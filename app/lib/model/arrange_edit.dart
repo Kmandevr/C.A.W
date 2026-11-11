@@ -4,6 +4,7 @@
 import 'dart:math' as math;
 
 import 'app_state.dart';
+import 'audio_clips.dart';
 import 'audio_edit.dart';
 import 'pattern_doc.dart';
 import 'project.dart';
@@ -270,6 +271,94 @@ extension ArrangeEdit on AppState {
     return true;
   }
 
+  // ---------- copy, cut and paste (desktop: Ctrl+C, Ctrl+X, Ctrl+V; owner, 2026-11-11) ----------
+
+  /// Every clip on the shown tracks becomes the selection (Ctrl+A). False when there are none.
+  bool selectAllClips() {
+    selectedClipIds.clear();
+    for (final l in visibleLayers) {
+      for (final c in l.clips) {
+        selectedClipIds.add(c.id);
+      }
+      for (final c in l.audioClips) {
+        selectedClipIds.add(c.id);
+      }
+    }
+    selectedClipId = selectedClipIds.firstOrNull;
+    clipSelectionChanged();
+    return selectedClipIds.isNotEmpty;
+  }
+
+  /// Copies the selected clips (MIDI with their notes as they are now, and audio) to the app's clip clipboard, with
+  /// their places relative to the first one. False when nothing is selected.
+  bool copySelectedClips() {
+    final tracks = [for (final l in visibleLayers) if (!l.isFolder) l];
+    final midi = selectedClips, audio = selectedAudioClips;
+    final starts = <double>[for (final c in midi) c.clip.startSteps.toDouble(), for (final c in audio) c.clip.startSteps];
+    final rows = [for (final c in midi) tracks.indexOf(c.layer), for (final c in audio) tracks.indexOf(c.layer)];
+    if (starts.isEmpty || rows.any((r) => r < 0)) return false;
+    final t0 = starts.reduce(math.min), r0 = rows.reduce(math.min);
+    ClipClipboard.items = [
+      for (final c in midi)
+        if (project.module(c.clip.patternId) case final m?)
+          ClipboardClip(row: tracks.indexOf(c.layer) - r0, at: c.clip.startSteps - t0,
+              midi: c.clip.toJson(), source: m.source, sourceName: m.name),
+      for (final c in audio)
+        ClipboardClip(row: tracks.indexOf(c.layer) - r0, at: c.clip.startSteps - t0,
+            audio: c.clip.copyWith(id: c.clip.id)),
+    ];
+    return ClipClipboard.items.isNotEmpty;
+  }
+
+  /// Cuts the selected clips: a copy, then a delete (locked clips are copied and stay). One undo step.
+  bool cutSelectedClips() => copySelectedClips() && deleteSelected();
+
+  /// Pastes the clipboard's clips with the first at [at] on [track] and the rest where they were relative to it
+  /// (MIDI clips with their own copy of the notes). A clip whose track would be past the last, or of the other kind
+  /// (audio on a MIDI track or the reverse), lands on [track] if it fits there, else is left out. The pasted clips
+  /// become the selection. One undo step; false when nothing was pasted.
+  bool pasteClips(LayerDoc track, int at) {
+    final items = ClipClipboard.items;
+    final tracks = [for (final l in visibleLayers) if (!l.isFolder) l];
+    final base = tracks.indexOf(track);
+    if (items.isEmpty || base < 0) return false;
+    bool fits(LayerDoc l, ClipboardClip c) => (c.audio != null) == l.isAudio;
+    final pasted = <String>[];
+    endUndoStep();
+    editProject((p) {
+      for (final c in items) {
+        final start = at + c.at;
+        if (start < 0 || start >= p.maxArrangementSteps) continue;
+        final step = start.round();
+        final i = base + c.row;
+        var target = i < tracks.length ? tracks[i] : track;
+        if (!fits(target, c)) target = track;
+        if (!fits(target, c)) continue;
+        if (c.midi case final m?) {
+          final source = ModuleDoc(id: newId('m'), name: _uniqueName(c.sourceName), source: c.source);
+          p.modules.add(source);
+          final clip = ClipDoc.fromJson({...m, 'id': newId('c'), 'pattern': source.id, 'start_steps': step});
+          clip.lengthSteps = clip.lengthSteps.clamp(1, p.maxArrangementSteps - step).toInt();
+          target.clips.add(clip);
+          pasted.add(clip.id);
+        } else if (c.audio case final a?) {
+          final clip = a.copyWith(id: newId('ac'), startSteps: start);
+          target.audioClips.add(clip);
+          pasted.add(clip.id);
+        }
+      }
+    });
+    endUndoStep();
+    if (pasted.isEmpty) return false;
+    selectedClipIds
+      ..clear()
+      ..addAll(pasted);
+    selectedClipId = pasted.first;
+    selectedLayerId = track.id;
+    clipSelectionChanged();
+    return true;
+  }
+
   // ---------- several clips dragged together ----------
 
   /// A drag of [grabbed] (one of several selected clips) from [from] to [to] at [startSteps] moves, or with [copy]
@@ -368,4 +457,21 @@ extension ArrangeEdit on AppState {
     }
     return '$base $n';
   }
+}
+
+/// One clip on the clip clipboard: its track ([row]) and start ([at]) relative to the first copied clip, and a copy
+/// of the clip (a MIDI clip with its pattern's text as it was copied).
+class ClipboardClip {
+  ClipboardClip({required this.row, required this.at, this.midi, this.source = '', this.sourceName = '', this.audio});
+  final int row;
+  final double at;
+  final Map<String, dynamic>? midi;
+  final String source, sourceName;
+  final AudioClipDoc? audio;
+}
+
+/// The app's clip clipboard (Arrange's Ctrl+C / Ctrl+X / Ctrl+V), shared by every project opened in this run.
+class ClipClipboard {
+  ClipClipboard._();
+  static List<ClipboardClip> items = const [];
 }

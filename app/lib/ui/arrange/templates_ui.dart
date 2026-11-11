@@ -2,6 +2,7 @@
 // template, and the add-track menu (the toolbar's + long-pressed) that inserts track templates.
 import 'package:flutter/material.dart';
 
+import '../pointer_input.dart';
 import '../../model/app_state.dart';
 import '../../model/audio_edit.dart';
 import '../../model/sampler.dart';
@@ -56,7 +57,7 @@ Future<void> saveTrackTemplate(BuildContext context, AppState s, LayerDoc layer)
   if (r == null || r.$1.trim().isEmpty || !context.mounted) return;
   final t = s.saveTrackTemplate(layer, r.$1, clips: r.$2);
   Haptics.drop();
-  _say(context, 'Saved track template ${t.name}: long-press + to add it');
+  _say(context, 'Saved track template ${t.name}: ${PointerInput.hold} + to add it');
 }
 
 /// The project menu's New from template: every project template; tap one to start a project from it, ☆ to make it

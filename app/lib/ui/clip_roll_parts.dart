@@ -246,12 +246,17 @@ class ClipLanesStrip extends StatelessWidget {
                     ],
                   ),
                 ),
-                const Spacer(),
-                const Padding(
-                  padding: EdgeInsets.only(right: 8),
-                  child: Text(
-                    'CLIP AUTOMATION · loops with the clip',
-                    style: TextStyle(color: Neon.dim, fontSize: 9, letterSpacing: 1),
+                // The label gives way first in a narrow roll (the focus panel's), ending in an ellipsis.
+                const Expanded(
+                  child: Padding(
+                    padding: EdgeInsets.only(left: 8, right: 8),
+                    child: Text(
+                      'CLIP AUTOMATION · loops with the clip',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      textAlign: TextAlign.right,
+                      style: TextStyle(color: Neon.dim, fontSize: 9, letterSpacing: 1),
+                    ),
                   ),
                 ),
               ],

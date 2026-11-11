@@ -1,4 +1,4 @@
-// Esc and the mouse's Back button close the page in front when it is one of the closable pages (Settings, the theme editor, Export, a device editor).
+// Esc and the mouse's Back button close the page in front when it is one of the closable pages (Settings, the theme editor, Export, a device editor, the full-screen piano roll, the project library, the Build tools).
 import 'package:flutter/gestures.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';

@@ -27,6 +27,7 @@ import 'dock/floating_window.dart';
 import 'dock/layout.dart';
 import 'file_manager_screen.dart';
 import 'files/project_file_actions.dart';
+import 'midi_file_actions.dart';
 import 'key_router.dart';
 import 'page_closer.dart';
 import 'theme.dart';
@@ -127,25 +128,37 @@ class _ShellState extends State<Shell> {
   final List<String> _waiting = []; // files that came before the project was ready
 
   /// Files opened with the app or dropped on its window: audio files are imported, each onto a new audio track, as
-  /// Files' import does. Other kinds (.mid, projects) are left to other listeners of [DesktopWindow.openedFiles].
+  /// Files' import does; a .mid becomes pattern clips (Files › Import MIDI file); a .caw or .cawproj is imported as a
+  /// new project after asking (Files › Import project). Other kinds are left alone.
   void _openFiles(List<String> paths) {
-    final audio = [
-      for (final p in paths)
-        if (audioExtensions.contains(p.split('.').last.toLowerCase())) File(p),
-    ];
-    final others = paths.length - audio.length;
-    if (others > 0) debugPrint('Opened files not imported here: ${paths.where((p) => !audio.any((f) => f.path == p))}');
-    if (audio.isEmpty || !mounted) return;
+    if (paths.isEmpty || !mounted) return;
     if (!s.ready) {
-      _waiting.addAll(audio.map((f) => f.path));
+      _waiting.addAll(paths);
       return;
     }
+    String ext(String p) => p.split('.').last.toLowerCase();
+    final audio = [for (final p in paths) if (audioExtensions.contains(ext(p))) File(p)];
+    final midi = [for (final p in paths) if (const {'mid', 'midi'}.contains(ext(p))) p];
+    final projects = [for (final p in paths) if (const {'caw', 'cawproj'}.contains(ext(p))) p];
+    final others = paths.where((p) => !audio.any((f) => f.path == p) && !midi.contains(p) && !projects.contains(p));
+    if (others.isNotEmpty) debugPrint('Opened files not imported: ${others.toList()}');
     final sources = <AudioSource>[
       for (final f in audio)
         if (f.existsSync())
           (name: f.uri.pathSegments.last, size: f.lengthSync(), read: () => f.openRead()),
     ];
-    if (sources.isNotEmpty) unawaited(importAudioSources(context, s, sources));
+    unawaited(() async {
+      if (sources.isNotEmpty) await importAudioSources(context, s, sources);
+      for (final m in midi) {
+        if (!mounted) return;
+        await importMidiFromPath(context, s, m);
+      }
+      // One project at a time: each asks before it replaces the open one.
+      for (final p in projects) {
+        if (!mounted) return;
+        await importProjectFromPath(context, s, p);
+      }
+    }());
   }
 
   @override
@@ -213,7 +226,7 @@ class _ShellState extends State<Shell> {
     }
   }
 
-  /// Opens the selected pattern in Build (Arrange's "Open in Sounds" on a clip).
+  /// Opens the selected pattern in Build (Arrange's "Open in Build" on a clip).
   void _openPattern() {
     final id = s.selectedModuleId;
     id == null || !s.isPattern(id)

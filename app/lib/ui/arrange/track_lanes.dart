@@ -4,6 +4,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/gestures.dart' show DragStartBehavior;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../model/app_state.dart';
 import '../../model/arrange_edit.dart';
@@ -352,7 +353,10 @@ class TrackLaneRows extends StatelessWidget {
 /// One lane, edited where it is drawn (REAPER, UG 18.14–18.15, pp. 367–368: a click adds a point, a drag moves a
 /// point or a segment, Alt+click deletes a point). On a touch screen a tap adds a point, a drag on a point moves it,
 /// a double-tap on a point deletes it, and the small handle in the middle of a segment drags the segment up or down.
-/// Drags start only on a point or a handle, so the rest of the row still scrolls the timeline.
+/// Drags start only on a point or a handle, so the rest of the row still scrolls the timeline. With a mouse (owner,
+/// 2026-11-11) a click selects a point (Shift-click adds one), a double-click adds a point or removes the one under
+/// it, a right-click on a point or a segment's handle opens its menu, Shift drags finely, and Delete removes the
+/// selected points.
 class LaneRow extends StatefulWidget {
   const LaneRow({super.key, required this.lane, required this.stepW, required this.width});
   final ArrangeLane lane;
@@ -367,6 +371,94 @@ class _LaneRowState extends State<LaneRow> {
   static const _h = kLaneRowHeight;
   // A drag's running position, so a point follows the finger rather than snapping between frames.
   Offset _grab = Offset.zero;
+
+  /// The points a mouse selected (indices), for Delete; and the mouse's clicks, told from double-clicks.
+  Set<int> _selected = {};
+  final _clicks = ClickCounter();
+  final _keys = FocusNode(debugLabel: 'lane-row');
+
+  /// Shift drags a fifth as far (fine control).
+  static double get _rate => HardwareKeyboard.instance.isShiftPressed ? 0.2 : 1;
+
+  @override
+  void dispose() {
+    _keys.dispose();
+    super.dispose();
+  }
+
+  @override
+  void didUpdateWidget(LaneRow old) {
+    super.didUpdateWidget(old);
+    _selected = {for (final i in _selected) if (i < lane.points.length) i};
+  }
+
+  /// A mouse's click on point [i]: it becomes the selection, or joins it (or leaves it) with Shift; a double-click
+  /// removes it.
+  void _clickPoint(int i) {
+    if (!_clicks.mouse) return;
+    _keys.requestFocus();
+    if (_clicks.doubleClick) {
+      lane.remove(i);
+      return setState(() => _selected = {});
+    }
+    setState(() {
+      if (HardwareKeyboard.instance.isShiftPressed) {
+        _selected = _selected.contains(i) ? ({..._selected}..remove(i)) : {..._selected, i};
+      } else {
+        _selected = {i};
+      }
+    });
+  }
+
+  /// Removes the selected points, the last first, as one undo step.
+  void _deleteSelected() {
+    if (_selected.isEmpty) return;
+    lane.state.beginAutomationGesture();
+    for (final i in _selected.toList()..sort((a, b) => b.compareTo(a))) {
+      if (i < lane.points.length) lane.remove(i);
+    }
+    lane.state.endAutomationGesture();
+    setState(() => _selected = {});
+  }
+
+  /// A point's or a segment's right-click menu: delete the point, flatten the segment, or reset the whole curve to a
+  /// flat line at its first value (its first and last points kept).
+  Future<void> _menu(Offset at, {int? point, int? segment}) async {
+    final v = await showLongPressMenu<String>(context, at: at, title: lane.name, style: lane.state.settings.longPressMenu,
+        actions: [
+          if (point != null) const MenuAction('delete', 'Delete point', Icons.delete_outline, section: 'Point'),
+          if (point != null && _selected.length > 1)
+            MenuAction('delete-selected', 'Delete ${_selected.length} selected points', Icons.delete_sweep_outlined,
+                section: 'Point'),
+          if (segment != null) const MenuAction('flatten', 'Flatten segment', Icons.horizontal_rule, section: 'Segment'),
+          const MenuAction('reset', 'Reset curve', Icons.restart_alt, section: 'Curve'),
+        ]);
+    if (v == null || !mounted) return;
+    final pts = lane.points;
+    lane.state.beginAutomationGesture();
+    switch (v) {
+      case 'delete' when point != null && point < pts.length:
+        lane.remove(point);
+      case 'delete-selected':
+        lane.state.endAutomationGesture();
+        return _deleteSelected();
+      case 'flatten' when segment != null && segment + 1 < pts.length:
+        final mid = (pts[segment].value + pts[segment + 1].value) / 2;
+        for (final i in [segment, segment + 1]) {
+          lane.move(i, lane.points[i].step, mid);
+        }
+      case 'reset' when pts.isNotEmpty:
+        final first = pts.first.value;
+        for (var i = lane.points.length - 2; i >= 1; i--) {
+          lane.remove(i);
+        }
+        for (var i = 0; i < lane.points.length; i++) {
+          lane.move(i, lane.points[i].step, first);
+        }
+    }
+    lane.state.endAutomationGesture();
+    setState(() => _selected = {});
+  }
 
   ArrangeLane get lane => widget.lane;
   double _y(double value) => _pad + (1 - lane.fraction(value)) * (_h - 2 * _pad);
@@ -393,13 +485,13 @@ class _LaneRowState extends State<LaneRow> {
 
   void _pointMove(int index, DragUpdateDetails d) {
     if (index >= lane.points.length) return;
-    _grab += d.delta;
+    _grab += d.delta * _rate;
     lane.move(index, math.max(0, _grab.dx / widget.stepW), _value(_grab.dy));
   }
 
   void _segmentMove(int index, DragUpdateDetails d) {
     if (index + 1 >= lane.points.length) return;
-    final df = -d.delta.dy / (_h - 2 * _pad);
+    final df = -d.delta.dy * _rate / (_h - 2 * _pad);
     for (final i in [index, index + 1]) {
       final p = lane.points[i];
       lane.move(i, p.step, lane.valueAt(lane.fraction(p.value) + df));
@@ -416,7 +508,7 @@ class _LaneRowState extends State<LaneRow> {
     final points = lane.points;
     final writer = AutomationWriter.current;
     final curve = CustomPaint(size: Size(widget.width, _h),
-      painter: _LanePainter(lane: lane, stepW: widget.stepW, pad: _pad, writer: writer));
+      painter: _LanePainter(lane: lane, stepW: widget.stepW, pad: _pad, writer: writer, selected: _selected));
     // While the Automate button writes this lane, it repaints with the playhead so the new values show live.
     final live = writer == null ? curve : ListenableBuilder(listenable: writer, builder: (context, child) =>
         writer.writing ? ValueListenableBuilder<int>(valueListenable: lane.state.tick,
@@ -424,20 +516,37 @@ class _LaneRowState extends State<LaneRow> {
               painter: _LanePainter(lane: lane, stepW: widget.stepW, pad: _pad, writer: writer)))
             : child!, child: curve);
     Offset? doubleAt;
-    return SizedBox(width: widget.width, height: _h, child: Stack(clipBehavior: Clip.none, children: [
-      Positioned.fill(child: GestureDetector(
-        key: ValueKey('lane-surface-${lane.key}'),
-        behavior: HitTestBehavior.opaque,
-        onTapUp: (d) {
-          if (_pointNear(d.localPosition) != null) return;
-          lane.add(math.max(0, d.localPosition.dx / widget.stepW), _value(d.localPosition.dy));
-        },
+    return Focus(
+      focusNode: _keys,
+      onKeyEvent: (_, e) {
+        if (e is! KeyDownEvent || _selected.isEmpty) return KeyEventResult.ignored;
+        if (e.logicalKey != LogicalKeyboardKey.delete && e.logicalKey != LogicalKeyboardKey.backspace) {
+          return KeyEventResult.ignored;
+        }
+        _deleteSelected();
+        return KeyEventResult.handled;
+      },
+      child: SizedBox(width: widget.width, height: _h, child: Stack(clipBehavior: Clip.none, children: [
+      Positioned.fill(child: Listener(onPointerDown: _clicks.down, child: TouchDoubleTap(
         onDoubleTapDown: (d) => doubleAt = d.localPosition,
         onDoubleTap: () {
           final i = doubleAt == null ? null : _pointNear(doubleAt!);
           if (i != null) lane.remove(i);
         },
-        child: RepaintBoundary(child: live))),
+        child: GestureDetector(
+        key: ValueKey('lane-surface-${lane.key}'),
+        behavior: HitTestBehavior.opaque,
+        onTapUp: (d) {
+          // A mouse: a click clears the point selection, a double-click adds a point.
+          if (_clicks.mouse) {
+            _keys.requestFocus();
+            if (_selected.isNotEmpty) setState(() => _selected = {});
+            if (!_clicks.doubleClick) return;
+          }
+          if (_pointNear(d.localPosition) != null) return;
+          lane.add(math.max(0, d.localPosition.dx / widget.stepW), _value(d.localPosition.dy));
+        },
+        child: RepaintBoundary(child: live))))),
       // Each segment's middle: a handle that drags it up or down (REAPER's segment drag).
       for (var i = 0; i + 1 < points.length; i++)
         if (_x(points[i + 1].step) - _x(points[i].step) > 40)
@@ -447,6 +556,7 @@ class _LaneRowState extends State<LaneRow> {
             width: 24, height: 24,
             child: GestureDetector(key: ValueKey('lane-segment-${lane.key}-$i'), behavior: HitTestBehavior.opaque,
               dragStartBehavior: DragStartBehavior.down,
+              onSecondaryTapUp: (d) => _menu(d.globalPosition, segment: i),
               onVerticalDragStart: (_) {
                 lane.state.beginAutomationGesture();
                 Haptics.grab();
@@ -459,23 +569,28 @@ class _LaneRowState extends State<LaneRow> {
       // Each point: a 28 px target around its 8 px dot.
       for (var i = 0; i < points.length; i++)
         Positioned(left: _x(points[i].step) - 14, top: _y(points[i].value) - 14, width: 28, height: 28,
-          child: GestureDetector(key: ValueKey('lane-point-${lane.key}-$i'), behavior: HitTestBehavior.opaque,
-            dragStartBehavior: DragStartBehavior.down,
+          child: Listener(onPointerDown: _clicks.down, child: TouchDoubleTap(
             onDoubleTap: () => lane.remove(i),
+            child: GestureDetector(key: ValueKey('lane-point-${lane.key}-$i'), behavior: HitTestBehavior.opaque,
+            dragStartBehavior: DragStartBehavior.down,
+            onTap: () => _clickPoint(i),
+            onSecondaryTapUp: (d) => _menu(d.globalPosition, point: i),
             onPanStart: (d) => _pointDrag(i, d),
             onPanUpdate: (d) => _pointMove(i, d),
             onPanEnd: (_) => _end(),
             onPanCancel: _end,
-            child: Tooltip(message: lane.label(points[i].value), child: const SizedBox.expand()))),
-    ]));
+            child: MouseRegion(cursor: SystemMouseCursors.move,
+                child: Tooltip(message: lane.label(points[i].value), child: const SizedBox.expand())))))),
+    ])));
   }
 }
 
 class _LanePainter extends CustomPainter {
-  _LanePainter({required this.lane, required this.stepW, required this.pad, this.writer})
+  _LanePainter({required this.lane, required this.stepW, required this.pad, this.writer, this.selected = const {}})
       : live = writer?.liveSamples(lane.key);
   final ArrangeLane lane;
   final double stepW, pad;
+  final Set<int> selected;
   final AutomationWriter? writer;
   final List<(double, double)>? live;
 
@@ -499,10 +614,13 @@ class _LanePainter extends CustomPainter {
       canvas.drawPath(path, Paint()..color = lane.color..style = PaintingStyle.stroke..strokeWidth = 1.6);
       final dot = Paint()..color = lane.color;
       final ring = Paint()..color = Neon.text..style = PaintingStyle.stroke..strokeWidth = 1;
-      for (final p in points) {
+      for (var i = 0; i < points.length; i++) {
+        final p = points[i];
         final at = Offset(p.step * stepW, y(p.value));
-        canvas.drawCircle(at, 4, dot);
-        canvas.drawCircle(at, 4, ring);
+        // A selected point is larger, with a bright ring.
+        final r = selected.contains(i) ? 5.5 : 4.0;
+        canvas.drawCircle(at, r, dot);
+        canvas.drawCircle(at, r, selected.contains(i) ? (Paint()..color = Neon.yellow..style = PaintingStyle.stroke..strokeWidth = 1.6) : ring);
       }
     }
     // What the Automate button is writing now, in red over the lane (it joins the lane when the take ends).

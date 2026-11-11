@@ -5,6 +5,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../actions/actions.dart';
 import '../actions/key_event.dart';
@@ -19,6 +20,7 @@ import '../model/settings.dart';
 import 'glass.dart';
 import 'key_bindings.dart';
 import 'page_closer.dart';
+import 'pointer_input.dart';
 import 'theme.dart';
 import 'volume_fader.dart';
 import 'widgets.dart' show confirmTrackDelete;
@@ -172,6 +174,10 @@ class KeyRouterState extends State<KeyRouter> {
 
   /// One key press. [area] is given by an editor that asks first (the piano roll); otherwise the focus decides.
   KeyEventResult handle(KeyEvent e, {Area? area}) {
+    // Holding Space (to pan with a mouse) must not play and pause over and over.
+    if (e is KeyRepeatEvent && e.logicalKey == LogicalKeyboardKey.space && !_editingText()) {
+      return KeyEventResult.handled;
+    }
     final chord = keyChordFromEvent(e, metaAsCtrl: defaultTargetPlatform == TargetPlatform.macOS);
     if (chord == null) return KeyEventResult.ignored;
     return _handleChord(chord, area: area);
@@ -245,6 +251,8 @@ class KeyRouterState extends State<KeyRouter> {
     switch (id) {
       case 'transport.playstop':
         s.togglePlay();
+        // Space+drag pans with a mouse: a pan started while this Space is held takes the toggle back.
+        if (SpacePan.held) SpacePan.armUndo(s.togglePlay);
       case 'transport.stop':
         s.stopPlayback();
       case 'transport.tap':
@@ -344,8 +352,10 @@ class KeyRouterState extends State<KeyRouter> {
         }
       case 'arranger.layer.moveUp' || 'arranger.layer.moveDown':
         if (layer == null) return false;
-        final to = (_layer + (id.endsWith('Up') ? -1 : 1)).clamp(0, layers.length - 1);
-        s.moveLayer(_layer, to);
+        final up = id.endsWith('Up');
+        final to = (_layer + (up ? -1 : 1)).clamp(0, layers.length - 1);
+        // moveLayer takes the index to insert before, so a move down inserts after the next track.
+        if (to != _layer) s.moveLayer(_layer, up ? to : to + 1);
         _layer = to;
       default:
         return false;

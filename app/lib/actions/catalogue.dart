@@ -113,7 +113,7 @@ const List<ActionDef> standardActions = [
   ActionDef('roll.cursor.up', 'Cursor up', _p,
       description: 'One semitone; selects the note it lands on', defaultKeys: ['Ctrl+W', 'Ctrl+Up'], toast: false),
   ActionDef('roll.cursor.down', 'Cursor down', _p,
-      description: 'One semitone; selects the note it lands on', defaultKeys: ['Ctrl+S', 'Ctrl+Down'], toast: false),
+      description: 'One semitone; selects the note it lands on', defaultKeys: ['Ctrl+Down'], toast: false),
   ActionDef('roll.cursor.left', 'Cursor left', _p,
       description: 'One grid step; selects the note it lands on', defaultKeys: ['Ctrl+A', 'Ctrl+Left'], toast: false),
   ActionDef('roll.cursor.right', 'Cursor right', _p,
@@ -232,8 +232,9 @@ const List<ActionDef> standardActions = [
   ActionDef('arranger.layer.longer', 'Layer longer', _r, defaultKeys: [']'], isChange: true),
   ActionDef('arranger.layer.add', 'Add layer', _r, defaultKeys: ['Ctrl+N'], isChange: true),
   ActionDef('arranger.layer.delete', 'Delete layer', _r, defaultKeys: ['Delete'], isChange: true),
-  ActionDef('arranger.layer.moveUp', 'Move layer up', _r, defaultKeys: ['Ctrl+W'], isChange: true),
-  ActionDef('arranger.layer.moveDown', 'Move layer down', _r, defaultKeys: ['Ctrl+S'], isChange: true),
+  // Ctrl+S saves everywhere (owner, 2026-11-11), so moving a layer takes Alt+Up / Alt+Down.
+  ActionDef('arranger.layer.moveUp', 'Move layer up', _r, defaultKeys: ['Alt+Up'], isChange: true),
+  ActionDef('arranger.layer.moveDown', 'Move layer down', _r, defaultKeys: ['Alt+Down'], isChange: true),
   ActionDef('arranger.layer.color', 'Layer colour', _r, isChange: true),
   // Clips (docs/reaper-flow.md, gap 1), run by the Arranger screen. Keys follow REAPER where they're free.
   ActionDef('arranger.clip.split', 'Split clips at the playhead', _r,
@@ -245,6 +246,14 @@ const List<ActionDef> standardActions = [
   ActionDef('arranger.clip.delete', 'Delete clips', _r,
       description: 'Delete also does this while clips are selected', isChange: true),
   ActionDef('arranger.clip.properties', 'Clip properties', _r, defaultKeys: ['F2'], toast: false),
+  // Desktop clipboard keys (owner, 2026-11-11). Paste lands at the edit cursor (the playhead while playing) on the
+  // selected track, the clips keeping their places relative to each other.
+  ActionDef('arranger.clip.copy', 'Copy clips', _r, defaultKeys: ['Ctrl+C']),
+  ActionDef('arranger.clip.cut', 'Cut clips', _r, defaultKeys: ['Ctrl+X'], isChange: true),
+  ActionDef('arranger.clip.paste', 'Paste clips', _r,
+      description: 'At the edit cursor on the selected track', defaultKeys: ['Ctrl+V'], isChange: true),
+  ActionDef('arranger.clip.selectAll', 'Select all clips', _r, defaultKeys: ['Ctrl+A'], toast: false),
+  ActionDef('arranger.clip.selectNone', 'Clear the clip selection', _r, defaultKeys: ['Esc'], toast: false),
   ActionDef('arranger.clip.selectMode', 'Select several clips', _r,
       description: 'Taps add clips; a long-press drag draws a box', toast: false),
   // The loop range, markers and regions (docs/reaper-flow.md, gap 2). REAPER's M, ] and [ are the layer's mute and
