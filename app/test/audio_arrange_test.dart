@@ -1,5 +1,7 @@
 // Audio clips in Arrange: the waveform from cached peaks, select, move, trim the edges (the right past the file loops),
 // fade corners, the curve dot, the gain handle, the menu, the arm button and the Clip tab's inspector.
+import 'dart:convert';
+
 import 'package:caw/model/app_state.dart';
 import 'package:caw/model/audio_clips.dart';
 import 'package:caw/model/audio_edit.dart';
@@ -119,20 +121,63 @@ void main() {
     await settle(tester);
   });
 
-  testWidgets('long-press opens the menu: reverse and split', (tester) async {
+  Future<void> doubleTap(WidgetTester tester, Finder f) async {
+    await tester.tap(f);
+    await tester.pump(const Duration(milliseconds: 60));
+    await tester.tap(f);
+    await tester.pumpAndSettle();
+  }
+
+  testWidgets('a double tap opens the menu (owner, 2026-11-11): reverse and split', (tester) async {
     s.pausedStep = 24;
     await pump(tester);
-    await tester.longPress(find.byKey(const ValueKey('audio-clip-c1')));
-    await tester.pumpAndSettle();
+    await doubleTap(tester, find.byKey(const ValueKey('audio-clip-c1')));
     await tester.tap(find.text('Split at the playhead'));
     await tester.pumpAndSettle();
     expect(s.project.layers.first.audioClips, hasLength(2));
-    await tester.longPress(find.byKey(const ValueKey('audio-clip-c1')));
-    await tester.pumpAndSettle();
+    await doubleTap(tester, find.byKey(const ValueKey('audio-clip-c1')));
     await tester.tap(find.text('Reverse'));
     await tester.pumpAndSettle();
     expect(clip().reverse, isTrue);
     await settle(tester);
+  });
+
+  testWidgets('a long press lifts it whole onto another track, on the grid, never before the start', (tester) async {
+    s.starting = false;
+    s.history.reset(jsonEncode(s.project.toJson()));
+    s.arrangementSnapSteps = 4;
+    await pump(tester);
+    final box = tester.getRect(find.byKey(const ValueKey('audio-clip-c1')));
+    final g = await tester.startGesture(box.center);
+    await tester.pump(const Duration(milliseconds: 600));
+    expect(find.text('Split at the playhead'), findsNothing, reason: 'a long press opens no menu now');
+    final to = Offset(box.center.dx - 900, tester.getCenter(find.byKey(const ValueKey('track-header-t2'))).dy);
+    for (var i = 1; i <= 8; i++) {
+      await g.moveTo(Offset.lerp(box.center, to, i / 8)!);
+      await tester.pump();
+    }
+    await g.up();
+    await settle(tester);
+    expect(s.project.layers.first.audioClips, isEmpty);
+    final moved = s.project.layers[1].audioClips.single;
+    expect(moved.startSteps, 0, reason: 'clamped at the project start');
+    expect(moved.lengthSeconds, 2, reason: 'picked up whole, never trimmed');
+    expect(s.undo(), isTrue);
+    expect(s.project.layers.first.audioClips.single.startSteps, 16);
+    await settle(tester);
+
+    // A short lift snaps to the grid.
+    final b2 = tester.getRect(find.byKey(const ValueKey('audio-clip-c1')));
+    final w = stepW(tester);
+    final g2 = await tester.startGesture(b2.center);
+    await tester.pump(const Duration(milliseconds: 600));
+    await g2.moveBy(Offset(w * 4.7, 0));
+    await tester.pump();
+    await g2.moveBy(const Offset(1, 0));
+    await tester.pump();
+    await g2.up();
+    await settle(tester);
+    expect(clip().startSteps, 20);
   });
 
   testWidgets('the arm button arms the track; armed, its header shows the input meter', (tester) async {

@@ -171,7 +171,7 @@ typedef _Window = ({Steps from, Steps to, Steps at});
 /// [controls] (a clip's automation lanes as CCs, [automationControls]) go in the same track.
 Uint8List patternToMidi(PatternDoc doc,
     {required double bpm, required int beatsPerBar, ClipDoc? clip, String? name, List<MidiControl> controls = const []}) {
-  final source = Steps(math.max(1, doc.lengthSteps(beatsPerBar)));
+  final source = Steps(clip?.loopLength(doc.lengthSteps(beatsPerBar)) ?? math.max(1, doc.lengthSteps(beatsPerBar)));
   final windows = <_Window>[];
   if (clip == null) {
     windows.add((from: Steps.zero, to: source, at: Steps.zero));

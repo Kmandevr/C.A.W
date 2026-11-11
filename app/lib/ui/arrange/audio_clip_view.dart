@@ -1,6 +1,7 @@
 // An audio clip in the arranger, REAPER-style: its waveform; drag the body to move it (onto another track too), the
 // edges to trim (the right one past the file's end loops it), the top corners for fades (their dot bends the curve)
-// and the top-middle handle for gain. Tap selects, double-tap opens the Clip tab, long-press opens its menu.
+// and the top-middle handle for gain. Tap selects; as a MIDI clip (owner, 2026-11-11), a long press picks it up whole
+// and carries it in time and across tracks on the grid, and a double tap or a right-click opens its menu.
 import 'dart:math' as math;
 
 import 'package:flutter/gestures.dart';
@@ -56,11 +57,16 @@ class AudioClipViewState extends State<AudioClipView> {
   int? _lastSnap;
   bool _ignored = false;
 
+  /// The move began with a long press (owner, 2026-11-11): the clip is picked up whole, edges included, and a resting
+  /// second finger frees it from the grid.
+  bool _lifted = false;
+  Offset _doubleAt = Offset.zero;
+
   AppState get s => widget.state;
   AudioClipDoc get c => widget.clip;
   double get bpm => s.project.bpm;
   double get _secPerPx => 15 / bpm / widget.stepW;
-  bool get _free => HardwareKeyboard.instance.isShiftPressed;
+  bool get _free => HardwareKeyboard.instance.isShiftPressed || (_lifted && (widget.drag?.free.value ?? false));
   int get _snap => s.arrangementSnapSteps;
   AudioAssetDoc? get _asset => s.project.asset(c.assetId);
 
@@ -98,7 +104,26 @@ class AudioClipViewState extends State<AudioClipView> {
 
   // ---------- gestures ----------
 
-  void _begin(_Grab g, Offset at) {
+  /// A long press picks the clip up: a tick, then moving carries it in time and across tracks.
+  void _lift(LongPressStartDetails d) {
+    if ((widget.drag?.pinching ?? false) || c.lock || _grab != _Grab.none) return;
+    Motion.tick();
+    _begin(_Grab.move, d.globalPosition, lift: true);
+  }
+
+  void _liftMove(LongPressMoveUpdateDetails d) {
+    if (_lifted) _update(d.globalPosition);
+  }
+
+  void _liftEnd(LongPressEndDetails _) {
+    if (_lifted) _end();
+  }
+
+  void _freeChanged() {
+    if (mounted && _grab == _Grab.move) setState(() {});
+  }
+
+  void _begin(_Grab g, Offset at, {bool lift = false}) {
     _ignored = c.lock && g != _Grab.none || (widget.drag?.pinching ?? false);
     if (_ignored) {
       if (c.lock) Haptics.error();
@@ -118,7 +143,11 @@ class AudioClipViewState extends State<AudioClipView> {
       };
       _curve = g == _Grab.curveIn ? c.fadeInCurve : g == _Grab.curveOut ? c.fadeOutCurve : null;
     });
-    if (g == _Grab.move) widget.drag?.begin(onScroll: () => setState(() {}), onCancel: _cancel);
+    _lifted = lift && g == _Grab.move;
+    if (g == _Grab.move) {
+      widget.drag?.begin(onScroll: () => setState(() {}), onCancel: _cancel, lift: _lifted);
+      widget.drag?.free.addListener(_freeChanged);
+    }
   }
 
   void _update(Offset global) {
@@ -201,7 +230,11 @@ class AudioClipViewState extends State<AudioClipView> {
   void _cancel() => _reset();
 
   void _reset() {
-    if (_grab == _Grab.move) widget.drag?.end();
+    if (_grab == _Grab.move) {
+      widget.drag?.free.removeListener(_freeChanged);
+      widget.drag?.end();
+    }
+    _lifted = false;
     if (mounted) setState(() { _grab = _Grab.none; _delta = Offset.zero; _value = null; _curve = null; });
     _ignored = false;
   }
@@ -226,6 +259,10 @@ class AudioClipViewState extends State<AudioClipView> {
           dragStartBehavior: DragStartBehavior.down,
           onTap: onTap,
           onDoubleTap: onDoubleTap,
+          // A long press on an edge picks the whole clip up too: it never trims.
+          onLongPressStart: g == _Grab.trimStart || g == _Grab.trimEnd ? _lift : null,
+          onLongPressMoveUpdate: g == _Grab.trimStart || g == _Grab.trimEnd ? _liftMove : null,
+          onLongPressEnd: g == _Grab.trimStart || g == _Grab.trimEnd ? _liftEnd : null,
           // Along one axis, so the handle wins its drag before the scroll views do (they take a drag on the same
           // slop; a pan would need twice as far).
           onHorizontalDragStart: _vertical(g) ? null : (d) => _begin(g, d.globalPosition),
@@ -315,14 +352,18 @@ class AudioClipViewState extends State<AudioClipView> {
             child: GestureDetector(
               key: ValueKey('audio-clip-${c.id}'),
               onTap: _tap,
-              onDoubleTap: widget.onOpen,
-              onLongPressStart: (d) => showAudioClipMenu(context, s, widget.layer, c, d.globalPosition, onOpen: widget.onOpen),
+              // A double tap or a right-click opens the menu (its first item opens the Clip tab); a long press lifts.
+              onDoubleTapDown: (d) => _doubleAt = d.globalPosition,
+              onDoubleTap: () => showAudioClipMenu(context, s, widget.layer, c, _doubleAt, onOpen: widget.onOpen),
+              onLongPressStart: _lift,
+              onLongPressMoveUpdate: _liftMove,
+              onLongPressEnd: _liftEnd,
               onSecondaryTapUp: (d) => showAudioClipMenu(context, s, widget.layer, c, d.globalPosition, onOpen: widget.onOpen),
               dragStartBehavior: DragStartBehavior.down,
               onPanStart: (d) => _begin(_Grab.move, d.globalPosition),
-              onPanUpdate: (d) => _update(d.globalPosition),
-              onPanEnd: (_) => _end(),
-              onPanCancel: () { if (_grab != _Grab.none) _cancel(); },
+              onPanUpdate: (d) { if (!_lifted) _update(d.globalPosition); },
+              onPanEnd: (_) { if (!_lifted) _end(); },
+              onPanCancel: () { if (_grab != _Grab.none && !_lifted) _cancel(); },
               child: body))),
           if (c.takes.length > 1 && width >= 100 && h >= 26)
             Positioned(top: 2, right: 14, child: TakeChip.audio(state: s, layer: widget.layer, audio: c, color: color)),

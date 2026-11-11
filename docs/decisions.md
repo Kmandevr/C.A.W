@@ -49,6 +49,10 @@ Carries out the owner's decision of 2026-11-10 ("C++ replaces the .caw language"
   - a bottom dock area, so the focus panel doesn't squeeze the lanes.
 - **Behaviour fixes that need no look change:** a mouse drags at once, right-click does whatever a long press does, the wheel turns knobs, Esc closes pages, and Windows remembers its window and accepts files dropped from Explorer.
 
+## 2026-11-11: MIDI clip loops and clip automation, how they are built (Claude, to confirm)
+
+Carries out the first two bullets of the owner's decision below ([App](app.md)). the loop point is `ClipDoc.loopSteps` (`loop_steps` in the engine's project JSON, 0 = the pattern's length, so older projects play the same). Clip lanes keep points in clip time and the app unrolls them onto the timeline for the engine: inside a clip its lane plays, elsewhere the track's lane on the same target (or the control's value); where clips with lanes on one target overlap, the later-starting one wins until it ends. Move to clip takes the track lane's values over the clip's first loop and removes the track lane. Clip automation is not drawn in Arrange's clip bodies yet.
+
 ## 2026-11-11: MIDI clip loops, clip automation and project packaging (owner)
 
 **Decision (owner, 2026-11-11, answers to Claude's questions):**
@@ -86,7 +90,7 @@ Carries out the owner's decision of 2026-11-10 ("C++ replaces the .caw language"
 - **A second finger frees a long-press lift from the grid**, as the owner asked; it still makes a copy during a quick drag (the earlier choice), and the clip menu duplicates.
 - **The double tap replaces the clip's old double tap** (which opened its notes): the menu's first entry, Edit notes, does that. A plain tap on a header now waits out the double tap before opening the focus view, while the header's buttons answer at once.
 - **The menus' numbers:** the track menu's Volume (dB) and Pan apply live; the clip menu's Length (bars) applies when let go or entered, since it rebuilds the project.
-- **Open: audio clips** (merged from the audio branch at the same time) keep their own gestures (`app/lib/ui/arrange/audio_clip_view.dart`): a long press opens their menu and a double tap the Clip tab, not yet the long-press lift and double-tap menu above.
+- **Audio clips** (done, 2026-11-11, branch `clip-loops`) follow the same rule (`app/lib/ui/arrange/audio_clip_view.dart`): a long press lifts the clip whole (edges included) onto any track on the grid, never before the project start, a resting second finger freeing it; a double tap or a right-click opens the menu, whose first item opens the Clip tab.
 
 ## 2026-11-11: Audio review fixes: declick lengths (to confirm)
 

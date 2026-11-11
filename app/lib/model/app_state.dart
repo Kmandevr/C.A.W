@@ -14,6 +14,7 @@ import 'native_components.dart';
 import 'project.dart';
 import 'project_dependencies.dart';
 import 'automation_writer.dart' show AutomationTarget;
+import 'clip_automation.dart';
 import 'history.dart';
 import 'mixer_fx.dart' show masterLayerId;
 import 'pattern_doc.dart';
@@ -41,10 +42,14 @@ class _AutomationSnapshot {
           ProjectAutomationLaneDoc.fromJson(lane.toJson())],
         trackLanes = {for (final layer in project.layers) layer.id: [
           for (final lane in layer.automation) AutomationLaneDoc.fromJson(lane.toJson()),
+        ]},
+        clipLanes = {for (final layer in project.layers) for (final clip in layer.clips) clip.id: [
+          for (final lane in clip.automation) lane.copy(),
         ]};
 
   final List<ProjectAutomationLaneDoc> projectLanes;
   final Map<String, List<AutomationLaneDoc>> trackLanes;
+  final Map<String, List<ClipAutomationLaneDoc>> clipLanes;
 }
 
 class AppState extends ChangeNotifier {
@@ -1357,6 +1362,9 @@ class AppState extends ChangeNotifier {
     project.automation = snapshot.projectLanes;
     for (final layer in project.layers) {
       layer.automation = snapshot.trackLanes[layer.id] ?? [];
+      for (final clip in layer.clips) {
+        if (snapshot.clipLanes[clip.id] case final lanes?) clip.automation = [for (final lane in lanes) lane.copy()];
+      }
     }
   }
 
@@ -1674,7 +1682,8 @@ class AppState extends ChangeNotifier {
     }
     final next = ClipDoc(id: newId('c'), patternId: patternId,
         startSteps: start, lengthSteps: clip.lengthSteps.clamp(1, project.maxArrangementSteps - start).toInt(),
-        sourceOffsetSteps: clip.sourceOffsetSteps, loop: clip.loop, linked: linked);
+        sourceOffsetSteps: clip.sourceOffsetSteps, loop: clip.loop, linked: linked, loopSteps: clip.loopSteps,
+        automation: [for (final a in clip.automation) a.copy()]);
     editLayer(layer, (l) => l.clips.add(next));
     selectClip(layer, next);
   }

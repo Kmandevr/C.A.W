@@ -36,7 +36,6 @@ MergedRecording? mergeRecording(AppState s, LayerDoc layer, List<TakenNote> note
     return docs[m.id] = d;
   }
 
-  int lengthOf(PatternDoc d) => math.max(1, d.lengthSteps(p.beatsPerBar));
   final clips = [for (final c in layer.clips) if (!c.lock) c];
 
   // Replace: each clip's notes heard between [from] and [to] go first.
@@ -46,7 +45,7 @@ MergedRecording? mergeRecording(AppState s, LayerDoc layer, List<TakenNote> note
       if (hi <= lo) continue;
       final d = docOf(c);
       if (d == null) continue;
-      final len = lengthOf(d);
+      final len = c.loopLength(d.lengthSteps(p.beatsPerBar));
       final gone = <int>{};
       for (final n in d.notes) {
         // Where the note plays in the song: once, or once a loop of the pattern while the clip loops.
@@ -73,7 +72,7 @@ MergedRecording? mergeRecording(AppState s, LayerDoc layer, List<TakenNote> note
       outside.add(n);
       continue;
     }
-    final len = lengthOf(d);
+    final len = c.loopLength(d.lengthSteps(p.beatsPerBar));
     var pos = n.at - c.startSteps + c.sourceOffsetSteps;
     if (c.loop) pos %= len;
     if (pos < 0 || pos >= len) {

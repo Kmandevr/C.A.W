@@ -983,6 +983,59 @@ TEST(arrangement_clips_can_overlap_on_one_track) {
 }
 
 
+// A clip's own loop point (REAPER-like, owner 2026-11-11): the clip repeats its source from the offset every
+// loop_steps, exactly as a pattern of that length would loop; 0 (the default) loops at the pattern's length.
+TEST(arrangement_clip_loop_steps_repeat_the_source_at_the_clip_loop_point) {
+    const auto render = [](const std::string& source, int loopSteps, int offset) {
+        ProjectSpec p;
+        p.bpm = 120;
+        p.loopBars = 2;
+        p.master = 1.0;
+        p.modules.push_back({"phrase", source});
+        LayerSpec layer = cawtest::testSignalNotesLayer("track", Shape::Dc, "", {{"level", 0.5}});
+        layer.volume = 1.0;
+        ClipSpec clip{"c", "phrase", 2, 24, offset, true};
+        clip.loopSteps = loopSteps;
+        layer.clips.push_back(clip);
+        p.layers.push_back(layer);
+        Engine e(48000);
+        e.setMasterBypass(true);
+        CHECK(e.setProject(p).find("\"ok\":true") != std::string::npos);
+        e.play();
+        return run(e, 6000 * 30);
+    };
+    // An 8-step pattern looped at 4: the note at step 5 never plays, the one at 0 every 4 steps.
+    const auto looped = render("---\nkind: pattern\nlength: 8\n---\n0 A4 1 1\n5 C4 2 1\n", 4, 0);
+    const auto four = render("---\nkind: pattern\nlength: 4\n---\n0 A4 1 1\n", 0, 0);
+    CHECK(looped == four);
+    const float on = static_cast<float>(0.5 * std::cos(kPi / 4.0));
+    CHECK_NEAR(looped[6000 * 6 + 3000], on, 1e-5);   // step 6: the second pass's note
+    CHECK_NEAR(looped[6000 * 7 + 3000], 0.0, 1e-5);  // step 7 (source step 5): cut by the loop point
+
+    // A loop point past the pattern's end plays silence up to it, as a longer pattern would.
+    const auto longer = render("---\nkind: pattern\nlength: 4\n---\n0 A4 1 1\n", 6, 0);
+    const auto six = render("---\nkind: pattern\nlength: 6\n---\n0 A4 1 1\n", 0, 0);
+    CHECK(longer == six);
+
+    // The offset counts inside the clip's loop, as it does inside a pattern.
+    CHECK(render("---\nkind: pattern\nlength: 8\n---\n0 A4 1 1\n3 C4 1 1\n6 E4 1 1\n", 4, 3) ==
+          render("---\nkind: pattern\nlength: 4\n---\n0 A4 1 1\n3 C4 1 1\n", 0, 3));
+
+    // 0 and the pattern's own length play the same; existing projects (no loop_steps) are unchanged.
+    CHECK(render("---\nkind: pattern\nlength: 4\n---\n0 A4 1 1\n", 4, 0) == four);
+
+    // The project file carries it, and refuses what it can't be.
+    ProjectSpec parsed;
+    std::string error;
+    CHECK(parseProject(R"({"caw_project":1,"modules":[{"id":"p","source":"---\nkind: pattern\n---\n"}],
+        "layers":[{"id":"t","clips":[{"id":"c","pattern":"p","loop_steps":12},{"id":"d","pattern":"p"}]}]})", parsed, error));
+    CHECK_EQ(parsed.layers.at(0).clips.at(0).loopSteps, 12);
+    CHECK_EQ(parsed.layers.at(0).clips.at(1).loopSteps, 0);
+    CHECK(!parseProject(R"({"caw_project":1,"layers":[{"id":"t","clips":[{"id":"c","pattern":"p","loop_steps":-1}]}]})",
+        parsed, error));
+    CHECK(error.find("clip 'c' of layer 't': loop_steps must be") != std::string::npos);
+}
+
 TEST(master_gain_updates_without_recompiling_and_ramps_smoothly) {
     ProjectSpec p = project({dc(0.5)});
     p.master = 1.0;
