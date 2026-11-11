@@ -51,6 +51,8 @@ class DeviceInline extends StatefulWidget {
 class _DeviceInlineState extends State<DeviceInline> {
   final _dragging = ValueNotifier<ModSource?>(null);
   final _focus = ValueNotifier<ModSource>(ModSource.env1);
+  final _assigning = ValueNotifier<ModSource?>(null);
+  final _selected = ValueNotifier<int?>(null);
 
   DeviceTarget get t => widget.target;
   AppState get s => t.state;
@@ -59,6 +61,8 @@ class _DeviceInlineState extends State<DeviceInline> {
   void dispose() {
     _dragging.dispose();
     _focus.dispose();
+    _assigning.dispose();
+    _selected.dispose();
     super.dispose();
   }
 
@@ -86,6 +90,8 @@ class _DeviceInlineState extends State<DeviceInline> {
       accent: color,
       secondary: second,
       focusSource: _focus,
+      assigning: matrix.slotCount > 0 ? _assigning : null,
+      selectedSlot: _selected,
       inline: true,
       child: Builder(builder: (context) => Padding(
         padding: const EdgeInsets.only(bottom: 8),

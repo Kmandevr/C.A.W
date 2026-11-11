@@ -15,10 +15,13 @@ import 'kit/presets.dart';
 
 /// One tab of a device editor.
 class DeviceSection {
-  const DeviceSection(this.id, this.label, this.icon, this.builder);
+  const DeviceSection(this.id, this.label, this.icon, this.builder, {this.showsSources = false});
   final String id, label;
   final IconData icon;
   final WidgetBuilder builder;
+
+  /// The page shows the mod sources' own controls (a source opened from the strip goes there).
+  final bool showsSources;
 }
 
 /// A custom editor: its tabs, its family (its colours and badge) and an accent that overrides the family's (both

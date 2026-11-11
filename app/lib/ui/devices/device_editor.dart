@@ -20,6 +20,7 @@ import 'kit/feel.dart';
 import 'kit/preset_browser.dart';
 import 'kit/presets.dart';
 import 'visuals/mod_routing.dart';
+import 'visuals/mod_sheet.dart';
 
 export 'kit/preset_browser.dart' show DevicePresetChip, showPresetBrowser;
 
@@ -117,6 +118,8 @@ class _DeviceEditorState extends State<DeviceEditor> {
   int _tab = 0;
   final _dragging = ValueNotifier<ModSource?>(null);
   final _focus = ValueNotifier<ModSource>(ModSource.env1);
+  final _assigning = ValueNotifier<ModSource?>(null);
+  final _selected = ValueNotifier<int?>(null);
 
   DeviceTarget get t => widget.target;
   AppState get s => t.state;
@@ -125,6 +128,8 @@ class _DeviceEditorState extends State<DeviceEditor> {
   void dispose() {
     _dragging.dispose();
     _focus.dispose();
+    _assigning.dispose();
+    _selected.dispose();
     super.dispose();
   }
 
@@ -157,7 +162,7 @@ class _DeviceEditorState extends State<DeviceEditor> {
     final tab = _tab.clamp(0, sections.length - 1);
     final matrix = ModMatrix(t);
     final hasMatrix = matrix.slotCount > 0;
-    final modTab = sections.indexWhere((x) => x.id == 'mod');
+    final modTab = sections.indexWhere((x) => x.showsSources || x.id == 'mod');
     return DeviceScope(
       target: t,
       matrix: hasMatrix ? matrix : null,
@@ -165,18 +170,18 @@ class _DeviceEditorState extends State<DeviceEditor> {
       accent: color,
       secondary: style?.secondary ?? color,
       focusSource: _focus,
+      assigning: hasMatrix ? _assigning : null,
+      selectedSlot: _selected,
       openSource: modTab < 0 ? null : (src) {
         _focus.value = src;
         setState(() => _tab = modTab);
       },
       child: Builder(builder: (context) => _frame(context, title: t.label, color: color, style: style, bypass: true,
         tabs: sections.length > 1 ? sections : null, tab: tab,
-        strip: hasMatrix ? ValueListenableBuilder<ModSource>(
-          valueListenable: _focus,
-          builder: (context, focus, _) => ModSourceStrip(
-            selected: sections[tab].id == 'mod' ? focus : null,
-            onSelect: (src) => DeviceScope.of(context).openSource?.call(src)),
-        ) : null,
+        strip: hasMatrix ? Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          const ModSourceStrip(),
+          const ModAssignBanner(),
+        ]) : null,
         body: AnimatedSwitcher(
           duration: Motion.fade(Motion.standard, Motion.of(context)),
           child: KeyedSubtree(key: ValueKey('device-page-${sections[tab].id}'), child: sections[tab].builder(context)),

@@ -4,6 +4,7 @@ import 'package:caw/engine/component_info.dart';
 import 'package:caw/model/app_state.dart';
 import 'package:caw/model/device_display.dart';
 import 'package:caw/model/device_target.dart';
+import 'package:caw/model/mod_matrix.dart';
 import 'package:caw/model/project.dart';
 import 'package:caw/model/settings.dart';
 import 'package:caw/model/arrange_fx.dart';
@@ -162,12 +163,56 @@ void main() {
     await done(tester);
   });
 
+  testWidgets('inline covers modulation as the full editor does: assign mode, the Modulation sheet, the MOD section',
+      (tester) async {
+    await pumpStack(tester, size: const Size(390, 1600));
+    final inst = find.byKey(const ValueKey('fx-inline-instrument'));
+    Finder inInst(String key) => find.descendant(of: inst, matching: find.byKey(ValueKey(key)));
+    expect(inInst('mod-source-strip'), findsOneWidget);
+    // Assign mode: ENV 3 onto OSC 1's level.
+    await tester.tap(inInst('modsrc-env3'));
+    await tester.pumpAndSettle();
+    expect(inInst('mod-assign-banner'), findsOneWidget);
+    await tester.tap(inInst('dknob-osc1_level'));
+    await tester.pumpAndSettle();
+    await tester.tap(inInst('mod-assign-done'));
+    await tester.pumpAndSettle();
+    final m = ModMatrix(DeviceTarget(s, layer().id, DeviceTarget.instrumentSlot));
+    final r = m.routeOf(ModSource.env3, 'osc1_level')!;
+    // The knob's Modulation sheet, a bottom sheet over the stack (no new page): its slider moves the amount.
+    await tester.longPress(inInst('dknob-osc1_level'));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('mod-sheet')), findsOneWidget);
+    expect(find.byKey(const ValueKey('device-editor')), findsNothing);
+    final before = layer().instrument!.params['mod${r.slot}_amt']!;
+    await tester.drag(find.byKey(ValueKey('modamount-${r.slot}')), const Offset(90, 0));
+    await tester.pumpAndSettle();
+    expect(layer().instrument!.params['mod${r.slot}_amt'], greaterThan(before));
+    await tester.tapAt(const Offset(10, 10)); // closes the sheet
+    await tester.pumpAndSettle();
+    // The MOD section: one source's shape and the routes it makes, editable here.
+    await tester.tap(inInst('flagship-inline-pick-6'));
+    await tester.pumpAndSettle();
+    expect(inInst('flagship-inline-mod'), findsOneWidget);
+    await tester.tap(inInst('flagship-inline-src-env3'));
+    await tester.pumpAndSettle();
+    expect(inInst('modroute-${r.slot}'), findsOneWidget);
+    // The full editor's MATRIX shows the same route.
+    await tester.tap(find.byKey(const ValueKey('fx-instrument-open')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('device-tab-matrix')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(ValueKey('modroute-${r.slot}')), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    await done(tester);
+  });
+
   testWidgets('⤢ and the name open the device full screen on a phone', (tester) async {
     await pumpStack(tester);
     await tester.tap(find.byKey(const ValueKey('fx-instrument-open')));
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('device-editor')), findsOneWidget);
-    expect(find.byKey(const ValueKey('flagship-osc')), findsOneWidget);
+    expect(find.byKey(const ValueKey('flagship-synth')), findsOneWidget);
     await tester.tap(find.byKey(const ValueKey('device-close')));
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('device-editor')), findsNothing);

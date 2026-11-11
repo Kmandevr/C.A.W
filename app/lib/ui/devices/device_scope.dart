@@ -1,18 +1,20 @@
 // What every control in a device editor shares: the device, its mod matrix, the source being dragged, value text.
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../../engine/component_info.dart';
 import '../../model/device_target.dart';
 import '../../model/mod_matrix.dart';
+import '../motion.dart';
 import '../theme.dart';
 
 /// Hands the device editor's state to its controls.
 class DeviceScope extends InheritedWidget {
   const DeviceScope({super.key, required this.target, required this.matrix, required this.dragging,
     required this.accent, Color? secondary, required this.focusSource, this.openSource, this.inline = false,
-    required super.child})
+    this.assigning, this.selectedSlot, required super.child})
       : secondary = secondary ?? accent;
 
   final DeviceTarget target;
@@ -25,6 +27,13 @@ class DeviceScope extends InheritedWidget {
 
   /// The device's colour, and its family's second colour (the right channel, the output, a gradient's end).
   final Color accent, secondary;
+
+  /// Assign mode (a tapped source chip): while set, every knob the source can reach pulses and a tap on one adds
+  /// or removes that route. Null when the editor has no assign mode.
+  final ValueNotifier<ModSource?>? assigning;
+
+  /// The route (its slot) last dropped, tapped or edited: the one a knob's ring drag or a two-finger drag sets.
+  final ValueNotifier<int?>? selectedSlot;
 
   /// The source the MOD page shows (a tapped chip picks it).
   final ValueNotifier<ModSource> focusSource;
@@ -40,6 +49,19 @@ class DeviceScope extends InheritedWidget {
   static bool isInline(BuildContext context) =>
       context.getInheritedWidgetOfExactType<DeviceScope>()?.inline ?? false;
 
+  static DeviceScope? maybeOf(BuildContext context) => context.dependOnInheritedWidgetOfExactType<DeviceScope>();
+
+  /// Makes route [slot] the selected one (what a ring or two-finger drag on its knob sets).
+  static void maybeSelect(BuildContext context, int slot) {
+    final s = context.getInheritedWidgetOfExactType<DeviceScope>()?.selectedSlot;
+    if (s != null) s.value = slot;
+  }
+
+  /// The same scope over [child] with a fresh [matrix] (a sheet over the editor, rebuilt on every change).
+  DeviceScope copyWith({ModMatrix? matrix, ValueChanged<ModSource>? openSource, required Widget child}) => DeviceScope(
+    target: target, matrix: matrix ?? this.matrix, dragging: dragging, accent: accent, secondary: secondary,
+    focusSource: focusSource, openSource: openSource ?? this.openSource, inline: inline, assigning: assigning, selectedSlot: selectedSlot, child: child);
+
   static DeviceScope of(BuildContext context) {
     final s = context.dependOnInheritedWidgetOfExactType<DeviceScope>();
     assert(s != null, 'a device control outside a DeviceScope');
@@ -52,11 +74,16 @@ class DeviceScope extends InheritedWidget {
   bool updateShouldNotify(DeviceScope old) => true;
 }
 
-/// A source's colour: envelopes green, LFOs blue, random violet, the note's own sources yellow.
+/// A source's colour: envelopes in greens, LFOs in blues, random pink, the note's own sources yellow; each
+/// envelope and LFO its own shade, so several rings on one knob tell apart (as Vital colours each modulator).
 Color modSourceColor(ModSource s) => switch (s) {
-      ModSource.env1 || ModSource.env2 || ModSource.env3 => Neon.green,
-      ModSource.lfo1 || ModSource.lfo2 || ModSource.lfo3 => Neon.blue,
-      ModSource.random => Neon.violet,
+      ModSource.env1 => Neon.green,
+      ModSource.env2 => Color.lerp(Neon.green, Neon.blue, 0.5)!,
+      ModSource.env3 => Color.lerp(Neon.green, Neon.yellow, 0.55)!,
+      ModSource.lfo1 => Neon.blue,
+      ModSource.lfo2 => Color.lerp(Neon.blue, Neon.violet, 0.6)!,
+      ModSource.lfo3 => Color.lerp(Neon.blue, Colors.white, 0.5)!,
+      ModSource.random => Neon.pink,
       ModSource.none => Neon.dim,
       _ => Neon.yellow,
     };
@@ -160,6 +187,134 @@ class DeviceCard extends StatelessWidget {
       ]),
     ),
   );
+}
+
+/// [child] growing and shrinking to its size over [Motion.standard] (no animation with motion Off: a zero-length
+/// AnimatedSize would mark itself dirty inside its own layout).
+Widget foldSize(BuildContext context, Widget child) {
+  final d = Motion.fade(Motion.standard, Motion.of(context));
+  if (d == Duration.zero) return child;
+  return AnimatedSize(duration: d, curve: Curves.easeOutCubic, alignment: Alignment.topCenter, child: child);
+}
+
+/// A device card that folds to its title row (an accordion section, so a page expands in place instead of
+/// opening another screen): a tap on the title row opens or closes it, with [summary] (what it is set to) beside
+/// the title. [actions] (a type picker) lead its body. It remembers being open per [storageId] in the route's page storage.
+class DeviceExpandCard extends StatefulWidget {
+  const DeviceExpandCard({super.key, required this.storageId, required this.title, required this.child,
+    this.color = Neon.blue, this.summary, this.leading, this.actions = const [], this.dimmed = false,
+    this.initiallyOpen = false, this.open});
+  final String storageId, title;
+  final String? summary;
+  final Widget child;
+  final Color color;
+  final Widget? leading;
+  final List<Widget> actions;
+  final bool dimmed, initiallyOpen;
+
+  /// Opens or closes it from outside (a source opened from the strip); null leaves it to the user.
+  final ValueListenable<bool>? open;
+
+  @override
+  State<DeviceExpandCard> createState() => DeviceExpandCardState();
+}
+
+class DeviceExpandCardState extends State<DeviceExpandCard> {
+  late bool _open;
+
+  bool get isOpen => _open;
+
+  @override
+  void initState() {
+    super.initState();
+    _open = PageStorage.maybeOf(context)?.readState(context, identifier: 'expand-${widget.storageId}') as bool? ??
+        widget.initiallyOpen;
+    widget.open?.addListener(_external);
+  }
+
+  @override
+  void didUpdateWidget(DeviceExpandCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.open != widget.open) {
+      oldWidget.open?.removeListener(_external);
+      widget.open?.addListener(_external);
+    }
+  }
+
+  @override
+  void dispose() {
+    widget.open?.removeListener(_external);
+    super.dispose();
+  }
+
+  void _external() {
+    final v = widget.open!.value;
+    if (v != _open) set(v);
+    if (v) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) Scrollable.ensureVisible(context, duration: const Duration(milliseconds: 250), alignment: 0.05);
+      });
+    }
+  }
+
+  void set(bool open) {
+    setState(() => _open = open);
+    PageStorage.maybeOf(context)?.writeState(context, open, identifier: 'expand-${widget.storageId}');
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final c = widget.color;
+    final level = Motion.of(context);
+    return AnimatedOpacity(
+      duration: const Duration(milliseconds: 120),
+      opacity: widget.dimmed ? 0.55 : 1,
+      child: AnimatedContainer(
+        duration: Motion.fade(Motion.standard, level),
+        margin: const EdgeInsets.only(bottom: 10),
+        clipBehavior: Clip.antiAlias,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(16),
+          gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [
+            Color.lerp(Neon.panel, c, _open ? 0.14 : 0.08)!.withValues(alpha: 0.75),
+            Color.lerp(Neon.panel, c, 0.03)!.withValues(alpha: 0.6),
+          ]),
+          border: Border.all(color: c.withValues(alpha: _open ? 0.45 : 0.25)),
+          boxShadow: _open ? [BoxShadow(color: c.withValues(alpha: 0.12), blurRadius: 16)] : null,
+        ),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: [
+          Container(height: 2, decoration: BoxDecoration(gradient: LinearGradient(colors: [
+            c.withValues(alpha: 0.9), c.withValues(alpha: 0.0)]))),
+          InkWell(
+            key: ValueKey('expand-${widget.storageId}'),
+            onTap: () {
+              Motion.tick();
+              set(!_open);
+            },
+            child: Padding(padding: const EdgeInsets.fromLTRB(10, 4, 4, 4), child: SizedBox(height: 40, child: Row(children: [
+              ?widget.leading,
+              if (widget.leading != null) const SizedBox(width: 6),
+              Text(widget.title, style: TextStyle(fontSize: 12, letterSpacing: 1.4, fontWeight: FontWeight.w800, color: c,
+                shadows: [Shadow(color: c.withValues(alpha: 0.5), blurRadius: 8)])),
+              const SizedBox(width: 8),
+              Expanded(child: widget.summary == null ? const SizedBox.shrink() : Text(widget.summary!, maxLines: 1,
+                overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 11, color: Neon.dim))),
+              AnimatedRotation(turns: _open ? 0.5 : 0, duration: Motion.fade(Motion.small, level),
+                child: Icon(Icons.expand_more, size: 22, color: c)),
+            ]))),
+          ),
+          foldSize(context, _open
+              ? Padding(padding: const EdgeInsets.fromLTRB(10, 0, 8, 10), child: widget.actions.isEmpty ? widget.child
+                  : Column(crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: [
+                      Wrap(spacing: 8, runSpacing: 6, children: widget.actions),
+                      const SizedBox(height: 6),
+                      widget.child,
+                    ]))
+              : const SizedBox(width: double.infinity)),
+        ]),
+      ),
+    );
+  }
 }
 
 /// Lays [children] out in columns of at least [minWidth] each when there is room, else stacked.

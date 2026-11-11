@@ -14,10 +14,12 @@ import 'package:caw/model/project.dart';
 import 'package:caw/model/settings.dart';
 import 'package:caw/ui/arrange/fx_stack.dart';
 import 'package:caw/ui/arrange/knob.dart' show Taper;
+import 'package:caw/ui/devices/device_controls.dart' show DeviceKnobPainter;
 import 'package:caw/ui/devices/device_editor.dart';
 import 'package:caw/ui/devices/device_registry.dart';
 import 'package:caw/ui/devices/flagship/flagship_editor.dart' show flagshipComponentId;
 import 'package:caw/ui/devices/visuals/envelope_view.dart';
+import 'package:caw/ui/devices/visuals/mod_routing.dart' show stripSources;
 import 'package:caw/ui/glass.dart';
 import 'package:caw/ui/motion.dart';
 import 'package:flutter/material.dart';
@@ -81,12 +83,43 @@ void main() {
     await tester.pumpAndSettle();
   }
 
+  Finder synthScroll() =>
+      find.descendant(of: find.byKey(const ValueKey('flagship-synth')), matching: find.byType(Scrollable)).first;
+
+  /// Scrolls [scrollable] (by its position: its heroes take drags) until [target] is built and on screen.
+  Future<void> reveal(WidgetTester tester, Finder target, [Finder? scrollable]) async {
+    final state = tester.state<ScrollableState>(scrollable ?? synthScroll());
+    for (var i = 0; i < 60 && target.evaluate().isEmpty; i++) {
+      state.position.jumpTo((state.position.pixels + 150).clamp(0, state.position.maxScrollExtent));
+      await tester.pump();
+    }
+    await tester.ensureVisible(target);
+    await tester.pumpAndSettle();
+  }
+
+  /// Scrolls the source strip until [source]'s chip is on screen; its centre.
+  Future<Offset> chip(WidgetTester tester, String source) async {
+    final f = find.byKey(ValueKey('modsrc-$source'));
+    await tester.scrollUntilVisible(f, 60, scrollable: find.descendant(
+        of: find.byKey(const ValueKey('mod-source-strip')), matching: find.byType(Scrollable)).first);
+    await tester.pumpAndSettle();
+    return tester.getCenter(f);
+  }
+
+  /// Scrolls the SYNTH page to section [id] and opens it.
+  Future<void> openSection(WidgetTester tester, String id) async {
+    final header = find.byKey(ValueKey('expand-$id'));
+    await reveal(tester, header);
+    await tester.tap(header);
+    await tester.pumpAndSettle();
+  }
+
   group('framework', () {
     wtest('the FX stack opens the instrument\'s editor full screen on a phone; close returns', (tester) async {
       await openSynth(tester);
       expect(find.byKey(const ValueKey('device-editor')), findsOneWidget);
       expect(find.text('Flagship'), findsWidgets);
-      expect(find.byKey(const ValueKey('flagship-osc')), findsOneWidget);
+      expect(find.byKey(const ValueKey('flagship-synth')), findsOneWidget);
       await tester.tap(find.byKey(const ValueKey('device-close')));
       await tester.pumpAndSettle();
       expect(find.byKey(const ValueKey('device-editor')), findsNothing);
@@ -107,10 +140,9 @@ void main() {
       expect(tester.takeException(), isNull);
     });
 
-    wtest('tabs switch between OSC, FILTER, MOD and FX', (tester) async {
+    wtest('three tabs, as Vital: SYNTH, EFFECTS and MATRIX', (tester) async {
       await openSynth(tester);
-      for (final (tab, page) in [('filter', 'flagship-filter'), ('mod', 'flagship-mod'), ('fx', 'flagship-fx'),
-          ('osc', 'flagship-osc')]) {
+      for (final (tab, page) in [('fx', 'flagship-fx'), ('matrix', 'flagship-matrix'), ('synth', 'flagship-synth')]) {
         await tester.tap(find.byKey(ValueKey('device-tab-$tab')));
         await tester.pumpAndSettle();
         expect(find.byKey(ValueKey(page)), findsOneWidget, reason: tab);
@@ -168,9 +200,9 @@ void main() {
   group('flagship', () {
     wtest('dragging the attack handle changes env 1\'s attack', (tester) async {
       await openSynth(tester);
-      await tester.tap(find.byKey(const ValueKey('device-tab-mod')));
-      await tester.pumpAndSettle();
+      await openSection(tester, 'flagship-envelopes');
       final view = find.byKey(const ValueKey('env-env1_'));
+      await reveal(tester, view);
       expect(view, findsOneWidget);
       final rect = tester.getRect(view);
       final t = synth();
@@ -195,9 +227,9 @@ void main() {
       await openSynth(tester);
       final m = ModMatrix(synth());
       expect(m.routes.length, 1, reason: 'slot 1 starts as env 2 to filter 1');
-      final chip = tester.getCenter(find.byKey(const ValueKey('modsrc-lfo1')));
+      final at = await chip(tester, 'lfo1');
       final knob = tester.getCenter(find.byKey(const ValueKey('dknob-osc1_level')));
-      final g = await tester.startGesture(chip);
+      final g = await tester.startGesture(at);
       await tester.pump();
       await g.moveBy(const Offset(0, 20));
       await tester.pump();
@@ -220,37 +252,149 @@ void main() {
       await tester.pumpAndSettle();
       expect(synth().value('mod${slot}_amt'), greaterThan(0.25));
       expect(synth().value('osc1_level'), level);
-      // The MOD page lists it and removes it.
-      await tester.tap(find.byKey(const ValueKey('device-tab-mod')));
+      // The MATRIX page lists it and removes it.
+      await tester.tap(find.byKey(const ValueKey('device-tab-matrix')));
       await tester.pumpAndSettle();
       await tester.scrollUntilVisible(find.byKey(ValueKey('modroute-remove-$slot')), 100,
-          scrollable: find.descendant(of: find.byKey(const ValueKey('flagship-mod')), matching: find.byType(Scrollable)).first);
+          scrollable: find.descendant(of: find.byKey(const ValueKey('flagship-matrix')), matching: find.byType(Scrollable)).first);
       await tester.tap(find.byKey(ValueKey('modroute-remove-$slot')));
       await tester.pumpAndSettle();
       expect(ModMatrix(synth()).routesTo('osc1_level'), isEmpty);
       expect(synth().value('mod${slot}_src'), 0);
     });
 
-    wtest('a source chip on another tab opens its MOD page', (tester) async {
+    wtest('assign mode: tap a chip, then tap knobs to add and remove routes; Done ends it', (tester) async {
       await openSynth(tester);
-      await tester.tap(find.byKey(const ValueKey('modsrc-lfo1')));
+      await tester.tapAt(await chip(tester, 'lfo2'));
       await tester.pumpAndSettle();
-      expect(find.byKey(const ValueKey('flagship-mod')), findsOneWidget);
-      expect(find.byKey(const ValueKey('lfo-lfo1_rate')), findsOneWidget);
+      expect(find.byKey(const ValueKey('mod-assign-banner')), findsOneWidget);
+      expect(find.textContaining('Tap knobs to route', findRichText: true), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('dknob-osc1_level')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('dknob-osc1_pan')));
+      await tester.pumpAndSettle();
+      var m = ModMatrix(synth());
+      expect(m.routeOf(ModSource.lfo2, 'osc1_level'), isNotNull);
+      expect(m.routeOf(ModSource.lfo2, 'osc1_pan'), isNotNull);
+      expect(synth().value('osc1_level'), 0.7, reason: 'a tap in assign mode routes; it doesn\'t turn the knob');
+      // A second tap removes it.
+      await tester.tap(find.byKey(const ValueKey('dknob-osc1_level')));
+      await tester.pumpAndSettle();
+      m = ModMatrix(synth());
+      expect(m.routeOf(ModSource.lfo2, 'osc1_level'), isNull);
+      expect(m.routeOf(ModSource.lfo2, 'osc1_pan'), isNotNull);
+      await tester.tap(find.byKey(const ValueKey('mod-assign-done')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('mod-assign-banner')), findsNothing);
+      await tester.tap(find.byKey(const ValueKey('dknob-osc1_level')));
+      await tester.pumpAndSettle();
+      expect(ModMatrix(synth()).routeOf(ModSource.lfo2, 'osc1_level'), isNull, reason: 'out of assign mode a tap does nothing');
     });
 
-    wtest('the oscillator picker and the filter curve edit their parameters', (tester) async {
+    wtest('assign mode\'s Edit opens the source\'s section in place', (tester) async {
       await openSynth(tester);
-      await tester.tap(find.byKey(const ValueKey('osc-pick-2')));
+      await tester.tapAt(await chip(tester, 'lfo1'));
       await tester.pumpAndSettle();
-      expect(find.byKey(const ValueKey('osc-2')), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('mod-assign-edit')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('lfo-lfo1_rate')), findsOneWidget);
+      expect(find.byKey(const ValueKey('mod-assign-banner')), findsNothing);
+    });
+
+    wtest('a finger that rests on a modulated knob\'s ring, then drags, still sets the amount (regression)', (tester) async {
+      await openSynth(tester);
+      final slot = ModMatrix(synth()).add(ModSource.lfo1, 'osc1_level')!;
+      await tester.pump();
+      final r = tester.getRect(find.byKey(const ValueKey('dknob-osc1_level')));
+      final g = await tester.startGesture(Offset(r.center.dx, r.top + 3));
+      await tester.pump(const Duration(milliseconds: 800)); // past the long-press time
+      for (var i = 0; i < 8; i++) {
+        await g.moveBy(const Offset(0, -5));
+        await tester.pump();
+      }
+      await g.up();
+      await tester.pumpAndSettle();
+      expect(find.byType(AlertDialog), findsNothing);
+      expect(find.byKey(const ValueKey('mod-sheet')), findsNothing);
+      expect(synth().value('mod${slot}_amt'), greaterThan(0.3));
+      expect(synth().value('osc1_level'), 0.7);
+    });
+
+    wtest('two fingers on a knob drag the selected route\'s amount', (tester) async {
+      await openSynth(tester);
+      final slot = ModMatrix(synth()).add(ModSource.env3, 'osc1_level')!;
+      await tester.pump();
+      final c = tester.getCenter(find.byKey(const ValueKey('dknob-osc1_level')));
+      final a = await tester.startGesture(c + const Offset(-3, -6));
+      final b = await tester.startGesture(c + const Offset(3, -6), pointer: 7);
+      await tester.pump();
+      for (var i = 0; i < 8; i++) {
+        await a.moveBy(const Offset(0, -6));
+        await b.moveBy(const Offset(0, -6));
+        await tester.pump();
+      }
+      await a.up();
+      await b.up();
+      await tester.pumpAndSettle();
+      expect(synth().value('mod${slot}_amt'), greaterThan(0.35));
+      expect(synth().value('osc1_level'), 0.7);
+    });
+
+    wtest('the Modulation sheet: long-press a knob; its slider edits the amount every time; polarity, add, remove',
+        (tester) async {
+      await openSynth(tester);
+      final slot = ModMatrix(synth()).add(ModSource.lfo1, 'osc1_level')!;
+      await tester.pump();
+      await tester.longPress(find.byKey(const ValueKey('dknob-osc1_level')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('mod-sheet')), findsOneWidget);
+      final slider = find.byKey(ValueKey('modamount-$slot'));
+      expect(tester.getSize(slider).height, greaterThanOrEqualTo(44), reason: 'a big target');
+      // Drag it right, then left, several times: each drag moves it (the bug was a drag that did nothing).
+      var last = synth().value('mod${slot}_amt');
+      for (final dx in [80.0, -40.0, 120.0, -160.0]) {
+        await tester.drag(slider, Offset(dx, 0));
+        await tester.pumpAndSettle();
+        final now = synth().value('mod${slot}_amt');
+        expect(dx > 0 ? now > last : now < last, isTrue, reason: 'drag $dx: $last -> $now');
+        last = now;
+      }
+      await tester.tap(find.byKey(ValueKey('modroute-unipolar-$slot')));
+      await tester.pumpAndSettle();
+      expect(synth().value('mod${slot}_bipolar'), 0);
+      await tester.tap(find.byKey(const ValueKey('mod-sheet-add-env3')));
+      await tester.pumpAndSettle();
+      expect(ModMatrix(synth()).routesTo('osc1_level'), hasLength(2));
+      await tester.tap(find.byKey(ValueKey('modroute-remove-$slot')));
+      await tester.pumpAndSettle();
+      expect(ModMatrix(synth()).routesTo('osc1_level').single.source, ModSource.env3);
+    });
+
+    wtest('several routes on one knob draw one ring each and a count badge', (tester) async {
+      await openSynth(tester);
+      final m = ModMatrix(synth());
+      for (final src in [ModSource.lfo1, ModSource.env2, ModSource.random]) {
+        m.add(src, 'osc1_frame');
+      }
+      await tester.pump();
+      final knob = find.byKey(const ValueKey('dknob-osc1_frame'));
+      final paint = tester.widgetList<CustomPaint>(find.descendant(of: knob, matching: find.byType(CustomPaint)))
+          .map((c) => c.painter).whereType<DeviceKnobPainter>().single;
+      expect(paint.rings, hasLength(3));
+      expect(find.descendant(of: find.byKey(const ValueKey('dknob-badge-osc1_frame')), matching: find.text('3')), findsOneWidget);
+    });
+
+    wtest('an oscillator\'s section opens in place; the filter curve edits its parameters', (tester) async {
+      await openSynth(tester);
+      await openSection(tester, 'flagship-osc-2');
+      expect(find.byKey(const ValueKey('wt-osc2_')), findsWidgets);
       await tester.tap(find.byKey(const ValueKey('dpower-osc2_on')));
       await tester.pumpAndSettle();
       expect(synth().value('osc2_on'), 1);
-      await tester.tap(find.byKey(const ValueKey('device-tab-filter')));
-      await tester.pumpAndSettle();
+      final curve = find.byKey(const ValueKey('filter-flt1_'));
+      await reveal(tester, curve);
       final before = synth().value('flt1_cutoff');
-      await tester.drag(find.byKey(const ValueKey('filter-flt1_')), const Offset(60, -30));
+      await tester.drag(curve, const Offset(60, -30));
       await tester.pumpAndSettle();
       expect(synth().value('flt1_cutoff'), greaterThan(before));
       expect(synth().value('flt1_resonance'), greaterThan(0.15));
@@ -273,6 +417,51 @@ void main() {
         expect(ModMatrix(synth()).add(ModSource.lfo3, m.destinations[i + 2]), isNotNull);
       }
       expect(ModMatrix(synth()).add(ModSource.lfo3, 'volume'), isNull, reason: 'all 16 in use');
+    });
+
+    test('the knob\'s modulated value follows the sources\' shapes (≈): an LFO swings it, an envelope lifts it', () {
+      final t = synth();
+      final m = ModMatrix(t);
+      m.remove(1);
+      m.add(ModSource.lfo1, 'osc1_level', amount: 0.2, bipolar: true); // 2 Hz sine
+      final m2 = ModMatrix(t);
+      final at = [for (var i = 0; i < 40; i++) m2.modulatedPosition('osc1_level', 0.5, i / 80)!];
+      expect(at.reduce((a, b) => a < b ? a : b), closeTo(0.3, 0.02));
+      expect(at.reduce((a, b) => a > b ? a : b), closeTo(0.7, 0.02));
+      expect(m2.modulatedPosition('osc1_pan', 0.5, 0), isNull, reason: 'no route');
+      // Velocity has no shape of its own: nothing to draw.
+      ModMatrix(t).add(ModSource.velocity, 'osc1_pan');
+      expect(ModMatrix(t).modulatedPosition('osc1_pan', 0.5, 0), isNull);
+      // The envelope: up after the attack, down to the sustain, released in the second beat.
+      final beat = 0.5;
+      double env(double s) => ModPreview.envelopeAt(s, attack: 0.1, decay: 0.1, sustain: 0.5, release: 0.1, beat: beat);
+      expect(env(0.05), closeTo(0.5, 1e-9));
+      expect(env(0.3), closeTo(0.5, 1e-9));
+      expect(env(0.99), lessThan(0.01));
+      // Several slots can aim at one knob (all 16).
+      final full = ModMatrix(t);
+      for (final r in full.routes) {
+        full.remove(r.slot);
+      }
+      for (final src in stripSources) {
+        expect(ModMatrix(t).add(src, 'flt1_cutoff'), isNotNull);
+      }
+      expect(ModMatrix(t).routesTo('flt1_cutoff').length, stripSources.length, reason: 'every source on one knob');
+    });
+
+    test('the via source scales a route; toggle adds and removes', () {
+      final m = ModMatrix(synth());
+      expect(m.hasVia, isTrue);
+      final slot = m.toggle(ModSource.lfo1, 'osc1_pan')!;
+      expect(slot, greaterThan(0));
+      m.setVia(slot, ModSource.modWheel);
+      expect(ModMatrix(synth()).route(slot)!.via, ModSource.modWheel);
+      expect(ModMatrix(synth()).toggle(ModSource.lfo1, 'osc1_pan'), 0);
+      expect(synth().value('mod${slot}_via'), 0);
+      const r = ModRoute(slot: 1, source: ModSource.lfo1, paramId: 'x', amount: 0.5, bipolar: true);
+      expect(r.offset(1), 0.5);
+      expect(r.offset(0), -0.5);
+      expect(r.offset(1, scale: 0.5), 0.25);
     });
 
     test('the route span is clamped and bipolar spans both ways', () {
@@ -329,7 +518,8 @@ void main() {
       });
     }
 
-    wtest('the flagship editor\'s MOD page with a route, phone', (tester) async {
+    wtest('the flagship editor\'s MATRIX page with routes, phone', (tester) async {
+      ModMatrix(synth()).add(ModSource.env3, 'flt1_cutoff');
       ModMatrix(synth()).add(ModSource.lfo1, 'flt1_cutoff');
       late BuildContext ctx;
       await pumpGolden(tester, Scaffold(body: Builder(builder: (c) {
@@ -338,9 +528,9 @@ void main() {
       })), goldenSizes['phone']!);
       openDeviceEditor(ctx, s, s.project.layers.first, DeviceTarget.instrumentSlot);
       await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const ValueKey('device-tab-mod')));
+      await tester.tap(find.byKey(const ValueKey('device-tab-matrix')));
       await tester.pumpAndSettle();
-      await expectLater(goldenScreen, matchesGoldenFile('goldens/device_flagship_mod_phone.png'));
+      await expectLater(goldenScreen, matchesGoldenFile('goldens/device_flagship_matrix_phone.png'));
     });
 
     wtest('the flagship editor\'s FILTER and FX pages, desktop', (tester) async {

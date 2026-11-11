@@ -1,9 +1,11 @@
-// The EQ's plugin UI (Pro-Q-like): the live spectrum behind a summed curve, one coloured node per band to drag, pinch for Q, type tiles.
+// The EQ's plugin UI (Pro-Q and Vital-like): the live spectrum behind a summed curve, a big node per band to drag, pinch for Q, a band strip, type tiles.
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
 import '../../../engine/component_info.dart';
+import '../../feedback.dart';
+import '../../motion.dart';
 import '../../theme.dart';
 import '../device_controls.dart';
 import '../device_scope.dart';
@@ -111,6 +113,7 @@ final _bandId = RegExp(r'^(band|b)(\d+)_(freq|gain|q|type|on|channel)$');
 
 class _EqEditorPageState extends State<EqEditorPage> {
   int? _selected;
+  bool _adding = false; // "+": the next tap on the curve places a band there
 
   @override
   Widget build(BuildContext context) {
@@ -142,6 +145,8 @@ class _EqEditorPageState extends State<EqEditorPage> {
     ];
     final range = math.min(24.0, t.param(id(numbers.first, 'gain'))?.max ?? 18);
     final selBand = bands.firstWhere((b) => b.n == sel);
+    final free = bands.where((b) => !b.on).firstOrNull;
+    final typeP = t.param(id(sel, 'type'));
     return effectPage('eq', [
       LayoutBuilder(builder: (context, box) => HeroCanvas(
         color: scope.accent,
@@ -151,23 +156,34 @@ class _EqEditorPageState extends State<EqEditorPage> {
         grid: false,
         child: DeviceDisplay(builder: (context, f) => _EqView(
           bands: bands, prefix: prefix, selected: sel, rangeDb: range, spectrum: f?.spectrum,
+          adding: _adding && free != null ? free : null,
+          onAdded: () => setState(() => _adding = false),
           onSelect: (n) => setState(() => _selected = n))),
       )),
-      SizedBox(height: 40, child: Row(children: [
+      if (_adding && free != null) Padding(padding: const EdgeInsets.only(top: 6), child: Text(
+        'Tap the curve where band ${free.n} goes', key: const ValueKey('eq-add-hint'), textAlign: TextAlign.center,
+        style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: free.color))),
+      const SizedBox(height: 6),
+      // The band strip: a tap selects a band (its controls below); "+" adds one where you next tap the curve.
+      SizedBox(height: 52, child: Row(children: [
         for (final b in bands) Expanded(child: Padding(padding: const EdgeInsets.symmetric(horizontal: 2), child: _BandChip(
           band: b, selected: b.n == sel,
-          onTap: () => setState(() => _selected = b.n),
-          onToggle: () => t.set(id(b.n, 'on'), b.on ? 0 : 1)))),
+          onTap: () => setState(() => _selected = b.n)))),
+        Padding(padding: const EdgeInsets.only(left: 2), child: _AddChip(
+          active: _adding, enabled: free != null, color: free?.color ?? Neon.dim,
+          onTap: () => setState(() => _adding = !_adding))),
       ])),
       const SizedBox(height: 8),
+      _BandReadout(band: selBand, type: typeP == null ? '' : formatParamValue(typeP, t.value(typeP.id))),
       ControlGroup(
         title: 'BAND $sel',
         color: selBand.color,
-        trailing: DevicePower(id(sel, 'on'), color: selBand.color),
+        trailing: _BandPower(on: selBand.on, color: selBand.color, n: sel, onTap: () => t.set(id(sel, 'on'), selBand.on ? 0 : 1)),
         child: LayoutBuilder(builder: (context, box) {
           final types = _TypeGrid(paramId: id(sel, 'type'), color: selBand.color);
           final knobs = Column(crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: [
-            KnobRow([id(sel, 'freq'), if (eqHasGain(selBand.shape)) id(sel, 'gain'), id(sel, 'q')], size: 54, color: selBand.color),
+            KnobRow([id(sel, 'freq'), if (eqHasGain(selBand.shape)) id(sel, 'gain'), id(sel, 'q')], size: 54, color: selBand.color,
+              labels: {id(sel, 'freq'): 'Frequency', id(sel, 'gain'): 'Gain', id(sel, 'q'): 'Width (Q)'}),
             Row(children: [
               const SizedBox(width: 64, child: Text('CHANNEL', style: TextStyle(fontSize: 9, letterSpacing: 1.2, fontWeight: FontWeight.w800, color: Neon.dim))),
               Expanded(child: Align(alignment: Alignment.centerLeft, child: DeviceChoice(id(sel, 'channel'), color: selBand.color))),
@@ -191,10 +207,10 @@ class _EqEditorPageState extends State<EqEditorPage> {
 }
 
 class _BandChip extends StatelessWidget {
-  const _BandChip({required this.band, required this.selected, required this.onTap, required this.onToggle});
+  const _BandChip({required this.band, required this.selected, required this.onTap});
   final _Band band;
   final bool selected;
-  final VoidCallback onTap, onToggle;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
@@ -210,23 +226,113 @@ class _BandChip extends StatelessWidget {
           DeviceFeel.tap();
           onTap();
         },
-        onLongPress: () {
-          DeviceFeel.tap();
-          onToggle();
-        },
-        child: Container(
+        child: Pressable(glow: c, child: AnimatedContainer(
+          duration: Motion.fade(Motion.small, Motion.of(context)),
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(10),
             color: selected ? c.withValues(alpha: 0.22) : Colors.white.withValues(alpha: 0.03),
-            border: Border.all(color: selected ? c : c.withValues(alpha: 0.35))),
+            border: Border.all(color: selected ? c : c.withValues(alpha: 0.35), width: selected ? 1.6 : 1),
+            boxShadow: selected ? [BoxShadow(color: c.withValues(alpha: 0.3), blurRadius: 8)] : null),
           child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
             Text('${band.n}', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: band.on ? Neon.text : Neon.dim)),
             SizedBox(width: 22, height: 10, child: CustomPaint(painter: _ShapeIconPainter(band.shape, c))),
+            Text(band.on ? _short(band.freq) : 'off', maxLines: 1, style: Neon.code(size: 8.5, color: c)),
           ]),
-        ),
+        )),
       ),
     );
   }
+
+  static String _short(double hz) => hz >= 1000 ? '${(hz / 1000).toStringAsFixed(hz >= 10000 ? 0 : 1)}k' : '${hz.round()}';
+}
+
+/// "+": the next tap on the curve turns on the first off band there.
+class _AddChip extends StatelessWidget {
+  const _AddChip({required this.active, required this.enabled, required this.color, required this.onTap});
+  final bool active, enabled;
+  final Color color;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) => Tooltip(message: enabled ? 'Add a band: then tap the curve' : 'Every band is on',
+    child: GestureDetector(
+      key: const ValueKey('eq-add'),
+      behavior: HitTestBehavior.opaque,
+      onTap: enabled ? () {
+        DeviceFeel.tap();
+        onTap();
+      } : null,
+      child: Pressable(glow: color, enabled: enabled, child: AnimatedContainer(
+        duration: Motion.fade(Motion.small, Motion.of(context)),
+        width: 44,
+        decoration: BoxDecoration(borderRadius: BorderRadius.circular(10),
+          color: active ? color.withValues(alpha: 0.3) : Colors.white.withValues(alpha: 0.03),
+          border: Border.all(color: enabled ? color : Neon.line, width: active ? 2 : 1)),
+        child: Icon(active ? Icons.close : Icons.add, size: 22, color: enabled ? color : Neon.dim),
+      )),
+    ));
+}
+
+/// The selected band's values in large type: type, frequency, gain and width.
+class _BandReadout extends StatelessWidget {
+  const _BandReadout({required this.band, required this.type});
+  final _Band band;
+  final String type;
+
+  @override
+  Widget build(BuildContext context) {
+    Widget cell(String label, String value) => Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Text(label, style: const TextStyle(fontSize: 9, letterSpacing: 1.1, fontWeight: FontWeight.w800, color: Neon.dim)),
+      Text(value, maxLines: 1, overflow: TextOverflow.ellipsis,
+        style: Neon.code(size: 14, color: band.on ? Neon.text : Neon.dim).copyWith(fontWeight: FontWeight.w700)),
+    ]));
+    return Container(
+      key: const ValueKey('eq-readout'),
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+      decoration: BoxDecoration(borderRadius: BorderRadius.circular(12), color: band.color.withValues(alpha: 0.08),
+        border: Border.all(color: band.color.withValues(alpha: 0.4))),
+      child: Row(children: [
+        cell('BAND ${band.n}', band.on ? type : 'Off'),
+        cell('FREQUENCY', _EqPainter._hz(band.freq)),
+        if (eqHasGain(band.shape)) cell('GAIN', '${band.gain >= 0 ? '+' : ''}${band.gain.toStringAsFixed(1)} dB'),
+        cell('WIDTH', 'Q ${band.q.toStringAsFixed(2)}'),
+      ]),
+    );
+  }
+}
+
+/// The selected band's power, explicit (a double-tap on a node resets it instead).
+class _BandPower extends StatelessWidget {
+  const _BandPower({required this.on, required this.color, required this.n, required this.onTap});
+  final bool on;
+  final Color color;
+  final int n;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) => Semantics(toggled: on, label: 'Band $n', child: GestureDetector(
+    key: const ValueKey('eq-band-power'),
+    behavior: HitTestBehavior.opaque,
+    onTap: () {
+      DeviceFeel.tap();
+      onTap();
+    },
+    child: Pressable(glow: color, radius: 16, child: AnimatedContainer(
+      duration: Motion.fade(Motion.small, Motion.of(context)),
+      height: 32,
+      padding: const EdgeInsets.symmetric(horizontal: 12),
+      decoration: BoxDecoration(borderRadius: BorderRadius.circular(16),
+        color: on ? color.withValues(alpha: 0.22) : Colors.white.withValues(alpha: 0.03),
+        border: Border.all(color: on ? color : Neon.line)),
+      child: Row(mainAxisSize: MainAxisSize.min, children: [
+        Icon(Icons.power_settings_new, size: 15, color: on ? color : Neon.dim),
+        const SizedBox(width: 4),
+        Text(on ? 'ON' : 'OFF', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w800, letterSpacing: 1,
+          color: on ? Neon.text : Neon.dim)),
+      ]),
+    )),
+  ));
 }
 
 class _ShapeIconPainter extends CustomPainter {
@@ -299,20 +405,19 @@ class _TypeGrid extends StatelessWidget {
     ]);
   }
 
-  static String _shortType(String s) => s
-      .replaceAll('Low shelf', 'Lo shelf')
-      .replaceAll('High shelf', 'Hi shelf')
-      .replaceAll('Low cut ', 'LC ')
-      .replaceAll('High cut ', 'HC ');
+  static String _shortType(String s) => s.replaceAll('Band-pass', 'Band pass');
 }
 
 /// The EQ's main visual: the live spectrum (violet) behind each band's own shape in its colour and the summed curve,
 /// a node per band. Drag a node: sideways its frequency, up and down its gain (a cut's or notch's Q); a second finger
-/// pinches its Q (spread wider: a wider band); the wheel sets Q on a desktop. Tap selects, double-tap switches a band
-/// on or off, double-tap on empty space turns the first off band on there, long-press picks its type.
+/// pinches its Q (spread wider: a wider band); the wheel sets Q on a desktop. Tap selects, double-tap resets a
+/// band (gain to 0 dB and its width to the default; the band power is a button of its own), long-press picks its
+/// type. With [adding] (the strip's "+") a tap on the curve turns that band on there.
 class _EqView extends StatefulWidget {
   const _EqView({required this.bands, required this.prefix, required this.selected, required this.onSelect,
-    this.rangeDb = 18, this.spectrum});
+    this.rangeDb = 18, this.spectrum, this.adding, this.onAdded});
+  final _Band? adding;
+  final VoidCallback? onAdded;
   final List<_Band> bands;
   final String prefix;
   final int selected;
@@ -345,7 +450,8 @@ class _EqViewState extends State<_EqView> {
 
       _Band? nearest(Offset p) {
         _Band? best;
-        var d = 30.0;
+        var d = 40.0; // a finger's reach around the 11–13 dp nodes
+        if (widget.adding != null) return null; // placing a band: every tap places it
         for (final b in widget.bands) {
           final dist = (node(b) - p).distance - (b.n == widget.selected ? 4 : 0);
           if (dist < d) {
@@ -401,6 +507,17 @@ class _EqViewState extends State<_EqView> {
           setState(() => _active = null);
         },
         onTap: (p) {
+          if (widget.adding case final off?) {
+            DeviceFeel.detent();
+            t.setAll({
+              _id(off.n, 'on'): 1,
+              _id(off.n, 'freq'): xToFreq(p.dx, w),
+              if (eqHasGain(off.shape)) _id(off.n, 'gain'): dbAt(p.dy).clamp(-widget.rangeDb, widget.rangeDb),
+            });
+            widget.onSelect(off.n);
+            widget.onAdded?.call();
+            return;
+          }
           if (nearest(p) case final b?) {
             DeviceFeel.tap();
             widget.onSelect(b.n);
@@ -408,17 +525,13 @@ class _EqViewState extends State<_EqView> {
         },
         onDoubleTap: (p) {
           if (nearest(p) case final b?) {
-            t.set(_id(b.n, 'on'), b.on ? 0 : 1);
-            return;
+            final q = t.param(_id(b.n, 'q'));
+            t.setAll({
+              if (eqHasGain(b.shape)) _id(b.n, 'gain'): 0,
+              if (q != null) q.id: q.defaultValue,
+            });
+            widget.onSelect(b.n);
           }
-          final off = widget.bands.where((b) => !b.on).firstOrNull;
-          if (off == null) return;
-          t.setAll({
-            _id(off.n, 'on'): 1,
-            _id(off.n, 'freq'): xToFreq(p.dx, w),
-            if (eqHasGain(off.shape)) _id(off.n, 'gain'): dbAt(p.dy).clamp(-widget.rangeDb, widget.rangeDb),
-          });
-          widget.onSelect(off.n);
         },
         onLongPress: (p) async {
           final b = nearest(p);
@@ -445,7 +558,7 @@ class _EqViewState extends State<_EqView> {
         },
         child: CustomPaint(size: Size(w, h), painter: _EqPainter(
           bands: widget.bands, y: y, node: node, selected: widget.selected, active: _active, spectrum: widget.spectrum,
-          rangeDb: widget.rangeDb, color: DeviceScope.of(context).accent)),
+          rangeDb: widget.rangeDb, color: DeviceScope.of(context).accent, adding: widget.adding != null)),
       );
     });
   }
@@ -453,7 +566,8 @@ class _EqViewState extends State<_EqView> {
 
 class _EqPainter extends CustomPainter {
   _EqPainter({required this.bands, required this.y, required this.node, required this.selected, required this.active,
-    required this.spectrum, required this.rangeDb, required this.color});
+    required this.spectrum, required this.rangeDb, required this.color, this.adding = false});
+  final bool adding;
   final List<_Band> bands;
   final double Function(double db) y;
   final Offset Function(_Band b) node;
@@ -525,13 +639,24 @@ class _EqPainter extends CustomPainter {
       i == 0 ? curve.moveTo(xs[i], py) : curve.lineTo(xs[i], py);
     }
     strokeGlow(canvas, curve, Colors.white.withValues(alpha: 0.92), width: 2);
+    if (adding) {
+      canvas.drawRect(Offset.zero & size, Paint()
+        ..color = Colors.white.withValues(alpha: 0.6)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.5);
+    }
     for (final b in bands) {
       final at = node(b);
       final c = b.on ? b.color : Neon.dim;
-      paintHandle(canvas, at, c, active: b.n == active, r: b.n == selected ? 9 : 7.5, label: '${b.n}');
-      if (b.n == active) {
+      if (!b.on && b.n != selected) {
+        paintHandle(canvas, at, c, r: 8, label: '${b.n}');
+        continue;
+      }
+      paintHandle(canvas, at, c, active: b.n == active, r: b.n == selected ? 13 : 11, label: '${b.n}');
+      if (b.n == active || (b.n == selected && active == null)) {
         paintLabel(canvas, '${_hz(b.freq)}  ${eqHasGain(b.shape) ? '${b.gain >= 0 ? '+' : ''}${b.gain.toStringAsFixed(1)} dB  ' : ''}'
-            'Q ${b.q.toStringAsFixed(2)}', at + Offset(0, at.dy > size.height / 2 ? -26 : 24), Neon.text, size: 10, align: 0,
+            'Q ${b.q.toStringAsFixed(2)}', at + Offset(0, at.dy > size.height / 2 ? -28 : 28),
+            b.n == active ? Neon.text : Neon.dim, size: b.n == active ? 11 : 9.5, align: 0,
             weight: FontWeight.w700);
       }
     }

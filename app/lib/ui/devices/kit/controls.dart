@@ -322,7 +322,7 @@ class KnobRow extends StatelessWidget {
     final ids = [for (final k in knobs) if (t.param(k) != null) k];
     if (ids.isEmpty) return const SizedBox.shrink();
     return LayoutBuilder(builder: (context, box) {
-      final item = math.max(52.0, size + 16);
+      final item = DeviceKnob.widthFor(size) + 2;
       final fit = math.max(1, (box.maxWidth / item).floor());
       final rows = (ids.length / fit).ceil();
       final per = (ids.length / rows).ceil();
@@ -369,12 +369,7 @@ class _DeviceFoldState extends State<DeviceFold> {
           Expanded(child: Container(height: 1, color: c.withValues(alpha: 0.2))),
         ])),
       ),
-      AnimatedSize(
-        duration: Motion.fade(Motion.standard, Motion.of(context)),
-        curve: Curves.easeOutCubic,
-        alignment: Alignment.topCenter,
-        child: _open ? Padding(padding: const EdgeInsets.only(bottom: 8), child: widget.child) : const SizedBox(width: double.infinity),
-      ),
+      foldSize(context, _open ? Padding(padding: const EdgeInsets.only(bottom: 8), child: widget.child) : const SizedBox(width: double.infinity)),
     ]);
   }
 }
