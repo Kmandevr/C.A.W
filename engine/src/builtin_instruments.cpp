@@ -2,6 +2,8 @@
 #include "builtin_instruments.h"
 #include "builtin_drums.h"
 #include "builtin_flagship.h"
+#include "audio_clips.h"
+#include "builtin_sampler.h"
 
 namespace caw {
 
@@ -10,6 +12,8 @@ namespace caw {
 void registerBuiltinInstruments(ModuleRegistry& registry) {
     registerDrums(registry);          // org.caw.drums
     registerFlagshipSynth(registry);  // org.caw.synth.flagship
+    registerSampler(registry);        // org.caw.sampler (builtin_sampler.cpp)
+    registerAudioTrack(registry);     // org.caw.audio-track: audio clips and input (audio_clips.cpp)
 }
 
 }  // namespace caw

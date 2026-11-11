@@ -6,6 +6,17 @@ updated: 2026-11-11
 
 # Decisions
 
+## 2026-11-11: Audio assets, clips, sampler and input (WP-J; choices to confirm)
+
+**Decision (Claude, for the owner to confirm; the owner put all three in the beta, see below; [engine](engine.md#audio-assets-clips-the-sampler-and-audio-input-api-18)):**
+- **Decoders: miniaudio's bundled dr_wav, dr_flac and dr_mp3**, already vendored (miniaudio 0.11.25; [Fact] the file's licence block, read 2026-11-11: "a choice of public domain or MIT-0", which covers the dr_libs code it carries). No new dependency. They are compiled a second time inside the core with every function `static` (`platform/decode_miniaudio.c`), so the core decodes in builds without device audio and never clashes with the device copy.
+- **Time-stretch: our own WSOLA** (Verhelst and Roelands, ICASSP 1993), not a library: [Fact] Rubber Band is GPL with a paid commercial licence (breakfastquay.com/rubberband, read 2026-11-11) and SoundTouch is LGPL v2.1 (surina.net/soundtouch, read 2026-11-11), both excluded by the licence rule. WSOLA is cheap and keeps transients; a phase vocoder for sustained tonal material is left for later. Varispeed (resampling) is the second mode.
+- **An audio track is a layer with `audio_clips`/`input`, played by a built-in instrument** (`org.caw.audio-track`), so clips get the track's inserts, sends, buses, keys, latency compensation and every render path without new mix-graph code. A layer plays an instrument or audio clips, not both.
+- **Assets are referenced by absolute path** (a project `assets` table, or a clip's `path`), shared process-wide within a 1 GiB budget; sampler zones name paths in the sampler's state JSON, whose keys mirror SFZ opcodes so import and export are one-to-one.
+- **Monitoring goes through the track's chain**, in the same duplex callback; `auto` monitors while armed and stopped, or while recording.
+- **Takes:** WAV float by default, one file per armed track per take, a new take at each loop wrap, placed by the round-trip latency (override, then the last good ping, then the device's buffer estimate, an [Assumption] until measured on the S22+).
+- **Open (owner):** the default fade on clip edges (none today; REAPER-style 1 ms is an app default to choose); whether a musical clip's default stretch is WSOLA; where recordings are kept (the app passes the folder).
+
 ## 2026-11-11: the app stops using .caw (WP-C; choices made for the owner, to confirm)
 
 - **Engine Lab moves to Settings › About and beta as "Engine diagnostics"** (to confirm with the owner; #139 says "Settings or a debug view"). It keeps the meters, the master scope and spectrum and each track's signal path; the .caw module report went with the language.
@@ -829,7 +840,6 @@ Built (engine pass, 2026-11-10):
 - Keep the permanent engine blueprint, milestone ledger and recovery guide current; one coherent review PR is the delivery target.
 - The graph compiler must not impose arbitrary node/connection/block caps. Resource limits must reflect actual memory, hardware and host safety budgets, with explicit errors and no silent content loss.
 
-
 ## 2026-11-02: Adaptive concurrency and batching
 
 - Concurrency and batching are foundational capabilities, selected automatically according to graph dependencies, workload size, deadlines and available hardware.
@@ -903,7 +913,6 @@ Built (engine pass, 2026-11-10):
 - **Automation:** track volume and pan lanes follow song time and are interpolated in the native callback. Global and module-parameter automation remain future work.
 - **Piano-roll multi-clip behavior:** selected companion clips are visible as read-only references; linked clips that share a source edit together. Editing multiple independent sources as one operation remains a follow-up.
 
-
 ## 2026-11-02: Graph compile and preparation require an explicit working-memory budget
 
 - Graph compilation and prepared execution require a non-zero GraphResourceBudget.maxWorkingBytes; the API does not silently choose an arbitrary fixed node or connection cap.
@@ -915,7 +924,6 @@ Built (engine pass, 2026-11-10):
 ## 2026-11-02 — Effect-chain length is resource-governed, not a fixed product cap
 
 Project layers and synth patches may describe dynamically sized module/effect chains. Parsing and engine preparation must preserve every authored chain element; no silent truncation or arbitrary eight-effect ceiling is allowed. Memory and processing costs are handled by explicit host resource budgets and clear preparation errors. This change does not remove unrelated limits such as the current project layer-slot model or export-buffer capacity; those remain separate integration work.
-
 
 ## 2026-11-06: Native C++ effects in playback (updated 2026-11-09)
 

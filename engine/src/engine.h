@@ -10,6 +10,7 @@
 #include <string>
 #include <vector>
 
+#include "audio_input.h"
 #include "component_chain.h"
 #include "midi_device.h"
 #include "execution.h"
@@ -63,6 +64,8 @@ public:
     Engine& operator=(const Engine&) = delete;
 
     double sampleRate() const { return sr_; }
+    // Audio input (caw.h API 18): monitoring, recording and the latency ping.
+    LiveAudio& liveAudio() noexcept { return *audioIn_; }
     const EngineResourceBudget& resourceBudget() const noexcept { return resourceBudget_; }
     // Layer slots the engine holds: kInitialLayerCapacity at first, growing (never shrinking) when
     // a project needs more. The Builder's audition is the slot after them, so auditionSlot() ==
@@ -219,6 +222,10 @@ public:
 private:
     // First, so it outlives every component chain (built-ins keep a pointer to it).
     std::atomic<int> quality_{1};
+    // The device input (monitoring, recording, the latency ping); audio tracks keep a pointer to it.
+    std::unique_ptr<LiveAudio> audioIn_;
+    std::atomic<bool> monitorWanted_{false};  // some audio track monitors its input (control thread sets it)
+    void wakeMonitors() noexcept;
     struct Slot;
     struct Cmd;
     struct Retired;

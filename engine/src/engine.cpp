@@ -1,5 +1,6 @@
 // Mixer implementation: the audio-thread render loop and the control-thread project diffing that feeds it.
 #include "engine.h"
+#include "audio_clips.h"
 
 #include "presets.h"
 #include "quality.h"
@@ -760,6 +761,24 @@ void Engine::dropExportTable(ExportTable* t) noexcept {
 
 // Audio thread: slot i joins the in-use list (kept ascending, so loops over it run in index order as
 // the full scans did). It leaves in processChunk once nothing is left for a loop to do there.
+// Stopped: an audio track monitoring its input runs as a held preview would, so its input is heard through its chain.
+void Engine::wakeMonitors() noexcept {
+    for (int i = 0; i < slotCount_; ++i) {
+        Slot& s = slotAt(i);
+        if (!s.active || !s.cur || !s.instrument || s.previewing || !s.instrument->monitorsStopped()) continue;
+        if (s.instrumentIdle) {
+            s.instrument->reset();
+            s.instrument->notes()->forget(false);
+            s.instrument->notes()->clearEvents();
+            s.instrumentIdle = false;
+        }
+        s.previewing = true;
+        s.previewQuiet = s.previewTail = 0;
+        previewing_ = true;
+        markLive(i);
+    }
+}
+
 void Engine::markLive(int i) noexcept {
     Slot& s = slotAt(i);
     if (s.listed) return;
@@ -801,6 +820,7 @@ Engine::Engine(double sampleRate, EngineResourceBudget resourceBudget)
     for (int i = 0; i < kScopeSize; ++i) masterScope_[i].store(0);
     midiPending_.reset(new PendingMidi[Midi2InputQueue::kCapacity]);
     loudness_->prepare(sampleRate);
+    audioIn_ = std::make_unique<LiveAudio>(sampleRate);
     masterCorrelation_.prepare(sampleRate);
     registerBuiltinComponents(nativeModules_);  // the Library's stereo tools, ready in every chain
     ctlSr_ = sampleRate;
@@ -1229,6 +1249,7 @@ ModuleLoadResult Engine::reloadNativeComponent(
     std::vector<Rebuilt> rebuilt;
     std::string error;
     const BuildingQuality building(&quality_);
+    const BuildingLiveAudio buildingInput(audioIn_.get());
     auto rebuild = [&](ComponentChain* old, int slot, LayerState* layer, const std::string& layerId) {
         if (!old || !old->uses(expectedId)) return true;
         const std::vector<ComponentSpec> specs = old->currentSpecs();
@@ -1311,7 +1332,15 @@ std::string Engine::setProjectOffline(const ProjectSpec& p) {
 }
 
 std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
+    {
+        bool monitors = false;  // an audio track that monitors its input runs while stopped (wakeMonitors)
+        for (const LayerSpec& l : p.layers)
+            monitors = monitors || (l.instrument.audioTrack && l.instrument.audioTrack->input.present &&
+                                    l.instrument.audioTrack->input.monitor != 0);
+        monitorWanted_.store(monitors, std::memory_order_relaxed);
+    }
     const BuildingQuality building(&quality_);
+    const BuildingLiveAudio buildingInput(audioIn_.get());
     {
         // Sends to buses only, keys from playing layers, and no loops (parseProject checks it too; this covers
         // projects built in code).
@@ -2731,6 +2760,7 @@ bool Engine::setComponentState(const std::string& layerId, uint32_t index, const
     spec.state.assign(data, data + size);
     std::string error;
     const BuildingQuality building(&quality_);
+    const BuildingLiveAudio buildingInput(audioIn_.get());
     auto chain = instrument ? ComponentChain::buildInstrument(nativeModules_, specs.front(), sr_, error)
                             : ComponentChain::build(nativeModules_, specs, sr_, error);
     if (!chain) return false;
@@ -4201,7 +4231,7 @@ void Engine::updatePreviewing(int frames) noexcept {
                 if (silent) v.active = false;
                 else voices = true;
             }
-        if (s.instrument && s.instrument->notes()->holdsPreview()) {
+        if (s.instrument && (s.instrument->notes()->holdsPreview() || s.instrument->monitorsStopped())) {
             if (silent) {
                 s.instrument->notes()->releasePreviews(0);
                 s.instrumentIdle = true;
@@ -4946,6 +4976,7 @@ int Engine::processChunk(float* l, float* r, int maxFrames) noexcept {
     }
     liveCount_ = kept;
     const int m = planChunk(maxFrames);
+    audioIn_->chunk(tapAt_, m, g_, playing_ && !previewChunk_);  // monitoring frames and the recorder's input
     if (previewChunk_)
         // Stopped, a track that isn't previewing exports silence, not the last block it played.
         for (int k = 0; k < liveCount_; ++k) {
@@ -5825,6 +5856,7 @@ void Engine::process(float* left, float* right, int frames) noexcept {
     updateSolo();
     takeDeviceMidi(frames);
     takeToneRequest();
+    if (!playing_ && monitorWanted_.load(std::memory_order_relaxed)) wakeMonitors();
     if (overloadPending_) {
         overloadPending_ = false;
         pickOverloadVictim();

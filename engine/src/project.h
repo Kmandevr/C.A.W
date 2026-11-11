@@ -3,6 +3,7 @@
 
 #include <cstdint>
 #include <map>
+#include <memory>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -12,6 +13,8 @@
 #include "dependency.h"
 
 namespace caw {
+
+struct AudioTrackSpec;  // audio_clips.h
 
 struct ModuleSpec {
     std::string id;
@@ -43,6 +46,8 @@ struct ComponentSpec {
     KeySpec key;
     // Audio for the component's sample slots (org.caw.drums: one per pad), decoded at build (component_samples.h).
     std::vector<SampleRefSpec> samples;
+    // org.caw.audio-track only: the layer's audio clips and input (audio_clips.h), set from "audio_clips"/"input".
+    std::shared_ptr<const AudioTrackSpec> audioTrack;
 };
 
 struct ClipSpec {

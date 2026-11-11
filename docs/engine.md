@@ -13,9 +13,9 @@ The engine in `engine/` as built. The reasons behind it are in [architecture](ar
 
 | Path | What it is |
 | --- | --- |
-| `engine/src/` | The portable core: `compile` (header, lexer, parser, code generation), `vm`, `builtins`, `detmath` (a forward to the public `include/caw/detmath.hpp`), `pattern` (note patterns), `engine` (mixer and voices), `component_chain` and `note_events` (native effects and instruments), `builtin_components` and `builtin_instruments`, `project`, `render` (exports), `render_stems` (song renders: mix and stems), `docs` (generated reference), `wav`, `json`, `capi` |
+| `engine/src/` | The portable core: `compile` (header, lexer, parser, code generation), `vm`, `builtins`, `detmath` (a forward to the public `include/caw/detmath.hpp`), `pattern` (note patterns), `engine` (mixer and voices), `component_chain` and `note_events` (native effects and instruments), `builtin_components` and `builtin_instruments`, `project`, `render` (exports), `render_stems` (song renders: mix and stems), `asset_store`, `time_stretch`, `audio_clips`, `builtin_sampler` and `audio_input` ([audio](#audio-assets-clips-the-sampler-and-audio-input-api-18)), `docs` (generated reference), `wav`, `json`, `capi` |
 | `engine/lib/` | The built-in libraries, written in the module language (`drum`, `synth`, `util`). CMake builds them into the engine |
-| `engine/include/caw.h` | The C API, version 4 |
+| `engine/include/caw.h` | The C API, version 18 |
 | `engine/platform/` | Audio output through miniaudio, and a stand-in for builds without a device |
 | `engine/cli/` | The `caw` tool |
 | `engine/plugin/clap/` | The CLAP wrapper that exports a component library as a `.clap` plug-in, and its test host |
@@ -335,6 +335,7 @@ The app, the CLI and exports share one format:
 - `loop_range` (default false) with `loop_start_steps` and `loop_end_steps` turns the loop range on (see Playback); while it is on, both must be whole steps with the end after the start, and the song lengthens to reach the end. Off, the two are not read.
 - Song positions are refused with a message naming the field, never moved or shortened (F7.2): `loop_bars`, layer `length_steps`, clip `start_steps`/`length_steps`/`source_offset_steps`, automation point steps and the audition length must be whole numbers (points may be fractional) that fit the 32-bit step count, so a song holds whole bars up to 2^31 − 1 steps (`maxLoopBars`/`maxArrangementSteps` in `engine/src/project.h`). Project automation lengthens the loop to reach its last point.
 - Clips are expanded off the audio thread. A layer whose clips would expand past the project-state budget left (an upper bound, checked before expanding) is not installed, with a warning. Building takes about three times the result, so that peak must fit the budget left after the project so far and the layer's own chain.
+- **Audio tracks (API 18):** a layer's `audio_clips` and `input`, and the project's `assets`: see [Audio clips](#audio-clips).
 - Fields the app adds for itself, such as colours, are ignored.
 
 ## Exports
@@ -681,6 +682,79 @@ The deep settings cost a pad that doesn't use them about 6 % (the voice loop's e
   - **Acoustic kick and snare.** **[Fact, Fletcher and Bassett's bass-drum study (JASA; physics.byu.edu abstract) and Rossing, "The acoustics of percussion instruments", Physics Today 45(3), 1992]** a bass drum is two membranes and the air between them, its spectrum changing with where and how hard it is struck; a snare's lowest modes are pairs of the (0,1) and (1,1) membrane modes coupled through the air, and the snare wires buzz against the lower head. **[Fact, mixing guides, gear4music "Kick drum EQ" and soundsheavy "Drum EQ frequencies"]** a kick's weight sits at 50..100 Hz, its boxiness at 200..400 Hz and the beater's click at 2..5 kHz (felt lower than plastic); a snare's body at 150..250 Hz. Here: the Membrane resonator (struck off centre, its position varied per hit), the head's short pitch drop, the Pop click, the boxiness cut at 400 Hz, Snappy wires that follow the head, velocity on brightness and decay, and the room send. **[Assumption]** a stick's contact lasts a few milliseconds (a thesis on snare drums gives 3..6 ms; KTH master's thesis, Wagner 2006): the mallet exciter lasts 0.5..2.5 ms, longer for a soft hit.
   - **Cymbals.** **[Fact, Sound On Sound "Analysing metallic percussion"; Rossing and coauthors on gongs and cymbals (Legge and Fletcher 1989, UNSW)]** cymbal modes are inharmonic; a hard hit spreads energy upward into a near-noise spectrum over the first few hundred milliseconds, the high modes die first and the last energy sits in the few-hundred-hertz modes; hi-hats are clamped, rides pivot and crashes swing freely. Here: FM-paired or square metal plus noise, the Cymbal resonator, decay curves for the fast-then-long fall, and pressure to damp or choke. **[Assumption]** the upward cascade itself (a slow build of high partials) isn't modelled; the noise share stands in for it.
 - **Not found:** a measured beater contact time for bass drums, and published decay times for crash and ride; both are **[Assumption]** values tuned by measurement against the ranges above.
+
+## Audio assets, clips, the sampler and audio input (API 18)
+
+Roadmap 0.2, 3.1–3.5, 4.2–4.3 and 7.2–7.7 on the engine side (WP-J). Code: `asset_store.*`, `time_stretch.*`, `audio_clips.*`, `builtin_sampler.cpp`, `builtin_sampler_sfz.cpp`, `audio_input.*`, `capi_audio.cpp`, `platform/decode_miniaudio.c` and the duplex device in `platform/audio_miniaudio.cpp`. Tests: `engine/tests/audio_assets_test.cpp` (and `audio_rt_test.cpp`: none of it allocates on the audio thread).
+
+### Audio assets
+
+- **Decoding:** WAV (PCM 8–32-bit, float, extensible), FLAC and MP3 through miniaudio 0.11.25's bundled dr_wav, dr_flac and dr_mp3 ([decisions](decisions.md#2026-11-11-audio-assets-clips-sampler-and-input-wp-j-choices-to-confirm)), compiled a second time inside the core with every function `static`, so it never meets the device copy. Files are untrusted: at most 1 GB on disk and 3 hours long, every read bounds-checked by the decoders, samples clamped to ±8 and non-finite ones made 0; a file that fails gives an error, never a crash (a fuzz test feeds random bytes behind a RIFF header).
+- **Resampling:** once, at load, to the engine's rate: a Kaiser-windowed sinc (β 9, 32 zero crossings at the lower rate, cutoff 0.96 of its Nyquist), deterministic maths (`detSin`). More than two channels keep the first two; mono stays mono (heard in both sides).
+- **The store** (`AssetStore::global()`, one per process): an asset is keyed by path and engine rate and reloaded when the file's size or time changes; clips and zones naming the same file share one copy (refcounted). The budget (1 GiB by default, `caw_asset_store_set_budget`) counts decoded bytes; when a load needs room the least recently used asset nothing plays is dropped, and a load that still doesn't fit is refused with a message. Decoding happens on whatever thread asks (the app's worker isolate for `caw_asset_load`, or the control thread during a project update): preload long files with `caw_asset_load` so the update finds them cached.
+- **Peaks:** min/max per 256 frames per channel, then levels of 512, 1,024, … frames; `caw_asset_peaks` answers any range and bucket count from the coarsest level no wider than a bucket (or from the samples when zoomed further in).
+
+### Audio clips
+
+A layer with `"audio_clips"` (and/or `"input"`) is an audio track: the engine plays it with the built-in instrument `org.caw.audio-track` (internal: `caw_engine_components` never lists it; it can't also name an `instrument`; a folder can't have clips), so a clip goes through the track's inserts, volume, pan, sends, folder buses, sidechain keys and latency compensation like any instrument, live and in every render (song renders, stems, exports).
+
+```json
+"assets": [ { "id": "a1", "path": "/abs/loop.wav", "bpm": 120 } ],
+"layers": [ { "id": "t1", "name": "Vox", "volume": 0.8,
+  "input": { "channel": 0, "channels": 1, "monitor": "auto", "armed": true },
+  "audio_clips": [ { "id": "c1", "asset": "a1", "start_steps": 16, "length_steps": 32, "offset_seconds": 0.25,
+    "gain": 1, "fade_in_seconds": 0.01, "fade_in_curve": "linear", "fade_out_seconds": 0.5, "fade_out_curve": "equal_power",
+    "reverse": false, "loop": false, "loop_start_seconds": 0, "loop_end_seconds": 0, "pitch": 0,
+    "mode": "fixed", "stretch": "wsola", "source_bpm": 120, "mute": false } ] } ]
+```
+
+- `"assets"` (project level, optional) names files once: `id`, absolute `path`, optional `bpm` (the source tempo musical clips default to). A clip names `"asset"` or a `"path"` directly. An unknown asset id refuses the project; a file that fails to load leaves its clip silent (the rest plays).
+- **Placement:** `start_steps` and `length_steps` are sixteenths and may be fractional (a recorded take lands off the grid); the sample is `floor(steps × samples per step + 0.5)`, as notes. The song lengthens to reach the last clip's end. At most 4,096 clips a track and 16 sounding at once (more overlapping are skipped).
+- **Source:** `offset_seconds` into the file at its own speed; `reverse` reads the file backwards (offset and loop points then count from its end); `loop` repeats `[loop_start_seconds, loop_end_seconds)` (0 end: the file's end) to fill the clip; past the file's end without a loop is silence.
+- **Level:** `gain` linear 0..3.98 (+12 dB); fades in seconds of output with curves `linear`, `equal_power` (sine), `s_curve` (raised cosine), `fast` (1 − (1 − u)²), `slow` (u²).
+- **Speed and pitch:** `mode` `"fixed"` plays at the file's speed (a tempo change moves where it starts, never how fast it plays; the app sets `length_steps` from the file's length at the current tempo); `"musical"` follows the tempo: the source moves `bpm / source_bpm` times real time, so it stays locked to the bars (needs `source_bpm` or the asset's `bpm`). `stretch` `"wsola"` keeps pitch at any speed and `pitch` (semitones −48..48) transposes without changing length; `"varispeed"` resamples, so pitch moves with speed (a musical varispeed clip at another tempo is transposed by it; in a fixed clip `pitch` changes the speed too, and the app should change its length). A clip at its file's speed with pitch 0 copies samples exactly.
+- **The readers** (`time_stretch.*`): exact copies; cubic Hermite (Catmull-Rom) for varispeed, with no anti-alias filter when reading faster than real time; WSOLA (Verhelst and Roelands 1993, as reviewed by Driedger and Müller 2016): 30 ms periodic-Hann frames at 50% overlap whose analysis positions follow the arrangement, each moved by up to half a hop to best continue the last (cross-correlation of the mono sum, every 4th lag on every 4th sample, then refined to the sample), then a Hermite pitch stage. Direct and varispeed reading hold no state, so playback from anywhere sounds as passing through; a WSOLA voice starts afresh at a seek or a loop wrap (deterministic from that point). Everything is the same at every block size (tested at 37, 64 and 512).
+- **Edits** from roadmap 3.4 (trim, split, move, duplicate, offset, loop, fade, gain, reverse) are these fields: the original file is never changed (3.5). Selection, snapping, grouping and undo are the app's.
+
+### Sampler (`org.caw.sampler`)
+
+An instrument (one note input, stereo out) that plays zones over the asset store. Its state (`"state"` base64 in the instrument entry, `caw_engine_set_component_state` while it plays, version 1) is JSON `{"zones": [zone, ...]}` (at most 4,096 zones, 4 MB). A project update with a changed state reloads the zones of a kept sampler; voices of the old zones stop.
+
+Zone keys mirror SFZ opcodes; positions are frames of the sample file at its own rate:
+
+| Key | Meaning (default) |
+|---|---|
+| `path` | the sample file (required) |
+| `lokey`, `hikey`, `pitch_keycenter` | key range 0..127 (0, 127) and root (60) |
+| `lovel`, `hivel` | velocity range 1..127 |
+| `tune`, `transpose`, `pitch_keytrack` | cents, semitones, cents per key (100) |
+| `volume`, `pan`, `amp_veltrack` | dB, −100..100 (balance), velocity sensitivity in % (100) |
+| `offset`, `end` | first and last frame played (end 0: the file's end) |
+| `loop_mode` | `no_loop`, `one_shot` (note-off ignored), `loop_continuous`, `loop_sustain` (loops while held, then plays on); loop points without a mode loop continuously |
+| `loop_start`, `loop_end`, `loop_crossfade` | the loop's first and last frame; crossfade seconds (equal power, into the audio before the loop start) |
+| `seq_length`, `seq_position` | round robins: a zone plays on hit `seq_position` of every `seq_length` matching ones (each zone counts its own hits) |
+| `lorand`, `hirand` | random round robin: plays when a per-note random 0..1 (seeded, deterministic) falls in [lorand, hirand) |
+| `group`, `off_by` | choke: a zone of group g cuts voices whose zone has off_by g (5 ms) |
+| `ampeg_attack`, `ampeg_decay`, `ampeg_sustain` (%), `ampeg_release` | this zone's envelope instead of the instrument's |
+
+Parameters: `gain` (dB −60..12), `attack`, `decay`, `sustain` (0..1), `release`, `velocity` (sensitivity 0..1), `tune` (cents ±100), `transpose` (±48), `filter` (Off, Low-pass, High-pass, Band-pass: the Library's SVF per voice), `cutoff` (20..20,000 Hz), `resonance` (Q 0.5..20), `filter_env` (octaves ±8), `filter_key` (key tracking 0..1), `filter_attack`/`decay`/`sustain`/`release`, `polyphony` (1..64; the oldest voice is stolen). A note that matches several zones layers them. Samples are read with cubic Hermite interpolation.
+
+### SFZ support
+
+`caw_sfz_import` reads a `.sfz` (at most 4 MB) into the state above: `<control>` (`default_path`), `<global>`, `<master>`, `<group>`, `<region>` with inheritance, `//` and `/* */` comments, `#define $NAME`, note names (`c4` = 60, `#` and `b`), sample paths with spaces and backslashes, relative to the file's folder. Opcodes read: `sample`, `key`, `lokey`, `hikey`, `pitch_keycenter`, `lovel`, `hivel`, `tune`, `transpose`, `volume`, `pan`, `pitch_keytrack`, `amp_veltrack`, `offset`, `end`, `loop_mode`/`loopmode`, `loop_start`/`loopstart`, `loop_end`/`loopend`, `loop_crossfade`, `seq_length`, `seq_position`, `lorand`, `hirand`, `group`, `off_by`, `ampeg_attack`, `ampeg_decay`, `ampeg_sustain`, `ampeg_release`, `trigger=attack`. Left out, each with a warning: regions with another `trigger` (release, first, legato), `#include`, `<curve>`/`<effect>`/`<midi>`/`<sample>` sections and every other opcode (named with its count: filters, LFOs, per-region EGs beyond ampeg, CC modulation, crossfades by key or velocity). Missing samples are warned about too. `caw_sfz_export` writes the same opcodes back (paths relative to the `.sfz` where inside its folder; `copy_samples` copies the files, unchanged, into `samples/`); export then import gives the same state (tested).
+
+### Audio input and recording
+
+- **The device:** `caw_audio_configure_input` makes the device duplex (miniaudio `ma_device_type_duplex`: capture and playback in one callback, any capture device the backend lists, 1..32 channels, shared mode). If the input won't open (no permission, no microphone) the output opens alone and `caw_audio_status`'s `"input"` says why. **Android needs the RECORD_AUDIO permission first** (the app asks; no Kotlin change was made). AAudio opens the default input, which Android routes.
+- **A track's `"input"`:** `channel` (first device channel, from 0), `channels` 1 (heard in both sides) or 2, `monitor` `off`, `on` (always) or `auto` (while armed and stopped, or armed while recording), `armed`. Monitoring plays the input through the track's whole chain in the same callback it arrived in (no buffer added beyond the device's own); while stopped a monitoring track keeps running as a held preview does. Input meters: `caw_engine_input_peaks`.
+- **Recording** (`caw_record_start` with the armed tracks): each chunk the transport plays, the audio thread copies the input into a lock-free ring (2 s of the channels used) with its song position, and a writer thread writes each track's take as WAV (32-bit float, or 24-bit PCM), `<layer>-take<n>.wav.part`, renamed to `.wav` when the take ends, with a `.wav.json` sidecar (layer, take, start). A full ring drops frames (counted in `dropped_frames`) and the writer fills them with silence, so a take never slips; a failed write (full storage) ends that take with an error and keeps what was written.
+- **Takes:** a take ends where the song position jumps (a loop wrap) and the next starts there, so loop recording gives a take per pass, all placed at the same start (take lanes and comping are the app's); `punch_in_steps`/`punch_out_steps` record only that range, sample-accurately.
+- **Latency:** recorded frame n is placed at the song frame heard n frames of round-trip latency earlier (the writer keeps the chunk positions), so a take lands where it was played; `start_frame`/`start_steps` may be before 0 (trim that much). The latency is an override (`caw_engine_set_input_latency`), else the last good ping, else the device's estimate (both sides' buffers; **[Assumption]** close but not exact, so the ping is the reliable value). The ping (`caw_latency_ping_start`) plays a 4,096-sample noise burst at −12 dBFS after the limiter and cross-correlates it with a second of input; the peak's lag is the round trip, accepted when it stands 8 times above the mean (tested with a simulated 733-frame loopback).
+- **Recovery:** after a crash, `caw_record_recover(dir)` fixes each `.wav.part`'s RIFF sizes to the whole frames written (the header is also brought up to date about every second while recording), renames it and lists it with its sidecar's placement and `"recovered": true`.
+
+### Performance
+
+[Fact, this container's 2.3 GHz Xeon, Release, 2026-11-11, 256-frame callbacks at 48 kHz, one core]: a clip at its file's speed costs about 0.09% of a core, varispeed 0.13%, WSOLA 0.27% (0.32% with pitch); a sampler voice with its filter on 0.15%. A phone core is slower ([performance](performance.md)); WSOLA's search is the part to watch.
 
 ## The `caw` CLI
 
