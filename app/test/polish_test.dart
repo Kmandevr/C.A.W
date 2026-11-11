@@ -125,7 +125,7 @@ void main() {
       c.show(Section.build);
       await tester.pumpAndSettle();
       expect(c.buildTabs, isEmpty);
-      expect(find.text('Write C++ instruments, effects and patterns, then hear them on your tracks.'), findsOneWidget);
+      expect(find.text('The C++ workspace: write instruments and effects in code, then hear them on your tracks. Patterns and other text files open here too.'), findsOneWidget);
       expect(find.byKey(const ValueKey('more-tools')), findsNothing);
       await tester.tap(find.byKey(const ValueKey('project-menu')).first);
       await tester.pumpAndSettle();

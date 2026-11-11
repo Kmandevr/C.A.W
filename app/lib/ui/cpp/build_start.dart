@@ -168,7 +168,7 @@ class BuildStartView extends StatelessWidget {
         ),
         Padding(
           padding: EdgeInsets.fromLTRB(pad, 4, pad, 12),
-          child: const Text('Write C++ instruments, effects and patterns, then hear them on your tracks.',
+          child: const Text('The C++ workspace: write instruments and effects in code, then hear them on your tracks. Patterns and other text files open here too.',
               key: ValueKey('build tagline'), style: TextStyle(fontSize: 13.5, color: Neon.dim, height: 1.35)),
         ),
         Padding(

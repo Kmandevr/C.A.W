@@ -2,7 +2,7 @@
 title: Performance
 summary: How C.A.W is measured for low-end devices, the audit's ranked bottlenecks with evidence, fixes with before/after numbers, and what remains.
 covers: [engine/bench/, app/lib/model/poller.dart, app/lib/model/settings.dart, app/lib/ui/motion.dart, app/test/poller_test.dart, app/test/rebuild_test.dart, app/test/perf_*]
-updated: 2026-11-10
+updated: 2026-11-11
 ---
 
 # Performance
@@ -107,7 +107,7 @@ Timed release run after the fixes (same server, a single run, so noisy):
 ### Hardware limits used by the scheduler
 
 - **[Fact]** The native profile is a startup snapshot, not a polling loop. It uses active/online logical CPUs, process affinity where exposed, and Linux/Android cgroup CPU quota where readable. The effective core count is the tightest available limit.
-- **[Fact]** Windows budgets from available physical memory. Linux/Android take the tighter of system-available memory and a finite cgroup limit minus current usage; an exhausted finite cgroup limit produces the minimum 1 MiB budget instead of being mistaken for an unavailable signal. Positive measurements are quartered, capped at 8192 MiB, and no longer rounded up to a 16 MiB floor. macOS/iOS still use half of total physical memory as a fallback, not a live available-memory reading. A zero profile field means unknown; the policy uses a one-worker fallback.
+- **[Fact]** Windows budgets from available physical memory. Linux/Android take the tighter of system-available memory (`MemAvailable` in `/proc/meminfo`, not free pages: Android keeps those low, and First loop, which charges 16–32 MiB of project state, was refused on a phone, 2026-11-11) and a finite cgroup limit minus current usage; an exhausted finite cgroup limit produces the minimum 1 MiB budget instead of being mistaken for an unavailable signal. Positive measurements are quartered, capped at 8192 MiB, and no longer rounded up to a 16 MiB floor. macOS/iOS still use half of total physical memory as a fallback, not a live available-memory reading. A zero profile field means unknown; the policy uses a one-worker fallback.
 - **[Fact]** The Android host reports thermal status (Android 10+) and battery-saver changes through event-driven platform channels. Foreground/background and audio-playing transitions also refresh the active worker budget. Unsupported platforms retain an explicit `Unknown` pressure state; background/offline work reserves one core where possible and GPU work is disabled.
 - **[Assumption, F7.1, 2026-11-04]** With the app's lane, point and pattern caps gone, editing cost grows with content size; very large patterns or lanes are not yet measured on a phone. Since F7.2 the Arranger's ruler and grid paint only the visible span, so a long song costs no more per frame than a short one; callgrind playback was unchanged by F7.2 (1 layer +0.04%, effects and graph within noise).
 - **Verification boundary:** policy unit tests cover unknown pressure, runtime foreground/audio changes, explicit CPU/memory caps and thermal/battery levels. CI verifies Android compilation and Dart mapping; actual thermal response, battery behavior and scheduling impact still require representative physical-device tests. The actual host probe remains platform-dependent and must be validated on representative Android and desktop devices.

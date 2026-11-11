@@ -353,7 +353,7 @@ void main() {
 
     testWidgets('the start page says what Build is for and starts an instrument, an effect or a pattern', (tester) async {
       final sections = await pump(tester);
-      expect(find.text('Write C++ instruments, effects and patterns, then hear them on your tracks.'), findsOneWidget);
+      expect(find.text('The C++ workspace: write instruments and effects in code, then hear them on your tracks. Patterns and other text files open here too.'), findsOneWidget);
       for (final id in ['new instrument', 'new effect', 'new pattern']) {
         expect(find.byKey(ValueKey(id)), findsOneWidget);
       }
