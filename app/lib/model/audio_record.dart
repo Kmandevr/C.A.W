@@ -355,7 +355,7 @@ class AudioRecorder extends ChangeNotifier {
   /// Takes a crash left unfinished in the project's recordings folder, fixed up by the engine; empty when none.
   Future<List<RecordedAudioTake>> recover() async {
     final dir = state.recordingsDirectory;
-    if (!await dir.exists()) return const [];
+    if (!dir.existsSync()) return const [];
     final r = await io.recover(dir.path);
     final known = {for (final a in state.project.assets) a.path};
     return [for (final t in r.takes) if (!known.contains(t.path)) t];

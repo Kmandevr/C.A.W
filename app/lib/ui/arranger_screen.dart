@@ -501,9 +501,18 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
     if (v == null || !mounted) return;
     if (v == 'fx') _openTrack(layer, tab: FocusTab.fx);
     if (v == 'arm') midi?.toggleRecord(layer.id);
-    if (v == 'audio-arm' && mounted) await toggleAudioArm(context, s, layer);
-    if (v == 'audio-input' && mounted) await showAudioInputSheet(context, s, layer);
-    if (v == 'audio-import' && mounted) await importAudioFiles(context, s, layer: layer);
+    if (v == 'audio-arm') {
+      await toggleAudioArm(context, s, layer);
+      return;
+    }
+    if (v == 'audio-input') {
+      await showAudioInputSheet(context, s, layer);
+      return;
+    }
+    if (v == 'audio-import') {
+      await importAudioFiles(context, s, layer: layer);
+      return;
+    }
     if (v == 'audio-track') s.addAudioTrack(after: layer);
     if (v == 'instrument') {
       await pickInstrument(context, s, layer);
