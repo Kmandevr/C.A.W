@@ -18,6 +18,23 @@ Carries out the owner's decision of 2026-11-10 ("C++ replaces the .caw language"
 - **Bug fixed on the way:** a track's instrument installed while nothing sounds counted as still ringing at the first Play, which mixed in 5 ms of a phantom tail (a free-running source started at twice its level); a new instrument now starts idle.
 - **Open, for the owner:** an instrument track keeps running after a Stop until its output is quiet (or 30 s), and a never-quiet effect there now ends at that cap without the 20 ms fade buses get; a bus whose capped tail has faded comes back while a child track still rings out. The app still sends `voices`, `swap`, `seam_crossfade` and the key (Settings' light-mode voice cap and swap timing now change nothing): removing those settings is UI work.
 
+## 2026-11-11: Desktop plays to desktop strengths (owner)
+
+**Decision (owner, 2026-11-11, after a desktop review with screenshots at 1366×768 and 1920×1080).** Phones stay exactly as they are; on desktop:
+- **Ctrl+S saves everywhere.** Moving a track up or down becomes Alt+Up and Alt+Down. WASD stays for everything else.
+- **A left-drag on empty space selects, at once.** In Arrange it draws a time selection; in the piano roll it draws a selection box. A middle-drag or Space+drag pans.
+- **A click selects at once.** A double-click on a clip opens its notes, and a right-click opens the menu. On phones, a double tap still opens the menu.
+- **Desktop look changes:**
+  - a command palette (Ctrl+Shift+P);
+  - the project menu as a dropdown that shows shortcut keys;
+  - compact right-click menus (keys shown, never off screen);
+  - device editors as non-modal, resizable floating windows (several open at once, sizes remembered);
+  - the mixer as a dockable panel (Ctrl+M) with wider strips;
+  - Settings and the theme editor at a readable width;
+  - the full-screen piano roll fitting the pattern, with a title bar and close;
+  - a bottom dock area, so the focus panel doesn't squeeze the lanes.
+- **Behaviour fixes that need no look change:** a mouse drags at once, right-click does whatever a long press does, the wheel turns knobs, Esc closes pages, and Windows remembers its window and accepts files dropped from Explorer.
+
 ## 2026-11-11: MIDI clip loops, clip automation and project packaging (owner)
 
 **Decision (owner, 2026-11-11, answers to Claude's questions):**
