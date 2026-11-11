@@ -406,7 +406,7 @@ class LiveMidi extends ChangeNotifier {
     taken.add(TakenNote(start - early, math.max(0.25, end - start), pitch, vel, pass));
   }
 
-  // ---- Devices (caw.h API 14: the engine places each message at the frame it was played) ----
+  // ---- Devices (caw.h API 15: the engine places each message at the frame it was played) ----
 
   /// The track each held device key (channel << 7 | key) sounds on: its off, pressure and pedal go there even if
   /// the target changed since.

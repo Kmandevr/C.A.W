@@ -114,6 +114,11 @@ public:
     // id: the master's; its instrument has index kInstrumentIndex), as each component's save_state writes it now; store it in the project so a
     // reload or an export starts from it. {"ok":false,...} if the layer has no chain.
     std::string componentStatesJson(const std::string& layerId);
+    // Gives a playing native component a new saved state (API version 14): the convolver's WAV impulse, a preset's
+    // state. The component's chain is rebuilt here, on the control thread, with every component's current values
+    // and state and this one's replaced, then crossfaded in as a project update would. False (nothing changes) when
+    // there is no such component or it refuses the state.
+    bool setComponentState(const std::string& layerId, uint32_t index, const uint8_t* data, size_t size, uint32_t version);
     // Live display data (#173): the latest block a playing component published (ModuleProcessor::readDisplay),
     // at most `max` floats into out; the count, 0 when it has none (or the control thread is busy: it never
     // waits), -1 when there is no such component. Any thread but the audio thread.
@@ -132,7 +137,7 @@ public:
     void notePitch(int32_t id, double pitch);  // glides a held preview to [pitch] without a new attack
     void noteOff(int32_t id);
     void notesOff();
-    // MIDI from devices (caw.h, API 14): messages for [layerId]'s instrument, queued for the audio thread, which
+    // MIDI from devices (caw.h, API 15): messages for [layerId]'s instrument, queued for the audio thread, which
     // plays each at its frame from its time on the MIDI clock (midiClockNs; 0 means now). UMP words (MIDI 1.0
     // Channel Voice ones upscaled to MIDI 2.0) or MIDI 1.0 bytes. Returns the messages queued; a full queue drops
     // the rest (counted in midiDropped). Any thread but the audio thread.
@@ -459,7 +464,7 @@ private:
     std::map<std::string, ModuleState> modules_;
     std::map<std::string, LayerState> layers_;
     std::map<int32_t, int> previewSlots_;  // control thread: each held preview's slot, for its pitch and off
-    // Device MIDI (API 14): producers push under midiPush_ (never the audio thread); the audio thread pops into
+    // Device MIDI (API 15): producers push under midiPush_ (never the audio thread); the audio thread pops into
     // midiPending_ (made with the Engine) and places each message at its frame.
     struct PendingMidi {
         Midi2Event e;

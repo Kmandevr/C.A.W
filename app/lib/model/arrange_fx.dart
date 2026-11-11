@@ -1,5 +1,7 @@
 // Arrange's track edits on AppState: a track's FX stack (instrument, .caw chain, native effects), drops onto a track
 // or below the last one, clips moved between tracks, trust.
+import 'dart:convert';
+
 import 'package:flutter/foundation.dart';
 
 import '../engine/component_info.dart';
@@ -163,6 +165,27 @@ extension ArrangeFx on AppState {
   }
 
   void commitNativeParams(LayerDoc layer) => editLayer(layer, (_) {});
+
+  /// Gives native effect [index] of [layer] a new saved state, [bytes] at [version] (the convolver's WAV impulse):
+  /// the engine rebuilds the effect's chain off the UI thread, and once it took the state the project keeps it
+  /// (base64), so a reload starts from it. False, and nothing kept, when there is no engine or no such effect, the
+  /// effect moved meanwhile, or it refused the state (a bad file). An undo takes the project's copy back but the
+  /// playing effect keeps the state until the project reloads.
+  Future<bool> loadNativeEffectState(LayerDoc layer, int index, Uint8List bytes, {int version = 1}) async {
+    final e = engine;
+    final engineIndex = engineComponentIndex(layer, index);
+    if (e == null || engineIndex == null) return false;
+    final id = layer.components[index].id;
+    if (!await e.setComponentState(layer.id, engineIndex, bytes, version)) return false;
+    if (index >= layer.components.length || layer.components[index].id != id) return false;
+    endUndoStep();
+    editLayer(layer, (l) {
+      l.components[index].state = base64Encode(bytes);
+      l.components[index].stateVersion = version;
+    });
+    endUndoStep();
+    return true;
+  }
 
   /// The C++ instruments a track can play: the engine's built-ins and the project's loaded (trusted) ones.
   List<NativeComponentInfo> get nativeInstruments =>

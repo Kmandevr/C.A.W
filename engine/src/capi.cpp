@@ -184,6 +184,14 @@ char* caw_engine_component_states(CawEngine* e, const char* layer_id) try {
     return nullptr;
 }
 
+int32_t caw_engine_set_component_state(CawEngine* e, const char* layer_id, uint32_t index, const uint8_t* data,
+                                       int32_t size, uint32_t version) try {
+    if (!e || !e->engine || size < 0 || (size > 0 && !data)) return 0;
+    return e->engine->setComponentState(layer_id ? layer_id : "", index, data, static_cast<size_t>(size), version) ? 1 : 0;
+} catch (...) {
+    return 0;
+}
+
 void caw_engine_set_global(CawEngine* e, const char* name, double value) {
     if (e && name) e->engine->setGlobal(name, value);
 }
@@ -469,7 +477,7 @@ extern "C" void caw_engine_set_quality(CawEngine* e, int32_t quality) {
 
 extern "C" int32_t caw_engine_quality(CawEngine* e) { return e && e->engine ? e->engine->quality() : CAW_QUALITY_NORMAL; }
 
-// ---- Device MIDI (API 14) ----
+// ---- Device MIDI (API 15) ----
 
 extern "C" int64_t caw_midi_clock_ns(void) { return caw::Engine::midiClockNs(); }
 

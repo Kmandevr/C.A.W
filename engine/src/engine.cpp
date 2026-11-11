@@ -137,7 +137,7 @@ struct Engine::Slot {
     bool seam = false;          // the shadow lane finishes the previous pass this chunk
     bool fade = false;          // the replaced chain plays on in the fade lane this chunk
     bool previewing = false;    // audio thread: the chain holds a preview voice, or its sound is still dying away
-    DeviceNotes deviceNotes;    // audio thread: the device MIDI channels' bend and pedal (API 14)
+    DeviceNotes deviceNotes;    // audio thread: the device MIDI channels' bend and pedal (API 15)
     int64_t previewQuiet = 0;   // samples the track's output has been below kPreviewQuiet
     int64_t previewTail = 0;    // samples since its last preview voice ended
     int64_t previewN = 0;       // stopped: the sample in the layer's loop that preview chunks run from
@@ -2673,6 +2673,47 @@ std::string Engine::componentStatesJson(const std::string& layerId) {
     return j + "]}";
 }
 
+bool Engine::setComponentState(const std::string& layerId, uint32_t index, const uint8_t* data, size_t size,
+                               uint32_t version) {
+    if (size > 0 && !data) return false;
+    std::lock_guard<std::mutex> lock(ctl_);
+    drainRetired();
+    const bool instrument = index == kInstrumentIndex;
+    uint32_t at = index;
+    ComponentChain* old = ctlComponentChain(layerId, at);
+    if (!old) return false;
+    LayerState* ls = nullptr;
+    if (!layerId.empty()) {
+        auto it = layers_.find(layerId);
+        if (it == layers_.end() || it->second.slot < 0) return false;
+        ls = &it->second;
+    }
+    std::vector<ComponentSpec> specs = old->currentSpecs();
+    if (at >= specs.size()) return false;
+    ComponentSpec& spec = specs[at];
+    spec.lenient = false;  // this one must take the new state; the others keep theirs as a rebuild does
+    spec.hasState = true;
+    spec.stateVersion = version;
+    spec.state.assign(data, data + size);
+    std::string error;
+    const BuildingQuality building(&quality_);
+    auto chain = instrument ? ComponentChain::buildInstrument(nativeModules_, specs.front(), sr_, error)
+                            : ComponentChain::build(nativeModules_, specs, sr_, error);
+    if (!chain) return false;
+    delete chain->swapAutomation(chain->automationFor(ctlAutomation_, layerId).release());
+    Cmd c;
+    c.type = !ls ? Cmd::SetMasterChain : instrument ? Cmd::SetInstrument : Cmd::SetInserts;
+    c.slot = ls ? ls->slot : -1;
+    ComponentChain* sent = chain.release();
+    c.masterChain = sent;
+    if (!send(c)) return false;  // send() freed it; the old chain plays on
+    if (ls) (instrument ? ls->instrument : ls->inserts) = sent;
+    else ctlMasterChain_ = sent;
+    std::map<std::string, std::vector<std::string>> warnings;
+    updateCompensation(warnings);
+    return true;
+}
+
 int32_t Engine::componentDisplay(const std::string& layerId, uint32_t index, float* out, uint32_t max) {
     // Never waits: a UI polls this every frame, and a project update can hold ctl_ for a while (it then shows
     // its last picture). The chains themselves are read without locks (DisplayBuffer).
@@ -2751,7 +2792,7 @@ void Engine::notesOff() {
     if (send(c)) previewSlots_.clear();
 }
 
-// ---- Device MIDI (API 14) ----
+// ---- Device MIDI (API 15) ----
 
 int64_t Engine::midiClockNs() noexcept {
     return std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now().time_since_epoch())

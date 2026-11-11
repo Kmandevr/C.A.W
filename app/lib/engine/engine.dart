@@ -646,6 +646,27 @@ class Engine {
     };
   }
 
+  /// Gives a playing component a new saved state ([bytes] as its save_state writes them, at [version]; the
+  /// convolver also takes a WAV file's bytes: its impulse). The engine rebuilds the chain off the UI isolate, in order
+  /// with loads and unloads. False when there is no such component or it refused the state.
+  Future<bool> setComponentState(String? layerId, int index, Uint8List bytes, int version) {
+    if (_disposed) return Future.error(StateError('engine is disposed'));
+    _pendingNativeOps++;
+    final done = Completer<bool>();
+    final engineAddress = _handle.address;
+    _queue = _queue.then((_) async {
+      try {
+        done.complete(await _setComponentStateOffThread(engineAddress, layerId ?? '', index, bytes, version));
+      } catch (error, stack) {
+        done.completeError(error, stack);
+      } finally {
+        _pendingNativeOps--;
+        if (_destroyRequested && _pendingNativeOps == 0) _destroyNative();
+      }
+    });
+    return done.future;
+  }
+
   /// The most floats a component's display block holds (kMaxDisplayFloats in engine/include/caw/display.hpp).
   static const int maxDisplayFloats = 1024;
 
@@ -696,7 +717,7 @@ class Engine {
   void noteOff(int id) => _b.noteOff(_handle, id);
   void notesOff() => _b.notesOff(_handle);
 
-  /// MIDI from a device (caw.h, API 14): MIDI 1.0 [bytes] for [layerId]'s instrument, played at [timeNs] on
+  /// MIDI from a device (caw.h, API 15): MIDI 1.0 [bytes] for [layerId]'s instrument, played at [timeNs] on
   /// [midiClockNs] (0: now), so the engine places each message at the frame it was played. Returns the messages
   /// queued.
   int midiBytes(String layerId, List<int> bytes, int timeNs) {
@@ -988,6 +1009,20 @@ Future<bool> _unloadComponentOffThread(int engineAddress, String componentId) =>
         return bindings.unloadComponent(engine, id) == 1;
       } finally {
         calloc.free(id);
+      }
+    });
+
+Future<bool> _setComponentStateOffThread(int engineAddress, String layerId, int index, Uint8List bytes, int version) =>
+    Isolate.run(() {
+      final bindings = Bindings.instance;
+      final layer = layerId.toNativeUtf8();
+      final data = calloc<Uint8>(bytes.isEmpty ? 1 : bytes.length);
+      try {
+        data.asTypedList(bytes.length).setAll(0, bytes);
+        return bindings.setComponentState(Pointer<Void>.fromAddress(engineAddress), layer, index, data, bytes.length, version) == 1;
+      } finally {
+        calloc.free(layer);
+        calloc.free(data);
       }
     });
 

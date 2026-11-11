@@ -498,7 +498,7 @@ class AppState extends ChangeNotifier {
   int deviceNotesHeld = 0;
 
   /// MIDI from a device for [layerId]'s instrument, placed by the engine at the frame it was played ([timeNs] on the
-  /// MIDI clock; caw.h API 14). MIDI 1.0 [bytes], or UMP [words]. Tests override it to watch.
+  /// MIDI clock; caw.h API 15). MIDI 1.0 [bytes], or UMP [words]. Tests override it to watch.
   void deviceMidi(String layerId, {List<int>? bytes, List<int>? words, int timeNs = 0}) {
     final e = engine;
     if (e == null) return;

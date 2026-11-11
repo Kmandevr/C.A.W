@@ -109,7 +109,7 @@ void main() {
     engine.dispose();
   }, skip: skip);
 
-  test('device MIDI (API 14): bytes and UMP words reach a track, an unknown track takes none, nothing drops', () async {
+  test('device MIDI (API 15): bytes and UMP words reach a track, an unknown track takes none, nothing drops', () async {
     final e = Engine.create();
     final p = ProjectDoc(id: 'p', name: 'T', layers: [LayerDoc(id: 'l', name: 'Keys', color: 0)])
       ..layers.first.instrument = ComponentUseDoc('org.caw.synth.flagship', {});

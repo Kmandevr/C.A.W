@@ -165,7 +165,7 @@ ${_lsrcs}nullptr};
 
 add_library(caw_core STATIC
   src/builtins.cpp src/compile.cpp src/docs.cpp src/pattern.cpp
-  src/engine.cpp src/component_chain.cpp src/builtin_components.cpp src/builtin_instruments.cpp src/builtin_drums.cpp src/builtin_drums_params.cpp src/builtin_drums_sounds.cpp src/component_samples.cpp src/builtin_flagship.cpp src/presets.cpp src/builtin_effects.cpp src/builtin_effects_eq.cpp src/builtin_effects_dynamics.cpp src/builtin_effects_space.cpp src/builtin_effects_saturator.cpp src/builtin_effects_kit.cpp src/builtin_ducker.cpp src/builtin_fx_creative.cpp src/builtin_fx_creative_tapestop.cpp src/builtin_fx_creative_reverser.cpp src/builtin_fx_creative_trancegate.cpp src/builtin_fx_creative_stutter.cpp src/builtin_fx_creative_bitcrush.cpp src/builtin_fx_creative_pitchshift.cpp src/builtin_fx_creative_freqshift.cpp src/builtin_fx_creative_ringmod.cpp src/builtin_fx_creative_presets.cpp src/execution.cpp src/module.cpp src/module_registry.cpp src/midi2.cpp src/midi_device.cpp src/params.cpp src/graph.cpp src/scheduler.cpp src/dependency.cpp src/hardware.cpp src/json.cpp src/midifile.cpp src/project.cpp
+  src/engine.cpp src/component_chain.cpp src/builtin_components.cpp src/builtin_instruments.cpp src/builtin_drums.cpp src/builtin_drums_params.cpp src/builtin_drums_sounds.cpp src/component_samples.cpp src/builtin_flagship.cpp src/presets.cpp src/builtin_effects.cpp src/builtin_effects_eq.cpp src/builtin_effects_dynamics.cpp src/builtin_effects_space.cpp src/builtin_effects_saturator.cpp src/builtin_effects_kit.cpp src/builtin_ducker.cpp src/builtin_fx_creative.cpp src/builtin_fx_creative_tapestop.cpp src/builtin_fx_creative_reverser.cpp src/builtin_fx_creative_trancegate.cpp src/builtin_fx_creative_stutter.cpp src/builtin_fx_creative_bitcrush.cpp src/builtin_fx_creative_pitchshift.cpp src/builtin_fx_creative_freqshift.cpp src/builtin_fx_creative_ringmod.cpp src/builtin_fx_creative_presets.cpp src/builtin_fx_space_mod.cpp src/builtin_fx_space_stereo.cpp src/builtin_fx_space_reverb.cpp src/builtin_fx_space_presets.cpp src/execution.cpp src/module.cpp src/module_registry.cpp src/midi2.cpp src/midi_device.cpp src/params.cpp src/graph.cpp src/scheduler.cpp src/dependency.cpp src/hardware.cpp src/json.cpp src/midifile.cpp src/project.cpp
   # fx-filters begin
   src/builtin_fx_filters.cpp src/builtin_fx_filters_comb.cpp src/builtin_fx_filters_formant.cpp src/builtin_fx_filters_eq.cpp src/builtin_fx_filters_presets.cpp
   # fx-filters end
@@ -236,11 +236,12 @@ target_include_directories(caw_cli PRIVATE src)
   target_sources(caw_tests PRIVATE tests/meters_test.cpp)  # loudness (BS.1770-5, EBU Tech 3341), true peak, correlation
   target_sources(caw_tests PRIVATE tests/fx_dynamics_test.cpp)  # fx-dynamics: the Dynamics and Drive effects
   target_sources(caw_tests PRIVATE tests/fx_creative_test.cpp)  # fx-creative: the Creative and Pitch & Time effects
+  target_sources(caw_tests PRIVATE tests/fx_space_test.cpp)  # fx-space: Space, Modulation and Utility effects
   # fx-filters begin
   target_sources(caw_tests PRIVATE tests/fx_filters_test.cpp)  # the EQ & Filter group
   # fx-filters end
   target_sources(caw_tests PRIVATE tests/fx_racks_test.cpp)  # fx-racks: the FX and multiband racks
-  target_sources(caw_tests PRIVATE tests/midi_device_test.cpp)  # MIDI from devices (API 14): edge conversion, timing, notes
+  target_sources(caw_tests PRIVATE tests/midi_device_test.cpp)  # MIDI from devices (API 15): edge conversion, timing, notes
   add_library(caw_test_component MODULE tests/native_component_fixture.cpp)
   target_link_libraries(caw_test_component PRIVATE CAW::SDK)
   target_compile_options(caw_test_component PRIVATE ${CAW_FLAGS})
@@ -281,6 +282,7 @@ target_include_directories(caw_cli PRIVATE src)
   # allocations, which would turn off AddressSanitizer's new/delete mismatch checks in caw_tests.
   add_executable(caw_rt_tests tests/test_main.cpp tests/graph_channels_test.cpp tests/engine_rt_test.cpp
                               tests/alloc_counter.cpp)
+  target_sources(caw_rt_tests PRIVATE tests/fx_space_rt_test.cpp)  # fx-space effects: no allocation on the audio thread
   target_sources(caw_rt_tests PRIVATE tests/fx_racks_rt_test.cpp)  # fx-racks
   target_compile_options(caw_rt_tests PRIVATE ${CAW_FLAGS})
   target_include_directories(caw_rt_tests PRIVATE src)

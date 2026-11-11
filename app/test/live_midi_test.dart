@@ -149,7 +149,7 @@ void main() {
     expect(takes[1].at - loop, 4);
   });
 
-  group('devices through the engine (caw.h API 14)', () {
+  group('devices through the engine (caw.h API 15)', () {
     test('a pad: its note, poly aftertouch and off reach one track with the device\'s channel and time', () {
       final s = WatchedState()..project = twoTracks();
       final midi = FakeMidi();

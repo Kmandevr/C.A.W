@@ -17,6 +17,7 @@ import 'filter_editor.dart';
 import 'mod_editors.dart';
 import 'racks/rack_editors.dart';  // fx-racks
 import 'space_editors.dart';
+import 'space/space_fx.dart'; // fx-space
 import 'utility_editors.dart';
 // fx-creative begin
 import 'creative/creative_catalog.dart';
@@ -74,6 +75,9 @@ final Map<String, DeviceEditorEntry> _byId = {
   'org.caw.stereo.balance': singlePage('balance', 'BALANCE', Icons.tune, DeviceFamily.utility, () => const StereoPage()),
   ...fxDynamicsEditors, // fx-dynamics: dynamics, multiband, de-esser, clipper, phase distortion
   ...creativeEditors,  // fx-creative
+  // fx-space begin
+  ...fxSpaceEditors,
+  // fx-space end
   // fx-filters begin
   ...filtersEditors,
   // fx-filters end

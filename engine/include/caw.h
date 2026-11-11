@@ -45,10 +45,12 @@ extern "C" {
    12 (2026-11-11, roadmap 2.6): live loudness and correlation meters (caw_engine_loudness,
    caw_engine_loudness_reset, caw_engine_layer_correlation). Nothing else changes.
    13 (2026-11-11): 11 and 12 together (the drums branch and the meters branch merged).
-   14 (2026-11-11): MIDI device input, frame-accurate: caw_midi_clock_ns, caw_engine_midi_ump, caw_engine_midi_bytes,
+   14 (2026-11-11): caw_engine_set_component_state (a playing component's new saved state: the convolver's WAV
+   impulse). Nothing else changes.
+   15 (2026-11-11): MIDI device input, frame-accurate: caw_midi_clock_ns, caw_engine_midi_ump, caw_engine_midi_bytes,
    caw_engine_midi_release, caw_engine_set_midi_options, caw_engine_midi_dropped and caw_engine_position_at.
    Nothing else changes. */
-#define CAW_API_VERSION 14
+#define CAW_API_VERSION 15
 /* The component index that names a layer's native instrument rather than one of its "components". */
 #define CAW_INSTRUMENT_INDEX 0xFFFFFFFFu
 
@@ -181,6 +183,15 @@ CAW_API int32_t caw_engine_component_display(CawEngine* e, const char* layer_id,
    index CAW_INSTRUMENT_INDEX). Store "state" and
    "version" (as "state_version") in the project's entry so a reload or an export starts from it. */
 CAW_API char* caw_engine_component_states(CawEngine* e, const char* layer_id);
+/* A new saved state for a playing component (API version 14), addressed as in caw_engine_set_component_param:
+   [size] bytes at [data] (0: an empty state) as save_state would write them, at state [version]. The convolver
+   (org.caw.convolver) also takes a WAV file's bytes as its state: its impulse response (checked as untrusted, at
+   most 10 s). The component's chain is rebuilt off the audio thread with every component's current values and
+   states, this one's replaced, and crossfaded in. Returns 1, or 0 (nothing changes) when there is no such component
+   or it refuses the state. It can take a while (a WAV decoded, a chain prepared): call it off the UI thread. Store
+   the state in the project's entry as well ("state", base64, and "state_version") so a reload starts from it. */
+CAW_API int32_t caw_engine_set_component_state(CawEngine* e, const char* layer_id, uint32_t index, const uint8_t* data,
+                                               int32_t size, uint32_t version);
 /* A send while it plays (API version 9): send `index` (0-based) of the layer's project "sends" gets `level`
    (linear gain 0..3.981, +12 dB), pre-fader (pre != 0: after the layer's effects, before its volume and pan) or
    post-fader, and mute; the level glides over 5 ms. 1 on success, 0 if the layer has no such send. A later
@@ -431,7 +442,7 @@ CAW_API void caw_engine_loudness_reset(CawEngine* e);
    over about 300 ms: 1 identical sides, 0 unrelated or silent, -1 opposite. 1 on success, 0 if layer_index is not a
    project layer. */
 CAW_API int32_t caw_engine_layer_correlation(CawEngine* e, int32_t layer_index, float* out);
-/* API version 14. MIDI from devices (USB, Bluetooth, Windows ports), into a track's instrument at the frame it was
+/* API version 15. MIDI from devices (USB, Bluetooth, Windows ports), into a track's instrument at the frame it was
    played. Messages are queued (1,024 at most between two audio callbacks; more are dropped and counted) and the
    audio thread plays each one a callback (plus the options' delay) after its time, so the spacing between messages
    is kept as played; one that comes later than that plays at the start of the next callback.

@@ -6,6 +6,8 @@ import '../../theme.dart';
 import 'creative/creative_catalog.dart' as fx_creative;  // fx-creative
 import 'dynamics/catalog.dart' as fx_dynamics;  // fx-dynamics
 import 'filters/filters_shared.dart' as fx_filters show filtersBrowserEntries;  // fx-filters
+import '../../../model/fx_space_display.dart' as fx_space_model show fxSpaceBrowser;  // fx-space
+import 'space/space_fx.dart' as fx_space show fxSpaceIcons;  // fx-space
 
 /// The browser's tabs (owner, 2026-11-11), in order.
 enum EffectCategory {
@@ -87,6 +89,7 @@ class EffectCatalog {
     [for (final e in fx_dynamics.fxDynamicsCatalog) (e.id, e.category, e.description, e.icon)],  // fx-dynamics
     [for (final e in fx_creative.creativeCatalog) (e.id, e.category, e.description, e.icon)],  // fx-creative
     [for (final e in fx_filters.filtersBrowserEntries) (e.id, e.category, e.description, e.icon)],  // fx-filters
+    [for (final e in fx_space_model.fxSpaceBrowser.entries) (e.key, e.value.category, e.value.description, fx_space.fxSpaceIcons[e.key]!)],  // fx-space
   ];
 
   static const List<EffectEntry> _entries = [
