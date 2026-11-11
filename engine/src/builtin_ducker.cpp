@@ -39,7 +39,10 @@ constexpr double kFadeSeconds = 0.005;    // a live change of look-ahead, mode o
 const ParamTable& duckParams() {
     static const ParamTable t = [] {
         ParamTable p;
-        p.pick("mode", "Trigger", 2.0, kModes);
+        // Mode and Look-ahead set the reported latency (latencyFor, from the held values): no lane or modulation
+        // may move them, or the compensation would no longer match the delay.
+        auto fixed = [](ParameterDescriptor& d) { d.automatable = d.modulatable = false; };
+        fixed(p.pick("mode", "Trigger", 2.0, kModes));
         p.num("depth", "Depth", 0.9, 0.0, 1.0);
         p.expo("attack", "Attack", 1.0, 0.1, 500.0, "ms");
         p.num("hold", "Hold", 10.0, 0.0, 1000.0, "ms");
@@ -52,10 +55,10 @@ const ParamTable& duckParams() {
         p.pick("response", "Response", 0.0, kResponses);
         p.expo("key_hpf", "Key high-pass", 20.0, 20.0, 2000.0, "Hz");
         p.expo("key_lpf", "Key low-pass", 20000.0, 200.0, 20000.0, "Hz");
-        p.pick("lookahead", "Look-ahead", 0.0, kLookaheads);
+        fixed(p.pick("lookahead", "Look-ahead", 0.0, kLookaheads));
         p.pick("bands", "Bands", 0.0, kBandModes);
         p.expo("crossover", "Crossover", 150.0, 40.0, 2000.0, "Hz");
-        p.num("link", "Stereo link", 1.0, 0.0, 1.0);
+        p.num("link", "Stereo link", 1.0, 0.0, 1.0);  // Follow only: Trigger plays one shape for both sides
         p.num("velocity", "Velocity", 0.0, 0.0, 1.0);
         p.pick("listen", "Key listen", 0.0, kOffOn);
         return p;

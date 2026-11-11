@@ -220,3 +220,18 @@ TEST(the_ducker_in_tempo_mode_waits_for_the_grid_when_play_starts_mid_beat) {
     e.run();
     CHECK(std::fabs(e.outL[300]) < 1e-3);
 }
+
+TEST(the_ducker_look_ahead_and_mode_are_not_automatable) {
+    // Audio review fix 6: the reported latency reads the held values, so a lane on either would break compensation.
+    Engine e(48000);
+    std::unique_ptr<ModuleProcessor> p = e.createNativeComponent("org.caw.ducker");
+    CHECK(p != nullptr);
+    if (!p) return;
+    const ModuleDescriptor& d = p->descriptor();
+    for (const char* id : {"lookahead", "mode"}) {
+        const ParameterDescriptor& q = d.parameters[paramIndex(d, id)];
+        CHECK(!q.automatable);
+        CHECK(!q.modulatable);
+    }
+    CHECK(d.parameters[paramIndex(d, "depth")].automatable);
+}
