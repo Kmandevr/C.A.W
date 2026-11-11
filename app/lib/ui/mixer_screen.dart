@@ -1,4 +1,5 @@
-// Mixer: Reaper-style channel strips (chain slots, pan, fader, meter, M and S) and the shared module inspector.
+// Mixer: Reaper-style channel strips (chain slots, pan, fader, meter, M and S), the master's FX slots, effects dragged
+// between strips, and the shared module inspector.
 // All edits flow through AppState; this screen does not own a second mix or processing model.
 import 'dart:math' as math;
 
@@ -6,13 +7,18 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../model/app_state.dart';
 import '../model/arrange_fx.dart';
+import '../model/mixer_fx.dart';
 import '../model/project.dart';
 import '../model/routing_edit.dart';
 import 'param_control.dart';
 import 'routing_view.dart';
 import 'theme.dart';
 import 'volume_fader.dart';
+import 'arrange/fx_stack.dart' show FxStack, addEffectTo;
 import 'arrange/track_color.dart';
+import 'devices/device_editor.dart' show openDeviceEditor;
+import 'glass.dart';
+import 'haptics.dart';
 import 'widgets.dart';
 
 /// Below this the strips keep their height and the panel scrolls up and down instead.
@@ -207,7 +213,8 @@ class _MasterStrip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final s = state;
-    return SizedBox(width: 120, child: NeonPanel(
+    final master = masterLayerOf(s.project);
+    return FxDropTarget(state: s, layer: master, child: SizedBox(width: 120, child: NeonPanel(
       color: Neon.pink,
       padding: const EdgeInsets.fromLTRB(6, 8, 6, 8),
       child: ValueListenableBuilder<int>(
@@ -215,6 +222,25 @@ class _MasterStrip extends StatelessWidget {
         builder: (context, _, _) => Column(children: [
           const SizedBox(height: 28, child: Center(child: Text('MASTER',
             style: TextStyle(color: Neon.pink, fontWeight: FontWeight.w800, fontSize: 12)))),
+          // The master's effects (the engine's master chain), like a track's slots: tap one for its UI, long-press
+          // and drag it onto a strip to copy it there.
+          ValueListenableBuilder<int>(valueListenable: s.layerValueTick(masterLayerId), builder: (context, _, _) =>
+            SizedBox(key: const ValueKey('master-fx-slots'), height: 2 * 43, child: master.components.isEmpty
+              ? const Center(child: Text('No master FX', style: TextStyle(color: Neon.dim, fontSize: 10)))
+              : SingleChildScrollView(child: Column(children: [
+                  for (var i = 0; i < master.components.length; i++)
+                    FxSlot(key: ValueKey('master-fx-$i'), state: s, layer: master, index: i,
+                      onTap: () => openDeviceEditor(context, s, masterLayerOf(s.project), i)),
+                ])))),
+          SizedBox(height: 36, child: Row(children: [
+            Expanded(child: TextButton.icon(key: const ValueKey('master-fx-add'),
+              onPressed: () => addEffectTo(context, s, masterLayerOf(s.project)),
+              style: TextButton.styleFrom(padding: EdgeInsets.zero, foregroundColor: Neon.pink),
+              icon: const Icon(Icons.add, size: 16), label: const Text('FX', style: TextStyle(fontSize: 11)))),
+            IconButton(key: const ValueKey('master-fx-chain'), tooltip: 'Master FX chain', iconSize: 18,
+              color: Neon.pink, padding: EdgeInsets.zero, constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+              onPressed: () => showMasterFx(context, s), icon: const Icon(Icons.view_agenda_outlined)),
+          ])),
           Expanded(child: Row(children: [
             Expanded(child: _Fader(key: const ValueKey('fader-master'), value: s.project.master, color: Neon.pink,
               label: 'Master level', onChanged: s.setMaster, defaultGain: 0.7)),
@@ -232,8 +258,120 @@ class _MasterStrip extends StatelessWidget {
               parse: VolumeTaper.parse, apply: s.setMaster)),
         ]),
       ),
-    ));
+    )));
   }
+}
+
+/// The master's whole chain in a sheet, as a track's FX tab: built-ins with their inline UIs, ⤢ for full screen,
+/// drag to reorder, + to add.
+Future<void> showMasterFx(BuildContext context, AppState s) => showGlassSheet<void>(
+  context: context,
+  isScrollControlled: true,
+  builder: (context) => SafeArea(child: SizedBox(
+    height: MediaQuery.sizeOf(context).height * 0.8,
+    child: ListenableBuilder(listenable: s,
+      builder: (context, _) => FxStack(key: const ValueKey('master-fx-stack'), state: s, layer: masterLayerOf(s.project))),
+  )),
+);
+
+/// One effect in a strip's slots: tap for its UI; long-press and drag it onto another strip to copy it there (Alt or
+/// Shift held while dropping moves it, as REAPER's Alt-drag). [index] is in the chain's C++ effects, or with [caw]
+/// in its .caw effects.
+class FxSlot extends StatelessWidget {
+  const FxSlot({super.key, required this.state, required this.layer, required this.index, required this.onTap,
+    this.caw = false, this.selected = false});
+  final AppState state;
+  final LayerDoc layer;
+  final int index;
+  final bool caw, selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final use = caw ? null : layer.components[index];
+    final name = caw ? state.project.module(layer.effectIds[index])?.name ?? 'Missing module' : state.componentLabel(use!.id);
+    final color = caw ? Neon.pink : (isBuiltinComponent(use!.id) ? Neon.blue : Neon.green);
+    final bypassed = use?.bypass ?? false;
+    final slot = Semantics(button: true, selected: selected, label: '${layer.name} effect $name${bypassed ? ', bypassed' : ''}',
+      excludeSemantics: true, child: Padding(
+      padding: const EdgeInsets.only(bottom: 3),
+      child: Material(
+        color: selected ? color.withValues(alpha: 0.28) : Neon.panelHi,
+        borderRadius: BorderRadius.circular(4),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(4),
+          onTap: onTap,
+          child: Container(
+            height: 40,
+            padding: const EdgeInsets.symmetric(horizontal: 5),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(4),
+              border: Border(left: BorderSide(color: color, width: 3)),
+            ),
+            alignment: Alignment.centerLeft,
+            child: Text(name, maxLines: 2, overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: 10, color: bypassed ? Neon.dim : null)),
+          ),
+        ),
+      ),
+    ));
+    return LongPressDraggable<FxSlotDrag>(
+      data: FxSlotDrag(layer.id, caw ? 'caw' : 'native', index),
+      onDragStarted: Haptics.grab,
+      feedback: Material(color: Colors.transparent, child: Container(
+        width: 96, height: 40,
+        padding: const EdgeInsets.symmetric(horizontal: 6),
+        alignment: Alignment.centerLeft,
+        decoration: BoxDecoration(color: Neon.panelHi, borderRadius: BorderRadius.circular(4),
+          border: Border.all(color: color), boxShadow: Neon.glow(color, strength: 0.4)),
+        child: Text(name, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 10)))),
+      childWhenDragging: Opacity(opacity: 0.4, child: slot),
+      child: slot,
+    );
+  }
+}
+
+/// A strip that takes effects dragged from other strips: it lights while one hovers, and a drop copies it (moves it
+/// with Alt or Shift), with a toast that can undo the drop or make it a move.
+class FxDropTarget extends StatelessWidget {
+  const FxDropTarget({super.key, required this.state, required this.layer, required this.child});
+  final AppState state;
+  final LayerDoc layer;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) => DragTarget<FxSlotDrag>(
+    onWillAcceptWithDetails: (d) => state.canDropFx(d.data, layer),
+    onAcceptWithDetails: (d) {
+      final keys = HardwareKeyboard.instance;
+      final move = keys.isAltPressed || keys.isShiftPressed;
+      final from = state.chainLayer(d.data.layerId);
+      final name = d.data.native
+          ? state.componentLabel(from!.components[d.data.index].id)
+          : state.project.module(from!.effectIds[d.data.index])?.name ?? 'effect';
+      final toId = layer.id, fromName = from.name;
+      state.endUndoStep();
+      if (!state.dropFx(d.data, layer, move: move)) return;
+      state.endUndoStep();
+      Haptics.drop();
+      ScaffoldMessenger.maybeOf(context)?.showSnackBar(SnackBar(
+        content: Text(move ? 'Moved $name from $fromName to ${layer.name}' : 'Copied $name to ${layer.name}'),
+        action: move ? SnackBarAction(label: 'Undo', onPressed: state.undo) : SnackBarAction(label: 'Move', onPressed: () {
+          // The copy goes, and the effect itself moves instead.
+          state.undo();
+          final to = state.chainLayer(toId);
+          if (to != null) state.dropFx(d.data, to, move: true);
+          state.endUndoStep();
+        }),
+      ));
+    },
+    builder: (context, hover, _) => DecoratedBox(
+      key: ValueKey('fx-drop-${layer.id}'),
+      position: DecorationPosition.foreground,
+      decoration: BoxDecoration(borderRadius: BorderRadius.circular(10),
+        border: hover.isEmpty ? null : Border.all(color: Neon.green, width: 2)),
+      child: child),
+  );
 }
 
 /// One track's or folder's strip, top to bottom: name, chain slots (or the folder's bus switch), route, pan, fader
@@ -278,6 +416,29 @@ class ChannelStrip extends StatelessWidget {
     ));
   }
 
+  /// A C++ instrument heads the slots: tap for its UI (it stays on its track, so it doesn't drag).
+  Widget _instrumentSlot(BuildContext context) => Semantics(button: true, label: '${layer.name} instrument $_instrumentName',
+    excludeSemantics: true, child: Padding(padding: const EdgeInsets.only(bottom: 3), child: Material(
+      color: Neon.panelHi,
+      borderRadius: BorderRadius.circular(4),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(4),
+        onTap: () {
+          state.selectLayer(layer);
+          openDeviceEditor(context, state, layer, -1);
+        },
+        child: Container(height: 40, padding: const EdgeInsets.symmetric(horizontal: 5), alignment: Alignment.centerLeft,
+          decoration: BoxDecoration(borderRadius: BorderRadius.circular(4),
+            border: const Border(left: BorderSide(color: Neon.green, width: 3))),
+          child: Text(_instrumentName ?? '', maxLines: 2, overflow: TextOverflow.ellipsis,
+            style: const TextStyle(fontSize: 10, color: Neon.green)))))));
+
+  Widget _nativeSlot(BuildContext context, int i) => FxSlot(state: state, layer: layer, index: i,
+    onTap: () {
+      state.selectLayer(layer);
+      openDeviceEditor(context, state, layer, i);
+    });
+
   @override
   Widget build(BuildContext context) {
     // Where the sound goes is the nearest bus above (a folder without a bus only groups), so the output menu lists
@@ -285,7 +446,7 @@ class ChannelStrip extends StatelessWidget {
     final folders = state.buses.where((item) => item.id != layer.id).toList();
     final routeId = state.outputOf(layer)?.id;
     final tint = trackColor(state, layer);
-    return SizedBox(width: _stripWidth, child: NeonPanel(
+    return FxDropTarget(state: state, layer: layer, child: SizedBox(width: _stripWidth, child: NeonPanel(
       color: state.selectedLayerId == layer.id ? Neon.blue : tint,
       padding: const EdgeInsets.fromLTRB(5, 6, 5, 6),
       child: ValueListenableBuilder<int>(
@@ -307,16 +468,27 @@ class ChannelStrip extends StatelessWidget {
                 const Text('GROUP BUS', style: TextStyle(color: Neon.dim, fontSize: 10)),
                 Switch.adaptive(value: layer.busEnabled, onChanged: (v) => state.setFolderBus(layer, v)),
                 if (layer.busEnabled) SendButton(state: state, layer: layer),
+                // A bus's own effects, also draggable to other strips.
+                if (layer.busEnabled)
+                  Expanded(child: SingleChildScrollView(child: Column(children: [
+                    for (var i = 0; i < layer.components.length; i++) _nativeSlot(context, i),
+                  ]))),
               ])
-            : layer.chain.isEmpty
+            : layer.chain.isEmpty && layer.components.isEmpty
               // A C++ instrument (no .caw chain): its name, else there is none.
               ? Center(child: Text(_instrumentName ?? 'No instrument', maxLines: 2, overflow: TextOverflow.ellipsis,
                   textAlign: TextAlign.center,
                   style: TextStyle(color: _instrumentName == null ? Neon.dim : Neon.green, fontSize: 10)))
               // A chain is a handful of slots: all built, scrolling inside the strip when there are more than three.
               : SingleChildScrollView(child: Column(children: [
-                  for (final id in layer.chain)
-                    _slot(id, id == layer.generatorId ? Neon.green : Neon.pink),
+                  if (layer.instrument == null && layer.generatorId != null) _slot(layer.generatorId!, Neon.green)
+                  else if (layer.instrument != null) _instrumentSlot(context),
+                  // The effects after it: .caw ones, then C++ ones, each draggable onto another strip.
+                  for (var i = 0; i < layer.effectIds.length; i++)
+                    FxSlot(state: state, layer: layer, index: i, caw: true,
+                      selected: state.selectedLayerId == layer.id && state.selectedModuleId == layer.effectIds[i],
+                      onTap: () => onSlot(layer.effectIds[i])),
+                  for (var i = 0; i < layer.components.length; i++) _nativeSlot(context, i),
                 ]))),
           if (!layer.isFolder)
             // Where the track's sound goes: the master or a folder's bus.
@@ -372,7 +544,7 @@ class ChannelStrip extends StatelessWidget {
           ]),
         ]),
       ),
-    ));
+    )));
   }
 }
 

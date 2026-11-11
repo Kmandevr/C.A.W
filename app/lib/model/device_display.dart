@@ -6,6 +6,7 @@ import 'package:flutter/scheduler.dart';
 
 import '../engine/engine.dart';
 import 'arrange_fx.dart';
+import 'mixer_fx.dart';
 import 'device_target.dart';
 import 'fx_space_display.dart'; // fx-space
 import 'drums.dart';
@@ -112,7 +113,7 @@ class _Poll extends ValueNotifier<DeviceDisplayFrame?> {
       return;
     }
     // A rack's child (fx-racks): the rack's index + (child + 1) * 65536.
-    final n = engine.componentDisplay(layer.id, target.displayChild == 0 ? index : index + target.displayChild * 65536, _buffer);
+    final n = engine.componentDisplay(engineLayerId(layer), target.displayChild == 0 ? index : index + target.displayChild * 65536, _buffer);
     if (n > 0) value = decodeDisplay(id, _buffer, n);  // 0: nothing new to show (or the engine is busy): keep the last
     if (n < 0) value = null;
   }

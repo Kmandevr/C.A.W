@@ -13,9 +13,11 @@ import 'native_components.dart';
 import 'project.dart';
 import 'automation_writer.dart' show AutomationTarget;
 import 'history.dart';
+import 'mixer_fx.dart' show masterLayerId;
 import 'pattern_doc.dart';
 import 'settings.dart';
 import 'storage.dart';
+import 'templates.dart';
 
 class _LibrarySnapshot {
   _LibrarySnapshot(ProjectDoc project)
@@ -752,7 +754,7 @@ class AppState extends ChangeNotifier {
       masterValueTick.value++;
       // Ticks of modules and layers the restore removed are dropped (left to their widgets, which go with them).
       _moduleValueTicks.removeWhere((id, _) => project.module(id) == null);
-      _layerValueTicks.removeWhere((id, _) => project.layers.every((l) => l.id != id));
+      _layerValueTicks.removeWhere((id, _) => id != masterLayerId && project.layers.every((l) => l.id != id));
       for (final n in _moduleValueTicks.values) { n.value++; }
       for (final n in _layerValueTicks.values) { n.value++; }
       timeSelectionStart = timeSelectionEnd = timeSelectionAnchor = null;
@@ -1861,11 +1863,11 @@ class AppState extends ChangeNotifier {
     if (status.loaded.isNotEmpty) await _syncNow();
   }
 
-  /// New project: blank (with Settings' tempo and time signature) or the First loop template, as Settings says.
-  Future<void> newProject() => _switchTo(
-      settings.newProjectStart == NewProjectStart.firstLoop ? starterProject() : blankProject());
+  /// New project: the template Settings › Projects and files names, else blank (with its tempo and meter).
+  Future<void> newProject() => _switchTo(newProjectDoc());
 
-  Future<void> newProjectFromTemplate() => _switchTo(starterProject());
+  /// New project from template [t] (the project menu's New from template).
+  Future<void> newProjectFromTemplate(TemplateDoc t) => _switchTo(projectFromTemplate(t));
 
   Future<void> openProject(String id) async {
     final p = await _storage?.load(id);

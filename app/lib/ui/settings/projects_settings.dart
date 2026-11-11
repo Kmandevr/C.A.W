@@ -6,6 +6,7 @@ import 'package:path_provider/path_provider.dart';
 
 import '../../model/settings.dart';
 import '../../model/storage.dart';
+import '../../model/templates.dart';
 import '../widgets.dart';
 import 'settings_deps.dart';
 import 'settings_widgets.dart';
@@ -68,9 +69,19 @@ class _ProjectsSettingsState extends State<ProjectsSettings> {
           value: s.restorePointsKept.toDouble(), min: 1, max: 100, divisions: 99, icon: Icons.history,
           show: (v) => '${v.round()}', set: (x, v) => x.restorePointsKept = v.round(), reset: 20,
           subtitle: 'The newest this many per project; older ones go when a new one is made'),
-      settingChoice<NewProjectStart>('projects.newStart', s.newProjectStart,
-          [for (final n in NewProjectStart.values) (n, n.label)], (v) => s.update((x) => x.newProjectStart = v),
-          icon: Icons.add_box_outlined, subtitle: 'What the project menu\'s New project opens'),
+      settingDropdown<String>('projects.newStart', s.newProjectTemplate, [
+            (blankTemplateId, 'Blank'),
+            ...switch (widget.deps.state) {
+              final app? => [for (final t in app.projectTemplates) (t.id, t.name)],
+              null => [(firstLoopTemplateId, 'First loop')],
+            },
+            // A saved template that was deleted elsewhere still shows until another is picked.
+            if (s.newProjectTemplate != blankTemplateId && widget.deps.state?.templateById(s.newProjectTemplate) == null &&
+                s.newProjectTemplate != firstLoopTemplateId)
+              (s.newProjectTemplate, templateLabel(s.newProjectTemplate)),
+          ], (v) => s.update((x) => x.newProjectTemplate = v),
+          icon: Icons.add_box_outlined,
+          subtitle: 'What the project menu\'s New project opens; save your own with Save as template'),
       settingAction('projects.newTempo',
           icon: Icons.speed,
           subtitle: '${s.newProjectBpm.toStringAsFixed(s.newProjectBpm % 1 == 0 ? 0 : 1)} BPM (a blank project); tap to type',

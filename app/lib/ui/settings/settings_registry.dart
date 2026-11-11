@@ -2,6 +2,7 @@
 import 'package:flutter/material.dart';
 
 import '../../model/settings.dart';
+import '../../model/templates.dart' show templateLabel;
 import '../../version.dart';
 import '../theme.dart';
 
@@ -71,7 +72,7 @@ enum SettingsSection {
       projects => [
           'Autosave ${s.autosaveMs < 1000 ? '${s.autosaveMs} ms' : '${s.autosaveMs ~/ 1000} s'}',
           '${s.restorePointsKept} restore points',
-          'new: ${s.newProjectStart.label}',
+          'new: ${templateLabel(s.newProjectTemplate)}',
         ].join(' · '),
       export => [
           exportKindLabel(s.exportKind),

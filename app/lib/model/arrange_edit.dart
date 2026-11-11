@@ -328,6 +328,9 @@ extension ArrangeEdit on AppState {
 
   // ---------- helpers ----------
 
+  /// A copy of [clip] at [start] with its own pattern (added to the project): call it inside an edit.
+  ClipDoc? copyClipAt(ClipDoc clip, int start) => _copyOf(clip, start);
+
   ClipDoc? _copyOf(ClipDoc clip, int start) {
     final original = project.module(clip.patternId);
     if (original == null) return null;

@@ -14,13 +14,17 @@ import 'device_target.dart';
 import 'midi_mapping.dart';
 import 'pattern_doc.dart';
 import 'project.dart';
+import 'record_modes.dart';
 import 'settings.dart';
 
 /// What one recording added (for the "Keep take?" toast's Undo): its clip and the take patterns on [layerId].
 class RecordedTake {
-  const RecordedTake(this.layerId, this.clipIds, this.moduleIds);
+  const RecordedTake(this.layerId, this.clipIds, this.moduleIds, [this.restore = const {}]);
   final String layerId;
   final List<String> clipIds, moduleIds;
+
+  /// Patterns an overdub or replace rewrote, with their sources before it (record_modes.dart).
+  final Map<String, String> restore;
   int get takes => moduleIds.length;
 }
 
@@ -320,6 +324,11 @@ class LiveMidi extends ChangeNotifier {
         l.clips.removeWhere((c) => t.clipIds.contains(c.id));
       }
       p.modules.removeWhere((m) => t.moduleIds.contains(m.id));
+      for (final e in t.restore.entries) {
+        p.module(e.key)
+          ?..source = e.value
+          ..runSource = e.value;
+      }
     });
   }
 
@@ -572,7 +581,8 @@ class LiveMidi extends ChangeNotifier {
   void _commit() {
     final layerId = armedLayerId;
     final from = _recordFrom;
-    _releaseAll(); // keys still down end where the playhead last was
+    final stoppedAt = _now(); // where the recording ended (replace clears up to here)
+    _releaseAll(); // keys still down end there
     _endDeviceTakes();
     armedLayerId = null;
     _recordFrom = null;
@@ -594,6 +604,13 @@ class LiveMidi extends ChangeNotifier {
       (passes[n.pass] ??= []).add(TakenNote(at, math.max(0.125, math.min(n.len, loopTo - at)), n.pitch, n.vel));
     }
     final order = passes.keys.toList()..sort();
+    // Overdub and replace write into the clips already there (record_modes.dart); a loop recording covers the loop.
+    final merged = mergeRecording(state, layer, [for (final k in order) ...passes[k]!], mode: state.settings.midiRecordMode,
+        from: _pass > 0 ? loopFrom : from, to: _pass > 0 ? loopTo : stoppedAt);
+    if (merged != null) {
+      lastTake.value = RecordedTake(layer.id, merged.clipIds, merged.moduleIds, merged.before);
+      return;
+    }
     int floorBar(double v) => (v / bar).floor() * bar;
     final firstStart = order.first == 0 ? floorBar(from) : floorBar(loopFrom);
     if (order.length == 1) {

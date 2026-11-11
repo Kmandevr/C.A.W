@@ -9,6 +9,7 @@ import 'package:flutter/foundation.dart';
 
 import 'app_state.dart';
 import 'arrange_fx.dart';
+import 'mixer_fx.dart';
 import 'device_target.dart';
 import 'project.dart';
 
@@ -396,7 +397,7 @@ extension UserPresets on AppState {
     final index = t.isInstrument ? ProjectDoc.instrumentIndex : engineComponentIndex(layer, t.slot);
     if (e != null && index != null) {
       try {
-        final s = e.componentStates(layer.id)[index];
+        final s = e.componentStates(engineLayerId(layer))[index];
         if (s != null) {
           state = s.state.isEmpty ? null : s.state;
           version = s.version;

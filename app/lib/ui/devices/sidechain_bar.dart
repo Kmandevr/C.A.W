@@ -9,6 +9,7 @@ import '../arrange/track_color.dart';
 import '../feedback.dart';
 import '../haptics.dart';
 import '../theme.dart';
+import '../../model/mixer_fx.dart' show isMasterLayer;
 
 /// One slim row, or nothing when [target]'s device has no sidechain input (or is an instrument).
 class SidechainBar extends StatelessWidget {
@@ -20,7 +21,7 @@ class SidechainBar extends StatelessWidget {
   Widget build(BuildContext context) {
     final t = target, s = t.state;
     final use = t.use, layer = t.layer, id = t.componentId;
-    if (t.isInstrument || use == null || layer == null || id == null || !s.hasSidechain(id)) return const SizedBox.shrink();
+    if (t.isInstrument || use == null || layer == null || isMasterLayer(layer) || id == null || !s.hasSidechain(id)) return const SizedBox.shrink();
     final key = use.key;
     final source = s.layerById(key?.layer);
     final plays = key != null && s.routing.keyPlays(layer, use);
