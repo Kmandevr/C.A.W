@@ -87,6 +87,29 @@ bool componentEntry(const Json& j, const std::string& where, ComponentSpec& c, s
             c.key.pre = tap == "pre";
             c.key.level = clampd(k->number("level", 1.0), 0.0, kMaxMixGain);
         }
+        // Samples: [{"slot": n, "path": file} or {"slot": n, "builtin": name}] (docs/engine.md, "Drums", Samples).
+        if (const Json* ss = j.get("samples"); ss && ss->type != Json::Type::Null) {
+            constexpr size_t kMaxSamples = 256;
+            if (ss->type != Json::Type::Array || ss->arr.size() > kMaxSamples) {
+                error = where + ": component '" + c.id + "' samples must be an array of at most 256 entries";
+                return false;
+            }
+            for (const Json& s : ss->arr) {
+                const double slot = s.type == Json::Type::Object ? s.number("slot", -1) : -1;
+                SampleRefSpec r;
+                if (s.type == Json::Type::Object) {
+                    r.path = s.string("path");
+                    r.builtin = s.string("builtin");
+                }
+                if (!(slot >= 0 && slot < 65536 && slot == std::floor(slot)) || r.path.empty() == r.builtin.empty() ||
+                    r.path.size() > 4096 || r.builtin.size() > 256) {
+                    error = where + ": component '" + c.id + "' sample entries must be {\"slot\": n, \"path\": file} or {\"slot\": n, \"builtin\": name}";
+                    return false;
+                }
+                r.slot = static_cast<uint32_t>(slot);
+                c.samples.push_back(std::move(r));
+            }
+        }
         // A built-in preset's values under the entry's own params (docs/engine.md, Presets).
         if (const Json* pr = j.get("preset"); pr && pr->type != Json::Type::Null) {
             if (pr->type != Json::Type::String || !applyBuiltinPreset(c.id, pr->str, c.params)) {

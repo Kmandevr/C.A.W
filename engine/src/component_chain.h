@@ -7,6 +7,8 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <string_view>
+#include <unordered_map>
 #include <vector>
 
 #include "module_registry.h"
@@ -174,6 +176,7 @@ private:
         // Audio thread: asleep, the component is skipped (its output is silence) until an event or input that
         // is not silent (for an instrument: an event).
         bool asleep = false;
+        std::unordered_map<std::string_view, int> index;  // parameter id to index (ids live in the descriptor)
         std::unique_ptr<KeyInput> key;  // a keyed effect's sidechain (null: not keyed)
         bool keyEvents = false;         // ... and it takes the key's notes
     };

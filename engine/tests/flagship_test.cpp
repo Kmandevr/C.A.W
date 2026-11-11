@@ -785,7 +785,7 @@ TEST(an_old_project_s_retired_synth_plays_as_flagship_with_its_preset_and_knobs)
     CHECK(out.find("\"flt1_resonance\":0.90000000000000002") != std::string::npos);
     CHECK(out.find("\"glide\":0.10000000000000001") != std::string::npos);
     CHECK(out.find("\"slide\":\"glide\"") != std::string::npos);
-    char* other = caw_migrate_instrument(R"({"id":"org.caw.drum.kick","params":{"tune":50}})");
+    char* other = caw_migrate_instrument(R"({"id":"org.caw.eq","params":{"low":2}})");
     CHECK(std::string(other).find("\"migrated\":false") != std::string::npos);
     caw_free(other);
     // An entry naming a preset comes back with the preset's values under its own (the app fills its knobs).

@@ -5,6 +5,7 @@
 #include <cstdio>
 #include <deque>
 
+#include "builtin_drums.h"
 #include "builtin_flagship.h"
 #include "json.h"
 
@@ -251,6 +252,7 @@ std::string number(double v) {
 const std::vector<BuiltinPreset>& builtinPresets(std::string_view componentId) {
     if (componentId == kFlagship) return flagshipPresets();
     if (componentId == "org.caw.ducker") return duckerPresets();
+    if (componentId == kDrumsId) return drumsPresets();
     return kNone;
 }
 
@@ -286,9 +288,12 @@ std::string builtinPresetsJson(std::string_view componentId) {
     return json + "]";
 }
 
-bool isLegacyInstrument(std::string_view id) { return id == kMorph || id == kBass || id == kAcid || id == kBasic; }
+bool isLegacyInstrument(std::string_view id) {
+    return id == kMorph || id == kBass || id == kAcid || id == kBasic || isLegacyDrum(id);
+}
 
 bool migrateLegacyInstrument(std::string& id, std::vector<std::pair<std::string, double>>& params, std::string* preset) {
+    if (isLegacyDrum(id)) return migrateLegacyDrum(id, params, preset);  // the old drums: org.caw.drums (builtin_drums_sounds.cpp)
     if (!isLegacyInstrument(id)) return false;
     const char* name = id == kMorph ? "Morph pad" : id == kBass ? "Mono bass" : id == kAcid ? "Acid 303" : "Basic";
     std::vector<std::pair<std::string, double>> out;
@@ -304,6 +309,7 @@ bool migrateLegacyInstrument(std::string& id, std::vector<std::pair<std::string,
 }
 
 std::string migratedLegacyParameter(std::string_view legacyId, std::string_view param) {
+    if (isLegacyDrum(legacyId)) return migratedLegacyDrumParameter(legacyId, param);
     const bool morph = legacyId == kMorph, bass = legacyId == kBass, acid = legacyId == kAcid, basicSynth = legacyId == kBasic;
     if (!(morph || bass || acid || basicSynth)) return {};
     if (param == "cutoff") return "flt1_cutoff";
@@ -343,11 +349,19 @@ std::string migrateInstrumentJson(std::string_view entryJson) {
                        jsonEscape(id) + "\"";
     if (!migrated && !preset.empty()) json += ",\"preset\":\"" + jsonEscape(preset) + "\"";
     if (migrated) {
-        json += ",\"preset\":\"" + jsonEscape(preset) + "\",\"lanes\":{";
+        if (!preset.empty()) json += ",\"preset\":\"" + jsonEscape(preset) + "\"";
+        json += ",\"lanes\":{";
         bool first = true;
+        for (std::string_view k : legacyDrumKnobs(legacy)) {
+            const std::string to = migratedLegacyParameter(legacy, k);
+            if (to.empty()) continue;
+            json += (first ? "\"" : ",\"") + std::string(k) + "\":\"" + to + "\"";
+            first = false;
+        }
         for (const char* k : {"shape", "drift", "unison", "detune", "spread", "cutoff", "resonance", "attack", "decay",
                               "sustain", "release", "volume", "wave", "sub", "env", "glide", "legato", "drive", "accent",
                               "slide", "wave1", "wave2", "mix"}) {
+            if (isLegacyDrum(legacy)) break;  // listed above
             const std::string to = migratedLegacyParameter(legacy, k);
             if (to.empty()) continue;
             json += (first ? "\"" : ",\"") + std::string(k) + "\":\"" + to + "\"";
