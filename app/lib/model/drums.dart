@@ -306,7 +306,7 @@ class DrumSketch {
     if (click > 0) longest = math.max(longest, clickLen * 2);
     final seconds = longest.clamp(0.05, 4.0).toDouble();
     final mx = Float32List(bins), mn = Float32List(bins);
-    const sub = 6;
+    const sub = 16;
     for (var b = 0; b < bins; b++) {
       var hi = 0.0, lo = 0.0;
       for (var k = 0; k < sub; k++) {

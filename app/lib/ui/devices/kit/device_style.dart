@@ -56,7 +56,7 @@ DeviceFamily? familyOfComponent(String id) => filtersFamily(id) /* fx-filters */
       'org.caw.filter' => DeviceFamily.filter,
       'org.caw.phaser' || 'org.caw.flanger' || 'org.caw.chorus' => DeviceFamily.modulation,
       'org.caw.utility' || 'org.caw.stereo.width' || 'org.caw.stereo.balance' => DeviceFamily.utility,
-      'org.caw.drum.kick' || 'org.caw.drum.snare' || 'org.caw.drum.hats' || 'org.caw.drum.kit' => DeviceFamily.drums,
+      'org.caw.drums' => DeviceFamily.drums,
       // fx-creative: the Creative and Pitch & Time effects
       'org.caw.tapestop' || 'org.caw.reverser' || 'org.caw.stutter' || 'org.caw.pitchshift' || 'org.caw.freqshift' ||
           'org.caw.trancegate' || 'org.caw.bitcrush' || 'org.caw.ringmod' => DeviceFamily.creative,
