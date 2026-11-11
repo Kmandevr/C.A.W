@@ -681,7 +681,7 @@ public:
         lastPad_ = -1;
     }
 
-    bool quiet() const noexcept override { return settled_; }
+    bool quiet() const noexcept override { return settled_ && !lanes_.any(); }
 
     uint32_t readDisplay(float* out, uint32_t max) const noexcept override { return display_.read(out, max); }
 
@@ -704,6 +704,7 @@ protected:
     void beginBlock(const ProcessBlock& b) noexcept override {
         block_ = &b;
         ++blockCount_;
+        lanes_.bind(b);
         // A new sample: voices still playing the one it replaces stop their sample layer (it is freed later).
         for (uint32_t s = 0; s < kPads; ++s) {
             const SampleBuffer* before = playing_[s];
@@ -745,12 +746,22 @@ protected:
                 left_ = kControlFrames;
             }
             const uint32_t n = std::min(left_, frames - i);
-            renderChunk(left + i, right + i, n);
+            renderChunk(left + i, right + i, n, offset + i);
             i += n;
             left_ -= n;
             clock_ += n;
         }
         if (displayClock_.tick(frames)) publish(b, offset);
+    }
+
+    // The voice bus (#127): a hit's lane ends once no voice plays its note.
+    void endBlock(const ProcessBlock&) noexcept override {
+        if (!lanes_.any()) return;
+        lanes_.endBlock([&](uint32_t id) noexcept {
+            for (uint32_t i = 0; i < live_; ++i)
+                if (voices_[list_[i]].active && voices_[list_[i]].noteId == id) return true;
+            return false;
+        });
     }
 
 private:
@@ -939,6 +950,7 @@ private:
         for (int pass = 0; pass < 2 && !pick; ++pass)
             for (DrumVoice& v : voices_)
                 if ((pass == 1 || v.fading) && (!pick || v.age < pick->age)) pick = &v;
+        lanes_.end(pick->noteId);  // stolen: its lane (#127) ends here
         pick->active = false;
         prune();
         return *pick;
@@ -1602,10 +1614,13 @@ private:
         }
     }
 
-    void renderChunk(float* left, float* right, uint32_t n) noexcept {
+    // One chunk (n <= kControlFrames frames), `at` its first frame in the block.
+    void renderChunk(float* left, float* right, uint32_t n, uint32_t at) noexcept {
         double busL[kOutputs][kControlFrames], busR[kOutputs][kControlFrames], send[kControlFrames];
+        double laneL[kControlFrames], laneR[kControlFrames];  // a hit with a voice-bus lane (#127), before the lane
         uint32_t used = 1;  // buses 0..used-1 written
         for (uint32_t i = 0; i < n; ++i) busL[0][i] = busR[0][i] = send[i] = 0.0;
+        if (lanes_.any()) lanes_.begin(at, n);
         for (uint32_t i = 0; i < live_; ++i) {
             DrumVoice& v = voices_[list_[i]];
             if (!v.active) continue;
@@ -1615,26 +1630,37 @@ private:
                 for (uint32_t k = 0; k < n; ++k) busL[used][k] = busR[used][k] = 0.0;
                 ++used;
             }
+            // A hit whose note has a lane: the same sums into laneL/R, then into the lane (summed back into its
+            // output below, after the host's per-note FX). Its room send stays dry.
+            VoiceLane* lane = lanes_.any() ? lanes_.laneFor(v.noteId) : nullptr;
+            double* dl = busL[out];
+            double* dr = busR[out];
+            if (lane) {
+                for (uint32_t k = 0; k < n; ++k) laneL[k] = laneR[k] = 0.0;
+                dl = laneL, dr = laneR;
+                laneOut(v.noteId, out);
+            }
             float peak = padLevel_[pad];
             const bool toRoom = roomOn_ && v.roomSend > 0.0;
             if (!toRoom && !v.sub && !v.wide) {  // the plain voice: mono, panned, no send
                 for (uint32_t k = 0; k < n; ++k) {
                     const double y = voiceSample(v);
-                    busL[out][k] += y * v.gainL;
-                    busR[out][k] += y * v.gainR;
+                    dl[k] += y * v.gainL;
+                    dr[k] += y * v.gainR;
                     const float a = static_cast<float>(y < 0.0 ? -y : y);
                     if (a > peak) peak = a;
                     if (v.capture) captureSample(pad, static_cast<float>(y));
                 }
                 padLevel_[pad] = peak;
+                if (lane) toLane(*lane, laneL, laneR, at, n);
                 continue;
             }
             for (uint32_t k = 0; k < n; ++k) {
                 const double y = voiceSample(v);
                 // Pan the voice; a clean sub goes to both sides whole (mono), the side signal opposite ways.
                 const double c = v.subOut * v.gainMid, w = v.wide ? v.side : 0.0;
-                busL[out][k] += y * v.gainL + c + w;
-                busR[out][k] += y * v.gainR + c - w;
+                dl[k] += y * v.gainL + c + w;
+                dr[k] += y * v.gainR + c - w;
                 if (toRoom) send[k] += y * v.gainMid * v.roomSend;  // the room hears the voice, not its sub
                 const double all = y + v.subOut;
                 const float a = static_cast<float>(all < 0.0 ? -all : all);
@@ -1642,6 +1668,22 @@ private:
                 if (v.capture) captureSample(pad, static_cast<float>(all));
             }
             padLevel_[pad] = peak;
+            if (lane) toLane(*lane, laneL, laneR, at, n);
+        }
+        if (lanes_.any()) {  // the host's per-note FX, then each lane into the output its hit plays to
+            lanes_.run(at, n);
+            for (uint32_t k = 0; k < lanes_.count(); ++k) {
+                const VoiceLane& l = lanes_.lane(k);
+                const uint32_t out = laneOutOf(l.noteId);
+                while (used <= out) {
+                    for (uint32_t j = 0; j < n; ++j) busL[used][j] = busR[used][j] = 0.0;
+                    ++used;
+                }
+                for (uint32_t j = 0; j < n; ++j) {
+                    busL[out][j] += l.channels[0][at + j];
+                    busR[out][j] += l.channels[1][at + j];
+                }
+            }
         }
         // Kit effects on the main bus.
         for (uint32_t k = 0; k < n; ++k) {
@@ -1687,6 +1729,30 @@ private:
             left[k] = static_cast<float>(outL * volume_);
             right[k] = static_cast<float>(outR * volume_);
         }
+    }
+
+    // ---------- The voice bus (#127) ----------
+
+    static void toLane(VoiceLane& lane, const double* l, const double* r, uint32_t at, uint32_t n) noexcept {
+        for (uint32_t k = 0; k < n; ++k) {
+            lane.channels[0][at + k] += static_cast<float>(l[k]);
+            lane.channels[1][at + k] += static_cast<float>(r[k]);
+        }
+    }
+    // The output each laned note's hit plays to, kept after the hit ends (its lane's FX tail goes there too).
+    void laneOut(uint32_t noteId, uint32_t out) noexcept {
+        for (LaneOut& o : laneOuts_)
+            if (o.noteId == noteId) {
+                o.out = static_cast<uint8_t>(out);
+                return;
+            }
+        laneOuts_[laneOutNext_] = {noteId, static_cast<uint8_t>(out)};
+        laneOutNext_ = (laneOutNext_ + 1) % VoiceLanes::kMaxLanes;
+    }
+    uint32_t laneOutOf(uint32_t noteId) const noexcept {
+        for (const LaneOut& o : laneOuts_)
+            if (o.noteId == noteId && noteId != 0) return o.out;
+        return 0;
     }
 
     // ---------- Display ----------
@@ -1843,6 +1909,13 @@ private:
     uint32_t notesSeen_ = 0;
     lib::Reverb room_;
     bool roomOn_ = false, settled_ = true;
+    VoiceLanes lanes_;  // the host's voice bus for this block (#127), or none
+    struct LaneOut {
+        uint32_t noteId = 0;
+        uint8_t out = 0;
+    };
+    LaneOut laneOuts_[VoiceLanes::kMaxLanes];
+    uint32_t laneOutNext_ = 0;
     double roomMix_ = 0;
     uint32_t roomQuiet_ = 0;
     double volume_ = 1;
@@ -1874,6 +1947,9 @@ const ModuleDescriptor& drumsDescriptor() {
         m.parameters = parameterTable();
         m.parameterCount = kParamCount;
         m.tailFrames = 192000 * 70;  // a 60 s ring at 192 kHz and the room; it says quiet() sooner
+        m.domains = kDomainWhole | kDomainPerNote;  // #127: one voice-bus lane per hit
+        m.capabilities = kCapabilityNotesIn | kCapabilitySampleAssets;
+        m.cpuClass = CpuClass::Medium;
         return m;
     }();
     return d;

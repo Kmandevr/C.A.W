@@ -245,6 +245,7 @@ target_include_directories(caw_cli PRIVATE src)
   target_sources(caw_tests PRIVATE tests/fx_racks_test.cpp)  # fx-racks: the FX and multiband racks
   target_sources(caw_tests PRIVATE tests/midi_device_test.cpp)  # MIDI from devices (API 15): edge conversion, timing, notes
   target_sources(caw_tests PRIVATE tests/graph_layout_test.cpp)  # #120 layout rules: mono to stereo, downmix, dual mono
+  target_sources(caw_tests PRIVATE tests/voice_bus_test.cpp)  # #127 the voice bus; #120 built-in declarations, C 3.0/3.1
   add_library(caw_test_component MODULE tests/native_component_fixture.cpp)
   target_link_libraries(caw_test_component PRIVATE CAW::SDK)
   target_compile_options(caw_test_component PRIVATE ${CAW_FLAGS})
@@ -254,16 +255,22 @@ target_include_directories(caw_cli PRIVATE src)
   target_compile_options(caw_test_component_no_entry PRIVATE ${CAW_FLAGS})
   target_compile_definitions(caw_test_component_no_entry PRIVATE CAW_TEST_OMIT_ENTRY)
   set_target_properties(caw_test_component_no_entry PROPERTIES PREFIX "" OUTPUT_NAME "caw_test_component_no_entry")
+  # A component built against the 3.0 C interface (a descriptor without the 3.1 fields), in plain C.
+  add_library(caw_test_component_v30 MODULE tests/native_component_v30_fixture.c)
+  target_include_directories(caw_test_component_v30 PRIVATE include)
+  set_target_properties(caw_test_component_v30 PROPERTIES PREFIX "" OUTPUT_NAME "caw_test_component_v30"
+    C_STANDARD 99 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF)
   # The component C interface compiles as plain C.
   add_library(caw_component_c_check OBJECT tests/component_header_check.c)
   target_include_directories(caw_component_c_check PRIVATE include)
   set_target_properties(caw_component_c_check PROPERTIES C_STANDARD 99 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF)
-  add_dependencies(caw_tests caw_test_component caw_test_component_no_entry caw_component_c_check)
+  add_dependencies(caw_tests caw_test_component caw_test_component_no_entry caw_test_component_v30 caw_component_c_check)
   target_compile_options(caw_tests PRIVATE ${CAW_FLAGS})
   target_include_directories(caw_tests PRIVATE src)
   target_compile_definitions(caw_tests PRIVATE CAW_ROOT="${CAW_ROOT}"
     "CAW_TEST_COMPONENT_PATH_DEFAULT=\"$<TARGET_FILE:caw_test_component>\""
-    "CAW_TEST_NO_ENTRY_COMPONENT_PATH=\"$<TARGET_FILE:caw_test_component_no_entry>\"")
+    "CAW_TEST_NO_ENTRY_COMPONENT_PATH=\"$<TARGET_FILE:caw_test_component_no_entry>\""
+    "CAW_TEST_V30_COMPONENT_PATH=\"$<TARGET_FILE:caw_test_component_v30>\"")
   target_link_libraries(caw_tests PRIVATE caw_core)
   # Compile the consumer test with only CAW::SDK's public include path; no engine/src access.
   add_library(caw_sdk_public_compile OBJECT tests/public_cpp_sdk_test.cpp)
@@ -287,6 +294,7 @@ target_include_directories(caw_cli PRIVATE src)
                               tests/alloc_counter.cpp)
   target_sources(caw_rt_tests PRIVATE tests/fx_space_rt_test.cpp)  # fx-space effects: no allocation on the audio thread
   target_sources(caw_rt_tests PRIVATE tests/fx_racks_rt_test.cpp)  # fx-racks
+  target_sources(caw_rt_tests PRIVATE tests/voice_bus_rt_test.cpp)  # #127: instruments rendering into voice-bus lanes
   target_compile_options(caw_rt_tests PRIVATE ${CAW_FLAGS})
   target_include_directories(caw_rt_tests PRIVATE src)
   add_dependencies(caw_rt_tests caw_test_component)
