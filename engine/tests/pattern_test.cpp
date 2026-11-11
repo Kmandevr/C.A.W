@@ -62,6 +62,19 @@ std::vector<double> play(const std::string& gen, const std::string& notes, int64
 
 }  // namespace
 
+// Pattern text parses without the .caw compiler (#160 removes it): note names live in pattern.h.
+TEST(pattern_note_names_need_no_compiler) {
+    double v = 0;
+    CHECK(noteNumber("C4", v) && v == 60);
+    CHECK(noteNumber("F#2", v) && v == 42);
+    CHECK(noteNumber("Bb0", v) && v == 22);
+    CHECK(!noteNumber("H4", v));
+    CHECK(!noteNumber("C", v));
+    CHECK(!noteNumber("C10", v));
+    PatternResult r = parsePattern(kHead + "0 C4 1 1\n");
+    CHECK(r.pattern && r.pattern->notes.size() == 1 && r.pattern->notes[0].pitch == 60);
+}
+
 TEST(patterns_parse_notes_chords_and_extras) {
     PatternResult r = parsePattern(
         "---\nkind: pattern\nname: Test\nlength: 2 bars\n---\n// comment\n0 A2 2 0.5\n13/3 C3,E3 1/3 1 ratchet 2 prob 0.25\n"
