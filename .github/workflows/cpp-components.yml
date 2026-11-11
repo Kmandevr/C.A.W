@@ -89,6 +89,7 @@ jobs:
         if: ${{ !matrix.android }}
         run: |
           for starter in examples/cpp/starters/*/; do
+            [ -f "$starter/caw-component.json" ] || continue  # tests/ holds the shared contract test
             name=$(basename "$starter")
             node scripts/caw-component-build.js \
               --project "$starter" --sdk "$RUNNER_TEMP/caw-sdk" \
