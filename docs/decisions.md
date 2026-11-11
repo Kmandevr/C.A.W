@@ -32,6 +32,14 @@ Carries out the owner's decision of 2026-11-10 ("C++ replaces the .caw language"
 - **Bug fixed on the way:** a track's instrument installed while nothing sounds counted as still ringing at the first Play, which mixed in 5 ms of a phantom tail (a free-running source started at twice its level); a new instrument now starts idle.
 - **Open, for the owner:** an instrument track keeps running after a Stop until its output is quiet (or 30 s), and a never-quiet effect there now ends at that cap without the 20 ms fade buses get; a bus whose capped tail has faded comes back while a child track still rings out. The app still sends `voices`, `swap`, `seam_crossfade` and the key (Settings' light-mode voice cap and swap timing now change nothing): removing those settings is UI work.
 
+## 2026-11-11: Finding things on a phone (owner)
+
+**Decision (owner, 2026-11-11).** Too many views and menus can only be found on desktop; the owner found the Build and Files tools only there.
+- **Back arrow:** full views such as Track cards get a ← Back in their header row, and Android's back gesture also returns to the arrangement.
+- **⋯ More per section:** each section's top bar gets a visible ⋯ that lists every view and menu the section has.
+- **Search everything:** on phones, a search finds any command or view by name, like the desktop command palette.
+- **Hints on first use:** a one-time tip points out hidden gestures (hold, double-tap, swipe) the first time each screen opens, and Settings can turn the tips off.
+
 ## 2026-11-11: What agents may do on GitHub and in git (owner)
 
 **Decision (owner, 2026-11-11):**
