@@ -6,6 +6,27 @@ updated: 2026-11-11
 
 # Decisions
 
+## 2026-11-11: The beta's scope: the whole roadmap, plus drums, effects and audio (owner)
+
+**The owner's words:** "Make sure everything in the roadmap is done. Including the routing and the hard stuff too."
+
+**Owner's answers:**
+- **Audio in the beta:** audio clips on tracks, audio recording, and a sampler instrument all ship in v1.0.0-beta.1. Before this, the roadmap put Stages 3, 4 and 7 after Release 1.
+- **Per-note effects:** built for the beta (#127). Instruments expose per-voice audio, and effects can run per note.
+- **New screens:** the modulator routing canvas, the testing suite, the sample-pack maker, CLAP export, the export sheet with stems, templates, and master FX slots. Each is designed in the existing device-kit style, and the owner reviews it in the APK; changes come after.
+- **MIDI storage (#158), locked in:** clips are stored as pattern text in the project; standard MIDI files (.mid, including MPE) are used for import and export.
+
+**Also decided today:**
+- **Effects:** every Kilohearts-style effect is built in. That includes the multiband rack and the FX rack with modulators, and a browser with category tabs, search, favourites and recently used.
+- **Drums:** one drum instrument (`org.caw.drums`) replaces Kick, Snare, Hats and Kit. Its structure:
+  - two modes: a 16-pad × 4-bank kit, or a single sound per track;
+  - layers: synthesis plus a sample layer;
+  - pitch tracking per sound, switchable, with glide;
+  - each pad on its own MIDI note, with an "explode to tracks" workflow;
+  - hardware MIDI pads supported.
+
+**Still the roadmap's call:** Stages 8–10 stay after Release 1: Faust, plug-in hosting, and iOS/macOS/Linux builds.
+
 ## 2026-11-11: Settings as a category list, every setting real (choices to confirm)
 
 **Decision (owner):** Settings opens on a list of sections with icons; a search finds any setting and jumps to it, highlighted; new Audio and MIDI, Editing, Projects and files and Export settings; full control of the audio device and buffer; nothing hidden. **Choices made on the owner's behalf, to confirm:**
