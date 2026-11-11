@@ -3,6 +3,7 @@ import 'dart:math' as math;
 
 import 'device_target.dart';
 import 'flagship_shapes.dart';
+import 'racks.dart';
 
 /// The flagship's mod sources, by their `modN_src` value (engine/src/builtin_flagship.cpp, `kSources`).
 enum ModSource {
@@ -19,13 +20,28 @@ enum ModSource {
   bend('Pitch bend', 'BEND'),
   pressure('Pressure', 'PRES'),
   timbre('Timbre', 'TMBR'),
-  modWheel('Mod wheel', 'WHEEL');
+  modWheel('Mod wheel', 'WHEEL'),
+  // The FX rack's own (fx-racks; its `modN_src` labels: engine/src/builtin_fx_racks_internal.h).
+  lfo4('LFO 4', 'LFO 4'),
+  follow1('Follower 1', 'FOL 1'),
+  follow2('Follower 2', 'FOL 2'),
+  macro1('Macro 1', 'M1'),
+  macro2('Macro 2', 'M2'),
+  macro3('Macro 3', 'M3'),
+  macro4('Macro 4', 'M4'),
+  macro5('Macro 5', 'M5'),
+  macro6('Macro 6', 'M6'),
+  macro7('Macro 7', 'M7'),
+  macro8('Macro 8', 'M8');
 
   const ModSource(this.label, this.short);
   final String label, short;
 
-  /// The value stored in `modN_src`.
+  /// The value stored in the flagship's `modN_src` (a device with other labels maps them: [ModMatrix.sourceValue]).
   int get value => index;
+
+  /// The source a choice label names ("LFO 1", "Macro 3"), or null.
+  static ModSource? byLabel(String label) => values.where((s) => s.label == label).firstOrNull;
 
   static ModSource of(double v) {
     final i = v.round();
@@ -33,7 +49,8 @@ enum ModSource {
   }
 
   /// LFOs and random swing both ways, so a new route from them starts bipolar; the others start unipolar.
-  bool get naturallyBipolar => this == lfo1 || this == lfo2 || this == lfo3 || this == random || this == bend;
+  bool get naturallyBipolar =>
+      this == lfo1 || this == lfo2 || this == lfo3 || this == lfo4 || this == random || this == bend;
 }
 
 /// One used slot: [source] moves [paramId] by [amount] of its knob travel (−1..1), both ways when [bipolar], its
@@ -63,8 +80,38 @@ class ModRoute {
 /// The matrix of [target]: a slot's `dst` value k + 1 is the descriptor's parameter k (any parameter before the
 /// slots), 0 is none.
 class ModMatrix {
-  ModMatrix(this.target);
+  ModMatrix(this.target, {this.prefix = ''});
   final DeviceTarget target;
+
+  /// A rack child's knobs (fx-racks): its ids are the rack's with this prefix (`s2.`); routes to them come back
+  /// without it, so the child's own knobs find their rings. Empty for a device's own matrix.
+  final String prefix;
+
+  String _full(String paramId) => prefix.isEmpty || paramId.contains('.') ? paramId : '$prefix$paramId';
+  String _local(String id) => prefix.isNotEmpty && id.startsWith(prefix) ? id.substring(prefix.length) : id;
+
+  /// The source each `modN_src` value names, from its choice labels (the flagship's order when it has none).
+  late final List<ModSource?> _table = _sourceTable();
+
+  List<ModSource?> _sourceTable() {
+    final choices = target.param(srcId(1))?.choices ?? const <String>[];
+    if (choices.isEmpty) return ModSource.values;
+    return [for (final c in choices) ModSource.byLabel(c)];
+  }
+
+  /// The sources this device's routes can take (none left out), in its order.
+  List<ModSource> get sources => [for (final s in _table) if (s != null && s != ModSource.none) s];
+
+  /// The value `modN_src` stores for [s] (0 when the device has no such source).
+  int sourceValue(ModSource s) {
+    final i = _table.indexOf(s);
+    return i < 0 ? 0 : i;
+  }
+
+  ModSource sourceOf(double v) {
+    final i = v.round();
+    return i >= 0 && i < _table.length ? (_table[i] ?? ModSource.none) : ModSource.none;
+  }
 
   static String srcId(int slot) => 'mod${slot}_src';
   static String dstId(int slot) => 'mod${slot}_dst';
@@ -95,18 +142,18 @@ class ModMatrix {
   }
 
   bool canModulate(String paramId) {
-    final p = target.param(paramId);
-    return p != null && p.modulatable && destinations.contains(paramId);
+    final p = target.param(_full(paramId));
+    return p != null && p.modulatable && destinations.contains(_full(paramId));
   }
 
   ModRoute? route(int slot) {
-    final src = ModSource.of(target.value(srcId(slot)));
+    final src = sourceOf(target.value(srcId(slot)));
     final dst = target.value(dstId(slot)).round();
     final dests = destinations;
     if (src == ModSource.none || dst <= 0 || dst > dests.length) return null;
-    return ModRoute(slot: slot, source: src, paramId: dests[dst - 1], amount: target.value(amtId(slot)),
+    return ModRoute(slot: slot, source: src, paramId: _local(dests[dst - 1]), amount: target.value(amtId(slot)),
       bipolar: target.value(bipolarId(slot)) >= 0.5,
-      via: target.param(viaId(slot)) == null ? ModSource.none : ModSource.of(target.value(viaId(slot))));
+      via: target.param(viaId(slot)) == null ? ModSource.none : sourceOf(target.value(viaId(slot))));
   }
 
   List<ModRoute> get routes => [for (var s = 1; s <= slotCount; s++) ?route(s)];
@@ -128,15 +175,15 @@ class ModMatrix {
   /// Routes [source] to [paramId] (one undo step). An existing route of the same pair is kept and returned.
   /// Null when the parameter can't be modulated or every slot is in use.
   int? add(ModSource source, String paramId, {double amount = 0.25, bool? bipolar}) {
-    if (source == ModSource.none || !canModulate(paramId)) return null;
+    if (source == ModSource.none || !_table.contains(source) || !canModulate(paramId)) return null;
     for (final r in routes) {
       if (r.source == source && r.paramId == paramId) return r.slot;
     }
     final slot = freeSlot;
     if (slot == null) return null;
     target.setAll({
-      srcId(slot): source.value.toDouble(),
-      dstId(slot): destinations.indexOf(paramId) + 1.0,
+      srcId(slot): sourceValue(source).toDouble(),
+      dstId(slot): destinations.indexOf(_full(paramId)) + 1.0,
       amtId(slot): amount,
       bipolarId(slot): (bipolar ?? source.naturallyBipolar) ? 1 : 0,
     });
@@ -162,10 +209,10 @@ class ModMatrix {
 
   void setAmountLive(int slot, double amount) => target.setLive(amtId(slot), amount.clamp(-1.0, 1.0));
 
-  void setSource(int slot, ModSource source) => target.set(srcId(slot), source.value.toDouble());
+  void setSource(int slot, ModSource source) => target.set(srcId(slot), sourceValue(source).toDouble());
 
   void setDestination(int slot, String paramId) {
-    final i = destinations.indexOf(paramId);
+    final i = destinations.indexOf(_full(paramId));
     if (i >= 0) target.set(dstId(slot), i + 1.0);
   }
 
@@ -175,7 +222,7 @@ class ModMatrix {
   bool get hasVia => slotCount > 0 && target.param(viaId(1)) != null;
 
   void setVia(int slot, ModSource via) {
-    if (target.param(viaId(slot)) != null) target.set(viaId(slot), via.value.toDouble());
+    if (target.param(viaId(slot)) != null) target.set(viaId(slot), sourceValue(via).toDouble());
   }
 
   /// Where [paramId]'s routes take its knob travel ([position], 0..1) at [seconds] on a clock, with sources drawn in
@@ -209,6 +256,8 @@ class ModPreview {
   /// The source's value at [seconds], or null when it has no shape of its own (velocity, note, bend, pressure,
   /// timbre, the mod wheel: they follow what is played).
   double? value(ModSource s, double seconds) {
+    // A rack's sources (fx-racks) run on its own tables: no preview drawn from the flagship's.
+    if (isRackComponent(target.componentId ?? '')) return null;
     switch (s) {
       case ModSource.lfo1 || ModSource.lfo2 || ModSource.lfo3:
         final p = 'lfo${s.index - ModSource.lfo1.index + 1}_';

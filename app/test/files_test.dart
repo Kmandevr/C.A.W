@@ -168,7 +168,7 @@ void main() {
     await tester.tap(find.text('open'));
     await tester.pumpAndSettle();
     expect(find.text('Add FX'), findsOneWidget);
-    expect(find.text('BUILT-IN'), findsOneWidget);
+    expect(find.text('UTILITY'), findsOneWidget); // built-ins by category (EffectCatalog)
     expect(find.text('MY EFFECTS'), findsOneWidget);
     expect(find.text('Fuzz'), findsOneWidget);
     expect(find.text('Not built'), findsOneWidget); // listed with a badge before it is built

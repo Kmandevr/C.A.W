@@ -58,7 +58,7 @@ class EngineDisplaySource extends DeviceDisplaySource {
 
   @override
   ValueListenable<DeviceDisplayFrame?> frames(DeviceTarget target) =>
-      _polls.putIfAbsent('${target.layerId}\u0000${target.slot}', () => _Poll(target, interval));
+      _polls.putIfAbsent('${target.layerId}\u0000${target.slot}\u0000${target.displayChild}', () => _Poll(target, interval));
 }
 
 class _Poll extends ValueNotifier<DeviceDisplayFrame?> {
@@ -106,7 +106,8 @@ class _Poll extends ValueNotifier<DeviceDisplayFrame?> {
       value = null;
       return;
     }
-    final n = engine.componentDisplay(layer.id, index, _buffer);
+    // A rack's child (fx-racks): the rack's index + (child + 1) * 65536.
+    final n = engine.componentDisplay(layer.id, target.displayChild == 0 ? index : index + target.displayChild * 65536, _buffer);
     if (n > 0) value = decodeDisplay(id, _buffer, n);  // 0: nothing new to show (or the engine is busy): keep the last
     if (n < 0) value = null;
   }
