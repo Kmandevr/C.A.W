@@ -12,6 +12,7 @@ import '../frame/frame_widgets.dart' show SlideIn;
 import '../glass.dart';
 import '../haptics.dart';
 import '../mixer_screen.dart';
+import '../routing_view.dart';
 import '../motion.dart';
 import '../pattern_editor.dart';
 import '../theme.dart';
@@ -264,6 +265,18 @@ class _MixerTab extends StatelessWidget {
               label: 'Pan', color: Neon.blue, size: 44,
               valueText: (v) => v.abs() < .01 ? 'C' : '${(v.abs() * 100).round()}${v < 0 ? 'L' : 'R'}',
               onChanged: (v) => state.mixLayer(layer, pan: v)),
+            // Sends: a knob per bus (long-press for options), "Send to…" for a new reverb or delay bus or another.
+            if (!layer.isFolder || layer.busEnabled) SizedBox(width: double.infinity, child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start, children: [
+                const Text('SENDS', style: TextStyle(color: Neon.dim, fontSize: 10, letterSpacing: 1.3, fontWeight: FontWeight.w800)),
+                const SizedBox(height: 4),
+                SendKnobs(state: state, layer: layer, size: 40),
+              ])),
+            TextButton.icon(
+              key: const ValueKey('mix-routing'),
+              onPressed: () => showRoutingView(context, state),
+              icon: const Icon(Icons.account_tree_outlined, size: 16),
+              label: const Text('Routing')),
           ]),
         )),
       ]),

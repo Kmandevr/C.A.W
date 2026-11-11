@@ -22,7 +22,7 @@ const builtinEffects = [
   'org.caw.eq', 'org.caw.compressor', 'org.caw.limiter', 'org.caw.gate', 'org.caw.transient', 'org.caw.reverb.pro',
   'org.caw.delay.pro', 'org.caw.delay.pingpong', 'org.caw.saturator', 'org.caw.distortion', 'org.caw.filter',
   'org.caw.phaser', 'org.caw.flanger', 'org.caw.chorus', 'org.caw.utility', 'org.caw.stereo.width',
-  'org.caw.stereo.balance',
+  'org.caw.stereo.balance', 'org.caw.ducker',
 ];
 const builtinInstruments = ['org.caw.synth.flagship', 'org.caw.drum.kick', 'org.caw.drum.snare', 'org.caw.drum.hats',
   'org.caw.drum.kit'];
@@ -53,6 +53,7 @@ DeviceDisplayFrame fakeFrame(String id, {int tick = 0, Map<String, double> value
         'detector_db': tick == 0 ? -12 : -40 + 37 * hit, 'open': ph < 0.55 ? 1 : 0, 'gain_db': 2.5, 'correlation': 0.62,
         'cutoff_l': 1600, 'lfo': 0.4, 'envelope': 0.3, 'freq_l': 900, 'freq_r': 1400, 'lfo_l': 0.3, 'lfo_r': -0.5,
         'delay_l_ms': 2.6, 'delay_r_ms': 3.4, 'wet_db': -14,
+        'key_db': -40 + 37 * hit, 'duck': hit, 'gr': 9 * hit, 'pos_ms': ph * 300, 'phase': ph, 'mode': 2, 'threshold': -24,
         ...values,
       });
 }

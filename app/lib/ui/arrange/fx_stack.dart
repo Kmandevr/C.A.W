@@ -8,6 +8,7 @@ import '../../model/app_state.dart';
 import '../../model/arrange_fx.dart';
 import '../../model/cpp_component.dart';
 import '../../model/project.dart';
+import '../../model/routing_edit.dart';
 import '../../model/device_target.dart';
 import '../devices/device_editor.dart';
 import '../devices/device_inline.dart';
@@ -15,6 +16,7 @@ import '../files/asset_picker.dart';
 import '../frame/sections.dart';
 import '../glass.dart';
 import '../theme.dart';
+import '../volume_fader.dart';
 import 'arrange_drag.dart';
 import 'track_color.dart';
 import 'knob.dart';
@@ -75,9 +77,9 @@ class _FxStackState extends State<FxStack> {
   @override
   Widget build(BuildContext context) {
     s.componentCatalog.refreshIfStale();
-    if (layer.isFolder) {
+    if (layer.isFolder && !layer.busEnabled) {
       return const Center(child: Padding(padding: EdgeInsets.all(16), child: Text(
-        'A folder mixes its tracks; effects go on the tracks inside it.',
+        'This folder only groups its tracks. Turn its bus on (Mixer) to give it effects of its own.',
         textAlign: TextAlign.center, style: TextStyle(color: Neon.dim))));
     }
     return DragTarget<AssetDrag>(
@@ -127,8 +129,11 @@ class _FxStackState extends State<FxStack> {
       key: const ValueKey('fx-stack-list'),
       controller: _scroll,
       padding: const EdgeInsets.fromLTRB(8, 0, 14, 24), children: [
-      // The instrument is the chain's first slot (REAPER: an instrument is FX, usually first in the chain).
-      if (layer.instrument != null) ...[
+      // The instrument is the chain's first slot (REAPER: an instrument is FX, usually first in the chain). A bus
+      // folder has neither instrument nor code chain: only its native effects.
+      if (layer.isFolder) ...[
+        const _GroupLabel('BUS EFFECTS', null, note: 'On everything this bus hears: its tracks and the sends to it'),
+      ] else if (layer.instrument != null) ...[
         const _GroupLabel('INSTRUMENT · C++', null, note: 'Plays the track\'s notes'),
         _NativeEffectCard(key: ValueKey('fx-instrument-${layer.instrument!.id}'), state: s, layer: layer, index: -1,
           instrument: true, selected: _selected == ('instrument', 0), glow: glow,
@@ -146,9 +151,11 @@ class _FxStackState extends State<FxStack> {
           icon: const Icon(Icons.piano, size: 18),
           label: const Text('Instrument'))),
       ],
+      if (!layer.isFolder) ...[
       const SizedBox(height: 6),
       _GroupLabel('CODE EFFECTS · .caw', layer.effectIds.isEmpty ? 'None' : null),
-      if (layer.effectIds.isNotEmpty)
+      ],
+      if (layer.effectIds.isNotEmpty && !layer.isFolder)
         ReorderableListView(
           key: const ValueKey('fx-caw-list'),
           shrinkWrap: true,
@@ -164,7 +171,7 @@ class _FxStackState extends State<FxStack> {
           ],
         ),
       const SizedBox(height: 6),
-      const _GroupLabel('NATIVE EFFECTS · C++', null, note: 'After the code chain, before volume and pan'),
+      if (!layer.isFolder) const _GroupLabel('NATIVE EFFECTS · C++', null, note: 'After the code chain, before volume and pan'),
       if (layer.components.isEmpty) const _GroupLabel('', 'None'),
       if (layer.components.isNotEmpty)
         ReorderableListView(
@@ -559,7 +566,7 @@ class _RoutingView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final p = state.project;
-    final out = p.layers.where((f) => f.id == layer.parentId && f.isFolder && f.busEnabled).firstOrNull;
+    final out = state.outputOf(layer);
     final nodes = <(String, String, Color, bool)>[
       if (layer.instrument case final inst?)
         (state.componentInfo(inst.id)?.label ?? state.cppComponentFor(inst.id)?.name ?? builtinComponentName(inst.id),
@@ -574,6 +581,9 @@ class _RoutingView extends StatelessWidget {
           isBuiltinComponent(c.id) ? Neon.blue : Neon.green, c.bypass || !state.componentPlayable(c.id)),
       ('Volume · Pan', '${(layer.volume * 100).round()}%', Neon.yellow, false),
       (out?.name ?? 'Master', 'Output', Neon.pink, false),
+      for (final send in layer.sends)
+        (state.layerById(send.to)?.name ?? 'Missing bus', 'Send · ${VolumeTaper.label(send.level)}${send.pre ? ' · pre' : ''}',
+          Neon.violet, send.mute),
     ];
     return SingleChildScrollView(
       key: const ValueKey('fx-routing'),

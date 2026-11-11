@@ -15,6 +15,7 @@ import '../theme.dart';
 import '../tokens.dart';
 import 'device_registry.dart';
 import 'device_scope.dart';
+import 'sidechain_bar.dart';
 import 'kit/device_style.dart';
 import 'kit/feel.dart';
 import 'kit/preset_browser.dart';
@@ -234,6 +235,7 @@ class _DeviceEditorState extends State<DeviceEditor> {
       header,
       Container(height: 2, decoration: BoxDecoration(gradient: LinearGradient(colors: [
         color.withValues(alpha: 0.0), color.withValues(alpha: 0.8), second.withValues(alpha: 0.8), second.withValues(alpha: 0.0)]))),
+      if (bypass) SidechainBar(target: t, color: color),
       if (tabs != null) SizedBox(height: 34, child: Row(children: [
         for (var i = 0; i < tabs.length; i++)
           Expanded(child: _Tab(section: tabs[i], selected: i == tab, color: color, onTap: () => setState(() => _tab = i))),

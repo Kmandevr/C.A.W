@@ -12,6 +12,7 @@ import '../theme.dart';
 import 'device_editor.dart' show DevicePresetChip;
 import 'device_registry.dart';
 import 'device_scope.dart';
+import 'sidechain_bar.dart';
 import 'kit/device_style.dart';
 import 'kit/feel.dart';
 import 'kit/presets.dart';
@@ -107,6 +108,7 @@ class _DeviceInlineState extends State<DeviceInline> {
                 Container(height: 2, decoration: BoxDecoration(gradient: LinearGradient(colors: [
                   color.withValues(alpha: 0.0), color.withValues(alpha: 0.8), second.withValues(alpha: 0.8),
                   second.withValues(alpha: 0.0)]))),
+                SidechainBar(target: t, color: color),
                 AnimatedOpacity(
                   duration: Motion.fade(Motion.small, Motion.of(context)),
                   opacity: t.bypass ? 0.55 : 1,
