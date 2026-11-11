@@ -756,6 +756,39 @@ class Engine {
     return j['ok'] == true ? j : null;
   }
 
+  /// The drums' layout (`caw_drums_info`: layers, sounds, kits, built-in samples, the GM map, the display layout).
+  static Map<String, dynamic>? drumsInfo() => _drumsJson((b) => b.drumsInfo());
+
+  /// A random ([current] null) or mutated sound of drum [type] (an index of the info's types, −1: the current
+  /// sound's) for pad [pad] 0..63: `{"ok", "type", "pad", "params": {"<pad>_<suffix>": value}}` (`caw_drums_randomize`).
+  static Map<String, dynamic>? drumsRandomize(int type, int seed, double amount, int pad, Map<String, dynamic>? current) {
+    final s = current == null ? nullptr : jsonEncode(current).toNativeUtf8();
+    try {
+      return _drumsJson((b) => b.drumsRandomize(type, seed & 0xFFFFFFFF, amount, pad, s));
+    } finally {
+      if (s != nullptr) calloc.free(s);
+    }
+  }
+
+  /// One Single-mode Drums track per used pad of Drums entry [entry] (`caw_drums_explode`).
+  static Map<String, dynamic>? drumsExplode(Map<String, dynamic> entry) {
+    final s = jsonEncode(entry).toNativeUtf8();
+    try {
+      return _drumsJson((b) => b.drumsExplode(s));
+    } finally {
+      calloc.free(s);
+    }
+  }
+
+  static Map<String, dynamic>? _drumsJson(Pointer<Utf8> Function(Bindings b) call) {
+    final b = Bindings.instance;
+    final r = call(b);
+    if (r == nullptr) return null;
+    final j = jsonDecode(r.toDartString()) as Map<String, dynamic>;
+    b.free(r);
+    return j['ok'] == true ? j : null;
+  }
+
   /// Ends every knob touch, so automation lanes rule again without a restart (Touch mode letting go).
   void releaseTouches() => _b.releaseTouches(_handle);
 

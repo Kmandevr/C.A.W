@@ -54,7 +54,7 @@ class DeviceTarget {
   /// Fires when a value of the track's devices changes (live edits, undo, redo).
   ValueListenable<int> get tick => state.layerValueTick(layerId);
 
-  ComponentParameterInfo? param(String id) => info?.parameters.where((p) => p.id == id).firstOrNull;
+  ComponentParameterInfo? param(String id) => info?.param(id);
 
   /// The parameter's current value: the project's, else its default (0 for an unknown id).
   double value(String id) => use?.params[id] ?? param(id)?.defaultValue ?? 0;

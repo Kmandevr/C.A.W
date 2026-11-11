@@ -195,9 +195,16 @@ class ComponentUseDoc {
   /// Where a component with a sidechain input (the ducker, a keyed compressor or gate) hears its key; null: none.
   ComponentKeyDoc? key;
 
+  /// The samples its slots play (the drums' Sample layer: slot n is pad n), by reference; the engine decodes them.
+  List<ComponentSampleDoc> samples = [];
+
+  /// The most parameter values an entry keeps: every knob of the largest built-in (the drums' 10392) with room.
+  static const maxParams = 16384;
+
   /// A bare id when nothing else is set, as older projects stored it. [withKey] false leaves the key out (the
   /// engine's copy, when the key would make a loop or names a layer that is gone: [RoutingPlan]).
-  Object toJson({bool withKey = true}) => params.isEmpty && !bypass && state == null && preset == null && (key == null || !withKey)
+  Object toJson({bool withKey = true}) => params.isEmpty && !bypass && state == null && preset == null &&
+          (key == null || !withKey) && samples.isEmpty
       ? id
       : {
           'id': id,
@@ -206,6 +213,7 @@ class ComponentUseDoc {
           if (bypass) 'bypass': true,
           if (state != null) ...{'state': state, 'state_version': stateVersion},
           if (key != null && withKey) 'key': key!.toJson(),
+          if (samples.isNotEmpty) 'samples': [for (final x in samples) x.toJson()],
         };
 
   /// Null for an entry without a usable id. Ids and parameter names are bounded; values must be finite.
@@ -219,7 +227,7 @@ class ComponentUseDoc {
     if (id.isEmpty) return null;
     final params = <String, double>{};
     if (j['params'] case final Map raw) {
-      for (final entry in raw.entries.take(256)) {
+      for (final entry in raw.entries.take(maxParams)) {
         final name = _boundedProjectText(entry.key, 64);
         if (name.isNotEmpty && entry.value is num && (entry.value as num).isFinite) {
           params[name] = (entry.value as num).toDouble();
@@ -235,12 +243,43 @@ class ComponentUseDoc {
       state is String && state.length <= (16 << 20) && RegExp(r'^[A-Za-z0-9+/]*={0,2}$').hasMatch(state) ? state : null,
       version is int && version >= 0 && version <= 0xFFFFFFFF ? version : 1,
       switch (_boundedProjectText(j['preset'], 64)) { '' => null, final name => name },
-    )..key = ComponentKeyDoc.fromJson(j['key']);
+    )
+      ..key = ComponentKeyDoc.fromJson(j['key'])
+      ..samples = ComponentSampleDoc.listFromJson(j['samples']);
   }
 
   static List<ComponentUseDoc> listFromJson(Object? raw) => [
         for (final entry in ((raw as List?) ?? const []).take(64)) ?ComponentUseDoc.fromJson(entry),
       ];
+}
+
+/// One sample slot of a component (the drums' pads): a file the app keeps ([path]) or a built-in pack sound
+/// ([builtin]), never both. The engine's limits (engine/src/project.cpp): 256 entries, slot 0..65535.
+class ComponentSampleDoc {
+  const ComponentSampleDoc(this.slot, {this.path, this.builtin});
+  final int slot;
+  final String? path, builtin;
+
+  String get label => builtin ?? (path ?? '').split(RegExp(r'[/\\]')).last;
+
+  Map<String, dynamic> toJson() => {'slot': slot, if (path != null) 'path': path, if (builtin != null) 'builtin': builtin};
+
+  static ComponentSampleDoc? fromJson(Object? j) {
+    if (j is! Map) return null;
+    final slot = j['slot'];
+    final path = _boundedProjectText(j['path'], 4096), builtin = _boundedProjectText(j['builtin'], 256);
+    if (slot is! int || slot < 0 || slot > 65535 || path.isEmpty == builtin.isEmpty) return null;
+    return ComponentSampleDoc(slot, path: path.isEmpty ? null : path, builtin: builtin.isEmpty ? null : builtin);
+  }
+
+  /// One entry per slot (the last wins), at most 256.
+  static List<ComponentSampleDoc> listFromJson(Object? raw) {
+    final bySlot = <int, ComponentSampleDoc>{};
+    for (final e in ((raw is List) ? raw : const []).take(256)) {
+      if (fromJson(e) case final s?) bySlot[s.slot] = s;
+    }
+    return bySlot.values.toList()..sort((a, b) => a.slot.compareTo(b.slot));
+  }
 }
 
 /// A marker (a named, coloured point in the song) or, with [endSteps], a region (a named span: a verse, a chorus).
@@ -751,7 +790,8 @@ class ProjectDoc {
           lane.target = to;
           return false;
         });
-        l.instrument = ComponentUseDoc(r['id'] as String, params, use.bypass, null, 1, r['preset'] as String?);
+        l.instrument = ComponentUseDoc(r['id'] as String, params, use.bypass, null, 1, r['preset'] as String?)
+          ..samples = use.samples;
         changed = true;
       } else if (params.length != use.params.length || params.entries.any((e) => use.params[e.key] != e.value)) {
         use.params = params;
