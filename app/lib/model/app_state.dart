@@ -1,6 +1,7 @@
 // App state: settings, the startup choice, the open project, engine sync, autosave, meters and every edit.
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
@@ -1741,6 +1742,15 @@ class AppState extends ChangeNotifier {
     // The retired synths as Flagship presets, and presets' values into the knobs (the engine does the same when it
     // plays, so a project opened without the engine library still sounds right).
     if (engine != null) p.resolveInstruments(Engine.resolveInstrument);
+    // A path the project names that isn't a plain local one (a network share, a device or URL) becomes a missing
+    // file before the engine or the missing-files check could look at it (project_dependencies.dart).
+    try {
+      final audio = _storage?.audioDirectory(p.id).path ??
+          '${Directory.systemTemp.path}${Platform.pathSeparator}caw-audio${Platform.pathSeparator}${p.id}';
+      quarantineUnsafePaths(p, '$audio${Platform.pathSeparator}missing');
+    } on ArgumentError {
+      // An id storage refuses has no folder; its paths stay as they are and the engine refuses the project.
+    }
     project = p;
     openError = null;
     openNotice = switch (p.droppedModules) {

@@ -145,6 +145,7 @@ void main() {
     await File('${tmp.path}/native-builds.json')
         .writeAsString(jsonEncode({'com.example.fuzz': {NativeTrustStore.sourceFingerprint(fuzz): libPath}}));
     state.project = project(audio, kick, zone);
+    state.userPickedFiles.addAll([audio, kick, zone]); // as an SFZ's samples are: picked by the user
     state.userPresets.put(UserPreset(id: 'up_1', kind: UserPresetKind.device, name: 'Warm fuzz',
         device: const PresetDevice('com.example.fuzz', {'drive': 0.5}), modified: DateTime.utc(2026)));
     await state.settings.saveTheme(calmNeon.copyWith(name: 'Night shift', profile: {'look.font': 'mono'}));
@@ -285,6 +286,92 @@ void main() {
     expect((loaded.length, builds), (1, 1));
   });
 
+  test('only plain local absolute paths are looked at', () {
+    for (final ok in ['/data/user/0/app/a.wav', r'C:\Users\me\a.wav', 'C:/x/a.wav', '/a b/c (1).wav']) {
+      expect(isSafeLocalPath(ok), isTrue, reason: ok);
+    }
+    for (final bad in [r'\\attacker\share\a.wav', '//host/x.wav', r'\\?\C:\a.wav', r'\\.\pipe\x', '\\\\host/x',
+        'smb://host/a.wav', 'file:///etc/passwd', 'http://x/a.wav', 'a.wav', 'sub/a.wav', '/a/../b.wav', '/a/./b',
+        r'C:\a.wav:stream', 'C:a.wav', '', '/a\u0000b']) {
+      expect(isSafeLocalPath(bad), isFalse, reason: bad);
+    }
+  });
+
+  test('a project naming network or device paths opens with them missing, never probed', () async {
+    final unc = r'\\attacker\share\kick.wav';
+    final json = ProjectDoc(id: 'x', name: 'Remote', assets: [AudioAssetDoc(id: 'a', path: unc, name: 'kick')], layers: [
+      LayerDoc(id: 'l', name: 'Hits', color: 0, audioClips: [AudioClipDoc(id: 'c', assetId: 'a')],
+          instrument: ComponentUseDoc('org.caw.drums')..samples = [ComponentSampleDoc(0, path: '//host/snare.wav')]),
+    ]).toJson();
+    final f = File('${tmp.path}/remote.caw')..writeAsStringSync(jsonEncode(json));
+    await state.importProjectFile(f.path);
+    await state.checkMissingFiles();
+    final p = state.project;
+    expect(p.assets.single.path, startsWith(state.audioDirectory.path));
+    expect(p.assets.single.path, endsWith('kick.wav'));
+    expect(p.layers.single.instrument!.samples.single.path, endsWith('snare.wav'));
+    expect(isSafeLocalPath(p.layers.single.instrument!.samples.single.path!), isTrue);
+    expect(state.missingFiles.map((m) => m.name).toSet(), {'kick.wav', 'snare.wav'});
+    // A project already on disk gets the same treatment when it opens.
+    await state.importProject(ProjectDoc.fromJson(json), prepare: (_) {});
+    expect(isSafeLocalPath(state.project.assets.single.path), isTrue);
+  });
+
+  test('a reference outside the project is listed as outside, never hashed or packaged', () async {
+    final own = file('own.wav', _bytes(100, 1)), other = file('other-project/secret.wav', _bytes(100, 2));
+    state.project = ProjectDoc(id: 'p', name: 'Mixed', assets: [
+      AudioAssetDoc(id: 'a', path: own, name: 'own'), AudioAssetDoc(id: 'b', path: other, name: 'secret')]);
+    state.userPickedFiles.add(own);
+    final deps = await state.projectDependencies();
+    final outside = deps.singleWhere((d) => d.name == 'secret.wav');
+    expect((outside.outside, outside.packageable, outside.size), (true, false, 0));
+    final caw = await state.writeProjectFile(deps, {for (final d in deps) d.key}, into: tmp);
+    final zip = ZipReader.open(caw.path);
+    final manifest = jsonDecode(utf8.decode(zip.readBytes(zip['manifest.json']!))) as Map;
+    expect(zip.entries.map((e) => e.name), isNot(contains(contains('secret'))));
+    zip.close();
+    final row = (manifest['dependencies'] as List).cast<Map>().singleWhere((e) => e['name'] == 'secret.wav');
+    expect((row['packaged'], row['outside'], row.containsKey('sha256')), (false, true, false));
+  });
+
+  test('a manifest listing one file twice is refused; unpacking stops at the running total', () async {
+    final wav = _bytes(3000, 1);
+    final projectJson = utf8.encode(jsonEncode(ProjectDoc(id: 'x', name: 'Bomb',
+        assets: [AudioAssetDoc(id: 'a', path: 'package:assets/a.wav', name: 'a')]).toJson()));
+    Uint8List pkg(List<Map<String, Object?>> deps, List<(String, List<int>, int, int)> more) {
+      final manifest = utf8.encode(jsonEncode({'format': packageFormat, 'version': 1, 'dependencies': deps}));
+      return _rawZip([('manifest.json', manifest, manifest.length, 0), ('project.json', projectJson, projectJson.length, 0),
+          ...more]);
+    }
+    final tag = 'budget${DateTime.now().microsecondsSinceEpoch}';
+    Map<String, Object?> listing(String path) => {'kind': 'audio', 'name': '$tag-${path.split('/').last}',
+        'reference': 'package:$path', 'path': path, 'packaged': true};
+    final twice = File('${tmp.path}/twice.caw')
+      ..writeAsBytesSync(pkg([listing('assets/a.wav'), listing('assets/a.wav')], [('assets/a.wav', wav, wav.length, 0)]));
+    await expectLater(state.importProjectFile(twice.path), throwsA(isA<FormatException>()
+        .having((e) => e.message, 'message', contains('more than once'))));
+    // More listings than files in the archive.
+    final more = File('${tmp.path}/more.caw')
+      ..writeAsBytesSync(pkg([for (final n in ['a', 'b', 'c', 'd']) listing('assets/$n.wav')],
+          [('assets/a.wav', wav, wav.length, 0)]));
+    await expectLater(state.importProjectFile(more.path), throwsFormatException);
+    // Three files of 3000 bytes under a 7000-byte budget: the third stops it, and the two written are removed.
+    final three = File('${tmp.path}/three.caw')..writeAsBytesSync(pkg(
+        [listing('assets/a.wav'), listing('assets/b.wav'), listing('assets/c.wav')],
+        [('assets/a.wav', wav, wav.length, 0), ('assets/b.wav', wav, wav.length, 0), ('assets/c.wav', wav, wav.length, 0)]));
+    final before = state.project.id;
+    await expectLater(state.importProjectFile(three.path, maxUnpackBytes: 7000 + 2000),
+        throwsA(isA<FormatException>().having((e) => e.message, 'message', contains('more than this app takes'))));
+    expect(state.project.id, before, reason: 'nothing opened');
+    final audioRoot = Directory('${Directory.systemTemp.path}${Platform.pathSeparator}caw-audio');
+    final left = audioRoot.existsSync()
+        ? audioRoot.listSync(recursive: true).whereType<File>().where((f) => f.path.contains(tag))
+        : const <File>[];
+    expect(left, isEmpty, reason: 'the files written before the budget ran out are removed');
+    await state.importProjectFile(three.path); // within the real limits it opens
+    expect(state.project.assets.single.path, isNot(startsWith('package:')));
+  });
+
   testWidgets('the checklist: Package everything, sources always in, the total follows the boxes', (tester) async {
     final deps = [
       ProjectDependency(key: 'a', kind: DependencyKind.audio, name: 'loop.wav', path: '/x', size: 2048, found: true,
@@ -340,6 +427,8 @@ void main() {
     ProjectFilePicker.pickAudio = ({required bool many}) async => [wrong];
     await tester.runAsync(() => locateMissingFiles(tester.element(find.byType(MissingFilesBanner)), state));
     expect(state.missingFiles, isNotEmpty, reason: 'a file with other bytes is not the one the package listed');
+    expect(state.audioDirectory.existsSync() ? state.audioDirectory.listSync().whereType<File>() : const <File>[], isEmpty,
+        reason: 'the refused copy is deleted');
 
     ProjectFilePicker.pickAudio = ({required bool many}) async => [right];
     await tester.runAsync(() => locateMissingFiles(tester.element(find.byType(MissingFilesBanner)), state));
