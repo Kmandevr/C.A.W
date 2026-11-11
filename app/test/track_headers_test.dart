@@ -526,4 +526,56 @@ void main() {
       expect(tester.takeException(), isNull);
     });
   });
+
+  group('motion', () {
+    testWidgets('a moved clip slides there quickly; with clip animations off it jumps', (tester) async {
+      await pump(tester, size: const Size(1200, 800));
+      final slot = find.byKey(const ValueKey('clip-slot-c1'));
+      final x0 = tester.getTopLeft(slot).dx;
+      s.moveClip(layer('a'), layer('a').clips.single, 32);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 50));
+      final mid = tester.getTopLeft(slot).dx;
+      await settle(tester);
+      final x1 = tester.getTopLeft(slot).dx;
+      expect(x1, greaterThan(x0));
+      expect(mid, greaterThan(x0));
+      expect(mid, lessThan(x1), reason: 'between its places part way');
+      final kinds = EditMotion.kinds;
+      EditMotion.kinds = {...EditMotionKind.values}..remove(EditMotionKind.clips);
+      addTearDown(() => EditMotion.kinds = kinds);
+      s.moveClip(layer('a'), layer('a').clips.single, 48);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 20));
+      expect(tester.getTopLeft(slot).dx, greaterThan(x1 + 100), reason: 'at once');
+      await settle(tester);
+    });
+
+    testWidgets('the mixer card and the focus panel are still there, part way, as they leave', (tester) async {
+      await pump(tester);
+      await tester.tap(find.byKey(const ValueKey('arrange-mixer')));
+      await settle(tester);
+      final card = find.byKey(const ValueKey('mixer-card'));
+      final open = tester.getTopLeft(card).dy;
+      await tester.tap(find.byKey(const ValueKey('arrange-mixer')).hitTestable().evaluate().isEmpty
+          ? find.byTooltip('Close') : find.byKey(const ValueKey('arrange-mixer')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 80));
+      expect(card, findsOneWidget, reason: 'still leaving');
+      expect(tester.getTopLeft(card).dy, greaterThan(open), reason: 'sliding down');
+      await settle(tester);
+      expect(card, findsNothing);
+
+      await tester.tap(header('c'));
+      await settle(tester);
+      final panel = find.byKey(const ValueKey('focus-panel'));
+      expect(panel, findsOneWidget);
+      sections.focusLayer(null);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 80));
+      expect(panel, findsOneWidget, reason: 'still leaving');
+      await settle(tester);
+      expect(panel, findsNothing);
+    });
+  });
 }

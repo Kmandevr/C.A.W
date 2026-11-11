@@ -219,6 +219,7 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('lanes-button-a')));
       await tester.pump();
       expect(keys().showLanes, isTrue);
+      await tester.pump(const Duration(milliseconds: 500)); // the lanes grow open under it
       expect(LayerDoc.fromJson(keys().toJson()).showLanes, isTrue, reason: 'saved per track');
       final row = tester.getRect(find.byKey(ValueKey('lane-row-$key')));
       final lane = tester.getRect(find.byKey(const ValueKey('track-header-a')));
@@ -231,6 +232,8 @@ void main() {
           greaterThanOrEqualTo(row.bottom + kLaneAddRowHeight - 0.5));
       await tester.tap(find.byKey(const ValueKey('lanes-button-a')));
       await tester.pump();
+      expect(find.byKey(ValueKey('lane-row-$key')), findsOneWidget, reason: 'they shrink away');
+      await tester.pump(const Duration(milliseconds: 500));
       expect(find.byKey(ValueKey('lane-row-$key')), findsNothing);
       await tester.pump(const Duration(seconds: 2));
     });
