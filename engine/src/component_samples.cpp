@@ -8,6 +8,7 @@
 #include <new>
 
 #include "builtin_drums.h"
+#include "utf8_path.h"
 #include "caw/module.hpp"
 
 namespace caw {
@@ -163,15 +164,15 @@ bool decodeWavBytes(const uint8_t* b, size_t size, double rate, std::vector<floa
 }
 
 bool decodeWavFile(const std::string& path, double rate, std::vector<float>& out, std::string& error) {
-    std::FILE* f = std::fopen(path.c_str(), "rb");
+    std::FILE* f = openFile(utf8Path(path), "rb");
     if (!f) {
         error = "can't open " + path;
         return false;
     }
     std::vector<uint8_t> bytes;
-    bool ok = std::fseek(f, 0, SEEK_END) == 0;
-    const long size = ok ? std::ftell(f) : -1;
-    ok = ok && size > 0 && static_cast<uint64_t>(size) <= kMaxSampleFileBytes && std::fseek(f, 0, SEEK_SET) == 0;
+    bool ok = seekFile(f, 0, SEEK_END);
+    const int64_t size = ok ? tellFile(f) : -1;
+    ok = ok && size > 0 && static_cast<uint64_t>(size) <= kMaxSampleFileBytes && seekFile(f, 0, SEEK_SET);
     if (ok) {
         try {
             bytes.resize(static_cast<size_t>(size));

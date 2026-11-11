@@ -5,6 +5,8 @@
 #include <cstdio>
 #include <cstring>
 
+#include "utf8_path.h"
+
 namespace caw {
 
 namespace {
@@ -128,7 +130,7 @@ bool WavFileWriter::open(const std::string& path, const WavSpec& spec, int64_t f
     abandon();
     path_ = path;
     part_ = path + ".part";
-    file_ = std::fopen(part_.c_str(), "wb");
+    file_ = openFile(utf8Path(part_), "wb");
     if (!file_) {
         error = "can't open " + part_ + " for writing";
         return false;
@@ -170,13 +172,13 @@ bool WavFileWriter::finish(std::string& error) {
     file_ = nullptr;
     if (failed_ || !closed || !complete) {
         error = complete ? "couldn't write all of " + path_ : "the render ended before the WAV was complete";
-        std::remove(part_.c_str());
+        removeFile(part_);
         return false;
     }
-    std::remove(path_.c_str());  // rename doesn't replace an existing file on Windows
-    if (std::rename(part_.c_str(), path_.c_str()) != 0) {
+    removeFile(path_);  // rename doesn't replace an existing file on Windows
+    if (!renameFile(part_, path_)) {
         error = "couldn't move " + part_ + " to " + path_;
-        std::remove(part_.c_str());
+        removeFile(part_);
         return false;
     }
     return true;
@@ -186,11 +188,11 @@ void WavFileWriter::abandon() {
     if (!file_) return;
     std::fclose(file_);
     file_ = nullptr;
-    std::remove(part_.c_str());
+    removeFile(part_);
 }
 
 bool writeFile(const std::string& path, const std::vector<uint8_t>& bytes, std::string& error) {
-    std::FILE* f = std::fopen(path.c_str(), "wb");
+    std::FILE* f = openFile(utf8Path(path), "wb");
     if (!f) {
         error = "can't open " + path + " for writing";
         return false;

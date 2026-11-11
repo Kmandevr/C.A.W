@@ -15,6 +15,7 @@
 #include "meters.h"
 #include "render.h"
 #include "sample_pack.h"
+#include "utf8_path.h"
 #include "wav.h"
 
 namespace caw {
@@ -215,7 +216,7 @@ bool makeRanges(const ProjectSpec& p, const SongRenderRequest& req, std::vector<
 void closeRaw(Output& o, bool remove) {
     if (o.raw) std::fclose(o.raw);
     o.raw = nullptr;
-    if (remove && !o.rawPath.empty()) std::remove(o.rawPath.c_str());
+    if (remove && !o.rawPath.empty()) removeFile(o.rawPath);
 }
 
 // The gain (dB) normalisation gives an output measured at `peak` (linear), `lufs` and `truePeakDb`.
@@ -281,15 +282,15 @@ bool renderRange(const ProjectSpec& base, const SongRenderRequest& req, const st
         for (int n = 2; usedNames.count(lower(unique)) > 0; ++n) unique = name + "_" + std::to_string(n);
         usedNames.insert(lower(unique));
         o.finalName = unique + ".wav";
-        o.finalPath = (fs::path(req.outDir) / o.finalName).string();
+        o.finalPath = pathText(utf8Path(req.outDir) / utf8Path(o.finalName));
         std::error_code ec;
-        if (fs::is_symlink(fs::symlink_status(o.finalPath, ec))) {
+        if (fs::is_symlink(fs::symlink_status(utf8Path(o.finalPath), ec))) {
             error = "'" + o.finalName + "' in the output folder is a symbolic link; refusing to write through it";
             cleanup();
             return false;
         }
         o.rawPath = o.finalPath + ".raw.part";
-        o.raw = std::fopen(o.rawPath.c_str(), "wb");
+        o.raw = openFile(utf8Path(o.rawPath), "wb");
         if (!o.raw) {
             error = "can't open " + o.rawPath + " for writing";
             cleanup();
@@ -404,7 +405,7 @@ bool renderRange(const ProjectSpec& base, const SongRenderRequest& req, const st
         spec.dither = req.dither && req.bitDepth == 16;
         spec.ditherSeed = static_cast<uint32_t>(out.files.size() + 1);
         WavFileWriter wav;
-        std::FILE* in = std::fopen(o.rawPath.c_str(), "rb");
+        std::FILE* in = openFile(utf8Path(o.rawPath), "rb");
         if (!in || !wav.open(o.finalPath, spec, frames, error)) {
             if (in) std::fclose(in);
             if (error.empty()) error = "can't read back " + o.rawPath;
@@ -439,7 +440,7 @@ bool renderRange(const ProjectSpec& base, const SongRenderRequest& req, const st
             cleanup();
             return false;
         }
-        std::remove(o.rawPath.c_str());
+        removeFile(o.rawPath);
         o.rawPath.clear();
         RenderedFile f;
         f.path = o.finalPath;
@@ -604,7 +605,7 @@ bool renderSong(const ProjectSpec& in, const SongRenderRequest& req, SongRenderR
                 int32_t* cancel) {
     out = SongRenderResult{};
     std::error_code ec;
-    if (req.outDir.empty() || !fs::is_directory(fs::path(req.outDir), ec)) {
+    if (req.outDir.empty() || !fs::is_directory(utf8Path(req.outDir), ec)) {
         out.error = "the output folder '" + req.outDir + "' doesn't exist";
         return false;
     }
@@ -629,7 +630,7 @@ bool renderSong(const ProjectSpec& in, const SongRenderRequest& req, SongRenderR
     std::set<std::string> used;
     for (size_t i = 0; i < ranges.size(); ++i) {
         if (!renderRange(p, req, stems, ranges[i], i, ranges.size(), used, out, progress, cancel)) {
-            for (const RenderedFile& f : out.files) std::remove(f.path.c_str());  // all or nothing
+            for (const RenderedFile& f : out.files) removeFile(f.path);  // all or nothing
             out.files.clear();
             if (out.error.empty()) out.error = "the render failed";
             return false;

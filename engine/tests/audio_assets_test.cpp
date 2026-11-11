@@ -16,23 +16,33 @@
 #include "audio_input.h"
 #include "builtin_sampler.h"
 #include "caw.h"
+#include "component_samples.h"
 #include "engine.h"
 #include "json.h"
 #include "project.h"
 #include "render_stems.h"
 #include "test.h"
 #include "time_stretch.h"
+#include "utf8_path.h"
 #include "wav.h"
 
 using namespace caw;
 
 namespace {
 
+// A fresh folder; its UTF-8 text (generic_string() would be the ANSI code page on Windows).
 std::string tempDir(const std::string& name) {
-    const auto d = std::filesystem::temp_directory_path() / ("caw_wpj_" + name);
+    const auto d = std::filesystem::temp_directory_path() / utf8Path("caw_wpj_" + name);
     std::filesystem::remove_all(d);
     std::filesystem::create_directories(d);
-    return d.generic_string();
+    return pathText(d);
+}
+
+// The bytes of a file named by UTF-8 text; the file is closed again before it returns (Windows can't delete an
+// open file, and remove_all throws then).
+std::vector<uint8_t> readBytes(const std::string& path) {
+    std::ifstream f(utf8Path(path), std::ios::binary);
+    return std::vector<uint8_t>((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
 }
 
 // A WAV file of `frames` frames; sample(i, c) gives each value.
@@ -119,7 +129,7 @@ TEST(assets_decode_wav_resample_and_keep_frequency) {
     CHECK_EQ(readPeaks(*a, 0, a->frames, 4, 0, pk), 4);
     CHECK_NEAR(pk[0], -0.5, 0.02);
     CHECK_NEAR(pk[1], 0.5, 0.02);
-    std::filesystem::remove_all(dir);
+    std::filesystem::remove_all(utf8Path(dir));
 }
 
 TEST(assets_resample_far_down_in_halfband_stages_quickly_and_cleanly) {
@@ -157,14 +167,14 @@ TEST(assets_refuse_garbage_truncated_and_missing_files) {
     std::string error;
     const std::string garbage = dir + "/garbage.wav";
     {
-        std::ofstream f(garbage, std::ios::binary);
+        std::ofstream f(utf8Path(garbage), std::ios::binary);
         for (int i = 0; i < 1000; ++i) f.put(static_cast<char>(i * 37));
     }
     CHECK(AssetStore::global().load(garbage, 48000, error) == nullptr);
     CHECK(!error.empty());
     // A WAV cut off inside its data still loads the frames it has (or is refused); it never reads past the end.
     const std::string good = writeWav(dir + "/cut.wav", 48000, 1, 4800, [](int64_t i, int) { return noiseAt(i, 0); });
-    std::filesystem::resize_file(good, 44 + 100 * 4 + 2);
+    std::filesystem::resize_file(utf8Path(good), 44 + 100 * 4 + 2);
     auto cut = AssetStore::global().load(good, 48000, error);
     CHECK(!cut || cut->frames <= 101);
     error.clear();
@@ -179,7 +189,7 @@ TEST(assets_refuse_garbage_truncated_and_missing_files) {
         AudioAsset out;
         decodeAsset(fuzz.data(), fuzz.size(), 48000, "fuzz", out, error);
     }
-    std::filesystem::remove_all(dir);
+    std::filesystem::remove_all(utf8Path(dir));
 }
 
 TEST(assets_decode_stops_at_the_budget_from_the_files_own_rate_and_channels) {
@@ -188,8 +198,7 @@ TEST(assets_decode_stops_at_the_budget_from_the_files_own_rate_and_channels) {
     const std::string dir = tempDir("decodebudget");
     std::string error;
     const std::string mono = writeWav(dir + "/mono.wav", 48000, 1, 300000, [](int64_t i, int) { return noiseAt(i, 0); }, false);
-    std::ifstream f(mono, std::ios::binary);
-    const std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+    const std::vector<uint8_t> bytes = readBytes(mono);
     AudioAsset a;
     CHECK(!decodeAsset(bytes.data(), bytes.size(), 48000, "mono", a, error, 1u << 20));  // 1.2 MB of floats
     CHECK(error.find("budget") != std::string::npos);
@@ -198,8 +207,7 @@ TEST(assets_decode_stops_at_the_budget_from_the_files_own_rate_and_channels) {
     CHECK_EQ(a.frames, int64_t{300000});
     // 32 channels of 20000 frames: 2.5 MB interleaved, but only the first two are kept (160 kB).
     const std::string wide = writeWav(dir + "/wide.wav", 48000, 32, 20000, [](int64_t i, int c) { return c * 0.01f + 0 * i; });
-    std::ifstream g(wide, std::ios::binary);
-    const std::vector<uint8_t> wb((std::istreambuf_iterator<char>(g)), std::istreambuf_iterator<char>());
+    const std::vector<uint8_t> wb = readBytes(wide);
     AudioAsset w;
     CHECK(decodeAsset(wb.data(), wb.size(), 48000, "wide", w, error, 400000));
     CHECK_EQ(w.sourceChannels, 32u);
@@ -213,7 +221,7 @@ TEST(assets_decode_stops_at_the_budget_from_the_files_own_rate_and_channels) {
     CHECK(s.load(mono, 48000, error) == nullptr);
     CHECK(error.find("budget") != std::string::npos);
     s.setBudget(was);
-    std::filesystem::remove_all(dir);
+    std::filesystem::remove_all(utf8Path(dir));
 }
 
 TEST(assets_share_by_refcount_and_the_budget_evicts_only_unused_ones) {
@@ -235,7 +243,7 @@ TEST(assets_share_by_refcount_and_the_budget_evicts_only_unused_ones) {
     CHECK(other != nullptr);
     CHECK(s.find(a, 48000) == nullptr);
     s.setBudget(was);
-    std::filesystem::remove_all(dir);
+    std::filesystem::remove_all(utf8Path(dir));
 }
 
 // ---------------------------------------------------------------- readers
@@ -290,7 +298,7 @@ TEST(audio_clip_plays_sample_accurately_through_the_track) {
     CHECK(exact);
     CHECK(k > 0.5 && k <= 1.0001);
     CHECK_EQ(l[48000], 0.0f);  // it ends where the clip ends
-    std::filesystem::remove_all(dir);
+    std::filesystem::remove_all(utf8Path(dir));
 }
 
 TEST(audio_clip_edits_offset_gain_fade_reverse_loop_and_mute) {
@@ -315,7 +323,7 @@ TEST(audio_clip_edits_offset_gain_fade_reverse_loop_and_mute) {
     // muted: nothing
     x = render(clipProject(p, ",\"start_steps\":0,\"length_steps\":2,\"mute\":true"), 12000);
     CHECK_EQ(*std::max_element(x.begin(), x.end()), 0.0f);
-    std::filesystem::remove_all(dir);
+    std::filesystem::remove_all(utf8Path(dir));
 }
 
 TEST(audio_clips_render_the_same_at_every_block_size_and_from_a_seek) {
@@ -340,7 +348,7 @@ TEST(audio_clips_render_the_same_at_every_block_size_and_from_a_seek) {
     bool same = true;
     for (int i = 1000; i < 20000; ++i) same = same && whole[18000 + i] == from[i];  // past the Play fade-in
     CHECK(same);
-    std::filesystem::remove_all(dir);
+    std::filesystem::remove_all(utf8Path(dir));
 }
 
 TEST(musical_clip_follows_the_tempo_and_fixed_does_not) {
@@ -361,7 +369,7 @@ TEST(musical_clip_follows_the_tempo_and_fixed_does_not) {
     // Fixed: the file at its own speed, done after 24000 frames.
     x = render(clipProject(p, ",\"start_steps\":0,\"length_steps\":4", 1, 60), 48000);
     CHECK_EQ(x[30000], 0.0f);
-    std::filesystem::remove_all(dir);
+    std::filesystem::remove_all(utf8Path(dir));
 }
 
 namespace {
@@ -393,7 +401,7 @@ TEST(fixed_clip_keeps_its_source_position_across_a_tempo_change) {
     double err = 0;
     for (int t = 62000; t < 80000; ++t) err = std::max(err, std::fabs(l[static_cast<size_t>(t)] - k * noiseAt(t - 48000, 0)));
     CHECK(err < 1e-5);
-    std::filesystem::remove_all(dir);
+    std::filesystem::remove_all(utf8Path(dir));
 }
 
 TEST(clip_voices_declick_on_a_loop_wrap_a_mode_change_and_stop_and_loops_crossfade) {
@@ -435,7 +443,7 @@ TEST(clip_voices_declick_on_a_loop_wrap_a_mode_change_and_stop_and_loops_crossfa
     CHECK(std::fabs(l[45000]) > 0.05f || std::fabs(l[44990]) > 0.05f);
     CHECK(largestStep(l, 44000, 47000) < 0.02f);
     (void)smooth;
-    std::filesystem::remove_all(dir);
+    std::filesystem::remove_all(utf8Path(dir));
 }
 
 TEST(audio_clips_parse_errors_and_song_length) {
@@ -488,7 +496,7 @@ TEST(audio_clip_goes_through_inserts_and_buses_and_the_song_render_matches_playb
     }
     CHECK(same);
     CHECK(peak > 0.05f);
-    std::filesystem::remove_all(dir);
+    std::filesystem::remove_all(utf8Path(dir));
 }
 
 // ---------------------------------------------------------------- the sampler
@@ -532,7 +540,7 @@ TEST(sampler_maps_zones_by_key_and_velocity_and_plays_at_pitch) {
         es += soft[i] * soft[i];
     }
     CHECK(es < el * 0.2);
-    std::filesystem::remove_all(dir);
+    std::filesystem::remove_all(utf8Path(dir));
 }
 
 TEST(sampler_round_robins_loops_and_one_shots) {
@@ -556,7 +564,7 @@ TEST(sampler_round_robins_loops_and_one_shots) {
     const std::string plain = "{\"zones\":[{\"path\":\"" + jsonEscape(c) + "\"}]}";
     x = playSampler(plain, "\"attack\":0", {60}, 20000, 2);
     CHECK_EQ(x[5000], 0.0f);
-    std::filesystem::remove_all(dir);
+    std::filesystem::remove_all(utf8Path(dir));
 }
 
 namespace {
@@ -583,7 +591,7 @@ TEST(sampler_steals_a_releasing_voice_first_and_fades_the_stolen_one) {
     x = render(samplerJson(zones, "\"polyphony\":1,\"attack\":0.005", "0 C4 4 1\\n1 D4 4 1\\n"), 12000, 64);
     CHECK(x[5900] > 0.15f);
     CHECK(largestStep(x, 5800, 6800) < 0.02f);
-    std::filesystem::remove_all(dir);
+    std::filesystem::remove_all(utf8Path(dir));
 }
 
 TEST(sampler_reload_fades_the_sounding_voices_out) {
@@ -602,7 +610,7 @@ TEST(sampler_reload_fades_the_sounding_voices_out) {
     for (int i = 12032; i < 24000; i += 64) e.process(l.data() + i, r.data() + i, 64);
     CHECK(l[12000] > 0.15f);
     CHECK(largestStep(l, 11000, 20000) < 0.02f);
-    std::filesystem::remove_all(dir);
+    std::filesystem::remove_all(utf8Path(dir));
 }
 
 TEST(sfz_import_reads_headers_inheritance_note_names_and_warns) {
@@ -677,13 +685,13 @@ TEST(sfz_defines_expand_once_longest_name_first_and_are_capped) {
 TEST(sfz_export_copies_samples_and_the_c_api_round_trips) {
     const std::string dir = tempDir("sfzexport");
     const std::string a = writeWav(dir + "/src a.wav", 48000, 1, 100, [](int64_t i, int) { return noiseAt(i, 0); });
-    std::filesystem::create_directories(dir + "/out");
+    std::filesystem::create_directories(utf8Path(dir + "/out"));
     const std::string state = "{\"zones\":[{\"path\":\"" + jsonEscape(a) + "\",\"lokey\":10,\"hikey\":20}]}";
     char* r = caw_sfz_export(state.c_str(), (dir + "/out/kit.sfz").c_str(), 1);
     CHECK(std::string(r).find("\"ok\":true") != std::string::npos);
     if (std::string(r).find("src_a") == std::string::npos) std::printf("%s\n", r);
     caw_free(r);
-    CHECK(std::filesystem::exists(dir + "/out/samples/src_a.wav"));
+    CHECK(std::filesystem::exists(utf8Path(dir + "/out/samples/src_a.wav")));
     r = caw_sfz_import((dir + "/out/kit.sfz").c_str());
     const std::string imported = r;
     caw_free(r);
@@ -691,16 +699,16 @@ TEST(sfz_export_copies_samples_and_the_c_api_round_trips) {
     CHECK(imported.find("samples/src_a.wav") != std::string::npos);
     CHECK(imported.find("\"lokey\":10") != std::string::npos);
     CHECK(imported.find("missing sample") == std::string::npos);
-    std::filesystem::remove_all(dir);
+    std::filesystem::remove_all(utf8Path(dir));
 }
 
 TEST(sfz_export_never_overwrites_copies_only_audio_and_keeps_unicode_names) {
     const std::string dir = tempDir("sfzexport2");
     const std::string a = writeWav(dir + "/src a.wav", 48000, 1, 100, [](int64_t i, int) { return noiseAt(i, 0); });
     const std::string u = writeWav(dir + "/\xc3\xbc" "n\xc3\xaf" "c\xc3\xb6" "de.wav", 48000, 1, 100, [](int64_t i, int) { return noiseAt(i, 1); });
-    std::filesystem::create_directories(dir + "/out/samples");
+    std::filesystem::create_directories(utf8Path(dir + "/out/samples"));
     {
-        std::ofstream keep(dir + "/out/samples/Src_A.wav", std::ios::binary);  // the same name but for case
+        std::ofstream keep(utf8Path(dir + "/out/samples/Src_A.wav"), std::ios::binary);  // the same name but for case
         keep << "keep";
     }
     const std::string state = "{\"zones\":[{\"path\":\"" + jsonEscape(a) + "\"},{\"path\":\"" + jsonEscape(u) + "\",\"lokey\":70}]}";
@@ -709,11 +717,11 @@ TEST(sfz_export_never_overwrites_copies_only_audio_and_keeps_unicode_names) {
     caw_free(r);
     CHECK(out.find("\"ok\":true") != std::string::npos);
     CHECK(out.find("samples/src_a_2.wav") != std::string::npos);
-    CHECK_EQ(std::filesystem::file_size(dir + "/out/samples/Src_A.wav"), std::uintmax_t{4});
-    CHECK(std::filesystem::exists(dir + "/out/samples/src_a_2.wav"));
+    CHECK_EQ(std::filesystem::file_size(utf8Path(dir + "/out/samples/Src_A.wav")), std::uintmax_t{4});
+    CHECK(std::filesystem::exists(utf8Path(dir + "/out/samples/src_a_2.wav")));
     // A zone naming something that is not audio is not copied.
     {
-        std::ofstream secret(dir + "/secret.wav", std::ios::binary);
+        std::ofstream secret(utf8Path(dir + "/secret.wav"), std::ios::binary);
         secret << "password=hunter2";
     }
     const std::string bad = "{\"zones\":[{\"path\":\"" + jsonEscape(dir + "/secret.wav") + "\"}]}";
@@ -721,8 +729,51 @@ TEST(sfz_export_never_overwrites_copies_only_audio_and_keeps_unicode_names) {
     const std::string refused = r;
     caw_free(r);
     CHECK(refused.find("\"ok\":false") != std::string::npos);
-    CHECK(!std::filesystem::exists(dir + "/out/samples/secret.wav"));
-    std::filesystem::remove_all(dir);
+    CHECK(!std::filesystem::exists(utf8Path(dir + "/out/samples/secret.wav")));
+    std::filesystem::remove_all(utf8Path(dir));
+}
+
+TEST(wav_writers_component_samples_and_song_renders_take_utf8_paths) {
+    // Every engine path is UTF-8 text; on Windows a narrow fopen would read it in the ANSI code page instead.
+    const std::string dir = tempDir("utf8") + "/K\xc3\xb6rper \xe9\x9f\xb3";  // "Körper 音"
+    std::filesystem::create_directories(utf8Path(dir));
+    const std::string a = writeWav(dir + "/\xc3\xa4.wav", 48000, 1, 100, [](int64_t i, int) { return noiseAt(i, 0); });
+    CHECK(std::filesystem::exists(utf8Path(a)));
+    std::string error;
+    CHECK(AssetStore::global().load(a, 48000, error) != nullptr);
+    std::vector<float> mono;
+    CHECK(decodeWavFile(a, 48000, mono, error));
+    CHECK_EQ(mono.size(), size_t{100});
+    // The streaming writer goes through a .part file and replaces what was there.
+    WavSpec spec;
+    spec.sampleRate = 48000;
+    spec.channels = 1;
+    spec.float32 = true;
+    std::vector<float> x(50, 0.25f);
+    WavFileWriter w;
+    CHECK(w.open(a, spec, 50, error));
+    CHECK(w.write(x.data(), 50));
+    CHECK(w.finish(error));
+    CHECK(!std::filesystem::exists(utf8Path(a + ".part")));
+    CHECK(decodeWavFile(a, 48000, mono, error));
+    CHECK_EQ(mono.size(), size_t{50});
+    // A song render into the folder.
+    const std::string json = "{\"caw_project\":1,\"bpm\":120,\"loop_bars\":1,\"master\":1,\"assets\":[{\"id\":\"a\",\"path\":\"" +
+                             jsonEscape(a) + "\"}],\"layers\":[{\"id\":\"t\",\"name\":\"T\",\"volume\":1,"
+                             "\"audio_clips\":[{\"id\":\"c1\",\"asset\":\"a\",\"length_steps\":4}]}]}";
+    ProjectSpec p;
+    CHECK(parseProject(json, p, error));
+    SongRenderRequest q;
+    q.outDir = dir;
+    q.project = "S\xc3\xa5ng";  // "Sång"
+    SongRenderResult r;
+    CHECK(renderSong(p, q, r));
+    CHECK_EQ(r.files.size(), size_t{1});
+    if (r.files.size() == 1) {
+        CHECK(std::filesystem::exists(utf8Path(r.files[0].path)));
+        CHECK(AssetStore::global().load(r.files[0].path, 48000, error) != nullptr);
+    }
+    std::filesystem::remove_all(utf8Path(tempDir("utf8")));
 }
 
 TEST(huge_sfz_offsets_and_peak_times_are_clamped_before_the_cast) {
@@ -741,7 +792,7 @@ TEST(huge_sfz_offsets_and_peak_times_are_clamped_before_the_cast) {
     CHECK_EQ(caw_asset_peaks(e, a.c_str(), 1e300, 2e300, 4, 0, out), 0);
     CHECK(caw_asset_peaks(e, a.c_str(), 0, 1e300, 4, 0, out) >= 0);
     caw_engine_destroy(e);
-    std::filesystem::remove_all(dir);
+    std::filesystem::remove_all(utf8Path(dir));
 }
 
 // ---------------------------------------------------------------- input, monitoring and recording
@@ -800,8 +851,7 @@ TEST(input_monitoring_through_the_track_while_stopped_and_off) {
 
 namespace {
 std::vector<float> readFloatWav(const std::string& path, int& channels) {
-    std::ifstream f(path, std::ios::binary);
-    std::vector<uint8_t> b((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+    const std::vector<uint8_t> b = readBytes(path);
     channels = b.size() >= 44 ? b[22] : 1;
     std::vector<float> out;
     for (size_t i = 44; i + 4 <= b.size(); i += 4) {
@@ -849,8 +899,8 @@ TEST(recording_writes_takes_on_the_grid_with_latency_compensation) {
     CHECK_EQ(ch, 1);
     CHECK_EQ(data.size(), size_t{48000});
     CHECK_EQ(data[1234], 1234.0f);
-    CHECK(std::filesystem::exists(t.string("path") + ".json"));
-    std::filesystem::remove_all(dir);
+    CHECK(std::filesystem::exists(utf8Path(t.string("path") + ".json")));
+    std::filesystem::remove_all(utf8Path(dir));
 }
 
 TEST(recording_loops_into_takes_and_punches_in_and_out) {
@@ -882,7 +932,7 @@ TEST(recording_loops_into_takes_and_punches_in_and_out) {
             CHECK_EQ(t.number("frames", 0), 24000.0);       // to step 8
             CHECK_EQ(t.number("channels", 0), 2.0);
         }
-    std::filesystem::remove_all(dir);
+    std::filesystem::remove_all(utf8Path(dir));
 }
 
 TEST(a_full_ring_across_loop_wraps_keeps_each_take_whole_and_in_place) {
@@ -919,7 +969,7 @@ TEST(a_full_ring_across_loop_wraps_keeps_each_take_whole_and_in_place) {
             CHECK_EQ(t.number("start_frame", 0), 24000.0);
             CHECK_EQ(t.number("frames", 0), 24000.0);
         }
-    std::filesystem::remove_all(dir);
+    std::filesystem::remove_all(utf8Path(dir));
 }
 
 TEST(recovery_finalises_a_take_left_by_a_crash) {
@@ -947,7 +997,7 @@ TEST(recovery_finalises_a_take_left_by_a_crash) {
         }
         std::string error;
         CHECK(writeFile(part, b, error));
-        std::ofstream side(dir + "/t-take1.wav.json");
+        std::ofstream side(utf8Path(dir + "/t-take1.wav.json"));
         side << "{\"layer\":\"t\",\"start_frame\":5000,\"start_steps\":0.8333,\"take\":1,\"bpm\":120}";
     }
     char* r = caw_record_recover(dir.c_str());
@@ -960,8 +1010,8 @@ TEST(recovery_finalises_a_take_left_by_a_crash) {
     auto a = AssetStore::global().load(dir + "/t-take1.wav", 48000, error);
     CHECK(a != nullptr);
     if (a) CHECK_EQ(a->frames, int64_t{1000});
-    CHECK(!std::filesystem::exists(part));
-    std::filesystem::remove_all(dir);
+    CHECK(!std::filesystem::exists(utf8Path(part)));
+    std::filesystem::remove_all(utf8Path(dir));
 }
 
 TEST(input_is_let_go_after_each_callback_and_read_at_the_devices_own_stride) {
@@ -1016,7 +1066,7 @@ TEST(recording_restarts_straight_away_while_the_audio_thread_runs) {
     stop.store(true);
     audio.join();
     CHECK_EQ(ok, 60);
-    std::filesystem::remove_all(dir);
+    std::filesystem::remove_all(utf8Path(dir));
 }
 
 TEST(recording_splits_a_take_before_the_wav_size_limit) {
@@ -1056,7 +1106,7 @@ TEST(recording_splits_a_take_before_the_wav_size_limit) {
         }
         CHECK_EQ(next, 24000.0);
     }
-    std::filesystem::remove_all(dir);
+    std::filesystem::remove_all(utf8Path(dir));
 }
 
 TEST(recovery_refuses_while_recording_and_leaves_foreign_part_files_alone) {
@@ -1064,17 +1114,14 @@ TEST(recovery_refuses_while_recording_and_leaves_foreign_part_files_alone) {
     // Not C.A.W's header (16-bit PCM): left as it is.
     const std::string foreign = dir + "/other.wav.part";
     const std::string pcm = writeWav(foreign, 44100, 2, 100, [](int64_t i, int) { return noiseAt(i, 1); }, false);
-    const auto before = std::filesystem::file_size(foreign);
-    std::ifstream f0(foreign, std::ios::binary);
-    const std::string bytes((std::istreambuf_iterator<char>(f0)), std::istreambuf_iterator<char>());
-    f0.close();
+    const auto before = std::filesystem::file_size(utf8Path(foreign));
+    const std::vector<uint8_t> bytes = readBytes(foreign);
     char* r = caw_record_recover(dir.c_str());
     std::string out = r;
     caw_free(r);
-    CHECK(std::filesystem::exists(foreign));
-    CHECK_EQ(std::filesystem::file_size(foreign), before);
-    std::ifstream f1(foreign, std::ios::binary);
-    CHECK(std::string((std::istreambuf_iterator<char>(f1)), std::istreambuf_iterator<char>()) == bytes);
+    CHECK(std::filesystem::exists(utf8Path(foreign)));
+    CHECK_EQ(std::filesystem::file_size(utf8Path(foreign)), before);
+    CHECK(readBytes(foreign) == bytes);
     CHECK(out.find("\"takes\":[]") != std::string::npos);
     // While a session records into the folder, recovery is refused (its .part files are being written).
     Engine e(48000);
@@ -1091,7 +1138,7 @@ TEST(recovery_refuses_while_recording_and_leaves_foreign_part_files_alone) {
     out = r;
     caw_free(r);
     CHECK(out.find("\"ok\":true") != std::string::npos);
-    std::filesystem::remove_all(dir);
+    std::filesystem::remove_all(utf8Path(dir));
 }
 
 TEST(latency_ping_finds_a_simulated_loopback) {
@@ -1162,7 +1209,7 @@ TEST(audio_clips_and_the_sampler_match_their_golden_render) {
         std::snprintf(buf, sizeof buf, "golden 0x%016llxull", static_cast<unsigned long long>(h));
         cawtest::fail(__FILE__, __LINE__, buf);
     }
-    std::filesystem::remove_all(dir);
+    std::filesystem::remove_all(utf8Path(dir));
 }
 
 TEST(the_sampler_is_listed_and_the_audio_track_player_is_not) {

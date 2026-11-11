@@ -2,6 +2,7 @@
 #include "sample_pack.h"
 
 #include "presets.h"
+#include "utf8_path.h"
 
 #include <algorithm>
 #include <atomic>
@@ -71,12 +72,6 @@ std::string fmt(double v, const char* f = "%.10g") {
     return buf;
 }
 
-fs::path utf8Path(const std::string& s) { return fs::path(std::u8string(s.begin(), s.end())); }
-
-std::string pathText(const fs::path& p) {
-    const auto u = p.u8string();
-    return std::string(u.begin(), u.end());
-}
 
 struct Out {
     std::string s;

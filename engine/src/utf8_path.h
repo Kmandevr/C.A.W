@@ -27,6 +27,18 @@ inline std::FILE* openFile(const std::filesystem::path& p, const char* mode) {
     return std::fopen(p.c_str(), mode);
 #endif
 }
+// Deletes a file named by UTF-8 text; never throws for a file system error (false then, or when there was none).
+inline bool removeFile(const std::string& path) {
+    std::error_code ec;
+    return std::filesystem::remove(utf8Path(path), ec);
+}
+// Renames a file named by UTF-8 text (remove `to` first to replace it on every platform); never throws for a
+// file system error.
+inline bool renameFile(const std::string& from, const std::string& to) {
+    std::error_code ec;
+    std::filesystem::rename(utf8Path(from), utf8Path(to), ec);
+    return !ec;
+}
 // 64-bit positions (long is 32-bit on Windows, so ftell fails past 2 GB there).
 inline int64_t tellFile(std::FILE* f) {
 #ifdef _WIN32

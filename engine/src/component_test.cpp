@@ -19,6 +19,7 @@
 #include "caw/instrument.hpp"
 #include "json.h"
 #include "params.h"
+#include "utf8_path.h"
 #include "wav.h"
 
 namespace caw {
@@ -280,11 +281,12 @@ bool readWav(const std::string& path, std::vector<float>& left, std::vector<floa
     // A regular file, read up to what the longest allowed test signal needs (120 s, 192 kHz, 32-bit stereo).
     constexpr std::uintmax_t kMaxWavBytes = 200u * 1024u * 1024u;
     std::error_code ec;
-    if (!std::filesystem::is_regular_file(path, ec) || std::filesystem::file_size(path, ec) > kMaxWavBytes || ec) {
+    const std::filesystem::path file = utf8Path(path);
+    if (!std::filesystem::is_regular_file(file, ec) || std::filesystem::file_size(file, ec) > kMaxWavBytes || ec) {
         error = "'" + path + "' is not a readable WAV file of at most 200 MB";
         return false;
     }
-    std::ifstream f(path, std::ios::binary);
+    std::ifstream f(file, std::ios::binary);
     if (!f) {
         error = "can't read the WAV file '" + path + "'";
         return false;
