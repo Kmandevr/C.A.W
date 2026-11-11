@@ -57,6 +57,29 @@ Carries out the owner's decision of 2026-11-10 ("C++ replaces the .caw language"
 - **Bug fixed on the way:** a track's instrument installed while nothing sounds counted as still ringing at the first Play, which mixed in 5 ms of a phantom tail (a free-running source started at twice its level); a new instrument now starts idle.
 - **Open, for the owner:** an instrument track keeps running after a Stop until its output is quiet (or 30 s), and a never-quiet effect there now ends at that cap without the 20 ms fade buses get; a bus whose capped tail has faded comes back while a child track still rings out. The app still sends `voices`, `swap`, `seam_crossfade` and the key (Settings' light-mode voice cap and swap timing now change nothing): removing those settings is UI work.
 
+## 2026-11-11: Track headers that shrink, collapse and open editors (owner)
+
+**Decision (owner, 2026-11-11):**
+- **Meters:** as a header gets narrower, its meter turns upright to save width.
+- **Collapse states, as in REAPER:**
+  - Normal;
+  - Compact: as thin as possible while keeping the name, mute and solo. On a phone at the narrowest header width, mute and solo drop until the track is focused;
+  - Thin bar: just a sliver showing a track is there.
+
+  Ways to change them:
+  - drag the track's own bottom edge, which snaps through the states;
+  - the track menu's Collapse ▸, which also applies to all selected tracks;
+  - a folder's chevron, which collapses its children to thin bars;
+  - a vertical pinch on a header.
+- **Height per track:** each track can be resized on its own, and the global height is the default.
+- **Nested tracks are indented** under their parent, by depth, so the nesting is visible.
+- **Header gestures:**
+  - a tap selects at once, and the focus view follows;
+  - a **double tap opens the track's effects**: the focus view's FX tab;
+  - a **hold opens the track menu** when released without moving, and a hold followed by a drag reorders or nests the track as before;
+  - right-click opens the menu with a mouse.
+- **Clips:** a tap on an already selected clip opens its editor (the piano roll for MIDI, the audio editor for audio). A double tap still opens the clip menu.
+
 ## 2026-11-11: Arrangement music video (owner)
 
 **Decision (owner, 2026-11-11).** A built-in tool that records the arrangement as a good-looking music video, made to look cool rather than to be useful.
