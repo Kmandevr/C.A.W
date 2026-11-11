@@ -153,6 +153,54 @@ TEST(one_shot_is_one_trimmed_pass) {
     CHECK(!renderExport(groove(), o, r));
 }
 
+TEST(one_shot_of_a_cpp_instrument_plays_one_note_to_its_tail) {
+    // A track with only a C++ instrument and its effects plays one note: here the test signal's 1 kHz sine at
+    // velocity 0.5 for 0.1 s (4800 frames), cut on its off, so the file is the note and what the master's DC block rings on.
+    ProjectSpec p = cawtest::testSignalProject({cawtest::testSignalNotesLayer("t", cawtest::Shape::Sine, "")});
+    p.layers[0].pattern.clear();
+    RenderResult r;
+    ExportOptions o;
+    o.kind = ExportKind::OneShot;
+    o.target = "t";
+    o.note = 83.2131;  // about 1 kHz
+    o.velocity = 0.5;
+    o.noteSeconds = 0.1;
+    CHECK(renderExport(p, o, r));
+    // The master's DC block rings out the cut's offset below 0.002, and the file ends once it is under -80 dB.
+    CHECK(r.frames > 4800 && r.frames < 12000);
+    for (int64_t f = 4810; f < r.frames; ++f) CHECK(std::fabs(r.samples[static_cast<size_t>(f) * 2]) < 0.002f);
+    float peak = 0;
+    for (int64_t f = 0; f < 4800; ++f) peak = std::max(peak, std::fabs(r.samples[static_cast<size_t>(f) * 2]));
+    CHECK_NEAR(peak, 0.5 * std::cos(3.14159265358979323846 / 4), 0.01);  // velocity times the centre pan
+    // The note's pitch: the test signal's sine at A4 for 0.5 s crosses up about 220 times.
+    p.layers[0].instrument = cawtest::testSignal(cawtest::Shape::Sine, {{"mode", 1}});
+    o.note = 69;
+    o.velocity = 1;
+    o.noteSeconds = 0.5;
+    CHECK(renderExport(p, o, r));
+    int ups = 0;
+    for (int64_t f = 1; f < r.frames; ++f) ups += r.samples[(f - 1) * 2] < 0 && r.samples[f * 2] >= 0;
+    CHECK(ups >= 219 && ups <= 220);
+    // Flagship rings on after its note (its release), and the file ends on the trimmed tail, well before 30 s.
+    p.layers[0].instrument = ComponentSpec{};
+    p.layers[0].instrument.id = "org.caw.synth.flagship";
+    CHECK(renderExport(p, o, r));
+    CHECK(r.frames > 24000);
+    CHECK(r.frames < 30 * 48000);
+    CHECK(std::fabs(r.samples[static_cast<size_t>(r.frames - 1) * 2]) < 0.01f);
+    // Clips set the length: one clip of 8 steps from step 4 (12 steps, 72000 frames at 120 BPM) plays its note.
+    p.layers[0].instrument = cawtest::testSignal(cawtest::Shape::Sine, {{"mode", 1}});
+    p.modules.push_back({"pat", "---\nkind: pattern\nlength: 8\n---\n0 C4 8 1\n", {}});
+    p.layers[0].clips = {ClipSpec{"c", "pat", 4, 8, 0, false, false}};
+    CHECK(renderExport(p, o, r));
+    CHECK(r.frames > 71900 && r.frames <= 72000);
+    float before = 0, during = 0;
+    for (int64_t f = 0; f < 24000; ++f) before = std::max(before, std::fabs(r.samples[static_cast<size_t>(f) * 2]));
+    for (int64_t f = 24000; f < 71000; ++f) during = std::max(during, std::fabs(r.samples[static_cast<size_t>(f) * 2]));
+    CHECK_EQ(before, 0.0f);
+    CHECK(during > 0.5f);
+}
+
 TEST(wavetable_frames_sweep_a_param) {
     ProjectSpec p;
     p.modules.push_back({"w", "---\nmode: float\n---\nparam fold = 1 in 1..8\nsin(sine(1) * fold)", {}});

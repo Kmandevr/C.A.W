@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cmath>
+#include <cstdio>
 #include <memory>
 
 #include "builtin_components.h"
@@ -363,6 +364,60 @@ void playedSpan(const ProjectSpec& p, const ExportOptions& o, int64_t& keepFrom,
     }
 }
 
+// A one-shot's silent end trimmed, keeping 5 ms after the last sound above -80 dB.
+void trimSilentEnd(RenderResult& out, int sr) {
+    int64_t last = -1;
+    for (int64_t f = 0; f < out.frames; ++f)
+        if (std::fabs(out.samples[static_cast<size_t>(f) * 2]) > 1e-4f ||
+            std::fabs(out.samples[static_cast<size_t>(f) * 2 + 1]) > 1e-4f)
+            last = f;
+    const int64_t end = std::min<int64_t>(out.frames, last + 1 + sr / 200);
+    out.frames = std::max<int64_t>(end, 1);
+    out.samples.resize(static_cast<size_t>(out.frames) * 2);
+}
+
+// The one-shot of a C++ instrument layer with no notes of its own (no pattern, clips or length): its instrument and
+// effects play one note (o.note, o.velocity, held o.noteSeconds) from the start, and the render runs on until the
+// output has stayed below -80 dB for 0.25 s after the note's end (30 s at most), then the silent end is trimmed.
+bool renderInstrumentNote(ProjectSpec& p, LayerSpec only, const ExportOptions& o, RenderResult& out, int32_t* progress,
+                          int32_t* cancel) {
+    const int sr = o.sampleRate;
+    const int64_t most = static_cast<int64_t>(30) * sr;
+    const double held = std::clamp(o.noteSeconds, 0.001, 29.0);
+    const double steps = held * p.bpm * 4.0 / 60.0;
+    const int stepsPerBar = p.beatsPerBar * 4;
+    const int64_t mostSteps = static_cast<int64_t>(std::ceil(30.0 * p.bpm * 4.0 / 60.0));
+    char line[96];
+    std::snprintf(line, sizeof line, "0 %.17g %.17g %.17g\n", std::clamp(o.note, 0.0, 127.0), steps,
+                  std::clamp(o.velocity, 0.0, 1.0));
+    const std::string id = "\x01oneshot-note";
+    p.modules.push_back({id, "---\nkind: pattern\nlength: " + std::to_string(mostSteps / stepsPerBar + 2) + " bars\n---\n" + line, {}});
+    p.loopBars = maxLoopBars(p.beatsPerBar);
+    only.pattern = id;
+    p.layers = {only};
+    out.samples.clear();
+    out.channels = 2;
+    out.sampleRate = sr;
+    const int64_t noteEnd = static_cast<int64_t>(std::ceil(held * sr));
+    int64_t frame = 0, lastLoud = 0;
+    bool finished = false;
+    const bool ok = recordTo(p, sr, 0, most, [&](const float* lr, int n) {
+        for (int i = 0; i < n; ++i, ++frame) {
+            if (std::fabs(lr[i * 2]) > 1e-4f || std::fabs(lr[i * 2 + 1]) > 1e-4f) lastLoud = frame;
+            out.samples.push_back(lr[i * 2]);
+            out.samples.push_back(lr[i * 2 + 1]);
+        }
+        finished = frame > noteEnd && frame - std::max(lastLoud, noteEnd) > sr / 4;
+        return !finished;
+    }, out.error, progress, cancel);
+    if (!ok && !finished) return false;
+    out.error.clear();
+    setProgress(progress, 1.0);
+    out.frames = frame;
+    trimSilentEnd(out, sr);
+    return true;
+}
+
 }  // namespace
 
 bool renderExport(const ProjectSpec& in, const ExportOptions& o, RenderResult& out, int32_t* progress,
@@ -391,8 +446,18 @@ bool renderExport(const ProjectSpec& in, const ExportOptions& o, RenderResult& o
             LayerSpec only = *layer;
             only.mute = false;
             only.solo = false;
+            only.parentId.clear();  // its folder and send targets aren't in the render
+            only.sends.clear();
             int64_t len;
-            if (!only.pattern.empty()) {
+            if (only.hasInstrument && !only.folder && only.pattern.empty() && only.clips.empty() && only.lengthSteps == 0)
+                return renderInstrumentNote(p, only, o, out, progress, cancel);
+            if (!only.clips.empty()) {
+                // Its clips set the length: to the end of the last one.
+                int64_t end = 0;
+                for (const ClipSpec& c : only.clips) end = std::max<int64_t>(end, int64_t{c.startSteps} + c.lengthSteps);
+                p.loopBars = maxLoopBars(p.beatsPerBar);  // the project loop never cuts the layer short
+                len = loopFrames(p, sr, static_cast<int>(std::min<int64_t>(end, maxArrangementSteps(p.beatsPerBar))));
+            } else if (!only.pattern.empty()) {
                 // A pattern sets the layer's length.
                 p.loopBars = maxLoopBars(p.beatsPerBar);  // the project loop never cuts the layer short
                 len = loopFrames(p, sr, parsePattern(p.module(only.pattern)->source).pattern->steps(p.beatsPerBar));
@@ -405,15 +470,7 @@ bool renderExport(const ProjectSpec& in, const ExportOptions& o, RenderResult& o
             len = std::min<int64_t>(len, static_cast<int64_t>(30) * sr);
             p.layers = {only};
             if (!record(p, sr, 0, len, out, progress, cancel)) return false;
-            // Trim the silent end, keeping 5 ms after the last sound above -80 dB.
-            int64_t last = -1;
-            for (int64_t f = 0; f < out.frames; ++f)
-                if (std::fabs(out.samples[static_cast<size_t>(f) * 2]) > 1e-4f ||
-                    std::fabs(out.samples[static_cast<size_t>(f) * 2 + 1]) > 1e-4f)
-                    last = f;
-            const int64_t end = std::min<int64_t>(out.frames, last + 1 + sr / 200);
-            out.frames = std::max<int64_t>(end, 1);
-            out.samples.resize(static_cast<size_t>(out.frames) * 2);
+            trimSilentEnd(out, sr);
             return true;
         }
         case ExportKind::Wavetable:
