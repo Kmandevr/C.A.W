@@ -1,4 +1,5 @@
 // The C API for audio assets, SFZ, input meters, recording and input latency (API version 18, WP-J).
+#include <algorithm>
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
