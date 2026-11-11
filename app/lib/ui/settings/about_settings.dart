@@ -39,11 +39,14 @@ class AboutSettings extends StatelessWidget {
             },
           ),
         ),
-        if (deps.state case final state?)
-          settingAction('about.diagnostics',
-              icon: Icons.account_tree_outlined, iconColor: Neon.blue,
-              subtitle: 'CPU, peaks, overloads, the master scope and spectrum, and each track\'s signal path',
-              onTap: () => showEngineDiagnostics(context, state)),
+        // Without the app (Settings opened alone: goldens, tests) the row shows but opens nothing.
+        settingAction('about.diagnostics',
+            icon: Icons.account_tree_outlined, iconColor: Neon.blue,
+            subtitle: 'CPU, peaks, overloads, the master scope and spectrum, and each track\'s signal path',
+            onTap: switch (deps.state) {
+              final state? => () => showEngineDiagnostics(context, state),
+              null => null,
+            }),
         settingAction('about.licences',
             icon: Icons.description_outlined, iconColor: Neon.dim,
             subtitle: 'Including JetBrains Mono (SIL Open Font License 1.1)',

@@ -164,6 +164,8 @@ void main() {
         expect(find.byKey(const ValueKey('more-tools')), findsNothing, reason: 'no other workspaces are left');
         await tester.tap(find.byKey(const ValueKey('project-menu')).first);
         await tester.pumpAndSettle();
+        await tester.scrollUntilVisible(find.byKey(const ValueKey('project-export')), 60,
+            scrollable: find.byType(Scrollable).last);
         await tester.tap(find.byKey(const ValueKey('project-export')));
         await tester.pumpAndSettle();
         expect(find.byType(ExportPage), findsOneWidget);
