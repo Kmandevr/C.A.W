@@ -135,11 +135,13 @@ void main() {
     final transport = ValueNotifier(false);
     rec.follow(transport, () => transport.value);
     transport.value = true;
-    await pumpEventQueue();
+    // Starting creates the recordings folder on disk, so wait for it rather than for one turn of the event queue
+    // (a busy machine needs more than one).
+    await _until(() => rec.recording);
     expect(rec.recording, isTrue);
     io.stopTakes = [take('v', 1, start: 8, frame: 96000)];
     transport.value = false;
-    await pumpEventQueue();
+    await _until(() => io.stops == 1 && layer('v').audioClips.isNotEmpty);
     expect(io.stops, 1);
     expect(layer('v').audioClips.single.startSteps, 8);
   });
@@ -221,4 +223,13 @@ void main() {
     s.recordingsDirectory.deleteSync(recursive: true);
     expect(Directory(s.recordingsDirectory.path).existsSync(), isFalse);
   });
+}
+
+/// Waits for [done], turning the event queue and letting real I/O finish, for at most [limit].
+Future<void> _until(bool Function() done, {Duration limit = const Duration(seconds: 10)}) async {
+  final end = DateTime.now().add(limit);
+  while (!done() && DateTime.now().isBefore(end)) {
+    await pumpEventQueue();
+    await Future<void>.delayed(const Duration(milliseconds: 5));
+  }
 }
