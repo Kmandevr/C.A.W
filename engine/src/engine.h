@@ -140,7 +140,8 @@ public:
     void setMetronome(bool on);
     // The click's volume (0..1) and sound (caw.h CAW_CLICK_*), read by the audio thread at each click.
     void setMetronomeSound(double volume, int sound) noexcept;
-    // A test tone: [seconds] (0..10) of a 440 Hz sine at -12 dBFS after the master, playing or not; 0 ends it.
+    // A test tone: [seconds] (0..10) of a 440 Hz sine at -12 dBFS, playing or not, added after the master's gain
+    // and transport fades and before the safety limiter; 0 ends it.
     void testTone(double seconds) noexcept;
     // Whether a tone is asked for or still plays: a request the audio thread has not taken yet, or the state it
     // published at its last callback (so a request ended before any callback, or too short to be a sample, is not).
@@ -306,7 +307,9 @@ private:
     std::atomic<bool> toneActive_{false};
     int64_t toneLeft_ = 0, toneLen_ = 0;
     double tonePhase_ = 0;
-    void mixTestTone(float* left, float* right, int frames) noexcept;
+    void takeToneRequest() noexcept;                       // once per callback, before any sample
+    double nextTone() noexcept;                            // the tone's next sample (only while toneLeft_ > 0)
+    void mixToneOnly(float* left, float* right, int frames) noexcept;  // frames the master stage did not run
     void startPlay(double fromStep, uint64_t playCount, uint32_t touchStamp) noexcept;
     void startClick(bool accent) noexcept;
     double nextClick() noexcept;  // the click's next sample (0 when none sounds)

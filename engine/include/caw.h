@@ -358,8 +358,10 @@ CAW_API char* caw_audio_status(CawEngine* e);
 #define CAW_CLICK_WOOD 1
 #define CAW_CLICK_TICK 2
 CAW_API void caw_engine_set_metronome_sound(CawEngine* e, double volume, int32_t sound);
-/* A test tone: [seconds] (up to 10) of a 440 Hz sine at -12 dBFS, mixed after the master whether or not the song
-   plays, with 10 ms fades; 0 ends one early. caw_engine_test_tone_sounding says whether one still sounds. */
+/* A test tone: [seconds] (up to 10) of a 440 Hz sine at -12 dBFS, mixed after the master volume and the transport's
+   fades and before the safety limiter, whether or not the song plays, with 10 ms fades; 0 ends one early.
+   caw_engine_test_tone_sounding says whether one is asked for or still sounds (as the audio thread last saw it);
+   opening or closing the device drops it. */
 CAW_API void caw_engine_test_tone(CawEngine* e, double seconds);
 CAW_API int32_t caw_engine_test_tone_sounding(CawEngine* e);
 

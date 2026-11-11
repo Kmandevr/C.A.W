@@ -640,6 +640,30 @@ TEST(overload_mutes_the_newest_layer) {
     CHECK_NEAR(out[4999], 0.75 * std::cos(kPi / 4.0), 1e-5);
 }
 
+TEST(the_test_tone_goes_through_the_safety_limiter) {
+    // A song already at the limiter's ceiling: the tone on top must not push the output past it (it used to be
+    // added after the limiter and hard-clipped at 1).
+    ProjectSpec p = project({{"loud", std::string(kFloat) + "sine(220)"}});
+    p.master = 3.0;  // +9.5 dB: well into the limiter
+    Engine e(48000);
+    e.setProject(p);
+    e.play();
+    run(e, 4800);
+    e.testTone(0.5);
+    std::vector<float> right;
+    const std::vector<float> left = run(e, 9600, 64, &right);
+    float peak = 0;
+    for (size_t i = 0; i < left.size(); ++i) peak = std::max({peak, std::fabs(left[i]), std::fabs(right[i])});
+    CHECK(peak <= 0.9771f);
+    CHECK(peak > 0.9f);
+    // The tone carries on through the stop's fade and after it, at its own level.
+    e.stop();
+    const std::vector<float> after = run(e, 4800);
+    float tail = 0;
+    for (size_t i = 2400; i < after.size(); ++i) tail = std::max(tail, std::fabs(after[i]));
+    CHECK(std::fabs(tail - 0.25f) < 0.02f);
+}
+
 TEST(stop_fades_to_silence_and_layers_can_be_removed) {
     ProjectSpec p = project({{"a", std::string(kFloat) + "0.5"}});
     Engine e(48000);
