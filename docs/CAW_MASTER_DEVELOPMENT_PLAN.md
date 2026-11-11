@@ -1,7 +1,7 @@
 ---
 title: C.A.W. master development plan
 summary: Design specification for the UI/workflow overhaul and engine integration; current implementation status is tracked separately.
-updated: 2026-11-03
+updated: 2026-11-11
 ---
 
 # C.A.W. — Master Development Plan
@@ -115,7 +115,7 @@ A dedicated plugin-development workspace:
 
 ### User-controlled file management
 - Users control folders, naming, nesting, locations, grouping and categories. C.A.W. may suggest defaults but must not force organization.
-- Native `.caw` content can represent different content types through metadata; `.cawproj` may represent projects. Keep ordinary formats such as MIDI, WAV, JSON and TXT interoperable.
+- A `.caw` file is a project (plain project JSON, or a zip package with its dependencies; #159); old `.cawproj` projects still import. Keep ordinary formats such as MIDI, WAV, JSON and TXT interoperable.
 - Separate extension, content type and open behavior.
 - Blank files/templates for projects, generators, effects, instruments, presets, MIDI patterns and custom templates.
 - Custom templates, presets and inheritance without overwriting originals.

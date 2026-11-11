@@ -1,7 +1,7 @@
 ---
 title: UI plan
 summary: The owner's UI direction (2026-11-04): the arrangement is home and looks like a standard DAW, with docking panels, a Unity-like code workspace and a Reaper-like mixer; today's findings, the order of work and open questions. Steps that are built say so where they stand.
-updated: 2026-11-05
+updated: 2026-11-11
 ---
 
 # UI plan
@@ -229,7 +229,7 @@ updated: 2026-11-05
   - It also holds the device folders the user adds:
     - **Windows:** read through `dart:io`.
     - **Android:** read through the Storage Access Framework, as a small Kotlin platform channel in the app (see the open questions).
-  - Device folders show only C.A.W-related files: `.caw`, `.cawproj`, `.mid`, `.wav`, `.txt` and `.md`. Other files are hidden.
+  - Device folders show only C.A.W-related files: `.caw`, `.cawproj` (old projects), `.mid`, `.wav`, `.txt` and `.md`. Other files are hidden.
   - **Operations:**
     - new, rename, duplicate and delete, from a long-press menu or the keyboard. Delete goes to an in-app trash and can be undone.
     - drag to move between folders. A drag between the project and a device folder copies.

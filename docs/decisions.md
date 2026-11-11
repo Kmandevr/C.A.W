@@ -6,6 +6,20 @@ updated: 2026-11-11
 
 # Decisions
 
+## 2026-11-11: the .caw project file and its package format (#159; Claude, choices to confirm)
+
+Carries out the owner's packaging bullets of "MIDI clip loops, clip automation and project packaging" (below); [App](app.md) has the flows.
+
+**Decision (Claude, for the owner to confirm):**
+- **One `.caw` file, two forms.** With nothing ticked besides the project itself it is the project JSON (as `.cawproj` was). Otherwise it is a **zip** holding `manifest.json`, `project.json`, `assets/` (audio and samples), `components/<component id>/<ABI>/` (C++ builds), `presets/*.cawpreset`, `theme.json` (`{"name", "theme": the .theme file text}`); `plugins/` is reserved and stays empty. The reader tells them apart by the zip signature. Import also takes `.cawproj` and `.json`.
+- **The manifest** (`"format": "caw.package"`, version 1) lists every dependency the export found, packaged or not: `kind`, `name`, `used_by`, `size`, `packaged`, `path` in the archive, `sha256`, `reference` (what the project JSON calls it), and per kind `component`, `abi` and `source_fingerprint` (builds), `preset_kind`, `embedded` (C++ sources and convolver impulses, which live in the project JSON) and `licence` (plug-ins: "unknown: not packaged"). A packaged file's references in `project.json` become `package:assets/<name>`, so no device path of a packaged file travels with it; a file left out keeps its path and its hash, so Locate… can check a copy.
+- **No new dependency:** the zip reader and writer are our own (`app/lib/model/zip_archive.dart`, stored and deflated entries through `dart:io`'s raw deflate, no zip64, no encryption) rather than the `archive` package ([Fact] MIT, its `LICENSE` in archive 3.6.1 on pub.dev, read 2026-11-11): the reader is small enough to check whole, and every limit is ours.
+- **Untrusted on the way in:** every archive name must be relative, `/`-separated and plain (no `..`, `.`-leading parts, drive letters, backslashes, control characters or links; zip-slip), and names are never used as output paths: files are written under names made here, inside the project's own folders. Limits: 20,000 entries, 4 GiB in all, 1 GiB per audio file, 256 MiB per build, 64 MiB of project JSON, 4 MiB of manifest, presets at their own 4 MiB, 1 MiB of theme; a deflated entry stops at the size it declared (zip bombs), and size and CRC are checked. A packaged file whose hash differs from its manifest is left out and named. Only files the manifest lists in their kind's folder are read.
+- **Builds through the trust store:** a build is unpacked only for this device's ABI and for sources it was built from; it asks Trust or Block once per build fingerprint (`library:<sha256>` in `native-trust.json`, beside the sources' fingerprints), and it loads only while that Trust stands (`NativeComponentManager` checks again at each prepare); the sources' own trust is still asked as before. A blocked or unanswered build is deleted and the sources build here.
+- **Defaults in the checklist:** audio and samples start ticked; builds, presets and the theme start unticked (device-specific or the user's own library); presets offered are those for a device the project uses (a track doesn't record which preset it came from); the theme is offered when the one in force is a custom one.
+- **On import:** presets join the user's under a free name; the theme waits for **Add theme** (`Settings.addTheme`, which doesn't choose it); a file that is still missing shows the banner.
+- **Open (owner):** whether the export should also offer to package recordings that no clip uses (they are listed under Files today and packaged when ticked); whether a plug-in's licence should be confirmable in the checklist once plug-in hosting exists.
+
 ## 2026-11-11: the .caw language is deleted from the engine (#160, WP-D)
 
 Carries out the owner's decision of 2026-11-10 ("C++ replaces the .caw language"; old projects are dropped).
@@ -533,7 +547,7 @@ Built (engine pass, 2026-11-10):
 **Decision (owner):** the .caw sound language is removed completely and replaced by C++. [Proposal, not built] Status: .caw still runs today; nothing below is built yet.
 - **Order (owner):** C++ instruments come first, then .caw is removed. Today every instrument is a .caw module and C++ components are stereo effects only, so note-playing C++ instruments (and C++ built-ins for the starter sounds) must exist before the language goes, and the app never goes silent in between.
 - **Patterns:** the owner asked for note clips stored as standard MIDI with a text form of C.A.W.'s own (#158). [Fact, 2026-11-10] a Standard MIDI File is binary, and so is MIDI 2.0's MIDI Clip File (midi.org M2-116-U, June 2023); midi.org publishes no official text form of either. How this was settled for now: "MIDI files are an import and export format" (2026-11-10, below the logo entry), pending the owner's confirmation.
-- **Project files (owner):** the project file itself takes the `.caw` extension (today `.cawproj`).
+- **Project files (owner):** the project file itself takes the `.caw` extension (built 2026-11-11, #159, below; old `.cawproj` files still import).
 - **Old projects (owner):** dropped. Projects and the "First loop" template made of .caw sounds are not converted; this follows "no project compatibility before Release 1" (2026-11-03).
 - **Sharing (owner):** shared sounds are C++, so each asks Trust / Block once per exact code, as now; Isolated (a separate process) stays planned. The sandbox that made a downloaded .caw module safe goes with the language.
 

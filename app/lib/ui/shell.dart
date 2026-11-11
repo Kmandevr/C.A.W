@@ -22,6 +22,7 @@ import 'dock/dock_view.dart';
 import 'dock/floating_window.dart';
 import 'dock/layout.dart';
 import 'file_manager_screen.dart';
+import 'files/project_file_actions.dart';
 import 'key_router.dart';
 import 'theme.dart';
 import 'settings/settings_page.dart';
@@ -257,6 +258,8 @@ class _ShellState extends State<Shell> {
     final error = s.engineError ?? s.audioError ?? s.openError;
     // A note about the project just opened (its .caw sounds were left out), one line, until the next project opens.
     final notice = error == null ? s.openNotice : null;
+    // Files the project plays that aren't here: one line with Locate… and Replace… (project_file_actions.dart).
+    if (error == null && notice == null && s.missingFiles.isNotEmpty) return MissingFilesBanner(state: s);
     if (error == null && notice == null) return null;
     final color = error != null ? Neon.pink : Neon.yellow;
     return Container(
@@ -852,6 +855,17 @@ Future<void> showProjectMenu(BuildContext context, AppState s) async {
             onTap: () {
               Navigator.pop(context);
               if (outer.mounted) showExportPage(outer, s);
+            },
+          ),
+          ListTile(
+            key: const ValueKey('project-export-file'),
+            leading: const Icon(Icons.file_upload_outlined, color: Neon.yellow),
+            title: const Text('Export project…'),
+            subtitle: const Text('A .caw file, with the samples, builds, presets and theme you tick',
+                style: TextStyle(color: Neon.dim)),
+            onTap: () {
+              Navigator.pop(context);
+              if (outer.mounted) exportPortableProject(outer, s);
             },
           ),
           ListTile(
