@@ -105,72 +105,13 @@ if(CAW_SANITIZE AND NOT MSVC)
 endif()
 
 
-# Embedded .caw files: starter templates (examples/*.caw) and the built-in libraries (engine/lib/*.caw) become
-# string constants inside the engine.
-function(caw_read_dir dir out_files out_srcs out_count)
-  file(GLOB _list CONFIGURE_DEPENDS "${dir}/*.caw")
-  list(SORT _list)
-  set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${_list})
-  set(_files "")
-  set(_srcs "")
-  foreach(f IN LISTS _list)
-    get_filename_component(_name "${f}" NAME)
-    file(READ "${f}" _body)
-    string(APPEND _files "\"${_name}\",\n")
-    string(APPEND _srcs "R\"caw_tpl(${_body})caw_tpl\",\n")
-  endforeach()
-  list(LENGTH _list _count)
-  set(${out_files} "${_files}" PARENT_SCOPE)
-  set(${out_srcs} "${_srcs}" PARENT_SCOPE)
-  set(${out_count} ${_count} PARENT_SCOPE)
-endfunction()
-
-function(caw_write_if_changed path content)
-  file(WRITE "${path}.tmp" "${content}")
-  file(COPY_FILE "${path}.tmp" "${path}" ONLY_IF_DIFFERENT)
-endfunction()
-caw_read_dir("${CAW_ROOT}/examples" _tfiles _tsrcs _tcount)
-if(_tcount EQUAL 0)
-  set(_tfiles "nullptr,\n")
-  set(_tsrcs "nullptr,\n")
-endif()
-set(CAW_TEMPLATES_CPP "${CMAKE_CURRENT_BINARY_DIR}/caw_templates.cpp")
-caw_write_if_changed("${CAW_TEMPLATES_CPP}" "// Generated from examples/*.caw by engine/CMakeLists.txt; do not edit.
-#include \"capi_internal.h\"
-namespace caw {
-const int kTemplateCount = ${_tcount};
-const char* const kTemplateFiles[] = {
-${_tfiles}};
-const char* const kTemplateSources[] = {
-${_tsrcs}};
-}  // namespace caw
-")
-caw_read_dir("${CMAKE_CURRENT_SOURCE_DIR}/lib" _lfiles _lsrcs _lcount)
-set(CAW_STDLIB_CPP "${CMAKE_CURRENT_BINARY_DIR}/caw_stdlib.cpp")
-caw_write_if_changed("${CAW_STDLIB_CPP}" "// Generated from engine/lib/*.caw by engine/CMakeLists.txt; do not edit.
-#include \"compile.h\"
-namespace caw {
-const std::vector<LibrarySource>& standardLibraries() {
-    static const char* const sources[] = {
-${_lsrcs}nullptr};
-    static const std::vector<LibrarySource> libs = [] {
-        std::vector<LibrarySource> v;
-        for (const char* const* s = sources; *s; ++s) v.push_back({std::string(), std::string(*s)});
-        return v;
-    }();
-    return libs;
-}
-}  // namespace caw
-")
-
 add_library(caw_core STATIC
-  src/builtins.cpp src/compile.cpp src/docs.cpp src/pattern.cpp
+  src/pattern.cpp
   src/engine.cpp src/component_chain.cpp src/builtin_components.cpp src/builtin_instruments.cpp src/builtin_drums.cpp src/builtin_drums_params.cpp src/builtin_drums_sounds.cpp src/component_samples.cpp src/builtin_flagship.cpp src/builtin_test_signal.cpp src/presets.cpp src/builtin_effects.cpp src/builtin_effects_eq.cpp src/builtin_effects_dynamics.cpp src/builtin_effects_space.cpp src/builtin_effects_saturator.cpp src/builtin_effects_kit.cpp src/builtin_ducker.cpp src/builtin_fx_creative.cpp src/builtin_fx_creative_tapestop.cpp src/builtin_fx_creative_reverser.cpp src/builtin_fx_creative_trancegate.cpp src/builtin_fx_creative_stutter.cpp src/builtin_fx_creative_bitcrush.cpp src/builtin_fx_creative_pitchshift.cpp src/builtin_fx_creative_freqshift.cpp src/builtin_fx_creative_ringmod.cpp src/builtin_fx_creative_presets.cpp src/builtin_fx_space_mod.cpp src/builtin_fx_space_stereo.cpp src/builtin_fx_space_reverb.cpp src/builtin_fx_space_presets.cpp src/execution.cpp src/module.cpp src/module_registry.cpp src/midi2.cpp src/midi_device.cpp src/params.cpp src/graph.cpp src/scheduler.cpp src/dependency.cpp src/hardware.cpp src/json.cpp src/midifile.cpp src/project.cpp
   # fx-filters begin
   src/builtin_fx_filters.cpp src/builtin_fx_filters_comb.cpp src/builtin_fx_filters_formant.cpp src/builtin_fx_filters_eq.cpp src/builtin_fx_filters_presets.cpp
   # fx-filters end
-  src/render.cpp src/render_stems.cpp src/synth.cpp src/tables.cpp src/vm.cpp src/wav.cpp
-  "${CAW_TEMPLATES_CPP}" "${CAW_STDLIB_CPP}")
+  src/render.cpp src/render_stems.cpp src/wav.cpp)
 # fx-racks begin
 target_sources(caw_core PRIVATE src/builtin_fx_racks.cpp src/builtin_fx_racks_fx.cpp src/builtin_fx_racks_multiband.cpp
   src/builtin_fx_racks_presets.cpp)
@@ -226,9 +167,8 @@ if(CAW_TOOLS)
   target_compile_options(caw_cli PRIVATE ${CAW_FLAGS})
 target_include_directories(caw_cli PRIVATE src)
   target_link_libraries(caw_cli PRIVATE caw_core)
-  add_executable(caw_tests tests/test_main.cpp tests/language_test.cpp tests/engine_test.cpp tests/export_test.cpp
-    tests/golden_test.cpp tests/variables_test.cpp tests/library_test.cpp tests/pattern_test.cpp
-    tests/midifile_test.cpp tests/midi2_test.cpp tests/module_registry_test.cpp tests/native_component_test.cpp tests/synth_test.cpp tests/execution_test.cpp tests/execution_capi_test.cpp tests/module_test.cpp tests/graph_test.cpp tests/params_test.cpp tests/sdk_header_test.cpp tests/scheduler_test.cpp tests/dependency_test.cpp tests/hardware_test.cpp tests/worker_api_test.cpp tests/mix_golden_test.cpp tests/public_cpp_sdk_test.cpp tests/track_components_test.cpp tests/instrument_test.cpp tests/builtin_instruments_test.cpp
+  add_executable(caw_tests tests/test_main.cpp tests/engine_test.cpp tests/export_test.cpp tests/pattern_test.cpp
+    tests/midifile_test.cpp tests/midi2_test.cpp tests/module_registry_test.cpp tests/native_component_test.cpp tests/execution_test.cpp tests/execution_capi_test.cpp tests/module_test.cpp tests/graph_test.cpp tests/params_test.cpp tests/sdk_header_test.cpp tests/scheduler_test.cpp tests/dependency_test.cpp tests/hardware_test.cpp tests/worker_api_test.cpp tests/mix_golden_test.cpp tests/public_cpp_sdk_test.cpp tests/track_components_test.cpp tests/instrument_test.cpp tests/builtin_instruments_test.cpp
     src/capi.cpp src/capi_audio.cpp src/capi_modulation.cpp src/execution_capi.cpp src/worker_api.cpp platform/audio_none.cpp)
   target_sources(caw_tests PRIVATE tests/component_test_test.cpp)  # the component testing suite (#163)
   target_sources(caw_tests PRIVATE tests/test_signal_test.cpp)  # org.caw.test.osc, the internal test signal

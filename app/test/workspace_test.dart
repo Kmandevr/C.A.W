@@ -7,6 +7,7 @@ import 'package:caw/actions/actions.dart';
 import 'package:caw/actions/macro.dart';
 import 'package:caw/engine/engine.dart';
 import 'package:caw/model/app_state.dart';
+import 'package:caw/model/pattern_templates.dart';
 import 'package:caw/model/project.dart';
 import 'package:caw/model/settings.dart';
 import 'package:caw/ui/arrange/automation_panel.dart';
@@ -764,8 +765,8 @@ void main() {
 
   test('library folder operations preserve patterns through rename and delete', () {
     state.createLibraryFolder('Drums/Kicks');
-    final id = state.addModule(const Template('Folder.caw', '---\nkind: pattern\nname: Folder test\n---\n0 C2 1 1'));
-    final secondId = state.addModule(const Template('Second.caw', '---\nkind: pattern\nname: Folder second\n---\n0 D2 1 1'));
+    final id = state.addModule(const PatternTemplate('Folder.caw', '---\nkind: pattern\nname: Folder test\n---\n0 C2 1 1'));
+    final secondId = state.addModule(const PatternTemplate('Second.caw', '---\nkind: pattern\nname: Folder second\n---\n0 D2 1 1'));
     state.moveModulesToFolder([id, secondId], 'Drums/Kicks');
     expect(state.project.libraryFolders, containsAll(['Drums', 'Drums/Kicks']));
     expect(state.project.module(id)?.folderPath, 'Drums/Kicks');

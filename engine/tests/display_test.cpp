@@ -12,6 +12,7 @@
 #include "native_component_test_path.h"
 #include "project.h"
 #include "test.h"
+#include "test_signal.h"
 
 using namespace caw;
 
@@ -28,13 +29,7 @@ ProjectSpec gainProject() {
     p.bpm = 120;
     p.loopBars = 1;
     p.master = 1.0;
-    p.modules.push_back({"dc", "---\nmode: float\n---\n0.5", {}});
-    LayerSpec l;
-    l.id = "t";
-    l.name = "t";
-    l.chain = {"dc"};
-    l.volume = 1.0;
-    l.components = {{kGain, {{"left", 2.0}}}};
+    LayerSpec l = cawtest::testSignalLayer("t", cawtest::Shape::Dc, {{"level", 0.5}}, {{kGain, {{"left", 2.0}}}});
     p.layers.push_back(l);
     p.masterComponents = {{kGain, {}}};
     return p;
@@ -133,7 +128,7 @@ TEST(a_playing_component_s_display_data_reaches_the_c_api) {
     // No such component, layer or instrument; bad arguments.
     CHECK_EQ(caw_engine_component_display(handle, "t", 1, out, 8), -1);
     CHECK_EQ(caw_engine_component_display(handle, "nope", 0, out, 8), -1);
-    CHECK_EQ(caw_engine_component_display(handle, "t", CAW_INSTRUMENT_INDEX, out, 8), -1);
+    CHECK_EQ(caw_engine_component_display(handle, "t", CAW_INSTRUMENT_INDEX, out, 8), 0);  // the test signal shows none
     CHECK_EQ(caw_engine_component_display(handle, "t", 0, nullptr, 8), 0);
     CHECK_EQ(caw_engine_component_display(handle, "t", 0, out, 0), 0);
     CHECK_EQ(caw_engine_component_display(nullptr, "t", 0, out, 8), -1);

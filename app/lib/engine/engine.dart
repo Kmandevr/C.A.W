@@ -1,4 +1,4 @@
-// Dart wrapper over the engine: compiles off the UI isolate, in order, and reads meters and scopes for the screens.
+// Dart wrapper over the engine: sends projects off the UI isolate, in order, and reads meters and scopes for the screens.
 import 'dart:async';
 import 'dart:convert';
 import 'dart:ffi';
@@ -11,8 +11,6 @@ import 'package:ffi/ffi.dart';
 import 'bindings.dart';
 import 'component_info.dart';
 import 'execution.dart';
-
-enum ParamKind { number, toggle, choice }
 
 /// Explicit, per-component native-code trust. There is intentionally no implicit Trusted default.
 enum NativeComponentTrust {
@@ -45,91 +43,30 @@ class NativeComponentLoadResult {
       );
 }
 
-class ParamInfo {
-  const ParamInfo(
-    this.name,
-    this.defaultValue,
-    this.min,
-    this.max, {
-    this.step = 0,
-    this.kind = ParamKind.number,
-    this.choices = const [],
-    this.tip = '',
-    this.header = '',
-    this.doc = '',
-    this.global = false,
-  });
-  final String name;
-  final double defaultValue, min, max, step;
-  final ParamKind kind;
-  final List<String> choices;
-  final String tip, header, doc;
-  final bool global;
-
-  /// Tooltip text: the short tip, then the longer doc comment.
-  String get help => [tip, doc].where((s) => s.isNotEmpty).join('\n');
-
-  static ParamInfo fromJson(Map<String, dynamic> j) => ParamInfo(
-        j['name'] as String,
-        (j['default'] as num).toDouble(),
-        (j['min'] as num).toDouble(),
-        (j['max'] as num).toDouble(),
-        step: (j['step'] as num?)?.toDouble() ?? 0,
-        kind: switch (j['kind']) { 'toggle' => ParamKind.toggle, 'choice' => ParamKind.choice, _ => ParamKind.number },
-        choices: ((j['choices'] as List?) ?? const []).cast<String>(),
-        tip: (j['tip'] as String?) ?? '',
-        header: (j['header'] as String?) ?? '',
-        doc: (j['doc'] as String?) ?? '',
-        global: j['global'] == true,
-      );
-}
-
-class ExportInfo {
-  const ExportInfo(this.name, this.doc);
-  final String name, doc;
-}
-
-/// What the engine said about one module after compiling it.
+/// What the engine said about one module (a pattern) after parsing it: the project result's entry.
 class ModuleInfo {
   const ModuleInfo({
     required this.ok,
     this.error = '',
     this.line = 0,
     this.col = 0,
-    this.kind = 'generator',
+    this.kind = 'pattern',
     this.name = '',
     this.summary = '',
-    this.params = const [],
-    this.ref = '',
-    this.exports = const [],
-    this.imports = const [],
     this.warnings = const [],
-    this.namespace = '',
-    this.functions = const [],
     this.noteCount = 0,
   });
   final bool ok;
   final String error;
   final int line, col;
-  /// generator, effect or library.
+
+  /// Always `pattern` now: the .caw sound modules are gone (#160).
   final String kind;
-  bool get isEffect => kind == 'effect';
-  bool get isLibrary => kind == 'library';
   bool get isPattern => kind == 'pattern';
   final String name, summary;
-  final List<ParamInfo> params;
-
-  /// The name other modules use to read this module's exports (`ref.export`).
-  final String ref;
-  final List<ExportInfo> exports;
-  final List<String> imports;
   final List<String> warnings;
 
-  /// A library module's namespace and its functions (named `namespace.fn`).
-  final String namespace;
-  final List<LibraryFn> functions;
-
-  /// A pattern module's number of notes.
+  /// The pattern's number of notes.
   final int noteCount;
 
   static ModuleInfo fromJson(Map<String, dynamic> j) => ModuleInfo(
@@ -137,103 +74,12 @@ class ModuleInfo {
         error: (j['error'] as String?) ?? '',
         line: (j['line'] as num?)?.toInt() ?? 0,
         col: (j['col'] as num?)?.toInt() ?? 0,
-        kind: (j['kind'] as String?) ?? 'generator',
+        kind: (j['kind'] as String?) ?? 'pattern',
         name: (j['name'] as String?) ?? '',
         summary: (j['summary'] as String?) ?? '',
-        params: ((j['params'] as List?) ?? const [])
-            .map((p) => ParamInfo.fromJson(p as Map<String, dynamic>))
-            .toList(),
-        ref: (j['ref'] as String?) ?? '',
-        exports: ((j['exports'] as List?) ?? const [])
-            .map((e) => ExportInfo((e as Map)['name'] as String, (e['doc'] as String?) ?? ''))
-            .toList(),
-        imports: ((j['imports'] as List?) ?? const []).cast<String>(),
         warnings: ((j['warnings'] as List?) ?? const []).cast<String>(),
-        namespace: (j['namespace'] as String?) ?? '',
         noteCount: (j['notes'] as num?)?.toInt() ?? 0,
-        functions: [
-          for (final f in (j['functions'] as List?) ?? const [])
-            LibraryFn.fromJson(f as Map<String, dynamic>, namespace: (j['namespace'] as String?) ?? ''),
-        ],
       );
-}
-
-/// One documented function: a built-in, a built-in library's, or one from a project library.
-class LibraryFn {
-  const LibraryFn({required this.name, this.category = '', this.doc = '', this.example = '', this.args = const []});
-  final String name, category, doc, example;
-  final List<({String name, String doc, bool optional})> args;
-
-  /// `name(a, b, c?)`, optional arguments marked `?`.
-  String get signature => '$name(${[for (final a in args) a.optional ? '${a.name}?' : a.name].join(', ')})';
-
-  /// What to type for a call: the required arguments' names as placeholders.
-  String get callText => '$name(${[for (final a in args) if (!a.optional) a.name].join(', ')})';
-
-  /// [namespace] prefixes names that don't have one yet (a project library's own functions).
-  static LibraryFn fromJson(Map<String, dynamic> j, {String namespace = ''}) {
-    final name = j['name'] as String;
-    return LibraryFn(
-      name: namespace.isNotEmpty && !name.contains('.') ? '$namespace.$name' : name,
-      category: (j['category'] as String?) ?? '',
-      doc: (j['doc'] as String?) ?? '',
-      example: (j['example'] as String?) ?? '',
-      args: [
-        for (final a in (j['args'] as List?) ?? const [])
-          (name: (a as Map)['name'] as String, doc: (a['doc'] as String?) ?? '', optional: a['optional'] == true),
-      ],
-    );
-  }
-}
-
-/// Everything the module language offers, from `caw_library()`: functions and constants (`scale.minor`).
-class Library {
-  const Library(this.functions, this.constants);
-  final List<LibraryFn> functions;
-  final List<String> constants;
-
-  static Library? _cached;
-
-  /// Loaded once; the engine's library is fixed for a build.
-  static Library get builtIn {
-    final c = _cached;
-    if (c != null) return c;
-    final b = Bindings.instance;
-    final r = b.library();
-    final j = jsonDecode(r.toDartString()) as Map<String, dynamic>;
-    b.free(r);
-    return _cached = Library(
-      [for (final f in j['functions'] as List) LibraryFn.fromJson(f as Map<String, dynamic>)],
-      (j['constants'] as List).cast<String>(),
-    );
-  }
-
-  /// Adds a project's own library functions, filed under their module's name.
-  Library withProject(Iterable<ModuleInfo> modules) {
-    final extra = [
-      for (final m in modules)
-        if (m.isLibrary)
-          for (final f in m.functions)
-            LibraryFn(
-                name: f.name,
-                category: m.name.isEmpty ? m.namespace : m.name,
-                doc: f.doc,
-                example: f.example,
-                args: f.args),
-    ];
-    return extra.isEmpty ? this : Library([...functions, ...extra], constants);
-  }
-
-  /// Functions and constants that complete [prefix], best first; the part after a dot matches too (`adsr`).
-  List<String> complete(String prefix, {int limit = 8, int minLetters = 2}) {
-    if (prefix.length < minLetters || prefix.isEmpty) return const [];
-    final names = [for (final f in functions) f.name, ...constants];
-    final starts = names.where((n) => n.startsWith(prefix) && n != prefix);
-    final parts = names.where((n) => !n.startsWith(prefix) && n.contains('.') && n.split('.').last.startsWith(prefix));
-    return [...starts, ...parts].take(limit).toList();
-  }
-
-  LibraryFn? find(String name) => functions.where((f) => f.name == name).firstOrNull;
 }
 
 class EngineMeters {
@@ -258,11 +104,6 @@ class LayerMeterValue {
   /// Sample peaks since the last read, after volume and pan: [peak] is the louder of the left and right.
   final double peak, peakL, peakR, progress;
   final bool active, overloaded;
-}
-
-class Template {
-  const Template(this.file, this.source);
-  final String file, source;
 }
 
 enum ExportKind { loop, free, oneShot, wavetable, midi }
@@ -590,13 +431,6 @@ class Engine {
     return done.future;
   }
 
-  void setParam(String moduleId, String name, double value) {
-    final m = moduleId.toNativeUtf8(), n = name.toNativeUtf8();
-    _b.setParam(_handle, m, n, value);
-    calloc.free(m);
-    calloc.free(n);
-  }
-
   /// A playing native component's parameter: component [index] of the layer's components, or of the
   /// master chain when [layerId] is null. It ramps over the parameter's smoothing; false if there is no
   /// such component or parameter. Store the value in the project too, so the next update keeps it.
@@ -736,12 +570,6 @@ class Engine {
     final n = _b.componentDisplay(_handle, _displayLayer!, index, _display, max);
     if (n > 0) out.setRange(0, n, _display.asTypedList(n));
     return n;
-  }
-
-  void setGlobal(String name, double value) {
-    final n = name.toNativeUtf8();
-    _b.setGlobal(_handle, n, value);
-    calloc.free(n);
   }
 
   void setLayerMix(String layerId, double volume, double pan, bool mute, bool solo) {
@@ -981,31 +809,6 @@ class Engine {
     if (displayLayer != null) calloc.free(displayLayer);
     final modOut = _modOut;
     if (modOut != null) calloc.free(modOut);
-  }
-
-  static List<Template> templates() {
-    final b = Bindings.instance;
-    return [
-      for (var i = 0; i < b.templateCount(); i++)
-        Template(b.templateFile(i).toDartString(), b.templateSource(i).toDartString()),
-    ];
-  }
-
-  static ModuleInfo check(String source) {
-    final b = Bindings.instance;
-    final s = source.toNativeUtf8();
-    final r = b.check(s);
-    calloc.free(s);
-    final text = r.toDartString();
-    b.free(r);
-    return ModuleInfo.fromJson(jsonDecode(text) as Map<String, dynamic>);
-  }
-
-  /// Checks source on the native bounded pool as interactive preview work.
-  static Future<ModuleInfo> checkAsync(String source) async {
-    final result = await NativeEngineWorkPool.shared.submitCheck(source).result;
-    if (result == null) throw StateError('native module check returned no result');
-    return ModuleInfo.fromJson(jsonDecode(result) as Map<String, dynamic>);
   }
 
   /// Turns a MIDI file (.mid or MIDI 2.0 Clip) into pattern module text; throws a [FormatException] if it can't.

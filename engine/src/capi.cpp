@@ -11,10 +11,8 @@
 #include "builtin_drums.h"
 #include "presets.h"
 #include "capi_internal.h"
-#include "compile.h"
 #include "component_test.h"
 #include "sample_pack.h"
-#include "docs.h"
 #include "json.h"
 #include "midifile.h"
 #include "pattern.h"
@@ -49,24 +47,6 @@ void caw_free(char* s) { std::free(s); }
 
 // Nothing may throw across the C API: running out of memory becomes an error the host can show.
 const char* const kOutOfMemory = "out of memory: the project is too big for this device";
-
-char* caw_check(const char* source) try {
-    using namespace caw;
-    if (moduleKindOf(source ? source : "") == ModuleKind::Pattern) {
-        PatternResult pr = parsePattern(source);
-        if (!pr.pattern)
-            return dup("{\"ok\":false,\"kind\":\"pattern\",\"error\":\"" + jsonEscape(pr.error) +
-                       "\",\"line\":" + std::to_string(pr.line) + ",\"col\":" + std::to_string(pr.col) + "}");
-        return dup("{\"ok\":true," + describePattern(*pr.pattern) + "}");
-    }
-    CompileResult r = compileModule(source ? source : "");
-    if (!r.program)
-        return dup("{\"ok\":false,\"error\":\"" + jsonEscape(r.error) + "\",\"line\":" + std::to_string(r.line) +
-                   ",\"col\":" + std::to_string(r.col) + "}");
-    return dup("{\"ok\":true," + describeProgram(*r.program) + "}");
-} catch (const std::bad_alloc&) {
-    return dup(std::string("{\"ok\":false,\"error\":\"") + kOutOfMemory + "\",\"line\":0,\"col\":0}");
-}
 
 CawEngine* caw_engine_create(int32_t sample_rate) try {
     if (sample_rate < 8000 || sample_rate > 192000) return nullptr;
@@ -145,10 +125,6 @@ int32_t caw_engine_unload_component(CawEngine* e, const char* component_id) try 
     return 0;
 }
 
-void caw_engine_set_param(CawEngine* e, const char* module_id, const char* name, double value) {
-    if (e && module_id && name) e->engine->setParam(module_id, name, value);
-}
-
 int32_t caw_engine_set_component_param(CawEngine* e, const char* layer_id, uint32_t index, const char* param_id,
                                        double value) try {
     return e && e->engine && param_id &&
@@ -191,10 +167,6 @@ int32_t caw_engine_set_component_state(CawEngine* e, const char* layer_id, uint3
     return e->engine->setComponentState(layer_id ? layer_id : "", index, data, static_cast<size_t>(size), version) ? 1 : 0;
 } catch (...) {
     return 0;
-}
-
-void caw_engine_set_global(CawEngine* e, const char* name, double value) {
-    if (e && name) e->engine->setGlobal(name, value);
 }
 
 void caw_engine_set_layer_mix(CawEngine* e, const char* layer_id, double volume, double pan, int32_t mute,
@@ -401,18 +373,6 @@ int32_t caw_pattern_export(const char* pattern_source, double bpm, int32_t beats
 } catch (const std::bad_alloc&) {
     copyError(kOutOfMemory, error, error_len);
     return 1;
-}
-
-char* caw_library(void) { return dup(caw::libraryJson()); }
-
-int32_t caw_template_count(void) { return caw::kTemplateCount; }
-
-const char* caw_template_file(int32_t i) {
-    return i >= 0 && i < caw::kTemplateCount ? caw::kTemplateFiles[i] : nullptr;
-}
-
-const char* caw_template_source(int32_t i) {
-    return i >= 0 && i < caw::kTemplateCount ? caw::kTemplateSources[i] : nullptr;
 }
 
 char* caw_component_test(const char* request_json, int32_t trust_level, const char* output_dir,

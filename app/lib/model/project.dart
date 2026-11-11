@@ -21,25 +21,22 @@ class ModuleDoc {
     required this.name,
     required this.source,
     String? runSource,
-    Map<String, double>? params,
     this.folderPath = '',
     List<String>? tags,
   })  : runSource = runSource ?? source,
-        params = params ?? {},
         tags = tags ?? [];
 
   final String id;
   String name;
   String source;
   String runSource;
-  Map<String, double> params;
   String folderPath;
   List<String> tags;
 
   bool get edited => source != runSource;
 
   Map<String, dynamic> toJson() => {
-    'id': id, 'name': name, 'source': source, 'run_source': runSource, 'params': params,
+    'id': id, 'name': name, 'source': source, 'run_source': runSource,
     'folder_path': folderPath, 'tags': tags,
   };
 
@@ -48,7 +45,6 @@ class ModuleDoc {
     name: (j['name'] as String?) ?? 'Module',
     source: (j['source'] as String?) ?? '',
     runSource: j['run_source'] as String?,
-    params: ((j['params'] as Map?) ?? {}).map((k, v) => MapEntry(k as String, (v as num).toDouble())),
     folderPath: (j['folder_path'] as String?) ?? '',
     tags: ((j['tags'] as List?) ?? const []).whereType<String>().take(16)
         .map((tag) => _boundedProjectText(tag, 48)).where((tag) => tag.isNotEmpty).toList(),
@@ -704,7 +700,7 @@ class ProjectDoc {
         'automation': engineAutomation,
         'modules': [
           for (final m in modules)
-            {'id': m.id, 'name': m.name, 'source': sourceOverrides?[m.id] ?? m.runSource, 'params': m.params},
+            {'id': m.id, 'name': m.name, 'source': sourceOverrides?[m.id] ?? m.runSource},
         ],
         'master_components': [for (final c in playable(masterComponents)) c.toJson()],
         'layers': [

@@ -6,23 +6,19 @@
 #include "engine.h"
 #include "project.h"
 #include "test.h"
+#include "test_signal.h"
 
 using namespace caw;
 
 namespace {
 
-const char* kFloat = "---\nmode: float\n---\n";
 const double kCentre = std::cos(3.14159265358979323846 / 4.0);  // a mono track's pan law at centre
 
 bool ok(const std::string& result) { return result.find("\"ok\":true") != std::string::npos; }
 
-LayerSpec track(const std::string& id, const std::string& module) {
-    LayerSpec l;
-    l.id = id;
-    l.name = id;
-    l.chain = {module};
-    l.volume = 1.0;
-    return l;
+// A track playing a constant `level` on the test signal, volume 1 and centred.
+LayerSpec track(const std::string& id, double level) {
+    return cawtest::testSignalLayer(id, cawtest::Shape::Dc, {{"level", level}});
 }
 
 LayerSpec bus(const std::string& id) {
@@ -41,10 +37,8 @@ ProjectSpec twoTracksAndABus() {
     p.bpm = 120;
     p.loopBars = 4;
     p.master = 1.0;
-    p.modules.push_back({"half", std::string(kFloat) + "0.5", {}});
-    p.modules.push_back({"quarter", std::string(kFloat) + "0.25", {}});
-    p.layers.push_back(track("a", "half"));
-    p.layers.push_back(track("b", "quarter"));
+    p.layers.push_back(track("a", 0.5));
+    p.layers.push_back(track("b", 0.25));
     p.layers.push_back(bus("fx"));
     return p;
 }
@@ -187,7 +181,7 @@ TEST(a_send_into_a_bus_with_effects_and_a_bus_sending_on) {
 
 TEST(sends_render_the_same_at_any_block_size) {
     ProjectSpec p = twoTracksAndABus();
-    p.modules[0].source = std::string(kFloat) + "sine(110) * 0.5";
+    p.layers[0].instrument = cawtest::testSignal(cawtest::Shape::Sine, {{"freq", 110}, {"level", 0.5}});
     p.layers[0].sends = {{"fx", 0.7, false, false}};
     p.layers[1].sends = {{"fx", 0.3, true, false}};
     p.layers[2].components = {transparentCompressor()};
@@ -282,7 +276,9 @@ TEST(sends_are_kept_in_time_with_latency_on_the_track_and_on_the_bus) {
 
 TEST(a_bus_reverb_rings_on_after_stop) {
     ProjectSpec p = twoTracksAndABus();
-    p.modules[0].source = std::string(kFloat) + "sine(220) * 0.5";
+    // A note held through the loop, so the Stop ends it (a free-running signal would ring on).
+    p.modules.push_back({"hold", "---\nkind: pattern\nlength: 64\n---\n0 A3 64 1\n"});
+    p.layers[0] = cawtest::testSignalNotesLayer("a", cawtest::Shape::Sine, "hold", {{"level", 0.5}});
     p.layers.erase(p.layers.begin() + 1);
     p.layers[0].sends = {{"fx", 1.0, false, false}};
     ComponentSpec verb;
@@ -422,7 +418,7 @@ TEST(the_ducker_in_audio_mode_ducks_once_per_hit_and_its_look_ahead_is_compensat
 
 TEST(the_ducker_in_notes_mode_ducks_on_each_note_of_the_key_track) {
     ProjectSpec p = duckedB({{"mode", 1.0}, {"depth", 1.0}, {"attack", 0.5}, {"hold", 5.0}, {"release", 60.0}}, true);
-    p.modules.push_back({"beats", "---\nkind: pattern\n---\n0 C4 1\n4 C4 1\n", {}});
+    p.modules.push_back({"beats", "---\nkind: pattern\n---\n0 C4 1\n4 C4 1\n"});
     p.layers[0].pattern = "beats";  // notes on beats 1 and 2 (16th-note steps)
     p.loopBars = 1;
     Engine e(48000);
@@ -492,9 +488,8 @@ TEST(a_send_pointed_at_another_bus_brings_none_of_the_old_bus_audio) {
     ProjectSpec p = twoTracksAndABus();
     p.layers.erase(p.layers.begin() + 1);  // a, fx
     p.layers.push_back(bus("fx2"));
-    p.modules.push_back({"none", std::string(kFloat) + "0", {}});
     for (const char* parent : {"fx", "fx2"}) {
-        LayerSpec c = track(std::string("in_") + parent, "none");
+        LayerSpec c = track(std::string("in_") + parent, 0.0);
         c.parentId = parent;
         c.components = {transparentCompressor()};
         p.layers.push_back(c);

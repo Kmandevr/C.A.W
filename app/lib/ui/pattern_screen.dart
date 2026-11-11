@@ -7,6 +7,7 @@ import '../actions/actions.dart';
 import '../engine/engine.dart';
 import '../model/app_state.dart';
 import '../model/pattern_doc.dart';
+import '../model/pattern_templates.dart';
 import '../model/project.dart';
 import 'code_editor.dart';
 import 'frame/sections.dart';
@@ -266,7 +267,7 @@ class _PatternScreenState extends State<PatternScreen> {
 
   /// A new pattern, with its header at once, opened in its own tab (Build's New › Pattern does the same).
   void _newPattern() {
-    final id = s.addModule(Template('Pattern.caw', PatternDoc.blank().serialize()));
+    final id = s.addModule(PatternTemplate('Pattern', PatternDoc.blank().serialize()));
     final m = s.project.module(id)!;
     m.source = m.runSource = editPatternHeader(m.source, m.name, name: m.name) ?? m.source;
     SectionController.maybeOf(context)?.openBuild(BuildTab(BuildTabKind.pattern, id));

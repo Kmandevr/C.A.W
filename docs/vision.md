@@ -22,7 +22,7 @@ C.A.W. is a code-driven sound-design and music-production workspace for creating
 
 **Current delivery priority (owner, 2026-11-06):** create a working prototype before building out the full architecture. Deliver a narrow, useful end-to-end slice and expand it through working product behavior. Plan for future compatibility and extensibility where they affect today's interfaces, but do not build comprehensive migration systems, marketplace plumbing or speculative frameworks ahead of demonstrated need.
 
-The current repository still contains the constrained .caw language and VM; that is an implementation fact, not the chosen destination. Useful existing engine capabilities are to be migrated into the C++ Library/SDK and shared component system before the old language and VM are removed. The owner has waived backwards compatibility for old .caw source and pre-release projects.
+The .caw language and VM were removed on 2026-11-11 (#160), once C++ built-ins and the app made the same music; the owner waived compatibility with old .caw sources and pre-release projects.
 
 ## Platforms and actual support
 
@@ -41,7 +41,7 @@ Do not describe a platform as supported for release solely because Flutter or th
 The app has three sections: Build (C++ components and patterns), Files and Arrange (tracks and clips, with the mixer, the automation lanes and the FX stack). Export is a page from the project menu and Engine diagnostics are in Settings.
 
 The repository currently includes:
-- A portable C++20 engine with built-in C++ instruments and effects and the project's own C++ components, written and built in Build. The engine still contains the constrained .caw module language, which the app no longer uses (WP-C, 2026-11-11) and #160 removes.
+- A portable C++20 engine with built-in C++ instruments and effects and the project's own C++ components, written and built in Build.
 - Pattern editing with a piano roll and drum grid, note expressions, velocity/chance curves and pattern generators.
 - Arrangement clips, nested folders, stereo folder buses and track/folder volume-pan automation.
 - Track mixer controls, master output level and stereo peak meters.

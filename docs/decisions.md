@@ -6,6 +6,18 @@ updated: 2026-11-11
 
 # Decisions
 
+## 2026-11-11: the .caw language is deleted from the engine (#160, WP-D)
+
+Carries out the owner's decision of 2026-11-10 ("C++ replaces the .caw language"; old projects are dropped).
+
+- **Deleted:** the compiler and VM (`compile.*`, `vm.*`, `builtins.*`, `synth.*`, `tables.*`, `program.h`, `ops.h`), the built-in libraries (`engine/lib/`), the function reference generator (`docs.cpp`, and with it `docs/library.md` and `docs/agent-guide.md`), the .caw example templates and their golden hashes, `language_test`, `variables_test`, `synth_test`, `library_test` and `golden_test`, the CLI's `check`, `templates`, `docs` and single-module `render`, and the C API's `caw_check`, `caw_library`, `caw_template_*`, `caw_engine_set_param`, `caw_engine_set_global` and `caw_worker_pool_submit_check`. The engine CI no longer checks or renders examples. `docs/synth.md` went with the patch compiler.
+- **Kept:** pattern text (the note-clip format, #158) and the per-pattern result the pattern tab reads; the two example patterns (`examples/acid-line.caw`, `chords.caw`), because the app bundles them and its test reads them.
+- **A track is its instrument and inserts:** `Engine::Chain` is gone (Install only makes a slot a track); one mix-graph node per track; no voices, seams, code swaps, swap timing, `.caw` params, globals, exports or imports (this ends #78 and #133's export budget). A layer without an instrument plays nothing. `LayerSpec.chain`, the project's `globals`, `voices`, `swap`, `seam_crossfade` and key fields are not read.
+- **C API 21** (18, 19 and 20 belong to the audio-engine, modulators and note-fx branches; per-note FX takes 22). A module that is not a pattern reports an error on line 1.
+- **Tests play C++:** every engine test that used a .caw source as a signal plays `org.caw.test.osc` (`engine/tests/test_signal.h`) or a built-in. The mixer goldens moved onto it and were re-recorded on purpose; the Library parity tests keep frozen hashes of the ports' output, recorded while they still matched the .caw built-ins. Every other golden is unchanged.
+- **Bug fixed on the way:** a track's instrument installed while nothing sounds counted as still ringing at the first Play, which mixed in 5 ms of a phantom tail (a free-running source started at twice its level); a new instrument now starts idle.
+- **Open, for the owner:** an instrument track keeps running after a Stop until its output is quiet (or 30 s), and a never-quiet effect there now ends at that cap without the 20 ms fade buses get; a bus whose capped tail has faded comes back while a child track still rings out. The app still sends `voices`, `swap`, `seam_crossfade` and the key (Settings' light-mode voice cap and swap timing now change nothing): removing those settings is UI work.
+
 ## 2026-11-11: Theme profiles and edit animations (owner)
 
 **Decision (owner, 2026-11-11, answers to Claude's questions):**

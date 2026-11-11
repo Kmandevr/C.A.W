@@ -4,7 +4,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 
-import '../../engine/engine.dart' show Template;
+import '../../model/pattern_templates.dart' show PatternTemplate;
 import '../../model/app_state.dart';
 import '../../model/cpp_starters.dart';
 import '../../model/cpp_workbench.dart';
@@ -237,7 +237,7 @@ class FilesActions {
 
   /// "New pattern", with its header at once, opened in Build.
   void newPattern() {
-    final id = state.addModule(Template('Pattern.caw', PatternDoc.blank().serialize()));
+    final id = state.addModule(PatternTemplate('Pattern', PatternDoc.blank().serialize()));
     final m = state.project.module(id)!;
     m.source = m.runSource = editPatternHeader(m.source, m.name, name: m.name) ?? m.source;
     onSelect('mod:$id');

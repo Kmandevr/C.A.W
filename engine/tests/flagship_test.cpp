@@ -523,7 +523,7 @@ TEST(the_flagship_renders_the_same_bits_at_any_block_size) {
         p.loopBars = 1;
         p.seed = 3;
         p.master = 0.8;
-        p.modules.push_back({"pat", "---\nkind: pattern\nname: P\nlength: 16\n---\n" + expressive, {}});
+        p.modules.push_back({"pat", "---\nkind: pattern\nname: P\nlength: 16\n---\n" + expressive});
         LayerSpec l;
         l.id = "t";
         l.name = "t";
@@ -816,7 +816,7 @@ TEST(an_old_project_s_retired_synth_plays_as_flagship_with_its_preset_and_knobs)
     ProjectSpec old;
     old.bpm = 120;
     old.loopBars = 1;
-    old.modules.push_back({"pat", "---\nkind: pattern\nname: P\nlength: 16\n---\n0 A1 2 1\n2 C2 2 0.8\n4 E2 4 1\n", {}});
+    old.modules.push_back({"pat", "---\nkind: pattern\nname: P\nlength: 16\n---\n0 A1 2 1\n2 C2 2 0.8\n4 E2 4 1\n"});
     LayerSpec l;
     l.id = "t";
     l.name = "t";

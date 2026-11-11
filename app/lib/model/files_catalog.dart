@@ -508,7 +508,6 @@ extension FilesCatalog on AppState {
           name: _freeName('${m.name} copy', project.modules.map((x) => x.name)),
           source: m.source,
           runSource: m.runSource,
-          params: {...m.params},
           folderPath: m.folderPath,
           tags: [...m.tags],
         );

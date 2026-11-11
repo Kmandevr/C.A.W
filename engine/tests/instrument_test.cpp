@@ -42,7 +42,7 @@ ProjectSpec instrumentTrack(const std::string& instrument, const std::string& no
     p.bpm = 120;
     p.loopBars = 1;
     p.master = 1.0;
-    p.modules.push_back({"pat", pattern(notes), {}});
+    p.modules.push_back({"pat", pattern(notes)});
     LayerSpec l;
     l.id = "t";
     l.name = "t";
@@ -107,7 +107,7 @@ TEST(project_json_reads_a_layers_native_instrument_and_its_lanes) {
     ProjectSpec p;
     std::string error;
     CHECK(parseProject(R"({"caw_project":1,
-        "layers":[{"id":"t","chain":["fx"],"instrument":{"id":"org.caw.synth.flagship","params":{"flt1_cutoff":900},"bypass":true}},
+        "layers":[{"id":"t","instrument":{"id":"org.caw.synth.flagship","params":{"flt1_cutoff":900},"bypass":true}},
                   {"id":"u","instrument":"org.caw.synth.flagship"},{"id":"v"}],
         "automation":[{"target_type":"instrument","layer":"t","target":"flt1_cutoff","points":[{"step":0,"value":500}]}]})",
                        p, error));
@@ -702,24 +702,6 @@ TEST(two_instrument_swaps_within_the_crossfade_keep_the_held_notes) {
     if (!rec.empty()) CHECK_EQ(rec[0].type, kOn);
 }
 
-TEST(an_instrument_is_followed_by_the_tracks_caw_effects_and_replaces_its_generator) {
-    Engine e(48000);
-    CHECK(loadFixture(e, kRecorder));
-    e.setMasterBypass(true);
-    ProjectSpec p = instrumentTrack(kRecorder, "0 C4 16 1\n");
-    p.modules.push_back({"half", "---\nkind: effect\n---\nin * 0.5", {}});
-    p.modules.push_back({"dc", "---\nmode: float\n---\n0.5", {}});
-    p.layers[0].chain = {"dc", "half"};
-    const std::string result = e.setProject(p);
-    CHECK(result.find("plays the native instrument") != std::string::npos);  // the generator is left out
-    e.play();
-    float l = 0, r = 0;
-    run(e, 6400, 64, &l, &r);
-    const double mid = 0.5 * (0.1 + 60.0 / 128.0);  // .caw effects are mono: they take the instrument's mid
-    CHECK_NEAR(l, 0.5 * mid * kCentre, 1e-5);
-    CHECK_NEAR(r, 0.5 * mid * kCentre, 1e-5);
-}
-
 TEST(an_instrument_and_an_effect_each_refuse_the_others_place) {
     Engine e(48000);
     CHECK(loadFixture(e, kRecorder));
@@ -820,7 +802,7 @@ TEST(c_api_plays_and_addresses_a_layers_instrument) {
     CawEngine* engine = caw_engine_create(48000);
     CHECK(engine != nullptr);
     if (!engine) return;
-    CHECK_EQ(caw_api_version(), 19);  // 19: project modulation; 18: audio clips, sampler, input; 17: C++ wavetable, one-shot, audition; 16: song renders; 15: MIDI devices; 14: component state; 13: drums and meters; 10: device choice
+    CHECK_EQ(caw_api_version(), 21);  // 21: the .caw language removed (#160; 20 unused); 19: project modulation; 18: audio clips, sampler, input; 17: C++ wavetable, one-shot, audition; 16: song renders; 15: MIDI devices; 14: component state; 13: drums and meters; 10: device choice
     char* result = caw_engine_set_project(engine,
         R"({"caw_project":1,"bpm":120,"modules":[{"id":"p","source":"---\nkind: pattern\nname: P\nlength: 16\n---\n0 C4 4 1\n"}],
             "layers":[{"id":"t","pattern":"p","instrument":{"id":"org.caw.synth.flagship","params":{"flt1_cutoff":900}}}]})");

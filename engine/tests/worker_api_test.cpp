@@ -30,7 +30,16 @@ TEST(worker_api_accepts_unknown_pressure_and_keeps_a_conservative_plan) {
     caw_worker_pool_destroy(pool);
 }
 
-TEST(worker_api_submits_checks_and_returns_owned_results) {
+namespace {
+// A project whose one pattern module is `pattern` (ok, or broken).
+std::string patternProject(const char* pattern) {
+    return std::string(R"({"caw_project":1,"modules":[{"id":"p","source":")") + pattern + R"("}]})";
+}
+const char* const kGoodPattern = "---\\nkind: pattern\\n---\\n0 C4 1 1\\n";
+const char* const kBrokenPattern = "---\\nkind: pattern\\n---\\n0 Q4 1 1\\n";
+}  // namespace
+
+TEST(worker_api_submits_project_updates_and_returns_owned_results) {
     CawWorkerPool* pool = caw_worker_pool_create(2);
     CHECK(pool != nullptr);
     if (!pool) return;
@@ -43,7 +52,14 @@ TEST(worker_api_submits_checks_and_returns_owned_results) {
     CHECK(plan.worker_threads >= 1);
     CHECK(plan.max_concurrent_jobs >= 1);
 
-    CawJob* good = caw_worker_pool_submit_check(pool, "sin(t)", CAW_JOB_FOREGROUND);
+    CawEngine* engine = caw_engine_create(48000);
+    CHECK(engine != nullptr);
+    if (!engine) {
+        caw_worker_pool_destroy(pool);
+        return;
+    }
+    const std::string goodProject = patternProject(kGoodPattern), brokenProject = patternProject(kBrokenPattern);
+    CawJob* good = caw_worker_pool_submit_project(pool, engine, goodProject.c_str(), CAW_JOB_FOREGROUND);
     CHECK(good != nullptr);
     if (good) {
         CawJobStatus tooSmall{};
@@ -60,7 +76,7 @@ TEST(worker_api_submits_checks_and_returns_owned_results) {
         caw_job_release(good);
     }
 
-    CawJob* invalid = caw_worker_pool_submit_check(pool, "t >>", CAW_JOB_BACKGROUND);
+    CawJob* invalid = caw_worker_pool_submit_project(pool, engine, brokenProject.c_str(), CAW_JOB_BACKGROUND);
     CHECK(invalid != nullptr);
     if (invalid) {
         CawJobStatus status{};
@@ -75,6 +91,7 @@ TEST(worker_api_submits_checks_and_returns_owned_results) {
         caw_job_release(invalid);
     }
     caw_worker_pool_wait_idle(pool);
+    caw_engine_destroy(engine);
     caw_worker_pool_destroy(pool);
 }
 
@@ -88,7 +105,13 @@ TEST(worker_api_rejects_submission_when_idle) {
     CawExecutionPlan plan{};
     CHECK_EQ(caw_worker_pool_apply(pool, &idle, &plan), 0);
     CHECK_EQ(plan.max_concurrent_jobs, 0);
-    CHECK(caw_worker_pool_submit_check(pool, "sin(t)", CAW_JOB_FOREGROUND) == nullptr);
+    CawEngine* engine = caw_engine_create(48000);
+    CHECK(engine != nullptr);
+    if (engine) {
+        CHECK(caw_worker_pool_submit_project(pool, engine, patternProject(kGoodPattern).c_str(), CAW_JOB_FOREGROUND) ==
+              nullptr);
+        caw_engine_destroy(engine);
+    }
     caw_worker_pool_destroy(pool);
 }
 
@@ -108,7 +131,7 @@ TEST(worker_api_project_jobs_keep_engine_alive_until_completion) {
         caw_worker_pool_destroy(pool);
         return;
     }
-    const char* project = R"CAW({"caw_project":1,"name":"worker test","bpm":120,"beats_per_bar":4,"loop_bars":1,"modules":[{"id":"tone","name":"Tone","source":"---\nmode: float\n---\n0.2"}],"layers":[{"id":"track","name":"Tone","chain":["tone"],"length_steps":16}]})CAW";
+    const char* project = R"CAW({"caw_project":1,"name":"worker test","bpm":120,"beats_per_bar":4,"loop_bars":1,"modules":[{"id":"pat","name":"Pattern","source":"---\nkind: pattern\n---\n0 C4 4 1\n"}],"layers":[{"id":"track","name":"Tone","pattern":"pat","instrument":{"id":"org.caw.test.osc","params":{"shape":4,"level":0.2}}}]})CAW";
     CawJob* job = caw_worker_pool_submit_project(pool, engine, project, CAW_JOB_FOREGROUND);
     CHECK(job != nullptr);
     // Destroy waits for the retained project job instead of invalidating its engine pointer.
@@ -138,7 +161,7 @@ TEST(worker_api_cancels_offline_render_and_keeps_released_handles_safe) {
     CawExecutionPlan plan{};
     CHECK_EQ(caw_worker_pool_apply(pool, &request, &plan), 0);
 
-    const char* project = R"CAW({"caw_project":1,"name":"cancel test","bpm":120,"beats_per_bar":4,"loop_bars":1,"modules":[{"id":"tone","name":"Tone","source":"---\nmode: float\n---\nsin(220)"}],"layers":[{"id":"track","name":"Tone","chain":["tone"],"length_steps":16}]})CAW";
+    const char* project = R"CAW({"caw_project":1,"name":"cancel test","bpm":120,"beats_per_bar":4,"loop_bars":1,"layers":[{"id":"track","name":"Tone","instrument":{"id":"org.caw.test.osc","params":{"freq":220}}}]})CAW";
     CawRenderOptions options{};
     options.kind = CAW_EXPORT_FREE;
     options.sample_rate = 48000;
@@ -161,9 +184,15 @@ TEST(worker_api_cancels_offline_render_and_keeps_released_handles_safe) {
         caw_job_release(render);
     }
 
-    CawJob* released = caw_worker_pool_submit_check(pool, "sin(t)", CAW_JOB_BACKGROUND);
-    CHECK(released != nullptr);
-    caw_job_release(released);  // The worker owns its context independently of the public handle.
+    CawEngine* engine = caw_engine_create(48000);
+    CHECK(engine != nullptr);
+    if (engine) {
+        CawJob* released = caw_worker_pool_submit_project(pool, engine, patternProject(kGoodPattern).c_str(),
+                                                          CAW_JOB_BACKGROUND);
+        CHECK(released != nullptr);
+        caw_job_release(released);  // The worker owns its context independently of the public handle.
+        caw_engine_destroy(engine);  // waits for the job that still holds it
+    }
     caw_worker_pool_wait_idle(pool);
     caw_worker_pool_destroy(pool);
 }

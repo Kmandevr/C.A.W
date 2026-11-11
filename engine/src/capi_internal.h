@@ -51,10 +51,3 @@ private:
     uint32_t asyncJobs = 0;
     bool destroying = false;
 };
-
-namespace caw {
-// Bundled starter templates, generated from examples/*.caw at build time.
-extern const int kTemplateCount;
-extern const char* const kTemplateFiles[];
-extern const char* const kTemplateSources[];
-}  // namespace caw

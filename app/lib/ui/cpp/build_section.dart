@@ -4,7 +4,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import '../../engine/engine.dart' show Template;
+import '../../model/pattern_templates.dart' show PatternTemplate;
 import '../../model/app_state.dart';
 import '../../model/cpp_workbench.dart';
 import '../../model/files_catalog.dart';
@@ -169,7 +169,7 @@ class _BuildSectionState extends State<BuildSection> {
   /// A new pattern, with its header at once (the header is fields, not text, so the file needs one), named like the
   /// module, opened in a tab.
   void _newPattern(SectionController c) {
-    final id = s.addModule(Template('Pattern.caw', PatternDoc.blank().serialize()));
+    final id = s.addModule(PatternTemplate('Pattern', PatternDoc.blank().serialize()));
     final m = s.project.module(id)!;
     m.source = m.runSource = editPatternHeader(m.source, m.name, name: m.name) ?? m.source;
     _open(c, BuildTab(BuildTabKind.pattern, id));

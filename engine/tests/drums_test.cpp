@@ -179,7 +179,7 @@ ProjectSpec track(const Values& params, const std::string& notes) {
     p.loopBars = 1;
     p.seed = 7;
     p.master = 0.8;
-    p.modules.push_back({"pat", "---\nkind: pattern\nname: P\nlength: 16\n---\n" + notes, {}});
+    p.modules.push_back({"pat", "---\nkind: pattern\nname: P\nlength: 16\n---\n" + notes});
     LayerSpec l;
     l.id = "t";
     l.name = "t";

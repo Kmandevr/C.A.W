@@ -15,8 +15,8 @@ struct ExportOptions {
     ExportKind kind = ExportKind::Loop;
     int sampleRate = 48000;
     double seconds = 8.0;  // Free
-    std::string target;    // OneShot: layer id. Wavetable: a layer with a C++ instrument, a built-in id, or a .caw module
-    std::string param;     // Wavetable: the parameter (or .caw param) swept across frames (empty = none)
+    std::string target;    // OneShot: layer id. Wavetable: a layer with a C++ instrument, or a built-in instrument's id
+    std::string param;     // Wavetable: the parameter swept across frames (empty = none)
     int frames = 64;       // Wavetable frame count
     // OneShot of a C++ instrument layer with no notes of its own (no pattern, clips or length): the note it plays.
     double note = 60, velocity = 1.0, noteSeconds = 0.5;  // MIDI pitch, 0..1, seconds held
@@ -36,8 +36,8 @@ struct RenderResult {
 
 constexpr int kWavetableFrame = 2048;
 
-// Every layer's pattern and modules compile (libraries aside): false and a message naming the first that doesn't, so
-// an export never silently drops a broken one.
+// Every layer's pattern parses: false and a message naming the first that doesn't, so an export never silently drops
+// a broken one.
 bool checkExportModules(const ProjectSpec& p, std::string& error);
 
 // progress gets 0..1000 and a non-zero cancel stops the render; both may be shared with another thread.

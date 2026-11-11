@@ -20,7 +20,7 @@ C.A.W. is not a conventional DAW and doesn't have to work like one, but it must 
 
 ## C++ creation platform direction
 
-**[Owner decision, 2026-11-05]** C.A.W. will use ordinary general-purpose C++ as its programming language, a comprehensive C.A.W. Library/SDK, and one shared component model for code, visual scripting and generated/custom performance interfaces. The current .caw language/VM is transitional and will be retired after its useful capabilities have been migrated and verified; old source/project compatibility is not required. The detailed design, component contract, library scope, authoring interfaces, real-time boundaries, versioning and migration gates are in [C++ creation platform](cpp-creation-platform.md).
+**[Owner decision, 2026-11-05]** C.A.W. will use ordinary general-purpose C++ as its programming language, a comprehensive C.A.W. Library/SDK, and one shared component model for code, visual scripting and generated/custom performance interfaces. The .caw language and VM it replaced were removed on 2026-11-11 (#160); old projects are not kept. The detailed design, component contract, library scope, authoring interfaces, real-time boundaries, versioning and migration gates are in [C++ creation platform](cpp-creation-platform.md).
 
 ## 0. Current state
 
@@ -57,7 +57,7 @@ The owner may also ship C.A.W as a VST3/CLAP plugin. So the core is plugin-shape
 
 ### Ready-made building blocks
 
-The C++ language and compiler are ordinary toolchain facilities; the C.A.W. Library/SDK and component model are the product-specific reusable layer. Use permissively licensed, maintained dependencies where they provide a measured benefit, and record exact licences and versions before adoption. The current .caw compiler/VM is transitional, not the target language. The dependency candidates below are proposals, not adopted dependencies.
+The C++ language and compiler are ordinary toolchain facilities; the C.A.W. Library/SDK and component model are the product-specific reusable layer. Use permissively licensed, maintained dependencies where they provide a measured benefit, and record exact licences and versions before adoption. The dependency candidates below are proposals, not adopted dependencies.
 
 | Job | Library | Licence | When |
 | --- | --- | --- | --- |
@@ -84,40 +84,37 @@ JUCE (9: AGPLv3/commercial) and Tracktion Engine (GPL-3.0-or-later/commercial, d
 
 ## 2. Audio and code execution
 
-**[Fact, current implementation checked 2026-11-05]** The existing .caw authoring language is compiled into bytecode for a small VM inside the C++ engine; source is not interpreted on the audio thread. **[Owner decision, 2026-11-05]** This VM is not the target language architecture. Ordinary C++ and the shared component SDK replace it after useful functionality and product workflows have migrated. See [C++ creation platform](cpp-creation-platform.md#migration-from-the-current-caw-language).
+**[Fact, 2026-11-11]** Sound is native C++: built-in components and the user's own, all on one component contract (`engine/include/caw/module.hpp`, the plain-C interface in `caw_component.h`). The .caw language, its compiler and VM were removed (#160, owner 2026-11-10). A track is an instrument component and its effect components; the control thread builds and activates them, and the audio thread runs them.
 
 ```
- source text ──► parser/compiler (worker thread) ──► Program (bytecode + constants)
-                                                        │ atomic pointer swap
- audio callback (audio thread) ◄── VM runs Program ◄─────┘   (+ short crossfade)
+ project JSON ──► control thread: parse patterns, build + activate component chains
+                                                        │ lock-free command queue
+ audio callback (audio thread) ◄── mix graph: tracks, buses, master ◄─┘   (+ 20 ms crossfade on a change)
 ```
 
-- **The sandbox comes from what the language can't do.** It has no I/O, no filesystem, no network and no system calls. Memory is fixed-size and allocated before playback. Loops are bounded and the call depth is capped. Downloaded modules are therefore no more dangerous than local ones.
-- **Audio-thread rules:** no allocation, no locks, no calls into the UI layer and no logging inside the callback. Programs are handed over through a single-slot atomic swap, and old programs are freed off the audio thread.
-- **Block processing:** the VM runs each opcode over a block of samples (for example 64) rather than one sample at a time. This cuts interpreter overhead a lot.
+- **Trust, not a sandbox:** a component is in-process code. A third-party binary loads only with the user's per-item trust choice (Blocked, Isolated, Trusted; [decisions](decisions.md)); Isolated waits for a separate-process host. Project input (patterns, project JSON, audio and MIDI files) is parsed with explicit limits.
+- **Audio-thread rules:** no allocation, no locks, no calls into the UI layer and no logging inside the callback. Chains, patterns and tables arrive through the command queue, and what they replace is freed off the audio thread.
+- **Block processing:** components run blocks of up to 64 frames.
 - **Arrangement scheduling:** clips are immutable instances that reference reusable pattern sources. On the control thread, CAW compiles their note events into one sorted absolute-time stream per track. The audio callback uses the existing block-boundary engine; it never parses patterns, allocates clip data or relies on UI timers. This keeps note timing independent of Flutter frame rate and avoids a separate scheduler thread.
 - **Folder buses:** the control thread resolves a validated folder tree into slot routing indices and a child-before-parent render order. The callback sums child stereo buffers into each bus (since 2026-11-03 each child is rounded to 32-bit float and summed in float, as graph edges will carry it; bus and master processing stays 64-bit), applies bus gain and stereo balance, then routes the result upward exactly once. Organization-only folders have no audio slot. No routing graph is allocated or walked in the callback.
 - **Track automation:** volume and pan points are copied into fixed-size slot arrays through the command queue. The callback interpolates against the current song step for each sample. The supported lane targets are deliberately limited to volume and pan in this implementation slice; global and plugin-parameter automation remain future work.
 - **Cost guard:** the engine measures time spent per callback. If it overruns repeatedly, it fades out and reports "too expensive" instead of stuttering.
 - **Ear and speaker safety:** NaN/Inf values are replaced with 0, DC is blocked, and a hard safety limiter runs last. Default output gain is low. Glitch audio can go to full-scale noise instantly.
-- **Defined arithmetic:** every operation has one defined result on every device (see [Bits and determinism](#bits-and-determinism)). Output has two modes: *byte* (`v & 255` mapped to −1…1, classic bytebeat) and *float* (clamped to −1…1).
-- **Sample rates:** a bytebeat `t` counts at the *formula rate* (8 kHz by default, user-selectable). The engine upsamples to the device rate with zero-order hold, which keeps the crunch. Procedural instruments run at the device rate. WAV export runs at 44.1 or 48 kHz.
-- **Offline render = same VM.** WAV export runs the identical program on a worker thread, faster than real time, so the export matches what you heard.
+- **Repeatable output** (see [Bits and determinism](#bits-and-determinism)).
+- **Sample rates:** components run at the device rate. WAV export runs at 8 to 192 kHz (44.1 or 48 kHz in the app).
+- **Offline render = same Engine.** WAV export runs the same mix graph on a worker thread, faster than real time, so the export matches what you heard.
 - **Background playback:** each platform has its own rule. Android needs a foreground service with the `mediaPlayback` type (required on Android 14+), and iOS needs the audio background mode. Desktop has no restriction. Device changes such as headphones being unplugged trigger a stream restart.
 
 ### Bits and determinism
 
-The owner's requirement: code works directly on the bits, so sounds come out chaotic and noise-like, yet **exactly repeatable**, the way `t>>6<<5%t` is. The same code, seed and settings give the same samples, bit for bit, on every platform, in playback, in the plugin and in WAV export.
+The owner's requirement: the same project, seed and settings give the same samples on every platform, in playback, in the plugin and in WAV export, where that is cheap; where exactness would cost real-time performance, output that is perceptually the same is enough (owner, 2026-11-10, [decisions](decisions.md)).
 
-- **[Fact]** **JavaScript's number semantics**, so pasted formulas sound identical: values are 64-bit floats, and bitwise operators work on 32-bit wrapping integers. Shift counts are masked to 0–31. `>>` is arithmetic and `>>>` logical. `%` keeps the sign of the left side, and `x/0` and `x%0` give 0. Operator precedence follows C and JavaScript, so `t>>6<<5%t` reads as `(t>>6) << (5%t)`. The full reference is in [engine](engine.md).
-- **No undefined behaviour inside:** bit operations convert through unsigned 32-bit values, so C++'s signed-overflow and oversized-shift traps can't leak into the sound.
-- **Bit tools as built-ins**, using C++20's `<bit>`: rotate (`rotl`, `rotr`), `popcount`, count leading/trailing zeros, bit reverse, byte swap, and reinterpreting a float's bits as an integer and back (`bits(x)`, `float(i)`). Later, the same tools work on the bytes of imported audio (roadmap Stage 3).
-- **Randomness is seeded, never live:** `hash(x)` and `noise(seed, t)` are counter-based hash functions (no hidden state, so jumping to any `t` gives the same value), and a project-level `seed` changes all of them at once. There's no clock or system randomness anywhere in the language.
+- **Randomness is seeded, never live:** a note's chance and the built-ins' noise come from the project seed and counter-based hashes, so jumping to any position gives the same result.
 - **Floats are made repeatable too:** compile with strict IEEE behaviour (no fast-math), and use the engine's own `sin`/`exp` approximations rather than each platform's maths library, whose last bits differ between systems. Golden-render tests in CI compare the exact bits. **[Fact, 2026-11-09]** Those maths functions are public SDK code (`engine/include/caw/detmath.hpp`), and `CAW::SDK` passes the strict flags (`-ffp-contract=off -fno-fast-math`, plus `-fno-trapping-math` since 2026-11-10, which changes no result; MSVC `/fp:precise`; clang-cl also `/clang:-ffp-contract=off`, which the engine now uses too) to every component built against it, so components repeat bit for bit too.
 
 ### Instruments, wavetables and samples — current status and remaining design
 
-The owner wants code-defined sounds to become playable instruments and exportable audio assets. **[Fact, checked 2026-11-01]** C.A.W. already has generator voice playback, a house synth patch format, built-in wavetable playback/frame morphing and WAV loop/free-length/one-shot/wavetable export. **[Fact, 2026-11-10]** Native C++ instruments (an event input and a stereo output, owning their voices) play a track's notes in place of a .caw generator, with the built-in `org.caw.synth.basic` ([native module SDK](native-module-sdk.md#writing-an-instrument), #156). A sample editor, imported audio assets, multisample mapping and SFZ export are not implemented. The design details below are proposals for remaining extensions, not a claim that every output path exists.
+The owner wants code-defined sounds to become playable instruments and exportable audio assets. **[Fact, 2026-11-11]** C.A.W. has WAV loop, free-length, one-shot and wavetable export of C++ instruments. **[Fact, 2026-11-10]** Native C++ instruments (an event input and a stereo output, owning their voices) play a track's notes, with the built-in `org.caw.synth.basic` ([native module SDK](native-module-sdk.md#writing-an-instrument), #156). A sample editor, imported audio assets, multisample mapping and SFZ export are not implemented. The design details below are proposals for remaining extensions, not a claim that every output path exists.
 
 - **Voice mode (playable synth):** the program runs once per note, from a fixed pool of pre-allocated voices (no allocation on note-on; the oldest voice is stolen when the pool is full). Each voice sees:
   - `t`: samples since note-on, scaled so pitch follows the note. Classic bytebeat runs at its formula rate when the note is the module's base note (default C4), and an octave up doubles the rate.
@@ -135,17 +132,13 @@ The owner wants code-defined sounds to become playable instruments and exportabl
 
 The existing built-ins and algorithms are migration candidates for the C.A.W. C++ Library/SDK. The target is a shared C++ event model for MIDI 1.0, MIDI 2.0 UMP, note identity, MPE/per-note expression, CC, clock and transport, usable from C++ components, visual graphs, performance controls and device adapters. Do not create separate MIDI implementations for each interface. The broader Library scope is in [C++ creation platform](cpp-creation-platform.md).
 
-### Current variables and patterns — transitional .caw implementation
+### Patterns and parameters
 
-**[Fact, current implementation]** The .caw VM supports module parameters, project globals, exported values, pattern modules, note events, velocity and per-note expression curves, MIDI file import/export, and the current piano-roll/drum-grid workflows. Project/module automation and the shared engine parameter resolver are documented in [Engine](engine.md) and [Engine implementation status](engine-build-status.md).
+**[Fact, 2026-11-11]** A project's modules are note patterns (the note-clip text the piano roll edits, #158): notes with velocity, chance, ratchets, slides and per-note expression curves, MIDI file import and export. They play a track's instrument as frame-accurate note events. Parameters are components' (and automation lanes target them); the shared parameter resolver is in [Engine implementation status](engine-build-status.md).
 
-This section describes the existing .caw implementation only. The owner has chosen ordinary C++ as the future authoring language. Do not extend the old .caw syntax as a parallel product language. Migrate useful parameter, pattern, event and generator capabilities to the shared C++ component/parameter/event model; old .caw source and pre-release-project compatibility is not required. See [C++ creation platform](cpp-creation-platform.md#migration-from-the-current-caw-language).
+### Live editing while playing
 
-### Live editing while playing — current behavior and C++ migration
-
-The existing .caw editor/VM supports live code swaps and pattern updates while playback continues. The C++ component workflow should retain useful live-update behavior where safe, using prepared component replacement and bounded state transfer rather than depending on the old VM's bytecode/state-matching mechanism.
-
-**[Fact]** The engine side is built: swap timing, pattern edits that let sounding notes finish, and state carried across code swaps ([engine](engine.md#playback)). The app also implements delayed auto-update, an enable/disable switch and selectable swap timing; see [App](app.md).
+**[Fact]** A pattern edit swaps in at the next block, and a sounding note follows it from the playhead ([engine](engine.md#patterns)); a changed instrument or chain is built off the audio thread and crossfaded in over 20 ms, held notes moving to a new instrument; a rebuilt user component replaces the old build the same way, keeping each instance's values and (where it accepts it) state.
 
 - **[Fact]** Built already:
   - Run hot-swaps code with a 20 ms crossfade, and code that fails keeps the old sound.
@@ -171,7 +164,7 @@ The shared component descriptor defines stable identity, role/capabilities, type
 
 The Library should include waveform and wavetable generation, oscillators, noise, interpolation, filters, EQ, distortion, saturation, dynamics, delay, reverb, modulation effects, FFT, convolution and resampling; synth voices, envelopes, LFOs, FM/AM, additive, granular and physical-modeling building blocks; samplers and sample buffers; MIDI 1.0, MIDI 2.0 UMP, MPE/per-note expression, sequencing and music-theory utilities; tables, windows, random distributions, vectors, matrices, complex math, transforms, bit operations and data utilities. Functions accept declared parameters, tables, buffers, events or other data and return audio, waveforms, transformed data, analysis results or events. Use the standard C++ library for standard facilities rather than duplicating it.
 
-The full proposed scope and contracts are in [C++ creation platform](cpp-creation-platform.md). The [visual creation and signal routing design](visual-routing-and-library-integration.md) defines the component editor, project/track workspace, conditional routing and reuse candidates. The current built-in function inventory remains [Function library](library.md); do not mark planned SDK functionality as built.
+The full proposed scope and contracts are in [C++ creation platform](cpp-creation-platform.md). The [visual creation and signal routing design](visual-routing-and-library-integration.md) defines the component editor, project/track workspace, conditional routing and reuse candidates. The current built-ins are listed in [engine](engine.md); do not mark planned SDK functionality as built.
 
 ### Shared MIDI and event routing [Proposal]
 
@@ -185,7 +178,7 @@ C++ itself remains general-purpose. Only code scheduled in the audio callback mu
 
 ### This repository (C.A.W.)
 
-The current repository contains the portable C++20 engine and CLI, platform audio layer, Flutter app (whose bundled assets are the code font and the crow logo), tests, documentation and bundled examples. The existing .caw module files and VM remain current implementation facts until the migration exit gate is met.
+The current repository contains the portable C++20 engine and CLI, platform audio layer, Flutter app (whose bundled assets are the code font and the crow logo), tests, documentation and bundled examples.
 
 ### C++ component source
 
@@ -194,10 +187,6 @@ The current repository contains the portable C++20 engine and CLI, platform audi
 ### Reusable library and project assets
 
 The planned C.A.W. Library can contain reusable C++ components, functions, instruments, effects, generators, data utilities, presets, examples and assets. Project-local assets travel with the project; global-library references use stable IDs and explicit versions. Asset handles define ownership and lifetime so sample buffers, tables and impulse responses are not copied unnecessarily.
-
-### Legacy .caw files
-
-The current .caw format documents the existing VM implementation only. It is not the future component source format. No compatibility layer for old .caw source or pre-release project files is required. Retain the old parser/VM only until every capability selected for migration has a tested C++/Library path and the app no longer depends on it; then remove the obsolete format and documentation.
 
 ## 4. GitHub sync
 

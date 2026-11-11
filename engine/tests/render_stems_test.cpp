@@ -13,13 +13,13 @@
 #include "meters.h"
 #include "render_stems.h"
 #include "test.h"
+#include "test_signal.h"
 #include "wav.h"
 
 using namespace caw;
 
 namespace {
 
-const char* kFloat = "---\nmode: float\n---\n";
 
 std::string tempDir(const char* tag) {
     static int n = 0;
@@ -76,11 +76,9 @@ std::vector<float> readWav(const std::string& path, int* bits = nullptr) {
     return out;
 }
 
-LayerSpec track(const std::string& id, const std::string& module, double volume) {
-    LayerSpec l;
-    l.id = id;
-    l.name = id;
-    l.chain = {module};
+// A track playing the test signal in Notes mode (its notes from its clips or pattern) at `level`.
+LayerSpec track(const std::string& id, cawtest::Shape shape, double level, double volume) {
+    LayerSpec l = cawtest::testSignalNotesLayer(id, shape, "", {{"level", level}});
     l.volume = volume;
     return l;
 }
@@ -102,18 +100,17 @@ ProjectSpec band() {
     p.bpm = 120;
     p.loopBars = 2;
     p.master = 0.7;
-    p.modules.push_back({"saw", std::string(kFloat) + "saw(110) * gate * vel * 0.3", {}});
-    p.modules.push_back({"sine", std::string(kFloat) + "sine(330) * gate * vel * 0.3", {}});
-    p.modules.push_back({"byte", "t*(t>>5|t>>8)", {}});
-    p.modules.push_back({"riff", "---\nkind: pattern\nlength: 8\n---\n0 A2 2 1\n4 C3 1 0.8\n6 E3 2 0.6\n", {}});
-    LayerSpec a = track("a", "saw", 0.8);
+    p.modules.push_back({"riff", "---\nkind: pattern\nlength: 8\n---\n0 A2 2 1\n4 C3 1 0.8\n6 E3 2 0.6\n"});
+    p.modules.push_back({"hold", "---\nkind: pattern\nlength: 32\n---\n0 C4 32 1\n"});
+    LayerSpec a = track("a", cawtest::Shape::Saw, 0.3, 0.8);
     a.name = "Bass";
     a.clips.push_back({"ca", "riff", 0, 32, 0, true});
     a.sends = {{"verb", 0.5, false, false}};
-    LayerSpec b = track("b", "byte", 0.2);
+    LayerSpec b = track("b", cawtest::Shape::Noise, 1.0, 0.2);
+    b.pattern = "hold";
     b.name = "Byte";
     b.pan = -0.4;
-    LayerSpec c = track("c", "sine", 1.0);
+    LayerSpec c = track("c", cawtest::Shape::Sine, 0.3, 1.0);
     c.name = "Lead";
     c.parentId = "verb";
     c.clips.push_back({"cc", "riff", 8, 16, 0, true});
@@ -468,8 +465,8 @@ TEST(the_song_render_request_is_checked) {
 
 TEST(song_renders_run_through_the_c_api_and_the_worker_pool) {
     const std::string dir = tempDir("capi");
-    const std::string project = R"js({"bpm":120,"loop_bars":1,"modules":[{"id":"m","source":"t*(t>>5|t>>8)"}],
-        "layers":[{"id":"l","name":"Loop","chain":["m"]}]})js";
+    const std::string project = R"js({"bpm":120,"loop_bars":1,"modules":[{"id":"m","source":"---\nkind: pattern\n---\n0 C4 16 1\n"}],
+        "layers":[{"id":"l","name":"Loop","pattern":"m","instrument":{"id":"org.caw.test.osc","params":{"mode":1,"shape":1}}}]})js";
     const std::string request = R"({"out_dir":")" + dir + R"(","project":"Song","tracks":true,"bit_depth":24})";
     char* out = caw_render_song(project.c_str(), request.c_str(), nullptr, nullptr);
     const std::string text = out;

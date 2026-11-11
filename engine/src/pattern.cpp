@@ -340,7 +340,7 @@ std::string describePattern(const Pattern& p) {
                     std::to_string(p.lengthBars);
     std::snprintf(buf, sizeof buf, ",\"last_end\":%.17g", p.lastEnd);
     o += buf;
-    o += ",\"notes\":" + std::to_string(p.notes.size()) + ",\"params\":[],\"exports\":[],\"imports\":[],\"functions\":[]";
+    o += ",\"notes\":" + std::to_string(p.notes.size());
     return o;
 }
 

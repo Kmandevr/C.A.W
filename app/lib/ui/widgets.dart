@@ -599,24 +599,6 @@ class _ValueDialogState extends State<ValueDialog> {
   );
 }
 
-/// A typed parameter value: a finite number ("0,5" reads as 0.5), clamped to the parameter's range and snapped to its
-/// step; null if not.
-double? parseParam(String text, ParamInfo p) {
-  final v = double.tryParse(text.trim().replaceAll(',', '.'));
-  if (v == null || !v.isFinite) return null;
-  final c = v.clamp(p.min, p.max).toDouble();
-  if (p.step <= 0) return c;
-  return (p.min + ((c - p.min) / p.step).round() * p.step).clamp(p.min, p.max).toDouble();
-}
-
-String formatParam(double v, ParamInfo p) {
-  final span = (p.max - p.min).abs();
-  if (v == v.roundToDouble() && span >= 4) return v.toStringAsFixed(0);
-  if (span >= 100) return v.toStringAsFixed(0);
-  if (span >= 10) return v.toStringAsFixed(1);
-  return v.toStringAsFixed(2);
-}
-
 /// A whole number of bars from 1 to [max]: − and + step it, tapping the number types any value (no fixed list of
 /// lengths; owner, 2026-11-09: a project's length has no cap).
 class BarsField extends StatelessWidget {

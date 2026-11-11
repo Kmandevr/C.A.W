@@ -15,28 +15,36 @@
 #include "engine.h"
 #include "native_component_test_path.h"
 #include "test.h"
+#include "test_signal.h"
 
 using namespace caw;
 
 namespace {
 
-const char* kFloat = "---\nmode: float\n---\n";
+using cawtest::Shape;
 
-ProjectSpec project(std::vector<std::pair<std::string, std::string>> mods, int bars = 1, double bpm = 120) {
-    ProjectSpec p;
-    p.bpm = bpm;
-    p.loopBars = bars;
-    p.master = 1.0;
-    int i = 0;
-    for (auto& [id, src] : mods) {
-        p.modules.push_back({id, src, {}});
-        LayerSpec l;
-        l.id = "l" + std::to_string(i++);
-        l.name = l.id;
-        l.chain = {id};
-        l.volume = 1.0;
-        p.layers.push_back(l);
-    }
+// A track's test signal (test_signal.h): its shape and values.
+struct Signal {
+    Shape shape;
+    cawtest::Params params;
+};
+Signal dc(double level) { return {Shape::Dc, {{"level", level}}}; }
+Signal sine(double hz, double level = 1.0) { return {Shape::Sine, {{"freq", hz}, {"level", level}}}; }
+
+// One track per signal (l0, l1, ...), volume 1 and centred, in a project with master gain 1.
+ProjectSpec project(std::vector<Signal> signals, int bars = 1, double bpm = 120) {
+    std::vector<LayerSpec> layers;
+    for (size_t i = 0; i < signals.size(); ++i)
+        layers.push_back(cawtest::testSignalLayer("l" + std::to_string(i), signals[i].shape, signals[i].params));
+    return cawtest::testSignalProject(std::move(layers), bpm, bars);
+}
+
+// A one-bar project whose one track (l0) holds a note through the loop on the test signal (Notes mode), so a Stop
+// ends it: a free-running signal ignores notes and rings on after a Stop like any instrument still sounding.
+ProjectSpec heldProject(Signal s) {
+    ProjectSpec p = project({});
+    p.modules.push_back({"hold", "---\nkind: pattern\nlength: 16\n---\n0 C4 16 1\n"});
+    p.layers.push_back(cawtest::testSignalNotesLayer("l0", s.shape, "hold", s.params));
     return p;
 }
 
@@ -70,7 +78,7 @@ TEST(engine_runs_trusted_native_stereo_master_effect_before_the_safety_limiter) 
     CHECK(loaded.success);
     if (!loaded.success) return;
 
-    ProjectSpec p = project({{"tone", std::string(kFloat) + "sine(220) * 0.8"}});
+    ProjectSpec p = project({sine(220, 0.8)});
     p.masterComponents.push_back({componentId, {}});
     CHECK(e.setProject(p).find("\"ok\":true") != std::string::npos);
     e.play();
@@ -93,24 +101,16 @@ TEST(meters_read_what_each_track_and_folder_sends_on_after_volume_and_pan) {
     p.bpm = 120;
     p.loopBars = 1;
     p.master = 1.0;
-    p.modules.push_back({"tone", std::string(kFloat) + "0.5", {}});
     LayerSpec folder;
     folder.id = "folder";
     folder.name = "Folder";
     folder.folder = true;
     folder.volume = 0.5;
     p.layers.push_back(folder);
-    LayerSpec centre;  // centred: each channel gets 0.5 * cos(pi/4)
-    centre.id = "centre";
-    centre.name = "Centre";
-    centre.chain = {"tone"};
-    centre.volume = 1.0;
+    LayerSpec centre = cawtest::testSignalLayer("centre", Shape::Dc, {{"level", 0.5}});  // each side 0.5 * cos(pi/4)
     centre.parentId = "folder";
     p.layers.push_back(centre);
-    LayerSpec left;  // hard left, at half volume: 0.25 on the left only
-    left.id = "left";
-    left.name = "Left";
-    left.chain = {"tone"};
+    LayerSpec left = cawtest::testSignalLayer("left", Shape::Dc, {{"level", 0.5}});  // hard left, half volume: 0.25 left
     left.volume = 0.5;
     left.pan = -1.0;
     p.layers.push_back(left);
@@ -136,8 +136,9 @@ TEST(track_meters_read_each_side_for_stereo_tracks) {
     CHECK(engine != nullptr);
     if (!engine) return;
     char* result = caw_engine_set_project(engine,
-        R"({"caw_project":1,"bpm":120,"master":1,"modules":[{"id":"dc","source":"---\nmode: float\n---\n0.5"}],
-            "layers":[{"id":"l","chain":["dc"],"volume":0.5,"pan":-1},{"id":"c","chain":["dc"],"volume":1,"pan":0.5}]})");
+        R"({"caw_project":1,"bpm":120,"master":1,
+            "layers":[{"id":"l","instrument":{"id":"org.caw.test.osc","params":{"shape":4,"level":0.5}},"volume":0.5,"pan":-1},
+                      {"id":"c","instrument":{"id":"org.caw.test.osc","params":{"shape":4,"level":0.5}},"volume":1,"pan":0.5}]})");
     CHECK(result && std::string(result).find("\"ok\":true") != std::string::npos);
     caw_free(result);
     caw_engine_play(engine);
@@ -164,9 +165,9 @@ TEST(track_meters_read_each_side_for_stereo_tracks) {
 }
 
 TEST(audition_only_uses_the_dedicated_audition_slot) {
-    ProjectSpec p = project({{"tone", std::string(kFloat) + "0.5"}});
-    p.layers.clear();
-    p.auditionChain = {"tone"};
+    ProjectSpec p = project({});
+    p.hasAuditionInstrument = true;
+    p.auditionInstrument = cawtest::testSignal(Shape::Dc, {{"level", 0.5}});
     p.auditionOnly = true;
 
     Engine e(48000);
@@ -188,7 +189,7 @@ TEST(audition_plays_a_cpp_instrument_and_its_effects) {
                     "components":[{"id":"org.caw.stereo.balance","params":{"pan":1}}]},
         "audition_only":true})", p, error));
     CHECK(error.empty());
-    CHECK(p.auditionOnly && p.hasAuditionInstrument && p.auditionChain.empty());
+    CHECK(p.auditionOnly && p.hasAuditionInstrument);
     CHECK_EQ(p.auditionComponents.size(), 1u);
     Engine e(48000);
     e.setMasterBypass(true);
@@ -231,12 +232,11 @@ TEST(audition_slot_follows_the_last_layer_slot_and_both_play) {
     Engine e(48000);
     CHECK_EQ(e.layerCapacity(), kInitialLayerCapacity);
     CHECK_EQ(e.auditionSlot(), e.layerCapacity());
-    std::vector<std::pair<std::string, std::string>> mods;
-    for (int i = 0; i < kInitialLayerCapacity; ++i)
-        mods.push_back({"m" + std::to_string(i), std::string(kFloat) + (i == kInitialLayerCapacity - 1 ? "0.25" : "0")});
-    ProjectSpec p = project(mods);
-    p.modules.push_back({"tone", std::string(kFloat) + "0.5", {}});
-    p.auditionChain = {"tone"};
+    std::vector<Signal> signals;
+    for (int i = 0; i < kInitialLayerCapacity; ++i) signals.push_back(dc(i == kInitialLayerCapacity - 1 ? 0.25 : 0));
+    ProjectSpec p = project(signals);
+    p.hasAuditionInstrument = true;
+    p.auditionInstrument = cawtest::testSignal(Shape::Dc, {{"level", 0.5}});
     e.setMasterBypass(true);
     e.setProject(p);
     e.play();
@@ -255,7 +255,7 @@ TEST(audition_slot_follows_the_last_layer_slot_and_both_play) {
 }
 
 TEST(folder_bus_routes_children_and_applies_group_gain) {
-    ProjectSpec p = project({{"a", std::string(kFloat) + "0.8"}});
+    ProjectSpec p = project({dc(0.8)});
     LayerSpec folder;
     folder.id = "bus";
     folder.name = "Group";
@@ -276,7 +276,7 @@ TEST(folder_bus_routes_children_and_applies_group_gain) {
 }
 
 TEST(reparenting_track_detaches_it_from_previous_folder_bus) {
-    ProjectSpec p = project({{"a", std::string(kFloat) + "0.8"}});
+    ProjectSpec p = project({dc(0.8)});
     LayerSpec folder;
     folder.id = "bus";
     folder.folder = true;
@@ -302,7 +302,7 @@ TEST(reparenting_track_detaches_it_from_previous_folder_bus) {
 }
 
 TEST(reparenting_folder_bus_detaches_it_from_old_parent_bus) {
-    ProjectSpec p = project({{"a", std::string(kFloat) + "0.8"}});
+    ProjectSpec p = project({dc(0.8)});
     LayerSpec outer;
     outer.id = "outer"; outer.folder = true; outer.busEnabled = true; outer.volume = 0.5;
     LayerSpec inner;
@@ -328,7 +328,7 @@ TEST(reparenting_folder_bus_detaches_it_from_old_parent_bus) {
 }
 
 TEST(organization_only_folder_mute_propagates_to_descendants) {
-    ProjectSpec p = project({{"a", std::string(kFloat) + "1"}});
+    ProjectSpec p = project({dc(1)});
     LayerSpec folder;
     folder.id = "group"; folder.folder = true; folder.busEnabled = false; folder.mute = true;
     p.layers.insert(p.layers.begin(), folder);
@@ -342,7 +342,7 @@ TEST(organization_only_folder_mute_propagates_to_descendants) {
 }
 
 TEST(nested_folder_buses_route_child_audio_once) {
-    ProjectSpec p = project({{"a", std::string(kFloat) + "0.8"}});
+    ProjectSpec p = project({dc(0.8)});
     LayerSpec outer;
     outer.id = "outer"; outer.folder = true; outer.busEnabled = true; outer.volume = 0.5;
     LayerSpec inner;
@@ -361,7 +361,7 @@ TEST(nested_folder_buses_route_child_audio_once) {
 // REAPER nests folders to any depth and "any action taken on a folder will effect its entire contents" (UG 5.13.5,
 // p. 102): three levels, with an organization-only folder between two buses, sum once and follow solo and mute.
 TEST(three_level_folders_sum_once_and_follow_folder_solo_and_mute) {
-    ProjectSpec p = project({{"a", std::string(kFloat) + "0.8"}, {"b", std::string(kFloat) + "0.3"}});
+    ProjectSpec p = project({dc(0.8), dc(0.3)});
     LayerSpec outer;
     outer.id = "outer"; outer.folder = true; outer.busEnabled = true; outer.volume = 0.5;
     LayerSpec mid;
@@ -396,7 +396,7 @@ TEST(three_level_folders_sum_once_and_follow_folder_solo_and_mute) {
 }
 
 TEST(track_pan_automation_moves_between_stereo_channels) {
-    ProjectSpec p = project({{"a", std::string(kFloat) + "1"}});
+    ProjectSpec p = project({dc(1)});
     p.layers[0].automation.push_back({"pan", {{0, -1}, {16, 1}}});
     Engine e(48000);
     e.setMasterBypass(true);
@@ -412,7 +412,7 @@ TEST(track_pan_automation_moves_between_stereo_channels) {
 }
 
 TEST(track_volume_automation_is_sample_positioned) {
-    ProjectSpec p = project({{"a", std::string(kFloat) + "1"}});
+    ProjectSpec p = project({dc(1)});
     p.layers[0].lengthSteps = 8;  // the lane must follow song time, not this shorter track loop
     p.layers[0].automation.push_back({"volume", {{0, 0}, {16, 1}}});
     Engine e(48000);
@@ -427,7 +427,7 @@ TEST(track_volume_automation_is_sample_positioned) {
 }
 
 TEST(folder_bus_volume_automation_is_sample_positioned) {
-    ProjectSpec p = project({{"a", std::string(kFloat) + "0.8"}}, 2);
+    ProjectSpec p = project({dc(0.8)}, 2);
     LayerSpec folder;
     folder.id = "bus";
     folder.folder = true;
@@ -449,7 +449,7 @@ TEST(folder_bus_volume_automation_is_sample_positioned) {
 }
 
 TEST(mute_overrides_volume_automation) {
-    ProjectSpec p = project({{"a", std::string(kFloat) + "1"}});
+    ProjectSpec p = project({dc(1)});
     p.layers[0].automation.push_back({"volume", {{0, 1}, {16, 1}}});
     p.layers[0].mute = true;
     Engine e(48000);
@@ -483,7 +483,11 @@ TEST(project_parser_reads_folder_and_automation_metadata) {
 }
 
 TEST(output_does_not_depend_on_block_size) {
-    ProjectSpec p = project({{"a", "t*(t>>5|t>>8)"}, {"b", std::string(kFloat) + "lpf(saw(110), 800, 3) * ad(step%4==0)"}});
+    // Noise free-running, and a saw played by a pattern (notes off the block grid) through a filter.
+    ProjectSpec p = project({{Shape::Noise, {{"level", 0.3}}}});
+    p.modules.push_back({"pat", "---\nkind: pattern\nlength: 16\n---\n0 A2 1.3 1\n1.7 C3 2.1 0.7\n5 E3 3 0.9\n"});
+    p.layers.push_back(cawtest::testSignalNotesLayer("b", Shape::Saw, "pat", {{"level", 0.4}},
+                                                     {{"org.caw.filter", {}}}));
     std::vector<std::vector<float>> outs;
     for (int block : {64, 37, 512, 1}) {
         Engine e(48000);
@@ -495,29 +499,33 @@ TEST(output_does_not_depend_on_block_size) {
 }
 
 TEST(layers_loop_at_their_own_length) {
-    // A 12-step layer in a 16-step project restarts every 12 steps; pos shows where each loop starts.
-    ProjectSpec p = project({{"a", std::string(kFloat) + "pos * 0.5"}});
-    p.seamCrossfade = false;
-    p.layers[0].lengthSteps = 12;
+    // A 12-step pattern in a 16-step project restarts every 12 steps: its one-step note at 0 sounds again there,
+    // and again when the project loop restarts every layer.
+    ProjectSpec p = project({});
+    p.modules.push_back({"pat", "---\nkind: pattern\nlength: 12\n---\n0 C4 1 1\n"});
+    p.layers.push_back(cawtest::testSignalNotesLayer("l0", Shape::Dc, "pat", {{"level", 0.5}}));
     Engine e(48000);
     e.setMasterBypass(true);
     e.setProject(p);
     e.play();
     // 120 BPM at 48 kHz: 6000 samples per 16th, so the layer loop is 72000 and the project loop 96000.
     std::vector<float> out = run(e, 200000);
-    const double g = std::cos(kPi / 4.0);
+    const double g = 0.5 * std::cos(kPi / 4.0);
     CHECK_EQ(e.loopLength(), int64_t{96000});
-    CHECK_NEAR(out[0], 0.0, 1e-7);
-    CHECK_NEAR(out[71999], 71999.0 / 72000.0 * 0.5 * g, 1e-6);
-    CHECK_NEAR(out[72000], 0.0, 1e-7);   // layer restarts
-    CHECK_NEAR(out[95999], 23999.0 / 72000.0 * 0.5 * g, 1e-6);
-    CHECK_NEAR(out[96000], 0.0, 1e-7);   // project loop restarts every layer
-    CHECK_NEAR(out[168000], 0.0, 1e-7);
+    CHECK_NEAR(out[0], g, 1e-6);
+    CHECK_NEAR(out[5999], g, 1e-6);
+    CHECK_NEAR(out[6000], 0.0, 1e-7);
+    CHECK_NEAR(out[71999], 0.0, 1e-7);
+    CHECK_NEAR(out[72000], g, 1e-6);    // layer restarts
+    CHECK_NEAR(out[78000], 0.0, 1e-7);
+    CHECK_NEAR(out[95999], 0.0, 1e-7);
+    CHECK_NEAR(out[96000], g, 1e-6);    // project loop restarts every layer
+    CHECK_NEAR(out[168000], g, 1e-6);
 }
 
 TEST(a_loop_range_loops_playback_inside_the_song) {
     // 120 BPM at 48 kHz: 6000 samples a step. The range is steps 4 to 8 (24000 to 48000) of a 16-step song.
-    ProjectSpec p = project({{"a", std::string(kFloat) + "0.1"}});
+    ProjectSpec p = project({dc(0.1)});
     p.loopRange = true;
     p.loopStartSteps = 4;
     p.loopEndSteps = 8;
@@ -560,43 +568,30 @@ TEST(project_file_loop_range_is_checked_and_reaches_the_song) {
     CHECK_EQ(p.loopBars, 4);
 }
 
-TEST(seam_crossfade_removes_the_click) {
-    ProjectSpec p = project({{"a", std::string(kFloat) + "pos * 0.8"}});
-    p.layers[0].lengthSteps = 4;
-    Engine hard(48000), soft(48000);
-    p.seamCrossfade = false;
-    hard.setMasterBypass(true);
-    hard.setProject(p);
-    hard.play();
-    p.seamCrossfade = true;
-    soft.setMasterBypass(true);
-    soft.setProject(p);
-    soft.play();
-    std::vector<float> h = run(hard, 30000), s = run(soft, 30000);
-    CHECK(maxStep(h, 23990, 24010) > 0.5f);
-    CHECK(maxStep(s, 23990, 24200) < 0.01f);
-}
-
-TEST(hot_swap_crossfades_without_a_click) {
+TEST(an_instrument_swap_crossfades_without_a_click) {
     Engine e(48000);
     e.setMasterBypass(true);
-    ProjectSpec p = project({{"a", std::string(kFloat) + "sine(220) * 0.5"}});
+    ProjectSpec p = project({sine(220, 0.5)});
     e.setProject(p);
     e.play();
     std::vector<float> before = run(e, 10000);
-    p.modules[0].source = std::string(kFloat) + "square(330) * 0.5";
+    // Another instrument (with no notes to play): the sine crossfades out over 20 ms.
+    p.layers[0].instrument = {"org.caw.synth.flagship", {}};
     std::string res = e.setProject(p);
     CHECK(res.find("\"ok\":true") != std::string::npos);
     std::vector<float> after = run(e, 10000);
     std::vector<float> all = before;
     all.insert(all.end(), after.begin(), after.end());
     CHECK(maxStep(all, 9990, 10010) < 0.05f);
-    // After the fade only the new sound plays: a square wave has big steps.
-    CHECK(maxStep(after, 2000, 9000) > 0.3f);
+    CHECK(maxStep(all, 9990, 11000) < 0.05f);
+    // After the fade only the new instrument plays: silence.
+    CHECK(maxStep(after, 2000, 9000) < 1e-6f);
 }
 
-TEST(broken_code_keeps_the_old_sound) {
-    ProjectSpec p = project({{"a", "t*(t>>5|t>>8)"}});
+TEST(a_broken_pattern_keeps_the_old_notes) {
+    ProjectSpec p = project({});
+    p.modules.push_back({"pat", "---\nkind: pattern\nlength: 16\n---\n0 A4 2 1\n4 C5 2 0.5\n"});
+    p.layers.push_back(cawtest::testSignalNotesLayer("l0", Shape::Sine, "pat", {{"level", 0.5}}));
     Engine a(48000), b(48000);
     a.setProject(p);
     b.setProject(p);
@@ -604,17 +599,17 @@ TEST(broken_code_keeps_the_old_sound) {
     b.play();
     std::vector<float> a1 = run(a, 5000), b1 = run(b, 5000);
     ProjectSpec broken = p;
-    broken.modules[0].source = "t*(t>>5|";
+    broken.modules[0].source = "---\nkind: pattern\nlength: 16\n---\n0 A4 2 1\n4 Q9 2 0.5\n";
     std::string res = a.setProject(broken);
     CHECK(res.find("\"ok\":false") != std::string::npos);
-    CHECK(res.find("line 1") != std::string::npos);
-    std::vector<float> a2 = run(a, 20000), b2 = run(b, 20000);
+    CHECK(res.find("\"line\":6") != std::string::npos);
+    std::vector<float> a2 = run(a, 40000), b2 = run(b, 40000);
     CHECK(a1 == b1);
     CHECK(a2 == b2);
 }
 
 TEST(mute_and_solo) {
-    ProjectSpec p = project({{"a", std::string(kFloat) + "0.25"}, {"b", std::string(kFloat) + "0.5"}});
+    ProjectSpec p = project({dc(0.25), dc(0.5)});
     Engine e(48000);
     e.setMasterBypass(true);
     p.layers[1].solo = true;
@@ -637,7 +632,7 @@ TEST(track_and_master_faders_reach_plus_12_db) {
     // Owner, 2026-11-10 (feel pass): faders like REAPER's, up to +12 dB (a gain of 3.981) on tracks and the
     // master; the safety limiter stays last. They were clamped at 0 dB (gain 1).
     const double kPlus12 = std::pow(10.0, 12.0 / 20.0);
-    ProjectSpec p = project({{"a", std::string(kFloat) + "0.05"}});
+    ProjectSpec p = project({dc(0.05)});
     p.master = 1.0;
     Engine e(48000);
     e.setMasterBypass(true);
@@ -670,7 +665,7 @@ TEST(track_and_master_faders_reach_plus_12_db) {
 }
 
 TEST(overload_mutes_the_newest_layer) {
-    ProjectSpec p = project({{"a", std::string(kFloat) + "0.25"}, {"b", std::string(kFloat) + "0.5"}});
+    ProjectSpec p = project({dc(0.25), dc(0.5)});
     Engine e(48000);
     e.setMasterBypass(true);
     e.setProject(p);
@@ -693,7 +688,7 @@ TEST(overload_mutes_the_newest_layer) {
 TEST(the_test_tone_goes_through_the_safety_limiter) {
     // A song already at the limiter's ceiling: the tone on top must not push the output past it (it used to be
     // added after the limiter and hard-clipped at 1).
-    ProjectSpec p = project({{"loud", std::string(kFloat) + "sine(220)"}});
+    ProjectSpec p = heldProject({Shape::Sine, {}});
     p.master = 3.0;  // +9.5 dB: well into the limiter
     Engine e(48000);
     e.setProject(p);
@@ -717,7 +712,7 @@ TEST(the_test_tone_goes_through_the_safety_limiter) {
 TEST(overload_shedding_goes_by_time_not_callbacks) {
     // The shedding was tuned at 512-frame callbacks: about 0.21 s over budget sheds a layer, then 1.07 s of rest.
     // Counting callbacks made 16-frame periods shed on a 7 ms hiccup and 8192-frame ones take 3.4 s.
-    ProjectSpec p = project({{"a", std::string(kFloat) + "0.25"}, {"b", std::string(kFloat) + "0.5"}});
+    ProjectSpec p = project({dc(0.25), dc(0.5)});
     auto overloadedAfter = [&](int frames, double seconds) {
         Engine e(48000);
         e.setProject(p);
@@ -758,8 +753,9 @@ TEST(overload_shedding_goes_by_time_not_callbacks) {
 }
 
 TEST(stop_fades_to_silence_and_layers_can_be_removed) {
-    ProjectSpec p = project({{"a", std::string(kFloat) + "0.5"}});
+    ProjectSpec p = heldProject(dc(0.5));
     Engine e(48000);
+    e.setMasterBypass(true);  // the master's DC blocker would ring on after the DC ends
     e.setProject(p);
     e.play();
     run(e, 2000);
@@ -776,13 +772,8 @@ TEST(stop_fades_to_silence_and_layers_can_be_removed) {
     run(e, 5000);
     e.meters();
     ProjectSpec many;
-    for (int i = 0; i < kInitialLayerCapacity; ++i) {
-        many.modules.push_back({"m" + std::to_string(i), std::string(kFloat) + "0.001", {}});
-        LayerSpec l;
-        l.id = "x" + std::to_string(i);
-        l.chain = {"m" + std::to_string(i)};
-        many.layers.push_back(l);
-    }
+    for (int i = 0; i < kInitialLayerCapacity; ++i)
+        many.layers.push_back(cawtest::testSignalLayer("x" + std::to_string(i), Shape::Dc, {{"level", 0.001}}));
     e.setProject(many);
     run(e, 100);
     LayerMeter lm;
@@ -790,69 +781,31 @@ TEST(stop_fades_to_silence_and_layers_can_be_removed) {
 }
 
 TEST(effects_process_their_layer_only) {
-    ProjectSpec p = project({{"a", std::string(kFloat) + "0.3"}, {"b", std::string(kFloat) + "0.3"}});
-    p.modules.push_back({"fx", "---\nkind: effect\n---\nin * 2", {}});
-    p.layers[0].chain.push_back("fx");
+    ProjectSpec p = project({dc(0.3), dc(0.3)});
+    p.layers[0].components = {{"org.caw.utility", {{"gain", 20.0 * std::log10(2.0)}}}};
     Engine e(48000);
     e.setMasterBypass(true);
     e.setProject(p);
     e.play();
-    std::vector<float> out = run(e, 1000);
-    CHECK_NEAR(out[999], 0.9 * std::cos(kPi / 4.0), 1e-6);
+    std::vector<float> out = run(e, 4000);
+    CHECK_NEAR(out[3999], 0.9 * std::cos(kPi / 4.0), 1e-5);
 }
 
-TEST(each_module_of_a_track_runs_as_its_own_graph_node) {
-    ProjectSpec p = project({{"a", std::string(kFloat) + "0.3"}});
-    p.modules.push_back({"fx", "---\nkind: effect\n---\nin * 2", {}});
-    p.modules.push_back({"fx2", "---\nkind: effect\n---\nin * 0.5", {}});
-    p.layers[0].chain = {"a", "fx", "fx2", "fx"};
+TEST(a_track_runs_as_one_graph_node_with_its_inserts) {
+    ProjectSpec p = project({dc(0.3)});
+    p.layers[0].components = {{"org.caw.utility", {{"gain", 20.0 * std::log10(2.0)}}}, {"org.caw.utility", {}}};
     Engine e(48000);
     e.setMasterBypass(true);
     e.setProject(p);
     e.play();
-    std::vector<float> out = run(e, 1000);
-    CHECK_NEAR(out[999], 0.6 * std::cos(kPi / 4.0), 1e-6);
-    CHECK_EQ(e.mixGraphNodesRun(), 6u);  // four module nodes, the track node and master; idle slots never run
+    std::vector<float> out = run(e, 4000);
+    CHECK_NEAR(out[3999], 0.6 * std::cos(kPi / 4.0), 1e-5);
+    CHECK_EQ(e.mixGraphNodesRun(), 2u);  // the track node (instrument and inserts) and master; idle slots never run
     CHECK_EQ(e.routingRejections(), 0u);
-}
-
-TEST(track_chain_longer_than_its_module_nodes_is_refused_with_an_error) {
-    ProjectSpec p = project({{"a", std::string(kFloat) + "0.25"}});
-    p.modules.push_back({"fx", "---\nkind: effect\n---\nin", {}});
-    for (int i = 1; i < kMaxTrackModules; ++i) p.layers[0].chain.push_back("fx");
-    Engine e(48000);
-    e.setMasterBypass(true);
-    CHECK(e.setProject(p).find("a track runs at most") == std::string::npos);
-    e.play();
-    std::vector<float> out = run(e, 500);
-    CHECK_NEAR(out[499], 0.25 * std::cos(kPi / 4.0), 1e-6);  // exactly the limit still plays
-    p.layers[0].chain.push_back("fx");
-    const std::string result = e.setProject(p);
-    CHECK(result.find("layer not installed: its chain has 33 modules and a track runs at most 32") != std::string::npos);
-    out = run(e, 4800);
-    CHECK_EQ(out[4799], 0.0f);  // refused, never played cut short
-    CHECK_EQ(e.routingRejections(), 0u);
-}
-
-TEST(params_reach_the_audio) {
-    ProjectSpec p = project({{"a", std::string(kFloat) + "param level = 0.2\nlevel"}});
-    p.modules[0].params["level"] = 0.4;
-    Engine e(48000);
-    e.setMasterBypass(true);
-    e.setProject(p);
-    e.play();
-    std::vector<float> out = run(e, 100);
-    CHECK_NEAR(out[99], 0.4 * std::cos(kPi / 4.0), 1e-6);
-    e.setParam("a", "level", 0.1);
-    out = run(e, 100);
-    CHECK_NEAR(out[99], 0.1 * std::cos(kPi / 4.0), 1e-6);
-    e.setParam("a", "level", 5.0);  // clamped to the declared range
-    out = run(e, 100);
-    CHECK_NEAR(out[99], 1.0 * std::cos(kPi / 4.0), 1e-6);
 }
 
 TEST(limiter_keeps_output_below_full_scale) {
-    ProjectSpec p = project({{"a", "t*7"}, {"b", "t*13"}, {"c", "t*3"}});
+    ProjectSpec p = project({{Shape::Saw, {{"freq", 110}}}, {Shape::Square, {{"freq", 170}}}, {Shape::Saw, {{"freq", 33}}}});
     Engine e(48000);
     e.setProject(p);
     e.play();
@@ -863,16 +816,16 @@ TEST(limiter_keeps_output_below_full_scale) {
     CHECK(peak > 0.5f);
 }
 
-TEST(unchanged_calls_keep_playing_across_a_code_swap) {
-    // Only the volume changes: the sine keeps its phase, so after the 20 ms crossfade the output is exactly the
-    // new volume times the same running sine, with no restart.
-    ProjectSpec p = project({{"m", std::string(kFloat) + "sine(220) * 0.5"}});
+TEST(a_value_change_keeps_the_instrument_playing) {
+    // Only the level changes: the same instrument takes the value and the sine keeps its phase, so the output is
+    // exactly the new level times the same running sine, with no restart.
+    ProjectSpec p = project({sine(220, 0.5)});
     Engine e(48000);
     e.setMasterBypass(true);
     e.setProject(p);
     e.play();
     run(e, 9000);
-    p.modules[0].source = std::string(kFloat) + "sine(220) * 0.25";
+    p.layers[0].instrument.params = {{"shape", 0}, {"freq", 220}, {"level", 0.25}};
     e.setProject(p);
     std::vector<float> y = run(e, 4000);
     const double g = std::cos(kPi / 4.0);
@@ -882,36 +835,15 @@ TEST(unchanged_calls_keep_playing_across_a_code_swap) {
     }
 }
 
-TEST(code_swaps_can_wait_for_the_next_bar) {
-    ProjectSpec p = project({{"m", std::string(kFloat) + "0.1"}}, 2);
-    p.swapMode = 2;  // next bar: 96000 samples at 120 BPM
-    Engine e(48000);
-    e.setMasterBypass(true);
-    e.setProject(p);
-    e.play();
-    run(e, 1024);
-    p.modules[0].source = std::string(kFloat) + "0.2";
-    e.setProject(p);
-    std::vector<float> y = run(e, 100000 - 1024);
-    const double g = std::cos(kPi / 4.0);
-    CHECK_NEAR(y[50000] / g, 0.1, 1e-6);
-    CHECK_NEAR(y[96000 - 1024 - 1] / g, 0.1, 1e-6);
-    CHECK_NEAR(y[96000 - 1024 + 2000] / g, 0.2, 1e-6);
-}
-
 TEST(arrangement_clips_schedule_reusable_patterns_on_the_project_timeline) {
     ProjectSpec p;
     p.bpm = 120;
     p.loopBars = 1;
     p.master = 1.0;
-    p.seamCrossfade = false;
-    p.modules.push_back({"tone", std::string(kFloat) + "gate * vel * 0.5", {}});
     p.modules.push_back({"phrase",
-        "---\nkind: pattern\nlength: 4\n---\n0 A4 2 1\n", {}});
-    LayerSpec layer;
-    layer.id = "track";
+        "---\nkind: pattern\nlength: 4\n---\n0 A4 2 1\n"});
+    LayerSpec layer = cawtest::testSignalNotesLayer("track", Shape::Dc, "", {{"level", 0.5}});
     layer.name = "Track";
-    layer.chain = {"tone"};
     layer.volume = 1.0;
     layer.clips.push_back({"clip-a", "phrase", 2, 8, 0, true});
     p.layers.push_back(layer);
@@ -935,12 +867,8 @@ TEST(a_muted_arrangement_clip_plays_nothing_and_the_rest_still_play) {
     p.bpm = 120;
     p.loopBars = 1;
     p.master = 1.0;
-    p.seamCrossfade = false;
-    p.modules.push_back({"tone", std::string(kFloat) + "gate * vel * 0.5", {}});
-    p.modules.push_back({"phrase", "---\nkind: pattern\nlength: 4\n---\n0 A4 2 1\n", {}});
-    LayerSpec layer;
-    layer.id = "track";
-    layer.chain = {"tone"};
+    p.modules.push_back({"phrase", "---\nkind: pattern\nlength: 4\n---\n0 A4 2 1\n"});
+    LayerSpec layer = cawtest::testSignalNotesLayer("track", Shape::Dc, "", {{"level", 0.5}});
     layer.volume = 1.0;
     layer.clips.push_back({"heard", "phrase", 0, 4, 0, false});
     layer.clips.push_back({"muted", "phrase", 8, 4, 0, false, true});
@@ -968,13 +896,9 @@ TEST(arrangement_clip_source_offset_trims_the_source_and_honors_non_looping) {
     p.bpm = 120;
     p.loopBars = 2;
     p.master = 1.0;
-    p.seamCrossfade = false;
-    p.modules.push_back({"tone", std::string(kFloat) + "gate * vel * 0.5", {}});
     p.modules.push_back({"phrase",
-        "---\nkind: pattern\nlength: 4\n---\n0 A4 1 1\n2 C4 1 1\n", {}});
-    LayerSpec layer;
-    layer.id = "track";
-    layer.chain = {"tone"};
+        "---\nkind: pattern\nlength: 4\n---\n0 A4 1 1\n2 C4 1 1\n"});
+    LayerSpec layer = cawtest::testSignalNotesLayer("track", Shape::Dc, "", {{"level", 0.5}});
     layer.volume = 1.0;
     layer.clips.push_back({"trimmed", "phrase", 4, 2, 2, false});
     p.layers.push_back(layer);
@@ -995,13 +919,9 @@ TEST(arrangement_clip_source_offset_preserves_the_tail_of_a_sustained_note) {
     p.bpm = 120;
     p.loopBars = 2;
     p.master = 1.0;
-    p.seamCrossfade = false;
-    p.modules.push_back({"tone", std::string(kFloat) + "gate * vel * 0.5", {}});
     p.modules.push_back({"phrase",
-        "---\nkind: pattern\nlength: 4\n---\n0 A4 4 1\n", {}});
-    LayerSpec layer;
-    layer.id = "track";
-    layer.chain = {"tone"};
+        "---\nkind: pattern\nlength: 4\n---\n0 A4 4 1\n"});
+    LayerSpec layer = cawtest::testSignalNotesLayer("track", Shape::Dc, "", {{"level", 0.5}});
     layer.volume = 1.0;
     layer.clips.push_back({"trimmed-sustain", "phrase", 4, 2, 2, false});
     p.layers.push_back(layer);
@@ -1021,13 +941,9 @@ TEST(arrangement_clip_source_offset_preserves_remaining_ratchets) {
     p.bpm = 120;
     p.loopBars = 2;
     p.master = 1.0;
-    p.seamCrossfade = false;
-    p.modules.push_back({"tone", std::string(kFloat) + "trig", {}});
     p.modules.push_back({"phrase",
-        "---\nkind: pattern\nlength: 4\n---\n0 A4 4 1 ratchet 4\n", {}});
-    LayerSpec layer;
-    layer.id = "track";
-    layer.chain = {"tone"};
+        "---\nkind: pattern\nlength: 4\n---\n0 A4 4 1 ratchet 4\n"});
+    LayerSpec layer = cawtest::testSignalNotesLayer("track", Shape::Impulse, "", {});
     layer.volume = 1.0;
     layer.clips.push_back({"trimmed-ratchet", "phrase", 4, 2, 2, false});
     p.layers.push_back(layer);
@@ -1047,12 +963,8 @@ TEST(arrangement_clips_can_overlap_on_one_track) {
     p.bpm = 120;
     p.loopBars = 2;
     p.master = 1.0;
-    p.seamCrossfade = false;
-    p.modules.push_back({"tone", std::string(kFloat) + "gate * vel * 0.25", {}});
-    p.modules.push_back({"phrase", "---\nkind: pattern\nlength: 4\n---\n0 A4 4 1\n", {}});
-    LayerSpec layer;
-    layer.id = "track";
-    layer.chain = {"tone"};
+    p.modules.push_back({"phrase", "---\nkind: pattern\nlength: 4\n---\n0 A4 4 1\n"});
+    LayerSpec layer = cawtest::testSignalNotesLayer("track", Shape::Dc, "", {{"level", 0.25}});
     layer.volume = 1.0;
     layer.clips.push_back({"looping", "phrase", 0, 8, 0, true});
     layer.clips.push_back({"overlap", "phrase", 4, 4, 0, false});
@@ -1072,13 +984,12 @@ TEST(arrangement_clips_can_overlap_on_one_track) {
 
 
 TEST(master_gain_updates_without_recompiling_and_ramps_smoothly) {
-    ProjectSpec p = project({{"tone", std::string(kFloat) + "0.5"}});
+    ProjectSpec p = project({dc(0.5)});
     p.master = 1.0;
     Engine e(48000);
     e.setMasterBypass(true);
     const std::string projectResult = e.setProject(p);
     CHECK(projectResult.find("\"ok\":true") != std::string::npos);
-    CHECK(projectResult.find("nothing exports") == std::string::npos);
     e.play();
     run(e, 256);
 
@@ -1099,7 +1010,7 @@ TEST(project_parser_keeps_arrangements_past_64_bars) {
        "clips":[{"id":"c","pattern":"p","start_steps":100000,"length_steps":50000,"source_offset_steps":900}],
        "automation":[{"target":"volume","points":[{"step":250000,"value":0.5}]}]}
     ],"automation":[{"target_type":"global","target":"swing","points":[{"step":300000,"value":1}]}],
-    "audition":{"chain":["m"],"length_steps":400000}})";
+    "audition":{"length_steps":400000}})";
     ProjectSpec p;
     std::string error;
     CHECK(parseProject(json, p, error));
@@ -1143,7 +1054,7 @@ TEST(project_parser_refuses_arrangement_values_it_cannot_represent) {
         "layer 't': automation point steps must be");
     refused(R"("automation":[{"target_type":"global","target":"g","points":[{"step":)" + std::to_string(maxSteps3 + 1) +
         R"(,"value":0}]}])", "automation point steps must be");
-    refused(R"("audition":{"chain":["m"],"length_steps":-5})", "audition length_steps must be");
+    refused(R"("audition":{"length_steps":-5})", "audition length_steps must be");
 
     // The largest values are accepted, and the loop reaches the last automation point without overflowing.
     ProjectSpec p;
@@ -1156,39 +1067,42 @@ TEST(project_parser_refuses_arrangement_values_it_cannot_represent) {
 }
 
 TEST(play_from_a_position_resumes_mid_loop) {
-    // As in layers_loop_at_their_own_length: a 12-step layer (72000 samples) in a 96000-sample project loop.
-    ProjectSpec p = project({{"a", std::string(kFloat) + "pos * 0.5"}});
-    p.seamCrossfade = false;
-    p.layers[0].lengthSteps = 12;
-    const double g = std::cos(kPi / 4.0);
+    // As in layers_loop_at_their_own_length: a 12-step pattern (72000 samples) in a 96000-sample project loop, here
+    // with a one-step note on every step, each louder than the one before (velocity (k + 1) / 12).
+    std::string notes = "---\nkind: pattern\nlength: 12\n---\n";
+    for (int k = 0; k < 12; ++k) notes += std::to_string(k) + " C4 1 " + std::to_string((k + 1) / 12.0) + "\n";
+    ProjectSpec p = project({});
+    p.modules.push_back({"pat", notes});
+    p.layers.push_back(cawtest::testSignalNotesLayer("l0", Shape::Dc, "pat", {{"level", 0.5}}));
+    const double g = 0.5 * std::cos(kPi / 4.0);
     Engine e(48000);
     e.setMasterBypass(true);
     e.setProject(p);
-    e.play(80000.0 / 6000.0);  // step 13.33 (6000 samples a step): in the layer's second pass
+    e.play(80000.0 / 6000.0);  // step 13.33 (6000 samples a step): 1.33 steps into the layer's second pass
     std::vector<float> out = run(e, 20000);
-    // It fades in over 10 ms (480 samples) so the jump from silence doesn't click, then plays the layer from there.
-    CHECK_NEAR(out[0], 0.0, 1e-7);
-    CHECK(std::fabs(out[100]) < std::fabs(out[1000]));
-    CHECK_NEAR(out[1000], 9000.0 / 72000.0 * 0.5 * g, 1e-6);
-    CHECK_NEAR(out[15999], 23999.0 / 72000.0 * 0.5 * g, 1e-6);
-    CHECK_NEAR(out[16000], 0.0, 1e-7);  // the project loop wraps as usual
+    // The note under the playhead began before it, so the first heard is the next one, at layer step 2 (4000 on).
+    CHECK_NEAR(out[1000], 0.0, 1e-7);
+    CHECK_NEAR(out[5000], 3.0 / 12.0 * g, 1e-4);
+    CHECK_NEAR(out[15999], 4.0 / 12.0 * g, 1e-4);
+    CHECK_NEAR(out[16000], 1.0 / 12.0 * g, 1e-4);  // the project loop wraps as usual
     Meters m = e.meters();
     CHECK_EQ(m.position, int64_t{4000});
     for (double bad : {-5.0, 16.0, 1e30, std::nan(""), static_cast<double>(INFINITY)}) {
         e.play(bad);  // outside the loop: from the start
-        out = run(e, 64);
-        CHECK_NEAR(out[0], 0.0, 1e-7);
+        run(e, 64);
+        CHECK_EQ(e.meters().position, int64_t{64});
     }
     // A tempo change before the play: the step lands on the same beat at the new tempo (12000 samples a step).
     p.bpm = 60;
     e.setProject(p);
     e.play(13.0);
     out = run(e, 2000);
-    CHECK_NEAR(out[1000], (13.0 * 12000.0 - 144000.0 + 1000.0) / 144000.0 * 0.5 * g, 1e-6);
+    CHECK_NEAR(out[1000], 2.0 / 12.0 * g, 1e-4);  // it fades in over 10 ms (480 samples), so the jump doesn't click
+    CHECK(std::fabs(out[100]) < std::fabs(out[1000]));
 }
 
 TEST(play_during_a_stop_fade_fades_back_in) {
-    ProjectSpec p = project({{"a", std::string(kFloat) + "0.5"}});
+    ProjectSpec p = project({dc(0.5)});
     Engine e(48000);
     e.setMasterBypass(true);
     e.setProject(p);
@@ -1209,12 +1123,8 @@ TEST(play_from_a_position_reaches_a_later_clip_on_time) {
     p.bpm = 400;
     p.loopBars = 80;
     p.master = 1.0;
-    p.seamCrossfade = false;
-    p.modules.push_back({"tone", std::string(kFloat) + "gate * 0.5", {}});
-    p.modules.push_back({"hit", "---\nkind: pattern\nlength: 4\n---\n0 A4 4 1\n", {}});
-    LayerSpec layer;
-    layer.id = "track";
-    layer.chain = {"tone"};
+    p.modules.push_back({"hit", "---\nkind: pattern\nlength: 4\n---\n0 A4 4 1\n"});
+    LayerSpec layer = cawtest::testSignalNotesLayer("track", Shape::Dc, "", {{"level", 0.5}});
     layer.volume = 1.0;
     layer.clips.push_back({"late", "hit", 70 * 16, 4, 0, false});  // bar 71: sample 336000 at 8 kHz
     p.layers.push_back(std::move(layer));
@@ -1232,12 +1142,8 @@ TEST(arrangement_plays_clips_past_bar_64) {
     p.bpm = 400;  // a step is 0.0375 s
     p.loopBars = 80;
     p.master = 1.0;
-    p.seamCrossfade = false;
-    p.modules.push_back({"tone", std::string(kFloat) + "gate * 0.5", {}});
-    p.modules.push_back({"hit", "---\nkind: pattern\nlength: 4\n---\n0 A4 4 1\n", {}});
-    LayerSpec layer;
-    layer.id = "track";
-    layer.chain = {"tone"};
+    p.modules.push_back({"hit", "---\nkind: pattern\nlength: 4\n---\n0 A4 4 1\n"});
+    LayerSpec layer = cawtest::testSignalNotesLayer("track", Shape::Dc, "", {{"level", 0.5}});
     layer.volume = 1.0;
     layer.clips.push_back({"late", "hit", 70 * 16, 4, 0, false});  // bar 71
     p.layers.push_back(std::move(layer));
@@ -1258,12 +1164,9 @@ TEST(arrangement_expansion_is_refused_above_the_project_state_budget) {
     ProjectSpec p;
     p.bpm = 120;
     p.loopBars = 1;
-    p.modules.push_back({"tone", std::string(kFloat) + "gate", {}});
-    p.modules.push_back({"tick", "---\nkind: pattern\nlength: 1\n---\n0 C4 1 1\n", {}});
-    p.modules.push_back({"rest", "---\nkind: pattern\nlength: 1\n---\n", {}});
-    LayerSpec layer;
-    layer.id = "track";
-    layer.chain = {"tone"};
+    p.modules.push_back({"tick", "---\nkind: pattern\nlength: 1\n---\n0 C4 1 1\n"});
+    p.modules.push_back({"rest", "---\nkind: pattern\nlength: 1\n---\n"});
+    LayerSpec layer = cawtest::testSignalNotesLayer("track", Shape::Dc, "", {});
     layer.clips.push_back({"huge", "tick", 0, 2000000000, 0, true});
     p.layers.push_back(layer);
     const std::string result = e.setProject(p);
@@ -1284,23 +1187,6 @@ TEST(arrangement_expansion_is_refused_above_the_project_state_budget) {
     p.layers[0].clips = {{"silent", "rest", 0, 2000000000, 0, true}};
     CHECK(e.setProject(p).find("\"ok\":true") != std::string::npos);
 }
-
-TEST(project_parser_preserves_long_module_chains) {
-    std::string chain = "[";
-    for (int i = 0; i < 12; ++i) {
-        if (i) chain += ",";
-        chain += "\"module_" + std::to_string(i) + "\"";
-    }
-    chain += "]";
-    const std::string json = R"({"caw_project":1,"layers":[{"id":"track","chain":)" + chain + R"(}]})";
-    ProjectSpec parsed;
-    std::string error;
-    CHECK(parseProject(json, parsed, error));
-    CHECK_EQ(parsed.layers.size(), size_t{1});
-    CHECK_EQ(parsed.layers[0].chain.size(), size_t{12});
-    CHECK_EQ(parsed.layers[0].chain.back(), std::string("module_11"));
-}
-
 
 TEST(project_parser_preserves_large_module_and_clip_lists) {
     std::string json = R"({"caw_project":1,"modules":[)";
@@ -1328,14 +1214,9 @@ TEST(arrangement_compilation_keeps_notes_beyond_4096) {
     p.bpm = 400;
     p.loopBars = 64;
     p.master = 1.0;
-    p.seamCrossfade = false;
-    p.voices = 32;
-    p.modules.push_back({"tone", std::string(kFloat) + "gate * 0.1", {}});
     p.modules.push_back({"chord",
-        "---\nkind: pattern\nlength: 1\n---\n0 C3,D3,E3,F3,G3,A3,B3,C4,D4 1\n", {}});
-    LayerSpec layer;
-    layer.id = "track";
-    layer.chain = {"tone"};
+        "---\nkind: pattern\nlength: 1\n---\n0 C3,D3,E3,F3,G3,A3,B3,C4,D4 1\n"});
+    LayerSpec layer = cawtest::testSignalNotesLayer("track", Shape::Dc, "", {{"level", 0.1}});
     layer.volume = 1.0;
     for (int i = 0; i < 520; ++i)
         layer.clips.push_back({"clip_" + std::to_string(i), "chord", i, 1, 0, false});
@@ -1371,8 +1252,7 @@ TEST(project_parser_preserves_large_project_automation) {
 
 TEST(project_and_engine_preserve_layer_automation_beyond_128_points) {
     std::string json = R"({"caw_project":1,"bpm":400,"loop_bars":64,"master":1,
-      "modules":[{"id":"tone","source":"---\nmode: float\n---\n1"}],
-      "layers":[{"id":"track","chain":["tone"],"volume":1,"automation":[
+      "layers":[{"id":"track","instrument":{"id":"org.caw.test.osc","params":{"shape":4}},"volume":1,"automation":[
         {"target":"volume","points":[)";
     for (int point = 0; point < 129; ++point) {
         if (point) json += ",";
@@ -1395,39 +1275,6 @@ TEST(project_and_engine_preserve_layer_automation_beyond_128_points) {
     CHECK_NEAR(out[38400], 0.1 * unity, 1e-4); // point 128 must not be truncated
 }
 
-TEST(engine_automates_parameters_beyond_32) {
-    ProjectSpec p;
-    p.bpm = 120;
-    p.loopBars = 1;
-    p.master = 1.0;
-    p.seamCrossfade = false;
-    std::string source = "---\nmode: float\n---\n";
-    for (int i = 0; i < 40; ++i)
-        source += "param p" + std::to_string(i) + " = 0.5 in 0..2\n";
-    source += "p39 * 0.5";
-    p.modules.push_back({"tone", source, {}});
-    LayerSpec layer;
-    layer.id = "track";
-    layer.chain = {"tone"};
-    layer.volume = 1.0;
-    p.layers.push_back(layer);
-    ProjectAutomationLaneSpec lane;
-    lane.targetType = "param";
-    lane.moduleId = "tone";
-    lane.target = "p39";
-    lane.points = {{0.0, 0.5}, {1.0, 1.5}};
-    p.automation.push_back(lane);
-
-    Engine e(8000);
-    e.setMasterBypass(true);
-    CHECK(e.setProject(p).find("\"ok\":true") != std::string::npos);
-    e.play();
-    const auto out = run(e, 1100);
-    const float pan = static_cast<float>(std::cos(kPi / 4.0));
-    CHECK_NEAR(out[0], 0.25 * pan, 1e-4);
-    CHECK_NEAR(out[1000], 0.75 * pan, 1e-4);
-}
-
 TEST(engine_rejects_project_state_above_hardware_budget) {
     HardwareProfile hardware;
     hardware.memoryBudgetMiB = 2;
@@ -1435,17 +1282,18 @@ TEST(engine_rejects_project_state_above_hardware_budget) {
     ProjectSpec p;
     p.bpm = 120;
     p.loopBars = 1;
-    p.modules.push_back({"tone", std::string(kFloat) + "1", {}});
-    const std::string delay = "---\nkind: effect\nmode: float\n---\nfx.delay(in, 0.5, 0.3, 0.5)";
-    p.modules.push_back({"delay_a", delay, {}});
-    p.modules.push_back({"delay_b", delay, {}});
-    LayerSpec layer;
-    layer.id = "track";
-    layer.chain = {"tone", "delay_a", "delay_b"};
-    p.layers.push_back(layer);
+    // Each Flagship holds a resolver and a block of values for every one of its parameters.
+    for (int i = 0; i < 16; ++i) {
+        LayerSpec layer;
+        layer.id = "track" + std::to_string(i);
+        layer.hasInstrument = true;
+        layer.instrument.id = "org.caw.synth.flagship";
+        layer.components = {{"org.caw.reverb.pro", {}}, {"org.caw.delay.pro", {}}};
+        p.layers.push_back(layer);
+    }
     const std::string result = e.setProject(p);
     CHECK(result.find("\"ok\":false") != std::string::npos);
-    CHECK(result.find("project-state budget") != std::string::npos);
+    CHECK(result.find("project-state memory budget") != std::string::npos);
 }
 
 TEST(engine_prepares_dynamic_note_curve_capacity_before_playback) {
@@ -1459,11 +1307,8 @@ TEST(engine_prepares_dynamic_note_curve_capacity_before_playback) {
     ProjectSpec p;
     p.bpm = 120;
     p.loopBars = 1;
-    p.modules.push_back({"tone", std::string(kFloat) + "sin(2*pi*freq*t)", {}});
-    p.modules.push_back({"pattern", pattern, {}});
-    LayerSpec layer;
-    layer.id = "track";
-    layer.chain = {"tone"};
+    p.modules.push_back({"pattern", pattern});
+    LayerSpec layer = cawtest::testSignalNotesLayer("track", Shape::Sine, "", {});
     layer.pattern = "pattern";
     p.layers.push_back(layer);
     Engine e(8000);
@@ -1474,178 +1319,12 @@ TEST(engine_prepares_dynamic_note_curve_capacity_before_playback) {
     CHECK(std::any_of(out.begin(), out.end(), [](float sample) { return std::abs(sample) > 1e-5f; }));
 }
 
-// Within one layer a module reads exports only from modules before it in the chain: those have
-// run this chunk on every lane. A later (or its own) module is refused, so no import's delay
-// depends on how chunks happen to be split.
-TEST(module_reads_exports_only_from_earlier_modules_of_its_own_chain) {
-    ProjectSpec p;
-    p.bpm = 120;
-    p.loopBars = 1;
-    p.master = 1.0;
-    p.modules.push_back({"gen", "---\nmode: float\n---\nexport let level = 0.25\n0.5", {}, "gen"});
-    p.modules.push_back({"early", "---\nkind: effect\nmode: float\n---\nin + late.boost", {}, "early"});
-    p.modules.push_back({"late", "---\nkind: effect\nmode: float\n---\nexport let boost = 1\nin + gen.level", {}, "late"});
-    LayerSpec l;
-    l.id = "t";
-    l.chain = {"gen", "early", "late"};
-    l.volume = 1.0;
-    p.layers = {l};
-    Engine e(48000);
-    e.setMasterBypass(true);
-    const std::string result = e.setProject(p);
-    CHECK(result.find("'late.boost' comes from a later module in this layer's chain (it reads 0)") != std::string::npos);
-    CHECK(result.find("'gen.level'") == std::string::npos);  // an earlier module's export is fine, no warning
-    e.play();
-    const std::vector<float> out = run(e, 4800);
-    CHECK_NEAR(out[4799], 0.75 * std::cos(kPi / 4.0), 1e-6);  // 0.5 + 0 + 0.25
-}
-
-TEST(engine_routes_more_than_16_module_exports) {
-    std::string source = "---\nmode: float\n---\n";
-    for (int i = 0; i < 20; ++i)
-        source += "export let value" + std::to_string(i) + " = " + std::to_string(i + 1) + "\n";
-    source += "0";
-    ProjectSpec p;
-    p.bpm = 120;
-    p.loopBars = 1;
-    p.master = 1.0;
-    p.modules.push_back({"source", source, {}, "src"});
-    p.modules.push_back({"consumer", "---\nkind: effect\nmode: float\n---\nsrc.value19 / 20", {}});
-    LayerSpec sourceLayer;
-    sourceLayer.id = "source_track";
-    sourceLayer.chain = {"source"};
-    sourceLayer.volume = 1.0;
-    LayerSpec consumerLayer;
-    consumerLayer.id = "consumer_track";
-    consumerLayer.chain = {"consumer"};
-    consumerLayer.volume = 1.0;
-    p.layers = {sourceLayer, consumerLayer};
-
-    HardwareProfile hardware;
-    hardware.memoryBudgetMiB = 16;
-    Engine e(8000, makeEngineResourceBudget(hardware));
-    e.setMasterBypass(true);
-    CHECK(e.setProject(p).find("\"ok\":true") != std::string::npos);
-    e.play();
-    const auto out = run(e, 1024);
-    CHECK_NEAR(out[out.size() - 2], std::cos(kPi / 4.0), 1e-3);
-}
-
-TEST(engine_rejects_export_layout_above_memory_budget) {
-    std::string source = "---\nmode: float\n---\n";
-    for (int i = 0; i < 20; ++i)
-        source += "export let value" + std::to_string(i) + " = " + std::to_string(i + 1) + "\n";
-    source += "1";
-    ProjectSpec p;
-    p.modules.push_back({"source", source, {}, "source"});
-    LayerSpec layer;
-    layer.id = "source_track";
-    layer.chain = {"source"};
-    p.layers.push_back(layer);
-    HardwareProfile hardware;
-    hardware.memoryBudgetMiB = 1;
-    Engine e(8000, makeEngineResourceBudget(hardware));
-    const std::string result = e.setProject(p);
-    CHECK(result.find("\"ok\":false") != std::string::npos);
-    // The layer is skipped (#133: refused per layer, before its slot is kept), and the result says why.
-    CHECK(result.find("exports more values than one layer may hold") != std::string::npos);
-}
-
-TEST(engine_bounds_total_export_buffers_by_the_budget_across_layers) {
-    // #133 (from #94): each layer may hold exportBuffersPerLayer() buffers, but the whole project
-    // only exportBufferBudget(), so a project that uses the per-layer allowance on many layers is
-    // refused before allocating past the budget, instead of using several times its memory.
-    EngineResourceBudget budget;
-    budget.graphWorkingBytes = 24ull << 20;
-    budget.projectStateBytes = 64ull << 20;
-    budget.compileWorkingBytes = 64ull << 20;
-    budget.retirementBytes = 64ull << 20;
-    budget.totalBytes = budget.graphWorkingBytes + budget.projectStateBytes + budget.compileWorkingBytes +
-                        budget.retirementBytes;
-    Engine e(8000, budget);
-    const size_t perLayer = e.exportBuffersPerLayer();
-    CHECK(perLayer > 0);
-    CHECK_EQ(e.exportBufferBudget(), perLayer * static_cast<size_t>(kExportBudgetSlots));
-    CHECK(e.maxLayers() > kExportBudgetSlots);
-    std::string source = "---\nmode: float\n---\n";
-    for (size_t i = 0; i < perLayer; ++i) source += "export let v" + std::to_string(i) + " = 1\n";
-    source += "1";
-    auto project = [&](int layers) {
-        ProjectSpec p;
-        p.modules.push_back({"wide", source, {}, "wide"});
-        for (int l = 0; l < layers; ++l) {
-            LayerSpec layer;
-            layer.id = "t" + std::to_string(l);
-            layer.chain = {"wide"};
-            p.layers.push_back(layer);
-        }
-        return p;
-    };
-    // Exactly the budget: accepted.
-    CHECK(e.setProject(project(kExportBudgetSlots)).find("\"ok\":true") != std::string::npos);
-    // One layer more needs perLayer buffers past it: refused, naming the budget.
-    const std::string over = e.setProject(project(kExportBudgetSlots + 1));
-    CHECK(over.find("\"ok\":false") != std::string::npos);
-    CHECK(over.find("export buffer budget") != std::string::npos);
-    // Only that layer was skipped, and its slot was not kept: the fitting project still installs,
-    // and the same refusal repeats instead of the slots running out.
-    CHECK(e.setProject(project(kExportBudgetSlots)).find("\"ok\":true") != std::string::npos);
-    const std::string again = e.setProject(project(kExportBudgetSlots + 1));
-    CHECK(again.find("export buffer budget") != std::string::npos);
-    CHECK(again.find("no free engine layer slot") == std::string::npos);
-    // A playing layer whose new chain exports more than one layer may hold is stopped, not left
-    // playing outside the plan (stale routing and exports).
-    CHECK(e.setProject(project(kExportBudgetSlots)).find("\"ok\":true") != std::string::npos);
-    ProjectSpec grown = project(kExportBudgetSlots);
-    grown.modules.push_back({"extra", "---\nmode: float\n---\nexport let more = 1\n1", {}, "extra"});
-    grown.layers[0].chain = {"wide", "extra"};
-    const std::string stopped = e.setProject(grown);
-    CHECK(stopped.find("\"ok\":false") != std::string::npos);
-    CHECK(stopped.find("layer 't0' not installed: its chain exports more values than one layer may hold") != std::string::npos);
-    CHECK(stopped.find("it was stopped") != std::string::npos);
-}
-
-TEST(routing_saturates_out_of_float_range_tracks_instead_of_silencing_the_mix) {
-    // A runaway module can output finite doubles beyond float range. Routing carries float (F4.2),
-    // so those samples must saturate at the largest float: inf (or NaN after a zero gain) would make
-    // the master drop the whole mix. The limiter then holds the output near its ceiling.
-    // Dropped samples show up as exact zeros where the master zeroed a non-finite mix.
-    auto dropouts = [](const std::vector<float>& v, bool& finite) {
-        int zeros = 0;
-        finite = true;
-        for (size_t i = 2400; i < v.size(); ++i) {
-            if (!std::isfinite(v[i])) finite = false;
-            if (v[i] == 0.0f) ++zeros;
-        }
-        return zeros;
-    };
-    ProjectSpec p = project({{"huge", std::string(kFloat) + "sine(220) * 1e39"}, {"ok", std::string(kFloat) + "sine(330) * 0.5"}});
-    Engine e(48000);
-    e.setProject(p);
-    e.play();
-    bool finite = false;
-    CHECK_EQ(dropouts(run(e, 4800), finite), 0);
-    CHECK(finite);
-    // Inside a muted-by-gain folder (volume 0) the saturated value must give 0, not NaN, so the
-    // root track still plays.
-    ProjectSpec q = project({{"huge", std::string(kFloat) + "sine(220) * 1e39"}, {"ok", std::string(kFloat) + "sine(330) * 0.5"}});
-    LayerSpec bus;
-    bus.id = "bus"; bus.name = "bus"; bus.folder = true; bus.busEnabled = true; bus.volume = 0.0;
-    q.layers.insert(q.layers.begin(), bus);
-    q.layers[1].parentId = "bus";
-    Engine f(48000);
-    f.setProject(q);
-    f.play();
-    CHECK_EQ(dropouts(run(f, 4800), finite), 0);
-    CHECK(finite);
-}
-
 TEST(track_removed_inside_folder_fades_out_like_a_root_track) {
     // Issue #76: a removed child kept its parent but was processed after the folder bus, so its fade
     // never reached the mix and it cut off with a step. It must fade like a removed root track.
     auto removalStep = [](bool inFolder) {
-        ProjectSpec p = project({{"keep", std::string(kFloat) + "sine(110) * 0.2"},
-                                 {"gone", std::string(kFloat) + "sine(220) * 0.5"}});
+        ProjectSpec p = project({sine(110, 0.2),
+                                 sine(220, 0.5)});
         if (inFolder) {
             LayerSpec bus;
             bus.id = "bus"; bus.name = "bus"; bus.folder = true; bus.busEnabled = true; bus.volume = 1.0;
@@ -1680,8 +1359,8 @@ TEST(engine_rejects_unsupported_sample_rates_with_an_exception) {
 }
 
 TEST(mix_graph_routing_is_never_rejected_through_reparenting_and_removal) {
-    ProjectSpec p = project({{"a", std::string(kFloat) + "sine(220) * 0.3"}, {"b", std::string(kFloat) + "sine(330) * 0.3"},
-                             {"c", std::string(kFloat) + "sine(440) * 0.3"}});
+    ProjectSpec p = project({sine(220, 0.3), sine(330, 0.3),
+                             sine(440, 0.3)});
     LayerSpec outer, inner;
     outer.id = "outer"; outer.name = "outer"; outer.folder = true; outer.busEnabled = true;
     inner.id = "inner"; inner.name = "inner"; inner.folder = true; inner.busEnabled = true; inner.parentId = "outer";
@@ -1706,124 +1385,31 @@ TEST(mix_graph_routing_is_never_rejected_through_reparenting_and_removal) {
     CHECK_EQ(e.routingRejections(), 0u);
 }
 
-namespace {
-// One automated param g (0..2, step 0.25) with a flat lane at 0.25 (0.3 stepped).
-ProjectSpec touchProject(const std::string& source = "param g = 0.5 in 0..2 step 0.25\ng", double stored = -1.0) {
-    ProjectSpec p;
-    p.bpm = 120;
-    p.loopBars = 1;
-    p.modules.push_back({"tone", std::string(kFloat) + source, {}});
-    if (stored >= 0.0) p.modules[0].params["g"] = stored;
-    LayerSpec layer;
-    layer.id = "track";
-    layer.chain = {"tone"};
-    layer.volume = 1.0;
-    p.layers.push_back(layer);
-    ProjectAutomationLaneSpec lane;
-    lane.targetType = "param";
-    lane.moduleId = "tone";
-    lane.target = "g";
-    lane.points = {{0.0, 0.3}};
-    p.automation.push_back(lane);
-    return p;
-}
-}  // namespace
-
-TEST(engine_param_moved_while_stopped_is_not_a_touch_after_play) {
-    Engine e(8000);
-    e.setMasterBypass(true);
-    CHECK(e.setProject(touchProject()).find("\"ok\":true") != std::string::npos);
-    e.play();
-    const double lane = run(e, 512).back();
-    CHECK(lane > 0.05);
-    e.stop();
-    run(e, 4096);
-    e.setParam("tone", "g", 0.8);
-    e.play();  // a (re)start: the lane rules
-    CHECK_NEAR(run(e, 512).back() / lane, 1.0, 1e-4);
-}
-
-TEST(engine_param_restore_is_not_a_touch_but_a_rebuild_keeps_one) {
-    Engine e(8000);
-    e.setMasterBypass(true);
-    CHECK(e.setProject(touchProject()).find("\"ok\":true") != std::string::npos);
-    e.play();
-    const double lane = run(e, 512).back();
-    CHECK(lane > 0.05);
-    // A project update that stores another value is a restore, not a knob move: the lane still rules.
-    CHECK(e.setProject(touchProject("param g = 0.5 in 0..2 step 0.25\ng", 1.0)).find("\"ok\":true") != std::string::npos);
-    CHECK_NEAR(run(e, 512).back() / lane, 1.0, 1e-4);
-    // A touch survives a code edit that rebuilds the chain (the stored value follows the knob).
-    e.setParam("tone", "g", 0.8);
-    CHECK_NEAR(run(e, 512).back() / lane, 3.0, 1e-4);
-    CHECK(e.setProject(touchProject("param g = 0.5 in 0..2 step 0.25\ng + 0", 0.8)).find("\"ok\":true") != std::string::npos);
-    CHECK_NEAR(run(e, 8192).back() / lane, 3.0, 1e-4);
-    e.play();
-    CHECK_NEAR(run(e, 512).back() / lane, 1.0, 1e-4);
-}
-
-TEST(engine_param_touch_overrides_automation_until_playback_restarts) {
-    // F6.6: the Engine's .caw params resolve through the shared parameter model (owner, 2026-11-04).
-    ProjectSpec p;
-    p.bpm = 120;
-    p.loopBars = 1;
-    p.modules.push_back({"tone", std::string(kFloat) + "param g = 0.5 in 0..2 step 0.25\ng", {}});
-    LayerSpec layer;
-    layer.id = "track";
-    layer.chain = {"tone"};
-    layer.volume = 1.0;
-    p.layers.push_back(layer);
-    ProjectAutomationLaneSpec lane;
-    lane.targetType = "param";
-    lane.moduleId = "tone";
-    lane.target = "g";
-    lane.points = {{0.0, 0.3}};  // stepped to 0.25
-    p.automation.push_back(lane);
-    Engine e(8000);
-    e.setMasterBypass(true);
-    CHECK(e.setProject(p).find("\"ok\":true") != std::string::npos);
-    e.play();
-    // Compared with the lane's level, so the layer's gain and pan law cancel out.
-    const double lane025 = run(e, 512).back();
-    CHECK(lane025 > 0.05);
-    e.setParam("tone", "g", 0.8);  // a touch: the manual value (stepped to 0.75) wins over the lane
-    CHECK_NEAR(run(e, 512).back() / lane025, 3.0, 1e-4);
-    CHECK_NEAR(run(e, 512).back() / lane025, 3.0, 1e-4);
-    e.play();  // playback restarts: the lane rules again
-    CHECK_NEAR(run(e, 512).back() / lane025, 1.0, 1e-4);
-}
-
-TEST(engine_param_moved_right_after_play_is_a_touch) {
-    // The knob moves before the audio thread has handled the Play command: still a touch.
-    Engine e(8000);
-    e.setMasterBypass(true);
-    CHECK(e.setProject(touchProject()).find("\"ok\":true") != std::string::npos);
-    e.play();
-    const double lane = run(e, 512).back();
-    CHECK(lane > 0.05);
-    e.play();
-    e.setParam("tone", "g", 0.8);
-    CHECK_NEAR(run(e, 512).back() / lane, 3.0, 1e-4);
-}
-
 // ---- F7.3 part B: the Engine grows past 64 layers, bounded by the memory budget ----
 
 namespace {
 
-// n layers, each playing `module` (one shared module), named g0..g(n-1).
-ProjectSpec layersOf(int n, const std::string& source, double volume = 1.0) {
-    ProjectSpec p;
-    p.bpm = 120;
-    p.loopBars = 1;
-    p.master = 1.0;
-    p.modules.push_back({"tone", source, {}});
+// n layers, each playing DC at `level`, named g0..g(n-1).
+ProjectSpec layersOf(int n, double level, double volume = 1.0) {
+    std::vector<LayerSpec> layers;
     for (int i = 0; i < n; ++i) {
-        LayerSpec l;
-        l.id = "g" + std::to_string(i);
-        l.name = l.id;
-        l.chain = {"tone"};
-        l.volume = volume;
-        p.layers.push_back(l);
+        layers.push_back(cawtest::testSignalLayer("g" + std::to_string(i), Shape::Dc, {{"level", level}}));
+        layers.back().volume = volume;
+    }
+    return cawtest::testSignalProject(std::move(layers), 120, 1);
+}
+
+// n layer slots: a track playing DC at `level` (g0), then n - 1 empty bus folders. A project runs at most 256 native
+// components (and each instrument holds a note list), so many slots are buses, which take a slot each.
+ProjectSpec slotsOf(int n, double level) {
+    ProjectSpec p = layersOf(1, level);
+    for (int i = 1; i < n; ++i) {
+        LayerSpec bus;
+        bus.id = "b" + std::to_string(i);
+        bus.name = bus.id;
+        bus.folder = true;
+        bus.busEnabled = true;
+        p.layers.push_back(bus);
     }
     return p;
 }
@@ -1834,7 +1420,7 @@ TEST(engine_plays_more_than_64_layers_with_meters_and_folder_buses_above_slot_64
     for (int n : {65, 200}) {
         // A folder bus first (slot 0), then n tracks; tracks from project index 64 on route through
         // the bus, so the bus sums children whose slots are 64 and above.
-        ProjectSpec p = layersOf(n, std::string(kFloat) + "0.0001");
+        ProjectSpec p = layersOf(n, 0.0001);
         LayerSpec folder;
         folder.id = "bus";
         folder.name = "Group";
@@ -1875,21 +1461,15 @@ TEST(engine_grows_during_playback_and_existing_layers_stay_bit_identical) {
     small.loopBars = 1;
     small.master = 1.0;
     for (int i = 0; i < 10; ++i) {
-        const std::string id = "s" + std::to_string(i);
-        small.modules.push_back({id, std::string(kFloat) + "sine(" + std::to_string(110 * (i + 1)) + ") * 0.05", {}});
-        LayerSpec l;
-        l.id = "l" + std::to_string(i);
-        l.chain = {id};
+        LayerSpec l = cawtest::testSignalLayer("l" + std::to_string(i), Shape::Sine, {{"freq", 110.0 * (i + 1)}, {"level", 0.05}});
         l.volume = 0.8;
         l.pan = -0.5 + 0.1 * i;
         small.layers.push_back(l);
     }
     ProjectSpec big = small;
-    big.modules.push_back({"loud", std::string(kFloat) + "sine(77) * 0.5", {}});
     for (int i = 10; i < 100; ++i) {
-        LayerSpec l;
-        l.id = "l" + std::to_string(i);
-        l.chain = {"loud"};
+        LayerSpec l = cawtest::testSignalLayer("l" + std::to_string(i), Shape::Sine, {{"freq", 77}, {"level", 0.5}});
+        l.volume = 0.8;
         l.mute = true;
         big.layers.push_back(l);
     }
@@ -1929,23 +1509,23 @@ TEST(engine_refuses_more_layers_than_the_memory_budget_allows) {
     Engine e(8000, makeEngineResourceBudget(hardware));
     CHECK_EQ(e.maxLayers(), 64);  // the initial capacity is always available
     e.setMasterBypass(true);
-    CHECK(e.setProject(layersOf(64, std::string(kFloat) + "0.001")).find("\"ok\":true") != std::string::npos);
-    const std::string refused = e.setProject(layersOf(65, std::string(kFloat) + "0.001"));
+    CHECK(e.setProject(slotsOf(64, 0.001)).find("\"ok\":true") != std::string::npos);
+    const std::string refused = e.setProject(slotsOf(65, 0.001));
     CHECK(refused.find("\"ok\":false") != std::string::npos);
     CHECK(refused.find("project has 65 layers; this device's memory budget allows at most 64") != std::string::npos);
     CHECK_EQ(e.layerCapacity(), 64);
     // The refused project changed nothing: the 64 layers play on.
     e.play();
     const auto out = run(e, 800);
-    CHECK_NEAR(out[799], 64 * 0.001 * std::cos(kPi / 4.0), 1e-5);
+    CHECK_NEAR(out[799], 0.001 * std::cos(kPi / 4.0), 1e-7);
     // The 128 MiB fallback budget (memory unknown) allows more than 64.
     Engine big(8000, makeEngineResourceBudget(HardwareProfile{}));
     CHECK(big.maxLayers() > 64);
 }
 
 TEST(engine_play_with_more_than_640_layers_retires_every_chain_without_stalling) {
-    // Play retires up to two chains per slot (the one fading out after a swap and the one a
-    // pending swap replaces): 2 * 701 entries, more than the retired queue holds at once.
+    // Every bus replaces its volume lane twice: about 2 * 700 retirements, more than the retired queue holds at
+    // once (the rest wait in the pending list); a Play after them must not wait for room.
     HardwareProfile hardware;
     hardware.memoryBudgetMiB = 1024;
     Engine e(48000, makeEngineResourceBudget(hardware));
@@ -1966,17 +1546,16 @@ TEST(engine_play_with_more_than_640_layers_retires_every_chain_without_stalling)
         e.process(l.data(), r.data(), 0);
         return result;
     };
-    ProjectSpec p = layersOf(700, std::string(kFloat) + "0.00001");
+    ProjectSpec p = slotsOf(700, 0.00001);
     CHECK(apply(p).find("\"ok\":true") != std::string::npos);
     CHECK(e.layerCapacity() >= 700);
     e.play();
     for (int k = 0; k < 4; ++k) e.process(l.data(), r.data(), 64);
-    CHECK_NEAR(l[63], 700 * 0.00001 * std::cos(kPi / 4.0), 1e-5);
-    p.modules[0].source = std::string(kFloat) + "0.00002";  // swapped at once: every slot has a chain fading out
-    CHECK(apply(p).find("\"ok\":true") != std::string::npos);
-    p.swapMode = 2;
-    p.modules[0].source = std::string(kFloat) + "0.00003";  // waits for the next bar: every slot has a pending chain
-    CHECK(apply(p).find("\"ok\":true") != std::string::npos);
+    CHECK_NEAR(l[63], 0.00001 * std::cos(kPi / 4.0), 1e-8);
+    for (double level : {1.0, 0.5, 1.0}) {  // the second and third rounds retire the lanes they replace
+        for (size_t i = 1; i < p.layers.size(); ++i) p.layers[i].automation = {{"volume", {{0, level}, {16, level}}}};
+        CHECK(apply(p).find("\"ok\":true") != std::string::npos);
+    }
     CHECK(e.meters().position > 0);
     e.play();
     e.process(l.data(), r.data(), 0);
@@ -1985,51 +1564,7 @@ TEST(engine_play_with_more_than_640_layers_retires_every_chain_without_stalling)
         e.process(l.data(), r.data(), 64);
         e.meters();  // drains the retired queue, so the overflow moves across
     }
-    CHECK_NEAR(l[63], 700 * 0.00003 * std::cos(kPi / 4.0), 1e-5);  // the pending code took over at Play
-    CHECK_EQ(e.routingRejections(), 0u);
-}
-
-TEST(engine_export_pointer_tables_follow_each_chains_real_export_need) {
-    // #133 item 3: a slot's export pointer table was sized from the budget share (exportBuffersPerLayer()
-    // pointers for every slot once anything exported), which also capped maxLayers() near 2,145 at 4 GiB.
-    // It now holds what the slot's chain exports, and grows when a later chain exports more.
-    EngineResourceBudget budget;
-    budget.graphWorkingBytes = 4ull << 30;
-    budget.projectStateBytes = 64ull << 20;
-    budget.compileWorkingBytes = 64ull << 20;
-    budget.retirementBytes = 64ull << 20;
-    budget.totalBytes = budget.graphWorkingBytes + budget.projectStateBytes + budget.compileWorkingBytes +
-                        budget.retirementBytes;
-    Engine e(48000, budget);
-    e.setMasterBypass(true);
-    CHECK(e.exportBuffersPerLayer() > 30000);
-    CHECK(e.maxLayers() > 2145);
-    const size_t perBuffer = kBlock * sizeof(double) + 2 * sizeof(void*);  // buffer, its owner and one table entry
-    ProjectSpec p;
-    p.bpm = 120;
-    p.loopBars = 1;
-    p.master = 1.0;
-    p.modules.push_back({"src", "---\nmode: float\n---\nexport let level = 0.25\n0", {}, "src"});
-    p.modules.push_back({"reader", "---\nmode: float\n---\nsrc.level", {}, "reader"});
-    LayerSpec a;
-    a.id = "a";
-    a.chain = {"src"};
-    a.volume = 1.0;
-    LayerSpec b = a;
-    b.id = "b";
-    b.chain = {"reader"};
-    p.layers = {a, b};
-    CHECK(e.setProject(p).find("\"ok\":true") != std::string::npos);
-    CHECK_EQ(e.exportBytes(), perBuffer);
-    e.play();
-    CHECK_NEAR(run(e, 960).back(), 0.25 * std::cos(kPi / 4.0), 1e-6);
-    // The playing exporter's chain grows to three exports: its table is replaced while it plays.
-    p.modules[0].source = "---\nmode: float\n---\nexport let level = 0.5\nexport let x = 1\nexport let y = 2\n0";
-    CHECK(e.setProject(p).find("\"ok\":true") != std::string::npos);
-    CHECK_EQ(e.exportBytes(), 3 * perBuffer + sizeof(void*));  // the old one-entry table is still the audio thread's
-    CHECK_NEAR(run(e, 4800).back(), 0.5 * std::cos(kPi / 4.0), 1e-6);
-    e.meters();  // the replaced table comes back from the audio thread and is freed
-    CHECK_EQ(e.exportBytes(), 3 * perBuffer);
+    CHECK_NEAR(l[63], 0.00001 * std::cos(kPi / 4.0), 1e-8);
     CHECK_EQ(e.routingRejections(), 0u);
 }
 
@@ -2055,8 +1590,8 @@ TEST(engine_per_chunk_work_follows_the_layers_in_use_not_the_capacity) {
         to.process(l.data(), r.data(), 0);
         return result;
     };
-    const std::string tone = std::string(kFloat) + "sine(220) * 0.01";
-    CHECK(apply(e, layersOf(700, tone, 0.0)).find("\"ok\":true") != std::string::npos);  // silent: removed at once
+    const double tone = 0.01;
+    CHECK(apply(e, slotsOf(700, tone)).find("\"ok\":true") != std::string::npos);
     CHECK(e.layerCapacity() >= 700);
     CHECK(apply(e, layersOf(4, tone)).find("\"ok\":true") != std::string::npos);
     CHECK(apply(fresh, layersOf(4, tone)).find("\"ok\":true") != std::string::npos);
@@ -2072,55 +1607,6 @@ TEST(engine_per_chunk_work_follows_the_layers_in_use_not_the_capacity) {
     CHECK_EQ(e.routingRejections(), 0u);
 }
 
-TEST(engine_export_buffers_stay_valid_across_a_grow) {
-    ProjectSpec p;
-    p.bpm = 120;
-    p.loopBars = 1;
-    p.master = 1.0;
-    p.modules.push_back({"src", "---\nmode: float\n---\nexport let level = 0.25\n0", {}, "src"});
-    p.modules.push_back({"reader", "---\nmode: float\n---\nsrc.level", {}, "reader"});
-    LayerSpec a;
-    a.id = "a";
-    a.chain = {"src"};
-    a.volume = 1.0;
-    LayerSpec b = a;
-    b.id = "b";
-    b.chain = {"reader"};
-    p.layers = {a, b};
-    Engine e(48000);
-    e.setMasterBypass(true);
-    CHECK(e.setProject(p).find("\"ok\":true") != std::string::npos);
-    e.play();
-    CHECK_NEAR(run(e, 960).back(), 0.25 * std::cos(kPi / 4.0), 1e-6);
-    // Grow to 100 layers: 96 muted fillers, then an exporter and a reader in slots above 64.
-    p.modules.push_back({"filler", std::string(kFloat) + "0.5", {}, "filler"});
-    p.modules.push_back({"hi", "---\nmode: float\n---\nexport let level = 0.125\n0", {}, "hi"});
-    p.modules.push_back({"hireader", "---\nmode: float\n---\nhi.level + src.level", {}, "hireader"});
-    for (int i = 0; i < 96; ++i) {
-        LayerSpec f = a;
-        f.id = "f" + std::to_string(i);
-        f.chain = {"filler"};
-        f.mute = true;
-        p.layers.push_back(f);
-    }
-    LayerSpec hi = a;
-    hi.id = "hi";
-    hi.chain = {"hi"};
-    LayerSpec hr = a;
-    hr.id = "hr";
-    hr.chain = {"hireader"};
-    p.layers.push_back(hr);  // slot 98 reads slot 99, so the order puts the exporter first
-    p.layers.push_back(hi);
-    CHECK(e.setProject(p).find("\"ok\":true") != std::string::npos);
-    CHECK(e.layerCapacity() >= 100);
-    // The old reader still reads the old exporter's buffer, and the new pair works too.
-    CHECK_NEAR(run(e, 960).back(), (0.25 + 0.375) * std::cos(kPi / 4.0), 1e-6);
-    // Moving the reader's source keeps working after the grow (the wiring is rebuilt).
-    p.modules[1].source = "---\nmode: float\n---\nsrc.level + hi.level";
-    CHECK(e.setProject(p).find("\"ok\":true") != std::string::npos);
-    CHECK_NEAR(run(e, 4800).back(), (0.375 + 0.375) * std::cos(kPi / 4.0), 1e-6);
-}
-
 TEST(project_parser_accepts_1000_layers) {
     std::string json = R"({"caw_project":1,"layers":[)";
     for (int i = 0; i < 1000; ++i) json += (i ? ",{\"id\":\"l" : "{\"id\":\"l") + std::to_string(i) + "\"}";
@@ -2132,9 +1618,9 @@ TEST(project_parser_accepts_1000_layers) {
 }
 
 TEST(audition_scope_follows_the_audition_slot_across_a_grow) {
-    ProjectSpec p = layersOf(10, std::string(kFloat) + "0.001");
-    p.modules.push_back({"aud", std::string(kFloat) + "0.5", {}});
-    p.auditionChain = {"aud"};
+    ProjectSpec p = layersOf(10, 0.001);
+    p.hasAuditionInstrument = true;
+    p.auditionInstrument = cawtest::testSignal(Shape::Dc, {{"level", 0.5}});
     p.auditionOnly = true;
     Engine e(48000);
     e.setMasterBypass(true);
@@ -2146,9 +1632,9 @@ TEST(audition_scope_follows_the_audition_slot_across_a_grow) {
     CHECK_EQ(e.scope(kScopeAudition, scope, 64), 64);
     CHECK_NEAR(scope[63], 0.4f, 1e-4);
     // Grow while the audition plays: it keeps its sound, and its scope id moves to the new last slot.
-    ProjectSpec big = layersOf(150, std::string(kFloat) + "0.001");
-    big.modules.push_back(p.modules.back());
-    big.auditionChain = {"aud"};
+    ProjectSpec big = layersOf(150, 0.001);
+    big.hasAuditionInstrument = true;
+    big.auditionInstrument = p.auditionInstrument;
     big.auditionOnly = true;
     CHECK(e.setProject(big).find("\"ok\":true") != std::string::npos);
     CHECK(e.layerCapacity() >= 150);
@@ -2169,31 +1655,12 @@ TEST(audition_scope_follows_the_audition_slot_across_a_grow) {
 // ---- Note previews (#103) ----
 
 namespace {
-// A layer playing an empty pattern through a tone that outputs gate * vel * note / 128, so the level shows which
-// pitch and velocity are held (and a sum of two voices would show as a jump).
+// A layer playing an empty pattern on the test signal in Notes mode at level 1: each held note outputs its
+// velocity, so the level shows which notes are held (and a sum of two voices shows as a jump).
 ProjectSpec previewProject() {
-    ProjectSpec p;
-    p.bpm = 120;
-    p.loopBars = 1;
-    p.master = 1.0;
-    p.seamCrossfade = false;
-    p.modules.push_back({"tone", std::string(kFloat) + "gate * vel * note / 128", {}});
-    p.modules.push_back({"phrase", "---\nkind: pattern\nlength: 16\n---\n", {}});
-    p.modules.push_back({"drone", std::string(kFloat) + "0.25", {}});
-    LayerSpec layer;
-    layer.id = "track";
-    layer.name = "Track";
-    layer.chain = {"tone"};
-    layer.pattern = "phrase";
-    layer.volume = 1.0;
-    p.layers.push_back(layer);
-    LayerSpec free;  // no pattern: it can't preview
-    free.id = "free";
-    free.name = "Free";
-    free.chain = {"drone"};
-    free.volume = 1.0;
-    free.mute = true;
-    p.layers.push_back(free);
+    ProjectSpec p = project({});
+    p.modules.push_back({"phrase", "---\nkind: pattern\nlength: 16\n---\n"});
+    p.layers.push_back(cawtest::testSignalNotesLayer("track", Shape::Dc, "phrase"));
     return p;
 }
 }  // namespace
@@ -2206,15 +1673,12 @@ TEST(a_preview_sounds_while_stopped_and_stops_at_its_note_off_without_moving_the
     CHECK_NEAR(run(e, 2000).back(), 0.0, 1e-9);  // stopped and silent
     e.noteOn("track", 7, 64, 0.5);
     const std::vector<float> held = run(e, 4800);
-    CHECK_NEAR(held.back(), 0.5 * 64 / 128.0 * pan, 1e-4);
+    CHECK_NEAR(held.back(), 0.5 * pan, 1e-4);
     CHECK_EQ(e.meters().position, 0);  // the transport stays where it was
     e.noteOff(7);
     const std::vector<float> after = run(e, 4800);
     CHECK_NEAR(after.back(), 0.0, 1e-6);
     CHECK_EQ(e.meters().playing, false);
-    // A preview on a layer without a pattern does nothing.
-    e.noteOn("free", 8, 60, 1);
-    CHECK_NEAR(run(e, 2400).back(), 0.0, 1e-9);
 }
 
 TEST(a_held_preview_glides_to_a_new_pitch_and_the_same_id_retriggers_instead_of_stacking) {
@@ -2222,14 +1686,14 @@ TEST(a_held_preview_glides_to_a_new_pitch_and_the_same_id_retriggers_instead_of_
     e.setMasterBypass(true);
     e.setProject(previewProject());
     const double pan = std::cos(kPi / 4.0);
-    e.noteOn("track", 1, 60, 1);
-    CHECK_NEAR(run(e, 2400).back(), 60 / 128.0 * pan, 1e-4);
+    e.noteOn("track", 1, 60, 0.5);
+    CHECK_NEAR(run(e, 2400).back(), 0.5 * pan, 1e-4);
     e.notePitch(1, 72);  // a bend being drawn: the same voice, a 5 ms glide
-    CHECK_NEAR(run(e, 2400).back(), 72 / 128.0 * pan, 1e-4);
-    e.noteOn("track", 1, 48, 1);  // the same id again: the old note ends, one voice sounds
-    CHECK_NEAR(run(e, 4800).back(), 48 / 128.0 * pan, 1e-4);
-    e.noteOn("track", 2, 50, 1);  // another id: a chord
-    CHECK_NEAR(run(e, 2400).back(), (48 + 50) / 128.0 * pan, 1e-4);
+    CHECK_NEAR(run(e, 2400).back(), 0.5 * pan, 1e-4);
+    e.noteOn("track", 1, 48, 0.25);  // the same id again: the old note ends, one voice sounds
+    CHECK_NEAR(run(e, 4800).back(), 0.25 * pan, 1e-4);
+    e.noteOn("track", 2, 50, 0.125);  // another id: a chord
+    CHECK_NEAR(run(e, 2400).back(), 0.375 * pan, 1e-4);
     e.notesOff();
     CHECK_NEAR(run(e, 4800).back(), 0.0, 1e-6);
 }
@@ -2238,32 +1702,31 @@ TEST(after_stop_a_preview_hears_neither_the_chord_that_was_playing_nor_a_jump_ba
     Engine e(48000);
     e.setMasterBypass(true);
     ProjectSpec p = previewProject();
-    p.modules[1].source = "---\nkind: pattern\nlength: 16\n---\n0 C4 16\n";  // a note held through the loop
+    p.modules[0].source = "---\nkind: pattern\nlength: 16\n---\n0 C4 16\n";  // a note held through the loop
     CHECK(e.setProject(p).find("\"ok\":true") != std::string::npos);
     const double pan = std::cos(kPi / 4.0);
     e.play();
-    CHECK_NEAR(run(e, 2400).back(), 60 / 128.0 * pan, 1e-4);
+    CHECK_NEAR(run(e, 2400).back(), 1.0 * pan, 1e-4);
     // A preview held across Stop: the stop fades out, then the preview alone fades back in, with no step.
-    e.noteOn("track", 1, 72, 1);
+    e.noteOn("track", 1, 72, 0.5);
     run(e, 2400);
     e.stop();
     const std::vector<float> across = run(e, 4800);
     float step = 0;
     for (size_t i = 1; i < across.size(); ++i) step = std::max(step, std::fabs(across[i] - across[i - 1]));
     CHECK(step < 0.01f);
-    CHECK_NEAR(across.back(), 72 / 128.0 * pan, 1e-4);  // the pattern's C4 doesn't come back
+    CHECK_NEAR(across.back(), 0.5 * pan, 1e-4);  // the pattern's C4 doesn't come back
     e.noteOff(1);
     CHECK_NEAR(run(e, 4800).back(), 0.0, 1e-6);
-    e.noteOn("track", 2, 48, 1);  // a fresh preview while stopped: only its own note
-    CHECK_NEAR(run(e, 2400).back(), 48 / 128.0 * pan, 1e-4);
+    e.noteOn("track", 2, 48, 0.25);  // a fresh preview while stopped: only its own note
+    CHECK_NEAR(run(e, 2400).back(), 0.25 * pan, 1e-4);
     e.notesOff();
 }
 
 TEST(a_preview_held_across_play_keeps_its_instrument_running) {
     Engine e(48000);
     e.setMasterBypass(true);
-    ProjectSpec p = previewProject();
-    p.modules[0].source = std::string(kFloat) + "gate * lpf(0.5, 4, 0.7)";  // a slow rise that a reset would restart
+    ProjectSpec p = previewProject();  // a reset at Play would end the held note: a drop to 0
     CHECK(e.setProject(p).find("\"ok\":true") != std::string::npos);
     e.noteOn("track", 1, 60, 1);
     std::vector<float> out = run(e, 4801);
@@ -2272,7 +1735,8 @@ TEST(a_preview_held_across_play_keeps_its_instrument_running) {
     out.insert(out.end(), playing.begin(), playing.end());
     float step = 0;
     for (size_t i = 2400; i < out.size(); ++i) step = std::max(step, std::fabs(out[i] - out[i - 1]));
-    CHECK(step < 0.001f);  // the filter rises smoothly; a reset would drop it to 0
+    CHECK(step < 0.001f);
+    CHECK(out.back() > 0.5f);
     e.notesOff();
 }
 
@@ -2287,12 +1751,12 @@ TEST(previews_follow_the_layer_mix_and_play_on_top_of_playback) {
     e.setLayerMix("track", 0.5, 0.0, false, false);  // a preview on a muted track ended: unmuting doesn't bring it back
     CHECK_NEAR(run(e, 4800).back(), 0.0, 1e-6);
     e.noteOn("track", 1, 64, 1);
-    CHECK_NEAR(run(e, 9600).back(), 0.5 * 64 / 128.0 * pan, 1e-3);
+    CHECK_NEAR(run(e, 9600).back(), 0.5 * pan, 1e-3);
     e.noteOff(1);
     e.play();
     run(e, 2400);
-    e.noteOn("track", 2, 32, 1);  // while playing: heard, and the empty pattern adds nothing
-    CHECK_NEAR(run(e, 4800).back(), 0.5 * 32 / 128.0 * pan, 1e-3);
+    e.noteOn("track", 2, 32, 0.5);  // while playing: heard, and the empty pattern adds nothing
+    CHECK_NEAR(run(e, 4800).back(), 0.5 * 0.5 * pan, 1e-3);
     CHECK(e.meters().position > 0);
 }
 
@@ -2308,7 +1772,7 @@ float peakIn(const std::vector<float>& v, size_t from, size_t to) {
 
 TEST(count_in_clicks_each_beat_then_plays_on_the_sample_after_the_last) {
     // 120 BPM at 48 kHz: a sixteenth is 6000 samples, a beat 24000.
-    ProjectSpec p = project({{"a", std::string(kFloat) + "0.25"}});
+    ProjectSpec p = heldProject(dc(0.25));
     Engine e(48000);
     e.setMasterBypass(true);
     e.setProject(p);
@@ -2335,7 +1799,7 @@ TEST(count_in_clicks_each_beat_then_plays_on_the_sample_after_the_last) {
 }
 
 TEST(metronome_clicks_on_every_beat_while_playing_and_not_when_off) {
-    ProjectSpec p = project({{"a", std::string(kFloat) + "0"}});
+    ProjectSpec p = project({dc(0)});
     Engine e(48000);
     e.setMasterBypass(true);
     e.setProject(p);
@@ -2352,23 +1816,31 @@ TEST(metronome_clicks_on_every_beat_while_playing_and_not_when_off) {
 }
 
 TEST(released_touches_let_the_lanes_rule_again_while_playing) {
+    // The test signal's level, automated by a flat lane at 0.3: a knob move is a touch over it until released.
+    ProjectSpec p = project({dc(0.5)});
+    ProjectAutomationLaneSpec lane;
+    lane.targetType = "instrument";
+    lane.moduleId = "l0";
+    lane.component = 0;
+    lane.target = "level";
+    lane.points = {{0.0, 0.3}};
+    p.automation.push_back(lane);
     Engine e(8000);
     e.setMasterBypass(true);
-    CHECK(e.setProject(touchProject()).find("\"ok\":true") != std::string::npos);
+    CHECK(e.setProject(p).find("\"ok\":true") != std::string::npos);
     e.play();
-    const double lane = run(e, 512).back();
-    CHECK(lane > 0.05);
-    e.setParam("tone", "g", 0.8);  // a touch overrides the lane
-    CHECK_NEAR(run(e, 512).back() / lane, 3.0, 1e-4);
-    e.releaseTouches();            // let go: the lane again, without a restart
-    CHECK_NEAR(run(e, 512).back() / lane, 1.0, 1e-4);
+    const double level = run(e, 512).back();
+    CHECK(level > 0.05);
+    CHECK(e.setComponentParam("l0", Engine::kInstrumentIndex, "level", 0.9));  // a touch overrides the lane
+    CHECK_NEAR(run(e, 512).back() / level, 3.0, 1e-4);
+    e.releaseTouches();  // let go: the lane again, without a restart
+    CHECK_NEAR(run(e, 512).back() / level, 1.0, 1e-4);
     CHECK(e.meters().playing);
 }
 
 TEST(track_volume_lanes_reach_plus_12_db_as_the_faders) {
     const std::string json = R"({"caw_project":1,"bpm":120,"loop_bars":1,"master":1,
-      "modules":[{"id":"tone","source":"---\nmode: float\n---\n0.1"}],
-      "layers":[{"id":"track","chain":["tone"],"volume":1,"automation":[
+      "layers":[{"id":"track","volume":1,"automation":[
         {"target":"volume","points":[{"step":0,"value":3.0},{"step":16,"value":9.0}]}]}]})";
     ProjectSpec parsed;
     std::string error;

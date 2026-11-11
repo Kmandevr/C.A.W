@@ -32,14 +32,6 @@ bool wholeIn(double v, int lo, int hi, int& out) {
 
 std::string range(int lo, int hi) { return std::to_string(lo) + " to " + std::to_string(hi); }
 
-std::vector<std::string> idList(const Json* arr) {
-    std::vector<std::string> out;
-    if (!arr || arr->type != Json::Type::Array) return out;
-    for (const Json& j : arr->arr)
-        if (j.type == Json::Type::String) out.push_back(j.str);
-    return out;
-}
-
 // One component entry: an id string, or {"id", "params": {name: number}, "bypass", "state", "state_version"}.
 bool componentEntry(const Json& j, const std::string& where, ComponentSpec& c, std::string& error) {
     if (j.type == Json::Type::String) {
@@ -290,7 +282,6 @@ bool parseProject(std::string_view text, ProjectSpec& out, std::string& error) {
     out.name = root.string("name");
     out.bpm = clampd(root.number("bpm", 120), 20, 400);
     out.beatsPerBar = clampi(root.number("beats_per_bar", 4), 1, 16);
-    out.voices = clampi(root.number("voices", 32), 1, 32);  // a cap: each generator plays its own voices: count
     const int maxBars = maxLoopBars(out.beatsPerBar);
     const int maxSteps = maxArrangementSteps(out.beatsPerBar);
     if (!wholeIn(root.number("loop_bars", 4), 1, maxBars, out.loopBars)) {
@@ -322,13 +313,6 @@ bool parseProject(std::string_view text, ProjectSpec& out, std::string& error) {
     };
     out.seed = static_cast<uint32_t>(clampd(root.number("seed", 0), 0, 4294967295.0));
     out.master = clampd(root.number("master", 0.7), 0, kMaxMixGain);
-    out.seamCrossfade = root.boolean("seam_crossfade", true);
-    {
-        const std::string swap = root.string("swap", "now");
-        out.swapMode = swap == "beat" ? 1 : swap == "bar" ? 2 : 0;
-    }
-    out.keyRoot = clampi(root.number("key_root", 9), 0, 11);
-    out.keyScale = clampi(root.number("key_scale", 1), 0, 13);
 
     if (const Json* deps = root.get("dependencies"); deps && deps->type == Json::Type::Array) {
         if (deps->arr.size() > 4096) {
@@ -376,15 +360,11 @@ bool parseProject(std::string_view text, ProjectSpec& out, std::string& error) {
             if (m.type != Json::Type::Object) continue;
             ModuleSpec spec;
             spec.id = m.string("id");
-            spec.name = m.string("name");
             spec.source = m.string("source");
-            // Ids with control characters are left out: the engine names its hidden modules with them.
+            // Ids with control characters are left out: the engine names its internal modules with them.
             bool control = false;
             for (unsigned char ch : spec.id) control = control || ch < 0x20;
             if (spec.id.empty() || control) continue;
-            if (const Json* ps = m.get("params"); ps && ps->type == Json::Type::Object)
-                for (const auto& [k, v] : ps->obj)
-                    if (v.type == Json::Type::Number && std::isfinite(v.num)) spec.params[k] = v.num;
             out.modules.push_back(std::move(spec));
         }
     }
@@ -398,7 +378,6 @@ bool parseProject(std::string_view text, ProjectSpec& out, std::string& error) {
             spec.id = l.string("id");
             spec.name = l.string("name");
             if (spec.id.empty()) continue;
-            spec.chain = idList(l.get("chain"));
             const std::string layerName = "layer '" + spec.id + "'";
             if (!componentList(l.get("components"), layerName + " components", spec.components, error)) return false;
             if (const Json* inst = l.get("instrument"); inst && inst->type != Json::Type::Null) {
@@ -572,11 +551,7 @@ bool parseProject(std::string_view text, ProjectSpec& out, std::string& error) {
         }, out, error))
         return false;
     if (!validateRouting(out, error)) return false;
-    if (const Json* g = root.get("globals"); g && g->type == Json::Type::Object)
-        for (const auto& [k, v] : g->obj)
-            if (v.type == Json::Type::Number && std::isfinite(v.num)) out.globals[k] = v.num;
     if (const Json* a = root.get("audition"); a && a->type == Json::Type::Object) {
-        out.auditionChain = idList(a->get("chain"));
         if (!wholeIn(a->number("length_steps", 0), 0, maxSteps, out.auditionSteps)) {
             error = "audition length_steps must be a whole number from " + range(0, maxSteps);
             return false;
@@ -592,38 +567,8 @@ bool parseProject(std::string_view text, ProjectSpec& out, std::string& error) {
             out.hasAuditionInstrument = true;
         }
     }
-    out.auditionOnly = root.boolean("audition_only", false) && (!out.auditionChain.empty() || out.hasAuditionInstrument);
+    out.auditionOnly = root.boolean("audition_only", false) && out.hasAuditionInstrument;
     return true;
-}
-
-std::string refName(const std::string& name) {
-    std::string out;
-    bool gap = false;
-    for (const char ch : name) {
-        const unsigned char c = static_cast<unsigned char>(ch);
-        if (std::isalnum(c)) {
-            if (gap && !out.empty()) out += '_';
-            out += static_cast<char>(std::tolower(c));
-            gap = false;
-        } else {
-            gap = true;
-        }
-    }
-    return out;
-}
-
-ProjectSpec singleModuleProject(const std::string& source, double bpm, int bars) {
-    ProjectSpec p;
-    p.bpm = bpm;
-    p.loopBars = bars;
-    p.modules.push_back({"m", source, {}});
-    LayerSpec l;
-    l.id = "l";
-    l.name = "module";
-    l.chain = {"m"};
-    l.volume = 1.0;
-    p.layers.push_back(l);
-    return p;
 }
 
 }  // namespace caw

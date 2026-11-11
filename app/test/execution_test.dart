@@ -59,20 +59,29 @@ void main() {
     expect(idle.allowGpu, isFalse);
   }, skip: skip);
 
-  test('native worker pool runs concurrent source checks and returns results', () async {
+  test('native worker pool runs concurrent renders', () async {
     final pool = NativeEngineWorkPool.shared;
     final plan = pool.apply(workload: EngineWorkload.interactivePreview);
     expect(plan.workerThreads, greaterThanOrEqualTo(1));
     expect(plan.maxConcurrentJobs, greaterThanOrEqualTo(1));
 
-    final first = pool.submitCheck('sin(t)').result;
-    final second = pool.submitCheck('square(t)').result;
-    final results = await Future.wait([first, second]);
-    expect(results.every((result) => result != null && result.contains('"ok":true')), isTrue);
+    final dir = await Directory.systemTemp.createTemp('caw');
+    const project = '{"caw_project":1,"layers":[{"id":"t","instrument":{"id":"org.caw.test.osc"}}]}';
+    final jobs = [
+      for (final name in ['a', 'b'])
+        RenderJob.start(RenderRequest(projectJson: project, kind: ExportKind.free, outPath: '${dir.path}/$name.wav', seconds: 0.2)),
+    ];
+    final results = await Future.wait([for (final j in jobs) j.result]);
+    expect(results, [null, null]);
+    expect(File('${dir.path}/a.wav').existsSync() && File('${dir.path}/b.wav').existsSync(), isTrue);
+    await dir.delete(recursive: true);
   }, skip: skip);
 
-  test('module checks run as native preview jobs', () async {
-    final checked = await Engine.checkAsync('sin(t)');
-    expect(checked.ok, isTrue);
+  test('project updates run as native jobs and report each pattern', () async {
+    final e = Engine.create();
+    final result = await e.setProject('{"caw_project":1,"modules":[{"id":"p","source":"---\\nkind: pattern\\n---\\n0 C4 1 1\\n"}]}');
+    expect(result['p']!.ok, isTrue);
+    expect(result['p']!.noteCount, 1);
+    e.dispose();
   }, skip: skip);
 }

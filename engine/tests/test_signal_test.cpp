@@ -133,7 +133,7 @@ TEST(test_signal_layer_helper_plays_on_a_track) {
 
     // Notes mode from a pattern: silent until the note at step 4 (6000 frames a step at 120 BPM).
     ProjectSpec p = cawtest::testSignalProject({cawtest::testSignalNotesLayer("n", Shape::Dc, "pat")}, 120, 1);
-    p.modules.push_back({"pat", "---\nkind: pattern\n---\n4 C4 2 1\n", {}});
+    p.modules.push_back({"pat", "---\nkind: pattern\n---\n4 C4 2 1\n"});
     Engine notes(48000);
     notes.setMasterBypass(true);
     CHECK(notes.setProject(p).find("\"ok\":true") != std::string::npos);

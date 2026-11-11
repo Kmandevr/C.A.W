@@ -8,11 +8,9 @@
 #include <memory>
 
 #include "builtin_components.h"
-#include "compile.h"
 #include "component_test.h"
 #include "engine.h"
 #include "pattern.h"
-#include "vm.h"
 #include "wav.h"
 
 namespace caw {
@@ -43,18 +41,10 @@ void setProgress(int32_t* p, double fraction) {
 
 bool cancelled(int32_t* c) { return c && atomicLoad(c) != 0; }
 
-// The project's own libraries, as the engine loads them.
-std::vector<LibrarySource> projectLibraries(const ProjectSpec& p) {
-    std::vector<std::string_view> sources;
-    for (const ModuleSpec& m : p.modules) sources.push_back(m.source);
-    return caw::projectLibraries(sources);
-}
-
 }  // namespace
 
-// Every module a render uses must compile, so an export never silently drops a broken one.
+// Every pattern a layer plays must parse, so an export never silently drops a broken one.
 bool checkExportModules(const ProjectSpec& p, std::string& err) {
-    const std::vector<LibrarySource> libs = projectLibraries(p);
     for (const LayerSpec& l : p.layers) {
         if (l.pattern.empty()) continue;
         const ModuleSpec* m = p.module(l.pattern);
@@ -64,20 +54,6 @@ bool checkExportModules(const ProjectSpec& p, std::string& err) {
             return false;
         }
     }
-    for (const LayerSpec& l : p.layers)
-        for (const std::string& id : l.chain) {
-            const ModuleSpec* m = p.module(id);
-            if (!m) {
-                err = "layer '" + l.name + "' uses a missing module '" + id + "'";
-                return false;
-            }
-            if (moduleKindOf(m->source) == ModuleKind::Library) continue;  // libraries don't play
-            CompileResult r = compileModule(m->source, libs);
-            if (!r.program) {
-                err = "module '" + id + "': " + r.error;
-                return false;
-            }
-        }
     return true;
 }
 
@@ -175,16 +151,17 @@ void finishWavetable(std::vector<double>& table, int frames, RenderResult& out) 
 constexpr int kWarmCycles = 3;
 constexpr double kWavetableNoteHz = 27.5;  // A0
 
-bool componentWavetableTarget(const ProjectSpec& p, const std::string& target, TestComponent& c) {
+// The instrument a wavetable target names: a layer's (with its values), or else a built-in component's id.
+TestComponent componentWavetableTarget(const ProjectSpec& p, const std::string& target) {
+    TestComponent c;
     for (const LayerSpec& l : p.layers)
         if (l.id == target && l.hasInstrument && !l.folder) {
             c.id = l.instrument.id;
             c.params = l.instrument.params;
-            return true;
+            return c;
         }
-    if (p.module(target)) return false;  // a .caw module (until #160 removes them)
     c.id = target;
-    return true;
+    return c;
 }
 
 bool renderComponentWavetable(TestComponent c, const ExportOptions& o, RenderResult& out, int32_t* progress,
@@ -193,7 +170,7 @@ bool renderComponentWavetable(TestComponent c, const ExportOptions& o, RenderRes
     registerBuiltinComponents(registry);
     const ModuleDescriptor* d = registry.find(c.id);
     if (!d) {
-        out.error = "no module, instrument layer or built-in component '" + o.target + "' to make a wavetable from";
+        out.error = "no instrument layer or built-in component '" + o.target + "' to make a wavetable from";
         return false;
     }
     bool notesIn = false;
@@ -242,102 +219,10 @@ bool renderComponentWavetable(TestComponent c, const ExportOptions& o, RenderRes
 
 bool renderWavetable(const ProjectSpec& p, const ExportOptions& o, RenderResult& out, int32_t* progress,
                      int32_t* cancel) {
-    if (TestComponent c; componentWavetableTarget(p, o.target, c)) return renderComponentWavetable(c, o, out, progress, cancel);
-    const ModuleSpec* m = p.module(o.target);
-    if (!m) {
-        out.error = "no module '" + o.target + "' to make a wavetable from";
-        return false;
-    }
-    CompileResult cr = compileModule(m->source, projectLibraries(p));
-    if (!cr.program || cr.program->kind == ModuleKind::Library) {
-        out.error = "module '" + o.target + "': " + (cr.program ? std::string("a library doesn't make sound") : cr.error);
-        return false;
-    }
-    const Program& prog = *cr.program;
-    int paramIdx = -1;
-    for (size_t i = 0; i < prog.params.size(); ++i)
-        if (prog.params[i].name == o.param) paramIdx = static_cast<int>(i);
-    if (!o.param.empty() && paramIdx < 0) {
-        out.error = "module '" + o.target + "' has no param '" + o.param + "'";
-        return false;
-    }
-    const int frames = std::clamp(o.frames, 1, 256);
-    out.channels = 1;
-    out.sampleRate = o.sampleRate;
-    out.frames = static_cast<int64_t>(frames) * kWavetableFrame;
-    out.samples.assign(static_cast<size_t>(out.frames), 0.0f);
-    std::vector<double> table(static_cast<size_t>(out.frames), 0.0);
-
-    // One frame is one cycle: t and n run 0..2047, phase and pos 0..1, and sr is 2048, so sine(1) is one cycle.
-    double tb[kBlock], ph[kBlock], zero[kBlock], srb[kBlock], bpmb[kBlock], seedb[kBlock], ones[kBlock], first[kBlock],
-        c4[kBlock];
-    std::fill_n(zero, kBlock, 0.0);
-    std::fill_n(ones, kBlock, 1.0);
-    std::fill_n(first, kBlock, 0.0);
-    first[0] = 1.0;
-    std::fill_n(c4, kBlock, 60.0);
-    std::fill_n(srb, kBlock, static_cast<double>(kWavetableFrame));
-    std::fill_n(bpmb, kBlock, p.bpm);
-    std::fill_n(seedb, kBlock, static_cast<double>(p.seed));
-    for (int f = 0; f < frames; ++f) {
-        if (cancelled(cancel)) {
-            out.error = "cancelled";
-            return false;
-        }
-        Instance inst(cr.program);
-        for (size_t i = 0; i < prog.params.size(); ++i) {
-            auto it = m->params.find(prog.params[i].name);
-            if (it != m->params.end()) inst.setParam(static_cast<int>(i), it->second);
-        }
-        if (paramIdx >= 0) {
-            const ParamDef& d = prog.params[static_cast<size_t>(paramIdx)];
-            const double v = frames == 1 ? d.def : d.min + (d.max - d.min) * f / (frames - 1);
-            inst.setParam(paramIdx, v);
-        }
-        BlockCtx ctx;
-        ctx.keyRoot = p.keyRoot;
-        ctx.keyScale = p.keyScale;
-        ctx.sr = kWavetableFrame;
-        ctx.bpm = p.bpm;
-        ctx.seed = p.seed;
-        for (int b = 0; b < kWavetableFrame; b += kBlock) {
-            ctx.n = kBlock;
-            for (int i = 0; i < kBlock; ++i) {
-                tb[i] = b + i;
-                ph[i] = (b + i) / static_cast<double>(kWavetableFrame);
-            }
-            ctx.vars[static_cast<int>(Var::T)] = tb;
-            ctx.vars[static_cast<int>(Var::Rate)] = srb;
-            ctx.vars[static_cast<int>(Var::Sr)] = srb;
-            ctx.vars[static_cast<int>(Var::Bpm)] = bpmb;
-            ctx.vars[static_cast<int>(Var::Seed)] = seedb;
-            ctx.vars[static_cast<int>(Var::Pos)] = ph;
-            ctx.vars[static_cast<int>(Var::Phase)] = ph;
-            ctx.vars[static_cast<int>(Var::Time)] = ph;
-            ctx.vars[static_cast<int>(Var::In)] = zero;
-            ctx.vars[static_cast<int>(Var::Step)] = zero;
-            ctx.vars[static_cast<int>(Var::Beat)] = zero;
-            ctx.vars[static_cast<int>(Var::Bar)] = zero;
-            // One held note whose frequency is one cycle per frame, so sine(freq) is a single cycle.
-            ctx.vars[static_cast<int>(Var::Trig)] = b == 0 ? first : zero;
-            ctx.vars[static_cast<int>(Var::Gate)] = ones;
-            ctx.vars[static_cast<int>(Var::Note)] = c4;
-            ctx.vars[static_cast<int>(Var::Freq)] = ones;
-            ctx.vars[static_cast<int>(Var::Vel)] = ones;
-            ctx.vars[static_cast<int>(Var::Rel)] = zero;
-            ctx.vars[static_cast<int>(Var::Bend)] = zero;
-            ctx.vars[static_cast<int>(Var::Press)] = ones;
-            ctx.vars[static_cast<int>(Var::Timbre)] = zero;
-            const double* y = inst.process(ctx);
-            for (int i = 0; i < kBlock; ++i) table[static_cast<size_t>(f) * kWavetableFrame + b + i] = y[i];
-        }
-        setProgress(progress, static_cast<double>(f + 1) / frames);
-    }
-    finishWavetable(table, frames, out);
-    return true;
+    return renderComponentWavetable(componentWavetableTarget(p, o.target), o, out, progress, cancel);
 }
 
-// The checks and project every export starts from (not wavetables, which compile one module).
+// The checks and project every export starts from (not wavetables, which render one instrument).
 bool prepareExport(const ProjectSpec& in, const ExportOptions& o, ProjectSpec& p, std::string& error) {
     if (o.sampleRate < 8000 || o.sampleRate > 192000) {
         error = "sample rate must be 8000 to 192000";
@@ -346,7 +231,6 @@ bool prepareExport(const ProjectSpec& in, const ExportOptions& o, ProjectSpec& p
     if (o.kind != ExportKind::Wavetable && !checkExportModules(in, error)) return false;
     p = in;
     p.auditionOnly = false;
-    p.auditionChain.clear();
     p.hasAuditionInstrument = false;
     p.auditionComponents.clear();
     return true;
@@ -397,7 +281,7 @@ bool renderInstrumentNote(ProjectSpec& p, LayerSpec only, const ExportOptions& o
     std::snprintf(line, sizeof line, "0 %.17g %.17g %.17g\n", std::clamp(o.note, 0.0, 127.0), steps,
                   std::clamp(o.velocity, 0.0, 1.0));
     const std::string id = "\x01oneshot-note";
-    p.modules.push_back({id, "---\nkind: pattern\nlength: " + std::to_string(mostSteps / stepsPerBar + 2) + " bars\n---\n" + line, {}});
+    p.modules.push_back({id, "---\nkind: pattern\nlength: " + std::to_string(mostSteps / stepsPerBar + 2) + " bars\n---\n" + line});
     p.loopBars = maxLoopBars(p.beatsPerBar);
     only.pattern = id;
     p.layers = {only};

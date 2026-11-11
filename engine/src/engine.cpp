@@ -21,11 +21,9 @@
 #include <stdexcept>
 #include <thread>
 
-#include "compile.h"
 #include "detmath.h"
 #include "json.h"
 #include "params.h"
-#include "tables.h"
 
 namespace caw {
 
@@ -33,22 +31,6 @@ namespace caw {
 struct Engine::AutomationData {
     std::vector<AutomationPointSpec> volume;
     std::vector<AutomationPointSpec> pan;
-};
-
-// A slot's export pointer table: exactly as many entries as the largest chain it has held exports
-// (#133). Never resized: a chain that exports more gets a new table by command (SetExports), and the
-// audio thread hands the old one back to be freed.
-struct Engine::ExportTable {
-    size_t capacity = 0;
-    std::unique_ptr<std::array<double, kBlock>*[]> entries;
-};
-
-// Export buffers and the slots' pointer tables, allocated on the control thread; a buffer never
-// moves or is freed while the Engine lives (a slot keeps its buffers for its next layer).
-struct Engine::ExportPool {
-    std::vector<std::unique_ptr<std::array<double, kBlock>>> buffers;
-    std::vector<std::unique_ptr<ExportTable>> tables;  // every table sent and not yet handed back
-    size_t entries = 0;  // the entries of those tables
 };
 
 // Per-layer audio and meter state. Fields above `vol` belong to the audio thread.
@@ -59,17 +41,14 @@ struct Engine::Slot {
     bool active = false;
     bool listed = false;     // in Engine::live_, the slots the per-chunk loops visit (audio thread)
     bool removing = false;
-    bool fresh = true;       // the chain has not played yet since it was installed or play started
-    bool contiguous = false; // the previous sample was processed, so a seam can crossfade
+    bool track = false;      // installed as a track: its instrument plays the notes, through its inserts
+    bool fresh = true;       // the track has not played yet since it was installed or play started
     bool overloaded = false;
     bool bus = false;
     int parentSlot = -1;
     AutomationData* automation = nullptr;
     double outL[kBlock] = {}, outR[kBlock] = {};
-    Chain* cur = nullptr;
-    Chain* old = nullptr;    // previous chain, fading out after a hot swap
-    Chain* pending = nullptr;  // new code waiting for the next beat or bar
-    ComponentChain* inserts = nullptr;  // native stereo effects after the chain, before volume and pan
+    ComponentChain* inserts = nullptr;  // native stereo effects after the instrument, before volume and pan
     DelayLine* delay = nullptr;         // latency compensation, after volume and pan
     SendTable* sends = nullptr;         // where the slot's sends and keys go (owned; replaced by SetSends)
     double routeGain[kMaxRoutes] = {};  // audio thread: each route's gain at the end of the last block
@@ -88,22 +67,20 @@ struct Engine::Slot {
     ComponentChain* instrumentFading = nullptr;  // the instrument `instrument` replaced, crossfading out
     int instrumentFadeLeft = 0;
     bool instrumentIdle = false;  // the instrument stopped running (Silent): reset before it runs again
-    float instL[kBlock] = {}, instR[kBlock] = {};  // this chunk's instrument output (module node 0)
+    float instL[kBlock] = {}, instR[kBlock] = {};  // this chunk's instrument output (runInstrument)
     // Play while the instrument still rang out (after Stop): its next few milliseconds, rendered before it was
     // reset and faded to silence, mixed in from the next chunk so the reset doesn't click.
     static constexpr int kPlayTailMax = 512;
     float playTailL[kPlayTailMax] = {}, playTailR[kPlayTailMax] = {};
     int playTailLen = 0, playTailAt = 0;
-    bool insertTail = false;   // stopped: the inserts ring out on silence (Mode::Tail) until quiet
+    bool insertTail = false;   // a bus, stopped: its inserts ring out on silence until quiet
     int tailFade = 0;          // > 0: a tail at its cap, still audible, fading out (frames left); -1: faded
     int64_t tailCap = 0;       // ... or for at most this many samples
     std::shared_ptr<const Pattern>* pattern = nullptr;  // owned here, freed on the control thread when retired
-    int swapLeft = 0;
-    int seamLeft = 0;
-    int64_t shadowN = 0;
     int steps = 0;
     int order = 0;
-    int64_t k = -1, epoch = -1, lastN = 0, expectG = -1;
+    double layerLen = 1;  // samples in this layer's loop, for the progress meter
+    int64_t k = -1, epoch = -1, lastN = 0;
     double gain = 0;
     double panCache = 2, gl = 0, gr = 0;
 
@@ -121,128 +98,24 @@ struct Engine::Slot {
     float* tapL = nullptr;
     float* tapR = nullptr;
 
-    // The slot's export pointer table (in Engine::ExportPool). `exports` is the audio thread's, set only by
-    // a SetExports command; `ctlExports` is the control thread's, the newest table it sent. The control
-    // thread fills a table's entries before it sends it, so the two threads never share a field (#133).
-    ExportTable* exports = nullptr;
-    ExportTable* ctlExports = nullptr;
-    bool hasExports() const noexcept { return exports != nullptr; }
-    std::array<double, kBlock>* exportAt(size_t b) const noexcept {
-        return exports && b < exports->capacity ? exports->entries[b] : nullptr;
-    }
-    size_t exportCount = 0;  // grows to the largest active chain export count; audio-thread owned
-
     // This chunk's plan (planChunk), read by the slot's graph nodes. Chunks end at every loop
-    // boundary and code swap of a playing track, so one plan covers the whole chunk.
-    enum class Mode : uint8_t { Idle, Bus, Silent, Play, Tail };  // Tail: only the inserts run, on silence
+    // boundary of a playing track, so one plan covers the whole chunk.
+    enum class Mode : uint8_t { Idle, Bus, Silent, Play };
     Mode mode = Mode::Idle;
     double target = 0;          // mix target (0 while muted or soloed out)
     int64_t n0 = 0, repeat = 0; // sample in the layer's loop, and the pattern repeat
     const Pattern* pat = nullptr;
-    bool seam = false;          // the shadow lane finishes the previous pass this chunk
-    bool fade = false;          // the replaced chain plays on in the fade lane this chunk
-    bool previewing = false;    // audio thread: the chain holds a preview voice, or its sound is still dying away
+    bool previewing = false;    // audio thread: the track holds a preview note, or its sound is still dying away
     DeviceNotes deviceNotes;    // audio thread: the device MIDI channels' bend and pedal (API 15)
     int64_t previewQuiet = 0;   // samples the track's output has been below kPreviewQuiet
     int64_t previewTail = 0;    // samples since its last preview voice ended
     int64_t previewN = 0;       // stopped: the sample in the layer's loop that preview chunks run from
 };
 
-// One sounding note of a pattern layer's generator.
-struct Voice {
-    Instance* inst = nullptr;
-    bool active = false, gate = false, trig = false;
-    uint32_t note = 0;
-    uint16_t sub = 0;
-    int64_t started = 0;  // note-on order, for stealing the oldest and for exports
-    int64_t since = 0;    // samples since note-on
-    int64_t rel = 0;      // samples since release
-    int64_t quiet = 0;    // samples below -90 dB since release
-    double pitch = 60, target = 60, glideStep = 0, freq = 261.6255653005986;
-    int glideLeft = 0;
-    double vel = 1, tacc = 0, phase = 0;
-    double lastY = 0;     // last output sample, so a voice cut short can be smoothed over
-    bool rebind = false;  // its pattern was edited: it moves onto its note in the new one (`note`) next run
-    // The note's own bend, pressure, timbre and vibrato, copied at note start (no allocation on the audio thread).
-    bool expressive = false;
-    NoteExpression ex;
-    int64_t exStart = 0;  // `since` when this note took the voice (a slide hands a voice on mid-way)
-    double exLen = 1;     // the note's length in samples, for the curves' 0..1 time
-    // The curves run at control rate: worked out every kExpressionStep samples, with linear steps in between.
-    double bend = 0, press = 1, timbre = 0, freqNow = 0;
-    double dBend = 0, dPress = 0, dTimbre = 0, dFreq = 0;
-    int exLeft = 0;  // samples until the next control point
-    int32_t preview = -1;  // a note preview's id (#103), or -1 for a pattern's note
-};
-
 constexpr int kExpressionStep = 16;  // 1/3 ms at 48 kHz: smooth for bends and vibrato up to 30 Hz, 16x cheaper
 
 // A held note carried across a pattern edit glides from the pitch heard to its new curve over this long.
 constexpr double kRebindGlideSeconds = 0.005;
-constexpr uint32_t kPreviewNote = 0xFFFFFFFEu;  // a note preview: no pattern event matches it, only its own off
-
-// One layer's modules: the main instances plus shadow copies that play the loop's tail across a seam. A layer
-// with a pattern runs its generator as voiceCount voices instead (main[0], shadow[0] and extras), with no seams.
-struct Engine::Chain {
-    std::vector<std::unique_ptr<Instance>> main, shadow;
-    bool voiced = false;
-    // A native instrument (the slot's) plays the notes: main holds only the .caw effects after it
-    // (perhaps none), and the chain loops as a pattern layer does (no seams, effects carry on).
-    bool native = false;
-    size_t expressionCapacity = 0;
-    std::vector<std::unique_ptr<Instance>> extraVoices;
-    Voice voices[kMaxVoices];
-    int voiceCount = 0;  // voices with an instance: the generator's voices: setting, at least 2 (main and shadow)
-    int voiceTake = 0;   // voices that take new notes: the voices: setting itself, 1..kMaxVoices
-    int64_t noteCount = 0;
-    double declick = 0;  // what voices cut short (stolen or ended) were playing; decays over about 2 ms
-    double vtb[kBlock], vtime[kBlock], vphase[kBlock], vtrig[kBlock], vgate[kBlock], vnote[kBlock], vfreq[kBlock];
-    double vvel[kBlock], vrel[kBlock], vout[kBlock], gen[kBlock];
-    double vbend[kBlock], vpress[kBlock], vtimbre[kBlock];
-    double ones[kBlock], dnote[kBlock], dfreq[kBlock];
-    // Each .caw param resolves through the shared parameter model (F6.6): its held value (set by
-    // writeParams) is the manual base and its automation lane (if any) the automated one. Only a
-    // knob move (setParam/setGlobal, which bump the param's touch serial) is a touch, until the
-    // next Play; any other held-value change (a project update) is a restore. .caw params have
-    // no smoothing, so resolving a module more than once per chunk (lanes, shadow) gives the
-    // same values.
-    struct ParamSlot {
-        ParameterResolver resolver;
-        bool active = false;          // false: the descriptor did not validate; the VM reads the held value
-        uint64_t heldBits = 0;        // the held value last seen (audio thread after publication)
-        uint32_t seenSerial = 0;      // the touch stamp last seen (audio thread)
-        bool passThrough = false;     // no lane and the held value resolves to itself: skip the resolver
-        const ProjectAutomationLaneSpec* lane = nullptr;
-    };
-    std::vector<std::array<double, kBlock>> paramSamples;
-    std::vector<const double*> paramValuePtrs;
-    std::shared_ptr<const std::vector<ProjectAutomationLaneSpec>> automation;
-    std::vector<std::vector<ParamSlot>> paramSlots;  // [module][param]
-    // [module][param]: the stamp of the last knob move (control thread, release), read by the audio thread.
-    std::vector<std::unique_ptr<std::atomic<uint32_t>[]>> touchSerials;
-    std::array<double, kBlock> laneScratch{};
-    uint64_t touchEpoch = 0;  // the play count this chain's touches belong to
-    std::vector<std::string> moduleIds;
-    // How each module takes over the running state of the chain it replaces, so unchanged calls play on.
-    struct Migration {
-        int from = -1;                    // module index in the replaced chain
-        const Program* expect = nullptr;  // the program the plan was made against
-        std::vector<std::array<uint32_t, 3>> ranges;  // (from offset, to offset, count)
-    };
-    std::vector<Migration> migrate;
-    std::vector<std::vector<std::pair<uint16_t, size_t>>> exportMap;  // per module: (register, export buffer)
-    size_t exportCount = 0;
-    std::vector<std::vector<const double*>> importPtrs;            // per module: one pointer per import
-    uint32_t used = 0;
-    double layerLen = 1;  // samples in this layer's loop, for pos and phase
-    // Per lane (0 the main pass, 1 the shadow across a seam): the block's time variables, worked
-    // out once per chunk by the first module node and read by the rest, plus the lane's input.
-    struct Lane {
-        double nb[kBlock], stepb[kBlock], beatb[kBlock], barb[kBlock], posb[kBlock], timeb[kBlock];
-        double srb[kBlock], bpmb[kBlock], seedb[kBlock], dtrig[kBlock], in[kBlock];
-    } lanes[2];
-    double tb[kBlock], rateb[kBlock], zero[kBlock];
-};
 
 // Delays a track's output so it lines up with the track whose native effects add the most latency.
 struct Engine::DelayLine {
@@ -307,15 +180,14 @@ struct Engine::SendTable {
 static_assert(ComponentChain::kMaxFrames == static_cast<uint32_t>(kBlock), "component chains run Engine blocks");
 
 struct Engine::Cmd {
-    enum Type { Install, SetSteps, SetPattern, Remove, Transport, SetMaster, SetMasterChain, SetInserts, SetInstrument, SetComponentAutomation, SetDelay, SetSends, SetSendLevel, Play, Stop, AuditionOnly, ClearOverload, SetOrder, SetRouting, ConfigureBus, SetAutomation, Grow, Preview, Metronome, ReleaseTouches, SetExports } type = Play;
+    // Install: the slot becomes a track (steps, order); its instrument and inserts come by their own commands.
+    enum Type { Install, SetSteps, SetPattern, Remove, Transport, SetMaster, SetMasterChain, SetInserts, SetInstrument, SetComponentAutomation, SetDelay, SetSends, SetSendLevel, Play, Stop, AuditionOnly, ClearOverload, SetOrder, SetRouting, ConfigureBus, SetAutomation, Grow, Preview, Metronome, ReleaseTouches } type = Play;
     std::shared_ptr<const Pattern>* pattern = nullptr;
     // SetOrder: slots in dependency order; SetPattern: for each note of the old pattern, the new note that carries it
     // on, or -1 (matchPatternNotes). Owned; retired by the audio thread.
     std::vector<int>* orderList = nullptr;
     SlotTable* table = nullptr;  // Grow: the larger slot table (owned; the one it replaces is retired)
-    ExportTable* exportTable = nullptr;  // SetExports: the slot's new export table (owned by ExportPool)
     int slot = 0;
-    Chain* chain = nullptr;
     ComponentChain* masterChain = nullptr;  // SetMasterChain: the master's; SetInserts/SetInstrument: the slot's (owned)
     // SetComponentAutomation: for slot's inserts (its instrument when `flag`), or the master's (slot -1)
     ComponentAutomation* componentAutomation = nullptr;
@@ -325,13 +197,11 @@ struct Engine::Cmd {
     int steps = 0, order = 0, parentSlot = -1;
     AutomationData* automation = nullptr;
     double bpm = 120, master = 0.7;
-    int beatsPerBar = 4, loopSteps = 64, keyRoot = 9, keyScale = 1;
+    int beatsPerBar = 4, loopSteps = 64;
     int loopFromSteps = 0, loopToSteps = 0;  // Transport: the loop range, when loopRange
     bool loopRange = false;
     uint32_t seed = 0;
-    bool seamXf = true, flag = false;
-    int swapMode = 0;
-    int voices = kMaxVoices;
+    bool flag = false;
     uint64_t playCount = 0;    // Play: the control thread's play count, which ends touches
     double fromStep = 0;       // Play: where in the project loop to start, in sixteenth steps
     uint32_t touchStamp = 0;   // Play: the last touch stamp before it (later stamps are touches after it)
@@ -343,7 +213,6 @@ struct Engine::Cmd {
 };
 
 struct Engine::Retired {
-    Chain* chain = nullptr;
     Slot* freed = nullptr;  // a slot whose layer has faded out (by object: the audition's index can change)
     std::shared_ptr<const Pattern>* pattern = nullptr;
     AutomationData* automation = nullptr;
@@ -353,13 +222,11 @@ struct Engine::Retired {
     ComponentAutomation* componentAutomation = nullptr;  // a component chain's automation table replaced
     DelayLine* delay = nullptr;  // a latency-compensation delay replaced or freed
     SendTable* sends = nullptr;  // a route table replaced or freed
-    ExportTable* exportTable = nullptr;  // an export table SetExports replaced (ExportPool frees it)
 };
 
 namespace {
 
 constexpr double kSwapSeconds = 0.02;
-constexpr double kSeamSeconds = 0.003;
 constexpr double kStopSeconds = 0.01;
 constexpr double kPlayTailSeconds = 0.005;   // Play after Stop: a ringing instrument fades out over this
 constexpr double kPlayTailQuietSeconds = 0.1;  // ... if its track sounded within the last 0.1 s
@@ -369,27 +236,13 @@ constexpr double kPreviewQuietSeconds = 0.25;   // ... once it has stayed below 
 constexpr double kPreviewTailSeconds = 30.0;    // the longest a tail (or a self-oscillating effect) keeps running
 constexpr double kGainSeconds = 0.005;
 constexpr double kLimitCeiling = 0.977;  // about -0.2 dBFS
-// Play retires up to two entries per slot and must always find room, even with the retired queue
-// full: the pending list holds 2 * (maxLayers() + 1) entries plus this slack (256 at 64 layers).
+// Retirements the retired queue has no room for wait in the pending list: 2 * (maxLayers() + 1) entries
+// plus this slack (256 at 64 layers), so every slot can hand back a chain and its fading one at once.
 constexpr int kPendingSlack = 126;
 constexpr size_t kMaxProjectComponents = 256;  // native component instances in one project (tracks and master)
 constexpr int64_t kMaxCompensationFrames = 1 << 15;  // latency compensation up to about 0.7 s at 48 kHz
-// What one export buffer costs against exportBufferBudget(): the buffer, its owner, and one table entry.
-constexpr uint64_t kExportBufferBytes = static_cast<uint64_t>(kBlock) * sizeof(double);
-constexpr uint64_t kExportSlotBytes =
-    kExportBufferBytes + sizeof(std::array<double, kBlock>*) + sizeof(std::unique_ptr<std::array<double, kBlock>>);
 // Grows above this many layers are not considered (node counts stay far inside uint32_t).
 constexpr int kLayerCeiling = 1 << 20;
-constexpr double kVoiceQuietSeconds = 0.1;   // a released voice ends after this long below -90 dB
-constexpr double kVoiceMaxRelease = 10.0;    // or this long after release, whatever its level
-constexpr double kQuietLevel = 3.1622776601683795e-5;  // -90 dB
-constexpr double kReleaseFade = 0.01;        // code that ignores gate and rel fades out this fast at note-off
-constexpr double kDeclickSeconds = 0.002;
-constexpr int kMaxSplits = 16;               // note changes that split one block; more start together
-constexpr int64_t kMaxTakeOver = 262144;     // state numbers a code swap may copy (2 MB): beyond it, start fresh
-constexpr double kC4 = 261.6255653005986;
-
-double mtof(double note) { return 440.0 * detPow(2.0, (note - 69.0) / 12.0); }
 
  // An upper bound on the bytes compileArrangement builds, so a huge looping clip is refused before it is expanded.
 double arrangementBytes(const std::vector<ClipSpec>& clips,
@@ -513,34 +366,8 @@ std::shared_ptr<const Pattern> compileArrangement(
     return out;
 }
 
-// Lets every held note go into its release (at a layer restart, or when the pattern changes).
-// A pattern restarting releases its own notes; held previews keep sounding until their note off.
-void releaseVoices(Voice* voices, int count) {
-    for (int v = 0; v < count; ++v)
-        if (voices[v].active && voices[v].gate && voices[v].preview < 0) {
-            voices[v].gate = false;
-            voices[v].rel = 0;
-            voices[v].quiet = 0;
-        }
-}
-
 double bitsToDouble(uint64_t b) { return std::bit_cast<double>(b); }
 uint64_t doubleToBits(double d) { return std::bit_cast<uint64_t>(d); }
-
-double automationValue(int count, const double* steps, const double* values, double at, double fallback) noexcept {
-    if (count <= 0) return fallback;
-    if (at <= steps[0]) return values[0];
-    int lo = 0, hi = count - 1;
-    while (lo + 1 < hi) {
-        const int mid = (lo + hi) / 2;
-        if (steps[mid] <= at) lo = mid; else hi = mid;
-    }
-    if (at >= steps[count - 1]) return values[count - 1];
-    const double span = steps[hi] - steps[lo];
-    if (span <= 0.0) return values[hi];
-    const double t = (at - steps[lo]) / span;
-    return values[lo] + (values[hi] - values[lo]) * t;
-}
 
 double automationValue(const std::vector<AutomationPointSpec>& points, double at, double fallback) noexcept {
     return automationLaneValue(points.data(), points.size(), at, fallback);  // the one lane rule (params.h)
@@ -559,33 +386,14 @@ void storeMax(std::atomic<float>& a, float v) {
 // stage. Every node has a summing stereo input; routing (child -> folder bus, root -> master) and the
 // execution order are set on the audio thread from the slots' state (Engine::updateRouting).
 struct Engine::MixGraph {
-    // Lanes on a track's module edges: 0 the current chain, 1 its shadow finishing the previous
-    // pass across a loop seam, 2 the replaced chain fading out after a code swap.
-    static constexpr uint32_t kLanes = 3;
-    static constexpr int K = kMaxTrackModules;
-
-    class ModuleNode final : public ModuleProcessor {
-    public:
-        ModuleNode(Engine& e, int slot, int index, const ModuleDescriptor& d) : e_(e), slot_(slot), index_(index), d_(d) {}
-        const ModuleDescriptor& descriptor() const noexcept override { return d_; }
-        using ModuleProcessor::process;
-        bool process(const AudioProcessBlock& b) noexcept override {
-            e_.runModuleNode(slot_, index_, b.input.channels, b.output.channels, static_cast<int>(b.frames));
-            return true;
-        }
-    private:
-        Engine& e_;
-        int slot_, index_;
-        const ModuleDescriptor& d_;
-    };
+    // A track's node: its instrument, inserts, volume and pan (Engine::runTrackNode); no graph input.
     class TrackNode final : public ModuleProcessor {
     public:
         TrackNode(Engine& e, int slot, const ModuleDescriptor& d) : e_(e), slot_(slot), d_(d) {}
         const ModuleDescriptor& descriptor() const noexcept override { return d_; }
         using ModuleProcessor::process;
         bool process(const AudioProcessBlock& b) noexcept override {
-            e_.runTrackNode(slot_, b.input.channels, b.output.channels[0], b.output.channels[1],
-                            static_cast<int>(b.frames));
+            e_.runTrackNode(slot_, b.output.channels[0], b.output.channels[1], static_cast<int>(b.frames));
             return true;
         }
     private:
@@ -623,28 +431,23 @@ struct Engine::MixGraph {
         const ModuleDescriptor& d_;
     };
 
-    // Node layout: K module nodes per slot, then a track node and a bus node per slot, then master.
-    static constexpr uint32_t moduleNode(int slot, int index) { return static_cast<uint32_t>(slot * K + index); }
+    // Node layout: a track node per slot, then a bus node per slot, then master.
     // The layout depends on the slot count (layer capacity + the audition), fixed at construction.
     const int slots;   // slot count
     const int master;  // the master in slot-level routing scratch (== slots)
-    uint32_t trackNode(int slot) const noexcept { return static_cast<uint32_t>(slots * K + slot); }
-    uint32_t busNode(int slot) const noexcept { return static_cast<uint32_t>(slots * K + slots + slot); }
-    uint32_t masterNode() const noexcept { return static_cast<uint32_t>(slots * (K + 2)); }
-    int nodeCount() const noexcept { return slots * (K + 2) + 1; }
-    int maxEdges() const noexcept { return slots * (K + 1); }
-    // The mixer graph is fixed engine structure (nodeCount() nodes of kBlock frames, about 2 MB at 64 layers), not
-    // project content, so it gets its own budget floor rather than competing with project graphs.
+    uint32_t trackNode(int slot) const noexcept { return static_cast<uint32_t>(slot); }
+    uint32_t busNode(int slot) const noexcept { return static_cast<uint32_t>(slots + slot); }
+    uint32_t masterNode() const noexcept { return static_cast<uint32_t>(2 * slots); }
+    int nodeCount() const noexcept { return 2 * slots + 1; }
+    int maxEdges() const noexcept { return slots; }  // each slot's output into its bus or the master
+    // The mixer graph is fixed engine structure (nodeCount() nodes of kBlock frames), not project content, so it
+    // gets its own budget floor rather than competing with project graphs.
     static constexpr std::size_t kMinBudgetBytes = 8u * 1024u * 1024u;
 
     const PortDescriptor ports[2] = {{"in", PortType::Audio, ChannelLayout::Stereo, true, 0, true},
                                      {"out", PortType::Audio, ChannelLayout::Stereo, false}};
-    const PortDescriptor lanePorts[2] = {{"in", PortType::Audio, ChannelLayout::Discrete, true, kLanes},
-                                         {"out", PortType::Audio, ChannelLayout::Discrete, false, kLanes}};
-    const PortDescriptor trackPorts[2] = {{"in", PortType::Audio, ChannelLayout::Discrete, true, kLanes},
-                                          {"out", PortType::Audio, ChannelLayout::Stereo, false}};
-    const ModuleDescriptor moduleDescriptor{"caw.track.module", 1, lanePorts, 2, nullptr, 0};
-    const ModuleDescriptor trackDescriptor{"caw.track.out", 1, trackPorts, 2, nullptr, 0};
+    const PortDescriptor trackPorts[1] = {{"out", PortType::Audio, ChannelLayout::Stereo, false}};
+    const ModuleDescriptor trackDescriptor{"caw.track.out", 1, trackPorts, 1, nullptr, 0};
     const ModuleDescriptor busDescriptor{"caw.mixer.bus", 1, ports, 2, nullptr, 0};
     const ModuleDescriptor masterDescriptor{"caw.mixer.master", 1, ports, 2, nullptr, 0};
     std::vector<std::string> ids;
@@ -654,8 +457,7 @@ struct Engine::MixGraph {
     // Routing scratch, audio thread only; slot-level arrays use `master` for the master. Sized in
     // the constructor and never resized on the audio thread.
     std::vector<int> target;          // [slots] routed destination slot (or master), or -1
-    std::vector<uint8_t> routable;    // [slots] runs this chunk: active, and a bus or a track with a chain
-    std::vector<int> modules;         // [slots] module nodes a routed track runs
+    std::vector<uint8_t> routable;    // [slots] runs this chunk: active, and a bus or a track
     std::vector<int> pending;         // [slots + 1] routed children not yet ordered
     std::vector<uint8_t> deferred;    // [slots + 1]
     std::vector<uint8_t> emitted;     // [slots + 1]
@@ -669,7 +471,7 @@ struct Engine::MixGraph {
     MixGraph(Engine& e, int capacity, double sampleRate, const EngineResourceBudget& engineBudget)
         : slots(capacity + 1), master(capacity + 1),
           target(static_cast<size_t>(slots), 0), routable(static_cast<size_t>(slots), 0),
-          modules(static_cast<size_t>(slots), 0), pending(static_cast<size_t>(slots) + 1, 0),
+          pending(static_cast<size_t>(slots) + 1, 0),
           deferred(static_cast<size_t>(slots) + 1, 0), emitted(static_cast<size_t>(slots) + 1, 0),
           slotOrder(static_cast<size_t>(slots), 0), stack(static_cast<size_t>(slots) + 1, 0), position(static_cast<size_t>(slots) + 1, UINT32_MAX),
           order(static_cast<size_t>(nodeCount()), 0), edges(static_cast<size_t>(maxEdges()), GraphConnection{}) {
@@ -686,10 +488,6 @@ struct Engine::MixGraph {
             graphNodes.push_back({ids.back(), d});
             processors.push_back(nodes.back().get());
         };
-        for (int s = 0; s < slots; ++s)
-            for (int i = 0; i < K; ++i)
-                add("slot" + std::to_string(s) + ".m" + std::to_string(i),
-                    std::make_unique<ModuleNode>(e, s, i, moduleDescriptor), &moduleDescriptor);
         for (int s = 0; s < slots; ++s)
             add("slot" + std::to_string(s) + ".track", std::make_unique<TrackNode>(e, s, trackDescriptor), &trackDescriptor);
         for (int s = 0; s < slots; ++s)
@@ -713,9 +511,9 @@ struct Engine::MixGraph {
             if (data < self || data >= self + sizeof(std::string)) b += id.capacity() + 1;  // not stored inline
         }
         b += nodes.capacity() * sizeof(std::unique_ptr<ModuleProcessor>);
-        b += static_cast<std::size_t>(slots) * (K * sizeof(ModuleNode) + sizeof(TrackNode) + sizeof(BusNode)) + sizeof(MasterNode);
+        b += static_cast<std::size_t>(slots) * (sizeof(TrackNode) + sizeof(BusNode)) + sizeof(MasterNode);
         b += static_cast<std::size_t>(nodeCount()) * (sizeof(GraphNode) + sizeof(ModuleProcessor*));
-        b += (target.capacity() + modules.capacity() + pending.capacity() + slotOrder.capacity() + stack.capacity()) * sizeof(int);
+        b += (target.capacity() + pending.capacity() + slotOrder.capacity() + stack.capacity()) * sizeof(int);
         b += routable.capacity() + deferred.capacity() + emitted.capacity();
         b += (position.capacity() + order.capacity()) * sizeof(uint32_t);
         b += edges.capacity() * sizeof(GraphConnection);
@@ -740,32 +538,13 @@ struct Engine::SlotTable {
 uint32_t Engine::mixGraphNodesRun() const noexcept { return mixGraph_->executor.runCount(); }
 int Engine::slotsScannedPerChunk() const noexcept { return liveCount_; }
 
-size_t Engine::exportBytes() const noexcept {
-    if (!exportPool_) return 0;
-    return exportPool_->buffers.size() * (kExportBufferBytes + sizeof(std::unique_ptr<std::array<double, kBlock>>)) +
-           exportPool_->entries * sizeof(std::array<double, kBlock>*);
-}
-
-// Control thread: forget a table the audio thread handed back (or never received) and free it.
-void Engine::dropExportTable(ExportTable* t) noexcept {
-    if (!t || !exportPool_) return;
-    auto& tables = exportPool_->tables;
-    for (size_t i = 0; i < tables.size(); ++i)
-        if (tables[i].get() == t) {
-            exportPool_->entries -= t->capacity;
-            tables[i] = std::move(tables.back());
-            tables.pop_back();
-            return;
-        }
-}
-
 // Audio thread: slot i joins the in-use list (kept ascending, so loops over it run in index order as
 // the full scans did). It leaves in processChunk once nothing is left for a loop to do there.
 // Stopped: an audio track monitoring its input runs as a held preview would, so its input is heard through its chain.
 void Engine::wakeMonitors() noexcept {
     for (int i = 0; i < slotCount_; ++i) {
         Slot& s = slotAt(i);
-        if (!s.active || !s.cur || !s.instrument || s.previewing || !s.instrument->monitorsStopped()) continue;
+        if (!s.active || !s.track || !s.instrument || s.previewing || !s.instrument->monitorsStopped()) continue;
         if (s.instrumentIdle) {
             s.instrument->reset();
             s.instrument->notes()->forget(false);
@@ -811,8 +590,6 @@ Engine::Engine(double sampleRate)
 Engine::Engine(double sampleRate, EngineResourceBudget resourceBudget)
     : sr_(sampleRate),
       resourceBudget_(resourceBudget),
-      exportPerSlot_(static_cast<size_t>(resourceBudget.graphWorkingBytes /
-                                         (static_cast<uint64_t>(kInitialLayerCapacity + 1) * kExportSlotBytes))),
       cmds_(new Spsc<Cmd, 1024>()),
       retired_(new Spsc<Retired, 1024>()),
       masterScope_(new std::atomic<float>[kScopeSize]),
@@ -855,10 +632,8 @@ Engine::Engine(double sampleRate, EngineResourceBudget resourceBudget)
         const double q = ((g64 - g2) - 62.0 * d) / 3906.0;  // (64^2 - 2^2) - 62 * (2^2 - 1^2)
         const double b = d - 3.0 * q;
         const double a = g1 - b - q;
-        // A slot's export table header; its entries are charged to exportBufferBudget() with the buffers (#133).
         const double perSlot = static_cast<double>(sizeof(Slot) + sizeof(std::unique_ptr<Slot>) + sizeof(Slot*) +
-                                                   2 * sizeof(int) + 2 * sizeof(Retired) + sizeof(ExportTable) +
-                                                   sizeof(std::unique_ptr<ExportTable>));
+                                                   2 * sizeof(int) + 2 * sizeof(Retired));
         const double budget = static_cast<double>(resourceBudget_.graphWorkingBytes);
         auto fits = [&](int c) {
             const double cap = c;
@@ -879,16 +654,15 @@ Engine::Engine(double sampleRate, EngineResourceBudget resourceBudget)
         }
         maxLayers_ = lo;
     }
-    // Play retires up to two entries per slot; the pending list holds that at the largest capacity,
-    // so a Play never waits on the retired queue (Spsc, fixed at 1024) once the control thread drains.
+    // The pending list holds two retirements per slot at the largest capacity, so the slots can hand back what
+    // they replaced (the retired queue is an Spsc fixed at 1024) while the control thread is slow to drain.
     pendingMax_ = 2 * (maxLayers_ + 1) + kPendingSlack;
-    if (pendingMax_ < 2 * (maxLayers_ + 1)) throw std::logic_error("pending list cannot hold a Play's retirements");
+    if (pendingMax_ < 2 * (maxLayers_ + 1)) throw std::logic_error("pending list cannot hold two retirements per slot");
     pending_.reset(new Retired[static_cast<size_t>(pendingMax_)]);
     table_ = std::move(first);
     bindTable();
     ctlTable_ = table_.get();
     ctlCapacity_.store(initial, std::memory_order_relaxed);
-    warmTables();  // the built-in wavetables are built here, never on the audio thread
     updateTiming();
     ctlLoopLen_ = loopLen_;
     loopLenFlag_.store(loopLen_);
@@ -898,7 +672,6 @@ Engine::~Engine() {
     // No audio thread runs any more: free everything directly.
     Cmd c;
     while (cmds_->pop(c)) {
-        if (c.type == Cmd::Install) delete c.chain;
         delete c.pattern;
         delete c.automation;
         delete c.orderList;
@@ -910,7 +683,6 @@ Engine::~Engine() {
     }
     Retired r;
     while (retired_->pop(r)) {
-        delete r.chain;
         delete r.pattern;
         delete r.automation;
         delete r.order;
@@ -921,7 +693,6 @@ Engine::~Engine() {
         delete r.sends;
     }
     for (int i = 0; i < pendingCount_; ++i) {
-        delete pending_[i].chain;
         delete pending_[i].pattern;
         delete pending_[i].automation;
         delete pending_[i].order;
@@ -936,9 +707,6 @@ Engine::~Engine() {
     delete masterFading_;
     masterFading_ = nullptr;
     for (const auto& slot : slotStore_) {
-        delete slot->cur;
-        delete slot->old;
-        delete slot->pending;
         delete slot->inserts;
         delete slot->insertsFading;
         delete slot->instrument;
@@ -956,7 +724,6 @@ Engine::~Engine() {
 void Engine::drainRetired() {
     Retired r;
     while (retired_->pop(r)) {
-        delete r.chain;
         delete r.pattern;
         delete r.automation;
         delete r.order;
@@ -965,7 +732,6 @@ void Engine::drainRetired() {
         delete r.componentAutomation;
         delete r.delay;
         delete r.sends;
-        dropExportTable(r.exportTable);
         if (r.freed) r.freed->ctlBusy = false;
     }
 }
@@ -980,8 +746,7 @@ bool Engine::send(const Cmd& c) {
         drainRetired();
         if (offlineControl_) applyCommands();
         if (tries > 2000) {
-            if (c.type == Cmd::Install) delete c.chain;  // audio stalled; drop rather than hang the app
-            delete c.pattern;
+            delete c.pattern;  // audio stalled; drop rather than hang the app
             delete c.automation;
             delete c.orderList;
             delete c.table;
@@ -1008,7 +773,7 @@ int Engine::freeSlot() {
 
 // Control thread, under ctl_: a table of `capacity` layer slots that keeps every existing Slot
 // (layer slots at their indices, the audition moved to the new last one), a mix graph sized for
-// it; sent to the audio thread as one Grow command. New slots have no export table until a chain exports.
+// it; sent to the audio thread as one Grow command.
 std::string Engine::grow(int capacity) {
     SlotTable& old = *ctlTable_;
     if (capacity <= old.capacity) return {};
@@ -1039,7 +804,7 @@ std::string Engine::grow(int capacity) {
         t->graph.reset(new MixGraph(*this, capacity, sr_, resourceBudget_));
         // The budget holds the old graph and the new one at once (maxLayers() allows for that).
         const uint64_t perSlot = sizeof(Slot) + sizeof(std::unique_ptr<Slot>) + sizeof(Slot*) + 2 * sizeof(int) +
-                                 2 * sizeof(Retired) + sizeof(ExportTable) + sizeof(std::unique_ptr<ExportTable>);
+                                 2 * sizeof(Retired);
         const uint64_t peak = static_cast<uint64_t>(old.graph->bytes()) + t->graph->bytes() +
                               perSlot * static_cast<uint64_t>(capacity + 1);
         if (peak > resourceBudget_.graphWorkingBytes) {
@@ -1069,148 +834,6 @@ std::string Engine::grow(int capacity) {
     for (auto& [id, ls] : layers_)
         if (ls.slot == oldAudition) ls.slot = capacity;  // the audition's layer state follows it
     return {};
-}
-
-Engine::Chain* Engine::buildChain(const std::vector<std::string>& ids, const std::vector<const double*>& wiring,
-                                  bool voiced, bool native, const Chain* prev, const std::shared_ptr<const std::vector<ProjectAutomationLaneSpec>>& automation,
-                                   size_t expressionCapacity) {
-    auto* c = new Chain();
-    c->voiced = voiced;
-    c->native = native;
-    size_t buf = 0;
-    size_t w = 0;
-    for (size_t i = 0; i < ids.size(); ++i) {
-        const ModuleState& m = modules_.at(ids[i]);
-        c->main.push_back(std::make_unique<Instance>(m.program));
-        c->shadow.push_back(std::make_unique<Instance>(m.program));
-        c->moduleIds.push_back(ids[i]);
-        c->used |= m.program->usedVars;
-        // Export buffers are numbered in chain order; setProject uses the same numbering.
-        std::vector<std::pair<uint16_t, size_t>> exports;
-        for (const ExportDef& e : m.program->exports) exports.emplace_back(e.reg, buf++);
-        c->exportMap.push_back(std::move(exports));
-        std::vector<const double*> imports;
-        for (size_t k = 0; k < m.program->imports.size(); ++k) imports.push_back(w < wiring.size() ? wiring[w++] : nullptr);
-        c->importPtrs.push_back(std::move(imports));
-    }
-    std::fill_n(c->zero, kBlock, 0.0);
-    std::fill_n(c->ones, kBlock, 1.0);
-    std::fill_n(c->dnote, kBlock, 60.0);
-    std::fill_n(c->dfreq, kBlock, kC4);
-    if (voiced && !c->main.empty()) {
-        // Voice 0 and 1 reuse the main and shadow instances, so a layer always has at least two.
-        c->voiceCount = std::clamp(c->main[0]->program().voices, 2, kMaxVoices);
-        c->voiceTake = std::clamp(c->main[0]->program().voices, 1, kMaxVoices);
-        for (int v = 2; v < c->voiceCount; ++v)
-            c->extraVoices.push_back(std::make_unique<Instance>(c->main[0]->programPtr()));
-        c->voices[0].inst = c->main[0].get();
-        c->voices[1].inst = c->shadow[0].get();
-        for (int v = 2; v < c->voiceCount; ++v) c->voices[v].inst = c->extraVoices[static_cast<size_t>(v - 2)].get();
-    }
-    c->exportCount = buf;
-    c->expressionCapacity = std::max(expressionCapacity, prev ? prev->expressionCapacity : size_t{0});
-    for (Voice& voice : c->voices) {
-        voice.ex.bend.points.reserve(c->expressionCapacity);
-        voice.ex.press.points.reserve(c->expressionCapacity);
-        voice.ex.timbre.points.reserve(c->expressionCapacity);
-    }
-    size_t maxParams = 0;
-    for (const auto& instance : c->main) maxParams = std::max(maxParams, instance->program().params.size());
-    c->paramSamples.resize(maxParams);
-    c->paramValuePtrs.resize(maxParams, nullptr);
-    writeParams(*c);
-    c->automation = automation;
-    // Give every param a resolver and find its automation lane, on the control thread.
-    c->paramSlots.resize(c->main.size());
-    c->touchSerials.resize(c->main.size());
-    c->touchEpoch = playCount_;  // its touches (below) already belong to the current playback
-    for (size_t moduleIndex = 0; moduleIndex < c->main.size(); ++moduleIndex) {
-        const Program& program = c->main[moduleIndex]->program();
-        const std::string& moduleId = c->moduleIds[moduleIndex];
-        c->paramSlots[moduleIndex].resize(program.params.size());
-        c->touchSerials[moduleIndex] = std::make_unique<std::atomic<uint32_t>[]>(program.params.size());
-        for (size_t paramIndex = 0; paramIndex < program.params.size(); ++paramIndex) {
-            const ParamDef& def = program.params[paramIndex];
-            Chain::ParamSlot& slot = c->paramSlots[moduleIndex][paramIndex];
-            ParameterDescriptor descriptor;
-            descriptor.id = def.name;  // the program outlives the chain's resolvers
-            descriptor.defaultValue = def.def;
-            descriptor.minimum = def.min;
-            descriptor.maximum = def.max;
-            descriptor.step = def.step;
-            slot.active = slot.resolver.configure(descriptor);
-            const double held = c->main[moduleIndex]->param(static_cast<int>(paramIndex));
-            slot.heldBits = std::bit_cast<uint64_t>(held);
-            if (slot.active) {
-                slot.resolver.setInitial(held);
-                // A touch made before this rebuild (since the last Play) carries over.
-                const bool touched = def.global ? touchedGlobals_.count(def.name) != 0
-                                                : touchedParams_.count({moduleId, def.name}) != 0;
-                if (touched) slot.resolver.setBase(held);
-            }
-            const ProjectAutomationLaneSpec* selected = nullptr;
-            for (const ProjectAutomationLaneSpec& lane : *automation) {
-                const bool matches = lane.targetType == "global"
-                    ? (def.global && lane.target == def.name)
-                    : (lane.targetType == "param" && !def.global && lane.moduleId == moduleId && lane.target == def.name);
-                if (matches) { selected = &lane; break; }
-            }
-            if (selected && !selected->points.empty()) slot.lane = selected;
-        }
-    }
-    // Plan how this chain takes over the running state of the one it replaces: every stateful call whose name
-    // (position in the code) and size are unchanged keeps playing, within a copy budget for the audio thread.
-    if (prev) {
-        int64_t budget = kMaxTakeOver;
-        std::vector<bool> used(prev->moduleIds.size(), false);
-        c->migrate.resize(ids.size());
-        for (size_t i = 0; i < ids.size(); ++i) {
-            for (size_t j = 0; j < prev->moduleIds.size(); ++j) {
-                if (used[j] || prev->moduleIds[j] != ids[i]) continue;
-                used[j] = true;
-                Chain::Migration& m = c->migrate[i];
-                m.from = static_cast<int>(j);
-                const Program& from = prev->main[j]->program();
-                const Program& to = c->main[i]->program();
-                m.expect = &from;
-                const int64_t copies =
-                    (i == 0 && voiced && prev->voiced) ? std::min(c->voiceCount, prev->voiceCount) : 1;
-                for (const StateSite& site : to.stateSites)
-                    for (const StateSite& old : from.stateSites)
-                        if (old.key == site.key && old.size == site.size) {
-                            if (budget < static_cast<int64_t>(site.size) * copies) break;
-                            budget -= static_cast<int64_t>(site.size) * copies;
-                            m.ranges.push_back({old.offset, site.offset, site.size});
-                            break;
-                        }
-                break;
-            }
-        }
-    }
-    return c;
-}
-
-void Engine::writeParams(Chain& c) {
-    for (size_t i = 0; i < c.main.size(); ++i) {
-        const ModuleState& m = modules_.at(c.moduleIds[i]);
-        const Program& p = c.main[i]->program();
-        for (size_t k = 0; k < p.params.size(); ++k) {
-            const ParamDef& d = p.params[k];
-            double v = d.def;
-            if (d.global) {
-                auto it = globals_.find(d.name);
-                if (it != globals_.end()) v = it->second;
-            } else {
-                auto it = m.params.find(d.name);
-                if (it != m.params.end()) v = it->second;
-            }
-            v = std::min(d.max, std::max(d.min, v));
-            c.main[i]->setParam(static_cast<int>(k), v);
-            c.shadow[i]->setParam(static_cast<int>(k), v);
-            if (i == 0)
-                for (auto& extra : c.extraVoices) extra->setParam(static_cast<int>(k), v);
-        }
-    }
 }
 
 void Engine::writeMix(int slot, double vol, double pan, bool mute, bool solo) {
@@ -1509,94 +1132,32 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
     t.loopToSteps = p.loopEndSteps;
     t.seed = p.seed;
     t.master = p.master;
-    t.seamXf = p.seamCrossfade;
-    t.keyRoot = p.keyRoot;
-    t.keyScale = p.keyScale;
-    t.swapMode = p.swapMode;
-    t.voices = p.voices;
     if (!send(t))
         return "{\"ok\":false,\"error\":\"audio command queue is not accepting project updates\",\"modules\":{}}";
     const double stepLen = 60.0 * ctlSr_ / (p.bpm * 4.0);
     ctlLoopLen_ = static_cast<int64_t>(std::floor(p.loopSteps() * stepLen + 0.5));
 
-    globals_ = p.globals;
     const auto projectAutomation = std::make_shared<const std::vector<ProjectAutomationLaneSpec>>(p.automation);
     ctlAutomation_ = projectAutomation;
 
-    // Project libraries (kind: library) compile first; every other module can call their functions.
-    std::vector<std::string_view> moduleSources;
-    for (const ModuleSpec& m : p.modules) moduleSources.push_back(m.source);
-    const std::vector<LibrarySource> libs = projectLibraries(moduleSources);
-    std::string libSig;
-    for (const LibrarySource& l : libs) libSig += l.ns + "\x1f" + l.source + "\x1e";
-
-    // Compile changed modules. A module that fails keeps its last good program, so the old sound plays on.
+    // Modules are patterns (note clips): parse the changed ones. A broken one keeps its last good version playing.
     bool allOk = true;
-    std::vector<std::pair<std::string, std::string>> synthWarnings;  // (synth id, message), added to warnings below
     std::map<std::string, ModuleState> next;
     for (const ModuleSpec& m : p.modules) {
         ModuleState st;
         auto it = modules_.find(m.id);
         if (it != modules_.end()) st = it->second;
-        if (moduleKindOf(m.source) == ModuleKind::Pattern) {
-            // Patterns are notes, not code: parse them; a broken one keeps its last good version playing.
-            st.program = nullptr;
-            if (it == modules_.end() || st.source != m.source || (!st.pattern && st.error.empty())) {
-                PatternResult r = parsePattern(m.source);
-                st.source = m.source;
-                if (r.pattern) {
-                    st.pattern = r.pattern;
-                    st.error.clear();
-                    st.line = st.col = 0;
-                } else {
-                    st.error = r.error;
-                    st.line = r.line;
-                    st.col = r.col;
-                }
-            }
-        } else if (it == modules_.end() || st.source != m.source || st.libSig != libSig || (!st.program && st.error.empty())) {
-            CompileResult r = compileModule(m.source, libs);
-            st.libSig = libSig;
+        if (it == modules_.end() || st.source != m.source || (!st.pattern && st.error.empty())) {
+            PatternResult r = parsePattern(m.source);
             st.source = m.source;
-            if (r.program) {
-                st.program = r.program;
+            if (r.pattern) {
+                st.pattern = r.pattern;
                 st.error.clear();
                 st.line = st.col = 0;
             } else {
                 st.error = r.error;
                 st.line = r.line;
                 st.col = r.col;
-            }
-        }
-        st.params = m.params;
-        st.ref = refName(!m.name.empty() ? m.name : (st.program && !st.program->name.empty() ? st.program->name : m.id));
-        // A synth plays as its voice then its effects: generated effect modules live as hidden modules beside it.
-        st.expand.clear();
-        if (st.program && st.program->synth) {
-            st.expand.push_back(m.id);
-            for (size_t k = 0; k < st.program->synthFx.size(); ++k) {
-                const std::string& fx = st.program->synthFx[k];
-                if (fx[0] == '@') {
-                    st.expand.push_back("\x1e" + fx.substr(1));
-                    continue;
-                }
-                // Keyed by the effect's kind and count ("delay_2"), so adding a line elsewhere keeps its tail.
-                const std::string hid = m.id + "\x1f" + st.program->synthFxKeys[k];
-                ModuleState hs;
-                auto old = modules_.find(hid);
-                if (old != modules_.end()) hs = old->second;
-                if (hs.source != fx || hs.libSig != libSig || !hs.program) {
-                    CompileResult cr = compileModule(fx, libs);
-                    hs.source = fx;
-                    hs.libSig = libSig;
-                    if (cr.program) hs.program = cr.program;
-                    hs.error = cr.program ? std::string() : cr.error;
-                }
-                if (!hs.error.empty())
-                    synthWarnings.push_back({m.id, "the " + st.program->synthFxKeys[k] + " effect made from this patch doesn't compile (an engine bug): " + hs.error});
-                hs.params = m.params;
-                next[hid] = std::move(hs);
-                st.expand.push_back(hid);
             }
         }
         if (!st.error.empty()) allOk = false;
@@ -1607,7 +1168,6 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
     // Layers: diff against what the audio thread has, sending only what changed.
     struct Want {
         std::string id;
-        std::vector<std::string> chain;
         std::string pattern;
         int steps;
         double vol, pan;
@@ -1623,45 +1183,27 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
     std::vector<Want> wants;
     int order = 0;
     if (p.auditionOnly) {
-        wants.push_back({"\1audition", p.auditionChain, p.auditionPattern, p.auditionSteps, 0.8, 0.0, false, false, 100000, {}, {}, "", false,
+        wants.push_back({"\1audition", p.auditionPattern, p.auditionSteps, 0.8, 0.0, false, false, 100000, {}, {}, "", false,
                          &p.auditionComponents, p.hasAuditionInstrument ? &p.auditionInstrument : nullptr});
     }
     order_.clear();
     for (const LayerSpec& l : p.layers) {
         order_.push_back(l.id);
-        wants.push_back({l.id, l.chain, l.pattern, l.lengthSteps, l.volume, l.pan, l.mute, l.solo, ++order, l.clips, l.automation, l.parentId, l.folder && l.busEnabled, &l.components,
+        wants.push_back({l.id, l.pattern, l.lengthSteps, l.volume, l.pan, l.mute, l.solo, ++order, l.clips, l.automation, l.parentId, l.folder && l.busEnabled, &l.components,
                          l.hasInstrument && !l.folder ? &l.instrument : nullptr});
     }
 
-    // Pass 1: which modules each layer plays, and its slot.
+    // Pass 1: whether each layer plays (a track needs an instrument), its notes, and its slot.
     struct Planned {
         Want w;
         LayerState ls;
-        std::vector<std::string> ids;
-        std::vector<const Program*> sig;
         std::shared_ptr<const Pattern> pattern;
         std::string arrangementSig;
         std::string automationSig;
-        std::string parameterAutomationSig;
-        size_t expressionCapacity = 0;
-        bool native = false;  // a native instrument plays the layer's notes
+        bool track = false;  // a native instrument plays the layer's notes
     };
     std::vector<Planned> plan;
     std::map<std::string, LayerState> nextLayers;
-    // Export memory (#133): buffers and the slots' pointer-table entries, charged per layer here in
-    // bytes against exportBufferBudget() (each buffer with one entry), while a layer that doesn't fit
-    // can still be skipped like one without a free slot, so nothing later refuses a project after
-    // slots were claimed or commands sent. Buffers once made stay with their slot and are reused.
-    constexpr size_t kBufferBytes = kExportBufferBytes + sizeof(std::unique_ptr<std::array<double, kBlock>>);
-    constexpr size_t kEntryBytes = sizeof(std::array<double, kBlock>*);
-    const size_t exportBudgetBytes = exportBufferBudget() * kExportSlotBytes;
-    size_t exportBytesPlanned = exportBytes();
-    auto exportBuffersIn = [&](int slot) {
-        const ExportTable* table = ctlSlot(slot).ctlExports;
-        size_t made = 0;  // made from index 0 up, so the first empty entry ends them
-        while (table && made < table->capacity && table->entries[made]) ++made;
-        return made;
-    };
     std::map<std::string, std::vector<std::string>> warnings;
     // A native component chain's automation lanes: a chain about to be sent takes its table now (the
     // audio thread doesn't have it yet); a kept chain gets a new table only when its lanes changed.
@@ -1683,7 +1225,6 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
             warnings["project"].push_back("audio command queue rejected a native component automation update");
         }
     };
-    for (const auto& [id, msg] : synthWarnings) warnings[id].push_back(msg);
     for (const auto& [id, st] : modules_) {
         if (!st.pattern) continue;
         const int steps = st.pattern->steps(p.beatsPerBar);
@@ -1696,49 +1237,12 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
     uint64_t projectStateBytes = masterChainBytes;  // includes the known master-chain object and processor pointer storage
     std::vector<std::vector<int>> readsFrom(static_cast<size_t>(slotCount));
     for (Want& w : wants) {
-        Planned pl{w, {}, {}, {}, nullptr, {}, {}, {}};
-        pl.native = w.instrument != nullptr && !w.bus;
-        uint64_t layerStateDoubles = 0;
-        // A synth in the chain stands for its voice and effects; its project effect modules are found by name.
-        std::vector<std::string> chain;
-        for (const std::string& id : w.chain) {
-            auto it = modules_.find(id);
-            if (it == modules_.end() || it->second.expand.empty()) {
-                chain.push_back(id);
-                continue;
-            }
-            for (const std::string& e : it->second.expand) {
-                if (e[0] != '\x1e') {
-                    chain.push_back(e);
-                    continue;
-                }
-                const std::string name = e.substr(1);
-                std::string found;
-                for (const auto& [mid, ms] : modules_)
-                    if (mid.find('\x1f') == std::string::npos && (mid == name || ms.ref == refName(name))) found = mid;
-                if (found.empty() || !modules_.at(found).program || modules_.at(found).program->kind != ModuleKind::Effect)
-                    warnings[id].push_back("fx " + name + ": there is no effect module called '" + name + "' in the project");
-                else
-                    chain.push_back(found);
-            }
-        }
-        for (const std::string& id : chain) {
-            auto it = modules_.find(id);
-            if (it == modules_.end() || !it->second.program || it->second.program->kind == ModuleKind::Library) continue;
-            if (pl.native && it->second.program->kind != ModuleKind::Effect) {
-                // A native instrument plays the notes instead: only .caw effects follow it.
-                warnings[id].push_back("layer '" + w.id + "' plays the native instrument '" + w.instrument->id +
-                                       "', so this module (not an effect) is not played there");
-                continue;
-            }
-            pl.ids.push_back(id);
-            pl.sig.push_back(it->second.program.get());
-            layerStateDoubles += static_cast<uint64_t>(std::max(0, it->second.program->stateSize));
-        }
-        const std::string warnKey = pl.ids.empty() ? std::string("project") : pl.ids.front();
+        Planned pl{w, {}, nullptr, {}, {}};
+        pl.track = w.instrument != nullptr && !w.bus;
+        uint64_t layerStateBytes = 0;
         // Arrangement clips are compiled into an immutable absolute-time event stream here,
-        // on the control thread. A layer still uses one voice pool and one instrument/effect chain.
-        if (!w.clips.empty() && (!pl.ids.empty() || pl.native)) {
+        // on the control thread. A layer still plays them on one instrument through one chain.
+        if (!w.clips.empty() && pl.track) {
             pl.arrangementSig = std::to_string(p.beatsPerBar) + "|" + std::to_string(p.loopSteps()) + "|";
             std::map<std::string, std::shared_ptr<const Pattern>> sources;
             for (const auto& [moduleId, module] : modules_)
@@ -1752,20 +1256,17 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
                 pl.arrangementSig += "\x1e";
             }
             // The expanded clips are project state: refuse them, before building them, past the budget left after
-            // the project so far and this layer's chain. Building takes about three times the result (vectors grow
-            // by doubling and the sort takes a buffer the size of the events), so that peak must fit too.
+            // the project so far. Building takes about three times the result (vectors grow by doubling and the sort
+            // takes a buffer the size of the events), so that peak must fit too.
             const double expanded = arrangementBytes(w.clips, sources, p.beatsPerBar);
-            const double left = static_cast<double>(resourceBudget_.projectStateBytes) -
-                static_cast<double>(projectStateBytes) - static_cast<double>(layerStateDoubles) * sizeof(double);
+            const double left = static_cast<double>(resourceBudget_.projectStateBytes) - static_cast<double>(projectStateBytes);
             if (expanded > 0 && 3.0 * expanded > left) {
-                warnings[warnKey].push_back("layer not installed: its arrangement clips expand to about " +
+                warnings["project"].push_back("layer '" + w.id + "' not installed: its arrangement clips expand to about " +
                     std::to_string(static_cast<uint64_t>(std::min(expanded, 1.8e19))) +
                     " bytes of notes, over this Engine's project-state budget of " +
                     std::to_string(resourceBudget_.projectStateBytes) + " bytes");
                 allOk = false;
-                pl.ids.clear();
-                pl.sig.clear();
-                pl.native = false;
+                pl.track = false;
             } else {
                 auto previous = layers_.find(w.id);
                 if (previous != layers_.end() && previous->second.arrangementSig == pl.arrangementSig &&
@@ -1775,80 +1276,45 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
                     pl.pattern = compileArrangement(w.clips, sources, p.beatsPerBar, p.loopSteps());
                 }
                 pl.w.steps = 0;  // arrangement follows the project transport, not an individual clip loop
-                layerStateDoubles += static_cast<uint64_t>(std::ceil(expanded / sizeof(double)));
-                if (!pl.native) {
-                    const Program& gen = *modules_.at(pl.ids.front()).program;
-                    layerStateDoubles += static_cast<uint64_t>(std::clamp(gen.voices, 2, kMaxVoices) - 1) *
-                        static_cast<uint64_t>(std::max(0, gen.stateSize));
-                }
+                layerStateBytes = static_cast<uint64_t>(std::ceil(expanded));
             }
-        } else if (!w.pattern.empty() && (!pl.ids.empty() || pl.native)) {
+        } else if (!w.pattern.empty() && pl.track) {
             auto it = modules_.find(w.pattern);
             if (it != modules_.end() && it->second.pattern) {
                 pl.pattern = it->second.pattern;
                 pl.w.steps = pl.pattern->steps(p.beatsPerBar);
-                if (!pl.native) {
-                    const Program& gen = *modules_.at(pl.ids.front()).program;
-                    layerStateDoubles += static_cast<uint64_t>(std::clamp(gen.voices, 2, kMaxVoices) - 1) *
-                        static_cast<uint64_t>(std::max(0, gen.stateSize));
-                }
             } else {
-                warnings[warnKey].push_back("pattern '" + w.pattern + "' is missing or has an error, so it plays without one");
+                warnings["project"].push_back("layer '" + w.id + "': pattern '" + w.pattern +
+                                              "' is missing or has an error, so it plays without one");
             }
         }
-        if (pl.pattern) {
-            for (const NoteExpression& expression : pl.pattern->expressions) {
-                pl.expressionCapacity = std::max(pl.expressionCapacity, expression.bend.points.size());
-                pl.expressionCapacity = std::max(pl.expressionCapacity, expression.press.points.size());
-                pl.expressionCapacity = std::max(pl.expressionCapacity, expression.timbre.points.size());
-            }
-            // Room to spare (a power of two, at least 16 points), so adding a curve point while the song plays
-            // seldom rebuilds the chain, and a held voice can take its note's edited curve without allocating.
-            pl.expressionCapacity = std::bit_ceil(std::max<size_t>(16, pl.expressionCapacity));
-        }
-        // The project-state share comes from the Engine's measured/fallback resource budget.
-        const bool stateSizeOverflow = layerStateDoubles > std::numeric_limits<uint64_t>::max() / sizeof(double);
-        const uint64_t layerStateBytes = stateSizeOverflow
-            ? std::numeric_limits<uint64_t>::max() : layerStateDoubles * sizeof(double);
-        const bool overBudget = stateSizeOverflow || projectStateBytes > resourceBudget_.projectStateBytes ||
-            layerStateBytes > resourceBudget_.projectStateBytes - projectStateBytes;
-        if ((!pl.ids.empty() || pl.native) && overBudget) {
-            warnings[warnKey].push_back("layer not installed: estimated module state exceeds this Engine's project-state budget of " +
+        if (pl.track && layerStateBytes > resourceBudget_.projectStateBytes - std::min(projectStateBytes, resourceBudget_.projectStateBytes)) {
+            warnings["project"].push_back("layer '" + w.id + "' not installed: its notes exceed this Engine's project-state budget of " +
                 std::to_string(resourceBudget_.projectStateBytes) + " bytes");
             allOk = false;
-            pl.ids.clear();
-            pl.sig.clear();
-            pl.native = false;
+            pl.track = false;
         }
-        if (pl.ids.size() > static_cast<size_t>(kMaxTrackModules)) {
-            // Each module runs as its own mix-graph node, and a track has kMaxTrackModules of them.
-            warnings[pl.ids.front()].push_back("layer not installed: its chain has " + std::to_string(pl.ids.size()) +
-                " modules and a track runs at most " + std::to_string(kMaxTrackModules));
-            allOk = false;
-            pl.ids.clear();
-            pl.sig.clear();
-        }
-        if (!pl.ids.empty() || pl.native) projectStateBytes += layerStateBytes;
+        if (pl.track) projectStateBytes += layerStateBytes;
         auto it = layers_.find(w.id);
         if (it != layers_.end()) {
             pl.ls = it->second;
             layers_.erase(it);
         }
         const bool isAudition = w.id[0] == '\x01';
-        if (pl.ids.empty() && !w.bus && !pl.native) {
+        if (!w.bus && !pl.track) {
+            // Nothing plays it (no instrument): it takes no slot.
             if (pl.ls.slot >= 0) {
                 Cmd c;
                 c.type = Cmd::Remove;
                 c.slot = pl.ls.slot;
                 if (!send(c)) {
                     allOk = false;
-                    warnings[w.id].push_back("audio command queue rejected removal of an invalid layer");
+                    warnings[w.id].push_back("audio command queue rejected removal of a layer that plays nothing");
                     nextLayers[w.id] = pl.ls;
                 }
             }
             continue;
         }
-        const bool hadSlot = pl.ls.slot >= 0;
         if (pl.ls.slot < 0) {
             pl.ls.slot = isAudition ? auditionSlot : freeSlot();
             if (isAudition) ctlSlot(auditionSlot).ctlBusy = true;
@@ -1859,61 +1325,13 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
                 continue;
             }
             pl.ls.automationSig = "\x01new-slot";  // force an empty-or-populated automation command on slot reuse
-            pl.ls.sig.clear();
-            pl.ls.wiring.clear();
-            pl.ls.chain = nullptr;
+            pl.ls.track = false;
             pl.ls.inserts = nullptr;
             pl.ls.instrument = nullptr;
-            pl.ls.native = false;
             pl.ls.compensation = 0;
-            pl.ls.voiced = false;
             pl.ls.pattern = nullptr;
             pl.ls.steps = -1;
             pl.ls.volume = -1;
-        }
-        {
-            size_t exports = 0;
-            for (const std::string& id : pl.ids) {
-                auto module = modules_.find(id);
-                if (module != modules_.end() && module->second.program) exports += module->second.program->exports.size();
-            }
-            const size_t made = exportBuffersIn(pl.ls.slot);
-            const ExportTable* table = ctlSlot(pl.ls.slot).ctlExports;
-            const size_t entries = table ? table->capacity : 0;
-            // A larger table replaces the slot's old one, which stays charged until the audio thread lets it go.
-            const size_t adds = (exports > made ? exports - made : 0) * kBufferBytes +
-                                (exports > entries ? exports : 0) * kEntryBytes;
-            const char* why = nullptr;
-            if (exports > exportPerSlot_)
-                why = "its chain exports more values than one layer may hold within this device's memory budget";
-            else if (exportBytesPlanned + adds > exportBudgetBytes)
-                why = "the project's exports would exceed this device's export buffer budget (if another song is "
-                      "still fading out, try again when it has)";
-            if (why) {
-                allOk = false;
-                projectStateBytes -= layerStateBytes;  // charged above for a layer that now won't run
-                // Keyed by the chain's first module, like the other chain warnings, so the result shows it.
-                std::string& message = warnings[pl.ids.empty() ? std::string("project") : pl.ids.front()]
-                    .emplace_back(std::string("layer '") + w.id + "' not installed: " + why);
-                if (!hadSlot) {
-                    ctlSlot(pl.ls.slot).ctlBusy = false;  // just claimed above; nothing was sent for it
-                    pl.ls.slot = -1;
-                    nextLayers[w.id] = pl.ls;
-                } else {
-                    // A playing layer can't keep its old chain outside the plan (its routing, order
-                    // and exports would go stale), so it stops, the way an invalid layer is removed.
-                    message += "; it was stopped";
-                    Cmd c;
-                    c.type = Cmd::Remove;
-                    c.slot = pl.ls.slot;
-                    if (!send(c)) {
-                        message += " (the audio command queue was full, so it keeps playing unchanged)";
-                        nextLayers[w.id] = pl.ls;
-                    }
-                }
-                continue;
-            }
-            exportBytesPlanned += adds;
         }
         plan.push_back(std::move(pl));
     }
@@ -1986,121 +1404,17 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
         }
     }
 
-    // Export tables and buffers for what each planned layer exports (charged above). A slot whose
-    // table is too small gets a new one, exactly its chain's size, with the old entries copied and the
-    // new buffers made, sent before the chain that reads it (SetExports; the audio thread retires the
-    // old table). A buffer's address never changes, so readers wired to it stay valid.
-    if (!exportPool_) {
-        try {
-            exportPool_ = std::make_unique<ExportPool>();
-        } catch (const std::bad_alloc&) {
-            return R"({"ok":false,"error":"unable to allocate the export pool within the hardware-derived memory budget"})";
-        }
-    }
-    for (const Planned& pl : plan) {
-        if (pl.ls.slot < 0 || pl.ls.slot >= slotCount || pl.ids.empty()) continue;
-        size_t required = 0;
-        for (const std::string& id : pl.ids) {
-            auto module = modules_.find(id);
-            if (module != modules_.end() && module->second.program) required += module->second.program->exports.size();
-        }
-        if (required == 0) continue;
-        Slot& slot = ctlSlot(pl.ls.slot);
-        ExportTable* table = slot.ctlExports;
-        ExportTable* made = nullptr;  // a new table, not yet sent
-        try {
-            if (!table || table->capacity < required) {
-                auto fresh = std::make_unique<ExportTable>();
-                fresh->capacity = required;
-                fresh->entries = std::make_unique<std::array<double, kBlock>*[]>(required);  // null entries
-                if (table) std::copy_n(table->entries.get(), table->capacity, fresh->entries.get());
-                ExportTable* added = fresh.get();
-                exportPool_->tables.push_back(std::move(fresh));  // on bad_alloc `fresh` still frees it
-                exportPool_->entries += required;
-                made = table = added;
-            }
-            // Only entries no chain on this slot has exported yet: the audio thread never reads them.
-            for (size_t index = 0; index < required; ++index) {
-                if (table->entries[index]) continue;
-                auto buffer = std::make_unique<std::array<double, kBlock>>();
-                buffer->fill(0.0);
-                auto* stable = buffer.get();
-                exportPool_->buffers.push_back(std::move(buffer));
-                table->entries[index] = stable;
-            }
-        } catch (const std::bad_alloc&) {
-            dropExportTable(made);
-            return R"({"ok":false,"error":"unable to allocate the required export buffers within the hardware-derived memory budget"})";
-        }
-        if (made) {
-            Cmd c;
-            c.type = Cmd::SetExports;
-            c.slot = pl.ls.slot;
-            c.exportTable = made;
-            if (!send(c)) {
-                dropExportTable(made);
-                return R"({"ok":false,"error":"audio command queue is not accepting project updates"})";
-            }
-            slot.ctlExports = made;
-        }
-    }
-
-    // Pass 2: where each exported value lives. The first layer (in project order) playing a module provides it.
-    struct Source {
-        int slot;
-        size_t module;  // its index in that layer's chain
-        const double* buf;
-    };
-    std::map<std::string, Source> sources;
-    for (const Planned& pl : plan) {
-        if (pl.w.id[0] == '\x01') continue;
-        size_t buf = 0;
-        for (size_t k = 0; k < pl.ids.size(); ++k) {
-            const ModuleState& m = modules_.at(pl.ids[k]);
-            for (const ExportDef& e : m.program->exports) {
-                sources.emplace(m.ref + "." + e.name, Source{pl.ls.slot, k, ctlSlot(pl.ls.slot).ctlExports->entries[buf]->data()});
-                ++buf;
-            }
-        }
-    }
-
-    // Pass 3: wire imports, install changed chains, and order layers so exporters run before their readers.
+    // Pass 2: send what changed, and order layers so buses run after their children.
     std::vector<int> projectOrder;
     for (Planned& pl : plan) {
-        std::vector<const double*> wiring;
-        for (size_t k = 0; k < pl.ids.size(); ++k) {
-            const std::string& id = pl.ids[k];
-            for (const std::string& imp : modules_.at(id).program->imports) {
-                auto src = sources.find(imp);
-                if (src == sources.end()) {
-                    wiring.push_back(nullptr);
-                    warnings[id].push_back("nothing exports '" + imp + "' (it reads 0)");
-                } else if (src->second.slot == pl.ls.slot && src->second.module >= k) {
-                    // Each module is a graph node, run in chain order: a later module (or this one)
-                    // has not run yet this chunk, so the value would lag by however chunks split.
-                    wiring.push_back(nullptr);
-                    warnings[id].push_back("'" + imp + "' comes from a later module in this layer's chain (it reads 0)");
-                } else {
-                    wiring.push_back(src->second.buf);
-                    if (src->second.slot != pl.ls.slot) readsFrom[pl.ls.slot].push_back(src->second.slot);
-                }
-            }
-        }
         LayerState& ls = pl.ls;
         const Want& w = pl.w;
         ls.arrangementSig = pl.arrangementSig;
-        for (const ProjectAutomationLaneSpec& lane : p.automation) {
-            pl.parameterAutomationSig += lane.targetType + "|" + lane.moduleId + "|" + lane.target + "|";
-            for (const AutomationPointSpec& point : lane.points)
-                pl.parameterAutomationSig += std::to_string(point.step) + ":" + std::to_string(point.value) + ";";
-        }
-        const bool parameterAutomationChanged = ls.parameterAutomationSig != pl.parameterAutomationSig;
         for (const AutomationLaneSpec& lane : w.automation) {
             pl.automationSig += lane.target + "|";
             for (const AutomationPointSpec& point : lane.points)
                 pl.automationSig += std::to_string(point.step) + ":" + std::to_string(point.value) + ";";
         }
-        const bool voiced = pl.pattern != nullptr && !pl.native;
         if (w.vol != ls.volume || w.pan != ls.pan || w.mute != ls.mute || w.solo != ls.solo) {
             writeMix(ls.slot, w.vol, w.pan, w.mute, w.solo);
             ls.volume = w.vol;
@@ -2134,11 +1448,11 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
         if (!w.bus) {
             syncInserts();
             auto madeInstrument = nextInstruments.find(w.id);
-            if ((pl.native && madeInstrument != nextInstruments.end()) || (!pl.native && ls.instrument)) {
+            if ((pl.track && madeInstrument != nextInstruments.end()) || (!pl.track && ls.instrument)) {
                 Cmd instrument;
                 instrument.type = Cmd::SetInstrument;
                 instrument.slot = ls.slot;
-                ComponentChain* sent = pl.native ? madeInstrument->second.release() : nullptr;
+                ComponentChain* sent = pl.track ? madeInstrument->second.release() : nullptr;
                 if (sent) attachAutomation(*sent, w.id);
                 instrument.masterChain = sent;
                 if (send(instrument)) {
@@ -2148,7 +1462,7 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
                     allOk = false;
                     warnings["project"].push_back("layer '" + w.id + "': audio command queue rejected its native instrument update");
                 }
-            } else if (pl.native && ls.instrument) {
+            } else if (pl.track && ls.instrument) {
                 ls.instrument->setValues({*w.instrument});
                 updateAutomation(ls.slot, *ls.instrument, w.id, ls.instrumentAutomationKey);
             }
@@ -2196,12 +1510,8 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
                     continue;
                 }
             }
-            ls.chain = nullptr;
-            ls.sig.clear();
-            ls.wiring.clear();
+            ls.track = false;
             ls.pattern.reset();
-            ls.voiced = false;
-            ls.expressionCapacity = 0;
             ls.steps = 0;
             projectOrder.push_back(ls.slot);
             nextLayers[w.id] = ls;
@@ -2239,30 +1549,21 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
             ls.bus = false;
             ls.parentSlot = pl.ls.parentSlot;
         }
-        if (pl.sig != ls.sig || wiring != ls.wiring || voiced != ls.voiced || pl.native != ls.native ||
-            parameterAutomationChanged || pl.expressionCapacity != ls.expressionCapacity || !ls.chain) {
-            Chain* c = buildChain(pl.ids, wiring, voiced, pl.native, ls.chain, projectAutomation, pl.expressionCapacity);
+        if (!ls.track) {
             Cmd cmd;
             cmd.type = Cmd::Install;
             cmd.slot = ls.slot;
-            cmd.chain = c;
             cmd.steps = w.steps;
             cmd.order = w.order;
             if (!send(cmd)) {
                 allOk = false;
-                warnings[w.id].push_back("audio command queue rejected the prepared module chain");
+                warnings[w.id].push_back("audio command queue rejected the track");
                 nextLayers[w.id] = ls;
                 continue;
             }
-            ls.chain = c;
-            ls.voiced = voiced;
-            ls.native = pl.native;
-            ls.expressionCapacity = pl.expressionCapacity;
-            ls.sig = pl.sig;
-            ls.wiring = std::move(wiring);
+            ls.track = true;
             ls.steps = w.steps;
         } else {
-            writeParams(*ls.chain);
             if (w.steps != ls.steps) {
                 Cmd cmd;
                 cmd.type = Cmd::SetSteps;
@@ -2294,7 +1595,6 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
             }
             ls.pattern = pl.pattern;
         }
-        ls.parameterAutomationSig = pl.parameterAutomationSig;
         projectOrder.push_back(ls.slot);
         nextLayers[w.id] = ls;
     }
@@ -2365,8 +1665,9 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
 
     if (!updateCompensation(warnings)) allOk = false;
 
-    // Dependency order: repeatedly take the first layer (in project order) whose sources are all placed. Layers
-    // in a loop are placed last in project order; one side of the loop then hears the other a block late.
+    // Dependency order: repeatedly take the first layer (in project order) whose children are all placed (a bus
+    // after the tracks and buses in it). validateRouting refuses loops, so every layer is placed; the audio
+    // thread's routing (updateRouting) then also runs each send's and key's source before its destination.
     {
         Cmd oc;
         oc.type = Cmd::SetOrder;
@@ -2388,20 +1689,8 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
                 progress = true;
             }
         }
-        for (int slot : projectOrder) {
-            if (placed[slot]) continue;
-            orderList->push_back(slot);
-            // Cycles are kept playable with the existing bounded one-block feedback behavior. Surface that
-            // behavior in the owning module's diagnostics instead of silently accepting a delayed connection.
-            for (const Planned& pl : plan) {
-                if (pl.ls.slot != slot || pl.ids.empty()) continue;
-                for (const std::string& id : pl.ids) {
-                    warnings[id].push_back(
-                        "signal dependency cycle (or a route blocked by one): at least one source is read from the previous block");
-                }
-                break;
-            }
-        }
+        for (int slot : projectOrder)
+            if (!placed[slot]) orderList->push_back(slot);  // never expected: kept playing in project order
         oc.orderList = orderList.release();  // send() frees it if the queue rejects the command
         if (!send(oc)) {
             allOk = false;
@@ -2463,13 +1752,12 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
     for (const ModuleSpec& m : p.modules) {
         const ModuleState& st = modules_.at(m.id);
         if (!mods.empty()) mods += ",";
-        mods += "\"" + jsonEscape(m.id) + "\":{\"ok\":" + (st.error.empty() ? "true" : "false") + ",\"ref\":\"" +
-                jsonEscape(st.ref) + "\"";
+        mods += "\"" + jsonEscape(m.id) + "\":{\"ok\":" + (st.error.empty() ? "true" : "false");
         if (!st.error.empty())
             mods += ",\"error\":\"" + jsonEscape(st.error) + "\",\"line\":" + std::to_string(st.line) +
                     ",\"col\":" + std::to_string(st.col);
-        if (st.program) mods += "," + describeProgram(*st.program);
-        else if (st.pattern) mods += "," + describePattern(*st.pattern);
+        if (st.pattern) mods += "," + describePattern(*st.pattern);
+        else mods += ",\"kind\":\"pattern\"";
         mods += ",\"warnings\":[";
         auto wit = warnings.find(m.id);
         if (wit != warnings.end()) {
@@ -2491,53 +1779,6 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
     }
     return std::string("{\"ok\":") + (allOk ? "true" : "false") +
            ",\"modules\":{" + mods + "},\"warnings\":{\"project\":[" + projectWarnings + "]}}";
-}
-
-void Engine::setParam(const std::string& moduleId, const std::string& name, double value) {
-    std::lock_guard<std::mutex> lock(ctl_);
-    auto it = modules_.find(moduleId);
-    if (it == modules_.end()) return;
-    it->second.params[name] = value;
-    // A synth's params reach its generated effect modules too.
-    std::vector<std::string> ids{moduleId};
-    for (const std::string& e : it->second.expand)
-        if (e != moduleId && e[0] != '\x1e') {
-            modules_.at(e).params[name] = value;
-            ids.push_back(e);
-        }
-    for (const std::string& id : ids) touchedParams_.insert({id, name});
-    for (auto& [id, ls] : layers_)
-        if (ls.chain)
-            for (const std::string& m : ls.chain->moduleIds)
-                if (std::find(ids.begin(), ids.end(), m) != ids.end()) {
-                    writeParams(*ls.chain);
-                    markTouched(*ls.chain, &ids, name);
-                    break;
-                }
-}
-
-void Engine::markTouched(Chain& c, const std::vector<std::string>* ids, const std::string& name) {
-    // After writeParams stored the held values, so the audio thread reads the new value with the stamp.
-    // One engine-wide stamp per knob move, so a Play can tell moves made before it from later ones.
-    ++touchCounter_;
-    for (size_t i = 0; i < c.main.size(); ++i) {
-        if (ids && std::find(ids->begin(), ids->end(), c.moduleIds[i]) == ids->end()) continue;
-        const Program& p = c.main[i]->program();
-        for (size_t k = 0; k < p.params.size(); ++k)
-            if (p.params[k].name == name && p.params[k].global == (ids == nullptr))
-                c.touchSerials[i][k].store(touchCounter_, std::memory_order_release);
-    }
-}
-
-void Engine::setGlobal(const std::string& name, double value) {
-    std::lock_guard<std::mutex> lock(ctl_);
-    globals_[name] = value;
-    touchedGlobals_.insert(name);
-    for (auto& [id, ls] : layers_)
-        if (ls.chain) {
-            writeParams(*ls.chain);
-            markTouched(*ls.chain, nullptr, name);
-        }
 }
 
 ComponentChain* Engine::ctlComponentChain(const std::string& layerId, uint32_t& index) noexcept {
@@ -3039,8 +2280,6 @@ void Engine::play(double fromStep) {
     c.touchStamp = touchCounter_;
     if (!send(c)) return;  // nothing changed on the audio side, so keep the control side as it was
     playCount_ = c.playCount;
-    touchedParams_.clear();  // a (re)start ends every touch; chains do the same at their next chunk
-    touchedGlobals_.clear();
     loudness_->requestReset();  // the integrated loudness measures this play
 }
 
@@ -3055,8 +2294,6 @@ void Engine::playCountIn(double fromStep, int beats) {
     c.touchStamp = touchCounter_;
     if (!send(c)) return;
     playCount_ = c.playCount;
-    touchedParams_.clear();
-    touchedGlobals_.clear();
     loudness_->requestReset();
 }
 
@@ -3141,8 +2378,6 @@ void Engine::releaseTouches() {
     c.touchStamp = touchCounter_;
     if (!send(c)) return;
     playCount_ = c.playCount;
-    touchedParams_.clear();
-    touchedGlobals_.clear();
 }
 
 void Engine::stop() {
@@ -3186,16 +2421,6 @@ void Engine::startPlay(double fromStep, uint64_t playCount, uint32_t touchStamp)
         for (int i = 0; i < slotCount_; ++i) {
             Slot& s = slotAt(i);
             if (!s.active) continue;
-            retire(s.old, nullptr);
-            s.old = nullptr;
-            if (s.pending) {
-                retire(s.cur, nullptr);
-                s.cur = s.pending;
-                s.pending = nullptr;
-            }
-            s.swapLeft = 0;
-            s.seamLeft = 0;
-            if (s.cur) restartChain(*s.cur);  // a held preview plays on into playback
             s.playTailLen = s.playTailAt = 0;
             if (s.instrument) {
                 // Pattern notes end; without a held preview the instrument starts from silence, as an export does.
@@ -3212,7 +2437,6 @@ void Engine::startPlay(double fromStep, uint64_t playCount, uint32_t touchStamp)
                 }
             }
             s.fresh = true;
-            s.contiguous = false;
             s.k = -1;
             s.epoch = -1;
             updateSolo();
@@ -3358,10 +2582,6 @@ void Engine::updateTiming() noexcept {
 
 int64_t Engine::wrapAt() const noexcept { return loopRange_ && g_ < loopTo_ ? loopTo_ : loopLen_; }
 
-int64_t Engine::after(int64_t next) const noexcept {
-    return next >= wrapAt() ? (loopRange_ ? loopFrom_ : 0) : next;
-}
-
 bool Engine::canRetire(size_t count) const noexcept {
     // The callback may use the queue plus its preallocated overflow list. When
     // overflow is already in use, retire() appends there until the control thread
@@ -3371,11 +2591,10 @@ bool Engine::canRetire(size_t count) const noexcept {
     return count <= retired_->writable() + pendingFree;
 }
 
-void Engine::retire(Chain* c, Slot* freed, std::shared_ptr<const Pattern>* pattern,
-                    AutomationData* automation, std::vector<int>* order, SlotTable* table,
-                    ComponentChain* masterChain) noexcept {
-    if (!c && !freed && !pattern && !automation && !order && !table && !masterChain) return;
-    retireEntry(Retired{c, freed, pattern, automation, order, table, masterChain});
+void Engine::retire(Slot* freed, std::shared_ptr<const Pattern>* pattern, AutomationData* automation,
+                    std::vector<int>* order, SlotTable* table, ComponentChain* masterChain) noexcept {
+    if (!freed && !pattern && !automation && !order && !table && !masterChain) return;
+    retireEntry(Retired{freed, pattern, automation, order, table, masterChain});
 }
 
 void Engine::retireEntry(const Retired& r) noexcept {
@@ -3383,59 +2602,6 @@ void Engine::retireEntry(const Retired& r) noexcept {
     if (pendingCount_ < pendingMax_) pending_[pendingCount_++] = r;
     // All callers reserve queue capacity before changing ownership. This is a
     // defensive fallback; command processing is paused while pending is non-empty.
-}
-
-void Engine::swapIn(Slot& s, Chain* c) noexcept {
-    retire(s.old, nullptr);
-    s.old = s.cur;
-    s.cur = c;
-    s.swapLeft = static_cast<int>(kSwapSeconds * sr_);
-    s.seamLeft = 0;
-    Chain& from = *s.old;
-    Chain& to = *s.cur;
-    // Unchanged calls keep their running state (phase, envelopes, delay lines), as planned in buildChain.
-    bool voicesTaken = false;
-    for (size_t i = 0; i < to.migrate.size(); ++i) {
-        const Chain::Migration& m = to.migrate[i];
-        if (m.from < 0 || static_cast<size_t>(m.from) >= from.main.size()) continue;
-        if (&from.main[static_cast<size_t>(m.from)]->program() != m.expect) continue;  // planned against other code
-        const bool gen = i == 0 && m.from == 0;
-        if (gen && to.voiced != from.voiced) continue;
-        if (gen && to.voiced) {
-            // Voices past the new count end here, smoothed over like a stolen voice.
-            for (int v = to.voiceCount; v < from.voiceCount; ++v)
-                if (from.voices[v].active) to.declick += from.voices[v].lastY;
-            for (int v = 0; v < std::min(to.voiceCount, from.voiceCount); ++v) {
-                Instance* inst = to.voices[v].inst;
-                to.voices[v] = from.voices[v];
-                to.voices[v].inst = inst;
-                for (const auto& [a, b, n] : m.ranges) inst->copyStateRange(*from.voices[v].inst, a, b, n);
-            }
-            to.noteCount = from.noteCount;
-            to.declick += from.declick;
-            voicesTaken = true;
-        } else {
-            for (const auto& [a, b, n] : m.ranges)
-                to.main[i]->copyStateRange(*from.main[static_cast<size_t>(m.from)], a, b, n);
-        }
-    }
-    // A pattern layer whose generator changed too much to take over: held notes start again in the new code.
-    if (!voicesTaken && from.voiced && to.voiced)
-        for (int v = 0; v < std::min(to.voiceCount, from.voiceCount); ++v) {
-            const Voice& f = from.voices[v];
-            Voice& t = to.voices[v];
-            if (!f.active || !f.gate) continue;
-            Instance* inst = t.inst;
-            t = f;
-            t.inst = inst;
-            inst->reset();
-            t.trig = true;
-            t.started = ++to.noteCount;
-            t.since = t.rel = t.quiet = 0;
-            t.exStart = 0;
-            t.exLeft = 0;
-            t.tacc = t.phase = t.lastY = 0;
-        }
 }
 
 void Engine::applyCommands() noexcept {
@@ -3453,7 +2619,6 @@ void Engine::applyCommands() noexcept {
     while (cmds_->peek(c)) {
         size_t retirementNeed = 0;
         switch (c.type) {
-            case Cmd::Install: retirementNeed = 2; break;
             case Cmd::SetMasterChain:
             case Cmd::SetInserts:
             case Cmd::SetInstrument:
@@ -3464,29 +2629,20 @@ void Engine::applyCommands() noexcept {
             case Cmd::SetPattern:
             case Cmd::Remove:
             case Cmd::SetOrder:
-            case Cmd::SetExports:
             case Cmd::Grow: retirementNeed = 1; break;
-            case Cmd::ConfigureBus: retirementNeed = c.flag ? 9 : 8; break;
-            // Every slot may retire its current and old chain. The pending overflow holds that at
-            // maxLayers() (pendingMax_), so with the queue drained a Play always finds room.
-            case Cmd::Play: retirementNeed = static_cast<size_t>(2 * slotCount_); break;
+            case Cmd::ConfigureBus: retirementNeed = c.flag ? 7 : 6; break;
             default: break;
         }
         if (!canRetire(retirementNeed) || !cmds_->pop(c)) break;
         routingDirty_ = true;  // any command may change slots, buses or order
         switch (c.type) {
             case Cmd::Install: {
+                // The slot becomes a track (its instrument and inserts arrive by their own commands).
                 Slot& s = slotAt(c.slot);
-                s.exportCount = std::max(s.exportCount, c.chain ? c.chain->exportCount : size_t{0});
                 s.steps = c.steps;
                 s.order = c.order;
-                if (!s.active || s.removing || !s.cur) {
-                    retire(s.cur, nullptr);
-                    retire(s.old, nullptr);
-                    s.cur = c.chain;
-                    s.old = nullptr;
-                    s.swapLeft = 0;
-                    s.seamLeft = 0;
+                if (!s.active || s.removing || !s.track) {
+                    s.track = true;
                     s.peakL.store(0, std::memory_order_relaxed);  // a reused slot doesn't show its last owner's level
                     s.peakR.store(0, std::memory_order_relaxed);
                     s.correlation.clear();
@@ -3494,7 +2650,6 @@ void Engine::applyCommands() noexcept {
                     markLive(c.slot);
                     s.removing = false;
                     s.fresh = true;
-                    s.contiguous = false;
                     s.overloaded = false;
                     s.bus = false;
                     s.overloadFlag.store(false, std::memory_order_relaxed);
@@ -3503,14 +2658,6 @@ void Engine::applyCommands() noexcept {
                     updateSolo();
                     const double initialTarget = slotTarget(s);
                     s.gain = initialTarget > 0.0 && s.automation && !s.automation->volume.empty() ? s.automation->volume.front().value : initialTarget;
-                } else if (swapMode_ > 0 && playing_ && stopFade_ == 0) {
-                    // Wait for the next beat or bar; newer code replaces code still waiting.
-                    retire(s.pending, nullptr);
-                    s.pending = c.chain;
-                } else {
-                    retire(s.pending, nullptr);
-                    s.pending = nullptr;
-                    swapIn(s, c.chain);
                 }
                 break;
             }
@@ -3525,7 +2672,7 @@ void Engine::applyCommands() noexcept {
             }
             case Cmd::SetAutomation: {
                 Slot& s = slotAt(c.slot);
-                retire(nullptr, nullptr, nullptr, s.automation);
+                retire(nullptr, nullptr, s.automation);
                 s.automation = c.automation;
                 if (c.flag && s.bus) {
                     const double initialTarget = slotTarget(s);
@@ -3542,20 +2689,18 @@ void Engine::applyCommands() noexcept {
                     s.order = c.order;
                     break;
                 }
-                retire(s.cur, nullptr, s.pattern);
-                retire(s.old, nullptr);
-                retire(s.pending, nullptr);
+                retire(nullptr, s.pattern);
                 {
-                    Retired r{nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, s.inserts};  // a new bus starts without them
+                    Retired r{nullptr, nullptr, nullptr, nullptr, nullptr, s.inserts};  // a new bus starts without them
                     r.delay = s.delay;
                     if (r.masterChain || r.delay) retireEntry(r);
                 }
-                retire(nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, s.insertsFading);
+                retire(nullptr, nullptr, nullptr, nullptr, nullptr, s.insertsFading);
                 s.insertsFading = nullptr;
                 s.insertsFadeLeft = 0;
                 s.inserts = nullptr;
-                retire(nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, s.instrument);
-                retire(nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, s.instrumentFading);
+                retire(nullptr, nullptr, nullptr, nullptr, nullptr, s.instrument);
+                retire(nullptr, nullptr, nullptr, nullptr, nullptr, s.instrumentFading);
                 s.instrument = s.instrumentFading = nullptr;
                 s.instrumentFadeLeft = 0;
                 s.delay = nullptr;
@@ -3566,7 +2711,7 @@ void Engine::applyCommands() noexcept {
                     s.delayFading = nullptr;
                     s.delayFadeLeft = 0;
                 }
-                s.cur = s.old = s.pending = nullptr;
+                s.track = false;
                 s.pattern = nullptr;
                 s.peakL.store(0, std::memory_order_relaxed);
                 s.peakR.store(0, std::memory_order_relaxed);
@@ -3576,7 +2721,7 @@ void Engine::applyCommands() noexcept {
                 s.removing = false;
                 s.bus = true;
                 if (c.flag) {
-                    retire(nullptr, nullptr, nullptr, s.automation);
+                    retire(nullptr, nullptr, s.automation);
                     s.automation = nullptr;
                 }
                 s.parentSlot = c.parentSlot;
@@ -3593,21 +2738,8 @@ void Engine::applyCommands() noexcept {
                 auto carried = [map](uint32_t note) {
                     return map && note < map->size() ? (*map)[note] : -1;
                 };
-                if (s.cur && s.cur->voiced)
-                    for (Voice& v : s.cur->voices) {
-                        if (!v.active || !v.gate || v.preview >= 0) continue;
-                        const int to = carried(v.note);
-                        if (to < 0) {
-                            v.gate = false;
-                            v.rel = v.quiet = 0;
-                            v.rebind = false;
-                            continue;
-                        }
-                        v.note = static_cast<uint32_t>(to);
-                        v.rebind = true;
-                    }
                 if (s.instrument) {
-                    // The same for a native instrument's notes; none keeps pointing into the old pattern.
+                    // None keeps pointing into the old pattern.
                     NoteEvents& notes = *s.instrument->notes();
                     for (NoteEvents::Held& h : notes.held()) {
                         if (!h.active || h.source != NoteEvents::Source::Pattern) continue;
@@ -3621,25 +2753,22 @@ void Engine::applyCommands() noexcept {
                         h.rebind = true;
                     }
                 }
-                retire(nullptr, nullptr, s.pattern, nullptr, c.orderList);
+                retire(nullptr, s.pattern, nullptr, c.orderList);
                 s.pattern = c.pattern;
                 break;
             }
             case Cmd::Remove: {
                 Slot& s = slotAt(c.slot);
                 s.removing = true;
-                retire(nullptr, nullptr, nullptr, s.automation);
+                retire(nullptr, nullptr, s.automation);
                 s.automation = nullptr;
                 break;
             }
             case Cmd::Transport:
                 // A tempo change moves every note in time: let held notes go so none is left hanging.
                 if (c.bpm != bpm_)
-                    for (int i = 0; i < slotCount_; ++i) {
-                        if (slotAt(i).cur && slotAt(i).cur->voiced) releaseVoices(slotAt(i).cur->voices, slotAt(i).cur->voiceCount);
-                        if (slotAt(i).old && slotAt(i).old->voiced) releaseVoices(slotAt(i).old->voices, slotAt(i).old->voiceCount);
+                    for (int i = 0; i < slotCount_; ++i)
                         if (slotAt(i).instrument) slotAt(i).instrument->notes()->releaseAll(0, true);
-                    }
                 bpm_ = c.bpm;
                 beatsPerBar_ = c.beatsPerBar;
                 loopSteps_ = c.loopSteps;
@@ -3650,11 +2779,6 @@ void Engine::applyCommands() noexcept {
                 master_ = masterTarget_ = c.master;
                 masterStep_ = 0.0;
                 masterRamp_ = 0;
-                seamXf_ = c.seamXf;
-                keyRoot_ = c.keyRoot;
-                keyScale_ = c.keyScale;
-                swapMode_ = c.swapMode;
-                voiceLimit_ = c.voices;
                 updateTiming();
                 if (g_ >= loopLen_) g_ = 0;
                 loopLenFlag_.store(loopLen_, std::memory_order_relaxed);
@@ -3671,14 +2795,14 @@ void Engine::applyCommands() noexcept {
                     const int fadeLen = std::max(1, static_cast<int>(kSwapSeconds * sr_));
                     if (masterFadeLeft_ * 2 > fadeLen) std::swap(masterChain_, masterFading_);
                 }
-                retire(nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, masterFading_);
+                retire(nullptr, nullptr, nullptr, nullptr, nullptr, masterFading_);
                 masterFading_ = nullptr;
                 masterFadeLeft_ = 0;
                 if (playing_ || previewing_) {  // sounding: crossfade; otherwise the next sound starts on the new chain
                     masterFading_ = masterChain_;
                     masterFadeLeft_ = std::max(1, static_cast<int>(kSwapSeconds * sr_));
                 } else {
-                    retire(nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, masterChain_);
+                    retire(nullptr, nullptr, nullptr, nullptr, nullptr, masterChain_);
                 }
                 masterChain_ = c.masterChain;
                 break;
@@ -3690,7 +2814,7 @@ void Engine::applyCommands() noexcept {
                 s.delayFadeLeft = 0;
                 if (r.delay) retireEntry(r);
                 if (c.delay && !s.delayStale) c.delay->takeHistory(s.delay);
-                if ((s.mode == Slot::Mode::Play || s.mode == Slot::Mode::Tail || s.mode == Slot::Mode::Bus) && !s.delayStale) {
+                if ((s.mode == Slot::Mode::Play || s.mode == Slot::Mode::Bus) && !s.delayStale) {
                     s.delayFading = s.delay;  // sounding: the timing change crossfades
                     s.delayFadeLeft = std::max(1, static_cast<int>(kSwapSeconds * sr_));
                 } else if (s.delay) {
@@ -3747,14 +2871,14 @@ void Engine::applyCommands() noexcept {
                 // A swap still crossfading: keep whichever side is heard more now, so nothing is cut short.
                 const int fadeLen = std::max(1, static_cast<int>(kSwapSeconds * sr_));
                 if (s.insertsFadeLeft * 2 > fadeLen) std::swap(s.inserts, s.insertsFading);
-                retire(nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, s.insertsFading);
+                retire(nullptr, nullptr, nullptr, nullptr, nullptr, s.insertsFading);
                 s.insertsFading = nullptr;
                 s.insertsFadeLeft = 0;
-                if (s.mode == Slot::Mode::Play || s.mode == Slot::Mode::Tail || s.mode == Slot::Mode::Bus) {
+                if (s.mode == Slot::Mode::Play || s.mode == Slot::Mode::Bus) {
                     s.insertsFading = s.inserts;  // sounding: crossfades out (null: from the dry signal)
                     s.insertsFadeLeft = std::max(1, static_cast<int>(kSwapSeconds * sr_));
                 } else {
-                    retire(nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, s.inserts);
+                    retire(nullptr, nullptr, nullptr, nullptr, nullptr, s.inserts);
                 }
                 s.inserts = c.masterChain;
                 break;
@@ -3769,7 +2893,7 @@ void Engine::applyCommands() noexcept {
                 // one it replaced (whose notes were let go) as the side heard more.
                 if (s.instrument && next && !s.instrumentIdle) next->notes()->takeOver(*s.instrument->notes());
                 if (s.instrumentFadeLeft * 2 > fadeLen) std::swap(s.instrument, s.instrumentFading);
-                retire(nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, s.instrumentFading);
+                retire(nullptr, nullptr, nullptr, nullptr, nullptr, s.instrumentFading);
                 s.instrumentFading = nullptr;
                 s.instrumentFadeLeft = 0;
                 if (s.mode == Slot::Mode::Play && s.instrument && !s.instrumentIdle) {
@@ -3777,7 +2901,10 @@ void Engine::applyCommands() noexcept {
                     s.instrumentFading = s.instrument;
                     s.instrumentFadeLeft = fadeLen;
                 } else {
-                    retire(nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, s.instrument);
+                    retire(nullptr, nullptr, nullptr, nullptr, nullptr, s.instrument);
+                    // Not sounding: it starts from silence when it first runs, so a Play doesn't take it for an
+                    // instrument still ringing out and mix in a tail of what it never played (playTail).
+                    s.instrumentIdle = next != nullptr;
                 }
                 s.instrument = next;
                 break;
@@ -3821,7 +2948,7 @@ void Engine::applyCommands() noexcept {
                     processCount_ = std::min(static_cast<int>(c.orderList->size()), slotCount_);
                     std::copy_n(c.orderList->data(), processCount_, processOrder_);
                 }
-                retire(nullptr, nullptr, nullptr, nullptr, c.orderList);  // freed on the control thread
+                retire(nullptr, nullptr, nullptr, c.orderList);  // freed on the control thread
                 break;
             case Cmd::Grow: {
                 // A larger table from the control thread: the same Slot objects for every layer
@@ -3834,20 +2961,9 @@ void Engine::applyCommands() noexcept {
                 for (int k = 0; k < liveCount_; ++k)  // the audition stays last: still ascending
                     t.live[k] = live_[k] == auditionSlot_ ? t.capacity : live_[k];
                 t.slots[t.capacity]->index = t.capacity;
-                retire(nullptr, nullptr, nullptr, nullptr, nullptr, table_.release());  // freed on the control thread
+                retire(nullptr, nullptr, nullptr, nullptr, table_.release());  // freed on the control thread
                 table_.reset(c.table);  // table_ held nothing after release(): no delete here
                 bindTable();
-                break;
-            }
-            case Cmd::SetExports: {
-                // A larger export table, with the old one's entries: chains keep reading the same buffers.
-                Slot& s = slotAt(c.slot);
-                if (s.exports) {
-                    Retired r;
-                    r.exportTable = s.exports;
-                    retireEntry(r);
-                }
-                s.exports = c.exportTable;
                 break;
             }
             case Cmd::ClearOverload:
@@ -3884,162 +3000,6 @@ int64_t Engine::loopStart(const Slot& s, int64_t k) const noexcept {
     return static_cast<int64_t>(std::floor(static_cast<double>(k) * (s.steps * stepLen_) + 0.5));
 }
 
-// A lane's time variables for this chunk: worked out once, by the track's first module node.
-void Engine::prepareLane(Chain& c, int lane, int64_t n0, int len) noexcept {
-    Chain::Lane& L = c.lanes[lane];
-    const uint32_t u = c.used;
-    auto uses = [u](Var v) { return (u >> static_cast<int>(v)) & 1u; };
-    for (int i = 0; i < len; ++i) L.nb[i] = static_cast<double>(n0 + i);
-    if (uses(Var::Step) || uses(Var::Beat) || uses(Var::Bar)) {
-        for (int i = 0; i < len; ++i) {
-            const double st = std::floor(L.nb[i] / stepLen_);
-            L.stepb[i] = st;
-            L.beatb[i] = std::floor(st / 4.0);
-            L.barb[i] = std::floor(L.beatb[i] / beatsPerBar_);
-        }
-    }
-    if (uses(Var::Pos) || uses(Var::Phase)) {
-        // pos counts through this layer's loop; layers that follow the project count through the project loop.
-        for (int i = 0; i < len; ++i) L.posb[i] = L.nb[i] / c.layerLen;
-    }
-    if (uses(Var::Time))
-        for (int i = 0; i < len; ++i) L.timeb[i] = L.nb[i] / sr_;
-    std::fill_n(L.srb, len, sr_);
-    std::fill_n(L.bpmb, len, bpm_);
-    std::fill_n(L.seedb, len, static_cast<double>(seed_));
-    // Without a pattern, the note variables describe one note held through the layer's loop (C4, full velocity).
-    if (uses(Var::Trig))
-        for (int i = 0; i < len; ++i) L.dtrig[i] = L.nb[i] == 0.0 ? 1.0 : 0.0;
-}
-
-// Resolves module idx's params for one chunk into c.paramValuePtrs (null: the VM reads the held
-// value, which is then exactly the resolved one). Bounded by params x len; no allocation.
-void Engine::resolveParams(Chain& c, const Instance& inst, size_t idx, int64_t globalStart, int len) noexcept {
-    if (c.touchEpoch != touchEpoch_) {
-        // Playback (re)started: touches end, and knob moves made before it (while stopped) are
-        // taken as plain values, so the lanes rule again. A move stamped after the Play stays
-        // unseen, so it becomes a touch below.
-        for (size_t m = 0; m < c.paramSlots.size(); ++m)
-            for (size_t k = 0; k < c.paramSlots[m].size(); ++k) {
-                c.paramSlots[m][k].resolver.clearTouch();
-                const uint32_t stamp = c.touchSerials[m][k].load(std::memory_order_acquire);
-                if (static_cast<int32_t>(stamp - touchPlayStamp_) <= 0) c.paramSlots[m][k].seenSerial = stamp;
-            }
-        c.touchEpoch = touchEpoch_;
-    }
-    std::vector<Chain::ParamSlot>& slots = c.paramSlots[idx];
-    for (size_t k = 0; k < slots.size(); ++k) {
-        Chain::ParamSlot& slot = slots[k];
-        if (!slot.active) continue;
-        // The serial first: a knob move stores the held value before bumping it.
-        const uint32_t serial = c.touchSerials[idx][k].load(std::memory_order_acquire);
-        const double held = inst.param(static_cast<int>(k));
-        const uint64_t bits = std::bit_cast<uint64_t>(held);
-        if (serial != slot.seenSerial) {  // a knob move: the manual base, a touch over a lane
-            slot.seenSerial = serial;
-            slot.heldBits = bits;
-            slot.resolver.setBase(held);
-            slot.passThrough = false;
-        } else if (bits != slot.heldBits) {  // a restore (project update): the value, no touch
-            slot.heldBits = bits;
-            slot.resolver.setInitial(held);
-            slot.passThrough = false;
-        } else if (slot.passThrough) {
-            continue;  // the common case: the VM reads the held value, which is the resolved one
-        }
-        const double* automation = nullptr;
-        if (slot.lane) {
-            // The Engine's lane position; the resolver clamps and steps it like any base.
-            const auto& points = slot.lane->points;
-            for (int sample = 0; sample < len; ++sample)
-                c.laneScratch[static_cast<size_t>(sample)] =
-                    automationValue(points, static_cast<double>(globalStart + sample) / stepLen_, points.front().value);
-            automation = c.laneScratch.data();
-        }
-        double* out = c.paramSamples[k].data();
-        const ParameterValue value = slot.resolver.resolve(static_cast<uint32_t>(len), automation, nullptr, out);
-        if (value.samples) {
-            c.paramValuePtrs[k] = value.samples;
-        } else if (std::bit_cast<uint64_t>(value.value) != bits) {  // e.g. a held value off the step grid
-            std::fill_n(out, len, value.value);
-            c.paramValuePtrs[k] = out;
-        } else {
-            slot.passThrough = !slot.lane;  // .caw params never ramp, so this holds until the value changes
-        }
-    }
-}
-
-// Module idx of a chain over one chunk of a lane (prepared by prepareLane); returns its output.
-const double* Engine::runModule(Chain& c, int lane, bool shadow, size_t idx, int64_t n0, int64_t globalStart, int len,
-                                const double* input, Slot* exportTo, const Pattern* pat, int64_t repeat) noexcept {
-    Chain::Lane& L = c.lanes[lane];
-    auto& inst = (shadow ? c.shadow : c.main)[idx];
-    BlockCtx ctx;
-    ctx.n = len;
-    ctx.sr = sr_;
-    ctx.bpm = bpm_;
-    ctx.seed = seed_;
-    ctx.keyRoot = keyRoot_;
-    ctx.keyScale = keyScale_;
-    const bool trig = ((c.used >> static_cast<int>(Var::Trig)) & 1u) != 0;
-    ctx.vars[static_cast<int>(Var::Sr)] = L.srb;
-    ctx.vars[static_cast<int>(Var::Bpm)] = L.bpmb;
-    ctx.vars[static_cast<int>(Var::Seed)] = L.seedb;
-    ctx.vars[static_cast<int>(Var::Step)] = L.stepb;
-    ctx.vars[static_cast<int>(Var::Beat)] = L.beatb;
-    ctx.vars[static_cast<int>(Var::Bar)] = L.barb;
-    ctx.vars[static_cast<int>(Var::Pos)] = L.posb;
-    ctx.vars[static_cast<int>(Var::Phase)] = L.posb;
-    ctx.vars[static_cast<int>(Var::Time)] = L.timeb;
-    ctx.vars[static_cast<int>(Var::Trig)] = trig ? L.dtrig : c.zero;
-    ctx.vars[static_cast<int>(Var::Gate)] = c.ones;
-    ctx.vars[static_cast<int>(Var::Note)] = c.dnote;
-    ctx.vars[static_cast<int>(Var::Freq)] = c.dfreq;
-    ctx.vars[static_cast<int>(Var::Vel)] = c.ones;
-    ctx.vars[static_cast<int>(Var::Rel)] = c.zero;
-    ctx.vars[static_cast<int>(Var::Bend)] = c.zero;
-    ctx.vars[static_cast<int>(Var::Press)] = c.ones;
-    ctx.vars[static_cast<int>(Var::Timbre)] = c.zero;
-    ctx.importOffset = 0;  // a chunk is one segment: exports and imports start at the chunk
-    std::fill(c.paramValuePtrs.begin(), c.paramValuePtrs.end(), nullptr);
-    ctx.paramValues = c.paramValuePtrs.data();
-    ctx.paramValueCount = static_cast<uint32_t>(c.paramValuePtrs.size());
-    resolveParams(c, *inst, idx, globalStart, len);
-    if (idx == 0 && c.voiced) {
-        runVoices(c, pat, repeat, n0, len, c.gen, exportTo, 0, ctx);
-        return c.gen;
-    }
-    ctx.imports = c.importPtrs[idx].empty() ? nullptr : c.importPtrs[idx].data();
-    const Program& p = inst->program();
-    if (p.mode == OutputMode::Byte) {
-        const double ratio = p.rate / sr_;
-        for (int i = 0; i < len; ++i) c.tb[i] = std::floor(L.nb[i] * ratio);
-        std::fill_n(c.rateb, len, p.rate);
-    } else {
-        std::copy_n(L.nb, len, c.tb);
-        std::fill_n(c.rateb, len, sr_);
-    }
-    ctx.vars[static_cast<int>(Var::T)] = c.tb;
-    ctx.vars[static_cast<int>(Var::Rate)] = c.rateb;
-    ctx.vars[static_cast<int>(Var::In)] = input;
-    const double* y = inst->process(ctx);
-    if (exportTo && exportTo->hasExports())
-        for (const auto& [reg, buf] : c.exportMap[idx])
-            if (exportTo->exportAt(buf))
-                std::copy_n(inst->reg(reg), len, exportTo->exportAt(buf)->data());
-    return y;
-}
-
-// A note taking a voice brings its own expression; its curves run over the note's (or ratchet repeat's) length.
-void Engine::takeExpression(Voice& v, const Pattern& pat, const PatternNote& n) noexcept {
-    v.expressive = n.extra >= 0 && static_cast<size_t>(n.extra) < pat.expressions.size();
-    if (!v.expressive) return;
-    v.ex = pat.expressions[static_cast<size_t>(n.extra)];
-    v.exStart = v.since;
-    v.exLen = std::max(1.0, n.len / std::max(1, n.ratchet) * stepLen_);
-    v.exLeft = 0;  // work out the first control point on the next sample
-}
-
 // The note's expression `into` samples after it took the voice: bend (curve + vibrato), press and timbre.
 static void expressionAt(const NoteExpression& x, double into, double len, double sr, double& bend, double& press, double& timbre) {
     const double u = std::clamp(into / len, 0.0, 1.0);
@@ -4053,40 +3013,9 @@ static void expressionAt(const NoteExpression& x, double into, double len, doubl
 }
 
 // A free voice, else the oldest released one, else the oldest; a sounding voice it takes is smoothed over.
-Voice& Engine::pickVoice(Chain& c) noexcept {
-    Voice* pick = nullptr;
-    // Only the project's first `voices` voices take new notes (light mode plays fewer).
-    const int limit = std::min(voiceLimit_, c.voiceTake);  // voices: 1 is mono: each note steals the one voice
-    for (int i = 0; i < limit; ++i)
-        if (!c.voices[i].active) {
-            pick = &c.voices[i];
-            break;
-        }
-    for (int pass = 0; pass < 2 && !pick; ++pass)
-        for (int i = 0; i < limit; ++i) {
-            Voice& v = c.voices[i];
-            if ((pass == 1 || !v.gate) && (!pick || v.started < pick->started)) pick = &v;
-        }
-    Voice& v = *pick;
-    if (v.active) c.declick += v.lastY;  // stealing a sounding voice: smooth over the jump
-    v.lastY = 0;
-    return v;
-}
-
-// Play and the end of a stop start a chain from silence: its instances reset and its pattern voices end. A held
-// preview keeps its voice and its instrument's state (voice 0's instrument is main[0]), so it sounds on unbroken.
-void Engine::restartChain(Chain& c) noexcept {
-    const bool keep0 = c.voiced && c.voices[0].active && c.voices[0].preview >= 0;
-    for (size_t i = keep0 ? 1 : 0; i < c.main.size(); ++i) c.main[i]->reset();
-    for (Voice& v : c.voices)
-        if (v.preview < 0) v.active = false;
-}
-
-// Note previews (#103) on the audio thread: a preview takes a voice like a pattern note, with no expression, and
-// holds it until its note off.
 // Callback start: device messages from the queue join the ones a past callback kept for later, and each gets its
 // frame in this callback. A message for a track that is not running wakes it as a preview does, so a key played
-// while stopped is heard. A .caw voice chain (no native instrument) takes notes as previews, at the block's start.
+// while stopped is heard.
 void Engine::takeDeviceMidi(int frames) noexcept {
     const int64_t test = midiClockTest_.load(std::memory_order_relaxed);
     const int64_t now = test >= 0 ? test : midiClockNs();
@@ -4114,9 +3043,6 @@ void Engine::takeDeviceMidi(int frames) noexcept {
                 Slot& s = slotAt(i);
                 if (s.instrument) s.deviceNotes.apply(*s.instrument->notes(), p.e, 0, o);  // its notes, then reset
                 else s.deviceNotes.reset();
-                if (s.cur && s.cur->voiced)
-                    for (Voice& v : s.cur->voices)
-                        if (v.active && v.gate && isDevicePreview(v.preview)) v.gate = false, v.rel = v.quiet = 0;
             }
             p.done = true;
             continue;
@@ -4128,24 +3054,11 @@ void Engine::takeDeviceMidi(int frames) noexcept {
             continue;
         }
         Slot& s = slotAt(p.e.target);
-        if (!s.active || !s.cur) {
+        if (!s.active || !s.track || !s.instrument) {
             p.done = true;
             continue;
         }
         const bool on = p.e.type == Midi2EventType::NoteOn;
-        if (!s.instrument) {  // a .caw voice chain: notes only, as previews
-            p.done = true;
-            if (!s.cur->voiced || (!on && p.e.type != Midi2EventType::NoteOff)) continue;
-            Cmd c;
-            c.type = Cmd::Preview;
-            c.previewOp = on ? 0 : 2;
-            c.slot = p.e.target;
-            c.previewId = devicePreviewId(p.e.group, p.e.channel, p.e.note);
-            c.pitch = p.e.note;
-            c.vel = p.e.value;
-            previewCommand(c);
-            continue;
-        }
         if (on && !s.previewing) {
             s.previewing = true;
             s.previewQuiet = s.previewTail = 0;
@@ -4180,93 +3093,48 @@ void Engine::endDeviceMidi(int frames) noexcept {
     midiPendingCount_ = keep;
 }
 
+// Note previews (#103) on the audio thread: a note on, a pitch glide or a note off on the track's instrument, with
+// the caller's id.
 void Engine::previewCommand(const Cmd& c) noexcept {
-    auto release = [](Voice& v) {
-        v.gate = false;
-        v.rel = v.quiet = 0;
-    };
     if (c.previewOp == 3) {
         for (int i = 0; i < slotCount_; ++i) {
             Slot& s = slotAt(i);
             // The app's previews only: a device's held keys stay (caw_engine_midi_release ends those).
             if (s.instrument) s.instrument->notes()->releasePreviews(0, kDevicePreviewBase);
-            if (!s.cur || !s.cur->voiced) continue;
-            for (Voice& v : s.cur->voices)
-                if (v.active && v.gate && v.preview >= 0 && !isDevicePreview(v.preview)) release(v);
         }
         return;
     }
     if (c.slot < 0 || c.slot >= slotCount_) return;
     Slot& s = slotAt(c.slot);
-    if (!s.active || !s.cur) return;
-    if (s.instrument) {
-        // A native instrument: the preview is a note on, a pitch glide or a note off, with the caller's id.
-        NoteEvents& notes = *s.instrument->notes();
-        if (s.instrumentIdle) {  // it hasn't run since it fell silent: start it from silence now
-            s.instrument->reset();
-            notes.forget(false);
-            notes.clearEvents();
-            s.instrumentIdle = false;
-        }
-        NoteEvents::Held* held = notes.findPreview(c.previewId);
-        if (c.previewOp == 1) {
-            if (!held) return;
-            held->target = c.pitch;
-            held->glideLeft = std::max(1, static_cast<int>(std::floor(kPreviewGlideSeconds * sr_ + 0.5)));
-            held->glideStep = (held->target - held->pitch) / held->glideLeft;
-            held->motionFrom = 0;
-            held->motionWait = 0;
-            return;
-        }
-        if (c.previewOp == 2) {
-            if (held) notes.off(0, *held);
-            return;
-        }
-        notes.on(0, NoteEvents::Source::Preview, 0, 0, c.previewId, c.pitch, c.vel);
-        s.previewing = true;
-        s.previewQuiet = s.previewTail = 0;
-        previewing_ = true;
-        return;
+    if (!s.active || !s.track || !s.instrument) return;
+    NoteEvents& notes = *s.instrument->notes();
+    if (s.instrumentIdle) {  // it hasn't run since it fell silent: start it from silence now
+        s.instrument->reset();
+        notes.forget(false);
+        notes.clearEvents();
+        s.instrumentIdle = false;
     }
-    if (!s.cur->voiced) return;
-    Chain& ch = *s.cur;
-    Voice* held = nullptr;
-    for (Voice& v : ch.voices)
-        if (v.active && v.gate && v.preview == c.previewId) held = &v;
+    NoteEvents::Held* held = notes.findPreview(c.previewId);
     if (c.previewOp == 1) {
         if (!held) return;
         held->target = c.pitch;
         held->glideLeft = std::max(1, static_cast<int>(std::floor(kPreviewGlideSeconds * sr_ + 0.5)));
         held->glideStep = (held->target - held->pitch) / held->glideLeft;
+        held->motionFrom = 0;
+        held->motionWait = 0;
         return;
     }
-    if (held) release(*held);  // an off, or a new note on the same id: the old one ends first
-    if (c.previewOp != 0) return;
-    Voice& v = pickVoice(ch);
-    v.inst->reset();
-    v.active = v.gate = v.trig = true;
-    v.note = kPreviewNote;
-    v.sub = 0;
-    v.preview = c.previewId;
-    v.started = ++ch.noteCount;
-    v.since = v.rel = v.quiet = 0;
-    v.pitch = v.target = c.pitch;
-    v.glideLeft = 0;
-    v.glideStep = 0;
-    v.freq = mtof(c.pitch);
-    v.vel = c.vel;
-    v.tacc = v.phase = 0;
-    v.rebind = false;
-    v.expressive = false;
-    v.exLeft = 0;
-    v.bend = v.timbre = 0;
-    v.press = 1;
+    if (c.previewOp == 2) {
+        if (held) notes.off(0, *held);
+        return;
+    }
+    notes.on(0, NoteEvents::Source::Preview, 0, 0, c.previewId, c.pitch, c.vel);
     s.previewing = true;
     s.previewQuiet = s.previewTail = 0;
     previewing_ = true;
 }
 
-// After a callback: which slots still preview. A slot keeps running after its last preview voice ends until its
+// After a callback: which slots still preview. A slot keeps running after its last preview note ends until its
 // output (an effect's tail) has stayed below -80 dB for a moment, so a reverb isn't cut off; a muted or soloed-out
 // slot doesn't run, so its previews end at once. Only previewing slots are looked at: no cost when none was played.
 void Engine::updatePreviewing(int frames) noexcept {
@@ -4275,13 +3143,7 @@ void Engine::updatePreviewing(int frames) noexcept {
         Slot& s = slotAt(live_[k]);
         if (!s.previewing) continue;
         const bool silent = !s.active || (slotTarget(s) == 0.0 && s.gain == 0.0);
-        bool voices = false;
-        if (s.cur && s.cur->voiced)
-            for (Voice& v : s.cur->voices) {
-                if (!v.active || v.preview < 0) continue;
-                if (silent) v.active = false;
-                else voices = true;
-            }
+        bool voices = false;  // a preview note is held
         if (s.instrument && (s.instrument->notes()->holdsPreview() || s.instrument->monitorsStopped())) {
             if (silent) {
                 s.instrument->notes()->releasePreviews(0);
@@ -4297,7 +3159,7 @@ void Engine::updatePreviewing(int frames) noexcept {
         if (s.insertTail && !voices && !silent && !quiet && s.previewTail >= cap && s.tailFade == 0)
             s.tailFade = std::max(1, static_cast<int>(kSwapSeconds * sr_));
         const bool fadingOut = s.insertTail && s.tailFade > 0;
-        const bool runs = s.bus ? s.insertTail : s.cur && (s.cur->voiced || s.cur->native || s.insertTail);
+        const bool runs = s.bus ? s.insertTail : s.track;
         const bool live = voices || (!silent && runs && !quiet && s.tailFade >= 0 && (s.previewTail < cap || fadingOut));
         if (!live && s.insertTail) {
             s.insertTail = false;
@@ -4361,23 +3223,14 @@ void Engine::endPlayback() noexcept {
                 s.inserts->reset();
             }
         }
-        if (!s.cur) continue;
-        if (s.cur->native) {
-            // A native instrument's notes end and ring out (their release, its effects' tails) until quiet.
-            if (s.instrument && !s.instrumentIdle) s.instrument->notes()->releaseAll(0, true);
-            s.insertTail = false;  // the track runs whole, as for a preview, not just its inserts
-            if (s.active && !s.bus && !(slotTarget(s) == 0.0 && s.gain == 0.0)) {
-                s.previewing = true;
-                s.previewTail = 0;
-                previewing_ = true;
-            }
-        } else {
-            restartChain(*s.cur);
-        }
-        if (s.old) {  // a stop during a code swap: the old chain's fade ends too
-            restartChain(*s.old);
-            for (Voice& v : s.old->voices) v.active = false;
-            s.swapLeft = 0;
+        if (!s.track) continue;
+        // The instrument's notes end and ring out (their release, its effects' tails) until quiet.
+        if (s.instrument && !s.instrumentIdle) s.instrument->notes()->releaseAll(0, true);
+        s.insertTail = false;  // the track runs whole, as for a preview, not just its inserts
+        if (s.active && !s.bus && !(slotTarget(s) == 0.0 && s.gain == 0.0)) {
+            s.previewing = true;
+            s.previewTail = 0;
+            previewing_ = true;
         }
         s.previewN = s.lastN + 1;
         s.previewQuiet = 0;
@@ -4385,55 +3238,7 @@ void Engine::endPlayback() noexcept {
     previewRampIn_ = previewing_ ? std::max(1, static_cast<int>(kStopSeconds * sr_)) : 0;
 }
 
-void Engine::noteEvent(Chain& c, const Pattern& pat, const PatternEvent& e, int64_t repeat) noexcept {
-    const PatternNote& n = pat.notes[e.note];
-    // A note-off just releases whichever voice holds the note; only note-ons ask whether the note plays.
-    if (e.on && !notePlays(n, e.note, repeat, seed_)) return;
-    if (!e.on) {
-        for (Voice& v : c.voices)
-            if (v.active && v.gate && v.note == e.note && v.sub == e.sub) {
-                v.gate = false;
-                v.rel = v.quiet = 0;
-                return;
-            }
-        return;
-    }
-    // A slide hands the sliding note's voice to this note: no new attack, the pitch glides over half a step.
-    if (e.sub == 0 && n.slideFrom >= 0) {
-        const PatternNote& from = pat.notes[static_cast<size_t>(n.slideFrom)];
-        for (Voice& v : c.voices)
-            if (v.active && v.gate && v.note == static_cast<uint32_t>(n.slideFrom) && v.sub == from.ratchet - 1) {
-                v.note = e.note;
-                v.sub = 0;
-                v.vel = n.vel;
-                // The glide starts from the pitch being heard, bend included, so a bent note doesn't snap first.
-                if (v.expressive) v.pitch += v.bend;
-                v.target = n.pitch;
-                v.glideLeft = std::max(1, static_cast<int>(std::floor(stepLen_ * 0.5 + 0.5)));
-                v.glideStep = (v.target - v.pitch) / v.glideLeft;
-                takeExpression(v, pat, n);
-                return;
-            }
-    }
-    Voice& v = pickVoice(c);
-    v.preview = -1;
-    v.inst->reset();
-    v.active = v.gate = v.trig = true;
-    v.note = e.note;
-    v.sub = e.sub;
-    v.started = ++c.noteCount;
-    v.since = v.rel = v.quiet = 0;
-    v.pitch = v.target = n.pitch;
-    v.glideLeft = 0;
-    v.glideStep = 0;
-    v.freq = mtof(n.pitch);
-    v.vel = n.vel;
-    v.tacc = v.phase = 0;
-    v.rebind = false;
-    takeExpression(v, pat, n);
-}
-
-bool Engine::playsNotes(const Slot& s) noexcept { return s.cur && (s.cur->voiced || s.cur->native); }
+bool Engine::playsNotes(const Slot& s) noexcept { return s.track; }
 
 // Where sub-note `sub` of pattern note `n` sounds, in samples of the layer pass; false when it has no such repeat.
 bool Engine::noteSpan(const PatternNote& n, uint32_t sub, int64_t& start, int64_t& stop) const noexcept {
@@ -4445,45 +3250,9 @@ bool Engine::noteSpan(const PatternNote& n, uint32_t sub, int64_t& start, int64_
     return true;
 }
 
-// A held .caw voice carried across a pattern edit, at the start of its next run (n0): if its new note still covers
-// the playhead it sounds on (no new trig) and takes that note's curve from here, gliding from the pitch heard to
-// where the new curve is over kRebindGlideSeconds; otherwise it is released.
-void Engine::rebindVoice(Voice& v, const Pattern* pat, int64_t n0) noexcept {
-    v.rebind = false;
-    int64_t start = 0, stop = 0;
-    const PatternNote* n = pat && v.note < pat->notes.size() ? &pat->notes[v.note] : nullptr;
-    const bool expressive = n && n->extra >= 0 && static_cast<size_t>(n->extra) < pat->expressions.size();
-    const NoteExpression* x = expressive ? &pat->expressions[static_cast<size_t>(n->extra)] : nullptr;
-    // The curve is copied into the voice's own storage, set aside for the layer's longest curve: one that doesn't
-    // fit (never expected: the chain is rebuilt with room first) ends the note rather than allocate here.
-    const bool fits = !x || (x->bend.points.size() <= v.ex.bend.points.capacity() &&
-                             x->press.points.size() <= v.ex.press.points.capacity() &&
-                             x->timbre.points.size() <= v.ex.timbre.points.capacity());
-    if (!n || !fits || !noteSpan(*n, v.sub, start, stop) || n0 < start || n0 >= stop) {
-        v.gate = false;
-        v.rel = v.quiet = 0;
-        return;
-    }
-    const double heard = v.pitch + (v.expressive ? v.bend : 0.0);
-    v.expressive = expressive;
-    if (x) v.ex = *x;
-    v.exLen = std::max(1.0, n->len / std::max(1, n->ratchet) * stepLen_);
-    v.exStart = v.since - (n0 - start);
-    v.bend = 0;
-    v.press = 1;
-    v.timbre = 0;
-    if (x) expressionAt(v.ex, static_cast<double>(n0 - start), v.exLen, sr_, v.bend, v.press, v.timbre);
-    v.exLeft = 0;  // the next sample works out its control point from these values, so nothing jumps
-    v.vel = n->vel;
-    v.pitch = heard - v.bend;
-    v.freq = mtof(v.pitch);
-    v.target = n->pitch;
-    v.glideLeft = std::max(1, static_cast<int>(std::floor(kRebindGlideSeconds * sr_ + 0.5)));
-    v.glideStep = (v.target - v.pitch) / v.glideLeft;
-}
-
-// The same for a native instrument's held note, at the start of its next chunk (n0): its motion carries on from the
-// next control point of its grid (the grid's phase is kept), now on the new note's curve, gliding there.
+// A held note carried across a pattern edit, at the start of its next chunk (n0): if its new note still covers the
+// playhead it sounds on and its motion carries on from the next control point of its grid (the grid's phase is
+// kept), now on the new note's curve, gliding there over kRebindGlideSeconds; otherwise it is released.
 void Engine::rebindNote(NoteEvents& notes, NoteEvents::Held& h, const Pattern* pat, int64_t n0) noexcept {
     h.rebind = false;
     int64_t start = 0, stop = 0;
@@ -4510,9 +3279,9 @@ void Engine::rebindNote(NoteEvents& notes, NoteEvents::Held& h, const Pattern* p
     h.glideStep = (h.target - h.pitch) / h.glideLeft;
 }
 
-// The pattern's notes in this chunk as a native instrument's events, on their exact frames, with the same rules a
-// .caw voice pool follows: chance per repeat, ratchets, slides (the held note glides on, no new attack), the note's
-// expression, and held notes carried across a pattern edit following their new note.
+// The pattern's notes in this chunk as the instrument's events, on their exact frames: chance per repeat, ratchets,
+// slides (the held note glides on, no new attack), the note's expression, and held notes carried across a pattern
+// edit following their new note.
 void Engine::instrumentNotes(Slot& s, NoteEvents& notes, int m) noexcept {
     const int64_t n0 = s.n0, end = n0 + m;
     const Pattern* pat = s.pat;
@@ -4569,8 +3338,8 @@ void Engine::instrumentNotes(Slot& s, NoteEvents& notes, int m) noexcept {
     }
 }
 
-// Glides and expression as per-note pitch, pressure and timbre events, worked out every kExpressionStep frames (as a
-// .caw voice works out its curves), sent only when a value changes. The grid runs on from the note's start (or its
+// Glides and expression as per-note pitch, pressure and timbre events, worked out every kExpressionStep frames, sent
+// only when a value changes. The grid runs on from the note's start (or its
 // slide) across blocks, and a note that ends or slides mid-block first gets its points up to there, so the events
 // land on the same frames, with the same values, at any block size.
 void Engine::noteMotion(NoteEvents& notes, NoteEvents::Held& h, int end) noexcept {
@@ -4683,7 +3452,7 @@ void Engine::runInstrument(Slot& s, int m) noexcept {
     }
     if (s.instrumentFadeLeft == 0 && s.instrumentFading) {
         if (canRetire(1)) {
-            retire(nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, s.instrumentFading);
+            retire(nullptr, nullptr, nullptr, nullptr, nullptr, s.instrumentFading);
             s.instrumentFading = nullptr;
         } else {
             s.instrumentFadeLeft = 1;  // no room to hand it back yet: try again next block
@@ -4691,155 +3460,11 @@ void Engine::runInstrument(Slot& s, int m) noexcept {
     }
 }
 
-void Engine::runVoices(Chain& c, const Pattern* pat, int64_t repeat, int64_t n0, int len, double* out, Slot* exportTo,
-                       int offset, const BlockCtx& base) noexcept {
-    std::fill_n(out, len, 0.0);
-    auto sampleOf = [this](double step) { return static_cast<int64_t>(std::floor(step * stepLen_ + 0.5)); };
-    const PatternEvent* ev = pat ? pat->events.data() : nullptr;
-    const size_t ne = pat ? pat->events.size() : 0;
-    size_t e = static_cast<size_t>(
-        std::partition_point(ev, ev + ne, [&](const PatternEvent& x) { return sampleOf(x.step) < n0; }) - ev);
-    for (int vi = 0; vi < c.voiceCount; ++vi)
-        if (c.voices[vi].active && c.voices[vi].rebind) rebindVoice(c.voices[vi], pat, n0);
-    const Program& prog = c.voices[0].inst->program();
-    const bool byteMode = prog.mode == OutputMode::Byte;
-    const double tPerHz = prog.rate / sr_ / kC4;  // byte mode: t runs at the formula rate when the note is C4
-    std::fill_n(c.rateb, len, byteMode ? prog.rate : sr_);
-    const int64_t quietMax = static_cast<int64_t>(kVoiceQuietSeconds * sr_);
-    const int64_t relMax = static_cast<int64_t>(kVoiceMaxRelease * sr_);
-    // Code that reads gate or rel shapes its own release, and code that reads trig rings on like a one-shot.
-    // Anything else (a plain bytebeat, say) would sound forever, so the engine fades it out at note-off.
-    const uint32_t uses = prog.usedVars;
-    auto reads = [uses](Var v) { return ((uses >> static_cast<int>(v)) & 1u) != 0; };
-    const bool engineFade = !reads(Var::Gate) && !reads(Var::Rel) && !reads(Var::Trig);
-    const double fadeLen = std::max(1.0, kReleaseFade * sr_);
-    const double declickCoef = detExp(-1.0 / (kDeclickSeconds * sr_));
-    int64_t pos = n0;
-    const int64_t end = n0 + len;
-    int splits = 0;
-    while (pos < end) {
-        while (e < ne && sampleOf(ev[e].step) <= pos) noteEvent(c, *pat, ev[e++], repeat);
-        // A pattern packed with notes can't split a block into slivers: past kMaxSplits they start together.
-        if (++splits >= kMaxSplits)
-            while (e < ne && sampleOf(ev[e].step) < end) noteEvent(c, *pat, ev[e++], repeat);
-        const int64_t next = e < ne ? std::min(end, sampleOf(ev[e].step)) : end;
-        const int n = static_cast<int>(next - pos), o = static_cast<int>(pos - n0);
-        int newest = -1;
-        for (int v = 0; v < c.voiceCount; ++v)
-            if (c.voices[v].active && (newest < 0 || c.voices[v].started > c.voices[newest].started)) newest = v;
-        if (exportTo && exportTo->hasExports())
-            for (const auto& [reg, buf] : c.exportMap[0])
-                if (exportTo->exportAt(buf))
-                    std::fill_n(exportTo->exportAt(buf)->data() + offset + o, n, 0.0);
-        BlockCtx ctx = base;
-        ctx.n = n;
-        for (int k = 0; k < static_cast<int>(Var::Count); ++k)
-            if (ctx.vars[k]) ctx.vars[k] += o;
-        ctx.paramValueOffset = o;
-        ctx.vars[static_cast<int>(Var::T)] = c.vtb;
-        ctx.vars[static_cast<int>(Var::Time)] = c.vtime;
-        ctx.vars[static_cast<int>(Var::Phase)] = c.vphase;
-        ctx.vars[static_cast<int>(Var::Rate)] = c.rateb + o;
-        ctx.vars[static_cast<int>(Var::In)] = c.zero;
-        ctx.vars[static_cast<int>(Var::Trig)] = c.vtrig;
-        ctx.vars[static_cast<int>(Var::Gate)] = c.vgate;
-        ctx.vars[static_cast<int>(Var::Note)] = c.vnote;
-        ctx.vars[static_cast<int>(Var::Freq)] = c.vfreq;
-        ctx.vars[static_cast<int>(Var::Vel)] = c.vvel;
-        ctx.vars[static_cast<int>(Var::Rel)] = c.vrel;
-        ctx.vars[static_cast<int>(Var::Bend)] = c.vbend;
-        ctx.vars[static_cast<int>(Var::Press)] = c.vpress;
-        ctx.vars[static_cast<int>(Var::Timbre)] = c.vtimbre;
-        ctx.imports = c.importPtrs[0].empty() ? nullptr : c.importPtrs[0].data();
-        ctx.importOffset = offset + o;
-        for (int vi = 0; vi < c.voiceCount; ++vi) {
-            Voice& v = c.voices[vi];
-            if (!v.active) continue;
-            for (int i = 0; i < n; ++i) {
-                if (v.glideLeft > 0) {
-                    v.pitch = --v.glideLeft == 0 ? v.target : v.pitch + v.glideStep;
-                    v.freq = mtof(v.pitch);
-                }
-                c.vtrig[i] = v.trig ? 1.0 : 0.0;
-                v.trig = false;
-                c.vgate[i] = v.gate ? 1.0 : 0.0;
-                // The note's expression: its bend (plus vibrato) moves note and freq; press and timbre are 0..1.
-                // Worked out every kExpressionStep samples from the note's start, stepped linearly in between, so
-                // it costs little per sample and doesn't depend on how the device splits blocks.
-                double bend = 0.0, press = 1.0, timbre = 0.0, freq = v.freq;
-                if (v.expressive) {
-                    const int64_t into = v.since - v.exStart;
-                    if (v.exLeft <= 0) {
-                        if (into == 0 || v.freqNow == 0) {
-                            expressionAt(v.ex, 0.0, v.exLen, sr_, v.bend, v.press, v.timbre);
-                            v.freqNow = mtof(v.pitch + v.bend);
-                        }
-                        double b, p, t;
-                        expressionAt(v.ex, static_cast<double>(into + kExpressionStep), v.exLen, sr_, b, p, t);
-                        v.dBend = (b - v.bend) / kExpressionStep;
-                        v.dPress = (p - v.press) / kExpressionStep;
-                        v.dTimbre = (t - v.timbre) / kExpressionStep;
-                        v.dFreq = (mtof(v.pitch + v.glideStep * kExpressionStep + b) - v.freqNow) / kExpressionStep;
-                        v.exLeft = kExpressionStep;
-                    }
-                    bend = v.bend;
-                    press = v.press;
-                    timbre = v.timbre;
-                    freq = v.freqNow;
-                    v.bend += v.dBend;
-                    v.press += v.dPress;
-                    v.timbre += v.dTimbre;
-                    v.freqNow += v.dFreq;
-                    --v.exLeft;
-                }
-                c.vnote[i] = v.pitch + bend;
-                c.vfreq[i] = freq;
-                c.vbend[i] = bend;
-                c.vpress[i] = press;
-                c.vtimbre[i] = timbre;
-                c.vvel[i] = v.vel;
-                c.vrel[i] = v.gate ? 0.0 : static_cast<double>(v.rel++);
-                c.vtb[i] = byteMode ? std::floor(v.tacc) : static_cast<double>(v.since);
-                v.tacc += tPerHz * freq;
-                c.vtime[i] = static_cast<double>(v.since++) / sr_;
-                c.vphase[i] = v.phase;
-                v.phase += freq / sr_;
-                v.phase -= std::floor(v.phase);
-            }
-            const double* y = v.inst->process(ctx);
-            const bool autoPress = v.expressive && !v.ex.press.points.empty() && !reads(Var::Press);
-            for (int i = 0; i < n; ++i) {
-                double s = y[i];
-                if (engineFade && !v.gate) s *= std::max(0.0, 1.0 - c.vrel[i] / fadeLen);
-                if (autoPress) s *= c.vpress[i];  // code that doesn't read press still gets the note's volume curve
-                out[o + i] += s;
-                v.lastY = s;
-                if (!v.gate) v.quiet = std::fabs(s) < kQuietLevel ? v.quiet + 1 : 0;
-            }
-            if (exportTo && exportTo->hasExports() && vi == newest)
-                for (const auto& [reg, buf] : c.exportMap[0])
-                    if (exportTo->exportAt(buf))
-                        std::copy_n(v.inst->reg(reg), n, exportTo->exportAt(buf)->data() + offset + o);
-            if (!v.gate && (v.quiet >= quietMax || v.rel >= relMax || (engineFade && v.rel >= fadeLen))) {
-                c.declick += v.lastY;  // ending a voice that is still sounding: smooth over the jump
-                v.active = false;
-            }
-        }
-        for (int i = 0; i < n && c.declick != 0.0; ++i) {
-            out[o + i] += c.declick;
-            c.declick *= declickCoef;
-            if (std::fabs(c.declick) < 1e-12) c.declick = 0.0;
-        }
-        pos = next;
-    }
-}
-
-// A playing track at the start of a chunk: loop restarts and code swaps happen here, on their
-// exact sample, and the chunk is cut short at the next one so a whole chunk is one segment.
+// A playing track at the start of a chunk: loop restarts happen here, on their exact sample, and the chunk is
+// cut short at the next one so a whole chunk is one pass.
 void Engine::planTrack(Slot& s, int& m) noexcept {
     const bool free = s.steps <= 0;
     const double layerLen = free ? static_cast<double>(loopLen_) : s.steps * stepLen_;
-    const int seamLen = std::max(1, static_cast<int>(kSeamSeconds * sr_));
     const int64_t gg = g_;
     int64_t k = 0, st = 0, nx = loopLen_;
     if (!free) {
@@ -4851,76 +3476,32 @@ void Engine::planTrack(Slot& s, int& m) noexcept {
         nx = std::min<int64_t>(loopStart(s, k + 1), loopLen_);
     }
     if (k != s.k || epoch_ != s.epoch) {
-        if (!s.fresh && s.cur && (s.cur->voiced || s.cur->native)) {
-            // A pattern layer restarts its pattern: held notes ring out, voices and effects carry on.
-            releaseVoices(s.cur->voices, s.cur->voiceCount);
-            if (s.instrument && !s.instrumentIdle) s.instrument->notes()->releaseAll(0, true);
-            if (s.old && s.old->voiced) releaseVoices(s.old->voices, s.old->voiceCount);
-            else if (s.old)
-                for (auto& inst : s.old->main) inst->reset();
-            s.seamLeft = 0;
-        } else if (!s.fresh) {
-            const bool cont = s.contiguous && s.expectG == gg;
-            if (seamXf_ && cont && !s.old && s.cur) {
-                // The shadow takes over the old pass's state; main is reset just below.
-                for (size_t i = 0; i < s.cur->main.size(); ++i) s.cur->shadow[i]->swapState(*s.cur->main[i]);
-                s.shadowN = s.lastN + 1;
-                s.seamLeft = seamLen;
-            } else {
-                s.seamLeft = 0;
-            }
-            if (s.cur)
-                for (auto& inst : s.cur->main) inst->reset();
-            if (s.old)
-                for (auto& inst : s.old->main) inst->reset();
-        }
+        // The layer restarts its pattern: held notes ring out, the instrument and its effects carry on.
+        if (!s.fresh && s.instrument && !s.instrumentIdle) s.instrument->notes()->releaseAll(0, true);
         s.fresh = false;
         s.k = k;
         s.epoch = epoch_;
     }
     m = static_cast<int>(std::min<int64_t>(m, nx - gg));
-    // New code waiting for the next beat or bar goes in on that exact sample.
-    if (s.pending) {
-        const double unit = (swapMode_ == 1 ? 4.0 : 4.0 * beatsPerBar_) * stepLen_;
-        int64_t kb = static_cast<int64_t>(std::floor(static_cast<double>(gg) / unit));
-        int64_t at = static_cast<int64_t>(std::floor(kb * unit + 0.5));
-        if (at < gg) at = static_cast<int64_t>(std::floor(++kb * unit + 0.5));
-        if (at == gg || swapMode_ == 0) {
-            if (canRetire(1)) {
-                swapIn(s, s.pending);
-                s.pending = nullptr;
-                routingDirty_ = true;  // the fade lane may need more module nodes
-            }
-        } else {
-            m = static_cast<int>(std::min<int64_t>(m, at - gg));
-        }
-    }
     s.n0 = gg - st;
     s.repeat = free ? epoch_ : k;
-    s.cur->layerLen = layerLen;
-    if (s.old) s.old->layerLen = layerLen;
+    s.layerLen = layerLen;
     s.pat = s.pattern ? s.pattern->get() : nullptr;
-    s.seam = s.seamLeft > 0;
-    s.fade = s.old && s.swapLeft > 0;
 }
 
 // Decides what each slot does this chunk and returns the chunk's length: maxFrames, cut at the
-// next loop boundary or code swap of any playing track.
+// next loop boundary of any playing track.
 int Engine::planChunk(int maxFrames) noexcept {
     int m = maxFrames;
     if (previewChunk_) {
         // Stopped, with previews: only the previewing tracks run, with no pattern events and no transport, through
-        // their effects, mix, folder buses and master. Swaps and removals wait for playback, as they do while stopped.
+        // their effects, mix, folder buses and master. Removals wait for playback, as they do while stopped.
         for (int k = 0; k < liveCount_; ++k) {
             Slot& s = slotAt(live_[k]);
-            if (!s.active || (!s.bus && !s.cur)) { s.mode = Slot::Mode::Idle; continue; }
+            if (!s.active || (!s.bus && !s.track)) { s.mode = Slot::Mode::Idle; continue; }
             if (s.bus) { s.mode = Slot::Mode::Bus; continue; }
             s.target = slotTarget(s);
             const bool silentMix = s.target == 0.0 && s.gain == 0.0;
-            if (s.previewing && !silentMix && !playsNotes(s) && s.insertTail) {
-                s.mode = Slot::Mode::Tail;  // a generator's loop would play on: only the inserts ring out
-                continue;
-            }
             if (!s.previewing || !playsNotes(s) || silentMix) {
                 s.mode = Slot::Mode::Silent;
                 s.insertsIdle = true;
@@ -4931,13 +3512,10 @@ int Engine::planChunk(int maxFrames) noexcept {
             }
             s.mode = Slot::Mode::Play;
             s.pat = nullptr;
-            s.seam = false;
-            s.fade = s.old && s.swapLeft > 0;  // a code edit while a preview sounds still crossfades
             // The layer's time runs on through its loop, so time-driven effects keep moving; cut at the wrap.
             const double layerLen = s.steps <= 0 ? static_cast<double>(loopLen_) : s.steps * stepLen_;
             const int64_t len = std::max<int64_t>(1, static_cast<int64_t>(std::floor(layerLen + 0.5)));
-            s.cur->layerLen = layerLen;
-            if (s.old) s.old->layerLen = layerLen;
+            s.layerLen = layerLen;
             s.previewN = ((s.previewN % len) + len) % len;
             s.n0 = s.previewN;
             m = static_cast<int>(std::min<int64_t>(m, len - s.n0));
@@ -4946,24 +3524,22 @@ int Engine::planChunk(int maxFrames) noexcept {
     }
     for (int k = 0; k < liveCount_; ++k) {
         Slot& s = slotAt(live_[k]);
-        if (!s.active || (!s.bus && !s.cur)) { s.mode = Slot::Mode::Idle; continue; }
+        if (!s.active || (!s.bus && !s.track)) { s.mode = Slot::Mode::Idle; continue; }
         if (s.bus) { s.mode = Slot::Mode::Bus; continue; }
         s.target = slotTarget(s);
         // A slot keying a component (a kick keying a ducker) keeps running while muted or soloed out, so its key
         // still sounds; its own output is silence.
         const bool keys = s.sends && s.sends->keys && !s.removing && !s.overloaded;
         if (s.target == 0.0 && s.gain == 0.0 && !keys) {
-            // Silent (muted, soloed out or removed, and faded out): nothing runs; swaps and removal finish.
+            // Silent (muted, soloed out or removed, and faded out): nothing runs; a removal finishes.
             s.mode = Slot::Mode::Silent;
             s.insertsIdle = true;
             s.instrumentIdle = s.instrumentIdle || s.instrument || s.instrumentFading;
             s.delayStale = true;
             s.routesStale = true;
-            s.contiguous = false;
-            if (s.pending && canRetire(1)) { swapIn(s, s.pending); s.pending = nullptr; routingDirty_ = true; }
             if (s.removing && canRetire(6)) {
-                retire(nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, s.instrument);
-                retire(nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, s.instrumentFading);
+                retire(nullptr, nullptr, nullptr, nullptr, nullptr, s.instrument);
+                retire(nullptr, nullptr, nullptr, nullptr, nullptr, s.instrumentFading);
                 s.instrument = s.instrumentFading = nullptr;
                 s.instrumentFadeLeft = 0;
                 {
@@ -4973,14 +3549,14 @@ int Engine::planChunk(int maxFrames) noexcept {
                     s.delayFading = nullptr;
                     s.delayFadeLeft = 0;
                 }
-                retire(nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, s.insertsFading);
+                retire(nullptr, nullptr, nullptr, nullptr, nullptr, s.insertsFading);
                 s.insertsFading = nullptr;
                 s.insertsFadeLeft = 0;
-                retire(s.cur, nullptr, s.pattern);
+                retire(nullptr, s.pattern);
                 s.pattern = nullptr;
                 {
                     // One entry: the slot frees with its inserts and delay.
-                    Retired r{s.old, &s, nullptr, nullptr, nullptr, nullptr, s.inserts};
+                    Retired r{&s, nullptr, nullptr, nullptr, nullptr, s.inserts};
                     r.delay = s.delay;
                     r.sends = s.sends;
                     retireEntry(r);
@@ -4988,7 +3564,7 @@ int Engine::planChunk(int maxFrames) noexcept {
                 s.inserts = nullptr;
                 s.delay = nullptr;
                 s.sends = nullptr;
-                s.cur = s.old = nullptr;
+                s.track = false;
                 s.active = false;
                 s.removing = false;
                 s.mode = Slot::Mode::Idle;
@@ -5004,23 +3580,16 @@ int Engine::planChunk(int maxFrames) noexcept {
 
 int Engine::processChunk(float* l, float* r, int maxFrames) noexcept {
     // Only slots in use are visited (#133). A slot leaves the list once no loop has anything left to do
-    // for it: inactive, exports cleared, not previewing and planned Idle (the scans it skips would only
-    // set Idle again). Its routing scratch is reset, as updateRouting would have left it.
+    // for it: inactive, not previewing and planned Idle (the scans it skips would only set Idle again).
+    // Its routing scratch is reset, as updateRouting would have left it.
     int kept = 0;
     for (int k = 0; k < liveCount_; ++k) {
         const int i = live_[k];
         Slot& slot = slotAt(i);
-        if (slot.hasExports() && slot.exportCount > 0 &&
-            (!slot.active || !slot.cur || (slotTarget(slot) == 0.0 && slot.gain == 0.0))) {
-            for (size_t b = 0; b < slot.exportCount; ++b)
-                if (slot.exportAt(b)) std::fill_n(slot.exportAt(b)->data(), maxFrames, 0.0);
-            if (!slot.active || (!slot.cur && !slot.pending)) slot.exportCount = 0;
-        }
-        if (!slot.active && slot.exportCount == 0 && !slot.previewing && slot.mode == Slot::Mode::Idle) {
+        if (!slot.active && !slot.previewing && slot.mode == Slot::Mode::Idle) {
             slot.listed = false;
             MixGraph& g = *mixGraph_;
             g.routable[i] = 0;
-            g.modules[i] = 0;
             g.target[i] = -1;
             g.pending[i] = 0;
             g.deferred[i] = g.emitted[i] = 0;
@@ -5032,21 +3601,12 @@ int Engine::processChunk(float* l, float* r, int maxFrames) noexcept {
     liveCount_ = kept;
     const int m = planChunk(maxFrames);
     audioIn_->chunk(tapAt_, m, g_, playing_ && !previewChunk_);  // monitoring frames and the recorder's input
-    if (previewChunk_)
-        // Stopped, a track that isn't previewing exports silence, not the last block it played.
-        for (int k = 0; k < liveCount_; ++k) {
-            Slot& slot = slotAt(live_[k]);
-            if (slot.mode == Slot::Mode::Play || !slot.hasExports()) continue;
-            for (size_t b = 0; b < slot.exportCount; ++b)
-                if (slot.exportAt(b)) std::fill_n(slot.exportAt(b)->data(), m, 0.0);
-        }
     ++chunkId_;
     // Project modulation (#161): due modulator blocks and every target's offsets, before any target runs.
     modulation_->beginChunk(static_cast<uint32_t>(m), g_, stepLen_, bpm_, static_cast<uint32_t>(beatsPerBar_),
                             playing_ && !previewChunk_, modPlays_, chunkId_);
-    // One graph runs the mix: each track's modules as a chain of nodes then its track node, in
-    // dependency order (exporters before readers), each folder bus after its children, then the
-    // master stage. Routing changes only between chunks.
+    // One graph runs the mix: each track's node, each folder bus after its children (and after every send and
+    // key into it), then the master stage. Routing changes only between chunks.
     if (routingDirty_) {
         routingDirty_ = false;
         updateRouting();
@@ -5061,14 +3621,14 @@ int Engine::processChunk(float* l, float* r, int maxFrames) noexcept {
     return m;
 }
 
-// Routing as graph edges: a routable slot (active, and a bus or a track with a chain) goes to its parent when
+// Routing as graph edges: a routable slot (active, and a bus or a track) goes to its parent when
 // that parent is an active folder bus, is dropped when its parent is anything else, and goes to master at the
 // root. Sends and sidechain keys add order but no edges (the source adds into its destination's input, runRoutes):
 // a slot runs after every slot that feeds it, whether as a child, a send or a key. The order is the old pass order
 // (processOrder_, then the remaining slots by index) with each slot held back until what feeds it has run, so a
-// track always reaches its bus in the same chunk (issue #76). A track runs as its module nodes (enough for its
-// current chain and the one fading out), chained lane by lane into its track node. Edges into buses follow that
-// order, which is the old accumulation order. Idle slots are left out of the order, so they cost nothing.
+// track always reaches its bus in the same chunk (issue #76). A track is one node (its instrument, inserts and
+// mix). Edges into buses follow that order, which is the old accumulation order. Idle slots are left out of the
+// order, so they cost nothing.
 void Engine::updateRouting() noexcept {
     MixGraph& g = *mixGraph_;
     const int master = g.master;
@@ -5077,19 +3637,8 @@ void Engine::updateRouting() noexcept {
     for (int k = 0; k < liveCount_; ++k) {
         const int i = live_[k];
         const Slot& s = slotAt(i);
-        int to = -1, modules = 0;
-        bool routable = s.active && (s.bus || s.cur);
-        if (routable && !s.bus) {
-            modules = static_cast<int>(s.cur->main.size());
-            if (s.old) modules = std::max(modules, static_cast<int>(s.old->main.size()));
-            if (s.cur->native) modules = std::max(modules, 1);  // node 0 runs the instrument
-            if (modules < 1 || modules > MixGraph::K) {
-                // setProject refuses longer chains; one here is a bug, so it is counted, not played cut short.
-                routingRejections_.fetch_add(1, std::memory_order_relaxed);
-                assert(!"track chain does not fit its module nodes");
-                routable = false;
-            }
-        }
+        int to = -1;
+        const bool routable = s.active && (s.bus || s.track);
         if (routable) {
             if (s.parentSlot >= 0 && s.parentSlot < capacity_ && s.parentSlot != i) {
                 const Slot& parent = slotAt(s.parentSlot);
@@ -5099,7 +3648,6 @@ void Engine::updateRouting() noexcept {
             }
         }
         g.routable[i] = routable;
-        g.modules[i] = modules;
         g.target[i] = to;
     }
     // A route counts when both ends run: into a bus's input, or a key into a slot with inserts.
@@ -5171,22 +3719,13 @@ void Engine::updateRouting() noexcept {
     uint32_t nodeCount = 0, edgeCount = 0;
     for (int k = 0; k < count; ++k) {
         const int x = g.slotOrder[k];
-        uint32_t out = g.busNode(x);
-        if (!slotAt(x).bus) {
-            const int n = g.modules[x];
-            for (int i = 0; i < n; ++i) {
-                g.order[nodeCount++] = MixGraph::moduleNode(x, i);
-                if (i > 0) g.edges[edgeCount++] = GraphConnection{MixGraph::moduleNode(x, i - 1), 1, MixGraph::moduleNode(x, i), 0};
-            }
-            out = g.trackNode(x);
-            g.order[nodeCount++] = out;
-            g.edges[edgeCount++] = GraphConnection{MixGraph::moduleNode(x, n - 1), 1, out, 0};
-        } else {
-            g.order[nodeCount++] = out;
-        }
+        const bool bus = slotAt(x).bus;
+        const uint32_t out = bus ? g.busNode(x) : g.trackNode(x);
+        g.order[nodeCount++] = out;
         const int to = g.target[x];
         if (to < 0 || g.position[x] >= g.position[to]) continue;
-        g.edges[edgeCount++] = GraphConnection{out, 1, to == master ? g.masterNode() : g.busNode(to), 0};
+        // The output port: a bus node's second (after its summing input), a track node's only one.
+        g.edges[edgeCount++] = GraphConnection{out, bus ? 1u : 0u, to == master ? g.masterNode() : g.busNode(to), 0};
     }
     g.order[nodeCount++] = g.masterNode();
     // Valid by construction. A rejection would keep the previous routing (safe: stale nodes output
@@ -5195,42 +3734,6 @@ void Engine::updateRouting() noexcept {
         routingRejections_.fetch_add(1, std::memory_order_relaxed);
         assert(!"mix graph rejected a derived route");
     }
-}
-
-// Module `index` of a playing track, on every lane that runs this chunk. Lanes arrive and leave
-// as float (graph edges are 32-bit, owner 2026-11-03); a module past a lane's chain passes it on.
-void Engine::runModuleNode(int slot, int index, const float* const* in, float* const* out, int m) noexcept {
-    Slot& s = slotAt(slot);
-    if (s.mode != Slot::Mode::Play) return;  // the track node outputs silence and reads no lane
-    const size_t idx = static_cast<size_t>(index);
-    const int64_t gg = g_;
-    const bool instrument = s.cur->native || s.instrument || s.instrumentFading || (s.fade && s.old->native);
-    if (index == 0 && instrument) runInstrument(s, m);
-    auto lane = [&](Chain& c, int l, bool shadow, int len, int64_t n0, Slot* exportTo, const Pattern* pat,
-                    int64_t repeat, int channel) noexcept {
-        // A native instrument's chain: its .caw effects take the instrument's mid (they are mono).
-        if (idx >= c.main.size()) {
-            if (idx == 0 && c.native)
-                for (int i = 0; i < len; ++i) out[channel][i] = 0.5f * (s.instL[i] + s.instR[i]);
-            else
-                std::copy_n(in[channel], len, out[channel]);
-            return;
-        }
-        if (idx == 0) prepareLane(c, l, n0, len);
-        const double* x = c.zero;
-        if (idx > 0) {
-            for (int i = 0; i < len; ++i) c.lanes[l].in[i] = static_cast<double>(in[channel][i]);
-            x = c.lanes[l].in;
-        } else if (c.native) {
-            for (int i = 0; i < len; ++i) c.lanes[l].in[i] = 0.5 * (static_cast<double>(s.instL[i]) + s.instR[i]);
-            x = c.lanes[l].in;
-        }
-        const double* y = runModule(c, l, shadow, idx, n0, gg, len, x, exportTo, pat, repeat);
-        for (int i = 0; i < len; ++i) out[channel][i] = routeSample(y[i]);
-    };
-    lane(*s.cur, 0, false, m, s.n0, &s, s.pat, s.repeat, 0);
-    if (s.seam) lane(*s.cur, 1, true, std::min(m, s.seamLeft), s.shadowN, nullptr, nullptr, s.k, 1);
-    if (s.fade) lane(*s.old, 0, false, m, s.n0, nullptr, nullptr, s.k, 2);
 }
 
 // A track's latency compensation, with the crossfade of a delay change.
@@ -5307,7 +3810,7 @@ void Engine::runInserts(Slot& s, float* L, float* R, int m) noexcept {
             R[i] = fadeR_[i] + (R[i] - fadeR_[i]) * w;
         }
         if (s.insertsFadeLeft == 0 && s.insertsFading && canRetire(1)) {
-            retire(nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, s.insertsFading);
+            retire(nullptr, nullptr, nullptr, nullptr, nullptr, s.insertsFading);
             s.insertsFading = nullptr;
         } else if (s.insertsFadeLeft == 0 && s.insertsFading) {
             s.insertsFadeLeft = 1;  // no room to hand it back yet: hold the new chain at full and try again
@@ -5468,19 +3971,16 @@ uint32_t Engine::keyNotes(const Slot& s, int m, Event* out, uint32_t max) const 
 }
 
 // A playing track's output: the seam and swap crossfades of its lanes, then gain and pan.
-void Engine::runTrackNode(int slot, const float* const* in, float* outL, float* outR, int m) noexcept {
+void Engine::runTrackNode(int slot, float* outL, float* outR, int m) noexcept {
     Slot& s = slotAt(slot);
-    if (s.mode != Slot::Mode::Play && s.mode != Slot::Mode::Tail) {
+    if (s.mode != Slot::Mode::Play) {
         std::fill_n(outL, m, 0.0f);
         std::fill_n(outR, m, 0.0f);
         return;
     }
-    const bool tail = s.mode == Slot::Mode::Tail;  // stopped: silence into the inserts, which ring out
     const double target = s.target;
     if (!(trackGainCoef_ >= 0.0)) trackGainCoef_ = 1.0 - detExp(-1.0 / (kGainSeconds * sr_));  // once per Engine
     const double gainCoef = trackGainCoef_;
-    const int seamLen = std::max(1, static_cast<int>(kSeamSeconds * sr_));
-    const int swapLen = std::max(1, static_cast<int>(kSwapSeconds * sr_));
     const double pan = bitsToDouble(s.pan.load(std::memory_order_relaxed));
     if ((!s.automation || s.automation->pan.empty()) && pan != s.panCache) {
         s.panCache = pan;
@@ -5488,49 +3988,12 @@ void Engine::runTrackNode(int slot, const float* const* in, float* outL, float* 
         s.gl = g.left;
         s.gr = g.right;
     }
-    // A native instrument with no .caw effects after it stays stereo into the inserts; the mono chain output
-    // (y) is then not used, so it is not worked out.
-    const bool instrumentStereo = !tail && s.cur->native && s.cur->main.empty() && !(s.fade && !s.old->main.empty());
-    double* y = tmp_;
-    if (!instrumentStereo)
-        for (int i = 0; i < m; ++i) y[i] = tail ? 0.0 : static_cast<double>(in[0][i]);
-    if (s.seam && !tail) {
-        const int sl = std::min(m, s.seamLeft);
-        if (!instrumentStereo)
-            for (int i = 0; i < sl; ++i) {
-                const double w = static_cast<double>(seamLen - s.seamLeft + i + 1) / (seamLen + 1);
-                y[i] = static_cast<double>(in[1][i]) * (1.0 - w) + y[i] * w;
-            }
-        s.shadowN += sl;
-        s.seamLeft -= sl;
-    }
-    if (s.fade && !tail) {
-        const int sl = std::min(m, s.swapLeft);
-        if (!instrumentStereo)
-            for (int i = 0; i < m; ++i) {
-                double w = 1.0;
-                if (i < sl) w = static_cast<double>(swapLen - s.swapLeft + i + 1) / (swapLen + 1);
-                y[i] = static_cast<double>(in[2][i]) * (1.0 - w) + y[i] * w;
-            }
-        s.swapLeft -= sl;
-    }
-    if (s.old && s.swapLeft <= 0 && canRetire(1)) {
-        retire(s.old, nullptr);
-        s.old = nullptr;
-        routingDirty_ = true;  // the fade lane's extra module nodes stop running
-    }
-    // Native inserts (#17): the mono chain output enters as two equal channels; what the inserts
-    // make of it stays stereo through volume and pan (the pan law then works per side, as balance).
-    const bool stereo = s.inserts || s.insertsFadeLeft > 0 || instrumentStereo;  // stereo output, not the mono chain
-    if (stereo) {
-        if (instrumentStereo) {
-            std::copy_n(s.instL, m, insertL_);
-            std::copy_n(s.instR, m, insertR_);
-        } else {
-            for (int i = 0; i < m; ++i) insertL_[i] = insertR_[i] = routeSample(finiteOr0(y[i]));
-        }
-        runInserts(s, insertL_, insertR_, m);
-    }
+    // The instrument (#17) into the native inserts, stereo through volume and pan (the pan law then works per side,
+    // as balance).
+    runInstrument(s, m);
+    std::copy_n(s.instL, m, insertL_);
+    std::copy_n(s.instR, m, insertR_);
+    runInserts(s, insertL_, insertR_, m);
     float peakL = 0, peakR = 0, sig = 0;
     int sp = s.scopePos.load(std::memory_order_relaxed);
     const bool volumeAutomated = s.automation && !s.automation->volume.empty();
@@ -5544,24 +4007,14 @@ void Engine::runTrackNode(int slot, const float* const* in, float* outL, float* 
         // branches, and the scope written in at most two runs instead of a wrap test per sample.
         const double gain = s.gain, gl = s.gl, gr = s.gr;
         float mid[kBlock], level[kBlock];
-        if (stereo) {
-            for (int i = 0; i < m; ++i) {
-                const double vl = static_cast<double>(insertL_[i]) * gain;
-                const double vr = static_cast<double>(insertR_[i]) * gain;
-                outL[i] = routeSample(vl * gl);
-                outR[i] = routeSample(vr * gr);
-                const double al = std::fabs(vl), ar = std::fabs(vr);
-                level[i] = static_cast<float>(al < ar ? ar : al);
-                mid[i] = static_cast<float>(0.5 * (vl + vr));
-            }
-        } else {
-            for (int i = 0; i < m; ++i) {
-                const double v = finiteOr0(y[i]) * gain;
-                outL[i] = routeSample(v * gl);
-                outR[i] = routeSample(v * gr);
-                level[i] = static_cast<float>(std::fabs(v));
-                mid[i] = static_cast<float>(v);
-            }
+        for (int i = 0; i < m; ++i) {
+            const double vl = static_cast<double>(insertL_[i]) * gain;
+            const double vr = static_cast<double>(insertR_[i]) * gain;
+            outL[i] = routeSample(vl * gl);
+            outR[i] = routeSample(vr * gr);
+            const double al = std::fabs(vl), ar = std::fabs(vr);
+            level[i] = static_cast<float>(al < ar ? ar : al);
+            mid[i] = static_cast<float>(0.5 * (vl + vr));
         }
         peakL = peakAbs(outL, m);
         peakR = peakAbs(outR, m);
@@ -5585,9 +4038,9 @@ void Engine::runTrackNode(int slot, const float* const* in, float* outL, float* 
             if (std::fabs(desired - s.gain) < 1e-6) s.gain = desired;
         }
         const double gain = volumeMod && s.gain > 0.0 ? faderGain(faderPosition(s.gain) + volumeMod[i]) : s.gain;  // muted stays silent
-        const double vl = (stereo ? static_cast<double>(insertL_[i]) : finiteOr0(y[i])) * gain;
-        const double vr = stereo ? static_cast<double>(insertR_[i]) * gain : vl;
-        const double v = stereo ? 0.5 * (vl + vr) : vl;  // the scope and tail test read the mid
+        const double vl = static_cast<double>(insertL_[i]) * gain;
+        const double vr = static_cast<double>(insertR_[i]) * gain;
+        const double v = 0.5 * (vl + vr);  // the scope and tail test read the mid
         double gl = s.gl, gr = s.gr;
         if (panAutomated || panMod) {
             double automatedPan = panAutomated ? automationValue(s.automation->pan, step, pan) : pan;
@@ -5609,33 +4062,9 @@ void Engine::runTrackNode(int slot, const float* const* in, float* outL, float* 
     storeMax(s.peakL, peakL);
     storeMax(s.peakR, peakR);
     s.correlation.process(outL, outR, m);
-    if (tail && s.tailFade != 0) {  // a capped tail fading out (or faded: silence until it is ended)
-        const int len = std::max(1, static_cast<int>(kSwapSeconds * sr_));
-        for (int i = 0; i < m; ++i) {
-            const float g = s.tailFade > 0 ? static_cast<float>(s.tailFade) / static_cast<float>(len) : 0.0f;
-            if (s.tailFade > 0 && --s.tailFade == 0) s.tailFade = -1;
-            outL[i] *= g;
-            outR[i] *= g;
-        }
-    }
-    if (modulation_->listens(slot)) {  // a modulator hears this track (#161): after its effects, and after the fader
-        const float* preL = insertL_;
-        const float* preR = insertR_;
-        if (!stereo) {
-            for (int i = 0; i < m; ++i) preL_[i] = tail ? 0.0f : routeSample(finiteOr0(y[i]));
-            preL = preR = preL_;
-        }
-        modulation_->tapAudio(slot, preL, preR, outL, outR, static_cast<uint32_t>(m));
-    }
-    if (s.sends && s.sends->count > 0) {
-        const float* preL = insertL_;
-        const float* preR = insertR_;
-        if (!stereo) {
-            for (int i = 0; i < m; ++i) preL_[i] = tail ? 0.0f : routeSample(finiteOr0(y[i]));
-            preL = preR = preL_;
-        }
-        runRoutes(s, preL, preR, outL, outR, m, !(target > 0.0), false);
-    }
+    // A modulator hears this track (#161): after its effects, and after the fader.
+    if (modulation_->listens(slot)) modulation_->tapAudio(slot, insertL_, insertR_, outL, outR, static_cast<uint32_t>(m));
+    if (s.sends && s.sends->count > 0) runRoutes(s, insertL_, insertR_, outL, outR, m, !(target > 0.0), false);
     if (s.delay || s.delayFadeLeft > 0) runDelay(s, outL, outR, m);  // in time where it meets the others
     if (s.tapL) {  // an offline stem: what the track sends on, as it meets the others
         std::copy_n(outL, m, s.tapL + tapAt_);
@@ -5647,10 +4076,7 @@ void Engine::runTrackNode(int slot, const float* const* in, float* outL, float* 
         return;
     }
     s.lastN = s.n0 + m - 1;
-    const int64_t next = g_ + m;
-    s.expectG = after(next);
-    s.contiguous = true;
-    s.progress.store(static_cast<float>(static_cast<double>(s.n0 + m) / s.cur->layerLen), std::memory_order_relaxed);
+    s.progress.store(static_cast<float>(static_cast<double>(s.n0 + m) / s.layerLen), std::memory_order_relaxed);
 }
 
 // A folder bus: its children arrive summed in float on the graph's summing input, and sends into it in its own
@@ -5742,11 +4168,11 @@ void Engine::runBusNode(int slot, const float* inL, const float* inR, float* out
     }
     if (s.removing && s.gain == 0.0 && canRetire(3)) {
         // Faded out: the slot is free again, with its inserts, delay and routes.
-        Retired r{nullptr, &s, nullptr, nullptr, nullptr, nullptr, s.inserts};
+        Retired r{&s, nullptr, nullptr, nullptr, nullptr, s.inserts};
         r.delay = s.delay;
         r.sends = s.sends;
         retireEntry(r);
-        retire(nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, s.insertsFading);
+        retire(nullptr, nullptr, nullptr, nullptr, nullptr, s.insertsFading);
         if (s.delayFading) {
             Retired d;
             d.delay = s.delayFading;
@@ -5901,7 +4327,7 @@ void Engine::runMasterNode(const float* inL, const float* inR, float* outL, floa
             }
             if (masterFadeLeft_ == 0 && masterFading_) {
                 if (canRetire(1)) {
-                    retire(nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, masterFading_);
+                    retire(nullptr, nullptr, nullptr, nullptr, nullptr, masterFading_);
                     masterFading_ = nullptr;
                 } else {
                     masterFadeLeft_ = 1;

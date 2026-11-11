@@ -22,18 +22,13 @@ ProjectSpec groove() {
     ProjectSpec p;
     p.bpm = 140;
     p.loopBars = 4;
-    p.modules.push_back({"kick", "---\nmode: float\n---\nsine(50 + 200 * ad(step%4==0, 0.0005, 0.05)) * ad(step%4==0, 0.001, 0.3)", {}});
-    p.modules.push_back({"byte", "t*(t>>5|t>>8)", {}});
-    LayerSpec a;
-    a.id = "k";
+    // A one-step note every 4 steps, and a 3-bar riff against the 4-bar project.
+    p.modules.push_back({"kick", "---\nkind: pattern\nlength: 4\n---\n0 C2 1 1\n"});
+    p.modules.push_back({"riff", "---\nkind: pattern\nlength: 48\n---\n0 A2 3 1\n5 C3 2 0.7\n17 E3 5 0.9\n30 G2 1/2 0.6\n"});
+    LayerSpec a = cawtest::testSignalNotesLayer("k", cawtest::Shape::Sine, "kick", {{"level", 0.8}});
     a.name = "Kick";
-    a.chain = {"kick"};
-    a.lengthSteps = 4;
-    LayerSpec b;
-    b.id = "b";
-    b.name = "Byte";
-    b.chain = {"byte"};
-    b.lengthSteps = 48;  // 3 bars against the 4-bar project
+    LayerSpec b = cawtest::testSignalNotesLayer("b", cawtest::Shape::Saw, "riff", {{"level", 0.5}});
+    b.name = "Riff";
     b.volume = 0.3;
     p.layers = {a, b};
     return p;
@@ -190,7 +185,7 @@ TEST(one_shot_of_a_cpp_instrument_plays_one_note_to_its_tail) {
     CHECK(std::fabs(r.samples[static_cast<size_t>(r.frames - 1) * 2]) < 0.01f);
     // Clips set the length: one clip of 8 steps from step 4 (12 steps, 72000 frames at 120 BPM) plays its note.
     p.layers[0].instrument = cawtest::testSignal(cawtest::Shape::Sine, {{"mode", 1}});
-    p.modules.push_back({"pat", "---\nkind: pattern\nlength: 8\n---\n0 C4 8 1\n", {}});
+    p.modules.push_back({"pat", "---\nkind: pattern\nlength: 8\n---\n0 C4 8 1\n"});
     p.layers[0].clips = {ClipSpec{"c", "pat", 4, 8, 0, false, false}};
     CHECK(renderExport(p, o, r));
     CHECK(r.frames > 71900 && r.frames <= 72000);
@@ -199,32 +194,6 @@ TEST(one_shot_of_a_cpp_instrument_plays_one_note_to_its_tail) {
     for (int64_t f = 24000; f < 71000; ++f) during = std::max(during, std::fabs(r.samples[static_cast<size_t>(f) * 2]));
     CHECK_EQ(before, 0.0f);
     CHECK(during > 0.5f);
-}
-
-TEST(wavetable_frames_sweep_a_param) {
-    ProjectSpec p;
-    p.modules.push_back({"w", "---\nmode: float\n---\nparam fold = 1 in 1..8\nsin(sine(1) * fold)", {}});
-    RenderResult r;
-    ExportOptions o;
-    o.kind = ExportKind::Wavetable;
-    o.target = "w";
-    o.param = "fold";
-    o.frames = 16;
-    CHECK(renderExport(p, o, r));
-    CHECK_EQ(r.channels, 1);
-    CHECK_EQ(r.frames, int64_t{16 * kWavetableFrame});
-    float peak = 0;
-    for (float v : r.samples) peak = std::max(peak, std::fabs(v));
-    CHECK_NEAR(peak, 1.0, 1e-6);
-    // The first frame is one plain cycle, the last is folded: they differ.
-    bool differ = false;
-    for (int i = 0; i < kWavetableFrame; ++i)
-        differ = differ || std::fabs(r.samples[i] - r.samples[15 * kWavetableFrame + i]) > 0.1f;
-    CHECK(differ);
-    // Each frame is one cycle: it starts and ends near zero.
-    CHECK(std::fabs(r.samples[0]) < 0.01f);
-    o.param = "missing";
-    CHECK(!renderExport(p, o, r));
 }
 
 TEST(wavetable_frames_sweep_a_cpp_instruments_parameter) {
@@ -279,12 +248,12 @@ TEST(wavetable_frames_sweep_a_cpp_instruments_parameter) {
     CHECK(!renderExport(p, o, r));
 }
 
-TEST(export_refuses_broken_modules) {
+TEST(export_refuses_broken_patterns) {
     ProjectSpec p = groove();
-    p.modules[1].source = "t>>";
+    p.modules[1].source = "---\nkind: pattern\nlength: 48\n---\n0 Q2 3 1\n";
     RenderResult r;
     CHECK(!renderExport(p, ExportOptions{}, r));
-    CHECK(r.error.find("module 'byte'") != std::string::npos);
+    CHECK(r.error.find("pattern 'riff'") != std::string::npos);
 }
 
 TEST(loop_export_longer_than_a_wav_file_holds_is_refused_before_rendering) {
@@ -349,15 +318,17 @@ TEST(offline_export_installs_projects_larger_than_the_command_queue_and_matches_
     p.bpm = 400;
     p.loopBars = 1;
     p.master = 1.0;  // The sample assertion below is for unity master gain.
-    p.modules.push_back({"tone", "---\nmode: float\n---\n0.5", {}});
-    for (int i = 0; i < 1025; ++i) {
-        LayerSpec layer;
-        layer.id = "layer-" + std::to_string(i);
-        layer.name = layer.id;
-        layer.chain = {"tone"};
-        layer.volume = i == 1024 ? 1.0 : 0.0;
-        p.layers.push_back(std::move(layer));
+    // 1024 bus folders (a project runs at most 256 native components), then one track, all sent as commands.
+    for (int i = 0; i < 1024; ++i) {
+        LayerSpec bus;
+        bus.id = "layer-" + std::to_string(i);
+        bus.name = bus.id;
+        bus.folder = true;
+        bus.busEnabled = true;
+        bus.volume = 0.0;
+        p.layers.push_back(std::move(bus));
     }
+    p.layers.push_back(cawtest::testSignalLayer("layer-1024", cawtest::Shape::Sine, {{"freq", 220}, {"level", 0.5}}));
 
     ExportOptions options;
     options.kind = ExportKind::Free;

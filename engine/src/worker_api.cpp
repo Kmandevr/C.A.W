@@ -17,12 +17,12 @@
 #include <string>
 
 namespace {
-enum class TaskKind { Check, Project, Render, Song };
+enum class TaskKind { Project, Render, Song };
 enum class State : int32_t { Queued = 0, Running = 1, Succeeded = 2, Failed = 3, Cancelled = 4 };
 
 struct JobState {
     std::atomic<int32_t> state{static_cast<int32_t>(State::Queued)};
-    TaskKind kind = TaskKind::Check;
+    TaskKind kind = TaskKind::Project;
     alignas(4) int32_t progress = 0;
     alignas(4) int32_t cancel = 0;
     std::atomic<int32_t> resultCode{0};
@@ -35,8 +35,7 @@ struct JobState {
 
 struct WorkItem {
     std::shared_ptr<JobState> state;
-    TaskKind kind = TaskKind::Check;
-    std::string source;
+    TaskKind kind = TaskKind::Project;
     std::string projectJson;
     std::string outPath;
     std::string target;
@@ -90,29 +89,11 @@ void execute(void* raw) noexcept {
         return;
     }
     try {
-        if (item->kind == TaskKind::Check) {
-            char* output = caw_check(item->source.c_str());
-            if (!output) {
-                std::lock_guard<std::mutex> lock(state->mutex);
-                state->error = "native module check could not allocate its result";
-                state->resultCode.store(1, std::memory_order_relaxed);
-                finish(state, State::Failed);
-                return;
-            }
-            {
-                std::lock_guard<std::mutex> lock(state->mutex);
-                state->result = output;
-            }
-            caw_free(output);
-            finish(state, State::Succeeded);
-            return;
-        }
-
         if (item->kind == TaskKind::Project) {
             char* output = caw_engine_set_project(item->engine, item->projectJson.c_str());
             if (!output) {
                 std::lock_guard<std::mutex> lock(state->mutex);
-                state->error = "native project compilation could not allocate its result";
+                state->error = "native project update could not allocate its result";
                 state->resultCode.store(1, std::memory_order_relaxed);
                 finish(state, State::Failed);
                 return;
@@ -261,17 +242,6 @@ int32_t caw_worker_pool_apply(CawWorkerPool* pool, const CawExecutionRequest* re
     return 0;
 } catch (...) {
     return 5;
-}
-
-CawJob* caw_worker_pool_submit_check(CawWorkerPool* pool, const char* source, int32_t priority) try {
-    if (!pool || !source) return nullptr;
-    auto item = std::make_unique<WorkItem>();
-    item->state = std::make_shared<JobState>();
-    item->kind = TaskKind::Check;
-    item->source = source;
-    return submit(pool, std::move(item), priority);
-} catch (...) {
-    return nullptr;
 }
 
 CawJob* caw_worker_pool_submit_project(CawWorkerPool* pool, CawEngine* engine, const char* project_json,

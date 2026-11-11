@@ -8,7 +8,6 @@
 #include <vector>
 
 #include "caw.h"
-#include "capi_internal.h"
 #include "midifile.h"
 #include "pattern.h"
 #include "test.h"
@@ -19,10 +18,10 @@ namespace {
 
 using Bytes = std::vector<uint8_t>;
 
+// One of the example patterns in examples/ (the app bundles them as its pattern templates).
 std::string templateSource(const char* file) {
-    for (int i = 0; i < kTemplateCount; ++i)
-        if (std::strcmp(kTemplateFiles[i], file) == 0) return kTemplateSources[i];
-    return "";
+    std::ifstream in(std::string(CAW_ROOT) + "/examples/" + file, std::ios::binary);
+    return std::string(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
 }
 
 // A note as it sounds: ratchets expanded, probability ignored.

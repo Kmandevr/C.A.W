@@ -212,28 +212,6 @@ class NativeEngineWorkPool {
     }
   }
 
-  NativeEngineJob submitCheck(String source) {
-    final text = source.toNativeUtf8();
-    const workload = EngineWorkload.interactivePreview;
-    var began = false;
-    var tracked = false;
-    try {
-      _beginWorkload(workload);
-      began = true;
-      final handle = _bindings.workerPoolSubmitCheck(_handle, text, NativeJobPriority.foreground.index);
-      if (handle == nullptr) throw StateError('native check queue is full or has no available capacity');
-      final job = NativeEngineJob._(_bindings, handle, includeResult: true);
-      _trackJob(job, workload);
-      tracked = true;
-      return job;
-    } catch (_) {
-      if (began && !tracked) _finishWorkload(workload);
-      rethrow;
-    } finally {
-      calloc.free(text);
-    }
-  }
-
   NativeEngineJob submitProject(Pointer<Void> engine, String projectJson) {
     final json = projectJson.toNativeUtf8();
     const workload = EngineWorkload.interactivePreview;

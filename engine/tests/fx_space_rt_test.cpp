@@ -1,22 +1,13 @@
 // fx-space: the Space, Modulation and Utility effects never allocate on the audio thread (knob moves, rebuilds, display reads).
-#include <cstring>
 #include <string>
 #include <vector>
 
 #include "alloc_counter.h"
-#include "capi_internal.h"
 #include "engine.h"
 #include "test.h"
+#include "test_signal.h"
 
 using namespace caw;
-
-namespace {
-std::string fxSpaceTemplate(const char* file) {
-    for (int i = 0; i < kTemplateCount; ++i)
-        if (std::strcmp(kTemplateFiles[i], file) == 0) return kTemplateSources[i];
-    return {};
-}
-}  // namespace
 
 TEST(fx_space_effects_never_allocate_on_the_audio_thread) {
     // Every fx-space effect on one track; the convolver changes its impulse (a rebuild and crossfade while playing),
@@ -27,11 +18,7 @@ TEST(fx_space_effects_never_allocate_on_the_audio_thread) {
     ProjectSpec p;
     p.bpm = 128;
     p.loopBars = 1;
-    p.modules.push_back({"bass", fxSpaceTemplate("bass.caw"), {}});
-    LayerSpec l;
-    l.id = l.name = "b";
-    l.chain = {"bass"};
-    p.layers = {l};
+    p.layers = {cawtest::testSignalLayer("b", cawtest::Shape::Saw, {{"freq", 55}, {"level", 0.5}})};
     for (const char* id : ids) p.layers[0].components.push_back({id, {}});
     Engine e(48000);
     CHECK(e.setProject(p).find("\"ok\":true") != std::string::npos);
