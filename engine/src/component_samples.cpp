@@ -52,7 +52,7 @@ bool decodeWavBytes(const uint8_t* b, size_t size, double rate, std::vector<floa
         error = "not a WAV file (RIFF/WAVE)";
         return false;
     }
-    if (!(rate >= 8000.0 && rate <= 384000.0)) {
+    if (rate != 0.0 && !(rate >= 8000.0 && rate <= 384000.0)) {  // 0: the file's own rate (no resampling)
         error = "bad engine sample rate";
         return false;
     }
@@ -152,6 +152,7 @@ bool decodeWavBytes(const uint8_t* b, size_t size, double rate, std::vector<floa
         }
         mono[f] = static_cast<float>(sum / channels);
     }
+    if (rate == 0.0) rate = srcRate;
     try {
         out = resample(mono, srcRate, rate);
     } catch (...) {

@@ -215,7 +215,8 @@ CAW_API char* caw_engine_component_states(CawEngine* e, const char* layer_id);
 /* A new saved state for a playing component (API version 14), addressed as in caw_engine_set_component_param:
    [size] bytes at [data] (0: an empty state) as save_state would write them, at state [version]. The convolver
    (org.caw.convolver) also takes a WAV file's bytes as its state: its impulse response (checked as untrusted, at
-   most 10 s). The component's chain is rebuilt off the audio thread with every component's current values and
+   most 10 s). The flagship (org.caw.synth.flagship) takes its User wavetable: an import ("CWTI", a frame split,
+   a WAV's bytes) or its saved form ("CWT1"), laid out in docs/engine.md; no new function, the same version. The component's chain is rebuilt off the audio thread with every component's current values and
    states, this one's replaced, and crossfaded in. Returns 1, or 0 (nothing changes) when there is no such component
    or it refuses the state. It can take a while (a WAV decoded, a chain prepared): call it off the UI thread. Store
    the state in the project's entry as well ("state", base64, and "state_version") so a reload starts from it. */

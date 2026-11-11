@@ -176,6 +176,7 @@ target_include_directories(caw_cli PRIVATE src)
   target_sources(caw_tests PRIVATE tests/sample_pack_test.cpp)  # the sample-pack maker (#164)
   target_sources(caw_tests PRIVATE tests/library_kernels_test.cpp)  # Library LFO, wavetable, reverb, smoothers
   target_sources(caw_tests PRIVATE tests/flagship_test.cpp)  # the flagship synth (#171) and its kernels
+  target_sources(caw_tests PRIVATE tests/flagship_tables_test.cpp)  # its warps' aliasing and its user wavetable
   target_sources(caw_tests PRIVATE tests/quality_test.cpp)  # the quality setting (Eco, Normal, High) and the buffer mode
   target_sources(caw_tests PRIVATE tests/display_test.cpp)  # live display data, engine to UI (#173)
   target_sources(caw_tests PRIVATE tests/effects_test.cpp)  # the built-in effects suite (#173)
