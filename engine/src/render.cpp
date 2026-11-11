@@ -47,8 +47,10 @@ std::vector<LibrarySource> projectLibraries(const ProjectSpec& p) {
     return caw::projectLibraries(sources);
 }
 
+}  // namespace
+
 // Every module a render uses must compile, so an export never silently drops a broken one.
-bool checkModules(const ProjectSpec& p, std::string& err) {
+bool checkExportModules(const ProjectSpec& p, std::string& err) {
     const std::vector<LibrarySource> libs = projectLibraries(p);
     for (const LayerSpec& l : p.layers) {
         if (l.pattern.empty()) continue;
@@ -75,6 +77,8 @@ bool checkModules(const ProjectSpec& p, std::string& err) {
         }
     return true;
 }
+
+namespace {
 
 // Refuses a render that a WAV file can't hold, before anything is allocated (songs run to the 32-bit step count).
 bool fitsWav(int64_t frames, int sr, std::string& error) {
@@ -255,7 +259,7 @@ bool prepareExport(const ProjectSpec& in, const ExportOptions& o, ProjectSpec& p
         error = "sample rate must be 8000 to 192000";
         return false;
     }
-    if (o.kind != ExportKind::Wavetable && !checkModules(in, error)) return false;
+    if (o.kind != ExportKind::Wavetable && !checkExportModules(in, error)) return false;
     p = in;
     p.auditionOnly = false;
     p.auditionChain.clear();

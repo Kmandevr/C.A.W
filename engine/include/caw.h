@@ -47,7 +47,7 @@ extern "C" {
    13 (2026-11-11): 11 and 12 together (the drums branch and the meters branch merged).
    14 (2026-11-11): caw_engine_set_component_state (a playing component's new saved state: the convolver's WAV
    impulse). Nothing else changes. */
-#define CAW_API_VERSION 14
+#define CAW_API_VERSION 15
 /* The component index that names a layer's native instrument rather than one of its "components". */
 #define CAW_INSTRUMENT_INDEX 0xFFFFFFFFu
 
@@ -439,6 +439,21 @@ CAW_API void caw_engine_loudness_reset(CawEngine* e);
    over about 300 ms: 1 identical sides, 0 unrelated or silent, -1 opposite. 1 on success, 0 if layer_index is not a
    project layer. */
 CAW_API int32_t caw_engine_layer_correlation(CawEngine* e, int32_t layer_index, float* out);
+
+/* Song renders for the Export sheet (API version 15, roadmap 0.3, 6.4, 6.5): the mix and aligned stems (a file per
+   track and per folder bus: what it sends to its parent or the master, after its effects, volume and pan) over the
+   song, the loop range, a time selection or each region, with a tail (none, seconds, or until silent), peak or
+   loudness (BS.1770-5) normalisation, 16/24-bit PCM (TPDF dither at 16) or 32-bit float, and names from a pattern.
+   One engine pass per range renders every file of it, so they start on the same frame and have the same length.
+   request_json is described in docs/engine.md ("Song renders"); every file goes into its existing "out_dir". The
+   result is JSON {"ok", "error", "files":[{"path", "name", "kind", "layer", "region", "frames", "gain_db",
+   "peak_db", "lufs"}]}; free it with caw_free. progress gets 0..1000 and a non-zero *cancel stops it (either may be
+   NULL); on failure or cancel no file of the request is left. Blocks the caller for the whole render: call it from
+   a worker, never the UI or audio thread. caw_worker_pool_submit_song runs it as a cancellable job whose
+   caw_job_result is that JSON (caw_job_error the message when it fails). */
+CAW_API char* caw_render_song(const char* project_json, const char* request_json, int32_t* progress, int32_t* cancel);
+CAW_API CawJob* caw_worker_pool_submit_song(CawWorkerPool* pool, const char* project_json, const char* request_json,
+                                            int32_t priority);
 
 #ifdef __cplusplus
 }

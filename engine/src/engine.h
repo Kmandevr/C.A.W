@@ -174,6 +174,13 @@ public:
     float masterCorrelation() const noexcept { return masterCorrelation_.read(); }
     bool layerCorrelation(int index, float& out);
     int scope(int index, float* out, int n);  // a project layer index, kScopeMaster or kScopeAudition
+    // Offline renders only (stems, render_stems.cpp), while no process() runs: from the next process() on, the output
+    // of project layer `layerId` (a track or a folder bus: what it sends to its parent bus or the master, after its
+    // effects, volume, pan and latency compensation, as it meets the others) is also copied into left and right at
+    // the frames it plays in each process() call. The buffers must hold as many frames as every later call; frames
+    // the layer doesn't play are left as they are (the caller clears them). False if the layer has no slot.
+    bool setOutputTap(const std::string& layerId, float* left, float* right);
+    void clearOutputTaps();
     int64_t loopLength();                     // samples in the project loop
     // Mix-graph routing updates the graph refused; always 0 unless the routing derivation is wrong.
     uint32_t routingRejections() const noexcept { return routingRejections_.load(std::memory_order_relaxed); }
@@ -300,6 +307,7 @@ private:
     bool previewing_ = false;     // some slot holds a preview voice (still sounding or releasing)
     bool previewChunk_ = false;   // this chunk runs only the previewing slots, with the transport stopped
     bool stopEnded_ = false;      // the stop fade reached silence this callback (endPlayback runs after the chunk)
+    int tapAt_ = 0;               // audio thread: the current chunk's first frame in its process() call (output taps)
     int previewRampIn_ = 0;       // samples left of the master's fade back in for previews after a stop
     int stopFade_ = 0;  // samples left in the stop fade, 0 when not stopping
     int playRampIn_ = 0;  // samples left of the fade in after a Play mid-loop or during a stop fade (no click)
