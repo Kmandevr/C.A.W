@@ -4,7 +4,7 @@ import 'dart:io';
 
 import 'package:ffi/ffi.dart';
 
-const int cawApiVersion = 13;  // must equal CAW_API_VERSION in engine/include/caw.h
+const int cawApiVersion = 14;  // must equal CAW_API_VERSION in engine/include/caw.h
 
 final class CawMetersStruct extends Struct {
   @Float()
@@ -255,7 +255,7 @@ class Bindings {
             'caw_engine_test_tone'),
         testToneSounding = lib.lookupFunction<Int32 Function(Pointer<Void>), int Function(Pointer<Void>)>(
             'caw_engine_test_tone_sounding'),
-        // API 13: MIDI from devices, frame-accurate.
+        // API 14: MIDI from devices, frame-accurate.
         midiClockNs = lib.lookupFunction<Int64 Function(), int Function()>('caw_midi_clock_ns'),
         midiUmp = lib.lookupFunction<Int32 Function(Pointer<Void>, Pointer<Utf8>, Pointer<Uint32>, Int32, Int64),
             int Function(Pointer<Void>, Pointer<Utf8>, Pointer<Uint32>, int, int)>('caw_engine_midi_ump'),

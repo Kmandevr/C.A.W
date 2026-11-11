@@ -132,7 +132,7 @@ public:
     void notePitch(int32_t id, double pitch);  // glides a held preview to [pitch] without a new attack
     void noteOff(int32_t id);
     void notesOff();
-    // MIDI from devices (caw.h, API 13): messages for [layerId]'s instrument, queued for the audio thread, which
+    // MIDI from devices (caw.h, API 14): messages for [layerId]'s instrument, queued for the audio thread, which
     // plays each at its frame from its time on the MIDI clock (midiClockNs; 0 means now). UMP words (MIDI 1.0
     // Channel Voice ones upscaled to MIDI 2.0) or MIDI 1.0 bytes. Returns the messages queued; a full queue drops
     // the rest (counted in midiDropped). Any thread but the audio thread.
@@ -459,7 +459,7 @@ private:
     std::map<std::string, ModuleState> modules_;
     std::map<std::string, LayerState> layers_;
     std::map<int32_t, int> previewSlots_;  // control thread: each held preview's slot, for its pitch and off
-    // Device MIDI (API 13): producers push under midiPush_ (never the audio thread); the audio thread pops into
+    // Device MIDI (API 14): producers push under midiPush_ (never the audio thread); the audio thread pops into
     // midiPending_ (made with the Engine) and places each message at its frame.
     struct PendingMidi {
         Midi2Event e;

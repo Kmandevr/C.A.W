@@ -192,7 +192,7 @@ Built on the graph from the Foundation stage. Do not keep a second mixer or crea
 
 | # | Item | Status | Where | Depends on | What's missing |
 |---|---|---|---|---|---|
-| 5.1 | USB and Bluetooth MIDI device discovery, connection, status and reconnect | Built, untested on hardware | both | F5 | Android USB, Bluetooth LE (in-app scan) and UMP devices, Windows WinMM ports; a device list with activity lights and on/off; frame-accurate engine input (API 13). Windows MIDI Services not used ([app](app.md)) |
+| 5.1 | USB and Bluetooth MIDI device discovery, connection, status and reconnect | Built, untested on hardware | both | F5 | Android USB, Bluetooth LE (in-app scan) and UMP devices, Windows WinMM ports; a device list with activity lights and on/off; frame-accurate engine input (API 14). Windows MIDI Services not used ([app](app.md)) |
 | 5.2 | Note/CC routing, controller learn and editable mappings | Built, untested on hardware | both | 5.1, F6 | Learn MIDI CC on any knob's long-press sheet; mappings in the project, listed and removable in Settings › MIDI; MPE and bend range ([app](app.md)) |
 | 5.3 | MIDI clock in/out and sync | Planned | engine | 5.1 | Not built |
 | 5.4 | Control surfaces with assignable controls and feedback | Planned | both | 5.2 | Not built |

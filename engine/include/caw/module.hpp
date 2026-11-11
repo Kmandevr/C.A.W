@@ -102,6 +102,9 @@ struct ParameterDescriptor {
     // automation lane (`automatable`, above) or a MIDI CC mapping the parameter does not allow.
     bool modulatable = true;
     bool midiMappable = true;
+    // Display only: where an editor files the parameter, as a slash path ("a1/body": pad A1's body layer; "kit/glue").
+    // Built-in components set it (docs/engine.md); it is not part of the C interface, so a loaded component has none.
+    std::string_view group;
 };
 enum class UiControlKind : uint8_t { Slider, Toggle, Dropdown, XYPad, Button, Curve };
 struct UiControlDescriptor {

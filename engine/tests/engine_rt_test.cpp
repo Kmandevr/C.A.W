@@ -457,6 +457,75 @@ TEST(the_built_in_instruments_never_allocate_on_the_audio_thread) {
     CHECK_EQ(operations, 0u);
 }
 
+TEST(drums_never_allocate_on_the_audio_thread) {
+    // org.caw.drums with a full kit (glue, drive, room), a pad with every layer on and a sample, plays a busy
+    // pattern while knobs move, the quality changes, its sample is swapped and previews play: no allocation or free.
+    ProjectSpec p;
+    p.bpm = 150;
+    p.loopBars = 1;
+    p.modules.push_back({"pat", "---\nkind: pattern\nname: P\nlength: 16\n---\n0 C2 1 1\n0 F#2 1 0.8\n1 F#2 1 0.5\n"
+                                "2 E3 1 0.9\n3 F#2 1 0.6\n4 D2 1 1\n4 D#2 1 0.8\n5 A#2 1 0.7\n6 C#3 1 0.9\n7 G2 1 0.7\n"
+                                "8 C2 1 1\n8 E3 2 1\n10 D#3 1 0.8\n11 B2 1 0.7\n12 D2 1 1\n13 A2 1 0.7\n14 C3 1 0.8\n15 F#2 1 0.6\n", {}});
+    LayerSpec l = layer("drums", {});
+    l.pattern = "pat";
+    l.hasInstrument = true;
+    l.instrument.id = "org.caw.drums";
+    // Pad B1 (E3 = 52): every layer, the effects, a built-in sample.
+    l.instrument.params = {{"glue", 0.5}, {"kit_drive_type", 1}, {"room", 0.3}, {"b1_type", 13}, {"b1_body_on", 1},
+                           {"b1_click_on", 1}, {"b1_noise_on", 1}, {"b1_noise_mode", 1}, {"b1_metal_on", 1},
+                           {"b1_metal_mode", 1}, {"b1_res_on", 1}, {"b1_smp_on", 1}, {"b1_drive_type", 1},
+                           {"b1_flt", 2}, {"b1_eq_low", 3}, {"b1_tr_attack", 0.5}, {"b1_comp", 0.5}, {"b1_rnd_pitch", 30},
+                           {"b1_poly", 4}, {"b1_level", -6}, {"b1_sub_on", 1}, {"b1_sub_wave", 2}, {"b1_sub_drive", 0.5},
+                           {"b1_sub_lp", 300}, {"b1_sub_follow", 0.5}, {"b1_penv_mode", 1}, {"b1_drive_lo", 100},
+                           {"b1_drive_hi", 6000}, {"b1_drive_mix", 0.6}, {"b1_clip", 2}, {"b1_clip_gain", 6},
+                           {"b1_width", 0.7}, {"b1_room_send", 0.5}, {"b1_press_tone", 0.5}, {"b1_rnd_pos", 0.5},
+                           {"kit_low", 3}, {"kit_high", -2}, {"kit_clip", 1}, {"kit_clip_gain", 4}, {"room_predelay", 20}};
+    l.instrument.samples = {{16, "", "Clap"}};
+    p.layers.push_back(l);
+    Engine e(48000);
+    CHECK(e.setProject(p).find("\"ok\":true") != std::string::npos);
+    e.play();
+    std::vector<float> L(192), R(192);
+    for (int k = 0; k < 250; ++k) e.process(L.data(), R.data(), 192);  // warm up
+    std::size_t operations = 0;
+    float peak = 0.0f;
+    for (int round = 0; round < 6; ++round) {
+        e.setQuality(round % 3);
+        e.setComponentParam("drums", Engine::kInstrumentIndex, "a1_body_decay", 0.2 + 0.3 * round);
+        e.setComponentParam("drums", Engine::kInstrumentIndex, "b1_metal_mode", round % 3);
+        e.setComponentParam("drums", Engine::kInstrumentIndex, "b1_res_model", round % 6);
+        e.setComponentParam("drums", Engine::kInstrumentIndex, "a7_metal_open", 0.2 * round);
+        e.setComponentParam("drums", Engine::kInstrumentIndex, "a1_punch", round % 2 ? 0.8 : -0.5);
+        e.setComponentParam("drums", Engine::kInstrumentIndex, "view_pad", round * 3);
+        e.setComponentParam("drums", Engine::kInstrumentIndex, "b1_drive_type", round + 3);  // fold .. asymmetric
+        e.setComponentParam("drums", Engine::kInstrumentIndex, "b1_penv_p2", 4.0 * round);
+        e.noteOn("drums", 300 + round, 52 + round, 1);
+        if (round == 3) {  // a sample swap: decoded here, on the control thread; the audio thread only exchanges
+            ProjectSpec q = p;
+            q.layers[0].instrument.samples = {{16, "", "Crash"}};
+            CHECK(e.setProject(q).find("\"ok\":true") != std::string::npos);
+        }
+        cawtest::AllocationScope scope;
+        for (int k = 0; k < 100; ++k) {
+            e.process(L.data(), R.data(), 192);
+            for (float v : L) peak = v > peak ? v : peak;
+        }
+        operations += scope.count();
+        float display[1024];
+        e.componentDisplay("drums", Engine::kInstrumentIndex, display, 1024);
+    }
+    CHECK_EQ(operations, 0u);
+    CHECK(peak > 0.01f);
+    e.notesOff();
+    e.stop();
+    {
+        cawtest::AllocationScope scope;
+        for (int k = 0; k < 500; ++k) e.process(L.data(), R.data(), 192);  // the tails, the room, then sleep
+        operations = scope.count();
+    }
+    CHECK_EQ(operations, 0u);
+}
+
 TEST(a_pattern_edit_while_notes_sound_never_allocates_on_the_audio_thread) {
     // #170: held notes carried across a pattern edit (a native instrument's and a .caw voice's) take their new
     // note's curve on the audio thread: the match is worked out on the control thread, the curve copy fits.
@@ -533,7 +602,7 @@ TEST(count_in_metronome_and_released_touches_never_allocate_on_the_audio_thread)
 }
 
 TEST(device_midi_never_allocates_on_the_audio_thread) {
-    // MIDI from a device (API 13), stopped and playing, on a native instrument and a .caw voice chain: notes, poly
+    // MIDI from a device (API 14), stopped and playing, on a native instrument and a .caw voice chain: notes, poly
     // and channel pressure, bend, sustain, CCs, MPE and a release, all played from the queue without allocating.
     ProjectSpec p;
     p.bpm = 120;

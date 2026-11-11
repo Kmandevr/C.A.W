@@ -137,7 +137,7 @@ struct Engine::Slot {
     bool seam = false;          // the shadow lane finishes the previous pass this chunk
     bool fade = false;          // the replaced chain plays on in the fade lane this chunk
     bool previewing = false;    // audio thread: the chain holds a preview voice, or its sound is still dying away
-    DeviceNotes deviceNotes;    // audio thread: the device MIDI channels' bend and pedal (API 13)
+    DeviceNotes deviceNotes;    // audio thread: the device MIDI channels' bend and pedal (API 14)
     int64_t previewQuiet = 0;   // samples the track's output has been below kPreviewQuiet
     int64_t previewTail = 0;    // samples since its last preview voice ended
     int64_t previewN = 0;       // stopped: the sample in the layer's loop that preview chunks run from
@@ -2751,7 +2751,7 @@ void Engine::notesOff() {
     if (send(c)) previewSlots_.clear();
 }
 
-// ---- Device MIDI (API 13) ----
+// ---- Device MIDI (API 14) ----
 
 int64_t Engine::midiClockNs() noexcept {
     return std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now().time_since_epoch())

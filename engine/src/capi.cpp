@@ -1,5 +1,6 @@
 // C API implementation (everything except the audio device, which lives in engine/platform).
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -7,6 +8,7 @@
 #include <string>
 
 #include "caw.h"
+#include "builtin_drums.h"
 #include "presets.h"
 #include "capi_internal.h"
 #include "compile.h"
@@ -441,13 +443,33 @@ extern "C" char* caw_migrate_instrument(const char* entry_json) try {
     return dup(std::string("{\"ok\":false,\"error\":\"") + kOutOfMemory + "\"}");
 }
 
+extern "C" char* caw_drums_info(void) try {
+    return dup(caw::drumsInfoJson());
+} catch (...) {
+    return dup(std::string("{\"ok\":false,\"error\":\"") + kOutOfMemory + "\"}");
+}
+
+extern "C" char* caw_drums_randomize(int32_t type, uint32_t seed, double amount, int32_t pad, const char* current_json) try {
+    return dup(caw::drumsRandomizeJson(type, seed, std::isfinite(amount) ? amount : 0.0, pad,
+                                       current_json ? std::string_view(current_json) : std::string_view()));
+} catch (...) {
+    return dup(std::string("{\"ok\":false,\"error\":\"") + kOutOfMemory + "\"}");
+}
+
+extern "C" char* caw_drums_explode(const char* entry_json) try {
+    if (!entry_json) return dup("{\"ok\":false,\"error\":\"missing entry\"}");
+    return dup(caw::drumsExplodeJson(entry_json));
+} catch (...) {
+    return dup(std::string("{\"ok\":false,\"error\":\"") + kOutOfMemory + "\"}");
+}
+
 extern "C" void caw_engine_set_quality(CawEngine* e, int32_t quality) {
     if (e && e->engine) e->engine->setQuality(quality);
 }
 
 extern "C" int32_t caw_engine_quality(CawEngine* e) { return e && e->engine ? e->engine->quality() : CAW_QUALITY_NORMAL; }
 
-// ---- Device MIDI (API 13) ----
+// ---- Device MIDI (API 14) ----
 
 extern "C" int64_t caw_midi_clock_ns(void) { return caw::Engine::midiClockNs(); }
 

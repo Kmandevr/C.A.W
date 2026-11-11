@@ -39,12 +39,16 @@ extern "C" {
    10 (2026-11-11): the audio device's choice and state (caw_audio_devices, caw_audio_configure,
    caw_audio_status), the metronome's sound and volume (caw_engine_set_metronome_sound) and a test tone
    (caw_engine_test_tone). Nothing else changes.
+   11 (2026-11-11): org.caw.drums (64 pads; the old org.caw.drum.* migrate to it through caw_migrate_instrument):
+   caw_drums_info, caw_drums_randomize, caw_drums_explode; a component entry's "samples" ([{"slot", "path"} or
+   {"slot", "builtin"}]) fills its sample slots; a parameter in caw_engine_components may carry "group".
    12 (2026-11-11, roadmap 2.6): live loudness and correlation meters (caw_engine_loudness,
-   caw_engine_loudness_reset, caw_engine_layer_correlation). Nothing else changes. (11 is another branch's.)
-   13 (2026-11-11): MIDI device input, frame-accurate: caw_midi_clock_ns, caw_engine_midi_ump, caw_engine_midi_bytes,
+   caw_engine_loudness_reset, caw_engine_layer_correlation). Nothing else changes.
+   13 (2026-11-11): 11 and 12 together (the drums branch and the meters branch merged).
+   14 (2026-11-11): MIDI device input, frame-accurate: caw_midi_clock_ns, caw_engine_midi_ump, caw_engine_midi_bytes,
    caw_engine_midi_release, caw_engine_set_midi_options, caw_engine_midi_dropped and caw_engine_position_at.
    Nothing else changes. */
-#define CAW_API_VERSION 13
+#define CAW_API_VERSION 14
 /* The component index that names a layer's native instrument rather than one of its "components". */
 #define CAW_INSTRUMENT_INDEX 0xFFFFFFFFu
 
@@ -321,6 +325,26 @@ CAW_API char* caw_sample_pack_render(const char* request_json, int32_t trust_lev
    Needs no engine; free with caw_free. The engine migrates a project it is given too. */
 CAW_API char* caw_migrate_instrument(const char* entry_json);
 
+/* Drums (API version 11; docs/engine.md "Drums"). Pure functions: no engine needed; free each result with caw_free.
+   caw_drums_info: the instrument's layout as JSON: {"ok", "banks", "pads_per_bank", "pads", "parameters", "globals",
+   "layers": [{"id", "name", "params": [suffix]}], "types": [name], "sounds": [{"name", "type", "description",
+   "params": {suffix: value}}], "kits": [{"name", "preset", "description", "pads": {pad: sound}}], "samples": [built-in
+   sample names], "gm": [{"note", "name", "pad"}], "display": {offsets}}. A sound's params are a pad's values
+   ("body_freq"); prefix them with the pad ("a1_") to set them.
+   caw_drums_randomize: a random (current_json NULL or with no "params") or mutated sound of drum `type` (an index of
+   "types"; -1 keeps the current sound's type) for pad `pad` (0 = A1 .. 63 = D16): the same type, seed, amount and
+   current values always give the same result. amount 0..1 is how far each knob moves toward its random target
+   (a fresh sound uses 1 when amount is 0); every drawn knob stays inside the type's range (a random kick is still a
+   kick). current_json: {"params": {id: value}} with ids prefixed for that pad or bare suffixes. Returns {"ok",
+   "type", "pad", "params": {"a1_...": value}} with every one of the pad's parameters.
+   caw_drums_explode: for a Drums instrument entry ({"id", "params", "samples"}), one track per used pad:
+   {"ok", "tracks": [{"pad", "name", "notes": [key] | "other" | "all" | {"channel": n}, "choke", "instrument":
+   {"id", "params", "samples"}}], "kit": {the kit effects' values}}: each track's instrument plays that pad's sound
+   alone (Single mode, pad A1); the caller moves the pad's notes to it. */
+CAW_API char* caw_drums_info(void);
+CAW_API char* caw_drums_randomize(int32_t type, uint32_t seed, double amount, int32_t pad, const char* current_json);
+CAW_API char* caw_drums_explode(const char* entry_json);
+
 /* Sound quality, for the device's budget: Eco lowers oversampling, caps unison copies at 4, halves display
    updates and thins the built-in reverbs; High raises oversampling where a built-in has it. Takes effect at
    the next block (settings that size memory, such as oversampling, at the next project update). */
@@ -407,7 +431,7 @@ CAW_API void caw_engine_loudness_reset(CawEngine* e);
    over about 300 ms: 1 identical sides, 0 unrelated or silent, -1 opposite. 1 on success, 0 if layer_index is not a
    project layer. */
 CAW_API int32_t caw_engine_layer_correlation(CawEngine* e, int32_t layer_index, float* out);
-/* API version 13. MIDI from devices (USB, Bluetooth, Windows ports), into a track's instrument at the frame it was
+/* API version 14. MIDI from devices (USB, Bluetooth, Windows ports), into a track's instrument at the frame it was
    played. Messages are queued (1,024 at most between two audio callbacks; more are dropped and counted) and the
    audio thread plays each one a callback (plus the options' delay) after its time, so the spacing between messages
    is kept as played; one that comes later than that plays at the start of the next callback.

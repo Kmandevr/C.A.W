@@ -443,8 +443,9 @@ class AppState extends ChangeNotifier {
           mute: mute));
     }
 
-    layer('Kick', 'org.caw.drum.kick', kick, 0.9);
-    layer('Hats', 'org.caw.drum.hats', hats, 0.55);
+    // Both drum tracks play the 808 kit (org.caw.drums): the kick's pattern hits C2 (pad A1), the hats' F#2 and A#2.
+    layer('Kick', 'org.caw.drums', kick, 0.9, preset: 'Kit: 808');
+    layer('Hats', 'org.caw.drums', hats, 0.55, preset: 'Kit: 808');
     const flagship = 'org.caw.synth.flagship';
     // The filter envelope's depth: a mod slot's amount is the octaves over the cutoff knob's 9.97-octave travel.
     const cutoffOctaves = 9.965784284662087;
@@ -497,7 +498,7 @@ class AppState extends ChangeNotifier {
   int deviceNotesHeld = 0;
 
   /// MIDI from a device for [layerId]'s instrument, placed by the engine at the frame it was played ([timeNs] on the
-  /// MIDI clock; caw.h API 13). MIDI 1.0 [bytes], or UMP [words]. Tests override it to watch.
+  /// MIDI clock; caw.h API 14). MIDI 1.0 [bytes], or UMP [words]. Tests override it to watch.
   void deviceMidi(String layerId, {List<int>? bytes, List<int>? words, int timeNs = 0}) {
     final e = engine;
     if (e == null) return;
