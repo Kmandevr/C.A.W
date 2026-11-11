@@ -335,8 +335,8 @@ class _DeviceKnobState extends State<DeviceKnob> {
                     child: Column(mainAxisSize: MainAxisSize.min, children: [
                       Stack(clipBehavior: Clip.none, children: [
                         AnimatedScale(
-                          scale: (hovering || _held) && Motion.of(context) == MotionLevel.full ? 1.08 : 1,
-                          duration: Motion.fade(Motion.small, Motion.of(context)),
+                          scale: (hovering || _held) && Motion.usabilityOf(context) == MotionLevel.full ? 1.08 : 1,
+                          duration: Motion.fade(Motion.small, Motion.usabilityOf(context)),
                           child: face),
                         if (routes.isNotEmpty || links.isNotEmpty) Positioned(right: -2, top: 0, child: _CountBadge(
                           key: ValueKey('dknob-badge-${p.id}'), count: routes.length + links.length,

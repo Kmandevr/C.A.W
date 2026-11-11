@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 
 import '../../model/settings.dart';
 import '../glass.dart';
+import '../panel_motion.dart';
 import '../theme.dart';
 import '../theme_editor.dart';
 import 'settings_deps.dart';
@@ -20,7 +21,7 @@ class LookSettings extends StatelessWidget {
       settingAction('look.theme',
           icon: Icons.palette, iconColor: Neon.pink, subtitle: s.themeName,
           onTap: () => Navigator.of(context)
-              .push(MaterialPageRoute<void>(builder: (_) => GlassPage(child: ThemeEditor(settings: s))))),
+              .push(panelRoute<void>(context, (_) => GlassPage(child: ThemeEditor(settings: s))))),
       settingChoice<Density>('look.density', s.density,
           const [(Density.comfortable, 'Comfortable'), (Density.compact, 'Compact')],
           (v) => s.update((x) => x.density = v),

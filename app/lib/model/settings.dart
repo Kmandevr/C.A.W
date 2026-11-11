@@ -11,6 +11,7 @@ import '../ui/glass.dart';
 import '../ui/haptics.dart';
 import '../ui/motion.dart';
 import '../ui/theme.dart';
+import '../ui/tokens.dart' show Radii;
 import '../ui/widgets.dart' show PeakMeter;
 
 enum Density { comfortable, compact }
@@ -24,6 +25,18 @@ enum LayoutMode {
 
   const LayoutMode(this.label);
   final String label;
+}
+
+/// The UI font (a theme's look): the system's, or the bundled JetBrains Mono (the only bundled font).
+enum UiFont {
+  system('System'),
+  mono('JetBrains Mono');
+
+  const UiFont(this.label);
+  final String label;
+
+  /// The font family to give the Material theme (null: the system's).
+  String? get family => this == mono ? Neon.mono : null;
 }
 
 /// How a long-press menu opens (owner, 2026-11-09): a compact list near the finger, or a Bitwig-style ring.
@@ -256,6 +269,10 @@ class Settings extends ChangeNotifier {
     Glass.enabled = glass;
     Glass.blurEnabled = glassBlur;
     Motion.minimalProfile = performanceMode == PerformanceMode.minimal;
+    EditMotion.style = editMotionStyle;
+    EditMotion.kinds = {...editMotionKinds};
+    Radii.scale = roundness;
+    Neon.glowStrength = glowStrength;
     PeakMeter.fallDbPerSecond = meterFall;
     CodePrefs.fontSize = codeFontSize;
     CodePrefs.tabWidth = codeTabWidth;
@@ -263,8 +280,27 @@ class Settings extends ChangeNotifier {
     CodePrefs.wrap = codeWrap;
   }
 
-  /// Motion (owner, 2026-11-04): Full, Reduced (fades only) or Off. Minimal and the system setting lower it further.
+  /// Motion (owner, 2026-11-04): Full, Reduced (fades only) or Off (owner, 2026-11-11: Off keeps the motion that
+  /// helps use the app, [Motion.usability]). Minimal and the system setting lower it further.
   MotionLevel motion = MotionLevel.full;
+
+  /// Edit animations (owner, 2026-11-11): their style, and the kinds turned on ([EditMotion]).
+  EditMotionStyle editMotionStyle = EditMotionStyle.subtle;
+  Set<EditMotionKind> editMotionKinds = {...EditMotionKind.values};
+
+  /// A theme's look besides its colours: the UI font, the text size (times the system's), the corners' roundness
+  /// ([Radii.scale]) and how strong the active glow is ([Neon.glowStrength]).
+  UiFont uiFont = UiFont.system;
+  double textScale = 1;
+  static const minTextScale = 0.85, maxTextScale = 1.3;
+  double roundness = 1;
+  static const maxRoundness = 2.0;
+  double glowStrength = 1;
+  static const maxGlowStrength = 2.0;
+
+  /// The profile the starter themes share (they are read-only): the look, layout and behaviour in force the last
+  /// time a starter theme was left for a custom one, put back when a starter is chosen again. Null until then.
+  Map<String, String>? baseProfile;
 
   /// Haptics on every touch, step and drag; on by default (owner).
   bool haptics = true;
@@ -464,6 +500,13 @@ class Settings extends ChangeNotifier {
         'light_auto': lightAuto,
         'vim_code': vimCode,
         'motion': motion.name,
+        'edit_motion_style': editMotionStyle.name,
+        'edit_motion_kinds': EditMotion.kindNames(editMotionKinds),
+        'ui_font': uiFont.name,
+        'text_scale': textScale,
+        'roundness': roundness,
+        'glow_strength': glowStrength,
+        if (baseProfile != null) 'base_profile': baseProfile,
         'haptics': haptics,
         'haptic_strength': hapticStrength,
         'layout_mode': layoutMode.name,
@@ -555,6 +598,24 @@ class Settings extends ChangeNotifier {
     lightAuto = (j['light_auto'] as bool?) ?? lightAuto;
     vimCode = (j['vim_code'] as bool?) ?? vimCode;
     motion = pick(MotionLevel.values, j['motion'], motion);
+    editMotionStyle = pick(EditMotionStyle.values, j['edit_motion_style'], editMotionStyle);
+    final kinds = j['edit_motion_kinds'];
+    if (kinds is List) editMotionKinds = EditMotion.parseKinds(kinds);
+    uiFont = pick(UiFont.values, j['ui_font'], uiFont);
+    double? unit(String k, double min, double max) {
+      final v = j[k];
+      return v is num && v.isFinite ? v.toDouble().clamp(min, max) : null;
+    }
+    textScale = unit('text_scale', minTextScale, maxTextScale) ?? textScale;
+    roundness = unit('roundness', 0, maxRoundness) ?? roundness;
+    glowStrength = unit('glow_strength', 0, maxGlowStrength) ?? glowStrength;
+    final base = j['base_profile'];
+    if (base is Map) {
+      baseProfile = {
+        for (final e in base.entries.take(256))
+          if (e.key is String && e.value is String && CawTheme.isProfileKey(e.key as String)) e.key as String: e.value as String,
+      };
+    }
     if (j['haptics'] is bool) haptics = j['haptics'] as bool;
     final hs = j['haptic_strength'];
     if (hs is num && hs.isFinite) hapticStrength = hs.toDouble().clamp(0.0, 1.0);
@@ -690,9 +751,15 @@ class Settings extends ChangeNotifier {
     _shownLook = _lookKey;
   }
 
-  /// What a look change compares: the theme and the code editor's font, tabs, numbers and wrap (they are read when
-  /// an editor builds, so a change rebuilds the screens once on leaving Settings, as a theme change does).
-  String get _lookKey => '${activeTheme.toFile()}|$codeFontSize|$codeTabWidth|$codeLineNumbers|$codeWrap';
+  /// What a look change compares: the theme's colours, the parts of its look read when a widget builds (corners,
+  /// glow strength), the profiles chosen ([_profileRevision]: a new dock layout is read when the shell is made) and
+  /// the code editor's font, tabs, numbers and wrap (read when an editor builds). A change rebuilds the screens once
+  /// on leaving Settings. A profile value saved into the theme (a track height, say) doesn't count by itself.
+  String get _lookKey => '${activeTheme.copyWith(profile: const {}).toFile()}|$roundness|$glowStrength|'
+      '$_profileRevision|$codeFontSize|$codeTabWidth|$codeLineNumbers|$codeWrap';
+
+  /// Bumped each time a theme's profile is put in force, so the screens (and the dock) are made again from it.
+  int _profileRevision = 0;
 
   Future<bool> saveExportProfile(ExportProfile profile) async {
     final name = profile.name.trim();
@@ -737,7 +804,14 @@ class Settings extends ChangeNotifier {
   Future<void> _saving = Future.value();
 
   /// Writes through a temporary file so a crash mid-save never leaves half a file. Saves run one after another.
-  Future<void> save() => _saving = _saving.catchError((_) {}).then((_) => _write());
+  /// With a custom theme chosen, a changed look, layout or behaviour is saved into that theme too ([syncProfile]).
+  Future<void> save() {
+    final theme = syncProfile();
+    return _saving = _saving.catchError((_) {}).then((_) async {
+      if (theme != null) await _writeTheme(theme);
+      await _write();
+    });
+  }
 
   Future<void> _write() async {
     final f = _file;
@@ -791,6 +865,132 @@ class Settings extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// The look, layout and behaviour in force, as a theme's profile ([CawTheme.profile]): what a theme saved or
+  /// exported now carries, and what choosing it later puts back.
+  Map<String, String> captureProfile() {
+    String on(bool v) => v ? 'on' : 'off';
+    String n(double v) => double.parse(v.toStringAsFixed(4)).toString();
+    return {
+      'look.font': uiFont.name,
+      'look.text_scale': n(textScale),
+      'look.roundness': n(roundness),
+      'look.glass': on(glass),
+      'look.glass_blur': on(glassBlur),
+      'look.glow_strength': n(glowStrength),
+      'look.reactive_glow': n(reactiveGlow),
+      'look.density': density.name,
+      'layout.track_height': n(trackHeight),
+      'layout.header_width': n(headerWidth),
+      'layout.track_gap': n(trackGap),
+      'layout.focus_panel_share': n(focusPanelShare),
+      'layout.dock': jsonEncode(dockLayouts),
+      'layout.toolbars': jsonEncode(editor.toJson()),
+      'behaviour.long_press_menu': longPressMenu.name,
+      'behaviour.haptics': on(haptics),
+      'behaviour.haptic_strength': n(hapticStrength),
+      'behaviour.motion': motion.name,
+      'behaviour.edit_style': editMotionStyle.name,
+      'behaviour.edit_kinds': EditMotion.kindNames(editMotionKinds).join(','),
+      'behaviour.snap': on(rollSnap),
+      'behaviour.grid': '$rollGrid',
+      'behaviour.value_grid': roll.valueGrid.name,
+    };
+  }
+
+  /// Puts [profile]'s values in force. A key it leaves out, or a value that doesn't read, keeps the current setting
+  /// (a colours-only theme changes nothing here). Doesn't notify or save.
+  void applyProfile(Map<String, String> profile) {
+    T? pick<T extends Enum>(List<T> values, String k) => values.where((e) => e.name == profile[k]).firstOrNull;
+    bool? flag(String k) => switch (profile[k]?.toLowerCase()) {
+          'on' || 'true' || 'yes' || '1' => true,
+          'off' || 'false' || 'no' || '0' => false,
+          _ => null,
+        };
+    double? number(String k, double min, double max) {
+      final v = double.tryParse(profile[k] ?? '');
+      return v == null || !v.isFinite ? null : v.clamp(min, max).toDouble();
+    }
+    Object? json(String k) {
+      try {
+        return profile[k] == null ? null : jsonDecode(profile[k]!);
+      } catch (_) {
+        return null;
+      }
+    }
+
+    uiFont = pick(UiFont.values, 'look.font') ?? uiFont;
+    textScale = number('look.text_scale', minTextScale, maxTextScale) ?? textScale;
+    roundness = number('look.roundness', 0, maxRoundness) ?? roundness;
+    glass = flag('look.glass') ?? glass;
+    glassBlur = flag('look.glass_blur') ?? glassBlur;
+    glowStrength = number('look.glow_strength', 0, maxGlowStrength) ?? glowStrength;
+    reactiveGlow = number('look.reactive_glow', 0, 1) ?? reactiveGlow;
+    density = pick(Density.values, 'look.density') ?? density;
+    // 0 is the screen's default height and width; anything else is kept in range.
+    final th = number('layout.track_height', 0, maxTrackHeight);
+    if (th != null) trackHeight = th == 0 ? 0 : th.clamp(minTrackHeight, maxTrackHeight);
+    final hw = number('layout.header_width', 0, maxHeaderWidth);
+    if (hw != null) headerWidth = hw == 0 ? 0 : hw.clamp(minHeaderWidth, maxHeaderWidth);
+    trackGap = number('layout.track_gap', 0, maxTrackGap) ?? trackGap;
+    focusPanelShare = number('layout.focus_panel_share', minFocusPanelShare, maxFocusPanelShare) ?? focusPanelShare;
+    final dock = json('layout.dock');
+    if (dock is Map) dockLayouts = {for (final e in dock.entries) if (e.key is String) e.key as String: e.value};
+    final bars = json('layout.toolbars');
+    if (bars is Map<String, dynamic>) editor = EditorLook.fromJson(bars);
+    longPressMenu = pick(LongPressMenuStyle.values, 'behaviour.long_press_menu') ?? longPressMenu;
+    haptics = flag('behaviour.haptics') ?? haptics;
+    hapticStrength = number('behaviour.haptic_strength', 0, 1) ?? hapticStrength;
+    motion = pick(MotionLevel.values, 'behaviour.motion') ?? motion;
+    editMotionStyle = pick(EditMotionStyle.values, 'behaviour.edit_style') ?? editMotionStyle;
+    final kinds = profile['behaviour.edit_kinds'];
+    if (kinds != null) editMotionKinds = EditMotion.parseKinds(kinds.split(',').map((k) => k.trim()));
+    rollSnap = flag('behaviour.snap') ?? rollSnap;
+    final grid = int.tryParse(profile['behaviour.grid'] ?? '');
+    if (grid != null && rollGrids.contains(grid)) rollGrid = grid;
+    final valueGrid = pick(ValueGrid.values, 'behaviour.value_grid');
+    if (valueGrid != null) roll = roll.copyWith(valueGrid: valueGrid);
+  }
+
+  /// Chooses the theme [name] and puts its whole profile in force (owner, 2026-11-11: switching theme switches all
+  /// of it). Leaving a starter theme keeps the current values as the starters' shared profile ([baseProfile]);
+  /// choosing a starter puts that back. Saved.
+  Future<void> chooseTheme(String name) => update((x) => x._choose(name));
+
+  void _choose(String name) {
+    final next = themeNamed(name);
+    if (isStarter(themeName) && !isStarter(next.name)) baseProfile = captureProfile();
+    if (isStarter(next.name)) {
+      if (!isStarter(themeName) && baseProfile != null) applyProfile(baseProfile!);
+    } else {
+      applyProfile(next.profile);
+    }
+    _draft = null;
+    themeName = next.name;
+    _profileRevision++;
+  }
+
+  /// With a custom theme chosen: saves the profile in force into it when it differs from the theme's (in memory;
+  /// [save] writes its file). Returns the theme to write, or null when nothing changed (a starter theme is never
+  /// changed: its profile is [baseProfile], which settings.json holds).
+  CawTheme? syncProfile() {
+    if (isStarter(themeName)) return null;
+    final i = customThemes.indexWhere((t) => t.name == themeName);
+    if (i < 0) return null;
+    final now = captureProfile();
+    final had = customThemes[i].profile;
+    if (now.entries.every((e) => had[e.key] == e.value)) return null;
+    final t = customThemes[i].copyWith(profile: {...had, ...now});
+    customThemes = [...customThemes]..[i] = t;
+    return t;
+  }
+
+  Future<void> _writeTheme(CawTheme t) async {
+    final d = _themesDir;
+    if (d == null) return;
+    await d.create(recursive: true);
+    await File('${d.path}${Platform.pathSeparator}${_fileName(t.name)}').writeAsString(t.toFile(), flush: true);
+  }
+
   /// A name not used by any theme yet, based on [name].
   String freeName(String name, {String? except}) {
     var out = name;
@@ -803,21 +1003,21 @@ class Settings extends ChangeNotifier {
 
   String _fileName(String name) => '${name.replaceAll(RegExp(r'[^A-Za-z0-9 _-]'), '_').trim()}.theme';
 
-  /// Saves [t] as a custom theme (replacing one of the same name) and makes it the chosen theme.
-  /// A starter theme's name is never overwritten: the copy gets a new name. Returns the saved theme.
+  /// Saves [t] as a custom theme (replacing one of the same name) and makes it the chosen theme, its profile in
+  /// force ([chooseTheme]; a theme saved from the editor carries the profile in force, so nothing moves). A starter
+  /// theme's name is never overwritten: the copy gets a new name. Returns the saved theme.
   Future<CawTheme> saveTheme(CawTheme t, {String? replacing}) async {
     if (isStarter(t.name)) t = t.copyWith(name: freeName('${t.name} copy'));
-    if (replacing != null && replacing != t.name && !isStarter(replacing)) await deleteTheme(replacing, save: false);
+    if (replacing != null && replacing != t.name && !isStarter(replacing)) {
+      await deleteTheme(replacing, save: false);
+      if (themeName == replacing) themeName = t.name; // renamed: not a switch away and back
+    }
     customThemes = [...customThemes.where((x) => x.name != t.name), t]
       ..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
-    final d = _themesDir;
-    if (d != null) {
-      await d.create(recursive: true);
-      await File('${d.path}${Platform.pathSeparator}${_fileName(t.name)}').writeAsString(t.toFile(), flush: true);
-    }
+    await _writeTheme(t);
     _draft = null;
-    await update((s) => s.themeName = t.name);
-    return t;
+    await chooseTheme(t.name);
+    return customThemes.firstWhere((x) => x.name == t.name, orElse: () => t);
   }
 
   Future<void> deleteTheme(String name, {bool save = true}) async {
@@ -828,7 +1028,7 @@ class Settings extends ChangeNotifier {
       final f = File('${d.path}${Platform.pathSeparator}${_fileName(name)}');
       if (await f.exists()) await f.delete();
     }
-    if (save) await update((s) => s.themeName = s.themeNamed(s.themeName).name);
+    if (save) await chooseTheme(themeName == name ? calmNeon.name : themeNamed(themeName).name);
   }
 }
 

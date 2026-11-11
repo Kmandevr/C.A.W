@@ -1,4 +1,5 @@
-// Settings › Feel: motion, haptics and their strength, the quick actions bar and how long-press menus open.
+// Settings › Feel: motion, edit animations (style and kinds), haptics and their strength, the quick actions bar and
+// how long-press menus open.
 import 'package:flutter/material.dart';
 
 import '../../model/settings.dart';
@@ -19,7 +20,28 @@ class FeelSettings extends StatelessWidget {
           const [(MotionLevel.full, 'Full'), (MotionLevel.reduced, 'Reduced'), (MotionLevel.off, 'Off')],
           (v) => s.update((x) => x.motion = v),
           icon: Icons.animation,
-          subtitle: Motion.minimalProfile ? 'Off while the Minimal profile is on' : 'Smooth, distance-aware animations and snapping'),
+          subtitle: Motion.minimalProfile
+              ? 'Off while the Minimal profile is on (drags, snapping and presses still move)'
+              : switch (s.motion) {
+                  MotionLevel.full => 'Smooth, distance-aware animations and snapping',
+                  MotionLevel.reduced => 'Fades only: nothing slides, grows or springs',
+                  MotionLevel.off => 'Only what helps: drag ghosts, snapping and press feedback',
+                }),
+      settingChoice<EditMotionStyle>('feel.editStyle', s.editMotionStyle,
+          [for (final v in EditMotionStyle.values) (v, v.label)],
+          s.motion == MotionLevel.off ? null : (v) => s.update((x) => x.editMotionStyle = v),
+          icon: Icons.auto_awesome_motion,
+          subtitle: s.motion == MotionLevel.off
+              ? 'Off with Motion off'
+              : s.editMotionStyle == EditMotionStyle.subtle
+                  ? 'Subtle: short, quiet eases'
+                  : 'Playful: a little longer, with a small overshoot'),
+      for (final k in EditMotionKind.values)
+        settingSwitch('feel.edit.${k.name}', s.editMotionKinds.contains(k),
+            s.motion == MotionLevel.off
+                ? null
+                : (v) => s.update((x) => x.editMotionKinds = v ? {...x.editMotionKinds, k} : ({...x.editMotionKinds}..remove(k))),
+            icon: Icons.animation_outlined),
       settingSwitch('feel.haptics', s.haptics, (v) => s.update((x) => x.haptics = v), icon: Icons.vibration),
       SettingRow(
         id: 'feel.hapticStrength',

@@ -84,7 +84,7 @@ class _BarsHandleState extends State<BarsHandle> {
         valueListenable: c.barsShown,
         builder: (context, shown, _) {
           final dragging = _dragging;
-          final level = Motion.of(context);
+          final level = Motion.usabilityOf(context); // a grip's feedback stays with motion Off
           final d = Motion.fade(Motion.small, level);
           final color = _past ? Neon.green : dragging ? Neon.text : Neon.dim;
           final label = !dragging

@@ -381,8 +381,9 @@ class RecordButton extends StatelessWidget {
 }
 
 /// The sections, one in front (an [IndexedStack], so each keeps its state). Switching shows the new one with a short
-/// fade and a slight rise (owner, 2026-11-10: a transition when switching sections, snappy); a fade only when motion
-/// is reduced, and nothing when it is off.
+/// fade and a slight rise (owner, 2026-11-10: a transition when switching sections, snappy), an edit animation of
+/// panels: that look with Subtle, longer with a small overshoot with Playful; a fade only when motion is reduced, and
+/// nothing when it is off or panels are turned off.
 class SectionSwitcher extends StatefulWidget {
   const SectionSwitcher({super.key, required this.index, required this.children});
   final int index;
@@ -394,17 +395,19 @@ class SectionSwitcher extends StatefulWidget {
 
 class _SectionSwitcherState extends State<SectionSwitcher> with SingleTickerProviderStateMixin {
   late final AnimationController _in = AnimationController(vsync: this, duration: Motion.standard, value: 1);
-  late final Animation<double> _curve = CurvedAnimation(parent: _in, curve: Curves.easeOutCubic);
-  late final Animation<Offset> _rise = Tween(begin: const Offset(0, 0.015), end: Offset.zero).animate(_curve);
+  late final Animation<double> _fade = CurvedAnimation(parent: _in, curve: Curves.easeOutCubic);
+  late final Animation<Offset> _rise = Tween(begin: const Offset(0, 0.015), end: Offset.zero)
+      .animate(CurvedAnimation(parent: _in, curve: _RiseCurve()));
 
   @override
   void didUpdateWidget(SectionSwitcher old) {
     super.didUpdateWidget(old);
     if (old.index == widget.index) return;
-    final level = Motion.of(context);
-    if (level == MotionLevel.off) {
+    final d = EditMotion.scaled(Motion.of(context), EditMotionKind.panels, Motion.standard);
+    if (d == null) {
       _in.value = 1;
     } else {
+      _in.duration = d;
       _in.forward(from: 0);
     }
   }
@@ -421,9 +424,15 @@ class _SectionSwitcherState extends State<SectionSwitcher> with SingleTickerProv
     final stack = IndexedStack(index: widget.index, children: [
       for (var i = 0; i < widget.children.length; i++) Dormant(awake: i == widget.index, child: widget.children[i]),
     ]);
-    final fade = FadeTransition(opacity: _curve, child: stack);
+    final fade = FadeTransition(opacity: _fade, child: stack);
     return Motion.of(context) == MotionLevel.full ? SlideTransition(position: _rise, child: fade) : fade;
   }
+}
+
+/// The section switch's rise: the ease-out it always had (Subtle), or Playful's overshoot, read as it runs.
+class _RiseCurve extends Curve {
+  @override
+  double transformInternal(double t) => EditMotion.curveOr(Curves.easeOutCubic).transform(t);
 }
 
 /// A part of the screen that is out of sight (a section behind, a dock tab not shown): while not [awake] it keeps
@@ -544,8 +553,8 @@ class _AwakeListenableBuilderState extends State<AwakeListenableBuilder> {
 }
 
 /// A panel that slides into place when it first appears: from [from] (a fraction of its own size) with a fade,
-/// over [Motion.panel] on an ease-out curve (owner, 2026-11-10: panels slide into place); a fade only with Reduced
-/// motion, nothing with Off.
+/// over [Motion.panel] on an ease-out curve (owner, 2026-11-10: panels slide into place), an edit animation of panels
+/// (longer with a small overshoot with Playful); a fade only with Reduced motion, nothing with Off or panels off.
 class SlideIn extends StatefulWidget {
   const SlideIn({super.key, required this.child, this.from = const Offset(0, 0.1)});
   final Widget child;
@@ -558,11 +567,19 @@ class SlideIn extends StatefulWidget {
 class _SlideInState extends State<SlideIn> with SingleTickerProviderStateMixin {
   late final AnimationController _c = AnimationController(vsync: this, duration: Motion.panel);
   late final Animation<double> _t = CurvedAnimation(parent: _c, curve: Curves.easeOutCubic);
+  late final Animation<double> _slide = CurvedAnimation(parent: _c, curve: _RiseCurve());
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    if (_c.isDismissed) Motion.of(context) == MotionLevel.off ? _c.value = 1 : _c.forward();
+    if (!_c.isDismissed) return;
+    final d = EditMotion.scaled(Motion.of(context), EditMotionKind.panels, Motion.panel);
+    if (d == null) {
+      _c.value = 1;
+    } else {
+      _c.duration = d;
+      _c.forward();
+    }
   }
 
   @override
@@ -575,7 +592,7 @@ class _SlideInState extends State<SlideIn> with SingleTickerProviderStateMixin {
   Widget build(BuildContext context) {
     final fade = FadeTransition(opacity: _t, child: widget.child);
     if (Motion.of(context) != MotionLevel.full) return fade;
-    return SlideTransition(position: Tween(begin: widget.from, end: Offset.zero).animate(_t), child: fade);
+    return SlideTransition(position: Tween(begin: widget.from, end: Offset.zero).animate(_slide), child: fade);
   }
 }
 

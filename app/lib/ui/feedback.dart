@@ -7,7 +7,8 @@ import 'haptics.dart';
 import 'motion.dart';
 import 'theme.dart';
 
-/// How far a pressed control shrinks with Full motion (Reduced and Off keep only the glow).
+/// How far a pressed control shrinks with Full motion (and with Off, which keeps press feedback; Reduced keeps only
+/// the glow). Press and grab feedback here runs at [Motion.usability]'s level.
 const pressedScale = 0.92;
 
 /// A control that dips and glows while a finger (or mouse button) is down on it. It only listens, so it never takes
@@ -38,7 +39,7 @@ class _PressableState extends State<Pressable> {
 
   @override
   Widget build(BuildContext context) {
-    final level = Motion.of(context);
+    final level = Motion.usabilityOf(context);
     final pressed = _down && widget.enabled;
     final color = widget.glow ?? Neon.green;
     final glow = DecoratedBox(
@@ -118,7 +119,7 @@ class GripMark extends StatelessWidget {
     final long = grabbed ? length * 2 : hovered ? length * 1.4 : length;
     final thick = grabbed ? 4.0 : hovered ? 3.0 : restThickness;
     return AnimatedContainer(
-      duration: Motion.fade(Motion.small, Motion.of(context)),
+      duration: Motion.fade(Motion.small, Motion.usabilityOf(context)),
       curve: Curves.easeOut,
       width: sideways ? thick : long,
       height: sideways ? long : thick,
