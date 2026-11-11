@@ -55,8 +55,13 @@ extern "C" {
    17 (2026-11-11): C++ in place of .caw (#160 prep), no new functions: the project JSON's "audition" takes a C++
    "instrument" and native "components" as a track does (the preview needs no .caw chain); caw_render's wavetable
    target may be a layer with a C++ instrument or a built-in instrument's id (its parameter swept), and a one-shot of
-   a C++ instrument layer with no notes plays one C4 for 0.5 s to its tail. */
-#define CAW_API_VERSION 17
+   a C++ instrument layer with no notes plays one C4 for 0.5 s to its tail.
+   18, 19 and 20: the audio-engine, modulators and note-fx changes (merged separately).
+   21 (2026-11-11, #160): the .caw language is gone. Removed: caw_check, caw_library, caw_template_count,
+   caw_template_file, caw_template_source, caw_engine_set_param, caw_engine_set_global and
+   caw_worker_pool_submit_check. A project's "modules" are patterns (note clips) only: any other module reports
+   an error in its result entry; layers' "chain" and the project's "globals" are not read. */
+#define CAW_API_VERSION 21
 /* The component index that names a layer's native instrument rather than one of its "components". */
 #define CAW_INSTRUMENT_INDEX 0xFFFFFFFFu
 
@@ -138,15 +143,12 @@ CAW_API int32_t caw_api_version(void);
 /* Strings returned by the engine are allocated; release them with caw_free. */
 CAW_API void caw_free(char* s);
 
-/* Compiles one module and returns JSON: {"ok":..., "error":..., "line":..., "col":..., "kind":..., "params":[...],
-   "exports":[...], "imports":[...], "functions":[...]} (docs/engine.md describes every field). */
-CAW_API char* caw_check(const char* source);
-
 /* Engine for live playback. */
 CAW_API CawEngine* caw_engine_create(int32_t sample_rate);
 CAW_API void caw_engine_destroy(CawEngine* e);
-/* Replaces the whole project (JSON, see docs/architecture.md). Unchanged layers keep playing; changed modules
-   hot-swap with a crossfade; a module that fails to compile keeps its last good version. Returns result JSON. */
+/* Replaces the whole project (JSON, see docs/architecture.md). Unchanged layers keep playing; a changed instrument
+   or chain crossfades in; a pattern that fails to parse keeps its last good version. Returns result JSON with one
+   entry per pattern module ({"ok", "kind":"pattern", "error", "line", "col", "notes", ...; docs/engine.md}). */
 CAW_API char* caw_engine_set_project(CawEngine* e, const char* project_json);
 /* Native component loading is never implied by a successful build. The caller must pass an explicit
    per-component trust level. Isolated is rejected until a separate-process audio host exists. */
@@ -166,7 +168,6 @@ CAW_API char* caw_engine_reload_component(CawEngine* e, const char* library_path
    "smoothing_frames","automatable","modulatable","midi_mappable","choices":[...]}],
    "ui_controls":[{"id","label","parameter_id","kind","min","max"}]}]} */
 CAW_API char* caw_engine_components(CawEngine* e);
-CAW_API void caw_engine_set_param(CawEngine* e, const char* module_id, const char* name, double value);
 /* A playing native component's parameter: component `index` (0-based) of a layer's "components"
    chain, or of "master_components" when layer_id is NULL or empty; CAW_INSTRUMENT_INDEX: the layer's
    "instrument". It ramps over the parameter's
@@ -205,8 +206,6 @@ CAW_API int32_t caw_engine_set_component_state(CawEngine* e, const char* layer_i
    project update sets the values it names again, so write the new values into the project too. */
 CAW_API int32_t caw_engine_set_send(CawEngine* e, const char* layer_id, uint32_t index, double level, int32_t pre,
                                     int32_t mute);
-/* Sets a project-wide `global` control; every module declaring it reads the new value. */
-CAW_API void caw_engine_set_global(CawEngine* e, const char* name, double value);
 /* Track and master volume: linear gain 0..3.981 (+12 dB; more is held there). Pan -1..1. */
 CAW_API void caw_engine_set_layer_mix(CawEngine* e, const char* layer_id, double volume, double pan, int32_t mute,
                                       int32_t solo);
@@ -259,11 +258,6 @@ CAW_API void caw_audio_stop(CawEngine* e);
 CAW_API int32_t caw_render(const char* project_json, const CawRenderOptions* options, const char* out_path,
                            int32_t* progress, int32_t* cancel, char* error, int32_t error_len);
 
-/* Every built-in and library function with its docs, arguments and example, plus the named constants, as JSON
-   ({"functions":[{"name","category","signature","doc","example","args":[{"name","doc","optional"}]}],
-   "constants":[...]}). Free with caw_free. */
-CAW_API char* caw_library(void);
-
 /* MIDI files for note patterns. caw_pattern_from_midi reads a Standard MIDI File (format 0 or 1) or a MIDI 2.0 Clip
    File and returns JSON {"ok":..., "error":..., "pattern":"<pattern module text>"}; free it with caw_free.
    caw_pattern_export writes a pattern module (its source text) to out_path: format 0 = Standard MIDI File (.mid),
@@ -272,11 +266,6 @@ enum { CAW_MIDI_SMF = 0, CAW_MIDI_CLIP = 1 };
 CAW_API char* caw_pattern_from_midi(const uint8_t* data, int32_t size);
 CAW_API int32_t caw_pattern_export(const char* pattern_source, double bpm, int32_t beats_per_bar, int32_t format,
                                    const char* out_path, char* error, int32_t error_len);
-
-/* Starter templates bundled with the engine (the files in examples/). Strings are static; don't free them. */
-CAW_API int32_t caw_template_count(void);
-CAW_API const char* caw_template_file(int32_t index);
-CAW_API const char* caw_template_source(int32_t index);
 
 
 /* Pure workload policy shared by the app and add-ons. Hosts supply observed capabilities;
@@ -294,7 +283,6 @@ typedef struct CawJobStatus { uint32_t struct_size; int32_t state; int32_t progr
 CAW_API CawWorkerPool* caw_worker_pool_create(uint32_t max_workers);
 CAW_API void caw_worker_pool_destroy(CawWorkerPool* pool);
 CAW_API int32_t caw_worker_pool_apply(CawWorkerPool* pool, const CawExecutionRequest* request, CawExecutionPlan* out);
-CAW_API CawJob* caw_worker_pool_submit_check(CawWorkerPool* pool, const char* source, int32_t priority);
 CAW_API CawJob* caw_worker_pool_submit_project(CawWorkerPool* pool, CawEngine* engine, const char* project_json,
                                                 int32_t priority);
 CAW_API CawJob* caw_worker_pool_submit_render(CawWorkerPool* pool, const char* project_json,
@@ -307,7 +295,7 @@ CAW_API int32_t caw_job_wait(CawJob* job, uint32_t timeout_ms);
 CAW_API int32_t caw_job_get_status(CawJob* job, CawJobStatus* out);
 CAW_API char* caw_job_result(CawJob* job);
 CAW_API char* caw_job_error(CawJob* job);
-/* Cancels queued jobs; a running render is interruptible, running checks/compiles finish. */
+/* Cancels queued jobs; a running render is interruptible, a running project update finishes. */
 CAW_API void caw_job_cancel(CawJob* job);
 CAW_API void caw_job_release(CawJob* job);
 CAW_API void caw_worker_pool_wait_idle(CawWorkerPool* pool);
