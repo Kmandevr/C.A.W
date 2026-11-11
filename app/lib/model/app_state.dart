@@ -651,6 +651,21 @@ class AppState extends ChangeNotifier {
     return pos < 0 ? null : heardStep(pos * project.engineLoopSteps / m.loopLength);
   }
 
+  /// Where the engine rendered at [timeNs] on the MIDI clock, in steps (not moved back to what was heard): the
+  /// tap-along calibration compares it with the beat. Null when the engine can't tell.
+  double? renderStepAt(int timeNs) {
+    final e = engine;
+    final m = meters;
+    if (e == null || timeNs <= 0 || m.loopLength <= 0) return null;
+    final pos = e.positionAt(timeNs);
+    return pos < 0 ? null : pos * project.engineLoopSteps / m.loopLength;
+  }
+
+  /// The tip the latency badge shows while the output adds more than 50 ms; null otherwise.
+  String? get latencyTip => latency.outputIsLate
+      ? '${latency.routeInfo.output.label} adds ${latency.outputMs.round()} ms: live playing and monitoring will feel late'
+      : null;
+
   void previewOff(int id) {
     final e = engine;
     if (e == null) return;

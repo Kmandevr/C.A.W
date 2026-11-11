@@ -9,6 +9,7 @@ import '../../model/audio_record.dart';
 import '../../model/settings.dart';
 import '../theme.dart';
 import 'audio_input_settings.dart';
+import 'latency_settings.dart';
 import 'settings_deps.dart';
 import 'settings_registry.dart';
 import 'settings_widgets.dart';
@@ -203,6 +204,7 @@ class _AudioSettingsState extends State<AudioSettings> {
           child: const Text('Play'),
         ),
       ),
+      LatencySettingsRow(state: widget.deps.state),
       if (AudioRecorder.current case final rec?) AudioInputSettings(recorder: rec) else const AudioInputSettingsOff(),
     ]);
   }
