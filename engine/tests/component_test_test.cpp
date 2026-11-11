@@ -483,11 +483,14 @@ TEST(component_test_plays_an_instrument_its_notes) {
     CHECK(at(r, {"output", "thd"}).type == Json::Type::Null);  // no sine went in
     CHECK(componentTestJson(req) == componentTestJson(req));
     // With no notes it plays one C4 for a second; a drum the same way.
-    const Json kick = run("{\"component\":\"org.caw.drum.kick\",\"cpu\":false}");
+    // (Drums in Single mode: pad A1, the 808 kick, answers every note, so the C4 plays it.)
+    const Json kick = run("{\"component\":{\"id\":\"org.caw.drums\",\"params\":{\"mode\":1}},\"cpu\":false}");
     CHECK(kick.boolean("ok", false));
     CHECK_EQ(at(kick, {"settings"}).number("signal_frames", 0), 48000.0);
-    CHECK(at(kick, {"output", "channels"}).arr[0].number("peak_db", -200) > -20);
-    CHECK(!run("{\"component\":\"org.caw.drum.kick\",\"bypass\":true}").boolean("ok", true));
+    const Json& kickChannels = at(kick, {"output", "channels"});
+    CHECK(!kickChannels.arr.empty());
+    if (!kickChannels.arr.empty()) CHECK(kickChannels.arr[0].number("peak_db", -200) > -20);
+    CHECK(!run("{\"component\":\"org.caw.drums\",\"bypass\":true}").boolean("ok", true));
 }
 
 TEST(component_test_feeds_a_keyed_effect_its_sidechain_and_key_notes) {
