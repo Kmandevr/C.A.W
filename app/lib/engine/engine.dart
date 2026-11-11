@@ -286,11 +286,79 @@ class RenderRequest {
   final double seconds;
 }
 
+/// One playback device the audio backend lists ([Engine.audioDevices]).
+class AudioDeviceInfo {
+  const AudioDeviceInfo({required this.name, this.isDefault = false, this.rates = const [], this.exclusiveRates = const []});
+  final String name;
+  final bool isDefault;
+
+  /// Native sample rates in shared and exclusive mode (0: any rate).
+  final List<int> rates, exclusiveRates;
+}
+
+/// The playback devices, the backend's name and whether it takes an exclusive-mode request (WASAPI, AAudio).
+class AudioDeviceList {
+  const AudioDeviceList({this.backend = 'none', this.exclusive = false, this.devices = const []});
+  final String backend;
+  final bool exclusive;
+  final List<AudioDeviceInfo> devices;
+
+  static AudioDeviceList fromJson(Map<String, dynamic> j) => AudioDeviceList(
+        backend: j['backend'] as String? ?? 'none',
+        exclusive: j['exclusive'] == true,
+        devices: [
+          for (final d in (j['devices'] as List? ?? const []))
+            if (d is Map && d['name'] is String)
+              AudioDeviceInfo(
+                name: d['name'] as String,
+                isDefault: d['default'] == true,
+                rates: [for (final r in (d['rates'] as List? ?? const [])) if (r is num) r.toInt()],
+                exclusiveRates: [for (final r in (d['exclusive_rates'] as List? ?? const [])) if (r is num) r.toInt()],
+              ),
+        ],
+      );
+}
+
+/// The device as it runs (caw_audio_status): what was granted, which can differ from what was asked.
+class AudioStatus {
+  const AudioStatus({
+    this.running = false,
+    this.backend = '',
+    this.device = '',
+    this.sampleRate = 0,
+    this.periodFrames = 0,
+    this.periods = 0,
+    this.exclusive = false,
+    this.lowLatency = false,
+  });
+  final bool running, exclusive, lowLatency;
+  final String backend, device;
+  final int sampleRate, periodFrames, periods;
+
+  /// The output buffer's length in ms (every period queued), the delay a played note adds before the speaker; the
+  /// converter and the speaker add a little more.
+  double get bufferMs => sampleRate <= 0 ? 0 : periodFrames * (periods <= 0 ? 1 : periods) * 1000 / sampleRate;
+
+  static AudioStatus fromJson(Map<String, dynamic> j) => AudioStatus(
+        running: j['running'] == true,
+        backend: j['backend'] as String? ?? '',
+        device: j['device'] as String? ?? '',
+        sampleRate: (j['sample_rate'] as num?)?.toInt() ?? 0,
+        periodFrames: (j['period_frames'] as num?)?.toInt() ?? 0,
+        periods: (j['periods'] as num?)?.toInt() ?? 0,
+        exclusive: j['exclusive'] == true,
+        lowLatency: j['low_latency'] == true,
+      );
+}
+
 /// Live engine plus its audio device. One per app.
 class Engine {
-  Engine._(this._b, this._handle);
+  Engine._(this._b, this._handle, this.sampleRate);
 
-  static const int sampleRate = 48000;
+  /// The rate the engine runs at unless Settings › Audio chose another (it is fixed when the engine is made).
+  static const int defaultSampleRate = 48000;
+  static const sampleRates = [44100, 48000, 88200, 96000];
+  final int sampleRate;
   static const int auditionIndex = -2;  // CAW_SCOPE_AUDITION: the audition's slot moves when the engine grows
   static const int masterIndex = -1;    // CAW_SCOPE_MASTER
 
@@ -311,15 +379,53 @@ class Engine {
   bool _nativeDestroyed = false;
   List<String> lastProjectWarnings = const [];
 
-  static Engine create() {
+  static Engine create({int sampleRate = defaultSampleRate}) {
     final b = Bindings.instance;
     if (b.apiVersion() != cawApiVersion) {
       throw StateError('engine library is API ${b.apiVersion()}, the app needs $cawApiVersion');
     }
-    final h = b.create(sampleRate);
+    final rate = sampleRates.contains(sampleRate) ? sampleRate : defaultSampleRate;
+    final h = b.create(rate);
     if (h == nullptr) throw StateError('could not create the engine');
-    return Engine._(b, h);
+    return Engine._(b, h, rate);
   }
+
+  /// The playback devices, read on a background isolate (opening the backend can take tens of milliseconds).
+  static Future<AudioDeviceList> audioDevices() => Isolate.run(() {
+        final b = Bindings.instance;
+        final r = b.audioDevices();
+        if (r == nullptr) return const AudioDeviceList();
+        final j = jsonDecode(r.toDartString()) as Map<String, dynamic>;
+        b.free(r);
+        return AudioDeviceList.fromJson(j);
+      });
+
+  /// How the device opens: [device] by name ('' the default), a callback of [periodFrames] (0: the buffer mode's)
+  /// and [exclusive] mode where the backend takes it. A running device reopens; false if it then didn't.
+  bool configureAudio({String device = '', int periodFrames = 0, bool exclusive = false}) {
+    final name = device.toNativeUtf8();
+    try {
+      return _b.audioConfigure(_handle, name, periodFrames, exclusive ? 1 : 0) == 0;
+    } finally {
+      calloc.free(name);
+    }
+  }
+
+  /// The device as it runs now.
+  AudioStatus audioStatus() {
+    final r = _b.audioStatus(_handle);
+    if (r == nullptr) return const AudioStatus();
+    final j = jsonDecode(r.toDartString()) as Map<String, dynamic>;
+    _b.free(r);
+    return AudioStatus.fromJson(j);
+  }
+
+  /// The metronome's click: [volume] 0..1 and its sound (CAW_CLICK_*: 0 Classic, 1 Wood, 2 Tick).
+  void setMetronomeSound(double volume, int sound) => _b.setMetronomeSound(_handle, volume, sound);
+
+  /// [seconds] of a 440 Hz test tone at -12 dBFS, playing or not; 0 ends it.
+  void testTone(double seconds) => _b.testTone(_handle, seconds);
+  bool get testToneSounding => _b.testToneSounding(_handle) != 0;
 
   /// Sends a whole project. Calls run one at a time on the native worker pool, off the UI isolate.
   Future<Map<String, ModuleInfo>> setProject(String json) {

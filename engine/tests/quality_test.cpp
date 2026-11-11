@@ -110,3 +110,105 @@ TEST(the_saturator_oversamples_by_quality_and_the_reverb_thins_at_eco) {
     // Still a reverb at about the same level.
     CHECK_NEAR(analysis::levels(eco.data(), eco.size()).rmsDb, analysis::levels(full.data(), full.size()).rmsDb, 1.5);
 }
+
+namespace {
+
+// The loudest sample of a one-bar count-in at 120 BPM (4 clicks) with the click at [volume] and [sound].
+float countInPeak(double volume, int sound, int* clickFrames = nullptr) {
+    ProjectSpec p;
+    p.bpm = 120;
+    p.loopBars = 1;
+    Engine e(48000);
+    if (!ok(e.setProjectOffline(p))) return -1;
+    e.setMetronomeSound(volume, sound);
+    e.playCountIn(0, 1);
+    std::vector<float> a(256), b(256);
+    float peak = 0;
+    int loud = 0;
+    for (int done = 0; done < 24000; done += 256) {  // the first beat's click and its silence after
+        e.process(a.data(), b.data(), 256);
+        for (const float v : a) {
+            peak = std::max(peak, std::fabs(v));
+            if (std::fabs(v) > 1e-4f) ++loud;
+        }
+    }
+    if (clickFrames) *clickFrames = loud;
+    return peak;
+}
+
+}  // namespace
+
+TEST(the_metronome_volume_and_sound_shape_the_click) {
+    int classic = 0, tick = 0;
+    const float full = countInPeak(1.0, CAW_CLICK_CLASSIC, &classic);
+    const float half = countInPeak(0.5, CAW_CLICK_CLASSIC);
+    CHECK(full > 0.3f);
+    CHECK(std::fabs(half - full * 0.5f) < 0.02f);
+    CHECK_EQ(countInPeak(0.0, CAW_CLICK_CLASSIC), 0.0f);
+    countInPeak(1.0, CAW_CLICK_TICK, &tick);
+    CHECK(tick > 0 && tick < classic / 2);  // the tick is far shorter
+    // Out of range: the volume is clamped and an unknown sound is the classic click.
+    CHECK(std::fabs(countInPeak(7.0, 99) - full) < 1e-6f);
+    // Through the C API (no crash on NULL).
+    caw_engine_set_metronome_sound(nullptr, 1, 0);
+    CawEngine* c = caw_engine_create(48000);
+    caw_engine_set_metronome_sound(c, 0.3, CAW_CLICK_WOOD);
+    caw_engine_destroy(c);
+}
+
+TEST(the_test_tone_plays_while_stopped_and_ends) {
+    Engine e(48000);
+    CHECK(!e.testToneSounding());
+    e.testTone(0.1);  // 4800 frames
+    CHECK(e.testToneSounding());
+    std::vector<float> a(512), b(512);
+    float peak = 0;
+    int crossings = 0;
+    float last = 0;
+    for (int done = 0; done < 4800; done += 512) {
+        e.process(a.data(), b.data(), 512);
+        for (size_t i = 0; i < a.size(); ++i) {
+            peak = std::max(peak, std::fabs(a[i]));
+            if (last < 0 && a[i] >= 0) ++crossings;
+            last = a[i];
+            CHECK_EQ(a[i], b[i]);
+        }
+    }
+    CHECK(std::fabs(peak - 0.25f) < 0.01f);
+    CHECK(crossings >= 42 && crossings <= 46);  // 440 Hz for 0.1 s
+    e.process(a.data(), b.data(), 512);
+    CHECK(!e.testToneSounding());
+    for (const float v : a) CHECK_EQ(v, 0.0f);
+    // Ended early: a 10 ms fade, then silence.
+    e.testTone(5);
+    e.process(a.data(), b.data(), 512);
+    e.testTone(0);
+    for (int i = 0; i < 2; ++i) e.process(a.data(), b.data(), 512);
+    CHECK(!e.testToneSounding());
+    CawEngine* c = caw_engine_create(48000);
+    caw_engine_test_tone(c, 1);
+    CHECK_EQ(caw_engine_test_tone_sounding(c), 1);
+    caw_engine_test_tone(c, 0);
+    caw_engine_destroy(c);
+}
+
+TEST(the_device_choice_is_kept_without_a_device) {
+    char* list = caw_audio_devices();
+    CHECK(std::string(list).find("\"devices\":[") != std::string::npos);
+    caw_free(list);
+    CawEngine* c = caw_engine_create(48000);
+    CHECK_EQ(caw_audio_configure(c, "Speakers \"USB\"", 4, CAW_AUDIO_EXCLUSIVE | 8), 0);
+    char* status = caw_audio_status(c);
+    const std::string s = status;
+    caw_free(status);
+    CHECK(s.find("\"running\":false") != std::string::npos);
+    CHECK(s.find("\"requested_device\":\"Speakers \\\"USB\\\"\"") != std::string::npos);
+    CHECK(s.find("\"requested_frames\":16") != std::string::npos);  // clamped to 16..8192
+    CHECK(s.find("\"exclusive_requested\":true") != std::string::npos);
+    CHECK_EQ(caw_audio_configure(c, nullptr, 100000, 0), 0);
+    status = caw_audio_status(c);
+    CHECK(std::string(status).find("\"requested_frames\":8192") != std::string::npos);
+    caw_free(status);
+    CHECK_EQ(caw_audio_configure(nullptr, nullptr, 0, 0), 1);
+    caw_engine_destroy(c);
+}

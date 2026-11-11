@@ -4,7 +4,7 @@ import 'dart:io';
 
 import 'package:ffi/ffi.dart';
 
-const int cawApiVersion = 8;  // must equal CAW_API_VERSION in engine/include/caw.h
+const int cawApiVersion = 10;  // must equal CAW_API_VERSION in engine/include/caw.h
 
 final class CawMetersStruct extends Struct {
   @Float()
@@ -240,7 +240,19 @@ class Bindings {
         jobCancel = lib.lookupFunction<Void Function(Pointer<Void>), void Function(Pointer<Void>)>('caw_job_cancel'),
         jobRelease = lib.lookupFunction<Void Function(Pointer<Void>), void Function(Pointer<Void>)>('caw_job_release'),
         workerPoolWaitIdle = lib.lookupFunction<Void Function(Pointer<Void>), void Function(Pointer<Void>)>(
-            'caw_worker_pool_wait_idle');
+            'caw_worker_pool_wait_idle'),
+        // API 10: the audio device's choice and state, the click's sound and a test tone.
+        audioDevices = lib.lookupFunction<Pointer<Utf8> Function(), Pointer<Utf8> Function()>('caw_audio_devices'),
+        audioConfigure = lib.lookupFunction<Int32 Function(Pointer<Void>, Pointer<Utf8>, Int32, Int32),
+            int Function(Pointer<Void>, Pointer<Utf8>, int, int)>('caw_audio_configure'),
+        audioStatus = lib.lookupFunction<Pointer<Utf8> Function(Pointer<Void>), Pointer<Utf8> Function(Pointer<Void>)>(
+            'caw_audio_status'),
+        setMetronomeSound = lib.lookupFunction<Void Function(Pointer<Void>, Double, Int32),
+            void Function(Pointer<Void>, double, int)>('caw_engine_set_metronome_sound'),
+        testTone = lib.lookupFunction<Void Function(Pointer<Void>, Double), void Function(Pointer<Void>, double)>(
+            'caw_engine_test_tone'),
+        testToneSounding = lib.lookupFunction<Int32 Function(Pointer<Void>), int Function(Pointer<Void>)>(
+            'caw_engine_test_tone_sounding');
 
   static Bindings? _instance;
 
@@ -312,4 +324,10 @@ class Bindings {
   final void Function(Pointer<Void>) jobCancel;
   final void Function(Pointer<Void>) jobRelease;
   final void Function(Pointer<Void>) workerPoolWaitIdle;
+  final Pointer<Utf8> Function() audioDevices;
+  final int Function(Pointer<Void>, Pointer<Utf8>, int, int) audioConfigure;
+  final Pointer<Utf8> Function(Pointer<Void>) audioStatus;
+  final void Function(Pointer<Void>, double, int) setMetronomeSound;
+  final void Function(Pointer<Void>, double) testTone;
+  final int Function(Pointer<Void>) testToneSounding;
 }

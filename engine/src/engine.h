@@ -128,6 +128,11 @@ public:
     // The metronome: a short built-in click on every beat while playing (accented on the bar), mixed before the
     // safety limiter. Off by default; renders and exports never click.
     void setMetronome(bool on);
+    // The click's volume (0..1) and sound (caw.h CAW_CLICK_*), read by the audio thread at each click.
+    void setMetronomeSound(double volume, int sound) noexcept;
+    // A test tone: [seconds] (0..10) of a 440 Hz sine at -12 dBFS after the master, playing or not; 0 ends it.
+    void testTone(double seconds) noexcept;
+    bool testToneSounding() const noexcept { return toneFlag_.load(std::memory_order_relaxed); }
     // Sound quality (caw.h CAW_QUALITY_*): the built-ins read it while they play (quality.h). Normal by default.
     void setQuality(int quality) noexcept;
     int quality() const noexcept { return quality_.load(std::memory_order_relaxed); }
@@ -263,6 +268,14 @@ private:
     uint32_t countInTouchStamp_ = 0;
     int clickLeft_ = 0, clickLen_ = 0;
     double clickPhase_ = 0, clickInc_ = 0, clickAmp_ = 0;
+    std::atomic<float> clickVolume_{1.0f};
+    std::atomic<int> clickSound_{0};
+    // The test tone: a request in samples from the control thread (-1: none), then the audio thread's own state.
+    std::atomic<int64_t> toneRequest_{-1};
+    std::atomic<bool> toneFlag_{false};
+    int64_t toneLeft_ = 0, toneLen_ = 0;
+    double tonePhase_ = 0;
+    void mixTestTone(float* left, float* right, int frames) noexcept;
     void startPlay(double fromStep, uint64_t playCount, uint32_t touchStamp) noexcept;
     void startClick(bool accent) noexcept;
     double nextClick() noexcept;  // the click's next sample (0 when none sounds)

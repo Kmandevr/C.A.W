@@ -2485,6 +2485,45 @@ void Engine::setMetronome(bool on) {
     send(c);
 }
 
+void Engine::setMetronomeSound(double volume, int sound) noexcept {
+    clickVolume_.store(static_cast<float>(std::isfinite(volume) ? std::clamp(volume, 0.0, 1.0) : 1.0),
+                       std::memory_order_relaxed);
+    clickSound_.store(sound >= 0 && sound <= 2 ? sound : 0, std::memory_order_relaxed);
+}
+
+void Engine::testTone(double seconds) noexcept {
+    const double s = std::isfinite(seconds) ? std::clamp(seconds, 0.0, 10.0) : 0.0;
+    toneRequest_.store(static_cast<int64_t>(s * sr_), std::memory_order_release);
+    if (s > 0) toneFlag_.store(true, std::memory_order_relaxed);
+}
+
+// The test tone, after everything else (the limiter included): 0.25 (-12 dBFS) of 440 Hz with 10 ms fades. A request
+// to end it early fades it out over those 10 ms.
+void Engine::mixTestTone(float* left, float* right, int frames) noexcept {
+    const int64_t ramp = std::max<int64_t>(1, static_cast<int64_t>(0.01 * sr_));
+    const int64_t req = toneRequest_.exchange(-1, std::memory_order_acq_rel);
+    if (req > 0) {
+        toneLeft_ = toneLen_ = req;
+        tonePhase_ = 0;
+    } else if (req == 0 && toneLeft_ > ramp) {
+        toneLen_ -= toneLeft_ - ramp;
+        toneLeft_ = ramp;
+    }
+    if (toneLeft_ <= 0) return;
+    const double inc = kTwoPi * 440.0 / sr_;
+    for (int j = 0; j < frames && toneLeft_ > 0; ++j, --toneLeft_) {
+        const double done = static_cast<double>(toneLen_ - toneLeft_);
+        const double env = std::min({1.0, (done + 1.0) / static_cast<double>(ramp),
+                                     static_cast<double>(toneLeft_) / static_cast<double>(ramp)});
+        const float v = static_cast<float>(0.25 * env * std::sin(tonePhase_));
+        tonePhase_ += inc;
+        if (tonePhase_ >= kTwoPi) tonePhase_ -= kTwoPi;
+        left[j] = std::clamp(left[j] + v, -1.0f, 1.0f);
+        right[j] = std::clamp(right[j] + v, -1.0f, 1.0f);
+    }
+    if (toneLeft_ <= 0) toneFlag_.store(false, std::memory_order_relaxed);
+}
+
 void Engine::releaseTouches() {
     // The same bookkeeping as a Play, without moving the transport: chains drop their touches at their next chunk.
     std::lock_guard<std::mutex> lock(ctl_);
@@ -2578,11 +2617,17 @@ void Engine::startPlay(double fromStep, uint64_t playCount, uint32_t touchStamp)
 
 // The metronome's click: 30 ms of a decaying sine, higher and louder on the bar's first beat. At most 0.5, so it
 // stays under the safety limiter's ceiling even where it is mixed after it (the count-in's own output).
+// The sound (setMetronomeSound) picks the length and pitch: Classic, Wood (lower and rounder) or Tick (short and
+// high); the volume scales it.
 void Engine::startClick(bool accent) noexcept {
-    clickLen_ = clickLeft_ = std::max(1, static_cast<int>(0.03 * sr_));
+    const int sound = clickSound_.load(std::memory_order_relaxed);
+    const double seconds = sound == 1 ? 0.04 : sound == 2 ? 0.008 : 0.03;
+    const double hz = sound == 1 ? (accent ? 880.0 : 660.0) : sound == 2 ? (accent ? 3520.0 : 2640.0)
+                                                                         : (accent ? 1760.0 : 1320.0);
+    clickLen_ = clickLeft_ = std::max(1, static_cast<int>(seconds * sr_));
     clickPhase_ = 0;
-    clickInc_ = kTwoPi * (accent ? 1760.0 : 1320.0) / sr_;
-    clickAmp_ = accent ? 0.5 : 0.32;
+    clickInc_ = kTwoPi * hz / sr_;
+    clickAmp_ = (accent ? 0.5 : 0.32) * static_cast<double>(clickVolume_.load(std::memory_order_relaxed));
 }
 
 double Engine::nextClick() noexcept {
@@ -4808,6 +4853,7 @@ void Engine::process(float* left, float* right, int frames) noexcept {
         i += m;
     }
     if (previewing_) updatePreviewing(frames);
+    mixTestTone(left, right, frames);
     playingFlag_.store(playing_, std::memory_order_relaxed);
     posFlag_.store(g_, std::memory_order_relaxed);
 }

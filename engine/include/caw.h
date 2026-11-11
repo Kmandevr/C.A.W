@@ -31,8 +31,11 @@ extern "C" {
    caw_engine_release_touches; track volume lanes up to +12 dB, as the faders.
    8 (2026-11-10): built-in presets ("presets" in caw_engine_components, "preset" in a component entry),
    caw_migrate_instrument (the retired synths as Flagship presets), caw_engine_set_quality and
-   caw_audio_set_buffer_mode. */
-#define CAW_API_VERSION 8
+   caw_audio_set_buffer_mode.
+   10 (2026-11-11): the audio device's choice and state (caw_audio_devices, caw_audio_configure,
+   caw_audio_status), the metronome's sound and volume (caw_engine_set_metronome_sound) and a test tone
+   (caw_engine_test_tone). Nothing else changes. */
+#define CAW_API_VERSION 10
 /* The component index that names a layer's native instrument rather than one of its "components". */
 #define CAW_INSTRUMENT_INDEX 0xFFFFFFFFu
 
@@ -321,6 +324,34 @@ CAW_API int32_t caw_engine_quality(CawEngine* e);
 CAW_API void caw_audio_set_buffer_mode(CawEngine* e, int32_t mode, int32_t recording);
 /* The device's callback size in frames while it runs (0 when stopped or unknown). */
 CAW_API int32_t caw_audio_buffer_frames(CawEngine* e);
+
+/* API version 10. The playback devices the platform's audio backend lists, as JSON: {"backend": name,
+   "exclusive": whether this backend takes an exclusive-mode request (WASAPI, AAudio), "devices": [{"name",
+   "default": bool, "rates": [native sample rates; 0 means any], "exclusive_rates": [rates offered in exclusive
+   mode]}]}. AAudio lists only the system default (Android routes it). Opens and closes the backend, so it can take
+   tens of milliseconds: call it off the UI thread, never from the audio thread. Free with caw_free. */
+CAW_API char* caw_audio_devices(void);
+/* How the device opens: on the playback device named [device_name] (NULL or empty: the system default; a name not
+   found also opens the default), with a callback of [period_frames] frames (16..8192; 0: as the buffer mode
+   chooses), and [flags]. CAW_AUDIO_EXCLUSIVE asks for exclusive mode (AAudio's exclusive sharing, its MMAP path
+   where the phone has one; WASAPI exclusive), falling back to shared when the device refuses. A running device
+   reopens with the new choice (a short gap). Returns 0, or 1 when the device was running and did not reopen. */
+#define CAW_AUDIO_EXCLUSIVE 1
+CAW_API int32_t caw_audio_configure(CawEngine* e, const char* device_name, int32_t period_frames, int32_t flags);
+/* The device as it runs, as JSON: {"running", "backend", "device", "sample_rate", "period_frames", "periods",
+   "exclusive" (granted at open), "low_latency" (the low-latency profile)} and the request ("requested_device",
+   "requested_frames", "exclusive_requested"); with no device running, {"running": false} and the request. AAudio
+   may still give a shared stream for an exclusive request without saying so. Free with caw_free. */
+CAW_API char* caw_audio_status(CawEngine* e);
+/* The metronome's (and count-in's) click: [volume] 0..1 (1 the default) and its CAW_CLICK_* sound. */
+#define CAW_CLICK_CLASSIC 0
+#define CAW_CLICK_WOOD 1
+#define CAW_CLICK_TICK 2
+CAW_API void caw_engine_set_metronome_sound(CawEngine* e, double volume, int32_t sound);
+/* A test tone: [seconds] (up to 10) of a 440 Hz sine at -12 dBFS, mixed after the master whether or not the song
+   plays, with 10 ms fades; 0 ends one early. caw_engine_test_tone_sounding says whether one still sounds. */
+CAW_API void caw_engine_test_tone(CawEngine* e, double seconds);
+CAW_API int32_t caw_engine_test_tone_sounding(CawEngine* e);
 
 #ifdef __cplusplus
 }
