@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../../engine/component_info.dart';
 import '../../model/app_state.dart';
 import '../../model/arrange_fx.dart';
+import '../../model/cpp_workbench.dart';
 import '../../model/cpp_component.dart';
 import '../../model/mixer_fx.dart';
 import '../../model/note_fx.dart';
@@ -14,6 +15,7 @@ import '../../model/device_target.dart';
 import '../devices/modulators/modulator_devices.dart' show ModulatorsSection;
 import '../devices/device_editor.dart';
 import '../devices/device_inline.dart';
+import '../cpp/plugin_screen.dart';
 import '../files/asset_picker.dart';
 import '../frame/sections.dart';
 import '../glass.dart';
@@ -301,6 +303,7 @@ class _NativeEffectCard extends StatelessWidget {
         style: state.settings.longPressMenu, actions: [
           MenuAction('bypass', use.bypass ? 'Turn on' : 'Bypass', Icons.power_settings_new, checked: use.bypass),
           if (cpp != null) const MenuAction('open', 'Open code', Icons.code),
+          if (cpp != null) const MenuAction('plugin', 'Plug-in: build, test, export…', Icons.extension_outlined),
           if (instrument) const MenuAction('replace', 'Replace…', Icons.swap_horiz),
           if (!instrument && index > 0) const MenuAction('up', 'Move up', Icons.arrow_upward),
           if (!instrument && index < layer.components.length - 1) const MenuAction('down', 'Move down', Icons.arrow_downward),
@@ -312,6 +315,10 @@ class _NativeEffectCard extends StatelessWidget {
         ]);
       if (v == 'bypass') _bypass(!use.bypass);
       if (v == 'open' && context.mounted) open();
+      if (v == 'plugin' && cpp != null && context.mounted) {
+        // The page's Open code (and its errors) go to the component's Build tab.
+        await openPluginPage(context, state.cppWorkbench(cpp.id), onOpenCode: (_) => open());
+      }
       if (v == 'replace' && context.mounted) await pickInstrument(context, state, layer);
       if (v == 'up') state.moveNativeEffect(layer, index, index - 1);
       if (v == 'down') state.moveNativeEffect(layer, index, index + 1);

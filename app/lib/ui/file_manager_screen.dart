@@ -1,5 +1,9 @@
 // Files, like Unity's Project window (owner, 2026-11-09): a folder tree, an asset grid with badges, size, breadcrumb, search and filters, and an inspector.
+import 'dart:async';
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../model/app_state.dart';
 import '../model/files_catalog.dart';
@@ -13,6 +17,7 @@ import 'files/files_tree.dart';
 import 'files/library_manager.dart';
 import 'files/project_file_actions.dart';
 import 'glass.dart';
+import 'page_closer.dart';
 import 'audio_file_actions.dart';
 import 'midi_file_actions.dart';
 import 'theme.dart';
@@ -90,6 +95,7 @@ class _FileManagerScreenState extends State<FileManagerScreen> {
 
   @override
   void dispose() {
+    _keys.dispose();
     _search.dispose();
     super.dispose();
   }
@@ -217,7 +223,7 @@ class _FileManagerScreenState extends State<FileManagerScreen> {
       case 'history':
         await showProjectRestorePoints(context, state);
       case 'library':
-        await Navigator.of(context).push(MaterialPageRoute<void>(
+        await Navigator.of(context).push(MaterialPageRoute<void>(settings: closablePage,
             builder: (_) => LibraryManagerPage(state: state, onOpenBuilder: widget.onOpenBuilder)));
     }
   }
@@ -414,6 +420,7 @@ class _FileManagerScreenState extends State<FileManagerScreen> {
         key: ValueKey(a.key),
         asset: a,
         onSelect: () {
+          _keys.requestFocus();
           setState(() => _selected = a.key);
           if (widget.explorer) (widget.onOpenAsset ?? actions.open)(a);
         },
@@ -453,8 +460,52 @@ class _FileManagerScreenState extends State<FileManagerScreen> {
             itemCount: count,
             itemBuilder: (_, i) => item(i),
           );
-    // A tap on empty space clears the selection.
-    return GestureDetector(behavior: HitTestBehavior.deferToChild, onTap: () => setState(() => _selected = null), child: body);
+    // A tap on empty space clears the selection. The keyboard moves it (arrows), opens (Enter), renames (F2) and
+    // deletes (Delete, asking first) once the grid has focus (a click on an item gives it).
+    return LayoutBuilder(builder: (context, c) {
+      // As the grid lays out: as many columns as fit [extent] wide (SliverGridDelegateWithMaxCrossAxisExtent).
+      final columns = list ? 1 : math.max(1, ((c.maxWidth - 2 * Space.s) / (extent + Space.xs)).ceil());
+      return Focus(
+        focusNode: _keys,
+        onKeyEvent: (_, e) => _onKey(e, assets, columns),
+        child: GestureDetector(behavior: HitTestBehavior.deferToChild, onTap: () => setState(() => _selected = null),
+            child: body),
+      );
+    });
+  }
+
+  /// The grid's keys (owner, 2026-11-11: a desktop browses Files from the keyboard).
+  final _keys = FocusNode(debugLabel: 'files-grid');
+
+  KeyEventResult _onKey(KeyEvent e, List<FileAsset> assets, int columns) {
+    if ((e is! KeyDownEvent && e is! KeyRepeatEvent) || assets.isEmpty) return KeyEventResult.ignored;
+    final k = e.logicalKey;
+    final i = assets.indexWhere((a) => a.key == _selected);
+    final step = switch (k) {
+      LogicalKeyboardKey.arrowRight => 1,
+      LogicalKeyboardKey.arrowLeft => -1,
+      LogicalKeyboardKey.arrowDown => columns,
+      LogicalKeyboardKey.arrowUp => -columns,
+      _ => 0,
+    };
+    if (step != 0) {
+      final next = i < 0 ? (step > 0 ? 0 : assets.length - 1) : (i + step).clamp(0, assets.length - 1);
+      setState(() => _selected = assets[next].key);
+      return KeyEventResult.handled;
+    }
+    if (i < 0 || e is KeyRepeatEvent) return KeyEventResult.ignored;
+    final a = assets[i], actions = _actions;
+    switch (k) {
+      case LogicalKeyboardKey.enter || LogicalKeyboardKey.numpadEnter:
+        (widget.explorer ? (widget.onOpenAsset ?? actions.open) : actions.open)(a);
+      case LogicalKeyboardKey.f2 when !a.builtin && a.sample == null:
+        unawaited(actions.rename(a));
+      case LogicalKeyboardKey.delete when !a.builtin:
+        unawaited(actions.delete(a));
+      default:
+        return KeyEventResult.ignored;
+    }
+    return KeyEventResult.handled;
   }
 
   @override

@@ -11,6 +11,7 @@ import '../haptics.dart';
 import '../theme.dart';
 import '../widgets.dart';
 import 'long_press_menu.dart';
+import '../pointer_input.dart';
 
 /// "bar.beat" (1-based) of [step].
 String barBeat(ProjectDoc p, int step) {
@@ -87,7 +88,10 @@ Future<void> showMarkerList(BuildContext context, AppState s) => showGlassSheet<
       final regions = [for (final m in p.markers) if (m.isRegion) m]..sort((a, b) => a.startSteps.compareTo(b.startSteps));
       Widget row(MarkerDoc m, String lead, String detail) {
         final color = Neon.layer(m.color);
-        return Builder(builder: (context) => ListTile(
+        // A right-click opens the menu a long-press does.
+        return Builder(builder: (context) => GestureDetector(
+          onSecondaryTap: () => markerMenu(context, s, m, menuAnchorOf(context)),
+          child: ListTile(
           key: ValueKey('marker-row-${m.id}'),
           dense: true,
           leading: SizedBox(width: 36, child: Center(child: Text(lead, style: Neon.code(size: 12, color: color)))),
@@ -101,14 +105,14 @@ Future<void> showMarkerList(BuildContext context, AppState s) => showGlassSheet<
             Navigator.of(context).pop();
           },
           onLongPress: () => markerMenu(context, s, m, menuAnchorOf(context)),
-        ));
+        )));
       }
       return ListView(shrinkWrap: true, children: [
         const Heading('Markers and regions'),
         if (markers.isEmpty && regions.isEmpty)
-          const Padding(padding: EdgeInsets.all(16), child: Text(
-            'None yet: long-press the ruler to add a marker or a region (Shift+M, Shift+R).',
-            style: TextStyle(color: Neon.dim))),
+          Padding(padding: const EdgeInsets.all(16), child: Text(
+            'None yet: ${PointerInput.hold} the ruler to add a marker or a region (Shift+M, Shift+R).',
+            style: const TextStyle(color: Neon.dim))),
         if (markers.isNotEmpty) const Padding(padding: EdgeInsets.fromLTRB(16, 4, 16, 0), child: Text('MARKERS',
           style: TextStyle(color: Neon.dim, fontSize: 10, letterSpacing: 1.2, fontWeight: FontWeight.w800))),
         // Keys 1–9 and 0 jump to the first ten markers (REAPER's).

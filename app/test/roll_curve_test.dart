@@ -9,6 +9,7 @@ import 'package:caw/model/app_state.dart';
 import 'package:caw/model/pattern_doc.dart';
 import 'package:caw/model/project.dart';
 import 'package:caw/ui/pattern_editor.dart';
+import 'package:flutter/gestures.dart' show kDoubleTapTimeout;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -83,8 +84,10 @@ void main() {
     await settle(tester);
     expect(at(m, 'C3').expr.bend,
         const [NotePoint(0, 0), NotePoint(0.25, 1), NotePoint(0.5, 2), NotePoint(1, 0)], reason: m.source);
+    // The point's double tap is timed by the wall clock (DateTime.now): the first tap was kept apart from it by real
+    // time past the timeout, and its two taps go back to back, so a slow machine can't push them apart.
+    await tester.runAsync(() => Future<void>.delayed(kDoubleTapTimeout + const Duration(milliseconds: 100)));
     await tester.tapAt(Offset(_x(4), _c3 - 32));
-    await tester.pump(const Duration(milliseconds: 80));
     await tester.tapAt(Offset(_x(4), _c3 - 32));
     await settle(tester);
     expect(at(m, 'C3').expr.bend, const [NotePoint(0, 0), NotePoint(0.25, 1), NotePoint(1, 0)], reason: m.source);

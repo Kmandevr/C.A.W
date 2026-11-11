@@ -218,9 +218,21 @@ class _PackageChecklistState extends State<PackageChecklist> {
 
 /// Import project: a .caw (plain or package) or an old .cawproj, as a new project.
 Future<void> importPortableProject(BuildContext context, AppState state) async {
+  final String? path;
   try {
-    final path = await ProjectFilePicker.pickImport();
-    if (path == null || !context.mounted) return;
+    path = await ProjectFilePicker.pickImport();
+  } catch (e) {
+    if (context.mounted) _snack(context, 'Project import failed: $e');
+    return;
+  }
+  if (path == null || !context.mounted) return;
+  await importProjectFromPath(context, state, path);
+}
+
+/// Imports the project file at [path] (a .caw or .cawproj opened with the app or dropped on its window, or one the
+/// picker chose), asking first, as a new project.
+Future<void> importProjectFromPath(BuildContext context, AppState state, String path) async {
+  try {
     final result = await state.importProjectFile(path,
         confirm: (project) async {
           if (!context.mounted) return false;

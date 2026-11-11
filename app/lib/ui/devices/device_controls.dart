@@ -9,6 +9,7 @@ import '../../model/modulation.dart';
 import '../arrange/knob.dart' show Taper;
 import '../feedback.dart';
 import '../motion.dart';
+import '../pointer_input.dart';
 import '../theme.dart';
 import '../widgets.dart' show ResetOnDoubleTap;
 import 'device_scope.dart';
@@ -186,6 +187,14 @@ class _DeviceKnobState extends State<DeviceKnob> {
       }
     }
 
+    // The mouse wheel: a step of the travel (a fifth with Shift), or one value of a stepped parameter; a burst of
+    // turns is one undo step ([WheelSteps]).
+    void wheel(int dir, bool fine) {
+      final now = t.value(p.id);
+      final stepped = p.isChoice || p.step > 0;
+      set(stepped ? _nudge(p, now, dir) : taper.value(taper.position(now) + dir * (fine ? 0.002 : 0.01)));
+    }
+
     void longPress() {
       if (modTarget != null && links.isNotEmpty && routes.isEmpty) {
         showModLinkSheet(context, app, modTarget, onTypeValue: p.isChoice ? null : () => _typeValue(context, p, t.value(p.id)));
@@ -323,11 +332,17 @@ class _DeviceKnobState extends State<DeviceKnob> {
                     end();
                   }
                 },
+                // Right-click: what a long-press does (the Modulation sheet, or the value dialog).
+                onSecondaryTapUp: (_) => longPress(),
                 onVerticalDragStart: (d) => start(d.localPosition),
                 onVerticalDragUpdate: (d) => update(d.delta.dy),
                 onVerticalDragEnd: (_) => end(),
                 onVerticalDragCancel: end,
-                child: OverlayPortal(
+                child: WheelSteps(
+                  onStep: wheel,
+                  onEnd: t.commit,
+                  cursor: assigning != null || projAssign != null ? SystemMouseCursors.click : SystemMouseCursors.resizeUpDown,
+                  child: OverlayPortal(
                   controller: _bubble,
                   overlayChildBuilder: (_) => _ValueBubble(anchor: context, text: bubbleText, color: bubbleColor),
                   child: SizedBox(
@@ -355,6 +370,7 @@ class _DeviceKnobState extends State<DeviceKnob> {
                         style: Neon.code(size: 10, color: color).copyWith(height: 1.25)),
                     ]),
                   ),
+                ),
                 ),
               ),
             ),
@@ -741,7 +757,16 @@ class DeviceSlider extends StatelessWidget {
       onReset: () => t.set(p.id, p.defaultValue),
       child: LayoutBuilder(builder: (context, box) {
         void at(double x) => t.setLive(p.id, taper.value(x / box.maxWidth));
-        return GestureDetector(
+        // The mouse wheel steps it (Shift: finer), one undo step per burst.
+        return WheelSteps(
+          cursor: SystemMouseCursors.resizeLeftRight,
+          onStep: (dir, fine) {
+            final now = t.value(p.id);
+            t.setLive(p.id, p.isChoice || p.step > 0 ? _nudge(p, now, dir)
+                : taper.value(taper.position(now) + dir * (fine ? 0.002 : 0.01)));
+          },
+          onEnd: t.commit,
+          child: GestureDetector(
           key: ValueKey('dslider-${p.id}'),
           behavior: HitTestBehavior.opaque,
           onHorizontalDragStart: (d) {
@@ -761,7 +786,7 @@ class DeviceSlider extends StatelessWidget {
               Text(formatParamValue(p, v), style: Neon.code(size: 10, color: c)),
             ])),
           )),
-        );
+        ));
       }),
     );
   }

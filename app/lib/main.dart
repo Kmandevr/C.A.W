@@ -9,11 +9,13 @@ import 'model/automation_writer.dart';
 import 'model/live_midi.dart';
 import 'model/problem_log.dart';
 import 'model/settings.dart';
+import 'platform/desktop_window.dart';
 import 'platform/haptics_device.dart';
 import 'platform/mic_permission.dart';
 import 'platform/midi_input.dart';
 import 'ui/glass.dart';
 import 'ui/haptics.dart';
+import 'ui/page_closer.dart';
 import 'ui/shell.dart';
 import 'ui/theme.dart';
 
@@ -33,6 +35,7 @@ Future<void> main() async {
     yield LicenseEntryWithLineBreaks(['JetBrains Mono'], await rootBundle.loadString('assets/fonts/OFL.txt'));
   });
   Haptics.device = platformHapticsDevice(); // the vibrator's fine primitives on Android
+  DesktopWindow.current = platformDesktopWindow(); // the window's title and files opened with or dropped on it
   final settings = await Settings.open();
   final state = AppState(settings: settings);
   // One MIDI listener for the app's life, above the shell (which a theme change rebuilds).
@@ -58,6 +61,9 @@ class CawApp extends StatefulWidget {
 
 class _CawAppState extends State<CawApp> {
   AppState get state => widget.state;
+
+  // Which route is in front, for Esc and the mouse's Back button on closable pages.
+  final PageCloserObserver _closer = PageCloserObserver();
 
   // The theme with what it was made from: a change that leaves the look alone keeps the same theme, so nothing that
   // reads the theme rebuilds for it.
@@ -96,10 +102,11 @@ class _CawAppState extends State<CawApp> {
     debugShowCheckedModeBanner: false,
     themeAnimationDuration: Duration.zero, // theme edits repaint once, with no animation frames
     theme: _themeFor(state.settings),
+    navigatorObservers: [_closer],
     // The glass backdrop sits behind every route (glass off: the plain background). The theme's text size scales
     // the system's.
     builder: (context, child) {
-      final body = GlassBackdrop(child: child ?? const SizedBox.shrink());
+      final body = GlassBackdrop(child: PageCloser(observer: _closer, child: child ?? const SizedBox.shrink()));
       final scale = state.settings.textScale;
       if (scale == 1) return body;
       final mq = MediaQuery.of(context);

@@ -1,4 +1,4 @@
-// The one gesture surface every hero visual uses: grab (one finger drags, two pinch), tap, double-tap, long-press and the mouse wheel.
+// The one gesture surface every hero visual uses: grab (one finger drags, two pinch), tap, double-tap, long-press, right-click and the mouse wheel.
 import 'dart:async';
 
 import 'package:flutter/gestures.dart';
@@ -21,13 +21,17 @@ class GrabUpdate {
 /// single-finger drags elsewhere ([DeviceFingers.fine]).
 class GrabGesture extends StatefulWidget {
   const GrabGesture({super.key, required this.child, this.grabs, this.onStart, this.onUpdate, this.onEnd, this.onTap,
-    this.onDoubleTap, this.onLongPress, this.onScroll});
+    this.onDoubleTap, this.onLongPress, this.onSecondaryTap, this.onScroll});
   final Widget child;
   final bool Function(Offset local)? grabs;
   final void Function(Offset local, int pointers)? onStart;
   final void Function(GrabUpdate u)? onUpdate;
   final VoidCallback? onEnd;
   final void Function(Offset local)? onTap, onDoubleTap, onLongPress;
+
+  /// A right-click (a mouse's secondary button); null runs [onLongPress] there, so a right-click opens what a
+  /// long-press does.
+  final void Function(Offset local)? onSecondaryTap;
 
   /// The mouse wheel over [child] (a desktop's Q or fine value): [dy] in wheel pixels, down positive.
   final void Function(Offset local, double dy)? onScroll;
@@ -45,6 +49,7 @@ class _GrabGestureState extends State<GrabGesture> {
   DateTime? _lastTap;
   Offset _lastTapAt = Offset.zero;
   bool _grabbing = false;
+  int? _secondary; // a right button down
 
   @override
   void dispose() {
@@ -53,6 +58,10 @@ class _GrabGestureState extends State<GrabGesture> {
   }
 
   void _pointerDown(PointerDownEvent e) {
+    if (e.kind == PointerDeviceKind.mouse && e.buttons == kSecondaryMouseButton) {
+      _secondary = e.pointer;
+      return;
+    }
     if (_pointer != null) {
       _press?.cancel(); // a second finger: no tap or long press
       _moved = true;
@@ -82,6 +91,15 @@ class _GrabGestureState extends State<GrabGesture> {
   }
 
   void _pointerUp(PointerUpEvent e) {
+    if (e.pointer == _secondary) {
+      _secondary = null;
+      final menu = widget.onSecondaryTap ?? widget.onLongPress;
+      if (menu != null) {
+        DeviceFeel.tap();
+        menu(e.localPosition);
+      }
+      return;
+    }
     if (e.pointer != _pointer) return;
     _pointer = null;
     _press?.cancel();
@@ -109,6 +127,7 @@ class _GrabGestureState extends State<GrabGesture> {
     onPointerMove: _pointerMove,
     onPointerUp: _pointerUp,
     onPointerCancel: (e) {
+      if (e.pointer == _secondary) _secondary = null;
       if (e.pointer == _pointer) _pointer = null;
       _press?.cancel();
     },

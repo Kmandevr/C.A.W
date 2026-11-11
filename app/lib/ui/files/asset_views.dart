@@ -1,10 +1,12 @@
 // How Files draws assets and folders: icons with type badges, grid tiles, compact list rows, and their tap, double-tap, drag and menu gestures.
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
 import '../../model/files_catalog.dart';
 import '../frame/sections.dart';
 import '../motion.dart';
 import '../theme.dart';
+import '../pointer_input.dart';
 import '../tokens.dart';
 
 IconData assetIcon(FileAssetType t) => switch (t) {
@@ -102,7 +104,8 @@ class AssetIcon extends StatelessWidget {
 }
 
 /// Tap selects (at once), a second tap within the double-tap time opens, right-click or a long press without
-/// moving opens the menu, and a long press that moves drags the asset (when it can go on a track).
+/// moving opens the menu, and a long press that moves (a mouse: a press that moves) drags the asset (when it can go
+/// on a track).
 class AssetGestures extends StatefulWidget {
   const AssetGestures({
     super.key,
@@ -128,6 +131,7 @@ class _AssetGesturesState extends State<AssetGestures> {
   DateTime? _lastTap;
   Offset? _down;
   double _moved = 0;
+  PointerDeviceKind _kind = PointerDeviceKind.touch; // the last press's pointer
 
   void _tap() {
     final now = DateTime.now();
@@ -158,7 +162,7 @@ class _AssetGesturesState extends State<AssetGestures> {
       child: widget.child,
     );
     if (drag == null) return body;
-    return LongPressDraggable<AssetDrag>(
+    return HoldDraggable<AssetDrag>(
       data: drag,
       hapticFeedbackOnStart: false,
       onDragStarted: () {
@@ -167,13 +171,13 @@ class _AssetGesturesState extends State<AssetGestures> {
         widget.onSelect();
       },
       onDragUpdate: (d) => _moved += d.delta.distance,
-      // Held still and let go: the long-press menu.
+      // Held still and let go: the long-press menu (a finger; a mouse's drag starts at once and right-clicks for it).
       onDraggableCanceled: (_, offset) {
-        if (_moved < 12) widget.onMenu(_down ?? offset);
+        if (_moved < 12 && !isMousePointer(_kind)) widget.onMenu(_down ?? offset);
       },
       feedback: AssetDragFeedback(asset: widget.asset),
       childWhenDragging: Opacity(opacity: 0.4, child: widget.child),
-      child: body,
+      child: Listener(onPointerDown: (e) => _kind = e.kind, child: body),
     );
   }
 }

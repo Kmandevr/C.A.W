@@ -62,7 +62,9 @@ void main() {
       'Shift+S': 'roll.notes.invertDown',
       'Ctrl+W': 'roll.cursor.up',
       'Ctrl+A': 'roll.cursor.left',
-      'Ctrl+S': 'roll.cursor.down',
+      // Ctrl+S saves everywhere (owner, 2026-11-11): the cursor moves down with Ctrl+Down.
+      'Ctrl+S': 'project.save',
+      'Ctrl+Down': 'roll.cursor.down',
       'Ctrl+D': 'roll.cursor.right',
       'Ctrl+Shift+W': 'roll.cursor.jumpUp',
       'Ctrl+Shift+A': 'roll.cursor.jumpLeft',
@@ -83,12 +85,20 @@ void main() {
     expect(defaults.lookup(Area.builder, k('Alt+L')), const ActionRef.action('builder.live.toggle'));
     expect(defaults.lookup(Area.code, k('D')), const ActionRef.action('code.vim.right'));
     expect(defaults.lookup(Area.code, k('X X')), const ActionRef.action('code.vim.deleteLine'));
-    // Area keys win over global ones: Ctrl+S saves elsewhere but moves the cursor in the roll.
-    expect(defaults.lookup(Area.arranger, k('Ctrl+S')), const ActionRef.action('arranger.layer.moveDown'));
-    expect(defaults.lookup(Area.exporter, k('Ctrl+S')), const ActionRef.action('project.save'));
+    // Ctrl+S saves in every area (owner, 2026-11-11); a track moves with Alt+Up / Alt+Down.
+    for (final area in Area.values) {
+      expect(defaults.lookup(area, k('Ctrl+S')), const ActionRef.action('project.save'), reason: '$area');
+    }
+    expect(defaults.lookup(Area.arranger, k('Alt+Up')), const ActionRef.action('arranger.layer.moveUp'));
+    expect(defaults.lookup(Area.arranger, k('Alt+Down')), const ActionRef.action('arranger.layer.moveDown'));
+    expect(defaults.lookup(Area.arranger, k('Ctrl+C')), const ActionRef.action('arranger.clip.copy'));
+    expect(defaults.lookup(Area.arranger, k('Ctrl+V')), const ActionRef.action('arranger.clip.paste'));
+    expect(defaults.lookup(Area.arranger, k('Ctrl+A')), const ActionRef.action('arranger.clip.selectAll'));
+    expect(defaults.lookup(Area.arranger, k('Esc')), const ActionRef.action('arranger.clip.selectNone'));
     for (final entry in const {
-      'Ctrl+3': 'view.exporter',
-      'Ctrl+7': 'view.files',
+      'Ctrl+1': 'view.builder',
+      'Ctrl+2': 'view.files',
+      'Ctrl+3': 'view.arranger',
     }.entries) {
       expect(defaults.lookup(Area.global, k(entry.key)), ActionRef.action(entry.value));
     }
@@ -198,7 +208,9 @@ macro "Run of four"
     expect(c.single.existing, const ActionRef.action('roll.select.copyafter'));
     expect(defaults.conflictsFor(Area.code, k('X')).single.kind, ConflictKind.prefix);
     expect(defaults.conflictsFor(Area.pattern, k('T')).single.kind, ConflictKind.shadowsGlobal);
-    expect(defaults.conflictsFor(Area.global, k('Ctrl+S')).map((c) => c.area), contains(Area.pattern));
+    // Ctrl+S saves everywhere (owner, 2026-11-11), so no area shadows it; a global Ctrl+W would hit the roll's cursor.
+    expect(defaults.conflictsFor(Area.global, k('Ctrl+S')).map((c) => c.area), isNot(contains(Area.pattern)));
+    expect(defaults.conflictsFor(Area.global, k('Ctrl+W')).map((c) => c.area), contains(Area.pattern));
     expect(defaults.conflictsFor(Area.pattern, k('Alt+9')), isEmpty);
 
     final km = defaults.copy()..bind(Area.pattern, k('Q Q'), const ActionRef.action('roll.notes.delete'));

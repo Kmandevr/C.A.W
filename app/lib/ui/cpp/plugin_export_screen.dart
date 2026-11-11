@@ -1,4 +1,4 @@
-// Export as plug-in (#162): pick the format and desktop targets, set name, vendor and version, save the plug-in project (.zip) with the system picker, and read how to build and load it in a desktop DAW.
+// Export as plug-in (#162): pick the format (CLAP or VST3) and desktop targets, set name, vendor and version, save the plug-in project (.zip) with the system picker, and read how to build and load it in a desktop DAW.
 import 'dart:async';
 import 'dart:io';
 
@@ -26,8 +26,11 @@ Future<bool> _saveWithPicker(List<int> bytes, String name) async {
 }
 
 class PluginExportScreen extends StatefulWidget {
-  const PluginExportScreen({super.key, required this.workbench, this.save});
+  const PluginExportScreen({super.key, required this.workbench, this.save, this.format = PluginFormat.clap});
   final CppWorkbench workbench;
+
+  /// The format picked when the page opens (the plug-in page's CLAP or VST3 target).
+  final PluginFormat format;
   final PackageSaver? save;
 
   @override
@@ -39,7 +42,7 @@ class _PluginExportScreenState extends State<PluginExportScreen> {
   final _vendor = TextEditingController();
   final _version = TextEditingController(text: '1.0.0');
   final _url = TextEditingController();
-  PluginFormat _format = PluginFormat.clap;
+  late PluginFormat _format = widget.format;
   final _targets = {PluginTarget.windowsX64, PluginTarget.linuxX64};
   bool _busy = false;
   String? _saved, _error;
@@ -70,6 +73,7 @@ class _PluginExportScreenState extends State<PluginExportScreen> {
       final ok = await (widget.save ?? _saveWithPicker)(zipStore(pluginPackageFiles(c, s)), name);
       if (!mounted) return;
       ok ? Haptics.threshold() : Haptics.tap();
+      if (ok) w.recordExport(s.format.label, name);
       setState(() => _saved = ok ? name : null);
     } catch (e) {
       Haptics.error();
@@ -146,11 +150,13 @@ class _PluginExportScreenState extends State<PluginExportScreen> {
           '${s.fileName}-<target> from the run\'s Artifacts.',
           style: const TextStyle(fontSize: 12, color: Neon.text))),
         ToolCard(title: '2 · Load it in a DAW', color: accent, child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-          Text('Unzip the artifact and copy ${s.fileName}.clap into a CLAP folder, then rescan plug-ins in your DAW:',
+          Text(_format == PluginFormat.vst3
+              ? 'Unzip the artifact and copy the ${s.fileName}.vst3 folder (a VST3 bundle) into a VST3 folder, then rescan '
+                'plug-ins in your DAW:'
+              : 'Unzip the artifact and copy ${s.fileName}.clap into a CLAP folder, then rescan plug-ins in your DAW:',
             style: const TextStyle(fontSize: 12, color: Neon.text)),
           const SizedBox(height: 6),
-          const ToolStat('Windows', r'C:\Program Files\Common Files\CLAP'),
-          const ToolStat('Linux', '~/.clap'),
+          for (final (os, folder) in _format.folders) ToolStat(os, folder),
           const SizedBox(height: 6),
           const Text('It shows under the component\'s own name with the DAW\'s generic knobs (no custom window yet). The '
             'README in the .zip has the details and a desktop build.', style: TextStyle(fontSize: 11, color: Neon.dim)),

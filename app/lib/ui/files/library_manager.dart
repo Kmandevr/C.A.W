@@ -433,7 +433,8 @@ class _LibraryManagerViewState extends State<LibraryManagerView> {
               child: Text(_query.isEmpty ? 'This folder is empty.' : 'No modules match this search.',
                 style: const TextStyle(color: Neon.dim))),
           for (final module in modules)
-            ListTile(
+            // A right-click edits the tags, as a long-press does.
+            GestureDetector(onSecondaryTap: _selectionMode ? null : () => _editTags(module), child: ListTile(
               contentPadding: EdgeInsets.zero,
               title: Row(children: [
                 Expanded(child: Text(module.name, maxLines: 1, overflow: TextOverflow.ellipsis)),
@@ -509,7 +510,7 @@ class _LibraryManagerViewState extends State<LibraryManagerView> {
                 }
               },
               onLongPress: _selectionMode ? null : () => _editTags(module),
-            ),
+            )),
         ])),
         const SizedBox(height: 12),
         const NeonPanel(color: Neon.yellow, child: Text(

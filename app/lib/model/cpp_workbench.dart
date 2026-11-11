@@ -60,6 +60,25 @@ Future<CppBuildResult?> _desktopCMakeBuild(AppState state, CppComponentDoc compo
 
 enum CppBuildPhase { idle, building, built, failed }
 
+/// A test suite's overall verdict.
+enum PluginCheck { pass, warn, fail }
+
+/// One test-suite run: its verdict, a one-line summary, and the build ([build] counts this session's builds) and code
+/// revision it tested.
+class PluginTestRecord {
+  const PluginTestRecord(this.verdict, this.summary, {required this.build, required this.revision});
+  final PluginCheck verdict;
+  final String summary;
+  final int build, revision;
+}
+
+/// One export: what was made ("CLAP", "VST3", "Sample pack"), the file or pack, and the code revision and build then.
+class PluginExportRecord {
+  const PluginExportRecord(this.target, this.file, {required this.revision, required this.build});
+  final String target, file;
+  final int revision, build;
+}
+
 /// Where an effect plays: a track's chain (layer) or the master's (layer null), at [index] in the project's list.
 class CppEffectUse {
   const CppEffectUse(this.layer, this.index, this.use);
@@ -204,6 +223,44 @@ class CppWorkbench extends ChangeNotifier {
   @visibleForTesting
   set debugArtifactPath(String path) => _artifact = path;
 
+  // ---------- the plug-in page's record (lib/model/plugin_pipeline.dart reads it) ----------
+
+  /// Bumped on every change to the code (typing, a new file, a version restored).
+  int codeRevision = 0;
+  int? _builtRevision;
+  int _buildingRevision = 0;
+
+  /// The code revision the loaded build was made from: a build this session, else 0 when the engine loaded the saved
+  /// code's build on opening; null before any build.
+  int? get builtRevision => _builtRevision ?? (artifactPath != null ? 0 : null);
+
+  /// The last test-suite run this session, of the build [PluginTestRecord.build] names.
+  PluginTestRecord? lastTest;
+
+  /// The last plug-in project or sample pack saved from this component this session.
+  PluginExportRecord? lastExport;
+
+  /// The test suite finished a run of the current build.
+  void recordTest(PluginCheck verdict, String summary) {
+    lastTest = PluginTestRecord(verdict, summary, build: builds, revision: builtRevision ?? 0);
+    notifyListeners();
+  }
+
+  /// A plug-in project or sample pack was saved.
+  void recordExport(String target, String file) {
+    lastExport = PluginExportRecord(target, file, revision: codeRevision, build: builds);
+    notifyListeners();
+  }
+
+  /// Marks the last build as made from the code as it is now (widget tests of the plug-in page).
+  @visibleForTesting
+  void debugMarkBuilt() {
+    builds++;
+    _builtRevision = codeRevision;
+    phase = CppBuildPhase.built;
+    notifyListeners();
+  }
+
   Timer? _saveTimer, _checkTimer;
   int _editGeneration = 0;
   bool _dirty = false;
@@ -282,6 +339,7 @@ class CppWorkbench extends ChangeNotifier {
     if (!CppComponentDoc.isSafeRelativePath(path) || texts.containsKey(path)) return false;
     texts[path] = text;
     currentFile = path;
+    codeRevision++;
     _dirty = true;
     _saveTimer?.cancel();
     _saveTimer = Timer(saveDelay, () => unawaited(save()));
@@ -295,6 +353,7 @@ class CppWorkbench extends ChangeNotifier {
     texts[path] = text;
     _dirty = true;
     _editGeneration++;
+    codeRevision++;
     if (phase == CppBuildPhase.built || phase == CppBuildPhase.failed) phase = CppBuildPhase.idle;
     _saveTimer?.cancel();
     _saveTimer = Timer(saveDelay, () => unawaited(save()));
@@ -461,6 +520,7 @@ class CppWorkbench extends ChangeNotifier {
       own = true;
     }
     _checkTimer?.cancel();
+    _buildingRevision = codeRevision; // typing during the build makes it out of date
     _dirty = true;
     await save();
     phase = CppBuildPhase.building;
@@ -547,6 +607,7 @@ class CppWorkbench extends ChangeNotifier {
 
   Future<void> _built(CppComponentDoc c, NativeComponentInfo? before) async {
     builds++;
+    _builtRevision = _buildingRevision;
     phase = CppBuildPhase.built;
     // A build has the whole truth: the check's marks give way to the build's warnings (none on success).
     diagnostics = diagnostics.where((d) => !d.isError).toList();
@@ -671,6 +732,7 @@ class CppWorkbench extends ChangeNotifier {
       ..clear()
       ..addAll(v.files);
     if (!texts.containsKey(currentFile)) currentFile = fileOrder.firstOrNull ?? currentFile;
+    codeRevision++;
     _dirty = true;
     revision++;
     diagnostics = const [];

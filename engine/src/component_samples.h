@@ -80,7 +80,7 @@ private:
 // Decodes a WAV file (PCM 8/16/24/32-bit, float 32/64, 1..8 channels, extensible format) to mono floats at
 // `rate`, bounds-checked against the limits above. Control thread (file I/O). False with `error`.
 bool decodeWavFile(const std::string& path, double rate, std::vector<float>& out, std::string& error);
-// The same from bytes in memory (tests, and any host that reads the file itself).
+// The same from bytes in memory (tests, and any host that reads the file itself). Rate 0: at the file's own rate.
 bool decodeWavBytes(const uint8_t* bytes, size_t size, double rate, std::vector<float>& out, std::string& error);
 
 // Loads every named sample into `processor` (if it has slots), skipping slots whose source didn't change and

@@ -6,9 +6,65 @@ import 'dart:typed_data';
 
 const _kH = 512; // the engine's harmonics per frame (frame size 1024 / 2)
 
-/// The built-in tables' names and frame counts (`kTables`).
-const List<String> wavetableNames = ['Basic', 'Analog', 'Vocal', 'Harmonic'];
-const List<int> wavetableFrames = [4, 5, 5, 16];
+/// The tables' names and frame counts (`kTables`): the built-in ones, then User (the imported table, its frames
+/// [UserWavetable.frames]; one sine frame when none is loaded).
+const List<String> wavetableNames = ['Basic', 'Analog', 'Vocal', 'Harmonic', 'Classic', 'User'];
+const List<int> wavetableFrames = [4, 5, 5, 16, 4, 1];
+
+/// The User table's index in [wavetableNames] (`kUserTable`).
+const userTableIndex = 5;
+
+/// The User table as the flagship saves it (its component state, "CWT1": the frame count, the frame size 2048, then
+/// 16-bit samples): each frame's 2048 samples, -1..1.
+class UserWavetable {
+  UserWavetable(this.frames);
+  final List<Float32List> frames;
+
+  /// Frame size of the saved form.
+  static const frameSize = 2048;
+
+  /// The most frames the engine takes.
+  static const maxFrames = 256;
+
+  /// Parses the saved form; null for anything else (an import envelope, a damaged state).
+  static UserWavetable? parse(Uint8List b) {
+    if (b.length < 12 || b[0] != 0x43 || b[1] != 0x57 || b[2] != 0x54 || b[3] != 0x31) return null;
+    final d = ByteData.sublistView(b);
+    final n = d.getUint32(4, Endian.little), size = d.getUint32(8, Endian.little);
+    if (n < 1 || n > maxFrames || size != frameSize || b.length != 12 + n * frameSize * 2) return null;
+    return UserWavetable([
+      for (var f = 0; f < n; f++)
+        Float32List.fromList([for (var i = 0; i < frameSize; i++) d.getInt16(12 + 2 * (f * frameSize + i), Endian.little) / 32767]),
+    ]);
+  }
+
+  /// One frame at [points] samples (linearly between the saved samples).
+  Float32List frame(int f, int points) {
+    final x = frames[f.clamp(0, frames.length - 1)];
+    final out = Float32List(points);
+    for (var i = 0; i < points; i++) {
+      final p = i * frameSize / points;
+      final k = p.floor(), m = p - k;
+      out[i] = x[k] + (x[(k + 1) % frameSize] - x[k]) * m;
+    }
+    return out;
+  }
+}
+
+/// The import form of the User table the flagship takes as its state: "CWTI", [split] (0: the file is 2048-sample
+/// frames, the usual single-cycle table export, a shorter file one cycle; 1..256: cut into that many equal frames),
+/// then the WAV file's bytes. The engine decodes and checks it (untrusted) and saves the "CWT1" form.
+Uint8List wavetableImport(Uint8List wav, int split) {
+  final b = Uint8List(8 + wav.length);
+  b.setAll(0, const [0x43, 0x57, 0x54, 0x49]);
+  ByteData.sublistView(b).setUint32(4, split, Endian.little);
+  b.setAll(8, wav);
+  return b;
+}
+
+/// How many frames table [table] has ([user]: the loaded User table).
+int tableFrameCount(int table, UserWavetable? user) =>
+    table == userTableIndex ? (user?.frames.length ?? 1) : wavetableFrames[table.clamp(0, wavetableFrames.length - 1)];
 
 /// The first three formants (Hz) of A, E, I, O, U (caw/library/formant.hpp).
 const List<List<double>> vowelFormantsHz = [
@@ -125,14 +181,24 @@ final List<List<_Frame>> _tables = () {
         return Float64List.sublistView(a, 0, n);
       }(), phases),
   ];
-  return [basic, analog, vocal, sweep];
+  // Classic: sine, triangle, saw and square (rising from 0, the saw from -1, the square at +1).
+  final classic = [
+    _Frame.harmonics(Float64List.fromList([1])),
+    _Frame.function((p) => p < 0.25 ? 4 * p : (p < 0.75 ? 2 - 4 * p : 4 * p - 4)),
+    _Frame.function((p) => 2 * p - 1),
+    _Frame.function((p) => p < 0.5 ? 1.0 : -1.0),
+  ];
+  // User with none loaded: a sine.
+  final user = [_Frame.harmonics(Float64List.fromList([1]))];
+  return [basic, analog, vocal, sweep, classic, user];
 }();
 
 final Map<(int, int, int), Float32List> _frameCache = {};
 
-/// Frame [frame] of table [table], as [points] samples of one cycle (cached).
-Float32List wavetableFrame(int table, int frame, {int points = 256}) {
+/// Frame [frame] of table [table], as [points] samples of one cycle (cached; [user]: the loaded User table).
+Float32List wavetableFrame(int table, int frame, {int points = 256, UserWavetable? user}) {
   table = table.clamp(0, _tables.length - 1);
+  if (table == userTableIndex && user != null) return user.frame(frame, points);
   frame = frame.clamp(0, _tables[table].length - 1);
   return _frameCache.putIfAbsent((table, frame, points), () {
     final f = _tables[table][frame];
@@ -157,7 +223,13 @@ Float32List wavetableFrame(int table, int frame, {int points = 256}) {
 }
 
 /// The warp modes (`kWarps`).
-enum Warp { none, bend, sync, mirror, quantize, fm, fold }
+enum Warp { none, bend, sync, mirror, quantize, fm, fold, oscFm }
+
+/// What each warp is called on screen (`kWarps`).
+const List<String> warpNames = ['None', 'Bend', 'Sync', 'Mirror', 'Quantize', 'FM', 'Fold', 'Osc FM'];
+
+/// The oscillator (1..3) Osc FM on oscillator [osc] hears: the one before it, round the ring (`fmSource`).
+int oscFmSource(int osc) => osc == 1 ? 3 : osc - 1;
 
 /// sin(2 pi u), as the engine's FM and fold warps approximate it (`sineCycles`).
 double _sineCycles(double u) {
@@ -168,9 +240,13 @@ double _sineCycles(double u) {
 
 /// The phase 0..1 the table is read at for phase [t], after warp [mode] at [amount] 0..1 (the engine's `warp`);
 /// [fmRatio] is the FM warp's ratio (`oscN_fm_ratio`). The fold warp shapes the level, not the phase: [foldLevel].
-double warpPhase(double t, Warp mode, double amount, {int fmRatio = 1}) {
+/// [modulator] is Osc FM's: the modulating oscillator's sample at this phase.
+double warpPhase(double t, Warp mode, double amount, {int fmRatio = 1, double modulator = 0}) {
   if (amount <= 0) return t;
   switch (mode) {
+    case Warp.oscFm:
+      final y = t + amount * modulator.clamp(-2.0, 2.0) + 4;
+      return math.min(y - y.floorToDouble(), 0.99999994);
     case Warp.fm:
       final y = t + 0.75 * amount * _sineCycles(fmRatio.clamp(1, 16) * t) + 1;
       return math.min(y - y.floorToDouble(), 0.99999994);
@@ -201,13 +277,16 @@ double foldLevel(double v, double amount) {
 }
 
 /// One cycle of an oscillator as drawn: table [table] at frame [position] 0..1 (between frames, linearly),
-/// through [warp] at [amount], as [points] samples.
-Float32List oscillatorCycle(int table, double position, Warp warp, double amount, {int points = 256, int fmRatio = 1}) {
+/// through [warp] at [amount], as [points] samples. [user] is the loaded User table; [modulator] Osc FM's (the
+/// modulating oscillator's cycle) and [modRatio] its pitch over this one's.
+Float32List oscillatorCycle(int table, double position, Warp warp, double amount,
+    {int points = 256, int fmRatio = 1, UserWavetable? user, Float32List? modulator, double modRatio = 1}) {
   table = table.clamp(0, wavetableFrames.length - 1);
-  final pos = position.clamp(0.0, 1.0) * (wavetableFrames[table] - 1);
+  final frames = tableFrameCount(table, user);
+  final pos = position.clamp(0.0, 1.0) * (frames - 1);
   final f0 = pos.floor(), mix = pos - f0;
-  final a = wavetableFrame(table, f0, points: points);
-  final b = wavetableFrame(table, math.min(f0 + 1, wavetableFrames[table] - 1), points: points);
+  final a = wavetableFrame(table, f0, points: points, user: user);
+  final b = wavetableFrame(table, math.min(f0 + 1, frames - 1), points: points, user: user);
   double read(Float32List x, double t) {
     final p = t * points;
     final i = p.floor() % points, j = (i + 1) % points;
@@ -217,7 +296,9 @@ Float32List oscillatorCycle(int table, double position, Warp warp, double amount
 
   final out = Float32List(points);
   for (var i = 0; i < points; i++) {
-    final t = warpPhase(i / points, warp, amount, fmRatio: fmRatio);
+    final u = i / points;
+    final m = modulator == null ? 0.0 : read(modulator, (u * modRatio) % 1.0);
+    final t = warpPhase(u, warp, amount, fmRatio: fmRatio, modulator: m);
     final va = read(a, t);
     final v = mix > 0 ? va + (read(b, t) - va) * mix : va;
     out[i] = warp == Warp.fold ? foldLevel(v, amount) : v;

@@ -6,10 +6,13 @@ import 'package:flutter/material.dart';
 import '../feedback.dart';
 import '../glass.dart';
 import '../haptics.dart';
+import '../page_closer.dart';
 import '../theme.dart';
 
-/// Opens a Build tool full screen (it slides in over the editor like a device editor).
+/// Opens a Build tool full screen (it slides in over the editor like a device editor); Esc and the mouse's Back
+/// button close it.
 Future<void> openToolPage(BuildContext context, Widget page) => Navigator.of(context).push(MaterialPageRoute<void>(
+      settings: closablePage,
       builder: (_) => GlassPage(child: page),
     ));
 

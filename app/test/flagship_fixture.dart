@@ -16,7 +16,7 @@ NativeComponentInfo flagshipFixture() {
   for (var o = 1; o <= 3; o++) {
     final p = 'osc${o}_', n = 'Osc $o ';
     pick('${p}on', '${n}on', o == 1 ? 1 : 0, offOn);
-    pick('${p}table', '${n}table', 0, const ['Basic', 'Analog', 'Vocal', 'Harmonic', 'Classic']);
+    pick('${p}table', '${n}table', 0, const ['Basic', 'Analog', 'Vocal', 'Harmonic', 'Classic', 'User']);
     num('${p}frame', '${n}frame', 1 / 3, 0, 1);
     num('${p}level', '${n}level', 0.7, 0, 1);
     num('${p}pan', '${n}pan', 0, -1, 1);
@@ -25,7 +25,7 @@ NativeComponentInfo flagshipFixture() {
     num('${p}fine', '${n}fine', 0, -100, 100, 'ct');
     num('${p}phase', '${n}phase', 0, 0, 1);
     num('${p}phase_rand', '${n}phase randomness', 1, 0, 1);
-    pick('${p}warp', '${n}warp', 0, const ['None', 'Bend', 'Sync', 'Mirror', 'Quantize', 'FM', 'Fold']);
+    pick('${p}warp', '${n}warp', 0, const ['None', 'Bend', 'Sync', 'Mirror', 'Quantize', 'FM', 'Fold', 'Osc FM']);
     num('${p}warp_amt', '${n}warp amount', 0, 0, 1);
     whole('${p}unison', '${n}unison', o == 1 ? 7 : 1, 1, 16);
     num('${p}detune', '${n}detune', 25, 0, 100, 'ct');

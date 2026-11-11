@@ -28,6 +28,8 @@ import '../model/pattern_doc.dart';
 import '../model/project.dart';
 import '../model/settings.dart';
 import 'key_router.dart';
+import 'page_closer.dart';
+import 'pointer_input.dart';
 import 'note_expression.dart';
 import 'motion.dart';
 import 'theme.dart';
@@ -279,6 +281,28 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
   void _loopHoverAt(PointerHoverEvent e) {
     final on = _loopHit(e.localPosition - _origin, e.kind);
     if (on != _loopHover) setState(() => _loopHover = on);
+  }
+
+  /// The loop bar's right-click menu: back to the pattern's length, and the clip's looping off (or on).
+  Future<void> _loopMenu(Offset global) async {
+    final layer = widget.layer, clip = widget.clip;
+    if (layer == null || clip == null) return;
+    final box = Overlay.of(context).context.findRenderObject() as RenderBox;
+    final at = box.globalToLocal(global);
+    final v = await showMenu<String>(
+      context: context,
+      position: RelativeRect.fromRect(at & const Size(1, 1), Offset.zero & box.size),
+      items: [
+        _menuHead('Loop'),
+        PopupMenuItem(value: 'reset', enabled: clip.loopSteps != null, height: 36,
+            child: const Text('Reset to pattern length')),
+        PopupMenuItem(value: 'loop', height: 36, child: Text(clip.loop ? 'Loop off' : 'Loop on')),
+      ],
+    );
+    if (v == null || !mounted) return;
+    if (v == 'reset') s.setClipLoop(layer, clip, null);
+    if (v == 'loop') s.editLayer(layer, (_) => clip.loop = !clip.loop);
+    setState(() {});
   }
   RollLook get _look => s.settings.roll;
   // The row height while a pinch or the zoom bar changes it; saved to the roll's look when it ends.
@@ -593,6 +617,11 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
 
   /// The roll's actions (docs/actions.md), run by keys, toolbars and macros through the key router.
   bool _action(String id, int count, String? arg) {
+    // Save writes the roll's pending edit into the project first, then the router's global save runs.
+    if (id == 'project.save') {
+      _flush();
+      return false;
+    }
     final d = _doc;
     if (d == null) return false;
     final g = _resSteps.times(count);
@@ -679,7 +708,12 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
       case 'roll.select.all':
         setState(() => _sel = {for (final n in d.notes) n.id});
       case 'roll.select.none':
-        setState(() => _sel = {});
+        // Esc with nothing selected leaves the full-screen roll.
+        if (_sel.isEmpty && widget.fullScreen) {
+          _closeFullScreen();
+        } else {
+          setState(() => _sel = {});
+        }
       case 'roll.select.addAtCursor':
         setState(() => _sel = {..._sel, ...d.notesIn(_cursorAt, _cursorAt, _cursorPitch, _cursorPitch)});
       case 'roll.edit.copy':
@@ -849,6 +883,12 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
           _ => null,
         };
     final g = _resSteps;
+    // Ctrl+S saves here too (owner, 2026-11-11: it saves everywhere); the cursor moves down with Ctrl+Down.
+    if (ctrl && !shift && !alt && k == LogicalKeyboardKey.keyS) {
+      _flush();
+      unawaited(s.flush());
+      return KeyEventResult.handled;
+    }
     final dd = dir(k);
     if (alt) {
       final digit = k.keyLabel.isNotEmpty ? int.tryParse(k.keyLabel) : null;
@@ -924,7 +964,11 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
       case LogicalKeyboardKey.delete || LogicalKeyboardKey.backspace:
         _apply(d.delete(_sel), select: {});
       case LogicalKeyboardKey.escape:
-        setState(() => _sel = {});
+        if (_sel.isEmpty && widget.fullScreen) {
+          _closeFullScreen();
+        } else {
+          setState(() => _sel = {});
+        }
       case LogicalKeyboardKey.equal:
         _apply(d.addVelocity(_sel, 0.1));
       case LogicalKeyboardKey.minus:
@@ -960,6 +1004,12 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
 
   /// A toolbar button: through the key router (so `.`, recording and toasts see it), or straight to the roll when
   /// there is no router (tests, previews).
+  /// Leaves the full-screen roll (its pending edit is written first).
+  void _closeFullScreen() {
+    _flush();
+    Navigator.of(context).maybePop();
+  }
+
   void _runRef(ActionRef r) {
     final router = _router;
     if (router != null) {
@@ -1671,6 +1721,111 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
 
   // ---------- pointer ----------
 
+  /// A mouse moves this far (px) on empty grid before its drag starts.
+  static const double _mouseDragSlop = 4;
+
+  /// The mouse pointer panning the roll (middle-drag or Space+drag), if any; whether the press is a mouse's.
+  int? _mousePan;
+  bool _mouse = false;
+
+  /// The mouse cursor for what the mouse is over: resize on a note's ends, move on its body, else the tool's own.
+  MouseCursor _hoverCursor = MouseCursor.defer;
+
+  void _cursorHover(PointerHoverEvent e) {
+    final c = _cursorFor(e.localPosition - _origin);
+    if (c != _hoverCursor) setState(() => _hoverCursor = c);
+  }
+
+  MouseCursor _cursorFor(Offset p) {
+    final d = _doc;
+    if (d == null || p.dx < 0 || p.dy < 0) return MouseCursor.defer;
+    _touch = false;
+    if (p.dy >= _gridH) return SystemMouseCursors.resizeUpDown; // a lane: drag a value up or down
+    if (_tool == PatternTool.curve) return SystemMouseCursors.precise;
+    final hit = _noteAt(p);
+    if (hit != null) {
+      if (_tool == PatternTool.erase) return SystemMouseCursors.disappearing;
+      if (_tool == PatternTool.ratchet) return SystemMouseCursors.resizeUpDown;
+      final part = _partAt(d.byId(hit)!, p.dx) ?? 0;
+      return part == 0 ? SystemMouseCursors.move : SystemMouseCursors.resizeLeftRight;
+    }
+    if (_edgeAt(p) != null) return SystemMouseCursors.resizeLeftRight;
+    return switch (_tool) {
+      PatternTool.draw => SystemMouseCursors.precise,
+      PatternTool.erase => SystemMouseCursors.disappearing,
+      PatternTool.ratchet => SystemMouseCursors.resizeUpDown,
+      _ => SystemMouseCursors.basic,
+    };
+  }
+
+  /// A right-click on the roll: on a note, the note menu (the note joins the selection first); on empty grid, the
+  /// grid menu. The cursor moves to the click, so Insert and Split work there. Built from the roll's own actions.
+  Future<void> _contextMenu(Offset p, Offset global) async {
+    final d = _doc;
+    if (d == null || p.dx < 0 || p.dy < 0 || p.dy >= _gridH) return;
+    final hit = _noteAt(p);
+    setState(() {
+      _cursorPitch = _pitchAt(p.dy).clamp(0, 127);
+      _cursorAt = _snapTime(_stepAt(p.dx), _tapLevel);
+      if (hit != null && !_sel.contains(hit)) _sel = {hit};
+    });
+    PopupMenuItem<String> item(String id, String label, {bool enabled = true}) {
+      final keys = _router?.vim.keymap.keysFor(Area.pattern, ActionRef.action(id)) ?? const [];
+      return PopupMenuItem<String>(
+        value: id,
+        enabled: enabled,
+        height: 36,
+        child: Row(children: [
+          Expanded(child: Text(label)),
+          if (keys.isNotEmpty)
+            Padding(padding: const EdgeInsets.only(left: 16),
+                child: Text(keys.first.toString(), style: const TextStyle(color: Neon.dim, fontSize: 11))),
+        ]),
+      );
+    }
+
+    final box = Overlay.of(context).context.findRenderObject() as RenderBox;
+    final at = box.globalToLocal(global);
+    final v = await showMenu<String>(
+      context: context,
+      position: RelativeRect.fromRect(at & const Size(1, 1), Offset.zero & box.size),
+      items: hit != null
+          ? [
+              _menuHead('Note${_sel.length > 1 ? 's (${_sel.length})' : ''}'),
+              item('roll.notes.delete', 'Delete'),
+              item('roll.edit.duplicate', 'Duplicate'),
+              item('roll.edit.copy', 'Copy'),
+              item('roll.edit.cut', 'Cut'),
+              item('roll.notes.quantize', 'Quantize'),
+              item('roll.notes.split', 'Split at the click'),
+              if (_sel.length > 1) item('roll.notes.join', 'Join'),
+              _menuHead('Velocity'),
+              item('vel:1.0', 'Velocity 100%'),
+              item('vel:0.8', 'Velocity 80%'),
+              item('vel:0.5', 'Velocity 50%'),
+              item('roll.notes.extras', 'Note extras…'),
+            ]
+          : [
+              _menuHead('Grid'),
+              item('roll.edit.paste', 'Paste', enabled: _clip != null && !_clip!.isEmpty),
+              item('roll.notes.insert', 'Insert a note here'),
+              item('roll.select.all', 'Select all', enabled: d.notes.isNotEmpty),
+              if (_sel.isNotEmpty) item('roll.select.none', 'Select none'),
+              item('roll.notes.quantizeSheet', 'Quantize…'),
+            ],
+    );
+    if (v == null || !mounted) return;
+    if (v.startsWith('vel:')) {
+      _action('roll.vel.set', 1, v.substring(4));
+    } else if (v == 'roll.edit.paste') {
+      // Paste at the click, not after the copied notes.
+      _pasteAt = _cursorAt;
+      _action(v, 1, null);
+    } else {
+      _action(v, 1, null);
+    }
+  }
+
   static const _origin = Offset(_keyW, _rulerH);
 
   /// One finger on a note, in a lane or with the select tool edits; on empty grid it waits: a tap draws (or erases),
@@ -1678,6 +1833,18 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
   void _pointerDown(PointerDownEvent e) {
     _focus.requestFocus();
     final local = e.localPosition - _origin;
+    if (isMousePointer(e.kind) && _pointers.isEmpty) {
+      // A right-click opens the menu (it never draws); the middle button or Space+drag pans.
+      if (e.buttons & kSecondaryMouseButton != 0) {
+        _loopHit(local, e.kind) ? _loopMenu(e.position) : _contextMenu(local, e.position);
+        return;
+      }
+      if (startsMousePan(e)) {
+        if (e.buttons == kPrimaryMouseButton) SpacePan.claim();
+        setState(() => _mousePan = e.pointer);
+        return;
+      }
+    }
     if (_step && !_grid && local.dx < 0 && local.dy >= 0 && local.dy < _gridH) {
       _stepKeyDown(e, local.dy); // the keys play step input, and stay out of the roll's gestures
       return;
@@ -1687,6 +1854,7 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
       final p = e.localPosition - _origin;
       _editPointer = e.pointer;
       _touch = e.kind == PointerDeviceKind.touch;
+      _mouse = isMousePointer(e.kind);
       _lastP = p;
       if (_loopHit(p, e.kind)) {
         _loopDown(p);
@@ -1814,6 +1982,12 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
   }
 
   void _pointerMove(PointerMoveEvent e) {
+    if (e.pointer == _mousePan) {
+      return setState(() {
+        _scrollX -= e.delta.dx;
+        _scrollY -= e.delta.dy;
+      });
+    }
     if (!_pointers.containsKey(e.pointer)) return; // step-input keys included: they aren't in it
     _pointers[e.pointer] = e.localPosition;
     if (_bypass) {
@@ -1845,7 +2019,8 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
     }
     final p = e.localPosition - _origin, pending = _pending;
     if (pending != null) {
-      if (!_panning && (p - pending).distance > kTouchSlop) {
+      // A mouse's drag starts after a few pixels (a finger's after the touch slop).
+      if (!_panning && (p - pending).distance > (_mouse ? _mouseDragSlop : kTouchSlop)) {
         _boxTimer?.cancel();
         _clearGhost();
         // A drag from just outside a selected note's end stretches it (a tap there still draws).
@@ -1855,10 +2030,12 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
           _dragTo(p);
           return;
         }
-        // A drag from empty grid does what the settings say: scroll, select, or the tool's own drag.
-        if (_look.emptyDrag != EmptyDrag.scroll && _tool != PatternTool.curve) {
+        // A drag from empty grid does what the settings say: scroll, select, or the tool's own drag. A mouse's left
+        // drag always draws a selection box (owner, 2026-11-11); it pans with the middle button or Space.
+        final empty = _mouse ? EmptyDrag.select : _look.emptyDrag;
+        if (empty != EmptyDrag.scroll && _tool != PatternTool.curve) {
           _pending = null;
-          _down(pending, rect: _look.emptyDrag == EmptyDrag.select);
+          _down(pending, rect: empty == EmptyDrag.select);
           _dragTo(p);
           return;
         }
@@ -1952,6 +2129,7 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
   }
 
   void _pointerUp(PointerEvent e, {required bool cancel}) {
+    if (e.pointer == _mousePan) setState(() => _mousePan = null);
     _stepKeyUp(e.pointer);
     if (_pointers.remove(e.pointer) == null) return;
     if (_bypass) {
@@ -2674,7 +2852,9 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
         if (widget.fullScreen) {
           Navigator.of(context).pop();
         } else {
+          // A closable page: Esc (with nothing selected) and the mouse's Back button close it too.
           Navigator.of(context).push(MaterialPageRoute<void>(
+              settings: closablePage,
               builder: (_) => GlassPage(
                   child: Scaffold(
                       body: SafeArea(
@@ -2732,7 +2912,12 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
             // its drags; the pointers are then read raw below.
             return MouseRegion(
               // Over the loop bar, the mouse shows it resizes (the bar drags like a clip's edge).
-              cursor: _loopHover || _loopLive != null ? SystemMouseCursors.resizeColumn : MouseCursor.defer,
+              // Elsewhere: a grab hand while panning, else what the mouse is over ([_cursorHover]).
+              cursor: _loopHover || _loopLive != null
+                  ? SystemMouseCursors.resizeColumn
+                  : _mousePan != null
+                      ? SystemMouseCursors.grabbing
+                      : _hoverCursor,
               child: RawGestureDetector(
               behavior: HitTestBehavior.opaque,
               gestures: {
@@ -2766,6 +2951,7 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
                 onPointerHover: (e) {
                   _loopHoverAt(e);
                   _curveHover(e);
+                  _cursorHover(e);
                 },
                 // The roll repaints when the notes or the view change; the Curve tool's overlay above it repaints on
                 // its own while a curve is hovered or dragged.
@@ -2814,6 +3000,22 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
                       rowH: _rowH, scrollX: _scrollX, scrollY: _scrollY, keyW: _keyW, rulerH: _rulerH, gridH: h,
                       color: _noteColor, label: loopLengthLabel(loop, s.project.beatsPerBar),
                       active: _loopLive != null || _loopHover)))),
+                  // A mouse over the bar: its length and what it does (a finger sees the length on the ruler).
+                  if (loop != null && clip != null && _loopHover && _loopLive == null)
+                    Positioned(
+                      left: (_origin.dx + loop * _pxPerStep - _scrollX + 10).clamp(0.0, math.max(0.0, box.maxWidth - 220)),
+                      top: _origin.dy + 4,
+                      child: IgnorePointer(
+                        child: Container(
+                          key: const ValueKey('roll-loop-tip'),
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                          decoration: BoxDecoration(color: Neon.bg.withValues(alpha: 0.92),
+                              borderRadius: BorderRadius.circular(6), border: Border.all(color: Neon.line)),
+                          child: Text('Loop ${loopLengthLabel(loop, s.project.beatsPerBar)} · drag to change, '
+                              'right-click for options', style: const TextStyle(color: Neon.text, fontSize: 11)),
+                        ),
+                      ),
+                    ),
                   if (_brushAt != null)
                     Positioned(
                       left: (_origin.dx + _brushNow.dx - 36).clamp(0.0, math.max(0.0, box.maxWidth - 80)),

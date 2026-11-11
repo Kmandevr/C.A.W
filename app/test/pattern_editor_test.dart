@@ -164,8 +164,10 @@ void main() {
     s.ready = true;
     s.starting = false;
     String body() => m.source.split('---').last.trim();
-    // The double tap is timed by the wall clock, so the test waits real time where the taps must be apart.
-    Future<void> wait() => tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 400)));
+    // The double tap is timed by the wall clock (DateTime.now, which the test's fake clock doesn't move), so the test
+    // waits real time longer than the timeout where the taps must be apart, and sends the two taps of a double tap
+    // back to back with no frame between them, so a slow machine can't push them apart.
+    Future<void> wait() => tester.runAsync(() => Future<void>.delayed(kDoubleTapTimeout + const Duration(milliseconds: 100)));
     await tester.pumpWidget(MaterialApp(home: Scaffold(body: PatternEditor(state: s, module: m))));
     await tester.tapAt(const Offset(120, 200));
     await tester.pump(const Duration(milliseconds: 500));
@@ -180,7 +182,6 @@ void main() {
     expect(body(), isNotEmpty, reason: 'taps far apart are two single taps');
     await wait();
     await tester.tapAt(const Offset(125, 200));
-    await tester.pump(const Duration(milliseconds: 100));
     await tester.tapAt(const Offset(125, 200));
     await tester.pump(const Duration(milliseconds: 500));
     expect(body(), isEmpty, reason: m.source);

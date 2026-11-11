@@ -352,15 +352,25 @@ COMPLETION: process : [#bool#]process(<#const AudioProcessBlock &block#>)
       final state = AppState(settings: Settings());
       state.project.cppComponents.add(CppComponentDoc.blankEffect(id: 'cpp1', name: 'Fuzz'));
       state.cppServices = CppBuilderServices(compiler: compiler, workDirectory: () async => dir);
-      final w = CppWorkbench(state, 'cpp1', checkDelay: const Duration(milliseconds: 80), saveDelay: const Duration(milliseconds: 40));
+      // Real timers: the edits come back to back (only the event loop turns between them), far inside the delay, so a
+      // slow machine can't let a check fire between two of them; then the test waits for the one check, however long
+      // it takes, and makes sure no other follows.
+      const delay = Duration(milliseconds: 600);
+      final w = CppWorkbench(state, 'cpp1', checkDelay: delay, saveDelay: const Duration(milliseconds: 40));
+      final typed = Stopwatch()..start();
       for (var i = 0; i < 4; i++) {
         w.edit('src/effect.cpp', '// typing $i');
-        await Future<void>.delayed(const Duration(milliseconds: 30));
+        await Future<void>.delayed(Duration.zero);
         expect(compiler.calls, isEmpty, reason: 'typing keeps the check waiting');
       }
       expect(w.checkScheduled, isTrue);
-      await Future<void>.delayed(const Duration(milliseconds: 250));
-      expect(compiler.calls, hasLength(1));
+      final last = typed.elapsed;
+      for (var t = 0; t < 400 && compiler.calls.isEmpty; t++) {
+        await Future<void>.delayed(const Duration(milliseconds: 25));
+      }
+      expect(typed.elapsed, greaterThanOrEqualTo(last + delay), reason: 'the check waits for the pause after the last edit');
+      await Future<void>.delayed(delay);
+      expect(compiler.calls, hasLength(1), reason: 'the earlier edits\' checks were cancelled');
       expect(compiler.calls.single, containsAll(['-fsyntax-only', '/tc/bin/clang++']));
       expect(compiler.calls.single, isNot(contains('-o')));
       // The check compiled the editor's code, written to the app-private workspace.

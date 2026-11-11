@@ -12,7 +12,7 @@ updated: 2026-11-11
 ## How it works
 
 - **Everything is an action.** Each command the app can do has an id (`roll.notes.up`), a name and a description. Buttons, menus, keys and macros all run actions, so anything you can tap, you can bind. Reaper works the same way ([Sound on Sound](https://www.soundonsound.com/techniques/automate-anything-reapers-custom-actions)).
-- **Areas, like Reaper's sections:** Global, Sounds (Builder), Tracks (Arranger), Pattern editor (roll and grid), Mixer, Engine Lab, Automation, Export, Files and Plugin Builder. A key can do different things in each area. Global keys work everywhere unless the area has its own binding.
+- **Areas, like Reaper's sections:** Global, Sounds (`builder`), Pattern editor (roll and grid), Tracks (Arranger), Export and Code editor (Vim) (`Area` in `app/lib/actions/actions.dart`). A key can do different things in each area. Global keys work everywhere unless the area has its own binding.
 - **The action list** (`?`, or Help → Actions):
   - search every action by name, with its keys
   - show the current key bindings for each action; **Edit keys** opens the key bindings editor
@@ -95,9 +95,8 @@ Keys marked † are the owner's own scheme (2026-10-28). The rest are proposals 
 | Undo / redo (the piano roll's own history inside it, a text field's own text undo while one has focus, such as the code editor; the project's everywhere else) | Ctrl+Z / Ctrl+Shift+Z (also Ctrl+Y) |
 | Save now (projects also autosave) | Ctrl+S |
 | Action list | ? |
-| Show Build / Arrange | Ctrl+1 / Ctrl+2 (the panel is revealed in the dock) |
-| Open the Export page (the project menu's Export…) | Ctrl+3 |
-| Go to Files | Ctrl+7 |
+| Go to Build / Files / Arrange, in the rail's order (`view.builder`, `view.files`, `view.arranger`; the panel is revealed in the dock) | Ctrl+1 / Ctrl+2 / Ctrl+3 |
+| Open the Export page (the project menu's Export…) | — |
 | New, open, duplicate, rename, delete project | — / Ctrl+O / — / F2 in the project menu / — |
 | Tap tempo | T |
 | Tempo up / down 1 BPM (Shift: 0.1) | Ctrl+= / Ctrl+- |
@@ -133,7 +132,7 @@ Notes:
 | --- | --- |
 | Move selected notes later / earlier one grid step | D / A, also → / ← † |
 | Move selected notes up / down a semitone | W / S, also ↑ / ↓ † |
-| Move the cursor one grid step or one semitone (selects the note it lands on) | Ctrl+W / A / S / D, also Ctrl+arrows † |
+| Move the cursor one grid step or one semitone (selects the note it lands on) | Ctrl+W / A / D, Ctrl+arrows † (Ctrl+S saves: owner, 2026-11-11) |
 | Jump the cursor to the next note in that direction | Ctrl+Shift+W / A / S / D † |
 | Insert a note at the cursor (last length used) | Q † |
 | Copy the selection to just after it, and select the copy | E † |
@@ -195,7 +194,9 @@ Generators (buttons; no default keys):
 | Open the layer's menu (generator, pattern, effects, length) | Enter |
 | Layer length shorter / longer | [ / ] |
 | Add layer / delete layer (Delete removes the selected clips instead while any are selected, as REAPER's Delete removes selected items) | Ctrl+N / Delete |
-| Move layer up / down | Ctrl+W / Ctrl+S |
+| Move layer up / down (Ctrl+S saves everywhere: owner, 2026-11-11) | Alt+Up / Alt+Down |
+| Copy / cut the selected clips; paste them at the edit cursor (the playhead while playing) on the selected track | Ctrl+C / Ctrl+X / Ctrl+V |
+| Select every clip / clear the clip and time selections | Ctrl+A / Esc |
 | Change layer colour | — |
 | Split clips at the playhead: the selected ones, or every clip under it (REAPER's S) | S |
 | Glue the selected clips on each track into one | G |
@@ -223,7 +224,6 @@ Generators (buttons; no default keys):
 Building the core turned up some clashes in this draft. They're resolved for now as follows, and are for the owner to change:
 - **Code editor:** in Vim mode, D moves right and A moves left, which clashes with Vim's `dd` (delete line) and `a` (append). Delete line is `X X` for now, and append has no key yet.
 - **Pattern editor:** Ctrl+A / Ctrl+D (select all, duplicate) clash with the owner's Ctrl+WASD cursor keys. The owner's keys win, so select all and duplicate have no default key; the action list or `:` still runs them.
-- **Ctrl+S:** saves everywhere except the pattern editor, where it moves the cursor down.
 - **Keys the draft didn't give:**
   - Shift+V starts Visual mode (V is the select tool in the roll), and V does in the code editor.
   - `+` and `_` are fine velocity steps.

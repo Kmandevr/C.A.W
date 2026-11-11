@@ -16,6 +16,7 @@ import '../kit/grab_gesture.dart';
 import '../kit/hero.dart';
 import '../visuals/filter_curve.dart' show freqToX, xToFreq;
 import 'effect_page.dart';
+import '../../pointer_input.dart';
 
 /// The band shapes the engine's EQ offers, in its choice order (`org.caw.eq`'s `bN_type`).
 enum EqShape { bell, lowShelf, highShelf, lowCut12, lowCut24, lowCut48, highCut12, highCut24, highCut48, notch, bandPass, tilt,
@@ -166,7 +167,7 @@ class _EqEditorPageState extends State<EqEditorPage> {
           onSelect: (n) => setState(() => _selected = n))),
       )),
       if (_adding && free != null) Padding(padding: const EdgeInsets.only(top: 6), child: Text(
-        'Tap the curve where band ${free.n} goes', key: const ValueKey('eq-add-hint'), textAlign: TextAlign.center,
+        '${PointerInput.tapCap} the curve where band ${free.n} goes', key: const ValueKey('eq-add-hint'), textAlign: TextAlign.center,
         style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: free.color))),
       const SizedBox(height: 6),
       // The band strip: a tap selects a band (its controls below); "+" adds one where you next tap the curve.
@@ -259,7 +260,7 @@ class _AddChip extends StatelessWidget {
   final VoidCallback onTap;
 
   @override
-  Widget build(BuildContext context) => Tooltip(message: enabled ? 'Add a band: then tap the curve' : 'Every band is on',
+  Widget build(BuildContext context) => Tooltip(message: enabled ? 'Add a band: then ${PointerInput.tap} the curve' : 'Every band is on',
     child: GestureDetector(
       key: const ValueKey('eq-add'),
       behavior: HitTestBehavior.opaque,
