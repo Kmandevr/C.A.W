@@ -8,6 +8,9 @@ import '../engine/engine.dart';
 import 'arrange_fx.dart';
 import 'device_target.dart';
 import 'project.dart';
+// fx-filters begin
+import '../ui/devices/effects/filters/filters_display.dart' show decodeFiltersDisplay;
+// fx-filters end
 
 /// One frame of what a device shows besides its parameters, read from the engine at the meter rate.
 class DeviceDisplayFrame {
@@ -118,6 +121,9 @@ DeviceDisplayFrame decodeDisplay(String componentId, List<double> f, int n) {
   double at(int i) => i < n ? f[i] : 0;
   Map<String, double> named(List<String> names, int from) =>
       {for (var i = 0; i < names.length && from + i < n; ++i) names[i]: f[from + i]};
+  // fx-filters begin
+  if (decodeFiltersDisplay(componentId, f, n) case final frame?) return frame;
+  // fx-filters end
   switch (componentId) {
     case 'org.caw.eq':
       final bins = at(0).toInt();
