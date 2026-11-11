@@ -1,9 +1,13 @@
 // What Files does with an asset or folder: open it in Build, audition it, its long-press menu, rename, duplicate, delete, new effects and modules.
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 
 import '../../model/app_state.dart';
 import '../../model/files_catalog.dart';
 import '../../model/user_presets.dart';
+import '../../platform/save_copy.dart';
+import '../cpp/sample_pack_screen.dart' show openSamplePackMaker;
 import '../devices/kit/preset_actions.dart' show exportPreset, importPreset;
 import '../frame/sections.dart';
 import '../theme.dart';
@@ -113,7 +117,9 @@ class FilesActions {
       context: context,
       builder: (context) => AlertDialog(
         title: Text('Delete "${a.name}"?'),
-        content: Text(uses.isEmpty
+        content: Text(a.sample != null
+            ? 'The WAV file is deleted from this device; undo can\'t bring it back.'
+            : uses.isEmpty
             ? 'This cannot be undone from Files (project undo still can).'
             : 'Used on ${uses.join(', ')}. Deleting removes it from ${uses.length == 1 ? 'that track' : 'those tracks'}.'),
         actions: [
@@ -147,8 +153,10 @@ class FilesActions {
       if (a.buildTab != null) const MenuEntry('open', Icons.open_in_new, 'Open'),
       if (a.previewable) MenuEntry('preview', isPreviewing(a) ? Icons.stop : Icons.play_arrow, isPreviewing(a) ? 'Stop preview' : 'Preview'),
       MenuEntry('fav', fav ? Icons.star_rounded : Icons.star_outline_rounded, fav ? 'Remove from Favourites' : 'Add to Favourites'),
-      if (!a.builtin) const MenuEntry('rename', Icons.drive_file_rename_outline, 'Rename'),
-      if (!a.builtin && a.midi == null) const MenuEntry('duplicate', Icons.copy, 'Duplicate'),
+      if (!a.builtin && a.sample == null) const MenuEntry('rename', Icons.drive_file_rename_outline, 'Rename'),
+      if (!a.builtin && a.midi == null && a.sample == null) const MenuEntry('duplicate', Icons.copy, 'Duplicate'),
+      if (a.isInstrument) const MenuEntry('sample-pack', Icons.library_music_outlined, 'Make sample pack…'),
+      if (a.sample != null) const MenuEntry('save-wav', Icons.file_upload_outlined, 'Save WAV…'),
       if (a.module != null) const MenuEntry('tags', Icons.sell_outlined, 'Edit tags'),
       if (a.module != null) const MenuEntry('export', Icons.file_upload_outlined, 'Export .caw'),
       if (a.preset != null) const MenuEntry('export-preset', Icons.file_upload_outlined, 'Export preset file'),
@@ -173,6 +181,15 @@ class FilesActions {
         await exportCawModule(context, a.module!);
       case 'export-preset':
         await exportPreset(context, a.preset!);
+      case 'sample-pack':
+        await openSamplePackMaker(context, state, instrumentId: a.native?.id ?? a.cpp?.componentId);
+      case 'save-wav':
+        try {
+          final saved = await saveCopyOf(File(a.sample!.path), name: a.sample!.file, mimeType: 'audio/wav', extension: 'wav');
+          if (saved) notice('Saved "${a.sample!.file}".');
+        } catch (e) {
+          notice('Could not save: $e', error: true);
+        }
       case 'delete':
         await delete(a);
     }
@@ -239,6 +256,8 @@ class FilesActions {
       ],
       if (f.kind == FilesFolderKind.presets)
         const MenuEntry('import-preset', Icons.file_open_outlined, 'Import preset file…'),
+      if (f.kind == FilesFolderKind.samplePacks || f.kind == FilesFolderKind.audio)
+        const MenuEntry('sample-pack', Icons.library_music_outlined, 'Make sample pack…'),
       if (f.kind == FilesFolderKind.libraryFolder) ...[
         const MenuEntry('rename', Icons.drive_file_rename_outline, 'Rename folder'),
         const MenuEntry('delete', Icons.delete_outline, 'Delete folder', danger: true, dividerBefore: true),
@@ -258,6 +277,9 @@ class FilesActions {
         await importCawModule(context, state, libraryParent);
       case 'import-preset':
         await importPreset(context, state.userPresets);
+      case 'sample-pack':
+        await openSamplePackMaker(context, state);
+        return 'audio/samples';
       case 'folder':
         await newLibraryFolder(libraryParent);
       case 'rename':

@@ -3,6 +3,9 @@
 // fx-creative begin
 #include "builtin_fx_creative.h"
 // fx-creative end
+// fx-filters begin
+#include "builtin_fx_filters.h"
+// fx-filters end
 
 #include <algorithm>
 
@@ -162,6 +165,9 @@ void registerBuiltinEffects(ModuleRegistry& registry) {
     fx::registerDucker(registry);
     fx::registerFxDynamics(registry);  // fx-dynamics
     fx::registerCreative(registry);  // fx-creative
+    // fx-filters begin
+    fx::registerFilters(registry);
+    // fx-filters end
 }
 
 }  // namespace caw

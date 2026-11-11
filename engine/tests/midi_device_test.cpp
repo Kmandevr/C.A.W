@@ -1,4 +1,4 @@
-// MIDI device input (API 11): MIDI 1.0 to UMP at the edge, device notes on an instrument, frame-accurate timing, drops.
+// MIDI device input (API 13): MIDI 1.0 to UMP at the edge, device notes on an instrument, frame-accurate timing, drops.
 #include <cstring>
 #include <string>
 #include <vector>

@@ -5,6 +5,7 @@
 #include "quality.h"
 #include "builtin_components.h"
 #include "graph.h"
+#include "meters.h"
 #include "route_math.h"
 #include "caw/library/stereo.hpp"
 #include "hardware.h"
@@ -108,6 +109,7 @@ struct Engine::Slot {
     std::atomic<uint64_t> vol{0}, pan{0};
     std::atomic<bool> mute{false}, solo{false};
     std::atomic<float> peakL{0}, peakR{0}, progress{0};  // meters: each side's sample peak since the last read
+    CorrelationMeter correlation;                         // of what it sends on
     std::atomic<bool> overloadFlag{false};
     std::atomic<float> scope[kScopeSize];
     std::atomic<int> scopePos{0};
@@ -135,7 +137,7 @@ struct Engine::Slot {
     bool seam = false;          // the shadow lane finishes the previous pass this chunk
     bool fade = false;          // the replaced chain plays on in the fade lane this chunk
     bool previewing = false;    // audio thread: the chain holds a preview voice, or its sound is still dying away
-    DeviceNotes deviceNotes;    // audio thread: the device MIDI channels' bend and pedal (API 11)
+    DeviceNotes deviceNotes;    // audio thread: the device MIDI channels' bend and pedal (API 13)
     int64_t previewQuiet = 0;   // samples the track's output has been below kPreviewQuiet
     int64_t previewTail = 0;    // samples since its last preview voice ended
     int64_t previewN = 0;       // stopped: the sample in the layer's loop that preview chunks run from
@@ -790,9 +792,12 @@ Engine::Engine(double sampleRate, EngineResourceBudget resourceBudget)
                                          (static_cast<uint64_t>(kInitialLayerCapacity + 1) * kExportSlotBytes))),
       cmds_(new Spsc<Cmd, 1024>()),
       retired_(new Spsc<Retired, 1024>()),
-      masterScope_(new std::atomic<float>[kScopeSize]) {
+      masterScope_(new std::atomic<float>[kScopeSize]),
+      loudness_(std::make_unique<LoudnessMeter>()) {
     for (int i = 0; i < kScopeSize; ++i) masterScope_[i].store(0);
     midiPending_.reset(new PendingMidi[Midi2InputQueue::kCapacity]);
+    loudness_->prepare(sampleRate);
+    masterCorrelation_.prepare(sampleRate);
     registerBuiltinComponents(nativeModules_);  // the Library's stereo tools, ready in every chain
     ctlSr_ = sampleRate;
     constexpr int initial = kInitialLayerCapacity;
@@ -804,6 +809,7 @@ Engine::Engine(double sampleRate, EngineResourceBudget resourceBudget)
     slotStore_.reserve(static_cast<size_t>(initial + 1));
     for (int s = 0; s <= initial; ++s) {
         slotStore_.push_back(std::make_unique<Slot>());
+        slotStore_.back()->correlation.prepare(sr_);
         Slot& slot = *slotStore_.back();
         slot.index = s;
         for (int i = 0; i < kScopeSize; ++i) slot.scope[i].store(0);
@@ -1000,6 +1006,7 @@ std::string Engine::grow(int capacity) {
         slotStore_.reserve(storeBefore + static_cast<size_t>(capacity - old.capacity));
         for (int s = old.capacity; s < capacity; ++s) {
             slotStore_.push_back(std::make_unique<Slot>());
+            slotStore_.back()->correlation.prepare(sr_);
             Slot& slot = *slotStore_.back();
             slot.index = s;
             for (int i = 0; i < kScopeSize; ++i) slot.scope[i].store(0);
@@ -2744,7 +2751,7 @@ void Engine::notesOff() {
     if (send(c)) previewSlots_.clear();
 }
 
-// ---- Device MIDI (API 11) ----
+// ---- Device MIDI (API 13) ----
 
 int64_t Engine::midiClockNs() noexcept {
     return std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now().time_since_epoch())
@@ -2879,6 +2886,7 @@ void Engine::play(double fromStep) {
     playCount_ = c.playCount;
     touchedParams_.clear();  // a (re)start ends every touch; chains do the same at their next chunk
     touchedGlobals_.clear();
+    loudness_->requestReset();  // the integrated loudness measures this play
 }
 
 void Engine::playCountIn(double fromStep, int beats) {
@@ -2894,6 +2902,7 @@ void Engine::playCountIn(double fromStep, int beats) {
     playCount_ = c.playCount;
     touchedParams_.clear();
     touchedGlobals_.clear();
+    loudness_->requestReset();
 }
 
 void Engine::setMetronome(bool on) {
@@ -3125,6 +3134,23 @@ bool Engine::layerMeter(int index, LayerMeter& out) {
     return true;
 }
 
+LoudnessMeter::Reading Engine::loudness() {
+    std::lock_guard<std::mutex> lock(ctl_);  // one reader at a time
+    return loudness_->read();
+}
+
+void Engine::resetLoudness() { loudness_->requestReset(); }
+
+bool Engine::layerCorrelation(int index, float& out) {
+    std::lock_guard<std::mutex> lock(ctl_);
+    out = 0.0f;
+    if (index < 0 || index >= static_cast<int>(order_.size())) return false;
+    auto it = layers_.find(order_[index]);
+    if (it == layers_.end() || it->second.slot < 0) return true;
+    out = ctlSlot(it->second.slot).correlation.read();
+    return true;
+}
+
 int Engine::scope(int index, float* out, int n) {
     std::lock_guard<std::mutex> lock(ctl_);
     n = std::min(n, kScopeSize);
@@ -3292,6 +3318,7 @@ void Engine::applyCommands() noexcept {
                     s.seamLeft = 0;
                     s.peakL.store(0, std::memory_order_relaxed);  // a reused slot doesn't show its last owner's level
                     s.peakR.store(0, std::memory_order_relaxed);
+                    s.correlation.clear();
                     s.active = true;
                     markLive(c.slot);
                     s.removing = false;
@@ -3372,6 +3399,7 @@ void Engine::applyCommands() noexcept {
                 s.pattern = nullptr;
                 s.peakL.store(0, std::memory_order_relaxed);
                 s.peakR.store(0, std::memory_order_relaxed);
+                s.correlation.clear();
                 s.active = true;
                 markLive(c.slot);
                 s.removing = false;
@@ -5391,6 +5419,7 @@ void Engine::runTrackNode(int slot, const float* const* in, float* outL, float* 
     s.scopePos.store(sp, std::memory_order_release);
     storeMax(s.peakL, peakL);
     storeMax(s.peakR, peakR);
+    s.correlation.process(outL, outR, m);
     if (tail && s.tailFade != 0) {  // a capped tail fading out (or faded: silence until it is ended)
         const int len = std::max(1, static_cast<int>(kSwapSeconds * sr_));
         for (int i = 0; i < m; ++i) {
@@ -5494,6 +5523,7 @@ void Engine::runBusNode(int slot, const float* inL, const float* inR, float* out
     }
     storeMax(s.peakL, peakL);  // a folder's meter: its mix after volume and pan
     storeMax(s.peakR, peakR);
+    s.correlation.process(outL, outR, m);
     s.previewQuiet = std::max(peakL, peakR) > kPreviewQuiet ? 0 : s.previewQuiet + m;
     if (routes) runRoutes(s, insertL_, insertR_, outL, outR, m, !(target > 0.0), true);
     if (s.delay || s.delayFadeLeft > 0) runDelay(s, outL, outR, m);  // in time where it meets the others
@@ -5669,6 +5699,8 @@ void Engine::runMasterNode(const float* inL, const float* inR, float* outL, floa
     masterScopePos_.store(sp, std::memory_order_release);
     storeMax(peakL_, pl);
     storeMax(peakR_, pr);
+    masterCorrelation_.process(outL, outR, m);
+    loudness_->process(outL, outR, m);  // K-weighting and true peak per sample; the rest each 100 ms
 }
 
 void Engine::pickOverloadVictim() noexcept {

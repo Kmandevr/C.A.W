@@ -4,7 +4,7 @@ import 'dart:io';
 
 import 'package:ffi/ffi.dart';
 
-const int cawApiVersion = 11;  // must equal CAW_API_VERSION in engine/include/caw.h
+const int cawApiVersion = 13;  // must equal CAW_API_VERSION in engine/include/caw.h
 
 final class CawMetersStruct extends Struct {
   @Float()
@@ -255,7 +255,7 @@ class Bindings {
             'caw_engine_test_tone'),
         testToneSounding = lib.lookupFunction<Int32 Function(Pointer<Void>), int Function(Pointer<Void>)>(
             'caw_engine_test_tone_sounding'),
-        // API 11: MIDI from devices, frame-accurate.
+        // API 13: MIDI from devices, frame-accurate.
         midiClockNs = lib.lookupFunction<Int64 Function(), int Function()>('caw_midi_clock_ns'),
         midiUmp = lib.lookupFunction<Int32 Function(Pointer<Void>, Pointer<Utf8>, Pointer<Uint32>, Int32, Int64),
             int Function(Pointer<Void>, Pointer<Utf8>, Pointer<Uint32>, int, int)>('caw_engine_midi_ump'),
@@ -269,6 +269,12 @@ class Bindings {
             'caw_engine_midi_dropped'),
         positionAt = lib.lookupFunction<Int64 Function(Pointer<Void>, Int64), int Function(Pointer<Void>, int)>(
             'caw_engine_position_at');
+        // The Build tools (#163, #164): the testing suite and the sample-pack maker; both block, so call them off
+        // the UI isolate.
+        componentTest = lib.lookupFunction<Pointer<Utf8> Function(Pointer<Utf8>, Int32, Pointer<Utf8>, Pointer<Utf8>),
+            Pointer<Utf8> Function(Pointer<Utf8>, int, Pointer<Utf8>, Pointer<Utf8>)>('caw_component_test'),
+        samplePackRender = lib.lookupFunction<Pointer<Utf8> Function(Pointer<Utf8>, Int32, Pointer<Int32>, Pointer<Int32>),
+            Pointer<Utf8> Function(Pointer<Utf8>, int, Pointer<Int32>, Pointer<Int32>)>('caw_sample_pack_render');
 
   static Bindings? _instance;
 
@@ -354,4 +360,6 @@ class Bindings {
   final void Function(Pointer<Void>, int, double, double, double) setMidiOptions;
   final int Function(Pointer<Void>) midiDropped;
   final int Function(Pointer<Void>, int) positionAt;
+  final Pointer<Utf8> Function(Pointer<Utf8>, int, Pointer<Utf8>, Pointer<Utf8>) componentTest;
+  final Pointer<Utf8> Function(Pointer<Utf8>, int, Pointer<Int32>, Pointer<Int32>) samplePackRender;
 }

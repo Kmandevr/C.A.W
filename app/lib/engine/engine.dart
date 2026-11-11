@@ -696,7 +696,7 @@ class Engine {
   void noteOff(int id) => _b.noteOff(_handle, id);
   void notesOff() => _b.notesOff(_handle);
 
-  /// MIDI from a device (caw.h, API 11): MIDI 1.0 [bytes] for [layerId]'s instrument, played at [timeNs] on
+  /// MIDI from a device (caw.h, API 13): MIDI 1.0 [bytes] for [layerId]'s instrument, played at [timeNs] on
   /// [midiClockNs] (0: now), so the engine places each message at the frame it was played. Returns the messages
   /// queued.
   int midiBytes(String layerId, List<int> bytes, int timeNs) {

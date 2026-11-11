@@ -63,7 +63,7 @@ const char* kUsage =
     "      --compare ID|LIBRARY [--compare-id ID --compare-trust T]   null test against another component or build\n"
     "      --bypass (null test against the dry input)  --align none|declared|measured (default declared)\n"
     "      --wav OUT.wav --input-wav IN.wav --no-cpu --fft N --request FILE.json (the request as JSON)\n"
-    "      --report json|text  --strict (exit 1 when the result has warnings)\n"
+    "      --report json|text  --strict (exit 1 when the result has warnings; a request's failed checks exit 1)\n"
     "  caw sample-pack [INSTRUMENT] --out DIR [options]  render an instrument over notes, velocities and parameter\n"
     "                                        steps to named WAV files plus a manifest (docs/engine.md \"Sample packs\")\n"
     "      --request FILE.json (the request as JSON; the options below override its keys)\n"
@@ -72,7 +72,8 @@ const char* kUsage =
     "      --notes C3,E3,60 | FROM:TO[:STEP]   --vel 64,127   --step NAME=V1,V2,... (repeatable)\n"
     "      --name NAME --pattern '{name}_{note}_{vel}_{param}'  --hold S --max S --tail-db DB\n"
     "      --rate R --bits 16|24|32 --mono --trim-db DB --no-trim --fade-in MS --fade-out MS\n"
-    "      --normalize peak|rms [--target DB] [--group]  --loop  --sfz  --max-files N  --overwrite\n";
+    "      --normalize peak|rms [--target DB] [--group]  --loop  --loop-xfade MS  --rr N  --dither tpdf\n"
+    "      --sfz  --max-files N  --overwrite\n";
 
 bool readFile(const std::string& path, std::string& out) {
     std::ifstream f(path, std::ios::binary);
@@ -474,6 +475,16 @@ void printTextReport(const caw::Json& r) {
             }
     if (const caw::Json* w = r.get("warnings"))
         for (const caw::Json& x : w->arr) std::printf("  warning: %s\n", x.str.c_str());
+    if (const caw::Json* c = r.get("checks")) {
+        for (const caw::Json& x : c->arr) {
+            const caw::Json* v = x.get("value");
+            std::printf("  check %s: %s (%s)\n", x.string("path").c_str(), x.boolean("pass", false) ? "pass" : "FAIL",
+                        v && v->type == caw::Json::Type::Number ? std::to_string(v->num).c_str()
+                        : v && v->type == caw::Json::Type::Bool ? (v->b ? "true" : "false")
+                                                                 : "missing");
+        }
+        std::printf("  %s\n", r.boolean("passed", false) ? "all checks passed" : "checks FAILED");
+    }
 }
 
 int testComponent(int argc, char** argv) {
@@ -588,6 +599,7 @@ int testComponent(int argc, char** argv) {
     if (report == "json" || !ok) std::printf("%s\n", result.c_str());
     else printTextReport(parsed);
     if (!ok) return 1;
+    if (!parsed.boolean("passed", true)) return 1;  // a request's checks (thresholds) failed
     const caw::Json* warnings = parsed.get("warnings");
     return strict && warnings && !warnings->arr.empty() ? 1 : 0;
 }
@@ -703,6 +715,13 @@ int samplePack(int argc, char** argv) {
         else if (a == "--fade-out") top.emplace_back("fade_out_ms", num("--fade-out"));
         else if (a == "--max-files") top.emplace_back("max_files", num("--max-files"));
         else if (a == "--loop") top.emplace_back("loop", jsonBool(true));
+        else if (a == "--loop-xfade") {  // a loop whose seam is crossfaded over MS
+            caw::Json l;
+            l.type = caw::Json::Type::Object;
+            l.obj["crossfade_ms"] = num("--loop-xfade");
+            top.emplace_back("loop", l);
+        } else if (a == "--rr") top.emplace_back("round_robins", num("--rr"));
+        else if (a == "--dither") top.emplace_back("dither", jsonString(val("--dither")));
         else if (a == "--sfz") top.emplace_back("sfz", jsonBool(true));
         else if (a == "--overwrite") top.emplace_back("overwrite", jsonBool(true));
         else if (a == "--no-trim") top.emplace_back("trim", jsonBool(false));

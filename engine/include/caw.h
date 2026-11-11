@@ -39,10 +39,12 @@ extern "C" {
    10 (2026-11-11): the audio device's choice and state (caw_audio_devices, caw_audio_configure,
    caw_audio_status), the metronome's sound and volume (caw_engine_set_metronome_sound) and a test tone
    (caw_engine_test_tone). Nothing else changes.
-   11 (2026-11-11): MIDI device input, frame-accurate: caw_midi_clock_ns, caw_engine_midi_ump, caw_engine_midi_bytes,
+   12 (2026-11-11, roadmap 2.6): live loudness and correlation meters (caw_engine_loudness,
+   caw_engine_loudness_reset, caw_engine_layer_correlation). Nothing else changes. (11 is another branch's.)
+   13 (2026-11-11): MIDI device input, frame-accurate: caw_midi_clock_ns, caw_engine_midi_ump, caw_engine_midi_bytes,
    caw_engine_midi_release, caw_engine_set_midi_options, caw_engine_midi_dropped and caw_engine_position_at.
    Nothing else changes. */
-#define CAW_API_VERSION 11
+#define CAW_API_VERSION 13
 /* The component index that names a layer's native instrument rather than one of its "components". */
 #define CAW_INSTRUMENT_INDEX 0xFFFFFFFFu
 
@@ -378,7 +380,34 @@ CAW_API void caw_engine_set_metronome_sound(CawEngine* e, double volume, int32_t
 CAW_API void caw_engine_test_tone(CawEngine* e, double seconds);
 CAW_API int32_t caw_engine_test_tone_sounding(CawEngine* e);
 
-/* API version 11. MIDI from devices (USB, Bluetooth, Windows ports), into a track's instrument at the frame it was
+/* Live loudness and correlation meters (API version 12, roadmap 2.6), read from the UI at 10 Hz or more. The
+   master's loudness is measured on what the device plays (after the master chain and the safety limiter, the test
+   tone included) per ITU-R BS.1770-5 (11/2023) and EBU Tech 3341 V4 (11/2023): K-weighted,
+   left and right weighted 1. Momentary is the last 400 ms, short-term the last 3 s (both ungated), integrated the
+   gated loudness (400 ms blocks every 100 ms, the -70 LUFS absolute gate and the relative gate 10 LU below) since
+   the last Play or caw_engine_loudness_reset. True peak is 4x oversampled with BS.1770-5 Annex 2's interpolating
+   filter (2x at 96 kHz, none from 192 kHz). A value with no reading yet, or of silence, is CAW_METER_NONE. */
+#define CAW_METER_NONE (-200.0f)
+typedef struct CawLoudness {
+    float momentary_lufs;
+    float short_term_lufs;
+    float integrated_lufs;
+    float momentary_max_lufs;   /* the loudest since the last reset (EBU Mode's maxima) */
+    float short_term_max_lufs;
+    float true_peak_l_dbtp;     /* each side's true peak since the last read */
+    float true_peak_r_dbtp;
+    float true_peak_max_dbtp;   /* the louder side's, since the last reset */
+    float correlation;          /* the master's stereo correlation: 1 mono, 0 unrelated or silent, -1 opposite */
+    float integrated_seconds;   /* audio the integrated loudness has measured */
+} CawLoudness;
+CAW_API void caw_engine_loudness(CawEngine* e, CawLoudness* out);
+/* Starts the integrated loudness, the maxima and the true-peak maximum again (Play does this too). */
+CAW_API void caw_engine_loudness_reset(CawEngine* e);
+/* A project layer's stereo correlation (a track or a folder bus, of what it sends on after volume and pan),
+   over about 300 ms: 1 identical sides, 0 unrelated or silent, -1 opposite. 1 on success, 0 if layer_index is not a
+   project layer. */
+CAW_API int32_t caw_engine_layer_correlation(CawEngine* e, int32_t layer_index, float* out);
+/* API version 13. MIDI from devices (USB, Bluetooth, Windows ports), into a track's instrument at the frame it was
    played. Messages are queued (1,024 at most between two audio callbacks; more are dropped and counted) and the
    audio thread plays each one a callback (plus the options' delay) after its time, so the spacing between messages
    is kept as played; one that comes later than that plays at the start of the next callback.
@@ -395,8 +424,9 @@ CAW_API int32_t caw_engine_midi_ump(CawEngine* e, const char* layer_id, const ui
    skipped), converted to MIDI 2.0 at the edge, in group 0. */
 CAW_API int32_t caw_engine_midi_bytes(CawEngine* e, const char* layer_id, const uint8_t* bytes, int32_t count,
                                       int64_t time_ns);
-/* What the instrument hears: a Note On holds a note (a preview, with the device's key and channel, so Stop's fade,
-   mute and notes_off end it too); its Note Off ends it, or the sustain pedal (CC 64) holds it until the pedal is up;
+/* What the instrument hears: a Note On holds a note (a preview, with the device's key and channel, so Stop's fade
+   and mute end it too, but not caw_engine_notes_off, which ends the app's own previews); its Note Off ends it, or
+   the sustain pedal (CC 64) holds it until the pedal is up;
    Poly Pressure and MIDI 2.0 per-note pitch reach that note; Pitch Bend becomes the pitch of the channel's notes
    (bend_range semitones); Channel Pressure the pressure of the channel's notes; CC 120 and 123 end the channel's
    notes. Every Control Change, Program Change and Channel Pressure also reaches the instrument as itself (a MIDI

@@ -13,6 +13,7 @@
 #include "component_chain.h"
 #include "midi_device.h"
 #include "execution.h"
+#include "meters.h"
 #include "module_registry.h"
 #include "pattern.h"
 #include "program.h"
@@ -131,7 +132,7 @@ public:
     void notePitch(int32_t id, double pitch);  // glides a held preview to [pitch] without a new attack
     void noteOff(int32_t id);
     void notesOff();
-    // MIDI from devices (caw.h, API 11): messages for [layerId]'s instrument, queued for the audio thread, which
+    // MIDI from devices (caw.h, API 13): messages for [layerId]'s instrument, queued for the audio thread, which
     // plays each at its frame from its time on the MIDI clock (midiClockNs; 0 means now). UMP words (MIDI 1.0
     // Channel Voice ones upscaled to MIDI 2.0) or MIDI 1.0 bytes. Returns the messages queued; a full queue drops
     // the rest (counted in midiDropped). Any thread but the audio thread.
@@ -176,6 +177,14 @@ public:
     void clearOverload();
     Meters meters();
     bool layerMeter(int index, LayerMeter& out);
+    // The master's loudness (BS.1770-5 / EBU Tech 3341: momentary, short-term, integrated since the last Play or
+    // reset) and true peak, after the safety limiter (meters.h). Not the audio thread.
+    LoudnessMeter::Reading loudness();
+    void resetLoudness();
+    // Stereo correlation (-1..1, 0 while silent) of the master, or of a project layer (track or folder bus, what
+    // it sends on). False for an index that is not a project layer.
+    float masterCorrelation() const noexcept { return masterCorrelation_.read(); }
+    bool layerCorrelation(int index, float& out);
     int scope(int index, float* out, int n);  // a project layer index, kScopeMaster or kScopeAudition
     int64_t loopLength();                     // samples in the project loop
     // Mix-graph routing updates the graph refused; always 0 unless the routing derivation is wrong.
@@ -389,6 +398,8 @@ private:
     std::atomic<uint32_t> routingRejections_{0};  // mix-graph routes the executor refused (never expected)
     std::unique_ptr<std::atomic<float>[]> masterScope_;
     std::atomic<int> masterScopePos_{0};
+    std::unique_ptr<LoudnessMeter> loudness_;  // the master's (about 100 KB: its gating histogram)
+    CorrelationMeter masterCorrelation_;
 
     // ---- control-thread state ----
     std::mutex ctl_;
@@ -448,7 +459,7 @@ private:
     std::map<std::string, ModuleState> modules_;
     std::map<std::string, LayerState> layers_;
     std::map<int32_t, int> previewSlots_;  // control thread: each held preview's slot, for its pitch and off
-    // Device MIDI (API 11): producers push under midiPush_ (never the audio thread); the audio thread pops into
+    // Device MIDI (API 13): producers push under midiPush_ (never the audio thread); the audio thread pops into
     // midiPending_ (made with the Engine) and places each message at its frame.
     struct PendingMidi {
         Midi2Event e;

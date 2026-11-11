@@ -60,8 +60,9 @@ std::unique_ptr<ModuleProcessor> make(Engine& e, const char* id, double rate = 4
 }
 
 // Runs `in` through p in `block`-frame blocks, with `values` over the defaults (and a transport at `tempo` when
-// tempo > 0).
-Stereo run(ModuleProcessor& p, const Stereo& in, const Values& values = {}, uint32_t block = 64, double tempo = 0) {
+// tempo > 0, stopped at beat 0 unless `playing`, which plays it from beat 0).
+Stereo run(ModuleProcessor& p, const Stereo& in, const Values& values = {}, uint32_t block = 64, double tempo = 0,
+           bool playing = false) {
     const ModuleDescriptor& d = p.descriptor();
     std::vector<ParameterValue> params(d.parameterCount);
     for (uint32_t k = 0; k < d.parameterCount; ++k) params[k].value = d.parameters[k].defaultValue;
@@ -78,6 +79,8 @@ Stereo run(ModuleProcessor& p, const Stereo& in, const Values& values = {}, uint
         const uint32_t n = static_cast<uint32_t>(std::min<size_t>(block, in.size() - start));
         const float* ic[2] = {in.l.data() + start, in.r.data() + start};
         float* oc[2] = {out.l.data() + start, out.r.data() + start};
+        if (playing) t.beat = static_cast<double>(start) * tempo / (60.0 * 48000.0);
+        t.playing = playing;
         AudioProcessBlock b;
         b.input = {ic, 2, n};
         b.output = {oc, 2, n};
@@ -464,6 +467,54 @@ TEST(the_effects_match_their_golden_renders) {
             std::unique_ptr<ModuleProcessor> p = make(e, id);
             if (!p) continue;
             const uint64_t h = hash(run(*p, in, b ? busy(id) : Values{}, 64, 120));
+            const Golden* g = nullptr;
+            for (const Golden& x : goldens)
+                if (std::strcmp(x.id, id) == 0 && x.busy == b) g = &x;
+            if (!g || g->hash != h) {
+                char buf[160];
+                std::snprintf(buf, sizeof buf, "    {\"%s\", %s, 0x%016llxull},", id, b ? "true" : "false", static_cast<unsigned long long>(h));
+                cawtest::fail(__FILE__, __LINE__, buf);
+            }
+        }
+}
+
+// The Library's stereo tools and the ducker (#121, #175): the same golden pattern, from a list of their own.
+static const char* const kStereoTools[] = {"org.caw.stereo.balance", "org.caw.stereo.width", "org.caw.distortion",
+                                    "org.caw.delay.pingpong", "org.caw.chorus",       "org.caw.ducker"};
+
+static Values stereoToolBusy(const char* id) {
+    const std::string s = id;
+    if (s == "org.caw.stereo.balance") return {{"pan", -0.6}};
+    if (s == "org.caw.stereo.width") return {{"width", 1.7}};
+    if (s == "org.caw.distortion") return {{"shape", 2}, {"drive", 9}, {"bits", 5}, {"mix", 0.7}, {"output", 0.8}};
+    if (s == "org.caw.delay.pingpong") return {{"sync", 2}, {"feedback", 0.7}, {"cross", 0.6}, {"mix", 0.6}};
+    if (s == "org.caw.chorus") return {{"rate", 2.2}, {"depth", 0.9}, {"mix", 0.8}};
+    // The ducker in Tempo mode (no key needed), every eighth, lows only, a bent shape.
+    return {{"mode", 2}, {"rate", 2}, {"depth", 0.7}, {"attack", 5}, {"hold", 20}, {"release", 120}, {"tension", -0.4},
+            {"offset", 0.25}, {"bands", 1}, {"crossover", 300}};
+}
+
+TEST(the_stereo_tools_and_the_ducker_match_their_golden_renders) {
+    // As the_effects_match_their_golden_renders (2 s of music, defaults and busy settings, 64-frame blocks, 120 BPM),
+    // with the song playing (the ducker's Tempo mode ducks on its beat), and the same bits at 37-frame blocks.
+    struct Golden {
+        const char* id;
+        bool busy;
+        uint64_t hash;
+    };
+    const Golden goldens[] = {
+#include "effects_golden.inc"
+    };
+    Engine e(48000);
+    const Stereo in = music(48000 * 2);
+    for (const char* id : kStereoTools)
+        for (bool b : {false, true}) {
+            std::unique_ptr<ModuleProcessor> p = make(e, id);
+            if (!p) continue;
+            const Stereo out = run(*p, in, b ? stereoToolBusy(id) : Values{}, 64, 120, true);  // playing: the ducks
+            const uint64_t h = hash(out);
+            if (hash(run(*make(e, id), in, b ? stereoToolBusy(id) : Values{}, 37, 120, true)) != h)
+                cawtest::fail(__FILE__, __LINE__, std::string(id) + " renders differently at another block size");
             const Golden* g = nullptr;
             for (const Golden& x : goldens)
                 if (std::strcmp(x.id, id) == 0 && x.busy == b) g = &x;

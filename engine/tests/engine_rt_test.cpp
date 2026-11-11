@@ -533,7 +533,7 @@ TEST(count_in_metronome_and_released_touches_never_allocate_on_the_audio_thread)
 }
 
 TEST(device_midi_never_allocates_on_the_audio_thread) {
-    // MIDI from a device (API 11), stopped and playing, on a native instrument and a .caw voice chain: notes, poly
+    // MIDI from a device (API 13), stopped and playing, on a native instrument and a .caw voice chain: notes, poly
     // and channel pressure, bend, sustain, CCs, MPE and a release, all played from the queue without allocating.
     ProjectSpec p;
     p.bpm = 120;

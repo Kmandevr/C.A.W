@@ -11,6 +11,7 @@ option(CAW_AUDIO "Build the shared library with device audio output (miniaudio)"
 option(CAW_TOOLS "Build the caw CLI and the tests" ON)
 option(CAW_SANITIZE "Build with AddressSanitizer and UndefinedBehaviorSanitizer" OFF)
 option(CAW_CLAP "Build the CLAP export tests: example plug-ins and a test host (fetches the CLAP headers)" OFF)
+option(CAW_VST3 "Build the VST3 export tests: example plug-ins and a test host (fetches the VST3 interface headers)" OFF)
 get_filename_component(CAW_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/.." ABSOLUTE)
 
 # Public source-level C++ SDK. Internal engine headers stay private to engine targets.
@@ -65,9 +66,13 @@ if(CAW_INSTALL_SDK)
   install(EXPORT CAWSDKTargets NAMESPACE CAW:: DESTINATION "${CAW_SDK_CMAKE_DIR}")
   install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/cmake/CAWComponent.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/cmake/CAWClap.cmake"
+    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/CAWVst3.cmake"
     DESTINATION "${CAW_SDK_CMAKE_DIR}")
   install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/plugin/clap/caw_clap_entry.cpp"
     DESTINATION "${CAW_SDK_CMAKE_DIR}/clap")
+  install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/plugin/vst3/caw_vst3_entry.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/plugin/vst3/caw_vst3_iids.cpp"
+    DESTINATION "${CAW_SDK_CMAKE_DIR}/vst3")
   install(DIRECTORY include/caw/ DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/caw")
   install(FILES include/caw_component.h DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}")
   install(FILES
@@ -160,6 +165,9 @@ ${_lsrcs}nullptr};
 
 add_library(caw_core STATIC
   src/builtins.cpp src/compile.cpp src/docs.cpp src/pattern.cpp
+  # fx-filters begin
+  src/builtin_fx_filters.cpp src/builtin_fx_filters_comb.cpp src/builtin_fx_filters_formant.cpp src/builtin_fx_filters_eq.cpp src/builtin_fx_filters_presets.cpp
+  # fx-filters end
   src/engine.cpp src/component_chain.cpp src/builtin_components.cpp src/builtin_instruments.cpp src/builtin_flagship.cpp src/presets.cpp src/builtin_effects.cpp src/builtin_effects_eq.cpp src/builtin_effects_dynamics.cpp src/builtin_effects_space.cpp src/builtin_effects_saturator.cpp src/builtin_effects_kit.cpp src/builtin_ducker.cpp src/builtin_fx_creative.cpp src/builtin_fx_creative_tapestop.cpp src/builtin_fx_creative_reverser.cpp src/builtin_fx_creative_trancegate.cpp src/builtin_fx_creative_stutter.cpp src/builtin_fx_creative_bitcrush.cpp src/builtin_fx_creative_pitchshift.cpp src/builtin_fx_creative_freqshift.cpp src/builtin_fx_creative_ringmod.cpp src/builtin_fx_creative_presets.cpp src/execution.cpp src/module.cpp src/module_registry.cpp src/midi2.cpp src/midi_device.cpp src/params.cpp src/graph.cpp src/scheduler.cpp src/dependency.cpp src/hardware.cpp src/json.cpp src/midifile.cpp src/project.cpp
   src/render.cpp src/synth.cpp src/tables.cpp src/vm.cpp src/wav.cpp
   "${CAW_TEMPLATES_CPP}" "${CAW_STDLIB_CPP}")
@@ -171,6 +179,7 @@ set_target_properties(caw_core PROPERTIES CXX_VISIBILITY_PRESET hidden VISIBILIT
 # The component testing suite (#163): offline measurements of C++ effects.
 target_sources(caw_core PRIVATE src/analysis.cpp src/component_test.cpp)
 target_sources(caw_core PRIVATE src/sample_pack.cpp)  # the sample-pack maker (#164)
+target_sources(caw_core PRIVATE src/meters.cpp)  # live loudness, true peak and correlation meters (roadmap 2.6)
 # fx-dynamics begin: the Dynamics and Drive effects
 target_sources(caw_core PRIVATE src/builtin_fx_dynamics.cpp src/builtin_fx_drive.cpp src/builtin_fx_dynamics_presets.cpp)
 # fx-dynamics end
@@ -218,9 +227,14 @@ target_include_directories(caw_cli PRIVATE src)
   target_sources(caw_tests PRIVATE tests/effects_test.cpp)  # the built-in effects suite (#173)
   target_sources(caw_tests PRIVATE tests/routing_test.cpp)  # sends, buses, keys and routing loops (#175)
   target_sources(caw_tests PRIVATE tests/ducker_test.cpp)  # the ducker driven directly (#175 audio review)
+  target_sources(caw_tests PRIVATE tests/stereo_path_test.cpp)  # stereo end to end: buses and WAV export (#17, #121)
+  target_sources(caw_tests PRIVATE tests/meters_test.cpp)  # loudness (BS.1770-5, EBU Tech 3341), true peak, correlation
   target_sources(caw_tests PRIVATE tests/fx_dynamics_test.cpp)  # fx-dynamics: the Dynamics and Drive effects
   target_sources(caw_tests PRIVATE tests/fx_creative_test.cpp)  # fx-creative: the Creative and Pitch & Time effects
-  target_sources(caw_tests PRIVATE tests/midi_device_test.cpp)  # MIDI from devices (API 11): edge conversion, timing, notes
+  # fx-filters begin
+  target_sources(caw_tests PRIVATE tests/fx_filters_test.cpp)  # the EQ & Filter group
+  # fx-filters end
+  target_sources(caw_tests PRIVATE tests/midi_device_test.cpp)  # MIDI from devices (API 13): edge conversion, timing, notes
   add_library(caw_test_component MODULE tests/native_component_fixture.cpp)
   target_link_libraries(caw_test_component PRIVATE CAW::SDK)
   target_compile_options(caw_test_component PRIVATE ${CAW_FLAGS})
@@ -280,4 +294,9 @@ endif()
 if(CAW_CLAP AND CAW_TOOLS)
   include(cmake/CAWClap.cmake)
   add_subdirectory(plugin/clap)
+endif()
+# VST3 export (docs/native-module-sdk.md): the same plug-ins as .vst3 bundles, and a host test.
+if(CAW_VST3 AND CAW_TOOLS)
+  include(cmake/CAWVst3.cmake)
+  add_subdirectory(plugin/vst3)
 endif()

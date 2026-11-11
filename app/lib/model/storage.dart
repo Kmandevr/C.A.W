@@ -204,12 +204,18 @@ class ProjectStorage {
     return directory;
   }
 
+  /// The project's sample packs (the sample-pack maker's renders): one folder per pack, shown in Files.
+  Directory samplePacksDirectory(String projectId) => Directory(
+    '${_root.path}${Platform.pathSeparator}samples${Platform.pathSeparator}${_validatedProjectId(projectId)}');
+
   Future<void> delete(String id) async {
     final f = _file(id);
     if (await f.exists()) await f.delete();
     if (RegExp(r'^[A-Za-z0-9_-]{1,128}$').hasMatch(id)) {
       final history = _restoreDirectory(id);
       if (await history.exists()) await history.delete(recursive: true);
+      final samples = samplePacksDirectory(id);
+      if (await samples.exists()) await samples.delete(recursive: true);
     }
   }
 
