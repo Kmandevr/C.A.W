@@ -149,28 +149,28 @@ void main() {
       ..midiChannel = 2;
     midi.notes.add(const MidiMessage(0x91, 60, 127, 'Other keyboard'));
     midi.notes.add(const MidiMessage(0x90, 61, 127, 'Keystation')); // channel 1
-    expect(s.on, isEmpty);
+    expect(s.device, isEmpty);
     midi.notes.add(const MidiMessage(0x91, 62, 127, 'Keystation')); // channel 2
-    expect(s.on.single.$2, 62);
+    expect(s.device.single.$2, [0x91, 62, 127], reason: 'a device plays through the engine\'s device input');
     live.keyDown(70, 0.5); // the on-screen keys always pass, at their own velocity
     expect(s.on.last.$3, closeTo(64 / 127, 1e-9));
     s.settings
       ..midiChannel = 0
       ..velocityCurve = VelocityCurve.hard;
     midi.notes.add(const MidiMessage(0x90, 63, 64, 'Keystation'));
-    expect(s.on.last.$3, closeTo((64 / 127) * (64 / 127), 1e-9));
+    expect(s.device.last.$2[2], ((64 / 127) * (64 / 127) * 127).round());
     s.settings
       ..velocityCurve = VelocityCurve.fixed
       ..midiFixedVelocity = 0.3;
     midi.notes.add(const MidiMessage(0x90, 64, 120, 'Keystation'));
-    expect(s.on.last.$3, 0.3);
+    expect(s.device.last.$2[2], (0.3 * 127).round());
     s.settings.midiThru = false;
-    final before = s.on.length;
+    final before = s.device.length;
     midi.notes.add(const MidiMessage(0x90, 65, 120, 'Keystation'));
-    expect(s.on.length, before, reason: 'thru off: nothing sounds outside a recording');
+    expect(s.device.length, before, reason: 'thru off: nothing sounds outside a recording');
     live.toggleRecord(s.project.layers.first.id);
     midi.notes.add(const MidiMessage(0x90, 66, 120, 'Keystation'));
-    expect(s.on.length, before + 1, reason: 'the armed track still hears it');
+    expect(s.device.length, before + 1, reason: 'the armed track still hears it');
     live.dispose();
   });
 

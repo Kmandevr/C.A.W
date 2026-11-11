@@ -34,7 +34,7 @@ Future<void> main() async {
   final settings = await Settings.open();
   final state = AppState(settings: settings);
   // One MIDI listener for the app's life, above the shell (which a theme change rebuilds).
-  LiveMidi.current = LiveMidi(state, platformMidiInput());
+  LiveMidi.current = LiveMidi(state, platformMidiInput(clock: () => state.engine?.midiClockNs ?? 0));
   AutomationWriter.current = AutomationWriter(state); // the transport's Automate button
 
   runApp(CawApp(state: state));

@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:math';
 
 import 'cpp_component.dart';
+import 'midi_mapping.dart';
 import 'pattern_doc.dart';
 import 'routing.dart';
 
@@ -537,6 +538,9 @@ class ProjectDoc {
   /// Markers and regions on the ruler, in no particular order.
   List<MarkerDoc> markers;
 
+  /// Controller learn: hardware CCs mapped to knobs (Settings › MIDI lists them).
+  List<MidiCcMapping> midiMappings = [];
+
   int get stepsPerBar => beatsPerBar * 4;
   int get loopSteps => loopBars * stepsPerBar;
   /// A song position is the engine's 32-bit step count, so a song holds whole bars up to 2^31 - 1 steps (F7.2).
@@ -719,6 +723,7 @@ class ProjectDoc {
         if (midiFiles.isNotEmpty) 'midi_files': [for (final f in midiFiles) f.toJson()],
         if (hasLoopRange) ...{'loop_range': loopRange, 'loop_start_steps': loopStartSteps, 'loop_end_steps': loopEndSteps},
         if (markers.isNotEmpty) 'markers': [for (final m in markers) m.toJson()],
+        if (midiMappings.isNotEmpty) 'midi_mappings': [for (final m in midiMappings) m.toJson()],
       };
 
   /// Brings each track's instrument up to what the engine plays, with [resolve] (`Engine.resolveInstrument`): a
@@ -854,6 +859,9 @@ class ProjectDoc {
     project.loopStartSteps = project.loopStartSteps.clamp(0, project.maxArrangementSteps - 1).toInt();
     project.loopEndSteps = project.loopEndSteps.clamp(0, project.maxArrangementSteps).toInt();
     if (!project.hasLoopRange) project.loopRange = false;
+    project.midiMappings = [
+      for (final raw in ((j['midi_mappings'] as List?) ?? const []).take(1024)) ?MidiCcMapping.fromJson(raw),
+    ];
     project.markers = [
       for (final raw in ((j['markers'] as List?) ?? const []).take(1024)) ?MarkerDoc.fromJson(raw, project.maxArrangementSteps),
     ];

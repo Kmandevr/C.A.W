@@ -246,7 +246,9 @@ class AppState extends ChangeNotifier {
       poll: _poll,
       interval: const Duration(milliseconds: 33),
       onIdle: () {
-    if (!meters.playing && _heldPreviews.isEmpty && !(engine?.testToneSounding ?? false)) engine?.stopAudio();
+    if (!meters.playing && _heldPreviews.isEmpty && deviceNotesHeld == 0 && !(engine?.testToneSounding ?? false)) {
+      engine?.stopAudio();
+    }
   });
 
   /// Settings › Audio's test tone: opens the device if it is closed and plays 440 Hz for [seconds]; returns an error
@@ -490,6 +492,33 @@ class AppState extends ChangeNotifier {
   }
 
   void previewPitch(int id, double pitch) => engine?.notePitch(id, pitch);
+
+  /// Keys a MIDI device holds down now (LiveMidi counts them): the audio device stays open while any is held.
+  int deviceNotesHeld = 0;
+
+  /// MIDI from a device for [layerId]'s instrument, placed by the engine at the frame it was played ([timeNs] on the
+  /// MIDI clock; caw.h API 11). MIDI 1.0 [bytes], or UMP [words]. Tests override it to watch.
+  void deviceMidi(String layerId, {List<int>? bytes, List<int>? words, int timeNs = 0}) {
+    final e = engine;
+    if (e == null) return;
+    if (!e.audioOn) _openAudio(e);
+    if (words != null) e.midiUmp(layerId, words, timeNs);
+    if (bytes != null) e.midiBytes(layerId, bytes, timeNs);
+    _poller.wake();
+  }
+
+  /// Ends the device notes on [layerId] (null: every track), as an unplugged keyboard leaves them.
+  void deviceMidiRelease([String? layerId]) => engine?.midiRelease(layerId);
+
+  /// Where the playhead was at [timeNs] on the MIDI clock, in sixteenth steps (unwrapped: past the loop's end it
+  /// counts on), or null when the engine can't tell (stopped, counting in, no engine).
+  double? stepAt(int timeNs) {
+    final e = engine;
+    final m = meters;
+    if (e == null || timeNs <= 0 || m.loopLength <= 0) return null;
+    final pos = e.positionAt(timeNs);
+    return pos < 0 ? null : pos * project.engineLoopSteps / m.loopLength;
+  }
 
   void previewOff(int id) {
     final e = engine;
