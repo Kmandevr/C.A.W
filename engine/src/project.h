@@ -100,6 +100,10 @@ struct LayerSpec {
     // a .caw generator; the chain's .caw effects, then `components`, follow it.
     bool hasInstrument = false;
     ComponentSpec instrument;
+    // Per-note FX (#127, note_fx_host.h): effects run once per note between the instrument's voices and its shared
+    // stage, in up to `noteVoices` slots (1..16), before `components`. The instrument must expose a voice bus.
+    std::vector<ComponentSpec> noteComponents;
+    int noteVoices = 8;
     double volume = 0.8, pan = 0.0;
     bool mute = false, solo = false;
 };

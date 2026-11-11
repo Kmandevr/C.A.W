@@ -14,6 +14,7 @@
 #include "component_chain.h"
 #include "midi_device.h"
 #include "modulation_links.h"
+#include "note_fx_host.h"
 #include "execution.h"
 #include "meters.h"
 #include "module_registry.h"
@@ -104,6 +105,11 @@ public:
     void setGlobal(const std::string& name, double value);
     // Component index that names a layer's native instrument instead of one of its inserts.
     static constexpr uint32_t kInstrumentIndex = 0xFFFFFFFFu;
+    // A component index with this bit names component (index & ~kNoteComponentFlag) of the layer's per-note FX
+    // (#127): knob moves and bypass fan out to every slot, the display reads the newest note's slot.
+    static constexpr uint32_t kNoteComponentFlag = 0x40000000u;
+    // Per-note FX (#127): the layer's voice budget, active slots and overflow (any thread; false: none there).
+    bool noteFxStats(const std::string& layerId, NoteFxStats& out);
     // Play after Stop: an instrument still ringing fades out over its next 5 ms, rendered at Play (inside one
     // callback). All the ringing instruments share this many frames of that work, so Play never costs more than
     // two 5 ms tails at 48 kHz: one or two fade over 5 ms, more over less each (16: 0.6 ms).
@@ -431,6 +437,7 @@ private:
     CorrelationMeter masterCorrelation_;
     // Project modulation (#161): its plan comes from the control thread, the audio thread runs it each chunk.
     std::unique_ptr<ModulationHost> modulation_ = std::make_unique<ModulationHost>();
+    std::unique_ptr<NoteFxManager> noteFx_ = std::make_unique<NoteFxManager>();  // per-note FX (#127)
     uint64_t modPlays_ = 0;  // audio thread: Plays handled, so the modulators restart at each (not at a touch release)
 
     // ---- control-thread state ----

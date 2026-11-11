@@ -249,7 +249,8 @@ inline bool audioProcessBlockValid(const AudioProcessBlock& block) noexcept {
 // run(hostData, offset, frames) so the host processes the stretch in place, then adds every ASSIGNED lane into
 // its mix before its shared stage. It sets kLaneEnded on a lane whose note no voice plays at the block's end.
 // caw::VoiceLanes (caw/instrument.hpp) does this bookkeeping.
-inline constexpr uint32_t kLaneAssigned = 1u, kLaneWritten = 2u, kLaneEnded = 4u;
+// kLaneRest (host): the overflow lane, note id 0, that every voice without a lane of its own renders into.
+inline constexpr uint32_t kLaneAssigned = 1u, kLaneWritten = 2u, kLaneEnded = 4u, kLaneRest = 8u;
 struct VoiceLane {
     uint32_t structSize = sizeof(VoiceLane);
     uint32_t noteId = 0;
@@ -395,7 +396,8 @@ static_assert(kCapabilityNotesIn == CAW_CAPABILITY_NOTES_IN && kCapabilityMidiIn
               kCapabilityEventsOut == CAW_CAPABILITY_EVENTS_OUT && kCapabilitySampleAssets == CAW_CAPABILITY_SAMPLE_ASSETS &&
               kCapabilityNeedsTransport == CAW_CAPABILITY_NEEDS_TRANSPORT && kCapabilityExportClap == CAW_CAPABILITY_EXPORT_CLAP);
 static_assert(static_cast<uint32_t>(CpuClass::Heavy) == CAW_CPU_HEAVY);
-static_assert(kLaneAssigned == CAW_LANE_ASSIGNED && kLaneWritten == CAW_LANE_WRITTEN && kLaneEnded == CAW_LANE_ENDED);
+static_assert(kLaneAssigned == CAW_LANE_ASSIGNED && kLaneWritten == CAW_LANE_WRITTEN && kLaneEnded == CAW_LANE_ENDED &&
+              kLaneRest == CAW_LANE_REST);
 // The voice bus crosses the C interface as is (the host's lanes reach a component without copying).
 static_assert(sizeof(VoiceLane) == sizeof(CawVoiceLane) && offsetof(VoiceLane, noteId) == offsetof(CawVoiceLane, note_id) &&
               offsetof(VoiceLane, flags) == offsetof(CawVoiceLane, flags) &&
