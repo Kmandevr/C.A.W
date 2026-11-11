@@ -9,7 +9,21 @@
       "Bash(graphify:*)",
       "Bash(uv tool install graphifyy)",
       "mcp__serena",
-      "Bash(node scripts/docs-test.js:*)"
+      "Bash(node scripts/docs-test.js:*)",
+      "Bash(git merge:*)",
+      "mcp__github__issue_write",
+      "mcp__github__add_issue_comment",
+      "mcp__github__issue_read",
+      "mcp__github__list_issues"
+    ],
+    "ask": [
+      "Bash(git branch -d:*)",
+      "Bash(git branch -D:*)",
+      "Bash(git branch --delete:*)",
+      "Bash(git push origin --delete:*)",
+      "Bash(git push --delete:*)",
+      "Bash(git push origin :*)",
+      "mcp__github__delete_file"
     ]
   },
   "hooks": {
@@ -60,5 +74,12 @@
   ],
   "env": {
     "MCP_TIMEOUT": "120000"
+  },
+  "autoMode": {
+    "allow": [
+      "$defaults",
+      "Merging local branches (agent worktree branches) into the session branch with git merge is allowed for the main agent and its subagents; the owner approved this (2026-11-11).",
+      "Closing, reopening, labelling and commenting on GitHub issues in kmandevr/c.a.w is allowed when the work they track is done or superseded; the owner approved this (2026-11-11)."
+    ]
   }
 }

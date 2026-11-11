@@ -32,6 +32,14 @@ Carries out the owner's decision of 2026-11-10 ("C++ replaces the .caw language"
 - **Bug fixed on the way:** a track's instrument installed while nothing sounds counted as still ringing at the first Play, which mixed in 5 ms of a phantom tail (a free-running source started at twice its level); a new instrument now starts idle.
 - **Open, for the owner:** an instrument track keeps running after a Stop until its output is quiet (or 30 s), and a never-quiet effect there now ends at that cap without the 20 ms fade buses get; a bus whose capped tail has faded comes back while a child track still rings out. The app still sends `voices`, `swap`, `seam_crossfade` and the key (Settings' light-mode voice cap and swap timing now change nothing): removing those settings is UI work.
 
+## 2026-11-11: What agents may do on GitHub and in git (owner)
+
+**Decision (owner, 2026-11-11):**
+- **Merging is allowed:** agents may merge local branches into the session branch.
+- **Issues:** agents may close, label and comment on issues in this repository when the work they track is done or superseded.
+- **Deleting branches** needs the owner's express direction or approval every time, so those commands always ask.
+- **Where it lives:** `.claude/settings.json`, in `permissions` and in the `autoMode` allow notes.
+
 ## 2026-11-11: Desktop plays to desktop strengths (owner)
 
 **Decision (owner, 2026-11-11, after a desktop review with screenshots at 1366×768 and 1920×1080).** Phones stay exactly as they are; on desktop:
