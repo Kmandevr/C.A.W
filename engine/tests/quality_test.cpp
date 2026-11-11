@@ -192,23 +192,56 @@ TEST(the_test_tone_plays_while_stopped_and_ends) {
     caw_engine_destroy(c);
 }
 
+TEST(the_test_tone_flag_follows_what_the_audio_thread_plays) {
+    std::vector<float> a(512), b(512);
+    // Asked for and ended before the audio thread saw it: nothing sounds, and the flag says so (it used to stick).
+    Engine e(48000);
+    e.testTone(5);
+    e.testTone(0);
+    CHECK(!e.testToneSounding());
+    e.process(a.data(), b.data(), 512);
+    CHECK(!e.testToneSounding());
+    for (const float v : a) CHECK_EQ(v, 0.0f);
+    // Too short to be a sample at this rate: never sounding.
+    e.testTone(1e-6);
+    CHECK(!e.testToneSounding());
+    e.process(a.data(), b.data(), 512);
+    CHECK(!e.testToneSounding());
+    // A new request while one still plays keeps it sounding through the old one's end.
+    e.testTone(0.01);  // 480 frames: ends inside the next block
+    e.process(a.data(), b.data(), 512);
+    CHECK(!e.testToneSounding());
+    e.testTone(0.01);
+    e.process(a.data(), b.data(), 256);
+    e.testTone(0.02);  // lands while the first still has frames left
+    e.process(a.data(), b.data(), 256);  // the first ends here; the second is taken at the next callback
+    CHECK(e.testToneSounding());
+    e.process(a.data(), b.data(), 512);
+    CHECK(e.testToneSounding());
+    e.process(a.data(), b.data(), 512);
+    CHECK(!e.testToneSounding());
+}
+
 TEST(the_device_choice_is_kept_without_a_device) {
     char* list = caw_audio_devices();
     CHECK(std::string(list).find("\"devices\":[") != std::string::npos);
     caw_free(list);
     CawEngine* c = caw_engine_create(48000);
-    CHECK_EQ(caw_audio_configure(c, "Speakers \"USB\"", 4, CAW_AUDIO_EXCLUSIVE | 8), 0);
+    // Two identical interfaces share a name: the id tells them apart, the name is kept for when the id is gone.
+    CHECK_EQ(caw_audio_configure(c, "{0.0.0.00000000}.{2}", "Speakers \"USB\"", 4, CAW_AUDIO_EXCLUSIVE | 8), 0);
     char* status = caw_audio_status(c);
     const std::string s = status;
     caw_free(status);
     CHECK(s.find("\"running\":false") != std::string::npos);
     CHECK(s.find("\"requested_device\":\"Speakers \\\"USB\\\"\"") != std::string::npos);
+    CHECK(s.find("\"requested_device_id\":\"{0.0.0.00000000}.{2}\"") != std::string::npos);
     CHECK(s.find("\"requested_frames\":16") != std::string::npos);  // clamped to 16..8192
     CHECK(s.find("\"exclusive_requested\":true") != std::string::npos);
-    CHECK_EQ(caw_audio_configure(c, nullptr, 100000, 0), 0);
+    CHECK_EQ(caw_audio_configure(c, nullptr, nullptr, 100000, 0), 0);
     status = caw_audio_status(c);
     CHECK(std::string(status).find("\"requested_frames\":8192") != std::string::npos);
+    CHECK(std::string(status).find("\"requested_device_id\":\"\"") != std::string::npos);
     caw_free(status);
-    CHECK_EQ(caw_audio_configure(nullptr, nullptr, 0, 0), 1);
+    CHECK_EQ(caw_audio_configure(nullptr, nullptr, nullptr, 0, 0), 1);
     caw_engine_destroy(c);
 }
