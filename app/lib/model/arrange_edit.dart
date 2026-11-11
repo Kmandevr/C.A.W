@@ -20,7 +20,7 @@ const kClipEditMaxNotes = 20000;
 List<PatternNote>? clipNotes(PatternDoc src, ClipDoc clip, int beatsPerBar,
     {int? from, int? to, bool tails = true, int limit = kClipEditMaxNotes}) {
   final lo = from ?? clip.startSteps, hi = to ?? clip.startSteps + clip.lengthSteps;
-  final sourceLength = math.max(1, src.lengthSteps(beatsPerBar));
+  final sourceLength = clip.loopLength(src.lengthSteps(beatsPerBar));
   var sourcePos = clip.sourceOffsetSteps, consumed = 0, timeline = clip.startSteps;
   final out = <PatternNote>[];
   while (consumed < clip.lengthSteps && timeline < hi) {
@@ -165,7 +165,8 @@ extension ArrangeEdit on AppState {
       // offset (it then plays a crossing note's tail).
       right = ClipDoc(id: newId('c'), patternId: clip.patternId, startSteps: step, lengthSteps: end - step,
           sourceOffsetSteps: clip.sourceOffsetSteps + step - clip.startSteps, loop: clip.loop, linked: true,
-          name: clip.name, color: clip.color, mute: clip.mute);
+          name: clip.name, color: clip.color, mute: clip.mute, loopSteps: clip.loopSteps,
+          automation: [for (final a in clip.automation) a.copy()]);
     } else {
       final module = _patternModule(_uniqueName('${original!.name} part'), end - step, notes);
       project.modules.add(module);
@@ -345,7 +346,8 @@ extension ArrangeEdit on AppState {
     project.modules.add(source);
     return ClipDoc(id: newId('c'), patternId: source.id, startSteps: start,
         lengthSteps: clip.lengthSteps.clamp(1, project.maxArrangementSteps - start).toInt(),
-        sourceOffsetSteps: clip.sourceOffsetSteps, loop: clip.loop, name: clip.name, color: clip.color, mute: clip.mute);
+        sourceOffsetSteps: clip.sourceOffsetSteps, loop: clip.loop, name: clip.name, color: clip.color, mute: clip.mute,
+        loopSteps: clip.loopSteps, automation: [for (final a in clip.automation) a.copy()]);
   }
 
   ModuleDoc _patternModule(String name, int lengthSteps, List<PatternNote> notes) {

@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:math';
 
 import 'audio_clips.dart';
+import 'clip_automation.dart';
 import 'cpp_component.dart';
 import 'midi_mapping.dart';
 import 'modulation.dart';
@@ -54,8 +55,9 @@ class ModuleDoc {
 
 class ClipDoc {
   ClipDoc({required this.id, required this.patternId, this.startSteps = 0, this.lengthSteps = 64, this.sourceOffsetSteps = 0,
-    this.loop = true, this.linked = false, this.name, this.color, this.mute = false, this.lock = false, List<String>? takes})
-      : takes = takes ?? [];
+    this.loop = true, this.linked = false, this.name, this.color, this.mute = false, this.lock = false, List<String>? takes,
+    this.loopSteps, List<ClipAutomationLaneDoc>? automation})
+      : takes = takes ?? [], automation = automation ?? [];
   final String id;
   String patternId;
 
@@ -67,6 +69,17 @@ class ClipDoc {
   int sourceOffsetSteps;
   bool loop;
   bool linked;
+
+  /// The clip's own loop point (owner, 2026-11-11, as REAPER loops an item at its source's length): the clip repeats
+  /// its source from [sourceOffsetSteps] every this many steps. Null plays at its pattern's length, as before.
+  int? loopSteps;
+
+  /// Clip automation (owner, 2026-11-11): lanes in the clip's own time (steps of its loop, from the pattern's start),
+  /// which loop with its notes and move and extend with it ([unrollClipAutomation]).
+  List<ClipAutomationLaneDoc> automation;
+
+  /// Where the clip loops, given its pattern's length in steps: [loopSteps] when set, else the pattern's length.
+  int loopLength(int patternSteps) => (loopSteps ?? 0) > 0 ? loopSteps! : max(1, patternSteps);
 
   /// The clip's own name (its Properties); null shows its pattern's name.
   String? name;
@@ -88,6 +101,8 @@ class ClipDoc {
         if (mute) 'mute': true,
         if (lock) 'lock': true,
         if (takes.isNotEmpty) 'takes': takes,
+        if ((loopSteps ?? 0) > 0) 'loop_steps': loopSteps,
+        if (automation.isNotEmpty) 'automation': [for (final a in automation) a.toJson()],
       };
 
   static ClipDoc fromJson(Map<String, dynamic> j) => ClipDoc(
@@ -103,6 +118,11 @@ class ClipDoc {
         mute: j['mute'] == true,
         lock: j['lock'] == true,
         takes: [for (final t in (j['takes'] as List?) ?? const []) if (t is String) t].take(64).toList(),
+        loopSteps: switch (j['loop_steps']) { final num n when n >= 1 => n.toInt(), _ => null },
+        automation: [
+          for (final a in (j['automation'] as List?) ?? const [])
+            if (a is Map<String, dynamic>) ?ClipAutomationLaneDoc.fromJson(a),
+        ],
       );
 }
 
@@ -718,9 +738,23 @@ class ProjectDoc {
         layerId == null ? masterComponents : layers.where((l) => l.id == layerId).firstOrNull?.components ?? const [];
     bool instrumentPlays(LayerDoc l) =>
         !l.isFolder && l.instrument != null && (playableComponents == null || playableComponents.contains(l.instrument!.id));
+    // Clip automation (owner, 2026-11-11) is unrolled onto the timeline: inside a clip its lane plays, elsewhere the
+    // track's or project's lane on the same target (lib/model/clip_automation.dart).
+    final unrolled = unrollClipAutomation();
+    final projectLanes = [
+      for (final lane in automation)
+        if (unrolled[lane.key] case final u?)
+          (ProjectAutomationLaneDoc.fromJson(lane.toJson())..points = u.points)
+        else
+          lane,
+      for (final MapEntry(key: key, value: u) in unrolled.entries)
+        if (u.targetType != 'track' && automation.every((a) => a.key != key))
+          ProjectAutomationLaneDoc(targetType: u.targetType, target: u.target, layerId: u.layerId, component: u.component,
+              points: u.points),
+    ];
     // Lanes being written (automation Write and Touch, [automationKey]) are left out: the control's live value plays.
     final engineAutomation = [
-      for (final lane in automation)
+      for (final lane in projectLanes)
         if (suspendLanes.contains(lane.key)) ...[]
         else if (lane.targetType == 'instrument') ...[
           if (layers.where((l) => l.id == lane.layerId).firstOrNull case final LayerDoc l when instrumentPlays(l)) lane.toJson(),
@@ -776,7 +810,16 @@ class ProjectDoc {
               'parent': l.parentId, 'folder': l.isFolder, 'bus': l.busEnabled,
               'automation': [
                 for (final a in l.automation)
-                  if (!suspendLanes.contains(automationKey('track', a.target, layerId: l.id))) a.toJson(),
+                  if (!suspendLanes.contains(automationKey('track', a.target, layerId: l.id)))
+                    if (unrolled[automationKey('track', a.target, layerId: l.id)] case final u?)
+                      (AutomationLaneDoc(target: a.target, points: u.points, armed: a.armed)).toJson()
+                    else
+                      a.toJson(),
+                for (final target in const ['volume', 'pan'])
+                  if (l.automation.every((a) => a.target != target))
+                    if (unrolled[automationKey('track', target, layerId: l.id)] case final u?)
+                      if (!suspendLanes.contains(automationKey('track', target, layerId: l.id)))
+                        AutomationLaneDoc(target: target, points: u.points).toJson(),
               ],
               if (l.clips.isEmpty && l.patternId != null) 'pattern': l.patternId,
               if (l.clips.isNotEmpty) 'clips': [
@@ -784,6 +827,7 @@ class ProjectDoc {
                   'id': clip.id, 'pattern': clip.patternId, 'start_steps': clip.startSteps,
                   'length_steps': clip.lengthSteps, 'source_offset_steps': clip.sourceOffsetSteps,
                   'loop': clip.loop,
+                  if ((clip.loopSteps ?? 0) > 0) 'loop_steps': clip.loopSteps,
                   if (clip.mute) 'mute': true,
                 },
               ],
@@ -997,6 +1041,15 @@ class ProjectDoc {
         clip.startSteps = clip.startSteps.clamp(0, project.maxArrangementSteps - 1).toInt();
         clip.lengthSteps = clip.lengthSteps.clamp(1, project.maxArrangementSteps - clip.startSteps).toInt();
         clip.sourceOffsetSteps = clip.sourceOffsetSteps.clamp(0, project.maxArrangementSteps).toInt();
+        if (clip.loopSteps != null) clip.loopSteps = clip.loopSteps!.clamp(1, project.maxArrangementSteps).toInt();
+        for (final lane in clip.automation) {
+          for (final point in lane.points) {
+            point.step = point.step.clamp(0, project.maxArrangementSteps.toDouble()).toDouble();
+            if (lane.isTrack) {
+              point.value = point.value.clamp(lane.target == 'volume' ? 0.0 : -1.0, lane.target == 'volume' ? kMaxMixGain : 1.0).toDouble();
+            }
+          }
+        }
       }
       for (final lane in layer.automation) {
         lane.points = lane.points.toList()
