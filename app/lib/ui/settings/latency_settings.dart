@@ -31,6 +31,22 @@ String _platformLabel(String source) => switch (source) {
       _ => 'not known',
     };
 
+/// A row of the Latency page (its own titles: Settings' search finds the page by its one entry, audio.outputLatency).
+Widget _action(String id, String title, {String? subtitle, IconData? icon, VoidCallback? onTap, Widget? trailing}) =>
+    SettingRow(id: id, child: ListTile(
+      key: ValueKey('action-$id'),
+      dense: true,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 8),
+      leading: icon == null ? null : Icon(icon, color: Neon.blue, size: 20),
+      title: Text(title),
+      subtitle: subtitle == null ? null : Text(subtitle, style: const TextStyle(color: Neon.dim, fontSize: 11)),
+      trailing: trailing ?? (onTap == null ? null : const Icon(Icons.chevron_right)),
+      onTap: onTap == null ? null : () {
+        Haptics.tap();
+        onTap();
+      },
+    ));
+
 /// The row in Settings › Audio that opens the Latency page.
 class LatencySettingsRow extends StatelessWidget {
   const LatencySettingsRow({super.key, required this.state});
@@ -138,7 +154,7 @@ class _LatencyPageState extends State<LatencyPage> {
     final level = Motion.of(context);
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       settingHeading(output ? 'Output' : 'Input'),
-      settingAction(output ? 'audio.latencyOutputDevice' : 'audio.latencyInputDevice',
+      _action(output ? 'audio.latencyOutputDevice' : 'audio.latencyInputDevice', output ? 'Output now' : 'Input now',
           icon: dev.kind.isBluetooth ? Icons.bluetooth : output ? Icons.speaker_outlined : Icons.mic_none,
           subtitle: '${dev.label} · system ${_ms(platform)} (${_platformLabel(source)})',
           trailing: AnimatedSwitcher(
@@ -146,18 +162,19 @@ class _LatencyPageState extends State<LatencyPage> {
             child: Text(_ms(total), key: ValueKey(total.round()),
                 style: Neon.code(size: 14, color: total > 50 ? Neon.yellow : Neon.text)),
           )),
-      settingAction(output ? 'audio.latencyOutputOffset' : 'audio.latencyInputOffset', icon: Icons.tune,
+      _action(output ? 'audio.latencyOutputOffset' : 'audio.latencyInputOffset', output ? 'Output offset' : 'Input offset',
+          icon: Icons.tune,
           subtitle: '+${_ms(off.extraMs)} for this device (${_sourceLabel(off.source)}); tap to type the total',
           onTap: () => _type(output: output),
           trailing: off.source == OffsetSource.preset ? null : TextButton(
               key: ValueKey(output ? 'latency-output-reset' : 'latency-input-reset'),
               onPressed: () => output ? l.resetOutput() : l.resetInput(), child: const Text('Preset'))),
       if (output)
-        settingAction('audio.latencyTap', icon: Icons.touch_app_outlined,
+        _action('audio.latencyTap', 'Tap along', icon: Icons.touch_app_outlined,
             subtitle: 'Plays the click; tap on every click you hear (8 taps)',
             trailing: FilledButton.tonal(key: const ValueKey('latency-tap'), onPressed: _tapAlong, child: const Text('Tap'))),
       if (!output)
-        settingAction('audio.latencyLoopback', icon: Icons.av_timer,
+        _action('audio.latencyLoopback', 'Loopback measurement', icon: Icons.av_timer,
             subtitle: hasInput ? 'A noise ping from the output into the input splits the round trip'
                 : 'Turn audio input on (below in Audio) to measure',
             trailing: FilledButton.tonal(key: const ValueKey('latency-loopback'),
@@ -174,11 +191,19 @@ class _LatencyPageState extends State<LatencyPage> {
         body: ListenableBuilder(
           listenable: l,
           builder: (context, _) => ListView(padding: const EdgeInsets.all(8), children: [
-            settingSwitch('audio.latencyCompensate', l.enabled, (v) {
-              Haptics.tap();
-              l.enabled = v;
-            }, icon: Icons.sync_alt,
-                subtitle: 'The playhead, meters and note highlights show what you hear; takes land where you played'),
+            SettingRow(id: 'audio.latencyCompensate', child: SwitchListTile(
+              key: const ValueKey('switch-audio.latencyCompensate'),
+              dense: true,
+              contentPadding: const EdgeInsets.symmetric(horizontal: 8),
+              secondary: const Icon(Icons.sync_alt, color: Neon.blue, size: 20),
+              title: const Text('Compensate latency'),
+              subtitle: const Text('The playhead, meters and note highlights show what you hear; takes land where you played'),
+              value: l.enabled,
+              onChanged: (v) {
+                Haptics.tap();
+                l.enabled = v;
+              },
+            )),
             AnimatedSize(
               duration: Motion.move(Motion.panel, Motion.of(context)),
               child: !l.enabled ? const SizedBox(width: double.infinity) : Column(
