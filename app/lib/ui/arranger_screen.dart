@@ -12,9 +12,11 @@ import '../model/arrange_fx.dart';
 import '../model/arrange_markers.dart';
 import '../model/live_midi.dart';
 import '../model/project.dart';
+import '../model/record_modes.dart';
 import '../model/settings.dart';
 import 'arrange/arrange_drag.dart';
 import 'arrange/region_list.dart';
+import 'arrange/take_chip.dart';
 import 'arrange/templates_ui.dart';
 import 'arrange/clip_bar.dart';
 import 'arrange/clip_preview.dart';
@@ -223,6 +225,12 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
         }
       case 'arranger.marker.next' || 'arranger.marker.prev':
         if (!s.jumpToMarker(next: id.endsWith('next'))) _router?.toast('No marker that way');
+      case 'arranger.take.next' || 'arranger.take.prev':
+        final withTakes = [for (final c in s.selectedClips) if (c.clip.takes.length > 1) c];
+        if (withTakes.isEmpty) _router?.toast('Select a clip with takes (a loop recording)');
+        for (final c in withTakes) {
+          s.stepTake(c.layer, c.clip, id.endsWith('next') ? 1 : -1);
+        }
       case 'arranger.marker.list':
         showMarkerList(context, s);
       case final go when go.startsWith('arranger.marker.go'):
@@ -2003,6 +2011,10 @@ class _TimelineClipState extends State<_TimelineClip> {
         // The clip's notes as a mini piano roll (REAPER), from a cached picture of its pattern; under the edges.
         if (preview != null) Positioned.fill(child: IgnorePointer(child: RepaintBoundary(
           child: CustomPaint(key: ValueKey('clip-preview-${c.id}'), painter: ClipPreviewPainter(preview))))),
+        // Loop-recorded takes: ‹ n/N › steps through them, a swipe across it too, a tap on the count lists them.
+        if (c.takes.length > 1 && c.lengthSteps * widget.stepW >= 86 && widget.height >= 26)
+          Positioned(top: 2, right: 14, child: TakeChip(state: widget.state, layer: widget.layer, clip: c,
+            color: widget.color)),
         // Both edges trim (REAPER: drag an item's edge): the left one moves the start and keeps the notes in time.
         _edge(left: true),
         _edge(left: false),

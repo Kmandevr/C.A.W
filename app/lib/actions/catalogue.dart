@@ -257,6 +257,10 @@ const List<ActionDef> standardActions = [
   ActionDef('arranger.marker.go8', 'Go to marker 8', _r, defaultKeys: ['8'], toast: false),
   ActionDef('arranger.marker.go9', 'Go to marker 9', _r, defaultKeys: ['9'], toast: false),
   ActionDef('arranger.marker.go10', 'Go to marker 10', _r, defaultKeys: ['0'], toast: false),
+  // REAPER's T and Shift+T; T is tap tempo here, so they have no keys by default.
+  ActionDef('arranger.take.next', 'Next take', _r, description: 'The selected clips play their next loop-recorded take',
+      isChange: true),
+  ActionDef('arranger.take.prev', 'Previous take', _r, isChange: true),
   ActionDef('arranger.marker.list', 'Markers and regions', _r,
       description: 'Every marker and region: jump, rename, loop, duplicate with clips', toast: false),
 

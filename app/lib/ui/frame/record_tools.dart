@@ -121,7 +121,7 @@ class KeysButton extends StatelessWidget {
       );
 }
 
-/// Record's long-press: the metronome, the count-in and the keys.
+/// Record's long-press: the metronome, the count-in, the MIDI record mode and the keys.
 Future<void> showRecordOptions(BuildContext context, AppState state, LiveMidi midi, Offset at) async {
   final s = state.settings;
   final v = await showLongPressMenu<String>(context, at: at, title: 'Recording', style: s.longPressMenu, actions: [
@@ -131,11 +131,20 @@ Future<void> showRecordOptions(BuildContext context, AppState state, LiveMidi mi
     for (final bars in const [0, 1, 2])
       MenuAction('c:$bars', bars == 0 ? 'No count-in' : 'Count-in $bars bar${bars == 1 ? '' : 's'}', Icons.more_time,
           checked: s.countInBars == bars),
+    // REAPER's record modes (lib/model/record_modes.dart).
+    for (final mode in MidiRecordMode.values)
+      MenuAction('r:${mode.name}', mode.label, switch (mode) {
+        MidiRecordMode.takes => Icons.layers_outlined,
+        MidiRecordMode.overdub => Icons.library_add_outlined,
+        MidiRecordMode.replace => Icons.find_replace,
+      }, checked: s.midiRecordMode == mode),
     MenuAction('keys', midi.keysOpen ? 'Hide the keys' : 'Show the keys and pads', Icons.piano),
   ]);
   if (v == null) return;
   if (v == 'keys') {
     midi.keysOpen = !midi.keysOpen;
+  } else if (v.startsWith('r:')) {
+    await s.setRecording(mode: MidiRecordMode.values.byName(v.substring(2)));
   } else if (v.startsWith('m:')) {
     await s.setRecording(metronome: Metronome.values.byName(v.substring(2)));
   } else {
@@ -174,7 +183,9 @@ class _TakeToastState extends State<TakeToast> {
     if (t == null || identical(t, _shown) || messenger == null) return;
     _shown = t;
     final layer = widget.midi.state.project.layers.where((l) => l.id == t.layerId).firstOrNull;
-    final name = widget.midi.state.project.module(t.moduleIds.last)?.name ?? 'Take';
+    // An overdub or replace into clips already there makes no take of its own.
+    final name = t.moduleIds.isEmpty ? (t.restore.length == 1 ? 'the notes' : 'the notes in ${t.restore.length} clips')
+        : widget.midi.state.project.module(t.moduleIds.last)?.name ?? 'Take';
     messenger
       ..hideCurrentSnackBar()
       ..showSnackBar(SnackBar(
