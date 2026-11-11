@@ -11,6 +11,7 @@ import 'files/asset_inspector.dart';
 import 'files/asset_views.dart';
 import 'files/files_tree.dart';
 import 'files/library_manager.dart';
+import 'files/project_file_actions.dart';
 import 'glass.dart';
 import 'audio_file_actions.dart';
 import 'midi_file_actions.dart';
@@ -192,7 +193,7 @@ class _FileManagerScreenState extends State<FileManagerScreen> {
   /// ⋯: everything the old Files screen had (portable files, restore points, the library manager).
   Future<void> _projectMenu(Offset at, FilesFolder folder) async {
     final action = await showCompactMenu<String>(context, at, const [
-      MenuEntry('export', Icons.file_upload_outlined, 'Export .cawproj'),
+      MenuEntry('export', Icons.file_upload_outlined, 'Export project…'),
       MenuEntry('import', Icons.file_open_outlined, 'Import project'),
       MenuEntry('midi', Icons.piano, 'Import MIDI file as clips'),
       MenuEntry('audio', Icons.graphic_eq_rounded, 'Import audio files (WAV, FLAC, MP3)'),

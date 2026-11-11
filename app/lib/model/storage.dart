@@ -212,6 +212,13 @@ class ProjectStorage {
   Directory audioDirectory(String projectId) => Directory(
     '${_root.path}${Platform.pathSeparator}audio${Platform.pathSeparator}${_validatedProjectId(projectId)}');
 
+  /// The drum pads' own WAVs the user picked (`DrumSampleImport`), app-wide beside the projects folder.
+  Directory get drumSamplesDirectory => Directory('${_root.parent.path}${Platform.pathSeparator}drum_samples');
+
+  /// Built C++ libraries that came in a project package (they load only once the user trusts each one).
+  Directory nativeImportsDirectory(String projectId) => Directory(
+    '${_root.path}${Platform.pathSeparator}native-imports${Platform.pathSeparator}${_validatedProjectId(projectId)}');
+
   Future<void> delete(String id) async {
     final f = _file(id);
     if (await f.exists()) await f.delete();
@@ -222,6 +229,8 @@ class ProjectStorage {
       if (await samples.exists()) await samples.delete(recursive: true);
       final audio = audioDirectory(id);
       if (await audio.exists()) await audio.delete(recursive: true);
+      final builds = nativeImportsDirectory(id);
+      if (await builds.exists()) await builds.delete(recursive: true);
     }
   }
 

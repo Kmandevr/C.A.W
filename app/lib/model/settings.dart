@@ -1020,6 +1020,15 @@ class Settings extends ChangeNotifier {
     return customThemes.firstWhere((x) => x.name == t.name, orElse: () => t);
   }
 
+  /// Adds [t] to the custom themes under a free name without choosing it (a project package's theme: Add theme).
+  Future<CawTheme> addTheme(CawTheme t) async {
+    final named = t.copyWith(name: freeName(t.name));
+    customThemes = [...customThemes, named]..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+    await _writeTheme(named);
+    notifyListeners();
+    return named;
+  }
+
   Future<void> deleteTheme(String name, {bool save = true}) async {
     if (isStarter(name)) return;
     customThemes = customThemes.where((t) => t.name != name).toList();

@@ -6,14 +6,18 @@ import 'package:flutter/gestures.dart' show DragStartBehavior;
 import 'package:flutter/material.dart';
 
 import '../../model/app_state.dart';
+import '../../model/arrange_edit.dart';
 import '../../model/arrange_fx.dart';
 import '../../model/automation_writer.dart';
+import '../../model/clip_automation.dart';
+import '../../model/clip_loop_edit.dart';
 import '../../model/project.dart';
 import '../feedback.dart';
 import '../haptics.dart';
 import '../theme.dart';
 import '../volume_fader.dart' show VolumeTaper;
 import '../pointer_input.dart';
+import 'long_press_menu.dart';
 
 /// One automation lane row's height: compact, and still a finger's height for its points (phone first).
 const double kLaneRowHeight = 40;
@@ -33,7 +37,15 @@ double lanesHeight(AppState state, LayerDoc layer) => !layer.showLanes || !canHa
 /// lanes the Automation panel edits and the Automate button writes.
 class ArrangeLane {
   ArrangeLane._(this.state, this.layer, this.key, this.name, this.color, this._track, this._project,
-      {this.min = 0, this.max = 1});
+      {this.min = 0, this.max = 1, this.clip, ClipAutomationLaneDoc? clipLane}) : _clip = clipLane;
+
+  /// A clip's lane ([ClipDoc.automation]), in the clip's own time, as the piano roll edits it.
+  static ArrangeLane? ofClip(AppState state, LayerDoc layer, ClipDoc clip, ClipAutomationLaneDoc lane) {
+    final look = _laneLook(state, layer, lane.targetType, lane.target, lane.component);
+    if (look == null) return null;
+    return ArrangeLane._(state, layer, 'clip|${clip.id}|${lane.keyOn(layer.id)}', look.name, look.color, null, null,
+        min: look.min, max: look.max, clip: clip, clipLane: lane);
+  }
 
   final AppState state;
   final LayerDoc layer;
@@ -41,11 +53,18 @@ class ArrangeLane {
   final Color color;
   final AutomationLaneDoc? _track;
   final ProjectAutomationLaneDoc? _project;
+  final ClipAutomationLaneDoc? _clip;
   final double min, max;
 
-  bool get isVolume => _track?.target == 'volume';
+  /// The clip whose lane this is (null for a track's or the project's lane).
+  final ClipDoc? clip;
+  ClipAutomationLaneDoc? get clipLane => _clip;
 
-  List<AutomationPointDoc> get points => _track?.points ?? _project!.points;
+  String? get _trackTarget => _track?.target ?? (_clip?.isTrack == true ? _clip!.target : null);
+
+  bool get isVolume => _trackTarget == 'volume';
+
+  List<AutomationPointDoc> get points => _track?.points ?? _project?.points ?? _clip!.points;
 
   /// A value as a height through the lane, 0 at the bottom and 1 at the top (volume on the faders' taper).
   double fraction(double value) {
@@ -60,49 +79,81 @@ class ArrangeLane {
 
   String label(double value) => isVolume
       ? VolumeTaper.label(value)
-      : _track != null ? '${(value * 100).round()}%' : value.toStringAsFixed(max - min > 10 ? 0 : 2);
+      : _trackTarget != null ? '${(value * 100).round()}%' : value.toStringAsFixed(max - min > 10 ? 0 : 2);
 
-  void add(double step, double value) => _track != null
-      ? state.addAutomationPoint(layer, _track, step, value)
-      : state.addProjectAutomationPoint(_project!, step, value.clamp(min, max).toDouble());
+  void add(double step, double value) => _clip != null
+      ? state.addClipLanePoint(layer, clip!, _clip, step, value.clamp(min, max).toDouble())
+      : _track != null
+          ? state.addAutomationPoint(layer, _track, step, value)
+          : state.addProjectAutomationPoint(_project!, step, value.clamp(min, max).toDouble());
 
-  void move(int index, double step, double value) => _track != null
-      ? state.updateAutomationPoint(layer, _track, index, step, value)
-      : state.updateProjectAutomationPoint(_project!, index, step, value.clamp(min, max).toDouble());
+  void move(int index, double step, double value) => _clip != null
+      ? state.updateClipLanePoint(layer, clip!, _clip, index, step, value.clamp(min, max).toDouble())
+      : _track != null
+          ? state.updateAutomationPoint(layer, _track, index, step, value)
+          : state.updateProjectAutomationPoint(_project!, index, step, value.clamp(min, max).toDouble());
 
-  void remove(int index) => _track != null
-      ? state.removeAutomationPoint(layer, _track, index)
-      : state.removeProjectAutomationPoint(_project!, index);
+  void remove(int index) => _clip != null
+      ? state.removeClipLanePoint(layer, clip!, _clip, index)
+      : _track != null
+          ? state.removeAutomationPoint(layer, _track, index)
+          : state.removeProjectAutomationPoint(_project!, index);
 
-  void delete() => _track != null ? state.removeAutomationLane(layer, _track) : state.removeProjectAutomationLane(_project!);
+  void delete() => _clip != null
+      ? state.removeClipLane(layer, clip!, _clip)
+      : _track != null ? state.removeAutomationLane(layer, _track) : state.removeProjectAutomationLane(_project!);
 
-  /// Whether the Automate button writes this lane (REAPER's envelope arm).
-  bool get armed => _track?.armed ?? _project!.armed;
+  /// The clip [moveToClip] would take this track lane into: the selected clip on the track, else its first one.
+  ClipDoc? get clipTarget {
+    if (_clip != null || (_project != null && _project.targetType != 'instrument' && _project.targetType != 'component')) {
+      return null;
+    }
+    return layer.clips.where((c) => c.id == state.selectedClipId).firstOrNull ?? layer.clips.firstOrNull;
+  }
+
+  /// "Move to clip" (a track lane) or "Move to track" (a clip lane): one undo step.
+  void moveToClip(ClipDoc target) => state.moveTrackLaneToClip(layer, target, key);
+  void moveToTrack() => state.moveClipLaneToTrack(layer, clip!, _clip!);
+
+  /// Whether the Automate button writes this lane (REAPER's envelope arm). Clip lanes are drawn, not written.
+  bool get armed => _clip != null || (_track?.armed ?? _project!.armed);
 
   /// Arms or disarms it: one undo step.
   void setArmed(bool on) {
-    if (on == armed) return;
+    if (on == armed || _clip != null) return;
     state.endUndoStep();
     state.editProject((_) => _track != null ? _track.armed = on : _project!.armed = on);
     state.endUndoStep();
   }
 }
 
+/// A lane's name, colour and value range on [layer]: volume and pan, or a parameter of its instrument or an effect.
+/// Null when the target isn't on the track (an effect that's gone).
+({String name, Color color, double min, double max})? _laneLook(AppState state, LayerDoc layer, String targetType,
+    String target, int? component) {
+  if (targetType == 'track') {
+    return (name: target == 'volume' ? 'Volume' : target == 'pan' ? 'Pan' : target,
+        color: target == 'volume' ? Neon.green : Neon.blue, min: -1.0, max: 1.0);
+  }
+  final id = switch (targetType) {
+    'instrument' => layer.instrument?.id,
+    'component' when (component ?? -1) >= 0 && component! < layer.components.length => layer.components[component].id,
+    _ => null,
+  };
+  if (id == null) return null;
+  final info = state.componentInfo(id);
+  final param = info?.parameters.where((p) => p.id == target).firstOrNull;
+  final device = info?.label ?? state.componentLabel(id);
+  return (name: '$device · ${param?.name.isNotEmpty == true ? param!.name : target}', color: Neon.violet,
+      min: param?.min ?? 0.0, max: param?.max ?? 1.0);
+}
+
 /// [layer]'s lanes, in order: volume and pan first, then its instrument's and effects' parameters.
 List<ArrangeLane> arrangeLanes(AppState state, LayerDoc layer) {
   ArrangeLane? native(ProjectAutomationLaneDoc lane) {
-    final id = switch (lane.targetType) {
-      'instrument' => layer.instrument?.id,
-      'component' when (lane.component ?? -1) >= 0 && lane.component! < layer.components.length =>
-        layer.components[lane.component!].id,
-      _ => null,
-    };
-    if (id == null) return null;
-    final info = state.componentInfo(id);
-    final param = info?.parameters.where((p) => p.id == lane.target).firstOrNull;
-    final device = info?.label ?? state.componentLabel(id);
-    return ArrangeLane._(state, layer, lane.key, '$device · ${param?.name.isNotEmpty == true ? param!.name : lane.target}',
-        Neon.violet, null, lane, min: param?.min ?? 0, max: param?.max ?? 1);
+    final look = _laneLook(state, layer, lane.targetType, lane.target, lane.component);
+    if (look == null || lane.targetType == 'track') return null;
+    return ArrangeLane._(state, layer, lane.key, look.name, look.color, null, lane, min: look.min, max: look.max);
   }
 
   return [
@@ -139,6 +190,42 @@ List<(String, String)> addableLanes(AppState state, LayerDoc layer) {
     }
   }
   return out;
+}
+
+/// What a clip's "Automation" picker can add to [clip] on [layer]: (value, label) pairs as [addableLanes] gives,
+/// less the clip's own lanes; [addClipArrangeLane] takes the value.
+List<(String, String)> addableClipLanes(AppState state, LayerDoc layer, ClipDoc clip) {
+  bool has(String type, String target, int? component) =>
+      clip.automation.any((a) => a.targetType == type && a.target == target && a.component == component);
+  final out = <(String, String)>[
+    for (final target in const ['volume', 'pan'])
+      if (!has('track', target, null)) ('track|$target', target == 'volume' ? 'Volume' : 'Pan'),
+  ];
+  final instrument = layer.instrument;
+  if (instrument != null) {
+    final info = state.componentInfo(instrument.id);
+    for (final p in info?.parameters ?? const []) {
+      if (p.automatable && !has('instrument', p.id, null)) out.add(('instrument|${p.id}', '${info!.label} · ${p.name.isEmpty ? p.id : p.name}'));
+    }
+  }
+  for (var i = 0; i < layer.components.length; i++) {
+    final info = state.componentInfo(layer.components[i].id);
+    for (final p in info?.parameters ?? const []) {
+      if (p.automatable && !has('component', p.id, i)) out.add(('component|$i|${p.id}', '${info!.label} · ${p.name.isEmpty ? p.id : p.name}'));
+    }
+  }
+  return out;
+}
+
+/// Adds the clip lane [value] names (from [addableClipLanes]): one undo step.
+void addClipArrangeLane(AppState state, LayerDoc layer, ClipDoc clip, String value) {
+  final parts = value.split('|');
+  if (parts.length == 2 && (parts.first == 'track' || parts.first == 'instrument')) {
+    state.addClipLane(layer, clip, parts.first, parts[1]);
+  } else if (parts.length == 3 && parts.first == 'component') {
+    final i = int.tryParse(parts[1]);
+    if (i != null && i >= 0 && i < layer.components.length) state.addClipLane(layer, clip, 'component', parts[2], component: i);
+  }
 }
 
 /// Adds the lane [value] names (from [addableLanes]): flat at the control's value now, across the song.
@@ -187,8 +274,13 @@ class TrackLaneHeaders extends StatelessWidget {
             border: Border(left: BorderSide(color: lane.color.withValues(alpha: 0.6), width: 2),
               bottom: BorderSide(color: Neon.line.withValues(alpha: 0.6)))),
           child: Row(children: [
-            Expanded(child: Text(lane.name, maxLines: 2, overflow: TextOverflow.ellipsis,
-              style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: lane.color))),
+            // The lane's menu: a long press or double tap on its name, or a right-click (Move to clip).
+            Expanded(child: GestureDetector(key: ValueKey('lane-name-${lane.key}'), behavior: HitTestBehavior.opaque,
+              onLongPressStart: (d) => laneMenu(context, lane, d.globalPosition),
+              onDoubleTapDown: (d) => laneMenu(context, lane, d.globalPosition),
+              onSecondaryTapDown: (d) => laneMenu(context, lane, d.globalPosition),
+              child: Align(alignment: Alignment.centerLeft, child: Text(lane.name, maxLines: 2, overflow: TextOverflow.ellipsis,
+                style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: lane.color))))),
             // Arm (REAPER's envelope arm): the Automate button writes only armed lanes; new lanes start armed.
             SizedBox(width: 26, height: kLaneRowHeight, child: Pressable(child: IconButton(
               key: ValueKey('lane-arm-${lane.key}'),
@@ -222,6 +314,23 @@ class TrackLaneHeaders extends StatelessWidget {
           ]))))),
     ]);
   }
+}
+
+/// A lane's menu (sectioned, as the Arrange menus are): a track lane moves into a clip on its track (the selected
+/// one, else the first; its first loop's values, in clip time), a clip lane onto the track; either can be removed.
+Future<void> laneMenu(BuildContext context, ArrangeLane lane, Offset at) async {
+  final target = lane.clipTarget;
+  final state = lane.state;
+  final v = await showLongPressMenu<String>(context, at: at, title: lane.name, style: state.settings.longPressMenu, actions: [
+    if (lane.clip != null)
+      const MenuAction('to-track', 'Move to track', Icons.vertical_align_bottom, section: 'Lane')
+    else if (target != null)
+      MenuAction('to-clip', 'Move to clip «${state.clipName(target)}»', Icons.vertical_align_top, section: 'Lane'),
+    const MenuAction('remove', 'Remove lane', Icons.close, danger: true, section: 'Lane'),
+  ]);
+  if (v == 'to-track') lane.moveToTrack();
+  if (v == 'to-clip' && target != null) lane.moveToClip(target);
+  if (v == 'remove') lane.delete();
 }
 
 /// A track's lanes on the timeline: one [LaneRow] per lane and the empty "+" row, level with [TrackLaneHeaders].

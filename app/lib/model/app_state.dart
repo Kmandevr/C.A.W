@@ -1,6 +1,7 @@
 // App state: settings, the startup choice, the open project, engine sync, autosave, meters and every edit.
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
@@ -11,7 +12,9 @@ import '../platform/resource_signals.dart';
 import 'poller.dart';
 import 'native_components.dart';
 import 'project.dart';
+import 'project_dependencies.dart';
 import 'automation_writer.dart' show AutomationTarget;
+import 'clip_automation.dart';
 import 'history.dart';
 import 'mixer_fx.dart' show masterLayerId;
 import 'pattern_doc.dart';
@@ -39,10 +42,14 @@ class _AutomationSnapshot {
           ProjectAutomationLaneDoc.fromJson(lane.toJson())],
         trackLanes = {for (final layer in project.layers) layer.id: [
           for (final lane in layer.automation) AutomationLaneDoc.fromJson(lane.toJson()),
+        ]},
+        clipLanes = {for (final layer in project.layers) for (final clip in layer.clips) clip.id: [
+          for (final lane in clip.automation) lane.copy(),
         ]};
 
   final List<ProjectAutomationLaneDoc> projectLanes;
   final Map<String, List<AutomationLaneDoc>> trackLanes;
+  final Map<String, List<ClipAutomationLaneDoc>> clipLanes;
 }
 
 class AppState extends ChangeNotifier {
@@ -156,6 +163,10 @@ class AppState extends ChangeNotifier {
 
   /// A one-line note about the project just opened (its .caw sounds were dropped); cleared by the next open.
   String? openNotice;
+
+  /// The files the open project plays that aren't on this device (project_dependencies.dart): the banner names
+  /// them with Locate… and Replace…; what needs them stays silent until they are relinked.
+  List<ProjectDependency> missingFiles = const [];
   ProjectStorage? _storage;
   /// The project storage once opened (the C++ Builder's desktop build materializes sources through it).
   ProjectStorage? get storage => _storage;
@@ -1351,6 +1362,9 @@ class AppState extends ChangeNotifier {
     project.automation = snapshot.projectLanes;
     for (final layer in project.layers) {
       layer.automation = snapshot.trackLanes[layer.id] ?? [];
+      for (final clip in layer.clips) {
+        if (snapshot.clipLanes[clip.id] case final lanes?) clip.automation = [for (final lane in lanes) lane.copy()];
+      }
     }
   }
 
@@ -1668,7 +1682,8 @@ class AppState extends ChangeNotifier {
     }
     final next = ClipDoc(id: newId('c'), patternId: patternId,
         startSteps: start, lengthSteps: clip.lengthSteps.clamp(1, project.maxArrangementSteps - start).toInt(),
-        sourceOffsetSteps: clip.sourceOffsetSteps, loop: clip.loop, linked: linked);
+        sourceOffsetSteps: clip.sourceOffsetSteps, loop: clip.loop, linked: linked, loopSteps: clip.loopSteps,
+        automation: [for (final a in clip.automation) a.copy()]);
     editLayer(layer, (l) => l.clips.add(next));
     selectClip(layer, next);
   }
@@ -1736,6 +1751,15 @@ class AppState extends ChangeNotifier {
     // The retired synths as Flagship presets, and presets' values into the knobs (the engine does the same when it
     // plays, so a project opened without the engine library still sounds right).
     if (engine != null) p.resolveInstruments(Engine.resolveInstrument);
+    // A path the project names that isn't a plain local one (a network share, a device or URL) becomes a missing
+    // file before the engine or the missing-files check could look at it (project_dependencies.dart).
+    try {
+      final audio = _storage?.audioDirectory(p.id).path ??
+          '${Directory.systemTemp.path}${Platform.pathSeparator}caw-audio${Platform.pathSeparator}${p.id}';
+      quarantineUnsafePaths(p, '$audio${Platform.pathSeparator}missing');
+    } on ArgumentError {
+      // An id storage refuses has no folder; its paths stay as they are and the engine refuses the project.
+    }
     project = p;
     openError = null;
     openNotice = switch (p.droppedModules) {
@@ -1753,11 +1777,23 @@ class AppState extends ChangeNotifier {
     selectedClipIds.clear();
     clearTimeSelection();
     previewOnly = false;
+    missingFiles = const [];
     await _storage?.setLastOpened(p.id);
     await flush();
     notifyListeners();
     await _syncNow();
     unawaited(prepareNativeComponents());
+    unawaited(checkMissingFiles());
+  }
+
+  /// Looks for the open project's files on this device again ([missingFiles]).
+  Future<void> checkMissingFiles() async {
+    final opened = project;
+    final missing = await findMissingFiles(opened);
+    if (!identical(project, opened) || _disposed) return;
+    final before = missingFiles.map((m) => m.key).join('|');
+    missingFiles = missing;
+    if (missing.map((m) => m.key).join('|') != before) notifyListeners();
   }
 
   /// Builds (or reuses a build of) and loads the project's C++ effects under the trust rules, then sends the
@@ -1785,9 +1821,11 @@ class AppState extends ChangeNotifier {
     if (p != null) await _switchTo(p);
   }
 
-  /// Imports a portable project as a new project ID so it cannot overwrite an existing saved project.
-  Future<void> importProject(ProjectDoc imported) {
-    final copy = ProjectDoc.fromJson(imported.toJson()..['id'] = newId('p'))..droppedModules = imported.droppedModules;
+  /// Imports a portable project as a new project ID ([id], else a fresh one) so it cannot overwrite an existing saved
+  /// project. [prepare] sees the copy before it opens (a package relinks its unpacked files there).
+  Future<void> importProject(ProjectDoc imported, {String? id, void Function(ProjectDoc copy)? prepare}) {
+    final copy = ProjectDoc.fromJson(imported.toJson()..['id'] = id ?? newId('p'))..droppedModules = imported.droppedModules;
+    prepare?.call(copy);
     return _switchTo(copy);
   }
 

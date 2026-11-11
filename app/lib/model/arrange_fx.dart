@@ -79,6 +79,18 @@ void followComponentLanes(ProjectDoc p, String? layerId, List<ComponentUseDoc> b
     lane.component = now;
     return false;
   });
+  // Clip lanes on the track's effects follow them the same way.
+  for (final clip in p.layers.where((l) => l.id == layerId).firstOrNull?.clips ?? const <ClipDoc>[]) {
+    clip.automation.removeWhere((lane) {
+      if (lane.targetType != 'component') return false;
+      final i = lane.component ?? -1;
+      if (i < 0 || i >= before.length) return true;
+      final now = after == null ? -1 : after.indexWhere((c) => identical(c, before[i]));
+      if (now < 0) return true;
+      lane.component = now;
+      return false;
+    });
+  }
   p.followComponentLinks(layerId, before);  // modulation links address an effect by index too (#161)
 }
 
@@ -347,7 +359,8 @@ extension ArrangeFx on AppState {
         source: original.source, runSource: original.runSource);
     final copied = ClipDoc(id: newId('c'), patternId: source.id, startSteps: start,
         lengthSteps: clip.lengthSteps.clamp(1, project.maxArrangementSteps - start).toInt(),
-        sourceOffsetSteps: clip.sourceOffsetSteps, loop: clip.loop);
+        sourceOffsetSteps: clip.sourceOffsetSteps, loop: clip.loop, loopSteps: clip.loopSteps,
+        automation: [for (final a in clip.automation) a.copy()]);
     editProject((p) {
       p.modules.add(source);
       target.clips.add(copied);

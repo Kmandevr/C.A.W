@@ -6,6 +6,20 @@ updated: 2026-11-11
 
 # Decisions
 
+## 2026-11-11: the .caw project file and its package format (#159; Claude, choices to confirm)
+
+Carries out the owner's packaging bullets of "MIDI clip loops, clip automation and project packaging" (below); [App](app.md) has the flows.
+
+**Decision (Claude, for the owner to confirm):**
+- **One `.caw` file, two forms.** With nothing ticked besides the project itself it is the project JSON (as `.cawproj` was). Otherwise it is a **zip** holding `manifest.json`, `project.json`, `assets/` (audio and samples), `components/<component id>/<ABI>/` (C++ builds), `presets/*.cawpreset`, `theme.json` (`{"name", "theme": the .theme file text}`); `plugins/` is reserved and stays empty. The reader tells them apart by the zip signature. Import also takes `.cawproj` and `.json`.
+- **The manifest** (`"format": "caw.package"`, version 1) lists every dependency the export found, packaged or not: `kind`, `name`, `used_by`, `size`, `packaged`, `path` in the archive, `sha256`, `reference` (what the project JSON calls it), and per kind `component`, `abi` and `source_fingerprint` (builds), `preset_kind`, `embedded` (C++ sources and convolver impulses, which live in the project JSON) and `licence` (plug-ins: "unknown: not packaged"). A packaged file's references in `project.json` become `package:assets/<name>`, so no device path of a packaged file travels with it; a file left out keeps its path and its hash, so Locate… can check a copy.
+- **No new dependency:** the zip reader and writer are our own (`app/lib/model/zip_archive.dart`, stored and deflated entries through `dart:io`'s raw deflate, no zip64, no encryption) rather than the `archive` package ([Fact] MIT, its `LICENSE` in archive 3.6.1 on pub.dev, read 2026-11-11): the reader is small enough to check whole, and every limit is ours.
+- **Untrusted on the way in:** every archive name must be relative, `/`-separated and plain (no `..`, `.`-leading parts, drive letters, backslashes, control characters or links; zip-slip), and names are never used as output paths: files are written under names made here, inside the project's own folders. Limits: 20,000 entries, 4 GiB in all, 1 GiB per audio file, 256 MiB per build, 64 MiB of project JSON, 4 MiB of manifest, presets at their own 4 MiB, 1 MiB of theme; a deflated entry stops at the size it declared (zip bombs), and size and CRC are checked. A packaged file whose hash differs from its manifest is left out and named. Only files the manifest lists in their kind's folder are read, each at most once (a manifest naming one twice, or listing more files than the archive holds, is refused), and the 4 GiB counts what is actually unpacked, so an import stops and removes its files once past it. Paths in a project are untrusted too: only plain local absolute paths are looked at (no network shares, device paths or URLs; they become missing files when a project opens), and an export packages or hashes only the project's own files; Locate… checks the copy it made, not the file picked.
+- **Builds through the trust store:** a build is unpacked only for this device's ABI and for sources it was built from; it asks Trust or Block once per build fingerprint (`library:<sha256>` in `native-trust.json`, beside the sources' fingerprints), and it loads only while that Trust stands (`NativeComponentManager` checks again at each prepare); the sources' own trust is still asked as before. A blocked or unanswered build is deleted and the sources build here.
+- **Defaults in the checklist:** audio and samples start ticked; builds, presets and the theme start unticked (device-specific or the user's own library); presets offered are those for a device the project uses (a track doesn't record which preset it came from); the theme is offered when the one in force is a custom one.
+- **On import:** presets join the user's under a free name; the theme waits for **Add theme** (`Settings.addTheme`, which doesn't choose it); a file that is still missing shows the banner.
+- **Open (owner):** whether the export should also offer to package recordings that no clip uses (they are listed under Files today and packaged when ticked); whether a plug-in's licence should be confirmable in the checklist once plug-in hosting exists.
+
 ## 2026-11-11: the .caw language is deleted from the engine (#160, WP-D)
 
 Carries out the owner's decision of 2026-11-10 ("C++ replaces the .caw language"; old projects are dropped).
@@ -17,6 +31,27 @@ Carries out the owner's decision of 2026-11-10 ("C++ replaces the .caw language"
 - **Tests play C++:** every engine test that used a .caw source as a signal plays `org.caw.test.osc` (`engine/tests/test_signal.h`) or a built-in. The mixer goldens moved onto it and were re-recorded on purpose; the Library parity tests keep frozen hashes of the ports' output, recorded while they still matched the .caw built-ins. Every other golden is unchanged.
 - **Bug fixed on the way:** a track's instrument installed while nothing sounds counted as still ringing at the first Play, which mixed in 5 ms of a phantom tail (a free-running source started at twice its level); a new instrument now starts idle.
 - **Open, for the owner:** an instrument track keeps running after a Stop until its output is quiet (or 30 s), and a never-quiet effect there now ends at that cap without the 20 ms fade buses get; a bus whose capped tail has faded comes back while a child track still rings out. The app still sends `voices`, `swap`, `seam_crossfade` and the key (Settings' light-mode voice cap and swap timing now change nothing): removing those settings is UI work.
+
+## 2026-11-11: Desktop plays to desktop strengths (owner)
+
+**Decision (owner, 2026-11-11, after a desktop review with screenshots at 1366×768 and 1920×1080).** Phones stay exactly as they are; on desktop:
+- **Ctrl+S saves everywhere.** Moving a track up or down becomes Alt+Up and Alt+Down. WASD stays for everything else.
+- **A left-drag on empty space selects, at once.** In Arrange it draws a time selection; in the piano roll it draws a selection box. A middle-drag or Space+drag pans.
+- **A click selects at once.** A double-click on a clip opens its notes, and a right-click opens the menu. On phones, a double tap still opens the menu.
+- **Desktop look changes:**
+  - a command palette (Ctrl+Shift+P);
+  - the project menu as a dropdown that shows shortcut keys;
+  - compact right-click menus (keys shown, never off screen);
+  - device editors as non-modal, resizable floating windows (several open at once, sizes remembered);
+  - the mixer as a dockable panel (Ctrl+M) with wider strips;
+  - Settings and the theme editor at a readable width;
+  - the full-screen piano roll fitting the pattern, with a title bar and close;
+  - a bottom dock area, so the focus panel doesn't squeeze the lanes.
+- **Behaviour fixes that need no look change:** a mouse drags at once, right-click does whatever a long press does, the wheel turns knobs, Esc closes pages, and Windows remembers its window and accepts files dropped from Explorer.
+
+## 2026-11-11: MIDI clip loops and clip automation, how they are built (Claude, to confirm)
+
+Carries out the first two bullets of the owner's decision below ([App](app.md)). the loop point is `ClipDoc.loopSteps` (`loop_steps` in the engine's project JSON, 0 = the pattern's length, so older projects play the same). Clip lanes keep points in clip time and the app unrolls them onto the timeline for the engine: inside a clip its lane plays, elsewhere the track's lane on the same target (or the control's value); where clips with lanes on one target overlap, the later-starting one wins until it ends. Move to clip takes the track lane's values over the clip's first loop and removes the track lane. Clip automation is not drawn in Arrange's clip bodies yet.
 
 ## 2026-11-11: MIDI clip loops, clip automation and project packaging (owner)
 
@@ -55,7 +90,7 @@ Carries out the owner's decision of 2026-11-10 ("C++ replaces the .caw language"
 - **A second finger frees a long-press lift from the grid**, as the owner asked; it still makes a copy during a quick drag (the earlier choice), and the clip menu duplicates.
 - **The double tap replaces the clip's old double tap** (which opened its notes): the menu's first entry, Edit notes, does that. A plain tap on a header now waits out the double tap before opening the focus view, while the header's buttons answer at once.
 - **The menus' numbers:** the track menu's Volume (dB) and Pan apply live; the clip menu's Length (bars) applies when let go or entered, since it rebuilds the project.
-- **Open: audio clips** (merged from the audio branch at the same time) keep their own gestures (`app/lib/ui/arrange/audio_clip_view.dart`): a long press opens their menu and a double tap the Clip tab, not yet the long-press lift and double-tap menu above.
+- **Audio clips** (done, 2026-11-11, branch `clip-loops`) follow the same rule (`app/lib/ui/arrange/audio_clip_view.dart`): a long press lifts the clip whole (edges included) onto any track on the grid, never before the project start, a resting second finger freeing it; a double tap or a right-click opens the menu, whose first item opens the Clip tab.
 
 ## 2026-11-11: Audio review fixes: declick lengths (to confirm)
 
@@ -533,7 +568,7 @@ Built (engine pass, 2026-11-10):
 **Decision (owner):** the .caw sound language is removed completely and replaced by C++. [Proposal, not built] Status: .caw still runs today; nothing below is built yet.
 - **Order (owner):** C++ instruments come first, then .caw is removed. Today every instrument is a .caw module and C++ components are stereo effects only, so note-playing C++ instruments (and C++ built-ins for the starter sounds) must exist before the language goes, and the app never goes silent in between.
 - **Patterns:** the owner asked for note clips stored as standard MIDI with a text form of C.A.W.'s own (#158). [Fact, 2026-11-10] a Standard MIDI File is binary, and so is MIDI 2.0's MIDI Clip File (midi.org M2-116-U, June 2023); midi.org publishes no official text form of either. How this was settled for now: "MIDI files are an import and export format" (2026-11-10, below the logo entry), pending the owner's confirmation.
-- **Project files (owner):** the project file itself takes the `.caw` extension (today `.cawproj`).
+- **Project files (owner):** the project file itself takes the `.caw` extension (built 2026-11-11, #159, below; old `.cawproj` files still import).
 - **Old projects (owner):** dropped. Projects and the "First loop" template made of .caw sounds are not converted; this follows "no project compatibility before Release 1" (2026-11-03).
 - **Sharing (owner):** shared sounds are C++, so each asks Trust / Block once per exact code, as now; Isolated (a separate process) stays planned. The sandbox that made a downloaded .caw module safe goes with the language.
 

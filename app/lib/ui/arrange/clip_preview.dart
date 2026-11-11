@@ -174,7 +174,7 @@ class ClipPictureCache {
 class MidiClipPreview extends ClipPreview {
   MidiClipPreview({required this.patternId, required this.source, required this.runSource, required this.beatsPerBar,
       required this.sourceOffsetSteps, required this.loop, required this.stepW, required this.top, required this.color,
-      ClipPictureCache? cache})
+      ClipPictureCache? cache, this.loopSteps})
       : cache = cache ?? ClipPictureCache.instance;
 
   /// The preview of [clip] from its pattern in [project], or null when the pattern is gone.
@@ -183,13 +183,17 @@ class MidiClipPreview extends ClipPreview {
     final m = project.module(clip.patternId);
     if (m == null) return null;
     return MidiClipPreview(patternId: m.id, source: m.source, runSource: m.runSource, beatsPerBar: project.beatsPerBar,
-        sourceOffsetSteps: clip.sourceOffsetSteps, loop: clip.loop, stepW: stepW, top: top, color: color, cache: cache);
+        sourceOffsetSteps: clip.sourceOffsetSteps, loop: clip.loop, stepW: stepW, top: top, color: color, cache: cache,
+        loopSteps: clip.loopSteps);
   }
 
   final String patternId, source, runSource;
   final int beatsPerBar, sourceOffsetSteps;
   final bool loop;
   final double stepW;
+
+  /// The clip's own loop point (null: its pattern's length): each repeat starts there, cut to it.
+  final int? loopSteps;
 
   /// Where the notes start below the clip's top (its name sits above them when there is room).
   final double top;
@@ -206,15 +210,18 @@ class MidiClipPreview extends ClipPreview {
     final h = size.height - top - 2;
     if (h <= 2) return;
     final picture = cache.picture(patternId, p, stepW: stepW, height: h, color: color, density: density(size.height));
-    final cycle = p.lengthSteps * stepW;
+    final loopLength = (loopSteps ?? 0) > 0 ? loopSteps! : p.lengthSteps;
+    final cycle = loopLength * stepW;
+    final cut = loopLength < p.lengthSteps; // notes past the loop point never play
     canvas.save();
     canvas.clipRect(Offset.zero & size);
-    var x = -(loop ? sourceOffsetSteps % p.lengthSteps : sourceOffsetSteps) * stepW;
+    var x = -(loop ? sourceOffsetSteps % loopLength : sourceOffsetSteps) * stepW;
     final edge = Paint()..color = color.withValues(alpha: color.a * 0.35)..strokeWidth = 1;
     for (var first = true; x < size.width; x += cycle, first = false) {
       if (x + cycle > 0) {
         canvas.save();
         canvas.translate(x, top);
+        if (cut) canvas.clipRect(Rect.fromLTWH(0, -top, cycle, size.height));
         canvas.drawPicture(picture);
         canvas.restore();
         if (!first && x > 0) canvas.drawLine(Offset(x, top), Offset(x, size.height - 2), edge);
@@ -228,7 +235,7 @@ class MidiClipPreview extends ClipPreview {
   bool sameAs(ClipPreview other) =>
       other is MidiClipPreview && other.patternId == patternId && identical(other.source, source) &&
       other.beatsPerBar == beatsPerBar && other.sourceOffsetSteps == sourceOffsetSteps && other.loop == loop &&
-      other.stepW == stepW && other.top == top && other.color == color;
+      other.stepW == stepW && other.top == top && other.color == color && other.loopSteps == loopSteps;
 }
 
 /// An audio clip's waveform from peak data: [peaks] holds a (min, max) pair per bucket, -1..1, each bucket

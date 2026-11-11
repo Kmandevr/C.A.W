@@ -11,6 +11,8 @@ import '../model/arrange_edit.dart';
 import '../model/audio_edit.dart';
 import '../model/arrange_fx.dart';
 import '../model/arrange_markers.dart';
+import '../model/clip_automation.dart';
+import '../model/clip_loop_edit.dart';
 import '../model/live_midi.dart';
 import '../model/pattern_doc.dart';
 import '../model/project.dart';
@@ -750,6 +752,15 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
             s.resizeClip(layer, clip, math.max(1, (b * bar).round()));
             s.endUndoStep();
           })),
+        // The clip's own loop point (owner, 2026-11-11; the piano roll's loop bar sets it too): in bars, whole steps.
+        MenuAction('loop-length', 'Loop length…', Icons.repeat, section: size, number: MenuNumber(
+          value: s.project.clipLoopSteps(clip) / bar, min: 1 / bar,
+          max: math.max(16.0, s.project.clipLoopSteps(clip) / bar).ceilToDouble(),
+          defaultValue: patternBars,
+          format: (b) => b == b.roundToDouble() ? b.toInt().toString() : b.toStringAsFixed(2),
+          onChangeEnd: (b) => s.setClipLoop(layer, clip, math.max(1, (b * bar).round())))),
+        if (clip.loopSteps != null)
+          const MenuAction('loop-reset', 'Reset loop to pattern length', Icons.restart_alt, section: size),
         const MenuAction('midi', 'Export as MIDI file', Icons.file_upload_outlined, section: more),
         if (!clip.lock) const MenuAction('delete', 'Delete', Icons.delete_outline, danger: true, section: more),
       ]);
@@ -775,6 +786,7 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
     if (v == 'copy') s.duplicateClip(layer, clip);
     if (v == 'linked') s.duplicateClip(layer, clip, linked: true);
     if (v == 'loop') s.editLayer(layer, (l) => clip.loop = !clip.loop);
+    if (v == 'loop-reset') s.setClipLoop(layer, clip, null);
     if (v == 'midi') await exportClipAsMidi(context, s, clip);
     if (v == 'delete') s.removeClip(layer, clip);
   }

@@ -19,6 +19,7 @@ import '../actions/macro.dart';
 import '../engine/engine.dart';
 
 import '../model/app_state.dart';
+import '../model/clip_loop_edit.dart';
 import '../model/lane_curve.dart';
 import '../model/live_midi.dart';
 import '../model/midi_clips.dart';
@@ -32,6 +33,7 @@ import 'motion.dart';
 import 'theme.dart';
 import 'widgets.dart';
 import 'arrange/track_color.dart';
+import 'clip_roll_parts.dart';
 import 'glass.dart';
 import 'adaptive_sheet.dart';
 import 'frame/frame_widgets.dart' show ScrollFade;
@@ -61,10 +63,15 @@ const _resolutions = [1, 2, 4, 8, 16, 32, 64, 128];
 
 class PatternEditor extends StatefulWidget {
   const PatternEditor(
-      {super.key, required this.state, required this.module, this.fullScreen = false, this.router});
+      {super.key, required this.state, required this.module, this.fullScreen = false, this.router, this.layer, this.clip});
   final AppState state;
   final ModuleDoc module;
   final bool fullScreen;
+
+  /// The clip the roll is opened for (the focus panel's Clip tab, and its full-screen roll), on [layer]: the roll then
+  /// shows the clip's loop bar and its automation lanes. Null in Build, where a pattern is edited on its own.
+  final LayerDoc? layer;
+  final ClipDoc? clip;
 
   /// The key router, for a full-screen roll whose route sits outside it.
   final KeyRouterState? router;
@@ -217,6 +224,62 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
   DateTime? _tapAt;
 
   static const _keyW = 44.0, _rulerH = 20.0;
+
+  // The clip's loop bar (owner, 2026-11-11): its length while dragged (committed on release, one undo step), where
+  // the finger took it relative to the bar, and whether the mouse is over it (a resize cursor).
+  int? _loopLive;
+  double _loopGrab = 0;
+  bool _loopHover = false;
+
+  /// Where the clip loops in the roll's time, or null when the roll isn't opened for a clip.
+  int? _loopSteps(PatternDoc d) {
+    final c = widget.clip;
+    if (c == null || widget.layer == null) return null;
+    return _loopLive ?? c.loopLength(d.lengthSteps(s.project.beatsPerBar));
+  }
+
+  /// Whether [p] (grid coordinates; the ruler is above 0) takes the loop bar: a mouse right on it anywhere down the
+  /// grid; a finger on the ruler or the grip under it, a little either side.
+  bool _loopHit(Offset p, PointerDeviceKind kind) {
+    final d = _doc;
+    final l = d == null ? null : _loopSteps(d);
+    if (l == null || p.dx < 0) return false;
+    final dx = (p.dx - (l * _pxPerStep - _scrollX)).abs();
+    if (kind == PointerDeviceKind.mouse) return dx <= 6 && p.dy < _gridH;
+    return dx <= 18 && p.dy < ClipLoopPainter.gripH;
+  }
+
+  void _loopDown(Offset p) {
+    final l = _loopSteps(_doc!)!;
+    _loopGrab = p.dx - (l * _pxPerStep - _scrollX);
+    Haptics.grab();
+    setState(() => _loopLive = l);
+  }
+
+  /// The bar follows the finger, on the grid (whole steps when freed by Shift, a second finger or snap off).
+  void _loopMove(Offset p) {
+    final raw = (p.dx - _loopGrab + _scrollX) / _pxPerStep;
+    final grid = _resSteps.toDouble();
+    final v = math.max(1, (_free || grid < 1 ? raw : Snap.to(raw, grid)).round());
+    if (v == _loopLive) return;
+    Haptics.tick();
+    setState(() => _loopLive = v);
+  }
+
+  void _loopEnd({required bool cancel}) {
+    final v = _loopLive, layer = widget.layer, clip = widget.clip;
+    setState(() => _loopLive = null);
+    if (cancel || v == null || layer == null || clip == null) return;
+    Haptics.drop();
+    if (v != clip.loopLength(_doc!.lengthSteps(s.project.beatsPerBar)) || clip.loopSteps != null) {
+      s.setClipLoop(layer, clip, v);
+    }
+  }
+
+  void _loopHoverAt(PointerHoverEvent e) {
+    final on = _loopHit(e.localPosition - _origin, e.kind);
+    if (on != _loopHover) setState(() => _loopHover = on);
+  }
   RollLook get _look => s.settings.roll;
   // The row height while a pinch or the zoom bar changes it; saved to the roll's look when it ends.
   double? _rowDrag;
@@ -1625,7 +1688,9 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
       _editPointer = e.pointer;
       _touch = e.kind == PointerDeviceKind.touch;
       _lastP = p;
-      if (_tool == PatternTool.curve) {
+      if (_loopHit(p, e.kind)) {
+        _loopDown(p);
+      } else if (_tool == PatternTool.curve) {
         // Curve tool: the lanes edit their curve; on the grid any note's curve edits where it is touched, and on
         // empty grid a tap clears the selection and a drag scrolls.
         final hit = p.dy < _gridH ? _curveHitAt(p, _curveReach(e.kind)) : null;
@@ -1812,10 +1877,12 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
 
   /// Whether a one-finger drag is under way: a note, a lane, a curve point or segment, or a pitch point.
   bool get _editing =>
-      (_dragStart != null && (_dragNote != null || _lane != 0)) || _cLane != 0 || _bNote != null || _brushAt != null;
+      (_dragStart != null && (_dragNote != null || _lane != 0)) || _cLane != 0 || _bNote != null || _brushAt != null ||
+      _loopLive != null;
 
   void _editMove(Offset p) {
     _lastP = p;
+    if (_loopLive != null) return _loopMove(p);
     if (_brushAt != null) return _brushMove(p);
     if (_bNote != null) {
       _bendMove(p);
@@ -1826,6 +1893,7 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
   }
 
   void _editEnd({required bool cancel}) {
+    if (_loopLive != null) return _loopEnd(cancel: cancel);
     if (_brushAt != null) return _brushEnd(cancel: cancel);
     if (_bNote != null) return _bendEnd(cancel: cancel);
     if (_cLane != 0) return _curveEnd(cancel: cancel);
@@ -2610,7 +2678,8 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
               builder: (_) => GlassPage(
                   child: Scaffold(
                       body: SafeArea(
-                          child: PatternEditor(state: s, module: widget.module, fullScreen: true, router: _router))))));
+                          child: PatternEditor(state: s, module: widget.module, fullScreen: true, router: _router,
+                              layer: widget.layer, clip: widget.clip))))));
         }
       },
     );
@@ -2647,14 +2716,24 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
             final w = box.maxWidth - _keyW, h = box.maxHeight - _lanesH - _rulerH;
             _gridH = h;
             _gridW = w;
-            _maxScrollX = math.max(0.0, length * _pxPerStep + 200 - w);
+            final loop = _loopSteps(d);
+            final clip = widget.clip;
+            // A clip shows its repeats past the loop bar, up to where it stops playing (in the roll's time).
+            final extent = loop == null || clip == null
+                ? 0.0
+                : (clip.loop ? clip.sourceOffsetSteps % loop : clip.sourceOffsetSteps) + clip.lengthSteps.toDouble();
+            final reach = math.max(length.toDouble(), math.max(loop?.toDouble() ?? 0, math.min(extent, length * 8.0 + 64)));
+            _maxScrollX = math.max(0.0, reach * _pxPerStep + 200 - w);
             _maxScrollY = math.max(0.0, 128 * _rowH - h);
             _scrollX = _scrollX.clamp(0, _maxScrollX);
             _scrollY = _scrollY.clamp(0, _maxScrollY);
             final grid = _grid ? _gridRows(d) : null;
             // The roll claims every touch on it, so a scrolling page around it (the Builder on a phone) never takes
             // its drags; the pointers are then read raw below.
-            return RawGestureDetector(
+            return MouseRegion(
+              // Over the loop bar, the mouse shows it resizes (the bar drags like a clip's edge).
+              cursor: _loopHover || _loopLive != null ? SystemMouseCursors.resizeColumn : MouseCursor.defer,
+              child: RawGestureDetector(
               behavior: HitTestBehavior.opaque,
               gestures: {
                 EagerGestureRecognizer: GestureRecognizerFactoryWithHandlers<EagerGestureRecognizer>(
@@ -2684,7 +2763,10 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
                     });
                   }
                 },
-                onPointerHover: _curveHover,
+                onPointerHover: (e) {
+                  _loopHoverAt(e);
+                  _curveHover(e);
+                },
                 // The roll repaints when the notes or the view change; the Curve tool's overlay above it repaints on
                 // its own while a curve is hovered or dragged.
                 child: Stack(fit: StackFit.expand, children: [
@@ -2726,6 +2808,12 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
                       ),
                     ),
                   ),
+                  if (loop != null && clip != null)
+                    IgnorePointer(child: RepaintBoundary(child: CustomPaint(size: Size.infinite, painter: ClipLoopPainter(
+                      doc: d, loopSteps: loop, extentSteps: clip.loop ? extent : loop.toDouble(), pxPerStep: _pxPerStep,
+                      rowH: _rowH, scrollX: _scrollX, scrollY: _scrollY, keyW: _keyW, rulerH: _rulerH, gridH: h,
+                      color: _noteColor, label: loopLengthLabel(loop, s.project.beatsPerBar),
+                      active: _loopLive != null || _loopHover)))),
                   if (_brushAt != null)
                     Positioned(
                       left: (_origin.dx + _brushNow.dx - 36).clamp(0.0, math.max(0.0, box.maxWidth - 80)),
@@ -2763,9 +2851,12 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
                     ),
                 ]),
               ),
-            );
+            ));
           }),
         ),
+        if (widget.clip case final clip? when widget.layer != null && _loopSteps(d) != null)
+          ClipLanesStrip(state: s, layer: widget.layer!, clip: clip, loopSteps: _loopSteps(d)!, pxPerStep: _pxPerStep,
+              scrollX: _scrollX, keyW: _keyW),
       ]),
     );
   }

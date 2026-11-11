@@ -48,7 +48,7 @@ The repository currently includes:
 - Engine diagnostics (Settings › About and beta): scope/spectrum inspection and meters.
 - MIDI pattern import/export, including Standard MIDI Files and MIDI 2.0 Clip Files, plus a native MIDI 2.0 UMP decoder/input-queue primitive.
 - Native offline WAV rendering, loop/free-length/one-shot/wavetable export, named profiles, export history and a bounded in-memory queue.
-- Portable .cawproj import/export, project-local folders, tags, saved searches and restore points.
+- Portable .caw project import/export (packages with their dependencies; old .cawproj files import), project-local folders, tags, saved searches and restore points.
 - CLAP plug-in project export of a C++ component (Build › Export as plug-in).
 
 Important boundaries:

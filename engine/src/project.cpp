@@ -456,6 +456,11 @@ bool parseProject(std::string_view text, ProjectSpec& out, std::string& error) {
                         error = clipName + ": source_offset_steps must be a whole number from " + range(0, maxSteps);
                         return false;
                     }
+                    if (!wholeIn(c.number("loop_steps", 0), 0, maxSteps, clip.loopSteps)) {
+                        error = clipName + ": loop_steps must be a whole number from " + range(0, maxSteps) +
+                            " (0 loops at the pattern's length)";
+                        return false;
+                    }
                     clip.loop = c.boolean("loop", true);
                     clip.mute = c.boolean("mute", false);
                     if (!clip.pattern.empty()) spec.clips.push_back(std::move(clip));

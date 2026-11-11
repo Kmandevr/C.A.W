@@ -1,4 +1,5 @@
-// SHA-256 (FIPS 180-4) for fingerprints of native code and its sources; no dependency.
+// SHA-256 (FIPS 180-4) for fingerprints of native code, its sources and packaged files; no dependency.
+import 'dart:io';
 import 'dart:typed_data';
 
 const _k = <int>[
@@ -14,19 +15,53 @@ const _k = <int>[
 
 int _rotr(int x, int n) => ((x >> n) | (x << (32 - n))) & 0xffffffff;
 
-/// The digest of [data] as 64 lowercase hex digits.
-String sha256Hex(List<int> data) {
-  final length = data.length;
-  final padded = Uint8List(((length + 9 + 63) ~/ 64) * 64)..setAll(0, data);
-  padded[length] = 0x80;
-  final bits = ByteData.sublistView(padded);
-  bits.setUint32(padded.length - 8, (length * 8) ~/ 0x100000000);
-  bits.setUint32(padded.length - 4, (length * 8) & 0xffffffff);
-  final h = <int>[0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19];
-  final w = List<int>.filled(64, 0);
-  for (var chunk = 0; chunk < padded.length; chunk += 64) {
+/// A running SHA-256: [add] the bytes in any number of pieces, then [hex].
+class Sha256 {
+  final _h = <int>[0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19];
+  final _block = Uint8List(64);
+  final _w = List<int>.filled(64, 0);
+  late final _view = ByteData.sublistView(_block);
+  int _fill = 0, _length = 0;
+  bool _done = false;
+
+  void add(List<int> data) {
+    if (_done) throw StateError('SHA-256 already finished');
+    _length += data.length;
+    for (var i = 0; i < data.length;) {
+      final n = (64 - _fill) < (data.length - i) ? 64 - _fill : data.length - i;
+      _block.setRange(_fill, _fill + n, data, i);
+      _fill += n;
+      i += n;
+      if (_fill == 64) {
+        _compress();
+        _fill = 0;
+      }
+    }
+  }
+
+  /// The digest as 64 lowercase hex digits; nothing can be added after it.
+  String hex() {
+    if (!_done) {
+      final bits = _length * 8;
+      _block[_fill++] = 0x80;
+      if (_fill > 56) {
+        _block.fillRange(_fill, 64, 0);
+        _compress();
+        _fill = 0;
+      }
+      _block.fillRange(_fill, 56, 0);
+      _view.setUint32(56, bits ~/ 0x100000000);
+      _view.setUint32(60, bits & 0xffffffff);
+      _compress();
+      _done = true;
+    }
+    return _h.map((x) => x.toRadixString(16).padLeft(8, '0')).join();
+  }
+
+  void _compress() {
+    final w = _w, h = _h;
     for (var i = 0; i < 16; i++) {
-      w[i] = bits.getUint32(chunk + i * 4);
+      w[i] = _view.getUint32(i * 4);
     }
     for (var i = 16; i < 64; i++) {
       final s0 = _rotr(w[i - 15], 7) ^ _rotr(w[i - 15], 18) ^ (w[i - 15] >> 3);
@@ -59,5 +94,22 @@ String sha256Hex(List<int> data) {
     h[6] = (h[6] + g) & 0xffffffff;
     h[7] = (h[7] + hh) & 0xffffffff;
   }
-  return h.map((x) => x.toRadixString(16).padLeft(8, '0')).join();
+}
+
+/// The digest of [data] as 64 lowercase hex digits.
+String sha256Hex(List<int> data) => (Sha256()..add(data)).hex();
+
+/// The digest of the file at [path], read a chunk at a time (call it off the UI isolate for a large file).
+String sha256OfFileSync(String path) {
+  final hash = Sha256();
+  final f = File(path).openSync();
+  try {
+    final buffer = Uint8List(1 << 16);
+    for (var n = f.readIntoSync(buffer); n > 0; n = f.readIntoSync(buffer)) {
+      hash.add(Uint8List.sublistView(buffer, 0, n));
+    }
+  } finally {
+    f.closeSync();
+  }
+  return hash.hex();
 }
