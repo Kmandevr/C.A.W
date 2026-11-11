@@ -1,4 +1,5 @@
-// The pattern editor: a piano roll and a drum grid over the same notes, with an adaptive grid, velocity lane and keys.
+// The pattern editor: a piano roll and a drum grid over the same notes, with an adaptive grid, velocity lane and keys,
+// the quantize sheet, step input and the generators.
 import 'dart:async';
 import 'dart:isolate';
 import 'dart:io';
@@ -19,6 +20,7 @@ import '../engine/engine.dart';
 
 import '../model/app_state.dart';
 import '../model/lane_curve.dart';
+import '../model/live_midi.dart';
 import '../model/midi_clips.dart';
 import '../model/midi_file.dart';
 import '../model/pattern_doc.dart';
@@ -34,6 +36,7 @@ import 'glass.dart';
 import 'adaptive_sheet.dart';
 import 'frame/frame_widgets.dart' show ScrollFade;
 import 'haptics.dart';
+import 'feedback.dart';
 
 enum PatternTool { draw, select, curve, erase }
 
@@ -239,6 +242,8 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
 
   @override
   void dispose() {
+    _stepMidi?.cancel();
+    _stepKeysOff();
     _hold?.cancel();
     _liveEnd();
     _hearStop();
@@ -562,11 +567,19 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
         _apply(r.doc, select: r.ids);
       case 'roll.notes.quantize':
         _apply(d.quantize(_sel.isEmpty ? {for (final n in d.notes) n.id} : _sel, _resSteps));
+      case 'roll.notes.quantizeSheet':
+        _quantizeSheet();
+      case 'roll.step.toggle':
+        _stepToggle();
+      case 'roll.step.rest':
+        if (_step) _stepAdvance(_resSteps.times(count));
       case 'roll.gen.euclid' ||
             'roll.gen.random' ||
             'roll.gen.arpeggiate' ||
             'roll.gen.humanize' ||
-            'roll.gen.chordStamp':
+            'roll.gen.chordStamp' ||
+            'roll.gen.connect' ||
+            'roll.gen.tremolo':
         _generate(id);
       case 'roll.gen.reverse':
         _apply(d.reverse(_sel));
@@ -1179,7 +1192,7 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
     final seed = DateTime.now().microsecondsSinceEpoch & 0x7fffffff;
     final v = await showDialogOrSheet<Map<String, double>>(
       context: context,
-      builder: (_) => _GenDialog(id: id),
+      builder: (_) => _GenDialog(id: id, rate: _resSteps),
     );
     if (v == null || !mounted || _doc == null) return;
     final doc = _doc!;
@@ -1213,7 +1226,157 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
       case 'roll.gen.chordStamp':
         final r = doc.chordStamp(_sel, key: _key, seventh: v['seventh']! > 0);
         _apply(r.doc, select: {..._sel, ...r.ids});
+      case 'roll.gen.connect':
+        _apply(doc.connect(_sel, glide: v['glide']! / 100));
+      case 'roll.gen.tremolo':
+        final wave = TremoloWave.values[v['wave']!.round()];
+        final cycle = _tremoloCycles[v['cycle']!.round()];
+        final depth = v['depth']! / 100;
+        final sel = _sel.isEmpty ? {for (final n in doc.notes) n.id} : _sel;
+        if (v['mode']!.round() == 1) {
+          final r = doc.tremoloRepeat(sel, rate: _resSteps, cycle: cycle, depth: depth, wave: wave);
+          _apply(r.doc, select: r.ids);
+        } else {
+          _apply(doc.tremolo(sel, cycle: cycle, depth: depth, wave: wave));
+        }
     }
+  }
+
+  // ---------- the quantize sheet (REAPER flow gap 8; REAPER's Quantize events, UG 13.23) ----------
+
+  /// Opens the sheet; the roll shows (and, while playing, plays) each setting as it moves, and Apply makes it one
+  /// undo step. Cancel or a swipe away puts the notes back. No selection: every note.
+  Future<void> _quantizeSheet() async {
+    final base = _doc;
+    if (base == null) return;
+    final sel = _sel.isEmpty ? {for (final n in base.notes) n.id} : _sel;
+    final seed = DateTime.now().microsecondsSinceEpoch & 0x7fffffff;
+    PatternDoc result(_Quantize q) => base.quantizeWith(sel, q.grid,
+        strength: q.strength, swing: q.swing, what: q.what, humanTiming: q.timing, humanVelocity: q.velocity, seed: seed);
+    void preview(_Quantize? q) {
+      if (!mounted) return;
+      final next = q == null ? base : result(q);
+      setState(() => _doc = next);
+      _live(next);
+    }
+
+    final q = await showDialogOrSheet<_Quantize>(
+      context: context,
+      builder: (_) => _QuantizeSheet(res: _res, triplet: _triplet, count: sel.length, onPreview: preview),
+    );
+    if (!mounted) return;
+    final sent = _liveEnd();
+    setState(() => _doc = base);
+    if (q == null) {
+      if (sent) s.livePattern(widget.module.id, null);
+      return;
+    }
+    _apply(result(q));
+    if (sent) _flush();
+  }
+
+  // ---------- step input (REAPER flow gap 8; REAPER's step recording, UG 13.26) ----------
+  // While on, each note played on the roll's keys or a MIDI keyboard goes in at the cursor, one grid long, and the
+  // cursor moves on a grid step; keys pressed while others are held join their chord. Rest skips a step.
+
+  bool _step = false;
+  StreamSubscription<Object?>? _stepMidi;
+  Steps _stepChordAt = Steps.zero;
+  final Set<int> _stepHeld = {}; // pitches down now (keys and keyboard)
+  final Map<int, ({int pitch, int? preview})> _stepKeys = {}; // roll-key pointers held
+
+  void _stepToggle() {
+    setState(() => _step = !_step);
+    Haptics.tap();
+    _stepMidi?.cancel();
+    _stepMidi = null;
+    _stepHeld.clear();
+    _stepKeysOff();
+    if (!_step) return;
+    final live = LiveMidi.current;
+    _stepMidi = live?.input?.messages.listen((m) {
+      if (!mounted || !_step || !live.accepts(m)) return;
+      if (m.isNoteOn) _stepNoteOn(m.data1, m.data2 / 127);
+      if (m.isNoteOff) _stepHeld.remove(m.data1);
+    });
+  }
+
+  /// A note played: a new step when no other key is down (the cursor moves on), else part of the held chord.
+  void _stepNoteOn(int pitch, double vel) {
+    final d = _doc;
+    if (d == null) return;
+    final len = _resSteps;
+    if (_stepHeld.isEmpty) {
+      _stepChordAt = _cursorAt;
+      _stepAdvance(len);
+    }
+    _stepHeld.add(pitch);
+    _cursorPitch = pitch.toDouble();
+    final r = d.insert(_stepChordAt, pitch.toDouble(), len, vel: vel);
+    if (r.id != null) {
+      final chord = {for (final n in r.doc.notes) if (n.at == _stepChordAt && _sel.contains(n.id)) n.id};
+      _apply(r.doc, select: {...chord, r.id!});
+    }
+    Haptics.tick();
+  }
+
+  /// Moves the step cursor on by [by], scrolling so it stays in view.
+  void _stepAdvance(Steps by) {
+    setState(() {
+      _cursorAt = _cursorAt + by;
+      final x = _cursorAt.toDouble() * _pxPerStep - _scrollX;
+      if (_gridW > 0 && (x > _gridW - 48 || x < 0)) _scrollX = math.max(0.0, _cursorAt.toDouble() * _pxPerStep - _gridW / 3);
+    });
+  }
+
+  void _stepKeysOff() {
+    for (final k in _stepKeys.values) {
+      if (k.preview != null) s.previewOff(k.preview!);
+    }
+    _stepKeys.clear();
+  }
+
+  /// A finger or click on the roll's keys during step input: the note sounds while held and goes in.
+  void _stepKeyDown(PointerDownEvent e, double y) {
+    final pitch = _pitchAt(y).clamp(0, 127).round();
+    final layer = _hearLayer;
+    int? pid;
+    if (layer != null) {
+      pid = s.nextPreviewId();
+      s.previewOn(layer, pid, pitch.toDouble(), _lastVel);
+    }
+    _stepKeys[e.pointer] = (pitch: pitch, preview: pid);
+    _stepNoteOn(pitch, _lastVel);
+  }
+
+  void _stepKeyUp(int pointer) {
+    final k = _stepKeys.remove(pointer);
+    if (k == null) return;
+    if (k.preview != null) s.previewOff(k.preview!);
+    if (!_stepKeys.values.any((o) => o.pitch == k.pitch)) _stepHeld.remove(k.pitch);
+  }
+
+  /// The step input bar under the toolbar: where the next note goes, Rest and Done.
+  Widget _stepBar() {
+    final bar = s.project.beatsPerBar * 4;
+    final at = _cursorAt.toDouble();
+    final pos = '${at ~/ bar + 1}.${(at % bar) ~/ 4 + 1}.${formatNumber(((at % 4) * 1000).roundToDouble() / 1000 + 1)}';
+    return Container(
+      key: const ValueKey('roll-step-bar'),
+      height: 36,
+      padding: const EdgeInsets.symmetric(horizontal: 10),
+      color: Neon.pink.withValues(alpha: 0.12),
+      child: Row(children: [
+        const Icon(Icons.piano, size: 16, color: Neon.pink),
+        const SizedBox(width: 6),
+        Expanded(
+          child: Text('STEP INPUT · next at $pos · ${noteLengthLabel(_resSteps)}',
+              overflow: TextOverflow.ellipsis, style: const TextStyle(color: Neon.pink, fontSize: 11, letterSpacing: 0.8)),
+        ),
+        Pressable(child: TextButton(onPressed: () => _runRef(const ActionRef.action('roll.step.rest')), child: const Text('Rest'))),
+        Pressable(child: TextButton(onPressed: () => _runRef(const ActionRef.action('roll.step.toggle')), child: const Text('Done'))),
+      ]),
+    );
   }
 
   // ---------- hearing notes (owner, 2026-11-05) ----------
@@ -1296,6 +1459,11 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
   /// a drag scrolls. Two fingers zoom and scroll, and drop an edit the first finger had started.
   void _pointerDown(PointerDownEvent e) {
     _focus.requestFocus();
+    final local = e.localPosition - _origin;
+    if (_step && !_grid && local.dx < 0 && local.dy >= 0 && local.dy < _gridH) {
+      _stepKeyDown(e, local.dy); // the keys play step input, and stay out of the roll's gestures
+      return;
+    }
     _pointers[e.pointer] = e.localPosition;
     if (_pointers.length == 1) {
       final p = e.localPosition - _origin;
@@ -1354,7 +1522,7 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
   }
 
   void _pointerMove(PointerMoveEvent e) {
-    if (!_pointers.containsKey(e.pointer)) return;
+    if (!_pointers.containsKey(e.pointer)) return; // step-input keys included: they aren't in it
     _pointers[e.pointer] = e.localPosition;
     if (_bypass) {
       // Only the finger that started the drag moves it; the resting one just holds the bypass. A second finger that
@@ -1485,6 +1653,7 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
   }
 
   void _pointerUp(PointerEvent e, {required bool cancel}) {
+    _stepKeyUp(e.pointer);
     if (_pointers.remove(e.pointer) == null) return;
     if (_bypass) {
       if (e.pointer != _editPointer) {
@@ -2032,6 +2201,7 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
         'roll.view.switch' => _grid,
         'roll.view.velocityLane' => _velLane,
         'roll.view.extrasLanes' => _extrasLane,
+        'roll.step.toggle' => _step,
         _ => false,
       },
       isEnabled: (id) => switch (id) {
@@ -2078,6 +2248,7 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
       },
       velLane: _velLane,
       extrasLane: _extrasLane,
+      stepInput: _step,
       hearNotes: _look.hearNotes,
       zoomBar: _zoomBar,
       onZoom: () => setState(() => _zoomBar = !_zoomBar),
@@ -2119,6 +2290,7 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
 
             ])),
         toolbar,
+        if (_step) _stepBar(),
         AnimatedSize(duration: Motion.move(Motion.standard, Motion.of(context)), curve: Curves.easeOutCubic,
           alignment: Alignment.topCenter,
           child: _zoomBar ? _zoomRow() : const SizedBox(width: double.infinity)),
@@ -2268,6 +2440,11 @@ const Map<String, IconData> _actionIcons = {
   'roll.gen.humanize': Icons.waves,
   'roll.gen.chordStamp': Icons.library_music_outlined,
   'roll.gen.legato': Icons.linear_scale,
+  'roll.gen.connect': Icons.timeline,
+  'roll.gen.tremolo': Icons.graphic_eq,
+  'roll.notes.quantizeSheet': Icons.align_horizontal_left,
+  'roll.step.toggle': Icons.piano,
+  'roll.step.rest': Icons.space_bar,
   'roll.gen.reverse': Icons.swap_horiz,
   'roll.gen.invertPitch': Icons.swap_vert,
   'transport.playstop': Icons.play_arrow,
@@ -2298,6 +2475,7 @@ class _Toolbar extends StatelessWidget {
     required this.onMenu,
     required this.velLane,
     required this.extrasLane,
+    required this.stepInput,
     required this.hearNotes,
     required this.canCustomise,
     required this.zoomBar,
@@ -2313,7 +2491,7 @@ class _Toolbar extends StatelessWidget {
   final bool canPaste;
   final VoidCallback onCopy, onPaste;
   final ValueChanged<ActionRef> onRun;
-  final bool fullScreen, velLane, extrasLane, canCustomise, hearNotes;
+  final bool fullScreen, velLane, extrasLane, canCustomise, hearNotes, stepInput;
   final VoidCallback onFullScreen;
   final ValueChanged<String> onMenu;
   final ({bool on, int res, bool triplet, bool fixed, ValueGrid value}) snap;
@@ -2402,6 +2580,8 @@ class _Toolbar extends StatelessWidget {
             CheckedPopupMenuItem(value: 'vel', checked: velLane, child: const Text('Velocity lane (Alt+V)')),
             CheckedPopupMenuItem(value: 'extras', checked: extrasLane, child: const Text('Chance lane (Alt+X)')),
             CheckedPopupMenuItem(value: 'hear', checked: hearNotes, child: const Text('Hear notes')),
+            CheckedPopupMenuItem(value: 'run:roll.step.toggle', checked: stepInput, child: const Text('Step input')),
+            const PopupMenuItem(value: 'run:roll.notes.quantizeSheet', child: Text('Quantize…')),
             const PopupMenuDivider(),
             for (final id in const [
               'roll.gen.euclid',
@@ -2410,6 +2590,8 @@ class _Toolbar extends StatelessWidget {
               'roll.gen.humanize',
               'roll.gen.chordStamp',
               'roll.gen.legato',
+              'roll.gen.connect',
+              'roll.gen.tremolo',
               'roll.gen.reverse',
               'roll.gen.invertPitch',
             ])
@@ -3249,8 +3431,11 @@ class _RollPainter extends CustomPainter {
 
 /// The settings a generator asks for, as named numbers; the last values are kept for the next time.
 class _GenDialog extends StatefulWidget {
-  const _GenDialog({required this.id});
+  const _GenDialog({required this.id, required this.rate});
   final String id;
+
+  /// The roll's grid: Tremolo's repeats come this often.
+  final Steps rate;
 
   static final Map<String, double> _last = {};
 
@@ -3276,6 +3461,13 @@ class _GenDialogState extends State<_GenDialog> {
         ('timing', 'Timing ± % of a step', 0, 50, 10, null),
         ('velocity', 'Velocity ± %', 0, 50, 10, null),
       ],
+    'roll.gen.connect' => [('glide', 'Glide into the next note, % of each note', 0, 100, 25, null)],
+    'roll.gen.tremolo' => [
+        ('mode', 'As', 0, 1, 0, ['Volume', 'Repeats at ${noteLengthLabel(widget.rate)}']),
+        ('wave', 'Wave', 0, 2, 0, ['Sine', 'Triangle', 'Square']),
+        ('cycle', 'Speed', 0, 3, 2, [for (final c in _tremoloCycles) 'Every ${noteLengthLabel(c)}']),
+        ('depth', 'Depth %', 0, 100, 50, null),
+      ],
     _ => [('seventh', 'Chord', 0, 1, 0, ['Triad', 'Seventh'])],
   };
   late final Map<String, double> _v = {
@@ -3284,11 +3476,26 @@ class _GenDialogState extends State<_GenDialog> {
 
   @override
   Widget build(BuildContext context) {
-    final name = widget.id.replaceFirst('roll.gen.', '');
+    final name = switch (widget.id) { 'roll.gen.connect' => 'connect notes', final id => id.replaceFirst('roll.gen.', '') };
     return AlertDialog(
       backgroundColor: Neon.panel,
       title: Text(name[0].toUpperCase() + name.substring(1)),
       content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+        if (widget.id == 'roll.gen.tremolo')
+          // The preview follows the controls: a two-bar note's volume, or its hits' velocities.
+          SizedBox(
+            key: const ValueKey('tremolo-preview'),
+            height: 56,
+            width: double.infinity,
+            child: CustomPaint(
+              painter: _TremoloPreview(
+                wave: TremoloWave.values[_v['wave']!.round()],
+                cycle: _tremoloCycles[_v['cycle']!.round()],
+                depth: _v['depth']! / 100,
+                rate: _v['mode']!.round() == 1 ? widget.rate : null,
+              ),
+            ),
+          ),
         for (final f in _fields)
           if (f.$6 != null)
             Wrap(spacing: 6, children: [
@@ -3296,7 +3503,10 @@ class _GenDialogState extends State<_GenDialog> {
                 ChoiceChip(
                   label: Text(f.$6![i]),
                   selected: _v[f.$1]!.round() == i,
-                  onSelected: (_) => setState(() => _v[f.$1] = i.toDouble()),
+                  onSelected: (_) {
+                    Haptics.tick();
+                    setState(() => _v[f.$1] = i.toDouble());
+                  },
                 ),
             ])
           else ...[
@@ -3318,6 +3528,182 @@ class _GenDialogState extends State<_GenDialog> {
             Navigator.pop(context, _v);
           },
           child: const Text('Apply'),
+        ),
+      ],
+    );
+  }
+}
+
+/// Tremolo speeds: one cycle every 1/4, 1/8, 1/16 or 1/32 note (in steps).
+final List<Steps> _tremoloCycles = [Steps(4), Steps(2), Steps.one, Steps(1, 2)];
+
+/// The tremolo generator's preview: the wave's level over two bars of a note, as a line (volume) or as bars (repeats
+/// every [rate]).
+class _TremoloPreview extends CustomPainter {
+  _TremoloPreview({required this.wave, required this.cycle, required this.depth, this.rate});
+  final TremoloWave wave;
+  final Steps cycle;
+  final double depth;
+  final Steps? rate;
+
+  static const _span = 32.0; // two bars of 4/4, in steps
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final bg = Paint()..color = Neon.bg.withValues(alpha: 0.6);
+    canvas.drawRRect(RRect.fromRectAndRadius(Offset.zero & size, const Radius.circular(6)), bg);
+    final c = cycle.toDouble();
+    double y(double level) => size.height - 4 - level * (size.height - 8);
+    final r = rate;
+    if (r != null) {
+      final step = r.toDouble();
+      final w = size.width * step / _span;
+      final bar = Paint()..color = Neon.green;
+      for (var t = 0.0; t < _span - 1e-9; t += step) {
+        final level = PatternDoc.tremoloLevel(wave, t / c, depth);
+        final x = t / _span * size.width;
+        canvas.drawRect(Rect.fromLTRB(x + w * 0.15, y(level), x + w * 0.85, size.height - 4), bar);
+      }
+      return;
+    }
+    final path = Path();
+    final n = math.max(64, size.width.round());
+    for (var i = 0; i <= n; i++) {
+      final t = i / n * _span;
+      final p = Offset(i / n * size.width, y(PatternDoc.tremoloLevel(wave, t / c, depth)));
+      i == 0 ? path.moveTo(p.dx, p.dy) : path.lineTo(p.dx, p.dy);
+    }
+    canvas.drawPath(path, Paint()
+      ..color = Neon.green
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2);
+  }
+
+  @override
+  bool shouldRepaint(_TremoloPreview o) => o.wave != wave || o.cycle != cycle || o.depth != depth || o.rate != rate;
+}
+
+/// The quantize sheet's settings.
+class _Quantize {
+  const _Quantize(this.grid, this.what, this.strength, this.swing, this.timing, this.velocity);
+  final Steps grid;
+  final QuantizeWhat what;
+  final double strength, swing, timing, velocity; // 0..1; timing in steps
+}
+
+/// Quantize (REAPER's Quantize events, UG 13.23): the grid (the roll's by default), what moves, strength, swing and
+/// humanize, each previewed on the roll as it moves; Bypass shows the notes as they were. The last applied settings
+/// (all but the grid) stay for next time.
+class _QuantizeSheet extends StatefulWidget {
+  const _QuantizeSheet({required this.res, required this.triplet, required this.count, required this.onPreview});
+  final int res, count;
+  final bool triplet;
+  final ValueChanged<_Quantize?> onPreview;
+
+  static ({QuantizeWhat what, double strength, double swing, double timing, double velocity})? _last;
+
+  @override
+  State<_QuantizeSheet> createState() => _QuantizeSheetState();
+}
+
+class _QuantizeSheetState extends State<_QuantizeSheet> {
+  late int _res = widget.res;
+  late bool _triplet = widget.triplet;
+  QuantizeWhat _what = _QuantizeSheet._last?.what ?? QuantizeWhat.starts;
+  double _strength = _QuantizeSheet._last?.strength ?? 100, _swing = _QuantizeSheet._last?.swing ?? 0;
+  double _timing = _QuantizeSheet._last?.timing ?? 0, _velocity = _QuantizeSheet._last?.velocity ?? 0;
+  bool _bypass = false;
+
+  _Quantize get _q => _Quantize(_triplet ? Steps(32, _res * 3) : Steps(16, _res), _what, _strength / 100, _swing / 100,
+      _timing / 100, _velocity / 100);
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _changed());
+  }
+
+  void _changed() => widget.onPreview(_bypass ? null : _q);
+
+  void _set(VoidCallback f) {
+    setState(f);
+    _changed();
+  }
+
+  Widget _chips<T>(List<(T, String)> items, T value, ValueChanged<T> on) => Wrap(spacing: 6, runSpacing: 2, children: [
+        for (final (v, label) in items)
+          ChoiceChip(
+            label: Text(label),
+            selected: v == value,
+            onSelected: (_) {
+              Haptics.tick();
+              _set(() => on(v));
+            },
+          ),
+      ]);
+
+  Widget _slider(String key, String label, double value, double max, ValueChanged<double> on) =>
+      Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text('$label: ${value.round()}%'),
+        Slider(
+          key: ValueKey('quantize-$key'),
+          min: 0,
+          max: max,
+          divisions: max.round(),
+          value: value,
+          onChanged: (x) {
+            if (x.roundToDouble() != value) Haptics.tick();
+            _set(() => on(x.roundToDouble()));
+          },
+        ),
+      ]);
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      backgroundColor: Neon.panel,
+      title: Text('Quantize ${widget.count == 1 ? '1 note' : '${widget.count} notes'}'),
+      content: SingleChildScrollView(
+        child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+          const Text('Grid'),
+          const SizedBox(height: 4),
+          _chips([for (final r in const [4, 8, 16, 32]) (r, '1/$r')], _res, (v) => _res = v),
+          Row(children: [
+            Expanded(child: Text('Triplets', style: TextStyle(color: _triplet ? Neon.text : Neon.dim))),
+            Switch(value: _triplet, onChanged: (v) => _set(() => _triplet = v)),
+          ]),
+          const Text('Move'),
+          const SizedBox(height: 4),
+          _chips([(QuantizeWhat.starts, 'Starts'), (QuantizeWhat.ends, 'Ends'), (QuantizeWhat.both, 'Both')], _what,
+              (v) => _what = v),
+          const SizedBox(height: 8),
+          _slider('strength', 'Strength', _strength, 100, (v) => _strength = v),
+          _slider('swing', 'Swing', _swing, 100, (v) => _swing = v),
+          _slider('timing', 'Humanize timing ± % of a step', _timing, 50, (v) => _timing = v),
+          _slider('velocity', 'Humanize velocity ± %', _velocity, 50, (v) => _velocity = v),
+          Row(children: [
+            const Expanded(child: Text('Bypass (hear the notes as they were)')),
+            Switch(key: const ValueKey('quantize-bypass'), value: _bypass, onChanged: (v) => _set(() => _bypass = v)),
+          ]),
+        ]),
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+        Pressable(
+          child: FilledButton(
+            onPressed: () {
+              Haptics.drop();
+              _QuantizeSheet._last = (
+                what: _what,
+                strength: _strength,
+                swing: _swing,
+                timing: _timing,
+                velocity: _velocity,
+              );
+              Navigator.pop(context, _q);
+            },
+            child: const Text('Apply'),
+          ),
         ),
       ],
     );

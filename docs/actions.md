@@ -2,7 +2,7 @@
 title: Actions, keys and macros
 summary: Implemented action routing, macros, keymap persistence and configurable toolbars, plus clearly identified UI gaps.
 covers: [app/lib/actions/, app/lib/ui/key_router.dart, app/lib/ui/key_bindings.dart, app/lib/ui/pattern_editor.dart, app/lib/ui/touch_quick_actions.dart]
-updated: 2026-11-10
+updated: 2026-11-11
 ---
 
 # Actions, keys and macros
@@ -146,6 +146,8 @@ Notes:
 | Copy / cut / paste at the cursor / duplicate | Ctrl+C / Ctrl+X / Ctrl+V / Ctrl+D |
 | Split notes at the cursor / join selected notes | Ctrl+E / Ctrl+J (Ableton uses these: [Live 12 manual](https://www.ableton.com/live-manual/12/live-keyboard-shortcuts/)) |
 | Quantize selected notes to the grid | Ctrl+U (as in Live) |
+| Quantize… (sheet: grid, starts/ends/both, strength, swing, humanize, previewed live) | ⋮ menu (no default key) |
+| Step input on / off; a rest skips a grid step | ⋮ menu, the step bar's Rest (no default keys) |
 | Hear the selected notes | Enter |
 
 Note values and extras:
@@ -179,6 +181,7 @@ Generators (buttons; no default keys):
 | --- | --- |
 | Euclid, random in key, arpeggiate, humanize, chord stamp | — |
 | Legato (stretch each note to the next) | — |
+| Connect notes (each chord to the next, voices gliding into it), tremolo (volume or repeats) | — |
 | Reverse selection, invert pitch around the cursor | — |
 
 ### Arranger
