@@ -6,6 +6,31 @@ updated: 2026-11-11
 
 # Decisions
 
+## 2026-11-11: Drums: deep settings and real quality, every genre (owner)
+
+**Owner's words:** "The drum instrument needs to have an in-depth set of settings and effects to make all the sounds extremely versatile and be actual good quality. Research how different kicks, snares, hats etc. are made and make sure it has all of the settings. You should be able to make a kick a legitimate dubstep kick, an 808 kick, or just a normal-sounding kick. Make it so it can even sound acoustic even though it's generated."
+
+**What this requires of `org.caw.drums`:**
+1. **Research per drum type, with sources.** Every control needed to build each sound must exist.
+   - **Kicks:** dubstep/riddim (punch + sub + distorted mid, clipped, short click), 808 (long tuned boom with glide and saturation), techno rumble, trap, hardstyle, house/909, acoustic (beater, shell resonance, port, room).
+   - **Snares:** 808/909; acoustic (head modes + wires, rimshot, ghost notes); claps; trap and dubstep layered snares.
+   - **Hats:** closed, open and pedal; the 808 square bank; modal cymbals with choke and openness.
+   - **Toms, cymbals (crash, ride, bell, china) and percussion.**
+2. **Real acoustic realism:**
+   - modal/physical layers with enough modes;
+   - strike position and damping;
+   - velocity changing the spectrum, not just the level;
+   - per-hit micro-variation;
+   - a room/body stage.
+3. **Effects deep enough for these genres:**
+   - multi-type distortion with pre/post filter;
+   - a clipper, EQ, compressor and transient shaper;
+   - a pitch-envelope shape editor;
+   - a layered sub with its own envelope;
+   - width that keeps the sub mono;
+   - a room send.
+4. **Quality checked numerically** against research targets (spectrum, pitch curve, decay, crest factor), with genre-accurate factory presets ("Dubstep kick", "808 kick" long and short, "Acoustic kick", "Acoustic snare", "Ride", "Crash", …).
+
 ## 2026-11-11: Finish the whole roadmap, then optimize, then a fit-and-finish pass (owner)
 
 **Owner's words:** "Don't stop until everything in the roadmap is completely done. I want you continuously working… once everything in the roadmap is done, go and optimize everything so it's fast, it's quick and that it runs extremely well. Then make sure everything is user friendly. Don't change the layout or things in the app, just make sure it fits well in the UI."
