@@ -17,6 +17,9 @@ import '../pattern_fields.dart';
 import '../glass.dart';
 import '../haptics.dart';
 import '../theme.dart';
+import '../key_router.dart';
+import '../keyboard/key_area.dart';
+import '../../actions/actions.dart';
 import 'build_start.dart';
 import 'cpp_editor.dart';
 import 'cpp_library.dart';
@@ -44,12 +47,78 @@ class _BuildSectionState extends State<BuildSection> {
   bool? _explorer;
   double _explorerWidth = 250;
 
+  // The three parts' keyboard focus, like VS Code's (owner, 2026-11-11): the explorer, the tab strip, the editor.
+  final _explorerKey = GlobalKey();
+  final _tabsNode = FocusNode(debugLabel: 'build-tabs');
+  final _editorNode = FocusNode(debugLabel: 'build-editor');
+  KeyRouterState? _router;
+  bool _wide = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final r = KeyRouter.of(context);
+    if (r == _router) return;
+    _router?.unregister(Area.builder, _editorNode);
+    _router = r?..register(Area.builder, _editorNode, _focusAction);
+  }
+
+  /// Ctrl+Shift+E, Ctrl+Shift+B and Ctrl+Shift+Enter: the explorer (shown first if hidden; again, hidden), the tabs
+  /// and the editor take the keyboard focus.
+  bool _focusAction(String id, int count, String? arg) {
+    switch (id) {
+      case 'build.focus.explorer':
+        final area = keyAreaUnder(_explorerKey.currentContext);
+        if (area != null && area.node.hasFocus && _wide) {
+          setState(() => _explorer = false);
+          _editorNode.requestFocus();
+        } else if (area != null && _explorerKey.currentContext != null && isShownNode(area.node)) {
+          focusAndReveal(area.node);
+        } else {
+          _toggleExplorer(_wide);
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            final a = keyAreaUnder(_explorerKey.currentContext);
+            if (a != null) focusAndReveal(a.node);
+          });
+        }
+      case 'build.focus.tabs':
+        focusAndReveal(_tabsNode);
+      case 'build.focus.editor':
+        if (!(KeyArea.ofNode(_editorNode)?.enter() ?? false)) _editorNode.requestFocus();
+      default:
+        return false;
+    }
+    return true;
+  }
+
+  /// The tab strip's keys: left and right switch tabs, Enter goes to the editor, Delete or Ctrl+W closes the tab.
+  bool _tabsAction(SectionController c, List<BuildTab> tabs, BuildTab? active, String id, int count) {
+    switch (id) {
+      case 'tabs.prev' || 'tabs.next':
+        _step(c, tabs, active, id == 'tabs.prev' ? -count : count);
+      case 'tabs.open':
+        if (active == null) return false;
+        if (_home) setState(() => _home = false);
+        c.activateBuild(active);
+        WidgetsBinding.instance.addPostFrameCallback((_) => _focusAction('build.focus.editor', 1, null));
+      case 'tabs.close':
+        if (active == null) return false;
+        c.closeBuild(active);
+      default:
+        return false;
+    }
+    return true;
+  }
+
   AppState get s => widget.state;
 
   SectionController _controller(BuildContext context) => SectionController.maybeOf(context) ?? (_own ??= SectionController());
 
   @override
   void dispose() {
+    _router?.unregister(Area.builder, _editorNode);
+    _tabsNode.dispose();
+    _editorNode.dispose();
     _own?.dispose();
     super.dispose();
   }
@@ -289,9 +358,15 @@ class _BuildSectionState extends State<BuildSection> {
         final workbench = activeCpp == null ? null : s.cppWorkbench(activeCpp.id);
         return LayoutBuilder(builder: (context, box) {
           final wide = box.maxWidth >= 720 && (box.maxWidth > box.maxHeight || box.maxWidth >= 900);
+          _wide = wide;
           final showExplorer = wide && (_explorer ?? box.maxWidth >= 900);
           // The tab strip follows the open component's current file (its label shows it).
-          final strip = AwakeListenableBuilder(
+          final strip = KeyArea(
+            area: Area.tabs,
+            label: 'Build tabs',
+            focusNode: _tabsNode,
+            onAction: (id, count, _) => _tabsAction(controller, tabs, active, id, count),
+            child: AwakeListenableBuilder(
             listenable: workbench ?? s,
             builder: (context, _) => _TabStrip(
               tabs: [
@@ -316,7 +391,7 @@ class _BuildSectionState extends State<BuildSection> {
               onClose: controller.closeBuild,
               onNew: () => _newMenu(controller, active),
             ),
-          );
+          ));
           final Widget body;
           if (active == null) {
             body = Column(children: [
@@ -349,14 +424,15 @@ class _BuildSectionState extends State<BuildSection> {
           } else {
             body = _PatternTab(state: s, moduleId: active.id, bar: strip);
           }
-          final explorer = FileManagerScreen(
+          final explorer = KeyedSubtree(key: _explorerKey, child: FileManagerScreen(
             key: const ValueKey('build explorer'),
             state: s,
             explorer: true,
             folder: _folderFor(active),
             activeKey: _activeKey(active),
             onOpenAsset: (a) => _openAsset(controller, a),
-          );
+          ));
+          final editor = KeyArea(area: Area.builder, label: 'Editor', focusNode: _editorNode, child: body);
           final Widget layout;
           if (wide) {
             final maxWidth = math.max(180.0, box.maxWidth * 0.5);
@@ -381,7 +457,7 @@ class _BuildSectionState extends State<BuildSection> {
                   ),
                 ),
               ],
-              Expanded(child: body),
+              Expanded(child: editor),
             ]);
           } else {
             layout = Scaffold(
@@ -394,12 +470,11 @@ class _BuildSectionState extends State<BuildSection> {
                 backgroundColor: Neon.panel.withValues(alpha: Glass.active ? 0.92 : 1),
                 child: SafeArea(child: explorer),
               ),
-              body: body,
+              body: editor,
             );
           }
           return CallbackShortcuts(
             bindings: {
-              const SingleActivator(LogicalKeyboardKey.keyE, control: true, shift: true): () => _toggleExplorer(wide),
               const SingleActivator(LogicalKeyboardKey.keyN, control: true, shift: true): () => _newMenu(controller, active),
               const SingleActivator(LogicalKeyboardKey.keyP, control: true): () => _quickOpen(controller, active),
               const SingleActivator(LogicalKeyboardKey.pageDown, control: true): () => _step(controller, tabs, active, 1),

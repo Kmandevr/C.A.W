@@ -3,6 +3,9 @@
 import 'package:flutter/material.dart';
 
 import '../../actions/actions.dart';
+import '../../actions/key_event.dart';
+import '../../actions/keymap.dart';
+import '../../actions/keys.dart';
 import '../motion.dart';
 import '../theme.dart';
 import '../tokens.dart';
@@ -130,6 +133,8 @@ class KeyAreaState extends State<KeyArea> {
   /// Runs [id] for this area: the screen's own handler first, then the generic moves.
   bool run(String id, int count, String? arg) {
     if (widget.onAction?.call(id, count, arg) ?? false) return true;
+    // A screen's own area (the Build editor) has no generic moves: its actions are its screen's.
+    if (!area.navigates) return false;
     final dot = id.lastIndexOf('.');
     final verb = dot < 0 ? id : id.substring(dot + 1);
     final move = switch (verb) {
@@ -151,6 +156,18 @@ class KeyAreaState extends State<KeyArea> {
     return false;
   }
 
+  static Keymap? _defaults;
+
+  // With no key router above (a screen shown alone), the area's own default keys still work.
+  KeyEventResult _alone(KeyEvent e) {
+    final chord = keyChordFromEvent(e);
+    if (chord == null) return KeyEventResult.ignored;
+    final km = _defaults ??= Keymap.defaults(ActionRegistry.standard());
+    final ref = km.bindingsIn(area)[KeySeq.one(chord)];
+    if (ref == null || ref.isMacro) return KeyEventResult.ignored;
+    return run(ref.id, 1, null) ? KeyEventResult.handled : KeyEventResult.ignored;
+  }
+
   /// Focuses the area's first control (Enter on the area); false when it has none.
   bool enter() => moveFocusIn(node, KeyMove.next);
 
@@ -168,6 +185,7 @@ class KeyAreaState extends State<KeyArea> {
         child: Focus(
           focusNode: node,
           autofocus: widget.autofocus,
+          onKeyEvent: _host == null ? (_, e) => _alone(e) : null,
           child: FocusTraversalGroup(child: widget.child),
         ),
       );
@@ -406,4 +424,20 @@ class KeyRingBox extends StatelessWidget {
                 ))),
               ]),
       );
+}
+
+/// The first [KeyArea] at or under [context] (a part of the screen that holds one, such as the Build explorer).
+KeyAreaState? keyAreaUnder(BuildContext? context) {
+  if (context == null || !context.mounted) return null;
+  KeyAreaState? found;
+  void visit(Element e) {
+    if (found != null) return;
+    if (e is StatefulElement && e.state is KeyAreaState) {
+      found = e.state as KeyAreaState;
+      return;
+    }
+    e.visitChildren(visit);
+  }
+  if (context is Element) visit(context);
+  return found;
 }

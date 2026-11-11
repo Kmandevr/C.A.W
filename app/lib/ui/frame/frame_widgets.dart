@@ -12,6 +12,9 @@ import '../glass.dart';
 import '../haptics.dart';
 import '../motion.dart';
 import '../theme.dart';
+import '../key_router.dart';
+import '../keyboard/key_area.dart';
+import '../../actions/actions.dart';
 import '../widgets.dart' show LiveIsland;
 import 'live_keys.dart';
 import 'record_tools.dart';
@@ -86,10 +89,10 @@ class SectionBar extends StatelessWidget {
           height: 48 + bottomInset,
           padding: EdgeInsets.only(bottom: bottomInset),
           decoration: _barDecoration(top: true),
-          child: Row(children: [
+          child: SectionKeys(child: Row(children: [
             for (final s in sectionOrder)
               Expanded(child: _SectionButton(section: s, selected: sections.current == s, onTap: () => sections.show(s))),
-          ]),
+          ])),
         ),
       );
 }
@@ -137,6 +140,43 @@ class _SectionButton extends StatelessWidget {
   }
 }
 
+/// The section bar's (or rail's) keys: the arrows and WASD step to the previous or next section and show it, Enter
+/// goes into the section shown (its first area), Esc from an area comes back here.
+class SectionKeys extends StatefulWidget {
+  const SectionKeys({super.key, required this.child});
+  final Widget child;
+
+  @override
+  State<SectionKeys> createState() => _SectionKeysState();
+}
+
+class _SectionKeysState extends State<SectionKeys> {
+  final _area = GlobalKey<KeyAreaState>();
+
+  bool _key(String id, int count, String? arg) {
+    final a = _area.currentState;
+    if (a == null) return false;
+    switch (id) {
+      case 'sections.prev' || 'sections.next':
+        for (var i = 0; i < count; i++) {
+          moveFocusIn(a.node, id == 'sections.prev' ? KeyMove.prev : KeyMove.next);
+        }
+        activateFocused();
+      case 'sections.open':
+        if (a.controlFocused) activateFocused();
+        // Once the section is on screen, its first area takes the focus.
+        WidgetsBinding.instance.addPostFrameCallback((_) => KeyRouterState.active.value?.focusFirstArea(except: a.node));
+      default:
+        return false;
+    }
+    return true;
+  }
+
+  @override
+  Widget build(BuildContext context) =>
+      KeyArea(key: _area, area: Area.sections, label: 'Sections', onAction: _key, child: widget.child);
+}
+
 /// The slim rail on the left in landscape, on tablets and on desktop.
 class SectionRail extends StatelessWidget {
   const SectionRail({super.key, required this.current, required this.onSelect, this.top, this.bottom,
@@ -163,9 +203,11 @@ class SectionRail extends StatelessWidget {
         child: Column(children: [
           ?top,
           const SizedBox(height: 4),
-          for (final s in sectionOrder)
-            SizedBox(height: compact ? 44 : 56,
-              child: _SectionButton(section: s, selected: current == s, onTap: () => onSelect(s), label: !compact)),
+          SectionKeys(child: Column(mainAxisSize: MainAxisSize.min, children: [
+            for (final s in sectionOrder)
+              SizedBox(height: compact ? 44 : 56,
+                child: _SectionButton(section: s, selected: current == s, onTap: () => onSelect(s), label: !compact)),
+          ])),
           const Spacer(),
           ?bottom,
         ]),

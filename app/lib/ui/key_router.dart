@@ -523,6 +523,12 @@ class KeyRouterState extends State<KeyRouter> implements KeyAreaHost {
     return readingOrder(nodes.toList());
   }
 
+  /// Focuses the first area on screen in reading order (other than [except]): Enter on the section bar.
+  void focusFirstArea({FocusNode? except}) {
+    final first = visibleAreas().where((n) => n != except).firstOrNull;
+    if (first != null) focusAndReveal(first);
+  }
+
   /// Tab and Shift+Tab: the next or previous area of the screen in front, round and round.
   void _cycleAreas(int d) {
     final areas = visibleAreas();
