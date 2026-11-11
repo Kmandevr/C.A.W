@@ -71,6 +71,19 @@ updated: 2026-11-11
 - **Phase distortion's latency** is a fixed 48 frames (1 ms at 48 kHz), declared, so the swing is ±46 frames whatever the sample rate.
 - **Not built:** an envelope follower as a modulation source (projects don't route modulation outputs yet); Bitcrush's ADC/DAC quality and dither, Faturator's color and stereo turbo, and Shaper's drawn curve as their own controls.
 
+## 2026-11-11: Creative and Pitch & Time effects (fx-creative, choices to confirm)
+
+**Decision (Claude, for the owner to confirm):** eight new built-ins (tape stop, reverser, stutter, pitch shifter, frequency shifter, trance gate, bitcrush, ring mod; [engine](engine.md#c-api-engineincludecawh)) with plugin UIs ([app](app.md)). No new dependency.
+- **A ninth device family, Creative** (yellow → pink), for both browser tabs, so these read apart from the modulation family's pink → violet.
+- **Tape stop's trigger is a knob** (`stop`, at or above 0.5 stops), so a lane or an LFO can trigger it, plus a hold-to-stop pad; Kilohearts has a Play switch. A start spins up from the tape under the head now (not where it stopped), and once at speed crossfades back to the live input over 12 ms, so the tape stop adds no lasting delay.
+- **Reverser's longest chunk is 2 s** (a half note at 60 BPM), to keep its buffer modest on a phone (4 MB at 48 kHz, as the tape stop's 8 s; the stutter's 3 s slice takes 1.2 MB).
+- **Pitch shifter: no formant-preserve mode.** It would need an FFT shifter with a spectral-envelope correction, or PSOLA with pitch detection: more latency and CPU. Its grain size sets its latency (half a grain), so the grain is not automatable or modulatable, as the ducker's look-ahead.
+- **Frequency shifter's "Both"** puts the upper sideband on the left and the lower on the right (a stereo effect), rather than summing both (which is ring modulation, already the ring mod).
+- **Trance gate:** one pattern (32 step levels saved with the device), not Kilohearts' eight pattern slots; Tie as a switch (a step after a sounding one doesn't retrigger) rather than per-step ties drawn by dragging.
+- **Stutter** is not a Kilohearts snapin; built as a seeded beat repeat (Ableton's Beat Repeat is the model), with a hold pad for live use.
+- **Ring mod** with a key: giving it a key turns its carrier to Sidechain, and removing the key turns it back to Sine. The sidechain key is the existing keyed-effect port (as the ducker's).
+- **Bitcrush stays separate from the saturator's Crush mode**: it models a converter pair (anti-alias and anti-image filters, jitter, dither, fractional bits); the saturator's mode is unchanged.
+
 ## 2026-11-11: Settings as a category list, every setting real (choices to confirm)
 
 **Decision (owner):** Settings opens on a list of sections with icons; a search finds any setting and jumps to it, highlighted; new Audio and MIDI, Editing, Projects and files and Export settings; full control of the audio device and buffer; nothing hidden. **Choices made on the owner's behalf, to confirm:**

@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 import '../../theme.dart';
 
 /// The families devices are coloured by (owner, 2026-11-10: "in the theme of the app, but more colorful").
-enum DeviceFamily { eq, dynamics, space, drive, filter, modulation, utility, synth, drums }
+enum DeviceFamily { eq, dynamics, space, drive, filter, modulation, utility, synth, drums, creative /* fx-creative */ }
 
 /// A family's look: [primary] for its controls and curves, [secondary] for the second voice of a visual (the right
 /// channel, the output, a gradient's far end), and its [icon].
@@ -38,6 +38,7 @@ DeviceStyle deviceStyle(DeviceFamily family) => switch (family) {
       DeviceFamily.utility => DeviceStyle(family, Neon.yellow, Neon.green, Icons.tune, 'UTILITY'),
       DeviceFamily.synth => DeviceStyle(family, Neon.green, Neon.blue, Icons.piano, 'SYNTH'),
       DeviceFamily.drums => DeviceStyle(family, _orange, Neon.pink, Icons.grid_view_rounded, 'DRUMS'),
+      DeviceFamily.creative => DeviceStyle(family, Neon.yellow, Neon.pink, Icons.auto_awesome, 'CREATIVE'),  // fx-creative
     };
 
 /// The family of built-in component [id], or null for anything else (a project's own C++ keeps the track colour).
@@ -53,6 +54,9 @@ DeviceFamily? familyOfComponent(String id) => switch (id) {
       'org.caw.phaser' || 'org.caw.flanger' || 'org.caw.chorus' => DeviceFamily.modulation,
       'org.caw.utility' || 'org.caw.stereo.width' || 'org.caw.stereo.balance' => DeviceFamily.utility,
       'org.caw.drum.kick' || 'org.caw.drum.snare' || 'org.caw.drum.hats' || 'org.caw.drum.kit' => DeviceFamily.drums,
+      // fx-creative: the Creative and Pitch & Time effects
+      'org.caw.tapestop' || 'org.caw.reverser' || 'org.caw.stutter' || 'org.caw.pitchshift' || 'org.caw.freqshift' ||
+          'org.caw.trancegate' || 'org.caw.bitcrush' || 'org.caw.ringmod' => DeviceFamily.creative,
       _ when id.startsWith('org.caw.synth.') || id == 'org.caw.bass' => DeviceFamily.synth,
       _ => null,
     };

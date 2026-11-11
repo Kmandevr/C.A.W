@@ -251,11 +251,15 @@ std::string number(double v) {
 // fx-dynamics begin
 const std::vector<BuiltinPreset>* fxDynamicsPresets(std::string_view id);  // builtin_fx_dynamics_presets.cpp
 // fx-dynamics end
+// fx-creative begin: the Creative and Pitch & Time effects' presets (builtin_fx_creative_presets.cpp)
+const std::vector<BuiltinPreset>* creativeBuiltinPresets(std::string_view id);
+// fx-creative end
 
 const std::vector<BuiltinPreset>& builtinPresets(std::string_view componentId) {
     if (const auto* p = fxDynamicsPresets(componentId)) return *p;  // fx-dynamics
     if (componentId == kFlagship) return flagshipPresets();
     if (componentId == "org.caw.ducker") return duckerPresets();
+    if (const auto* p = creativeBuiltinPresets(componentId)) return *p;  // fx-creative
     return kNone;
 }
 

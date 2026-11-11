@@ -190,6 +190,27 @@ DeviceDisplayFrame decodeDisplay(String componentId, List<double> f, int n) {
       return DeviceDisplayFrame(inputDb: at(0), outputDb: at(1),
           values: named(['drive', 'normalize', 'bias', 'spread', 'mod_l', 'mod_r', 'delay_l_ms', 'delay_r_ms'], 2));
     // fx-dynamics end
+    // fx-creative begin: the Creative and Pitch & Time effects (docs/engine.md, Display data)
+    case 'org.caw.tapestop':
+      return DeviceDisplayFrame(inputDb: at(0), outputDb: at(1),
+          values: named(['speed', 'state', 'lag_ms', 'progress', 'stop_s', 'start_s'], 2));
+    case 'org.caw.reverser':
+      return DeviceDisplayFrame(inputDb: at(0), outputDb: at(1), values: named(['chunk_ms', 'position', 'crossfade', 'grain'], 2));
+    case 'org.caw.stutter':
+      return DeviceDisplayFrame(inputDb: at(0), outputDb: at(1),
+          values: named(['active', 'repeat', 'progress', 'slice_ms', 'triggers', 'length_ms'], 2));
+    case 'org.caw.pitchshift':
+      return DeviceDisplayFrame(inputDb: at(0), outputDb: at(1), values: named(['semitones_now', 'grain_ms', 'latency_ms', 'phase'], 2));
+    case 'org.caw.freqshift':
+      return DeviceDisplayFrame(inputDb: at(0), outputDb: at(1), values: named(['shift_l', 'shift_r', 'direction', 'feedback', 'phase'], 2));
+    case 'org.caw.trancegate':
+      return DeviceDisplayFrame(inputDb: at(0), outputDb: at(1), values: named(['step', 'env', 'steps'], 2));
+    case 'org.caw.bitcrush':
+      return DeviceDisplayFrame(inputDb: at(0), outputDb: at(1), values: named(['bits', 'rate_hz', 'adc_hz', 'dac_hz', 'holds'], 2));
+    case 'org.caw.ringmod':
+      return DeviceDisplayFrame(inputDb: at(0), outputDb: at(1),
+          values: named(['source', 'freq_l', 'freq_r', 'carrier_phase', 'carrier_peak', 'oversample'], 2));
+    // fx-creative end
     default:
       return DeviceDisplayFrame(values: {for (var i = 0; i < n && i < 64; ++i) '$i': f[i]});
   }
