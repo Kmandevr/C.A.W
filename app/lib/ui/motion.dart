@@ -120,3 +120,58 @@ class Snap {
     return (1 - off / reach).clamp(0.0, 1.0);
   }
 }
+
+/// What an edit animation is for (owner, 2026-11-11): each kind can be turned off on its own.
+enum EditMotionKind {
+  notes('Notes added, deleted and moved'),
+  clips('Clips added, deleted and moved'),
+  tracks('Tracks added, deleted and reordered'),
+  lengths('Lengths and sizes changing'),
+  panels('Panels, menus and pages');
+
+  const EditMotionKind(this.label);
+  final String label;
+}
+
+/// How edit animations feel (owner, 2026-11-11: the user's choice, Subtle by default).
+enum EditMotionStyle {
+  subtle('Subtle'),
+  playful('Playful');
+
+  const EditMotionStyle(this.label);
+  final String label;
+}
+
+/// Edit animations: what appears, disappears, moves or resizes because of an edit. Separate from the motion that
+/// helps use the app (drag ghosts, snapping, press feedback, which [Motion] keeps even when everything else is Off).
+/// Settings sets the statics.
+class EditMotion {
+  EditMotion._();
+
+  static EditMotionStyle style = EditMotionStyle.subtle;
+
+  /// The kinds turned on (all by default).
+  static Set<EditMotionKind> kinds = {...EditMotionKind.values};
+
+  /// How long an edit animation of [kind] runs under [context], or null when it doesn't run: Motion Off (or the
+  /// Minimal profile), the kind turned off. Reduced motion keeps it as a fade ([fadeOnly]).
+  static Duration? of(BuildContext context, EditMotionKind kind) =>
+      durationFor(Motion.of(context), kind);
+
+  static Duration? durationFor(MotionLevel level, EditMotionKind kind) {
+    if (level == MotionLevel.off || !kinds.contains(kind)) return null;
+    return switch (style) {
+      EditMotionStyle.subtle => const Duration(milliseconds: 160),
+      EditMotionStyle.playful => const Duration(milliseconds: 260),
+    };
+  }
+
+  /// True when only a fade may run (Reduced motion): no scaling, sliding or springs.
+  static bool fadeOnly(BuildContext context) => Motion.of(context) == MotionLevel.reduced;
+
+  /// The curve for things appearing or moving: an ease-out for Subtle, a small overshoot for Playful.
+  static Curve get curve => style == EditMotionStyle.playful ? Curves.easeOutBack : Curves.easeOutCubic;
+
+  /// The curve for things going away.
+  static const Curve exitCurve = Curves.easeInCubic;
+}

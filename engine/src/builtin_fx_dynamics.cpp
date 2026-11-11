@@ -248,7 +248,7 @@ const ParamTable& mbParams() {
     return t;
 }
 const ModuleDescriptor& mbDescriptor() {
-    static const ModuleDescriptor d = effectDescriptor("org.caw.multiband", "Multiband dynamics", mbParams(), 0, 0);
+    static const ModuleDescriptor d = withCpu(effectDescriptor("org.caw.multiband", "Multiband dynamics", mbParams(), 0, 0), CpuClass::Heavy);
     return d;
 }
 

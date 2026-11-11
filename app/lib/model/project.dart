@@ -4,6 +4,7 @@ import 'dart:math';
 
 import 'cpp_component.dart';
 import 'midi_mapping.dart';
+import 'modulation.dart';
 import 'pattern_doc.dart';
 import 'routing.dart';
 
@@ -577,6 +578,10 @@ class ProjectDoc {
   /// Controller learn: hardware CCs mapped to knobs (Settings › MIDI lists them).
   List<MidiCcMapping> midiMappings = [];
 
+  /// Project modulation (#161, modulation.dart): modulators and the links from their outputs to any knob.
+  List<ModulatorDoc> modulators = [];
+  List<ModLinkDoc> modLinks = [];
+
   int get stepsPerBar => beatsPerBar * 4;
   int get loopSteps => loopBars * stepsPerBar;
   /// A song position is the engine's 32-bit step count, so a song holds whole bars up to 2^31 - 1 steps (F7.2).
@@ -737,6 +742,9 @@ class ProjectDoc {
           if (playable(auditionComponents).isNotEmpty) 'components': [for (final c in playable(auditionComponents)) c.toJson()],
         },
         'audition_only': auditionOnly && auditionInstrument != null,
+        // Project modulation (#161): what can play of it (modulation.dart).
+        ...engineModulationFields(routing, playableComponents: playableComponents,
+            engineIndex: (layerId, index) => playableIndex(chainOf(layerId), index), instrumentPlays: instrumentPlays),
       });
     return result;
   }
@@ -763,6 +771,8 @@ class ProjectDoc {
         if (hasLoopRange) ...{'loop_range': loopRange, 'loop_start_steps': loopStartSteps, 'loop_end_steps': loopEndSteps},
         if (markers.isNotEmpty) 'markers': [for (final m in markers) m.toJson()],
         if (midiMappings.isNotEmpty) 'midi_mappings': [for (final m in midiMappings) m.toJson()],
+        if (modulators.isNotEmpty) 'modulators': [for (final m in modulators) m.toJson()],
+        if (modLinks.isNotEmpty) 'modulation': [for (final l in modLinks) l.toJson()],
       };
 
   /// Brings each track's instrument up to what the engine plays, with [resolve] (`Engine.resolveInstrument`): a
@@ -907,6 +917,12 @@ class ProjectDoc {
     if (!project.hasLoopRange) project.loopRange = false;
     project.midiMappings = [
       for (final raw in ((j['midi_mappings'] as List?) ?? const []).take(1024)) ?MidiCcMapping.fromJson(raw),
+    ];
+    project.modulators = [
+      for (final raw in ((j['modulators'] as List?) ?? const []).take(kMaxModulators)) ?ModulatorDoc.fromJson(raw),
+    ];
+    project.modLinks = [
+      for (final raw in ((j['modulation'] as List?) ?? const []).take(kMaxModLinks)) ?ModLinkDoc.fromJson(raw),
     ];
     project.markers = [
       for (final raw in ((j['markers'] as List?) ?? const []).take(1024)) ?MarkerDoc.fromJson(raw, project.maxArrangementSteps),

@@ -317,6 +317,9 @@ const ModuleDescriptor& flagshipDescriptor() {
         m.parameters = params().d;
         m.parameterCount = kParamCount;
         m.tailFrames = 7680000;  // 40 s at 192 kHz: a 10 s release into a 20 s reverb; it says quiet() sooner
+        m.domains = kDomainWhole | kDomainPerNote;  // #127: it renders into a voice bus (VoiceLanes)
+        m.capabilities = kCapabilityNotesIn | kCapabilityMidiIn;  // the mod wheel
+        m.cpuClass = CpuClass::Heavy;
         return m;
     }();
     return d;
@@ -880,7 +883,7 @@ public:
 
     // No voice and the effects cleared: silence until the next note (whose note-on restarts the control grid;
     // the free LFOs and every other clock stood still while idle, so a skipped stretch changes nothing).
-    bool quiet() const noexcept override { return idle_; }
+    bool quiet() const noexcept override { return idle_ && !lanes_.any(); }
 
 protected:
     void onNote(const NoteMessage& m) noexcept override {
@@ -891,7 +894,7 @@ protected:
                     monoOn(m);
                     break;
                 }
-                Voice& v = voices_.start(m.noteId);
+                Voice& v = voices_.start(m.noteId, &lanes_);
                 v.fresh = !v.env[0].active();  // a stolen voice continues from where it is (no click)
                 v.starting = true;
                 v.mono = false;
@@ -960,7 +963,7 @@ protected:
             for (lib::Adsr& e : v.env) e.gateOn();
             return;
         }
-        Voice& v = voices_.start(m.noteId);
+        Voice& v = voices_.start(m.noteId, &lanes_);
         v.fresh = !v.env[0].active();
         v.starting = true;
         v.mono = true;
@@ -1010,6 +1013,7 @@ protected:
     void beginBlock(const ProcessBlock& b) noexcept override {
         transport_ = b.transport;
         block_ = &b;
+        lanes_.bind(b);
         const Params& p = params();
         const uint32_t given = b.parameters ? std::min(b.parameterCount, kParamCount) : 0;
         // The same values as last block, none ramping (a steady chain hands over the same array): nothing to read.
@@ -1037,10 +1041,19 @@ protected:
         knobsChanged_ = knobsChanged_ || changed;  // until the next control has used them
     }
 
+    // The voice bus (#127): a note whose lane ends at the block's end has no voice left playing it.
+    void endBlock(const ProcessBlock&) noexcept override {
+        if (lanes_.any()) lanes_.endBlock([&](uint32_t id) noexcept { return voices_.find(id) != nullptr; });
+    }
+
     void render(float* left, float* right, uint32_t frames, uint32_t offset, const ProcessBlock& b) noexcept override {
         if (idle_) {
             std::memset(left, 0, frames * sizeof(float));
             std::memset(right, 0, frames * sizeof(float));
+            if (lanes_.any()) {  // a lane before its note starts: the host's FX still run (on silence)
+                lanes_.begin(offset, frames);
+                lanes_.runAndSum(left, right, offset, frames);
+            }
             return;
         }
         clock_.run(frames, offset,
@@ -1049,7 +1062,7 @@ protected:
                        control(b, at);
                    },
                    [&](uint32_t start, uint32_t n) noexcept {
-                       renderPeriod(left + start, right + start, n);
+                       renderPeriod(left + start, right + start, n, offset + start);
                        if (!idle_) sinceControl_ += n;  // gone idle: every clock stands still
                    });
     }
@@ -1235,8 +1248,9 @@ private:
         if (knobsChanged_ || (moved_ & kMovedGlobal)) configureEffects(g);
 
         knobsChanged_ = false;
-        // Nothing sounding and the tails below -94 dB for long enough: clear the effects and rest.
-        if (voices_.activeCount() == 0) {
+        // Nothing sounding and the tails below -94 dB for long enough: clear the effects and rest (not while the
+        // host has voice-bus lanes: their FX tails run through this instrument's periods).
+        if (voices_.activeCount() == 0 && !lanes_.any()) {
             const bool fx = distOn_ || eqOn_ || chorusOn_ || delayOn_ || reverbOn_;
             const double window = fx ? 0.1 * sr_ + (delayOn_ ? delayTime1_ : 0.0) : 0.0;
             if (static_cast<double>(quietRun_) >= window) {
@@ -1736,8 +1750,9 @@ private:
         if (!v.env[0].active()) v.active = false;
     }
 
-    // One piece (n <= kControlFrames frames) of the control period, sinceControl_ frames into it.
-    void renderPeriod(float* left, float* right, uint32_t n) noexcept {
+    // One piece (n <= kControlFrames frames) of the control period, sinceControl_ frames into it; `at` is its
+    // first frame in the block.
+    void renderPeriod(float* left, float* right, uint32_t n, uint32_t at) noexcept {
         if (idle_) {
             std::memset(left, 0, n * sizeof(float));
             std::memset(right, 0, n * sizeof(float));
@@ -1747,7 +1762,23 @@ private:
         float L[kControlFrames] = {}, R[kControlFrames] = {};
         zero(sharedL_), zero(sharedR_);
         sharedUsed_ = false;
-        voices_.forEachActive([&](Voice& v) noexcept { renderVoice(v, L, R, n, first); });
+        if (lanes_.any()) {
+            // The voice bus (#127): a voice whose note has a lane renders there (with its own filter 1, never the
+            // shared one, which sums voices), the host runs its per-note FX, and the lanes join the voices' sum
+            // before the shared stage below (distortion, EQ, chorus, delay, reverb, volume).
+            lanes_.begin(at, n);
+            voices_.forEachActive([&](Voice& v) noexcept {
+                if (VoiceLane* lane = lanes_.laneFor(v.noteId)) {
+                    v.shared = false;
+                    renderVoice(v, lane->channels[0] + at, lane->channels[1] + at, n, first);
+                } else {
+                    renderVoice(v, L, R, n, first);
+                }
+            });
+            lanes_.runAndSum(L, R, at, n);
+        } else {
+            voices_.forEachActive([&](Voice& v) noexcept { renderVoice(v, L, R, n, first); });
+        }
         runShared(L, R, n);
         const double volumeStep = (volume1_ - volume0_) / kControlFrames;
         const double delayStep = (delayTime1_ - delayTime0_) / kControlFrames;
@@ -1870,6 +1901,7 @@ private:
     };
 
     VoicePool<Voice, kVoices> voices_;
+    VoiceLanes lanes_;  // the host's voice bus for this block (#127), or none
     HeldNotes held_;  // mono and legato
     lib::CombFilter combs_[kVoices][kFilters * 2];
     const Tables* tables_ = nullptr;

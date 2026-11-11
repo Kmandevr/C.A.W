@@ -455,6 +455,53 @@ class Engine {
     }
   }
 
+  /// Project modulation (API 19, #161): a running modulator's knob (by its project id), ramped like a component's.
+  /// Store it in the project too, so the next update keeps it.
+  bool setModulatorParam(String modulatorId, String param, double value) {
+    final m = modulatorId.toNativeUtf8(), p = param.toNativeUtf8();
+    try {
+      return _b.setModulatorParam(_handle, m, p, value) == 1;
+    } finally {
+      calloc.free(m);
+      calloc.free(p);
+    }
+  }
+
+  bool setModulatorBypass(String modulatorId, bool bypass) {
+    final m = modulatorId.toNativeUtf8();
+    try {
+      return _b.setModulatorBypass(_handle, m, bypass ? 1 : 0) == 1;
+    } finally {
+      calloc.free(m);
+    }
+  }
+
+  /// A link's amount while it plays (a ring drag), −1..1 of its target's travel.
+  bool setModulationAmount(int linkId, double amount) => _b.setModulationAmount(_handle, linkId, amount) == 1;
+
+  Pointer<Float>? _modOut;
+
+  /// A modulator's outputs (0..1) at the last audio chunk, or null for an unknown one or while the engine is busy.
+  /// Cheap and never blocks: a modulator's UI polls it once per frame.
+  List<double>? modulatorOutputs(String modulatorId) {
+    if (_nativeDestroyed) return null;
+    final out = _modOut ??= calloc<Float>(8);
+    final m = modulatorId.toNativeUtf8();
+    try {
+      final n = _b.modulatorOutputs(_handle, m, out, 8);
+      return n <= 0 ? null : [for (var i = 0; i < n; i++) out[i]];
+    } finally {
+      calloc.free(m);
+    }
+  }
+
+  /// Link [linkId]'s target's summed offset (normalized travel) at the last chunk, or null.
+  double? modulationOffset(int linkId) {
+    if (_nativeDestroyed) return null;
+    final out = _modOut ??= calloc<Float>(8);
+    return _b.modulationOffset(_handle, linkId, out) == 1 ? out[0] : null;
+  }
+
   /// Bypasses (or brings back) a playing native component, crossfaded; null [layerId] is the master chain.
   bool setComponentBypass(String? layerId, int index, bool bypass) {
     final l = (layerId ?? '').toNativeUtf8();
@@ -760,6 +807,8 @@ class Engine {
     calloc.free(_display);
     final displayLayer = _displayLayer;
     if (displayLayer != null) calloc.free(displayLayer);
+    final modOut = _modOut;
+    if (modOut != null) calloc.free(modOut);
   }
 
   /// Turns a MIDI file (.mid or MIDI 2.0 Clip) into pattern module text; throws a [FormatException] if it can't.

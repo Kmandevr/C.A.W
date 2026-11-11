@@ -156,6 +156,7 @@ const ModuleDescriptor& convDescriptor() {
     static const ModuleDescriptor d = [] {
         ModuleDescriptor x = effectDescriptor("org.caw.convolver", "Convolver", convParams(), kPartition, kInfiniteTail);
         x.maxStateBytes = kIrStateHeader + 2u * 4u * kMaxIrFileFrames;
+        x.cpuClass = CpuClass::Heavy;
         return x;
     }();
     return d;
@@ -704,7 +705,7 @@ const ParamTable& shimmerParams() {
     return t;
 }
 const ModuleDescriptor& shimmerDescriptor() {
-    static const ModuleDescriptor d = effectDescriptor("org.caw.shimmer", "Shimmer", shimmerParams(), 0, kInfiniteTail);
+    static const ModuleDescriptor d = withCpu(effectDescriptor("org.caw.shimmer", "Shimmer", shimmerParams(), 0, kInfiniteTail), CpuClass::Heavy);
     return d;
 }
 

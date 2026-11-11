@@ -5,6 +5,7 @@
 #include "builtin_fx_racks_internal.h"
 #include "caw/library/dynamics.hpp"
 #include "caw/library/envelope.hpp"
+#include "mod_route.h"
 
 namespace caw {
 namespace fx {
@@ -98,10 +99,7 @@ const FxLayout& fxLayout() {
     return l;
 }
 
-double unitHash(uint32_t seed, uint64_t cycle) noexcept {
-    const uint32_t h = hash32(seed ^ hash32(static_cast<uint32_t>(cycle) ^ static_cast<uint32_t>(cycle >> 32) * 0x9e3779b9u));
-    return static_cast<double>(h) / 4294967296.0;
-}
+double unitHash(uint32_t seed, uint64_t cycle) noexcept { return modUnitHash(seed, cycle); }
 double frac(double x) noexcept { return x - std::floor(x); }
 
 bool noteOn(const Event& e) noexcept { return ((e.data[0] >> 28) & 0xFu) == 0x4u && ((e.data[0] >> 20) & 0xFu) == 0x9u; }
@@ -154,17 +152,8 @@ protected:
 
     double lfoShape(uint32_t l, int shape, double p, uint64_t cycle, uint32_t at) const noexcept {
         switch (shape) {
-            case kSine: return std::sin(2.0 * 3.14159265358979323846 * p);
-            case kTriangle: return p < 0.25 ? 4.0 * p : (p < 0.75 ? 2.0 - 4.0 * p : 4.0 * p - 4.0);
-            case kSawUp: return 2.0 * p - 1.0;
-            case kSawDown: return 1.0 - 2.0 * p;
-            case kSquare: return p < 0.5 ? 1.0 : -1.0;
-            case kSampleHold: return 2.0 * unitHash(0x1000u + l, cycle) - 1.0;
-            case kSmoothRandom: {
-                const double a = unitHash(0x1000u + l, cycle), b = unitHash(0x1000u + l, cycle + 1);
-                const double t = p * p * (3.0 - 2.0 * p);
-                return 2.0 * (a + (b - a) * t) - 1.0;
-            }
+            case kSine: case kTriangle: case kSawUp: case kSawDown: case kSquare: case kSampleHold: case kSmoothRandom:
+                return modLfoShape(shape, p, cycle, 0x1000u + l);  // the shapes the project LFO shares (mod_route.h)
             default: {  // Custom: the 16 points, joined by straight lines, around the cycle
                 const Indices::Lfo& k = fxLayout().k.lfo[l];
                 const double x = p * kPoints;
@@ -262,7 +251,7 @@ protected:
                 continue;
             if (!d.parameters[dst].modulatable) continue;
             const double u = src_[src];
-            const double offset = amount * (on(base + 3, at) ? 2.0 * u - 1.0 : u);
+            const double offset = modRouteOffset(u, amount, on(base + 3, at));  // the one route rule (mod_route.h)
             routeOffset_[r] = offset;
             uint32_t t = 0;
             while (t < tCount_ && tParam_[t] != static_cast<uint32_t>(dst)) ++t;
@@ -287,8 +276,7 @@ protected:
     }
 
     double modulated(const ParameterDescriptor& p, double base, double offset) const noexcept {
-        const double n = std::clamp(normalizeParameter(p, base) + offset, 0.0, 1.0);
-        return constrainParameter(p, denormalizeParameter(p, n));
+        return modulatedValue(p, base, offset);
     }
 
     void chunk(const float* inL, const float* inR, float* outL, float* outR, uint32_t n, uint32_t at) noexcept override {

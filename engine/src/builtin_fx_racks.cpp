@@ -150,6 +150,8 @@ void RackLayout::Built::make(const RackLayout& layout, const std::vector<const M
     desc.parameterCount = static_cast<uint32_t>(params.size());
     desc.tailFrames = tail;
     desc.maxStateBytes = static_cast<uint32_t>(std::min<uint64_t>(stateBytes, 64u << 20));
+    // #120: whole only (the slots may hold a limiter or a keyed effect), and a rack of effects costs a lot.
+    desc.cpuClass = CpuClass::Heavy;
 }
 
 // ---------- The container ----------

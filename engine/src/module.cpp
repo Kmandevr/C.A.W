@@ -10,6 +10,44 @@ namespace caw {
 
 namespace {
 constexpr uint32_t kQuadraticLimit = 256;  // up to this many parameters, the plain pairwise duplicate check
+
+// The domains and capabilities against the ports (#120); the ports themselves are already valid.
+ModuleValidation validateDomains(const ModuleDescriptor& d) noexcept {
+    if ((d.domains & ~kKnownDomains) != 0 || (d.domains & kDomainWhole) == 0) return ModuleValidation::InvalidDomains;
+    uint32_t audioIn = 0, audioOut = 0, eventIn = 0, eventOut = 0;
+    const PortDescriptor* in = nullptr;
+    const PortDescriptor* out = nullptr;
+    for (uint32_t i = 0; i < d.portCount; ++i) {
+        const PortDescriptor& p = d.ports[i];
+        if (p.type == PortType::Audio) {
+            if (p.input) in = &p, ++audioIn;
+            else out = &p, ++audioOut;
+        } else if (p.type == PortType::Event) {
+            ++(p.input ? eventIn : eventOut);
+        }
+    }
+    if ((d.domains & kDomainPerChannel) &&
+        !(audioIn == 1 && audioOut == 1 && in->layout == ChannelLayout::Mono && out->layout == ChannelLayout::Mono))
+        return ModuleValidation::DomainPortMismatch;
+    if (d.domains & (kDomainPerNote | kDomainPerVoice)) {
+        const bool effect = audioIn == 1 && audioOut == 1 && in->layout == ChannelLayout::Stereo &&
+                            out->layout == ChannelLayout::Stereo;
+        const bool instrument = audioIn == 0 && audioOut == 1 && out->layout == ChannelLayout::Stereo && eventIn > 0;
+        if (!effect && !instrument) return ModuleValidation::DomainPortMismatch;
+    }
+    if ((d.capabilities & ~kKnownCapabilities) != 0 ||
+        ((d.capabilities & (kCapabilityNotesIn | kCapabilityMidiIn)) && eventIn == 0) ||
+        ((d.capabilities & kCapabilityEventsOut) && eventOut == 0))
+        return ModuleValidation::InvalidCapabilities;
+    switch (d.cpuClass) {
+        case CpuClass::Unspecified:
+        case CpuClass::Light:
+        case CpuClass::Medium:
+        case CpuClass::Heavy: break;
+        default: return ModuleValidation::InvalidCapabilities;
+    }
+    return ModuleValidation::Ok;
+}
 }  // namespace
 
 ModuleValidation validateModuleDescriptor(const ModuleDescriptor& d) noexcept {
@@ -144,7 +182,7 @@ ModuleValidation validateModuleDescriptor(const ModuleDescriptor& d) noexcept {
                 return ModuleValidation::InvalidUiControlRange;
         }
     }
-    return ModuleValidation::Ok;
+    return validateDomains(d);
 }
 
 bool moduleDescriptorsMatch(const ModuleDescriptor& a, const ModuleDescriptor& b) noexcept {
@@ -156,7 +194,8 @@ bool moduleDescriptorsMatch(const ModuleDescriptor& a, const ModuleDescriptor& b
         a.portCount != b.portCount || a.parameterCount != b.parameterCount ||
         a.uiControlCount != b.uiControlCount || a.customUiId != b.customUiId ||
         a.version != b.version || a.role != b.role || a.latencyFrames != b.latencyFrames ||
-        a.tailFrames != b.tailFrames || a.maxStateBytes != b.maxStateBytes)
+        a.tailFrames != b.tailFrames || a.maxStateBytes != b.maxStateBytes || a.domains != b.domains ||
+        a.capabilities != b.capabilities || a.cpuClass != b.cpuClass)
         return false;
 
     for (uint32_t i = 0; i < a.portCount; ++i) {

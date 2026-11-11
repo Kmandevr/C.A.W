@@ -73,6 +73,28 @@ uint16_t cgroupCpuLimit() noexcept {
 
 // Returns false only when no finite cgroup memory limit is available. A true
 // result with zero bytes means the finite limit is exhausted, not "unknown".
+// MemAvailable from /proc/meminfo: free memory plus the page cache and buffers the kernel can reclaim.
+// Android keeps MemFree low on purpose (spare RAM holds caches), so MemFree alone understates what an app can use.
+uint64_t procMemAvailable() noexcept {
+#if defined(__linux__) || defined(__ANDROID__)
+    FILE* file = std::fopen("/proc/meminfo", "r");
+    if (!file) return 0;
+    char line[128];
+    uint64_t kib = 0;
+    while (std::fgets(line, sizeof(line), file)) {
+        unsigned long long value = 0;
+        if (std::sscanf(line, "MemAvailable: %llu kB", &value) == 1) {
+            kib = value;
+            break;
+        }
+    }
+    std::fclose(file);
+    return kib * 1024ull;
+#else
+    return 0;
+#endif
+}
+
 bool cgroupAvailableMemory(uint64_t& availableBytes) noexcept {
     uint64_t limit = 0, used = 0;
     FILE* file = std::fopen("/sys/fs/cgroup/memory.max", "r");
@@ -164,12 +186,14 @@ HardwareProfile detectHardwareProfile() noexcept {
     const uint16_t quotaCores = cgroupCpuLimit();
     if (quotaCores > 0) profile.logicalCores = profile.logicalCores
         ? std::min(profile.logicalCores, quotaCores) : quotaCores;
-    uint64_t availableBytes = 0;
+    uint64_t availableBytes = procMemAvailable();
 #if defined(_SC_AVPHYS_PAGES)
-    const long availablePages = sysconf(_SC_AVPHYS_PAGES);
-    const long pageSize = sysconf(_SC_PAGESIZE);
-    if (availablePages > 0 && pageSize > 0)
-        availableBytes = static_cast<uint64_t>(availablePages) * static_cast<uint64_t>(pageSize);
+    if (availableBytes == 0) {  // no /proc/meminfo: free pages only
+        const long availablePages = sysconf(_SC_AVPHYS_PAGES);
+        const long pageSize = sysconf(_SC_PAGESIZE);
+        if (availablePages > 0 && pageSize > 0)
+            availableBytes = static_cast<uint64_t>(availablePages) * static_cast<uint64_t>(pageSize);
+    }
 #endif
 #if defined(__linux__) && !defined(__ANDROID__)
     if (availableBytes == 0) {

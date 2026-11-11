@@ -82,6 +82,11 @@ public:
     // A new instance. A loaded component's instance is not yet activated: the host calls
     // activate(sampleRate, maxFrames) before processing and destroys it off the audio thread.
     std::unique_ptr<ModuleProcessor> create(std::string_view id) const noexcept;
+    // A mono-in, mono-out component that declares kDomainPerChannel, run as dual mono (#120 layout rules): one
+    // instance per channel behind a stereo descriptor (the same id, parameters and timing; ports "in" and "out"
+    // stereo, domains whole). Both instances get the same parameters; state saves and loads the left one's and
+    // loads it into both. Null for any other component.
+    std::unique_ptr<ModuleProcessor> createDualMono(std::string_view id) const noexcept;
     std::size_t size() const noexcept { return registrations_.size(); }
 
 private:

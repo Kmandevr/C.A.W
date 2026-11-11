@@ -188,7 +188,7 @@ const ParamTable& tiltParams() {
     return t;
 }
 const ModuleDescriptor& tiltDescriptor() {
-    static const ModuleDescriptor d = effectDescriptor("org.caw.tilt", "Tilt EQ", tiltParams(), 0, 0);
+    static const ModuleDescriptor d = withCpu(effectDescriptor("org.caw.tilt", "Tilt EQ", tiltParams(), 0, 0), CpuClass::Light);
     return d;
 }
 

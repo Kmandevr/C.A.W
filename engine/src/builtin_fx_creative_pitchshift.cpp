@@ -40,7 +40,7 @@ const ParamTable& pitchParams() {
 
 const ModuleDescriptor& pitchDescriptor() {
     // Latency 0 here: half the grain is reported per instance (VariableLatency).
-    static const ModuleDescriptor d = effectDescriptor("org.caw.pitchshift", "Pitch shifter", pitchParams(), 0, 0);
+    static const ModuleDescriptor d = withCpu(effectDescriptor("org.caw.pitchshift", "Pitch shifter", pitchParams(), 0, 0), CpuClass::Heavy);
     return d;
 }
 

@@ -37,7 +37,7 @@ const ParamTable& crushParams() {
 }
 
 const ModuleDescriptor& crushDescriptor() {
-    static const ModuleDescriptor d = effectDescriptor("org.caw.bitcrush", "Bitcrush", crushParams(), 0, 0);
+    static const ModuleDescriptor d = withCpu(effectDescriptor("org.caw.bitcrush", "Bitcrush", crushParams(), 0, 0), CpuClass::Light);
     return d;
 }
 

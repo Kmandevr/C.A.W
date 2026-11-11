@@ -21,6 +21,12 @@ struct CawEngine {
     std::string deviceName;
     int periodFrames = 0;
     int audioFlags = 0;
+    // The input (caw_audio_configure_input, API 18): duplex when enabled; a capture device by id, else by name
+    // (both empty: the default), and how many channels. Under the same lock.
+    bool inputEnabled = false;
+    std::string inputId;
+    std::string inputName;
+    int inputChannels = 2;
 
     // Async control jobs retain the handle until their worker callback has finished.
     bool retainAsync() {

@@ -567,14 +567,31 @@ class AppState extends ChangeNotifier {
     _livePending = null; // the project as it is now supersedes a drag step not yet sent
     _docGen++;
     final json = _engineJson();
+    final id = project.id;
     try {
       info = await e.setProject(json);
       engineError = null;
+      _engineProjectId = id;
     } catch (err) {
       engineError = 'Engine error: $err';
+      // The engine keeps what it had when a project is refused. That is right for an edit of this project (its last
+      // good state plays on), but never for another project: its audio must not play under this one's name.
+      if (_engineProjectId != id) {
+        e.stop();
+        _transportOn = false;
+        try {
+          info = await e.setProject(ProjectDoc(id: id, name: project.name).toEngineJson());
+          _engineProjectId = id;
+        } catch (_) {
+          // Even the empty project was refused: leave the transport stopped.
+        }
+      }
     }
     notifyListeners();
   }
+
+  /// The project whose state the engine holds (null before the first project loads): see [_syncNow].
+  String? _engineProjectId;
 
   /// Automation lanes the engine leaves out while they are being written ([automationKey]s; the automation writer).
   final Set<String> suspendedLanes = {};

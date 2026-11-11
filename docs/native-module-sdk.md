@@ -2,7 +2,7 @@
 title: Native module SDK
 summary: C ABI host contract and C++ component SDK, validation, real-time rules, state and packaging.
 updated: 2026-11-11
-covers: [engine/include/caw_component.h, engine/include/caw/display.hpp, engine/include/caw/library/, engine/src/sample_pack.*, engine/plugin/clap/, engine/cmake/CAWClap.cmake, engine/plugin/vst3/, engine/cmake/CAWVst3.cmake, engine/include/caw/module.hpp, engine/include/caw/component.hpp, engine/include/caw/instrument.hpp, engine/CMakeLists.txt, engine/cmake/, examples/cpp/minimal/, examples/cpp/poly-synth/, scripts/caw-component-build.js, .github/workflows/cpp-components.yml, engine/src/module.*, engine/src/module_registry.*, engine/src/graph.*, engine/src/component_test.*, engine/src/analysis.*]
+covers: [engine/include/caw_component.h, engine/include/caw/display.hpp, engine/include/caw/modulator.hpp, examples/cpp/modulator/, engine/include/caw/library/, engine/src/sample_pack.*, engine/plugin/clap/, engine/cmake/CAWClap.cmake, engine/plugin/vst3/, engine/cmake/CAWVst3.cmake, engine/include/caw/module.hpp, engine/include/caw/component.hpp, engine/include/caw/instrument.hpp, engine/CMakeLists.txt, engine/cmake/, examples/cpp/minimal/, examples/cpp/poly-synth/, scripts/caw-component-build.js, .github/workflows/cpp-components.yml, engine/src/module.*, engine/src/module_registry.*, engine/src/graph.*, engine/src/component_test.*, engine/src/analysis.*]
 ---
 
 # Native module SDK v1
@@ -149,6 +149,10 @@ caw sample-pack --request pack.json --trust trusted --out pack --overwrite
 
 Each file is a fresh instance: a note on at the first frame, held for `--hold` seconds, a note off, and the release until it falls below -80 dB. So `reset()`/`activate` must leave no state from before, `tailFrames` should cover your release (a release longer than `--max` is cut, `tail_truncated`), and the same build gives the same bytes every time. Use `--step NAME=V1,V2` to render a parameter at several values (one SFZ per combination), and `effects` in a request file to bake an effect chain into the samples. The library is in-process code, so it loads only with `--trust trusted` (hosts pass `CAW_NATIVE_TRUST_TRUSTED` to `caw_sample_pack_render`); the request itself cannot grant trust. Loops are found at matching zero crossings in the held part, so they sound seamless only when the held sound repeats.
 
+## Writing a modulator
+
+A modulator (#161) is a component whose outputs are modulation ports (one float per frame, 0..1), with at most one event input (the notes of the track it hears) and one audio input (that track's sound). It goes in the project's modulators, not on a chain, and its outputs can move any knob, volume, pan or send ([engine](engine.md#modulation-project-modulators-and-links-161)). `caw/modulator.hpp` gives the ports (`caw::mod::output("out")`, `mod::notesInput()`, `mod::audioInput()`), a base class `caw::mod::Modulator` whose `render(const mod::Block&)` fills `block.outputs[k][0..frames)`, `mod::decode` for note, pressure, controller and bend messages, `mod::HeldNotes` and `mod::Ramp` (work a value out once per block and draw it straight from the last). The host runs it in blocks of 16 frames on a grid from Play and gives it the transport (`block.beatAt`), so its output never depends on the device's buffer size. `examples/cpp/modulator` (a Euclidean gate: `gate` and `ramp` outputs) builds with `caw_add_component` like any component and has a contract test.
+
 ## The Library
 
 `engine/include/caw/library/` is header-only C++ in `namespace caw::lib`: what the engine's built-ins are made of, for your components to reuse. It uses only the deterministic maths of `caw/detmath.hpp`, so a component built with `CAW::SDK` gets the same bits as the engine, and nothing in it allocates except a `prepare()` (the delay lines, the reverb, the comb and the wavetable; call it in `activate`, never in `process`). Objects with coefficients have a `set()` that costs an exp or a tan (call it when a knob moves, or every 16 frames) and a per-sample call. Each header explains its method in comments, as a worked example of an efficient real-time kernel.
@@ -245,6 +249,8 @@ The process callback may run on the audio thread. It must:
 
 Creation, destruction, state serialization, graph compilation and asset loading happen off the audio thread. A module that violates the contract can still stall or crash an in-process host: native modules are trusted code, **not a security sandbox**. Untrusted modules require process isolation, which is a separate future host feature.
 
+**Revision 3.1 (#120, #127, 2026-11-11).** `CAW_COMPONENT_ABI_REVISION 1` appends the descriptor's `domains`, `capabilities` and `cpu_class` and the process block's `voices` (the voice bus); a host reads them only when `struct_size` covers them, and a 3.0 component loads as whole-only. In C++ set `ModuleDescriptor::domains` (default whole only: add `kDomainPerNote` when the effect is safe to run once per note, or, for an instrument, when it renders into `ProcessBlock::voices` with `caw::VoiceLanes`), `capabilities` and `cpuClass`. The rules and the lane protocol: [engine](engine.md#descriptor-domains-and-the-voice-bus-120-127).
+
 ## Resource and compatibility rules
 
 - Stable IDs identify modules; display names are not identifiers.
@@ -253,7 +259,7 @@ Creation, destruction, state serialization, graph compilation and asset loading 
 - State size is capped by the host and declared maximum; the host rejects oversized state.
 - Hosts must pin module version and preserve project snapshots or report missing/incompatible dependencies.
 - Optional features may be omitted from a build, but a missing dependency must be reported explicitly rather than silently substituted.
-- The v1 interface is stereo-native. Mono and discrete layouts are explicit port declarations, never inferred from buffer count.
+- The interface is stereo-native. Mono and discrete layouts are explicit port declarations, never inferred from buffer count; a graph widens only a mono output into a stereo input (duplicated), and stereo into mono needs `org.caw.downmix`.
 
 ## Display data
 

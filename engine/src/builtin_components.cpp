@@ -1,5 +1,6 @@
 // Built-in components (the C.A.W. Library, #121): stereo effects and an instrument, registered in every Engine.
 #include "builtin_components.h"
+#include "builtin_modulators.h"
 
 #include "builtin_effects.h"
 #include "builtin_instruments.h"
@@ -51,6 +52,8 @@ ModuleDescriptor descriptor(std::string_view id, std::string_view name, const Pa
     d.portCount = 2;
     d.parameters = params;
     d.parameterCount = 1;
+    d.domains = kDomainWhole | kDomainPerNote;  // #120: stereo effects may run per note
+    d.cpuClass = CpuClass::Light;
     return d;
 }
 
@@ -120,6 +123,7 @@ ModuleDescriptor distortionDescriptor() {
     ModuleDescriptor d = descriptor("org.caw.distortion", "Distortion", kDistortionParams);
     d.role = ModuleRole::Effect;
     d.parameterCount = 5;
+    d.cpuClass = CpuClass::Medium;
     return d;
 }
 const ModuleDescriptor kDistortion = distortionDescriptor();
@@ -230,6 +234,7 @@ ModuleDescriptor delayDescriptor() {
     ModuleDescriptor d = descriptor("org.caw.delay.pingpong", "Ping-pong delay", kDelayParams);
     d.role = ModuleRole::Effect;
     d.parameterCount = 5;
+    d.cpuClass = CpuClass::Medium;
     d.tailFrames = kInfiniteTail;  // with feedback it rings until it is quiet
     return d;
 }
@@ -299,6 +304,7 @@ ModuleDescriptor chorusDescriptor() {
     ModuleDescriptor d = descriptor("org.caw.chorus", "Chorus", kChorusParams);
     d.role = ModuleRole::Effect;
     d.parameterCount = 3;
+    d.cpuClass = CpuClass::Medium;
     d.tailFrames = 9600;  // the 50 ms line empties, at rates up to 192 kHz
     return d;
 }
@@ -375,6 +381,7 @@ void registerBuiltinComponents(ModuleRegistry& registry) {
     registry.add(kChorus, &make<ChorusEffect>);
     registerBuiltinEffects(registry);  // the effects suite (#173, builtin_effects*.cpp)
     registerBuiltinInstruments(registry);  // the drums and Flagship (builtin_instruments.cpp, builtin_flagship.cpp)
+    registerBuiltinModulators(registry);  // LFO, envelope, follower, steps, random, macros, MIDI to CV (#161)
     registerTestSignal(registry);  // org.caw.test.osc, internal: for tests, never listed (builtin_test_signal.cpp)
 }
 

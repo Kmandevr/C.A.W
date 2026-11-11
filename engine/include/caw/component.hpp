@@ -193,6 +193,11 @@ int32_t process(void* p, const CawProcessBlock* block) noexcept {
             ports.parameters = self.parameters.data();
             ports.parameterCount = block->parameter_count;
             ports.transport = transport;
+            // 3.1: the voice bus, when the host's block has the field (the C and C++ structs share a layout).
+            if (block->struct_size >= offsetof(CawProcessBlock, voices) + sizeof(block->voices) && block->voices &&
+                block->voices->struct_size >= sizeof(CawVoiceBus) && block->voices->lane_stride >= sizeof(CawVoiceLane) &&
+                (block->voices->lane_count == 0 || block->voices->lanes) && block->voices->run)
+                ports.voices = reinterpret_cast<const VoiceBus*>(block->voices);
             ok = processor.processPorts(ports);
         } else {
             if (block->audio_in_count > 1 || block->audio_out_count > 1) return 0;
@@ -335,6 +340,10 @@ bool exportComponent(const ModuleDescriptor& d, Exported& exported) noexcept {
         c.ui_control_info_size = sizeof(CawUiControlInfo);
         c.ui_controls = e->uiControls.empty() ? nullptr : e->uiControls.data();
         c.custom_ui_id = e->text(d.customUiId);
+        c.domains = d.domains;
+        c.capabilities = d.capabilities;
+        c.cpu_class = static_cast<uint32_t>(d.cpuClass);
+        c.reserved = 0;
 
         CawComponentV3& t = e->table;
         t.struct_size = sizeof(CawComponentV3);

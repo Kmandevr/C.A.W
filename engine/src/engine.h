@@ -10,8 +10,10 @@
 #include <string>
 #include <vector>
 
+#include "audio_input.h"
 #include "component_chain.h"
 #include "midi_device.h"
+#include "modulation_links.h"
 #include "execution.h"
 #include "meters.h"
 #include "module_registry.h"
@@ -56,6 +58,8 @@ public:
     Engine& operator=(const Engine&) = delete;
 
     double sampleRate() const { return sr_; }
+    // Audio input (caw.h API 18): monitoring, recording and the latency ping.
+    LiveAudio& liveAudio() noexcept { return *audioIn_; }
     const EngineResourceBudget& resourceBudget() const noexcept { return resourceBudget_; }
     // Layer slots the engine holds: kInitialLayerCapacity at first, growing (never shrinking) when
     // a project needs more. The Builder's audition is the slot after them, so auditionSlot() ==
@@ -91,6 +95,14 @@ public:
     // empty layer id: the master chain; kInstrumentIndex: the layer's instrument). Ramps over the parameter's smoothing. False if there is no
     // such component or parameter. A later project update sets the values it names again.
     bool setComponentParam(const std::string& layerId, uint32_t index, const std::string& param, double value);
+    // Project modulation (#161, modulation_links.h; API 19): a running modulator's knob or bypass, a link's amount
+    // while it plays, and what the audio thread last published (a modulator's outputs, 0..1; a link's target's summed
+    // offset in normalized travel). The readers never wait: 0 (outputs) or false while a project update runs.
+    bool setModulatorParam(const std::string& modulatorId, const std::string& param, double value);
+    bool setModulatorBypass(const std::string& modulatorId, bool bypass);
+    bool setModulationAmount(uint32_t linkId, double amount);
+    int32_t modulatorOutputs(const std::string& modulatorId, float* out, int32_t max);
+    bool modulationOffset(uint32_t linkId, float& out);
     // Bypasses (or brings back) a playing native component, crossfaded. False if there is none.
     bool setComponentBypass(const std::string& layerId, uint32_t index, bool bypass);
     // {"ok":true,"components":[{"index","ok","version","state"(base64)}]} for a layer's chain (empty
@@ -200,6 +212,10 @@ public:
 private:
     // First, so it outlives every component chain (built-ins keep a pointer to it).
     std::atomic<int> quality_{1};
+    // The device input (monitoring, recording, the latency ping); audio tracks keep a pointer to it.
+    std::unique_ptr<LiveAudio> audioIn_;
+    std::atomic<bool> monitorWanted_{false};  // some audio track monitors its input (control thread sets it)
+    void wakeMonitors() noexcept;
     struct Slot;
     struct Cmd;
     struct Retired;
@@ -366,6 +382,9 @@ private:
     std::atomic<int> masterScopePos_{0};
     std::unique_ptr<LoudnessMeter> loudness_;  // the master's (about 100 KB: its gating histogram)
     CorrelationMeter masterCorrelation_;
+    // Project modulation (#161): its plan comes from the control thread, the audio thread runs it each chunk.
+    std::unique_ptr<ModulationHost> modulation_ = std::make_unique<ModulationHost>();
+    uint64_t modPlays_ = 0;  // audio thread: Plays handled, so the modulators restart at each (not at a touch release)
 
     // ---- control-thread state ----
     std::mutex ctl_;

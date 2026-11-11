@@ -514,6 +514,21 @@ const cppBuiltins = <CppBuiltin>[
       'gain and pan per band.',
       ['bands', 'mix', 'output']),
   // fx-racks end
+  // modulators begin (#161, engine/src/builtin_modulators.cpp): go in a track's Modulators lane; outputs route to any knob
+  CppBuiltin('org.caw.mod.lfo', 'LFO', false,
+      'Eight shapes (Custom: 16 drawn points p1..p16), Hz or synced, Free, Retrigger on notes or locked to the song.',
+      ['shape', 'rate', 'sync', 'phase', 'mode']),
+  CppBuiltin('org.caw.mod.envelope', 'Envelope', false, 'An ADSR from the notes of the track it hears.',
+      ['attack', 'decay', 'sustain', 'release', 'mode']),
+  CppBuiltin('org.caw.mod.follower', 'Envelope follower', false, 'The level of any track or bus.',
+      ['attack', 'release', 'gain']),
+  CppBuiltin('org.caw.mod.steps', 'Step sequencer', false, 'Up to 16 steps (s1..s16) on the song\'s grid, with glide.',
+      ['steps', 'sync', 'rate', 'glide']),
+  CppBuiltin('org.caw.mod.random', 'Random', false, 'Sample & hold, smoothed, seeded.', ['rate', 'sync', 'smooth', 'seed']),
+  CppBuiltin('org.caw.mod.macros', 'Macros', false, 'Eight knobs (macro1..macro8), each its own output.', ['macro1']),
+  CppBuiltin('org.caw.mod.midi', 'MIDI to CV', false, 'Pitch, velocity, gate and pressure of the notes it hears.',
+      ['low', 'high', 'glide', 'priority']),
+  // modulators end
 ];
 
 /// One of C.A.W's own text formats, for the Library's last groups.

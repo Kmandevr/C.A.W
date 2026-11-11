@@ -43,6 +43,10 @@ struct Audio {
     bool fallback = false;
     std::string fallbackReason;
     std::string deviceId;        // the backend's id of the device that opened ("" for the default)
+    // The input (API 18): open when the device runs duplex; why not when it was asked for and did not open.
+    bool input = false;
+    ma_uint32 inputChannels = 0;
+    std::string inputDeviceId, inputError;
     float l[kChunk], r[kChunk];
 };
 
@@ -159,14 +163,19 @@ void readAAudioModes(Audio* a) {
 void readAAudioModes(Audio*) {}
 #endif
 
-void callback(ma_device* dev, void* output, const void*, ma_uint32 frames) {
+void callback(ma_device* dev, void* output, const void* input, ma_uint32 frames) {
     auto* a = static_cast<Audio*>(dev->pUserData);
     const auto start = std::chrono::steady_clock::now();
     auto* out = static_cast<float*>(output);
     ma_uint32 done = 0;
+    caw::LiveAudio& live = a->owner->engine->liveAudio();
+    const auto* in = static_cast<const float*>(input);
+    const int ch = a->input && in ? static_cast<int>(a->inputChannels) : 0;
     while (done < frames) {
         const int n = static_cast<int>(frames - done < kChunk ? frames - done : kChunk);
+        live.beginCallback(ch ? in + static_cast<size_t>(done) * ch : nullptr, ch, n);  // monitoring and recording
         a->owner->engine->process(a->l, a->r, n);
+        live.afterCallback(a->l, a->r, n);  // the latency ping
         for (int i = 0; i < n; ++i) {
             out[(done + i) * 2] = a->l[i];
             out[(done + i) * 2 + 1] = a->r[i];
@@ -189,6 +198,7 @@ void stopLocked(CawEngine* e) {
     auto* a = static_cast<Audio*>(e->audio);
     ma_device_uninit(&a->device);  // the callback has stopped once this returns
     ma_context_uninit(&a->context);
+    e->engine->liveAudio().setDeviceChannels(0);
     delete a;
     e->audio = nullptr;
     e->engine->resetTestTone();  // a tone cut off here would otherwise say it sounds until the device reopens
@@ -198,8 +208,17 @@ void stopLocked(CawEngine* e) {
 // Opens and starts the device on [a]'s context: [id] (null: the default), [frames] a callback (0: the device's
 // own), exclusive mode when asked and the backend takes it (shared if refused). MA_SUCCESS or why not.
 ma_result openDevice(Audio* a, const CawEngine* e, const ma_device_id* id, ma_uint32 frames, bool exclusive,
-                     std::string& why) {
-    ma_device_config cfg = ma_device_config_init(ma_device_type_playback);
+                     std::string& why, const ma_device_id* inputId = nullptr, bool duplex = false) {
+    ma_device_config cfg = ma_device_config_init(duplex ? ma_device_type_duplex : ma_device_type_playback);
+    a->input = duplex;
+    if (duplex) {
+        // Input and output in one callback (miniaudio duplex), so monitoring adds no buffer of its own; the input
+        // is always shared (exclusive applies to playback).
+        cfg.capture.format = ma_format_f32;
+        cfg.capture.channels = static_cast<ma_uint32>(e->inputChannels);
+        cfg.capture.pDeviceID = inputId;
+        cfg.capture.shareMode = ma_share_mode_shared;
+    }
     cfg.playback.format = ma_format_f32;
     cfg.playback.channels = 2;
     cfg.playback.pDeviceID = id;
@@ -234,6 +253,16 @@ ma_result openDevice(Audio* a, const CawEngine* e, const ma_device_id* id, ma_ui
         return r;
     }
     readAAudioModes(a);
+    if (duplex) {
+        a->inputChannels = a->device.capture.channels;
+        e->engine->liveAudio().setDeviceChannels(static_cast<int>(a->inputChannels));
+        // [Assumption] the round trip is about both sides' buffers; a ping measures it (caw_latency_ping_start).
+        const ma_uint32 in = a->device.capture.internalPeriodSizeInFrames * std::max<ma_uint32>(1, a->device.capture.internalPeriods);
+        const ma_uint32 out = a->device.playback.internalPeriodSizeInFrames * std::max<ma_uint32>(1, a->device.playback.internalPeriods);
+        e->engine->liveAudio().setDeviceLatency(static_cast<int64_t>(in) + out);
+    } else {
+        e->engine->liveAudio().setDeviceChannels(0);
+    }
     e->engine->resetTestTone();  // a request made while closed is stale (the callback is not running yet)
     r = ma_device_start(&a->device);
     if (r != MA_SUCCESS) {
@@ -278,10 +307,41 @@ int32_t startLocked(CawEngine* e, char* error, int32_t error_len) {
             }
         }
     }
+    // The capture device the same way (AAudio: the default input, which Android routes).
+    ma_device_id chosenInput;
+    bool inputFound = false;
+    if (e->inputEnabled && (!e->inputId.empty() || !e->inputName.empty()) && a->context.backend != ma_backend_aaudio) {
+        ma_device_info* capture = nullptr;
+        ma_uint32 count = 0;
+        if (ma_context_get_devices(&a->context, nullptr, nullptr, &capture, &count) == MA_SUCCESS) {
+            for (ma_uint32 i = 0; i < count && !inputFound && !e->inputId.empty(); ++i)
+                if (e->inputId == deviceIdText(a->context.backend, capture[i].id)) {
+                    chosenInput = capture[i].id;
+                    inputFound = true;
+                }
+            for (ma_uint32 i = 0; i < count && !inputFound && !e->inputName.empty(); ++i)
+                if (e->inputName == capture[i].name) {
+                    chosenInput = capture[i].id;
+                    inputFound = true;
+                }
+        }
+    }
     const ma_uint32 frames = wantedFrames(e);
     const bool exclusive = (e->audioFlags & CAW_AUDIO_EXCLUSIVE) != 0;
     std::string why;
-    r = openDevice(a, e, found ? &chosen : nullptr, frames, exclusive, why);
+    if (e->inputEnabled) {
+        r = openDevice(a, e, found ? &chosen : nullptr, frames, exclusive, why, inputFound ? &chosenInput : nullptr, true);
+        if (r == MA_SUCCESS) {
+            if (inputFound) a->inputDeviceId = deviceIdText(a->context.backend, chosenInput);
+        } else {
+            // No input (no permission, no microphone, a busy device): playback alone, and the status says why.
+            a->inputError = why;
+            why.clear();
+            r = openDevice(a, e, found ? &chosen : nullptr, frames, exclusive, why);
+        }
+    } else {
+        r = openDevice(a, e, found ? &chosen : nullptr, frames, exclusive, why);
+    }
     if (r != MA_SUCCESS && (found || frames > 0 || exclusive)) {
         // The choice did not open (the interface is busy or refuses the size): the system default, shared, at its
         // own size, so Play is never silent; the status says so (fallback) and why.
@@ -313,6 +373,23 @@ int32_t reopenLocked(CawEngine* e) {
     char error[256];
     if (startLocked(e, error, sizeof error) != 0) return 1;
     return static_cast<const Audio*>(e->audio)->fallback ? 2 : 0;
+}
+
+std::string inputStatus(const CawEngine* e, const Audio* a) {
+    const bool running = a && a->input;
+    std::string out = std::string("{\"enabled\":") + (e->inputEnabled ? "true" : "false") +
+                      ",\"running\":" + (running ? "true" : "false") +
+                      ",\"requested_device\":" + quoted(e->inputName.c_str()) +
+                      ",\"requested_device_id\":" + quoted(e->inputId.c_str()) +
+                      ",\"requested_channels\":" + std::to_string(e->inputChannels);
+    if (running) {
+        const auto& c = a->device.capture;
+        out += ",\"device\":" + quoted(c.name) + ",\"device_id\":" + quoted(a->inputDeviceId.c_str()) +
+               ",\"channels\":" + std::to_string(a->inputChannels) + ",\"sample_rate\":" + std::to_string(c.internalSampleRate) +
+               ",\"period_frames\":" + std::to_string(c.internalPeriodSizeInFrames) +
+               ",\"latency_frames\":" + std::to_string(e->engine->liveAudio().latency());
+    }
+    return out + ",\"error\":" + quoted(a ? a->inputError.c_str() : "") + "}";
 }
 
 }  // namespace
@@ -406,6 +483,56 @@ int32_t caw_audio_configure(CawEngine* e, const char* device_id, const char* dev
     return reopenLocked(e);
 }
 
+char* caw_audio_input_devices(void) {
+    ma_context context;
+    if (ma_context_init(nullptr, 0, nullptr, &context) != MA_SUCCESS)
+        return dup("{\"backend\":\"none\",\"exclusive\":false,\"devices\":[]}");
+    std::string out = "{\"backend\":" + quoted(ma_get_backend_name(context.backend)) + ",\"exclusive\":false,\"devices\":[";
+    ma_device_info* capture = nullptr;
+    ma_uint32 count = 0;
+    if (ma_context_get_devices(&context, nullptr, nullptr, &capture, &count) == MA_SUCCESS) {
+        for (ma_uint32 i = 0; i < count; ++i) {
+            ma_uint32 channels = 0;
+            std::vector<ma_uint32> rates;
+            ma_device_info info;
+            if (ma_context_get_device_info(&context, ma_device_type_capture, &capture[i].id, &info) == MA_SUCCESS)
+                for (ma_uint32 f = 0; f < info.nativeDataFormatCount; ++f) {
+                    channels = std::max(channels, info.nativeDataFormats[f].channels);
+                    const ma_uint32 rate = info.nativeDataFormats[f].sampleRate;
+                    if (std::find(rates.begin(), rates.end(), rate) == rates.end()) rates.push_back(rate);
+                }
+            std::sort(rates.begin(), rates.end());
+            std::string list;
+            for (const ma_uint32 v : rates) list += (list.empty() ? "" : ",") + std::to_string(v);
+            out += std::string(i ? "," : "") + "{\"name\":" + quoted(capture[i].name) +
+                   ",\"id\":" + quoted(deviceIdText(context.backend, capture[i].id).c_str()) +
+                   ",\"default\":" + (capture[i].isDefault ? "true" : "false") + ",\"channels\":" + std::to_string(channels) +
+                   ",\"rates\":[" + list + "],\"exclusive_rates\":[]}";
+        }
+    }
+    ma_context_uninit(&context);
+    return dup(out + "]}");
+}
+
+int32_t caw_audio_configure_input(CawEngine* e, int32_t enabled, const char* device_id, const char* device_name,
+                                  int32_t channels) {
+    if (!e) return 1;
+    std::lock_guard<std::mutex> lock(gDeviceLock);
+    const bool on = enabled != 0;
+    std::string id = device_id ? std::string(device_id).substr(0, 511) : std::string();
+    std::string name = device_name ? std::string(device_name).substr(0, MA_MAX_DEVICE_NAME_LENGTH) : std::string();
+    const int ch = channels <= 0 ? 2 : (channels > 32 ? 32 : channels);
+    if (on == e->inputEnabled && id == e->inputId && name == e->inputName && ch == e->inputChannels) {
+        const auto* a = static_cast<const Audio*>(e->audio);
+        return a && a->fallback ? 2 : 0;
+    }
+    e->inputEnabled = on;
+    e->inputId = std::move(id);
+    e->inputName = std::move(name);
+    e->inputChannels = ch;
+    return reopenLocked(e);
+}
+
 char* caw_audio_status(CawEngine* e) {
     if (!e) return dup("{\"running\":false}");
     std::lock_guard<std::mutex> lock(gDeviceLock);
@@ -414,7 +541,7 @@ char* caw_audio_status(CawEngine* e) {
                                 ",\"requested_frames\":" + std::to_string(e->periodFrames) +
                                 ",\"exclusive_requested\":" + ((e->audioFlags & CAW_AUDIO_EXCLUSIVE) ? "true" : "false");
     const auto* a = static_cast<const Audio*>(e->audio);
-    if (!a) return dup("{\"running\":false" + request + "}");
+    if (!a) return dup("{\"running\":false" + request + ",\"input\":" + inputStatus(e, nullptr) + "}");
     const auto& p = a->device.playback;
     return dup("{\"running\":true,\"backend\":" + quoted(ma_get_backend_name(a->context.backend)) +
                ",\"device\":" + quoted(p.name) + ",\"device_id\":" + quoted(a->deviceId.c_str()) +
@@ -425,7 +552,7 @@ char* caw_audio_status(CawEngine* e) {
                ",\"low_latency\":" + (a->lowLatency ? "true" : "false") +
                ",\"modes_read_back\":" + (a->modesReadBack ? "true" : "false") +
                ",\"fallback\":" + (a->fallback ? "true" : "false") +
-               ",\"fallback_reason\":" + quoted(a->fallbackReason.c_str()) + request + "}");
+               ",\"fallback_reason\":" + quoted(a->fallbackReason.c_str()) + request + ",\"input\":" + inputStatus(e, a) + "}");
 }
 
 }  // extern "C"

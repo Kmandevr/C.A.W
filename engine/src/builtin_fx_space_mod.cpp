@@ -475,7 +475,7 @@ const ParamTable& tremoloParams() {
     return t;
 }
 const ModuleDescriptor& tremoloDescriptor() {
-    static const ModuleDescriptor d = effectDescriptor("org.caw.tremolo", "Tremolo", tremoloParams(), 0, 0);
+    static const ModuleDescriptor d = withCpu(effectDescriptor("org.caw.tremolo", "Tremolo", tremoloParams(), 0, 0), CpuClass::Light);
     return d;
 }
 
@@ -496,7 +496,7 @@ const ParamTable& autopanParams() {
     return t;
 }
 const ModuleDescriptor& autopanDescriptor() {
-    static const ModuleDescriptor d = effectDescriptor("org.caw.autopan", "Auto-pan", autopanParams(), 0, 0);
+    static const ModuleDescriptor d = withCpu(effectDescriptor("org.caw.autopan", "Auto-pan", autopanParams(), 0, 0), CpuClass::Light);
     return d;
 }
 

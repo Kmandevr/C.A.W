@@ -122,7 +122,7 @@ const Info* element(const void* base, uint32_t stride, uint32_t index) noexcept 
 // Copies a component's C descriptor into engine-owned storage. False (with a message) when its
 // sizes or pointers are unusable; field values are left to validateModuleDescriptor.
 bool copyDescriptor(const CawComponentDescriptor& c, LoadedComponent& out, std::string& error) {
-    if (c.struct_size < sizeof(CawComponentDescriptor) || c.abi_version != CAW_COMPONENT_ABI_VERSION) {
+    if (c.struct_size < CAW_COMPONENT_DESCRIPTOR_SIZE_3_0 || c.abi_version != CAW_COMPONENT_ABI_VERSION) {
         error = "The component descriptor is from another C interface version.";
         return false;
     }
@@ -213,6 +213,13 @@ bool copyDescriptor(const CawComponentDescriptor& c, LoadedComponent& out, std::
     d.latencyFrames = c.latency_frames;
     d.tailFrames = c.tail_frames;
     d.maxStateBytes = c.max_state_bytes;
+    // 3.1 (#120): read only when the component's struct has them; an older build runs whole-only. Out-of-range
+    // values are kept (validation refuses them) rather than truncated into valid ones.
+    if (c.struct_size >= offsetof(CawComponentDescriptor, cpu_class) + sizeof(c.cpu_class)) {
+        d.domains = c.domains == 0 ? kDomainWhole : c.domains;
+        d.capabilities = c.capabilities;
+        d.cpuClass = enumFrom<CpuClass>(c.cpu_class);
+    }
     if (!textOk) {
         error = "A component string is longer than the host accepts.";
         return false;
@@ -344,6 +351,8 @@ public:
         c.event_in_count = block.eventInCount;
         c.event_out = eventOut_.data();
         c.event_out_count = block.eventOutCount;
+        // The voice bus has the same layout on both sides (caw/module.hpp); a 3.0 component never reads it.
+        c.voices = reinterpret_cast<const CawVoiceBus*>(block.voices);
         bool ok = component_->table->process(instance_, &c) == 1;
         // The EventOutput rule (caw/module.hpp): at most capacity, frames in order and inside the
         // block; anything else fails the block (and reports no events).
@@ -461,7 +470,7 @@ ModuleLoadResult ModuleRegistry::loadSharedLibrary(
             if (!candidate) break;
             listsAny = true;
             if (candidate->struct_size < sizeof(CawComponentV3) || candidate->abi_version != CAW_COMPONENT_ABI_VERSION ||
-                !candidate->descriptor || candidate->descriptor->struct_size < sizeof(CawComponentDescriptor) ||
+                !candidate->descriptor || candidate->descriptor->struct_size < CAW_COMPONENT_DESCRIPTOR_SIZE_3_0 ||
                 candidate->descriptor->abi_version != CAW_COMPONENT_ABI_VERSION) {
                 skippedIncompatible = true;
                 continue;
@@ -495,7 +504,7 @@ ModuleLoadResult ModuleRegistry::loadSharedLibrary(
         if (!copyDescriptor(*table->descriptor, *component, copyError))
             return {false,
                     table->descriptor->abi_version != CAW_COMPONENT_ABI_VERSION ||
-                            table->descriptor->struct_size < sizeof(CawComponentDescriptor)
+                            table->descriptor->struct_size < CAW_COMPONENT_DESCRIPTOR_SIZE_3_0
                         ? ModuleLoadError::IncompatibleAbi
                         : ModuleLoadError::InvalidDescriptor,
                     std::string(expectedId), std::move(copyError)};
@@ -594,6 +603,29 @@ const char* roleName(ModuleRole role) noexcept {
     }
     return "unspecified";
 }
+const char* cpuClassName(CpuClass c) noexcept {
+    switch (c) {
+        case CpuClass::Unspecified: return "unspecified";
+        case CpuClass::Light: return "light";
+        case CpuClass::Medium: return "medium";
+        case CpuClass::Heavy: return "heavy";
+    }
+    return "unspecified";
+}
+// Bit names in bit order, as JSON strings.
+std::string bitNames(uint32_t bits, const char* const* names, uint32_t count) {
+    std::string j = "[";
+    bool first = true;
+    for (uint32_t b = 0; b < count; ++b)
+        if (bits & (1u << b)) {
+            j += std::string(first ? "\"" : ",\"") + names[b] + "\"";
+            first = false;
+        }
+    return j + "]";
+}
+constexpr const char* kDomainNames[] = {"whole", "per_channel", "per_voice", "per_note"};
+constexpr const char* kCapabilityNames[] = {"notes_in", "midi_in", "events_out", "sample_assets", "needs_transport",
+                                            "export_clap"};
 const char* uiKindName(UiControlKind kind) noexcept {
     switch (kind) {
         case UiControlKind::Slider: return "slider";
@@ -644,7 +676,9 @@ std::string moduleDescriptorJson(const ModuleDescriptor& d) {
                     "\",\"latency_frames\":" + std::to_string(d.latencyFrames) +
                     ",\"tail_frames\":" + (d.tailFrames == kInfiniteTail ? std::string("null") : std::to_string(d.tailFrames)) +
                     ",\"max_state_bytes\":" + std::to_string(d.maxStateBytes) + ",\"custom_ui_id\":" + quoted(d.customUiId) +
-                    ",\"ports\":[";
+                    ",\"domains\":" + bitNames(d.domains, kDomainNames, 4) +
+                    ",\"capabilities\":" + bitNames(d.capabilities, kCapabilityNames, 6) + ",\"cpu_class\":\"" +
+                    cpuClassName(d.cpuClass) + "\",\"ports\":[";
     for (uint32_t i = 0; i < d.portCount; ++i) {
         const PortDescriptor& p = d.ports[i];
         j += std::string(i ? "," : "") + "{\"id\":" + quoted(p.id) + ",\"type\":\"" + portTypeName(p.type) +
@@ -701,6 +735,80 @@ std::unique_ptr<ModuleProcessor> ModuleRegistry::create(std::string_view id) con
         return std::unique_ptr<ModuleProcessor>(processor);
     }
     return {};
+}
+
+namespace {
+// Two mono instances as one stereo processor (createDualMono).
+class DualMonoProcessor final : public ModuleProcessor {
+public:
+    DualMonoProcessor(std::unique_ptr<ModuleProcessor> left, std::unique_ptr<ModuleProcessor> right)
+        : left_(std::move(left)), right_(std::move(right)) {
+        const ModuleDescriptor& mono = left_->descriptor();
+        descriptor_ = mono;
+        for (uint32_t p = 0; p < 2; ++p) {
+            ports_[p] = mono.ports[p];
+            ports_[p].layout = ChannelLayout::Stereo;
+        }
+        descriptor_.ports = ports_;
+        descriptor_.domains = kDomainWhole;
+    }
+    const ModuleDescriptor& descriptor() const noexcept override { return descriptor_; }
+    bool activate(double sampleRate, uint32_t maxFrames) noexcept override {
+        return left_->activate(sampleRate, maxFrames) && right_->activate(sampleRate, maxFrames);
+    }
+    void deactivate() noexcept override {
+        left_->deactivate();
+        right_->deactivate();
+    }
+    void reset() noexcept override {
+        left_->reset();
+        right_->reset();
+    }
+    bool quiet() const noexcept override { return left_->quiet() && right_->quiet(); }
+    uint32_t readDisplay(float* out, uint32_t max) const noexcept override { return left_->readDisplay(out, max); }
+    bool process(const AudioProcessBlock& block) noexcept override {
+        if (!audioProcessBlockValid(block) || block.input.channelCount != 2 || block.output.channelCount != 2) return false;
+        bool ok = true;
+        for (uint32_t c = 0; c < 2; ++c) {
+            AudioProcessBlock one = block;
+            one.input = {block.input.channels + c, 1, block.input.frames};
+            one.output = {block.output.channels + c, 1, block.output.frames};
+            ok = (c == 0 ? left_ : right_)->process(one) && ok;
+        }
+        return ok;
+    }
+    uint32_t stateVersion() const noexcept override { return left_->stateVersion(); }
+    bool saveState(uint8_t* destination, uint32_t capacity, uint32_t& written) const noexcept override {
+        return left_->saveState(destination, capacity, written);
+    }
+    bool loadState(const uint8_t* source, uint32_t size, uint32_t version) noexcept override {
+        const bool a = left_->loadState(source, size, version);
+        const bool b = right_->loadState(source, size, version);
+        return a && b;
+    }
+
+private:
+    std::unique_ptr<ModuleProcessor> left_, right_;
+    PortDescriptor ports_[2];
+    ModuleDescriptor descriptor_;
+};
+}  // namespace
+
+std::unique_ptr<ModuleProcessor> ModuleRegistry::createDualMono(std::string_view id) const noexcept {
+    const ModuleDescriptor* d = find(id);
+    // validateModuleDescriptor's PerChannel rule: one mono audio input and one mono audio output. Only those two
+    // ports, in this order, so the stereo copy keeps every port.
+    if (!d || !(d->domains & kDomainPerChannel) || d->portCount != 2 || d->ports[0].type != PortType::Audio ||
+        !d->ports[0].input || d->ports[1].type != PortType::Audio || d->ports[1].input ||
+        d->ports[0].layout != ChannelLayout::Mono || d->ports[1].layout != ChannelLayout::Mono)
+        return {};
+    std::unique_ptr<ModuleProcessor> left = create(id), right = create(id);
+    if (!left || !right || left->usesProcessPorts()) return {};
+    try {
+        return std::make_unique<DualMonoProcessor>(std::move(left), std::move(right));
+    } catch (...) {
+        return {};
+    }
 }
 
 }  // namespace caw

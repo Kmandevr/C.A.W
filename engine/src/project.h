@@ -2,6 +2,7 @@
 #pragma once
 
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -11,6 +12,8 @@
 #include "dependency.h"
 
 namespace caw {
+
+struct AudioTrackSpec;  // audio_clips.h
 
 // A project module: a pattern (note clip, `kind: pattern`) by id; its source is the pattern text.
 struct ModuleSpec {
@@ -41,6 +44,8 @@ struct ComponentSpec {
     KeySpec key;
     // Audio for the component's sample slots (org.caw.drums: one per pad), decoded at build (component_samples.h).
     std::vector<SampleRefSpec> samples;
+    // org.caw.audio-track only: the layer's audio clips and input (audio_clips.h), set from "audio_clips"/"input".
+    std::shared_ptr<const AudioTrackSpec> audioTrack;
 };
 
 struct ClipSpec {
@@ -96,6 +101,36 @@ struct LayerSpec {
     bool mute = false, solo = false;
 };
 
+// Project modulation (#161; docs/engine.md, Modulation). A modulator is a component with modulation outputs (one
+// float per frame, 0..1) and at most one event input (notes) and one audio input: an LFO, an envelope, a follower, a
+// step sequencer, random, macros, MIDI to CV, or a user's C++ modulator. It hears the notes or audio of `input`.
+struct ModulatorSpec {
+    std::string id;     // project-unique; links name it
+    std::string name;
+    std::string layer;  // where the app shows it (a track, a bus; "" the project)
+    std::string input;  // the layer whose notes or audio it hears ("" none)
+    bool hearsNotes = true, hearsAudio = false;  // "hears": "notes" (default), "audio" or "both"
+    bool inputPost = false;  // audio after the layer's volume and pan (default: after its effects, before the fader)
+    ComponentSpec component;
+};
+// What a link moves: a parameter of a layer's component ("component": `layer` "" is the master chain, `index` the
+// component), of its instrument ("instrument"), of another modulator ("modulator": `layer` is its id), or a layer's
+// "volume", "pan" or "send" level (`index` the send).
+struct ModTargetSpec {
+    std::string type, layer, param;
+    int index = -1;
+};
+// One link: the same route record as a device's `modN_*` slots (mod_route.h), at project level.
+struct ModLinkSpec {
+    uint32_t id = 0;     // stable identity (the app's); links into one target add up in id order
+    std::string source;  // a modulator id
+    uint32_t output = 0;  // which of its modulation outputs
+    ModTargetSpec target;
+    double amount = 0.0;  // -1..1 of the target's normalized travel
+    bool bipolar = false;
+    double curve = 0.0;   // -1..1, 0 straight (modCurve)
+};
+
 // A song position is a 32-bit step count, so a song holds whole bars up to 2^31 - 1 steps (F7.2: no other
 // length limit). beatsPerBar is 1..16, so a bar is 4..64 steps.
 constexpr int maxLoopBars(int beatsPerBar) noexcept { return 2147483647 / (beatsPerBar * 4); }
@@ -117,6 +152,8 @@ struct ProjectSpec {
     std::vector<ComponentSpec> masterComponents;  // explicitly loaded native stereo effects, in master-chain order
     std::vector<LayerSpec> layers;
     std::vector<ProjectAutomationLaneSpec> automation;
+    std::vector<ModulatorSpec> modulators;  // #161: project modulation (modulation_links.h)
+    std::vector<ModLinkSpec> modulation;
     // The Builder's preview, if any: a C++ instrument (with its values) and native effects, as a track plays them
     // ("audition": {"instrument": ..., "components": [...]}).
     bool hasAuditionInstrument = false;

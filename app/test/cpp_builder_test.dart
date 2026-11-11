@@ -166,7 +166,9 @@ COMPLETION: process : [#bool#]process(<#const AudioProcessBlock &block#>)
         expect(src, contains('"$k"'), reason: '${b.id} has no knob $k');
       }
     }
-    final ids = RegExp(r'"(org\.caw\.[a-z.]+)"').allMatches(src).map((m) => m.group(1)).toSet();
+    // Internal components (ModuleRegistry::addInternal) play by id but are never listed, so the Library leaves them out.
+    const internal = {'org.caw.downmix', 'org.caw.test.osc'};
+    final ids = RegExp(r'"(org\.caw\.[a-z.]+)"').allMatches(src).map((m) => m.group(1)).toSet().difference(internal);
     expect(ids, cppBuiltins.map((b) => b.id).toSet(), reason: 'a built-in is missing from the Library');
   });
 

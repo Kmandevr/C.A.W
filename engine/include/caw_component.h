@@ -1,4 +1,4 @@
-/* C.A.W component interface v3: the stable C boundary between the host and a compiled component.
+/* C.A.W component interface v3 (revision 3.1): the stable C boundary between the host and a compiled component.
  *
  * Plain C: no C++ types, exceptions or STL cross it, so a component built with one compiler or C++
  * standard library loads into a host built with another. Component authors normally write C++
@@ -11,6 +11,10 @@
  * - Arrays of ports, parameters and UI controls are read with the strides the descriptor gives
  *   (port_info_size, ...), each at least the sizeof() in this header; extra trailing fields are
  *   ignored.
+ * - Fields appended to a struct under these rules raise CAW_COMPONENT_ABI_REVISION (3.0, then 3.1), not
+ *   CAW_COMPONENT_ABI_VERSION: the entry symbol and every older component keep working. Each appended field
+ *   says the revision it arrived in; a reader reads it only when struct_size covers it, and otherwise uses the
+ *   default it documents.
  * - New capabilities arrive as extensions: CawHost.get_extension (host to component) and
  *   CawComponentV3.get_extension (component to host), each looked up by a string id. An unknown id
  *   returns NULL.
@@ -32,6 +36,7 @@
 #ifndef CAW_COMPONENT_H
 #define CAW_COMPONENT_H
 
+#include <stddef.h>
 #include <stdint.h>
 
 #ifdef __cplusplus
@@ -40,6 +45,9 @@ extern "C" {
 
 #define CAW_COMPONENT_ABI_VERSION 3u
 #define CAW_COMPONENT_ENTRY_SYMBOL "caw_get_component_v3"
+/* 0: the v3 structs as first shipped. 1 (3.1, 2026-11-11, #120 and #127): CawComponentDescriptor.domains,
+   capabilities and cpu_class; CawProcessBlock.voices (the voice bus, CawVoiceBus). */
+#define CAW_COMPONENT_ABI_REVISION 1u
 
 /* Numeric values match the C++ enums in caw/module.hpp (checked there with static_assert). */
 enum {
@@ -83,6 +91,26 @@ enum { CAW_EVENT_NOTE = 0, CAW_EVENT_MIDI = 1 };
 #define CAW_PARAMETER_MIDI_MAPPABLE 4u
 
 #define CAW_INFINITE_TAIL 0xFFFFFFFFu
+
+/* CawComponentDescriptor.domains (3.1, #120): where a host may run the component. CAW_DOMAIN_WHOLE is always set.
+   PER_CHANNEL: a mono-in, mono-out effect run once per channel (dual mono). PER_NOTE (and PER_VOICE, the same in
+   this host): an effect with one stereo input and one stereo output may run once per note; an instrument (no
+   audio input, one stereo output, an event input) reads the voice bus (CawProcessBlock.voices). 0, or a
+   descriptor older than 3.1, reads as CAW_DOMAIN_WHOLE. */
+#define CAW_DOMAIN_WHOLE 1u
+#define CAW_DOMAIN_PER_CHANNEL 2u
+#define CAW_DOMAIN_PER_VOICE 4u
+#define CAW_DOMAIN_PER_NOTE 8u
+/* CawComponentDescriptor.capabilities (3.1): what the component needs or offers. NOTES_IN and MIDI_IN need an
+   event input, EVENTS_OUT an event output. */
+#define CAW_CAPABILITY_NOTES_IN 1u
+#define CAW_CAPABILITY_MIDI_IN 2u
+#define CAW_CAPABILITY_EVENTS_OUT 4u
+#define CAW_CAPABILITY_SAMPLE_ASSETS 8u
+#define CAW_CAPABILITY_NEEDS_TRANSPORT 16u
+#define CAW_CAPABILITY_EXPORT_CLAP 32u
+/* CawComponentDescriptor.cpu_class (3.1): a rough cost hint. */
+enum { CAW_CPU_UNSPECIFIED = 0, CAW_CPU_LIGHT = 1, CAW_CPU_MEDIUM = 2, CAW_CPU_HEAVY = 3 };
 
 /* Strings are UTF-8, NUL-terminated, owned by the component and valid while its library is loaded.
  * NULL means empty. */
@@ -140,7 +168,15 @@ typedef struct CawComponentDescriptor {
     uint32_t ui_control_info_size; /* >= sizeof(CawUiControlInfo) */
     const CawUiControlInfo* ui_controls;
     const char* custom_ui_id;
+    /* 3.1 (#120). Read only when struct_size covers them; an older descriptor (CAW_COMPONENT_DESCRIPTOR_SIZE_3_0)
+       reads as domains CAW_DOMAIN_WHOLE, capabilities 0, cpu_class CAW_CPU_UNSPECIFIED. */
+    uint32_t domains;      /* CAW_DOMAIN_* bits */
+    uint32_t capabilities; /* CAW_CAPABILITY_* bits */
+    uint32_t cpu_class;    /* CAW_CPU_* */
+    uint32_t reserved;     /* 0 */
 } CawComponentDescriptor;
+/* The smallest descriptor a host accepts: the 3.0 struct, up to custom_ui_id. */
+#define CAW_COMPONENT_DESCRIPTOR_SIZE_3_0 ((uint32_t)offsetof(CawComponentDescriptor, domains))
 
 /* Process block. Every pointer is borrowed for this call only; never keep it. Lists are per port
  * type, each in descriptor order (the k-th audio input is the k-th input port of type audio). */
@@ -188,6 +224,42 @@ typedef struct CawTransport {
     uint32_t reserved;       /* 0 */
 } CawTransport;
 
+/* The voice bus (3.1, #127): per-note FX lanes an instrument that declares CAW_DOMAIN_PER_NOTE renders into.
+ * The host owns every lane and buffer; it sets each lane's note_id and flags (CAW_LANE_ASSIGNED, the out bits
+ * clear) before each process call. channels[c] holds at least the block's frames, frame 0 being the block's
+ * first frame.
+ * The instrument, for each stretch [offset, offset + frames) it renders (a control period, say):
+ * 1. clears that stretch of every ASSIGNED lane;
+ * 2. renders each voice whose note id matches an ASSIGNED lane into that lane (and sets CAW_LANE_WRITTEN on it)
+ *    instead of its mix; a voice with no lane goes to its mix as before;
+ * 3. calls run(host_data, offset, frames): the host processes the lanes' stretch in place (on the audio thread;
+ *    it never allocates, locks or blocks);
+ * 4. adds every ASSIGNED lane's stretch into its mix, in lane order, BEFORE its own shared stage (its effects,
+ *    its volume), so per-note FX sit between the voices and the instrument's shared sound.
+ * Every frame of the block is covered by exactly one run() call, in order, also while the instrument has no
+ * voice (a lane's FX tail). An instrument sets CAW_LANE_ENDED on a lane whose note no voice plays at the end of
+ * the block (the note finished, was stolen or never started); the host then lets the lane's FX ring out and
+ * frees it. A mono or legato voice renders into the lane of the note it plays now. A host that has no lanes for
+ * a block passes voices NULL, and the instrument renders exactly as it would without a bus. */
+#define CAW_LANE_ASSIGNED 1u /* host: the lane is in use for note_id */
+#define CAW_LANE_WRITTEN 2u  /* instrument: a voice rendered into the lane in this block */
+#define CAW_LANE_ENDED 4u    /* instrument: no voice plays note_id at the end of this block */
+typedef struct CawVoiceLane {
+    uint32_t struct_size;
+    uint32_t note_id;       /* the host note id (CawEvent.note_id) */
+    uint32_t flags;         /* CAW_LANE_* */
+    uint32_t channel_count; /* 2 */
+    float* channels[2];
+} CawVoiceLane;
+typedef struct CawVoiceBus {
+    uint32_t struct_size;
+    uint32_t lane_count;
+    uint32_t lane_stride; /* bytes from one lane to the next, >= sizeof(CawVoiceLane) */
+    CawVoiceLane* lanes;
+    void* host_data;
+    void (*run)(void* host_data, uint32_t offset, uint32_t frames);
+} CawVoiceBus;
+
 typedef struct CawProcessBlock {
     uint32_t struct_size;
     uint32_t frames;
@@ -212,6 +284,8 @@ typedef struct CawProcessBlock {
     uint32_t parameter_count;
     /* NULL when there is none (stopped, or a host without one). Read it only when struct_size covers it. */
     const CawTransport* transport;
+    /* 3.1 (#127): the voice bus, or NULL. Read it only when struct_size covers it. */
+    const CawVoiceBus* voices;
 } CawProcessBlock;
 
 typedef struct CawHost {

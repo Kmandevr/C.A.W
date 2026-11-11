@@ -112,6 +112,16 @@ ModuleDescriptor effectDescriptor(std::string_view id, std::string_view name, co
 ModuleDescriptor keyedEffectDescriptor(std::string_view id, std::string_view name, const ParamTable& params,
                                        uint32_t latencyFrames, uint32_t tailFrames, bool notes);
 
+// #120: effectDescriptor's domains (whole and per note) and cost hint (medium) changed for one effect.
+inline ModuleDescriptor withDomains(ModuleDescriptor d, uint32_t domains) {
+    d.domains = domains;
+    return d;
+}
+inline ModuleDescriptor withCpu(ModuleDescriptor d, CpuClass cpu) {
+    d.cpuClass = cpu;
+    return d;
+}
+
 // What every effect of the suite shares:
 // - a control grid: control() reads the knobs every 16 frames, counted across blocks, so any block size gives
 //   the same bits; run() does the per-sample work in between;
