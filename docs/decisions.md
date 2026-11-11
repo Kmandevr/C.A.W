@@ -25,6 +25,17 @@ updated: 2026-11-11
 - **Settings › Code editor** drops the rows that only served the .caw editor (completion chips, the Library button, compact controls); their stored values stay in `settings.json` until WP-D.
 - **Templates:** the C++ starters replace the .caw templates in Files (New from a starter…) and the track cards' Add track; the two pattern templates (acid line, chords) are bundled in Dart so the engine's `caw_templates` is no longer called.
 
+## 2026-11-11: Per-note FX host, sources, C API and app (#127 steps 4–7; choices to confirm)
+
+**Decision (Claude, from the architect's design; [architecture](architecture.md#the-per-note-fx-host-notefxhost-fact-steps-47-branch-note-fx-host-2026-11-11), [engine](engine.md#per-note-fx-host-127-steps-46)):**
+- **Overflow is a lane, not a side path:** the voice bus gains `CAW_LANE_REST` (note id 0), the lane every voice without its own slot renders into, so the overflow chain hears exactly the unassigned voices. An instrument built before the bit plays those voices dry; it is a 3.1 addition, not a new revision.
+- **B + 2 chains:** two spare slot chains let a stolen slot fade out for 10 ms while the new note starts on a fresh chain; with the spares busy the note goes to overflow. "Oldest released" is the released note that started first.
+- **Time in frames, not blocks:** a slot's chain starts on its note's frame and its tail runs max(declared tail, 128 frames), capped at 2 s, past the note's last sound, then fades; so playback at any buffer size and an export give the same bits. `quiet()` alone doesn't free a slot (it is learnt at block ends).
+- **Budget read at each note-on** (not at the next project update): a quality change applies to the next notes; slots are allocated for B.
+- **API 22**, leaving 20 and 21 to parallel branches (delete-caw); per-note components are addressed with a bit on the component index (`CAW_NOTE_COMPONENT`) rather than new setter functions; per-note components keep no saved state.
+- **Note sources as link sources** (`note.pitch` … `note.age`, target `noteComponent` only); pitch reads pitch / 127, age runs 0 to 1 over 2 s: first choices.
+- **To confirm (owner, in the APK):** (1) the look: the PER NOTE section above the track effects with a voice-budget chip and slot dots, violet per-note cards, and Run per note / Run on whole track in the card menus (or a per-card toggle only); (2) over budget, overflow to one shared chain (built, the default) or steal the oldest held note; (3) the default budget per phone (8; Eco 4, High 16) after a CPU measurement on the S22+; (4) the name and range of the age source (0–2 s).
+
 ## 2026-11-11: Per-note FX steps 1–3 and descriptor domains (#127, #120; choices to confirm)
 
 **Decision (Claude, from the architect's design; [architecture](architecture.md#per-note-processing-127-and-descriptor-domains-120)):**
@@ -34,9 +45,9 @@ updated: 2026-11-11
 - **Lanes are summed before the instrument's shared stage**, so turning per-note FX on does not change the instrument's own effects and volume, and with no bus the sound is bit-identical. The Flagship calls `run()` once per control period (16 frames); step 4's host must handle such short runs cheaply.
 - **ENDED means no voice plays the note at the block's end**, raised every such block (also for a lane assigned before its note starts), so the host never waits on a note the instrument dropped. Mono and legato lanes follow the note the voice plays now. A drum hit's room send stays dry.
 - **`org.caw.downmix` is new and internal:** `org.caw.utility`'s Mono mode is stereo in and out and cannot feed a mono port; the downmix is unlisted while track chains take stereo only. Dual mono is `ModuleRegistry::createDualMono`, an adapter, not a graph feature.
-- **The listing** adds `domains`, `capabilities` and `cpu_class` (snake_case like its other keys) to `caw_engine_components`; no new function, so the API number stays 17. Step 6's new functions take the next free number (20 at the time of writing: 18 and 19 are claimed by the audio-engine and modulator branches).
+- **The listing** adds `domains`, `capabilities` and `cpu_class` (snake_case like its other keys) to `caw_engine_components`; no new function, so the API number stays 17 (step 6 took 22).
 - **Cost classes are judged, not measured** ([Assumption] until the S22+ measurement).
-- **To confirm (owner):** (1) the look: a "Per note" section above "Track" in the FX stack, or a per-card "Run per note" toggle only; (2) over budget, overflow to one shared chain (the default) or steal the oldest note's slot; (3) the default voice budget per phone (8 for now; Eco 4, High 16) after the CPU measurement; (4) the name "domain" in the UI (a menu might say "Runs: whole track / per note").
+- **To confirm (owner):** the name "domain" in the UI (the app says "Run per note" / "Run on whole track"); the look and budget questions are in the steps 4–7 entry above.
 
 ## 2026-11-11: Modulators and routing anything to anywhere, #161 (choices to confirm)
 

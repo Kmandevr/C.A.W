@@ -528,7 +528,7 @@ std::string ModulationHost::update(const ModuleRegistry& registry, const Project
     std::shared_ptr<ModulationRuntime> rt;
     if (ctl_ && ctl_->rt && ctl_->rt->key == key) {
         rt = ctl_->rt;  // the same modulators: they keep running and take the new values
-        rt->chain->setValues(specs);
+        if (rt->chain) rt->chain->setValues(specs);  // none when the project has links but no modulators
     } else {
         rt = std::make_shared<ModulationRuntime>();
         rt->key = key;
