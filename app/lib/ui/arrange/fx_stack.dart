@@ -10,6 +10,7 @@ import '../../model/mixer_fx.dart';
 import '../../model/project.dart';
 import '../../model/routing_edit.dart';
 import '../../model/device_target.dart';
+import '../devices/modulators/modulator_devices.dart' show ModulatorsSection;
 import '../devices/device_editor.dart';
 import '../devices/device_inline.dart';
 import '../files/asset_picker.dart';
@@ -166,6 +167,8 @@ class _FxStackState extends State<FxStack> {
         onPressed: () => addEffectTo(context, s, layer),
         icon: const Icon(Icons.add, size: 18),
         label: const Text('FX'))),
+      // Project modulation (#161): this track's modulators, under its effects (the master's: the project's own).
+      ModulatorsSection(state: s, layer: layer),
     ]));
   }
 }

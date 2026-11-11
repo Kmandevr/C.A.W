@@ -2,7 +2,7 @@
 title: Native module SDK
 summary: C ABI host contract and C++ component SDK, validation, real-time rules, state and packaging.
 updated: 2026-11-11
-covers: [engine/include/caw_component.h, engine/include/caw/display.hpp, engine/include/caw/library/, engine/src/sample_pack.*, engine/plugin/clap/, engine/cmake/CAWClap.cmake, engine/plugin/vst3/, engine/cmake/CAWVst3.cmake, engine/include/caw/module.hpp, engine/include/caw/component.hpp, engine/include/caw/instrument.hpp, engine/CMakeLists.txt, engine/cmake/, examples/cpp/minimal/, examples/cpp/poly-synth/, scripts/caw-component-build.js, .github/workflows/cpp-components.yml, engine/src/module.*, engine/src/module_registry.*, engine/src/graph.*, engine/src/component_test.*, engine/src/analysis.*]
+covers: [engine/include/caw_component.h, engine/include/caw/display.hpp, engine/include/caw/modulator.hpp, examples/cpp/modulator/, engine/include/caw/library/, engine/src/sample_pack.*, engine/plugin/clap/, engine/cmake/CAWClap.cmake, engine/plugin/vst3/, engine/cmake/CAWVst3.cmake, engine/include/caw/module.hpp, engine/include/caw/component.hpp, engine/include/caw/instrument.hpp, engine/CMakeLists.txt, engine/cmake/, examples/cpp/minimal/, examples/cpp/poly-synth/, scripts/caw-component-build.js, .github/workflows/cpp-components.yml, engine/src/module.*, engine/src/module_registry.*, engine/src/graph.*, engine/src/component_test.*, engine/src/analysis.*]
 ---
 
 # Native module SDK v1
@@ -148,6 +148,10 @@ caw sample-pack --request pack.json --trust trusted --out pack --overwrite
 ```
 
 Each file is a fresh instance: a note on at the first frame, held for `--hold` seconds, a note off, and the release until it falls below -80 dB. So `reset()`/`activate` must leave no state from before, `tailFrames` should cover your release (a release longer than `--max` is cut, `tail_truncated`), and the same build gives the same bytes every time. Use `--step NAME=V1,V2` to render a parameter at several values (one SFZ per combination), and `effects` in a request file to bake an effect chain into the samples. The library is in-process code, so it loads only with `--trust trusted` (hosts pass `CAW_NATIVE_TRUST_TRUSTED` to `caw_sample_pack_render`); the request itself cannot grant trust. Loops are found at matching zero crossings in the held part, so they sound seamless only when the held sound repeats.
+
+## Writing a modulator
+
+A modulator (#161) is a component whose outputs are modulation ports (one float per frame, 0..1), with at most one event input (the notes of the track it hears) and one audio input (that track's sound). It goes in the project's modulators, not on a chain, and its outputs can move any knob, volume, pan or send ([engine](engine.md#modulation-project-modulators-and-links-161)). `caw/modulator.hpp` gives the ports (`caw::mod::output("out")`, `mod::notesInput()`, `mod::audioInput()`), a base class `caw::mod::Modulator` whose `render(const mod::Block&)` fills `block.outputs[k][0..frames)`, `mod::decode` for note, pressure, controller and bend messages, `mod::HeldNotes` and `mod::Ramp` (work a value out once per block and draw it straight from the last). The host runs it in blocks of 16 frames on a grid from Play and gives it the transport (`block.beatAt`), so its output never depends on the device's buffer size. `examples/cpp/modulator` (a Euclidean gate: `gate` and `ramp` outputs) builds with `caw_add_component` like any component and has a contract test.
 
 ## The Library
 

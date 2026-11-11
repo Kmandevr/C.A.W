@@ -38,6 +38,18 @@ updated: 2026-11-11
 - **Cost classes are judged, not measured** ([Assumption] until the S22+ measurement).
 - **To confirm (owner):** (1) the look: a "Per note" section above "Track" in the FX stack, or a per-card "Run per note" toggle only; (2) over budget, overflow to one shared chain (the default) or steal the oldest note's slot; (3) the default voice budget per phone (8 for now; Eco 4, High 16) after the CPU measurement; (4) the name "domain" in the UI (a menu might say "Runs: whole track / per note").
 
+## 2026-11-11: Modulators and routing anything to anywhere, #161 (choices to confirm)
+
+**Decision (Claude, for the owner to confirm in the APK; [engine](engine.md#modulation-project-modulators-and-links-161), [ui](ui.md#modulation-on-touch)):**
+- **One model.** Project links reuse the racks' and Flagship's route record and rules (amount and polarity of the knob's normalized travel, summed per knob, base value untouched), widened to (layer, component index, parameter) and to volume, pan, sends and other modulators, plus a per-link curve. The shared arithmetic is `engine/src/mod_route.h`; the FX rack calls it. A device's internal matrix stays (its per-voice sources, such as Flagship's envelopes, can't be project-level).
+- **A project-level `modulators` list**, each with a `layer` (where it is shown) and an `input` (what it hears), rather than modulator components inside track chains: chains stay audio-only, and a modulator on one track can hear another.
+- **Modulators live in a "Modulators" lane at the bottom of each track's FX stack** (the master's holds the project's), not on a separate strip. To confirm: the owner may prefer a strip in the mixer or the Arrange view.
+- **Timing: a fixed 16-frame grid from Play and a 96-frame (2 ms) look-behind**, instead of ordering tracks so a source runs before its target in the same block: block-size independent, export equals playback, and the mix graph's order (sends, keys) is untouched. A follower is 2 ms late, which is below any envelope's attack. Modulators restart at each Play.
+- **Loops are refused** like routing loops, through followers only (notes make none, so an envelope can move its own track); a follower moving its own track is refused (to confirm: self-ducking could be allowed later, it is stable with the look-behind).
+- **Volume and send links move the fader's travel** (the app's REAPER-like taper, 0 dB three quarters up), pan its −1..1 travel; master volume takes no links yet.
+- **Budgets:** 64 modulators, 256 links, 32 links per knob, 8 outputs per modulator.
+- **C API version 19** (18 is the audio-engine branch's); merge both and keep 19.
+
 ## 2026-11-11: MIDI devices (WP-H; choices made for the owner)
 
 - **The engine path:** device MIDI reaches a track's instrument through a new C API (API 15) into `Midi2InputQueue`, placed at the frame it was played from the device's timestamp, one callback late so the spacing is kept (Android's MIDI timestamps are `System.nanoTime`, the engine's `steady_clock` on Android). On-screen keys keep note previews. MIDI 1.0 is converted to MIDI 2.0 at the edge (`midi_device.cpp`, the UMP specification's min-centre-max upscaling written from the published algorithm, [Assumption] not re-read against the PDF).

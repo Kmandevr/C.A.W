@@ -9,6 +9,7 @@
 #include "audio_clips.h"
 #include "builtin_fx_racks.h"
 #include "json.h"
+#include "mod_route.h"
 #include "route_math.h"
 
 namespace caw {
@@ -80,7 +81,51 @@ bool ComponentChain::isInstrument(const ModuleDescriptor& d) noexcept {
 
 std::unique_ptr<ComponentChain> ComponentChain::buildInstrument(const ModuleRegistry& registry, const ComponentSpec& spec,
                                                                 double sampleRate, std::string& error) {
-    return make(registry, {spec}, sampleRate, true, error);
+    return make(registry, {spec}, sampleRate, Kind::Instrument, error);
+}
+
+bool ComponentChain::isModulator(const ModuleDescriptor& d) noexcept {
+    if (!d.ports || d.portCount == 0) return false;
+    uint32_t outs = 0, events = 0, audio = 0;
+    for (uint32_t k = 0; k < d.portCount; ++k) {
+        const PortDescriptor& p = d.ports[k];
+        if (p.type == PortType::Modulation && !p.input) ++outs;
+        else if (p.type == PortType::Event && p.input) ++events;
+        else if (p.type == PortType::Audio && p.input && (portChannelCount(p) == 1 || portChannelCount(p) == 2)) ++audio;
+        else return false;
+    }
+    return outs >= 1 && outs <= kMaxModulatorOutputs && events <= 1 && audio <= 1;
+}
+
+std::unique_ptr<ComponentChain> ComponentChain::buildModulators(const ModuleRegistry& registry,
+                                                                const std::vector<ComponentSpec>& specs,
+                                                                double sampleRate, std::string& error) {
+    return make(registry, specs, sampleRate, Kind::Modulators, error);
+}
+
+uint32_t ComponentChain::modulatorOutputs(std::size_t index) const noexcept {
+    const ModuleDescriptor* d = descriptorOf(index);
+    uint32_t n = 0;
+    for (uint32_t k = 0; d && k < d->portCount; ++k) n += d->ports[k].type == PortType::Modulation && !d->ports[k].input;
+    return n;
+}
+
+bool ComponentChain::modulatorTakesNotes(std::size_t index) const noexcept {
+    const ModuleDescriptor* d = descriptorOf(index);
+    for (uint32_t k = 0; d && k < d->portCount; ++k)
+        if (d->ports[k].type == PortType::Event && d->ports[k].input) return true;
+    return false;
+}
+
+bool ComponentChain::modulatorTakesAudio(std::size_t index) const noexcept {
+    const ModuleDescriptor* d = descriptorOf(index);
+    for (uint32_t k = 0; d && k < d->portCount; ++k)
+        if (d->ports[k].type == PortType::Audio && d->ports[k].input) return true;
+    return false;
+}
+
+int ComponentChain::parameterIndexOf(std::size_t index, std::string_view id) const noexcept {
+    return index < entries_.size() ? parameterIndex(*entries_[index], id) : -1;
 }
 
 ComponentChain::~ComponentChain() {
@@ -97,9 +142,9 @@ uint64_t ComponentChain::estimateBytes(std::size_t components, std::size_t param
            static_cast<uint64_t>(parameters) * perParameter;
 }
 
-int ComponentChain::parameterIndex(const Entry& e, const std::string& id) const noexcept {
+int ComponentChain::parameterIndex(const Entry& e, std::string_view id) const noexcept {
     if (!e.index.empty()) {
-        const auto it = e.index.find(std::string_view(id));
+        const auto it = e.index.find(id);
         return it == e.index.end() ? -1 : it->second;
     }
     const ModuleDescriptor& d = e.processor->descriptor();
@@ -111,12 +156,14 @@ int ComponentChain::parameterIndex(const Entry& e, const std::string& id) const 
 std::unique_ptr<ComponentChain> ComponentChain::build(const ModuleRegistry& registry,
                                                       const std::vector<ComponentSpec>& specs, double sampleRate,
                                                       std::string& error) {
-    return make(registry, specs, sampleRate, false, error);
+    return make(registry, specs, sampleRate, Kind::Effects, error);
 }
 
 std::unique_ptr<ComponentChain> ComponentChain::make(const ModuleRegistry& registry, const std::vector<ComponentSpec>& specs,
-                                                     double sampleRate, bool instrument, std::string& error) {
+                                                     double sampleRate, Kind kind, std::string& error) {
+    const bool instrument = kind == Kind::Instrument;
     std::unique_ptr<ComponentChain> chain(new ComponentChain());
+    chain->modulators_ = kind == Kind::Modulators;
     chain->sampleRate_ = sampleRate;
     if (instrument) chain->notes_ = std::make_unique<NoteEvents>();
     chain->entries_.reserve(specs.size());
@@ -131,12 +178,23 @@ std::unique_ptr<ComponentChain> ComponentChain::make(const ModuleRegistry& regis
                     " can't be an instrument: an instrument has one event input and one stereo audio output";
             return nullptr;
         }
+        if (kind == Kind::Modulators) {
+            if (!isModulator(*d)) {
+                error = "native component " + quoted(spec.id) +
+                        " is not a modulator: a modulator has 1 to 8 modulation outputs, at most one event input and"
+                        " at most one audio input";
+                return nullptr;
+            }
+        } else if (isModulator(*d)) {
+            error = "native component " + quoted(spec.id) + " is a modulator: add it to the project's modulators";
+            return nullptr;
+        }
         if (!instrument && isInstrument(*d)) {
             error = "native component " + quoted(spec.id) + " is an instrument: choose it as the track's instrument";
             return nullptr;
         }
-        const bool keyed = !instrument && isKeyedEffect(*d);
-        if (!instrument && !isStereoEffect(*d) && !keyed) {
+        const bool keyed = kind == Kind::Effects && isKeyedEffect(*d);
+        if (kind == Kind::Effects && !isStereoEffect(*d) && !keyed) {
             error = "native component " + quoted(spec.id) +
                     " must expose one stereo audio input and one stereo audio output (and, keyed, a stereo"
                     " \"sidechain\" input and at most one event input)";
@@ -152,6 +210,10 @@ std::unique_ptr<ComponentChain> ComponentChain::make(const ModuleRegistry& regis
         e->processor = registry.create(spec.id);
         if (!e->processor) {
             error = "native component " + quoted(spec.id) + " could not create a processor instance";
+            return nullptr;
+        }
+        if (kind == Kind::Modulators && !e->processor->usesProcessPorts()) {
+            error = "native component " + quoted(spec.id) + " has modulation outputs but does not process ports";
             return nullptr;
         }
         // A rack (fx-racks) makes its children from its slot values first: its descriptor then lists their parameters.
@@ -416,6 +478,124 @@ void sanitize(float* x, uint32_t m) noexcept {
 }
 }  // namespace
 
+void ComponentChain::resolveEntry(Entry& e, std::size_t index, uint32_t m, const ChainTime* time, bool playing,
+                                  bool newPlay) noexcept {
+    const std::size_t count = e.resolvers.size();
+    // Parameters move on even while bypassed, so a component comes back at its current values. Nothing new
+    // since the last block (no value, touch, lane or play change, no ramp): last block's values stand.
+    const uint32_t generation = e.generation.load(std::memory_order_acquire);
+    const bool steady = generation == e.seenGeneration && !newPlay && !e.dynamic && playing == e.seenPlaying &&
+                        e.seenLanes == static_cast<const void*>(automation_);
+    e.seenGeneration = generation;
+    e.seenPlaying = playing;
+    e.seenLanes = automation_;
+    e.dynamic = false;
+    for (std::size_t k = 0; k < count && !steady; ++k) {
+        if (newPlay) e.resolvers[k].clearTouch();  // a Play ends knob overrides: the lanes rule again
+        const uint32_t touch = e.touches[k].load(std::memory_order_acquire);
+        const uint64_t bits = e.held[k].load(std::memory_order_relaxed);
+        if (touch != e.seenTouch[k]) {  // a knob move: ramps, and overrides a lane
+            e.seenTouch[k] = touch;
+            e.seenBits[k] = bits;
+            e.resolvers[k].setBase(fromBits(bits));
+        } else if (bits != e.seenBits[k]) {  // a project update: ramps, not a touch
+            e.seenBits[k] = bits;
+            const bool touched = e.resolvers[k].touched();
+            e.resolvers[k].setBase(fromBits(bits));
+            if (!touched) e.resolvers[k].clearTouch();
+        }
+        const double* automation = nullptr;
+        const ProjectAutomationLaneSpec* lane =
+            playing && automation_ && index < automation_->byParam.size() && k < automation_->byParam[index].size()
+                ? automation_->byParam[index][k] : nullptr;
+        if (lane) {
+            for (uint32_t i = 0; i < m; ++i)
+                lane_[i] = automationLaneValue(lane->points.data(), lane->points.size(),
+                                               static_cast<double>(time->start + i) / time->stepLength,
+                                               lane->points.front().value);
+            automation = lane_.data();
+        }
+        e.values[k] = e.resolvers[k].resolve(m, automation, nullptr, e.samples[k].data());
+        e.dynamic = e.dynamic || e.values[k].samples != nullptr || e.resolvers[k].ramping();
+    }
+}
+
+const ParameterValue* ComponentChain::modulated(const Entry& e, std::size_t index, uint32_t m,
+                                                const ChainTime* time) noexcept {
+    const ChainModulation* mod = time ? time->modulation : nullptr;
+    const uint32_t count = static_cast<uint32_t>(e.values.size());
+    if (!mod || mod->count == 0 || count > mod->valueCapacity || !mod->values) return e.values.data();
+    bool any = false;
+    uint32_t buffer = 0;
+    const ModuleDescriptor& d = e.processor->descriptor();
+    for (uint32_t b = 0; b < mod->count; ++b) {
+        const ChainModulation::Binding& x = mod->bindings[b];
+        if (x.entry != index || x.param >= count || !x.offset || !d.parameters[x.param].modulatable) continue;
+        if (!any) {
+            std::copy_n(e.values.data(), count, mod->values);
+            any = true;
+        }
+        const ParameterDescriptor& p = d.parameters[x.param];
+        const ParameterValue base = e.values[x.param];
+        const float* off = x.offset;
+        bool flat = !base.samples;
+        for (uint32_t i = 1; i < m && flat; ++i) flat = off[i] == off[0];
+        if (flat) {
+            mod->values[x.param] = ParameterValue{nullptr, modulatedValue(p, base.value, off[0])};
+        } else if (buffer < mod->sampleBuffers && mod->samples) {
+            double* out = mod->samples + static_cast<std::size_t>(buffer++) * kMaxFrames;
+            for (uint32_t i = 0; i < m; ++i) out[i] = modulatedValue(p, base.samples ? base.samples[i] : base.value, off[i]);
+            mod->values[x.param] = ParameterValue{out, out[0]};
+        }
+    }
+    return any ? mod->values : e.values.data();
+}
+
+void ComponentChain::beginModulators(const ChainTime* time) noexcept {
+    const bool playing = time && time->playing;
+    modNewPlay_ = playing && time->playEpoch != playEpoch_;
+    if (playing) playEpoch_ = time->playEpoch;
+}
+
+bool ComponentChain::runModulator(std::size_t index, uint32_t m, double sampleRate, const ChainTime* time,
+                                  const Event* events, uint32_t eventCount, const float* inL, const float* inR,
+                                  float* const* outs, uint32_t outCount) noexcept {
+    if (!modulators_ || index >= entries_.size() || m == 0 || m > kMaxFrames) return false;
+    Entry& e = *entries_[index];
+    const bool playing = time && time->playing;
+    resolveEntry(e, index, m, time, playing, modNewPlay_);
+    for (uint32_t k = 0; k < outCount; ++k) std::fill_n(outs[k], m, 0.0f);
+    if (e.bypass.load(std::memory_order_relaxed)) return true;  // bypassed: its outputs hold 0
+    Transport transport;
+    if (time) transport = {time->tempo, static_cast<double>(time->start) / time->stepLength / 4.0, time->beatsPerBar, playing};
+    static const float silence[kMaxFrames] = {};
+    const float* ch[2] = {inL ? inL : silence, inR ? inR : (inL ? inL : silence)};
+    const ModuleDescriptor& d = e.processor->descriptor();
+    uint32_t audioChannels = 0;
+    for (uint32_t k = 0; k < d.portCount; ++k)
+        if (d.ports[k].type == PortType::Audio && d.ports[k].input) audioChannels = portChannelCount(d.ports[k]);
+    const ConstChannelBufferView audioIn{ch, audioChannels, m};
+    const EventInput notes{events, events ? eventCount : 0};
+    ProcessBlock ports;
+    ports.frames = m;
+    ports.sampleRate = sampleRate;
+    ports.audioIn = audioChannels ? &audioIn : nullptr;
+    ports.audioInCount = audioChannels ? 1 : 0;
+    ports.eventIn = modulatorTakesNotes(index) ? &notes : nullptr;
+    ports.eventInCount = ports.eventIn ? 1 : 0;
+    ports.modulationOut = outs;
+    ports.modulationOutCount = outCount;
+    ports.parameters = e.values.empty() ? nullptr : modulated(e, index, m, time);
+    ports.parameterCount = static_cast<uint32_t>(e.values.size());
+    ports.transport = time ? &transport : nullptr;
+    const bool ok = e.processor->processPorts(ports);
+    for (uint32_t k = 0; k < outCount; ++k) {
+        float* o = outs[k];
+        for (uint32_t i = 0; i < m; ++i) o[i] = ok && std::isfinite(o[i]) ? std::clamp(o[i], 0.0f, 1.0f) : 0.0f;
+    }
+    return ok;
+}
+
 void ComponentChain::process(float* left, float* right, uint32_t m, double sampleRate, const ChainTime* time) noexcept {
     if (m == 0 || m > kMaxFrames) return;
     if (notes_) {  // an instrument makes its sound from silence: bypassed, it crossfades to silence
@@ -432,43 +612,7 @@ void ComponentChain::process(float* left, float* right, uint32_t m, double sampl
     for (std::size_t index = 0; index < entries_.size(); ++index) {
         Entry& e = *entries_[index];
         const std::size_t count = e.resolvers.size();
-        // Parameters move on even while bypassed, so a component comes back at its current values. Nothing new
-        // since the last block (no value, touch, lane or play change, no ramp): last block's values stand.
-        const uint32_t generation = e.generation.load(std::memory_order_acquire);
-        const bool steady = generation == e.seenGeneration && !newPlay && !e.dynamic && playing == e.seenPlaying &&
-                            e.seenLanes == static_cast<const void*>(automation_);
-        e.seenGeneration = generation;
-        e.seenPlaying = playing;
-        e.seenLanes = automation_;
-        e.dynamic = false;
-        for (std::size_t k = 0; k < count && !steady; ++k) {
-            if (newPlay) e.resolvers[k].clearTouch();  // a Play ends knob overrides: the lanes rule again
-            const uint32_t touch = e.touches[k].load(std::memory_order_acquire);
-            const uint64_t bits = e.held[k].load(std::memory_order_relaxed);
-            if (touch != e.seenTouch[k]) {  // a knob move: ramps, and overrides a lane
-                e.seenTouch[k] = touch;
-                e.seenBits[k] = bits;
-                e.resolvers[k].setBase(fromBits(bits));
-            } else if (bits != e.seenBits[k]) {  // a project update: ramps, not a touch
-                e.seenBits[k] = bits;
-                const bool touched = e.resolvers[k].touched();
-                e.resolvers[k].setBase(fromBits(bits));
-                if (!touched) e.resolvers[k].clearTouch();
-            }
-            const double* automation = nullptr;
-            const ProjectAutomationLaneSpec* lane =
-                playing && automation_ && index < automation_->byParam.size() && k < automation_->byParam[index].size()
-                    ? automation_->byParam[index][k] : nullptr;
-            if (lane) {
-                for (uint32_t i = 0; i < m; ++i)
-                    lane_[i] = automationLaneValue(lane->points.data(), lane->points.size(),
-                                                   static_cast<double>(time->start + i) / time->stepLength,
-                                                   lane->points.front().value);
-                automation = lane_.data();
-            }
-            e.values[k] = e.resolvers[k].resolve(m, automation, nullptr, e.samples[k].data());
-            e.dynamic = e.dynamic || e.values[k].samples != nullptr || e.resolvers[k].ramping();
-        }
+        resolveEntry(e, index, m, time, playing, newPlay);
         const double target = e.bypass.load(std::memory_order_relaxed) ? 0.0 : 1.0;
         if (e.mix == 0.0 && target == 0.0) continue;  // bypassed: not run, input passes on untouched
         if (e.mix == 0.0) e.processor->reset();  // back from a bypass: no audio from before it
@@ -489,7 +633,7 @@ void ComponentChain::process(float* left, float* right, uint32_t m, double sampl
         block.output = {out, 2, m};
         block.frames = m;
         block.sampleRate = sampleRate;
-        block.parameters = count ? e.values.data() : nullptr;
+        block.parameters = count ? modulated(e, index, m, time) : nullptr;
         block.parameterCount = static_cast<uint32_t>(count);
         block.transport = time ? &transport : nullptr;
         bool processed;

@@ -2435,6 +2435,30 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
         }
     }
 
+    // Project modulation (#161, modulation_links.cpp): its own plan, swapped in lock-free at the next chunk.
+    {
+        std::vector<std::string>& w = warnings["project"];
+        const std::string modError = modulation_->update(nativeModules_, p, sr_, [&](const std::string& id) {
+            ModulationHost::LayerInfo info;
+            if (id.empty()) {
+                info.inserts = ctlMasterChain_;
+                return info;
+            }
+            auto it = layers_.find(id);
+            if (it == layers_.end()) return info;
+            info.slot = it->second.slot;
+            info.bus = it->second.bus;
+            info.sends = it->second.userSends;
+            info.inserts = it->second.inserts;
+            info.instrument = it->second.instrument;
+            return info;
+        }, w);
+        if (!modError.empty()) {
+            allOk = false;
+            w.push_back(modError);
+        }
+    }
+
     std::string mods;
     for (const ModuleSpec& m : p.modules) {
         const ModuleState& st = modules_.at(m.id);
@@ -2788,6 +2812,32 @@ int32_t Engine::componentDisplay(const std::string& layerId, uint32_t index, flo
     return chain->readDisplay(index, out, max);
 }
 
+bool Engine::setModulatorParam(const std::string& modulatorId, const std::string& param, double value) {
+    std::lock_guard<std::mutex> lock(ctl_);
+    return modulation_->setModulatorParam(modulatorId, param, value);
+}
+
+bool Engine::setModulatorBypass(const std::string& modulatorId, bool bypass) {
+    std::lock_guard<std::mutex> lock(ctl_);
+    return modulation_->setModulatorBypass(modulatorId, bypass);
+}
+
+bool Engine::setModulationAmount(uint32_t linkId, double amount) {
+    std::lock_guard<std::mutex> lock(ctl_);
+    return modulation_->setLinkAmount(linkId, amount);
+}
+
+int32_t Engine::modulatorOutputs(const std::string& modulatorId, float* out, int32_t max) {
+    std::unique_lock<std::mutex> lock(ctl_, std::try_to_lock);  // a UI polls it: never waits
+    if (!lock.owns_lock()) return 0;
+    return modulation_->outputs(modulatorId, out, max);
+}
+
+bool Engine::modulationOffset(uint32_t linkId, float& out) {
+    std::unique_lock<std::mutex> lock(ctl_, std::try_to_lock);
+    return lock.owns_lock() && modulation_->linkOffset(linkId, out);
+}
+
 void Engine::setLayerMix(const std::string& layerId, double volume, double pan, bool mute, bool solo) {
     std::lock_guard<std::mutex> lock(ctl_);
     auto it = layers_.find(layerId);
@@ -3113,6 +3163,7 @@ void Engine::startPlay(double fromStep, uint64_t playCount, uint32_t touchStamp)
     }
     touchEpoch_ = playCount;  // chains from before this Play drop their touches at their next chunk
     touchPlayStamp_ = touchStamp;
+    ++modPlays_;  // project modulators restart at the next chunk (#161)
     // Resuming starts mid-loop: each track works out its own loop pass from g_ at its next chunk. Code
     // there may be far from zero, and a Play during a stop fade cuts it short, so both fade in.
     // In steps, converted with the tempo the Transport commands before it set, so a tempo change made
@@ -4585,7 +4636,8 @@ void Engine::playTail(Slot& s, int most) noexcept {
 }
 
 void Engine::runInstrument(Slot& s, int m) noexcept {
-    const ChainTime time{g_, stepLen_, touchEpoch_, bpm_, static_cast<uint32_t>(beatsPerBar_), playing_ && !previewChunk_};
+    ChainTime time{g_, stepLen_, touchEpoch_, bpm_, static_cast<uint32_t>(beatsPerBar_), playing_ && !previewChunk_};
+    time.modulation = modulation_->forChain(s.index, ModChainKind::Instrument, s.instrument, 0);  // #161
     if (s.instrumentIdle) {
         // It stopped running while silent: what it held is stale, so it starts from silence.
         for (ComponentChain* c : {s.instrument, s.instrumentFading})
@@ -4601,6 +4653,7 @@ void Engine::runInstrument(Slot& s, int m) noexcept {
         if (!previewChunk_) instrumentNotes(s, notes, m);
         if (midiPendingCount_ > 0) feedDeviceMidi(s, notes, m);
         instrumentMotion(notes, m);
+        if (modulation_->listens(s.index)) modulation_->tapNotes(s.index, notes.events(), notes.count());  // #161
         s.instrument->process(s.instL, s.instR, static_cast<uint32_t>(m), sr_, &time);
     } else {
         std::fill_n(s.instL, m, 0.0f);
@@ -4613,7 +4666,9 @@ void Engine::runInstrument(Slot& s, int m) noexcept {
     if (s.instrumentFadeLeft <= 0) return;
     // A replaced instrument (a rebuild, another choice) rings out under the new one for 20 ms.
     if (s.instrumentFading) {
-        s.instrumentFading->process(fadeL_, fadeR_, static_cast<uint32_t>(m), sr_, &time);
+        ChainTime fadeTime = time;
+        fadeTime.modulation = modulation_->forChain(s.index, ModChainKind::Instrument, s.instrumentFading, 1);
+        s.instrumentFading->process(fadeL_, fadeR_, static_cast<uint32_t>(m), sr_, &fadeTime);
     } else {
         std::fill_n(fadeL_, m, 0.0f);
         std::fill_n(fadeR_, m, 0.0f);
@@ -4986,6 +5041,9 @@ int Engine::processChunk(float* l, float* r, int maxFrames) noexcept {
                 if (slot.exportAt(b)) std::fill_n(slot.exportAt(b)->data(), m, 0.0);
         }
     ++chunkId_;
+    // Project modulation (#161): due modulator blocks and every target's offsets, before any target runs.
+    modulation_->beginChunk(static_cast<uint32_t>(m), g_, stepLen_, bpm_, static_cast<uint32_t>(beatsPerBar_),
+                            playing_ && !previewChunk_, modPlays_, chunkId_);
     // One graph runs the mix: each track's modules as a chain of nodes then its track node, in
     // dependency order (exporters before readers), each folder bus after its children, then the
     // master stage. Routing changes only between chunks.
@@ -5227,13 +5285,16 @@ void Engine::runInserts(Slot& s, float* L, float* R, int m) noexcept {
         if (s.insertsFading) s.insertsFading->reset();
         s.insertsIdle = false;
     }
-    const ChainTime time{g_, stepLen_, touchEpoch_, bpm_, static_cast<uint32_t>(beatsPerBar_), playing_ && !previewChunk_,
-                         chunkId_};
+    ChainTime time{g_, stepLen_, touchEpoch_, bpm_, static_cast<uint32_t>(beatsPerBar_), playing_ && !previewChunk_,
+                   chunkId_};
+    time.modulation = modulation_->forChain(s.index, ModChainKind::Inserts, inserts, 0);  // #161
     const ChainTime* t = &time;
     if (fading) {
         std::copy_n(L, m, fadeL_);
         std::copy_n(R, m, fadeR_);
-        if (s.insertsFading) s.insertsFading->process(fadeL_, fadeR_, static_cast<uint32_t>(m), sr_, t);
+        ChainTime fadeTime = time;
+        fadeTime.modulation = modulation_->forChain(s.index, ModChainKind::Inserts, s.insertsFading, 1);
+        if (s.insertsFading) s.insertsFading->process(fadeL_, fadeR_, static_cast<uint32_t>(m), sr_, &fadeTime);
     }
     if (inserts) inserts->process(L, R, static_cast<uint32_t>(m), sr_, t);
     if (fading) {
@@ -5304,7 +5365,9 @@ void Engine::runRoutes(Slot& s, const float* preL, const float* preR, const floa
     for (int k = 0; k < t.count; ++k) {
         SendTable::Route& r = t.routes[k];
         const bool key = r.key >= 0;
-        const double want = r.mute || (!key && silenced) ? 0.0 : r.level;
+        const float* levelMod = key ? nullptr : modulation_->send(s.index, k);  // project modulation (#161)
+        const double level = levelMod ? faderGain(faderPosition(r.level) + levelMod[m - 1]) : r.level;
+        const double want = r.mute || (!key && silenced) ? 0.0 : level;
         const double from = s.routeGain[k];
         if (!s.routeOk[k]) {
             s.routeGain[k] = 0.0;  // its destination doesn't run: it starts from silence when it does
@@ -5473,7 +5536,10 @@ void Engine::runTrackNode(int slot, const float* const* in, float* outL, float* 
     const bool volumeAutomated = s.automation && !s.automation->volume.empty();
     const bool panAutomated = s.automation && !s.automation->pan.empty();
     const double settled = target > 0.0 ? target : 0.0;
-    if (!volumeAutomated && !panAutomated && s.gain == settled) {
+    // Project modulation of the fader (#161): offsets in its travel (the app's taper) and in pan's, per frame.
+    const float* volumeMod = modulation_->volume(slot);
+    const float* panMod = modulation_->pan(slot);
+    if (!volumeAutomated && !panAutomated && s.gain == settled && !volumeMod && !panMod) {
         // The usual case: volume settled, no lanes. The same sums as the loop below, without its per-sample
         // branches, and the scope written in at most two runs instead of a wrap test per sample.
         const double gain = s.gain, gl = s.gl, gr = s.gr;
@@ -5518,12 +5584,14 @@ void Engine::runTrackNode(int slot, const float* const* in, float* outL, float* 
             s.gain += (desired - s.gain) * gainCoef;
             if (std::fabs(desired - s.gain) < 1e-6) s.gain = desired;
         }
-        const double vl = (stereo ? static_cast<double>(insertL_[i]) : finiteOr0(y[i])) * s.gain;
-        const double vr = stereo ? static_cast<double>(insertR_[i]) * s.gain : vl;
+        const double gain = volumeMod && s.gain > 0.0 ? faderGain(faderPosition(s.gain) + volumeMod[i]) : s.gain;  // muted stays silent
+        const double vl = (stereo ? static_cast<double>(insertL_[i]) : finiteOr0(y[i])) * gain;
+        const double vr = stereo ? static_cast<double>(insertR_[i]) * gain : vl;
         const double v = stereo ? 0.5 * (vl + vr) : vl;  // the scope and tail test read the mid
         double gl = s.gl, gr = s.gr;
-        if (panAutomated) {
-            const double automatedPan = automationValue(s.automation->pan, step, pan);
+        if (panAutomated || panMod) {
+            double automatedPan = panAutomated ? automationValue(s.automation->pan, step, pan) : pan;
+            if (panMod) automatedPan = std::clamp(automatedPan + 2.0 * panMod[i], -1.0, 1.0);
             const lib::PanGains g = lib::constantPowerPan(automatedPan);
             gl = g.left; gr = g.right;
         }
@@ -5549,6 +5617,15 @@ void Engine::runTrackNode(int slot, const float* const* in, float* outL, float* 
             outL[i] *= g;
             outR[i] *= g;
         }
+    }
+    if (modulation_->listens(slot)) {  // a modulator hears this track (#161): after its effects, and after the fader
+        const float* preL = insertL_;
+        const float* preR = insertR_;
+        if (!stereo) {
+            for (int i = 0; i < m; ++i) preL_[i] = tail ? 0.0f : routeSample(finiteOr0(y[i]));
+            preL = preR = preL_;
+        }
+        modulation_->tapAudio(slot, preL, preR, outL, outR, static_cast<uint32_t>(m));
     }
     if (s.sends && s.sends->count > 0) {
         const float* preL = insertL_;
@@ -5611,6 +5688,8 @@ void Engine::runBusNode(int slot, const float* inL, const float* inR, float* out
     }
     const double pan = bitsToDouble(s.pan.load(std::memory_order_relaxed));
     const double gainCoef = 1.0 - detExp(-1.0 / (kGainSeconds * sr_));
+    const float* volumeMod = modulation_->volume(slot);  // project modulation (#161)
+    const float* panMod = modulation_->pan(slot);
     for (int j = 0; j < m; ++j) {
         const double step = static_cast<double>(g_ + j) / stepLen_;
         const bool volumeAutomated = s.automation && !s.automation->volume.empty();
@@ -5622,12 +5701,14 @@ void Engine::runBusNode(int slot, const float* inL, const float* inR, float* out
             s.gain += (desired - s.gain) * gainCoef;
             if (std::fabs(desired - s.gain) < 1e-6) s.gain = desired;
         }
-        const double automatedPan = s.automation && !s.automation->pan.empty()
+        double automatedPan = s.automation && !s.automation->pan.empty()
             ? automationValue(s.automation->pan, step, pan) : pan;
+        if (panMod) automatedPan = std::clamp(automatedPan + 2.0 * panMod[j], -1.0, 1.0);
         const double leftPan = automatedPan > 0.0 ? 1.0 - automatedPan : 1.0;
         const double rightPan = automatedPan < 0.0 ? 1.0 + automatedPan : 1.0;
-        s.outL[j] *= s.gain * leftPan;
-        s.outR[j] *= s.gain * rightPan;
+        const double gain = volumeMod && s.gain > 0.0 ? faderGain(faderPosition(s.gain) + volumeMod[j]) : s.gain;  // muted stays silent
+        s.outL[j] *= gain * leftPan;
+        s.outR[j] *= gain * rightPan;
     }
     // Graph edges carry 32-bit float (owner, 2026-11-03), saturating at +/-FLT_MAX (route_math.h).
     float peakL = 0, peakR = 0;
@@ -5646,6 +5727,9 @@ void Engine::runBusNode(int slot, const float* inL, const float* inR, float* out
             outR[i] *= g;
         }
     }
+    if (modulation_->listens(slot))  // a modulator hears this bus (#161)
+        modulation_->tapAudio(slot, received || inserts || routes ? insertL_ : inL, received || inserts || routes ? insertR_ : inR,
+                              outL, outR, static_cast<uint32_t>(m));
     storeMax(s.peakL, peakL);  // a folder's meter: its mix after volume and pan
     storeMax(s.peakR, peakR);
     s.correlation.process(outL, outR, m);
@@ -5786,13 +5870,16 @@ void Engine::runMasterNode(const float* inL, const float* inR, float* outL, floa
             stageL[i] = static_cast<float>(bypass ? xl : yl);
             stageR[i] = static_cast<float>(bypass ? xr : yr);
         }
-        const ChainTime time{g_, stepLen_, touchEpoch_, bpm_, static_cast<uint32_t>(beatsPerBar_), playing_ && !previewChunk_};
+        ChainTime time{g_, stepLen_, touchEpoch_, bpm_, static_cast<uint32_t>(beatsPerBar_), playing_ && !previewChunk_};
+        time.modulation = modulation_->forChain(-1, ModChainKind::Master, masterChain_, 0);  // #161
         const ChainTime* t = &time;
         const bool fading = masterFadeLeft_ > 0;
         if (fading) {
             std::copy_n(stageL, m, fadeL_);
             std::copy_n(stageR, m, fadeR_);
-            if (masterFading_) masterFading_->process(fadeL_, fadeR_, static_cast<uint32_t>(m), sr_, t);
+            ChainTime fadeTime = time;
+            fadeTime.modulation = modulation_->forChain(-1, ModChainKind::Master, masterFading_, 1);
+            if (masterFading_) masterFading_->process(fadeL_, fadeR_, static_cast<uint32_t>(m), sr_, &fadeTime);
         }
         if (masterChain_) masterChain_->process(stageL, stageR, static_cast<uint32_t>(m), sr_, t);
         if (masterTailFade_ != 0 && previewChunk_) {  // the master's capped tail fading out

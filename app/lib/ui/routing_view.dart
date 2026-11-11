@@ -7,9 +7,11 @@ import '../model/arrange_fx.dart';
 import '../model/project.dart';
 import '../model/routing.dart';
 import '../model/routing_edit.dart';
+import '../model/modulation.dart';
 import 'arrange/knob.dart';
 import 'arrange/long_press_menu.dart';
 import 'arrange/track_color.dart';
+import 'devices/modulators/modulator_devices.dart' show modulatorColor, showModLinkSheet;
 import 'feedback.dart';
 import 'glass.dart';
 import 'haptics.dart';
@@ -342,6 +344,26 @@ class _RouteRow extends StatelessWidget {
               const SizedBox(width: 4),
               Expanded(child: Text('$name hears ${from?.name ?? 'a missing track'}${plays ? '' : ' (not playing: it would hear itself)'}',
                 style: TextStyle(fontSize: 10, color: plays ? Neon.text : Neon.dim))),
+            ])),
+          // Project modulation (#161): what moves this layer, and the modulators that hear it.
+          if (s.project.linksOnLayer(layer.id) case final links when links.isNotEmpty)
+            Padding(padding: const EdgeInsets.only(top: 6), child: Wrap(spacing: 6, runSpacing: 6, children: [
+              for (final l in links)
+                _Chip(
+                  key: ValueKey('route-mod-${l.id}'),
+                  icon: Icons.waves,
+                  label: '${s.modSourceLabel(l.ref)} → ${s.modTargetLabel(l.target).split(' · ').skip(1).join(' · ')}',
+                  color: modulatorColor(s, l.source),
+                  tooltip: 'A modulation: tap for its amount',
+                  onTap: (_) => showModLinkSheet(context, s, l.target),
+                ),
+            ])),
+          if ([for (final m in s.project.modulators) if (m.inputId == layer.id && m.hears != 'none') m.name] case final names
+              when names.isNotEmpty)
+            Padding(padding: const EdgeInsets.only(top: 6), child: Row(children: [
+              const Icon(Icons.hearing, size: 12, color: Neon.violet),
+              const SizedBox(width: 4),
+              Expanded(child: Text('Heard by ${names.join(', ')}', style: const TextStyle(fontSize: 10, color: Neon.text))),
             ])),
           if (heard.isNotEmpty)
             Padding(padding: const EdgeInsets.only(top: 6), child: Text(
