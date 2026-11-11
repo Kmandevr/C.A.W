@@ -355,7 +355,7 @@ class _ClipTab extends StatelessWidget {
     ]));
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       header,
-      Expanded(child: PatternEditor(key: ValueKey('clip-${module.id}'), state: state, module: module)),
+      Expanded(child: PatternEditor(key: ValueKey('clip-${module.id}'), state: state, module: module, layer: layer, clip: clip)),
     ]);
   }
 }
