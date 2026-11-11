@@ -527,6 +527,51 @@ private:
     bool bassMono_ = false, dcBlock_ = false;
 };
 
+// ---------- Downmix (#120 layout rules) ----------
+
+// The explicit stereo-to-mono step a graph needs before a mono input (it never downmixes on its own): (L+R)/2,
+// left or right. Stateless; the mode switches at once.
+constexpr std::string_view kDownmixModes[] = {"Average", "Left", "Right"};
+const ParamTable& downmixParams() {
+    static const ParamTable t = [] {
+        ParamTable p;
+        p.pick("mode", "Mode", 0.0, kDownmixModes);
+        return p;
+    }();
+    return t;
+}
+constexpr PortDescriptor kDownmixPorts[] = {stereoInput("in"), audioPort("out", false, ChannelLayout::Mono)};
+const ModuleDescriptor& downmixDescriptor() {
+    static const ModuleDescriptor d = [] {
+        ModuleDescriptor m;
+        m.id = "org.caw.downmix";
+        m.name = "Downmix";
+        m.role = ModuleRole::Utility;
+        m.ports = kDownmixPorts;
+        m.portCount = 2;
+        m.parameters = downmixParams().data();
+        m.parameterCount = downmixParams().size();
+        m.cpuClass = CpuClass::Light;  // whole only: its output is mono
+        return m;
+    }();
+    return d;
+}
+
+class Downmix final : public ModuleProcessor {
+public:
+    const ModuleDescriptor& descriptor() const noexcept override { return downmixDescriptor(); }
+    bool process(const AudioProcessBlock& b) noexcept override {
+        if (!audioProcessBlockValid(b) || b.input.channelCount != 2 || b.output.channelCount != 1) return false;
+        const float* l = b.input.channels[0];
+        const float* r = b.input.channels[1];
+        float* out = b.output.channels[0];
+        const int mode = b.parameters && b.parameterCount > 0 ? std::clamp(static_cast<int>(b.parameters[0].value + 0.5), 0, 2) : 0;
+        for (uint32_t i = 0; i < b.frames; ++i)
+            out[i] = mode == 1 ? l[i] : mode == 2 ? r[i] : 0.5f * (l[i] + r[i]);
+        return true;
+    }
+};
+
 template <class T>
 ModuleProcessor* make() noexcept {
     return new (std::nothrow) T();
@@ -539,6 +584,8 @@ void registerKit(ModuleRegistry& registry) {
     registry.add(phaserDescriptor(), &make<Phaser>);
     registry.add(flangerDescriptor(), &make<Flanger>);
     registry.add(utilityDescriptor(), &make<Utility>);
+    // Internal for now: track chains take stereo only, so the browser does not list it (graphs create it by id).
+    registry.addInternal(downmixDescriptor(), &make<Downmix>);
 }
 
 }  // namespace caw::fx

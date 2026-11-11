@@ -737,4 +737,78 @@ std::unique_ptr<ModuleProcessor> ModuleRegistry::create(std::string_view id) con
     return {};
 }
 
+namespace {
+// Two mono instances as one stereo processor (createDualMono).
+class DualMonoProcessor final : public ModuleProcessor {
+public:
+    DualMonoProcessor(std::unique_ptr<ModuleProcessor> left, std::unique_ptr<ModuleProcessor> right)
+        : left_(std::move(left)), right_(std::move(right)) {
+        const ModuleDescriptor& mono = left_->descriptor();
+        descriptor_ = mono;
+        for (uint32_t p = 0; p < 2; ++p) {
+            ports_[p] = mono.ports[p];
+            ports_[p].layout = ChannelLayout::Stereo;
+        }
+        descriptor_.ports = ports_;
+        descriptor_.domains = kDomainWhole;
+    }
+    const ModuleDescriptor& descriptor() const noexcept override { return descriptor_; }
+    bool activate(double sampleRate, uint32_t maxFrames) noexcept override {
+        return left_->activate(sampleRate, maxFrames) && right_->activate(sampleRate, maxFrames);
+    }
+    void deactivate() noexcept override {
+        left_->deactivate();
+        right_->deactivate();
+    }
+    void reset() noexcept override {
+        left_->reset();
+        right_->reset();
+    }
+    bool quiet() const noexcept override { return left_->quiet() && right_->quiet(); }
+    uint32_t readDisplay(float* out, uint32_t max) const noexcept override { return left_->readDisplay(out, max); }
+    bool process(const AudioProcessBlock& block) noexcept override {
+        if (!audioProcessBlockValid(block) || block.input.channelCount != 2 || block.output.channelCount != 2) return false;
+        bool ok = true;
+        for (uint32_t c = 0; c < 2; ++c) {
+            AudioProcessBlock one = block;
+            one.input = {block.input.channels + c, 1, block.input.frames};
+            one.output = {block.output.channels + c, 1, block.output.frames};
+            ok = (c == 0 ? left_ : right_)->process(one) && ok;
+        }
+        return ok;
+    }
+    uint32_t stateVersion() const noexcept override { return left_->stateVersion(); }
+    bool saveState(uint8_t* destination, uint32_t capacity, uint32_t& written) const noexcept override {
+        return left_->saveState(destination, capacity, written);
+    }
+    bool loadState(const uint8_t* source, uint32_t size, uint32_t version) noexcept override {
+        const bool a = left_->loadState(source, size, version);
+        const bool b = right_->loadState(source, size, version);
+        return a && b;
+    }
+
+private:
+    std::unique_ptr<ModuleProcessor> left_, right_;
+    PortDescriptor ports_[2];
+    ModuleDescriptor descriptor_;
+};
+}  // namespace
+
+std::unique_ptr<ModuleProcessor> ModuleRegistry::createDualMono(std::string_view id) const noexcept {
+    const ModuleDescriptor* d = find(id);
+    // validateModuleDescriptor's PerChannel rule: one mono audio input and one mono audio output. Only those two
+    // ports, in this order, so the stereo copy keeps every port.
+    if (!d || !(d->domains & kDomainPerChannel) || d->portCount != 2 || d->ports[0].type != PortType::Audio ||
+        !d->ports[0].input || d->ports[1].type != PortType::Audio || d->ports[1].input ||
+        d->ports[0].layout != ChannelLayout::Mono || d->ports[1].layout != ChannelLayout::Mono)
+        return {};
+    std::unique_ptr<ModuleProcessor> left = create(id), right = create(id);
+    if (!left || !right || left->usesProcessPorts()) return {};
+    try {
+        return std::make_unique<DualMonoProcessor>(std::move(left), std::move(right));
+    } catch (...) {
+        return {};
+    }
+}
+
 }  // namespace caw
