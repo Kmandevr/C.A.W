@@ -142,6 +142,7 @@ class LiveMidi extends ChangeNotifier {
       _learning = null;
       learned.value = made;
       notifyListeners();
+      return true; // the control that was learnt doesn't move the knob yet: the next movement does
     }
     var used = false;
     for (final map in state.project.midiMappings) {

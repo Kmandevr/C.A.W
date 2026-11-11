@@ -7,6 +7,7 @@ import '../../glass.dart';
 import '../../motion.dart';
 import '../../theme.dart';
 import '../device_scope.dart';
+import '../midi_learn.dart';
 import '../kit/feel.dart';
 import 'mod_routing.dart';
 
@@ -404,6 +405,7 @@ class _ModulationSheet extends StatelessWidget {
               icon: const Icon(Icons.keyboard_outlined, size: 16),
               label: Text(formatParamValue(p, t.value(p.id)), style: Neon.code(size: 13, color: scope.accent))),
           ]),
+          Align(alignment: Alignment.centerLeft, child: MidiLearnButton(target: t, paramId: p.id, color: scope.accent)),
           const SizedBox(height: 10),
           if (routes.isEmpty)
             Padding(padding: const EdgeInsets.symmetric(vertical: 8), child: Text(

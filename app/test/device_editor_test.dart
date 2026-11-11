@@ -9,6 +9,8 @@ import 'package:caw/model/app_state.dart';
 import 'package:caw/model/arrange_fx.dart';
 import 'package:caw/model/device_target.dart';
 import 'package:caw/model/flagship_shapes.dart';
+import 'package:caw/model/live_midi.dart';
+import 'package:caw/platform/midi_input.dart';
 import 'package:caw/model/mod_matrix.dart';
 import 'package:caw/model/project.dart';
 import 'package:caw/model/settings.dart';
@@ -26,6 +28,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'flagship_fixture.dart';
+import 'live_midi_test.dart' show FakeMidi;
 import 'golden_util.dart';
 
 const _unknown = NativeComponentInfo(id: 'local.fuzz.cpp1', name: 'Fuzz', role: 'effect', ports: [
@@ -564,4 +567,33 @@ void main() {
     }
     e.dispose();
   }, skip: lib == null || lib.isEmpty);
+
+  wtest('Learn MIDI CC: long-press a knob, learn, move a hardware knob; it maps, moves the knob and can be forgotten',
+      (tester) async {
+    final midi = FakeMidi();
+    final live = LiveMidi(s, midi);
+    LiveMidi.current = live;
+    addTearDown(() {
+      LiveMidi.current = null;
+      live.dispose();
+    });
+    await openSynth(tester);
+    await tester.longPress(find.byKey(const ValueKey('dknob-osc1_level')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('midi-learn')));
+    await tester.pump();
+    expect(find.byKey(const ValueKey('midi-learn-waiting')), findsOneWidget);
+    midi.notes.add(const MidiMessage(0xB0, 21, 0, 'Knobs'));
+    await tester.pump();
+    expect(find.text('CC 21 · ch 1'), findsOneWidget);
+    expect(s.project.midiMappings.single.paramId, 'osc1_level');
+    midi.notes.add(const MidiMessage(0xB0, 21, 127, 'Knobs'));
+    final p = synth().param('osc1_level')!;
+    expect(synth().value('osc1_level'), p.max, reason: 'the top of the CC is the top of the knob');
+    await tester.pump(const Duration(milliseconds: 500)); // the movement is saved once the control rests
+    await tester.tap(find.byKey(const ValueKey('midi-forget')));
+    await tester.pump();
+    expect(s.project.midiMappings, isEmpty);
+    expect(find.text('Learn MIDI CC'), findsOneWidget);
+  });
 }
