@@ -51,6 +51,7 @@ public:
     LiveAudio& operator=(const LiveAudio&) = delete;
 
     // ---- audio thread (the device callback)
+    // `channels` is the device's own count, the buffer's stride (only the first kMaxInputChannels are used).
     void beginCallback(const float* interleaved, int channels, int frames) noexcept;
     // The Engine's chunk: frames [at, at + frames) of this call play song samples [songPos, songPos + frames).
     void chunk(int at, int frames, int64_t songPos, bool playing) noexcept;
@@ -58,10 +59,12 @@ public:
     float input(int channel, int frame) const noexcept {
         const int f = chunkAt_ + frame;
         if (!in_ || channel < 0 || channel >= inChannels_ || f < 0 || f >= inFrames_) return 0.0f;
-        return in_[static_cast<size_t>(f) * static_cast<size_t>(inChannels_) + static_cast<size_t>(channel)];
+        return in_[static_cast<size_t>(f) * static_cast<size_t>(inStride_) + static_cast<size_t>(channel)];
     }
     bool recordingNow() const noexcept { return armed_.load(std::memory_order_relaxed); }
-    // After process(): the latency ping's burst is added to the output here, and the input is captured.
+    // After process(): the latency ping's burst is added to the output here, and the input is captured. The
+    // callback's input is let go here: a process() outside a device callback hears none (the buffer is the
+    // device's and goes when it closes).
     void afterCallback(float* left, float* right, int frames) noexcept;
 
     // ---- control thread
@@ -82,7 +85,8 @@ public:
     std::string startRecording(std::string_view requestJson);
     std::string stopRecording();
     std::string recordingStatus();
-    // Finalises takes left behind by a crash (".wav.part" files in dir) and lists them.
+    // Finalises takes left behind by a crash (".wav.part" files in dir whose header is the recorder's own) and
+    // lists them. Refused while a recording in this process writes into the folder.
     static std::string recover(const std::string& dir);
 
     // Latency ping: a noise burst out, its echo found in the input (a loopback cable, or speaker to mic).
@@ -101,7 +105,8 @@ private:
     const double sr_;
     // audio thread
     const float* in_ = nullptr;
-    int inChannels_ = 0, inFrames_ = 0, chunkAt_ = 0;
+    int inChannels_ = 0, inStride_ = 0, inFrames_ = 0, chunkAt_ = 0;
+    std::atomic<bool> inChunk_{false};  // the audio thread is inside chunk() (startRecording waits it out)
     int32_t gap_ = 0;
     std::atomic<float> peaks_[kMaxInputChannels];
     std::atomic<int> deviceChannels_{0};
@@ -115,9 +120,10 @@ private:
     std::unique_ptr<Spsc<Header, 8192>> headers_;
     std::unique_ptr<Session> session_;
     std::thread writer_;
+    void waitForChunk() const noexcept;  // control thread, once disarmed: until no chunk() can still use the ring
     std::atomic<bool> stopWriter_{false};
     std::mutex ctl_;
-    // ping (0 idle, 1 asked, 2 playing and capturing, 3 captured)
+    // ping (0 idle, 1 asked, 2 playing and capturing, 3 captured, 4 being worked out)
     std::atomic<int> pingState_{0};
     std::vector<float> burst_, capture_;
     size_t pingAt_ = 0;

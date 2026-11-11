@@ -40,8 +40,8 @@ struct AudioAsset {
     double seconds() const noexcept { return rate > 0 ? static_cast<double>(frames) / rate : 0; }
 };
 
-// Bandlimited resampling of one channel (Kaiser-windowed sinc, 32 taps per side at the lower rate): the same
-// bits on every device. Control thread.
+// Bandlimited resampling of one channel (Kaiser-windowed sinc, 32 taps per side at the lower rate), after halfband
+// decimation stages while the source is at least 4 x the target: the same bits on every device. Control thread.
 std::vector<float> resampleChannel(const float* in, int64_t frames, double from, double to);
 // Fills asset.peaks from asset.data.
 void computePeaks(AudioAsset& asset);
@@ -50,9 +50,10 @@ void computePeaks(AudioAsset& asset);
 int32_t readPeaks(const AudioAsset& asset, int64_t startFrame, int64_t endFrame, int32_t buckets, uint32_t channel,
                   float* out) noexcept;
 
-// Decodes bytes (WAV, FLAC, MP3) into an asset at `rate`. False with `error`.
+// Decodes bytes (WAV, FLAC, MP3) into an asset at `rate`. False with `error`, also as soon as the decoded or
+// resampled samples would need more than `maxBytes` (the budget left; checked before they are allocated).
 bool decodeAsset(const uint8_t* bytes, size_t size, double rate, const std::string& name, AudioAsset& out,
-                 std::string& error);
+                 std::string& error, uint64_t maxBytes = kDefaultAssetBudget);
 
 // The process-wide store. Every call is on a control thread (it decodes and allocates) and takes the store's
 // lock; the audio thread never calls it. An asset stays while anything holds it; the store's own reference is
@@ -85,6 +86,7 @@ private:
     std::shared_ptr<const AudioAsset> insert(const std::string& key, std::shared_ptr<AudioAsset> a, uint64_t size,
                                              int64_t time, std::string& error);
     bool makeRoom(uint64_t need);
+    uint64_t roomLeft();  // the budget less what assets in use hold (the rest can be evicted)
     std::mutex lock_;
     std::map<std::string, Entry> entries_;
     uint64_t budget_ = kDefaultAssetBudget, clock_ = 0;

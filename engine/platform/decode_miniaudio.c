@@ -39,12 +39,16 @@ static void caw_decode_error(char* error, size_t len, const char* msg) {
     error[n] = '\0';
 }
 
-int caw_decode_audio(const void* data, size_t size, uint64_t max_frames, CawDecodedAudio* out, char* error,
-                     size_t error_len) {
+int caw_decode_audio(const void* data, size_t size, double max_seconds, uint64_t max_bytes, CawDecodedAudio* out,
+                     char* error, size_t error_len) {
     ma_decoder_config config;
     ma_decoder decoder;
-    float* pcm = NULL;
-    uint64_t capacity = 0, frames = 0;
+    float* pcm = NULL;   /* the kept channels, interleaved */
+    float* read = NULL;  /* one chunk of every channel the file has */
+    uint64_t capacity = 0, frames = 0, max_frames, budget_frames;
+    uint32_t channels, keep;
+    const uint64_t chunk = 4096;
+    int over_budget = 0;
     if (!out) return 0;
     memset(out, 0, sizeof *out);
     if (!data || size == 0) {
@@ -62,21 +66,44 @@ int caw_decode_audio(const void* data, size_t size, uint64_t max_frames, CawDeco
         caw_decode_error(error, error_len, "the file has an unsupported channel count or sample rate");
         return 0;
     }
+    channels = decoder.outputChannels;
+    keep = channels < 2 ? channels : 2;
+    /* The limits at the file's real rate and channel count, before anything is decoded. */
+    max_frames = max_seconds > 0 ? (uint64_t)(max_seconds * (double)decoder.outputSampleRate) : 0;
+    budget_frames = max_bytes / (sizeof(float) * keep);
+    if (budget_frames < max_frames) {
+        max_frames = budget_frames;
+        over_budget = 1;
+    }
+    if (max_frames > (uint64_t)SIZE_MAX / (sizeof(float) * channels)) max_frames = (uint64_t)SIZE_MAX / (sizeof(float) * channels);
+    read = (float*)malloc((size_t)chunk * sizeof(float) * channels);
+    if (!read) {
+        ma_decoder_uninit(&decoder);
+        caw_decode_error(error, error_len, "out of memory decoding the file");
+        return 0;
+    }
     for (;;) {
-        const uint64_t chunk = 16384;
         ma_uint64 got = 0;
-        if (frames + chunk > capacity) {
+        uint64_t i;
+        uint32_t c;
+        if (ma_decoder_read_pcm_frames(&decoder, read, chunk, &got) != MA_SUCCESS || got == 0) break;
+        if (frames + got > max_frames) {
+            free(read);
+            free(pcm);
+            ma_decoder_uninit(&decoder);
+            caw_decode_error(error, error_len,
+                             over_budget ? "the file needs more memory than the audio budget has left"
+                                         : "the file is longer than the asset limit");
+            return 0;
+        }
+        if (frames + got > capacity) {
             uint64_t next = capacity ? capacity * 2 : 65536;
             float* grown;
-            if (next > max_frames + chunk) next = max_frames + chunk;
-            if (next < frames + chunk || next > (uint64_t)SIZE_MAX / (sizeof(float) * decoder.outputChannels)) {
-                free(pcm);
-                ma_decoder_uninit(&decoder);
-                caw_decode_error(error, error_len, "the file is longer than the asset limit");
-                return 0;
-            }
-            grown = (float*)realloc(pcm, (size_t)next * sizeof(float) * decoder.outputChannels);
+            if (next < frames + got) next = frames + got;
+            if (next > max_frames) next = max_frames;
+            grown = (float*)realloc(pcm, (size_t)next * sizeof(float) * keep);
             if (!grown) {
+                free(read);
                 free(pcm);
                 ma_decoder_uninit(&decoder);
                 caw_decode_error(error, error_len, "out of memory decoding the file");
@@ -85,18 +112,13 @@ int caw_decode_audio(const void* data, size_t size, uint64_t max_frames, CawDeco
             pcm = grown;
             capacity = next;
         }
-        if (ma_decoder_read_pcm_frames(&decoder, pcm + frames * decoder.outputChannels, chunk, &got) != MA_SUCCESS ||
-            got == 0)
-            break;
+        for (i = 0; i < got; ++i)
+            for (c = 0; c < keep; ++c) pcm[(frames + i) * keep + c] = read[i * channels + c];
         frames += got;
-        if (frames > max_frames) {
-            free(pcm);
-            ma_decoder_uninit(&decoder);
-            caw_decode_error(error, error_len, "the file is longer than the asset limit");
-            return 0;
-        }
     }
-    out->channels = decoder.outputChannels;
+    free(read);
+    out->channels = keep;
+    out->source_channels = channels;
     out->sample_rate = decoder.outputSampleRate;
     ma_decoder_uninit(&decoder);
     if (frames == 0) {

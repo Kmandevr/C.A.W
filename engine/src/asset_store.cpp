@@ -2,6 +2,7 @@
 #include "asset_store.h"
 
 #include <algorithm>
+#include <array>
 #include "caw/detmath.hpp"
 #include <cmath>
 #include <cstdio>
@@ -10,6 +11,7 @@
 
 #include "../platform/decode_audio.h"
 #include "json.h"
+#include "utf8_path.h"
 
 namespace caw {
 
@@ -32,11 +34,50 @@ double besselI0(double x) {
     return sum;
 }
 
+// One halfband decimation stage: a 31-tap Kaiser-windowed sinc lowpass at a quarter of the rate (passband to 0.12,
+// stopband from 0.38 of the rate, about 120 dB down), keeping every second sample. Every even tap but the centre is
+// zero. Used only while the rate is at least 4 x the target, so the final resampler's own lowpass (at the target's
+// Nyquist) covers everything this stage's transition band lets through.
+std::vector<float> halve(const float* in, int64_t frames) {
+    constexpr int kHalf = 15;  // odd taps 1, 3, .. 15 each side
+    constexpr double kBeta = 11.0;
+    static const auto taps = [] {
+        std::array<double, kHalf + 1> h{};
+        const double i0b = besselI0(kBeta);
+        for (int n = 1; n <= kHalf; n += 2) {
+            const double u = static_cast<double>(n) / (kHalf + 1);
+            const double sign = ((n - 1) / 2) % 2 ? -1.0 : 1.0;  // sin(pi n / 2)
+            h[static_cast<size_t>(n)] = sign / (3.14159265358979323846 * n) * besselI0(kBeta * std::sqrt(1.0 - u * u)) / i0b;
+        }
+        return h;
+    }();
+    const int64_t outFrames = (frames + 1) / 2;
+    std::vector<float> out(static_cast<size_t>(outFrames));
+    auto at = [&](int64_t j) { return j < 0 || j >= frames ? 0.0 : static_cast<double>(in[j]); };
+    for (int64_t k = 0; k < outFrames; ++k) {
+        const int64_t c = 2 * k;
+        double acc = 0.5 * at(c);
+        for (int n = 1; n <= kHalf; n += 2) acc += taps[static_cast<size_t>(n)] * (at(c - n) + at(c + n));
+        out[static_cast<size_t>(k)] = static_cast<float>(acc);
+    }
+    return out;
+}
+
 }  // namespace
 
 std::vector<float> resampleChannel(const float* in, int64_t frames, double from, double to) {
     if (frames <= 0) return {};
     if (from == to) return std::vector<float>(in, in + frames);
+    // The output length and positions follow the original rates; far down, halfband stages bring the input to
+    // below 4 x the target first, so the final kernel is at most about 133 taps a side.
+    const int64_t outFrames = std::max<int64_t>(1, static_cast<int64_t>(std::floor(static_cast<double>(frames) * (to / from))));
+    std::vector<float> staged;
+    while (from >= 4.0 * to) {
+        staged = halve(in, frames);
+        in = staged.data();
+        frames = static_cast<int64_t>(staged.size());
+        from /= 2.0;
+    }
     constexpr int kZeroCrossings = 32;
     constexpr int kPhases = 512;
     constexpr double kBeta = 9.0;
@@ -61,7 +102,6 @@ std::vector<float> resampleChannel(const float* in, int64_t frames, double from,
         const double f = t - k;
         return table[static_cast<size_t>(k)] + (table[static_cast<size_t>(k) + 1] - table[static_cast<size_t>(k)]) * f;
     };
-    const int64_t outFrames = std::max<int64_t>(1, static_cast<int64_t>(std::floor(static_cast<double>(frames) * ratio)));
     std::vector<float> out(static_cast<size_t>(outFrames));
     const int width = static_cast<int>(std::ceil(half));
     for (int64_t i = 0; i < outFrames; ++i) {
@@ -149,15 +189,15 @@ int32_t readPeaks(const AudioAsset& a, int64_t start, int64_t end, int32_t bucke
 }
 
 bool decodeAsset(const uint8_t* bytes, size_t size, double rate, const std::string& name, AudioAsset& out,
-                 std::string& error) {
+                 std::string& error, uint64_t maxBytes) {
     if (!(rate >= 8000 && rate <= 192000)) {
         error = "the engine rate must be 8000..192000 Hz";
         return false;
     }
     CawDecodedAudio d;
     char why[256] = {0};
-    // The most frames any rate up to 768 kHz may hold in kMaxAssetSeconds, checked again below at the real rate.
-    if (!caw_decode_audio(bytes, size, static_cast<uint64_t>(kMaxAssetSeconds * 768000.0), &d, why, sizeof why)) {
+    // The decoder sets its limits from the file's own rate and channels before decoding anything.
+    if (!caw_decode_audio(bytes, size, kMaxAssetSeconds, maxBytes, &d, why, sizeof why)) {
         error = name + ": " + why;
         return false;
     }
@@ -172,14 +212,20 @@ bool decodeAsset(const uint8_t* bytes, size_t size, double rate, const std::stri
     out.path = name;
     out.rate = rate;
     out.sourceRate = d.sample_rate;
-    out.sourceChannels = d.channels;
+    out.sourceChannels = d.source_channels;
     out.sourceFrames = static_cast<int64_t>(d.frames);
     out.channels = d.channels >= 2 ? 2 : 1;
+    // The resampled planes, checked against the budget before they are made (upsampling grows them).
+    const double resampled = std::floor(static_cast<double>(d.frames) * rate / d.sample_rate) + 1;
+    if (resampled * out.channels * sizeof(float) > static_cast<double>(maxBytes)) {
+        error = name + ": the file needs more memory than the audio budget has left";
+        return false;
+    }
     try {
         std::vector<float> plane(static_cast<size_t>(d.frames));
         for (uint32_t c = 0; c < out.channels; ++c) {
             for (uint64_t i = 0; i < d.frames; ++i) {
-                const float v = d.interleaved[i * d.channels + c];
+                const float v = d.interleaved[i * d.channels + c];  // d.channels: the kept ones
                 plane[static_cast<size_t>(i)] = std::isfinite(v) ? std::clamp(v, -8.0f, 8.0f) : 0.0f;
             }
             out.data[c] = resampleChannel(plane.data(), static_cast<int64_t>(d.frames), d.sample_rate, rate);
@@ -205,6 +251,14 @@ std::string keyOf(const std::string& path, double rate) {
     return path + r;
 }
 }  // namespace
+
+uint64_t AssetStore::roomLeft() {
+    std::lock_guard<std::mutex> g(lock_);
+    uint64_t held = 0;
+    for (const auto& [k, e] : entries_)
+        if (e.asset.use_count() > 1) held += e.asset->bytes();
+    return held < budget_ ? budget_ - held : 0;
+}
 
 bool AssetStore::makeRoom(uint64_t need) {
     uint64_t total = 0;
@@ -248,12 +302,13 @@ std::shared_ptr<const AudioAsset> AssetStore::load(const std::string& path, doub
         return found;
     }
     std::error_code ec;
-    const uint64_t size = fs::file_size(path, ec);
+    const fs::path file = utf8Path(path);
+    const uint64_t size = fs::file_size(file, ec);
     if (ec) {
         error = path + " can't be read";
         return nullptr;
     }
-    const auto when = fs::last_write_time(path, ec);
+    const auto when = fs::last_write_time(file, ec);
     const int64_t time = ec ? 0 : static_cast<int64_t>(when.time_since_epoch().count());
     const std::string key = keyOf(path, rate);
     {
@@ -275,7 +330,7 @@ std::shared_ptr<const AudioAsset> AssetStore::load(const std::string& path, doub
         error = path + ": out of memory";
         return nullptr;
     }
-    std::FILE* f = std::fopen(path.c_str(), "rb");
+    std::FILE* f = openFile(file, "rb");
     const bool read = f && std::fread(bytes.data(), 1, bytes.size(), f) == bytes.size();
     if (f) std::fclose(f);
     if (!read) {
@@ -283,7 +338,7 @@ std::shared_ptr<const AudioAsset> AssetStore::load(const std::string& path, doub
         return nullptr;
     }
     auto a = std::make_shared<AudioAsset>();
-    if (!decodeAsset(bytes.data(), bytes.size(), rate, path, *a, error)) return nullptr;
+    if (!decodeAsset(bytes.data(), bytes.size(), rate, path, *a, error, roomLeft())) return nullptr;
     std::lock_guard<std::mutex> g(lock_);
     return insert(key, std::move(a), size, time, error);
 }
@@ -291,7 +346,7 @@ std::shared_ptr<const AudioAsset> AssetStore::load(const std::string& path, doub
 std::shared_ptr<const AudioAsset> AssetStore::loadBytes(const std::string& name, const uint8_t* bytes, size_t size,
                                                         double rate, std::string& error) {
     auto a = std::make_shared<AudioAsset>();
-    if (!decodeAsset(bytes, size, rate, "mem:" + name, *a, error)) return nullptr;
+    if (!decodeAsset(bytes, size, rate, "mem:" + name, *a, error, roomLeft())) return nullptr;
     std::lock_guard<std::mutex> g(lock_);
     return insert(keyOf("mem:" + name, rate), std::move(a), size, 0, error);
 }

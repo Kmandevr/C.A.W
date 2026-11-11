@@ -1,5 +1,8 @@
 // WP-J: the asset store (decoding, resampling, peaks), audio clips on tracks, time-stretch, the sampler, SFZ and input.
 #include <algorithm>
+#include <thread>
+#include <atomic>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -119,6 +122,36 @@ TEST(assets_decode_wav_resample_and_keep_frequency) {
     std::filesystem::remove_all(dir);
 }
 
+TEST(assets_resample_far_down_in_halfband_stages_quickly_and_cleanly) {
+    // 768 kHz to 48 kHz once cost about 1,070 taps a side per output; staged halfband decimation brings it near the
+    // cost of 96 kHz to 48 kHz. A 1 kHz tone passes; a 30 kHz one (above the new Nyquist) does not fold down.
+    auto signal = [](double rate, int64_t frames) {
+        std::vector<float> x(static_cast<size_t>(frames));
+        for (int64_t i = 0; i < frames; ++i)
+            x[static_cast<size_t>(i)] = static_cast<float>(0.5 * std::sin(2 * 3.14159265358979 * 1000.0 * i / rate) +
+                                                           0.3 * std::sin(2 * 3.14159265358979 * 30000.0 * i / rate));
+        return x;
+    };
+    const auto hi = signal(768000, 768000), lo = signal(96000, 96000);
+    auto time = [](const std::vector<float>& x, double from, std::vector<float>& out) {
+        const auto t0 = std::chrono::steady_clock::now();
+        out = resampleChannel(x.data(), static_cast<int64_t>(x.size()), from, 48000);
+        return std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+    };
+    std::vector<float> a, b;
+    double ta = 1e9, tb = 1e9;
+    for (int k = 0; k < 3; ++k) {
+        ta = std::min(ta, time(hi, 768000, a));
+        tb = std::min(tb, time(lo, 96000, b));
+    }
+    CHECK(ta < 4 * tb);
+    CHECK_EQ(a.size(), size_t{48000});
+    double err = 0;
+    for (size_t i = 2000; i < 46000; ++i)
+        err = std::max(err, std::fabs(a[i] - 0.5 * std::sin(2 * 3.14159265358979 * 1000.0 * static_cast<double>(i) / 48000.0)));
+    CHECK(err < 1e-4);
+}
+
 TEST(assets_refuse_garbage_truncated_and_missing_files) {
     const std::string dir = tempDir("bad");
     std::string error;
@@ -146,6 +179,40 @@ TEST(assets_refuse_garbage_truncated_and_missing_files) {
         AudioAsset out;
         decodeAsset(fuzz.data(), fuzz.size(), 48000, "fuzz", out, error);
     }
+    std::filesystem::remove_all(dir);
+}
+
+TEST(assets_decode_stops_at_the_budget_from_the_files_own_rate_and_channels) {
+    // The decoder's limits come from the file's real rate and channel count, before the samples are decoded: a file
+    // whose kept samples (at most two channels) would pass the budget is refused, and many channels cost two.
+    const std::string dir = tempDir("decodebudget");
+    std::string error;
+    const std::string mono = writeWav(dir + "/mono.wav", 48000, 1, 300000, [](int64_t i, int) { return noiseAt(i, 0); }, false);
+    std::ifstream f(mono, std::ios::binary);
+    const std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+    AudioAsset a;
+    CHECK(!decodeAsset(bytes.data(), bytes.size(), 48000, "mono", a, error, 1u << 20));  // 1.2 MB of floats
+    CHECK(error.find("budget") != std::string::npos);
+    error.clear();
+    CHECK(decodeAsset(bytes.data(), bytes.size(), 48000, "mono", a, error, 2u << 20));
+    CHECK_EQ(a.frames, int64_t{300000});
+    // 32 channels of 20000 frames: 2.5 MB interleaved, but only the first two are kept (160 kB).
+    const std::string wide = writeWav(dir + "/wide.wav", 48000, 32, 20000, [](int64_t i, int c) { return c * 0.01f + 0 * i; });
+    std::ifstream g(wide, std::ios::binary);
+    const std::vector<uint8_t> wb((std::istreambuf_iterator<char>(g)), std::istreambuf_iterator<char>());
+    AudioAsset w;
+    CHECK(decodeAsset(wb.data(), wb.size(), 48000, "wide", w, error, 400000));
+    CHECK_EQ(w.sourceChannels, 32u);
+    CHECK_EQ(w.channels, 2u);
+    CHECK_NEAR(w.data[1][5000], 0.01, 1e-4);
+    // The store passes what its budget has left (less the assets in use).
+    AssetStore& s = AssetStore::global();
+    const uint64_t was = s.budget();
+    s.purge();
+    s.setBudget(1u << 20);
+    CHECK(s.load(mono, 48000, error) == nullptr);
+    CHECK(error.find("budget") != std::string::npos);
+    s.setBudget(was);
     std::filesystem::remove_all(dir);
 }
 
@@ -237,10 +304,10 @@ TEST(audio_clip_edits_offset_gain_fade_reverse_loop_and_mute) {
     // reverse: the first frame is the file's last
     x = render(clipProject(p, ",\"start_steps\":0,\"length_steps\":1,\"reverse\":true"), 6000);
     CHECK_NEAR(x[0], k * noiseAt(11999, 0), 1e-6);
-    // loop: 4 steps long over a 2-step file: the second pass repeats the first
+    // loop: 4 steps long over a 2-step file: the second pass repeats the first (past the seam's 2 ms fade in)
     x = render(clipProject(p, ",\"start_steps\":0,\"length_steps\":4,\"loop\":true"), 24000);
-    CHECK_NEAR(x[12000 + 77], x[77], 1e-7);
-    CHECK(std::fabs(x[12000 + 77]) > 0);
+    CHECK_NEAR(x[12000 + 577], x[577], 1e-7);
+    CHECK(std::fabs(x[12000 + 577]) > 0);
     // a linear fade in over 0.1 s: halfway is half
     x = render(clipProject(p, ",\"start_steps\":0,\"length_steps\":2,\"fade_in_seconds\":0.1"), 12000);
     CHECK_NEAR(x[2400], 0.5 * k * noiseAt(2400, 0), 1e-6);
@@ -294,6 +361,80 @@ TEST(musical_clip_follows_the_tempo_and_fixed_does_not) {
     // Fixed: the file at its own speed, done after 24000 frames.
     x = render(clipProject(p, ",\"start_steps\":0,\"length_steps\":4", 1, 60), 48000);
     CHECK_EQ(x[30000], 0.0f);
+    std::filesystem::remove_all(dir);
+}
+
+namespace {
+// The largest step between neighbouring samples of x[from..to).
+float largestStep(const std::vector<float>& x, size_t from, size_t to) {
+    float d = 0;
+    for (size_t i = from + 1; i < to && i < x.size(); ++i) d = std::max(d, std::fabs(x[i] - x[i - 1]));
+    return d;
+}
+float sineAt(int64_t i, double hz) { return static_cast<float>(0.5 * std::sin(2 * 3.14159265358979 * hz * i / 48000.0)); }
+}  // namespace
+
+TEST(fixed_clip_keeps_its_source_position_across_a_tempo_change) {
+    // A fixed clip plays its file at its own speed: a tempo change moves where the clip starts on the song, but the
+    // voice already sounding carries on from where it is (no jump back or forward).
+    const std::string dir = tempDir("tempochange");
+    const std::string p = writeWav(dir + "/n.wav", 48000, 1, 144000, [](int64_t i, int) { return noiseAt(i, 0); });
+    const std::string fields = ",\"start_steps\":8,\"length_steps\":16";
+    Engine e(48000);
+    e.setMasterBypass(true);
+    CHECK(e.setProjectJson(clipProject(p, fields, 2, 120)).find("\"ok\":true") != std::string::npos);
+    e.play();
+    std::vector<float> l(100032), r(100032);
+    for (int i = 0; i < 60032; i += 64) e.process(l.data() + i, r.data() + i, 64);
+    CHECK(e.setProjectJson(clipProject(p, fields, 2, 130)).find("\"ok\":true") != std::string::npos);
+    for (int i = 60032; i < 100032; i += 64) e.process(l.data() + i, r.data() + i, 64);
+    const double k = l[48000] / noiseAt(0, 0);
+    CHECK(k > 0.5);
+    double err = 0;
+    for (int t = 62000; t < 80000; ++t) err = std::max(err, std::fabs(l[static_cast<size_t>(t)] - k * noiseAt(t - 48000, 0)));
+    CHECK(err < 1e-5);
+    std::filesystem::remove_all(dir);
+}
+
+TEST(clip_voices_declick_on_a_loop_wrap_a_mode_change_and_stop_and_loops_crossfade) {
+    const std::string dir = tempDir("declick");
+    // 55 Hz: no whole number of cycles in the spans below, so every hard cut would jump.
+    const std::string p = writeWav(dir + "/s.wav", 48000, 1, 200000, [](int64_t i, int) { return sineAt(i, 55); });
+    const float smooth = 0.5f * 2 * 3.14159265f * 55 / 48000 * 1.5f;  // a little over the sine's own largest step
+    // The clip runs past the song loop's end: at the wrap the old voice fades out while the clip starts again.
+    std::string looped = clipProject(p, ",\"start_steps\":0,\"length_steps\":32", 2);
+    looped.replace(looped.find("\"loop_bars\""), 0, "\"loop_range\":true,\"loop_start_steps\":0,\"loop_end_steps\":16,");
+    auto x = render(looped, 110000, 64);
+    float before = 0;
+    for (size_t i = 95000; i < 96000; ++i) before = std::max(before, std::fabs(x[i]));
+    CHECK(before > 0.1f);
+    CHECK(largestStep(x, 95000, 97000) < 0.01f);
+    // A loop seam (the whole file looped, 14000 frames: 16.04 cycles, so the splice would jump by 0.12): no hard
+    // splice. Then a loop with audio before its start, and one with audio only after its end.
+    const std::string q = writeWav(dir + "/q.wav", 48000, 1, 14000, [](int64_t i, int) { return sineAt(i, 55); });
+    x = render(clipProject(q, ",\"start_steps\":0,\"length_steps\":8,\"loop\":true"), 40000, 64);
+    CHECK(largestStep(x, 13500, 14500) < 0.01f);
+    CHECK(largestStep(x, 27500, 28500) < 0.01f);
+    x = render(clipProject(p, ",\"start_steps\":0,\"length_steps\":8,\"loop\":true,\"offset_seconds\":0.1,"
+                              "\"loop_start_seconds\":0.1,\"loop_end_seconds\":0.29"), 40000, 64);
+    CHECK(largestStep(x, 8500, 10000) < 0.01f);
+    x = render(clipProject(p, ",\"start_steps\":0,\"length_steps\":8,\"loop\":true,\"loop_end_seconds\":0.2915"), 40000, 64);
+    CHECK(largestStep(x, 13500, 14500) < 0.01f);
+    // A mode change while it sounds (pitch 0 to 2: direct to stretched), and stop.
+    Engine e(48000);
+    e.setMasterBypass(true);
+    CHECK(e.setProjectJson(clipProject(p, ",\"start_steps\":0,\"length_steps\":16")).find("\"ok\":true") != std::string::npos);
+    e.play();
+    std::vector<float> l(60032), r(60032);
+    for (int i = 0; i < 30016; i += 64) e.process(l.data() + i, r.data() + i, 64);
+    CHECK(e.setProjectJson(clipProject(p, ",\"start_steps\":0,\"length_steps\":16,\"pitch\":2")).find("\"ok\":true") != std::string::npos);
+    for (int i = 30016; i < 45056; i += 64) e.process(l.data() + i, r.data() + i, 64);
+    e.stop();
+    for (int i = 45056; i < 60032; i += 64) e.process(l.data() + i, r.data() + i, 64);
+    CHECK(largestStep(l, 29000, 32000) < 0.02f);
+    CHECK(std::fabs(l[45000]) > 0.05f || std::fabs(l[44990]) > 0.05f);
+    CHECK(largestStep(l, 44000, 47000) < 0.02f);
+    (void)smooth;
     std::filesystem::remove_all(dir);
 }
 
@@ -418,6 +559,52 @@ TEST(sampler_round_robins_loops_and_one_shots) {
     std::filesystem::remove_all(dir);
 }
 
+namespace {
+std::string samplerJson(const std::string& state, const std::string& params, const std::string& notes) {
+    return "{\"caw_project\":1,\"bpm\":120,\"loop_bars\":2,\"master\":1,\"modules\":[{\"id\":\"p\",\"source\":\""
+           "---\\nkind: pattern\\nlength: 32\\n---\\n" + notes + "\"}],\"layers\":[{\"id\":\"s\",\"name\":\"S\",\"volume\":1,"
+           "\"pattern\":\"p\",\"instrument\":{\"id\":\"org.caw.sampler\",\"params\":{" + params + "},\"state\":\"" +
+           b64(state) + "\"}}]}";
+}
+}  // namespace
+
+TEST(sampler_steals_a_releasing_voice_first_and_fades_the_stolen_one) {
+    const std::string dir = tempDir("steal");
+    const std::string a = writeWav(dir + "/a.wav", 48000, 1, 96000, [](int64_t, int) { return 0.25f; });
+    const std::string b = writeWav(dir + "/b.wav", 48000, 1, 96000, [](int64_t, int) { return -0.25f; });
+    const std::string zones = "{\"zones\":[{\"path\":\"" + jsonEscape(a) + "\",\"lokey\":60,\"hikey\":60},{\"path\":\"" +
+                              jsonEscape(b) + "\",\"lokey\":62,\"hikey\":62},{\"path\":\"" + jsonEscape(a) +
+                              "\",\"lokey\":64,\"hikey\":64}]}";
+    // Two voices: A held, B released (a long release), then C: B goes, not the older A.
+    auto x = render(samplerJson(zones, "\"polyphony\":2,\"attack\":0.005,\"release\":1",
+                                "0 C4 12 1\\n2 D4 1 1\\n4 E4 4 1\\n"), 40000, 64);
+    CHECK_NEAR(x[33000], 0.5 * std::sqrt(0.5), 0.02);  // A and C (each 0.25, at the centre's -3 dB)
+    // One voice: the second note steals the first, which fades out over about 5 ms instead of stopping dead.
+    x = render(samplerJson(zones, "\"polyphony\":1,\"attack\":0.005", "0 C4 4 1\\n1 D4 4 1\\n"), 12000, 64);
+    CHECK(x[5900] > 0.15f);
+    CHECK(largestStep(x, 5800, 6800) < 0.02f);
+    std::filesystem::remove_all(dir);
+}
+
+TEST(sampler_reload_fades_the_sounding_voices_out) {
+    const std::string dir = tempDir("reload");
+    const std::string a = writeWav(dir + "/a.wav", 48000, 1, 96000, [](int64_t, int) { return 0.25f; });
+    const std::string b = writeWav(dir + "/b.wav", 48000, 1, 96000, [](int64_t, int) { return -0.25f; });
+    const std::string za = "{\"zones\":[{\"path\":\"" + jsonEscape(a) + "\"}]}";
+    const std::string zb = "{\"zones\":[{\"path\":\"" + jsonEscape(b) + "\"}]}";
+    Engine e(48000);
+    e.setMasterBypass(true);
+    CHECK(e.setProjectJson(samplerJson(za, "\"attack\":0", "0 C4 16 1\\n")).find("\"ok\":true") != std::string::npos);
+    e.play();
+    std::vector<float> l(24000), r(24000);
+    for (int i = 0; i < 12032; i += 64) e.process(l.data() + i, r.data() + i, 64);
+    CHECK(e.setProjectJson(samplerJson(zb, "\"attack\":0", "0 C4 16 1\\n")).find("\"ok\":true") != std::string::npos);
+    for (int i = 12032; i < 24000; i += 64) e.process(l.data() + i, r.data() + i, 64);
+    CHECK(l[12000] > 0.15f);
+    CHECK(largestStep(l, 11000, 20000) < 0.02f);
+    std::filesystem::remove_all(dir);
+}
+
 TEST(sfz_import_reads_headers_inheritance_note_names_and_warns) {
     const std::string sfz = R"(// test
 #define $ROOT 60
@@ -466,6 +653,27 @@ TEST(sfz_import_reads_headers_inheritance_note_names_and_warns) {
     CHECK(text.find("sample=samples/piano soft.wav") != std::string::npos);
 }
 
+TEST(sfz_defines_expand_once_longest_name_first_and_are_capped) {
+    SamplerProgram p;
+    std::vector<std::string> warnings;
+    std::string error;
+    // $A must not replace inside $AB, and a value is not expanded again.
+    CHECK(importSfzText("#define $A 1\n#define $AB 70\n#define $C $A\n<region> sample=x$C.wav key=$AB lovel=$A\n", "/k", p,
+                        warnings, error));
+    CHECK_EQ(p.zones.size(), size_t{1});
+    if (p.zones.size() == 1) {
+        CHECK_EQ(p.zones[0].lokey, 70);
+        CHECK_EQ(p.zones[0].lovel, 1);
+        CHECK_EQ(p.zones[0].path, std::string("/k/x$A.wav"));
+    }
+    // A 2000-character value used a million times would be 2 GB: refused, quickly, past 4 x the 4 MB file limit.
+    std::string big = "#define $X " + std::string(2000, 'v') + "\n<region> sample=a.wav ";
+    big.reserve(big.size() + 2000000);
+    for (int i = 0; i < 1000000; ++i) big += "$X";
+    CHECK(!importSfzText(big, "/k", p, warnings, error));
+    CHECK(error.find("#define") != std::string::npos);
+}
+
 TEST(sfz_export_copies_samples_and_the_c_api_round_trips) {
     const std::string dir = tempDir("sfzexport");
     const std::string a = writeWav(dir + "/src a.wav", 48000, 1, 100, [](int64_t i, int) { return noiseAt(i, 0); });
@@ -483,6 +691,56 @@ TEST(sfz_export_copies_samples_and_the_c_api_round_trips) {
     CHECK(imported.find("samples/src_a.wav") != std::string::npos);
     CHECK(imported.find("\"lokey\":10") != std::string::npos);
     CHECK(imported.find("missing sample") == std::string::npos);
+    std::filesystem::remove_all(dir);
+}
+
+TEST(sfz_export_never_overwrites_copies_only_audio_and_keeps_unicode_names) {
+    const std::string dir = tempDir("sfzexport2");
+    const std::string a = writeWav(dir + "/src a.wav", 48000, 1, 100, [](int64_t i, int) { return noiseAt(i, 0); });
+    const std::string u = writeWav(dir + "/\xc3\xbcn\xc3\xafc\xc3\xb6de.wav", 48000, 1, 100, [](int64_t i, int) { return noiseAt(i, 1); });
+    std::filesystem::create_directories(dir + "/out/samples");
+    {
+        std::ofstream keep(dir + "/out/samples/Src_A.wav", std::ios::binary);  // the same name but for case
+        keep << "keep";
+    }
+    const std::string state = "{\"zones\":[{\"path\":\"" + jsonEscape(a) + "\"},{\"path\":\"" + jsonEscape(u) + "\",\"lokey\":70}]}";
+    char* r = caw_sfz_export(state.c_str(), (dir + "/out/kit.sfz").c_str(), 1);
+    const std::string out = r;
+    caw_free(r);
+    CHECK(out.find("\"ok\":true") != std::string::npos);
+    CHECK(out.find("samples/src_a_2.wav") != std::string::npos);
+    CHECK_EQ(std::filesystem::file_size(dir + "/out/samples/Src_A.wav"), std::uintmax_t{4});
+    CHECK(std::filesystem::exists(dir + "/out/samples/src_a_2.wav"));
+    // A zone naming something that is not audio is not copied.
+    {
+        std::ofstream secret(dir + "/secret.wav", std::ios::binary);
+        secret << "password=hunter2";
+    }
+    const std::string bad = "{\"zones\":[{\"path\":\"" + jsonEscape(dir + "/secret.wav") + "\"}]}";
+    r = caw_sfz_export(bad.c_str(), (dir + "/out/bad.sfz").c_str(), 1);
+    const std::string refused = r;
+    caw_free(r);
+    CHECK(refused.find("\"ok\":false") != std::string::npos);
+    CHECK(!std::filesystem::exists(dir + "/out/samples/secret.wav"));
+    std::filesystem::remove_all(dir);
+}
+
+TEST(huge_sfz_offsets_and_peak_times_are_clamped_before_the_cast) {
+    SamplerProgram p;
+    std::vector<std::string> warnings;
+    std::string error;
+    CHECK(importSfzText("<region> sample=a.wav offset=1e300 end=1e300 loop_start=1e300 loop_end=1e300\n", "/k", p, warnings, error));
+    if (p.zones.size() == 1) {
+        CHECK_EQ(p.zones[0].offset, int64_t{9000000000000000});
+        CHECK_EQ(p.zones[0].loopEnd, int64_t{9000000000000000});
+    }
+    const std::string dir = tempDir("peaksclamp");
+    const std::string a = writeWav(dir + "/a.wav", 48000, 1, 1000, [](int64_t i, int) { return noiseAt(i, 0); });
+    CawEngine* e = caw_engine_create(48000);
+    float out[8];
+    CHECK_EQ(caw_asset_peaks(e, a.c_str(), 1e300, 2e300, 4, 0, out), 0);
+    CHECK(caw_asset_peaks(e, a.c_str(), 0, 1e300, 4, 0, out) >= 0);
+    caw_engine_destroy(e);
     std::filesystem::remove_all(dir);
 }
 
@@ -666,6 +924,136 @@ TEST(recovery_finalises_a_take_left_by_a_crash) {
     CHECK(a != nullptr);
     if (a) CHECK_EQ(a->frames, int64_t{1000});
     CHECK(!std::filesystem::exists(part));
+    std::filesystem::remove_all(dir);
+}
+
+TEST(input_is_let_go_after_each_callback_and_read_at_the_devices_own_stride) {
+    std::vector<float> in, l(256), r(256);
+    Engine e(48000);
+    e.setMasterBypass(true);
+    CHECK(e.setProjectJson(inputProject("on", false)).find("\"ok\":true") != std::string::npos);
+    for (int k = 0; k < 4; ++k) callback(e, in, 0.25f, 256, l.data(), r.data());
+    CHECK_NEAR(l[200], 0.25 * std::sqrt(0.5), 1e-6);
+    // The device closed: its buffer is gone (here overwritten). A process() without a callback hears silence.
+    std::fill(in.begin(), in.end(), 0.9f);
+    e.process(l.data(), r.data(), 256);
+    CHECK_EQ(l[200], 0.0f);
+    // A device with 34 channels: channel 1 of each frame is at frame * 34 + 1, even though only 32 are used.
+    std::vector<float> wide(256 * 34);
+    for (size_t i = 0; i < wide.size(); ++i) wide[i] = static_cast<float>(i % 34) * 0.01f;
+    for (int k = 0; k < 4; ++k) {
+        e.liveAudio().beginCallback(wide.data(), 34, 256);
+        e.process(l.data(), r.data(), 256);
+        e.liveAudio().afterCallback(l.data(), r.data(), 256);
+    }
+    float worst = 0;
+    for (int i = 100; i < 256; ++i) worst = std::max(worst, std::fabs(l[static_cast<size_t>(i)] - 0.01f * std::sqrt(0.5f)));
+    CHECK(worst < 1e-6f);
+}
+
+TEST(recording_restarts_straight_away_while_the_audio_thread_runs) {
+    // startRecording right after stopRecording reallocates the ring and scratch: never while a callback is in chunk().
+    const std::string dir = tempDir("restart");
+    Engine e(48000);
+    e.setMasterBypass(true);
+    e.setProjectJson(inputProject("off", true));
+    e.liveAudio().setDeviceChannels(4);
+    e.play();
+    std::atomic<bool> stop{false};
+    std::thread audio([&] {
+        std::vector<float> in(64 * 4, 0.1f), l(64), r(64);
+        while (!stop.load()) {
+            e.liveAudio().beginCallback(in.data(), 4, 64);
+            e.process(l.data(), r.data(), 64);
+            e.liveAudio().afterCallback(l.data(), r.data(), 64);
+        }
+    });
+    int ok = 0;
+    for (int k = 0; k < 60; ++k) {
+        const int ch = k % 3;  // 1, 2 then 3 channels in use: a new ring size each time
+        const std::string req = "{\"dir\":\"" + jsonEscape(dir) + "\",\"bpm\":120,\"tracks\":[{\"layer\":\"t\",\"channel\":" +
+                                std::to_string(ch) + ",\"channels\":" + std::to_string(ch == 2 ? 2 : 1) + "}]}";
+        ok += e.liveAudio().startRecording(req).find("\"ok\":true") != std::string::npos;
+        e.liveAudio().stopRecording();
+    }
+    stop.store(true);
+    audio.join();
+    CHECK_EQ(ok, 60);
+    std::filesystem::remove_all(dir);
+}
+
+TEST(recording_splits_a_take_before_the_wav_size_limit) {
+    // WAV sizes are 32-bit: a take is continued in a new file before 4 GB (here a small limit stands in for it).
+    const std::string dir = tempDir("split");
+    Engine e(48000);
+    e.setMasterBypass(true);
+    e.setProjectJson(inputProject("off", true));
+    e.liveAudio().setDeviceChannels(2);
+    e.liveAudio().setLatencyOverride(0);
+    CHECK(e.liveAudio().startRecording("{\"dir\":\"" + jsonEscape(dir) + "\",\"bpm\":120,\"max_file_bytes\":40000,"
+                                       "\"tracks\":[{\"layer\":\"t\",\"channel\":1}]}").find("\"ok\":true") != std::string::npos);
+    e.play();
+    std::vector<float> in, l(480), r(480);
+    int64_t n = 0;
+    for (int k = 0; k < 50; ++k) {  // 24000 frames, 96000 bytes: three files of at most 10000 frames
+        in.assign(480 * 2, 0.0f);
+        for (int i = 0; i < 480; ++i) in[static_cast<size_t>(i) * 2 + 1] = static_cast<float>(n++);
+        e.liveAudio().beginCallback(in.data(), 2, 480);
+        e.process(l.data(), r.data(), 480);
+    }
+    Json j;
+    std::string error;
+    CHECK(parseJson(e.liveAudio().stopRecording(), j, error));
+    const Json* takes = j.get("takes");
+    CHECK(takes && takes->arr.size() == 3);
+    if (takes && takes->arr.size() == 3) {
+        double next = 0;
+        for (const Json& t : takes->arr) {
+            CHECK_EQ(t.number("start_frame", -1), next);
+            CHECK(t.number("frames", 0) <= 10000.0);
+            int ch = 0;
+            const auto data = readFloatWav(t.string("path"), ch);
+            CHECK_EQ(data.size(), static_cast<size_t>(t.number("frames", 0)));
+            if (!data.empty()) CHECK_EQ(data[0], static_cast<float>(next));
+            next += t.number("frames", 0);
+        }
+        CHECK_EQ(next, 24000.0);
+    }
+    std::filesystem::remove_all(dir);
+}
+
+TEST(recovery_refuses_while_recording_and_leaves_foreign_part_files_alone) {
+    const std::string dir = tempDir("recover2");
+    // Not C.A.W's header (16-bit PCM): left as it is.
+    const std::string foreign = dir + "/other.wav.part";
+    const std::string pcm = writeWav(foreign, 44100, 2, 100, [](int64_t i, int) { return noiseAt(i, 1); }, false);
+    const auto before = std::filesystem::file_size(foreign);
+    std::ifstream f0(foreign, std::ios::binary);
+    const std::string bytes((std::istreambuf_iterator<char>(f0)), std::istreambuf_iterator<char>());
+    f0.close();
+    char* r = caw_record_recover(dir.c_str());
+    std::string out = r;
+    caw_free(r);
+    CHECK(std::filesystem::exists(foreign));
+    CHECK_EQ(std::filesystem::file_size(foreign), before);
+    std::ifstream f1(foreign, std::ios::binary);
+    CHECK(std::string((std::istreambuf_iterator<char>(f1)), std::istreambuf_iterator<char>()) == bytes);
+    CHECK(out.find("\"takes\":[]") != std::string::npos);
+    // While a session records into the folder, recovery is refused (its .part files are being written).
+    Engine e(48000);
+    e.setProjectJson(inputProject("off", true));
+    e.liveAudio().setDeviceChannels(2);
+    CHECK(e.liveAudio().startRecording("{\"dir\":\"" + jsonEscape(dir) + "\",\"bpm\":120,\"tracks\":[{\"layer\":\"t\",\"channel\":1}]}")
+              .find("\"ok\":true") != std::string::npos);
+    r = caw_record_recover(dir.c_str());
+    out = r;
+    caw_free(r);
+    CHECK(out.find("\"ok\":false") != std::string::npos);
+    e.liveAudio().stopRecording();
+    r = caw_record_recover(dir.c_str());
+    out = r;
+    caw_free(r);
+    CHECK(out.find("\"ok\":true") != std::string::npos);
     std::filesystem::remove_all(dir);
 }
 

@@ -4,19 +4,41 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <complex>
 #include <cstdio>
 #include <cstring>
 #include <deque>
 #include <filesystem>
 #include <fstream>
 
+#include "analysis.h"
 #include "json.h"
 #include "sample_pack.h"
+#include "utf8_path.h"
 
 namespace caw {
 
 namespace {
 thread_local LiveAudio* gBuilding = nullptr;
+
+// The folders recordings in this process write into now (recover() leaves them alone).
+std::mutex gRecordingLock;
+std::vector<std::filesystem::path> gRecordingDirs;
+
+std::filesystem::path canonicalDir(const std::string& dir) {
+    std::error_code ec;
+    auto p = std::filesystem::weakly_canonical(utf8Path(dir), ec);
+    return ec ? utf8Path(dir) : p;
+}
+void forgetDir(const std::string& dir) {
+    std::lock_guard<std::mutex> r(gRecordingLock);
+    const auto here = canonicalDir(dir);
+    for (auto it = gRecordingDirs.begin(); it != gRecordingDirs.end(); ++it)
+        if (*it == here) {
+            gRecordingDirs.erase(it);
+            return;
+        }
+}
 }
 
 LiveAudio* buildingLiveAudio() noexcept { return gBuilding; }
@@ -63,6 +85,9 @@ namespace {
 
 void le16(uint8_t* p, uint32_t v) { p[0] = v & 255; p[1] = (v >> 8) & 255; }
 void le32(uint8_t* p, uint32_t v) { for (int i = 0; i < 4; ++i) p[i] = (v >> (8 * i)) & 255; }
+
+// The most data bytes one take file holds: its WAV sizes are 32-bit, so a longer take goes on in a new file.
+constexpr uint64_t kMaxTakeDataBytes = 0xFFFFFFFFull - 36 - (1u << 20);
 
 // A 44-byte RIFF header: PCM (format 1, 24-bit) or IEEE float (format 3, 32-bit).
 void wavHeader(uint8_t* h, int rate, int channels, bool float32, uint64_t dataBytes) {
@@ -117,6 +142,7 @@ struct LiveAudio::Session {
     int64_t punchIn = 0, punchOut = 0;
     int64_t latency = 0;
     int rate = 48000;
+    uint64_t maxDataBytes = kMaxTakeDataBytes;  // per file: a take is split before its WAV sizes would overflow
     std::vector<Track> tracks;
     std::mutex m;  // guards takes, error and the counters below (status reads them)
     std::vector<Take> takes;
@@ -136,15 +162,15 @@ struct LiveAudio::Session {
                ",\"complete\":" + (t.complete ? "true" : "false") + ",\"error\":\"" + jsonEscape(t.error) + "\"}";
     }
     void sidecar(const Take& t) const {
-        std::ofstream f(t.path + ".json", std::ios::binary | std::ios::trunc);
+        std::ofstream f(utf8Path(t.path + ".json"), std::ios::binary | std::ios::trunc);
         f << takeJson(t);
     }
     void header(Track& tr) {
         if (!tr.f) return;
         uint8_t h[44];
         wavHeader(h, rate, tr.channels, float32, static_cast<uint64_t>(tr.frames) * tr.channels * (float32 ? 4 : 3));
-        const long end = std::ftell(tr.f);
-        if (std::fseek(tr.f, 0, SEEK_SET) != 0 || std::fwrite(h, 1, 44, tr.f) != 44 || std::fseek(tr.f, end, SEEK_SET) != 0)
+        const int64_t end = tellFile(tr.f);
+        if (end < 0 || !seekFile(tr.f, 0, SEEK_SET) || std::fwrite(h, 1, 44, tr.f) != 44 || !seekFile(tr.f, end, SEEK_SET))
             tr.failed = true;
         std::fflush(tr.f);
     }
@@ -167,11 +193,11 @@ struct LiveAudio::Session {
         ++takeIndex;
         for (Track& tr : tracks) {
             const std::string name = sanitizeFileName(tr.layer) + "-take" + std::to_string(takeIndex) + ".wav";
-            tr.path = (std::filesystem::path(dir) / name).generic_string();
+            tr.path = pathText(utf8Path(dir) / utf8Path(name));
             tr.part = tr.path + ".part";
             tr.frames = tr.sinceHeader = 0;
             tr.failed = false;
-            tr.f = std::fopen(tr.part.c_str(), "wb");
+            tr.f = openFile(utf8Path(tr.part), "wb");
             if (!tr.f) {
                 tr.failed = true;
                 std::lock_guard<std::mutex> g(m);
@@ -201,7 +227,7 @@ struct LiveAudio::Session {
             std::fclose(tr.f);
             tr.f = nullptr;
             std::error_code ec;
-            std::filesystem::rename(tr.part, tr.path, ec);
+            std::filesystem::rename(utf8Path(tr.part), utf8Path(tr.path), ec);
             Take t;
             t.layer = tr.layer;
             t.path = tr.path;
@@ -216,6 +242,13 @@ struct LiveAudio::Session {
             takes.push_back(std::move(t));
         }
     }
+    // Whether one more frame would take a track's file past maxDataBytes.
+    bool full() const {
+        const uint64_t bytes = float32 ? 4 : 3;
+        for (const Track& tr : tracks)
+            if ((static_cast<uint64_t>(tr.frames) + 1) * tr.channels * bytes > maxDataBytes) return true;
+        return false;
+    }
     // The song position heard when input frame `l` (linear) was played: the chunk history, latency frames back.
     int64_t positionOf(int64_t l) const {
         for (auto it = hist.rbegin(); it != hist.rend(); ++it)
@@ -229,6 +262,7 @@ struct LiveAudio::Session {
             const int64_t pos = positionOf(linear + j - latency);
             const bool inRange = !punch || (pos >= punchIn && pos < punchOut);
             if (inTake && (!inRange || pos != lastPos + 1)) end();
+            if (inTake && full()) end();  // the file's 32-bit sizes: the take goes on in the next file
             if (inRange && !inTake) begin(pos);
             if (!inTake) continue;
             lastPos = pos;
@@ -269,24 +303,34 @@ LiveAudio::~LiveAudio() {
         armed_.store(false);
         stopWriter_.store(true);
         writer_.join();
+        if (session_) forgetDir(session_->dir);
     }
 }
 
 void LiveAudio::beginCallback(const float* in, int channels, int frames) noexcept {
-    in_ = in;
-    inChannels_ = in ? std::clamp(channels, 0, kMaxInputChannels) : 0;
-    inFrames_ = in ? frames : 0;
+    in_ = in && channels > 0 && frames > 0 ? in : nullptr;
+    inStride_ = in_ ? channels : 0;
+    inChannels_ = in_ ? std::min(channels, kMaxInputChannels) : 0;
+    inFrames_ = in_ ? frames : 0;
     chunkAt_ = 0;
     for (int c = 0; c < inChannels_; ++c) {
         float peak = peaks_[c].load(std::memory_order_relaxed);
-        for (int i = 0; i < frames; ++i) peak = std::max(peak, std::fabs(in[static_cast<size_t>(i) * inChannels_ + c]));
+        for (int i = 0; i < inFrames_; ++i) peak = std::max(peak, std::fabs(in_[static_cast<size_t>(i) * inStride_ + c]));
         peaks_[c].store(peak, std::memory_order_relaxed);
     }
 }
 
 void LiveAudio::chunk(int at, int frames, int64_t songPos, bool playing) noexcept {
     chunkAt_ = at;
-    if (!playing || !armed_.load(std::memory_order_acquire) || !headers_ || frames <= 0 || frames > 512) return;
+    if (!playing) return;
+    // Marked busy before armed_ is read (both sequentially consistent): once the control thread has disarmed and
+    // seen this false, no chunk() can still reach the ring or scratch it is about to reallocate.
+    inChunk_.store(true);
+    struct Done {
+        std::atomic<bool>& busy;
+        ~Done() { busy.store(false, std::memory_order_release); }
+    } done{inChunk_};
+    if (!armed_.load() || !headers_ || frames <= 0 || frames > 512) return;
     const size_t need = static_cast<size_t>(frames) * static_cast<size_t>(ringChannels_);
     if (samples_.writable() < need || headers_->writable() == 0) {
         gap_ += frames;
@@ -298,6 +342,10 @@ void LiveAudio::chunk(int at, int frames, int64_t songPos, bool playing) noexcep
     samples_.push(scratch_.get(), need);
     headers_->push({songPos, frames, gap_});
     gap_ = 0;
+}
+
+void LiveAudio::waitForChunk() const noexcept {
+    while (inChunk_.load()) std::this_thread::yield();
 }
 
 int64_t LiveAudio::latency() const noexcept {
@@ -334,7 +382,7 @@ std::string LiveAudio::startRecording(std::string_view requestJson) {
     auto s = std::make_unique<Session>();
     s->dir = j.string("dir");
     std::error_code ec;
-    if (s->dir.empty() || !std::filesystem::is_directory(s->dir, ec)) return failJson("\"dir\" must be an existing folder");
+    if (s->dir.empty() || !std::filesystem::is_directory(utf8Path(s->dir), ec)) return failJson("\"dir\" must be an existing folder");
     s->bpm = j.number("bpm", 120);
     if (!(s->bpm >= 20 && s->bpm <= 400)) return failJson("bpm must be 20..400");
     s->rate = static_cast<int>(std::lround(sr_));
@@ -350,6 +398,10 @@ std::string LiveAudio::startRecording(std::string_view requestJson) {
         s->punch = true;
         s->punchIn = static_cast<int64_t>(std::floor(a * s->stepLen + 0.5));
         s->punchOut = b >= 1e15 ? INT64_MAX : static_cast<int64_t>(std::floor(b * s->stepLen + 0.5));
+    }
+    if (const Json* mb = j.get("max_file_bytes"); mb && mb->type == Json::Type::Number) {
+        if (!(mb->num >= 1024)) return failJson("max_file_bytes must be at least 1024");
+        s->maxDataBytes = static_cast<uint64_t>(std::min(mb->num, static_cast<double>(kMaxTakeDataBytes)));
     }
     s->latency = latency();
     int ringChannels = 0;
@@ -368,7 +420,10 @@ std::string LiveAudio::startRecording(std::string_view requestJson) {
         ringChannels = std::max(ringChannels, tr.channel + tr.channels);
         s->tracks.push_back(std::move(tr));
     }
-    // Two seconds of every channel in use, and a chunk's worth to fill.
+    // Two seconds of every channel in use, and a chunk's worth to fill. A chunk() of the last session may still
+    // be running on the audio thread: it is waited out before anything it reads is replaced.
+    armed_.store(false);
+    waitForChunk();
     ringChannels_ = ringChannels;
     if (!samples_.allocate(static_cast<size_t>(2.0 * sr_) * static_cast<size_t>(ringChannels)))
         return failJson("out of memory");
@@ -378,6 +433,10 @@ std::string LiveAudio::startRecording(std::string_view requestJson) {
     while (headers_->pop(drain)) {
     }
     if (!scratch_) return failJson("out of memory");
+    {
+        std::lock_guard<std::mutex> r(gRecordingLock);
+        gRecordingDirs.push_back(canonicalDir(s->dir));
+    }
     session_ = std::move(s);
     gap_ = 0;
     dropped_.store(0);
@@ -429,29 +488,53 @@ std::string LiveAudio::stopRecording() {
     {
         std::lock_guard<std::mutex> g(ctl_);
         if (!writer_.joinable()) return "{\"ok\":false,\"error\":\"not recording\",\"takes\":[]}";
-        armed_.store(false, std::memory_order_release);
+        armed_.store(false);
+        waitForChunk();
         stopWriter_.store(true, std::memory_order_release);
         writer_.join();
+        forgetDir(session_->dir);
     }
     std::string status = recordingStatus();
     return "{\"ok\":true," + status.substr(1);
 }
 
+namespace {
+// Whether a 44-byte header is the one the recorder writes: RIFF/WAVE, a 16-byte fmt chunk of 24-bit PCM or 32-bit
+// float, one or two channels, consistent sizes, then the data chunk.
+bool recorderHeader(const uint8_t* h) {
+    auto u16 = [&](int o) { return static_cast<uint32_t>(h[o] | (h[o + 1] << 8)); };
+    auto u32 = [&](int o) { return u16(o) | (u16(o + 2) << 16); };
+    if (std::memcmp(h, "RIFF", 4) != 0 || std::memcmp(h + 8, "WAVEfmt ", 8) != 0 || u32(16) != 16 ||
+        std::memcmp(h + 36, "data", 4) != 0)
+        return false;
+    const uint32_t format = u16(20), channels = u16(22), rate = u32(24), bits = u16(34), align = u16(32);
+    const uint32_t bytes = format == 3 ? 4 : 3;
+    if (!((format == 3 && bits == 32) || (format == 1 && bits == 24)) || channels < 1 || channels > 2) return false;
+    return rate >= 1000 && rate <= 768000 && align == channels * bytes && u32(28) == rate * align;
+}
+}  // namespace
+
 std::string LiveAudio::recover(const std::string& dir) {
     namespace fs = std::filesystem;
     std::string list;
     std::error_code ec;
-    if (!fs::is_directory(dir, ec)) return failJson(dir + " is not a folder");
-    for (const auto& e : fs::directory_iterator(dir, ec)) {
-        const std::string p = e.path().generic_string();
+    const fs::path folder = utf8Path(dir);
+    if (!fs::is_directory(folder, ec)) return failJson(dir + " is not a folder");
+    {
+        std::lock_guard<std::mutex> r(gRecordingLock);
+        const auto here = canonicalDir(dir);
+        for (const auto& d : gRecordingDirs)
+            if (d == here) return failJson("a recording is writing into " + dir + ": stop it first");
+    }
+    for (const auto& e : fs::directory_iterator(folder, ec)) {
+        const std::string p = pathText(e.path());
         if (p.size() < 9 || p.compare(p.size() - 9, 9, ".wav.part") != 0) continue;
-        std::FILE* f = std::fopen(p.c_str(), "r+b");
+        std::FILE* f = openFile(e.path(), "r+b");
         if (!f) continue;
         uint8_t h[44] = {};
-        const bool read = std::fread(h, 1, 44, f) == 44 && std::memcmp(h, "RIFF", 4) == 0 && std::memcmp(h + 36, "data", 4) == 0;
-        std::fseek(f, 0, SEEK_END);
-        const long size = std::ftell(f);
-        if (!read || size < 44) {
+        const bool ours = std::fread(h, 1, 44, f) == 44 && recorderHeader(h);
+        const int64_t size = ours && seekFile(f, 0, SEEK_END) ? tellFile(f) : -1;
+        if (!ours || size < 44) {  // not a take the recorder left: not touched
             std::fclose(f);
             continue;
         }
@@ -459,17 +542,17 @@ std::string LiveAudio::recover(const std::string& dir) {
         const int rate = h[24] | (h[25] << 8) | (h[26] << 16) | (h[27] << 24);
         const int align = h[32] | (h[33] << 8);
         const bool float32 = (h[20] | (h[21] << 8)) == 3;
-        const uint64_t data = align > 0 ? (static_cast<uint64_t>(size) - 44) / align * align : 0;
+        const uint64_t data = (static_cast<uint64_t>(size) - 44) / align * align;
         wavHeader(h, rate, channels, float32, data);
-        std::fseek(f, 0, SEEK_SET);
+        seekFile(f, 0, SEEK_SET);
         std::fwrite(h, 1, 44, f);
         std::fclose(f);
-        if (static_cast<uint64_t>(size) > 44 + data) fs::resize_file(p, 44 + data, ec);
+        if (static_cast<uint64_t>(size) > 44 + data) fs::resize_file(e.path(), 44 + data, ec);
         std::string final = p.substr(0, p.size() - 5);
-        if (fs::exists(final, ec)) final = final.substr(0, final.size() - 4) + "-recovered.wav";
-        fs::rename(p, final, ec);
+        if (fs::exists(utf8Path(final), ec)) final = final.substr(0, final.size() - 4) + "-recovered.wav";
+        fs::rename(e.path(), utf8Path(final), ec);
         if (ec) continue;
-        const int64_t frames = align > 0 ? static_cast<int64_t>(data / align) : 0;
+        const int64_t frames = static_cast<int64_t>(data / align);
         // The sidecar written at the take's start says where it goes; the frames and the recovery are added.
         std::string side, layer;
         int64_t start = 0;
@@ -477,7 +560,7 @@ std::string LiveAudio::recover(const std::string& dir) {
         int take = 0;
         double bpm = 0;
         {
-            std::ifstream sf(p.substr(0, p.size() - 5) + ".json", std::ios::binary);
+            std::ifstream sf(utf8Path(p.substr(0, p.size() - 5) + ".json"), std::ios::binary);
             std::string text((std::istreambuf_iterator<char>(sf)), std::istreambuf_iterator<char>());
             Json j;
             std::string err;
@@ -495,10 +578,10 @@ std::string LiveAudio::recover(const std::string& dir) {
                ",\"channels\":" + std::to_string(channels) + ",\"sample_rate\":" + std::to_string(rate) +
                ",\"bpm\":" + jnum(bpm) + ",\"complete\":false,\"recovered\":true,\"error\":\"\"}";
         {
-            std::ofstream out(final + ".json", std::ios::binary | std::ios::trunc);
+            std::ofstream out(utf8Path(final + ".json"), std::ios::binary | std::ios::trunc);
             out << side;
         }
-        fs::remove(p.substr(0, p.size() - 5) + ".json", ec);
+        fs::remove(utf8Path(p.substr(0, p.size() - 5) + ".json"), ec);
         list += (list.empty() ? "" : ",") + side;
     }
     return "{\"ok\":true,\"error\":\"\",\"takes\":[" + list + "]}";
@@ -509,7 +592,7 @@ std::string LiveAudio::recover(const std::string& dir) {
 bool LiveAudio::startPing() {
     std::lock_guard<std::mutex> g(ctl_);
     const int s = pingState_.load();
-    if (s == 1 || s == 2) return false;
+    if (s == 1 || s == 2 || s == 4) return false;
     burst_.assign(4096, 0.0f);
     uint32_t x = 0x1234567u;
     for (size_t i = 0; i < burst_.size(); ++i) {
@@ -532,45 +615,68 @@ void LiveAudio::afterCallback(float* left, float* right, int frames) noexcept {
         pingState_.store(2, std::memory_order_relaxed);
         s = 2;
     }
-    if (s != 2) return;
-    for (int i = 0; i < frames; ++i) {
-        const size_t k = pingAt_ + static_cast<size_t>(i);
-        if (k < burst_.size()) {
-            left[i] = std::clamp(left[i] + burst_[k], -1.0f, 1.0f);
-            right[i] = std::clamp(right[i] + burst_[k], -1.0f, 1.0f);
+    if (s == 2) {
+        for (int i = 0; i < frames; ++i) {
+            const size_t k = pingAt_ + static_cast<size_t>(i);
+            if (k < burst_.size()) {
+                left[i] = std::clamp(left[i] + burst_[k], -1.0f, 1.0f);
+                right[i] = std::clamp(right[i] + burst_[k], -1.0f, 1.0f);
+            }
+            if (k < capture_.size()) {
+                float sum = 0;
+                if (in_ && i < inFrames_)
+                    for (int c = 0; c < inChannels_; ++c) sum += in_[static_cast<size_t>(i) * inStride_ + c];
+                capture_[k] = sum;
+            }
         }
-        if (k < capture_.size()) {
-            float sum = 0;
-            for (int c = 0; c < inChannels_; ++c) sum += in_[static_cast<size_t>(i) * inChannels_ + c];
-            capture_[k] = in_ && i < inFrames_ ? sum : 0.0f;
-        }
+        pingAt_ += static_cast<size_t>(frames);
+        if (pingAt_ >= capture_.size()) pingState_.store(3, std::memory_order_release);
     }
-    pingAt_ += static_cast<size_t>(frames);
-    if (pingAt_ >= capture_.size()) pingState_.store(3, std::memory_order_release);
+    // The callback is over: its input buffer belongs to the device and may go with it.
+    in_ = nullptr;
+    inChannels_ = inStride_ = inFrames_ = 0;
 }
 
 std::string LiveAudio::pingResult() {
-    std::lock_guard<std::mutex> g(ctl_);
-    const int s = pingState_.load(std::memory_order_acquire);
-    if (s == 1 || s == 2) return "{\"state\":\"running\"}";
-    if (s == 0) return pingLast_.empty() ? "{\"state\":\"idle\"}" : pingLast_;
-    // Cross-correlation of the burst with what came back: the best lag is the round trip.
-    const size_t lags = capture_.size() - burst_.size();
+    std::vector<float> burst, capture;
+    {
+        std::lock_guard<std::mutex> g(ctl_);
+        const int s = pingState_.load(std::memory_order_acquire);
+        if (s == 1 || s == 2 || s == 4) return "{\"state\":\"running\"}";
+        if (s == 0) return pingLast_.empty() ? "{\"state\":\"idle\"}" : pingLast_;
+        burst = std::move(burst_);
+        capture = std::move(capture_);
+        pingState_.store(4, std::memory_order_release);  // working it out, outside the lock
+    }
+    // Cross-correlation of the burst with what came back, by FFT: the best lag is the round trip.
+    const size_t lags = capture.size() > burst.size() ? capture.size() - burst.size() : 0;
+    size_t n = 1;
+    while (n < capture.size() + burst.size()) n <<= 1;
     double best = 0, sum = 0;
     size_t at = 0;
-    for (size_t lag = 0; lag < lags; ++lag) {
-        double c = 0;
-        for (size_t i = 0; i < burst_.size(); ++i) c += static_cast<double>(burst_[i]) * capture_[lag + i];
-        c = std::fabs(c);
-        sum += c;
-        if (c > best) {
-            best = c;
-            at = lag;
+    try {
+        std::vector<std::complex<double>> fb(n), fc(n);
+        for (size_t i = 0; i < burst.size(); ++i) fb[i] = burst[i];
+        for (size_t i = 0; i < capture.size(); ++i) fc[i] = capture[i];
+        analysis::fft(fb, false);
+        analysis::fft(fc, false);
+        for (size_t i = 0; i < n; ++i) fc[i] *= std::conj(fb[i]);
+        analysis::fft(fc, true);
+        for (size_t lag = 0; lag < lags; ++lag) {
+            const double c = std::fabs(fc[lag].real());
+            sum += c;
+            if (c > best) {
+                best = c;
+                at = lag;
+            }
         }
+    } catch (...) {
+        best = 0;
     }
     const double mean = lags ? sum / static_cast<double>(lags) : 0;
     const double confidence = mean > 0 ? best / mean : 0;
     const bool ok = best > 1e-6 && confidence >= 8.0;
+    std::lock_guard<std::mutex> g(ctl_);
     if (ok) measured_.store(static_cast<int64_t>(at), std::memory_order_relaxed);
     pingLast_ = "{\"state\":\"done\",\"ok\":" + std::string(ok ? "true" : "false") + ",\"frames\":" + std::to_string(at) +
                 ",\"ms\":" + jnum(1000.0 * at / sr_) + ",\"confidence\":" + jnum(confidence) + "}";
