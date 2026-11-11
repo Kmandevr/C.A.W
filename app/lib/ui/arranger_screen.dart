@@ -1,4 +1,5 @@
 // Arrange: the tracks and clips on a timeline, compact track headers, the focus view (one track and its panel) and the mixer card.
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/gestures.dart';
@@ -74,6 +75,7 @@ class ArrangerScreen extends StatefulWidget {
 
 class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProviderStateMixin {
   bool settings = false, cardsView = false, mixerCard = false, zoomBar = false;
+  final _headerTaps = _HeaderTaps();
 
   /// Phone portrait: the focus panel opened up over the pinned track (owner, 2026-11-10: it can open higher).
   bool _panelHigh = false;
@@ -309,6 +311,7 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
 
   @override
   void dispose() {
+    _headerTaps.dispose();
     widget.state.tick.removeListener(_followPlayhead);
     _router?.unregister(Area.arranger, _keys);
     _keys.dispose();
@@ -1197,11 +1200,15 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
               style: const TextStyle(color: Neon.dim, fontSize: 10, letterSpacing: 1.3))))),
         for (final layer in layers) row('h', layer, [
           _TimelineHeader(key: drag?.headerKey(layer.id), state: s, layer: layer, index: p.layers.indexOf(layer),
+            taps: _headerTaps,
             drag: drag, onTrackDrag: drag == null ? null : (phase, at) => _trackDrag(layer, phase, at),
             depth: pinned ? 0 : s.folderDepth(layer), trackHeight: trackHeight,
             focused: layer.id == focusId,
             // The pinned track: a tap goes back to all tracks, a sideways swipe to the next or previous one.
             onTap: pinned ? () => _focus(null) : () => callbacks.onTap(layer),
+            // A finger's tap lights the track up at once; the focus view it opens (or, pinned, closes) waits out
+            // the double tap that opens the menu.
+            onSelect: layer.isFolder ? null : pinned ? () {} : () { if (s.selectedLayerId != layer.id) s.selectLayer(layer); },
             onSwipe: pinned ? _step : null,
             onFx: () => callbacks.onFx(layer),
             onMenu: (at) => callbacks.onMenu(layer, at),
@@ -1322,8 +1329,9 @@ enum _Marquee { start, move, end }
 /// The selected or focused track glows in its own colour, brighter.
 class _TimelineHeader extends StatelessWidget {
   const _TimelineHeader({super.key, required this.state, required this.layer, required this.index, required this.depth,
+    required this.taps,
     required this.trackHeight, required this.onTap, required this.onFx, required this.onMenu,
-    this.focused = false, this.onSwipe, this.onResize, this.onResizeEnd, this.drag, this.onTrackDrag});
+    this.focused = false, this.onSelect, this.onSwipe, this.onResize, this.onResizeEnd, this.drag, this.onTrackDrag});
   final AppState state;
   final LayerDoc layer;
   final int index, depth;
@@ -1331,6 +1339,11 @@ class _TimelineHeader extends StatelessWidget {
   final bool focused;
   final VoidCallback onTap, onFx;
   final void Function(Offset at) onMenu;
+  final _HeaderTaps taps;
+
+  /// A finger's tap: what shows at once (the track lights up) when [onTap] then opens something that moves the
+  /// headers, which waits out the double tap. Null: [onTap] answers at once (a folder's tap only selects it).
+  final VoidCallback? onSelect;
   final ValueChanged<int>? onSwipe;
 
   /// A drag on the row's bottom edge, by this many pixels; null on the focus view's pinned track.
@@ -1515,24 +1528,30 @@ class _TimelineHeader extends StatelessWidget {
         key: ValueKey('track-height-grip-${layer.id}'), axis: Axis.vertical, label: 'Resize tracks',
         onDrag: onResize!, onEnd: onResizeEnd ?? () {})),
     ]);
-    // A double tap opens the track menu (owner, 2026-11-11); a long press picks the track up (on the pinned track,
-    // which can't move, it opens the menu too). The double tap leaves the header's buttons out ([_HeaderDoubleTap]).
-    final doubleTap = RawGestureDetector(behavior: HitTestBehavior.opaque, gestures: {
-      _HeaderDoubleTap: GestureRecognizerFactoryWithHandlers<_HeaderDoubleTap>(
-        () => _HeaderDoubleTap(debugOwner: this),
-        (r) => r
-          ..onDoubleTapDown = ((d) => _doubleAt = d.globalPosition)
-          ..onDoubleTap = (() => onMenu(_doubleAt))),
-    }, child: resizable);
     return Semantics(
       button: true,
       selected: selected,
       label: '${layer.name} track',
-      // The outermost pointer handler sees a press last: it clears the mark a header button left.
-      child: Listener(onPointerDown: (_) => _onHeaderButton = false, child: GestureDetector(
+      // A tap selects at once; a quick second tap opens the track menu as well (owner, 2026-11-11), with no double
+      // tap in the gesture arena to hold the first back. A long press picks the track up (on the pinned track, which
+      // can't move, it opens the menu too). The outermost pointer handler sees a press last: a press on one of the
+      // header's buttons (M, S, FX, the arrows) isn't counted, and it clears the mark the button left.
+      child: Listener(onPointerDown: (e) {
+        _onHeaderButton ? taps.count.reset() : taps.count.down(e, target: layer.id);
+        _onHeaderButton = false;
+      }, onPointerUp: taps.count.up, child: GestureDetector(
         key: ValueKey('track-header-${layer.id}'),
         behavior: HitTestBehavior.opaque,
-        onTap: onTap,
+        onTap: () {
+          taps.cancel();
+          if (taps.count.doubleTap) return onMenu(taps.count.position);
+          final select = onSelect;
+          if (taps.count.mouse || select == null) return onTap();
+          // A finger: the track lights up at once; what the tap opens (the focus view, which moves the headers)
+          // waits out the double tap, so a quick second tap lands on the same header and opens its menu instead.
+          select();
+          taps.open = Timer(kDoubleTapTimeout, onTap);
+        },
         onLongPressStart: (d) => onTrackDrag == null ? onMenu(d.globalPosition) : onTrackDrag!(_HeaderPhase.press, d.globalPosition),
         onLongPressMoveUpdate: onTrackDrag == null ? null : (d) => onTrackDrag!(_HeaderPhase.move, d.globalPosition),
         onLongPressEnd: onTrackDrag == null ? null : (d) => onTrackDrag!(_HeaderPhase.release, d.globalPosition),
@@ -1543,18 +1562,18 @@ class _TimelineHeader extends StatelessWidget {
           if (v.abs() > 200) onSwipe!(v < 0 ? 1 : -1);
         },
         // A mouse drags the header straight away; a finger's vertical drag still scrolls the tracks.
-        child: onTrackDrag == null ? doubleTap : GestureDetector(
+        child: onTrackDrag == null ? resizable : GestureDetector(
           supportedDevices: const {PointerDeviceKind.mouse},
           onVerticalDragStart: (d) => onTrackDrag!(_HeaderPhase.grab, d.globalPosition),
           onVerticalDragUpdate: (d) => onTrackDrag!(_HeaderPhase.move, d.globalPosition),
           onVerticalDragEnd: (_) => onTrackDrag!(_HeaderPhase.release, Offset.zero),
           onVerticalDragCancel: () => onTrackDrag!(_HeaderPhase.cancel, Offset.zero),
-          child: doubleTap),
+          child: resizable),
       )),
     );
   }
 
-  /// One of the header's own buttons: a press on it marks [_onHeaderButton], so it isn't held for a double tap.
+  /// One of the header's own buttons: a press on it marks [_onHeaderButton], so it doesn't count as a header tap.
   static Widget _button(Widget child) => Listener(onPointerDown: (_) => _onHeaderButton = true, child: child);
 }
 
@@ -1562,22 +1581,23 @@ class _TimelineHeader extends StatelessWidget {
 /// sees the press last).
 bool _onHeaderButton = false;
 
-/// A header's double tap that never takes a press starting on one of its buttons: M, S, FX and the arrows answer at
-/// once instead of waiting out the double tap.
-class _HeaderDoubleTap extends DoubleTapGestureRecognizer {
-  _HeaderDoubleTap({super.debugOwner});
+/// The headers' taps, shared by the arranger's headers: [count] tells a tap from a double tap (each press names its
+/// track, so a tap on the next header is a first), and [open] is a finger's tap that opens something (the focus
+/// view), waiting out the double tap.
+class _HeaderTaps {
+  final count = ClickCounter();
+  Timer? open;
 
-  @override
-  bool isPointerAllowed(PointerDownEvent event) =>
-      // A mouse click selects at once: the right-click opens the menu instead (owner, 2026-11-11).
-      !_onHeaderButton && !isMousePointer(event.kind) && super.isPointerAllowed(event);
+  void cancel() {
+    open?.cancel();
+    open = null;
+  }
+
+  void dispose() => cancel();
 }
 
 double _gainDb(double g) => g <= 0.001 ? -60 : (20 * math.log(g) / math.ln10).clamp(-60.0, 12.0).toDouble();
 double _dbGain(double db) => db <= -60 ? 0 : math.pow(10, db / 20).toDouble();
-
-/// Where the last double tap on a header or clip went down (a double tap's callback carries no position).
-Offset _doubleAt = Offset.zero;
 
 /// How far a track [depth] folders down is indented: 10 px a level for four levels, then 3 px a level up to
 /// 60 px, so a deep tree still leaves a phone's narrow header room for the name.
@@ -1652,7 +1672,7 @@ class _TimelineLane extends StatefulWidget {
 class _TimelineLaneState extends State<_TimelineLane> {
   /// A Ctrl+drag with the mouse in empty space draws a new empty clip (REAPER): from, to, in steps.
   (int, int)? _drawing;
-  int? _doubleTapStep;
+  final _clicks = ClickCounter();
 
   // Edit animations: the clips seen at the last build (null before the first) and where, and deleted ones leaving.
   Set<String>? _known;
@@ -1777,9 +1797,15 @@ class _TimelineLaneState extends State<_TimelineLane> {
       builder: (context, hovering, _) => SizedBox(width: widget.width, height: height,
     child: Stack(children: [
       Positioned.fill(child: Listener(
-        onPointerDown: _drawDown,
+        onPointerDown: (e) {
+          _clicks.down(e);
+          _drawDown(e);
+        },
         onPointerMove: _drawMove,
-        onPointerUp: _drawUp,
+        onPointerUp: (e) {
+          _clicks.up(e);
+          _drawUp(e);
+        },
         onPointerCancel: _drawUp,
         child: GestureDetector(behavior: HitTestBehavior.opaque,
         // A plain horizontal drag belongs to the enclosing scroll view. Long-press
@@ -1794,12 +1820,9 @@ class _TimelineLaneState extends State<_TimelineLane> {
           final step = (d.localPosition.dx / stepW).round();
           state.setTimeSelection(step, step);
           if (!state.meters.playing) state.seekTo(step.toDouble());
-        },
-        // A double-tap in empty space draws a one-bar empty clip there (the touch stand-in for REAPER's Ctrl+drag).
-        onDoubleTapDown: (d) => _doubleTapStep = _snapped(d.localPosition.dx),
-        onDoubleTap: () {
-          final at = _doubleTapStep;
-          if (at != null) state.addEmptyClip(layer, at, state.project.stepsPerBar);
+          // A quick second tap (or a double-click) in empty space also draws a one-bar empty clip there (the touch
+          // stand-in for REAPER's Ctrl+drag); the first tap answered at once.
+          if (_clicks.twice) state.addEmptyClip(layer, _snapped(_clicks.localPosition.dx), state.project.stepsPerBar);
         },
         // In Select mode a long-press drag draws a box around clips instead of a time selection.
         onLongPressStart: (d) => widget.callbacks.selectMode()
@@ -2294,17 +2317,15 @@ class _TimelineClipState extends State<_TimelineClip> {
           child: Stack(children: [
         Positioned.fill(child: MediaQuery(
           data: mq.copyWith(gestureSettings: const DeviceGestureSettings(touchSlop: kTouchSlop / 2)),
-          // The modifiers count as they were when the click went down: the tap itself comes after the double-tap wait.
+          // The modifiers count as they were when the click went down.
           child: Listener(onPointerDown: (e) {
             _tapKeys = (HardwareKeyboard.instance.isControlPressed, HardwareKeyboard.instance.isShiftPressed);
             _clicks.down(e);
           },
-          // A double tap opens the clip menu (owner, 2026-11-11), which replaced the double tap that opened the notes:
-          // its first item, "Edit notes", does what that did. A mouse's click answers at once instead, and its
+          onPointerUp: _clicks.up,
+          // A tap selects at once; a quick second tap opens the clip menu as well (owner, 2026-11-11), which replaced
+          // the double tap that opened the notes: its first item, "Edit notes", does what that did. A mouse's
           // double-click opens the notes; the right-click opens the menu.
-          child: TouchDoubleTap(
-          onDoubleTapDown: (d) => _doubleAt = d.globalPosition,
-          onDoubleTap: () => widget.callbacks.onClipMenu(widget.layer, c, _doubleAt),
           child: MouseRegion(cursor: SystemMouseCursors.grab, child: GestureDetector(
           key: ValueKey('clip-${c.id}'),
           // A long press picks the clip up (owner, 2026-11-11); a double tap, or a right-click, opens its menu.
@@ -2314,6 +2335,7 @@ class _TimelineClipState extends State<_TimelineClip> {
           onSecondaryTapUp: (d) => widget.callbacks.onClipMenu(widget.layer, c, d.globalPosition),
           onTap: () {
             if (_clicks.doubleClick) return widget.callbacks.onClipOpen(widget.layer, c);
+            if (_clicks.doubleTap) return widget.callbacks.onClipMenu(widget.layer, c, _clicks.position);
             final (ctrl, shift) = _tapKeys;
             // REAPER (UG 7.2.1): Ctrl-click adds or removes a clip, Shift-click selects the range to it. A tap in
             // Select mode adds or removes it, the phone's way.
@@ -2359,7 +2381,7 @@ class _TimelineClipState extends State<_TimelineClip> {
                 ]))),
             ]),
           ),
-        )))))),
+        ))))),
         // The clip's notes as a mini piano roll (REAPER), from a cached picture of its pattern; under the edges.
         if (preview != null) Positioned.fill(child: IgnorePointer(child: RepaintBoundary(
           child: CustomPaint(key: ValueKey('clip-preview-${c.id}'), painter: ClipPreviewPainter(preview))))),

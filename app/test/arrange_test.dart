@@ -85,7 +85,7 @@ void main() {
       listenForHaptics(tester);
       await pumpArranger(tester, const Size(412, 900));
       await tester.tap(find.byKey(const ValueKey('track-header-a')));
-      await tester.pump(kDoubleTapTimeout); // a header's tap waits out its double tap
+      await tester.pump(kDoubleTapTimeout); // the focus view waits out the double tap
       await tester.pumpAndSettle();
       expect(sections.focusedLayer, 'a');
       expect(s.selectedLayerId, 'a');
@@ -121,17 +121,17 @@ void main() {
 
       // Tapping the pinned track closes it too.
       await tester.tap(find.byKey(const ValueKey('track-header-b')));
-      await tester.pump(kDoubleTapTimeout); // a header's tap waits out its double tap
+      await tester.pump(kDoubleTapTimeout); // the focus view waits out the double tap
       await tester.pumpAndSettle();
       expect(sections.focusedLayer, 'b');
       await tester.tap(find.byKey(const ValueKey('track-header-b')));
-      await tester.pump(kDoubleTapTimeout); // a header's tap waits out its double tap
+      await tester.pump(kDoubleTapTimeout); // the focus view waits out the double tap
       await tester.pumpAndSettle();
       expect(sections.focusedLayer, isNull);
 
       // Android Back leaves the focus view instead of the app.
       await tester.tap(find.byKey(const ValueKey('track-header-a')));
-      await tester.pump(kDoubleTapTimeout); // a header's tap waits out its double tap
+      await tester.pump(kDoubleTapTimeout); // the focus view waits out the double tap
       await tester.pumpAndSettle();
       expect(sections.focusedLayer, 'a');
       await tester.binding.handlePopRoute();
@@ -165,7 +165,7 @@ void main() {
       listenForHaptics(tester);
       await pumpArranger(tester, const Size(860, 400));
       await tester.tap(find.byKey(const ValueKey('track-header-a')));
-      await tester.pump(kDoubleTapTimeout); // a header's tap waits out its double tap
+      await tester.pump(kDoubleTapTimeout); // the focus view waits out the double tap
       await tester.pumpAndSettle();
       Rect panel() => tester.getRect(find.byKey(const ValueKey('focus-panel')));
       expect(panel().left, greaterThan(860 * 0.25));
@@ -211,7 +211,7 @@ void main() {
         (tester) async {
       await pumpArranger(tester, const Size(1400, 900), withSections: false);
       await tester.tap(find.byKey(const ValueKey('track-header-c')));
-      await tester.pump(kDoubleTapTimeout); // a header's tap waits out its double tap
+      await tester.pump(kDoubleTapTimeout); // the focus view waits out the double tap
       await tester.pumpAndSettle();
       final panel = tester.getRect(find.byKey(const ValueKey('focus-panel')));
       expect(panel.left, greaterThan(800));
@@ -390,7 +390,7 @@ void main() {
   testWidgets('phone portrait: the focus panel opens higher over the pinned track, and back', (tester) async {
     await pumpArranger(tester, const Size(412, 900));
     await tester.tap(find.byKey(const ValueKey('track-header-a')));
-    await tester.pump(kDoubleTapTimeout); // a header's tap waits out its double tap
+    await tester.pump(kDoubleTapTimeout); // the focus view waits out the double tap
     await settle(tester);
     final panel = find.byKey(const ValueKey('focus-panel'));
     final low = tester.getTopLeft(panel).dy;
@@ -410,7 +410,7 @@ void main() {
       (tester) async {
     await pumpArranger(tester, const Size(412, 900));
     await tester.tap(find.byKey(const ValueKey('track-header-a')));
-    await tester.pump(kDoubleTapTimeout); // a header's tap waits out its double tap
+    await tester.pump(kDoubleTapTimeout); // the focus view waits out the double tap
     await settle(tester);
     final panel = find.byKey(const ValueKey('focus-panel'));
     final rest = tester.getTopLeft(panel).dy;
@@ -433,6 +433,54 @@ void main() {
   });
 
   group('track headers', () {
+    testWidgets('a finger tap lights the track up in the next frame; a quick second tap opens its menu instead of the '
+        'focus view', (tester) async {
+      await pumpArranger(tester, const Size(412, 900));
+      Finder header(String id) => find.byKey(ValueKey('track-header-$id'));
+      bool lit(String id) =>
+          tester.widget<Semantics>(find.ancestor(of: header(id), matching: find.byType(Semantics)).first)
+              .properties.selected ?? false;
+      expect(lit('b'), isFalse);
+      await tester.tap(header('b'));
+      await tester.pump();
+      expect(s.selectedLayerId, 'b');
+      expect(lit('b'), isTrue, reason: 'no double-tap wait (owner, 2026-11-11)');
+      // The focus view moves the headers, so it waits out the double tap.
+      expect(sections.focusedLayer, isNull);
+      await tester.pump(kDoubleTapTimeout);
+      await tester.pumpAndSettle();
+      expect(sections.focusedLayer, 'b');
+      await tester.tap(header('b')); // the pinned track: back to all tracks
+      await tester.pump(kDoubleTapTimeout);
+      await tester.pumpAndSettle();
+      expect(sections.focusedLayer, isNull);
+
+      await tester.tap(header('c'));
+      await tester.pump();
+      expect(lit('c'), isTrue);
+      await tester.pump(const Duration(milliseconds: 80));
+      await tester.tap(header('c'));
+      await tester.pump();
+      expect(find.byKey(const ValueKey('long-press-menu')), findsOneWidget, reason: 'the second tap adds the menu');
+      await tester.pump(kDoubleTapTimeout);
+      await tester.pumpAndSettle();
+      expect(sections.focusedLayer, isNull, reason: 'a double tap opens no focus view');
+      expect(s.selectedLayerId, 'c');
+      await tester.tapAt(const Offset(5, 5));
+      await settle(tester);
+
+      // A tap on the next header soon after is a first tap there, not a double tap.
+      await tester.tap(header('a'));
+      await tester.pump(const Duration(milliseconds: 80));
+      await tester.tap(header('b'));
+      await tester.pump();
+      expect(find.byKey(const ValueKey('long-press-menu')), findsNothing);
+      expect(lit('b'), isTrue);
+      await tester.pump(kDoubleTapTimeout);
+      await settle(tester);
+      expect(sections.focusedLayer, 'b');
+    });
+
     testWidgets('drag the headers\' right edge and a row\'s bottom edge to resize them; the sizes are saved',
         (tester) async {
       await pumpArranger(tester, const Size(412, 900));

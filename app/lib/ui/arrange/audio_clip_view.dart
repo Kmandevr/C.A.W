@@ -61,7 +61,6 @@ class AudioClipViewState extends State<AudioClipView> {
   /// The move began with a long press (owner, 2026-11-11): the clip is picked up whole, edges included, and a resting
   /// second finger frees it from the grid.
   bool _lifted = false;
-  Offset _doubleAt = Offset.zero;
 
   AppState get s => widget.state;
   AudioClipDoc get c => widget.clip;
@@ -352,14 +351,19 @@ class AudioClipViewState extends State<AudioClipView> {
           // The body: select, open, menu and move (from the first few pixels, before the scroll views take it).
           Positioned.fill(child: MediaQuery(
             data: mq.copyWith(gestureSettings: const DeviceGestureSettings(touchSlop: kTouchSlop / 2)),
-            // A double tap or a right-click opens the menu (its first item opens the Clip tab); a long press lifts.
-            // A mouse's click selects at once and its double-click opens the Clip tab (owner, 2026-11-11).
-            child: Listener(onPointerDown: _clicks.down, child: TouchDoubleTap(
-              onDoubleTapDown: (d) => _doubleAt = d.globalPosition,
-              onDoubleTap: () => showAudioClipMenu(context, s, widget.layer, c, _doubleAt, onOpen: widget.onOpen),
-              child: GestureDetector(
+            // A tap selects at once; a quick second tap opens the menu as well (its first item opens the Clip tab), as a
+            // right-click does; a long press lifts. A mouse's double-click opens the Clip tab (owner, 2026-11-11).
+            child: Listener(onPointerDown: _clicks.down, onPointerUp: _clicks.up, child: GestureDetector(
               key: ValueKey('audio-clip-${c.id}'),
-              onTap: () => _clicks.doubleClick && widget.onOpen != null ? widget.onOpen!() : _tap(),
+              onTap: () {
+                if (_clicks.doubleClick && widget.onOpen != null) {
+                  widget.onOpen!();
+                } else if (_clicks.doubleTap) {
+                  showAudioClipMenu(context, s, widget.layer, c, _clicks.position, onOpen: widget.onOpen);
+                } else {
+                  _tap();
+                }
+              },
               onLongPressStart: _lift,
               onLongPressMoveUpdate: _liftMove,
               onLongPressEnd: _liftEnd,
@@ -369,7 +373,7 @@ class AudioClipViewState extends State<AudioClipView> {
               onPanUpdate: (d) { if (!_lifted) _update(d.globalPosition); },
               onPanEnd: (_) { if (!_lifted) _end(); },
               onPanCancel: () { if (_grab != _Grab.none && !_lifted) _cancel(); },
-              child: body))))),
+              child: body)))),
           if (c.takes.length > 1 && width >= 100 && h >= 26)
             Positioned(top: 2, right: 14, child: TakeChip.audio(state: s, layer: widget.layer, audio: c, color: color)),
           // The edges trim: the left keeps the audio in place, the right past the file's end loops it.

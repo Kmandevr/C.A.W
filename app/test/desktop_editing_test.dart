@@ -146,7 +146,7 @@ void main() {
       await tester.pump(const Duration(seconds: 1));
     });
 
-    testWidgets('a click selects a clip at once; a double-click opens its notes; a finger waits for the double tap',
+    testWidgets('a click selects a clip at once; a double-click opens its notes; a finger tap selects at once too',
         (tester) async {
       await pump(tester);
       await tester.tap(find.byKey(const ValueKey('clip-c1')), kind: PointerDeviceKind.mouse);
@@ -164,9 +164,8 @@ void main() {
       s.clearClipSelection();
       await tester.tap(find.byKey(const ValueKey('clip-c1')));
       await tester.pump();
-      expect(s.selectedClipIds, isEmpty, reason: 'a finger tap waits out the double tap');
-      await tester.pump(const Duration(milliseconds: 400));
-      expect(s.selectedClipIds, {'c1'});
+      expect(s.selectedClipIds, {'c1'}, reason: 'a finger tap answers at once (owner, 2026-11-11)');
+      expect(find.text('Edit notes'), findsNothing, reason: 'one tap is not the menu');
       await tester.pump(const Duration(seconds: 1));
     });
 
@@ -453,8 +452,9 @@ void main() {
       final key = 'clip|c1|${automationKey('track', 'volume', layerId: 'a')}';
       final surface = find.byKey(ValueKey('lane-surface-$key'));
       await tester.tapAt(tester.getRect(surface).topLeft + const Offset(2 * 28.0, 12));
+      await tester.pump();
+      expect(clip('c1').automation.single.points, hasLength(3), reason: 'at once: no double-tap wait');
       await tester.pump(const Duration(milliseconds: 400));
-      expect(clip('c1').automation.single.points, hasLength(3));
       final p = find.byKey(ValueKey('lane-point-$key-1'));
       await tester.tap(p);
       await tester.pump(const Duration(milliseconds: 60));

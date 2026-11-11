@@ -3,6 +3,7 @@ import 'dart:async';
 import 'dart:math' as math;
 import 'dart:typed_data';
 
+import 'package:flutter/gestures.dart' show kDoubleTapTouchSlop;
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 
@@ -13,6 +14,7 @@ import 'motion.dart';
 import 'theme.dart';
 import 'glass.dart';
 import 'haptics.dart';
+import 'pointer_input.dart' show ClickCounter;
 
 class NeonPanel extends StatelessWidget {
   const NeonPanel({super.key, required this.child, this.color, this.padding = const EdgeInsets.all(12)});
@@ -631,21 +633,36 @@ class BarsField extends StatelessWidget {
 }
 
 /// A double-tap on [child] (a slider, usually) sets it back to its default (owner, 2026-11-10: every slider and knob
-/// resets on a double-tap). A drag still belongs to the slider; a single tap waits the double-tap time first.
-class ResetOnDoubleTap extends StatelessWidget {
+/// resets on a double-tap). The taps and drags belong to the slider and answer at once (a tap moves the thumb at
+/// once): only a [Listener] counts them, and the second tap's reset lands after the slider has had that tap.
+class ResetOnDoubleTap extends StatefulWidget {
   const ResetOnDoubleTap({super.key, required this.onReset, required this.child});
   final VoidCallback? onReset;
   final Widget child;
 
   @override
-  Widget build(BuildContext context) => onReset == null
-      ? child
-      : GestureDetector(
-          onDoubleTap: () {
-            Motion.tick();
-            onReset!();
-          },
-          child: child);
+  State<ResetOnDoubleTap> createState() => _ResetOnDoubleTapState();
+}
+
+class _ResetOnDoubleTapState extends State<ResetOnDoubleTap> {
+  final _taps = ClickCounter();
+
+  void _up(PointerUpEvent e) {
+    _taps.up(e);
+    // A second tap that stayed in place (a drag is the slider's). The slider takes the tap in the same event, after
+    // this listener: the reset waits for it, so the default is what stays.
+    if (!_taps.twice || (e.position - _taps.position).distance > kDoubleTapTouchSlop) return;
+    scheduleMicrotask(() {
+      if (!mounted || widget.onReset == null) return;
+      Motion.tick();
+      widget.onReset!();
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.onReset == null
+      ? widget.child
+      : Listener(onPointerDown: _taps.down, onPointerUp: _up, child: widget.child);
 }
 
 /// Settings › Editing › Ask before deleting a track: a dialog when it is on (true at once when off; undo takes a

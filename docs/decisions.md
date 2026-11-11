@@ -57,6 +57,29 @@ Carries out the owner's decision of 2026-11-10 ("C++ replaces the .caw language"
 - **Bug fixed on the way:** a track's instrument installed while nothing sounds counted as still ringing at the first Play, which mixed in 5 ms of a phantom tail (a free-running source started at twice its level); a new instrument now starts idle.
 - **Open, for the owner:** an instrument track keeps running after a Stop until its output is quiet (or 30 s), and a never-quiet effect there now ends at that cap without the 20 ms fade buses get; a bus whose capped tail has faded comes back while a child track still rings out. The app still sends `voices`, `swap`, `seam_crossfade` and the key (Settings' light-mode voice cap and swap timing now change nothing): removing those settings is UI work.
 
+## 2026-11-11: Track headers that shrink, collapse and open editors (owner)
+
+**Decision (owner, 2026-11-11):**
+- **Meters:** as a header gets narrower, its meter turns upright to save width.
+- **Collapse states, as in REAPER:**
+  - Normal;
+  - Compact: as thin as possible while keeping the name, mute and solo. On a phone at the narrowest header width, mute and solo drop until the track is focused;
+  - Thin bar: just a sliver showing a track is there.
+
+  Ways to change them:
+  - drag the track's own bottom edge, which snaps through the states;
+  - the track menu's Collapse ▸, which also applies to all selected tracks;
+  - a folder's chevron, which collapses its children to thin bars;
+  - a vertical pinch on a header.
+- **Height per track:** each track can be resized on its own, and the global height is the default.
+- **Nested tracks are indented** under their parent, by depth, so the nesting is visible.
+- **Header gestures:**
+  - a tap selects at once, and the focus view follows;
+  - a **double tap opens the track's effects**: the focus view's FX tab;
+  - a **hold opens the track menu** when released without moving, and a hold followed by a drag reorders or nests the track as before;
+  - right-click opens the menu with a mouse.
+- **Clips:** a tap on an already selected clip opens its editor (the piano roll for MIDI, the audio editor for audio). A double tap still opens the clip menu.
+
 ## 2026-11-11: Arrangement music video (owner)
 
 **Decision (owner, 2026-11-11).** A built-in tool that records the arrangement as a good-looking music video, made to look cool rather than to be useful.
@@ -196,7 +219,7 @@ Carries out the first two bullets of the owner's decision below ([App](app.md)).
 **How Arrange does it (Claude, choices to confirm; [App](app.md)):**
 - **A plain track becomes a parent by turning into a bus folder** (`makeParent`): it keeps its id, effects, sends, fader and volume and pan lanes, so what it nests plays through them as in REAPER, and its instrument and clips move to a new first track inside it of the same name. The engine's bus slots only sum and run effects; letting a bus also play an instrument is an engine change left for later, so the parent's own clips are not on its row as in REAPER.
 - **A second finger frees a long-press lift from the grid**, as the owner asked; it still makes a copy during a quick drag (the earlier choice), and the clip menu duplicates.
-- **The double tap replaces the clip's old double tap** (which opened its notes): the menu's first entry, Edit notes, does that. A plain tap on a header now waits out the double tap before opening the focus view, while the header's buttons answer at once.
+- **The double tap replaces the clip's old double tap** (which opened its notes): the menu's first entry, Edit notes, does that. No tap waits for the double tap (owner, 2026-11-11: "significant delay between the selection and the track actually lighting up"): the first tap selects at once and a quick second tap adds the menu (`ClickCounter`, no double-tap recognizer in the gesture arena). Only a finger's tap on a header holds back the focus view it opens for the double-tap time, since the focus view moves the headers out from under the second tap; the track lights up at once.
 - **The menus' numbers:** the track menu's Volume (dB) and Pan apply live; the clip menu's Length (bars) applies when let go or entered, since it rebuilds the project.
 - **Audio clips** (done, 2026-11-11, branch `clip-loops`) follow the same rule (`app/lib/ui/arrange/audio_clip_view.dart`): a long press lifts the clip whole (edges included) onto any track on the grid, never before the project start, a resting second finger freeing it; a double tap or a right-click opens the menu, whose first item opens the Clip tab.
 

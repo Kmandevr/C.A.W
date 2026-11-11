@@ -68,7 +68,7 @@ void main() {
     expect(gain, 1, reason: 'double-tap: 0 dB');
   });
 
-  testWidgets('a slider wrapped in ResetOnDoubleTap still drags, and a double-tap resets it', (tester) async {
+  testWidgets('a slider wrapped in ResetOnDoubleTap still drags and taps at once, and a double-tap resets it', (tester) async {
     var pan = 0.0;
     await tester.pumpWidget(MaterialApp(home: Scaffold(body: Center(child: SizedBox(width: 300,
       child: StatefulBuilder(builder: (context, setState) => ResetOnDoubleTap(onReset: () => setState(() => pan = 0),
@@ -76,6 +76,12 @@ void main() {
     await tester.drag(find.byKey(const ValueKey('pan')), const Offset(80, 0));
     await tester.pumpAndSettle();
     expect(pan, greaterThan(0.3));
+    await tester.pump(const Duration(seconds: 1));
+    // A single tap moves the thumb at once (no double-tap wait); a quick second tap then resets.
+    await tester.tapAt(tester.getRect(find.byKey(const ValueKey('pan'))).centerLeft + const Offset(40, 0));
+    await tester.pump();
+    expect(pan, lessThan(-0.3));
+    await tester.pump(const Duration(seconds: 1));
     await tester.tap(find.byKey(const ValueKey('pan')));
     await tester.pump(const Duration(milliseconds: 50));
     await tester.tap(find.byKey(const ValueKey('pan')));

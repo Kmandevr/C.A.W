@@ -7,6 +7,7 @@ import '../../model/cpp_snippets.dart';
 import '../../model/cpp_workbench.dart';
 import '../arrange/knob.dart' show Taper;
 import '../theme.dart';
+import '../widgets.dart' show ResetOnDoubleTap;
 
 TextStyle _small({Color color = Neon.text, FontWeight? weight}) => TextStyle(fontSize: 12, color: color, fontWeight: weight);
 
@@ -236,9 +237,9 @@ class _Knob extends StatelessWidget {
       child: Row(children: [
         SizedBox(width: 80, child: Text(p.label, style: _small(), overflow: TextOverflow.ellipsis)),
         Expanded(
-          child: GestureDetector(
-            // Double-tap: back to the descriptor's default.
-            onDoubleTap: () => workbench.setKnob(use, p.id, p.defaultValue, commit: true),
+          // Double-tap: back to the descriptor's default; a single tap still moves the slider at once.
+          child: ResetOnDoubleTap(
+            onReset: () => workbench.setKnob(use, p.id, p.defaultValue, commit: true),
             child: p.exponential && p.max > p.min
                 ? Slider(
                     value: taper.position(value),
