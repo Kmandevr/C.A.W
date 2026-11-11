@@ -81,7 +81,15 @@ void main() {
     setUp(() async => root = await Directory.systemTemp.createTemp('caw-history-'));
     tearDown(() => root.delete(recursive: true));
 
-    Future<void> pause() => Future<void>.delayed(const Duration(milliseconds: 700));
+    /// Waits, however busy the machine is, until the state's own pause timer has closed the burst of edits (it fires
+    /// 600 ms after the last edit; nothing here closes it by hand).
+    Future<void> settled(AppState s) async {
+      final deadline = DateTime.now().add(const Duration(seconds: 20));
+      while (s.history.open && DateTime.now().isBefore(deadline)) {
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+      }
+      expect(s.history.open, isFalse, reason: 'the burst settles by itself after a pause');
+    }
 
     test('undo and redo go back and forth over project edits, one step per burst', () async {
       final storage = ProjectStorage(root);
@@ -98,9 +106,10 @@ void main() {
       s.mixLayer(s.project.layers.first, volume: 0.2);
       expect(s.canUndo, isTrue);
       expect(notified, greaterThan(0), reason: 'the transport sees undo become available');
-      await pause();
+      expect(s.history.open, isTrue, reason: 'the two volume moves are one open burst');
+      await settled(s);
       s.editProject((p) => p.bpm = 150);
-      await pause();
+      await settled(s);
 
       expect(s.undo(), isTrue);
       expect(s.project.bpm, 120);

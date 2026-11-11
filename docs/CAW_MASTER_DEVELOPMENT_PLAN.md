@@ -101,11 +101,10 @@ Workflow and reliability:
 - On success offer open, reveal-in-file-manager and preview/test actions.
 - Do not promise unsupported output formats or destinations.
 
-### Plugin Builder
-A dedicated plugin-development workspace:
+### Plug-in workflow
+One plug-in page per C++ component (shipped: Write → Build → Test → Export, [app](app.md) Build; the .caw Plugin Builder went with the .caw language, #160):
 - Start from an existing generator/effect/instrument or create a new one.
-- Guided and advanced workflows.
-- Visual no-code builder and native code path.
+- A native C++ code path; a visual no-code builder remains a later idea.
 - Automatically generated parameter controls; customizable UI and metadata.
 - Target selection, validation, testing, building and packaging.
 - CLAP first, VST3 later; standalone builds where feasible.
@@ -388,7 +387,7 @@ Document measured improvements, test evidence, known limitations and compatibili
 
 # How the two tasks fit together
 
-**Task 1 owns presentation, interaction and workflow:** Builder, Arranger, Mixer/Editor, Engine Lab, automation/visual programming, Exporter, Plugin Builder and file management.
+**Task 1 owns presentation, interaction and workflow:** Build (C++ components, patterns and each component's plug-in page), Arrange (with the mixer and automation), Export and Files.
 
 **Task 2 owns underlying processing and runtime:** existing engine integration, universal interaction graph, programmable engine files, low-level data manipulation, non-destructive transformations, scheduling, optimization, plugin-host boundary and rendering.
 

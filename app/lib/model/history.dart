@@ -22,6 +22,9 @@ class ProjectHistory {
   bool get canUndo => _undo.isNotEmpty || (_open && _stable != null);
   bool get canRedo => _redo.isNotEmpty;
 
+  /// A burst of edits is open: edited since the last [settle].
+  bool get open => _open;
+
   /// A new project (or one just opened): no history, and [current] is where it stands.
   void reset(String current) {
     _undo.clear();
