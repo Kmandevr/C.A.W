@@ -149,7 +149,7 @@ class _GatePainter extends CustomPainter {
       final lit = step == k;
       final slot = Rect.fromLTWH(pad + k * sw + 1, top, sw - 2, hh);
       canvas.drawRRect(RRect.fromRectAndRadius(slot, const Radius.circular(3)),
-        Paint()..color = Colors.white.withValues(alpha: k % 4 == 0 ? 0.06 : 0.03));
+        Paint()..color = Neon.ink.withValues(alpha: k % 4 == 0 ? 0.06 : 0.03));
       if (lvl > 0) {
         // The step's envelope: attack, decay to sustain, release at the gate's end (times relative to the step).
         final env = Path()..moveTo(x + 1, base);

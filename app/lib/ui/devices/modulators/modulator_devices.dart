@@ -39,7 +39,7 @@ Color modulatorColor(AppState s, String modulatorId) {
   };
   final same = s.project.modulators.where((x) => x.componentId == m.componentId).toList();
   final i = same.indexOf(m);
-  return i <= 0 ? base : Color.lerp(base, Colors.white, (0.18 * i).clamp(0.0, 0.6))!;
+  return i <= 0 ? base : Color.lerp(base, Neon.ink, (0.18 * i).clamp(0.0, 0.6))!;
 }
 
 void _say(BuildContext context, String text) =>
@@ -713,7 +713,7 @@ class _StepsPainter extends CustomPainter {
     }
     if (now != null) {
       final y = (1 - now!.clamp(0.0, 1.0)) * (size.height - 6) + 3;
-      canvas.drawLine(Offset(0, y), Offset(size.width, y), Paint()..color = Colors.white.withValues(alpha: 0.4));
+      canvas.drawLine(Offset(0, y), Offset(size.width, y), Paint()..color = Neon.ink.withValues(alpha: 0.4));
     }
   }
 

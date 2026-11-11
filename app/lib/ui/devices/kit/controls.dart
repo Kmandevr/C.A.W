@@ -60,7 +60,7 @@ class ModeTiles extends StatelessWidget {
               duration: Motion.fade(Motion.small, Motion.of(context)),
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(10),
-                color: k == sel ? c.withValues(alpha: 0.2) : Colors.white.withValues(alpha: 0.03),
+                color: k == sel ? c.withValues(alpha: 0.2) : Neon.ink.withValues(alpha: 0.03),
                 border: Border.all(color: k == sel ? c : Neon.line, width: k == sel ? 1.5 : 1),
                 boxShadow: k == sel ? [BoxShadow(color: c.withValues(alpha: 0.25), blurRadius: 10)] : null),
               child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
@@ -145,7 +145,7 @@ class DeviceToggle extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: 12),
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(18),
-            color: on ? c.withValues(alpha: 0.22) : Colors.white.withValues(alpha: 0.03),
+            color: on ? c.withValues(alpha: 0.22) : Neon.ink.withValues(alpha: 0.03),
             border: Border.all(color: on ? c : Neon.line),
             boxShadow: on ? [BoxShadow(color: c.withValues(alpha: 0.3), blurRadius: 10)] : null),
           child: Row(mainAxisSize: MainAxisSize.min, children: [
@@ -276,7 +276,7 @@ class _MeterPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final r = RRect.fromRectAndRadius(Offset.zero & size, const Radius.circular(4));
-    canvas.drawRRect(r, Paint()..color = Colors.white.withValues(alpha: 0.05));
+    canvas.drawRRect(r, Paint()..color = Neon.ink.withValues(alpha: 0.05));
     canvas.save();
     canvas.clipRRect(r);
     final h = size.height * v;

@@ -354,7 +354,7 @@ class _SheetHeader extends StatelessWidget {
           ]),
           const SizedBox(height: 6),
           Container(height: 3, decoration: BoxDecoration(borderRadius: BorderRadius.circular(2),
-              gradient: LinearGradient(colors: [_accent, _second]))),
+              gradient: LinearGradient(colors: Neon.ramp([_accent, _second])))),
         ]),
       );
 }
@@ -452,7 +452,7 @@ class _Tiles<T> extends StatelessWidget {
           duration: Motion.fade(Motion.small, Motion.of(context)),
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(10),
-            color: on ? c.withValues(alpha: 0.2) : Colors.white.withValues(alpha: ok ? 0.03 : 0.0),
+            color: on ? c.withValues(alpha: 0.2) : Neon.ink.withValues(alpha: ok ? 0.03 : 0.0),
             border: Border.all(color: on ? c : Neon.line.withValues(alpha: ok ? 1 : 0.4), width: on ? 1.5 : 1),
             boxShadow: on ? [BoxShadow(color: c.withValues(alpha: 0.25), blurRadius: 10)] : null,
           ),
@@ -488,7 +488,7 @@ class _Pill extends StatelessWidget {
             padding: const EdgeInsets.symmetric(horizontal: 12),
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(18),
-              color: on ? _accent.withValues(alpha: 0.22) : Colors.white.withValues(alpha: 0.03),
+              color: on ? _accent.withValues(alpha: 0.22) : Neon.ink.withValues(alpha: 0.03),
               border: Border.all(color: on ? _accent : Neon.line),
               boxShadow: on ? [BoxShadow(color: _accent.withValues(alpha: 0.3), blurRadius: 10)] : null,
             ),

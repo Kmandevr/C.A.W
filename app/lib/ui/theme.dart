@@ -1,18 +1,55 @@
-// The look: themes (Calm neon and the starter themes), the readable theme file, the active theme behind Neon.*, fonts.
+// The look: themes (the five built-in families, each light and dark), the readable theme file, the active theme behind Neon.*, fonts.
 import 'dart:ui' show ColorSpace;
 
 import 'package:flutter/material.dart';
 
 import 'glass.dart';
+import 'theme_palette.dart';
 
-/// One theme: a colour for each slot, whether active things glow, and (owner, 2026-11-11: a theme is a full profile)
-/// the rest of its look, layout and behaviour in [profile]. Saved as a readable theme file.
+/// One theme: a dark and a light palette (owner, 2026-11-11: light and dark for every built-in theme; the Mode
+/// switch picks which one shows), whether active things glow, whether it is [flat], and (owner, 2026-11-11: a theme
+/// is a full profile) the rest of its look, layout and behaviour in [profile]. Saved as a readable theme file.
+///
+/// A theme object shows one palette ([light]); [shown] gives the same theme in the other mode, kept as one object
+/// per mode so a mode switch back and forth makes no new theme (and no new Material theme).
 class CawTheme {
-  const CawTheme({required this.name, required this.colors, this.glow = true, this.profile = const {}});
+  CawTheme({
+    required this.name,
+    required Map<String, Color> colors,
+    Map<String, Color>? lightColors,
+    this.glow = true,
+    this.flat = false,
+    this.profile = const {},
+    this.light = false,
+  })  : darkColors = colors,
+        _lightGiven = lightColors;
 
   final String name;
-  final Map<String, Color> colors;
+
+  /// The dark palette (the file's plain `slot:` lines). A slot left out comes from Neon's.
+  final Map<String, Color> darkColors;
+
+  /// The light palette as set (the file's `light.slot:` lines); null when it is made from the dark one.
+  final Map<String, Color>? _lightGiven;
+
+  /// The light palette: as set, or made from the dark one by [lightFrom] (the built-ins' own algorithm).
+  late final Map<String, Color> lightColors = _lightGiven == null
+      ? lightFrom(_full(darkColors, _neonDark))
+      : _full(_lightGiven, lightFrom(_full(darkColors, _neonDark)));
+
+  /// True when the light palette was set rather than made ([lightFrom]).
+  bool get hasOwnLight => _lightGiven != null;
+
+  /// Which palette this object shows.
+  final bool light;
   final bool glow;
+
+  /// The plain look of a standard DAW (the Flat family, owner 2026-11-11): no glow and no glass whatever the
+  /// settings say, solid fills instead of gradients. Kept in both modes.
+  final bool flat;
+
+  /// The palette shown.
+  Map<String, Color> get colors => light ? lightColors : darkColors;
 
   /// The profile's values by key (`look.font`, `layout.track_height`, `behaviour.motion`, ...), as the file writes
   /// them. Settings reads and fills them ([Settings.captureProfile]); a key left out (a colours-only theme from
@@ -51,16 +88,57 @@ class CawTheme {
     'layer8': 'Track colour 8',
   };
 
-  /// The colour of [slot]; a slot the theme leaves out comes from Calm neon.
-  Color operator [](String slot) => colors[slot] ?? calmNeon.colors[slot] ?? const Color(0xFFFF00FF);
+  static Map<String, Color> _full(Map<String, Color> c, Map<String, Color> base) =>
+      c.length == slots.length && slots.keys.every(c.containsKey) ? c : {...base, ...c};
 
-  CawTheme copyWith({String? name, Map<String, Color>? colors, bool? glow, Map<String, String>? profile}) => CawTheme(
-      name: name ?? this.name,
-      colors: colors ?? this.colors,
-      glow: glow ?? this.glow,
-      profile: profile ?? this.profile);
+  /// The colour of [slot] in the palette shown; a slot the theme leaves out comes from Neon's. Besides the
+  /// [slots], `ink` is the colour that stands out from every surface for faint lines, grids, handles and highlights:
+  /// white on a dark palette, the text colour on a light one.
+  Color operator [](String slot) {
+    if (slot == 'ink') return light ? this['text'] : const Color(0xFFFFFFFF);
+    return colors[slot] ?? (light ? neonLight.lightColors : _neonDark)[slot] ?? const Color(0xFFFF00FF);
+  }
 
-  CawTheme withColor(String slot, Color c) => copyWith(colors: {...colors, slot: c});
+  CawTheme? _twin;
+
+  /// This theme showing its light palette ([light] true) or its dark one. The same object each time.
+  CawTheme shown(bool light) {
+    if (light == this.light) return this;
+    final twin = _twin ??= CawTheme(
+        name: name, colors: darkColors, lightColors: _lightGiven, glow: glow, flat: flat, profile: profile,
+        light: light);
+    twin._twin ??= this;
+    return twin;
+  }
+
+  CawTheme copyWith({
+    String? name,
+    Map<String, Color>? colors,
+    Map<String, Color>? lightColors,
+    bool clearLight = false,
+    bool? glow,
+    bool? flat,
+    Map<String, String>? profile,
+    bool? light,
+  }) =>
+      CawTheme(
+          name: name ?? this.name,
+          colors: colors ?? darkColors,
+          lightColors: clearLight ? null : (lightColors ?? _lightGiven),
+          glow: glow ?? this.glow,
+          flat: flat ?? this.flat,
+          profile: profile ?? this.profile,
+          light: light ?? this.light);
+
+  /// Sets [slot] in the palette shown (the other palette stays; a light palette made from the dark one follows it).
+  CawTheme withColor(String slot, Color c) =>
+      light ? copyWith(lightColors: {...lightColors, slot: c}) : copyWith(colors: {...darkColors, slot: c});
+
+  /// The theme with its light palette made afresh from the dark one ([lightFrom]), editable afterwards.
+  CawTheme makeLight() => copyWith(lightColors: lightFrom(_full(darkColors, _neonDark)));
+
+  /// The theme with its dark palette made afresh from the light one ([darkFrom]), editable afterwards.
+  CawTheme makeDark() => copyWith(colors: darkFrom(lightColors), lightColors: lightColors);
 
   static String hex(Color c) =>
       '#${(c.toARGB32() & 0xFFFFFF).toRadixString(16).padLeft(6, '0').toUpperCase()}';
@@ -73,15 +151,25 @@ class CawTheme {
     return Color(h.length == 6 ? 0xFF000000 | v : v);
   }
 
-  /// The theme file: a header like a module's, then one `slot: #RRGGBB` line per colour, then the profile's
+  /// The theme file: a header like a module's, then one `slot: #RRGGBB` line per colour of the dark palette, the
+  /// light palette's `light.slot: #RRGGBB` lines when it was set (not made from the dark one), then the profile's
   /// `part.key: value` lines by part (look, layout, behaviour; a layout value may be one line of JSON). With no
-  /// profile the file is exactly a colours-only theme, as before profiles.
+  /// light palette and no profile the file is exactly a colours-only theme, as before profiles; an older build reads
+  /// the dark palette and skips the rest.
   String toFile() {
     final b = StringBuffer('---\nkind: theme\nname: $name\n---\n');
-    b.writeln('// C.A.W theme: one colour per line as #RRGGBB. Missing lines fall back to Calm neon.');
+    b.writeln('// C.A.W theme: one colour per line as #RRGGBB. Missing lines fall back to Neon.');
     b.writeln('glow: ${glow ? 'on' : 'off'}');
+    if (flat) b.writeln('flat: on');
+    final dark = _full(darkColors, _neonDark);
     for (final s in slots.keys) {
-      b.writeln('$s: ${hex(this[s])}');
+      b.writeln('$s: ${hex(dark[s]!)}');
+    }
+    if (_lightGiven != null) {
+      b.writeln('// The light palette (Mode: Light).');
+      for (final s in slots.keys) {
+        b.writeln('light.$s: ${hex(lightColors[s]!)}');
+      }
     }
     if (profile.isNotEmpty) {
       b.writeln('// The look, layout and behaviour. Missing lines keep the current settings.');
@@ -95,12 +183,16 @@ class CawTheme {
     return b.toString();
   }
 
-  /// Reads a theme file. Unknown keys are ignored; anything that isn't a theme throws a [FormatException].
+  /// Reads a theme file. Unknown keys are ignored; anything that isn't a theme throws a [FormatException]. A file
+  /// with one palette (from before light and dark) loads it as the dark palette, or as the light one when its
+  /// background is light, and makes the other ([lightFrom], [darkFrom]).
   static CawTheme parse(String text) {
     String? kind, name;
-    var glow = true;
+    var glow = true, flat = false;
     final colors = <String, Color>{};
+    final lightColors = <String, Color>{};
     final profile = <String, String>{};
+    bool on(String v) => !{'off', 'false', 'no', '0'}.contains(v.toLowerCase());
     final lines = text.replaceAll('\r', '').split('\n');
     for (var i = 0; i < lines.length; i++) {
       final line = lines[i].trim();
@@ -115,21 +207,36 @@ class CawTheme {
         case 'name':
           name = value;
         case 'glow':
-          glow = !{'off', 'false', 'no', '0'}.contains(value.toLowerCase());
+          glow = on(value);
+        case 'flat':
+          flat = on(value);
         default:
           if (isProfileKey(key)) {
             if (value.length <= 64 * 1024) profile[key] = value;
             continue;
           }
-          if (!slots.containsKey(key)) continue;
+          final lightSlot = key.startsWith('light.') ? key.substring(6) : null;
+          if (!slots.containsKey(lightSlot ?? key)) continue;
           final c = parseHex(value);
           if (c == null) throw FormatException('Line ${i + 1}: "$value" is not a #RRGGBB colour');
-          colors[key] = c;
+          (lightSlot == null ? colors : lightColors)[lightSlot ?? key] = c;
       }
     }
     if (kind != 'theme') throw const FormatException('Not a theme file (it needs "kind: theme")');
+    final themeName = (name == null || name.isEmpty) ? 'Imported theme' : name;
+    if (lightColors.isEmpty && colors.containsKey('bg') && isLightPalette(colors)) {
+      // One light palette: it is the light one, and the dark one is made from it.
+      final light = _full(colors, neonLight.lightColors);
+      return CawTheme(
+          name: themeName, colors: darkFrom(light), lightColors: light, glow: glow, flat: flat, profile: profile);
+    }
     return CawTheme(
-        name: (name == null || name.isEmpty) ? 'Imported theme' : name, colors: colors, glow: glow, profile: profile);
+        name: themeName,
+        colors: colors,
+        lightColors: lightColors.isEmpty ? null : lightColors,
+        glow: glow,
+        flat: flat,
+        profile: profile);
   }
 }
 
@@ -137,37 +244,75 @@ Map<String, Color> _palette(List<int> v) => {
       for (final (i, s) in CawTheme.slots.keys.indexed) s: Color(v[i]),
     };
 
-/// The default look: near-black, thin neon lines, glow only on what's active.
-final calmNeon = CawTheme(
-  name: 'Calm neon',
+/// Neon's dark palette, the fallback for a slot a theme leaves out.
+final Map<String, Color> _neonDark = _palette(const [
+  0xFF07070B, 0xFF101018, 0xFF181824, 0xFF2A2A3C, 0xFFE9E9F2, 0xFF8C8CA3, //
+  0xFF39FF14, 0xFFFF2BD6, 0xFFFFE81F, 0xFF1FD8FF, 0xFFB46CFF, //
+  0xFF39FF14, 0xFFFF2BD6, 0xFFFFE81F, 0xFF1FD8FF, 0xFFB46CFF, 0xFFFF8A1F, 0xFF2BFFB0, 0xFFFF4D5E,
+]);
+
+/// The built-in families (owner, 2026-11-11), in the picker's order. Each has a dark and a light palette; the
+/// light ones are made by [lightFrom] (Dawn, designed light first, makes its dark one by [darkFrom]), so a custom
+/// theme's "Make light version" is the same algorithm.
+const themeFamilies = ['Neon', 'Flat', 'Dusk', 'Dawn', 'Amber'];
+
+/// Neon (was Calm neon), the default: near-black, thin neon lines, glow only on what's active.
+final calmNeon = CawTheme(name: 'Neon', colors: _neonDark);
+
+/// Neon in its light palette.
+CawTheme get neonLight => calmNeon.shown(true);
+
+/// Flat (owner, 2026-11-11): Neon's counterpart, a standard DAW look. Flat neutral greys, muted accents at ordinary
+/// saturation, no glow and no glass, solid fills and thin borders. Its own palette, not any one DAW's theme.
+final flatTheme = CawTheme(
+  name: 'Flat',
+  glow: false,
+  flat: true,
   colors: _palette(const [
-    0xFF07070B, 0xFF101018, 0xFF181824, 0xFF2A2A3C, 0xFFE9E9F2, 0xFF8C8CA3, //
-    0xFF39FF14, 0xFFFF2BD6, 0xFFFFE81F, 0xFF1FD8FF, 0xFFB46CFF, //
-    0xFF39FF14, 0xFFFF2BD6, 0xFFFFE81F, 0xFF1FD8FF, 0xFFB46CFF, 0xFFFF8A1F, 0xFF2BFFB0, 0xFFFF4D5E,
+    0xFF1F2023, 0xFF27292C, 0xFF303236, 0xFF45484D, 0xFFE2E3E5, 0xFFA3A6AB, //
+    0xFF6DBA74, 0xFFE6879A, 0xFFD9B95A, 0xFF64A3DB, 0xFFA48DD8, //
+    0xFF6DBA74, 0xFFE6879A, 0xFFD9B95A, 0xFF64A3DB, 0xFFA48DD8, 0xFFDB9358, 0xFF5CBFA8, 0xFFDB6A62,
   ]),
 );
 
-/// The themes that ship with the app (they can be duplicated, not changed).
-final starterThemes = [
-  calmNeon,
-  CawTheme(
-    name: 'Night',
-    glow: false,
-    colors: _palette(const [
-      0xFF040406, 0xFF0B0B10, 0xFF12121A, 0xFF20202C, 0xFFC4C4D0, 0xFF6C6C80, //
-      0xFF4CC38A, 0xFFC45BB2, 0xFFD6C25A, 0xFF4FA6C6, 0xFF9C83D6, //
-      0xFF4CC38A, 0xFFC45BB2, 0xFFD6C25A, 0xFF4FA6C6, 0xFF9C83D6, 0xFFD68A4C, 0xFF4CC3A6, 0xFFC45B66,
-    ]),
-  ),
-  CawTheme(
-    name: 'Amber terminal',
-    colors: _palette(const [
-      0xFF0B0804, 0xFF15100A, 0xFF1E170E, 0xFF3A2C18, 0xFFFFD9A0, 0xFFA08060, //
-      0xFFFFB000, 0xFFFF6A3D, 0xFFFFE08A, 0xFFFFC861, 0xFFB68AE0, //
-      0xFFFFB000, 0xFFFF6A3D, 0xFFFFE08A, 0xFFD9A066, 0xFFB68AE0, 0xFFFF8A3D, 0xFFE0C060, 0xFFD96650,
-    ]),
-  ),
-];
+/// Dusk (was Night): dim, muted and without glow, for late sessions.
+final duskTheme = CawTheme(
+  name: 'Dusk',
+  glow: false,
+  colors: _palette(const [
+    0xFF040406, 0xFF0B0B10, 0xFF12121A, 0xFF20202C, 0xFFC4C4D0, 0xFF7E7E93, //
+    0xFF4CC38A, 0xFFC45BB2, 0xFFD6C25A, 0xFF4FA6C6, 0xFF9C83D6, //
+    0xFF4CC38A, 0xFFC45BB2, 0xFFD6C25A, 0xFF4FA6C6, 0xFF9C83D6, 0xFFD68A4C, 0xFF4CC3A6, 0xFFC45B66,
+  ]),
+);
+
+/// Dawn (new): Dusk's light-hearted counterpart, a warm sunrise. Designed light first (cream and peach surfaces,
+/// coral, honey, sky and lavender accents); its dark palette is made from the light one ([darkFrom]).
+final dawnTheme = () {
+  final light = withSafeContrast(_palette(const [
+    0xFFFCF5EB, 0xFFF6EADB, 0xFFEFDFCB, 0xFFDDC7AC, 0xFF2E1F16, 0xFF715A49, //
+    0xFF2E7D52, 0xFFC23D62, 0xFF9A5F00, 0xFF2D6CA5, 0xFF7B4DB0, //
+    0xFF2E7D52, 0xFFC23D62, 0xFF9A5F00, 0xFF2D6CA5, 0xFF7B4DB0, 0xFFC0561A, 0xFF1F7F70, 0xFFBE3B3B,
+  ]));
+  return CawTheme(name: 'Dawn', colors: darkFrom(light), lightColors: light);
+}();
+
+/// Amber (was Amber terminal): a warm monochrome terminal.
+final amberTheme = CawTheme(
+  name: 'Amber',
+  colors: _palette(const [
+    0xFF0B0804, 0xFF15100A, 0xFF1E170E, 0xFF3A2C18, 0xFFFFD9A0, 0xFFA08060, //
+    0xFFFFB000, 0xFFFF6A3D, 0xFFFFE08A, 0xFFFFC861, 0xFFB68AE0, //
+    0xFFFFB000, 0xFFFF6A3D, 0xFFFFE08A, 0xFFD9A066, 0xFFB68AE0, 0xFFFF8A3D, 0xFFE0C060, 0xFFD96650,
+  ]),
+);
+
+/// The themes that ship with the app, in [themeFamilies] order (they can be duplicated, not changed).
+final starterThemes = [calmNeon, flatTheme, duskTheme, dawnTheme, amberTheme];
+
+/// The family a saved theme name from before the families stands for (2026-11-11: Calm neon, Night and Amber
+/// terminal became Neon, Dusk and Amber, all dark).
+const legacyThemeNames = {'Calm neon': 'Neon', 'Night': 'Dusk', 'Amber terminal': 'Amber'};
 
 /// A colour that always shows the active theme's slot, so `const` uses of Neon.* follow the theme.
 class _ThemeColor extends Color {
@@ -188,7 +333,8 @@ class _ThemeColor extends Color {
 }
 
 class Neon {
-  /// The theme every Neon colour reads from. Settings sets it; widgets built earlier repaint when the app remounts.
+  /// The theme every Neon colour reads from, in the palette shown. Settings sets it; widgets built earlier repaint
+  /// when the app remounts.
   static CawTheme active = calmNeon;
 
   /// Performance profile: 0 full, 1 balanced, 2 lightweight, 3 minimal.
@@ -212,6 +358,34 @@ class Neon {
   static const Color blue = _ThemeColor('blue');
   static const Color violet = _ThemeColor('violet');
 
+  /// The colour that stands out from every surface, for faint grids, guide lines, handles and highlights: white on
+  /// a dark palette, the text colour on a light one (use it at the alpha a white overlay had).
+  static const Color ink = _ThemeColor('ink');
+
+  /// Code's quoted text and operators: soft pink and lavender on a dark palette; on a light one a mix of two
+  /// accents, so they pass AA like the accents do.
+  static Color get codeString =>
+      active.light ? Color.lerp(active['pink'], active['violet'], 0.4)! : const Color(0xFFFF9EE8);
+  static Color get codeOperator =>
+      active.light ? Color.lerp(active['blue'], active['violet'], 0.5)! : const Color(0xFFB9B9FF);
+
+  /// True while the active theme shows its light palette.
+  static bool get isLight => active.light;
+
+  /// True while the active theme is flat (the Flat family): solid fills, no glow, no glass.
+  static bool get flat => active.flat;
+
+  /// A gradient's colours, or with a [flat] theme one solid colour (the middle of them) in their place.
+  static List<Color> ramp(List<Color> colors) {
+    if (!flat || colors.length < 2) return colors;
+    final mid = Color.lerp(colors.first, colors.last, 0.5)!;
+    return List.filled(colors.length, mid);
+  }
+
+  /// A drawn stroke's glow strength: 1 on a dark palette, softer on a light one (a halo on white reads as a smudge),
+  /// none with a flat theme.
+  static double get strokeGlow => flat ? 0 : (active.light ? 0.6 : 1);
+
   /// Track (layer) colours, in order: eight, so a song's tracks are told apart before colours repeat.
   static const List<Color> layers = [
     _ThemeColor('layer1'),
@@ -234,9 +408,16 @@ class Neon {
 
   /// The glow around active things; nothing when the theme turns glow off.
   static List<BoxShadow> glow(Color c, {double strength = 0.55}) {
-    final scale = (performanceMode == 0 ? 1.0 : performanceMode == 1 ? 0.55 : 0.0) * glowStrength;
-    return active.glow && !light && scale > 0
-        ? [BoxShadow(color: c.withValues(alpha: (strength * scale).clamp(0.0, 1.0)), blurRadius: 12, spreadRadius: -2)]
+    // On a light palette the glow is softer and tighter: a wide halo on white reads as a smudge.
+    final scale = (performanceMode == 0 ? 1.0 : performanceMode == 1 ? 0.55 : 0.0) * glowStrength *
+        (active.light ? 0.6 : 1);
+    return active.glow && !active.flat && !light && scale > 0
+        ? [
+            BoxShadow(
+                color: c.withValues(alpha: (strength * scale).clamp(0.0, 1.0)),
+                blurRadius: active.light ? 8 : 12,
+                spreadRadius: -2)
+          ]
         : const [];
   }
 
@@ -265,18 +446,32 @@ class Neon {
     double r(double v) => v * roundness;
     final bg = t['bg'], panel = t['panel'], panelHi = t['panelHi'], line = t['line'], text = t['text'];
     final green = t['green'], pink = t['pink'], blue = t['blue'];
-    final scheme = ColorScheme.dark(
-      surface: panel,
-      primary: green,
-      secondary: pink,
-      tertiary: blue,
-      error: pink,
-      onPrimary: bg,
-      onSecondary: bg,
-      onSurface: text,
-    );
+    final scheme = t.light
+        ? ColorScheme.light(
+            surface: panel,
+            primary: green,
+            secondary: pink,
+            tertiary: blue,
+            error: pink,
+            onPrimary: bg,
+            onSecondary: bg,
+            onSurface: text,
+            onSurfaceVariant: t['dim'],
+            outline: line,
+          )
+        : ColorScheme.dark(
+            surface: panel,
+            primary: green,
+            secondary: pink,
+            tertiary: blue,
+            error: pink,
+            onPrimary: bg,
+            onSecondary: bg,
+            onSurface: text,
+          );
     return ThemeData(
       useMaterial3: true,
+      brightness: t.light ? Brightness.light : Brightness.dark,
       colorScheme: scheme,
       fontFamily: fontFamily,
       fontFamilyFallback: fontFamily == mono ? monoFallback : null,
@@ -341,7 +536,7 @@ class Neon {
               backgroundColor: panelHi.withValues(alpha: 0.9),
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(r(20)),
-                side: BorderSide(color: Colors.white.withValues(alpha: 0.14)),
+                side: BorderSide(color: t['ink'].withValues(alpha: 0.14)),
               ),
             )
           : roundness == 1
@@ -352,7 +547,7 @@ class Neon {
               color: panelHi.withValues(alpha: 0.92),
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(r(14)),
-                side: BorderSide(color: Colors.white.withValues(alpha: 0.14)),
+                side: BorderSide(color: t['ink'].withValues(alpha: 0.14)),
               ),
             )
           : roundness == 1

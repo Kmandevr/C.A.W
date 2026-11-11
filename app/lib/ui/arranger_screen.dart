@@ -1361,7 +1361,7 @@ class _TimelineHeader extends StatelessWidget {
               border: Border(
                 left: edge,
                 bottom: BorderSide(color: Colors.black.withValues(alpha: 0.35)),
-                right: BorderSide(color: Colors.white.withValues(alpha: 0.05)),
+                right: BorderSide(color: Neon.ink.withValues(alpha: 0.05)),
               ),
               boxShadow: selected ? [BoxShadow(color: color.withValues(alpha: 0.28), blurRadius: 12)] : null)
           : BoxDecoration(color: Color.lerp(Neon.panel, color, selected ? 0.30 : 0.16),
@@ -2279,7 +2279,7 @@ class _TimelineClipState extends State<_TimelineClip> {
     final name = _name;
     // The notes sit under the name when the clip is tall enough for both, else they fill it.
     final preview = MidiClipPreview.of(widget.state.project, c, stepW: widget.stepW,
-      top: widget.height >= 34 ? 15 : 1, color: Color.lerp(widget.color, Colors.white, 0.45)!.withValues(alpha: 0.9));
+      top: widget.height >= 34 ? 15 : 1, color: Color.lerp(widget.color, Neon.ink, 0.45)!.withValues(alpha: 0.9));
     // On the pinned track the clip itself slides in time; elsewhere its ghost shows where it goes and it stays dim.
     final shown = dragging && !sourceDragging && _drag == null ? (_moveTarget() - c.startSteps) * widget.stepW : 0.0;
     final ghosted = dragging && !sourceDragging && _drag != null && !_copy;

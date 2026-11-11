@@ -29,7 +29,7 @@ import '../pointer_input.dart';
 const sectionOrder = [Section.build, Section.files, Section.arrange];
 
 BoxDecoration _barDecoration({required bool top}) {
-  final edge = BorderSide(color: Glass.active ? Colors.white.withValues(alpha: 0.08) : Neon.line);
+  final edge = BorderSide(color: Glass.active ? Neon.ink.withValues(alpha: 0.08) : Neon.line);
   return BoxDecoration(
     color: Glass.active ? Neon.panel.withValues(alpha: 0.6) : Neon.panel,
     border: top ? Border(top: edge) : Border(bottom: edge),
@@ -158,7 +158,7 @@ class SectionRail extends StatelessWidget {
         padding: EdgeInsets.only(left: inset.left, top: inset.top, bottom: inset.bottom),
         decoration: BoxDecoration(
           color: Glass.active ? Neon.panel.withValues(alpha: 0.6) : Neon.panel,
-          border: Border(right: BorderSide(color: Glass.active ? Colors.white.withValues(alpha: 0.08) : Neon.line)),
+          border: Border(right: BorderSide(color: Glass.active ? Neon.ink.withValues(alpha: 0.08) : Neon.line)),
         ),
         child: Column(children: [
           ?top,
@@ -629,7 +629,7 @@ class _ScrollFadeState extends State<ScrollFade> {
             decoration: BoxDecoration(gradient: LinearGradient(
               begin: left ? Alignment.centerRight : Alignment.centerLeft,
               end: left ? Alignment.centerLeft : Alignment.centerRight,
-              colors: [Neon.bg.withValues(alpha: 0), Neon.bg.withValues(alpha: 0.85)],
+              colors: Neon.ramp([Neon.bg.withValues(alpha: 0), Neon.bg.withValues(alpha: 0.85)]),
             )),
             child: Align(
               alignment: left ? Alignment.centerLeft : Alignment.centerRight,

@@ -299,7 +299,7 @@ class AudioClipViewState extends State<AudioClipView> {
     final pxPerSec = widget.stepW * bpm / 15;
     final fadeInPx = math.min(width, fadeIn * pxPerSec), fadeOutPx = math.min(width, fadeOut * pxPerSec);
     final top = h >= 34 ? 14.0 : 0.0;
-    final wave = Color.lerp(color, Colors.white, 0.35)!.withValues(alpha: 0.9);
+    final wave = Color.lerp(color, Neon.ink, 0.35)!.withValues(alpha: 0.9);
     final dragShift = _grab == _Grab.move && widget.drag != null ? _delta.dy : 0.0;
     final name = s.audioClipName(c);
     final showHandles = widget.selected && !c.lock && width >= 40 && h >= 26;
@@ -334,14 +334,14 @@ class AudioClipViewState extends State<AudioClipView> {
         if (_grab == _Grab.gain || (showHandles && gain != 1))
           Positioned(left: 0, right: 0, top: top + 2, child: Center(child: Text(gainDb(gain),
               key: ValueKey('audio-gain-label-${c.id}'),
-              style: const TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.w700)))),
+              style: const TextStyle(color: Neon.ink, fontSize: 9, fontWeight: FontWeight.w700)))),
         if (_grab == _Grab.fadeIn || _grab == _Grab.fadeOut)
           Positioned(left: 0, right: 0, bottom: 2, child: Center(child: Text(
               '${((_grab == _Grab.fadeIn ? fadeIn : fadeOut) * 1000).round()} ms',
-              style: const TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.w700)))),
+              style: const TextStyle(color: Neon.ink, fontSize: 9, fontWeight: FontWeight.w700)))),
         if (_curve != null)
           Positioned(left: 0, right: 0, bottom: 2, child: Center(child: Text(_curve!.label,
-              style: const TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.w700)))),
+              style: const TextStyle(color: Neon.ink, fontSize: 9, fontWeight: FontWeight.w700)))),
       ])),
     );
     final mq = MediaQuery.of(context);
@@ -399,7 +399,7 @@ class AudioClipViewState extends State<AudioClipView> {
                 cursor: SystemMouseCursors.resizeRow,
                 onDoubleTap: () => s.setAudioGain(widget.layer, c, 1),
                 child: Center(child: Container(width: 22, height: 3, decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.85), borderRadius: BorderRadius.circular(2))))),
+                    color: Neon.ink.withValues(alpha: 0.85), borderRadius: BorderRadius.circular(2))))),
           ],
         ]),
       ),

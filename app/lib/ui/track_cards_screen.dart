@@ -507,7 +507,7 @@ class _Lane extends StatelessWidget {
           final song = math.max(1, p.engineLoopSteps);
           final stepW = box.maxWidth / song;
           final tracks = layer.isFolder ? _childrenOf(p, layer).toList() : [layer];
-          final notes = Color.lerp(color, Colors.white, 0.35)!;
+          final notes = Color.lerp(color, Neon.ink, 0.35)!;
           Widget clipBox(Key key, double start, double length, bool muted, Widget? body) {
             final left = start * stepW;
             final width = math.max(2.0, math.min(length * stepW, box.maxWidth - left));

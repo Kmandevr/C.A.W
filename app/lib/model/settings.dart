@@ -227,6 +227,17 @@ enum ExportNaming {
   final String label;
 }
 
+/// Which palette the chosen theme shows (owner, 2026-11-11: one switch for light or dark; Follow system tracks
+/// Android's and Windows' dark mode, live).
+enum LookMode {
+  dark('Dark'),
+  light('Light'),
+  system('Follow system');
+
+  const LookMode(this.label);
+  final String label;
+}
+
 /// The piano roll's tool when it opens.
 enum StartTool {
   draw('Draw'),
@@ -246,6 +257,15 @@ class Settings extends ChangeNotifier {
   final Directory? dir;
 
   String themeName = calmNeon.name;
+
+  /// Light, dark or the system's ([platformBrightness]). Only the palette changes: the profile stays.
+  LookMode lookMode = LookMode.dark;
+
+  /// The platform's light or dark setting, kept up to date by the app ([setPlatformBrightness]).
+  Brightness platformBrightness = Brightness.dark;
+
+  /// True when the light palette shows.
+  bool get showsLight => lookMode == LookMode.light || (lookMode == LookMode.system && platformBrightness == Brightness.light);
   Density density = Density.compact; // owner, 2026-11-09: compact, not oversized
 
   /// Live coding: code swaps in by itself [liveDelayMs] after the last edit, at [swapTiming].
@@ -266,7 +286,7 @@ class Settings extends ChangeNotifier {
     Motion.setting = motion;
     Motion.haptics = haptics;
     Haptics.strength = hapticStrength;
-    Glass.enabled = glass;
+    Glass.enabled = glass && !activeTheme.flat; // the Flat family never shows glass, whatever the switch says
     Glass.blurEnabled = glassBlur;
     Motion.minimalProfile = performanceMode == PerformanceMode.minimal;
     EditMotion.style = editMotionStyle;
@@ -466,8 +486,9 @@ class Settings extends ChangeNotifier {
   List<CawTheme> get themes => [...starterThemes, ...customThemes];
   bool isStarter(String name) => starterThemes.any((t) => t.name == name);
   CawTheme themeNamed(String name) => themes.firstWhere((t) => t.name == name, orElse: () => calmNeon);
-  CawTheme get theme => themeNamed(themeName);
-  CawTheme get activeTheme => _draft ?? theme;
+  /// The chosen theme in the palette shown ([showsLight]); the same object while the theme and mode stay.
+  CawTheme get theme => themeNamed(themeName).shown(showsLight);
+  CawTheme get activeTheme => (_draft ?? themeNamed(themeName)).shown(showsLight);
   bool get compact => density == Density.compact;
 
   /// Opens the settings next to the projects folder (the app support folder), or [base] in tests.
@@ -491,6 +512,7 @@ class Settings extends ChangeNotifier {
 
   Map<String, dynamic> toJson() => {
         'theme': themeName,
+        'theme_mode': lookMode.name,
         'density': density.name,
         'live_update': liveUpdate,
         'live_delay_ms': liveDelayMs,
@@ -584,7 +606,10 @@ class Settings extends ChangeNotifier {
   void fromJson(Map<String, dynamic> j) {
     T pick<T extends Enum>(List<T> values, Object? v, T fallback) =>
         values.where((e) => e.name == v).firstOrNull ?? fallback;
-    themeName = (j['theme'] as String?) ?? themeName;
+    final savedTheme = j['theme'] as String?;
+    // A name from before the families (Calm neon, Night, Amber terminal) is that family, dark.
+    themeName = legacyThemeNames[savedTheme] ?? savedTheme ?? themeName;
+    lookMode = pick(LookMode.values, j['theme_mode'], lookMode);
     density = pick(Density.values, j['density'], density);
     liveUpdate = (j['live_update'] as bool?) ?? liveUpdate;
     liveDelayMs = ((j['live_delay_ms'] as num?)?.toInt() ?? liveDelayMs).clamp(0, 10000);
@@ -732,7 +757,9 @@ class Settings extends ChangeNotifier {
         if (f is! File || !f.path.endsWith('.theme')) continue;
         try {
           final t = CawTheme.parse(await f.readAsString());
-          if (!isStarter(t.name) && !found.any((x) => x.name == t.name)) found.add(t);
+          // A custom theme named like a family added later (Flat, Dawn...) keeps its colours under a new name.
+          final named = isStarter(t.name) ? t.copyWith(name: '${t.name} (mine)') : t;
+          if (!isStarter(named.name) && !found.any((x) => x.name == named.name)) found.add(named);
         } catch (_) {
           // A damaged theme file is skipped, not fatal.
         }
@@ -755,7 +782,7 @@ class Settings extends ChangeNotifier {
   /// glow strength), the profiles chosen ([_profileRevision]: a new dock layout is read when the shell is made) and
   /// the code editor's font, tabs, numbers and wrap (read when an editor builds). A change rebuilds the screens once
   /// on leaving Settings. A profile value saved into the theme (a track height, say) doesn't count by itself.
-  String get _lookKey => '${activeTheme.copyWith(profile: const {}).toFile()}|$roundness|$glowStrength|'
+  String get _lookKey => '${activeTheme.copyWith(profile: const {}).toFile()}|${activeTheme.light}|$roundness|$glowStrength|'
       '$_profileRevision|$codeFontSize|$codeTabWidth|$codeLineNumbers|$codeWrap';
 
   /// Bumped each time a theme's profile is put in force, so the screens (and the dock) are made again from it.
@@ -853,7 +880,26 @@ class Settings extends ChangeNotifier {
   void preview(CawTheme? draft) {
     _draft = draft;
     Neon.active = activeTheme;
+    _applyPerformanceMode();
     notifyListeners();
+  }
+
+  /// Light, dark or follow the system: only the palette changes, the profile in force stays. Saved.
+  Future<void> setLookMode(LookMode mode) => update((x) => x.lookMode = mode);
+
+  /// The platform's light or dark mode changed (or is first known, [quiet]: nothing is built yet). With Follow
+  /// system on, the palette follows at once and the screens are made again once ([commitLook]).
+  void setPlatformBrightness(Brightness b, {bool quiet = false}) {
+    if (b == platformBrightness) return;
+    platformBrightness = b;
+    if (lookMode != LookMode.system) return;
+    Neon.active = activeTheme;
+    _applyPerformanceMode();
+    if (quiet) {
+      _shownLook = _lookKey;
+    } else {
+      commitLook();
+    }
   }
 
   /// After leaving the settings: if the look changed, rebuild every screen once so fixed colours repaint too.

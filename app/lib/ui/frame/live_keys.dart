@@ -79,7 +79,7 @@ class _LiveKeysPanelState extends State<LiveKeysPanel> {
               key: const ValueKey('live-keys'),
               decoration: BoxDecoration(
                 color: Neon.panel.withValues(alpha: 0.82),
-                border: Border(top: BorderSide(color: Colors.white.withValues(alpha: 0.08))),
+                border: Border(top: BorderSide(color: Neon.ink.withValues(alpha: 0.08))),
               ),
               padding: const EdgeInsets.fromLTRB(6, 2, 6, 4),
               child: Column(mainAxisSize: MainAxisSize.min, children: [

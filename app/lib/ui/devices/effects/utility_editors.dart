@@ -79,9 +79,9 @@ class _CorrPainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     final r = RRect.fromRectAndRadius(Rect.fromLTWH(0, size.height / 2 - 4, size.width, 8), const Radius.circular(4));
     canvas.drawRRect(r, Paint()
-      ..shader = LinearGradient(colors: [Neon.pink.withValues(alpha: 0.35), Colors.white.withValues(alpha: 0.08),
-        color.withValues(alpha: 0.35)]).createShader(r.outerRect));
-    canvas.drawLine(Offset(size.width / 2, 0), Offset(size.width / 2, size.height), Paint()..color = Colors.white24);
+      ..shader = LinearGradient(colors: Neon.ramp([Neon.pink.withValues(alpha: 0.35), Neon.ink.withValues(alpha: 0.08),
+        color.withValues(alpha: 0.35)])).createShader(r.outerRect));
+    canvas.drawLine(Offset(size.width / 2, 0), Offset(size.width / 2, size.height), Paint()..color = Neon.ink.withAlpha(0x3D));
     if (v case final x?) {
       final px = (x.clamp(-1.0, 1.0) + 1) / 2 * size.width;
       final c = x < 0 ? Neon.pink : color;
@@ -170,7 +170,7 @@ class _FieldPainter extends CustomPainter {
     final radius = math.min(size.width / 2 - 16, size.height - 40);
     // The half-circle: left at 180°, right at 0°.
     final arcs = Paint()
-      ..color = Colors.white.withValues(alpha: 0.08)
+      ..color = Neon.ink.withValues(alpha: 0.08)
       ..style = PaintingStyle.stroke;
     for (final k in [0.33, 0.66, 1.0]) {
       canvas.drawArc(Rect.fromCircle(center: c, radius: radius * k), math.pi, math.pi, false, arcs);
@@ -193,7 +193,7 @@ class _FieldPainter extends CustomPainter {
       ..arcTo(Rect.fromCircle(center: c, radius: reach), lo, math.max(0.02, hi - lo), false)
       ..close();
     canvas.drawPath(fan, Paint()
-      ..shader = RadialGradient(colors: [color.withValues(alpha: 0.55), second.withValues(alpha: 0.12)])
+      ..shader = RadialGradient(colors: Neon.ramp([color.withValues(alpha: 0.55), second.withValues(alpha: 0.12)]))
           .createShader(Rect.fromCircle(center: c, radius: reach)));
     strokeGlow(canvas, Path()..addArc(Rect.fromCircle(center: c, radius: reach), lo, math.max(0.02, hi - lo)), color,
         width: active ? 3 : 2.2);
@@ -206,7 +206,7 @@ class _FieldPainter extends CustomPainter {
     for (var i = 0; i < 46; i++) {
       final a = lo + (hi - lo) * rand();
       final r = reach * (0.15 + 0.8 * rand()) * (0.85 + 0.15 * math.sin(secs * (3 + 4 * rand()) + i));
-      canvas.drawCircle(c + Offset(math.cos(a), math.sin(a)) * r, 1.6, Paint()..color = Colors.white.withValues(alpha: 0.5 * rand() + 0.2));
+      canvas.drawCircle(c + Offset(math.cos(a), math.sin(a)) * r, 1.6, Paint()..color = Neon.ink.withValues(alpha: 0.5 * rand() + 0.2));
     }
     if (bassMono) {
       canvas.drawCircle(c, radius * 0.22, Paint()..color = Neon.yellow.withValues(alpha: 0.18));

@@ -126,13 +126,13 @@ class _ClipPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     Offset pt(double x, double y) => Offset(sq.left + (x + 1) / 2 * sq.width, yOf(y));
-    final faint = Paint()..color = Colors.white.withValues(alpha: 0.08);
+    final faint = Paint()..color = Neon.ink.withValues(alpha: 0.08);
     canvas.drawRect(sq, Paint()
-      ..color = Colors.white.withValues(alpha: 0.08)
+      ..color = Neon.ink.withValues(alpha: 0.08)
       ..style = PaintingStyle.stroke);
     canvas.drawLine(pt(-1, 0), pt(1, 0), faint);
     canvas.drawLine(pt(0, -1), pt(0, 1), faint);
-    canvas.drawLine(pt(-1, -1), pt(1, 1), Paint()..color = Colors.white.withValues(alpha: 0.12));
+    canvas.drawLine(pt(-1, -1), pt(1, 1), Paint()..color = Neon.ink.withValues(alpha: 0.12));
     // The ceiling, both ways.
     for (final s in [1.0, -1.0]) {
       final y = yOf(s * ceiling);
@@ -158,8 +158,8 @@ class _ClipPainter extends CustomPainter {
       final a = math.pow(10, db / 20).toDouble().clamp(0.0, 1.0);
       for (final x in [a, -a]) {
         final p = pt(x, curve(x));
-        canvas.drawCircle(p, 9, Paint()..color = Colors.white.withValues(alpha: 0.14));
-        canvas.drawCircle(p, 4, Paint()..color = Colors.white);
+        canvas.drawCircle(p, 9, Paint()..color = Neon.ink.withValues(alpha: 0.14));
+        canvas.drawCircle(p, 4, Paint()..color = Neon.ink);
       }
     }
   }

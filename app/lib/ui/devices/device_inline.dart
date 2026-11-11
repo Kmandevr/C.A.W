@@ -119,9 +119,9 @@ class _DeviceInlineState extends State<DeviceInline> {
             child: GlassPanel(radius: 12, tint: color, child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: [
                 _header(context, color, second, style, key),
-                Container(height: 2, decoration: BoxDecoration(gradient: LinearGradient(colors: [
+                Container(height: 2, decoration: BoxDecoration(gradient: LinearGradient(colors: Neon.ramp([
                   color.withValues(alpha: 0.0), color.withValues(alpha: 0.8), second.withValues(alpha: 0.8),
-                  second.withValues(alpha: 0.0)]))),
+                  second.withValues(alpha: 0.0)])))),
                 if (!widget.nested) SidechainBar(target: t, color: color),
                 AnimatedOpacity(
                   duration: Motion.fade(Motion.small, Motion.of(context)),
@@ -150,7 +150,7 @@ class _DeviceInlineState extends State<DeviceInline> {
         width: 26, height: 26,
         decoration: BoxDecoration(borderRadius: BorderRadius.circular(8),
           gradient: LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight,
-            colors: [color.withValues(alpha: 0.9), second.withValues(alpha: 0.75)]),
+            colors: Neon.ramp([color.withValues(alpha: 0.9), second.withValues(alpha: 0.75)])),
           boxShadow: Neon.glow(color, strength: 0.3)),
         child: Icon(style?.icon ?? Icons.extension_outlined, size: 15, color: Neon.bg)),
       const SizedBox(width: 6),

@@ -304,7 +304,7 @@ class _BandStrip extends StatelessWidget {
         },
         child: Container(
           height: 22, margin: const EdgeInsets.symmetric(horizontal: 1), alignment: Alignment.center,
-          decoration: BoxDecoration(borderRadius: BorderRadius.circular(5), color: v ? on.withValues(alpha: 0.85) : Colors.white.withValues(alpha: 0.04),
+          decoration: BoxDecoration(borderRadius: BorderRadius.circular(5), color: v ? on.withValues(alpha: 0.85) : Neon.ink.withValues(alpha: 0.04),
             border: Border.all(color: v ? on : Neon.line)),
           child: Text(label, style: TextStyle(fontSize: 10, fontWeight: FontWeight.w800, color: v ? Neon.bg : Neon.dim)))));
     }

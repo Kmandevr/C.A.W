@@ -59,7 +59,7 @@ class CawApp extends StatefulWidget {
   State<CawApp> createState() => _CawAppState();
 }
 
-class _CawAppState extends State<CawApp> {
+class _CawAppState extends State<CawApp> with WidgetsBindingObserver {
   AppState get state => widget.state;
 
   // Which route is in front, for Esc and the mouse's Back button on closable pages.
@@ -82,11 +82,19 @@ class _CawAppState extends State<CawApp> {
   @override
   void initState() {
     super.initState();
+    // The system's light or dark mode, for Mode: Follow system (known before the first frame, then followed live).
+    WidgetsBinding.instance.addObserver(this);
+    state.settings.setPlatformBrightness(WidgetsBinding.instance.platformDispatcher.platformBrightness, quiet: true);
     state.settings.addListener(_settingsChanged);
   }
 
   @override
+  void didChangePlatformBrightness() =>
+      state.settings.setPlatformBrightness(WidgetsBinding.instance.platformDispatcher.platformBrightness);
+
+  @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     state.settings.removeListener(_settingsChanged);
     super.dispose();
   }

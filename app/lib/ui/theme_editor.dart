@@ -1,5 +1,5 @@
-// The theme editor (Settings › Look › Theme): pick a theme (a whole profile), edit its colours, look, layout and
-// behaviour with a live preview, and save, duplicate, import or export it.
+// The theme editor (Settings › Look › Theme): pick a theme (a whole profile) and its Mode, edit its light and dark
+// colours, look, layout and behaviour with a live preview, and save, duplicate, import or export it.
 import 'dart:convert';
 
 import 'package:file_picker/file_picker.dart';
@@ -67,6 +67,15 @@ class _ThemeEditorState extends State<ThemeEditor> {
     Haptics.tap();
     s.update(change);
     setState(() => _profileEdited = true);
+  }
+
+  /// Makes the other mode's palette from the one shown (the built-ins' algorithm), shows it and switches Mode to it,
+  /// so it can be edited at once.
+  Future<void> _makeOther() async {
+    final light = !_draft.light;
+    _edit((light ? _draft.makeLight() : _draft.makeDark()).shown(light));
+    await s.setLookMode(light ? LookMode.light : LookMode.dark);
+    if (mounted) _say(light ? 'Made a light version: edit it below' : 'Made a dark version: edit it below');
   }
 
   void _say(String text) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
@@ -289,6 +298,7 @@ class _ThemeEditorState extends State<ThemeEditor> {
   Widget build(BuildContext context) => ListenableBuilder(listenable: s, builder: (context, _) => _build(context));
 
   Widget _build(BuildContext context) {
+    _draft = _draft.shown(s.showsLight); // the Mode switch shows the draft's other palette, edits and all
     final starter = _starter && !_dirty;
     return Scaffold(
       appBar: AppBar(
@@ -304,11 +314,26 @@ class _ThemeEditorState extends State<ThemeEditor> {
           for (final t in s.themes)
             ChoiceChip(
               label: Text(t.name),
-              avatar: _Swatch(t['green'], size: 14),
+              avatar: _Swatch(t.shown(s.showsLight)['green'], size: 14),
               selected: t.name == s.themeName,
               onSelected: (_) => _choose(t),
             ),
         ]),
+        const SizedBox(height: 8),
+        SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: SegmentedButton<LookMode>(
+            key: const ValueKey('theme-mode'),
+            showSelectedIcon: false,
+            style: const ButtonStyle(visualDensity: VisualDensity.compact, tapTargetSize: MaterialTapTargetSize.shrinkWrap),
+            segments: [for (final m in LookMode.values) ButtonSegment(value: m, label: Text(m.label))],
+            selected: {s.lookMode},
+            onSelectionChanged: (v) {
+              Haptics.tap();
+              s.setLookMode(v.first);
+            },
+          ),
+        ),
         const SizedBox(height: 12),
         _Preview(theme: _draft),
         const SizedBox(height: 12),
@@ -357,6 +382,19 @@ class _ThemeEditorState extends State<ThemeEditor> {
             ]),
           ),
         const Heading('Colours'),
+        Row(children: [
+          Expanded(
+            child: _sub(_draft.light
+                ? 'Editing the light palette (Mode: Light). The dark one stays as it is.'
+                : 'Editing the dark palette. The light one is made from it until you make and edit your own.'),
+          ),
+          TextButton.icon(
+            key: const ValueKey('theme-make-other'),
+            onPressed: _makeOther,
+            icon: Icon(_draft.light ? Icons.dark_mode_outlined : Icons.light_mode_outlined, size: 18),
+            label: Text(_draft.light ? 'Make dark version' : 'Make light version'),
+          ),
+        ]),
         for (final e in CawTheme.slots.entries) ...[
           ListTile(
             contentPadding: EdgeInsets.zero,

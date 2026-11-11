@@ -342,7 +342,7 @@ Future<T?> showCompactMenu<T>(BuildContext context, Offset at, List<MenuEntry<T>
     context: context,
     position: RelativeRect.fromLTRB(at.dx, at.dy, size.width - at.dx, size.height - at.dy),
     color: Neon.panelHi.withValues(alpha: 0.96),
-    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(Radii.m), side: BorderSide(color: Colors.white.withValues(alpha: 0.12))),
+    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(Radii.m), side: BorderSide(color: Neon.ink.withValues(alpha: 0.12))),
     menuPadding: const EdgeInsets.symmetric(vertical: Space.xs),
     items: [
       for (final e in entries) ...[

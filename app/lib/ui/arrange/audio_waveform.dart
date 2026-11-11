@@ -8,6 +8,7 @@ import 'package:flutter/material.dart';
 
 import '../../engine/audio_engine.dart';
 import '../../model/audio_clips.dart';
+import '../theme.dart';
 
 /// One zoom level of one file: min/max pairs, [secondsPerBucket] apart.
 class PeakLevel {
@@ -154,7 +155,7 @@ class AudioClipPainter extends CustomPainter {
     // The fades: the faded-out part shaded, and the curve the gain follows.
     final shade = Paint()..color = Colors.black.withValues(alpha: 0.32);
     final line = Paint()
-      ..color = Colors.white.withValues(alpha: 0.85)
+      ..color = Neon.ink.withValues(alpha: 0.85)
       ..style = PaintingStyle.stroke
       ..strokeWidth = 1.3;
     void fade(double w, FadeCurve c, bool fadingIn) {

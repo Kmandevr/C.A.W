@@ -17,8 +17,8 @@ Color _plain(Color c) => Color.from(alpha: c.a, red: c.r, green: c.g, blue: c.b)
 CodeHighlightTheme cppHighlightTheme() {
   TextStyle c(Color color, {bool bold = false, bool italic = false}) =>
       TextStyle(color: _plain(color), fontWeight: bold ? FontWeight.w600 : null, fontStyle: italic ? FontStyle.italic : null);
-  const op = Color(0xFFB9B9FF);
-  const str = Color(0xFFFF9EE8);
+  final op = Neon.codeOperator;
+  final str = Neon.codeString;
   return CodeHighlightTheme(
     languages: {
       'cpp': CodeHighlightThemeMode(mode: langCpp),

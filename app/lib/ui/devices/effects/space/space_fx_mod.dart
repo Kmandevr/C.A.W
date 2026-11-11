@@ -66,7 +66,7 @@ class _VoicesPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final w = size.width, h = size.height;
-    canvas.drawLine(Offset(w / 2, 20), Offset(w / 2, h - 8), Paint()..color = Colors.white12);
+    canvas.drawLine(Offset(w / 2, 20), Offset(w / 2, h - 8), Paint()..color = Neon.ink.withAlpha(0x1F));
     paintLabel(canvas, 'L', Offset(10, h - 12), color, size: 9, weight: FontWeight.w800);
     paintLabel(canvas, 'R', Offset(w - 10, h - 12), second, size: 9, align: 1, weight: FontWeight.w800);
     for (var v = 0; v < voices; v++) {
@@ -182,7 +182,7 @@ class _WavePainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final w = size.width, h = size.height, mid = h * 0.55, amp = (h * 0.36) * depth.clamp(0.0, 1.0);
-    canvas.drawLine(Offset(0, mid), Offset(w, mid), Paint()..color = Colors.white10);
+    canvas.drawLine(Offset(0, mid), Offset(w, mid), Paint()..color = Neon.ink.withAlpha(0x1A));
     for (final (off, c) in [(0.0, color), (stereo * 0.5, second)]) {
       final p = Path();
       for (var i = 0; i <= 160; i++) {
@@ -245,7 +245,7 @@ class _PanPainter extends CustomPainter {
     final w = size.width, h = size.height;
     final arc = Rect.fromCenter(center: Offset(w / 2, h + 10), width: w - 30, height: (h - 20) * 2);
     canvas.drawArc(arc, math.pi, math.pi, false, Paint()
-      ..color = Colors.white12
+      ..color = Neon.ink.withAlpha(0x1F)
       ..style = PaintingStyle.stroke
       ..strokeWidth = 2);
     paintLabel(canvas, 'L', Offset(10, h - 12), color, size: 9, weight: FontWeight.w800);
@@ -306,7 +306,7 @@ class _RotorPainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     final c = Offset(size.width / 2, size.height / 2 + 8);
     final r = math.min(size.width, size.height) / 2 - 22;
-    canvas.drawCircle(c, r + 6, Paint()..color = Colors.white.withValues(alpha: 0.04));
+    canvas.drawCircle(c, r + 6, Paint()..color = Neon.ink.withValues(alpha: 0.04));
     // The drum: a disc with a slot.
     final da = 2 * math.pi * drum;
     canvas.drawCircle(c, r * 0.45, Paint()..color = second.withValues(alpha: 0.18));

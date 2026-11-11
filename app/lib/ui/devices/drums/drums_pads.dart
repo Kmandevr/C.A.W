@@ -113,7 +113,7 @@ class _BankButton extends StatelessWidget {
         alignment: Alignment.center,
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(9),
-          color: selected ? c.withValues(alpha: 0.22) : Colors.white.withValues(alpha: 0.03),
+          color: selected ? c.withValues(alpha: 0.22) : Neon.ink.withValues(alpha: 0.03),
           border: Border.all(color: selected ? c : Neon.line),
           boxShadow: selected ? [BoxShadow(color: c.withValues(alpha: 0.3), blurRadius: 8)] : null),
         child: Row(mainAxisSize: MainAxisSize.min, children: [
@@ -258,10 +258,10 @@ class _DrumPadTileState extends State<DrumPadTile> {
               height: widget.height,
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(12),
-                gradient: LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: [
+                gradient: LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: Neon.ramp([
                   c.withValues(alpha: hit ? 0.5 : (used ? 0.18 : 0.05)),
                   c.withValues(alpha: hit ? 0.22 : (used ? 0.05 : 0.02)),
-                ]),
+                ])),
                 border: Border.all(
                   color: widget.learning ? Neon.yellow : (widget.selected ? c : c.withValues(alpha: used ? 0.45 : 0.2)),
                   width: widget.selected || widget.learning ? 2 : 1),

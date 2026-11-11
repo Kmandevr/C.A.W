@@ -118,7 +118,7 @@ void main() {
       expect(Haptics.enabled, isFalse);
       expect(EditMotion.style, EditMotionStyle.playful);
 
-      await s.chooseTheme('Night');
+      await s.chooseTheme('Dusk');
       expect(s.trackHeight, 60, reason: 'the starters share the values in force before Big');
       expect(s.longPressMenu, LongPressMenuStyle.list);
       expect(s.motion, MotionLevel.full);
@@ -150,7 +150,7 @@ void main() {
       expect(s.theme.profile['layout.header_width'], '180.0');
       expect(File('${dir.path}/themes/Mine.theme').readAsStringSync(), contains('layout.header_width: 180.0'));
 
-      await s.chooseTheme('Calm neon');
+      await s.chooseTheme('Neon');
       await s.update((x) => x.headerWidth = 140);
       expect(calmNeon.profile, isEmpty);
       expect(s.themeNamed('Mine').profile['layout.header_width'], '180.0');

@@ -82,13 +82,13 @@ Color modSourceColor(ModSource s) => switch (s) {
       ModSource.env3 => Color.lerp(Neon.green, Neon.yellow, 0.55)!,
       ModSource.lfo1 => Neon.blue,
       ModSource.lfo2 => Color.lerp(Neon.blue, Neon.violet, 0.6)!,
-      ModSource.lfo3 => Color.lerp(Neon.blue, Colors.white, 0.5)!,
+      ModSource.lfo3 => Color.lerp(Neon.blue, Neon.ink, 0.5)!,
       ModSource.lfo4 => Color.lerp(Neon.blue, Neon.green, 0.35)!,
       ModSource.random => Neon.pink,
       ModSource.follow1 => Color.lerp(Neon.yellow, Neon.pink, 0.45)!,
       ModSource.follow2 => Color.lerp(Neon.yellow, Neon.pink, 0.75)!,
       ModSource.macro1 || ModSource.macro2 || ModSource.macro3 || ModSource.macro4 =>
-        Color.lerp(Neon.violet, Colors.white, 0.1 * (s.index - ModSource.macro1.index))!,
+        Color.lerp(Neon.violet, Neon.ink, 0.1 * (s.index - ModSource.macro1.index))!,
       ModSource.macro5 || ModSource.macro6 || ModSource.macro7 || ModSource.macro8 =>
         Color.lerp(Neon.violet, Neon.pink, 0.15 * (s.index - ModSource.macro5.index + 1))!,
       ModSource.none => Neon.dim,
@@ -169,15 +169,15 @@ class DeviceCard extends StatelessWidget {
       clipBehavior: Clip.antiAlias,
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(14),
-        gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [
+        gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: Neon.ramp([
           Color.lerp(Neon.panel, color, 0.12)!.withValues(alpha: 0.7),
           Color.lerp(Neon.panel, color, 0.03)!.withValues(alpha: 0.6),
-        ]),
+        ])),
         border: Border.all(color: color.withValues(alpha: 0.3)),
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: [
-        Container(height: 2, decoration: BoxDecoration(gradient: LinearGradient(colors: [
-          color.withValues(alpha: 0.9), color.withValues(alpha: 0.0)]))),
+        Container(height: 2, decoration: BoxDecoration(gradient: LinearGradient(colors: Neon.ramp([
+          color.withValues(alpha: 0.9), color.withValues(alpha: 0.0)])))),
         Padding(padding: const EdgeInsets.fromLTRB(10, 2, 8, 8), child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: [
             SizedBox(height: 32, child: Row(children: [
@@ -282,16 +282,16 @@ class DeviceExpandCardState extends State<DeviceExpandCard> {
         clipBehavior: Clip.antiAlias,
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(16),
-          gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [
+          gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: Neon.ramp([
             Color.lerp(Neon.panel, c, _open ? 0.14 : 0.08)!.withValues(alpha: 0.75),
             Color.lerp(Neon.panel, c, 0.03)!.withValues(alpha: 0.6),
-          ]),
+          ])),
           border: Border.all(color: c.withValues(alpha: _open ? 0.45 : 0.25)),
           boxShadow: _open ? [BoxShadow(color: c.withValues(alpha: 0.12), blurRadius: 16)] : null,
         ),
         child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: [
-          Container(height: 2, decoration: BoxDecoration(gradient: LinearGradient(colors: [
-            c.withValues(alpha: 0.9), c.withValues(alpha: 0.0)]))),
+          Container(height: 2, decoration: BoxDecoration(gradient: LinearGradient(colors: Neon.ramp([
+            c.withValues(alpha: 0.9), c.withValues(alpha: 0.0)])))),
           InkWell(
             key: ValueKey('expand-${widget.storageId}'),
             onTap: () {

@@ -58,7 +58,7 @@ class _HaasPainter extends CustomPainter {
     // Top half: the arrivals on 0..40 ms.
     final base = h * 0.48;
     double x(double ms) => 14 + (w - 28) * ms / 40;
-    canvas.drawLine(Offset(14, base), Offset(w - 14, base), Paint()..color = Colors.white12);
+    canvas.drawLine(Offset(14, base), Offset(w - 14, base), Paint()..color = Neon.ink.withAlpha(0x1F));
     final g = math.pow(10, level / 20).toDouble();
     void spike(double ms, double height, Color c, String label) {
       canvas.drawLine(Offset(x(ms), base), Offset(x(ms), base - height), Paint()
@@ -184,11 +184,11 @@ class _ImagerPainter extends CustomPainter {
     final r = math.min(w, h) / 2 - 18;
     for (final k in [0.5, 1.0]) {
       canvas.drawCircle(c, r * k, Paint()
-        ..color = Colors.white10
+        ..color = Neon.ink.withAlpha(0x1A)
         ..style = PaintingStyle.stroke);
     }
-    canvas.drawLine(c - Offset(0, r), c + Offset(0, r), Paint()..color = Colors.white12);
-    canvas.drawLine(c - Offset(r, 0), c + Offset(r, 0), Paint()..color = Colors.white12);
+    canvas.drawLine(c - Offset(0, r), c + Offset(0, r), Paint()..color = Neon.ink.withAlpha(0x1F));
+    canvas.drawLine(c - Offset(r, 0), c + Offset(r, 0), Paint()..color = Neon.ink.withAlpha(0x1F));
     if (v != null) {
       var most = 1e-4;
       for (var p = 0; p < 128; p++) {
@@ -209,10 +209,10 @@ class _ImagerPainter extends CustomPainter {
       canvas.drawRRect(RRect.fromRectAndRadius(bar, const Radius.circular(5)),
           Paint()..color = Color.lerp(color, second, b / 2)!.withValues(alpha: on ? 0.55 : 0.28));
       final unity = h - 16 - (h - 46) / 2;
-      canvas.drawLine(Offset(cx - 14, unity), Offset(cx + 14, unity), Paint()..color = Colors.white30);
+      canvas.drawLine(Offset(cx - 14, unity), Offset(cx + 14, unity), Paint()..color = Neon.ink.withAlpha(0x4D));
       paintLabel(canvas, '${names[b]} ${(widths[b] * 100).round()}%', Offset(cx, h - 7), on ? Neon.text : Neon.dim, size: 8,
           align: 0, weight: FontWeight.w800);
-      if (b > 0) canvas.drawLine(Offset(x0, 22), Offset(x0, h - 4), Paint()..color = Colors.white10);
+      if (b > 0) canvas.drawLine(Offset(x0, 22), Offset(x0, h - 4), Paint()..color = Neon.ink.withAlpha(0x1A));
     }
     paintLabel(canvas, '${freqs[0].round()} Hz', Offset(w / 3, 26), Neon.dim, size: 8, align: 0);
     paintLabel(canvas, '${(freqs[1] / 1000).toStringAsFixed(1)} kHz', Offset(2 * w / 3, 26), Neon.dim, size: 8, align: 0);
@@ -305,12 +305,12 @@ class _MatrixPainter extends CustomPainter {
       final v = values[k];
       final c = v < 0 ? Neon.pink : (k < 2 ? color : second);
       canvas.drawRRect(RRect.fromRectAndRadius(rect, const Radius.circular(10)),
-          Paint()..color = Colors.white.withValues(alpha: active == k ? 0.08 : 0.03));
+          Paint()..color = Neon.ink.withValues(alpha: active == k ? 0.08 : 0.03));
       final mid = rect.center.dy;
       final fill = Rect.fromLTRB(rect.left + 8, v >= 0 ? mid - v * (rect.height / 2 - 6) : mid, rect.right - 8,
           v >= 0 ? mid : mid - v * (rect.height / 2 - 6));
       canvas.drawRRect(RRect.fromRectAndRadius(fill, const Radius.circular(4)), Paint()..color = c.withValues(alpha: 0.45));
-      canvas.drawLine(Offset(rect.left + 4, mid), Offset(rect.right - 4, mid), Paint()..color = Colors.white24);
+      canvas.drawLine(Offset(rect.left + 4, mid), Offset(rect.right - 4, mid), Paint()..color = Neon.ink.withAlpha(0x3D));
       paintLabel(canvas, labels[k], Offset(rect.left + 8, rect.top + 9), Neon.dim, size: 8, weight: FontWeight.w800);
       paintLabel(canvas, '${v >= 0 ? '' : '−'}${(v.abs() * 100).round()}%', Offset(rect.right - 8, rect.top + 9),
           active == k ? Neon.text : c, size: 9, align: 1, weight: FontWeight.w800);

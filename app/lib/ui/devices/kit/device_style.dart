@@ -20,7 +20,7 @@ class DeviceStyle {
   final String label;
 
   /// The faceplate's stripe and a hero's glow: primary into secondary.
-  LinearGradient get gradient => LinearGradient(colors: [primary, secondary]);
+  LinearGradient get gradient => LinearGradient(colors: Neon.ramp([primary, secondary]));
 
   /// The tinted dark of a hero canvas.
   Color get canvas => Color.lerp(Neon.bg, primary, 0.07)!;

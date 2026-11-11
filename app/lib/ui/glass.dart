@@ -80,7 +80,7 @@ class GlassPanel extends StatelessWidget {
     return DecoratedBox(
       decoration: BoxDecoration(
         borderRadius: r,
-        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+        border: Border.all(color: Neon.ink.withValues(alpha: 0.08)),
         gradient: LinearGradient(
           begin: Alignment.topCenter,
           end: Alignment.bottomCenter,
@@ -131,9 +131,9 @@ class GlassOverlay extends StatelessWidget {
           ? BoxDecoration(
               borderRadius: r,
               color: Neon.panelHi.withValues(alpha: 0.55),
-              border: Border.all(color: Colors.white.withValues(alpha: 0.14)),
+              border: Border.all(color: Neon.ink.withValues(alpha: 0.14)),
             )
-          : _unblurred(r, Border.all(color: Colors.white.withValues(alpha: 0.16))),
+          : _unblurred(r, Border.all(color: Neon.ink.withValues(alpha: 0.16))),
       child: Padding(padding: padding, child: child),
     );
     return ClipRRect(
@@ -160,7 +160,10 @@ class GlassBackdrop extends StatelessWidget {
       children: [
         // Grey and black (owner, 2026-11-10: not green): soft neutral light from the theme's text colour, with one
         // faint touch of the accent blue, so the frost still reads as glass rather than a flat colour.
-        RepaintBoundary(child: CustomPaint(painter: _BackdropPainter(Neon.bg, [Neon.text, Neon.text, Neon.blue]))),
+        // On a light palette the light comes from white above and the glows are fainter, so it stays clean.
+        RepaintBoundary(
+            child: CustomPaint(
+                painter: _BackdropPainter(Neon.bg, [Neon.text, Neon.text, Neon.blue], light: Neon.isLight))),
         child,
       ],
     );
@@ -169,7 +172,7 @@ class GlassBackdrop extends StatelessWidget {
 
 class _BackdropPainter extends CustomPainter {
   // Theme colours become plain colours here: a painter's Paint doesn't read a theme slot's overridden channels.
-  _BackdropPainter(Color bg, List<Color> glows)
+  _BackdropPainter(Color bg, List<Color> glows, {this.light = false})
       : bg = _plain(bg),
         glows = [for (final g in glows) _plain(g)];
 
@@ -177,6 +180,7 @@ class _BackdropPainter extends CustomPainter {
 
   final Color bg;
   final List<Color> glows;
+  final bool light;
 
   /// Where each glow sits (fractions of the screen), its radius (of the longer side) and strength.
   static const _spots = [(0.12, 0.0, 0.95, 0.075), (0.95, 0.6, 0.8, 0.045), (0.3, 1.05, 0.9, 0.05)];
@@ -186,7 +190,8 @@ class _BackdropPainter extends CustomPainter {
     final rect = Offset.zero & size;
     // A dark grey that deepens to black towards the bottom.
     canvas.drawRect(rect, Paint()..shader = LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter,
-        colors: [Color.lerp(bg, const Color(0xFF2A2A30), 0.55)!, bg]).createShader(rect));
+        colors: [Color.lerp(bg, light ? const Color(0xFFFFFFFF) : const Color(0xFF2A2A30), 0.55)!, bg])
+            .createShader(rect));
     // A faint diagonal sheen, like light across frosted glass.
     canvas.drawRect(rect, Paint()..shader = LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight,
         colors: [const Color(0x00FFFFFF), const Color(0x0AFFFFFF), const Color(0x00FFFFFF)],
@@ -200,7 +205,7 @@ class _BackdropPainter extends CustomPainter {
         Paint()
           ..shader = RadialGradient(
             colors: [
-              glows[i].withValues(alpha: a),
+              glows[i].withValues(alpha: light ? a * 0.5 : a),
               glows[i].withValues(alpha: 0),
             ],
           ).createShader(Rect.fromCircle(center: centre, radius: long * r)),
@@ -209,7 +214,7 @@ class _BackdropPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(_BackdropPainter old) => old.bg != bg || !listEquals(old.glows, glows);
+  bool shouldRepaint(_BackdropPainter old) => old.bg != bg || old.light != light || !listEquals(old.glows, glows);
 }
 
 /// A bottom sheet that slides up as frosted glass (a plain sheet with glass off). Takes the same arguments as the
@@ -263,7 +268,7 @@ class _GlassSheet extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final edge = Border(top: BorderSide(color: Colors.white.withValues(alpha: 0.16)));
+    final edge = Border(top: BorderSide(color: Neon.ink.withValues(alpha: 0.16)));
     final body = DecoratedBox(
       decoration: Glass.blur
           ? BoxDecoration(borderRadius: _radius, color: Neon.panelHi.withValues(alpha: 0.62), border: edge)

@@ -164,12 +164,12 @@ class _FilterPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final w = size.width, h = size.height;
-    final grid = Paint()..color = Colors.white.withValues(alpha: 0.05);
+    final grid = Paint()..color = Neon.ink.withValues(alpha: 0.05);
     for (final (hz, l) in [(100.0, '100'), (1000.0, '1k'), (10000.0, '10k')]) {
       canvas.drawLine(Offset(freqToX(hz, w), 0), Offset(freqToX(hz, w), h), grid);
       paintLabel(canvas, l, Offset(freqToX(hz, w) + 3, h - 7), Neon.dim, size: 8);
     }
-    canvas.drawLine(Offset(0, y(0)), Offset(w, y(0)), Paint()..color = Colors.white.withValues(alpha: 0.1));
+    canvas.drawLine(Offset(0, y(0)), Offset(w, y(0)), Paint()..color = Neon.ink.withValues(alpha: 0.1));
     // The LFO's sweep (violet) and the envelope's reach (green) as bands of cutoffs.
     if (lfoAmt.abs() > 0.001) {
       final lo = freqToX(cut * math.pow(2, -lfoAmt.abs() * 4).toDouble(), w), hi = freqToX(cut * math.pow(2, lfoAmt.abs() * 4).toDouble(), w);
@@ -200,7 +200,7 @@ class _FilterPainter extends CustomPainter {
     final set = curve(cut);
     if (modulated) {
       canvas.drawPath(set, Paint()
-        ..color = Colors.white.withValues(alpha: 0.28)
+        ..color = Neon.ink.withValues(alpha: 0.28)
         ..style = PaintingStyle.stroke
         ..strokeWidth = 1.2);
       final now = curve(moved);

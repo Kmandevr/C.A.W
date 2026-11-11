@@ -118,7 +118,7 @@ class DevicePicker extends StatelessWidget {
             duration: Motion.fade(Motion.small, Motion.of(context)),
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(10),
-              color: i == selected ? (colors?[i] ?? accent).withValues(alpha: 0.2) : Colors.white.withValues(alpha: 0.03),
+              color: i == selected ? (colors?[i] ?? accent).withValues(alpha: 0.2) : Neon.ink.withValues(alpha: 0.03),
               border: Border.all(color: i == selected ? (colors?[i] ?? accent) : Neon.line),
               boxShadow: i == selected ? [BoxShadow(color: (colors?[i] ?? accent).withValues(alpha: 0.25), blurRadius: 8)] : null),
             alignment: Alignment.center,

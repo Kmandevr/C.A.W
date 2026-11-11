@@ -127,7 +127,7 @@ class _EnvelopePainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    final grid = Paint()..color = Colors.white.withValues(alpha: 0.04);
+    final grid = Paint()..color = Neon.ink.withValues(alpha: 0.04);
     for (var i = 1; i < 4; i++) {
       final y = g.top + (g.bottom - g.top) * i / 4;
       canvas.drawLine(Offset(g.top, y), Offset(size.width - g.top, y), grid);
@@ -154,13 +154,13 @@ class _EnvelopePainter extends CustomPainter {
       ..close();
     canvas.drawPath(fill, Paint()
       ..shader = LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter,
-        colors: [color.withValues(alpha: 0.28), color.withValues(alpha: 0.02)]).createShader(Offset.zero & size));
+        colors: Neon.ramp([color.withValues(alpha: 0.28), color.withValues(alpha: 0.02)])).createShader(Offset.zero & size));
     canvas.drawPath(path, Paint()
       ..color = color
       ..style = PaintingStyle.stroke
       ..strokeWidth = 2
       ..strokeJoin = StrokeJoin.round);
-    canvas.drawLine(Offset(g.xS, g.top), Offset(g.xS, g.bottom), Paint()..color = Colors.white.withValues(alpha: 0.08));
+    canvas.drawLine(Offset(g.xS, g.top), Offset(g.xS, g.bottom), Paint()..color = Neon.ink.withValues(alpha: 0.08));
     for (final (h, at) in [(_Handle.attack, g.attack), (_Handle.decay, g.decay), (_Handle.release, g.release)]) {
       final on = h == active;
       canvas.drawCircle(at, on ? 7 : 5, Paint()..color = Neon.panelHi);

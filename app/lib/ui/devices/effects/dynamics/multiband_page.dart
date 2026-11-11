@@ -171,7 +171,7 @@ class _MultibandPainter extends CustomPainter {
         final top = yOf(l);
         canvas.drawRRect(RRect.fromRectAndRadius(Rect.fromLTRB(col.left + 4, top, col.right - 4, col.bottom), const Radius.circular(4)),
           Paint()..shader = LinearGradient(begin: Alignment.bottomCenter, end: Alignment.topCenter,
-            colors: [c.withValues(alpha: 0.15), c.withValues(alpha: 0.55)]).createShader(col));
+            colors: Neon.ramp([c.withValues(alpha: 0.15), c.withValues(alpha: 0.55)])).createShader(col));
       }
       // Thresholds.
       for (final (db, tc, id) in [(band.down, color, 'b${b + 1}_down_thr'), (band.up, second, 'b${b + 1}_up_thr')]) {
@@ -195,9 +195,9 @@ class _MultibandPainter extends CustomPainter {
     for (final (x, id) in [(x1, 'xover_low'), (x2, 'xover_high')]) {
       final px = area.left + x * area.width;
       canvas.drawLine(Offset(px, area.top), Offset(px, area.bottom), Paint()
-        ..color = Colors.white.withValues(alpha: active == id ? 0.8 : 0.3)
+        ..color = Neon.ink.withValues(alpha: active == id ? 0.8 : 0.3)
         ..strokeWidth = active == id ? 2 : 1);
-      paintHandle(canvas, Offset(px, area.bottom - 10), Colors.white, active: active == id, r: 5);
+      paintHandle(canvas, Offset(px, area.bottom - 10), Neon.ink, active: active == id, r: 5);
       final hz = 20 * math.pow(1000, x);
       paintLabel(canvas, hz >= 1000 ? '${(hz / 1000).toStringAsFixed(1)}k' : hz.toStringAsFixed(0), Offset(px, area.bottom - 24),
         Neon.text, size: 8, align: 0, weight: FontWeight.w700);
