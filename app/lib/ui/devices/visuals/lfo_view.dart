@@ -96,8 +96,8 @@ class _LfoPainter extends CustomPainter {
     const pad = 6.0;
     final w = size.width - 2 * pad, h = size.height - 2 * pad;
     Offset pt(double x, double v) => Offset(pad + x * w, pad + h * (1 - (v + 1) / 2));
-    canvas.drawLine(pt(0, 0), pt(1, 0), Paint()..color = Colors.white.withValues(alpha: 0.06));
-    canvas.drawLine(pt(0.5, -1), pt(0.5, 1), Paint()..color = Colors.white.withValues(alpha: 0.04));
+    canvas.drawLine(pt(0, 0), pt(1, 0), Paint()..color = Neon.ink.withValues(alpha: 0.06));
+    canvas.drawLine(pt(0.5, -1), pt(0.5, 1), Paint()..color = Neon.ink.withValues(alpha: 0.04));
     final path = Path()..moveTo(pt(0, _at(0)).dx, pt(0, _at(0)).dy);
     const n = 160;
     for (var i = 1; i <= n; i++) {

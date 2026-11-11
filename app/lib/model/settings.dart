@@ -6,6 +6,7 @@ import 'dart:math' as math;
 import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 
+import '../ui/arrange/clip_look.dart';
 import '../ui/code_prefs.dart';
 import '../ui/glass.dart';
 import '../ui/haptics.dart';
@@ -227,6 +228,17 @@ enum ExportNaming {
   final String label;
 }
 
+/// Which palette the chosen theme shows (owner, 2026-11-11: one switch for light or dark; Follow system tracks
+/// Android's and Windows' dark mode, live).
+enum LookMode {
+  dark('Dark'),
+  light('Light'),
+  system('Follow system');
+
+  const LookMode(this.label);
+  final String label;
+}
+
 /// The piano roll's tool when it opens.
 enum StartTool {
   draw('Draw'),
@@ -246,6 +258,15 @@ class Settings extends ChangeNotifier {
   final Directory? dir;
 
   String themeName = calmNeon.name;
+
+  /// Light, dark or the system's ([platformBrightness]). Only the palette changes: the profile stays.
+  LookMode lookMode = LookMode.dark;
+
+  /// The platform's light or dark setting, kept up to date by the app ([setPlatformBrightness]).
+  Brightness platformBrightness = Brightness.dark;
+
+  /// True when the light palette shows.
+  bool get showsLight => lookMode == LookMode.light || (lookMode == LookMode.system && platformBrightness == Brightness.light);
   Density density = Density.compact; // owner, 2026-11-09: compact, not oversized
 
   /// Live coding: code swaps in by itself [liveDelayMs] after the last edit, at [swapTiming].
@@ -266,10 +287,13 @@ class Settings extends ChangeNotifier {
     Motion.setting = motion;
     Motion.haptics = haptics;
     Haptics.strength = hapticStrength;
-    Glass.enabled = glass;
+    Glass.enabled = glass && !activeTheme.flat; // the Flat family never shows glass, whatever the switch says
     Glass.blurEnabled = glassBlur;
     Motion.minimalProfile = performanceMode == PerformanceMode.minimal;
-    EditMotion.style = editMotionStyle;
+    EditMotion.feel = motionFeel;
+    Haptics.feel = {...hapticFeel};
+    ClipLook.corner = clipCorner;
+    ClipLook.fill = clipFill;
     EditMotion.kinds = {...editMotionKinds};
     Radii.scale = roundness;
     Neon.glowStrength = glowStrength;
@@ -285,7 +309,21 @@ class Settings extends ChangeNotifier {
   MotionLevel motion = MotionLevel.full;
 
   /// Edit animations (owner, 2026-11-11): their style, and the kinds turned on ([EditMotion]).
-  EditMotionStyle editMotionStyle = EditMotionStyle.subtle;
+  EditMotionStyle get editMotionStyle =>
+      motionFeel.curve == MotionCurve.bouncy ? EditMotionStyle.playful : EditMotionStyle.subtle;
+  set editMotionStyle(EditMotionStyle v) =>
+      motionFeel = v == EditMotionStyle.playful ? MotionFeel.playful : MotionFeel.subtle;
+
+  /// The theme's animation style (owner, 2026-11-11): pace, curve, entrance and exit ([EditMotion.feel]). Subtle and
+  /// Playful ([editMotionStyle]) are two of its looks.
+  MotionFeel motionFeel = MotionFeel.subtle;
+
+  /// Each haptic kind's feel, Light, Firm or Off ([Haptics.feel]); a kind left out is Light.
+  Map<HapticKind, HapticFeel> hapticFeel = {};
+
+  /// Arrange's clips: corner shape and fill ([ClipLook]).
+  ClipCorner clipCorner = ClipCorner.rounded;
+  ClipFill clipFill = ClipFill.standard;
   Set<EditMotionKind> editMotionKinds = {...EditMotionKind.values};
 
   /// A theme's look besides its colours: the UI font, the text size (times the system's), the corners' roundness
@@ -466,8 +504,9 @@ class Settings extends ChangeNotifier {
   List<CawTheme> get themes => [...starterThemes, ...customThemes];
   bool isStarter(String name) => starterThemes.any((t) => t.name == name);
   CawTheme themeNamed(String name) => themes.firstWhere((t) => t.name == name, orElse: () => calmNeon);
-  CawTheme get theme => themeNamed(themeName);
-  CawTheme get activeTheme => _draft ?? theme;
+  /// The chosen theme in the palette shown ([showsLight]); the same object while the theme and mode stay.
+  CawTheme get theme => themeNamed(themeName).shown(showsLight);
+  CawTheme get activeTheme => (_draft ?? themeNamed(themeName)).shown(showsLight);
   bool get compact => density == Density.compact;
 
   /// Opens the settings next to the projects folder (the app support folder), or [base] in tests.
@@ -491,6 +530,7 @@ class Settings extends ChangeNotifier {
 
   Map<String, dynamic> toJson() => {
         'theme': themeName,
+        'theme_mode': lookMode.name,
         'density': density.name,
         'live_update': liveUpdate,
         'live_delay_ms': liveDelayMs,
@@ -501,6 +541,10 @@ class Settings extends ChangeNotifier {
         'vim_code': vimCode,
         'motion': motion.name,
         'edit_motion_style': editMotionStyle.name,
+        'motion_feel': motionFeel.encode(),
+        'haptic_feel': Haptics.encodeFeel(hapticFeel),
+        'clip_corner': clipCorner.name,
+        'clip_fill': clipFill.name,
         'edit_motion_kinds': EditMotion.kindNames(editMotionKinds),
         'ui_font': uiFont.name,
         'text_scale': textScale,
@@ -584,7 +628,10 @@ class Settings extends ChangeNotifier {
   void fromJson(Map<String, dynamic> j) {
     T pick<T extends Enum>(List<T> values, Object? v, T fallback) =>
         values.where((e) => e.name == v).firstOrNull ?? fallback;
-    themeName = (j['theme'] as String?) ?? themeName;
+    final savedTheme = j['theme'] as String?;
+    // A name from before the families (Calm neon, Night, Amber terminal) is that family, dark.
+    themeName = legacyThemeNames[savedTheme] ?? savedTheme ?? themeName;
+    lookMode = pick(LookMode.values, j['theme_mode'], lookMode);
     density = pick(Density.values, j['density'], density);
     liveUpdate = (j['live_update'] as bool?) ?? liveUpdate;
     liveDelayMs = ((j['live_delay_ms'] as num?)?.toInt() ?? liveDelayMs).clamp(0, 10000);
@@ -599,6 +646,10 @@ class Settings extends ChangeNotifier {
     vimCode = (j['vim_code'] as bool?) ?? vimCode;
     motion = pick(MotionLevel.values, j['motion'], motion);
     editMotionStyle = pick(EditMotionStyle.values, j['edit_motion_style'], editMotionStyle);
+    motionFeel = MotionFeel.decode(j['motion_feel'] as String?) ?? motionFeel;
+    if (j['haptic_feel'] is String) hapticFeel = Haptics.decodeFeel(j['haptic_feel'] as String);
+    clipCorner = pick(ClipCorner.values, j['clip_corner'], clipCorner);
+    clipFill = pick(ClipFill.values, j['clip_fill'], clipFill);
     final kinds = j['edit_motion_kinds'];
     if (kinds is List) editMotionKinds = EditMotion.parseKinds(kinds);
     uiFont = pick(UiFont.values, j['ui_font'], uiFont);
@@ -732,7 +783,9 @@ class Settings extends ChangeNotifier {
         if (f is! File || !f.path.endsWith('.theme')) continue;
         try {
           final t = CawTheme.parse(await f.readAsString());
-          if (!isStarter(t.name) && !found.any((x) => x.name == t.name)) found.add(t);
+          // A custom theme named like a family added later (Flat, Dawn...) keeps its colours under a new name.
+          final named = isStarter(t.name) ? t.copyWith(name: '${t.name} (mine)') : t;
+          if (!isStarter(named.name) && !found.any((x) => x.name == named.name)) found.add(named);
         } catch (_) {
           // A damaged theme file is skipped, not fatal.
         }
@@ -755,8 +808,8 @@ class Settings extends ChangeNotifier {
   /// glow strength), the profiles chosen ([_profileRevision]: a new dock layout is read when the shell is made) and
   /// the code editor's font, tabs, numbers and wrap (read when an editor builds). A change rebuilds the screens once
   /// on leaving Settings. A profile value saved into the theme (a track height, say) doesn't count by itself.
-  String get _lookKey => '${activeTheme.copyWith(profile: const {}).toFile()}|$roundness|$glowStrength|'
-      '$_profileRevision|$codeFontSize|$codeTabWidth|$codeLineNumbers|$codeWrap';
+  String get _lookKey => '${activeTheme.copyWith(profile: const {}).toFile()}|${activeTheme.light}|$roundness|$glowStrength|'
+      '$_profileRevision|$codeFontSize|$codeTabWidth|$codeLineNumbers|$codeWrap|$clipCorner|$clipFill';
 
   /// Bumped each time a theme's profile is put in force, so the screens (and the dock) are made again from it.
   int _profileRevision = 0;
@@ -853,7 +906,26 @@ class Settings extends ChangeNotifier {
   void preview(CawTheme? draft) {
     _draft = draft;
     Neon.active = activeTheme;
+    _applyPerformanceMode();
     notifyListeners();
+  }
+
+  /// Light, dark or follow the system: only the palette changes, the profile in force stays. Saved.
+  Future<void> setLookMode(LookMode mode) => update((x) => x.lookMode = mode);
+
+  /// The platform's light or dark mode changed (or is first known, [quiet]: nothing is built yet). With Follow
+  /// system on, the palette follows at once and the screens are made again once ([commitLook]).
+  void setPlatformBrightness(Brightness b, {bool quiet = false}) {
+    if (b == platformBrightness) return;
+    platformBrightness = b;
+    if (lookMode != LookMode.system) return;
+    Neon.active = activeTheme;
+    _applyPerformanceMode();
+    if (quiet) {
+      _shownLook = _lookKey;
+    } else {
+      commitLook();
+    }
   }
 
   /// After leaving the settings: if the look changed, rebuild every screen once so fixed colours repaint too.
@@ -890,6 +962,10 @@ class Settings extends ChangeNotifier {
       'behaviour.haptic_strength': n(hapticStrength),
       'behaviour.motion': motion.name,
       'behaviour.edit_style': editMotionStyle.name,
+      'behaviour.motion_feel': motionFeel.encode(),
+      'behaviour.haptic_feel': Haptics.encodeFeel(hapticFeel),
+      'look.clip_corner': clipCorner.name,
+      'look.clip_fill': clipFill.name,
       'behaviour.edit_kinds': EditMotion.kindNames(editMotionKinds).join(','),
       'behaviour.snap': on(rollSnap),
       'behaviour.grid': '$rollGrid',
@@ -942,6 +1018,11 @@ class Settings extends ChangeNotifier {
     hapticStrength = number('behaviour.haptic_strength', 0, 1) ?? hapticStrength;
     motion = pick(MotionLevel.values, 'behaviour.motion') ?? motion;
     editMotionStyle = pick(EditMotionStyle.values, 'behaviour.edit_style') ?? editMotionStyle;
+    motionFeel = MotionFeel.decode(profile['behaviour.motion_feel']) ?? motionFeel;
+    final feel = profile['behaviour.haptic_feel'];
+    if (feel != null) hapticFeel = Haptics.decodeFeel(feel);
+    clipCorner = pick(ClipCorner.values, 'look.clip_corner') ?? clipCorner;
+    clipFill = pick(ClipFill.values, 'look.clip_fill') ?? clipFill;
     final kinds = profile['behaviour.edit_kinds'];
     if (kinds != null) editMotionKinds = EditMotion.parseKinds(kinds.split(',').map((k) => k.trim()));
     rollSnap = flag('behaviour.snap') ?? rollSnap;

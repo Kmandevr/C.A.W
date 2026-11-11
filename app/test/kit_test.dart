@@ -46,7 +46,7 @@ void main() {
     expect(Roles.track(8), Neon.layer(0));
   });
 
-  test('a theme file without the new track colours still loads, falling back to Calm neon', () {
+  test('a theme file without the new track colours still loads, falling back to Neon', () {
     final t = CawTheme.parse('---\nkind: theme\nname: Old\n---\nlayer1: #112233\n');
     expect(t['layer1'], const Color(0xFF112233));
     expect(t['layer8'], calmNeon['layer8']);

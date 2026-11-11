@@ -508,7 +508,7 @@ class _StatusRow extends StatelessWidget {
       decoration: Glass.active
           ? BoxDecoration(
               color: Neon.panel.withValues(alpha: 0.6),
-              border: Border(bottom: BorderSide(color: Colors.white.withValues(alpha: 0.08))),
+              border: Border(bottom: BorderSide(color: Neon.ink.withValues(alpha: 0.08))),
             )
           : const BoxDecoration(color: Neon.panel, border: Border(bottom: BorderSide(color: Neon.line))),
       child: Row(children: [
@@ -629,7 +629,7 @@ class _TransportBar extends StatelessWidget {
       decoration: Glass.active
           ? BoxDecoration(
               color: Neon.panel.withValues(alpha: 0.6),
-              border: Border(bottom: BorderSide(color: Colors.white.withValues(alpha: 0.08))),
+              border: Border(bottom: BorderSide(color: Neon.ink.withValues(alpha: 0.08))),
             )
           : const BoxDecoration(color: Neon.panel, border: Border(bottom: BorderSide(color: Neon.line))),
       // Desktop on a phone (Settings › Layout) can make the bar narrow: the project name then keeps a modest width and

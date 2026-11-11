@@ -48,12 +48,12 @@ class HeroCanvas extends StatelessWidget {
     clipBehavior: Clip.antiAlias,
     decoration: BoxDecoration(
       borderRadius: BorderRadius.circular(14),
-      gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [
+      gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: Neon.ramp([
         Color.lerp(Neon.bg, color, 0.10)!.withValues(alpha: 0.92),
         Color.lerp(Neon.bg, color, 0.03)!.withValues(alpha: 0.92),
-      ]),
+      ])),
       border: Border.all(color: color.withValues(alpha: 0.35)),
-      boxShadow: [BoxShadow(color: color.withValues(alpha: 0.12), blurRadius: 18)],
+      boxShadow: Neon.flat ? null : [BoxShadow(color: color.withValues(alpha: 0.12), blurRadius: 18)],
     ),
     child: Stack(fit: StackFit.expand, children: [
       if (grid) CustomPaint(painter: _GridPainter(color)),
@@ -243,9 +243,10 @@ void paintLabel(Canvas canvas, String text, Offset at, Color color, {double size
 
 /// A stroke paint in [color], with a soft glow under it when [glow] (the neon look).
 void strokeGlow(Canvas canvas, Path path, Color color, {double width = 2, bool glow = true}) {
-  if (glow) {
+  final strength = Neon.strokeGlow; // softer on a light palette, none with a flat theme
+  if (glow && strength > 0) {
     canvas.drawPath(path, Paint()
-      ..color = color.withValues(alpha: 0.25)
+      ..color = color.withValues(alpha: 0.25 * strength)
       ..style = PaintingStyle.stroke
       ..strokeWidth = width + 4
       ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 3));
@@ -267,7 +268,7 @@ void fillFade(Canvas canvas, Path path, double baseline, Size size, Color color,
     ..close();
   canvas.drawPath(fill, Paint()
     ..shader = LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter,
-        colors: [color.withValues(alpha: alpha), color.withValues(alpha: 0.02)])
+        colors: Neon.ramp([color.withValues(alpha: alpha), color.withValues(alpha: 0.02)]))
         .createShader(Rect.fromLTRB(0, math.min(b.top, baseline), size.width, math.max(b.bottom, baseline) + 1)));
 }
 

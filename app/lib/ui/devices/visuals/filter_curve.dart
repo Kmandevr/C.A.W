@@ -87,12 +87,12 @@ class _FilterPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     double y(double db) => (top - db.clamp(bottom, top)) / (top - bottom) * size.height;
-    final grid = Paint()..color = Colors.white.withValues(alpha: 0.05);
+    final grid = Paint()..color = Neon.ink.withValues(alpha: 0.05);
     for (final hz in [100.0, 1000.0, 10000.0]) {
       final x = freqToX(hz, size.width);
       canvas.drawLine(Offset(x, 0), Offset(x, size.height), grid);
     }
-    canvas.drawLine(Offset(0, y(0)), Offset(size.width, y(0)), Paint()..color = Colors.white.withValues(alpha: 0.09));
+    canvas.drawLine(Offset(0, y(0)), Offset(size.width, y(0)), Paint()..color = Neon.ink.withValues(alpha: 0.09));
     final path = Path();
     final n = math.max(64, size.width ~/ 2);
     for (var i = 0; i <= n; i++) {
@@ -106,7 +106,7 @@ class _FilterPainter extends CustomPainter {
       ..close();
     canvas.drawPath(fill, Paint()
       ..shader = LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter,
-        colors: [color.withValues(alpha: 0.25), color.withValues(alpha: 0.0)]).createShader(Offset.zero & size));
+        colors: Neon.ramp([color.withValues(alpha: 0.25), color.withValues(alpha: 0.0)])).createShader(Offset.zero & size));
     canvas.drawPath(path, Paint()
       ..color = color
       ..style = PaintingStyle.stroke

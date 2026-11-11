@@ -128,7 +128,7 @@ class _AmountBar extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final r = RRect.fromRectAndRadius(Offset.zero & size, const Radius.circular(12));
-    canvas.drawRRect(r, Paint()..color = Colors.white.withValues(alpha: 0.04));
+    canvas.drawRRect(r, Paint()..color = Neon.ink.withValues(alpha: 0.04));
     canvas.drawRRect(r, Paint()
       ..color = color.withValues(alpha: held ? 0.9 : 0.35)
       ..style = PaintingStyle.stroke
@@ -139,7 +139,7 @@ class _AmountBar extends CustomPainter {
     final x = mid + amount * mid;
     final fill = Rect.fromLTRB(amount < 0 ? x : mid, 0, amount < 0 ? mid : x, size.height);
     canvas.drawRect(fill, Paint()
-      ..shader = LinearGradient(colors: [color.withValues(alpha: 0.18), color.withValues(alpha: 0.5)],
+      ..shader = LinearGradient(colors: Neon.ramp([color.withValues(alpha: 0.18), color.withValues(alpha: 0.5)]),
           begin: amount < 0 ? Alignment.centerRight : Alignment.centerLeft,
           end: amount < 0 ? Alignment.centerLeft : Alignment.centerRight).createShader(fill));
     // Bipolar: a faint mirror shows the route also swings the other way.

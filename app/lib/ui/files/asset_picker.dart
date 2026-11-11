@@ -240,7 +240,7 @@ class _AssetPickerSheetState extends State<AssetPickerSheet> {
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(8),
               gradient: LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight,
-                colors: [color.withValues(alpha: 0.85), color.withValues(alpha: 0.4)])),
+                colors: Neon.ramp([color.withValues(alpha: 0.85), color.withValues(alpha: 0.4)]))),
             child: Icon(e.icon, size: 17, color: Neon.bg)),
           const SizedBox(width: Space.s),
           Expanded(child: Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.start,

@@ -179,7 +179,7 @@ class _FocusPanelState extends State<FocusPanel> {
       radius: 12,
       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
         header,
-        Container(height: 1, color: Colors.white.withValues(alpha: 0.06)),
+        Container(height: 1, color: Neon.ink.withValues(alpha: 0.06)),
         Expanded(child: switch (widget.tab) {
           FocusTab.fx => FxStack(key: ValueKey('fx-${widget.layer.id}'), state: widget.state, layer: widget.layer),
           FocusTab.mixer => _MixerTab(state: widget.state, layer: widget.layer),

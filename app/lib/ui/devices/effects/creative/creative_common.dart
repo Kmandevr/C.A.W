@@ -53,7 +53,7 @@ class _HoldPadState extends State<HoldPad> {
           height: widget.height,
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(12),
-            color: on ? c.withValues(alpha: 0.32) : Colors.white.withValues(alpha: 0.04),
+            color: on ? c.withValues(alpha: 0.32) : Neon.ink.withValues(alpha: 0.04),
             border: Border.all(color: on ? c : Neon.line, width: on ? 2 : 1),
             boxShadow: on ? Neon.glow(c) : null),
           child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [

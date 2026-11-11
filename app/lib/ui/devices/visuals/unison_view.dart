@@ -77,8 +77,8 @@ class _UnisonPainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     final cx = size.width / 2, base = size.height - 8;
     final half = size.width / 2 - 14;
-    canvas.drawLine(Offset(cx - half, base), Offset(cx + half, base), Paint()..color = Colors.white.withValues(alpha: 0.08));
-    canvas.drawLine(Offset(cx, 6), Offset(cx, base), Paint()..color = Colors.white.withValues(alpha: 0.05));
+    canvas.drawLine(Offset(cx - half, base), Offset(cx + half, base), Paint()..color = Neon.ink.withValues(alpha: 0.08));
+    canvas.drawLine(Offset(cx, 6), Offset(cx, base), Paint()..color = Neon.ink.withValues(alpha: 0.05));
     for (final s in ['L', 'R']) {
       final tp = TextPainter(text: TextSpan(text: s, style: Neon.code(size: 8, color: Neon.dim)),
         textDirection: TextDirection.ltr)..layout();
@@ -95,7 +95,7 @@ class _UnisonPainter extends CustomPainter {
       final hue = c.semitones < 0 ? Color.lerp(color, Neon.blue, pitch * 0.7)! : Color.lerp(color, Neon.pink, pitch * 0.7)!;
       final paint = Paint()
         ..shader = LinearGradient(begin: Alignment.bottomCenter, end: Alignment.topCenter,
-          colors: [hue.withValues(alpha: 0.05), hue.withValues(alpha: 0.9)])
+          colors: Neon.ramp([hue.withValues(alpha: 0.05), hue.withValues(alpha: 0.9)]))
           .createShader(Rect.fromLTRB(x - 2, base - h, x + 2, base))
         ..strokeWidth = active ? 3 : 2.2
         ..strokeCap = StrokeCap.round;

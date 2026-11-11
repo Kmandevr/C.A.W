@@ -236,7 +236,7 @@ class _BandChip extends StatelessWidget {
           duration: Motion.fade(Motion.small, Motion.of(context)),
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(10),
-            color: selected ? c.withValues(alpha: 0.22) : Colors.white.withValues(alpha: 0.03),
+            color: selected ? c.withValues(alpha: 0.22) : Neon.ink.withValues(alpha: 0.03),
             border: Border.all(color: selected ? c : c.withValues(alpha: 0.35), width: selected ? 1.6 : 1),
             boxShadow: selected ? [BoxShadow(color: c.withValues(alpha: 0.3), blurRadius: 8)] : null),
           child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
@@ -272,7 +272,7 @@ class _AddChip extends StatelessWidget {
         duration: Motion.fade(Motion.small, Motion.of(context)),
         width: 44,
         decoration: BoxDecoration(borderRadius: BorderRadius.circular(10),
-          color: active ? color.withValues(alpha: 0.3) : Colors.white.withValues(alpha: 0.03),
+          color: active ? color.withValues(alpha: 0.3) : Neon.ink.withValues(alpha: 0.03),
           border: Border.all(color: enabled ? color : Neon.line, width: active ? 2 : 1)),
         child: Icon(active ? Icons.close : Icons.add, size: 22, color: enabled ? color : Neon.dim),
       )),
@@ -329,7 +329,7 @@ class _BandPower extends StatelessWidget {
       height: 32,
       padding: const EdgeInsets.symmetric(horizontal: 12),
       decoration: BoxDecoration(borderRadius: BorderRadius.circular(16),
-        color: on ? color.withValues(alpha: 0.22) : Colors.white.withValues(alpha: 0.03),
+        color: on ? color.withValues(alpha: 0.22) : Neon.ink.withValues(alpha: 0.03),
         border: Border.all(color: on ? color : Neon.line)),
       child: Row(mainAxisSize: MainAxisSize.min, children: [
         Icon(Icons.power_settings_new, size: 15, color: on ? color : Neon.dim),
@@ -395,7 +395,7 @@ class _TypeGrid extends StatelessWidget {
                 child: Container(
                   decoration: BoxDecoration(
                     borderRadius: BorderRadius.circular(8),
-                    color: k == sel ? color.withValues(alpha: 0.2) : Colors.white.withValues(alpha: 0.03),
+                    color: k == sel ? color.withValues(alpha: 0.2) : Neon.ink.withValues(alpha: 0.03),
                     border: Border.all(color: k == sel ? color : Neon.line)),
                   child: Column(children: [
                     Expanded(child: Padding(padding: const EdgeInsets.fromLTRB(6, 5, 6, 1), child: CustomPaint(size: Size.infinite,
@@ -586,7 +586,7 @@ class _EqPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final w = size.width;
-    final grid = Paint()..color = Colors.white.withValues(alpha: 0.05);
+    final grid = Paint()..color = Neon.ink.withValues(alpha: 0.05);
     for (final (hz, label) in [(50.0, '50'), (100.0, '100'), (200.0, '200'), (500.0, '500'), (1000.0, '1k'), (2000.0, '2k'),
         (5000.0, '5k'), (10000.0, '10k')]) {
       final x = freqToX(hz, w);
@@ -598,7 +598,7 @@ class _EqPainter extends CustomPainter {
       canvas.drawLine(Offset(0, y(db)), Offset(w, y(db)), grid);
       paintLabel(canvas, '${db > 0 ? '+' : ''}${db.round()}', Offset(w - 4, y(db)), Neon.dim.withValues(alpha: 0.7), size: 8, align: 1);
     }
-    canvas.drawLine(Offset(0, y(0)), Offset(w, y(0)), Paint()..color = Colors.white.withValues(alpha: 0.12));
+    canvas.drawLine(Offset(0, y(0)), Offset(w, y(0)), Paint()..color = Neon.ink.withValues(alpha: 0.12));
     // The live spectrum, from the bottom.
     if (spectrum case final s? when s.length > 1) {
       final p = Path()..moveTo(0, size.height);
@@ -610,7 +610,7 @@ class _EqPainter extends CustomPainter {
         ..close();
       canvas.drawPath(p, Paint()
         ..shader = LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter,
-            colors: [Neon.violet.withValues(alpha: 0.35), Neon.violet.withValues(alpha: 0.05)]).createShader(Offset.zero & size));
+            colors: Neon.ramp([Neon.violet.withValues(alpha: 0.35), Neon.violet.withValues(alpha: 0.05)])).createShader(Offset.zero & size));
     }
     final n = math.max(80, w ~/ 3);
     final xs = [for (var i = 0; i <= n; i++) w * i / n];
@@ -644,10 +644,10 @@ class _EqPainter extends CustomPainter {
       final py = y(sum[i].clamp(-rangeDb * 1.3, rangeDb * 1.3));
       i == 0 ? curve.moveTo(xs[i], py) : curve.lineTo(xs[i], py);
     }
-    strokeGlow(canvas, curve, Colors.white.withValues(alpha: 0.92), width: 2);
+    strokeGlow(canvas, curve, Neon.ink.withValues(alpha: 0.92), width: 2);
     if (adding) {
       canvas.drawRect(Offset.zero & size, Paint()
-        ..color = Colors.white.withValues(alpha: 0.6)
+        ..color = Neon.ink.withValues(alpha: 0.6)
         ..style = PaintingStyle.stroke
         ..strokeWidth = 1.5);
     }

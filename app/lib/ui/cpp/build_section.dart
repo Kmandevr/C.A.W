@@ -459,7 +459,7 @@ class _TabStrip extends StatelessWidget {
           onPressed: onFind,
           icon: const Icon(Icons.search, color: Neon.dim),
         ),
-        Container(width: 1, height: 18, color: Colors.white.withValues(alpha: 0.08)),
+        Container(width: 1, height: 18, color: Neon.ink.withValues(alpha: 0.08)),
         Expanded(
           child: ListView(scrollDirection: Axis.horizontal, children: [
             for (final t in tabs) _Tab(entry: t, active: t.tab == active, onSelect: onSelect, onClose: onClose),

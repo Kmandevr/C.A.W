@@ -136,6 +136,13 @@ Still open: custom labels, layouts inside project packages, and one file for eve
 
   The aim is a workspace that feels like home.
 
+**How it is built (Claude, 2026-11-11; choices for the owner to confirm):**
+- **Meter colours** get no slots of their own: meters draw in their track's colour, the warning accent and the danger accent (`pink`, kept red to magenta by the builder) at 0 dB, so the builder's track ramp and accents colour them. New slots would need every old theme file to fall back.
+- **Header style** is a preset of the existing header width and track height (Compact 112 px × 48 px, Roomy 200 px × 88 px), not a second header layout.
+- **One radius token:** the corner roundness also squares off device knob caps below 100% and sets clip corners (Rounded = 5 px × roundness; Square and Round are the other clip shapes). Arrange's audio clips and many fixed corners don't follow it yet.
+- **Haptic style** is Light (as designed), Firm (1.6×) or Off per kind, on top of the strength.
+- **Animation style** (owner's follow-up of 2026-11-11): pace, curve, entrance and exit as theme tokens; Subtle and Playful became two of its looks, Standard keeps the app exactly as it was, and Reduced and Off keep their rules.
+
 ## 2026-11-11: Light and dark for every built-in theme (owner)
 
 **Decision (owner, 2026-11-11).** The built-in themes become four families, each with a light and a dark version:
@@ -145,6 +152,10 @@ Still open: custom labels, layouts inside project packages, and one file for eve
 - **Amber** (today's Amber terminal).
 
 One switch picks light or dark for whichever family is chosen, so nothing is set up colour by colour. The light and dark versions keep the family's character, and their accents stay recognisably the same, with no jarring colour differences. **[Proposal]** The switch also offers "Follow the system", which tracks Android's and Windows' dark mode. A custom theme profile can carry a light and a dark palette too, and it keeps its look and layout settings when the switch flips.
+
+- Flat (owner, 2026-11-11): Neon's counterpart, a standard DAW look without glow or glass.
+- **How it is built (Claude, 2026-11-11):** light palettes come from one generator (`lightFrom`, its reverse `darkFrom`; [App](app.md)) that keeps each hue and moves lightness until WCAG AA holds on every surface (4.5:1 text, dim and accents; 3:1 track colours), so a custom theme's "Make light version" is the same algorithm. Dawn is designed light first and its dark palette is generated. Dusk dark's dim text moved from #6C6C80 to #7E7E93 to pass 4.5:1 on its raised panels. Follow system is built. Flat's no-glow, no-glass and solid fills belong to the theme, not the profile, so the user's Glass switch and glow strength come back on leaving Flat.
+- **Flat's references (read 2026-11-11), not copied:** [Fact] Ableton Live 12's manual (2.3.2 "Theme & Colors", ableton.com/en/live-manual/12/first-steps) offers colour schemes with a light or dark appearance or the OS's, a warm, cool or neutral tone, and high contrast. [Fact] Bitwig's user guide ("User Interfacing", bitwig.com/userguide/latest/user_interfacing): an active control is tinted orange, an inactive one uses a neutral colour such as white, grey or silver. [Fact] REAPER's theme development reference (reaper.fm/sdk/walter/images.php): a theme file controls the colours and fonts of much of the interface, with its default theme as the example. Flat takes the shared idea (neutral grey surfaces, one restrained accent per role, state shown by tint) with its own values; no theme file or exact colour of theirs is used.
 
 ## 2026-11-11: Finding things on a phone (owner)
 

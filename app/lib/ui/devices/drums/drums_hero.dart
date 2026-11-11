@@ -214,8 +214,8 @@ class _HeroPainter extends CustomPainter {
       }
       band.close();
       canvas.drawPath(band, Paint()
-        ..shader = LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [
-          color.withValues(alpha: 0.55), color.withValues(alpha: 0.18), color.withValues(alpha: 0.55)])
+        ..shader = LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: Neon.ramp([
+          color.withValues(alpha: 0.55), color.withValues(alpha: 0.18), color.withValues(alpha: 0.55)]))
             .createShader(Offset.zero & size));
       strokeGlow(canvas, top, color, width: 1.4);
     }

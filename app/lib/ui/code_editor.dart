@@ -16,11 +16,11 @@ final _note = RegExp(r'^[A-G][#b]?\d$');
 /// Colours one token of pattern text.
 Color? tokenColor(String tok) {
   if (tok.startsWith('//') || tok.startsWith('/*')) return Neon.dim;
-  if (tok.startsWith('"')) return const Color(0xFFFF9EE8); // quoted text: soft pink
+  if (tok.startsWith('"')) return Neon.codeString; // quoted text: soft pink
   if (RegExp(r'^[0-9.]').hasMatch(tok)) return Neon.yellow;
   if (_keywords.contains(tok)) return Neon.pink;
   if (_note.hasMatch(tok)) return Neon.yellow;
-  if (RegExp(r'^[-+*/%&|^~!<>=?:]').hasMatch(tok)) return const Color(0xFFB9B9FF);
+  if (RegExp(r'^[-+*/%&|^~!<>=?:]').hasMatch(tok)) return Neon.codeOperator;
   return null;
 }
 

@@ -151,12 +151,12 @@ double disperserDelayMs(double hz, {required double stages, required double freq
 /// Draws a response hero's frame: the 100 / 1k / 10k lines and the 0 dB line.
 void paintFrequencyGrid(Canvas canvas, Size size, double zeroY) {
   final w = size.width, h = size.height;
-  final grid = Paint()..color = Colors.white.withValues(alpha: 0.05);
+  final grid = Paint()..color = Neon.ink.withValues(alpha: 0.05);
   for (final (hz, l) in [(100.0, '100'), (1000.0, '1k'), (10000.0, '10k')]) {
     canvas.drawLine(Offset(freqToX(hz, w), 0), Offset(freqToX(hz, w), h), grid);
     paintLabel(canvas, l, Offset(freqToX(hz, w) + 3, h - 7), Neon.dim, size: 8);
   }
-  canvas.drawLine(Offset(0, zeroY), Offset(w, zeroY), Paint()..color = Colors.white.withValues(alpha: 0.1));
+  canvas.drawLine(Offset(0, zeroY), Offset(w, zeroY), Paint()..color = Neon.ink.withValues(alpha: 0.1));
 }
 
 /// The path of y = [db](hz) across the width, [y] mapping dB to pixels.

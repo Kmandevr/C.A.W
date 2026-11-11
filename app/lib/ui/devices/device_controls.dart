@@ -11,6 +11,7 @@ import '../feedback.dart';
 import '../motion.dart';
 import '../pointer_input.dart';
 import '../theme.dart';
+import '../tokens.dart' show Radii;
 import '../widgets.dart' show ResetOnDoubleTap;
 import 'device_scope.dart';
 import 'midi_learn.dart';
@@ -562,7 +563,7 @@ class DeviceKnobPainter extends CustomPainter {
     }
     canvas.drawArc(rect, a0, sweep, false, stroke
       ..shader = SweepGradient(startAngle: 0, endAngle: math.pi * 2, transform: GradientRotation(_start),
-          colors: [color.withValues(alpha: 0.65), color, Color.lerp(color, Colors.white, 0.35)!],
+          colors: Neon.ramp([color.withValues(alpha: 0.65), color, Color.lerp(color, Neon.ink, 0.35)!]),
           stops: const [0, 0.5, 0.75]).createShader(rect));
     stroke.shader = null;
     // One ring per route, outside the track, in its source's colour (up to four; the badge counts the rest).
@@ -599,10 +600,20 @@ class DeviceKnobPainter extends CustomPainter {
         canvas.drawArc(rr, _start + _sweep * (lo + (hi - lo) * k / n), _sweep * (hi - lo) / n, false, dash);
       }
     }
-    canvas.drawCircle(c, r - 4.5, Paint()..color = Neon.panelHi);
-    canvas.drawCircle(c, r - 4.5, Paint()
-      ..color = Colors.white.withValues(alpha: 0.06)
-      ..style = PaintingStyle.stroke);
+    // The cap: round as designed; below full corner roundness ([Radii.scale]) it squares off toward a tile.
+    final face = Paint()..color = Neon.panelHi;
+    final rim = Paint()
+      ..color = Neon.ink.withValues(alpha: 0.06)
+      ..style = PaintingStyle.stroke;
+    if (Radii.scale >= 1) {
+      canvas.drawCircle(c, r - 4.5, face);
+      canvas.drawCircle(c, r - 4.5, rim);
+    } else {
+      final cap = RRect.fromRectAndRadius(
+          Rect.fromCircle(center: c, radius: r - 4.5), Radius.circular((r - 4.5) * (0.25 + 0.75 * Radii.scale)));
+      canvas.drawRRect(cap, face);
+      canvas.drawRRect(cap, rim);
+    }
     final a = _start + _sweep * pos;
     final dir = Offset(math.cos(a), math.sin(a));
     canvas.drawLine(c + dir * (r * 0.3), c + dir * (r - 5), Paint()
@@ -616,10 +627,10 @@ class DeviceKnobPainter extends CustomPainter {
       canvas.drawArc(rect, _start + _sweep * math.min(pos, m), _sweep * (m - pos).abs(), false, Paint()
         ..style = PaintingStyle.stroke
         ..strokeWidth = 3
-        ..color = Colors.white.withValues(alpha: 0.45));
+        ..color = Neon.ink.withValues(alpha: 0.45));
       final dot = c + Offset(math.cos(am), math.sin(am)) * r;
-      canvas.drawCircle(dot, 4.5, Paint()..color = Colors.white.withValues(alpha: 0.25));
-      canvas.drawCircle(dot, 2.6, Paint()..color = Colors.white);
+      canvas.drawCircle(dot, 4.5, Paint()..color = Neon.ink.withValues(alpha: 0.25));
+      canvas.drawCircle(dot, 2.6, Paint()..color = Neon.ink);
     }
   }
 
@@ -801,7 +812,7 @@ class _SliderPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final r = RRect.fromRectAndRadius(Offset.zero & size, const Radius.circular(6));
-    canvas.drawRRect(r, Paint()..color = Colors.white.withValues(alpha: 0.04));
+    canvas.drawRRect(r, Paint()..color = Neon.ink.withValues(alpha: 0.04));
     canvas.drawRRect(r, Paint()
       ..color = Neon.line
       ..style = PaintingStyle.stroke);

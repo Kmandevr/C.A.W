@@ -210,7 +210,7 @@ class _DeviceEditorState extends State<DeviceEditor> {
           width: 30, height: 30,
           decoration: BoxDecoration(borderRadius: BorderRadius.circular(9),
             gradient: LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight,
-              colors: [color.withValues(alpha: 0.9), second.withValues(alpha: 0.75)]),
+              colors: Neon.ramp([color.withValues(alpha: 0.9), second.withValues(alpha: 0.75)])),
             boxShadow: Neon.glow(color, strength: 0.35)),
           child: Icon(style?.icon ?? Icons.extension_outlined, size: 17, color: Neon.bg)),
         const SizedBox(width: 8),
@@ -241,14 +241,14 @@ class _DeviceEditorState extends State<DeviceEditor> {
     );
     return DeviceFingers.counter(child: Column(key: const ValueKey('device-editor'), crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       header,
-      Container(height: 2, decoration: BoxDecoration(gradient: LinearGradient(colors: [
-        color.withValues(alpha: 0.0), color.withValues(alpha: 0.8), second.withValues(alpha: 0.8), second.withValues(alpha: 0.0)]))),
+      Container(height: 2, decoration: BoxDecoration(gradient: LinearGradient(colors: Neon.ramp([
+        color.withValues(alpha: 0.0), color.withValues(alpha: 0.8), second.withValues(alpha: 0.8), second.withValues(alpha: 0.0)])))),
       if (bypass) SidechainBar(target: t, color: color),
       if (tabs != null) SizedBox(height: 34, child: Row(children: [
         for (var i = 0; i < tabs.length; i++)
           Expanded(child: _Tab(section: tabs[i], selected: i == tab, color: color, onTap: () => setState(() => _tab = i))),
       ])),
-      Container(height: 1, color: Colors.white.withValues(alpha: 0.06)),
+      Container(height: 1, color: Neon.ink.withValues(alpha: 0.06)),
       ?strip,
       Expanded(child: AnimatedOpacity(
         duration: Motion.fade(Motion.small, Motion.of(context)),

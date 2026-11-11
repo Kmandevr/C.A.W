@@ -119,10 +119,10 @@ class ToolCard extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(14),
-        gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [
+        gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: Neon.ramp([
           Color.lerp(Neon.panel, c, 0.08)!.withValues(alpha: 0.85),
           Neon.panel.withValues(alpha: 0.7),
-        ]),
+        ])),
         border: Border.all(color: c.withValues(alpha: 0.35)),
         boxShadow: [BoxShadow(color: c.withValues(alpha: 0.10), blurRadius: 16)],
       ),
@@ -319,7 +319,7 @@ class _BandPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    final grid = Paint()..color = Colors.white.withValues(alpha: 0.06);
+    final grid = Paint()..color = Neon.ink.withValues(alpha: 0.06);
     for (final hz in const [100.0, 1000.0, 10000.0]) {
       final x = xOf(hz, size.width);
       canvas.drawLine(Offset(x, 0), Offset(x, size.height), grid);
@@ -351,7 +351,7 @@ class _BandPainter extends CustomPainter {
       ..close();
     canvas.drawPath(fill, Paint()
       ..shader = LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter,
-          colors: [color.withValues(alpha: 0.28), color.withValues(alpha: 0.02)]).createShader(Offset.zero & size));
+          colors: Neon.ramp([color.withValues(alpha: 0.28), color.withValues(alpha: 0.02)])).createShader(Offset.zero & size));
     canvas.drawPath(path, Paint()
       ..color = color.withValues(alpha: 0.35)
       ..style = PaintingStyle.stroke
@@ -395,7 +395,7 @@ class _WavePainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final half = size.height / 2;
-    final mid = Paint()..color = Colors.white.withValues(alpha: 0.07);
+    final mid = Paint()..color = Neon.ink.withValues(alpha: 0.07);
     canvas.drawLine(Offset(0, half / 2), Offset(size.width, half / 2), mid);
     canvas.drawLine(Offset(0, half * 1.5), Offset(size.width, half * 1.5), mid);
     void lane(List<(double, double)> cols, double y0, Color c) {

@@ -96,7 +96,7 @@ class _FloatingWindowState extends State<FloatingWindow> {
               child: MouseRegion(cursor: SystemMouseCursors.move, child: Container(
                 height: 30,
                 padding: const EdgeInsets.only(left: 10),
-                color: Colors.white.withValues(alpha: 0.04),
+                color: Neon.ink.withValues(alpha: 0.04),
                 child: Row(children: [
                   Expanded(child: Text(widget.title, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600))),
                   IconButton(

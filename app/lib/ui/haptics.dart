@@ -4,6 +4,17 @@ import '../platform/haptics_device.dart';
 
 export '../platform/haptics_device.dart' show FlutterHaptics, HapticKind, HapticsDevice;
 
+/// How one kind of haptic feels (owner, 2026-11-11: the theme sets the feel): Light (as designed), Firm (stronger)
+/// or Off.
+enum HapticFeel {
+  light('Light'),
+  firm('Firm'),
+  off('Off');
+
+  const HapticFeel(this.label);
+  final String label;
+}
+
 /// The app's haptics (owner, 2026-11-10: "subtle everywhere", with a strength setting and an off switch). Settings
 /// sets [enabled] and [strength]; `main.dart` sets [device] for the platform.
 class Haptics {
@@ -14,6 +25,26 @@ class Haptics {
 
   /// 0 (faintest) to 1 (strongest); 0.5 is the default and plays each kind at its base scale.
   static double strength = 0.5;
+
+  /// Each kind's feel (a kind left out is Light). Firm plays at [firmScale] times Light's scale.
+  static Map<HapticKind, HapticFeel> feel = {};
+  static const firmScale = 1.6;
+
+  /// The feel per kind as a theme's profile value, `kind:feel` pairs (Light ones left out), and back.
+  static String encodeFeel(Map<HapticKind, HapticFeel> f) =>
+      [for (final k in HapticKind.values) if ((f[k] ?? HapticFeel.light) != HapticFeel.light) '${k.name}:${f[k]!.name}']
+          .join(',');
+  static Map<HapticKind, HapticFeel> decodeFeel(String text) {
+    final out = <HapticKind, HapticFeel>{};
+    for (final pair in text.split(',')) {
+      final kv = pair.split(':');
+      if (kv.length != 2) continue;
+      final k = HapticKind.values.where((v) => v.name == kv[0].trim()).firstOrNull;
+      final f = HapticFeel.values.where((v) => v.name == kv[1].trim()).firstOrNull;
+      if (k != null && f != null && f != HapticFeel.light) out[k] = f;
+    }
+    return out;
+  }
 
   /// Where feedback plays: Flutter's HapticFeedback until main.dart picks the platform's.
   static HapticsDevice device = const FlutterHaptics();
@@ -65,13 +96,14 @@ class Haptics {
   /// The scale [kind] plays at for [strength]: half the base at 0, the base at 0.5, one and a half times it at 1
   /// (Android's guidance: scales a ratio of 1.4 or more apart feel different).
   static double scaleFor(HapticKind kind, [double? at]) =>
-      (baseScale[kind]! * (0.5 + (at ?? strength).clamp(0.0, 1.0))).clamp(0.0, 1.0);
+      (baseScale[kind]! * (0.5 + (at ?? strength).clamp(0.0, 1.0)) * (feel[kind] == HapticFeel.firm ? firmScale : 1))
+          .clamp(0.0, 1.0);
 
   static final Map<HapticKind, Duration> _last = {};
 
   /// Plays [kind] unless haptics are off or it comes too soon; true when it played.
   static bool play(HapticKind kind) {
-    if (!enabled) return false;
+    if (!enabled || feel[kind] == HapticFeel.off) return false;
     final t = now();
     final last = _last[kind];
     if (last != null && t - last < minGap[kind]!) return false;

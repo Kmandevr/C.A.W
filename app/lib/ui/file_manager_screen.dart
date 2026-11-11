@@ -286,7 +286,7 @@ class _FileManagerScreenState extends State<FileManagerScreen> {
           avatar: Icon(icon, size: 14, color: on ? Neon.blue : Neon.dim),
           label: Text(label, style: TextStyle(fontSize: 11.5, color: on ? Neon.text : Neon.dim)),
           selectedColor: Neon.blue.withValues(alpha: 0.16),
-          side: BorderSide(color: on ? Neon.blue.withValues(alpha: 0.6) : Colors.white.withValues(alpha: 0.1)),
+          side: BorderSide(color: on ? Neon.blue.withValues(alpha: 0.6) : Neon.ink.withValues(alpha: 0.1)),
           onSelected: (_) => setState(() {
             if (!_filters.remove(f)) _filters.add(f);
           }),
@@ -359,7 +359,7 @@ class _FileManagerScreenState extends State<FileManagerScreen> {
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(Radii.s),
                 color: on ? color.withValues(alpha: 0.14) : null,
-                border: Border.all(color: on ? color.withValues(alpha: 0.6) : Colors.white.withValues(alpha: 0.08)),
+                border: Border.all(color: on ? color.withValues(alpha: 0.6) : Neon.ink.withValues(alpha: 0.08)),
               ),
               child: Row(mainAxisSize: MainAxisSize.min, children: [
                 Icon(icon, size: 13, color: color),

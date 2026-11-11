@@ -231,7 +231,7 @@ class _UiButtonState extends State<UiButton> {
       padding: const EdgeInsets.symmetric(horizontal: 14),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(18),
-        color: held ? color.withValues(alpha: 0.32) : Colors.white.withValues(alpha: 0.03),
+        color: held ? color.withValues(alpha: 0.32) : Neon.ink.withValues(alpha: 0.03),
         border: Border.all(color: p == null ? Neon.line.withValues(alpha: 0.5) : (held ? color : Neon.line)),
         boxShadow: held ? [BoxShadow(color: color.withValues(alpha: 0.4), blurRadius: 12)] : null),
       child: Row(mainAxisSize: MainAxisSize.min, children: [

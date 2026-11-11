@@ -20,12 +20,12 @@ void main() {
 
   test('the file is readable key: #RRGGBB text with a theme header', () {
     final f = calmNeon.toFile();
-    expect(f, startsWith('---\nkind: theme\nname: Calm neon\n---\n'));
+    expect(f, startsWith('---\nkind: theme\nname: Neon\n---\n'));
     expect(f, contains('bg: #07070B\n'));
     expect(f, contains('glow: on\n'));
   });
 
-  test('missing colours fall back to Calm neon; unknown keys are ignored', () {
+  test('missing colours fall back to Neon; unknown keys are ignored', () {
     final t = CawTheme.parse('---\nkind: theme\nname: Mine\n---\nbg: #112233\nfuture_key: 7\nglow: off\n');
     expect(t.name, 'Mine');
     expect(t.glow, isFalse);
@@ -41,10 +41,10 @@ void main() {
   test('Neon colours, even const ones, read the active theme', () {
     const c = Neon.bg;
     expect(c.toARGB32(), 0xFF07070B);
-    Neon.active = starterThemes.firstWhere((t) => t.name == 'Night');
+    Neon.active = starterThemes.firstWhere((t) => t.name == 'Dusk');
     expect(c.toARGB32(), Neon.active['bg'].toARGB32());
     expect(Neon.layer(1).toARGB32(), Neon.active['layer2'].toARGB32());
-    expect(Neon.glow(Neon.green), isEmpty); // Night has glow off
+    expect(Neon.glow(Neon.green), isEmpty); // Dusk has glow off
     expect((Paint()..color = Neon.pink).color.toARGB32(), Neon.active['pink'].toARGB32());
   });
 }
