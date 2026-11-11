@@ -156,6 +156,7 @@ void registerBuiltinEffects(ModuleRegistry& registry) {
     fx::registerSpace(registry);
     fx::registerSaturator(registry);
     fx::registerKit(registry);
+    fx::registerDucker(registry);
 }
 
 }  // namespace caw

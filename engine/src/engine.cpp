@@ -2567,7 +2567,14 @@ bool Engine::setSend(const std::string& layerId, uint32_t index, double level, b
 bool Engine::setComponentParam(const std::string& layerId, uint32_t index, const std::string& param, double value) {
     std::lock_guard<std::mutex> lock(ctl_);
     ComponentChain* chain = ctlComponentChain(layerId, index);
-    return chain && chain->setValue(index, param, value);
+    if (!chain) return false;
+    const uint64_t before = chain->latencyFrames();
+    if (!chain->setValue(index, param, value)) return false;
+    if (chain->latencyFrames() != before) {  // a look-ahead turned on or off: everything else moves to stay in time
+        std::map<std::string, std::vector<std::string>> warnings;
+        updateCompensation(warnings);
+    }
+    return true;
 }
 
 bool Engine::setComponentBypass(const std::string& layerId, uint32_t index, bool bypass) {

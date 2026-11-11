@@ -337,3 +337,117 @@ TEST(a_compressor_keyed_by_another_track_ducks_it_even_while_that_track_is_muted
     const std::string result = f.setProject(q);
     CHECK(result.find("no sidechain input") != std::string::npos);
 }
+
+namespace {
+
+// Track b (0.25) through a ducker; a (0.5) is its key when `keyed`. Master bypassed, a muted (it only keys).
+ProjectSpec duckedB(std::vector<std::pair<std::string, double>> params, bool keyed) {
+    ProjectSpec p = twoTracksAndABus();
+    p.layers.pop_back();
+    ComponentSpec d;
+    d.id = "org.caw.ducker";
+    d.params = std::move(params);
+    d.hasKey = keyed;
+    d.key.layer = "a";
+    p.layers[1].components = {d};
+    p.layers[0].mute = true;
+    return p;
+}
+
+const double kQuarterOut = 0.25 * kCentre;  // b undisturbed
+
+}  // namespace
+
+TEST(the_ducker_in_tempo_mode_ducks_on_every_beat_with_no_input) {
+    // 120 bpm at 48 kHz: a beat is 24000 frames. Attack 1 ms, hold 10 ms, release 220 ms, full depth.
+    ProjectSpec p = duckedB({{"mode", 2.0}, {"rate", 5.0}, {"depth", 1.0}, {"attack", 1.0}, {"hold", 10.0},
+                             {"release", 220.0}}, false);
+    Engine e(48000);
+    e.setMasterBypass(true);
+    CHECK(ok(e.setProject(p)));
+    e.play();
+    const auto out = run(e, 72000);
+    for (int beat = 0; beat < 3; ++beat) {
+        const size_t at = static_cast<size_t>(beat) * 24000;
+        CHECK(std::fabs(out[at + 300]) < 1e-3);                    // in the hold: silent
+        CHECK_NEAR(out[at + 20000], kQuarterOut, 1e-4);            // recovered before the next beat
+        CHECK(out[at + 3000] > 0.0f && out[at + 3000] < kQuarterOut);  // on the way back up
+    }
+    // Any block size, the same duck.
+    Engine f(48000);
+    f.setMasterBypass(true);
+    CHECK(ok(f.setProject(p)));
+    f.play();
+    const auto uneven = runUneven(f, 72000);
+    for (size_t i = 0; i < out.size(); i += 97) CHECK_NEAR(uneven[i], out[i], 1e-5);
+}
+
+TEST(the_ducker_in_audio_mode_ducks_once_per_hit_and_its_look_ahead_is_compensated) {
+    // The key (a constant 0.5, -6 dB) crosses the -24 dB threshold once: one duck, then b is back.
+    ProjectSpec p = duckedB({{"mode", 0.0}, {"depth", 1.0}, {"attack", 1.0}, {"hold", 10.0}, {"release", 100.0}}, true);
+    Engine e(48000);
+    e.setMasterBypass(true);
+    CHECK(ok(e.setProject(p)));
+    e.play();
+    auto out = run(e, 24000);
+    CHECK(std::fabs(out[400]) < 1e-3);
+    CHECK_NEAR(out[20000], kQuarterOut, 1e-4);
+    float display[32] = {};
+    CHECK(e.componentDisplay("b", 0, display, 32) >= 18);
+    CHECK(display[7] == 0.0f);  // the mode: Audio
+
+    // Without a key there is nothing to duck to.
+    Engine f(48000);
+    f.setMasterBypass(true);
+    CHECK(ok(f.setProject(duckedB({{"mode", 0.0}, {"depth", 1.0}}, false))));
+    f.play();
+    out = run(f, 4800);
+    CHECK_NEAR(out[400], kQuarterOut, 1e-4);
+
+    // A 10 ms look-ahead delays b by 480 frames (reported as latency) and the duck still leads it.
+    ProjectSpec q = duckedB({{"mode", 0.0}, {"depth", 1.0}, {"attack", 1.0}, {"hold", 10.0}, {"release", 100.0},
+                             {"lookahead", 4.0}}, true);
+    Engine g(48000);
+    g.setMasterBypass(true);
+    CHECK(ok(g.setProject(q)));
+    g.play();
+    out = run(g, 24000);
+    for (int i = 0; i < 470; ++i) CHECK(std::fabs(out[static_cast<size_t>(i)]) < 1e-6f);  // the line filling
+    CHECK(std::fabs(out[600]) < 1e-3);
+    CHECK(g.componentDisplay("b", 0, display, 32) >= 18);
+    CHECK_NEAR(display[10], 10.0, 1e-3);
+    // Turned off live, the latency goes away.
+    CHECK(g.setComponentParam("b", 0, "lookahead", 0.0));
+}
+
+TEST(the_ducker_in_notes_mode_ducks_on_each_note_of_the_key_track) {
+    ProjectSpec p = duckedB({{"mode", 1.0}, {"depth", 1.0}, {"attack", 0.5}, {"hold", 5.0}, {"release", 60.0}}, true);
+    p.modules.push_back({"beats", "---\nkind: pattern\n---\n0 C4 1\n4 C4 1\n", {}});
+    p.layers[0].pattern = "beats";  // notes on beats 1 and 2 (16th-note steps)
+    p.loopBars = 1;
+    Engine e(48000);
+    e.setMasterBypass(true);
+    CHECK(ok(e.setProject(p)));
+    e.play();
+    const auto out = run(e, 48000);
+    CHECK(std::fabs(out[200]) < 1e-3);
+    CHECK_NEAR(out[12000], kQuarterOut, 1e-4);
+    CHECK(std::fabs(out[24200]) < 1e-3);
+    CHECK_NEAR(out[36000], kQuarterOut, 1e-4);
+}
+
+TEST(the_ducker_ducks_only_the_lows_or_only_the_highs) {
+    // b is DC: all lows. Lows ducks it; Highs leaves it alone.
+    auto at = [](double bands) {
+        ProjectSpec p = duckedB({{"mode", 2.0}, {"depth", 1.0}, {"attack", 1.0}, {"hold", 200.0}, {"release", 50.0},
+                                 {"bands", bands}}, false);
+        Engine e(48000);
+        e.setMasterBypass(true);
+        CHECK(ok(e.setProject(p)));
+        e.play();
+        return run(e, 24000);
+    };
+    const auto lows = at(1.0), highs = at(2.0);
+    CHECK(std::fabs(lows[6000]) < 1e-3);
+    CHECK_NEAR(highs[6000], kQuarterOut, 1e-3);
+}

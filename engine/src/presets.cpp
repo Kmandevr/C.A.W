@@ -133,6 +133,17 @@ const std::vector<BuiltinPreset>& flagshipPresets() {
     return p;
 }
 
+// The ducker's shapes (#175): the duck's attack, hold, release (ms), curve and depth; the trigger is left alone.
+const std::vector<BuiltinPreset>& duckerPresets() {
+    static const std::vector<BuiltinPreset> p = {
+        {"Pump", "The classic sidechain pump: straight down, a slow swell back", {{"attack", 1.0}, {"hold", 10.0}, {"release", 260.0}, {"tension", 0.6}, {"depth", 1.0}}},
+        {"Quick", "A short dip that clears room for the kick and gets out of the way", {{"attack", 0.5}, {"hold", 0.0}, {"release", 90.0}, {"tension", -0.3}, {"depth", 0.8}}},
+        {"Smooth", "A gentle, rounded duck for pads and vocals", {{"attack", 15.0}, {"hold", 30.0}, {"release", 400.0}, {"tension", -0.5}, {"depth", 0.6}}},
+        {"Gate", "Off on the hit, back hard at the end: a choppy trance gate", {{"attack", 0.3}, {"hold", 120.0}, {"release", 8.0}, {"tension", 0.0}, {"depth", 1.0}}},
+    };
+    return p;
+}
+
 const std::vector<BuiltinPreset> kNone;
 
 void set(std::vector<std::pair<std::string, double>>& params, std::string_view id, double value) {
@@ -238,7 +249,9 @@ std::string number(double v) {
 }  // namespace
 
 const std::vector<BuiltinPreset>& builtinPresets(std::string_view componentId) {
-    return componentId == kFlagship ? flagshipPresets() : kNone;
+    if (componentId == kFlagship) return flagshipPresets();
+    if (componentId == "org.caw.ducker") return duckerPresets();
+    return kNone;
 }
 
 const BuiltinPreset* findBuiltinPreset(std::string_view componentId, std::string_view name) {

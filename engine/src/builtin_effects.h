@@ -15,7 +15,8 @@
 namespace caw {
 
 // Registers the suite: org.caw.eq, .compressor, .limiter, .reverb.pro, .delay.pro, .saturator, .gate, .filter,
-// .phaser, .flanger, .utility, .transient (builtin_effects_*.cpp). registerBuiltinComponents calls it.
+// .phaser, .flanger, .utility, .transient (builtin_effects_*.cpp) and .ducker (builtin_ducker.cpp).
+// registerBuiltinComponents calls it.
 void registerBuiltinEffects(ModuleRegistry& registry);
 
 namespace fx {
@@ -25,6 +26,7 @@ void registerDynamics(ModuleRegistry& registry);   // builtin_effects_dynamics.c
 void registerSpace(ModuleRegistry& registry);      // builtin_effects_space.cpp: reverb, delay
 void registerSaturator(ModuleRegistry& registry);  // builtin_effects_saturator.cpp
 void registerKit(ModuleRegistry& registry);        // builtin_effects_kit.cpp: filter, phaser, flanger, utility
+void registerDucker(ModuleRegistry& registry);     // builtin_ducker.cpp: the ducker (#175)
 
 constexpr std::string_view kOffOn[] = {"Off", "On"};
 

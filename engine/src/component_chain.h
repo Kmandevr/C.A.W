@@ -16,6 +16,14 @@
 
 namespace caw {
 
+// A built-in whose latency depends on its parameters (the ducker's look-ahead, only while it is on): the chain asks
+// it, with the control thread's values, instead of reading the descriptor. Engine-internal; not part of the SDK.
+class VariableLatency {
+public:
+    virtual ~VariableLatency() = default;
+    virtual uint32_t latencyFor(const double* values, uint32_t count) const noexcept = 0;
+};
+
 // Which automation lane drives each parameter of a chain. Immutable once made; a project update
 // that changes the lanes makes a new one, and the audio thread swaps it in (the chain keeps playing).
 struct ComponentAutomation {

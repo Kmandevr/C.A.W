@@ -334,8 +334,17 @@ uint32_t ComponentChain::tailFrames() const noexcept {
 
 uint64_t ComponentChain::latencyFrames() const noexcept {
     uint64_t latency = 0;
-    for (const auto& e : entries_)  // a bypassed effect passes its input on undelayed
-        if (!e->bypass.load(std::memory_order_relaxed)) latency += e->processor->descriptor().latencyFrames;
+    for (const auto& e : entries_) {  // a bypassed effect passes its input on undelayed
+        if (e->bypass.load(std::memory_order_relaxed)) continue;
+        if (const auto* v = dynamic_cast<const VariableLatency*>(e->processor.get())) {
+            double values[64];
+            const uint32_t n = static_cast<uint32_t>(std::min<std::size_t>(e->resolvers.size(), 64));
+            for (uint32_t k = 0; k < n; ++k) values[k] = fromBits(e->held[k].load(std::memory_order_relaxed));
+            latency += v->latencyFor(values, n);
+        } else {
+            latency += e->processor->descriptor().latencyFrames;
+        }
+    }
     return latency;
 }
 
