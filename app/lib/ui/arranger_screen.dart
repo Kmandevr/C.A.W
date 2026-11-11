@@ -1299,7 +1299,8 @@ class _TimelineHeader extends StatelessWidget {
                 color: Color.lerp(Neon.text, color, selected ? 0.35 : 0.15))))),
           // A deep folder's header can get narrow: M and S move to their own row's place, the icons go first.
           if (oneRow && box.maxWidth >= 72) ...[mute, const SizedBox(width: 2), solo],
-          if (layer.isAudio) AudioArmButton(state: state, layer: layer, size: chip),
+          // Arm sits by the name when the header has room for both; a phone's one-row header puts it by the meter.
+          if (layer.isAudio && !oneRow) AudioArmButton(state: state, layer: layer, size: chip),
           // A folder's icon only says what it is: a narrow header gives its room to the name.
           if (showFx && (!layer.isFolder || box.maxWidth >= 140)) fx,
         ]));
@@ -1308,8 +1309,9 @@ class _TimelineHeader extends StatelessWidget {
           // under the name allows.
           final room = box.maxHeight - (thin ? 26 : 32);
           final lanes = room >= 12 ? lanesButton(30, math.min(18.0, room)) : null;
+          final arm = layer.isAudio ? AudioArmButton(state: state, layer: layer, size: math.max(12.0, math.min(18.0, room))) : null;
           return Column(mainAxisSize: MainAxisSize.min, children: [top, SizedBox(height: thin ? 2 : 4),
-            lanes == null ? meter : Row(children: [Expanded(child: meter), lanes])]);
+            lanes == null && arm == null ? meter : Row(children: [?arm, Expanded(child: meter), ?lanes])]);
         }
         final lanes = lanesButton(26, 26);
         return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
