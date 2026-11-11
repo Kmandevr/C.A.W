@@ -21,6 +21,7 @@ import 'code_style.dart';
 import 'cpp_library.dart';
 import 'key_row.dart';
 import 'panels.dart';
+import 'plugin_export_screen.dart';
 import 'sample_pack_screen.dart';
 import 'test_suite_screen.dart';
 import 'tool_kit.dart';
@@ -787,6 +788,9 @@ class CppEditorState extends State<CppEditor> {
                 PopupMenuItem(key: const ValueKey('bar sample pack'), height: 34,
                     value: () => openSamplePackMaker(context, w.state, instrumentId: w.componentId),
                     child: const Text('Make sample pack…', style: TextStyle(fontSize: 13))),
+              PopupMenuItem(key: const ValueKey('bar export plugin'), height: 34,
+                  value: () => openToolPage(context, PluginExportScreen(workbench: w)),
+                  child: const Text('Export as plug-in…', style: TextStyle(fontSize: 13))),
             ],
           ),
         ),

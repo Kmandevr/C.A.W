@@ -14,6 +14,7 @@ import 'package:caw/model/sample_packs.dart';
 import 'package:caw/model/cpp_component.dart';
 import 'package:caw/model/cpp_workbench.dart';
 import 'package:caw/model/settings.dart';
+import 'package:caw/ui/cpp/plugin_export_screen.dart';
 import 'package:caw/ui/cpp/sample_pack_screen.dart';
 import 'package:caw/ui/cpp/test_suite_screen.dart';
 import 'package:caw/ui/cpp/tool_kit.dart';
@@ -277,6 +278,41 @@ void main() {
         await tester.ensureVisible(find.byKey(const ValueKey('pack-result')));
         await tester.pumpAndSettle();
         await expectLater(goldenScreen, matchesGoldenFile('goldens/build_sample_pack_$name.png'));
+      });
+    }
+  });
+
+  group('Export as plug-in', () {
+    testWidgets('needs a vendor, keeps VST3 and macOS off, and saves the package zip', (tester) async {
+      final saved = <String, List<int>>{};
+      await tester.pumpWidget(MaterialApp(theme: ThemeData.dark(), home: PluginExportScreen(workbench: workbench(),
+          save: (bytes, name) async {
+            saved[name] = bytes;
+            return true;
+          })));
+      expect(find.text('• Give a vendor (your name or label).'), findsOneWidget);
+      expect(tester.widget<ButtonStyleButton>(find.byKey(const ValueKey('tool-action'))).onPressed, isNull);
+      await tester.tap(find.byKey(const ValueKey('plugin-format-PluginFormat.vst3')));
+      await tester.pump();
+      expect(find.text('• The engine has no VST3 wrapper yet.'), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('plugin-format-PluginFormat.clap')));
+      await tester.enterText(find.byKey(const ValueKey('plugin-vendor')), 'Me');
+      await tester.pump();
+      expect(tester.widget<Switch>(find.descendant(of: find.byKey(const ValueKey('plugin-target-macos')),
+          matching: find.byType(Switch))).onChanged, isNull);
+      await tester.tap(find.byKey(const ValueKey('tool-action')));
+      await tester.pumpAndSettle();
+      expect(saved.keys.single, 'fuzz-plugin.zip');
+      expect(find.byKey(const ValueKey('plugin-saved')), findsOneWidget);
+    });
+
+    for (final name in const ['phone', 'desktop']) {
+      testWidgets('golden: the export page at $name size', (tester) async {
+        await pumpGolden(tester, PluginExportScreen(workbench: workbench(), save: (_, _) async => true), goldenSizes[name]!);
+        await tester.enterText(find.byKey(const ValueKey('plugin-vendor')), 'Me');
+        FocusManager.instance.primaryFocus?.unfocus(); // no blinking cursor in the golden
+        await tester.pumpAndSettle();
+        await expectLater(goldenScreen, matchesGoldenFile('goldens/build_plugin_export_$name.png'));
       });
     }
   });
