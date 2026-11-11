@@ -109,6 +109,20 @@ void fillSine(std::vector<float>& x, double hz, double amp) {
 
 }  // namespace
 
+TEST(the_ducker_keeps_its_gain_continuous_when_a_softer_note_retriggers_it) {
+    // Audio review fix 1: Velocity 1, a full note then a soft one in the hold. The soft one's shallower depth used
+    // to apply at once (gain 0.1 to 0.82 in one sample); it now glides in over the attack.
+    Duck d({{"mode", 1.0}, {"velocity", 1.0}, {"depth", 0.9}, {"attack", 1.0}, {"hold", 100.0}, {"release", 200.0}});
+    d.sized(12000);
+    std::fill(d.inL.begin(), d.inL.end(), 0.5f);
+    std::fill(d.inR.begin(), d.inR.end(), 0.5f);
+    d.notes = {{0, 1.0}, {2400, 0.1}};
+    d.run();
+    CHECK_NEAR(d.outL[2000], 0.5 * 0.1, 1e-3);  // the full duck
+    CHECK(maxStep(d.outL, 2300, 2700) < 0.02);
+    CHECK_NEAR(d.outL[3000], 0.5 * (1.0 - 0.9 * 0.1), 1e-3);  // then the soft note's depth
+}
+
 TEST(the_ducker_survives_a_nan_or_infinite_key_in_follow_mode) {
     // Audio review fix 8: a NaN in the key stuck in the follower (and the key filters) and the output went NaN.
     for (double hpf : {20.0, 100.0}) {

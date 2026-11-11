@@ -119,7 +119,8 @@ protected:
         from_ = duck_ = 0.0;
         armed_ = true;
         lastPeriod_ = INT64_MIN;
-        scale_ = 1.0;
+        scale_ = scaleTarget_ = 1.0;
+        scaleStep_ = 0.0;
         grMax_ = keyMax_ = 0.0;
         triggers_ = 0;
     }
@@ -244,6 +245,10 @@ protected:
                 }
             }
             if (mode_ != 0 || !followMode_) {
+                if (scale_ != scaleTarget_) {  // a retrigger's new depth, gliding in over the attack
+                    scale_ += scaleStep_;
+                    if ((scaleStep_ > 0.0) == (scale_ >= scaleTarget_)) scale_ = scaleTarget_;
+                }
                 duck_ = shape();
                 const double gain = 1.0 - depth_ * scale_ * mix_ * duck_;
                 g[0] = g[1] = gain;
@@ -304,11 +309,18 @@ protected:
 
 private:
     // The shape starts again (a kick, a note, a beat): the attack runs from wherever the duck is now, so a duck
-    // retriggered before it has recovered doesn't jump.
+    // retriggered before it has recovered doesn't jump. A new depth (Velocity: a softer or harder note) jumps only
+    // while nothing is ducked; during a duck it glides in over the attack, so the gain stays continuous.
     void trigger(double velocity) noexcept {
         from_ = duck_;
         at_ = 0;
-        scale_ = 1.0 - velocity_ * (1.0 - std::clamp(velocity, 0.0, 1.0));
+        scaleTarget_ = 1.0 - velocity_ * (1.0 - std::clamp(velocity, 0.0, 1.0));
+        if (duck_ <= 0.0) {
+            scale_ = scaleTarget_;
+            scaleStep_ = 0.0;
+        } else {
+            scaleStep_ = (scaleTarget_ - scale_) / std::max(1.0, attack_);
+        }
         ++triggers_;
     }
     // The duck now (0 none, 1 full) and one sample on: attack (from where it was to full), hold, release (its
@@ -345,7 +357,7 @@ private:
     uint32_t lookahead_ = 0;
     bool useHpf_ = false, useLpf_ = false, followMode_ = false, listen_ = false, armed_ = true;
     int64_t at_ = -1, lastPeriod_ = INT64_MIN;
-    double from_ = 0, duck_ = 0, scale_ = 1;
+    double from_ = 0, duck_ = 0, scale_ = 1, scaleTarget_ = 1, scaleStep_ = 0;
     double grMax_ = 0, grNow_ = 0, keyMax_ = 0;
     uint32_t triggers_ = 0;
 };
