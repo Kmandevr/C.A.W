@@ -27,6 +27,14 @@ struct PackParamAxis {
 };
 
 enum class PackNormalize { None, Peak, Rms };
+enum class PackDither { None, Tpdf };
+
+// One parameter a round robin varies: each take after the first moves it by up to +-amount (deterministically).
+struct PackVary {
+    std::string id;
+    int effect = -1;  // < 0: the instrument
+    double amount = 0;
+};
 
 struct SamplePackRequest {
     PackComponent instrument;
@@ -54,6 +62,12 @@ struct SamplePackRequest {
     bool loop = false;
     double loopMinSeconds = 0.05;
     double loopMaxSeconds = -1;        // < 0: half the hold
+    double loopCrossfadeMs = 0;        // > 0: the loop's last part is crossfaded with the audio before its start
+    bool loopCrossfadeEqualPower = true;  // false: linear
+    int roundRobins = 1;               // takes of each cell (1..16), each a fresh render
+    double roundRobinPrerollMs = 7.0;  // take k runs the chain k x this long, silent, before its note
+    std::vector<PackVary> roundRobinVary;
+    PackDither dither = PackDither::None;  // 16- and 24-bit PCM only
     bool sfz = false;
     bool manifest = true;
     uint32_t maxFiles = 256;
@@ -81,10 +95,10 @@ bool parseNoteName(std::string_view text, int& midi);
 // A plain file name: letters, digits and . _ - # + only (anything else becomes _), no "..", no leading dot,
 // at most 150 characters, never empty and never a reserved Windows device name.
 std::string sanitizeFileName(std::string_view name);
-// Expands {name} {note} {midi} {vel} {param} {index} in `pattern`, collapses repeated or edge underscores
+// Expands {name} {note} {midi} {vel} {param} {index} {rr} in `pattern`, collapses repeated or edge underscores
 // left by empty tokens, and sanitises the result (without the extension).
 std::string expandNamePattern(std::string_view pattern, std::string_view name, int note, int velocity,
-                              std::string_view param, uint32_t index);
+                              std::string_view param, uint32_t index, int roundRobin = 0);
 // "cutoff-1200_mix-0.5": each swept parameter as id-value (a choice parameter by its label; minus as "m").
 std::string paramLabel(const std::vector<std::pair<std::string, std::string>>& idValue);
 
@@ -103,10 +117,18 @@ struct PackLoop {
 PackLoop findLoop(const std::vector<float>& left, const std::vector<float>& right, std::size_t earliest,
                   std::size_t endTarget, std::size_t minLength);
 
+// Crossfades a found loop's last `frames` frames with the frames just before its start, so the seam at the wrap
+// continues smoothly whatever the match (equal power, sin/cos, or linear). `frames` is held to the loop's length and
+// to the frames before its start. Returns the frames crossfaded.
+std::size_t crossfadeLoop(std::vector<float>& left, std::vector<float>& right, const PackLoop& loop, std::size_t frames,
+                          bool equalPower);
+
 struct PackWavSpec {
     int sampleRate = 48000;
     int channels = 2;
     int bitDepth = 24;
+    PackDither dither = PackDither::None;  // TPDF: +-1 LSB triangular noise before rounding (not for float)
+    uint32_t ditherSeed = 1;
     int rootNote = 60;  // smpl unity note
     bool loop = false;
     uint32_t loopStart = 0, loopEnd = 0;
@@ -119,11 +141,13 @@ std::vector<uint8_t> encodePackWav(const PackWavSpec& spec, const std::vector<fl
 struct SfzRegion {
     std::string sample;
     int note = 60, velocity = 100;
+    int roundRobin = 0, roundRobins = 1;  // seq_position (from 1) and seq_length when more than one
     bool loop = false;
     uint32_t loopStart = 0, loopEnd = 0;
 };
 // SFZ text mapping the regions by note (each sample covers the keys to halfway to its neighbours) and velocity
-// (each covers from the layer below it, exclusive, to its own velocity; the top layer up to 127).
+// (each covers from the layer below it, exclusive, to its own velocity; the top layer up to 127), and round robins
+// by seq_length and seq_position.
 std::string sfzText(std::string_view title, const std::vector<SfzRegion>& regions);
 
 }  // namespace caw

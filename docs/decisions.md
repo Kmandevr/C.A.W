@@ -6,6 +6,13 @@ updated: 2026-11-11
 
 # Decisions
 
+## 2026-11-11: VST3 interface headers for the plug-in builder (#162)
+
+- **Licence [Fact, checked 2026-11-11]:** Steinberg's VST3 SDK is MIT. The `LICENSE.txt` of `steinbergmedia/vst3sdk`, `vst3_pluginterfaces`, `vst3_base` and `vst3_public_sdk` (default branches, read 2026-11-11) is the MIT License, "Copyright (c) 2026, Steinberg Media Technologies GmbH"; the `vst3_pluginterfaces` tag `v3.8.0_build_66` (commit `31d6eeba`, 2025-10-20) already carries it, so the change came with VST 3.8.0. No GPL or proprietary licence remains on the parts used.
+- **Dependency:** `steinbergmedia/vst3_pluginterfaces` **v3.8.1_build_84** (commit `4f547e8e`, 2026-08-11, the latest tag on 2026-11-11), MIT. Only the interface headers and two of their files (`base/funknown.cpp`, `base/coreiids.cpp`) are compiled; the SDK's helper classes, VSTGUI and the validator are not fetched. Fetched at configure time by `caw_add_vst3_plugin` (`engine/cmake/CAWVst3.cmake`), not vendored, not in the app or the engine library; the build stops if the fetched `LICENSE.txt` is not MIT.
+- **Why:** VST3 is the export target after CLAP (roadmap 9.3): the same component library builds as a `.vst3` bundle through a second wrapper around the C interface ([native module SDK](native-module-sdk.md#export-as-a-vst3-plug-in)).
+- **[Assumption]** the "VST" name and logo are trademarks with their own usage guidelines (the repository README's "License & Usage guidelines"), separate from the code licence; C.A.W does not use the logo. Not checked further.
+
 ## 2026-11-11: Drums: deep settings and real quality, every genre (owner)
 
 **Owner's words:** "The drum instrument needs to have an in-depth set of settings and effects to make all the sounds extremely versatile and be actual good quality. Research how different kicks, snares, hats etc. are made and make sure it has all of the settings. You should be able to make a kick a legitimate dubstep kick, an 808 kick, or just a normal-sounding kick. Make it so it can even sound acoustic even though it's generated."
