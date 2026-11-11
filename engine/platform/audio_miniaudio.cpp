@@ -46,6 +46,7 @@ struct Audio {
     // The input (API 18): open when the device runs duplex; why not when it was asked for and did not open.
     bool input = false;
     ma_uint32 inputChannels = 0;
+    ma_uint32 duplexBufferFrames = 0;  // miniaudio's duplex ring buffer's starting fill, in the latency estimate
     std::string inputDeviceId, inputError;
     float l[kChunk], r[kChunk];
 };
@@ -259,7 +260,15 @@ ma_result openDevice(Audio* a, const CawEngine* e, const ma_device_id* id, ma_ui
         // [Assumption] the round trip is about both sides' buffers; a ping measures it (caw_latency_ping_start).
         const ma_uint32 in = a->device.capture.internalPeriodSizeInFrames * std::max<ma_uint32>(1, a->device.capture.internalPeriods);
         const ma_uint32 out = a->device.playback.internalPeriodSizeInFrames * std::max<ma_uint32>(1, a->device.playback.internalPeriods);
-        e->engine->liveAudio().setDeviceLatency(static_cast<int64_t>(in) + out);
+        // [Verified, miniaudio 0.11.25 source] on an asynchronous backend (AAudio, OpenSL ES, Core Audio, JACK,
+        // Web Audio) and on PulseAudio, duplex runs through ma_device.duplexRB: the capture callback writes into
+        // it and the playback callback reads from it, and ma_duplex_rb_init starts its write position two capture
+        // periods ahead (ma_pcm_rb_seek_write(..., captureInternalPeriodSizeInFrames * 2)). Those two periods are
+        // in the round trip too. WASAPI, ALSA and the other blocking read/write backends have no such buffer
+        // (ma_device_init only makes it when ma_context_is_backend_asynchronous). How far the fill drifts while
+        // running is not counted: the ping measures that.
+        a->duplexBufferFrames = a->device.duplexRB.rb.rb.pBuffer ? a->device.capture.internalPeriodSizeInFrames * 2 : 0;
+        e->engine->liveAudio().setDeviceLatency(static_cast<int64_t>(in) + out + a->duplexBufferFrames);
     } else {
         e->engine->liveAudio().setDeviceChannels(0);
     }
@@ -387,6 +396,7 @@ std::string inputStatus(const CawEngine* e, const Audio* a) {
         out += ",\"device\":" + quoted(c.name) + ",\"device_id\":" + quoted(a->inputDeviceId.c_str()) +
                ",\"channels\":" + std::to_string(a->inputChannels) + ",\"sample_rate\":" + std::to_string(c.internalSampleRate) +
                ",\"period_frames\":" + std::to_string(c.internalPeriodSizeInFrames) +
+               ",\"duplex_buffer_frames\":" + std::to_string(a->duplexBufferFrames) +
                ",\"latency_frames\":" + std::to_string(e->engine->liveAudio().latency());
     }
     return out + ",\"error\":" + quoted(a ? a->inputError.c_str() : "") + "}";
@@ -522,10 +532,12 @@ int32_t caw_audio_configure_input(CawEngine* e, int32_t enabled, const char* dev
     std::string id = device_id ? std::string(device_id).substr(0, 511) : std::string();
     std::string name = device_name ? std::string(device_name).substr(0, MA_MAX_DEVICE_NAME_LENGTH) : std::string();
     const int ch = channels <= 0 ? 2 : (channels > 32 ? 32 : channels);
-    if (on == e->inputEnabled && id == e->inputId && name == e->inputName && ch == e->inputChannels) {
-        const auto* a = static_cast<const Audio*>(e->audio);
-        return a && a->fallback ? 2 : 0;
-    }
+    const auto* running = static_cast<const Audio*>(e->audio);
+    // Unchanged, and either off or already open: nothing to do. Asked again with input on while the device runs
+    // without it (it failed to open, say because RECORD_AUDIO was not granted yet), it is tried again.
+    if (on == e->inputEnabled && id == e->inputId && name == e->inputName && ch == e->inputChannels &&
+        (!on || !running || running->input))
+        return running && running->fallback ? 2 : 0;
     e->inputEnabled = on;
     e->inputId = std::move(id);
     e->inputName = std::move(name);
