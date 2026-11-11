@@ -78,8 +78,9 @@ typedef struct CawRenderOptions {
     int32_t float32;      /* 1 = 32-bit float, 0 = 24-bit PCM (wavetables are always float) */
     int32_t frames;       /* wavetable frames, 1..256 */
     double seconds;       /* free-length duration */
-    const char* target;   /* one-shot: layer id; wavetable: module id */
-    const char* param;    /* wavetable: param to sweep, or NULL */
+    const char* target;   /* one-shot: layer id; wavetable: a layer with a C++ instrument, a built-in instrument's
+                             id, or a .caw module id */
+    const char* param;    /* wavetable: the parameter (or .caw param) to sweep, or NULL */
 } CawRenderOptions;
 
 /* Workload identifiers shared by the app, project tools and native add-ons. */

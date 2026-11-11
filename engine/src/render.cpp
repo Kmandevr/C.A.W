@@ -6,7 +6,9 @@
 #include <cmath>
 #include <memory>
 
+#include "builtin_components.h"
 #include "compile.h"
+#include "component_test.h"
 #include "engine.h"
 #include "pattern.h"
 #include "vm.h"
@@ -145,8 +147,97 @@ int64_t loopFrames(const ProjectSpec& p, int sr, int steps) {
     return static_cast<int64_t>(std::floor(steps * stepLen + 0.5));
 }
 
+// Each frame's DC offset removed, then the whole table normalised to a peak of 1, into out.samples.
+void finishWavetable(std::vector<double>& table, int frames, RenderResult& out) {
+    for (int f = 0; f < frames; ++f) {
+        double mean = 0;
+        for (int i = 0; i < kWavetableFrame; ++i) mean += table[static_cast<size_t>(f) * kWavetableFrame + i];
+        mean /= kWavetableFrame;
+        for (int i = 0; i < kWavetableFrame; ++i) table[static_cast<size_t>(f) * kWavetableFrame + i] -= mean;
+    }
+    double peak = 0;
+    for (double v : table) peak = std::max(peak, std::fabs(v));
+    const double scale = peak > 0 ? 1.0 / peak : 0.0;
+    for (size_t i = 0; i < table.size(); ++i) out.samples[i] = static_cast<float>(table[i] * scale);
+}
+
+// A C++ instrument's wavetable. The target is a layer with an instrument (played with the layer's values) or a
+// built-in component's id. Each frame is a fresh instance holding A0 (MIDI 21, 27.5 Hz) at a sample rate of
+// 27.5 * 2048, so one cycle of the note is one 2048-frame frame; the frame is the cycle after kWarmCycles, past
+// the note's attack, as the mid of the instrument's output. With a param, frame f sets it to
+// min + (max - min) * f / (frames - 1) (one frame: its default), constrained as the host constrains it. A
+// component's saved state (a user wavetable, drum samples) isn't loaded: built-ins render their own sound.
+constexpr int kWarmCycles = 3;
+constexpr double kWavetableNoteHz = 27.5;  // A0
+
+bool componentWavetableTarget(const ProjectSpec& p, const std::string& target, TestComponent& c) {
+    for (const LayerSpec& l : p.layers)
+        if (l.id == target && l.hasInstrument && !l.folder) {
+            c.id = l.instrument.id;
+            c.params = l.instrument.params;
+            return true;
+        }
+    if (p.module(target)) return false;  // a .caw module (until #160 removes them)
+    c.id = target;
+    return true;
+}
+
+bool renderComponentWavetable(TestComponent c, const ExportOptions& o, RenderResult& out, int32_t* progress,
+                              int32_t* cancel) {
+    ModuleRegistry registry;
+    registerBuiltinComponents(registry);
+    const ModuleDescriptor* d = registry.find(c.id);
+    if (!d) {
+        out.error = "no module, instrument layer or built-in component '" + o.target + "' to make a wavetable from";
+        return false;
+    }
+    bool notesIn = false;
+    for (uint32_t k = 0; k < d->portCount; ++k) notesIn = notesIn || (d->ports[k].type == PortType::Event && d->ports[k].input);
+    if (!notesIn) {
+        out.error = "component '" + c.id + "' takes no notes: a wavetable is made from an instrument";
+        return false;
+    }
+    const ParameterDescriptor* swept = nullptr;
+    for (uint32_t k = 0; k < d->parameterCount; ++k)
+        if (d->parameters[k].id == o.param) swept = &d->parameters[k];
+    if (!o.param.empty() && !swept) {
+        out.error = "component '" + c.id + "' has no parameter '" + o.param + "'";
+        return false;
+    }
+    const int frames = std::clamp(o.frames, 1, 256);
+    out.channels = 1;
+    out.sampleRate = o.sampleRate;
+    out.frames = static_cast<int64_t>(frames) * kWavetableFrame;
+    out.samples.assign(static_cast<size_t>(out.frames), 0.0f);
+    std::vector<double> table(static_cast<size_t>(out.frames), 0.0);
+    const double sr = kWavetableNoteHz * kWavetableFrame;
+    const size_t length = static_cast<size_t>(kWarmCycles + 1) * kWavetableFrame;
+    const std::vector<float> silence(length, 0.0f);
+    const std::vector<TestNote> note = {{21, 127, 0, static_cast<double>(length) / sr + 1.0}};
+    const size_t base = c.params.size();
+    if (swept) c.params.push_back({o.param, swept->defaultValue});
+    for (int f = 0; f < frames; ++f) {
+        if (cancelled(cancel)) {
+            out.error = "cancelled";
+            return false;
+        }
+        if (swept)
+            c.params[base].second = frames == 1 ? swept->defaultValue
+                                                : swept->minimum + (swept->maximum - swept->minimum) * f / (frames - 1);
+        ComponentRender r;
+        if (!renderComponent(registry, c, sr, 64, 120, silence, silence, false, r, out.error, note)) return false;
+        const size_t from = static_cast<size_t>(kWarmCycles) * kWavetableFrame;
+        for (int i = 0; i < kWavetableFrame; ++i)
+            table[static_cast<size_t>(f) * kWavetableFrame + i] = 0.5 * (static_cast<double>(r.left[from + i]) + r.right[from + i]);
+        setProgress(progress, static_cast<double>(f + 1) / frames);
+    }
+    finishWavetable(table, frames, out);
+    return true;
+}
+
 bool renderWavetable(const ProjectSpec& p, const ExportOptions& o, RenderResult& out, int32_t* progress,
                      int32_t* cancel) {
+    if (TestComponent c; componentWavetableTarget(p, o.target, c)) return renderComponentWavetable(c, o, out, progress, cancel);
     const ModuleSpec* m = p.module(o.target);
     if (!m) {
         out.error = "no module '" + o.target + "' to make a wavetable from";
@@ -235,17 +326,9 @@ bool renderWavetable(const ProjectSpec& p, const ExportOptions& o, RenderResult&
             const double* y = inst.process(ctx);
             for (int i = 0; i < kBlock; ++i) table[static_cast<size_t>(f) * kWavetableFrame + b + i] = y[i];
         }
-        // Remove each frame's DC offset so the table is centred.
-        double mean = 0;
-        for (int i = 0; i < kWavetableFrame; ++i) mean += table[static_cast<size_t>(f) * kWavetableFrame + i];
-        mean /= kWavetableFrame;
-        for (int i = 0; i < kWavetableFrame; ++i) table[static_cast<size_t>(f) * kWavetableFrame + i] -= mean;
         setProgress(progress, static_cast<double>(f + 1) / frames);
     }
-    double peak = 0;
-    for (double v : table) peak = std::max(peak, std::fabs(v));
-    const double scale = peak > 0 ? 1.0 / peak : 0.0;
-    for (size_t i = 0; i < table.size(); ++i) out.samples[i] = static_cast<float>(table[i] * scale);
+    finishWavetable(table, frames, out);
     return true;
 }
 

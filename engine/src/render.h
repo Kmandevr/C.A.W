@@ -15,8 +15,8 @@ struct ExportOptions {
     ExportKind kind = ExportKind::Loop;
     int sampleRate = 48000;
     double seconds = 8.0;  // Free
-    std::string target;    // OneShot: layer id. Wavetable: module id
-    std::string param;     // Wavetable: the param swept across frames (empty = none)
+    std::string target;    // OneShot: layer id. Wavetable: a layer with a C++ instrument, a built-in id, or a .caw module
+    std::string param;     // Wavetable: the parameter (or .caw param) swept across frames (empty = none)
     int frames = 64;       // Wavetable frame count
 };
 

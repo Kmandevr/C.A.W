@@ -11,6 +11,7 @@
 #include "engine.h"
 #include "render.h"
 #include "test.h"
+#include "test_signal.h"
 #include "wav.h"
 
 using namespace caw;
@@ -175,6 +176,58 @@ TEST(wavetable_frames_sweep_a_param) {
     // Each frame is one cycle: it starts and ends near zero.
     CHECK(std::fabs(r.samples[0]) < 0.01f);
     o.param = "missing";
+    CHECK(!renderExport(p, o, r));
+}
+
+TEST(wavetable_frames_sweep_a_cpp_instruments_parameter) {
+    // The test signal in Notes mode on a layer: frame f is one cycle of A0 with shape f (sine, saw, square, ...).
+    ProjectSpec p = cawtest::testSignalProject({cawtest::testSignalNotesLayer("osc", cawtest::Shape::Sine, "")});
+    RenderResult r;
+    ExportOptions o;
+    o.kind = ExportKind::Wavetable;
+    o.target = "osc";
+    o.param = "shape";
+    o.frames = 3;  // shape 0, 3 (noise), 6 (sweep): min + (max - min) * f / (frames - 1)
+    CHECK(renderExport(p, o, r));
+    CHECK_EQ(r.channels, 1);
+    CHECK_EQ(r.frames, int64_t{3 * kWavetableFrame});
+    // Frame 0 is one sine cycle: 0 at the start, the peak a quarter in, the trough three quarters in.
+    CHECK(std::fabs(r.samples[0]) < 1e-3f);
+    CHECK(r.samples[512] > 0.3f);
+    CHECK_NEAR(r.samples[1536], -r.samples[512], 1e-3);
+    float peak = 0;
+    for (float v : r.samples) peak = std::max(peak, std::fabs(v));
+    CHECK_NEAR(peak, 1.0, 1e-6);
+    // Seven frames, one per shape: each differs from the sine.
+    o.frames = 7;
+    CHECK(renderExport(p, o, r));
+    for (int f = 1; f < 7; ++f) {
+        bool differ = false;
+        for (int i = 0; i < kWavetableFrame; ++i)
+            differ = differ || std::fabs(r.samples[i] - r.samples[static_cast<size_t>(f) * kWavetableFrame + i]) > 0.05f;
+        CHECK(differ);
+    }
+    // A square frame (shape 2) is flat on each half: its samples a quarter in and an eighth in match.
+    const float* square = r.samples.data() + 2 * kWavetableFrame;
+    CHECK_NEAR(square[256], square[512], 1e-6);
+    CHECK_NEAR(square[1280], square[1536], 1e-6);
+    CHECK(square[512] > 0 && square[1536] < 0);
+    // A built-in by id, with its defaults; no sweep gives the same frame each time.
+    o.target = "org.caw.synth.flagship";
+    o.param.clear();
+    o.frames = 2;
+    CHECK(renderExport(p, o, r));
+    CHECK(r.samples[100] == r.samples[kWavetableFrame + 100]);
+    // Refusals: an effect, a missing parameter, a missing target.
+    o.target = "org.caw.stereo.width";
+    CHECK(!renderExport(p, o, r));
+    CHECK(r.error.find("takes no notes") != std::string::npos);
+    o.target = "osc";
+    o.param = "missing";
+    CHECK(!renderExport(p, o, r));
+    CHECK(r.error.find("no parameter 'missing'") != std::string::npos);
+    o.target = "nothing";
+    o.param.clear();
     CHECK(!renderExport(p, o, r));
 }
 
