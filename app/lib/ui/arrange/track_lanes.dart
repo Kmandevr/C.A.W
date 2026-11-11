@@ -74,6 +74,17 @@ class ArrangeLane {
       : state.removeProjectAutomationPoint(_project!, index);
 
   void delete() => _track != null ? state.removeAutomationLane(layer, _track) : state.removeProjectAutomationLane(_project!);
+
+  /// Whether the Automate button writes this lane (REAPER's envelope arm).
+  bool get armed => _track?.armed ?? _project!.armed;
+
+  /// Arms or disarms it: one undo step.
+  void setArmed(bool on) {
+    if (on == armed) return;
+    state.endUndoStep();
+    state.editProject((_) => _track != null ? _track.armed = on : _project!.armed = on);
+    state.endUndoStep();
+  }
 }
 
 /// [layer]'s lanes, in order: volume and pan first, then its instrument's and effects' parameters.
@@ -177,8 +188,19 @@ class TrackLaneHeaders extends StatelessWidget {
           child: Row(children: [
             Expanded(child: Text(lane.name, maxLines: 2, overflow: TextOverflow.ellipsis,
               style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: lane.color))),
-            // 32 px wide, a whole row high: a finger's target in a compact row.
-            SizedBox(width: 32, height: kLaneRowHeight, child: Pressable(child: IconButton(
+            // Arm (REAPER's envelope arm): the Automate button writes only armed lanes; new lanes start armed.
+            SizedBox(width: 26, height: kLaneRowHeight, child: Pressable(child: IconButton(
+              key: ValueKey('lane-arm-${lane.key}'),
+              padding: EdgeInsets.zero, iconSize: 15, isSelected: lane.armed,
+              tooltip: lane.armed ? 'Armed: Automate writes it (tap to disarm)' : 'Disarmed: only plays (tap to arm)',
+              icon: Icon(lane.armed ? Icons.radio_button_checked : Icons.radio_button_unchecked,
+                color: lane.armed ? Neon.pink : Neon.dim),
+              onPressed: () {
+                Haptics.tap();
+                lane.setArmed(!lane.armed);
+              }))),
+            // 26 px wide and a whole row high: a finger's target in a compact row, leaving the name room beside the arm.
+            SizedBox(width: 26, height: kLaneRowHeight, child: Pressable(child: IconButton(
               key: ValueKey('lane-remove-${lane.key}'),
               padding: EdgeInsets.zero, tooltip: 'Remove lane', iconSize: 15,
               icon: const Icon(Icons.close, color: Neon.dim),

@@ -2,7 +2,7 @@
 title: Actions, keys and macros
 summary: Implemented action routing, macros, keymap persistence and configurable toolbars, plus clearly identified UI gaps.
 covers: [app/lib/actions/, app/lib/ui/key_router.dart, app/lib/ui/key_bindings.dart, app/lib/ui/pattern_editor.dart, app/lib/ui/touch_quick_actions.dart]
-updated: 2026-11-10
+updated: 2026-11-11
 ---
 
 # Actions, keys and macros
@@ -65,7 +65,7 @@ The owner wants the whole app, code editor included, to work like Vim (2026-10-2
   - **Insert:** keys type text, in the code editor, name fields and the command line.
   - **Visual:** movement keys extend the selection: a time × pitch rectangle in the roll, cells in the grid, layers in the Arranger.
   - Esc always returns to Normal, and the mode shows in the status bar.
-- **Counts:** a number before a command repeats it. `3E` copies the selection three times after itself, `12W` moves notes up an octave, and `4]` makes a layer four steps longer. That's why the grid sizes moved from 1–4 to Alt+1–4.
+- **Counts:** a number before a command repeats it. `3E` copies the selection three times after itself, `12W` moves notes up an octave, and `4]` makes a layer four steps longer. That's why the grid sizes moved from 1–4 to Alt+1–4. A digit an area binds on its own runs that action instead: the arranger binds 1–0 to its marker jumps (REAPER's), so counts there need those keys unbound in the key bindings editor.
 - **Command line:** `:` opens it, with completion. Every action is a command by its name (`:quantize`, `:export loop`), and some take values: `:bpm 140`, `:grid 1/16`, `:key A minor`, `:len 4 bars`, `:vel 80%`.
 - **Repeat:** `.` repeats the last change. With a count, `5.` repeats it five times.
 - **Recording macros:**
@@ -146,6 +146,8 @@ Notes:
 | Copy / cut / paste at the cursor / duplicate | Ctrl+C / Ctrl+X / Ctrl+V / Ctrl+D |
 | Split notes at the cursor / join selected notes | Ctrl+E / Ctrl+J (Ableton uses these: [Live 12 manual](https://www.ableton.com/live-manual/12/live-keyboard-shortcuts/)) |
 | Quantize selected notes to the grid | Ctrl+U (as in Live) |
+| Quantize… (sheet: grid, starts/ends/both, strength, swing, humanize, previewed live) | ⋮ menu (no default key) |
+| Step input on / off; a rest skips a grid step | ⋮ menu, the step bar's Rest (no default keys) |
 | Hear the selected notes | Enter |
 
 Note values and extras:
@@ -179,6 +181,7 @@ Generators (buttons; no default keys):
 | --- | --- |
 | Euclid, random in key, arpeggiate, humanize, chord stamp | — |
 | Legato (stretch each note to the next) | — |
+| Connect notes (each chord to the next, voices gliding into it), tremolo (volume or repeats) | — |
 | Reverse selection, invert pitch around the cursor | — |
 
 ### Arranger
@@ -204,6 +207,8 @@ Generators (buttons; no default keys):
 | Add a marker at the playhead (REAPER's M is the layer's mute here) | Shift+M |
 | Add a region over the time selection, else the loop range (REAPER's Shift+R) | Shift+R |
 | Go to the next / previous marker or region (REAPER's ] and [ are the layer's length here) | Ctrl+] / Ctrl+[ |
+| Go to marker 1–10, in time order (REAPER's 1–0; these take the digits from counts here) | 1 … 9, 0 |
+| Markers and regions: the list (jump, rename, loop, duplicate a region with its clips) | — |
 
 ### Exporter
 

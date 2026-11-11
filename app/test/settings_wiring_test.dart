@@ -64,7 +64,7 @@ void main() {
       x.restorePointsKept = 7;
       x.newProjectBpm = 96;
       x.newProjectBeatsPerBar = 3;
-      x.newProjectStart = NewProjectStart.firstLoop;
+      x.newProjectTemplate = 'builtin:first-loop';
       x.exportKind = 'free';
       x.exportSampleRate = 44100;
       x.exportFloat32 = true;
@@ -83,8 +83,8 @@ void main() {
     expect([b.rollGrid, b.rollSnap, b.rollTool, b.rollNoteSteps], [32, false, StartTool.select, 4.0]);
     expect([b.followPlayhead, b.wheelZooms, b.confirmDelete], [false, true, true]);
     expect([b.codeFontSize, b.codeTabWidth, b.codeLineNumbers, b.codeWrap], [18, 2, false, true]);
-    expect([b.autosaveMs, b.restorePointsKept, b.newProjectBpm, b.newProjectBeatsPerBar, b.newProjectStart],
-        [5000, 7, 96, 3, NewProjectStart.firstLoop]);
+    expect([b.autosaveMs, b.restorePointsKept, b.newProjectBpm, b.newProjectBeatsPerBar, b.newProjectTemplate],
+        [5000, 7, 96, 3, 'builtin:first-loop']);
     expect([b.exportKind, b.exportSampleRate, b.exportFloat32, b.exportSeconds, b.exportNaming],
         ['free', 44100, true, 30, ExportNaming.dated]);
     CodePrefs.fontSize = 15;
@@ -149,28 +149,28 @@ void main() {
       ..midiChannel = 2;
     midi.notes.add(const MidiMessage(0x91, 60, 127, 'Other keyboard'));
     midi.notes.add(const MidiMessage(0x90, 61, 127, 'Keystation')); // channel 1
-    expect(s.on, isEmpty);
+    expect(s.device, isEmpty);
     midi.notes.add(const MidiMessage(0x91, 62, 127, 'Keystation')); // channel 2
-    expect(s.on.single.$2, 62);
+    expect(s.device.single.$2, [0x91, 62, 127], reason: 'a device plays through the engine\'s device input');
     live.keyDown(70, 0.5); // the on-screen keys always pass, at their own velocity
     expect(s.on.last.$3, closeTo(64 / 127, 1e-9));
     s.settings
       ..midiChannel = 0
       ..velocityCurve = VelocityCurve.hard;
     midi.notes.add(const MidiMessage(0x90, 63, 64, 'Keystation'));
-    expect(s.on.last.$3, closeTo((64 / 127) * (64 / 127), 1e-9));
+    expect(s.device.last.$2[2], ((64 / 127) * (64 / 127) * 127).round());
     s.settings
       ..velocityCurve = VelocityCurve.fixed
       ..midiFixedVelocity = 0.3;
     midi.notes.add(const MidiMessage(0x90, 64, 120, 'Keystation'));
-    expect(s.on.last.$3, 0.3);
+    expect(s.device.last.$2[2], (0.3 * 127).round());
     s.settings.midiThru = false;
-    final before = s.on.length;
+    final before = s.device.length;
     midi.notes.add(const MidiMessage(0x90, 65, 120, 'Keystation'));
-    expect(s.on.length, before, reason: 'thru off: nothing sounds outside a recording');
+    expect(s.device.length, before, reason: 'thru off: nothing sounds outside a recording');
     live.toggleRecord(s.project.layers.first.id);
     midi.notes.add(const MidiMessage(0x90, 66, 120, 'Keystation'));
-    expect(s.on.length, before + 1, reason: 'the armed track still hears it');
+    expect(s.device.length, before + 1, reason: 'the armed track still hears it');
     live.dispose();
   });
 

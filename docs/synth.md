@@ -2,7 +2,7 @@
 title: Synth
 summary: Implemented synth patch compiler, supported patch features, app behavior and verified gaps.
 covers: [engine/src/synth.cpp, engine/tests/synth_test.cpp, app/lib/ui/builder_screen.dart, app/lib/ui/modulation_panel.dart]
-updated: 2026-11-10
+updated: 2026-11-11
 ---
 
 # Synth
@@ -52,7 +52,7 @@ Do not show unsupported patch lines as valid syntax or claim that imported/drawn
 
 - Synth patches are edited through Builder's ordinary code and generated-controls workflow.
 - The current app does not provide a dedicated synth page, on-screen synth keyboard, preset browser/tag manager or drag-to-modulate canvas.
-- MIDI pattern file import/export is implemented, but USB/Bluetooth MIDI device connection and live hardware routing are not.
+- MIDI pattern file import/export and live MIDI devices are implemented ([engine](engine.md), [app](app.md)).
 - Plugin Builder validates and packages native .caw source modules. It does not compile CLAP/VST3 binaries or host third-party plugins.
 - The native module SDK/graph foundations are not the active Engine/VM playback path; see [engine implementation status](engine-build-status.md).
 

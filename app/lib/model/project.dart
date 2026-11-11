@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:math';
 
 import 'cpp_component.dart';
+import 'midi_mapping.dart';
 import 'pattern_doc.dart';
 import 'routing.dart';
 
@@ -120,12 +121,15 @@ class AutomationPointDoc {
 }
 
 class AutomationLaneDoc {
-  AutomationLaneDoc({required this.target, List<AutomationPointDoc>? points}) : points = points ?? [];
+  AutomationLaneDoc({required this.target, List<AutomationPointDoc>? points, this.armed = true}) : points = points ?? [];
   String target;
   List<AutomationPointDoc> points;
-  Map<String, dynamic> toJson() => {'target': target, 'points': [for (final p in points) p.toJson()]};
+
+  /// Written by the Automate button (REAPER's envelope arm, UG 18.5); a disarmed lane only plays.
+  bool armed;
+  Map<String, dynamic> toJson() => {'target': target, 'points': [for (final p in points) p.toJson()], if (!armed) 'armed': false};
   static AutomationLaneDoc fromJson(Map<String, dynamic> j) => AutomationLaneDoc(
-    target: j['target'] as String, points: ((j['points'] as List?) ?? const [])
+    target: j['target'] as String, armed: j['armed'] != false, points: ((j['points'] as List?) ?? const [])
       .map((p) => AutomationPointDoc.fromJson(p as Map<String, dynamic>)).toList());
 }
 
@@ -133,7 +137,8 @@ class AutomationLaneDoc {
 /// parameter (`component`: [layerId] null for the master chain, [component] its index in that chain).
 class ProjectAutomationLaneDoc {
   ProjectAutomationLaneDoc(
-      {required this.targetType, required this.target, this.moduleId, this.layerId, this.component, List<AutomationPointDoc>? points})
+      {required this.targetType, required this.target, this.moduleId, this.layerId, this.component, List<AutomationPointDoc>? points,
+      this.armed = true})
       : points = points ?? [];
   String targetType;
   String target;
@@ -141,6 +146,9 @@ class ProjectAutomationLaneDoc {
   String? layerId;
   int? component;
   List<AutomationPointDoc> points;
+
+  /// Written by the Automate button (REAPER's envelope arm); a disarmed lane only plays.
+  bool armed;
 
   String get key => automationKey(targetType, target, layerId: layerId, moduleId: moduleId, component: component);
 
@@ -151,6 +159,7 @@ class ProjectAutomationLaneDoc {
         if (layerId != null) 'layer': layerId,
         if (component != null) 'component': component,
         'points': [for (final p in points) p.toJson()],
+        if (!armed) 'armed': false,
       };
 
   static ProjectAutomationLaneDoc fromJson(Map<String, dynamic> j) => ProjectAutomationLaneDoc(
@@ -159,6 +168,7 @@ class ProjectAutomationLaneDoc {
         moduleId: j['module'] as String?,
         layerId: j['layer'] as String?,
         component: (j['component'] as num?)?.toInt(),
+        armed: j['armed'] != false,
         points: ((j['points'] as List?) ?? const []).map((p) => AutomationPointDoc.fromJson(p as Map<String, dynamic>)).toList(),
       );
 }
@@ -195,9 +205,16 @@ class ComponentUseDoc {
   /// Where a component with a sidechain input (the ducker, a keyed compressor or gate) hears its key; null: none.
   ComponentKeyDoc? key;
 
+  /// The samples its slots play (the drums' Sample layer: slot n is pad n), by reference; the engine decodes them.
+  List<ComponentSampleDoc> samples = [];
+
+  /// The most parameter values an entry keeps: every knob of the largest built-in (the drums' 10392) with room.
+  static const maxParams = 16384;
+
   /// A bare id when nothing else is set, as older projects stored it. [withKey] false leaves the key out (the
   /// engine's copy, when the key would make a loop or names a layer that is gone: [RoutingPlan]).
-  Object toJson({bool withKey = true}) => params.isEmpty && !bypass && state == null && preset == null && (key == null || !withKey)
+  Object toJson({bool withKey = true}) => params.isEmpty && !bypass && state == null && preset == null &&
+          (key == null || !withKey) && samples.isEmpty
       ? id
       : {
           'id': id,
@@ -206,6 +223,7 @@ class ComponentUseDoc {
           if (bypass) 'bypass': true,
           if (state != null) ...{'state': state, 'state_version': stateVersion},
           if (key != null && withKey) 'key': key!.toJson(),
+          if (samples.isNotEmpty) 'samples': [for (final x in samples) x.toJson()],
         };
 
   /// Null for an entry without a usable id. Ids and parameter names are bounded; values must be finite.
@@ -219,7 +237,7 @@ class ComponentUseDoc {
     if (id.isEmpty) return null;
     final params = <String, double>{};
     if (j['params'] case final Map raw) {
-      for (final entry in raw.entries.take(256)) {
+      for (final entry in raw.entries.take(maxParams)) {
         final name = _boundedProjectText(entry.key, 64);
         if (name.isNotEmpty && entry.value is num && (entry.value as num).isFinite) {
           params[name] = (entry.value as num).toDouble();
@@ -235,12 +253,43 @@ class ComponentUseDoc {
       state is String && state.length <= (16 << 20) && RegExp(r'^[A-Za-z0-9+/]*={0,2}$').hasMatch(state) ? state : null,
       version is int && version >= 0 && version <= 0xFFFFFFFF ? version : 1,
       switch (_boundedProjectText(j['preset'], 64)) { '' => null, final name => name },
-    )..key = ComponentKeyDoc.fromJson(j['key']);
+    )
+      ..key = ComponentKeyDoc.fromJson(j['key'])
+      ..samples = ComponentSampleDoc.listFromJson(j['samples']);
   }
 
   static List<ComponentUseDoc> listFromJson(Object? raw) => [
         for (final entry in ((raw as List?) ?? const []).take(64)) ?ComponentUseDoc.fromJson(entry),
       ];
+}
+
+/// One sample slot of a component (the drums' pads): a file the app keeps ([path]) or a built-in pack sound
+/// ([builtin]), never both. The engine's limits (engine/src/project.cpp): 256 entries, slot 0..65535.
+class ComponentSampleDoc {
+  const ComponentSampleDoc(this.slot, {this.path, this.builtin});
+  final int slot;
+  final String? path, builtin;
+
+  String get label => builtin ?? (path ?? '').split(RegExp(r'[/\\]')).last;
+
+  Map<String, dynamic> toJson() => {'slot': slot, if (path != null) 'path': path, if (builtin != null) 'builtin': builtin};
+
+  static ComponentSampleDoc? fromJson(Object? j) {
+    if (j is! Map) return null;
+    final slot = j['slot'];
+    final path = _boundedProjectText(j['path'], 4096), builtin = _boundedProjectText(j['builtin'], 256);
+    if (slot is! int || slot < 0 || slot > 65535 || path.isEmpty == builtin.isEmpty) return null;
+    return ComponentSampleDoc(slot, path: path.isEmpty ? null : path, builtin: builtin.isEmpty ? null : builtin);
+  }
+
+  /// One entry per slot (the last wins), at most 256.
+  static List<ComponentSampleDoc> listFromJson(Object? raw) {
+    final bySlot = <int, ComponentSampleDoc>{};
+    for (final e in ((raw is List) ? raw : const []).take(256)) {
+      if (fromJson(e) case final s?) bySlot[s.slot] = s;
+    }
+    return bySlot.values.toList()..sort((a, b) => a.slot.compareTo(b.slot));
+  }
 }
 
 /// A marker (a named, coloured point in the song) or, with [endSteps], a region (a named span: a verse, a chorus).
@@ -541,6 +590,9 @@ class ProjectDoc {
   /// Markers and regions on the ruler, in no particular order.
   List<MarkerDoc> markers;
 
+  /// Controller learn: hardware CCs mapped to knobs (Settings › MIDI lists them).
+  List<MidiCcMapping> midiMappings = [];
+
   int get stepsPerBar => beatsPerBar * 4;
   int get loopSteps => loopBars * stepsPerBar;
   /// A song position is the engine's 32-bit step count, so a song holds whole bars up to 2^31 - 1 steps (F7.2).
@@ -731,6 +783,7 @@ class ProjectDoc {
         if (midiFiles.isNotEmpty) 'midi_files': [for (final f in midiFiles) f.toJson()],
         if (hasLoopRange) ...{'loop_range': loopRange, 'loop_start_steps': loopStartSteps, 'loop_end_steps': loopEndSteps},
         if (markers.isNotEmpty) 'markers': [for (final m in markers) m.toJson()],
+        if (midiMappings.isNotEmpty) 'midi_mappings': [for (final m in midiMappings) m.toJson()],
       };
 
   /// Brings each track's instrument up to what the engine plays, with [resolve] (`Engine.resolveInstrument`): a
@@ -759,7 +812,8 @@ class ProjectDoc {
           lane.target = to;
           return false;
         });
-        l.instrument = ComponentUseDoc(r['id'] as String, params, use.bypass, null, 1, r['preset'] as String?);
+        l.instrument = ComponentUseDoc(r['id'] as String, params, use.bypass, null, 1, r['preset'] as String?)
+          ..samples = use.samples;
         changed = true;
       } else if (params.length != use.params.length || params.entries.any((e) => use.params[e.key] != e.value)) {
         use.params = params;
@@ -866,6 +920,9 @@ class ProjectDoc {
     project.loopStartSteps = project.loopStartSteps.clamp(0, project.maxArrangementSteps - 1).toInt();
     project.loopEndSteps = project.loopEndSteps.clamp(0, project.maxArrangementSteps).toInt();
     if (!project.hasLoopRange) project.loopRange = false;
+    project.midiMappings = [
+      for (final raw in ((j['midi_mappings'] as List?) ?? const []).take(1024)) ?MidiCcMapping.fromJson(raw),
+    ];
     project.markers = [
       for (final raw in ((j['markers'] as List?) ?? const []).take(1024)) ?MarkerDoc.fromJson(raw, project.maxArrangementSteps),
     ];

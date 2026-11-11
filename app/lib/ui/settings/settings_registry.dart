@@ -2,6 +2,7 @@
 import 'package:flutter/material.dart';
 
 import '../../model/settings.dart';
+import '../../model/templates.dart' show templateLabel;
 import '../../version.dart';
 import '../theme.dart';
 
@@ -71,7 +72,7 @@ enum SettingsSection {
       projects => [
           'Autosave ${s.autosaveMs < 1000 ? '${s.autosaveMs} ms' : '${s.autosaveMs ~/ 1000} s'}',
           '${s.restorePointsKept} restore points',
-          'new: ${s.newProjectStart.label}',
+          'new: ${templateLabel(s.newProjectTemplate)}',
         ].join(' · '),
       export => [
           exportKindLabel(s.exportKind),
@@ -144,6 +145,15 @@ const List<SettingEntry> settingEntries = [
   _E('audio.quality', _a, 'Sound quality', 'Eco, Normal or High: oversampling, unison copies and reverb density',
       ['eco', 'battery', 'oversampling', 'cpu']),
   _E('audio.test', _a, 'Test tone', 'Plays 440 Hz for a moment to check the output', ['beep', 'sine', 'check', 'a4']),
+  _E('midi.devices', _m, 'MIDI devices', 'The connected keyboards and pad controllers: on or off, and a light as each plays',
+      ['usb', 'bluetooth', 'controller', 'pads', 'keyboard', 'device', 'connect']),
+  _E('midi.bluetooth', _m, 'Scan for Bluetooth MIDI', 'Find and connect a Bluetooth LE MIDI keyboard or controller',
+      ['bluetooth', 'ble', 'pair', 'wireless']),
+  _E('midi.mpe', _m, 'MPE', 'MIDI Polyphonic Expression: each note on its own channel bends and presses alone',
+      ['mpe', 'expression', 'seaboard', 'linnstrument', 'per-note']),
+  _E('midi.bendRange', _m, 'Pitch bend range', 'Semitones a full pitch bend moves', ['bend', 'wheel', 'range', 'semitones']),
+  _E('midi.mappings', _m, 'Controller mappings', 'Hardware knobs mapped with Learn MIDI CC; remove them here',
+      ['learn', 'cc', 'knob', 'map', 'controller']),
   _E('midi.device', _m, 'MIDI keyboard', 'Which connected keyboard plays; every one by default',
       ['controller', 'usb', 'bluetooth', 'input', 'device']),
   _E('midi.channel', _m, 'MIDI channel', 'Listen on every channel or on one of 1 to 16', ['channel', 'omni']),

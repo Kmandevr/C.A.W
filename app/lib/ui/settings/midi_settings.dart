@@ -1,9 +1,11 @@
-// Settings › MIDI and input: the keyboard and channel read, the velocity curve, MIDI thru and the on-screen keys.
+// Settings › MIDI and input: the devices (midi_devices_settings.dart), the keyboard and channel read, the velocity
+// curve, MIDI thru and the on-screen keys.
 import 'package:flutter/material.dart';
 
 import '../../model/live_midi.dart';
 import '../../model/settings.dart';
 import '../frame/live_keys.dart' show noteName;
+import 'midi_devices_settings.dart';
 import 'settings_deps.dart';
 import 'settings_widgets.dart';
 
@@ -17,6 +19,8 @@ class MidiSettings extends StatelessWidget {
     final midi = LiveMidi.current;
     final connected = midi?.devices ?? const <String>[];
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      MidiDevicesSettings(deps: deps),
+      settingHeading('Playing'),
       settingDropdown<String>(
         'midi.device',
         s.midiDevice,
@@ -30,7 +34,7 @@ class MidiSettings extends StatelessWidget {
         subtitle: midi?.input == null
             ? 'This platform reads no MIDI keyboards yet; the on-screen keys play'
             : connected.isEmpty
-                ? 'None connected: plug in a USB keyboard or pair a Bluetooth one in Android'
+                ? 'None connected'
                 : '${connected.length} connected',
       ),
       settingDropdown<int>(

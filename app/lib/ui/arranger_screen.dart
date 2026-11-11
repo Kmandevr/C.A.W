@@ -12,8 +12,12 @@ import '../model/arrange_fx.dart';
 import '../model/arrange_markers.dart';
 import '../model/live_midi.dart';
 import '../model/project.dart';
+import '../model/record_modes.dart';
 import '../model/settings.dart';
 import 'arrange/arrange_drag.dart';
+import 'arrange/region_list.dart';
+import 'arrange/take_chip.dart';
+import 'arrange/templates_ui.dart';
 import 'arrange/clip_bar.dart';
 import 'arrange/clip_preview.dart';
 import 'arrange/ruler.dart';
@@ -221,6 +225,17 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
         }
       case 'arranger.marker.next' || 'arranger.marker.prev':
         if (!s.jumpToMarker(next: id.endsWith('next'))) _router?.toast('No marker that way');
+      case 'arranger.take.next' || 'arranger.take.prev':
+        final withTakes = [for (final c in s.selectedClips) if (c.clip.takes.length > 1) c];
+        if (withTakes.isEmpty) _router?.toast('Select a clip with takes (a loop recording)');
+        for (final c in withTakes) {
+          s.stepTake(c.layer, c.clip, id.endsWith('next') ? 1 : -1);
+        }
+      case 'arranger.marker.list':
+        showMarkerList(context, s);
+      case final go when go.startsWith('arranger.marker.go'):
+        final n = int.tryParse(go.substring('arranger.marker.go'.length)) ?? 0;
+        if (!s.jumpToMarkerNumber(n)) _router?.toast('No marker $n');
       default:
         return false;
     }
@@ -466,6 +481,8 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
       if (hasVolume) const MenuAction('remove-automation-volume', 'Remove volume automation', Icons.remove_circle_outline),
       if (hasPan) const MenuAction('remove-automation-pan', 'Remove pan automation', Icons.remove_circle_outline),
       MenuAction('spacer', layer.spaceBelow > 0 ? 'Remove spacer below' : 'Add spacer below', Icons.space_bar),
+      MenuAction('template', layer.isFolder ? 'Save folder as track template…' : 'Save as track template…',
+          Icons.bookmark_add_outlined),
       const MenuAction('delete', 'Delete', Icons.delete_outline, danger: true),
     ]);
     if (v == null || !mounted) return;
@@ -495,6 +512,10 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
     if (v == 'automation-pan') s.addAutomationLane(layer, 'pan');
     if (v == 'remove-automation-volume') s.removeAutomationLane(layer, layer.automation.firstWhere((a) => a.target == 'volume'));
     if (v == 'remove-automation-pan') s.removeAutomationLane(layer, layer.automation.firstWhere((a) => a.target == 'pan'));
+    if (v == 'template') {
+      if (mounted) await saveTrackTemplate(context, s, layer);
+      return;
+    }
     if (v == 'spacer') s.setSpaceBelow(layer, layer.spaceBelow > 0 ? 0 : _SpacerHeader.initial);
     if (v == 'delete' && mounted && await confirmTrackDelete(context, s, layer) && mounted) {
       if (_focusId == layer.id) _focus(null);
@@ -814,12 +835,19 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
         // under a heading (owner, 2026-11-05: one toolbar row, as in the UI plan).
         final narrow = constraints.maxWidth < 760;
         final controls = <Widget>[
-          if (narrow)
-            IconButton(onPressed: p.layers.length >= 64 ? null : s.addLayer,
-              icon: const Icon(Icons.add), color: Neon.green, tooltip: 'Add track')
-          else
-            TextButton.icon(onPressed: p.layers.length >= 64 ? null : s.addLayer,
-              icon: const Icon(Icons.add, size: 17), label: const Text('Track')),
+          // Long-press (or right-click) for the add-track menu: a folder and the track templates.
+          Builder(builder: (context) => GestureDetector(
+            onSecondaryTapUp: (d) => showAddTrackMenu(context, s, d.globalPosition),
+            child: narrow
+              // The tooltip shows on hover only: a long press opens the add-track menu.
+              ? Tooltip(message: 'Add track', triggerMode: TooltipTriggerMode.manual,
+                  child: TextButton(key: const ValueKey('arrange-add-track'), onPressed: s.addLayer,
+                    onLongPress: () => showAddTrackMenu(context, s, menuAnchorOf(context)),
+                    style: TextButton.styleFrom(minimumSize: const Size(48, 48), shape: const CircleBorder()),
+                    child: const Icon(Icons.add, color: Neon.green)))
+              : TextButton.icon(key: const ValueKey('arrange-add-track'), onPressed: s.addLayer,
+                  onLongPress: () => showAddTrackMenu(context, s, menuAnchorOf(context)),
+                  icon: const Icon(Icons.add, size: 17), label: const Text('Track')))),
           IconButton(key: const ValueKey('arrange-browse'), onPressed: () => setState(() => _browser = !_browser),
             color: _browser ? Neon.blue : Neon.dim, icon: const Icon(Icons.folder_open),
             tooltip: 'Files: drag one onto a track'),
@@ -855,10 +883,10 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
             items: [for (final v in [1, 2, 4, 8, 16]) DropdownMenuItem(value: v, child: Text('1/${v == 1 ? 16 : 16 ~/ v}'))],
             onChanged: (v) { if (v != null) setState(() => s.arrangementSnapSteps = v); })),
           if (narrow)
-            IconButton(onPressed: p.layers.length >= 64 ? null : s.addFolder,
+            IconButton(onPressed: s.addFolder,
               icon: const Icon(Icons.create_new_folder_outlined), color: Neon.green, tooltip: 'Add folder')
           else
-            TextButton.icon(onPressed: p.layers.length >= 64 ? null : s.addFolder,
+            TextButton.icon(onPressed: s.addFolder,
               icon: const Icon(Icons.create_new_folder_outlined, size: 17), label: const Text('Folder')),
           // A phone opens the mixer as a card over the tracks; a wide screen docks it under them.
           IconButton(onPressed: () => setState(() => narrow ? mixerCard = !mixerCard : mixer = !mixer),
@@ -1984,6 +2012,10 @@ class _TimelineClipState extends State<_TimelineClip> {
         // The clip's notes as a mini piano roll (REAPER), from a cached picture of its pattern; under the edges.
         if (preview != null) Positioned.fill(child: IgnorePointer(child: RepaintBoundary(
           child: CustomPaint(key: ValueKey('clip-preview-${c.id}'), painter: ClipPreviewPainter(preview))))),
+        // Loop-recorded takes: ‹ n/N › steps through them, a swipe across it too, a tap on the count lists them.
+        if (c.takes.length > 1 && c.lengthSteps * widget.stepW >= 86 && widget.height >= 26)
+          Positioned(top: 2, right: 14, child: TakeChip(state: widget.state, layer: widget.layer, clip: c,
+            color: widget.color)),
         // Both edges trim (REAPER: drag an item's edge): the left one moves the start and keeps the notes in time.
         _edge(left: true),
         _edge(left: false),

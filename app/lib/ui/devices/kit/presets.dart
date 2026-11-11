@@ -137,10 +137,15 @@ class DevicePresets {
     return matches(target, const DevicePreset('Init', {})) ? 'Init' : 'Custom';
   }
 
+  /// Parameters that pick what an editor shows, not how the device sounds (the drums' shown pad): an edit of them
+  /// leaves the preset's name as it was.
+  static const viewOnly = {'view_pad'};
+
   static bool matches(DeviceTarget target, DevicePreset preset) {
     final info = target.info;
     if (info == null) return false;
     for (final p in info.parameters) {
+      if (viewOnly.contains(p.id)) continue;
       if ((target.value(p.id) - (preset.values[p.id] ?? p.defaultValue)).abs() > 1e-6) return false;
     }
     return true;

@@ -6,8 +6,10 @@ import 'package:flutter/scheduler.dart';
 
 import '../engine/engine.dart';
 import 'arrange_fx.dart';
+import 'mixer_fx.dart';
 import 'device_target.dart';
 import 'fx_space_display.dart'; // fx-space
+import 'drums.dart';
 import 'project.dart';
 // fx-filters begin
 import '../ui/devices/effects/filters/filters_display.dart' show decodeFiltersDisplay;
@@ -111,7 +113,7 @@ class _Poll extends ValueNotifier<DeviceDisplayFrame?> {
       return;
     }
     // A rack's child (fx-racks): the rack's index + (child + 1) * 65536.
-    final n = engine.componentDisplay(layer.id, target.displayChild == 0 ? index : index + target.displayChild * 65536, _buffer);
+    final n = engine.componentDisplay(engineLayerId(layer), target.displayChild == 0 ? index : index + target.displayChild * 65536, _buffer);
     if (n > 0) value = decodeDisplay(id, _buffer, n);  // 0: nothing new to show (or the engine is busy): keep the last
     if (n < 0) value = null;
   }
@@ -126,6 +128,7 @@ DeviceDisplayFrame decodeDisplay(String componentId, List<double> f, int n) {
   // fx-space begin
   if (decodeFxSpaceDisplay(componentId, f, n) case final space?) return space;
   // fx-space end
+  if (componentId == drumsComponentId) return DrumsDisplayFrame.decode(f, n) ?? const DeviceDisplayFrame();
   // fx-filters begin
   if (decodeFiltersDisplay(componentId, f, n) case final frame?) return frame;
   // fx-filters end

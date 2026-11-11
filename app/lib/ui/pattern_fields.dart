@@ -1,4 +1,4 @@
-// A pattern's header (`---` name, length `---`) kept out of its text and edited as small fields above the notes.
+// A pattern's header (`---` name, summary, length `---`) kept out of its text and edited as small fields above the notes.
 import 'package:flutter/material.dart';
 
 import '../model/pattern_doc.dart';
@@ -32,21 +32,22 @@ String joinPatternHeader(String source, String body, String name) {
   return (header.isEmpty ? defaultPatternHeader(name) : header) + body;
 }
 
-/// The header of [source] (or a new one) with its name or length changed; the notes are left as written.
+/// The header of [source] (or a new one) with its name, summary or length changed; the notes are left as written.
 /// [steps] and [bars] both null with [setLength] removes the length, so the notes decide it. Null when the
 /// header can't be read (the text view shows the problem).
-String? editPatternHeader(String source, String fallbackName, {String? name, bool setLength = false, int? steps, int? bars}) {
+String? editPatternHeader(String source, String fallbackName, {String? name, String? summary, bool setLength = false, int? steps, int? bars}) {
   final (header, body) = splitPatternHeader(source);
   final parsed = PatternDoc.parse(header.isEmpty ? defaultPatternHeader(fallbackName) : header).doc;
   if (parsed == null) return null;
   var doc = parsed;
   if (name != null) doc = doc.setName(name);
+  if (summary != null) doc = doc.setSummary(summary);
   if (setLength) doc = doc.setLength(steps: steps, bars: bars);
   final out = doc.serialize();
   return splitPatternHeader(out.endsWith('\n') ? out : '$out\n').$1 + body;
 }
 
-/// Name and length as two compact fields. [onRename] gets the new name (the module's and the header's).
+/// Name, summary and length as compact fields: one row when wide, the summary on a row of its own on a phone. [onRename] gets the new name (the module's and the header's).
 class PatternFields extends StatefulWidget {
   const PatternFields({super.key, required this.source, required this.name, required this.stepsPerBar, required this.onSource,
       required this.onRename});
@@ -63,7 +64,13 @@ class PatternFields extends StatefulWidget {
 
 class _PatternFieldsState extends State<PatternFields> {
   late final _name = TextEditingController(text: widget.name);
-  final _focus = FocusNode();
+  late final _summary = TextEditingController(text: _summaryNow);
+  final _focus = FocusNode(), _summaryFocus = FocusNode();
+
+  String get _summaryNow {
+    final header = splitPatternHeader(widget.source()).$1;
+    return header.isEmpty ? '' : PatternDoc.parse(header).doc?.summary ?? '';
+  }
 
   @override
   void initState() {
@@ -71,19 +78,33 @@ class _PatternFieldsState extends State<PatternFields> {
     _focus.addListener(() {
       if (!_focus.hasFocus) _commitName();
     });
+    _summaryFocus.addListener(() {
+      if (!_summaryFocus.hasFocus) _commitSummary();
+    });
   }
 
   @override
   void didUpdateWidget(PatternFields old) {
     super.didUpdateWidget(old);
     if (!_focus.hasFocus && _name.text != widget.name) _name.text = widget.name;
+    if (!_summaryFocus.hasFocus && _summary.text != _summaryNow) _summary.text = _summaryNow;
   }
 
   @override
   void dispose() {
     _name.dispose();
+    _summary.dispose();
     _focus.dispose();
+    _summaryFocus.dispose();
     super.dispose();
+  }
+
+  void _commitSummary() {
+    final v = _summary.text.replaceAll(RegExp(r'[#\r\n]'), ' ').trim();
+    if (v == _summaryNow) return;
+    final next = editPatternHeader(widget.source(), widget.name, summary: v);
+    if (next != null) widget.onSource(next);
+    setState(() {});
   }
 
   void _commitName() {
@@ -119,7 +140,26 @@ class _PatternFieldsState extends State<PatternFields> {
     ];
     final current = steps != null ? (steps, null) : (null, bars);
     final dense = const TextStyle(fontSize: 13);
-    return Row(children: [
+    final summary = SizedBox(
+      height: 34,
+      child: TextField(
+        key: const ValueKey('pattern summary'),
+        controller: _summary,
+        focusNode: _summaryFocus,
+        style: dense,
+        textInputAction: TextInputAction.done,
+        onSubmitted: (_) => _commitSummary(),
+        decoration: const InputDecoration(
+          isDense: true,
+          labelText: 'Summary',
+          border: OutlineInputBorder(),
+          contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+        ),
+      ),
+    );
+    return LayoutBuilder(builder: (context, box) {
+      final wide = box.maxWidth >= 600;
+      final row = Row(children: [
       Expanded(
         child: SizedBox(
           height: 34,
@@ -139,6 +179,7 @@ class _PatternFieldsState extends State<PatternFields> {
           ),
         ),
       ),
+      if (wide) ...[const SizedBox(width: 8), Expanded(flex: 2, child: summary)],
       const SizedBox(width: 8),
       SizedBox(
         width: 118,
@@ -167,5 +208,12 @@ class _PatternFieldsState extends State<PatternFields> {
         ),
       ),
     ]);
+      // The floating labels sit above each field: room for the top one so it clears the tab row.
+      return wide
+          ? row
+          : Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Column(mainAxisSize: MainAxisSize.min, children: [row, const SizedBox(height: 12), summary]));
+    });
   }
 }

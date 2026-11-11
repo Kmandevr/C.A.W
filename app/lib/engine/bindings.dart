@@ -4,7 +4,7 @@ import 'dart:io';
 
 import 'package:ffi/ffi.dart';
 
-const int cawApiVersion = 14;  // must equal CAW_API_VERSION in engine/include/caw.h
+const int cawApiVersion = 17;  // must equal CAW_API_VERSION in engine/include/caw.h
 
 final class CawMetersStruct extends Struct {
   @Float()
@@ -167,6 +167,11 @@ class Bindings {
             'caw_engine_release_touches'),
         migrateInstrument = lib.lookupFunction<Pointer<Utf8> Function(Pointer<Utf8>), Pointer<Utf8> Function(Pointer<Utf8>)>(
             'caw_migrate_instrument'),
+        drumsInfo = lib.lookupFunction<Pointer<Utf8> Function(), Pointer<Utf8> Function()>('caw_drums_info'),
+        drumsRandomize = lib.lookupFunction<Pointer<Utf8> Function(Int32, Uint32, Double, Int32, Pointer<Utf8>),
+            Pointer<Utf8> Function(int, int, double, int, Pointer<Utf8>)>('caw_drums_randomize'),
+        drumsExplode = lib.lookupFunction<Pointer<Utf8> Function(Pointer<Utf8>), Pointer<Utf8> Function(Pointer<Utf8>)>(
+            'caw_drums_explode'),
         setQuality = lib.lookupFunction<Void Function(Pointer<Void>, Int32), void Function(Pointer<Void>, int)>(
             'caw_engine_set_quality'),
         audioSetBufferMode = lib.lookupFunction<Void Function(Pointer<Void>, Int32, Int32),
@@ -257,12 +262,33 @@ class Bindings {
             'caw_engine_test_tone'),
         testToneSounding = lib.lookupFunction<Int32 Function(Pointer<Void>), int Function(Pointer<Void>)>(
             'caw_engine_test_tone_sounding'),
+        // API 15: MIDI from devices, frame-accurate.
+        midiClockNs = lib.lookupFunction<Int64 Function(), int Function()>('caw_midi_clock_ns'),
+        midiUmp = lib.lookupFunction<Int32 Function(Pointer<Void>, Pointer<Utf8>, Pointer<Uint32>, Int32, Int64),
+            int Function(Pointer<Void>, Pointer<Utf8>, Pointer<Uint32>, int, int)>('caw_engine_midi_ump'),
+        midiBytes = lib.lookupFunction<Int32 Function(Pointer<Void>, Pointer<Utf8>, Pointer<Uint8>, Int32, Int64),
+            int Function(Pointer<Void>, Pointer<Utf8>, Pointer<Uint8>, int, int)>('caw_engine_midi_bytes'),
+        midiRelease = lib.lookupFunction<Void Function(Pointer<Void>, Pointer<Utf8>),
+            void Function(Pointer<Void>, Pointer<Utf8>)>('caw_engine_midi_release'),
+        setMidiOptions = lib.lookupFunction<Void Function(Pointer<Void>, Int32, Double, Double, Double),
+            void Function(Pointer<Void>, int, double, double, double)>('caw_engine_set_midi_options'),
+        midiDropped = lib.lookupFunction<Int64 Function(Pointer<Void>), int Function(Pointer<Void>)>(
+            'caw_engine_midi_dropped'),
+        positionAt = lib.lookupFunction<Int64 Function(Pointer<Void>, Int64), int Function(Pointer<Void>, int)>(
+            'caw_engine_position_at'),
         // The Build tools (#163, #164): the testing suite and the sample-pack maker; both block, so call them off
         // the UI isolate.
         componentTest = lib.lookupFunction<Pointer<Utf8> Function(Pointer<Utf8>, Int32, Pointer<Utf8>, Pointer<Utf8>),
             Pointer<Utf8> Function(Pointer<Utf8>, int, Pointer<Utf8>, Pointer<Utf8>)>('caw_component_test'),
         samplePackRender = lib.lookupFunction<Pointer<Utf8> Function(Pointer<Utf8>, Int32, Pointer<Int32>, Pointer<Int32>),
-            Pointer<Utf8> Function(Pointer<Utf8>, int, Pointer<Int32>, Pointer<Int32>)>('caw_sample_pack_render');
+            Pointer<Utf8> Function(Pointer<Utf8>, int, Pointer<Int32>, Pointer<Int32>)>('caw_sample_pack_render'),
+        // Song renders (API 15): the mix and stems; it blocks, so it runs as a worker-pool job.
+        renderSong = lib.lookupFunction<
+            Pointer<Utf8> Function(Pointer<Utf8>, Pointer<Utf8>, Pointer<Int32>, Pointer<Int32>),
+            Pointer<Utf8> Function(Pointer<Utf8>, Pointer<Utf8>, Pointer<Int32>, Pointer<Int32>)>('caw_render_song'),
+        workerPoolSubmitSong = lib.lookupFunction<
+            Pointer<Void> Function(Pointer<Void>, Pointer<Utf8>, Pointer<Utf8>, Int32),
+            Pointer<Void> Function(Pointer<Void>, Pointer<Utf8>, Pointer<Utf8>, int)>('caw_worker_pool_submit_song');
 
   static Bindings? _instance;
 
@@ -299,6 +325,9 @@ class Bindings {
   final void Function(Pointer<Void>, double, int) playCountIn;
   final void Function(Pointer<Void>, int) setMetronome;
   final Pointer<Utf8> Function(Pointer<Utf8>) migrateInstrument;
+  final Pointer<Utf8> Function() drumsInfo;
+  final Pointer<Utf8> Function(int, int, double, int, Pointer<Utf8>) drumsRandomize;
+  final Pointer<Utf8> Function(Pointer<Utf8>) drumsExplode;
   final void Function(Pointer<Void>, int) setQuality;
   final void Function(Pointer<Void>, int, int) audioSetBufferMode;
   final int Function(Pointer<Void>) audioBufferFrames;
@@ -342,6 +371,15 @@ class Bindings {
   final void Function(Pointer<Void>, double, int) setMetronomeSound;
   final void Function(Pointer<Void>, double) testTone;
   final int Function(Pointer<Void>) testToneSounding;
+  final int Function() midiClockNs;
+  final int Function(Pointer<Void>, Pointer<Utf8>, Pointer<Uint32>, int, int) midiUmp;
+  final int Function(Pointer<Void>, Pointer<Utf8>, Pointer<Uint8>, int, int) midiBytes;
+  final void Function(Pointer<Void>, Pointer<Utf8>) midiRelease;
+  final void Function(Pointer<Void>, int, double, double, double) setMidiOptions;
+  final int Function(Pointer<Void>) midiDropped;
+  final int Function(Pointer<Void>, int) positionAt;
   final Pointer<Utf8> Function(Pointer<Utf8>, int, Pointer<Utf8>, Pointer<Utf8>) componentTest;
   final Pointer<Utf8> Function(Pointer<Utf8>, int, Pointer<Int32>, Pointer<Int32>) samplePackRender;
+  final Pointer<Utf8> Function(Pointer<Utf8>, Pointer<Utf8>, Pointer<Int32>, Pointer<Int32>) renderSong;
+  final Pointer<Void> Function(Pointer<Void>, Pointer<Utf8>, Pointer<Utf8>, int) workerPoolSubmitSong;
 }

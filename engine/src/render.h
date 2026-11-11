@@ -36,6 +36,10 @@ struct RenderResult {
 
 constexpr int kWavetableFrame = 2048;
 
+// Every layer's pattern and modules compile (libraries aside): false and a message naming the first that doesn't, so
+// an export never silently drops a broken one.
+bool checkExportModules(const ProjectSpec& p, std::string& error);
+
 // progress gets 0..1000 and a non-zero cancel stops the render; both may be shared with another thread.
 bool renderExport(const ProjectSpec& p, const ExportOptions& o, RenderResult& out, int32_t* progress = nullptr,
                   int32_t* cancel = nullptr);

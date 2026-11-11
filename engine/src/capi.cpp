@@ -19,6 +19,7 @@
 #include "midifile.h"
 #include "pattern.h"
 #include "render.h"
+#include "render_stems.h"
 #include "wav.h"
 
 namespace {
@@ -476,3 +477,56 @@ extern "C" void caw_engine_set_quality(CawEngine* e, int32_t quality) {
 }
 
 extern "C" int32_t caw_engine_quality(CawEngine* e) { return e && e->engine ? e->engine->quality() : CAW_QUALITY_NORMAL; }
+
+// ---- Device MIDI (API 15) ----
+
+extern "C" int64_t caw_midi_clock_ns(void) { return caw::Engine::midiClockNs(); }
+
+extern "C" int32_t caw_engine_midi_ump(CawEngine* e, const char* layer_id, const uint32_t* words, int32_t count,
+                                       int64_t time_ns) try {
+    return e && e->engine && layer_id ? e->engine->midiUmp(layer_id, words, count, time_ns) : 0;
+} catch (...) {
+    return 0;
+}
+
+extern "C" int32_t caw_engine_midi_bytes(CawEngine* e, const char* layer_id, const uint8_t* bytes, int32_t count,
+                                         int64_t time_ns) try {
+    return e && e->engine && layer_id ? e->engine->midiBytes(layer_id, bytes, count, time_ns) : 0;
+} catch (...) {
+    return 0;
+}
+
+extern "C" void caw_engine_midi_release(CawEngine* e, const char* layer_id) try {
+    if (e && e->engine) e->engine->midiRelease(layer_id ? layer_id : "");
+} catch (...) {
+}
+
+extern "C" void caw_engine_set_midi_options(CawEngine* e, int32_t flags, double bend_range, double note_bend_range,
+                                            double delay_ms) {
+    if (e && e->engine) e->engine->setMidiOptions((flags & CAW_MIDI_MPE) != 0, bend_range, note_bend_range, delay_ms);
+}
+
+extern "C" int64_t caw_engine_midi_dropped(CawEngine* e) {
+    return e && e->engine ? static_cast<int64_t>(e->engine->midiDropped()) : 0;
+}
+
+extern "C" int64_t caw_engine_position_at(CawEngine* e, int64_t time_ns) {
+    return e && e->engine ? e->engine->positionAt(time_ns) : -1;
+}
+
+extern "C" char* caw_render_song(const char* project_json, const char* request_json, int32_t* progress,
+                                 int32_t* cancel) try {
+    caw::SongRenderResult r;
+    if (!project_json || !request_json) {
+        r.error = "missing argument";
+        return dup(caw::songRenderResultJson(r));
+    }
+    caw::ProjectSpec p;
+    caw::SongRenderRequest req;
+    if (!caw::parseProject(project_json, p, r.error) || !caw::parseSongRenderRequest(request_json, req, r.error))
+        return dup(caw::songRenderResultJson(r));
+    caw::renderSong(p, req, r, progress, cancel);
+    return dup(caw::songRenderResultJson(r));
+} catch (const std::bad_alloc&) {
+    return dup(std::string("{\"ok\":false,\"error\":\"") + kOutOfMemory + "\",\"files\":[]}");
+}

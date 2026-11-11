@@ -7,6 +7,7 @@ import '../../engine/engine.dart';
 import '../../model/app_state.dart';
 import '../../model/arrange_fx.dart';
 import '../../model/cpp_component.dart';
+import '../../model/mixer_fx.dart';
 import '../../model/project.dart';
 import '../../model/routing_edit.dart';
 import '../../model/device_target.dart';
@@ -36,7 +37,10 @@ void openSource(BuildContext context, BuildTab tab, {ValueChanged<String>? onOpe
 /// Asks for an effect or an instrument (the same browser, as in REAPER) and puts it on [layer]; an instrument
 /// replaces the track's, after asking.
 Future<void> addEffectTo(BuildContext context, AppState state, LayerDoc layer) async {
-  final pick = await showAssetPicker(context, state, kinds: {AssetKind.nativeEffect, AssetKind.cawModule});
+  // The master's chain takes C++ effects only.
+  final master = isMasterLayer(layer);
+  final pick = await showAssetPicker(context, state, kinds: {AssetKind.nativeEffect, if (!master) AssetKind.cawModule},
+      instruments: !master);
   if (pick != null && context.mounted) await dropOnTrack(context, state, layer, pick);
 }
 
@@ -74,6 +78,9 @@ class _FxStackState extends State<FxStack> {
   AppState get s => widget.state;
   LayerDoc get layer => widget.layer;
 
+  /// A bus folder or the master: native effects only, no instrument or code chain.
+  bool get _nativeOnly => layer.isFolder || isMasterLayer(layer);
+
   @override
   Widget build(BuildContext context) {
     s.componentCatalog.refreshIfStale();
@@ -105,7 +112,7 @@ class _FxStackState extends State<FxStack> {
     Text(_routing ? 'ROUTING' : 'FX STACK', style: const TextStyle(
       color: Neon.dim, fontSize: 10, letterSpacing: 1.3, fontWeight: FontWeight.w800)),
     const Spacer(),
-    IconButton(
+    if (!isMasterLayer(layer)) IconButton(
       key: const ValueKey('fx-routing-toggle'),
       tooltip: _routing ? 'FX stack' : 'Routing',
       iconSize: 18,
@@ -131,7 +138,9 @@ class _FxStackState extends State<FxStack> {
       padding: const EdgeInsets.fromLTRB(8, 0, 14, 24), children: [
       // The instrument is the chain's first slot (REAPER: an instrument is FX, usually first in the chain). A bus
       // folder has neither instrument nor code chain: only its native effects.
-      if (layer.isFolder) ...[
+      if (isMasterLayer(layer)) ...[
+        const _GroupLabel('MASTER EFFECTS', null, note: 'On the whole mix, before the master level and the safety limiter'),
+      ] else if (layer.isFolder) ...[
         const _GroupLabel('BUS EFFECTS', null, note: 'On everything this bus hears: its tracks and the sends to it'),
       ] else if (layer.instrument != null) ...[
         const _GroupLabel('INSTRUMENT · C++', null, note: 'Plays the track\'s notes'),
@@ -151,11 +160,11 @@ class _FxStackState extends State<FxStack> {
           icon: const Icon(Icons.piano, size: 18),
           label: const Text('Instrument'))),
       ],
-      if (!layer.isFolder) ...[
+      if (!_nativeOnly) ...[
       const SizedBox(height: 6),
       _GroupLabel('CODE EFFECTS · .caw', layer.effectIds.isEmpty ? 'None' : null),
       ],
-      if (layer.effectIds.isNotEmpty && !layer.isFolder)
+      if (layer.effectIds.isNotEmpty && !_nativeOnly)
         ReorderableListView(
           key: const ValueKey('fx-caw-list'),
           shrinkWrap: true,
@@ -171,7 +180,7 @@ class _FxStackState extends State<FxStack> {
           ],
         ),
       const SizedBox(height: 6),
-      if (!layer.isFolder) const _GroupLabel('NATIVE EFFECTS · C++', null, note: 'After the code chain, before volume and pan'),
+      if (!_nativeOnly) const _GroupLabel('NATIVE EFFECTS · C++', null, note: 'After the code chain, before volume and pan'),
       if (layer.components.isEmpty) const _GroupLabel('', 'None'),
       if (layer.components.isNotEmpty)
         ReorderableListView(

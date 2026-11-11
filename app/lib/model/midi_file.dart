@@ -7,11 +7,15 @@
 // - running status, note-on with velocity 0 as a note-off, overlapping notes of one key (the first note-off ends the
 //   earliest of them), all-notes-off/all-sound-off, the pitch bend range (RPN 0) and the MPE Configuration Message
 //   (RPN 6, which makes member channels' default range 48 semitones)
+// - controller changes other than those the reader uses itself (bank and data entry 0/6/32/38, CC74, NRPN/RPN
+//   98-101, channel mode 120-127) are kept per track as [MidiControl]s
 // - sysex and meta events other than tempo, time signature and track name are skipped
 // - SMPTE time division: ticks are read as if the file ran at 120 BPM (its tempo events don't time it)
 // Writing: a format 1 file, a conductor track (tempo and meter) and one track per [MidiTrack]. Notes with any bend,
 // pressure or timbre make the whole track MPE (lower zone: channel 1 manages, 2-16 each carry one note at a time with
-// its own bend, channel pressure and CC74); otherwise notes are plain, on their own channels.
+// its own bend, channel pressure and CC74); otherwise notes are plain, on their own channels. A track's controller
+// changes ([MidiTrack.controls], such as automation lanes as CCs) go out on their own channels (MPE's manager channel
+// is channel 1, so a control on channel 0 reaches the whole zone).
 import 'dart:convert';
 import 'dart:math' as math;
 import 'dart:typed_data';
@@ -79,6 +83,27 @@ class MidiNote {
       '${timbre.isEmpty ? '' : ' timbre $timbre'})';
 }
 
+/// A controller change (Control Change [controller] 0..127 to [value] 0..127) on [channel] 0..15 at [tick].
+class MidiControl {
+  const MidiControl(this.tick, this.controller, this.value, [this.channel = 0]);
+  final int tick, controller, value, channel;
+
+  @override
+  bool operator ==(Object other) =>
+      other is MidiControl &&
+      other.tick == tick &&
+      other.controller == controller &&
+      other.value == value &&
+      other.channel == channel;
+  @override
+  int get hashCode => Object.hash(tick, controller, value, channel);
+  @override
+  String toString() => 'CC$controller=$value@$tick${channel == 0 ? '' : ' ch $channel'}';
+}
+
+/// Controllers the reader interprets itself (data entry, MPE timbre, RPN/NRPN, channel mode), so not kept as controls.
+bool _readerOwns(int cc) => cc == 0 || cc == 6 || cc == 32 || cc == 38 || cc == 74 || (cc >= 98 && cc <= 101) || cc >= 120;
+
 class MidiTempo {
   const MidiTempo(this.tick, this.bpm);
   final int tick;
@@ -86,9 +111,12 @@ class MidiTempo {
 }
 
 class MidiTrack {
-  MidiTrack({this.name = '', required this.notes, this.endTick});
+  MidiTrack({this.name = '', required this.notes, this.endTick, this.controls = const []});
   final String name;
   final List<MidiNote> notes;
+
+  /// Controller changes in time order (automation lanes as CCs when written; a file's other CCs when read).
+  final List<MidiControl> controls;
 
   /// Where the track ends (its End of Track event); null when writing means just after the last note.
   final int? endTick;
@@ -241,6 +269,7 @@ class _Reader {
     _track = number;
     final ch = List.generate(16, (_) => _Channel());
     final done = <MidiNote>[];
+    final controls = <MidiControl>[];
     var name = '';
     var tick = 0;
     int? running;
@@ -335,6 +364,8 @@ class _Reader {
           for (final n in c.open) {
             addPoint(n.bend, n, before, c.bendSemitones);
           }
+        case 0xB when !_readerOwns(a):
+          controls.add(MidiControl(tick, a, b, status & 0x0F));
         case 0xB:
           _controller(c, ch, status & 0x0F, a, b, (value) {
             for (final n in c.open) {
@@ -362,7 +393,7 @@ class _Reader {
       }
     }
     done.sort((x, y) => x.on != y.on ? x.on.compareTo(y.on) : x.key.compareTo(y.key));
-    return MidiTrack(name: name, notes: done, endTick: tick);
+    return MidiTrack(name: name, notes: done, endTick: tick, controls: controls);
   }
 
   void _controller(_Channel c, List<_Channel> all, int channel, int cc, int v, void Function(double) timbre,
@@ -443,7 +474,7 @@ Uint8List writeMidiFile(MidiFile file) {
   final tempos = file.tempos.isEmpty ? const [MidiTempo(0, 120)] : file.tempos;
   final num = (file.meterNumerator ?? 4).clamp(1, 255), den = file.meterDenominator ?? 4;
   final denPower = math.max(0, math.min(6, (math.log(den) / math.ln2).round()));
-  final end = file.tracks.fold<int>(0, (m, t) => math.max(m, t.endTick ?? t.notes.fold(0, (e, n) => math.max(e, n.off))));
+  final end = file.tracks.fold<int>(0, (m, t) => math.max(m, t.endTick ?? _lastTick(t)));
   chunk([
     _Event(0, 0, [0xFF, 0x58, 0x04, num, denPower, 24, 8]),
     for (final t in tempos)
@@ -451,10 +482,17 @@ Uint8List writeMidiFile(MidiFile file) {
         _Event(math.max(0, t.tick), 0, [0xFF, 0x51, 0x03, ..._u24((60000000 / t.bpm).round().clamp(1, 0xFFFFFF))]),
   ], '', end);
   for (final t in file.tracks) {
-    chunk(t.notes.any((n) => n.expressive) ? _mpeEvents(t.notes) : _plainEvents(t.notes), t.name, t.endTick);
+    chunk([
+      ...t.notes.any((n) => n.expressive) ? _mpeEvents(t.notes) : _plainEvents(t.notes),
+      for (final c in t.controls)
+        _Event(math.max(0, c.tick), 2, [0xB0 | c.channel & 0x0F, c.controller.clamp(0, 127), c.value.clamp(0, 127)]),
+    ], t.name, t.endTick);
   }
   return out.takeBytes();
 }
+
+/// Where a track's last note or control is.
+int _lastTick(MidiTrack t) => t.controls.fold(t.notes.fold(0, (e, n) => math.max(e, n.off)), (e, c) => math.max(e, c.tick));
 
 List<int> _u24(int v) => [v >> 16 & 0xFF, v >> 8 & 0xFF, v & 0xFF];
 

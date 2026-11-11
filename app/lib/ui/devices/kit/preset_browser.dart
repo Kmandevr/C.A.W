@@ -15,6 +15,7 @@ import 'device_style.dart' show spectrumColors;
 import 'feel.dart';
 import 'preset_actions.dart';
 import 'presets.dart';
+import '../../../model/mixer_fx.dart' show isMasterLayer;
 
 /// The header's preset button: the current preset's name ("*" once a value changed); a tap opens the browser. While
 /// the current preset is the user's and changed, a save icon beside it saves over it. With [shortcuts] (the full
@@ -285,7 +286,7 @@ class _PresetBrowserState extends State<PresetBrowser> {
           onSelected: (v) => _more(context, v),
           itemBuilder: (context) => [
             const PopupMenuItem(value: 'import', child: Text('Import preset file…')),
-            if (t.layer != null && !(t.layer!.isFolder)) ...[
+            if (t.layer != null && !(t.layer!.isFolder) && !isMasterLayer(t.layer)) ...[
               const PopupMenuItem(value: 'track-save', child: Text('Save track preset…')),
               const PopupMenuItem(value: 'track-load', child: Text('Load track preset…')),
             ],

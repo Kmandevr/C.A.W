@@ -717,6 +717,52 @@ class Engine {
   void noteOff(int id) => _b.noteOff(_handle, id);
   void notesOff() => _b.notesOff(_handle);
 
+  /// MIDI from a device (caw.h, API 15): MIDI 1.0 [bytes] for [layerId]'s instrument, played at [timeNs] on
+  /// [midiClockNs] (0: now), so the engine places each message at the frame it was played. Returns the messages
+  /// queued.
+  int midiBytes(String layerId, List<int> bytes, int timeNs) {
+    if (bytes.isEmpty) return 0;
+    final l = layerId.toNativeUtf8();
+    final p = calloc<Uint8>(bytes.length);
+    p.asTypedList(bytes.length).setAll(0, bytes);
+    final n = _b.midiBytes(_handle, l, p, bytes.length, timeNs);
+    calloc.free(p);
+    calloc.free(l);
+    return n;
+  }
+
+  /// The same for Universal MIDI Packet [words] (MIDI 1.0 and 2.0 Channel Voice messages play).
+  int midiUmp(String layerId, List<int> words, int timeNs) {
+    if (words.isEmpty) return 0;
+    final l = layerId.toNativeUtf8();
+    final p = calloc<Uint32>(words.length);
+    p.asTypedList(words.length).setAll(0, words);
+    final n = _b.midiUmp(_handle, l, p, words.length, timeNs);
+    calloc.free(p);
+    calloc.free(l);
+    return n;
+  }
+
+  /// Ends every device note on [layerId] (null: on every track): a device went away with keys down.
+  void midiRelease([String? layerId]) {
+    final l = (layerId ?? '').toNativeUtf8();
+    _b.midiRelease(_handle, l);
+    calloc.free(l);
+  }
+
+  /// MPE on or off, the channel and per-note bend ranges (semitones) and a steady-timing delay (ms).
+  void setMidiOptions({bool mpe = false, double bendRange = 2, double noteBendRange = 48, double delayMs = 0}) =>
+      _b.setMidiOptions(_handle, mpe ? 1 : 0, bendRange, noteBendRange, delayMs);
+
+  /// Device messages dropped (a full queue) since the engine was made.
+  int get midiDropped => _b.midiDropped(_handle);
+
+  /// The transport position (samples into the project loop, unwrapped) at [timeNs] on the MIDI clock; -1 stopped.
+  int positionAt(int timeNs) => _b.positionAt(_handle, timeNs);
+
+  /// The MIDI clock (monotonic ns; Android's System.nanoTime) that device timestamps are on.
+  int get midiClockNs => _b.midiClockNs();
+
   void play() => _b.play(_handle);
 
   /// Plays from [step] sixteenth steps into the project loop (fractions allowed); outside it, from 0.
@@ -750,6 +796,39 @@ class Engine {
     final s = jsonEncode(entry).toNativeUtf8();
     final r = b.migrateInstrument(s);
     calloc.free(s);
+    if (r == nullptr) return null;
+    final j = jsonDecode(r.toDartString()) as Map<String, dynamic>;
+    b.free(r);
+    return j['ok'] == true ? j : null;
+  }
+
+  /// The drums' layout (`caw_drums_info`: layers, sounds, kits, built-in samples, the GM map, the display layout).
+  static Map<String, dynamic>? drumsInfo() => _drumsJson((b) => b.drumsInfo());
+
+  /// A random ([current] null) or mutated sound of drum [type] (an index of the info's types, −1: the current
+  /// sound's) for pad [pad] 0..63: `{"ok", "type", "pad", "params": {"<pad>_<suffix>": value}}` (`caw_drums_randomize`).
+  static Map<String, dynamic>? drumsRandomize(int type, int seed, double amount, int pad, Map<String, dynamic>? current) {
+    final s = current == null ? nullptr : jsonEncode(current).toNativeUtf8();
+    try {
+      return _drumsJson((b) => b.drumsRandomize(type, seed & 0xFFFFFFFF, amount, pad, s));
+    } finally {
+      if (s != nullptr) calloc.free(s);
+    }
+  }
+
+  /// One Single-mode Drums track per used pad of Drums entry [entry] (`caw_drums_explode`).
+  static Map<String, dynamic>? drumsExplode(Map<String, dynamic> entry) {
+    final s = jsonEncode(entry).toNativeUtf8();
+    try {
+      return _drumsJson((b) => b.drumsExplode(s));
+    } finally {
+      calloc.free(s);
+    }
+  }
+
+  static Map<String, dynamic>? _drumsJson(Pointer<Utf8> Function(Bindings b) call) {
+    final b = Bindings.instance;
+    final r = call(b);
     if (r == nullptr) return null;
     final j = jsonDecode(r.toDartString()) as Map<String, dynamic>;
     b.free(r);

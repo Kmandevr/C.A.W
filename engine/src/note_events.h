@@ -37,6 +37,9 @@ public:
         int32_t preview = -1;  // Preview: the caller's id
         uint32_t id = 0;       // the host note id the instrument sees
         uint8_t key = 60;      // the key its on was sent with (its off and per-note messages use it)
+        uint8_t channel = 0;   // the MIDI channel its messages carry (a device's note keeps the device's)
+        bool pedal = false;    // a device note whose key is up, held on by the sustain pedal
+        double bend = 0;       // a device note's own pitch bend in semitones (MIDI 2.0 per-note pitch, MPE)
         uint64_t order = 0;    // note-on order
         double vel = 1;
         bool rebind = false;   // Pattern: its pattern was edited; `note` is its note in the new one (Engine::rebindNote)
@@ -60,7 +63,8 @@ public:
     static constexpr size_t kBytes = 2 * kCapacity * sizeof(Event) + kMaxHeld * sizeof(Held);
 
     // A new note at `frame`; the held note it replaces (same pattern note, or same preview id) ends first.
-    Held& on(uint32_t frame, Source source, uint32_t note, uint16_t sub, int32_t preview, double pitch, double vel) noexcept {
+    Held& on(uint32_t frame, Source source, uint32_t note, uint16_t sub, int32_t preview, double pitch, double vel,
+             uint8_t channel = 0) noexcept {
         if (Held* same = source == Source::Preview ? findPreview(preview) : findPattern(note, sub)) off(frame, *same);
         if (used_ == kMaxHeld) compact();
         Held* pick = nullptr;
@@ -81,12 +85,13 @@ public:
         h.preview = preview;
         h.id = nextId();
         h.key = notes::keyOf(pitch);
+        h.channel = static_cast<uint8_t>(channel & 0xF);
         h.order = ++order_;
         h.vel = vel;
         h.pitch = h.target = h.sentPitch = pitch;
         // Room stays for every held note's off, this one's too. An on with no room is not held at all (the
         // instrument never heard it), so its slot keeps no off reserved and nothing can stick.
-        if (!push(notes::noteOn(frame, h.id, pitch, vel))) {
+        if (!push(notes::noteOn(frame, h.id, pitch, vel, h.channel))) {
             h.active = false;
             --active_;
         }
@@ -96,19 +101,19 @@ public:
         if (!h.active) return;
         h.active = false;
         --active_;
-        push(notes::noteOff(frame, h.id, h.key), true);  // an off always has room
+        push(notes::noteOff(frame, h.id, h.key, 0.0, h.channel), true);  // an off always has room
     }
     void pitch(uint32_t frame, Held& h, double pitch) noexcept {
         if (!h.active || pitch == h.sentPitch) return;
-        if (push(notes::notePitch(frame, h.id, h.key, pitch))) h.sentPitch = pitch;
+        if (push(notes::notePitch(frame, h.id, h.key, pitch, h.channel))) h.sentPitch = pitch;
     }
     void pressure(uint32_t frame, Held& h, double value) noexcept {
         if (!h.active || value == h.sentPress) return;
-        if (push(notes::notePressure(frame, h.id, h.key, value))) h.sentPress = value;
+        if (push(notes::notePressure(frame, h.id, h.key, value, h.channel))) h.sentPress = value;
     }
     void timbre(uint32_t frame, Held& h, double value) noexcept {
         if (!h.active || value == h.sentTimbre) return;
-        if (push(notes::noteTimbre(frame, h.id, h.key, value))) h.sentTimbre = value;
+        if (push(notes::noteTimbre(frame, h.id, h.key, value, h.channel))) h.sentTimbre = value;
     }
     Held* findPattern(uint32_t note, uint16_t sub) noexcept {
         for (Held& h : held())
@@ -125,9 +130,10 @@ public:
         for (Held& h : held())
             if (h.active && !(keepPreviews && h.source == Source::Preview)) off(frame, h);
     }
-    void releasePreviews(uint32_t frame) noexcept {
+    // Ends the held previews whose id is below `below` (device notes have the top ids: midi_device.h).
+    void releasePreviews(uint32_t frame, int32_t below = INT32_MAX) noexcept {
         for (Held& h : held())
-            if (h.active && h.source == Source::Preview) off(frame, h);
+            if (h.active && h.source == Source::Preview && h.preview < below) off(frame, h);
     }
     // Forgets every held note without telling the instrument (it was just reset, so it holds none).
     void forget(bool keepPreviews) noexcept {
@@ -157,7 +163,7 @@ public:
             }
         order_ = from.order_;
         nextId_ = from.nextId_;
-        for (const Held& h : held()) push(notes::noteOn(0, h.id, h.sentPitch, h.vel));
+        for (const Held& h : held()) push(notes::noteOn(0, h.id, h.sentPitch, h.vel, h.channel));
     }
 
     // The held notes (the ones still active have `active` set; ended ones are packed away after each block).

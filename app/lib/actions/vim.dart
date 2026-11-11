@@ -211,7 +211,10 @@ class VimController extends ChangeNotifier {
     if (_mode == VimMode.insert) return KeyResult.ignored;
 
     final d = key.digit;
-    if (d != null && _prefix.isEmpty && (d != 0 || _count != null)) {
+    // A digit the area binds on its own runs that action (the arranger's 1–0 marker jumps, as REAPER's) unless a
+    // count is already being typed; elsewhere digits are counts.
+    final boundDigit = d != null && _count == null && _keymap.lookup(_area, KeySeq([key])) != null;
+    if (d != null && !boundDigit && _prefix.isEmpty && (d != 0 || _count != null)) {
       _count = math.min((_count ?? 0) * 10 + d, 99999);
       return KeyResult.ok;
     }

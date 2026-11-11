@@ -2,7 +2,7 @@
 title: Music workflow implementation gaps
 summary: Factual snapshot of implemented and incomplete music-workflow capabilities; sequencing belongs to the permanent roadmap.
 covers: [app/lib/model/app_state.dart, app/lib/model/lane_curve.dart, app/lib/model/pattern_doc.dart, app/lib/model/poller.dart, app/lib/model/project.dart, app/lib/model/storage.dart]
-updated: 2026-11-10
+updated: 2026-11-11
 ---
 
 # Music workflow implementation gaps
@@ -60,7 +60,7 @@ This note records the current implementation gaps in C.A.W.'s music-production w
 ### MIDI hardware and recording
 
 - **[Implemented foundation]** MIDI 2.0 UMP decoding and bounded input-queue primitives, plus MIDI pattern file import/export.
-- **[Implemented, Android]** MIDI keyboards: every connected USB device (and a Bluetooth one once Android has connected it) is read (`MidiInput.kt`, `app/lib/platform/midi_input.dart`); notes, sustain and pitch bend play the armed or selected track live through the engine's note previews (`app/lib/model/live_midi.dart`). Record captures a take while playing and writes it at Stop as a new pattern clip from the bar where recording began. Desktop has no MIDI input yet.
+- **[Implemented, Android and Windows]** MIDI devices: USB, Bluetooth (scanned and connected in the app) and UMP devices on Android, WinMM ports on Windows ([app](app.md)); every Channel Voice message plays the armed or selected track at the frame it was played through the engine's device input (`app/lib/model/live_midi.dart`). Record captures a take while playing and writes it at Stop as a new pattern clip from the bar where recording began. Controller learn maps CCs to knobs.
 - **[Incomplete]** Bluetooth MIDI pairing inside the app, controller learn/mapping, external clock/sync and control-surface support.
 - **[Incomplete]** Audio recording, input monitoring, recording latency compensation (MIDI takes are timed from the polled playhead), punch-in/out, loop recording, take lanes and comping.
 

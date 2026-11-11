@@ -1,6 +1,7 @@
 // Writes automation from the controls (owner, 2026-11-10: an Automate button in the transport, Touch by default):
 // while it is on and the song plays, knob and fader moves become thinned points in their lanes, in Touch, Latch or
-// Write mode; Read only plays. One take of writing (play to stop) is one undo step.
+// Write mode; Read only plays. A disarmed lane (REAPER's envelope arm) only plays. One take of writing (play to stop)
+// is one undo step.
 import 'dart:async';
 import 'dart:math' as math;
 
@@ -129,7 +130,10 @@ class AutomationWriter extends ChangeNotifier {
   double get _now => state.playheadStep;
 
   void _moved(AutomationTarget target, double value) {
-    if (!_armed || mode == AutomationMode.read || !_playing || !value.isFinite || !_canAutomate(target)) return;
+    if (!_armed || mode == AutomationMode.read || !_playing || !value.isFinite || !_canAutomate(target) ||
+        !laneArmed(target)) {
+      return;
+    }
     _openTake();
     final at = _now;
     final seg = _segments[target.key] ??= _start(target, at);
@@ -216,7 +220,7 @@ class AutomationWriter extends ChangeNotifier {
         AutomationTarget(a.targetType, a.target, layerId: a.layerId, moduleId: a.moduleId, component: a.component),
     ];
     for (final t in targets) {
-      if (!_canAutomate(t) || _segments.containsKey(t.key)) continue;
+      if (!_canAutomate(t) || !laneArmed(t) || _segments.containsKey(t.key)) continue;
       final seg = _start(t, at)..held = false;
       _add(seg, at, seg.value);
       _segments[t.key] = seg;
@@ -298,6 +302,13 @@ class AutomationWriter extends ChangeNotifier {
     if (t.kind == 'track') return _layer(t.layerId)?.automation.where((a) => a.target == t.name).firstOrNull;
     return state.project.automation.where((a) => a.key == t.key).firstOrNull;
   }
+
+  /// Whether moves of [t] are written: its lane is armed, or it has none yet (writing makes one, armed).
+  bool laneArmed(AutomationTarget t) => switch (_laneOf(t)) {
+        final AutomationLaneDoc lane => lane.armed,
+        final ProjectAutomationLaneDoc lane => lane.armed,
+        _ => true,
+      };
 
   List<AutomationPointDoc>? _pointsOf(AutomationTarget t) => switch (_laneOf(t)) {
         final AutomationLaneDoc lane => lane.points,

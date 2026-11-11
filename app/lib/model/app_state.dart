@@ -13,9 +13,11 @@ import 'native_components.dart';
 import 'project.dart';
 import 'automation_writer.dart' show AutomationTarget;
 import 'history.dart';
+import 'mixer_fx.dart' show masterLayerId;
 import 'pattern_doc.dart';
 import 'settings.dart';
 import 'storage.dart';
+import 'templates.dart';
 
 class _LibrarySnapshot {
   _LibrarySnapshot(ProjectDoc project)
@@ -246,7 +248,9 @@ class AppState extends ChangeNotifier {
       poll: _poll,
       interval: const Duration(milliseconds: 33),
       onIdle: () {
-    if (!meters.playing && _heldPreviews.isEmpty && !(engine?.testToneSounding ?? false)) engine?.stopAudio();
+    if (!meters.playing && _heldPreviews.isEmpty && deviceNotesHeld == 0 && !(engine?.testToneSounding ?? false)) {
+      engine?.stopAudio();
+    }
   });
 
   /// Settings › Audio's test tone: opens the device if it is closed and plays 440 Hz for [seconds]; returns an error
@@ -492,6 +496,33 @@ class AppState extends ChangeNotifier {
 
   void previewPitch(int id, double pitch) => engine?.notePitch(id, pitch);
 
+  /// Keys a MIDI device holds down now (LiveMidi counts them): the audio device stays open while any is held.
+  int deviceNotesHeld = 0;
+
+  /// MIDI from a device for [layerId]'s instrument, placed by the engine at the frame it was played ([timeNs] on the
+  /// MIDI clock; caw.h API 15). MIDI 1.0 [bytes], or UMP [words]. Tests override it to watch.
+  void deviceMidi(String layerId, {List<int>? bytes, List<int>? words, int timeNs = 0}) {
+    final e = engine;
+    if (e == null) return;
+    if (!e.audioOn) _openAudio(e);
+    if (words != null) e.midiUmp(layerId, words, timeNs);
+    if (bytes != null) e.midiBytes(layerId, bytes, timeNs);
+    _poller.wake();
+  }
+
+  /// Ends the device notes on [layerId] (null: every track), as an unplugged keyboard leaves them.
+  void deviceMidiRelease([String? layerId]) => engine?.midiRelease(layerId);
+
+  /// Where the playhead was at [timeNs] on the MIDI clock, in sixteenth steps (unwrapped: past the loop's end it
+  /// counts on), or null when the engine can't tell (stopped, counting in, no engine).
+  double? stepAt(int timeNs) {
+    final e = engine;
+    final m = meters;
+    if (e == null || timeNs <= 0 || m.loopLength <= 0) return null;
+    final pos = e.positionAt(timeNs);
+    return pos < 0 ? null : pos * project.engineLoopSteps / m.loopLength;
+  }
+
   void previewOff(int id) {
     final e = engine;
     if (e == null) return;
@@ -732,7 +763,7 @@ class AppState extends ChangeNotifier {
       masterValueTick.value++;
       // Ticks of modules and layers the restore removed are dropped (left to their widgets, which go with them).
       _moduleValueTicks.removeWhere((id, _) => project.module(id) == null);
-      _layerValueTicks.removeWhere((id, _) => project.layers.every((l) => l.id != id));
+      _layerValueTicks.removeWhere((id, _) => id != masterLayerId && project.layers.every((l) => l.id != id));
       for (final n in _moduleValueTicks.values) { n.value++; }
       for (final n in _layerValueTicks.values) { n.value++; }
       timeSelectionStart = timeSelectionEnd = timeSelectionAnchor = null;
@@ -1841,11 +1872,11 @@ class AppState extends ChangeNotifier {
     if (status.loaded.isNotEmpty) await _syncNow();
   }
 
-  /// New project: blank (with Settings' tempo and time signature) or the First loop template, as Settings says.
-  Future<void> newProject() => _switchTo(
-      settings.newProjectStart == NewProjectStart.firstLoop ? starterProject() : blankProject());
+  /// New project: the template Settings › Projects and files names, else blank (with its tempo and meter).
+  Future<void> newProject() => _switchTo(newProjectDoc());
 
-  Future<void> newProjectFromTemplate() => _switchTo(starterProject());
+  /// New project from template [t] (the project menu's New from template).
+  Future<void> newProjectFromTemplate(TemplateDoc t) => _switchTo(projectFromTemplate(t));
 
   Future<void> openProject(String id) async {
     final p = await _storage?.load(id);
