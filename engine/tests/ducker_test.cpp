@@ -163,3 +163,25 @@ TEST(the_ducker_flushes_denormals_in_its_key_and_band_filters) {
     CHECK_EQ(analysis::levels(b.outR.data(), b.outR.size()).denormal, 0u);
     CHECK_EQ(b.outR.back(), 0.0f);
 }
+
+TEST(the_ducker_in_tempo_mode_waits_for_the_grid_when_play_starts_mid_beat) {
+    // Audio review fix 9: Play from half a beat in ducked at once, off the grid. It now waits for the next beat.
+    Duck d({{"mode", 2.0}, {"rate", 5.0}, {"depth", 1.0}, {"attack", 1.0}, {"hold", 10.0}, {"release", 100.0}});
+    d.sized(36000);
+    std::fill(d.inL.begin(), d.inL.end(), 0.25f);
+    std::fill(d.inR.begin(), d.inR.end(), 0.25f);
+    d.playing = true;
+    d.startBeat = 0.5;  // a beat is 24000 frames at 120 bpm: the next one is at frame 12000
+    d.run();
+    CHECK_NEAR(d.outL[300], 0.25, 1e-6);
+    CHECK(std::fabs(d.outL[12300]) < 1e-3);
+
+    // From the top, the first frame is on the grid: it ducks at once.
+    Duck e({{"mode", 2.0}, {"rate", 5.0}, {"depth", 1.0}, {"attack", 1.0}, {"hold", 10.0}, {"release", 100.0}});
+    e.sized(4800);
+    std::fill(e.inL.begin(), e.inL.end(), 0.25f);
+    std::fill(e.inR.begin(), e.inR.end(), 0.25f);
+    e.playing = true;
+    e.run();
+    CHECK(std::fabs(e.outL[300]) < 1e-3);
+}

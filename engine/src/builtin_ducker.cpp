@@ -235,12 +235,16 @@ protected:
                     const double phase = beat / periodBeats_ - offset_;
                     const int64_t period = static_cast<int64_t>(std::floor(phase + 1e-9));
                     if (period != lastPeriod_) {
+                        // The first frame after Play (or a wake): it ducks only on the grid, within a frame of a
+                        // division's start; from half a beat in, the next division is the first duck.
+                        const double oneFrame = tempo() / (60.0 * rate() * periodBeats_);
+                        const bool started = lastPeriod_ == INT64_MIN;
                         lastPeriod_ = period;
-                        trigger(1.0);
+                        if (!started || phase - static_cast<double>(period) < oneFrame) trigger(1.0);
                     }
                     phase_ = phase - std::floor(phase);
                 } else {
-                    lastPeriod_ = INT64_MIN;  // stopped: the next Play ducks on its first beat
+                    lastPeriod_ = INT64_MIN;  // stopped: the next Play ducks on the next division it reaches
                     phase_ = -1.0;
                 }
             }
