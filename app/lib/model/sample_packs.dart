@@ -1,13 +1,15 @@
-// The project's sample packs (#164): the folders the sample-pack maker renders into, read back from each pack's manifest for Files.
+// The project's sample packs (#164): the folders the sample-pack maker renders into, read back from each pack's manifest for Files, and a pack zipped whole to save outside the app.
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:isolate';
 
 import 'package:flutter/foundation.dart';
 
 import 'app_state.dart';
 import 'cpp_workbench.dart';
 import 'arrange_fx.dart';
+import 'zip_archive.dart';
 
 /// One WAV of a pack, as its manifest describes it.
 class SampleFileInfo {
@@ -65,6 +67,41 @@ class SamplePackInfo {
       for (final p in wavs) SampleFileInfo(file: p.substring(p.lastIndexOf(sep) + 1), path: p),
     ]);
   }
+}
+
+/// Zips the pack in [pack] into a new file at [zipPath], off the UI isolate: its WAVs, SFZ files and manifest under one
+/// top folder named after the pack (sub-folders, half-written `.part` files and names a zip can't hold safely are left
+/// out). Returns how many files went in; a failure deletes the partial zip and throws.
+Future<int> zipSamplePack(Directory pack, String zipPath) {
+  final dir = pack.path;
+  return Isolate.run(() => _zipPack(dir, zipPath));
+}
+
+int _zipPack(String dir, String zipPath) {
+  final pack = Directory(dir);
+  final top = pack.uri.pathSegments.where((s) => s.isNotEmpty).last;
+  final files = [
+    for (final f in pack.listSync(followLinks: false))
+      if (f is File && !f.path.endsWith('.part')) f,
+  ]..sort((a, b) => a.path.compareTo(b.path));
+  final w = ZipWriter.create(zipPath);
+  var n = 0;
+  try {
+    for (final f in files) {
+      final name = '$top/${f.uri.pathSegments.last}';
+      if (!isSafeArchivePath(name)) continue;
+      w.addFile(name, f.path);
+      n++;
+    }
+    w.close();
+  } catch (_) {
+    w.abandon();
+    try {
+      File(zipPath).deleteSync();
+    } catch (_) {}
+    rethrow;
+  }
+  return n;
 }
 
 final _packs = Expando<List<SamplePackInfo>>('sample packs');

@@ -6,6 +6,14 @@ updated: 2026-11-11
 
 # Decisions
 
+## 2026-11-11: Build tools leftovers (#162, #163, #164, #11; Claude, proposals for the owner)
+
+- **Test-suite thresholds:** three switches, sent as the engine's `checks`: Headroom (both peaks ≤ −0.3 dBFS) and Not silent (both RMS > −70 dBFS) on by default, Real time (median block < 50 % of real time) off and only sent with CPU timing on. Why: the commonest ways a component is wrong (clipping, silence, too slow) with values a user doesn't have to type; the engine takes any path, so more can follow.
+- **Instrument notes:** four fixed sequences (C4 1 s, C major chord, C4 at 32/64/96/127, C2–C6) instead of a note editor. Why: they cover pitch range, polyphony and velocity response on a phone with one tap.
+- **Sample pack out of the app:** a stored .zip through the save picker, not a folder picker. Why: Android's picker hands back a document, not a writable folder path, and one file is easier to share.
+- **VST3 in the export page:** one format per package (CLAP or VST3), not both. Why: it keeps the page and the generated workflow simple; a second export makes the other format. Folders from Steinberg's "Plug-in Locations" page (read 2026-11-11).
+- **Learned CCs in a .mid export:** a lane on a knob with a learned CC uses that CC and channel, values on the knob's travel; a CC learned by two lanes goes to the first. The "mod-wheel-mapped target" is read as a knob with CC1 learned; a mod-matrix route from the mod wheel is not turned into CC1, since the lane holds the knob's values, not the wheel's (open question for the owner).
+
 ## 2026-11-11: the .caw project file and its package format (#159; Claude, choices to confirm)
 
 Carries out the owner's packaging bullets of "MIDI clip loops, clip automation and project packaging" (below); [App](app.md) has the flows.

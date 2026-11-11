@@ -1,4 +1,4 @@
-// The testing suite (#163): render a built C++ effect offline against a test signal and show null tests, A/B, analysers, CPU and latency as pass/fail cards.
+// The testing suite (#163): render a built C++ effect offline against a test signal (an instrument: a note sequence) and show null tests, A/B, analysers, CPU, latency and the user's thresholds as pass/fail cards.
 import 'dart:async';
 import 'dart:io';
 import 'dart:isolate';
@@ -27,6 +27,56 @@ extension on TestSignal {
         TestSignal.pink => 'Pink noise',
       };
 }
+
+/// The note sequences an instrument is played (the engine takes up to 4,096 notes).
+enum TestNotes { single, chord, velocities, octaves }
+
+extension TestNotesLook on TestNotes {
+  String get label => switch (this) {
+        TestNotes.single => 'C4',
+        TestNotes.chord => 'Chord',
+        TestNotes.velocities => 'Velocities',
+        TestNotes.octaves => 'Octaves',
+      };
+
+  /// The request's `notes`: pitch, velocity, start and length (seconds).
+  List<Map<String, num>> get notes => switch (this) {
+        TestNotes.single => [{'pitch': 60, 'velocity': 100, 'start': 0, 'length': 1}],
+        TestNotes.chord => [for (final p in const [60, 64, 67]) {'pitch': p, 'velocity': 100, 'start': 0, 'length': 1}],
+        TestNotes.velocities => [
+            for (final (i, v) in const [32, 64, 96, 127].indexed) {'pitch': 60, 'velocity': v, 'start': i * 0.5, 'length': 0.4},
+          ],
+        TestNotes.octaves => [
+            for (final (i, p) in const [36, 48, 60, 72, 84].indexed) {'pitch': p, 'velocity': 100, 'start': i * 0.5, 'length': 0.4},
+          ],
+      };
+}
+
+/// The pass/fail thresholds the screen offers, as the engine's `checks` (docs/engine.md, "Component testing").
+enum TestThreshold {
+  headroom('Headroom', 'Peaks at most −0.3 dBFS on both sides'),
+  audible('Not silent', 'RMS above −70 dBFS on both sides'),
+  realtime('Real time', 'The median block takes under 50 % of its real time');
+
+  const TestThreshold(this.label, this.detail);
+  final String label, detail;
+
+  List<Map<String, Object>> get checks => switch (this) {
+        TestThreshold.headroom => [for (final c in const [0, 1]) {'path': 'output.channels.$c.peak_db', 'max': -0.3}],
+        TestThreshold.audible => [for (final c in const [0, 1]) {'path': 'output.channels.$c.rms_db', 'min': -70}],
+        TestThreshold.realtime => [{'path': 'cpu.median_percent', 'max': 50}],
+      };
+}
+
+/// A readable name for a check's path (the screen's own; anything else shows its path).
+String checkLabel(String path) => switch (path) {
+      'output.channels.0.peak_db' => 'Peak L ≤ −0.3 dB',
+      'output.channels.1.peak_db' => 'Peak R ≤ −0.3 dB',
+      'output.channels.0.rms_db' => 'RMS L > −70 dB',
+      'output.channels.1.rms_db' => 'RMS R > −70 dB',
+      'cpu.median_percent' => 'Median block < 50 %',
+      _ => path,
+    };
 
 /// One result card: its title, verdict and lines of measurements.
 class TestCard {
@@ -74,7 +124,7 @@ class TestSuiteResult {
           ('Peak $side', db(channels[i]['peak_db'])),
           ('RMS $side', db(channels[i]['rms_db'])),
         ],
-      if (channels.isNotEmpty) ('Gain', db(channels.first['gain_db'])),
+      if (channels.isNotEmpty && channels.first['gain_db'] is num) ('Gain', db(channels.first['gain_db'])),
       if (stereo['correlation'] is num) ('Correlation', (stereo['correlation'] as num).toStringAsFixed(2)),
       if (stereo['width'] is num) ('Width', '${((stereo['width'] as num) * 100).round()}%'),
     ], note: switch (levelStatus) {
@@ -102,12 +152,13 @@ class TestSuiteResult {
       ], note: status == ToolStatus.pass ? 'They null: the two sound the same.' : 'They sound different.'));
     }
 
-    final lat = (out['latency'] as Map?) ?? const {};
-    cards.add(TestCard('Latency', lat['matches'] == false ? ToolStatus.fail : (lat['matches'] == true ? ToolStatus.pass : ToolStatus.info), [
-      ('Declared', '${lat['declared'] ?? 0} frames'),
-      ('Measured', lat['measured'] == null ? 'n/a for this signal' : '${lat['measured']} frames'),
-    ], note: lat['matches'] == false ? 'The measured delay differs from latencyFrames: hosts will misalign it.'
-        : (lat['measured'] == null ? 'Use an impulse, a sweep or noise to measure it.' : null)));
+    if (out['latency'] case final Map lat) {
+      cards.add(TestCard('Latency', lat['matches'] == false ? ToolStatus.fail : (lat['matches'] == true ? ToolStatus.pass : ToolStatus.info), [
+        ('Declared', '${lat['declared'] ?? 0} frames'),
+        ('Measured', lat['measured'] == null ? 'n/a for this signal' : '${lat['measured']} frames'),
+      ], note: lat['matches'] == false ? 'The measured delay differs from latencyFrames: hosts will misalign it.'
+          : (lat['measured'] == null ? 'Use an impulse, a sweep or noise to measure it.' : null)));
+    }
 
     final tail = (out['tail'] as Map?) ?? const {};
     final tailStatus = tail['within_declared'] == false
@@ -138,6 +189,16 @@ class TestSuiteResult {
         ('THD', l['thd_percent'] is num ? '${(l['thd_percent'] as num).toStringAsFixed(2)}%' : 'n/a'),
         ('THD+N', l['thd_n_percent'] is num ? '${(l['thd_n_percent'] as num).toStringAsFixed(2)}%' : 'n/a'),
       ]));
+    }
+
+    if (j['checks'] case final List checks when checks.isNotEmpty) {
+      final rows = [for (final c in checks) if (c is Map) c];
+      cards.add(TestCard('Thresholds', j['passed'] == true ? ToolStatus.pass : ToolStatus.fail, [
+        for (final c in rows)
+          ('${c['pass'] == true ? '✓' : '✗'} ${checkLabel('${c['path']}')}', c['value'] is num
+              ? (c['value'] as num).toStringAsFixed(1)
+              : (c['value'] == null ? 'missing' : '${c['value']}')),
+      ], note: j['passed'] == true ? null : 'A value outside its threshold fails the test (a missing value too).'));
     }
 
     return TestSuiteResult(ok: true, cards: cards, spectrum: _bands(out['spectrum']), response: _bands(out['frequency_response']),
@@ -212,6 +273,8 @@ const _none = '', _previous = '@previous';
 
 class _TestSuiteScreenState extends State<TestSuiteScreen> {
   TestSignal _signal = TestSignal.sine;
+  TestNotes _notes = TestNotes.single;
+  final Set<TestThreshold> _thresholds = {TestThreshold.headroom, TestThreshold.audible};
   bool _bypass = true;
   bool _cpu = true;
   String _compare = _none;
@@ -222,28 +285,42 @@ class _TestSuiteScreenState extends State<TestSuiteScreen> {
   CppWorkbench get w => widget.workbench;
   BuildToolsBackend get backend => widget.backend ?? BuildToolsBackend.current;
 
-  /// Built-in stereo effects to compare against.
+  bool get _instrument => w.isInstrument;
+
+  /// Built-ins of the same kind to compare against: stereo effects, or instruments for an instrument.
   List<NativeComponentInfo> get _builtins => [
         for (final i in w.state.componentCatalog.value.values)
-          if ((i.builtin || isBuiltinComponent(i.id)) && !i.isInstrument &&
-              i.ports.where((p) => p.isAudio && p.channels == 2).length == 2)
+          if ((i.builtin || isBuiltinComponent(i.id)) && i.isInstrument == _instrument &&
+              i.ports.where((p) => p.isAudio && p.channels == 2).length == (_instrument ? 1 : 2))
             i,
       ]..sort((a, b) => a.label.compareTo(b.label));
+
+  /// The thresholds asked for, as the engine's checks (real time only while CPU is timed).
+  List<Map<String, Object>> get _checks => [
+        for (final t in TestThreshold.values)
+          if (_thresholds.contains(t) && (t != TestThreshold.realtime || _cpu)) ...t.checks,
+      ];
 
   /// The knobs as the first track using it has them, else the defaults.
   Map<String, double> get _params => {...?w.uses.firstOrNull?.use.params};
 
   Map<String, dynamic> request(String library) => {
         'component': {'id': w.componentId, 'library': library, 'params': _params},
-        'signal': switch (_signal) {
-          TestSignal.sine => {'type': 'sine', 'frequency': 1000},
-          TestSignal.sweep => {'type': 'sweep'},
-          TestSignal.impulse => {'type': 'impulse'},
-          TestSignal.pink => {'type': 'pink'},
+        if (_instrument)
+          'notes': _notes.notes
+        else ...{
+          'signal': switch (_signal) {
+            TestSignal.sine => {'type': 'sine', 'frequency': 1000},
+            TestSignal.sweep => {'type': 'sweep'},
+            TestSignal.impulse => {'type': 'impulse'},
+            TestSignal.pink => {'type': 'pink'},
+          },
+          'bypass': _bypass,
         },
-        'bypass': _bypass,
         'cpu': _cpu,
-        'align': _signal == TestSignal.sine ? 'declared' : 'measured',
+        // An instrument has no input to measure a delay against, so its null test aligns by the declared latency.
+        'align': _instrument || _signal == TestSignal.sine ? 'declared' : 'measured',
+        if (_checks.isNotEmpty) 'checks': _checks,
         if (_compare == _previous && w.previousArtifactPath != null)
           'compare': {'id': w.componentId, 'library': w.previousArtifactPath, 'params': _params}
         else if (_compare.isNotEmpty && _compare != _previous)
@@ -285,7 +362,7 @@ class _TestSuiteScreenState extends State<TestSuiteScreen> {
   @override
   Widget build(BuildContext context) {
     final built = w.artifactPath != null;
-    final instrument = w.isInstrument;
+    final instrument = _instrument;
     const accent = Neon.blue;
     final result = _result;
     return ToolPage(
@@ -299,24 +376,32 @@ class _TestSuiteScreenState extends State<TestSuiteScreen> {
         color: accent,
         busyLabel: 'Rendering offline…',
         progress: _running ? -1 : null,
-        onPressed: built && !instrument ? _run : null,
+        onPressed: built ? _run : null,
       ),
       children: [
-        if (instrument)
-          const ToolCard(title: 'Effects only for now', status: ToolStatus.info, child: Text(
-            'The testing suite runs a stereo effect against a test signal. Instruments need note input, which the engine\'s '
-            'suite doesn\'t send yet. Try the sample-pack maker to render this instrument.',
-            style: TextStyle(fontSize: 12, color: Neon.dim)))
-        else if (!built)
+        if (!built)
           const ToolCard(title: 'Build it first', status: ToolStatus.info, child: Text(
             'The suite loads the library the last build made. Press ▶ Build in the editor, then come back.',
             style: TextStyle(fontSize: 12, color: Neon.dim))),
-        const ToolHeading('Signal'),
-        ToolSegments<TestSignal>(values: TestSignal.values, labels: (s) => s.label, value: _signal, color: accent,
-          keyPrefix: 'signal', onChanged: (s) => setState(() => _signal = s)),
+        if (instrument) ...[
+          const ToolHeading('Notes'),
+          ToolSegments<TestNotes>(values: TestNotes.values, labels: (n) => n.label, value: _notes, color: accent,
+            keyPrefix: 'notes', onChanged: (n) => setState(() => _notes = n)),
+          Padding(padding: const EdgeInsets.only(top: 4), child: Text(switch (_notes) {
+            TestNotes.single => 'One C4 at velocity 100, held 1 s, then its release.',
+            TestNotes.chord => 'C4, E4 and G4 together at velocity 100, held 1 s.',
+            TestNotes.velocities => 'C4 four times, at velocity 32, 64, 96 and 127.',
+            TestNotes.octaves => 'C2 to C6, one note per octave.',
+          }, style: const TextStyle(fontSize: 11, color: Neon.dim))),
+        ] else ...[
+          const ToolHeading('Signal'),
+          ToolSegments<TestSignal>(values: TestSignal.values, labels: (s) => s.label, value: _signal, color: accent,
+            keyPrefix: 'signal', onChanged: (s) => setState(() => _signal = s)),
+        ],
         const ToolHeading('Compare'),
-        ToolSwitch(label: 'A/B against bypass', detail: 'A null test of the output against the dry signal',
-          value: _bypass, color: accent, onChanged: (v) => setState(() => _bypass = v)),
+        if (!instrument)
+          ToolSwitch(label: 'A/B against bypass', detail: 'A null test of the output against the dry signal',
+            value: _bypass, color: accent, onChanged: (v) => setState(() => _bypass = v)),
         ToolSwitch(label: 'CPU per block', detail: 'Times every process call on this device',
           value: _cpu, color: accent, onChanged: (v) => setState(() => _cpu = v)),
         Padding(padding: const EdgeInsets.only(top: 4), child: Row(children: [
@@ -334,6 +419,15 @@ class _TestSuiteScreenState extends State<TestSuiteScreen> {
             onChanged: (v) => setState(() => _compare = v ?? _none),
           ),
         ])),
+        const ToolHeading('Pass / fail'),
+        for (final t in TestThreshold.values)
+          ToolSwitch(
+            key: ValueKey('test-threshold-${t.name}'),
+            label: t.label,
+            detail: t == TestThreshold.realtime && !_cpu ? '${t.detail} (needs CPU per block)' : t.detail,
+            value: _thresholds.contains(t),
+            color: accent,
+            onChanged: (v) => setState(() => v ? _thresholds.add(t) : _thresholds.remove(t))),
         if (result != null) ...[
           const ToolHeading('Results'),
           if (!result.ok)
@@ -348,7 +442,8 @@ class _TestSuiteScreenState extends State<TestSuiteScreen> {
                 _ => 'Something failed',
               },
               status: result.overall,
-              child: Text('${_signal.label} through ${w.name}${_params.isEmpty ? ', default knobs' : ', knobs as on its first track'}.',
+              child: Text('${instrument ? '${_notes.label} played on' : '${_signal.label} through'} ${w.name}'
+                '${_params.isEmpty ? ', default knobs' : ', knobs as on its first track'}.',
                 style: const TextStyle(fontSize: 12, color: Neon.dim))),
             if (_wave case (final l, final r))
               ToolCard(title: 'Scope · output', color: Neon.green, child: WaveGraph(left: l, right: r)),

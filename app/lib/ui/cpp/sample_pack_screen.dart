@@ -1,4 +1,4 @@
-// The sample-pack maker (#164): pick an instrument, notes, velocities, length, loop and format, render it off the UI isolate with progress and cancel, and file the WAVs (and SFZ) under Files › Audio & MIDI › Sample packs.
+// The sample-pack maker (#164): pick an instrument, notes, velocities, length, loop and format, render it off the UI isolate with progress and cancel, file the WAVs (and SFZ) under Files › Audio & MIDI › Sample packs, and save the pack as a .zip through the system picker.
 import 'dart:async';
 import 'dart:io';
 
@@ -10,6 +10,7 @@ import '../../engine/engine.dart' show NativeComponentTrust;
 import '../../model/app_state.dart';
 import '../../model/arrange_fx.dart';
 import '../../model/sample_packs.dart';
+import '../../platform/save_copy.dart';
 import '../frame/live_keys.dart' show noteName;
 import '../haptics.dart';
 import '../theme.dart';
@@ -42,13 +43,22 @@ String packFolderName(String name) {
   return n.isEmpty ? 'Pack' : n;
 }
 
+/// Saves a finished pack's zip as [name] (the system picker; a test passes a fake). True when saved.
+typedef PackZipSaver = Future<bool> Function(File zip, String name);
+
+Future<bool> _saveWithPicker(File zip, String name) =>
+    saveCopyOf(zip, name: name, mimeType: 'application/zip', extension: 'zip');
+
 class SamplePackScreen extends StatefulWidget {
-  const SamplePackScreen({super.key, required this.state, this.instrumentId, this.backend});
+  const SamplePackScreen({super.key, required this.state, this.instrumentId, this.backend, this.saveZip});
   final AppState state;
   final String? instrumentId;
 
   /// Where renders go (the engine unless a test passes a fake).
   final BuildToolsBackend? backend;
+
+  /// Where Save pack (.zip)… sends the zip (the system picker unless a test passes a fake).
+  final PackZipSaver? saveZip;
 
   @override
   State<SamplePackScreen> createState() => SamplePackScreenState();
@@ -69,6 +79,9 @@ class SamplePackScreenState extends State<SamplePackScreen> {
   double _progress = 0;
   Map<String, dynamic>? _result;
   String? _error;
+  Directory? _packDir; // the folder the last finished render filled
+  bool _zipping = false;
+  String? _zipMessage;
 
   AppState get s => widget.state;
   BuildToolsBackend get backend => widget.backend ?? BuildToolsBackend.current;
@@ -172,8 +185,42 @@ class SamplePackScreenState extends State<SamplePackScreen> {
     setState(() {
       _run = null;
       _result = ok ? result : null;
+      _packDir = ok ? dir : null;
+      _zipMessage = null;
       _error = ok ? null : '${result['error'] ?? 'The render failed.'}';
     });
+  }
+
+  /// Zips the finished pack off the UI isolate and hands it to the system's save picker.
+  Future<void> _saveZip() async {
+    final dir = _packDir;
+    if (dir == null || _zipping) return;
+    setState(() {
+      _zipping = true;
+      _zipMessage = null;
+    });
+    Directory? tmp;
+    String message;
+    try {
+      tmp = await Directory.systemTemp.createTemp('caw-pack-');
+      final name = '${dir.uri.pathSegments.where((p) => p.isNotEmpty).last}.zip';
+      final zip = File('${tmp.path}${Platform.pathSeparator}$name');
+      final count = await zipSamplePack(dir, zip.path);
+      final saved = await (widget.saveZip ?? _saveWithPicker)(zip, name);
+      saved ? Haptics.threshold() : Haptics.tap();
+      message = saved ? 'Saved $name ($count file${count == 1 ? '' : 's'}).' : 'Not saved (picker closed).';
+    } catch (e) {
+      Haptics.error();
+      message = 'Could not save the pack: $e';
+    } finally {
+      unawaited(tmp?.delete(recursive: true).then((_) {}, onError: (_) {}));
+    }
+    if (mounted) {
+      setState(() {
+        _zipping = false;
+        _zipMessage = message;
+      });
+    }
   }
 
   void _cancel() {
@@ -278,15 +325,19 @@ class SamplePackScreenState extends State<SamplePackScreen> {
             status: e.contains('cancel') ? ToolStatus.info : ToolStatus.fail,
             child: Text(e.contains('cancel') ? 'Files finished before you stopped it are kept in the pack; no SFZ was written.' : e,
               style: const TextStyle(fontSize: 12, color: Neon.text))),
-        if (result != null) _ResultCard(result: result),
+        if (result != null)
+          _ResultCard(result: result, saving: _zipping, message: _zipMessage, onSave: _packDir == null ? null : _saveZip),
       ],
     );
   }
 }
 
 class _ResultCard extends StatelessWidget {
-  const _ResultCard({required this.result});
+  const _ResultCard({required this.result, this.onSave, this.saving = false, this.message});
   final Map<String, dynamic> result;
+  final VoidCallback? onSave;
+  final bool saving;
+  final String? message;
 
   @override
   Widget build(BuildContext context) {
@@ -309,6 +360,18 @@ class _ResultCard extends StatelessWidget {
         const SizedBox(height: 6),
         const Text('Find them in Files › Audio & MIDI › Sample packs; long-press one to save a copy.',
           style: TextStyle(fontSize: 11, color: Neon.dim)),
+        const SizedBox(height: 6),
+        Align(alignment: Alignment.centerLeft, child: TextButton.icon(
+          key: const ValueKey('pack-save-zip'),
+          onPressed: saving ? null : onSave,
+          icon: saving
+              ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2))
+              : const Icon(Icons.file_upload_outlined, size: 16),
+          label: Text(saving ? 'Zipping…' : 'Save pack (.zip)…'),
+          style: TextButton.styleFrom(foregroundColor: Neon.green),
+        )),
+        if (message case final m?) Text(m, key: const ValueKey('pack-save-message'),
+          style: const TextStyle(fontSize: 11, color: Neon.dim)),
       ]),
     );
   }
