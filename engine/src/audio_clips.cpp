@@ -214,6 +214,11 @@ bool parseAudioTrack(const Json& l, const std::map<std::string, AssetRef>& asset
 
 namespace {
 
+// Clip voice declick: a voice cut by a seek, a loop wrap, stop, a mode change or an edit fades out over this while
+// whatever replaces it fades in (a voice starting mid-clip; one starting at its clip's start is left as authored),
+// and a clip's loop seam crossfades over it too (docs/decisions.md: the default is to confirm).
+constexpr double kClipDeclickSeconds = 0.004;
+
 struct CompiledClip {
     AudioClipSpec spec;
     std::shared_ptr<const AudioAsset> asset;
@@ -267,6 +272,7 @@ public:
     bool usesProcessPorts() const noexcept override { return true; }
     bool activate(double sampleRate, uint32_t) noexcept override {
         sr_ = sampleRate;
+        declick_ = std::max<int64_t>(1, std::llround(kClipDeclickSeconds * sampleRate));
         live_ = buildingLiveAudio();
         for (Voice& v : voices_)
             if (!v.reader.prepare(sampleRate)) return false;
@@ -302,6 +308,7 @@ public:
                     ? static_cast<int64_t>(std::llround(std::min(frames, c.loopEndSeconds * rate)))
                     : static_cast<int64_t>(frames);
                 if (cc.src.loopEnd <= cc.src.loopStart) cc.src.loop = false;
+                cc.src.seam = std::llround(kClipDeclickSeconds * rate);
             }
             cc.offsetFrames = std::floor(c.offsetSeconds * rate + 0.5);
             cc.pitchRatio = detPow(2.0, c.pitch / 12.0);
@@ -339,9 +346,18 @@ public:
         std::fill_n(L, m, 0.0f);
         std::fill_n(R, m, 0.0f);
         const uint64_t was = timeline_.current() ? timeline_.current()->serial : 0;
-        if (timeline_.poll()) remap(was);
+        Timeline* previous = nullptr;
+        if (!held_ && timeline_.take(previous)) {
+            remap(was);
+            // Voices fading out still read the old timeline's assets: it stays here until they are done.
+            if (previous && (anyFading() || !timeline_.retire(previous))) held_ = previous;
+        }
         const Timeline* tl = timeline_.current();
-        if (!tl) return true;
+        const int64_t t0 = clock_;  // this block's first frame in the player's own, continuous time
+        if (!tl) {
+            clock_ += m;
+            return true;
+        }
         const bool playing = b.transport && b.transport->playing;
         // Monitoring: the device input through the track (on, or auto while armed and stopped or recording).
         const TrackInputSpec& in = tl->input;
@@ -354,16 +370,35 @@ public:
             }
         }
         if (!playing) {
-            for (Voice& v : voices_) v.active = false;
+            for (Voice& v : voices_) fadeOut(v);
             expected_ = -1;
+            finish(t0, m, L, R);
             return true;
         }
         const double tempo = b.transport->tempo > 0 ? b.transport->tempo : 120.0;
         const double stepLen = 60.0 * sr_ / (tempo * 4.0);
         const int64_t pos = std::llround(b.transport->beat * 4.0 * stepLen);
-        if (pos != expected_)
-            for (Voice& v : voices_) v.active = false;  // a seek or a loop wrap: every voice starts again
+        if (pos != expected_) {
+            for (Voice& v : voices_) fadeOut(v);  // a seek or a loop wrap: every voice starts again
+        } else if (tempo != lastTempo_) {
+            // A tempo change: musical clips follow the new grid (they start again, declicked); fixed clips keep
+            // the source position they are at (their voice's mapping moves by what the clip's start moved).
+            for (Voice& v : voices_) {
+                if (!v.active || v.clip < 0) continue;
+                const CompiledClip& c = tl->clips[static_cast<size_t>(v.clip)];
+                if (c.spec.musical) {
+                    fadeOut(v);
+                    continue;
+                }
+                const int64_t cs = static_cast<int64_t>(std::floor(c.spec.startSteps * stepLen + 0.5));
+                const double here = v.anchorS + v.slope * static_cast<double>(t0 - v.anchorT);
+                v.drift = here - (c.offsetFrames + v.slope * static_cast<double>(pos - cs));
+            }
+        }
+        if (expected_ < 0 && !anyActive()) clock_ = pos;  // a fresh start: the player's time is the song's
+        const int64_t shift = clock_ - pos;
         expected_ = pos + m;
+        lastTempo_ = tempo;
         const int64_t end = pos + m;
         // Clips are sorted by start, and none is longer than maxLength: the first that can reach pos.
         const double from = static_cast<double>(pos) / stepLen - tl->maxLength - 1.0;
@@ -380,7 +415,7 @@ public:
             Voice* v = voiceFor(static_cast<int>(ci));
             if (v) v->seen = true;
             if (c.spec.mute || !c.asset) {
-                if (v) v->active = false;
+                if (v) fadeOut(*v);
                 continue;
             }
             // How fast the source moves and which reader plays it.
@@ -394,17 +429,27 @@ public:
                 mode = slope == 1.0 && pitch == 1.0 ? ReadMode::Direct : ReadMode::Stretch;
             }
             const int64_t a = std::max(pos, cs), z = std::min(end, ce);
-            if (v && (v->reader.mode() != mode || v->reader.pitch() != pitch)) v->active = false;
-            if (!v || !v->active) {
-                v = freeVoice();
-                if (!v) continue;  // more than kAudioClipVoices clips at once: this one is skipped
-                v->active = true;
-                v->seen = true;
-                v->clip = static_cast<int>(ci);
-                v->reader.start(c.src, mode, pitch, a, c.offsetFrames + slope * static_cast<double>(a - cs), slope);
+            if (v && (v->reader.mode() != mode || v->reader.pitch() != pitch)) {
+                fadeOut(*v);
+                v = nullptr;
             }
+            if (!v) {
+                if (playingVoices() >= kAudioClipVoices) continue;  // more clips at once than that: this one is skipped
+                v = freeVoice();
+                if (!v) continue;
+                v->active = v->seen = true;
+                v->clip = static_cast<int>(ci);
+                v->drift = 0;
+                v->fadeLeft = 0;
+                v->inAt = 0;
+                v->inLen = a > cs ? declick_ : 0;  // started mid-clip: faded in
+                v->reader.start(c.src, mode, pitch, a + shift, c.offsetFrames + slope * static_cast<double>(a - cs), slope);
+            }
+            v->anchorT = cs + shift;
+            v->anchorS = c.offsetFrames + v->drift;
+            v->slope = slope;
             v->reader.setSource(c.src);
-            v->reader.setMapping(cs, c.offsetFrames, slope);
+            v->reader.setMapping(v->anchorT, v->anchorS, v->slope);
             const float g = static_cast<float>(c.spec.gain);
             for (int64_t t = a; t < z; ++t) {
                 double w = g;
@@ -412,55 +457,119 @@ public:
                     w *= curve(c.spec.fadeInCurve, static_cast<double>(t - cs) / static_cast<double>(c.fadeIn));
                 if (c.fadeOut > 0 && ce - t <= c.fadeOut)
                     w *= curve(c.spec.fadeOutCurve, static_cast<double>(ce - t) / static_cast<double>(c.fadeOut));
+                if (v->inAt < v->inLen) {
+                    w *= static_cast<double>(v->inAt + 1) / static_cast<double>(v->inLen + 1);
+                    ++v->inAt;
+                }
                 gain_[t - pos] = static_cast<float>(w);
             }
-            v->reader.render(a, static_cast<int>(z - a), gain_ + (a - pos), L + (a - pos), R + (a - pos));
-            if (z >= ce) v->active = false;  // the clip ended in this block
+            if (z > a) v->lastGain = gain_[z - 1 - pos];
+            v->reader.render(a + shift, static_cast<int>(z - a), gain_ + (a - pos), L + (a - pos), R + (a - pos));
+            if (z >= ce) v->active = false;  // the clip ended in this block (its own fade-out shapes that)
         }
         // Voices whose clip is gone from under the playhead.
         for (Voice& v : voices_)
-            if (!v.seen) v.active = false;
+            if (!v.seen && v.clip >= 0) fadeOut(v);
+        finish(t0, m, L, R);
         return true;
     }
+
+    ~AudioTrackPlayer() override { delete held_; }
 
 private:
     struct Voice {
         bool active = false, seen = false;
-        int clip = -1;
+        int clip = -1;               // -1: fading out, no longer any clip's
+        int64_t fadeLeft = 0;        // fading out: frames left
+        float fadeFrom = 0;          // the gain the fade out starts from
+        float lastGain = 0;          // the gain of the last frame played
+        int64_t inAt = 0, inLen = 0; // the fade in of a voice started mid-clip
+        int64_t anchorT = 0;         // the reader's mapping, in the player's time
+        double anchorS = 0, slope = 1;
+        double drift = 0;            // source frames added to a fixed clip's mapping since a tempo change
         ClipReader reader;
     };
+    // Fades a sounding voice out over the declick (it keeps reading where it was) instead of cutting it.
+    void fadeOut(Voice& v) noexcept {
+        if (!v.active || v.clip < 0) return;
+        v.clip = -1;
+        if (v.lastGain == 0.0f) {
+            v.active = false;
+            return;
+        }
+        v.fadeLeft = declick_;
+        v.fadeFrom = v.lastGain;
+    }
+    // The fading voices' last frames, and the player's time moves on.
+    void finish(int64_t t0, int m, float* L, float* R) noexcept {
+        for (Voice& v : voices_) {
+            if (!v.active || v.clip >= 0) continue;
+            const int n = static_cast<int>(std::min<int64_t>(m, v.fadeLeft));
+            for (int i = 0; i < n; ++i)
+                gain_[i] = v.fadeFrom * static_cast<float>(v.fadeLeft - i) / static_cast<float>(declick_ + 1);
+            v.reader.render(t0, n, gain_, L, R);
+            v.fadeLeft -= n;
+            if (v.fadeLeft <= 0) v.active = false;
+        }
+        if (held_ && !anyFading() && timeline_.retire(held_)) held_ = nullptr;
+        clock_ += m;
+    }
+    bool anyFading() const noexcept {
+        for (const Voice& v : voices_)
+            if (v.active && v.clip < 0) return true;
+        return false;
+    }
+    bool anyActive() const noexcept {
+        for (const Voice& v : voices_)
+            if (v.active) return true;
+        return false;
+    }
+    int playingVoices() const noexcept {
+        int n = 0;
+        for (const Voice& v : voices_) n += v.active && v.clip >= 0;
+        return n;
+    }
     Voice* voiceFor(int clip) noexcept {
         for (Voice& v : voices_)
             if (v.active && v.clip == clip) return &v;
         return nullptr;
     }
+    // A free voice, else the fading one closest to silence (cut).
     Voice* freeVoice() noexcept {
-        for (Voice& v : voices_)
+        Voice* best = nullptr;
+        for (Voice& v : voices_) {
             if (!v.active) return &v;
-        return nullptr;
+            if (v.clip < 0 && (!best || v.fadeLeft < best->fadeLeft)) best = &v;
+        }
+        if (best) best->active = false;
+        return best;
     }
     void remap(uint64_t was) noexcept {
         const Timeline* t = timeline_.current();
         if (!t || t->baseSerial != was) {
-            for (Voice& v : voices_) v.active = false;
+            for (Voice& v : voices_) fadeOut(v);
             return;
         }
         for (Voice& v : voices_) {
-            if (!v.active) continue;
+            if (!v.active || v.clip < 0) continue;
             int found = -1;
             for (size_t i = 0; i < t->prevIndex.size() && found < 0; ++i)
                 if (t->prevIndex[i] == v.clip) found = static_cast<int>(i);
-            v.clip = found;
-            v.active = found >= 0;
+            if (found < 0) fadeOut(v);
+            else v.clip = found;
         }
     }
 
     double sr_ = 48000;
     LiveAudio* live_ = nullptr;
-    Voice voices_[kAudioClipVoices];
+    Voice voices_[2 * kAudioClipVoices];  // the playing ones, and room for as many fading out
     float gain_[64] = {};
     int64_t expected_ = -1;
+    int64_t clock_ = 0;      // the player's own time: one frame per frame rendered, whatever the transport does
+    int64_t declick_ = 192;  // frames
+    double lastTempo_ = 0;
     Handover<Timeline> timeline_;
+    Timeline* held_ = nullptr;  // a replaced timeline whose assets fading voices still read
     std::atomic<bool> monitorStopped_{false};
     // control thread
     std::string signature_;

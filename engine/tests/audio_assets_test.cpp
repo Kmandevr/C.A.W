@@ -302,10 +302,10 @@ TEST(audio_clip_edits_offset_gain_fade_reverse_loop_and_mute) {
     // reverse: the first frame is the file's last
     x = render(clipProject(p, ",\"start_steps\":0,\"length_steps\":1,\"reverse\":true"), 6000);
     CHECK_NEAR(x[0], k * noiseAt(11999, 0), 1e-6);
-    // loop: 4 steps long over a 2-step file: the second pass repeats the first
+    // loop: 4 steps long over a 2-step file: the second pass repeats the first (past the seam's 2 ms fade in)
     x = render(clipProject(p, ",\"start_steps\":0,\"length_steps\":4,\"loop\":true"), 24000);
-    CHECK_NEAR(x[12000 + 77], x[77], 1e-7);
-    CHECK(std::fabs(x[12000 + 77]) > 0);
+    CHECK_NEAR(x[12000 + 577], x[577], 1e-7);
+    CHECK(std::fabs(x[12000 + 577]) > 0);
     // a linear fade in over 0.1 s: halfway is half
     x = render(clipProject(p, ",\"start_steps\":0,\"length_steps\":2,\"fade_in_seconds\":0.1"), 12000);
     CHECK_NEAR(x[2400], 0.5 * k * noiseAt(2400, 0), 1e-6);
@@ -359,6 +359,80 @@ TEST(musical_clip_follows_the_tempo_and_fixed_does_not) {
     // Fixed: the file at its own speed, done after 24000 frames.
     x = render(clipProject(p, ",\"start_steps\":0,\"length_steps\":4", 1, 60), 48000);
     CHECK_EQ(x[30000], 0.0f);
+    std::filesystem::remove_all(dir);
+}
+
+namespace {
+// The largest step between neighbouring samples of x[from..to).
+float largestStep(const std::vector<float>& x, size_t from, size_t to) {
+    float d = 0;
+    for (size_t i = from + 1; i < to && i < x.size(); ++i) d = std::max(d, std::fabs(x[i] - x[i - 1]));
+    return d;
+}
+float sineAt(int64_t i, double hz) { return static_cast<float>(0.5 * std::sin(2 * 3.14159265358979 * hz * i / 48000.0)); }
+}  // namespace
+
+TEST(fixed_clip_keeps_its_source_position_across_a_tempo_change) {
+    // A fixed clip plays its file at its own speed: a tempo change moves where the clip starts on the song, but the
+    // voice already sounding carries on from where it is (no jump back or forward).
+    const std::string dir = tempDir("tempochange");
+    const std::string p = writeWav(dir + "/n.wav", 48000, 1, 144000, [](int64_t i, int) { return noiseAt(i, 0); });
+    const std::string fields = ",\"start_steps\":8,\"length_steps\":16";
+    Engine e(48000);
+    e.setMasterBypass(true);
+    CHECK(e.setProjectJson(clipProject(p, fields, 2, 120)).find("\"ok\":true") != std::string::npos);
+    e.play();
+    std::vector<float> l(100032), r(100032);
+    for (int i = 0; i < 60032; i += 64) e.process(l.data() + i, r.data() + i, 64);
+    CHECK(e.setProjectJson(clipProject(p, fields, 2, 130)).find("\"ok\":true") != std::string::npos);
+    for (int i = 60032; i < 100032; i += 64) e.process(l.data() + i, r.data() + i, 64);
+    const double k = l[48000] / noiseAt(0, 0);
+    CHECK(k > 0.5);
+    double err = 0;
+    for (int t = 62000; t < 80000; ++t) err = std::max(err, std::fabs(l[static_cast<size_t>(t)] - k * noiseAt(t - 48000, 0)));
+    CHECK(err < 1e-5);
+    std::filesystem::remove_all(dir);
+}
+
+TEST(clip_voices_declick_on_a_loop_wrap_a_mode_change_and_stop_and_loops_crossfade) {
+    const std::string dir = tempDir("declick");
+    // 55 Hz: no whole number of cycles in the spans below, so every hard cut would jump.
+    const std::string p = writeWav(dir + "/s.wav", 48000, 1, 200000, [](int64_t i, int) { return sineAt(i, 55); });
+    const float smooth = 0.5f * 2 * 3.14159265f * 55 / 48000 * 1.5f;  // a little over the sine's own largest step
+    // The clip runs past the song loop's end: at the wrap the old voice fades out while the clip starts again.
+    std::string looped = clipProject(p, ",\"start_steps\":0,\"length_steps\":32", 2);
+    looped.replace(looped.find("\"loop_bars\""), 0, "\"loop_range\":true,\"loop_start_steps\":0,\"loop_end_steps\":16,");
+    auto x = render(looped, 110000, 64);
+    float before = 0;
+    for (size_t i = 95000; i < 96000; ++i) before = std::max(before, std::fabs(x[i]));
+    CHECK(before > 0.1f);
+    CHECK(largestStep(x, 95000, 97000) < 0.01f);
+    // A loop seam (the whole file looped, 14000 frames: 16.04 cycles, so the splice would jump by 0.12): no hard
+    // splice. Then a loop with audio before its start, and one with audio only after its end.
+    const std::string q = writeWav(dir + "/q.wav", 48000, 1, 14000, [](int64_t i, int) { return sineAt(i, 55); });
+    x = render(clipProject(q, ",\"start_steps\":0,\"length_steps\":8,\"loop\":true"), 40000, 64);
+    CHECK(largestStep(x, 13500, 14500) < 0.01f);
+    CHECK(largestStep(x, 27500, 28500) < 0.01f);
+    x = render(clipProject(p, ",\"start_steps\":0,\"length_steps\":8,\"loop\":true,\"offset_seconds\":0.1,"
+                              "\"loop_start_seconds\":0.1,\"loop_end_seconds\":0.29"), 40000, 64);
+    CHECK(largestStep(x, 8500, 10000) < 0.01f);
+    x = render(clipProject(p, ",\"start_steps\":0,\"length_steps\":8,\"loop\":true,\"loop_end_seconds\":0.2915"), 40000, 64);
+    CHECK(largestStep(x, 13500, 14500) < 0.01f);
+    // A mode change while it sounds (pitch 0 to 2: direct to stretched), and stop.
+    Engine e(48000);
+    e.setMasterBypass(true);
+    CHECK(e.setProjectJson(clipProject(p, ",\"start_steps\":0,\"length_steps\":16")).find("\"ok\":true") != std::string::npos);
+    e.play();
+    std::vector<float> l(60032), r(60032);
+    for (int i = 0; i < 30016; i += 64) e.process(l.data() + i, r.data() + i, 64);
+    CHECK(e.setProjectJson(clipProject(p, ",\"start_steps\":0,\"length_steps\":16,\"pitch\":2")).find("\"ok\":true") != std::string::npos);
+    for (int i = 30016; i < 45056; i += 64) e.process(l.data() + i, r.data() + i, 64);
+    e.stop();
+    for (int i = 45056; i < 60032; i += 64) e.process(l.data() + i, r.data() + i, 64);
+    CHECK(largestStep(l, 29000, 32000) < 0.02f);
+    CHECK(std::fabs(l[45000]) > 0.05f || std::fabs(l[44990]) > 0.05f);
+    CHECK(largestStep(l, 44000, 47000) < 0.02f);
+    (void)smooth;
     std::filesystem::remove_all(dir);
 }
 

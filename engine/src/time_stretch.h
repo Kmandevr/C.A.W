@@ -1,6 +1,7 @@
 // Reading an audio asset for a clip voice: direct, varispeed (cubic Hermite) or time-stretched with WSOLA plus a pitch stage.
 #pragma once
 
+#include <algorithm>
 #include <cstdint>
 #include <memory>
 
@@ -10,17 +11,22 @@ namespace caw {
 
 // An asset as a clip reads it: optionally reversed (index i reads frame frames-1-i), then optionally looped
 // (an index at or past loopEnd wraps into [loopStart, loopEnd)); anything outside the asset reads silence.
+// A loop seam is crossfaded over `seam` frames (at most half the loop), so the wrap is no hard splice, and the
+// loop's period stays exact: with audio before loopStart, the loop's last frames fade into that lead-in (which
+// runs on into loopStart); else, with audio after loopEnd, the first frames after a wrap fade in over what
+// would have followed the end; else (the whole file looped) the seam dips: half the seam fading out to the end
+// and half fading in from the start.
 struct ClipSource {
     const AudioAsset* asset = nullptr;
     bool reverse = false;
     bool loop = false;
     int64_t loopStart = 0, loopEnd = 0;  // frames at the asset's rate, in reversed order when reverse
+    int64_t seam = 0;                    // frames; 0 splices hard
     int64_t wrap(int64_t i) const noexcept {
         if (loop && i >= loopEnd && loopEnd > loopStart) i = loopStart + (i - loopStart) % (loopEnd - loopStart);
         return i;
     }
-    void frame(int64_t i, float& l, float& r) const noexcept {
-        i = wrap(i);
+    void raw(int64_t i, float& l, float& r) const noexcept {
         if (!asset || i < 0 || i >= asset->frames) {
             l = r = 0.0f;
             return;
@@ -28,6 +34,36 @@ struct ClipSource {
         const int64_t p = reverse ? asset->frames - 1 - i : i;
         l = asset->data[0][static_cast<size_t>(p)];
         r = asset->channels > 1 ? asset->data[1][static_cast<size_t>(p)] : l;
+    }
+    void frame(int64_t i, float& l, float& r) const noexcept {
+        const bool looping = loop && loopEnd > loopStart;
+        const bool wrapped = looping && i >= loopEnd;
+        i = wrap(i);
+        raw(i, l, r);
+        if (!looping || seam <= 0 || !asset) return;
+        const int64_t len = loopEnd - loopStart, x = std::min(seam, len / 2);
+        if (x <= 0) return;
+        float a, b;
+        if (loopStart >= x) {
+            if (i < loopEnd - x) return;
+            const float w = static_cast<float>((static_cast<double>(i - (loopEnd - x)) + 0.5) / static_cast<double>(x));
+            raw(i - len, a, b);
+            l = l * (1.0f - w) + a * w;
+            r = r * (1.0f - w) + b * w;
+        } else if (loopEnd + x <= asset->frames) {
+            if (!wrapped || i >= loopStart + x) return;
+            const float w = static_cast<float>((static_cast<double>(i - loopStart) + 0.5) / static_cast<double>(x));
+            raw(loopEnd + (i - loopStart), a, b);
+            l = l * w + a * (1.0f - w);
+            r = r * w + b * (1.0f - w);
+        } else {
+            const int64_t h = std::max<int64_t>(1, x / 2);
+            float g = 1.0f;
+            if (i >= loopEnd - h) g = static_cast<float>((static_cast<double>(loopEnd - i) - 0.5) / static_cast<double>(h));
+            else if (wrapped && i < loopStart + h) g = static_cast<float>((static_cast<double>(i - loopStart) + 0.5) / static_cast<double>(h));
+            l *= g;
+            r *= g;
+        }
     }
 };
 
