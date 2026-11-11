@@ -61,6 +61,17 @@ updated: 2026-11-11
 
 **Still the roadmap's call:** Stages 8–10 stay after Release 1: Faust, plug-in hosting, and iOS/macOS/Linux builds.
 
+## 2026-11-11: Racks and the effect browser (fx-racks, choices to confirm)
+
+**Decision (owner):** a multiband rack (as Multipass) and an FX rack with modulators (as Snap Heap); the browser's nine tabs, search, favourites, recents, a description and icon per effect. **Choices made on the owner's behalf, to confirm** ([engine](engine.md#racks-containers-fx-racks), [UI](ui.md#the-effect-browser)):
+- **Children live in the rack's parameters** (`<slot>_fx` holds a 24-bit hash of the child's id, the child's knobs `s2.cutoff`), so the project file, presets, undo and automation needed no new format.
+- **No racks inside racks**, so there is no depth to bound. **Sizes:** the FX rack holds 8 effects in one serial lane and has 16 routes; the multiband rack holds 4 effects a band. Snap Heap's parallel lanes, Multipass's Pre/Post FX lanes and per-lane mix, and modulators inside the multiband rack are not built; a multiband rack's knobs take automation, not modulation (a rack can't sit in an FX rack), until #161.
+- **Fixed modulators** (4 LFOs, 2 followers, 2 note envelopes, random, 8 macros) instead of Kilohearts' free list of up to 32.
+- **Modulation runs on a 16-frame grid**, as the Flagship's.
+- **The modulation route record is meant to be reused for #161** (route anything anywhere): [Proposal] in [engine](engine.md#racks-containers-fx-racks); #161's design is still the owner's.
+- **Browser:** an All tab before the nine; Favourites are the Files favourites; Recently used keeps the last 12 picks app-wide; an effect no catalog lists goes under Utility.
+- **Factory presets:** FX rack Wobble filter, Dub space, Ducked delay, Drifting tape, Note sweep; multiband rack Multiband glue, Air exciter, Tight low end, Split space.
+
 ## 2026-11-11: Dynamics and Drive effects (fx-dynamics; choices to confirm)
 
 **Decision (owner, 2026-11-11):** "any effect you would reasonably want is already there", Kilohearts-style; all four groups equally important. The Dynamics and Drive group added Dynamics, Multiband dynamics with an OTT mode, a De-esser, a Clipper and Phase distortion, and five curves, spread and dynamics to the saturator (see [engine reference](engine.md#dynamics-and-drive-research-and-technique-fx-dynamics-2026-11-11)). **Choices made on the owner's behalf, to confirm:**
