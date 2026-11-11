@@ -171,15 +171,20 @@ class _FileManagerScreenState extends State<FileManagerScreen> {
   Future<void> _newMenu(Offset at, FilesFolder folder) async {
     final action = await showCompactMenu<String>(context, at, const [
       MenuEntry('cpp', Icons.memory, 'New C++ effect'),
-      MenuEntry('effect', Icons.tune, 'New .caw effect'),
-      MenuEntry('generator', Icons.waves, 'New .caw instrument'),
+      MenuEntry('cpp-instrument', Icons.piano_outlined, 'New C++ instrument'),
+      MenuEntry('starter', Icons.auto_awesome_outlined, 'New from a starter…'),
       MenuEntry('pattern', Icons.piano, 'New pattern'),
     ]);
     if (action == null || !mounted) return;
-    if (action == 'cpp') {
-      _actions.newCppEffect();
-    } else {
-      _actions.newCawModule(action, folderPath: folder.libraryPath);
+    switch (action) {
+      case 'cpp':
+        _actions.newCppEffect();
+      case 'cpp-instrument':
+        _actions.newCppEffect(instrument: true);
+      case 'starter':
+        await _actions.newFromStarter();
+      case 'pattern':
+        _actions.newPattern();
     }
   }
 
@@ -188,7 +193,6 @@ class _FileManagerScreenState extends State<FileManagerScreen> {
     final action = await showCompactMenu<String>(context, at, const [
       MenuEntry('export', Icons.file_upload_outlined, 'Export .cawproj'),
       MenuEntry('import', Icons.file_open_outlined, 'Import project'),
-      MenuEntry('module', Icons.note_add_outlined, 'Import .caw module'),
       MenuEntry('midi', Icons.piano, 'Import MIDI file as clips'),
       MenuEntry('restore', Icons.bookmark_add_outlined, 'Create restore point', dividerBefore: true),
       MenuEntry('history', Icons.history, 'Version history'),
@@ -201,8 +205,6 @@ class _FileManagerScreenState extends State<FileManagerScreen> {
       case 'import':
         await importPortableProject(context, state);
         if (mounted) setState(() => _selected = null);
-      case 'module':
-        await importCawModule(context, state, folder.libraryPath);
       case 'midi':
         await importMidiFile(context, state);
       case 'restore':
@@ -326,7 +328,7 @@ class _FileManagerScreenState extends State<FileManagerScreen> {
     );
   }
 
-  /// Build's explorer: one tap to each kind of code (C++ components, patterns, .caw modules), with counts; the group
+  /// Build's explorer: one tap to each kind of code (C++ components, patterns), with counts; the group
   /// the explorer stands in is lit.
   Widget _explorerGroups(String path) {
     final p = state.project;
@@ -366,7 +368,6 @@ class _FileManagerScreenState extends State<FileManagerScreen> {
       child: ListView(scrollDirection: Axis.horizontal, padding: const EdgeInsets.symmetric(horizontal: Space.s), children: [
         group('cpp', 'code/cpp', Icons.memory, Neon.pink, 'C++', p.cppComponents.length),
         group('patterns', 'audio/patterns', Icons.queue_music, Neon.yellow, 'Patterns', patterns),
-        group('caw', 'code/caw', Icons.graphic_eq, Neon.blue, '.caw', p.modules.length - patterns),
       ]),
     );
   }

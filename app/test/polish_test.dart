@@ -7,8 +7,8 @@ import 'package:caw/model/project.dart';
 import 'package:caw/model/settings.dart';
 import 'package:caw/ui/arrange/focus_panel.dart';
 import 'package:caw/ui/arranger_screen.dart';
-import 'package:caw/ui/automation_screen.dart';
-import 'package:caw/ui/exporter_screen.dart';
+import 'package:caw/ui/arrange/automation_panel.dart';
+import 'package:caw/ui/export_page.dart';
 import 'package:caw/ui/file_manager_screen.dart';
 import 'package:caw/ui/frame/sections.dart';
 import 'package:caw/ui/haptics.dart';
@@ -99,9 +99,6 @@ void main() {
 
   group('Automation', () {
     testWidgets('empty lanes point to recording with Automate; tracks show their colour', (tester) async {
-      await tester.pumpWidget(MaterialApp(home: Scaffold(body: AutomationScreen(state: s))));
-      expect(find.byKey(const ValueKey('automate-hint')), findsOneWidget);
-      expect(find.textContaining('no .caw module parameters'), findsOneWidget);
       await tester.pumpWidget(MaterialApp(home: Scaffold(body: TrackAutomationPanel(state: s, layer: s.project.layers.first))));
       expect(find.byKey(const ValueKey('automate-hint')), findsOneWidget);
     });
@@ -114,7 +111,6 @@ void main() {
     AppState app() {
       final a = AppState();
       a.engine = Engine.create();
-      a.templates = Engine.templates();
       a.project = a.starterProject();
       a.selectedModuleId = a.project.modules.first.id;
       a.ready = true;
@@ -122,7 +118,7 @@ void main() {
       return a;
     }
 
-    testWidgets('Build opens on its start page, not on a module; More says what each page is for', (tester) async {
+    testWidgets('Build opens on its start page, not on a module; the project menu has Export', (tester) async {
       final a = app();
       await pumpGolden(tester, Shell(state: a), goldenSizes['phone']!);
       final c = SectionController.of(tester.element(find.byType(Scaffold).first));
@@ -130,17 +126,17 @@ void main() {
       await tester.pumpAndSettle();
       expect(c.buildTabs, isEmpty);
       expect(find.text('Write C++ instruments, effects and patterns, then hear them on your tracks.'), findsOneWidget);
-      await tester.tap(find.byKey(const ValueKey('more-tools')));
+      expect(find.byKey(const ValueKey('more-tools')), findsNothing);
+      await tester.tap(find.byKey(const ValueKey('project-menu')).first);
       await tester.pumpAndSettle();
-      expect(find.text('CPU, peaks, signal paths, scope and spectrum'), findsOneWidget);
-      expect(find.text('Make and package .caw instruments and effects'), findsOneWidget);
+      expect(find.text('The song or stems, a loop, a one-shot, a wavetable or MIDI'), findsOneWidget);
       a.dispose();
     }, skip: skip);
   });
 
   group('Export', () {
     testWidgets('with no saved profiles the picker says how to make one', (tester) async {
-      await tester.pumpWidget(MaterialApp(home: Scaffold(body: ExporterScreen(state: s))));
+      await tester.pumpWidget(MaterialApp(home: Scaffold(body: ExportPage(state: s))));
       expect(find.text('None yet: save one with the bookmark'), findsOneWidget);
     });
 
@@ -170,7 +166,7 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('clip-open-build')));
       await tester.pump();
       expect(sections.current, Section.build);
-      expect(sections.activeBuildTab, BuildTab(BuildTabKind.caw, pattern.id));
+      expect(sections.activeBuildTab, BuildTab(BuildTabKind.pattern, pattern.id));
       await tester.pumpWidget(const SizedBox());
       await tester.pump(const Duration(seconds: 2));
     });

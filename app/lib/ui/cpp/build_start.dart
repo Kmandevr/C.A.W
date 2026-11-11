@@ -105,14 +105,13 @@ class BuildStartView extends StatelessWidget {
     }
     final id = state.addModule(picked.template!);
     state.selectModule(id);
-    onOpen(BuildTab(BuildTabKind.caw, id));
+    onOpen(BuildTab(BuildTabKind.pattern, id));
   }
 
   @override
   Widget build(BuildContext context) {
     final cpp = state.project.cppComponents;
     final patterns = state.project.modules.where((m) => state.isPattern(m.id)).toList();
-    final modules = state.project.modules.where((m) => !state.isPattern(m.id)).toList();
     final desktop = Theme.of(context).platform == TargetPlatform.windows ||
         Theme.of(context).platform == TargetPlatform.linux ||
         Theme.of(context).platform == TargetPlatform.macOS;
@@ -217,15 +216,9 @@ class BuildStartView extends StatelessWidget {
           ),
         if (patterns.isNotEmpty) heading('Patterns', count: patterns.length),
         for (final m in patterns)
-          row('open caw ${m.id}', Icons.queue_music, Neon.yellow, m.name, 'pattern', () {
+          row('open pattern ${m.id}', Icons.queue_music, Neon.yellow, m.name, 'pattern', () {
             state.selectModule(m.id);
-            onOpen(BuildTab(BuildTabKind.caw, m.id));
-          }),
-        if (modules.isNotEmpty) heading('.caw modules', count: modules.length),
-        for (final m in modules)
-          row('open caw ${m.id}', Icons.graphic_eq, Neon.blue, m.name, state.info[m.id]?.kind ?? '.caw', () {
-            state.selectModule(m.id);
-            onOpen(BuildTab(BuildTabKind.caw, m.id));
+            onOpen(BuildTab(BuildTabKind.pattern, m.id));
           }),
         if (desktop)
           Padding(
@@ -379,13 +372,12 @@ class ExamplesList extends StatelessWidget {
 /// Whether C++ sources make an instrument (derive from `caw::InstrumentProcessor`) rather than an effect.
 bool cppIsInstrument(Iterable<String> sources) => sources.any((s) => s.contains('InstrumentProcessor'));
 
-/// The icon and colour of a Build tab or explorer item by kind: C++ instrument, C++ effect, pattern, .caw module.
+/// The icon and colour of a Build tab or explorer item by kind: C++ instrument, C++ effect or pattern.
 ({IconData icon, Color color}) buildKindLook(AppState state, BuildTab tab) {
   if (tab.kind == BuildTabKind.cpp) {
     final c = state.cppComponent(tab.id);
     final instrument = c != null && cppIsInstrument(c.files.values);
     return instrument ? (icon: Icons.piano_outlined, color: Neon.green) : (icon: Icons.tune, color: Neon.pink);
   }
-  if (state.isPattern(tab.id)) return (icon: Icons.queue_music, color: Neon.yellow);
-  return (icon: Icons.graphic_eq, color: Neon.blue);
+  return (icon: Icons.queue_music, color: Neon.yellow);
 }

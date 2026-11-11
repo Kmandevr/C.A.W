@@ -8,9 +8,11 @@ import 'package:caw/model/app_state.dart';
 import 'package:caw/model/history.dart';
 import 'package:caw/model/project.dart';
 import 'package:caw/model/storage.dart';
-import 'package:caw/ui/builder_screen.dart';
+import 'package:caw/ui/pattern_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+
+const _head = '---\nkind: pattern\nname: tone\n---\n';
 
 void main() {
   group('ProjectHistory', () {
@@ -112,31 +114,34 @@ void main() {
       expect(s.redo(), isFalse);
     });
   });
-  testWidgets('undoing typed code shows the old code in the editor, and the next keystroke keeps the undo', (tester) async {
+  testWidgets('undoing typed pattern text shows the old text in the editor, and the next keystroke keeps the undo', (tester) async {
     final s = AppState();
     s.starting = false;
-    s.project = ProjectDoc(id: 'p', name: 'Song', modules: [ModuleDoc(id: 'm', name: 'tone', source: 'out 1')]);
+    s.project = ProjectDoc(id: 'p', name: 'Song', modules: [ModuleDoc(id: 'm', name: 'tone', source: '${_head}0 C3 1')]);
     s.selectedModuleId = 'm';
     s.history.reset(jsonEncode(s.project.toJson()));
     // The shell rebuilds the workspace when the state notifies.
-    await tester.pumpWidget(MaterialApp(home: Scaffold(body: ListenableBuilder(listenable: s, builder: (_, _) => BuilderScreen(state: s)))));
-    String shown() => tester.widget<EditableText>(find.byType(EditableText).first).controller.text;
-    expect(shown(), 'out 1');
+    await tester.pumpWidget(MaterialApp(home: Scaffold(body: ListenableBuilder(listenable: s, builder: (_, _) => PatternScreen(state: s)))));
+    await tester.tap(find.text('Text'));
+    await tester.pump();
+    final code = find.byWidgetPredicate((w) => w is EditableText && w.maxLines == null);
+    String shown() => tester.widget<EditableText>(code).controller.text;
+    expect(shown(), '0 C3 1');
 
-    await tester.enterText(find.byType(EditableText).first, 'out 2');
+    await tester.enterText(code, '0 C3 2');
     await tester.pump(const Duration(milliseconds: 700));
-    expect(s.project.module('m')!.source, 'out 2');
+    expect(s.project.module('m')!.source, '${_head}0 C3 2');
     expect(s.undo(), isTrue);
     await tester.pump();
-    expect(shown(), 'out 1');
-    await tester.enterText(find.byType(EditableText).first, 'out 13');
-    expect(s.project.module('m')!.source, 'out 13');
+    expect(shown(), '0 C3 1');
+    await tester.enterText(code, '0 C3 13');
+    expect(s.project.module('m')!.source, '${_head}0 C3 13');
     expect(s.undo(), isTrue);
     await tester.pump();
-    expect(shown(), 'out 1');
+    expect(shown(), '0 C3 1');
     expect(s.redo(), isTrue);
     await tester.pump();
-    expect(shown(), 'out 13');
+    expect(shown(), '0 C3 13');
     await tester.pump(const Duration(seconds: 2));
     s.dispose();
   });

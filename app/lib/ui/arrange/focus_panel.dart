@@ -8,13 +8,13 @@ import '../../model/app_state.dart';
 import '../../model/pattern_doc.dart';
 import '../../model/project.dart';
 import '../../model/settings.dart';
-import '../automation_screen.dart';
+import 'automation_panel.dart';
 import '../feedback.dart';
 import '../frame/frame_widgets.dart' show SlideIn;
 import '../frame/sections.dart';
 import '../glass.dart';
 import '../haptics.dart';
-import '../mixer_screen.dart';
+import 'channel_strip.dart';
 import '../routing_view.dart';
 import '../motion.dart';
 import '../pattern_editor.dart';
@@ -180,7 +180,7 @@ class _FocusPanelState extends State<FocusPanel> {
         header,
         Container(height: 1, color: Colors.white.withValues(alpha: 0.06)),
         Expanded(child: switch (widget.tab) {
-          FocusTab.fx => FxStack(key: ValueKey('fx-${widget.layer.id}'), state: widget.state, layer: widget.layer, onOpenModule: widget.onOpenModule),
+          FocusTab.fx => FxStack(key: ValueKey('fx-${widget.layer.id}'), state: widget.state, layer: widget.layer),
           FocusTab.mixer => _MixerTab(state: widget.state, layer: widget.layer),
           FocusTab.clip => _ClipTab(state: widget.state, layer: widget.layer),
           FocusTab.automation => TrackAutomationPanel(state: widget.state, layer: widget.layer),
@@ -254,7 +254,7 @@ class _MixerTab extends StatelessWidget {
     return SingleChildScrollView(child: SizedBox(height: h, child: Padding(
       padding: const EdgeInsets.all(8),
       child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        ChannelStrip(state: state, layer: layer, index: state.project.layers.indexOf(layer), onSlot: (_) {}),
+        ChannelStrip(state: state, layer: layer, index: state.project.layers.indexOf(layer)),
         const SizedBox(width: 12),
         Expanded(child: ValueListenableBuilder<int>(
           valueListenable: state.layerValueTick(layer.id),
@@ -346,7 +346,7 @@ class _ClipTab extends StatelessWidget {
           onPressed: () {
             Haptics.tap();
             state.selectModule(module.id);
-            sections.openBuild(BuildTab(BuildTabKind.caw, module.id));
+            sections.openBuild(BuildTab(BuildTabKind.pattern, module.id));
           },
           icon: const Icon(Icons.open_in_new, color: Neon.dim)),
     ]));

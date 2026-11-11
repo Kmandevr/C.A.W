@@ -14,17 +14,13 @@ import '../model/app_state.dart';
 import '../model/settings.dart';
 import '../platform/system_bars.dart';
 import 'arranger_screen.dart';
-import 'exporter_screen.dart';
-import 'mixer_screen.dart';
-import 'automation_screen.dart';
+import 'export_page.dart';
 import 'cpp/build_section.dart';
 import 'dock/dock_controller.dart';
 import 'dock/dock_view.dart';
 import 'dock/floating_window.dart';
 import 'dock/layout.dart';
-import 'engine_lab_screen.dart';
 import 'file_manager_screen.dart';
-import 'plugin_builder_screen.dart';
 import 'key_router.dart';
 import 'theme.dart';
 import 'settings/settings_page.dart';
@@ -43,22 +39,12 @@ import 'arrange/templates_ui.dart';
 import '../model/templates.dart';
 
 /// The panel each view shortcut shows, by the index KeyRouter's `onView` passes.
-const _viewPanels = [
-  Panels.builder,
-  Panels.arrangement,
-  Panels.mixer,
-  Panels.engineLab,
-  Panels.automation,
-  Panels.exporter,
-  Panels.files,
-  Panels.pluginBuilder,
-];
+const _viewPanels = [Panels.builder, Panels.arrangement, Panels.files];
 
 /// The keyboard area of each panel.
 Area _areaOf(String panel) => switch (panel) {
       Panels.builder => Area.builder,
       Panels.arrangement => Area.arranger,
-      Panels.exporter => Area.exporter,
       _ => Area.global,
     };
 
@@ -177,47 +163,33 @@ class _ShellState extends State<Shell> {
     }
   }
 
-  /// Opens the selected .caw module in Build (the older screens' "open in Builder").
-  void _openBuilder() {
+  /// Opens the selected pattern in Build (Arrange's "Open in Sounds" on a clip).
+  void _openPattern() {
     final id = s.selectedModuleId;
-    id == null ? _sections.show(Section.build) : _sections.openBuild(BuildTab(BuildTabKind.caw, id));
+    id == null || !s.isPattern(id)
+        ? _sections.show(Section.build)
+        : _sections.openBuild(BuildTab(BuildTabKind.pattern, id));
     if (_dock.form == FormFactor.desktop) _dock.reveal(Panels.builder);
   }
 
-  /// Shows [panel]: docked on desktop; on a phone its section, or a page of its own for the other workspaces.
+  /// Shows [panel]: docked on desktop; on a phone its section.
   void _reveal(BuildContext context, String panel) {
     if (_dock.form == FormFactor.desktop) return _dock.reveal(panel);
     final section = sectionOfPanel(panel);
-    if (section != null) return _sections.show(section);
-    final screen = _screens()[panel];
-    if (screen == null) return;
-    Navigator.of(context).push(MaterialPageRoute<void>(
-      builder: (_) => GlassPage(
-        child: Scaffold(
-          backgroundColor: Glass.active ? Colors.transparent : null,
-          appBar: AppBar(title: Text(dockPanelTitle(panel)), backgroundColor: Colors.transparent),
-          body: SafeArea(top: false, child: screen),
-        ),
-      ),
-    ));
+    if (section != null) _sections.show(section);
   }
 
   Map<String, Widget> _screens() => {
         Panels.builder: BuildSection(state: s),
         Panels.arrangement: ArrangerScreen(
           state: s,
-          onOpenPattern: _openBuilder,
+          onOpenPattern: _openPattern,
           onOpenModule: (id) {
             s.selectModule(id);
-            _openBuilder();
+            _openPattern();
           },
         ),
-        Panels.mixer: MixerScreen(state: s, onOpenBuilder: _openBuilder),
-        Panels.engineLab: EngineLabScreen(state: s, onOpenBuilder: _openBuilder),
-        Panels.automation: AutomationScreen(state: s),
-        Panels.exporter: ExporterScreen(state: s),
-        Panels.files: FileManagerScreen(state: s, onOpenBuilder: _openBuilder),
-        Panels.pluginBuilder: PluginBuilderScreen(state: s, onOpenBuilder: _openBuilder),
+        Panels.files: FileManagerScreen(state: s, onOpenBuilder: _openPattern),
       };
 
   @override
@@ -260,6 +232,7 @@ class _ShellState extends State<Shell> {
                               ? _areaOf(_dock.keyPanel)
                               : _areaOf(panelOfSection(_sections.current)),
                           onView: (i) => _reveal(context, _viewPanels[i]),
+                          onExport: () => showExportPage(context, s),
                           child: _dock.form == FormFactor.desktop
                               ? SafeArea(child: _desktop(context, screens))
                               : _phone(context, screens, pad, landscape: _dock.form == FormFactor.phoneLandscape),
@@ -279,14 +252,21 @@ class _ShellState extends State<Shell> {
   Object _transportLook() => (s.transportOn, s.canUndo, s.canRedo, s.pausedStep, s.project, s.project.bpm,
       s.project.name, LiveMidi.current, AutomationWriter.current);
 
-  Widget? _banner() => s.engineError != null || s.audioError != null || s.openError != null
-      ? Container(
-          width: double.infinity,
-          color: Neon.pink.withValues(alpha: 0.15),
-          padding: const EdgeInsets.all(8),
-          child: Text(s.engineError ?? s.audioError ?? s.openError!, style: const TextStyle(color: Neon.pink)),
-        )
-      : null;
+  Widget? _banner() {
+    final error = s.engineError ?? s.audioError ?? s.openError;
+    // A note about the project just opened (its .caw sounds were left out), one line, until the next project opens.
+    final notice = error == null ? s.openNotice : null;
+    if (error == null && notice == null) return null;
+    final color = error != null ? Neon.pink : Neon.yellow;
+    return Container(
+      key: ValueKey(error != null ? 'banner-error' : 'banner-notice'),
+      width: double.infinity,
+      color: color.withValues(alpha: 0.15),
+      padding: const EdgeInsets.all(8),
+      child: Text(error ?? notice!, maxLines: error != null ? null : 1, overflow: error != null ? null : TextOverflow.ellipsis,
+          style: TextStyle(color: color)),
+    );
+  }
 
   /// Desktop and tablets: the rail, the transport bar and the docking panels.
   Widget _desktop(BuildContext context, Map<String, Widget> screens) => Row(children: [
@@ -399,13 +379,6 @@ class _ShellState extends State<Shell> {
                 child: const Pressable(child: SizedBox(height: 40, child: Center(child: CrowLogo(size: 22)))),
               ),
             ),
-            bottom: Pressable(child: IconButton(
-              key: const ValueKey('more-tools'),
-              tooltip: 'More: mixer, automation, export…',
-              color: Neon.dim,
-              icon: const Icon(Icons.more_vert),
-              onPressed: () => _showTools(context),
-            )),
           )),
           Expanded(
             child: Column(children: [
@@ -431,7 +404,7 @@ class _ShellState extends State<Shell> {
       );
     }
     final status = Selected(select: () => (s.project, s.project.name, s.project.bpm),
-        builder: (_) => _StatusRow(state: s, onTools: () => _showTools(context)));
+        builder: (_) => _StatusRow(state: s));
     final bar = Glass.active ? Neon.panel.withValues(alpha: 0.6) : Neon.panel;
     return Column(children: [
       // The system status bar's strip keeps the bar colour; the status row tucks away under it.
@@ -453,38 +426,12 @@ class _ShellState extends State<Shell> {
       ],
     ]);
   }
-
-  /// The phone's other workspaces (the mixer, automation, export, the engine lab, the .caw plugin builder).
-  Future<void> _showTools(BuildContext context) => showGlassSheet<void>(
-        context: context,
-        backgroundColor: Neon.panel,
-        isScrollControlled: true,
-        builder: (sheet) => SafeArea(
-          child: ListView(shrinkWrap: true, children: [
-            const Heading('More'),
-            for (final id in const [Panels.mixer, Panels.automation, Panels.exporter, Panels.engineLab, Panels.pluginBuilder])
-              ListTile(
-                key: ValueKey('more-$id'),
-                dense: true,
-                leading: Icon(_panelIcon(id), color: Neon.dim, size: 19),
-                title: Text(dockPanelTitle(id)),
-                // One line each on what it is for, so the less obvious ones (Engine lab, Plugins) say so.
-                subtitle: Text(_panelBlurb(id), style: const TextStyle(fontSize: 11.5, color: Neon.dim)),
-                onTap: () {
-                  Navigator.pop(sheet);
-                  _reveal(context, id);
-                },
-              ),
-          ]),
-        ),
-      );
 }
 
-/// The phone's slim top row: the project (tap for its menu), the tempo, the song position and CPU, and More.
+/// The phone's slim top row: the project (tap for its menu, Export among it), the tempo, and CPU.
 class _StatusRow extends StatelessWidget {
-  const _StatusRow({required this.state, required this.onTools});
+  const _StatusRow({required this.state});
   final AppState state;
-  final VoidCallback onTools;
 
   @override
   Widget build(BuildContext context) {
@@ -518,15 +465,7 @@ class _StatusRow extends StatelessWidget {
         _BpmButton(state: state),
         const SizedBox(width: 8),
         _CpuReadout(state: state),
-        IconButton(
-          key: const ValueKey('more-tools'),
-          tooltip: 'More: mixer, automation, export…',
-          iconSize: 19,
-          constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
-          color: Neon.dim,
-          icon: const Icon(Icons.more_vert),
-          onPressed: onTools,
-        ),
+        const SizedBox(width: 8),
       ]),
     );
   }
@@ -576,7 +515,6 @@ Future<void> showLayoutMenu(BuildContext context, DockController dock) => showGl
                 emptySelectionAllowed: true,
                 segments: const [
                   ButtonSegment(value: DockPreset.arrange, label: Text('Arrange')),
-                  ButtonSegment(value: DockPreset.mix, label: Text('Mix')),
                   ButtonSegment(value: DockPreset.code, label: Text('Code')),
                 ],
                 selected: const {},
@@ -603,24 +541,10 @@ Future<void> showLayoutMenu(BuildContext context, DockController dock) => showGl
       ),
     );
 
-String _panelBlurb(String id) => switch (id) {
-      Panels.mixer => 'Every track side by side: levels, pan, routing',
-      Panels.automation => 'Volume, pan and parameter lanes over the song',
-      Panels.exporter => 'Render the loop or song to WAV or MIDI',
-      Panels.engineLab => 'CPU, peaks, signal paths, scope and spectrum',
-      Panels.pluginBuilder => 'Make and package .caw instruments and effects',
-      _ => '',
-    };
-
 IconData _panelIcon(String id) => switch (id) {
       Panels.builder => Icons.code,
       Panels.arrangement => Icons.view_timeline,
-      Panels.mixer => Icons.tune,
-      Panels.engineLab => Icons.account_tree,
-      Panels.automation => Icons.show_chart,
-      Panels.exporter => Icons.ios_share,
       Panels.files => Icons.folder_open,
-      Panels.pluginBuilder => Icons.extension,
       _ => Icons.dashboard,
     };
 
@@ -915,6 +839,17 @@ Future<void> showProjectMenu(BuildContext context, AppState s) async {
             onTap: () {
               Navigator.pop(context);
               if (outer.mounted) saveProjectTemplate(outer, s);
+            },
+          ),
+          ListTile(
+            key: const ValueKey('project-export'),
+            leading: const Icon(Icons.ios_share, color: Neon.yellow),
+            title: const Text('Export…'),
+            subtitle: const Text('The song or stems, a loop, a one-shot, a wavetable or MIDI',
+                style: TextStyle(color: Neon.dim)),
+            onTap: () {
+              Navigator.pop(context);
+              if (outer.mounted) showExportPage(outer, s);
             },
           ),
           ListTile(

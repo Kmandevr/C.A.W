@@ -1,36 +1,30 @@
-// Code editor for modules: syntax highlighting, the symbol key row for phone typing, and jump-to-error.
+// The pattern text editor (note clips, #158): highlighting, the symbol key row for phone typing, and jump-to-error.
+// C++ has its own editor (cpp/cpp_editor.dart).
 import 'package:flutter/material.dart';
 
 import '../model/settings.dart';
 import 'code_prefs.dart';
 import 'theme.dart';
 
-const _keywords = {'let', 'param', 'in', 'global', 'export', 'fn', 'on', 'off', 'slide', 'prob', 'ratchet'};
-const _vars = {'t', 'sr', 'rate', 'bpm', 'beat', 'bar', 'step', 'pos', 'phase', 'time', 'seed', 'pi'};
-const _builtins = {
-  'sin', 'cos', 'tan', 'abs', 'floor', 'ceil', 'round', 'trunc', 'sqrt', 'exp', 'log', 'tanh', 'sign', 'fract', //
-  'mtof', 'popcount', 'clz', 'ctz', 'bitrev', 'bswap', 'bits', 'float', 'min', 'max', 'pow', 'rotl', 'rotr', //
-  'clamp', 'mix', 'hash', 'noise', 'sine', 'saw', 'square', 'tri', 'ad', 'lpf', 'hpf', 'bpf',
-};
+/// A note's extras (engine/src/pattern.cpp): slide, prob P, ratchet N, bend, vib, press, timbre.
+const _keywords = {'slide', 'prob', 'ratchet', 'bend', 'vib', 'press', 'timbre'};
 
 final _token = RegExp(r'//[^\n]*|/\*[\s\S]*?\*/|"[^"\n]*"?|0[xX][0-9a-fA-F]+|0[bB][01]+|\d*\.?\d+(?:[eE][+-]?\d+)?|'
     r'[A-G][#b]?\d\b|[A-Za-z_][A-Za-z0-9_]*|>>>|<<|>>|[-+*/%&|^~!<>=?:]+');
 final _note = RegExp(r'^[A-G][#b]?\d$');
 
-/// Colours one token of module code.
+/// Colours one token of pattern text.
 Color? tokenColor(String tok) {
   if (tok.startsWith('//') || tok.startsWith('/*')) return Neon.dim;
-  if (tok.startsWith('"')) return const Color(0xFFFF9EE8); // tooltips in quotes: soft pink
+  if (tok.startsWith('"')) return const Color(0xFFFF9EE8); // quoted text: soft pink
   if (RegExp(r'^[0-9.]').hasMatch(tok)) return Neon.yellow;
   if (_keywords.contains(tok)) return Neon.pink;
-  if (_vars.contains(tok)) return Neon.blue;
-  if (_builtins.contains(tok)) return Neon.green;
   if (_note.hasMatch(tok)) return Neon.yellow;
   if (RegExp(r'^[-+*/%&|^~!<>=?:]').hasMatch(tok)) return const Color(0xFFB9B9FF);
   return null;
 }
 
-/// A text controller that paints module code with token colours; header lines are dimmed.
+/// A text controller that paints pattern text with token colours; header lines are dimmed.
 class CodeController extends TextEditingController {
   CodeController({super.text});
 
@@ -68,35 +62,6 @@ class CodeController extends TextEditingController {
     value = TextEditingValue(text: next, selection: TextSelection.collapsed(offset: sel.start + s.length));
   }
 
-  static final _wordChar = RegExp(r'[A-Za-z0-9_.]');
-
-  /// Where the name being typed before the cursor starts (letters, digits, `_` and `.`).
-  int _wordStart() {
-    var i = selection.isValid ? selection.start : text.length;
-    while (i > 0 && _wordChar.hasMatch(text[i - 1])) {
-      i--;
-    }
-    return i;
-  }
-
-  /// The name being typed before the cursor, e.g. `env.ad` (empty when there is none).
-  String get wordAtCursor =>
-      selection.isValid && selection.isCollapsed ? text.substring(_wordStart(), selection.start) : '';
-
-  /// Replaces the name being typed with [s]. A call's placeholder arguments come out selected, ready to type over.
-  void completeWord(String s) {
-    final start = _wordStart();
-    final end = selection.isValid ? selection.end : text.length;
-    final open = s.indexOf('(');
-    final close = s.lastIndexOf(')');
-    value = TextEditingValue(
-      text: text.replaceRange(start, end, s),
-      selection: open < 0 || close <= open + 1
-          ? TextSelection.collapsed(offset: start + (open >= 0 && close == open + 1 ? close + 1 : s.length))
-          : TextSelection(baseOffset: start + open + 1, extentOffset: start + close),
-    );
-  }
-
   /// Puts the cursor at a 1-based line and column (from an error message).
   void jumpTo(int line, int col) {
     var offset = 0;
@@ -109,16 +74,9 @@ class CodeController extends TextEditingController {
   }
 }
 
-/// The faint example an empty module shows for its kind (generator, effect, pattern or library): a header and a
-/// first line. It is only a hint; the file stays empty until you type.
-String codeHint(String kind) => switch (kind) {
-      'effect' => '---\nkind: effect\nname: My effect\n---\nin * 0.5',
-      'pattern' => '---\nkind: pattern\nname: My pattern\nlength: 16\n---\n// at  note  len  vel\n0      A2    2    1',
-      'library' => '---\nkind: library\nnamespace: mine\nname: My tools\n---\n/// Folds a signal back into -1..1.\n'
-          'fn fold(x, amount) = sin(x * amount)',
-      _ => '---\nkind: generator\nname: My sound\nmode: float\n---\nsine(mtof(A3)) * 0.5\n\n'
-          '// or with no header, a bytebeat formula: t * (t >> 5 | t >> 8)',
-    };
+/// The faint example an empty pattern shows: a header and a first note. It is only a hint; the file stays empty
+/// until you type.
+const patternHint = '---\nkind: pattern\nname: My pattern\nlength: 16\n---\n// at  note  len  vel\n0      A2    2    1';
 
 /// The editable code area. [hint] shows faintly while it is empty.
 class CodeField extends StatelessWidget {
@@ -154,7 +112,7 @@ class CodeField extends StatelessWidget {
       );
 }
 
-/// Buttons for the symbols bytebeat code needs most, which phone keyboards hide.
+/// Buttons for the symbols pattern text needs most, which phone keyboards hide.
 class SymbolRow extends StatelessWidget {
   const SymbolRow({super.key, required this.onInsert, this.symbols = EditorLook.defaultKeyRow});
   final ValueChanged<String> onInsert;

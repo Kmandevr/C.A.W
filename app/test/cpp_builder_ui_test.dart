@@ -465,7 +465,7 @@ void main() {
 
     testWidgets('after a build, "Try it on a track" puts an effect on the picked track and an instrument on a new one',
         (tester) async {
-      state.addLayer(empty: true);
+      state.addLayer();
       final kick = state.project.layers.single..name = 'Kick';
       state.selectLayer(kick);
       final fx = CppComponentDoc.blankEffect(id: 'cpp1', name: 'Fuzz');

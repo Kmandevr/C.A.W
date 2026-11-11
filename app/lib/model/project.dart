@@ -1,4 +1,4 @@
-// The project as the app stores it (modules, layers, settings) and its translation to the engine's project JSON.
+// The project as the app stores it (patterns, layers, settings) and its translation to the engine's project JSON.
 import 'dart:convert';
 import 'dart:math';
 
@@ -12,7 +12,8 @@ String newId(String prefix) {
   return '$prefix${List.generate(8, (_) => r.nextInt(36).toRadixString(36)).join()}';
 }
 
-/// A sound module: its code in the editor, and the code last sent to the engine with Run.
+/// A pattern (a note clip's notes as text, #158): its text in the editor, and the text last sent to the engine with
+/// Run. The .caw sound modules that shared this type are gone (#160): a project loads with them dropped.
 class ModuleDoc {
   ModuleDoc({
     required this.id,
@@ -133,8 +134,8 @@ class AutomationLaneDoc {
       .map((p) => AutomationPointDoc.fromJson(p as Map<String, dynamic>)).toList());
 }
 
-/// A project-level automation lane: a module parameter (`param`), a global (`global`), or a native component's
-/// parameter (`component`: [layerId] null for the master chain, [component] its index in that chain).
+/// A project-level automation lane: a native instrument's parameter (`instrument`, on track [layerId]) or a native
+/// component's parameter (`component`: [layerId] null for the master chain, [component] its index in that chain).
 class ProjectAutomationLaneDoc {
   ProjectAutomationLaneDoc(
       {required this.targetType, required this.target, this.moduleId, this.layerId, this.component, List<AutomationPointDoc>? points,
@@ -163,7 +164,7 @@ class ProjectAutomationLaneDoc {
       };
 
   static ProjectAutomationLaneDoc fromJson(Map<String, dynamic> j) => ProjectAutomationLaneDoc(
-        targetType: j['target_type'] as String? ?? 'global',
+        targetType: j['target_type'] as String? ?? '',
         target: j['target'] as String? ?? '',
         moduleId: j['module'] as String?,
         layerId: j['layer'] as String?,
@@ -357,8 +358,6 @@ class LayerDoc {
     required this.id,
     required this.name,
     required this.color,
-    this.generatorId,
-    List<String>? effectIds,
     this.patternId,
     this.lengthSteps = 0,
     this.volume = 0.8,
@@ -377,7 +376,7 @@ class LayerDoc {
     this.spaceBelow = 0,
     this.ownColor = false,
     this.showLanes = false,
-  }) : effectIds = effectIds ?? [], clips = clips ?? [], automation = automation ?? [], components = components ?? [],
+  }) : clips = clips ?? [], automation = automation ?? [], components = components ?? [],
         sends = sends ?? [];
 
   /// The tallest visual spacer under a track, in logical pixels.
@@ -396,22 +395,19 @@ class LayerDoc {
   /// The track's automation lanes are open under it in the arrangement (its envelope button; hidden by default).
   /// Saved with the project, never sent to the engine.
   bool showLanes;
-  String? generatorId;
-  List<String> effectIds;
-  String? patternId; // a pattern module whose notes play the generator; it sets the layer's length
+  String? patternId; // a legacy single pattern (migrated to a clip at load); it sets the layer's length
   int lengthSteps; // 16ths; 0 follows the project loop
   double volume, pan;
   bool mute, solo;
   List<ClipDoc> clips;
   List<AutomationLaneDoc> automation;
-  List<ComponentUseDoc> components; // native C++ effects after the chain, before volume and pan (a bus folder's too)
+  List<ComponentUseDoc> components; // native C++ effects after the instrument, before volume and pan (a bus folder's too)
 
   /// Copies of the track's sound into bus folders (a reverb bus, a delay bus), beside its route to its folder's bus
   /// or the master; at most [SendDoc.maxSends].
   List<SendDoc> sends;
 
-  /// A native C++ instrument (a built-in or one of the project's) playing the track's notes instead of a .caw
-  /// generator: the two are exclusive, so setting one clears the other ([setInstrument], [generatorId]).
+  /// The native C++ instrument (a built-in or one of the project's) playing the track's notes ([setInstrument]).
   ComponentUseDoc? instrument;
   String? parentId;
   bool isFolder, busEnabled, collapsed;
@@ -421,30 +417,23 @@ class LayerDoc {
   double spaceBelow;
 
   /// Whether the track's sound can differ between left and right before its pan (a native instrument or effect,
-  /// or a folder's bus summing its tracks): its meters then show each side. A .caw chain is mono (its pan alone
-  /// places it), so one meter tells all there is.
+  /// or a folder's bus summing its tracks): its meters then show each side. An empty track has one meter.
   bool get isStereo => isFolder || instrument != null || components.isNotEmpty;
 
-  /// The .caw modules the engine runs: the generator then the effects; with a native [instrument], only the effects.
-  List<String> get chain => instrument != null ? [...effectIds] : [?generatorId, ...effectIds];
-
-  /// Makes [componentId] the track's instrument (null: none), replacing any .caw generator. The same id keeps its
-  /// values; another one starts from its defaults.
+  /// Makes [componentId] the track's instrument (null: none). The same id keeps its values; another one starts
+  /// from its defaults.
   void setInstrument(String? componentId) {
     if (componentId == null) {
       instrument = null;
       return;
     }
     if (instrument?.id != componentId) instrument = ComponentUseDoc(componentId);
-    generatorId = null;
   }
 
   Map<String, dynamic> toJson() => {
         'id': id,
         'name': name,
         'color': color,
-        'generator': generatorId,
-        'effects': effectIds,
         'pattern': patternId,
         'length_steps': lengthSteps,
         'volume': volume,
@@ -466,8 +455,6 @@ class LayerDoc {
         id: j['id'] as String,
         name: (j['name'] as String?) ?? 'Layer',
         color: (j['color'] as num?)?.toInt() ?? 0,
-        generatorId: j['generator'] as String?,
-        effectIds: ((j['effects'] as List?) ?? const []).cast<String>().toList(),
         patternId: j['pattern'] as String?,
         lengthSteps: (j['length_steps'] as num?)?.toInt() ?? 0,
         volume: (j['volume'] as num?)?.toDouble() ?? 0.8,
@@ -507,7 +494,6 @@ class ProjectDoc {
     this.seed = 0x7f3a,
     this.master = 0.7,
     this.seamCrossfade = true,
-    Map<String, double>? globals,
     List<ModuleDoc>? modules,
     List<LayerDoc>? layers,
     List<ProjectAutomationLaneDoc>? automation,
@@ -522,7 +508,6 @@ class ProjectDoc {
     List<MarkerDoc>? markers,
   })  : midiFiles = midiFiles ?? [],
         markers = markers ?? [],
-        globals = globals ?? {},
         modules = modules ?? [],
         layers = layers ?? [],
         automation = automation ?? [],
@@ -563,8 +548,11 @@ class ProjectDoc {
   int seed;
   double master;
   bool seamCrossfade;
-  Map<String, double> globals; // project-wide control values by name
-  List<ModuleDoc> modules;
+  List<ModuleDoc> modules; // the patterns
+
+  /// The names of the .caw sound modules dropped when this project was read ([fromJson]; never saved): the app
+  /// says so once. Old .caw projects are not converted (owner, 2026-11-10).
+  List<String> droppedModules = const [];
   List<LayerDoc> layers;
   List<ProjectAutomationLaneDoc> automation;
   List<String> libraryFolders;
@@ -664,9 +652,10 @@ class ProjectDoc {
     return null;
   }
 
-  /// The engine's project JSON (docs/engine.md, "Project file"). Modules get the code last run, not unrun edits.
+  /// The engine's project JSON (docs/engine.md, "Project file"). Patterns get the text last run, not unrun edits.
   String toEngineJson(
-      {List<String>? audition, String? auditionPattern, bool auditionOnly = false, int voices = 8, String swap = 'now',
+      {String? auditionPattern, bool auditionOnly = false, int voices = 8, String swap = 'now',
+      ComponentUseDoc? auditionInstrument, List<ComponentUseDoc> auditionComponents = const [],
       Set<String>? playableComponents, Map<String, String>? sourceOverrides, Set<String> suspendLanes = const {}}) {
     final engineLoopBars = engineLoopSteps ~/ stepsPerBar;
     // Native components the engine hasn't loaded (awaiting trust, blocked, failed to build) are left out, so the
@@ -707,7 +696,6 @@ class ProjectDoc {
         'voices': voices,
         'swap': swap,
         if (keyNumbers case (final root, final scale)) ...{'key_root': root, 'key_scale': scale},
-        'globals': globals,
         'automation': engineAutomation,
         'modules': [
           for (final m in modules)
@@ -719,7 +707,6 @@ class ProjectDoc {
             {
               'id': l.id,
               'name': l.name,
-              'chain': l.chain,
               // A bus folder runs its own effects (a reverb bus); a folder without a bus has none.
               if (playable(l.components).isNotEmpty && (!l.isFolder || l.busEnabled))
                 'components': [for (final c in playable(l.components)) c.toJson(withKey: routing.keyPlays(l, c))],
@@ -747,8 +734,13 @@ class ProjectDoc {
               'solo': l.solo,
             },
         ],
-        if (audition != null) 'audition': {'chain': audition, 'pattern': ?auditionPattern},
-        'audition_only': auditionOnly && audition != null,
+        // The preview: a C++ instrument and its effects (left out while not loaded) playing a pattern, as a track does.
+        if (auditionInstrument != null) 'audition': {
+          'pattern': ?auditionPattern,
+          if (playableComponents?.contains(auditionInstrument.id) ?? true) 'instrument': auditionInstrument.toJson(),
+          if (playable(auditionComponents).isNotEmpty) 'components': [for (final c in playable(auditionComponents)) c.toJson()],
+        },
+        'audition_only': auditionOnly && auditionInstrument != null,
       });
     return result;
   }
@@ -764,7 +756,6 @@ class ProjectDoc {
         'seed': seed,
         'master': master,
         'seam_crossfade': seamCrossfade,
-        'globals': globals,
         'automation': [for (final lane in automation) lane.toJson()],
         'modules': [for (final m in modules) m.toJson()],
         'layers': [for (final l in layers) l.toJson()],
@@ -826,10 +817,11 @@ class ProjectDoc {
       seed: (j['seed'] as num?)?.toInt() ?? 0,
       master: (j['master'] as num?)?.toDouble() ?? 0.7,
       seamCrossfade: j['seam_crossfade'] != false,
-      globals: ((j['globals'] as Map?) ?? {}).map((k, v) => MapEntry(k as String, (v as num).toDouble())),
       automation: ((j['automation'] as List?) ?? const []).map((lane) => ProjectAutomationLaneDoc.fromJson(lane as Map<String, dynamic>)).toList(),
-      modules: ((j['modules'] as List?) ?? const [])
-          .map((m) => ModuleDoc.fromJson(m as Map<String, dynamic>)).toList(),
+      modules: [
+        for (final m in ((j['modules'] as List?) ?? const []).map((m) => ModuleDoc.fromJson(m as Map<String, dynamic>)))
+          if (isPatternSource(m.source) || isPatternSource(m.runSource)) m,
+      ],
       libraryFolders: ((j['library_folders'] as List?) ?? const []).whereType<String>().take(512).toList(),
       savedLibrarySearches: {
         for (final entry in ((j['saved_library_searches'] as Map?) ?? const {}).entries.take(32))
@@ -865,6 +857,12 @@ class ProjectDoc {
       }).toList(),
     );
 
+    // .caw sound modules are gone (#160): the project loads without them and says which went.
+    project.droppedModules = [
+      for (final raw in ((j['modules'] as List?) ?? const []).whereType<Map>())
+        if (!project.modules.any((m) => m.id == raw['id'])) (raw['name'] as String?) ?? 'Module',
+    ];
+
     // Rebuild a safe, complete virtual-folder tree from both the folder list and module assignments.
     final safeFolders = <String>{};
     void addFolderPath(String raw) {
@@ -892,8 +890,7 @@ class ProjectDoc {
     project.libraryFolders = safeFolders.toList()..sort();
 
     project.automation = project.automation.where((lane) =>
-      lane.target.isNotEmpty && (lane.targetType == 'global' ||
-        (lane.targetType == 'param' && lane.moduleId?.isNotEmpty == true) ||
+      lane.target.isNotEmpty && (
         // A native instrument's parameter, on its track (the Automate button writes these).
         (lane.targetType == 'instrument' && lane.layerId?.isNotEmpty == true) ||
         // A native component's parameter: its chain index (the layer is optional: absent is the master).
@@ -948,7 +945,10 @@ String? _normalizeProjectFolderPath(String raw) {
   return parts.join('/');
 }
 
-/// Reads a header value (name, summary, kind) straight from module source, for display before it compiles.
+/// Whether [source] is a pattern's text (its header says `kind: pattern`), the one kind of module the app keeps.
+bool isPatternSource(String source) => headerValue(source, 'kind') == 'pattern';
+
+/// Reads a header value (name, summary, kind) straight from a pattern's text, for display before it compiles.
 String? headerValue(String source, String key) {
   final lines = const LineSplitter().convert(source);
   if (lines.isEmpty || lines.first.trim() != '---') return null;

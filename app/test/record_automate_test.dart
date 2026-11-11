@@ -448,7 +448,6 @@ void main() {
       final s = AppState();
       addTearDown(s.dispose);
       s.engine = Engine.create();
-      s.templates = Engine.templates();
       s.project = s.starterProject();
       s.ready = true;
       s.starting = false;

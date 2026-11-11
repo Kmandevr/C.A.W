@@ -1,4 +1,5 @@
-// The Files browser's catalogue: every asset (built-in effects, C++ components and files, .caw modules, patterns), its folder tree, uses and edits.
+// The Files browser's catalogue: every asset (built-in effects, C++ components and files, patterns, MIDI files,
+// presets, samples), its folder tree, uses and edits.
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -19,10 +20,7 @@ enum FileAssetType {
   builtinEffect, // part of the engine (org.caw.*): always there, read-only
   cppComponent,  // a project C++ component (an effect)
   cppFile,       // one source file of a project C++ component
-  cawEffect,     // a .caw effect module
-  cawGenerator,  // a .caw generator or synth
-  cawLibrary,    // a .caw library module
-  pattern,       // a .caw pattern (MIDI notes)
+  pattern,       // a pattern (a note clip's notes as text)
   midiFile,      // an imported MIDI file: its parts are patterns
   devicePreset,  // a user preset of one device (app-wide, not in the project)
   trackPreset,   // a user track preset: an instrument and effects (app-wide)
@@ -38,9 +36,6 @@ extension FileAssetTypeInfo on FileAssetType {
         FileAssetType.builtinEffect => 'FX',
         FileAssetType.cppComponent => 'C++',
         FileAssetType.cppFile => 'SRC',
-        FileAssetType.cawEffect => 'FX',
-        FileAssetType.cawGenerator => 'GEN',
-        FileAssetType.cawLibrary => 'LIB',
         FileAssetType.pattern => 'MIDI',
         FileAssetType.midiFile => 'MID',
         FileAssetType.devicePreset => 'PRE',
@@ -52,9 +47,6 @@ extension FileAssetTypeInfo on FileAssetType {
         FileAssetType.builtinEffect => 'Built-in effect',
         FileAssetType.cppComponent => 'C++ effect',
         FileAssetType.cppFile => 'C++ source file',
-        FileAssetType.cawEffect => '.caw effect',
-        FileAssetType.cawGenerator => '.caw instrument',
-        FileAssetType.cawLibrary => '.caw library',
         FileAssetType.pattern => 'Pattern',
         FileAssetType.midiFile => 'MIDI file',
         FileAssetType.devicePreset => 'Device preset',
@@ -63,10 +55,9 @@ extension FileAssetTypeInfo on FileAssetType {
       };
 
   FileAssetFilter get filter => switch (this) {
-        FileAssetType.builtinEffect || FileAssetType.cppComponent || FileAssetType.cawEffect ||
-            FileAssetType.devicePreset => FileAssetFilter.effects,
-        FileAssetType.cawGenerator || FileAssetType.trackPreset => FileAssetFilter.instruments,
-        FileAssetType.cppFile || FileAssetType.cawLibrary => FileAssetFilter.code,
+        FileAssetType.builtinEffect || FileAssetType.cppComponent || FileAssetType.devicePreset => FileAssetFilter.effects,
+        FileAssetType.trackPreset => FileAssetFilter.instruments,
+        FileAssetType.cppFile => FileAssetFilter.code,
         FileAssetType.pattern || FileAssetType.midiFile || FileAssetType.sampleFile => FileAssetFilter.patterns,
       };
 }
@@ -99,22 +90,19 @@ class FileAsset {
         FileAssetType.cppComponent => cpp!.componentId.isEmpty
             ? null
             : AssetDrag(AssetKind.nativeEffect, cpp!.componentId, name, instrument: isInstrument),
-        FileAssetType.cawEffect => AssetDrag(AssetKind.cawModule, module!.id, name),
-        FileAssetType.cawGenerator => AssetDrag(AssetKind.cawModule, module!.id, name, instrument: true),
         FileAssetType.pattern => AssetDrag(AssetKind.pattern, module!.id, name),
         FileAssetType.midiFile => AssetDrag(AssetKind.midiFile, midi!.id, name),
         FileAssetType.devicePreset => AssetDrag(AssetKind.devicePreset, preset!.id, name),
         FileAssetType.trackPreset => AssetDrag(AssetKind.trackPreset, preset!.id, name),
-        FileAssetType.cppFile || FileAssetType.cawLibrary || FileAssetType.sampleFile => null,
+        FileAssetType.cppFile || FileAssetType.sampleFile => null,
       };
 
   /// An instrument plays a track's notes: a native one by its descriptor (or, before a project C++ component is
-  /// built, by deriving from `caw::InstrumentProcessor`), and every .caw generator.
+  /// built, by deriving from `caw::InstrumentProcessor`).
   bool get isInstrument => switch (type) {
         FileAssetType.builtinEffect => native!.isInstrument || native!.role == 'instrument',
         FileAssetType.cppComponent => native?.isInstrument ??
             cpp!.files.values.any((source) => source.contains('InstrumentProcessor')),
-        FileAssetType.cawGenerator => true,
         _ => false,
       };
 
@@ -123,18 +111,18 @@ class FileAsset {
         FileAssetType.builtinEffect || FileAssetType.midiFile || FileAssetType.devicePreset ||
             FileAssetType.trackPreset || FileAssetType.sampleFile => null,
         FileAssetType.cppComponent || FileAssetType.cppFile => BuildTab(BuildTabKind.cpp, cpp!.componentId),
-        _ => BuildTab(BuildTabKind.caw, module!.id),
+        _ => BuildTab(BuildTabKind.pattern, module!.id),
       };
 
-  /// A .caw module or pattern can be auditioned with Solo preview.
-  bool get previewable => module != null && type != FileAssetType.cawLibrary;
+  /// A pattern can be auditioned with Solo preview.
+  bool get previewable => module != null;
 }
 
-/// What a folder holds. Folders are paths: `fav`, `fx`, `fx/builtin`, `fx/cpp`, `fx/caw`, `code`, `code/cpp`,
-/// `code/cpp/<component entry id>`, `code/caw`, `code/caw/<library folder>`, `audio`, `audio/patterns`,
+/// What a folder holds. Folders are paths: `fav`, `fx`, `fx/builtin`, `fx/cpp`, `code`, `code/cpp`,
+/// `code/cpp/<component entry id>`, `audio`, `audio/patterns`,
 /// `audio/midi`, `audio/samples` (sample packs), `audio/samples/<pack>`, `presets` (the user's presets, app-wide), `packs`.
-enum FilesFolderKind { favourites, effects, builtin, cppEffects, cawEffects, code, cppList, cppComponent, cawModules,
-  libraryFolder, audio, patterns, midiFiles, presets, packs, samplePacks, samplePack }
+enum FilesFolderKind { favourites, effects, builtin, cppEffects, code, cppList, cppComponent, audio, patterns, midiFiles,
+  presets, packs, samplePacks, samplePack }
 
 class FilesFolder {
   const FilesFolder(this.path, this.label, this.kind, [this.children = const []]);
@@ -147,17 +135,8 @@ class FilesFolder {
   bool get offersNewCpp => const {FilesFolderKind.effects, FilesFolderKind.cppEffects, FilesFolderKind.code,
     FilesFolderKind.cppList}.contains(kind);
 
-  /// "New .caw module" (and the kind it starts as): effects folders make effects, patterns folders patterns,
-  /// code folders a blank generator.
-  String? get newCawKind => switch (kind) {
-        FilesFolderKind.effects || FilesFolderKind.cawEffects => 'effect',
-        FilesFolderKind.code || FilesFolderKind.cawModules || FilesFolderKind.libraryFolder => 'generator',
-        FilesFolderKind.audio || FilesFolderKind.patterns => 'pattern',
-        _ => null,
-      };
-
-  /// The library folder path a new or imported module goes into ('' for none).
-  String get libraryPath => kind == FilesFolderKind.libraryFolder ? path.substring('code/caw/'.length) : '';
+  /// "New pattern" belongs in the audio and patterns folders.
+  bool get offersNewPattern => kind == FilesFolderKind.audio || kind == FilesFolderKind.patterns;
 }
 
 /// Favourites, kept app-wide in `files-favourites.json` next to settings.json (in memory without a folder).
@@ -242,16 +221,7 @@ extension FilesCatalog on AppState {
 
   // ---------- assets ----------
 
-  FileAsset _moduleAsset(ModuleDoc m) {
-    final type = isPattern(m.id)
-        ? FileAssetType.pattern
-        : isEffect(m.id)
-            ? FileAssetType.cawEffect
-            : isLibrary(m.id)
-                ? FileAssetType.cawLibrary
-                : FileAssetType.cawGenerator;
-    return FileAsset._('mod:${m.id}', m.name, type, module: m);
-  }
+  FileAsset _moduleAsset(ModuleDoc m) => FileAsset._('mod:${m.id}', m.name, FileAssetType.pattern, module: m);
 
   List<FileAsset> get builtinAssets => [
         for (final c in nativeCatalog.where((c) => c.builtin))
@@ -268,7 +238,8 @@ extension FilesCatalog on AppState {
           FileAsset._('file:${c.id}/$path', path, FileAssetType.cppFile, cpp: c, filePath: path),
       ];
 
-  List<FileAsset> get moduleAssets => [for (final m in project.modules) _moduleAsset(m)]..sort(_byName);
+  List<FileAsset> get moduleAssets =>
+      [for (final m in project.modules) if (isPattern(m.id)) _moduleAsset(m)]..sort(_byName);
 
   List<FileAsset> get midiFileAssets => [
         for (final f in project.midiFiles) FileAsset._('midi:${f.id}', f.name, FileAssetType.midiFile, midi: f),
@@ -307,25 +278,17 @@ extension FilesCatalog on AppState {
 
   /// The tree: Favourites, Effects & instruments, Code, Audio & MIDI (Packs only when the app has any: none yet).
   List<FilesFolder> get filesTree {
-    final libFolders = project.libraryFolders.toList()..sort();
-    List<FilesFolder> libChildren(String parent) => [
-          for (final f in libFolders)
-            if ((parent.isEmpty ? !f.contains('/') : f.startsWith('$parent/') && !f.substring(parent.length + 1).contains('/')))
-              FilesFolder('code/caw/$f', f.split('/').last, FilesFolderKind.libraryFolder, libChildren(f)),
-        ];
     return [
       const FilesFolder('fav', 'Favourites', FilesFolderKind.favourites),
       const FilesFolder('fx', 'Effects & instruments', FilesFolderKind.effects, [
         FilesFolder('fx/builtin', 'Built-in', FilesFolderKind.builtin),
         FilesFolder('fx/cpp', 'My C++ effects', FilesFolderKind.cppEffects),
-        FilesFolder('fx/caw', '.caw modules', FilesFolderKind.cawEffects),
       ]),
       FilesFolder('code', 'Code', FilesFolderKind.code, [
         FilesFolder('code/cpp', 'C++ components', FilesFolderKind.cppList, [
           for (final c in [...project.cppComponents]..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase())))
             FilesFolder('code/cpp/${c.id}', c.name, FilesFolderKind.cppComponent),
         ]),
-        FilesFolder('code/caw', '.caw modules', FilesFolderKind.cawModules, libChildren('')),
       ]),
       FilesFolder('audio', 'Audio & MIDI', FilesFolderKind.audio, [
         const FilesFolder('audio/patterns', 'Patterns', FilesFolderKind.patterns),
@@ -361,17 +324,11 @@ extension FilesCatalog on AppState {
         FilesFolderKind.favourites => allAssets.where(isFavourite).toList(),
         FilesFolderKind.builtin => builtinAssets,
         FilesFolderKind.cppEffects => cppAssets,
-        FilesFolderKind.cawEffects => moduleAssets
-            .where((a) => a.type == FileAssetType.cawEffect || a.type == FileAssetType.cawGenerator)
-            .toList(),
         FilesFolderKind.cppComponent => () {
             final c = project.cppComponents.where((c) => 'code/cpp/${c.id}' == folder.path).firstOrNull;
             return c == null ? <FileAsset>[] : cppFileAssets(c);
           }(),
-        FilesFolderKind.cawModules =>
-          moduleAssets.where((a) => a.module!.folderPath.isEmpty || !project.libraryFolders.contains(a.module!.folderPath)).toList(),
-        FilesFolderKind.libraryFolder => moduleAssets.where((a) => a.module!.folderPath == folder.libraryPath).toList(),
-        FilesFolderKind.patterns => moduleAssets.where((a) => a.type == FileAssetType.pattern).toList(),
+        FilesFolderKind.patterns => moduleAssets,
         FilesFolderKind.midiFiles => midiFileAssets,
         FilesFolderKind.presets => presetAssets,
         FilesFolderKind.samplePack => [
@@ -416,7 +373,7 @@ extension FilesCatalog on AppState {
     } else if (a.module != null) {
       final id = a.module!.id;
       for (final l in project.layers) {
-        if (l.generatorId == id || l.effectIds.contains(id) || l.patternId == id || l.clips.any((c) => c.patternId == id)) {
+        if (l.patternId == id || l.clips.any((c) => c.patternId == id)) {
           out.add(l.name);
         }
       }
@@ -553,8 +510,6 @@ extension FilesCatalog on AppState {
           folderPath: m.folderPath,
           tags: [...m.tags],
         );
-        final kind = blankKinds[m.id];
-        if (kind != null) blankKinds[copy.id] = kind;
         if (info[m.id] != null) info[copy.id] = info[m.id]!;
         editProject((p) => p.modules.insert(p.modules.indexOf(m) + 1, copy));
         return 'mod:${copy.id}';

@@ -1,4 +1,5 @@
-// Exporter: the Export song sheet (mix, stems, regions), and a loop, free-length take, one-shot, wavetable or MIDI file saved with the picker.
+// The Export page (the project menu's Export…, Ctrl+3): the Export song sheet (mix, stems, regions), and a loop,
+// free-length take, one-shot, wavetable or MIDI file saved with the picker.
 import 'dart:async';
 import 'dart:io';
 import 'dart:isolate';
@@ -11,7 +12,10 @@ import '../model/app_state.dart';
 import '../model/project.dart';
 import '../platform/save_copy.dart';
 import '../model/settings.dart';
+import '../engine/component_info.dart';
+import '../model/arrange_fx.dart';
 import 'export_sheet.dart';
+import 'glass.dart';
 import 'haptics.dart';
 import 'theme.dart';
 import 'widgets.dart';
@@ -39,15 +43,26 @@ class _QueuedExport {
   final double seconds, bpm;
 }
 
-class ExporterScreen extends StatefulWidget {
-  const ExporterScreen({super.key, required this.state});
+/// Opens the Export page over the frame (it was the Export workspace, folded into the project menu with #139).
+Future<void> showExportPage(BuildContext context, AppState state) => Navigator.of(context).push(MaterialPageRoute<void>(
+      builder: (_) => GlassPage(
+        child: Scaffold(
+          backgroundColor: Glass.active ? Colors.transparent : null,
+          appBar: AppBar(title: const Text('Export'), backgroundColor: Colors.transparent),
+          body: SafeArea(top: false, child: ListenableBuilder(listenable: state, builder: (_, _) => ExportPage(state: state))),
+        ),
+      ),
+    ));
+
+class ExportPage extends StatefulWidget {
+  const ExportPage({super.key, required this.state});
   final AppState state;
 
   @override
-  State<ExporterScreen> createState() => _ExporterScreenState();
+  State<ExportPage> createState() => _ExportPageState();
 }
 
-class _ExporterScreenState extends State<ExporterScreen> {
+class _ExportPageState extends State<ExportPage> {
   // Settings › Export: what the exporter opens with.
   late ExportKind _kind = ExportKind.values.firstWhere((k) => k.name == s.settings.exportKind, orElse: () => ExportKind.loop);
   late bool _advanced = _kind != ExportKind.loop; // a non-loop default needs the full exporter
@@ -55,7 +70,7 @@ class _ExporterScreenState extends State<ExporterScreen> {
   late bool _float = s.settings.exportFloat32;
   late double _seconds = s.settings.exportSeconds;
   String? _layerId;
-  String? _moduleId;
+  String? _tableLayerId; // the instrument track a wavetable sweeps
   String? _patternId;
   String? _param;
   int _frames = 64;
@@ -109,8 +124,8 @@ class _ExporterScreenState extends State<ExporterScreen> {
         final l = p.layers.where((l) => l.id == _layerId).firstOrNull;
         return '${base}_${_safe(l?.name ?? 'layer')}.wav';
       case ExportKind.wavetable:
-        final m = p.module(_moduleId);
-        return '${base}_${_safe(m?.name ?? 'table')}_${_frames}f.wav';
+        final l = p.layers.where((l) => l.id == _tableLayerId).firstOrNull;
+        return '${base}_${_safe(l?.name ?? 'table')}_${_frames}f.wav';
       case ExportKind.midi:
         final m = p.module(_patternId);
         return '${base}_${_safe(m?.name ?? 'pattern')}.mid';
@@ -145,8 +160,8 @@ class _ExporterScreenState extends State<ExporterScreen> {
         _layerId = entry.target;
       }
       if (entry.kind == ExportKind.wavetable.name &&
-          s.project.modules.any((module) => module.id == entry.target)) {
-        _moduleId = entry.target;
+          s.project.layers.any((layer) => layer.id == entry.target)) {
+        _tableLayerId = entry.target;
       }
       if (entry.kind == ExportKind.midi.name &&
           s.project.module(entry.target) != null && s.isPattern(entry.target)) {
@@ -220,7 +235,7 @@ class _ExporterScreenState extends State<ExporterScreen> {
     final pattern = s.project.module(_patternId);
     final target = switch (_kind) {
       ExportKind.oneShot => _layerId ?? '',
-      ExportKind.wavetable => _moduleId ?? '',
+      ExportKind.wavetable => _tableLayerId ?? '',
       ExportKind.midi => pattern?.id ?? '',
       _ => '',
     };
@@ -399,7 +414,7 @@ class _ExporterScreenState extends State<ExporterScreen> {
         frames: _frames,
         target: switch (_kind) {
           ExportKind.oneShot => _layerId ?? '',
-          ExportKind.wavetable => _moduleId ?? '',
+          ExportKind.wavetable => _tableLayerId ?? '',
           ExportKind.midi => _patternId ?? '',
           _ => '',
         },
@@ -420,13 +435,13 @@ class _ExporterScreenState extends State<ExporterScreen> {
     final p = s.project;
     final target = switch (_kind) {
       ExportKind.oneShot => _layerId ?? '',
-      ExportKind.wavetable => _moduleId ?? '',
+      ExportKind.wavetable => _tableLayerId ?? '',
       ExportKind.midi => _patternId ?? '',
       _ => '',
     };
     if ((_kind == ExportKind.oneShot || _kind == ExportKind.wavetable) && target.isEmpty) {
       setState(() {
-        _message = _kind == ExportKind.oneShot ? 'Pick a layer first.' : 'Pick a module first.';
+        _message = _kind == ExportKind.oneShot ? 'Pick a layer first.' : 'Pick an instrument track first.';
         _messageIsError = true;
       });
       return;
@@ -546,16 +561,18 @@ class _ExporterScreenState extends State<ExporterScreen> {
   @override
   Widget build(BuildContext context) {
     final p = s.project;
-    final layers = p.layers.where((l) => l.generatorId != null || l.instrument != null).toList();
+    final layers = p.layers.where((l) => !l.isFolder && l.instrument != null).toList();
     if (_layerId == null || !layers.any((l) => l.id == _layerId)) _layerId = layers.firstOrNull?.id;
-    final modules = p.modules.where((m) => (s.info[m.id]?.ok ?? false) && !s.isLibrary(m.id)).toList();
     final patterns = p.modules.where((m) => s.isPattern(m.id)).toList();
     if (_patternId == null || !patterns.any((m) => m.id == _patternId)) _patternId = patterns.firstOrNull?.id;
-    if (_moduleId == null || !modules.any((m) => m.id == _moduleId)) {
-      _moduleId = (modules.where((m) => s.isGenerator(m.id)).firstOrNull ?? modules.firstOrNull)?.id;
-    }
-    final params = s.info[_moduleId]?.params ?? const <ParamInfo>[];
-    if (_param != null && !params.any((x) => x.name == _param)) _param = null;
+    // A wavetable is made from a track's C++ instrument (with its values), sweeping one of its knobs.
+    if (_tableLayerId == null || !layers.any((l) => l.id == _tableLayerId)) _tableLayerId = layers.firstOrNull?.id;
+    final tableLayer = layers.where((l) => l.id == _tableLayerId).firstOrNull;
+    final params = [
+      for (final q in s.componentInfo(tableLayer?.instrument?.id ?? '')?.parameters ?? const <ComponentParameterInfo>[])
+        if (!q.isChoice) q,
+    ];
+    if (_param != null && !params.any((x) => x.id == _param)) _param = null;
     final busy = _job != null || _midiBusy || _saving || _queueRunning;
     return ListView(padding: const EdgeInsets.fromLTRB(12, 8, 12, 96), children: [
       // The Export sheet: the song or its stems, a range, loudness and a queue (roadmap 0.3, 6.4, 6.5).
@@ -704,7 +721,7 @@ class _ExporterScreenState extends State<ExporterScreen> {
             DropdownButton<String>(
               value: _layerId,
               isExpanded: true,
-              hint: const Text('No layers with a generator'),
+              hint: const Text('No tracks with an instrument'),
               items: [for (final l in layers) DropdownMenuItem(value: l.id, child: Text(l.name))],
               onChanged: busy ? null : (v) => setState(() => _layerId = v),
             ),
@@ -718,11 +735,11 @@ class _ExporterScreenState extends State<ExporterScreen> {
             ),
           if (_kind == ExportKind.wavetable) ...[
             DropdownButton<String>(
-              value: _moduleId,
+              value: _tableLayerId,
               isExpanded: true,
-              hint: const Text('No compiled modules'),
-              items: [for (final m in modules) DropdownMenuItem(value: m.id, child: Text(m.name))],
-              onChanged: busy ? null : (v) => setState(() => _moduleId = v),
+              hint: const Text('No tracks with an instrument'),
+              items: [for (final l in layers) DropdownMenuItem(value: l.id, child: Text(l.name))],
+              onChanged: busy ? null : (v) => setState(() => _tableLayerId = v),
             ),
             LayoutBuilder(builder: (context, constraints) {
               final sweep = DropdownButton<String?>(
@@ -730,8 +747,8 @@ class _ExporterScreenState extends State<ExporterScreen> {
                 isExpanded: constraints.maxWidth < 560,
                 items: [
                   const DropdownMenuItem<String?>(value: null, child: Text('nothing')),
-                  for (final x in params) DropdownMenuItem<String?>(value: x.name,
-                    child: Text(x.name, maxLines: 1, overflow: TextOverflow.ellipsis)),
+                  for (final x in params) DropdownMenuItem<String?>(value: x.id,
+                    child: Text(x.label, maxLines: 1, overflow: TextOverflow.ellipsis)),
                 ],
                 onChanged: busy ? null : (v) => setState(() => _param = v),
               );
@@ -856,7 +873,8 @@ class _ExporterScreenState extends State<ExporterScreen> {
       case ExportKind.oneShot:
         return 'One pass of one layer on its own, with the silent end trimmed.';
       case ExportKind.wavetable:
-        return 'Single-cycle frames of 2048 samples for wavetable synths, sweeping a param across the frames.';
+        return 'Single-cycle frames of 2048 samples for wavetable synths, from a track\'s instrument, sweeping one of '
+            'its knobs across the frames.';
       case ExportKind.midi:
         return 'Export a project pattern as a standard MIDI file using the project tempo and time signature.';
     }

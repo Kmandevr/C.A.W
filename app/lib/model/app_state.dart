@@ -17,6 +17,7 @@ import 'mixer_fx.dart' show masterLayerId;
 import 'pattern_doc.dart';
 import 'settings.dart';
 import 'storage.dart';
+import 'pattern_templates.dart';
 import 'templates.dart';
 
 class _LibrarySnapshot {
@@ -152,10 +153,14 @@ class AppState extends ChangeNotifier {
 
   /// Why the last project didn't open on launch (the template opened instead); cleared by opening another.
   String? openError;
+
+  /// A one-line note about the project just opened (its .caw sounds were dropped); cleared by the next open.
+  String? openNotice;
   ProjectStorage? _storage;
   /// The project storage once opened (the C++ Builder's desktop build materializes sources through it).
   ProjectStorage? get storage => _storage;
-  List<Template> templates = const [];
+  /// The pattern templates Build's examples list (bundled with the app, pattern_templates.dart).
+  List<Template> templates = patternTemplates;
 
   ProjectDoc project = ProjectDoc(id: newId('p'), name: 'Untitled');
   Map<String, ModuleInfo> info = {};
@@ -216,9 +221,6 @@ class AppState extends ChangeNotifier {
   bool starting = true;
   String? lastProjectId;
   List<ProjectSummary> savedProjects = const [];
-
-  /// The kind picked for a blank new module, so the editor can hint until the file has a header (not saved).
-  final Map<String, String> blankKinds = {};
 
   /// Bumped on every meter poll (about 30 times a second) so meters can repaint without rebuilding screens.
   final ValueNotifier<int> tick = ValueNotifier(0);
@@ -284,7 +286,6 @@ class AppState extends ChangeNotifier {
       applyAudioSettings();  // before the device opens, so it opens on the chosen device at the chosen size
       hardwareProfile = EngineExecutionPolicy.hardwareProfile;
       auditionPlan = EngineExecutionPolicy.plan(workload: EngineWorkload.interactiveAudition);
-      templates = Engine.templates();
       await _audioConfigured;  // the choice is in the engine before the device opens (no reopen right after)
       _openAudio(engine!);
     } catch (e) {
@@ -471,7 +472,7 @@ class AppState extends ChangeNotifier {
   /// The layer a pattern's note previews play on: the selected layer if it plays [patternId], else the first that
   /// does; null when no layer plays it.
   String? previewLayerFor(String patternId) {
-    bool plays(LayerDoc l) => (l.generatorId != null || l.instrument != null) && (l.patternId == patternId || l.clips.any((c) => c.patternId == patternId));
+    bool plays(LayerDoc l) => l.instrument != null && (l.patternId == patternId || l.clips.any((c) => c.patternId == patternId));
     final selected = project.layers.where((l) => l.id == selectedLayerId && plays(l)).firstOrNull;
     return (selected ?? project.layers.where(plays).firstOrNull)?.id;
   }
@@ -534,30 +535,22 @@ class AppState extends ChangeNotifier {
     }
   }
 
-  /// What Solo preview plays for the selected module: a generator alone, an effect after a generator that uses it,
-  /// or a pattern through the sound of a layer that plays it. Each plays the pattern of its layer, if it has one.
-  ({List<String> chain, String? pattern})? get preview {
+  /// What Solo preview plays for the selected pattern: its notes through the C++ instrument and effects of a track
+  /// that plays it; null when no track with an instrument plays it.
+  ({String pattern, ComponentUseDoc instrument, List<ComponentUseDoc> components})? get preview {
     final m = project.module(selectedModuleId);
-    if (m == null || isLibrary(m.id)) return null;
-    String? firstGenerator() => project.modules.where((x) => isGenerator(x.id)).map((x) => x.id).firstOrNull;
-    if (isPattern(m.id)) {
-      final layer = project.layers.where((l) => l.clips.any((clip) => clip.patternId == m.id) && l.generatorId != null).firstOrNull;
-      final gen = layer?.generatorId ?? firstGenerator();
-      return gen == null ? null : (chain: layer?.chain ?? [gen], pattern: m.id);
-    }
-    if (!isEffect(m.id)) {
-      final layer = project.layers.where((l) => l.generatorId == m.id).firstOrNull;
-      return (chain: [m.id], pattern: layer?.clips.firstOrNull?.patternId ?? layer?.patternId);
-    }
-    final layer = project.layers.where((l) => l.effectIds.contains(m.id) && l.generatorId != null).lastOrNull;
-    final gen = layer?.generatorId ?? firstGenerator();
-    return (chain: [?gen, m.id], pattern: layer?.clips.firstOrNull?.patternId ?? layer?.patternId);
+    if (m == null || !isPattern(m.id)) return null;
+    final layer = project.layers.where((l) =>
+        !l.isFolder && l.instrument != null && l.clips.any((clip) => clip.patternId == m.id)).firstOrNull;
+    if (layer == null) return null;
+    return (pattern: m.id, instrument: layer.instrument!, components: layer.components);
   }
 
   String _engineJson({Map<String, String>? sourceOverrides}) {
     final pv = previewOnly ? preview : null;
     return project.toEngineJson(
-        audition: pv?.chain,
+        auditionInstrument: pv?.instrument,
+        auditionComponents: pv?.components ?? const [],
         auditionPattern: pv?.pattern,
         auditionOnly: previewOnly,
         voices: settings.lightMode ? 4 : 32, // global cap; each generator chooses its own voice count
@@ -950,7 +943,7 @@ class AppState extends ChangeNotifier {
     return null;
   }
 
-  // ---------- modules (Builder) ----------
+  // ---------- patterns (Build) ----------
 
   void selectModule(String id) {
     selectedModuleId = id;
@@ -963,8 +956,6 @@ class AppState extends ChangeNotifier {
     selectedLayerId = layer.id;
     selectedClipId = null;
     selectedClipIds.clear();
-    selectedModuleId = layer.generatorId ?? layer.effectIds.firstOrNull;
-    if (previewOnly && selectedModuleId != null) _sync();
     notifyListeners();
   }
 
@@ -1190,38 +1181,6 @@ class AppState extends ChangeNotifier {
     _changed(engine: false);
   }
 
-  /// Imports an ordinary .caw module as a new project item; existing modules are never overwritten.
-  String importModuleSource(String source, {String fileName = 'Imported.caw', String folderPath = ''}) {
-    final folder = _normalizeLibraryPath(folderPath);
-    if (folder.isNotEmpty && !project.libraryFolders.contains(folder)) createLibraryFolder(folder);
-    final module = moduleFromTemplate(Template(fileName, source));
-    module.name = _freeModuleName(module.name);
-    module.folderPath = folder;
-    project.modules.add(module);
-    selectedModuleId = module.id;
-    _changed();
-    return module.id;
-  }
-
-  /// A new, truly empty module. Until it has a header it compiles as a byte-mode generator, so the picked [kind]
-  /// (generator, effect, pattern or library) is remembered only for the editor's hint and badge.
-  String addBlankModule(String kind) {
-    final label = switch (kind) { 'effect' => 'Effect', 'pattern' => 'Pattern', 'library' => 'Library', _ => 'Sound' };
-    final m = ModuleDoc(id: newId('m'), name: _freeModuleName(label), source: '');
-    project.modules.add(m);
-    blankKinds[m.id] = kind;
-    selectedModuleId = m.id;
-    _changed();
-    return m.id;
-  }
-
-  /// The kind to hint for an empty module (null once it has any text).
-  String? hintKindOf(String moduleId) {
-    final m = project.module(moduleId);
-    if (m == null || m.source.isNotEmpty) return null;
-    return blankKinds[moduleId] ?? 'generator';
-  }
-
   void renameModule(String id, String name) {
     final m = project.module(id);
     if (m == null || name.trim().isEmpty) return;
@@ -1232,52 +1191,12 @@ class AppState extends ChangeNotifier {
   void deleteModule(String id) {
     project.modules.removeWhere((m) => m.id == id);
     for (final l in project.layers) {
-      if (l.generatorId == id) l.generatorId = null;
       if (l.patternId == id) l.patternId = null;
       l.clips.removeWhere((clip) => clip.patternId == id);
-      l.effectIds.remove(id);
     }
     if (selectedModuleId == id) selectedModuleId = project.modules.isEmpty ? null : project.modules.first.id;
     _pruneClipSelection();
     _changed();
-  }
-
-  void setParam(String moduleId, String name, double value) {
-    final m = project.module(moduleId);
-    if (m == null) return;
-    onParamMove?.call(AutomationTarget('param', name, moduleId: moduleId), value);
-    m.params[name] = value;
-    engine?.setParam(moduleId, name, value);
-    _save();
-    moduleValueTick(moduleId).value++;
-    values.value++;
-  }
-
-  /// Every `global` declared by the project's modules, once each (the first declaration wins).
-  List<ParamInfo> get globalDefs {
-    final seen = <String>{};
-    final out = <ParamInfo>[];
-    for (final m in project.modules) {
-      for (final p in info[m.id]?.params ?? const <ParamInfo>[]) {
-        if (p.global && seen.add(p.name)) out.add(p);
-      }
-    }
-    return out;
-  }
-
-  double globalValue(ParamInfo p) => project.globals[p.name] ?? p.defaultValue;
-
-  void setGlobal(String name, double value) {
-    onParamMove?.call(AutomationTarget('global', name), value);
-    project.globals[name] = value;
-    engine?.setGlobal(name, value);
-    _save();
-    for (final module in project.modules) {
-      if ((info[module.id]?.params ?? const <ParamInfo>[]).any((param) => param.global && param.name == name)) {
-        moduleValueTick(module.id).value++;
-      }
-    }
-    values.value++;
   }
 
   void setPreviewOnly(bool on) {
@@ -1285,19 +1204,11 @@ class AppState extends ChangeNotifier {
     _changed(engine: true);
   }
 
-  /// generator, effect or library: from the last check, or the header before the module has compiled.
-  String kindOf(String moduleId) {
+  /// Whether [moduleId] is one of the project's patterns (every module is, once a project has loaded; #160).
+  bool isPattern(String moduleId) {
     final m = project.module(moduleId);
-    if (m == null) return 'generator';
-    final emptyHint = m.source.isEmpty ? blankKinds[moduleId] : null;
-    return info[moduleId]?.kind ?? headerValue(m.runSource, 'kind') ?? emptyHint ?? 'generator';
+    return m != null && (isPatternSource(m.runSource) || isPatternSource(m.source));
   }
-
-  bool isEffect(String moduleId) => kindOf(moduleId) == 'effect';
-  bool isLibrary(String moduleId) => kindOf(moduleId) == 'library';
-  bool isPattern(String moduleId) => kindOf(moduleId) == 'pattern';
-  /// A sound a track can play: a generator or a synth patch played as one instrument.
-  bool isGenerator(String moduleId) => const {'generator', 'synth'}.contains(kindOf(moduleId));
 
   // ---------- layers (Arranger) ----------
 
@@ -1449,30 +1360,6 @@ class AppState extends ChangeNotifier {
     return true;
   }
 
-  void addProjectAutomationLane(String targetType, String target, [String? moduleId]) {
-    if (target.isEmpty) return;
-    if (targetType != 'global' && targetType != 'param') return;
-    if (targetType == 'param' && (moduleId == null || moduleId.isEmpty)) return;
-    if (project.automation.any((lane) => lane.targetType == targetType &&
-        lane.target == target && lane.moduleId == moduleId)) {
-      return;
-    }
-    _pushAutomationUndo();
-    final end = project.layers.fold<int>(project.loopSteps, (value, layer) =>
-      layer.clips.fold<int>(value, (current, clip) =>
-        current > clip.startSteps + clip.lengthSteps ? current : clip.startSteps + clip.lengthSteps)).toDouble();
-    final definition = targetType == 'global'
-        ? info.values.expand((module) => module.params).where((param) => param.global && param.name == target).firstOrNull
-        : info[moduleId]?.params.where((param) => param.name == target).firstOrNull;
-    final value = targetType == 'global'
-        ? (project.globals[target] ?? definition?.defaultValue ?? 0.0)
-        : (project.module(moduleId)?.params[target] ?? definition?.defaultValue ?? 0.0);
-    project.automation.add(ProjectAutomationLaneDoc(targetType: targetType, target: target,
-      moduleId: moduleId, points: [AutomationPointDoc(step: 0, value: value),
-        AutomationPointDoc(step: end, value: value)]));
-    _changed();
-  }
-
   void updateProjectAutomationPoint(ProjectAutomationLaneDoc lane, int index, double step, double value) {
     if (index < 0 || index >= lane.points.length) return;
     _pushAutomationUndo();
@@ -1574,14 +1461,12 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Adds a track using [soundId], the first available sound, or no sound when [empty] is true.
-  void addLayer({String? soundId, bool empty = false}) {
-    final gen = empty ? null : project.module(soundId) ?? project.modules.where((m) => isGenerator(m.id)).firstOrNull;
+  /// Adds an empty track (no instrument yet: drop one on it, or pick one in its FX).
+  void addLayer() {
     project.layers.add(LayerDoc(
       id: newId('l'),
-      name: gen?.name ?? 'Layer ${project.layers.length + 1}',
+      name: 'Layer ${project.layers.length + 1}',
       color: project.layers.length % LayerDoc.trackColors,
-      generatorId: gen?.id,
       lengthSteps: project.stepsPerBar,
       volume: 1, // 0 dB (owner, 2026-11-10)
     ));
@@ -1831,11 +1716,15 @@ class AppState extends ChangeNotifier {
     if (engine != null) p.resolveInstruments(Engine.resolveInstrument);
     project = p;
     openError = null;
+    openNotice = switch (p.droppedModules) {
+      [] => null,
+      final gone => 'C.A.W plays C++ now: ${gone.length == 1 ? 'one .caw sound was' : '${gone.length} .caw sounds were'} '
+          'left out of this project (${gone.take(3).join(', ')}${gone.length > 3 ? '…' : ''}).',
+    };
     _historyTimer?.cancel();
     history.reset(_snapshot());
     masterValueTick.value++;
     info = {};
-    blankKinds.clear();
     selectedModuleId = p.modules.isEmpty ? null : p.modules.first.id;
     selectedLayerId = null;
     selectedClipId = null;
@@ -1876,7 +1765,7 @@ class AppState extends ChangeNotifier {
 
   /// Imports a portable project as a new project ID so it cannot overwrite an existing saved project.
   Future<void> importProject(ProjectDoc imported) {
-    final copy = ProjectDoc.fromJson(imported.toJson()..['id'] = newId('p'));
+    final copy = ProjectDoc.fromJson(imported.toJson()..['id'] = newId('p'))..droppedModules = imported.droppedModules;
     return _switchTo(copy);
   }
 

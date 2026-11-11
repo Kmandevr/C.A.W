@@ -17,14 +17,15 @@ AppState _state() {
   final s = AppState();
   final cpp = CppComponentDoc.blankEffect(id: 'cpp1', name: 'Fuzz');
   s.project = ProjectDoc(id: 'files-test', name: 'Files test', modules: [
-    ModuleDoc(id: 'crush', name: 'Crush', source: '---\nkind: effect\n---\nx'),
-    ModuleDoc(id: 'bass', name: 'Bass', source: '---\nkind: generator\n---\nsin(110)'),
+    ModuleDoc(id: 'riff', name: 'Riff', source: '---\nkind: pattern\n---\n0 A2 1 1'),
     ModuleDoc(id: 'beat', name: 'Beat', source: '---\nkind: pattern\n---\nc4'),
   ], layers: [
-    LayerDoc(id: 'l1', name: 'Bass track', color: 0, generatorId: 'bass', effectIds: ['crush'], patternId: 'beat'),
+    LayerDoc(id: 'l1', name: 'Bass track', color: 0, clips: [
+      ClipDoc(id: 'c1', patternId: 'riff', lengthSteps: 16),
+      ClipDoc(id: 'c2', patternId: 'beat', startSteps: 16, lengthSteps: 16),
+    ]),
   ], cppComponents: [cpp]);
-  s.info['crush'] = const ModuleInfo(ok: true, kind: 'effect');
-  s.info['bass'] = const ModuleInfo(ok: true, kind: 'generator');
+  s.info['riff'] = const ModuleInfo(ok: true, kind: 'pattern');
   s.info['beat'] = const ModuleInfo(ok: true, kind: 'pattern');
   s.nativeCatalog = const [
     NativeComponentInfo(id: 'org.caw.gain', name: 'Gain', role: 'effect', builtin: true),
@@ -72,48 +73,49 @@ void main() {
     expect(sections.current, Section.build);
     expect(sections.activeBuildTab, BuildTab(BuildTabKind.cpp, cpp.componentId));
 
-    // A .caw module opens in a .caw tab, and its inspector says where it is used.
+    // A pattern opens in a pattern tab, and its inspector says where it is used.
     sections.show(Section.files);
-    await tester.tap(find.text('.caw modules').first);
+    await tester.tap(find.text('Audio & MIDI').first);
     await tester.pump();
-    final crush = find.byKey(const ValueKey('mod:crush'));
-    await tester.tap(crush);
+    await tester.tap(find.text('Patterns').last);
+    await tester.pump();
+    final riff = find.byKey(const ValueKey('mod:riff'));
+    await tester.tap(riff);
     await tester.pump();
     expect(find.text('Used on Bass track'), findsOneWidget);
     await tester.pump(const Duration(milliseconds: 500));
-    await tester.tap(crush);
+    await tester.tap(riff);
     await tester.pump(const Duration(milliseconds: 50));
-    await tester.tap(crush);
+    await tester.tap(riff);
     await tester.pump();
-    expect(sections.activeBuildTab, const BuildTab(BuildTabKind.caw, 'crush'));
-    expect(s.selectedModuleId, 'crush');
+    expect(sections.activeBuildTab, const BuildTab(BuildTabKind.pattern, 'riff'));
+    expect(s.selectedModuleId, 'riff');
     await tester.pump(const Duration(seconds: 1));
   });
 
   testWidgets('search looks through every folder and the type filters narrow it', (tester) async {
     final s = _state();
     await _pump(tester, s, const Size(1200, 800));
-    await tester.enterText(find.byType(TextField), 'b');
+    await tester.enterText(find.byType(TextField), 'f');
     await tester.pump();
-    expect(find.byKey(const ValueKey('mod:bass')), findsOneWidget);
-    expect(find.byKey(const ValueKey('mod:beat')), findsOneWidget);
-    expect(find.byKey(const ValueKey('mod:crush')), findsNothing);
+    expect(find.byKey(const ValueKey('mod:riff')), findsOneWidget);
+    expect(find.byKey(const ValueKey('cpp:cpp1')), findsOneWidget);
+    expect(find.byKey(const ValueKey('mod:beat')), findsNothing);
     expect(find.text('Search'), findsOneWidget); // the breadcrumb
 
     await tester.tap(find.byKey(const ValueKey('filter patterns')));
     await tester.pump();
-    expect(find.byKey(const ValueKey('mod:beat')), findsOneWidget);
-    expect(find.byKey(const ValueKey('mod:bass')), findsNothing);
+    expect(find.byKey(const ValueKey('mod:riff')), findsOneWidget);
+    expect(find.byKey(const ValueKey('cpp:cpp1')), findsNothing);
 
     // A filter without a query narrows the open folder.
     await tester.tap(find.byTooltip('Clear search'));
     await tester.pump();
     await tester.tap(find.byKey(const ValueKey('filter patterns')));
     await tester.tap(find.byKey(const ValueKey('filter effects')));
-    await tester.tap(find.text('.caw modules').first);
+    await tester.tap(find.text('Audio & MIDI').first);
     await tester.pump();
-    expect(find.byKey(const ValueKey('mod:crush')), findsOneWidget);
-    expect(find.byKey(const ValueKey('mod:bass')), findsNothing);
+    expect(find.byKey(const ValueKey('mod:riff')), findsNothing);
   });
 
   testWidgets('in portrait the tree is a drawer and the breadcrumb leads', (tester) async {
@@ -147,14 +149,16 @@ void main() {
   testWidgets('the size slider at its smallest shows a list', (tester) async {
     final s = _state();
     await _pump(tester, s, const Size(1200, 800));
-    await tester.tap(find.text('.caw modules').first);
+    await tester.tap(find.text('Audio & MIDI').first);
+    await tester.pump();
+    await tester.tap(find.text('Patterns').last);
     await tester.pump();
     final slider = find.byType(Slider);
     await tester.drag(slider, const Offset(-200, 0));
     await tester.pump();
     expect(tester.widget<Slider>(slider).value, 0);
-    expect(find.text('FX'), findsWidgets); // list rows show the type badge next to the name
-    expect(tester.getSize(find.byKey(const ValueKey('mod:crush'))).height, 34);
+    expect(find.text('MIDI'), findsWidgets); // list rows show the type badge next to the name
+    expect(tester.getSize(find.byKey(const ValueKey('mod:riff'))).height, 34);
     await tester.pump(const Duration(milliseconds: 400)); // the slider's double-tap reset waits this long
   });
 
@@ -162,7 +166,7 @@ void main() {
     final s = _state();
     AssetDrag? picked;
     await tester.pumpWidget(MaterialApp(home: Scaffold(body: Builder(builder: (context) => TextButton(
-      onPressed: () async => picked = await showAssetPicker(context, s, kinds: {AssetKind.nativeEffect, AssetKind.cawModule}),
+      onPressed: () async => picked = await showAssetPicker(context, s, kinds: {AssetKind.nativeEffect}),
       child: const Text('open'),
     )))));
     await tester.tap(find.text('open'));
@@ -172,7 +176,6 @@ void main() {
     expect(find.text('MY EFFECTS'), findsOneWidget);
     expect(find.text('Fuzz'), findsOneWidget);
     expect(find.text('Not built'), findsOneWidget); // listed with a badge before it is built
-    expect(find.text('Crush'), findsOneWidget);
     expect(find.text('Beat'), findsNothing); // patterns weren't asked for
 
     await tester.enterText(find.byType(TextField), 'gai');
@@ -203,33 +206,35 @@ void main() {
   testWidgets('long-press menu: favourite, duplicate, and delete warns when used on tracks', (tester) async {
     final s = _state();
     await _pump(tester, s, const Size(1200, 800));
-    await tester.tap(find.text('.caw modules').first);
+    await tester.tap(find.text('Audio & MIDI').first);
+    await tester.pump();
+    await tester.tap(find.text('Patterns').last);
     await tester.pump();
 
-    await tester.longPress(find.byKey(const ValueKey('mod:crush')));
+    await tester.longPress(find.byKey(const ValueKey('mod:riff')));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Add to Favourites'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Favourites').first);
     await tester.pump();
-    expect(find.byKey(const ValueKey('mod:crush')), findsOneWidget);
-    expect(find.byKey(const ValueKey('mod:bass')), findsNothing);
+    expect(find.byKey(const ValueKey('mod:riff')), findsOneWidget);
+    expect(find.byKey(const ValueKey('mod:beat')), findsNothing);
 
-    await tester.longPress(find.byKey(const ValueKey('mod:crush')));
+    await tester.longPress(find.byKey(const ValueKey('mod:riff')));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Duplicate'));
     await tester.pumpAndSettle();
-    expect(s.project.modules.where((m) => m.name == 'Crush copy'), hasLength(1));
+    expect(s.project.modules.where((m) => m.name == 'Riff copy'), hasLength(1));
 
-    await tester.longPress(find.byKey(const ValueKey('mod:crush')));
+    await tester.longPress(find.byKey(const ValueKey('mod:riff')));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Delete'));
     await tester.pumpAndSettle();
     expect(find.textContaining('Used on Bass track'), findsWidgets);
     await tester.tap(find.text('Delete anyway'));
     await tester.pumpAndSettle();
-    expect(s.project.module('crush'), isNull);
-    expect(s.project.layers.single.effectIds, isEmpty);
+    expect(s.project.module('riff'), isNull);
+    expect(s.project.layers.single.clips.single.patternId, 'beat');
     await tester.pump(const Duration(seconds: 3)); // the snack bar
   });
 
@@ -242,7 +247,7 @@ void main() {
         of: find.byKey(const ValueKey('native:org.caw.gain')), matching: find.byType(LongPressDraggable<AssetDrag>)));
     expect(gain.data?.kind, AssetKind.nativeEffect);
     expect(gain.data?.id, 'org.caw.gain');
-    expect(s.folderAssets(s.folderAt('audio/patterns')!).single.drag?.kind, AssetKind.pattern);
+    expect(s.folderAssets(s.folderAt('audio/patterns')!).first.drag?.kind, AssetKind.pattern);
     expect(s.cppAssets.single.drag?.id, s.project.cppComponents.single.componentId);
   });
 

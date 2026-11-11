@@ -22,7 +22,6 @@ void main() {
   Future<AppState> startState(WidgetTester tester, {bool distortion = false}) async {
     final s = AppState();
     s.engine = Engine.create();
-    s.templates = Engine.templates();
     s.project = s.starterProject();
     if (distortion) s.project.layers.first.components.add(ComponentUseDoc('org.caw.distortion'));
     s.selectedModuleId = s.project.modules.first.id;
@@ -53,7 +52,7 @@ void main() {
     s.project.cppComponents.add(doc);
     await pumpGolden(tester, Shell(state: s), goldenSizes['phone']!);
     sections(tester).openBuild(BuildTab(BuildTabKind.cpp, doc.componentId));
-    sections(tester).openBuild(BuildTab(BuildTabKind.caw, s.project.modules.firstWhere((m) => s.isPattern(m.id)).id));
+    sections(tester).openBuild(BuildTab(BuildTabKind.pattern, s.project.modules.firstWhere((m) => s.isPattern(m.id)).id));
     await tester.pumpAndSettle();
     await expectLater(goldenScreen, matchesGoldenFile('goldens/section_build_pattern_phone.png'));
     await tester.tap(find.byKey(const ValueKey('explorer')));

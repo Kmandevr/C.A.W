@@ -11,7 +11,7 @@ import 'package:caw/model/mixer_fx.dart';
 import 'package:caw/model/project.dart';
 import 'package:caw/model/settings.dart';
 import 'package:caw/ui/frame/sections.dart' show AssetDrag, AssetKind;
-import 'package:caw/ui/mixer_screen.dart';
+import 'package:caw/ui/arrange/channel_strip.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -20,10 +20,8 @@ const width = NativeComponentInfo(id: 'org.caw.stereo.width', name: 'Width', rol
     parameters: [ComponentParameterInfo(id: 'width', name: 'Width', defaultValue: 1, min: 0, max: 2)]);
 const synth = NativeComponentInfo(id: 'org.caw.synth.basic', name: 'Basic synth', role: 'instrument', builtin: true);
 
-ProjectDoc project() => ProjectDoc(id: 'p', name: 'Mix', modules: [
-      ModuleDoc(id: 'echo', name: 'Echo', source: '---\nkind: effect\n---\n', params: {'mix': 0.3}),
-    ], layers: [
-      LayerDoc(id: 'a', name: 'Drums', color: 0, effectIds: ['echo'],
+ProjectDoc project() => ProjectDoc(id: 'p', name: 'Mix', layers: [
+      LayerDoc(id: 'a', name: 'Drums', color: 0,
           components: [ComponentUseDoc('org.caw.stereo.width', {'width': 1.5})]),
       LayerDoc(id: 'b', name: 'Bass', color: 1),
       LayerDoc(id: 'f', name: 'Group', color: 2, isFolder: true, busEnabled: false),
@@ -58,7 +56,6 @@ void main() {
 
     test('the master takes C++ effects only', () {
       final master = masterLayerOf(s.project);
-      expect(s.dropAsset(master, const AssetDrag(AssetKind.cawModule, 'echo', 'Echo')), isFalse);
       expect(s.dropAsset(master, const AssetDrag(AssetKind.nativeEffect, 'org.caw.synth.basic', 'Synth', instrument: true)), isFalse);
       expect(s.dropAsset(master, const AssetDrag(AssetKind.nativeEffect, 'org.caw.stereo.width', 'Width')), isTrue);
       expect(s.project.masterComponents.length, 1);
@@ -77,7 +74,7 @@ void main() {
 
   group('FX between strips', () {
     test('a C++ effect copies with its values, the source keeps it', () {
-      expect(s.dropFx(const FxSlotDrag('a', 'native', 0), layer('b')), isTrue);
+      expect(s.dropFx(const FxSlotDrag('a', 0), layer('b')), isTrue);
       expect(layer('a').components.length, 1);
       final copy = layer('b').components.single;
       expect(copy.params['width'], 1.5);
@@ -86,7 +83,7 @@ void main() {
 
     test('a move takes the effect and its lanes', () {
       s.project.automation.add(ProjectAutomationLaneDoc(targetType: 'component', target: 'width', layerId: 'a', component: 0));
-      expect(s.dropFx(const FxSlotDrag('a', 'native', 0), masterLayerOf(s.project), move: true), isTrue);
+      expect(s.dropFx(const FxSlotDrag('a', 0), masterLayerOf(s.project), move: true), isTrue);
       expect(layer('a').components, isEmpty);
       expect(s.project.masterComponents.single.params['width'], 1.5);
       final lane = s.project.automation.single;
@@ -94,16 +91,11 @@ void main() {
       expect(lane.component, 0);
     });
 
-    test('a .caw effect copy gets its own module; the master and a plain folder refuse it', () {
-      const drag = FxSlotDrag('a', 'caw', 0);
-      expect(s.canDropFx(drag, masterLayerOf(s.project)), isFalse);
+    test('a plain folder and the same track refuse a drop', () {
+      const drag = FxSlotDrag('a', 0);
       expect(s.canDropFx(drag, layer('f')), isFalse);
       expect(s.canDropFx(drag, layer('a')), isFalse);
-      expect(s.dropFx(drag, layer('b')), isTrue);
-      final id = layer('b').effectIds.single;
-      expect(id, isNot('echo'));
-      expect(s.project.module(id)!.params['mix'], 0.3);
-      expect(layer('a').effectIds, ['echo']);
+      expect(s.canDropFx(const FxSlotDrag('a', 3), layer('b')), isFalse);
     });
   });
 
@@ -115,7 +107,11 @@ void main() {
       s.starting = false;
       s.history.reset(jsonEncode(s.project.toJson()));
       await tester.pumpWidget(MaterialApp(home: Scaffold(body: ListenableBuilder(listenable: s,
-          builder: (context, _) => MixerScreen(state: s, onOpenBuilder: () {})))));
+          // Arrange's mixer card and focus view show these strips (the Mixer workspace folded into Arrange, #139).
+          builder: (context, _) => SizedBox(height: 700, child: ListView(scrollDirection: Axis.horizontal, children: [
+            MasterStrip(state: s),
+            for (final (i, l) in s.project.layers.indexed) ChannelStrip(state: s, layer: l, index: i),
+          ]))))));
     }
 
     Future<void> settle(WidgetTester tester) async {

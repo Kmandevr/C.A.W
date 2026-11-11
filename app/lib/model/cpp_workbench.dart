@@ -613,11 +613,11 @@ class CppWorkbench extends ChangeNotifier {
     if (c == null) return null;
     var target = layer;
     if (target == null || target.isFolder) {
-      state.addLayer(empty: true);
+      state.addLayer();
       target = state.project.layers.last..name = c.name;
     }
     if (isInstrument) {
-      if (target.instrument?.id == componentId && target.generatorId == null) return null;
+      if (target.instrument?.id == componentId) return null;
       state.setNativeInstrument(target, componentId);
     } else {
       if (target.components.any((u) => u.id == componentId)) return null;

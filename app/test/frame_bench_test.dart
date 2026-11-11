@@ -24,7 +24,6 @@ void main() {
       addTearDown(tester.view.reset);
       final s = AppState();
       s.engine = Engine.create();
-      s.templates = Engine.templates();
       s.project = s.starterProject();
       s.selectedModuleId = s.project.modules.first.id;
       s.ready = true;

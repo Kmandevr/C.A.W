@@ -2,7 +2,7 @@
 import 'package:caw/model/app_state.dart';
 import 'package:caw/model/project.dart';
 import 'package:caw/model/settings.dart';
-import 'package:caw/ui/builder_screen.dart';
+import 'package:caw/ui/pattern_screen.dart';
 import 'package:caw/ui/pattern_fields.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -47,7 +47,7 @@ void main() {
     final m = ModuleDoc(id: 'p1', name: 'Line', source: _src);
     state.project = ProjectDoc(id: 'p', name: 'P', modules: [m]);
     state.selectModule(m.id);
-    await tester.pumpWidget(MaterialApp(home: Scaffold(body: BuilderScreen(state: state))));
+    await tester.pumpWidget(MaterialApp(home: Scaffold(body: PatternScreen(state: state))));
     await tester.tap(find.text('Text'));
     await tester.pump();
     final field = tester.widget<TextField>(find.byWidgetPredicate((w) => w is TextField && w.maxLines == null));

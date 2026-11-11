@@ -73,7 +73,6 @@ void main() {
     addTearDown(tester.view.reset);
     final s = AppState();
     s.engine = Engine.create();
-    s.templates = Engine.templates();
     s.project = s.starterProject();
     final m = ModuleDoc(id: 'line', name: 'line', source: '---\nkind: pattern\n---\n$body');
     s.project.modules.add(m);
@@ -140,7 +139,6 @@ void main() {
   testWidgets('golden: bent notes at phone size, zoomed in and out', (tester) async {
     final s = AppState();
     s.engine = Engine.create();
-    s.templates = Engine.templates();
     s.project = s.starterProject();
     const body = '0 G3 4 0.9 bend 0:0 0.6:0~0.6 1:-5\n'
         '4 E3 6 0.8 bend 0:0~0.4 0.4:2 1:2 vib 0.4 8 0.3\n'

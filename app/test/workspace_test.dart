@@ -17,7 +17,7 @@ import 'package:caw/ui/arranger_screen.dart';
 import 'package:caw/ui/engine_lab_screen.dart';
 import 'package:caw/ui/exporter_screen.dart';
 import 'package:caw/ui/files/library_manager.dart';
-import 'package:caw/ui/mixer_screen.dart';
+import 'package:caw/ui/arrange/channel_strip.dart';
 import 'package:caw/ui/key_router.dart';
 import 'package:caw/ui/plugin_builder_screen.dart';
 import 'package:caw/ui/volume_fader.dart';

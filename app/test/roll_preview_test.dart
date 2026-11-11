@@ -51,12 +51,11 @@ void main() {
     addTearDown(tester.view.reset);
     final s = _Recorder();
     s.engine = Engine.create();
-    s.templates = Engine.templates();
     s.project = s.starterProject();
     final m = ModuleDoc(id: 'line', name: 'line', source: '---\nkind: pattern\n---\n$body');
     s.project.modules.add(m);
     // A layer with an instrument plays this pattern, so its notes have something to sound on.
-    s.project.layers.firstWhere((l) => l.instrument != null || l.generatorId != null).clips.add(ClipDoc(id: 'clip-line', patternId: m.id));
+    s.project.layers.firstWhere((l) => l.instrument != null).clips.add(ClipDoc(id: 'clip-line', patternId: m.id));
     s.ready = true;
     s.starting = false;
     await tester.pumpWidget(MaterialApp(home: Scaffold(body: PatternEditor(state: s, module: m))));

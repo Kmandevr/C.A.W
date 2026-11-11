@@ -1,5 +1,5 @@
 // Settings › Code editor: live coding (auto-update, delay, swap timing), font size, tabs, line numbers, wrap, and the
-// editor's chips, buttons and Controls panel.
+// pattern editor's buttons, scope and Run bar.
 import 'package:flutter/material.dart';
 
 import '../../model/settings.dart';
@@ -31,30 +31,19 @@ class CodeSettings extends StatelessWidget {
       settingSlider('code.fontSize', s,
           value: s.codeFontSize, min: Settings.minCodeFontSize, max: Settings.maxCodeFontSize, divisions: 14,
           icon: Icons.format_size, show: (v) => '${v.round()} pt', set: (x, v) => x.codeFontSize = v.roundToDouble(),
-          reset: 15, subtitle: 'The .caw editor\'s size; the C++ editor\'s follows it (12.5 at 15)'),
+          reset: 15, subtitle: 'The pattern editor\'s size; the C++ editor\'s follows it (12.5 at 15)'),
       settingChoice<int>('code.tabWidth', s.codeTabWidth, const [(2, '2'), (4, '4'), (8, '8')],
           (v) => s.update((x) => x.codeTabWidth = v),
           icon: Icons.keyboard_tab, subtitle: 'Spaces per indent in the C++ editor (files opened from now on)'),
       settingSwitch('code.lineNumbers', s.codeLineNumbers, (v) => s.update((x) => x.codeLineNumbers = v),
           icon: Icons.format_list_numbered),
       settingSwitch('code.wrap', s.codeWrap, (v) => s.update((x) => x.codeWrap = v),
-          icon: Icons.wrap_text, subtitle: 'The C++ editor wraps long lines (the .caw editor always does)'),
+          icon: Icons.wrap_text, subtitle: 'The C++ editor wraps long lines (the pattern editor always does)'),
       settingHeading('Editor'),
-      toggle('code.chips', e.chips, (v) => e.copyWith(chips: v), Icons.auto_awesome),
-      settingSlider('code.chips.letters', s,
-          value: e.chipLetters.toDouble(), min: 1, max: 4, divisions: 3, enabled: e.chips, icon: Icons.text_fields,
-          show: (v) => 'after ${v.round()}', set: (x, v) => x.editor = x.editor.copyWith(chipLetters: v.round()), reset: 2),
-      settingSlider('code.chips.count', s,
-          value: e.chipCount.toDouble(), min: 3, max: 16, divisions: 13, enabled: e.chips, icon: Icons.view_week_outlined,
-          show: (v) => 'up to ${v.round()}', set: (x, v) => x.editor = x.editor.copyWith(chipCount: v.round()), reset: 8),
-      toggle('code.library', e.libraryButton, (v) => e.copyWith(libraryButton: v), Icons.menu_book,
-          subtitle: 'F1 still opens it'),
       toggle('code.solo', e.soloButton, (v) => e.copyWith(soloButton: v), Icons.hearing,
-          subtitle: 'Also in the module\'s ⋮ menu when hidden'),
+          subtitle: 'Also in the pattern\'s ⋮ menu when hidden'),
       toggle('code.scope', e.scope, (v) => e.copyWith(scope: v), Icons.show_chart, subtitle: 'Light mode hides it too'),
       toggle('code.barOnTop', e.barOnTop, (v) => e.copyWith(barOnTop: v), Icons.vertical_align_top),
-      toggle('code.compactControls', e.compactControls, (v) => e.copyWith(compactControls: v), Icons.density_small,
-          subtitle: 'Denser slider rows; tap a header to fold its group'),
     ]);
   }
 }

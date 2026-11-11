@@ -226,7 +226,7 @@ void main() {
       final layer = s.project.layers.first;
       s.addNativeEffect(layer, 'org.caw.stereo.width');
       await pumpStack(tester, layer);
-      expect(find.text('CODE EFFECTS · .caw'), findsOneWidget);
+      expect(find.textContaining('.caw'), findsNothing, reason: 'no .caw chain any more (#160)');
       expect(find.text('NATIVE EFFECTS · C++'), findsOneWidget);
       expect(find.text('Width'), findsWidgets);
       expect(find.byKey(const ValueKey('fx-inline-0')), findsOneWidget, reason: 'its plugin UI, inline');
@@ -342,11 +342,8 @@ void main() {
     testWidgets('drops and picks: effects join the chain, a pattern becomes a clip at the drop step', (tester) async {
       final layer = s.project.layers.first;
       s.project.modules.addAll([
-        ModuleDoc(id: 'fx1', name: 'Echo', source: '---\nkind: effect\n---\n'),
         ModuleDoc(id: 'pat', name: 'Beat', source: '---\nkind: pattern\n---\n'),
       ]);
-      expect(s.dropAsset(layer, const AssetDrag(AssetKind.cawModule, 'fx1', 'Echo')), isTrue);
-      expect(layer.effectIds, ['fx1']);
       expect(s.dropAsset(layer, const AssetDrag(AssetKind.nativeEffect, 'org.caw.chorus', 'Chorus')), isTrue);
       expect(layer.components.single.id, 'org.caw.chorus');
 
@@ -579,7 +576,6 @@ void main() {
   testWidgets('with the engine: the built-ins list their knobs, and a knob on a track moves live (needs CAW_LIB)',
       (tester) async {
     s.engine = Engine.create();
-    s.templates = Engine.templates();
     s.project = s.starterProject();
     final layer = s.project.layers.firstWhere((l) => !l.isFolder);
     await tester.runAsync(() async {
@@ -610,7 +606,6 @@ void _steppedKnobs() {
     final s = AppState(settings: Settings());
     addTearDown(s.dispose);
     s.engine = Engine.create();
-    s.templates = Engine.templates();
     s.project = s.starterProject();
     await tester.runAsync(() async {
       s.componentCatalog.refreshIfStale();

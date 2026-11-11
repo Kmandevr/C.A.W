@@ -29,7 +29,6 @@ import 'frame/sections.dart';
 import 'feedback.dart' show GrabFeedback, GripMark, Pressable;
 import 'haptics.dart';
 import 'motion.dart';
-import 'param_control.dart';
 import 'theme.dart';
 import 'arrange/track_color.dart';
 import 'arrange/track_lanes.dart';
@@ -65,7 +64,7 @@ class ArrangerScreen extends StatefulWidget {
 }
 
 class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProviderStateMixin {
-  bool mixer = false, settings = false, cardsView = false, mixerCard = false, zoomBar = false;
+  bool settings = false, cardsView = false, mixerCard = false, zoomBar = false;
 
   /// Phone portrait: the focus panel opened up over the pinned track (owner, 2026-11-10: it can open higher).
   bool _panelHigh = false;
@@ -803,7 +802,6 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
         ])),
         if (settings) _settingsPanel(),
         Expanded(child: _withDockedClipBar(withBrowser, focused)),
-        if (mixer) _ArrangementMixer(state: s),
       ]),
     );
   }
@@ -888,9 +886,10 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
           else
             TextButton.icon(onPressed: s.addFolder,
               icon: const Icon(Icons.create_new_folder_outlined, size: 17), label: const Text('Folder')),
-          // A phone opens the mixer as a card over the tracks; a wide screen docks it under them.
-          IconButton(onPressed: () => setState(() => narrow ? mixerCard = !mixerCard : mixer = !mixer),
-            color: (narrow ? mixerCard : mixer) ? Neon.blue : Neon.dim, icon: const Icon(Icons.tune), tooltip: 'Mixer'),
+          // The mixer opens as a card over the tracks: the master and every track's strip (the Mixer workspace
+          // folded into Arrange, #139).
+          IconButton(key: const ValueKey('arrange-mixer'), onPressed: () => setState(() => mixerCard = !mixerCard),
+            color: mixerCard ? Neon.blue : Neon.dim, icon: const Icon(Icons.tune), tooltip: 'Mixer'),
           IconButton(onPressed: () => setState(() => settings = !settings),
             color: settings ? Neon.blue : Neon.dim, icon: const Icon(Icons.settings_outlined), tooltip: 'Settings'),
           IconButton(onPressed: () => setState(() { cardsView = true; mixerCard = false; }),
@@ -963,9 +962,6 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
       constraints: BoxConstraints(maxHeight: MediaQuery.sizeOf(context).height * 0.5),
       child: SingleChildScrollView(padding: const EdgeInsets.fromLTRB(10, 0, 10, 8), child: Column(children: [
         _ProjectSettings(state: s),
-        if (s.globalDefs.isNotEmpty) NeonPanel(color: Neon.blue, child: ParamGroups(
-          params: s.globalDefs, color: Neon.blue, valueOf: s.globalValue,
-          onChanged: (d, v) => s.setGlobal(d.name, v))),
         // App-wide: how long-press menus open (owner: a list near the finger by default, a ring as a setting).
         Padding(padding: const EdgeInsets.only(top: 6), child: Row(children: [
           const Expanded(child: Text('Long-press menus', style: TextStyle(color: Neon.dim))),
@@ -1127,8 +1123,7 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
     return LayoutBuilder(builder: (context, box) => Stack(children: [
       Positioned.fill(child: tracks),
       Positioned(left: 6, right: 6, bottom: 6, height: math.min(box.maxHeight - 12, math.max(320.0, box.maxHeight * 0.86)),
-        child: SlideIn(from: const Offset(0, 0.15), child: MixerCard(state: s, onClose: () => setState(() => mixerCard = false),
-          onSlot: (layer, _) { setState(() => mixerCard = false); _openTrack(layer, tab: FocusTab.fx); }))),
+        child: SlideIn(from: const Offset(0, 0.15), child: MixerCard(state: s, onClose: () => setState(() => mixerCard = false)))),
     ]));
   }
 }
@@ -1180,8 +1175,7 @@ class _TimelineHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     final color = trackColor(state, layer);
     final selected = focused || state.selectedLayerId == layer.id;
-    final gens = state.project.modules.where((m) => state.isGenerator(m.id)).toList();
-    final fxCount = layer.effectIds.length + layer.components.length;
+    final fxCount = layer.components.length;
     final thin = trackHeight < 52;
     // REAPER-style (owner, 2026-11-10): the track's colour tints the whole header and its left edge, no outline.
     final edge = BorderSide(color: selected ? color : color.withValues(alpha: 0.75), width: selected ? 4 : 3);
@@ -1214,7 +1208,7 @@ class _TimelineHeader extends StatelessWidget {
             onTap: () => layer.isFolder
                 ? state.editLayer(layer, (l) => l.solo = !l.solo)
                 : state.mixLayer(layer, solo: !layer.solo));
-        // A stereo track (a native instrument or effect, or a folder) meters each side; a .caw track one bar.
+        // A stereo track (a native instrument or effect, or a folder) meters each side; an empty track one bar.
         final meter = TrackMeter(key: ValueKey('meter-${layer.id}'), state: state, index: index, stereo: layer.isStereo,
             color: color);
         // FX: drawn at 18 dp, touched over about 34 dp; a dot tells the track has effects. A very narrow header
@@ -1264,7 +1258,7 @@ class _TimelineHeader extends StatelessWidget {
             message: layer.isFolder
                 ? (layer.busEnabled ? 'Folder with a group bus' : 'Folder')
                 : 'Instrument: ${layer.instrument != null ? state.componentInfo(layer.instrument!.id)?.label ?? layer.instrument!.id
-                    : gens.where((g) => g.id == layer.generatorId).firstOrNull?.name ?? 'none'} · hold for more',
+                    : 'none'} · hold for more',
             child: Text(layer.name, maxLines: 1, overflow: TextOverflow.ellipsis,
               style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700,
                 color: Color.lerp(Neon.text, color, selected ? 0.35 : 0.15))))),
@@ -2052,39 +2046,6 @@ class _GhostView extends StatelessWidget {
             ]))),
       ]))));
     });
-}
-
-class _ArrangementMixer extends StatelessWidget {
-  const _ArrangementMixer({required this.state});
-  final AppState state;
-  @override
-  Widget build(BuildContext context) => Container(height: 150,
-    decoration: const BoxDecoration(color: Neon.panel, border: Border(top: BorderSide(color: Neon.line))),
-    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      const Padding(padding: EdgeInsets.fromLTRB(12, 7, 12, 2),
-        child: Text('MIXER', style: TextStyle(color: Neon.dim, fontSize: 10, letterSpacing: 1.4))),
-      Expanded(child: ListView(scrollDirection: Axis.horizontal, children: [
-        for (final l in state.project.layers.where((x) => !x.isFolder || x.busEnabled))
-          SizedBox(width: 150, child: Padding(padding: const EdgeInsets.symmetric(horizontal: 7),
-            child: Column(children: [
-              Text(l.name, maxLines: 1, overflow: TextOverflow.ellipsis,
-                style: TextStyle(color: trackColor(state, l), fontSize: 11)),
-              Expanded(child: ValueListenableBuilder<int>(valueListenable: state.layerValueTick(l.id),
-                builder: (context, _, _) => Column(children: [
-                  Row(children: [const Icon(Icons.volume_up, size: 13, color: Neon.dim),
-                    Expanded(child: SizedBox(height: 36, child: VolumeFader(value: l.volume, vertical: false,
-                      label: '${l.name} level', onChanged: (v) => state.mixLayer(l, volume: v)))),
-                    SizedBox(width: 52, child: Text(VolumeTaper.label(l.volume), textAlign: TextAlign.right,
-                      style: Neon.code(size: 9, color: Neon.dim)))]),
-                  Row(children: [const Text('L', style: TextStyle(color: Neon.dim, fontSize: 10)),
-                    Expanded(child: ResetOnDoubleTap(onReset: () => state.mixLayer(l, pan: 0), child: Slider(
-                      value: l.pan, min: -1, max: 1, onChanged: (v) => state.mixLayer(l, pan: v)))),
-                    const Text('R', style: TextStyle(color: Neon.dim, fontSize: 10))]),
-                ]))),
-            ]))),
-      ])),
-    ]),
-  );
 }
 
 class _OverloadBanner extends StatelessWidget {

@@ -25,13 +25,11 @@ LayerDoc masterLayerOf(ProjectDoc p) {
 /// What the engine calls a chain's layer: null for the master.
 String? engineLayerId(LayerDoc layer) => isMasterLayer(layer) ? null : layer.id;
 
-/// An effect being dragged from a mixer strip: chain [kind] ('native' for a C++ effect, 'caw' for a .caw one) slot
-/// [index] of track [layerId] ([masterLayerId] for the master).
+/// A C++ effect being dragged from a mixer strip: slot [index] of track [layerId] ([masterLayerId] for the master).
 class FxSlotDrag {
-  const FxSlotDrag(this.layerId, this.kind, this.index);
-  final String layerId, kind;
+  const FxSlotDrag(this.layerId, this.index);
+  final String layerId;
   final int index;
-  bool get native => kind == 'native';
 }
 
 extension MixerFx on AppState {
@@ -45,55 +43,31 @@ extension MixerFx on AppState {
     final from = chainLayer(drag.layerId);
     if (from == null || identical(from, to) || from.id == to.id) return false;
     if (to.isFolder && !to.busEnabled) return false;
-    if (drag.native) return drag.index >= 0 && drag.index < from.components.length;
-    if (isMasterLayer(to) || to.isFolder) return false;
-    return drag.index >= 0 && drag.index < from.effectIds.length;
+    return drag.index >= 0 && drag.index < from.components.length;
   }
 
   /// Puts the effect [drag] names at the end of [to]'s chain, as REAPER's FX drag between strips: a copy with the
-  /// same values (a .caw effect gets its own module, so its knobs are its own), or with [move] the effect itself,
-  /// leaving the source. One undo step; false when it can't go there.
+  /// same values, or with [move] the effect itself, leaving the source. One undo step; false when it can't go there.
   bool dropFx(FxSlotDrag drag, LayerDoc to, {bool move = false}) {
     if (!canDropFx(drag, to)) return false;
     final from = chainLayer(drag.layerId)!;
-    if (drag.native) {
-      final use = from.components[drag.index];
-      final copy = move ? use : ComponentUseDoc.fromJson(use.toJson())!;
-      final before = List.of(from.components);
-      editProject((p) {
-        if (move) {
-          from.components.removeAt(drag.index);
-          // Its lanes go with it (lanes address an effect by chain index; the master's lanes have no layer).
-          for (final lane in p.automation) {
-            if (lane.targetType == 'component' && lane.layerId == engineLayerId(from) && lane.component == drag.index) {
-              lane.layerId = engineLayerId(to);
-              lane.component = to.components.length;
-            }
+    final use = from.components[drag.index];
+    final copy = move ? use : ComponentUseDoc.fromJson(use.toJson())!;
+    final before = List.of(from.components);
+    editProject((p) {
+      if (move) {
+        from.components.removeAt(drag.index);
+        // Its lanes go with it (lanes address an effect by chain index; the master's lanes have no layer).
+        for (final lane in p.automation) {
+          if (lane.targetType == 'component' && lane.layerId == engineLayerId(from) && lane.component == drag.index) {
+            lane.layerId = engineLayerId(to);
+            lane.component = to.components.length;
           }
         }
-        // At the end of [to]'s chain, so its own lanes keep their indexes.
-        to.components.add(copy);
-        if (move) followComponentLanes(p, engineLayerId(from), before);
-      });
-      return true;
-    }
-    final id = from.effectIds[drag.index];
-    var placed = id;
-    if (!move) {
-      final m = project.module(id);
-      if (m == null) return false;
-      final copy = ModuleDoc(id: newId('m'), name: m.name, source: m.source, runSource: m.runSource,
-          params: Map.of(m.params));
-      placed = copy.id;
-      editProject((p) {
-        p.modules.add(copy);
-        to.effectIds.add(placed);
-      });
-      return true;
-    }
-    editProject((_) {
-      from.effectIds.removeAt(drag.index);
-      to.effectIds.add(placed);
+      }
+      // At the end of [to]'s chain, so its own lanes keep their indexes.
+      to.components.add(copy);
+      if (move) followComponentLanes(p, engineLayerId(from), before);
     });
     return true;
   }
