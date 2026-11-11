@@ -20,6 +20,10 @@ Owner (2026-11-10): work through everything discussed toward the open beta, with
 - Closing done issues on GitHub was blocked by the auto-mode classifier: ask the owner to allow it or close them (#7 #21 #24 #36 #38 #40 #76 #123 #128 #137 #168 #170 #172 #175; superseded #32 #54). Draft comments in the audit §6.
 - Owner choices to batch at the end: agents' "to confirm" items in decisions.md (Build start page, Try-it, sheets <600 dp, Files toggle, mod amount 25 %, bipolar, Flagship tabs, EQ double-tap, routing defaults, settings sections/defaults).
 
+## Next
+- Merge each agent as it reports (registries and API numbers conflict: keep all entries), audio-review engine merges, build an APK and send it with what's new.
+- Then the next waves from the audit: WP-H MIDI devices, WP-I stems/render parity, WP-K screens; then WP-B/C/D (#160), WP-E (#159), WP-F (#161), WP-G (#127), WP-J (audio clips/recording/sampler); WP-N docs; WP-O release.
+
 ## Owner's calls pending
 - Confirm MIDI storage (pattern text + SMF exchange); Android developer verification (2027, see vision.md).
 
