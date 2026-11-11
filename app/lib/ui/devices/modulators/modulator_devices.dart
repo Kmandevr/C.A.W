@@ -20,6 +20,7 @@ import '../device_controls.dart';
 import '../device_scope.dart';
 import '../kit/controls.dart';
 import '../kit/feel.dart';
+import '../../pointer_input.dart';
 
 /// A modulator's colour: its kind's (LFOs blue, envelopes green, the follower amber, steps orange, random pink,
 /// macros violet, MIDI yellow), each further one of a kind a shade on, so rings on one knob tell apart.
@@ -90,7 +91,7 @@ class ModOutputChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) => ValueListenableBuilder<ModSourceRef?>(
     valueListenable: state.assigningModulation,
-    builder: (context, a, _) => LongPressDraggable<ModSourceRef>(
+    builder: (context, a, _) => HoldDraggable<ModSourceRef>(
       key: ValueKey('modout-${source.modulatorId}-${source.output}'),
       data: source,
       delay: const Duration(milliseconds: 180),
@@ -104,7 +105,7 @@ class ModOutputChip extends StatelessWidget {
       onDragEnd: (_) => state.draggingModulation.value = null,
       onDraggableCanceled: (_, _) => state.draggingModulation.value = null,
       child: Tooltip(
-        message: 'Tap, then tap any knob, or hold and drag onto one: ${state.modSourceLabel(source)} moves it',
+        message: '${PointerInput.tapCap}, then ${PointerInput.tap} any knob, or ${PointerInput.mouse ? 'drag' : 'hold and drag'} onto one: ${state.modSourceLabel(source)} moves it',
         waitDuration: const Duration(milliseconds: 700),
         child: GestureDetector(
           behavior: HitTestBehavior.opaque,
@@ -347,8 +348,8 @@ class ModulatorsSection extends StatelessWidget {
         Row(children: [
           const Text('MODULATORS', style: TextStyle(fontSize: 10, letterSpacing: 1.3, fontWeight: FontWeight.w800, color: Neon.dim)),
           const SizedBox(width: 8),
-          const Expanded(child: Text('Drag an output onto any knob, or tap it, then tap knobs',
-            maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 10, color: Neon.dim))),
+          Expanded(child: Text('Drag an output onto any knob, or ${PointerInput.tap} it, then ${PointerInput.tap} knobs',
+            maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 10, color: Neon.dim))),
           IconButton(
             key: const ValueKey('modulators-add'),
             tooltip: 'Add a modulator',

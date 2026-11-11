@@ -159,6 +159,7 @@ class _CodeKeyRowState extends State<CodeKeyRow> {
             key: ValueKey('key ${key.label}'),
             onTap: () => _type(key.text),
             onLongPress: key.variants.isEmpty ? null : () => _showVariants(c, key),
+            onSecondaryTap: key.variants.isEmpty ? null : () => _showVariants(c, key),
             child: SizedBox(
               height: CodeKeyRow.height,
               child: Center(child: Text(key.label, style: Neon.code(size: 15, color: Neon.text))),

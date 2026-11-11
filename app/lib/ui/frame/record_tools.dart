@@ -11,6 +11,7 @@ import '../arrange/long_press_menu.dart';
 import '../feedback.dart';
 import '../haptics.dart';
 import '../theme.dart';
+import '../pointer_input.dart';
 
 const _modeNames = {
   AutomationMode.touch: ('Touch', 'T', 'Writes while you hold a control, then back to the lane'),
@@ -52,7 +53,7 @@ class AutomateButton extends StatelessWidget {
           final hot = armed && writer.writing;
           final color = armed ? Neon.pink : Neon.dim;
           return Tooltip(
-            message: armed ? 'Automate: on, $name (long-press for the mode)' : 'Automate: write control moves while playing',
+            message: armed ? 'Automate: on, $name (${PointerInput.hold} for the mode)' : 'Automate: write control moves while playing',
             child: Semantics(
               button: true,
               toggled: armed,

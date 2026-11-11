@@ -300,6 +300,15 @@ class _ZoneMapState extends State<ZoneMap> {
     final kw = size.width / (b - a + 1);
     // A zone moves from the first few pixels (a key is narrow on a phone), before the page's scroll takes the drag.
     final mq = MediaQuery.of(context);
+    void addUnder(Offset at) {
+      final under = [
+        for (var i = widget.zones.zones.length - 1; i >= 0; i--)
+          if (_rect(widget.zones.zones[i], size).inflate(4).contains(at)) i,
+      ];
+      final i = under.where((i) => !widget.selected.contains(i)).firstOrNull ?? under.firstOrNull;
+      if (i != null) widget.onSelect(i, additive: true);
+    }
+
     return MediaQuery(data: mq.copyWith(gestureSettings: const DeviceGestureSettings(touchSlop: kTouchSlop / 3)),
         child: GestureDetector(
       behavior: HitTestBehavior.opaque,
@@ -308,14 +317,8 @@ class _ZoneMapState extends State<ZoneMap> {
       onTapUp: (d) => widget.onSelect(_hit(d.localPosition, size), additive: widget.selected.length > 1 ||
           HardwareKeyboard.instance.isControlPressed),
       // A long-press adds a zone to the selection: of stacked zones, the first not chosen yet (layers, round robins).
-      onLongPressStart: (d) {
-        final under = [
-          for (var i = widget.zones.zones.length - 1; i >= 0; i--)
-            if (_rect(widget.zones.zones[i], size).inflate(4).contains(d.localPosition)) i,
-        ];
-        final i = under.where((i) => !widget.selected.contains(i)).firstOrNull ?? under.firstOrNull;
-        if (i != null) widget.onSelect(i, additive: true);
-      },
+      onLongPressStart: (d) => addUnder(d.localPosition),
+      onSecondaryTapUp: (d) => addUnder(d.localPosition), // a right-click does the same
       onPanStart: (d) {
         final i = _hit(d.localPosition, size);
         if (i == null) return;

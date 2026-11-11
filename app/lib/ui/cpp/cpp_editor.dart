@@ -15,6 +15,7 @@ import '../feedback.dart';
 import '../frame/sections.dart';
 import '../glass.dart';
 import '../haptics.dart';
+import '../pointer_input.dart';
 import '../code_prefs.dart';
 import '../theme.dart';
 import 'code_style.dart';
@@ -456,6 +457,7 @@ class CppEditorState extends State<CppEditor> {
             controller: v.controller,
             scrollController: _scroll,
             focusNode: _focus,
+            toolbarController: const _MouseEditMenu(),
             wordWrap: CodePrefs.wrap,
             autofocus: false, // the keyboard opens when the code is tapped, not when a tab opens
             chunkAnalyzer: const NonCodeChunkAnalyzer(),
@@ -1246,4 +1248,40 @@ class _StatusChip extends StatelessWidget {
         ),
     ]);
   }
+}
+
+/// A right-click on the code (a mouse): Cut, Copy, Paste and Select all, at the pointer. A finger's long-press is
+/// left as it was (re_editor asks this controller then too, and it shows nothing for touch).
+class _MouseEditMenu implements SelectionToolbarController {
+  const _MouseEditMenu();
+
+  @override
+  void show({
+    required BuildContext context,
+    required CodeLineEditingController controller,
+    required TextSelectionToolbarAnchors anchors,
+    Rect? renderRect,
+    required LayerLink layerLink,
+    required ValueNotifier<bool> visibility,
+  }) {
+    if (!PointerInput.mouse) return;
+    final at = anchors.primaryAnchor;
+    unawaited(showMenu<void Function()>(
+      context: context,
+      position: RelativeRect.fromLTRB(at.dx, at.dy, at.dx, at.dy),
+      items: [
+        PopupMenuItem(key: const ValueKey('code-menu-cut'), height: 36, value: controller.cut,
+          child: const Text('Cut  (Ctrl+X)', style: TextStyle(fontSize: 12))),
+        PopupMenuItem(key: const ValueKey('code-menu-copy'), height: 36, value: () => unawaited(controller.copy()),
+          child: const Text('Copy  (Ctrl+C)', style: TextStyle(fontSize: 12))),
+        PopupMenuItem(key: const ValueKey('code-menu-paste'), height: 36, value: controller.paste,
+          child: const Text('Paste  (Ctrl+V)', style: TextStyle(fontSize: 12))),
+        PopupMenuItem(key: const ValueKey('code-menu-all'), height: 36, value: controller.selectAll,
+          child: const Text('Select all  (Ctrl+A)', style: TextStyle(fontSize: 12))),
+      ],
+    ).then((run) => run?.call()));
+  }
+
+  @override
+  void hide(BuildContext context) {}
 }

@@ -17,6 +17,7 @@ import 'glass.dart';
 import 'haptics.dart';
 import 'theme.dart';
 import 'volume_fader.dart';
+import 'pointer_input.dart';
 
 /// What "Send to…" offers: a new reverb or delay bus (made with its effect and the send in one tap), or a bus that
 /// exists and wouldn't make a loop.
@@ -184,7 +185,7 @@ class _SendKnob extends StatelessWidget {
       onLongPressStart: (d) => showSendOptions(context, state, layer, index, at: d.globalPosition),
       onSecondaryTapUp: (d) => showSendOptions(context, state, layer, index, at: d.globalPosition),
       child: Opacity(opacity: plays && !send.mute ? 1 : 0.45, child: Tooltip(
-        message: plays ? 'Send to $name (long-press for options)' : 'Send to $name: not playing (it would feed itself, or the bus is off)',
+        message: plays ? 'Send to $name (${PointerInput.hold} for options)' : 'Send to $name: not playing (it would feed itself, or the bus is off)',
         child: Knob(
           key: ValueKey('send-${layer.id}-$index'),
           value: VolumeTaper.position(send.level), min: 0, max: 1,
@@ -315,7 +316,7 @@ class _RouteRow extends StatelessWidget {
                 icon: Icons.arrow_forward,
                 label: out?.name ?? 'Master',
                 color: out == null ? Neon.pink : trackColor(s, out),
-                tooltip: 'Where ${layer.name} goes: tap to change',
+                tooltip: 'Where ${layer.name} goes: ${PointerInput.tap} to change',
                 onTap: (at) => _pickOutput(context, at),
               ),
               for (var i = 0; i < layer.sends.length; i++)
@@ -325,7 +326,7 @@ class _RouteRow extends StatelessWidget {
                   label: '${s.layerById(layer.sends[i].to)?.name ?? 'Missing'} ${_sendLabel(layer.sends[i])}',
                   color: _busColor(s, layer.sends[i].to),
                   faded: !plan.sendPlays(layer, i) || layer.sends[i].mute,
-                  tooltip: plan.sendPlays(layer, i) ? 'A send: tap for its options' : 'Not playing: it would feed itself, or the bus is off',
+                  tooltip: plan.sendPlays(layer, i) ? 'A send: ${PointerInput.tap} for its options' : 'Not playing: it would feed itself, or the bus is off',
                   onTap: (at) => showSendOptions(context, s, layer, i, at: at, onOpenBus: onOpenLayer),
                 ),
               if (layer.sends.length < SendDoc.maxSends)
@@ -354,7 +355,7 @@ class _RouteRow extends StatelessWidget {
                   icon: Icons.waves,
                   label: '${s.modSourceLabel(l.ref)} → ${s.modTargetLabel(l.target).split(' · ').skip(1).join(' · ')}',
                   color: modulatorColor(s, l.source),
-                  tooltip: 'A modulation: tap for its amount',
+                  tooltip: 'A modulation: ${PointerInput.tap} for its amount',
                   onTap: (_) => showModLinkSheet(context, s, l.target),
                 ),
             ])),

@@ -16,6 +16,7 @@ import 'pattern_editor.dart';
 import 'pattern_fields.dart';
 import 'theme.dart';
 import 'widgets.dart';
+import 'pointer_input.dart';
 
 class PatternScreen extends StatefulWidget {
   const PatternScreen({super.key, required this.state});
@@ -375,7 +376,7 @@ class _PatternScreenState extends State<PatternScreen> {
         ),
         if (look.soloButton)
           IconButton(
-            tooltip: s.previewOnly ? 'Hearing only this (tap for the whole project)' : 'Hear only this',
+            tooltip: s.previewOnly ? 'Hearing only this (${PointerInput.tap} for the whole project)' : 'Hear only this',
             isSelected: s.previewOnly,
             onPressed: () => s.setPreviewOnly(!s.previewOnly),
             icon: const Icon(Icons.headphones_outlined, color: Neon.dim),

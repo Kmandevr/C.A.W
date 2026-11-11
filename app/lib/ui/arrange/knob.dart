@@ -1,4 +1,4 @@
-// A compact rotary knob for effect cards: drag up or down to turn, double-tap for the default, a tick at the centre;
+// A compact rotary knob for effect cards: drag up or down (or turn the mouse wheel) to turn, double-tap for the default, a tick at the centre;
 // exponential parameters turn on a log taper.
 import 'dart:math' as math;
 
@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 
 import '../haptics.dart';
 import '../motion.dart';
+import '../pointer_input.dart';
 import '../theme.dart';
 
 /// Where a value sits along a control's travel (0..1) and back. Linear by default; an exponential parameter
@@ -124,6 +125,19 @@ class _KnobState extends State<Knob> {
     widget.onChangeEnd?.call();
   }
 
+  // The mouse wheel: one value of a stepped knob, else a hundredth of the travel (a fifth of that with Shift).
+  void _wheel(int dir, bool fine) {
+    final now = _dragValue ?? widget.value;
+    _set(widget.step > 0 ? now + dir * widget.step
+        : _taper.value(_taper.position(now) + dir * (fine ? 0.002 : 0.01)));
+  }
+
+  // A wheel burst ends: one change (undo step), as a drag's end.
+  void _wheelEnd() {
+    _dragValue = null;
+    widget.onChangeEnd?.call();
+  }
+
   @override
   Widget build(BuildContext context) {
     final norm = _taper.position(widget.value);
@@ -173,7 +187,12 @@ class _KnobState extends State<Knob> {
           onDoubleTap: widget.enabled && widget.defaultValue != null
               ? () { _set(widget.defaultValue!); _dragValue = null; widget.onChangeEnd?.call(); }
               : null,
-          child: SizedBox(
+          child: WheelSteps(
+            enabled: widget.enabled,
+            onStep: _wheel,
+            onEnd: _wheelEnd,
+            cursor: SystemMouseCursors.resizeUpDown,
+            child: SizedBox(
             width: math.max(48, widget.size + 14),
             child: Column(mainAxisSize: MainAxisSize.min, children: [
               // Held, the knob grows a little and glows (feedback.dart's press look).
@@ -194,7 +213,7 @@ class _KnobState extends State<Knob> {
                 style: const TextStyle(fontSize: 9, color: Neon.dim)),
               Text(text, maxLines: 1, overflow: TextOverflow.ellipsis, style: Neon.code(size: 9, color: color)),
             ]),
-          ),
+          )),
         ),
       ),
     );

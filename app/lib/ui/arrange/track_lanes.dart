@@ -13,6 +13,7 @@ import '../feedback.dart';
 import '../haptics.dart';
 import '../theme.dart';
 import '../volume_fader.dart' show VolumeTaper;
+import '../pointer_input.dart';
 
 /// One automation lane row's height: compact, and still a finger's height for its points (phone first).
 const double kLaneRowHeight = 40;
@@ -192,7 +193,7 @@ class TrackLaneHeaders extends StatelessWidget {
             SizedBox(width: 26, height: kLaneRowHeight, child: Pressable(child: IconButton(
               key: ValueKey('lane-arm-${lane.key}'),
               padding: EdgeInsets.zero, iconSize: 15, isSelected: lane.armed,
-              tooltip: lane.armed ? 'Armed: Automate writes it (tap to disarm)' : 'Disarmed: only plays (tap to arm)',
+              tooltip: lane.armed ? 'Armed: Automate writes it (${PointerInput.tap} to disarm)' : 'Disarmed: only plays (${PointerInput.tap} to arm)',
               icon: Icon(lane.armed ? Icons.radio_button_checked : Icons.radio_button_unchecked,
                 color: lane.armed ? Neon.pink : Neon.dim),
               onPressed: () {

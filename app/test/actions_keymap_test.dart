@@ -87,8 +87,9 @@ void main() {
     expect(defaults.lookup(Area.arranger, k('Ctrl+S')), const ActionRef.action('arranger.layer.moveDown'));
     expect(defaults.lookup(Area.exporter, k('Ctrl+S')), const ActionRef.action('project.save'));
     for (final entry in const {
-      'Ctrl+3': 'view.exporter',
-      'Ctrl+7': 'view.files',
+      'Ctrl+1': 'view.builder',
+      'Ctrl+2': 'view.files',
+      'Ctrl+3': 'view.arranger',
     }.entries) {
       expect(defaults.lookup(Area.global, k(entry.key)), ActionRef.action(entry.value));
     }

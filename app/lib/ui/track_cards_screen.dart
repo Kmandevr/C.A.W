@@ -11,6 +11,7 @@ import '../model/project.dart';
 import 'arrange/fx_stack.dart' show addEffectTo, pickInstrument;
 import 'cpp/build_start.dart' show ExamplesList, StarterExample;
 import 'theme.dart';
+import 'pointer_input.dart';
 import 'volume_fader.dart';
 import 'arrange/track_color.dart';
 import 'widgets.dart';
@@ -793,13 +794,16 @@ class _TrackSheet extends StatelessWidget {
             const SizedBox(width: 56, child: Text('Pan', style: TextStyle(color: Neon.dim))),
             const Text('L', style: TextStyle(color: Neon.dim, fontSize: 12)),
             Expanded(
-              child: ResetOnDoubleTap(onReset: () => s.mixLayer(layer, pan: 0), child: Slider(
+              child: ResetOnDoubleTap(onReset: () => s.mixLayer(layer, pan: 0), child: WheelSteps(
+                onStep: (dir, fine) => s.mixLayer(layer, pan: panWheelStep(layer.pan, dir, fine)),
+                child: Slider(
                 value: layer.pan,
                 min: -1,
                 max: 1,
                 activeColor: color,
+                mouseCursor: SystemMouseCursors.resizeLeftRight,
                 onChanged: (v) => s.mixLayer(layer, pan: v.abs() < 0.04 ? 0 : v),
-              )),
+              ))),
             ),
             const Text('R', style: TextStyle(color: Neon.dim, fontSize: 12)),
           ]),

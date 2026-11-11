@@ -1,6 +1,7 @@
 // App shell: the frame (Build, Files, Arrange; bottom transport on phones, a rail and docking panels when wide) and
 // the project menu.
 import 'dart:async';
+import 'dart:io';
 import 'dart:ui' show AppExitResponse;
 
 import 'package:flutter/material.dart';
@@ -12,7 +13,10 @@ import '../model/automation_writer.dart';
 import '../model/live_midi.dart';
 import '../model/app_state.dart';
 import '../model/settings.dart';
+import '../model/audio_edit.dart' show audioExtensions;
+import '../platform/desktop_window.dart';
 import '../platform/system_bars.dart';
+import 'audio_file_actions.dart' show AudioSource, importAudioSources;
 import 'arranger_screen.dart';
 import 'audio_record_ui.dart';
 import 'export_page.dart';
@@ -23,6 +27,7 @@ import 'dock/floating_window.dart';
 import 'dock/layout.dart';
 import 'file_manager_screen.dart';
 import 'key_router.dart';
+import 'page_closer.dart';
 import 'theme.dart';
 import 'settings/settings_page.dart';
 import 'widgets.dart';
@@ -38,6 +43,7 @@ import 'frame/strain.dart';
 import 'adaptive_sheet.dart';
 import 'arrange/templates_ui.dart';
 import '../model/templates.dart';
+import 'pointer_input.dart';
 
 /// The panel each view shortcut shows, by the index KeyRouter's `onView` passes.
 const _viewPanels = [Panels.builder, Panels.arrangement, Panels.files];
@@ -104,9 +110,49 @@ class _ShellState extends State<Shell> {
     if (s.settings.layoutMode != _layoutMode && mounted) setState(() => _layoutMode = s.settings.layoutMode);
   }
 
+  StreamSubscription<List<String>>? _opened;
+
+  // The window's title follows the project's name (desktop; DesktopWindow ignores it elsewhere).
+  void _syncTitle() {
+    if (!s.ready) return;
+    DesktopWindow.current.setProjectTitle(s.project.name);
+    if (_waiting.isNotEmpty) {
+      final paths = List.of(_waiting);
+      _waiting.clear();
+      WidgetsBinding.instance.addPostFrameCallback((_) => _openFiles(paths));
+    }
+  }
+
+  final List<String> _waiting = []; // files that came before the project was ready
+
+  /// Files opened with the app or dropped on its window: audio files are imported, each onto a new audio track, as
+  /// Files' import does. Other kinds (.mid, projects) are left to other listeners of [DesktopWindow.openedFiles].
+  void _openFiles(List<String> paths) {
+    final audio = [
+      for (final p in paths)
+        if (audioExtensions.contains(p.split('.').last.toLowerCase())) File(p),
+    ];
+    final others = paths.length - audio.length;
+    if (others > 0) debugPrint('Opened files not imported here: ${paths.where((p) => !audio.any((f) => f.path == p))}');
+    if (audio.isEmpty || !mounted) return;
+    if (!s.ready) {
+      _waiting.addAll(audio.map((f) => f.path));
+      return;
+    }
+    final sources = <AudioSource>[
+      for (final f in audio)
+        if (f.existsSync())
+          (name: f.uri.pathSegments.last, size: f.lengthSync(), read: () => f.openRead()),
+    ];
+    if (sources.isNotEmpty) unawaited(importAudioSources(context, s, sources));
+  }
+
   @override
   void initState() {
     super.initState();
+    s.addListener(_syncTitle);
+    _syncTitle();
+    _opened = DesktopWindow.current.openedFiles.listen(_openFiles);
     s.settings.addListener(_onSettings);
     _sections.addListener(_onSection);
     _life = AppLifecycleListener(
@@ -128,6 +174,8 @@ class _ShellState extends State<Shell> {
 
   @override
   void dispose() {
+    s.removeListener(_syncTitle);
+    unawaited(_opened?.cancel());
     s.settings.removeListener(_onSettings);
     _life.dispose();
     _dock.dispose();
@@ -728,11 +776,12 @@ class _BpmButton extends StatelessWidget {
       onLongPressHint: 'Tap tempo',
       excludeSemantics: true,
       child: Tooltip(
-        message: 'Tap to type the tempo, long-press to tap it (T)',
+        message: '${PointerInput.tapCap} to type the tempo, ${PointerInput.hold} to tap it (T)',
         child: InkWell(
           key: const ValueKey('transport-bpm'),
           onTap: type,
           onLongPress: pad,
+          onSecondaryTap: pad,
           child: Padding(
             padding: const EdgeInsets.symmetric(vertical: 2),
             child: Text('${_bpmText(bpm)} BPM', style: Neon.code(size: 14, color: Neon.blue)),
@@ -870,7 +919,7 @@ Future<void> showProjectMenu(BuildContext context, AppState s) async {
             onTap: () async {
               final nav = Navigator.of(context);
               nav.pop();
-              await nav.push(MaterialPageRoute<void>(builder: (_) => GlassPage(child: SettingsPage(settings: s.settings, state: s,
+              await nav.push(MaterialPageRoute<void>(settings: closablePage, builder: (_) => GlassPage(child: SettingsPage(settings: s.settings, state: s,
                   engineProfile: s.hardwareProfile, executionPlan: s.auditionPlan,
                   onEditKeys: keys == null ? null : (c) => keys.showKeyBindings(c)))));
               s.settings.commitLook();

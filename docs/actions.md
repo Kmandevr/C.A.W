@@ -95,9 +95,8 @@ Keys marked † are the owner's own scheme (2026-10-28). The rest are proposals 
 | Undo / redo (the piano roll's own history inside it, a text field's own text undo while one has focus, such as the code editor; the project's everywhere else) | Ctrl+Z / Ctrl+Shift+Z (also Ctrl+Y) |
 | Save now (projects also autosave) | Ctrl+S |
 | Action list | ? |
-| Show Build / Arrange | Ctrl+1 / Ctrl+2 (the panel is revealed in the dock) |
-| Open the Export page (the project menu's Export…) | Ctrl+3 |
-| Go to Files | Ctrl+7 |
+| Go to Build / Files / Arrange, in the rail's order (`view.builder`, `view.files`, `view.arranger`; the panel is revealed in the dock) | Ctrl+1 / Ctrl+2 / Ctrl+3 |
+| Open the Export page (the project menu's Export…) | — |
 | New, open, duplicate, rename, delete project | — / Ctrl+O / — / F2 in the project menu / — |
 | Tap tempo | T |
 | Tempo up / down 1 BPM (Shift: 0.1) | Ctrl+= / Ctrl+- |
