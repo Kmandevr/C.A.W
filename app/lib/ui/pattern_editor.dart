@@ -38,13 +38,14 @@ import 'frame/frame_widgets.dart' show ScrollFade;
 import 'haptics.dart';
 import 'feedback.dart';
 
-enum PatternTool { draw, select, curve, erase }
+enum PatternTool { draw, select, curve, erase, ratchet }
 
 /// Paint counts of the roll's layers, for the frame benchmark in the tests: the whole roll, and the live curve on top.
 @visibleForTesting
 class RollPaintStats {
   static int roll = 0, live = 0;
   static String? label; // the pitch label the overlay last drew, if any
+  static int edits = 0; // notes the roll's last paint drew part way through an edit animation
   static Offset? anchor; // where it last drew a curve's start, if anywhere
   static void reset() => roll = live = 0;
 }
@@ -77,7 +78,8 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
   PatternDoc? _doc;
   String? _error;
   String _lastText = '';
-  final List<PatternDoc> _undo = [], _redo = [];
+  // Undo steps: the doc before an edit, or (with [sel]) a selection a box drew, which an undo takes back.
+  final List<_Undo> _undo = [], _redo = [];
   Set<int> _sel = {};
   PatternTool _tool = PatternTool.draw;
   bool _grid = false; // drum grid instead of the roll
@@ -106,6 +108,51 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
   late final AnimationController _spring = AnimationController(vsync: this)..addListener(_springTick);
   double _lagFrom = 0;
   int _lagEdge = 1;
+
+  // Edit animations (owner, 2026-11-11; [EditMotion]): notes an edit adds pop in from their start, deleted ones shrink
+  // and fade, moved ones slide from where they were and changed lengths grow or shrink. One controller drives them
+  // all; the painter reads its value (no widget per note, no rebuild a frame). Drags don't animate: their ghosts
+  // and snapping are the help.
+  late final AnimationController _editCtl = AnimationController(vsync: this)
+    ..addStatusListener((st) {
+      if (st == AnimationStatus.completed && _motion != null && mounted) setState(() => _motion = null);
+    });
+  _RollMotion? _motion;
+
+  /// Starts the edit animation from [from] to [to], for the kinds turned on.
+  void _animateEdit(PatternDoc from, PatternDoc to) {
+    final notesD = EditMotion.of(context, EditMotionKind.notes), lenD = EditMotion.of(context, EditMotionKind.lengths);
+    _motion = null;
+    if (notesD == null && lenD == null) return;
+    final old = {for (final n in from.notes) n.id: n};
+    final appear = <int>{};
+    final was = <int, ({double at, double pitch, double len})>{};
+    final ids = <int>{};
+    for (final n in to.notes) {
+      ids.add(n.id);
+      final o = old[n.id];
+      if (o == null) {
+        if (notesD != null) appear.add(n.id);
+        continue;
+      }
+      final moved = notesD != null && (o.at != n.at || o.pitch != n.pitch), sized = lenD != null && o.len != n.len;
+      if (moved || sized) {
+        was[n.id] = (
+          at: (moved ? o.at : n.at).toDouble(),
+          pitch: moved ? o.pitch : n.pitch,
+          len: (sized ? o.len : n.len).toDouble(),
+        );
+      }
+    }
+    final gone = notesD == null ? const <PatternNote>[] : [for (final n in from.notes) if (!ids.contains(n.id)) n];
+    final count = appear.length + was.length + gone.length;
+    if (count == 0 || count > 2000) return; // a huge edit just lands
+    final d1 = notesD ?? Duration.zero, d2 = was.isEmpty ? Duration.zero : (lenD ?? Duration.zero);
+    _editCtl.duration = d1 > d2 ? d1 : d2;
+    _motion = _RollMotion(_editCtl, appear: appear, was: was, gone: gone, fade: EditMotion.fadeOnly(context),
+        curve: EditMotion.curve);
+    _editCtl.forward(from: 0);
+  }
 
   void _springTick() {
     setState(() {
@@ -143,6 +190,14 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
   Offset _pinchFocal = Offset.zero;
   int _lane = 0; // a drag in the velocity (1) or extras (2) lane
   bool _rectSelect = false; // this drag draws a selection rectangle
+  // The selection box (owner, 2026-11-11): a long press on empty grid, then a drag, adds the notes it covers to
+  // [_rectBase], the selection before it; one undo step takes it back. A rectangle isn't drawn until past the slop,
+  // so a tap never changes the selection, and a double tap on empty grid clears it.
+  static const _boxHold = Duration(milliseconds: 350);
+  Timer? _boxTimer;
+  bool _boxAdd = false, _rectMoved = false;
+  Set<int> _rectBase = const {};
+  ({Offset at, DateTime when})? _emptyTap;
   // The Curve tool: one curve per lane (1 velocity, 2 chance), kept while the roll is open.
   // Replaced (never changed in place) on each edit, so the painter sees a new map only when a curve changed.
   Map<int, LaneCurve> _curves = const {1: LaneCurve(), 2: LaneCurve()};
@@ -249,6 +304,7 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
     _hearStop();
     _curveView.dispose();
     _spring.dispose();
+    _editCtl.dispose();
     _scroller.dispose();
     s.settings.removeListener(_settingsChanged);
     _router?.unregister(Area.pattern, _focus);
@@ -322,9 +378,8 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
     final d = _doc;
     if (d == null || identical(next, d)) return;
     _mirrorSelectedSources(d, next);
-    _undo.add(d);
-    if (_undo.length > 200) _undo.removeAt(0);
-    _redo.clear();
+    _pushUndo(_Undo(d));
+    _animateEdit(d, next);
     setState(() {
       _doc = next;
       if (select != null) _sel = select;
@@ -410,13 +465,28 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
     }
   }
 
+  void _pushUndo(_Undo u) {
+    _undo.add(u);
+    if (_undo.length > 200) _undo.removeAt(0);
+    _redo.clear();
+  }
+
   void _undoRedo(bool undo) {
     final from = undo ? _undo : _redo, to = undo ? _redo : _undo;
     if (from.isEmpty || _doc == null) return;
     final before = _doc!;
-    final next = from.removeLast();
+    final step = from.removeLast();
+    final sel = step.sel;
+    if (sel != null) {
+      // A selection step: the notes stay, the selection goes back (or forward) to what it was.
+      to.add(_Undo(before, sel: _sel));
+      setState(() => _sel = sel.where((id) => before.byId(id) != null).toSet());
+      return;
+    }
+    final next = step.doc;
     _mirrorSelectedSources(before, next);
-    to.add(before);
+    to.add(_Undo(before));
+    _animateEdit(before, next);
     setState(() => _doc = next);
     _scheduleSend();
   }
@@ -525,7 +595,7 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
         var x = d;
         var sel = _sel;
         for (var i = 0; i < count && sel.isNotEmpty; i++) {
-          final r = x.copyAfter(sel);
+          final r = x.copyAfter(sel, grid: _pasteGrid);
           x = r.doc;
           sel = r.ids;
         }
@@ -541,7 +611,7 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
       case 'roll.notes.delete':
         _apply(d.delete(_sel), select: {});
       case 'roll.edit.cut':
-        _clip = d.copy(_sel);
+        _copy(d);
         _apply(d.delete(_sel), select: {});
       case 'roll.select.all':
         setState(() => _sel = {for (final n in d.notes) n.id});
@@ -550,14 +620,24 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
       case 'roll.select.addAtCursor':
         setState(() => _sel = {..._sel, ...d.notesIn(_cursorAt, _cursorAt, _cursorPitch, _cursorPitch)});
       case 'roll.edit.copy':
-        if (_sel.isNotEmpty) setState(() { _clip = d.copy(_sel); });
+        if (_sel.isNotEmpty) setState(() => _copy(d));
       case 'roll.edit.paste':
         final c = _clip;
-        if (c == null) return true;
-        final r = d.paste(c, _cursorAt);
-        _apply(r.doc, select: r.ids);
+        if (c == null || c.isEmpty) return true;
+        // Right after the copied notes (owner, 2026-11-11), then after each paste, so pastes chain end to end; the
+        // copy becomes the selection.
+        var x = d;
+        var ids = <int>{};
+        for (var i = 0; i < count; i++) {
+          final at = _pasteAt ?? _cursorAt;
+          final r = x.paste(c, at);
+          x = r.doc;
+          ids = r.ids;
+          _pasteAt = _afterSpan(at, c.span);
+        }
+        _apply(x, select: ids);
       case 'roll.edit.duplicate':
-        final r = d.copyAfter(_sel);
+        final r = d.copyAfter(_sel, grid: _pasteGrid);
         _apply(r.doc, select: r.ids);
       case 'roll.notes.split':
         final r = d.split(_sel, _cursorAt);
@@ -581,6 +661,8 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
             'roll.gen.connect' ||
             'roll.gen.tremolo':
         _generate(id);
+      case 'roll.gen.vibrato':
+        _vibrato();
       case 'roll.gen.reverse':
         _apply(d.reverse(_sel));
       case 'roll.gen.invertPitch':
@@ -630,6 +712,8 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
         setState(() => _tool = PatternTool.curve);
       case 'roll.tool.erase':
         setState(() => _tool = PatternTool.erase);
+      case 'roll.tool.ratchet':
+        setState(() => _tool = PatternTool.ratchet);
       case 'roll.view.switch':
         setState(() => _grid = !_grid);
       case 'roll.view.zoomIn':
@@ -664,6 +748,26 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
   }
 
   PatternClip? _clip;
+  Steps? _pasteAt; // where the next paste goes: after the copied notes, then after the last paste
+
+  /// The grid a paste or a copy-after lands on: the roll's while snapping, else none.
+  Steps? get _pasteGrid => _snap ? _resSteps : null;
+
+  /// The first grid line at or after [at] + [span] (exactly there when not snapping).
+  Steps _afterSpan(Steps at, Steps span) {
+    final end = at + span, g = _pasteGrid;
+    return g == null ? end : end.ceilTo(g);
+  }
+
+  /// Copies the selection; the next paste lands right after it.
+  void _copy(PatternDoc d) {
+    final c = d.copy(_sel);
+    if (c.isEmpty) return;
+    _clip = c;
+    _pasteAt = _afterSpan(_selected(d).map((n) => n.at).reduce(Steps.min), c.span);
+  }
+
+  List<PatternNote> _selected(PatternDoc d) => [for (final id in _sel) ?d.byId(id)];
 
   KeyEventResult _onKey(FocusNode node, KeyEvent e) {
     if (e is! KeyDownEvent && e is! KeyRepeatEvent) return KeyEventResult.ignored;
@@ -751,7 +855,7 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
         if (r.id != null) _apply(r.doc, select: {r.id!});
       case LogicalKeyboardKey.keyE:
         if (_sel.isNotEmpty) {
-          final r = d.copyAfter(_sel);
+          final r = d.copyAfter(_sel, grid: _pasteGrid);
           _apply(r.doc, select: r.ids);
         }
       case LogicalKeyboardKey.delete || LogicalKeyboardKey.backspace:
@@ -825,13 +929,8 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
   /// A tap on the grid with the Curve tool: adds the note under it to the notes the curves shape, or clears them.
   void _pickForCurve(Offset p) {
     final hit = _noteAt(p);
-    setState(() {
-      if (hit == null) {
-        _sel = {};
-      } else {
-        _sel = _sel.contains(hit) ? (Set.of(_sel)..remove(hit)) : {..._sel, hit};
-      }
-    });
+    if (hit == null) return _emptyTapped(p);
+    setState(() => _sel = _sel.contains(hit) ? (Set.of(_sel)..remove(hit)) : {..._sel, hit});
   }
 
   void _curveDown(Offset p) {
@@ -972,6 +1071,21 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
       }
     }
     if (point != null) return point;
+    // A selected note's tension handles come next: they sit on its line.
+    _CurveHit? handle;
+    var handleD = reach;
+    for (final n in d.notes) {
+      if (!_sel.contains(n.id) || n.expr.bend.length < 2) continue;
+      final x0 = _noteX(n), w = _noteW(n), mid = _noteMid(n);
+      for (final h in curveHandles(n.expr.bend, w)) {
+        final dist = (Offset(x0 + h.u * w, mid - h.v * _rowH) - p).distance;
+        if (dist <= handleD) {
+          handleD = dist;
+          handle = _CurveHit(n.id, handle: h.seg);
+        }
+      }
+    }
+    if (handle != null) return handle;
     if (line != null) return line;
     final body = _noteAt(p);
     return body == null ? null : _CurveHit(body);
@@ -1000,16 +1114,17 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
   _CurveHit? _bHit;
   double _bK0 = 0;
   Offset? _bStart, _bAt, _bSmooth;
-  bool _bMoved = false, _bFrame = false;
+  bool _bMoved = false, _bFrame = false, _bHandle = false;
   ({int id, int point, DateTime at})? _bTapped; // the last point tapped: a second tap soon after removes it
 
   List<NotePoint> get _livePoints => _curveView.value.points ?? _doc!.byId(_bNote!)!.expr.bend;
 
   /// Shows [points] as note [_bNote]'s curve, [active] the point that follows the finger. The roll itself repaints
   /// only when a drag starts showing points (it then leaves that note to the overlay).
-  void _showLive(List<NotePoint> points, {int? active, bool drawing = false}) {
+  void _showLive(List<NotePoint> points, {int? active, bool drawing = false, int? handle}) {
     final first = _curveView.value.points == null;
-    _curveView.value = _CurveView(hit: _bHit, id: _bNote, points: points, active: active, drawing: drawing);
+    _curveView.value =
+        _CurveView(hit: _bHit, id: _bNote, points: points, active: active, drawing: drawing, handle: handle);
     if (first) setState(() {});
   }
 
@@ -1038,6 +1153,25 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
         _hearStop();
       });
       _hearBendAt(p);
+      return;
+    }
+    if (hit.handle != null && hit.handle! + 1 < pts.length) {
+      // A tension handle follows the finger at once: the segment bends to pass under it.
+      _bSeg = hit.handle;
+      _bHandle = true;
+      _bK0 = pts[hit.handle!].k;
+      _showLive(pts, handle: hit.handle);
+      final seg = hit.handle!;
+      _holdAt = p;
+      _hold = Timer(Duration(milliseconds: _look.holdMs), () {
+        // Held down: the segment goes straight and the rest of this touch does nothing.
+        final now = [..._livePoints];
+        if (seg < now.length) now[seg] = NotePoint(now[seg].t, now[seg].v);
+        _showLive(now);
+        _bSeg = -1;
+        _bMoved = true;
+        Haptics.tick();
+      });
       return;
     }
     if (hit.line && pts.length > 1) {
@@ -1086,7 +1220,7 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
       _bMoved = true;
       _tapClear();
     }
-    if (!_bMoved && (_bPoint == null || (raw - start).distance < 2)) return;
+    if (!_bMoved && ((_bPoint == null && !_bHandle) || (raw - start).distance < 2)) return;
     _selectForCurve(id);
     // Free (unsnapped) drags follow a lightly smoothed finger; the release lands where the finger is.
     final s0 = _bSmooth ?? raw;
@@ -1105,6 +1239,11 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
       final u = _bendU(p.dx, n, prev: pts[i].t).clamp(lo, hi);
       pts[i] = NotePoint(u, _bendValue(p.dy, n, prev: pts[i].v), pts[i].k);
       _showLive(pts, active: i, drawing: _curveView.value.drawing);
+    } else if (_bHandle && seg != null && seg + 1 < pts.length) {
+      // The handle: the segment's middle goes where the finger is (its tension, k, stored on the segment's start).
+      final a = pts[seg], b = pts[seg + 1];
+      pts[seg] = NotePoint(a.t, a.v, tensionThrough(a.v, b.v, (_noteMid(n) - p.dy) / _rowH));
+      _showLive(pts, handle: seg);
     } else if (seg != null && seg < pts.length) {
       // Dragging the line up bends it to rise late (eases in), down to rise early, as on the lanes.
       final k = (_bK0 - (raw.dy - start.dy) / 120).clamp(-1.0, 1.0);
@@ -1143,8 +1282,8 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
           _bTapped = (id: id, point: hit.point!, at: now);
         }
         _selectForCurve(id);
-      } else if (hit.line && n.expr.bend.length > 1) {
-        // A tap on a bent line adds a point there, on the line, so the curve keeps its shape.
+      } else if ((hit.line || hit.handle != null) && n.expr.bend.length > 1) {
+        // A tap on a bent line (or its handle) adds a point there, on the line, so the curve keeps its shape.
         final u = _bendU(start.dx, n);
         pts = _insertPoint(n.expr.bend, NotePoint(u, NoteExpression.valueAt(n.expr.bend, u)));
         _bTapped = null;
@@ -1161,7 +1300,7 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
     _bNote = _bPoint = _bSeg = null;
     _bHit = null;
     _bStart = _bAt = _bSmooth = null;
-    _bMoved = _bFrame = false;
+    _bMoved = _bFrame = _bHandle = false;
     _curveView.value = const _CurveView();
     cancel ? _cancelEdit() : _up();
   }
@@ -1240,6 +1379,22 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
           _apply(doc.tremolo(sel, cycle: cycle, depth: depth, wave: wave));
         }
     }
+  }
+
+  /// Vibrato (owner, 2026-11-11): sets the selected notes' own vibrato (every note when none is selected), the same
+  /// values the extras panel's vibrato sliders show; their bend curves stay. A synced rate is turned into Hz at the
+  /// project's tempo when it is applied. One undo step; repeatable (no randomness).
+  Future<void> _vibrato() async {
+    final d = _doc;
+    if (d == null || d.notes.isEmpty) return;
+    final v = await showDialogOrSheet<_Vibrato>(
+      context: context,
+      builder: (_) => _VibratoDialog(secPerStep: _secPerStep),
+    );
+    final doc = _doc;
+    if (v == null || !mounted || doc == null) return;
+    final sel = _sel.isEmpty ? {for (final n in doc.notes) n.id} : _sel;
+    _apply(doc.setVibrato(sel, depth: v.cents / 100, rate: v.hz(_secPerStep), fade: v.fade));
   }
 
   // ---------- the quantize sheet (REAPER flow gap 8; REAPER's Quantize events, UG 13.23) ----------
@@ -1481,32 +1636,104 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
         } else {
           _pending = p;
           _panning = false;
+          _armBox();
         }
+      } else if (_tool == PatternTool.ratchet) {
+        _brushDown(p);
       } else if (p.dy >= _gridH || _noteAt(p) != null || _tool == PatternTool.select) {
         _down(p);
       } else {
         _pending = p;
         _panning = false;
         if (_tool == PatternTool.draw) _showGhost(p);
+        _armBox();
       }
     } else if (_pointers.length == 2 && _editing) {
       // A second finger during a drag (a note, a lane, a curve or a pitch point) frees it from the grid while it
       // rests.
       _hold?.cancel();
       _hold = null;
+      _boxTimer?.cancel();
       _tapCandidate = null; // two fingers aren't a tap: lifting them doesn't arm the double tap
       _bypass = true;
       _restAt = e.localPosition;
       _editAtBypass = _pointers[_editPointer] ?? e.localPosition;
       _editMove(_lastP!);
     } else if (_pointers.length == 2) {
+      _boxTimer?.cancel();
       _cancelEdit();
       _curveEnd(cancel: true);
       _bendEnd(cancel: true);
+      _brushEnd(cancel: true);
       _pending = null;
       _clearGhost();
       _startPinch();
     }
+  }
+
+  // ---------- the ratchet brush (owner, 2026-11-11) ----------
+  // A drag over notes sets their ratchet count: each note the finger passes (on its row, or on the row the drag began
+  // in) joins, and the count follows the finger up (more) or down (fewer), one step every [_brushStep] px from the
+  // count the first note had. A note that is selected brings the whole selection. One undo step a drag.
+
+  static const _brushStep = 24.0;
+  Offset? _brushAt; // where the drag began; null when no brush drag is under way
+  Offset _brushNow = Offset.zero;
+  PatternDoc? _brushBase;
+  Set<int> _brushIds = {};
+  int _brush0 = 1, _brushCount = 1;
+
+  void _brushDown(Offset p) {
+    final d = _doc;
+    if (d == null || p.dy >= _gridH) return;
+    _brushAt = _brushNow = p;
+    _brushBase = d;
+    _brushIds = {};
+    final hit = _noteAt(p);
+    _brush0 = hit == null ? 1 : d.byId(hit)!.ratchet;
+    _brushCount = _brush0;
+    if (hit != null && _sel.contains(hit)) _brushIds = {..._sel};
+    _brushPick(p);
+    setState(() {});
+  }
+
+  void _brushPick(Offset p) {
+    final start = _brushAt!;
+    for (final at in [p, Offset(p.dx, start.dy)]) {
+      final id = _noteAt(at);
+      if (id != null) _brushIds.add(id);
+    }
+  }
+
+  void _brushMove(Offset p) {
+    final start = _brushAt, base = _brushBase;
+    if (start == null || base == null) return;
+    _brushNow = p;
+    _brushPick(p);
+    final count = (_brush0 - ((p.dy - start.dy) / _brushStep).round()).clamp(1, kPatternMaxRatchet).toInt();
+    if (count != _brushCount) Haptics.tick();
+    _brushCount = count;
+    setState(() => _doc = base.setRatchet(_brushIds, count));
+  }
+
+  void _brushEnd({required bool cancel}) {
+    final base = _brushBase;
+    if (_brushAt == null) return;
+    _brushAt = null;
+    _brushBase = null;
+    if (base == null) return;
+    if (cancel) {
+      setState(() => _doc = base);
+      return;
+    }
+    final d = _doc;
+    if (d != null && !identical(d, base) && d.serialize() != base.serialize()) {
+      _pushUndo(_Undo(base));
+      _scheduleSend();
+    } else {
+      _doc = base;
+    }
+    setState(() {});
   }
 
   void _startPinch() {
@@ -1554,6 +1781,7 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
     final p = e.localPosition - _origin, pending = _pending;
     if (pending != null) {
       if (!_panning && (p - pending).distance > kTouchSlop) {
+        _boxTimer?.cancel();
         _clearGhost();
         // A drag from just outside a selected note's end stretches it (a tap there still draws).
         if (_tool != PatternTool.curve && _edgeAt(pending) != null) {
@@ -1583,10 +1811,12 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
   }
 
   /// Whether a one-finger drag is under way: a note, a lane, a curve point or segment, or a pitch point.
-  bool get _editing => (_dragStart != null && (_dragNote != null || _lane != 0)) || _cLane != 0 || _bNote != null;
+  bool get _editing =>
+      (_dragStart != null && (_dragNote != null || _lane != 0)) || _cLane != 0 || _bNote != null || _brushAt != null;
 
   void _editMove(Offset p) {
     _lastP = p;
+    if (_brushAt != null) return _brushMove(p);
     if (_bNote != null) {
       _bendMove(p);
       return _hearBendAt(p);
@@ -1596,6 +1826,7 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
   }
 
   void _editEnd({required bool cancel}) {
+    if (_brushAt != null) return _brushEnd(cancel: cancel);
     if (_bNote != null) return _bendEnd(cancel: cancel);
     if (_cLane != 0) return _curveEnd(cancel: cancel);
     cancel ? _cancelEdit() : _up();
@@ -1683,6 +1914,7 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
       return;
     }
     if (_pointers.isNotEmpty) return;
+    _boxTimer?.cancel();
     _clearGhost();
     final pending = _pending;
     _pending = null;
@@ -1713,6 +1945,7 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
   void _cancelEdit() {
     _hold?.cancel();
     _hold = null;
+    _boxTimer?.cancel();
     if (_liveEnd()) s.livePattern(widget.module.id, null);
     _hearStop();
     _scroller.stop();
@@ -1791,7 +2024,7 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
   }
 
   /// Starts a one-finger edit at [p]. [outside]: the drag began just outside a selected note's end and stretches it.
-  void _down(Offset p, {bool rect = false, bool outside = false}) {
+  void _down(Offset p, {bool rect = false, bool outside = false, bool add = false}) {
     _focus.requestFocus();
     final d = _doc;
     if (d == null) return;
@@ -1866,11 +2099,45 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
         _hear({r.id!});
       }
     } else {
-      setState(() {
-        _sel = {};
-        _rectEnd = p;
-      });
+      // A rectangle from empty grid. It replaces the selection once it is drawn past the slop, or adds to it as a
+      // selection box ([add], or held still for [_boxHold] first).
+      _rectBase = _sel;
+      _rectMoved = false;
+      _boxAdd = add;
+      _boxTimer?.cancel();
+      if (!add) {
+        _boxTimer = Timer(_boxHold, () {
+          if (_rectMoved || _dragStart == null || _rectEnd == null) return;
+          Haptics.tick();
+          setState(() => _boxAdd = true);
+        });
+      }
+      setState(() => _rectEnd = p);
     }
+  }
+
+  /// A finger down on empty grid: held still for [_boxHold], it starts a selection box that adds to the selection.
+  void _armBox() {
+    _boxTimer?.cancel();
+    _boxTimer = Timer(_boxHold, () {
+      final p = _pending;
+      if (p == null || _panning || _pointers.length != 1 || !mounted) return;
+      _pending = null;
+      _clearGhost();
+      Haptics.tick();
+      _down(p, rect: true, add: true);
+    });
+  }
+
+  /// A tap on empty grid: a second one soon after, near it, clears the selection (a single tap leaves it).
+  void _emptyTapped(Offset p) {
+    final last = _emptyTap, now = DateTime.now();
+    if (last != null && now.difference(last.when) < kDoubleTapTimeout && (p - last.at).distance < 48) {
+      _emptyTap = null;
+      if (_sel.isNotEmpty) setState(() => _sel = {});
+      return;
+    }
+    _emptyTap = (at: p, when: now);
   }
 
   void _move(Offset p) {
@@ -1891,17 +2158,21 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
     }
     if (_dragNote == null) {
       if (_rectSelect) {
+        if (!_rectMoved && (p - start).distance <= kTouchSlop) return;
+        _rectMoved = true;
         setState(() {
           _rectEnd = p;
           final a = _stepAt(math.min(start.dx, p.dx)), b = _stepAt(math.max(start.dx, p.dx));
-          _sel = base.notesIn(Steps.fromDouble(a, maxDenominator: 384), Steps.fromDouble(b, maxDenominator: 384),
+          final inBox = base.notesIn(Steps.fromDouble(a, maxDenominator: 384), Steps.fromDouble(b, maxDenominator: 384),
               math.min(_pitchAt(start.dy), _pitchAt(p.dy)), math.max(_pitchAt(start.dy), _pitchAt(p.dy)));
+          _sel = _boxAdd ? {..._rectBase, ...inBox} : inBox;
         });
       }
       return;
     }
     final free = _free;
     final dSteps = (p.dx - start.dx) / _pxPerStep;
+    _motion = null; // a drag shows the notes where they are
     if (_edge != 0) {
       final b = base.byId(_dragNote!);
       if (b == null) return;
@@ -1937,6 +2208,15 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
   void _up() {
     _hold?.cancel();
     _hold = null;
+    _boxTimer?.cancel();
+    if (_rectEnd != null && _dragStart != null && _dragNote == null && _lane == 0) {
+      if (_boxAdd && _doc != null && !setEquals(_sel, _rectBase)) {
+        _pushUndo(_Undo(_doc!, sel: _rectBase)); // undo takes back what the box added
+      } else if (!_rectMoved && !_boxAdd) {
+        _emptyTapped(_dragStart!);
+      }
+    }
+    _boxAdd = _rectMoved = false;
     final live = _liveEnd();
     _scroller.stop();
     _edge = 0;
@@ -1969,8 +2249,7 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
     _tapCandidate = null;
     if (_dragBase != null && _doc != null && !identical(_dragBase, _doc)) {
       // One undo step for the whole drag.
-      _undo.add(_dragBase!);
-      _redo.clear();
+      _pushUndo(_Undo(_dragBase!));
       if (!live) _scheduleSend();
     }
     if (live) _liveDone();
@@ -1999,11 +2278,16 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
     setState(() => _doc = _lane == 1 ? d.setVelocity(hit, v) : d.setProb(hit, v));
   }
 
-  /// The extras panel for the selected notes: velocity, chance, ratchet, slide. One undo step for the whole visit.
+  double _rampDepth = 0.7; // the ratchet ramp's depth, kept while the roll is open
+
+  /// The extras panel for the selected notes, in sections with the most used first (owner, 2026-11-11): velocity
+  /// and chance; ratchet with its ramp and the brush; slide; tremolo and vibrato; then the note's own expression.
+  /// One undo step for the whole visit.
   Future<void> _openExtras() async {
     final base = _doc;
     if (base == null || _sel.isEmpty) return;
     final sel = Set<int>.of(_sel);
+    String? then; // an action to run once the sheet has closed (a tool or a dialog)
     await showGlassSheet<void>(
       context: context,
       backgroundColor: Neon.panel,
@@ -2022,16 +2306,29 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
           child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
             Text(sel.length == 1 ? 'Note at ${n.at}, length ${n.len}' : '${sel.length} notes',
                 style: const TextStyle(color: Neon.text)),
-            Text('Velocity ${(n.vel * 100).round()}%'),
-            Slider(value: n.vel, onChanged: (v) => change((d) => d.setVelocity(sel, _lastVel = v))),
-            Text('Chance ${(n.prob * 100).round()}%'),
+            const Heading('Note'),
+            ValueSlider(
+                label: 'Velocity',
+                value: n.vel,
+                min: 0,
+                max: 1,
+                reset: 1,
+                scale: 100,
+                unit: '%',
+                onChanged: (v) => change((d) => d.setVelocity(sel, _lastVel = v))),
             // Chance steps by the value grid while snapping is on, like the chance lane.
-            Slider(
+            ValueSlider(
+                label: 'Chance',
                 value: n.prob,
+                min: 0,
+                max: 1,
+                reset: 1,
+                scale: 100,
+                unit: '%',
                 divisions: _snap ? (1 / _look.valueGrid.step).round() : null,
                 onChanged: (v) => change((d) => d.setProb(sel, v))),
-            const Text('Ratchet'),
-            Wrap(spacing: 6, children: [
+            const Heading('Ratchet'),
+            Wrap(spacing: 6, runSpacing: 4, children: [
               for (var r = 1; r <= 8; r++)
                 ChoiceChip(
                   label: Text('$r'),
@@ -2039,12 +2336,59 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
                   onSelected: (_) => change((d) => d.setRatchet(sel, r)),
                 ),
             ]),
+            if (sel.any((id) => (_doc!.byId(id)?.ratchet ?? 1) > 1)) ...[
+              // The engine plays a ratchet's repeats at one velocity: a ramp writes them out as notes.
+              Text('Ramp the repeats (writes them out as notes)', style: TextStyle(color: Neon.dim, fontSize: 12)),
+              ValueSlider(
+                  label: 'Ramp depth',
+                  value: _rampDepth,
+                  min: 0,
+                  max: 1,
+                  reset: 0.7,
+                  scale: 100,
+                  unit: '%',
+                  onChanged: (v) => set(() => _rampDepth = v)),
+              Wrap(spacing: 6, children: [
+                for (final (ramp, name) in const [(RatchetRamp.fadeIn, 'Fade in'), (RatchetRamp.fadeOut, 'Fade out')])
+                  ActionChip(
+                    key: ValueKey('ratchet-ramp-${ramp.name}'),
+                    label: Text(name),
+                    onPressed: () => change((d) {
+                      final r = d.ratchetRamp(sel, ramp: ramp, depth: _rampDepth);
+                      sel
+                        ..clear()
+                        ..addAll(r.ids);
+                      _sel = {...sel};
+                      return r.doc;
+                    }),
+                  ),
+              ]),
+            ],
+            TextButton.icon(
+              onPressed: () {
+                then = 'roll.tool.ratchet';
+                Navigator.pop(ctx);
+              },
+              icon: const Icon(Icons.view_week_outlined, size: 18),
+              label: const Text('Ratchet brush (drag over notes)'),
+            ),
             SwitchListTile(
               contentPadding: EdgeInsets.zero,
               title: const Text('Slide'),
               value: n.slide,
               onChanged: (v) => change((d) => d.setSlide(sel, v)),
             ),
+            const Heading('Wobble'),
+            Wrap(spacing: 6, children: [
+              for (final (id, name) in const [('roll.gen.tremolo', 'Tremolo…'), ('roll.gen.vibrato', 'Vibrato…')])
+                ActionChip(
+                  label: Text(name),
+                  onPressed: () {
+                    then = id;
+                    Navigator.pop(ctx);
+                  },
+                ),
+            ]),
             // The note's own pitch curve, vibrato, volume and timbre (MPE style); one undo step with the rest.
             ExpressionPanel(
               expr: n.expr,
@@ -2059,11 +2403,14 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
         );
       }),
     );
-    if (!mounted || identical(base, _doc)) return;
-    _undo.add(base);
-    _redo.clear();
-    setState(() {});
-    _scheduleSend();
+    if (!mounted) return;
+    if (!identical(base, _doc)) {
+      _pushUndo(_Undo(base));
+      setState(() {});
+      _scheduleSend();
+    }
+    final next = then;
+    if (next != null) _action(next, 1, null);
   }
 
   void _say(String text) => ScaffoldMessenger.maybeOf(context)?.showSnackBar(SnackBar(content: Text(text)));
@@ -2195,6 +2542,7 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
         'roll.tool.select' => _tool == PatternTool.select,
         'roll.tool.erase' => _tool == PatternTool.erase,
         'roll.tool.curve' => _tool == PatternTool.curve,
+        'roll.tool.ratchet' => _tool == PatternTool.ratchet,
         'roll.grid.snap' => _snap,
         'roll.grid.triplets' => _triplet,
         'roll.grid.adaptive' => _fixed,
@@ -2374,9 +2722,27 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
                         lagEdge: _lagEdge,
                         lengthOf: _edge != 0 ? _dragNote : null,
                         ghost: _ghost,
+                        motion: _motion,
                       ),
                     ),
                   ),
+                  if (_brushAt != null)
+                    Positioned(
+                      left: (_origin.dx + _brushNow.dx - 36).clamp(0.0, math.max(0.0, box.maxWidth - 80)),
+                      top: math.max(0.0, _origin.dy + _brushNow.dy - 56),
+                      child: IgnorePointer(
+                        child: Container(
+                          key: const ValueKey('ratchet-brush-label'),
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                          decoration: BoxDecoration(
+                              color: Neon.bg.withValues(alpha: 0.9),
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(color: Neon.yellow)),
+                          child: Text(_brushCount == 1 ? 'Ratchet off' : 'Ratchet $_brushCount',
+                              style: const TextStyle(color: Neon.text, fontWeight: FontWeight.w700, fontSize: 13)),
+                        ),
+                      ),
+                    ),
                   if (_tool == PatternTool.curve)
                     RepaintBoundary(
                       child: CustomPaint(
@@ -2417,6 +2783,7 @@ const Map<String, IconData> _actionIcons = {
   'roll.tool.select': Icons.highlight_alt,
   'roll.tool.erase': Icons.auto_fix_normal,
   'roll.tool.curve': Icons.gesture,
+  'roll.tool.ratchet': Icons.view_week_outlined,
   'edit.undo': Icons.undo,
   'edit.redo': Icons.redo,
   'roll.grid.triplets': Icons.looks_3_outlined,
@@ -2442,6 +2809,7 @@ const Map<String, IconData> _actionIcons = {
   'roll.gen.legato': Icons.linear_scale,
   'roll.gen.connect': Icons.timeline,
   'roll.gen.tremolo': Icons.graphic_eq,
+  'roll.gen.vibrato': Icons.waves_outlined,
   'roll.notes.quantizeSheet': Icons.align_horizontal_left,
   'roll.step.toggle': Icons.piano,
   'roll.step.rest': Icons.space_bar,
@@ -2575,33 +2943,40 @@ class _Toolbar extends StatelessWidget {
           tooltip: 'More',
           icon: const Icon(Icons.more_vert, color: Neon.dim),
           onSelected: onMenu,
+          // Sections with headers, the most used first (owner, 2026-11-11).
           itemBuilder: (_) => [
+            _menuHead('Notes'),
             const PopupMenuItem(value: 'note', child: Text('Note extras… (I, or hold a note)')),
+            const PopupMenuItem(value: 'run:roll.notes.quantizeSheet', child: Text('Quantize…')),
+            const PopupMenuItem(value: 'run:roll.gen.tremolo', child: Text('Tremolo…')),
+            const PopupMenuItem(value: 'run:roll.gen.vibrato', child: Text('Vibrato…')),
+            _menuHead('Tools'),
+            CheckedPopupMenuItem(value: 'run:roll.tool.ratchet', checked: isOn('roll.tool.ratchet'),
+                child: const Text('Ratchet brush')),
+            CheckedPopupMenuItem(value: 'run:roll.step.toggle', checked: stepInput, child: const Text('Step input')),
+            CheckedPopupMenuItem(value: 'hear', checked: hearNotes, child: const Text('Hear notes')),
+            _menuHead('Lanes'),
             CheckedPopupMenuItem(value: 'vel', checked: velLane, child: const Text('Velocity lane (Alt+V)')),
             CheckedPopupMenuItem(value: 'extras', checked: extrasLane, child: const Text('Chance lane (Alt+X)')),
-            CheckedPopupMenuItem(value: 'hear', checked: hearNotes, child: const Text('Hear notes')),
-            CheckedPopupMenuItem(value: 'run:roll.step.toggle', checked: stepInput, child: const Text('Step input')),
-            const PopupMenuItem(value: 'run:roll.notes.quantizeSheet', child: Text('Quantize…')),
-            const PopupMenuDivider(),
+            _menuHead('Generate'),
             for (final id in const [
               'roll.gen.euclid',
               'roll.gen.random',
               'roll.gen.arpeggiate',
-              'roll.gen.humanize',
               'roll.gen.chordStamp',
+              'roll.gen.humanize',
               'roll.gen.legato',
               'roll.gen.connect',
-              'roll.gen.tremolo',
               'roll.gen.reverse',
               'roll.gen.invertPitch',
             ])
-              PopupMenuItem(value: 'run:$id', child: Text('Generate: ${registry[id]?.name ?? id}')),
-            const PopupMenuDivider(),
-            PopupMenuItem(value: 'toolbar', enabled: canCustomise, child: const Text('Customise toolbar…')),
-            const PopupMenuDivider(),
+              PopupMenuItem(value: 'run:$id', child: Text(registry[id]?.name ?? id)),
+            _menuHead('MIDI files'),
             const PopupMenuItem(value: 'import', child: Text('Import MIDI file…')),
             const PopupMenuItem(value: 'mid', child: Text('Export as MIDI (.mid)')),
             const PopupMenuItem(value: 'midi2', child: Text('Export as MIDI 2.0 clip (.midi2)')),
+            const PopupMenuDivider(),
+            PopupMenuItem(value: 'toolbar', enabled: canCustomise, child: const Text('Customise toolbar…')),
           ],
         ),
       ]),
@@ -2609,6 +2984,14 @@ class _Toolbar extends StatelessWidget {
     });
   }
 }
+
+/// A section's header in a menu: small caps, not a choice.
+PopupMenuItem<String> _menuHead(String text) => PopupMenuItem<String>(
+      enabled: false,
+      height: 28,
+      child: Text(text.toUpperCase(),
+          style: const TextStyle(fontSize: 11, letterSpacing: 1.4, fontWeight: FontWeight.w700, color: Neon.dim)),
+    );
 
 /// The snap magnet with its time grid: a tap turns snapping on or off for notes and every curve; the ▾ menu holds
 /// the time grid, triplets, adaptive and the value grid, in a sheet (owner, 2026-11-04).
@@ -2881,29 +3264,59 @@ class _ActionPickerState extends State<_ActionPicker> {
   }
 }
 
+/// One undo step: the doc before an edit, or, with [sel], the selection before a selection box changed it.
+class _Undo {
+  const _Undo(this.doc, {this.sel});
+  final PatternDoc doc;
+  final Set<int>? sel;
+}
+
 /// What a touch grabs with the Curve tool: a note's pitch point [point], its line ([line]), or the note itself.
 @immutable
 class _CurveHit {
-  const _CurveHit(this.id, {this.point, this.line = false});
+  const _CurveHit(this.id, {this.point, this.line = false, this.handle});
   final int id;
   final int? point;
   final bool line;
+  final int? handle; // a segment's tension handle: the segment after point [handle]
 
   @override
-  bool operator ==(Object o) => o is _CurveHit && o.id == id && o.point == point && o.line == line;
+  bool operator ==(Object o) =>
+      o is _CurveHit && o.id == id && o.point == point && o.line == line && o.handle == handle;
   @override
-  int get hashCode => Object.hash(id, point, line);
+  int get hashCode => Object.hash(id, point, line, handle);
+}
+
+/// The tension handles of curve [pts] on a note [nw] px wide: one on each segment that changes pitch and is at
+/// least 16 px wide, at its middle in time and on the curve there (u 0..1 along the note, v in semitones).
+List<({int seg, double u, double v})> curveHandles(List<NotePoint> pts, double nw) => [
+      for (var i = 0; i + 1 < pts.length; i++)
+        if ((pts[i + 1].v - pts[i].v).abs() > 1e-6 && (pts[i + 1].t - pts[i].t) * nw >= 16)
+          (
+            seg: i,
+            u: (pts[i].t + pts[i + 1].t) / 2,
+            v: NoteExpression.valueAt(pts, (pts[i].t + pts[i + 1].t) / 2),
+          ),
+    ];
+
+/// The bend (k, -1..1) that puts a segment from [a] to [b] through [v] at its middle in time: the curve is
+/// a + (b - a) x^(4^k), so k = log4(ln f / ln 0.5) for f = (v - a) / (b - a).
+double tensionThrough(double a, double b, double v) {
+  final f = ((v - a) / (b - a)).clamp(0.02, 0.98);
+  final k = math.log(math.log(f) / math.log(0.5)) / math.log(4);
+  return (k.clamp(-1.0, 1.0) * 100).roundToDouble() / 100;
 }
 
 /// The Curve tool's overlay: what the mouse or finger would grab ([hit]), and while a drag is under way note [id]'s
 /// [points] as they will be committed, [active] the one that follows the finger; [drawing]: a new point being placed.
 @immutable
 class _CurveView {
-  const _CurveView({this.hit, this.id, this.points, this.active, this.drawing = false});
+  const _CurveView({this.hit, this.id, this.points, this.active, this.drawing = false, this.handle});
   final _CurveHit? hit;
   final int? id;
   final List<NotePoint>? points;
   final int? active;
+  final int? handle; // the tension handle being dragged
   final bool drawing;
 }
 
@@ -3100,12 +3513,61 @@ class _CurveOverlayPainter extends CustomPainter {
         label.paint(canvas, lp);
       }
     }
+    // Tension handles on each selected note's bent segments: a diamond on the curve at the segment's middle, and a
+    // faint chord between its ends so the bend reads against a straight line.
+    for (final id in sel) {
+      final n = note(id);
+      if (n == null) continue;
+      final bend = id == v.id && pts != null ? pts : n.expr.bend;
+      if (bend.length < 2) continue;
+      final x = nx(n), nw = nwOf(n), mid = ny(n) + rowH / 2;
+      for (final h in curveHandles(bend, nw)) {
+        final a = bend[h.seg], b = bend[h.seg + 1];
+        final on = id == v.id && v.handle == h.seg;
+        canvas.drawLine(Offset(x + a.t * nw, mid - a.v * rowH), Offset(x + b.t * nw, mid - b.v * rowH), Paint()
+          ..color = Neon.blue.withValues(alpha: on ? 0.6 : 0.3)
+          ..strokeWidth = 1);
+        final c = Offset(x + h.u * nw, mid - h.v * rowH), r = on ? 7.0 : 5.0;
+        final diamond = Path()
+          ..moveTo(c.dx, c.dy - r)
+          ..lineTo(c.dx + r, c.dy)
+          ..lineTo(c.dx, c.dy + r)
+          ..lineTo(c.dx - r, c.dy)
+          ..close();
+        canvas.drawPath(diamond, Paint()..color = on ? Neon.blue : Neon.blue.withValues(alpha: 0.8));
+        canvas.drawPath(diamond, Paint()
+          ..color = Neon.bg
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 1.2);
+        if (on) {
+          final text = 'curve ${a.k >= 0 ? '+' : ''}${a.k.toStringAsFixed(2)}';
+          RollPaintStats.label = text;
+          final label = TextPainter(
+            text: TextSpan(text: text, style: const TextStyle(color: Neon.text, fontSize: 11, fontWeight: FontWeight.w600)),
+            textDirection: TextDirection.ltr,
+          )..layout();
+          final lp = Offset((c.dx - label.width / 2).clamp(0.0, math.max(0.0, w - label.width)),
+              c.dy - label.height - 14 < 0 ? c.dy + 12 : c.dy - label.height - 14);
+          canvas.drawRRect(RRect.fromRectAndRadius((lp - const Offset(4, 1)) & Size(label.width + 8, label.height + 2),
+              const Radius.circular(4)), Paint()..color = Neon.bg.withValues(alpha: 0.85));
+          label.paint(canvas, lp);
+        }
+      }
+    }
     // What the mouse or finger would grab: its point ringed, or its line lit.
     final hit = v.hit, hn = note(hit?.id);
     if (hit != null && hn != null && v.active == null) {
       final e = hit.id == v.id && pts != null ? hn.expr.copyWith(bend: pts) : hn.expr;
       final x = nx(hn), y = ny(hn), nw = nwOf(hn);
-      if (hit.point != null && hit.point! < e.bend.length) {
+      if (hit.handle != null) {
+        for (final h in curveHandles(e.bend, nw)) {
+          if (h.seg != hit.handle) continue;
+          canvas.drawCircle(Offset(x + h.u * nw, y + rowH / 2 - h.v * rowH), 9, Paint()
+            ..color = Neon.blue
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 2);
+        }
+      } else if (hit.point != null && hit.point! < e.bend.length) {
         final q = e.bend[hit.point!];
         canvas.drawCircle(Offset(x + q.t * nw, y + rowH / 2 - q.v * rowH), 9, Paint()
           ..color = Neon.yellow
@@ -3173,7 +3635,9 @@ class _RollPainter extends CustomPainter {
     this.lagEdge = 1,
     this.lengthOf,
     this.ghost,
-  });
+    this.motion,
+  }) : super(repaint: motion?.anim);
+  final _RollMotion? motion; // an edit animation under way
   // A stretch in progress: the notes' edge (end 1, start -1) is drawn [lag] px past its snapped place.
   final double lag;
   final Set<int> lagIds;
@@ -3247,10 +3711,28 @@ class _RollPainter extends CustomPainter {
       }
     }
     // Notes: layer colour, brighter when louder; white outline when selected; a dot when it has extras.
+    final m = motion, mt = m?.t ?? 1;
+    var animated = 0;
     for (final n in doc.notes) {
-      final x = n.at.toDouble() * pxPerStep - scrollX, nw = math.max(3.0, n.len.toDouble() * pxPerStep - 1);
+      var x = n.at.toDouble() * pxPerStep - scrollX, nw = math.max(3.0, n.len.toDouble() * pxPerStep - 1);
+      var y = (127 - n.pitch.round()) * rowH - scrollY;
+      double? alpha;
+      if (m != null && mt < 1) {
+        final was = m.was[n.id];
+        if (m.appear.contains(n.id)) {
+          animated++;
+          alpha = mt;
+          if (!m.fade) nw = math.max(3.0, nw * mt); // pops in from its start
+        } else if (was != null && !m.fade) {
+          animated++;
+          final x0 = was.at * pxPerStep - scrollX, y0 = (127 - was.pitch.round()) * rowH - scrollY;
+          final w0 = math.max(3.0, was.len * pxPerStep - 1);
+          x = x0 + (x - x0) * mt;
+          y = y0 + (y - y0) * mt;
+          nw = w0 + (nw - w0) * mt;
+        }
+      }
       if (x > w || x + nw < 0) continue;
-      final y = (127 - n.pitch.round()) * rowH - scrollY;
       final e = n.expr;
       final bent = _isBent(e);
       // A bent note can sound far from its row: keep it on screen while any of its curve is.
@@ -3268,15 +3750,32 @@ class _RollPainter extends CustomPainter {
             ? Rect.fromLTRB(box.left, box.top, math.max(box.left + 3, box.right + lag), box.bottom)
             : Rect.fromLTRB(math.min(box.right - 3, box.left + lag), box.top, box.right, box.bottom);
       }
+      if (alpha != null) canvas.saveLayer(null, Paint()..color = Color.fromRGBO(0, 0, 0, alpha.clamp(0.0, 1.0)));
       _paintNote(canvas, n, e, box,
           x: x, y: y, nw: nw, w: w, rowH: rowH, color: color, secPerStep: secPerStep, selected: sel.contains(n.id),
           points: !curveMode || !bent ? 0 : (sel.contains(n.id) ? 2 : 1));
+      if (alpha != null) canvas.restore();
       if (n.prob < 1 || n.ratchet > 1 || n.slide) {
         // On the ribbon where a bent note starts.
         final lift = bent ? _drawnPitch(e, 4, nw, n.len.toDouble() * secPerStep, false) * rowH : 0.0;
         canvas.drawCircle(Offset(x + 4, y + rowH / 2 - lift), 2, Paint()..color = Neon.bg);
       }
     }
+    if (m != null && mt < 1) {
+      // Deleted notes shrink to their middle and fade (only fade when reduced).
+      final k = 1 - m.exit;
+      for (final n in m.gone) {
+        final x = n.at.toDouble() * pxPerStep - scrollX, nw = math.max(3.0, n.len.toDouble() * pxPerStep - 1);
+        final y = (127 - n.pitch.round()) * rowH - scrollY;
+        if (x > w || x + nw < 0 || y > h || y + rowH < 0) continue;
+        animated++;
+        final full = Rect.fromLTWH(x, y + 1, nw, rowH - 2);
+        final box = m.fade ? full : Rect.fromCenter(center: full.center, width: full.width * k, height: full.height * k);
+        canvas.drawRRect(RRect.fromRectAndRadius(box, const Radius.circular(3)),
+            Paint()..color = color.withValues(alpha: (0.35 + 0.65 * n.vel) * k));
+      }
+    }
+    RollPaintStats.edits = animated;
     final g = ghost;
     if (g != null) {
       final r = RRect.fromRectAndRadius(
@@ -3426,7 +3925,24 @@ class _RollPainter extends CustomPainter {
       o.lagEdge != lagEdge ||
       o.lengthOf != lengthOf ||
       o.ghost != ghost ||
+      o.motion != motion ||
       o.color != color;
+}
+
+/// An edit animation on the roll: [appear] pops in from its start, [was] holds where moved or resized notes were,
+/// [gone] shrinks and fades; with [fade] (Reduced motion) only opacity changes.
+class _RollMotion {
+  _RollMotion(this.anim, {required this.appear, required this.was, required this.gone, required this.fade,
+      required this.curve});
+  final Animation<double> anim;
+  final Set<int> appear;
+  final Map<int, ({double at, double pitch, double len})> was;
+  final List<PatternNote> gone;
+  final bool fade;
+  final Curve curve;
+
+  double get t => curve.transform(anim.value.clamp(0.0, 1.0));
+  double get exit => EditMotion.exitCurve.transform(anim.value.clamp(0.0, 1.0));
 }
 
 /// The settings a generator asks for, as named numbers; the last values are kept for the next time.
@@ -3509,16 +4025,16 @@ class _GenDialogState extends State<_GenDialog> {
                   },
                 ),
             ])
-          else ...[
-            Text('${f.$2}: ${_v[f.$1]!.round()}'),
-            Slider(
+          else
+            ValueSlider(
+              label: f.$2,
               min: f.$3,
               max: f.$4,
+              reset: f.$5,
               divisions: (f.$4 - f.$3).round(),
               value: _v[f.$1]!,
               onChanged: (x) => setState(() => _v[f.$1] = x.roundToDouble()),
             ),
-          ],
       ]),
       actions: [
         TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
@@ -3532,6 +4048,121 @@ class _GenDialogState extends State<_GenDialog> {
       ],
     );
   }
+}
+
+/// The Vibrato dialog's settings: [cents] deep, one cycle every [cycle] steps (synced) or [freeHz], [fade] 0..1.
+class _Vibrato {
+  const _Vibrato({required this.cents, required this.cycle, required this.freeHz, required this.fade});
+  final double cents, freeHz, fade;
+  final Steps? cycle; // null: the free rate
+
+  /// The rate in Hz, a synced one at [secPerStep] seconds a step (the engine takes 0.1 to 30 Hz).
+  double hz(double secPerStep) {
+    final c = cycle;
+    return (c == null ? freeHz : 1 / (c.toDouble() * secPerStep)).clamp(0.1, 30).toDouble();
+  }
+}
+
+/// Vibrato: depth in cents, a rate synced to 1/4..1/32 or free in Hz, a fade-in; the preview follows each control.
+class _VibratoDialog extends StatefulWidget {
+  const _VibratoDialog({required this.secPerStep});
+  final double secPerStep;
+
+  static _Vibrato last = _Vibrato(cents: 30, cycle: Steps.one, freeHz: 5.5, fade: 0.3);
+
+  @override
+  State<_VibratoDialog> createState() => _VibratoDialogState();
+}
+
+class _VibratoDialogState extends State<_VibratoDialog> {
+  late double _cents = _VibratoDialog.last.cents, _hz = _VibratoDialog.last.freeHz, _fade = _VibratoDialog.last.fade;
+  late Steps? _cycle = _VibratoDialog.last.cycle;
+
+  _Vibrato get _v => _Vibrato(cents: _cents, cycle: _cycle, freeHz: _hz, fade: _fade);
+
+  @override
+  Widget build(BuildContext context) {
+    final v = _v;
+    return AlertDialog(
+      backgroundColor: Neon.panel,
+      title: const Text('Vibrato'),
+      content: SingleChildScrollView(
+        child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          SizedBox(
+            key: const ValueKey('vibrato-preview'),
+            height: 56,
+            child: CustomPaint(
+                painter: _VibratoPreview(cents: v.cents, hz: v.hz(widget.secPerStep), fade: v.fade,
+                    span: 32 * widget.secPerStep)),
+          ),
+          const Heading('Rate'),
+          Wrap(spacing: 6, runSpacing: 4, children: [
+            for (final c in [..._tremoloCycles, null])
+              ChoiceChip(
+                label: Text(c == null ? 'Free (Hz)' : noteLengthLabel(c)),
+                selected: _cycle == c,
+                onSelected: (_) {
+                  Haptics.tick();
+                  setState(() => _cycle = c);
+                },
+              ),
+          ]),
+          if (_cycle == null)
+            ValueSlider(label: 'Rate', value: _hz, min: 0.5, max: 12, reset: 5.5, decimals: 1, unit: ' Hz',
+                sliderKey: const ValueKey('vibrato-hz'), onChanged: (x) => setState(() => _hz = x))
+          else
+            Text('${v.hz(widget.secPerStep).toStringAsFixed(2)} Hz at this tempo',
+                style: TextStyle(color: Neon.dim, fontSize: 12)),
+          const Heading('Shape'),
+          ValueSlider(label: 'Depth', value: _cents, min: 0, max: 200, reset: 30, unit: ' cents', divisions: 200,
+              sliderKey: const ValueKey('vibrato-depth'), onChanged: (x) => setState(() => _cents = x)),
+          ValueSlider(label: 'Fade-in', value: _fade, min: 0, max: 1, reset: 0.3, scale: 100, unit: '%',
+              sliderKey: const ValueKey('vibrato-fade'), onChanged: (x) => setState(() => _fade = x)),
+        ]),
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+        FilledButton(
+          onPressed: () {
+            Haptics.drop();
+            _VibratoDialog.last = v;
+            Navigator.pop(context, v);
+          },
+          child: const Text('Apply'),
+        ),
+      ],
+    );
+  }
+}
+
+/// The vibrato's pitch over two bars of a note: the wave growing in over the fade-in.
+class _VibratoPreview extends CustomPainter {
+  _VibratoPreview({required this.cents, required this.hz, required this.fade, required this.span});
+  final double cents, hz, fade, span; // span: seconds shown
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    canvas.drawRRect(RRect.fromRectAndRadius(Offset.zero & size, const Radius.circular(6)),
+        Paint()..color = Neon.bg.withValues(alpha: 0.6));
+    final mid = size.height / 2;
+    canvas.drawLine(Offset(0, mid), Offset(size.width, mid), Paint()..color = Neon.line);
+    final e = NoteExpression(vibDepth: cents / 100, vibRate: hz, vibFade: fade);
+    final path = Path();
+    final n = math.max(128, size.width.round() * 2);
+    for (var i = 0; i <= n; i++) {
+      final u = i / n;
+      // Full scale is 2 semitones (200 cents) each way.
+      final y = mid - e.pitchAt(u, u * span) / 2 * (mid - 4);
+      i == 0 ? path.moveTo(u * size.width, y) : path.lineTo(u * size.width, y);
+    }
+    canvas.drawPath(path, Paint()
+      ..color = Neon.green
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2);
+  }
+
+  @override
+  bool shouldRepaint(_VibratoPreview o) => o.cents != cents || o.hz != hz || o.fade != fade || o.span != span;
 }
 
 /// Tremolo speeds: one cycle every 1/4, 1/8, 1/16 or 1/32 note (in steps).
@@ -3642,21 +4273,21 @@ class _QuantizeSheetState extends State<_QuantizeSheet> {
           ),
       ]);
 
-  Widget _slider(String key, String label, double value, double max, ValueChanged<double> on) =>
-      Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text('$label: ${value.round()}%'),
-        Slider(
-          key: ValueKey('quantize-$key'),
-          min: 0,
-          max: max,
-          divisions: max.round(),
-          value: value,
-          onChanged: (x) {
-            if (x.roundToDouble() != value) Haptics.tick();
-            _set(() => on(x.roundToDouble()));
-          },
-        ),
-      ]);
+  Widget _slider(String key, String label, double value, double max, ValueChanged<double> on, {double reset = 0}) =>
+      ValueSlider(
+        sliderKey: ValueKey('quantize-$key'),
+        label: label,
+        unit: '%',
+        min: 0,
+        max: max,
+        reset: reset,
+        divisions: max.round(),
+        value: value,
+        onChanged: (x) {
+          if (x.roundToDouble() != value) Haptics.tick();
+          _set(() => on(x.roundToDouble()));
+        },
+      );
 
   @override
   Widget build(BuildContext context) {
@@ -3677,7 +4308,7 @@ class _QuantizeSheetState extends State<_QuantizeSheet> {
           _chips([(QuantizeWhat.starts, 'Starts'), (QuantizeWhat.ends, 'Ends'), (QuantizeWhat.both, 'Both')], _what,
               (v) => _what = v),
           const SizedBox(height: 8),
-          _slider('strength', 'Strength', _strength, 100, (v) => _strength = v),
+          _slider('strength', 'Strength', _strength, 100, (v) => _strength = v, reset: 100),
           _slider('swing', 'Swing', _swing, 100, (v) => _swing = v),
           _slider('timing', 'Humanize timing ± % of a step', _timing, 50, (v) => _timing = v),
           _slider('velocity', 'Humanize velocity ± %', _velocity, 50, (v) => _velocity = v),

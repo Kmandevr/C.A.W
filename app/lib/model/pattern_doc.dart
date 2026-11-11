@@ -155,6 +155,9 @@ class Steps implements Comparable<Steps> {
   /// The multiple of [grid] at or below this.
   Steps floorTo(Steps grid) => grid.times((this / grid).floor());
 
+  /// The multiple of [grid] at or above this.
+  Steps ceilTo(Steps grid) => grid.times((this / grid).ceil());
+
   Steps clamp(Steps lo, Steps hi) => this < lo ? lo : (this > hi ? hi : this);
 
   static Steps max(Steps a, Steps b) => a >= b ? a : b;
@@ -470,6 +473,9 @@ class PatternNote {
 }
 
 /// Notes cut or copied, with starts relative to the earliest one.
+/// Which way a ratchet's velocity ramp goes ([PatternDoc.ratchetRamp]).
+enum RatchetRamp { fadeIn, fadeOut }
+
 class PatternClip {
   const PatternClip(this.notes, this.span);
 
@@ -1115,8 +1121,14 @@ class PatternDoc {
     return paste(copy(sel), s.map((n) => n.at).reduce(Steps.min) + offset);
   }
 
-  /// The E key: copies the selection to start where it ends.
-  ({PatternDoc doc, Set<int> ids}) copyAfter(Set<int> sel) => duplicate(sel, copy(sel).span);
+  /// The E key: copies the selection to start where it ends, on the next line of [grid] at or after its end when one
+  /// is given (owner, 2026-11-11: copies chain end to end).
+  ({PatternDoc doc, Set<int> ids}) copyAfter(Set<int> sel, {Steps? grid}) {
+    final span = copy(sel).span;
+    if (grid == null || grid <= Steps.zero || _selected(sel).isEmpty) return duplicate(sel, span);
+    final start = _selected(sel).map((n) => n.at).reduce(Steps.min);
+    return duplicate(sel, (start + span).ceilTo(grid) - start);
+  }
 
   /// Chord inversion up, per start time in the selection: the lowest note goes up by octaves to just above the
   /// highest (a single note goes up an octave). A chord whose new note would pass 127 stays as it is.
@@ -1468,6 +1480,48 @@ class PatternDoc {
   PatternDoc setProb(Set<int> sel, double prob) => _map(sel, (n) => n.copyWith(prob: _round3(prob.clamp(0, 1).toDouble())));
   PatternDoc setRatchet(Set<int> sel, int ratchet) => _map(sel, (n) => n.copyWith(ratchet: ratchet.clamp(1, 8)));
   PatternDoc setSlide(Set<int> sel, bool slide) => _map(sel, (n) => n.copyWith(slide: slide));
+
+  /// Vibrato on the selected notes (the roll's Vibrato tool): [depth] semitones (0..12), [rate] Hz (0.1..30) and
+  /// [fade] the share of the note it takes to reach full depth (0..1). Their bend, volume and timbre curves stay.
+  PatternDoc setVibrato(Set<int> sel, {required double depth, required double rate, double fade = 0}) {
+    final d = _round3(depth.clamp(0, 12).toDouble()), r = _round3(rate.clamp(0.1, 30).toDouble());
+    final f = _round3(fade.clamp(0, 1).toDouble());
+    return _map(sel, (n) => n.copyWith(expr: n.expr.copyWith(vibDepth: d, vibRate: d == 0 ? n.expr.vibRate : r, vibFade: f)));
+  }
+
+  /// A ratchet's repeats with a velocity ramp (owner, 2026-11-11). The engine plays a ratchet's repeats at one
+  /// velocity, so each selected note with a ratchet of 2 or more is written out as that many notes, each a repeat
+  /// long, whose velocities ramp: [ramp] up (fade in) from (1 - [depth]) of the note's velocity to all of it, or down
+  /// (fade out). Each repeat keeps the note's chance and its curves (the engine runs those over each repeat anyway);
+  /// a slide stays on the first. Returns the notes (written out or not) that replace the selection.
+  ({PatternDoc doc, Set<int> ids}) ratchetRamp(Set<int> sel, {required RatchetRamp ramp, double depth = 0.7}) {
+    final picked = _selected(sel).where((n) => n.ratchet > 1).toList();
+    if (picked.isEmpty) return (doc: this, ids: {for (final n in _selected(sel)) n.id});
+    final dep = depth.clamp(0, 1).toDouble();
+    final gone = {for (final n in picked) n.id};
+    final out = [for (final n in notes) if (!gone.contains(n.id)) n];
+    final ids = {for (final n in _selected(sel)) if (!gone.contains(n.id)) n.id};
+    var id = _nextId;
+    for (final n in picked) {
+      final r = n.ratchet, part = n.len / Steps(r);
+      for (var q = 0; q < r; q++) {
+        final x = q / (r - 1);
+        final level = ramp == RatchetRamp.fadeIn ? 1 - dep * (1 - x) : 1 - dep * x;
+        out.add(n.copyWith(
+          id: id,
+          at: n.at + part.times(q),
+          len: part,
+          vel: _round3((n.vel * level).clamp(0, 1).toDouble()),
+          ratchet: 1,
+          slide: q == 0 && n.slide,
+          trailingComment: q == 0 ? n.trailingComment : null,
+          line: null,
+        ));
+        ids.add(id++);
+      }
+    }
+    return (doc: _withNotes(out, id), ids: ids);
+  }
 
   PatternDoc _insertEquivalent(PatternNote note) {
     final inserted = insert(note.at, note.pitch, note.len, vel: note.vel);
