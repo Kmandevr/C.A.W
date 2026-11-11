@@ -52,6 +52,17 @@ class _AutomationSnapshot {
   final Map<String, List<ClipAutomationLaneDoc>> clipLanes;
 }
 
+/// A request to bring the views (Arrange, an open piano roll) back to [step] (sixteenth steps): the transport's ⏮.
+/// [always] (a double tap, Ctrl+Home: the project start) scrolls them there; otherwise (one tap, the loop start) a
+/// view scrolls only when [step] is off its screen. [serial] tells two requests to the same place apart.
+@immutable
+class RevealStartRequest {
+  const RevealStartRequest(this.step, {required this.always, required this.serial});
+  final double step;
+  final bool always;
+  final int serial;
+}
+
 class AppState extends ChangeNotifier {
   AppState({Settings? settings}) : settings = settings ?? Settings() {
     _light = this.settings.lightMode;
@@ -366,6 +377,7 @@ class AppState extends ChangeNotifier {
     _syncTimer?.cancel();
     _historyTimer?.cancel();
     masterValueTick.dispose();
+    revealStartRequests.dispose();
     values.dispose();
     tick.dispose();
     for (final notifier in _moduleValueTicks.values) { notifier.dispose(); }
@@ -922,6 +934,26 @@ class AppState extends ChangeNotifier {
       pausedStep = at;
     }
     notifyListeners();
+  }
+
+  /// The views' hook for ⏮ ([backToStart]): Arrange and the piano roll listen and glide to the request's step.
+  final ValueNotifier<RevealStartRequest?> revealStartRequests = ValueNotifier(null);
+
+  /// Where ⏮ goes: the loop start while a loop range plays, else the project start (sixteenth steps).
+  int get startStep => project.loopsRange ? project.loopStartSteps : 0;
+
+  /// The transport's ⏮ (Home; with [projectStart], a double tap or Ctrl+Home): moves the playhead to [startStep] or
+  /// the project start. Playing, playback goes on from there; stopped, it only moves (a stop at the project start
+  /// stays a stop). It also asks the views to come back ([revealStartRequests]).
+  void backToStart({bool projectStart = false}) {
+    final at = projectStart ? 0 : startStep;
+    if (_transportOn || pausedStep != null || at != 0) {
+      seekTo(at.toDouble());
+    } else {
+      notifyListeners();
+    }
+    revealStartRequests.value =
+        RevealStartRequest(at.toDouble(), always: projectStart || at == 0, serial: (revealStartRequests.value?.serial ?? 0) + 1);
   }
 
   /// Where the playhead is now, in sixteenth steps (paused: where play resumes; stopped: 0).

@@ -390,6 +390,14 @@ class Settings extends ChangeNotifier {
   /// Vim editing in the code editor (WASD moves; I types). Off by default.
   bool vimCode = false;
 
+  /// Vim keys in the keyboard-focus areas (FX chain, mixer, Files, Settings...): H J K L move like the arrows. Off by
+  /// default (the owner's movement keys are WASD).
+  bool vimKeys = false;
+
+  /// The key hint strip (which keys work where the keyboard focus is): null follows the keyboard (shown once a
+  /// hardware keyboard is used, and on a desktop), true or false as chosen in Settings › Keys.
+  bool? keyHints;
+
   /// Recording (owner, 2026-11-10): when the metronome clicks, and how many bars the count-in has (0: none).
   Metronome metronome = Metronome.recording;
   int countInBars = 1;
@@ -539,6 +547,8 @@ class Settings extends ChangeNotifier {
         'light_mode': lightMode, // retained for older builds that read settings.json
         'light_auto': lightAuto,
         'vim_code': vimCode,
+        'vim_keys': vimKeys,
+        if (keyHints != null) 'key_hints': keyHints,
         'motion': motion.name,
         'edit_motion_style': editMotionStyle.name,
         'motion_feel': motionFeel.encode(),
@@ -644,6 +654,8 @@ class Settings extends ChangeNotifier {
     }
     lightAuto = (j['light_auto'] as bool?) ?? lightAuto;
     vimCode = (j['vim_code'] as bool?) ?? vimCode;
+    vimKeys = (j['vim_keys'] as bool?) ?? vimKeys;
+    if (j['key_hints'] is bool) keyHints = j['key_hints'] as bool;
     motion = pick(MotionLevel.values, j['motion'], motion);
     editMotionStyle = pick(EditMotionStyle.values, j['edit_motion_style'], editMotionStyle);
     motionFeel = MotionFeel.decode(j['motion_feel'] as String?) ?? motionFeel;
