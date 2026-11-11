@@ -40,6 +40,20 @@ Carries out the owner's decision of 2026-11-10 ("C++ replaces the .caw language"
 - **Bug fixed on the way:** a track's instrument installed while nothing sounds counted as still ringing at the first Play, which mixed in 5 ms of a phantom tail (a free-running source started at twice its level); a new instrument now starts idle.
 - **Open, for the owner:** an instrument track keeps running after a Stop until its output is quiet (or 30 s), and a never-quiet effect there now ends at that cap without the 20 ms fade buses get; a bus whose capped tail has faded comes back while a child track still rings out. The app still sends `voices`, `swap`, `seam_crossfade` and the key (Settings' light-mode voice cap and swap timing now change nothing): removing those settings is UI work.
 
+## 2026-11-11: A theme editor that builds the theme for you (owner)
+
+**Decision (owner, 2026-11-11).** Today's theme editor is detailed but hard to use.
+- **Palette builder up front:** pick one or two colours, or a mood, and it generates a complete, good-looking palette for light and dark (surfaces, text, accents, track colours, meters). Contrast is kept readable, and the palette can be shuffled and tweaked.
+- **Every colour stays editable** in an advanced section.
+- **The theme also sets the feel:**
+  - haptics (on, strength, style);
+  - how sharp or soft corners and buttons are;
+  - fonts and text size;
+  - how tracks look (height, header style, clip shape);
+  - glow, glass and motion.
+
+  The aim is a workspace that feels like home.
+
 ## 2026-11-11: Light and dark for every built-in theme (owner)
 
 **Decision (owner, 2026-11-11).** The built-in themes become four families, each with a light and a dark version:
