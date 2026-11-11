@@ -323,10 +323,12 @@ class Settings extends ChangeNotifier {
   SoundQuality soundQuality = SoundQuality.normal;
   AudioBuffer audioBuffer = AudioBuffer.auto;
 
-  /// Settings › Audio: the playback device by name ('' the system default), the engine's sample rate (fixed when the
-  /// engine is made, so a change applies at the next start), a callback size in frames (0: the buffer mode chooses)
-  /// and exclusive mode where the backend takes it (WASAPI, AAudio).
+  /// Settings › Audio: the playback device by the backend's id (two identical interfaces share a name) and by name,
+  /// which opens it when the id has changed (a driver reinstall) ('' both: the system default), the engine's sample
+  /// rate (fixed when the engine is made, so a change applies at the next start), a callback size in frames (0: the
+  /// buffer mode chooses) and exclusive mode where the backend takes it (WASAPI, AAudio).
   String audioDevice = '';
+  String audioDeviceId = '';
   int sampleRate = 48000;
   static const sampleRates = [44100, 48000, 88200, 96000];
   int bufferFrames = 0;
@@ -473,6 +475,7 @@ class Settings extends ChangeNotifier {
         'audio_buffer': audioBuffer.name,
         'settings_version': version,
         'audio_device': audioDevice,
+        'audio_device_id': audioDeviceId,
         'sample_rate': sampleRate,
         'buffer_frames': bufferFrames,
         'exclusive_audio': exclusiveAudio,
@@ -585,6 +588,7 @@ class Settings extends ChangeNotifier {
     // Version 1 files: the old exporter opened at 48 kHz, 24-bit, 8 s and the loop, as the version-2 defaults do;
     // "Low latency" chose the smallest buffer, which version 2's 0 frames (the mode chooses) still means.
     audioDevice = text('audio_device', 255) ?? audioDevice;
+    audioDeviceId = text('audio_device_id', 511) ?? audioDeviceId;
     final rate = j['sample_rate'];
     if (rate is num && sampleRates.contains(rate.toInt())) sampleRate = rate.toInt();
     final frames = j['buffer_frames'];

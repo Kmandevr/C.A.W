@@ -15,8 +15,9 @@ struct CawEngine {
     // control thread touches them, under engine/platform's device lock.
     int bufferMode = 0;
     bool recording = false;
-    // The device's choice (caw_audio_configure): a playback device by name (empty: the default), a callback size
-    // (0: the buffer mode's) and CAW_AUDIO_* flags. Under the same lock.
+    // The device's choice (caw_audio_configure): a playback device by the backend's id, else by name (both empty:
+    // the default), a callback size (0: the buffer mode's) and CAW_AUDIO_* flags. Under the same lock.
+    std::string deviceId;
     std::string deviceName;
     int periodFrames = 0;
     int audioFlags = 0;

@@ -27,10 +27,9 @@ class ConvolverPage extends StatelessWidget {
         painter: (dot) => _IrPainter(values: f?.values, decay: t.value('decay'), size: t.value('size'),
             reverse: t.value('reverse') >= 0.5, length: t.value('length'), source: t.value('source').round(),
             color: scope.accent, second: scope.secondary)))),
-      Row(children: [
+      Wrap(spacing: 8, runSpacing: 4, crossAxisAlignment: WrapCrossAlignment.center, children: [
         spaceLabel('IMPULSE'),
-        const Flexible(child: DeviceChoice('source', maxSegments: 0)),
-        const SizedBox(width: 8),
+        const DeviceChoice('source', maxSegments: 0),
         const DeviceToggle('reverse', label: 'Reverse', icon: Icons.swap_horiz),
       ]),
       if (file) DeviceDisplay(builder: (context, f) => Padding(padding: const EdgeInsets.only(top: 6), child: Text(

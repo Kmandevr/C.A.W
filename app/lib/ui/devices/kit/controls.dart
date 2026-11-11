@@ -17,14 +17,16 @@ import 'hero.dart';
 typedef ChoiceIcon = void Function(Canvas canvas, Rect rect, int index, Color color);
 
 /// A choice parameter as a row of big tiles, each a drawn icon over its name (FabFilter Saturn's style picker):
-/// readable at phone size and a 48 dp target. [names] shortens the descriptor's labels.
+/// readable at phone size and a 48 dp target. [names] shortens the descriptor's labels. With [perRow], more choices
+/// than that wrap onto further rows of [height] each (the saturator's eleven curves).
 class ModeTiles extends StatelessWidget {
-  const ModeTiles(this.paramId, {super.key, required this.icon, this.names, this.color, this.height = 54});
+  const ModeTiles(this.paramId, {super.key, required this.icon, this.names, this.color, this.height = 54, this.perRow});
   final String paramId;
   final ChoiceIcon icon;
   final List<String>? names;
   final Color? color;
   final double height;
+  final int? perRow;
 
   @override
   Widget build(BuildContext context) {
@@ -36,9 +38,13 @@ class ModeTiles extends StatelessWidget {
     final n = p.choices.length;
     final sel = (t.value(p.id) - p.min).round().clamp(0, n - 1);
     final c = color ?? scope.accent;
-    return SizedBox(height: height, child: Row(children: [
-      for (var k = 0; k < n; k++)
-        Expanded(child: Padding(padding: EdgeInsets.only(right: k < n - 1 ? 4 : 0), child: Semantics(
+    final per = perRow == null || perRow! >= n ? n : perRow!;
+    final rows = (n / per).ceil();
+    Widget row(int from) {
+      final to = math.min(n, from + per);
+      return SizedBox(height: height, child: Row(children: [
+      for (var k = from; k < to; k++)
+        Expanded(child: Padding(padding: EdgeInsets.only(right: k < to - 1 ? 4 : 0), child: Semantics(
           button: true,
           selected: k == sel,
           label: '${p.label}: ${p.choices[k]}',
@@ -67,7 +73,14 @@ class ModeTiles extends StatelessWidget {
             )),
           ),
         ))),
-    ]));
+      // The last row keeps the others' tile width.
+      for (var k = to; k < from + per && rows > 1; k++) const Expanded(child: SizedBox()),
+      ]));
+    }
+    if (rows == 1) return row(0);
+    return Column(mainAxisSize: MainAxisSize.min, children: [
+      for (var r = 0; r < rows; r++) Padding(padding: EdgeInsets.only(top: r == 0 ? 0 : 4), child: row(r * per)),
+    ]);
   }
 }
 

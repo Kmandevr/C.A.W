@@ -626,7 +626,7 @@ TEST(overload_mutes_the_newest_layer) {
     e.setProject(p);
     e.play();
     run(e, 1000);
-    for (int i = 0; i < 40; ++i) e.reportLoad(1.5);
+    for (int i = 0; i < 40; ++i) e.reportLoad(1.5, 512);
     std::vector<float> out = run(e, 5000);
     const Meters m = e.meters();
     CHECK_EQ(m.overloaded, 1);
@@ -638,6 +638,73 @@ TEST(overload_mutes_the_newest_layer) {
     out = run(e, 5000);
     CHECK_EQ(e.meters().overloaded, 0);
     CHECK_NEAR(out[4999], 0.75 * std::cos(kPi / 4.0), 1e-5);
+}
+
+TEST(the_test_tone_goes_through_the_safety_limiter) {
+    // A song already at the limiter's ceiling: the tone on top must not push the output past it (it used to be
+    // added after the limiter and hard-clipped at 1).
+    ProjectSpec p = project({{"loud", std::string(kFloat) + "sine(220)"}});
+    p.master = 3.0;  // +9.5 dB: well into the limiter
+    Engine e(48000);
+    e.setProject(p);
+    e.play();
+    run(e, 4800);
+    e.testTone(0.5);
+    std::vector<float> right;
+    const std::vector<float> left = run(e, 9600, 64, &right);
+    float peak = 0;
+    for (size_t i = 0; i < left.size(); ++i) peak = std::max({peak, std::fabs(left[i]), std::fabs(right[i])});
+    CHECK(peak <= 0.9771f);
+    CHECK(peak > 0.9f);
+    // The tone carries on through the stop's fade and after it, at its own level.
+    e.stop();
+    const std::vector<float> after = run(e, 4800);
+    float tail = 0;
+    for (size_t i = 2400; i < after.size(); ++i) tail = std::max(tail, std::fabs(after[i]));
+    CHECK(std::fabs(tail - 0.25f) < 0.02f);
+}
+
+TEST(overload_shedding_goes_by_time_not_callbacks) {
+    // The shedding was tuned at 512-frame callbacks: about 0.21 s over budget sheds a layer, then 1.07 s of rest.
+    // Counting callbacks made 16-frame periods shed on a 7 ms hiccup and 8192-frame ones take 3.4 s.
+    ProjectSpec p = project({{"a", std::string(kFloat) + "0.25"}, {"b", std::string(kFloat) + "0.5"}});
+    auto overloadedAfter = [&](int frames, double seconds) {
+        Engine e(48000);
+        e.setProject(p);
+        e.play();
+        run(e, 1000);
+        const int calls = static_cast<int>(seconds * 48000 / frames + 0.5);
+        for (int i = 0; i < calls; ++i) e.reportLoad(1.5, frames);
+        run(e, 64);
+        return e.meters().overloaded;
+    };
+    CHECK_EQ(overloadedAfter(16, 0.0083), 0);  // 25 tiny callbacks: a hiccup
+    CHECK_EQ(overloadedAfter(16, 0.1), 0);
+    CHECK_EQ(overloadedAfter(16, 0.35), 1);
+    CHECK_EQ(overloadedAfter(512, 0.1), 0);
+    CHECK_EQ(overloadedAfter(512, 0.35), 1);
+    CHECK_EQ(overloadedAfter(8192, 0.35), 1);   // two callbacks, not twenty
+    // The meter's average is weighted by time as well: one long callback at 1.5 reads far over budget.
+    Engine e(48000);
+    e.reportLoad(1.5, 8192);
+    CHECK(e.meters().cpu > 1.0f);
+    Engine f(48000);
+    for (int i = 0; i < 32; ++i) f.reportLoad(1.5, 16);  // 10.7 ms: one 512-frame callback's worth
+    CHECK_NEAR(f.meters().cpu, 0.15, 0.01);
+    // The cooldown is time too: still overloaded after shedding, the next layer goes about 1.07 s later.
+    Engine g(48000);
+    g.setProject(p);
+    g.play();
+    run(g, 1000);
+    for (int i = 0; i < 300; ++i) g.reportLoad(1.5, 64);  // 0.4 s: the first layer
+    run(g, 64);
+    CHECK_EQ(g.meters().overloaded, 1);
+    for (int i = 0; i < 600; ++i) g.reportLoad(1.5, 64);  // 0.8 s more: still cooling down
+    run(g, 64);
+    CHECK_EQ(g.meters().overloaded, 1);
+    for (int i = 0; i < 600; ++i) g.reportLoad(1.5, 64);
+    run(g, 64);
+    CHECK_EQ(g.meters().overloaded, 2);
 }
 
 TEST(stop_fades_to_silence_and_layers_can_be_removed) {
