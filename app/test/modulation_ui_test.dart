@@ -13,6 +13,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'device_ui_fixture.dart';
+import 'golden_util.dart';
 
 /// A track with a filter, its Modulators lane, and the filter's cutoff knob under it.
 Future<AppState> _pump(WidgetTester tester, String kind) async {
@@ -131,6 +132,25 @@ void main() {
     await tester.pumpWidget(MaterialApp(home: Scaffold(body: RoutingView(state: s))));
     await tester.pumpAndSettle();
     expect(find.text('Random → Volume'), findsOneWidget);
+    await _end(tester);
+  });
+
+  testWidgets('golden: a track\'s Modulators lane and a knob with two links (for the owner\'s look)', (tester) async {
+    Motion.setting = MotionLevel.off;
+    final s = stateWith('org.caw.filter');
+    final lfo = s.addModulator(ModulatorKinds.lfo, layerId: 'a')!;
+    final steps = s.addModulator(ModulatorKinds.steps, layerId: 'a')!;
+    s.addModulator(ModulatorKinds.macros, layerId: 'a');
+    s.addModLink(ModSourceRef(lfo.id, 0), _cutoff, amount: 0.3);
+    s.addModLink(ModSourceRef(steps.id, 0), _cutoff, amount: -0.2);
+    await pumpGolden(tester, Scaffold(body: ListView(padding: const EdgeInsets.all(8), children: [
+      DeviceScope(
+        target: targetOf(s, 'org.caw.filter'), matrix: null, dragging: ValueNotifier<ModSource?>(null), accent: Neon.green,
+        focusSource: ValueNotifier(ModSource.none),
+        child: const Center(child: DeviceKnob('cutoff', size: 56))),
+      ModulatorsSection(state: s, layer: s.project.layers.first),
+    ])), const Size(390, 1600));
+    await expectLater(goldenScreen, matchesGoldenFile('goldens/modulators_lane_phone.png'));
     await _end(tester);
   });
 }

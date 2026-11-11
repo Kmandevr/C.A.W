@@ -4,6 +4,7 @@
 #include <vector>
 
 #include "builtin_components.h"
+#include "caw.h"
 #include "component_chain.h"
 #include "engine.h"
 #include "modulation_links.h"
@@ -336,4 +337,40 @@ TEST(a_users_cpp_modulator_loads_and_moves_a_track) {
     float v[2] = {};
     CHECK_EQ(e.modulatorOutputs("euclid", v, 2), 2);
 #endif
+}
+
+TEST(the_c_api_moves_modulators_and_links_and_reads_their_outputs) {
+    CawEngine* engine = caw_engine_create(48000);
+    CHECK(engine != nullptr);
+    if (!engine) return;
+    char* result = caw_engine_set_project(engine, R"({"caw_project":1,"layers":[{"id":"a","name":"A",
+        "instrument":{"id":"org.caw.test.osc","params":{"shape":4}}}],
+        "modulators":[{"id":"mac","component":{"id":"org.caw.mod.macros","params":{"macro1":0.25}}}],
+        "modulation":[{"id":7,"source":"mac","target":{"type":"volume","layer":"a"},"amount":-0.5}]})");
+    CHECK(result && std::string(result).find("\"ok\":true") != std::string::npos);
+    caw_free(result);
+    CHECK_EQ(caw_engine_set_modulator_param(engine, "mac", "macro2", 0.5), 1);
+    CHECK_EQ(caw_engine_set_modulator_param(engine, "mac", "nope", 0.5), 0);
+    CHECK_EQ(caw_engine_set_modulator_param(engine, "nope", "macro1", 0.5), 0);
+    CHECK_EQ(caw_engine_set_modulator_bypass(engine, "mac", 0), 1);
+    CHECK_EQ(caw_engine_set_modulation_amount(engine, 7, -0.25), 1);
+    CHECK_EQ(caw_engine_set_modulation_amount(engine, 8, -0.25), 0);
+    float out[8] = {};
+    CHECK_EQ(caw_engine_modulator_outputs(engine, "nope", out, 8), -1);
+    CHECK(caw_engine_modulator_outputs(engine, "mac", out, 8) >= 0);  // 8 once the audio thread has run a chunk
+    float offset = 1;
+    CHECK_EQ(caw_engine_modulation_offset(engine, 7, &offset), 1);
+    CHECK_EQ(caw_engine_modulation_offset(engine, 9, &offset), 0);
+    caw_engine_destroy(engine);
+}
+
+TEST(a_muted_track_stays_silent_whatever_moves_its_volume) {
+    Engine e(48000.0);
+    e.setMasterBypass(true);
+    ProjectSpec p = dcProject({modulator("mac", "org.caw.mod.macros", {{"macro1", 1.0}})}, {link(1, "mac", "volume", "dc", 1.0)});
+    p.layers[0].mute = true;
+    CHECK(ok(e.setProjectOffline(p)));
+    e.play();
+    const std::vector<float> out = run(e, 9600);
+    CHECK_EQ(last(out), 0.0f);
 }

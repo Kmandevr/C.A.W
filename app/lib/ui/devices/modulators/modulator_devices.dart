@@ -469,15 +469,18 @@ class _ModulatorCardState extends State<ModulatorCard> {
         color: c,
         initiallyOpen: true,
         dimmed: m.bypass,
-        summary: [s.componentInfo(m.componentId)?.label ?? ModulatorKinds.label(m.componentId), ?hears].join(' · '),
+        summary: [
+          if ((s.componentInfo(m.componentId)?.label ?? ModulatorKinds.label(m.componentId)) case final kind
+              when !m.name.startsWith(kind)) kind,
+          ?hears,
+        ].join(' · '),
         actions: [
           IconButton(key: ValueKey('modulator-bypass-${m.id}'), tooltip: m.bypass ? 'Turn it on' : 'Bypass',
             iconSize: 18, color: m.bypass ? Neon.dim : c,
             onPressed: () => s.setModulatorBypass(m.id, !m.bypass), icon: const Icon(Icons.power_settings_new)),
-          if (m.hears != 'none') ActionChip(key: ValueKey('modulator-input-${m.id}'),
-            avatar: Icon(m.hearsAudio ? Icons.graphic_eq : Icons.piano, size: 14, color: c),
-            label: Text(input?.name ?? 'Hears nothing', style: const TextStyle(fontSize: 11)),
-            onPressed: () => _pickInput(context)),
+          if (m.hears != 'none') _SmallChip(key: ValueKey('modulator-input-${m.id}'), color: c,
+            icon: m.hearsAudio ? Icons.graphic_eq : Icons.piano, label: input?.name ?? 'Hears nothing',
+            onTap: () => _pickInput(context)),
           IconButton(key: ValueKey('modulator-menu-${m.id}'), tooltip: 'More', iconSize: 18,
             onPressed: () => _menu(context), icon: const Icon(Icons.more_horiz, color: Neon.dim)),
         ],
@@ -486,9 +489,8 @@ class _ModulatorCardState extends State<ModulatorCard> {
           const SizedBox(height: 6),
           Wrap(spacing: 6, runSpacing: 6, children: [
             for (var o = 0; o < outs.length; o++) ModOutputChip(state: s, source: ModSourceRef(m.id, o)),
-            ActionChip(key: ValueKey('modulator-target-${m.id}'),
-              avatar: const Icon(Icons.add_link, size: 14), label: const Text('Target…', style: TextStyle(fontSize: 11)),
-              onPressed: () => pickModTarget(context, s, ModSourceRef(m.id, 0))),
+            _SmallChip(key: ValueKey('modulator-target-${m.id}'), color: Neon.dim, icon: Icons.add_link, label: 'Target…',
+              onTap: () => pickModTarget(context, s, ModSourceRef(m.id, 0))),
           ]),
           if (links.isNotEmpty) const SizedBox(height: 6),
           for (final l in links) ModLinkCard(state: s, link: l, showTarget: true),
@@ -745,4 +747,30 @@ class _EnvelopeView extends StatelessWidget {
         painter: _CurvePainter(f, color, v.isEmpty ? null : v.first)),
     );
   }
+}
+
+/// A small outlined chip in a device's colour (the input picker, Target…).
+class _SmallChip extends StatelessWidget {
+  const _SmallChip({super.key, required this.color, required this.icon, required this.label, required this.onTap});
+  final Color color;
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) => Pressable(glow: color, radius: 17, child: GestureDetector(
+    behavior: HitTestBehavior.opaque,
+    onTap: onTap,
+    child: Container(
+      height: 34,
+      padding: const EdgeInsets.symmetric(horizontal: 10),
+      decoration: BoxDecoration(borderRadius: BorderRadius.circular(17), color: color.withValues(alpha: 0.08),
+        border: Border.all(color: color.withValues(alpha: 0.45))),
+      child: Row(mainAxisSize: MainAxisSize.min, children: [
+        Icon(icon, size: 14, color: color),
+        const SizedBox(width: 4),
+        Text(label, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Neon.text)),
+      ]),
+    ),
+  ));
 }

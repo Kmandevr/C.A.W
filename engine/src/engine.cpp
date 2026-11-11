@@ -5553,7 +5553,7 @@ void Engine::runTrackNode(int slot, const float* const* in, float* outL, float* 
             s.gain += (desired - s.gain) * gainCoef;
             if (std::fabs(desired - s.gain) < 1e-6) s.gain = desired;
         }
-        const double gain = volumeMod ? faderGain(faderPosition(s.gain) + volumeMod[i]) : s.gain;
+        const double gain = volumeMod && s.gain > 0.0 ? faderGain(faderPosition(s.gain) + volumeMod[i]) : s.gain;  // muted stays silent
         const double vl = (stereo ? static_cast<double>(insertL_[i]) : finiteOr0(y[i])) * gain;
         const double vr = stereo ? static_cast<double>(insertR_[i]) * gain : vl;
         const double v = stereo ? 0.5 * (vl + vr) : vl;  // the scope and tail test read the mid
@@ -5675,7 +5675,7 @@ void Engine::runBusNode(int slot, const float* inL, const float* inR, float* out
         if (panMod) automatedPan = std::clamp(automatedPan + 2.0 * panMod[j], -1.0, 1.0);
         const double leftPan = automatedPan > 0.0 ? 1.0 - automatedPan : 1.0;
         const double rightPan = automatedPan < 0.0 ? 1.0 + automatedPan : 1.0;
-        const double gain = volumeMod ? faderGain(faderPosition(s.gain) + volumeMod[j]) : s.gain;
+        const double gain = volumeMod && s.gain > 0.0 ? faderGain(faderPosition(s.gain) + volumeMod[j]) : s.gain;  // muted stays silent
         s.outL[j] *= gain * leftPan;
         s.outR[j] *= gain * rightPan;
     }
