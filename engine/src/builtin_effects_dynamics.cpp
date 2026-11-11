@@ -99,6 +99,9 @@ protected:
         release_ = lib::timeCoefficient(release, sr);
         makeupDb_ = param(kMakeup, at);
         if (on(kAutoMakeup, at)) makeupDb_ -= 0.5 * lib::compressorGainDb(0.0, threshold_, ratio_, knee_);
+        // A level under this is below the knee by more than 0.01 dB, where the curve is exactly 0 dB: no log needed.
+        const double kneeStart = threshold_ - 0.5 * (knee_ < 0.0 ? 0.0 : knee_) - 0.01;
+        if (kneeStart != kneeStartDb_) kneeStartDb_ = kneeStart, quietBelow_ = lib::dbToGain(kneeStart);
                 mix_ = std::clamp(param(kMix, at), 0.0, 1.0);
         lookahead_ = std::min<uint32_t>(kLookaheadFrames, static_cast<uint32_t>(param(kLookahead, at) * 0.001 * sr + 0.5));
         rms_ = choice(kDetect, at) == 1;
@@ -140,12 +143,15 @@ protected:
             const int channels = link_ >= 1.0 ? 1 : 2;
             for (int c = 0; c < channels; ++c) {
                 const double lv = channels == 1 ? most : level[c] + (most - level[c]) * link_;
-                const double target = lib::compressorGainDb(lib::gainToDb(lv, -200.0), threshold_, ratio_, knee_);
+                const double target =
+                    lv < quietBelow_ ? 0.0 : lib::compressorGainDb(lib::gainToDb(lv, -200.0), threshold_, ratio_, knee_);
                 const double coef = target < env_[c] ? attack_ : release_;
                 env_[c] = target + (env_[c] - target) * coef;
                 if (env_[c] - target < 1e-9 && target - env_[c] < 1e-9) env_[c] = target;  // settled: no subnormal creep
                 if (env_[c] > -1e-9) env_[c] = 0.0;  // back to no reduction: no subnormal creep
-                gain[c] = lib::dbToGain(env_[c] + makeupDb_);
+                const double db = env_[c] + makeupDb_;  // the same dB as last sample (no reduction, say): the same gain
+                if (db != gainDb_[c]) gainDb_[c] = db, gainOf_[c] = lib::dbToGain(db);
+                gain[c] = gainOf_[c];
             }
             if (channels == 1) env_[1] = env_[0], gain[1] = gain[0];
             const double gr = std::min(env_[0], env_[1]);
@@ -191,6 +197,8 @@ private:
     double ms_[2] = {}, env_[2] = {};
     bool external_ = false;
     double threshold_ = -18, ratio_ = 4, knee_ = 6, attack_ = 0, release_ = 0, makeupDb_ = 0;
+    double kneeStartDb_ = 1e300, quietBelow_ = 0.0;     // control: below quietBelow_ (linear) the curve gives 0 dB
+    double gainDb_[2] = {1e300, 1e300}, gainOf_[2] = {1.0, 1.0};  // run: dbToGain(gainDb_) last worked out
     double mix_ = 1, link_ = 1, rmsCoef_ = 0, sustainCoef_ = 0, sustained_ = 0;
     double grMax_ = 0, grNow_ = 0, levelMax_ = 0;
     bool rms_ = false, useHpf_ = false, listen_ = false;

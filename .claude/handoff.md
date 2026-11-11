@@ -1,34 +1,29 @@
 # Handoff
 
-Commit: 4cfc5a3
-
-Branch: ccr-56285e11-0xrj3h (PR #167 open, subscribed, CI green at aa1ee28)
+Commit: 313975b
+Branch: ccr-56285e11-0xrj3h (PR #178 open into Main, watched; Main protected: PRs only, owner said merge yourself when CI is green)
 
 ## Goal
-Owner (2026-11-11, latest): "Don't stop until everything in the roadmap is completely done. I want you continuously working. Restart when your limit goes out." After the roadmap: optimize everything (fast, quick, runs extremely well), then a user-friendliness pass that does NOT change the layout or things in the app, only makes everything fit well in the UI. Wake-up scheduled 2026-11-11T17:31Z (owner's 10:31 pm).
-Owner (2026-11-10): work through everything discussed toward the open beta, without the owner's input except where a call is genuinely theirs; don't message them unless something is on fire.
+Owner (2026-11-11): keep working through everything planned toward v1.0.0-beta.1; build each request they gave today (all recorded in `docs/decisions.md`, newest first); then speed pass, fit-and-finish (every change animates: `.claude/rules/app.md`), docs pass, version bump, pre-release. Resume at 5:50 pm owner time (America/New_York) via a scheduled message.
 
-## Done and verified (on this branch, pushed)
-- Bend-in-clips fix; decisions (polyphony, landscape, inefficient plug-ins).
-- Logo C5 (owner-approved) in app, Android adaptive icon, Windows icon, SVGs in `app/assets/logo/`. Logo changes need the owner's explicit yes.
-- GitHub Releases in `.github/workflows/app.yml` (tag v* or Run workflow + release); APK native libs compressed. No release made yet.
-- Library kernels: lfo/wavetable/reverb/smoothing headers + tests (not yet used by any built-in).
-- MIDI file import/export in Dart (`app/lib/model/midi_file.dart`, `app/lib/model/midi_clips.dart`, `app/lib/ui/midi_file_actions.dart`).
+## Done and verified (on the branch, pushed)
+- Merged to Main via #176/#177: desktop batches, leftovers, track cards, Flagship extras, Plug-in page, instant taps, Windows UTF-8 fixes.
+- On #178 (pushed, CI running): themes (5 families light/dark, theme editor, feel, animation style), music video (setup, auto director, preview, MP4 via MediaCodec / Media Foundation, encoders never compiled yet: first compile is the app.yml dispatch run at 313975b). Local: `flutter analyze` clean; `flutter test -j 4` 1358 passed on the theme merge; music_video + workspace tests pass.
 
-## Open
-- Merged and pushed on the session branch (4cfc5a3, API 17): settings, routing/ducker + fixes, #133, all four FX groups + racks/browser, drums engine + editor, parity ports + C++ starters, engine leftovers (meters, VST3), MIDI devices (API 15), build tools, piano roll (K2), arrange/mixer (K1), stems/export sheet (API 16), engine off .caw (WP-B, API 17).
-- Running (worktrees): off-caw-app (WP-C), audio-engine (WP-J engine, API 18), modulators (WP-F #161, API 19); architect designing #127 (WP-G) into architecture.md.
-- Next: WP-D delete the .caw language (after WP-C; pattern templates acid-line/chords need a Dart home first), WP-E (#159 .caw project extension), WP-G build from the architect's plan, WP-J app UI after the engine, then the optimization pass, the fit-and-finish pass (no layout changes), WP-N docs, version bump, release.
-- Known flaky timing tests to fix in the cleanup pass: double-tap in pattern_editor and files, the cpp_builder live-check debounce. Fixed so far: tap tempo (fake clock), export queue wait.
-- Closing done issues on GitHub was blocked by auto mode: ask the owner (#7 #21 #24 #36 #38 #40 #76 #123 #128 #137 #168 #170 #172 #175; superseded #32 #54).
-- Owner choices to batch: every "to confirm" entry in decisions.md (2026-11-10/11), the Engine Lab placement, and the new screens' looks.
+## Open (agents in worktrees `.claude/worktrees/<name>`; if the session restarted, read each branch's `git log ccr-56285e11-0xrj3h..<name>` and finish/merge it)
+- `track-headers` (+ endless scroll right, revealStart API): collapse states, per-track height, indent, upright meters, header tap=focus instantly / double tap=FX / hold=menu, selected-clip tap opens editor, follow pause + setting (2.5 s, off, never) + Smooth style, snappy move animation, resize reveals not stretch, header/panel animations in and out, empty-arrange hint centred, deep zoom out. Decisions: "Track headers that shrink…", "Every change animates".
+- `keyboard-a` (⏮ double tap also scrolls views to start via an AppState hook; arranger side in track-headers): keyboard-only contexts (FX chain, devices, mixer, Files, Build, Settings, menus), hint strip, exit animations outside Arrange, ⏮ back-to-start button (tap loop start, double tap project start, Home/Ctrl+Home). Batch B (Arrange/roll keyboard) after track-headers.
+- `video-smooth`: music video "Smooth follow" switch (off by default).
+- `latency-comp`: output latency compensation (Bluetooth etc.): measured + per-device offset + calibration, audible playhead, recording placement, badge; new C API number; lists UI consumers to switch.
+- `perf-pass`: engine/effects CPU pass (owner's "mid tempo" 3 tracks = 49% CPU); Flagship hotspots to fix after.
+- Next waves: layout file phase 1 (decisions "A REAPER-style layout file"), phone ⋯ More / search / hints (decisions "Finding things on a phone"), desktop look batch C (`scratchpad` gone after restart: see decisions "Desktop plays to desktop strengths"), midi_clips learned-CC wire-up, platform-modularity plan fold-in (commit b10d640 if still present).
+- Owner questions open: per-note FX look/over-budget; plugin pipeline state saved in project?; Reset curve meaning; layout-file custom labels/packages/one file.
 
 ## Next
-- Merge each agent as it reports (registries and API numbers conflict: keep all entries), audio-review engine merges, build an APK and send it with what's new.
-- Then the next waves from the audit: WP-H MIDI devices, WP-I stems/render parity, WP-K screens; then WP-B/C/D (#160), WP-E (#159), WP-F (#161), WP-G (#127), WP-J (audio clips/recording/sampler); WP-N docs; WP-O release.
-
-## Owner's calls pending
-- Confirm MIDI storage (pattern text + SMF exchange); Android developer verification (2027, see vision.md).
+- When #178 CI is green: merge into Main. Check the 313975b APK run (encoder compile); send the owner the APK link.
+- Merge each agent as it reports (analyze, full `CAW_LIB=… flutter test`, docs-test --strict, push, PR).
 
 ## Read first
-- `docs/decisions.md`, `docs/app.md`
+- `docs/decisions.md`
+- `docs/app.md`
+- `.claude/rules/app.md`

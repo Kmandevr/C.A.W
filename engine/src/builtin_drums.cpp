@@ -925,11 +925,12 @@ private:
         v.glideSt = v.glideTarget = s.track ? note - s.root : 0.0;
         start(v, s);
         list_[live_++] = static_cast<uint16_t>(index);
-        // Display: this pad's picture starts over with this hit.
-        v.capture = true;
+        // Display: this pad's picture starts over with this hit, while a UI reads the display (the audio doesn't
+        // depend on it; unwatched, the per-sample capture is skipped).
+        v.capture = watched_;
         for (uint32_t i = 0; i + 1 < live_; ++i)
             if (voices_[list_[i]].pad == static_cast<int>(pad)) voices_[list_[i]].capture = false;
-        startCapture(pad, s, v);
+        if (watched_) startCapture(pad, s, v);
         lastPad_ = static_cast<int>(pad);
         return true;
     }
@@ -1866,6 +1867,7 @@ private:
             for (uint32_t i = 0; i < kPitchPoints; ++i) curve[i] = 0.0f;
         }
         display_.publish(d, kDisplayFloats);
+        watched_ = display_.watched();
     }
 
 public:
@@ -1922,6 +1924,7 @@ private:
     double volume_ = 1;
     // display
     DisplayBuffer<kDisplayFloats> display_;
+    bool watched_ = true;  // a UI read the display lately (publish): hits capture their waveform
     DisplayClock displayClock_;
     float frame_[kDisplayFloats] = {};
     float padLevel_[kPads] = {};

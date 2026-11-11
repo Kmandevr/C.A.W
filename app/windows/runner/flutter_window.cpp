@@ -11,6 +11,7 @@
 
 #include "flutter/generated_plugin_registrant.h"
 #include "utils.h"
+#include "video_channel.h"
 
 namespace {
 
@@ -97,6 +98,9 @@ bool FlutterWindow::OnCreate() {
         }
       });
 
+  // The music video's MP4 encoder (video_channel.cpp).
+  RegisterVideoChannel(flutter_controller_->engine()->messenger());
+
   // Files dropped from Explorer arrive as WM_DROPFILES.
   ::DragAcceptFiles(GetHandle(), TRUE);
 
@@ -119,6 +123,7 @@ bool FlutterWindow::OnCreate() {
 
 void FlutterWindow::OnDestroy() {
   window_channel_ = nullptr;
+  UnregisterVideoChannel();
   if (flutter_controller_) {
     flutter_controller_ = nullptr;
   }
