@@ -13,6 +13,7 @@ import 'native_components.dart';
 import 'project.dart';
 import 'automation_writer.dart' show AutomationTarget;
 import 'history.dart';
+import 'mixer_fx.dart' show masterLayerId;
 import 'pattern_doc.dart';
 import 'settings.dart';
 import 'storage.dart';
@@ -723,7 +724,7 @@ class AppState extends ChangeNotifier {
       masterValueTick.value++;
       // Ticks of modules and layers the restore removed are dropped (left to their widgets, which go with them).
       _moduleValueTicks.removeWhere((id, _) => project.module(id) == null);
-      _layerValueTicks.removeWhere((id, _) => project.layers.every((l) => l.id != id));
+      _layerValueTicks.removeWhere((id, _) => id != masterLayerId && project.layers.every((l) => l.id != id));
       for (final n in _moduleValueTicks.values) { n.value++; }
       for (final n in _layerValueTicks.values) { n.value++; }
       timeSelectionStart = timeSelectionEnd = timeSelectionAnchor = null;

@@ -9,6 +9,7 @@ import '../engine/engine.dart';
 import '../ui/frame/sections.dart';
 import 'app_state.dart';
 import 'midi_clips.dart';
+import 'mixer_fx.dart';
 import 'cpp_component.dart';
 import 'automation_writer.dart' show AutomationTarget;
 import 'native_trust.dart';
@@ -120,7 +121,7 @@ extension ArrangeFx on AppState {
     final before = List.of(layer.components);
     editProject((p) {
       layer.components.insert((at ?? layer.components.length).clamp(0, layer.components.length), use);
-      followComponentLanes(p, layer.id, before);
+      followComponentLanes(p, engineLayerId(layer), before);
     });
     return use;
   }
@@ -130,7 +131,7 @@ extension ArrangeFx on AppState {
     final before = List.of(layer.components);
     editProject((p) {
       layer.components.removeAt(index);
-      followComponentLanes(p, layer.id, before);
+      followComponentLanes(p, engineLayerId(layer), before);
     });
   }
 
@@ -141,7 +142,7 @@ extension ArrangeFx on AppState {
     final before = List.of(layer.components);
     editProject((p) {
       layer.components.insert(to, layer.components.removeAt(from));
-      followComponentLanes(p, layer.id, before);
+      followComponentLanes(p, engineLayerId(layer), before);
     });
   }
 
@@ -149,7 +150,7 @@ extension ArrangeFx on AppState {
   void setNativeBypass(LayerDoc layer, int index, bool bypass) {
     if (index < 0 || index >= layer.components.length) return;
     final engineIndex = engineComponentIndex(layer, index);
-    if (engineIndex != null) engine?.setComponentBypass(layer.id, engineIndex, bypass);
+    if (engineIndex != null) engine?.setComponentBypass(engineLayerId(layer), engineIndex, bypass);
     editLayer(layer, (l) => l.components[index].bypass = bypass);
   }
 
@@ -157,10 +158,10 @@ extension ArrangeFx on AppState {
   /// [commitNativeParams] when the gesture ends to save it (an update with the same chain keeps the running state).
   void setNativeParamLive(LayerDoc layer, int index, String param, double value) {
     if (index < 0 || index >= layer.components.length) return;
-    onParamMove?.call(AutomationTarget('component', param, layerId: layer.id, component: index), value);
+    onParamMove?.call(AutomationTarget('component', param, layerId: engineLayerId(layer), component: index), value);
     layer.components[index].params[param] = value;
     final engineIndex = engineComponentIndex(layer, index);
-    if (engineIndex != null) engine?.setComponentParam(layer.id, engineIndex, param, value);
+    if (engineIndex != null) engine?.setComponentParam(engineLayerId(layer), engineIndex, param, value);
     layerValueTick(layer.id).value++;
   }
 
@@ -176,7 +177,7 @@ extension ArrangeFx on AppState {
     final engineIndex = engineComponentIndex(layer, index);
     if (e == null || engineIndex == null) return false;
     final id = layer.components[index].id;
-    if (!await e.setComponentState(layer.id, engineIndex, bytes, version)) return false;
+    if (!await e.setComponentState(engineLayerId(layer), engineIndex, bytes, version)) return false;
     if (index >= layer.components.length || layer.components[index].id != id) return false;
     endUndoStep();
     editLayer(layer, (l) {
@@ -252,6 +253,10 @@ extension ArrangeFx on AppState {
   /// Puts what was picked or dropped on [layer]: an effect joins its chain, an instrument module becomes its
   /// instrument when it has none, and a pattern becomes a clip at [atStep] (snapped). True when something changed.
   bool dropAsset(LayerDoc layer, AssetDrag asset, {int? atStep}) {
+    // The master's chain holds C++ effects only (the engine's `master_components`).
+    if (isMasterLayer(layer)) {
+      return asset.kind == AssetKind.nativeEffect && !isInstrumentAsset(asset) && addNativeEffect(layer, asset.id) != null;
+    }
     if (layer.isFolder) return false;
     switch (asset.kind) {
       case AssetKind.nativeEffect:

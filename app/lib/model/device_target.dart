@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import '../engine/component_info.dart';
 import 'app_state.dart';
 import 'arrange_fx.dart';
+import 'mixer_fx.dart';
 import 'project.dart';
 import 'racks.dart';
 
@@ -21,7 +22,9 @@ class DeviceTarget {
 
   bool get isInstrument => slot == instrumentSlot;
 
-  LayerDoc? get layer => state.project.layers.where((l) => l.id == layerId).firstOrNull;
+  /// The track (the master's stand-in, [masterLayerOf], for [masterLayerId]).
+  LayerDoc? get layer => layerId == masterLayerId
+      ? masterLayerOf(state.project) : state.project.layers.where((l) => l.id == layerId).firstOrNull;
 
   /// The device's entry in the project, or null when it is gone (removed, or undone away).
   ComponentUseDoc? get use {
