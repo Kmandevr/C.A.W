@@ -6,6 +6,14 @@ updated: 2026-11-11
 
 # Decisions
 
+## 2026-11-11: Audio review fixes: declick lengths (to confirm)
+
+**Decision (Claude, for the owner to confirm; [engine](engine.md#audio-clips)):**
+- **Clip voices declick over 4 ms** (to confirm): a voice cut by a seek, loop wrap, stop, mode change, mute or edit fades out over 4 ms while one starting mid-clip fades in over 4 ms; a clip's loop seam crossfades over 4 ms. A voice starting at its clip's start is left as authored (no fade), so a clip's own attack is unchanged. The review asked for 2–5 ms.
+- **The sampler fades stolen voices and voices of replaced zones over 5 ms** (to confirm), and steals the oldest releasing voice before the oldest held one.
+- **SFZ export copies only WAV, FLAC and MP3 files** (by extension and first bytes, up to 1 GB), named uniquely against `samples/` without regard to case: a project's zone paths are untrusted and could otherwise copy any readable file into the exported folder.
+- **Recording splits a take into a new file before 4 GB** (WAV's 32-bit sizes) rather than writing RF64, so every take stays a plain WAV the decoders and other apps read.
+
 ## 2026-11-11: Audio assets, clips, sampler and input (WP-J; choices to confirm)
 
 **Decision (Claude, for the owner to confirm; the owner put all three in the beta, see below; [engine](engine.md#audio-assets-clips-the-sampler-and-audio-input-api-18)):**
