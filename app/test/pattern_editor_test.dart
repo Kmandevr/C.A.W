@@ -116,7 +116,9 @@ void main() {
     expect(find.byTooltip('Draw tool'), findsOneWidget);
     await tester.tap(find.byTooltip('More'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Generate: Euclid'));
+    await tester.ensureVisible(find.text('Euclid'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Euclid'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Apply'));
     await tester.pump(const Duration(milliseconds: 200));
@@ -214,7 +216,7 @@ void main() {
     await tester.ensureVisible(find.text('Vibrato').first);
     await tester.tap(find.widgetWithText(ActionChip, 'Vibrato'));
     await tester.pump();
-    Navigator.of(tester.element(find.text('Expression'))).pop();
+    Navigator.of(tester.element(find.text('EXPRESSION'))).pop();
     await tester.pumpAndSettle();
     await tester.pump(const Duration(milliseconds: 200));
     expect(m.source, contains('vib 0.4 5.5 0.3'));

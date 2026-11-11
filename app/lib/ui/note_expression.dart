@@ -81,17 +81,8 @@ class ExpressionPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final e = expr;
-    // Double-tap: the value a note has without vibrato (none, 5 Hz, no fade-in).
-    Widget slider(String label, double v, double min, double max, String Function(double) show, NoteExpression Function(double) set,
-            double reset) =>
-        Row(children: [
-          SizedBox(width: 92, child: Text('$label ${show(v)}', style: Neon.code(size: 12))),
-          Expanded(child: ResetOnDoubleTap(onReset: () => onChanged(set(reset)),
-            child: Slider(value: v.clamp(min, max), min: min, max: max, onChanged: (x) => onChanged(set(x))))),
-        ]);
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      const SizedBox(height: 8),
-      const Text('Expression', style: TextStyle(fontWeight: FontWeight.w700)),
+      const Heading('Expression'),
       Wrap(spacing: 6, runSpacing: 4, children: [
         for (final (name, f) in expressionPresets) ActionChip(label: Text(name), onPressed: () => onChanged(f(e))),
       ]),
@@ -100,9 +91,13 @@ class ExpressionPanel extends StatelessWidget {
           style: TextStyle(color: Neon.dim, fontSize: 12)),
       NoteCurveEditor(
           points: e.bend, min: -12, max: 12, zero: 0, snap: 1, timeSnap: timeSnap, color: color, onChanged: (p) => onChanged(e.copyWith(bend: p))),
-      slider('Vibrato', e.vibDepth, 0, 2, (v) => v.toStringAsFixed(2), (v) => e.copyWith(vibDepth: v), 0),
-      slider('Rate', e.vibRate, 0.5, 12, (v) => '${v.toStringAsFixed(1)} Hz', (v) => e.copyWith(vibRate: v), const NoteExpression().vibRate),
-      slider('Fade-in', e.vibFade, 0, 1, (v) => '${(v * 100).round()}%', (v) => e.copyWith(vibFade: v), 0),
+      // Vibrato: big sliders with a type-in and a reset (none, 5 Hz, no fade-in).
+      ValueSlider(label: 'Vibrato depth', value: e.vibDepth, min: 0, max: 2, reset: 0, scale: 100, unit: ' cents',
+          onChanged: (v) => onChanged(e.copyWith(vibDepth: v))),
+      ValueSlider(label: 'Vibrato rate', value: e.vibRate, min: 0.5, max: 12, reset: const NoteExpression().vibRate,
+          decimals: 1, unit: ' Hz', onChanged: (v) => onChanged(e.copyWith(vibRate: v))),
+      ValueSlider(label: 'Vibrato fade-in', value: e.vibFade, min: 0, max: 1, reset: 0, scale: 100, unit: '%',
+          onChanged: (v) => onChanged(e.copyWith(vibFade: v))),
       Text('Volume over the note', style: TextStyle(color: Neon.dim, fontSize: 12)),
       NoteCurveEditor(
           points: e.press, min: 0, max: 1, zero: 1, snap: valueSnap, timeSnap: timeSnap, color: color, onChanged: (p) => onChanged(e.copyWith(press: p))),

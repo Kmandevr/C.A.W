@@ -669,3 +669,95 @@ Future<bool> confirmTrackDelete(BuildContext context, AppState state, LayerDoc l
   );
   return ok == true;
 }
+
+/// A number in an advanced menu (owner, 2026-11-11): its name, its value (a tap types one), a reset button and a big
+/// slider under them, which a double-tap also resets. The value shows as [scale] × the value with [decimals] places
+/// and [unit] (velocity 0..1 as `80%`); a typed number is read in the same units, clamped and, with [divisions],
+/// snapped.
+class ValueSlider extends StatelessWidget {
+  const ValueSlider({
+    super.key,
+    required this.label,
+    required this.value,
+    required this.min,
+    required this.max,
+    required this.reset,
+    required this.onChanged,
+    this.onChangeEnd,
+    this.scale = 1,
+    this.decimals = 0,
+    this.unit = '',
+    this.divisions,
+    this.sliderKey,
+  });
+  final String label, unit;
+  final double value, min, max, reset, scale;
+  final int decimals;
+  final int? divisions;
+  final ValueChanged<double> onChanged;
+  final ValueChanged<double>? onChangeEnd;
+  final Key? sliderKey;
+
+  String show(double v) => '${(v * scale).toStringAsFixed(decimals)}$unit';
+
+  double _snap(double v) {
+    final c = v.clamp(min, max).toDouble();
+    final d = divisions;
+    if (d == null || d <= 0) return c;
+    final step = (max - min) / d;
+    return (min + ((c - min) / step).round() * step).clamp(min, max).toDouble();
+  }
+
+  void _set(double v) {
+    onChanged(v);
+    onChangeEnd?.call(v);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final v = value.clamp(min, max).toDouble();
+    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: [
+      Row(children: [
+        Expanded(child: Text(label, style: const TextStyle(color: Neon.text))),
+        TextButton(
+          key: ValueKey('value-type-$label'),
+          onPressed: () => typeValue(context,
+              title: label,
+              initial: (v * scale).toStringAsFixed(decimals),
+              keyboardType: const TextInputType.numberWithOptions(decimal: true, signed: true),
+              parse: (t) {
+                final x = double.tryParse(t.trim().replaceAll(',', '.').replaceAll(RegExp(r'[^0-9.\-]'), ''));
+                return x == null || !x.isFinite ? null : _snap(x / scale);
+              },
+              apply: _set),
+          child: Text(show(v), style: Neon.code(size: 13)),
+        ),
+        IconButton(
+          tooltip: 'Reset to ${show(reset)}',
+          visualDensity: VisualDensity.compact,
+          onPressed: v == reset ? null : () => _set(reset),
+          icon: const Icon(Icons.restart_alt, size: 18),
+        ),
+      ]),
+      ResetOnDoubleTap(
+        onReset: () => _set(reset),
+        child: SliderTheme(
+          data: SliderTheme.of(context).copyWith(
+            trackHeight: 8,
+            thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 11),
+            overlayShape: const RoundSliderOverlayShape(overlayRadius: 22),
+          ),
+          child: Slider(
+            key: sliderKey,
+            value: v,
+            min: min,
+            max: max,
+            divisions: divisions,
+            onChanged: onChanged,
+            onChangeEnd: onChangeEnd,
+          ),
+        ),
+      ),
+    ]);
+  }
+}

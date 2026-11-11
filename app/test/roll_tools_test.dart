@@ -33,7 +33,10 @@ List<PatternNote> _notes(ModuleDoc m) => PatternDoc.parse(m.source).doc!.notes;
 Future<void> _menu(WidgetTester tester, String item) async {
   await tester.tap(find.byTooltip('More'));
   await tester.pumpAndSettle();
-  await tester.tap(find.ancestor(of: find.text(item), matching: find.byWidgetPredicate((w) => w is PopupMenuEntry)).first);
+  final entry = find.ancestor(of: find.text(item), matching: find.byWidgetPredicate((w) => w is PopupMenuEntry)).first;
+  await tester.ensureVisible(entry);
+  await tester.pumpAndSettle();
+  await tester.tap(entry);
   await tester.pumpAndSettle();
 }
 
@@ -165,13 +168,13 @@ void main() {
     final s = await _state('---\nkind: pattern\n---\n0 C3 2\n4 E3 2\n');
     final m = s.project.module('line')!;
     await tester.pumpWidget(MaterialApp(home: Scaffold(body: PatternEditor(state: s, module: m))));
-    await _menu(tester, 'Generate: Connect notes');
+    await _menu(tester, 'Connect notes');
     await tester.tap(find.text('Apply'));
     await tester.pumpAndSettle();
     await tester.pump(const Duration(milliseconds: 300));
     expect(_notes(m).first.len, Steps(4), reason: m.source);
     expect(_notes(m).first.expr.bend.last.v, 4, reason: m.source);
-    await _menu(tester, 'Generate: Tremolo');
+    await _menu(tester, 'Tremolo…');
     final preview = find.byKey(const ValueKey('tremolo-preview'));
     expect(preview, findsOneWidget);
     CustomPaint paint() => tester.widget<CustomPaint>(find.descendant(of: preview, matching: find.byType(CustomPaint)));

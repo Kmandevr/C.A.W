@@ -143,7 +143,7 @@ Notes:
 | Select all / none | Ctrl+A / Esc |
 | Select next / previous note in time | Tab / Shift+Tab |
 | Add the note at the cursor to the selection | Ctrl+Shift+Space |
-| Copy / cut / paste at the cursor / duplicate | Ctrl+C / Ctrl+X / Ctrl+V / Ctrl+D |
+| Copy / cut / paste (after the copied notes, chaining) / duplicate | Ctrl+C / Ctrl+X / Ctrl+V / Ctrl+D |
 | Split notes at the cursor / join selected notes | Ctrl+E / Ctrl+J (Ableton uses these: [Live 12 manual](https://www.ableton.com/live-manual/12/live-keyboard-shortcuts/)) |
 | Quantize selected notes to the grid | Ctrl+U (as in Live) |
 | Quantize… (sheet: grid, starts/ends/both, strength, swing, humanize, previewed live) | ⋮ menu (no default key) |
@@ -169,7 +169,7 @@ Grid and view:
 | Snap (magnet) on / off (grid off) | N |
 | Adaptive / fixed grid | Alt+F |
 | Drag a length without snapping | hold Shift while dragging |
-| Tools: draw, select, curve, erase | B, V, C, X |
+| Tools: draw, select, curve, erase, ratchet brush | B, V, C, X, — |
 | Switch piano roll / drum grid | G |
 | Zoom in / out / fit the pattern (also Ctrl + wheel; Ctrl + Shift + wheel for the row height) | Ctrl+= / Ctrl+- / F |
 | Show velocity lane / extras lanes | Alt+V / Alt+X (Ctrl+1/2/3 always switch areas, owner) |
@@ -181,7 +181,7 @@ Generators (buttons; no default keys):
 | --- | --- |
 | Euclid, random in key, arpeggiate, humanize, chord stamp | — |
 | Legato (stretch each note to the next) | — |
-| Connect notes (each chord to the next, voices gliding into it), tremolo (volume or repeats) | — |
+| Connect notes (each chord to the next, voices gliding into it), tremolo (volume or repeats), vibrato (pitch) | — |
 | Reverse selection, invert pitch around the cursor | — |
 
 ### Arranger
