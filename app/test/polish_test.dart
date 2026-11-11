@@ -141,7 +141,7 @@ void main() {
   group('Export', () {
     testWidgets('with no saved profiles the picker says how to make one', (tester) async {
       await tester.pumpWidget(MaterialApp(home: Scaffold(body: ExporterScreen(state: s))));
-      expect(find.text('None yet: save these settings with the bookmark'), findsOneWidget);
+      expect(find.text('None yet: save one with the bookmark'), findsOneWidget);
     });
 
     test('recent exports show their time to the minute', () {

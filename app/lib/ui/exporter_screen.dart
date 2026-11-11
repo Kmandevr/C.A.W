@@ -571,7 +571,7 @@ class _ExporterScreenState extends State<ExporterScreen> {
                 Expanded(child: DropdownButton<String>(
                   value: selectedProfile,
                   isExpanded: true,
-                  hint: Text(profiles.isEmpty ? 'None yet: save these settings with the bookmark' : 'Choose a saved profile',
+                  hint: Text(profiles.isEmpty ? 'None yet: save one with the bookmark' : 'Choose a saved profile',
                       key: const ValueKey('export-profile-hint'),
                       style: const TextStyle(fontSize: 13, color: Neon.dim), maxLines: 1, overflow: TextOverflow.ellipsis),
                   underline: const SizedBox.shrink(),
