@@ -820,7 +820,7 @@ TEST(c_api_plays_and_addresses_a_layers_instrument) {
     CawEngine* engine = caw_engine_create(48000);
     CHECK(engine != nullptr);
     if (!engine) return;
-    CHECK_EQ(caw_api_version(), 17);  // 17: C++ audition, wavetable and one-shot (no new functions); 16: song renders and stems; 15: MIDI device input; 14: component state while playing; 13: drums (11) and meters (12) merged; 10: device choice, click sound, test tone; 9: routing
+    CHECK_EQ(caw_api_version(), 19);  // 19: project modulation (18: the audio-engine branch); 17: C++ audition, wavetable and one-shot (no new functions); 16: song renders and stems; 15: MIDI device input; 14: component state while playing; 13: drums (11) and meters (12) merged; 10: device choice, click sound, test tone; 9: routing
     char* result = caw_engine_set_project(engine,
         R"({"caw_project":1,"bpm":120,"modules":[{"id":"p","source":"---\nkind: pattern\nname: P\nlength: 16\n---\n0 C4 4 1\n"}],
             "layers":[{"id":"t","pattern":"p","instrument":{"id":"org.caw.synth.flagship","params":{"flt1_cutoff":900}}}]})");

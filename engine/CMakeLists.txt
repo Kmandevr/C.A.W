@@ -175,6 +175,9 @@ add_library(caw_core STATIC
 target_sources(caw_core PRIVATE src/builtin_fx_racks.cpp src/builtin_fx_racks_fx.cpp src/builtin_fx_racks_multiband.cpp
   src/builtin_fx_racks_presets.cpp)
 # fx-racks end
+# modulators begin (#161: project modulation, its built-in modulators)
+target_sources(caw_core PRIVATE src/modulation_links.cpp src/builtin_modulators.cpp)
+# modulators end
 target_include_directories(caw_core PRIVATE src)
 target_compile_options(caw_core PRIVATE ${CAW_FLAGS})
 find_package(Threads REQUIRED)
@@ -191,7 +194,7 @@ target_sources(caw_core PRIVATE src/builtin_fx_dynamics.cpp src/builtin_fx_drive
 
 # The library the app loads through dart:ffi.
 if(CAW_AUDIO)
-  add_library(caw_engine SHARED src/capi.cpp src/execution_capi.cpp src/worker_api.cpp platform/audio_miniaudio.cpp platform/miniaudio_impl.c)
+  add_library(caw_engine SHARED src/capi.cpp src/capi_modulation.cpp src/execution_capi.cpp src/worker_api.cpp platform/audio_miniaudio.cpp platform/miniaudio_impl.c)
   target_include_directories(caw_engine PRIVATE src third_party/miniaudio)
   target_compile_options(caw_engine PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${CAW_FLAGS}>)
   if(ANDROID)
@@ -201,7 +204,7 @@ if(CAW_AUDIO)
     target_link_libraries(caw_engine PRIVATE dl m)
   endif()
 else()
-  add_library(caw_engine SHARED src/capi.cpp src/execution_capi.cpp src/worker_api.cpp platform/audio_none.cpp)
+  add_library(caw_engine SHARED src/capi.cpp src/capi_modulation.cpp src/execution_capi.cpp src/worker_api.cpp platform/audio_none.cpp)
   target_compile_options(caw_engine PRIVATE ${CAW_FLAGS})
   target_include_directories(caw_engine PRIVATE src)
 endif()
@@ -221,7 +224,7 @@ target_include_directories(caw_cli PRIVATE src)
   add_executable(caw_tests tests/test_main.cpp tests/language_test.cpp tests/engine_test.cpp tests/export_test.cpp
     tests/golden_test.cpp tests/variables_test.cpp tests/library_test.cpp tests/pattern_test.cpp
     tests/midifile_test.cpp tests/midi2_test.cpp tests/module_registry_test.cpp tests/native_component_test.cpp tests/synth_test.cpp tests/execution_test.cpp tests/execution_capi_test.cpp tests/module_test.cpp tests/graph_test.cpp tests/params_test.cpp tests/sdk_header_test.cpp tests/scheduler_test.cpp tests/dependency_test.cpp tests/hardware_test.cpp tests/worker_api_test.cpp tests/mix_golden_test.cpp tests/public_cpp_sdk_test.cpp tests/track_components_test.cpp tests/instrument_test.cpp tests/builtin_instruments_test.cpp
-    src/capi.cpp src/execution_capi.cpp src/worker_api.cpp platform/audio_none.cpp)
+    src/capi.cpp src/capi_modulation.cpp src/execution_capi.cpp src/worker_api.cpp platform/audio_none.cpp)
   target_sources(caw_tests PRIVATE tests/component_test_test.cpp)  # the component testing suite (#163)
   target_sources(caw_tests PRIVATE tests/test_signal_test.cpp)  # org.caw.test.osc, the internal test signal
   target_sources(caw_tests PRIVATE tests/sample_pack_test.cpp)  # the sample-pack maker (#164)
@@ -243,6 +246,7 @@ target_include_directories(caw_cli PRIVATE src)
   target_sources(caw_tests PRIVATE tests/fx_filters_test.cpp)  # the EQ & Filter group
   # fx-filters end
   target_sources(caw_tests PRIVATE tests/fx_racks_test.cpp)  # fx-racks: the FX and multiband racks
+  target_sources(caw_tests PRIVATE tests/modulation_test.cpp)  # #161: project modulators and links
   target_sources(caw_tests PRIVATE tests/midi_device_test.cpp)  # MIDI from devices (API 15): edge conversion, timing, notes
   add_library(caw_test_component MODULE tests/native_component_fixture.cpp)
   target_link_libraries(caw_test_component PRIVATE CAW::SDK)
@@ -253,6 +257,12 @@ target_include_directories(caw_cli PRIVATE src)
   target_compile_options(caw_test_component_no_entry PRIVATE ${CAW_FLAGS})
   target_compile_definitions(caw_test_component_no_entry PRIVATE CAW_TEST_OMIT_ENTRY)
   set_target_properties(caw_test_component_no_entry PROPERTIES PREFIX "" OUTPUT_NAME "caw_test_component_no_entry")
+  # The example modulator (examples/cpp/modulator, #161), loaded by modulation_test.cpp as a user's C++ modulator.
+  add_library(caw_test_modulator MODULE ../examples/cpp/modulator/src/euclid_modulator.cpp)
+  target_link_libraries(caw_test_modulator PRIVATE CAW::SDK)
+  target_compile_options(caw_test_modulator PRIVATE ${CAW_FLAGS})
+  set_target_properties(caw_test_modulator PROPERTIES PREFIX "" OUTPUT_NAME "caw_test_modulator")
+  add_dependencies(caw_tests caw_test_modulator)
   # The component C interface compiles as plain C.
   add_library(caw_component_c_check OBJECT tests/component_header_check.c)
   target_include_directories(caw_component_c_check PRIVATE include)
@@ -262,7 +272,8 @@ target_include_directories(caw_cli PRIVATE src)
   target_include_directories(caw_tests PRIVATE src)
   target_compile_definitions(caw_tests PRIVATE CAW_ROOT="${CAW_ROOT}"
     "CAW_TEST_COMPONENT_PATH_DEFAULT=\"$<TARGET_FILE:caw_test_component>\""
-    "CAW_TEST_NO_ENTRY_COMPONENT_PATH=\"$<TARGET_FILE:caw_test_component_no_entry>\"")
+    "CAW_TEST_NO_ENTRY_COMPONENT_PATH=\"$<TARGET_FILE:caw_test_component_no_entry>\""
+    "CAW_TEST_MODULATOR_PATH=\"$<TARGET_FILE:caw_test_modulator>\"")
   target_link_libraries(caw_tests PRIVATE caw_core)
   # Compile the consumer test with only CAW::SDK's public include path; no engine/src access.
   add_library(caw_sdk_public_compile OBJECT tests/public_cpp_sdk_test.cpp)
@@ -286,6 +297,7 @@ target_include_directories(caw_cli PRIVATE src)
                               tests/alloc_counter.cpp)
   target_sources(caw_rt_tests PRIVATE tests/fx_space_rt_test.cpp)  # fx-space effects: no allocation on the audio thread
   target_sources(caw_rt_tests PRIVATE tests/fx_racks_rt_test.cpp)  # fx-racks
+  target_sources(caw_rt_tests PRIVATE tests/modulation_rt_test.cpp)  # #161: project modulation
   target_compile_options(caw_rt_tests PRIVATE ${CAW_FLAGS})
   target_include_directories(caw_rt_tests PRIVATE src)
   add_dependencies(caw_rt_tests caw_test_component)
@@ -295,7 +307,7 @@ target_include_directories(caw_cli PRIVATE src)
   add_test(NAME caw_rt_tests COMMAND caw_rt_tests)
   
   # Times the engine like an audio callback (see docs/performance.md); run it on a release build.
-add_executable(caw_bench bench/caw_bench.cpp src/capi.cpp platform/audio_none.cpp)
+add_executable(caw_bench bench/caw_bench.cpp src/capi.cpp src/capi_modulation.cpp platform/audio_none.cpp)
   target_compile_options(caw_bench PRIVATE ${CAW_FLAGS})
   target_include_directories(caw_bench PRIVATE src)
   target_link_libraries(caw_bench PRIVATE caw_core)

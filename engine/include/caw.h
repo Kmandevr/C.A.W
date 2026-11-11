@@ -55,8 +55,15 @@ extern "C" {
    17 (2026-11-11): C++ in place of .caw (#160 prep), no new functions: the project JSON's "audition" takes a C++
    "instrument" and native "components" as a track does (the preview needs no .caw chain); caw_render's wavetable
    target may be a layer with a C++ instrument or a built-in instrument's id (its parameter swept), and a one-shot of
-   a C++ instrument layer with no notes plays one C4 for 0.5 s to its tail. */
-#define CAW_API_VERSION 17
+   a C++ instrument layer with no notes plays one C4 for 0.5 s to its tail.
+   18: reserved for the audio-engine branch (audio clips, the sampler and input).
+   19 (2026-11-11, #161): project modulation. The project JSON's "modulators" (components with modulation outputs:
+   org.caw.mod.lfo, .envelope, .follower, .steps, .random, .macros, .midi, or a user's C++ modulator) and
+   "modulation" links (any modulator output to any parameter of a layer's or the master's component or instrument,
+   another modulator's parameter, or a layer's volume, pan or send level; docs/engine.md, "Modulation");
+   caw_engine_set_modulator_param, caw_engine_set_modulator_bypass, caw_engine_set_modulation_amount,
+   caw_engine_modulator_outputs and caw_engine_modulation_offset. Nothing else changes. */
+#define CAW_API_VERSION 19
 /* The component index that names a layer's native instrument rather than one of its "components". */
 #define CAW_INSTRUMENT_INDEX 0xFFFFFFFFu
 
@@ -205,6 +212,19 @@ CAW_API int32_t caw_engine_set_component_state(CawEngine* e, const char* layer_i
    project update sets the values it names again, so write the new values into the project too. */
 CAW_API int32_t caw_engine_set_send(CawEngine* e, const char* layer_id, uint32_t index, double level, int32_t pre,
                                     int32_t mute);
+/* Project modulation (API version 19, #161). A knob of a running modulator (its project "id"), ramped like a
+   component's; bypass (its outputs hold 0); a link's amount (-1..1 of its target's travel) while it plays, as during
+   a ring drag. 1 on success, 0 for an unknown modulator, parameter or link. A later project update sets the values
+   it names again, so write the new values into the project too. */
+CAW_API int32_t caw_engine_set_modulator_param(CawEngine* e, const char* modulator_id, const char* param, double value);
+CAW_API int32_t caw_engine_set_modulator_bypass(CawEngine* e, const char* modulator_id, int32_t bypass);
+CAW_API int32_t caw_engine_set_modulation_amount(CawEngine* e, uint32_t link_id, double amount);
+/* A modulator's outputs (0..1 each) at the last audio chunk, at most `max` into out: the count, 0 while the
+   engine is busy with a project update (never waits; a UI polls it every frame), -1 for an unknown modulator. */
+CAW_API int32_t caw_engine_modulator_outputs(CawEngine* e, const char* modulator_id, float* out, int32_t max);
+/* Link `link_id`'s target's summed offset (normalized travel, every link into that target together) at the last
+   chunk, into *out: 1, or 0 for an unknown link or while busy. */
+CAW_API int32_t caw_engine_modulation_offset(CawEngine* e, uint32_t link_id, float* out);
 /* Sets a project-wide `global` control; every module declaring it reads the new value. */
 CAW_API void caw_engine_set_global(CawEngine* e, const char* name, double value);
 /* Track and master volume: linear gain 0..3.981 (+12 dB; more is held there). Pan -1..1. */

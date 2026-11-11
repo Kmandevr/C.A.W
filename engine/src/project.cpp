@@ -1,6 +1,8 @@
 // Reads the project JSON into a ProjectSpec: values clamp to a safe range, song positions out of range are refused.
 #include "project.h"
 
+#include "modulation_links.h"
+
 #include "presets.h"
 
 #include <algorithm>
@@ -219,6 +221,8 @@ bool validateRouting(const ProjectSpec& p, std::string& error) {
             edges[it->second].push_back(i);
         }
     }
+    // A modulator that hears a layer's audio orders it before every layer its links move (#161).
+    if (!modulationEdges(p, index, edges, error)) return false;
     // Depth-first search for a loop; the path to it names the layers in the message.
     std::vector<uint8_t> state(n, 0);  // 0 unseen, 1 on the path, 2 done
     std::vector<size_t> path, at;
@@ -556,6 +560,11 @@ bool parseProject(std::string_view text, ProjectSpec& out, std::string& error) {
             parent = found->parentId;
         }
     }
+    // Project modulation (#161): modulators and links (modulation_links.cpp), before the routing check that orders them.
+    if (!parseModulation(root, [](const Json& j, const std::string& where, ComponentSpec& c, std::string& e) {
+            return componentEntry(j, where, c, e);
+        }, out, error))
+        return false;
     if (!validateRouting(out, error)) return false;
     if (const Json* g = root.get("globals"); g && g->type == Json::Type::Object)
         for (const auto& [k, v] : g->obj)
