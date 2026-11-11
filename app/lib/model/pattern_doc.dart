@@ -854,6 +854,13 @@ class PatternDoc {
   PatternDoc setName(String value) =>
       _setHeader('name', value.replaceAll(RegExp(r'[#\r\n]'), '').trim(), const ['caw', 'kind']);
 
+  /// Rewrites the `summary:` line (or adds one after `name:`); an empty value removes it. `#` and line breaks are
+  /// dropped, as for the name.
+  PatternDoc setSummary(String value) {
+    final v = value.replaceAll(RegExp(r'[#\r\n]'), ' ').trim();
+    return _setHeader('summary', v.isEmpty ? null : v, const ['caw', 'kind', 'name']);
+  }
+
   /// Rewrites the `length:` line as steps or bars (or adds it); both null removes it, so the notes decide.
   PatternDoc setLength({int? steps, int? bars}) {
     if (steps != null && bars != null) throw ArgumentError('give steps or bars, not both');

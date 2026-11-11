@@ -247,7 +247,7 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
     _scroller.dispose();
     s.settings.removeListener(_settingsChanged);
     _router?.unregister(Area.pattern, _focus);
-    _flush();
+    _flush(closing: true);
     _focus.dispose();
     super.dispose();
   }
@@ -258,6 +258,7 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
     _lastText = src;
     if (r.ok) {
       _doc = r.doc;
+      _written = r.doc;
       _error = null;
       _undo.clear();
       _redo.clear();
@@ -333,23 +334,39 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
     _sendTimer = Timer(const Duration(milliseconds: 150), _flush);
   }
 
-  void _flush() {
+  /// The doc the module's source last came from or was written from: an unedited roll writes nothing (an empty
+  /// pattern's source stays empty instead of gaining a header).
+  PatternDoc? _written;
+
+  /// Writes the roll's notes to the module (and the engine). [closing]: from dispose, which runs while the tree is
+  /// locked, so the write (whose notification rebuilds the app) waits for the end of the frame.
+  void _flush({bool closing = false}) {
     _sendTimer?.cancel();
     _sendTimer = null;
     final d = _doc;
-    if (d == null) return;
+    if (d == null || identical(d, _written)) return;
     final text = d.serialize();
+    _written = d;
     if (text == widget.module.source) return;
     _lastText = text;
-    s.editSource(widget.module.id, text);
-    s.run(widget.module.id);
-    if (_multiEditEnabled) {
-      for (final entry in _multiDocs.entries) {
-        final source = entry.value.serialize();
-        if (s.project.module(entry.key)?.source == source) continue;
-        s.editSource(entry.key, source);
-        s.run(entry.key);
-      }
+    if (closing && SchedulerBinding.instance.schedulerPhase != SchedulerPhase.idle) {
+      final s = this.s, id = widget.module.id, multi = _multiEditEnabled ? {for (final e in _multiDocs.entries) e.key: e.value.serialize()} : const <String, String>{};
+      SchedulerBinding.instance.addPostFrameCallback((_) => _write(s, id, text, multi));
+      return;
+    }
+    _write(s, widget.module.id, text, {
+      if (_multiEditEnabled)
+        for (final e in _multiDocs.entries) e.key: e.value.serialize()
+    });
+  }
+
+  static void _write(AppState s, String id, String text, Map<String, String> multi) {
+    s.editSource(id, text);
+    s.run(id);
+    for (final entry in multi.entries) {
+      if (s.project.module(entry.key)?.source == entry.value) continue;
+      s.editSource(entry.key, entry.value);
+      s.run(entry.key);
     }
   }
 

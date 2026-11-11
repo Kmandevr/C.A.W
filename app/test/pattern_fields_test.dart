@@ -1,4 +1,4 @@
-// A pattern's header kept out of its text: splitting, joining and editing it, and the Builder's name and length fields.
+// A pattern's header kept out of its text: splitting, joining and editing it, and the Builder's name, summary and length fields.
 import 'package:caw/model/app_state.dart';
 import 'package:caw/model/project.dart';
 import 'package:caw/model/settings.dart';
@@ -34,6 +34,14 @@ void main() {
     expect(editPatternHeader('0 A1 2', 'Riff', setLength: true, bars: 1), '---\ncaw: 1\nkind: pattern\nname: Riff\nlength: 1 bar\n---\n0 A1 2');
   });
 
+  test('the summary is added after the name, rewritten in place and removed when empty (#169)', () {
+    final added = editPatternHeader(_src, 'x', summary: 'Lead line # two bars')!;
+    expect(added, contains('name: Line   # the lead\nsummary: Lead line   two bars\nlength: 2 bars\n'));
+    final changed = editPatternHeader(added, 'x', summary: 'Bass')!;
+    expect(changed, contains('summary: Bass\n'));
+    expect(editPatternHeader(changed, 'x', summary: ''), _src);
+  });
+
   testWidgets("the Builder's text view hides a pattern's header; typing keeps it and the fields edit it", (tester) async {
     final state = AppState(settings: Settings());
     final m = ModuleDoc(id: 'p1', name: 'Line', source: _src);
@@ -52,6 +60,11 @@ void main() {
     await tester.pump();
     expect(m.name, 'Bass');
     expect(m.source, contains('name: Bass'));
+    expect(m.source, endsWith('---\n0 C3 1\n'));
+    await tester.enterText(find.byKey(const ValueKey('pattern summary')), 'The bass line');
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pump();
+    expect(m.source, contains('# the lead\nsummary: The bass line\nlength'));
     expect(m.source, endsWith('---\n0 C3 1\n'));
     await tester.pumpWidget(const SizedBox());
     await tester.pump(const Duration(seconds: 1));
