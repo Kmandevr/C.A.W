@@ -3697,6 +3697,9 @@ void Engine::applyCommands() noexcept {
                     s.instrumentFadeLeft = fadeLen;
                 } else {
                     retire(nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, s.instrument);
+                    // Not sounding: it starts from silence when it first runs, so a Play doesn't take it for an
+                    // instrument still ringing out and mix in a tail of what it never played (playTail).
+                    s.instrumentIdle = next != nullptr;
                 }
                 s.instrument = next;
                 break;
