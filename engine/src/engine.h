@@ -149,6 +149,8 @@ public:
     uint32_t routingRejections() const noexcept { return routingRejections_.load(std::memory_order_relaxed); }
     // Tests only, between process() calls: graph nodes the last chunk ran.
     uint32_t mixGraphNodesRun() const noexcept;
+    // Tests only, between process() calls: slots the per-chunk loops (planning, solo, exports) visit.
+    int slotsScannedPerChunk() const noexcept;
     // Tests only: skip the master DC blocker and limiter so layer output can be checked exactly.
     void setMasterBypass(bool on) { bypass_.store(on, std::memory_order_relaxed); }
 
@@ -181,6 +183,7 @@ private:
                 SlotTable* table = nullptr, ComponentChain* components = nullptr) noexcept;
     void retireEntry(const Retired& r) noexcept;  // audio thread: to the control thread, to be freed
     void bindTable() noexcept;  // audio thread: cache the current table's slots, graph and sizes
+    void markLive(int slot) noexcept;  // audio thread: the slot joins the in-use list the per-chunk loops visit
     int processChunk(float* l, float* r, int maxFrames) noexcept;  // returns the frames it ran
     int planChunk(int maxFrames) noexcept;
     void planTrack(Slot& s, int& m) noexcept;
@@ -252,6 +255,8 @@ private:
     Slot** slots_ = nullptr;      // table_'s slots
     MixGraph* mixGraph_ = nullptr;  // table_'s graph, routed on the audio thread
     int* processOrder_ = nullptr;   // table_'s order list: slots in dependency order (exporters before readers)
+    int* live_ = nullptr;           // table_'s in-use list: liveCount_ slots, ascending (markLive)
+    int liveCount_ = 0;
     int capacity_ = 0;      // layer slots; the audition slot follows them
     int auditionSlot_ = 0;  // == capacity_
     int slotCount_ = 0;     // capacity_ + 1 (layers and the audition)

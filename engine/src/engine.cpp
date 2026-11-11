@@ -48,6 +48,7 @@ struct Engine::Slot {
     // last) gets the new last index from the audio thread when a Grow swaps in a larger table.
     int index = -1;
     bool active = false;
+    bool listed = false;     // in Engine::live_, the slots the per-chunk loops visit (audio thread)
     bool removing = false;
     bool fresh = true;       // the chain has not played yet since it was installed or play started
     bool contiguous = false; // the previous sample was processed, so a seam can crossfade
@@ -652,7 +653,7 @@ struct Engine::MixGraph {
           target(static_cast<size_t>(slots), 0), routable(static_cast<size_t>(slots), 0),
           modules(static_cast<size_t>(slots), 0), pending(static_cast<size_t>(slots) + 1, 0),
           deferred(static_cast<size_t>(slots) + 1, 0), emitted(static_cast<size_t>(slots) + 1, 0),
-          slotOrder(static_cast<size_t>(slots), 0), stack(static_cast<size_t>(slots) + 1, 0), position(static_cast<size_t>(slots) + 1, 0),
+          slotOrder(static_cast<size_t>(slots), 0), stack(static_cast<size_t>(slots) + 1, 0), position(static_cast<size_t>(slots) + 1, UINT32_MAX),
           order(static_cast<size_t>(nodeCount()), 0), edges(static_cast<size_t>(maxEdges()), GraphConnection{}) {
         const int kNodes = nodeCount();
         ids.reserve(kNodes);
@@ -712,16 +713,36 @@ struct Engine::SlotTable {
     int capacity = 0;                // layer slots; slots[capacity] is the audition
     std::unique_ptr<Slot*[]> slots;  // capacity + 1, pointing into Engine::slotStore_
     std::unique_ptr<int[]> processOrder;  // capacity + 1 entries
+    // capacity + 1 entries: the slots in use, ascending (audio thread; Engine::live_). The per-chunk loops
+    // visit only these, so their cost follows the layers in use, not the capacity (#133).
+    std::unique_ptr<int[]> live;
     std::unique_ptr<MixGraph> graph;
 };
 
 uint32_t Engine::mixGraphNodesRun() const noexcept { return mixGraph_->executor.runCount(); }
+int Engine::slotsScannedPerChunk() const noexcept { return liveCount_; }
+
+// Audio thread: slot i joins the in-use list (kept ascending, so loops over it run in index order as
+// the full scans did). It leaves in processChunk once nothing is left for a loop to do there.
+void Engine::markLive(int i) noexcept {
+    Slot& s = slotAt(i);
+    if (s.listed) return;
+    s.listed = true;
+    int k = liveCount_;
+    while (k > 0 && live_[k - 1] > i) {
+        live_[k] = live_[k - 1];
+        --k;
+    }
+    live_[k] = i;
+    ++liveCount_;
+}
 
 void Engine::bindTable() noexcept {
     SlotTable& t = *table_;
     slots_ = t.slots.get();
     mixGraph_ = t.graph.get();
     processOrder_ = t.processOrder.get();
+    live_ = t.live.get();
     capacity_ = t.capacity;
     auditionSlot_ = t.capacity;
     slotCount_ = t.capacity + 1;
@@ -748,6 +769,7 @@ Engine::Engine(double sampleRate, EngineResourceBudget resourceBudget)
     first->capacity = initial;
     first->slots.reset(new Slot*[static_cast<size_t>(initial + 1)]);
     first->processOrder.reset(new int[static_cast<size_t>(initial + 1)]());
+    first->live.reset(new int[static_cast<size_t>(initial + 1)]());
     slotStore_.reserve(static_cast<size_t>(initial + 1));
     for (int s = 0; s <= initial; ++s) {
         slotStore_.push_back(std::make_unique<Slot>());
@@ -773,7 +795,7 @@ Engine::Engine(double sampleRate, EngineResourceBudget resourceBudget)
         const double b = d - 3.0 * q;
         const double a = g1 - b - q;
         const double perSlot = static_cast<double>(sizeof(Slot) + sizeof(std::unique_ptr<Slot>) + sizeof(Slot*) +
-                                                   sizeof(int) + 2 * sizeof(Retired)) +
+                                                   2 * sizeof(int) + 2 * sizeof(Retired)) +
             static_cast<double>(exportPerSlot_) * static_cast<double>(kExportSlotBytes - kExportBufferBytes);
         const double budget = static_cast<double>(resourceBudget_.graphWorkingBytes);
         auto fits = [&](int c) {
@@ -938,6 +960,7 @@ std::string Engine::grow(int capacity) {
         t->capacity = capacity;
         t->slots.reset(new Slot*[static_cast<size_t>(capacity + 1)]);
         t->processOrder.reset(new int[static_cast<size_t>(capacity + 1)]());
+        t->live.reset(new int[static_cast<size_t>(capacity + 1)]());
         for (int s = 0; s < old.capacity; ++s) t->slots[s] = old.slots[s];
         t->slots[capacity] = old.slots[old.capacity];  // the audition; the audio thread sets its index
         slotStore_.reserve(storeBefore + static_cast<size_t>(capacity - old.capacity));
@@ -950,7 +973,7 @@ std::string Engine::grow(int capacity) {
         }
         t->graph.reset(new MixGraph(*this, capacity, sr_, resourceBudget_));
         // The budget holds the old graph and the new one at once (maxLayers() allows for that).
-        const uint64_t perSlot = sizeof(Slot) + sizeof(std::unique_ptr<Slot>) + sizeof(Slot*) + sizeof(int) +
+        const uint64_t perSlot = sizeof(Slot) + sizeof(std::unique_ptr<Slot>) + sizeof(Slot*) + 2 * sizeof(int) +
                                  2 * sizeof(Retired) + exportPerSlot_ * (kExportSlotBytes - kExportBufferBytes);
         const uint64_t peak = static_cast<uint64_t>(old.graph->bytes()) + t->graph->bytes() +
                               perSlot * static_cast<uint64_t>(capacity + 1);
@@ -3050,6 +3073,7 @@ void Engine::applyCommands() noexcept {
                     s.peakL.store(0, std::memory_order_relaxed);  // a reused slot doesn't show its last owner's level
                     s.peakR.store(0, std::memory_order_relaxed);
                     s.active = true;
+                    markLive(c.slot);
                     s.removing = false;
                     s.fresh = true;
                     s.contiguous = false;
@@ -3129,6 +3153,7 @@ void Engine::applyCommands() noexcept {
                 s.peakL.store(0, std::memory_order_relaxed);
                 s.peakR.store(0, std::memory_order_relaxed);
                 s.active = true;
+                markLive(c.slot);
                 s.removing = false;
                 s.bus = true;
                 if (c.flag) {
@@ -3382,6 +3407,8 @@ void Engine::applyCommands() noexcept {
                 SlotTable& t = *c.table;
                 for (int k = 0; k < processCount_; ++k)
                     t.processOrder[k] = processOrder_[k] == auditionSlot_ ? t.capacity : processOrder_[k];
+                for (int k = 0; k < liveCount_; ++k)  // the audition stays last: still ascending
+                    t.live[k] = live_[k] == auditionSlot_ ? t.capacity : live_[k];
                 t.slots[t.capacity]->index = t.capacity;
                 retire(nullptr, nullptr, nullptr, nullptr, nullptr, table_.release());  // freed on the control thread
                 table_.reset(c.table);  // table_ held nothing after release(): no delete here
@@ -3410,8 +3437,11 @@ double Engine::slotTarget(const Slot& s) const noexcept {
 
 void Engine::updateSolo() noexcept {
     bool any = false;
-    for (int i = 0; i < capacity_ && !any; ++i)
+    for (int k = 0; k < liveCount_ && !any; ++k) {
+        const int i = live_[k];
+        if (i >= capacity_) break;  // the audition, always last
         any = slotAt(i).active && !slotAt(i).removing && slotAt(i).solo.load(std::memory_order_relaxed);
+    }
     anySolo_ = any;
 }
 
@@ -3709,8 +3739,8 @@ void Engine::previewCommand(const Cmd& c) noexcept {
 // slot doesn't run, so its previews end at once. Only previewing slots are looked at: no cost when none was played.
 void Engine::updatePreviewing(int frames) noexcept {
     bool any = false;
-    for (int i = 0; i < slotCount_; ++i) {
-        Slot& s = slotAt(i);
+    for (int k = 0; k < liveCount_; ++k) {
+        Slot& s = slotAt(live_[k]);
         if (!s.previewing) continue;
         const bool silent = !s.active || (slotTarget(s) == 0.0 && s.gain == 0.0);
         bool voices = false;
@@ -4344,8 +4374,8 @@ int Engine::planChunk(int maxFrames) noexcept {
     if (previewChunk_) {
         // Stopped, with previews: only the previewing tracks run, with no pattern events and no transport, through
         // their effects, mix, folder buses and master. Swaps and removals wait for playback, as they do while stopped.
-        for (int i = 0; i < slotCount_; ++i) {
-            Slot& s = slotAt(i);
+        for (int k = 0; k < liveCount_; ++k) {
+            Slot& s = slotAt(live_[k]);
             if (!s.active || (!s.bus && !s.cur)) { s.mode = Slot::Mode::Idle; continue; }
             if (s.bus) { s.mode = Slot::Mode::Bus; continue; }
             s.target = slotTarget(s);
@@ -4377,8 +4407,8 @@ int Engine::planChunk(int maxFrames) noexcept {
         }
         return m;
     }
-    for (int i = 0; i < slotCount_; ++i) {
-        Slot& s = slotAt(i);
+    for (int k = 0; k < liveCount_; ++k) {
+        Slot& s = slotAt(live_[k]);
         if (!s.active || (!s.bus && !s.cur)) { s.mode = Slot::Mode::Idle; continue; }
         if (s.bus) { s.mode = Slot::Mode::Bus; continue; }
         s.target = slotTarget(s);
@@ -4436,7 +4466,12 @@ int Engine::planChunk(int maxFrames) noexcept {
 }
 
 int Engine::processChunk(float* l, float* r, int maxFrames) noexcept {
-    for (int i = 0; i < slotCount_; ++i) {
+    // Only slots in use are visited (#133). A slot leaves the list once no loop has anything left to do
+    // for it: inactive, exports cleared, not previewing and planned Idle (the scans it skips would only
+    // set Idle again). Its routing scratch is reset, as updateRouting would have left it.
+    int kept = 0;
+    for (int k = 0; k < liveCount_; ++k) {
+        const int i = live_[k];
         Slot& slot = slotAt(i);
         if (slot.hasExports() && slot.exportCount > 0 &&
             (!slot.active || !slot.cur || (slotTarget(slot) == 0.0 && slot.gain == 0.0))) {
@@ -4444,12 +4479,25 @@ int Engine::processChunk(float* l, float* r, int maxFrames) noexcept {
                 if (slot.exportAt(b)) std::fill_n(slot.exportAt(b)->data(), maxFrames, 0.0);
             if (!slot.active || (!slot.cur && !slot.pending)) slot.exportCount = 0;
         }
+        if (!slot.active && slot.exportCount == 0 && !slot.previewing && slot.mode == Slot::Mode::Idle) {
+            slot.listed = false;
+            MixGraph& g = *mixGraph_;
+            g.routable[i] = 0;
+            g.modules[i] = 0;
+            g.target[i] = -1;
+            g.pending[i] = 0;
+            g.deferred[i] = g.emitted[i] = 0;
+            g.position[i] = UINT32_MAX;
+            continue;
+        }
+        live_[kept++] = i;
     }
+    liveCount_ = kept;
     const int m = planChunk(maxFrames);
     if (previewChunk_)
         // Stopped, a track that isn't previewing exports silence, not the last block it played.
-        for (int i = 0; i < slotCount_; ++i) {
-            Slot& slot = slotAt(i);
+        for (int k = 0; k < liveCount_; ++k) {
+            Slot& slot = slotAt(live_[k]);
             if (slot.mode == Slot::Mode::Play || !slot.hasExports()) continue;
             for (size_t b = 0; b < slot.exportCount; ++b)
                 if (slot.exportAt(b)) std::fill_n(slot.exportAt(b)->data(), m, 0.0);
@@ -4482,7 +4530,10 @@ int Engine::processChunk(float* l, float* r, int maxFrames) noexcept {
 void Engine::updateRouting() noexcept {
     MixGraph& g = *mixGraph_;
     const int master = g.master;
-    for (int i = 0; i < slotCount_; ++i) {
+    // Only slots in use (live_, ascending); the rest are not routable, and processChunk reset their
+    // scratch when they left the list (#133).
+    for (int k = 0; k < liveCount_; ++k) {
+        const int i = live_[k];
         const Slot& s = slotAt(i);
         int to = -1, modules = 0;
         bool routable = s.active && (s.bus || s.cur);
@@ -4517,8 +4568,13 @@ void Engine::updateRouting() noexcept {
         if (r.key < 0 ? !d.bus : !d.inserts) return -1;
         return r.dest;
     };
-    for (int n = 0; n <= slotCount_; ++n) { g.pending[n] = 0; g.deferred[n] = false; g.emitted[n] = false; }
-    for (int i = 0; i < slotCount_; ++i) {
+    for (int k = 0; k < liveCount_; ++k) {
+        const int n = live_[k];
+        g.pending[n] = 0; g.deferred[n] = false; g.emitted[n] = false;
+    }
+    g.pending[master] = 0; g.deferred[master] = false; g.emitted[master] = false;
+    for (int k = 0; k < liveCount_; ++k) {
+        const int i = live_[k];
         if (!g.routable[i]) continue;
         if (g.target[i] >= 0 && g.target[i] != master) ++g.pending[g.target[i]];
         const Slot& s = slotAt(i);
@@ -4552,15 +4608,17 @@ void Engine::updateRouting() noexcept {
         emit(x);
     };
     for (int k = 0; k < processCount_; ++k) visit(processOrder_[k]);
-    for (int k = 0; k < slotCount_; ++k) visit(k);
+    for (int k = 0; k < liveCount_; ++k) visit(live_[k]);
     // A routing cycle is never sent by the control thread; if one appears, keep everything ordered
     // and drop the edges and routes that would point backwards.
-    for (int k = 0; k < slotCount_; ++k)
-        if (g.routable[k] && !g.emitted[k]) { g.emitted[k] = true; g.slotOrder[count++] = k; }
-    for (int n = 0; n <= slotCount_; ++n) g.position[n] = UINT32_MAX;  // not run this chunk
+    for (int j = 0; j < liveCount_; ++j)
+        if (const int k = live_[j]; g.routable[k] && !g.emitted[k]) { g.emitted[k] = true; g.slotOrder[count++] = k; }
+    for (int j = 0; j < liveCount_; ++j) g.position[live_[j]] = UINT32_MAX;  // not run this chunk
+    g.position[master] = UINT32_MAX;
     for (int k = 0; k < count; ++k) g.position[g.slotOrder[k]] = static_cast<uint32_t>(k);
     g.position[master] = static_cast<uint32_t>(count);
-    for (int i = 0; i < slotCount_; ++i) {
+    for (int j = 0; j < liveCount_; ++j) {
+        const int i = live_[j];
         Slot& s = slotAt(i);
         if (!s.sends) continue;
         for (int k = 0; k < s.sends->count; ++k) {
@@ -5231,7 +5289,8 @@ void Engine::runMasterNode(const float* inL, const float* inR, float* outL, floa
 
 void Engine::pickOverloadVictim() noexcept {
     int best = -1;
-    for (int i = 0; i < slotCount_; ++i) {
+    for (int k = 0; k < liveCount_; ++k) {
+        const int i = live_[k];
         const Slot& s = slotAt(i);
         if (!s.active || s.overloaded || slotTarget(s) == 0.0) continue;
         if (best < 0 || s.order > slotAt(best).order) best = i;

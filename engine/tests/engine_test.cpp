@@ -1872,6 +1872,45 @@ TEST(engine_play_with_more_than_640_layers_retires_every_chain_without_stalling)
     CHECK_EQ(e.routingRejections(), 0u);
 }
 
+TEST(engine_per_chunk_work_follows_the_layers_in_use_not_the_capacity) {
+    // #133 item 2: capacity never shrinks, so after a 700-layer project the per-chunk loops
+    // (planning, solo, export clearing, routing) must visit only the slots in use, and sound the same.
+    HardwareProfile hardware;
+    hardware.memoryBudgetMiB = 1024;
+    Engine e(48000, makeEngineResourceBudget(hardware));
+    Engine fresh(48000, makeEngineResourceBudget(hardware));
+    e.setMasterBypass(true);
+    fresh.setMasterBypass(true);
+    std::vector<float> l(64), r(64);
+    auto apply = [&](Engine& to, const ProjectSpec& p) {
+        std::atomic<bool> done{false};
+        std::string result;
+        std::thread control([&] {
+            result = to.setProject(p);
+            done.store(true);
+        });
+        while (!done.load()) to.process(l.data(), r.data(), 0);
+        control.join();
+        to.process(l.data(), r.data(), 0);
+        return result;
+    };
+    const std::string tone = std::string(kFloat) + "sine(220) * 0.01";
+    CHECK(apply(e, layersOf(700, tone, 0.0)).find("\"ok\":true") != std::string::npos);  // silent: removed at once
+    CHECK(e.layerCapacity() >= 700);
+    CHECK(apply(e, layersOf(4, tone)).find("\"ok\":true") != std::string::npos);
+    CHECK(apply(fresh, layersOf(4, tone)).find("\"ok\":true") != std::string::npos);
+    e.play();
+    fresh.play();
+    std::vector<float> er, fr;
+    const auto el = run(e, 4800, 64, &er);
+    const auto fl = run(fresh, 4800, 64, &fr);
+    CHECK(el == fl);
+    CHECK(er == fr);
+    CHECK(e.slotsScannedPerChunk() <= 5);  // the 4 layers (and at most the audition)
+    CHECK_EQ(e.slotsScannedPerChunk(), fresh.slotsScannedPerChunk());
+    CHECK_EQ(e.routingRejections(), 0u);
+}
+
 TEST(engine_export_buffers_stay_valid_across_a_grow) {
     ProjectSpec p;
     p.bpm = 120;
