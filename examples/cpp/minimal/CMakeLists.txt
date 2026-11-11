@@ -16,6 +16,13 @@ if(CAW_BUILD_CLAP)
     OUTPUT_NAME caw-minimal VENDOR "C.A.W examples" VERSION "1.0.0")
 endif()
 
+# And as a VST3 plug-in (the caw-minimal.vst3 bundle next to the library); fetches the VST3 interface headers.
+option(CAW_BUILD_VST3 "Also build the component as a VST3 plug-in" OFF)
+if(CAW_BUILD_VST3)
+  caw_add_vst3_plugin(TARGET caw_minimal_vst3 COMPONENT caw_minimal_component
+    OUTPUT_NAME caw-minimal VENDOR "C.A.W examples" VERSION "1.0.0")
+endif()
+
 include(CTest)
 if(BUILD_TESTING AND NOT ANDROID)
   add_executable(caw_component_contract_test
