@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 
 import '../model/app_state.dart';
 import '../model/files_catalog.dart';
+import '../model/user_presets.dart';
 import 'frame/frame_widgets.dart' show AwakeListenableBuilder, ScrollFade;
 import 'files/asset_actions.dart';
 import 'files/asset_inspector.dart';
@@ -377,6 +378,8 @@ class _FileManagerScreenState extends State<FileManagerScreen> {
       FilesFolderKind.builtin => 'Built-in effects appear once the engine is running.',
       FilesFolderKind.cppEffects || FilesFolderKind.cppList => 'No C++ effects yet. Hold this folder or tap + for a new one.',
       FilesFolderKind.patterns => 'No patterns yet. Tap + for a new one.',
+      FilesFolderKind.presets => 'Your presets show here: Save preset… in a device, or Save track preset… in its ⋯ '
+          'menu. Drag one onto a track, or onto the empty area for a new track.',
       FilesFolderKind.midiFiles => 'Imported MIDI files show here (⋯ › Import MIDI file as clips); drag one onto a track.',
       _ => 'This folder is empty.',
     };
@@ -447,7 +450,7 @@ class _FileManagerScreenState extends State<FileManagerScreen> {
   @override
   // Asleep while Files is behind another section (frame_widgets.dart).
   Widget build(BuildContext context) => AwakeListenableBuilder(
-        listenable: state,
+        listenable: Listenable.merge([state, state.userPresets]),
         builder: (context, _) => LayoutBuilder(builder: (context, c) {
           // A small docked panel in a landscape window still uses the drawer: the tree needs room beside the grid.
           final wide = !widget.explorer && (c.maxWidth > c.maxHeight || c.maxWidth >= 900) && c.maxWidth >= 560;

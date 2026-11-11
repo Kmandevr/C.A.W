@@ -57,9 +57,42 @@ public:
         return {v2, v1, x - k_ * v1 - v2, x - k_ * v1};
     }
     double lowpass(double x) noexcept { return process(x).low; }
+    // The low-pass of a stereo pair whose right side was set like this one (setLike): both sides in one loop,
+    // laid out side by side so the compiler runs them as one two-wide vector (each side's arithmetic is
+    // lowpass()'s, so the bits are the same).
+    void lowpassPair(Svf& right, float* l, float* r, uint32_t frames) noexcept {
+#if defined(__GNUC__)  // GCC and Clang (the Android, Linux and Windows-Clang builds): a two-wide vector, SSE2 or NEON
+        typedef double Pair __attribute__((vector_size(16)));
+        Pair s1 = {ic1_, right.ic1_}, s2 = {ic2_, right.ic2_};
+        const Pair a1 = {a1_, a1_}, a2 = {a2_, a2_}, a3 = {a3_, a3_}, zero = {0.0, 0.0}, two = {2.0, 2.0};
+        for (uint32_t i = 0; i < frames; ++i) {
+            Pair x = {static_cast<double>(l[i]), static_cast<double>(r[i])};
+            x = x - x == zero ? x : zero;  // finiteOr0
+            const Pair v3 = x - s2;
+            const Pair v1 = a1 * s1 + a2 * v3;
+            const Pair v2 = s2 + a2 * s1 + a3 * v3;
+            s1 = two * v1 - s1;
+            s2 = two * v2 - s2;
+            l[i] = static_cast<float>(v2[0]);
+            r[i] = static_cast<float>(v2[1]);
+        }
+        ic1_ = s1[0], right.ic1_ = s1[1], ic2_ = s2[0], right.ic2_ = s2[1];
+#else
+        for (uint32_t i = 0; i < frames; ++i) {
+            l[i] = static_cast<float>(lowpass(static_cast<double>(l[i])));
+            r[i] = static_cast<float>(right.lowpass(static_cast<double>(r[i])));
+        }
+#endif
+    }
     double highpass(double x) noexcept { return process(x).high; }
     double bandpass(double x) noexcept { return process(x).band; }
     void clear() noexcept { ic1_ = ic2_ = 0.0; }
+    // A silent input decays the state into subnormal numbers (slow on many CPUs): a caller whose input may be
+    // silent flushes it with this once per block.
+    void flushDenormals() noexcept {
+        if (ic1_ < 1e-20 && ic1_ > -1e-20) ic1_ = 0.0;
+        if (ic2_ < 1e-20 && ic2_ > -1e-20) ic2_ = 0.0;
+    }
     // Takes another filter's coefficients (no tan): the second side of a stereo pair set like the first.
     void setLike(const Svf& other) noexcept {
         a1_ = other.a1_, a2_ = other.a2_, a3_ = other.a3_, k_ = other.k_;

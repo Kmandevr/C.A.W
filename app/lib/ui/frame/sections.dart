@@ -116,6 +116,8 @@ enum AssetKind {
   cawModule,    // a project .caw module, by module id
   pattern,      // a MIDI pattern source, by module id
   midiFile,     // an imported MIDI file (its parts are patterns), by MidiFileDoc id
+  devicePreset, // a user device preset (a component with its values), by preset id
+  trackPreset,  // a user track preset (an instrument and effects), by preset id
 }
 
 @immutable
