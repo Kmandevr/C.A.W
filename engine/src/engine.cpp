@@ -135,6 +135,7 @@ struct Engine::Slot {
     bool seam = false;          // the shadow lane finishes the previous pass this chunk
     bool fade = false;          // the replaced chain plays on in the fade lane this chunk
     bool previewing = false;    // audio thread: the chain holds a preview voice, or its sound is still dying away
+    DeviceNotes deviceNotes;    // audio thread: the device MIDI channels' bend and pedal (API 11)
     int64_t previewQuiet = 0;   // samples the track's output has been below kPreviewQuiet
     int64_t previewTail = 0;    // samples since its last preview voice ended
     int64_t previewN = 0;       // stopped: the sample in the layer's loop that preview chunks run from
@@ -791,6 +792,7 @@ Engine::Engine(double sampleRate, EngineResourceBudget resourceBudget)
       retired_(new Spsc<Retired, 1024>()),
       masterScope_(new std::atomic<float>[kScopeSize]) {
     for (int i = 0; i < kScopeSize; ++i) masterScope_[i].store(0);
+    midiPending_.reset(new PendingMidi[Midi2InputQueue::kCapacity]);
     registerBuiltinComponents(nativeModules_);  // the Library's stereo tools, ready in every chain
     ctlSr_ = sampleRate;
     constexpr int initial = kInitialLayerCapacity;
@@ -2742,6 +2744,121 @@ void Engine::notesOff() {
     if (send(c)) previewSlots_.clear();
 }
 
+// ---- Device MIDI (API 11) ----
+
+int64_t Engine::midiClockNs() noexcept {
+    return std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now().time_since_epoch())
+        .count();
+}
+
+bool Engine::queueDeviceMidi(int slot, Midi2Event e, int64_t timeNs) noexcept {
+    e.target = slot;
+    e.timeNs = timeNs;
+    return midiIn_.push(e);
+}
+
+// The layer's slot, or -1. Briefly under ctl_, as a preview's note on.
+int Engine::deviceSlot(const std::string& id) {
+    std::lock_guard<std::mutex> lock(ctl_);
+    if (id.empty() || id[0] == '\x01') return -1;
+    auto it = layers_.find(id);
+    return it == layers_.end() ? -1 : it->second.slot;
+}
+
+int Engine::midiUmp(const std::string& layerId, const uint32_t* words, int count, int64_t timeNs) {
+    if (!words || count <= 0) return 0;
+    const int slot = deviceSlot(layerId);
+    if (slot < 0) return 0;
+    if (timeNs <= 0) timeNs = midiClockNs();
+    std::lock_guard<std::mutex> lock(midiPush_);
+    int queued = 0;
+    for (int i = 0; i < count;) {
+        const int n = umpWordCount(words[i]);
+        if (i + n > count) break;  // a message cut short
+        uint32_t w[2] = {words[i], n > 1 ? words[i + 1] : 0u};
+        i += n;
+        if ((w[0] >> 28) == 0x2 && !ump1ToUmp2(w[0], w)) continue;
+        Midi2Event e;
+        if (!decodeMidi2ChannelVoice(w[0], w[1], e)) continue;  // utility, system, SysEx, flex data: not for notes
+        e.ump[0] = w[0];
+        e.ump[1] = w[1];
+        if (queueDeviceMidi(slot, e, timeNs)) ++queued;
+    }
+    return queued;
+}
+
+int Engine::midiBytes(const std::string& layerId, const uint8_t* bytes, int count, int64_t timeNs) {
+    if (!bytes || count <= 0) return 0;
+    const int slot = deviceSlot(layerId);
+    if (slot < 0) return 0;
+    if (timeNs <= 0) timeNs = midiClockNs();
+    std::lock_guard<std::mutex> lock(midiPush_);
+    int queued = 0;
+    uint8_t status = 0;  // running status within this call
+    for (int i = 0; i < count;) {
+        const uint8_t b = bytes[i];
+        if (b >= 0xF8) { ++i; continue; }  // real-time bytes may come anywhere
+        if (b >= 0xF0) {  // system common and SysEx: skipped up to the next status byte
+            status = 0;
+            ++i;
+            while (i < count && bytes[i] < 0x80) ++i;
+            continue;
+        }
+        if (b >= 0x80) {
+            status = b;
+            ++i;
+        } else if (status == 0) {
+            ++i;
+            continue;
+        }
+        const int need = midi1DataBytes(status);
+        if (i + need > count) break;
+        const uint8_t d1 = need > 0 ? bytes[i] : 0, d2 = need > 1 ? bytes[i + 1] : 0;
+        if (d1 >= 0x80 || d2 >= 0x80) continue;  // a status byte arrived early: start again from it
+        i += need;
+        uint32_t w[2];
+        Midi2Event e;
+        if (!midi1ToUmp2(status, d1, d2, 0, w) || !decodeMidi2ChannelVoice(w[0], w[1], e)) continue;
+        e.ump[0] = w[0];
+        e.ump[1] = w[1];
+        if (queueDeviceMidi(slot, e, timeNs)) ++queued;
+    }
+    return queued;
+}
+
+void Engine::midiRelease(const std::string& layerId) {
+    int slot = -1;
+    if (!layerId.empty()) {
+        slot = deviceSlot(layerId);
+        if (slot < 0) return;
+    }
+    Midi2Event e;
+    e.type = Midi2EventType::AllOff;
+    std::lock_guard<std::mutex> lock(midiPush_);
+    queueDeviceMidi(slot, e, midiClockNs());  // slot -1: every slot
+}
+
+void Engine::setMidiOptions(bool mpe, double bendRange, double noteBendRange, double delayMs) noexcept {
+    auto clampD = [](double v, double lo, double hi, double fallback) {
+        return std::isfinite(v) ? std::clamp(v, lo, hi) : fallback;
+    };
+    midiMpe_.store(mpe, std::memory_order_relaxed);
+    midiBendRange_.store(clampD(bendRange, 0, 96, 2), std::memory_order_relaxed);
+    midiNoteBendRange_.store(clampD(noteBendRange, 0, 96, 48), std::memory_order_relaxed);
+    midiDelayNs_.store(static_cast<int64_t>(clampD(delayMs, 0, 200, 0) * 1e6), std::memory_order_relaxed);
+}
+
+uint64_t Engine::midiDropped() const noexcept {
+    return midiIn_.dropped() + midiPendingDropped_.load(std::memory_order_relaxed);
+}
+
+int64_t Engine::positionAt(int64_t timeNs) const noexcept {
+    const int64_t pos = cbPos_.load(std::memory_order_acquire);
+    if (pos < 0) return -1;
+    const int64_t at = cbTimeNs_.load(std::memory_order_acquire);
+    return pos + static_cast<int64_t>(std::floor(static_cast<double>(timeNs - at) * sr_ / 1e9));
+}
+
 void Engine::setMaster(double volume) {
     std::lock_guard<std::mutex> lock(ctl_);
     Cmd c;
@@ -3768,6 +3885,102 @@ void Engine::restartChain(Chain& c) noexcept {
 
 // Note previews (#103) on the audio thread: a preview takes a voice like a pattern note, with no expression, and
 // holds it until its note off.
+// Callback start: device messages from the queue join the ones a past callback kept for later, and each gets its
+// frame in this callback. A message for a track that is not running wakes it as a preview does, so a key played
+// while stopped is heard. A .caw voice chain (no native instrument) takes notes as previews, at the block's start.
+void Engine::takeDeviceMidi(int frames) noexcept {
+    const int64_t test = midiClockTest_.load(std::memory_order_relaxed);
+    const int64_t now = test >= 0 ? test : midiClockNs();
+    cbTimeNs_.store(now, std::memory_order_relaxed);
+    cbPos_.store(playing_ ? g_ : -1, std::memory_order_release);
+    midiChunkFrom_ = 0;
+    Midi2Event e;
+    while (midiIn_.pop(e)) {
+        if (midiPendingCount_ == Midi2InputQueue::kCapacity) {
+            midiPendingDropped_.fetch_add(1, std::memory_order_relaxed);
+            continue;
+        }
+        PendingMidi& p = midiPending_[midiPendingCount_++];
+        p.e = e;
+        p.done = false;
+    }
+    if (midiPendingCount_ == 0) return;
+    const int64_t delay = midiDelayNs_.load(std::memory_order_relaxed);
+    for (uint32_t k = 0; k < midiPendingCount_; ++k) {
+        PendingMidi& p = midiPending_[k];
+        if (p.e.type == Midi2EventType::AllOff) {  // at once, whatever its time
+            const DeviceMidiOptions o{};
+            for (int i = 0; i < slotCount_; ++i) {
+                if (p.e.target >= 0 && i != p.e.target) continue;
+                Slot& s = slotAt(i);
+                if (s.instrument) s.deviceNotes.apply(*s.instrument->notes(), p.e, 0, o);  // its notes, then reset
+                else s.deviceNotes.reset();
+                if (s.cur && s.cur->voiced)
+                    for (Voice& v : s.cur->voices)
+                        if (v.active && v.gate && isDevicePreview(v.preview)) v.gate = false, v.rel = v.quiet = 0;
+            }
+            p.done = true;
+            continue;
+        }
+        p.frame = deviceMidiFrame(p.e.timeNs, now, frames, sr_, delay);
+        if (p.frame >= frames) continue;  // a later callback's
+        if (p.e.target < 0 || p.e.target >= slotCount_) {
+            p.done = true;
+            continue;
+        }
+        Slot& s = slotAt(p.e.target);
+        if (!s.active || !s.cur) {
+            p.done = true;
+            continue;
+        }
+        const bool on = p.e.type == Midi2EventType::NoteOn;
+        if (!s.instrument) {  // a .caw voice chain: notes only, as previews
+            p.done = true;
+            if (!s.cur->voiced || (!on && p.e.type != Midi2EventType::NoteOff)) continue;
+            Cmd c;
+            c.type = Cmd::Preview;
+            c.previewOp = on ? 0 : 2;
+            c.slot = p.e.target;
+            c.previewId = devicePreviewId(p.e.group, p.e.channel, p.e.note);
+            c.pitch = p.e.note;
+            c.vel = p.e.value;
+            previewCommand(c);
+            continue;
+        }
+        if (on && !s.previewing) {
+            s.previewing = true;
+            s.previewQuiet = s.previewTail = 0;
+            markLive(p.e.target);
+        }
+        if (on) previewing_ = true;
+    }
+}
+
+// The chunk's device messages for s (and any earlier one it did not run for), at their frames in it.
+void Engine::feedDeviceMidi(Slot& s, NoteEvents& notes, int m) noexcept {
+    const DeviceMidiOptions o{midiMpe_.load(std::memory_order_relaxed), midiBendRange_.load(std::memory_order_relaxed),
+                              midiNoteBendRange_.load(std::memory_order_relaxed)};
+    const int64_t end = midiChunkFrom_ + m;
+    for (uint32_t k = 0; k < midiPendingCount_; ++k) {
+        PendingMidi& p = midiPending_[k];
+        if (p.done || p.e.target != s.index || p.frame >= end) continue;
+        const int64_t at = p.frame - midiChunkFrom_;
+        s.deviceNotes.apply(notes, p.e, static_cast<uint32_t>(at < 0 ? 0 : at), o);
+        p.done = true;
+    }
+}
+
+// Callback end: messages for later callbacks stay; delivered ones, and ones for a track that did not run, go.
+void Engine::endDeviceMidi(int frames) noexcept {
+    uint32_t keep = 0;
+    for (uint32_t k = 0; k < midiPendingCount_; ++k) {
+        const PendingMidi& p = midiPending_[k];
+        if (p.done || p.frame < frames) continue;
+        midiPending_[keep++] = p;
+    }
+    midiPendingCount_ = keep;
+}
+
 void Engine::previewCommand(const Cmd& c) noexcept {
     auto release = [](Voice& v) {
         v.gate = false;
@@ -3776,10 +3989,11 @@ void Engine::previewCommand(const Cmd& c) noexcept {
     if (c.previewOp == 3) {
         for (int i = 0; i < slotCount_; ++i) {
             Slot& s = slotAt(i);
-            if (s.instrument) s.instrument->notes()->releasePreviews(0);
+            // The app's previews only: a device's held keys stay (caw_engine_midi_release ends those).
+            if (s.instrument) s.instrument->notes()->releasePreviews(0, kDevicePreviewBase);
             if (!s.cur || !s.cur->voiced) continue;
             for (Voice& v : s.cur->voices)
-                if (v.active && v.gate && v.preview >= 0) release(v);
+                if (v.active && v.gate && v.preview >= 0 && !isDevicePreview(v.preview)) release(v);
         }
         return;
     }
@@ -4237,6 +4451,7 @@ void Engine::runInstrument(Slot& s, int m) noexcept {
     if (s.instrument) {
         NoteEvents& notes = *s.instrument->notes();
         if (!previewChunk_) instrumentNotes(s, notes, m);
+        if (midiPendingCount_ > 0) feedDeviceMidi(s, notes, m);
         instrumentMotion(notes, m);
         s.instrument->process(s.instL, s.instR, static_cast<uint32_t>(m), sr_, &time);
     } else {
@@ -5476,6 +5691,7 @@ void Engine::process(float* left, float* right, int frames) noexcept {
     updateSolo();
     applyCommands();
     updateSolo();
+    takeDeviceMidi(frames);
     takeToneRequest();
     if (overloadPending_) {
         overloadPending_ = false;
@@ -5490,6 +5706,7 @@ void Engine::process(float* left, float* right, int frames) noexcept {
             int done = m;
             if (previewing_) {
                 previewChunk_ = true;
+                midiChunkFrom_ = i;
                 done = processChunk(left + i, right + i, m);
                 previewChunk_ = false;
             } else {
@@ -5521,6 +5738,7 @@ void Engine::process(float* left, float* right, int frames) noexcept {
             }
             // Stopped with previews: they play, the transport stays where it is.
             previewChunk_ = true;
+            midiChunkFrom_ = i;
             const int m = processChunk(left + i, right + i, std::min(frames - i, kBlock));
             previewChunk_ = false;
             i += m;
@@ -5529,6 +5747,7 @@ void Engine::process(float* left, float* right, int frames) noexcept {
         // The song loops at its end, or at the loop range's end while that is on (and before it).
         const int64_t wrap = wrapAt();
         const int maxM = static_cast<int>(std::min<int64_t>({static_cast<int64_t>(frames - i), kBlock, wrap - g_}));
+        midiChunkFrom_ = i;
         const int m = processChunk(left + i, right + i, maxM);
         if (stopEnded_) {
             stopEnded_ = false;
@@ -5541,6 +5760,7 @@ void Engine::process(float* left, float* right, int frames) noexcept {
         }
         i += m;
     }
+    if (midiPendingCount_ > 0) endDeviceMidi(frames);
     if (previewing_) updatePreviewing(frames);
     toneActive_.store(toneLeft_ > 0, std::memory_order_release);
     playingFlag_.store(playing_, std::memory_order_relaxed);
