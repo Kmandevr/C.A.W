@@ -1,5 +1,8 @@
 // The built-in effects suite (#173): the shared EffectBase (control grid, sleep, display) and registration.
 #include "builtin_effects.h"
+// fx-filters begin
+#include "builtin_fx_filters.h"
+// fx-filters end
 
 #include <algorithm>
 
@@ -157,6 +160,9 @@ void registerBuiltinEffects(ModuleRegistry& registry) {
     fx::registerSaturator(registry);
     fx::registerKit(registry);
     fx::registerDucker(registry);
+    // fx-filters begin
+    fx::registerFilters(registry);
+    // fx-filters end
 }
 
 }  // namespace caw

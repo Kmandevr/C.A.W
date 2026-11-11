@@ -6,6 +6,9 @@
 #include <deque>
 
 #include "builtin_flagship.h"
+// fx-filters begin
+#include "builtin_fx_filters.h"
+// fx-filters end
 #include "json.h"
 
 namespace caw {
@@ -251,6 +254,9 @@ std::string number(double v) {
 const std::vector<BuiltinPreset>& builtinPresets(std::string_view componentId) {
     if (componentId == kFlagship) return flagshipPresets();
     if (componentId == "org.caw.ducker") return duckerPresets();
+    // fx-filters begin
+    if (const auto* p = fx::filtersPresets(componentId)) return *p;
+    // fx-filters end
     return kNone;
 }
 
