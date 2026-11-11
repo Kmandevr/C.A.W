@@ -11,6 +11,7 @@ import '../../model/cpp_completion.dart';
 import '../../model/cpp_diagnostics.dart';
 import '../../model/cpp_versions.dart';
 import '../../model/cpp_workbench.dart';
+import '../../model/plugin_pipeline.dart';
 import '../feedback.dart';
 import '../frame/sections.dart';
 import '../glass.dart';
@@ -22,10 +23,7 @@ import 'code_style.dart';
 import 'cpp_library.dart';
 import 'key_row.dart';
 import 'panels.dart';
-import 'plugin_export_screen.dart';
-import 'sample_pack_screen.dart';
-import 'test_suite_screen.dart';
-import 'tool_kit.dart';
+import 'plugin_screen.dart';
 import '../adaptive_sheet.dart';
 
 /// One file's editor state, kept with its session so undo survives switching tabs and files.
@@ -325,21 +323,16 @@ class CppEditorState extends State<CppEditor> {
 
   Future<void> runBuild() async {
     _closeCompletion();
-    final ok = await w.build();
-    if (ok || !mounted) return;
-    final trust = await showDialog<bool>(
-      context: context,
-      builder: (c) => AlertDialog(
-        title: const Text('Native code from elsewhere'),
-        content: const Text('This effect came with the project, not from this device. Building runs it in the app '
-            'as trusted code. Trust it and treat your edits as your own?'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Cancel')),
-          TextButton(onPressed: () => Navigator.pop(c, true), child: const Text('Trust and build')),
-        ],
-      ),
-    );
-    if (trust == true) await w.build(trustConfirmed: true);
+    await buildWithTrust(context, w);
+  }
+
+  /// The component's plug-in page (Write → Build → Test → Export); its errors come back here at their line.
+  void openPlugin() {
+    _closeCompletion();
+    Haptics.tap();
+    unawaited(openPluginPage(context, w, onOpenCode: (d) {
+      if (d != null && mounted) jumpTo(d);
+    }));
   }
 
   // ---------- sheets ----------
@@ -657,7 +650,7 @@ class CppEditorState extends State<CppEditor> {
   }
 
   /// The top row: Build's tabs (or the file's name), the side-panel toggle when wide, and ▶ Build.
-  Widget _topRow({required bool wide, required bool side}) {
+  Widget _topRow({required bool wide, required bool side, required double width}) {
     return SizedBox(
       height: 36,
       child: Row(children: [
@@ -673,6 +666,7 @@ class CppEditorState extends State<CppEditor> {
           _iconAction('side panel', side ? Icons.vertical_split : Icons.vertical_split_outlined,
               side ? 'Hide Problems and Library' : 'Show Problems and Library', () => setState(() => _side = !side),
               color: side ? Neon.blue : null),
+        _PluginButton(workbench: w, labelled: width >= 360, onOpen: openPlugin),
         Padding(padding: const EdgeInsets.only(left: 2, right: 4), child: _BuildButton(phase: w.phase, onBuild: runBuild)),
       ]),
     );
@@ -771,7 +765,7 @@ class CppEditorState extends State<CppEditor> {
           height: 28,
           child: PopupMenuButton<void Function()>(
             key: const ValueKey('more'),
-            tooltip: 'Snippets, ♪ Test and the Build tools',
+            tooltip: 'Snippets, ♪ Test and the plug-in page',
             padding: EdgeInsets.zero,
             iconSize: 16,
             icon: const Icon(Icons.more_vert, color: Neon.dim),
@@ -783,16 +777,8 @@ class CppEditorState extends State<CppEditor> {
               PopupMenuItem(key: const ValueKey('bar test'), height: 34, value: _showTest,
                   child: const Text('♪ Test: play it with knobs', style: TextStyle(fontSize: 13))),
               const PopupMenuDivider(),
-              PopupMenuItem(key: const ValueKey('bar test suite'), height: 34,
-                  value: () => openToolPage(context, TestSuiteScreen(workbench: w)),
-                  child: const Text('Test suite…', style: TextStyle(fontSize: 13))),
-              if (w.isInstrument)
-                PopupMenuItem(key: const ValueKey('bar sample pack'), height: 34,
-                    value: () => openSamplePackMaker(context, w.state, instrumentId: w.componentId),
-                    child: const Text('Make sample pack…', style: TextStyle(fontSize: 13))),
-              PopupMenuItem(key: const ValueKey('bar export plugin'), height: 34,
-                  value: () => openToolPage(context, PluginExportScreen(workbench: w)),
-                  child: const Text('Export as plug-in…', style: TextStyle(fontSize: 13))),
+              PopupMenuItem(key: const ValueKey('bar plugin'), height: 34, value: openPlugin,
+                  child: const Text('Plug-in: build, test, export…', style: TextStyle(fontSize: 13))),
             ],
           ),
         ),
@@ -872,7 +858,7 @@ class CppEditorState extends State<CppEditor> {
       final wide = mq.size.width > mq.size.height && box.maxWidth >= 600;
       final side = wide && (_side ?? box.maxWidth >= 1100);
       final column = Column(children: [
-        _topRow(wide: wide, side: side),
+        _topRow(wide: wide, side: side, width: box.maxWidth),
         _crumbRow(wide: wide, side: side, width: box.maxWidth),
         Expanded(child: _editor()),
         if (keyboard) CodeEditorTapRegion(child: CodeKeyRow(target: _target, onChanged: () => setState(() {}))),
@@ -1084,6 +1070,47 @@ class _HintPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(_HintPainter old) => true;
+}
+
+/// The plug-in page's button beside ▶ Build: "Plug-in" with a dot in the colour of the pipeline's furthest step
+/// (green once tested, yellow when out of date or to check, pink on a failure).
+class _PluginButton extends StatelessWidget {
+  const _PluginButton({required this.workbench, required this.labelled, required this.onOpen});
+  final CppWorkbench workbench;
+  final bool labelled;
+  final VoidCallback onOpen;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = PluginPipeline(workbench);
+    final steps = p.steps;
+    final failed = steps.where((s) => s.state == PluginStepState.failed).firstOrNull;
+    final stale = steps.where((s) => s.state == PluginStepState.outdated).firstOrNull;
+    final dot = failed != null
+        ? Neon.pink
+        : stale != null ? Neon.yellow : (p.testedOk ? Neon.green : Neon.dim);
+    final icon = Stack(clipBehavior: Clip.none, children: [
+      const Icon(Icons.extension_outlined, size: 16, color: Neon.violet),
+      Positioned(right: -2, top: -2, child: Container(width: 6, height: 6,
+          decoration: BoxDecoration(shape: BoxShape.circle, color: dot))),
+    ]);
+    return Tooltip(
+      message: 'Plug-in: build, test and export ${workbench.name}',
+      child: SizedBox(
+        height: 30,
+        child: labelled
+            ? TextButton.icon(
+                key: const ValueKey('plugin-page'),
+                style: TextButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 8), minimumSize: const Size(0, 30),
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap),
+                onPressed: onOpen,
+                icon: icon,
+                label: Text('Plug-in', style: Neon.code(size: 12, color: Neon.violet)))
+            : IconButton(key: const ValueKey('plugin-page'), onPressed: onOpen, icon: icon, padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(minWidth: 34, minHeight: 30)),
+      ),
+    );
+  }
 }
 
 /// ▶ Build, labelled: a ring while building, green with a check once built and unchanged since.

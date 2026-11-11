@@ -101,6 +101,28 @@ class TestSuiteResult {
       ? ToolStatus.fail
       : cards.any((c) => c.status == ToolStatus.warn) ? ToolStatus.warn : ToolStatus.pass;
 
+  /// The verdict the plug-in page shows (a run that couldn't start fails).
+  PluginCheck get verdict => !ok
+      ? PluginCheck.fail
+      : switch (overall) {
+          ToolStatus.fail => PluginCheck.fail,
+          ToolStatus.warn => PluginCheck.warn,
+          _ => PluginCheck.pass,
+        };
+
+  /// One line for the plug-in page: the verdict and how many thresholds pass.
+  String get summary {
+    if (!ok) return 'Could not run: ${error.split('\n').first}';
+    final thresholds = cards.where((c) => c.title == 'Thresholds').firstOrNull;
+    final passed = thresholds?.lines.where((l) => l.$1.startsWith('✓')).length;
+    final head = switch (overall) {
+      ToolStatus.pass => 'All checks pass',
+      ToolStatus.warn => 'Passes, with things to check',
+      _ => 'Something failed',
+    };
+    return thresholds == null ? head : '$head · $passed of ${thresholds.lines.length} thresholds pass';
+  }
+
   static String db(Object? v) => v is num ? '${v >= 0 ? '+' : ''}${v.toStringAsFixed(1)} dB' : '−∞';
   static List<(double, double)> _bands(Object? o) => [
         for (final b in ((o as Map?)?['bands'] as List? ?? const []))
@@ -256,7 +278,7 @@ class TestSuiteResult {
 }
 
 /// The testing suite for the open C++ component: pick a signal and the comparisons, Run, and read the cards. Reach it
-/// from the C++ editor's ⋯ menu ("Test suite…").
+/// from the component's plug-in page (its Test step).
 class TestSuiteScreen extends StatefulWidget {
   const TestSuiteScreen({super.key, required this.workbench, this.backend});
   final CppWorkbench workbench;
@@ -347,12 +369,17 @@ class _TestSuiteScreenState extends State<TestSuiteScreen> {
           : null;
       if (!mounted) return;
       result.ok ? Haptics.threshold() : Haptics.error();
+      w.recordTest(result.verdict, result.summary);
       setState(() {
         _result = result;
         _wave = wave;
       });
     } catch (e) {
-      if (mounted) setState(() => _result = TestSuiteResult(ok: false, error: '$e'));
+      if (mounted) {
+        final failed = TestSuiteResult(ok: false, error: '$e');
+        w.recordTest(failed.verdict, failed.summary);
+        setState(() => _result = failed);
+      }
     } finally {
       if (mounted) setState(() => _running = false);
       unawaited(dir?.delete(recursive: true).then((_) {}, onError: (_) {}));

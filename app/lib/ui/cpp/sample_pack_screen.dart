@@ -51,7 +51,7 @@ Future<bool> _saveWithPicker(File zip, String name) =>
     saveCopyOf(zip, name: name, mimeType: 'application/zip', extension: 'zip');
 
 class SamplePackScreen extends StatefulWidget {
-  const SamplePackScreen({super.key, required this.state, this.instrumentId, this.backend, this.saveZip});
+  const SamplePackScreen({super.key, required this.state, this.instrumentId, this.backend, this.saveZip, this.onRendered});
   final AppState state;
   final String? instrumentId;
 
@@ -60,6 +60,9 @@ class SamplePackScreen extends StatefulWidget {
 
   /// Where Save pack (.zip)… sends the zip (the system picker unless a test passes a fake).
   final PackZipSaver? saveZip;
+
+  /// A pack finished rendering into Files, with the pack's folder name (the plug-in page records it).
+  final ValueChanged<String>? onRendered;
 
   @override
   State<SamplePackScreen> createState() => SamplePackScreenState();
@@ -183,6 +186,7 @@ class SamplePackScreenState extends State<SamplePackScreen> {
     if (!mounted) return;
     final ok = result['ok'] == true;
     ok ? Haptics.threshold() : Haptics.error();
+    if (ok) widget.onRendered?.call(dir.uri.pathSegments.where((p) => p.isNotEmpty).last);
     setState(() {
       _run = null;
       _result = ok ? result : null;

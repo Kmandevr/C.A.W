@@ -6,6 +6,23 @@ updated: 2026-11-11
 
 # Decisions
 
+## 2026-11-11: one plug-in page per C++ component (owner's "the plug-in workflow is confusing"; Claude, a proposal for the owner's review)
+
+**Problem:** a C++ component's Test suite, Export as plug-in and Make sample pack were three separate pages behind the editor's ⋯ menu, with build status only in the editor and nothing linking one step to the next.
+
+**What established tools do (primary sources, read 2026-11-11):**
+- **JUCE Projucer:** each project lists its *exporters* (one per IDE or build system), each carrying its own build configurations, Debug and Release by default; the generated IDE projects are rebuilt from the Projucer project on save, so settings live in one place ([JUCE tutorial "Manage your Projucer project"](https://docs.juce.com/master/tutorial_manage_projucer_project.html)). Lesson: one home per artefact, targets listed side by side.
+- **iPlug2:** one plug-in codebase targets CLAP, VST2, VST3, AUv2, AUv3, AAX, WAM and standalone apps ([iPlug2 README](https://github.com/iPlug2/iPlug2)). Lesson: formats are targets of one source, not separate workflows.
+- **Steinberg VST3 SDK:** the *validator* is a command-line host that checks a plug-in's VST3 conformity and suits build-server use; the *Plug-in Test Host* has a unit-tests window with Run All / Run Selected, errors in an Errors view and warnings and results in a Messages view ([VST3 portal: Validator](https://steinbergmedia.github.io/vst3_dev_portal/pages/What+is+the+VST+3+SDK/Validator.html), [Plug-in Test Host](https://steinbergmedia.github.io/vst3_dev_portal/pages/What+is+the+VST+3+SDK/Plug-in+Test+Host.html)). Lesson: validate before shipping, errors apart from warnings.
+- **CLAP:** `clap-validator validate <plugin.clap>` runs an automatic test suite for common bugs, with `--only-failed` to show just failures ([clap-validator](https://github.com/free-audio/clap-validator)); `clap-host` is a reference host to load a plug-in and play it from the keyboard ([clap-host](https://github.com/free-audio/clap-host)). Lesson: a pass/fail summary first, the detail behind it.
+- **DDMF Plugindoctor:** analysis modes (linear, harmonic, dynamics, performance…) behind tabs, two chains to compare or show the difference ([manual PDF](https://www.ddmf.eu/pdfmanuals/PlugindoctorManual.pdf)). Lesson: measurements grouped by question; compare A/B. (Our test suite already follows this.)
+- **Xcode:** Archive, then the Organizer's **Validate App** (an automated check with feedback, before submitting) and **Distribute App** ([Apple: Distributing your app for beta testing and releases](https://developer.apple.com/documentation/xcode/distributing-your-app-for-beta-testing-and-releases)). Lesson: one place per build, a validation step before export, and export offered as the next button.
+- **Max for Live:** Freeze bundles a device with every file it uses so it works when shared; it takes effect on save ([Cycling '74: Freezing Max for Live devices](https://docs.cycling74.com/legacy/max8/vignettes/live_freezing)). **Kilohearts Snap Heap:** a preset built from Snapins works for anyone it is shared with ([Kilohearts: Snap Heap](https://kilohearts.com/products/snap_heap)). **Bitwig:** the Grid device as a whole is the preset, loaded from the browser ([Bitwig user guide: devices](https://www.bitwig.com/userguide/latest/introduction_to_devices)). Lesson: "make it a thing you can share" is one action from where you made it. **[Assumption]** Bitwig's exact save steps were not found in its current guide.
+
+**What makes them clear:** one place per artefact; status at a glance (pass, fail, not run); validation before export; a next-step button; readable errors that lead to the code.
+
+**Design (built, for the owner's review in the APK):** one **plug-in page** per C++ component (instrument or effect): Write → Build → Test → Export as a strip and a card per step. Each step has a status (DONE, CHECK for warnings, FAILED, NOT RUN, OUT OF DATE after an edit, RUNNING), its key result in one line and a button; the next step's button is the filled one and the bottom bar repeats it. Build runs in place and lists errors that jump to their line; Test opens the existing test suite and shows its verdict and thresholds; Export offers CLAP, VST3 and (instruments) Sample pack as targets side by side, opening the existing pages. Export warns, never blocks, when the latest build is untested, failed its tests or the code isn't built (the owner's "warn, don't block"). Reached from **Plug-in** beside ▶ Build (not only ⋯) and from the component's card menu on a track. Why: it follows the shared lessons above with the screens we have, rewriting none of their logic. **[Assumption]** The pipeline's record (test verdicts, exports) lasts for the app session and isn't saved in the project; the owner may want it saved. **Open (owner):** the look in the APK; whether the record should persist.
+
 ## 2026-11-11: Build tools leftovers (#162, #163, #164, #11; Claude, proposals for the owner)
 
 - **Test-suite thresholds:** three switches, sent as the engine's `checks`: Headroom (both peaks ≤ −0.3 dBFS) and Not silent (both RMS > −70 dBFS) on by default, Real time (median block < 50 % of real time) off and only sent with CPU timing on. Why: the commonest ways a component is wrong (clipping, silence, too slow) with values a user doesn't have to type; the engine takes any path, so more can follow.
@@ -39,6 +56,62 @@ Carries out the owner's decision of 2026-11-10 ("C++ replaces the .caw language"
 - **Tests play C++:** every engine test that used a .caw source as a signal plays `org.caw.test.osc` (`engine/tests/test_signal.h`) or a built-in. The mixer goldens moved onto it and were re-recorded on purpose; the Library parity tests keep frozen hashes of the ports' output, recorded while they still matched the .caw built-ins. Every other golden is unchanged.
 - **Bug fixed on the way:** a track's instrument installed while nothing sounds counted as still ringing at the first Play, which mixed in 5 ms of a phantom tail (a free-running source started at twice its level); a new instrument now starts idle.
 - **Open, for the owner:** an instrument track keeps running after a Stop until its output is quiet (or 30 s), and a never-quiet effect there now ends at that cap without the 20 ms fade buses get; a bus whose capped tail has faded comes back while a child track still rings out. The app still sends `voices`, `swap`, `seam_crossfade` and the key (Settings' light-mode voice cap and swap timing now change nothing): removing those settings is UI work.
+
+## 2026-11-11: Arrangement music video (owner)
+
+**Decision (owner, 2026-11-11).** A built-in tool that records the arrangement as a good-looking music video, made to look cool rather than to be useful.
+- **Shots, each switchable on or off:** an arrangement flythrough (the camera follows the playhead and notes light up), the mixer with live meters, piano-roll close-ups, and device editors with knobs moving to the automation.
+- **Auto director:** pick a style (for example Calm, Energetic or Minimal) and the range. It cuts between shots on the beat and at sections. Optional title card. It uses the current theme.
+- **Any aspect ratio and any resolution,** with presets for 9:16, 16:9 and 1:1.
+- **Preview:** a quick unrendered preview before recording.
+
+**[Proposal]** It renders offline:
+- the frames come from the same widgets drawn off screen at the chosen size, in step with the offline audio render;
+- they are encoded with the platform's own encoders (Android MediaCodec/MediaMuxer, Windows Media Foundation), so no GPL dependency;
+- the output is an MP4 with H.264 and AAC.
+
+## 2026-11-11: A REAPER-style layout file (owner; design, questions open)
+
+**Request (owner, 2026-11-11).** As REAPER's theme files and WALTER layouts do ([Fact] reaper.fm/sdk/walter/walter.php, read 2026-11-11), a code-only file should be able to change the app's look completely: where panels and menus are, which menus show, how menus open and how they animate.
+
+**[Proposal]** The architect's design:
+- a declarative, versioned text file (`caw-layout 1`) with bounded conditions (`when screen == desktop`, `width < 160dp`, read-only UI state) and no loops or code;
+- per element, flow layouts: ordered slots with priorities, not WALTER's pixel coordinates;
+- dock presets, toolbars, and menus by id (items from the action catalogue, how they open, style, motion token);
+- declared params that become a "theme adjuster" in the theme editor;
+- the built-in layout shipped in the same format;
+- a broken or unknown file falls back to the built-in layout with a banner, and the file can never hide Settings, Reset layout or the section switch;
+- edited in Build with live reload, completion and diagnostics.
+
+The phases:
+1. the parser, the evaluator, dock presets, toolbars and menu style;
+2. menus as data;
+3. element layouts;
+4. params;
+5. motion;
+6. completion and sharing.
+
+**Owner's answers (2026-11-11):**
+- **Both:** the layout is part of the theme file, which is the whole theme. The theme editor can still change everything a theme supports, in any theme, not only your own.
+- **One home:** toolbars and menus move from the key bindings into the layout. Key bindings keep only keys and macros.
+- **No hiding:** a layout may reorder and collapse things (into ⋯ or overflow) but never hide features.
+- **Flow and priorities,** not coordinates.
+
+Still open: custom labels, layouts inside project packages, and one file for every screen shape or one per shape. Until answered: no custom labels, a packaged layout is offered and never applied silently, and one file uses conditions.
+
+## 2026-11-11: A theme editor that builds the theme for you (owner)
+
+**Decision (owner, 2026-11-11).** Today's theme editor is detailed but hard to use.
+- **Palette builder up front:** pick one or two colours, or a mood, and it generates a complete, good-looking palette for light and dark (surfaces, text, accents, track colours, meters). Contrast is kept readable, and the palette can be shuffled and tweaked.
+- **Every colour stays editable** in an advanced section.
+- **The theme also sets the feel:**
+  - haptics (on, strength, style);
+  - how sharp or soft corners and buttons are;
+  - fonts and text size;
+  - how tracks look (height, header style, clip shape);
+  - glow, glass and motion.
+
+  The aim is a workspace that feels like home.
 
 ## 2026-11-11: Light and dark for every built-in theme (owner)
 

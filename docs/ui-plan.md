@@ -324,7 +324,7 @@ Each step is one small PR to `Main`. It includes widget tests, screenshot (golde
 6. **U5, track chain and Inspector:** reorder, bypass, drag and drop from files. Several instruments arrive when the engine issue lands.
 7. **U6, mixer:** strips with chains and parameter editing. Built 2026-11-05: strips, chain slots that open their parameters, typed level and pan, and typed parameter values (in every inspector). Sends and master effects wait for the engine.
 8. **U7, code workspace:** the file tree, tabs, problems and device folders (security review), plus #20.
-9. **U8, the remaining panels:** Exporter, Files, Engine Lab and Plugin Builder become panels with the U0 widgets.
+9. **U8, the remaining panels:** Export and Files become panels with the U0 widgets. Engine diagnostics moved to Settings, and the .caw Plugin Builder went with the .caw language (#160); a C++ component's build, test and export live on its plug-in page ([app](app.md), Build).
 
 ## Open questions for the owner
 
