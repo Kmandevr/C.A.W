@@ -7,6 +7,9 @@
 
 #include "builtin_flagship.h"
 #include "builtin_fx_space.h"  // fx-space
+// fx-filters begin
+#include "builtin_fx_filters.h"
+// fx-filters end
 #include "json.h"
 
 namespace caw {
@@ -264,6 +267,9 @@ const std::vector<BuiltinPreset>& builtinPresets(std::string_view componentId) {
     // fx-space begin
     if (const std::vector<BuiltinPreset>* p = fx::fxSpacePresets(componentId)) return *p;
     // fx-space end
+    // fx-filters begin
+    if (const auto* p = fx::filtersPresets(componentId)) return *p;
+    // fx-filters end
     return kNone;
 }
 

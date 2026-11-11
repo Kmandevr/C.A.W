@@ -6,6 +6,9 @@
 // fx-space begin
 #include "builtin_fx_space.h"
 // fx-space end
+// fx-filters begin
+#include "builtin_fx_filters.h"
+// fx-filters end
 
 #include <algorithm>
 
@@ -166,6 +169,9 @@ void registerBuiltinEffects(ModuleRegistry& registry) {
     fx::registerFxDynamics(registry);  // fx-dynamics
     fx::registerCreative(registry);  // fx-creative
     fx::registerFxSpace(registry);  // fx-space
+    // fx-filters begin
+    fx::registerFilters(registry);
+    // fx-filters end
 }
 
 }  // namespace caw

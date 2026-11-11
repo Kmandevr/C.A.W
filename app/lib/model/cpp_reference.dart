@@ -449,6 +449,24 @@ const cppBuiltins = <CppBuiltin>[
   CppBuiltin('org.caw.channelmixer', 'Channel mixer', false, 'A 2 x 2 matrix: swap, fold, copy or invert the sides.',
       ['left_to_left', 'right_to_left', 'left_to_right', 'right_to_right']),
   // fx-space end
+  // fx-filters begin
+  CppBuiltin('org.caw.ladder', 'Ladder filter', false, 'A zero-delay-feedback 4-pole ladder: 12 or 24 dB, drive and bias, self-oscillation.',
+      ['mode', 'slope', 'cutoff', 'resonance', 'drive', 'bias', 'comp', 'mix', 'output']),
+  CppBuiltin('org.caw.nlfilter', 'Nonlinear filter', false, 'A state-variable filter with a saturating shape inside its loop.',
+      ['type', 'cutoff', 'q', 'drive', 'shape', 'mix', 'output']),
+  CppBuiltin('org.caw.comb', 'Comb filter', false, 'A feedback/feed-forward comb tuned in Hz or to a note, with damping and polarity.',
+      ['tune', 'freq', 'note', 'fine', 'feedback', 'damping', 'polarity', 'stereo', 'spread', 'mix', 'output']),
+  CppBuiltin('org.caw.resonator', 'Resonator', false, 'Sixteen tuned resonances: string, odd string, bar modes, a chord or a scale.',
+      ['mode', 'chord', 'scale', 'note', 'fine', 'decay', 'brightness', 'spread', 'mix', 'output']),
+  CppBuiltin('org.caw.formant', 'Formant filter', false, 'Vowels A, E, I, O, U on an XY pad, with shift, Q, lows and highs.',
+      ['vowel_x', 'vowel_y', 'shift', 'q', 'lows', 'highs', 'mix', 'output']),
+  CppBuiltin('org.caw.disperser', 'Disperser', false, 'Up to 64 all-pass stages that smear transients into a chirp.',
+      ['amount', 'freq', 'pinch', 'spread', 'mix']),
+  CppBuiltin('org.caw.eq.dj', '3-band EQ', false, 'A DJ EQ: Linkwitz-Riley splits, three gains and kill switches.',
+      ['low', 'mid', 'high', 'kill_low', 'kill_mid', 'kill_high', 'low_x', 'high_x', 'output']),
+  CppBuiltin('org.caw.tilt', 'Tilt EQ', false, 'Darker or brighter around a pivot, on stereo, mid or side.', ['tilt', 'freq', 'q', 'channel', 'output']),
+  CppBuiltin('org.caw.geq', 'Graphic EQ', false, '31 third-octave bands (g1..g31, ±12 dB) corrected for their overlap.', ['range', 'output']),
+  // fx-filters end
 ];
 
 /// One of C.A.W's own text formats, for the Library's last groups.
