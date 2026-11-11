@@ -40,6 +40,49 @@ Carries out the owner's decision of 2026-11-10 ("C++ replaces the .caw language"
 - **Bug fixed on the way:** a track's instrument installed while nothing sounds counted as still ringing at the first Play, which mixed in 5 ms of a phantom tail (a free-running source started at twice its level); a new instrument now starts idle.
 - **Open, for the owner:** an instrument track keeps running after a Stop until its output is quiet (or 30 s), and a never-quiet effect there now ends at that cap without the 20 ms fade buses get; a bus whose capped tail has faded comes back while a child track still rings out. The app still sends `voices`, `swap`, `seam_crossfade` and the key (Settings' light-mode voice cap and swap timing now change nothing): removing those settings is UI work.
 
+## 2026-11-11: Arrangement music video (owner)
+
+**Decision (owner, 2026-11-11).** A built-in tool that records the arrangement as a good-looking music video, made to look cool rather than to be useful.
+- **Shots, each switchable on or off:** an arrangement flythrough (the camera follows the playhead and notes light up), the mixer with live meters, piano-roll close-ups, and device editors with knobs moving to the automation.
+- **Auto director:** pick a style (for example Calm, Energetic or Minimal) and the range. It cuts between shots on the beat and at sections. Optional title card. It uses the current theme.
+- **Any aspect ratio and any resolution,** with presets for 9:16, 16:9 and 1:1.
+- **Preview:** a quick unrendered preview before recording.
+
+**[Proposal]** It renders offline:
+- the frames come from the same widgets drawn off screen at the chosen size, in step with the offline audio render;
+- they are encoded with the platform's own encoders (Android MediaCodec/MediaMuxer, Windows Media Foundation), so no GPL dependency;
+- the output is an MP4 with H.264 and AAC.
+
+## 2026-11-11: A REAPER-style layout file (owner; design, questions open)
+
+**Request (owner, 2026-11-11).** As REAPER's theme files and WALTER layouts do ([Fact] reaper.fm/sdk/walter/walter.php, read 2026-11-11), a code-only file should be able to change the app's look completely: where panels and menus are, which menus show, how menus open and how they animate.
+
+**[Proposal]** The architect's design:
+- a declarative, versioned text file (`caw-layout 1`) with bounded conditions (`when screen == desktop`, `width < 160dp`, read-only UI state) and no loops or code;
+- per element, flow layouts: ordered slots with priorities, not WALTER's pixel coordinates;
+- dock presets, toolbars, and menus by id (items from the action catalogue, how they open, style, motion token);
+- declared params that become a "theme adjuster" in the theme editor;
+- the built-in layout shipped in the same format;
+- a broken or unknown file falls back to the built-in layout with a banner, and the file can never hide Settings, Reset layout or the section switch;
+- edited in Build with live reload, completion and diagnostics.
+
+The phases:
+1. the parser, the evaluator, dock presets, toolbars and menu style;
+2. menus as data;
+3. element layouts;
+4. params;
+5. motion;
+6. completion and sharing.
+
+Open questions for the owner (`docs/vision.md`):
+- a separate file that a theme names, or part of the theme;
+- whether toolbars and menus move from the keymap into it;
+- whether a layout may hide features or only reorder and collapse them;
+- flow-only or coordinates;
+- custom labels;
+- layouts inside project packages;
+- one file for every screen shape or one per shape.
+
 ## 2026-11-11: A theme editor that builds the theme for you (owner)
 
 **Decision (owner, 2026-11-11).** Today's theme editor is detailed but hard to use.
