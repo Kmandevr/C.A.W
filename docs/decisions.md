@@ -25,7 +25,6 @@ updated: 2026-11-11
 - **Settings › Code editor** drops the rows that only served the .caw editor (completion chips, the Library button, compact controls); their stored values stay in `settings.json` until WP-D.
 - **Templates:** the C++ starters replace the .caw templates in Files (New from a starter…) and the track cards' Add track; the two pattern templates (acid line, chords) are bundled in Dart so the engine's `caw_templates` is no longer called.
 
-
 ## 2026-11-11: MIDI devices (WP-H; choices made for the owner)
 
 - **The engine path:** device MIDI reaches a track's instrument through a new C API (API 15) into `Midi2InputQueue`, placed at the frame it was played from the device's timestamp, one callback late so the spacing is kept (Android's MIDI timestamps are `System.nanoTime`, the engine's `steady_clock` on Android). On-screen keys keep note previews. MIDI 1.0 is converted to MIDI 2.0 at the edge (`midi_device.cpp`, the UMP specification's min-centre-max upscaling written from the published algorithm, [Assumption] not re-read against the PDF).
@@ -828,7 +827,6 @@ Built (engine pass, 2026-11-10):
 - Keep the permanent engine blueprint, milestone ledger and recovery guide current; one coherent review PR is the delivery target.
 - The graph compiler must not impose arbitrary node/connection/block caps. Resource limits must reflect actual memory, hardware and host safety budgets, with explicit errors and no silent content loss.
 
-
 ## 2026-11-02: Adaptive concurrency and batching
 
 - Concurrency and batching are foundational capabilities, selected automatically according to graph dependencies, workload size, deadlines and available hardware.
@@ -902,7 +900,6 @@ Built (engine pass, 2026-11-10):
 - **Automation:** track volume and pan lanes follow song time and are interpolated in the native callback. Global and module-parameter automation remain future work.
 - **Piano-roll multi-clip behavior:** selected companion clips are visible as read-only references; linked clips that share a source edit together. Editing multiple independent sources as one operation remains a follow-up.
 
-
 ## 2026-11-02: Graph compile and preparation require an explicit working-memory budget
 
 - Graph compilation and prepared execution require a non-zero GraphResourceBudget.maxWorkingBytes; the API does not silently choose an arbitrary fixed node or connection cap.
@@ -914,7 +911,6 @@ Built (engine pass, 2026-11-10):
 ## 2026-11-02 — Effect-chain length is resource-governed, not a fixed product cap
 
 Project layers and synth patches may describe dynamically sized module/effect chains. Parsing and engine preparation must preserve every authored chain element; no silent truncation or arbitrary eight-effect ceiling is allowed. Memory and processing costs are handled by explicit host resource budgets and clear preparation errors. This change does not remove unrelated limits such as the current project layer-slot model or export-buffer capacity; those remain separate integration work.
-
 
 ## 2026-11-06: Native C++ effects in playback (updated 2026-11-09)
 
