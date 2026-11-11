@@ -500,6 +500,27 @@ TEST(sfz_import_reads_headers_inheritance_note_names_and_warns) {
     CHECK(text.find("sample=samples/piano soft.wav") != std::string::npos);
 }
 
+TEST(sfz_defines_expand_once_longest_name_first_and_are_capped) {
+    SamplerProgram p;
+    std::vector<std::string> warnings;
+    std::string error;
+    // $A must not replace inside $AB, and a value is not expanded again.
+    CHECK(importSfzText("#define $A 1\n#define $AB 70\n#define $C $A\n<region> sample=x$C.wav key=$AB lovel=$A\n", "/k", p,
+                        warnings, error));
+    CHECK_EQ(p.zones.size(), size_t{1});
+    if (p.zones.size() == 1) {
+        CHECK_EQ(p.zones[0].lokey, 70);
+        CHECK_EQ(p.zones[0].lovel, 1);
+        CHECK_EQ(p.zones[0].path, std::string("/k/x$A.wav"));
+    }
+    // A 2000-character value used a million times would be 2 GB: refused, quickly, past 4 x the 4 MB file limit.
+    std::string big = "#define $X " + std::string(2000, 'v') + "\n<region> sample=a.wav ";
+    big.reserve(big.size() + 2000000);
+    for (int i = 0; i < 1000000; ++i) big += "$X";
+    CHECK(!importSfzText(big, "/k", p, warnings, error));
+    CHECK(error.find("#define") != std::string::npos);
+}
+
 TEST(sfz_export_copies_samples_and_the_c_api_round_trips) {
     const std::string dir = tempDir("sfzexport");
     const std::string a = writeWav(dir + "/src a.wav", 48000, 1, 100, [](int64_t i, int) { return noiseAt(i, 0); });

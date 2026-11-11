@@ -72,9 +72,12 @@ bool importSfzText(std::string_view text, const std::string& baseDir, SamplerPro
         return false;
     }
     std::string src = stripComments(text);
-    // #define $NAME value, applied to the rest of the text.
+    // #define $NAME value, applied to the rest of the text in one pass: at each '$' the longest defined name there
+    // is replaced, and what it is replaced by is not expanded again. The expanded text is capped.
     std::map<std::string, std::string> defines;
     {
+        const size_t cap = 4 * kMaxSfzBytes;
+        auto nameChar = [](char c) { return std::isalnum(static_cast<unsigned char>(c)) || c == '_'; };
         std::istringstream lines(src);
         std::string line, kept;
         while (std::getline(lines, line)) {
@@ -90,12 +93,30 @@ bool importSfzText(std::string_view text, const std::string& baseDir, SamplerPro
                 warnings.push_back("#include is not followed (the included file's regions are left out)");
                 continue;
             }
-            for (const auto& [k, v] : defines)
-                for (size_t at = line.find(k); at != std::string::npos; at = line.find(k, at + v.size()))
-                    line.replace(at, k.size(), v);
-            kept += line + "\n";
+            for (size_t i = 0; i < line.size();) {
+                if (line[i] == '$' && !defines.empty()) {
+                    size_t run = i + 1;
+                    while (run < line.size() && nameChar(line[run])) ++run;
+                    bool replaced = false;
+                    for (size_t end = run; end > i + 1 && !replaced; --end) {
+                        const auto it = defines.find(line.substr(i, end - i));
+                        if (it == defines.end()) continue;
+                        kept += it->second;
+                        i = end;
+                        replaced = true;
+                    }
+                    if (!replaced) kept += line[i++];
+                } else {
+                    kept += line[i++];
+                }
+                if (kept.size() > cap) {
+                    error = "the SFZ file's #define values expand past " + std::to_string(cap >> 20) + " MB";
+                    return false;
+                }
+            }
+            kept += '\n';
         }
-        src = kept;
+        src = std::move(kept);
     }
     // Tokens: <header> and opcode=value, where a value runs to the next opcode, header or line end (so
     // sample paths may hold spaces).
