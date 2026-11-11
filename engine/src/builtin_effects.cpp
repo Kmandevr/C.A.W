@@ -3,6 +3,9 @@
 // fx-creative begin
 #include "builtin_fx_creative.h"
 // fx-creative end
+// fx-space begin
+#include "builtin_fx_space.h"
+// fx-space end
 // fx-filters begin
 #include "builtin_fx_filters.h"
 // fx-filters end
@@ -167,6 +170,7 @@ void registerBuiltinEffects(ModuleRegistry& registry) {
     fx::registerDucker(registry);
     fx::registerFxDynamics(registry);  // fx-dynamics
     fx::registerCreative(registry);  // fx-creative
+    fx::registerFxSpace(registry);  // fx-space
     // fx-filters begin
     fx::registerFilters(registry);
     // fx-filters end

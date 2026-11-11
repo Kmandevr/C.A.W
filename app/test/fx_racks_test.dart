@@ -17,6 +17,8 @@ import 'package:caw/ui/devices/effects/creative/creative_catalog.dart' show crea
 import 'package:caw/ui/devices/effects/dynamics/catalog.dart' show fxDynamicsCatalog;
 import 'package:caw/ui/devices/effects/effect_catalog.dart';
 import 'package:caw/ui/devices/effects/filters/filters_shared.dart' show filtersBrowserEntries;
+import 'package:caw/model/fx_space_display.dart' show fxSpaceBrowser;
+import 'package:caw/ui/devices/effects/space/space_fx.dart' show fxSpaceIcons;
 import 'package:caw/ui/files/asset_picker.dart';
 import 'package:caw/ui/frame/sections.dart';
 import 'package:caw/ui/devices/visuals/filter_curve.dart' show freqToX;
@@ -141,7 +143,8 @@ void main() {
     test('the groups\' catalogs fill the browser: their tab, description and icon, the base keywords kept', () {
       for (final e in [...fxDynamicsCatalog.map((e) => (e.id, e.category, e.description, e.icon)),
           ...creativeCatalog.map((e) => (e.id, e.category, e.description, e.icon)),
-          ...filtersBrowserEntries.map((e) => (e.id, e.category, e.description, e.icon))]) {
+          ...filtersBrowserEntries.map((e) => (e.id, e.category, e.description, e.icon)),
+          ...fxSpaceBrowser.entries.map((e) => (e.key, e.value.category, e.value.description, fxSpaceIcons[e.key]!))]) {
         final entry = EffectCatalog.of(e.$1);
         expect(entry, isNotNull, reason: e.$1);
         expect(entry!.category, EffectCategory.byLabel(e.$2), reason: e.$1);

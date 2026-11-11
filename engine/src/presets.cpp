@@ -7,6 +7,7 @@
 
 #include "builtin_drums.h"
 #include "builtin_flagship.h"
+#include "builtin_fx_space.h"  // fx-space
 // fx-filters begin
 #include "builtin_fx_filters.h"
 // fx-filters end
@@ -272,6 +273,9 @@ const std::vector<BuiltinPreset>& builtinPresets(std::string_view componentId) {
     if (componentId == "org.caw.ducker") return duckerPresets();
     if (componentId == kDrumsId) return drumsPresets();
     if (const auto* p = creativeBuiltinPresets(componentId)) return *p;  // fx-creative
+    // fx-space begin
+    if (const std::vector<BuiltinPreset>* p = fx::fxSpacePresets(componentId)) return *p;
+    // fx-space end
     // fx-filters begin
     if (const auto* p = fx::filtersPresets(componentId)) return *p;
     // fx-filters end

@@ -4,7 +4,7 @@ import 'dart:io';
 
 import 'package:ffi/ffi.dart';
 
-const int cawApiVersion = 13;  // must equal CAW_API_VERSION in engine/include/caw.h
+const int cawApiVersion = 14;  // must equal CAW_API_VERSION in engine/include/caw.h
 
 final class CawMetersStruct extends Struct {
   @Float()
@@ -139,6 +139,8 @@ class Bindings {
             int Function(Pointer<Void>, Pointer<Utf8>, int, int)>('caw_engine_set_component_bypass'),
         componentStates = lib.lookupFunction<Pointer<Utf8> Function(Pointer<Void>, Pointer<Utf8>),
             Pointer<Utf8> Function(Pointer<Void>, Pointer<Utf8>)>('caw_engine_component_states'),
+        setComponentState = lib.lookupFunction<Int32 Function(Pointer<Void>, Pointer<Utf8>, Uint32, Pointer<Uint8>, Int32, Uint32),
+            int Function(Pointer<Void>, Pointer<Utf8>, int, Pointer<Uint8>, int, int)>('caw_engine_set_component_state'),
         componentDisplay = lib.lookupFunction<Int32 Function(Pointer<Void>, Pointer<Utf8>, Uint32, Pointer<Float>, Int32),
             int Function(Pointer<Void>, Pointer<Utf8>, int, Pointer<Float>, int)>('caw_engine_component_display'),
         setGlobal = lib.lookupFunction<Void Function(Pointer<Void>, Pointer<Utf8>, Double),
@@ -283,6 +285,7 @@ class Bindings {
   final int Function(Pointer<Void>, Pointer<Utf8>, int, double, int, int) setSend;
   final int Function(Pointer<Void>, Pointer<Utf8>, int, int) setComponentBypass;
   final Pointer<Utf8> Function(Pointer<Void>, Pointer<Utf8>) componentStates;
+  final int Function(Pointer<Void>, Pointer<Utf8>, int, Pointer<Uint8>, int, int) setComponentState;
   final int Function(Pointer<Void>, Pointer<Utf8>, int, Pointer<Float>, int) componentDisplay;
   final void Function(Pointer<Void>, Pointer<Utf8>, double) setGlobal;
   final void Function(Pointer<Void>, Pointer<Utf8>, double, double, int, int) setLayerMix;
