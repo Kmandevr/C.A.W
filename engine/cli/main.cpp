@@ -72,7 +72,8 @@ const char* kUsage =
     "      --notes C3,E3,60 | FROM:TO[:STEP]   --vel 64,127   --step NAME=V1,V2,... (repeatable)\n"
     "      --name NAME --pattern '{name}_{note}_{vel}_{param}'  --hold S --max S --tail-db DB\n"
     "      --rate R --bits 16|24|32 --mono --trim-db DB --no-trim --fade-in MS --fade-out MS\n"
-    "      --normalize peak|rms [--target DB] [--group]  --loop  --sfz  --max-files N  --overwrite\n";
+    "      --normalize peak|rms [--target DB] [--group]  --loop  --loop-xfade MS  --rr N  --dither tpdf\n"
+    "      --sfz  --max-files N  --overwrite\n";
 
 bool readFile(const std::string& path, std::string& out) {
     std::ifstream f(path, std::ios::binary);
@@ -714,6 +715,13 @@ int samplePack(int argc, char** argv) {
         else if (a == "--fade-out") top.emplace_back("fade_out_ms", num("--fade-out"));
         else if (a == "--max-files") top.emplace_back("max_files", num("--max-files"));
         else if (a == "--loop") top.emplace_back("loop", jsonBool(true));
+        else if (a == "--loop-xfade") {  // a loop whose seam is crossfaded over MS
+            caw::Json l;
+            l.type = caw::Json::Type::Object;
+            l.obj["crossfade_ms"] = num("--loop-xfade");
+            top.emplace_back("loop", l);
+        } else if (a == "--rr") top.emplace_back("round_robins", num("--rr"));
+        else if (a == "--dither") top.emplace_back("dither", jsonString(val("--dither")));
         else if (a == "--sfz") top.emplace_back("sfz", jsonBool(true));
         else if (a == "--overwrite") top.emplace_back("overwrite", jsonBool(true));
         else if (a == "--no-trim") top.emplace_back("trim", jsonBool(false));
