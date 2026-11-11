@@ -239,6 +239,8 @@ class NewTrackZone extends StatelessWidget {
             onDoubleTap: header ? () => state.addEmptyTrack() : null,
             // Long-press: the add-track menu with the track templates (docs/reaper-flow.md, Templates).
             onLongPressStart: header ? (d) => showAddTrackMenu(context, state, d.globalPosition) : null,
+            // A right-click opens the same menu with a mouse, anywhere in the zone.
+            onSecondaryTapUp: (d) => showAddTrackMenu(context, state, d.globalPosition),
             child: SizedBox(height: height, child: Padding(
               padding: const EdgeInsets.fromLTRB(2, 4, 2, 0),
               child: Align(alignment: Alignment.topLeft, child: AnimatedOpacity(

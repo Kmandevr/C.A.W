@@ -1,4 +1,4 @@
-// The Export page (the project menu's Export…, Ctrl+3): the Export song sheet (mix, stems, regions), and a loop,
+// The Export page (the project menu's Export…): the Export song sheet (mix, stems, regions), and a loop,
 // free-length take, one-shot, wavetable or MIDI file saved with the picker.
 import 'dart:async';
 import 'dart:io';
@@ -17,6 +17,7 @@ import '../model/arrange_fx.dart';
 import 'export_sheet.dart';
 import 'glass.dart';
 import 'haptics.dart';
+import 'page_closer.dart';
 import 'theme.dart';
 import 'widgets.dart';
 
@@ -45,6 +46,7 @@ class _QueuedExport {
 
 /// Opens the Export page over the frame (it was the Export workspace, folded into the project menu with #139).
 Future<void> showExportPage(BuildContext context, AppState state) => Navigator.of(context).push(MaterialPageRoute<void>(
+      settings: closablePage,
       builder: (_) => GlassPage(
         child: Scaffold(
           backgroundColor: Glass.active ? Colors.transparent : null,

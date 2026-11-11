@@ -9,6 +9,7 @@ import '../../theme.dart';
 import '../device_scope.dart';
 import '../kit/feel.dart';
 import 'mod_sheet.dart';
+import '../../pointer_input.dart';
 
 /// The sources a strip offers: the shaped ones first, then the note's own.
 const List<ModSource> stripSources = [
@@ -80,7 +81,7 @@ class ModSourceChip extends StatelessWidget {
       onDragEnd: (_) => scope.dragging.value = null,
       onDraggableCanceled: (_, _) => scope.dragging.value = null,
       child: Tooltip(
-        message: 'Tap, then tap knobs, or drag onto a knob: ${source.label} moves it',
+        message: '${PointerInput.tapCap}, then ${PointerInput.tap} knobs, or drag onto a knob: ${source.label} moves it',
         waitDuration: const Duration(milliseconds: 700),
         child: GestureDetector(
           behavior: HitTestBehavior.opaque,
@@ -162,9 +163,10 @@ class ModRouteList extends StatelessWidget {
           label: Text('${(only ?? newSource).short} to a knob', maxLines: 1, style: const TextStyle(fontSize: 12))),
       ])),
       if (routes.isEmpty)
-        const Padding(padding: EdgeInsets.symmetric(vertical: 10), child: Text(
-          'Tap a source chip, then tap knobs. Or drag a chip onto a knob, or long-press a knob.',
-          style: TextStyle(fontSize: 11, color: Neon.dim))),
+        Padding(padding: const EdgeInsets.symmetric(vertical: 10), child: Text(
+          '${PointerInput.tapCap} a source chip, then ${PointerInput.tap} knobs. Or drag a chip onto a knob, or '
+          '${PointerInput.hold} a knob.',
+          style: const TextStyle(fontSize: 11, color: Neon.dim))),
       for (final r in routes) ModRouteCard(route: r, matrix: m),
     ]);
   }

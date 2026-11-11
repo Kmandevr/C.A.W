@@ -13,6 +13,7 @@ import '../haptics.dart';
 import '../theme.dart';
 import 'settings_deps.dart';
 import 'settings_widgets.dart';
+import '../pointer_input.dart';
 
 class MidiDevicesSettings extends StatelessWidget {
   const MidiDevicesSettings({super.key, required this.deps});
@@ -233,7 +234,7 @@ class _Mappings extends StatelessWidget {
           settingHeading('Controller mappings'),
           if (maps.isEmpty)
             settingAction('midi.mappings', icon: Icons.tune,
-                subtitle: 'None yet: long-press a knob, choose Learn MIDI CC, and move a control on your device')
+                subtitle: 'None yet: ${PointerInput.hold} a knob, choose Learn MIDI CC, and move a control on your device')
           else
             SettingRow(id: 'midi.mappings', child: Column(children: [
               for (final m in maps)

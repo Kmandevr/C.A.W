@@ -680,7 +680,7 @@ void main() {
 
     // One sideways-scrolling row of icon buttons, no heading (owner, 2026-11-05).
     expect(find.text('ARRANGEMENT'), findsNothing);
-    expect(find.byTooltip('Add track'), findsOneWidget);
+    expect(find.byWidgetPredicate((w) => w is Tooltip && (w.message ?? '').startsWith('Add a track')), findsOneWidget);
     expect(tester.getSize(find.byKey(const ValueKey('arrange-toolbar'))).height, lessThanOrEqualTo(48));
     // The header: name, M, S and a meter, with the instrument in its menu.
     expect(find.text('Mobile track'), findsOneWidget);

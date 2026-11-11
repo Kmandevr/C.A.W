@@ -16,6 +16,7 @@ import '../widgets.dart' show LiveIsland;
 import 'live_keys.dart';
 import 'record_tools.dart';
 import 'sections.dart';
+import '../pointer_input.dart';
 
 /// The icon and name of each section.
 (IconData, String) sectionLook(Section s) => switch (s) {
@@ -361,7 +362,7 @@ class RecordButton extends StatelessWidget {
             key: const ValueKey('transport-record'),
             tooltip: recording
                 ? 'Stop recording'
-                : 'Record into the selected track and the armed audio tracks (long-press: metronome, count-in)',
+                : 'Record into the selected track and the armed audio tracks (${PointerInput.hold}: metronome, count-in)',
             iconSize: 19,
             constraints: constraints,
             color: Neon.pink,

@@ -19,6 +19,7 @@ import 'sidechain_bar.dart';
 import 'kit/device_style.dart';
 import 'kit/feel.dart';
 import 'kit/preset_browser.dart';
+import '../page_closer.dart';
 import 'kit/presets.dart';
 import 'visuals/mod_routing.dart';
 import 'visuals/mod_sheet.dart';
@@ -37,6 +38,7 @@ Future<void> openDeviceEditor(BuildContext context, AppState state, LayerDoc lay
   if (deviceEditorWindowed(MediaQuery.sizeOf(context))) {
     return showGeneralDialog<void>(
       context: context,
+      routeSettings: closablePage,
       barrierDismissible: true,
       barrierLabel: 'Close the device',
       barrierColor: Colors.black.withValues(alpha: 0.25),
@@ -49,6 +51,7 @@ Future<void> openDeviceEditor(BuildContext context, AppState state, LayerDoc lay
     );
   }
   return Navigator.of(context).push(PageRouteBuilder<void>(
+    settings: closablePage,
     transitionDuration: Motion.fade(Motion.panel, level),
     reverseTransitionDuration: Motion.fade(Motion.standard, level),
     pageBuilder: (context, _, _) => GlassPage(child: Scaffold(

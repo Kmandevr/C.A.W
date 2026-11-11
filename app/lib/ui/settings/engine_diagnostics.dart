@@ -9,12 +9,13 @@ import '../../engine/engine.dart';
 import '../../model/app_state.dart';
 import '../../model/arrange_fx.dart';
 import '../../model/project.dart';
+import '../page_closer.dart';
 import '../theme.dart';
 import '../widgets.dart';
 
 /// Opens Engine diagnostics as a page of its own.
 Future<void> showEngineDiagnostics(BuildContext context, AppState state) => Navigator.of(context).push(
-      MaterialPageRoute<void>(builder: (_) => Scaffold(
+      MaterialPageRoute<void>(settings: closablePage, builder: (_) => Scaffold(
         appBar: AppBar(title: const Text('Engine diagnostics')),
         body: SafeArea(top: false, child: EngineDiagnostics(state: state)),
       )),

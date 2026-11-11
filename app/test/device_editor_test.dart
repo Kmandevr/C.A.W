@@ -1,5 +1,6 @@
 // Device editors: opening from the FX stack, tabs, the envelope's handles, mod sources dropped on knobs, the fallback
-// page, undo, the mod matrix and shape maths, goldens of the flagship editor, and the fixture against the engine.
+// page, undo, the mod matrix and shape maths, a knob's right-click and wheel, goldens of the flagship editor, and the
+// fixture against the engine.
 import 'dart:convert';
 import 'dart:io';
 
@@ -24,6 +25,7 @@ import 'package:caw/ui/devices/visuals/envelope_view.dart';
 import 'package:caw/ui/devices/visuals/mod_routing.dart' show stripSources;
 import 'package:caw/ui/glass.dart';
 import 'package:caw/ui/motion.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -595,5 +597,34 @@ void main() {
     await tester.pump();
     expect(s.project.midiMappings, isEmpty);
     expect(find.text('Learn MIDI CC'), findsOneWidget);
+  });
+
+  wtest('a mouse: right-click on a knob opens what a long-press does; the wheel steps it, one undo step a burst',
+      (tester) async {
+    s.starting = false;
+    s.history.reset(jsonEncode(s.project.toJson()));
+    await openSynth(tester);
+    final knob = find.byKey(const ValueKey('dknob-osc1_level'));
+    await tester.tap(knob, buttons: kSecondaryMouseButton, kind: PointerDeviceKind.mouse);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('mod-sheet')), findsOneWidget, reason: 'the long-press sheet');
+    Navigator.of(tester.element(find.byKey(const ValueKey('mod-sheet')))).pop();
+    await tester.pumpAndSettle();
+    final before = synth().value('osc1_level');
+    final mouse = TestPointer(1, PointerDeviceKind.mouse);
+    await tester.sendEventToBinding(mouse.hover(tester.getCenter(knob)));
+    for (var i = 0; i < 3; i++) {
+      await tester.sendEventToBinding(mouse.scroll(const Offset(0, -20)));
+      await tester.pump(const Duration(milliseconds: 50));
+    }
+    final up = synth().value('osc1_level');
+    expect(up, greaterThan(before), reason: 'a turn up raises it');
+    await tester.sendEventToBinding(mouse.scroll(const Offset(0, 20)));
+    await tester.pump(const Duration(milliseconds: 50));
+    expect(synth().value('osc1_level'), lessThan(up));
+    await tester.pump(const Duration(seconds: 1)); // the burst ends: one change
+    s.undo();
+    await tester.pumpAndSettle();
+    expect(synth().value('osc1_level'), closeTo(before, 1e-9), reason: 'one undo takes the whole burst back');
   });
 }

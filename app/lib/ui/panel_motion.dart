@@ -2,6 +2,7 @@
 import 'package:flutter/material.dart';
 
 import 'motion.dart';
+import 'page_closer.dart';
 
 /// How long a pushed page's transition runs with Subtle (Material's own page transition).
 const pageTransition = Duration(milliseconds: 300);
@@ -11,14 +12,16 @@ const sheetEnter = Duration(milliseconds: 250), sheetExit = Duration(millisecond
 
 /// A route for a pushed page (a Settings section, the theme editor), animated as an edit animation of panels:
 /// Material's own page transition with Subtle and full motion (as before edit styles), a longer slide with a small
-/// overshoot with Playful, a fade with Reduced motion, and none with motion Off or panels turned off.
+/// overshoot with Playful, a fade with Reduced motion, and none with motion Off or panels turned off. Esc and the
+/// mouse's Back button close it ([closablePage]).
 Route<T> panelRoute<T>(BuildContext context, WidgetBuilder builder) {
   final level = Motion.of(context);
   final d = EditMotion.scaled(level, EditMotionKind.panels, pageTransition);
   if (d != null && level == MotionLevel.full && EditMotion.style == EditMotionStyle.subtle) {
-    return MaterialPageRoute<T>(builder: builder);
+    return MaterialPageRoute<T>(settings: closablePage, builder: builder);
   }
   return PageRouteBuilder<T>(
+    settings: closablePage,
     pageBuilder: (context, _, _) => builder(context),
     transitionDuration: d ?? Duration.zero,
     reverseTransitionDuration: d == null ? Duration.zero : pageTransition,

@@ -227,7 +227,10 @@ class _PresetBrowserState extends State<PresetBrowser> {
       final fav = store.isFavourite(p.favouriteKey(id));
       final user = p.isUser ? store.byId(p.userId!) : null;
       final tagIndex = tags.indexOf(p.category);
-      return Pressable(glow: color, child: ListTile(
+      // A right-click opens the menu a long-press does.
+      return Pressable(glow: color, child: GestureDetector(
+        onSecondaryTap: user == null ? null : () => _menu(context, user),
+        child: ListTile(
         key: ValueKey(p.isUser ? 'preset-user-${p.name}' : 'preset-${p.name}'),
         dense: true,
         selected: selected,
@@ -258,7 +261,7 @@ class _PresetBrowserState extends State<PresetBrowser> {
           Navigator.of(context).maybePop();
         },
         onLongPress: user == null ? null : () => _menu(context, user),
-      ));
+      )));
     }
 
     final empty = shownMine.isEmpty && shownFactory.isEmpty;
@@ -399,7 +402,15 @@ Future<void> showTrackPresets(BuildContext context, AppState state, LayerDoc lay
                   'any track or drag it from Files › Presets onto the empty area for a new track.',
                   textAlign: TextAlign.center, style: TextStyle(color: Neon.dim))))
               : ListView(children: [
-                  for (final p in list) Builder(builder: (context) => Pressable(child: ListTile(
+                  for (final p in list) Builder(builder: (context) {
+                    void menu() {
+                      final box = context.findRenderObject() as RenderBox?;
+                      DeviceFeel.grab();
+                      presetMenu(context, store, p,
+                        box == null ? Offset.zero : box.localToGlobal(box.size.center(Offset.zero)));
+                    }
+                    // A right-click opens the menu a long-press does.
+                    return Pressable(child: GestureDetector(onSecondaryTap: menu, child: ListTile(
                     key: ValueKey('track-preset-${p.name}'),
                     dense: true,
                     leading: const Icon(Icons.view_list_outlined, size: 18, color: Neon.green),
@@ -410,13 +421,9 @@ Future<void> showTrackPresets(BuildContext context, AppState state, LayerDoc lay
                       loadTrackPreset(context, state, layer, p);
                       Navigator.of(context).maybePop();
                     },
-                    onLongPress: () {
-                      final box = context.findRenderObject() as RenderBox?;
-                      DeviceFeel.grab();
-                      presetMenu(context, store, p,
-                        box == null ? Offset.zero : box.localToGlobal(box.size.center(Offset.zero)));
-                    },
-                  ))),
+                    onLongPress: menu,
+                  )));
+                  }),
                 ])),
         ]));
       })),

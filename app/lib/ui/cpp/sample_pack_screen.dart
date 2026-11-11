@@ -14,6 +14,7 @@ import '../frame/live_keys.dart' show noteName;
 import '../haptics.dart';
 import '../theme.dart';
 import 'tool_kit.dart';
+import '../pointer_input.dart';
 
 /// Opens the maker full screen, with [instrumentId] picked when given.
 Future<void> openSamplePackMaker(BuildContext context, AppState state, {String? instrumentId}) =>
@@ -307,8 +308,8 @@ class _ResultCard extends StatelessWidget {
           ToolStat('${f['file']}', f['seconds'] is num ? '${(f['seconds'] as num).toStringAsFixed(2)} s' : ''),
         if (files.length > 8) Text('and ${files.length - 8} more', style: const TextStyle(fontSize: 11, color: Neon.dim)),
         const SizedBox(height: 6),
-        const Text('Find them in Files › Audio & MIDI › Sample packs; long-press one to save a copy.',
-          style: TextStyle(fontSize: 11, color: Neon.dim)),
+        Text('Find them in Files › Audio & MIDI › Sample packs; ${PointerInput.hold} one to save a copy.',
+          style: const TextStyle(fontSize: 11, color: Neon.dim)),
       ]),
     );
   }

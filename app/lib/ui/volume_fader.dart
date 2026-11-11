@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 
 import '../model/project.dart' show kMaxMixGain;
 import 'motion.dart';
+import 'pointer_input.dart';
 import 'theme.dart';
 
 /// The fader taper (owner, 2026-11-10: like REAPER's). A track's or the master's `volume` is a linear gain (1 is
@@ -99,8 +100,8 @@ class _VolumeFaderState extends State<VolumeFader> {
   final Set<int> _fingers = {};
   bool _active = false;
 
-  void _move(double delta, double length) {
-    final fine = HardwareKeyboard.instance.isShiftPressed || _fingers.length > 1;
+  void _move(double delta, double length, {bool? fine}) {
+    fine ??= HardwareKeyboard.instance.isShiftPressed || _fingers.length > 1;
     final from = _pos ?? VolumeTaper.position(widget.value);
     final next = (from + delta / math.max(1.0, length) * (fine ? VolumeFader.fine : 1)).clamp(0.0, 1.0).toDouble();
     // Crossing 0 dB ticks once, like a knob reaching its centre.
@@ -114,6 +115,14 @@ class _VolumeFaderState extends State<VolumeFader> {
       _pos = null;
       _active = false;
     });
+    widget.onChangeEnd?.call();
+  }
+
+  // The mouse wheel: 2% of the travel a turn (a fifth of that with Shift); the burst's end is one change.
+  void _wheel(int dir, bool fine) => _move(dir * 0.02 * (fine ? VolumeFader.fine : 1), 1, fine: false);
+
+  void _wheelEnd() {
+    _pos = null;
     widget.onChangeEnd?.call();
   }
 
@@ -143,7 +152,11 @@ class _VolumeFaderState extends State<VolumeFader> {
           onPointerCancel: (e) => _fingers.remove(e.pointer),
           child: LayoutBuilder(builder: (context, box) {
             final length = widget.vertical ? box.maxHeight : box.maxWidth;
-            return GestureDetector(
+            return WheelSteps(
+              onStep: _wheel,
+              onEnd: _wheelEnd,
+              cursor: widget.vertical ? SystemMouseCursors.resizeUpDown : SystemMouseCursors.resizeLeftRight,
+              child: GestureDetector(
               behavior: HitTestBehavior.opaque,
               onDoubleTap: () {
                 Motion.tick();
@@ -160,7 +173,7 @@ class _VolumeFaderState extends State<VolumeFader> {
                 size: Size(box.maxWidth.isFinite ? box.maxWidth : 40, box.maxHeight.isFinite ? box.maxHeight : 40),
                 painter: _FaderPainter(p, widget.color, widget.vertical, _active),
               ),
-            );
+            ));
           }),
         ),
       ),

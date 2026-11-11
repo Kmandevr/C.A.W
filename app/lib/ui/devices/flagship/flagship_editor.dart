@@ -13,6 +13,7 @@ import '../visuals/wavetable_view.dart';
 import '../../../model/device_target.dart';
 import '../../../model/flagship_shapes.dart' show filterTypeNames;
 import 'flagship_mod_fx.dart';
+import '../../pointer_input.dart';
 
 const flagshipComponentId = 'org.caw.synth.flagship';
 
@@ -65,7 +66,7 @@ class FlagshipSynthPage extends StatelessWidget {
       const _Group('FILTERS', 'Shape the oscillators\' tone. Drag a curve: sideways for cutoff, up for resonance.'),
       DeviceColumns(minWidth: 340, children: [for (var f = 1; f <= 2; f++) FilterCard(f, initiallyOpen: wide || f == 1)]),
       const FilterRoutingCard(),
-      const _Group('MODULATORS', 'Tap a source chip above, then tap knobs. Or drag the chip onto a knob.'),
+      _Group('MODULATORS', '${PointerInput.tapCap} a source chip above, then ${PointerInput.tap} knobs. Or drag the chip onto a knob.'),
       DeviceColumns(minWidth: 320, children: const [EnvelopesCard(), LfosCard()]),
       const VoiceCard(),
     ]));

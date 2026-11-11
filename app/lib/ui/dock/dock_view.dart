@@ -8,6 +8,7 @@ import '../glass.dart';
 import '../haptics.dart';
 import '../motion.dart';
 import '../theme.dart';
+import '../pointer_input.dart';
 import '../tokens.dart';
 import 'layout.dart';
 
@@ -562,7 +563,7 @@ class _Tab extends StatelessWidget {
       ),
     );
     if (!draggable) return label;
-    return LongPressDraggable<String>(
+    return HoldDraggable<String>(
       data: id,
       dragAnchorStrategy: pointerDragAnchorStrategy,
       hapticFeedbackOnStart: false,

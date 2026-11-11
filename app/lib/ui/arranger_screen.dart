@@ -18,6 +18,7 @@ import '../model/pattern_doc.dart';
 import '../model/project.dart';
 import '../model/record_modes.dart';
 import '../model/settings.dart';
+import 'pointer_input.dart';
 import 'arrange/audio_clip_view.dart';
 import 'arrange/audio_input_ui.dart';
 import 'audio_file_actions.dart';
@@ -215,6 +216,25 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
         // REAPER's Delete removes the selected items; with no clip selected it deletes the track as before.
         if (s.selectedClipIds.isEmpty) return false;
         s.deleteSelected();
+      case 'arranger.clip.copy':
+        if (!s.copySelectedClips()) _router?.toast('Select clips to copy');
+      case 'arranger.clip.cut':
+        if (!s.cutSelectedClips()) _router?.toast('Select clips to cut');
+      case 'arranger.clip.paste':
+        final track = s.project.layers.where((l) => l.id == s.selectedLayerId && !l.isFolder).firstOrNull ??
+            s.visibleLayers.where((l) => !l.isFolder).firstOrNull;
+        if (ClipClipboard.items.isEmpty) {
+          _router?.toast('Copy clips first');
+        } else if (track == null || !s.pasteClips(track, s.editStep)) {
+          _router?.toast('Nothing to paste on this track');
+        }
+      case 'arranger.clip.selectAll':
+        if (!s.selectAllClips()) _router?.toast('No clips');
+      case 'arranger.clip.selectNone':
+        // Esc clears the clip and time selections, and leaves Select mode.
+        s.clearClipSelection();
+        s.clearTimeSelection();
+        setState(() => _selectMode = false);
       case 'arranger.clip.selectMode':
         setState(() => _selectMode = !_selectMode);
       case 'arranger.loop.toggle':
@@ -335,7 +355,15 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
     _setZoom(_zoomFrom + (_zoomTarget - _zoomFrom) * t, focal: _zoomFocal);
   }
 
+  /// The mouse pointer panning the view (middle-drag or Space+drag), if any.
+  int? _panPointer;
+
   void _touchDown(PointerDownEvent e, double headW) {
+    if (startsMousePan(e)) {
+      _panPointer = e.pointer;
+      if (e.buttons == kPrimaryMouseButton) SpacePan.claim();
+      return;
+    }
     if (e.kind != PointerDeviceKind.touch) return;
     // During a clip or track drag a second finger toggles copy (the phone's Ctrl) instead of starting a pinch; during
     // a clip picked up with a long press it frees the clip from the grid while it rests (owner, 2026-11-11).
@@ -366,6 +394,7 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
   }
 
   void _touchMove(PointerMoveEvent e, double headW) {
+    if (e.pointer == _panPointer) return panBy(e.delta, h: _hScroll, v: _drag.vScroll);
     if (!_touches.containsKey(e.pointer)) return;
     _touches[e.pointer] = e.localPosition;
     if (_touches.length != 2) return;
@@ -383,6 +412,7 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
   int? _resting;
 
   void _touchUp(PointerEvent e) {
+    if (e.pointer == _panPointer) _panPointer = null;
     if (e.pointer == _resting) {
       _resting = null;
       _drag.free.value = false;
@@ -733,7 +763,7 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
         // Loop-recorded takes (lib/model/live_midi.dart): pick the one the clip plays.
         if (clip.takes.length > 1) MenuAction('takes', 'Takes (${clip.takes.length})…', Icons.layers_outlined,
             section: clipSection),
-        if (widget.onOpenPattern != null) const MenuAction('edit', 'Open in Sounds', Icons.open_in_new,
+        if (widget.onOpenPattern != null) const MenuAction('edit', 'Open in Build', Icons.open_in_new,
             section: clipSection),
         const MenuAction('copy', 'Duplicate independently', Icons.copy, section: edit),
         const MenuAction('linked', 'Duplicate linked', Icons.link, section: edit),
@@ -791,11 +821,19 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
     if (v == 'delete') s.removeClip(layer, clip);
   }
 
+  /// The + Track button's tooltip, in the words of the input in use.
+  static String get _addTrackTip => 'Add a track (${PointerInput.hold} for a folder, audio or a template)';
+
   _TrackCallbacks _callbacks(List<ModuleDoc> patterns) => _TrackCallbacks(
     onTap: (l) => _openTrack(l),
     onFx: (l) => _openTrack(l, tab: FocusTab.fx),
     onMenu: (l, at) => _trackMenu(l, at, patterns),
     onClipMenu: _clipMenu,
+    // A mouse's double-click on a MIDI clip opens its notes, as the menu's Edit notes does.
+    onClipOpen: (l, c) {
+      widget.state.activateClip(l, c);
+      _focus(l.id, tab: FocusTab.clip);
+    },
     onAudioOpen: (l) => _focus(l.id, tab: FocusTab.clip),
     selectMode: () => _selectMode,
     onMarquee: (phase, at, additive) => switch (phase) {
@@ -951,14 +989,16 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
             onSecondaryTapUp: (d) => showAddTrackMenu(context, s, d.globalPosition),
             child: narrow
               // The tooltip shows on hover only: a long press opens the add-track menu.
-              ? Tooltip(message: 'Add track', triggerMode: TooltipTriggerMode.manual,
+              ? Tooltip(message: _addTrackTip, triggerMode: TooltipTriggerMode.manual,
                   child: TextButton(key: const ValueKey('arrange-add-track'), onPressed: s.addLayer,
                     onLongPress: () => showAddTrackMenu(context, s, menuAnchorOf(context)),
                     style: TextButton.styleFrom(minimumSize: const Size(48, 48), shape: const CircleBorder()),
                     child: const Icon(Icons.add, color: Neon.green)))
-              : TextButton.icon(key: const ValueKey('arrange-add-track'), onPressed: s.addLayer,
+              // A desktop's hover names the menu behind it (a finger's long press shows no tooltip).
+              : Tooltip(message: _addTrackTip, triggerMode: TooltipTriggerMode.manual,
+                  child: TextButton.icon(key: const ValueKey('arrange-add-track'), onPressed: s.addLayer,
                   onLongPress: () => showAddTrackMenu(context, s, menuAnchorOf(context)),
-                  icon: const Icon(Icons.add, size: 17), label: const Text('Track')))),
+                  icon: const Icon(Icons.add, size: 17), label: const Text('Track'))))),
           IconButton(key: const ValueKey('arrange-browse'), onPressed: () => setState(() => _browser = !_browser),
             color: _browser ? Neon.blue : Neon.dim, icon: const Icon(Icons.folder_open),
             tooltip: 'Files: drag one onto a track'),
@@ -1259,12 +1299,15 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
 /// What a track header, lane or clip asks of the arranger.
 class _TrackCallbacks {
   const _TrackCallbacks({required this.onTap, required this.onFx, required this.onMenu, required this.onClipMenu,
-    required this.selectMode, required this.onMarquee, this.onAudioOpen});
+    required this.onClipOpen, required this.selectMode, required this.onMarquee, this.onAudioOpen});
   final ValueChanged<LayerDoc> onTap, onFx;
   final void Function(LayerDoc layer, Offset at) onMenu;
   final void Function(LayerDoc layer, ClipDoc clip, Offset at) onClipMenu;
 
-  /// An audio clip's double-tap: the track's Clip tab (its inspector).
+  /// A mouse's double-click on a MIDI clip: its notes, in the focus panel's Clip tab.
+  final void Function(LayerDoc layer, ClipDoc clip) onClipOpen;
+
+  /// An audio clip's double-click, or its menu's Clip settings…: the track's Clip tab (its inspector).
   final void Function(LayerDoc layer)? onAudioOpen;
 
   /// Whether Select mode is on: a tap on a clip adds or removes it, a long-press drag in a lane draws a box.
@@ -1527,7 +1570,9 @@ class _HeaderDoubleTap extends DoubleTapGestureRecognizer {
   _HeaderDoubleTap({super.debugOwner});
 
   @override
-  bool isPointerAllowed(PointerDownEvent event) => !_onHeaderButton && super.isPointerAllowed(event);
+  bool isPointerAllowed(PointerDownEvent event) =>
+      // A mouse click selects at once: the right-click opens the menu instead (owner, 2026-11-11).
+      !_onHeaderButton && !isMousePointer(event.kind) && super.isPointerAllowed(event);
 }
 
 double _gainDb(double g) => g <= 0.001 ? -60 : (20 * math.log(g) / math.ln10).clamp(-60.0, 12.0).toDouble();
@@ -1649,14 +1694,32 @@ class _TimelineLaneState extends State<_TimelineLane> {
   /// modifiers, "Arrange view, right drag").
   bool _marquee = false;
 
+  /// A mouse's left drag on empty space draws a time selection at once (owner, 2026-11-11; a finger holds first):
+  /// where it went down, until it has moved [_selectSlop]; then whether a selection was drawn, so the click's tap
+  /// doesn't also reset it.
+  double? _selectFrom;
+  bool _mouseSelected = false;
+  static const double _selectSlop = 4;
+
   void _drawDown(PointerDownEvent e) {
+    _mouseSelected = false;
+    _selectFrom = null;
+    // The middle button and Space+drag pan the view (the screen's own listener).
+    if (startsMousePan(e)) return;
     if (e.kind == PointerDeviceKind.mouse && e.buttons == kSecondaryMouseButton) {
       _marquee = true;
       widget.callbacks.onMarquee(_Marquee.start, e.position, HardwareKeyboard.instance.isShiftPressed);
       return;
     }
-    if (e.kind != PointerDeviceKind.mouse || e.buttons != kPrimaryMouseButton ||
-        !HardwareKeyboard.instance.isControlPressed) {
+    if (!isMousePointer(e.kind) || e.buttons != kPrimaryMouseButton) return;
+    if (!HardwareKeyboard.instance.isControlPressed) {
+      // In Select mode the drag draws a box around clips; otherwise a time selection.
+      if (widget.callbacks.selectMode()) {
+        _marquee = true;
+        widget.callbacks.onMarquee(_Marquee.start, e.position, true);
+      } else {
+        _selectFrom = e.localPosition.dx;
+      }
       return;
     }
     final at = _snapped(e.localPosition.dx);
@@ -1665,6 +1728,17 @@ class _TimelineLaneState extends State<_TimelineLane> {
 
   void _drawMove(PointerMoveEvent e) {
     if (_marquee) return widget.callbacks.onMarquee(_Marquee.move, e.position, false);
+    final from = _selectFrom;
+    if (from != null) {
+      final x = e.localPosition.dx;
+      if (!_mouseSelected) {
+        if ((x - from).abs() < _selectSlop) return;
+        _mouseSelected = true;
+        state.beginTimeSelection((from / widget.stepW).round());
+      }
+      state.updateTimeSelection((x / widget.stepW).round());
+      return;
+    }
     final d = _drawing;
     if (d == null) return;
     final to = math.max(d.$1 + 1, _snapped(e.localPosition.dx, up: true));
@@ -1675,6 +1749,11 @@ class _TimelineLaneState extends State<_TimelineLane> {
     if (_marquee) {
       _marquee = false;
       return widget.callbacks.onMarquee(_Marquee.end, e.position, false);
+    }
+    if (_selectFrom != null) {
+      _selectFrom = null;
+      if (_mouseSelected) state.endTimeSelection();
+      return;
     }
     final d = _drawing;
     if (d == null) return;
@@ -1709,6 +1788,11 @@ class _TimelineLaneState extends State<_TimelineLane> {
         // drag creates a time selection without stealing normal timeline navigation.
         // A tap sets the edit cursor; stopped, play then starts there and Split cuts there (REAPER).
         onTapUp: (d) {
+          // A mouse drag that drew a time selection keeps it.
+          if (_mouseSelected) {
+            _mouseSelected = false;
+            return;
+          }
           final step = (d.localPosition.dx / stepW).round();
           state.setTimeSelection(step, step);
           if (!state.meters.playing) state.seekTo(step.toDouble());
@@ -1939,6 +2023,7 @@ typedef _Ghost = ({Rect rect, Rect clip, Color color, bool copy});
 class _TimelineClipState extends State<_TimelineClip> {
   double dx = 0, resizeDx = 0, trimDx = 0;
   (bool, bool) _tapKeys = (false, false);
+  final _clicks = ClickCounter();
   bool dragging = false, resizing = false, trimming = false, sourceDragging = false;
   int? _lastSnap;
 
@@ -2212,9 +2297,17 @@ class _TimelineClipState extends State<_TimelineClip> {
         Positioned.fill(child: MediaQuery(
           data: mq.copyWith(gestureSettings: const DeviceGestureSettings(touchSlop: kTouchSlop / 2)),
           // The modifiers count as they were when the click went down: the tap itself comes after the double-tap wait.
-          child: Listener(onPointerDown: (_) =>
-              _tapKeys = (HardwareKeyboard.instance.isControlPressed, HardwareKeyboard.instance.isShiftPressed),
-          child: GestureDetector(
+          child: Listener(onPointerDown: (e) {
+            _tapKeys = (HardwareKeyboard.instance.isControlPressed, HardwareKeyboard.instance.isShiftPressed);
+            _clicks.down(e);
+          },
+          // A double tap opens the clip menu (owner, 2026-11-11), which replaced the double tap that opened the notes:
+          // its first item, "Edit notes", does what that did. A mouse's click answers at once instead, and its
+          // double-click opens the notes; the right-click opens the menu.
+          child: TouchDoubleTap(
+          onDoubleTapDown: (d) => _doubleAt = d.globalPosition,
+          onDoubleTap: () => widget.callbacks.onClipMenu(widget.layer, c, _doubleAt),
+          child: MouseRegion(cursor: SystemMouseCursors.grab, child: GestureDetector(
           key: ValueKey('clip-${c.id}'),
           // A long press picks the clip up (owner, 2026-11-11); a double tap, or a right-click, opens its menu.
           onLongPressStart: _lift,
@@ -2222,6 +2315,7 @@ class _TimelineClipState extends State<_TimelineClip> {
           onLongPressEnd: _liftEnd,
           onSecondaryTapUp: (d) => widget.callbacks.onClipMenu(widget.layer, c, d.globalPosition),
           onTap: () {
+            if (_clicks.doubleClick) return widget.callbacks.onClipOpen(widget.layer, c);
             final (ctrl, shift) = _tapKeys;
             // REAPER (UG 7.2.1): Ctrl-click adds or removes a clip, Shift-click selects the range to it. A tap in
             // Select mode adds or removes it, the phone's way.
@@ -2235,10 +2329,6 @@ class _TimelineClipState extends State<_TimelineClip> {
               widget.state.selectClip(widget.layer, c);
             }
           },
-          // A double tap opens the clip menu (owner, 2026-11-11), which replaced the double tap that opened the notes:
-          // its first item, "Edit notes", does what that did.
-          onDoubleTapDown: (d) => _doubleAt = d.globalPosition,
-          onDoubleTap: () => widget.callbacks.onClipMenu(widget.layer, c, _doubleAt),
           dragStartBehavior: DragStartBehavior.down,
           onPanStart: _start,
           onPanUpdate: _update,
@@ -2271,7 +2361,7 @@ class _TimelineClipState extends State<_TimelineClip> {
                 ]))),
             ]),
           ),
-        )))),
+        )))))),
         // The clip's notes as a mini piano roll (REAPER), from a cached picture of its pattern; under the edges.
         if (preview != null) Positioned.fill(child: IgnorePointer(child: RepaintBoundary(
           child: CustomPaint(key: ValueKey('clip-preview-${c.id}'), painter: ClipPreviewPainter(preview))))),

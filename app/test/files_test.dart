@@ -10,6 +10,7 @@ import 'package:caw/model/project.dart';
 import 'package:caw/ui/file_manager_screen.dart';
 import 'package:caw/ui/files/asset_picker.dart';
 import 'package:caw/ui/frame/sections.dart';
+import 'package:caw/ui/pointer_input.dart' show HoldDraggable;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -243,8 +244,8 @@ void main() {
     await _pump(tester, s, const Size(1200, 800));
     await tester.tap(find.text('Built-in').first);
     await tester.pump();
-    final gain = tester.widget<LongPressDraggable<AssetDrag>>(find.descendant(
-        of: find.byKey(const ValueKey('native:org.caw.gain')), matching: find.byType(LongPressDraggable<AssetDrag>)));
+    final gain = tester.widget<HoldDraggable<AssetDrag>>(find.descendant(
+        of: find.byKey(const ValueKey('native:org.caw.gain')), matching: find.byType(HoldDraggable<AssetDrag>)));
     expect(gain.data?.kind, AssetKind.nativeEffect);
     expect(gain.data?.id, 'org.caw.gain');
     expect(s.folderAssets(s.folderAt('audio/patterns')!).first.drag?.kind, AssetKind.pattern);
