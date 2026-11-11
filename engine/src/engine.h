@@ -142,7 +142,13 @@ public:
     void setMetronomeSound(double volume, int sound) noexcept;
     // A test tone: [seconds] (0..10) of a 440 Hz sine at -12 dBFS after the master, playing or not; 0 ends it.
     void testTone(double seconds) noexcept;
-    bool testToneSounding() const noexcept { return toneFlag_.load(std::memory_order_relaxed); }
+    // Whether a tone is asked for or still plays: a request the audio thread has not taken yet, or the state it
+    // published at its last callback (so a request ended before any callback, or too short to be a sample, is not).
+    bool testToneSounding() const noexcept {
+        return toneRequest_.load(std::memory_order_acquire) > 0 || toneActive_.load(std::memory_order_acquire);
+    }
+    // Drops any request and the tone in progress. Only while no process() runs (the device is closed).
+    void resetTestTone() noexcept;
     // Sound quality (caw.h CAW_QUALITY_*): the built-ins read it while they play (quality.h). Normal by default.
     void setQuality(int quality) noexcept;
     int quality() const noexcept { return quality_.load(std::memory_order_relaxed); }
@@ -294,9 +300,10 @@ private:
     double clickPhase_ = 0, clickInc_ = 0, clickAmp_ = 0;
     std::atomic<float> clickVolume_{1.0f};
     std::atomic<int> clickSound_{0};
-    // The test tone: a request in samples from the control thread (-1: none), then the audio thread's own state.
+    // The test tone: a request in samples from the control thread (-1: none, 0: end it), then the audio thread's
+    // own state, which it alone publishes in toneActive_ (whether frames are left after its last callback).
     std::atomic<int64_t> toneRequest_{-1};
-    std::atomic<bool> toneFlag_{false};
+    std::atomic<bool> toneActive_{false};
     int64_t toneLeft_ = 0, toneLen_ = 0;
     double tonePhase_ = 0;
     void mixTestTone(float* left, float* right, int frames) noexcept;

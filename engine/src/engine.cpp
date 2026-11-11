@@ -2793,14 +2793,23 @@ void Engine::setMetronomeSound(double volume, int sound) noexcept {
 void Engine::testTone(double seconds) noexcept {
     const double s = std::isfinite(seconds) ? std::clamp(seconds, 0.0, 10.0) : 0.0;
     toneRequest_.store(static_cast<int64_t>(s * sr_), std::memory_order_release);
-    if (s > 0) toneFlag_.store(true, std::memory_order_relaxed);
+}
+
+void Engine::resetTestTone() noexcept {
+    toneRequest_.store(-1, std::memory_order_release);
+    toneLeft_ = toneLen_ = 0;
+    toneActive_.store(false, std::memory_order_release);
 }
 
 // The test tone, after everything else (the limiter included): 0.25 (-12 dBFS) of 440 Hz with 10 ms fades. A request
 // to end it early fades it out over those 10 ms.
 void Engine::mixTestTone(float* left, float* right, int frames) noexcept {
     const int64_t ramp = std::max<int64_t>(1, static_cast<int64_t>(0.01 * sr_));
-    const int64_t req = toneRequest_.exchange(-1, std::memory_order_acq_rel);
+    // A start is published as sounding before its request is cleared, so testToneSounding() never reads false in
+    // between. A request that lands after the load is left for the next callback.
+    int64_t req = toneRequest_.load(std::memory_order_acquire);
+    if (req > 0) toneActive_.store(true, std::memory_order_release);
+    if (req != -1 && !toneRequest_.compare_exchange_strong(req, -1, std::memory_order_acq_rel)) req = -1;
     if (req > 0) {
         toneLeft_ = toneLen_ = req;
         tonePhase_ = 0;
@@ -2808,7 +2817,10 @@ void Engine::mixTestTone(float* left, float* right, int frames) noexcept {
         toneLen_ -= toneLeft_ - ramp;
         toneLeft_ = ramp;
     }
-    if (toneLeft_ <= 0) return;
+    if (toneLeft_ <= 0) {
+        toneActive_.store(false, std::memory_order_release);
+        return;
+    }
     const double inc = kTwoPi * 440.0 / sr_;
     for (int j = 0; j < frames && toneLeft_ > 0; ++j, --toneLeft_) {
         const double done = static_cast<double>(toneLen_ - toneLeft_);
@@ -2820,7 +2832,7 @@ void Engine::mixTestTone(float* left, float* right, int frames) noexcept {
         left[j] = std::clamp(left[j] + v, -1.0f, 1.0f);
         right[j] = std::clamp(right[j] + v, -1.0f, 1.0f);
     }
-    if (toneLeft_ <= 0) toneFlag_.store(false, std::memory_order_relaxed);
+    toneActive_.store(toneLeft_ > 0, std::memory_order_release);
 }
 
 void Engine::releaseTouches() {

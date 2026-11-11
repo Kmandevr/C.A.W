@@ -192,6 +192,36 @@ TEST(the_test_tone_plays_while_stopped_and_ends) {
     caw_engine_destroy(c);
 }
 
+TEST(the_test_tone_flag_follows_what_the_audio_thread_plays) {
+    std::vector<float> a(512), b(512);
+    // Asked for and ended before the audio thread saw it: nothing sounds, and the flag says so (it used to stick).
+    Engine e(48000);
+    e.testTone(5);
+    e.testTone(0);
+    CHECK(!e.testToneSounding());
+    e.process(a.data(), b.data(), 512);
+    CHECK(!e.testToneSounding());
+    for (const float v : a) CHECK_EQ(v, 0.0f);
+    // Too short to be a sample at this rate: never sounding.
+    e.testTone(1e-6);
+    CHECK(!e.testToneSounding());
+    e.process(a.data(), b.data(), 512);
+    CHECK(!e.testToneSounding());
+    // A new request while one still plays keeps it sounding through the old one's end.
+    e.testTone(0.01);  // 480 frames: ends inside the next block
+    e.process(a.data(), b.data(), 512);
+    CHECK(!e.testToneSounding());
+    e.testTone(0.01);
+    e.process(a.data(), b.data(), 256);
+    e.testTone(0.02);  // lands while the first still has frames left
+    e.process(a.data(), b.data(), 256);  // the first ends here; the second is taken at the next callback
+    CHECK(e.testToneSounding());
+    e.process(a.data(), b.data(), 512);
+    CHECK(e.testToneSounding());
+    e.process(a.data(), b.data(), 512);
+    CHECK(!e.testToneSounding());
+}
+
 TEST(the_device_choice_is_kept_without_a_device) {
     char* list = caw_audio_devices();
     CHECK(std::string(list).find("\"devices\":[") != std::string::npos);

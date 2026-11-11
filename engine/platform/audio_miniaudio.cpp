@@ -96,10 +96,11 @@ void setError(const std::string& msg, char* error, int32_t len) {
 void stopLocked(CawEngine* e) {
     if (!e || !e->audio) return;
     auto* a = static_cast<Audio*>(e->audio);
-    ma_device_uninit(&a->device);
+    ma_device_uninit(&a->device);  // the callback has stopped once this returns
     ma_context_uninit(&a->context);
     delete a;
     e->audio = nullptr;
+    e->engine->resetTestTone();  // a tone cut off here would otherwise say it sounds until the device reopens
     if (gActive == e) gActive = nullptr;
 }
 
@@ -163,6 +164,7 @@ int32_t startLocked(CawEngine* e, char* error, int32_t error_len) {
         delete a;
         return 1;
     }
+    e->engine->resetTestTone();  // a request made while closed is stale (the callback is not running yet)
     r = ma_device_start(&a->device);
     if (r != MA_SUCCESS) {
         setError(std::string("can't start the audio device: ") + ma_result_description(r), error, error_len);
