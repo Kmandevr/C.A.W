@@ -95,6 +95,21 @@ public:
         return true;
     }
 
+    // Build frame `frame` from its harmonics' sine and cosine amounts: harmonic h is
+    // sinAmt[h - 1] sin(2 pi h p) + cosAmt[h - 1] cos(2 pi h p) for phase p 0..1 (an FFT's bins, as a renderer that
+    // measured a sampled cycle has them). Non-finite amounts count as 0; harmonics above frameSize/2 are ignored.
+    bool setFrameSinCos(int frame, const double* sinAmt, const double* cosAmt, int count) noexcept {
+        if (!ready(frame) || sinAmt == nullptr || cosAmt == nullptr) return false;
+        const int top = size_ / 2;
+        for (int h = 0; h <= top; ++h) sinAmt_[h] = cosAmt_[h] = 0.0;
+        for (int h = 1; h <= top && h <= count; ++h) {
+            sinAmt_[h] = finiteOr0(sinAmt[h - 1]);
+            cosAmt_[h] = finiteOr0(cosAmt[h - 1]);
+        }
+        buildLevels(frame);
+        return true;
+    }
+
     // Build frame `frame` from one cycle of a function: fn(phase) for phase 0..1 gives the sample. It is
     // sampled at frameSize points, measured into harmonics with a direct DFT (DC is dropped: an offset is
     // not useful in an oscillator) and band-limited per level like any other frame. A naive saw

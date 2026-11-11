@@ -11,9 +11,10 @@ import '../visuals/filter_curve.dart';
 import '../visuals/unison_view.dart';
 import '../visuals/wavetable_view.dart';
 import '../../../model/device_target.dart';
-import '../../../model/flagship_shapes.dart' show filterTypeNames;
+import '../../../model/flagship_shapes.dart' show filterTypeNames, warpNames;
 import 'flagship_mod_fx.dart';
 import '../../pointer_input.dart';
+import 'flagship_wavetable.dart';
 
 const flagshipComponentId = 'org.caw.synth.flagship';
 
@@ -178,11 +179,13 @@ class OscCard extends StatelessWidget {
       initiallyOpen: initiallyOpen,
       leading: DevicePower('${p}on'),
       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: [
-        LabeledRow('WAVETABLE', _roomy((roomy) => DeviceChoice('${p}table', maxSegments: roomy ? 5 : 0))),
+        // Six long names as segments from about 440 dp; narrower, a menu.
+        LabeledRow('WAVETABLE', LayoutBuilder(builder: (context, box) =>
+            DeviceChoice('${p}table', maxSegments: box.maxWidth >= 440 ? 6 : 0))),
         const SizedBox(height: 4),
         WavetableView(prefix: p),
-        LabeledRow('WARP', _roomy((roomy) => DeviceChoice('${p}warp', maxSegments: roomy ? 5 : 0,
-          labels: const ['None', 'Bend', 'Sync', 'Mirror', 'Quantize', 'FM', 'Fold']))),
+        ImportWavetableButton(prefix: p),
+        LabeledRow('WARP', _roomy((roomy) => DeviceChoice('${p}warp', maxSegments: roomy ? 5 : 0, labels: warpNames))),
         plainKnobs(p, const ['frame', 'warp_amt', 'level', 'pan']),
         const DeviceHeading('PITCH'),
         plainKnobs(p, const ['octave', 'semi', 'fine'], size: 42),

@@ -7,14 +7,19 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <memory>
+#include <mutex>
 #include <new>
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
+#include "component_samples.h"
 #include "caw/detmath.hpp"
 #include "caw/instrument.hpp"
 #include "caw/library/comb.hpp"
+#include "caw/library/convolver.hpp"
 #include "caw/library/delay.hpp"
 #include "caw/library/distortion.hpp"
 #include "caw/library/envelope.hpp"
@@ -24,6 +29,7 @@
 #include "caw/library/formant.hpp"
 #include "caw/library/lfo.hpp"
 #include "caw/library/oscillator.hpp"
+#include "caw/library/oversample.hpp"
 #include "caw/library/reverb.hpp"
 #include "caw/library/stereo.hpp"
 #include "caw/library/unison.hpp"
@@ -58,7 +64,14 @@ namespace {
 constexpr uint32_t kControlFrames = 16;
 constexpr uint32_t kVoices = 64;  // a voice can be 48 oscillator copies: 64 is plenty; the oldest is stolen past it
 constexpr uint32_t kOscs = 3, kFilters = 2, kEnvs = 3, kLfos = 3, kSlots = 16;
-constexpr int kTableCount = 5;
+constexpr int kTableCount = 5;  // the built-in tables
+constexpr int kUserTable = kTableCount, kTableChoices = kTableCount + 1;  // then "User": the imported one
+// The user wavetable's state (see "The user wavetable" below).
+constexpr uint32_t kWtMagic = 0x31545743u;        // "CWT1"
+constexpr uint32_t kWtImportMagic = 0x49545743u;  // "CWTI"
+constexpr uint32_t kUserFrameSize = 2048, kMaxUserFrames = 256, kWtHeader = 12, kWtImportHeader = 8;
+constexpr uint32_t kMaxWtWavBytes = 8u << 20;  // the import's WAV (a project keeps the decoded form)
+constexpr uint32_t kMaxWtStateBytes = kWtImportHeader + kMaxWtWavBytes;
 constexpr int kFrameSize = 1024;  // 512 harmonics: a full spectrum down to about 30 Hz at 48 kHz
 constexpr int kMaxCopies = lib::kMaxUnisonVoices;
 constexpr int kEcoCopies = 4;  // the unison cap at Eco quality
@@ -115,13 +128,16 @@ enum Source : int {
     kSrcBend, kSrcPressure, kSrcTimbre, kSrcModWheel, kSrcAccent, kSourceCount
 };
 enum FilterType : int { kLadderLp, kLadderHp, kLadderBp, kSvfLp, kSvfHp, kSvfBp, kSvfNotch, kComb, kFormant, kFilterTypeCount };
-enum Warp : int { kWarpNone, kWarpBend, kWarpSync, kWarpMirror, kWarpQuantize, kWarpFm, kWarpFold, kWarpCount };
+enum Warp : int { kWarpNone, kWarpBend, kWarpSync, kWarpMirror, kWarpQuantize, kWarpFm, kWarpFold, kWarpFmOsc, kWarpCount };
 enum Dest : int { kToFilter1, kToFilter2, kToBoth, kToBypass };
+// Osc FM's modulator: the oscillator before it, round the ring (osc 1 hears osc 3, 2 hears 1, 3 hears 2).
+constexpr uint32_t fmSource(uint32_t o) { return (o + kOscs - 1) % kOscs; }
 enum VoiceMode : int { kPoly, kMono, kLegato };
 
 constexpr std::string_view kOffOn[] = {"Off", "On"};
-constexpr std::string_view kTables[] = {"Basic", "Analog", "Vocal", "Harmonic", "Classic"};
-constexpr std::string_view kWarps[] = {"None", "Bend", "Sync", "Mirror", "Quantize", "FM", "Fold"};
+constexpr std::string_view kTables[] = {"Basic", "Analog", "Vocal", "Harmonic", "Classic", "User"};
+static_assert(sizeof(kTables) / sizeof(kTables[0]) == kTableChoices);
+constexpr std::string_view kWarps[] = {"None", "Bend", "Sync", "Mirror", "Quantize", "FM", "Fold", "Osc FM"};
 static_assert(sizeof(kWarps) / sizeof(kWarps[0]) == kWarpCount);
 constexpr std::string_view kStacks[] = {"Off", "Octave", "2 octaves", "Fifth", "Major chord", "Minor chord", "Harmonics"};
 constexpr std::string_view kDests[] = {"Filter 1", "Filter 2", "Both", "Bypass"};
@@ -320,6 +336,7 @@ const ModuleDescriptor& flagshipDescriptor() {
         m.domains = kDomainWhole | kDomainPerNote;  // #127: it renders into a voice bus (VoiceLanes)
         m.capabilities = kCapabilityNotesIn | kCapabilityMidiIn;  // the mod wheel
         m.cpuClass = CpuClass::Heavy;
+        m.maxStateBytes = kMaxWtStateBytes;  // the user wavetable (an import's WAV is the largest form)
         return m;
     }();
     return d;
@@ -443,6 +460,174 @@ const Tables& tables() {
     return t;
 }
 
+// ---------- The user wavetable (the component state) ----------
+
+// The User table is the instrument's saved state (caw_engine_set_component_state, stored in the project), in one
+// of two forms, both at state version 1:
+// - its own form, what saveState writes: "CWT1", the frame count (1..256), the frame size (2048), then every
+//   frame's 2048 samples as 16-bit little-endian PCM, the table normalised to a peak of full scale;
+// - an import: "CWTI", how to cut it (0: 2048-sample frames, the usual single-cycle table export; 1..256: that many
+//   equal frames, each resampled to 2048), then a WAV file's bytes (PCM or float, any channels: their mix).
+// An empty state is no table: User plays a sine. Everything is checked and refused whole on any fault (sizes,
+// counts, a silent table); nothing is clamped silently but a WAV's own decoder limits (30 s).
+static_assert(kWtHeader + kMaxUserFrames * kUserFrameSize * 2 <= kMaxWtStateBytes);
+
+struct UserTable {
+    std::vector<uint8_t> canonical;  // the "CWT1" form
+    lib::Wavetable table;
+};
+
+uint32_t wtLe32(const uint8_t* p) noexcept {
+    return static_cast<uint32_t>(p[0]) | (static_cast<uint32_t>(p[1]) << 8) | (static_cast<uint32_t>(p[2]) << 16) |
+           (static_cast<uint32_t>(p[3]) << 24);
+}
+void wtPut32(std::vector<uint8_t>& b, uint32_t v) {
+    for (int k = 0; k < 4; ++k) b.push_back(static_cast<uint8_t>(v >> (8 * k)));
+}
+
+// One cycle of `count` samples (from `at`, cyclic) at 2048 points, linearly between the samples.
+void cycleTo2048(const float* at, double count, float* out) noexcept {
+    const int64_t whole = static_cast<int64_t>(count);
+    for (uint32_t i = 0; i < kUserFrameSize; ++i) {
+        const double x = count * i / kUserFrameSize;
+        const int64_t i0 = static_cast<int64_t>(x), k = i0 < whole ? i0 : whole - 1;  // never past the cycle
+        const double f = x - static_cast<double>(k);
+        const float a = at[k], b = at[k + 1 < whole ? k + 1 : 0];
+        out[i] = static_cast<float>(a + (b - a) * f);
+    }
+}
+
+// The canonical form of a state (either form), or false. Control thread.
+bool canonicalUserTable(const uint8_t* src, uint32_t size, std::vector<uint8_t>& out) {
+    out.clear();
+    if (!src || size < kWtImportHeader) return false;
+    const uint32_t magic = wtLe32(src);
+    if (magic == kWtMagic) {
+        if (size < kWtHeader) return false;
+        const uint32_t frames = wtLe32(src + 4), frameSize = wtLe32(src + 8);
+        if (frames < 1 || frames > kMaxUserFrames || frameSize != kUserFrameSize) return false;
+        if (size != kWtHeader + frames * kUserFrameSize * 2u) return false;
+        out.assign(src, src + size);
+        return true;
+    }
+    if (magic != kWtImportMagic) return false;
+    const uint32_t split = wtLe32(src + 4);
+    if (split > kMaxUserFrames || size - kWtImportHeader > kMaxWtWavBytes) return false;
+    std::vector<float> mono;
+    std::string error;
+    if (!decodeWavBytes(src + kWtImportHeader, size - kWtImportHeader, 0.0, mono, error)) return false;
+    const size_t n = mono.size();
+    std::vector<float> table;
+    uint32_t frames = 0;
+    if (split == 0) {  // 2048-sample frames; a shorter file is one cycle
+        if (n < kUserFrameSize) {
+            if (n < 16) return false;
+            frames = 1;
+            table.resize(kUserFrameSize);
+            cycleTo2048(mono.data(), static_cast<double>(n), table.data());
+        } else {
+            if (n / kUserFrameSize > kMaxUserFrames) return false;
+            frames = static_cast<uint32_t>(n / kUserFrameSize);  // a partial frame at the end is left out
+            table.assign(mono.begin(), mono.begin() + static_cast<std::ptrdiff_t>(frames * kUserFrameSize));
+        }
+    } else {
+        const double length = static_cast<double>(n) / split;
+        if (length < 16.0) return false;  // under 16 samples a cycle: not a wavetable
+        frames = split;
+        table.resize(static_cast<size_t>(frames) * kUserFrameSize);
+        for (uint32_t f = 0; f < frames; ++f) {
+            const size_t from = static_cast<size_t>(f * length);
+            cycleTo2048(mono.data() + from, length, table.data() + static_cast<size_t>(f) * kUserFrameSize);
+        }
+    }
+    float peak = 0.0f;
+    for (const float v : table) peak = std::max(peak, std::fabs(v));
+    if (!(peak > 1e-6f) || !std::isfinite(peak)) return false;  // silent (or broken): nothing to play
+    out.reserve(kWtHeader + table.size() * 2);
+    wtPut32(out, kWtMagic);
+    wtPut32(out, frames);
+    wtPut32(out, kUserFrameSize);
+    for (const float v : table) {
+        const double q = std::floor(static_cast<double>(v) / peak * 32767.0 + 0.5);
+        const auto x = static_cast<int16_t>(q > 32767.0 ? 32767.0 : (q < -32767.0 ? -32767.0 : q));
+        out.push_back(static_cast<uint8_t>(static_cast<uint16_t>(x) & 0xFF));
+        out.push_back(static_cast<uint8_t>(static_cast<uint16_t>(x) >> 8));
+    }
+    return true;
+}
+
+// The table from its canonical form: each 2048-sample frame measured with an FFT, its first 512 harmonics (the
+// built-in tables' 1024-sample frames, DC dropped) band-limited per mip level, and the whole table scaled so its
+// loudest frame has a full-scale saw's RMS, as the built-in tables' frames do. Control thread; about 2 ms a frame on a
+// desktop core (256 frames: about half a second, 2026-11-11), so a table is built once while any instance holds it.
+std::shared_ptr<UserTable> buildUserTable(std::vector<uint8_t> canonical) {
+    auto u = std::make_shared<UserTable>();
+    const uint32_t frames = wtLe32(canonical.data() + 4);
+    constexpr int kH = kFrameSize / 2;
+    std::vector<double> sinAmt(static_cast<size_t>(frames) * kH), cosAmt(static_cast<size_t>(frames) * kH);
+    std::vector<double> re(kUserFrameSize), im(kUserFrameSize);
+    lib::Fft fft;
+    fft.prepare(kUserFrameSize);
+    double loudest = 0.0;
+    for (uint32_t f = 0; f < frames; ++f) {
+        const uint8_t* p = canonical.data() + kWtHeader + static_cast<size_t>(f) * kUserFrameSize * 2;
+        for (uint32_t i = 0; i < kUserFrameSize; ++i) {
+            re[i] = static_cast<int16_t>(static_cast<uint16_t>(p[2 * i] | (p[2 * i + 1] << 8))) / 32767.0;
+            im[i] = 0.0;
+        }
+        fft.forward(re.data(), im.data());
+        // x[n] = sum over h of (2/N)(Re X[h] cos(2 pi h n / N) - Im X[h] sin(2 pi h n / N)).
+        double power = 0.0;
+        for (int h = 1; h <= kH; ++h) {
+            const double s = -2.0 * im[h] / kUserFrameSize, c = 2.0 * re[h] / kUserFrameSize;
+            sinAmt[static_cast<size_t>(f) * kH + h - 1] = s;
+            cosAmt[static_cast<size_t>(f) * kH + h - 1] = c;
+            power += s * s + c * c;
+        }
+        loudest = std::max(loudest, std::sqrt(0.5 * power));
+    }
+    const double scale = loudest > 0.0 ? 0.57735026918962576 / loudest : 0.0;
+    for (double& a : sinAmt) a *= scale;
+    for (double& a : cosAmt) a *= scale;
+    u->table.prepare(static_cast<int>(frames), kFrameSize);
+    for (uint32_t f = 0; f < frames; ++f)
+        u->table.setFrameSinCos(static_cast<int>(f), &sinAmt[static_cast<size_t>(f) * kH], &cosAmt[static_cast<size_t>(f) * kH], kH);
+    u->canonical = std::move(canonical);
+    return u;
+}
+
+// Tables already built, shared by every instance holding the same one (a chain rebuilt, an undo, two tracks):
+// the same bytes are built once while any instance keeps them. Control thread (a lock, never the audio thread).
+std::shared_ptr<const UserTable> userTableFor(std::vector<uint8_t> canonical) {
+    static std::mutex lock;
+    static std::vector<std::weak_ptr<const UserTable>> built;
+    const std::lock_guard<std::mutex> hold(lock);
+    for (auto it = built.begin(); it != built.end();) {
+        std::shared_ptr<const UserTable> t = it->lock();
+        if (!t) {
+            it = built.erase(it);
+            continue;
+        }
+        if (t->canonical == canonical) return t;
+        ++it;
+    }
+    std::shared_ptr<const UserTable> t = buildUserTable(std::move(canonical));
+    built.push_back(t);
+    return t;
+}
+
+// What User plays with no table loaded: a sine.
+const lib::Wavetable& emptyUserTable() {
+    static const lib::Wavetable t = [] {
+        lib::Wavetable x;
+        x.prepare(1, kFrameSize);
+        const double one = 1.0;
+        x.setFrameHarmonics(0, &one, 1);
+        return x;
+    }();
+    return t;
+}
+
 // ---------- One oscillator's unison stack, per voice ----------
 
 inline float whole(float t) noexcept { return static_cast<float>(static_cast<int32_t>(t)); }  // floor, for t >= 0
@@ -486,8 +671,31 @@ struct OscKey {
     double position = 0, level = 0, pan = 0, pitch = 0, amount = 0;
     int warp = 0;
     int fmRatio = 1;
+    double modRatio = 1.0;  // Osc FM: the modulating oscillator's pitch over this one's (its octave, semitones, fine)
     lib::UnisonSettings unison{-1};
     bool operator==(const OscKey&) const = default;
+};
+
+// The fold warp's 2x decimator for one side (the half-band all-pass pair of lib::Oversampler2x's down()).
+struct Decimator2x {
+    lib::AllpassChain a0, a1;
+    double held = 0.0;
+    void set(const lib::HalfBandDesign& d) noexcept {
+        a0.set(d, 0);
+        a1.set(d, 1);
+        clear();
+    }
+    float down(const float* in) noexcept {
+        const double a = a0.process(in[0]);
+        const double b = a1.process(held);
+        held = in[1];
+        return static_cast<float>(0.5 * (a + b));
+    }
+    void clear() noexcept {
+        a0.clear();
+        a1.clear();
+        held = 0.0;
+    }
 };
 
 struct OscVoice {
@@ -509,6 +717,9 @@ struct OscVoice {
     int level[kMaxCopies] = {};      // the mip level each copy reads
     bool centred = false;            // every copy plays the same on both sides (no pan, no spread)
     float gainL[kMaxCopies] = {}, gainR[kMaxCopies] = {};
+    float monoGain[kMaxCopies] = {};  // a quarter of the copy's pan gains' sum (added twice: the mid), before the level
+    // The FM and fold warps' decimators (left, right, and the copy Osc FM hears), state the render moves on.
+    Decimator2x foldL, foldR, foldM;
     // The layout and pan gains, worked out again only when their settings change.
     lib::UnisonSettings layoutKey{-1};
     double panKey = 2.0;
@@ -566,15 +777,26 @@ CAW_FORCE_INLINE void addCopy(const float* A, const float* B, uint32_t p, uint32
     }
 }
 
-// Adds `n` frames of the stack, `first` frames into the control period, to L and R.
+// Osc FM's phase: t moved by w1 cycles per unit of the modulating oscillator's sample m (held to +-2, so a loud
+// unison stack cannot run the index away).
+inline float fmOscPhase(float t, float w1, float m) noexcept {
+    m = m < -2.0f ? -2.0f : (m > 2.0f ? 2.0f : m);
+    float y = t + w1 * m + 4.0f;  // w1 <= 1: y stays above 0
+    y -= whole(y);
+    return y < 0.99999994f ? y : 0.99999994f;
+}
+
+// Adds `n` frames of the stack, `first` frames into the control period, to L and R with the copies' gains gL, gR
+// (L and R may be the same buffer: a mono sum). `fm` is Osc FM's modulator for the whole period (null otherwise).
 template <int W, bool Morph>
-void addStack(const OscVoice& o, float* L, float* R, uint32_t n, uint32_t first) noexcept {
+void addStack(const OscVoice& o, const float* gL, const float* gR, float* L, float* R, uint32_t n, uint32_t first,
+              const float* fm) noexcept {
     if constexpr (W == kWarpNone) {
         for (int c = 0; c < o.count; ++c) {
             if (!o.a[c]) continue;
             const uint32_t step = o.step[c];
             const uint32_t p0 = o.phase[c] + first * step;
-            addCopy<Morph, 0>(o.a[c], o.b[c], p0, step, o.shift[c], o.gainL[c], o.gainR[c], o.mix, L, R, n);
+            addCopy<Morph, 0>(o.a[c], o.b[c], p0, step, o.shift[c], gL[c], gR[c], o.mix, L, R, n);
         }
         return;
     }
@@ -583,10 +805,45 @@ void addStack(const OscVoice& o, float* L, float* R, uint32_t n, uint32_t first)
         const float* A = o.a[c];
         const float* B = o.b[c];
         const float m = o.size[c], t0 = static_cast<float>(o.phase[c] * (1.0 / 4294967296.0)), dt = static_cast<float>(o.dt[c]);
-        const float gl = o.gainL[c], gr = o.gainR[c], mix = o.mix, w1 = o.w1, w2 = o.w2, w3 = o.w3;
+        const float gl = gL[c], gr = gR[c], mix = o.mix, w1 = o.w1, w2 = o.w2, w3 = o.w3;
         for (uint32_t i = 0; i < n; ++i) {
             float t = t0 + static_cast<float>(static_cast<int32_t>(first + i)) * dt;
             t -= whole(t);
+            float x;
+            if constexpr (W == kWarpFmOsc) x = fmOscPhase(t, w1, fm[first + i]) * m;
+            else x = warp<W>(t, w1, w2, w3) * m;
+            const int32_t k = static_cast<int32_t>(x);
+            const float fr = x - static_cast<float>(k);
+            float v = A[k] + (A[k + 1] - A[k]) * fr;
+            if constexpr (Morph) {
+                const float u = B[k] + (B[k + 1] - B[k]) * fr;
+                v += (u - v) * mix;
+            }
+            L[i] += v * gl;
+            R[i] += v * gr;
+        }
+    }
+}
+
+// The FM and fold warps at twice the rate: each copy is read (exactly: the table and the warped phase are smooth,
+// so reading between samples needs no interpolation filter), warped (and folded) at t and t + dt / 2, summed with
+// its gains, and the sum comes down through a half-band decimator. What FM's far sidebands and the folder make
+// above the high rate's Nyquist (up to 1.5 times the sample rate) lands in the decimator's stop band instead of
+// on the audible spectrum. R null: mono into L (gL).
+template <int W, bool Morph>
+void addTwice(OscVoice& o, const float* gL, const float* gR, float* L, float* R, uint32_t n, uint32_t first,
+             Decimator2x& dl, Decimator2x* dr) noexcept {
+    float hl[2 * kControlFrames] = {}, hr[2 * kControlFrames] = {};
+    for (int c = 0; c < o.count; ++c) {
+        if (!o.a[c]) continue;
+        const float* A = o.a[c];
+        const float* B = o.b[c];
+        const float m = o.size[c], t0 = static_cast<float>(o.phase[c] * (1.0 / 4294967296.0)), dt = static_cast<float>(o.dt[c]);
+        const float half = 0.5f * dt, gl = gL[c], gr = gR ? gR[c] : 0.0f, mix = o.mix, w1 = o.w1, w2 = o.w2, w3 = o.w3;
+        for (uint32_t i = 0; i < 2 * n; ++i) {
+            float t = t0 + static_cast<float>(static_cast<int32_t>(first + (i >> 1))) * dt + ((i & 1u) ? half : 0.0f);
+            t -= whole(t);
+            t = t < 0.99999994f ? t : 0.99999994f;
             const float x = warp<W>(t, w1, w2, w3) * m;
             const int32_t k = static_cast<int32_t>(x);
             const float fr = x - static_cast<float>(k);
@@ -595,31 +852,60 @@ void addStack(const OscVoice& o, float* L, float* R, uint32_t n, uint32_t first)
                 const float u = B[k] + (B[k + 1] - B[k]) * fr;
                 v += (u - v) * mix;
             }
-            if constexpr (W == kWarpFold) {
-                // A wavefolder on the read value (lib::fold's sin(x drive pi / 2)), drive w1, blended in by w2.
-                v += w2 * (sineCycles(0.25f * w1 * v + 64.0f) - v);
-            }
-            L[i] += v * gl;
-            R[i] += v * gr;
+            // A wavefolder on the read value (lib::fold's sin(x drive pi / 2)), drive w1, blended in by w2.
+            if constexpr (W == kWarpFold) v += w2 * (sineCycles(0.25f * w1 * v + 64.0f) - v);
+            hl[i] += v * gl;
+            hr[i] += v * gr;
         }
     }
+    for (uint32_t i = 0; i < n; ++i) L[i] += dl.down(hl + 2 * i);
+    if (dr)
+        for (uint32_t i = 0; i < n; ++i) R[i] += dr->down(hr + 2 * i);
 }
 
 template <int W>
-void addStackWarp(const OscVoice& o, float* L, float* R, uint32_t n, uint32_t first) noexcept {
-    if (o.mix != 0.0f) addStack<W, true>(o, L, R, n, first);
-    else addStack<W, false>(o, L, R, n, first);
+void addStackWarp(const OscVoice& o, const float* gL, const float* gR, float* L, float* R, uint32_t n, uint32_t first,
+                  const float* fm) noexcept {
+    if (o.mix != 0.0f) addStack<W, true>(o, gL, gR, L, R, n, first, fm);
+    else addStack<W, false>(o, gL, gR, L, R, n, first, fm);
 }
 
-void addOscillator(const OscVoice& o, float* L, float* R, uint32_t n, uint32_t first) noexcept {
+// addTwice for warp W: stereo through the left and right decimators, or mono (the halves summed once, as one
+// gain) through its own.
+template <int W>
+void addTwiceWarp(OscVoice& o, const float* gL, const float* gR, float* L, float* R, uint32_t n, uint32_t first,
+                  bool mono) noexcept {
+    if (mono) {
+        float g[kMaxCopies];
+        for (int c = 0; c < o.count; ++c) g[c] = 2.0f * o.monoGain[c];
+        if (o.mix != 0.0f) addTwice<W, true>(o, g, nullptr, L, nullptr, n, first, o.foldM, nullptr);
+        else addTwice<W, false>(o, g, nullptr, L, nullptr, n, first, o.foldM, nullptr);
+    } else if (o.mix != 0.0f) {
+        addTwice<W, true>(o, gL, gR, L, R, n, first, o.foldL, &o.foldR);
+    } else {
+        addTwice<W, false>(o, gL, gR, L, R, n, first, o.foldL, &o.foldR);
+    }
+}
+
+// The oscillator's stack into L and R (its gains, its level), or with `mono` into L alone at its pre-level mono
+// gains (what Osc FM hears of it). `fm`: Osc FM's modulator, period-indexed.
+void addOscillator(OscVoice& o, float* L, float* R, uint32_t n, uint32_t first, const float* fm,
+                   bool mono = false) noexcept {
+    const float* gL = mono ? o.monoGain : o.gainL;
+    const float* gR = mono ? o.monoGain : o.gainR;
+    if (mono) R = L;  // two half gains into one buffer: the mono sum
     switch (o.warpMode) {
-        case kWarpBend: addStackWarp<kWarpBend>(o, L, R, n, first); break;
-        case kWarpSync: addStackWarp<kWarpSync>(o, L, R, n, first); break;
-        case kWarpMirror: addStackWarp<kWarpMirror>(o, L, R, n, first); break;
-        case kWarpQuantize: addStackWarp<kWarpQuantize>(o, L, R, n, first); break;
-        case kWarpFm: addStackWarp<kWarpFm>(o, L, R, n, first); break;
-        case kWarpFold: addStackWarp<kWarpFold>(o, L, R, n, first); break;
-        default: addStackWarp<kWarpNone>(o, L, R, n, first); break;
+        case kWarpBend: addStackWarp<kWarpBend>(o, gL, gR, L, R, n, first, fm); break;
+        case kWarpSync: addStackWarp<kWarpSync>(o, gL, gR, L, R, n, first, fm); break;
+        case kWarpMirror: addStackWarp<kWarpMirror>(o, gL, gR, L, R, n, first, fm); break;
+        case kWarpQuantize: addStackWarp<kWarpQuantize>(o, gL, gR, L, R, n, first, fm); break;
+        case kWarpFm: addTwiceWarp<kWarpFm>(o, gL, gR, L, R, n, first, mono); break;
+        case kWarpFmOsc:
+            if (fm) addStackWarp<kWarpFmOsc>(o, gL, gR, L, R, n, first, fm);
+            else addStackWarp<kWarpNone>(o, gL, gR, L, R, n, first, fm);
+            break;
+        case kWarpFold: addTwiceWarp<kWarpFold>(o, gL, gR, L, R, n, first, mono); break;
+        default: addStackWarp<kWarpNone>(o, gL, gR, L, R, n, first, fm); break;
     }
 }
 
@@ -782,6 +1068,10 @@ struct Voice {
     lib::Lfo lfo[kLfos];  // the retriggered LFOs (a free one is the instrument's)
     lib::Lfo random;
     OscVoice osc[kOscs];
+    // Each oscillator's latest mono output (before its level) at each frame of the control period, for the one
+    // Osc FM modulates from it. Oscillators render in order, so 2 and 3 hear 1 and 2 in the same frames and 1
+    // hears 3 one period (16 frames) late: the same for any block size.
+    float fmBuf[kOscs][kControlFrames] = {};
     VoiceFilter filter[kFilters];
     bool parallel = false;
     double gain0 = 0.0, gain1 = 0.0;  // the level ramps from gain0 to gain1 over the control period
@@ -840,7 +1130,9 @@ public:
         try {
             sr_ = sampleRate > 0.0 && std::isfinite(sampleRate) ? sampleRate : 48000.0;
             quality_ = buildingQuality();
-            tables_ = &tables();
+            const Tables& built = tables();
+            for (int t = 0; t < kTableCount; ++t) table_[t] = &built.table[t];
+            table_[kUserTable] = user_ ? &user_->table : &emptyUserTable();
             for (auto& pair : combs_)
                 for (lib::CombFilter& c : pair) c.prepare(sr_, 20.0);
             chorus_.prepare(sr_);
@@ -854,6 +1146,36 @@ public:
         lastGiven_ = ~0u;  // the next block reads every value
         reset();
         return true;
+    }
+
+    // The user wavetable. Control thread, when the chain is built and before it plays (a state change rebuilds
+    // the chain: caw_engine_set_component_state), so the voices never read a table that goes away.
+    uint32_t stateVersion() const noexcept override { return 1; }
+    bool saveState(uint8_t* dst, uint32_t capacity, uint32_t& written) const noexcept override {
+        written = 0;
+        if (!user_) return true;
+        const size_t need = user_->canonical.size();
+        if (!dst || need > capacity) return false;
+        std::memcpy(dst, user_->canonical.data(), need);
+        written = static_cast<uint32_t>(need);
+        return true;
+    }
+    bool loadState(const uint8_t* src, uint32_t size, uint32_t version) noexcept override {
+        if (version != 1 || size > kMaxWtStateBytes) return false;
+        try {
+            std::shared_ptr<const UserTable> next;
+            if (size > 0) {
+                std::vector<uint8_t> canonical;
+                if (!canonicalUserTable(src, size, canonical)) return false;
+                next = userTableFor(std::move(canonical));
+            }
+            reset();  // no voice holds the old table's frames
+            user_ = std::move(next);
+            table_[kUserTable] = user_ ? &user_->table : &emptyUserTable();
+            return true;
+        } catch (...) {
+            return false;
+        }
     }
 
     void reset() noexcept override {
@@ -1311,7 +1633,9 @@ private:
         v.random.prepare(sr_);
         v.random.setSeed(v.seed ^ 0xA511E9B3U);
         v.random.retrigger();
+        std::memset(v.fmBuf, 0, sizeof v.fmBuf);
         if (!v.fresh) return;
+        for (OscVoice& o : v.osc) o.foldL.clear(), o.foldR.clear(), o.foldM.clear();
         v.shared = true;  // until its filter 1 is set unlike the shared one (then its own, to the note's end)
         for (uint32_t o = 0; o < kOscs; ++o) {
             const double start = base_[oscParam(o, kOscPhase)], randomness = base_[oscParam(o, kOscPhaseRand)];
@@ -1410,7 +1734,7 @@ private:
         const double position = clampd(frame, 0.0, 1.0);
         if (position == o.key.position) return;
         o.key.position = position;
-        const lib::Wavetable& table = tables_->table[o.key.table];
+        const lib::Wavetable& table = *table_[o.key.table];
         const double at = position * (table.frameCount() - 1);
         const int f0 = static_cast<int>(at), f1 = f0 + 1 < table.frameCount() ? f0 + 1 : f0;
         o.mix = static_cast<float>(at - f0);
@@ -1434,7 +1758,7 @@ private:
         }
         o.dest = clampi(at(kOscDest), 0, 3);
         OscKey key;
-        key.table = clampi(at(kOscTable), 0, kTableCount - 1);
+        key.table = clampi(at(kOscTable), 0, kTableChoices - 1);
         key.position = clampd(at(kOscFrame), 0.0, 1.0);
         key.level = clampd(at(kOscLevel), 0.0, 1.0);
         key.pan = clampd(at(kOscPan), -1.0, 1.0);
@@ -1445,6 +1769,12 @@ private:
         key.amount = clampd(at(kOscWarpAmount), 0.0, 1.0);
         key.warp = key.amount > 0.0 ? clampi(at(kOscWarp), 0, kWarpCount - 1) : kWarpNone;
         key.fmRatio = key.warp == kWarpFm ? clampi(P(fmRatioParam(index)), 1, 16) : 1;
+        if (key.warp == kWarpFmOsc) {  // the modulator's tuning against this one's (both follow the note)
+            const uint32_t m = fmSource(index);
+            const double offset = 12.0 * clampi(P(oscParam(m, kOscOctave)), -4, 4) + clampi(P(oscParam(m, kOscSemi)), -12, 12) +
+                                  clampd(P(oscParam(m, kOscFine)), -100.0, 100.0) / 100.0;
+            key.modRatio = exp2((offset - o.pitchOffset[0] - o.pitchOffset[1] - o.pitchOffset[2]) / 12.0);
+        }
         lib::UnisonSettings& u = key.unison;
         // Eco quality caps each oscillator at 4 copies (the outermost and the centre kept: the stack is laid out
         // again for 4, so its detune and spread stay as wide).
@@ -1456,7 +1786,7 @@ private:
         u.stack = static_cast<lib::UnisonStack>(clampi(at(kOscStack), 0, lib::kUnisonStackCount - 1));
         if (key == o.key) return;  // nothing moved: the copies keep their steps, levels and gains
 
-        const lib::Wavetable& table = tables_->table[key.table];
+        const lib::Wavetable& table = *table_[key.table];
         const double position = key.position * (table.frameCount() - 1);
         const int f0 = static_cast<int>(position), f1 = f0 + 1 < table.frameCount() ? f0 + 1 : f0;
         o.mix = static_cast<float>(position - f0);
@@ -1528,9 +1858,23 @@ private:
             case kWarpFold:
                 o.w1 = static_cast<float>(1.0 + 7.0 * amount);  // drive 1..8
                 o.w2 = static_cast<float>(amount < 0.25 ? 4.0 * amount : 1.0);
-                faster = o.w1;  // folding spreads the harmonics about as far as the drive
+                // Folding spreads the table's harmonics about as far as the drive; rendered at twice the rate, what
+                // goes up to 1.5 times the sample rate is filtered out, so half the drive keeps it there.
+                faster = 0.5 * o.w1 > 1.0 ? 0.5 * o.w1 : 1.0;
+                break;
+            case kWarpFmOsc:
+                // Up to one cycle of phase per unit of the modulator (an index of 2 pi for a full-scale sine). The
+                // fastest the modulated phase runs, for a sine modulator at its pitch: 1 + 2 pi depth ratio.
+                o.w1 = static_cast<float>(amount);
+                faster = 1.0 + kTwoPi * amount * key.modRatio;
                 break;
             default: break;
+        }
+        const bool twice = key.warp == kWarpFold || key.warp == kWarpFm;
+        if (twice && (o.warpMode != key.warp || o.key.table < 0)) {  // into FM or fold: fresh decimators
+            o.foldL.set(half_);
+            o.foldR.set(half_);
+            o.foldM.set(half_);
         }
         o.warpMode = key.warp;
         o.key = key;
@@ -1545,7 +1889,7 @@ private:
         if (pitch == o.key.pitch) return;
         o.key.pitch = pitch;
         o.hz = 440.0 * exp2((pitch - 69.0) / 12.0);
-        tuneCopies(o, tables_->table[o.key.table]);
+        tuneCopies(o, *table_[o.key.table]);
     }
 
     // Each copy's step, mip level, frames and gains, from the oscillator's pitch, frames and layout.
@@ -1571,6 +1915,7 @@ private:
             o.shift[c] = 32 - std::countr_zero(static_cast<uint32_t>(table.levelSize(k)));
             o.gainL[c] = static_cast<float>(o.panL[c] * key.level);
             o.gainR[c] = static_cast<float>(o.panR[c] * key.level);
+            o.monoGain[c] = static_cast<float>(0.25 * (o.panL[c] + o.panR[c]));
         }
         o.centred = true;
         for (int c = 0; c < o.count; ++c) o.centred = o.centred && (!o.a[c] || o.gainL[c] == o.gainR[c]);
@@ -1650,24 +1995,37 @@ private:
         float f1L[kControlFrames], f1R[kControlFrames], f2L[kControlFrames], f2R[kControlFrames];
         float byL[kControlFrames], byR[kControlFrames];
         bool bypass = false, second = v.filter[1].on;  // second: filter 2's path carries anything
-        for (const OscVoice& o : v.osc) {
+        bool feeds[kOscs] = {};  // Osc FM listens to it
+        for (uint32_t k = 0; k < kOscs; ++k) {
+            const OscVoice& o = v.osc[k];
             if (!o.on || o.count == 0) continue;
             bypass = bypass || o.dest == kToBypass;
             second = second || o.dest == kToFilter2 || (v.parallel && o.dest == kToBoth);
+            if (o.warpMode == kWarpFmOsc) feeds[fmSource(k)] = true;
         }
         // Whole periods cleared (a fixed count: inline stores, no memset call).
         zero(f1L), zero(f1R);
         if (second) zero(f2L), zero(f2R);
         if (bypass) zero(byL), zero(byR);
-        for (const OscVoice& o : v.osc) {
-            if (!o.on || o.count == 0) continue;
+        for (uint32_t k = 0; k < kOscs; ++k) {
+            OscVoice& o = v.osc[k];
+            if (!o.on || o.count == 0) {
+                if (feeds[k]) std::memset(v.fmBuf[k] + first, 0, n * sizeof(float));  // nothing to hear
+                continue;
+            }
+            const float* fm = o.warpMode == kWarpFmOsc ? v.fmBuf[fmSource(k)] : nullptr;
+            if (feeds[k]) {
+                float* M = v.fmBuf[k] + first;
+                std::memset(M, 0, n * sizeof(float));
+                addOscillator(o, M, nullptr, n, first, fm, true);
+            }
             switch (o.dest) {
-                case kToFilter2: addOscillator(o, f2L, f2R, n, first); break;
-                case kToBypass: addOscillator(o, byL, byR, n, first); break;
+                case kToFilter2: addOscillator(o, f2L, f2R, n, first, fm); break;
+                case kToBypass: addOscillator(o, byL, byR, n, first, fm); break;
                 case kToBoth:
                     if (v.parallel) {
                         float tL[kControlFrames] = {}, tR[kControlFrames] = {};
-                        addOscillator(o, tL, tR, n, first);
+                        addOscillator(o, tL, tR, n, first, fm);
                         for (uint32_t i = 0; i < n; ++i) {
                             f1L[i] += tL[i];
                             f1R[i] += tR[i];
@@ -1677,7 +2035,7 @@ private:
                         break;
                     }
                     [[fallthrough]];  // in series, filter 1 feeds filter 2 anyway
-                default: addOscillator(o, f1L, f1R, n, first); break;
+                default: addOscillator(o, f1L, f1R, n, first, fm); break;
             }
         }
         // Filter 1 linear and set like every other voice's (no slot moves it for this voice, no key tracking):
@@ -1904,7 +2262,9 @@ private:
     VoiceLanes lanes_;  // the host's voice bus for this block (#127), or none
     HeldNotes held_;  // mono and legato
     lib::CombFilter combs_[kVoices][kFilters * 2];
-    const Tables* tables_ = nullptr;
+    const lib::Wavetable* table_[kTableChoices] = {};  // the built-in tables, then User
+    std::shared_ptr<const UserTable> user_;            // the loaded user table (the state), or none
+    lib::HalfBandDesign half_{8, 0.04};               // the fold warp's decimators
     const std::atomic<int>* quality_ = nullptr;  // the building Engine's (quality.h)
     Clock clock_;
     const Transport* transport_ = nullptr;

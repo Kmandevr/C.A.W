@@ -1,4 +1,6 @@
 // Real-time checks on the whole Engine and its parameter resolver: the audio path never allocates or frees.
+#include <cmath>
+#include <cstdint>
 #include <cstring>
 #include <string>
 #include <vector>
@@ -640,4 +642,57 @@ TEST(device_midi_never_allocates_on_the_audio_thread) {
     CHECK(peak > 0.0f);
     CHECK_EQ(operations, 0u);
     CHECK_EQ(e.midiDropped(), 0u);
+}
+
+TEST(the_flagship_s_user_wavetable_and_twice_rate_warps_never_allocate_on_the_audio_thread) {
+    // A flagship playing its user wavetable (the state, a sine and a square frame) through Osc FM, FM and fold,
+    // its warps and table switched as it plays and its state replaced between rounds: no allocation or free.
+    std::vector<uint8_t> state = {'C', 'W', 'T', '1', 2, 0, 0, 0, 0, 8, 0, 0};
+    for (int f = 0; f < 2; ++f)
+        for (int i = 0; i < 2048; ++i) {
+            const double v = f == 0 ? std::sin(6.283185307179586 * i / 2048) : (i < 1024 ? 1.0 : -1.0);
+            const auto x = static_cast<uint16_t>(static_cast<int16_t>(v * 32767.0));
+            state.push_back(static_cast<uint8_t>(x & 0xFF));
+            state.push_back(static_cast<uint8_t>(x >> 8));
+        }
+    ProjectSpec p;
+    p.bpm = 150;
+    p.loopBars = 1;
+    p.modules.push_back({"pat", "---\nkind: pattern\nname: P\nlength: 16\n---\n0 C3 4 1\n0 G3 4 0.8\n4 D3 4 1\n8 E2 4 1\n12 A3 4 1\n"});
+    LayerSpec l = layer("f", "org.caw.synth.flagship", "pat");
+    l.instrument.params = {{"osc1_table", 5}, {"osc1_warp", 7}, {"osc1_warp_amt", 0.5}, {"osc2_on", 1}, {"osc2_warp", 6},
+                           {"osc2_warp_amt", 0.8}, {"osc2_unison", 5}, {"osc3_on", 1}, {"osc3_table", 5}, {"osc3_warp", 5},
+                           {"osc3_warp_amt", 0.6}};
+    l.instrument.hasState = true;
+    l.instrument.stateVersion = 1;
+    l.instrument.state = state;
+    p.layers.push_back(l);
+    Engine e(48000);
+    CHECK(e.setProject(p).find("\"ok\":true") != std::string::npos);
+    e.play();
+    std::vector<float> L(192), R(192);
+    for (int k = 0; k < 250; ++k) e.process(L.data(), R.data(), 192);  // warm up
+    std::size_t operations = 0;
+    float peak = 0.0f;
+    for (int round = 0; round < 6; ++round) {
+        if (round == 3) {  // a new table: the chain is rebuilt off the audio thread and crossfaded in
+            state[4] = 1;
+            state.resize(12 + 4096);
+            CHECK(e.setComponentState("f", Engine::kInstrumentIndex, state.data(), state.size(), 1));
+            for (int k = 0; k < 50; ++k) e.process(L.data(), R.data(), 192);  // the old chain retires
+        }
+        e.setComponentParam("f", Engine::kInstrumentIndex, "osc1_warp", 5 + round % 3);
+        e.setComponentParam("f", Engine::kInstrumentIndex, "osc2_warp", 7 - round % 3);
+        e.setComponentParam("f", Engine::kInstrumentIndex, "osc2_table", round % 6);
+        e.setComponentParam("f", Engine::kInstrumentIndex, "osc3_warp_amt", 0.2 * round);
+        e.noteOn("f", 300 + round, 48 + round, 1);
+        cawtest::AllocationScope scope;
+        for (int k = 0; k < 100; ++k) {
+            e.process(L.data(), R.data(), 192);
+            for (float v : L) peak = v > peak ? v : peak;
+        }
+        operations += scope.count();
+    }
+    CHECK_EQ(operations, 0u);
+    CHECK(peak > 0.01f);
 }
