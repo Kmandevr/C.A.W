@@ -525,6 +525,31 @@ void main() {
       expect(layer('a').clips.single.startSteps, 16);
     });
 
+    testWidgets('a finger tap selects a clip in the next frame; a quick second tap opens its menu as well',
+        (tester) async {
+      await pump(tester);
+      final clip = find.byKey(const ValueKey('clip-c1'));
+      await tester.tap(clip);
+      await tester.pump();
+      expect(s.selectedClipIds, {'c1'}, reason: 'no double-tap wait (owner, 2026-11-11)');
+      expect(find.text('Edit notes'), findsNothing);
+      await tester.pump(const Duration(milliseconds: 80));
+      await tester.tap(clip);
+      await tester.pumpAndSettle();
+      expect(find.text('Edit notes'), findsOneWidget, reason: 'the second tap adds the menu');
+      expect(s.selectedClipIds, {'c1'});
+      await tester.tapAt(const Offset(5, 5));
+      await settle(tester);
+
+      // Two taps further apart than the double-tap time are two taps: the second opens no menu.
+      await tester.tap(clip);
+      await tester.pump(kDoubleTapTimeout + const Duration(milliseconds: 50));
+      await tester.tap(clip);
+      await tester.pump();
+      expect(find.text('Edit notes'), findsNothing);
+      await settle(tester);
+    });
+
     testWidgets('a double tap on a clip opens its menu, in sections; a right-click too', (tester) async {
       await pump(tester);
       await doubleTap(tester, find.byKey(const ValueKey('clip-c1')));
