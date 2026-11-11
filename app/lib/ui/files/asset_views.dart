@@ -16,6 +16,8 @@ IconData assetIcon(FileAssetType t) => switch (t) {
       FileAssetType.cawLibrary => Icons.functions,
       FileAssetType.pattern => Icons.piano,
       FileAssetType.midiFile => Icons.queue_music,
+      FileAssetType.devicePreset => Icons.bookmarks_outlined,
+      FileAssetType.trackPreset => Icons.view_list_outlined,
     };
 
 Color assetColor(FileAssetType t) => switch (t) {
@@ -25,6 +27,7 @@ Color assetColor(FileAssetType t) => switch (t) {
       FileAssetType.cawGenerator => Neon.green,
       FileAssetType.cawLibrary => Neon.dim,
       FileAssetType.pattern || FileAssetType.midiFile => Neon.yellow,
+      FileAssetType.devicePreset || FileAssetType.trackPreset => Neon.green,
     };
 
 IconData folderIcon(FilesFolderKind k) => switch (k) {
@@ -38,6 +41,7 @@ IconData folderIcon(FilesFolderKind k) => switch (k) {
       FilesFolderKind.audio => Icons.music_note,
       FilesFolderKind.patterns => Icons.piano,
       FilesFolderKind.midiFiles => Icons.queue_music,
+      FilesFolderKind.presets => Icons.bookmarks_outlined,
       FilesFolderKind.packs => Icons.inventory_outlined,
     };
 

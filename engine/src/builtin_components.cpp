@@ -128,6 +128,13 @@ double paramAt(const AudioProcessBlock& b, uint32_t k, uint32_t i, double fallba
     return b.parameters[k].samples ? b.parameters[k].samples[i] : b.parameters[k].value;
 }
 
+// No knob among the first `count` ramps in this block (the usual case): each holds one value for every frame.
+bool steadyKnobs(const AudioProcessBlock& b, uint32_t count) noexcept {
+    for (uint32_t k = 0; k < count && k < b.parameterCount && b.parameters; ++k)
+        if (b.parameters[k].samples) return false;
+    return true;
+}
+
 // The shapes' per-sample maths is the Library's fast kind (fastmath.hpp: the same curves within 1e-9), and
 // what depends only on the knobs is worked out once per value, not per sample.
 class Distortion final : public ModuleProcessor {
@@ -136,6 +143,7 @@ public:
     using ModuleProcessor::process;
     bool process(const AudioProcessBlock& b) noexcept override {
         if (!stereo(b)) return false;
+        if (steadyKnobs(b, 5) && static_cast<int>(paramAt(b, 0, 0, 0.0)) == 0) return processDrive(b);
         for (uint32_t i = 0; i < b.frames; ++i) {
             const int shape = static_cast<int>(paramAt(b, 0, i, 0.0));
             const double amount = paramAt(b, 1, i, 4.0), bits = paramAt(b, 2, i, 8.0);
@@ -162,6 +170,37 @@ public:
     }
 
 private:
+    // Drive with every knob holding still: the knobs read once, and a sample the same on both sides (a centred
+    // instrument) driven once for both (2026-11-10 second performance pass; the same bits as the loop above).
+    bool processDrive(const AudioProcessBlock& b) noexcept {
+        saturator_.set(paramAt(b, 1, 0, 4.0));
+        const double mix = paramAt(b, 3, 0, 1.0), out = paramAt(b, 4, 0, 1.0);
+        const float* inL = b.input.channels[0];
+        const float* inR = b.input.channels[1];
+        float* outL = b.output.channels[0];
+        float* outR = b.output.channels[1];
+        const auto shape = [&](double x, double y) noexcept { return static_cast<float>((x + (y - x) * mix) * out); };
+        uint32_t i = 0;
+        for (; i + 1 < b.frames; i += 2) {  // two frames at a time (Saturator::process2: the same bits)
+            const double l[2] = {inL[i], inL[i + 1]}, r[2] = {inR[i], inR[i + 1]};
+            double yl[2], yr[2];
+            saturator_.process2(l, yl);
+            const bool same = r[0] == l[0] && r[1] == l[1];
+            if (!same) saturator_.process2(r, yr);
+            for (int j = 0; j < 2; ++j) {
+                outL[i + j] = shape(l[j], yl[j]);
+                outR[i + j] = same ? outL[i + j] : shape(r[j], yr[j]);
+            }
+        }
+        for (; i < b.frames; ++i) {
+            const double l = inL[i], r = inR[i];
+            const float yl = shape(l, saturator_.process(l));
+            outL[i] = yl;
+            outR[i] = r == l ? yl : shape(r, saturator_.process(r));
+        }
+        return true;
+    }
+
     lib::Saturator saturator_;
     double bits_ = -1.0, steps_ = 128.0;
 };
@@ -214,6 +253,20 @@ public:
         if (!stereo(b)) return false;
         // The host gives the tempo even while stopped; without a transport at all, the last tempo seen holds.
         if (b.transport) tempo_ = b.transport->tempo;
+        if (steadyKnobs(b, 5)) {  // the knobs and the target read once (the same bits as the loop below)
+            const int sync = static_cast<int>(paramAt(b, 0, 0, 3.0));
+            const double target = sync > 0 && sync < 8 ? lib::noteSeconds(tempo_, kDivisionWholeNotes[sync])
+                                                       : paramAt(b, 1, 0, 375.0) / 1000.0;
+            const double feedback = paramAt(b, 2, 0, 0.45), cross = paramAt(b, 3, 0, 1.0), mix = paramAt(b, 4, 0, 0.35);
+            for (uint32_t i = 0; i < b.frames; ++i) {
+                seconds_ = seconds_ < 0.0 ? target : seconds_ + (target - seconds_) * glide_;
+                float l = b.input.channels[0][i], r = b.input.channels[1][i];
+                delay_.process(seconds_, feedback, cross, mix, l, r);
+                b.output.channels[0][i] = l;
+                b.output.channels[1][i] = r;
+            }
+            return true;
+        }
         for (uint32_t i = 0; i < b.frames; ++i) {
             const int sync = static_cast<int>(paramAt(b, 0, i, 3.0));
             const double target = sync > 0 && sync < 8 ? lib::noteSeconds(tempo_, kDivisionWholeNotes[sync])
@@ -270,6 +323,21 @@ public:
     // block's size doesn't move it), the sweep gliding in between: perceptually the per-sample sweep.
     bool process(const AudioProcessBlock& b) noexcept override {
         if (!stereo(b)) return false;
+        if (steadyKnobs(b, 3)) {  // the knobs read once (the same bits as the loop below)
+            const double rate = paramAt(b, 0, 0, 0.6), depth = paramAt(b, 1, 0, 0.5), mix = paramAt(b, 2, 0, 0.5);
+            for (uint32_t i = 0; i < b.frames; ++i) {
+                if (left_ == 0) {
+                    chorus_.control(rate, depth, kControlFrames);
+                    left_ = kControlFrames;
+                }
+                --left_;
+                float l = b.input.channels[0][i], r = b.input.channels[1][i];
+                chorus_.step(mix, l, r);
+                b.output.channels[0][i] = l;
+                b.output.channels[1][i] = r;
+            }
+            return true;
+        }
         for (uint32_t i = 0; i < b.frames; ++i) {
             if (left_ == 0) {
                 chorus_.control(paramAt(b, 0, i, 0.6), paramAt(b, 1, i, 0.5), kControlFrames);

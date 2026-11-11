@@ -115,6 +115,49 @@ public:
         gain_ = 1.0 / detTanh(a);
     }
     double process(double x) const noexcept { return fastTanh(finiteOr0(x) * amount_) * gain_; }
+    // process() on two values at once, the same bits: on GCC and Clang as a two-wide vector (SSE2, NEON), each
+    // lane process()'s operations in its order (fastTanh, its fastExp and floorSmall through a 32-bit truncation,
+    // exact for these magnitudes), elsewhere two calls.
+    void process2(const double* in, double* out) const noexcept {
+#if defined(__GNUC__)
+        typedef double D2 __attribute__((vector_size(16)));
+        typedef int64_t I2 __attribute__((vector_size(16)));
+        typedef int32_t W2 __attribute__((vector_size(8)));
+        const D2 zero = {0.0, 0.0}, one = {1.0, 1.0};
+        D2 x = {in[0], in[1]};
+        x = x - x == zero ? x : zero;  // finiteOr0
+        x = x * amount_;
+        const D2 a = x < zero ? -x : x;
+        const I2 big = a > 19.0;
+        const D2 y = -2.0 * (big ? D2{19.0, 19.0} : a);  // fastExp(-2a), where a <= 19: x above -708, below 709
+        const D2 q = y * 1.4426950408889634 + 0.5;
+        const D2 t = __builtin_convertvector(__builtin_convertvector(q, W2), D2);  // floorSmall: |q| < 2^31
+        const D2 k = t > q ? t - 1.0 : t;
+        const D2 r = (y - k * 6.93147180369123816490e-01) - k * 1.90821492927058770002e-10;
+        D2 p = D2{1.0 / 40320.0, 1.0 / 40320.0};
+        p = p * r + 1.0 / 5040.0;
+        p = p * r + 1.0 / 720.0;
+        p = p * r + 1.0 / 120.0;
+        p = p * r + 1.0 / 24.0;
+        p = p * r + 1.0 / 6.0;
+        p = p * r + 0.5;
+        p = p * r + 1.0;
+        p = p * r + 1.0;
+        const I2 scale = (__builtin_convertvector(k, I2) + 1023) << 52;
+        D2 e;
+        __builtin_memcpy(&e, &scale, sizeof e);
+        e = p * e;
+        const D2 th = (one - e) / (one + e);
+        D2 v = big ? one : th;
+        v = x < zero ? -v : v;
+        v = v * gain_;
+        out[0] = v[0];
+        out[1] = v[1];
+#else
+        out[0] = process(in[0]);
+        out[1] = process(in[1]);
+#endif
+    }
 
 private:
     double amount_ = 1.0, gain_ = 1.3130352854993312;  // 1 / tanh(1)
