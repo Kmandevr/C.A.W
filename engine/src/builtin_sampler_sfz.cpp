@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <cstring>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
@@ -9,9 +10,11 @@
 #include <set>
 #include <sstream>
 
+#include "asset_store.h"
 #include "builtin_sampler.h"
 #include "json.h"
 #include "sample_pack.h"
+#include "utf8_path.h"
 
 namespace caw {
 
@@ -149,15 +152,15 @@ bool importSfzText(std::string_view text, const std::string& baseDir, SamplerPro
         std::replace(sample.begin(), sample.end(), '\\', '/');
         std::string prefix = control.count("default_path") ? control["default_path"] : "";
         std::replace(prefix.begin(), prefix.end(), '\\', '/');
-        std::filesystem::path p(sample);
-        if (!p.is_absolute()) p = std::filesystem::path(baseDir) / prefix / sample;
-        z.path = p.lexically_normal().generic_string();
+        std::filesystem::path p = utf8Path(sample);
+        if (!p.is_absolute()) p = utf8Path(baseDir) / utf8Path(prefix) / utf8Path(sample);
+        z.path = pathText(p.lexically_normal());
         bool keySet = false;
         for (const auto& [k, v] : all) {
             double x = 0;
             const bool isNum = sfzNumber(v, x);
             auto whole = [&](int lo, int hi) { return static_cast<int>(std::clamp(std::round(x), double(lo), double(hi))); };
-            auto frames = [&]() { return static_cast<int64_t>(std::max(0.0, std::round(x))); };
+            auto frames = [&]() { return static_cast<int64_t>(std::clamp(std::round(x), 0.0, 9e15)); };  // fits int64_t
             if (k == "sample" || k == "trigger") continue;
             if (k == "loop_mode" || k == "loopmode") {
                 z.loopModeSet = true;
@@ -281,8 +284,8 @@ std::string exportSfzText(const SamplerProgram& p, const std::string& sfzDir, co
     for (const SamplerZone& z : p.zones) {
         std::string path = z.path;
         std::error_code ec;
-        const fs::path rel = fs::path(z.path).lexically_relative(fs::path(sfzDir));
-        if (!rel.empty() && rel.generic_string().rfind("..", 0) != 0) path = rel.generic_string();
+        const fs::path rel = utf8Path(z.path).lexically_relative(utf8Path(sfzDir));
+        if (!rel.empty() && pathText(rel).rfind("..", 0) != 0) path = pathText(rel);
         s += "<region> sample=" + path + " lokey=" + std::to_string(z.lokey) + " hikey=" + std::to_string(z.hikey) +
              " pitch_keycenter=" + std::to_string(z.root) + " lovel=" + std::to_string(z.lovel) +
              " hivel=" + std::to_string(z.hivel);
@@ -319,23 +322,54 @@ std::string listJson(const std::vector<std::string>& v) {
     return s + "]";
 }
 std::string fail(const std::string& e) { return "{\"ok\":false,\"error\":\"" + jsonEscape(e) + "\"}"; }
+std::string lowerAscii(std::string s) {
+    for (char& c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    return s;
+}
+// Export copies only what a zone can play: a regular audio file (.wav, .flac or .mp3 whose first bytes say so)
+// no larger than the asset limit. The state comes from a project, which may come from anyone: without this, a
+// zone path could copy any readable file (a key, a database) into the folder being exported and shared.
+bool copyableSample(const std::filesystem::path& src, std::string& why) {
+    std::error_code ec;
+    if (!std::filesystem::is_regular_file(src, ec)) {
+        why = "not a file";
+        return false;
+    }
+    const auto size = std::filesystem::file_size(src, ec);
+    if (ec || size < 4 || size > kMaxAssetFileBytes) {
+        why = "not a sample (empty, or larger than 1 GB)";
+        return false;
+    }
+    const std::string ext = lowerAscii(pathText(src.extension()));
+    unsigned char h[4] = {};
+    std::ifstream f(src, std::ios::binary);
+    f.read(reinterpret_cast<char*>(h), 4);
+    const bool riff = std::memcmp(h, "RIFF", 4) == 0 || std::memcmp(h, "RF64", 4) == 0;
+    const bool flac = std::memcmp(h, "fLaC", 4) == 0;
+    const bool mp3 = std::memcmp(h, "ID3", 3) == 0 || (h[0] == 0xFF && (h[1] & 0xE0) == 0xE0);
+    if (!f || !((ext == ".wav" && riff) || (ext == ".flac" && flac) || (ext == ".mp3" && mp3))) {
+        why = "only WAV, FLAC and MP3 samples are copied";
+        return false;
+    }
+    return true;
+}
 }  // namespace
 
 std::string sfzImportJson(const std::string& path) {
     try {
         std::error_code ec;
-        const auto size = std::filesystem::file_size(path, ec);
+        const auto size = std::filesystem::file_size(utf8Path(path), ec);
         if (ec) return fail(path + " can't be read");
         if (size > kMaxSfzBytes) return fail("the SFZ file is larger than 4 MB");
-        std::ifstream f(path, std::ios::binary);
+        std::ifstream f(utf8Path(path), std::ios::binary);
         std::string text((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
         SamplerProgram p;
         std::vector<std::string> warnings;
         std::string error;
-        const std::string dir = std::filesystem::path(path).parent_path().generic_string();
+        const std::string dir = pathText(utf8Path(path).parent_path());
         if (!importSfzText(text, dir, p, warnings, error)) return fail(error);
         for (const SamplerZone& z : p.zones)
-            if (!std::filesystem::exists(z.path, ec)) warnings.push_back("missing sample: " + z.path);
+            if (!std::filesystem::exists(utf8Path(z.path), ec)) warnings.push_back("missing sample: " + z.path);
         return "{\"ok\":true,\"error\":\"\",\"zones\":" + std::to_string(p.zones.size()) + ",\"warnings\":" +
                listJson(warnings) + ",\"state\":" + samplerStateJson(p) + "}";
     } catch (...) {
@@ -349,7 +383,7 @@ std::string sfzExportJson(std::string_view stateJson, const std::string& sfzPath
         SamplerProgram p;
         std::string error;
         if (!parseSamplerState(stateJson, p, error)) return fail(error);
-        const fs::path out(sfzPath);
+        const fs::path out = utf8Path(sfzPath);
         const fs::path dir = out.parent_path();
         std::error_code ec;
         if (!fs::is_directory(dir, ec)) return fail("the folder for " + sfzPath + " doesn't exist");
@@ -358,32 +392,37 @@ std::string sfzExportJson(std::string_view stateJson, const std::string& sfzPath
             const fs::path samples = dir / "samples";
             fs::create_directories(samples, ec);
             std::map<std::string, std::string> copied;  // source -> new path
+            // Names already taken, compared without case (Windows and Android storage ignore it): files already in
+            // samples/ are never overwritten, and two sources never share a name.
             std::set<std::string> names;
+            for (const auto& e : fs::directory_iterator(samples, ec)) names.insert(lowerAscii(pathText(e.path().filename())));
             for (SamplerZone& z : p.zones) {
                 auto it = copied.find(z.path);
                 if (it == copied.end()) {
-                    const fs::path src(z.path);
-                    std::string stem = sanitizeFileName(src.stem().string());
-                    const std::string dotted = src.extension().string();
+                    const fs::path src = utf8Path(z.path);
+                    std::string why;
+                    if (!copyableSample(src, why)) return fail("can't copy " + z.path + ": " + why);
+                    std::string stem = sanitizeFileName(pathText(src.stem()));
+                    const std::string dotted = pathText(src.extension());
                     const std::string ext = dotted.size() > 1 ? "." + sanitizeFileName(dotted.substr(1)) : "";
                     std::string name = stem + ext;
-                    for (int k = 2; names.count(name); ++k) name = stem + "_" + std::to_string(k) + ext;
-                    names.insert(name);
-                    const fs::path dst = samples / name;
-                    fs::copy_file(src, dst, fs::copy_options::overwrite_existing, ec);
+                    for (int k = 2; names.count(lowerAscii(name)); ++k) name = stem + "_" + std::to_string(k) + ext;
+                    names.insert(lowerAscii(name));
+                    const fs::path dst = samples / utf8Path(name);
+                    fs::copy_file(src, dst, fs::copy_options::none, ec);  // never over a file (names are unique)
                     if (ec) return fail("can't copy " + z.path + ": " + ec.message());
-                    files.push_back(dst.generic_string());
-                    it = copied.emplace(z.path, dst.generic_string()).first;
+                    files.push_back(pathText(dst));
+                    it = copied.emplace(z.path, pathText(dst)).first;
                 }
                 z.path = it->second;
             }
         }
-        const std::string text = exportSfzText(p, dir.generic_string(), out.stem().string());
+        const std::string text = exportSfzText(p, pathText(dir), pathText(out.stem()));
         std::ofstream f(out, std::ios::binary | std::ios::trunc);
         f << text;
         f.close();
         if (!f) return fail("can't write " + sfzPath);
-        files.insert(files.begin(), out.generic_string());
+        files.insert(files.begin(), pathText(out));
         return "{\"ok\":true,\"error\":\"\",\"files\":" + listJson(files) + "}";
     } catch (...) {
         return fail("the SFZ file could not be written");

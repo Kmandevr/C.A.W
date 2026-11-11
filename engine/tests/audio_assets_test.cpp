@@ -694,6 +694,56 @@ TEST(sfz_export_copies_samples_and_the_c_api_round_trips) {
     std::filesystem::remove_all(dir);
 }
 
+TEST(sfz_export_never_overwrites_copies_only_audio_and_keeps_unicode_names) {
+    const std::string dir = tempDir("sfzexport2");
+    const std::string a = writeWav(dir + "/src a.wav", 48000, 1, 100, [](int64_t i, int) { return noiseAt(i, 0); });
+    const std::string u = writeWav(dir + "/\xc3\xbcn\xc3\xafc\xc3\xb6de.wav", 48000, 1, 100, [](int64_t i, int) { return noiseAt(i, 1); });
+    std::filesystem::create_directories(dir + "/out/samples");
+    {
+        std::ofstream keep(dir + "/out/samples/Src_A.wav", std::ios::binary);  // the same name but for case
+        keep << "keep";
+    }
+    const std::string state = "{\"zones\":[{\"path\":\"" + jsonEscape(a) + "\"},{\"path\":\"" + jsonEscape(u) + "\",\"lokey\":70}]}";
+    char* r = caw_sfz_export(state.c_str(), (dir + "/out/kit.sfz").c_str(), 1);
+    const std::string out = r;
+    caw_free(r);
+    CHECK(out.find("\"ok\":true") != std::string::npos);
+    CHECK(out.find("samples/src_a_2.wav") != std::string::npos);
+    CHECK_EQ(std::filesystem::file_size(dir + "/out/samples/Src_A.wav"), std::uintmax_t{4});
+    CHECK(std::filesystem::exists(dir + "/out/samples/src_a_2.wav"));
+    // A zone naming something that is not audio is not copied.
+    {
+        std::ofstream secret(dir + "/secret.wav", std::ios::binary);
+        secret << "password=hunter2";
+    }
+    const std::string bad = "{\"zones\":[{\"path\":\"" + jsonEscape(dir + "/secret.wav") + "\"}]}";
+    r = caw_sfz_export(bad.c_str(), (dir + "/out/bad.sfz").c_str(), 1);
+    const std::string refused = r;
+    caw_free(r);
+    CHECK(refused.find("\"ok\":false") != std::string::npos);
+    CHECK(!std::filesystem::exists(dir + "/out/samples/secret.wav"));
+    std::filesystem::remove_all(dir);
+}
+
+TEST(huge_sfz_offsets_and_peak_times_are_clamped_before_the_cast) {
+    SamplerProgram p;
+    std::vector<std::string> warnings;
+    std::string error;
+    CHECK(importSfzText("<region> sample=a.wav offset=1e300 end=1e300 loop_start=1e300 loop_end=1e300\n", "/k", p, warnings, error));
+    if (p.zones.size() == 1) {
+        CHECK_EQ(p.zones[0].offset, int64_t{9000000000000000});
+        CHECK_EQ(p.zones[0].loopEnd, int64_t{9000000000000000});
+    }
+    const std::string dir = tempDir("peaksclamp");
+    const std::string a = writeWav(dir + "/a.wav", 48000, 1, 1000, [](int64_t i, int) { return noiseAt(i, 0); });
+    CawEngine* e = caw_engine_create(48000);
+    float out[8];
+    CHECK_EQ(caw_asset_peaks(e, a.c_str(), 1e300, 2e300, 4, 0, out), 0);
+    CHECK(caw_asset_peaks(e, a.c_str(), 0, 1e300, 4, 0, out) >= 0);
+    caw_engine_destroy(e);
+    std::filesystem::remove_all(dir);
+}
+
 // ---------------------------------------------------------------- input, monitoring and recording
 
 namespace {

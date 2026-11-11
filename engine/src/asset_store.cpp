@@ -11,6 +11,7 @@
 
 #include "../platform/decode_audio.h"
 #include "json.h"
+#include "utf8_path.h"
 
 namespace caw {
 
@@ -301,12 +302,13 @@ std::shared_ptr<const AudioAsset> AssetStore::load(const std::string& path, doub
         return found;
     }
     std::error_code ec;
-    const uint64_t size = fs::file_size(path, ec);
+    const fs::path file = utf8Path(path);
+    const uint64_t size = fs::file_size(file, ec);
     if (ec) {
         error = path + " can't be read";
         return nullptr;
     }
-    const auto when = fs::last_write_time(path, ec);
+    const auto when = fs::last_write_time(file, ec);
     const int64_t time = ec ? 0 : static_cast<int64_t>(when.time_since_epoch().count());
     const std::string key = keyOf(path, rate);
     {
@@ -328,7 +330,7 @@ std::shared_ptr<const AudioAsset> AssetStore::load(const std::string& path, doub
         error = path + ": out of memory";
         return nullptr;
     }
-    std::FILE* f = std::fopen(path.c_str(), "rb");
+    std::FILE* f = openFile(file, "rb");
     const bool read = f && std::fread(bytes.data(), 1, bytes.size(), f) == bytes.size();
     if (f) std::fclose(f);
     if (!read) {

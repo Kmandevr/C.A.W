@@ -50,8 +50,9 @@ int32_t caw_asset_peaks(CawEngine* e, const char* path, double start_seconds, do
     auto a = caw::AssetStore::global().load(path, e->engine->sampleRate(), error);
     if (!a) return -1;
     const double rate = a->rate;
-    const int64_t s = static_cast<int64_t>(std::floor(std::max(0.0, start_seconds) * rate));
-    const int64_t z = static_cast<int64_t>(std::floor(std::max(0.0, end_seconds) * rate));
+    // Clamped before the cast (a huge time would not fit int64_t); readPeaks clamps to the asset.
+    const int64_t s = static_cast<int64_t>(std::floor(std::clamp(start_seconds * rate, 0.0, 9e15)));
+    const int64_t z = static_cast<int64_t>(std::floor(std::clamp(end_seconds * rate, 0.0, 9e15)));
     if (z <= s) return 0;
     return caw::readPeaks(*a, s, z, buckets, channel < 0 ? 0u : static_cast<uint32_t>(channel), out);
 } catch (...) {
