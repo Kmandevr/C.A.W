@@ -79,7 +79,7 @@ class _FxStackState extends State<FxStack> {
         textAlign: TextAlign.center, style: TextStyle(color: Neon.dim))));
     }
     return DragTarget<AssetDrag>(
-      onWillAcceptWithDetails: (d) => d.data.kind != AssetKind.pattern && d.data.kind != AssetKind.midiFile,
+      onWillAcceptWithDetails: (d) => d.data.kind != AssetKind.pattern && d.data.kind != AssetKind.midiFile && d.data.kind != AssetKind.audioFile,
       onAcceptWithDetails: (d) => dropOnTrack(context, s, layer, d.data),
       builder: (context, hovering, _) => DecoratedBox(
         decoration: BoxDecoration(

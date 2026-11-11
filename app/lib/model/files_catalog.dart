@@ -9,6 +9,7 @@ import '../engine/engine.dart' show NativeComponentTrust;
 import '../ui/frame/sections.dart';
 import 'app_state.dart';
 import 'arrange_fx.dart';
+import 'audio_clips.dart';
 import 'cpp_component.dart';
 import 'native_trust.dart';
 import 'project.dart';
@@ -25,6 +26,7 @@ enum FileAssetType {
   devicePreset,  // a user preset of one device (app-wide, not in the project)
   trackPreset,   // a user track preset: an instrument and effects (app-wide)
   sampleFile,    // one WAV of a rendered sample pack (#164)
+  audioFile,     // an audio file the project uses (imported or recorded; API 18)
 }
 
 /// The search filters (icons in the toolbar): an asset passes when its group is on, or when none is on.
@@ -41,6 +43,7 @@ extension FileAssetTypeInfo on FileAssetType {
         FileAssetType.devicePreset => 'PRE',
         FileAssetType.trackPreset => 'TRK',
         FileAssetType.sampleFile => 'WAV',
+        FileAssetType.audioFile => audioBadge,
       };
 
   String get label => switch (this) {
@@ -52,20 +55,24 @@ extension FileAssetTypeInfo on FileAssetType {
         FileAssetType.devicePreset => 'Device preset',
         FileAssetType.trackPreset => 'Track preset',
         FileAssetType.sampleFile => 'Sample (WAV)',
+        FileAssetType.audioFile => 'Audio file',
       };
 
   FileAssetFilter get filter => switch (this) {
         FileAssetType.builtinEffect || FileAssetType.cppComponent || FileAssetType.devicePreset => FileAssetFilter.effects,
         FileAssetType.trackPreset => FileAssetFilter.instruments,
         FileAssetType.cppFile => FileAssetFilter.code,
-        FileAssetType.pattern || FileAssetType.midiFile || FileAssetType.sampleFile => FileAssetFilter.patterns,
+        FileAssetType.pattern || FileAssetType.midiFile || FileAssetType.sampleFile || FileAssetType.audioFile =>
+          FileAssetFilter.patterns,
       };
+
+  static const audioBadge = 'AUD';
 }
 
 /// One item in the browser.
 class FileAsset {
   FileAsset._(this.key, this.name, this.type, {this.module, this.cpp, this.filePath, this.native, this.midi, this.preset,
-    this.sample});
+    this.sample, this.audio});
 
   /// Unique within the project; also the favourites key (built-ins are app-wide).
   final String key;
@@ -78,6 +85,7 @@ class FileAsset {
   final MidiFileDoc? midi;       // for a [FileAssetType.midiFile]
   final UserPreset? preset;      // for a [FileAssetType.devicePreset] or [FileAssetType.trackPreset]
   final SampleFileInfo? sample;  // for a [FileAssetType.sampleFile]
+  final AudioAssetDoc? audio;    // for a [FileAssetType.audioFile]
 
   bool get builtin => type == FileAssetType.builtinEffect;
 
@@ -94,7 +102,10 @@ class FileAsset {
         FileAssetType.midiFile => AssetDrag(AssetKind.midiFile, midi!.id, name),
         FileAssetType.devicePreset => AssetDrag(AssetKind.devicePreset, preset!.id, name),
         FileAssetType.trackPreset => AssetDrag(AssetKind.trackPreset, preset!.id, name),
-        FileAssetType.cppFile || FileAssetType.sampleFile => null,
+        // Audio: a clip where it lands (a sample pack's WAV by its path, added to the project then).
+        FileAssetType.audioFile => AssetDrag(AssetKind.audioFile, audio!.id, name),
+        FileAssetType.sampleFile => AssetDrag(AssetKind.audioFile, sample!.path, name),
+        FileAssetType.cppFile => null,
       };
 
   /// An instrument plays a track's notes: a native one by its descriptor (or, before a project C++ component is
@@ -109,7 +120,7 @@ class FileAsset {
   /// The Build tab double-tap opens; null for built-ins (nothing to edit).
   BuildTab? get buildTab => switch (type) {
         FileAssetType.builtinEffect || FileAssetType.midiFile || FileAssetType.devicePreset ||
-            FileAssetType.trackPreset || FileAssetType.sampleFile => null,
+            FileAssetType.trackPreset || FileAssetType.sampleFile || FileAssetType.audioFile => null,
         FileAssetType.cppComponent || FileAssetType.cppFile => BuildTab(BuildTabKind.cpp, cpp!.componentId),
         _ => BuildTab(BuildTabKind.pattern, module!.id),
       };
@@ -122,7 +133,7 @@ class FileAsset {
 /// `code/cpp/<component entry id>`, `audio`, `audio/patterns`,
 /// `audio/midi`, `audio/samples` (sample packs), `audio/samples/<pack>`, `presets` (the user's presets, app-wide), `packs`.
 enum FilesFolderKind { favourites, effects, builtin, cppEffects, code, cppList, cppComponent, audio, patterns, midiFiles,
-  presets, packs, samplePacks, samplePack }
+  presets, packs, samplePacks, samplePack, audioFiles }
 
 class FilesFolder {
   const FilesFolder(this.path, this.label, this.kind, [this.children = const []]);
@@ -254,6 +265,11 @@ extension FilesCatalog on AppState {
             FileAsset._('preset:${p.id}', p.name, FileAssetType.devicePreset, preset: p, native: nativeInfo(p.componentId!)),
       ];
 
+  /// The project's audio files (imported and recorded), by name.
+  List<FileAsset> get audioAssets => [
+        for (final a in project.assets) FileAsset._('aud:${a.id}', a.name, FileAssetType.audioFile, audio: a),
+      ]..sort(_byName);
+
   /// The WAVs of every rendered sample pack.
   List<FileAsset> get sampleAssets => [for (final p in samplePacks) ..._packAssets(p)];
 
@@ -268,6 +284,7 @@ extension FilesCatalog on AppState {
         for (final c in project.cppComponents) ...cppFileAssets(c),
         ...moduleAssets,
         ...midiFileAssets,
+        ...audioAssets,
         ...presetAssets,
         ...sampleAssets,
       ];
@@ -293,6 +310,7 @@ extension FilesCatalog on AppState {
       FilesFolder('audio', 'Audio & MIDI', FilesFolderKind.audio, [
         const FilesFolder('audio/patterns', 'Patterns', FilesFolderKind.patterns),
         const FilesFolder('audio/midi', 'MIDI files', FilesFolderKind.midiFiles),
+        const FilesFolder('audio/files', 'Audio files', FilesFolderKind.audioFiles),
         FilesFolder('audio/samples', 'Sample packs', FilesFolderKind.samplePacks, [
           for (final p in samplePacks) FilesFolder('audio/samples/${p.name}', p.name, FilesFolderKind.samplePack),
         ]),
@@ -330,6 +348,7 @@ extension FilesCatalog on AppState {
           }(),
         FilesFolderKind.patterns => moduleAssets,
         FilesFolderKind.midiFiles => midiFileAssets,
+        FilesFolderKind.audioFiles => audioAssets,
         FilesFolderKind.presets => presetAssets,
         FilesFolderKind.samplePack => [
             for (final p in samplePacks)
@@ -369,6 +388,10 @@ extension FilesCatalog on AppState {
       final parts = a.midi!.parts.toSet();
       for (final l in project.layers) {
         if (l.clips.any((c) => parts.contains(c.patternId))) out.add(l.name);
+      }
+    } else if (a.audio != null) {
+      for (final l in project.layers) {
+        if (l.audioClips.any((c) => c.assetId == a.audio!.id || c.takes.contains(a.audio!.id))) out.add(l.name);
       }
     } else if (a.module != null) {
       final id = a.module!.id;

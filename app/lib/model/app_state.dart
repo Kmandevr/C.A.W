@@ -1530,7 +1530,9 @@ class AppState extends ChangeNotifier {
   }
 
   void _pruneClipSelection() {
-    final valid = {for (final layer in project.layers) for (final clip in layer.clips) clip.id};
+    final valid = {
+      for (final layer in project.layers) ...[for (final clip in layer.clips) clip.id, for (final c in layer.audioClips) c.id],
+    };
     selectedClipIds.removeWhere((id) => !valid.contains(id));
     if (selectedClipId == null || !selectedClipIds.contains(selectedClipId)) {
       if (selectedClipIds.isEmpty) {
@@ -1542,7 +1544,14 @@ class AppState extends ChangeNotifier {
       } else {
         for (final layer in project.layers) {
           final clip = layer.clips.where((c) => selectedClipIds.contains(c.id)).firstOrNull;
-          if (clip == null) continue;
+          if (clip == null) {
+            // Only audio clips are selected here (lib/model/audio_edit.dart): the first of them leads.
+            final audio = layer.audioClips.where((c) => selectedClipIds.contains(c.id)).firstOrNull;
+            if (audio == null) continue;
+            selectedLayerId = layer.id;
+            selectedClipId = audio.id;
+            break;
+          }
           selectedLayerId = layer.id;
           selectedClipId = clip.id;
           selectedModuleId = clip.patternId;

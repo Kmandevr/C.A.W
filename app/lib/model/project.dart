@@ -2,6 +2,7 @@
 import 'dart:convert';
 import 'dart:math';
 
+import 'audio_clips.dart';
 import 'cpp_component.dart';
 import 'midi_mapping.dart';
 import 'pattern_doc.dart';
@@ -376,8 +377,10 @@ class LayerDoc {
     this.spaceBelow = 0,
     this.ownColor = false,
     this.showLanes = false,
+    List<AudioClipDoc>? audioClips,
+    this.input,
   }) : clips = clips ?? [], automation = automation ?? [], components = components ?? [],
-        sends = sends ?? [];
+        sends = sends ?? [], audioClips = audioClips ?? [];
 
   /// The tallest visual spacer under a track, in logical pixels.
   static const maxSpaceBelow = 160.0;
@@ -409,6 +412,15 @@ class LayerDoc {
 
   /// The native C++ instrument (a built-in or one of the project's) playing the track's notes ([setInstrument]).
   ComponentUseDoc? instrument;
+
+  /// Audio clips (API 18): with them, or an [input], the track is an audio track ([isAudio]).
+  List<AudioClipDoc> audioClips;
+
+  /// What the track records and hears from the device's input; null for none.
+  AudioInputDoc? input;
+
+  /// An audio track: the engine plays its clips and input instead of an instrument (it can't have both).
+  bool get isAudio => !isFolder && (audioClips.isNotEmpty || input != null);
   String? parentId;
   bool isFolder, busEnabled, collapsed;
 
@@ -418,7 +430,7 @@ class LayerDoc {
 
   /// Whether the track's sound can differ between left and right before its pan (a native instrument or effect,
   /// or a folder's bus summing its tracks): its meters then show each side. An empty track has one meter.
-  bool get isStereo => isFolder || instrument != null || components.isNotEmpty;
+  bool get isStereo => isFolder || instrument != null || components.isNotEmpty || isAudio;
 
   /// Makes [componentId] the track's instrument (null: none). The same id keeps its values; another one starts
   /// from its defaults.
@@ -449,6 +461,8 @@ class LayerDoc {
         if (spaceBelow > 0) 'space_below': spaceBelow,
         if (ownColor) 'own_color': true,
         if (showLanes) 'show_lanes': true,
+        if (audioClips.isNotEmpty) 'audio_clips': [for (final c in audioClips) c.toJson()],
+        if (input != null) 'input': input!.toJson(),
       };
 
   static LayerDoc fromJson(Map<String, dynamic> j) => LayerDoc(
@@ -474,6 +488,9 @@ class LayerDoc {
         },
         ownColor: j['own_color'] == true,
         showLanes: j['show_lanes'] == true,
+        audioClips: j['folder'] == true ? null
+            : [for (final c in ((j['audio_clips'] as List?) ?? const []).take(4096)) ?AudioClipDoc.fromJson(c)],
+        input: j['folder'] == true ? null : AudioInputDoc.fromJson(j['input']),
       );
 }
 
@@ -506,7 +523,9 @@ class ProjectDoc {
     this.loopStartSteps = 0,
     this.loopEndSteps = 0,
     List<MarkerDoc>? markers,
+    List<AudioAssetDoc>? assets,
   })  : midiFiles = midiFiles ?? [],
+        assets = assets ?? [],
         markers = markers ?? [],
         modules = modules ?? [],
         layers = layers ?? [],
@@ -578,6 +597,11 @@ class ProjectDoc {
   /// Markers and regions on the ruler, in no particular order.
   List<MarkerDoc> markers;
 
+  /// The audio files the project's clips play (copied into its storage on import, or recorded).
+  List<AudioAssetDoc> assets;
+
+  AudioAssetDoc? asset(String? id) => id == null ? null : assets.where((a) => a.id == id).firstOrNull;
+
   /// Controller learn: hardware CCs mapped to knobs (Settings › MIDI lists them).
   List<MidiCcMapping> midiMappings = [];
 
@@ -591,7 +615,8 @@ class ProjectDoc {
   /// while it is on (the engine reaches it too).
   int get arrangementEndSteps {
     final clipsEnd = layers.fold<int>(loopsRange ? max(loopSteps, loopEndSteps) : loopSteps, (end, layer) =>
-        layer.clips.fold<int>(end, (value, clip) => max(value, clip.startSteps + clip.lengthSteps)));
+        layer.audioClips.fold<int>(layer.clips.fold<int>(end, (value, clip) => max(value, clip.startSteps + clip.lengthSteps)),
+            (value, clip) => max(value, clip.endAt(bpm).ceil())));
     return automation.fold<int>(clipsEnd, (end, lane) =>
         lane.points.fold<int>(end, (value, point) => max(value, point.step.ceil())));
   }
@@ -702,6 +727,7 @@ class ProjectDoc {
             {'id': m.id, 'name': m.name, 'source': sourceOverrides?[m.id] ?? m.runSource, 'params': m.params},
         ],
         'master_components': [for (final c in playable(masterComponents)) c.toJson()],
+        if (assets.isNotEmpty) 'assets': [for (final a in assets) a.toEngineJson()],
         'layers': [
           for (final l in layers)
             {
@@ -712,7 +738,15 @@ class ProjectDoc {
                 'components': [for (final c in playable(l.components)) c.toJson(withKey: routing.keyPlays(l, c))],
               if (routing.sendsOf(l) case final sends when sends.isNotEmpty) 'sends': [for (final s in sends) s.toJson()],
               // A C++ instrument not loaded yet (awaiting trust, building) is left out: the track is silent until it is.
-              if (instrumentPlays(l)) 'instrument': l.instrument!.toJson(),
+              if (instrumentPlays(l) && !l.isAudio) 'instrument': l.instrument!.toJson(),
+              // An audio track (API 18): its clips (those whose file the project lists) and its input.
+              if (l.isAudio) ...{
+                'audio_clips': [
+                  for (final c in l.audioClips)
+                    if (asset(c.assetId) != null) c.toEngineJson(bpm),
+                ],
+                if (l.input != null) 'input': l.input!.toJson(),
+              },
               'parent': l.parentId, 'folder': l.isFolder, 'bus': l.busEnabled,
               'automation': [
                 for (final a in l.automation)
@@ -727,7 +761,7 @@ class ProjectDoc {
                   if (clip.mute) 'mute': true,
                 },
               ],
-              'length_steps': l.clips.isNotEmpty ? 0 : l.lengthSteps,
+              'length_steps': l.clips.isNotEmpty || l.isAudio ? 0 : l.lengthSteps,
               'volume': l.volume,
               'pan': l.pan,
               'mute': l.mute,
@@ -767,6 +801,7 @@ class ProjectDoc {
         if (hasLoopRange) ...{'loop_range': loopRange, 'loop_start_steps': loopStartSteps, 'loop_end_steps': loopEndSteps},
         if (markers.isNotEmpty) 'markers': [for (final m in markers) m.toJson()],
         if (midiMappings.isNotEmpty) 'midi_mappings': [for (final m in midiMappings) m.toJson()],
+        if (assets.isNotEmpty) 'assets': [for (final a in assets) a.toJson()],
       };
 
   /// Brings each track's instrument up to what the engine plays, with [resolve] (`Engine.resolveInstrument`): a
@@ -835,6 +870,7 @@ class ProjectDoc {
         for (final raw in ((j['midi_files'] as List?) ?? const []).take(512))
           if (raw is Map<String, dynamic>) ?MidiFileDoc.fromJson(raw),
       ],
+      assets: [for (final raw in ((j['assets'] as List?) ?? const []).take(16384)) ?AudioAssetDoc.fromJson(raw)],
       loopRange: j['loop_range'] == true,
       loopStartSteps: (j['loop_start_steps'] as num?)?.toInt() ?? 0,
       loopEndSteps: (j['loop_end_steps'] as num?)?.toInt() ?? 0,
@@ -916,6 +952,10 @@ class ProjectDoc {
       for (final raw in ((j['markers'] as List?) ?? const []).take(1024)) ?MarkerDoc.fromJson(raw, project.maxArrangementSteps),
     ];
     for (final layer in project.layers) {
+      for (final clip in layer.audioClips) {
+        clip.ensureSeconds(project.bpm);
+        clip.startSteps = clip.startSteps.clamp(0.0, project.maxArrangementSteps - 1.0).toDouble();
+      }
       for (final clip in layer.clips) {
         clip.startSteps = clip.startSteps.clamp(0, project.maxArrangementSteps - 1).toInt();
         clip.lengthSteps = clip.lengthSteps.clamp(1, project.maxArrangementSteps - clip.startSteps).toInt();

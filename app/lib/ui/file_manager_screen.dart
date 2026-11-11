@@ -12,6 +12,7 @@ import 'files/asset_views.dart';
 import 'files/files_tree.dart';
 import 'files/library_manager.dart';
 import 'glass.dart';
+import 'audio_file_actions.dart';
 import 'midi_file_actions.dart';
 import 'theme.dart';
 import 'tokens.dart';
@@ -194,6 +195,7 @@ class _FileManagerScreenState extends State<FileManagerScreen> {
       MenuEntry('export', Icons.file_upload_outlined, 'Export .cawproj'),
       MenuEntry('import', Icons.file_open_outlined, 'Import project'),
       MenuEntry('midi', Icons.piano, 'Import MIDI file as clips'),
+      MenuEntry('audio', Icons.graphic_eq_rounded, 'Import audio files (WAV, FLAC, MP3)'),
       MenuEntry('restore', Icons.bookmark_add_outlined, 'Create restore point', dividerBefore: true),
       MenuEntry('history', Icons.history, 'Version history'),
       MenuEntry('library', Icons.folder_copy_outlined, 'Project library (folders, tags)', dividerBefore: true),
@@ -207,6 +209,8 @@ class _FileManagerScreenState extends State<FileManagerScreen> {
         if (mounted) setState(() => _selected = null);
       case 'midi':
         await importMidiFile(context, state);
+      case 'audio':
+        await importAudioFiles(context, state, place: false);
       case 'restore':
         await createProjectRestorePoint(context, state);
       case 'history':
@@ -383,6 +387,8 @@ class _FileManagerScreenState extends State<FileManagerScreen> {
       FilesFolderKind.patterns => 'No patterns yet. Tap + for a new one.',
       FilesFolderKind.presets => 'Your presets show here: Save preset… in a device, or Save track preset… in its ⋯ '
           'menu. Drag one onto a track, or onto the empty area for a new track.',
+      FilesFolderKind.audioFiles => 'Audio files show here (⋯ › Import audio files, or a recording); drag one onto a '
+          'track, or onto the empty area for a new audio track.',
       FilesFolderKind.midiFiles => 'Imported MIDI files show here (⋯ › Import MIDI file as clips); drag one onto a track.',
       _ => 'This folder is empty.',
     };

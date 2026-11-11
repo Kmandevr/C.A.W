@@ -8,6 +8,7 @@ import '../engine/component_info.dart';
 import '../engine/engine.dart';
 import '../ui/frame/sections.dart';
 import 'app_state.dart';
+import 'audio_edit.dart';
 import 'midi_clips.dart';
 import 'mixer_fx.dart';
 import 'cpp_component.dart';
@@ -250,6 +251,8 @@ extension ArrangeFx on AppState {
       case AssetKind.trackPreset:
         final p = userPresets.byId(asset.id);
         return p != null && applyTrackPreset(layer, p);
+      case AssetKind.audioFile:
+        return dropAudio(layer, asset.id, atStep: atStep);
     }
   }
 

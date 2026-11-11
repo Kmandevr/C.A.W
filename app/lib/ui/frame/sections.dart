@@ -117,6 +117,7 @@ enum AssetKind {
   midiFile,     // an imported MIDI file (its parts are patterns), by MidiFileDoc id
   devicePreset, // a user device preset (a component with its values), by preset id
   trackPreset,  // a user track preset (an instrument and effects), by preset id
+  audioFile,    // an audio file: a project asset by its id, or a WAV in app storage by its absolute path
 }
 
 @immutable

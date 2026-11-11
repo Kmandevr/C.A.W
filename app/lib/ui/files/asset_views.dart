@@ -16,12 +16,14 @@ IconData assetIcon(FileAssetType t) => switch (t) {
       FileAssetType.devicePreset => Icons.bookmarks_outlined,
       FileAssetType.trackPreset => Icons.view_list_outlined,
       FileAssetType.sampleFile => Icons.audio_file_outlined,
+      FileAssetType.audioFile => Icons.graphic_eq_rounded,
     };
 
 Color assetColor(FileAssetType t) => switch (t) {
       FileAssetType.builtinEffect => Neon.blue,
       FileAssetType.cppComponent || FileAssetType.cppFile => Neon.violet,
       FileAssetType.pattern || FileAssetType.midiFile || FileAssetType.sampleFile => Neon.yellow,
+      FileAssetType.audioFile => Neon.green,
       FileAssetType.devicePreset || FileAssetType.trackPreset => Neon.green,
     };
 
@@ -34,6 +36,7 @@ IconData folderIcon(FilesFolderKind k) => switch (k) {
       FilesFolderKind.audio => Icons.music_note,
       FilesFolderKind.patterns => Icons.piano,
       FilesFolderKind.midiFiles => Icons.queue_music,
+      FilesFolderKind.audioFiles => Icons.graphic_eq_rounded,
       FilesFolderKind.presets => Icons.bookmarks_outlined,
       FilesFolderKind.packs || FilesFolderKind.samplePack => Icons.inventory_outlined,
       FilesFolderKind.samplePacks => Icons.library_music_outlined,
