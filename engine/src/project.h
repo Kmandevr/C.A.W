@@ -131,10 +131,15 @@ struct ProjectSpec {
     std::vector<ComponentSpec> masterComponents;  // explicitly loaded native stereo effects, in master-chain order
     std::vector<LayerSpec> layers;
     std::vector<ProjectAutomationLaneSpec> automation;
-    std::vector<std::string> auditionChain;  // the Builder's preview, if any
+    std::vector<std::string> auditionChain;  // the Builder's preview, if any: .caw module ids
+    // The preview may play a C++ instrument (with its values) and native effects instead of, or after, a .caw
+    // chain, as a track does ("audition": {"instrument": ..., "components": [...]}).
+    bool hasAuditionInstrument = false;
+    ComponentSpec auditionInstrument;
+    std::vector<ComponentSpec> auditionComponents;
     int auditionSteps = 0;
     std::string auditionPattern;
-    bool auditionOnly = false;
+    bool auditionOnly = false;  // only the preview sounds; needs a chain or an instrument
 
     int loopSteps() const { return loopBars * beatsPerBar * 4; }
     const ModuleSpec* module(const std::string& id) const;

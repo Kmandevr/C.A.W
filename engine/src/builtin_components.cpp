@@ -3,6 +3,7 @@
 
 #include "builtin_effects.h"
 #include "builtin_instruments.h"
+#include "builtin_test_signal.h"
 
 #include <algorithm>
 #include <cmath>
@@ -374,6 +375,7 @@ void registerBuiltinComponents(ModuleRegistry& registry) {
     registry.add(kChorus, &make<ChorusEffect>);
     registerBuiltinEffects(registry);  // the effects suite (#173, builtin_effects*.cpp)
     registerBuiltinInstruments(registry);  // the drums and Flagship (builtin_instruments.cpp, builtin_flagship.cpp)
+    registerTestSignal(registry);  // org.caw.test.osc, internal: for tests, never listed (builtin_test_signal.cpp)
 }
 
 }  // namespace caw

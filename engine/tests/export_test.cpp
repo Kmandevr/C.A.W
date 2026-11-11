@@ -11,6 +11,7 @@
 #include "engine.h"
 #include "render.h"
 #include "test.h"
+#include "test_signal.h"
 #include "wav.h"
 
 using namespace caw;
@@ -152,6 +153,54 @@ TEST(one_shot_is_one_trimmed_pass) {
     CHECK(!renderExport(groove(), o, r));
 }
 
+TEST(one_shot_of_a_cpp_instrument_plays_one_note_to_its_tail) {
+    // A track with only a C++ instrument and its effects plays one note: here the test signal's 1 kHz sine at
+    // velocity 0.5 for 0.1 s (4800 frames), cut on its off, so the file is the note and what the master's DC block rings on.
+    ProjectSpec p = cawtest::testSignalProject({cawtest::testSignalNotesLayer("t", cawtest::Shape::Sine, "")});
+    p.layers[0].pattern.clear();
+    RenderResult r;
+    ExportOptions o;
+    o.kind = ExportKind::OneShot;
+    o.target = "t";
+    o.note = 83.2131;  // about 1 kHz
+    o.velocity = 0.5;
+    o.noteSeconds = 0.1;
+    CHECK(renderExport(p, o, r));
+    // The master's DC block rings out the cut's offset below 0.002, and the file ends once it is under -80 dB.
+    CHECK(r.frames > 4800 && r.frames < 12000);
+    for (int64_t f = 4810; f < r.frames; ++f) CHECK(std::fabs(r.samples[static_cast<size_t>(f) * 2]) < 0.002f);
+    float peak = 0;
+    for (int64_t f = 0; f < 4800; ++f) peak = std::max(peak, std::fabs(r.samples[static_cast<size_t>(f) * 2]));
+    CHECK_NEAR(peak, 0.5 * std::cos(3.14159265358979323846 / 4), 0.01);  // velocity times the centre pan
+    // The note's pitch: the test signal's sine at A4 for 0.5 s crosses up about 220 times.
+    p.layers[0].instrument = cawtest::testSignal(cawtest::Shape::Sine, {{"mode", 1}});
+    o.note = 69;
+    o.velocity = 1;
+    o.noteSeconds = 0.5;
+    CHECK(renderExport(p, o, r));
+    int ups = 0;
+    for (int64_t f = 1; f < r.frames; ++f) ups += r.samples[(f - 1) * 2] < 0 && r.samples[f * 2] >= 0;
+    CHECK(ups >= 219 && ups <= 220);
+    // Flagship rings on after its note (its release), and the file ends on the trimmed tail, well before 30 s.
+    p.layers[0].instrument = ComponentSpec{};
+    p.layers[0].instrument.id = "org.caw.synth.flagship";
+    CHECK(renderExport(p, o, r));
+    CHECK(r.frames > 24000);
+    CHECK(r.frames < 30 * 48000);
+    CHECK(std::fabs(r.samples[static_cast<size_t>(r.frames - 1) * 2]) < 0.01f);
+    // Clips set the length: one clip of 8 steps from step 4 (12 steps, 72000 frames at 120 BPM) plays its note.
+    p.layers[0].instrument = cawtest::testSignal(cawtest::Shape::Sine, {{"mode", 1}});
+    p.modules.push_back({"pat", "---\nkind: pattern\nlength: 8\n---\n0 C4 8 1\n", {}});
+    p.layers[0].clips = {ClipSpec{"c", "pat", 4, 8, 0, false, false}};
+    CHECK(renderExport(p, o, r));
+    CHECK(r.frames > 71900 && r.frames <= 72000);
+    float before = 0, during = 0;
+    for (int64_t f = 0; f < 24000; ++f) before = std::max(before, std::fabs(r.samples[static_cast<size_t>(f) * 2]));
+    for (int64_t f = 24000; f < 71000; ++f) during = std::max(during, std::fabs(r.samples[static_cast<size_t>(f) * 2]));
+    CHECK_EQ(before, 0.0f);
+    CHECK(during > 0.5f);
+}
+
 TEST(wavetable_frames_sweep_a_param) {
     ProjectSpec p;
     p.modules.push_back({"w", "---\nmode: float\n---\nparam fold = 1 in 1..8\nsin(sine(1) * fold)", {}});
@@ -175,6 +224,58 @@ TEST(wavetable_frames_sweep_a_param) {
     // Each frame is one cycle: it starts and ends near zero.
     CHECK(std::fabs(r.samples[0]) < 0.01f);
     o.param = "missing";
+    CHECK(!renderExport(p, o, r));
+}
+
+TEST(wavetable_frames_sweep_a_cpp_instruments_parameter) {
+    // The test signal in Notes mode on a layer: frame f is one cycle of A0 with shape f (sine, saw, square, ...).
+    ProjectSpec p = cawtest::testSignalProject({cawtest::testSignalNotesLayer("osc", cawtest::Shape::Sine, "")});
+    RenderResult r;
+    ExportOptions o;
+    o.kind = ExportKind::Wavetable;
+    o.target = "osc";
+    o.param = "shape";
+    o.frames = 3;  // shape 0, 3 (noise), 6 (sweep): min + (max - min) * f / (frames - 1)
+    CHECK(renderExport(p, o, r));
+    CHECK_EQ(r.channels, 1);
+    CHECK_EQ(r.frames, int64_t{3 * kWavetableFrame});
+    // Frame 0 is one sine cycle: 0 at the start, the peak a quarter in, the trough three quarters in.
+    CHECK(std::fabs(r.samples[0]) < 1e-3f);
+    CHECK(r.samples[512] > 0.3f);
+    CHECK_NEAR(r.samples[1536], -r.samples[512], 1e-3);
+    float peak = 0;
+    for (float v : r.samples) peak = std::max(peak, std::fabs(v));
+    CHECK_NEAR(peak, 1.0, 1e-6);
+    // Seven frames, one per shape: each differs from the sine.
+    o.frames = 7;
+    CHECK(renderExport(p, o, r));
+    for (int f = 1; f < 7; ++f) {
+        bool differ = false;
+        for (int i = 0; i < kWavetableFrame; ++i)
+            differ = differ || std::fabs(r.samples[i] - r.samples[static_cast<size_t>(f) * kWavetableFrame + i]) > 0.05f;
+        CHECK(differ);
+    }
+    // A square frame (shape 2) is flat on each half: its samples a quarter in and an eighth in match.
+    const float* square = r.samples.data() + 2 * kWavetableFrame;
+    CHECK_NEAR(square[256], square[512], 1e-6);
+    CHECK_NEAR(square[1280], square[1536], 1e-6);
+    CHECK(square[512] > 0 && square[1536] < 0);
+    // A built-in by id, with its defaults; no sweep gives the same frame each time.
+    o.target = "org.caw.synth.flagship";
+    o.param.clear();
+    o.frames = 2;
+    CHECK(renderExport(p, o, r));
+    CHECK(r.samples[100] == r.samples[kWavetableFrame + 100]);
+    // Refusals: an effect, a missing parameter, a missing target.
+    o.target = "org.caw.stereo.width";
+    CHECK(!renderExport(p, o, r));
+    CHECK(r.error.find("takes no notes") != std::string::npos);
+    o.target = "osc";
+    o.param = "missing";
+    CHECK(!renderExport(p, o, r));
+    CHECK(r.error.find("no parameter 'missing'") != std::string::npos);
+    o.target = "nothing";
+    o.param.clear();
     CHECK(!renderExport(p, o, r));
 }
 

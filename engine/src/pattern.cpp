@@ -8,11 +8,28 @@
 #include <cstdio>
 #include <stdexcept>
 
-#include "compile.h"
 #include "detmath.h"
 #include "json.h"
 
 namespace caw {
+
+bool noteNumber(const std::string& s, double& out) {
+    if (s.size() < 2 || s[0] < 'A' || s[0] > 'G') return false;
+    static const int base[] = {9, 11, 0, 2, 4, 5, 7};  // A..G
+    int n = base[s[0] - 'A'];
+    size_t i = 1;
+    if (s[i] == '#') {
+        ++n;
+        ++i;
+    } else if (s[i] == 'b') {
+        --n;
+        ++i;
+    }
+    if (i + 1 != s.size() || !std::isdigit(static_cast<unsigned char>(s[i]))) return false;
+    const int oct = s[i] - '0';
+    out = (oct + 1) * 12 + n;
+    return true;
+}
 
 namespace {
 

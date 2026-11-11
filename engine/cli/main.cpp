@@ -38,7 +38,10 @@ const char* kUsage =
     "                                        the code a synth patch becomes\n"
     "  caw render INPUT -o OUT.wav [options] render a module (.caw) or project (.json)\n"
     "      --loop (default)  one exact project loop      --seconds S   free length\n"
-    "      --oneshot LAYER   one pass of a layer, trimmed --wavetable MODULE [--param P] [--frames N]\n"
+    "      --oneshot LAYER   one pass of a layer, trimmed; a C++ instrument layer with no notes plays one\n"
+    "                        [--note N (60)] [--velocity 0..1 (1)] [--note-seconds S (0.5)] to its tail\n"
+    "      --wavetable TARGET [--param P] [--frames N]  TARGET: a C++ instrument layer, a built-in\n"
+    "                        instrument id or a .caw module; P is swept over its range across the frames\n"
     "      --rate 44100|48000   --float (32-bit float; default 24-bit)\n"
     "      --bpm B --bars N  tempo and loop length when rendering a single module (default 120, 4)\n"
     "      --steps N         a single module's layer length in 16ths (default: the whole loop)\n"
@@ -178,6 +181,9 @@ int render(int argc, char** argv) {
             o.kind = caw::ExportKind::Wavetable;
             o.target = val("--wavetable");
         } else if (a == "--param") o.param = val("--param");
+        else if (a == "--note") o.note = std::atof(val("--note").c_str());
+        else if (a == "--velocity") o.velocity = std::atof(val("--velocity").c_str());
+        else if (a == "--note-seconds") o.noteSeconds = std::atof(val("--note-seconds").c_str());
         else if (a == "--frames") o.frames = std::atoi(val("--frames").c_str());
         else if (a == "--rate") o.sampleRate = std::atoi(val("--rate").c_str());
         else if (a == "--float") floatOut = true;

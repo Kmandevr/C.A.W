@@ -573,8 +573,17 @@ bool parseProject(std::string_view text, ProjectSpec& out, std::string& error) {
             return false;
         }
         out.auditionPattern = a->string("pattern");
+        if (!componentList(a->get("components"), "audition components", out.auditionComponents, error)) return false;
+        if (const Json* inst = a->get("instrument"); inst && inst->type != Json::Type::Null) {
+            if (inst->type != Json::Type::String && inst->type != Json::Type::Object) {
+                error = "audition instrument must be a component id or {\"id\": ...}";
+                return false;
+            }
+            if (!componentEntry(*inst, "audition instrument", out.auditionInstrument, error)) return false;
+            out.hasAuditionInstrument = true;
+        }
     }
-    out.auditionOnly = root.boolean("audition_only", false) && !out.auditionChain.empty();
+    out.auditionOnly = root.boolean("audition_only", false) && (!out.auditionChain.empty() || out.hasAuditionInstrument);
     return true;
 }
 

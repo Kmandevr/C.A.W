@@ -113,7 +113,8 @@ void main() {
     expect(q.add(title: 'one', projectJson: '{}', request: {'project': 'A'}), isTrue);
     expect(q.add(title: 'two', projectJson: '{}', request: {'project': 'B'}), isTrue);
     expect(q.add(title: 'three', projectJson: '{}', request: {'project': 'C'}), isTrue);
-    await _settle();
+    await _until(() => started.isNotEmpty);  // the queue starts the first render on its own async turn
+    await _settle();  // and gives a second one time to (wrongly) start
     expect(started.length, 1, reason: 'one render at a time');
     expect(q.jobs[0].state, ExportJobState.running);
     expect(Directory(started[0].request['out_dir'] as String).existsSync(), isTrue);

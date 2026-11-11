@@ -1,6 +1,6 @@
 # Handoff
 
-Commit: fcf4ef3
+Commit: 4cfc5a3
 
 Branch: ccr-56285e11-0xrj3h (PR #167 open, subscribed, CI green at aa1ee28)
 
@@ -16,10 +16,12 @@ Owner (2026-11-10): work through everything discussed toward the open beta, with
 - MIDI file import/export in Dart (`app/lib/model/midi_file.dart`, `app/lib/model/midi_clips.dart`, `app/lib/ui/midi_file_actions.dart`).
 
 ## Open
-- Owner (2026-11-11): "make sure everything in the roadmap is done, including the routing and the hard stuff"; beta scope in decisions.md 2026-11-11 (audio clips, recording, sampler, per-note FX all IN). Audit with work packages WP-A..WP-O: scratchpad `roadmap_audit_v1.md` (summary: order A,H,I,K,L,M now; B then C; D (#160); E (#159), F (#161, reuse fx-racks modulator model), G (#127+#120 after drums merges module.hpp); J (audio clips/recording/sampler, after drums' sample API); N docs; O release).
-- Running agents (worktrees under .claude/worktrees/): drums (engine first; then a UI agent), fx-creative, fx-filters, fx-space, fx-dynamics, fx-racks (racks + browser), adfix (audio-device review fixes), parity (WP-A), engine-leftovers (WP-L). API numbers: 10 = settings (merged), drums takes 11, leftovers next free; reconcile on merge.
-- Closing done issues on GitHub was blocked by the auto-mode classifier: ask the owner to allow it or close them (#7 #21 #24 #36 #38 #40 #76 #123 #128 #137 #168 #170 #172 #175; superseded #32 #54). Draft comments in the audit §6.
-- Owner choices to batch at the end: agents' "to confirm" items in decisions.md (Build start page, Try-it, sheets <600 dp, Files toggle, mod amount 25 %, bipolar, Flagship tabs, EQ double-tap, routing defaults, settings sections/defaults).
+- Merged and pushed on the session branch (4cfc5a3, API 17): settings, routing/ducker + fixes, #133, all four FX groups + racks/browser, drums engine + editor, parity ports + C++ starters, engine leftovers (meters, VST3), MIDI devices (API 15), build tools, piano roll (K2), arrange/mixer (K1), stems/export sheet (API 16), engine off .caw (WP-B, API 17).
+- Running (worktrees): off-caw-app (WP-C), audio-engine (WP-J engine, API 18), modulators (WP-F #161, API 19); architect designing #127 (WP-G) into architecture.md.
+- Next: WP-D delete the .caw language (after WP-C; pattern templates acid-line/chords need a Dart home first), WP-E (#159 .caw project extension), WP-G build from the architect's plan, WP-J app UI after the engine, then the optimization pass, the fit-and-finish pass (no layout changes), WP-N docs, version bump, release.
+- Known flaky timing tests to fix in the cleanup pass: double-tap in pattern_editor and files, the cpp_builder live-check debounce. Fixed so far: tap tempo (fake clock), export queue wait.
+- Closing done issues on GitHub was blocked by auto mode: ask the owner (#7 #21 #24 #36 #38 #40 #76 #123 #128 #137 #168 #170 #172 #175; superseded #32 #54).
+- Owner choices to batch: every "to confirm" entry in decisions.md (2026-11-10/11), the Engine Lab placement, and the new screens' looks.
 
 ## Next
 - Merge each agent as it reports (registries and API numbers conflict: keep all entries), audio-review engine merges, build an APK and send it with what's new.

@@ -1407,6 +1407,17 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
                 ++total;
             }
         }
+        if (p.auditionOnly) {  // the preview's own chain, as a track's
+            if (!p.auditionComponents.empty()) {
+                charge(p.auditionComponents);
+                total += p.auditionComponents.size();
+            }
+            if (p.hasAuditionInstrument) {
+                charge({p.auditionInstrument});
+                masterChainBytes += sizeof(NoteEvents) + NoteEvents::kBytes;
+                ++total;
+            }
+        }
         // Each instance may allocate what it likes when activated; the cap bounds how many there are.
         if (total > kMaxProjectComponents)
             return "{\"ok\":false,\"error\":\"the project uses " + std::to_string(total) +
@@ -1442,6 +1453,24 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
                 return "{\"ok\":false,\"error\":\"layer '" + jsonEscape(l.id) + "' instrument: " + jsonEscape(error) +
                        "\",\"modules\":{}}";
             nextInstruments[l.id] = std::move(instrument);
+        }
+        if (p.auditionOnly) {
+            const std::string id = "\1audition";
+            auto it = layers_.find(id);
+            if (!p.auditionComponents.empty() &&
+                !(it != layers_.end() && it->second.inserts && it->second.inserts->sameComponents(p.auditionComponents, sr_))) {
+                auto chain = ComponentChain::build(nativeModules_, p.auditionComponents, sr_, error);
+                if (!chain)
+                    return "{\"ok\":false,\"error\":\"audition: " + jsonEscape(error) + "\",\"modules\":{}}";
+                nextInserts[id] = std::move(chain);
+            }
+            if (p.hasAuditionInstrument &&
+                !(it != layers_.end() && it->second.instrument && it->second.instrument->sameComponents({p.auditionInstrument}, sr_))) {
+                auto instrument = ComponentChain::buildInstrument(nativeModules_, p.auditionInstrument, sr_, error);
+                if (!instrument)
+                    return "{\"ok\":false,\"error\":\"audition instrument: " + jsonEscape(error) + "\",\"modules\":{}}";
+                nextInstruments[id] = std::move(instrument);
+            }
         }
     }
     // Layer slots: refuse a project the budget cannot hold, then grow before any layer is sent, so
@@ -1594,7 +1623,8 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
     std::vector<Want> wants;
     int order = 0;
     if (p.auditionOnly) {
-        wants.push_back({"\1audition", p.auditionChain, p.auditionPattern, p.auditionSteps, 0.8, 0.0, false, false, 100000, {}, {}, "", false});
+        wants.push_back({"\1audition", p.auditionChain, p.auditionPattern, p.auditionSteps, 0.8, 0.0, false, false, 100000, {}, {}, "", false,
+                         &p.auditionComponents, p.hasAuditionInstrument ? &p.auditionInstrument : nullptr});
     }
     order_.clear();
     for (const LayerSpec& l : p.layers) {

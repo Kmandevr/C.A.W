@@ -9,6 +9,9 @@
 
 namespace caw {
 
+// A note name such as C4, F#2 or Bb0 gives its MIDI note number (C4 = 60). Patterns and the .caw compiler share it.
+bool noteNumber(const std::string& s, double& out);
+
 constexpr int kMaxRatchet = 8;
 
 constexpr double kMaxBend = 48.0;  // semitones either way (the app draws within +-12 by default)
