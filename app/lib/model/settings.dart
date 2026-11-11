@@ -343,6 +343,12 @@ class Settings extends ChangeNotifier {
   double midiFixedVelocity = 0.8;
   bool midiThru = true;
 
+  /// The MIDI devices turned off in Settings › MIDI (by name; the others are read), MPE, and the semitones a full
+  /// pitch bend moves (MPE: the master channel's; member channels and MIDI 2.0 per-note bend use 48).
+  Set<String> midiClosed = {};
+  bool midiMpe = false;
+  int midiBendRange = 2;
+
   /// The on-screen keys: velocity from where a key is touched (0), else this fixed velocity; the octave they open on.
   double keysVelocity = 0;
   int keysOctave = 3;
@@ -484,6 +490,9 @@ class Settings extends ChangeNotifier {
         'velocity_curve': velocityCurve.name,
         'midi_fixed_velocity': midiFixedVelocity,
         'midi_thru': midiThru,
+        'midi_closed': midiClosed.toList(),
+        'midi_mpe': midiMpe,
+        'midi_bend_range': midiBendRange,
         'keys_velocity': keysVelocity,
         'keys_octave': keysOctave,
         'click_sound': clickSound.name,
@@ -599,6 +608,10 @@ class Settings extends ChangeNotifier {
     velocityCurve = pick(VelocityCurve.values, j['velocity_curve'], velocityCurve);
     midiFixedVelocity = num_('midi_fixed_velocity', 0.05, 1) ?? midiFixedVelocity;
     midiThru = flag('midi_thru') ?? midiThru;
+    final closed = j['midi_closed'];
+    if (closed is List) midiClosed = {for (final n in closed.take(64)) if (n is String && n.length <= 255) n};
+    midiMpe = flag('midi_mpe') ?? midiMpe;
+    midiBendRange = num_('midi_bend_range', 1, 48)?.round() ?? midiBendRange;
     keysVelocity = num_('keys_velocity', 0, 1) ?? keysVelocity;
     keysOctave = num_('keys_octave', 1, 6)?.round() ?? keysOctave;
     clickSound = pick(ClickSound.values, j['click_sound'], clickSound);

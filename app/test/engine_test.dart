@@ -109,6 +109,23 @@ void main() {
     engine.dispose();
   }, skip: skip);
 
+  test('device MIDI (API 15): bytes and UMP words reach a track, an unknown track takes none, nothing drops', () async {
+    final e = Engine.create();
+    final p = ProjectDoc(id: 'p', name: 'T', layers: [LayerDoc(id: 'l', name: 'Keys', color: 0)])
+      ..layers.first.instrument = ComponentUseDoc('org.caw.synth.flagship', {});
+    await e.setProject(p.toEngineJson());
+    final now = e.midiClockNs;
+    expect(now, greaterThan(0));
+    expect(e.midiBytes('l', [0x90, 60, 100, 0xA0, 60, 50, 0xC0, 3], now), 3);
+    expect(e.midiUmp('l', [0x00200000, 0x40903C00, 0xFFFF0000], now), 1, reason: 'the JR timestamp is skipped');
+    expect(e.midiBytes('nope', [0x90, 60, 100], 0), 0);
+    e.setMidiOptions(mpe: true, bendRange: 12);
+    e.midiRelease();
+    expect(e.midiDropped, 0);
+    expect(e.positionAt(now), -1, reason: 'stopped');
+    e.dispose();
+  }, skip: skip);
+
   test('a generator plays the notes of a pattern', () async {
     final templates = Engine.templates();
     final synth = templates.firstWhere((t) => t.file == 'acid-synth.caw');

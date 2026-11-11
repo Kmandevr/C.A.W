@@ -600,3 +600,52 @@ TEST(count_in_metronome_and_released_touches_never_allocate_on_the_audio_thread)
     CHECK(sum > 0.0);
     CHECK_EQ(operations, 0u);
 }
+
+TEST(device_midi_never_allocates_on_the_audio_thread) {
+    // MIDI from a device (API 15), stopped and playing, on a native instrument and a .caw voice chain: notes, poly
+    // and channel pressure, bend, sustain, CCs, MPE and a release, all played from the queue without allocating.
+    ProjectSpec p;
+    p.bpm = 120;
+    p.loopBars = 1;
+    p.modules.push_back({"acid-synth", templateSource("acid-synth.caw"), {}});
+    p.modules.push_back({"acid-line", templateSource("acid-line.caw"), {}});
+    LayerSpec synth = layer("s", {});
+    synth.hasInstrument = true;
+    synth.instrument.id = "org.caw.synth.flagship";
+    LayerSpec voiced = layer("v", {"acid-synth"});
+    voiced.pattern = "acid-line";
+    p.layers = {synth, voiced};
+    Engine e(48000);
+    CHECK(e.setProject(p).find("\"ok\":true") != std::string::npos);
+    std::vector<float> l(192), r(192);
+    for (int k = 0; k < 20; ++k) e.process(l.data(), r.data(), 192);
+    const uint8_t played[] = {0x90, 60, 100, 0x91, 64, 90, 0xA0, 60, 70, 0xD1, 50, 0xE0, 0, 80, 0xB0, 64, 127,
+                              0xB0, 1, 40, 0xC0, 5, 0x80, 60, 0, 0xB0, 64, 0, 0x81, 64, 0};
+    std::size_t operations = 0;
+    float peak = 0.0f;
+    for (int pass = 0; pass < 4; ++pass) {
+        if (pass == 1) e.play();
+        e.setMidiOptions(pass == 2, 2, 48, pass == 3 ? 5 : 0);
+        // Queued off the audio thread, a little apart, as a player would.
+        const int64_t t = Engine::midiClockNs();
+        for (int i = 0; i < static_cast<int>(sizeof played);) {
+            const int n = (played[i] & 0xF0) == 0xC0 || (played[i] & 0xF0) == 0xD0 ? 2 : 3;
+            e.midiBytes("s", played + i, n, t + i * 100'000);
+            e.midiBytes("v", played + i, n, t + i * 100'000);
+            i += n;
+        }
+        cawtest::AllocationScope scope;
+        for (int k = 0; k < 40; ++k) {
+            e.process(l.data(), r.data(), 192);
+            for (float v : l) peak = std::max(peak, std::fabs(v));
+        }
+        operations += scope.count();
+        e.midiRelease("");
+        cawtest::AllocationScope release;
+        for (int k = 0; k < 4; ++k) e.process(l.data(), r.data(), 192);
+        operations += release.count();
+    }
+    CHECK(peak > 0.0f);
+    CHECK_EQ(operations, 0u);
+    CHECK_EQ(e.midiDropped(), 0u);
+}

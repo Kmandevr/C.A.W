@@ -1,6 +1,8 @@
-// Plays a MIDI keyboard (or the on-screen keys and pads) on a track and records it: notes go to the armed track
-// (else the selected one) as live previews; while recording, after a count-in, they are captured against the
-// playhead and become a new pattern clip at Stop, one take per loop pass, with a "Keep take?" undo.
+// Plays MIDI devices (and the on-screen keys and pads) on a track and records them: a device's messages go to the
+// armed track (else the selected one) through the engine's device input, placed at the frame they were played; the
+// on-screen keys as live previews. While recording, after a count-in, notes are captured against the playhead (a
+// device's at its own timestamps) and become a new pattern clip at Stop, one take per loop pass, with a "Keep
+// take?" undo. Controller learn maps a device's CC to a knob.
 import 'dart:async';
 import 'dart:math' as math;
 
@@ -8,6 +10,8 @@ import 'package:flutter/foundation.dart';
 
 import '../platform/midi_input.dart';
 import 'app_state.dart';
+import 'device_target.dart';
+import 'midi_mapping.dart';
 import 'pattern_doc.dart';
 import 'project.dart';
 import 'settings.dart';
@@ -38,15 +42,124 @@ class LiveMidi extends ChangeNotifier {
     state.addListener(_onState);
     state.tick.addListener(_onTick);
     state.settings.addListener(_applyMetronome);
+    state.settings.addListener(_applyMidiSettings);
     final i = input;
     if (i == null) return;
     _subs.add(i.messages.listen(handle));
     _subs.add(i.devices.listen((names) {
       // A keyboard unplugged with keys down sends no note-offs: end every note.
-      if (names.length < devices.length) _releaseAll();
+      if (names.length < devices.length) {
+        _releaseAll();
+        _releaseDevices();
+      }
       devices = names;
       notifyListeners();
     }));
+    _subs.add(i.ports.listen((list) {
+      ports = list;
+      notifyListeners();
+    }));
+    _closed = {...state.settings.midiClosed};
+    i.setClosed(_closed);
+  }
+
+  /// Every device the platform sees, open or turned off (Settings › MIDI's list).
+  List<MidiPort> ports = const [];
+
+  /// When each device (by name) last sent something, for its activity light; [activity] ticks with it.
+  final Map<String, DateTime> lastActivity = {};
+  final ValueNotifier<int> activity = ValueNotifier(0);
+
+  void _blink(String source) {
+    final now = DateTime.now();
+    final last = lastActivity[source];
+    lastActivity[source] = now;
+    if (last == null || now.difference(last).inMilliseconds > 40) activity.value++;
+  }
+
+  Set<String> _closed = {};
+  (bool, int)? _midiOptions;
+
+  /// Settings › MIDI: the devices turned off, and MPE and the bend range for the engine.
+  void _applyMidiSettings() {
+    final s = state.settings;
+    if (!_sameSet(s.midiClosed, _closed)) {
+      _closed = {...s.midiClosed};
+      input?.setClosed(_closed);
+    }
+    final want = (s.midiMpe, s.midiBendRange);
+    final e = state.engine;
+    if (e != null && want != _midiOptions) {
+      _midiOptions = want;
+      e.setMidiOptions(mpe: s.midiMpe, bendRange: s.midiBendRange.toDouble());
+    }
+  }
+
+  static bool _sameSet(Set<String> a, Set<String> b) => a.length == b.length && a.containsAll(b);
+
+  /// Controller learn: the knob waiting for a device's next CC, or null.
+  ({String layerId, int slot, String paramId})? get learning => _learning;
+  ({String layerId, int slot, String paramId})? _learning;
+
+  /// The mapping the last learn made (the knob's sheet says so and plays its feedback), or null.
+  final ValueNotifier<MidiCcMapping?> learned = ValueNotifier(null);
+
+  /// Waits for a CC from a device to map to [paramId] of the device at [slot] on [layerId]; [cancelLearn] stops.
+  void learn(String layerId, int slot, String paramId) {
+    _learning = (layerId: layerId, slot: slot, paramId: paramId);
+    learned.value = null;
+    notifyListeners();
+  }
+
+  void cancelLearn() {
+    if (_learning == null) return;
+    _learning = null;
+    notifyListeners();
+  }
+
+  /// The CC mapped to that knob, or null.
+  MidiCcMapping? mappingOf(String layerId, int slot, String paramId) =>
+      state.project.midiMappings.where((m) => m.targets(layerId, slot, paramId)).firstOrNull;
+
+  /// Removes a mapping (one undo step).
+  void forget(MidiCcMapping m) {
+    state.editProject((p) => p.midiMappings.remove(m));
+    notifyListeners();
+  }
+
+  final Map<String, Timer> _commits = {};
+
+  /// A device's CC: learnt onto the waiting knob, or moving the knobs mapped to it. True when it was used.
+  bool _control(MidiMessage m) {
+    if (m.data1 >= 120) return false; // channel mode messages (all notes off, reset) are never a knob
+    final l = _learning;
+    if (l != null) {
+      final made = MidiCcMapping(channel: m.channel, cc: m.data1, layerId: l.layerId, slot: l.slot, paramId: l.paramId);
+      state.editProject((p) {
+        p.midiMappings.removeWhere((x) => x.targets(l.layerId, l.slot, l.paramId));
+        p.midiMappings.add(made);
+      });
+      _learning = null;
+      learned.value = made;
+      notifyListeners();
+      return true; // the control that was learnt doesn't move the knob yet: the next movement does
+    }
+    var used = false;
+    for (final map in state.project.midiMappings) {
+      if (!map.matches(m.channel, m.data1)) continue;
+      final t = DeviceTarget(state, map.layerId, map.slot);
+      final p = t.param(map.paramId);
+      if (p == null) continue;
+      used = true;
+      t.setLive(p.id, MidiCcMapping.valueFor(p, m.data2));
+      // One undo step per movement: saved once the control rests.
+      _commits.remove(map.layerId)?.cancel();
+      _commits[map.layerId] = Timer(const Duration(milliseconds: 400), () {
+        _commits.remove(map.layerId);
+        t.commit();
+      });
+    }
+    return used;
   }
 
   /// The on-screen keys and pads (owner, 2026-11-10): a slide-up panel over the transport.
@@ -221,9 +334,29 @@ class LiveMidi extends ChangeNotifier {
   }
 
   void handle(MidiMessage m) {
+    final words = m.ump;
+    if (words != null && m.status == 0) {
+      // A UMP batch: each packet on its own, with its MIDI 1.0 view.
+      for (final one in MidiMessage.fromUmp(words, m.source, m.timeNs)) {
+        handle(one);
+      }
+      return;
+    }
+    if (m.status == MidiMessage.perNote) {
+      if (!accepts(MidiMessage(0x80 | m.data1, 0, 0, m.source))) return;
+      _blink(m.source);
+      final to = _deviceTo[m.data1 << 7 | m.data2] ?? (recording || state.settings.midiThru ? targetLayerId : null);
+      if (to != null) state.deviceMidi(to, words: words, timeNs: m.timeNs);
+      return;
+    }
     if (!accepts(m)) return;
+    if (m.source.isNotEmpty) {
+      _blink(m.source);
+      if (m.isControl && _control(m)) return;
+    }
     // MIDI thru off: notes sound only on a track being recorded.
     final layer = recording || state.settings.midiThru ? targetLayerId : null;
+    if (m.source.isNotEmpty) return _device(m, layer);
     if (layer == null) return;
     final now = _now();
     if (m.isNoteOn) {
@@ -259,13 +392,162 @@ class LiveMidi extends ChangeNotifier {
     final h = _held.remove(note);
     if (h == null) return;
     state.previewOff(h.$1);
+    _keep(h.$2, now, note.toDouble(), h.$3, h.$4);
+  }
+
+  /// A recorded note from [start] to [end] (steps, every pass counted), begun in loop pass [pass].
+  void _keep(double start, double end, double pitch, double vel, int pass) {
     final from = _recordFrom;
     if (!recording || from == null) return;
     // Notes begun in the pre-roll (before the record point, on the first pass) are heard, not recorded.
-    if (h.$4 == 0 && h.$2 < from - 1e-9) return;
+    if (pass == 0 && start < from - 1e-9) return;
     // Written earlier by the recording offset, for the delay between a note and hearing it (Settings › Recording).
     final early = recordOffsetSteps;
-    taken.add(TakenNote(h.$2 - early, math.max(0.25, now - h.$2), note.toDouble(), h.$3, h.$4));
+    taken.add(TakenNote(start - early, math.max(0.25, end - start), pitch, vel, pass));
+  }
+
+  // ---- Devices (caw.h API 15: the engine places each message at the frame it was played) ----
+
+  /// The track each held device key (channel << 7 | key) sounds on: its off, pressure and pedal go there even if
+  /// the target changed since.
+  final Map<int, String> _deviceTo = {};
+  final Map<int, (double, double, int)> _deviceTakes = {}; // key -> (start, velocity, pass) while recording
+  final Set<int> _deviceSustained = {};
+  final List<bool> _devicePedal = List.filled(16, false);
+
+  /// Where the playhead was when a device message at [timeNs] was played: (steps with every pass counted, pass).
+  /// From the engine's position at that time when it knows it; else the playhead now.
+  (double, int) _at(int timeNs) {
+    final now = _now();
+    final countingIn = recording && state.transportOn && !state.meters.playing;
+    final exact = countingIn ? null : state.stepAt(timeNs);
+    if (exact == null) return (now, _pass);
+    final (from, to) = loopSpan;
+    final loop = to - from;
+    var s = exact, pass = _pass, wraps = _wraps;
+    if (loop > 0 && state.meters.playing) {
+      if (s >= to) {
+        s -= loop; // played after the wrap, before the callback that crossed it reported back
+        pass++;
+        wraps += loop;
+      } else if (s < _lastStep - loop / 2) {
+        pass++; // the engine has wrapped; the playhead here has not caught up
+        wraps += loop;
+      } else if (s > _lastStep + loop / 2 && pass > 0) {
+        pass--; // played just before a wrap the playhead here already counted
+        wraps -= loop;
+      }
+    }
+    return (s + wraps, pass);
+  }
+
+  /// A Note On's velocity through Settings › MIDI's curve (its UMP packet too).
+  MidiMessage _curved(MidiMessage m, double vel) {
+    final words = m.ump;
+    if (words == null) return m.withData2((vel * 127).round().clamp(1, 127));
+    final w = [...words];
+    if (w[0] >> 28 == 2) {
+      w[0] = (w[0] & 0xFFFFFF00) | (vel * 127).round().clamp(1, 127);
+    } else if (w.length > 1) {
+      w[1] = ((vel * 65535).round().clamp(1, 65535) << 16) | (w[1] & 0xFFFF);
+    }
+    return MidiMessage(m.status, m.data1, m.data2, m.source, m.timeNs, w);
+  }
+
+  void _send(String layer, MidiMessage m) {
+    final words = m.ump;
+    if (words != null) {
+      state.deviceMidi(layer, words: words, timeNs: m.timeNs);
+    } else {
+      state.deviceMidi(layer, bytes: m.bytes, timeNs: m.timeNs);
+    }
+  }
+
+  void _device(MidiMessage m, String? layer) {
+    final key = m.channel << 7 | m.data1;
+    final ch = m.channel;
+    if (m.isNoteOn) {
+      if (layer == null) return;
+      final old = _deviceTo[key];
+      if (old != null && old != layer) _send(old, MidiMessage(0x80 | ch, m.data1, 0, m.source, m.timeNs));
+      _endTake(key, m.timeNs);
+      final words = m.ump;
+      // A MIDI 2.0 note's 16-bit velocity goes through the curve at its own resolution.
+      final played = words != null && words[0] >> 28 == 4 && words.length > 1 ? (words[1] >> 16) / 65535 : m.data2 / 127;
+      final vel = state.settings.velocityCurve.apply(played, state.settings.midiFixedVelocity);
+      _send(layer, _curved(m, vel));
+      _deviceTo[key] = layer;
+      _deviceSustained.remove(key);
+      if (recording) {
+        final (at, pass) = _at(m.timeNs);
+        _deviceTakes[key] = (at, vel, pass);
+      }
+    } else if (m.isNoteOff) {
+      final to = _deviceTo[key] ?? layer;
+      if (to == null) return;
+      _send(to, m);
+      if (_devicePedal[ch] && _deviceTo.containsKey(key)) {
+        _deviceSustained.add(key);
+      } else {
+        _deviceTo.remove(key);
+        _endTake(key, m.timeNs);
+      }
+    } else if (m.isPolyPressure) {
+      final to = _deviceTo[key] ?? layer;
+      if (to != null) _send(to, m);
+    } else if (m.isControl && (m.data1 == 64 || m.data1 == 120 || m.data1 == 123)) {
+      // The pedal and all-notes-off reach every track that holds this channel's keys, and the target.
+      final on = {for (final e in _deviceTo.entries) if (e.key >> 7 == ch) e.value, ?layer};
+      for (final to in on) {
+        _send(to, m);
+      }
+      final up = m.data1 == 64 ? m.data2 < 64 : true;
+      if (m.data1 == 64) _devicePedal[ch] = !up;
+      if (up) {
+        for (final k in _deviceSustained.where((k) => k >> 7 == ch).toList()) {
+          _deviceSustained.remove(k);
+          _deviceTo.remove(k);
+          _endTake(k, m.timeNs);
+        }
+        if (m.data1 != 64) {
+          for (final k in _deviceTo.keys.where((k) => k >> 7 == ch).toList()) {
+            _deviceTo.remove(k);
+            _endTake(k, m.timeNs);
+          }
+        }
+      }
+    } else {
+      if (layer == null) return;
+      _send(layer, m);
+    }
+    state.deviceNotesHeld = _deviceTo.length;
+  }
+
+  void _endTake(int key, int timeNs) {
+    final t = _deviceTakes.remove(key);
+    if (t == null) return;
+    final (end, _) = _at(timeNs);
+    _keep(t.$1, end, (key & 0x7F).toDouble(), t.$2, t.$3);
+  }
+
+  /// The device notes recording still holds end where the playhead last was (Stop).
+  void _endDeviceTakes() {
+    final now = _lastNow;
+    for (final e in _deviceTakes.entries.toList()) {
+      _keep(e.value.$1, now, (e.key & 0x7F).toDouble(), e.value.$2, e.value.$3);
+    }
+    _deviceTakes.clear();
+  }
+
+  /// A device went away: its keys can never send their offs, so the engine ends them.
+  void _releaseDevices() {
+    if (_deviceTo.isEmpty) return;
+    _endDeviceTakes();
+    _deviceTo.clear();
+    _deviceSustained.clear();
+    _devicePedal.fillRange(0, 16, false);
+    state.deviceNotesHeld = 0;
+    state.deviceMidiRelease();
   }
 
   /// Settings › Metronome and recording's offset in sixteenth steps at the project's tempo.
@@ -282,6 +564,7 @@ class LiveMidi extends ChangeNotifier {
   void _onState() {
     if (!state.transportOn && recording) _commit(); // Stop (or a pause) ends the take
     _applyMetronome();
+    _applyMidiSettings(); // a new engine takes the MIDI options too
   }
 
   /// Writes the recording on the armed track: one pass is one clip from the bar where recording began; a loop
@@ -290,6 +573,7 @@ class LiveMidi extends ChangeNotifier {
     final layerId = armedLayerId;
     final from = _recordFrom;
     _releaseAll(); // keys still down end where the playhead last was
+    _endDeviceTakes();
     armedLayerId = null;
     _recordFrom = null;
     countInEnds = null;
@@ -374,13 +658,20 @@ class LiveMidi extends ChangeNotifier {
   void dispose() {
     if (recording) _commit();
     _releaseAll();
+    _releaseDevices();
+    for (final t in _commits.values) {
+      t.cancel();
+    }
     for (final s in _subs) {
       s.cancel();
     }
     state.removeListener(_onState);
     state.tick.removeListener(_onTick);
     state.settings.removeListener(_applyMetronome);
+    state.settings.removeListener(_applyMidiSettings);
     lastTake.dispose();
+    learned.dispose();
+    activity.dispose();
     super.dispose();
   }
 }

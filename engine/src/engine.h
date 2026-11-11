@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "component_chain.h"
+#include "midi_device.h"
 #include "execution.h"
 #include "meters.h"
 #include "module_registry.h"
@@ -136,6 +137,22 @@ public:
     void notePitch(int32_t id, double pitch);  // glides a held preview to [pitch] without a new attack
     void noteOff(int32_t id);
     void notesOff();
+    // MIDI from devices (caw.h, API 15): messages for [layerId]'s instrument, queued for the audio thread, which
+    // plays each at its frame from its time on the MIDI clock (midiClockNs; 0 means now). UMP words (MIDI 1.0
+    // Channel Voice ones upscaled to MIDI 2.0) or MIDI 1.0 bytes. Returns the messages queued; a full queue drops
+    // the rest (counted in midiDropped). Any thread but the audio thread.
+    int midiUmp(const std::string& layerId, const uint32_t* words, int count, int64_t timeNs);
+    int midiBytes(const std::string& layerId, const uint8_t* bytes, int count, int64_t timeNs);
+    // Ends every device note on [layerId] (empty: every layer), at the next callback.
+    void midiRelease(const std::string& layerId);
+    void setMidiOptions(bool mpe, double bendRange, double noteBendRange, double delayMs) noexcept;
+    uint64_t midiDropped() const noexcept;
+    static int64_t midiClockNs() noexcept;
+    // The transport's position in samples (into the project loop, not wrapped) the audio thread renders at [timeNs]
+    // on the MIDI clock, from the last callback's start; -1 while not playing or before a callback.
+    int64_t positionAt(int64_t timeNs) const noexcept;
+    // Tests only: the MIDI clock the audio thread reads (-1: the real one).
+    void setMidiClockForTest(int64_t ns) noexcept { midiClockTest_.store(ns, std::memory_order_relaxed); }
     void setMaster(double volume);
     void play(double fromStep = 0);  // fromStep: sixteenth steps into the project loop (out of range starts at 0)
     // Count-in: clicks [beats] beats at the tempo (previews still play), then plays from [fromStep] on the
@@ -256,6 +273,11 @@ private:
     static bool playsNotes(const Slot& s) noexcept;
     struct Voice& pickVoice(Chain& c) noexcept;
     void previewCommand(const Cmd& c) noexcept;
+    void takeDeviceMidi(int frames) noexcept;   // callback start: the queue into midiPending_, frames worked out
+    void feedDeviceMidi(Slot& s, NoteEvents& notes, int m) noexcept;  // this chunk's device messages for s
+    void endDeviceMidi(int frames) noexcept;    // callback end: keep only the messages for later callbacks
+    bool queueDeviceMidi(int slot, Midi2Event e, int64_t timeNs) noexcept;
+    int deviceSlot(const std::string& layerId);
     void updatePreviewing(int frames) noexcept;
     void endPlayback() noexcept;
     static void restartChain(Chain& c) noexcept;
@@ -442,6 +464,24 @@ private:
     std::map<std::string, ModuleState> modules_;
     std::map<std::string, LayerState> layers_;
     std::map<int32_t, int> previewSlots_;  // control thread: each held preview's slot, for its pitch and off
+    // Device MIDI (API 15): producers push under midiPush_ (never the audio thread); the audio thread pops into
+    // midiPending_ (made with the Engine) and places each message at its frame.
+    struct PendingMidi {
+        Midi2Event e;
+        int64_t frame = 0;  // in the current callback
+        bool done = false;
+    };
+    Midi2InputQueue midiIn_;
+    std::mutex midiPush_;
+    std::unique_ptr<PendingMidi[]> midiPending_;
+    uint32_t midiPendingCount_ = 0;
+    int midiChunkFrom_ = 0;  // audio thread: the chunk's first frame in the callback
+    std::atomic<uint64_t> midiPendingDropped_{0};
+    std::atomic<bool> midiMpe_{false};
+    std::atomic<double> midiBendRange_{2}, midiNoteBendRange_{48};
+    std::atomic<int64_t> midiDelayNs_{0};
+    std::atomic<int64_t> midiClockTest_{-1};
+    std::atomic<int64_t> cbTimeNs_{0}, cbPos_{-1};  // the last callback's start on the MIDI clock, and g_ then (-1: stopped)
     std::vector<std::string> order_;  // layer ids in project order, for meters
     std::map<std::string, double> globals_;
     // Knob moves since the last Play (control thread), so a rebuilt chain keeps their touches.

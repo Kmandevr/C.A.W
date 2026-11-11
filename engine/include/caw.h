@@ -46,8 +46,11 @@ extern "C" {
    caw_engine_loudness_reset, caw_engine_layer_correlation). Nothing else changes.
    13 (2026-11-11): 11 and 12 together (the drums branch and the meters branch merged).
    14 (2026-11-11): caw_engine_set_component_state (a playing component's new saved state: the convolver's WAV
-   impulse). Nothing else changes. */
-#define CAW_API_VERSION 14
+   impulse). Nothing else changes.
+   15 (2026-11-11): MIDI device input, frame-accurate: caw_midi_clock_ns, caw_engine_midi_ump, caw_engine_midi_bytes,
+   caw_engine_midi_release, caw_engine_set_midi_options, caw_engine_midi_dropped and caw_engine_position_at.
+   Nothing else changes. */
+#define CAW_API_VERSION 15
 /* The component index that names a layer's native instrument rather than one of its "components". */
 #define CAW_INSTRUMENT_INDEX 0xFFFFFFFFu
 
@@ -439,6 +442,45 @@ CAW_API void caw_engine_loudness_reset(CawEngine* e);
    over about 300 ms: 1 identical sides, 0 unrelated or silent, -1 opposite. 1 on success, 0 if layer_index is not a
    project layer. */
 CAW_API int32_t caw_engine_layer_correlation(CawEngine* e, int32_t layer_index, float* out);
+/* API version 15. MIDI from devices (USB, Bluetooth, Windows ports), into a track's instrument at the frame it was
+   played. Messages are queued (1,024 at most between two audio callbacks; more are dropped and counted) and the
+   audio thread plays each one a callback (plus the options' delay) after its time, so the spacing between messages
+   is kept as played; one that comes later than that plays at the start of the next callback.
+   The clock: monotonic nanoseconds (steady_clock: CLOCK_MONOTONIC on Android and Linux, the same clock as Android's
+   System.nanoTime and so MidiReceiver timestamps; QueryPerformanceCounter on Windows). */
+CAW_API int64_t caw_midi_clock_ns(void);
+/* [count] UMP words for [layer_id]'s instrument, all at [time_ns] on that clock (0 or less: now). MIDI 2.0 Channel
+   Voice messages (type 4) and MIDI 1.0 Channel Voice ones (type 2, upscaled to MIDI 2.0 as the UMP specification's
+   translation does) play; utility (JR timestamps), system, SysEx and data messages are skipped by their length.
+   Returns the messages queued. Any thread but the audio callback's. */
+CAW_API int32_t caw_engine_midi_ump(CawEngine* e, const char* layer_id, const uint32_t* words, int32_t count,
+                                    int64_t time_ns);
+/* The same for a MIDI 1.0 byte stream (running status within the call; real-time bytes, system messages and SysEx
+   skipped), converted to MIDI 2.0 at the edge, in group 0. */
+CAW_API int32_t caw_engine_midi_bytes(CawEngine* e, const char* layer_id, const uint8_t* bytes, int32_t count,
+                                      int64_t time_ns);
+/* What the instrument hears: a Note On holds a note (a preview, with the device's key and channel, so Stop's fade
+   and mute end it too, but not caw_engine_notes_off, which ends the app's own previews); its Note Off ends it, or
+   the sustain pedal (CC 64) holds it until the pedal is up;
+   Poly Pressure and MIDI 2.0 per-note pitch reach that note; Pitch Bend becomes the pitch of the channel's notes
+   (bend_range semitones); Channel Pressure the pressure of the channel's notes; CC 120 and 123 end the channel's
+   notes. Every Control Change, Program Change and Channel Pressure also reaches the instrument as itself (a MIDI
+   event, MIDI 2.0 words, note id 0). With CAW_MIDI_MPE, channel 1 is the master (its bend and pressure apply to
+   every note, its bend over bend_range) and channels 2..16 each carry one note (their bend over note_bend_range,
+   their CC 74 the note's timbre). note_bend_range is also a MIDI 2.0 per-note pitch bend's range. A .caw voice
+   chain takes only notes, at the start of a block. */
+#define CAW_MIDI_MPE 1
+CAW_API void caw_engine_set_midi_options(CawEngine* e, int32_t flags, double bend_range, double note_bend_range,
+                                         double delay_ms);
+/* Ends every device note on [layer_id] (NULL or empty: on every track) and forgets their channels' bend and pedal,
+   at the next callback: a device was unplugged with keys down. */
+CAW_API void caw_engine_midi_release(CawEngine* e, const char* layer_id);
+/* Device messages dropped since the engine was made (a full queue). */
+CAW_API int64_t caw_engine_midi_dropped(CawEngine* e);
+/* The transport position (samples into the project loop, not wrapped at its end) the audio thread renders at
+   [time_ns] on the MIDI clock, worked out from the last callback's start; -1 while stopped. Recording places a
+   played note with it. */
+CAW_API int64_t caw_engine_position_at(CawEngine* e, int64_t time_ns);
 
 #ifdef __cplusplus
 }

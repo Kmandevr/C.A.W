@@ -1,5 +1,5 @@
 // The Android host: thermal and battery-saver signals for the resource adapter, the C++ compiler channel, MIDI
-// keyboard input, saving exports and haptics.
+// devices and the Bluetooth MIDI scan, saving exports and haptics.
 package com.kmandevr.caw
 
 import android.content.BroadcastReceiver
@@ -18,6 +18,7 @@ class MainActivity : FlutterActivity() {
     private var thermalListener: PowerManager.OnThermalStatusChangedListener? = null
     private var powerSaveReceiver: BroadcastReceiver? = null
     private var pendingSave: Pair<String, MethodChannel.Result>? = null
+    private var bluetoothMidi: BluetoothMidi? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -81,8 +82,14 @@ class MainActivity : FlutterActivity() {
         // Touch feedback with the vibrator's fine primitives (Haptics.kt).
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, HAPTICS_METHOD_CHANNEL).setMethodCallHandler(Haptics(this))
 
-        EventChannel(flutterEngine.dartExecutor.binaryMessenger, MIDI_EVENT_CHANNEL)
-            .setStreamHandler(MidiInput(applicationContext))
+        // MIDI devices (MidiInput.kt) and the in-app Bluetooth LE MIDI scan (BluetoothMidi.kt).
+        val midi = MidiInput(applicationContext)
+        EventChannel(flutterEngine.dartExecutor.binaryMessenger, MIDI_EVENT_CHANNEL).setStreamHandler(midi)
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, MIDI_METHOD_CHANNEL).setMethodCallHandler(midi)
+        val bluetooth = BluetoothMidi(this)
+        bluetoothMidi = bluetooth
+        EventChannel(flutterEngine.dartExecutor.binaryMessenger, BLUETOOTH_EVENT_CHANNEL).setStreamHandler(bluetooth)
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, BLUETOOTH_METHOD_CHANNEL).setMethodCallHandler(bluetooth)
 
         EventChannel(flutterEngine.dartExecutor.binaryMessenger, RESOURCE_EVENT_CHANNEL)
             .setStreamHandler(object : EventChannel.StreamHandler {
@@ -179,8 +186,15 @@ class MainActivity : FlutterActivity() {
         }.start()
     }
 
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        if (bluetoothMidi?.onPermissionResult(requestCode) == true) return
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+    }
+
     override fun onDestroy() {
         stopMonitoring()
+        bluetoothMidi?.close()
+        bluetoothMidi = null
         super.onDestroy()
     }
 
@@ -189,6 +203,9 @@ class MainActivity : FlutterActivity() {
         private const val RESOURCE_EVENT_CHANNEL = "caw/resource_signals/events"
         private const val COMPILER_METHOD_CHANNEL = "caw/compiler"
         private const val MIDI_EVENT_CHANNEL = "caw/midi"
+        private const val MIDI_METHOD_CHANNEL = "caw/midi/control"
+        private const val BLUETOOTH_EVENT_CHANNEL = "caw/midi/bluetooth/events"
+        private const val BLUETOOTH_METHOD_CHANNEL = "caw/midi/bluetooth"
         private const val FILES_METHOD_CHANNEL = "caw/files"
         private const val HAPTICS_METHOD_CHANNEL = "caw/haptics"
         private const val SAVE_REQUEST = 4711

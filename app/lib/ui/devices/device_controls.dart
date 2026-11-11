@@ -11,6 +11,7 @@ import '../motion.dart';
 import '../theme.dart';
 import '../widgets.dart' show ResetOnDoubleTap;
 import 'device_scope.dart';
+import 'midi_learn.dart';
 import 'kit/feel.dart';
 import 'kit/hero.dart' show MotionClock, motionRuns;
 import 'visuals/mod_sheet.dart';
@@ -27,7 +28,7 @@ Taper taperOf(ComponentParameterInfo p) => Taper(p.min, p.max, exponential: p.ex
 /// Dart). It takes a dropped source chip (a new route) and, in assign mode, a tap adds or removes the route. The
 /// amount always has its own target: a drag that starts on the knob's outer edge or its rings sets the selected
 /// route's amount, two fingers on the knob do the same, and a long-press opens its Modulation sheet with a big
-/// slider per route. Without a matrix a long-press types a value.
+/// slider per route. Without a matrix a long-press types a value. Both offer "Learn MIDI CC" (midi_learn.dart).
 class DeviceKnob extends StatefulWidget {
   const DeviceKnob(this.paramId, {super.key, this.label, this.size = 40, this.color, this.valueText});
   final String paramId;
@@ -342,6 +343,7 @@ class _DeviceKnobState extends State<DeviceKnob> {
         onSubmitted: (s) => Navigator.of(c).pop(double.tryParse(s.trim())),
       ),
       actions: [
+        MidiLearnButton(target: t, paramId: p.id),
         TextButton(onPressed: () => Navigator.of(c).pop(), child: const Text('Cancel')),
         TextButton(onPressed: () => Navigator.of(c).pop(double.tryParse(field.text.trim())), child: const Text('Set')),
       ],

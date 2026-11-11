@@ -8,7 +8,8 @@
 namespace caw {
 
 enum class Midi2EventType : uint8_t {
-    NoteOff, NoteOn, PolyPressure, PerNotePitch, ControlChange, ChannelPressure, PitchBend
+    NoteOff, NoteOn, PolyPressure, PerNotePitch, ControlChange, ChannelPressure, PitchBend, ProgramChange,
+    AllOff  // the host's own: every device note on the target ends (a device went away); never decoded
 };
 
 struct Midi2Event {
@@ -20,10 +21,16 @@ struct Midi2Event {
     uint8_t attributeType = 0;
     uint16_t attributeData = 0;
     double value = 0.0; // normalized 0..1, or signed -1..1 for pitch bend
+    // Set by the host's device input (midi_device.h), not by the decoder: the message's MIDI 2.0 Channel Voice
+    // words (a MIDI 1.0 message arrives upscaled), its time on the MIDI clock (ns) and the slot it is for.
+    uint32_t ump[2] = {0, 0};
+    int64_t timeNs = 0;
+    int32_t target = -1;
 };
 
 // Decodes one MIDI 2.0 Channel Voice (message type 0x4) UMP.
-// Returns false for other message types or unsupported statuses. No allocation.
+// Returns false for other message types or unsupported statuses. No allocation. Program Change (0xC) puts the
+// program in index (value = program / 127).
 bool decodeMidi2ChannelVoice(uint32_t word0, uint32_t word1, Midi2Event& out) noexcept;
 
 // A Control Change from a UMP: MIDI 1.0 Channel Voice (type 0x2, 7-bit value) or MIDI 2.0 Channel
