@@ -1,8 +1,8 @@
 ---
 title: Native module SDK
 summary: C ABI host contract and C++ component SDK, validation, real-time rules, state and packaging.
-updated: 2026-11-10
-covers: [engine/include/caw_component.h, engine/include/caw/display.hpp, engine/include/caw/library/, engine/src/sample_pack.*, engine/plugin/clap/, engine/cmake/CAWClap.cmake, engine/include/caw/module.hpp, engine/include/caw/component.hpp, engine/include/caw/instrument.hpp, engine/CMakeLists.txt, engine/cmake/, examples/cpp/minimal/, examples/cpp/poly-synth/, scripts/caw-component-build.js, .github/workflows/cpp-components.yml, engine/src/module.*, engine/src/module_registry.*, engine/src/graph.*, engine/src/component_test.*, engine/src/analysis.*]
+updated: 2026-11-11
+covers: [engine/include/caw_component.h, engine/include/caw/display.hpp, engine/include/caw/library/, engine/src/sample_pack.*, engine/plugin/clap/, engine/cmake/CAWClap.cmake, engine/plugin/vst3/, engine/cmake/CAWVst3.cmake, engine/include/caw/module.hpp, engine/include/caw/component.hpp, engine/include/caw/instrument.hpp, engine/CMakeLists.txt, engine/cmake/, examples/cpp/minimal/, examples/cpp/poly-synth/, scripts/caw-component-build.js, .github/workflows/cpp-components.yml, engine/src/module.*, engine/src/module_registry.*, engine/src/graph.*, engine/src/component_test.*, engine/src/analysis.*]
 ---
 
 # Native module SDK v1
@@ -14,8 +14,8 @@ covers: [engine/include/caw_component.h, engine/include/caw/display.hpp, engine/
 - **Loading:** explicit trust (Blocked / Trusted; Isolated is refused, since there is no sandbox), and rebuilds that switch in while playing.
 - **Playback:** stereo effects with parameters, automation, bypass, state, tails and latency compensation, on tracks and the master; instruments (an event input, a stereo output) playing a track's notes, with the same (2026-11-10, #156).
 - **Testing:** an offline testing suite measures an effect (levels, THD+N, impulse response, latency and tail against the declared values, null tests, parameter sweeps, CPU per block) from the C API or `caw test-component`; instruments are not covered yet.
-- **CLAP export (2026-11-10):** a component library also builds as a `.clap` plug-in for Linux and Windows hosts ("Export as a CLAP plug-in" below).
-- **Still to come:** the UI, process isolation, signing, components with other ports, VST3 export and an in-app Export button.
+- **CLAP and VST3 export:** a component library also builds as a `.clap` plug-in (2026-11-10) and a `.vst3` bundle (2026-11-11) for Linux and Windows hosts ("Export as a CLAP plug-in" and "Export as a VST3 plug-in" below).
+- **Still to come:** the UI, process isolation, signing, components with other ports, macOS plug-in bundles and an in-app Export button.
 
 ## Writing an effect
 
@@ -208,6 +208,29 @@ What the wrapper maps (the component sees an ordinary C.A.W host):
 - **Not mapped:** control inputs read their default and modulation inputs 0; control and modulation outputs are discarded. Host blocks longer than 4096 frames are processed in pieces. No GUI (hosts show generic parameter controls), no per-voice modulation, no sysex.
 
 Threads and memory follow CLAP: process, reset and (while active) flush on the audio thread, the rest on the main thread; everything is allocated in `activate`, and a test counts zero allocations in process, flush and reset. On Linux the plug-in links with `-Bsymbolic`, so a host that loads several C.A.W plug-ins with global symbols cannot route one plug-in's wrapper to another's components. The test host (`engine/plugin/clap/tests/clap_host_test.cpp`, `caw_clap_tests`, built with `-DCAW_CLAP=ON`) loads the example and a test bundle (`tests/clap_fixture.cpp`: an effect with parameters, state, latency and tail; an instrument with note input and output; a transport reader) and compares every sample with the same components run through `ModuleRegistry`. Not yet tried in a third-party host or with the community `clap-validator`.
+
+## Export as a VST3 plug-in
+
+**[Fact, checked 2026-11-11]** The same component library builds as a VST3 plug-in, without changing its code:
+
+```cmake
+caw_add_vst3_plugin(TARGET my_echo_vst3 COMPONENT caw_component_local_my_echo
+  OUTPUT_NAME my-echo VENDOR "Me" URL "https://example.org" EMAIL "me@example.org" VERSION "1.0.0")  # all but TARGET/COMPONENT optional
+```
+
+It compiles the component's sources with the SDK's wrapper (`engine/plugin/vst3/caw_vst3_entry.cpp`, installed in `lib/cmake/CAW/vst3/`) into a bundle next to the component library: `my-echo.vst3/Contents/x86_64-linux/my-echo.so` on Linux, `my-echo.vst3/Contents/x86_64-win/my-echo.vst3` on Windows (`aarch64-linux` and `arm64-win` on Arm). The example does it with `-DCAW_BUILD_VST3=ON`. Configuring fetches the VST3 interface headers (`steinbergmedia/vst3_pluginterfaces` 3.8.1, MIT, pinned by commit; [decision](decisions.md)); offline, point `FETCHCONTENT_SOURCE_DIR_CAW_VST3` at a checkout in a folder named `pluginterfaces`. Only those headers are used, not the SDK's helper classes. macOS bundles are not built. The library inside still exports `caw_get_component_v3`, so C.A.W loads it like the plain library.
+
+What the wrapper maps, following the CLAP wrapper where VST3 allows:
+- **Factory:** one class per component ("Audio Module Class"), name = display name (or the id), version = `VERSION` or the component's version, SDK version 3.8.1. Class id: two 64-bit FNV-1a hashes of `caw.vst3:` + the component id, so it stays the same across builds and changes only with the id. Sub-categories by role (`Instrument|Synth`, `Fx`, `Fx|Tools`, `Fx|Analyzer`, `Fx|Generator`), plus `Stereo` or `Mono`.
+- **One object:** the component is also its processor and its edit controller (`getControllerClassId` returns `kNotImplemented`, so hosts query `IEditController` on it, as for the SDK's single-component effects). No editor view: hosts show generic controls.
+- **Buses:** the component's audio ports with their channel counts (the first of each side is main; mono, stereo, quad, 5.1, 7.1 or N discrete speakers); `setBusArrangements` takes only those counts. One event bus per event port. 32-bit float only.
+- **Notes:** VST3 note on and off and poly pressure become MIDI 2.0 UMP note messages with note id = VST3 id + 1; notes without an id (−1) get wrapper ids with the top bit set and end on an off for their key; a velocity-0 note on is an off. Up to 256 notes tracked per bus (past that the oldest ends) and 1,024 events per bus per piece, with room kept for the offs as in the CLAP wrapper. The component's output notes and poly pressure go back as VST3 events with the host's id restored. Sysex, note expression, chords and scales are not passed on.
+- **Parameters:** id = FNV-1a hash of the parameter id, 31 bits (VST3 keeps ids from 2³¹ for hosts), a collision moving to the next free id. Normalized 0..1 on the parameter's curve (exponential when the curve is exponential and the minimum is above 0, else linear); a step or choices give `stepCount` and the SDK's mapping (`floor(n × (steps + 1))`), choices are a list. Each queue point is a change at its sample offset, ramping over `smoothingFrames` exactly as the engine ramps a manual change (the test checks bit for bit); VST3's linear segments between points are not followed. A block of 0 frames applies its changes at once. Text as in CLAP (choice labels, or the value with its unit).
+- **State:** the CLAP wrapper's blob, byte for byte (component id, its state version, each parameter by id, the component's own bytes), so the same state loads through either. `setComponentState` reads it for the controller's values; a load while active waits until the current block ends, as in CLAP.
+- **Latency, tail and transport:** latency and tail from the descriptor (an infinite tail is `kInfiniteTail`); tempo, the position in quarter notes (moved on per piece of a long block) and beats per bar reach the component while the host plays. A quiet component sets the outputs' silence flags.
+- **Not mapped:** control inputs read their default and modulation inputs 0; control and modulation outputs are discarded. Host blocks longer than 4096 frames are processed in pieces. No units, programs, MIDI CC mapping or bypass parameter.
+
+Everything is allocated in `setActive(true)`, and a test counts zero allocations in process. The test host (`engine/plugin/vst3/tests/vst3_host_test.cpp`, `caw_vst3_tests`, built with `-DCAW_VST3=ON`) loads the example and the CLAP test bundle as `.vst3` bundles and compares every sample with the same components run through `ModuleRegistry`. Not yet tried in a third-party host or with Steinberg's `validator`.
 
 ## Real-time contract
 

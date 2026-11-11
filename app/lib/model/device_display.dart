@@ -61,7 +61,7 @@ class EngineDisplaySource extends DeviceDisplaySource {
 
   @override
   ValueListenable<DeviceDisplayFrame?> frames(DeviceTarget target) =>
-      _polls.putIfAbsent('${target.layerId}\u0000${target.slot}', () => _Poll(target, interval));
+      _polls.putIfAbsent('${target.layerId}\u0000${target.slot}\u0000${target.displayChild}', () => _Poll(target, interval));
 }
 
 class _Poll extends ValueNotifier<DeviceDisplayFrame?> {
@@ -109,7 +109,8 @@ class _Poll extends ValueNotifier<DeviceDisplayFrame?> {
       value = null;
       return;
     }
-    final n = engine.componentDisplay(layer.id, index, _buffer);
+    // A rack's child (fx-racks): the rack's index + (child + 1) * 65536.
+    final n = engine.componentDisplay(layer.id, target.displayChild == 0 ? index : index + target.displayChild * 65536, _buffer);
     if (n > 0) value = decodeDisplay(id, _buffer, n);  // 0: nothing new to show (or the engine is busy): keep the last
     if (n < 0) value = null;
   }
@@ -125,6 +126,22 @@ DeviceDisplayFrame decodeDisplay(String componentId, List<double> f, int n) {
   if (decodeFiltersDisplay(componentId, f, n) case final frame?) return frame;
   // fx-filters end
   switch (componentId) {
+    // fx-racks begin
+    case 'org.caw.rack.multiband':
+      final bins = at(12).toInt();
+      return DeviceDisplayFrame(inputDb: at(0), outputDb: at(1),
+          spectrum: at(13) > 0.5 && 14 + 2 * bins <= n
+              ? [for (var j = 0; j < bins; ++j) ((f[14 + j] + 90) / 90).clamp(0.0, 1.0).toDouble()]
+              : null,
+          values: {'bands': at(2), for (var c = 0; c < 4; ++c) 'xover${c + 1}': at(3 + c),
+            for (var b = 0; b < 5; ++b) 'band${b + 1}_db': at(7 + b),
+            if (at(13) > 0.5 && 14 + 2 * bins <= n) for (var j = 0; j < bins; ++j) 'out$j': f[14 + bins + j]});
+    case 'org.caw.rack.fx':
+      final sources = at(2).toInt();
+      return DeviceDisplayFrame(inputDb: at(0), outputDb: at(1), values: {
+        for (var s = 1; s <= sources; ++s) 'src$s': at(2 + s),
+        for (var r = 0; r < 16; ++r) 'route${r + 1}': at(3 + sources + r)});
+    // fx-racks end
     case 'org.caw.eq':
       final bins = at(0).toInt();
       final watched = at(3) > 0.5;

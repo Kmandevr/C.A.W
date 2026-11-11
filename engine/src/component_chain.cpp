@@ -6,6 +6,7 @@
 #include <cmath>
 #include <cstring>
 
+#include "builtin_fx_racks.h"
 #include "json.h"
 #include "route_math.h"
 
@@ -148,6 +149,15 @@ std::unique_ptr<ComponentChain> ComponentChain::make(const ModuleRegistry& regis
             error = "native component " + quoted(spec.id) + " could not create a processor instance";
             return nullptr;
         }
+        // A rack (fx-racks) makes its children from its slot values first: its descriptor then lists their parameters.
+        if (auto* rack = dynamic_cast<RackContainer*>(e->processor.get())) {
+            std::string why;
+            if (!rack->configure(registry, spec.params, spec.lenient, why)) {
+                error = "native component " + quoted(spec.id) + ": " + why;
+                return nullptr;
+            }
+            e->structure = rackStructure(spec);
+        }
         const ModuleDescriptor& own = e->processor->descriptor();  // lives as long as the processor
         const uint32_t count = own.parameterCount;
         e->resolvers.resize(count);
@@ -169,6 +179,8 @@ std::unique_ptr<ComponentChain> ComponentChain::make(const ModuleRegistry& regis
         for (const auto& [name, value] : spec.params) {
             const int k = chain->parameterIndex(*e, name);
             if (k < 0 && spec.lenient) continue;  // a rebuild dropped the parameter
+            // A rack's value for a child its slot no longer holds (`s2.cutoff` after s2 changed): left over, ignored.
+            if (k < 0 && !e->structure.empty() && name.find('.') != std::string::npos) continue;
             if (k < 0) {
                 error = "native component " + quoted(spec.id) + " has no parameter " + quoted(name);
                 return nullptr;
@@ -208,7 +220,7 @@ std::unique_ptr<ComponentChain> ComponentChain::make(const ModuleRegistry& regis
 bool ComponentChain::sameComponents(const std::vector<ComponentSpec>& specs, double sampleRate) const noexcept {
     if (specs.size() != entries_.size() || sampleRate != sampleRate_) return false;
     for (std::size_t i = 0; i < specs.size(); ++i)
-        if (specs[i].id != entries_[i]->id) return false;
+        if (specs[i].id != entries_[i]->id || rackStructure(specs[i]) != entries_[i]->structure) return false;
     return true;
 }
 
@@ -337,10 +349,11 @@ uint64_t ComponentChain::latencyFrames() const noexcept {
     for (const auto& e : entries_) {  // a bypassed effect passes its input on undelayed
         if (e->bypass.load(std::memory_order_relaxed)) continue;
         if (const auto* v = dynamic_cast<const VariableLatency*>(e->processor.get())) {
-            double values[64];
-            const uint32_t n = static_cast<uint32_t>(std::min<std::size_t>(e->resolvers.size(), 64));
+            // Control thread: as many values as it has (a rack has hundreds).
+            std::vector<double> values(e->resolvers.size());
+            const uint32_t n = static_cast<uint32_t>(values.size());
             for (uint32_t k = 0; k < n; ++k) values[k] = fromBits(e->held[k].load(std::memory_order_relaxed));
-            latency += v->latencyFor(values, n);
+            latency += v->latencyFor(values.data(), n);
         } else {
             latency += e->processor->descriptor().latencyFrames;
         }
@@ -502,6 +515,15 @@ void ComponentChain::process(float* left, float* right, uint32_t m, double sampl
 }
 
 int32_t ComponentChain::readDisplay(std::size_t index, float* out, uint32_t max) const noexcept {
+    // A rack's child (fx-racks): index + (child + 1) * 65536.
+    if (const std::size_t child = index >> 16; child > 0) {
+        index &= 0xFFFFu;
+        if (index >= entries_.size() || !entries_[index]->processor) return -1;
+        const auto* rack = dynamic_cast<const RackContainer*>(entries_[index]->processor.get());
+        if (!rack) return -1;
+        const uint32_t n = rack->readChildDisplay(static_cast<uint32_t>(child - 1), out, max);
+        return static_cast<int32_t>(n > max ? max : n);
+    }
     if (index >= entries_.size() || !entries_[index]->processor) return -1;
     const uint32_t n = entries_[index]->processor->readDisplay(out, max);
     return static_cast<int32_t>(n > max ? max : n);

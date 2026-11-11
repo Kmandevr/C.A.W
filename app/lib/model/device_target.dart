@@ -5,6 +5,7 @@ import '../engine/component_info.dart';
 import 'app_state.dart';
 import 'arrange_fx.dart';
 import 'project.dart';
+import 'racks.dart';
 
 /// Where a device sits: track [layerId], and [slot] in its native chain (`instrumentSlot`: its instrument).
 /// It resolves the track on every read, so it keeps working after an undo replaced the project's objects.
@@ -34,8 +35,16 @@ class DeviceTarget {
 
   NativeComponentInfo? get info {
     final id = componentId;
-    return id == null ? null : state.componentInfo(id);
+    if (id == null) return null;
+    final base = state.componentInfo(id);
+    // A rack (fx-racks): its own parameters, its children's and its routes, for the children it holds now.
+    final u = use;
+    if (base == null || u == null || !isRackComponent(id)) return base;
+    return rackInfo(base, u.params, state.componentCatalog.value);
   }
+
+  /// Which of the component's children its live display is (0: the component itself; a rack's child: its slot + 1).
+  int get displayChild => 0;
 
   String get label {
     final id = componentId;

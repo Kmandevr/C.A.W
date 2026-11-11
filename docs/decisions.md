@@ -6,6 +6,13 @@ updated: 2026-11-11
 
 # Decisions
 
+## 2026-11-11: VST3 interface headers for the plug-in builder (#162)
+
+- **Licence [Fact, checked 2026-11-11]:** Steinberg's VST3 SDK is MIT. The `LICENSE.txt` of `steinbergmedia/vst3sdk`, `vst3_pluginterfaces`, `vst3_base` and `vst3_public_sdk` (default branches, read 2026-11-11) is the MIT License, "Copyright (c) 2026, Steinberg Media Technologies GmbH"; the `vst3_pluginterfaces` tag `v3.8.0_build_66` (commit `31d6eeba`, 2025-10-20) already carries it, so the change came with VST 3.8.0. No GPL or proprietary licence remains on the parts used.
+- **Dependency:** `steinbergmedia/vst3_pluginterfaces` **v3.8.1_build_84** (commit `4f547e8e`, 2026-08-11, the latest tag on 2026-11-11), MIT. Only the interface headers and two of their files (`base/funknown.cpp`, `base/coreiids.cpp`) are compiled; the SDK's helper classes, VSTGUI and the validator are not fetched. Fetched at configure time by `caw_add_vst3_plugin` (`engine/cmake/CAWVst3.cmake`), not vendored, not in the app or the engine library; the build stops if the fetched `LICENSE.txt` is not MIT.
+- **Why:** VST3 is the export target after CLAP (roadmap 9.3): the same component library builds as a `.vst3` bundle through a second wrapper around the C interface ([native module SDK](native-module-sdk.md#export-as-a-vst3-plug-in)).
+- **[Assumption]** the "VST" name and logo are trademarks with their own usage guidelines (the repository README's "License & Usage guidelines"), separate from the code licence; C.A.W does not use the logo. Not checked further.
+
 ## 2026-11-11: Drums: deep settings and real quality, every genre (owner)
 
 **Owner's words:** "The drum instrument needs to have an in-depth set of settings and effects to make all the sounds extremely versatile and be actual good quality. Research how different kicks, snares, hats etc. are made and make sure it has all of the settings. You should be able to make a kick a legitimate dubstep kick, an 808 kick, or just a normal-sounding kick. Make it so it can even sound acoustic even though it's generated."
@@ -60,6 +67,17 @@ updated: 2026-11-11
   - hardware MIDI pads supported.
 
 **Still the roadmap's call:** Stages 8–10 stay after Release 1: Faust, plug-in hosting, and iOS/macOS/Linux builds.
+
+## 2026-11-11: Racks and the effect browser (fx-racks, choices to confirm)
+
+**Decision (owner):** a multiband rack (as Multipass) and an FX rack with modulators (as Snap Heap); the browser's nine tabs, search, favourites, recents, a description and icon per effect. **Choices made on the owner's behalf, to confirm** ([engine](engine.md#racks-containers-fx-racks), [UI](ui.md#the-effect-browser)):
+- **Children live in the rack's parameters** (`<slot>_fx` holds a 24-bit hash of the child's id, the child's knobs `s2.cutoff`), so the project file, presets, undo and automation needed no new format.
+- **No racks inside racks**, so there is no depth to bound. **Sizes:** the FX rack holds 8 effects in one serial lane and has 16 routes; the multiband rack holds 4 effects a band. Snap Heap's parallel lanes, Multipass's Pre/Post FX lanes and per-lane mix, and modulators inside the multiband rack are not built; a multiband rack's knobs take automation, not modulation (a rack can't sit in an FX rack), until #161.
+- **Fixed modulators** (4 LFOs, 2 followers, 2 note envelopes, random, 8 macros) instead of Kilohearts' free list of up to 32.
+- **Modulation runs on a 16-frame grid**, as the Flagship's.
+- **The modulation route record is meant to be reused for #161** (route anything anywhere): [Proposal] in [engine](engine.md#racks-containers-fx-racks); #161's design is still the owner's.
+- **Browser:** an All tab before the nine; Favourites are the Files favourites; Recently used keeps the last 12 picks app-wide; an effect no catalog lists goes under Utility.
+- **Factory presets:** FX rack Wobble filter, Dub space, Ducked delay, Drifting tape, Note sweep; multiband rack Multiband glue, Air exciter, Tight low end, Split space.
 
 ## 2026-11-11: Dynamics and Drive effects (fx-dynamics; choices to confirm)
 

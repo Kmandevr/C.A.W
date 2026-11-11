@@ -462,3 +462,78 @@ TEST(component_test_wav_round_trip_and_c_api) {
     CHECK(std::string(result).find("\"ok\":false") != std::string::npos);
     caw_free(result);
 }
+
+TEST(component_test_plays_an_instrument_its_notes) {
+    // An instrument (no audio input, an event input) is fed notes: its output, its tail after the last note off.
+    const std::string req =
+        "{\"component\":\"org.caw.synth.flagship\",\"cpu\":false,\"notes\":[{\"pitch\":57,\"velocity\":110,"
+        "\"start\":0,\"length\":0.4},{\"pitch\":64.5,\"velocity\":60,\"start\":0.2,\"length\":0.3}],\"tail_seconds\":2}";
+    const Json r = run(req);
+    CHECK(r.boolean("ok", false));
+    CHECK(at(r, {"settings"}).string("signal") == "notes");
+    CHECK_EQ(at(r, {"settings"}).number("notes", 0), 2.0);
+    CHECK_EQ(at(r, {"settings"}).number("signal_frames", 0), 24000.0);  // the last note ends at 0.5 s
+    CHECK(at(r, {"output", "channels"}).arr[0].number("peak_db", -200) > -30);
+    CHECK(at(r, {"output", "stereo"}).number("width", 0) > 0.01);  // its unison is spread across the sides
+    const Json& tail = at(r, {"output", "tail"});
+    CHECK(tail.type == Json::Type::Object);
+    CHECK(tail.number("measured", 0) > 0);  // its release rings past the last note off
+    CHECK(at(r, {"ports"}).number("audio_inputs", -1) == 0.0);
+    CHECK(at(r, {"ports"}).number("event_inputs", -1) == 1.0);
+    CHECK(at(r, {"output", "thd"}).type == Json::Type::Null);  // no sine went in
+    CHECK(componentTestJson(req) == componentTestJson(req));
+    // With no notes it plays one C4 for a second; a drum the same way.
+    const Json kick = run("{\"component\":\"org.caw.drum.kick\",\"cpu\":false}");
+    CHECK(kick.boolean("ok", false));
+    CHECK_EQ(at(kick, {"settings"}).number("signal_frames", 0), 48000.0);
+    CHECK(at(kick, {"output", "channels"}).arr[0].number("peak_db", -200) > -20);
+    CHECK(!run("{\"component\":\"org.caw.drum.kick\",\"bypass\":true}").boolean("ok", true));
+}
+
+TEST(component_test_feeds_a_keyed_effect_its_sidechain_and_key_notes) {
+    // The ducker: main input, a stereo sidechain and key notes. In Audio mode a loud key ducks the main signal; with
+    // the key silent (no 'inputs'), nothing ducks. In Notes mode, the request's notes duck it.
+    auto gain = [](const std::string& extra, const std::string& params) {
+        const Json r = run("{\"component\":{\"id\":\"org.caw.ducker\",\"params\":{" + params +
+                           "}},\"signal\":{\"type\":\"sine\",\"frequency\":200,\"seconds\":1},\"cpu\":false" + extra + "}");
+        CHECK(r.boolean("ok", false));
+        CHECK_EQ(at(r, {"ports"}).number("audio_inputs", 0), 2.0);
+        CHECK_EQ(at(r, {"ports"}).number("event_inputs", 0), 1.0);
+        return at(r, {"output", "channels"}).arr.empty() ? 0.0 : at(r, {"output", "channels"}).arr[0].number("gain_db", 0);
+    };
+    const std::string audio = "\"mode\":0,\"response\":1,\"depth\":1,\"threshold\":-40";
+    CHECK_NEAR(gain("", audio), 0.0, 0.01);
+    CHECK(gain(",\"inputs\":{\"sidechain\":{\"type\":\"dc\",\"level_db\":-6,\"seconds\":1}}", audio) < -20);
+    const std::string notes = "\"mode\":1,\"depth\":0.9,\"release\":2000,\"hold\":500";
+    CHECK_NEAR(gain("", notes), 0.0, 0.01);
+    CHECK(gain(",\"notes\":[{\"pitch\":36,\"start\":0.1,\"length\":0.1},{\"pitch\":36,\"start\":0.6,\"length\":0.1}]", notes) < -3);
+    // A port it doesn't have, and notes for an effect without an event input, are refused.
+    CHECK(run("{\"component\":\"org.caw.ducker\",\"inputs\":{\"key\":\"sine\"}}").string("error").find("'key'") !=
+          std::string::npos);
+    CHECK(!run("{\"component\":\"org.caw.chorus\",\"notes\":[{\"pitch\":60}]}").boolean("ok", true));
+}
+
+TEST(component_test_checks_its_thresholds) {
+    const Json r = run(
+        "{\"component\":{\"id\":\"org.caw.distortion\",\"params\":{\"shape\":1,\"drive\":8}},\"signal\":\"sine\","
+        "\"cpu\":false,\"bypass\":true,\"checks\":["
+        "{\"path\":\"output.channels.0.peak_db\",\"max\":0.01},"            // hard clip holds full scale
+        "{\"path\":\"output.thd.left.thd_percent\",\"min\":5},"                    // and distorts
+        "{\"path\":\"output.channels.1.nan\",\"equals\":0},"
+        "{\"path\":\"bypass.exact\",\"equals\":false},"
+        "{\"path\":\"output.channels.0.peak_db\",\"min\":3},"               // fails: it is not over full scale
+        "{\"path\":\"output.nothing_here\",\"max\":1}]}");                 // fails: missing
+    CHECK(r.boolean("ok", false));
+    const Json& checks = at(r, {"checks"});
+    CHECK_EQ(checks.arr.size(), size_t{6});
+    const bool expected[] = {true, true, true, true, false, false};
+    for (size_t k = 0; k < 6 && k < checks.arr.size(); ++k) CHECK(checks.arr[k].boolean("pass", !expected[k]) == expected[k]);
+    CHECK(checks.arr.size() < 6 || checks.arr[5].get("value")->type == Json::Type::Null);
+    CHECK(!r.boolean("passed", true));
+    const Json good = run("{\"component\":\"org.caw.stereo.width\",\"signal\":\"pink\",\"cpu\":false,"
+                          "\"checks\":[{\"path\":\"output.stereo.correlation\",\"min\":0.999,\"max\":1.001}]}");
+    CHECK(good.boolean("passed", false));
+    CHECK(run("{\"component\":\"org.caw.chorus\"}").get("passed") == nullptr);  // no checks, no verdict
+    CHECK(!run("{\"component\":\"org.caw.chorus\",\"checks\":[{\"path\":\"x\"}]}").boolean("ok", true));
+    CHECK(!run("{\"component\":\"org.caw.chorus\",\"checks\":[{\"path\":\"x\",\"equals\":\"y\"}]}").boolean("ok", true));
+}

@@ -83,7 +83,7 @@ double bend(double x, double tension) noexcept {
     x = std::clamp(x, 0.0, 1.0);
     if (std::fabs(tension) < 1e-3) return x;
     const double c = tension * kTensionSteepness;
-    return (std::exp(c * x) - 1.0) / (std::exp(c) - 1.0);
+    return (detExp(c * x) - 1.0) / (detExp(c) - 1.0);  // detExp: the same bits on every platform (golden renders)
 }
 
 class Ducker final : public EffectBase, public VariableLatency {
@@ -140,6 +140,14 @@ protected:
 
     void control(uint32_t at) noexcept override {
         const double sr = rate();
+        // Filters fed silence decay through denormal numbers (slow on many CPUs): settle them at 0 instead. Here,
+        // on the control grid, not in run(), whose calls a block boundary splits: flushing there made the output
+        // depend on the device's block size (found by the #121 golden render at 37-frame blocks).
+        for (int c = 0; c < 2; ++c) {
+            hpf_[c].flushDenormals();
+            lpf_[c].flushDenormals();
+            for (auto& f : split_[c]) f.flushDenormals();
+        }
         mode_ = choice(kMode, at);
         depth_ = std::clamp(param(kDepth, at), 0.0, 1.0);
         attack_ = std::max(1.0, param(kAttack, at) * 0.001 * sr);
@@ -177,12 +185,6 @@ protected:
         const EventInput& notes = keyNotes();
         const uint32_t first = runStart();
         const size_t size = delay_[0].size();
-        // Filters fed silence decay through denormal numbers (slow on many CPUs): settle them at 0 instead.
-        for (int c = 0; c < 2; ++c) {
-            hpf_[c].flushDenormals();
-            lpf_[c].flushDenormals();
-            for (auto& f : split_[c]) f.flushDenormals();
-        }
         for (uint32_t i = 0; i < n; ++i) {
             // The key, filtered (Audio mode reads it; Listen plays it). A NaN or Inf in it reads as 0, before the
             // filters (whose state it would stay in) and after them.

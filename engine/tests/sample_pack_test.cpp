@@ -442,3 +442,109 @@ TEST(sample_pack_c_api_trust_progress_and_cancel) {
     caw_free(s);
     fs::remove_all(dir);
 }
+
+TEST(sample_pack_crossfades_a_loop_seam_into_the_audio_before_it) {
+    // A ramp: the loop 1000..1999 jumps from 1999 back to 1000 at the wrap. Crossfaded over 200 frames, the loop's
+    // last frame becomes (nearly) the frame before its start, so the wrap continues the ramp.
+    std::vector<float> l(3000), r(3000);
+    for (std::size_t i = 0; i < l.size(); ++i) l[i] = r[i] = static_cast<float>(i) / 3000.0f;
+    PackLoop loop;
+    loop.found = true;
+    loop.start = 1000;
+    loop.end = 1999;
+    std::vector<float> lin = l, linR = r;
+    CHECK_EQ(crossfadeLoop(lin, linR, loop, 200, false), static_cast<std::size_t>(200));
+    CHECK_NEAR(lin[1999], 999.0 / 3000.0 + (1999.0 - 999.0) / 3000.0 / 201.0, 1e-6);  // 200/201 of the way
+    CHECK_EQ(lin[1799], l[1799]);  // before the fade: untouched
+    CHECK_EQ(lin[999], l[999]);    // the audio before the loop is only read
+    for (std::size_t i = 1800; i < 2000; ++i) CHECK(lin[i] <= l[i]);  // a ramp fading toward its earlier values
+    // Equal power: gains sin and cos of the same angle, so at the midpoint each side is cos(pi/4).
+    std::vector<float> ep = l, epR = r;
+    crossfadeLoop(ep, epR, loop, 199, true);  // 199 frames: frame 99 of the fade is the midpoint, t = 100/200
+    const double g = std::cos(kPi / 4);
+    CHECK_NEAR(ep[1999 - 199 + 1 + 99], (l[1999 - 199 + 1 + 99] + l[1000 - 199 + 99]) * g, 1e-5);
+    // Held to the frames before the loop and to its length.
+    PackLoop early = loop;
+    early.start = 50;
+    std::vector<float> a = l, b = r;
+    CHECK_EQ(crossfadeLoop(a, b, early, 500, true), static_cast<std::size_t>(50));
+    PackLoop none;
+    CHECK_EQ(crossfadeLoop(a, b, none, 500, true), static_cast<std::size_t>(0));
+}
+
+TEST(sample_pack_tpdf_dither_turns_a_quarter_lsb_into_its_average) {
+    // A level a quarter of a 16-bit step: plain rounding gives 0 everywhere; TPDF dither gives values whose mean
+    // is the level (the error no longer depends on the signal), the same bytes every time, and silence stays 0.
+    const std::size_t n = 48000;
+    std::vector<float> l(n, static_cast<float>(0.25 / 32767.0)), r = l;
+    for (std::size_t i = 0; i < 100; ++i) l[i] = r[i] = 0.0f;
+    PackWavSpec spec;
+    spec.bitDepth = 16;
+    const Wav plain = parseWav(encodePackWav(spec, l, r));
+    double plainSum = 0;
+    for (float x : plain.left) plainSum += std::fabs(x);
+    CHECK_EQ(plainSum, 0.0);
+    spec.dither = PackDither::Tpdf;
+    const std::vector<uint8_t> bytes = encodePackWav(spec, l, r);
+    CHECK(bytes == encodePackWav(spec, l, r));
+    const Wav d = parseWav(bytes);
+    double sum = 0, most = 0;
+    for (std::size_t i = 100; i < d.left.size(); ++i) {
+        const double lsb = d.left[i] * 32768.0;
+        sum += lsb;
+        most = std::max(most, std::fabs(lsb));
+    }
+    CHECK_NEAR(sum / static_cast<double>(n - 100), 0.25, 0.02);
+    CHECK(most <= 2.0);  // within the triangular +-1 LSB around the level
+    for (std::size_t i = 0; i < 100; ++i) CHECK_EQ(d.left[i], 0.0f);
+    spec.ditherSeed = 2;
+    CHECK(encodePackWav(spec, l, r) != bytes);  // another file, other noise
+    spec.bitDepth = 32;  // float: never dithered
+    PackWavSpec flt = spec;
+    flt.dither = PackDither::None;
+    CHECK(encodePackWav(spec, l, r) == encodePackWav(flt, l, r));
+}
+
+TEST(sample_pack_renders_round_robins_and_crossfaded_loops) {
+    const fs::path dir = freshDir("rr");
+    const std::string common = "\"instrument\":\"org.caw.synth.flagship\",\"notes\":[60],\"hold_seconds\":0.4,"
+                               "\"bit_depth\":16,\"dither\":\"tpdf\",\"sfz\":true,"
+                               "\"loop\":{\"crossfade_ms\":5,\"min_seconds\":0.02}";
+    const Json r = run("{" + common + ",\"output_dir\":\"" + esc(dir / "rr") + "\",\"name\":\"pad\","
+                       "\"round_robins\":{\"count\":3,\"vary\":[{\"id\":\"osc1_fine\",\"amount\":15}]}}");
+    CHECK(r.boolean("ok", false));
+    if (!r.boolean("ok", false)) std::printf("%s\n", r.string("error").c_str());
+    const std::vector<std::string> files = wavFiles(dir / "rr");
+    CHECK_EQ(files.size(), static_cast<std::size_t>(3));
+    for (int k = 1; k <= 3; ++k) CHECK(fs::exists(dir / "rr" / ("pad_C4_100_rr" + std::to_string(k) + ".wav")));
+    const std::vector<uint8_t> a = readBytes(dir / "rr" / "pad_C4_100_rr1.wav"), b = readBytes(dir / "rr" / "pad_C4_100_rr2.wav"),
+                               c = readBytes(dir / "rr" / "pad_C4_100_rr3.wav");
+    CHECK(a != b && b != c && a != c);  // three takes
+    const Json* list = r.get("files");
+    CHECK(list && list->arr.size() == 3);
+    if (list && list->arr.size() == 3) {
+        CHECK_EQ(list->arr[1].number("round_robin", 0), 2.0);
+        const Json* loop = list->arr[0].get("loop");
+        CHECK(loop && loop->type == Json::Type::Object && loop->number("crossfade_frames", 0) == 240.0);
+    }
+    const Json* settings = r.get("settings");
+    CHECK(settings && settings->string("dither") == std::string("tpdf"));
+    CHECK(settings && settings->number("round_robins", 0) == 3.0);
+    std::string sfz;
+    {
+        std::ifstream in(dir / "rr" / "pad.sfz");
+        sfz.assign((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    }
+    CHECK(sfz.find("sample=pad_C4_100_rr2.wav") != std::string::npos);
+    CHECK(sfz.find("seq_length=3 seq_position=2") != std::string::npos);
+    // The first take is the render without round robins, byte for byte.
+    const Json one = run("{" + common + ",\"output_dir\":\"" + esc(dir / "one") + "\",\"name\":\"pad\"}");
+    CHECK(one.boolean("ok", false));
+    CHECK(readBytes(dir / "one" / "pad_C4_100.wav") == a);
+    // A vary on a parameter the instrument doesn't have is refused before anything renders.
+    CHECK(!run("{" + common + ",\"output_dir\":\"" + esc(dir / "bad") + "\",\"round_robins\":{\"count\":2,"
+               "\"vary\":[{\"id\":\"nope\",\"amount\":1}]}}").boolean("ok", true));
+    CHECK(!run("{" + common + ",\"output_dir\":\"" + esc(dir / "bad") + "\",\"round_robins\":17}").boolean("ok", true));
+    CHECK(!run("{" + common + ",\"output_dir\":\"" + esc(dir / "bad") + "\",\"dither\":\"shaped\"}").boolean("ok", true));
+    fs::remove_all(dir);
+}
