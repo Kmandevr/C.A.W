@@ -343,6 +343,8 @@ bool prepareExport(const ProjectSpec& in, const ExportOptions& o, ProjectSpec& p
     p = in;
     p.auditionOnly = false;
     p.auditionChain.clear();
+    p.hasAuditionInstrument = false;
+    p.auditionComponents.clear();
     return true;
 }
 
