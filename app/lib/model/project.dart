@@ -120,12 +120,15 @@ class AutomationPointDoc {
 }
 
 class AutomationLaneDoc {
-  AutomationLaneDoc({required this.target, List<AutomationPointDoc>? points}) : points = points ?? [];
+  AutomationLaneDoc({required this.target, List<AutomationPointDoc>? points, this.armed = true}) : points = points ?? [];
   String target;
   List<AutomationPointDoc> points;
-  Map<String, dynamic> toJson() => {'target': target, 'points': [for (final p in points) p.toJson()]};
+
+  /// Written by the Automate button (REAPER's envelope arm, UG 18.5); a disarmed lane only plays.
+  bool armed;
+  Map<String, dynamic> toJson() => {'target': target, 'points': [for (final p in points) p.toJson()], if (!armed) 'armed': false};
   static AutomationLaneDoc fromJson(Map<String, dynamic> j) => AutomationLaneDoc(
-    target: j['target'] as String, points: ((j['points'] as List?) ?? const [])
+    target: j['target'] as String, armed: j['armed'] != false, points: ((j['points'] as List?) ?? const [])
       .map((p) => AutomationPointDoc.fromJson(p as Map<String, dynamic>)).toList());
 }
 
@@ -133,7 +136,8 @@ class AutomationLaneDoc {
 /// parameter (`component`: [layerId] null for the master chain, [component] its index in that chain).
 class ProjectAutomationLaneDoc {
   ProjectAutomationLaneDoc(
-      {required this.targetType, required this.target, this.moduleId, this.layerId, this.component, List<AutomationPointDoc>? points})
+      {required this.targetType, required this.target, this.moduleId, this.layerId, this.component, List<AutomationPointDoc>? points,
+      this.armed = true})
       : points = points ?? [];
   String targetType;
   String target;
@@ -141,6 +145,9 @@ class ProjectAutomationLaneDoc {
   String? layerId;
   int? component;
   List<AutomationPointDoc> points;
+
+  /// Written by the Automate button (REAPER's envelope arm); a disarmed lane only plays.
+  bool armed;
 
   String get key => automationKey(targetType, target, layerId: layerId, moduleId: moduleId, component: component);
 
@@ -151,6 +158,7 @@ class ProjectAutomationLaneDoc {
         if (layerId != null) 'layer': layerId,
         if (component != null) 'component': component,
         'points': [for (final p in points) p.toJson()],
+        if (!armed) 'armed': false,
       };
 
   static ProjectAutomationLaneDoc fromJson(Map<String, dynamic> j) => ProjectAutomationLaneDoc(
@@ -159,6 +167,7 @@ class ProjectAutomationLaneDoc {
         moduleId: j['module'] as String?,
         layerId: j['layer'] as String?,
         component: (j['component'] as num?)?.toInt(),
+        armed: j['armed'] != false,
         points: ((j['points'] as List?) ?? const []).map((p) => AutomationPointDoc.fromJson(p as Map<String, dynamic>)).toList(),
       );
 }
