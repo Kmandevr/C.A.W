@@ -265,7 +265,18 @@ class DrumSketch {
   final Float32List max, min;
   final String? decayId;
 
+  static final Map<String, DrumSketch> _cache = {};
+
+  /// The sketch of [p], kept while its knobs don't change (the hero redraws it on every edit elsewhere).
   factory DrumSketch.of(DrumPadView p, {int bins = 256}) {
+    final key = '${p.pad}|$bins|${[for (final s in p.layout.suffixes) p.v(s)].join(',')}';
+    final hit = _cache[key];
+    if (hit != null) return hit;
+    if (_cache.length > 32) _cache.clear();
+    return _cache[key] = DrumSketch._draw(p, bins);
+  }
+
+  factory DrumSketch._draw(DrumPadView p, int bins) {
     final lengthScale = math.pow(2, 2 * p.v('length')).toDouble();
     final layers = <({double level, double attack, double hold, double decay, double curve, double Function(double s, int i) wave})>[];
     final shape = DrumPitchShape(p);

@@ -1,7 +1,6 @@
 // The Drums editor (org.caw.drums): pads and banks, a picked pad's layers, each card's ids, note learn, randomize and mutate, explode in one undo step, the sample picker, the Points editor, the inline view, goldens, and (with CAW_LIB) the real engine.
 import 'dart:convert';
 import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:caw/engine/engine.dart';
 import 'package:caw/model/app_state.dart';
@@ -26,21 +25,6 @@ import 'device_ui_fixture.dart';
 import 'golden_util.dart';
 
 const id = drumsComponentId;
-
-/// A drums display frame: [peaks] by pad, a note received ([note], [count]), the shown pad's hit.
-DrumsDisplayFrame drumsFrame({Map<int, double> peaks = const {}, int note = -1, int count = 0, int shown = 0,
-    double seconds = 0.6}) {
-  final mx = Float32List(256), mn = Float32List(256);
-  for (var i = 0; i < 256; i++) {
-    final env = (1 - i / 256) * (1 - i / 256);
-    mx[i] = 0.9 * env;
-    mn[i] = -0.85 * env;
-  }
-  return DrumsDisplayFrame(mode: 0, shownPad: shown, glueGr: 2, padGr: 0, waveSeconds: seconds, pitchSpan: 0,
-    voices: 1, lastPad: shown, lastNote: note, lastChannel: 1, lastVelocity: 1, noteCount: count, penvMode: 0,
-    peaks: Float32List.fromList([for (var i = 0; i < 64; i++) peaks[i] ?? 0]), waveMax: mx, waveMin: mn,
-    pitch: Float32List(64));
-}
 
 /// Records the engine calls and answers with fixed values.
 class FakeDrumsApi extends DrumsApi {

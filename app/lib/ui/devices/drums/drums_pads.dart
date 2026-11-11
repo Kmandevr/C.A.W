@@ -127,33 +127,53 @@ class _BankButton extends StatelessWidget {
   }
 }
 
-/// The selected bank as 4 × 4 pads, pad 1 at the bottom left as on an MPC (13..16 on top). [height] is a pad's.
-class DrumPadGrid extends StatelessWidget {
+/// The selected bank as 4 × 4 pads, pad 1 at the bottom left as on an MPC (13..16 on top). [padHeight] is a pad's.
+/// A knob turned elsewhere rebuilds no pad: each tile is kept while what it shows is unchanged.
+class DrumPadGrid extends StatefulWidget {
   const DrumPadGrid({super.key, this.padHeight = 64, this.gap = 6});
   final double padHeight, gap;
 
   @override
+  State<DrumPadGrid> createState() => _DrumPadGridState();
+}
+
+class _DrumPadGridState extends State<DrumPadGrid> {
+  final Map<int, (String, Widget)> _tiles = {};
+
+  @override
   Widget build(BuildContext context) {
     final t = DeviceScope.of(context).target;
+    final layout = drumsLayout(t);
     final sel = DrumsSelection.of(t);
     return ListenableBuilder(listenable: Listenable.merge([sel.bank, sel.pad, sel.learning]), builder: (context, _) {
       final bank = sel.bank.value;
+      final shared = '${t.value('mode')}|${t.value('base_note')}|${widget.padHeight}|${DeviceScope.of(context).accent}';
+      Widget tile(int pad) {
+        final p = DrumPadView(t, layout, pad);
+        final sig = '$shared|${sel.pad.value == pad}|${sel.learning.value == pad}|${p.used}|${p.v('type')}|'
+            '${p.v('note')}|${p.v('choke')}|${padSample(t, pad)?.label}';
+        final cached = _tiles[pad];
+        if (cached != null && cached.$1 == sig) return cached.$2;
+        final w = DrumPadTile(key: ValueKey('drum-tile-$pad'), pad: pad, height: widget.padHeight,
+          selected: sel.pad.value == pad, learning: sel.learning.value == pad);
+        _tiles[pad] = (sig, w);
+        return w;
+      }
       return Column(key: const ValueKey('drum-grid'), mainAxisSize: MainAxisSize.min, children: [
         for (var r = 0; r < 4; r++)
-          Padding(padding: EdgeInsets.only(top: r == 0 ? 0 : gap), child: Row(children: [
+          Padding(padding: EdgeInsets.only(top: r == 0 ? 0 : widget.gap), child: Row(children: [
             for (var c = 0; c < 4; c++) ...[
-              if (c > 0) SizedBox(width: gap),
-              Expanded(child: DrumPadTile(
-                pad: bank * drumPadsPerBank + (3 - r) * 4 + c,
-                height: padHeight,
-                selected: sel.pad.value == bank * drumPadsPerBank + (3 - r) * 4 + c,
-                learning: sel.learning.value == bank * drumPadsPerBank + (3 - r) * 4 + c)),
+              if (c > 0) SizedBox(width: widget.gap),
+              Expanded(child: tile(bank * drumPadsPerBank + (3 - r) * 4 + c)),
             ],
           ])),
       ]);
     });
   }
 }
+
+/// The device a control reads without depending on its scope (so a scope update alone doesn't rebuild it).
+DeviceScope _scopeOf(BuildContext context) => context.getInheritedWidgetOfExactType<DeviceScope>()!;
 
 /// One pad: its name, sound and note, lit by its peak from the display data; a touch plays it (softer toward the
 /// top, as the keys) and picks it, a long-press opens its menu.
@@ -172,7 +192,7 @@ class _DrumPadTileState extends State<DrumPadTile> {
   AppState? _state;
 
   void _down(Offset local) {
-    final t = DeviceScope.of(context).target;
+    final t = _scopeOf(context).target;
     final layout = drumsLayout(t);
     DeviceFeel.tap();
     DrumsSelection.of(t).select(t, widget.pad);
@@ -201,7 +221,7 @@ class _DrumPadTileState extends State<DrumPadTile> {
 
   @override
   Widget build(BuildContext context) {
-    final scope = DeviceScope.of(context);
+    final scope = _scopeOf(context);
     final t = scope.target;
     final layout = drumsLayout(t);
     final p = DrumPadView(t, layout, widget.pad);

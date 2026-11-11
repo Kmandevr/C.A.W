@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import '../../../model/device_target.dart';
 import '../../../model/drums.dart';
 import '../../theme.dart';
+import '../../widgets.dart' show LiveIsland;
 import '../device_controls.dart';
 import '../device_scope.dart';
 import '../kit/feel.dart';
@@ -75,7 +76,8 @@ class _DrumHeroState extends State<DrumHero> {
             final id = p.id('penv_mode');
             if (body) t.set(id, shape.points ? 0 : 1);
           },
-          child: RepaintBoundary(child: DeviceDisplay(builder: (context, f) {
+          // A live island: the 30 Hz frames rebuild, lay out and repaint the drawing alone, not the page around it.
+          child: LiveIsland(child: DeviceDisplay(builder: (context, f) {
             final live = f is DrumsDisplayFrame && f.shownPad == widget.pad && f.waveSeconds > 0 ? f : null;
             return CustomPaint(size: size, painter: _HeroPainter(
               color: c, second: scope.secondary, sketch: sketch, live: live, shape: body ? shape : null, axis: axis,

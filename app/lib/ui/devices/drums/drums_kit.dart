@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import '../../../model/drums.dart';
 import '../../feedback.dart';
 import '../../theme.dart';
+import '../../widgets.dart' show LiveIsland;
 import '../device_controls.dart';
 import '../device_scope.dart';
 import '../flagship/flagship_editor.dart' show LabeledRow;
@@ -44,8 +45,8 @@ class DrumsKitPage extends StatelessWidget {
         summary: t.value('glue') <= 0 ? 'Off' : '${f('glue')} · ${f('glue_ratio')}:1',
         child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Expanded(child: knobs(layout.kitGroups['glue'] ?? const [])),
-          DeviceDisplay(builder: (context, fr) => LevelMeter(
-            db: fr is DrumsDisplayFrame ? -fr.glueGr : null, label: 'GR', reduction: true, height: 110)),
+          SizedBox(width: 24, height: 110, child: LiveIsland(child: DeviceDisplay(builder: (context, fr) => LevelMeter(
+            db: fr is DrumsDisplayFrame ? -fr.glueGr : null, label: 'GR', reduction: true, height: 110)))),
         ])),
       DeviceExpandCard(
         key: const ValueKey('drum-kit-drive'),
