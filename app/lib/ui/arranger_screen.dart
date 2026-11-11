@@ -839,7 +839,8 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
           Builder(builder: (context) => GestureDetector(
             onSecondaryTapUp: (d) => showAddTrackMenu(context, s, d.globalPosition),
             child: narrow
-              ? Semantics(label: 'Add track (long-press: templates)', button: true, excludeSemantics: true,
+              // The tooltip shows on hover only: a long press opens the add-track menu.
+              ? Tooltip(message: 'Add track', triggerMode: TooltipTriggerMode.manual,
                   child: TextButton(key: const ValueKey('arrange-add-track'), onPressed: s.addLayer,
                     onLongPress: () => showAddTrackMenu(context, s, menuAnchorOf(context)),
                     style: TextButton.styleFrom(minimumSize: const Size(48, 48), shape: const CircleBorder()),

@@ -7,7 +7,10 @@ import 'package:caw/model/project.dart';
 import 'package:caw/model/routing.dart';
 import 'package:caw/model/settings.dart';
 import 'package:caw/model/templates.dart';
+import 'package:caw/actions/actions.dart';
 import 'package:caw/ui/arrange/templates_ui.dart';
+import 'package:caw/ui/arranger_screen.dart';
+import 'package:caw/ui/key_router.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -141,6 +144,25 @@ void main() {
     await done;
     expect(s.project.layers.length, before + 1);
     expect(s.project.layers.last.name, 'Pad');
+    await tester.pump(const Duration(seconds: 1));
+  });
+
+  testWidgets('a long press on the toolbar\'s + opens the add-track menu; a tap still adds a track', (tester) async {
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(MaterialApp(home: KeyRouter(state: s, screenArea: Area.arranger, onView: (_) {},
+      child: Scaffold(body: ListenableBuilder(listenable: s, builder: (_, _) => ArrangerScreen(state: s))))));
+    await tester.pump();
+    final before = s.project.layers.length;
+    await tester.tap(find.byKey(const ValueKey('arrange-add-track')));
+    await tester.pump();
+    expect(s.project.layers.length, before + 1);
+    await tester.longPress(find.byKey(const ValueKey('arrange-add-track')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Reverb bus'));
+    await tester.pumpAndSettle();
+    expect(s.project.layers.last.name, 'Reverb bus');
     await tester.pump(const Duration(seconds: 1));
   });
 
