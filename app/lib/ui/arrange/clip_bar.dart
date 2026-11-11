@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 
 import '../../model/app_state.dart';
 import '../../model/arrange_edit.dart';
+import '../../model/audio_edit.dart';
 import '../../model/project.dart';
 import '../glass.dart';
 import '../theme.dart';
@@ -29,11 +30,14 @@ class ClipBar extends StatelessWidget {
   Widget build(BuildContext context) {
     final s = state;
     final chosen = s.selectedClips;
+    final audio = s.selectedAudioClips;
     final step = s.editStep;
     final canSplit = (chosen.isEmpty
             ? s.project.layers.expand((l) => l.clips)
             : chosen.map((c) => c.clip))
-        .any((c) => !c.lock && c.startSteps < step && c.startSteps + c.lengthSteps > step);
+        .any((c) => !c.lock && c.startSteps < step && c.startSteps + c.lengthSteps > step) ||
+        (chosen.isEmpty ? (audio.isEmpty ? s.allAudioClips : audio) : const <PlacedAudioClip>[])
+            .any((c) => !c.clip.lock && c.clip.startSteps < step && c.clip.endAt(s.project.bpm) > step);
     final perTrack = <String, int>{};
     for (final c in chosen) {
       if (!c.clip.lock) perTrack[c.layer.id] = (perTrack[c.layer.id] ?? 0) + 1;
@@ -45,8 +49,10 @@ class ClipBar extends StatelessWidget {
     final buttons = <Widget>[
       button('split', Icons.content_cut, 'Split at the playhead (S)', canSplit ? () => s.splitClips() : null),
       button('glue', Icons.join_full, 'Glue into one clip (G)', canGlue ? s.glueSelected : null),
-      button('duplicate', Icons.copy_all, 'Duplicate (Ctrl+D)', chosen.isEmpty ? null : s.duplicateSelected),
-      button('delete', Icons.delete_outline, 'Delete (Delete)', chosen.any((c) => !c.clip.lock) ? s.deleteSelected : null,
+      button('duplicate', Icons.copy_all, 'Duplicate (Ctrl+D)',
+          chosen.isEmpty && audio.isEmpty ? null : s.duplicateSelected),
+      button('delete', Icons.delete_outline, 'Delete (Delete)',
+          chosen.any((c) => !c.clip.lock) || audio.any((c) => !c.clip.lock) ? s.deleteSelected : null,
         color: Neon.pink),
       button('properties', Icons.tune, 'Properties (F2)', chosen.isEmpty ? null : onProperties),
       button('select', selectMode ? Icons.checklist : Icons.checklist_rtl,
@@ -54,7 +60,9 @@ class ClipBar extends StatelessWidget {
         () => onSelectMode(!selectMode), color: selectMode ? Neon.blue : null),
     ];
     if (!docked) return Row(key: const ValueKey('clip-bar'), mainAxisSize: MainAxisSize.min, children: buttons);
-    final label = chosen.isEmpty ? 'Tap clips' : chosen.length == 1 ? s.clipName(chosen.single.clip) : '${chosen.length} clips';
+    final count = chosen.length + audio.length;
+    final label = count == 0 ? 'Tap clips' : count == 1
+        ? (chosen.isEmpty ? s.audioClipName(audio.single.clip) : s.clipName(chosen.single.clip)) : '$count clips';
     return GlassOverlay(key: const ValueKey('clip-bar'), radius: Radii.l,
       padding: const EdgeInsets.symmetric(horizontal: 4),
       child: SizedBox(height: 44, child: Row(mainAxisSize: MainAxisSize.min, children: [

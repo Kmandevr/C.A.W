@@ -3,6 +3,8 @@
 import 'package:flutter/material.dart';
 
 import '../../model/app_state.dart';
+import '../../model/audio_edit.dart';
+import '../../model/sampler.dart';
 import '../../model/project.dart';
 import '../../model/templates.dart';
 import '../glass.dart';
@@ -127,12 +129,17 @@ Future<void> showAddTrackMenu(BuildContext context, AppState s, Offset at) async
   final v = await showLongPressMenu<String>(context, at: at, title: 'Add track', style: s.settings.longPressMenu, actions: [
     const MenuAction('track', 'Empty track', Icons.add),
     const MenuAction('folder', 'Folder', Icons.create_new_folder_outlined),
+    // Audio (API 18): a track that records and plays audio clips, and a track playing the sampler.
+    const MenuAction('audio', 'Audio track', Icons.graphic_eq_rounded),
+    const MenuAction('sampler', 'Sampler track', Icons.piano_outlined),
     for (final t in templates)
       MenuAction('tpl:${t.id}', t.bundled ? t.name : '${t.name} (saved)', t.bundled ? Icons.auto_awesome_mosaic : Icons.bookmark_outline),
   ]);
   if (v == null) return;
   if (v == 'track') s.addLayer();
   if (v == 'folder') s.addFolder();
+  if (v == 'audio') s.addAudioTrack();
+  if (v == 'sampler') s.addSamplerTrack();
   if (v.startsWith('tpl:')) {
     final t = templates.where((t) => 'tpl:${t.id}' == v).firstOrNull;
     if (t != null && s.insertTrackTemplate(t) != null) Haptics.drop();

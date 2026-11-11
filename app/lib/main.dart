@@ -4,11 +4,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'model/app_state.dart';
+import 'model/audio_record.dart';
 import 'model/automation_writer.dart';
 import 'model/live_midi.dart';
 import 'model/problem_log.dart';
 import 'model/settings.dart';
 import 'platform/haptics_device.dart';
+import 'platform/mic_permission.dart';
 import 'platform/midi_input.dart';
 import 'ui/glass.dart';
 import 'ui/haptics.dart';
@@ -36,6 +38,11 @@ Future<void> main() async {
   // One MIDI listener for the app's life, above the shell (which a theme change rebuilds).
   LiveMidi.current = LiveMidi(state, platformMidiInput(clock: () => state.engine?.midiClockNs ?? 0));
   AutomationWriter.current = AutomationWriter(state); // the transport's Automate button
+  // Audio recording follows the transport's Record (armed audio tracks); the input choice is app-wide.
+  final midi = LiveMidi.current!;
+  AudioRecorder.current = AudioRecorder(state, permission: platformMicPermission())
+    ..follow(midi, () => midi.recording)
+    ..load();
 
   runApp(CawApp(state: state));
   state.init();
