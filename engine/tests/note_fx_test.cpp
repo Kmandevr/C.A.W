@@ -7,6 +7,7 @@
 
 #include "builtin_components.h"
 #include "builtin_test_signal.h"
+#include "caw.h"
 #include "caw/instrument.hpp"
 #include "engine.h"
 #include "note_fx_host.h"
@@ -404,4 +405,26 @@ TEST(per_note_fx_host_gives_the_same_bits_at_any_block_split) {
     CHECK(x.mixL == y.mixL);
     for (auto& [id, v] : x.lane) CHECK(v == y.lane[id]);
     CHECK(peak(x.mixL) > 0.01f);
+}
+
+TEST(per_note_fx_c_api_reports_stats_size_tagged) {
+    CHECK_EQ(caw_api_version(), 22);
+    CawEngine* engine = caw_engine_create(48000);
+    char* r = caw_engine_set_project(engine, R"({"caw_project":1,"layers":[{"id":"t","instrument":{"id":"org.caw.test.osc",
+        "params":{"mode":1}},"noteComponents":["org.caw.filter"],"noteVoices":3}]})");
+    CHECK(ok(r));
+    caw_free(r);
+    CawNoteFxStats s{};
+    s.struct_size = sizeof s;
+    CHECK_EQ(caw_engine_note_fx_stats(engine, "t", &s), 1);
+    CHECK_EQ(s.voices, 3u);
+    CHECK_EQ(s.active, 0u);
+    // An older, shorter struct gets only the fields it has.
+    uint32_t small[3] = {3 * sizeof(uint32_t), 99, 99};
+    CHECK_EQ(caw_engine_note_fx_stats(engine, "t", reinterpret_cast<CawNoteFxStats*>(small)), 1);
+    CHECK_EQ(small[1], 3u);
+    CHECK_EQ(small[2], 3u);
+    CHECK_EQ(caw_engine_note_fx_stats(engine, "none", &s), 0);
+    CHECK_EQ(caw_engine_set_component_param(engine, "t", CAW_NOTE_COMPONENT | 0u, "cutoff", 800.0), 1);
+    caw_engine_destroy(engine);
 }

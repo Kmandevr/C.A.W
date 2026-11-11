@@ -66,10 +66,19 @@ extern "C" {
    "modulation" links (any modulator output to any parameter of a layer's or the master's component or instrument,
    another modulator's parameter, or a layer's volume, pan or send level; docs/engine.md, "Modulation");
    caw_engine_set_modulator_param, caw_engine_set_modulator_bypass, caw_engine_set_modulation_amount,
-   caw_engine_modulator_outputs and caw_engine_modulation_offset. Nothing else changes. */
-#define CAW_API_VERSION 19
+   caw_engine_modulator_outputs and caw_engine_modulation_offset. Nothing else changes.
+   22 (2026-11-11, #127; 20 and 21 are left to parallel branches, e.g. delete-caw): per-note FX. A layer's
+   "noteComponents" (effects run once per note, between its instrument's voices and its shared stage) and
+   "noteVoices" (1..16, default 8); component indices with CAW_NOTE_COMPONENT address them (knobs and bypass fan
+   out to every slot, the display reads the newest note's slot); automation lanes and modulation links of kind
+   "noteComponent"; the link sources "note.pitch", "note.velocity", "note.pressure", "note.timbre", "note.gate" and
+   "note.age"; caw_engine_note_fx_stats. The voice bus (caw_component.h) gains CAW_LANE_REST. Nothing else changes. */
+#define CAW_API_VERSION 22
 /* The component index that names a layer's native instrument rather than one of its "components". */
 #define CAW_INSTRUMENT_INDEX 0xFFFFFFFFu
+/* A component index with this bit (API version 22) names component (index & ~CAW_NOTE_COMPONENT) of the layer's
+   "noteComponents" (per-note FX, #127). */
+#define CAW_NOTE_COMPONENT 0x40000000u
 
 typedef struct CawEngine CawEngine;
 
@@ -231,6 +240,20 @@ CAW_API int32_t caw_engine_modulator_outputs(CawEngine* e, const char* modulator
 /* Link `link_id`'s target's summed offset (normalized travel, every link into that target together) at the last
    chunk, into *out: 1, or 0 for an unknown link or while busy. */
 CAW_API int32_t caw_engine_modulation_offset(CawEngine* e, uint32_t link_id, float* out);
+/* Per-note FX (API version 22, #127): what a layer's per-note slots are doing. Set struct_size to
+   sizeof(CawNoteFxStats) first; fields past a smaller struct_size are not written. 1 on success, 0 when the layer
+   has no per-note FX or the engine is busy with a project update (it never waits; a UI polls it). */
+typedef struct CawNoteFxStats {
+    uint32_t struct_size;
+    uint32_t voices;       /* the layer's "noteVoices" */
+    uint32_t budget;       /* slots notes may hold now: Eco min(voices, 4), Normal voices, High min(voices, 16) */
+    uint32_t active;       /* slots holding a note (held, released or ringing out) */
+    uint32_t active_mask;  /* bit k: slot k holds a note */
+    uint32_t overflowing;  /* 1 while the overflow chain runs (notes past the budget, sharing one chain) */
+    uint32_t overflowed;   /* notes that went to the overflow chain since the per-note FX started */
+    uint32_t stolen;       /* released or ringing slots handed to a new note */
+} CawNoteFxStats;
+CAW_API int32_t caw_engine_note_fx_stats(CawEngine* e, const char* layer_id, CawNoteFxStats* out);
 /* Sets a project-wide `global` control; every module declaring it reads the new value. */
 CAW_API void caw_engine_set_global(CawEngine* e, const char* name, double value);
 /* Track and master volume: linear gain 0..3.981 (+12 dB; more is held there). Pan -1..1. */

@@ -45,6 +45,14 @@ class NativeComponentLoadResult {
       );
 }
 
+/// A layer's per-note FX slots (caw_engine_note_fx_stats, API 22).
+class NoteFxStats {
+  const NoteFxStats({required this.voices, required this.budget, required this.active, required this.activeMask,
+      required this.overflowing, required this.overflowed, required this.stolen});
+  final int voices, budget, active, activeMask, overflowed, stolen;
+  final bool overflowing;
+}
+
 class ParamInfo {
   const ParamInfo(
     this.name,
@@ -666,6 +674,28 @@ class Engine {
     if (_nativeDestroyed) return null;
     final out = _modOut ??= calloc<Float>(8);
     return _b.modulationOffset(_handle, linkId, out) == 1 ? out[0] : null;
+  }
+
+  /// A component index with this bit names one of the layer's per-note components (CAW_NOTE_COMPONENT, #127):
+  /// knob moves and bypass reach every slot, the display shows the newest note's slot.
+  static const int noteComponentFlag = 0x40000000;
+
+  /// What a layer's per-note FX slots are doing now (CawNoteFxStats), or null (none there, or the engine is busy).
+  /// Cheap and never blocks: the voice-budget chip polls it.
+  NoteFxStats? noteFxStats(String layerId) {
+    if (_nativeDestroyed) return null;
+    final out = calloc<CawNoteFxStatsStruct>();
+    final l = layerId.toNativeUtf8();
+    try {
+      out.ref.structSize = sizeOf<CawNoteFxStatsStruct>();
+      if (_b.noteFxStats(_handle, l, out) != 1) return null;
+      final r = out.ref;
+      return NoteFxStats(voices: r.voices, budget: r.budget, active: r.active, activeMask: r.activeMask,
+          overflowing: r.overflowing != 0, overflowed: r.overflowed, stolen: r.stolen);
+    } finally {
+      calloc.free(l);
+      calloc.free(out);
+    }
   }
 
   /// Bypasses (or brings back) a playing native component, crossfaded; null [layerId] is the master chain.

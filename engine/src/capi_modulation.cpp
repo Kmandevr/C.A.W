@@ -1,6 +1,8 @@
-// The C API's project modulation calls (API 19, #161): modulator knobs and bypass, link amounts, and the live outputs a UI draws.
+// The C API's project modulation calls (API 19, #161): modulator knobs and bypass, link amounts, the live outputs a UI draws, and per-note FX stats (API 22, #127).
 #include "caw.h"
 #include "capi_internal.h"
+
+#include <cstring>
 
 int32_t caw_engine_set_modulator_param(CawEngine* e, const char* modulator_id, const char* param, double value) try {
     return e && e->engine && modulator_id && param && e->engine->setModulatorParam(modulator_id, param, value) ? 1 : 0;
@@ -36,3 +38,24 @@ int32_t caw_engine_modulation_offset(CawEngine* e, uint32_t link_id, float* out)
 } catch (...) {
     return 0;
 }
+
+int32_t caw_engine_note_fx_stats(CawEngine* e, const char* layer_id, CawNoteFxStats* out) try {
+    if (!e || !e->engine || !layer_id || !out || out->struct_size < 2 * sizeof(uint32_t)) return 0;
+    caw::NoteFxStats s;
+    if (!e->engine->noteFxStats(layer_id, s)) return 0;
+    CawNoteFxStats full{};
+    full.struct_size = out->struct_size;
+    full.voices = s.voices;
+    full.budget = s.budget;
+    full.active = s.active;
+    full.active_mask = s.activeMask;
+    full.overflowing = s.overflowing;
+    full.overflowed = s.overflowed;
+    full.stolen = s.stolen;
+    const size_t n = out->struct_size < sizeof(CawNoteFxStats) ? out->struct_size : sizeof(CawNoteFxStats);
+    std::memcpy(out, &full, n);
+    return 1;
+} catch (...) {
+    return 0;
+}
+static_assert(caw::Engine::kNoteComponentFlag == CAW_NOTE_COMPONENT, "the per-note component bit");

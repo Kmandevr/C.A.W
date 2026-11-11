@@ -137,6 +137,8 @@ class NativeComponentInfo {
     this.uiControls = const [],
     this.builtin = false,
     this.presets = const [],
+    this.domains = const ['whole'],
+    this.cpuClass = 'unspecified',
   });
 
   final String id, name;
@@ -155,6 +157,15 @@ class NativeComponentInfo {
 
   /// A built-in's named parameter sets (Flagship's "Mono bass", "Acid 303"...), in display order.
   final List<ComponentPresetInfo> presets;
+
+  /// Where it may run (#120): "whole", "per_channel", "per_voice", "per_note". An effect with "per_note" (or
+  /// "per_voice") can run once per note; an instrument with it has a voice bus, so it can host per-note effects.
+  final List<String> domains;
+
+  /// Its author's cost hint: "unspecified", "light", "medium" or "heavy" (not a measurement).
+  final String cpuClass;
+
+  bool get runsPerNote => domains.contains('per_note') || domains.contains('per_voice');
 
   String get label => name.isEmpty ? id : name;
 
@@ -197,6 +208,8 @@ class NativeComponentInfo {
         presets: [
           for (final p in (j['presets'] as List? ?? const [])) ComponentPresetInfo.fromJson(p as Map<String, dynamic>)
         ],
+        domains: [for (final d in (j['domains'] as List? ?? const ['whole'])) if (d is String) d],
+        cpuClass: j['cpu_class'] as String? ?? 'unspecified',
       );
 
   /// Parses the whole caw_engine_components result; an error result gives an empty list.
