@@ -6,6 +6,25 @@ updated: 2026-11-11
 
 # Decisions
 
+## 2026-11-11: One drum instrument, built (choices to confirm)
+
+**Decision (Claude, for the owner to confirm; [engine](engine.md#drums-orgcawdrums)):**
+- **Flat parameter ids, 64 pads × 119** (`a1_body_freq` .. `d16_rnd_level`, 7635 in all, each with a `group` tag). Why: every knob stays automatable, modulatable, MIDI-mappable and in presets and undo with no new machinery. The trade-off: a 1.9 MB descriptor for the app to parse, about 4 MB of parameter state per instance, and a knob page that must be built from the groups (no generic page can show 7635 knobs). The alternative, a pad's deep settings in the component's state with only a few automatable knobs per pad, keeps the descriptor small but loses automation of most knobs. **To confirm.**
+- **The smallest descriptor extension:** `ParameterDescriptor::group` (a slash path, `"a1/body"`, `"kit/glue"`), emitted as `"group"` by `caw_engine_components` for built-ins only; the plain-C component interface is unchanged.
+- **Explode to tracks, not multi-output (for now).** The instrument chain has one stereo output; carrying a component's extra outputs into child tracks needs the chain, the mixer graph and the project's routing changed. So the per-pad `out` is stored and the processor keeps nine buses (Out 2..9 skip the kit effects), and `caw_drums_explode` gives the app one Single-mode Drums per used pad, with the notes to move. Multi-output is a follow-up. **To confirm.**
+- **Samples by reference in the project** (`"samples": [{"slot", "path"}]` or `{"slot", "builtin"}`), decoded by the engine on the control thread, instead of a call passing float data: the project then reloads and exports with its samples. Built-in samples are the library's sounds rendered by the engine (nothing to license). Mono, 30 s a slot, 64 MB an instance, WAV only. The app must copy a user's file somewhere it keeps (a `content://` file can't be opened by path). **[Assumption]**
+- **Bank layout:** bank A's Auto notes are 36..51 (the General MIDI keys, so the kits' sounds sit where GM puts them), each bank the next 16, from a configurable `base_note`. The default kit (808) fills bank A; banks B..D start empty.
+- **Defaults made for the owner:** the old drums' sounds carried over as closely as measured (their renders within 1 dB in level); centre-panned voices at full level on both sides (a balance, not constant power); the variation's sequence restarts at every Play, so a render repeats; a random sound is level-matched to about −1 dBFS; quality Eco/Normal/High sets the drives' oversampling (1/2/4×), the metal's band-limiting (none/polyBLEP/2× rate) and the resonator's modes (8/16/32).
+- **API 11** (10 is the settings redesign's): `caw_drums_info`, `caw_drums_randomize`, `caw_drums_explode`, and the component entry's `samples`.
+
+## 2026-11-11: One drum instrument (owner)
+
+**Decision (owner, verbatim):** "take all the drum plugs and make them in to one that can make any kick, hihat, snare, tom, crash, rimshot, etc. It should make all the drum sounds a drum can make and be extremely customisable. The kick should be more than it is, same with the hat, to the point that it's just crazy what it can do."
+- **Structure:** "Make it work like a MIDI kit with pads, or just standalone, one sound per track": a Kit mode (pads on MIDI notes, a GM-style default map) and a Single mode (one sound per track, any note).
+- **Sound source:** synthesis plus a sample layer. **Editor** (for the app): layers as stacked cards, a draggable waveform hero, a Character strip of macros.
+- **Extras, all four:** randomize and mutate; per-hit variation (velocity layers and round-robin-style subtle changes); choke groups and per-pad outputs; pad and kit effects.
+- **Later the same day:** 16 pads × 4 banks (A..D) = 64 pads, like an MPC; pads not used cost nothing and only sounding voices run. Pitch: "Both, switchable": a pitch tracking switch per sound (off a fixed pitch; on chromatic from the note, with a mono option and glide between overlapping notes, for 808 basslines), on Kit pads too. Samples: the user's files and a small built-in pack of one-shots the engine renders from presets (nothing to license), listed and loaded through the app. Outputs: "Each one will be routed to a specific note so you only really need one track to work it, but it should also allow an automatic create-per-track workflow. And have support for native pads and stuff like that, like hardware pads that use MIDI natively": one track by default with an editable note map per pad, an "explode to tracks" workflow, per-pad note learn, a channel option (e.g. 10), velocity, and polyphonic pressure as a modulation source (to choke or damp a cymbal by squeezing). The old kick, snare, hats and kit migrate to it.
+
 ## 2026-11-11: Routing and the ducker (#175, choices made for the owner)
 
 **Decision (Claude, for the owner to confirm):**

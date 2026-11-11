@@ -1,7 +1,7 @@
 ---
 title: Native module SDK
 summary: C ABI host contract and C++ component SDK, validation, real-time rules, state and packaging.
-updated: 2026-11-10
+updated: 2026-11-11
 covers: [engine/include/caw_component.h, engine/include/caw/display.hpp, engine/include/caw/library/, engine/src/sample_pack.*, engine/plugin/clap/, engine/cmake/CAWClap.cmake, engine/include/caw/module.hpp, engine/include/caw/component.hpp, engine/include/caw/instrument.hpp, engine/CMakeLists.txt, engine/cmake/, examples/cpp/minimal/, examples/cpp/poly-synth/, scripts/caw-component-build.js, .github/workflows/cpp-components.yml, engine/src/module.*, engine/src/module_registry.*, engine/src/graph.*, engine/src/component_test.*, engine/src/analysis.*]
 ---
 
@@ -162,6 +162,7 @@ Each file is a fresh instance: a note on at the first frame, held for `--hold` s
 - `eq.hpp`: `EqBand` (a low shelf, bell or high shelf from one trapezoidal SVF: exact gain where it should be, no bump) and `ThreeBandEq` (low shelf at 250 Hz, a bell, high shelf at 4 kHz; gains in dB).
 - `envelope.hpp`: `AdEnvelope` (as the .caw `ad`), `Adsr` (as `env.adsr`), `Glide` (portamento), `decayCoefficient` and `attackStep`.
 - `drums.hpp`: `KickVoice`, `SnareVoice`, `ClapVoice` and `HatVoice` with their settings structs: `set()`, `trigger(velocity)`, `next()`, `choke()`.
+- `modal.hpp` (2026-11-11): `ModalBank`, up to 32 modes of a struck object (Membrane: Bessel-zero ratios; Plate; Bar; Tube; Bell; Cymbal) with `ModalSettings` (`frequency`, `decay`, `damping`, `brightness`, `inharmonicity`, `position`, `modes`): `set()` at a strike or a pitch change, `process(strike, drive)` per sample (a strike rings each mode at its loudness; a driven input is scaled by 1 − r so it can't run away), `ringing()`. org.caw.drums' resonator.
 - `smoothing.hpp`: `OnePoleSmoother` (99 % of a step in its time, then lands exactly) and `LinearSmoother` (a ramp that ends in exactly its time); `setTime()` pays once, `setTarget()` is free. Smooth every knob that scales audio.
 - `lfo.hpp`: `Lfo` with `LfoShape` sine, triangle, saw up and down, square (pulse width), sample-and-hold and smooth random; rate in Hz or tempo-synced (`setRateBeats(beats, bpm)`), phase offset, unipolar or bipolar, `retrigger()` and `syncToBeat(position, beats)`. `next()` per sample, `block(frames)` once per block. The random shapes are a function of seed and cycle number, so they repeat with the song.
 - `unison.hpp`: `unisonLayout(UnisonSettings, UnisonVoice*)` lays out up to 16 unison copies: `detune` (the outermost copies' semitones) shaped by `power` (−1..1: \|x\|^(4^power)), `spread` (mirror pairs on opposite sides, alternating, so 0 is exactly centred), `blend` (centre against the others, power-normalised) and `UnisonStack` intervals (octave, two octaves, fifth, major, minor, harmonics). The flagship synth's unison.
