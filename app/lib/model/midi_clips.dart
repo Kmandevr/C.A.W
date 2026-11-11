@@ -1,5 +1,6 @@
 // Note clips to and from Standard MIDI Files: a .mid's tracks (or channels) become pattern clips in the project, and
-// a clip's notes, with their per-note bend, pressure and timbre, become a .mid (lib/model/midi_file.dart writes it).
+// a clip's notes, with their per-note bend, pressure and timbre, become a .mid (lib/model/midi_file.dart writes it),
+// with its track's automation lanes over the clip as controller changes (CC7 volume, CC10 pan, CC20 up for others).
 //
 // Clips stay stored as C.A.W.'s pattern text (docs/decisions.md "MIDI files are an import and export format").
 // Times convert by ticks per quarter note (one 16th step is a quarter of a quarter note), so a file's notes keep their
@@ -167,7 +168,9 @@ typedef _Window = ({Steps from, Steps to, Steps at});
 /// length and looping, as the engine arranges it), else one loop of the pattern. Each ratchet hit is its own note;
 /// chance and slide have no MIDI form and are left out. Notes with expression (bend, vibrato, pressure, timbre or a
 /// microtonal pitch) make the file MPE.
-Uint8List patternToMidi(PatternDoc doc, {required double bpm, required int beatsPerBar, ClipDoc? clip, String? name}) {
+/// [controls] (a clip's automation lanes as CCs, [automationControls]) go in the same track.
+Uint8List patternToMidi(PatternDoc doc,
+    {required double bpm, required int beatsPerBar, ClipDoc? clip, String? name, List<MidiControl> controls = const []}) {
   final source = Steps(math.max(1, doc.lengthSteps(beatsPerBar)));
   final windows = <_Window>[];
   if (clip == null) {
@@ -213,7 +216,7 @@ Uint8List patternToMidi(PatternDoc doc, {required double bpm, required int beats
     tempos: [MidiTempo(0, tempo)],
     meterNumerator: beatsPerBar.clamp(1, 16),
     meterDenominator: 4,
-    tracks: [MidiTrack(name: name ?? doc.name, notes: notes, endTick: end)],
+    tracks: [MidiTrack(name: name ?? doc.name, notes: notes, endTick: math.max(end, controls.fold(0, (e, c) => math.max(e, c.tick))), controls: controls)],
   ));
 }
 
@@ -346,12 +349,100 @@ String _freeName(ProjectDoc p, String name) {
   return '$name $n';
 }
 
-/// [clip] (a clip on a track of [p]) as a Standard MIDI File at the project's tempo and meter; null when its pattern
-/// is missing or doesn't parse.
-Uint8List? clipToMidi(ProjectDoc p, ClipDoc clip) {
+/// [clip] (a clip on a track of [p]) as a Standard MIDI File at the project's tempo and meter, with its track's
+/// automation over the clip as CCs ([automationControls]; [range] as there); null when its pattern is missing or
+/// doesn't parse.
+Uint8List? clipToMidi(ProjectDoc p, ClipDoc clip, {AutomationRange? range}) {
   final m = p.module(clip.patternId);
   if (m == null) return null;
   final doc = PatternDoc.parse(m.source).doc ?? PatternDoc.parse(m.runSource).doc;
   if (doc == null) return null;
-  return patternToMidi(doc, bpm: p.bpm, beatsPerBar: p.beatsPerBar, clip: clip, name: m.name);
+  final layer = p.layers.where((l) => l.clips.contains(clip)).firstOrNull;
+  final controls = layer == null ? const <MidiControl>[] : automationControls(p, layer, clip, range: range);
+  return patternToMidi(doc, bpm: p.bpm, beatsPerBar: p.beatsPerBar, clip: clip, name: m.name, controls: controls);
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Automation as MIDI CCs (#11)
+
+/// A project lane's value range, for scaling it to 0..127; null when unknown.
+typedef AutomationRange = ({double lo, double hi})? Function(ProjectAutomationLaneDoc lane);
+
+/// The CCs a track's other lanes get, in the project's lane order: the 12 undefined controllers 20-31, then the 18
+/// undefined 102-119 (MIDI 1.0's controller table). Lanes past the 30th are left out.
+const List<int> kAutomationCcs = [20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, //
+  102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112, 113, 114, 115, 116, 117, 118, 119];
+
+/// A sample every 1/32 note (half a step) along a ramp; MIDI holds a value until the next one.
+const double _ccEverySteps = 0.5;
+
+/// [layer]'s automation over [clip] (song time from the clip's start to its end) as controller changes, ticks from
+/// the clip's start at [kMidiExportPpq]: the track's volume lane as CC7 (gain g as 127·√g, so 0 dB is 127 and
+/// −6 dB about 90; above 0 dB holds at 127), pan as CC10 (−1 left 0, centre 64, right 127), and the project's lanes
+/// on this track (its instrument's and effects' parameters, and the parameters of its .caw generator and effects)
+/// as [kAutomationCcs] in lane order, scaled from [range] (else 0..1 when every point is inside it, else the lane's
+/// own lowest to highest point). Each lane sends its value at the clip's start, then a change at every point and
+/// along each ramp every 1/32 note, only when the 7-bit value changes. Globals have no track and are left out.
+List<MidiControl> automationControls(ProjectDoc p, LayerDoc layer, ClipDoc clip, {AutomationRange? range}) {
+  const tps = kMidiExportPpq ~/ 4; // ticks per step
+  final from = clip.startSteps.toDouble(), to = (clip.startSteps + clip.lengthSteps).toDouble();
+  final out = <MidiControl>[];
+
+  void lane(List<AutomationPointDoc> raw, int cc, int Function(double v) seven) {
+    if (raw.isEmpty) return;
+    final pts = [...raw]..sort((a, b) => a.step.compareTo(b.step));
+    double at(double step) {
+      if (step <= pts.first.step) return pts.first.value;
+      for (var i = 0; i + 1 < pts.length; i++) {
+        final a = pts[i], b = pts[i + 1];
+        if (step <= b.step) return b.step > a.step ? a.value + (b.value - a.value) * (step - a.step) / (b.step - a.step) : b.value;
+      }
+      return pts.last.value;
+    }
+
+    // The times to send: the clip's start, every point inside the clip, and a grid along each ramp.
+    final times = <double>{from};
+    for (var i = 0; i < pts.length; i++) {
+      final a = pts[i].step;
+      if (a > from && a < to) times.add(a);
+      if (i + 1 < pts.length && pts[i + 1].value != pts[i].value) {
+        final b = pts[i + 1].step;
+        for (var t = math.max(from, (a / _ccEverySteps).ceil() * _ccEverySteps); t < math.min(b, to); t += _ccEverySteps) {
+          times.add(t);
+        }
+      }
+    }
+    var last = -1;
+    for (final t in times.toList()..sort()) {
+      final v = seven(at(t)).clamp(0, 127);
+      if (v == last) continue;
+      last = v;
+      out.add(MidiControl(((t - from) * tps).round(), cc, v));
+      if (out.length > kMaxMidiEvents) throw const MidiFileException('the automation would write more than $kMaxMidiEvents events');
+    }
+  }
+
+  for (final a in layer.automation) {
+    switch (a.target) {
+      case 'volume':
+        lane(a.points, 7, (g) => (127 * math.sqrt(math.max(0.0, math.min(1.0, g)))).round());
+      case 'pan':
+        lane(a.points, 10, (x) => (63.5 + 63.5 * x.clamp(-1.0, 1.0)).round());
+    }
+  }
+  final modules = {?layer.generatorId, ...layer.effectIds};
+  final mine = [
+    for (final a in p.automation)
+      if (a.layerId == layer.id || (a.targetType == 'param' && modules.contains(a.moduleId))) a
+  ];
+  for (final (i, a) in mine.take(kAutomationCcs.length).indexed) {
+    if (a.points.isEmpty) continue;
+    final values = a.points.map((x) => x.value);
+    final lo = values.reduce(math.min), hi = values.reduce(math.max);
+    final r = range?.call(a) ?? (lo >= 0 && hi <= 1 ? (lo: 0.0, hi: 1.0) : (lo: lo, hi: hi));
+    final span = r.hi - r.lo;
+    lane(a.points, kAutomationCcs[i], (v) => span > 0 ? (127 * (v - r.lo) / span).round() : 0);
+  }
+  out.sort((a, b) => a.tick != b.tick ? a.tick.compareTo(b.tick) : a.controller.compareTo(b.controller));
+  return out;
 }
