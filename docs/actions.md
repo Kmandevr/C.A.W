@@ -12,7 +12,7 @@ updated: 2026-11-11
 ## How it works
 
 - **Everything is an action.** Each command the app can do has an id (`roll.notes.up`), a name and a description. Buttons, menus, keys and macros all run actions, so anything you can tap, you can bind. Reaper works the same way ([Sound on Sound](https://www.soundonsound.com/techniques/automate-anything-reapers-custom-actions)).
-- **Areas, like Reaper's sections:** Global, Sounds (Builder), Tracks (Arranger), Pattern editor (roll and grid), Mixer, Engine Lab, Automation, Export, Files and Plugin Builder. A key can do different things in each area. Global keys work everywhere unless the area has its own binding.
+- **Areas, like Reaper's sections:** Global, Sounds (`builder`), Pattern editor (roll and grid), Tracks (Arranger), Export and Code editor (Vim) (`Area` in `app/lib/actions/actions.dart`). A key can do different things in each area. Global keys work everywhere unless the area has its own binding.
 - **The action list** (`?`, or Help → Actions):
   - search every action by name, with its keys
   - show the current key bindings for each action; **Edit keys** opens the key bindings editor

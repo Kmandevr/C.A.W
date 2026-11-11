@@ -26,8 +26,11 @@ Future<bool> _saveWithPicker(List<int> bytes, String name) async {
 }
 
 class PluginExportScreen extends StatefulWidget {
-  const PluginExportScreen({super.key, required this.workbench, this.save});
+  const PluginExportScreen({super.key, required this.workbench, this.save, this.format = PluginFormat.clap});
   final CppWorkbench workbench;
+
+  /// The format picked when the page opens (the plug-in page's CLAP or VST3 target).
+  final PluginFormat format;
   final PackageSaver? save;
 
   @override
@@ -39,7 +42,7 @@ class _PluginExportScreenState extends State<PluginExportScreen> {
   final _vendor = TextEditingController();
   final _version = TextEditingController(text: '1.0.0');
   final _url = TextEditingController();
-  PluginFormat _format = PluginFormat.clap;
+  late PluginFormat _format = widget.format;
   final _targets = {PluginTarget.windowsX64, PluginTarget.linuxX64};
   bool _busy = false;
   String? _saved, _error;
@@ -70,6 +73,7 @@ class _PluginExportScreenState extends State<PluginExportScreen> {
       final ok = await (widget.save ?? _saveWithPicker)(zipStore(pluginPackageFiles(c, s)), name);
       if (!mounted) return;
       ok ? Haptics.threshold() : Haptics.tap();
+      if (ok) w.recordExport(s.format.label, name);
       setState(() => _saved = ok ? name : null);
     } catch (e) {
       Haptics.error();
