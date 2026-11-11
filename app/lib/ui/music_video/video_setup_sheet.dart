@@ -1,5 +1,6 @@
-// The Music video sheet (Export page and project menu): shots, style, range, aspect, resolution, frame rate and title
-// card in the device kit's look, the live preview, and the offline render with progress, cancel and the save picker.
+// The Music video sheet (Export page and project menu): shots, style, smooth follow, range, aspect, resolution, frame
+// rate and title card in the device kit's look, the live preview, and the offline render with progress, cancel and
+// the save picker.
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -256,6 +257,16 @@ class _MusicVideoPanelState extends State<MusicVideoPanel> {
             VideoStyle.energetic => 'Cuts on the bar and the beat, pushes at sections and drops, a quick camera.',
             VideoStyle.minimal => 'Few, long shots and slow fades.',
           }),
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Align(alignment: Alignment.centerLeft, child: _Pill(key: const ValueKey('video-smooth-follow'),
+                label: 'SMOOTH FOLLOW', on: o.smoothFollow,
+                onTap: busy ? null : () => _set(() => o.smoothFollow = !o.smoothFollow))),
+          ),
+          _Reveal(switchKey: o.smoothFollow, _Note(o.smoothFollow
+              ? 'The arrangement and piano roll hold the playhead a third of the way in and scroll the song under it; '
+                  'the zoom changes only at cuts.'
+              : 'Off: the camera springs after the playhead and zooms through each shot.')),
           Row(children: [
             const Text('Seed', style: TextStyle(color: Neon.dim, fontSize: 12)),
             IconButton(key: const ValueKey('video-seed-down'), onPressed: busy || o.seed <= 1 ? null : () => _set(() => o.seed--),

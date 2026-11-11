@@ -1,5 +1,5 @@
 // The arrangement music video: the director's determinism, cuts on beats and sections, shot toggles, size checks,
-// the frame clock and spring camera, a short render through the frame-hash encoder, and the setup sheet and preview.
+// the frame clock, spring camera and smooth follow, a short render through the frame-hash encoder, and the setup sheet and preview.
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
@@ -39,6 +39,15 @@ ProjectDoc _song() => ProjectDoc(id: 'p', name: 'Video test', bpm: 120, loopBars
         AutomationPointDoc(step: 64, value: 0), AutomationPointDoc(step: 128, value: 1),
       ]),
     ], markers: [MarkerDoc(id: 'm1', name: 'Verse', startSteps: 64)]);
+
+/// FNV-1a (32 bit) of [s]'s code units, a digest that is the same on every platform and Dart version.
+int _fnv(String s) {
+  var h = 0x811c9dc5;
+  for (final c in s.codeUnits) {
+    h = ((h ^ c) * 0x01000193) & 0xffffffff;
+  }
+  return h;
+}
 
 VideoScene _scene([ProjectDoc? p]) => buildVideoScene(p ?? _song(), colorOf: (l) => 0xff00ffcc + l.color);
 
@@ -163,6 +172,62 @@ void main() {
       expect(z, closeTo(1, 1e-9));
       expect(springTo(0, from: 1.4, velocity: 0, target: 1, omega: omega).$1, 1.4);
     });
+
+    test('smooth follow off keeps the spring camera exactly (digest pinned before the switch existed)', () {
+      final scene = _scene();
+      final buf = StringBuffer();
+      for (final style in VideoStyle.values) {
+        final plan = directVideo(scene, MusicVideoOptions(style: style, seed: 5), start: 0, end: 256);
+        expect(plan.smoothFollow, isFalse);
+        for (var st = 0.0; st < 256; st += 0.75) {
+          final c = plan.camera(plan.at(st), st);
+          expect(c.anchor, isNull);
+          buf.write('${c.center.toStringAsFixed(6)} ${c.zoom.toStringAsFixed(6)};');
+        }
+      }
+      expect(_fnv(buf.toString()), 0x445e8b0d);
+    });
+
+    test('smooth follow: the same cuts, and the timeline shots hold the playhead still a third of the way in', () {
+      final scene = _scene();
+      var checked = 0;
+      for (final style in VideoStyle.values) {
+        for (var seed = 1; seed <= 6; seed++) {
+          final off = directVideo(scene, MusicVideoOptions(style: style, seed: seed), start: 0, end: 256);
+          final on = directVideo(scene, MusicVideoOptions(style: style, seed: seed, smoothFollow: true), start: 0, end: 256);
+          expect(on.smoothFollow, isTrue);
+          expect(on.shots.join(','), off.shots.join(','), reason: '${style.name} $seed'); // the director still cuts alike
+          for (var i = 0; i < on.shots.length; i++) {
+            final shot = on.shots[i];
+            final locked = ShotPlan.locks(shot.kind);
+            final eased = i > 0 && on.shots[i - 1].kind == shot.kind;
+            double? zoom;
+            // Every frame at 30 fps inside the shot.
+            for (var st = shot.start; st < shot.end; st += 120 / 15 / 30) {
+              final cam = on.camera(shot, st);
+              if (!locked) {
+                expect(cam.anchor, isNull);
+                continue;
+              }
+              final (:left, :visible) = videoView(shot, cam);
+              // The playhead's x across the frame (the ruler's, and so the tilted lanes').
+              expect((st - left) / visible, closeTo(1 / 3, 1e-9), reason: '$shot at $st');
+              expect(cam.center, st);
+              if (!eased || st >= shot.start + ShotPlan.lockedZoomSteps) {
+                zoom ??= cam.zoom;
+                expect(cam.zoom, zoom, reason: 'no zoom inside $shot');
+              }
+              checked++;
+            }
+            if (locked && eased) {
+              // A cut from the same kind eases from the last shot's zoom.
+              expect(on.camera(shot, shot.start).zoom, closeTo(on.shots[i - 1].zoomFrom, 1e-12));
+            }
+          }
+        }
+      }
+      expect(checked, greaterThan(1000));
+    });
   });
 
   group('setup', () {
@@ -218,11 +283,12 @@ void main() {
       (tester) async {
     final tmp = Directory.systemTemp.createTempSync('caw_video_');
     addTearDown(() => tmp.deleteSync(recursive: true));
-    Future<(FrameHashEncoder, File?, MusicVideoRender)> once(String name) async {
+    Future<(FrameHashEncoder, File?, MusicVideoRender)> once(String name, {bool smooth = false}) async {
       final enc = FrameHashEncoder();
       final r = MusicVideoRender(
         projectJson: _song().toEngineJson(), scene: _scene(), startStep: 112, endStep: 144,
-        options: MusicVideoOptions(resolution: VideoResolution.custom, customWidth: 128, customHeight: 224, fps: 30, seed: 5),
+        options: MusicVideoOptions(resolution: VideoResolution.custom, customWidth: 128, customHeight: 224, fps: 30, seed: 5,
+            smoothFollow: smooth),
         encoder: enc, workDir: Directory('${tmp.path}/$name'), audio: (p, r) => _FakeAudio(r));
       final f = await tester.runAsync(r.run);
       return (enc, f, r);
@@ -243,6 +309,18 @@ void main() {
     // Deterministic: the same render gives the same frames.
     final (again, _, _) = await once('b');
     expect(again.hashes, enc.hashes);
+
+    // Smooth follow off (the default) draws the frames it drew before the switch existed (hashes recorded then; a
+    // Flutter upgrade that changes rasterising may need them re-recorded, as a golden image would).
+    expect([for (final n in [0, 30, 60, 90, 119]) enc.hashes[n]],
+        ['434202556405b4bf', '046bbce04c3c3a99', '5a481fa633bde948', 'b2f86154c5e9ed5f', 'be963525034a0c89']);
+
+    // On, the same cuts draw differently, and as deterministically.
+    final (smooth, _, _) = await once('s', smooth: true);
+    final (smooth2, _, _) = await once('t', smooth: true);
+    expect(smooth.frames, 120);
+    expect(smooth.hashes, smooth2.hashes);
+    expect(smooth.hashes, isNot(enc.hashes));
   });
 
   testWidgets('a cancelled render stops and leaves no file', (tester) async {
@@ -281,9 +359,14 @@ void main() {
     }
   });
 
-  /// Scrolls [key] into view and taps it.
+  /// Scrolls [key] into view (building it first if the list hasn't yet) and taps it.
   Future<void> tapKey(WidgetTester tester, String key) async {
     final f = find.byKey(ValueKey(key));
+    if (f.evaluate().isEmpty) {
+      // Above or below: scroll back to the top, then down until it is built.
+      await tester.scrollUntilVisible(find.byType(MusicVideoPreview), -200, scrollable: find.byType(Scrollable).first);
+      if (f.evaluate().isEmpty) await tester.scrollUntilVisible(f, 200, scrollable: find.byType(Scrollable).first);
+    }
     await tester.ensureVisible(f);
     await tester.pump();
     await tester.tap(f);
@@ -307,6 +390,22 @@ void main() {
     }
     expect(find.text('Switch on at least one shot.'), findsWidgets);
     await tapKey(tester, 'video-shot-mixer');
+
+    // Smooth follow: off by default; the switch turns it on for the preview's plan, and off again.
+    Future<MusicVideoPreview> previewNow() async {
+      await tester.scrollUntilVisible(find.byType(MusicVideoPreview), -200, scrollable: find.byType(Scrollable).first);
+      return tester.widget<MusicVideoPreview>(find.byType(MusicVideoPreview));
+    }
+    expect((await previewNow()).plan.smoothFollow, isFalse);
+    await tapKey(tester, 'video-smooth-follow');
+    await tester.pump(const Duration(seconds: 1));
+    expect(find.textContaining('a third of the way in'), findsOneWidget);
+    expect((await previewNow()).plan.smoothFollow, isTrue);
+    expect((await previewNow()).options.smoothFollow, isTrue);
+    await tapKey(tester, 'video-smooth-follow');
+    await tester.pump(const Duration(seconds: 1));
+    expect(find.textContaining('a third of the way in'), findsNothing);
+    expect((await previewNow()).plan.smoothFollow, isFalse);
 
     // A custom size that is odd is refused, then an even one is fine.
     await tapKey(tester, 'video-res-custom');
