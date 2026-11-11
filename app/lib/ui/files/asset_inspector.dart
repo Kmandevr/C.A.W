@@ -26,6 +26,12 @@ class AssetInspector extends StatelessWidget {
         FileAssetType.cppFile => 'C++ components / ${asset.cpp!.name}',
         FileAssetType.devicePreset => 'Presets · ${asset.native?.label ?? asset.preset!.componentId}',
         FileAssetType.trackPreset => 'Presets · track',
+        FileAssetType.sampleFile => 'Sample packs · ${[
+            if (asset.sample!.noteName.isNotEmpty) asset.sample!.noteName,
+            if (asset.sample!.velocity > 0) 'velocity ${asset.sample!.velocity}',
+            if (asset.sample!.seconds > 0) '${asset.sample!.seconds.toStringAsFixed(2)} s',
+            if (asset.sample!.looped) 'looped',
+          ].join(' · ')}',
         FileAssetType.midiFile => 'MIDI files · ${asset.midi!.parts.length} part${asset.midi!.parts.length == 1 ? '' : 's'}',
         _ => asset.module!.folderPath.isEmpty ? '.caw modules' : '.caw modules / ${asset.module!.folderPath}',
       };
@@ -89,7 +95,7 @@ class AssetInspector extends StatelessWidget {
         if (a.type == FileAssetType.cppFile)
           line(Icons.notes, '${'\n'.allMatches(a.cpp!.files[a.filePath] ?? '').length + 1} lines'),
         if (a.module != null && a.module!.tags.isNotEmpty) line(Icons.sell_outlined, a.module!.tags.join(', ')),
-        if (a.type != FileAssetType.cppFile && a.type != FileAssetType.cawLibrary)
+        if (a.type != FileAssetType.cppFile && a.type != FileAssetType.cawLibrary && a.sample == null)
           line(Icons.view_stream_outlined, uses.isEmpty ? 'Not used on any track' : 'Used on ${uses.join(', ')}',
               color: uses.isEmpty ? Neon.dim : Neon.text),
         if (!compact && a.drag != null)

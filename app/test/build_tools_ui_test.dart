@@ -3,10 +3,18 @@ import 'dart:async';
 
 import 'package:caw/engine/build_tools.dart';
 import 'package:caw/engine/engine.dart' show NativeComponentTrust;
+import 'dart:convert';
+import 'dart:io';
+
+import 'package:caw/engine/component_info.dart';
 import 'package:caw/model/app_state.dart';
+import 'package:caw/model/arrange_fx.dart';
+import 'package:caw/model/files_catalog.dart';
+import 'package:caw/model/sample_packs.dart';
 import 'package:caw/model/cpp_component.dart';
 import 'package:caw/model/cpp_workbench.dart';
 import 'package:caw/model/settings.dart';
+import 'package:caw/ui/cpp/sample_pack_screen.dart';
 import 'package:caw/ui/cpp/test_suite_screen.dart';
 import 'package:caw/ui/cpp/tool_kit.dart';
 import 'package:caw/ui/motion.dart';
@@ -150,6 +158,125 @@ void main() {
         });
         await tester.pumpAndSettle();
         await expectLater(goldenScreen, matchesGoldenFile('goldens/build_test_suite_$name.png'));
+      });
+    }
+  });
+
+  group('Sample-pack maker', () {
+    const flagship = NativeComponentInfo(id: 'org.caw.synth.flagship', name: 'Flagship', builtin: true, ports: [
+      ComponentPortInfo(id: 'notes', type: 'event', input: true, layout: 'none', channels: 0),
+      ComponentPortInfo(id: 'out', type: 'audio', input: false, layout: 'stereo', channels: 2),
+    ]);
+    late Directory root;
+    late AppState state;
+    setUp(() {
+      root = Directory.systemTemp.createTempSync('caw-packs');
+      state = AppState(settings: Settings());
+      state.samplePacksRoot = root;
+      state.componentCatalog.set([flagship]);
+    });
+    tearDown(() => root.deleteSync(recursive: true));
+
+    Future<void> render(WidgetTester tester) async {
+      await tester.runAsync(() async {
+        await tester.tap(find.byKey(const ValueKey('tool-action')));
+        for (var i = 0; i < 50; i++) {
+          await Future<void>.delayed(const Duration(milliseconds: 10));
+        }
+      });
+      await tester.pump();
+    }
+
+    testWidgets('sends the grid, shows progress, and Cancel stops it', (tester) async {
+      final fake = FakeTools();
+      await tester.pumpWidget(MaterialApp(theme: ThemeData.dark(),
+          home: SamplePackScreen(state: state, instrumentId: flagship.id, backend: fake)));
+      expect(find.text('Render 5 files'), findsOneWidget); // C2..C6 in octaves
+      await tester.tap(find.byKey(const ValueKey('pack-layers-2')));
+      await tester.ensureVisible(find.text('Loop points'));
+      await tester.tap(find.text('Loop points'));
+      await tester.pump();
+      expect(find.text('Render 10 files'), findsOneWidget);
+      await render(tester);
+      final req = fake.packs.single;
+      expect(req['instrument'], {'id': flagship.id});
+      expect(req['notes'], [36, 48, 60, 72, 84]);
+      expect(req['velocities'], [64, 127]);
+      expect(req['output_dir'], '${root.path}${Platform.pathSeparator}Flagship');
+      expect(req['name'], 'Flagship');
+      expect(req['loop'], {'enabled': true, 'min_seconds': 0.05, 'max_seconds': 0.5});
+      expect(req['sfz'], isTrue);
+      expect(req['max_files'], 10);
+      expect(req.containsKey('trust'), isFalse);
+      expect(fake.trust, NativeComponentTrust.blocked); // a built-in names no library
+      fake.run!.progress = 0.4;
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 250))); // the screen polls on a real timer
+      await tester.pump();
+      expect(find.text('Rendering offline… 40%'), findsOneWidget);
+      await tester.runAsync(() async {
+        await tester.tap(find.byKey(const ValueKey('tool-cancel')));
+      });
+      for (var i = 0; i < 100 && find.byKey(const ValueKey('pack-error')).evaluate().isEmpty; i++) {
+        await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 20)));
+        await tester.pump();
+      }
+      expect(fake.run!.cancelled, isTrue);
+      expect(find.byKey(const ValueKey('pack-error')), findsOneWidget);
+      expect(find.text('Stopped'), findsOneWidget);
+    });
+
+    testWidgets('a project instrument that is not built says so', (tester) async {
+      await tester.pumpWidget(MaterialApp(theme: ThemeData.dark(),
+          home: SamplePackScreen(state: state, instrumentId: 'local.my-synth', backend: FakeTools())));
+      expect(find.textContaining('Build this C++ instrument first'), findsOneWidget);
+      expect(tester.widget<ButtonStyleButton>(find.byKey(const ValueKey('tool-action'))).onPressed, isNull);
+    });
+
+    test('Files lists a rendered pack from its manifest, and deleting the last WAV removes the pack', () async {
+      final dir = Directory('${root.path}/Lead')..createSync();
+      File('${dir.path}/Lead_C4_100.wav').writeAsBytesSync([0]);
+      File('${dir.path}/Lead.json').writeAsStringSync(jsonEncode({
+        'instrument': {'id': 'org.caw.synth.flagship'},
+        'files': [{'file': 'Lead_C4_100.wav', 'note_name': 'C4', 'velocity': 100, 'seconds': 1.5, 'loop': null}],
+        'sfz': ['Lead.sfz'],
+      }));
+      await state.refreshSamplePacks();
+      expect(state.samplePacks.single.name, 'Lead');
+      final folder = state.folderAt('audio/samples/Lead')!;
+      expect(folder.kind, FilesFolderKind.samplePack);
+      final wav = state.folderAssets(folder).single;
+      expect(wav.type, FileAssetType.sampleFile);
+      expect(wav.sample!.noteName, 'C4');
+      expect(wav.drag, isNull);
+      state.deleteAsset(wav);
+      for (var i = 0; i < 50 && state.samplePacks.isNotEmpty; i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+      }
+      expect(dir.existsSync(), isFalse);
+      expect(state.samplePacks, isEmpty);
+    });
+
+    for (final name in const ['phone', 'desktop']) {
+      testWidgets('golden: a finished pack at $name size', (tester) async {
+        final fake = FakeTools();
+        await pumpGolden(tester, SamplePackScreen(state: state, instrumentId: flagship.id, backend: fake), goldenSizes[name]!);
+        await render(tester);
+        await tester.runAsync(() async {
+          fake.run!.done.complete({
+            'ok': true, 'error': '', 'warnings': <String>[], 'sfz': ['Flagship.sfz'],
+            'files': [for (final n in ['C2', 'C3', 'C4', 'C5', 'C6']) {'file': 'Flagship_${n}_100.wav', 'seconds': 1.42, 'loop': null}],
+          });
+        });
+        // The screen re-reads the packs from disk (real I/O) before it shows the result.
+        for (var i = 0; i < 100 && find.byKey(const ValueKey('pack-result')).evaluate().isEmpty; i++) {
+          await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 20)));
+          await tester.pump();
+        }
+        await tester.pumpAndSettle();
+        expect(find.byKey(const ValueKey('pack-result')), findsOneWidget);
+        await tester.ensureVisible(find.byKey(const ValueKey('pack-result')));
+        await tester.pumpAndSettle();
+        await expectLater(goldenScreen, matchesGoldenFile('goldens/build_sample_pack_$name.png'));
       });
     }
   });

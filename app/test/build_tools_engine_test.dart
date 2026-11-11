@@ -2,7 +2,14 @@
 import 'dart:io';
 
 import 'package:caw/engine/build_tools.dart';
+import 'package:caw/engine/component_info.dart';
 import 'package:caw/engine/engine.dart' show NativeComponentTrust;
+import 'package:caw/model/app_state.dart';
+import 'package:caw/model/arrange_fx.dart';
+import 'package:caw/model/sample_packs.dart';
+import 'package:caw/model/settings.dart';
+import 'package:caw/ui/cpp/sample_pack_screen.dart';
+import 'package:flutter/material.dart';
 import 'package:caw/ui/cpp/test_suite_screen.dart' show TestSuiteResult;
 import 'package:flutter_test/flutter_test.dart';
 
@@ -62,4 +69,32 @@ void main() {
     final c = await big.result;
     expect(c['ok'], isFalse);
   }, skip: skip);
+
+  testWidgets('the sample-pack screen\'s own request renders in the engine and lands in Files', (tester) async {
+    final root = Directory.systemTemp.createTempSync('caw-screen-pack');
+    addTearDown(() => root.deleteSync(recursive: true));
+    final state = AppState(settings: Settings())..samplePacksRoot = root;
+    state.componentCatalog.set([
+      const NativeComponentInfo(id: 'org.caw.synth.flagship', name: 'Flagship', builtin: true, ports: [
+        ComponentPortInfo(id: 'notes', type: 'event', input: true, layout: 'none', channels: 0),
+        ComponentPortInfo(id: 'out', type: 'audio', input: false, layout: 'stereo', channels: 2),
+      ]),
+    ]);
+    await tester.pumpWidget(MaterialApp(home: SamplePackScreen(state: state, instrumentId: 'org.caw.synth.flagship')));
+    await tester.tap(find.byKey(const ValueKey('pack-hold-0.25')));
+    await tester.ensureVisible(find.text('Loop points'));
+    await tester.tap(find.text('Loop points'));
+    await tester.pump();
+    await tester.runAsync(() async => tester.tap(find.byKey(const ValueKey('tool-action'))));
+    for (var i = 0; i < 600 && find.byKey(const ValueKey('pack-result')).evaluate().isEmpty &&
+        find.byKey(const ValueKey('pack-error')).evaluate().isEmpty; i++) {
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
+      await tester.pump();
+    }
+    expect(find.byKey(const ValueKey('pack-error')), findsNothing);
+    expect(find.byKey(const ValueKey('pack-result')), findsOneWidget);
+    final pack = state.samplePacks.single;
+    expect(pack.files.map((f) => f.file), hasLength(5));
+    expect(pack.sfz, ['Flagship.sfz']);
+  }, skip: skip != null);
 }

@@ -415,3 +415,39 @@ class _WavePainter extends CustomPainter {
   @override
   bool shouldRepaint(covariant _WavePainter o) => o.left != left || o.right != right || o.color != color;
 }
+
+/// A labelled value with − and + (a hold repeats through the tap), for a note or a count.
+class ToolStepper extends StatelessWidget {
+  const ToolStepper({super.key, required this.label, required this.value, required this.text, required this.onChanged,
+    this.min = 0, this.max = 127, this.step = 1, this.color = Neon.blue, this.keyPrefix});
+  final String label;
+  final int value, min, max, step;
+  final String Function(int) text;
+  final ValueChanged<int> onChanged;
+  final Color color;
+  final String? keyPrefix;
+
+  @override
+  Widget build(BuildContext context) {
+    Widget button(IconData icon, int delta) {
+      final next = (value + delta).clamp(min, max);
+      return IconButton(
+        key: keyPrefix == null ? null : ValueKey('$keyPrefix${delta < 0 ? '-' : '+'}'),
+        visualDensity: VisualDensity.compact,
+        constraints: const BoxConstraints.tightFor(width: 40, height: 40),
+        icon: Icon(icon, size: 18, color: next == value ? Neon.line : color),
+        onPressed: next == value ? null : () {
+          Haptics.tick();
+          onChanged(next);
+        },
+      );
+    }
+
+    return Row(children: [
+      Expanded(child: Text(label, style: const TextStyle(fontSize: 13, color: Neon.text))),
+      button(Icons.remove, -step),
+      SizedBox(width: 52, child: Text(text(value), textAlign: TextAlign.center, style: Neon.code(size: 13, color: color))),
+      button(Icons.add, step),
+    ]);
+  }
+}
