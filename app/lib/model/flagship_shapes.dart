@@ -157,12 +157,25 @@ Float32List wavetableFrame(int table, int frame, {int points = 256}) {
 }
 
 /// The warp modes (`kWarps`).
-enum Warp { none, bend, sync, mirror, quantize }
+enum Warp { none, bend, sync, mirror, quantize, fm, fold }
 
-/// The phase 0..1 the table is read at for phase [t], after warp [mode] at [amount] 0..1 (the engine's `warp`).
-double warpPhase(double t, Warp mode, double amount) {
+/// sin(2 pi u), as the engine's FM and fold warps approximate it (`sineCycles`).
+double _sineCycles(double u) {
+  final x = 2 * (u - u.floorToDouble()) - 1;
+  final y = 4 * x * (1 - x.abs());
+  return -(y + 0.225 * (y * y.abs() - y));
+}
+
+/// The phase 0..1 the table is read at for phase [t], after warp [mode] at [amount] 0..1 (the engine's `warp`);
+/// [fmRatio] is the FM warp's ratio (`oscN_fm_ratio`). The fold warp shapes the level, not the phase: [foldLevel].
+double warpPhase(double t, Warp mode, double amount, {int fmRatio = 1}) {
   if (amount <= 0) return t;
   switch (mode) {
+    case Warp.fm:
+      final y = t + 0.75 * amount * _sineCycles(fmRatio.clamp(1, 16) * t) + 1;
+      return math.min(y - y.floorToDouble(), 0.99999994);
+    case Warp.fold:
+      return t;
     case Warp.bend:
       return math.min(t * (1 + amount * (1 - t)), 0.99999994);
     case Warp.sync:
@@ -180,9 +193,16 @@ double warpPhase(double t, Warp mode, double amount) {
   }
 }
 
+/// A table level [v] after the fold warp at [amount] 0..1 (the engine's: a sine folder, drive 1..8, blended in).
+double foldLevel(double v, double amount) {
+  if (amount <= 0) return v;
+  final drive = 1 + 7 * amount, blend = math.min(1.0, 4 * amount);
+  return v + blend * (_sineCycles(0.25 * drive * v + 64) - v);
+}
+
 /// One cycle of an oscillator as drawn: table [table] at frame [position] 0..1 (between frames, linearly),
 /// through [warp] at [amount], as [points] samples.
-Float32List oscillatorCycle(int table, double position, Warp warp, double amount, {int points = 256}) {
+Float32List oscillatorCycle(int table, double position, Warp warp, double amount, {int points = 256, int fmRatio = 1}) {
   table = table.clamp(0, wavetableFrames.length - 1);
   final pos = position.clamp(0.0, 1.0) * (wavetableFrames[table] - 1);
   final f0 = pos.floor(), mix = pos - f0;
@@ -197,9 +217,10 @@ Float32List oscillatorCycle(int table, double position, Warp warp, double amount
 
   final out = Float32List(points);
   for (var i = 0; i < points; i++) {
-    final t = warpPhase(i / points, warp, amount);
+    final t = warpPhase(i / points, warp, amount, fmRatio: fmRatio);
     final va = read(a, t);
-    out[i] = mix > 0 ? va + (read(b, t) - va) * mix : va;
+    final v = mix > 0 ? va + (read(b, t) - va) * mix : va;
+    out[i] = warp == Warp.fold ? foldLevel(v, amount) : v;
   }
   return out;
 }

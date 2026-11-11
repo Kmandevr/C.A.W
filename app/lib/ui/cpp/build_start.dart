@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 
 import '../../engine/engine.dart' show Template;
 import '../../model/app_state.dart';
+import '../../model/cpp_starters.dart';
 import '../../model/cpp_workbench.dart';
 import '../feedback.dart';
 import '../glass.dart';
@@ -10,13 +11,15 @@ import '../haptics.dart';
 import '../theme.dart';
 import '../frame/sections.dart';
 
-/// What a starter example is, read from its header (`kind:`, `name:`, `summary:`).
+/// One entry of "Open an example": a bundled C++ starter (an instrument or an effect), or a pattern template
+/// (read from its header: `kind:`, `name:`, `summary:`).
 class StarterExample {
-  StarterExample(this.template, this.kind, this.name, this.summary);
-  final Template template;
-  final String kind, name, summary;
+  StarterExample(this.key, this.kind, this.name, this.summary, {this.template, this.starter});
+  final String key, kind, name, summary;
+  final Template? template;
+  final CppStarter? starter;
 
-  /// Plays notes (a generator or a synth), changes sound (an effect), or is notes for a track (a pattern).
+  /// Plays notes (an instrument), changes sound (an effect), or is notes for a track (a pattern).
   String get group => switch (kind) {
         'pattern' => 'Patterns',
         'effect' => 'Effects',
@@ -26,9 +29,19 @@ class StarterExample {
   static StarterExample of(Template t) {
     String field(String key) => RegExp('^$key:\\s*(.*)\$', multiLine: true).firstMatch(t.source)?.group(1)?.trim() ?? '';
     final name = field('name');
-    return StarterExample(t, field('kind'), name.isEmpty ? t.file : name, field('summary'));
+    return StarterExample(t.file, field('kind'), name.isEmpty ? t.file : name, field('summary'), template: t);
   }
+
+  static StarterExample cpp(CppStarter s) =>
+      StarterExample('cpp/${s.folder}', s.instrument ? 'instrument' : 'effect', s.name, s.summary, starter: s);
 }
+
+/// The examples: the C++ starters, then the pattern templates (the .caw sound modules are replaced by the starters,
+/// #122).
+List<StarterExample> starterExamples(List<Template> templates) => [
+      for (final s in cppStarters) StarterExample.cpp(s),
+      for (final t in templates) StarterExample.of(t),
+    ].where((e) => e.starter != null || e.kind == 'pattern').toList();
 
 /// The three ways to start, with a one-line explanation and a tiny code preview each.
 class StartCard {
@@ -75,7 +88,7 @@ class BuildStartView extends StatelessWidget {
   }
 
   Future<void> _examples(BuildContext context) async {
-    final examples = [for (final t in state.templates) StarterExample.of(t)];
+    final examples = starterExamples(state.templates);
     final picked = await showGlassSheet<StarterExample>(
       context: context,
       isScrollControlled: true,
@@ -84,7 +97,13 @@ class BuildStartView extends StatelessWidget {
       builder: (c) => ExamplesList(examples: examples, onPick: (e) => Navigator.pop(c, e)),
     );
     if (picked == null) return;
-    final id = state.addModule(picked.template);
+    final starter = picked.starter;
+    if (starter != null) {
+      final doc = state.addCppStarter(starter);
+      onOpen(BuildTab(BuildTabKind.cpp, doc.componentId));
+      return;
+    }
+    final id = state.addModule(picked.template!);
     state.selectModule(id);
     onOpen(BuildTab(BuildTabKind.caw, id));
   }
@@ -343,7 +362,7 @@ class ExamplesList extends StatelessWidget {
           ),
           for (final e in groups[g]!)
             ListTile(
-              key: ValueKey('example ${e.template.file}'),
+              key: ValueKey('example ${e.key}'),
               dense: true,
               leading: Icon(icon[g], size: 18, color: color[g]),
               title: Text(e.name, style: const TextStyle(fontSize: 13)),

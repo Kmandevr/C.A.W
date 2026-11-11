@@ -1,0 +1,11 @@
+{
+  "format": "caw.component",
+  "version": 1,
+  "component": {
+    "id": "org.caw.starter.acid",
+    "name": "Acid"
+  },
+  "sources": [
+    "src/acid.cpp"
+  ]
+}

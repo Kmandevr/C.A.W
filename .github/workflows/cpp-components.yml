@@ -85,6 +85,17 @@ jobs:
             --project examples/cpp/poly-synth --sdk "$RUNNER_TEMP/caw-sdk" \
             --build "$RUNNER_TEMP/caw-instrument-build" --config Release
           ctest --test-dir "$RUNNER_TEMP/caw-instrument-build" --build-config Release --output-on-failure
+      - name: Build and test the C++ starters for desktop
+        if: ${{ !matrix.android }}
+        run: |
+          for starter in examples/cpp/starters/*/; do
+            [ -f "$starter/caw-component.json" ] || continue  # tests/ holds the shared contract test
+            name=$(basename "$starter")
+            node scripts/caw-component-build.js \
+              --project "$starter" --sdk "$RUNNER_TEMP/caw-sdk" \
+              --build "$RUNNER_TEMP/caw-starter-$name" --config Release
+            ctest --test-dir "$RUNNER_TEMP/caw-starter-$name" --build-config Release --output-on-failure
+          done
       - name: Build the example instrument for Android ARM64
         if: matrix.android
         run: |

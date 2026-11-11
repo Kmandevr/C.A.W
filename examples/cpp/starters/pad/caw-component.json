@@ -1,0 +1,11 @@
+{
+  "format": "caw.component",
+  "version": 1,
+  "component": {
+    "id": "org.caw.starter.pad",
+    "name": "Pad"
+  },
+  "sources": [
+    "src/pad.cpp"
+  ]
+}

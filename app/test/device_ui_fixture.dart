@@ -9,6 +9,7 @@ import 'package:caw/model/app_state.dart';
 import 'package:caw/model/arrange_fx.dart';
 import 'package:caw/model/device_display.dart';
 import 'package:caw/model/device_target.dart';
+import 'package:caw/model/drums.dart';
 import 'package:caw/model/project.dart';
 import 'package:caw/model/settings.dart';
 import 'package:caw/ui/devices/device_editor.dart';
@@ -33,11 +34,9 @@ const builtinEffects = [
   'org.caw.tremolo', 'org.caw.autopan', 'org.caw.rotary', 'org.caw.imager', 'org.caw.channelmixer',
   // fx-space end
 ];
-const builtinInstruments = ['org.caw.synth.flagship', 'org.caw.drum.kick', 'org.caw.drum.snare', 'org.caw.drum.hats',
-  'org.caw.drum.kit'];
-/// The instruments the engine has now. The old drums (org.caw.drum.*) migrate to org.caw.drums (2026-11-11); their
-/// editors stay, on the fixture's frozen descriptors, until the Drums editor replaces them.
-const engineInstruments = ['org.caw.synth.flagship', 'org.caw.drums'];
+const builtinInstruments = ['org.caw.synth.flagship', 'org.caw.drums'];
+/// The instruments the engine has now. The old drums (org.caw.drum.*) migrate to org.caw.drums (2026-11-11).
+const engineInstruments = builtinInstruments;
 const retiredDrums = ['org.caw.drum.kick', 'org.caw.drum.snare', 'org.caw.drum.hats', 'org.caw.drum.kit'];
 
 List<NativeComponentInfo>? _infos;
@@ -69,6 +68,21 @@ DeviceDisplayFrame fakeFrame(String id, {int tick = 0, Map<String, double> value
         'key_db': -40 + 37 * hit, 'duck': hit, 'gr': 9 * hit, 'pos_ms': ph * 300, 'phase': ph, 'mode': 2, 'threshold': -24,
         ...values,
       });
+}
+
+/// A drums display frame: [peaks] by pad, a note received ([note], [count]), the shown pad's hit.
+DrumsDisplayFrame drumsFrame({Map<int, double> peaks = const {}, int note = -1, int count = 0, int shown = 0,
+    double seconds = 0.6}) {
+  final mx = Float32List(256), mn = Float32List(256);
+  for (var i = 0; i < 256; i++) {
+    final env = (1 - i / 256) * (1 - i / 256);
+    mx[i] = 0.9 * env;
+    mn[i] = -0.85 * env;
+  }
+  return DrumsDisplayFrame(mode: 0, shownPad: shown, glueGr: 2, padGr: 0, waveSeconds: seconds, pitchSpan: 0,
+    voices: 1, lastPad: shown, lastNote: note, lastChannel: 1, lastVelocity: 1, noteCount: count, penvMode: 0,
+    peaks: Float32List.fromList([for (var i = 0; i < 64; i++) peaks[i] ?? 0]), waveMax: mx, waveMin: mn,
+    pitch: Float32List(64));
 }
 
 /// Display frames a test sets.

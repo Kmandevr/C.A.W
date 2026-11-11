@@ -25,7 +25,7 @@ NativeComponentInfo flagshipFixture() {
     num('${p}fine', '${n}fine', 0, -100, 100, 'ct');
     num('${p}phase', '${n}phase', 0, 0, 1);
     num('${p}phase_rand', '${n}phase randomness', 1, 0, 1);
-    pick('${p}warp', '${n}warp', 0, const ['None', 'Bend', 'Sync', 'Mirror', 'Quantize']);
+    pick('${p}warp', '${n}warp', 0, const ['None', 'Bend', 'Sync', 'Mirror', 'Quantize', 'FM', 'Fold']);
     num('${p}warp_amt', '${n}warp amount', 0, 0, 1);
     whole('${p}unison', '${n}unison', o == 1 ? 7 : 1, 1, 16);
     num('${p}detune', '${n}detune', 25, 0, 100, 'ct');
@@ -108,6 +108,10 @@ NativeComponentInfo flagshipFixture() {
   expo('glide', 'Glide', 0.05, 0.001, 2, 's');
   for (var s = 1; s <= 16; s++) {
     pick('mod${s}_via', 'Mod $s scaled by', 0, sources);
+  }
+  // After the via sources (#171 FM warp, 2026-11-11): each oscillator's FM ratio.
+  for (var o = 1; o <= 3; o++) {
+    whole('osc${o}_fm_ratio', 'Osc $o FM ratio', 1, 1, 16);
   }
   return NativeComponentInfo(id: 'org.caw.synth.flagship', name: 'Flagship', role: 'instrument', builtin: true,
       ports: const [

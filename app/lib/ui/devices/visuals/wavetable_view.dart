@@ -35,6 +35,7 @@ class _WavetableViewState extends State<WavetableView> {
     final frame = t.value(_id('frame'));
     final warp = Warp.values[t.value(_id('warp')).round().clamp(0, Warp.values.length - 1)];
     final amount = t.value(_id('warp_amt'));
+    final ratio = t.param(_id('fm_ratio')) == null ? 1 : t.value(_id('fm_ratio')).round();
     final on = t.value(_id('on')) >= 0.5;
     return LayoutBuilder(builder: (context, box) => GrabPan(
       key: ValueKey('wt-${widget.prefix}'),
@@ -60,7 +61,7 @@ class _WavetableViewState extends State<WavetableView> {
         if (t.param(_id('warp_amt')) case final p?) p.id: p.defaultValue,
       }),
       child: SizedBox(height: widget.height, child: CustomPaint(
-        painter: _WavetablePainter(table, frame, warp, amount, on ? color : Neon.dim, _dragging),
+        painter: _WavetablePainter(table, frame, warp, amount, on ? color : Neon.dim, _dragging, ratio),
         child: Align(alignment: Alignment.bottomLeft, child: Padding(padding: const EdgeInsets.all(4), child: Text(
           '${wavetableNames[table]} · ${(frame * (wavetableFrames[table] - 1) + 1).toStringAsFixed(1)}/${wavetableFrames[table]}'
           '${warp == Warp.none || amount <= 0 ? '' : ' · ${warp.name} ${(amount * 100).round()}%'}',
@@ -71,8 +72,8 @@ class _WavetableViewState extends State<WavetableView> {
 }
 
 class _WavetablePainter extends CustomPainter {
-  _WavetablePainter(this.table, this.frame, this.warp, this.amount, this.color, this.active);
-  final int table;
+  _WavetablePainter(this.table, this.frame, this.warp, this.amount, this.color, this.active, this.fmRatio);
+  final int table, fmRatio;
   final double frame, amount;
   final Warp warp;
   final Color color;
@@ -104,7 +105,7 @@ class _WavetablePainter extends CustomPainter {
         ..style = PaintingStyle.stroke
         ..strokeWidth = 1);
     }
-    final now = oscillatorCycle(table, frame, warp, amount, points: points);
+    final now = oscillatorCycle(table, frame, warp, amount, points: points, fmRatio: fmRatio);
     final path = cycle(now, depthX * frame, depthY * frame, 0.8);
     canvas.drawPath(path, Paint()
       ..color = color.withValues(alpha: 0.25)
@@ -120,5 +121,5 @@ class _WavetablePainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant _WavetablePainter o) => o.table != table || o.frame != frame || o.warp != warp ||
-      o.amount != amount || o.color != color || o.active != active;
+      o.amount != amount || o.color != color || o.active != active || o.fmRatio != fmRatio;
 }

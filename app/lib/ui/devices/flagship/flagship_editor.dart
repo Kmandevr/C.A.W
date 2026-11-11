@@ -181,7 +181,7 @@ class OscCard extends StatelessWidget {
         const SizedBox(height: 4),
         WavetableView(prefix: p),
         LabeledRow('WARP', _roomy((roomy) => DeviceChoice('${p}warp', maxSegments: roomy ? 5 : 0,
-          labels: const ['None', 'Bend', 'Sync', 'Mirror', 'Quantize']))),
+          labels: const ['None', 'Bend', 'Sync', 'Mirror', 'Quantize', 'FM', 'Fold']))),
         plainKnobs(p, const ['frame', 'warp_amt', 'level', 'pan']),
         const DeviceHeading('PITCH'),
         plainKnobs(p, const ['octave', 'semi', 'fine'], size: 42),

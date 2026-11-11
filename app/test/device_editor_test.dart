@@ -554,9 +554,9 @@ void main() {
   test('the fixture matches the engine\'s flagship descriptor', () async {
     final e = Engine.create();
     final real = (await e.nativeComponents()).firstWhere((c) => c.id == flagshipComponentId);
-    expect(real.parameters.length, 209);
+    expect(real.parameters.length, 212);
     // The engine's presets reach the browser (DevicePresets.engine reads the descriptor's list).
-    expect(real.presets.map((p) => p.name), ['Init', 'Morph pad', 'Mono bass', 'Acid 303', 'Basic']);
+    expect(real.presets.map((p) => p.name), ['Init', 'Morph pad', 'Mono bass', 'Acid 303', 'Basic', 'Pluck', 'FM bell']);
     expect([for (final p in real.parameters) p.id], [for (final p in flagship.parameters) p.id]);
     for (var i = 0; i < real.parameters.length; i++) {
       final a = real.parameters[i], b = flagship.parameters[i];

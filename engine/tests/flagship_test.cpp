@@ -276,7 +276,7 @@ TEST(the_flagship_lists_its_parameters_grouped_by_section_with_good_descriptors)
     const ModuleDescriptor& d = p->descriptor();
     CHECK_EQ(d.id, std::string_view("org.caw.synth.flagship"));
     CHECK_EQ(d.name, std::string_view("Flagship"));
-    CHECK_EQ(d.parameterCount, 209u);
+    CHECK_EQ(d.parameterCount, 212u);
     const char* prefixes[] = {"osc1_", "osc2_", "osc3_", "flt1_", "flt2_", "flt_", "env1_", "env2_", "env3_", "lfo1_",
                               "lfo2_", "lfo3_", "rnd_", "volume", "velocity", "bend_range", "fx_", "mod", "voice_mode", "glide"};
     for (uint32_t k = 0; k < d.parameterCount; ++k) {
@@ -684,13 +684,92 @@ TEST(the_flagship_classic_table_plays_the_classic_shapes) {
     CHECK(square[1] < 1e-3 * square[0]);
 }
 
+TEST(the_flagship_fm_warp_adds_harmonic_sidebands_at_its_ratio) {
+    Engine e(48000);
+    std::unique_ptr<ModuleProcessor> p = make(e);
+    if (!p) return;
+    // A sine (Classic, frame 0) at A3 through the FM warp: phase modulation at a whole ratio keeps every partial on
+    // a harmonic of 220 Hz, and more amount spreads more power above the fundamental.
+    auto partials = [&](double amount, double ratio) {
+        p->reset();
+        const Stereo s = play(*p, {notes::noteOn(0, 1, 57, 1)}, 24000,
+                              plain({{"osc1_table", 4}, {"osc1_warp", 5}, {"osc1_warp_amt", amount}, {"osc1_fm_ratio", ratio}}));
+        return spectrum(s.left, 8000, 8192);
+    };
+    const std::vector<double> light = partials(0.15, 1), heavy = partials(0.8, 1), three = partials(0.5, 3);
+    auto above = [](const std::vector<double>& sp) { return bandPower(sp, 330, 6000, 8192) / peakNear(sp, 220, 3, 8192); };
+    CHECK(above(light) > 1e-3);  // the warp is on
+    CHECK(above(heavy) > 3 * above(light));
+    for (const std::vector<double>* sp : {&light, &heavy, &three}) {
+        // Between the harmonics (a quarter of the way to the next) is empty.
+        double harmonic = 0, between = 0;
+        for (int h = 1; h <= 12; ++h) {
+            harmonic += peakNear(*sp, 220.0 * h, 3, 8192);
+            between += peakNear(*sp, 220.0 * h + 110.0, 20, 8192);
+        }
+        CHECK(between < 1e-4 * harmonic);
+    }
+    // Ratio 3 puts the first sidebands at 2 and 4 times the note, 1 at 2 and 3 times... so the third harmonic
+    // is weaker against the fourth at ratio 3 than at ratio 1.
+    const double r1 = peakNear(partials(0.5, 1), 880, 3, 8192) / peakNear(partials(0.5, 1), 660, 3, 8192);
+    const double r3 = peakNear(three, 880, 3, 8192) / peakNear(three, 660, 3, 8192);
+    CHECK(r3 > 10 * r1);
+    // The ratio is ignored by the other warps and with no warp: the same bits as before it existed.
+    p->reset();
+    const Stereo a = play(*p, {notes::noteOn(0, 1, 57, 1)}, 4096, {{"osc1_warp", 1}, {"osc1_warp_amt", 0.4}});
+    p->reset();
+    const Stereo b = play(*p, {notes::noteOn(0, 1, 57, 1)}, 4096, {{"osc1_warp", 1}, {"osc1_warp_amt", 0.4}, {"osc1_fm_ratio", 7}});
+    CHECK(a.left == b.left);
+}
+
+TEST(the_flagship_fold_warp_folds_a_sine_into_odd_harmonics) {
+    Engine e(48000);
+    std::unique_ptr<ModuleProcessor> p = make(e);
+    if (!p) return;
+    auto partials = [&](double amount) {
+        p->reset();
+        const Stereo s = play(*p, {notes::noteOn(0, 1, 57, 1)}, 24000,
+                              plain({{"osc1_table", 4}, {"osc1_warp", 6}, {"osc1_warp_amt", amount}}));
+        return spectrum(s.left, 8000, 8192);
+    };
+    const std::vector<double> soft = partials(0.1), hard = partials(1.0);
+    auto third = [](const std::vector<double>& sp) { return peakNear(sp, 660, 3, 8192) / peakNear(sp, 220, 3, 8192); };
+    CHECK(third(hard) > 0.05);           // folded 8 times: strong upper partials
+    CHECK(third(hard) > 5 * third(soft));
+    // A folded sine stays odd-symmetric: no even harmonics.
+    CHECK(peakNear(hard, 440, 3, 8192) < 1e-4 * peakNear(hard, 220, 3, 8192));
+    // Amount 0 is no warp at all, bit for bit.
+    p->reset();
+    const Stereo a = play(*p, {notes::noteOn(0, 1, 57, 1)}, 4096, {{"osc1_warp", 6}, {"osc1_warp_amt", 0}});
+    p->reset();
+    const Stereo b = play(*p, {notes::noteOn(0, 1, 57, 1)}, 4096, {{"osc1_warp", 0}, {"osc1_warp_amt", 0}});
+    CHECK(a.left == b.left);
+}
+
+TEST(the_pluck_and_fm_bell_presets_darken_as_their_notes_fade) {
+    // The .caw synth.pluck and synth.fm as presets: bright at the start, duller later (their filter or FM index
+    // falls with an envelope).
+    Engine e(48000);
+    std::unique_ptr<ModuleProcessor> p = make(e);
+    if (!p) return;
+    for (const char* name : {"Pluck", "FM bell"}) {
+        Values v;
+        for (const auto& [id, x] : findBuiltinPreset(kId, name)->values) v.emplace_back(std::string(id), x);
+        p->reset();
+        const Stereo s = play(*p, {notes::noteOn(0, 1, 57, 1)}, 36000, v);
+        const std::vector<double> early = spectrum(s.left, 480, 4096), late = spectrum(s.left, 28000, 4096);
+        auto bright = [](const std::vector<double>& sp) { return bandPower(sp, 600, 8000, 4096) / bandPower(sp, 150, 300, 4096); };
+        if (!(bright(early) > 4 * bright(late))) cawtest::fail(__FILE__, __LINE__, std::string(name) + " does not darken");
+    }
+}
+
 TEST(flagship_presets_set_their_values_and_an_entry_names_one) {
     // Every preset names only Flagship's parameters, within their ranges.
     Engine e(48000);
     std::unique_ptr<ModuleProcessor> p = make(e);
     if (!p) return;
     const ModuleDescriptor& d = p->descriptor();
-    CHECK_EQ(builtinPresets(kId).size(), 5u);
+    CHECK_EQ(builtinPresets(kId).size(), 7u);
     for (const BuiltinPreset& preset : builtinPresets(kId))
         for (const auto& [id, v] : preset.values) {
             const int k = paramIndex(d, std::string(id));

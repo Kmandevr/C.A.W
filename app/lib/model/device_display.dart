@@ -8,6 +8,7 @@ import '../engine/engine.dart';
 import 'arrange_fx.dart';
 import 'device_target.dart';
 import 'fx_space_display.dart'; // fx-space
+import 'drums.dart';
 import 'project.dart';
 // fx-filters begin
 import '../ui/devices/effects/filters/filters_display.dart' show decodeFiltersDisplay;
@@ -126,6 +127,7 @@ DeviceDisplayFrame decodeDisplay(String componentId, List<double> f, int n) {
   // fx-space begin
   if (decodeFxSpaceDisplay(componentId, f, n) case final space?) return space;
   // fx-space end
+  if (componentId == drumsComponentId) return DrumsDisplayFrame.decode(f, n) ?? const DeviceDisplayFrame();
   // fx-filters begin
   if (decodeFiltersDisplay(componentId, f, n) case final frame?) return frame;
   // fx-filters end

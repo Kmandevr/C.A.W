@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 import '../../engine/component_info.dart';
 import '../../model/arrange_fx.dart' show isBuiltinComponent;
 import '../../model/device_target.dart';
-import 'drums/drum_editors.dart';
+import 'drums/drums_editor.dart';
 import 'effects/effect_editors.dart';
 import 'flagship/flagship_editor.dart';
 import 'flagship/flagship_inline.dart';

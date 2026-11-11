@@ -272,6 +272,37 @@ const double g = gain_.next();  // per sample"""),
       group: 'Modulation'),
   CppRefEntry('caw::lib::LinearSmoother', 'class', 'A straight ramp that reaches the target in exactly the set time (gains, crossfades).',
       insertText: 'caw::lib::LinearSmoother mix_;', group: 'Modulation'),
+  CppRefEntry('caw::lib::CurveShape', 'class', 'A drawn LFO: up to 32 points joined by lines and looped; valueAt(phase) reads it.',
+      insertText: 'caw::lib::CurveShape curve_;', group: 'Modulation', example: """const double points[] = {0.0, 1.0, -0.5, -1.0};
+curve_.setEven(points, 4);  // in activate()
+const double m = curve_.valueAt(lfo_.phase());  // or b.transport->beat / 16"""),
+  CppRefEntry('caw::lib::CurveShape::setPoints', 'void (const double* xs, const double* levels, int count) noexcept',
+      'Points at their own places (x 0..1, levels -1..1).', member: true, group: 'Modulation'),
+  CppRefEntry('caw::lib::beatPhase', 'double (double seconds, double bpm, double beats, double offset = 0)',
+      'Cycles of a tempo-synced LFO at a song position.', insertText: 'caw::lib::beatPhase(seconds, tempo, 4.0)', group: 'Modulation'),
+  CppRefEntry('caw::lib::tremoloGain', 'double (double lfo, double depth)', 'A tremolo\'s gain from a -1..1 LFO: 1 down to 1 - depth.',
+      insertText: 'caw::lib::tremoloGain(lfo_.next(), 0.5)', group: 'Modulation'),
+  // Music (library/music.hpp).
+  CppRefEntry('caw::lib::scaleNote', 'double (double degree, Scale scale, double root)', 'The MIDI note of a scale degree; past the end climbs octaves.',
+      insertText: 'caw::lib::scaleNote(step % 8, caw::lib::Scale::Minor, 57)', group: 'Music', example: """// A random walk in A minor, the same on every render:
+const double note = caw::lib::scaleNote(caw::lib::randomIndex(step, 8, seed), caw::lib::Scale::Minor, 57);"""),
+  CppRefEntry('caw::lib::quantizeNote', 'double (double note, Scale scale, double root)', 'The nearest note of the scale (a tie goes down).',
+      insertText: 'caw::lib::quantizeNote(pitch, caw::lib::Scale::Major, 60)', group: 'Music'),
+  CppRefEntry('caw::lib::chordNote', 'double (Chord chord, double index, double root)', 'The index-th note of a chord; past the end climbs octaves.',
+      insertText: 'caw::lib::chordNote(caw::lib::Chord::Min7, i, 57)', group: 'Music'),
+  CppRefEntry('caw::lib::arpNote', 'double (Chord chord, double step, ArpMode mode, double root, int octaves = 1, uint32_t seed = 0)',
+      'The note an arpeggio plays on a step: up, down, up and down, or seeded random.',
+      insertText: 'caw::lib::arpNote(caw::lib::Chord::Min, step, caw::lib::ArpMode::UpDown, 57, 2)', group: 'Music'),
+  CppRefEntry('caw::lib::euclid', 'bool (double hits, double steps, double pos, double rotate = 0)', 'A Euclidean rhythm: hits spread evenly over steps.',
+      insertText: 'caw::lib::euclid(5, 16, step)', group: 'Music'),
+  CppRefEntry('caw::lib::Scale', 'enum class', 'Major, Minor, the modes, HarmonicMinor, MelodicMinor, the pentatonics, Blues, Chromatic, WholeTone.',
+      insertText: 'caw::lib::Scale::Minor', group: 'Music'),
+  CppRefEntry('caw::lib::Chord', 'enum class', 'Maj, Min, Dim, Aug, Sus2, Sus4, Maj7, Min7, Dom7, Maj9, Min9, Power.', insertText: 'caw::lib::Chord::Min7',
+      group: 'Music'),
+  CppRefEntry('caw::lib::randomUnit', 'double (double x, uint32_t seed = 0)', 'A repeatable 0..1 for x (a step number). Also randomIndex and chance.',
+      insertText: 'caw::lib::randomUnit(step, seed)', group: 'Music'),
+  CppRefEntry('caw::lib::chance', 'bool (double x, double p, uint32_t seed = 0)', 'True with probability p for x, repeatably.',
+      insertText: 'caw::lib::chance(step, 0.6, seed)', group: 'Music'),
   // Drums (library/drums.hpp).
   CppRefEntry('caw::lib::KickVoice', 'class', 'Kick: set(KickSettings, rate), trigger(velocity), next(), choke().',
       insertText: 'caw::lib::KickVoice kick_;', group: 'Drums', example: """caw::lib::KickSettings k;
@@ -290,6 +321,12 @@ const double y = kick_.next();"""),
   CppRefEntry('caw::lib::KickVoice::trigger', 'void (double velocity) noexcept', 'A hit, velocity 0..1.', member: true, group: 'Drums'),
   CppRefEntry('caw::lib::KickVoice::choke', 'void () noexcept', 'Fades it out over 5 ms.', member: true, group: 'Drums'),
   // Effects (library/delay.hpp, reverb.hpp, distortion.hpp, stereo.hpp).
+  CppRefEntry('caw::lib::SampleHold', 'class', 'Sample and hold: process(x, rate, sampleRate) picks up a new value rate times a second.',
+      insertText: 'caw::lib::SampleHold hold_;', group: 'Effects'),
+  CppRefEntry('caw::lib::bitMask', 'double (double x, uint32_t mask)', 'Flips bits of the sound read as 16 bits (a glitch).',
+      insertText: 'caw::lib::bitMask(x, 0x0F00)', group: 'Effects'),
+  CppRefEntry('caw::lib::wrapAround', 'double (double x, double amount)', 'Pushes the sound past full scale and wraps it round (an overflow).',
+      insertText: 'caw::lib::wrapAround(x, 3.0)', group: 'Effects'),
   CppRefEntry('caw::lib::PingPongDelay', 'class', 'Stereo ping-pong delay: prepare(sr, maxSeconds), process(...).', group: 'Effects',
       insertText: 'caw::lib::PingPongDelay delay_;', example: """delay_.prepare(rate, 2.0);  // in activate()
 delay_.process(caw::lib::noteSeconds(tempo, 0.25), 0.4, 0.5, 0.3, l, r);"""),
@@ -334,8 +371,8 @@ class CppBuiltin {
 const cppBuiltins = <CppBuiltin>[
   CppBuiltin('org.caw.synth.flagship', 'Flagship', true,
       'Three wavetable oscillators with unison (up to 16 copies), two filters, a 16-slot mod matrix and effects; poly, '
-      'mono or legato with glide. Its 209 knobs are grouped by prefix: osc1_..osc3_, flt1_, flt2_, flt_routing, env1_..env3_, '
-      'lfo1_..lfo3_, rnd_, mod1_..mod16_ and fx_. Presets: Init, Morph pad, Mono bass, Acid 303 and Basic.',
+      'mono or legato with glide. Its 212 knobs are grouped by prefix: osc1_..osc3_, flt1_, flt2_, flt_routing, env1_..env3_, '
+      'lfo1_..lfo3_, rnd_, mod1_..mod16_ and fx_. Presets: Init, Morph pad, Mono bass, Acid 303, Basic, Pluck and FM bell.',
       ['voice_mode', 'glide', 'flt_routing', 'rnd_rate', 'rnd_mode', 'volume', 'velocity', 'bend_range', 'fx_dist_on', 'fx_dist_type', 'fx_dist_drive',
        'fx_dist_mix', 'fx_eq_on', 'fx_eq_low', 'fx_eq_mid', 'fx_eq_mid_freq', 'fx_eq_high', 'fx_eq_mix', 'fx_chorus_on',
        'fx_chorus_rate', 'fx_chorus_depth', 'fx_chorus_mix', 'fx_delay_on', 'fx_delay_sync', 'fx_delay_time', 'fx_delay_feedback',

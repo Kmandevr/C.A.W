@@ -128,6 +128,10 @@ Values basic() {
     return v;
 }
 
+// The .caw synth voices' presets (#122): defined in the parity block at the end of this file.
+Values pluck();
+Values fmBell();
+
 const std::vector<BuiltinPreset>& flagshipPresets() {
     static const std::vector<BuiltinPreset> p = {
         {"Init", "Flagship's own default: a warm, wide saw stack", {}},
@@ -135,6 +139,8 @@ const std::vector<BuiltinPreset>& flagshipPresets() {
         {"Mono bass", "A saw and a sub an octave down, a low-pass and legato glide (the Bass)", monoBass()},
         {"Acid 303", "A saw into a resonant ladder, with accents and slides (the Acid synth)", acid303()},
         {"Basic", "Two oscillators, a low-pass and an ADSR (the Basic synth)", basic()},
+        {"Pluck", "A bright saw whose low-pass closes as it fades: a plucked string (the .caw synth.pluck)", pluck()},
+        {"FM bell", "A sine phase-modulated at three times its pitch, the index falling with the note (the .caw synth.fm)", fmBell()},
     };
     return p;
 }
@@ -397,5 +403,34 @@ std::string migrateInstrumentJson(std::string_view entryJson) {
         json += (i ? ",\"" : "\"") + jsonEscape(params[i].first) + "\":" + number(params[i].second);
     return json + "}}";
 }
+
+// ---- parity (#122) begin: Flagship presets for the .caw synth.* voices ----
+
+namespace {
+
+// synth.pluck(trig, freq, 0.4): a saw into a 12 dB low-pass (q 1) opened from 300 Hz to 6.3 kHz by an envelope
+// half as long as the note's 0.4 s decay.
+Values pluck() {
+    Values v = with(common(), {{"osc1_frame", kSaw}, {"flt1_type", kSvfLp}, {"flt1_cutoff", 300},
+                               {"flt1_resonance", 0.10404187691730582},  // q 1 = 0.707 * 28^r
+                               {"env1_attack", 0.001}, {"env1_decay", 0.4}, {"env1_sustain", 0}, {"env1_release", 0.4},
+                               {"env2_attack", 0.001}, {"env2_decay", 0.2}, {"env2_sustain", 0}, {"env2_release", 0.2},
+                               {"velocity", 0.6}, {"volume", 0.6}});
+    return with(v, slot(1, kSrcEnv2, "flt1_cutoff", 4.392317422778761 / kCutoffOctaves));  // log2(6300 / 300)
+}
+
+// synth.fm(freq, ratio, index): a sine through Flagship's FM warp at ratio 3, the warp amount (the index) opened
+// by env 2 and falling over 0.6 s, a slow level decay and no filter.
+Values fmBell() {
+    Values v = with(common(), {{"osc1_frame", kSine}, {"osc1_warp", 5 /* FM */}, {"osc1_warp_amt", 0.05}, {"osc1_fm_ratio", 3},
+                               {"flt1_on", 0}, {"env1_attack", 0.001}, {"env1_decay", 1.5}, {"env1_sustain", 0},
+                               {"env1_release", 1.2}, {"env2_attack", 0.001}, {"env2_decay", 0.6}, {"env2_sustain", 0.1},
+                               {"env2_release", 0.6}, {"velocity", 0.7}, {"volume", 0.5}});
+    return with(v, slot(1, kSrcEnv2, "osc1_warp_amt", 0.75));
+}
+
+}  // namespace
+
+// ---- parity (#122) end ----
 
 }  // namespace caw
