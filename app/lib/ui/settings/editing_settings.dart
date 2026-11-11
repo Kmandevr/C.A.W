@@ -44,6 +44,18 @@ class EditingSettings extends StatelessWidget {
           subtitle: 'A new note\'s length until you change one (the last length then carries on)'),
       settingSwitch('editing.follow', s.followPlayhead, (v) => s.update((x) => x.followPlayhead = v),
           icon: Icons.keyboard_double_arrow_right),
+      settingChoice<bool>('editing.followStyle', s.followSmooth, const [(false, 'Page'), (true, 'Smooth')],
+          (v) => s.update((x) => x.followSmooth = v),
+          icon: Icons.swipe_right_alt,
+          subtitle: s.followSmooth ? 'The playhead stays a third in; the tracks glide under it'
+              : 'The view pages on when the playhead nears its edge'),
+      // The slider's last stop, past 10 s, is Never (0 in the settings): following waits for the next Play.
+      settingSlider('editing.followResume', s,
+          value: s.followResume <= 0 ? Settings.maxFollowResume + 0.5 : s.followResume,
+          min: Settings.minFollowResume, max: Settings.maxFollowResume + 0.5, divisions: 20,
+          show: (v) => v > Settings.maxFollowResume ? 'Never' : '${v.toStringAsFixed(1)} s',
+          set: (x, v) => x.followResume = v > Settings.maxFollowResume ? 0 : v,
+          reset: 2.5, enabled: s.followPlayhead, icon: Icons.timer_outlined),
       settingSwitch('editing.wheel', s.wheelZooms, (v) => s.update((x) => x.wheelZooms = v),
           icon: Icons.mouse_outlined,
           subtitle: s.wheelZooms ? 'The wheel zooms the arrangement; Ctrl + wheel scrolls' : 'Ctrl + wheel zooms the arrangement'),

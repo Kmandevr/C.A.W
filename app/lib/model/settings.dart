@@ -453,6 +453,15 @@ class Settings extends ChangeNotifier {
   double rollNoteSteps = 0;
   static const rollNoteLengths = [0.0, 1.0, 2.0, 4.0, 8.0, 16.0];
   bool followPlayhead = true;
+
+  /// How long after the last interaction (or selection change) the view follows the playhead again, in seconds
+  /// (owner, 2026-11-11); 0 is Never: it waits for the next Play.
+  double followResume = 2.5;
+
+  /// Smooth following (owner, 2026-11-11): the view scrolls continuously so the playhead stays a third from the left;
+  /// off, it pages on when the playhead nears the edge (the default).
+  bool followSmooth = false;
+  static const minFollowResume = 0.5, maxFollowResume = 10.0;
   bool wheelZooms = false;
   bool confirmDelete = false;
 
@@ -600,6 +609,8 @@ class Settings extends ChangeNotifier {
         'roll_tool': rollTool.name,
         'roll_note_steps': rollNoteSteps,
         'follow_playhead': followPlayhead,
+        'follow_resume': followResume,
+        'follow_smooth': followSmooth,
         'wheel_zooms': wheelZooms,
         'confirm_delete': confirmDelete,
         'code_font_size': codeFontSize,
@@ -747,6 +758,11 @@ class Settings extends ChangeNotifier {
     final len = j['roll_note_steps'];
     if (len is num && rollNoteLengths.contains(len.toDouble())) rollNoteSteps = len.toDouble();
     followPlayhead = flag('follow_playhead') ?? followPlayhead;
+    followSmooth = flag('follow_smooth') ?? followSmooth;
+    final resume = j['follow_resume'];
+    if (resume is num && resume.isFinite) {
+      followResume = resume <= 0 ? 0 : resume.toDouble().clamp(minFollowResume, maxFollowResume);
+    }
     wheelZooms = flag('wheel_zooms') ?? wheelZooms;
     confirmDelete = flag('confirm_delete') ?? confirmDelete;
     codeFontSize = num_('code_font_size', minCodeFontSize, maxCodeFontSize) ?? codeFontSize;
@@ -967,6 +983,9 @@ class Settings extends ChangeNotifier {
       'look.clip_corner': clipCorner.name,
       'look.clip_fill': clipFill.name,
       'behaviour.edit_kinds': EditMotion.kindNames(editMotionKinds).join(','),
+      'behaviour.follow': on(followPlayhead),
+      'behaviour.follow_resume': followResume <= 0 ? 'never' : n(followResume),
+      'behaviour.follow_style': followSmooth ? 'smooth' : 'page',
       'behaviour.snap': on(rollSnap),
       'behaviour.grid': '$rollGrid',
       'behaviour.value_grid': roll.valueGrid.name,
@@ -1025,6 +1044,15 @@ class Settings extends ChangeNotifier {
     clipFill = pick(ClipFill.values, 'look.clip_fill') ?? clipFill;
     final kinds = profile['behaviour.edit_kinds'];
     if (kinds != null) editMotionKinds = EditMotion.parseKinds(kinds.split(',').map((k) => k.trim()));
+    followPlayhead = flag('behaviour.follow') ?? followPlayhead;
+    final resume = profile['behaviour.follow_resume'];
+    if (resume?.trim().toLowerCase() == 'never') {
+      followResume = 0;
+    } else {
+      followResume = number('behaviour.follow_resume', minFollowResume, maxFollowResume) ?? followResume;
+    }
+    final style = profile['behaviour.follow_style']?.trim().toLowerCase();
+    if (style == 'smooth' || style == 'page') followSmooth = style == 'smooth';
     rollSnap = flag('behaviour.snap') ?? rollSnap;
     final grid = int.tryParse(profile['behaviour.grid'] ?? '');
     if (grid != null && rollGrids.contains(grid)) rollGrid = grid;

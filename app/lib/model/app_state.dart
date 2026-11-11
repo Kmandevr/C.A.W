@@ -1236,16 +1236,22 @@ class AppState extends ChangeNotifier {
 
   // ---------- layers (Arranger) ----------
 
-  List<LayerDoc> get visibleLayers => project.layers.where((layer) {
+  /// The tracks the arrangement shows, in order: every track. A collapsed folder no longer hides the tracks inside
+  /// it but draws them as thin bars ([shownCollapse]; owner, 2026-11-11).
+  List<LayerDoc> get visibleLayers => List.of(project.layers);
+
+  /// How [layer]'s row shows: thin inside a collapsed folder (at any depth), else its own [LayerDoc.collapse], so
+  /// opening the folder brings back each track's own state.
+  TrackCollapse shownCollapse(LayerDoc layer) {
     var parent = layer.parentId;
     for (var depth = 0; parent != null && depth < project.layers.length; depth++) {
       final folder = project.layers.where((x) => x.id == parent).firstOrNull;
       if (folder == null) break;
-      if (folder.collapsed) return false;
+      if (folder.collapsed) return TrackCollapse.thin;
       parent = folder.parentId;
     }
-    return true;
-  }).toList();
+    return layer.collapse;
+  }
 
   /// Whether [layer] is somewhere inside the folder [folderId], at any depth.
   bool isInside(LayerDoc layer, String folderId) {
@@ -1326,6 +1332,39 @@ class AppState extends ChangeNotifier {
     _changed(engine: false);
   }
 
+  /// Sets how much of each of [layers]' rows shows (the track menu's Collapse, a header's bottom-edge drag or pinch):
+  /// one undo step. With [height] (a normal row), that track's own height is set too. Only the screen changes.
+  void setTrackCollapse(Iterable<LayerDoc> layers, TrackCollapse collapse, {double? height}) {
+    final h = height == null || !height.isFinite ? null
+        : height.clamp(LayerDoc.minHeight, LayerDoc.maxHeight).toDouble();
+    endUndoStep();
+    var changed = false;
+    for (final l in layers) {
+      if (l.collapse != collapse) {
+        l.collapse = collapse;
+        changed = true;
+      }
+      if (h != null && collapse == TrackCollapse.normal && l.height != h) {
+        l.height = h;
+        changed = true;
+      }
+    }
+    if (!changed) return;
+    _changed(engine: false);
+    endUndoStep();
+  }
+
+  /// [layer]'s row goes back to the global default height (Settings' track height).
+  void resetTrackHeight(LayerDoc layer) {
+    if (layer.height == null) return;
+    endUndoStep();
+    layer.height = null;
+    _changed(engine: false);
+    endUndoStep();
+  }
+
+  /// A folder's chevron: collapsed, the tracks inside it show as thin bars ([shownCollapse]); opened, each goes back
+  /// to its own state.
   void setFolderCollapsed(LayerDoc folder, bool collapsed) {
     if (!folder.isFolder) return;
     editLayer(folder, (l) => l.collapsed = collapsed);

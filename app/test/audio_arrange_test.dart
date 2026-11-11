@@ -65,7 +65,8 @@ void main() {
     final levels = WaveformCache.instance.cachedLevels;
     await tester.pump();
     expect(WaveformCache.instance.cachedLevels, levels, reason: 'a repaint reads the cache');
-    expect(find.text('Drop audio here, or arm the track and record'), findsOneWidget, reason: 'the empty audio track');
+    expect(find.text('Drop audio here, or arm the track and record'), findsNothing,
+        reason: 'a track holds a clip: no hint (owner, 2026-11-11)');
     await settle(tester);
   });
 

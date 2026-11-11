@@ -200,6 +200,11 @@ const List<SettingEntry> settingEntries = [
   _E('editing.noteLength', _ed, 'New note length', 'Follow the grid, or always this length', ['note', 'length', 'draw']),
   _E('editing.follow', _ed, 'Follow the playhead', 'The arrangement scrolls to keep the playhead in view while playing',
       ['auto scroll', 'autoscroll', 'scroll', 'playback']),
+  _E('editing.followStyle', _ed, 'Follow style', 'Page: the view jumps on near the edge. Smooth: it scrolls on, the '
+      'playhead a third in', ['smooth scroll', 'page', 'follow', 'continuous']),
+  _E('editing.followResume', _ed, 'Resume after',
+      'After you scroll, zoom, drag or select, how long the view waits before following again; Never waits for Play',
+      ['auto scroll', 'follow', 'pause', 'delay', 'playback']),
   _E('editing.wheel', _ed, 'Wheel zooms', 'The mouse wheel zooms the arrangement; Ctrl + wheel then scrolls',
       ['mouse', 'zoom', 'scroll', 'ctrl']),
   _E('editing.confirmDelete', _ed, 'Ask before deleting a track', 'A question before a track or folder goes',

@@ -177,13 +177,14 @@ class MidiClipPreview extends ClipPreview {
       ClipPictureCache? cache, this.loopSteps})
       : cache = cache ?? ClipPictureCache.instance;
 
-  /// The preview of [clip] from its pattern in [project], or null when the pattern is gone.
+  /// The preview of [clip] from its pattern in [project], or null when the pattern is gone. [trim]: the clip's start
+  /// moved by this many steps while its left edge is dragged, so the notes stay where they are on the timeline.
   static MidiClipPreview? of(ProjectDoc project, ClipDoc clip, {required double stepW, required double top,
-      required Color color, ClipPictureCache? cache}) {
+      required Color color, ClipPictureCache? cache, int trim = 0}) {
     final m = project.module(clip.patternId);
     if (m == null) return null;
     return MidiClipPreview(patternId: m.id, source: m.source, runSource: m.runSource, beatsPerBar: project.beatsPerBar,
-        sourceOffsetSteps: clip.sourceOffsetSteps, loop: clip.loop, stepW: stepW, top: top, color: color, cache: cache,
+        sourceOffsetSteps: clip.sourceOffsetSteps + trim, loop: clip.loop, stepW: stepW, top: top, color: color, cache: cache,
         loopSteps: clip.loopSteps);
   }
 

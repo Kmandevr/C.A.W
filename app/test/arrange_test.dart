@@ -10,6 +10,7 @@ import 'package:caw/model/native_components.dart';
 import 'package:caw/model/native_trust.dart';
 import 'package:caw/model/project.dart';
 import 'package:caw/model/settings.dart';
+import 'package:caw/ui/arrange/focus_panel.dart';
 import 'package:caw/ui/arrange/fx_stack.dart';
 import 'package:caw/ui/arrange/track_color.dart';
 import 'package:caw/ui/theme.dart';
@@ -72,11 +73,9 @@ void main() {
     await tester.pump(const Duration(seconds: 1)); // let autosave and history timers run out
   }
 
-  /// A double tap: a header's or a clip's menu (owner, 2026-11-11).
-  Future<void> doubleTap(WidgetTester tester, Finder f) async {
-    await tester.tap(f);
-    await tester.pump(const Duration(milliseconds: 60));
-    await tester.tap(f);
+  /// A hold let go without moving: a header's menu (owner, 2026-11-11).
+  Future<void> hold(WidgetTester tester, Finder f) async {
+    await tester.longPress(f);
     await tester.pumpAndSettle();
   }
 
@@ -433,52 +432,69 @@ void main() {
   });
 
   group('track headers', () {
-    testWidgets('a finger tap lights the track up in the next frame; a quick second tap opens its menu instead of the '
-        'focus view', (tester) async {
+    testWidgets('a tap focuses the track in the next frame; a quick second tap switches the focus view to its effects',
+        (tester) async {
       await pumpArranger(tester, const Size(412, 900));
       Finder header(String id) => find.byKey(ValueKey('track-header-$id'));
-      bool lit(String id) =>
-          tester.widget<Semantics>(find.ancestor(of: header(id), matching: find.byType(Semantics)).first)
-              .properties.selected ?? false;
-      expect(lit('b'), isFalse);
+      FocusTab? tab() => tester.widget<FocusPanel>(find.byType(FocusPanel)).tab;
+      // A tap focuses at once (owner, 2026-11-11): no double-tap wait.
       await tester.tap(header('b'));
       await tester.pump();
       expect(s.selectedLayerId, 'b');
-      expect(lit('b'), isTrue, reason: 'no double-tap wait (owner, 2026-11-11)');
-      // The focus view moves the headers, so it waits out the double tap.
-      expect(sections.focusedLayer, isNull);
-      await tester.pump(kDoubleTapTimeout);
-      await tester.pumpAndSettle();
       expect(sections.focusedLayer, 'b');
+      await tester.pumpAndSettle();
+      // Another tab, then back to all tracks.
+      await tester.tap(find.byKey(const ValueKey('focus-tab-mixer')));
+      await tester.pumpAndSettle();
+      expect(tab(), FocusTab.mixer);
       await tester.tap(header('b')); // the pinned track: back to all tracks
-      await tester.pump(kDoubleTapTimeout);
       await tester.pumpAndSettle();
       expect(sections.focusedLayer, isNull);
+      await tester.pump(kDoubleTapTimeout);
 
+      // A tap opens the focus view on the tab it had; a quick second tap on the pinned track (which moved under
+      // the finger) switches it to the effects.
       await tester.tap(header('c'));
       await tester.pump();
-      expect(lit('c'), isTrue);
+      expect(sections.focusedLayer, 'c');
+      expect(tab(), FocusTab.mixer);
       await tester.pump(const Duration(milliseconds: 80));
       await tester.tap(header('c'));
       await tester.pump();
-      expect(find.byKey(const ValueKey('long-press-menu')), findsOneWidget, reason: 'the second tap adds the menu');
-      await tester.pump(kDoubleTapTimeout);
+      expect(sections.focusedLayer, 'c', reason: 'the double tap keeps the focus view open');
+      expect(tab(), FocusTab.fx);
+      expect(find.byKey(const ValueKey('long-press-menu')), findsNothing, reason: 'a double tap opens no menu');
       await tester.pumpAndSettle();
-      expect(sections.focusedLayer, isNull, reason: 'a double tap opens no focus view');
-      expect(s.selectedLayerId, 'c');
-      await tester.tapAt(const Offset(5, 5));
-      await settle(tester);
-
-      // A tap on the next header soon after is a first tap there, not a double tap.
-      await tester.tap(header('a'));
-      await tester.pump(const Duration(milliseconds: 80));
-      await tester.tap(header('b'));
-      await tester.pump();
-      expect(find.byKey(const ValueKey('long-press-menu')), findsNothing);
-      expect(lit('b'), isTrue);
+      await tester.tap(header('c'));
+      await tester.pumpAndSettle();
+      expect(sections.focusedLayer, isNull);
       await tester.pump(kDoubleTapTimeout);
+
       await settle(tester);
-      expect(sections.focusedLayer, 'b');
+    });
+
+    testWidgets('beside the side panel a quick tap on another header is a first tap there, not a double tap',
+        (tester) async {
+      await pumpArranger(tester, const Size(1200, 800));
+      Finder header(String id) => find.byKey(ValueKey('track-header-$id'));
+      FocusTab? tab() => tester.widget<FocusPanel>(find.byType(FocusPanel)).tab;
+      await tester.tap(header('a'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('focus-tab-mixer')));
+      await tester.pumpAndSettle();
+      await tester.pump(kDoubleTapTimeout);
+      await tester.tap(header('b'));
+      await tester.pump(const Duration(milliseconds: 60));
+      await tester.tap(header('c'));
+      await tester.pump();
+      expect(sections.focusedLayer, 'c');
+      expect(tab(), FocusTab.mixer, reason: 'two headers: two first taps');
+      // The same header again, where it still is: a double tap.
+      await tester.pump(const Duration(milliseconds: 60));
+      await tester.tap(header('c'));
+      await tester.pump();
+      expect(tab(), FocusTab.fx);
+      await settle(tester);
     });
 
     testWidgets('drag the headers\' right edge and a row\'s bottom edge to resize them; the sizes are saved',
@@ -490,10 +506,14 @@ void main() {
       await settle(tester);
       expect(tester.getSize(header).width, closeTo(w0 - 30, 1.5));
       expect(s.settings.headerWidth, closeTo(w0 - 30, 1.5));
-      await tester.drag(find.byKey(const ValueKey('track-height-grip-a')), const Offset(0, -20));
+      // A row's bottom edge resizes that track only (owner, 2026-11-11), saved with the project.
+      final trackH0 = s.settings.trackHeight;
+      await tester.drag(find.byKey(const ValueKey('track-height-grip-a')), const Offset(0, 20));
       await settle(tester);
-      expect(tester.getSize(header).height, closeTo(h0 - 20, 1.5));
-      expect(s.settings.trackHeight, closeTo(h0 - 20, 1.5));
+      expect(tester.getSize(header).height, closeTo(h0 + 20, 1.5));
+      expect(s.project.layers.first.height, closeTo(h0 + 20, 1.5));
+      expect(tester.getSize(find.byKey(const ValueKey('track-header-b'))).height, h0, reason: 'the others keep theirs');
+      expect(s.settings.trackHeight, trackH0);
       expect(Settings()..fromJson(s.settings.toJson()), isA<Settings>()
           .having((x) => x.headerWidth, 'width', s.settings.headerWidth)
           .having((x) => x.trackHeight, 'height', s.settings.trackHeight));
@@ -573,7 +593,7 @@ void main() {
       listenForHaptics(tester);
       await pumpArranger(tester, const Size(412, 900));
       final header = find.byKey(const ValueKey('track-header-a'));
-      await doubleTap(tester, header);
+      await hold(tester, header);
       final menu = find.byKey(const ValueKey('long-press-menu'));
       expect(menu, findsOneWidget);
       expect(haptics, contains('HapticFeedbackType.selectionClick'));
@@ -589,7 +609,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(menu, findsNothing);
       expect(s.project.layers.map((l) => l.id), ['b', 'a', 'c']);
-      expect(sections.focusedLayer, isNull, reason: 'a double tap is not a tap');
+      expect(sections.focusedLayer, isNull, reason: 'a hold is not a tap');
       await settle(tester);
     });
 
@@ -597,7 +617,7 @@ void main() {
       s.settings.longPressMenu = LongPressMenuStyle.ring;
       expect(s.settings.toJson()['long_press_menu'], 'ring');
       await pumpArranger(tester, const Size(412, 900));
-      await doubleTap(tester, find.byKey(const ValueKey('track-header-c')));
+      await hold(tester, find.byKey(const ValueKey('track-header-c')));
       expect(find.byKey(const ValueKey('long-press-ring')), findsOneWidget);
       expect(find.byKey(const ValueKey('long-press-menu')), findsNothing);
       await tester.tap(find.byTooltip('Delete'));
