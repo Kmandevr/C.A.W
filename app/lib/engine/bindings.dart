@@ -4,7 +4,7 @@ import 'dart:io';
 
 import 'package:ffi/ffi.dart';
 
-const int cawApiVersion = 12;  // must equal CAW_API_VERSION in engine/include/caw.h
+const int cawApiVersion = 13;  // must equal CAW_API_VERSION in engine/include/caw.h
 
 final class CawMetersStruct extends Struct {
   @Float()

@@ -97,6 +97,10 @@ uint64_t ComponentChain::estimateBytes(std::size_t components, std::size_t param
 }
 
 int ComponentChain::parameterIndex(const Entry& e, const std::string& id) const noexcept {
+    if (!e.index.empty()) {
+        const auto it = e.index.find(std::string_view(id));
+        return it == e.index.end() ? -1 : it->second;
+    }
     const ModuleDescriptor& d = e.processor->descriptor();
     for (uint32_t k = 0; k < d.parameterCount; ++k)
         if (d.parameters[k].id == id) return static_cast<int>(k);
@@ -167,6 +171,10 @@ std::unique_ptr<ComponentChain> ComponentChain::make(const ModuleRegistry& regis
         e->seenTouch.assign(count, 0);
         e->samples.resize(count);
         e->values.resize(count);
+        if (count > 64) {  // a long list (org.caw.drums): looked up by id, not walked
+            e->index.reserve(count);
+            for (uint32_t k = 0; k < count; ++k) e->index.emplace(own.parameters[k].id, static_cast<int>(k));
+        }
         std::vector<double> values(count);
         for (uint32_t k = 0; k < count; ++k) {
             if (!e->resolvers[k].configure(own.parameters[k])) {
@@ -212,6 +220,10 @@ std::unique_ptr<ComponentChain> ComponentChain::make(const ModuleRegistry& regis
             }
             if (!loaded) e->processor->reset();  // a rebuild that can't take the old state starts clean
         }
+        if (!applyComponentSamples(*e->processor, spec.samples, sampleRate, error)) {
+            error = "native component " + quoted(spec.id) + ": " + error;
+            return nullptr;
+        }
         chain->entries_.push_back(std::move(e));
     }
     return chain;
@@ -228,11 +240,33 @@ void ComponentChain::setValues(const std::vector<ComponentSpec>& specs) noexcept
     for (std::size_t i = 0; i < specs.size() && i < entries_.size(); ++i) {
         Entry& e = *entries_[i];
         const ModuleDescriptor& d = e.processor->descriptor();
-        for (uint32_t k = 0; k < d.parameterCount; ++k) {
-            double value = d.parameters[k].defaultValue;
-            for (const auto& [name, v] : specs[i].params)
-                if (d.parameters[k].id == name) value = v;
-            e.held[k].store(toBits(constrainParameter(d.parameters[k], value)), std::memory_order_relaxed);
+        bool done = false;
+        if (!e.index.empty()) {  // a long list: each named value looked up once (every value stored once, no flicker)
+            try {
+                std::vector<double> values(d.parameterCount);
+                for (uint32_t k = 0; k < d.parameterCount; ++k) values[k] = d.parameters[k].defaultValue;
+                for (const auto& [name, v] : specs[i].params) {
+                    const auto it = e.index.find(std::string_view(name));
+                    if (it != e.index.end()) values[static_cast<size_t>(it->second)] = v;
+                }
+                for (uint32_t k = 0; k < d.parameterCount; ++k)
+                    e.held[k].store(toBits(constrainParameter(d.parameters[k], values[k])), std::memory_order_relaxed);
+                done = true;
+            } catch (...) {
+            }
+        }
+        if (!done) {
+            for (uint32_t k = 0; k < d.parameterCount; ++k) {
+                double value = d.parameters[k].defaultValue;
+                for (const auto& [name, v] : specs[i].params)
+                    if (d.parameters[k].id == name) value = v;
+                e.held[k].store(toBits(constrainParameter(d.parameters[k], value)), std::memory_order_relaxed);
+            }
+        }
+        try {  // samples named or no longer named (loading off the audio thread; a file that fails empties its slot)
+            std::string ignored;
+            applyComponentSamples(*e.processor, specs[i].samples, sampleRate_, ignored);
+        } catch (...) {
         }
         e.generation.fetch_add(1, std::memory_order_release);  // after the values
         e.bypass.store(specs[i].bypass, std::memory_order_relaxed);

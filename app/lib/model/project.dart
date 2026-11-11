@@ -169,9 +169,13 @@ class ComponentUseDoc {
   ComponentUseDoc(this.id, [Map<String, double>? params, this.bypass = false, this.state, this.stateVersion = 1, this.preset])
       : params = params ?? {};
 
-  /// The synths that became Flagship presets (one synth, 2026-11-10): a project naming one plays Flagship with the
-  /// matching preset ([ProjectDoc.resolveInstruments]).
-  static const retiredInstruments = {'org.caw.synth.morph', 'org.caw.bass', 'org.caw.synth.acid', 'org.caw.synth.basic'};
+  /// The synths that became Flagship presets (one synth, 2026-11-10) and the drums that became org.caw.drums (one drum
+  /// instrument, 2026-11-11): a project naming one plays the successor with its values mapped
+  /// ([ProjectDoc.resolveInstruments]).
+  static const retiredInstruments = {
+    'org.caw.synth.morph', 'org.caw.bass', 'org.caw.synth.acid', 'org.caw.synth.basic',
+    'org.caw.drum.kick', 'org.caw.drum.snare', 'org.caw.drum.hats', 'org.caw.drum.kit',
+  };
 
   /// The built-in preset the values start from (Flagship's "Mono bass"...), or null. The engine puts the preset's
   /// values under [params]; [ProjectDoc.resolveInstruments] fills them in so the knobs show them.

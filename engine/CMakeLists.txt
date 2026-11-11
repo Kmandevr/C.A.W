@@ -165,7 +165,7 @@ ${_lsrcs}nullptr};
 
 add_library(caw_core STATIC
   src/builtins.cpp src/compile.cpp src/docs.cpp src/pattern.cpp
-  src/engine.cpp src/component_chain.cpp src/builtin_components.cpp src/builtin_instruments.cpp src/builtin_flagship.cpp src/presets.cpp src/builtin_effects.cpp src/builtin_effects_eq.cpp src/builtin_effects_dynamics.cpp src/builtin_effects_space.cpp src/builtin_effects_saturator.cpp src/builtin_effects_kit.cpp src/builtin_ducker.cpp src/builtin_fx_creative.cpp src/builtin_fx_creative_tapestop.cpp src/builtin_fx_creative_reverser.cpp src/builtin_fx_creative_trancegate.cpp src/builtin_fx_creative_stutter.cpp src/builtin_fx_creative_bitcrush.cpp src/builtin_fx_creative_pitchshift.cpp src/builtin_fx_creative_freqshift.cpp src/builtin_fx_creative_ringmod.cpp src/builtin_fx_creative_presets.cpp src/execution.cpp src/module.cpp src/module_registry.cpp src/midi2.cpp src/params.cpp src/graph.cpp src/scheduler.cpp src/dependency.cpp src/hardware.cpp src/json.cpp src/midifile.cpp src/project.cpp
+  src/engine.cpp src/component_chain.cpp src/builtin_components.cpp src/builtin_instruments.cpp src/builtin_drums.cpp src/builtin_drums_params.cpp src/builtin_drums_sounds.cpp src/component_samples.cpp src/builtin_flagship.cpp src/presets.cpp src/builtin_effects.cpp src/builtin_effects_eq.cpp src/builtin_effects_dynamics.cpp src/builtin_effects_space.cpp src/builtin_effects_saturator.cpp src/builtin_effects_kit.cpp src/builtin_ducker.cpp src/builtin_fx_creative.cpp src/builtin_fx_creative_tapestop.cpp src/builtin_fx_creative_reverser.cpp src/builtin_fx_creative_trancegate.cpp src/builtin_fx_creative_stutter.cpp src/builtin_fx_creative_bitcrush.cpp src/builtin_fx_creative_pitchshift.cpp src/builtin_fx_creative_freqshift.cpp src/builtin_fx_creative_ringmod.cpp src/builtin_fx_creative_presets.cpp src/execution.cpp src/module.cpp src/module_registry.cpp src/midi2.cpp src/params.cpp src/graph.cpp src/scheduler.cpp src/dependency.cpp src/hardware.cpp src/json.cpp src/midifile.cpp src/project.cpp
   # fx-filters begin
   src/builtin_fx_filters.cpp src/builtin_fx_filters_comb.cpp src/builtin_fx_filters_formant.cpp src/builtin_fx_filters_eq.cpp src/builtin_fx_filters_presets.cpp
   # fx-filters end
@@ -230,6 +230,7 @@ target_include_directories(caw_cli PRIVATE src)
   target_sources(caw_tests PRIVATE tests/display_test.cpp)  # live display data, engine to UI (#173)
   target_sources(caw_tests PRIVATE tests/effects_test.cpp)  # the built-in effects suite (#173)
   target_sources(caw_tests PRIVATE tests/routing_test.cpp)  # sends, buses, keys and routing loops (#175)
+  target_sources(caw_tests PRIVATE tests/drums_test.cpp)  # org.caw.drums: 64 pads, layers, presets, samples, migration
   target_sources(caw_tests PRIVATE tests/ducker_test.cpp)  # the ducker driven directly (#175 audio review)
   target_sources(caw_tests PRIVATE tests/stereo_path_test.cpp)  # stereo end to end: buses and WAV export (#17, #121)
   target_sources(caw_tests PRIVATE tests/meters_test.cpp)  # loudness (BS.1770-5, EBU Tech 3341), true peak, correlation
