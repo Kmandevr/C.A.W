@@ -65,7 +65,7 @@ public:
 private:
     double channelBend(uint8_t ch, const DeviceMidiOptions& o) const noexcept;
     void repitch(NoteEvents& notes, uint32_t frame, NoteEvents::Held& h, const DeviceMidiOptions& o) noexcept;
-    double bend_[16] = {};     // -1..1
+    float bend_[16] = {};      // -1..1 (float: one of these sits in every track slot, within its memory budget)
     bool sustain_[16] = {};
 };
 

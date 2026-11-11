@@ -105,7 +105,7 @@ void DeviceNotes::reset() noexcept {
 }
 
 double DeviceNotes::channelBend(uint8_t ch, const DeviceMidiOptions& o) const noexcept {
-    if (!o.mpe) return bend_[ch & 0xF] * o.bendRange;
+    if (!o.mpe) return static_cast<double>(bend_[ch & 0xF]) * o.bendRange;
     // MPE: the master channel (1) bends every note; a member channel bends its own note too.
     return bend_[0] * o.bendRange + (ch == 0 ? 0.0 : bend_[ch & 0xF] * o.noteBendRange);
 }
@@ -165,7 +165,7 @@ void DeviceNotes::apply(NoteEvents& notes, const Midi2Event& e, uint32_t frame, 
             }
             return;
         case Midi2EventType::PitchBend:
-            bend_[ch] = e.value;
+            bend_[ch] = static_cast<float>(e.value);
             each(o.mpe && ch == 0, [&](NoteEvents::Held& h) { repitch(notes, frame, h, o); });
             return;
         case Midi2EventType::ChannelPressure:
