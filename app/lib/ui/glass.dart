@@ -5,7 +5,7 @@ import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter/material.dart';
 
 import 'haptics.dart';
-import 'motion.dart';
+import 'panel_motion.dart';
 import 'theme.dart';
 import 'tokens.dart';
 
@@ -53,17 +53,19 @@ class GlassPage extends StatelessWidget {
 /// A docked panel's surface. With glass on: a translucent tint, a soft highlight along the top and a thin
 /// white edge, and no blur (docked panels redraw often). With glass off: the plain panel colour and line border.
 class GlassPanel extends StatelessWidget {
-  const GlassPanel({super.key, required this.child, this.radius = Radii.m, this.tint});
+  const GlassPanel({super.key, required this.child, this.radius, this.tint});
 
   final Widget child;
-  final double radius;
+
+  /// The corners ([Radii.m] when null).
+  final double? radius;
 
   /// The colour the tint leans to (a track colour, say); the panel colour by default.
   final Color? tint;
 
   @override
   Widget build(BuildContext context) {
-    final r = BorderRadius.circular(radius);
+    final r = BorderRadius.circular(radius ?? Radii.m);
     if (!Glass.active) {
       return DecoratedBox(
         decoration: BoxDecoration(
@@ -95,10 +97,12 @@ class GlassPanel extends StatelessWidget {
 /// behind it under a see-through tint, or with blur off a denser tint, a top highlight and a bright edge. With
 /// glass off: the solid raised panel colour.
 class GlassOverlay extends StatelessWidget {
-  const GlassOverlay({super.key, required this.child, this.blur = true, this.radius = Radii.l, this.padding = EdgeInsets.zero});
+  const GlassOverlay({super.key, required this.child, this.blur = true, this.radius, this.padding = EdgeInsets.zero});
 
   final Widget child;
-  final double radius;
+
+  /// The corners ([Radii.l] when null).
+  final double? radius;
   final EdgeInsetsGeometry padding;
 
   /// False for a surface that stays up over live content (a floating window): the glass look without the backdrop
@@ -107,7 +111,7 @@ class GlassOverlay extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final r = BorderRadius.circular(radius);
+    final r = BorderRadius.circular(radius ?? Radii.l);
     final blurred = blur && Glass.blur;
     if (!Glass.active) {
       return DecoratedBox(
@@ -209,7 +213,8 @@ class _BackdropPainter extends CustomPainter {
 }
 
 /// A bottom sheet that slides up as frosted glass (a plain sheet with glass off). Takes the same arguments as the
-/// `showModalBottomSheet` calls it replaces. Reduced and Off motion show it without the slide.
+/// `showModalBottomSheet` calls it replaces. It rises as an edit animation of panels ([sheetAnimation]); Reduced and
+/// Off motion show it without the slide.
 Future<T?> showGlassSheet<T>({
   required BuildContext context,
   required WidgetBuilder builder,
@@ -228,7 +233,7 @@ Future<T?> showGlassSheet<T>({
     constraints: constraints,
     backgroundColor: glass ? Colors.transparent : (backgroundColor ?? Neon.panel),
     elevation: glass ? 0 : null,
-    sheetAnimationStyle: Motion.of(context) == MotionLevel.full ? null : AnimationStyle.noAnimation,
+    sheetAnimationStyle: sheetAnimation(context), // an edit animation of panels (Subtle, Playful or none)
     builder: glass ? (c) => _GlassSheet(handle: showDragHandle, child: builder(c)) : builder,
   );
 }
@@ -254,7 +259,7 @@ class _GlassSheet extends StatelessWidget {
   final Widget child;
   final bool handle;
 
-  static const _radius = BorderRadius.vertical(top: Radius.circular(Radii.l + 6));
+  static BorderRadius get _radius => BorderRadius.vertical(top: Radius.circular(Radii.l + 6 * Radii.scale));
 
   @override
   Widget build(BuildContext context) {

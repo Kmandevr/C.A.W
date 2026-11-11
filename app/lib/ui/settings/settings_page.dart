@@ -7,6 +7,7 @@ import '../../model/app_state.dart';
 import '../../model/settings.dart';
 import '../feedback.dart';
 import '../haptics.dart';
+import '../panel_motion.dart';
 import '../theme.dart';
 import '../widgets.dart';
 import 'about_settings.dart';
@@ -78,8 +79,9 @@ class _SettingsPageState extends State<SettingsPage> {
       });
       return;
     }
-    Navigator.of(context).push(MaterialPageRoute<void>(
-      builder: (_) => SettingsSectionPage(section: section, deps: _deps, highlight: highlight),
+    Navigator.of(context).push(panelRoute<void>(
+      context,
+      (_) => SettingsSectionPage(section: section, deps: _deps, highlight: highlight),
     ));
   }
 

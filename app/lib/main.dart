@@ -65,9 +65,9 @@ class _CawAppState extends State<CawApp> {
   Object? _themeFrom;
 
   ThemeData _themeFor(Settings s) {
-    final from = (s.activeTheme, s.compact, Glass.active);
+    final from = (s.activeTheme, s.compact, Glass.active, s.uiFont, s.roundness);
     if (_theme == null || from != _themeFrom) {
-      _theme = Neon.theme(look: s.activeTheme, compact: s.compact);
+      _theme = Neon.theme(look: s.activeTheme, compact: s.compact, fontFamily: s.uiFont.family, roundness: s.roundness);
       _themeFrom = from;
     }
     return _theme!;
@@ -96,8 +96,16 @@ class _CawAppState extends State<CawApp> {
     debugShowCheckedModeBanner: false,
     themeAnimationDuration: Duration.zero, // theme edits repaint once, with no animation frames
     theme: _themeFor(state.settings),
-    // The glass backdrop sits behind every route (glass off: the plain background).
-    builder: (context, child) => GlassBackdrop(child: child ?? const SizedBox.shrink()),
+    // The glass backdrop sits behind every route (glass off: the plain background). The theme's text size scales
+    // the system's.
+    builder: (context, child) {
+      final body = GlassBackdrop(child: child ?? const SizedBox.shrink());
+      final scale = state.settings.textScale;
+      if (scale == 1) return body;
+      final mq = MediaQuery.of(context);
+      return MediaQuery(
+          data: mq.copyWith(textScaler: TextScaler.linear(mq.textScaler.scale(16) / 16 * scale)), child: body);
+    },
     // A new key after a theme or glass change (including a profile that turns glass or blur off) rebuilds every screen, so colours fixed at build time repaint too.
     home: Shell(key: ValueKey((state.settings.lookRevision, Glass.active, Glass.blurChosen)), state: state),
   );

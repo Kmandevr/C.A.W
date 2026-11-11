@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import '../../model/settings.dart';
 import '../../model/templates.dart' show templateLabel;
 import '../../version.dart';
+import '../motion.dart';
 import '../theme.dart';
 
 /// The Settings sections, in the category list's order.
@@ -66,6 +67,7 @@ enum SettingsSection {
       look => [s.themeName, s.compact ? 'Compact' : 'Comfortable', s.layoutMode.label].join(' · '),
       feel => [
           'Motion ${s.motion.name}',
+          if (s.motion != MotionLevel.off) 'edits ${s.editMotionStyle.label}',
           s.haptics ? 'haptics ${(s.hapticStrength * 100).round()}%' : 'haptics off',
         ].join(' · '),
       performance => [s.performanceMode.label, if (s.lightAuto) 'auto Lightweight'].join(' · '),
@@ -223,7 +225,8 @@ const List<SettingEntry> settingEntries = [
   _E('code.solo', _c, 'Solo preview button', 'The pattern editor\'s Solo button', ['audition', 'preview']),
   _E('code.scope', _c, 'Scope', 'The pattern editor\'s oscilloscope', ['oscilloscope', 'waveform']),
   _E('code.barOnTop', _c, 'Run bar on top', 'The key row and Run above the pattern text', ['layout', 'toolbar']),
-  _E('look.theme', _l, 'Theme', 'Colours: pick, edit, import or export a theme', ['colour', 'color', 'dark', 'palette']),
+  _E('look.theme', _l, 'Theme', 'A whole profile: colours, look, layout and behaviour; pick, edit, import or export',
+      ['colour', 'color', 'dark', 'palette', 'profile', 'font', 'corners', 'roundness']),
   _E('look.density', _l, 'Density', 'Compact or Comfortable (48 dp touch targets)', ['size', 'compact', 'touch targets']),
   _E('look.layout', _l, 'Layout', 'Auto, Phone or Desktop frame', ['desktop', 'phone', 'tablet', 'dex', 'frame']),
   _E('look.glass', _l, 'Glass', 'See-through panels over a soft background', ['transparency', 'frosted']),
@@ -235,7 +238,14 @@ const List<SettingEntry> settingEntries = [
       ['arrange', 'size', 'width']),
   _E('look.trackHeight', _l, 'Track height', 'Every track\'s row height; Default follows the screen', ['arrange', 'size']),
   _E('look.focusShare', _l, 'Focus panel width', 'Phone landscape: the focus view\'s side panel share', ['landscape', 'panel']),
-  _E('feel.motion', _f, 'Motion', 'Full, Reduced (fades only) or Off', ['animation', 'reduce motion']),
+  _E('feel.motion', _f, 'Motion', 'Full, Reduced (fades only) or Off (drags, snapping and presses still move)',
+      ['animation', 'reduce motion']),
+  _E('feel.editStyle', _f, 'Edit animations', 'How edits animate: Subtle or Playful', ['animation', 'style', 'playful']),
+  _E('feel.edit.notes', _f, 'Animate notes', 'Notes added, deleted and moved', ['animation', 'piano roll']),
+  _E('feel.edit.clips', _f, 'Animate clips', 'Clips added, deleted and moved', ['animation', 'arrange']),
+  _E('feel.edit.tracks', _f, 'Animate tracks', 'Tracks added, deleted and reordered', ['animation', 'arrange']),
+  _E('feel.edit.lengths', _f, 'Animate lengths and sizes', 'Lengths and sizes changing', ['animation', 'resize']),
+  _E('feel.edit.panels', _f, 'Animate panels', 'Panels, menus, sheets and pages opening', ['animation', 'sheet', 'page']),
   _E('feel.haptics', _f, 'Haptics', 'A light touch on presses, steps, snaps, grabs and drops', ['vibration', 'feedback']),
   _E('feel.hapticStrength', _f, 'Haptic strength', 'How strong the haptics are', ['vibration', 'intensity']),
   _E('feel.quickActions', _f, 'Quick actions bar', 'A floating row of shortcut buttons on a phone', ['shortcuts', 'buttons']),

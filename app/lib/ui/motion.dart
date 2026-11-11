@@ -5,11 +5,12 @@ import 'package:flutter/widgets.dart';
 
 import 'haptics.dart';
 
-/// How much the app moves (owner, 2026-11-04): Full; Reduced keeps fades but no movement or springs; Off.
+/// How much the app moves (owner, 2026-11-04): Full; Reduced keeps fades but no movement or springs; Off keeps only
+/// the motion that helps use the app (owner, 2026-11-11: drag ghosts, snapping, press feedback; [Motion.usability]).
 enum MotionLevel {
   full('Full'),
   reduced('Reduced: fades only'),
-  off('Off');
+  off('Off: only drags, snapping and presses');
 
   const MotionLevel(this.label);
   final String label;
@@ -58,6 +59,15 @@ class Motion {
     final d = distancePx.isNaN ? 0.0 : distancePx.abs();
     return d <= 0 ? 0 : math.min(2 / d, 0.04);
   }
+
+  /// The level that motion which helps use the app runs at (drag ghosts, snap settles, press and grab feedback,
+  /// drop targets; owner, 2026-11-11): the Off switch leaves it on as Full, and Reduced (or the system's
+  /// reduce-motion setting) still turns its movement into a fade. Pass the result to [move], [fade] and
+  /// [settleCurve] in place of the plain level.
+  static MotionLevel usability(MotionLevel level) => level == MotionLevel.off ? MotionLevel.full : level;
+
+  /// [usability] for the widget tree under [context].
+  static MotionLevel usabilityOf(BuildContext context) => usability(of(context));
 
   /// A movement's duration at [level]: zero unless motion is full (Reduced and Off don't move things).
   static Duration move(Duration d, MotionLevel level) => level == MotionLevel.full ? d : Duration.zero;
@@ -143,7 +153,7 @@ enum EditMotionStyle {
 }
 
 /// Edit animations: what appears, disappears, moves or resizes because of an edit. Separate from the motion that
-/// helps use the app (drag ghosts, snapping, press feedback, which [Motion] keeps even when everything else is Off).
+/// helps use the app (drag ghosts, snapping, press feedback: [Motion.usability], kept even when motion is Off).
 /// Settings sets the statics.
 class EditMotion {
   EditMotion._();
@@ -168,6 +178,28 @@ class EditMotion {
 
   /// True when only a fade may run (Reduced motion): no scaling, sliding or springs.
   static bool fadeOnly(BuildContext context) => Motion.of(context) == MotionLevel.reduced;
+
+  /// For motion that already had its own length before edit styles (panels, sheets, pages, the section switch):
+  /// [subtle] itself for Subtle (so Subtle looks as it did), [playfulScale] times longer for Playful, and null when
+  /// it doesn't run (motion Off or the Minimal profile, or [kind] turned off).
+  static const playfulScale = 1.5;
+  static Duration? scaled(MotionLevel level, EditMotionKind kind, Duration subtle) {
+    if (level == MotionLevel.off || !kinds.contains(kind)) return null;
+    return style == EditMotionStyle.playful ? subtle * playfulScale : subtle;
+  }
+
+  /// [subtle] for Subtle; Playful's small overshoot otherwise (for motion that had its own curve before styles).
+  static Curve curveOr(Curve subtle) => style == EditMotionStyle.playful ? playfulCurve : subtle;
+
+  /// Playful's ease-out with a small overshoot: a gentler back curve than [Curves.easeOutBack], so a sheet or page
+  /// passing its place by a few pixels doesn't uncover the edge behind it for long.
+  static const Curve playfulCurve = Cubic(0.34, 1.32, 0.64, 1);
+
+  /// The kinds as saved in settings and theme files (their names, in [EditMotionKind] order).
+  static List<String> kindNames(Set<EditMotionKind> kinds) =>
+      [for (final k in EditMotionKind.values) if (kinds.contains(k)) k.name];
+  static Set<EditMotionKind> parseKinds(Iterable<Object?> names) =>
+      {for (final k in EditMotionKind.values) if (names.contains(k.name)) k};
 
   /// The curve for things appearing or moving: an ease-out for Subtle, a small overshoot for Playful.
   static Curve get curve => style == EditMotionStyle.playful ? Curves.easeOutBack : Curves.easeOutCubic;

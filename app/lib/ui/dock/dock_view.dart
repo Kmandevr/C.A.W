@@ -402,7 +402,8 @@ class _GroupState extends State<_Group> {
                     IgnorePointer(
                       child: AnimatedOpacity(
                         opacity: candidates.isNotEmpty && _hover != null ? 1 : 0,
-                        duration: Motion.fade(Motion.small, level),
+                        // Where a dragged panel would land: help, so it stays with motion Off.
+                        duration: Motion.fade(Motion.small, Motion.usability(level)),
                         child: _DropPreview(edge: _hover ?? DockEdge.center),
                       ),
                     ),

@@ -101,8 +101,8 @@ class _ModAmountSliderState extends State<ModAmountSlider> {
         onIncrease: () => widget.matrix.setAmount(r.slot, r.amount + 0.01),
         onDecrease: () => widget.matrix.setAmount(r.slot, r.amount - 0.01),
         child: AnimatedScale(
-          scale: _amount != null && Motion.of(context) == MotionLevel.full ? 1.02 : 1,
-          duration: Motion.fade(Motion.small, Motion.of(context)),
+          scale: _amount != null && Motion.usabilityOf(context) == MotionLevel.full ? 1.02 : 1,
+          duration: Motion.fade(Motion.small, Motion.usabilityOf(context)),
           child: SizedBox(height: widget.height, child: CustomPaint(
             painter: _AmountBar(amount, c, held: _amount != null, bipolar: r.bipolar),
             child: Center(child: GestureDetector(
