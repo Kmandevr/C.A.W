@@ -6,6 +6,17 @@ updated: 2026-11-11
 
 # Decisions
 
+## 2026-11-11: Audio assets, clips, sampler and input (WP-J; choices to confirm)
+
+**Decision (Claude, for the owner to confirm; the owner put all three in the beta, see below; [engine](engine.md#audio-assets-clips-the-sampler-and-audio-input-api-18)):**
+- **Decoders: miniaudio's bundled dr_wav, dr_flac and dr_mp3**, already vendored (miniaudio 0.11.25; [Fact] the file's licence block, read 2026-11-11: "a choice of public domain or MIT-0", which covers the dr_libs code it carries). No new dependency. They are compiled a second time inside the core with every function `static` (`platform/decode_miniaudio.c`), so the core decodes in builds without device audio and never clashes with the device copy.
+- **Time-stretch: our own WSOLA** (Verhelst and Roelands, ICASSP 1993), not a library: [Fact] Rubber Band is GPL with a paid commercial licence (breakfastquay.com/rubberband, read 2026-11-11) and SoundTouch is LGPL v2.1 (surina.net/soundtouch, read 2026-11-11), both excluded by the licence rule. WSOLA is cheap and keeps transients; a phase vocoder for sustained tonal material is left for later. Varispeed (resampling) is the second mode.
+- **An audio track is a layer with `audio_clips`/`input`, played by a built-in instrument** (`org.caw.audio-track`), so clips get the track's inserts, sends, buses, keys, latency compensation and every render path without new mix-graph code. A layer plays an instrument or audio clips, not both.
+- **Assets are referenced by absolute path** (a project `assets` table, or a clip's `path`), shared process-wide within a 1 GiB budget; sampler zones name paths in the sampler's state JSON, whose keys mirror SFZ opcodes so import and export are one-to-one.
+- **Monitoring goes through the track's chain**, in the same duplex callback; `auto` monitors while armed and stopped, or while recording.
+- **Takes:** WAV float by default, one file per armed track per take, a new take at each loop wrap, placed by the round-trip latency (override, then the last good ping, then the device's buffer estimate, an [Assumption] until measured on the S22+).
+- **Open (owner):** the default fade on clip edges (none today; REAPER-style 1 ms is an app default to choose); whether a musical clip's default stretch is WSOLA; where recordings are kept (the app passes the folder).
+
 ## 2026-11-11: MIDI devices (WP-H; choices made for the owner)
 
 - **The engine path:** device MIDI reaches a track's instrument through a new C API (API 15) into `Midi2InputQueue`, placed at the frame it was played from the device's timestamp, one callback late so the spacing is kept (Android's MIDI timestamps are `System.nanoTime`, the engine's `steady_clock` on Android). On-screen keys keep note previews. MIDI 1.0 is converted to MIDI 2.0 at the edge (`midi_device.cpp`, the UMP specification's min-centre-max upscaling written from the published algorithm, [Assumption] not re-read against the PDF).
