@@ -140,7 +140,7 @@ The track header is the quick-control surface (mute, solo, generator, folder and
 **C.A.W's rules for a device UI:**
 1. **One hero** at the top, about a third of a phone's height, drawn from the device's real parameters and its live display data ([engine](engine.md#display-data)), edited directly: dragging the hero edits the parameters it shows. Drawings computed in Dart, not read from the engine, say "≈".
 2. **Main controls next, big:** 50–56 dp knobs in balanced rows, drawn-icon tiles for modes and types (48 dp tall), pill toggles. **Everything else behind MORE** (closed by default).
-3. **The same gestures everywhere:** drag a handle or the hero; a second finger (or Shift) is fine adjust; a pinch on an EQ node or the stereo field widens it; double-tap resets (an EQ node: on/off); long-press a knob to type a value, an EQ node for its type; the mouse wheel sets Q. A drag shows its value in a bubble above the finger.
+3. **The same gestures everywhere:** drag a handle or the hero; a second finger (or Shift) is fine adjust; a pinch on an EQ node or the stereo field widens it; double-tap resets (an EQ node too: its band's power is a button of its own); long-press a knob to type a value, an EQ node for its type; the mouse wheel sets Q. A drag shows its value in a bubble above the finger.
 4. **Motion shows state, cheaply:** ping-pong balls, sweeping notches, ripples and particles run only with full motion (Minimal and reduced motion stop them) and redraw at 30 Hz, the display data's rate; levels scroll as history.
 5. **Feedback on every touch:** a light haptic on grab, detent, tap and release through one hook (`DeviceFeel.hook`), which plays the frame's haptics (grab, tick, tap, drop); mode tiles and toggles dip and glow while pressed.
 
