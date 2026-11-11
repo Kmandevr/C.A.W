@@ -1,4 +1,4 @@
-// Exporter: render a loop, a free-length take, a one-shot or a wavetable to WAV, then save it with the system picker.
+// Exporter: the Export song sheet (mix, stems, regions), and a loop, free-length take, one-shot, wavetable or MIDI file saved with the picker.
 import 'dart:async';
 import 'dart:io';
 import 'dart:isolate';
@@ -11,6 +11,8 @@ import '../model/app_state.dart';
 import '../model/project.dart';
 import '../platform/save_copy.dart';
 import '../model/settings.dart';
+import 'export_sheet.dart';
+import 'haptics.dart';
 import 'theme.dart';
 import 'widgets.dart';
 
@@ -556,6 +558,23 @@ class _ExporterScreenState extends State<ExporterScreen> {
     if (_param != null && !params.any((x) => x.name == _param)) _param = null;
     final busy = _job != null || _midiBusy || _saving || _queueRunning;
     return ListView(padding: const EdgeInsets.fromLTRB(12, 8, 12, 96), children: [
+      // The Export sheet: the song or its stems, a range, loudness and a queue (roadmap 0.3, 6.4, 6.5).
+      NeonPanel(color: Neon.yellow, child: Row(children: [
+        const Expanded(child: Text('The mix, stems, regions or the selection, with loudness, tail and a queue.',
+            style: TextStyle(color: Neon.dim, fontSize: 12))),
+        const SizedBox(width: 8),
+        FilledButton.icon(
+          key: const ValueKey('open-export-sheet'),
+          style: FilledButton.styleFrom(backgroundColor: Neon.yellow, foregroundColor: Neon.bg, minimumSize: const Size(0, 48)),
+          onPressed: busy ? null : () {
+            Haptics.tap();
+            showSongExportSheet(context, s);
+          },
+          icon: const Icon(Icons.ios_share),
+          label: const Text('Export song', style: TextStyle(fontWeight: FontWeight.w800)),
+        ),
+      ])),
+      const SizedBox(height: 4),
       const Heading('Export mode'),
       SegmentedButton<bool>(
         segments: const [

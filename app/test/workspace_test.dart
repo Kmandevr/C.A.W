@@ -738,6 +738,8 @@ void main() {
     expect(find.text('EXPORT QUEUE · 1'), findsOneWidget);
     expect(find.textContaining('bars.wav').first, findsOneWidget);
     expect(find.text('loop · 48 kHz'), findsOneWidget);
+    await tester.ensureVisible(find.byTooltip('Remove queued export'));  // below the Export song panel
+    await tester.pumpAndSettle();
     await tester.tap(find.byTooltip('Remove queued export'));
     await tester.pumpAndSettle();
     expect(find.textContaining('EXPORT QUEUE'), findsNothing);

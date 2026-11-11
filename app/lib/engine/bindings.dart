@@ -4,7 +4,7 @@ import 'dart:io';
 
 import 'package:ffi/ffi.dart';
 
-const int cawApiVersion = 14;  // must equal CAW_API_VERSION in engine/include/caw.h
+const int cawApiVersion = 15;  // must equal CAW_API_VERSION in engine/include/caw.h
 
 final class CawMetersStruct extends Struct {
   @Float()
@@ -262,7 +262,14 @@ class Bindings {
         componentTest = lib.lookupFunction<Pointer<Utf8> Function(Pointer<Utf8>, Int32, Pointer<Utf8>, Pointer<Utf8>),
             Pointer<Utf8> Function(Pointer<Utf8>, int, Pointer<Utf8>, Pointer<Utf8>)>('caw_component_test'),
         samplePackRender = lib.lookupFunction<Pointer<Utf8> Function(Pointer<Utf8>, Int32, Pointer<Int32>, Pointer<Int32>),
-            Pointer<Utf8> Function(Pointer<Utf8>, int, Pointer<Int32>, Pointer<Int32>)>('caw_sample_pack_render');
+            Pointer<Utf8> Function(Pointer<Utf8>, int, Pointer<Int32>, Pointer<Int32>)>('caw_sample_pack_render'),
+        // Song renders (API 15): the mix and stems; it blocks, so it runs as a worker-pool job.
+        renderSong = lib.lookupFunction<
+            Pointer<Utf8> Function(Pointer<Utf8>, Pointer<Utf8>, Pointer<Int32>, Pointer<Int32>),
+            Pointer<Utf8> Function(Pointer<Utf8>, Pointer<Utf8>, Pointer<Int32>, Pointer<Int32>)>('caw_render_song'),
+        workerPoolSubmitSong = lib.lookupFunction<
+            Pointer<Void> Function(Pointer<Void>, Pointer<Utf8>, Pointer<Utf8>, Int32),
+            Pointer<Void> Function(Pointer<Void>, Pointer<Utf8>, Pointer<Utf8>, int)>('caw_worker_pool_submit_song');
 
   static Bindings? _instance;
 
@@ -344,4 +351,6 @@ class Bindings {
   final int Function(Pointer<Void>) testToneSounding;
   final Pointer<Utf8> Function(Pointer<Utf8>, int, Pointer<Utf8>, Pointer<Utf8>) componentTest;
   final Pointer<Utf8> Function(Pointer<Utf8>, int, Pointer<Int32>, Pointer<Int32>) samplePackRender;
+  final Pointer<Utf8> Function(Pointer<Utf8>, Pointer<Utf8>, Pointer<Int32>, Pointer<Int32>) renderSong;
+  final Pointer<Void> Function(Pointer<Void>, Pointer<Utf8>, Pointer<Utf8>, int) workerPoolSubmitSong;
 }
