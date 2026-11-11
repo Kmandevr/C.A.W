@@ -388,6 +388,24 @@ const cppBuiltins = <CppBuiltin>[
   CppBuiltin('org.caw.chorus', 'Chorus', false, 'A stereo chorus.', ['rate', 'depth', 'mix']),
   CppBuiltin('org.caw.stereo.width', 'Width', false, 'Mid/side width: 0 mono, 1 as is, 2 wide.', ['width']),
   CppBuiltin('org.caw.stereo.balance', 'Balance', false, 'Stereo balance.', ['pan']),
+  // fx-creative begin: the Creative and Pitch & Time effects (engine/src/builtin_fx_creative_*.cpp)
+  CppBuiltin('org.caw.tapestop', 'Tape stop', false, 'The tape slowing to a halt and spinning back up: stop at or above 0.5 stops it.',
+      ['stop', 'stop_time', 'stop_sync', 'start_time', 'start_sync', 'curve', 'mix']),
+  CppBuiltin('org.caw.reverser', 'Reverser', false, 'Each chunk played backwards one chunk later, crossfaded; synced or free.',
+      ['sync', 'time', 'crossfade', 'mix']),
+  CppBuiltin('org.caw.stutter', 'Stutter', false, 'A seeded beat repeat: chance per interval, slices that decay and re-pitch; hold repeats now.',
+      ['interval', 'offset', 'division', 'length', 'chance', 'seed', 'decay', 'pitch', 'gate', 'hold', 'mix']),
+  CppBuiltin('org.caw.pitchshift', 'Pitch shifter', false, 'Semitones and cents by two crossfaded grains; latency half a grain.',
+      ['semitones', 'cents', 'grain', 'jitter', 'mix']),
+  CppBuiltin('org.caw.freqshift', 'Frequency shifter', false, 'Single-sideband shift through a Hilbert pair: up, down or both, with feedback.',
+      ['shift', 'direction', 'spread', 'feedback', 'delay', 'mix']),
+  CppBuiltin('org.caw.trancegate', 'Trance gate', false, 'A drawn 8/16/32-step gate (s1..s32 levels) with an envelope per step and swing.',
+      ['steps', 'rate', 'attack', 'decay', 'sustain', 'release', 'length', 'swing', 'legato', 'mix']),
+  CppBuiltin('org.caw.bitcrush', 'Bitcrush', false, 'Bits, sample rate, jitter, dither, anti-alias and anti-image filters.',
+      ['bits', 'rate', 'jitter', 'dither', 'adc', 'dac', 'output', 'mix']),
+  CppBuiltin('org.caw.ringmod', 'Ring mod', false, 'The input times a sine, triangle, square, saw, noise or its sidechain key.',
+      ['source', 'freq', 'spread', 'bias', 'rectify', 'mix']),
+  // fx-creative end
 ];
 
 /// One of C.A.W's own text formats, for the Library's last groups.

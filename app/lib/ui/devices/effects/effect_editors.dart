@@ -13,6 +13,9 @@ import 'filter_editor.dart';
 import 'mod_editors.dart';
 import 'space_editors.dart';
 import 'utility_editors.dart';
+// fx-creative begin
+import 'creative/creative_catalog.dart';
+// fx-creative end
 
 // An EQ band's knobs: `bandN_` or the built-in EQ's `bN_` (org.caw.eq).
 final _band = RegExp(r'^(band|b)(\d+)_(freq|gain|q|type|on|channel)$');
@@ -64,5 +67,6 @@ final Map<String, DeviceEditorEntry> _byId = {
   'org.caw.utility': singlePage('utility', 'UTILITY', Icons.tune, DeviceFamily.utility, () => const StereoPage()),
   'org.caw.stereo.width': singlePage('width', 'WIDTH', Icons.tune, DeviceFamily.utility, () => const StereoPage()),
   'org.caw.stereo.balance': singlePage('balance', 'BALANCE', Icons.tune, DeviceFamily.utility, () => const StereoPage()),
+  ...creativeEditors,  // fx-creative
 };
 

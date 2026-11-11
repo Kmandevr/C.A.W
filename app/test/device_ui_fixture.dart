@@ -23,6 +23,9 @@ const builtinEffects = [
   'org.caw.delay.pro', 'org.caw.delay.pingpong', 'org.caw.saturator', 'org.caw.distortion', 'org.caw.filter',
   'org.caw.phaser', 'org.caw.flanger', 'org.caw.chorus', 'org.caw.utility', 'org.caw.stereo.width',
   'org.caw.stereo.balance', 'org.caw.ducker',
+  // fx-creative
+  'org.caw.tapestop', 'org.caw.reverser', 'org.caw.stutter', 'org.caw.pitchshift', 'org.caw.freqshift', 'org.caw.trancegate',
+  'org.caw.bitcrush', 'org.caw.ringmod',
 ];
 const builtinInstruments = ['org.caw.synth.flagship', 'org.caw.drum.kick', 'org.caw.drum.snare', 'org.caw.drum.hats',
   'org.caw.drum.kit'];
