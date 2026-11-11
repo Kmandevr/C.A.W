@@ -43,7 +43,7 @@ ProjectSpec project(std::vector<Signal> signals, int bars = 1, double bpm = 120)
 // ends it: a free-running signal ignores notes and rings on after a Stop like any instrument still sounding.
 ProjectSpec heldProject(Signal s) {
     ProjectSpec p = project({});
-    p.modules.push_back({"hold", "---\nkind: pattern\nlength: 16\n---\n0 C4 16 1\n", {}});
+    p.modules.push_back({"hold", "---\nkind: pattern\nlength: 16\n---\n0 C4 16 1\n"});
     p.layers.push_back(cawtest::testSignalNotesLayer("l0", s.shape, "hold", s.params));
     return p;
 }
@@ -485,7 +485,7 @@ TEST(project_parser_reads_folder_and_automation_metadata) {
 TEST(output_does_not_depend_on_block_size) {
     // Noise free-running, and a saw played by a pattern (notes off the block grid) through a filter.
     ProjectSpec p = project({{Shape::Noise, {{"level", 0.3}}}});
-    p.modules.push_back({"pat", "---\nkind: pattern\nlength: 16\n---\n0 A2 1.3 1\n1.7 C3 2.1 0.7\n5 E3 3 0.9\n", {}});
+    p.modules.push_back({"pat", "---\nkind: pattern\nlength: 16\n---\n0 A2 1.3 1\n1.7 C3 2.1 0.7\n5 E3 3 0.9\n"});
     p.layers.push_back(cawtest::testSignalNotesLayer("b", Shape::Saw, "pat", {{"level", 0.4}},
                                                      {{"org.caw.filter", {}}}));
     std::vector<std::vector<float>> outs;
@@ -502,7 +502,7 @@ TEST(layers_loop_at_their_own_length) {
     // A 12-step pattern in a 16-step project restarts every 12 steps: its one-step note at 0 sounds again there,
     // and again when the project loop restarts every layer.
     ProjectSpec p = project({});
-    p.modules.push_back({"pat", "---\nkind: pattern\nlength: 12\n---\n0 C4 1 1\n", {}});
+    p.modules.push_back({"pat", "---\nkind: pattern\nlength: 12\n---\n0 C4 1 1\n"});
     p.layers.push_back(cawtest::testSignalNotesLayer("l0", Shape::Dc, "pat", {{"level", 0.5}}));
     Engine e(48000);
     e.setMasterBypass(true);
@@ -590,7 +590,7 @@ TEST(an_instrument_swap_crossfades_without_a_click) {
 
 TEST(a_broken_pattern_keeps_the_old_notes) {
     ProjectSpec p = project({});
-    p.modules.push_back({"pat", "---\nkind: pattern\nlength: 16\n---\n0 A4 2 1\n4 C5 2 0.5\n", {}});
+    p.modules.push_back({"pat", "---\nkind: pattern\nlength: 16\n---\n0 A4 2 1\n4 C5 2 0.5\n"});
     p.layers.push_back(cawtest::testSignalNotesLayer("l0", Shape::Sine, "pat", {{"level", 0.5}}));
     Engine a(48000), b(48000);
     a.setProject(p);
@@ -791,7 +791,7 @@ TEST(effects_process_their_layer_only) {
     CHECK_NEAR(out[3999], 0.9 * std::cos(kPi / 4.0), 1e-5);
 }
 
-TEST(a_track_runs_as_its_instrument_node_and_track_node) {
+TEST(a_track_runs_as_one_graph_node_with_its_inserts) {
     ProjectSpec p = project({dc(0.3)});
     p.layers[0].components = {{"org.caw.utility", {{"gain", 20.0 * std::log10(2.0)}}}, {"org.caw.utility", {}}};
     Engine e(48000);
@@ -800,7 +800,7 @@ TEST(a_track_runs_as_its_instrument_node_and_track_node) {
     e.play();
     std::vector<float> out = run(e, 4000);
     CHECK_NEAR(out[3999], 0.6 * std::cos(kPi / 4.0), 1e-5);
-    CHECK_EQ(e.mixGraphNodesRun(), 3u);  // the instrument node, the track node and master; idle slots never run
+    CHECK_EQ(e.mixGraphNodesRun(), 2u);  // the track node (instrument and inserts) and master; idle slots never run
     CHECK_EQ(e.routingRejections(), 0u);
 }
 
@@ -841,7 +841,7 @@ TEST(arrangement_clips_schedule_reusable_patterns_on_the_project_timeline) {
     p.loopBars = 1;
     p.master = 1.0;
     p.modules.push_back({"phrase",
-        "---\nkind: pattern\nlength: 4\n---\n0 A4 2 1\n", {}});
+        "---\nkind: pattern\nlength: 4\n---\n0 A4 2 1\n"});
     LayerSpec layer = cawtest::testSignalNotesLayer("track", Shape::Dc, "", {{"level", 0.5}});
     layer.name = "Track";
     layer.volume = 1.0;
@@ -867,7 +867,7 @@ TEST(a_muted_arrangement_clip_plays_nothing_and_the_rest_still_play) {
     p.bpm = 120;
     p.loopBars = 1;
     p.master = 1.0;
-    p.modules.push_back({"phrase", "---\nkind: pattern\nlength: 4\n---\n0 A4 2 1\n", {}});
+    p.modules.push_back({"phrase", "---\nkind: pattern\nlength: 4\n---\n0 A4 2 1\n"});
     LayerSpec layer = cawtest::testSignalNotesLayer("track", Shape::Dc, "", {{"level", 0.5}});
     layer.volume = 1.0;
     layer.clips.push_back({"heard", "phrase", 0, 4, 0, false});
@@ -897,7 +897,7 @@ TEST(arrangement_clip_source_offset_trims_the_source_and_honors_non_looping) {
     p.loopBars = 2;
     p.master = 1.0;
     p.modules.push_back({"phrase",
-        "---\nkind: pattern\nlength: 4\n---\n0 A4 1 1\n2 C4 1 1\n", {}});
+        "---\nkind: pattern\nlength: 4\n---\n0 A4 1 1\n2 C4 1 1\n"});
     LayerSpec layer = cawtest::testSignalNotesLayer("track", Shape::Dc, "", {{"level", 0.5}});
     layer.volume = 1.0;
     layer.clips.push_back({"trimmed", "phrase", 4, 2, 2, false});
@@ -920,7 +920,7 @@ TEST(arrangement_clip_source_offset_preserves_the_tail_of_a_sustained_note) {
     p.loopBars = 2;
     p.master = 1.0;
     p.modules.push_back({"phrase",
-        "---\nkind: pattern\nlength: 4\n---\n0 A4 4 1\n", {}});
+        "---\nkind: pattern\nlength: 4\n---\n0 A4 4 1\n"});
     LayerSpec layer = cawtest::testSignalNotesLayer("track", Shape::Dc, "", {{"level", 0.5}});
     layer.volume = 1.0;
     layer.clips.push_back({"trimmed-sustain", "phrase", 4, 2, 2, false});
@@ -942,7 +942,7 @@ TEST(arrangement_clip_source_offset_preserves_remaining_ratchets) {
     p.loopBars = 2;
     p.master = 1.0;
     p.modules.push_back({"phrase",
-        "---\nkind: pattern\nlength: 4\n---\n0 A4 4 1 ratchet 4\n", {}});
+        "---\nkind: pattern\nlength: 4\n---\n0 A4 4 1 ratchet 4\n"});
     LayerSpec layer = cawtest::testSignalNotesLayer("track", Shape::Impulse, "", {});
     layer.volume = 1.0;
     layer.clips.push_back({"trimmed-ratchet", "phrase", 4, 2, 2, false});
@@ -963,7 +963,7 @@ TEST(arrangement_clips_can_overlap_on_one_track) {
     p.bpm = 120;
     p.loopBars = 2;
     p.master = 1.0;
-    p.modules.push_back({"phrase", "---\nkind: pattern\nlength: 4\n---\n0 A4 4 1\n", {}});
+    p.modules.push_back({"phrase", "---\nkind: pattern\nlength: 4\n---\n0 A4 4 1\n"});
     LayerSpec layer = cawtest::testSignalNotesLayer("track", Shape::Dc, "", {{"level", 0.25}});
     layer.volume = 1.0;
     layer.clips.push_back({"looping", "phrase", 0, 8, 0, true});
@@ -990,7 +990,6 @@ TEST(master_gain_updates_without_recompiling_and_ramps_smoothly) {
     e.setMasterBypass(true);
     const std::string projectResult = e.setProject(p);
     CHECK(projectResult.find("\"ok\":true") != std::string::npos);
-    CHECK(projectResult.find("nothing exports") == std::string::npos);
     e.play();
     run(e, 256);
 
@@ -1073,7 +1072,7 @@ TEST(play_from_a_position_resumes_mid_loop) {
     std::string notes = "---\nkind: pattern\nlength: 12\n---\n";
     for (int k = 0; k < 12; ++k) notes += std::to_string(k) + " C4 1 " + std::to_string((k + 1) / 12.0) + "\n";
     ProjectSpec p = project({});
-    p.modules.push_back({"pat", notes, {}});
+    p.modules.push_back({"pat", notes});
     p.layers.push_back(cawtest::testSignalNotesLayer("l0", Shape::Dc, "pat", {{"level", 0.5}}));
     const double g = 0.5 * std::cos(kPi / 4.0);
     Engine e(48000);
@@ -1124,7 +1123,7 @@ TEST(play_from_a_position_reaches_a_later_clip_on_time) {
     p.bpm = 400;
     p.loopBars = 80;
     p.master = 1.0;
-    p.modules.push_back({"hit", "---\nkind: pattern\nlength: 4\n---\n0 A4 4 1\n", {}});
+    p.modules.push_back({"hit", "---\nkind: pattern\nlength: 4\n---\n0 A4 4 1\n"});
     LayerSpec layer = cawtest::testSignalNotesLayer("track", Shape::Dc, "", {{"level", 0.5}});
     layer.volume = 1.0;
     layer.clips.push_back({"late", "hit", 70 * 16, 4, 0, false});  // bar 71: sample 336000 at 8 kHz
@@ -1143,7 +1142,7 @@ TEST(arrangement_plays_clips_past_bar_64) {
     p.bpm = 400;  // a step is 0.0375 s
     p.loopBars = 80;
     p.master = 1.0;
-    p.modules.push_back({"hit", "---\nkind: pattern\nlength: 4\n---\n0 A4 4 1\n", {}});
+    p.modules.push_back({"hit", "---\nkind: pattern\nlength: 4\n---\n0 A4 4 1\n"});
     LayerSpec layer = cawtest::testSignalNotesLayer("track", Shape::Dc, "", {{"level", 0.5}});
     layer.volume = 1.0;
     layer.clips.push_back({"late", "hit", 70 * 16, 4, 0, false});  // bar 71
@@ -1165,8 +1164,8 @@ TEST(arrangement_expansion_is_refused_above_the_project_state_budget) {
     ProjectSpec p;
     p.bpm = 120;
     p.loopBars = 1;
-    p.modules.push_back({"tick", "---\nkind: pattern\nlength: 1\n---\n0 C4 1 1\n", {}});
-    p.modules.push_back({"rest", "---\nkind: pattern\nlength: 1\n---\n", {}});
+    p.modules.push_back({"tick", "---\nkind: pattern\nlength: 1\n---\n0 C4 1 1\n"});
+    p.modules.push_back({"rest", "---\nkind: pattern\nlength: 1\n---\n"});
     LayerSpec layer = cawtest::testSignalNotesLayer("track", Shape::Dc, "", {});
     layer.clips.push_back({"huge", "tick", 0, 2000000000, 0, true});
     p.layers.push_back(layer);
@@ -1216,7 +1215,7 @@ TEST(arrangement_compilation_keeps_notes_beyond_4096) {
     p.loopBars = 64;
     p.master = 1.0;
     p.modules.push_back({"chord",
-        "---\nkind: pattern\nlength: 1\n---\n0 C3,D3,E3,F3,G3,A3,B3,C4,D4 1\n", {}});
+        "---\nkind: pattern\nlength: 1\n---\n0 C3,D3,E3,F3,G3,A3,B3,C4,D4 1\n"});
     LayerSpec layer = cawtest::testSignalNotesLayer("track", Shape::Dc, "", {{"level", 0.1}});
     layer.volume = 1.0;
     for (int i = 0; i < 520; ++i)
@@ -1308,7 +1307,7 @@ TEST(engine_prepares_dynamic_note_curve_capacity_before_playback) {
     ProjectSpec p;
     p.bpm = 120;
     p.loopBars = 1;
-    p.modules.push_back({"pattern", pattern, {}});
+    p.modules.push_back({"pattern", pattern});
     LayerSpec layer = cawtest::testSignalNotesLayer("track", Shape::Sine, "", {});
     layer.pattern = "pattern";
     p.layers.push_back(layer);
@@ -1660,7 +1659,7 @@ namespace {
 // velocity, so the level shows which notes are held (and a sum of two voices shows as a jump).
 ProjectSpec previewProject() {
     ProjectSpec p = project({});
-    p.modules.push_back({"phrase", "---\nkind: pattern\nlength: 16\n---\n", {}});
+    p.modules.push_back({"phrase", "---\nkind: pattern\nlength: 16\n---\n"});
     p.layers.push_back(cawtest::testSignalNotesLayer("track", Shape::Dc, "phrase"));
     return p;
 }

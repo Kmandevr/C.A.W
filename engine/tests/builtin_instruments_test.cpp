@@ -150,7 +150,7 @@ ProjectSpec track(const std::string& instrument, const std::string& notes, std::
     p.loopBars = 1;
     p.seed = 7;
     p.master = 0.8;
-    p.modules.push_back({"pat", pattern(notes), {}});
+    p.modules.push_back({"pat", pattern(notes)});
     LayerSpec l;
     l.id = "t";
     l.name = "t";

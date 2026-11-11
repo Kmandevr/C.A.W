@@ -92,9 +92,9 @@ typedef struct CawRenderOptions {
     int32_t float32;      /* 1 = 32-bit float, 0 = 24-bit PCM (wavetables are always float) */
     int32_t frames;       /* wavetable frames, 1..256 */
     double seconds;       /* free-length duration */
-    const char* target;   /* one-shot: layer id; wavetable: a layer with a C++ instrument, a built-in instrument's
-                             id, or a .caw module id */
-    const char* param;    /* wavetable: the parameter (or .caw param) to sweep, or NULL */
+    const char* target;   /* one-shot: layer id; wavetable: a layer with a C++ instrument, or a built-in
+                             instrument's id */
+    const char* param;    /* wavetable: the parameter to sweep, or NULL */
 } CawRenderOptions;
 
 /* Workload identifiers shared by the app, project tools and native add-ons. */
@@ -462,8 +462,7 @@ CAW_API int32_t caw_engine_midi_bytes(CawEngine* e, const char* layer_id, const 
    notes. Every Control Change, Program Change and Channel Pressure also reaches the instrument as itself (a MIDI
    event, MIDI 2.0 words, note id 0). With CAW_MIDI_MPE, channel 1 is the master (its bend and pressure apply to
    every note, its bend over bend_range) and channels 2..16 each carry one note (their bend over note_bend_range,
-   their CC 74 the note's timbre). note_bend_range is also a MIDI 2.0 per-note pitch bend's range. A .caw voice
-   chain takes only notes, at the start of a block. */
+   their CC 74 the note's timbre). note_bend_range is also a MIDI 2.0 per-note pitch bend's range. */
 #define CAW_MIDI_MPE 1
 CAW_API void caw_engine_set_midi_options(CawEngine* e, int32_t flags, double bend_range, double note_bend_range,
                                          double delay_ms);

@@ -100,8 +100,8 @@ ProjectSpec band() {
     p.bpm = 120;
     p.loopBars = 2;
     p.master = 0.7;
-    p.modules.push_back({"riff", "---\nkind: pattern\nlength: 8\n---\n0 A2 2 1\n4 C3 1 0.8\n6 E3 2 0.6\n", {}});
-    p.modules.push_back({"hold", "---\nkind: pattern\nlength: 32\n---\n0 C4 32 1\n", {}});
+    p.modules.push_back({"riff", "---\nkind: pattern\nlength: 8\n---\n0 A2 2 1\n4 C3 1 0.8\n6 E3 2 0.6\n"});
+    p.modules.push_back({"hold", "---\nkind: pattern\nlength: 32\n---\n0 C4 32 1\n"});
     LayerSpec a = track("a", cawtest::Shape::Saw, 0.3, 0.8);
     a.name = "Bass";
     a.clips.push_back({"ca", "riff", 0, 32, 0, true});

@@ -71,22 +71,22 @@ ProjectSpec firstLoop(const std::string& only = "") {
     std::string hats;
     for (int at = 0; at < 16; ++at) hats += std::to_string(at) + (at % 8 == 6 ? " A#2 1 1\n" : " F#2 1 1\n");
     p.modules = {
-        {"kick", patternSource("Kick", "16", "0 C2 1 1\n4 C2 1 1\n8 C2 1 1\n12 C2 1 1\n"), {}},
-        {"hats", patternSource("Hats", "16", hats), {}},
+        {"kick", patternSource("Kick", "16", "0 C2 1 1\n4 C2 1 1\n8 C2 1 1\n12 C2 1 1\n")},
+        {"hats", patternSource("Hats", "16", hats)},
         {"bass", patternSource("Bass line", "16",
                                "0 A1 1/2 1\n2 A1 1/2 1\n3 C2 1/2 1\n4 A2 1/2 1\n6 G1 1/2 1\n8 E2 1/2 1\n9 C2 1/2 1\n"
-                               "11 G1 1/2 1\n12 A1 1/2 1\n15 A1 1/2 1\n"), {}},
+                               "11 G1 1/2 1\n12 A1 1/2 1\n15 A1 1/2 1\n")},
         {"lead", patternSource("Lead", "2 bars",
                                "0 E4 2 0.9\n2 A4 2 0.8\n4 C5 3 0.9\n8 B4 2 0.8\n10 A4 2 0.7\n12 G4 4 0.8\n"
                                "16 E4 2 0.9\n18 A4 2 0.8\n20 C5 2 0.9\n22 D5 1 0.8 slide\n23 E5 5 0.9\n28 D5 2 0.7\n"
-                               "30 C5 2 0.6\n"), {}},
+                               "30 C5 2 0.6\n")},
         {"acid", patternSource("Acid line", "16",
                                "0 A1 2 1\n2 A2 1 0.7\n3 A1 1 0.8 slide\n4 C2 2 0.9\n6 A1 1 0.6 prob 0.5\n"
                                "8 E2 2 1 ratchet 2\n10 G1 1 0.7\n11 A1 1 0.8 slide\n12 A2 2 0.9\n14 G2 1 0.6\n"
-                               "15 E2 1 0.8\n"), {}},
+                               "15 E2 1 0.8\n")},
         {"chords", patternSource("Chords", "4 bars",
                                  "0 A3,C4,E4 16 0.8\n16 F3,A3,C4 16 0.75\n32 C3,E3,G3 16 0.8\n48 G3,B3,D4 14 0.7\n"
-                                 "62 G3,B3,D4 1/2 0.5 ratchet 2\n"), {}},
+                                 "62 G3,B3,D4 1/2 0.5 ratchet 2\n")},
     };
     addInstrumentLayer(p, "Kick", "org.caw.drum.kick", {}, "kick", 0.9);
     addInstrumentLayer(p, "Hats", "org.caw.drum.hats", {}, "hats", 0.55);
@@ -148,7 +148,7 @@ ProjectSpec busy(const std::string& instrument, std::vector<std::pair<std::strin
         for (int at = 0; at < 4; ++at) notes += std::to_string(at * 4) + " " + chords[at] + " 4 0.8\n";
     }
     if (!notes_) notes.clear();  // the engine's own cost of a track
-    p.modules = {{"busy", patternSource("Busy", "16", notes), {}}};
+    p.modules = {{"busy", patternSource("Busy", "16", notes)}};
     addInstrumentLayer(p, "t", instrument, std::move(params), "busy", 0.6, std::move(effects));
     return p;
 }

@@ -36,7 +36,7 @@ struct DeviceMidiOptions {
 };
 
 // The preview id a device note holds on an instrument: the top 32,768 ids, far above the app's (a counter from 1).
-// Positive, so everything that treats a preview id of 0 or more as a preview (a .caw voice chain's voices) does here.
+// Positive, so everything that treats a preview id of 0 or more as a preview does here.
 constexpr int32_t kDevicePreviewBase = 0x7FFF8000;
 constexpr int32_t devicePreviewId(uint8_t group, uint8_t channel, uint8_t key) noexcept {
     return kDevicePreviewBase + ((group & 0xF) << 11 | (channel & 0xF) << 7 | (key & 0x7F));

@@ -277,7 +277,7 @@ TEST(sends_are_kept_in_time_with_latency_on_the_track_and_on_the_bus) {
 TEST(a_bus_reverb_rings_on_after_stop) {
     ProjectSpec p = twoTracksAndABus();
     // A note held through the loop, so the Stop ends it (a free-running signal would ring on).
-    p.modules.push_back({"hold", "---\nkind: pattern\nlength: 64\n---\n0 A3 64 1\n", {}});
+    p.modules.push_back({"hold", "---\nkind: pattern\nlength: 64\n---\n0 A3 64 1\n"});
     p.layers[0] = cawtest::testSignalNotesLayer("a", cawtest::Shape::Sine, "hold", {{"level", 0.5}});
     p.layers.erase(p.layers.begin() + 1);
     p.layers[0].sends = {{"fx", 1.0, false, false}};
@@ -418,7 +418,7 @@ TEST(the_ducker_in_audio_mode_ducks_once_per_hit_and_its_look_ahead_is_compensat
 
 TEST(the_ducker_in_notes_mode_ducks_on_each_note_of_the_key_track) {
     ProjectSpec p = duckedB({{"mode", 1.0}, {"depth", 1.0}, {"attack", 0.5}, {"hold", 5.0}, {"release", 60.0}}, true);
-    p.modules.push_back({"beats", "---\nkind: pattern\n---\n0 C4 1\n4 C4 1\n", {}});
+    p.modules.push_back({"beats", "---\nkind: pattern\n---\n0 C4 1\n4 C4 1\n"});
     p.layers[0].pattern = "beats";  // notes on beats 1 and 2 (16th-note steps)
     p.loopBars = 1;
     Engine e(48000);

@@ -23,8 +23,8 @@ ProjectSpec groove() {
     p.bpm = 140;
     p.loopBars = 4;
     // A one-step note every 4 steps, and a 3-bar riff against the 4-bar project.
-    p.modules.push_back({"kick", "---\nkind: pattern\nlength: 4\n---\n0 C2 1 1\n", {}});
-    p.modules.push_back({"riff", "---\nkind: pattern\nlength: 48\n---\n0 A2 3 1\n5 C3 2 0.7\n17 E3 5 0.9\n30 G2 1/2 0.6\n", {}});
+    p.modules.push_back({"kick", "---\nkind: pattern\nlength: 4\n---\n0 C2 1 1\n"});
+    p.modules.push_back({"riff", "---\nkind: pattern\nlength: 48\n---\n0 A2 3 1\n5 C3 2 0.7\n17 E3 5 0.9\n30 G2 1/2 0.6\n"});
     LayerSpec a = cawtest::testSignalNotesLayer("k", cawtest::Shape::Sine, "kick", {{"level", 0.8}});
     a.name = "Kick";
     LayerSpec b = cawtest::testSignalNotesLayer("b", cawtest::Shape::Saw, "riff", {{"level", 0.5}});
@@ -185,7 +185,7 @@ TEST(one_shot_of_a_cpp_instrument_plays_one_note_to_its_tail) {
     CHECK(std::fabs(r.samples[static_cast<size_t>(r.frames - 1) * 2]) < 0.01f);
     // Clips set the length: one clip of 8 steps from step 4 (12 steps, 72000 frames at 120 BPM) plays its note.
     p.layers[0].instrument = cawtest::testSignal(cawtest::Shape::Sine, {{"mode", 1}});
-    p.modules.push_back({"pat", "---\nkind: pattern\nlength: 8\n---\n0 C4 8 1\n", {}});
+    p.modules.push_back({"pat", "---\nkind: pattern\nlength: 8\n---\n0 C4 8 1\n"});
     p.layers[0].clips = {ClipSpec{"c", "pat", 4, 8, 0, false, false}};
     CHECK(renderExport(p, o, r));
     CHECK(r.frames > 71900 && r.frames <= 72000);

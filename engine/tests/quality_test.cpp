@@ -22,7 +22,7 @@ std::vector<float> render(int quality, const std::string& instrument, const std:
     ProjectSpec p;
     p.bpm = 120;
     p.loopBars = 1;
-    p.modules.push_back({"pat", "---\nkind: pattern\nname: P\nlength: 16\n---\n" + notes, {}});
+    p.modules.push_back({"pat", "---\nkind: pattern\nname: P\nlength: 16\n---\n" + notes});
     LayerSpec l;
     l.id = "t";
     l.name = "t";

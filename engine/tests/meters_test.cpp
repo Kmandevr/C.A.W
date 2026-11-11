@@ -179,7 +179,7 @@ ProjectSpec chordTrack(std::vector<ComponentSpec> inserts) {
     p.bpm = 120;
     p.loopBars = 2;
     p.master = 0.8;
-    p.modules.push_back({"pat", "---\nkind: pattern\nname: P\nlength: 32\n---\n0 A3 32 0.9\n0 E4 32 0.8\n", {}});
+    p.modules.push_back({"pat", "---\nkind: pattern\nname: P\nlength: 32\n---\n0 A3 32 0.9\n0 E4 32 0.8\n"});
     LayerSpec l;
     l.id = "t";
     l.name = "t";

@@ -80,7 +80,7 @@ ProjectSpec flagshipTrack(std::vector<ComponentSpec> inserts) {
     p.loopBars = 1;
     p.seed = 5;
     p.master = 0.8;
-    p.modules.push_back({"pat", "---\nkind: pattern\nname: P\nlength: 16\n---\n0 A3 4 0.9\n0 C4 4 0.8\n0 E4 4 0.8\n8 G3 2 0.9\n", {}});
+    p.modules.push_back({"pat", "---\nkind: pattern\nname: P\nlength: 16\n---\n0 A3 4 0.9\n0 C4 4 0.8\n0 E4 4 0.8\n8 G3 2 0.9\n"});
     LayerSpec l;
     l.id = "synth";
     l.name = "synth";

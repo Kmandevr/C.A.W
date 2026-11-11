@@ -34,7 +34,7 @@ ProjectSpec constantTrack(std::vector<ComponentSpec> components) {
     p.bpm = 120;
     p.loopBars = 1;
     p.master = 1.0;
-    p.modules.push_back({"hold", "---\nkind: pattern\nlength: 16\n---\n0 C4 16 1\n", {}});
+    p.modules.push_back({"hold", "---\nkind: pattern\nlength: 16\n---\n0 C4 16 1\n"});
     LayerSpec l = cawtest::testSignalNotesLayer("t", cawtest::Shape::Dc, "hold", {{"level", 0.5}}, std::move(components));
     p.layers.push_back(l);
     return p;

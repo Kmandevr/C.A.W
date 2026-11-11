@@ -42,7 +42,7 @@ ProjectSpec instrumentTrack(const std::string& instrument, const std::string& no
     p.bpm = 120;
     p.loopBars = 1;
     p.master = 1.0;
-    p.modules.push_back({"pat", pattern(notes), {}});
+    p.modules.push_back({"pat", pattern(notes)});
     LayerSpec l;
     l.id = "t";
     l.name = "t";

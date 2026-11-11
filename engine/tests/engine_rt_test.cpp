@@ -37,7 +37,7 @@ TEST(engine_process_never_allocates_through_loop_wraps_and_chain_swaps) {
     ProjectSpec p;
     p.bpm = 140;
     p.loopBars = 1;
-    p.modules.push_back({"acid", kAcidLine, {}});
+    p.modules.push_back({"acid", kAcidLine});
     p.layers = {layer("b", "org.caw.synth.flagship", "acid", {{"org.caw.distortion", {}}, {"org.caw.chorus", {}}}),
                 layer("a", "org.caw.test.osc", "acid", {{"org.caw.bitcrush", {}}}),
                 layer("y", "org.caw.test.osc", "acid")};
@@ -182,7 +182,7 @@ TEST(note_previews_never_allocate_on_the_audio_thread_playing_or_stopped) {
     ProjectSpec p;
     p.bpm = 140;
     p.loopBars = 1;
-    p.modules.push_back({"acid-line", kAcidLine, {}});
+    p.modules.push_back({"acid-line", kAcidLine});
     p.layers = {layer("a", "org.caw.synth.flagship", "acid-line", {{"org.caw.bitcrush", {}}})};
     Engine e(48000);
     e.setProject(p);
@@ -225,7 +225,7 @@ TEST(engine_process_never_allocates_with_native_inserts_and_live_parameter_chang
     ProjectSpec p;
     p.bpm = 120;
     p.loopBars = 1;
-    p.modules.push_back({"acid", kAcidLine, {}});
+    p.modules.push_back({"acid", kAcidLine});
     p.layers = {layer("b", "org.caw.synth.flagship", "acid")};
     p.layers[0].components = {{gain, {{"left", 2.0}}}, {"org.caw.distortion", {{"shape", 2}}},
                               {"org.caw.delay.pingpong", {{"sync", 2}}}, {"org.caw.stereo.width", {{"width", 1.5}}}};
@@ -269,7 +269,7 @@ TEST(publishing_and_reading_display_data_never_allocates) {
     ProjectSpec p;
     p.bpm = 120;
     p.loopBars = 1;
-    p.modules.push_back({"acid", kAcidLine, {}});
+    p.modules.push_back({"acid", kAcidLine});
     p.layers = {layer("b", "org.caw.synth.flagship", "acid")};
     p.layers[0].components = {{gain, {}}};
     p.masterComponents = {{gain, {}}};
@@ -301,7 +301,7 @@ TEST(the_built_in_effects_suite_never_allocates_on_the_audio_thread) {
     ProjectSpec p;
     p.bpm = 128;
     p.loopBars = 1;
-    p.modules.push_back({"acid", kAcidLine, {}});
+    p.modules.push_back({"acid", kAcidLine});
     p.layers = {layer("b", "org.caw.synth.flagship", "acid")};
     for (const char* id : ids) p.layers[0].components.push_back({id, {}});
     p.layers[0].components[0].params = {{"b4_gain", 6}, {"b1_on", 1}, {"b1_type", 5}};
@@ -341,7 +341,7 @@ TEST(a_native_instrument_never_allocates_on_the_audio_thread) {
     p.bpm = 160;
     p.loopBars = 1;
     p.modules.push_back({"pat", "---\nkind: pattern\nname: P\nlength: 16\n---\n0 C3 4 1\n0 G3 4 1\n4 D3 2 1 slide\n"
-                                "6 F3 2 1\n8 A3 4 1 ratchet 4\n12 C4 4 1\n", {}});
+                                "6 F3 2 1\n8 A3 4 1 ratchet 4\n12 C4 4 1\n"});
     p.layers = {layer("s", "org.caw.synth.flagship", "pat", {{"org.caw.distortion", {}}, {"org.caw.delay.pingpong", {}}}),
                 layer("t", "org.caw.synth.flagship", "pat")};
     Engine e(48000);
@@ -388,7 +388,7 @@ TEST(the_built_in_instruments_never_allocate_on_the_audio_thread) {
     p.loopBars = 1;
     p.modules.push_back({"pat", "---\nkind: pattern\nname: P\nlength: 16\n---\n0 C2 2 1\n0 F#2 1 0.7\n2 A#2 2 0.8\n"
                                 "4 D2 2 1 slide\n4 D#2 1 1\n6 A1 2 0.9\n8 E2 4 1 ratchet 4\n8 C4 4 0.7\n8 E4 4 0.7\n"
-                                "12 G#2 2 0.6\n12 B1 4 1\n", {}});
+                                "12 G#2 2 0.6\n12 B1 4 1\n"});
     const char* ids[] = {"org.caw.drum.kick", "org.caw.drum.snare", "org.caw.drum.hats", "org.caw.drum.kit",
                          "org.caw.bass",      "org.caw.synth.acid", "org.caw.synth.morph", "org.caw.synth.flagship",
                          "org.caw.synth.basic"};
@@ -446,7 +446,7 @@ TEST(drums_never_allocate_on_the_audio_thread) {
     p.loopBars = 1;
     p.modules.push_back({"pat", "---\nkind: pattern\nname: P\nlength: 16\n---\n0 C2 1 1\n0 F#2 1 0.8\n1 F#2 1 0.5\n"
                                 "2 E3 1 0.9\n3 F#2 1 0.6\n4 D2 1 1\n4 D#2 1 0.8\n5 A#2 1 0.7\n6 C#3 1 0.9\n7 G2 1 0.7\n"
-                                "8 C2 1 1\n8 E3 2 1\n10 D#3 1 0.8\n11 B2 1 0.7\n12 D2 1 1\n13 A2 1 0.7\n14 C3 1 0.8\n15 F#2 1 0.6\n", {}});
+                                "8 C2 1 1\n8 E3 2 1\n10 D#3 1 0.8\n11 B2 1 0.7\n12 D2 1 1\n13 A2 1 0.7\n14 C3 1 0.8\n15 F#2 1 0.6\n"});
     LayerSpec l = layer("drums", "org.caw.drums", "pat");
     // Pad B1 (E3 = 52): every layer, the effects, a built-in sample.
     l.instrument.params = {{"glue", 0.5}, {"kit_drive_type", 1}, {"room", 0.3}, {"b1_type", 13}, {"b1_body_on", 1},
@@ -514,7 +514,7 @@ TEST(a_pattern_edit_while_notes_sound_never_allocates_on_the_audio_thread) {
         return "---\nkind: pattern\nname: P\nlength: 16\n---\n0 C3 16 1  bend 0:0 " + std::to_string(0.3 + 0.05 * k) +
                ":" + std::to_string(k - 6) + " 1:12\n" + (k % 2 ? "0 E3 16 1\n" : "") + "4 G3 8 1  bend 0:0 1:-3\n";
     };
-    p.modules.push_back({"pat", pattern(0), {}});
+    p.modules.push_back({"pat", pattern(0)});
     p.layers = {layer("i", "org.caw.synth.morph", "pat"), layer("v", "org.caw.test.osc", "pat")};
     p.layers[1].instrument.params = {{"mode", 1}};
     Engine e(48000);
@@ -537,7 +537,7 @@ TEST(count_in_metronome_and_released_touches_never_allocate_on_the_audio_thread)
     ProjectSpec p;
     p.bpm = 140;
     p.loopBars = 1;
-    p.modules.push_back({"acid-line", kAcidLine, {}});
+    p.modules.push_back({"acid-line", kAcidLine});
     p.layers = {layer("a", "org.caw.synth.flagship", "acid-line", {{"org.caw.bitcrush", {}}})};
     Engine e(48000);
     e.setProject(p);
@@ -573,7 +573,7 @@ TEST(the_test_signal_never_allocates_on_the_audio_thread) {
     ProjectSpec p;
     p.bpm = 150;
     p.loopBars = 1;
-    p.modules.push_back({"pat", "---\nkind: pattern\nlength: 16\n---\n0 C4,E4,G4 2 1\n4 D2 1 1 slide\n8 E2 4 1 ratchet 4\n", {}});
+    p.modules.push_back({"pat", "---\nkind: pattern\nlength: 16\n---\n0 C4,E4,G4 2 1\n4 D2 1 1 slide\n8 E2 4 1 ratchet 4\n"});
     for (const char* id : {"free", "notes"}) {
         LayerSpec l = layer(id, "org.caw.test.osc");
         if (std::strcmp(id, "notes") == 0) {
@@ -604,7 +604,7 @@ TEST(device_midi_never_allocates_on_the_audio_thread) {
     ProjectSpec p;
     p.bpm = 120;
     p.loopBars = 1;
-    p.modules.push_back({"acid-line", kAcidLine, {}});
+    p.modules.push_back({"acid-line", kAcidLine});
     p.layers = {layer("s", "org.caw.synth.flagship"), layer("v", "org.caw.test.osc", "acid-line")};
     p.layers[1].instrument.params = {{"mode", 1}};
     Engine e(48000);

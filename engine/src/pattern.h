@@ -9,7 +9,7 @@
 
 namespace caw {
 
-// A note name such as C4, F#2 or Bb0 gives its MIDI note number (C4 = 60). Patterns and the .caw compiler share it.
+// A note name such as C4, F#2 or Bb0 gives its MIDI note number (C4 = 60).
 bool noteNumber(const std::string& s, double& out);
 
 constexpr int kMaxRatchet = 8;
@@ -80,7 +80,7 @@ struct PatternResult {
 
 PatternResult parsePattern(std::string_view source);
 
-// JSON fields describing a pattern (no braces), for caw_check and the project result.
+// JSON fields describing a pattern (no braces), for the project result's module entry.
 std::string describePattern(const Pattern& p);
 
 // Which note of `to` (an edit of `from`) carries on each note of `from`: its index in to.notes, or -1 when the edit

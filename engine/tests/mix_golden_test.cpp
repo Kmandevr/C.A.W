@@ -65,13 +65,13 @@ ProjectSpec base() {
     p.master = 0.8;
     p.seed = 7;
     p.modules = {
-        {"kick-pat", pattern("16", "0 C2 1 1\n4 C2 1 1\n8 C2 1 1\n12 C2 1 0.9\n"), {}},
-        {"hats-pat", pattern("16", "2 F#2 1/2 0.8\n6 F#2 1/2 0.7\n10 F#2 1/2 0.8\n14 F#2 1/2 0.6 prob 0.5\n"), {}},
-        {"bass-pat", pattern("16", "0 A1 2 1\n3 A1 1 0.8\n6 C2 2 0.9\n8 E1 3 1\n12 G1 2 0.7 slide\n14 A1 2 0.9\n"), {}},
+        {"kick-pat", pattern("16", "0 C2 1 1\n4 C2 1 1\n8 C2 1 1\n12 C2 1 0.9\n")},
+        {"hats-pat", pattern("16", "2 F#2 1/2 0.8\n6 F#2 1/2 0.7\n10 F#2 1/2 0.8\n14 F#2 1/2 0.6 prob 0.5\n")},
+        {"bass-pat", pattern("16", "0 A1 2 1\n3 A1 1 0.8\n6 C2 2 0.9\n8 E1 3 1\n12 G1 2 0.7 slide\n14 A1 2 0.9\n")},
         {"acid-line", pattern("16", "0 A1 2 1\n2 A2 1 0.7\n3 A1 1 0.8 slide\n4 C2 2 0.9\n6 A1 1 0.6 prob 0.5\n"
                                     "8 E2 2 1 ratchet 2\n10 G1 1 0.7\n11 A1 1 0.8 slide\n12 A2 2 0.9\n14 G2 1 0.6\n"
-                                    "15 E2 1 0.8\n"), {}},
-        {"chords", pattern("16", "0 A3,C4,E4 8 0.8\n8 F3,A3,C4 6 0.75\n14 G3,B3,D4 1/2 0.5 ratchet 2\n"), {}},
+                                    "15 E2 1 0.8\n")},
+        {"chords", pattern("16", "0 A3,C4,E4 8 0.8\n8 F3,A3,C4 6 0.75\n14 G3,B3,D4 1/2 0.5 ratchet 2\n")},
     };
     return p;
 }
@@ -200,8 +200,8 @@ std::vector<Case> cases() {
     {
         // Short, odd pattern lengths: each track loops on its own, mid-block and through effects.
         ProjectSpec p = base();
-        p.modules.push_back({"three", pattern("3", "0 C3 1 1\n1.5 G3 1 0.6\n"), {}});
-        p.modules.push_back({"five", pattern("5", "0 F#2 1/2 0.9\n2 F#2 1/2 0.5\n4 F#2 1 0.7\n"), {}});
+        p.modules.push_back({"three", pattern("3", "0 C3 1 1\n1.5 G3 1 0.6\n")});
+        p.modules.push_back({"five", pattern("5", "0 F#2 1/2 0.9\n2 F#2 1/2 0.5\n4 F#2 1 0.7\n")});
         p.layers = {chainTrack("y", "bass", {kFold}, 0.6, -0.3), chainTrack("h", "hats", {kGlitch}, 0.6, 0.4)};
         p.layers[0].pattern = "three";
         p.layers[1].pattern = "five";

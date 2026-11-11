@@ -281,7 +281,7 @@ bool renderInstrumentNote(ProjectSpec& p, LayerSpec only, const ExportOptions& o
     std::snprintf(line, sizeof line, "0 %.17g %.17g %.17g\n", std::clamp(o.note, 0.0, 127.0), steps,
                   std::clamp(o.velocity, 0.0, 1.0));
     const std::string id = "\x01oneshot-note";
-    p.modules.push_back({id, "---\nkind: pattern\nlength: " + std::to_string(mostSteps / stepsPerBar + 2) + " bars\n---\n" + line, {}});
+    p.modules.push_back({id, "---\nkind: pattern\nlength: " + std::to_string(mostSteps / stepsPerBar + 2) + " bars\n---\n" + line});
     p.loopBars = maxLoopBars(p.beatsPerBar);
     only.pattern = id;
     p.layers = {only};

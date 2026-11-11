@@ -169,7 +169,7 @@ bool pickStems(const ProjectSpec& p, const SongRenderRequest& req, std::vector<S
     } else {
         for (const LayerSpec& l : p.layers) {
             const bool bus = l.folder && l.busEnabled;
-            const bool track = !l.folder && (!l.chain.empty() || l.hasInstrument);
+            const bool track = !l.folder && l.hasInstrument;
             if ((bus && req.buses) || (track && req.tracks)) out.push_back(pick(l));
         }
     }
@@ -619,7 +619,6 @@ bool renderSong(const ProjectSpec& in, const SongRenderRequest& req, SongRenderR
     if (!checkExportModules(in, out.error)) return false;
     ProjectSpec p = in;
     p.auditionOnly = false;
-    p.auditionChain.clear();
     std::vector<StemPick> stems;
     std::vector<Range> ranges;
     if (!pickStems(p, req, stems, out.error) || !makeRanges(p, req, ranges, out.error)) return false;

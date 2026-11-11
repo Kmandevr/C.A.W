@@ -1,8 +1,7 @@
-// Project description shared by the app, the CLI and exports: tempo, modules (source and param values) and layers.
+// Project description shared by the app, the CLI and exports: tempo, pattern modules, layers and their components.
 #pragma once
 
 #include <cstdint>
-#include <map>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -13,11 +12,10 @@
 
 namespace caw {
 
+// A project module: a pattern (note clip, `kind: pattern`) by id; its source is the pattern text.
 struct ModuleSpec {
     std::string id;
     std::string source;
-    std::map<std::string, double> params;
-    std::string name = {};  // how other modules refer to this one (module.export); falls back to the header name
 };
 
 // Where a component with a sidechain input (a ducker, a compressor or gate keyed by another track) hears its
@@ -59,10 +57,10 @@ struct AutomationPointSpec { double step = 0, value = 0; };
 struct AutomationLaneSpec { std::string target; std::vector<AutomationPointSpec> points; };
 
 struct ProjectAutomationLaneSpec {
-    std::string targetType;  // param, global, component or instrument
-    std::string moduleId;    // param: the module; component: the layer (empty for the master chain); instrument: the layer
+    std::string targetType;  // component or instrument (other types are kept but drive nothing)
+    std::string moduleId;    // component: the layer (empty for the master chain); instrument: the layer
     int component = -1;      // component: its index in that chain
-    std::string target;      // parameter/global name
+    std::string target;      // parameter name
     std::vector<AutomationPointSpec> points;
 };
 
@@ -82,17 +80,16 @@ constexpr int kMaxSends = 8;  // sends per layer
 
 struct LayerSpec {
     std::string id, name;
-    std::vector<std::string> chain;  // module ids: generator first, then effects
-    int lengthSteps = 0;             // 16th notes per loop; 0 loops with the project
-    std::string pattern;             // legacy single-pattern layer
+    int lengthSteps = 0;             // 16th notes per loop; 0 loops with the project (a pattern sets its own)
+    std::string pattern;             // the pattern module a layer without clips loops
     std::vector<ClipSpec> clips;      // arrangement instances, compiled before playback
     std::string parentId;
     bool folder = false, busEnabled = true;
     std::vector<AutomationLaneSpec> automation;
-    std::vector<ComponentSpec> components;  // native stereo effects after the chain, before volume and pan
+    std::vector<ComponentSpec> components;  // native stereo effects after the instrument, before volume and pan
     std::vector<SendSpec> sends;            // at most kMaxSends; each to a bus folder
-    // A native instrument (one event input, one stereo output) that plays the layer's notes instead of
-    // a .caw generator; the chain's .caw effects, then `components`, follow it.
+    // The native instrument (one event input, one stereo output) that plays the layer's notes; `components`
+    // follow it. A track without one plays nothing and takes no slot.
     bool hasInstrument = false;
     ComponentSpec instrument;
     double volume = 0.8, pan = 0.0;
@@ -115,26 +112,19 @@ struct ProjectSpec {
     int loopStartSteps = 0, loopEndSteps = 0;
     uint32_t seed = 0;
     double master = 0.7;
-    bool seamCrossfade = true;
-    int voices = 32;  // the most voices any pattern layer may use (1..32); light mode sends 4
-    int swapMode = 0;  // when new code is heard while playing: 0 at once, 1 at the next beat, 2 at the next bar
-    std::map<std::string, double> globals;  // project-wide control values by name
-    int keyRoot = 9;                        // 0 = C … 11 = B; scale() and chord() default to this key
-    int keyScale = 1;                       // a scale.* id (1 = minor)
     std::vector<DependencyRef> dependencies;
     std::vector<ModuleSpec> modules;
     std::vector<ComponentSpec> masterComponents;  // explicitly loaded native stereo effects, in master-chain order
     std::vector<LayerSpec> layers;
     std::vector<ProjectAutomationLaneSpec> automation;
-    std::vector<std::string> auditionChain;  // the Builder's preview, if any: .caw module ids
-    // The preview may play a C++ instrument (with its values) and native effects instead of, or after, a .caw
-    // chain, as a track does ("audition": {"instrument": ..., "components": [...]}).
+    // The Builder's preview, if any: a C++ instrument (with its values) and native effects, as a track plays them
+    // ("audition": {"instrument": ..., "components": [...]}).
     bool hasAuditionInstrument = false;
     ComponentSpec auditionInstrument;
     std::vector<ComponentSpec> auditionComponents;
     int auditionSteps = 0;
     std::string auditionPattern;
-    bool auditionOnly = false;  // only the preview sounds; needs a chain or an instrument
+    bool auditionOnly = false;  // only the preview sounds; needs an instrument
 
     int loopSteps() const { return loopBars * beatsPerBar * 4; }
     const ModuleSpec* module(const std::string& id) const;
@@ -147,12 +137,5 @@ std::string routeTarget(const ProjectSpec& p, const LayerSpec& layer);
 // buses, sends and keys: false and a message naming the loop otherwise. parseProject calls it.
 bool validateRouting(const ProjectSpec& p, std::string& error);
 bool parseProject(std::string_view json, ProjectSpec& out, std::string& error);
-
-// The name modules use to read another module's exports: lower case, other characters become '_'
-// ("Kick" -> kick, "Bytebeat loop" -> bytebeat_loop).
-std::string refName(const std::string& name);
-
-// Wraps one module's source in a one-layer project, for the CLI and quick renders.
-ProjectSpec singleModuleProject(const std::string& source, double bpm, int bars);
 
 }  // namespace caw

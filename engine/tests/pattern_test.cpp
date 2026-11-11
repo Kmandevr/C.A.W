@@ -30,7 +30,7 @@ ProjectSpec voicedProject(double level, const std::string& notes, int loopBars =
     p.loopBars = loopBars;
     p.seed = 3;
     p.master = 1.0;
-    p.modules.push_back({"p", notes.rfind("---", 0) == 0 ? notes : kHead + notes, {}});
+    p.modules.push_back({"p", notes.rfind("---", 0) == 0 ? notes : kHead + notes});
     p.layers = {cawtest::testSignalNotesLayer("l", shape, "p", {{"level", level}})};
     return p;
 }

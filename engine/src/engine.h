@@ -1,4 +1,5 @@
-// The mixer and its control side: layers with their own loop lengths, hot-swap crossfades, mute/solo, limiter and meters.
+// The mixer and its control side: tracks (an instrument and its inserts) with their own loop lengths, crossfaded
+// chain changes, folder buses, sends, mute/solo, limiter and meters.
 #pragma once
 
 #include <atomic>
@@ -6,7 +7,6 @@
 #include <map>
 #include <memory>
 #include <mutex>
-#include <set>
 #include <string>
 #include <vector>
 
@@ -16,23 +16,16 @@
 #include "meters.h"
 #include "module_registry.h"
 #include "pattern.h"
-#include "program.h"
 #include "project.h"
 #include "spsc.h"
-#include "vm.h"
 
 namespace caw {
 
+constexpr int kBlock = 64;  // frames the mixer runs at most at once (a chunk); component chains run in these blocks
 constexpr int kScopeSize = 1024;
-constexpr int kMaxVoices = 32;  // most notes a pattern layer plays at once (a module asks for 1..32 with voices:)
-// Modules one track runs (its generator or voice, then effects); each is its own mix-graph node.
-// A longer chain is refused with a layer error, never truncated.
-constexpr int kMaxTrackModules = 32;
 // Layer slots a new Engine starts with. It grows past them (setProject) up to maxLayers(), which
 // its memory budget sets; this many are always available.
 constexpr int kInitialLayerCapacity = 64;
-// The export-buffer budget is a share sized for this many slots (the initial layers plus the audition).
-constexpr int kExportBudgetSlots = kInitialLayerCapacity + 1;
 
 struct Meters {
     float cpu = 0, peakL = 0, peakR = 0;
@@ -72,16 +65,8 @@ public:
     // The most layer slots this Engine's graph-working budget allows (at least kInitialLayerCapacity):
     // a project with more layers is refused by setProject.
     int maxLayers() const noexcept { return maxLayers_; }
-    // Export buffers one layer may hold, and how many the whole project may allocate (a 65-slot share
-    // of the graph-working budget, so growing past 64 layers spreads it rather than multiplying it).
-    size_t exportBuffersPerLayer() const noexcept { return exportPerSlot_; }
-    size_t exportBufferBudget() const noexcept { return exportPerSlot_ * static_cast<size_t>(kExportBudgetSlots); }
-    // Control thread: bytes the export buffers and the slots' export pointer tables hold now (a table a
-    // larger one replaced counts until the audio thread hands it back); setProject keeps it within
-    // exportBufferBudget() buffers' worth.
-    size_t exportBytes() const noexcept;
 
-    // Control thread. Each returns quickly; compiling happens here, never on the audio thread.
+    // Control thread. Each returns quickly; patterns parse and chains are built here, never on the audio thread.
     std::string setProject(const ProjectSpec& p);  // live: commands are applied by the audio callback
     // Offline render only: call while no audio callback can run; project commands are applied synchronously.
     std::string setProjectOffline(const ProjectSpec& p);
@@ -96,8 +81,6 @@ public:
     std::unique_ptr<ModuleProcessor> createNativeComponent(const std::string& id);
     // {"ok":true,"components":[descriptor, ...]} for the loaded native components (moduleDescriptorJson).
     std::string nativeComponentsJson();
-    void setParam(const std::string& moduleId, const std::string& name, double value);
-    void setGlobal(const std::string& name, double value);
     // Component index that names a layer's native instrument instead of one of its inserts.
     static constexpr uint32_t kInstrumentIndex = 0xFFFFFFFFu;
     // Play after Stop: an instrument still ringing fades out over its next 5 ms, rendered at Play (inside one
@@ -131,8 +114,8 @@ public:
     // Most routes (sends and sidechain keys) one layer feeds.
     static constexpr int kMaxRoutes = 24;
     // Note previews (#103): a held note on a layer's instrument, heard through its effects and mix, while playing or
-    // stopped. [id] is the caller's handle: a second noteOn with it ends the first. Only layers that play notes
-    // (a voiced chain, or a native instrument) can preview.
+    // stopped. [id] is the caller's handle: a second noteOn with it ends the first. Only tracks (layers with an
+    // instrument) can preview.
     void noteOn(const std::string& layerId, int32_t id, double pitch, double velocity);
     void notePitch(int32_t id, double pitch);  // glides a held preview to [pitch] without a new attack
     void noteOff(int32_t id);
@@ -203,7 +186,7 @@ public:
     uint32_t routingRejections() const noexcept { return routingRejections_.load(std::memory_order_relaxed); }
     // Tests only, between process() calls: graph nodes the last chunk ran.
     uint32_t mixGraphNodesRun() const noexcept;
-    // Tests only, between process() calls: slots the per-chunk loops (planning, solo, exports) visit.
+    // Tests only, between process() calls: slots the per-chunk loops (planning, solo, routing) visit.
     int slotsScannedPerChunk() const noexcept;
     // Tests only: skip the master DC blocker and limiter so layer output can be checked exactly.
     void setMasterBypass(bool on) { bypass_.store(on, std::memory_order_relaxed); }
@@ -214,8 +197,6 @@ public:
     // over budget before a layer is shed and the rest after it go by time, so any callback size behaves alike.
     void reportLoad(double load, int frames) noexcept;
 
-    struct Chain;
-
 private:
     // First, so it outlives every component chain (built-ins keep a pointer to it).
     std::atomic<int> quality_{1};
@@ -223,9 +204,6 @@ private:
     struct Cmd;
     struct Retired;
     struct AutomationData;
-    struct ExportPool;
-    struct ExportTable;
-    void dropExportTable(ExportTable* t) noexcept;  // control thread
     struct MixGraph;  // the graph that routes slots, folder buses and master (engine.cpp)
     struct SlotTable;  // the slots, their mix graph and order list at one capacity (engine.cpp)
     struct DelayLine;  // a track's latency-compensation delay (engine.cpp)
@@ -236,19 +214,17 @@ private:
     bool send(const Cmd& c);
     std::string setProjectImpl(const ProjectSpec& p, bool offline);
     void applyCommands() noexcept;
-    void retire(Chain* c, Slot* freed, std::shared_ptr<const Pattern>* pattern = nullptr,
-                AutomationData* automation = nullptr, std::vector<int>* order = nullptr,
-                SlotTable* table = nullptr, ComponentChain* components = nullptr) noexcept;
+    void retire(Slot* freed, std::shared_ptr<const Pattern>* pattern = nullptr, AutomationData* automation = nullptr,
+                std::vector<int>* order = nullptr, SlotTable* table = nullptr,
+                ComponentChain* components = nullptr) noexcept;
     void retireEntry(const Retired& r) noexcept;  // audio thread: to the control thread, to be freed
     void bindTable() noexcept;  // audio thread: cache the current table's slots, graph and sizes
     void markLive(int slot) noexcept;  // audio thread: the slot joins the in-use list the per-chunk loops visit
     int processChunk(float* l, float* r, int maxFrames) noexcept;  // returns the frames it ran
     int planChunk(int maxFrames) noexcept;
     void planTrack(Slot& s, int& m) noexcept;
-    // Graph nodes (audio thread): each module of a track, the track's crossfades and mix, a
-    // folder bus, and the master stage.
-    void runModuleNode(int slot, int index, const float* const* in, float* const* out, int m) noexcept;
-    void runTrackNode(int slot, const float* const* in, float* outL, float* outR, int m) noexcept;
+    // Graph nodes (audio thread): a track (its instrument, inserts and mix), a folder bus, and the master stage.
+    void runTrackNode(int slot, float* outL, float* outR, int m) noexcept;
     void runDelay(Slot& s, float* outL, float* outR, int m) noexcept;
     void runBusNode(int slot, const float* inL, const float* inR, float* outL, float* outR, int m) noexcept;
     // A slot's native inserts over L/R in place, with the crossfade of a chain change (tracks and buses).
@@ -261,15 +237,7 @@ private:
     void updateRouting() noexcept;
     double slotTarget(const Slot& s) const noexcept;
     void updateSolo() noexcept;
-    void prepareLane(Chain& c, int lane, int64_t n0, int len) noexcept;
-    void markTouched(Chain& c, const std::vector<std::string>* ids, const std::string& name);
-    void resolveParams(Chain& c, const Instance& inst, size_t idx, int64_t globalStart, int len) noexcept;
-    const double* runModule(Chain& c, int lane, bool shadow, size_t idx, int64_t n0, int64_t globalStart, int len,
-                            const double* input, Slot* exportTo, const Pattern* pat, int64_t repeat) noexcept;
-    void runVoices(Chain& c, const Pattern* pat, int64_t repeat, int64_t n0, int len, double* out, Slot* exportTo,
-                   int offset, const BlockCtx& base) noexcept;
-    void noteEvent(Chain& c, const Pattern& pat, const PatternEvent& e, int64_t repeat) noexcept;
-    // A native instrument's track (module node 0): its pattern notes and note motion as events, then
+    // A track's instrument, first in its track node: its pattern notes and note motion as events, then
     // the instrument (and one it replaced, crossfading out) into the slot's instL/instR.
     void runInstrument(Slot& s, int m) noexcept;
     void instrumentNotes(Slot& s, NoteEvents& notes, int m) noexcept;
@@ -278,7 +246,6 @@ private:
     bool ringsAtPlay(const Slot& s) const noexcept;
     void playTail(Slot& s, int most) noexcept;
     static bool playsNotes(const Slot& s) noexcept;
-    struct Voice& pickVoice(Chain& c) noexcept;
     void previewCommand(const Cmd& c) noexcept;
     void takeDeviceMidi(int frames) noexcept;   // callback start: the queue into midiPending_, frames worked out
     void feedDeviceMidi(Slot& s, NoteEvents& notes, int m) noexcept;  // this chunk's device messages for s
@@ -287,28 +254,19 @@ private:
     int deviceSlot(const std::string& layerId);
     void updatePreviewing(int frames) noexcept;
     void endPlayback() noexcept;
-    static void restartChain(Chain& c) noexcept;
-    void takeExpression(struct Voice& v, const Pattern& pat, const PatternNote& n) noexcept;
     bool noteSpan(const PatternNote& n, uint32_t sub, int64_t& start, int64_t& stop) const noexcept;
-    void rebindVoice(struct Voice& v, const Pattern* pat, int64_t n0) noexcept;
     void rebindNote(NoteEvents& notes, NoteEvents::Held& h, const Pattern* pat, int64_t n0) noexcept;
     int64_t loopStart(const Slot& s, int64_t k) const noexcept;
     void updateTiming() noexcept;
     // Where playback from g_ goes back: the loop range's end while it is on and ahead, else the song end.
     int64_t wrapAt() const noexcept;
-    // The position after a chunk that ends at [next]: back to the loop range's start (or 0) at the wrap.
-    int64_t after(int64_t next) const noexcept;
     void pickOverloadVictim() noexcept;
 
     const double sr_;
     double trackGainCoef_ = -1.0;  // audio thread: the track gain glide's per-sample factor, worked out on first use
     const EngineResourceBudget resourceBudget_;
-    // Export buffers one layer may hold: fixed at construction from the budget (a 65-slot share), so
-    // every slot added by a grow gets the same. Each slot's pointer table holds only what its chain exports.
-    const size_t exportPerSlot_;
     int maxLayers_ = kInitialLayerCapacity;  // set once in the constructor
     int pendingMax_ = 0;                     // pending_ entries; set once in the constructor
-    std::unique_ptr<ExportPool> exportPool_;
 
     // ---- audio-thread state ----
     // The current slot table (owned; a Grow command swaps in a larger one and retires this one).
@@ -317,7 +275,7 @@ private:
     std::unique_ptr<SlotTable> table_;
     Slot** slots_ = nullptr;      // table_'s slots
     MixGraph* mixGraph_ = nullptr;  // table_'s graph, routed on the audio thread
-    int* processOrder_ = nullptr;   // table_'s order list: slots in dependency order (exporters before readers)
+    int* processOrder_ = nullptr;   // table_'s order list: slots in project order, buses after their children
     int* live_ = nullptr;           // table_'s in-use list: liveCount_ slots, ascending (markLive)
     int liveCount_ = 0;
     int capacity_ = 0;      // layer slots; the audition slot follows them
@@ -369,10 +327,6 @@ private:
     double master_ = 0.7;
     double masterTarget_ = 0.7, masterStep_ = 0.0;
     int masterRamp_ = 0;
-    bool seamXf_ = true;
-    int keyRoot_ = 9, keyScale_ = 1;
-    int swapMode_ = 0;  // 0 at once, 1 next beat, 2 next bar
-    int voiceLimit_ = kMaxVoices;  // the project's cap on voices for new notes (light mode sends 4)
     bool anySolo_ = false;  // some layer is soloed (refreshed each callback)
     bool auditionOnly_ = false;
     double stepLen_ = 0;  // samples per 16th note
@@ -385,20 +339,19 @@ private:
     int processCount_ = 0;
     int64_t chunkId_ = 0;
     bool routingDirty_ = true;  // re-derive graph routing before the next chunk
-    // Retirements waiting for room in the queue (pendingMax_ entries, enough for a Play at
-    // maxLayers(); owned, so a throwing constructor cannot leak it).
+    // Retirements waiting for room in the queue (pendingMax_ entries: two per slot at maxLayers() and
+    // some slack; owned, so a throwing constructor cannot leak it).
     std::unique_ptr<Retired[]> pending_;
     int pendingCount_ = 0;
-    double tmp_[kBlock];
     int64_t masterTailLeft_ = 0;  // audio thread: stopped, the master chain rings out for at most this long
     int64_t masterQuiet_ = 0;     // ... ending sooner once its output has been quiet for a moment
     int masterTailFade_ = 0;      // > 0: at its cap and still audible, fading out (frames left); -1: faded
     ComponentChain* masterFading_ = nullptr;  // audio thread: the master chain a newer one replaced, crossfading out
     int masterFadeLeft_ = 0;
     float insertL_[kBlock], insertR_[kBlock];
-    float fadeL_[kBlock], fadeR_[kBlock];  // audio thread: a replaced chain's output during its crossfade            // audio thread: a track's inserts run here
+    float fadeL_[kBlock], fadeR_[kBlock];  // audio thread: a replaced chain's output during its crossfade
     float masterStageL_[kBlock], masterStageR_[kBlock];  // audio thread: the master chain runs here
-    float preL_[kBlock], routeL_[kBlock], routeR_[kBlock];  // audio thread: a mono pre tap, and a route's signal
+    float routeL_[kBlock], routeR_[kBlock];  // audio thread: a route's signal
 
     // ---- shared ----
     std::unique_ptr<Spsc<Cmd, 1024>> cmds_;
@@ -424,38 +377,27 @@ private:
     std::string ctlMasterAutomationKey_;
     std::shared_ptr<const std::vector<ProjectAutomationLaneSpec>> ctlAutomation_;  // the last project's lanes  // the lanes the master chain's automation table was made from
     bool offlineControl_ = false;  // control thread only; true only when no audio callback can run
+    // A project module: a pattern (note clip) and the last version that parsed.
     struct ModuleState {
         std::string source;
-        std::string ref;     // the name other modules use for its exports
-        std::string libSig;  // the project libraries it was compiled with
-        std::shared_ptr<const Program> program;  // last program that compiled
-        std::shared_ptr<const Pattern> pattern;  // pattern modules: the last version that parsed
+        std::shared_ptr<const Pattern> pattern;  // the last version that parsed
         std::string error;
         int line = 0, col = 0;
-        std::map<std::string, double> params;
-        // A synth: the chain it plays as (its voice, generated effect modules, and "\x1e" + name for a project module).
-        std::vector<std::string> expand;
     };
     struct LayerState {
         int slot = -1;
-        Chain* chain = nullptr;
-        std::vector<const Program*> sig;
-        std::vector<const double*> wiring;  // where each import of the chain reads from
+        bool track = false;                      // installed as a track (Install sent): it plays its instrument
         int steps = -1;
-        bool voiced = false;                     // plays a pattern through a pool of voices
         std::shared_ptr<const Pattern> pattern;  // what the audio thread was last sent
         std::string arrangementSig;              // source + clip signature; keeps compiled timelines stable
         double volume = -1, pan = 0;
         bool mute = false, solo = false, bus = false;
         int parentSlot = -1;
         std::string automationSig;
-        size_t expressionCapacity = 0;
-        std::string parameterAutomationSig;
         ComponentChain* inserts = nullptr;  // the native effects last sent to the slot (alive while it plays)
         std::string insertsAutomationKey;   // the lanes their automation table was made from
         ComponentChain* instrument = nullptr;  // the native instrument last sent to the slot (alive while it plays)
         std::string instrumentAutomationKey;
-        bool native = false;                // the chain was built for a native instrument
         int64_t compensation = 0;           // the latency-compensation delay last sent, in frames
         // Sends (the project's, in order) then sidechain keys this layer feeds; set by setProject, sent by
         // updateCompensation with their delays.
@@ -491,10 +433,6 @@ private:
     std::atomic<int64_t> midiClockTest_{-1};
     std::atomic<int64_t> cbTimeNs_{0}, cbPos_{-1};  // the last callback's start on the MIDI clock, and g_ then (-1: stopped)
     std::vector<std::string> order_;  // layer ids in project order, for meters
-    std::map<std::string, double> globals_;
-    // Knob moves since the last Play (control thread), so a rebuilt chain keeps their touches.
-    std::set<std::pair<std::string, std::string>> touchedParams_;  // (module id, param)
-    std::set<std::string> touchedGlobals_;
     uint64_t playCount_ = 0;     // Play commands sent (control thread)
     uint32_t touchCounter_ = 0;  // knob moves (control thread); wraps, compared by difference
     // Every slot ever made (the audio thread's tables point into it); it only grows.
@@ -506,11 +444,6 @@ private:
     double ctlSr_ = 0;
     int64_t ctlLoopLen_ = 0;
 
-    Chain* buildChain(const std::vector<std::string>& ids, const std::vector<const double*>& wiring, bool voiced, bool native,
-                      const Chain* prev, const std::shared_ptr<const std::vector<ProjectAutomationLaneSpec>>& automation,
-                      size_t expressionCapacity);
-    void swapIn(Slot& s, Chain* c) noexcept;  // hot swap with a crossfade, keeping what can keep playing
-    void writeParams(Chain& c);
     void writeMix(int slot, double vol, double pan, bool mute, bool solo);
     int freeSlot();
     // Control thread; null: none. `index` kInstrumentIndex names the layer's instrument (and becomes 0).
