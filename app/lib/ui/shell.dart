@@ -885,7 +885,12 @@ Future<void> showProjectMenu(BuildContext context, AppState s) async {
           ),
           ListTile(
             leading: const Icon(Icons.add, color: Neon.green),
-            title: const Text('New blank project'),
+            title: const Text('New project'),
+            subtitle: Text(
+                s.settings.newProjectStart == NewProjectStart.firstLoop
+                    ? 'The First loop template (Settings › Projects and files)'
+                    : 'Blank, ${s.settings.newProjectBpm.toStringAsFixed(0)} BPM, ${s.settings.newProjectBeatsPerBar}/4',
+                style: const TextStyle(color: Neon.dim)),
             onTap: () {
               Navigator.pop(context);
               s.newProject();

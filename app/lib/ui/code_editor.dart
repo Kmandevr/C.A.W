@@ -2,6 +2,7 @@
 import 'package:flutter/material.dart';
 
 import '../model/settings.dart';
+import 'code_prefs.dart';
 import 'theme.dart';
 
 const _keywords = {'let', 'param', 'in', 'global', 'export', 'fn', 'on', 'off', 'slide', 'prob', 'ratchet'};
@@ -140,7 +141,7 @@ class CodeField extends StatelessWidget {
         smartDashesType: SmartDashesType.disabled,
         smartQuotesType: SmartQuotesType.disabled,
         textCapitalization: TextCapitalization.none,
-        style: Neon.code(),
+        style: Neon.code(size: CodePrefs.fontSize), // Settings › Code editor
         cursorColor: Neon.green,
         decoration: InputDecoration(
           filled: true,
@@ -148,7 +149,7 @@ class CodeField extends StatelessWidget {
           contentPadding: const EdgeInsets.all(12),
           hintText: hint,
           hintMaxLines: 12,
-          hintStyle: Neon.code(color: Neon.dim.withValues(alpha: 0.55)),
+          hintStyle: Neon.code(size: CodePrefs.fontSize, color: Neon.dim.withValues(alpha: 0.55)),
         ),
       );
 }

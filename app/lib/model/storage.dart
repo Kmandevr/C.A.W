@@ -93,8 +93,9 @@ class ProjectStorage {
   Directory _restoreDirectory(String projectId) => Directory(
     '${_root.path}${Platform.pathSeparator}restore-points${Platform.pathSeparator}${_validatedProjectId(projectId)}');
 
-  /// Creates an explicit restore point atomically and retains at most 20 per project.
-  Future<String> createRestorePoint(ProjectDoc project) async {
+  /// Creates an explicit restore point atomically and keeps the newest [keep] per project (Settings › Projects and
+  /// files; 20 by default).
+  Future<String> createRestorePoint(ProjectDoc project, {int keep = 20}) async {
     final directory = _restoreDirectory(project.id);
     await directory.create(recursive: true);
     final sequence = (_restorePointSequence++).toString().padLeft(4, '0');
@@ -111,7 +112,7 @@ class ProjectStorage {
       (entity) => entity is File && entity.path.endsWith('.json'),
     ).cast<File>().toList())
       ..sort((a, b) => b.path.compareTo(a.path));
-    for (final stale in snapshots.skip(20)) {
+    for (final stale in snapshots.skip(keep.clamp(1, 100))) {
       await stale.delete();
     }
     return id;

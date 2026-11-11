@@ -81,14 +81,30 @@ class AppState extends ChangeNotifier {
   SoundQuality? _quality;
   AudioBuffer? _buffer;
   bool? _bufferRecording;
+  String? _deviceChoice, _clickChoice;
 
-  /// Sends the sound quality and the buffer mode to the engine when they (or whether a recording runs) changed.
+  /// Sends the sound quality, the device's choice (device, callback size, exclusive mode), the click's sound and the
+  /// buffer mode to the engine when they (or whether a recording runs) changed. A running device reopens off the
+  /// audio thread (the engine's device lock; never in the callback).
   void applyAudioSettings({bool? recording}) {
     final e = engine;
     if (e == null) return;
     if (_quality != settings.soundQuality) {
       _quality = settings.soundQuality;
       e.setQuality(settings.soundQuality.index);
+    }
+    final device = '${settings.audioDevice}|${settings.bufferFrames}|${settings.exclusiveAudio}';
+    if (_deviceChoice != device) {
+      _deviceChoice = device;
+      if (!e.configureAudio(
+          device: settings.audioDevice, periodFrames: settings.bufferFrames, exclusive: settings.exclusiveAudio)) {
+        audioError = 'The audio device did not reopen with the new settings';
+      }
+    }
+    final click = '${settings.clickVolume}|${settings.clickSound.index}';
+    if (_clickChoice != click) {
+      _clickChoice = click;
+      e.setMetronomeSound(settings.clickVolume, settings.clickSound.index);
     }
     final rec = recording ?? _bufferRecording ?? false;
     if (_buffer != settings.audioBuffer || _bufferRecording != rec) {
@@ -208,8 +224,28 @@ class AppState extends ChangeNotifier {
       poll: _poll,
       interval: const Duration(milliseconds: 33),
       onIdle: () {
-    if (!meters.playing && _heldPreviews.isEmpty) engine?.stopAudio();
+    if (!meters.playing && _heldPreviews.isEmpty && !(engine?.testToneSounding ?? false)) engine?.stopAudio();
   });
+
+  /// Settings › Audio's test tone: opens the device if it is closed and plays 440 Hz for [seconds]; returns an error
+  /// message when the device can't open.
+  String? playTestTone({double seconds = 1.5}) {
+    final e = engine;
+    if (e == null) return engineError ?? 'The sound engine did not load';
+    if (useAudioDevice && !e.audioOn) {
+      audioError = e.startAudio();
+      if (audioError != null) {
+        notifyListeners();
+        return audioError;
+      }
+    }
+    e.testTone(seconds);
+    _poller.wake();
+    return null;
+  }
+
+  /// The audio device as it runs now (null without an engine).
+  AudioStatus? get audioStatus => engine?.audioStatus();
 
   Future<void> init() async {
     _resourcePressureSubscription = ResourceSignals.changes.listen(
@@ -218,8 +254,8 @@ class AppState extends ChangeNotifier {
     );
     EngineExecutionPolicy.updateRuntimeSignals(pressure: await ResourceSignals.read());
     try {
-      engine = Engine.create();
-      applyAudioSettings();  // before the device opens, so it opens at the chosen size
+      engine = Engine.create(sampleRate: settings.sampleRate);
+      applyAudioSettings();  // before the device opens, so it opens on the chosen device at the chosen size
       hardwareProfile = EngineExecutionPolicy.hardwareProfile;
       auditionPlan = EngineExecutionPolicy.plan(workload: EngineWorkload.interactiveAudition);
       templates = Engine.templates();
@@ -273,7 +309,10 @@ class AppState extends ChangeNotifier {
   }
 
   /// An empty project: no modules and no layers.
-  ProjectDoc blankProject() => ProjectDoc(id: newId('p'), name: 'New project');
+  /// Settings › Projects and files sets its tempo and time signature.
+  ProjectDoc blankProject() => ProjectDoc(id: newId('p'), name: 'New project')
+    ..bpm = settings.newProjectBpm
+    ..beatsPerBar = settings.newProjectBeatsPerBar;
 
   @override
   void dispose() {
@@ -578,7 +617,7 @@ class AppState extends ChangeNotifier {
     _docGen++;
     _recordHistory();
     _saveTimer?.cancel();
-    _saveTimer = Timer(const Duration(milliseconds: 500), flush);
+    _saveTimer = Timer(Duration(milliseconds: settings.autosaveMs), flush);
   }
 
   // ---------- undo and redo (the whole project) ----------
@@ -695,7 +734,7 @@ class AppState extends ChangeNotifier {
     final storage = _storage;
     if (storage == null || starting) return false;
     await flush();
-    await storage.createRestorePoint(project);
+    await storage.createRestorePoint(project, keep: settings.restorePointsKept);
     return true;
   }
 
@@ -707,7 +746,7 @@ class AppState extends ChangeNotifier {
     if (storage == null || starting) return false;
     final snapshot = await storage.loadRestorePoint(project.id, restorePointId);
     if (snapshot == null) return false;
-    await storage.createRestorePoint(project);
+    await storage.createRestorePoint(project, keep: settings.restorePointsKept);
     await _switchTo(snapshot);
     return true;
   }
@@ -1752,7 +1791,9 @@ class AppState extends ChangeNotifier {
     if (status.loaded.isNotEmpty) await _syncNow();
   }
 
-  Future<void> newProject() => _switchTo(blankProject());
+  /// New project: blank (with Settings' tempo and time signature) or the First loop template, as Settings says.
+  Future<void> newProject() => _switchTo(
+      settings.newProjectStart == NewProjectStart.firstLoop ? starterProject() : blankProject());
 
   Future<void> newProjectFromTemplate() => _switchTo(starterProject());
 

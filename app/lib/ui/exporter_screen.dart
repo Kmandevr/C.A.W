@@ -46,11 +46,12 @@ class ExporterScreen extends StatefulWidget {
 }
 
 class _ExporterScreenState extends State<ExporterScreen> {
-  ExportKind _kind = ExportKind.loop;
+  // Settings › Export: what the exporter opens with.
+  late ExportKind _kind = ExportKind.values.firstWhere((k) => k.name == s.settings.exportKind, orElse: () => ExportKind.loop);
   bool _advanced = false;
-  int _rate = 48000;
-  bool _float = false;
-  double _seconds = 8;
+  late int _rate = s.settings.exportSampleRate;
+  late bool _float = s.settings.exportFloat32;
+  late double _seconds = s.settings.exportSeconds;
   String? _layerId;
   String? _moduleId;
   String? _patternId;
@@ -81,6 +82,18 @@ class _ExporterScreenState extends State<ExporterScreen> {
   String _fileName() {
     final p = s.project;
     final base = _safe(p.name).isEmpty ? 'CAW' : _safe(p.name);
+    // Settings › Export › File names: the project alone, or with the date and time, instead of the details below.
+    final ext = _kind == ExportKind.midi ? 'mid' : 'wav';
+    switch (s.settings.exportNaming) {
+      case ExportNaming.project:
+        return '$base.$ext';
+      case ExportNaming.dated:
+        final t = DateTime.now();
+        String two(int v) => v.toString().padLeft(2, '0');
+        return '${base}_${t.year}-${two(t.month)}-${two(t.day)}_${two(t.hour)}${two(t.minute)}.$ext';
+      case ExportNaming.detailed:
+        break;
+    }
     final bpm = p.bpm.toStringAsFixed(p.bpm == p.bpm.roundToDouble() ? 0 : 1);
     switch (_kind) {
       case ExportKind.loop:

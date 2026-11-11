@@ -729,7 +729,7 @@ class _TrackSheet extends StatelessWidget {
         const SizedBox(width: 6),
         ToggleChip(label: 'S', tooltip: 'Solo', on: layer.solo, color: Neon.blue, onTap: () => s.mixLayer(layer, solo: !layer.solo)),
         PopupMenuButton<String>(
-          onSelected: (v) {
+          onSelected: (v) async {
             switch (v) {
               case 'rename':
                 _rename(context, s, layer);
@@ -738,7 +738,9 @@ class _TrackSheet extends StatelessWidget {
               case 'down':
                 s.moveLayer(index, index + 2);
               case 'delete':
-                Navigator.pop(context);
+                final nav = Navigator.of(context);
+                if (!await confirmTrackDelete(context, s, layer)) return;
+                nav.pop();
                 s.removeLayer(layer);
             }
           },
