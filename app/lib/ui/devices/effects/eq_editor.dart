@@ -18,7 +18,8 @@ import '../visuals/filter_curve.dart' show freqToX, xToFreq;
 import 'effect_page.dart';
 
 /// The band shapes the engine's EQ offers, in its choice order (`org.caw.eq`'s `bN_type`).
-enum EqShape { bell, lowShelf, highShelf, lowCut12, lowCut24, lowCut48, highCut12, highCut24, highCut48, notch, bandPass, tilt }
+enum EqShape { bell, lowShelf, highShelf, lowCut12, lowCut24, lowCut48, highCut12, highCut24, highCut48, notch, bandPass, tilt,
+  lowCut96, highCut96 }  // the 96s appended (fx-filters), as the engine appends them
 
 /// A band's shape from its type choice's label, so an EQ with other names still draws.
 EqShape eqShapeOf(String label) {
@@ -27,9 +28,11 @@ EqShape eqShapeOf(String label) {
   if (l.contains('low') && l.contains('shelf')) return EqShape.lowShelf;
   if (l.contains('high') && l.contains('shelf')) return EqShape.highShelf;
   if (l.contains('low cut') || l.contains('high-pass') || l.contains('high pass') || l == 'hp') {
+    if (l.contains('96')) return EqShape.lowCut96;
     return EqShape.values[EqShape.lowCut12.index + slope];
   }
   if (l.contains('high cut') || l.contains('low-pass') || l.contains('low pass') || l == 'lp') {
+    if (l.contains('96')) return EqShape.highCut96;
     return EqShape.values[EqShape.highCut12.index + slope];
   }
   if (l.contains('notch')) return EqShape.notch;
@@ -47,6 +50,7 @@ double _mag2(double a2, double a1, double a0, double w) {
 }
 
 const _butter4 = [0.5412, 1.3066], _butter8 = [0.5098, 0.6013, 0.9000, 2.5629];
+const _butter16 = [0.5024, 0.5225, 0.5669, 0.6468, 0.7882, 1.0607, 1.7224, 5.1011];
 
 /// A band's gain in dB at [hz]: the analog prototypes the engine's trapezoidal SVF stages are made from (RBJ's
 /// cookbook shapes; cuts as Butterworth stages whose last Q follows [q]), so the drawing follows the sound closely.
@@ -58,7 +62,8 @@ double eqShapeDb(EqShape s, double hz, double fc, double gain, double q) {
   List<double> stages(int n) => switch (n) {
         0 => [qq],
         1 => [_butter4[0], _butter4[1] * qq / 0.7071],
-        _ => [..._butter8.sublist(0, 3), _butter8[3] * qq / 0.7071],
+        2 => [..._butter8.sublist(0, 3), _butter8[3] * qq / 0.7071],
+        _ => [..._butter16.sublist(0, 7), _butter16[7] * qq / 0.7071],
       };
   switch (s) {
     case EqShape.bell:
@@ -69,15 +74,15 @@ double eqShapeDb(EqShape s, double hz, double fc, double gain, double q) {
     case EqShape.highShelf:
       final r = math.sqrt(a) / qq;
       return db(a * _mag2(a, r, 1, w) / _mag2(1, r, a, w));
-    case EqShape.lowCut12 || EqShape.lowCut24 || EqShape.lowCut48:
+    case EqShape.lowCut12 || EqShape.lowCut24 || EqShape.lowCut48 || EqShape.lowCut96:
       var sum = 0.0;
-      for (final sq in stages(s.index - EqShape.lowCut12.index)) {
+      for (final sq in stages(s == EqShape.lowCut96 ? 3 : s.index - EqShape.lowCut12.index)) {
         sum += db(w * w / _mag2(1, 1 / sq, 1, w));
       }
       return sum;
-    case EqShape.highCut12 || EqShape.highCut24 || EqShape.highCut48:
+    case EqShape.highCut12 || EqShape.highCut24 || EqShape.highCut48 || EqShape.highCut96:
       var sum = 0.0;
-      for (final sq in stages(s.index - EqShape.highCut12.index)) {
+      for (final sq in stages(s == EqShape.highCut96 ? 3 : s.index - EqShape.highCut12.index)) {
         sum += db(1 / _mag2(1, 1 / sq, 1, w));
       }
       return sum;
@@ -357,7 +362,7 @@ void eqShapeIcon(Canvas canvas, Rect r, int index, Color color) {
   }, width: r.height < 20 ? 1.4 : 1.8);
 }
 
-/// The type choice as a grid of drawn shapes (two rows of six for the engine's twelve).
+/// The type choice as a grid of drawn shapes (two rows of seven for the engine's fourteen).
 class _TypeGrid extends StatelessWidget {
   const _TypeGrid({required this.paramId, required this.color});
   final String paramId;
@@ -370,7 +375,7 @@ class _TypeGrid extends StatelessWidget {
     if (p == null || !p.isChoice) return const SizedBox.shrink();
     final sel = (t.value(p.id) - p.min).round();
     final n = p.choices.length;
-    const perRow = 6;
+    const perRow = 7;
     return Column(mainAxisSize: MainAxisSize.min, children: [
       for (var row = 0; row * perRow < n; row++)
         Padding(padding: const EdgeInsets.only(bottom: 4), child: SizedBox(height: 46, child: Row(children: [

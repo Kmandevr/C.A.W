@@ -84,6 +84,16 @@ updated: 2026-11-11
 - **Ring mod** with a key: giving it a key turns its carrier to Sidechain, and removing the key turns it back to Sine. The sidechain key is the existing keyed-effect port (as the ducker's).
 - **Bitcrush stays separate from the saturator's Crush mode**: it models a converter pair (anti-alias and anti-image filters, jitter, dither, fractional bits); the saturator's mode is unchanged.
 
+## 2026-11-11: EQ & Filter effects (fx-filters, choices to confirm)
+
+**Decision (Claude, for the owner to confirm):** nine new built-ins for the browser's EQ & Filter tab (ladder, nonlinear filter, comb, resonator, formant, disperser, 3-band EQ, tilt EQ, graphic EQ; [engine](engine.md#c-api-engineincludecawh)) with plugin UIs ([app](app.md)). No new dependency, no C API change.
+- **Slice EQ is the existing parametric EQ, extended:** `org.caw.eq` already had mid/side per band and an analyser, so Low cut 96 and High cut 96 (eight Butterworth stages) were appended to its types (saved projects keep their type numbers) instead of a second parametric EQ.
+- **The 3-band EQ's id is `org.caw.eq.dj`**, beside the parametric EQ, with DJ kill switches Kilohearts' 3-Band EQ lacks.
+- **The graphic EQ** stands in for Carve EQ (whose page lists only "a 31 band graphic EQ"): 31 third-octave bells corrected for their overlap, so the drawn curve is what you hear.
+- **The tilt EQ** has no Kilohearts counterpart; it is the parametric EQ's Tilt band as its own small device, with mid/side.
+- **The comb adds feedback** (positive and negative, with damping) to Kilohearts' feed-forward comb, and tunes to a note or Hz.
+- **Not built:** Filter Table (a wavetable-driven filter; it needs a table editor and its own design) and the ladder's diode topology (its coupled stages need their own derivation). The resonator's modal ratios come from beam theory, not checked against a published table ([Assumption]).
+
 ## 2026-11-11: Settings as a category list, every setting real (choices to confirm)
 
 **Decision (owner):** Settings opens on a list of sections with icons; a search finds any setting and jumps to it, highlighted; new Audio and MIDI, Editing, Projects and files and Export settings; full control of the audio device and buffer; nothing hidden. **Choices made on the owner's behalf, to confirm:**
