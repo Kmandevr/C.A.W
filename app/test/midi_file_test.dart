@@ -1,6 +1,6 @@
 // Tests Standard MIDI File import and export: hand-built files (running status, velocity-0 note-offs, overlaps,
 // sysex and meta skipping, bend ranges, MPE), malformed and truncated input failing closed, round trips through
-// pattern clips, and placing imported clips in a project.
+// pattern clips, placing imported clips in a project, and a clip's automation lanes as CCs.
 import 'dart:math' as math;
 import 'dart:typed_data';
 
@@ -357,6 +357,89 @@ void main() {
       s.deleteAsset(asset);
       expect(s.project.midiFiles, isEmpty);
       expect(under.clips, hasLength(1));
+    });
+  });
+  group('automation as CCs (#11)', () {
+    test('controller changes round trip; the ones the reader uses itself are not kept as controls', () {
+      final bytes = writeMidiFile(MidiFile(tracks: [
+        MidiTrack(notes: [MidiNote(key: 60, velocity: 100, on: 0, off: 960)], controls: const [
+          MidiControl(0, 7, 100), MidiControl(480, 10, 0, 2), MidiControl(960, 20, 127),
+        ]),
+      ]));
+      final back = readMidiFile(bytes).tracks.last;
+      expect(back.controls, const [MidiControl(0, 7, 100), MidiControl(480, 10, 0, 2), MidiControl(960, 20, 127)]);
+      expect(back.notes.single.off, 960);
+      // An MPE file's own setup (RPNs, data entry) and CC74 timbre stay out of the controls.
+      final mpe = writeMidiFile(MidiFile(tracks: [
+        MidiTrack(notes: [MidiNote(key: 60, velocity: 100, on: 0, off: 960, timbre: [const MidiPoint(0, 0.5)])],
+            controls: const [MidiControl(0, 7, 90)]),
+      ]));
+      expect(readMidiFile(mpe).tracks.last.controls, const [MidiControl(0, 7, 90)]);
+      // Controls past the last note set the track's end.
+      final late = writeMidiFile(MidiFile(tracks: [MidiTrack(notes: const [], controls: const [MidiControl(5000, 1, 3)])]));
+      expect(readMidiFile(late).tracks.last.endTick, 5000);
+    });
+
+    ProjectDoc song() {
+      final p = ProjectDoc(id: 'p', name: 'T', bpm: 120);
+      p.modules.add(ModuleDoc(id: 'pat', name: 'Riff', source: PatternDoc.blank(name: 'Riff', bars: 1).serialize()));
+      p.modules.add(ModuleDoc(id: 'syn', name: 'Synth', source: ''));
+      final keys = LayerDoc(id: 'L1', name: 'Keys', color: 0, generatorId: 'syn')
+        ..clips.add(ClipDoc(id: 'c1', patternId: 'pat', startSteps: 8, lengthSteps: 16))
+        ..automation.addAll([
+          AutomationLaneDoc(target: 'volume', points: [AutomationPointDoc(step: 0, value: 1), AutomationPointDoc(step: 16, value: 0.25)]),
+          AutomationLaneDoc(target: 'pan', points: [AutomationPointDoc(step: 0, value: -1)]),
+        ]);
+      p.layers.add(keys);
+      p.automation.addAll([
+        ProjectAutomationLaneDoc(targetType: 'param', target: 'cutoff', moduleId: 'syn', points: [
+          AutomationPointDoc(step: 8, value: 0), AutomationPointDoc(step: 24, value: 1),
+        ]),
+        // Another track's lane, and a global: not this clip's.
+        ProjectAutomationLaneDoc(targetType: 'component', target: 'mix', layerId: 'L2', component: 0,
+            points: [AutomationPointDoc(step: 0, value: 0.5)]),
+        ProjectAutomationLaneDoc(targetType: 'global', target: 'swing', points: [AutomationPointDoc(step: 0, value: 0.5)]),
+        ProjectAutomationLaneDoc(targetType: 'instrument', target: 'drive', layerId: 'L1', points: [
+          AutomationPointDoc(step: 0, value: 200), AutomationPointDoc(step: 100, value: 400),
+        ]),
+      ]);
+      return p;
+    }
+
+    test("a clip's track lanes become CC7, CC10 and CC20 upwards over the clip, from its start", () {
+      final p = song();
+      final c = automationControls(p, p.layers.single, p.layers.single.clips.single);
+      List<MidiControl> cc(int n) => [for (final x in c) if (x.controller == n) x];
+      // Volume: at the clip's start (step 8) the ramp is at 0.625 (127·√0.625 = 100); the point at 16 is 0.25 (64).
+      expect(cc(7).first, const MidiControl(0, 7, 100));
+      expect(cc(7).last, const MidiControl(8 * 240, 7, 64));
+      expect(cc(7).length, greaterThan(5), reason: 'the ramp is sampled');
+      for (var i = 1; i < cc(7).length; i++) {
+        expect(cc(7)[i].value, lessThan(cc(7)[i - 1].value), reason: 'only changes are sent');
+      }
+      expect(cc(10), const [MidiControl(0, 10, 0)]);
+      // The synth's cutoff (0..1) on CC20, from 0 at the clip's start to 127 at its end.
+      expect(cc(20).first, const MidiControl(0, 20, 0));
+      expect(cc(20).last.value, inInclusiveRange(119, 127));
+      expect(cc(20).every((x) => x.tick < 16 * 240), isTrue, reason: 'inside the clip');
+      // The instrument's drive (200..400, no range given) scales from its own points: 200 at 0, 400 at 100.
+      expect(cc(21).first, MidiControl(0, 21, (127 * 16 / 200).round()));
+      final ranged = automationControls(p, p.layers.single, p.layers.single.clips.single,
+          range: (lane) => lane.target == 'drive' ? (lo: 0.0, hi: 1000.0) : null);
+      expect(ranged.firstWhere((x) => x.controller == 21).value, (127 * 216 / 1000).round());
+      expect(c.map((x) => x.controller).toSet(), {7, 10, 20, 21}, reason: 'other tracks and globals are left out');
+    });
+
+    test('a clip exported as .mid carries its lanes as CCs', () {
+      final p = song();
+      final back = readMidiFile(clipToMidi(p, p.layers.single.clips.single)!);
+      final controls = back.tracks.last.controls;
+      expect(controls.first, const MidiControl(0, 7, 100));
+      expect(controls.map((x) => x.controller).toSet(), {7, 10, 20, 21});
+      // A track without lanes writes none.
+      p.layers.single.automation.clear();
+      p.automation.clear();
+      expect(readMidiFile(clipToMidi(p, p.layers.single.clips.single)!).tracks.last.controls, isEmpty);
     });
   });
 }

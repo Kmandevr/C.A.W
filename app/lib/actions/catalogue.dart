@@ -153,6 +153,11 @@ const List<ActionDef> standardActions = [
   ActionDef('roll.notes.join', 'Join notes', _p, defaultKeys: ['Ctrl+J'], isChange: true),
   ActionDef('roll.notes.quantize', 'Quantize', _p,
       description: 'Selected notes to the grid', defaultKeys: ['Ctrl+U'], command: 'quantize', isChange: true),
+  ActionDef('roll.notes.quantizeSheet', 'Quantize…', _p,
+      description: 'Grid, strength, swing, starts or ends, humanize; previewed as it moves', isChange: true),
+  ActionDef('roll.step.toggle', 'Step input', _p,
+      description: 'Notes from the keys or a MIDI keyboard go in at the cursor, a grid step each'),
+  ActionDef('roll.step.rest', 'Step input: rest', _p, description: 'Skips a grid step', toast: false),
   ActionDef('roll.notes.audition', 'Hear selected notes', _p, defaultKeys: ['Enter'], toast: false),
   // Note values and extras.
   ActionDef('roll.vel.up', 'Velocity up', _p, description: '10%', defaultKeys: ['='], isChange: true),
@@ -203,6 +208,9 @@ const List<ActionDef> standardActions = [
   ActionDef('roll.gen.humanize', 'Humanize', _p, isChange: true),
   ActionDef('roll.gen.chordStamp', 'Chord stamp', _p, isChange: true),
   ActionDef('roll.gen.legato', 'Legato', _p, description: 'Stretch each note to the next', isChange: true),
+  ActionDef('roll.gen.connect', 'Connect notes', _p,
+      description: 'Each chord lasts to the next and its voices glide into it', isChange: true),
+  ActionDef('roll.gen.tremolo', 'Tremolo', _p, description: 'Volume or repeats on a sine, triangle or square', isChange: true),
   ActionDef('roll.gen.reverse', 'Reverse selection', _p, isChange: true),
   ActionDef('roll.gen.invertPitch', 'Invert pitch around the cursor', _p, isChange: true),
 
