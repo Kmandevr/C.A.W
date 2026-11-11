@@ -6,6 +6,7 @@
 #include <new>
 #include <vector>
 
+#include "caw/detmath.hpp"
 #include "caw/library/dynamics.hpp"
 #include "caw/library/filter.hpp"
 #include "component_chain.h"
@@ -166,13 +167,21 @@ protected:
         const EventInput& notes = keyNotes();
         const uint32_t first = runStart();
         const size_t size = delay_[0].size();
+        // Filters fed silence decay through denormal numbers (slow on many CPUs): settle them at 0 instead.
+        for (int c = 0; c < 2; ++c) {
+            hpf_[c].flushDenormals();
+            lpf_[c].flushDenormals();
+            for (auto& f : split_[c]) f.flushDenormals();
+        }
         for (uint32_t i = 0; i < n; ++i) {
-            // The key, filtered (Audio mode reads it; Listen plays it).
-            double k[2] = {keyL ? keyL[i] : 0.0, keyR ? keyR[i] : 0.0};
+            // The key, filtered (Audio mode reads it; Listen plays it). A NaN or Inf in it reads as 0, before the
+            // filters (whose state it would stay in) and after them.
+            double k[2] = {keyL ? finiteOr0(keyL[i]) : 0.0, keyR ? finiteOr0(keyR[i]) : 0.0};
             if (mode_ == 0 || listen_)
                 for (int c = 0; c < 2; ++c) {
                     if (useHpf_) k[c] = hpf_[c].highpass(k[c]);
                     if (useLpf_) k[c] = lpf_[c].lowpass(k[c]);
+                    k[c] = finiteOr0(k[c]);
                 }
             double g[2] = {1.0, 1.0};
             if (mode_ == 0) {
@@ -194,7 +203,7 @@ protected:
                         } else {
                             amount_[c] = target + (amount_[c] - target) * followRelease_;
                         }
-                        if (amount_[c] < 1e-9) amount_[c] = 0.0;
+                        if (!(amount_[c] >= 1e-9 && amount_[c] <= 1.0)) amount_[c] = 0.0;  // settled, or not finite
                         g[c] = 1.0 - depth_ * mix_ * bend(amount_[c], -tension_ * 0.5);
                     }
                     duck_ = std::max(amount_[0], amount_[1]);
