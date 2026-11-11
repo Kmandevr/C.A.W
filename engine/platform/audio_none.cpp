@@ -77,4 +77,11 @@ char* caw_audio_status(CawEngine* e) {
                ",\"exclusive_requested\":" + ((e->audioFlags & CAW_AUDIO_EXCLUSIVE) ? "true" : "false") + "}");
 }
 
+char* caw_audio_latency(CawEngine* e) {
+    if (!e) return dup("{\"running\":false}");
+    const std::string off = "{\"running\":false,\"frames\":0,\"ms\":0.00,\"source\":\"none\",\"device_id\":0}";
+    return dup("{\"running\":false,\"sample_rate\":" + std::to_string(static_cast<int>(e->engine->sampleRate())) + ",\"output\":" + off +
+               ",\"input\":" + off + "}");
+}
+
 }  // extern "C"

@@ -1,5 +1,6 @@
 // Audio output through miniaudio (AAudio on Android, WASAPI on Windows, Core Audio, ALSA/PulseAudio), with load metering.
 #include <chrono>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <mutex>
@@ -9,6 +10,7 @@
 
 #if defined(__ANDROID__)
 #include <dlfcn.h>
+#include <time.h>
 #endif
 
 #include "caw.h"
@@ -402,6 +404,102 @@ std::string inputStatus(const CawEngine* e, const Audio* a) {
     return out + ",\"error\":" + quoted(a ? a->inputError.c_str() : "") + "}";
 }
 
+
+// API 23: how late one side of the device is, in the engine's frames, and where the figure came from.
+struct SideLatency {
+    int64_t frames = 0;
+    const char* source = "none";  // "timestamp" (AAudio's presentation time), "buffers" (the queued periods), "none"
+    int32_t deviceId = 0;         // AAudio's routed device id (AudioDeviceInfo.getId() on Android); 0 elsewhere
+};
+
+int64_t toEngineFrames(int64_t frames, ma_uint32 deviceRate, int engineRate) {
+    if (deviceRate == 0 || static_cast<int>(deviceRate) == engineRate) return frames;
+    return frames * engineRate / static_cast<int64_t>(deviceRate);
+}
+
+// Every queued period of one side, at the engine's rate: the whole latency where nothing better is known
+// (WASAPI, ALSA, PulseAudio). [Assumption] a converter, the driver and the speaker (or a Bluetooth link) add more;
+// the per-device offset in the app covers that.
+SideLatency bufferLatency(const ma_uint32 period, const ma_uint32 periods, const ma_uint32 rate, int engineRate) {
+    SideLatency s;
+    s.frames = toEngineFrames(static_cast<int64_t>(period) * std::max<ma_uint32>(1, periods), rate, engineRate);
+    s.source = s.frames > 0 ? "buffers" : "none";
+    return s;
+}
+
+#if defined(__ANDROID__)
+// AAudio's own figure, from AAudioStream_getTimestamp (NDK API 26: the time a frame was played on the speaker or
+// headset, or recorded on the microphone): the next frame written (read) reaches the speaker at (was recorded at)
+// that time plus the frames between them, so the latency is how far that lies from now. The same reckoning as
+// Oboe's AudioStream::calculateLatencyMillis. Looked up in the libaaudio.so miniaudio opened, as the modes are.
+// Called with the device's reroute lock held, so the stream stays the one miniaudio has. False when no timestamp
+// is available yet (a stream that has only just started) or the figure is out of range.
+bool aaudioLatency(Audio* a, void* stream, bool output, int engineRate, SideLatency& out) {
+    if (!stream || !a->context.aaudio.hAAudio) return false;
+    void* lib = a->context.aaudio.hAAudio;
+    using Timestamp = int32_t (*)(void*, int32_t, int64_t*, int64_t*);
+    using Frames = int64_t (*)(void*);
+    using Int = int32_t (*)(void*);
+    auto timestamp = reinterpret_cast<Timestamp>(dlsym(lib, "AAudioStream_getTimestamp"));
+    auto frames = reinterpret_cast<Frames>(dlsym(lib, output ? "AAudioStream_getFramesWritten" : "AAudioStream_getFramesRead"));
+    auto rate = reinterpret_cast<Int>(dlsym(lib, "AAudioStream_getSampleRate"));
+    auto device = reinterpret_cast<Int>(dlsym(lib, "AAudioStream_getDeviceId"));
+    if (device) out.deviceId = device(stream);
+    if (!timestamp || !frames || !rate) return false;
+    int64_t position = 0, timeNs = 0;
+    if (timestamp(stream, CLOCK_MONOTONIC, &position, &timeNs) != 0) return false;  // AAUDIO_OK is 0
+    const int32_t sr = rate(stream);
+    if (sr <= 0 || timeNs <= 0) return false;
+    const int64_t app = frames(stream);
+    timespec now{};
+    clock_gettime(CLOCK_MONOTONIC, &now);
+    const int64_t nowNs = static_cast<int64_t>(now.tv_sec) * 1000000000LL + now.tv_nsec;
+    const int64_t at = timeNs + (app - position) * 1000000000LL / sr;
+    const int64_t ns = output ? at - nowNs : nowNs - at;
+    if (ns <= 0 || ns > 2000000000LL) return false;  // stale or not yet meaningful
+    out.frames = ns * engineRate / 1000000000LL;
+    out.source = "timestamp";
+    return true;
+}
+#endif
+
+std::string sideJson(const SideLatency& s, int engineRate, bool running) {
+    const double ms = engineRate > 0 ? static_cast<double>(s.frames) * 1000.0 / engineRate : 0.0;
+    char buf[48];
+    std::snprintf(buf, sizeof buf, "%.2f", ms);
+    return std::string("{\"running\":") + (running ? "true" : "false") + ",\"frames\":" + std::to_string(s.frames) +
+           ",\"ms\":" + buf + ",\"source\":\"" + s.source + "\",\"device_id\":" + std::to_string(s.deviceId) + "}";
+}
+
+std::string latencyJson(CawEngine* e, Audio* a) {
+    const int rate = static_cast<int>(e->engine->sampleRate());
+    if (!a) return "{\"running\":false,\"sample_rate\":" + std::to_string(rate) + ",\"output\":" +
+                   sideJson(SideLatency{}, rate, false) + ",\"input\":" + sideJson(SideLatency{}, rate, false) + "}";
+    const auto& p = a->device.playback;
+    const auto& c = a->device.capture;
+    SideLatency out = bufferLatency(p.internalPeriodSizeInFrames, p.internalPeriods, p.internalSampleRate, rate);
+    SideLatency in;
+    if (a->input) in = bufferLatency(c.internalPeriodSizeInFrames, c.internalPeriods, c.internalSampleRate, rate);
+#if defined(__ANDROID__)
+    if (a->context.backend == ma_backend_aaudio) {
+        ma_mutex_lock(&a->device.aaudio.rerouteLock);
+        SideLatency t;
+        if (aaudioLatency(a, a->device.aaudio.pStreamPlayback, true, rate, t)) out = t;
+        else out.deviceId = t.deviceId;
+        if (a->input) {
+            SideLatency ti;
+            if (aaudioLatency(a, a->device.aaudio.pStreamCapture, false, rate, ti)) in = ti;
+            else in.deviceId = ti.deviceId;
+        }
+        ma_mutex_unlock(&a->device.aaudio.rerouteLock);
+    }
+#endif
+    // The duplex ring buffer's two capture periods (see openDevice) hold the input back before the callback reads it.
+    if (a->input) in.frames += toEngineFrames(a->duplexBufferFrames, c.internalSampleRate, rate);
+    return "{\"running\":true,\"sample_rate\":" + std::to_string(rate) + ",\"output\":" + sideJson(out, rate, true) +
+           ",\"input\":" + sideJson(in, rate, a->input) + "}";
+}
+
 }  // namespace
 
 extern "C" {
@@ -565,6 +663,12 @@ char* caw_audio_status(CawEngine* e) {
                ",\"modes_read_back\":" + (a->modesReadBack ? "true" : "false") +
                ",\"fallback\":" + (a->fallback ? "true" : "false") +
                ",\"fallback_reason\":" + quoted(a->fallbackReason.c_str()) + request + ",\"input\":" + inputStatus(e, a) + "}");
+}
+
+char* caw_audio_latency(CawEngine* e) {
+    if (!e) return dup("{\"running\":false}");
+    std::lock_guard<std::mutex> lock(gDeviceLock);
+    return dup(latencyJson(e, static_cast<Audio*>(e->audio)));
 }
 
 }  // extern "C"

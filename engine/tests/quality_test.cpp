@@ -245,3 +245,18 @@ TEST(the_device_choice_is_kept_without_a_device) {
     CHECK_EQ(caw_audio_configure(nullptr, nullptr, nullptr, 0, 0), 1);
     caw_engine_destroy(c);
 }
+
+TEST(latency_without_a_device_reports_none) {
+    CawEngine* c = caw_engine_create(44100);
+    char* lat = caw_audio_latency(c);
+    const std::string s = lat;
+    caw_free(lat);
+    CHECK(s.find("\"running\":false") != std::string::npos);
+    CHECK(s.find("\"sample_rate\":44100") != std::string::npos);
+    CHECK(s.find("\"output\":{") != std::string::npos && s.find("\"input\":{") != std::string::npos);
+    CHECK(s.find("\"source\":\"none\"") != std::string::npos);
+    caw_engine_destroy(c);
+    lat = caw_audio_latency(nullptr);
+    CHECK(std::string(lat) == "{\"running\":false}");
+    caw_free(lat);
+}
