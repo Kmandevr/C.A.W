@@ -701,22 +701,26 @@ class CppEditorState extends State<CppEditor> {
       ],
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
-        child: Text.rich(
-          TextSpan(children: [
-            if (width >= 420) ...[
-              TextSpan(text: w.name, style: Neon.code(size: 11, color: Neon.dim)),
-              TextSpan(text: ' › ', style: Neon.code(size: 11, color: Neon.line)),
-              for (final p in parts.take(parts.length - 1)) ...[
-                TextSpan(text: p, style: Neon.code(size: 11, color: Neon.dim)),
-                TextSpan(text: ' › ', style: Neon.code(size: 11, color: Neon.line)),
-              ],
-            ],
-            TextSpan(text: parts.last, style: Neon.code(size: 11, color: Neon.text)),
-            const WidgetSpan(alignment: PlaceholderAlignment.middle, child: Icon(Icons.arrow_drop_down, size: 14, color: Neon.dim)),
-          ]),
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-        ),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          Flexible(
+            child: Text.rich(
+              TextSpan(children: [
+                if (width >= 420) ...[
+                  TextSpan(text: w.name, style: Neon.code(size: 11, color: Neon.dim)),
+                  TextSpan(text: ' › ', style: Neon.code(size: 11, color: Neon.dim.withValues(alpha: 0.6))),
+                  for (final p in parts.take(parts.length - 1)) ...[
+                    TextSpan(text: p, style: Neon.code(size: 11, color: Neon.dim)),
+                    TextSpan(text: ' › ', style: Neon.code(size: 11, color: Neon.dim.withValues(alpha: 0.6))),
+                  ],
+                ],
+                TextSpan(text: parts.last, style: Neon.code(size: 11, color: Neon.text)),
+              ]),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          const Icon(Icons.arrow_drop_down, size: 14, color: Neon.dim),
+        ]),
       ),
     );
     return Container(

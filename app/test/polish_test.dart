@@ -9,6 +9,7 @@ import 'package:caw/ui/arrange/focus_panel.dart';
 import 'package:caw/ui/arranger_screen.dart';
 import 'package:caw/ui/automation_screen.dart';
 import 'package:caw/ui/exporter_screen.dart';
+import 'package:caw/ui/file_manager_screen.dart';
 import 'package:caw/ui/frame/sections.dart';
 import 'package:caw/ui/haptics.dart';
 import 'package:caw/ui/pattern_editor.dart';
@@ -191,6 +192,23 @@ void main() {
       expect(find.byKey(const ValueKey('scroll-fade-right')), findsOneWidget);
       await tester.pumpWidget(const SizedBox());
       await tester.pump(const Duration(seconds: 2));
+    });
+  });
+
+  group('Files', () {
+    testWidgets('on a phone the filters are labelled chips and one button switches list and icons', (tester) async {
+      tester.view.physicalSize = const Size(390, 844);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      await tester.pumpWidget(MaterialApp(home: Scaffold(body: FileManagerScreen(state: s))));
+      await tester.pump();
+      await tester.pump();
+      expect(find.text('Effects'), findsOneWidget);
+      expect(find.byType(Slider), findsNothing);
+      expect(find.byKey(const ValueKey('scroll-fade-right')), findsOneWidget);
+      await tester.tap(find.byTooltip('Show as a list'));
+      await tester.pump();
+      expect(find.byTooltip('Show as icons'), findsOneWidget);
     });
   });
 }

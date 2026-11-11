@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 
 import '../model/app_state.dart';
 import '../model/files_catalog.dart';
-import 'frame/frame_widgets.dart' show AwakeListenableBuilder;
+import 'frame/frame_widgets.dart' show AwakeListenableBuilder, ScrollFade;
 import 'files/asset_actions.dart';
 import 'files/asset_inspector.dart';
 import 'files/asset_views.dart';
@@ -280,7 +280,8 @@ class _FileManagerScreenState extends State<FileManagerScreen> {
     return SizedBox(
       height: 40,
       child: Row(children: [
-        Expanded(child: SingleChildScrollView(
+        // The chips scroll on a phone; a fade says there are more.
+        Expanded(child: ScrollFade(child: SingleChildScrollView(
           scrollDirection: Axis.horizontal,
           padding: const EdgeInsets.only(left: Space.s),
           child: Row(children: [
@@ -290,11 +291,17 @@ class _FileManagerScreenState extends State<FileManagerScreen> {
             toggle(FileAssetFilter.patterns, Icons.piano, 'Patterns'),
             const SizedBox(width: Space.xs),
             Text('$count item${count == 1 ? '' : 's'}', style: TypeScale.number(size: TypeScale.caption, color: Neon.dim)),
+            const SizedBox(width: Space.s),
           ]),
-        )),
+        ))),
+        // A phone gets one list/icons toggle instead of the size slider, so the filters keep the room.
+        if (narrow)
+          _iconButton(_size < _listBelow ? Icons.grid_view : Icons.view_list, _size < _listBelow ? 'Show as icons' : 'Show as a list',
+              () => setState(() => _size = _size < _listBelow ? 0.35 : 0)),
+        if (!narrow) ...[
         Tooltip(message: 'List', child: Icon(Icons.view_list, size: 14, color: _size < _listBelow ? Neon.blue : Neon.dim)),
         SizedBox(
-          width: narrow ? 64 : 110,
+          width: 110,
           child: SliderTheme(
             data: SliderTheme.of(context).copyWith(
               trackHeight: 2,
@@ -310,6 +317,7 @@ class _FileManagerScreenState extends State<FileManagerScreen> {
           ),
         ),
         const Tooltip(message: 'Large icons', child: Icon(Icons.grid_view, size: 14, color: Neon.dim)),
+        ],
         const SizedBox(width: Space.s),
       ]),
     );
@@ -477,7 +485,7 @@ class _FileManagerScreenState extends State<FileManagerScreen> {
             if (widget.explorer && !searching) _explorerGroups(folder.path),
             if (!wide && _searchOpen)
               Padding(padding: const EdgeInsets.fromLTRB(Space.s, 0, Space.s, Space.xs), child: _searchField(autofocus: true)),
-            if (!widget.explorer) _filterBar(subfolders.length + assets.length, narrow: c.maxWidth < 360),
+            if (!widget.explorer) _filterBar(subfolders.length + assets.length, narrow: c.maxWidth < 480),
             Expanded(child: _grid(folder, subfolders, assets, searching)),
             if (selected != null && !sideInspector && !widget.explorer)
               Padding(
