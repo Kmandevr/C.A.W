@@ -4,6 +4,7 @@
 import 'dart:math' as math;
 
 import 'app_state.dart';
+import 'audio_edit.dart';
 import 'pattern_doc.dart';
 import 'project.dart';
 
@@ -130,11 +131,15 @@ extension ArrangeEdit on AppState {
   /// gets its own pattern (REAPER never pools the parts of a split, UG 13.35). True when something was split.
   bool splitClips({int? at}) {
     final step = at ?? editStep;
+    // Audio clips split by their own rules (audio_edit.dart): a selection of only audio clips splits those; with
+    // nothing selected every clip under the cut splits, audio too. A mixed selection splits its MIDI clips.
+    final none = selectedClipIds.isEmpty, midiChosen = selectedClips.isNotEmpty;
     bool under(ClipDoc c) => !c.lock && c.startSteps < step && c.startSteps + c.lengthSteps > step;
     final chosen = selectedClipIds.isEmpty
         ? [for (final l in project.layers) if (!l.isFolder) for (final c in l.clips) if (under(c)) (layer: l, clip: c)]
         : [for (final c in selectedClips) if (under(c.clip)) c];
-    if (chosen.isEmpty) return false;
+    final audio = none || !midiChosen ? splitAudioClips(step.toDouble(), selectedOnly: !none) : false;
+    if (chosen.isEmpty) return audio;
     endUndoStep();
     final rights = <PlacedClip>[];
     editProject((p) {
@@ -226,7 +231,7 @@ extension ArrangeEdit on AppState {
   /// as a block, so the copies keep their spacing. The copies become the selection.
   bool duplicateSelected() {
     final chosen = selectedClips;
-    if (chosen.isEmpty) return false;
+    if (chosen.isEmpty) return duplicateSelectedAudio();
     final lo = chosen.map((c) => c.clip.startSteps).reduce(math.min);
     final hi = chosen.map((c) => c.clip.startSteps + c.clip.lengthSteps).reduce(math.max);
     final copies = <PlacedClip>[];
@@ -249,8 +254,9 @@ extension ArrangeEdit on AppState {
 
   /// Delete (REAPER: Delete removes the selected items). Locked clips stay. True when something was deleted.
   bool deleteSelected() {
+    final audio = deleteSelectedAudio();
     final chosen = [for (final c in selectedClips) if (!c.clip.lock) c];
-    if (chosen.isEmpty) return false;
+    if (chosen.isEmpty) return audio;
     endUndoStep();
     editProject((_) {
       for (final c in chosen) {

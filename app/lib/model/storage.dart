@@ -208,6 +208,10 @@ class ProjectStorage {
   Directory samplePacksDirectory(String projectId) => Directory(
     '${_root.path}${Platform.pathSeparator}samples${Platform.pathSeparator}${_validatedProjectId(projectId)}');
 
+  /// The project's audio (API 18): imported files are copied here, and recordings go into its `recordings` folder.
+  Directory audioDirectory(String projectId) => Directory(
+    '${_root.path}${Platform.pathSeparator}audio${Platform.pathSeparator}${_validatedProjectId(projectId)}');
+
   Future<void> delete(String id) async {
     final f = _file(id);
     if (await f.exists()) await f.delete();
@@ -216,6 +220,8 @@ class ProjectStorage {
       if (await history.exists()) await history.delete(recursive: true);
       final samples = samplePacksDirectory(id);
       if (await samples.exists()) await samples.delete(recursive: true);
+      final audio = audioDirectory(id);
+      if (await audio.exists()) await audio.delete(recursive: true);
     }
   }
 

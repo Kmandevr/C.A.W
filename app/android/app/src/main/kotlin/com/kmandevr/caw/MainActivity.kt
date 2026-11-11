@@ -1,5 +1,5 @@
 // The Android host: thermal and battery-saver signals for the resource adapter, the C++ compiler channel, MIDI
-// devices and the Bluetooth MIDI scan, saving exports and haptics.
+// devices and the Bluetooth MIDI scan, saving exports, haptics and the microphone permission.
 package com.kmandevr.caw
 
 import android.content.BroadcastReceiver
@@ -20,6 +20,7 @@ class MainActivity : FlutterActivity() {
     private var pendingSave: Pair<String, MethodChannel.Result>? = null
     private var bluetoothMidi: BluetoothMidi? = null
     private var pendingFolder: FolderSave? = null
+    private var micPermission: MicPermission? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -99,6 +100,11 @@ class MainActivity : FlutterActivity() {
 
         // Touch feedback with the vibrator's fine primitives (Haptics.kt).
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, HAPTICS_METHOD_CHANNEL).setMethodCallHandler(Haptics(this))
+
+        // RECORD_AUDIO, asked only when audio input is turned on or a track is armed (MicPermission.kt).
+        val mic = MicPermission(this)
+        micPermission = mic
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, PERMISSIONS_METHOD_CHANNEL).setMethodCallHandler(mic)
 
         // MIDI devices (MidiInput.kt) and the in-app Bluetooth LE MIDI scan (BluetoothMidi.kt).
         val midi = MidiInput(applicationContext)
@@ -207,6 +213,7 @@ class MainActivity : FlutterActivity() {
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         if (bluetoothMidi?.onPermissionResult(requestCode) == true) return
+        if (micPermission?.onPermissionResult(requestCode) == true) return
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
     }
 
@@ -257,6 +264,7 @@ class MainActivity : FlutterActivity() {
         private const val BLUETOOTH_METHOD_CHANNEL = "caw/midi/bluetooth"
         private const val FILES_METHOD_CHANNEL = "caw/files"
         private const val HAPTICS_METHOD_CHANNEL = "caw/haptics"
+        private const val PERMISSIONS_METHOD_CHANNEL = "caw/permissions"
         private const val SAVE_REQUEST = 4711
         private const val SAVE_FOLDER_REQUEST = 4712
     }

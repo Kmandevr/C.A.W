@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import '../../model/app_state.dart';
 import '../../model/automation_writer.dart';
 import '../../model/live_midi.dart';
+import '../audio_record_ui.dart';
 import '../feedback.dart';
 import '../glass.dart';
 import '../haptics.dart';
@@ -318,7 +319,7 @@ class _BottomTransportState extends State<BottomTransport> {
             ),
           ),
           const SizedBox(width: 4),
-          // Record plays a USB keyboard or the on-screen keys; audio recording needs the engine's audio input (#152).
+          // Record plays a USB keyboard or the on-screen keys, and records the armed audio tracks (audio_record.dart).
           RecordButton(midi: widget.midi, state: s, constraints: small),
         ]),
       ),
@@ -326,10 +327,10 @@ class _BottomTransportState extends State<BottomTransport> {
     if (midi == null) return bar;
     return TakeToast(
       midi: midi,
-      child: Column(mainAxisSize: MainAxisSize.min, children: [
+      child: AudioRecordFeedback(state: s, child: Column(mainAxisSize: MainAxisSize.min, children: [
         LiveKeysPanel(midi: midi, state: s, compact: widget.compact),
         bar,
-      ]),
+      ])),
     );
   }
 
@@ -360,7 +361,7 @@ class RecordButton extends StatelessWidget {
             key: const ValueKey('transport-record'),
             tooltip: recording
                 ? 'Stop recording'
-                : 'Record into the selected track (long-press: metronome, count-in)',
+                : 'Record into the selected track and the armed audio tracks (long-press: metronome, count-in)',
             iconSize: 19,
             constraints: constraints,
             color: Neon.pink,

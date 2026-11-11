@@ -32,6 +32,13 @@ class AssetInspector extends StatelessWidget {
             if (asset.sample!.seconds > 0) '${asset.sample!.seconds.toStringAsFixed(2)} s',
             if (asset.sample!.looped) 'looped',
           ].join(' · ')}',
+        FileAssetType.audioFile => 'Audio files · ${[
+            if (asset.audio!.seconds > 0) '${asset.audio!.seconds.toStringAsFixed(2)} s',
+            if (asset.audio!.channels > 0) asset.audio!.channels == 1 ? 'mono' : 'stereo',
+            if (asset.audio!.sourceRate > 0) '${(asset.audio!.sourceRate / 1000).toStringAsFixed(1)} kHz',
+            if (asset.audio!.bpm != null) '${asset.audio!.bpm!.toStringAsFixed(0)} BPM',
+            if (asset.audio!.recorded) 'recorded',
+          ].join(' · ')}',
         FileAssetType.midiFile => 'MIDI files · ${asset.midi!.parts.length} part${asset.midi!.parts.length == 1 ? '' : 's'}',
         _ => asset.module!.folderPath.isEmpty ? 'Patterns' : 'Patterns / ${asset.module!.folderPath}',
       };

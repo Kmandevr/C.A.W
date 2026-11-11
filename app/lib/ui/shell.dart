@@ -14,6 +14,7 @@ import '../model/app_state.dart';
 import '../model/settings.dart';
 import '../platform/system_bars.dart';
 import 'arranger_screen.dart';
+import 'audio_record_ui.dart';
 import 'export_page.dart';
 import 'cpp/build_section.dart';
 import 'dock/dock_controller.dart';
@@ -318,7 +319,8 @@ class _ShellState extends State<Shell> {
               ),
             ),
             // The on-screen keys and pads slide up from the bottom edge here.
-            if (LiveMidi.current case final m?) TakeToast(midi: m, child: LiveKeysPanel(midi: m, state: s)),
+            if (LiveMidi.current case final m?)
+              TakeToast(midi: m, child: AudioRecordFeedback(state: s, child: LiveKeysPanel(midi: m, state: s))),
           ]),
         ),
       ]);

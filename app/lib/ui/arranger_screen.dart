@@ -8,12 +8,16 @@ import 'package:flutter/services.dart';
 import '../actions/actions.dart';
 import '../model/app_state.dart';
 import '../model/arrange_edit.dart';
+import '../model/audio_edit.dart';
 import '../model/arrange_fx.dart';
 import '../model/arrange_markers.dart';
 import '../model/live_midi.dart';
 import '../model/project.dart';
 import '../model/record_modes.dart';
 import '../model/settings.dart';
+import 'arrange/audio_clip_view.dart';
+import 'arrange/audio_input_ui.dart';
+import 'audio_file_actions.dart';
 import 'arrange/arrange_drag.dart';
 import 'arrange/region_list.dart';
 import 'arrange/take_chip.dart';
@@ -450,12 +454,22 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
         // the engine's input.
         // While any track records, this stops that take (one take at a time).
         // With no USB keyboard, recording opens the on-screen keys and pads.
-        MenuAction('arm', midi?.recording ?? false ? 'Stop recording' : 'Record arm', Icons.fiber_manual_record,
-            enabled: midi != null, checked: midi?.armedLayerId == layer.id),
-        MenuAction('input', 'Input · ${midi == null || midi.devices.isEmpty ? 'none' : midi.devices.join(', ')}', Icons.input,
-            enabled: false, hint: 'MIDI keyboards play the selected track; audio input comes later'),
+        if (layer.isAudio) ...[
+          // An audio track records its input (lib/model/audio_record.dart) when armed and Record is pressed.
+          MenuAction('audio-arm', 'Record arm', Icons.fiber_manual_record, checked: layer.input?.armed ?? false),
+          MenuAction('audio-input', 'Input · ${layer.input?.label ?? 'none'}…', Icons.input),
+        ] else ...[
+          MenuAction('arm', midi?.recording ?? false ? 'Stop recording' : 'Record arm', Icons.fiber_manual_record,
+              enabled: midi != null, checked: midi?.armedLayerId == layer.id),
+          MenuAction('input', 'Input · ${midi == null || midi.devices.isEmpty ? 'none' : midi.devices.join(', ')}', Icons.input,
+              enabled: false, hint: 'MIDI keyboards play the selected track; an audio track records audio input'),
+        ],
+        if (layer.instrument == null && layer.clips.isEmpty)
+          const MenuAction('audio-import', 'Import audio…', Icons.graphic_eq_rounded)
+        else
+          const MenuAction('audio-track', 'New audio track below', Icons.graphic_eq_rounded),
         // The same browser as the FX stack's (REAPER: instruments are FX), filtered to instruments.
-        MenuAction('instrument', 'Instrument · ${s.instrumentName(layer) ?? 'none'}…', Icons.piano),
+        if (!layer.isAudio) MenuAction('instrument', 'Instrument · ${s.instrumentName(layer) ?? 'none'}…', Icons.piano),
         for (final pattern in patterns) MenuAction('clip:${pattern.id}', 'Add clip · ${pattern.name}', Icons.add_box_outlined),
         const MenuAction('midi', 'Import MIDI file…', Icons.file_open_outlined),
       ],
@@ -487,6 +501,19 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
     if (v == null || !mounted) return;
     if (v == 'fx') _openTrack(layer, tab: FocusTab.fx);
     if (v == 'arm') midi?.toggleRecord(layer.id);
+    if (v == 'audio-arm') {
+      await toggleAudioArm(context, s, layer);
+      return;
+    }
+    if (v == 'audio-input') {
+      await showAudioInputSheet(context, s, layer);
+      return;
+    }
+    if (v == 'audio-import') {
+      await importAudioFiles(context, s, layer: layer);
+      return;
+    }
+    if (v == 'audio-track') s.addAudioTrack(after: layer);
     if (v == 'instrument') {
       await pickInstrument(context, s, layer);
       return;
@@ -684,6 +711,7 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
     onMenu: (l, at) => _trackMenu(l, at, patterns),
     onClipMenu: _clipMenu,
     onClipOpen: (l, c) { widget.state.activateClip(l, c); _focus(l.id, tab: FocusTab.clip); },
+    onAudioOpen: (l) => _focus(l.id, tab: FocusTab.clip),
     selectMode: () => _selectMode,
     onMarquee: (phase, at, additive) => switch (phase) {
       _Marquee.start => _marqueeStart(at, additive: additive),
@@ -1131,11 +1159,14 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
 /// What a track header, lane or clip asks of the arranger.
 class _TrackCallbacks {
   const _TrackCallbacks({required this.onTap, required this.onFx, required this.onMenu, required this.onClipMenu,
-    required this.onClipOpen, required this.selectMode, required this.onMarquee});
+    required this.onClipOpen, required this.selectMode, required this.onMarquee, this.onAudioOpen});
   final ValueChanged<LayerDoc> onTap, onFx;
   final void Function(LayerDoc layer, Offset at) onMenu;
   final void Function(LayerDoc layer, ClipDoc clip, Offset at) onClipMenu;
   final void Function(LayerDoc layer, ClipDoc clip) onClipOpen;
+
+  /// An audio clip's double-tap: the track's Clip tab (its inspector).
+  final void Function(LayerDoc layer)? onAudioOpen;
 
   /// Whether Select mode is on: a tap on a clip adds or removes it, a long-press drag in a lane draws a box.
   final bool Function() selectMode;
@@ -1209,8 +1240,11 @@ class _TimelineHeader extends StatelessWidget {
                 ? state.editLayer(layer, (l) => l.solo = !l.solo)
                 : state.mixLayer(layer, solo: !layer.solo));
         // A stereo track (a native instrument or effect, or a folder) meters each side; an empty track one bar.
-        final meter = TrackMeter(key: ValueKey('meter-${layer.id}'), state: state, index: index, stereo: layer.isStereo,
-            color: color);
+        // An armed audio track shows its input's level instead (REAPER's record-armed meter).
+        final meter = layer.input?.armed ?? false
+            ? Center(child: AudioInputMeter(layer: layer, height: thin ? 5 : 7))
+            : TrackMeter(key: ValueKey('meter-${layer.id}'), state: state, index: index, stereo: layer.isStereo,
+                color: color);
         // FX: drawn at 18 dp, touched over about 34 dp; a dot tells the track has effects. A very narrow header
         // drops it: a tap on the header opens the track's effects too.
         final showFx = box.maxWidth >= 104;
@@ -1257,6 +1291,7 @@ class _TimelineHeader extends StatelessWidget {
           Expanded(child: Tooltip(
             message: layer.isFolder
                 ? (layer.busEnabled ? 'Folder with a group bus' : 'Folder')
+                : layer.isAudio ? 'Audio track · ${layer.input?.label ?? 'no input'} · hold for more'
                 : 'Instrument: ${layer.instrument != null ? state.componentInfo(layer.instrument!.id)?.label ?? layer.instrument!.id
                     : 'none'} · hold for more',
             child: Text(layer.name, maxLines: 1, overflow: TextOverflow.ellipsis,
@@ -1264,6 +1299,8 @@ class _TimelineHeader extends StatelessWidget {
                 color: Color.lerp(Neon.text, color, selected ? 0.35 : 0.15))))),
           // A deep folder's header can get narrow: M and S move to their own row's place, the icons go first.
           if (oneRow && box.maxWidth >= 72) ...[mute, const SizedBox(width: 2), solo],
+          // Arm sits by the name when the header has room for both; a phone's one-row header puts it by the meter.
+          if (layer.isAudio && !oneRow) AudioArmButton(state: state, layer: layer, size: chip),
           // A folder's icon only says what it is: a narrow header gives its room to the name.
           if (showFx && (!layer.isFolder || box.maxWidth >= 140)) fx,
         ]));
@@ -1272,8 +1309,9 @@ class _TimelineHeader extends StatelessWidget {
           // under the name allows.
           final room = box.maxHeight - (thin ? 26 : 32);
           final lanes = room >= 12 ? lanesButton(30, math.min(18.0, room)) : null;
+          final arm = layer.isAudio ? AudioArmButton(state: state, layer: layer, size: math.max(12.0, math.min(18.0, room))) : null;
           return Column(mainAxisSize: MainAxisSize.min, children: [top, SizedBox(height: thin ? 2 : 4),
-            lanes == null ? meter : Row(children: [Expanded(child: meter), lanes])]);
+            lanes == null && arm == null ? meter : Row(children: [?arm, Expanded(child: meter), ?lanes])]);
         }
         final lanes = lanesButton(26, 26);
         return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -1542,15 +1580,25 @@ class _TimelineLaneState extends State<_TimelineLane> {
             height: trackHeight - 2 * _clipInset(trackHeight),
             color: clip.color == null ? color : Neon.layer(clip.color!),
             selected: widget.selectedIds.contains(clip.id), callbacks: widget.callbacks)),
+      // Audio clips (API 18): an audio track's clips, with their own handles (audio_clip_view.dart).
+      for (final clip in layer.audioClips)
+        Positioned(left: clip.startSteps * stepW, top: _clipInset(trackHeight),
+          width: math.max(12.0, clip.lengthAt(state.project.bpm) * stepW),
+          height: trackHeight - 2 * _clipInset(trackHeight),
+          child: AudioClipView(key: ValueKey('audio-view-${clip.id}'), state: state, layer: layer, clip: clip,
+            stepW: stepW, drag: widget.drag, height: trackHeight - 2 * _clipInset(trackHeight),
+            color: audioClipColor(state, layer, clip), selected: widget.selectedIds.contains(clip.id),
+            selectMode: widget.callbacks.selectMode, onOpen: () => widget.callbacks.onAudioOpen?.call(layer))),
       if (_drawing case (final from, final to))
         Positioned(left: from * stepW, top: _clipInset(trackHeight), width: (to - from) * stepW,
           height: trackHeight - 2 * _clipInset(trackHeight), child: IgnorePointer(child: DecoratedBox(
             key: const ValueKey('clip-draw-preview'),
             decoration: BoxDecoration(borderRadius: BorderRadius.circular(5), color: color.withValues(alpha: 0.18),
               border: Border.all(color: color))))),
-      if (layer.clips.isEmpty && !layer.isFolder)
-        Positioned(left: 10, top: trackHeight * 0.38, child: const IgnorePointer(child: Text(
-          'Double-tap for a clip, or drop a pattern here', style: TextStyle(color: Neon.dim, fontSize: 10)))),
+      if (layer.clips.isEmpty && layer.audioClips.isEmpty && !layer.isFolder)
+        Positioned(left: 10, top: trackHeight * 0.38, child: IgnorePointer(child: Text(
+          layer.isAudio ? 'Drop audio here, or arm the track and record' : 'Double-tap for a clip, or drop a pattern here',
+          style: const TextStyle(color: Neon.dim, fontSize: 10)))),
     ]),
   ));
     final drag = widget.drag;

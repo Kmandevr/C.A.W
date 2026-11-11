@@ -12,6 +12,7 @@ import 'flagship/flagship_presets.dart';
 import 'generic_device_page.dart';
 import 'kit/device_style.dart';
 import 'kit/presets.dart';
+import 'sampler/sampler_editor.dart';
 
 /// One tab of a device editor.
 class DeviceSection {
@@ -46,6 +47,7 @@ class DeviceEditors {
     flagshipComponentId: const DeviceEditorEntry(flagshipSections, family: DeviceFamily.synth, presets: flagshipStarterPresets,
         inline: flagshipInline),
     ...drumEditors,
+    ...samplerEditors,
   };
 
   /// Editors chosen by a built-in effect's parameters (an EQ by its `bandN_` knobs, and so on), so the stock

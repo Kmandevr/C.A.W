@@ -324,6 +324,15 @@ class Engine {
     return AudioStatus.fromJson(j);
   }
 
+  /// The device's status as the engine wrote it (API 18 adds its "input" object).
+  Map<String, dynamic> audioStatusJson() {
+    final r = _b.audioStatus(_handle);
+    if (r == nullptr) return const {};
+    final j = jsonDecode(r.toDartString()) as Map<String, dynamic>;
+    _b.free(r);
+    return j;
+  }
+
   /// The metronome's click: [volume] 0..1 and its sound (CAW_CLICK_*: 0 Classic, 1 Wood, 2 Tick).
   void setMetronomeSound(double volume, int sound) => _b.setMetronomeSound(_handle, volume, sound);
 
@@ -817,6 +826,22 @@ class Engine {
   }
 
   bool get audioOn => _audioOn;
+
+  /// The native engine's address for a quick call on this isolate (API 18 meters, statuses), or null once disposed.
+  int? get nativeAddress => _disposed || _nativeDestroyed ? null : _handle.address;
+
+  /// Runs [op] (usually an [Isolate.run]) with the native engine's address, keeping the engine alive until it ends
+  /// (the API 18 calls in audio_engine.dart). Null when the engine is already disposed.
+  Future<T?> withNative<T>(Future<T> Function(int address) op) async {
+    if (_disposed) return null;
+    _pendingNativeOps++;
+    try {
+      return await op(_handle.address);
+    } finally {
+      _pendingNativeOps--;
+      if (_destroyRequested && _pendingNativeOps == 0) _destroyNative();
+    }
+  }
 
   void dispose() {
     if (_disposed) return;

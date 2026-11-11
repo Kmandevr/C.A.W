@@ -286,7 +286,9 @@ class LiveMidi extends ChangeNotifier {
     }
     final id = layerId ?? targetLayerId;
     if (id == null) return;
-    if (devices.isEmpty) keysOpen = true;
+    // An armed audio track records its input instead (audio_record.dart): the keys stay as they are then.
+    final audioArmed = state.project.layers.any((l) => l.input?.armed ?? false);
+    if (devices.isEmpty && !audioArmed) keysOpen = true;
     armedLayerId = id;
     taken.clear();
     lastTake.value = null;

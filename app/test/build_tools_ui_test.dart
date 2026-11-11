@@ -1,6 +1,7 @@
 // The Build tools' screens with a fake engine: the testing suite's request and result cards, the sample-pack maker's request, progress and cancel, and the plug-in export; goldens at phone and desktop size.
 import 'dart:async';
 
+import 'package:caw/ui/frame/sections.dart' show AssetKind;
 import 'package:caw/engine/build_tools.dart';
 import 'package:caw/engine/engine.dart' show NativeComponentTrust;
 import 'dart:convert';
@@ -248,7 +249,9 @@ void main() {
       final wav = state.folderAssets(folder).single;
       expect(wav.type, FileAssetType.sampleFile);
       expect(wav.sample!.noteName, 'C4');
-      expect(wav.drag, isNull);
+      // A pack's WAV drags as audio (a clip where it lands, or a sampler zone).
+      expect(wav.drag!.kind, AssetKind.audioFile);
+      expect(wav.drag!.id, wav.sample!.path);
       state.deleteAsset(wav);
       for (var i = 0; i < 50 && state.samplePacks.isNotEmpty; i++) {
         await Future<void>.delayed(const Duration(milliseconds: 10));

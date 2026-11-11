@@ -8,6 +8,7 @@ import '../../model/app_state.dart';
 import '../../model/pattern_doc.dart';
 import '../../model/project.dart';
 import '../../model/settings.dart';
+import 'audio_clip_inspector.dart';
 import 'automation_panel.dart';
 import '../feedback.dart';
 import '../frame/frame_widgets.dart' show SlideIn;
@@ -295,6 +296,8 @@ class _ClipTab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // An audio track's Clip tab is its audio clips' inspector (audio_clip_inspector.dart).
+    if (layer.isAudio) return AudioClipInspector(state: state, layer: layer);
     final clip = layer.clips.where((c) => c.id == state.selectedClipId).firstOrNull ?? layer.clips.firstOrNull;
     final module = state.project.module(clip?.patternId);
     if (layer.isFolder) {

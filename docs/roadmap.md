@@ -46,13 +46,13 @@ An overview by area, checked against the repository on 2026-11-03. The stage tab
 | App/platforms | Eight Flutter workspaces; Android and Windows app CI artifacts; autosave; per-editor undo/redo; project format version check | App-wide undo, crash recovery, project migrations, onboarding/help; iOS/macOS builds; Linux app is not a shipped CI artifact |
 | Engine | Portable C++20 engine, built-in C++ instruments and effects, stereo playback/mixer, offline renderer, worker pool and adaptive workload policy | The C++ authoring toolchain, shared component SDK and Library are not built; the typed graph and N-channel contract have integration gaps (Foundation, issue #28) |
 | Patterns | Piano roll, drum grid, note expressions, lane curves, generators, MIDI file import/export | Kit-row routing, code-generated procedural patterns/Freeze and advanced groove/quantize extensions |
-| Arrangement | MIDI clip timeline, linked/independent clips, nested folders, stereo folder buses, track/folder volume-pan automation, module-parameter and project-global automation | Audio clips, clip automation, tempo map, markers/sections and consolidation |
+| Arrangement | MIDI clip timeline, linked/independent clips, nested folders, stereo folder buses, track/folder volume-pan automation, module-parameter and project-global automation; audio clips (2026-11-11) | Clip automation, tempo map, markers/sections and consolidation |
 | Mixer | Track volume/pan/mute/solo, generator/effect chains, folder buses and master output | Sends, general sidechain routing, parallel paths, master effect chain and integrated visual track/routing inspector |
 | Sound/synth | Code generators/effects, house synth patch compiler/playback, built-in wavetable morph/phase warp, LFOs and modulation matrix | Custom/imported wavetable authoring, drawn LFO curves and additional warp modes |
 | MIDI | MIDI pattern import/export; USB, Bluetooth, UMP (Android) and WinMM (Windows) devices into instruments at their frame; controller learn | MIDI clock, MIDI-CI, MIDI output |
-| Export | WAV loop/free-length/one-shot/wavetable, MIDI, profiles/history and bounded in-memory queue | SFZ multisample workflow, stems, persistent queue and broader batch delivery |
-| Audio assets | Generated audio and module/effect processing | Audio import, non-destructive audio clips, sample editor and multisample mapping |
-| Recording | No audio or live MIDI recording workflow | MIDI/audio recording, monitoring, latency compensation, punch, loop recording, takes and comping |
+| Export | WAV loop/free-length/one-shot/wavetable, MIDI, profiles/history and bounded in-memory queue | Stems, persistent queue and broader batch delivery |
+| Audio assets | Audio import into the project, non-destructive audio clips, the sampler with zone mapping and SFZ (2026-11-11) | Sample editor, generated audio as assets |
+| Recording | MIDI and audio recording, monitoring, latency compensation, punch, loop takes, crash recovery (2026-11-11) | Comping, device-loss handling, hardware timing checks |
 | Plugins | C++ components export as CLAP and VST3 plug-ins (`engine/plugin/`); native SDK/graph foundations exist | Dynamic native loading/isolation and external CLAP/VST3/AU hosting |
 | AI/video | No in-app AI; video sync is not planned | AI remains excluded; video sync remains off-roadmap |
 
@@ -127,7 +127,7 @@ These are three interfaces to the same C++ components and project state, not sep
 | # | Item | Status | Where | Depends on | What's missing |
 |---|---|---|---|---|---|
 | 0.1 | Automation for module parameters and project globals, with serialization and native engine integration | Implemented | both | — | Done (PR #68). Moves into the graph with F4/F6 |
-| 0.2 | WAV/SFZ multisample: import WAV samples (own or third-party), map zones by hand (key ranges, velocity layers), play them in C.A.W, export WAV + SFZ | Partial | both | Foundation; project folders | Engine built (API 18, [engine](engine.md#sampler-orgcawsampler)): `org.caw.sampler` with zones over the asset store, SFZ import and export. The app's zone editor and import/export screens are not built. Samples live in the project folder or the global library (owner, 2026-11-03) |
+| 0.2 | WAV/SFZ multisample: import WAV samples (own or third-party), map zones by hand (key ranges, velocity layers), play them in C.A.W, export WAV + SFZ | Partial | both | Foundation; project folders | Engine built (API 18, [engine](engine.md#sampler-orgcawsampler)): `org.caw.sampler` with zones over the asset store, SFZ import and export. The app's sampler editor maps zones by hand (drag over keys and velocity, samples dropped on keys) and imports and exports SFZ with the samples copied ([app](app.md), Audio). Samples live in the project folder or the global library (owner, 2026-11-03) |
 | 0.3 | Stems export through the native export pipeline | Planned | both | Foundation (per-bus graph renders) | No stems export exists |
 
 **Exit gate:** automation remains fully functional; the refactored engine uses one coherent execution model; retained capabilities have tests; the portable fallback works; callback safety, deterministic behavior, playback/export parity, performance budgets and CI are verified. Compatibility with old .caw source and pre-release projects is not required. Device performance claims require real-device evidence.
@@ -169,11 +169,11 @@ Built on the graph from the Foundation stage. Do not keep a second mixer or crea
 
 | # | Item | Status | Where | Depends on | What's missing |
 |---|---|---|---|---|---|
-| 3.1 | Import and preview common audio formats | Partial | both | 0.2 (WAV import) | Engine: WAV, FLAC and MP3 decode into the asset store (`caw_asset_load`); the app's import and preview are not built |
-| 3.2 | Audio clips on the timeline, positions in beats; each clip *musical* (follows tempo, stretched) or *fixed* (original speed) (owner, 2026-11-03) | Partial | both | F4 | Engine built: a layer's `audio_clips`, fixed or musical with WSOLA or varispeed ([engine](engine.md#audio-clips)); the app's clips are not built |
-| 3.3 | Waveform summaries | Partial | both | 3.1 | Engine: min/max peak levels per asset (`caw_asset_peaks`); the app's waveform drawing is not built |
-| 3.4 | Trim, split, move, duplicate, source offset, loop, fade, clip gain, reverse; selection, snapping, grouping, undo | Partial | app | 3.2, 1.6 | The engine plays every clip field (offset, length, loop, fades with curves, gain, reverse, pitch); the app's editing is not built |
-| 3.5 | Originals untouched: edits saved as non-destructive clip operations; one asset identity for generated and imported audio | Partial | both | 3.1 | Clips and zones are non-destructive fields over shared, refcounted assets keyed by path; generated audio is not an asset yet |
+| 3.1 | Import and preview common audio formats | Built, untested on hardware | both | 0.2 (WAV import) | WAV, FLAC and MP3 imported through the system picker or Files into the project's folder, decoded off the UI isolate ([app](app.md), Audio); no audition of a file before placing it |
+| 3.2 | Audio clips on the timeline, positions in beats; each clip *musical* (follows tempo, stretched) or *fixed* (original speed) (owner, 2026-11-03) | Built, untested on hardware | both | F4 | Fixed clips keep their seconds at any tempo, musical ones their steps, WSOLA or varispeed ([app](app.md), Audio); not yet heard on the S22+ |
+| 3.3 | Waveform summaries | Built, untested on hardware | both | 3.1 | Clips, the inspector and the sampler draw `caw_asset_peaks`, cached per zoom level; the cost on a long project is not measured on a phone |
+| 3.4 | Trim, split, move, duplicate, source offset, loop, fade, clip gain, reverse; selection, snapping, grouping, undo | Partial | app | 3.2, 1.6 | Built: move (across tracks, copy), edge trims with loop extend, split, duplicate, fades with curves, gain, reverse, pitch, mode, mute, lock, selection with the MIDI clips', snapping and one undo step each. Not built: grouping, the marquee and glue for audio clips |
+| 3.5 | Originals untouched: edits saved as non-destructive clip operations; one asset identity for generated and imported audio | Partial | both | 3.1 | Imports are copies in the project's folder, never changed; clips are fields over them. Generated audio is not an asset yet, and a missing file only leaves its clip silent (no report in the app yet) |
 
 **Exit gate:** project save/reopen preserves asset references and edits; missing assets are reported; originals remain unchanged; phone playback and editing stay responsive.
 
@@ -182,7 +182,7 @@ Built on the graph from the Foundation stage. Do not keep a second mixer or crea
 | # | Item | Status | Where | Depends on | What's missing |
 |---|---|---|---|---|---|
 | 4.1 | Sample editor: crop/trim, fades, gain/normalize, reverse, loop points | Planned | both | 3.5 | Not built |
-| 4.2 | Sampler zones beyond 0.2: round-robin groups and audition | Partial | both | 0.2 | Engine: round robins (`seq_length`/`seq_position`, `lorand`/`hirand`), choke groups and loop crossfades; audition in the app is not built |
+| 4.2 | Sampler zones beyond 0.2: round-robin groups and audition | Built, untested on hardware | both | 0.2 | The sampler's editor makes round-robin groups from selected zones, sets choke groups, and its keys audition the zones ([app](app.md), Audio) |
 | 4.3 | Shared asset model for generated sounds, imported samples and zones | Partial | both | 3.5 | The asset store is shared by clips and sampler zones; drums samples and generated sounds still load on their own |
 | 4.4 | Transient slicing and sample-to-pattern | Later | both | 4.1 | After basic editing and mapping are reliable |
 
@@ -217,17 +217,17 @@ Built on the graph from the Foundation stage. Do not keep a second mixer or crea
 
 ### Stage 7 — Recording and performance workflow
 
-Recording is part of the product direction and the last stage before Release 1. It is not implemented today.
+Recording is part of the product direction and the last stage before Release 1. MIDI and audio recording are built; hardware timing and recovery from device loss are not verified.
 
 | # | Item | Status | Where | Depends on | What's missing |
 |---|---|---|---|---|---|
 | 7.1 | MIDI recording from devices and on-screen controls | Partial | both | 5.1, 5.5 | Record writes a take from a MIDI device (placed at its timestamps) or the on-screen keys and pads, with loop passes as takes and a Keep take? toast ([app](app.md)); no record modes (overdub, replace) |
-| 7.2 | Audio input selection, channel configuration and input monitoring | Partial | both | 5.6 | Engine: a duplex device with input choice and channels, per-track input channels and monitoring off/on/auto through the track ([engine](engine.md#audio-input-and-recording)); the app's settings and RECORD_AUDIO request are not built |
-| 7.3 | Multitrack audio recording to arrangement tracks | Partial | both | 3.2, 7.2 | Engine: armed tracks record to WAV takes on a writer thread (`caw_record_*`); the app's record flow is not built |
-| 7.4 | Input latency measurement and compensation | Partial | engine | 7.2 | Built in the engine: takes are placed by the round-trip latency (override, loopback ping or the device's estimate); not yet checked on a phone |
-| 7.5 | Punch in/out and loop recording; take lanes and comping | Partial | both | 7.3 | Engine: punch in/out and one take per loop pass; take lanes and comping are the app's, not built |
+| 7.2 | Audio input selection, channel configuration and input monitoring | Built, untested on hardware | both | 5.6 | Settings › Audio's input device and channels, the RECORD_AUDIO request when input is turned on or a track armed, each track's channel, mono or stereo and monitoring ([app](app.md), Audio); untested on the S22+ |
+| 7.3 | Multitrack audio recording to arrangement tracks | Built, untested on hardware | both | 3.2, 7.2 | Record records every armed audio track; takes become clips where they were played ([app](app.md), Audio) |
+| 7.4 | Input latency measurement and compensation | Partial | both | 7.2 | Takes are placed by the round-trip latency; Settings › Audio measures it with the ping (after a warning) or takes a typed offset. Not yet measured on a phone |
+| 7.5 | Punch in/out and loop recording; take lanes and comping | Partial | both | 7.3 | Punch over the loop range or the time selection; a loop recording's passes stack as one clip's takes, swapped whole by the take chip. Comping parts of takes is not built |
 | 7.6 | Count-in, metronome options and monitoring controls | Partial | app | 5.5 | Metronome off, while recording or always, and a 0–2 bar count-in on Record's long-press; no click sound choice or monitoring controls |
-| 7.7 | Recording recovery after interruption, device loss or low storage | Partial | both | 1.7, 7.3 | Engine: `.wav.part` takes are finalised at start-up (`caw_record_recover`), a failed write ends the take keeping what was written, a full ring is filled with silence; device-loss handling in the app is not built |
+| 7.7 | Recording recovery after interruption, device loss or low storage | Partial | both | 1.7, 7.3 | Takes a crash left are offered back when the project opens; a failed write ends the take keeping what was written, a full ring is filled with silence and reported. Device-loss handling in the app is not built |
 
 **Exit gate:** recording is reliable on supported hardware, timing/latency behavior is measured, files recover safely after interruption, and the audio callback remains bounded.
 

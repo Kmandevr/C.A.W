@@ -321,6 +321,8 @@ void main() {
             }
           case AssetKind.devicePreset || AssetKind.trackPreset:
             fail('presets are tested in user_presets_test.dart');
+          case AssetKind.audioFile:
+            fail('audio drops are tested in audio_clips_test.dart');
         }
       });
     }
