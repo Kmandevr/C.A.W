@@ -72,11 +72,20 @@ void main() {
     await tester.pump(const Duration(seconds: 1)); // let autosave and history timers run out
   }
 
+  /// A double tap: a header's or a clip's menu (owner, 2026-11-11).
+  Future<void> doubleTap(WidgetTester tester, Finder f) async {
+    await tester.tap(f);
+    await tester.pump(const Duration(milliseconds: 60));
+    await tester.tap(f);
+    await tester.pumpAndSettle();
+  }
+
   group('focus view', () {
     testWidgets('a tap pins the track on top with its panel; swipes, tap and Back go next or close', (tester) async {
       listenForHaptics(tester);
       await pumpArranger(tester, const Size(412, 900));
       await tester.tap(find.byKey(const ValueKey('track-header-a')));
+      await tester.pump(kDoubleTapTimeout); // a header's tap waits out its double tap
       await tester.pumpAndSettle();
       expect(sections.focusedLayer, 'a');
       expect(s.selectedLayerId, 'a');
@@ -112,14 +121,17 @@ void main() {
 
       // Tapping the pinned track closes it too.
       await tester.tap(find.byKey(const ValueKey('track-header-b')));
+      await tester.pump(kDoubleTapTimeout); // a header's tap waits out its double tap
       await tester.pumpAndSettle();
       expect(sections.focusedLayer, 'b');
       await tester.tap(find.byKey(const ValueKey('track-header-b')));
+      await tester.pump(kDoubleTapTimeout); // a header's tap waits out its double tap
       await tester.pumpAndSettle();
       expect(sections.focusedLayer, isNull);
 
       // Android Back leaves the focus view instead of the app.
       await tester.tap(find.byKey(const ValueKey('track-header-a')));
+      await tester.pump(kDoubleTapTimeout); // a header's tap waits out its double tap
       await tester.pumpAndSettle();
       expect(sections.focusedLayer, 'a');
       await tester.binding.handlePopRoute();
@@ -153,6 +165,7 @@ void main() {
       listenForHaptics(tester);
       await pumpArranger(tester, const Size(860, 400));
       await tester.tap(find.byKey(const ValueKey('track-header-a')));
+      await tester.pump(kDoubleTapTimeout); // a header's tap waits out its double tap
       await tester.pumpAndSettle();
       Rect panel() => tester.getRect(find.byKey(const ValueKey('focus-panel')));
       expect(panel().left, greaterThan(860 * 0.25));
@@ -198,6 +211,7 @@ void main() {
         (tester) async {
       await pumpArranger(tester, const Size(1400, 900), withSections: false);
       await tester.tap(find.byKey(const ValueKey('track-header-c')));
+      await tester.pump(kDoubleTapTimeout); // a header's tap waits out its double tap
       await tester.pumpAndSettle();
       final panel = tester.getRect(find.byKey(const ValueKey('focus-panel')));
       expect(panel.left, greaterThan(800));
@@ -376,6 +390,7 @@ void main() {
   testWidgets('phone portrait: the focus panel opens higher over the pinned track, and back', (tester) async {
     await pumpArranger(tester, const Size(412, 900));
     await tester.tap(find.byKey(const ValueKey('track-header-a')));
+    await tester.pump(kDoubleTapTimeout); // a header's tap waits out its double tap
     await settle(tester);
     final panel = find.byKey(const ValueKey('focus-panel'));
     final low = tester.getTopLeft(panel).dy;
@@ -395,6 +410,7 @@ void main() {
       (tester) async {
     await pumpArranger(tester, const Size(412, 900));
     await tester.tap(find.byKey(const ValueKey('track-header-a')));
+    await tester.pump(kDoubleTapTimeout); // a header's tap waits out its double tap
     await settle(tester);
     final panel = find.byKey(const ValueKey('focus-panel'));
     final rest = tester.getTopLeft(panel).dy;
@@ -509,8 +525,7 @@ void main() {
       listenForHaptics(tester);
       await pumpArranger(tester, const Size(412, 900));
       final header = find.byKey(const ValueKey('track-header-a'));
-      await tester.longPress(header);
-      await tester.pumpAndSettle();
+      await doubleTap(tester, header);
       final menu = find.byKey(const ValueKey('long-press-menu'));
       expect(menu, findsOneWidget);
       expect(haptics, contains('HapticFeedbackType.selectionClick'));
@@ -520,11 +535,13 @@ void main() {
       await tester.tap(find.text('Record arm'));
       await tester.pumpAndSettle();
       expect(menu, findsOneWidget, reason: 'a disabled entry does nothing');
+      await tester.ensureVisible(find.text('Move down'));
+      await tester.pumpAndSettle();
       await tester.tap(find.text('Move down'));
       await tester.pumpAndSettle();
       expect(menu, findsNothing);
       expect(s.project.layers.map((l) => l.id), ['b', 'a', 'c']);
-      expect(sections.focusedLayer, isNull, reason: 'a long-press is not a tap');
+      expect(sections.focusedLayer, isNull, reason: 'a double tap is not a tap');
       await settle(tester);
     });
 
@@ -532,8 +549,7 @@ void main() {
       s.settings.longPressMenu = LongPressMenuStyle.ring;
       expect(s.settings.toJson()['long_press_menu'], 'ring');
       await pumpArranger(tester, const Size(412, 900));
-      await tester.longPress(find.byKey(const ValueKey('track-header-c')));
-      await tester.pumpAndSettle();
+      await doubleTap(tester, find.byKey(const ValueKey('track-header-c')));
       expect(find.byKey(const ValueKey('long-press-ring')), findsOneWidget);
       expect(find.byKey(const ValueKey('long-press-menu')), findsNothing);
       await tester.tap(find.byTooltip('Delete'));

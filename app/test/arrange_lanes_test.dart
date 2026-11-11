@@ -184,11 +184,12 @@ void main() {
       await tester.pump(const Duration(seconds: 2));
     });
 
-    testWidgets('a header dragged into the middle of a folder three levels down goes inside it', (tester) async {
+    testWidgets('a header dragged into the right third of a folder three levels down goes inside it', (tester) async {
       nest();
       await pumpArranger(tester, const Size(1200, 900));
       final from = tester.getCenter(find.byKey(const ValueKey('track-header-b')));
-      final to = tester.getCenter(find.byKey(ValueKey('track-header-${named('Inner').id}')));
+      final inner = tester.getRect(find.byKey(ValueKey('track-header-${named('Inner').id}')));
+      final to = Offset(inner.right - 20, inner.center.dy);
       final g = await tester.startGesture(from, kind: PointerDeviceKind.mouse);
       for (var i = 1; i <= 6; i++) {
         await g.moveTo(Offset.lerp(from, to, i / 6)!);

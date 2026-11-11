@@ -9,6 +9,7 @@ import '../engine/engine.dart';
 import '../ui/frame/sections.dart';
 import 'app_state.dart';
 import 'audio_edit.dart';
+import 'live_midi.dart';
 import 'midi_clips.dart';
 import 'modulation.dart';
 import 'mixer_fx.dart';
@@ -29,8 +30,9 @@ String builtinComponentName(String id) {
   return text.isEmpty ? id : text[0].toUpperCase() + text.substring(1);
 }
 
-/// Where a dragged track header lands on another track: above it, inside it (a folder's middle, as REAPER's folder
-/// drop zone), or below it (below a folder: after everything inside it).
+/// Where a dragged track header lands on another track: above it, inside it (the right-most third of its header,
+/// owner 2026-11-11 after REAPER; any track, which then becomes a parent), or below it (below a folder: after
+/// everything inside it).
 enum TrackDrop { above, into, below }
 
 /// What a native effect in a track's stack is doing now, for its card.
@@ -370,8 +372,13 @@ extension ArrangeFx on AppState {
     final p = project;
     if (target != null && (identical(target, track) || _isInside(target, track.id))) return false;
     if (target != null && where == TrackDrop.into) {
-      if (!target.isFolder || track.parentId == target.id) return false;
-      return moveLayerIntoFolder(track, target.id);
+      if (track.parentId == target.id) return false;
+      // One undo step: the parent made (when it was a plain track) and the track moved into it.
+      endUndoStep();
+      if (!target.isFolder) makeParent(target);
+      final moved = moveLayerIntoFolder(track, target.id);
+      endUndoStep();
+      return moved;
     }
     final subtree = [for (final l in p.layers) if (identical(l, track) || _isInside(l, track.id)) l];
     editProject((p) {
@@ -390,6 +397,49 @@ extension ArrangeFx on AppState {
       p.layers.insertAll(at, subtree);
     });
     return true;
+  }
+
+  /// Lets the plain track [track] hold tracks (owner, 2026-11-11: any track can be a parent, its children feeding
+  /// it). The engine's buses only sum and run effects, so [track] becomes a folder with a bus that keeps its id,
+  /// name, colour, effects, sends, fader, mute, solo and track automation (so what it nests passes through them, as a
+  /// REAPER parent's FX and fader do), and what plays on it (its instrument and clips) moves to a new first track
+  /// inside it, of the same name, at unity gain; lanes, links and modulators that follow the instrument move with
+  /// it. A track with nothing to play just becomes the folder. Returns that new track, or null when none was needed.
+  LayerDoc? makeParent(LayerDoc track) {
+    if (track.isFolder) return null;
+    final plays = track.instrument != null || track.clips.isNotEmpty || track.patternId != null;
+    LayerDoc? own;
+    editProject((p) {
+      if (plays) {
+        own = LayerDoc(id: newId('l'), name: track.name, color: track.color, ownColor: track.ownColor,
+            parentId: track.id, patternId: track.patternId, lengthSteps: track.lengthSteps, volume: 1,
+            clips: track.clips, instrument: track.instrument);
+        final id = own!.id;
+        for (final lane in p.automation) {
+          if (lane.targetType == 'instrument' && lane.layerId == track.id) lane.layerId = id;
+        }
+        for (final link in p.modLinks) {
+          if (link.target.type == 'instrument' && link.target.layerId == track.id) {
+            link.target = ModTarget.instrument(id, link.target.param);
+          }
+        }
+        for (final m in p.modulators) {
+          if (m.inputId == track.id && m.hears == 'notes') m.inputId = id;
+        }
+        p.layers.insert(p.layers.indexOf(track) + 1, own!);
+        track
+          ..clips = []
+          ..patternId = null
+          ..instrument = null;
+      }
+      track
+        ..isFolder = true
+        ..busEnabled = true
+        ..collapsed = false;
+    });
+    final midi = LiveMidi.current;
+    if (own != null && midi?.armedLayerId == track.id) midi!.armedLayerId = own!.id;
+    return own;
   }
 
   /// Drags [clip]'s left edge to [startSteps] (REAPER: an item's edge is dragged to trim it): the end stays where it

@@ -123,7 +123,10 @@ void main() {
       await tester.pumpWidget(MaterialApp(home: SectionScope(controller: sections,
           child: Scaffold(body: ListenableBuilder(listenable: s, builder: (_, _) => ArrangerScreen(state: s))))));
       await tester.pump();
-      await tester.longPress(find.byKey(const ValueKey('track-header-a')));
+      // A double tap opens the track menu (owner, 2026-11-11).
+      await tester.tap(find.byKey(const ValueKey('track-header-a')));
+      await tester.pump(const Duration(milliseconds: 60));
+      await tester.tap(find.byKey(const ValueKey('track-header-a')));
       await tester.pumpAndSettle();
       expect(find.text('Instrument · Saw…'), findsOneWidget);
       expect(find.textContaining('Instrument · Basic synth'), findsNothing, reason: 'no long list any more');
@@ -141,7 +144,10 @@ void main() {
       final layer = s.project.layers.first;
       expect(layer.instrument?.id, 'org.caw.synth.basic');
       // Back to the Saw, and Cancel keeps what it has.
-      await tester.longPress(find.byKey(const ValueKey('track-header-a')));
+      // A double tap opens the track menu (owner, 2026-11-11).
+      await tester.tap(find.byKey(const ValueKey('track-header-a')));
+      await tester.pump(const Duration(milliseconds: 60));
+      await tester.tap(find.byKey(const ValueKey('track-header-a')));
       await tester.pumpAndSettle();
       await tester.tap(find.text('Instrument · Basic synth…'));
       await tester.pumpAndSettle();

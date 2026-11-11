@@ -41,6 +41,12 @@ Carries out the owner's decision of 2026-11-10 ("C++ replaces the .caw language"
 - **Advanced menus** (the note menu, the piano roll's ⋯, the Arrange menus): grouped into sections with the most-used items first. Numbers get a big slider, a type-in field and a reset.
 - **Build** can open anything text-based, but its focus is C++. It opens on C++, and it should be clear that C++ is what it is for.
 
+**How Arrange does it (Claude, choices to confirm; [App](app.md)):**
+- **A plain track becomes a parent by turning into a bus folder** (`makeParent`): it keeps its id, effects, sends, fader and volume and pan lanes, so what it nests plays through them as in REAPER, and its instrument and clips move to a new first track inside it of the same name. The engine's bus slots only sum and run effects; letting a bus also play an instrument is an engine change left for later, so the parent's own clips are not on its row as in REAPER.
+- **A second finger frees a long-press lift from the grid**, as the owner asked; it still makes a copy during a quick drag (the earlier choice), and the clip menu duplicates.
+- **The double tap replaces the clip's old double tap** (which opened its notes): the menu's first entry, Edit notes, does that. A plain tap on a header now waits out the double tap before opening the focus view, while the header's buttons answer at once.
+- **The menus' numbers:** the track menu's Volume (dB) and Pan apply live; the clip menu's Length (bars) applies when let go or entered, since it rebuilds the project.
+
 ## 2026-11-11: Audio review fixes: declick lengths (to confirm)
 
 **Decision (Claude, for the owner to confirm; [engine](engine.md#audio-clips)):**
