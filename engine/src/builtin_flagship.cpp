@@ -1156,7 +1156,7 @@ private:
     // (k is below kModTargets: the slots' own parameters are read from base_.) The unmodulated case, by far the
     // most common, is a load and a branch.
     CAW_FORCE_INLINE double value(uint32_t k, const double* offsets) const noexcept {
-        const int t = targetOf_[k];
+        const int t = k < kModTargets ? targetOf_[k] : 0;
         // A slot whose source is at 0 (an envelope at rest, no timbre) leaves the knob as it is: no exp, and the
         // filter that reads it keeps its coefficients.
         return t && offsets[t - 1] != 0.0 ? modulated(k, t - 1, offsets) : base_[k];
@@ -1328,7 +1328,7 @@ private:
         for (uint32_t t = 0; t < targetCount_; ++t)
             moving[t] = offsets[t] != 0.0 ? modulated(targetParam_[t], static_cast<int>(t), offsets) : base_[targetParam_[t]];
         const auto P = [&](uint32_t k) noexcept {
-            const int t = targetOf_[k];
+            const int t = k < kModTargets ? targetOf_[k] : 0;  // parameters after the slots (FM ratios) aren't targets
             return t ? moving[t - 1] : base_[k];
         };
         // Only what changed: every section at a note's start or after a knob moved; else the sections where a value
