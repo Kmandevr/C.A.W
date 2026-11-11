@@ -1,12 +1,17 @@
 // The fx-space reverbs' plugin UIs: the convolver (its impulse response's envelope on a decay x size pad) and the shimmer (rising octave layers).
 import 'dart:math' as math;
+import 'dart:typed_data';
 
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
+import '../../../../model/arrange_fx.dart';
+import '../../../haptics.dart';
 import '../../../theme.dart';
 import '../../device_controls.dart';
 import '../../device_scope.dart';
 import '../../kit/controls.dart';
+import '../../kit/feel.dart';
 import '../../kit/hero.dart';
 import '../effect_page.dart';
 import 'space_fx.dart';
@@ -31,6 +36,7 @@ class ConvolverPage extends StatelessWidget {
         spaceLabel('IMPULSE'),
         const DeviceChoice('source', maxSegments: 0),
         const DeviceToggle('reverse', label: 'Reverse', icon: Icons.swap_horiz),
+        const LoadImpulseButton(),
       ]),
       if (file) DeviceDisplay(builder: (context, f) => Padding(padding: const EdgeInsets.only(top: 6), child: Text(
           (f?.values['file'] ?? 0) > 0.5 ? 'A WAV impulse is loaded.' : 'No WAV loaded: the wet is silent until one is.',
@@ -43,6 +49,79 @@ class ConvolverPage extends StatelessWidget {
           style: Neon.code(size: 10, color: Neon.dim))),
     ]);
   }
+}
+
+/// The largest WAV impulse the convolver takes (kMaxIrFileBytes in engine/src/builtin_fx_space.h).
+const maxImpulseBytes = 16 * 1024 * 1024;
+
+/// Picks a WAV file for the convolver: its bytes, or null when cancelled (tests replace it). A file over
+/// [maxImpulseBytes] is refused before it is read.
+Future<Uint8List?> Function() pickImpulseWav = defaultPickImpulseWav;
+
+/// The system file picker, for WAV files.
+Future<Uint8List?> defaultPickImpulseWav() async {
+  final file = await FilePicker.pickFile(type: FileType.custom, allowedExtensions: const ['wav']);
+  if (file == null) return null;
+  if (await file.xFile.length() > maxImpulseBytes) throw const FormatException('That file is over 16 MB.');
+  return file.xFile.readAsBytes();
+}
+
+/// Load WAV…: the user's own impulse response. The engine checks the file (it is untrusted), rebuilds the effect
+/// with it off the UI thread, and the impulse picker moves to Loaded file.
+class LoadImpulseButton extends StatefulWidget {
+  const LoadImpulseButton({super.key});
+
+  @override
+  State<LoadImpulseButton> createState() => _LoadImpulseButtonState();
+}
+
+class _LoadImpulseButtonState extends State<LoadImpulseButton> {
+  bool _busy = false;
+
+  void _say(String text, {bool error = false}) {
+    final m = ScaffoldMessenger.maybeOf(context);
+    if (m == null) return;
+    m.hideCurrentSnackBar();
+    m.showSnackBar(SnackBar(content: Text(text, style: TextStyle(color: error ? Neon.pink : null)),
+        duration: const Duration(seconds: 4)));
+  }
+
+  Future<void> _load() async {
+    DeviceFeel.tap();
+    final t = DeviceScope.of(context).target;
+    final layer = t.layer;
+    if (layer == null || t.isInstrument) return;
+    setState(() => _busy = true);
+    try {
+      final bytes = await pickImpulseWav();
+      if (bytes == null || !mounted) return;
+      final ok = await t.state.loadNativeEffectState(layer, t.slot, bytes);
+      if (!mounted) return;
+      if (ok) {
+        t.set('source', 9);
+        _say('Impulse loaded');
+      } else {
+        Haptics.error();
+        _say('Not loaded: the convolver takes a PCM or float WAV of up to 10 s.', error: true);
+      }
+    } on FormatException catch (e) {
+      Haptics.error();
+      if (mounted) _say('Not loaded: ${e.message}', error: true);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => TextButton.icon(
+        key: const ValueKey('convolver-load'),
+        style: TextButton.styleFrom(foregroundColor: DeviceScope.of(context).accent),
+        onPressed: _busy ? null : _load,
+        icon: _busy
+            ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2))
+            : const Icon(Icons.file_open, size: 16),
+        label: const Text('Load WAV…', style: TextStyle(fontSize: 12)),
+      );
 }
 
 class _IrPainter extends CustomPainter {

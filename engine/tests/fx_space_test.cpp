@@ -9,6 +9,7 @@
 #include <utility>
 #include <vector>
 
+#include "caw.h"
 #include "caw/detmath.hpp"
 #include "caw/display.hpp"
 #include "caw/library/convolver.hpp"
@@ -501,6 +502,48 @@ TEST(fx_space_the_convolver_plays_a_loaded_file_exactly_after_its_latency_and_sa
     CHECK(q->loadState(nullptr, 0, 1));
     CHECK(q->saveState(saved.data(), static_cast<uint32_t>(saved.size()), written));
     CHECK_EQ(written, 0u);
+}
+
+// The app loads a WAV impulse into a playing convolver through caw_engine_set_component_state (API 11): the chain is
+// rebuilt off the audio thread with the file as the convolver's state, the other effects keep their values, and a bad
+// file, a wrong index or a missing layer change nothing.
+TEST(fx_space_a_playing_convolver_takes_a_wav_through_the_c_api) {
+    CawEngine* engine = caw_engine_create(48000);
+    CHECK(engine != nullptr);
+    if (!engine) return;
+    char* result = caw_engine_set_project(engine,
+        R"({"caw_project":1,"bpm":120,"modules":[{"id":"p","source":"---\nkind: pattern\nname: P\nlength: 16\n---\n0 C4 4 1\n"}],
+            "layers":[{"id":"t","pattern":"p","instrument":"org.caw.synth.flagship",
+              "components":[{"id":"org.caw.utility","params":{"gain":-6}},
+                            {"id":"org.caw.convolver","params":{"source":9,"mix":1,"predelay":0}}]}]})");
+    CHECK(result && std::string(result).find("\"ok\":true") != std::string::npos);
+    caw_free(result);
+    std::vector<float> l(4800, 0.0f);
+    l[0] = 0.5f, l[2400] = 0.25f;
+    const std::vector<uint8_t> file = wav(16, 1, {l});
+    const int32_t size = static_cast<int32_t>(file.size());
+    CHECK_EQ(caw_engine_set_component_state(engine, "t", 1, file.data(), size, 1), 1);
+    char* states = caw_engine_component_states(engine, "t");
+    const std::string j = states ? states : "";
+    caw_free(states);
+    // The convolver saves the decoded file (16-byte header + 4800 float frames); the utility saves nothing.
+    CHECK(j.find("\"index\":1,\"ok\":true,\"version\":1,\"state\":\"") != std::string::npos);
+    CHECK(j.find("\"index\":1,\"ok\":true,\"version\":1,\"state\":\"\"") == std::string::npos);
+    std::vector<float> outL(512), outR(512);
+    caw_engine_play(engine);
+    for (int k = 0; k < 40; ++k) caw_engine_process(engine, outL.data(), outR.data(), 512);
+    for (size_t i = 0; i < outL.size(); ++i) CHECK(std::isfinite(outL[i]) && std::isfinite(outR[i]));
+    // Refused: a truncated WAV, a component past the end, a layer that isn't there, a null pointer with a size.
+    CHECK_EQ(caw_engine_set_component_state(engine, "t", 1, file.data(), 40, 1), 0);
+    CHECK_EQ(caw_engine_set_component_state(engine, "t", 2, file.data(), size, 1), 0);
+    CHECK_EQ(caw_engine_set_component_state(engine, "nope", 1, file.data(), size, 1), 0);
+    CHECK_EQ(caw_engine_set_component_state(engine, "t", 1, nullptr, size, 1), 0);
+    // An empty state clears the file.
+    CHECK_EQ(caw_engine_set_component_state(engine, "t", 1, nullptr, 0, 1), 1);
+    states = caw_engine_component_states(engine, "t");
+    CHECK(states && std::string(states).find("\"index\":1,\"ok\":true,\"version\":1,\"state\":\"\"") != std::string::npos);
+    caw_free(states);
+    caw_engine_destroy(engine);
 }
 
 TEST(fx_space_every_generated_impulse_response_sounds_and_decays) {

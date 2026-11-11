@@ -15,7 +15,7 @@ class FxBrowserEntry {
 
 /// The browser entries of the fx-space effects (the browser's icon comes from the editor registry).
 const fxSpaceBrowser = <String, FxBrowserEntry>{
-  'org.caw.convolver': FxBrowserEntry('Space', 'Convolution reverb: generated rooms, halls, plates, springs and odd spaces, or your own WAV'),
+  'org.caw.convolver': FxBrowserEntry('Space', 'Convolution reverb: generated rooms, halls, plates and springs, or your own WAV'),
   'org.caw.shimmer': FxBrowserEntry('Space', 'A reverb whose tail climbs an octave or a fifth each round'),
   'org.caw.haas': FxBrowserEntry('Space', 'Width from delaying one side a few milliseconds, with a mono check'),
   'org.caw.ensemble': FxBrowserEntry('Modulation', 'Up to eight detuned chorus voices spread across the field'),

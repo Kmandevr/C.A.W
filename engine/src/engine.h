@@ -112,6 +112,11 @@ public:
     // id: the master's; its instrument has index kInstrumentIndex), as each component's save_state writes it now; store it in the project so a
     // reload or an export starts from it. {"ok":false,...} if the layer has no chain.
     std::string componentStatesJson(const std::string& layerId);
+    // Gives a playing native component a new saved state (API version 11): the convolver's WAV impulse, a preset's
+    // state. The component's chain is rebuilt here, on the control thread, with every component's current values
+    // and state and this one's replaced, then crossfaded in as a project update would. False (nothing changes) when
+    // there is no such component or it refuses the state.
+    bool setComponentState(const std::string& layerId, uint32_t index, const uint8_t* data, size_t size, uint32_t version);
     // Live display data (#173): the latest block a playing component published (ModuleProcessor::readDisplay),
     // at most `max` floats into out; the count, 0 when it has none (or the control thread is busy: it never
     // waits), -1 when there is no such component. Any thread but the audio thread.

@@ -38,8 +38,10 @@ extern "C" {
    loops are refused; latency compensation covers buses and sends.
    10 (2026-11-11): the audio device's choice and state (caw_audio_devices, caw_audio_configure,
    caw_audio_status), the metronome's sound and volume (caw_engine_set_metronome_sound) and a test tone
-   (caw_engine_test_tone). Nothing else changes. */
-#define CAW_API_VERSION 10
+   (caw_engine_test_tone). Nothing else changes.
+   11 (2026-11-11): caw_engine_set_component_state (a playing component's new saved state: the convolver's WAV
+   impulse). Nothing else changes. */
+#define CAW_API_VERSION 11
 /* The component index that names a layer's native instrument rather than one of its "components". */
 #define CAW_INSTRUMENT_INDEX 0xFFFFFFFFu
 
@@ -172,6 +174,15 @@ CAW_API int32_t caw_engine_component_display(CawEngine* e, const char* layer_id,
    index CAW_INSTRUMENT_INDEX). Store "state" and
    "version" (as "state_version") in the project's entry so a reload or an export starts from it. */
 CAW_API char* caw_engine_component_states(CawEngine* e, const char* layer_id);
+/* A new saved state for a playing component (API version 11), addressed as in caw_engine_set_component_param:
+   [size] bytes at [data] (0: an empty state) as save_state would write them, at state [version]. The convolver
+   (org.caw.convolver) also takes a WAV file's bytes as its state: its impulse response (checked as untrusted, at
+   most 10 s). The component's chain is rebuilt off the audio thread with every component's current values and
+   states, this one's replaced, and crossfaded in. Returns 1, or 0 (nothing changes) when there is no such component
+   or it refuses the state. It can take a while (a WAV decoded, a chain prepared): call it off the UI thread. Store
+   the state in the project's entry as well ("state", base64, and "state_version") so a reload starts from it. */
+CAW_API int32_t caw_engine_set_component_state(CawEngine* e, const char* layer_id, uint32_t index, const uint8_t* data,
+                                               int32_t size, uint32_t version);
 /* A send while it plays (API version 9): send `index` (0-based) of the layer's project "sends" gets `level`
    (linear gain 0..3.981, +12 dB), pre-fader (pre != 0: after the layer's effects, before its volume and pan) or
    post-fader, and mute; the level glides over 5 ms. 1 on success, 0 if the layer has no such send. A later
