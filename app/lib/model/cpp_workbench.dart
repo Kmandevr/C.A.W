@@ -11,6 +11,7 @@ import '../engine/engine.dart';
 import '../platform/cpp_build.dart';
 import '../platform/cpp_compiler.dart';
 import 'app_state.dart';
+import 'cpp_starters.dart';
 import 'arrange_fx.dart';
 import 'cpp_completion.dart';
 import 'cpp_component.dart';
@@ -115,6 +116,25 @@ extension CppBuilderState on AppState {
     final doc = instrument
         ? CppComponentDoc.blankInstrument(id: newId('cpp'), name: n)
         : CppComponentDoc.blankEffect(id: newId('cpp'), name: n);
+    editProject((p) => p.cppComponents.add(doc));
+    cppWorkbench(doc.id).own = true;
+    final trust = nativeComponents?.trust;
+    if (trust != null) {
+      trust.markAuthored(doc);
+      unawaited(_saveTrust(trust));
+    }
+    return doc;
+  }
+
+  /// A copy of a bundled C++ starter (examples/cpp/starters), added to the project under a free name. It ships
+  /// with the app like the blank templates, so it is the user's own code from here on.
+  CppComponentDoc addCppStarter(CppStarter starter) {
+    var n = starter.name;
+    var k = 1;
+    while (project.cppComponents.any((c) => c.name == n)) {
+      n = '${starter.name} ${++k}';
+    }
+    final doc = starter.copy(id: newId('cpp'), displayName: n);
     editProject((p) => p.cppComponents.add(doc));
     cppWorkbench(doc.id).own = true;
     final trust = nativeComponents?.trust;

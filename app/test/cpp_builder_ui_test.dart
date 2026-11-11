@@ -8,6 +8,7 @@ import 'package:caw/model/cpp_diagnostics.dart';
 import 'package:caw/model/cpp_workbench.dart';
 import 'package:caw/model/settings.dart';
 import 'package:caw/ui/cpp/build_section.dart';
+import 'package:caw/ui/cpp/build_start.dart' show starterExamples;
 import 'package:caw/ui/cpp/cpp_editor.dart';
 import 'package:caw/ui/cpp/cpp_library.dart';
 import 'package:caw/ui/cpp/key_row.dart';
@@ -378,7 +379,7 @@ void main() {
       await done(tester);
     });
 
-    testWidgets('Open an example lists the starter modules by kind and opens a copy', (tester) async {
+    testWidgets('Open an example lists the C++ starters and pattern templates by kind and opens a copy', (tester) async {
       state.templates = const [
         Template('fold.caw', '---\ncaw: 1\nkind: effect\nname: Fold\nsummary: Wavefolder\n---\nout = in;\n'),
         Template('chords.caw', '---\ncaw: 1\nkind: pattern\nname: Chords\nsummary: Four bars\n---\n'),
@@ -386,14 +387,18 @@ void main() {
       final sections = await pump(tester);
       await tester.tap(find.byKey(const ValueKey('open example')));
       await tester.pumpAndSettle();
-      expect(find.text('EFFECTS'), findsOneWidget);
-      expect(find.text('PATTERNS'), findsOneWidget);
-      expect(find.text('Wavefolder'), findsOneWidget);
-      await tester.tap(find.byKey(const ValueKey('example fold.caw')));
+      expect(find.text('INSTRUMENTS'), findsOneWidget);
+      // The .caw sound modules are replaced by the C++ starters; patterns stay.
+      final listed = starterExamples(state.templates);
+      expect({for (final e in listed) e.group}, {'Instruments', 'Effects', 'Patterns'});
+      expect(listed.map((e) => e.key), containsAll(['cpp/bass', 'cpp/glitch-fx', 'chords.caw']));
+      expect(listed.map((e) => e.key), isNot(contains('fold.caw')));
+      await tester.tap(find.byKey(const ValueKey('example cpp/bass')));
       await tester.pumpAndSettle();
-      final m = state.project.modules.single;
-      expect(m.name, 'Fold');
-      expect(sections.activeBuildTab, BuildTab(BuildTabKind.caw, m.id));
+      final c = state.project.cppComponents.single;
+      expect(c.name, 'Bass');
+      expect(c.componentId, 'local.bass.${c.id}');
+      expect(sections.activeBuildTab, BuildTab(BuildTabKind.cpp, c.componentId));
       await done(tester);
     });
 
