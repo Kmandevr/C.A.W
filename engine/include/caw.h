@@ -337,21 +337,31 @@ CAW_API int32_t caw_audio_buffer_frames(CawEngine* e);
 
 /* API version 10. The playback devices the platform's audio backend lists, as JSON: {"backend": name,
    "exclusive": whether this backend takes an exclusive-mode request (WASAPI, AAudio), "devices": [{"name",
-   "default": bool, "rates": [native sample rates; 0 means any], "exclusive_rates": [rates offered in exclusive
-   mode]}]}. AAudio lists only the system default (Android routes it). Opens and closes the backend, so it can take
+   "id": the backend's id as text ("" where it has none worth keeping; WASAPI's endpoint id tells two identical
+   interfaces apart), "default": bool, "rates": [native sample rates; 0 means any], "exclusive_rates": [rates
+   offered in exclusive mode]}]}. AAudio lists only the system default (Android routes it). Opens and closes the backend, so it can take
    tens of milliseconds: call it off the UI thread, never from the audio thread. Free with caw_free. */
 CAW_API char* caw_audio_devices(void);
-/* How the device opens: on the playback device named [device_name] (NULL or empty: the system default; a name not
-   found also opens the default), with a callback of [period_frames] frames (16..8192; 0: as the buffer mode
-   chooses), and [flags]. CAW_AUDIO_EXCLUSIVE asks for exclusive mode (AAudio's exclusive sharing, its MMAP path
-   where the phone has one; WASAPI exclusive), falling back to shared when the device refuses. A running device
-   reopens with the new choice (a short gap). Returns 0, or 1 when the device was running and did not reopen. */
+/* How the device opens: on the playback device whose "id" (caw_audio_devices) is [device_id], else the one named
+   [device_name] (both NULL or empty: the system default; one not found also opens the default; AAudio always
+   opens the default, which Android routes), with a callback of [period_frames] frames (16..8192; 0: as the buffer
+   mode chooses; AAudio on Android 11 and older ignores it), and [flags]. CAW_AUDIO_EXCLUSIVE asks for exclusive
+   mode (AAudio's exclusive sharing, its MMAP path where the phone has one; WASAPI exclusive), falling back to
+   shared when the device refuses. A running device reopens with the new choice (a short gap, under a lock: call it
+   off the UI thread). When the choice does not open, the system default opens shared at its own size instead.
+   Returns 0 (running as chosen, or not running), 2 (running on the default instead: caw_audio_status has
+   "fallback" and why) or 1 (the device was running and nothing reopened: it is closed). The same choice again
+   returns 0 or 2 as it runs. caw_audio_start falls back the same way and returns 0. */
 #define CAW_AUDIO_EXCLUSIVE 1
-CAW_API int32_t caw_audio_configure(CawEngine* e, const char* device_name, int32_t period_frames, int32_t flags);
-/* The device as it runs, as JSON: {"running", "backend", "device", "sample_rate", "period_frames", "periods",
-   "exclusive" (granted at open), "low_latency" (the low-latency profile)} and the request ("requested_device",
-   "requested_frames", "exclusive_requested"); with no device running, {"running": false} and the request. AAudio
-   may still give a shared stream for an exclusive request without saying so. Free with caw_free. */
+CAW_API int32_t caw_audio_configure(CawEngine* e, const char* device_id, const char* device_name,
+                                    int32_t period_frames, int32_t flags);
+/* The device as it runs, as JSON: {"running", "backend", "device", "device_id", "sample_rate", "period_frames"
+   (the callback size the device gave), "periods", "exclusive", "low_latency", "modes_read_back", "fallback",
+   "fallback_reason"} and the request ("requested_device", "requested_device_id", "requested_frames",
+   "exclusive_requested"); with no device running, {"running": false} and the request. On AAudio "exclusive" and
+   "low_latency" (the fast path) are read from the stream at open ("modes_read_back": true; a later reroute may
+   change them); on WASAPI "exclusive" is what opened (it refuses rather than share); elsewhere they are what was
+   asked. Free with caw_free. */
 CAW_API char* caw_audio_status(CawEngine* e);
 /* The metronome's (and count-in's) click: [volume] 0..1 (1 the default) and its CAW_CLICK_* sound. */
 #define CAW_CLICK_CLASSIC 0

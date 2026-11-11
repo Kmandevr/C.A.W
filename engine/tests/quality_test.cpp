@@ -227,18 +227,21 @@ TEST(the_device_choice_is_kept_without_a_device) {
     CHECK(std::string(list).find("\"devices\":[") != std::string::npos);
     caw_free(list);
     CawEngine* c = caw_engine_create(48000);
-    CHECK_EQ(caw_audio_configure(c, "Speakers \"USB\"", 4, CAW_AUDIO_EXCLUSIVE | 8), 0);
+    // Two identical interfaces share a name: the id tells them apart, the name is kept for when the id is gone.
+    CHECK_EQ(caw_audio_configure(c, "{0.0.0.00000000}.{2}", "Speakers \"USB\"", 4, CAW_AUDIO_EXCLUSIVE | 8), 0);
     char* status = caw_audio_status(c);
     const std::string s = status;
     caw_free(status);
     CHECK(s.find("\"running\":false") != std::string::npos);
     CHECK(s.find("\"requested_device\":\"Speakers \\\"USB\\\"\"") != std::string::npos);
+    CHECK(s.find("\"requested_device_id\":\"{0.0.0.00000000}.{2}\"") != std::string::npos);
     CHECK(s.find("\"requested_frames\":16") != std::string::npos);  // clamped to 16..8192
     CHECK(s.find("\"exclusive_requested\":true") != std::string::npos);
-    CHECK_EQ(caw_audio_configure(c, nullptr, 100000, 0), 0);
+    CHECK_EQ(caw_audio_configure(c, nullptr, nullptr, 100000, 0), 0);
     status = caw_audio_status(c);
     CHECK(std::string(status).find("\"requested_frames\":8192") != std::string::npos);
+    CHECK(std::string(status).find("\"requested_device_id\":\"\"") != std::string::npos);
     caw_free(status);
-    CHECK_EQ(caw_audio_configure(nullptr, nullptr, 0, 0), 1);
+    CHECK_EQ(caw_audio_configure(nullptr, nullptr, nullptr, 0, 0), 1);
     caw_engine_destroy(c);
 }
