@@ -46,6 +46,7 @@ Carries out the owner's decision of 2026-11-10 ("C++ replaces the .caw language"
 - **A second finger frees a long-press lift from the grid**, as the owner asked; it still makes a copy during a quick drag (the earlier choice), and the clip menu duplicates.
 - **The double tap replaces the clip's old double tap** (which opened its notes): the menu's first entry, Edit notes, does that. A plain tap on a header now waits out the double tap before opening the focus view, while the header's buttons answer at once.
 - **The menus' numbers:** the track menu's Volume (dB) and Pan apply live; the clip menu's Length (bars) applies when let go or entered, since it rebuilds the project.
+- **Open: audio clips** (merged from the audio branch at the same time) keep their own gestures (`app/lib/ui/arrange/audio_clip_view.dart`): a long press opens their menu and a double tap the Clip tab, not yet the long-press lift and double-tap menu above.
 
 ## 2026-11-11: Audio review fixes: declick lengths (to confirm)
 
