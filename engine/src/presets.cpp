@@ -248,9 +248,14 @@ std::string number(double v) {
 
 }  // namespace
 
+// fx-creative begin: the Creative and Pitch & Time effects' presets (builtin_fx_creative_presets.cpp)
+const std::vector<BuiltinPreset>* creativeBuiltinPresets(std::string_view id);
+// fx-creative end
+
 const std::vector<BuiltinPreset>& builtinPresets(std::string_view componentId) {
     if (componentId == kFlagship) return flagshipPresets();
     if (componentId == "org.caw.ducker") return duckerPresets();
+    if (const auto* p = creativeBuiltinPresets(componentId)) return *p;  // fx-creative
     return kNone;
 }
 
