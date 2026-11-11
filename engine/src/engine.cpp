@@ -273,7 +273,9 @@ struct Engine::SendTable {
         int dest = -1;     // destination slot
         int key = -1;      // -1: a bus's input; else the component index on dest's inserts it keys
         double level = 1;
-        bool pre = false, mute = false;
+        // pre: the tap asked for; tapPre: the tap in use (audio thread). A switch fades the route out, changes
+        // tap at 0 and fades back in, so it never jumps.
+        bool pre = false, mute = false, tapPre = false;
         DelayLine* delay = nullptr;  // owned; null: none
     };
     Route routes[kMaxRoutes];
@@ -2506,7 +2508,7 @@ bool Engine::updateCompensation(std::map<std::string, std::vector<std::string>>&
                     t.dest = r.dest;
                     t.key = r.key;
                     t.level = r.level;
-                    t.pre = r.pre;
+                    t.pre = t.tapPre = r.pre;
                     t.mute = r.mute;
                     t.delay = makeDelay(delays[k]);
                     c.sends->keys = c.sends->keys || (r.key >= 0 && r.dest >= 0);
@@ -3307,11 +3309,15 @@ void Engine::applyCommands() noexcept {
                 SendTable* next = c.sends;
                 if (next) {
                     for (int k = 0; k < next->count; ++k) {
-                        const SendTable::Route& r = next->routes[k];
+                        SendTable::Route& r = next->routes[k];
                         const SendTable::Route* was = s.sends && k < s.sends->count ? &s.sends->routes[k] : nullptr;
-                        // A route that stays keeps its gain and, unless stale, its delay's recent input.
-                        if (!was || was->dest != r.dest || was->key != r.key) s.routeGain[k] = 0.0;
-                        if (r.delay && was && !s.routesStale) r.delay->takeHistory(was->delay);
+                        // A route that stays keeps its gain, its tap (a change of tap then fades as SetSendLevel's
+                        // does) and, unless stale, its delay's recent input. A route that now goes elsewhere starts
+                        // from silence: its old line holds the old destination's audio.
+                        const bool stays = was && was->dest == r.dest && was->key == r.key;
+                        if (!stays) s.routeGain[k] = 0.0;
+                        if (stays && s.routeGain[k] > 0.0) r.tapPre = was->tapPre;
+                        if (r.delay && stays && !s.routesStale) r.delay->takeHistory(was->delay);
                     }
                 }
                 Retired r;
@@ -3325,7 +3331,8 @@ void Engine::applyCommands() noexcept {
                 if (s.sends && c.order >= 0 && c.order < s.sends->count) {
                     SendTable::Route& r = s.sends->routes[c.order];
                     r.level = c.master;
-                    r.pre = c.flag;
+                    r.pre = c.flag;  // runRoutes moves the tap over, through silence
+                    if (s.routeGain[c.order] == 0.0) r.tapPre = r.pre;
                     r.mute = c.sendMute;
                 }
                 break;
@@ -4758,12 +4765,44 @@ void Engine::runInserts(Slot& s, float* L, float* R, int m) noexcept {
 }
 
 // Sends and keys (runRoutes): each route's gain ramps across the block to its level (0 while muted, and for a
-// send while the slot is muted or soloed out); a pre route reads the pre tap, a post route the post tap (a key
-// from a silenced slot: the pre tap at the fader's volume and pan, so a muted kick still ducks). Each route's
-// delay keeps it in time where it arrives; the result adds into the destination's input for this chunk.
+// send while the slot is muted or soloed out); a pre route reads the pre tap, a post send the post tap. A post key
+// reads the pre tap times the fader's own volume and pan (automated ones included), whatever mute, solo or the
+// fader's ramp do, so a muted kick ducks just as a playing one and unmuting it doesn't re-trigger. A switch of
+// tap fades the route to 0 and back. Each route's delay keeps it in time where it arrives; the result adds into
+// the destination's input for this chunk. `bus`: the slot is a folder bus (its pan is a balance).
 void Engine::runRoutes(Slot& s, const float* preL, const float* preR, const float* postL, const float* postR, int m,
-                       bool silenced, double keyPostL, double keyPostR) noexcept {
+                       bool silenced, bool bus) noexcept {
     SendTable& t = *s.sends;
+    // The fader's volume and pan per frame, for post keys (worked out only when some route needs them).
+    double faderL[kBlock], faderR[kBlock];
+    bool fader = false;
+    auto faderGains = [&]() {
+        if (fader) return;
+        fader = true;
+        const bool volumeLane = s.automation && !s.automation->volume.empty();
+        const bool panLane = s.automation && !s.automation->pan.empty();
+        const double vol = bitsToDouble(s.vol.load(std::memory_order_relaxed));
+        const double pan = bitsToDouble(s.pan.load(std::memory_order_relaxed));
+        auto gains = [bus](double p, double& l, double& r) {
+            if (bus) {
+                l = p > 0.0 ? 1.0 - p : 1.0;
+                r = p < 0.0 ? 1.0 + p : 1.0;
+            } else {
+                const lib::PanGains g = lib::constantPowerPan(p);
+                l = g.left;
+                r = g.right;
+            }
+        };
+        double pl = 0.0, pr = 0.0;
+        gains(pan, pl, pr);
+        for (int i = 0; i < m; ++i) {
+            const double step = static_cast<double>(g_ + i) / stepLen_;
+            const double v = volumeLane ? automationValue(s.automation->volume, step, 1.0) : vol;
+            if (panLane) gains(automationValue(s.automation->pan, step, pan), pl, pr);
+            faderL[i] = v * pl;
+            faderR[i] = v * pr;
+        }
+    };
     // The notes the slot plays this chunk, for components keyed by it (the ducker's Notes mode).
     Event notes[ComponentChain::kMaxKeyEvents];
     const uint32_t noteCount = t.keys ? keyNotes(s, m, notes, ComponentChain::kMaxKeyEvents) : 0;
@@ -4781,7 +4820,10 @@ void Engine::runRoutes(Slot& s, const float* preL, const float* preR, const floa
             s.routeGain[k] = 0.0;  // its destination doesn't run: it starts from silence when it does
             continue;
         }
-        if (from == 0.0 && want == 0.0 && !r.delay) continue;
+        if (from == 0.0 && want == 0.0 && !r.delay) {
+            r.tapPre = r.pre;  // silent: the tap can change at once
+            continue;
+        }
         Slot& d = slotAt(r.dest);
         auto skip = [&]() { s.routeGain[k] = want; };
         float* dl = nullptr;
@@ -4813,18 +4855,24 @@ void Engine::runRoutes(Slot& s, const float* preL, const float* preR, const floa
             dl = d.recvL;
             dr = d.recvR;
         }
-        const bool fromPre = r.pre || (key && silenced);
-        const float* xl = fromPre ? preL : postL;
-        const float* xr = fromPre ? preR : postR;
-        const double gl = key && silenced && !r.pre ? keyPostL : 1.0;
-        const double gr = key && silenced && !r.pre ? keyPostR : 1.0;
+        const bool postKey = key && (!r.pre || !r.tapPre);
+        if (postKey) faderGains();
+        const float* xl = r.tapPre || key ? preL : postL;
+        const float* xr = r.tapPre || key ? preR : postR;
         // A level change glides at a fixed rate per sample (full scale in 5 ms), so it is the same at any block size.
         const double most = 1.0 / std::max(1.0, kGainSeconds * sr_);
         double g = from;
         for (int i = 0; i < m; ++i) {
-            if (g != want) g = want > g ? std::min(want, g + most) : std::max(want, g - most);
-            routeL_[i] = routeSample(static_cast<double>(xl[i]) * g * gl);
-            routeR_[i] = routeSample(static_cast<double>(xr[i]) * g * gr);
+            const double aim = r.tapPre == r.pre ? want : 0.0;  // changing tap: through silence
+            if (g != aim) g = aim > g ? std::min(aim, g + most) : std::max(aim, g - most);
+            if (g == 0.0 && r.tapPre != r.pre) {
+                r.tapPre = r.pre;
+                xl = r.tapPre || key ? preL : postL;
+                xr = r.tapPre || key ? preR : postR;
+            }
+            const bool faded = key && !r.tapPre;
+            routeL_[i] = routeSample(static_cast<double>(xl[i]) * g * (faded ? faderL[i] : 1.0));
+            routeR_[i] = routeSample(static_cast<double>(xr[i]) * g * (faded ? faderR[i] : 1.0));
         }
         s.routeGain[k] = g;
         if (r.delay) r.delay->run(routeL_, routeR_, m);
@@ -5018,8 +5066,7 @@ void Engine::runTrackNode(int slot, const float* const* in, float* outL, float* 
             for (int i = 0; i < m; ++i) preL_[i] = tail ? 0.0f : routeSample(finiteOr0(y[i]));
             preL = preR = preL_;
         }
-        const double vol = bitsToDouble(s.vol.load(std::memory_order_relaxed));
-        runRoutes(s, preL, preR, outL, outR, m, !(target > 0.0), vol * s.gl, vol * s.gr);
+        runRoutes(s, preL, preR, outL, outR, m, !(target > 0.0), false);
     }
     if (s.delay || s.delayFadeLeft > 0) runDelay(s, outL, outR, m);  // in time where it meets the others
     s.previewQuiet = sig > kPreviewQuiet ? 0 : s.previewQuiet + m;
@@ -5107,11 +5154,7 @@ void Engine::runBusNode(int slot, const float* inL, const float* inR, float* out
     storeMax(s.peakL, peakL);  // a folder's meter: its mix after volume and pan
     storeMax(s.peakR, peakR);
     s.previewQuiet = std::max(peakL, peakR) > kPreviewQuiet ? 0 : s.previewQuiet + m;
-    if (routes) {
-        const double leftPan = pan > 0.0 ? 1.0 - pan : 1.0, rightPan = pan < 0.0 ? 1.0 + pan : 1.0;
-        const double vol = bitsToDouble(s.vol.load(std::memory_order_relaxed));
-        runRoutes(s, insertL_, insertR_, outL, outR, m, !(target > 0.0), vol * leftPan, vol * rightPan);
-    }
+    if (routes) runRoutes(s, insertL_, insertR_, outL, outR, m, !(target > 0.0), true);
     if (s.delay || s.delayFadeLeft > 0) runDelay(s, outL, outR, m);  // in time where it meets the others
     if (s.removing && s.gain == 0.0 && canRetire(3)) {
         // Faded out: the slot is free again, with its inserts, delay and routes.
