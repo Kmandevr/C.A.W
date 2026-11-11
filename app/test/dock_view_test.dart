@@ -54,7 +54,7 @@ class _ProbeState extends State<_Probe> {
 
 DockLayout _two() => DockLayout(SplitNode(DockAxis.row, [
       TabsNode([Panels.arrangement]),
-      TabsNode([Panels.mixer, Panels.files]),
+      TabsNode([Panels.builder, Panels.files]),
     ]));
 
 Future<void> _pump(WidgetTester tester, DockLayout l, {ValueChanged<DockLayout>? onLayout, Size? size}) async {
@@ -82,28 +82,28 @@ void main() {
       (tester) async {
     await _pump(tester, _two());
     expect(find.text('Arrange 0 live'), findsOneWidget);
-    expect(find.text('Mixer 0 live'), findsOneWidget);
-    await tester.tap(find.text('Mixer 0 live'));
+    expect(find.text('Build 0 live'), findsOneWidget);
+    await tester.tap(find.text('Build 0 live'));
     await tester.pump();
-    expect(find.text('Mixer 1 live'), findsOneWidget);
+    expect(find.text('Build 1 live'), findsOneWidget);
     await tester.tap(find.byKey(const ValueKey('dock-tab-files')));
     await tester.pumpAndSettle();
     expect(find.text('Files 0 live'), findsOneWidget);
-    // The mixer is still mounted, with its state, and its tickers are off.
-    expect(find.text('Mixer 1 paused', skipOffstage: false), findsOneWidget);
-    await tester.tap(find.byKey(const ValueKey('dock-tab-mixer')));
+    // The builder is still mounted, with its state, and its tickers are off.
+    expect(find.text('Build 1 paused', skipOffstage: false), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('dock-tab-builder')));
     await tester.pumpAndSettle();
-    expect(find.text('Mixer 1 live'), findsOneWidget);
+    expect(find.text('Build 1 live'), findsOneWidget);
   });
 
   testWidgets('a panel keeps its state when it moves to another group', (tester) async {
     await _pump(tester, _two());
-    await tester.tap(find.text('Mixer 0 live'));
+    await tester.tap(find.text('Build 0 live'));
     await tester.pump();
     final host = tester.state<_HostState>(find.byType(_Host));
-    host.set(host.layout.dock(Panels.mixer, target: Panels.arrangement, edge: DockEdge.bottom));
+    host.set(host.layout.dock(Panels.builder, target: Panels.arrangement, edge: DockEdge.bottom));
     await tester.pumpAndSettle();
-    expect(find.text('Mixer 1 live'), findsOneWidget);
+    expect(find.text('Build 1 live'), findsOneWidget);
   });
 
   testWidgets('dragging a divider moves the boundary, never below the minimum share', (tester) async {
@@ -150,7 +150,7 @@ void main() {
   testWidgets('a group\'s active tab dropped on its own group\'s edge splits the group', (tester) async {
     DockLayout? last;
     await _pump(tester, _two(), onLayout: (l) => last = l);
-    final tab = tester.getCenter(find.byKey(const ValueKey('dock-tab-mixer')));
+    final tab = tester.getCenter(find.byKey(const ValueKey('dock-tab-builder')));
     final g = await tester.startGesture(tab);
     await tester.pump(kLongPressTimeout + const Duration(milliseconds: 50));
     await g.moveTo(const Offset(790, 300));
@@ -158,18 +158,18 @@ void main() {
     await g.up();
     await tester.pumpAndSettle();
     expect(last, isNotNull);
-    expect(last!.panels.toSet(), {Panels.arrangement, Panels.mixer, Panels.files});
+    expect(last!.panels.toSet(), {Panels.arrangement, Panels.builder, Panels.files});
     expect((last!.root as SplitNode).children, hasLength(3));
   });
 
   testWidgets('a short split still gives every group room for its tab strip', (tester) async {
     final l = DockLayout(SplitNode(DockAxis.column, [
       TabsNode([Panels.arrangement]),
-      TabsNode([Panels.mixer]),
+      TabsNode([Panels.builder]),
     ], [0.88, 0.12]));
     await _pump(tester, l, size: const Size(600, 260));
     expect(tester.takeException(), isNull);
-    expect(tester.getSize(find.text('Mixer 0 live').hitTestable()).height, greaterThan(0));
+    expect(tester.getSize(find.text('Build 0 live').hitTestable()).height, greaterThan(0));
   });
 
   testWidgets('a long-pressed tab dropped near another group\'s edge splits it there', (tester) async {
@@ -200,15 +200,15 @@ void main() {
     await _pump(tester, _two());
     await tester.tap(find.text('Arrange 0 live'));
     await tester.pump();
-    await tester.tap(find.byKey(const ValueKey('dock-max-mixer')));
+    await tester.tap(find.byKey(const ValueKey('dock-max-builder')));
     await tester.pumpAndSettle();
-    expect(find.text('Mixer 0 live'), findsOneWidget);
+    expect(find.text('Build 0 live'), findsOneWidget);
     expect(find.text('Arrange 1 live'), findsNothing);
     expect(find.text('Arrange 1 paused', skipOffstage: false), findsOneWidget);
-    await tester.tap(find.byKey(const ValueKey('dock-max-mixer')));
+    await tester.tap(find.byKey(const ValueKey('dock-max-builder')));
     await tester.pumpAndSettle();
     expect(find.text('Arrange 1 live'), findsOneWidget);
-    expect(find.text('Mixer 0 live'), findsOneWidget);
+    expect(find.text('Build 0 live'), findsOneWidget);
   });
 
   group('goldens', () {

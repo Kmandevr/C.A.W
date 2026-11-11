@@ -16,10 +16,9 @@ import 'package:flutter_test/flutter_test.dart';
 
 ProjectDoc project() => ProjectDoc(id: 'p', name: 'My song', bpm: 97, modules: [
       ModuleDoc(id: 'pat', name: 'Beat', source: '---\nkind: pattern\nlength: 16\n---\n0 C2 1 1\n'),
-      ModuleDoc(id: 'echo', name: 'Echo', source: '---\nkind: effect\n---\n', params: {'mix': 0.4}),
     ], layers: [
       LayerDoc(id: 'f', name: 'Band', color: 1, isFolder: true),
-      LayerDoc(id: 'a', name: 'Drums', color: 0, parentId: 'f', effectIds: ['echo'],
+      LayerDoc(id: 'a', name: 'Drums', color: 0, parentId: 'f',
           instrument: ComponentUseDoc('org.caw.drums', {}, false, null, 1, 'Kit: 808'),
           clips: [ClipDoc(id: 'c1', patternId: 'pat', lengthSteps: 16)], sends: [SendDoc('r'), SendDoc('outside')]),
       LayerDoc(id: 'r', name: 'Verb', color: 2, parentId: 'f', isFolder: true,
@@ -84,10 +83,6 @@ void main() {
     expect(added[1].sends.single.to, added[2].id); // the send outside the folder is left out
     expect(added[1].clips, isEmpty); // without clips
     expect(added[1].instrument!.preset, 'Kit: 808');
-    // Its .caw effect is a copy of its own.
-    final echo = added[1].effectIds.single;
-    expect(echo, isNot('echo'));
-    expect(s.project.module(echo)!.params['mix'], 0.4);
     expect(s.project.automation.where((a) => a.layerId == added[1].id), hasLength(1));
     expect(s.selectedLayerId, first.id);
   });

@@ -5,12 +5,14 @@ import 'package:caw/model/cpp_component.dart';
 import 'package:caw/model/project.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-ProjectDoc sample() => ProjectDoc(id: 'p1', name: 'Test', bpm: 140, globals: {'swing': 0.2}, modules: [
-      ModuleDoc(id: 'm1', name: 'Lead', source: 't*2', runSource: 't', params: {'shift': 6}),
-      ModuleDoc(id: 'fx', name: 'Crush', source: '---\nkind: effect\n---\nin'),
+const _lead = '---\nkind: pattern\nname: Lead\n---\n';
+ProjectDoc sample() => ProjectDoc(id: 'p1', name: 'Test', bpm: 140, modules: [
+      ModuleDoc(id: 'm1', name: 'Lead', source: '${_lead}0 C3 1 1\n', runSource: '${_lead}0 A2 1 1\n'),
+      ModuleDoc(id: 'pat', name: 'Notes', source: '---\nkind: pattern\nname: Notes\n---\n0 E3 2 1\n'),
     ], layers: [
-      LayerDoc(id: 'l1', name: 'Lead', color: 2, generatorId: 'm1', effectIds: ['fx'], lengthSteps: 48, volume: 0.5, pan: -0.3, solo: true),
-      LayerDoc(id: 'l2', name: 'Notes', color: 1, generatorId: 'm1', patternId: 'pat'),
+      LayerDoc(id: 'l1', name: 'Lead', color: 2, instrument: ComponentUseDoc('org.caw.synth.flagship'), lengthSteps: 48,
+          volume: 0.5, pan: -0.3, solo: true),
+      LayerDoc(id: 'l2', name: 'Notes', color: 1, instrument: ComponentUseDoc('org.caw.synth.flagship'), patternId: 'pat'),
     ]);
 
 void main() {
@@ -107,7 +109,7 @@ void main() {
     final back = ProjectDoc.fromJson(jsonDecode(jsonEncode(p.toJson())) as Map<String, dynamic>);
     expect(jsonEncode(back.toJson()), jsonEncode(p.toJson()));
     expect(back.modules.first.edited, isTrue);
-    expect(back.layers.first.chain, ['m1', 'fx']);
+    expect(back.droppedModules, isEmpty);
   });
 
   test('folder hierarchy and automation survive app and engine serialization', () {
@@ -128,27 +130,38 @@ void main() {
     expect((layers[1]['automation'] as List).single['target'], 'pan');
   });
 
-  test('project parameter and global automation round-trip through app and engine JSON', () {
-    final p = sample();
-    p.automation.add(ProjectAutomationLaneDoc(targetType: 'param', moduleId: 'm1',
-      target: 'shift', points: [AutomationPointDoc(step: 0, value: 2),
-        AutomationPointDoc(step: 128, value: 8)]));
-    p.automation.add(ProjectAutomationLaneDoc(targetType: 'global', target: 'swing',
-      points: [AutomationPointDoc(step: 0, value: 0), AutomationPointDoc(step: 64, value: 0.5)]));
-    final back = ProjectDoc.fromJson(jsonDecode(jsonEncode(p.toJson())) as Map<String, dynamic>);
-    expect(back.automation, hasLength(2));
-    expect(back.automation.first.moduleId, 'm1');
-    final engine = jsonDecode(back.toEngineJson()) as Map<String, dynamic>;
-    expect(engine['automation'], hasLength(2));
-    expect(engine['loop_bars'], 8);
-    expect(engine['automation'][0]['target_type'], 'param');
-    expect(engine['automation'][1]['target_type'], 'global');
+  test('a project with .caw sound modules loads without them, says which went, and keeps its patterns (#160)', () {
+    final raw = jsonDecode(jsonEncode(sample().toJson())) as Map<String, dynamic>;
+    raw['globals'] = {'swing': 0.2};
+    (raw['modules'] as List).addAll([
+      {'id': 'gen', 'name': 'Old synth', 'source': '---\nkind: generator\n---\nsine(220)'},
+      {'id': 'fx', 'name': 'Crush', 'source': '---\nkind: effect\n---\nin'},
+      {'id': 'bb', 'name': 'Bytebeat', 'source': 't*2'},
+    ]);
+    ((raw['layers'] as List).first as Map)..['generator'] = 'gen'..['effects'] = ['fx'];
+    raw['automation'] = [
+      {'target_type': 'param', 'module': 'gen', 'target': 'cutoff', 'points': [{'step': 0, 'value': 1}]},
+      {'target_type': 'global', 'target': 'swing', 'points': [{'step': 0, 'value': 1}]},
+      {'target_type': 'instrument', 'layer': 'l1', 'target': 'flt1_cutoff', 'points': [{'step': 0, 'value': 1}]},
+    ];
+    final p = ProjectDoc.fromJson(jsonDecode(jsonEncode(raw)) as Map<String, dynamic>);
+    expect(p.modules.map((m) => m.id), ['m1', 'pat']);
+    expect(p.droppedModules, ['Old synth', 'Crush', 'Bytebeat']);
+    expect(p.automation.single.targetType, 'instrument');
+    final saved = jsonEncode(p.toJson());
+    for (final gone in ['"generator"', '"effects"', '"globals"', 'Old synth']) {
+      expect(saved, isNot(contains(gone)), reason: gone);
+    }
+    final engine = jsonDecode(p.toEngineJson()) as Map<String, dynamic>;
+    expect(engine.containsKey('globals'), isFalse);
+    expect(((engine['layers'] as List).first as Map).containsKey('chain'), isFalse);
+    expect(ProjectDoc.fromJson(jsonDecode(saved) as Map<String, dynamic>).droppedModules, isEmpty);
   });
 
   test('loading keeps every automation lane and point (F7, owner 2026-11-04)', () {
     final p = sample();
     for (var i = 0; i < 257; i++) {
-      p.automation.add(ProjectAutomationLaneDoc(targetType: 'global', target: 'g$i',
+      p.automation.add(ProjectAutomationLaneDoc(targetType: 'instrument', target: 'g$i', layerId: 'l1',
         points: [AutomationPointDoc(step: 0, value: 0)]));
     }
     p.automation.first.points = [for (var i = 0; i < 129; i++) AutomationPointDoc(step: i * 0.5, value: i / 129)];
@@ -201,39 +214,34 @@ void main() {
     expect(normalized.layers[1].clips, hasLength(1));
   });
 
-  test('engine JSON carries the code last run and the layer chain', () {
+  test('engine JSON carries the text last run and the layer\'s instrument', () {
     final j = jsonDecode(sample().toEngineJson()) as Map<String, dynamic>;
     expect(j['caw_project'], 1);
-    expect((j['modules'] as List).first['source'], 't');
+    expect((j['modules'] as List).first['source'], '${_lead}0 A2 1 1\n');
     final layer = (j['layers'] as List).first as Map<String, dynamic>;
-    expect(layer['chain'], ['m1', 'fx']);
+    expect(layer.containsKey('chain'), isFalse);
+    expect(layer['instrument'], 'org.caw.synth.flagship');
     expect(layer['length_steps'], 48);
     expect(layer.containsKey('pattern'), isFalse);
     expect((j['layers'] as List)[1].containsKey('pattern'), isFalse);
     expect(((j['layers'] as List)[1]['clips'] as List).single['pattern'], 'pat');
     expect(j['audition_only'], false);
-    expect(j['globals'], {'swing': 0.2});
     expect((j['modules'] as List).first['name'], 'Lead');
     expect([j['key_root'], j['key_scale']], [9, 1]);  // A minor
     final none = jsonDecode((sample()..key = 'None').toEngineJson()) as Map<String, dynamic>;
     expect(none.containsKey('key_root'), isFalse);
     expect((sample()..key = 'C# minor').keyNumbers, (1, 1));
     expect((sample()..key = 'Bb major').keyNumbers, (10, 0));
-    final a = jsonDecode(sample().toEngineJson(audition: ['m1'], auditionOnly: true)) as Map<String, dynamic>;
-    expect(a['audition'], {'chain': ['m1']});
-    final ap = jsonDecode(sample().toEngineJson(audition: ['m1'], auditionPattern: 'pat')) as Map<String, dynamic>;
-    expect(ap['audition'], {'chain': ['m1'], 'pattern': 'pat'});
-    expect(a['audition_only'], true);
-    // A C++ instrument and its effects audition as a track plays them; one not loaded is left out.
+    // Solo preview: a pattern through a track's C++ instrument and effects; one not loaded is left out.
     final synth = ComponentUseDoc('org.caw.synth.flagship', {'flt1_cutoff': 800});
     final width = ComponentUseDoc('org.caw.stereo.width', {'width': 1.5});
-    final c = jsonDecode(sample().toEngineJson(
+    final a = jsonDecode(sample().toEngineJson(
         auditionInstrument: synth, auditionComponents: [width], auditionPattern: 'pat', auditionOnly: true)) as Map<String, dynamic>;
-    expect(c['audition'], {'chain': [], 'pattern': 'pat', 'instrument': synth.toJson(), 'components': [width.toJson()]});
-    expect(c['audition_only'], true);
+    expect(a['audition'], {'pattern': 'pat', 'instrument': synth.toJson(), 'components': [width.toJson()]});
+    expect(a['audition_only'], true);
     final unloaded = jsonDecode(sample().toEngineJson(
         auditionInstrument: ComponentUseDoc('com.me.synth'), auditionOnly: true, playableComponents: {})) as Map<String, dynamic>;
-    expect(unloaded['audition'], {'chain': []});
+    expect(unloaded['audition'], <String, Object?>{});
   });
 
   test('songs keep clips, automation and loop length past 64 bars (F7.2, owner 2026-11-04)', () {
@@ -246,7 +254,7 @@ void main() {
        'length_steps': 50000, 'source_offset_steps': 900},
     ];
     raw['automation'] = [
-      {'target_type': 'global', 'target': 'swing', 'points': [{'step': 300000, 'value': 1}]},
+      {'target_type': 'instrument', 'layer': 'l1', 'target': 'flt1_cutoff', 'points': [{'step': 300000, 'value': 1}]},
     ];
     final imported = ProjectDoc.fromJson(raw);
     final clip = imported.layers[0].clips.single;

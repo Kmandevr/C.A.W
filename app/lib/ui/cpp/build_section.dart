@@ -9,7 +9,7 @@ import '../../model/app_state.dart';
 import '../../model/cpp_workbench.dart';
 import '../../model/files_catalog.dart';
 import '../../model/pattern_doc.dart';
-import '../builder_screen.dart';
+import '../pattern_screen.dart';
 import '../file_manager_screen.dart';
 import '../frame/frame_widgets.dart' show AwakeListenableBuilder;
 import '../frame/sections.dart';
@@ -22,7 +22,7 @@ import 'cpp_editor.dart';
 import 'cpp_library.dart';
 import 'quick_open.dart';
 
-/// Build's tabs are project C++ components (the C++ editor) and .caw modules and patterns (the module Builder).
+/// Build's tabs are project C++ components (the C++ editor) and patterns (the pattern editor).
 /// Wide screens (landscape or desktop) show the explorer as a sidebar that can be dragged wider or hidden
 /// (Ctrl+Shift+E); phones open it as a drawer from ☰. Ctrl+PageDown / Ctrl+PageUp switch tabs and
 /// Ctrl+Shift+N opens + New.
@@ -55,35 +55,33 @@ class _BuildSectionState extends State<BuildSection> {
   }
 
   bool _exists(BuildTab t) =>
-      t.kind == BuildTabKind.cpp ? s.cppComponent(t.id) != null : s.project.modules.any((m) => m.id == t.id);
+      t.kind == BuildTabKind.cpp ? s.cppComponent(t.id) != null : s.project.modules.any((m) => m.id == t.id && s.isPattern(m.id));
 
   String _name(BuildTab t) => t.kind == BuildTabKind.cpp
       ? s.cppComponent(t.id)?.name ?? t.id
       : s.project.modules.where((m) => m.id == t.id).firstOrNull?.name ?? t.id;
 
-  /// Where the explorer stands for [t]: the component's files, the patterns, or the module's folder.
+  /// Where the explorer stands for [t]: the component's files, or the patterns.
   String _folderFor(BuildTab? t) {
     if (t == null) return 'code';
     if (t.kind == BuildTabKind.cpp) {
       final c = s.cppComponent(t.id);
       return c == null ? 'code/cpp' : 'code/cpp/${c.id}';
     }
-    if (s.isPattern(t.id)) return 'audio/patterns';
-    final f = s.project.module(t.id)?.folderPath ?? '';
-    return f.isNotEmpty && s.project.libraryFolders.contains(f) ? 'code/caw/$f' : 'code/caw';
+    return 'audio/patterns';
   }
 
   /// The explorer item that is open in the editor.
   String? _activeKey(BuildTab? t) {
     if (t == null) return null;
-    if (t.kind == BuildTabKind.caw) return 'mod:${t.id}';
+    if (t.kind == BuildTabKind.pattern) return 'mod:${t.id}';
     final c = s.cppComponent(t.id);
     return c == null ? null : 'file:${c.id}/${s.cppWorkbench(c.id).currentFile}';
   }
 
   void _open(SectionController c, BuildTab t) => c.openBuild(t);
 
-  /// A tap in the explorer: a source file opens in its component's tab, a module or pattern in its own.
+  /// A tap in the explorer: a source file opens in its component's tab, a pattern in its own.
   void _openAsset(SectionController c, FileAsset a) {
     final cpp = a.cpp;
     if (cpp != null) {
@@ -92,7 +90,7 @@ class _BuildSectionState extends State<BuildSection> {
       if (path != null) s.cppWorkbench(cpp.id).selectFile(path);
     } else if (a.module != null) {
       s.selectModule(a.module!.id);
-      _open(c, BuildTab(BuildTabKind.caw, a.module!.id));
+      _open(c, BuildTab(BuildTabKind.pattern, a.module!.id));
     } else {
       return; // a built-in: nothing to edit (its docs are in the Library)
     }
@@ -174,12 +172,12 @@ class _BuildSectionState extends State<BuildSection> {
     final id = s.addModule(Template('Pattern.caw', PatternDoc.blank().serialize()));
     final m = s.project.module(id)!;
     m.source = m.runSource = editPatternHeader(m.source, m.name, name: m.name) ?? m.source;
-    _open(c, BuildTab(BuildTabKind.caw, id));
+    _open(c, BuildTab(BuildTabKind.pattern, id));
   }
 
   // ---------- quick switcher ----------
 
-  /// Ctrl+P (or the search button): the start page, the project's C++ files, patterns and .caw modules, and the
+  /// Ctrl+P (or the search button): the start page, the project's C++ files and patterns, and the
   /// classes and functions of the open C++ file.
   Future<void> _quickOpen(SectionController c, BuildTab? active) {
     final items = <QuickItem>[];
@@ -205,13 +203,11 @@ class _BuildSectionState extends State<BuildSection> {
         }, group: 'C++ files'));
       }
     }
-    for (final m in s.project.modules) {
-      final pattern = s.isPattern(m.id);
-      items.add(QuickItem('mod ${m.id}', m.name, pattern ? 'pattern' : '.caw ${s.info[m.id]?.kind ?? 'module'}',
-          pattern ? Icons.queue_music : Icons.graphic_eq, pattern ? Neon.yellow : Neon.blue, () {
+    for (final m in s.project.modules.where((m) => s.isPattern(m.id))) {
+      items.add(QuickItem('mod ${m.id}', m.name, 'pattern', Icons.queue_music, Neon.yellow, () {
         s.selectModule(m.id);
-        _open(c, BuildTab(BuildTabKind.caw, m.id));
-      }, group: pattern ? 'Patterns' : '.caw modules'));
+        _open(c, BuildTab(BuildTabKind.pattern, m.id));
+      }, group: 'Patterns'));
     }
     items.add(QuickItem('start', 'Start page', 'new code, examples, the Library', Icons.home_outlined, Neon.dim,
         () => _showHome(c), group: 'Build'));
@@ -351,7 +347,7 @@ class _BuildSectionState extends State<BuildSection> {
                 workbench: workbench!,
                 bar: strip);
           } else {
-            body = _CawTab(state: s, moduleId: active.id, bar: strip);
+            body = _PatternTab(state: s, moduleId: active.id, bar: strip);
           }
           final explorer = FileManagerScreen(
             key: const ValueKey('build explorer'),
@@ -535,9 +531,9 @@ class _Tab extends StatelessWidget {
       );
 }
 
-/// A .caw module or pattern tab: the module Builder under the same slim tab row.
-class _CawTab extends StatelessWidget {
-  const _CawTab({required this.state, required this.moduleId, required this.bar});
+/// A pattern tab: the pattern editor under the same slim tab row.
+class _PatternTab extends StatelessWidget {
+  const _PatternTab({required this.state, required this.moduleId, required this.bar});
   final AppState state;
   final String moduleId;
   final Widget bar;
@@ -551,7 +547,7 @@ class _CawTab extends StatelessWidget {
     }
     return Column(children: [
       SizedBox(height: 36, child: bar),
-      Expanded(child: BuilderScreen(state: state, embedded: true)),
+      Expanded(child: PatternScreen(state: state)),
     ]);
   }
 }

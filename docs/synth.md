@@ -1,7 +1,7 @@
 ---
 title: Synth
-summary: Implemented synth patch compiler, supported patch features, app behavior and verified gaps.
-covers: [engine/src/synth.cpp, engine/tests/synth_test.cpp, app/lib/ui/builder_screen.dart, app/lib/ui/modulation_panel.dart]
+summary: The engine's .caw synth patch compiler and its features; the app no longer edits .caw patches (#160).
+covers: [engine/src/synth.cpp, engine/tests/synth_test.cpp]
 updated: 2026-11-11
 ---
 
@@ -13,7 +13,7 @@ This note describes the synth functionality that exists in the repository. It is
 
 **[Fact, checked 2026-11-01]** The engine accepts modules with header kind: synth. The patch compiler translates the patch into ordinary generator code plus effect modules, which use the existing voice, pattern, hot-swap, export and deterministic-render paths. The Init synth template is included, and engine tests cover parsing, validation and generated output.
 
-A synth patch is a code-editable module. In the current app, it is handled through the normal Builder workflow (the Code panel; in a narrow panel its controls and code scroll as one list, under a one-row track card outside Build, and its sheets open as glass sheets while Glass is on): generated parameters appear in the Controls panel and the patch source remains editable in the code editor, which shows the restored code after a project undo or redo. There is no separate Vital/Serum-style synth screen or dedicated on-screen keyboard in the current UI.
+A synth patch is a .caw module. The app no longer opens, edits or plays .caw modules (the .caw Builder and its Modulation links panel went with WP-C, #160; a project loads without them), so synth patches are an engine-only feature until #160 deletes the compiler. The app's synth is the C++ Flagship (`org.caw.synth.flagship`).
 
 ## Supported patch features
 
@@ -32,7 +32,7 @@ A synth patch is a code-editable module. In the current app, it is handled throu
 | Effects | Drive, bit-crush, delay, reverb and compressor; project effect modules can also be referenced in a dynamically sized patch effect chain |
 | Validation | Patch values are range-checked; errors identify the source line/column; caw check --code prints generated code |
 
-The synth modulation matrix is editable through the Builder's Modulation links panel. The general module/global modulation editor also supports expression-based modulation through the existing modulation path.
+The synth modulation matrix is written in the patch source; the app has no editor for it any more.
 
 ## Wavetable boundaries
 
@@ -50,14 +50,13 @@ Do not show unsupported patch lines as valid syntax or claim that imported/drawn
 
 ## App and plugin boundaries
 
-- Synth patches are edited through Builder's ordinary code and generated-controls workflow.
+- The app has no .caw synth patch editing (#160).
 - The current app does not provide a dedicated synth page, on-screen synth keyboard, preset browser/tag manager or drag-to-modulate canvas.
 - MIDI pattern file import/export and live MIDI devices are implemented ([engine](engine.md), [app](app.md)).
-- Plugin Builder validates and packages native .caw source modules. It does not compile CLAP/VST3 binaries or host third-party plugins.
 - The native module SDK/graph foundations are not the active Engine/VM playback path; see [engine implementation status](engine-build-status.md).
 
 ## Verification and source of truth
 
-Implementation is in engine/src/synth.cpp, with tests in engine/tests/synth_test.cpp. App integration is through the normal Builder and module parameter path in app/lib/ui/builder_screen.dart and app/lib/ui/modulation_panel.dart. The detailed engine boundary is in [Engine](engine.md) and [Engine implementation status](engine-build-status.md).
+Implementation is in engine/src/synth.cpp, with tests in engine/tests/synth_test.cpp. The detailed engine boundary is in [Engine](engine.md) and [Engine implementation status](engine-build-status.md).
 
 If a patch feature changes, update this note in the same change and verify the generated syntax against the compiler/tests. Never infer support from the example of a future patch format.

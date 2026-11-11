@@ -48,7 +48,6 @@ void main() {
   test('a live pattern step reaches the engine without touching the model or notifying', () async {
     final s = AppState();
     s.engine = Engine.create();
-    s.templates = Engine.templates();
     s.project = s.starterProject();
     s.ready = true;
     s.starting = false;

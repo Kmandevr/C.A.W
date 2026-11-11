@@ -38,25 +38,24 @@ Do not describe a platform as supported for release solely because Flutter or th
 
 ## Current product capabilities — summary
 
-The app currently has eight workspaces: Builder, Arranger, Mixer, Engine Lab, Automation, Exporter, Files and Plugin Builder.
+The app has three sections: Build (C++ components and patterns), Files and Arrange (tracks and clips, with the mixer, the automation lanes and the FX stack). Export is a page from the project menu and Engine diagnostics are in Settings.
 
 The repository currently includes:
-- A portable C++20 engine and constrained .caw module language for code-defined generators, effects, patterns, libraries and synth patches (current implementation, not the target language). The planned C++ authoring/toolchain and shared component SDK are not implemented yet.
-- Module parameters, project globals, exported signals and reusable functions.
+- A portable C++20 engine with built-in C++ instruments and effects and the project's own C++ components, written and built in Build. The engine still contains the constrained .caw module language, which the app no longer uses (WP-C, 2026-11-11) and #160 removes.
 - Pattern editing with a piano roll and drum grid, note expressions, velocity/chance curves and pattern generators.
 - Arrangement clips, nested folders, stereo folder buses and track/folder volume-pan automation.
 - Track mixer controls, master output level and stereo peak meters.
-- Engine Lab scope/spectrum inspection and engine diagnostics.
+- Engine diagnostics (Settings › About and beta): scope/spectrum inspection and meters.
 - MIDI pattern import/export, including Standard MIDI Files and MIDI 2.0 Clip Files, plus a native MIDI 2.0 UMP decoder/input-queue primitive.
 - Native offline WAV rendering, loop/free-length/one-shot/wavetable export, named profiles, export history and a bounded in-memory queue.
-- Portable .cawproj and .caw import/export, project-local folders, tags, saved searches and restore points.
-- Plugin Builder for validating and packaging .caw source modules.
+- Portable .cawproj import/export, project-local folders, tags, saved searches and restore points.
+- CLAP plug-in project export of a C++ component (Build › Export as plug-in).
 
 Important boundaries:
 - USB, Bluetooth and UMP MIDI devices (Android) and WinMM ports (Windows) play instruments at the frame they were played; not yet tested on the owner's hardware. MIDI clock and output are not implemented.
 - Audio-file import, audio clips, sample editing and WAV/SFZ multisample authoring are not implemented.
 - Sends to bus folders, sidechain keys (the ducker, compressor and gate) and bus effects are built (2026-11-11, #175); receives, parallel paths inside a track and a routing matrix are not. Native effect chains on tracks, buses and the master are built (engine).
-- Module/global parameter automation and stems export remain approved v2 work.
+- Instrument and effect knob automation is built; stems export is in the Export song sheet.
 - Audio/MIDI recording, input monitoring, recording latency compensation, take lanes and comping are not implemented; they are planned later in the permanent roadmap. (Plugin delay compensation for native effects is built.)
 - The modular graph executor and native module registry are foundations, not the active playback/mixer path. External CLAP/VST3 binary hosting is not implemented. Dynamic loading of C.A.W. native components, under the user's explicit trust choice, is built in the engine; no screen uses it yet.
 - Video synchronization is not planned at this time.

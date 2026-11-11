@@ -175,9 +175,8 @@ void main() {
 
   test('the engine takes sends, a bus with effects and a keyed ducker', () async {
     final p = _project();
-    p.modules.add(ModuleDoc(id: 'm', name: 'Tone', source: 'sin(2*pi*220*t)'));
-    p.layers[0].generatorId = 'm';
-    p.layers[1].generatorId = 'm';
+    p.layers[0].setInstrument('org.caw.synth.flagship');
+    p.layers[1].setInstrument('org.caw.synth.flagship');
     p.layers[3].components.add(ComponentUseDoc('org.caw.reverb.pro', {'mix': 1.0}));
     p.layers[0].sends.add(SendDoc('verb', pre: true));
     p.layers[1].components.add(ComponentUseDoc('org.caw.ducker', {'mode': 0})..key = ComponentKeyDoc('kick'));

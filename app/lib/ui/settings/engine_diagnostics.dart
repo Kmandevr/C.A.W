@@ -1,19 +1,28 @@
-// Engine Lab: live diagnostics and inspectable relationships from the compiled project.
+// Settings › About and beta › Engine diagnostics (the Engine Lab workspace, moved here with #139): CPU, peaks,
+// overloads, the master scope and spectrum, and each track's signal path from what the engine reports.
 // Only capabilities returned by the current engine API are presented; unsupported graph operations are not simulated.
 import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
-import '../engine/engine.dart';
-import '../model/app_state.dart';
-import '../model/project.dart';
-import 'theme.dart';
-import 'widgets.dart';
+import '../../engine/engine.dart';
+import '../../model/app_state.dart';
+import '../../model/arrange_fx.dart';
+import '../../model/project.dart';
+import '../theme.dart';
+import '../widgets.dart';
 
-class EngineLabScreen extends StatelessWidget {
-  const EngineLabScreen({super.key, required this.state, required this.onOpenBuilder});
+/// Opens Engine diagnostics as a page of its own.
+Future<void> showEngineDiagnostics(BuildContext context, AppState state) => Navigator.of(context).push(
+      MaterialPageRoute<void>(builder: (_) => Scaffold(
+        appBar: AppBar(title: const Text('Engine diagnostics')),
+        body: SafeArea(top: false, child: EngineDiagnostics(state: state)),
+      )),
+    );
+
+class EngineDiagnostics extends StatelessWidget {
+  const EngineDiagnostics({super.key, required this.state});
   final AppState state;
-  final VoidCallback onOpenBuilder;
 
   @override
   Widget build(BuildContext context) => ListenableBuilder(listenable: state, builder: (context, _) =>
@@ -35,21 +44,15 @@ class EngineLabScreen extends StatelessWidget {
       const SizedBox(height: 8),
       if (state.project.layers.isEmpty) const NeonPanel(child: Text('No tracks. Add a track in Arranger.')),
       for (var i = 0; i < state.project.layers.length; i++)
-        _SignalPath(state: state, layer: state.project.layers[i], index: i, onOpenBuilder: onOpenBuilder),
-      const SizedBox(height: 14),
-      const Text('COMPILED MODULES', style: TextStyle(color: Neon.blue, fontWeight: FontWeight.w800)),
-      const SizedBox(height: 8),
-      if (state.project.modules.isEmpty) const NeonPanel(child: Text('No modules. Create a generator or effect in Builder.')),
-      for (final module in state.project.modules) _ModuleReport(state: state, module: module, onOpenBuilder: onOpenBuilder),
+        _SignalPath(state: state, layer: state.project.layers[i], index: i),
     ]));
 }
 
 class _SignalPath extends StatelessWidget {
-  const _SignalPath({required this.state, required this.layer, required this.index, required this.onOpenBuilder});
+  const _SignalPath({required this.state, required this.layer, required this.index});
   final AppState state;
   final LayerDoc layer;
   final int index;
-  final VoidCallback onOpenBuilder;
 
   @override
   Widget build(BuildContext context) {
@@ -73,24 +76,23 @@ class _SignalPath extends StatelessWidget {
         Wrap(crossAxisAlignment: WrapCrossAlignment.center, spacing: 6, runSpacing: 6, children: [
           const Text('MIDI', style: TextStyle(color: Neon.yellow, fontSize: 10, fontWeight: FontWeight.w800)),
           for (final id in midiIds)
-            ActionChip(
+            Chip(
               avatar: const Icon(Icons.piano, size: 13, color: Neon.yellow),
               label: Text(state.project.module(id)?.name ?? 'Missing pattern', style: const TextStyle(fontSize: 11)),
-              onPressed: () { state.selectModule(id); onOpenBuilder(); },
               side: const BorderSide(color: Neon.line), backgroundColor: Neon.panelHi),
         ]),
       ],
       const SizedBox(height: 8),
       Wrap(crossAxisAlignment: WrapCrossAlignment.center, spacing: 6, runSpacing: 6, children: [
         const Text('AUDIO', style: TextStyle(color: Neon.green, fontSize: 10, fontWeight: FontWeight.w800)),
-        for (var i = 0; i < layer.chain.length; i++) ...[
+        for (final (i, id) in [?layer.instrument?.id, for (final c in layer.components) c.id].indexed) ...[
           if (i > 0) _SignalPulse(state: state, index: index, color: Neon.green),
-          ActionChip(
-            label: Text(state.project.module(layer.chain[i])?.name ?? 'Missing module', style: const TextStyle(fontSize: 11)),
-            onPressed: () { state.selectLayer(layer); state.selectModule(layer.chain[i]); onOpenBuilder(); },
+          Chip(
+            label: Text(state.componentLabel(id), style: const TextStyle(fontSize: 11)),
             side: const BorderSide(color: Neon.line), backgroundColor: Neon.panelHi),
         ],
-        if (layer.chain.isEmpty) const Text('No generator or effects assigned', style: TextStyle(color: Neon.dim, fontSize: 12)),
+        if (layer.instrument == null && layer.components.isEmpty)
+          const Text('No instrument or effects', style: TextStyle(color: Neon.dim, fontSize: 12)),
         _SignalPulse(state: state, index: index, color: Neon.green),
         const Icon(Icons.arrow_forward, size: 14, color: Neon.dim),
         Text(outputLabel,
@@ -151,41 +153,6 @@ class _SignalPulsePainter extends CustomPainter {
   @override
   bool shouldRepaint(covariant _SignalPulsePainter old) =>
       old.state != state || old.index != index || old.color != color;
-}
-
-class _ModuleReport extends StatelessWidget {
-  const _ModuleReport({required this.state, required this.module, required this.onOpenBuilder});
-  final AppState state;
-  final ModuleDoc module;
-  final VoidCallback onOpenBuilder;
-
-  @override
-  Widget build(BuildContext context) {
-    final info = state.info[module.id];
-    final color = info == null || !info.ok ? Neon.pink : Neon.blue;
-    return Padding(padding: const EdgeInsets.only(bottom: 8),
-      child: NeonPanel(color: color, child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Row(children: [
-          Expanded(child: Text(module.name, style: const TextStyle(fontWeight: FontWeight.w700))),
-          Text(info == null ? 'NOT COMPILED' : info.ok ? info.kind.toUpperCase() : 'ERROR',
-            style: Neon.code(size: 10, color: color)),
-          IconButton(tooltip: 'Open in Builder', onPressed: () {
-            state.selectModule(module.id);
-            onOpenBuilder();
-          }, icon: const Icon(Icons.open_in_new, size: 18)),
-        ]),
-        if (info?.summary.isNotEmpty == true) Text(info!.summary, style: const TextStyle(color: Neon.dim, fontSize: 12)),
-        if (info?.params.isNotEmpty == true)
-          Text('Parameters: ${info!.params.map((p) => p.name).join(', ')}',
-            style: Neon.code(size: 11, color: Neon.green)),
-        if (info?.error.isNotEmpty == true) Text(info!.error, style: const TextStyle(color: Neon.pink, fontSize: 12)),
-        if (info?.imports.isNotEmpty == true) Text('Imports: ${info!.imports.join(', ')}', style: Neon.code(size: 11, color: Neon.dim)),
-        if (info?.exports.isNotEmpty == true) Text('Exports: ${info!.exports.map((e) => e.name).join(', ')}', style: Neon.code(size: 11, color: Neon.dim)),
-        if (info?.warnings.isNotEmpty == true)
-          for (final warning in info!.warnings) Text('Warning: $warning', style: const TextStyle(color: Neon.yellow, fontSize: 11)),
-        if (module.edited) const Text('Unrun source edits', style: TextStyle(color: Neon.yellow, fontSize: 11)),
-      ])));
-  }
 }
 
 class _Readout extends StatelessWidget {

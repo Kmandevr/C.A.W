@@ -3,7 +3,7 @@ import 'dart:io';
 
 import 'package:caw/engine/engine.dart';
 import 'package:caw/model/app_state.dart';
-import 'package:caw/model/project.dart';
+import 'package:caw/model/arrange_fx.dart';
 import 'package:caw/ui/shell.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/widgets.dart' as widgets;
@@ -18,12 +18,7 @@ void main() {
     tester.view.devicePixelRatio = 1;
     final s = AppState();
     s.engine = Engine.create();
-    s.templates = Engine.templates();
     s.project = s.starterProject();
-    // The First loop plays C++ instruments; this test is about a .caw generator, so a .caw kick track leads.
-    final cawKick = s.moduleFromTemplate(s.template('kick.caw')!);
-    s.project.modules.insert(0, cawKick);
-    s.project.layers.insert(0, LayerDoc(id: 'caw-kick', name: 'Kick', color: 0, generatorId: cawKick.id, lengthSteps: 16));
     s.selectedModuleId = s.project.modules.first.id;
     s.ready = true;
     s.starting = false;
@@ -33,7 +28,7 @@ void main() {
     var rebuilt = 0;
     widgets.debugOnRebuildDirtyWidget = (e, builtOnce) => rebuilt++;
     final kick = s.project.modules.first;
-    // The first keystroke marks the module as edited, which the whole app shows; it isn't counted.
+    // The first keystroke marks the pattern as edited, which the whole app shows; it isn't counted.
     s.editSource(kick.id, '${kick.source}\n//');
     await tester.pump();
     rebuilt = 0;
@@ -43,9 +38,10 @@ void main() {
     }
     final perKey = rebuilt / 10;
     rebuilt = 0;
-    final param = s.info[kick.id]!.params.first;
+    // A knob of a track's C++ instrument (the Bass's Flagship cutoff).
+    final bass = s.project.layers.firstWhere((l) => l.name == 'Bass');
     for (var i = 0; i < 10; i++) {
-      s.setParam(kick.id, param.name, param.min + (param.max - param.min) * i / 10);
+      s.setInstrumentParamLive(bass, 'flt1_cutoff', 200.0 + 100 * i);
       await tester.pump();
     }
     final perStep = rebuilt / 10;

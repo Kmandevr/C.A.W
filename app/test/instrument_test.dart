@@ -29,29 +29,29 @@ const _width = NativeComponentInfo(id: 'org.caw.stereo.width', name: 'Width', ro
   ComponentPortInfo(id: 'out', type: 'audio', input: false, layout: 'stereo', channels: 2),
 ]);
 
-ProjectDoc _project() => ProjectDoc(id: 'p', name: 'Instruments', modules: [
-      ModuleDoc(id: 'gen', name: 'Saw', source: 'saw(freq)'),
-      ModuleDoc(id: 'fx', name: 'Fold', source: '---\nkind: effect\n---\nin'),
-    ], layers: [
-      LayerDoc(id: 'a', name: 'Lead', color: 0, generatorId: 'gen', effectIds: ['fx']),
+const _saw = NativeComponentInfo(id: 'org.caw.synth.saw', name: 'Saw', role: 'instrument', builtin: true,
+    ports: _instrumentPorts);
+
+ProjectDoc _project() => ProjectDoc(id: 'p', name: 'Instruments', layers: [
+      LayerDoc(id: 'a', name: 'Lead', color: 0, instrument: ComponentUseDoc('org.caw.synth.saw'),
+          components: [ComponentUseDoc('org.caw.stereo.width')]),
       LayerDoc(id: 'b', name: 'Bass', color: 1),
     ]);
 
 void main() {
   group('model', () {
-    test('an instrument replaces the generator and round-trips through the project file', () {
+    test('an instrument replaces another and round-trips through the project file', () {
       final layer = _project().layers.first;
-      expect(layer.chain, ['gen', 'fx']);
+      layer.instrument!.params['cutoff'] = 300;
       layer.setInstrument('org.caw.synth.basic');
-      expect(layer.generatorId, isNull);
-      expect(layer.chain, ['fx'], reason: 'with a C++ instrument only the .caw effects run');
+      expect(layer.instrument!.params, isEmpty, reason: 'another instrument starts from its defaults');
+      expect(layer.components.single.id, 'org.caw.stereo.width', reason: 'the effects stay');
       layer.instrument!.params['cutoff'] = 900;
       layer.setInstrument('org.caw.synth.basic');
       expect(layer.instrument!.params['cutoff'], 900, reason: 'the same instrument keeps its values');
       final back = LayerDoc.fromJson(jsonDecode(jsonEncode(layer.toJson())) as Map<String, dynamic>);
       expect(back.instrument?.id, 'org.caw.synth.basic');
       expect(back.instrument?.params['cutoff'], 900);
-      expect(back.generatorId, isNull);
       layer.setInstrument(null);
       expect(layer.toJson().containsKey('instrument'), isFalse);
     });
@@ -66,7 +66,7 @@ void main() {
       final played = engine({'local.lead.cpp1'});
       final layer = (played['layers'] as List).first as Map<String, dynamic>;
       expect(layer['instrument'], 'local.lead.cpp1');
-      expect(layer['chain'], ['fx']);
+      expect(layer.containsKey('chain'), isFalse);
       expect((played['automation'] as List).single['target_type'], 'instrument');
       final waiting = engine(<String>{});
       expect(((waiting['layers'] as List).first as Map<String, dynamic>).containsKey('instrument'), isFalse);
@@ -113,10 +113,10 @@ void main() {
       sections.dispose();
     });
 
-    testWidgets('the track menu has one Instrument… entry: the browser lists C++ and .caw instruments, not effects',
+    testWidgets('the track menu has one Instrument… entry: the browser lists the instruments, not effects',
         (tester) async {
-      s.componentCatalog.set(const [_synth, _width]);
-      s.nativeCatalog = const [_synth, _width];
+      s.componentCatalog.set(const [_saw, _synth, _width]);
+      s.nativeCatalog = const [_saw, _synth, _width];
       tester.view.physicalSize = const Size(412, 900);
       tester.view.devicePixelRatio = 1;
       addTearDown(tester.view.reset);
@@ -140,8 +140,7 @@ void main() {
       await tester.pumpAndSettle();
       final layer = s.project.layers.first;
       expect(layer.instrument?.id, 'org.caw.synth.basic');
-      expect(layer.generatorId, isNull);
-      // Back to the .caw generator, and Cancel keeps what it has.
+      // Back to the Saw, and Cancel keeps what it has.
       await tester.longPress(find.byKey(const ValueKey('track-header-a')));
       await tester.pumpAndSettle();
       await tester.tap(find.text('Instrument · Basic synth…'));
@@ -197,8 +196,6 @@ void main() {
       expect(p.name, 'First loop');
       expect([for (final l in p.layers) l.name], ['Kick', 'Hats', 'Bass', 'Lead', 'Acid', 'Pad']);
       for (final l in p.layers) {
-        expect(l.generatorId, isNull, reason: l.name);
-        expect(l.effectIds, isEmpty, reason: l.name);
         expect(l.instrument?.id, startsWith('org.caw.'), reason: l.name);
         expect(l.clips.single.lengthSteps, p.loopSteps, reason: l.name);
         expect(l.components.every((c) => c.id.startsWith('org.caw.')), isTrue, reason: l.name);

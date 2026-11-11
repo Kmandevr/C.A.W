@@ -15,12 +15,7 @@ import 'layout.dart';
 String dockPanelTitle(String id) => switch (id) {
   Panels.arrangement => 'Arrange',
   Panels.builder => 'Build',
-  Panels.mixer => 'Mixer',
-  Panels.engineLab => 'Engine lab',
-  Panels.automation => 'Automation',
-  Panels.exporter => 'Export',
   Panels.files => 'Files',
-  Panels.pluginBuilder => 'Plugins',
   _ => id,
 };
 

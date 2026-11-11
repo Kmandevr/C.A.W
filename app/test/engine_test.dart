@@ -4,6 +4,7 @@ import 'dart:isolate';
 import 'dart:typed_data';
 
 import 'package:caw/engine/engine.dart';
+import 'package:caw/model/pattern_templates.dart';
 import 'package:caw/model/project.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -37,7 +38,7 @@ void main() {
       ModuleDoc(id: 'k', name: 'Kick', source: kick.source),
       ModuleDoc(id: 'x', name: 'Broken', source: 'sin('),
     ], layers: [
-      LayerDoc(id: 'l', name: 'Kick', color: 0, generatorId: 'k', lengthSteps: 4),
+      LayerDoc(id: 'l', name: 'Kick', color: 0, instrument: ComponentUseDoc('org.caw.drums'), lengthSteps: 4),
     ]);
     final result = await e.setProject(p.toEngineJson());
     expect(result['k']!.ok, isTrue);
@@ -127,24 +128,20 @@ void main() {
   }, skip: skip);
 
   test('a generator plays the notes of a pattern', () async {
-    final templates = Engine.templates();
-    final synth = templates.firstWhere((t) => t.file == 'acid-synth.caw');
-    final line = templates.firstWhere((t) => t.file == 'acid-line.caw');
+    final line = patternTemplates.firstWhere((t) => t.file == 'acid-line.caw');
     final info = Engine.check(line.source);
     expect(info.ok, isTrue);
     expect(info.isPattern, isTrue);
     expect(info.noteCount, 11);
     expect(Engine.check('---\nkind: pattern\n---\n0 H2 1').line, 4);
     final p = ProjectDoc(id: 'p', name: 'T', modules: [
-      ModuleDoc(id: 's', name: 'Acid', source: synth.source),
       ModuleDoc(id: 'n', name: 'Line', source: line.source),
     ], layers: [
-      LayerDoc(id: 'l', name: 'Acid', color: 0, generatorId: 's', patternId: 'n'),
+      LayerDoc(id: 'l', name: 'Acid', color: 0, instrument: ComponentUseDoc('org.caw.synth.flagship'), patternId: 'n'),
     ]);
     final e = Engine.create();
     final result = await e.setProject(p.toEngineJson());
     expect(result['n']!.ok, isTrue);
-    expect(result['s']!.warnings, isEmpty);
     e.dispose();
     final dir = await Directory.systemTemp.createTemp('caw');
     final midiOut = '${dir.path}/acid.mid';

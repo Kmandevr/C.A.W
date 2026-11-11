@@ -13,7 +13,7 @@ void main() {
     final c = SectionController();
     expect(c.current, Section.arrange);
     const a = BuildTab(BuildTabKind.cpp, 'org.me.drive');
-    const b = BuildTab(BuildTabKind.caw, 'm1');
+    const b = BuildTab(BuildTabKind.pattern, 'm1');
     c.addBuild(b);
     expect(c.current, Section.arrange, reason: 'adding a tab does not switch sections');
     c.openBuild(a);

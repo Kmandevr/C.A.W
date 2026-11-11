@@ -51,10 +51,10 @@ String exportProjectName(ProjectDoc p, ExportNaming naming, {DateTime? now}) {
   }
 }
 
-/// The stems a project has: tracks that play (a generator or an instrument) and folder buses.
+/// The stems a project has: tracks that play (an instrument) and folder buses.
 List<({String id, String name, String kind})> projectStems(ProjectDoc p, StemSet set) => [
       for (final l in p.layers)
-        if (!l.isFolder && (l.generatorId != null || l.instrument != null) && set != StemSet.buses)
+        if (!l.isFolder && l.instrument != null && set != StemSet.buses)
           (id: l.id, name: l.name, kind: 'track')
         else if (l.isFolder && l.busEnabled && set != StemSet.tracks)
           (id: l.id, name: l.name, kind: 'bus'),

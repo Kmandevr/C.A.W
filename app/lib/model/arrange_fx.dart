@@ -1,4 +1,4 @@
-// Arrange's track edits on AppState: a track's FX stack (instrument, .caw chain, native effects), drops onto a track
+// Arrange's track edits on AppState: a track's FX stack (instrument and native effects), drops onto a track
 // or below the last one, clips moved between tracks, trust.
 import 'dart:convert';
 
@@ -192,25 +192,15 @@ extension ArrangeFx on AppState {
   List<NativeComponentInfo> get nativeInstruments =>
       [for (final c in componentCatalog.value.values) if (c.isInstrument && componentPlayable(c.id)) c];
 
-  /// Makes native component [componentId] [layer]'s instrument in place of its .caw generator (null: none). Lanes of
-  /// a replaced instrument go with it.
+  /// Makes native component [componentId] [layer]'s instrument (null: none). Lanes of a replaced instrument go with
+  /// it.
   void setNativeInstrument(LayerDoc layer, String? componentId) {
-    if (layer.isFolder || (layer.instrument?.id == componentId && layer.generatorId == null)) return;
+    if (layer.isFolder || layer.instrument?.id == componentId) return;
     editProject((p) {
       if (layer.instrument?.id != componentId) {
         p.automation.removeWhere((a) => a.targetType == 'instrument' && a.layerId == layer.id);
       }
       layer.setInstrument(componentId);
-    });
-  }
-
-  /// Makes .caw module [moduleId] [layer]'s instrument, replacing a native one.
-  void setCawGenerator(LayerDoc layer, String moduleId) {
-    if (layer.isFolder) return;
-    editProject((p) {
-      if (layer.instrument != null) p.automation.removeWhere((a) => a.targetType == 'instrument' && a.layerId == layer.id);
-      layer.instrument = null;
-      layer.generatorId = moduleId;
     });
   }
 
@@ -232,26 +222,8 @@ extension ArrangeFx on AppState {
     layerValueTick(layer.id).value++;
   }
 
-  /// Adds .caw effect module [moduleId] to [layer]'s chain (at [at], or the end).
-  bool addCawEffect(LayerDoc layer, String moduleId, {int? at}) {
-    if (layer.isFolder || project.module(moduleId) == null || layer.effectIds.length >= 32) return false;
-    editLayer(layer, (l) => l.effectIds.insert((at ?? l.effectIds.length).clamp(0, l.effectIds.length), moduleId));
-    return true;
-  }
-
-  void removeCawEffect(LayerDoc layer, int index) {
-    if (index < 0 || index >= layer.effectIds.length) return;
-    editLayer(layer, (l) => l.effectIds.removeAt(index));
-  }
-
-  void moveCawEffect(LayerDoc layer, int from, int to) {
-    final n = layer.effectIds.length;
-    if (from < 0 || from >= n || to < 0 || to >= n || from == to) return;
-    editLayer(layer, (l) => l.effectIds.insert(to, l.effectIds.removeAt(from)));
-  }
-
-  /// Puts what was picked or dropped on [layer]: an effect joins its chain, an instrument module becomes its
-  /// instrument when it has none, and a pattern becomes a clip at [atStep] (snapped). True when something changed.
+  /// Puts what was picked or dropped on [layer]: an effect joins its chain, an instrument becomes its instrument,
+  /// and a pattern becomes a clip at [atStep] (snapped). True when something changed.
   bool dropAsset(LayerDoc layer, AssetDrag asset, {int? atStep}) {
     // The master's chain holds C++ effects only (the engine's `master_components`).
     if (isMasterLayer(layer)) {
@@ -266,14 +238,6 @@ extension ArrangeFx on AppState {
           return true;
         }
         return addNativeEffect(layer, asset.id) != null;
-      case AssetKind.cawModule:
-        if (isPattern(asset.id)) return _dropPattern(layer, asset.id, atStep);
-        if (isGenerator(asset.id)) {
-          if (layer.generatorId == asset.id && layer.instrument == null) return false;
-          setCawGenerator(layer, asset.id);
-          return true;
-        }
-        return addCawEffect(layer, asset.id);
       case AssetKind.pattern:
         return _dropPattern(layer, asset.id, atStep);
       case AssetKind.midiFile:
@@ -289,31 +253,26 @@ extension ArrangeFx on AppState {
     }
   }
 
-  /// An instrument rather than an effect or a clip: what [AssetDrag.instrument] says, else the engine's descriptor
-  /// (a native component) or the module's kind (.caw).
+  /// An instrument rather than an effect or a clip: what [AssetDrag.instrument] says, else the engine's descriptor.
   bool isInstrumentAsset(AssetDrag asset) => switch (asset.kind) {
         AssetKind.nativeEffect => asset.instrument || (componentInfo(asset.id)?.isInstrument ?? false),
-        AssetKind.cawModule => asset.instrument || isGenerator(asset.id),
         AssetKind.devicePreset => asset.instrument ||
             (componentInfo(userPresets.byId(asset.id)?.componentId ?? '')?.isInstrument ?? false),
         AssetKind.trackPreset => userPresets.byId(asset.id)?.instrument != null,
         _ => false,
       };
 
-  /// The name of what plays [layer]'s notes (its C++ instrument or .caw generator), or null when nothing does.
+  /// The name of what plays [layer]'s notes (its C++ instrument), or null when nothing does.
   String? instrumentName(LayerDoc layer) {
     final use = layer.instrument;
-    if (use != null) return componentLabel(use.id);
-    final gen = layer.generatorId == null ? null : project.module(layer.generatorId);
-    return gen?.name;
+    return use == null ? null : componentLabel(use.id);
   }
 
   /// Whether putting [asset] on [layer] would replace the instrument it has (the UI asks first).
   bool replacesInstrument(LayerDoc layer, AssetDrag asset) {
     if (!isInstrumentAsset(asset) || instrumentName(layer) == null) return false;
     if (asset.kind == AssetKind.trackPreset || asset.kind == AssetKind.devicePreset) return true;
-    return asset.kind == AssetKind.nativeEffect ? layer.instrument?.id != asset.id
-        : layer.instrument != null || layer.generatorId != asset.id;
+    return layer.instrument?.id != asset.id;
   }
 
   /// A new track with nothing on it, named [name]: at the end of the list, or with [parentId] as the last track

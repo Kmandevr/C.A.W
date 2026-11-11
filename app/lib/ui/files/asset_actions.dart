@@ -1,18 +1,25 @@
-// What Files does with an asset or folder: open it in Build, audition it, its long-press menu, rename, duplicate, delete, new effects and modules.
+// What Files does with an asset or folder: open it in Build, audition it, its long-press menu, rename, duplicate,
+// delete, new C++ effects and instruments (blank or from a starter) and new patterns.
 import 'dart:io';
 
 import 'package:flutter/material.dart';
 
+import '../../engine/engine.dart' show Template;
 import '../../model/app_state.dart';
+import '../../model/cpp_starters.dart';
+import '../../model/cpp_workbench.dart';
 import '../../model/files_catalog.dart';
+import '../../model/pattern_doc.dart';
 import '../../model/user_presets.dart';
 import '../../platform/save_copy.dart';
+import '../cpp/build_start.dart' show ExamplesList, StarterExample;
 import '../cpp/sample_pack_screen.dart' show openSamplePackMaker;
 import '../devices/kit/preset_actions.dart' show exportPreset, importPreset;
 import '../frame/sections.dart';
+import '../glass.dart';
+import '../pattern_fields.dart' show editPatternHeader;
 import '../theme.dart';
 import 'asset_views.dart';
-import 'library_manager.dart';
 
 /// Actions shared by the Files screen and its inspector. [onOpenBuilder] is the old shell's fallback for opening
 /// a module when there is no SectionScope; [onSelect] makes a new or copied asset the selection.
@@ -35,7 +42,7 @@ class FilesActions {
     ));
   }
 
-  /// Double-tap: a C++ component or file opens in a C++ Builder tab, a .caw module or pattern in a .caw tab.
+  /// Double-tap: a C++ component or file opens in a C++ Builder tab, a pattern in a pattern tab.
   void open(FileAsset a) {
     final tab = a.buildTab;
     if (tab == null) return;
@@ -50,7 +57,7 @@ class FilesActions {
 
   bool isPreviewing(FileAsset a) => a.module != null && state.previewOnly && state.selectedModuleId == a.module!.id;
 
-  /// ▶: Solo preview (the audition) of a .caw module or pattern, starting the transport when it was stopped.
+  /// ▶: Solo preview (the audition) of a pattern, starting the transport when it was stopped.
   void togglePreview(FileAsset a) {
     final m = a.module;
     if (m == null || !a.previewable) return;
@@ -158,7 +165,6 @@ class FilesActions {
       if (a.isInstrument) const MenuEntry('sample-pack', Icons.library_music_outlined, 'Make sample pack…'),
       if (a.sample != null) const MenuEntry('save-wav', Icons.file_upload_outlined, 'Save WAV…'),
       if (a.module != null) const MenuEntry('tags', Icons.sell_outlined, 'Edit tags'),
-      if (a.module != null) const MenuEntry('export', Icons.file_upload_outlined, 'Export .caw'),
       if (a.preset != null) const MenuEntry('export-preset', Icons.file_upload_outlined, 'Export preset file'),
       if (!a.builtin) const MenuEntry('delete', Icons.delete_outline, 'Delete', danger: true, dividerBefore: true),
     ]);
@@ -177,8 +183,6 @@ class FilesActions {
         duplicate(a);
       case 'tags':
         await editTags(a);
-      case 'export':
-        await exportCawModule(context, a.module!);
       case 'export-preset':
         await exportPreset(context, a.preset!);
       case 'sample-pack':
@@ -208,60 +212,59 @@ class FilesActions {
     }
   }
 
-  /// "New .caw module" of [kind] (effect, generator or pattern) in [folderPath], opened in Build.
-  void newCawModule(String kind, {String folderPath = ''}) {
-    final id = state.addBlankModule(kind);
-    if (folderPath.isNotEmpty) state.moveModuleToFolder(id, folderPath);
+  /// "New from a starter": the C++ starters (instruments and effects, examples/cpp/starters) to copy into the
+  /// project and open in Build. They replace the .caw templates (#160).
+  Future<void> newFromStarter() async {
+    final picked = await showGlassSheet<StarterExample>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      constraints: BoxConstraints(maxHeight: MediaQuery.sizeOf(context).height * 0.7),
+      builder: (c) => ExamplesList(
+          examples: [for (final s in cppStarters) StarterExample.cpp(s)], onPick: (e) => Navigator.pop(c, e)),
+    );
+    final starter = picked?.starter;
+    if (starter == null || !context.mounted) return;
+    final doc = state.addCppStarter(starter);
+    onSelect('cpp:${doc.id}');
+    final sections = SectionController.maybeOf(context);
+    if (sections != null) {
+      sections.openBuild(BuildTab(BuildTabKind.cpp, doc.componentId));
+    } else {
+      notice('Added "${doc.name}".');
+    }
+  }
+
+  /// "New pattern", with its header at once, opened in Build.
+  void newPattern() {
+    final id = state.addModule(Template('Pattern.caw', PatternDoc.blank().serialize()));
+    final m = state.project.module(id)!;
+    m.source = m.runSource = editPatternHeader(m.source, m.name, name: m.name) ?? m.source;
     onSelect('mod:$id');
     final sections = SectionController.maybeOf(context);
     if (sections != null) {
-      sections.openBuild(BuildTab(BuildTabKind.caw, id));
+      sections.openBuild(BuildTab(BuildTabKind.pattern, id));
     } else {
       onOpenBuilder();
     }
   }
 
-  Future<void> newLibraryFolder(String parent) async {
-    final name = await askName('New folder', '', label: 'Folder name');
-    if (name == null) return;
-    try {
-      if (!state.createLibraryFolder(parent.isEmpty ? name : '$parent/$name')) notice('That folder already exists.', error: true);
-    } catch (e) {
-      notice('Folder could not be created: $e', error: true);
-    }
-  }
-
-  /// The long-press menu of a folder (in the tree or the grid). Returns the path to show after it (a renamed
-  /// or deleted library folder moves the view), or null to stay.
+  /// The long-press menu of a folder (in the tree or the grid). Returns the path to show after it, or null to stay.
   Future<String?> folderMenu(FilesFolder f, Offset at) async {
     if (f.kind == FilesFolderKind.cppComponent) {
       final c = state.cppAssets.where((a) => 'code/cpp/${a.cpp!.id}' == f.path).firstOrNull;
       if (c != null) await assetMenu(c, at);
       return null;
     }
-    final cawKind = f.newCawKind;
-    final libraryParent = f.kind == FilesFolderKind.libraryFolder ? f.libraryPath : '';
     final entries = <MenuEntry<String>>[
       if (f.offersNewCpp) const MenuEntry('cpp', Icons.memory, 'New C++ effect'),
       if (f.offersNewCpp) const MenuEntry('cpp-instrument', Icons.piano_outlined, 'New C++ instrument'),
-      if (cawKind != null)
-        MenuEntry('caw', Icons.note_add_outlined, switch (cawKind) {
-          'effect' => 'New .caw effect',
-          'pattern' => 'New pattern',
-          _ => 'New .caw module',
-        }),
-      if (f.kind == FilesFolderKind.cawModules || f.kind == FilesFolderKind.libraryFolder) ...[
-        const MenuEntry('import', Icons.file_open_outlined, 'Import .caw module here'),
-        const MenuEntry('folder', Icons.create_new_folder_outlined, 'New folder'),
-      ],
+      if (f.offersNewCpp) const MenuEntry('starter', Icons.auto_awesome_outlined, 'New from a starter…'),
+      if (f.offersNewPattern) const MenuEntry('pattern', Icons.note_add_outlined, 'New pattern'),
       if (f.kind == FilesFolderKind.presets)
         const MenuEntry('import-preset', Icons.file_open_outlined, 'Import preset file…'),
       if (f.kind == FilesFolderKind.samplePacks || f.kind == FilesFolderKind.audio)
         const MenuEntry('sample-pack', Icons.library_music_outlined, 'Make sample pack…'),
-      if (f.kind == FilesFolderKind.libraryFolder) ...[
-        const MenuEntry('rename', Icons.drive_file_rename_outline, 'Rename folder'),
-        const MenuEntry('delete', Icons.delete_outline, 'Delete folder', danger: true, dividerBefore: true),
-      ],
     ];
     if (entries.isEmpty) return null;
     final action = await showCompactMenu<String>(context, at, entries);
@@ -271,42 +274,15 @@ class FilesActions {
         newCppEffect();
       case 'cpp-instrument':
         newCppEffect(instrument: true);
-      case 'caw':
-        newCawModule(cawKind!, folderPath: libraryParent);
-      case 'import':
-        await importCawModule(context, state, libraryParent);
+      case 'starter':
+        await newFromStarter();
+      case 'pattern':
+        newPattern();
       case 'import-preset':
         await importPreset(context, state.userPresets);
       case 'sample-pack':
         await openSamplePackMaker(context, state);
         return 'audio/samples';
-      case 'folder':
-        await newLibraryFolder(libraryParent);
-      case 'rename':
-        final next = await askName('Rename folder', f.label, label: 'Folder name');
-        if (next == null) return null;
-        final parent = libraryParent.contains('/') ? libraryParent.substring(0, libraryParent.lastIndexOf('/')) : '';
-        final to = parent.isEmpty ? next : '$parent/$next';
-        try {
-          if (state.renameLibraryFolder(libraryParent, to)) return 'code/caw/$to';
-        } catch (_) {}
-        notice('Folder name is invalid or already in use.', error: true);
-      case 'delete':
-        final ok = await showDialog<bool>(
-          context: context,
-          builder: (context) => AlertDialog(
-            title: const Text('Delete folder?'),
-            content: Text('Delete "${f.label}"? Its modules move to the parent folder; no module is deleted.'),
-            actions: [
-              TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-              FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Delete folder')),
-            ],
-          ),
-        );
-        if (ok != true) return null;
-        state.deleteLibraryFolder(libraryParent);
-        final parent = libraryParent.contains('/') ? libraryParent.substring(0, libraryParent.lastIndexOf('/')) : '';
-        return parent.isEmpty ? 'code/caw' : 'code/caw/$parent';
     }
     return null;
   }

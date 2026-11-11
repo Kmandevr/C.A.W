@@ -383,8 +383,7 @@ void main() {
     ProjectDoc song() {
       final p = ProjectDoc(id: 'p', name: 'T', bpm: 120);
       p.modules.add(ModuleDoc(id: 'pat', name: 'Riff', source: PatternDoc.blank(name: 'Riff', bars: 1).serialize()));
-      p.modules.add(ModuleDoc(id: 'syn', name: 'Synth', source: ''));
-      final keys = LayerDoc(id: 'L1', name: 'Keys', color: 0, generatorId: 'syn')
+      final keys = LayerDoc(id: 'L1', name: 'Keys', color: 0, instrument: ComponentUseDoc('org.caw.synth.flagship'))
         ..clips.add(ClipDoc(id: 'c1', patternId: 'pat', startSteps: 8, lengthSteps: 16))
         ..automation.addAll([
           AutomationLaneDoc(target: 'volume', points: [AutomationPointDoc(step: 0, value: 1), AutomationPointDoc(step: 16, value: 0.25)]),
@@ -392,7 +391,7 @@ void main() {
         ]);
       p.layers.add(keys);
       p.automation.addAll([
-        ProjectAutomationLaneDoc(targetType: 'param', target: 'cutoff', moduleId: 'syn', points: [
+        ProjectAutomationLaneDoc(targetType: 'instrument', target: 'cutoff', layerId: 'L1', points: [
           AutomationPointDoc(step: 8, value: 0), AutomationPointDoc(step: 24, value: 1),
         ]),
         // Another track's lane, and a global: not this clip's.

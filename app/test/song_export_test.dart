@@ -4,7 +4,6 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:caw/engine/engine.dart';
 import 'package:caw/model/app_state.dart';
 import 'package:caw/model/project.dart';
 import 'package:caw/model/settings.dart';
@@ -159,8 +158,8 @@ void main() {
     final s = AppState(settings: Settings());
     addTearDown(s.dispose);
     s.project = ProjectDoc(id: 'p', name: 'Song', bpm: 120, layers: [
-      LayerDoc(id: 'a', name: 'Bass', color: 0, generatorId: 'g'),
-      LayerDoc(id: 'b', name: 'Keys', color: 1, generatorId: 'g', parentId: 'bus'),
+      LayerDoc(id: 'a', name: 'Bass', color: 0, instrument: ComponentUseDoc('org.caw.synth.flagship')),
+      LayerDoc(id: 'b', name: 'Keys', color: 1, instrument: ComponentUseDoc('org.caw.synth.flagship'), parentId: 'bus'),
       LayerDoc(id: 'bus', name: 'Verb', color: 2, isFolder: true),
     ]);
     s.project.markers.add(MarkerDoc(id: 'r', name: 'Verse', startSteps: 0, endSteps: 16));
@@ -218,7 +217,6 @@ void main() {
   test('with the engine: the queue renders the mix and stems to aligned WAV files (needs CAW_LIB)', () async {
     final s = AppState(settings: Settings());
     addTearDown(s.dispose);
-    s.templates = Engine.templates();
     s.project = s.starterProject();
     final q = ExportQueue(tmp);
     await q.load();

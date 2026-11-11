@@ -216,7 +216,6 @@ extension Templates on AppState {
       j['sends'] = [for (final s in l.sends) if (ids.contains(s.to)) s.toJson()];
       if (!clips) j['clips'] = <Object>[];
       layers.add(j);
-      modules.addAll([?l.generatorId, ...l.effectIds]);
       if (clips) {
         for (final c in l.clips) {
           modules.addAll([c.patternId, ...c.takes]);
@@ -236,8 +235,9 @@ extension Templates on AppState {
     return t;
   }
 
-  /// Puts track template [t]'s tracks at the end of the track list with new ids (its modules too, so their knobs
-  /// are the new tracks' own), as REAPER's Insert track from template; one undo step. Returns the first track.
+  /// Puts track template [t]'s tracks at the end of the track list with new ids (its patterns too, so their notes
+  /// are the new tracks' own), as REAPER's Insert track from template; one undo step. Returns the first track. A
+  /// template saved with .caw sounds inserts without them (#160).
   LayerDoc? insertTrackTemplate(TemplateDoc t) {
     if (t.kind != TemplateKind.track) return null;
     final body = jsonDecode(jsonEncode(t.json)) as Map<String, dynamic>;
@@ -248,6 +248,7 @@ extension Templates on AppState {
     final modules = <ModuleDoc>[];
     for (final m in (body['modules'] as List? ?? const [])) {
       if (m is! Map<String, dynamic> || m['id'] is! String) continue;
+      if (!isPatternSource('${m['run_source'] ?? m['source'] ?? ''}')) continue;
       final id = newId('m');
       moduleIds[m['id'] as String] = id;
       modules.add(ModuleDoc.fromJson({...m, 'id': id}));
@@ -259,12 +260,10 @@ extension Templates on AppState {
       if (id == null) continue;
       j['id'] = id;
       j['parent'] = layerIds[j['parent']];
-      j['generator'] = mod(j['generator']);
-      j['effects'] = [for (final e in (j['effects'] as List? ?? const [])) ?mod(e)];
       j['pattern'] = null;
       j['clips'] = [
         for (final c in (j['clips'] as List? ?? const []))
-          if (c is Map<String, dynamic>) {
+          if (c is Map<String, dynamic> && moduleIds.containsKey(c['pattern'])) {
             ...c, 'id': newId('c'), 'pattern': mod(c['pattern']),
             if (c['takes'] is List) 'takes': [for (final k in c['takes'] as List) ?mod(k)],
           },

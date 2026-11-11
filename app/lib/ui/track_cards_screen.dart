@@ -1,13 +1,15 @@
-// Tracks (the Arranger area): a project strip, big visual track cards, and a panel per track with its sound, notes, effects and mix.
+// Tracks (the Arranger area): a project strip, big visual track cards, and a panel per track with its instrument,
+// notes, effects and mix.
 import 'package:flutter/material.dart';
 
-import '../engine/engine.dart';
 import '../model/app_state.dart';
 import '../model/arrange_fx.dart';
+import '../model/cpp_starters.dart';
+import '../model/cpp_workbench.dart';
 import '../model/pattern_doc.dart';
 import '../model/project.dart';
-import 'builder_screen.dart' show kindColor, kindIcon;
-import 'param_control.dart';
+import 'arrange/fx_stack.dart' show addEffectTo, pickInstrument;
+import 'cpp/build_start.dart' show ExamplesList, StarterExample;
 import 'theme.dart';
 import 'volume_fader.dart';
 import 'arrange/track_color.dart';
@@ -136,18 +138,6 @@ Future<void> showProjectSheet(BuildContext context, AppState s) {
               return ListView(shrinkWrap: true, padding: const EdgeInsets.fromLTRB(16, 8, 16, 16), children: [
               const Heading('Project'),
               _ProjectSettings(state: s),
-              if (s.globalDefs.isNotEmpty) ...[
-                const Heading('Project controls'),
-                ValueListenableBuilder<int>(
-                  valueListenable: s.values,
-                  builder: (context, _, _) => ParamGroups(
-                    params: s.globalDefs,
-                    color: Neon.blue,
-                    valueOf: s.globalValue,
-                    onChanged: (p, v) => s.setGlobal(p.name, v),
-                  ),
-                ),
-              ],
             ]);
             },
           ),
@@ -354,16 +344,16 @@ class _TrackCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final p = state.project;
     final color = trackColor(state, layer);
-    final sound = p.module(layer.generatorId);
+    final sound = state.instrumentName(layer);
     final pattern = p.module(layer.patternId);
     final cycle = _cycleSteps(state, layer);
     final dim = layer.mute || (p.layers.any((l) => l.solo) && !layer.solo);
     final detail = [
-      // The sound's name only when the track's own name doesn't already say it.
-      if (sound == null) 'No sound' else if (sound.name != layer.name) sound.name,
+      // The instrument's name only when the track's own name doesn't already say it.
+      if (sound == null) 'No instrument' else if (sound != layer.name) sound,
       if (pattern != null) pattern.name,
       _stepsLabel(cycle, p.stepsPerBar),
-      if (layer.effectIds.isNotEmpty) '${layer.effectIds.length} fx',
+      if (layer.components.isNotEmpty) '${layer.components.length} fx',
     ].join('  ·  ');
     return Opacity(
       opacity: dim ? 0.5 : 1,
@@ -377,7 +367,7 @@ class _TrackCard extends StatelessWidget {
             padding: const EdgeInsets.fromLTRB(14, 10, 8, 12),
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Row(children: [
-                Icon(sound == null ? Icons.add_circle_outline : kindIcon('generator'), color: color, size: 22),
+                Icon(sound == null ? Icons.add_circle_outline : Icons.piano_outlined, color: color, size: 22),
                 const SizedBox(width: 10),
                 Expanded(
                   child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -547,13 +537,8 @@ class _AddTrackCard extends StatelessWidget {
   final AppState state;
   final bool empty;
 
+  /// An empty track, or one playing a copy of a C++ starter (they replace the .caw templates, #160).
   Future<void> _add(BuildContext context) async {
-    final p = state.project;
-    final sounds = p.modules.where((m) => state.isGenerator(m.id)).toList();
-    final templates = [
-      for (final t in state.templates)
-        if (const {'generator', 'synth'}.contains(headerValue(t.source, 'kind') ?? 'generator')) t,
-    ];
     final pick = await showGlassSheet<Object>(
       context: context,
       backgroundColor: Neon.panel,
@@ -562,38 +547,26 @@ class _AddTrackCard extends StatelessWidget {
         child: ConstrainedBox(
           constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.8),
           child: ListView(shrinkWrap: true, children: [
-            if (sounds.isNotEmpty) ...[
-              const Heading('Sounds in this project'),
-              for (final (i, m) in sounds.indexed)
-                ListTile(
-                  autofocus: i == 0,
-                  leading: Icon(kindIcon('generator'), color: kindColor('generator')),
-                  title: Text(m.name),
-                  onTap: () => Navigator.pop(context, m),
-                ),
-            ],
-            const Heading('New sound from a template'),
-            for (final t in templates)
-              ListTile(
-                leading: const Icon(Icons.auto_awesome, color: Neon.green),
-                title: Text(headerValue(t.source, 'name') ?? t.file),
-                subtitle: Text(headerValue(t.source, 'summary') ?? '', style: const TextStyle(color: Neon.dim)),
-                onTap: () => Navigator.pop(context, t),
-              ),
             ListTile(
+              autofocus: true,
               leading: const Icon(Icons.crop_square, color: Neon.dim),
               title: const Text('Empty track'),
-              subtitle: const Text('Pick its sound later', style: TextStyle(color: Neon.dim)),
+              subtitle: const Text('Pick its instrument later', style: TextStyle(color: Neon.dim)),
               onTap: () => Navigator.pop(context, false),
             ),
+            const Heading('New track from a starter'),
+            ExamplesList(
+                examples: [for (final s in cppStarters) if (s.instrument) StarterExample.cpp(s)],
+                onPick: (e) => Navigator.pop(context, e)),
           ]),
         ),
       ),
     );
-    if (pick == null) return;
-    if (pick is ModuleDoc) state.addLayer(soundId: pick.id);
-    if (pick is Template) state.addLayer(soundId: state.addModule(pick));
-    if (pick == false) state.addLayer(empty: true);
+    if (pick == false) state.addLayer();
+    if (pick is StarterExample && pick.starter != null) {
+      final doc = state.addCppStarter(pick.starter!);
+      state.cppWorkbench(doc.id).tryOn(null);
+    }
   }
 
   @override
@@ -623,7 +596,7 @@ class _AddTrackCard extends StatelessWidget {
       );
 }
 
-/// Everything about one track in one panel: sound (with its sliders), notes, effects and mix.
+/// Everything about one track in one panel: instrument, notes, effects and mix.
 Future<void> showTrackSheet(BuildContext context, AppState s, LayerDoc layer, ValueChanged<String> onOpenModule) =>
     showGlassSheet<void>(
       context: context,
@@ -690,11 +663,8 @@ class _TrackSheet extends StatelessWidget {
     final p = s.project;
     final color = trackColor(state, layer);
     final index = p.layers.indexOf(layer);
-    final sounds = p.modules.where((m) => s.isGenerator(m.id)).toList();
-    final effects = p.modules.where((m) => s.isEffect(m.id)).toList();
     final patterns = p.modules.where((m) => s.isPattern(m.id)).toList();
-    final sound = p.module(layer.generatorId);
-    final soundParams = [for (final q in s.info[sound?.id]?.params ?? const <ParamInfo>[]) if (!q.global) q];
+    final instrument = s.instrumentName(layer);
     final lengths = lengthChoices(p.stepsPerBar);
     if (!lengths.any((c) => c.$1 == layer.lengthSteps)) lengths.add((layer.lengthSteps, '${layer.lengthSteps} 16ths'));
     Widget? edit(String? id) => id == null
@@ -753,34 +723,16 @@ class _TrackSheet extends StatelessWidget {
         ),
       ]),
 
-      _section('Sound', Neon.green, action: edit(sound?.id)),
-      if (sounds.isEmpty)
-        const Text('No sounds yet: make one in Sounds, or add a track from a template.', style: TextStyle(color: Neon.dim))
-      else
-        Wrap(spacing: 6, runSpacing: 6, children: [
-          for (final m in sounds)
-            _choice(m.name, kindIcon('generator'), Neon.green, m.id == layer.generatorId,
-                () => s.setCawGenerator(layer, m.id)),
-        ]),
-      if (sound != null && soundParams.isNotEmpty)
-        Padding(
-          padding: const EdgeInsets.only(top: 8, right: 8),
-          child: ValueListenableBuilder<int>(
-            valueListenable: s.values,
-            builder: (context, _, _) => ParamGroups(
-              params: soundParams,
-              color: color,
-              valueOf: (q) => sound.params[q.name] ?? q.defaultValue,
-              onChanged: (q, v) => s.setParam(sound.id, q.name, v),
-            ),
-          ),
-        ),
+      _section('Instrument', Neon.green,
+          action: TextButton.icon(onPressed: () => pickInstrument(context, s, layer),
+              icon: const Icon(Icons.piano, size: 16), label: Text(instrument == null ? 'Pick' : 'Change'))),
+      Text(instrument ?? 'Nothing plays this track\'s notes yet', style: TextStyle(color: instrument == null ? Neon.dim : Neon.text)),
 
       _section('Notes', Neon.yellow, action: edit(layer.patternId)),
       Wrap(spacing: 6, runSpacing: 6, children: [
         _choice('None', Icons.block, Neon.dim, layer.patternId == null, () => s.editLayer(layer, (l) => l.patternId = null)),
         for (final m in patterns)
-          _choice(m.name, kindIcon('pattern'), Neon.yellow, m.id == layer.patternId,
+          _choice(m.name, Icons.piano, Neon.yellow, m.id == layer.patternId,
               () => s.editLayer(layer, (l) => l.patternId = m.id)),
       ]),
       if (layer.patternId == null) ...[
@@ -814,25 +766,16 @@ class _TrackSheet extends StatelessWidget {
 
       _section('Effects', Neon.pink),
       Wrap(spacing: 6, runSpacing: 6, crossAxisAlignment: WrapCrossAlignment.center, children: [
-        for (final id in layer.effectIds)
+        for (final (i, c) in layer.components.indexed)
           InputChip(
-            label: Text(p.module(id)?.name ?? '?'),
-            avatar: Icon(kindIcon('effect'), size: 16, color: Neon.pink),
-            onPressed: () => onOpenModule(id),
-            onDeleted: () => s.editLayer(layer, (l) => l.effectIds.remove(id)),
+            label: Text(s.componentLabel(c.id)),
+            avatar: const Icon(Icons.tune, size: 16, color: Neon.pink),
+            onDeleted: () => s.removeNativeEffect(layer, i),
           ),
-        if (layer.effectIds.length < 8)
-          PopupMenuButton<String>(
-            tooltip: 'Add an effect',
-            enabled: effects.isNotEmpty,
-            onSelected: (id) => s.editLayer(layer, (l) => l.effectIds.add(id)),
-            itemBuilder: (_) => [for (final e in effects) PopupMenuItem(value: e.id, child: Text(e.name))],
-            child: Padding(
-              padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 4),
-              child: Text(effects.isEmpty ? 'No effects yet (make one in Sounds)' : '+ Add effect',
-                  style: const TextStyle(color: Neon.pink, fontWeight: FontWeight.w600)),
-            ),
-          ),
+        TextButton(
+          onPressed: () => addEffectTo(context, s, layer),
+          child: const Text('+ Add effect', style: TextStyle(color: Neon.pink, fontWeight: FontWeight.w600)),
+        ),
       ]),
 
       _section('Mix', Neon.blue),

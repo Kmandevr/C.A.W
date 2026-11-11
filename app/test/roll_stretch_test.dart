@@ -37,7 +37,6 @@ void main() {
     addTearDown(tester.view.reset);
     final s = AppState();
     s.engine = Engine.create();
-    s.templates = Engine.templates();
     s.project = s.starterProject();
     final m = ModuleDoc(id: 'line', name: 'line', source: '---\nkind: pattern\n---\n$body');
     s.project.modules.add(m);
@@ -202,7 +201,6 @@ void main() {
       (tester) async {
     final s = AppState();
     s.engine = Engine.create();
-    s.templates = Engine.templates();
     s.project = s.starterProject();
     final m = ModuleDoc(id: 'line', name: 'line', source: '---\nkind: pattern\n---\n0 C3 4\n8 E3 2\n');
     s.project.modules.add(m);
