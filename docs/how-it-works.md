@@ -57,7 +57,7 @@ The modular foundation is real native C++ code, but it is not yet the active pla
 
 | To change | Edit | Then |
 | --- | --- | --- |
-| Add or change a built-in instrument or effect | an `engine/src/builtin_*.cpp` file, registered in `registerBuiltinComponents` (`engine/src/builtin_components.cpp`) | its test file; a golden render where it makes sound; [engine](engine.md) |
+| Add or change a built-in instrument or effect | an `engine/src/builtin_*.cpp` file, registered in `registerBuiltinComponents` (`engine/src/builtin_components.cpp`) | its test file, registered in `engine/CMakeLists.txt` (`target_sources(caw_tests ...)`, e.g. `flagship_tables_test.cpp`); a golden render where it makes sound; [engine](engine.md) |
 | Add a C++ Library kernel (DSP for components) | a header in `engine/include/caw/library/` | a test file registered in `engine/CMakeLists.txt` (`target_sources(caw_tests ...)`), e.g. `library_kernels_test.cpp`; list it in the [SDK's Library section](native-module-sdk.md#the-library) |
 | Change module descriptors, ports or parameter/UI metadata | `engine/src/module.*` | `module_test.cpp`, `module_registry_test.cpp`; update [engine build status](engine-build-status.md) |
 | Change graph validation, execution order or prepared N-channel processing | `engine/src/graph.*` | `graph_test.cpp`, `graph_channels_test.cpp`; preserve the no-allocation/no-lock process contract (checked by `alloc_counter.cpp`) and the shared float routing rule in `route_math.h` |
