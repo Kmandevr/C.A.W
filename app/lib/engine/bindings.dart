@@ -268,7 +268,7 @@ class Bindings {
         midiDropped = lib.lookupFunction<Int64 Function(Pointer<Void>), int Function(Pointer<Void>)>(
             'caw_engine_midi_dropped'),
         positionAt = lib.lookupFunction<Int64 Function(Pointer<Void>, Int64), int Function(Pointer<Void>, int)>(
-            'caw_engine_position_at');
+            'caw_engine_position_at'),
         // The Build tools (#163, #164): the testing suite and the sample-pack maker; both block, so call them off
         // the UI isolate.
         componentTest = lib.lookupFunction<Pointer<Utf8> Function(Pointer<Utf8>, Int32, Pointer<Utf8>, Pointer<Utf8>),
