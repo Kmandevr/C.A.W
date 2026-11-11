@@ -11,6 +11,7 @@ import '../platform/resource_signals.dart';
 import 'poller.dart';
 import 'native_components.dart';
 import 'project.dart';
+import 'project_dependencies.dart';
 import 'automation_writer.dart' show AutomationTarget;
 import 'history.dart';
 import 'mixer_fx.dart' show masterLayerId;
@@ -156,6 +157,10 @@ class AppState extends ChangeNotifier {
 
   /// A one-line note about the project just opened (its .caw sounds were dropped); cleared by the next open.
   String? openNotice;
+
+  /// The files the open project plays that aren't on this device (project_dependencies.dart): the banner names
+  /// them with Locate… and Replace…; what needs them stays silent until they are relinked.
+  List<ProjectDependency> missingFiles = const [];
   ProjectStorage? _storage;
   /// The project storage once opened (the C++ Builder's desktop build materializes sources through it).
   ProjectStorage? get storage => _storage;
@@ -1753,11 +1758,23 @@ class AppState extends ChangeNotifier {
     selectedClipIds.clear();
     clearTimeSelection();
     previewOnly = false;
+    missingFiles = const [];
     await _storage?.setLastOpened(p.id);
     await flush();
     notifyListeners();
     await _syncNow();
     unawaited(prepareNativeComponents());
+    unawaited(checkMissingFiles());
+  }
+
+  /// Looks for the open project's files on this device again ([missingFiles]).
+  Future<void> checkMissingFiles() async {
+    final opened = project;
+    final missing = await findMissingFiles(opened);
+    if (!identical(project, opened) || _disposed) return;
+    final before = missingFiles.map((m) => m.key).join('|');
+    missingFiles = missing;
+    if (missing.map((m) => m.key).join('|') != before) notifyListeners();
   }
 
   /// Builds (or reuses a build of) and loads the project's C++ effects under the trust rules, then sends the
@@ -1785,9 +1802,11 @@ class AppState extends ChangeNotifier {
     if (p != null) await _switchTo(p);
   }
 
-  /// Imports a portable project as a new project ID so it cannot overwrite an existing saved project.
-  Future<void> importProject(ProjectDoc imported) {
-    final copy = ProjectDoc.fromJson(imported.toJson()..['id'] = newId('p'))..droppedModules = imported.droppedModules;
+  /// Imports a portable project as a new project ID ([id], else a fresh one) so it cannot overwrite an existing saved
+  /// project. [prepare] sees the copy before it opens (a package relinks its unpacked files there).
+  Future<void> importProject(ProjectDoc imported, {String? id, void Function(ProjectDoc copy)? prepare}) {
+    final copy = ProjectDoc.fromJson(imported.toJson()..['id'] = id ?? newId('p'))..droppedModules = imported.droppedModules;
+    prepare?.call(copy);
     return _switchTo(copy);
   }
 

@@ -513,7 +513,7 @@ void main() {
 
     expect(find.text('CURRENT PROJECT'), findsOneWidget);
     expect(find.text('Portable project'), findsOneWidget);
-    expect(find.text('Export .cawproj'), findsOneWidget);
+    expect(find.text('Export project…'), findsOneWidget);
     expect(find.text('Import project'), findsOneWidget);
     expect(find.byTooltip('Import .caw module into this folder'), findsNothing);
     expect(find.text('Bass'), findsOneWidget);

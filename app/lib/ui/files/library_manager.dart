@@ -1,8 +1,6 @@
 // The project library manager (from the old Files screen): portable project files, restore points, and the patterns'
 // folders, tags and bulk edits.
-import 'dart:convert';
 
-import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
 import '../../model/app_state.dart';
@@ -10,6 +8,7 @@ import '../../model/project.dart';
 import '../theme.dart';
 import '../widgets.dart';
 import '../adaptive_sheet.dart';
+import 'project_file_actions.dart';
 
 class LibraryManagerView extends StatefulWidget {
   const LibraryManagerView({super.key, required this.state, required this.onOpenBuilder});
@@ -284,7 +283,7 @@ class _LibraryManagerViewState extends State<LibraryManagerView> {
           const SizedBox(height: 10),
           Wrap(spacing: 8, runSpacing: 8, children: [
             FilledButton.icon(onPressed: () => exportPortableProject(context, state),
-              icon: const Icon(Icons.file_upload_outlined), label: const Text('Export .cawproj')),
+              icon: const Icon(Icons.file_upload_outlined), label: const Text('Export project…')),
             OutlinedButton.icon(onPressed: () async {
               await importPortableProject(context, state);
               if (mounted) {
@@ -514,80 +513,11 @@ class _LibraryManagerViewState extends State<LibraryManagerView> {
         ])),
         const SizedBox(height: 12),
         const NeonPanel(color: Neon.yellow, child: Text(
-          'Portable formats here: .cawproj project files. Folders and tags are stored inside the project. Use Export (the project menu) for WAV audio, MIDI patterns and wavetables. Import/export file pickers let you choose your own operating-system folders.',
+          'Portable formats here: .caw project files (Import also opens old .cawproj files). Folders and tags are stored inside the project. Use Export (the project menu) for WAV audio, MIDI patterns and wavetables. Import/export file pickers let you choose your own operating-system folders.',
           style: TextStyle(color: Neon.dim, fontSize: 12))),
       ]);
     },
   );
-}
-
-String _safeFileName(String value) =>
-    value.trim().replaceAll(RegExp(r'[^A-Za-z0-9 _-]+'), '').replaceAll(RegExp(r'\s+'), '_');
-
-Future<void> exportPortableProject(BuildContext context, AppState state) async {
-  try {
-    await state.flush();
-    final name = _safeFileName(state.project.name);
-    final bytes = utf8.encode(const JsonEncoder.withIndent('  ').convert(state.project.toJson()));
-    final saved = await FilePicker.saveFile(
-      fileName: '${name.isEmpty ? 'Caw_Project' : name}.cawproj',
-      bytes: bytes,
-      mimeType: 'application/json',
-      type: FileType.custom,
-      allowedExtensions: const ['cawproj'],
-    );
-    if (context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(saved == null ? 'Project export cancelled.' : 'Exported project file.')));
-    }
-  } catch (e) {
-    if (context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Project export failed: $e')));
-    }
-  }
-}
-
-Future<void> importPortableProject(BuildContext context, AppState state) async {
-  try {
-    final file = await FilePicker.pickFile(
-      type: FileType.custom,
-      allowedExtensions: const ['cawproj', 'json'],
-    );
-    if (file == null) return;
-    final decoded = jsonDecode(await file.xFile.readAsString());
-    if (decoded is! Map<String, dynamic> || decoded['caw_app_project'] is! num) {
-      throw const FormatException('This is not a C.A.W. project file.');
-    }
-    final version = (decoded['caw_app_project'] as num).toInt();
-    if (version > ProjectDoc.fileVersion) {
-      throw FormatException('This project uses a newer format (v$version); this app supports v${ProjectDoc.fileVersion}.');
-    }
-    final project = ProjectDoc.fromJson(decoded);
-    if (!context.mounted) return;
-    final proceed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Import project?'),
-        content: Text('Open "${project.name}" as a new project? Your current project will be autosaved first.'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Import')),
-        ],
-      ),
-    );
-    if (proceed != true) return;
-    await state.importProject(project);
-    if (context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Imported "${state.project.name}".')));
-    }
-  } catch (e) {
-    if (context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Project import failed: $e')));
-    }
-  }
 }
 
 Future<void> createProjectRestorePoint(BuildContext context, AppState state) async {
