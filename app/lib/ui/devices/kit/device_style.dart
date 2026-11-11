@@ -46,6 +46,9 @@ DeviceFamily? familyOfComponent(String id) => switch (id) {
       'org.caw.compressor' || 'org.caw.limiter' || 'org.caw.gate' || 'org.caw.transient' => DeviceFamily.dynamics,
       'org.caw.reverb.pro' || 'org.caw.delay.pro' || 'org.caw.delay.pingpong' => DeviceFamily.space,
       'org.caw.saturator' || 'org.caw.distortion' => DeviceFamily.drive,
+      // fx-dynamics
+      'org.caw.dynamics' || 'org.caw.multiband' || 'org.caw.deesser' => DeviceFamily.dynamics,
+      'org.caw.clipper' || 'org.caw.phasedist' => DeviceFamily.drive,
       'org.caw.filter' => DeviceFamily.filter,
       'org.caw.phaser' || 'org.caw.flanger' || 'org.caw.chorus' => DeviceFamily.modulation,
       'org.caw.utility' || 'org.caw.stereo.width' || 'org.caw.stereo.balance' => DeviceFamily.utility,

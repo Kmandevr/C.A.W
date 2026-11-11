@@ -364,8 +364,10 @@ const cppBuiltins = <CppBuiltin>[
   CppBuiltin('org.caw.delay.pro', 'Delay', false, 'Stereo, ping-pong or dual; synced (dotted, triplet) or free; a filtered, driven loop.',
       ['mode', 'sync', 'time', 'sync_r', 'time_r', 'offset', 'feedback', 'low_cut', 'high_cut', 'drive', 'mod_depth', 'mod_rate',
        'duck', 'freeze', 'mix']),
-  CppBuiltin('org.caw.saturator', 'Saturator', false, 'Tape, tube, soft and hard clip, fold and crush, 2x oversampled (4x at High quality).',
-      ['mode', 'drive', 'bias', 'tone', 'bits', 'rate', 'oversample', 'auto_gain', 'output', 'mix']),
+  CppBuiltin('org.caw.saturator', 'Saturator', false,
+      'Tape, tube, soft and hard clip, fold, crush, fuzz, rectify, tri fold, bit shape and fat, 2x oversampled (4x at High '
+      'quality); spread sets the bias apart left and right, dynamics gives back the input\'s envelope.',
+      ['mode', 'drive', 'bias', 'tone', 'bits', 'rate', 'oversample', 'auto_gain', 'output', 'mix', 'spread', 'dynamics']),
   CppBuiltin('org.caw.gate', 'Gate', false, 'A gate or expander with hold and a sidechain filter.',
       ['threshold', 'range', 'ratio', 'attack', 'hold', 'release', 'knee', 'sc_hpf', 'sidechain']),
   CppBuiltin('org.caw.ducker', 'Ducker', false,
@@ -388,6 +390,23 @@ const cppBuiltins = <CppBuiltin>[
   CppBuiltin('org.caw.chorus', 'Chorus', false, 'A stereo chorus.', ['rate', 'depth', 'mix']),
   CppBuiltin('org.caw.stereo.width', 'Width', false, 'Mid/side width: 0 mono, 1 as is, 2 wide.', ['width']),
   CppBuiltin('org.caw.stereo.balance', 'Balance', false, 'Stereo balance.', ['pan']),
+  // fx-dynamics begin (engine/src/builtin_fx_dynamics.cpp, builtin_fx_drive.cpp)
+  CppBuiltin('org.caw.dynamics', 'Dynamics', false,
+      'Upward and downward compression and expansion: a low and a high threshold, each with its own ratio, knee, range.',
+      ['low_threshold', 'low_ratio', 'high_threshold', 'high_ratio', 'knee', 'attack', 'release', 'range', 'detect', 'in_gain',
+       'out_gain', 'mix']),
+  CppBuiltin('org.caw.multiband', 'Multiband dynamics', false,
+      'Three bands (Linkwitz-Riley crossovers), each compressed upward and downward; an OTT mode. Band knobs b1_..b3_ '
+      'down_thr, down_ratio, up_thr, up_ratio, gain, attack, release.',
+      ['mode', 'depth', 'time', 'upward', 'downward', 'xover_low', 'xover_high', 'in_gain', 'out_gain']),
+  CppBuiltin('org.caw.deesser', 'De-esser', false, 'Turns down sibilance above a frequency: the band only, or everything.',
+      ['freq', 'threshold', 'range', 'release', 'mode', 'listen']),
+  CppBuiltin('org.caw.clipper', 'Clipper', false, 'Hard, soft or analog clipping under a ceiling, up to 8x oversampled; clip to 0 dB.',
+      ['mode', 'drive', 'ceiling', 'softness', 'oversample', 'master', 'output', 'mix']),
+  CppBuiltin('org.caw.phasedist', 'Phase distortion', false,
+      'The input delays itself by its own value (self phase modulation); 1 ms of latency.',
+      ['drive', 'normalize', 'tone', 'bias', 'spread', 'mix']),
+  // fx-dynamics end
 ];
 
 /// One of C.A.W's own text formats, for the Library's last groups.
