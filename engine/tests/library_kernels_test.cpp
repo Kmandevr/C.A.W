@@ -558,3 +558,151 @@ TEST(library_ping_pong_with_no_cross_echoes_each_side_in_place) {
     CHECK(eL > 0.5);
     CHECK(eR == 0.0);
 }
+
+// --- .caw parity (#122): the Library ports render the same as the .caw built-ins they replace ---
+
+#include "caw/library/glitch.hpp"
+#include "caw/library/modulation.hpp"
+#include "caw/library/music.hpp"
+#include "compile.h"
+#include "vm.h"
+
+namespace {
+
+// Runs a float-mode .caw body for `blocks` blocks (t = the sample number, time in seconds) and returns its raw
+// output: the old path, for comparing a port with.
+std::vector<double> renderCaw(const std::string& body, int blocks, uint32_t seed = 0, double bpm = 120,
+                              double sr = 48000) {
+    CompileResult r = compileModule("---\nmode: float\n---\n" + body);
+    if (!r.program) {
+        cawtest::fail(__FILE__, __LINE__, "compile failed: " + body + " -> " + r.error);
+        return {};
+    }
+    Instance inst(r.program);
+    std::vector<double> out;
+    double tb[kBlock], time[kBlock], zero[kBlock] = {};
+    BlockCtx c;
+    c.sr = sr;
+    c.bpm = bpm;
+    c.seed = seed;
+    for (int b = 0; b < blocks; ++b) {
+        for (int i = 0; i < kBlock; ++i) {
+            tb[i] = b * kBlock + i;
+            time[i] = tb[i] / sr;
+        }
+        c.n = kBlock;
+        for (int v = 0; v < static_cast<int>(Var::Count); ++v) c.vars[v] = zero;
+        c.vars[static_cast<int>(Var::T)] = tb;
+        c.vars[static_cast<int>(Var::Time)] = time;
+        inst.process(c);
+        out.insert(out.end(), inst.rawOutput(), inst.rawOutput() + kBlock);
+    }
+    return out;
+}
+
+// How many of the samples differ between the .caw render and the port (beyond `tol`).
+template <class F>
+int mismatches(const std::vector<double>& caw, F port, double tol = 0.0) {
+    int bad = 0;
+    for (size_t n = 0; n < caw.size(); ++n)
+        if (!(std::fabs(caw[n] - port(static_cast<double>(n))) <= tol)) ++bad;
+    return bad;
+}
+
+}  // namespace
+
+TEST(library_music_scale_and_quantize_match_the_caw_builtins) {
+    // Every scale, degrees -20..19 and roots 48..71, then notes 30..90 in steps of a quarter tone.
+    const int blocks = 14 * 24 * 40 / kBlock + 1;
+    std::vector<double> s = renderCaw("scale(t % 40 - 20, floor(t / 40) % 14, 48 + floor(t / 560) % 24)", blocks);
+    CHECK_EQ(mismatches(s, [](double n) {
+                 return lib::scaleNote(std::fmod(n, 40) - 20, static_cast<lib::Scale>(static_cast<int>(std::floor(n / 40)) % 14),
+                                       48 + std::fmod(std::floor(n / 560), 24));
+             }), 0);
+    std::vector<double> q = renderCaw("quantize(30 + (t % 240) / 4, floor(t / 240) % 14, 50 + floor(t / 3360) % 12)", 160);
+    CHECK_EQ(mismatches(q, [](double n) {
+                 return lib::quantizeNote(30 + std::fmod(n, 240) / 4, static_cast<lib::Scale>(static_cast<int>(std::floor(n / 240)) % 14),
+                                          50 + std::fmod(std::floor(n / 3360), 12));
+             }), 0);
+    CHECK_EQ(lib::scaleNote(0, lib::Scale::Minor, lib::keyRoot(9)), 69.0);  // the .caw default key: A4
+    CHECK_EQ(lib::scaleNote(-1, lib::Scale::Minor, 69), 67.0);
+    CHECK_EQ(lib::quantizeNote(61, lib::Scale::Major, 60), 60.0);  // a tie goes down
+    CHECK_EQ(lib::scaleNote(std::nan(""), lib::Scale::Major, 60), 60.0);
+}
+
+TEST(library_music_chords_and_arpeggios_match_the_caw_builtins) {
+    std::vector<double> c = renderCaw("chord(t % 12, floor(t / 12) % 30 - 10, 40 + floor(t / 360) % 30)", 180);
+    CHECK_EQ(mismatches(c, [](double n) {
+                 return lib::chordNote(static_cast<lib::Chord>(static_cast<int>(std::fmod(n, 12))), std::fmod(std::floor(n / 12), 30) - 10,
+                                       40 + std::fmod(std::floor(n / 360), 30));
+             }), 0);
+    // Every chord, mode and octave count over 40 steps, with a project seed (the random mode follows it).
+    for (uint32_t seed : {0u, 77u}) {
+        std::vector<double> a = renderCaw("arp(t % 12, floor(t / 12) % 40, floor(t / 480) % 4, 57, 1 + floor(t / 1920) % 4)", 121, seed);
+        CHECK_EQ(mismatches(a, [seed](double n) {
+                     return lib::arpNote(static_cast<lib::Chord>(static_cast<int>(std::fmod(n, 12))), std::fmod(std::floor(n / 12), 40),
+                                         static_cast<lib::ArpMode>(static_cast<int>(std::fmod(std::floor(n / 480), 4))), 57,
+                                         1 + static_cast<int>(std::fmod(std::floor(n / 1920), 4)), seed);
+                 }), 0);
+    }
+    CHECK_EQ(lib::chordNote(lib::Chord::Maj, 3, 60), 72.0);
+    CHECK_EQ(lib::arpNote(lib::Chord::Maj, 3, lib::ArpMode::UpDown, 60), 64.0);  // 60 64 67 64, then again
+}
+
+TEST(library_music_euclid_and_seeded_choices_match_the_caw_builtins) {
+    std::vector<double> e = renderCaw("euclid(t % 18, 1 + floor(t / 18) % 17, floor(t / 306) % 40 - 8, floor(t / 12240) % 3)", 575);
+    CHECK_EQ(mismatches(e, [](double n) {
+                 return lib::euclid(std::fmod(n, 18), 1 + std::fmod(std::floor(n / 18), 17), std::fmod(std::floor(n / 306), 40) - 8,
+                                    std::fmod(std::floor(n / 12240), 3)) ? 1.0 : 0.0;
+             }), 0);
+    std::string hits;
+    for (int s = 0; s < 16; ++s) hits += lib::euclid(5, 16, s) ? 'x' : '.';
+    CHECK_EQ(hits, std::string("x...x..x..x..x.."));
+    for (uint32_t seed : {0u, 9u}) {
+        CHECK_EQ(mismatches(renderCaw("rand(t)", 8, seed), [seed](double n) { return lib::randomUnit(n, seed); }), 0);
+        CHECK_EQ(mismatches(renderCaw("randi(t, 1 + t % 9)", 8, seed),
+                            [seed](double n) { return static_cast<double>(lib::randomIndex(n, 1 + std::fmod(n, 9), seed)); }), 0);
+        CHECK_EQ(mismatches(renderCaw("chance(t, (t % 10) / 10)", 8, seed),
+                            [seed](double n) { return lib::chance(n, std::fmod(n, 10) / 10, seed) ? 1.0 : 0.0; }), 0);
+    }
+}
+
+TEST(library_curve_lfo_and_tremolo_match_the_caw_builtins) {
+    // Four even points is lfo.curve: a two-beat cycle at 120 BPM (1 s), started a tenth in.
+    const double pts[4] = {0.0, 1.0, -0.5, -1.0};
+    lib::CurveShape curve;
+    curve.setEven(pts, 4);
+    std::vector<double> c = renderCaw("lfo.curve(2, 0.1, 0, 1, -0.5, -1)", 1600);
+    CHECK_EQ(mismatches(c, [&](double n) { return curve.valueAt(lib::beatPhase(n / 48000.0, 120, 2, 0.1)); }, 1e-12), 0);
+    CHECK_NEAR(curve.valueAt(0.125), 0.5, 1e-12);
+    CHECK_NEAR(curve.valueAt(0.875), -0.5, 1e-12);  // the last point runs back to the first
+    // Points at their own places: a ramp up over the first 10 %, then down to the end.
+    const double xs[2] = {0.0, 0.1}, ys[2] = {-1.0, 1.0};
+    curve.setPoints(xs, ys, 2);
+    CHECK_NEAR(curve.valueAt(0.05), 0.0, 1e-12);
+    CHECK_NEAR(curve.valueAt(0.55), 0.0, 1e-12);
+    CHECK_EQ(curve.valueAt(std::nan("")), -1.0);
+    // util.trem: a quarter-beat sine tremolo at depth 0.8 on a ramp.
+    std::vector<double> t = renderCaw("util.trem((t % 100) / 100, 0.25, 0.8)", 200);
+    CHECK_EQ(mismatches(t, [](double n) {
+                 const double p = lib::beatPhase(n / 48000.0, 120, 0.25);
+                 return std::fmod(n, 100) / 100 * lib::tremoloGain(detSin(kTwoPi * (p - std::floor(p))), 0.8);
+             }, 1e-12), 0);
+}
+
+TEST(library_glitch_kernels_match_the_caw_builtins) {
+    lib::SampleHold hold;
+    std::vector<double> h = renderCaw("glitch.hold(t % 977, 1234 + (t % 3000))", 100);
+    CHECK_EQ(mismatches(h, [&](double n) { return hold.process(std::fmod(n, 977), 1234 + std::fmod(n, 3000), 48000); }), 0);
+    std::vector<double> m = renderCaw("glitch.mask(sin(t * 0.01) * 1.2, t % 65536)", 40);
+    CHECK_EQ(mismatches(m, [](double n) {
+                 return lib::bitMask(detSin(n * 0.01) * 1.2, static_cast<uint32_t>(std::fmod(n, 65536)));
+             }), 0);
+    std::vector<double> w = renderCaw("glitch.wrap(sin(t * 0.01), 1 + (t % 50) / 10)", 40);
+    CHECK_EQ(mismatches(w, [](double n) { return lib::wrapAround(detSin(n * 0.01), 1 + std::fmod(n, 50) / 10); }), 0);
+    CHECK_NEAR(lib::wrapAround(0.5, 3), -0.5, 1e-12);
+    for (int i = -100; i <= 100; ++i) {
+        const double y = lib::wrapAround(i * 0.37, 7);
+        CHECK(y >= -1.0 && y <= 1.0);
+    }
+}
