@@ -5,6 +5,7 @@ import '../../../engine/component_info.dart';
 import '../device_registry.dart';
 import '../kit/device_style.dart';
 import 'drive_editors.dart';
+import 'ducker_editor.dart';
 import 'dynamics_editors.dart';
 import 'effect_page.dart';
 import 'eq_editor.dart';
@@ -53,6 +54,7 @@ final Map<String, DeviceEditorEntry> _byId = {
   'org.caw.saturator': singlePage('drive', 'DRIVE', Icons.whatshot_outlined, DeviceFamily.drive, () => const DrivePage()),
   'org.caw.distortion': singlePage('drive', 'DRIVE', Icons.whatshot_outlined, DeviceFamily.drive, () => const DrivePage()),
   'org.caw.limiter': singlePage('limit', 'LIMIT', Icons.vertical_align_top, DeviceFamily.dynamics, () => const LimiterPage()),
+  'org.caw.ducker': singlePage('ducker', 'DUCK', Icons.call_received, DeviceFamily.dynamics, () => const DuckerPage()),
   'org.caw.gate': singlePage('gate', 'GATE', Icons.door_sliding_outlined, DeviceFamily.dynamics, () => const GatePage()),
   'org.caw.transient': singlePage('transient', 'SHAPE', Icons.show_chart, DeviceFamily.dynamics, () => const TransientPage()),
   'org.caw.filter': singlePage('filter', 'FILTER', Icons.filter_alt_outlined, DeviceFamily.filter, () => const FilterPage()),

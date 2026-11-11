@@ -7,7 +7,9 @@ import 'package:flutter/services.dart';
 import '../model/app_state.dart';
 import '../model/arrange_fx.dart';
 import '../model/project.dart';
+import '../model/routing_edit.dart';
 import 'param_control.dart';
+import 'routing_view.dart';
 import 'theme.dart';
 import 'volume_fader.dart';
 import 'arrange/track_color.dart';
@@ -130,6 +132,11 @@ class _MixerScreenState extends State<MixerScreen> {
         ? math.max(_minStripHeight, constraints.maxHeight - 2 * pad) : _minStripHeight;
     final s = widget.state;
     return ListView(padding: const EdgeInsets.all(pad), children: [
+      Align(alignment: Alignment.centerRight, child: TextButton.icon(
+        key: const ValueKey('mixer-routing'),
+        onPressed: () => showRoutingView(context, s),
+        icon: const Icon(Icons.account_tree_outlined, size: 16),
+        label: const Text('Routing'))),
       if (!wide)
         _strips(height, wide: false)
       else
@@ -273,8 +280,10 @@ class ChannelStrip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final folders = state.project.layers.where((item) => item.isFolder && item.id != layer.id).toList();
-    final routeId = folders.any((folder) => folder.id == layer.parentId) ? layer.parentId : null;
+    // Where the sound goes is the nearest bus above (a folder without a bus only groups), so the output menu lists
+    // the bus folders; picking one moves the track into it.
+    final folders = state.buses.where((item) => item.id != layer.id).toList();
+    final routeId = state.outputOf(layer)?.id;
     final tint = trackColor(state, layer);
     return SizedBox(width: _stripWidth, child: NeonPanel(
       color: state.selectedLayerId == layer.id ? Neon.blue : tint,
@@ -297,6 +306,7 @@ class ChannelStrip extends StatelessWidget {
             ? Column(children: [
                 const Text('GROUP BUS', style: TextStyle(color: Neon.dim, fontSize: 10)),
                 Switch.adaptive(value: layer.busEnabled, onChanged: (v) => state.setFolderBus(layer, v)),
+                if (layer.busEnabled) SendButton(state: state, layer: layer),
               ])
             : layer.chain.isEmpty
               // A C++ instrument (no .caw chain): its name, else there is none.
@@ -310,7 +320,7 @@ class ChannelStrip extends StatelessWidget {
                 ]))),
           if (!layer.isFolder)
             // Where the track's sound goes: the master or a folder's bus.
-            SizedBox(height: 40, child: Tooltip(message: '${layer.name} output', child: DropdownButton<String?>(
+            SizedBox(height: 40, child: Row(children: [Expanded(child: Tooltip(message: '${layer.name} output', child: DropdownButton<String?>(
               value: routeId,
               isExpanded: true,
               isDense: true,
@@ -323,7 +333,13 @@ class ChannelStrip extends StatelessWidget {
                     maxLines: 1, overflow: TextOverflow.ellipsis)),
               ],
               onChanged: (id) { state.moveLayerIntoFolder(layer, id); },
-            ))),
+            ))), SendButton(state: state, layer: layer)])),
+          // Its sends: a knob per bus it feeds (long-press for pre/post, mute, remove), then "Send" for more.
+          if (layer.sends.isNotEmpty && (!layer.isFolder || layer.busEnabled))
+            Padding(padding: const EdgeInsets.only(top: 2), child: ConstrainedBox(
+              constraints: const BoxConstraints(maxHeight: 100),
+              child: SingleChildScrollView(child: SendKnobs(state: state, layer: layer, compact: true, size: 26,
+                showAdd: false)))),
           SizedBox(height: 40, child: ResetOnDoubleTap(onReset: () => state.mixLayer(layer, pan: 0), child: Slider(
             key: ValueKey('pan-${layer.id}'),
             value: layer.pan.clamp(-1.0, 1.0).toDouble(), min: -1, max: 1, activeColor: Neon.blue,

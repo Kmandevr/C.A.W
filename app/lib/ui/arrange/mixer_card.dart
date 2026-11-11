@@ -7,6 +7,7 @@ import '../../model/app_state.dart';
 import '../../model/project.dart';
 import '../glass.dart';
 import '../mixer_screen.dart';
+import '../routing_view.dart';
 import '../theme.dart';
 import '../volume_fader.dart';
 import 'track_color.dart';
@@ -42,6 +43,8 @@ class _MixerCardState extends State<MixerCard> {
           const SizedBox(width: 12),
           const Text('MIXER', style: TextStyle(color: Neon.dim, fontSize: 10, letterSpacing: 1.4, fontWeight: FontWeight.w800)),
           const Spacer(),
+          IconButton(key: const ValueKey('mixer-card-routing'), tooltip: 'Routing', iconSize: 18,
+            onPressed: () => showRoutingView(context, s), icon: const Icon(Icons.account_tree_outlined)),
           IconButton(tooltip: 'Close mixer', iconSize: 18, onPressed: widget.onClose, icon: const Icon(Icons.close)),
         ])),
         Expanded(child: LayoutBuilder(builder: (context, box) {
@@ -108,11 +111,11 @@ class _NarrowStrip extends StatelessWidget {
         const SizedBox(height: 2),
         ToggleChip(label: 'M', size: 34, on: layer.mute, color: Neon.yellow,
           tooltip: layer.mute ? 'Unmute ${layer.name}' : 'Mute ${layer.name}',
-          onTap: () => layer.isFolder ? state.editLayer(layer, (l) => l.mute = !l.mute) : state.mixLayer(layer, mute: !layer.mute)),
+          onTap: () => state.mixLayer(layer, mute: !layer.mute)),
         const SizedBox(height: 3),
         ToggleChip(label: 'S', size: 34, on: layer.solo, color: Neon.blue,
           tooltip: layer.solo ? 'Unsolo ${layer.name}' : 'Solo ${layer.name}',
-          onTap: () => layer.isFolder ? state.editLayer(layer, (l) => l.solo = !l.solo) : state.mixLayer(layer, solo: !layer.solo)),
+          onTap: () => state.mixLayer(layer, solo: !layer.solo)),
         const SizedBox(height: 6),
       ]),
     )));

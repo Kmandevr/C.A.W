@@ -37,7 +37,33 @@ bool isStereoEffect(const ModuleDescriptor& d) noexcept {
 
 std::string quoted(const std::string& s) { return "'" + jsonEscape(s) + "'"; }
 
+bool stereoAudio(const PortDescriptor& p) noexcept {
+    return p.type == PortType::Audio && p.layout == ChannelLayout::Stereo && portChannelCount(p) == 2;
+}
+
 }  // namespace
+
+bool ComponentChain::isKeyedEffect(const ModuleDescriptor& d) noexcept {
+    if (!d.ports || d.portCount < 3 || d.portCount > 4) return false;
+    int mainIn = 0, keyIn = 0, events = 0, out = 0;
+    bool first = true, keyFirst = false;
+    for (uint32_t k = 0; k < d.portCount; ++k) {
+        const PortDescriptor& p = d.ports[k];
+        if (p.type == PortType::Event && p.input) {
+            ++events;
+        } else if (stereoAudio(p) && !p.input) {
+            ++out;
+        } else if (stereoAudio(p) && p.input) {
+            const bool key = p.id == "sidechain";
+            if (first) keyFirst = key;
+            first = false;
+            ++(key ? keyIn : mainIn);
+        } else {
+            return false;
+        }
+    }
+    return mainIn == 1 && keyIn == 1 && !keyFirst && events <= 1 && out == 1;
+}
 
 bool ComponentChain::isInstrument(const ModuleDescriptor& d) noexcept {
     if (d.portCount != 2 || !d.ports) return false;
@@ -103,13 +129,20 @@ std::unique_ptr<ComponentChain> ComponentChain::make(const ModuleRegistry& regis
             error = "native component " + quoted(spec.id) + " is an instrument: choose it as the track's instrument";
             return nullptr;
         }
-        if (!instrument && !isStereoEffect(*d)) {
+        const bool keyed = !instrument && isKeyedEffect(*d);
+        if (!instrument && !isStereoEffect(*d) && !keyed) {
             error = "native component " + quoted(spec.id) +
-                    " must currently expose one stereo audio input and one stereo audio output";
+                    " must expose one stereo audio input and one stereo audio output (and, keyed, a stereo"
+                    " \"sidechain\" input and at most one event input)";
             return nullptr;
         }
         auto e = std::make_unique<Entry>();
         e->id = spec.id;
+        if (keyed) {
+            e->key = std::make_unique<KeyInput>();
+            for (uint32_t k = 0; k < d->portCount; ++k)
+                e->keyEvents = e->keyEvents || (d->ports[k].type == PortType::Event && d->ports[k].input);
+        }
         e->processor = registry.create(spec.id);
         if (!e->processor) {
             error = "native component " + quoted(spec.id) + " could not create a processor instance";
@@ -301,8 +334,17 @@ uint32_t ComponentChain::tailFrames() const noexcept {
 
 uint64_t ComponentChain::latencyFrames() const noexcept {
     uint64_t latency = 0;
-    for (const auto& e : entries_)  // a bypassed effect passes its input on undelayed
-        if (!e->bypass.load(std::memory_order_relaxed)) latency += e->processor->descriptor().latencyFrames;
+    for (const auto& e : entries_) {  // a bypassed effect passes its input on undelayed
+        if (e->bypass.load(std::memory_order_relaxed)) continue;
+        if (const auto* v = dynamic_cast<const VariableLatency*>(e->processor.get())) {
+            double values[64];
+            const uint32_t n = static_cast<uint32_t>(std::min<std::size_t>(e->resolvers.size(), 64));
+            for (uint32_t k = 0; k < n; ++k) values[k] = fromBits(e->held[k].load(std::memory_order_relaxed));
+            latency += v->latencyFor(values, n);
+        } else {
+            latency += e->processor->descriptor().latencyFrames;
+        }
+    }
     return latency;
 }
 
@@ -383,7 +425,9 @@ void ComponentChain::process(float* left, float* right, uint32_t m, double sampl
         // Asleep (fallen silent) and still nothing coming in: not run. Its output is silence, which is already
         // in left/right (an instrument's are cleared above; an effect's input is silent and passes on).
         const bool on = e.mix == 1.0 && target == 1.0;
-        const bool events = notes_ && notes_->count() > 0;
+        // A keyed effect hears its key only in the chunk the sources wrote it (else silence and no notes).
+        const KeyInput* key = e.key && time && time->chunk >= 0 && e.key->chunk == time->chunk ? e.key.get() : nullptr;
+        const bool events = (notes_ && notes_->count() > 0) || (key && key->count > 0);
         if (e.asleep && on && !events && (notes_ || (peakAbs(left, m) == 0.0f && peakAbs(right, m) == 0.0f))) continue;
         e.asleep = false;
         std::copy_n(left, m, stageL_.data());
@@ -399,7 +443,26 @@ void ComponentChain::process(float* left, float* right, uint32_t m, double sampl
         block.parameterCount = static_cast<uint32_t>(count);
         block.transport = time ? &transport : nullptr;
         bool processed;
-        if (notes_) {
+        if (e.key) {
+            static const float silence[kMaxFrames] = {};
+            const float* keyCh[2] = {key ? key->l : silence, key ? key->r : silence};
+            const ConstChannelBufferView audioIn[2] = {{in, 2, m}, {keyCh, 2, m}};
+            const ChannelBufferView audioOut{out, 2, m};
+            const EventInput keyEvents{key ? key->events : nullptr, key ? key->count : 0};
+            ProcessBlock ports;
+            ports.frames = m;
+            ports.sampleRate = sampleRate;
+            ports.audioIn = audioIn;
+            ports.audioInCount = 2;
+            ports.audioOut = &audioOut;
+            ports.audioOutCount = 1;
+            ports.eventIn = e.keyEvents ? &keyEvents : nullptr;
+            ports.eventInCount = e.keyEvents ? 1 : 0;
+            ports.parameters = block.parameters;
+            ports.parameterCount = block.parameterCount;
+            ports.transport = block.transport;
+            processed = e.processor->usesProcessPorts() && e.processor->processPorts(ports);
+        } else if (notes_) {
             const ChannelBufferView audioOut{out, 2, m};
             const EventInput events{notes_->events(), notes_->count()};
             ProcessBlock ports;

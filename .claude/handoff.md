@@ -1,6 +1,6 @@
 # Handoff
 
-Commit: fbe0b74
+Commit: 655839e
 
 Branch: ccr-56285e11-0xrj3h (PR #167 open, subscribed, CI green at aa1ee28)
 
@@ -15,8 +15,9 @@ Owner (2026-11-10): work through everything discussed toward the open beta, with
 - MIDI file import/export in Dart (`app/lib/model/midi_file.dart`, `app/lib/model/midi_clips.dart`, `app/lib/ui/midi_file_actions.dart`).
 
 ## Open
-- Signed APK verified (run 42921918821, keystore loaded); link sent to the owner.
-- Agents for #175 stopped at the usage limit and were re-launched 00:33Z from their committed state (briefs in the scratchpad) in worktrees: `.claude/worktrees/routing` (routing-ducker), `.claude/worktrees/modux` (mod-ux, synth UI first), `.claude/worktrees/polish` (polish-pass). Merged: user presets, flagship-perf.
+- #175 agents all merged (polish-pass, mod-ux, routing-ducker); app 815 tests and engine ctest pass at 655839e. APK at c8a9bef sent to the owner.
+- Running: `settings-redesign` (worktree `.claude/worktrees/settings`; owner chose a category list + search, every setting, full audio device/buffer control, nothing hidden; new C API goes in as API 10), `engine-133` (worktree `.claude/worktrees/e133`, #133), and an audio review of the routing/ducker engine code.
+- Owner choices from the agents to batch at the end: Build start page vs last tab, Try-it replaces an instrument without confirm, sheets under 600 dp, Files toggle vs slider; new-route amount 25 %, bipolar defaults, Flagship tabs, EQ double-tap = reset; routing defaults (decisions.md 2026-11-11).
 
 ## Next after merges
 - reaper-flow gaps 5-10 (sends/buses, render parity, actions, MIDI editor flow, mixer parity, templates), #161 modulators/routing, testing-suite and sample-pack screens, mixer label shows instrument name, #133 leftovers, then #160/#159 (.caw removal, .caw project extension).

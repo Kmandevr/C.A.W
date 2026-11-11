@@ -145,20 +145,6 @@ TEST(component_parameters_change_while_playing_and_through_project_updates) {
     CHECK_NEAR(l, 0.5 * kCentre, 1e-5);
 }
 
-TEST(a_folder_with_components_warns_that_they_are_not_played) {
-    Engine e(48000);
-    CHECK(loadFixture(e, kGain));
-    ProjectSpec p = constantTrack({});
-    LayerSpec folder;
-    folder.id = "f";
-    folder.name = "f";
-    folder.folder = true;
-    folder.components = {{kGain, {}}};
-    p.layers.push_back(folder);
-    const std::string result = e.setProject(p);
-    CHECK(result.find("folder buses take no native components") != std::string::npos);
-}
-
 TEST(a_project_with_too_many_components_is_refused) {
     Engine e(48000);
     CHECK(loadFixture(e, kGain));

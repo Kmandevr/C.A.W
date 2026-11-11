@@ -4,6 +4,7 @@ import 'dart:math';
 
 import 'cpp_component.dart';
 import 'pattern_doc.dart';
+import 'routing.dart';
 
 String newId(String prefix) {
   final r = Random.secure();
@@ -187,8 +188,12 @@ class ComponentUseDoc {
   String? state;
   int stateVersion;
 
-  /// A bare id when nothing else is set, as older projects stored it.
-  Object toJson() => params.isEmpty && !bypass && state == null && preset == null
+  /// Where a component with a sidechain input (the ducker, a keyed compressor or gate) hears its key; null: none.
+  ComponentKeyDoc? key;
+
+  /// A bare id when nothing else is set, as older projects stored it. [withKey] false leaves the key out (the
+  /// engine's copy, when the key would make a loop or names a layer that is gone: [RoutingPlan]).
+  Object toJson({bool withKey = true}) => params.isEmpty && !bypass && state == null && preset == null && (key == null || !withKey)
       ? id
       : {
           'id': id,
@@ -196,6 +201,7 @@ class ComponentUseDoc {
           if (params.isNotEmpty) 'params': params,
           if (bypass) 'bypass': true,
           if (state != null) ...{'state': state, 'state_version': stateVersion},
+          if (key != null && withKey) 'key': key!.toJson(),
         };
 
   /// Null for an entry without a usable id. Ids and parameter names are bounded; values must be finite.
@@ -225,7 +231,7 @@ class ComponentUseDoc {
       state is String && state.length <= (16 << 20) && RegExp(r'^[A-Za-z0-9+/]*={0,2}$').hasMatch(state) ? state : null,
       version is int && version >= 0 && version <= 0xFFFFFFFF ? version : 1,
       switch (_boundedProjectText(j['preset'], 64)) { '' => null, final name => name },
-    );
+    )..key = ComponentKeyDoc.fromJson(j['key']);
   }
 
   static List<ComponentUseDoc> listFromJson(Object? raw) => [
@@ -309,6 +315,7 @@ class LayerDoc {
     List<ClipDoc>? clips,
     List<AutomationLaneDoc>? automation,
     List<ComponentUseDoc>? components,
+    List<SendDoc>? sends,
     this.instrument,
     this.parentId,
     this.isFolder = false,
@@ -317,7 +324,8 @@ class LayerDoc {
     this.spaceBelow = 0,
     this.ownColor = false,
     this.showLanes = false,
-  }) : effectIds = effectIds ?? [], clips = clips ?? [], automation = automation ?? [], components = components ?? [];
+  }) : effectIds = effectIds ?? [], clips = clips ?? [], automation = automation ?? [], components = components ?? [],
+        sends = sends ?? [];
 
   /// The tallest visual spacer under a track, in logical pixels.
   static const maxSpaceBelow = 160.0;
@@ -343,7 +351,11 @@ class LayerDoc {
   bool mute, solo;
   List<ClipDoc> clips;
   List<AutomationLaneDoc> automation;
-  List<ComponentUseDoc> components; // native C++ effects after the chain, before volume and pan
+  List<ComponentUseDoc> components; // native C++ effects after the chain, before volume and pan (a bus folder's too)
+
+  /// Copies of the track's sound into bus folders (a reverb bus, a delay bus), beside its route to its folder's bus
+  /// or the master; at most [SendDoc.maxSends].
+  List<SendDoc> sends;
 
   /// A native C++ instrument (a built-in or one of the project's) playing the track's notes instead of a .caw
   /// generator: the two are exclusive, so setting one clears the other ([setInstrument], [generatorId]).
@@ -389,6 +401,7 @@ class LayerDoc {
         'clips': [for (final c in clips) c.toJson()],
         'automation': [for (final a in automation) a.toJson()],
         if (components.isNotEmpty) 'components': [for (final c in components) c.toJson()],
+        if (sends.isNotEmpty) 'sends': [for (final s in sends) s.toJson()],
         if (instrument != null) 'instrument': instrument!.toJson(),
         'parent': parentId, 'folder': isFolder, 'bus': busEnabled, 'collapsed': collapsed,
         if (spaceBelow > 0) 'space_below': spaceBelow,
@@ -411,6 +424,7 @@ class LayerDoc {
         clips: ((j['clips'] as List?) ?? const []).map((c) => ClipDoc.fromJson(c as Map<String, dynamic>)).toList(),
         automation: ((j['automation'] as List?) ?? const []).map((a) => AutomationLaneDoc.fromJson(a as Map<String, dynamic>)).toList(),
         components: ComponentUseDoc.listFromJson(j['components']),
+        sends: SendDoc.listFromJson(j['sends']),
         instrument: j['folder'] == true ? null : ComponentUseDoc.fromJson(j['instrument']),
         parentId: j['parent'] as String?, isFolder: j['folder'] == true,
         busEnabled: j['bus'] != false, collapsed: j['collapsed'] == true,
@@ -601,6 +615,7 @@ class ProjectDoc {
     final engineLoopBars = engineLoopSteps ~/ stepsPerBar;
     // Native components the engine hasn't loaded (awaiting trust, blocked, failed to build) are left out, so the
     // rest of the song still plays; their automation lanes go with them and the others are renumbered.
+    final routing = RoutingPlan.of(this);
     List<ComponentUseDoc> playable(List<ComponentUseDoc> chain) =>
         playableComponents == null ? chain : [for (final c in chain) if (playableComponents.contains(c.id)) c];
     int? playableIndex(List<ComponentUseDoc> chain, int index) {
@@ -649,7 +664,10 @@ class ProjectDoc {
               'id': l.id,
               'name': l.name,
               'chain': l.chain,
-              if (playable(l.components).isNotEmpty && !l.isFolder) 'components': [for (final c in playable(l.components)) c.toJson()],
+              // A bus folder runs its own effects (a reverb bus); a folder without a bus has none.
+              if (playable(l.components).isNotEmpty && (!l.isFolder || l.busEnabled))
+                'components': [for (final c in playable(l.components)) c.toJson(withKey: routing.keyPlays(l, c))],
+              if (routing.sendsOf(l) case final sends when sends.isNotEmpty) 'sends': [for (final s in sends) s.toJson()],
               // A C++ instrument not loaded yet (awaiting trust, building) is left out: the track is silent until it is.
               if (instrumentPlays(l)) 'instrument': l.instrument!.toJson(),
               'parent': l.parentId, 'folder': l.isFolder, 'bus': l.busEnabled,

@@ -1558,14 +1558,16 @@ class AppState extends ChangeNotifier {
     if (pan != null) l.pan = pan;
     if (mute != null) l.mute = mute;
     if (solo != null) l.solo = solo;
-    engine?.setLayerMix(l.id, l.volume, l.pan, l.mute, l.solo);
-    // Volume and pan drags only redraw their sliders; mute and solo change how the whole layer list looks.
+    // Volume and pan drags only redraw their sliders and go straight to the audio thread. Mute and solo reach
+    // through folders and buses (soloing a track keeps its buses and send buses open; muting a folder without a bus
+    // mutes its tracks), which the engine works out from the whole project, so they go as a project update.
     if (mute == null && solo == null) {
+      engine?.setLayerMix(l.id, l.volume, l.pan, l.mute, l.solo);
       _save();
       layerValueTick(l.id).value++;
       values.value++;
     } else {
-      _changed(engine: false);
+      _changed();
     }
   }
 

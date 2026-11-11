@@ -133,6 +133,8 @@ class Bindings {
             void Function(Pointer<Void>, Pointer<Utf8>, Pointer<Utf8>, double)>('caw_engine_set_param'),
         setComponentParam = lib.lookupFunction<Int32 Function(Pointer<Void>, Pointer<Utf8>, Uint32, Pointer<Utf8>, Double),
             int Function(Pointer<Void>, Pointer<Utf8>, int, Pointer<Utf8>, double)>('caw_engine_set_component_param'),
+        setSend = lib.lookupFunction<Int32 Function(Pointer<Void>, Pointer<Utf8>, Uint32, Double, Int32, Int32),
+            int Function(Pointer<Void>, Pointer<Utf8>, int, double, int, int)>('caw_engine_set_send'),
         setComponentBypass = lib.lookupFunction<Int32 Function(Pointer<Void>, Pointer<Utf8>, Uint32, Int32),
             int Function(Pointer<Void>, Pointer<Utf8>, int, int)>('caw_engine_set_component_bypass'),
         componentStates = lib.lookupFunction<Pointer<Utf8> Function(Pointer<Void>, Pointer<Utf8>),
@@ -272,6 +274,7 @@ class Bindings {
   final Pointer<Utf8> Function(Pointer<Void>) components;
   final void Function(Pointer<Void>, Pointer<Utf8>, Pointer<Utf8>, double) setParam;
   final int Function(Pointer<Void>, Pointer<Utf8>, int, Pointer<Utf8>, double) setComponentParam;
+  final int Function(Pointer<Void>, Pointer<Utf8>, int, double, int, int) setSend;
   final int Function(Pointer<Void>, Pointer<Utf8>, int, int) setComponentBypass;
   final Pointer<Utf8> Function(Pointer<Void>, Pointer<Utf8>) componentStates;
   final int Function(Pointer<Void>, Pointer<Utf8>, int, Pointer<Float>, int) componentDisplay;

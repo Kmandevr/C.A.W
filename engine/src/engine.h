@@ -113,6 +113,12 @@ public:
     // waits), -1 when there is no such component. Any thread but the audio thread.
     int32_t componentDisplay(const std::string& layerId, uint32_t index, float* out, uint32_t max);
     void setLayerMix(const std::string& layerId, double volume, double pan, bool mute, bool solo);
+    // A send while it plays (send `index` of the layer's project "sends"): its level (linear, 0..+12 dB), pre- or
+    // post-fader and mute, ramped over a block. False if the layer has no such send. A later project update sets
+    // the values it names again.
+    bool setSend(const std::string& layerId, uint32_t index, double level, bool pre, bool mute);
+    // Most routes (sends and sidechain keys) one layer feeds.
+    static constexpr int kMaxRoutes = 24;
     // Note previews (#103): a held note on a layer's instrument, heard through its effects and mix, while playing or
     // stopped. [id] is the caller's handle: a second noteOn with it ends the first. Only layers that play notes
     // (a voiced chain, or a native instrument) can preview.
@@ -168,6 +174,7 @@ private:
     struct MixGraph;  // the graph that routes slots, folder buses and master (engine.cpp)
     struct SlotTable;  // the slots, their mix graph and order list at one capacity (engine.cpp)
     struct DelayLine;  // a track's latency-compensation delay (engine.cpp)
+    struct SendTable;  // where a slot's sends and keys go, with their delays (engine.cpp)
 
     void drainRetired();
     bool canRetire(size_t count) const noexcept;
@@ -188,6 +195,12 @@ private:
     void runTrackNode(int slot, const float* const* in, float* outL, float* outR, int m) noexcept;
     void runDelay(Slot& s, float* outL, float* outR, int m) noexcept;
     void runBusNode(int slot, const float* inL, const float* inR, float* outL, float* outR, int m) noexcept;
+    // A slot's native inserts over L/R in place, with the crossfade of a chain change (tracks and buses).
+    void runInserts(Slot& s, float* L, float* R, int m) noexcept;
+    // A slot's sends and keys: pre taps after its effects, post taps after volume and pan (before its delay).
+    uint32_t keyNotes(const Slot& s, int m, Event* out, uint32_t max) const noexcept;
+    void runRoutes(Slot& s, const float* preL, const float* preR, const float* postL, const float* postR, int m,
+                   bool silenced, double keyPostL, double keyPostR) noexcept;
     void runMasterNode(const float* inL, const float* inR, float* outL, float* outR, int m) noexcept;
     void updateRouting() noexcept;
     double slotTarget(const Slot& s) const noexcept;
@@ -317,6 +330,7 @@ private:
     float insertL_[kBlock], insertR_[kBlock];
     float fadeL_[kBlock], fadeR_[kBlock];  // audio thread: a replaced chain's output during its crossfade            // audio thread: a track's inserts run here
     float masterStageL_[kBlock], masterStageR_[kBlock];  // audio thread: the master chain runs here
+    float preL_[kBlock], routeL_[kBlock], routeR_[kBlock];  // audio thread: a mono pre tap, and a route's signal
 
     // ---- shared ----
     std::unique_ptr<Spsc<Cmd, 1024>> cmds_;
@@ -373,6 +387,17 @@ private:
         std::string instrumentAutomationKey;
         bool native = false;                // the chain was built for a native instrument
         int64_t compensation = 0;           // the latency-compensation delay last sent, in frames
+        // Sends (the project's, in order) then sidechain keys this layer feeds; set by setProject, sent by
+        // updateCompensation with their delays.
+        struct Route {
+            int dest = -1;     // the destination slot (-1: none; the send's bus is missing)
+            int key = -1;      // -1: into the bus's input; else the component index on dest's inserts it keys
+            double level = 1;
+            bool pre = false, mute = false;
+        };
+        std::vector<Route> routes, routesSent;
+        int userSends = 0;          // routes[0..userSends) are the project's sends
+        std::string routesSig;      // destinations and delays last sent
     };
     std::map<std::string, ModuleState> modules_;
     std::map<std::string, LayerState> layers_;
@@ -402,6 +427,8 @@ private:
     int freeSlot();
     // Control thread; null: none. `index` kInstrumentIndex names the layer's instrument (and becomes 0).
     ComponentChain* ctlComponentChain(const std::string& layerId, uint32_t& index) noexcept;
+    // Latency compensation for every route (each track's and bus's main output and each send, so all arrive in
+    // time where they meet), sending changed delays and route tables.
     bool updateCompensation(std::map<std::string, std::vector<std::string>>& warnings);
 };
 
