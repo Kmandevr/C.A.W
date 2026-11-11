@@ -375,6 +375,7 @@ class _LaneRowState extends State<LaneRow> {
   /// The points a mouse selected (indices), for Delete; and the mouse's clicks, told from double-clicks.
   Set<int> _selected = {};
   final _clicks = ClickCounter();
+  static const _surface = -1; // the surface's presses, told apart from each point's (its index)
   final _keys = FocusNode(debugLabel: 'lane-row');
 
   /// Shift drags a fifth as far (fine control).
@@ -395,7 +396,11 @@ class _LaneRowState extends State<LaneRow> {
   /// A mouse's click on point [i]: it becomes the selection, or joins it (or leaves it) with Shift; a double-click
   /// removes it.
   void _clickPoint(int i) {
-    if (!_clicks.mouse) return;
+    // A finger: a tap on a point does nothing, a quick second tap removes it.
+    if (!_clicks.mouse) {
+      if (_clicks.doubleTap) lane.remove(i);
+      return;
+    }
     _keys.requestFocus();
     if (_clicks.doubleClick) {
       lane.remove(i);
@@ -515,7 +520,6 @@ class _LaneRowState extends State<LaneRow> {
             builder: (context, _, _) => CustomPaint(size: Size(widget.width, _h),
               painter: _LanePainter(lane: lane, stepW: widget.stepW, pad: _pad, writer: writer)))
             : child!, child: curve);
-    Offset? doubleAt;
     return Focus(
       focusNode: _keys,
       onKeyEvent: (_, e) {
@@ -527,12 +531,8 @@ class _LaneRowState extends State<LaneRow> {
         return KeyEventResult.handled;
       },
       child: SizedBox(width: widget.width, height: _h, child: Stack(clipBehavior: Clip.none, children: [
-      Positioned.fill(child: Listener(onPointerDown: _clicks.down, child: TouchDoubleTap(
-        onDoubleTapDown: (d) => doubleAt = d.localPosition,
-        onDoubleTap: () {
-          final i = doubleAt == null ? null : _pointNear(doubleAt!);
-          if (i != null) lane.remove(i);
-        },
+      // Taps answer at once; a finger's quick second tap near a point (outside its own target) also removes it.
+      Positioned.fill(child: Listener(onPointerDown: (e) => _clicks.down(e, target: _surface), onPointerUp: _clicks.up,
         child: GestureDetector(
         key: ValueKey('lane-surface-${lane.key}'),
         behavior: HitTestBehavior.opaque,
@@ -543,10 +543,14 @@ class _LaneRowState extends State<LaneRow> {
             if (_selected.isNotEmpty) setState(() => _selected = {});
             if (!_clicks.doubleClick) return;
           }
-          if (_pointNear(d.localPosition) != null) return;
+          final near = _pointNear(d.localPosition);
+          if (near != null) {
+            if (_clicks.doubleTap) lane.remove(near);
+            return;
+          }
           lane.add(math.max(0, d.localPosition.dx / widget.stepW), _value(d.localPosition.dy));
         },
-        child: RepaintBoundary(child: live))))),
+        child: RepaintBoundary(child: live)))),
       // Each segment's middle: a handle that drags it up or down (REAPER's segment drag).
       for (var i = 0; i + 1 < points.length; i++)
         if (_x(points[i + 1].step) - _x(points[i].step) > 40)
@@ -569,8 +573,7 @@ class _LaneRowState extends State<LaneRow> {
       // Each point: a 28 px target around its 8 px dot.
       for (var i = 0; i < points.length; i++)
         Positioned(left: _x(points[i].step) - 14, top: _y(points[i].value) - 14, width: 28, height: 28,
-          child: Listener(onPointerDown: _clicks.down, child: TouchDoubleTap(
-            onDoubleTap: () => lane.remove(i),
+          child: Listener(onPointerDown: (e) => _clicks.down(e, target: i), onPointerUp: _clicks.up,
             child: GestureDetector(key: ValueKey('lane-point-${lane.key}-$i'), behavior: HitTestBehavior.opaque,
             dragStartBehavior: DragStartBehavior.down,
             onTap: () => _clickPoint(i),
@@ -580,7 +583,7 @@ class _LaneRowState extends State<LaneRow> {
             onPanEnd: (_) => _end(),
             onPanCancel: _end,
             child: MouseRegion(cursor: SystemMouseCursors.move,
-                child: Tooltip(message: lane.label(points[i].value), child: const SizedBox.expand())))))),
+                child: Tooltip(message: lane.label(points[i].value), child: const SizedBox.expand()))))),
     ])));
   }
 }

@@ -1,6 +1,6 @@
 // Mouse and touch told apart: a drag that starts at once with a mouse (a hold with a finger), hint words for the
 // input in use ("click" or "tap"), the mouse wheel stepping a value with one undo step per burst, the middle-button and
-// Space+drag pan, a double tap for fingers only and a mouse's double-click counter.
+// Space+drag pan, and a counter that tells a second tap or click from a first without holding the first back.
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
@@ -220,53 +220,74 @@ void panBy(Offset delta, {ScrollController? h, ScrollController? v}) {
   move(v, delta.dy);
 }
 
-/// A double tap for fingers and pens only: a mouse's click then answers at once (owner, 2026-11-11: a click selects
-/// at once; a double tap on a phone still opens the menu). Put it around a [GestureDetector] that has the onTap.
-class TouchDoubleTap extends StatelessWidget {
-  const TouchDoubleTap({super.key, required this.onDoubleTap, this.onDoubleTapDown, required this.child});
-  final VoidCallback onDoubleTap;
-  final GestureTapDownCallback? onDoubleTapDown;
-  final Widget child;
-
-  @override
-  Widget build(BuildContext context) => RawGestureDetector(gestures: {
-        _TouchDoubleTapRecognizer: GestureRecognizerFactoryWithHandlers<_TouchDoubleTapRecognizer>(
-          () => _TouchDoubleTapRecognizer(debugOwner: this),
-          (r) => r
-            ..onDoubleTapDown = onDoubleTapDown
-            ..onDoubleTap = onDoubleTap,
-        ),
-      }, child: child);
-}
-
-class _TouchDoubleTapRecognizer extends DoubleTapGestureRecognizer {
-  _TouchDoubleTapRecognizer({super.debugOwner});
-
-  @override
-  bool isPointerAllowed(PointerDownEvent event) => !isMousePointer(event.kind) && super.isPointerAllowed(event);
-}
-
-/// Tells a mouse's double-click from its click, for a widget whose taps answer at once: feed it every press
-/// ([down], from a [Listener]) and ask [mouse] and [doubleClick] in the tap's callback.
+/// Tells a second tap or click from a first, for a widget whose taps answer at once (owner, 2026-11-11: a tap
+/// selects at once; a quick second tap adds the double tap's action, such as the menu). Feed it every press and lift
+/// ([down] and [up], from a [Listener], which takes no part in the gesture arena) and ask [doubleClick],
+/// [doubleTap] or [twice] in the tap's callback, which comes after the press.
+///
+/// A mouse's double-click is its second left click within [kDoubleTapTimeout] of the first press; a finger's (or
+/// pen's) double tap is its second press within [kDoubleTapTimeout] of the first tap's lift, as Flutter's own double
+/// tap counts it. Both land within [kDoubleTapSlop] of the first press, on the same [down] `target` (a widget shared
+/// by several items names the item), and a third press starts again.
 class ClickCounter {
-  Timer? _window; // open for the double-click time after a first click
-  Offset _lastPos = Offset.zero;
+  // When the window for a second press closes: a first click's press (a mouse) or a first tap's lift (a finger) plus
+  // the double-tap time. The gesture binding's clock is the wall clock, and a test's fake clock under test.
+  DateTime? _windowEnd;
+  DateTime _downAt = DateTime(0);
+  Offset _lastPos = Offset.zero, _local = Offset.zero;
+  Object? _lastTarget;
+  int? _pointer; // the counted finger press, until it lifts
   bool _mouse = false, _double = false;
+
+  static DateTime get _now => GestureBinding.instance.samplingClock.now();
 
   /// Whether the last press was a mouse's.
   bool get mouse => _mouse;
 
   /// Whether the last press was a mouse's second click, soon enough after and close enough to the first.
-  bool get doubleClick => _double;
+  bool get doubleClick => _mouse && _double;
 
-  void down(PointerDownEvent e) {
+  /// Whether the last press was a finger's or pen's second tap, soon enough after and close enough to the first.
+  bool get doubleTap => !_mouse && _double;
+
+  /// A double-click or a double tap.
+  bool get twice => _double;
+
+  /// Where the last press went down, globally and in the [Listener]'s own coordinates.
+  Offset get position => _lastPos;
+  Offset get localPosition => _local;
+
+  void down(PointerDownEvent e, {Object? target}) {
+    final now = _now;
     _mouse = isMousePointer(e.kind);
     // Only the left button double-clicks; a right-click neither counts nor opens the window.
-    final left = _mouse && e.buttons == kPrimaryMouseButton;
-    _double = left && (_window?.isActive ?? false) && (e.position - _lastPos).distance <= kDoubleTapSlop;
-    _window?.cancel();
-    // A third click starts again, so a triple click is one double-click and one click.
-    _window = left && !_double ? Timer(kDoubleTapTimeout, () {}) : null;
+    final counts = !_mouse || e.buttons == kPrimaryMouseButton;
+    final end = _windowEnd;
+    _double = counts && end != null && !now.isAfter(end) && target == _lastTarget &&
+        (e.position - _lastPos).distance <= kDoubleTapSlop;
+    // A mouse's window opens at its first click; a finger's at its first tap's lift ([up]). A third press starts again.
+    _windowEnd = _mouse && counts && !_double ? now.add(kDoubleTapTimeout) : null;
+    _pointer = !_mouse && counts && !_double ? e.pointer : null;
     _lastPos = e.position;
+    _local = e.localPosition;
+    _lastTarget = target;
+    _downAt = now;
+  }
+
+  /// A lift: a finger's first tap (short, and not moved past the touch slop) opens the window for its second.
+  void up(PointerUpEvent e) {
+    if (e.pointer != _pointer) return;
+    _pointer = null;
+    final now = _now;
+    if ((e.position - _lastPos).distance <= kDoubleTapTouchSlop && now.difference(_downAt) < kLongPressTimeout) {
+      _windowEnd = now.add(kDoubleTapTimeout);
+    }
+  }
+
+  /// Forgets the presses so far: the next one is a first (a press that went to something else, such as a button).
+  void reset() {
+    _windowEnd = null;
+    _pointer = null;
+    _double = false;
   }
 }

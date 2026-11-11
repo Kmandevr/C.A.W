@@ -242,8 +242,9 @@ void main() {
       // A tap high up in the row adds a point there.
       final row = tester.getRect(find.byKey(ValueKey('lane-row-$key')));
       await tester.tapAt(Offset(row.left + 200, row.top + 8));
-      await tester.pump(const Duration(milliseconds: 400)); // past the double-tap wait
+      await tester.pump(); // at once: no double-tap wait
       expect(pts(), hasLength(3));
+      await tester.pump(kDoubleTapTimeout); // so the drag below isn't a second tap
       final added = pts()[1];
       expect(added.value, greaterThan(0.5));
       // Drag it down to the bottom: pan goes left.

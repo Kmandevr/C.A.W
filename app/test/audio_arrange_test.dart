@@ -10,6 +10,7 @@ import 'package:caw/model/settings.dart';
 import 'package:caw/ui/arrange/audio_clip_inspector.dart';
 import 'package:caw/ui/arrange/audio_waveform.dart';
 import 'package:caw/ui/arranger_screen.dart';
+import 'package:flutter/gestures.dart' show kDoubleTapTimeout;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -131,6 +132,12 @@ void main() {
   testWidgets('a double tap opens the menu (owner, 2026-11-11): reverse and split', (tester) async {
     s.pausedStep = 24;
     await pump(tester);
+    // The first tap selects in the next frame (no double-tap wait); the second adds the menu.
+    await tester.tap(find.byKey(const ValueKey('audio-clip-c1')));
+    await tester.pump();
+    expect(s.selectedClipIds, {'c1'});
+    expect(find.text('Reverse'), findsNothing);
+    await tester.pump(kDoubleTapTimeout + const Duration(milliseconds: 50));
     await doubleTap(tester, find.byKey(const ValueKey('audio-clip-c1')));
     await tester.tap(find.text('Split at the playhead'));
     await tester.pumpAndSettle();
