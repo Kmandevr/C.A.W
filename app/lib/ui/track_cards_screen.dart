@@ -1,15 +1,23 @@
-// Tracks (the Arranger area): a project strip, big visual track cards, and a panel per track with its instrument,
-// notes, effects and mix.
+// Track cards (Arrange's cards view): a project strip, a big card per track (its instrument, clips and notes, a meter,
+// M and S) and a panel per track with its instrument, notes, effects and mix.
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 
 import '../model/app_state.dart';
 import '../model/arrange_fx.dart';
+import '../model/audio_clips.dart';
+import '../model/audio_edit.dart';
 import '../model/cpp_starters.dart';
 import '../model/cpp_workbench.dart';
 import '../model/pattern_doc.dart';
+import '../model/pattern_templates.dart' show PatternTemplate;
 import '../model/project.dart';
-import 'arrange/fx_stack.dart' show addEffectTo, pickInstrument;
+import 'arrange/audio_waveform.dart';
+import 'arrange/clip_preview.dart';
+import 'arrange/fx_stack.dart' show FxStack, pickInstrument;
 import 'cpp/build_start.dart' show ExamplesList, StarterExample;
+import 'routing_view.dart' show SendKnobs;
 import 'theme.dart';
 import 'pointer_input.dart';
 import 'volume_fader.dart';
@@ -18,16 +26,19 @@ import 'widgets.dart';
 import 'glass.dart';
 
 class TrackCardsScreen extends StatelessWidget {
-  const TrackCardsScreen({super.key, required this.state, required this.onOpenModule});
+  const TrackCardsScreen({super.key, required this.state, required this.onOpenModule, this.onBack});
   final AppState state;
 
-  /// Opens a module in the Sounds area (its controls, code or notes).
+  /// Opens a pattern in Build (a clip's notes).
   final ValueChanged<String> onOpenModule;
+
+  /// Leaves the cards for the arrangement; Android's Back does the same while the cards are open.
+  final VoidCallback? onBack;
 
   @override
   Widget build(BuildContext context) {
     final p = state.project;
-    return ListView(
+    final list = ListView(
       padding: const EdgeInsets.fromLTRB(12, 10, 12, 96),
       children: [
         if (state.meters.overloaded > 0) _OverloadBanner(state: state),
@@ -40,7 +51,38 @@ class TrackCardsScreen extends StatelessWidget {
         if (p.layers.length < 64) _AddTrackCard(state: state, empty: p.layers.isEmpty),
       ],
     );
+    final back = onBack;
+    if (back == null) return list;
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) back();
+      },
+      child: list,
+    );
   }
+}
+
+/// The cards view's header row: ← Back to the arrangement, then the view's title.
+class TrackCardsHeader extends StatelessWidget {
+  const TrackCardsHeader({super.key, required this.onBack});
+  final VoidCallback onBack;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+        padding: const EdgeInsets.fromLTRB(4, 4, 8, 2),
+        child: Row(children: [
+          TextButton.icon(
+            key: const ValueKey('track-cards-back'),
+            onPressed: onBack,
+            style: TextButton.styleFrom(foregroundColor: Neon.text),
+            icon: const Icon(Icons.arrow_back, size: 20),
+            label: const Text('Back'),
+          ),
+          const SizedBox(width: 6),
+          const Text('TRACK CARDS', style: TextStyle(color: Neon.dim, fontSize: 11, letterSpacing: 1.4, fontWeight: FontWeight.w800)),
+        ]),
+      );
 }
 
 class _OverloadBanner extends StatelessWidget {
@@ -296,25 +338,55 @@ class _Labeled extends StatelessWidget {
       ]);
 }
 
-/// The steps one cycle of a track lasts: its pattern's length, its own, or the project loop's.
-int _cycleSteps(AppState s, LayerDoc l) {
+
+/// What a track plays, in a few words: its instrument and preset ("Drums · Kit: 808"), an audio track, or a folder.
+/// Null for a track with no instrument yet.
+String? trackSoundText(AppState s, LayerDoc layer) {
+  if (layer.isFolder) return layer.busEnabled ? 'Bus folder' : 'Folder';
+  if (layer.isAudio) return layer.input != null && layer.audioClips.isEmpty ? 'Audio · input' : 'Audio';
+  final use = layer.instrument;
+  if (use == null) return null;
+  final name = s.componentLabel(use.id), preset = use.preset;
+  return preset == null || preset.isEmpty || preset == name ? name : '$name · $preset';
+}
+
+/// The tracks inside [folder], directly.
+Iterable<LayerDoc> _childrenOf(ProjectDoc p, LayerDoc folder) => p.layers.where((l) => l.parentId == folder.id);
+
+/// How many folders [layer] sits in (cards inside a folder are indented under it).
+int _depthOf(ProjectDoc p, LayerDoc layer) {
+  var depth = 0;
+  var parent = layer.parentId;
+  while (parent != null && depth < p.layers.length) {
+    final folder = p.layers.where((l) => l.id == parent).firstOrNull;
+    if (folder == null) break;
+    depth++;
+    parent = folder.parentId;
+  }
+  return depth;
+}
+
+/// The card's second line: what plays, the clips, and the effects.
+String _detail(AppState s, LayerDoc layer) {
   final p = s.project;
-  final pattern = p.module(l.patternId);
-  if (pattern != null) return _notesOf(pattern.source)?.lengthSteps(p.beatsPerBar) ?? p.loopSteps;
-  return l.lengthSteps > 0 ? l.lengthSteps : p.loopSteps;
-}
-
-String _stepsLabel(int steps, int stepsPerBar) {
-  if (steps % stepsPerBar == 0) return steps == stepsPerBar ? '1 bar' : '${steps ~/ stepsPerBar} bars';
-  if (steps % 4 == 0) return steps == 4 ? '1 beat' : '${steps ~/ 4} beats';
-  return '$steps 16ths';
-}
-
-/// Parsed pattern sources, so cards don't re-parse text that hasn't changed.
-final Map<String, PatternDoc?> _parsed = {};
-PatternDoc? _notesOf(String source) {
-  if (_parsed.length > 64) _parsed.clear();
-  return _parsed.putIfAbsent(source, () => PatternDoc.parse(source).doc);
+  final sound = trackSoundText(s, layer);
+  String count(int n, String one) => n == 1 ? '1 $one' : '$n ${one}s';
+  final fx = layer.components.length + layer.noteComponents.length;
+  return [
+    // The instrument's name only when the track's own name doesn't already say it.
+    if (sound == null) 'No instrument' else if (sound != layer.name) sound,
+    if (layer.isFolder)
+      count(_childrenOf(p, layer).length, 'track')
+    else if (layer.isAudio)
+      count(layer.audioClips.length, 'clip')
+    else if (layer.clips.length == 1)
+      p.module(layer.clips.first.patternId)?.name ?? 'Missing pattern'
+    else if (layer.clips.isEmpty)
+      'No clips'
+    else
+      count(layer.clips.length, 'clip'),
+    if (fx > 0) '$fx fx',
+  ].join('  ·  ');
 }
 
 Future<void> _rename(BuildContext context, AppState state, LayerDoc layer) async {
@@ -333,7 +405,8 @@ Future<void> _rename(BuildContext context, AppState state, LayerDoc layer) async
   if (name != null && name.trim().isNotEmpty) state.editLayer(layer, (l) => l.name = name.trim());
 }
 
-/// One track: its colour, name, sound and notes, a picture of one cycle with the playhead, a level meter, M and S.
+/// One track: its colour, name and sound, its clips across the song with their notes and the playhead, a level
+/// meter, M and S.
 class _TrackCard extends StatelessWidget {
   const _TrackCard({required this.state, required this.layer, required this.index, required this.onOpenModule});
   final AppState state;
@@ -345,68 +418,71 @@ class _TrackCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final p = state.project;
     final color = trackColor(state, layer);
-    final sound = state.instrumentName(layer);
-    final pattern = p.module(layer.patternId);
-    final cycle = _cycleSteps(state, layer);
+    final sound = trackSoundText(state, layer);
     final dim = layer.mute || (p.layers.any((l) => l.solo) && !layer.solo);
-    final detail = [
-      // The instrument's name only when the track's own name doesn't already say it.
-      if (sound == null) 'No instrument' else if (sound != layer.name) sound,
-      if (pattern != null) pattern.name,
-      _stepsLabel(cycle, p.stepsPerBar),
-      if (layer.components.isNotEmpty) '${layer.components.length} fx',
-    ].join('  ·  ');
-    return Opacity(
-      opacity: dim ? 0.5 : 1,
-      child: NeonPanel(
-        color: color,
-        padding: EdgeInsets.zero,
-        child: InkWell(
-          borderRadius: BorderRadius.circular(14),
-          onTap: () => showTrackSheet(context, state, layer, onOpenModule),
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(14, 10, 8, 12),
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Row(children: [
-                Icon(sound == null ? Icons.add_circle_outline : Icons.piano_outlined, color: color, size: 22),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    Text(layer.name,
-                        overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w700)),
-                    Text(detail,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(color: sound == null ? Neon.pink : Neon.dim, fontSize: 12.5)),
-                  ]),
+    final icon = layer.isFolder
+        ? Icons.folder_outlined
+        : layer.isAudio
+            ? Icons.graphic_eq
+            : sound == null
+                ? Icons.add_circle_outline
+                : Icons.piano_outlined;
+    return Padding(
+      padding: EdgeInsets.only(left: 14.0 * math.min(_depthOf(p, layer), 4)),
+      child: Opacity(
+        opacity: dim ? 0.5 : 1,
+        child: NeonPanel(
+          key: ValueKey('track-card-${layer.id}'),
+          color: color,
+          padding: EdgeInsets.zero,
+          child: InkWell(
+            borderRadius: BorderRadius.circular(14),
+            onTap: () => showTrackSheet(context, state, layer, onOpenModule),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(14, 10, 8, 12),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Row(children: [
+                  Icon(icon, color: color, size: 22),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Text(layer.name,
+                          overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w700)),
+                      Text(_detail(state, layer),
+                          key: ValueKey('track-card-detail-${layer.id}'),
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(color: sound == null ? Neon.pink : Neon.dim, fontSize: 12.5)),
+                    ]),
+                  ),
+                  ValueListenableBuilder<int>(
+                    valueListenable: state.tick,
+                    builder: (context, _, _) {
+                      final m = index < state.layerMeters.length ? state.layerMeters[index] : null;
+                      if (m?.overloaded != true) return const SizedBox();
+                      return const Padding(
+                        padding: EdgeInsets.only(right: 6),
+                        child: Icon(Icons.speed, color: Neon.pink, size: 20),
+                      );
+                    },
+                  ),
+                  ToggleChip(
+                      label: 'M', tooltip: 'Mute', on: layer.mute, color: Neon.yellow, onTap: () => state.mixLayer(layer, mute: !layer.mute)),
+                  const SizedBox(width: 6),
+                  ToggleChip(
+                      label: 'S', tooltip: 'Solo', on: layer.solo, color: Neon.blue, onTap: () => state.mixLayer(layer, solo: !layer.solo)),
+                ]),
+                const SizedBox(height: 10),
+                Padding(
+                  padding: const EdgeInsets.only(right: 6),
+                  child: _Lane(state: state, layer: layer, index: index, color: color),
                 ),
-                ValueListenableBuilder<int>(
-                  valueListenable: state.tick,
-                  builder: (context, _, _) {
-                    final m = index < state.layerMeters.length ? state.layerMeters[index] : null;
-                    if (m?.overloaded != true) return const SizedBox();
-                    return const Padding(
-                      padding: EdgeInsets.only(right: 6),
-                      child: Icon(Icons.speed, color: Neon.pink, size: 20),
-                    );
-                  },
+                const SizedBox(height: 6),
+                Padding(
+                  padding: const EdgeInsets.only(right: 6),
+                  child: TrackMeter(state: state, index: index, stereo: layer.isStereo, color: color),
                 ),
-                ToggleChip(
-                    label: 'M', tooltip: 'Mute', on: layer.mute, color: Neon.yellow, onTap: () => state.mixLayer(layer, mute: !layer.mute)),
-                const SizedBox(width: 6),
-                ToggleChip(
-                    label: 'S', tooltip: 'Solo', on: layer.solo, color: Neon.blue, onTap: () => state.mixLayer(layer, solo: !layer.solo)),
               ]),
-              const SizedBox(height: 10),
-              Padding(
-                padding: const EdgeInsets.only(right: 6),
-                child: _Lane(state: state, index: index, color: color, pattern: pattern, cycle: cycle, stepsPerBar: p.stepsPerBar),
-              ),
-              const SizedBox(height: 6),
-              Padding(
-                padding: const EdgeInsets.only(right: 6),
-                child: TrackMeter(state: state, index: index, stereo: layer.isStereo, color: color),
-              ),
-            ]),
+            ),
           ),
         ),
       ),
@@ -414,100 +490,112 @@ class _TrackCard extends StatelessWidget {
   }
 }
 
-/// One cycle of a track: its pattern's notes, or a block per bar for a sound with no pattern, and the playhead.
+/// The whole song in one strip: the track's clips where they sit, each drawing its notes as Arrange's clips do (the
+/// same mini piano roll, loops included) or its waveform, and the playhead. A folder shows its tracks' clips.
 class _Lane extends StatelessWidget {
-  const _Lane(
-      {required this.state,
-      required this.index,
-      required this.color,
-      required this.pattern,
-      required this.cycle,
-      required this.stepsPerBar});
+  const _Lane({required this.state, required this.layer, required this.index, required this.color});
   final AppState state;
+  final LayerDoc layer;
   final int index;
   final Color color;
-  final ModuleDoc? pattern;
-  final int cycle, stepsPerBar;
 
   @override
   Widget build(BuildContext context) => SizedBox(
         height: 40,
-        child: Stack(fit: StackFit.expand, children: [
-          RepaintBoundary(
-            child: CustomPaint(
-              painter: _LanePainter(
-                  notes: pattern == null ? null : _notesOf(pattern!.source)?.notes, cycle: cycle, bar: stepsPerBar, color: color),
+        child: LayoutBuilder(builder: (context, box) {
+          final p = state.project;
+          final song = math.max(1, p.engineLoopSteps);
+          final stepW = box.maxWidth / song;
+          final tracks = layer.isFolder ? _childrenOf(p, layer).toList() : [layer];
+          final notes = Color.lerp(color, Colors.white, 0.35)!;
+          Widget clipBox(Key key, double start, double length, bool muted, Widget? body) {
+            final left = start * stepW;
+            final width = math.max(2.0, math.min(length * stepW, box.maxWidth - left));
+            if (left >= box.maxWidth) return const SizedBox.shrink();
+            return Positioned(
+              key: key,
+              left: left,
+              width: width,
+              top: 4,
+              bottom: 4,
+              child: Container(
+                decoration: BoxDecoration(
+                  color: color.withValues(alpha: muted ? 0.08 : 0.2),
+                  border: Border.all(color: color.withValues(alpha: muted ? 0.3 : 0.7)),
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: body == null || width < 6 ? null : ClipRRect(borderRadius: BorderRadius.circular(4), child: body),
+              ),
+            );
+          }
+
+          return Stack(fit: StackFit.expand, children: [
+            RepaintBoundary(child: CustomPaint(painter: _GridPainter(song, p.stepsPerBar))),
+            for (final t in tracks) ...[
+              for (final c in t.clips)
+                clipBox(ValueKey('card-clip-${c.id}'), c.startSteps.toDouble(), c.lengthSteps.toDouble(), c.mute || t.mute,
+                    layer.isFolder ? null : _midiNotes(p, c, stepW, notes)),
+              for (final c in t.audioClips)
+                clipBox(ValueKey('card-audio-${c.id}'), c.startSteps, c.lengthAt(p.bpm), c.mute || t.mute,
+                    layer.isFolder ? null : _waveform(c, stepW, notes)),
+            ],
+            ValueListenableBuilder<int>(
+              valueListenable: state.tick,
+              builder: (context, _, _) {
+                final m = index < state.layerMeters.length ? state.layerMeters[index] : null;
+                final at = state.meters.playing ? (m?.progress ?? 0) : -1.0;
+                return CustomPaint(painter: _PlayheadPainter(at, color));
+              },
             ),
-          ),
-          ValueListenableBuilder<int>(
-            valueListenable: state.tick,
-            builder: (context, _, _) {
-              final m = index < state.layerMeters.length ? state.layerMeters[index] : null;
-              final at = state.meters.playing ? (m?.progress ?? 0) : -1.0;
-              return CustomPaint(painter: _PlayheadPainter(at, color));
-            },
-          ),
-        ]),
+          ]);
+        }),
       );
+
+  Widget? _midiNotes(ProjectDoc p, ClipDoc c, double stepW, Color notes) {
+    final preview = MidiClipPreview.of(p, c, stepW: stepW, top: 1, color: notes);
+    return preview == null ? null : RepaintBoundary(child: CustomPaint(
+      key: ValueKey('card-notes-${c.id}'),
+      painter: ClipPreviewPainter(preview),
+      size: Size.infinite));
+  }
+
+  Widget _waveform(AudioClipDoc c, double stepW, Color wave) {
+    final asset = state.project.asset(c.assetId);
+    final fileSeconds = asset?.seconds ?? 0;
+    final per = c.sourcePerStep(state.project.bpm, asset?.bpm) / stepW;
+    return CustomPaint(
+      key: ValueKey('card-wave-${c.id}'),
+      size: Size.infinite,
+      painter: AudioClipPainter(
+        peaks: () => asset == null || state.engine == null
+            ? null
+            : WaveformCache.instance.peaks(state.audioIo, asset.path, fileSeconds, per.abs()),
+        window: ClipWindow(offset: c.offsetSeconds, perPixel: per, fileSeconds: fileSeconds, reverse: c.reverse,
+            loop: c.loop, loopStart: c.loopStart, loopEnd: c.loopEnd),
+        color: wave, gain: c.gain, fadeIn: 0, fadeOut: 0, inCurve: c.fadeInCurve, outCurve: c.fadeOutCurve),
+    );
+  }
 }
 
-class _LanePainter extends CustomPainter {
-  _LanePainter({required this.notes, required this.cycle, required this.bar, required this.color});
-  final List<PatternNote>? notes;
-  final int cycle, bar;
-  final Color color;
+/// The strip's background and its bar lines (not drawn one by one when bars are under 2 px: a long song).
+class _GridPainter extends CustomPainter {
+  _GridPainter(this.steps, this.bar);
+  final int steps, bar;
 
   @override
   void paint(Canvas canvas, Size size) {
-    final r = RRect.fromRectAndRadius(Offset.zero & size, const Radius.circular(6));
-    canvas.drawRRect(r, Paint()..color = Neon.bg.withValues(alpha: 0.6));
-    final stepW = size.width / cycle;
-    // Bars narrower than 2 px are not drawn one by one: a very long pattern would mean millions of them.
-    final barsVisible = bar * stepW >= 2;
-    // Bar lines.
+    canvas.drawRRect(RRect.fromRectAndRadius(Offset.zero & size, const Radius.circular(6)),
+        Paint()..color = Neon.bg.withValues(alpha: 0.6));
+    final stepW = size.width / steps;
+    if (bar * stepW < 2) return;
     final grid = Paint()..color = Neon.line;
-    for (var s = bar; barsVisible && s < cycle; s += bar) {
+    for (var s = bar; s < steps; s += bar) {
       canvas.drawLine(Offset(s * stepW, 2), Offset(s * stepW, size.height - 2), grid);
-    }
-    final ns = notes;
-    if (ns == null) {
-      // No pattern: the sound plays the whole cycle, shown as one block per bar.
-      final fill = Paint()..color = color.withValues(alpha: 0.22);
-      final edge = Paint()
-        ..color = color.withValues(alpha: 0.7)
-        ..style = PaintingStyle.stroke;
-      final block = barsVisible ? bar : cycle;  // one block for the whole cycle when bars are too thin
-      for (var s = 0; s < cycle; s += block) {
-        final w = ((s + block > cycle ? cycle - s : block) * stepW) - 3;
-        final rect = RRect.fromRectAndRadius(Rect.fromLTWH(s * stepW + 1.5, 6, w, size.height - 12), const Radius.circular(4));
-        canvas.drawRRect(rect, fill);
-        canvas.drawRRect(rect, edge);
-      }
-      return;
-    }
-    if (ns.isEmpty) return;
-    var lo = ns.first.pitch, hi = lo;
-    for (final n in ns) {
-      if (n.pitch < lo) lo = n.pitch;
-      if (n.pitch > hi) hi = n.pitch;
-    }
-    final span = hi - lo < 6 ? 6.0 : hi - lo;
-    final rowH = (size.height - 8) / (span + 1);
-    final noteH = rowH.clamp(2.0, 7.0);
-    final paint = Paint();
-    for (final n in ns) {
-      final x = n.at.toDouble() * stepW;
-      if (x > size.width - 2) continue;
-      final w = (n.len.toDouble() * stepW).clamp(2.0, size.width - x);
-      final y = 4 + (hi - n.pitch + (span - (hi - lo)) / 2) * rowH + (rowH - noteH) / 2;
-      paint.color = color.withValues(alpha: 0.45 + 0.55 * n.vel.clamp(0.0, 1.0));
-      canvas.drawRRect(RRect.fromRectAndRadius(Rect.fromLTWH(x, y, w, noteH), const Radius.circular(2)), paint);
     }
   }
 
   @override
-  bool shouldRepaint(covariant _LanePainter old) =>
-      old.notes != notes || old.cycle != cycle || old.bar != bar || old.color != color;
+  bool shouldRepaint(covariant _GridPainter old) => old.steps != steps || old.bar != bar;
 }
 
 class _PlayheadPainter extends CustomPainter {
@@ -563,7 +651,7 @@ class _AddTrackCard extends StatelessWidget {
         ),
       ),
     );
-    if (pick == false) state.addLayer();
+    if (pick == false) state.addEmptyTrack();
     if (pick is StarterExample && pick.starter != null) {
       final doc = state.addCppStarter(pick.starter!);
       state.cppWorkbench(doc.id).tryOn(null);
@@ -597,42 +685,47 @@ class _AddTrackCard extends StatelessWidget {
       );
 }
 
-/// Everything about one track in one panel: instrument, notes, effects and mix.
-Future<void> showTrackSheet(BuildContext context, AppState s, LayerDoc layer, ValueChanged<String> onOpenModule) =>
-    showGlassSheet<void>(
-      context: context,
-      backgroundColor: Neon.panel,
-      isScrollControlled: true,
-      constraints: const BoxConstraints(maxWidth: 760),
-      builder: (context) => SafeArea(
-        child: ConstrainedBox(
-          constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.9),
-          child: ListenableBuilder(
-            listenable: s,
-            builder: (context, _) {
-              // Deleted from elsewhere (a key, another project opened): close instead of showing a stale track.
-              if (!s.project.layers.contains(layer)) {
-                WidgetsBinding.instance.addPostFrameCallback((_) {
-                  if (context.mounted) Navigator.maybePop(context);
-                });
-                return const SizedBox(height: 80);
-              }
-              return _TrackSheet(
-                state: s,
-                layer: layer,
-                onOpenModule: (id) {
-                  Navigator.pop(context);
-                  onOpenModule(id);
-                },
-              );
-            },
-          ),
+/// Everything about one track in one panel: instrument, notes, effects and mix. It follows the track by its id, so
+/// an undo or redo (which rebuilds the project) keeps it open on the same track.
+Future<void> showTrackSheet(BuildContext context, AppState s, LayerDoc layer, ValueChanged<String> onOpenModule) {
+  final id = layer.id;
+  return showGlassSheet<void>(
+    context: context,
+    backgroundColor: Neon.panel,
+    isScrollControlled: true,
+    constraints: const BoxConstraints(maxWidth: 760),
+    builder: (context) => SafeArea(
+      child: ConstrainedBox(
+        constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.9),
+        child: ListenableBuilder(
+          listenable: s,
+          builder: (context, _) {
+            final now = s.project.layers.where((l) => l.id == id).firstOrNull;
+            // Deleted from elsewhere (a key, another project opened): close instead of showing a stale track.
+            if (now == null) {
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                if (context.mounted) Navigator.maybePop(context);
+              });
+              return const SizedBox(height: 80);
+            }
+            return _TrackSheet(
+              key: ValueKey('track-sheet-$id'),
+              state: s,
+              layer: now,
+              onOpenModule: (id) {
+                Navigator.pop(context);
+                onOpenModule(id);
+              },
+            );
+          },
         ),
       ),
-    );
+    ),
+  );
+}
 
 class _TrackSheet extends StatelessWidget {
-  const _TrackSheet({required this.state, required this.layer, required this.onOpenModule});
+  const _TrackSheet({super.key, required this.state, required this.layer, required this.onOpenModule});
   final AppState state;
   final LayerDoc layer;
   final ValueChanged<String> onOpenModule;
@@ -647,16 +740,63 @@ class _TrackSheet extends StatelessWidget {
         ]),
       );
 
-  Widget _choice(String label, IconData icon, Color color, bool selected, VoidCallback onTap) => ChoiceChip(
-        avatar: Icon(icon, size: 16, color: color),
-        label: Text(label),
-        selected: selected,
-        onSelected: (_) => onTap(),
-        selectedColor: color.withValues(alpha: 0.22),
-        side: BorderSide(color: selected ? color : Neon.line),
-        labelStyle: const TextStyle(color: Neon.text, fontWeight: FontWeight.w600),
-        showCheckmark: false,
-      );
+  Widget _note(String text) => Text(text, style: const TextStyle(color: Neon.dim));
+
+  /// Opens [clip]'s notes: the clip becomes the selection and its pattern opens in Build.
+  void _openClip(ClipDoc clip) {
+    state.selectClip(layer, clip);
+    onOpenModule(clip.patternId);
+  }
+
+  List<Widget> _notes(BuildContext context) {
+    final s = state;
+    final p = s.project;
+    if (layer.isFolder) return [_note('A folder holds tracks; their clips play into it.')];
+    if (layer.isAudio) {
+      return [
+        if (layer.audioClips.isEmpty) _note('Records from its input; no clips yet.'),
+        Wrap(spacing: 6, runSpacing: 6, children: [
+          for (final c in layer.audioClips)
+            Chip(
+              avatar: const Icon(Icons.graphic_eq, size: 16, color: Neon.yellow),
+              label: Text('${s.audioClipName(c)} · bar ${c.startSteps ~/ p.stepsPerBar + 1}'),
+              side: const BorderSide(color: Neon.line),
+            ),
+        ]),
+      ];
+    }
+    if (layer.clips.isEmpty) {
+      return [
+        _note('No clips on this track yet.'),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: TextButton.icon(
+            key: const ValueKey('track-sheet-new-pattern'),
+            onPressed: () {
+              final id = s.addModule(
+                  PatternTemplate('${layer.name} notes', PatternDoc.blank(name: '${layer.name} notes').serialize()));
+              s.addClip(layer, id);
+            },
+            icon: const Icon(Icons.queue_music, size: 16, color: Neon.yellow),
+            label: const Text('New pattern on this track'),
+          ),
+        ),
+      ];
+    }
+    return [
+      Wrap(spacing: 6, runSpacing: 6, children: [
+        for (final c in layer.clips)
+          ActionChip(
+            key: ValueKey('track-sheet-clip-${c.id}'),
+            avatar: const Icon(Icons.piano, size: 16, color: Neon.yellow),
+            label: Text('${p.module(c.patternId)?.name ?? 'Missing pattern'} · bar ${c.startSteps ~/ p.stepsPerBar + 1}'),
+            side: BorderSide(color: c.id == s.selectedClipId ? Neon.yellow : Neon.line),
+            labelStyle: const TextStyle(color: Neon.text, fontWeight: FontWeight.w600),
+            onPressed: p.module(c.patternId) == null ? null : () => _openClip(c),
+          ),
+      ]),
+    ];
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -664,13 +804,9 @@ class _TrackSheet extends StatelessWidget {
     final p = s.project;
     final color = trackColor(state, layer);
     final index = p.layers.indexOf(layer);
-    final patterns = p.modules.where((m) => s.isPattern(m.id)).toList();
-    final instrument = s.instrumentName(layer);
-    final lengths = lengthChoices(p.stepsPerBar);
-    if (!lengths.any((c) => c.$1 == layer.lengthSteps)) lengths.add((layer.lengthSteps, '${layer.lengthSteps} 16ths'));
-    Widget? edit(String? id) => id == null
-        ? null
-        : TextButton.icon(onPressed: () => onOpenModule(id), icon: const Icon(Icons.edit, size: 16), label: const Text('Edit'));
+    final sound = trackSoundText(s, layer);
+    final instrumentTrack = !layer.isFolder && !layer.isAudio;
+    final first = layer.clips.where((c) => c.id == s.selectedClipId).firstOrNull ?? layer.clips.firstOrNull;
 
     return ListView(shrinkWrap: true, padding: const EdgeInsets.fromLTRB(16, 4, 8, 20), children: [
       Row(children: [
@@ -678,7 +814,11 @@ class _TrackSheet extends StatelessWidget {
           message: 'Change colour',
           child: InkWell(
             customBorder: const CircleBorder(),
-            onTap: () => s.editLayer(layer, (l) => l.color = (l.color + 1) % Neon.layers.length),
+            // The track's own colour from now on (a track in a folder otherwise shows a shade of the folder's).
+            onTap: () => s.editLayer(layer, (l) {
+              l.color = (l.color + 1) % LayerDoc.trackColors;
+              l.ownColor = true;
+            }),
             child: Padding(
               padding: const EdgeInsets.all(12),
               child: Container(
@@ -725,64 +865,39 @@ class _TrackSheet extends StatelessWidget {
       ]),
 
       _section('Instrument', Neon.green,
-          action: TextButton.icon(onPressed: () => pickInstrument(context, s, layer),
-              icon: const Icon(Icons.piano, size: 16), label: Text(instrument == null ? 'Pick' : 'Change'))),
-      Text(instrument ?? 'Nothing plays this track\'s notes yet', style: TextStyle(color: instrument == null ? Neon.dim : Neon.text)),
+          action: instrumentTrack
+              ? TextButton.icon(onPressed: () => pickInstrument(context, s, layer),
+                  icon: const Icon(Icons.piano, size: 16), label: Text(sound == null ? 'Pick' : 'Change'))
+              : null),
+      Text(
+        layer.isFolder
+            ? (layer.busEnabled ? 'A bus folder: its tracks play through its effects.' : 'A folder: it groups its tracks.')
+            : layer.isAudio
+                ? 'An audio track: it plays its audio clips${layer.input != null ? ' and its input' : ''}.'
+                : sound ?? 'Nothing plays this track\'s notes yet',
+        key: const ValueKey('track-sheet-instrument'),
+        style: TextStyle(color: instrumentTrack && sound == null ? Neon.dim : Neon.text),
+      ),
 
-      _section('Notes', Neon.yellow, action: edit(layer.patternId)),
-      Wrap(spacing: 6, runSpacing: 6, children: [
-        _choice('None', Icons.block, Neon.dim, layer.patternId == null, () => s.editLayer(layer, (l) => l.patternId = null)),
-        for (final m in patterns)
-          _choice(m.name, Icons.piano, Neon.yellow, m.id == layer.patternId,
-              () => s.editLayer(layer, (l) => l.patternId = m.id)),
-      ]),
-      if (layer.patternId == null) ...[
-        const Padding(
-          padding: EdgeInsets.only(top: 10, bottom: 6),
-          child: Text('Loops every', style: TextStyle(color: Neon.dim, fontSize: 13)),
-        ),
-        SizedBox(
-          height: 44,
-          child: ListView(scrollDirection: Axis.horizontal, children: [
-            for (final c in lengths)
-              Padding(
-                padding: const EdgeInsets.only(right: 6),
-                child: ChoiceChip(
-                  label: Text(c.$2),
-                  selected: c.$1 == layer.lengthSteps,
-                  onSelected: (_) => s.editLayer(layer, (l) => l.lengthSteps = c.$1),
-                  selectedColor: color.withValues(alpha: 0.22),
-                  side: BorderSide(color: c.$1 == layer.lengthSteps ? color : Neon.line),
-                  labelStyle: const TextStyle(color: Neon.text, fontWeight: FontWeight.w600),
-                  showCheckmark: false,
-                ),
-              ),
-          ]),
-        ),
-      ] else
-        const Padding(
-          padding: EdgeInsets.only(top: 8),
-          child: Text('Loops with its notes', style: TextStyle(color: Neon.dim, fontSize: 13)),
-        ),
+      _section('Notes', Neon.yellow,
+          action: first == null || p.module(first.patternId) == null || layer.isAudio
+              ? null
+              : TextButton.icon(
+                  key: const ValueKey('track-sheet-edit-notes'),
+                  onPressed: () => _openClip(first),
+                  icon: const Icon(Icons.edit, size: 16),
+                  label: const Text('Edit'))),
+      ..._notes(context),
 
       _section('Effects', Neon.pink),
-      Wrap(spacing: 6, runSpacing: 6, crossAxisAlignment: WrapCrossAlignment.center, children: [
-        for (final (i, c) in layer.components.indexed)
-          InputChip(
-            label: Text(s.componentLabel(c.id)),
-            avatar: const Icon(Icons.tune, size: 16, color: Neon.pink),
-            onDeleted: () => s.removeNativeEffect(layer, i),
-          ),
-        TextButton(
-          onPressed: () => addEffectTo(context, s, layer),
-          child: const Text('+ Add effect', style: TextStyle(color: Neon.pink, fontWeight: FontWeight.w600)),
-        ),
-      ]),
+      // The focus view's FX stack: the instrument first, per-note FX, the track's effects (reorder, bypass, knobs,
+      // remove) and its modulators. A folder without a bus explains why it has none.
+      SizedBox(height: 420, child: FxStack(key: ValueKey('track-sheet-fx-${layer.id}'), state: s, layer: layer)),
 
       _section('Mix', Neon.blue),
       ValueListenableBuilder<int>(
-        valueListenable: s.values,
-        builder: (context, _, _) => Column(children: [
+        valueListenable: s.layerValueTick(layer.id),
+        builder: (context, _, _) => Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Row(children: [
             const SizedBox(width: 56, child: Text('Volume', style: TextStyle(color: Neon.dim))),
             Expanded(child: SizedBox(height: 40, child: VolumeFader(value: layer.volume, vertical: false, color: color,
@@ -797,7 +912,8 @@ class _TrackSheet extends StatelessWidget {
               child: ResetOnDoubleTap(onReset: () => s.mixLayer(layer, pan: 0), child: WheelSteps(
                 onStep: (dir, fine) => s.mixLayer(layer, pan: panWheelStep(layer.pan, dir, fine)),
                 child: Slider(
-                value: layer.pan,
+                key: const ValueKey('track-sheet-pan'),
+                value: layer.pan.clamp(-1.0, 1.0),
                 min: -1,
                 max: 1,
                 activeColor: color,
@@ -807,6 +923,13 @@ class _TrackSheet extends StatelessWidget {
             ),
             const Text('R', style: TextStyle(color: Neon.dim, fontSize: 12)),
           ]),
+          // Sends to bus folders, as the focus view's Mixer tab has them.
+          if (!layer.isFolder || layer.busEnabled) ...[
+            const SizedBox(height: 4),
+            const Text('Sends', style: TextStyle(color: Neon.dim)),
+            const SizedBox(height: 4),
+            SendKnobs(state: s, layer: layer, size: 36),
+          ],
         ]),
       ),
     ]);

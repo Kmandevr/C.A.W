@@ -849,11 +849,9 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
     final p = s.project;
     if (cardsView) {
       return Column(children: [
-        Padding(padding: const EdgeInsets.fromLTRB(8, 4, 8, 2), child: Row(children: [
-          IconButton(onPressed: () => setState(() => cardsView = false), icon: const Icon(Icons.view_timeline), tooltip: 'Timeline view'),
-          const Text('TRACK CARDS', style: TextStyle(color: Neon.dim, fontSize: 11, letterSpacing: 1.4, fontWeight: FontWeight.w800)),
-        ])),
-        Expanded(child: TrackCardsScreen(state: s, onOpenModule: widget.onOpenModule ?? s.selectModule)),
+        TrackCardsHeader(onBack: () => setState(() => cardsView = false)),
+        Expanded(child: TrackCardsScreen(state: s, onOpenModule: widget.onOpenModule ?? s.selectModule,
+            onBack: () => setState(() => cardsView = false))),
       ]);
     }
     final focused = p.layers.where((l) => l.id == _focusId && !l.isFolder).firstOrNull;
