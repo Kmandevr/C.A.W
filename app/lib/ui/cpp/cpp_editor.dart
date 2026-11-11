@@ -21,6 +21,10 @@ import 'code_style.dart';
 import 'cpp_library.dart';
 import 'key_row.dart';
 import 'panels.dart';
+import 'plugin_export_screen.dart';
+import 'sample_pack_screen.dart';
+import 'test_suite_screen.dart';
+import 'tool_kit.dart';
 import '../adaptive_sheet.dart';
 
 /// One file's editor state, kept with its session so undo survives switching tabs and files.
@@ -765,7 +769,7 @@ class CppEditorState extends State<CppEditor> {
           height: 28,
           child: PopupMenuButton<void Function()>(
             key: const ValueKey('more'),
-            tooltip: 'Snippets and ♪ Test',
+            tooltip: 'Snippets, ♪ Test and the Build tools',
             padding: EdgeInsets.zero,
             iconSize: 16,
             icon: const Icon(Icons.more_vert, color: Neon.dim),
@@ -776,6 +780,17 @@ class CppEditorState extends State<CppEditor> {
                   child: const Text('Snippets', style: TextStyle(fontSize: 13))),
               PopupMenuItem(key: const ValueKey('bar test'), height: 34, value: _showTest,
                   child: const Text('♪ Test: play it with knobs', style: TextStyle(fontSize: 13))),
+              const PopupMenuDivider(),
+              PopupMenuItem(key: const ValueKey('bar test suite'), height: 34,
+                  value: () => openToolPage(context, TestSuiteScreen(workbench: w)),
+                  child: const Text('Test suite…', style: TextStyle(fontSize: 13))),
+              if (w.isInstrument)
+                PopupMenuItem(key: const ValueKey('bar sample pack'), height: 34,
+                    value: () => openSamplePackMaker(context, w.state, instrumentId: w.componentId),
+                    child: const Text('Make sample pack…', style: TextStyle(fontSize: 13))),
+              PopupMenuItem(key: const ValueKey('bar export plugin'), height: 34,
+                  value: () => openToolPage(context, PluginExportScreen(workbench: w)),
+                  child: const Text('Export as plug-in…', style: TextStyle(fontSize: 13))),
             ],
           ),
         ),

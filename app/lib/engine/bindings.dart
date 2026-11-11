@@ -254,7 +254,13 @@ class Bindings {
         testTone = lib.lookupFunction<Void Function(Pointer<Void>, Double), void Function(Pointer<Void>, double)>(
             'caw_engine_test_tone'),
         testToneSounding = lib.lookupFunction<Int32 Function(Pointer<Void>), int Function(Pointer<Void>)>(
-            'caw_engine_test_tone_sounding');
+            'caw_engine_test_tone_sounding'),
+        // The Build tools (#163, #164): the testing suite and the sample-pack maker; both block, so call them off
+        // the UI isolate.
+        componentTest = lib.lookupFunction<Pointer<Utf8> Function(Pointer<Utf8>, Int32, Pointer<Utf8>, Pointer<Utf8>),
+            Pointer<Utf8> Function(Pointer<Utf8>, int, Pointer<Utf8>, Pointer<Utf8>)>('caw_component_test'),
+        samplePackRender = lib.lookupFunction<Pointer<Utf8> Function(Pointer<Utf8>, Int32, Pointer<Int32>, Pointer<Int32>),
+            Pointer<Utf8> Function(Pointer<Utf8>, int, Pointer<Int32>, Pointer<Int32>)>('caw_sample_pack_render');
 
   static Bindings? _instance;
 
@@ -333,4 +339,6 @@ class Bindings {
   final void Function(Pointer<Void>, double, int) setMetronomeSound;
   final void Function(Pointer<Void>, double) testTone;
   final int Function(Pointer<Void>) testToneSounding;
+  final Pointer<Utf8> Function(Pointer<Utf8>, int, Pointer<Utf8>, Pointer<Utf8>) componentTest;
+  final Pointer<Utf8> Function(Pointer<Utf8>, int, Pointer<Int32>, Pointer<Int32>) samplePackRender;
 }

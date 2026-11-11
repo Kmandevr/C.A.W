@@ -190,6 +190,20 @@ class CppWorkbench extends ChangeNotifier {
   /// The built effect's descriptor while it is loaded (its knobs), null before the first build.
   NativeComponentInfo? info;
 
+  String? _artifact;
+
+  /// The library file of the last build this session, else the one the engine loaded (the Build tools' test and
+  /// sample-pack renders load it again); null before a build.
+  String? get artifactPath => _artifact ?? state.nativeComponents?.artifactOf(componentId);
+
+  /// The build before the last one, while its library file is a different file that still exists (the testing
+  /// suite's "previous build" comparison).
+  String? previousArtifactPath;
+
+  /// Sets the last build's library file without building (widget tests of the Build tools).
+  @visibleForTesting
+  set debugArtifactPath(String path) => _artifact = path;
+
   Timer? _saveTimer, _checkTimer;
   int _editGeneration = 0;
   bool _dirty = false;
@@ -461,6 +475,7 @@ class CppWorkbench extends ChangeNotifier {
         final status = state.nativeStatus;
         final id = c.componentId;
         if (status != null && status.loaded.contains(id)) {
+          _keepArtifact(manager.artifactOf(id));
           await _built(c, before);
         } else if (status?.buildFailed[id] case final CppBuildResult failed) {
           _failed(failed);
@@ -487,6 +502,7 @@ class CppWorkbench extends ChangeNotifier {
                   reload: builds > 0);
           if (loaded.ok) {
             state.editProject((_) {}); // send the project again so tracks pick the effect up
+            _keepArtifact(result.artifactPath);
             await _built(c, before);
           } else {
             phase = CppBuildPhase.failed;
@@ -500,6 +516,13 @@ class CppWorkbench extends ChangeNotifier {
     }
     if (!_disposed) notifyListeners();
     return true;
+  }
+
+  void _keepArtifact(String? path) {
+    if (path == null) return;
+    final old = artifactPath;
+    if (old != null && old != path && File(old).existsSync()) previousArtifactPath = old;
+    _artifact = path;
   }
 
   void _failed(CppBuildResult result) {

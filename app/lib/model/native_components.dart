@@ -58,10 +58,14 @@ class NativeComponentManager {
   /// App-private JSON: {component id: {source fingerprint: artifact path}}.
   final File cacheFile;
   final Map<String, String> _loadedFingerprint = {};  // component id -> fingerprint of what the engine has
+  final Map<String, String> _loadedArtifact = {};     // component id -> the library file the engine loaded
   Map<String, Map<String, String>>? _cache;
 
   /// Every component id the engine has loaded, for ProjectDoc.toEngineJson(playableComponents:).
   Set<String> get loaded => _loadedFingerprint.keys.toSet();
+
+  /// The library file the engine loaded for component [id] (the Build tools test and render it), or null.
+  String? artifactOf(String id) => _loadedArtifact[id];
 
   Future<NativeComponentsStatus> prepare(ProjectDoc project) async {
     final status = NativeComponentsStatus();
@@ -98,6 +102,7 @@ class NativeComponentManager {
       final loaded = await load(artifactPath: artifact, expectedComponentId: id, trust: choice, reload: reload);
       if (loaded.ok) {
         _loadedFingerprint[id] = fingerprint;
+        _loadedArtifact[id] = artifact;
         status.loaded.add(id);
       } else {
         status.loadFailed[id] = loaded.error;

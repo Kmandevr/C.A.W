@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 
 import '../model/app_state.dart';
 import '../model/files_catalog.dart';
+import '../model/sample_packs.dart';
 import '../model/user_presets.dart';
 import 'frame/frame_widgets.dart' show AwakeListenableBuilder, ScrollFade;
 import 'files/asset_actions.dart';
@@ -75,6 +76,7 @@ class _FileManagerScreenState extends State<FileManagerScreen> {
     state.refreshNativeCatalog().then((_) {
       if (mounted) setState(() {});
     });
+    state.refreshSamplePacks();
   }
 
   @override
@@ -450,7 +452,7 @@ class _FileManagerScreenState extends State<FileManagerScreen> {
   @override
   // Asleep while Files is behind another section (frame_widgets.dart).
   Widget build(BuildContext context) => AwakeListenableBuilder(
-        listenable: Listenable.merge([state, state.userPresets]),
+        listenable: Listenable.merge([state, state.userPresets, state.samplePacksTick]),
         builder: (context, _) => LayoutBuilder(builder: (context, c) {
           // A small docked panel in a landscape window still uses the drawer: the tree needs room beside the grid.
           final wide = !widget.explorer && (c.maxWidth > c.maxHeight || c.maxWidth >= 900) && c.maxWidth >= 560;
