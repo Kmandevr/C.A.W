@@ -874,6 +874,7 @@ Engine::~Engine() {
         delete c.masterChain;
         delete c.componentAutomation;
         delete c.delay;
+        delete c.sends;
     }
     Retired r;
     while (retired_->pop(r)) {
@@ -885,6 +886,7 @@ Engine::~Engine() {
         delete r.masterChain;
         delete r.componentAutomation;
         delete r.delay;
+        delete r.sends;
     }
     for (int i = 0; i < pendingCount_; ++i) {
         delete pending_[i].chain;
@@ -895,6 +897,7 @@ Engine::~Engine() {
         delete pending_[i].masterChain;
         delete pending_[i].componentAutomation;
         delete pending_[i].delay;
+        delete pending_[i].sends;
     }
     delete masterChain_;
     masterChain_ = nullptr;
@@ -2793,34 +2796,59 @@ void Engine::setMetronomeSound(double volume, int sound) noexcept {
 void Engine::testTone(double seconds) noexcept {
     const double s = std::isfinite(seconds) ? std::clamp(seconds, 0.0, 10.0) : 0.0;
     toneRequest_.store(static_cast<int64_t>(s * sr_), std::memory_order_release);
-    if (s > 0) toneFlag_.store(true, std::memory_order_relaxed);
 }
 
-// The test tone, after everything else (the limiter included): 0.25 (-12 dBFS) of 440 Hz with 10 ms fades. A request
-// to end it early fades it out over those 10 ms.
-void Engine::mixTestTone(float* left, float* right, int frames) noexcept {
+void Engine::resetTestTone() noexcept {
+    toneRequest_.store(-1, std::memory_order_release);
+    toneLeft_ = toneLen_ = 0;
+    toneActive_.store(false, std::memory_order_release);
+}
+
+// The test tone: 0.25 (-12 dBFS) of 440 Hz with 10 ms fades, added before the safety limiter (finishSample in
+// runMasterNode, or mixToneOnly where the master stage does not run). A request to end it early fades it out over
+// those 10 ms.
+void Engine::takeToneRequest() noexcept {
+    // A start is published as sounding before its request is cleared, so testToneSounding() never reads false in
+    // between. A request that lands after the load is left for the next callback.
+    int64_t req = toneRequest_.load(std::memory_order_acquire);
+    if (req == -1) return;
+    if (req > 0) toneActive_.store(true, std::memory_order_release);
+    if (!toneRequest_.compare_exchange_strong(req, -1, std::memory_order_acq_rel)) return;
     const int64_t ramp = std::max<int64_t>(1, static_cast<int64_t>(0.01 * sr_));
-    const int64_t req = toneRequest_.exchange(-1, std::memory_order_acq_rel);
     if (req > 0) {
         toneLeft_ = toneLen_ = req;
         tonePhase_ = 0;
-    } else if (req == 0 && toneLeft_ > ramp) {
+    } else if (toneLeft_ > ramp) {
         toneLen_ -= toneLeft_ - ramp;
         toneLeft_ = ramp;
     }
+}
+
+double Engine::nextTone() noexcept {
+    const int64_t ramp = std::max<int64_t>(1, static_cast<int64_t>(0.01 * sr_));
+    const double done = static_cast<double>(toneLen_ - toneLeft_);
+    const double env = std::min({1.0, (done + 1.0) / static_cast<double>(ramp),
+                                 static_cast<double>(toneLeft_) / static_cast<double>(ramp)});
+    const double v = 0.25 * env * std::sin(tonePhase_);
+    tonePhase_ += kTwoPi * 440.0 / sr_;
+    if (tonePhase_ >= kTwoPi) tonePhase_ -= kTwoPi;
+    --toneLeft_;
+    return v;
+}
+
+void Engine::mixToneOnly(float* left, float* right, int frames) noexcept {
     if (toneLeft_ <= 0) return;
-    const double inc = kTwoPi * 440.0 / sr_;
-    for (int j = 0; j < frames && toneLeft_ > 0; ++j, --toneLeft_) {
-        const double done = static_cast<double>(toneLen_ - toneLeft_);
-        const double env = std::min({1.0, (done + 1.0) / static_cast<double>(ramp),
-                                     static_cast<double>(toneLeft_) / static_cast<double>(ramp)});
-        const float v = static_cast<float>(0.25 * env * std::sin(tonePhase_));
-        tonePhase_ += inc;
-        if (tonePhase_ >= kTwoPi) tonePhase_ -= kTwoPi;
-        left[j] = std::clamp(left[j] + v, -1.0f, 1.0f);
-        right[j] = std::clamp(right[j] + v, -1.0f, 1.0f);
+    const double rel = detExp(-1.0 / (0.1 * sr_));
+    const bool bypass = bypass_.load(std::memory_order_relaxed);
+    for (int j = 0; j < frames && toneLeft_ > 0; ++j) {
+        const double t = nextTone();
+        const double yl = static_cast<double>(left[j]) + t, yr = static_cast<double>(right[j]) + t;
+        const double env = std::max(std::fabs(yl), std::fabs(yr));
+        limEnv_ = env > limEnv_ ? env : env + (limEnv_ - env) * rel;
+        const double gain = bypass ? 1.0 : (limEnv_ > kLimitCeiling ? kLimitCeiling / limEnv_ : 1.0);
+        left[j] = static_cast<float>(yl * gain);
+        right[j] = static_cast<float>(yr * gain);
     }
-    if (toneLeft_ <= 0) toneFlag_.store(false, std::memory_order_relaxed);
 }
 
 void Engine::releaseTouches() {
@@ -4606,6 +4634,7 @@ int Engine::processChunk(float* l, float* r, int maxFrames) noexcept {
                                      static_cast<uint32_t>(m))) {
         std::fill_n(l, m, 0.0f);
         std::fill_n(r, m, 0.0f);
+        mixToneOnly(l, r, m);  // the master stage, last in the graph, did not run
     }
     return m;
 }
@@ -5302,9 +5331,6 @@ void Engine::runMasterNode(const float* inL, const float* inR, float* outL, floa
             yl += v;
             yr += v;
         }
-        const double env = std::max(std::fabs(yl), std::fabs(yr));
-        limEnv_ = env > limEnv_ ? env : env + (limEnv_ - env) * rel;
-        const double gain = bypass ? 1.0 : (limEnv_ > kLimitCeiling ? kLimitCeiling / limEnv_ : 1.0);
         if (stopFade_ > 0) {
             fade = static_cast<double>(stopFade_) / (kStopSeconds * sr_);
             if (--stopFade_ == 0) {
@@ -5320,8 +5346,24 @@ void Engine::runMasterNode(const float* inL, const float* inR, float* outL, floa
             const int len = std::max(1, static_cast<int>(kStopSeconds * sr_));
             fade = 1.0 - static_cast<double>(playRampIn_--) / len;
         }
-        const float ol = static_cast<float>(yl * gain * fade);
-        const float orr = static_cast<float>(yr * gain * fade);
+        float ol, orr;
+        if (toneLeft_ > 0) {
+            // The test tone joins after the transport's fades (it sounds stopped too) and before the limiter, which
+            // follows the louder of the song's own level and the sum, so the sum stays under the ceiling.
+            const double t = nextTone();
+            const double sl = yl * fade + t, sr = yr * fade + t;
+            const double env = std::max({std::fabs(yl), std::fabs(yr), std::fabs(sl), std::fabs(sr)});
+            limEnv_ = env > limEnv_ ? env : env + (limEnv_ - env) * rel;
+            const double gain = bypass ? 1.0 : (limEnv_ > kLimitCeiling ? kLimitCeiling / limEnv_ : 1.0);
+            ol = static_cast<float>(sl * gain);
+            orr = static_cast<float>(sr * gain);
+        } else {
+            const double env = std::max(std::fabs(yl), std::fabs(yr));
+            limEnv_ = env > limEnv_ ? env : env + (limEnv_ - env) * rel;
+            const double gain = bypass ? 1.0 : (limEnv_ > kLimitCeiling ? kLimitCeiling / limEnv_ : 1.0);
+            ol = static_cast<float>(yl * gain * fade);
+            orr = static_cast<float>(yr * gain * fade);
+        }
         outL[frame] = ol;
         outR[frame] = orr;
         pl = std::max(pl, std::fabs(ol));
@@ -5434,6 +5476,7 @@ void Engine::process(float* left, float* right, int frames) noexcept {
     updateSolo();
     applyCommands();
     updateSolo();
+    takeToneRequest();
     if (overloadPending_) {
         overloadPending_ = false;
         pickOverloadVictim();
@@ -5452,6 +5495,7 @@ void Engine::process(float* left, float* right, int frames) noexcept {
             } else {
                 std::fill(left + i, left + i + m, 0.0f);
                 std::fill(right + i, right + i + m, 0.0f);
+                mixToneOnly(left + i, right + i, m);
             }
             for (int j = 0; j < done; ++j) {
                 if (countInAt_ % countInBeat_ == 0) startClick((countInAt_ / countInBeat_) % std::max(1, beatsPerBar_) == 0);
@@ -5472,6 +5516,7 @@ void Engine::process(float* left, float* right, int frames) noexcept {
             if (!previewing_) {
                 std::fill(left + i, left + frames, 0.0f);
                 std::fill(right + i, right + frames, 0.0f);
+                mixToneOnly(left + i, right + i, frames - i);
                 break;
             }
             // Stopped with previews: they play, the transport stays where it is.
@@ -5497,23 +5542,35 @@ void Engine::process(float* left, float* right, int frames) noexcept {
         i += m;
     }
     if (previewing_) updatePreviewing(frames);
-    mixTestTone(left, right, frames);
+    toneActive_.store(toneLeft_ > 0, std::memory_order_release);
     playingFlag_.store(playing_, std::memory_order_relaxed);
     posFlag_.store(g_, std::memory_order_relaxed);
 }
 
-void Engine::reportLoad(double load) noexcept {
-    loadAvg_ = 0.9 * loadAvg_ + 0.1 * load;
+// Tuned at 512-frame callbacks at 48 kHz (10.7 ms): the average kept 0.9 of itself a callback, 20 callbacks over
+// 0.85 shed a layer and 100 callbacks passed before the next. The same in seconds, for any callback size.
+void Engine::reportLoad(double load, int frames) noexcept {
+    constexpr double kTick = 512.0 / 48000.0;
+    constexpr double kOverSeconds = 20 * kTick, kCoolSeconds = 100 * kTick;
+    constexpr double kSlack = 1e-9;  // summed callback lengths land a hair under the product
+    if (frames <= 0) return;
+    const double dt = static_cast<double>(frames) / sr_;
+    if (dt != loadDt_) {  // the size rarely changes: pow only then
+        loadDt_ = dt;
+        loadKeep_ = std::pow(0.9, dt / kTick);
+    }
+    loadAvg_ = loadKeep_ * loadAvg_ + (1.0 - loadKeep_) * (std::isfinite(load) ? load : 0.0);
     cpu_.store(static_cast<float>(loadAvg_), std::memory_order_relaxed);
-    if (overCooldown_ > 0) --overCooldown_;
+    coolSeconds_ = std::max(0.0, coolSeconds_ - dt);
     if (loadAvg_ > 0.85) {
-        if (++overCount_ >= 20 && overCooldown_ == 0) {
+        overSeconds_ += dt;
+        if (overSeconds_ >= kOverSeconds - kSlack && coolSeconds_ <= kSlack) {
             overloadPending_ = true;
-            overCount_ = 0;
-            overCooldown_ = 100;
+            overSeconds_ = 0;
+            coolSeconds_ = kCoolSeconds;
         }
     } else {
-        overCount_ = 0;
+        overSeconds_ = 0;
     }
 }
 

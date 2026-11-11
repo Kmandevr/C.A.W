@@ -27,6 +27,10 @@ void registerSpace(ModuleRegistry& registry);      // builtin_effects_space.cpp:
 void registerSaturator(ModuleRegistry& registry);  // builtin_effects_saturator.cpp
 void registerKit(ModuleRegistry& registry);        // builtin_effects_kit.cpp: filter, phaser, flanger, utility
 void registerDucker(ModuleRegistry& registry);     // builtin_ducker.cpp: the ducker (#175)
+// fx-dynamics begin
+void registerFxDynamics(ModuleRegistry& registry);  // builtin_fx_dynamics.cpp: dynamics, multiband, de-esser (and the drive file's)
+void registerFxDrive(ModuleRegistry& registry);     // builtin_fx_drive.cpp: clipper, phase distortion
+// fx-dynamics end
 
 constexpr std::string_view kOffOn[] = {"Off", "On"};
 

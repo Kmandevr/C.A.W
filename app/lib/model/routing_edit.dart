@@ -131,6 +131,12 @@ extension RoutingEdit on AppState {
     if (use.id == 'org.caw.ducker' && sourceId != null && (use.params['mode'] ?? 2) == 2) {
       setNativeParamLive(layer, slot, 'mode', 0);
     }
+    // fx-creative: a ring mod takes the key as its carrier when given one, and goes back to a sine without.
+    if (use.id == 'org.caw.ringmod') {
+      final keyed = (use.params['source'] ?? 0).round() == 5;
+      if (sourceId != null && !keyed) setNativeParamLive(layer, slot, 'source', 5);
+      if (sourceId == null && keyed) setNativeParamLive(layer, slot, 'source', 0);
+    }
     editLayer(layer, (l) => use.key = sourceId == null ? null : ComponentKeyDoc(sourceId, pre: pre));
     return true;
   }
