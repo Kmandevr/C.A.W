@@ -38,6 +38,7 @@ import 'arrange/long_press_menu.dart';
 import 'arrange/mixer_card.dart';
 import 'follow_gate.dart';
 import 'frame/sections.dart';
+import 'presence.dart';
 import 'view_glide.dart';
 import 'feedback.dart' show GrabFeedback, GripMark, Pressable;
 import 'haptics.dart';
@@ -96,6 +97,8 @@ class _ArrangerScreenState extends State<ArrangerScreen> with TickerProviderStat
   /// The Files browser beside (or under) the tracks, so files can be dragged onto a track or into the FX stack
   /// without leaving Arrange (owner, 2026-11-10).
   bool _browser = false;
+  bool _browserWas = false, _browserLeaving = false;
+  Timer? _browserTimer;
 
   /// Time zoom: pixels per 16th step (× 0.85 at compact density).
   double zoom = 18.0;
@@ -228,6 +231,7 @@ class _ArrangerScreenState extends State<ArrangerScreen> with TickerProviderStat
   /// Bumped as rows change height under the finger or finish gliding, so the rows below take their new places as
   /// they are instead of gliding there again (TrackRowMotion's epoch).
   int _rowGen = 0;
+  final Map<String, bool> _lanesSeen = {};
   bool _settlePending = false;
 
   void _rowsSettled() {
@@ -477,6 +481,8 @@ class _ArrangerScreenState extends State<ArrangerScreen> with TickerProviderStat
     _keys.dispose();
     _marquee.dispose();
     _zoomAnim.dispose();
+    _panelOut.dispose();
+    _browserTimer?.cancel();
     _glide.dispose();
     _hScroll.removeListener(_onHScroll);
     if (widget.controller?._revealStart == _revealStart) widget.controller?._revealStart = null;
@@ -1067,21 +1073,52 @@ class _ArrangerScreenState extends State<ArrangerScreen> with TickerProviderStat
   @override
   Widget build(BuildContext context) {
     final s = widget.state;
+    // The track cards slide in over the arrangement and back out (owner, 2026-11-11); the arrangement isn't built
+    // while they cover it.
+    return Stack(children: [
+      if (!cardsView) Positioned.fill(child: _main(context)),
+      Positioned.fill(child: Presence(from: const Offset(0, 0.08), child: !cardsView ? null : ColoredBox(
+        color: Neon.bg,
+        child: Column(children: [
+          TrackCardsHeader(onBack: () => setState(() => cardsView = false)),
+          Expanded(child: TrackCardsScreen(state: s, onOpenModule: widget.onOpenModule ?? s.selectModule,
+              onBack: () => setState(() => cardsView = false))),
+        ])))),
+    ]);
+  }
+
+  /// The track whose focus panel is on its way out, and the one shown last (owner, 2026-11-11: the panel leaves as
+  /// it came).
+  LayerDoc? _closing, _shownFocus;
+  late final AnimationController _panelOut = AnimationController(vsync: this)
+    ..addStatusListener((st) {
+      if (st == AnimationStatus.dismissed && _closing != null && mounted) setState(() => _closing = null);
+    });
+
+  Widget _main(BuildContext context) {
+    final s = widget.state;
     final p = s.project;
-    if (cardsView) {
-      return Column(children: [
-        TrackCardsHeader(onBack: () => setState(() => cardsView = false)),
-        Expanded(child: TrackCardsScreen(state: s, onOpenModule: widget.onOpenModule ?? s.selectModule,
-            onBack: () => setState(() => cardsView = false))),
-      ]);
-    }
     final focused = p.layers.where((l) => l.id == _focusId && !l.isFolder).firstOrNull;
+    if (focused != null) {
+      _closing = null;
+      _shownFocus = focused;
+    } else if (_shownFocus != null) {
+      final d = EditMotion.scaled(Motion.of(context), EditMotionKind.panels, Motion.panel);
+      if (d != null && p.layers.contains(_shownFocus)) {
+        _closing = _shownFocus;
+        _panelOut.duration = d;
+        _panelOut.reverse(from: 1);
+      }
+      _shownFocus = null;
+    }
+    // The panel's track: the focused one, or the one whose panel is leaving.
+    final shownTrack = focused ?? _closing;
     final layout = focusLayoutFor(MediaQuery.sizeOf(context));
     final callbacks = _callbacks(_patterns);
     final focusable = _focusable;
     final fi = focused == null ? -1 : focusable.indexOf(focused);
     Widget panel(bool sheet) => FocusPanel(
-      state: s, layer: focused!, tab: _tab, bottomSheetStyle: sheet,
+      state: s, layer: shownTrack!, tab: _tab, bottomSheetStyle: sheet,
       onTab: (t) => setState(() => _tab = t),
       onClose: () { _panelHigh = false; _focus(null); },
       expanded: _panelHigh,
@@ -1093,8 +1130,14 @@ class _ArrangerScreenState extends State<ArrangerScreen> with TickerProviderStat
       onBrowse: () => setState(() => _browser = !_browser),
     );
 
+    // On its way out the panel slides and fades back where it came from, and takes no touches.
+    Widget leaving(Widget panel, Offset to) => _closing == null ? panel : IgnorePointer(child: FadeTransition(
+      opacity: CurvedAnimation(parent: _panelOut, curve: Curves.easeOutCubic),
+      child: Motion.of(context) != MotionLevel.full ? panel : SlideTransition(
+        position: Tween(begin: to, end: Offset.zero).animate(CurvedAnimation(parent: _panelOut, curve: Curves.easeOutCubic)),
+        child: panel)));
     final Widget body;
-    if (focused != null && layout == FocusLayout.pinned) {
+    if (shownTrack != null && layout == FocusLayout.pinned) {
       // Phone portrait: the track pinned at the top (still scrollable and editable), its panel below.
       // Opened higher, the panel slides up over the track and leaves only a sliver of it.
       body = LayoutBuilder(builder: (context, box) {
@@ -1104,26 +1147,38 @@ class _ArrangerScreenState extends State<ArrangerScreen> with TickerProviderStat
             height: _panelHigh ? 0 : pinnedH + 4,
             child: ClipRect(child: OverflowBox(alignment: Alignment.topCenter, minHeight: pinnedH + 4, maxHeight: pinnedH + 4,
               child: Column(children: [
-                SizedBox(height: pinnedH, child: _timeline(context, [focused], callbacks, pinned: true)),
+                SizedBox(height: pinnedH, child: _timeline(context, [shownTrack], callbacks, pinned: true)),
                 const SizedBox(height: 4),
               ])))),
-          Expanded(child: SlideIn(from: const Offset(0, 0.12), child: panel(true))),
+          Expanded(child: leaving(SlideIn(from: const Offset(0, 0.12), child: panel(true)), const Offset(0, 0.12))),
         ]);
       });
-    } else if (focused != null) {
+    } else if (shownTrack != null) {
       // Landscape and desktop: a right side panel; the tracks keep their full height.
       // Its size is FocusSidePane's (focus_panel.dart): resizable on a phone, two thirds by default.
       body = FocusSidePane(settings: s.settings, desktop: MediaQuery.sizeOf(context).width >= 900,
-        tracks: _arrangement(context, callbacks), panel: panel(false));
+        tracks: _arrangement(context, callbacks), panel: leaving(panel(false), const Offset(0.15, 0)));
     } else {
       body = _arrangement(context, callbacks);
     }
 
-    final withBrowser = !_browser ? body : LayoutBuilder(builder: (context, box) {
+    // The Files pane leaves as it came: its room stays while it slides out (owner, 2026-11-11).
+    if (_browserWas && !_browser) {
+      final d = EditMotion.scaled(Motion.of(context), EditMotionKind.panels, Motion.panel);
+      if (d != null) {
+        _browserLeaving = true;
+        _browserTimer?.cancel();
+        _browserTimer = Timer(d, () { if (mounted) setState(() => _browserLeaving = false); });
+      }
+    }
+    if (_browser) _browserLeaving = false;
+    _browserWas = _browser;
+    final paneRoom = _browser || _browserLeaving;
+    final withBrowser = LayoutBuilder(builder: (context, box) {
       // The same Files browser as Build's explorer; hold an item and drag it onto a track or the FX stack.
-      final pane = SlideIn(
+      final pane = Presence(
         from: box.maxWidth >= 600 ? const Offset(0.15, 0) : const Offset(0, 0.15),
-        child: Padding(padding: const EdgeInsets.all(4), child: GlassPanel(key: const ValueKey('arrange-browser'),
+        child: !_browser ? null : Padding(padding: const EdgeInsets.all(4), child: GlassPanel(key: const ValueKey('arrange-browser'),
           child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
             SizedBox(height: 30, child: Row(children: [
               const SizedBox(width: 10),
@@ -1140,12 +1195,12 @@ class _ArrangerScreenState extends State<ArrangerScreen> with TickerProviderStat
       if (box.maxWidth >= 600) {
         return Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
           Expanded(child: body),
-          SizedBox(width: math.min(300.0, box.maxWidth * 0.32), child: pane),
+          if (paneRoom) SizedBox(width: math.min(300.0, box.maxWidth * 0.32), child: pane),
         ]);
       }
       return Column(children: [
         Expanded(child: body),
-        SizedBox(height: math.max(160.0, box.maxHeight * 0.4), child: pane),
+        if (paneRoom) SizedBox(height: math.max(160.0, box.maxHeight * 0.4), child: pane),
       ]);
     });
 
@@ -1167,7 +1222,7 @@ class _ArrangerScreenState extends State<ArrangerScreen> with TickerProviderStat
           _toolbar(context, focused),
           AnimatedSize(duration: Motion.move(Motion.standard, Motion.of(context)), curve: Curves.easeOutCubic,
             alignment: Alignment.topCenter,
-            child: zoomBar ? _zoomBar() : const SizedBox(width: double.infinity)),
+            child: Presence(from: const Offset(0, -0.3), child: zoomBar ? _zoomBar() : null)),
         ])),
         if (settings) _settingsPanel(),
         Expanded(child: _withDockedClipBar(withBrowser, focused)),
@@ -1403,6 +1458,21 @@ class _ArrangerScreenState extends State<ArrangerScreen> with TickerProviderStat
             minHeight: room, maxHeight: room, child: build(room))));
         });
     }
+    // A track's automation lanes open and close by growing and shrinking under it, header and lanes together
+    // (owner, 2026-11-11); once they have, the rows below take their places as they are.
+    final lanesD = pinned ? null : EditMotion.of(context, EditMotionKind.lengths);
+    Widget lanesReveal(LayerDoc l, Widget? lanes) {
+      final open = lanes != null;
+      if (_lanesSeen[l.id] != null && _lanesSeen[l.id] != open && lanesD != null) {
+        Timer(lanesD + const Duration(milliseconds: 20), _rowsSettled);
+      }
+      _lanesSeen[l.id] = open;
+      return AnimatedSwitcher(duration: lanesD ?? Duration.zero,
+        switchInCurve: EditMotion.curve, switchOutCurve: EditMotion.exitCurve,
+        transitionBuilder: (child, a) => SizeTransition(sizeFactor: a, alignment: Alignment.topCenter,
+            child: FadeTransition(opacity: a, child: child)),
+        child: lanes ?? const SizedBox(width: double.infinity));
+    }
     // A thin row keeps its automation lanes closed.
     bool lanesOpen(LayerDoc l) => !pinned && l.showLanes && canHaveLanes(l) && _rowCollapse(l) != TrackCollapse.thin;
     final rows = layers.fold<double>(0, (h, l) => h + rowH(l) + (pinned ? 0 : (lanesOpen(l) ? lanesHeight(s, l) : 0) + l.spaceBelow) + gap);
@@ -1481,9 +1551,8 @@ class _ArrangerScreenState extends State<ArrangerScreen> with TickerProviderStat
             onResize: pinned ? null : (dy) => _rowResize(layer, dy),
             onResizeEnd: _rowResizeEnd)),
           // The track's automation lanes, open under it (REAPER's envelope lanes, UG 18.16).
-          if (lanesOpen(layer))
-            TrackLaneHeaders(key: ValueKey('lane-headers-${layer.id}'), state: s, layer: layer,
-              indent: folderIndent(s.folderDepth(layer))),
+          if (!pinned) lanesReveal(layer, lanesOpen(layer) ? TrackLaneHeaders(key: ValueKey('lane-headers-${layer.id}'),
+              state: s, layer: layer, indent: folderIndent(s.folderDepth(layer))) : null),
           if (layer.spaceBelow > 0 && !pinned) _SpacerHeader(state: s, layer: layer),
           SizedBox(height: gap),
         ]),
@@ -1520,8 +1589,8 @@ class _ArrangerScreenState extends State<ArrangerScreen> with TickerProviderStat
               glideRow(layer, (h) => _TimelineLane(key: drag?.laneKey(layer.id), state: s, layer: layer, width: width,
                 stepW: stepW, trackHeight: h, selectedIds: s.selectedClipIds, callbacks: callbacks, drag: drag,
                 thin: !pinned && _rowCollapse(layer) == TrackCollapse.thin)),
-              if (lanesOpen(layer))
-                TrackLaneRows(state: s, layer: layer, stepW: stepW, width: width),
+              if (!pinned) lanesReveal(layer, lanesOpen(layer)
+                  ? TrackLaneRows(state: s, layer: layer, stepW: stepW, width: width) : null),
               // A spacer and the gap leave the timeline empty too, so lanes stay level with their headers.
               if (layer.spaceBelow > 0 && !pinned) SizedBox(height: layer.spaceBelow),
               SizedBox(height: gap),
@@ -1571,11 +1640,12 @@ class _ArrangerScreenState extends State<ArrangerScreen> with TickerProviderStat
     final tracks = s.project.layers.isEmpty
         ? _EmptyArrangement(onAdd: () { Haptics.tap(); s.addLayer(); }, onBrowse: () => setState(() => _browser = true))
         : _timeline(context, s.visibleLayers, callbacks);
-    if (!mixerCard) return tracks;
+    // The mixer card slides up over the tracks and back down (owner, 2026-11-11).
     return LayoutBuilder(builder: (context, box) => Stack(children: [
       Positioned.fill(child: tracks),
       Positioned(left: 6, right: 6, bottom: 6, height: math.min(box.maxHeight - 12, math.max(320.0, box.maxHeight * 0.86)),
-        child: SlideIn(from: const Offset(0, 0.15), child: MixerCard(state: s, onClose: () => setState(() => mixerCard = false)))),
+        child: Presence(from: const Offset(0, 0.15), child: !mixerCard ? null
+            : MixerCard(state: s, onClose: () => setState(() => mixerCard = false)))),
     ]));
   }
 }

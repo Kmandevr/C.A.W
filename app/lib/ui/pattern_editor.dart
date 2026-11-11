@@ -157,9 +157,15 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
     final count = appear.length + was.length + gone.length;
     if (count == 0 || count > 2000) return; // a huge edit just lands
     final d1 = notesD ?? Duration.zero, d2 = was.isEmpty ? Duration.zero : (lenD ?? Duration.zero);
-    _editCtl.duration = d1 > d2 ? d1 : d2;
+    // Notes that only moved (a nudge, a paste in place, a quantize, a drag's last snap) slide there quickly, in one
+    // short glide the painter draws (owner, 2026-11-11).
+    final lens = {for (final n in to.notes) n.id: n.len.toDouble()};
+    final moveOnly = appear.isEmpty && gone.isEmpty && was.entries.every((e) => e.value.len == lens[e.key]);
+    final nudge = moveOnly ? EditMotion.nudge(context, EditMotionKind.notes) : null;
+    if (moveOnly && nudge == null) return;
+    _editCtl.duration = nudge ?? (d1 > d2 ? d1 : d2);
     _motion = _RollMotion(_editCtl, appear: appear, was: was, gone: gone, fade: EditMotion.fadeOnly(context),
-        curve: EditMotion.curve);
+        curve: nudge != null ? EditMotion.nudgeCurve : EditMotion.curve);
     _editCtl.forward(from: 0);
   }
 

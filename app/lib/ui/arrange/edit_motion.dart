@@ -28,6 +28,7 @@ class ClipSlot extends StatefulWidget {
 
 class _ClipSlotState extends State<ClipSlot> with SingleTickerProviderStateMixin {
   Duration _glide = Duration.zero;
+  Curve _curve = EditMotion.curve;
   AnimationController? _in;
 
   @override
@@ -49,7 +50,14 @@ class _ClipSlotState extends State<ClipSlot> with SingleTickerProviderStateMixin
       return;
     }
     final kind = old.rect.topLeft != widget.rect.topLeft ? EditMotionKind.clips : EditMotionKind.lengths;
+    // A move alone (the same size somewhere else) is a short, snappy slide (owner, 2026-11-11).
+    if (old.rect.size == widget.rect.size) {
+      _glide = EditMotion.nudge(context, kind) ?? Duration.zero;
+      _curve = EditMotion.nudgeCurve;
+      return;
+    }
     _glide = EditMotion.fadeOnly(context) ? Duration.zero : EditMotion.of(context, kind) ?? Duration.zero;
+    _curve = EditMotion.curve;
   }
 
   @override
@@ -70,7 +78,7 @@ class _ClipSlotState extends State<ClipSlot> with SingleTickerProviderStateMixin
           ? child
           : ScaleTransition(scale: Tween(begin: 0.82, end: 1.0).animate(t), alignment: Alignment.centerLeft, child: child));
     }
-    return AnimatedPositioned.fromRect(rect: widget.rect, duration: _glide, curve: EditMotion.curve, child: child);
+    return AnimatedPositioned.fromRect(rect: widget.rect, duration: _glide, curve: _curve, child: child);
   }
 }
 

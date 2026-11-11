@@ -273,6 +273,24 @@ class EditMotion {
     return feel == MotionFeel.playful ? const Duration(milliseconds: 260) : Motion.paced(const Duration(milliseconds: 160));
   }
 
+  /// A note or clip moved by an edit (keys, a menu, a nudge, a paste in place, a quantize, a drag's last snap) slides
+  /// there in this, before the theme's pace: shorter than other edits, so it feels snappy (owner, 2026-11-11).
+  static const nudgeBase = Duration(milliseconds: 105);
+
+  /// How long a move of [kind] slides under [context], or null when it doesn't (motion Off or Reduced, the kind off).
+  static Duration? nudge(BuildContext context, EditMotionKind kind) {
+    final level = Motion.of(context);
+    if (level != MotionLevel.full || !kinds.contains(kind)) return null;
+    return Motion.paced(nudgeBase);
+  }
+
+  /// A move's curve: a fast ease-out in the theme's curve family.
+  static Curve get nudgeCurve => switch (feel.curve) {
+        MotionCurve.bouncy => playfulCurve,
+        MotionCurve.linear => Curves.linear,
+        _ => Curves.easeOutQuart,
+      };
+
   /// True when only a fade may run (Reduced motion): no scaling, sliding or springs.
   static bool fadeOnly(BuildContext context) => Motion.of(context) == MotionLevel.reduced;
 
