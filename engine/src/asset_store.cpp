@@ -2,6 +2,7 @@
 #include "asset_store.h"
 
 #include <algorithm>
+#include "caw/detmath.hpp"
 #include <cmath>
 #include <cstdio>
 #include <filesystem>
@@ -49,7 +50,7 @@ std::vector<float> resampleChannel(const float* in, int64_t frames, double from,
         const double t = static_cast<double>(k) / kPhases;
         if (t >= half) { table[static_cast<size_t>(k)] = 0; continue; }
         const double x = 3.14159265358979323846 * fc * t;
-        const double sinc = t == 0 ? 1.0 : std::sin(x) / x;
+        const double sinc = t == 0 ? 1.0 : detSin(x) / x;
         const double u = t / half;
         table[static_cast<size_t>(k)] = fc * sinc * besselI0(kBeta * std::sqrt(std::max(0.0, 1.0 - u * u))) / i0b;
     }

@@ -2,6 +2,7 @@
 #include "audio_clips.h"
 
 #include <algorithm>
+#include "caw/detmath.hpp"
 #include <cmath>
 #include <cstdio>
 
@@ -234,8 +235,8 @@ double curve(FadeCurve c, double u) noexcept {
     u = u < 0 ? 0 : (u > 1 ? 1 : u);
     switch (c) {
         case FadeCurve::Linear: return u;
-        case FadeCurve::EqualPower: return std::sin(u * 1.5707963267948966);
-        case FadeCurve::SCurve: return 0.5 - 0.5 * std::cos(u * 3.14159265358979323846);
+        case FadeCurve::EqualPower: return detSin(u * 1.5707963267948966);
+        case FadeCurve::SCurve: return 0.5 - 0.5 * detCos(u * 3.14159265358979323846);
         case FadeCurve::Fast: return 1.0 - (1.0 - u) * (1.0 - u);
         case FadeCurve::Slow: return u * u;
     }
@@ -303,7 +304,7 @@ public:
                 if (cc.src.loopEnd <= cc.src.loopStart) cc.src.loop = false;
             }
             cc.offsetFrames = std::floor(c.offsetSeconds * rate + 0.5);
-            cc.pitchRatio = std::pow(2.0, c.pitch / 12.0);
+            cc.pitchRatio = detPow(2.0, c.pitch / 12.0);
             cc.fadeIn = static_cast<int64_t>(std::llround(c.fadeInSeconds * rate));
             cc.fadeOut = static_cast<int64_t>(std::llround(c.fadeOutSeconds * rate));
             t->maxLength = std::max(t->maxLength, c.lengthSteps);

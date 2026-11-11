@@ -2,6 +2,7 @@
 #include "builtin_sampler.h"
 
 #include <algorithm>
+#include "caw/detmath.hpp"
 #include <array>
 #include <cmath>
 #include <cstdio>
@@ -358,7 +359,7 @@ protected:
         std::fill_n(right, frames, 0.0f);
         const Program* prog = program_.current();
         if (!prog) return;
-        const double gain = std::pow(10.0, p_[kGain] / 20.0);
+        const double gain = detPow(10.0, p_[kGain] / 20.0);
         const int filter = static_cast<int>(p_[kFilter]);
         for (Voice& v : voices_) {
             if (!v.active) continue;
@@ -369,7 +370,7 @@ protected:
             v.fenv.set(p_[kFAttack], p_[kFDecay], p_[kFSustain], p_[kFRelease], sr_);
             const double tuneCents = (v.pitch - z.z.root) * z.z.keytrack + z.z.tune + 100.0 * z.z.transpose +
                                      p_[kTune] + 100.0 * p_[kTranspose];
-            const double inc = std::pow(2.0, tuneCents / 1200.0);
+            const double inc = detPow(2.0, tuneCents / 1200.0);
             const bool looping = z.loopEnd > z.loopStart &&
                 (z.z.loopMode == LoopMode::Continuous || (z.z.loopMode == LoopMode::Sustain && v.held));
             const float* l = a.channel(0);
@@ -384,7 +385,7 @@ protected:
             for (uint32_t i = 0; i < frames; ++i) {
                 if ((i & 15) == 0 && filter > 0) {  // the filter's cutoff, every 16 frames
                     const double env = v.fenv.level();
-                    double fc = p_[kCutoff] * std::pow(2.0, p_[kFilterEnv] * env + p_[kFilterKey] * (v.pitch - 60.0) / 12.0);
+                    double fc = p_[kCutoff] * detPow(2.0, p_[kFilterEnv] * env + p_[kFilterKey] * (v.pitch - 60.0) / 12.0);
                     fc = std::clamp(fc, 20.0, 0.45 * sr_);
                     v.svfL.set(fc, p_[kResonance], sr_);
                     v.svfR.set(fc, p_[kResonance], sr_);
@@ -532,7 +533,7 @@ private:
                     lz.crossfade = std::min({z.loopCrossfade * sr_, lz.loopStart, lz.loopEnd - lz.loopStart});
                 }
             }
-            const double g = std::pow(10.0, z.volume / 20.0);
+            const double g = detPow(10.0, z.volume / 20.0);
             const double pan = z.pan / 100.0;
             lz.gainL = g * std::min(1.0, 1.0 - pan);
             lz.gainR = g * std::min(1.0, 1.0 + pan);

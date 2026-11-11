@@ -691,3 +691,51 @@ TEST(latency_ping_finds_a_simulated_loopback) {
     CHECK(res.find("\"frames\":733") != std::string::npos);
     CHECK_EQ(e.liveAudio().latency(), int64_t{733});
 }
+
+// ---------------------------------------------------------------- golden
+
+TEST(audio_clips_and_the_sampler_match_their_golden_render) {
+    // Every clip mode (direct with fades, musical WSOLA with pitch and a loop, reversed varispeed) and the sampler
+    // (a looped zone, a filter, a chord) through the master, 1.5 s in 64-frame blocks. Change the hash only for an
+    // intended sound change (the failure prints the new one).
+    constexpr uint64_t kGolden = 0x6dde60ef58cef603ull;  // recorded 2026-11-11, GCC 13
+    const std::string dir = tempDir("golden");
+    const std::string p = writeWav(dir + "/n.wav", 44100, 2, 44100, [](int64_t i, int c) {
+        return static_cast<float>(0.4 * std::sin(2 * 3.14159265358979 * (220.0 + 110 * c) * i / 44100.0) + 0.2 * noiseAt(i, c));
+    }, false);
+    const std::string zones = "{\"zones\":[{\"path\":\"" + jsonEscape(p) +
+                              "\",\"pitch_keycenter\":57,\"loop_mode\":\"loop_sustain\",\"loop_start\":1000,\"loop_end\":20000,"
+                              "\"loop_crossfade\":0.01,\"pan\":-30}]}";
+    const std::string json =
+        "{\"caw_project\":1,\"bpm\":120,\"loop_bars\":1,\"master\":0.5,\"assets\":[{\"id\":\"a\",\"path\":\"" + jsonEscape(p) +
+        "\",\"bpm\":100}],\"modules\":[{\"id\":\"pt\",\"source\":\"---\\nkind: pattern\\nlength: 16\\n---\\n0 C4,E4,G4 3 1\\n4 A3 6 0.7\\n\"}],"
+        "\"layers\":[{\"id\":\"d\",\"name\":\"D\",\"audio_clips\":["
+        "{\"id\":\"1\",\"asset\":\"a\",\"start_steps\":0,\"length_steps\":5,\"fade_in_seconds\":0.01,\"fade_out_seconds\":0.1,\"fade_out_curve\":\"s_curve\"},"
+        "{\"id\":\"2\",\"asset\":\"a\",\"start_steps\":3.3,\"length_steps\":6,\"mode\":\"musical\",\"pitch\":2,\"loop\":true,\"gain\":0.7},"
+        "{\"id\":\"3\",\"asset\":\"a\",\"start_steps\":7,\"length_steps\":9,\"stretch\":\"varispeed\",\"pitch\":-7,\"reverse\":true}]},"
+        "{\"id\":\"s\",\"name\":\"S\",\"pattern\":\"pt\",\"instrument\":{\"id\":\"org.caw.sampler\",\"params\":{\"filter\":1,\"cutoff\":1200,"
+        "\"filter_env\":2,\"release\":0.3},\"state\":\"" + b64(zones) + "\"}}]}";
+    Engine e(48000);
+    CHECK(e.setProjectJson(json).find("\"ok\":true") != std::string::npos);
+    e.play();
+    uint64_t h = 1469598103934665603ull;
+    float l[64], r[64], peak = 0;
+    for (int k = 0; k < 48000 * 3 / 2 / 64; ++k) {
+        e.process(l, r, 64);
+        for (int i = 0; i < 64; ++i) {
+            peak = std::max(peak, std::fabs(l[i]));
+            for (float v : {l[i], r[i]}) {
+                uint32_t bits;
+                std::memcpy(&bits, &v, 4);
+                h = (h ^ bits) * 1099511628211ull;
+            }
+        }
+    }
+    CHECK(peak > 0.05f);
+    if (h != kGolden) {
+        char buf[64];
+        std::snprintf(buf, sizeof buf, "golden 0x%016llxull", static_cast<unsigned long long>(h));
+        cawtest::fail(__FILE__, __LINE__, buf);
+    }
+    std::filesystem::remove_all(dir);
+}

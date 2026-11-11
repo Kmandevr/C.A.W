@@ -2,6 +2,7 @@
 #include "time_stretch.h"
 
 #include <algorithm>
+#include "caw/detmath.hpp"
 #include <cmath>
 
 namespace caw {
@@ -30,7 +31,7 @@ bool ClipReader::prepare(double sampleRate) {
     if (!window_ || !accL_ || !accR_ || !scratch_ || !natural_ || !yl_ || !yr_) return false;
     for (int i = 0; i < n_; ++i)  // periodic Hann: shifted by a hop, two sum to 1
         window_[static_cast<size_t>(i)] =
-            static_cast<float>(0.5 - 0.5 * std::cos(2.0 * 3.14159265358979323846 * i / n_));
+            static_cast<float>(0.5 - 0.5 * detCos(2.0 * 3.14159265358979323846 * i / n_));
     return true;
 }
 
