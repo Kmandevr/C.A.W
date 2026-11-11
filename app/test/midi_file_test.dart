@@ -1,14 +1,17 @@
 // Tests Standard MIDI File import and export: hand-built files (running status, velocity-0 note-offs, overlaps,
 // sysex and meta skipping, bend ranges, MPE), malformed and truncated input failing closed, round trips through
-// pattern clips, placing imported clips in a project, and a clip's automation lanes as CCs.
+// pattern clips, placing imported clips in a project, a clip's automation lanes as CCs, and which CC a learned
+// knob's lane takes.
 import 'dart:math' as math;
 import 'dart:typed_data';
 
+import 'package:caw/engine/component_info.dart';
 import 'package:caw/model/app_state.dart';
 import 'package:caw/model/arrange_fx.dart';
 import 'package:caw/model/files_catalog.dart';
 import 'package:caw/model/midi_clips.dart';
 import 'package:caw/model/midi_file.dart';
+import 'package:caw/model/midi_mapping.dart';
 import 'package:caw/model/pattern_doc.dart';
 import 'package:caw/model/project.dart';
 import 'package:caw/ui/frame/sections.dart';
@@ -439,6 +442,57 @@ void main() {
       p.layers.single.automation.clear();
       p.automation.clear();
       expect(readMidiFile(clipToMidi(p, p.layers.single.clips.single)!).tracks.last.controls, isEmpty);
+    });
+  });
+
+  group('lanes on learned CCs', () {
+    ProjectAutomationLaneDoc lane(String type, String target, {int? component, String layer = 'L1'}) =>
+        ProjectAutomationLaneDoc(targetType: type, target: target, layerId: layer, component: component,
+            points: [AutomationPointDoc(step: 0, value: 0.5)]);
+
+    test('a learned knob keeps its CC and channel; the others take the free pool numbers in order', () {
+      final lanes = [
+        lane('instrument', 'cutoff'),
+        lane('component', 'mix', component: 1),
+        lane('instrument', 'vibrato'),
+        lane('component', 'mix', component: 0),
+      ];
+      const mappings = [
+        MidiCcMapping(channel: 0, cc: 20, layerId: 'L1', slot: 1, paramId: 'mix'), // takes the pool's first number
+        MidiCcMapping(channel: 0, cc: 1, layerId: 'L1', slot: -1, paramId: 'vibrato'), // the mod wheel
+        MidiCcMapping(channel: 3, cc: 74, layerId: 'L2', slot: -1, paramId: 'cutoff'), // another track's knob
+      ];
+      final ccs = automationLaneCcs(mappings, lanes, const [20, 21, 22]);
+      expect([for (final c in ccs) (c?.cc, c?.channel)], [(21, 0), (20, 0), (1, 0), (22, 0)]);
+      expect(ccs[1]!.learned, mappings[0]);
+      expect(ccs[0]!.learned, isNull);
+      // A learned CC on another channel doesn't take the pool's number on channel 0.
+      final other = automationLaneCcs(
+          const [MidiCcMapping(channel: 5, cc: 20, layerId: 'L1', slot: -1, paramId: 'vibrato')],
+          [lane('instrument', 'cutoff'), lane('instrument', 'vibrato')], const [20, 21]);
+      expect([for (final c in other) (c?.cc, c?.channel)], [(20, 0), (20, 5)]);
+    });
+
+    test('two lanes learned on one CC: the first keeps it; past the pool, lanes are left out', () {
+      const mappings = [
+        MidiCcMapping(channel: 0, cc: 1, layerId: 'L1', slot: -1, paramId: 'a'),
+        MidiCcMapping(channel: 0, cc: 1, layerId: 'L1', slot: -1, paramId: 'b'),
+      ];
+      final ccs = automationLaneCcs(mappings, [lane('instrument', 'a'), lane('instrument', 'b'), lane('instrument', 'c')],
+          const [20]);
+      expect([for (final c in ccs) c?.cc], [1, 20, null]);
+      // Globals and mix lanes have no knob to learn.
+      expect(automationLaneCcs(mappings, [ProjectAutomationLaneDoc(targetType: 'global', target: 'a')], const []), [null]);
+    });
+
+    test('a learned lane\'s values go out on the knob\'s travel, the inverse of what the CC moves', () {
+      const linear = ComponentParameterInfo(id: 'mix', defaultValue: 0, min: 0, max: 1);
+      const cutoff = ComponentParameterInfo(id: 'cutoff', defaultValue: 1000, min: 20, max: 20000, exponential: true);
+      expect(MidiCcMapping.ccFor(linear, 0.5), 64);
+      expect(MidiCcMapping.ccFor(linear, 7), 127, reason: 'clamped to the range');
+      for (final v in const [0, 1, 31, 64, 100, 127]) {
+        expect(MidiCcMapping.ccFor(cutoff, MidiCcMapping.valueFor(cutoff, v)), v, reason: 'CC $v round trips');
+      }
     });
   });
 }

@@ -49,6 +49,9 @@ Future<SectionController> _pump(WidgetTester tester, AppState s, Size size) asyn
 
 void main() {
   testWidgets('tap selects and shows the inspector; double-tap opens in Build', (tester) async {
+    // A double tap is timed by the wall clock (DateTime.now, which the fake clock doesn't move): the selecting tap is
+    // kept apart from the double tap by real time past the timeout, and the double tap's two taps go back to back.
+    Future<void> apart() => tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 400)));
     final s = _state();
     final sections = await _pump(tester, s, const Size(1200, 800));
     expect(find.text('Effects & instruments'), findsWidgets); // the tree, in landscape
@@ -65,9 +68,8 @@ void main() {
     expect(sections.current, Section.arrange);
     expect(sections.buildTabs, isEmpty);
 
-    await tester.pump(const Duration(milliseconds: 500));
+    await apart();
     await tester.tap(fuzz);
-    await tester.pump(const Duration(milliseconds: 50));
     await tester.tap(fuzz);
     await tester.pump();
     final cpp = s.project.cppComponents.single;
@@ -84,9 +86,8 @@ void main() {
     await tester.tap(riff);
     await tester.pump();
     expect(find.text('Used on Bass track'), findsOneWidget);
-    await tester.pump(const Duration(milliseconds: 500));
+    await apart();
     await tester.tap(riff);
-    await tester.pump(const Duration(milliseconds: 50));
     await tester.tap(riff);
     await tester.pump();
     expect(sections.activeBuildTab, const BuildTab(BuildTabKind.pattern, 'riff'));

@@ -1,22 +1,29 @@
-// Plug-in export (#162): packs a project C++ component as a CMake project that builds a CLAP plug-in with the SDK's caw_add_clap_plugin, plus a GitHub Actions workflow for the desktop targets, as a .zip.
+// Plug-in export (#162): packs a project C++ component as a CMake project that builds a CLAP or VST3 plug-in with the SDK's caw_add_clap_plugin or caw_add_vst3_plugin, plus a GitHub Actions workflow for the desktop targets, as a .zip.
 import 'dart:convert';
 import 'dart:typed_data';
 
 import 'cpp_component.dart';
 
-/// The plug-in formats. Only those the engine's SDK can build are [available].
+/// The plug-in formats the SDK builds: CLAP (`caw_add_clap_plugin`, a single file) and VST3 (`caw_add_vst3_plugin`,
+/// a `.vst3` bundle folder), both for Linux and Windows (docs/native-module-sdk.md).
 enum PluginFormat {
-  clap('CLAP', '.clap'),
-  // Hook for VST3: the SDK has no VST3 wrapper yet (its licence is to be checked first, #162).
-  vst3('VST3', '.vst3');
+  clap('CLAP', '.clap', 'caw_add_clap_plugin', 'clap', 'CLAP', 'FETCHCONTENT_SOURCE_DIR_CAW_CLAP'),
+  vst3('VST3', '.vst3', 'caw_add_vst3_plugin', 'vst3', 'VST3', 'FETCHCONTENT_SOURCE_DIR_CAW_VST3');
 
-  const PluginFormat(this.label, this.extension);
-  final String label, extension;
+  const PluginFormat(this.label, this.extension, this.cmakeFunction, this.targetSuffix, this.headers, this.offlineVariable);
+  final String label, extension, cmakeFunction, targetSuffix, headers, offlineVariable;
 
-  bool get available => this == PluginFormat.clap;
+  bool get available => true;
 
   /// Why a format can't be picked, or null.
   String? get unavailableReason => available ? null : 'The engine has no $label wrapper yet.';
+
+  /// The plug-in folders a desktop DAW scans, for the README and the screen: CLAP's from the CLAP headers'
+  /// `clap/entry.h`, VST3's from Steinberg's "Plug-in Locations" page (read 2026-11-11).
+  List<(String, String)> get folders => switch (this) {
+        clap => const [('Windows', r'C:\Program Files\Common Files\CLAP'), ('Linux', '~/.clap')],
+        vst3 => const [('Windows', r'C:\Program Files\Common Files\VST3'), ('Linux', '~/.vst3')],
+      };
 }
 
 /// The desktop targets. A phone can't build or host desktop plug-ins, so the package's workflow builds them on
@@ -68,7 +75,9 @@ Map<String, String> pluginPackageFiles(CppComponentDoc component, PluginExportSe
   final top = '${s.fileName}-plugin';
   final targets = [for (final t in PluginTarget.values) if (s.targets.contains(t) && t.available) t];
   final target = 'caw_component_${s.fileName.replaceAll('-', '_')}';
-  final cmake = '''# Builds "${s.name}" as a CLAP plug-in with the C.A.W SDK (exported from C.A.W).
+  final f = s.format;
+  final file = '${s.fileName}${f.extension}';
+  final cmake = '''# Builds "${s.name}" as a ${f.label} plug-in with the C.A.W SDK (exported from C.A.W).
 cmake_minimum_required(VERSION 3.22)
 project(${target}_plugin LANGUAGES CXX)
 
@@ -77,11 +86,11 @@ find_package(CAW 1.0 CONFIG REQUIRED)
 # The component library C.A.W loads, from the component's own manifest and sources.
 caw_add_component(MANIFEST "\${CMAKE_CURRENT_SOURCE_DIR}/component/caw-component.json" TARGET $target)
 
-# The same code as a CLAP plug-in: ${s.fileName}.clap next to the library (configuring fetches the CLAP headers).
-caw_add_clap_plugin(TARGET ${target}_clap COMPONENT $target
+# The same code as a ${f.label} plug-in: $file next to the library (configuring fetches the ${f.headers} headers).
+${f.cmakeFunction}(TARGET ${target}_${f.targetSuffix} COMPONENT $target
   OUTPUT_NAME "${s.fileName}" VENDOR "${s.vendor.trim()}" VERSION "${s.version.trim()}"${s.url.trim().isEmpty ? '' : ' URL "${s.url.trim()}"'})
 ''';
-  final workflow = '''# Builds the plug-in for each desktop target on GitHub's runners and keeps the .clap files as run artifacts.
+  final workflow = '''# Builds the plug-in for each desktop target on GitHub's runners and keeps the $file ${f == PluginFormat.vst3 ? 'bundle' : 'file'} as run artifacts.
 name: Build plug-in
 on:
   push:
@@ -117,20 +126,20 @@ ${[for (final t in targets) '          - { os: ${t.runner}, name: ${t.slug} }'].
       - uses: actions/upload-artifact@v7
         with:
           name: ${s.fileName}-\${{ matrix.name }}
-          path: build/artifacts/**/*.clap
+          path: ${f == PluginFormat.vst3 ? 'build/artifacts/$file' : 'build/artifacts/**/*.clap'}
           if-no-files-found: error
 ''';
   final deps = component.dependencies.entries.map((e) => '- ${e.key} ${e.value}').join('\n');
   final readme = '''# ${s.name}
 
-A CLAP plug-in made from the C.A.W C++ component `${component.componentId}`, by ${s.vendor.trim()}, version ${s.version.trim()}.
+A ${f.label} plug-in made from the C.A.W C++ component `${component.componentId}`, by ${s.vendor.trim()}, version ${s.version.trim()}.
 Targets: ${targets.map((t) => t.label).join(', ')}.
 
 ## Build it on GitHub (no PC needed)
 
 1. Create a new repository on GitHub and upload everything in this folder to it, keeping the `.github` folder.
 2. The **Build plug-in** workflow runs on every push (or from the Actions tab: Run workflow).
-3. When the run finishes, download `${s.fileName}-<target>` from the run's Artifacts and unzip it: inside is `${s.fileName}.clap`.
+3. When the run finishes, download `${s.fileName}-<target>` from the run's Artifacts and unzip it: inside is `$file`${f == PluginFormat.vst3 ? ' (a folder: the VST3 bundle)' : ''}.
 
 The workflow builds the C.A.W SDK from `$cawRepository` at `$cawDefaultRef`. For a build that never changes, run it with
 `caw_ref` set to a fixed commit.
@@ -143,20 +152,7 @@ Install the C.A.W SDK (`cmake -S engine -B sdk-build -DCAW_AUDIO=OFF -DCAW_TOOLS
     cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=<sdk>
     cmake --build build --config Release
 
-Configuring downloads the CLAP headers (MIT licence) from GitHub; offline, set `FETCHCONTENT_SOURCE_DIR_CAW_CLAP` to a
-checkout of free-audio/clap.
-
-## Load it in a DAW
-
-Copy `${s.fileName}.clap` into a CLAP folder, then let your DAW rescan its plug-ins. The standard folders (from the CLAP
-headers, `clap/entry.h`):
-
-- Windows: `%COMMONPROGRAMFILES%\\CLAP` (usually `C:\\Program Files\\Common Files\\CLAP`) or
-  `%LOCALAPPDATA%\\Programs\\Common\\CLAP`
-- Linux: `~/.clap` or `/usr/lib/clap`
-
-Hosts also search the folders in a `CLAP_PATH` environment variable. The plug-in shows under the component's own
-name with the host's generic parameter controls (there is no custom editor window). macOS isn't built yet.
+${f == PluginFormat.vst3 ? vst3Readme(file) : clapReadme(file)}
 ${deps.isEmpty ? '' : '\n## Dependencies\n\nThe component lists these pinned dependencies; the package does not fetch them:\n\n$deps\n'}''';
   return {
     '$top/CMakeLists.txt': cmake,
@@ -166,6 +162,37 @@ ${deps.isEmpty ? '' : '\n## Dependencies\n\nThe component lists these pinned dep
       if (CppComponentDoc.isSafeRelativePath(e.key)) '$top/component/${e.key}': e.value,
   };
 }
+
+/// The README's build-offline and install part for a `.clap` ([file]).
+String clapReadme(String file) => '''Configuring downloads the CLAP headers (MIT licence) from GitHub; offline, set `FETCHCONTENT_SOURCE_DIR_CAW_CLAP` to a
+checkout of free-audio/clap.
+
+## Load it in a DAW
+
+Copy `$file` into a CLAP folder, then let your DAW rescan its plug-ins. The standard folders (from the CLAP
+headers, `clap/entry.h`):
+
+- Windows: `%COMMONPROGRAMFILES%\\CLAP` (usually `C:\\Program Files\\Common Files\\CLAP`) or
+  `%LOCALAPPDATA%\\Programs\\Common\\CLAP`
+- Linux: `~/.clap` or `/usr/lib/clap`
+
+Hosts also search the folders in a `CLAP_PATH` environment variable. The plug-in shows under the component's own
+name with the host's generic parameter controls (there is no custom editor window). macOS isn't built yet.''';
+
+/// The README's build-offline and install part for a `.vst3` bundle ([file]).
+String vst3Readme(String file) => '''Configuring downloads the VST3 interface headers (steinbergmedia/vst3_pluginterfaces, MIT licence) from GitHub; offline,
+set `FETCHCONTENT_SOURCE_DIR_CAW_VST3` to a checkout of that repository in a folder named `pluginterfaces`.
+
+## Load it in a DAW
+
+`$file` is a folder (a VST3 bundle): copy the whole folder into a VST3 folder, then let your DAW rescan its plug-ins.
+The standard folders (Steinberg's VST 3 documentation, "Plug-in Locations"):
+
+- Windows: `C:\\Program Files\\Common Files\\VST3`, or for your user only `%LOCALAPPDATA%\\Programs\\Common\\VST3`
+- Linux: `~/.vst3`, `/usr/lib/vst3` or `/usr/local/lib/vst3`
+
+The plug-in shows under the component's own name with the host's generic parameter controls (there is no custom
+editor window). macOS isn't built yet.''';
 
 /// A plain zip (stored, no compression) of [files] (path to text), with fixed times so the same input gives the same
 /// bytes.
