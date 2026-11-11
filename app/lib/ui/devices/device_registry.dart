@@ -59,12 +59,18 @@ class DeviceEditors {
   /// never to a project's own C++ code.
   static DeviceEditorEntry? custom(String id, NativeComponentInfo? info) {
     final exact = _byId[id];
-    if (exact != null || info == null || !(isBuiltinComponent(id) || info.builtin)) return exact;
-    for (final m in _matchers) {
-      if (m(info) case final e?) return e;
+    if (exact != null || info == null) return exact;
+    if (isBuiltinComponent(id) || info.builtin) {
+      for (final m in _matchers) {
+        if (m(info) case final e?) return e;
+      }
     }
-    return null;
+    // A component that declares UI controls (#10) gets them as its editor, inline in the FX stack too.
+    return info.uiControls.isNotEmpty ? generated : null;
   }
+
+  /// The editor generated from a component's declared UI controls ([GeneratedControls]).
+  static const DeviceEditorEntry generated = DeviceEditorEntry(_fallbackSections);
 
   /// The fallback: one page of the generic knobs.
   static const DeviceEditorEntry fallback = DeviceEditorEntry(_fallbackSections);
