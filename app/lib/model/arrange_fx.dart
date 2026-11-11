@@ -9,6 +9,7 @@ import '../engine/engine.dart';
 import '../ui/frame/sections.dart';
 import 'app_state.dart';
 import 'midi_clips.dart';
+import 'modulation.dart';
 import 'mixer_fx.dart';
 import 'cpp_component.dart';
 import 'automation_writer.dart' show AutomationTarget;
@@ -75,6 +76,7 @@ void followComponentLanes(ProjectDoc p, String? layerId, List<ComponentUseDoc> b
     lane.component = now;
     return false;
   });
+  p.followComponentLinks(layerId, before);  // modulation links address an effect by index too (#161)
 }
 
 extension ArrangeFx on AppState {

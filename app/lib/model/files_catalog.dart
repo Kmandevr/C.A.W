@@ -1,4 +1,5 @@
 // The Files browser's catalogue: every asset (built-in effects, C++ components and files, .caw modules, patterns), its folder tree, uses and edits.
+import 'modulation.dart' show isModulatorInfo;
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -96,7 +97,7 @@ class FileAsset {
         FileAssetType.builtinEffect => native!.role == 'generator' && !native!.isInstrument
             ? null
             : AssetDrag(AssetKind.nativeEffect, native!.id, name, instrument: isInstrument),
-        FileAssetType.cppComponent => cpp!.componentId.isEmpty
+        FileAssetType.cppComponent => cpp!.componentId.isEmpty || (native != null && isModulatorInfo(native!))
             ? null
             : AssetDrag(AssetKind.nativeEffect, cpp!.componentId, name, instrument: isInstrument),
         FileAssetType.cawEffect => AssetDrag(AssetKind.cawModule, module!.id, name),
@@ -254,7 +255,8 @@ extension FilesCatalog on AppState {
   }
 
   List<FileAsset> get builtinAssets => [
-        for (final c in nativeCatalog.where((c) => c.builtin))
+        // Modulators go in a track's Modulators (modulation.dart), never on a chain.
+        for (final c in nativeCatalog.where((c) => c.builtin && !isModulatorInfo(c)))
           FileAsset._('native:${c.id}', c.label, FileAssetType.builtinEffect, native: c),
       ]..sort(_byName);
 

@@ -110,7 +110,8 @@ String engineLibraryPath() {
 
 class Bindings {
   Bindings._(DynamicLibrary lib)
-      : apiVersion = lib.lookupFunction<Int32 Function(), int Function()>('caw_api_version'),
+      : _lib = lib,
+        apiVersion = lib.lookupFunction<Int32 Function(), int Function()>('caw_api_version'),
         free = lib.lookupFunction<Void Function(Pointer<Utf8>), void Function(Pointer<Utf8>)>('caw_free'),
         check = lib.lookupFunction<Pointer<Utf8> Function(Pointer<Utf8>), Pointer<Utf8> Function(Pointer<Utf8>)>(
             'caw_check'),
@@ -293,6 +294,25 @@ class Bindings {
   static Bindings? _instance;
 
   /// Loads the engine library once per isolate.
+  final DynamicLibrary _lib;
+
+  // Project modulation (API 19, #161; caw.h).
+  late final int Function(Pointer<Void>, Pointer<Utf8>, Pointer<Utf8>, double) setModulatorParam = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Pointer<Utf8>, Pointer<Utf8>, Double),
+      int Function(Pointer<Void>, Pointer<Utf8>, Pointer<Utf8>, double)>('caw_engine_set_modulator_param');
+  late final int Function(Pointer<Void>, Pointer<Utf8>, int) setModulatorBypass = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Pointer<Utf8>, Int32), int Function(Pointer<Void>, Pointer<Utf8>, int)>(
+      'caw_engine_set_modulator_bypass');
+  late final int Function(Pointer<Void>, int, double) setModulationAmount = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Uint32, Double), int Function(Pointer<Void>, int, double)>(
+      'caw_engine_set_modulation_amount');
+  late final int Function(Pointer<Void>, Pointer<Utf8>, Pointer<Float>, int) modulatorOutputs = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Pointer<Utf8>, Pointer<Float>, Int32),
+      int Function(Pointer<Void>, Pointer<Utf8>, Pointer<Float>, int)>('caw_engine_modulator_outputs');
+  late final int Function(Pointer<Void>, int, Pointer<Float>) modulationOffset = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Uint32, Pointer<Float>), int Function(Pointer<Void>, int, Pointer<Float>)>(
+      'caw_engine_modulation_offset');
+
   static Bindings get instance => _instance ??= Bindings._(DynamicLibrary.open(engineLibraryPath()));
 
   final int Function() apiVersion;

@@ -101,6 +101,10 @@ class RoutingPlan {
 
   void _edge(String from, String to) => (_edges[from] ??= {}).add(to);
 
+  /// Adds an edge other routes must not close a loop with (project modulation: a modulator hearing [from]'s audio
+  /// and moving [to], modulation.dart).
+  void addEdge(String from, String to) => _edge(from, to);
+
   /// Whether [to] is reached from [from] along the routes kept so far.
   bool reaches(String from, String to) {
     final seen = <String>{from};
