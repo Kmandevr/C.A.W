@@ -10,6 +10,7 @@ import '../../model/arrange_fx.dart';
 import '../../model/project.dart';
 import '../frame/sections.dart';
 import '../theme.dart';
+import 'templates_ui.dart';
 
 /// What a drag over the tracks points at: a track (and, for a dragged header, where on it), or the empty area below
 /// the last track, where a drop makes a new track.
@@ -223,6 +224,8 @@ class NewTrackZone extends StatelessWidget {
           return GestureDetector(
             behavior: HitTestBehavior.opaque,
             onDoubleTap: header ? () => state.addEmptyTrack() : null,
+            // Long-press: the add-track menu with the track templates (docs/reaper-flow.md, Templates).
+            onLongPressStart: header ? (d) => showAddTrackMenu(context, state, d.globalPosition) : null,
             child: SizedBox(height: height, child: Padding(
               padding: const EdgeInsets.fromLTRB(2, 4, 2, 0),
               child: Align(alignment: Alignment.topLeft, child: AnimatedOpacity(

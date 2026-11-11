@@ -191,14 +191,6 @@ enum VelocityCurve {
 }
 
 /// What New project starts from: an empty project, or the First loop template.
-enum NewProjectStart {
-  blank('Blank'),
-  firstLoop('First loop');
-
-  const NewProjectStart(this.label);
-  final String label;
-}
-
 /// How the exporter names a file: project, tempo and length (the default), the project alone, or the project and
 /// the date and time.
 enum ExportNaming {
@@ -384,7 +376,8 @@ class Settings extends ChangeNotifier {
   int restorePointsKept = 20;
   double newProjectBpm = 140; // ProjectDoc's own default
   int newProjectBeatsPerBar = 4;
-  NewProjectStart newProjectStart = NewProjectStart.blank;
+  /// The template New project opens (`lib/model/templates.dart` ids; '' is a blank project).
+  String newProjectTemplate = '';
 
   /// Settings › Export: what the exporter opens with.
   String exportKind = 'loop';
@@ -505,7 +498,7 @@ class Settings extends ChangeNotifier {
         'restore_points_kept': restorePointsKept,
         'new_project_bpm': newProjectBpm,
         'new_project_beats_per_bar': newProjectBeatsPerBar,
-        'new_project_start': newProjectStart.name,
+        'new_project_template': newProjectTemplate,
         'export_kind': exportKind,
         'export_sample_rate': exportSampleRate,
         'export_float32': exportFloat32,
@@ -624,7 +617,12 @@ class Settings extends ChangeNotifier {
     restorePointsKept = num_('restore_points_kept', 1, 100)?.round() ?? restorePointsKept;
     newProjectBpm = num_('new_project_bpm', 20, 400) ?? newProjectBpm;
     newProjectBeatsPerBar = num_('new_project_beats_per_bar', 1, 16)?.round() ?? newProjectBeatsPerBar;
-    newProjectStart = pick(NewProjectStart.values, j['new_project_start'], newProjectStart);
+    final template = j['new_project_template'];
+    if (template is String && template.length <= 128) {
+      newProjectTemplate = template;
+    } else if (j['new_project_start'] == 'firstLoop') {
+      newProjectTemplate = 'builtin:first-loop';  // the setting's earlier form
+    }
     if (const {'loop', 'free', 'oneShot', 'wavetable', 'midi'}.contains(j['export_kind'])) {
       exportKind = j['export_kind'] as String;
     }

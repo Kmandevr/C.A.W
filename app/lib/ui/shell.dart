@@ -39,6 +39,8 @@ import 'frame/record_tools.dart';
 import 'frame/sections.dart';
 import 'frame/strain.dart';
 import 'adaptive_sheet.dart';
+import 'arrange/templates_ui.dart';
+import '../model/templates.dart';
 
 /// The panel each view shortcut shows, by the index KeyRouter's `onView` passes.
 const _viewPanels = [
@@ -854,6 +856,7 @@ Future<void> showProjectMenu(BuildContext context, AppState s) async {
   final projects = await s.listProjects();
   if (!context.mounted) return;
   final keys = KeyRouter.of(context); // the sheet's own context is outside the router
+  final outer = context; // for what opens after the sheet closes
   await showGlassSheet<void>(
     context: context,
     backgroundColor: Neon.panel,
@@ -887,9 +890,10 @@ Future<void> showProjectMenu(BuildContext context, AppState s) async {
             leading: const Icon(Icons.add, color: Neon.green),
             title: const Text('New project'),
             subtitle: Text(
-                s.settings.newProjectStart == NewProjectStart.firstLoop
-                    ? 'The First loop template (Settings › Projects and files)'
-                    : 'Blank, ${s.settings.newProjectBpm.toStringAsFixed(0)} BPM, ${s.settings.newProjectBeatsPerBar}/4',
+                switch (s.templateById(s.settings.newProjectTemplate)) {
+                  final t? => 'From the ${t.name} template (Settings › Projects and files)',
+                  null => 'Blank, ${s.settings.newProjectBpm.toStringAsFixed(0)} BPM, ${s.settings.newProjectBeatsPerBar}/4',
+                },
                 style: const TextStyle(color: Neon.dim)),
             onTap: () {
               Navigator.pop(context);
@@ -898,11 +902,19 @@ Future<void> showProjectMenu(BuildContext context, AppState s) async {
           ),
           ListTile(
             leading: const Icon(Icons.auto_awesome_mosaic, color: Neon.green),
-            title: const Text('New from template'),
-            subtitle: const Text('First loop: drums, bass, a lead and an acid line on C++ instruments', style: TextStyle(color: Neon.dim)),
+            title: const Text('New from template…'),
+            subtitle: const Text('The starters and the templates you saved', style: TextStyle(color: Neon.dim)),
             onTap: () {
               Navigator.pop(context);
-              s.newProjectFromTemplate();
+              if (outer.mounted) showProjectTemplates(outer, s);
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.bookmark_add_outlined, color: Neon.blue),
+            title: const Text('Save as template…'),
+            onTap: () {
+              Navigator.pop(context);
+              if (outer.mounted) saveProjectTemplate(outer, s);
             },
           ),
           ListTile(

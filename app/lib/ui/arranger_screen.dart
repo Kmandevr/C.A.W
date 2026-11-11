@@ -14,6 +14,7 @@ import '../model/live_midi.dart';
 import '../model/project.dart';
 import '../model/settings.dart';
 import 'arrange/arrange_drag.dart';
+import 'arrange/templates_ui.dart';
 import 'arrange/clip_bar.dart';
 import 'arrange/clip_preview.dart';
 import 'arrange/ruler.dart';
@@ -466,6 +467,8 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
       if (hasVolume) const MenuAction('remove-automation-volume', 'Remove volume automation', Icons.remove_circle_outline),
       if (hasPan) const MenuAction('remove-automation-pan', 'Remove pan automation', Icons.remove_circle_outline),
       MenuAction('spacer', layer.spaceBelow > 0 ? 'Remove spacer below' : 'Add spacer below', Icons.space_bar),
+      MenuAction('template', layer.isFolder ? 'Save folder as track template…' : 'Save as track template…',
+          Icons.bookmark_add_outlined),
       const MenuAction('delete', 'Delete', Icons.delete_outline, danger: true),
     ]);
     if (v == null || !mounted) return;
@@ -495,6 +498,10 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
     if (v == 'automation-pan') s.addAutomationLane(layer, 'pan');
     if (v == 'remove-automation-volume') s.removeAutomationLane(layer, layer.automation.firstWhere((a) => a.target == 'volume'));
     if (v == 'remove-automation-pan') s.removeAutomationLane(layer, layer.automation.firstWhere((a) => a.target == 'pan'));
+    if (v == 'template') {
+      if (mounted) await saveTrackTemplate(context, s, layer);
+      return;
+    }
     if (v == 'spacer') s.setSpaceBelow(layer, layer.spaceBelow > 0 ? 0 : _SpacerHeader.initial);
     if (v == 'delete' && mounted && await confirmTrackDelete(context, s, layer) && mounted) {
       if (_focusId == layer.id) _focus(null);
@@ -814,12 +821,18 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
         // under a heading (owner, 2026-11-05: one toolbar row, as in the UI plan).
         final narrow = constraints.maxWidth < 760;
         final controls = <Widget>[
-          if (narrow)
-            IconButton(onPressed: s.addLayer,
-              icon: const Icon(Icons.add), color: Neon.green, tooltip: 'Add track')
-          else
-            TextButton.icon(onPressed: s.addLayer,
-              icon: const Icon(Icons.add, size: 17), label: const Text('Track')),
+          // Long-press (or right-click) for the add-track menu: a folder and the track templates.
+          Builder(builder: (context) => GestureDetector(
+            onSecondaryTapUp: (d) => showAddTrackMenu(context, s, d.globalPosition),
+            child: narrow
+              ? Semantics(label: 'Add track (long-press: templates)', button: true, excludeSemantics: true,
+                  child: TextButton(key: const ValueKey('arrange-add-track'), onPressed: s.addLayer,
+                    onLongPress: () => showAddTrackMenu(context, s, menuAnchorOf(context)),
+                    style: TextButton.styleFrom(minimumSize: const Size(48, 48), shape: const CircleBorder()),
+                    child: const Icon(Icons.add, color: Neon.green)))
+              : TextButton.icon(key: const ValueKey('arrange-add-track'), onPressed: s.addLayer,
+                  onLongPress: () => showAddTrackMenu(context, s, menuAnchorOf(context)),
+                  icon: const Icon(Icons.add, size: 17), label: const Text('Track')))),
           IconButton(key: const ValueKey('arrange-browse'), onPressed: () => setState(() => _browser = !_browser),
             color: _browser ? Neon.blue : Neon.dim, icon: const Icon(Icons.folder_open),
             tooltip: 'Files: drag one onto a track'),

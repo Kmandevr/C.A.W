@@ -64,7 +64,7 @@ void main() {
       x.restorePointsKept = 7;
       x.newProjectBpm = 96;
       x.newProjectBeatsPerBar = 3;
-      x.newProjectStart = NewProjectStart.firstLoop;
+      x.newProjectTemplate = 'builtin:first-loop';
       x.exportKind = 'free';
       x.exportSampleRate = 44100;
       x.exportFloat32 = true;
@@ -83,8 +83,8 @@ void main() {
     expect([b.rollGrid, b.rollSnap, b.rollTool, b.rollNoteSteps], [32, false, StartTool.select, 4.0]);
     expect([b.followPlayhead, b.wheelZooms, b.confirmDelete], [false, true, true]);
     expect([b.codeFontSize, b.codeTabWidth, b.codeLineNumbers, b.codeWrap], [18, 2, false, true]);
-    expect([b.autosaveMs, b.restorePointsKept, b.newProjectBpm, b.newProjectBeatsPerBar, b.newProjectStart],
-        [5000, 7, 96, 3, NewProjectStart.firstLoop]);
+    expect([b.autosaveMs, b.restorePointsKept, b.newProjectBpm, b.newProjectBeatsPerBar, b.newProjectTemplate],
+        [5000, 7, 96, 3, 'builtin:first-loop']);
     expect([b.exportKind, b.exportSampleRate, b.exportFloat32, b.exportSeconds, b.exportNaming],
         ['free', 44100, true, 30, ExportNaming.dated]);
     CodePrefs.fontSize = 15;
