@@ -139,6 +139,10 @@ DeviceDisplayFrame decodeDisplay(String componentId, List<double> f, int n) {
     case 'org.caw.gate':
       return DeviceDisplayFrame(inputDb: at(0), outputDb: at(1), gainReductionDb: -at(2),
           values: named(['gr', 'gr_max', 'detector_db', 'threshold', 'open'], 2));
+    case 'org.caw.ducker':
+      return DeviceDisplayFrame(inputDb: at(0), outputDb: at(1), gainReductionDb: -at(4), values: named(['key_db', 'duck', 'gr',
+        'gr_max', 'pos_ms', 'mode', 'threshold', 'depth', 'lookahead_ms', 'triggers', 'period_ms', 'phase', 'attack_ms',
+        'hold_ms', 'release_ms', 'tension'], 2));
     case 'org.caw.reverb.pro':
       return DeviceDisplayFrame(inputDb: at(0), outputDb: at(2),
           values: named(['input_db', 'wet_db', 'output_db', 'duck_db', 'decay_s', 'predelay_s', 'freeze', 'size'], 0));

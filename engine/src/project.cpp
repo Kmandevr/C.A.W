@@ -71,6 +71,22 @@ bool componentEntry(const Json& j, const std::string& where, ComponentSpec& c, s
                 c.params.emplace_back(k, v.num);
             }
         }
+        // The sidechain key: {"layer": id, "tap": "pre" | "post", "level": gain} (null or absent: none).
+        if (const Json* k = j.get("key"); k && k->type != Json::Type::Null) {
+            if (k->type != Json::Type::Object || k->string("layer").empty()) {
+                error = where + ": component '" + c.id + "' key must be {\"layer\": id, \"tap\": \"pre\"|\"post\", \"level\": n}";
+                return false;
+            }
+            c.hasKey = true;
+            c.key.layer = k->string("layer");
+            const std::string tap = k->string("tap", "pre");
+            if (tap != "pre" && tap != "post") {
+                error = where + ": component '" + c.id + "' key tap must be \"pre\" or \"post\"";
+                return false;
+            }
+            c.key.pre = tap == "pre";
+            c.key.level = clampd(k->number("level", 1.0), 0.0, kMaxMixGain);
+        }
         // A built-in preset's values under the entry's own params (docs/engine.md, Presets).
         if (const Json* pr = j.get("preset"); pr && pr->type != Json::Type::Null) {
             if (pr->type != Json::Type::String || !applyBuiltinPreset(c.id, pr->str, c.params)) {
@@ -107,6 +123,115 @@ bool componentList(const Json* arr, const std::string& where, std::vector<Compon
 }
 
 }  // namespace
+
+std::string routeTarget(const ProjectSpec& p, const LayerSpec& layer) {
+    std::string parent = layer.parentId;
+    for (size_t depth = 0; !parent.empty() && depth < p.layers.size(); ++depth) {
+        const LayerSpec* found = nullptr;
+        for (const LayerSpec& l : p.layers)
+            if (l.id == parent) found = &l;
+        if (!found) return {};
+        if (found->folder && found->busEnabled) return found->id;
+        parent = found->parentId;
+    }
+    return {};
+}
+
+bool validateRouting(const ProjectSpec& p, std::string& error) {
+    const size_t n = p.layers.size();
+    std::map<std::string, size_t> index;
+    for (size_t i = 0; i < n; ++i) index.emplace(p.layers[i].id, i);
+    auto label = [&](size_t i) {
+        const LayerSpec& l = p.layers[i];
+        return "'" + (l.name.empty() ? l.id : l.name) + "'";
+    };
+    // Edges run from what is heard to what hears it: a layer to its bus (or nothing: the master), to the buses
+    // it sends to, and a key's source to the layer whose component it keys.
+    std::vector<std::vector<size_t>> edges(n);
+    for (size_t i = 0; i < n; ++i) {
+        const LayerSpec& l = p.layers[i];
+        const bool plays = !(l.folder && !l.busEnabled);  // an organization-only folder carries no audio
+        if (plays) {
+            const std::string to = routeTarget(p, l);
+            if (!to.empty()) edges[i].push_back(index.at(to));
+        }
+        for (const SendSpec& s : l.sends) {
+            auto it = index.find(s.to);
+            if (it == index.end()) {
+                error = "layer " + label(i) + " sends to '" + s.to + "', which is not in the project";
+                return false;
+            }
+            const LayerSpec& to = p.layers[it->second];
+            if (!to.folder || !to.busEnabled) {
+                error = "layer " + label(i) + " sends to " + label(it->second) + ", which is not a bus";
+                return false;
+            }
+            if (it->second == i) {
+                error = "layer " + label(i) + " sends to itself";
+                return false;
+            }
+            if (!plays) {
+                error = "folder " + label(i) + " has no bus, so it has nothing to send";
+                return false;
+            }
+            edges[i].push_back(it->second);
+        }
+        for (const ComponentSpec& c : l.components) {
+            if (!c.hasKey) continue;
+            auto it = index.find(c.key.layer);
+            if (it == index.end()) {
+                error = "layer " + label(i) + ": component '" + c.id + "' is keyed by '" + c.key.layer + "', which is not in the project";
+                return false;
+            }
+            if (it->second == i) {
+                error = "layer " + label(i) + ": component '" + c.id + "' can't be keyed by its own layer";
+                return false;
+            }
+            const LayerSpec& from = p.layers[it->second];
+            if (from.folder && !from.busEnabled) {
+                error = "layer " + label(i) + ": component '" + c.id + "' is keyed by folder " + label(it->second) +
+                        ", which has no bus";
+                return false;
+            }
+            edges[it->second].push_back(i);
+        }
+    }
+    // Depth-first search for a loop; the path to it names the layers in the message.
+    std::vector<uint8_t> state(n, 0);  // 0 unseen, 1 on the path, 2 done
+    std::vector<size_t> path, at;
+    for (size_t start = 0; start < n; ++start) {
+        if (state[start]) continue;
+        path.assign(1, start);
+        at.assign(1, 0);
+        state[start] = 1;
+        while (!path.empty()) {
+            const size_t x = path.back();
+            if (at.back() == edges[x].size()) {
+                state[x] = 2;
+                path.pop_back();
+                at.pop_back();
+                continue;
+            }
+            const size_t y = edges[x][at.back()++];
+            if (state[y] == 1) {
+                std::string loop;
+                bool on = false;
+                for (size_t k : path) {
+                    on = on || k == y;
+                    if (on) loop += label(k) + " -> ";
+                }
+                error = "routing makes a loop: " + loop + label(y) + " (a layer can't hear itself)";
+                return false;
+            }
+            if (state[y] == 0) {
+                state[y] = 1;
+                path.push_back(y);
+                at.push_back(0);
+            }
+        }
+    }
+    return true;
+}
 
 const ModuleSpec* ProjectSpec::module(const std::string& id) const {
     for (const ModuleSpec& m : modules)
@@ -213,6 +338,11 @@ bool parseProject(std::string_view text, ProjectSpec& out, std::string& error) {
     }
 
     if (!componentList(root.get("master_components"), "master_components", out.masterComponents, error)) return false;
+    for (const ComponentSpec& c : out.masterComponents)
+        if (c.hasKey) {
+            error = "master_components: component '" + c.id + "' can't take a sidechain key on the master (put it on a bus)";
+            return false;
+        }
     if (const Json* mods = root.get("modules"); mods && mods->type == Json::Type::Array) {
         for (const Json& m : mods->arr) {
             if (m.type != Json::Type::Object) continue;
@@ -256,6 +386,30 @@ bool parseProject(std::string_view text, ProjectSpec& out, std::string& error) {
             spec.parentId = l.string("parent");
             spec.folder = l.boolean("folder", false);
             spec.busEnabled = l.boolean("bus", true);
+            if (const Json* sends = l.get("sends"); sends && sends->type != Json::Type::Null) {
+                if (sends->type != Json::Type::Array) {
+                    error = layerName + ": sends must be a list of {\"to\": bus id, \"level\", \"pre\", \"mute\"}";
+                    return false;
+                }
+                if (sends->arr.size() > static_cast<size_t>(kMaxSends)) {
+                    error = layerName + " has more than " + std::to_string(kMaxSends) + " sends";
+                    return false;
+                }
+                for (const Json& sj : sends->arr) {
+                    SendSpec send;
+                    if (sj.type == Json::Type::Object) {
+                        send.to = sj.string("to");
+                        send.level = clampd(sj.number("level", 1.0), 0.0, kMaxMixGain);
+                        send.pre = sj.boolean("pre", false);
+                        send.mute = sj.boolean("mute", false);
+                    }
+                    if (send.to.empty()) {
+                        error = layerName + ": every send needs a \"to\" bus";
+                        return false;
+                    }
+                    spec.sends.push_back(std::move(send));
+                }
+            }
             if (const Json* clips = l.get("clips"); clips && clips->type == Json::Type::Array) {
                 for (const Json& c : clips->arr) {
                     if (c.type != Json::Type::Object) continue;
@@ -379,6 +533,7 @@ bool parseProject(std::string_view text, ProjectSpec& out, std::string& error) {
             parent = found->parentId;
         }
     }
+    if (!validateRouting(out, error)) return false;
     if (const Json* g = root.get("globals"); g && g->type == Json::Type::Object)
         for (const auto& [k, v] : g->obj)
             if (v.type == Json::Type::Number && std::isfinite(v.num)) out.globals[k] = v.num;

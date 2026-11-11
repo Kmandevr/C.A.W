@@ -449,6 +449,17 @@ class Engine {
     }
   }
 
+  /// A playing send (API version 9): send [index] of the layer's project `sends` gets [level] (linear), pre or post
+  /// fader and mute, ramped; false if there is no such send. Store it in the project too.
+  bool setSend(String layerId, int index, double level, {required bool pre, required bool mute}) {
+    final l = layerId.toNativeUtf8();
+    try {
+      return _b.setSend(_handle, l, index, level, pre ? 1 : 0, mute ? 1 : 0) == 1;
+    } finally {
+      calloc.free(l);
+    }
+  }
+
   /// Bypasses (or brings back) a playing native component, crossfaded; null [layerId] is the master chain.
   bool setComponentBypass(String? layerId, int index, bool bypass) {
     final l = (layerId ?? '').toNativeUtf8();
