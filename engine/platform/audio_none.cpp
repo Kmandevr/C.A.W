@@ -46,6 +46,18 @@ void caw_audio_set_buffer_mode(CawEngine* e, int32_t mode, int32_t recording) {
 
 int32_t caw_audio_buffer_frames(CawEngine*) { return 0; }
 
+char* caw_audio_input_devices(void) { return dup("{\"backend\":\"none\",\"exclusive\":false,\"devices\":[]}"); }
+
+int32_t caw_audio_configure_input(CawEngine* e, int32_t enabled, const char* device_id, const char* device_name,
+                                  int32_t channels) {
+    if (!e) return 1;
+    e->inputEnabled = enabled != 0;
+    e->inputId = device_id ? std::string(device_id).substr(0, 511) : std::string();
+    e->inputName = device_name ? std::string(device_name).substr(0, 255) : std::string();
+    e->inputChannels = channels <= 0 ? 2 : (channels > 32 ? 32 : channels);
+    return 0;
+}
+
 char* caw_audio_devices(void) { return dup("{\"backend\":\"none\",\"exclusive\":false,\"devices\":[]}"); }
 
 int32_t caw_audio_configure(CawEngine* e, const char* device_id, const char* device_name, int32_t period_frames,

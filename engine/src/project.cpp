@@ -7,6 +7,7 @@
 #include <cctype>
 #include <cmath>
 
+#include "audio_clips.h"
 #include "json.h"
 
 namespace caw {
@@ -383,6 +384,9 @@ bool parseProject(std::string_view text, ProjectSpec& out, std::string& error) {
             out.modules.push_back(std::move(spec));
         }
     }
+    std::map<std::string, AssetRef> assets;  // the "assets" table audio clips name
+    if (!parseAssetTable(root, assets, error)) return false;
+    double audioEndSteps = 0;  // the last audio clip's end
     if (const Json* layers = root.get("layers"); layers && layers->type == Json::Type::Array) {
         for (const Json& l : layers->arr) {
             if (l.type != Json::Type::Object) continue;
@@ -409,6 +413,7 @@ bool parseProject(std::string_view text, ProjectSpec& out, std::string& error) {
             spec.parentId = l.string("parent");
             spec.folder = l.boolean("folder", false);
             spec.busEnabled = l.boolean("bus", true);
+            if (!parseAudioTrack(l, assets, layerName, static_cast<double>(maxSteps), spec, audioEndSteps, error)) return false;
             if (const Json* sends = l.get("sends"); sends && sends->type != Json::Type::Null) {
                 if (sends->type != Json::Type::Array) {
                     error = layerName + ": sends must be a list of {\"to\": bus id, \"level\", \"pre\", \"mute\"}";
@@ -529,6 +534,7 @@ bool parseProject(std::string_view text, ProjectSpec& out, std::string& error) {
         for (const auto& point : lane.points)
             automationEndStep = std::max<int64_t>(automationEndStep, static_cast<int64_t>(std::ceil(point.step)));
     const int64_t stepsPerBar = out.beatsPerBar * 4;
+    automationEndStep = std::max<int64_t>(automationEndStep, static_cast<int64_t>(std::ceil(audioEndSteps)));
     if (automationEndStep > 0)
         out.loopBars = std::max(out.loopBars, static_cast<int>((automationEndStep + stepsPerBar - 1) / stepsPerBar));
     // The song reaches the loop range's end, so playback gets there.

@@ -51,8 +51,13 @@ extern "C" {
    caw_engine_midi_release, caw_engine_set_midi_options, caw_engine_midi_dropped and caw_engine_position_at.
    Nothing else changes.
    16 (2026-11-11): song renders and stems: caw_render_song and caw_worker_pool_submit_song (aligned mix, track,
-   bus and region renders; bounds, tail, normalise, 16-bit dither). Nothing else changes. */
-#define CAW_API_VERSION 16
+   bus and region renders; bounds, tail, normalise, 16-bit dither). Nothing else changes.
+   18 (2026-11-11, WP-J): audio assets (caw_asset_*), audio clips on tracks (a layer's "audio_clips" and the
+   project's "assets"), the sampler org.caw.sampler with SFZ import and export (caw_sfz_*), audio input
+   (caw_audio_input_devices, caw_audio_configure_input, a layer's "input", caw_engine_input_peaks), recording
+   (caw_record_*), input latency (caw_engine_set_input_latency, caw_engine_input_latency, caw_latency_ping_*).
+   Nothing else changes. */
+#define CAW_API_VERSION 18
 /* The component index that names a layer's native instrument rather than one of its "components". */
 #define CAW_INSTRUMENT_INDEX 0xFFFFFFFFu
 
@@ -498,6 +503,72 @@ CAW_API int64_t caw_engine_position_at(CawEngine* e, int64_t time_ns);
 CAW_API char* caw_render_song(const char* project_json, const char* request_json, int32_t* progress, int32_t* cancel);
 CAW_API CawJob* caw_worker_pool_submit_song(CawWorkerPool* pool, const char* project_json, const char* request_json,
                                             int32_t priority);
+
+/* ---- API version 18 (WP-J; docs/engine.md "Audio assets", "Audio clips", "Sampler", "Audio input and recording").
+   Audio assets: files decoded (WAV, FLAC, MP3: miniaudio's dr_wav, dr_flac, dr_mp3) and resampled to the engine's
+   rate once, shared by every clip and sampler zone that names the same path, within a memory budget (1 GiB by
+   default; the least recently used asset nothing plays is dropped first). Decoding a long file takes a while: call
+   these from a worker isolate, never the UI or audio thread.
+   caw_asset_load: {"ok", "error", "path", "frames", "channels" (1 or 2), "sample_rate" (the engine's), "source_rate",
+   "source_channels", "source_frames", "seconds", "bytes"}. Free with caw_free. */
+CAW_API char* caw_asset_load(CawEngine* e, const char* path);
+/* Waveform overview: [buckets] (1..65536) equal parts of [start_seconds, end_seconds) of the asset's channel
+   (0 or 1; 1 on a mono file reads 0), each a (min, max) pair into out_min_max (2 * buckets floats). Loads the file if
+   it isn't loaded. Returns the buckets written, or -1 when the file can't be loaded. */
+CAW_API int32_t caw_asset_peaks(CawEngine* e, const char* path, double start_seconds, double end_seconds,
+                                int32_t buckets, int32_t channel, float* out_min_max);
+/* The store: {"bytes", "budget", "count", "assets": [{"path", "rate", "bytes", "in_use"}]}. Free with caw_free. */
+CAW_API char* caw_asset_store_status(void);
+CAW_API void caw_asset_store_set_budget(int64_t bytes);
+/* Drops every asset nothing plays (a project closed). */
+CAW_API void caw_asset_store_purge(void);
+/* SFZ for org.caw.sampler (docs/engine.md "SFZ support"). Import: {"ok", "error", "zones" (count), "warnings":
+   [text], "state": the sampler's state JSON ({"zones": [...]}, sample paths made absolute)}; put the state in the
+   instrument entry's "state" (base64) or give it to caw_engine_set_component_state. Export: writes [sfz_path]
+   from a state JSON, sample paths relative to its folder where they are inside it; copy_samples copies every
+   sample into a "samples" folder beside it first. {"ok", "error", "files": [paths]}. Free with caw_free. */
+CAW_API char* caw_sfz_import(const char* sfz_path);
+CAW_API char* caw_sfz_export(const char* state_json, const char* sfz_path, int32_t copy_samples);
+/* Audio input. The capture devices, as caw_audio_devices lists playback ones, plus "channels" (the most the
+   device offers; 0 unknown). On Android the app needs the RECORD_AUDIO permission before input opens. */
+CAW_API char* caw_audio_input_devices(void);
+/* Opens (enabled != 0) or closes the input: the device then runs duplex, input and output in one callback, so
+   monitoring adds no buffer of its own. [device_id]/[device_name] as caw_audio_configure (both empty: the default
+   input), [channels] 1..32 (0: 2). A running device reopens. Returns as caw_audio_configure. caw_audio_status gains
+   "input": {"enabled", "running", "device", "device_id", "channels", "sample_rate", "period_frames",
+   "latency_frames" (the device's own estimate, input plus output buffers)}. */
+CAW_API int32_t caw_audio_configure_input(CawEngine* e, int32_t enabled, const char* device_id,
+                                          const char* device_name, int32_t channels);
+/* Each input channel's peak (0..1+) since the last call; returns the channels written (at most max). */
+CAW_API int32_t caw_engine_input_peaks(CawEngine* e, float* out, int32_t max);
+/* Recording armed tracks (request JSON: {"dir": an existing folder, "bpm": the tempo (start_steps), "tracks":
+   [{"layer", "channel": first input channel from 0, "channels": 1 or 2}], "bits": 32 (float, default) or 24,
+   optional "punch_in_steps", "punch_out_steps"}). From the next played chunk, each track's input goes through a
+   lock-free ring to a writer thread that writes "<layer>-take<n>.wav" (".wav.part" until the take ends, the header
+   counted about every second) and a "<file>.json" sidecar. A take starts where recording (or the punch range)
+   begins and ends at a jump: a loop wrap starts the next take, so loop recording gives one take per pass. Takes
+   land latency-compensated: frame 0 of a take is the song frame that was heard when it was played
+   ("start_frame", "start_steps"; it can be before 0, so trim that much off the clip's offset). Stopping waits for
+   the writer to finish. Results: {"ok", "error", "recording", "dropped_frames", "latency": {...}, "takes":
+   [{"layer", "path", "take", "start_frame", "start_steps", "frames", "seconds", "channels", "sample_rate", "bpm",
+   "complete", "error"}]}. Free each with caw_free. */
+CAW_API char* caw_record_start(CawEngine* e, const char* request_json);
+CAW_API char* caw_record_stop(CawEngine* e);
+CAW_API char* caw_record_status(CawEngine* e);
+/* At start-up: finalises takes a crash left in [dir] (".wav.part": the header is fixed to the frames written, the
+   file renamed) and lists them as above with "recovered": true. Free with caw_free. */
+CAW_API char* caw_record_recover(const char* dir);
+/* Recording latency compensation in frames: [frames] >= 0 overrides; -1 uses the last good ping, else the
+   device's estimate. caw_engine_input_latency: {"frames", "ms", "source": "override"|"measured"|"device",
+   "override", "measured", "device"}. Free with caw_free. */
+CAW_API void caw_engine_set_input_latency(CawEngine* e, int64_t frames);
+CAW_API char* caw_engine_input_latency(CawEngine* e);
+/* A loopback ping: a short noise burst (-12 dBFS) is played and found again in the input (a loopback cable, or
+   the speaker into the mic in a quiet room), giving the round trip. Start it (0 if one runs or no engine), then
+   poll the result after about a second: {"state": "running"|"idle"} or {"state": "done", "ok", "frames", "ms",
+   "confidence"}; an "ok" result becomes the measured latency. Free with caw_free. */
+CAW_API int32_t caw_latency_ping_start(CawEngine* e);
+CAW_API char* caw_latency_ping_result(CawEngine* e);
 
 #ifdef __cplusplus
 }

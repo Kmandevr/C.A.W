@@ -90,6 +90,8 @@ public:
     }
     bool keyed(std::size_t index) const noexcept { return index < entries_.size() && entries_[index]->key != nullptr; }
     bool instrument() const noexcept { return notes_ != nullptr; }
+    // Audio thread: an audio track monitoring its input wants to run while the transport is stopped.
+    bool monitorsStopped() const noexcept;
     // The instrument's notes and this block's events (null for an effect chain). Audio thread.
     NoteEvents* notes() noexcept { return notes_.get(); }
     ~ComponentChain();

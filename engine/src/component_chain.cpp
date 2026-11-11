@@ -6,6 +6,7 @@
 #include <cmath>
 #include <cstring>
 
+#include "audio_clips.h"
 #include "builtin_fx_racks.h"
 #include "json.h"
 #include "route_math.h"
@@ -224,6 +225,7 @@ std::unique_ptr<ComponentChain> ComponentChain::make(const ModuleRegistry& regis
             error = "native component " + quoted(spec.id) + ": " + error;
             return nullptr;
         }
+        applyComponentHostData(*e->processor, spec, sampleRate);  // audio clips, a sampler's zones
         chain->entries_.push_back(std::move(e));
     }
     return chain;
@@ -266,6 +268,7 @@ void ComponentChain::setValues(const std::vector<ComponentSpec>& specs) noexcept
         try {  // samples named or no longer named (loading off the audio thread; a file that fails empties its slot)
             std::string ignored;
             applyComponentSamples(*e.processor, specs[i].samples, sampleRate_, ignored);
+            applyComponentHostData(*e.processor, specs[i], sampleRate_);
         } catch (...) {
         }
         e.generation.fetch_add(1, std::memory_order_release);  // after the values
@@ -546,6 +549,12 @@ void ComponentChain::process(float* left, float* right, uint32_t m, double sampl
         }
     }
     if (notes_) notes_->clearEvents();  // delivered (or dropped while bypassed): the next block starts empty
+}
+
+bool ComponentChain::monitorsStopped() const noexcept {
+    for (const auto& e : entries_)
+        if (e->processor && caw::monitorsStopped(*e->processor)) return true;
+    return false;
 }
 
 int32_t ComponentChain::readDisplay(std::size_t index, float* out, uint32_t max) const noexcept {
