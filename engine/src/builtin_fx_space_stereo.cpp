@@ -64,7 +64,7 @@ const ParamTable& haasParams() {
     return t;
 }
 const ModuleDescriptor& haasDescriptor() {
-    static const ModuleDescriptor d = effectDescriptor("org.caw.haas", "Haas", haasParams(), 0, 2400);
+    static const ModuleDescriptor d = withCpu(effectDescriptor("org.caw.haas", "Haas", haasParams(), 0, 2400), CpuClass::Light);
     return d;
 }
 
@@ -160,7 +160,7 @@ const ParamTable& imagerParams() {
     return t;
 }
 const ModuleDescriptor& imagerDescriptor() {
-    static const ModuleDescriptor d = effectDescriptor("org.caw.imager", "Imager", imagerParams(), 0, 0);
+    static const ModuleDescriptor d = withCpu(effectDescriptor("org.caw.imager", "Imager", imagerParams(), 0, 0), CpuClass::Light);
     return d;
 }
 
@@ -289,7 +289,7 @@ const ParamTable& mixerParams() {
     return t;
 }
 const ModuleDescriptor& mixerDescriptor() {
-    static const ModuleDescriptor d = effectDescriptor("org.caw.channelmixer", "Channel mixer", mixerParams(), 0, 0);
+    static const ModuleDescriptor d = withCpu(effectDescriptor("org.caw.channelmixer", "Channel mixer", mixerParams(), 0, 0), CpuClass::Light);
     return d;
 }
 

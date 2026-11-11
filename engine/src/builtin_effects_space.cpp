@@ -67,7 +67,7 @@ const ParamTable& reverbParams() {
     return t;
 }
 const ModuleDescriptor& reverbDescriptor() {
-    static const ModuleDescriptor d = effectDescriptor("org.caw.reverb.pro", "Reverb", reverbParams(), 0, kInfiniteTail);
+    static const ModuleDescriptor d = withCpu(effectDescriptor("org.caw.reverb.pro", "Reverb", reverbParams(), 0, kInfiniteTail), CpuClass::Heavy);
     return d;
 }
 

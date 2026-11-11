@@ -63,6 +63,9 @@ const ModuleDescriptor& testSignalDescriptor() {
         m.portCount = 2;
         m.parameters = kParams;
         m.parameterCount = kParamCount;
+        m.domains = kDomainWhole | kDomainPerNote;  // Notes mode renders into a voice bus (VoiceLanes)
+        m.capabilities = kCapabilityNotesIn;
+        m.cpuClass = CpuClass::Light;
         return m;
     }();
     return d;
@@ -100,7 +103,7 @@ public:
         free_ = Voice{};
         freeStarted_ = false;
     }
-    bool quiet() const noexcept override { return notes_ && live_ == 0; }
+    bool quiet() const noexcept override { return notes_ && live_ == 0 && !lanes_.any(); }
 
 protected:
     void beginBlock(const ProcessBlock& b) noexcept override {
@@ -109,6 +112,7 @@ protected:
         notes_ = notes;
         startPhase_ = parameterAt(b, kPhase, 0, 0.0);
         seed_ = static_cast<uint32_t>(parameterAt(b, kSeed, 0, 1.0));
+        lanes_.bind(b);
         if (!notes_ && !freeStarted_) {
             free_.start(startPhase_, seed_);
             freeStarted_ = true;
@@ -117,7 +121,7 @@ protected:
     void onNote(const NoteMessage& m) noexcept override {
         if (!notes_) return;
         if (m.type == NoteMessageType::On) {
-            Voice& v = voices_.start(m.noteId);
+            Voice& v = voices_.start(m.noteId, &lanes_);
             v.pitch = m.pitch;
             v.velocity = m.velocity;
             v.start(startPhase_, seed_ + m.noteId);
@@ -133,7 +137,8 @@ protected:
         const double sweepFrames = parameterAt(b, kSweepTime, offset, 1.0) * sr_;
         const uint64_t period = static_cast<uint64_t>(std::floor(parameterAt(b, kPeriod, offset, 0.0) * sr_ + 0.5));
         for (uint32_t i = 0; i < frames; ++i) left[i] = right[i] = 0.0f;
-        auto play = [&](Voice& v, bool fromNote) noexcept {
+        if (lanes_.any()) lanes_.begin(offset, frames);
+        auto play = [&](Voice& v, bool fromNote, float* outL, float* outR) noexcept {
             for (uint32_t i = 0; i < frames; ++i) {
                 const double level = parameterAt(b, kLevel, offset + i, 1.0) * (fromNote ? v.velocity : 1.0);
                 double hz;
@@ -164,20 +169,28 @@ protected:
                     }
                 }
                 const double out = y * level;
-                left[i] += static_cast<float>(out * gl);
-                right[i] += static_cast<float>(out * gr);
+                outL[i] += static_cast<float>(out * gl);
+                outR[i] += static_cast<float>(out * gr);
                 v.phase += hz / sr_;
                 v.phase -= std::floor(v.phase);
                 ++v.elapsed;
             }
         };
         if (!notes_) {
-            play(free_, false);
+            play(free_, false, left, right);
             live_ = 1;
-            return;
+        } else {
+            // The voice bus (#127): a note with a lane plays there; the lanes join the mix after the host's FX.
+            voices_.forEachActive([&](Voice& v) {
+                if (VoiceLane* lane = lanes_.laneFor(v.noteId)) play(v, true, lane->channels[0] + offset, lane->channels[1] + offset);
+                else play(v, true, left, right);
+            });
+            live_ = voices_.activeCount();
         }
-        voices_.forEachActive([&](Voice& v) { play(v, true); });
-        live_ = voices_.activeCount();
+        if (lanes_.any()) lanes_.runAndSum(left, right, offset, frames);
+    }
+    void endBlock(const ProcessBlock&) noexcept override {
+        if (lanes_.any()) lanes_.endBlock([&](uint32_t id) noexcept { return notes_ && voices_.find(id) != nullptr; });
     }
 
 private:
@@ -188,6 +201,7 @@ private:
     uint32_t live_ = 0;
     Voice free_;
     VoicePool<Voice, 64> voices_;
+    VoiceLanes lanes_;  // the host's voice bus for this block (#127), or none
 };
 
 ModuleProcessor* makeTestSignal() noexcept { return new (std::nothrow) TestSignal(); }

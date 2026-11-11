@@ -86,11 +86,16 @@ TEST(graph_compiler_has_no_arbitrary_node_or_connection_cap) {
     CHECK_EQ(graph.executionOrder.back(), nodeCount - 1);
 }
 
-TEST(graph_rejects_mono_stereo_mismatch) {
+// The layout rules (#120): mono into stereo is duplicated (graph_layout_test.cpp); stereo into mono is refused.
+TEST(graph_rejects_stereo_into_mono_but_widens_mono_into_stereo) {
     const PortDescriptor monoOut[] = {{"out", PortType::Audio, ChannelLayout::Mono, false}};
     const ModuleDescriptor mono{"test.mono", 1, monoOut, 1, nullptr, 0};
-    const std::vector<GraphNode> nodes{{"mono", &mono}, {"stereo", &sink}};
-    const CompiledGraph graph = compileGraph(nodes, {{0, 0, 1, 0}}, kTestBudget);
+    CHECK(compileGraph({{"mono", &mono}, {"stereo", &sink}}, {{0, 0, 1, 0}}, kTestBudget));
+    const PortDescriptor monoIn[] = {{"in", PortType::Audio, ChannelLayout::Mono, true}};
+    const ModuleDescriptor monoSink{"test.mono.sink", 1, monoIn, 1, nullptr, 0};
+    const PortDescriptor stereoOut[] = {stereoOutput("out")};
+    const ModuleDescriptor stereo{"test.stereo", 1, stereoOut, 1, nullptr, 0};
+    const CompiledGraph graph = compileGraph({{"stereo", &stereo}, {"mono", &monoSink}}, {{0, 0, 1, 0}}, kTestBudget);
     CHECK(graph.error == GraphError::ChannelLayoutMismatch);
     CHECK_EQ(graph.errorConnection, 0u);
 }

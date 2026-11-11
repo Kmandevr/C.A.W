@@ -161,7 +161,9 @@ CAW_API char* caw_engine_reload_component(CawEngine* e, const char* library_path
                                           int32_t trust_level);
 /* The loaded native components' descriptors as JSON (free with caw_free):
    {"ok":true,"components":[{"id","name","version","role","latency_frames","tail_frames" (null =
-   infinite),"max_state_bytes","custom_ui_id","ports":[{"id","type","input","layout","channels",
+   infinite),"max_state_bytes","custom_ui_id","domains" (["whole","per_channel","per_voice","per_note"], the ones
+   declared),"capabilities" (["notes_in","midi_in","events_out","sample_assets","needs_transport","export_clap"]),
+   "cpu_class" ("unspecified","light","medium","heavy"),"ports":[{"id","type","input","layout","channels",
    "summing"}],"parameters":[{"id","name","unit","default","min","max","step","curve",
    "smoothing_frames","automatable","modulatable","midi_mappable","choices":[...]}],
    "ui_controls":[{"id","label","parameter_id","kind","min","max"}]}]} */

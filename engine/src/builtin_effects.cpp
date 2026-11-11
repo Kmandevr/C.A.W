@@ -44,6 +44,9 @@ ModuleDescriptor effectDescriptor(std::string_view id, std::string_view name, co
     d.parameterCount = params.size();
     d.latencyFrames = latencyFrames;
     d.tailFrames = tailFrames;
+    // #120: a stereo effect may run per note (#127); the ones that must not opt out (keyed, the limiter).
+    d.domains = kDomainWhole | kDomainPerNote;
+    d.cpuClass = CpuClass::Medium;
     return d;
 }
 
@@ -52,6 +55,8 @@ ModuleDescriptor keyedEffectDescriptor(std::string_view id, std::string_view nam
     ModuleDescriptor d = effectDescriptor(id, name, params, latencyFrames, tailFrames);
     d.ports = notes ? kKeyedNotePorts : kKeyedPorts;
     d.portCount = notes ? 4 : 3;
+    d.domains = kDomainWhole;  // a sidechain is the track's or a bus's signal, not one note's
+    d.capabilities = notes ? kCapabilityNotesIn : 0u;
     return d;
 }
 

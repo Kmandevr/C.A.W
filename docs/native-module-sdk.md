@@ -245,6 +245,8 @@ The process callback may run on the audio thread. It must:
 
 Creation, destruction, state serialization, graph compilation and asset loading happen off the audio thread. A module that violates the contract can still stall or crash an in-process host: native modules are trusted code, **not a security sandbox**. Untrusted modules require process isolation, which is a separate future host feature.
 
+**Revision 3.1 (#120, #127, 2026-11-11).** `CAW_COMPONENT_ABI_REVISION 1` appends the descriptor's `domains`, `capabilities` and `cpu_class` and the process block's `voices` (the voice bus); a host reads them only when `struct_size` covers them, and a 3.0 component loads as whole-only. In C++ set `ModuleDescriptor::domains` (default whole only: add `kDomainPerNote` when the effect is safe to run once per note, or, for an instrument, when it renders into `ProcessBlock::voices` with `caw::VoiceLanes`), `capabilities` and `cpuClass`. The rules and the lane protocol: [engine](engine.md#descriptor-domains-and-the-voice-bus-120-127).
+
 ## Resource and compatibility rules
 
 - Stable IDs identify modules; display names are not identifiers.
@@ -253,7 +255,7 @@ Creation, destruction, state serialization, graph compilation and asset loading 
 - State size is capped by the host and declared maximum; the host rejects oversized state.
 - Hosts must pin module version and preserve project snapshots or report missing/incompatible dependencies.
 - Optional features may be omitted from a build, but a missing dependency must be reported explicitly rather than silently substituted.
-- The v1 interface is stereo-native. Mono and discrete layouts are explicit port declarations, never inferred from buffer count.
+- The interface is stereo-native. Mono and discrete layouts are explicit port declarations, never inferred from buffer count; a graph widens only a mono output into a stereo input (duplicated), and stereo into mono needs `org.caw.downmix`.
 
 ## Display data
 

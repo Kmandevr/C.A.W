@@ -111,7 +111,7 @@ const ParamTable& clipParams() {
     return t;
 }
 const ModuleDescriptor& clipDescriptor() {
-    static const ModuleDescriptor d = effectDescriptor("org.caw.clipper", "Clipper", clipParams(), 0, 0);
+    static const ModuleDescriptor d = withCpu(effectDescriptor("org.caw.clipper", "Clipper", clipParams(), 0, 0), CpuClass::Light);
     return d;
 }
 
