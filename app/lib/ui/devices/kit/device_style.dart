@@ -2,6 +2,7 @@
 import 'package:flutter/material.dart';
 
 import '../../theme.dart';
+import '../effects/space/space_fx.dart' show fxSpaceFamilies; // fx-space
 // fx-filters begin
 import '../effects/filters/filters_display.dart' show filtersFamily;
 // fx-filters end
@@ -61,6 +62,7 @@ DeviceFamily? familyOfComponent(String id) => filtersFamily(id) /* fx-filters */
       'org.caw.tapestop' || 'org.caw.reverser' || 'org.caw.stutter' || 'org.caw.pitchshift' || 'org.caw.freqshift' ||
           'org.caw.trancegate' || 'org.caw.bitcrush' || 'org.caw.ringmod' => DeviceFamily.creative,
       _ when id.startsWith('org.caw.synth.') || id == 'org.caw.bass' => DeviceFamily.synth,
+      _ when fxSpaceFamilies.containsKey(id) => fxSpaceFamilies[id], // fx-space
       _ => null,
     };
 

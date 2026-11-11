@@ -128,6 +128,15 @@ updated: 2026-11-11
 - **Ring mod** with a key: giving it a key turns its carrier to Sidechain, and removing the key turns it back to Sine. The sidechain key is the existing keyed-effect port (as the ducker's).
 - **Bitcrush stays separate from the saturator's Crush mode**: it models a converter pair (anti-alias and anti-image filters, jitter, dither, fractional bits); the saturator's mode is unchanged.
 
+## 2026-11-11: Space, Modulation and Utility effects (fx-space, choices to confirm)
+
+**Decision (Claude, for the owner to confirm):** eleven new built-ins for the browser's Space, Modulation and Utility tabs (convolver, shimmer, Haas, ensemble, doubler, vibrato, tremolo, auto-pan, rotary, imager, channel mixer; [engine](engine.md#c-api-engineincludecawh)) with plugin UIs ([app](app.md)). No new dependency. One C API addition: `caw_engine_set_component_state`, API version 14 (the next free number after the drums and meters branches).
+- **New effects beside the old ones, not extensions:** the ensemble is a separate multi-voice unit (`org.caw.chorus` stays the small three-knob chorus, its presets untouched); the imager is multiband with meters (`org.caw.utility` and `org.caw.stereo.width` stay); the shimmer reuses the reverb kernel as its own device rather than a mode of `org.caw.reverb.pro`.
+- **Impulse responses are generated, not shipped:** nine types from seeded noise, chirps, combs and grains, so nothing is licensed. A user WAV is decoded on the control thread with every size checked, capped at 10 s and 16 MB, and stored in the project (base64 of the file) so it travels with it; a 10 s stereo file at 48 kHz adds up to about 5 MB to the project (the decoded floats, base64).
+- **Loading a WAV rebuilds the chain:** the other effects on that track keep their values and saved state but restart their running sound (a delay's echoes) with a 20 ms crossfade. An undo of the load changes the project but not what plays until a reload.
+- **Response length by quality:** 5 s at High, 3.5 s at Normal, 2 s at Eco (longer files are trimmed).
+- **Other Kilohearts snapins of this area:** Stereo (Mid, Width, Pan) is covered by the existing utility and the imager; Gain by the utility; Chorus (delay, rate, depth, spread, taps) by the ensemble; Reverb's Early (early/late balance) is not a control of `org.caw.reverb.pro` (follow-up). Not built here: a "Trance gate" and "Ring mod" belong to fx-creative.
+
 ## 2026-11-11: EQ & Filter effects (fx-filters, choices to confirm)
 
 **Decision (Claude, for the owner to confirm):** nine new built-ins for the browser's EQ & Filter tab (ladder, nonlinear filter, comb, resonator, formant, disperser, 3-band EQ, tilt EQ, graphic EQ; [engine](engine.md#c-api-engineincludecawh)) with plugin UIs ([app](app.md)). No new dependency, no C API change.
