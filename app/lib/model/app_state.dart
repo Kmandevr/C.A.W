@@ -815,10 +815,13 @@ class AppState extends ChangeNotifier {
 
   // ---------- transport ----------
 
+  /// The clock tap tempo reads (tests swap in a fake one so the result doesn't depend on machine load).
+  DateTime Function() tapClock = DateTime.now;
+
   /// Records a tempo tap; pauses over two seconds restart the measurement.
   /// [at] is injectable for deterministic tests.
   void tapTempo({DateTime? at}) {
-    final now = at ?? DateTime.now();
+    final now = at ?? tapClock();
     if (_tempoTaps.isNotEmpty && now.difference(_tempoTaps.last) > const Duration(seconds: 2)) {
       _tempoTaps.clear();
     }
