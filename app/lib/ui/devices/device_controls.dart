@@ -14,6 +14,7 @@ import '../theme.dart';
 import '../tokens.dart' show Radii;
 import '../widgets.dart' show ResetOnDoubleTap;
 import 'device_scope.dart';
+import 'kit/key_param.dart';
 import 'midi_learn.dart';
 import 'modulators/modulator_devices.dart' show modulatorColor, showModLinkSheet;
 import 'kit/feel.dart';
@@ -86,9 +87,18 @@ class _DeviceKnobState extends State<DeviceKnob> {
   Widget build(BuildContext context) {
     final app = DeviceScope.of(context).target.state;
     // Project modulation (#161): its links, the output being dragged and assign mode redraw the knob.
-    return ListenableBuilder(
-      listenable: Listenable.merge([app.modulationTick, app.draggingModulation, app.assigningModulation]),
-      builder: (context, _) => _build(context));
+    return KeyParam(
+      paramId: widget.paramId,
+      onType: () {
+        final t = DeviceScope.of(context).target;
+        final p = t.param(widget.paramId);
+        if (p != null && !p.isChoice) _typeValue(context, p, t.value(p.id));
+      },
+      kind: DeviceScope.of(context).target.param(widget.paramId)?.isChoice ?? false ? KeyParamKind.choice : KeyParamKind.range,
+      child: ListenableBuilder(
+        listenable: Listenable.merge([app.modulationTick, app.draggingModulation, app.assigningModulation]),
+        builder: (context, _) => _build(context)),
+    );
   }
 
   Widget _build(BuildContext context) {
@@ -708,11 +718,16 @@ class DeviceChoice extends StatelessWidget {
         onChanged: (k) { if (k != null) pick(k); },
       )));
     }
-    if (label == null) return body;
+    // The keyboard steps through it (a dropdown's own button also opens it with Enter).
+    final keyed = names.length <= maxSegments
+        ? KeyParam(paramId: p.id, kind: KeyParamKind.choice,
+            child: Semantics(label: label ?? p.label, value: names[i], child: body))
+        : body;
+    if (label == null) return keyed;
     return Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
       Text(label!, style: const TextStyle(fontSize: 9, color: Neon.dim)),
       const SizedBox(height: 2),
-      body,
+      keyed,
     ]);
   }
 }
@@ -764,7 +779,11 @@ class DeviceSlider extends StatelessWidget {
     final v = t.value(p.id);
     final c = color ?? scope.accent;
     final bipolar = p.min < 0 && p.max > 0;
-    return ResetOnDoubleTap(
+    return KeyParam(paramId: p.id, child: Semantics(
+      label: label ?? p.label,
+      value: formatParamValue(p, v),
+      slider: true,
+      child: ResetOnDoubleTap(
       onReset: () => t.set(p.id, p.defaultValue),
       child: LayoutBuilder(builder: (context, box) {
         void at(double x) => t.setLive(p.id, taper.value(x / box.maxWidth));
@@ -799,7 +818,7 @@ class DeviceSlider extends StatelessWidget {
           )),
         ));
       }),
-    );
+    )));
   }
 }
 

@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 
 import '../../actions/actions.dart';
 import '../motion.dart';
+import '../theme.dart';
+import '../tokens.dart';
 
 /// Runs one of an area's actions; false when it doesn't do that one (the generic moves then try it).
 typedef KeyAreaAction = bool Function(String id, int count, String? arg);
@@ -373,4 +375,35 @@ int focusDepth(FocusNode node) {
 FocusScopeNode? routeScope(ModalRoute<dynamic> route) {
   final ctx = route.subtreeContext;
   return ctx == null || !ctx.mounted ? null : FocusScope.of(ctx);
+}
+
+/// The focus ring drawn on an item a screen selects with the keyboard itself (the FX chain's effect, the mixer's
+/// strip), where the item is not a focus node of its own.
+class KeyRingBox extends StatelessWidget {
+  const KeyRingBox({super.key, required this.child, this.label});
+  final Widget child;
+
+  /// A small tag above the ring (the mixer's control: "Pan +0.20").
+  final String? label;
+
+  @override
+  Widget build(BuildContext context) => Container(
+        key: const ValueKey('key-ring-box'),
+        foregroundDecoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(KeyRing.radius + KeyRing.gap),
+          border: Border.all(color: KeyRing.color, width: KeyRing.width),
+          boxShadow: [BoxShadow(color: KeyRing.accent.withValues(alpha: 0.45), blurRadius: 6)],
+        ),
+        child: label == null
+            ? child
+            : Stack(clipBehavior: Clip.none, children: [
+                child,
+                Positioned(left: 2, right: 2, top: 2, child: Center(child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                  decoration: BoxDecoration(color: KeyRing.accent, borderRadius: BorderRadius.circular(Radii.s)),
+                  child: Text(label!, maxLines: 1, overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontSize: 9, fontWeight: FontWeight.w800, color: Neon.bg)),
+                ))),
+              ]),
+      );
 }

@@ -15,6 +15,7 @@ import '../theme.dart';
 import '../tokens.dart';
 import 'device_registry.dart';
 import 'device_scope.dart';
+import 'kit/key_param.dart';
 import 'sidechain_bar.dart';
 import 'kit/device_style.dart';
 import 'kit/feel.dart';
@@ -239,7 +240,7 @@ class _DeviceEditorState extends State<DeviceEditor> {
         const SizedBox(width: 4),
       ])),
     );
-    return DeviceFingers.counter(child: Column(key: const ValueKey('device-editor'), crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+    return DeviceFingers.counter(child: DeviceKeyArea(label: '$title device', child: Column(key: const ValueKey('device-editor'), crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       header,
       Container(height: 2, decoration: BoxDecoration(gradient: LinearGradient(colors: Neon.ramp([
         color.withValues(alpha: 0.0), color.withValues(alpha: 0.8), second.withValues(alpha: 0.8), second.withValues(alpha: 0.0)])))),
@@ -254,7 +255,7 @@ class _DeviceEditorState extends State<DeviceEditor> {
         duration: Motion.fade(Motion.small, Motion.of(context)),
         opacity: t.bypass ? 0.55 : 1,
         child: body)),
-    ]));
+    ])));
   }
 }
 

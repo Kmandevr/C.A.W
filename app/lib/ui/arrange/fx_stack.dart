@@ -19,6 +19,9 @@ import '../cpp/plugin_screen.dart';
 import '../files/asset_picker.dart';
 import '../frame/sections.dart';
 import '../glass.dart';
+import '../keyboard/key_area.dart';
+import '../../actions/actions.dart';
+import '../motion.dart';
 import '../theme.dart';
 import '../volume_fader.dart';
 import 'arrange_drag.dart';
@@ -59,11 +62,107 @@ class FxStack extends StatefulWidget {
 class _FxStackState extends State<FxStack> {
   bool _routing = false;
   final _scroll = ScrollController();
+  final _keys = FocusNode(debugLabel: 'fx-chain');
+
+  @override
+  void initState() {
+    super.initState();
+    _keys.addListener(_focusChanged);
+  }
 
   @override
   void dispose() {
+    _keys.removeListener(_focusChanged);
+    _keys.dispose();
     _scroll.dispose();
     super.dispose();
+  }
+
+  void _focusChanged() {
+    // The keyboard picks an effect as soon as the chain has the focus.
+    if (_keys.hasFocus && _selected == null && _slots.isNotEmpty) setState(() => _selected = _slots.first);
+    setState(() {});
+  }
+
+  /// The chain's slots top to bottom, as the cards show them: the instrument, then the native effects.
+  List<(String, int)> get _slots => [
+        if (!_nativeOnly && layer.instrument != null) ('instrument', 0),
+        for (var i = 0; i < layer.components.length; i++) ('native', i),
+      ];
+
+  final Map<(String, int), GlobalKey> _cardKeys = {};
+  GlobalKey _cardKey((String, int) slot) => _cardKeys.putIfAbsent(slot, GlobalKey.new);
+
+  void _select((String, int) slot) {
+    setState(() => _selected = slot);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final ctx = _cardKeys[slot]?.currentContext;
+      if (ctx != null && ctx.mounted) {
+        Scrollable.ensureVisible(ctx, duration: Motion.fade(Motion.standard, Motion.of(ctx)), curve: EditMotion.curve,
+            alignmentPolicy: ScrollPositionAlignmentPolicy.keepVisibleAtEnd);
+      }
+    });
+  }
+
+  /// The FX chain's keys (owner, 2026-11-11): up and down pick an effect, Enter opens it, Space bypasses, Ctrl+D
+  /// duplicates, Delete removes, Alt+Up and Alt+Down reorder.
+  bool _key(String id, int count, String? arg) {
+    final slots = _slots;
+    final at = _selected == null ? -1 : slots.indexOf(_selected!);
+    final sel = at < 0 ? null : slots[at];
+    final native = sel?.$1 == 'native' ? sel!.$2 : null;
+    switch (id) {
+      case 'fx.up' || 'fx.down':
+        if (slots.isEmpty) return true;
+        final d = id == 'fx.up' ? -count : count;
+        _select(slots[at < 0 ? (d > 0 ? 0 : slots.length - 1) : (at + d).clamp(0, slots.length - 1)]);
+      case 'fx.open':
+        if (sel == null) return false;
+        unawaitedOpen(sel);
+      case 'fx.bypass':
+        if (sel == null) return false;
+        if (native == null) {
+          s.setInstrumentBypass(layer, !layer.instrument!.bypass);
+        } else {
+          s.setNativeBypass(layer, native, !layer.components[native].bypass);
+        }
+      case 'fx.duplicate':
+        if (native == null) return false;
+        final copy = ComponentUseDoc.fromJson(layer.components[native].toJson());
+        if (copy == null || s.insertNativeEffect(layer, copy, at: native + 1) == null) return false;
+        _select(('native', native + 1));
+      case 'fx.delete':
+        if (sel == null) return false;
+        if (native == null) {
+          s.setNativeInstrument(layer, null);
+        } else {
+          s.removeNativeEffect(layer, native);
+        }
+        final left = _slots;
+        setState(() => _selected = left.isEmpty ? null : left[(at).clamp(0, left.length - 1)]);
+      case 'fx.moveUp' || 'fx.moveDown':
+        if (native == null) return false;
+        final to = native + (id == 'fx.moveUp' ? -1 : 1);
+        if (to < 0 || to >= layer.components.length) return true;
+        s.moveNativeEffect(layer, native, to);
+        _select(('native', to));
+      case 'fx.add':
+        addEffectTo(context, s, layer);
+      default:
+        return false;
+    }
+    return true;
+  }
+
+  void unawaitedOpen((String, int) slot) {
+    final i = slot.$1 == 'instrument' ? DeviceTarget.instrumentSlot : slot.$2;
+    final use = slot.$1 == 'instrument' ? layer.instrument : layer.components[slot.$2];
+    final cpp = use == null ? null : s.cppComponentFor(use.id);
+    if (cpp != null) {
+      openSource(context, BuildTab(BuildTabKind.cpp, use!.id));
+    } else {
+      openDeviceEditor(context, s, layer, i);
+    }
   }
 
   /// The selected card: ('native' | 'instrument', index).
@@ -90,12 +189,18 @@ class _FxStackState extends State<FxStack> {
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(10),
           border: hovering.isEmpty ? null : Border.all(color: trackColor(s, layer), width: 1.5)),
-        child: ValueListenableBuilder<Map<String, NativeComponentInfo>>(
-          valueListenable: s.componentCatalog,
-          builder: (context, _, _) => Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-            _toolbar(context),
-            Expanded(child: _routing ? _RoutingView(state: s, layer: layer) : _stack(context)),
-          ]),
+        child: KeyArea(
+          area: Area.fx,
+          label: '${layer.name} FX chain',
+          focusNode: _keys,
+          onAction: _key,
+          child: ValueListenableBuilder<Map<String, NativeComponentInfo>>(
+            valueListenable: s.componentCatalog,
+            builder: (context, _, _) => Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+              _toolbar(context),
+              Expanded(child: _routing ? _RoutingView(state: s, layer: layer) : _stack(context)),
+            ]),
+          ),
         ),
       ),
     );
@@ -138,9 +243,10 @@ class _FxStackState extends State<FxStack> {
         const _GroupLabel('BUS EFFECTS', null, note: 'On everything this bus hears: its tracks and the sends to it'),
       ] else if (layer.instrument != null) ...[
         const _GroupLabel('INSTRUMENT · C++', null, note: 'Plays the track\'s notes'),
-        _NativeEffectCard(key: ValueKey('fx-instrument-${layer.instrument!.id}'), state: s, layer: layer, index: -1,
-          instrument: true, selected: _selected == ('instrument', 0), glow: glow,
-          onSelect: () => setState(() => _selected = ('instrument', 0))),
+        KeyedSubtree(key: _cardKey(('instrument', 0)), child: _NativeEffectCard(
+          key: ValueKey('fx-instrument-${layer.instrument!.id}'), state: s, layer: layer, index: -1,
+          instrument: true, selected: _selected == ('instrument', 0), keyFocus: _keys.hasFocus, glow: glow,
+          onSelect: () => setState(() => _selected = ('instrument', 0)))),
       ] else ...[
         const _GroupLabel('INSTRUMENT', null, note: 'Nothing plays this track\'s notes yet'),
         Align(alignment: Alignment.centerLeft, child: TextButton.icon(
@@ -164,9 +270,11 @@ class _FxStackState extends State<FxStack> {
           onReorderItem: (from, to) => s.moveNativeEffect(layer, from, to),
           children: [
             for (var i = 0; i < layer.components.length; i++)
-              _NativeEffectCard(key: ValueKey('fx-native-$i-${layer.components[i].id}'), state: s, layer: layer,
-                index: i, selected: _selected == ('native', i), glow: glow,
-                onSelect: () => setState(() => _selected = ('native', i))),
+              KeyedSubtree(key: ValueKey('fx-native-$i-${layer.components[i].id}'), child: KeyedSubtree(
+                key: _cardKey(('native', i)),
+                child: _NativeEffectCard(state: s, layer: layer,
+                  index: i, selected: _selected == ('native', i), keyFocus: _keys.hasFocus, glow: glow,
+                  onSelect: () => setState(() => _selected = ('native', i))))),
           ],
         ),
       const SizedBox(height: 8),
@@ -272,11 +380,14 @@ Widget _iconAction({required String tooltip, required IconData icon, required Vo
 /// A native component's card: one of the track's C++ effects, or (with [instrument]) its C++ instrument.
 class _NativeEffectCard extends StatelessWidget {
   const _NativeEffectCard({super.key, required this.state, required this.layer, required this.index,
-    required this.selected, required this.glow, required this.onSelect, this.instrument = false});
+    required this.selected, required this.glow, required this.onSelect, this.instrument = false, this.keyFocus = false});
   final AppState state;
   final LayerDoc layer;
   final int index;
   final bool selected;
+
+  /// The chain has the keyboard focus: the selected card wears the focus ring.
+  final bool keyFocus;
   final Color glow;
   final VoidCallback onSelect;
   final bool instrument;
@@ -289,6 +400,11 @@ class _NativeEffectCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final card = _card(context);
+    return selected && keyFocus ? KeyRingBox(child: card) : card;
+  }
+
+  Widget _card(BuildContext context) {
     final use = _use;
     final info = state.componentInfo(use.id);
     final cpp = state.cppComponentFor(use.id);
