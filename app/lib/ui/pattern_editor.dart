@@ -314,7 +314,8 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
   // The row height while a pinch or the zoom bar changes it; saved to the roll's look when it ends.
   double? _rowDrag;
   double get _rowH => _rowDrag ?? _look.rowHeight;
-  static const _minRow = 10.0, _maxRow = 40.0, _minPx = 4.0, _maxPx = 200.0;
+  // Zoomed all the way out a long clip's bars are under a pixel each (owner, 2026-11-11: zoom out a lot).
+  static const _minRow = 10.0, _maxRow = 40.0, _minPx = 0.05, _maxPx = 200.0;
   bool _zoomBar = false;
   double _rowStart = 16, _pinchSpanY = 0;
   bool _pinchX = true, _pinchY = false;
@@ -450,6 +451,10 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
   /// The finest grid level shown at this zoom: lines at least 10 px apart, never finer than the resolution.
   Steps _levelFor(double minPx) {
     var steps = _triplet ? Steps(128, 3) : Steps(16 * 4, 1); // start at 4 bars' worth (or its triplet) and halve
+    // Far out, 16, 64, 256… bars' worth, so the lines stay apart.
+    while (steps.toDouble() * _pxPerStep < minPx && steps.toDouble() < 1e9) {
+      steps = Steps(steps.numerator * 4, steps.denominator);
+    }
     final finest = _snap ? _resSteps : Steps(1, 128);
     while (true) {
       final half = Steps(steps.numerator, steps.denominator * 2);
@@ -4141,7 +4146,12 @@ class _RollPainter extends CustomPainter {
       }
     }
     canvas.drawRect(Rect.fromLTWH(keyW, 0, w, rulerH), Paint()..color = Neon.panel);
-    for (var b = (t0 / bar).floor(); b * bar <= t1; b++) {
+    // A label every bar, or every 4, 16, 64… bars zoomed far out, so they never crowd (owner, 2026-11-11).
+    var every = 1;
+    while (every * bar * pxPerStep < 28 && every < 1 << 20) {
+      every *= 4;
+    }
+    for (var b = (t0 / bar / every).floor() * every; b * bar <= t1; b += every) {
       final x = keyW + b * bar * pxPerStep - scrollX;
       if (x < keyW) continue;
       ts.text = TextSpan(text: '${b + 1}', style: const TextStyle(color: Neon.dim, fontSize: 11));
