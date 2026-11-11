@@ -278,6 +278,7 @@ inline float cubic(float a, float b, float c, float d, float t) noexcept {
 
 class SamplerProcessor final : public InstrumentProcessor {
 public:
+    ~SamplerProcessor() override { delete old_; }
     const ModuleDescriptor& descriptor() const noexcept override { return samplerDescriptor(); }
     bool activate(double sampleRate, uint32_t) noexcept override {
         sr_ = sampleRate;
@@ -338,9 +339,15 @@ public:
 
 protected:
     void beginBlock(const ProcessBlock& b) noexcept override {
-        if (program_.poll()) {
-            for (Voice& v : voices_) v.active = false;  // new zones: the old voices' zones are gone
+        // New zones: the voices on the old ones fade out over kFadeSeconds, and the old program stays here
+        // (not freed) until they are done.
+        if (old_ && !plays(old_) && program_.retire(old_)) old_ = nullptr;
+        Program* previous = nullptr;
+        if (!old_ && program_.take(previous)) {
+            for (Voice& v : voices_)
+                if (v.active) fadeQuickly(v);
             std::fill(std::begin(counters_), std::end(counters_), 0u);
+            if (previous && (plays(previous) || !program_.retire(previous))) old_ = previous;
         }
         for (uint32_t k = 0; k < kParamCount; ++k) p_[k] = parameterAt(b, k, 0, parameters()[k].defaultValue);
     }
@@ -357,14 +364,12 @@ protected:
     void render(float* left, float* right, uint32_t frames, uint32_t, const ProcessBlock&) noexcept override {
         std::fill_n(left, frames, 0.0f);
         std::fill_n(right, frames, 0.0f);
-        const Program* prog = program_.current();
-        if (!prog) return;
         const double gain = detPow(10.0, p_[kGain] / 20.0);
         const int filter = static_cast<int>(p_[kFilter]);
         for (Voice& v : voices_) {
             if (!v.active) continue;
-            if (v.zone >= prog->zones.size()) { v.active = false; continue; }
-            const LoadedZone& z = prog->zones[v.zone];
+            if (!v.prog || v.zone >= v.prog->zones.size()) { v.active = false; continue; }
+            const LoadedZone& z = v.prog->zones[v.zone];
             const AudioAsset& a = *z.asset;
             v.amp.set(v.attack, v.decay, v.sustain, v.releaseTime, sr_);
             v.fenv.set(p_[kFAttack], p_[kFDecay], p_[kFSustain], p_[kFRelease], sr_);
@@ -402,9 +407,14 @@ protected:
                     sl = sl * wa + bl * wb;
                     sr = sr * wa + br * wb;
                 }
-                const double env = v.amp.next();
+                double env = v.amp.next();
                 v.fenv.next();
                 if (v.amp.done()) { v.active = false; break; }
+                if (v.killStep > 0) {  // stolen, or its zones replaced: a short fade out
+                    v.kill -= v.killStep;
+                    if (v.kill <= 0) { v.active = false; break; }
+                    env *= v.kill;
+                }
                 float ol = static_cast<float>(sl * env * v.gainL * gain), orr = static_cast<float>(sr * env * v.gainR * gain);
                 if (filter > 0) {
                     const SvfOutput fl = v.svfL.process(ol), fr = v.svfR.process(orr);
@@ -422,7 +432,9 @@ private:
     struct Voice {
         bool active = false, held = false;
         uint32_t noteId = 0;
+        const Program* prog = nullptr;  // the zones it plays (the current program, or the old one fading out)
         size_t zone = 0;
+        double kill = 1, killStep = 0;  // a fade out over kFadeSeconds when killStep > 0
         uint64_t age = 0;
         double pos = 0, pitch = 60;
         double gainL = 1, gainR = 1;
@@ -437,8 +449,18 @@ private:
         Adsr fenv;
         Svf svfL, svfR;
     };
+    static constexpr double kFadeSeconds = 0.005;
+    void fadeQuickly(Voice& v) noexcept {
+        v.held = false;
+        if (v.killStep == 0) v.killStep = 1.0 / std::max(1.0, kFadeSeconds * sr_);
+    }
+    bool plays(const Program* p) const noexcept {
+        for (const Voice& v : voices_)
+            if (v.active && v.prog == p) return true;
+        return false;
+    }
     void release(Voice& v) noexcept {
-        const Program* prog = program_.current();
+        const Program* prog = v.prog;
         v.held = false;
         if (prog && v.zone < prog->zones.size() && prog->zones[v.zone].z.loopMode == LoopMode::OneShot) return;
         v.amp.off = true;
@@ -468,31 +490,46 @@ private:
             if (!lz.asset) continue;
             if (z.group)  // choke: zones this group cuts off
                 for (Voice& v : voices_)
-                    if (v.active && v.zone < prog->zones.size() && prog->zones[v.zone].z.offBy == z.group) {
+                    if (v.active && v.prog == prog && v.zone < prog->zones.size() && prog->zones[v.zone].z.offBy == z.group) {
                         v.releaseTime = 0.005;
                         v.amp.off = true;
                         v.amp.e.set(v.attack, v.decay, v.sustain, 0.005, sr_);
                         v.amp.e.gateOff();
                     }
-            // A voice: a free one, else the oldest (polyphony counts the sounding voices).
+            // A voice: a free slot. Polyphony counts the sounding voices (not those fading out); at the limit the
+            // oldest releasing voice is stolen, else the oldest, and it fades out in its slot over kFadeSeconds
+            // while the new one starts in a spare slot.
             uint32_t sounding = 0;
             Voice* pick = nullptr;
             Voice* oldest = nullptr;
-            for (uint32_t i = 0; i < kSamplerVoices; ++i) {
-                Voice& v = voices_[i];
-                if (v.active) {
+            Voice* oldestReleasing = nullptr;
+            Voice* oldestFading = nullptr;
+            for (Voice& v : voices_) {
+                if (!v.active) {
+                    if (!pick) pick = &v;
+                } else if (v.killStep > 0) {
+                    if (!oldestFading || v.age < oldestFading->age) oldestFading = &v;
+                } else {
                     ++sounding;
-                    if (!oldest || v.age < oldest->age) oldest = &v;
-                } else if (!pick && i < kSamplerVoices) {
-                    pick = &v;
+                    if (v.amp.off) {
+                        if (!oldestReleasing || v.age < oldestReleasing->age) oldestReleasing = &v;
+                    } else if (!oldest || v.age < oldest->age) {
+                        oldest = &v;
+                    }
                 }
             }
-            if (sounding >= poly || !pick) pick = oldest;
+            Voice* victim = nullptr;
+            if (sounding >= poly) {
+                victim = oldestReleasing ? oldestReleasing : oldest;
+                if (victim) fadeQuickly(*victim);
+            }
+            if (!pick) pick = oldestFading ? oldestFading : victim;  // no slot left: one is cut
             if (!pick) return;
             Voice& v = *pick;
             v = Voice{};
             v.active = v.held = true;
             v.noteId = m.noteId;
+            v.prog = prog;
             v.zone = zi;
             v.age = ++clock_;
             v.pos = lz.start;
@@ -545,7 +582,9 @@ private:
 
     double sr_ = 0;
     double p_[kParamCount] = {};
-    Voice voices_[kSamplerVoices];
+    static constexpr uint32_t kSpareVoices = 8;  // slots for stolen voices fading out
+    Voice voices_[kSamplerVoices + kSpareVoices];
+    Program* old_ = nullptr;  // a replaced program whose voices are still fading out (audio thread)
     uint32_t counters_[kMaxSamplerZones] = {};
     uint32_t rng_ = 0x9E3779B9u;
     uint64_t clock_ = 0;

@@ -557,6 +557,52 @@ TEST(sampler_round_robins_loops_and_one_shots) {
     std::filesystem::remove_all(dir);
 }
 
+namespace {
+std::string samplerJson(const std::string& state, const std::string& params, const std::string& notes) {
+    return "{\"caw_project\":1,\"bpm\":120,\"loop_bars\":2,\"master\":1,\"modules\":[{\"id\":\"p\",\"source\":\""
+           "---\\nkind: pattern\\nlength: 32\\n---\\n" + notes + "\"}],\"layers\":[{\"id\":\"s\",\"name\":\"S\",\"volume\":1,"
+           "\"pattern\":\"p\",\"instrument\":{\"id\":\"org.caw.sampler\",\"params\":{" + params + "},\"state\":\"" +
+           b64(state) + "\"}}]}";
+}
+}  // namespace
+
+TEST(sampler_steals_a_releasing_voice_first_and_fades_the_stolen_one) {
+    const std::string dir = tempDir("steal");
+    const std::string a = writeWav(dir + "/a.wav", 48000, 1, 96000, [](int64_t, int) { return 0.25f; });
+    const std::string b = writeWav(dir + "/b.wav", 48000, 1, 96000, [](int64_t, int) { return -0.25f; });
+    const std::string zones = "{\"zones\":[{\"path\":\"" + jsonEscape(a) + "\",\"lokey\":60,\"hikey\":60},{\"path\":\"" +
+                              jsonEscape(b) + "\",\"lokey\":62,\"hikey\":62},{\"path\":\"" + jsonEscape(a) +
+                              "\",\"lokey\":64,\"hikey\":64}]}";
+    // Two voices: A held, B released (a long release), then C: B goes, not the older A.
+    auto x = render(samplerJson(zones, "\"polyphony\":2,\"attack\":0.005,\"release\":1",
+                                "0 C4 12 1\\n2 D4 1 1\\n4 E4 4 1\\n"), 40000, 64);
+    CHECK_NEAR(x[33000], 0.5 * std::sqrt(0.5), 0.02);  // A and C (each 0.25, at the centre's -3 dB)
+    // One voice: the second note steals the first, which fades out over about 5 ms instead of stopping dead.
+    x = render(samplerJson(zones, "\"polyphony\":1,\"attack\":0.005", "0 C4 4 1\\n1 D4 4 1\\n"), 12000, 64);
+    CHECK(x[5900] > 0.15f);
+    CHECK(largestStep(x, 5800, 6800) < 0.02f);
+    std::filesystem::remove_all(dir);
+}
+
+TEST(sampler_reload_fades_the_sounding_voices_out) {
+    const std::string dir = tempDir("reload");
+    const std::string a = writeWav(dir + "/a.wav", 48000, 1, 96000, [](int64_t, int) { return 0.25f; });
+    const std::string b = writeWav(dir + "/b.wav", 48000, 1, 96000, [](int64_t, int) { return -0.25f; });
+    const std::string za = "{\"zones\":[{\"path\":\"" + jsonEscape(a) + "\"}]}";
+    const std::string zb = "{\"zones\":[{\"path\":\"" + jsonEscape(b) + "\"}]}";
+    Engine e(48000);
+    e.setMasterBypass(true);
+    CHECK(e.setProjectJson(samplerJson(za, "\"attack\":0", "0 C4 16 1\\n")).find("\"ok\":true") != std::string::npos);
+    e.play();
+    std::vector<float> l(24000), r(24000);
+    for (int i = 0; i < 12032; i += 64) e.process(l.data() + i, r.data() + i, 64);
+    CHECK(e.setProjectJson(samplerJson(zb, "\"attack\":0", "0 C4 16 1\\n")).find("\"ok\":true") != std::string::npos);
+    for (int i = 12032; i < 24000; i += 64) e.process(l.data() + i, r.data() + i, 64);
+    CHECK(l[12000] > 0.15f);
+    CHECK(largestStep(l, 11000, 20000) < 0.02f);
+    std::filesystem::remove_all(dir);
+}
+
 TEST(sfz_import_reads_headers_inheritance_note_names_and_warns) {
     const std::string sfz = R"(// test
 #define $ROOT 60
