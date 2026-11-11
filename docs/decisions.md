@@ -57,6 +57,21 @@ Carries out the owner's decision of 2026-11-10 ("C++ replaces the .caw language"
 - **Bug fixed on the way:** a track's instrument installed while nothing sounds counted as still ringing at the first Play, which mixed in 5 ms of a phantom tail (a free-running source started at twice its level); a new instrument now starts idle.
 - **Open, for the owner:** an instrument track keeps running after a Stop until its output is quiet (or 30 s), and a never-quiet effect there now ends at that cap without the 20 ms fade buses get; a bus whose capped tail has faded comes back while a child track still rings out. The app still sends `voices`, `swap`, `seam_crossfade` and the key (Settings' light-mode voice cap and swap timing now change nothing): removing those settings is UI work.
 
+## 2026-11-11: The whole app works from the keyboard (owner)
+
+**Decision (owner, 2026-11-11).** "That's what I meant by vim": everything reachable with the keyboard alone, with the arrow keys or WASD, and the keys change with the context. Some examples:
+- select, duplicate and move tracks and clips;
+- select and edit notes in the piano roll;
+- pick an effect in a chain, open it, move between its knobs and change them;
+- the same in the mixer, Files, Build and Settings.
+
+**[Proposal]** The design:
+- every area has a visible keyboard focus and a context: Arrange tracks, Arrange clips, piano roll, FX chain, device knobs, mixer, Files, Build, a menu or sheet;
+- arrows and WASD move within the context; Enter opens or edits; Esc goes up a level; Tab moves to the next area;
+- the existing action keymap (`lib/actions/`) adds actions per context;
+- a which-key style hint strip shows the keys that work in the current context, and can be turned off;
+- the existing Vim mode stays as the alternative keymap.
+
 ## 2026-11-11: Track headers that shrink, collapse and open editors (owner)
 
 **Decision (owner, 2026-11-11):**
