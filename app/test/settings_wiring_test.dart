@@ -34,6 +34,7 @@ void main() {
     final s = await Settings.open(base: dir);
     await s.update((x) {
       x.audioDevice = 'USB Audio';
+      x.audioDeviceId = '{0.0.0.00000000}.{a1}';
       x.sampleRate = 96000;
       x.bufferFrames = 128;
       x.exclusiveAudio = true;
@@ -73,7 +74,8 @@ void main() {
     expect(CodePrefs.fontSize, 18, reason: 'the editors read it at once');
     final b = await Settings.open(base: dir);
     expect(b.loadedVersion, Settings.version);
-    expect([b.audioDevice, b.sampleRate, b.bufferFrames, b.exclusiveAudio], ['USB Audio', 96000, 128, true]);
+    expect([b.audioDevice, b.audioDeviceId, b.sampleRate, b.bufferFrames, b.exclusiveAudio],
+        ['USB Audio', '{0.0.0.00000000}.{a1}', 96000, 128, true]);
     expect([b.midiDevice, b.midiChannel, b.velocityCurve, b.midiFixedVelocity, b.midiThru],
         ['Keystation', 10, VelocityCurve.fixed, 0.6, false]);
     expect([b.keysVelocity, b.keysOctave, b.clickSound, b.clickVolume], [0.7, 5, ClickSound.tick, 0.4]);
@@ -262,7 +264,7 @@ void main() {
     s.dispose();
   });
 
-  test('with the engine: the click volume reaches it, the device choice is kept, the test tone sounds', () {
+  test('with the engine: the click volume reaches it, the device choice is kept, the test tone sounds', () async {
     final s = AppState();
     s.useAudioDevice = false;
     s.engine = Engine.create(sampleRate: 44100);
@@ -282,15 +284,33 @@ void main() {
     expect(half, closeTo(full / 2, full * 0.1));
     s.settings.update((x) {
       x.audioDevice = 'Speakers';
+      x.audioDeviceId = 'speakers-2';
       x.bufferFrames = 256;
       x.exclusiveAudio = true;
     });
     s.applyAudioSettings();
+    await s.audioConfigured; // the reopen runs on a background isolate
     final status = s.engine!.audioStatus();
-    expect([status.requestedDevice, status.requestedFrames, status.exclusiveRequested], ['Speakers', 256, true]);
+    expect([status.requestedDevice, status.requestedDeviceId, status.requestedFrames, status.exclusiveRequested],
+        ['Speakers', 'speakers-2', 256, true]);
+    expect(s.engine!.audioOn, isFalse, reason: 'audioOn follows the native device, which this build has none of');
     expect(s.playTestTone(), isNull);
     expect(s.engine!.testToneSounding, isTrue);
     s.dispose();
+  }, skip: !_haveEngine);
+
+  test('with the engine: device choices reach it off the UI isolate, in the order made', () async {
+    final e = Engine.create();
+    final first = e.configureAudio(device: 'A', periodFrames: 64);
+    final second = e.configureAudio(deviceId: 'id-b', device: 'B', periodFrames: 128, exclusive: true);
+    expect(await first, AudioConfigured.ok, reason: 'nothing runs, so nothing reopens');
+    expect(await second, AudioConfigured.ok);
+    final st = e.audioStatus();
+    expect([st.requestedDevice, st.requestedDeviceId, st.requestedFrames, st.exclusiveRequested], ['B', 'id-b', 128, true]);
+    expect(e.audioOn, isFalse);
+    final late = e.configureAudio(device: 'C');
+    e.dispose(); // the engine outlives the call in flight
+    expect(await late, AudioConfigured.ok);
   }, skip: !_haveEngine);
 }
 
