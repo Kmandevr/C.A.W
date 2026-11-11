@@ -874,6 +874,7 @@ Engine::~Engine() {
         delete c.masterChain;
         delete c.componentAutomation;
         delete c.delay;
+        delete c.sends;
     }
     Retired r;
     while (retired_->pop(r)) {
@@ -885,6 +886,7 @@ Engine::~Engine() {
         delete r.masterChain;
         delete r.componentAutomation;
         delete r.delay;
+        delete r.sends;
     }
     for (int i = 0; i < pendingCount_; ++i) {
         delete pending_[i].chain;
@@ -895,6 +897,7 @@ Engine::~Engine() {
         delete pending_[i].masterChain;
         delete pending_[i].componentAutomation;
         delete pending_[i].delay;
+        delete pending_[i].sends;
     }
     delete masterChain_;
     masterChain_ = nullptr;
