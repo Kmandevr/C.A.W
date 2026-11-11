@@ -7,6 +7,7 @@ import 'package:flutter/scheduler.dart';
 import '../engine/engine.dart';
 import 'arrange_fx.dart';
 import 'device_target.dart';
+import 'drums.dart';
 import 'project.dart';
 // fx-filters begin
 import '../ui/devices/effects/filters/filters_display.dart' show decodeFiltersDisplay;
@@ -122,6 +123,7 @@ DeviceDisplayFrame decodeDisplay(String componentId, List<double> f, int n) {
   double at(int i) => i < n ? f[i] : 0;
   Map<String, double> named(List<String> names, int from) =>
       {for (var i = 0; i < names.length && from + i < n; ++i) names[i]: f[from + i]};
+  if (componentId == drumsComponentId) return DrumsDisplayFrame.decode(f, n) ?? const DeviceDisplayFrame();
   // fx-filters begin
   if (decodeFiltersDisplay(componentId, f, n) case final frame?) return frame;
   // fx-filters end

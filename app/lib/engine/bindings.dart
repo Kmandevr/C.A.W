@@ -165,6 +165,11 @@ class Bindings {
             'caw_engine_release_touches'),
         migrateInstrument = lib.lookupFunction<Pointer<Utf8> Function(Pointer<Utf8>), Pointer<Utf8> Function(Pointer<Utf8>)>(
             'caw_migrate_instrument'),
+        drumsInfo = lib.lookupFunction<Pointer<Utf8> Function(), Pointer<Utf8> Function()>('caw_drums_info'),
+        drumsRandomize = lib.lookupFunction<Pointer<Utf8> Function(Int32, Uint32, Double, Int32, Pointer<Utf8>),
+            Pointer<Utf8> Function(int, int, double, int, Pointer<Utf8>)>('caw_drums_randomize'),
+        drumsExplode = lib.lookupFunction<Pointer<Utf8> Function(Pointer<Utf8>), Pointer<Utf8> Function(Pointer<Utf8>)>(
+            'caw_drums_explode'),
         setQuality = lib.lookupFunction<Void Function(Pointer<Void>, Int32), void Function(Pointer<Void>, int)>(
             'caw_engine_set_quality'),
         audioSetBufferMode = lib.lookupFunction<Void Function(Pointer<Void>, Int32, Int32),
@@ -296,6 +301,9 @@ class Bindings {
   final void Function(Pointer<Void>, double, int) playCountIn;
   final void Function(Pointer<Void>, int) setMetronome;
   final Pointer<Utf8> Function(Pointer<Utf8>) migrateInstrument;
+  final Pointer<Utf8> Function() drumsInfo;
+  final Pointer<Utf8> Function(int, int, double, int, Pointer<Utf8>) drumsRandomize;
+  final Pointer<Utf8> Function(Pointer<Utf8>) drumsExplode;
   final void Function(Pointer<Void>, int) setQuality;
   final void Function(Pointer<Void>, int, int) audioSetBufferMode;
   final int Function(Pointer<Void>) audioBufferFrames;
