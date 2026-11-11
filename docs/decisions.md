@@ -57,6 +57,18 @@ Carries out the owner's decision of 2026-11-10 ("C++ replaces the .caw language"
 - **Bug fixed on the way:** a track's instrument installed while nothing sounds counted as still ringing at the first Play, which mixed in 5 ms of a phantom tail (a free-running source started at twice its level); a new instrument now starts idle.
 - **Open, for the owner:** an instrument track keeps running after a Stop until its output is quiet (or 30 s), and a never-quiet effect there now ends at that cap without the 20 ms fade buses get; a bus whose capped tail has faded comes back while a child track still rings out. The app still sends `voices`, `swap`, `seam_crossfade` and the key (Settings' light-mode voice cap and swap timing now change nothing): removing those settings is UI work.
 
+## 2026-11-11: Latency compensation for Bluetooth and other outputs (owner)
+
+**Decision (owner, 2026-11-11).** Compensate for output latency on Bluetooth speakers and headphones, and on any output with noticeable delay (USB, HDMI, casting).
+
+**[Proposal]** How:
+- **Measure:** the output latency comes from the platform (Android AAudio/AudioTrack timestamps and the routed device type; Windows device and stream latency). Each output device gets a manual offset, saved per device, with presets for Bluetooth, and a tap-along or loopback calibration.
+- **Apply:**
+  - the playhead, meters, note highlights and the music-video preview show what you hear, not what was just rendered;
+  - recordings and MIDI takes are placed by the known round trip;
+  - metronome and count-in follow too.
+- **Show:** while Bluetooth adds more than about 50 ms, a small badge says so, because live playing and monitoring through Bluetooth will always feel late.
+
 ## 2026-11-11: Every change animates (owner)
 
 **Decision (owner, 2026-11-11):** "As a rule of thumb, if anything changes it should animate to its changed state." That covers moves, size changes, things appearing and disappearing, and panels and pages opening and closing, both in and out. Each animation is short, follows the theme's animation tokens, and respects Off, Reduced and the per-kind switches. Motion that helps use the app (drags following the finger) stays immediate. The fit-and-finish pass audits the whole app against this rule.
