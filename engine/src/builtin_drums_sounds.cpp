@@ -747,7 +747,7 @@ std::string drumsInfoJson() {
         if (n >= 36 && n < 36 + static_cast<int>(kPads)) j += ",\"pad\":\"" + padId(static_cast<uint32_t>(n - 36)) + "\"";
         j += "}";
     }
-    j += "],\"display\":{\"floats\":656,\"header\":16,\"pad_levels\":16,\"wave_max\":80,\"wave_min\":336,\"wave_bins\":256,"
+    j += "],\"display\":{\"version\":2,\"floats\":656,\"header\":16,\"pad_levels\":16,\"wave_max\":80,\"wave_min\":336,\"wave_bins\":256,"
          "\"pitch\":592,\"pitch_points\":64}}";
     return j;
 }

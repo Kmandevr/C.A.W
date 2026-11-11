@@ -38,6 +38,12 @@
 // - The grid runs on from block to block (it never restarts), and a hit reads its pad's knobs at its own frame,
 //   so a render is the same at any block size.
 
+#if defined(_MSC_VER) && !defined(__clang__)
+#define CAW_DRUMS_INLINE __forceinline
+#else
+#define CAW_DRUMS_INLINE inline __attribute__((always_inline))
+#endif
+
 namespace caw {
 
 namespace {
@@ -537,7 +543,7 @@ struct DrumVoice {
     // body
     DrumEnv bodyEnv, pitchEnv;
     double phase = 0, phase2 = 0, fEnd = 55, fStart = 220, invSr = 1.0 / 48000, p2ratio = 1.5, p2level = 0,
-           shapeAmt = 0, shapeNorm = 1, fold = 0, bodyLevel = 1, bodyRatio = 1;
+           shapeAmt = 0, shapeNorm = 1, fold = 0, bodyLevel = 1, bodyF = 55;
     int wave = 0;
     // pitch shape: four segments in semitones over the settled pitch
     bool points = false;
@@ -1226,7 +1232,7 @@ private:
             const double pe = v.pitchEnv.next();
             f = v.fEnd + (v.fStart - v.fEnd) * pe;
         }
-        v.bodyRatio = f / v.fEnd;
+        v.bodyF = f;
         const double dt = f * v.invSr;
         double y;
         switch (v.wave) {
@@ -1253,7 +1259,7 @@ private:
         const double env = v.subEnv.next();
         if (env == 0.0) return 0.0;
         double dt = v.subDt;
-        if (v.subFollow > 0.0 && v.bodyRatio != 1.0) dt *= lib::fastExp(v.subFollow * lib::fastLog(v.bodyRatio));
+        if (v.subFollow > 0.0 && v.bodyF != v.fEnd) dt *= lib::fastExp(v.subFollow * lib::fastLog(v.bodyF / v.fEnd));
         double y;
         switch (v.subWave) {
             case kSubTriangle: y = lib::triangleWave(v.subPhase); break;
@@ -1413,7 +1419,7 @@ private:
         return y * v.smpLevel;
     }
 
-    double voiceSample(DrumVoice& v) noexcept {
+    CAW_DRUMS_INLINE double voiceSample(DrumVoice& v) noexcept {
         double bodyRaw = 0.0, layers = 0.0;
         if (v.body) {
             bodyRaw = bodySample(v);
@@ -1611,6 +1617,18 @@ private:
             }
             float peak = padLevel_[pad];
             const bool toRoom = roomOn_ && v.roomSend > 0.0;
+            if (!toRoom && !v.sub && !v.wide) {  // the plain voice: mono, panned, no send
+                for (uint32_t k = 0; k < n; ++k) {
+                    const double y = voiceSample(v);
+                    busL[out][k] += y * v.gainL;
+                    busR[out][k] += y * v.gainR;
+                    const float a = static_cast<float>(y < 0.0 ? -y : y);
+                    if (a > peak) peak = a;
+                    if (v.capture) captureSample(pad, static_cast<float>(y));
+                }
+                padLevel_[pad] = peak;
+                continue;
+            }
             for (uint32_t k = 0; k < n; ++k) {
                 const double y = voiceSample(v);
                 // Pan the voice; a clean sub goes to both sides whole (mono), the side signal opposite ways.
