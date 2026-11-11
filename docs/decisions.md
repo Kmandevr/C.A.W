@@ -6,6 +6,18 @@ updated: 2026-11-11
 
 # Decisions
 
+## 2026-11-11: Theme profiles and edit animations (owner)
+
+**Decision (owner, 2026-11-11, answers to Claude's questions):**
+- **A theme is a full profile:**
+  - **look:** colours, fonts and size, corner roundness, glass, glow and density;
+  - **layout:** track height and header width, panel sizes, the dock layout, and the toolbar buttons' order and visibility;
+  - **behaviour:** gestures, menu style, haptics, motion and snap defaults.
+
+  Switching theme switches all of it. Profiles can be saved, duplicated, imported and exported, as colour themes are today.
+- **Edit animations:** anything an edit adds, deletes, moves or resizes animates. That covers notes, clips and tracks, lengths and sizes, and panels. The style is the user's choice, Subtle (the default) or Playful.
+- **Turning animations off:** one switch turns off every animation except the ones that help use the app (drag ghosts, snapping, press feedback). Each kind of edit animation also has its own switch (`EditMotion` in `app/lib/ui/motion.dart`).
+
 ## 2026-11-11: Touch editing in Arrange and the piano roll (owner)
 
 **Decision (owner, 2026-11-11, answers to Claude's questions):**
@@ -16,6 +28,12 @@ updated: 2026-11-11
 - **Tremolo and ratchet tools:** a ratchet count per note (2–8 even repeats with a velocity ramp), a **ratchet brush** (drag over notes to set their count), tremolo as a volume wobble, a **vibrato** tool (pitch), and curve handles on pitch bends.
 - **Advanced menus** (the note menu, the piano roll's ⋯, the Arrange menus): grouped into sections with the most-used items first. Numbers get a big slider, a type-in field and a reset.
 - **Build** can open anything text-based, but its focus is C++. It opens on C++, and it should be clear that C++ is what it is for.
+
+**How Arrange does it (Claude, choices to confirm; [App](app.md)):**
+- **A plain track becomes a parent by turning into a bus folder** (`makeParent`): it keeps its id, effects, sends, fader and volume and pan lanes, so what it nests plays through them as in REAPER, and its instrument and clips move to a new first track inside it of the same name. The engine's bus slots only sum and run effects; letting a bus also play an instrument is an engine change left for later, so the parent's own clips are not on its row as in REAPER.
+- **A second finger frees a long-press lift from the grid**, as the owner asked; it still makes a copy during a quick drag (the earlier choice), and the clip menu duplicates.
+- **The double tap replaces the clip's old double tap** (which opened its notes): the menu's first entry, Edit notes, does that. A plain tap on a header now waits out the double tap before opening the focus view, while the header's buttons answer at once.
+- **The menus' numbers:** the track menu's Volume (dB) and Pan apply live; the clip menu's Length (bars) applies when let go or entered, since it rebuilds the project.
 
 ## 2026-11-11: Audio assets, clips, sampler and input (WP-J; choices to confirm)
 

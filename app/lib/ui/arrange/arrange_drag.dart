@@ -57,6 +57,13 @@ class ArrangeDrag {
   /// Two fingers are on the timeline (a pinch): a clip drag doesn't start.
   bool pinching = false;
 
+  /// The drag in progress began with a long press (a clip picked up whole): a second finger resting on the screen
+  /// then frees it from the grid ([free]) instead of making a copy, as in the piano roll.
+  bool lifted = false;
+
+  /// A second finger rests on the screen during a [lifted] drag: it moves off the grid until that finger lifts.
+  final free = ValueNotifier<bool>(false);
+
   GlobalKey laneKey(String layerId) => _lanes.putIfAbsent(layerId, () => GlobalKey(debugLabel: 'lane-$layerId'));
   GlobalKey headerKey(String layerId) => _headers.putIfAbsent(layerId, () => GlobalKey(debugLabel: 'head-$layerId'));
 
@@ -84,16 +91,18 @@ class ArrangeDrag {
     return DragSpot.track(hit.$1);
   }
 
-  /// Where a dragged track header lands: REAPER's folder drop zone is the middle of a folder's panel; elsewhere the
-  /// upper half goes above the track and the lower half below it.
-  DragSpot? trackSpotAt(Offset global, ProjectDoc project) {
+  /// Where a dragged track header lands (owner, 2026-11-11, after REAPER): a plain up and down drag only reorders,
+  /// the upper half of a header going above that track and the lower half below it; with the finger in the
+  /// right-most third of a header the dragged track nests under that one (any track can be a parent).
+  DragSpot? trackSpotAt(Offset global) {
     final spot = spotAt(global, from: _headers);
     if (spot == null || spot.newTrack) return spot;
     final r = rectOf(_headers[spot.layerId]!)!;
+    if (global.dx >= r.left + r.width * 2 / 3 && global.dy <= r.bottom) {
+      return DragSpot.track(spot.layerId!, where: TrackDrop.into);
+    }
     final y = (global.dy - r.top) / r.height;
-    final folder = project.layers.where((l) => l.id == spot.layerId).firstOrNull?.isFolder ?? false;
-    final where = folder && y > 0.25 && y < 0.75 ? TrackDrop.into : (y < 0.5 ? TrackDrop.above : TrackDrop.below);
-    return DragSpot.track(spot.layerId!, where: where);
+    return DragSpot.track(spot.layerId!, where: y < 0.5 ? TrackDrop.above : TrackDrop.below);
   }
 
   // ---------- a drag in progress: edge scrolling and Escape ----------
@@ -103,9 +112,10 @@ class ArrangeDrag {
   VoidCallback? _onScroll, _onCancel;
 
   /// Starts a drag: [onScroll] runs after an edge scroll moved the view, [onCancel] when Escape is pressed.
-  void begin({required VoidCallback onScroll, required VoidCallback onCancel, bool track = false}) {
+  void begin({required VoidCallback onScroll, required VoidCallback onCancel, bool track = false, bool lift = false}) {
     active = true;
     dragsTrack = track;
+    lifted = lift;
     _onScroll = onScroll;
     _onCancel = onCancel;
     HardwareKeyboard.instance.addHandler(_key);
@@ -120,6 +130,7 @@ class ArrangeDrag {
   void end() {
     active = false;
     dragsTrack = false;
+    lifted = false;
     _edgeTimer?.cancel();
     _edgeTimer = null;
     _pointer = null;
@@ -127,6 +138,7 @@ class ArrangeDrag {
     HardwareKeyboard.instance.removeHandler(_key);
     hover.value = null;
     copy.value = false;
+    free.value = false;
   }
 
   bool _key(KeyEvent e) {
@@ -173,6 +185,7 @@ class ArrangeDrag {
     vScroll.dispose();
     hover.dispose();
     copy.dispose();
+    free.dispose();
   }
 }
 
