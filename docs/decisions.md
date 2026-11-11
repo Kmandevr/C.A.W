@@ -6,6 +6,40 @@ updated: 2026-11-11
 
 # Decisions
 
+## 2026-11-11: Drums: deep settings and real quality, every genre (owner)
+
+**Owner's words:** "The drum instrument needs to have an in-depth set of settings and effects to make all the sounds extremely versatile and be actual good quality. Research how different kicks, snares, hats etc. are made and make sure it has all of the settings. You should be able to make a kick a legitimate dubstep kick, an 808 kick, or just a normal-sounding kick. Make it so it can even sound acoustic even though it's generated."
+
+**What this requires of `org.caw.drums`:**
+1. **Research per drum type, with sources.** Every control needed to build each sound must exist.
+   - **Kicks:** dubstep/riddim (punch + sub + distorted mid, clipped, short click), 808 (long tuned boom with glide and saturation), techno rumble, trap, hardstyle, house/909, acoustic (beater, shell resonance, port, room).
+   - **Snares:** 808/909; acoustic (head modes + wires, rimshot, ghost notes); claps; trap and dubstep layered snares.
+   - **Hats:** closed, open and pedal; the 808 square bank; modal cymbals with choke and openness.
+   - **Toms, cymbals (crash, ride, bell, china) and percussion.**
+2. **Real acoustic realism:**
+   - modal/physical layers with enough modes;
+   - strike position and damping;
+   - velocity changing the spectrum, not just the level;
+   - per-hit micro-variation;
+   - a room/body stage.
+3. **Effects deep enough for these genres:**
+   - multi-type distortion with pre/post filter;
+   - a clipper, EQ, compressor and transient shaper;
+   - a pitch-envelope shape editor;
+   - a layered sub with its own envelope;
+   - width that keeps the sub mono;
+   - a room send.
+4. **Quality checked numerically** against research targets (spectrum, pitch curve, decay, crest factor), with genre-accurate factory presets ("Dubstep kick", "808 kick" long and short, "Acoustic kick", "Acoustic snare", "Ride", "Crash", …).
+
+## 2026-11-11: Finish the whole roadmap, then optimize, then a fit-and-finish pass (owner)
+
+**Owner's words:** "Don't stop until everything in the roadmap is completely done. I want you continuously working… once everything in the roadmap is done, go and optimize everything so it's fast, it's quick and that it runs extremely well. Then make sure everything is user friendly. Don't change the layout or things in the app, just make sure it fits well in the UI."
+
+**The order:**
+1. Every roadmap item (beta scope above).
+2. A performance pass across the engine and the app.
+3. A user-friendliness pass that keeps the layout and features as they are and only fixes fit, spacing, overflow, labels and feedback.
+
 ## 2026-11-11: The beta's scope: the whole roadmap, plus drums, effects and audio (owner)
 
 **The owner's words:** "Make sure everything in the roadmap is done. Including the routing and the hard stuff too."
@@ -26,6 +60,29 @@ updated: 2026-11-11
   - hardware MIDI pads supported.
 
 **Still the roadmap's call:** Stages 8–10 stay after Release 1: Faust, plug-in hosting, and iOS/macOS/Linux builds.
+
+## 2026-11-11: Dynamics and Drive effects (fx-dynamics; choices to confirm)
+
+**Decision (owner, 2026-11-11):** "any effect you would reasonably want is already there", Kilohearts-style; all four groups equally important. The Dynamics and Drive group added Dynamics, Multiband dynamics with an OTT mode, a De-esser, a Clipper and Phase distortion, and five curves, spread and dynamics to the saturator (see [engine reference](engine.md#dynamics-and-drive-research-and-technique-fx-dynamics-2026-11-11)). **Choices made on the owner's behalf, to confirm:**
+- **Extend, don't duplicate:** the new distortion types are saturator modes (appended, so saved projects keep their mode), not a second distortion effect; expansion and upward compression live in Dynamics, not in the gate or compressor.
+- **Multiband opens in OTT mode at 50 % depth.** OTT's per-band numbers are the commonly quoted ones for Ableton's OTT preset, not confirmed ([Assumption]).
+- **Upward lift never spikes:** an instant-attack detector limits the lift, so the attack knob shapes only the downward side and expansion.
+- **Clipper overshoot:** with oversampling and without Clip to 0 dB the output can pass the ceiling by a few dB (the IIR half-bands' phase); clipping again would bring the aliases back. Clip to 0 dB guarantees full scale. A linear-phase half-band would reduce the overshoot at the cost of latency (a follow-up if wanted).
+- **Phase distortion's latency** is a fixed 48 frames (1 ms at 48 kHz), declared, so the swing is ±46 frames whatever the sample rate.
+- **Not built:** an envelope follower as a modulation source (projects don't route modulation outputs yet); Bitcrush's ADC/DAC quality and dither, Faturator's color and stereo turbo, and Shaper's drawn curve as their own controls.
+
+## 2026-11-11: Creative and Pitch & Time effects (fx-creative, choices to confirm)
+
+**Decision (Claude, for the owner to confirm):** eight new built-ins (tape stop, reverser, stutter, pitch shifter, frequency shifter, trance gate, bitcrush, ring mod; [engine](engine.md#c-api-engineincludecawh)) with plugin UIs ([app](app.md)). No new dependency.
+- **A ninth device family, Creative** (yellow → pink), for both browser tabs, so these read apart from the modulation family's pink → violet.
+- **Tape stop's trigger is a knob** (`stop`, at or above 0.5 stops), so a lane or an LFO can trigger it, plus a hold-to-stop pad; Kilohearts has a Play switch. A start spins up from the tape under the head now (not where it stopped), and once at speed crossfades back to the live input over 12 ms, so the tape stop adds no lasting delay.
+- **Reverser's longest chunk is 2 s** (a half note at 60 BPM), to keep its buffer modest on a phone (4 MB at 48 kHz, as the tape stop's 8 s; the stutter's 3 s slice takes 1.2 MB).
+- **Pitch shifter: no formant-preserve mode.** It would need an FFT shifter with a spectral-envelope correction, or PSOLA with pitch detection: more latency and CPU. Its grain size sets its latency (half a grain), so the grain is not automatable or modulatable, as the ducker's look-ahead.
+- **Frequency shifter's "Both"** puts the upper sideband on the left and the lower on the right (a stereo effect), rather than summing both (which is ring modulation, already the ring mod).
+- **Trance gate:** one pattern (32 step levels saved with the device), not Kilohearts' eight pattern slots; Tie as a switch (a step after a sounding one doesn't retrigger) rather than per-step ties drawn by dragging.
+- **Stutter** is not a Kilohearts snapin; built as a seeded beat repeat (Ableton's Beat Repeat is the model), with a hold pad for live use.
+- **Ring mod** with a key: giving it a key turns its carrier to Sidechain, and removing the key turns it back to Sine. The sidechain key is the existing keyed-effect port (as the ducker's).
+- **Bitcrush stays separate from the saturator's Crush mode**: it models a converter pair (anti-alias and anti-image filters, jitter, dither, fractional bits); the saturator's mode is unchanged.
 
 ## 2026-11-11: Settings as a category list, every setting real (choices to confirm)
 

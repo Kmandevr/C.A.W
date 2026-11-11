@@ -5,6 +5,7 @@ import '../../../engine/component_info.dart';
 import '../device_registry.dart';
 import '../kit/device_style.dart';
 import 'drive_editors.dart';
+import 'dynamics/catalog.dart' show fxDynamicsEditors; // fx-dynamics
 import 'ducker_editor.dart';
 import 'dynamics_editors.dart';
 import 'effect_page.dart';
@@ -13,6 +14,9 @@ import 'filter_editor.dart';
 import 'mod_editors.dart';
 import 'space_editors.dart';
 import 'utility_editors.dart';
+// fx-creative begin
+import 'creative/creative_catalog.dart';
+// fx-creative end
 
 // An EQ band's knobs: `bandN_` or the built-in EQ's `bN_` (org.caw.eq).
 final _band = RegExp(r'^(band|b)(\d+)_(freq|gain|q|type|on|channel)$');
@@ -64,5 +68,7 @@ final Map<String, DeviceEditorEntry> _byId = {
   'org.caw.utility': singlePage('utility', 'UTILITY', Icons.tune, DeviceFamily.utility, () => const StereoPage()),
   'org.caw.stereo.width': singlePage('width', 'WIDTH', Icons.tune, DeviceFamily.utility, () => const StereoPage()),
   'org.caw.stereo.balance': singlePage('balance', 'BALANCE', Icons.tune, DeviceFamily.utility, () => const StereoPage()),
+  ...fxDynamicsEditors, // fx-dynamics: dynamics, multiband, de-esser, clipper, phase distortion
+  ...creativeEditors,  // fx-creative
 };
 

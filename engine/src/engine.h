@@ -141,9 +141,16 @@ public:
     void setMetronome(bool on);
     // The click's volume (0..1) and sound (caw.h CAW_CLICK_*), read by the audio thread at each click.
     void setMetronomeSound(double volume, int sound) noexcept;
-    // A test tone: [seconds] (0..10) of a 440 Hz sine at -12 dBFS after the master, playing or not; 0 ends it.
+    // A test tone: [seconds] (0..10) of a 440 Hz sine at -12 dBFS, playing or not, added after the master's gain
+    // and transport fades and before the safety limiter; 0 ends it.
     void testTone(double seconds) noexcept;
-    bool testToneSounding() const noexcept { return toneFlag_.load(std::memory_order_relaxed); }
+    // Whether a tone is asked for or still plays: a request the audio thread has not taken yet, or the state it
+    // published at its last callback (so a request ended before any callback, or too short to be a sample, is not).
+    bool testToneSounding() const noexcept {
+        return toneRequest_.load(std::memory_order_acquire) > 0 || toneActive_.load(std::memory_order_acquire);
+    }
+    // Drops any request and the tone in progress. Only while no process() runs (the device is closed).
+    void resetTestTone() noexcept;
     // Sound quality (caw.h CAW_QUALITY_*): the built-ins read it while they play (quality.h). Normal by default.
     void setQuality(int quality) noexcept;
     int quality() const noexcept { return quality_.load(std::memory_order_relaxed); }
@@ -174,7 +181,9 @@ public:
 
     // Audio thread: no allocation, locks or I/O.
     void process(float* left, float* right, int frames) noexcept;
-    void reportLoad(double load) noexcept;  // fraction of the callback's time budget used
+    // One callback's share of its time budget used, for [frames] frames at the engine's rate. The average, the time
+    // over budget before a layer is shed and the rest after it go by time, so any callback size behaves alike.
+    void reportLoad(double load, int frames) noexcept;
 
     struct Chain;
 
@@ -303,12 +312,15 @@ private:
     double clickPhase_ = 0, clickInc_ = 0, clickAmp_ = 0;
     std::atomic<float> clickVolume_{1.0f};
     std::atomic<int> clickSound_{0};
-    // The test tone: a request in samples from the control thread (-1: none), then the audio thread's own state.
+    // The test tone: a request in samples from the control thread (-1: none, 0: end it), then the audio thread's
+    // own state, which it alone publishes in toneActive_ (whether frames are left after its last callback).
     std::atomic<int64_t> toneRequest_{-1};
-    std::atomic<bool> toneFlag_{false};
+    std::atomic<bool> toneActive_{false};
     int64_t toneLeft_ = 0, toneLen_ = 0;
     double tonePhase_ = 0;
-    void mixTestTone(float* left, float* right, int frames) noexcept;
+    void takeToneRequest() noexcept;                       // once per callback, before any sample
+    double nextTone() noexcept;                            // the tone's next sample (only while toneLeft_ > 0)
+    void mixToneOnly(float* left, float* right, int frames) noexcept;  // frames the master stage did not run
     void startPlay(double fromStep, uint64_t playCount, uint32_t touchStamp) noexcept;
     void startClick(bool accent) noexcept;
     double nextClick() noexcept;  // the click's next sample (0 when none sounds)
@@ -332,7 +344,8 @@ private:
     int64_t loopLen_ = 0; // samples per project loop
     double dcL_[2] = {0, 0}, dcR_[2] = {0, 0}, limEnv_ = 0;
     double loadAvg_ = 0;
-    int overCount_ = 0, overCooldown_ = 0;
+    double overSeconds_ = 0, coolSeconds_ = 0;  // time over budget so far, time left before another layer is shed
+    double loadDt_ = 0, loadKeep_ = 0;          // the last callback's length and the average's weight for it
     bool overloadPending_ = false;
     int processCount_ = 0;
     int64_t chunkId_ = 0;
