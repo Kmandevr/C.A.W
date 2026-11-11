@@ -1,6 +1,7 @@
 // Saves projects as JSON files in app-private storage and remembers which one was open last.
 import 'dart:convert';
 import 'dart:io';
+import 'dart:isolate';
 
 import 'package:path_provider/path_provider.dart';
 
@@ -36,17 +37,24 @@ class ProjectStorage {
   File _file(String id) => File('${_root.path}${Platform.pathSeparator}$id.json');
   File get _settings => File('${_root.path}${Platform.pathSeparator}settings.json');
 
+  /// The saved projects, newest first. Every file is read and decoded for its name, so this runs off the UI isolate:
+  /// at startup it would otherwise cost as much as opening every project (#174).
   Future<List<ProjectSummary>> list() async {
-    final out = <ProjectSummary>[];
-    await for (final f in _root.list()) {
-      if (f is! File || !f.path.endsWith('.json') || f.path == _settings.path) continue;
-      try {
-        final j = jsonDecode(await f.readAsString()) as Map<String, dynamic>;
-        out.add(ProjectSummary(j['id'] as String, (j['name'] as String?) ?? 'Untitled', await f.lastModified()));
-      } catch (_) {
-        // A damaged file is skipped, not fatal.
+    final root = _root.path, settings = _settings.path;
+    final rows = await Isolate.run(() {
+      final out = <(String, String, int)>[];
+      for (final f in Directory(root).listSync()) {
+        if (f is! File || !f.path.endsWith('.json') || f.path == settings) continue;
+        try {
+          final j = jsonDecode(f.readAsStringSync()) as Map<String, dynamic>;
+          out.add((j['id'] as String, (j['name'] as String?) ?? 'Untitled', f.lastModifiedSync().microsecondsSinceEpoch));
+        } catch (_) {
+          // A damaged file is skipped, not fatal.
+        }
       }
-    }
+      return out;
+    });
+    final out = [for (final (id, name, at) in rows) ProjectSummary(id, name, DateTime.fromMicrosecondsSinceEpoch(at))];
     out.sort((a, b) => b.modified.compareTo(a.modified));
     return out;
   }
@@ -58,17 +66,20 @@ class ProjectStorage {
     final f = _file(id);
     if (!await f.exists()) return null;
     try {
-      return ProjectDoc.fromJson(jsonDecode(await f.readAsString()) as Map<String, dynamic>);
+      // Reading and decoding a big project runs off the UI isolate; the decoded map comes back without a copy.
+      final path = f.path;
+      return ProjectDoc.fromJson(await Isolate.run(() => jsonDecode(File(path).readAsStringSync())) as Map<String, dynamic>);
     } catch (_) {
       return null;
     }
   }
 
-  /// Writes through a temporary file so a crash mid-save never leaves a half-written project.
-  Future<void> save(ProjectDoc p) async {
+  /// Writes through a temporary file so a crash mid-save never leaves a half-written project. [json] is [p]'s
+  /// `jsonEncode(p.toJson())` when the caller already has it (the app shares it with its undo snapshot).
+  Future<void> save(ProjectDoc p, {String? json}) async {
     final f = _file(p.id);
     final tmp = File('${f.path}.tmp');
-    await tmp.writeAsString(const JsonEncoder.withIndent(' ').convert(p.toJson()), flush: true);
+    await tmp.writeAsString(json ?? jsonEncode(p.toJson()), flush: true);
     await tmp.rename(f.path);
   }
 
@@ -82,8 +93,9 @@ class ProjectStorage {
   Directory _restoreDirectory(String projectId) => Directory(
     '${_root.path}${Platform.pathSeparator}restore-points${Platform.pathSeparator}${_validatedProjectId(projectId)}');
 
-  /// Creates an explicit restore point atomically and retains at most 20 per project.
-  Future<String> createRestorePoint(ProjectDoc project) async {
+  /// Creates an explicit restore point atomically and keeps the newest [keep] per project (Settings › Projects and
+  /// files; 20 by default).
+  Future<String> createRestorePoint(ProjectDoc project, {int keep = 20}) async {
     final directory = _restoreDirectory(project.id);
     await directory.create(recursive: true);
     final sequence = (_restorePointSequence++).toString().padLeft(4, '0');
@@ -100,7 +112,7 @@ class ProjectStorage {
       (entity) => entity is File && entity.path.endsWith('.json'),
     ).cast<File>().toList())
       ..sort((a, b) => b.path.compareTo(a.path));
-    for (final stale in snapshots.skip(20)) {
+    for (final stale in snapshots.skip(keep.clamp(1, 100))) {
       await stale.delete();
     }
     return id;
@@ -137,7 +149,8 @@ class ProjectStorage {
         '${_restoreDirectory(projectId).path}${Platform.pathSeparator}$restorePointId.json',
       );
       if (!await file.exists()) return null;
-      final decoded = jsonDecode(await file.readAsString());
+      final path = file.path;
+      final decoded = await Isolate.run(() => jsonDecode(File(path).readAsStringSync()));
       if (decoded is! Map<String, dynamic>) return null;
       final project = ProjectDoc.fromJson(decoded);
       return project.id == projectId ? project : null;
@@ -191,12 +204,33 @@ class ProjectStorage {
     return directory;
   }
 
+  /// The project's sample packs (the sample-pack maker's renders): one folder per pack, shown in Files.
+  Directory samplePacksDirectory(String projectId) => Directory(
+    '${_root.path}${Platform.pathSeparator}samples${Platform.pathSeparator}${_validatedProjectId(projectId)}');
+
+  /// The project's audio (API 18): imported files are copied here, and recordings go into its `recordings` folder.
+  Directory audioDirectory(String projectId) => Directory(
+    '${_root.path}${Platform.pathSeparator}audio${Platform.pathSeparator}${_validatedProjectId(projectId)}');
+
+  /// The drum pads' own WAVs the user picked (`DrumSampleImport`), app-wide beside the projects folder.
+  Directory get drumSamplesDirectory => Directory('${_root.parent.path}${Platform.pathSeparator}drum_samples');
+
+  /// Built C++ libraries that came in a project package (they load only once the user trusts each one).
+  Directory nativeImportsDirectory(String projectId) => Directory(
+    '${_root.path}${Platform.pathSeparator}native-imports${Platform.pathSeparator}${_validatedProjectId(projectId)}');
+
   Future<void> delete(String id) async {
     final f = _file(id);
     if (await f.exists()) await f.delete();
     if (RegExp(r'^[A-Za-z0-9_-]{1,128}$').hasMatch(id)) {
       final history = _restoreDirectory(id);
       if (await history.exists()) await history.delete(recursive: true);
+      final samples = samplePacksDirectory(id);
+      if (await samples.exists()) await samples.delete(recursive: true);
+      final audio = audioDirectory(id);
+      if (await audio.exists()) await audio.delete(recursive: true);
+      final builds = nativeImportsDirectory(id);
+      if (await builds.exists()) await builds.delete(recursive: true);
     }
   }
 
@@ -210,4 +244,85 @@ class ProjectStorage {
   }
 
   Future<void> setLastOpened(String id) => _settings.writeAsString(jsonEncode({'last': id}));
+}
+
+/// What the app's folders take on the device, in bytes (Settings › Projects and files).
+class StorageUse {
+  const StorageUse({this.projects = 0, this.restorePoints = 0, this.themes = 0, this.other = 0, this.caches = 0});
+  final int projects, restorePoints, themes, other, caches;
+  int get total => projects + restorePoints + themes + other + caches;
+
+  /// Measures [support] (the app support folder: projects/, its restore-points/, themes/ and the rest, such as
+  /// settings and C++ builds) and [temp] (caches: renders waiting for the save picker), off the UI isolate.
+  static Future<StorageUse> measure(Directory support, Directory? temp) {
+    final s = support.path, t = temp?.path, sep = Platform.pathSeparator;
+    return Isolate.run(() {
+      var projects = 0, restore = 0, themes = 0, other = 0, caches = 0;
+      int size(FileSystemEntity f) {
+        try {
+          return f is File ? f.lengthSync() : 0;
+        } catch (_) {
+          return 0;
+        }
+      }
+      final projectsDir = '$s${sep}projects', restoreDir = '$projectsDir${sep}restore-points', themesDir = '$s${sep}themes';
+      if (Directory(s).existsSync()) {
+        for (final f in Directory(s).listSync(recursive: true, followLinks: false)) {
+          final n = size(f);
+          if (f.path.startsWith(restoreDir)) {
+            restore += n;
+          } else if (f.path.startsWith(projectsDir)) {
+            projects += n;
+          } else if (f.path.startsWith(themesDir)) {
+            themes += n;
+          } else {
+            other += n;
+          }
+        }
+      }
+      if (t != null && Directory(t).existsSync()) {
+        for (final f in Directory(t).listSync(recursive: true, followLinks: false)) {
+          caches += size(f);
+        }
+      }
+      return StorageUse(projects: projects, restorePoints: restore, themes: themes, other: other, caches: caches);
+    });
+  }
+
+  /// Deletes what is in [temp] (finished renders not saved yet; never projects or settings) and returns the bytes
+  /// freed. A file in use stays.
+  static Future<int> clearCaches(Directory temp) {
+    final t = temp.path;
+    return Isolate.run(() {
+      var freed = 0;
+      final dir = Directory(t);
+      if (!dir.existsSync()) return 0;
+      for (final f in dir.listSync(followLinks: false)) {
+        try {
+          if (f is File) {
+            final n = f.lengthSync();
+            f.deleteSync();
+            freed += n;
+          } else if (f is Directory) {
+            var n = 0;
+            for (final g in f.listSync(recursive: true, followLinks: false)) {
+              if (g is File) n += g.lengthSync();
+            }
+            f.deleteSync(recursive: true);
+            freed += n;
+          }
+        } catch (_) {
+          // In use or not ours to delete: left.
+        }
+      }
+      return freed;
+    });
+  }
+
+  static String format(int bytes) {
+    if (bytes < 1024) return '$bytes B';
+    if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(0)} KB';
+    if (bytes < 1024 * 1024 * 1024) return '${(bytes / 1024 / 1024).toStringAsFixed(1)} MB';
+    return '${(bytes / 1024 / 1024 / 1024).toStringAsFixed(2)} GB';
+  }
 }

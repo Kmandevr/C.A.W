@@ -1,15 +1,43 @@
-// App-wide settings (theme, density, motion, live coding) saved as settings.json, plus custom theme files in themes/
+// App-wide settings (audio, MIDI, recording, editing, look, projects, export) saved as settings.json, plus themes/
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 
+import '../ui/code_prefs.dart';
 import '../ui/glass.dart';
+import '../ui/haptics.dart';
 import '../ui/motion.dart';
 import '../ui/theme.dart';
+import '../ui/tokens.dart' show Radii;
+import '../ui/widgets.dart' show PeakMeter;
 
 enum Density { comfortable, compact }
+
+/// The frame (owner, 2026-11-10): Auto (the desktop frame on a big window: DeX, an external display, a tablet),
+/// Phone (always the phone frame) or Desktop (the rail, docking panels and floating windows, even on a phone).
+enum LayoutMode {
+  auto('Auto'),
+  phone('Phone'),
+  desktop('Desktop');
+
+  const LayoutMode(this.label);
+  final String label;
+}
+
+/// The UI font (a theme's look): the system's, or the bundled JetBrains Mono (the only bundled font).
+enum UiFont {
+  system('System'),
+  mono('JetBrains Mono');
+
+  const UiFont(this.label);
+  final String label;
+
+  /// The font family to give the Material theme (null: the system's).
+  String? get family => this == mono ? Neon.mono : null;
+}
 
 /// How a long-press menu opens (owner, 2026-11-09): a compact list near the finger, or a Bitwig-style ring.
 enum LongPressMenuStyle { list, ring }
@@ -134,6 +162,80 @@ class ExportHistoryEntry {
   }
 }
 
+/// When the metronome clicks: never, while recording (and its count-in), or whenever the song plays.
+enum Metronome { off, recording, always }
+
+/// What a MIDI recording does where the track already has clips (REAPER's record modes, UG 3.32): a new clip whose
+/// loop passes are takes, notes added into the clips there (overdub), or the notes there replaced over the time
+/// recorded (replace).
+enum MidiRecordMode {
+  takes('New clip, takes'),
+  overdub('Overdub'),
+  replace('Replace');
+
+  const MidiRecordMode(this.label);
+  final String label;
+}
+
+/// Sound quality (owner, 2026-11-10), in the engine's order (CAW_QUALITY_*): Eco spends less on oversampling,
+/// unison copies, reverb density and display updates; High oversamples the saturator further.
+enum SoundQuality { eco, normal, high }
+
+/// The device buffer (owner, 2026-11-10), in the engine's order (CAW_BUFFER_*): Auto uses a larger one while not
+/// recording (fewer wake-ups, less battery), Low latency always the smallest, Battery always the larger.
+enum AudioBuffer { auto, lowLatency, battery }
+
+/// The metronome's click, in the engine's order (CAW_CLICK_*).
+enum ClickSound {
+  classic('Classic'),
+  wood('Wood'),
+  tick('Tick');
+
+  const ClickSound(this.label);
+  final String label;
+}
+
+/// How a MIDI keyboard's velocity becomes a note's: as played, softer touches louder (Soft), harder needed (Hard),
+/// or always [Settings.midiFixedVelocity].
+enum VelocityCurve {
+  linear('Linear'),
+  soft('Soft'),
+  hard('Hard'),
+  fixed('Fixed');
+
+  const VelocityCurve(this.label);
+  final String label;
+
+  /// [v] (0..1) through the curve.
+  double apply(double v, double fixed) => switch (this) {
+        VelocityCurve.linear => v,
+        VelocityCurve.soft => math.sqrt(v.clamp(0.0, 1.0)),
+        VelocityCurve.hard => v * v,
+        VelocityCurve.fixed => fixed,
+      };
+}
+
+/// What New project starts from: an empty project, or the First loop template.
+/// How the exporter names a file: project, tempo and length (the default), the project alone, or the project and
+/// the date and time.
+enum ExportNaming {
+  detailed('Project, tempo, length'),
+  project('Project only'),
+  dated('Project, date and time');
+
+  const ExportNaming(this.label);
+  final String label;
+}
+
+/// The piano roll's tool when it opens.
+enum StartTool {
+  draw('Draw'),
+  select('Select');
+
+  const StartTool(this.label);
+  final String label;
+}
+
 class Settings extends ChangeNotifier {
   /// Settings kept in [dir] (settings.json and themes/); with no folder they live in memory only.
   Settings({this.dir}) {
@@ -163,16 +265,55 @@ class Settings extends ChangeNotifier {
     Neon.showScopes = performanceMode != PerformanceMode.minimal;
     Motion.setting = motion;
     Motion.haptics = haptics;
+    Haptics.strength = hapticStrength;
     Glass.enabled = glass;
     Glass.blurEnabled = glassBlur;
     Motion.minimalProfile = performanceMode == PerformanceMode.minimal;
+    EditMotion.style = editMotionStyle;
+    EditMotion.kinds = {...editMotionKinds};
+    Radii.scale = roundness;
+    Neon.glowStrength = glowStrength;
+    PeakMeter.fallDbPerSecond = meterFall;
+    CodePrefs.fontSize = codeFontSize;
+    CodePrefs.tabWidth = codeTabWidth;
+    CodePrefs.lineNumbers = codeLineNumbers;
+    CodePrefs.wrap = codeWrap;
   }
 
-  /// Motion (owner, 2026-11-04): Full, Reduced (fades only) or Off. Minimal and the system setting lower it further.
+  /// Motion (owner, 2026-11-04): Full, Reduced (fades only) or Off (owner, 2026-11-11: Off keeps the motion that
+  /// helps use the app, [Motion.usability]). Minimal and the system setting lower it further.
   MotionLevel motion = MotionLevel.full;
 
-  /// Haptic ticks on snaps, detents and placed notes; on by default (owner).
+  /// Edit animations (owner, 2026-11-11): their style, and the kinds turned on ([EditMotion]).
+  EditMotionStyle editMotionStyle = EditMotionStyle.subtle;
+  Set<EditMotionKind> editMotionKinds = {...EditMotionKind.values};
+
+  /// A theme's look besides its colours: the UI font, the text size (times the system's), the corners' roundness
+  /// ([Radii.scale]) and how strong the active glow is ([Neon.glowStrength]).
+  UiFont uiFont = UiFont.system;
+  double textScale = 1;
+  static const minTextScale = 0.85, maxTextScale = 1.3;
+  double roundness = 1;
+  static const maxRoundness = 2.0;
+  double glowStrength = 1;
+  static const maxGlowStrength = 2.0;
+
+  /// The profile the starter themes share (they are read-only): the look, layout and behaviour in force the last
+  /// time a starter theme was left for a custom one, put back when a starter is chosen again. Null until then.
+  Map<String, String>? baseProfile;
+
+  /// Haptics on every touch, step and drag; on by default (owner).
   bool haptics = true;
+
+  /// How strong the haptics are, 0 to 1 (owner, 2026-11-10: "a little bit more, just barely"; 0.5 is the base).
+  double hapticStrength = 0.5;
+
+  /// Which frame the app uses (owner, 2026-11-10): Auto picks the desktop frame on a big enough window.
+  LayoutMode layoutMode = LayoutMode.auto;
+
+  /// Phone landscape: the focus view's side panel's share of the width (owner, 2026-11-10: resizable, 2/3).
+  double focusPanelShare = defaultFocusPanelShare;
+  static const defaultFocusPanelShare = 2 / 3, minFocusPanelShare = 0.3, maxFocusPanelShare = 0.8;
 
   /// The docking layouts by screen shape (`phonePortrait`, `phoneLandscape`, `desktop`), kept as raw JSON: the dock
   /// reads them and falls back to a preset when one is missing or damaged.
@@ -182,6 +323,16 @@ class Settings extends ChangeNotifier {
   /// of each other with no room).
   double trackGap = 6;
   static const maxTrackGap = 24.0;
+
+  /// Arrange's track header width and track row height in logical pixels, dragged from the header's right edge and
+  /// a row's bottom edge (owner, 2026-11-10: narrower, thinner headers); 0 uses the screen's default.
+  double headerWidth = 0, trackHeight = 0;
+  static const minHeaderWidth = 96.0, maxHeaderWidth = 320.0;
+  static const minTrackHeight = 40.0, maxTrackHeight = 160.0;
+
+  /// How fast peak meters fall, in dB per second (owner, 2026-11-10: faster than the old 24, still smooth).
+  double meterFall = 96;
+  static const meterFalls = [48.0, 96.0, 144.0, 192.0];
 
   /// Long-press menus on tracks, clips and effects: a list by default, a ring as a choice.
   LongPressMenuStyle longPressMenu = LongPressMenuStyle.list;
@@ -201,10 +352,101 @@ class Settings extends ChangeNotifier {
   /// Vim editing in the code editor (WASD moves; I types). Off by default.
   bool vimCode = false;
 
+  /// Recording (owner, 2026-11-10): when the metronome clicks, and how many bars the count-in has (0: none).
+  Metronome metronome = Metronome.recording;
+  int countInBars = 1;
+
+  /// The transport's Automate button's write mode ('touch', 'latch', 'write', 'read'; owner, 2026-11-10: Touch).
+  String automationMode = 'touch';
+
+  /// Sound quality and the device buffer (owner, 2026-11-10).
+  SoundQuality soundQuality = SoundQuality.normal;
+  AudioBuffer audioBuffer = AudioBuffer.auto;
+
+  /// Settings › Audio: the playback device by the backend's id (two identical interfaces share a name) and by name,
+  /// which opens it when the id has changed (a driver reinstall) ('' both: the system default), the engine's sample
+  /// rate (fixed when the engine is made, so a change applies at the next start), a callback size in frames (0: the
+  /// buffer mode chooses) and exclusive mode where the backend takes it (WASAPI, AAudio).
+  String audioDevice = '';
+  String audioDeviceId = '';
+  int sampleRate = 48000;
+  static const sampleRates = [44100, 48000, 88200, 96000];
+  int bufferFrames = 0;
+  static const bufferSizes = [0, 16, 32, 48, 64, 96, 128, 192, 256, 384, 512, 768, 1024, 2048, 4096, 8192];
+  bool exclusiveAudio = false;
+
+  /// Settings › MIDI and input: the keyboard read ('' every connected one), its channel (0 every channel, else 1-16),
+  /// the velocity curve (and the Fixed value), and whether notes play the selected track outside a recording.
+  String midiDevice = '';
+  int midiChannel = 0;
+  VelocityCurve velocityCurve = VelocityCurve.linear;
+  double midiFixedVelocity = 0.8;
+  bool midiThru = true;
+
+  /// The MIDI devices turned off in Settings › MIDI (by name; the others are read), MPE, and the semitones a full
+  /// pitch bend moves (MPE: the master channel's; member channels and MIDI 2.0 per-note bend use 48).
+  Set<String> midiClosed = {};
+  bool midiMpe = false;
+  int midiBendRange = 2;
+
+  /// The on-screen keys: velocity from where a key is touched (0), else this fixed velocity; the octave they open on.
+  double keysVelocity = 0;
+  int keysOctave = 3;
+
+  /// The metronome's click: its sound and volume (0..1).
+  ClickSound clickSound = ClickSound.classic;
+  double clickVolume = 1;
+
+  /// Recording: bars played before the record point when Record starts from a stop (not recorded), and how much
+  /// earlier than heard (ms) a played note is written, for the output's delay.
+  int preRollBars = 0;
+  double recordOffsetMs = 0;
+
+  /// The MIDI record mode (Record's long-press).
+  MidiRecordMode midiRecordMode = MidiRecordMode.takes;
+  static const maxRecordOffsetMs = 250.0;
+
+  /// Settings › Editing: the piano roll opens with this grid (1/n note), snapping, tool and note length (steps; 0
+  /// follows the grid); the arrangement follows the playhead; the mouse wheel zooms without Ctrl; deleting a track asks.
+  int rollGrid = 16;
+  static const rollGrids = [4, 8, 16, 32, 64];
+  bool rollSnap = true;
+  StartTool rollTool = StartTool.draw;
+  double rollNoteSteps = 0;
+  static const rollNoteLengths = [0.0, 1.0, 2.0, 4.0, 8.0, 16.0];
+  bool followPlayhead = true;
+  bool wheelZooms = false;
+  bool confirmDelete = false;
+
+  /// Settings › Code editor: the code font size (the C++ editor's is scaled from it), tab width, line numbers and
+  /// soft wrap (the C++ editor; the .caw editor always wraps).
+  double codeFontSize = 15;
+  static const minCodeFontSize = 10.0, maxCodeFontSize = 24.0;
+  int codeTabWidth = 4;
+  bool codeLineNumbers = true;
+  bool codeWrap = false;
+
+  /// Settings › Projects and files: how long after the last edit the project is saved, how many restore points each
+  /// project keeps, and what New project starts with.
+  int autosaveMs = 500;
+  static const autosaveDelays = [500, 2000, 5000, 15000, 30000];
+  int restorePointsKept = 20;
+  double newProjectBpm = 140; // ProjectDoc's own default
+  int newProjectBeatsPerBar = 4;
+  /// The template New project opens (`lib/model/templates.dart` ids; '' is a blank project).
+  String newProjectTemplate = '';
+
+  /// Settings › Export: what the exporter opens with.
+  String exportKind = 'loop';
+  int exportSampleRate = 48000;
+  bool exportFloat32 = false;
+  double exportSeconds = 8;
+  ExportNaming exportNaming = ExportNaming.detailed;
+
   /// The piano roll's sizes, look and touch choices.
   RollLook roll = const RollLook();
 
-  /// The code editor's key row, completion chips, buttons and Controls panel.
+  /// The pattern editor's key row, buttons and scope.
   EditorLook editor = const EditorLook();
 
   /// Themes the user made or imported, saved one file each in themes/.
@@ -258,10 +500,23 @@ class Settings extends ChangeNotifier {
         'light_auto': lightAuto,
         'vim_code': vimCode,
         'motion': motion.name,
+        'edit_motion_style': editMotionStyle.name,
+        'edit_motion_kinds': EditMotion.kindNames(editMotionKinds),
+        'ui_font': uiFont.name,
+        'text_scale': textScale,
+        'roundness': roundness,
+        'glow_strength': glowStrength,
+        if (baseProfile != null) 'base_profile': baseProfile,
         'haptics': haptics,
+        'haptic_strength': hapticStrength,
+        'layout_mode': layoutMode.name,
+        'focus_panel_share': focusPanelShare,
         'glass': glass,
         'quick_actions': quickActions,
         'track_gap': trackGap,
+        if (headerWidth > 0) 'header_width': headerWidth,
+        if (trackHeight > 0) 'track_height': trackHeight,
+        'meter_fall': meterFall,
         'long_press_menu': longPressMenu.name,
         'glass_blur': glassBlur,
         'dock_layouts': dockLayouts,
@@ -270,7 +525,61 @@ class Settings extends ChangeNotifier {
         'export_history': [for (final entry in exportHistory) entry.toJson()],
         'roll': roll.toJson(),
         'editor': editor.toJson(),
+        'metronome': metronome.name,
+        'count_in_bars': countInBars,
+        'automation_mode': automationMode,
+        'sound_quality': soundQuality.name,
+        'audio_buffer': audioBuffer.name,
+        'settings_version': version,
+        'audio_device': audioDevice,
+        'audio_device_id': audioDeviceId,
+        'sample_rate': sampleRate,
+        'buffer_frames': bufferFrames,
+        'exclusive_audio': exclusiveAudio,
+        'midi_device': midiDevice,
+        'midi_channel': midiChannel,
+        'velocity_curve': velocityCurve.name,
+        'midi_fixed_velocity': midiFixedVelocity,
+        'midi_thru': midiThru,
+        'midi_closed': midiClosed.toList(),
+        'midi_mpe': midiMpe,
+        'midi_bend_range': midiBendRange,
+        'keys_velocity': keysVelocity,
+        'keys_octave': keysOctave,
+        'click_sound': clickSound.name,
+        'click_volume': clickVolume,
+        'pre_roll_bars': preRollBars,
+        'record_offset_ms': recordOffsetMs,
+        'midi_record_mode': midiRecordMode.name,
+        'roll_grid': rollGrid,
+        'roll_snap': rollSnap,
+        'roll_tool': rollTool.name,
+        'roll_note_steps': rollNoteSteps,
+        'follow_playhead': followPlayhead,
+        'wheel_zooms': wheelZooms,
+        'confirm_delete': confirmDelete,
+        'code_font_size': codeFontSize,
+        'code_tab_width': codeTabWidth,
+        'code_line_numbers': codeLineNumbers,
+        'code_wrap': codeWrap,
+        'autosave_ms': autosaveMs,
+        'restore_points_kept': restorePointsKept,
+        'new_project_bpm': newProjectBpm,
+        'new_project_beats_per_bar': newProjectBeatsPerBar,
+        'new_project_template': newProjectTemplate,
+        'export_kind': exportKind,
+        'export_sample_rate': exportSampleRate,
+        'export_float32': exportFloat32,
+        'export_seconds': exportSeconds,
+        'export_naming': exportNaming.name,
       };
+
+  /// The settings file's layout: 1 (no `settings_version`) had no Audio, MIDI, Editing, Projects or Export pages; 2
+  /// adds them. Every version-1 key keeps its name and meaning, so an older build still reads a newer file.
+  static const version = 2;
+
+  /// The file's version when it was read (1 for a file from before `settings_version`).
+  int loadedVersion = version;
 
   void fromJson(Map<String, dynamic> j) {
     T pick<T extends Enum>(List<T> values, Object? v, T fallback) =>
@@ -289,12 +598,47 @@ class Settings extends ChangeNotifier {
     lightAuto = (j['light_auto'] as bool?) ?? lightAuto;
     vimCode = (j['vim_code'] as bool?) ?? vimCode;
     motion = pick(MotionLevel.values, j['motion'], motion);
+    editMotionStyle = pick(EditMotionStyle.values, j['edit_motion_style'], editMotionStyle);
+    final kinds = j['edit_motion_kinds'];
+    if (kinds is List) editMotionKinds = EditMotion.parseKinds(kinds);
+    uiFont = pick(UiFont.values, j['ui_font'], uiFont);
+    double? unit(String k, double min, double max) {
+      final v = j[k];
+      return v is num && v.isFinite ? v.toDouble().clamp(min, max) : null;
+    }
+    textScale = unit('text_scale', minTextScale, maxTextScale) ?? textScale;
+    roundness = unit('roundness', 0, maxRoundness) ?? roundness;
+    glowStrength = unit('glow_strength', 0, maxGlowStrength) ?? glowStrength;
+    final base = j['base_profile'];
+    if (base is Map) {
+      baseProfile = {
+        for (final e in base.entries.take(256))
+          if (e.key is String && e.value is String && CawTheme.isProfileKey(e.key as String)) e.key as String: e.value as String,
+      };
+    }
     if (j['haptics'] is bool) haptics = j['haptics'] as bool;
+    final hs = j['haptic_strength'];
+    if (hs is num && hs.isFinite) hapticStrength = hs.toDouble().clamp(0.0, 1.0);
+    layoutMode = pick(LayoutMode.values, j['layout_mode'], layoutMode);
+    final fs = j['focus_panel_share'];
+    if (fs is num && fs.isFinite) focusPanelShare = fs.toDouble().clamp(minFocusPanelShare, maxFocusPanelShare);
     if (j['glass'] is bool) glass = j['glass'] as bool;
     if (j['quick_actions'] is bool) quickActions = j['quick_actions'] as bool;
     final gap = j['track_gap'];
     if (gap is num && gap.isFinite) trackGap = gap.toDouble().clamp(0.0, maxTrackGap);
+    final hw = j['header_width'];
+    if (hw is num && hw.isFinite && hw > 0) headerWidth = hw.toDouble().clamp(minHeaderWidth, maxHeaderWidth);
+    final th = j['track_height'];
+    if (th is num && th.isFinite && th > 0) trackHeight = th.toDouble().clamp(minTrackHeight, maxTrackHeight);
+    final fall = j['meter_fall'];
+    if (fall is num && fall.isFinite) meterFall = fall.toDouble().clamp(6.0, 240.0);
     longPressMenu = pick(LongPressMenuStyle.values, j['long_press_menu'], longPressMenu);
+    metronome = pick(Metronome.values, j['metronome'], metronome);
+    soundQuality = pick(SoundQuality.values, j['sound_quality'], soundQuality);
+    audioBuffer = pick(AudioBuffer.values, j['audio_buffer'], audioBuffer);
+    final countIn = j['count_in_bars'];
+    if (countIn is num && countIn.isFinite) countInBars = countIn.toInt().clamp(0, 4);
+    if (const ['touch', 'latch', 'write', 'read'].contains(j['automation_mode'])) automationMode = j['automation_mode'] as String;
     if (j['glass_blur'] is bool) glassBlur = j['glass_blur'] as bool;
     final dock = j['dock_layouts'];
     if (dock is Map) dockLayouts = {for (final e in dock.entries) if (e.key is String) e.key as String: e.value};
@@ -308,6 +652,76 @@ class Settings extends ChangeNotifier {
     if (r is Map<String, dynamic>) roll = RollLook.fromJson(r);
     final e = j['editor'];
     if (e is Map<String, dynamic>) editor = EditorLook.fromJson(e);
+    _fromJsonV2(j, pick);
+  }
+
+  void _fromJsonV2(Map<String, dynamic> j, T Function<T extends Enum>(List<T>, Object?, T) pick) {
+    double? num_(String k, double min, double max) {
+      final v = j[k];
+      return v is num && v.isFinite ? v.toDouble().clamp(min, max) : null;
+    }
+    String? text(String k, int max) => j[k] is String ? _settingText(j[k], max) : null;
+    bool? flag(String k) => j[k] is bool ? j[k] as bool : null;
+    final v = j['settings_version'];
+    loadedVersion = v is num ? v.toInt() : 1;
+    // Version 1 files: the old exporter opened at 48 kHz, 24-bit, 8 s and the loop, as the version-2 defaults do;
+    // "Low latency" chose the smallest buffer, which version 2's 0 frames (the mode chooses) still means.
+    audioDevice = text('audio_device', 255) ?? audioDevice;
+    audioDeviceId = text('audio_device_id', 511) ?? audioDeviceId;
+    final rate = j['sample_rate'];
+    if (rate is num && sampleRates.contains(rate.toInt())) sampleRate = rate.toInt();
+    final frames = j['buffer_frames'];
+    if (frames is num && bufferSizes.contains(frames.toInt())) bufferFrames = frames.toInt();
+    exclusiveAudio = flag('exclusive_audio') ?? exclusiveAudio;
+    midiDevice = text('midi_device', 255) ?? midiDevice;
+    midiChannel = num_('midi_channel', 0, 16)?.round() ?? midiChannel;
+    velocityCurve = pick(VelocityCurve.values, j['velocity_curve'], velocityCurve);
+    midiFixedVelocity = num_('midi_fixed_velocity', 0.05, 1) ?? midiFixedVelocity;
+    midiThru = flag('midi_thru') ?? midiThru;
+    final closed = j['midi_closed'];
+    if (closed is List) midiClosed = {for (final n in closed.take(64)) if (n is String && n.length <= 255) n};
+    midiMpe = flag('midi_mpe') ?? midiMpe;
+    midiBendRange = num_('midi_bend_range', 1, 48)?.round() ?? midiBendRange;
+    keysVelocity = num_('keys_velocity', 0, 1) ?? keysVelocity;
+    keysOctave = num_('keys_octave', 1, 6)?.round() ?? keysOctave;
+    clickSound = pick(ClickSound.values, j['click_sound'], clickSound);
+    clickVolume = num_('click_volume', 0, 1) ?? clickVolume;
+    preRollBars = num_('pre_roll_bars', 0, 4)?.round() ?? preRollBars;
+    recordOffsetMs = num_('record_offset_ms', 0, maxRecordOffsetMs) ?? recordOffsetMs;
+    midiRecordMode = pick(MidiRecordMode.values, j['midi_record_mode'], midiRecordMode);
+    final grid = j['roll_grid'];
+    if (grid is num && rollGrids.contains(grid.toInt())) rollGrid = grid.toInt();
+    rollSnap = flag('roll_snap') ?? rollSnap;
+    rollTool = pick(StartTool.values, j['roll_tool'], rollTool);
+    final len = j['roll_note_steps'];
+    if (len is num && rollNoteLengths.contains(len.toDouble())) rollNoteSteps = len.toDouble();
+    followPlayhead = flag('follow_playhead') ?? followPlayhead;
+    wheelZooms = flag('wheel_zooms') ?? wheelZooms;
+    confirmDelete = flag('confirm_delete') ?? confirmDelete;
+    codeFontSize = num_('code_font_size', minCodeFontSize, maxCodeFontSize) ?? codeFontSize;
+    final tab = j['code_tab_width'];
+    if (tab is num && const [2, 4, 8].contains(tab.toInt())) codeTabWidth = tab.toInt();
+    codeLineNumbers = flag('code_line_numbers') ?? codeLineNumbers;
+    codeWrap = flag('code_wrap') ?? codeWrap;
+    final save = j['autosave_ms'];
+    if (save is num && autosaveDelays.contains(save.toInt())) autosaveMs = save.toInt();
+    restorePointsKept = num_('restore_points_kept', 1, 100)?.round() ?? restorePointsKept;
+    newProjectBpm = num_('new_project_bpm', 20, 400) ?? newProjectBpm;
+    newProjectBeatsPerBar = num_('new_project_beats_per_bar', 1, 16)?.round() ?? newProjectBeatsPerBar;
+    final template = j['new_project_template'];
+    if (template is String && template.length <= 128) {
+      newProjectTemplate = template;
+    } else if (j['new_project_start'] == 'firstLoop') {
+      newProjectTemplate = 'builtin:first-loop';  // the setting's earlier form
+    }
+    if (const {'loop', 'free', 'oneShot', 'wavetable', 'midi'}.contains(j['export_kind'])) {
+      exportKind = j['export_kind'] as String;
+    }
+    final er = j['export_sample_rate'];
+    if (er is num && (er == 44100 || er == 48000)) exportSampleRate = er.toInt();
+    exportFloat32 = flag('export_float32') ?? exportFloat32;
+    exportSeconds = num_('export_seconds', 1, 120) ?? exportSeconds;
+    exportNaming = pick(ExportNaming.values, j['export_naming'], exportNaming);
   }
 
   Future<void> _load() async {
@@ -334,8 +748,18 @@ class Settings extends ChangeNotifier {
     }
     Neon.active = activeTheme;
     _applyPerformanceMode();
-    _shownLook = activeTheme.toFile();
+    _shownLook = _lookKey;
   }
+
+  /// What a look change compares: the theme's colours, the parts of its look read when a widget builds (corners,
+  /// glow strength), the profiles chosen ([_profileRevision]: a new dock layout is read when the shell is made) and
+  /// the code editor's font, tabs, numbers and wrap (read when an editor builds). A change rebuilds the screens once
+  /// on leaving Settings. A profile value saved into the theme (a track height, say) doesn't count by itself.
+  String get _lookKey => '${activeTheme.copyWith(profile: const {}).toFile()}|$roundness|$glowStrength|'
+      '$_profileRevision|$codeFontSize|$codeTabWidth|$codeLineNumbers|$codeWrap';
+
+  /// Bumped each time a theme's profile is put in force, so the screens (and the dock) are made again from it.
+  int _profileRevision = 0;
 
   Future<bool> saveExportProfile(ExportProfile profile) async {
     final name = profile.name.trim();
@@ -350,6 +774,15 @@ class Settings extends ChangeNotifier {
     notifyListeners();
     await save();
     return true;
+  }
+
+  /// Record's long-press: the metronome and the count-in, saved at once.
+  Future<void> setRecording({Metronome? metronome, int? countInBars, MidiRecordMode? mode}) async {
+    if (metronome != null) this.metronome = metronome;
+    if (mode != null) midiRecordMode = mode;
+    if (countInBars != null) this.countInBars = countInBars.clamp(0, 4);
+    notifyListeners();
+    await save();
   }
 
   Future<void> deleteExportProfile(String name) async {
@@ -371,7 +804,14 @@ class Settings extends ChangeNotifier {
   Future<void> _saving = Future.value();
 
   /// Writes through a temporary file so a crash mid-save never leaves half a file. Saves run one after another.
-  Future<void> save() => _saving = _saving.catchError((_) {}).then((_) => _write());
+  /// With a custom theme chosen, a changed look, layout or behaviour is saved into that theme too ([syncProfile]).
+  Future<void> save() {
+    final theme = syncProfile();
+    return _saving = _saving.catchError((_) {}).then((_) async {
+      if (theme != null) await _writeTheme(theme);
+      await _write();
+    });
+  }
 
   Future<void> _write() async {
     final f = _file;
@@ -382,12 +822,22 @@ class Settings extends ChangeNotifier {
     await tmp.rename(f.path);
   }
 
+  /// True while [adjust] tells its listeners: a continuous control on the Settings page is moving, which the app's
+  /// frame doesn't need to rebuild for (the page shows it).
+  bool get adjusting => _adjusting;
+  bool _adjusting = false;
+
   /// Changes settings and shows them without saving, for continuous controls; [save] when the drag ends.
   void adjust(void Function(Settings) change) {
     change(this);
     Neon.active = activeTheme;
     _applyPerformanceMode();
-    notifyListeners();
+    _adjusting = true;
+    try {
+      notifyListeners();
+    } finally {
+      _adjusting = false;
+    }
   }
 
   /// Changes settings, shows them and saves them.
@@ -408,11 +858,137 @@ class Settings extends ChangeNotifier {
 
   /// After leaving the settings: if the look changed, rebuild every screen once so fixed colours repaint too.
   void commitLook() {
-    final now = activeTheme.toFile();
+    final now = _lookKey;
     if (now == _shownLook) return;
     _shownLook = now;
     lookRevision++;
     notifyListeners();
+  }
+
+  /// The look, layout and behaviour in force, as a theme's profile ([CawTheme.profile]): what a theme saved or
+  /// exported now carries, and what choosing it later puts back.
+  Map<String, String> captureProfile() {
+    String on(bool v) => v ? 'on' : 'off';
+    String n(double v) => double.parse(v.toStringAsFixed(4)).toString();
+    return {
+      'look.font': uiFont.name,
+      'look.text_scale': n(textScale),
+      'look.roundness': n(roundness),
+      'look.glass': on(glass),
+      'look.glass_blur': on(glassBlur),
+      'look.glow_strength': n(glowStrength),
+      'look.reactive_glow': n(reactiveGlow),
+      'look.density': density.name,
+      'layout.track_height': n(trackHeight),
+      'layout.header_width': n(headerWidth),
+      'layout.track_gap': n(trackGap),
+      'layout.focus_panel_share': n(focusPanelShare),
+      'layout.dock': jsonEncode(dockLayouts),
+      'layout.toolbars': jsonEncode(editor.toJson()),
+      'behaviour.long_press_menu': longPressMenu.name,
+      'behaviour.haptics': on(haptics),
+      'behaviour.haptic_strength': n(hapticStrength),
+      'behaviour.motion': motion.name,
+      'behaviour.edit_style': editMotionStyle.name,
+      'behaviour.edit_kinds': EditMotion.kindNames(editMotionKinds).join(','),
+      'behaviour.snap': on(rollSnap),
+      'behaviour.grid': '$rollGrid',
+      'behaviour.value_grid': roll.valueGrid.name,
+    };
+  }
+
+  /// Puts [profile]'s values in force. A key it leaves out, or a value that doesn't read, keeps the current setting
+  /// (a colours-only theme changes nothing here). Doesn't notify or save.
+  void applyProfile(Map<String, String> profile) {
+    T? pick<T extends Enum>(List<T> values, String k) => values.where((e) => e.name == profile[k]).firstOrNull;
+    bool? flag(String k) => switch (profile[k]?.toLowerCase()) {
+          'on' || 'true' || 'yes' || '1' => true,
+          'off' || 'false' || 'no' || '0' => false,
+          _ => null,
+        };
+    double? number(String k, double min, double max) {
+      final v = double.tryParse(profile[k] ?? '');
+      return v == null || !v.isFinite ? null : v.clamp(min, max).toDouble();
+    }
+    Object? json(String k) {
+      try {
+        return profile[k] == null ? null : jsonDecode(profile[k]!);
+      } catch (_) {
+        return null;
+      }
+    }
+
+    uiFont = pick(UiFont.values, 'look.font') ?? uiFont;
+    textScale = number('look.text_scale', minTextScale, maxTextScale) ?? textScale;
+    roundness = number('look.roundness', 0, maxRoundness) ?? roundness;
+    glass = flag('look.glass') ?? glass;
+    glassBlur = flag('look.glass_blur') ?? glassBlur;
+    glowStrength = number('look.glow_strength', 0, maxGlowStrength) ?? glowStrength;
+    reactiveGlow = number('look.reactive_glow', 0, 1) ?? reactiveGlow;
+    density = pick(Density.values, 'look.density') ?? density;
+    // 0 is the screen's default height and width; anything else is kept in range.
+    final th = number('layout.track_height', 0, maxTrackHeight);
+    if (th != null) trackHeight = th == 0 ? 0 : th.clamp(minTrackHeight, maxTrackHeight);
+    final hw = number('layout.header_width', 0, maxHeaderWidth);
+    if (hw != null) headerWidth = hw == 0 ? 0 : hw.clamp(minHeaderWidth, maxHeaderWidth);
+    trackGap = number('layout.track_gap', 0, maxTrackGap) ?? trackGap;
+    focusPanelShare = number('layout.focus_panel_share', minFocusPanelShare, maxFocusPanelShare) ?? focusPanelShare;
+    final dock = json('layout.dock');
+    if (dock is Map) dockLayouts = {for (final e in dock.entries) if (e.key is String) e.key as String: e.value};
+    final bars = json('layout.toolbars');
+    if (bars is Map<String, dynamic>) editor = EditorLook.fromJson(bars);
+    longPressMenu = pick(LongPressMenuStyle.values, 'behaviour.long_press_menu') ?? longPressMenu;
+    haptics = flag('behaviour.haptics') ?? haptics;
+    hapticStrength = number('behaviour.haptic_strength', 0, 1) ?? hapticStrength;
+    motion = pick(MotionLevel.values, 'behaviour.motion') ?? motion;
+    editMotionStyle = pick(EditMotionStyle.values, 'behaviour.edit_style') ?? editMotionStyle;
+    final kinds = profile['behaviour.edit_kinds'];
+    if (kinds != null) editMotionKinds = EditMotion.parseKinds(kinds.split(',').map((k) => k.trim()));
+    rollSnap = flag('behaviour.snap') ?? rollSnap;
+    final grid = int.tryParse(profile['behaviour.grid'] ?? '');
+    if (grid != null && rollGrids.contains(grid)) rollGrid = grid;
+    final valueGrid = pick(ValueGrid.values, 'behaviour.value_grid');
+    if (valueGrid != null) roll = roll.copyWith(valueGrid: valueGrid);
+  }
+
+  /// Chooses the theme [name] and puts its whole profile in force (owner, 2026-11-11: switching theme switches all
+  /// of it). Leaving a starter theme keeps the current values as the starters' shared profile ([baseProfile]);
+  /// choosing a starter puts that back. Saved.
+  Future<void> chooseTheme(String name) => update((x) => x._choose(name));
+
+  void _choose(String name) {
+    final next = themeNamed(name);
+    if (isStarter(themeName) && !isStarter(next.name)) baseProfile = captureProfile();
+    if (isStarter(next.name)) {
+      if (!isStarter(themeName) && baseProfile != null) applyProfile(baseProfile!);
+    } else {
+      applyProfile(next.profile);
+    }
+    _draft = null;
+    themeName = next.name;
+    _profileRevision++;
+  }
+
+  /// With a custom theme chosen: saves the profile in force into it when it differs from the theme's (in memory;
+  /// [save] writes its file). Returns the theme to write, or null when nothing changed (a starter theme is never
+  /// changed: its profile is [baseProfile], which settings.json holds).
+  CawTheme? syncProfile() {
+    if (isStarter(themeName)) return null;
+    final i = customThemes.indexWhere((t) => t.name == themeName);
+    if (i < 0) return null;
+    final now = captureProfile();
+    final had = customThemes[i].profile;
+    if (now.entries.every((e) => had[e.key] == e.value)) return null;
+    final t = customThemes[i].copyWith(profile: {...had, ...now});
+    customThemes = [...customThemes]..[i] = t;
+    return t;
+  }
+
+  Future<void> _writeTheme(CawTheme t) async {
+    final d = _themesDir;
+    if (d == null) return;
+    await d.create(recursive: true);
+    await File('${d.path}${Platform.pathSeparator}${_fileName(t.name)}').writeAsString(t.toFile(), flush: true);
   }
 
   /// A name not used by any theme yet, based on [name].
@@ -427,21 +1003,30 @@ class Settings extends ChangeNotifier {
 
   String _fileName(String name) => '${name.replaceAll(RegExp(r'[^A-Za-z0-9 _-]'), '_').trim()}.theme';
 
-  /// Saves [t] as a custom theme (replacing one of the same name) and makes it the chosen theme.
-  /// A starter theme's name is never overwritten: the copy gets a new name. Returns the saved theme.
+  /// Saves [t] as a custom theme (replacing one of the same name) and makes it the chosen theme, its profile in
+  /// force ([chooseTheme]; a theme saved from the editor carries the profile in force, so nothing moves). A starter
+  /// theme's name is never overwritten: the copy gets a new name. Returns the saved theme.
   Future<CawTheme> saveTheme(CawTheme t, {String? replacing}) async {
     if (isStarter(t.name)) t = t.copyWith(name: freeName('${t.name} copy'));
-    if (replacing != null && replacing != t.name && !isStarter(replacing)) await deleteTheme(replacing, save: false);
+    if (replacing != null && replacing != t.name && !isStarter(replacing)) {
+      await deleteTheme(replacing, save: false);
+      if (themeName == replacing) themeName = t.name; // renamed: not a switch away and back
+    }
     customThemes = [...customThemes.where((x) => x.name != t.name), t]
       ..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
-    final d = _themesDir;
-    if (d != null) {
-      await d.create(recursive: true);
-      await File('${d.path}${Platform.pathSeparator}${_fileName(t.name)}').writeAsString(t.toFile(), flush: true);
-    }
+    await _writeTheme(t);
     _draft = null;
-    await update((s) => s.themeName = t.name);
-    return t;
+    await chooseTheme(t.name);
+    return customThemes.firstWhere((x) => x.name == t.name, orElse: () => t);
+  }
+
+  /// Adds [t] to the custom themes under a free name without choosing it (a project package's theme: Add theme).
+  Future<CawTheme> addTheme(CawTheme t) async {
+    final named = t.copyWith(name: freeName(t.name));
+    customThemes = [...customThemes, named]..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+    await _writeTheme(named);
+    notifyListeners();
+    return named;
   }
 
   Future<void> deleteTheme(String name, {bool save = true}) async {
@@ -452,7 +1037,7 @@ class Settings extends ChangeNotifier {
       final f = File('${d.path}${Platform.pathSeparator}${_fileName(name)}');
       if (await f.exists()) await f.delete();
     }
-    if (save) await update((s) => s.themeName = s.themeNamed(s.themeName).name);
+    if (save) await chooseTheme(themeName == name ? calmNeon.name : themeNamed(themeName).name);
   }
 }
 
@@ -561,19 +1146,14 @@ class RollLook {
   }
 }
 
-/// The code editor's layout: what the symbol key row holds, when completion chips show, which buttons and panels
-/// show, and where the Run bar sits.
+/// The pattern editor's layout: what the symbol key row holds, whether the Solo button and the scope show, and
+/// where the Run bar sits.
 class EditorLook {
   const EditorLook({
     this.keyRow = defaultKeyRow,
-    this.chips = true,
-    this.chipLetters = 2,
-    this.chipCount = 8,
-    this.libraryButton = true,
     this.soloButton = true,
     this.scope = true,
     this.barOnTop = false,
-    this.compactControls = false,
   });
 
   static const defaultKeyRow = [
@@ -583,69 +1163,42 @@ class EditorLook {
   /// The symbol key row's keys, in order; a key may end in a space ("let ").
   final List<String> keyRow;
 
-  /// Completion chips, after how many typed letters, and how many at most.
-  final bool chips;
-  final int chipLetters, chipCount;
-
-  /// The Library and Solo preview buttons and the scope.
-  final bool libraryButton, soloButton, scope;
+  /// The Solo preview button and the scope.
+  final bool soloButton, scope;
 
   /// The key row and Run bar above the code instead of under it.
   final bool barOnTop;
 
-  /// Denser control rows.
-  final bool compactControls;
-
   EditorLook copyWith({
     List<String>? keyRow,
-    bool? chips,
-    int? chipLetters,
-    int? chipCount,
-    bool? libraryButton,
     bool? soloButton,
     bool? scope,
     bool? barOnTop,
-    bool? compactControls,
   }) =>
       EditorLook(
         keyRow: List.unmodifiable([
           for (final k in keyRow ?? this.keyRow)
             if (k.trim().isNotEmpty && k.length <= 16) k
         ].take(64)),
-        chips: chips ?? this.chips,
-        chipLetters: (chipLetters ?? this.chipLetters).clamp(1, 4),
-        chipCount: (chipCount ?? this.chipCount).clamp(3, 16),
-        libraryButton: libraryButton ?? this.libraryButton,
         soloButton: soloButton ?? this.soloButton,
         scope: scope ?? this.scope,
         barOnTop: barOnTop ?? this.barOnTop,
-        compactControls: compactControls ?? this.compactControls,
       );
 
   Map<String, dynamic> toJson() => {
         'key_row': keyRow,
-        'chips': chips,
-        'chip_letters': chipLetters,
-        'chip_count': chipCount,
-        'library_button': libraryButton,
         'solo_button': soloButton,
         'scope': scope,
         'bar_on_top': barOnTop,
-        'compact_controls': compactControls,
       };
 
   static EditorLook fromJson(Map<String, dynamic> j) {
     final row = j['key_row'];
     return const EditorLook().copyWith(
       keyRow: row is List ? [for (final k in row) if (k is String) k] : null,
-      chips: j['chips'] as bool?,
-      chipLetters: (j['chip_letters'] as num?)?.toInt(),
-      chipCount: (j['chip_count'] as num?)?.toInt(),
-      libraryButton: j['library_button'] as bool?,
       soloButton: j['solo_button'] as bool?,
       scope: j['scope'] as bool?,
       barOnTop: j['bar_on_top'] as bool?,
-      compactControls: j['compact_controls'] as bool?,
     );
   }
 }

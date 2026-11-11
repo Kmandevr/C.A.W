@@ -11,19 +11,20 @@ IconData assetIcon(FileAssetType t) => switch (t) {
       FileAssetType.builtinEffect => Icons.graphic_eq,
       FileAssetType.cppComponent => Icons.memory,
       FileAssetType.cppFile => Icons.code,
-      FileAssetType.cawEffect => Icons.tune,
-      FileAssetType.cawGenerator => Icons.waves,
-      FileAssetType.cawLibrary => Icons.functions,
       FileAssetType.pattern => Icons.piano,
+      FileAssetType.midiFile => Icons.queue_music,
+      FileAssetType.devicePreset => Icons.bookmarks_outlined,
+      FileAssetType.trackPreset => Icons.view_list_outlined,
+      FileAssetType.sampleFile => Icons.audio_file_outlined,
+      FileAssetType.audioFile => Icons.graphic_eq_rounded,
     };
 
 Color assetColor(FileAssetType t) => switch (t) {
       FileAssetType.builtinEffect => Neon.blue,
       FileAssetType.cppComponent || FileAssetType.cppFile => Neon.violet,
-      FileAssetType.cawEffect => Neon.pink,
-      FileAssetType.cawGenerator => Neon.green,
-      FileAssetType.cawLibrary => Neon.dim,
-      FileAssetType.pattern => Neon.yellow,
+      FileAssetType.pattern || FileAssetType.midiFile || FileAssetType.sampleFile => Neon.yellow,
+      FileAssetType.audioFile => Neon.green,
+      FileAssetType.devicePreset || FileAssetType.trackPreset => Neon.green,
     };
 
 IconData folderIcon(FilesFolderKind k) => switch (k) {
@@ -31,12 +32,14 @@ IconData folderIcon(FilesFolderKind k) => switch (k) {
       FilesFolderKind.effects => Icons.auto_awesome,
       FilesFolderKind.builtin => Icons.inventory_2_outlined,
       FilesFolderKind.cppEffects || FilesFolderKind.cppList || FilesFolderKind.cppComponent => Icons.memory,
-      FilesFolderKind.cawEffects || FilesFolderKind.cawModules => Icons.description_outlined,
       FilesFolderKind.code => Icons.code,
-      FilesFolderKind.libraryFolder => Icons.folder_outlined,
       FilesFolderKind.audio => Icons.music_note,
       FilesFolderKind.patterns => Icons.piano,
-      FilesFolderKind.packs => Icons.inventory_outlined,
+      FilesFolderKind.midiFiles => Icons.queue_music,
+      FilesFolderKind.audioFiles => Icons.graphic_eq_rounded,
+      FilesFolderKind.presets => Icons.bookmarks_outlined,
+      FilesFolderKind.packs || FilesFolderKind.samplePack => Icons.inventory_outlined,
+      FilesFolderKind.samplePacks => Icons.library_music_outlined,
     };
 
 Color folderColor(FilesFolderKind k) => k == FilesFolderKind.favourites ? Neon.yellow : Neon.blue;

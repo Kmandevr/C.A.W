@@ -1,4 +1,5 @@
-# App checks: analysis and tests on every pull request; the Android APK and Windows app on Main or on demand.
+# App checks: analysis and tests on every pull request; the Android APK and Windows app on Main or on demand;
+# a GitHub Release (pre-release while in beta) from a version tag or from Run workflow with "release".
 name: App
 on:
   # Pull requests test the app (analysis, tests); Main also builds the installable APK and Windows app.
@@ -6,6 +7,9 @@ on:
   # everything on any branch (an APK to try before merging).
   push:
     branches: [Main]
+    # A version tag (v0.9.0-beta.2) builds both installables and publishes them as a GitHub Release.
+    # GitHub does not apply the path filter below to tag pushes.
+    tags: ["v*"]
     paths:
       - "app/**"
       # The engine code the app embeds (not its tests, benchmarks, CLI or the compiler wrapper).
@@ -38,6 +42,10 @@ on:
         description: Also build the Android APK and the Windows app (off for a quick test-only run)
         type: boolean
         default: true
+      release:
+        description: Publish the installables as a GitHub Release tagged v<version from app/pubspec.yaml> (pre-release while in beta)
+        type: boolean
+        default: false
   # The APK carries the on-device compiler, whose LLVM build the Compiler workflow caches on Main. When that
   # workflow finishes there, the APK is built again so Main's APK always has the compiler (only the APK runs).
   workflow_run:
@@ -259,14 +267,23 @@ jobs:
           flutter --disable-analytics
           # arm64 only: the phones C.A.W targets (the owner's Galaxy S22+). Each extra ABI builds the engine and
           # the Dart code again.
-          flutter build apk --release --target-platform android-arm64
+          # --split-debug-info keeps the Dart stack-trace tables out of the APK (libapp.so 10.2 -> 8.8 MB, docs/
+          # performance.md); a reported trace is decoded with `flutter symbolize -d app.android-arm64.symbols`.
+          # No --obfuscate: it saves only 0.13 MB more and would garble type names in the app's own error texts.
+          flutter build apk --release --target-platform android-arm64 --split-debug-info=build/symbols
           ccache --show-stats || true
           mv build/app/outputs/flutter-apk/app-release.apk "$GITHUB_WORKSPACE/caw-android.apk"
+          (cd build/symbols && zip -q "$GITHUB_WORKSPACE/caw-android-symbols.zip" ./*.symbols)
       - uses: actions/upload-artifact@v7
         with:
           name: caw-android-apk
           path: caw-android.apk
           retention-days: 30
+      - uses: actions/upload-artifact@v7
+        with:
+          name: caw-android-symbols
+          path: caw-android-symbols.zip
+          retention-days: 90
 
   windows:
     name: Windows app
@@ -307,3 +324,65 @@ jobs:
           name: caw-windows
           path: app/build/windows/x64/runner/Release/
           retention-days: 30
+      - name: Zip the Windows app
+        shell: pwsh
+        run: Compress-Archive -Path app/build/windows/x64/runner/Release/* -DestinationPath caw-windows.zip
+      - uses: actions/upload-artifact@v7
+        with:
+          name: caw-windows-zip
+          path: caw-windows.zip
+          retention-days: 30
+
+  release:
+    name: GitHub Release
+    needs: [android, windows]
+    if: >-
+      startsWith(github.ref, 'refs/tags/v') ||
+      (github.event_name == 'workflow_dispatch' && inputs.installables && inputs.release)
+    runs-on: ubuntu-24.04
+    # Only this job may write: it creates the tag (when Run workflow made the release) and the release.
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v7
+        with:
+          name: caw-android-apk
+      - uses: actions/download-artifact@v7
+        with:
+          name: caw-android-symbols
+      - uses: actions/download-artifact@v7
+        with:
+          name: caw-windows-zip
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SIGNED: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
+        run: |
+          version=$(sed -n 's/^version: *\([^+]*\).*/\1/p' app/pubspec.yaml)
+          tag="v$version"
+          if [[ "$GITHUB_REF" == refs/tags/* && "$GITHUB_REF_NAME" != "$tag" ]]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match app/pubspec.yaml's version ($tag)."; exit 1
+          fi
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "::error::Release $tag already exists: raise the version in app/pubspec.yaml and app/lib/version.dart first."; exit 1
+          fi
+          mv caw-android.apk "caw-$version-android.apk"
+          mv caw-windows.zip "caw-$version-windows.zip"
+          mv caw-android-symbols.zip "caw-$version-android-symbols.zip"
+          {
+            echo "C.A.W. $version"
+            echo
+            echo "- Android (arm64): caw-$version-android.apk"
+            echo "- Windows (x64): caw-$version-windows.zip, unzip and run caw.exe"
+            echo "- Android debug symbols (for decoding a reported stack trace): caw-$version-android-symbols.zip"
+            if [ "$SIGNED" != "true" ]; then
+              echo
+              echo "This APK is signed with a throwaway key: uninstall the previous C.A.W. before installing it."
+            fi
+          } > notes.md
+          prerelease=""
+          [[ "$version" == *-* ]] && prerelease="--prerelease"
+          gh release create "$tag" --target "$GITHUB_SHA" --title "C.A.W. $version" $prerelease \
+            --notes-file notes.md --generate-notes \
+            "caw-$version-android.apk" "caw-$version-windows.zip" "caw-$version-android-symbols.zip"

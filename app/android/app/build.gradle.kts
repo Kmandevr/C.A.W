@@ -52,6 +52,14 @@ android {
         }
     }
 
+    // Native libraries are stored compressed, so the APK download is much smaller (the on-device compiler alone
+    // is about 78 MB uncompressed); Android unpacks them once at install. Decision in docs/decisions.md.
+    packaging {
+        jniLibs {
+            useLegacyPackaging = true
+        }
+    }
+
     // The on-device C++ compiler, when CI packaged it (engine/compiler/package-android.sh): the library and its
     // offline data. Without it the app works and says the compiler isn't in this build.
     val compilerPackage = System.getenv("CAW_COMPILER_PACKAGE")

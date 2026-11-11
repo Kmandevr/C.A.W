@@ -11,8 +11,8 @@
 
 namespace caw {
 
-// What the component is fed. Effects take a stereo signal; instruments will take a note sequence
-// (a Notes kind, not built yet), with the rest of the harness unchanged.
+// What the component's main audio input is fed (a component without an audio input, an instrument, is fed
+// `notes` instead; any other audio input gets its own signal from `inputs`).
 enum class TestSignalKind { Impulse, Sine, Sweep, WhiteNoise, PinkNoise, Silence, Dc, Wav, Buffer };
 
 struct TestSignal {
@@ -41,6 +41,25 @@ struct TestComponent {
 
 enum class NullAlign { None, Declared, Measured };
 
+// One note of the sequence an event input gets (an instrument's notes, a keyed effect's key notes).
+struct TestNote {
+    double pitch = 60;     // MIDI note number (fractions allowed: 60.5 is a quarter tone above C4)
+    double velocity = 100; // 1..127
+    double start = 0;      // seconds
+    double length = 0.5;   // seconds held before the note off
+};
+
+// A pass/fail threshold on one value of the result: `path` names it by dotted keys and array indices
+// ("output.channels.0.peak_db", "bypass.depth_db", "sweep.points.2.thd.left.thd_percent"). A number must lie in
+// [min, max] (either may be left out); `equals` compares a boolean or a number exactly.
+struct TestCheck {
+    std::string path;
+    bool hasMin = false, hasMax = false, hasEquals = false;
+    double min = 0, max = 0;
+    bool equalsBool = false, equalsIsBool = false;
+    double equalsNumber = 0;
+};
+
 struct ComponentTestRequest {
     TestComponent component;
     double sampleRate = 48000;
@@ -63,6 +82,9 @@ struct ComponentTestRequest {
     double sweepFrom = 0, sweepTo = 0;  // default: the parameter's range
     std::string writeWav;       // the output as 32-bit float stereo WAV, for listening
     std::string writeInputWav;  // the test signal itself
+    std::vector<TestNote> notes;  // the first event input's notes (an instrument with none plays one C4 for 1 s)
+    std::vector<std::pair<std::string, TestSignal>> inputs;  // audio inputs after the first, by port id (else silence)
+    std::vector<TestCheck> checks;  // thresholds: the result gains "checks" and "passed"
 };
 
 // Parses the JSON request (keys in docs/engine.md, "Component testing"). False and `error` on a
@@ -74,16 +96,25 @@ bool parseComponentTestRequest(std::string_view json, ComponentTestRequest& out,
 bool generateTestSignal(const TestSignal& signal, double sampleRate, std::vector<float>& left,
                         std::vector<float>& right, std::string& error);
 
-// One offline render of a component over a stereo input, in blocks of `blockSize`.
+// One offline render of a component over a stereo input, in blocks of `blockSize`. Any ports: the first audio
+// input takes inLeft/inRight, later audio inputs take `extraInputs` (by order; missing ones are silent), the first
+// event input takes `notes`; the first audio output is measured and every later one is kept in `extraOutputs`. A
+// mono port gets the mid of its stereo signal; a mono output is copied to both sides.
 struct ComponentRender {
     std::vector<float> left, right;  // raw output: NaN, Inf and denormals left in
+    std::vector<std::pair<std::string, std::vector<float>>> extraOutputs;  // later audio outputs, per channel, by port id
     uint64_t failedBlocks = 0;       // process returned false: the input passes through, as in the app
     std::vector<double> blockMicros; // with timing
     uint32_t latencyFrames = 0, tailFrames = 0;  // declared
+    uint64_t eventsOut = 0;  // events the component emitted on its event outputs
+};
+struct StereoBuffer {
+    std::vector<float> left, right;
 };
 bool renderComponent(const ModuleRegistry& registry, const TestComponent& component, double sampleRate,
                      uint32_t blockSize, double tempo, const std::vector<float>& inLeft,
-                     const std::vector<float>& inRight, bool timing, ComponentRender& out, std::string& error);
+                     const std::vector<float>& inRight, bool timing, ComponentRender& out, std::string& error,
+                     const std::vector<TestNote>& notes = {}, const std::vector<StereoBuffer>& extraInputs = {});
 
 // Loads what `component` names into `registry` (which should hold the built-ins): nothing for a
 // registered id, the library with its trust choice otherwise.

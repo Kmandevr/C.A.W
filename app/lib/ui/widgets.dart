@@ -8,8 +8,11 @@ import 'package:flutter/scheduler.dart';
 
 import '../engine/engine.dart';
 import '../model/app_state.dart';
+import '../model/project.dart' show LayerDoc;
+import 'motion.dart';
 import 'theme.dart';
 import 'glass.dart';
+import 'haptics.dart';
 
 class NeonPanel extends StatelessWidget {
   const NeonPanel({super.key, required this.child, this.color, this.padding = const EdgeInsets.all(12)});
@@ -105,16 +108,19 @@ class _ScopePainter extends CustomPainter {
 /// A horizontal bar for a 0..1 value, drawn in neon. With glass on: a faint fill and a solid outline, for the
 /// track and the value alike, a little taller so the outline reads.
 class Bar extends StatelessWidget {
-  const Bar({super.key, required this.value, required this.color, this.height = 4});
+  const Bar({super.key, required this.value, required this.color, this.height = 4, this.glassMinHeight = 7});
   final double value;
   final Color color;
   final double height;
+
+  /// The glass look draws the bar at least this tall (a stereo meter's two bars are thinner).
+  final double glassMinHeight;
 
   @override
   Widget build(BuildContext context) => Glass.active ? _glass() : _plain();
 
   Widget _glass() {
-    final h = height < 7 ? 7.0 : height;
+    final h = height < glassMinHeight ? glassMinHeight : height;
     final r = BorderRadius.circular(h);
     return LayoutBuilder(
       builder: (context, c) => Container(
@@ -151,15 +157,63 @@ class Bar extends StatelessWidget {
       );
 }
 
-/// A peak meter for one layer, folder or the master, on a dB scale: the bar rises at once to each sample peak and
-/// falls at [fallDbPerSecond]; a thin line holds the highest peak for [holdSeconds]; at [clipDb] or over it turns
-/// pink for [clipSeconds]. It runs on wall-clock time, so it falls the same at any meter cadence. While sound comes
-/// in, the meter reads (about 30 a second) move it; once they report silence its own ticker finishes the fall at the
-/// same rate and then stops, so it never freezes partway when the engine goes quiet.
-class PeakMeter extends StatefulWidget {
-  const PeakMeter({super.key, required this.state, required this.read, required this.color, this.vertical = false});
+/// A track's meter in the mixer, the arrangement or a track card: a stereo [PeakMeter] (left and right, from
+/// `caw_engine_layer_meter_stereo`) for a stereo track ([LayerDoc.isStereo]: a native instrument or effect, or a
+/// folder), and one bar for a mono .caw track, whose two sides differ only by its pan.
+class TrackMeter extends StatelessWidget {
+  const TrackMeter(
+      {super.key, required this.state, required this.index, required this.stereo, required this.color, this.vertical = false});
   final AppState state;
+  final int index; // the track's project index, as AppState.layerMeters lists it
+  final bool stereo;
+  final Color color;
+  final bool vertical;
+
+  LayerMeterValue? get _meter => index < state.layerMeters.length ? state.layerMeters[index] : null;
+
+  /// A sideways meter's height: two 5 dp bars and a gap, or one bar (drawn at least 7 dp tall with glass).
+  double get _sidewaysHeight => stereo ? 11 : Glass.active ? 7 : 4;
+
+  @override
+  Widget build(BuildContext context) {
+    final meter = stereo
+        ? PeakMeter(state: state, color: color, vertical: vertical,
+            read: () => _meter?.peakL ?? 0.0, readRight: () => _meter?.peakR ?? 0.0)
+        : PeakMeter(state: state, color: color, vertical: vertical, read: () => _meter?.peak ?? 0.0);
+    // Sideways (a track header) it is a live island of a fixed size, so its 30 reads a second don't lay out and
+    // repaint the list of tracks around it.
+    return vertical ? meter : SizedBox(width: double.infinity, height: _sidewaysHeight, child: LiveIsland(child: meter));
+  }
+}
+
+/// Something that changes about 30 times a second (a meter, the playhead, a readout), kept to itself: it rebuilds,
+/// lays out and repaints alone. Give it a fixed size (tight constraints), which makes it a layout boundary; its own
+/// LayoutBuilder is the build scope its updates run in, so they don't make a LayoutBuilder higher up lay out the
+/// screen again (each LayoutBuilder is a build scope: a rebuild under it lays it out anew).
+class LiveIsland extends StatelessWidget {
+  const LiveIsland({super.key, required this.child});
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) => RepaintBoundary(child: LayoutBuilder(builder: (_, _) => child));
+}
+
+/// A peak meter for one layer, folder or the master, on a dB scale, REAPER-like: the bar rises at once to each
+/// sample peak and falls at [fallDbPerSecond] (the Meter fall setting); a thin line holds the highest peak for
+/// [holdSeconds]; at [clipDb] or over it turns pink for [clipSeconds]. With [readRight] it is a stereo meter: two
+/// bars, left above right (side by side when [vertical]). It runs on wall-clock time, so it falls the same at any
+/// meter cadence. While sound comes in, the meter reads (about 30 a second) move it; once they report silence its own
+/// ticker finishes the fall at the same rate and then stops, so it never freezes partway when the engine goes quiet.
+class PeakMeter extends StatefulWidget {
+  const PeakMeter({super.key, required this.state, required this.read, required this.color, this.vertical = false,
+      this.readRight});
+  final AppState state;
+
+  /// The peak since the last read (the left channel of a stereo meter).
   final double Function() read;
+
+  /// The right channel's peak: given, the meter shows two bars.
+  final double Function()? readRight;
   final Color color;
 
   /// Upright, filling from the bottom (a mixer strip's meter), instead of a bar filling from the left.
@@ -167,7 +221,9 @@ class PeakMeter extends StatefulWidget {
 
   /// The meter's range: [floorDb] (empty) to 0 dBFS (full).
   static const floorDb = -60.0;
-  static const fallDbPerSecond = 24.0;
+
+  /// Set from Settings (`meter_fall`); 96 dB/s by default (owner: the old "Very fast" is the right medium).
+  static double fallDbPerSecond = 96.0;
 
   static final _wall = Stopwatch()..start();
 
@@ -192,19 +248,52 @@ class PeakMeter extends StatefulWidget {
   State<PeakMeter> createState() => PeakMeterState();
 }
 
+/// One channel's bar, held peak and clip light.
+class _MeterChannel {
+  double shownDb = PeakMeter.floorDb, holdDb = PeakMeter.floorDb;
+  double holdLeft = 0, clipLeft = 0; // seconds
+
+  bool get empty => shownDb <= PeakMeter.floorDb && holdDb <= PeakMeter.floorDb && clipLeft <= 0;
+  bool get clipped => clipLeft > 0;
+
+  void take(double peak) {
+    final d = PeakMeter.db(peak);
+    if (d > shownDb) shownDb = d;
+    if (d >= holdDb && d > PeakMeter.floorDb) {
+      holdDb = d;
+      holdLeft = PeakMeter.holdSeconds;
+    }
+    if (d >= PeakMeter.clipDb) clipLeft = PeakMeter.clipSeconds;
+  }
+
+  void fall(double dt) {
+    final rate = PeakMeter.fallDbPerSecond;
+    shownDb = math.max(PeakMeter.floorDb, shownDb - rate * dt);
+    // The peak line holds, then falls like the bar for whatever part of this frame came after its hold.
+    final held = math.min(holdLeft, dt);
+    holdLeft = math.max(0, holdLeft - dt);
+    holdDb = math.max(shownDb, holdDb - rate * (dt - math.max(0, held)));
+    if (clipLeft > 0) clipLeft -= dt;
+  }
+}
+
 class PeakMeterState extends State<PeakMeter> with SingleTickerProviderStateMixin {
   late final Ticker _ticker = createTicker(_frame);
   Duration _last = Duration.zero, _built = Duration.zero;
   Duration _lastRead = Duration.zero;
-  double _shownDb = PeakMeter.floorDb, _holdDb = PeakMeter.floorDb;
-  double _holdLeft = 0, _clipLeft = 0; // seconds
+  final _left = _MeterChannel(), _right = _MeterChannel();
 
-  /// The level the bar shows now, in dB (for tests).
-  double get shownDb => _shownDb;
+  bool get _stereo => widget.readRight != null;
+
+  /// The level the bar shows now, in dB (the left bar of a stereo meter; for tests).
+  double get shownDb => _left.shownDb;
 
   /// The held peak line, in dB.
-  double get holdDb => _holdDb;
-  bool get clipped => _clipLeft > 0;
+  double get holdDb => _left.holdDb;
+  bool get clipped => _left.clipped || (_stereo && _right.clipped);
+
+  /// The right bar's level, in dB (a stereo meter; for tests).
+  double get shownRightDb => _right.shownDb;
 
   @override
   void initState() {
@@ -228,7 +317,7 @@ class PeakMeterState extends State<PeakMeter> with SingleTickerProviderStateMixi
     super.dispose();
   }
 
-  bool get _empty => _shownDb <= PeakMeter.floorDb && _holdDb <= PeakMeter.floorDb && _clipLeft <= 0;
+  bool get _empty => _left.empty && (!_stereo || _right.empty);
 
   // A meter read: the peak since the last one. The time since the previous read moves the fall first.
   void _read() {
@@ -236,15 +325,11 @@ class PeakMeterState extends State<PeakMeter> with SingleTickerProviderStateMixi
     if (!_ticker.isActive) _fall((now - _lastRead).inMicroseconds / 1e6);
     _lastRead = now;
     final peak = widget.read();
-    final d = PeakMeter.db(peak);
-    if (d > _shownDb) _shownDb = d;
-    if (d >= _holdDb && d > PeakMeter.floorDb) {
-      _holdDb = d;
-      _holdLeft = PeakMeter.holdSeconds;
-    }
-    if (d >= PeakMeter.clipDb) _clipLeft = PeakMeter.clipSeconds;
+    _left.take(peak);
+    final right = widget.readRight?.call() ?? 0.0;
+    if (_stereo) _right.take(right);
     // Sound coming in: the reads drive the meter. Silence: the ticker finishes the fall (the reads may stop soon).
-    if (peak > 0) {
+    if (peak > 0 || right > 0) {
       _ticker.stop();
     } else if (!_empty && !_ticker.isActive) {
       _last = _built = Duration.zero;
@@ -270,42 +355,39 @@ class PeakMeterState extends State<PeakMeter> with SingleTickerProviderStateMixi
 
   void _fall(double dt) {
     if (dt <= 0) return;
-    _shownDb = math.max(PeakMeter.floorDb, _shownDb - PeakMeter.fallDbPerSecond * dt);
-    // The peak line holds, then falls like the bar for whatever part of this frame came after its hold.
-    final held = math.min(_holdLeft, dt);
-    _holdLeft = math.max(0, _holdLeft - dt);
-    _holdDb = math.max(_shownDb, _holdDb - PeakMeter.fallDbPerSecond * (dt - math.max(0, held)));
-    if (_clipLeft > 0) _clipLeft -= dt;
+    _left.fall(dt);
+    if (_stereo) _right.fall(dt);
   }
 
-  @override
-  Widget build(BuildContext context) {
-    final color = clipped ? Neon.pink : widget.color;
-    final hold = PeakMeter.fraction(_holdDb);
-    if (widget.vertical) {
-      return RepaintBoundary(child: Container(
-        decoration: BoxDecoration(
-          color: Neon.line.withValues(alpha: 0.18),
-          borderRadius: BorderRadius.circular(3),
-          border: Border.all(color: Neon.line, width: 0.8),
-        ),
-        child: LayoutBuilder(builder: (context, c) {
-          final h = c.maxHeight.isFinite ? c.maxHeight : 0.0;
-          return Stack(children: [
-            Positioned(left: 0, right: 0, bottom: 0, height: h * PeakMeter.fraction(_shownDb),
-              child: Container(color: color.withValues(alpha: 0.6))),
-            if (hold > 0)
-              Positioned(left: 0, right: 0, height: 1.5,
-                bottom: (h * hold - 1.5).clamp(0.0, math.max(0.0, h - 1.5)),
-                child: IgnorePointer(child: Container(color: color))),
-          ]);
-        }),
-      ));
-    }
-    // Its own layer: a meter moving doesn't repaint the panel around it.
-    return RepaintBoundary(child: LayoutBuilder(
+  Widget _upright(_MeterChannel ch) {
+    final color = ch.clipped ? Neon.pink : widget.color;
+    final hold = PeakMeter.fraction(ch.holdDb);
+    return Container(
+      decoration: BoxDecoration(
+        color: Neon.line.withValues(alpha: 0.18),
+        borderRadius: BorderRadius.circular(3),
+        border: Border.all(color: Neon.line, width: 0.8),
+      ),
+      child: LayoutBuilder(builder: (context, c) {
+        final h = c.maxHeight.isFinite ? c.maxHeight : 0.0;
+        return Stack(children: [
+          Positioned(left: 0, right: 0, bottom: 0, height: h * PeakMeter.fraction(ch.shownDb),
+            child: Container(color: color.withValues(alpha: 0.6))),
+          if (hold > 0)
+            Positioned(left: 0, right: 0, height: 1.5,
+              bottom: (h * hold - 1.5).clamp(0.0, math.max(0.0, h - 1.5)),
+              child: IgnorePointer(child: Container(color: color))),
+        ]);
+      }),
+    );
+  }
+
+  Widget _sideways(_MeterChannel ch, {double height = 4}) {
+    final color = ch.clipped ? Neon.pink : widget.color;
+    final hold = PeakMeter.fraction(ch.holdDb);
+    return LayoutBuilder(
       builder: (context, c) => Stack(alignment: Alignment.centerLeft, children: [
-        Bar(value: PeakMeter.fraction(_shownDb), color: color),
+        Bar(value: PeakMeter.fraction(ch.shownDb), color: color, height: height, glassMinHeight: _stereo ? 5 : 7),
         if (hold > 0 && c.maxWidth.isFinite)
           Positioned(
             left: (c.maxWidth * hold - 1.5).clamp(0.0, math.max(0.0, c.maxWidth - 1.5)),
@@ -314,7 +396,23 @@ class PeakMeterState extends State<PeakMeter> with SingleTickerProviderStateMixi
             child: IgnorePointer(child: Container(width: 1.5, color: color)),
           ),
       ]),
-    ));
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // Its own layer: a meter moving doesn't repaint the panel around it.
+    if (widget.vertical) {
+      return RepaintBoundary(child: _stereo
+          ? Row(children: [Expanded(child: _upright(_left)), const SizedBox(width: 2), Expanded(child: _upright(_right))])
+          : _upright(_left));
+    }
+    if (!_stereo) return RepaintBoundary(child: _sideways(_left));
+    return RepaintBoundary(child: Column(mainAxisSize: MainAxisSize.min, children: [
+      _sideways(_left, height: 5),
+      const SizedBox(height: 1),
+      _sideways(_right, height: 5),
+    ]));
   }
 }
 
@@ -401,7 +499,10 @@ class ToggleChip extends StatelessWidget {
         message: tooltip ?? label,
         child: InkWell(
           borderRadius: BorderRadius.circular(8),
-          onTap: onTap,
+          onTap: () {
+            Haptics.tap(); // M and S are felt, as every other press
+            onTap();
+          },
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 120),
             width: size,
@@ -498,24 +599,6 @@ class _ValueDialogState extends State<ValueDialog> {
   );
 }
 
-/// A typed parameter value: a finite number ("0,5" reads as 0.5), clamped to the parameter's range and snapped to its
-/// step; null if not.
-double? parseParam(String text, ParamInfo p) {
-  final v = double.tryParse(text.trim().replaceAll(',', '.'));
-  if (v == null || !v.isFinite) return null;
-  final c = v.clamp(p.min, p.max).toDouble();
-  if (p.step <= 0) return c;
-  return (p.min + ((c - p.min) / p.step).round() * p.step).clamp(p.min, p.max).toDouble();
-}
-
-String formatParam(double v, ParamInfo p) {
-  final span = (p.max - p.min).abs();
-  if (v == v.roundToDouble() && span >= 4) return v.toStringAsFixed(0);
-  if (span >= 100) return v.toStringAsFixed(0);
-  if (span >= 10) return v.toStringAsFixed(1);
-  return v.toStringAsFixed(2);
-}
-
 /// A whole number of bars from 1 to [max]: − and + step it, tapping the number types any value (no fixed list of
 /// lengths; owner, 2026-11-09: a project's length has no cap).
 class BarsField extends StatelessWidget {
@@ -543,6 +626,138 @@ class BarsField extends StatelessWidget {
         child: Text(value == 1 ? '1 bar' : '$value bars')),
       IconButton(onPressed: value < max ? () => set(value + 1) : null, icon: const Icon(Icons.add, size: 16),
         tooltip: 'One bar more', visualDensity: VisualDensity.compact),
+    ]);
+  }
+}
+
+/// A double-tap on [child] (a slider, usually) sets it back to its default (owner, 2026-11-10: every slider and knob
+/// resets on a double-tap). A drag still belongs to the slider; a single tap waits the double-tap time first.
+class ResetOnDoubleTap extends StatelessWidget {
+  const ResetOnDoubleTap({super.key, required this.onReset, required this.child});
+  final VoidCallback? onReset;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) => onReset == null
+      ? child
+      : GestureDetector(
+          onDoubleTap: () {
+            Motion.tick();
+            onReset!();
+          },
+          child: child);
+}
+
+/// Settings › Editing › Ask before deleting a track: a dialog when it is on (true at once when off; undo takes a
+/// delete back either way).
+Future<bool> confirmTrackDelete(BuildContext context, AppState state, LayerDoc layer) async {
+  if (!state.settings.confirmDelete) return true;
+  final ok = await showDialog<bool>(
+    context: context,
+    builder: (context) => AlertDialog(
+      title: Text('Delete "${layer.name}"?'),
+      content: Text(layer.isFolder ? 'The folder and the tracks in it go.' : 'Its clips and effects go with it.'),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+        TextButton(
+          key: const ValueKey('confirm-delete'),
+          onPressed: () => Navigator.pop(context, true),
+          child: const Text('Delete', style: TextStyle(color: Neon.pink)),
+        ),
+      ],
+    ),
+  );
+  return ok == true;
+}
+
+/// A number in an advanced menu (owner, 2026-11-11): its name, its value (a tap types one), a reset button and a big
+/// slider under them, which a double-tap also resets. The value shows as [scale] × the value with [decimals] places
+/// and [unit] (velocity 0..1 as `80%`); a typed number is read in the same units, clamped and, with [divisions],
+/// snapped.
+class ValueSlider extends StatelessWidget {
+  const ValueSlider({
+    super.key,
+    required this.label,
+    required this.value,
+    required this.min,
+    required this.max,
+    required this.reset,
+    required this.onChanged,
+    this.onChangeEnd,
+    this.scale = 1,
+    this.decimals = 0,
+    this.unit = '',
+    this.divisions,
+    this.sliderKey,
+  });
+  final String label, unit;
+  final double value, min, max, reset, scale;
+  final int decimals;
+  final int? divisions;
+  final ValueChanged<double> onChanged;
+  final ValueChanged<double>? onChangeEnd;
+  final Key? sliderKey;
+
+  String show(double v) => '${(v * scale).toStringAsFixed(decimals)}$unit';
+
+  double _snap(double v) {
+    final c = v.clamp(min, max).toDouble();
+    final d = divisions;
+    if (d == null || d <= 0) return c;
+    final step = (max - min) / d;
+    return (min + ((c - min) / step).round() * step).clamp(min, max).toDouble();
+  }
+
+  void _set(double v) {
+    onChanged(v);
+    onChangeEnd?.call(v);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final v = value.clamp(min, max).toDouble();
+    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: [
+      Row(children: [
+        Expanded(child: Text(label, style: const TextStyle(color: Neon.text))),
+        TextButton(
+          key: ValueKey('value-type-$label'),
+          onPressed: () => typeValue(context,
+              title: label,
+              initial: (v * scale).toStringAsFixed(decimals),
+              keyboardType: const TextInputType.numberWithOptions(decimal: true, signed: true),
+              parse: (t) {
+                final x = double.tryParse(t.trim().replaceAll(',', '.').replaceAll(RegExp(r'[^0-9.\-]'), ''));
+                return x == null || !x.isFinite ? null : _snap(x / scale);
+              },
+              apply: _set),
+          child: Text(show(v), style: Neon.code(size: 13)),
+        ),
+        IconButton(
+          tooltip: 'Reset to ${show(reset)}',
+          visualDensity: VisualDensity.compact,
+          onPressed: v == reset ? null : () => _set(reset),
+          icon: const Icon(Icons.restart_alt, size: 18),
+        ),
+      ]),
+      ResetOnDoubleTap(
+        onReset: () => _set(reset),
+        child: SliderTheme(
+          data: SliderTheme.of(context).copyWith(
+            trackHeight: 8,
+            thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 11),
+            overlayShape: const RoundSliderOverlayShape(overlayRadius: 22),
+          ),
+          child: Slider(
+            key: sliderKey,
+            value: v,
+            min: min,
+            max: max,
+            divisions: divisions,
+            onChanged: onChanged,
+            onChangeEnd: onChangeEnd,
+          ),
+        ),
+      ),
     ]);
   }
 }

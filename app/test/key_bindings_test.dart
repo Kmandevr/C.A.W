@@ -100,9 +100,9 @@ void main() {
     await tester.tap(find.text('Edit keys'));
     await tester.pumpAndSettle();
     expect(find.text('Key bindings'), findsWidgets);
-    await tester.enterText(find.byKey(const ValueKey('keys-search')), 'Go to Mixer');
+    await tester.enterText(find.byKey(const ValueKey('keys-search')), 'Go to Files');
     await tester.pump();
-    await tester.tap(find.widgetWithText(ListTile, 'Go to Mixer'));
+    await tester.tap(find.widgetWithText(ListTile, 'Go to Files'));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('add-key')));
     await tester.pumpAndSettle();
@@ -111,7 +111,7 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('key-set')));
     await tester.pumpAndSettle();
     expect(router.currentState!.vim.keymap.lookup(Area.global, KeySeq.parse('Alt+M')),
-        const ActionRef.action('view.mixer'));
+        const ActionRef.action('view.files'));
   });
 
   test('typed keys match what the keyboard sends', () {

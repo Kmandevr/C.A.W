@@ -1,10 +1,566 @@
 ---
 title: Decisions
 summary: Dated record of what was chosen and why, newest first.
-updated: 2026-11-10
+updated: 2026-11-11
 ---
 
 # Decisions
+
+## 2026-11-11: the .caw project file and its package format (#159; Claude, choices to confirm)
+
+Carries out the owner's packaging bullets of "MIDI clip loops, clip automation and project packaging" (below); [App](app.md) has the flows.
+
+**Decision (Claude, for the owner to confirm):**
+- **One `.caw` file, two forms.** With nothing ticked besides the project itself it is the project JSON (as `.cawproj` was). Otherwise it is a **zip** holding `manifest.json`, `project.json`, `assets/` (audio and samples), `components/<component id>/<ABI>/` (C++ builds), `presets/*.cawpreset`, `theme.json` (`{"name", "theme": the .theme file text}`); `plugins/` is reserved and stays empty. The reader tells them apart by the zip signature. Import also takes `.cawproj` and `.json`.
+- **The manifest** (`"format": "caw.package"`, version 1) lists every dependency the export found, packaged or not: `kind`, `name`, `used_by`, `size`, `packaged`, `path` in the archive, `sha256`, `reference` (what the project JSON calls it), and per kind `component`, `abi` and `source_fingerprint` (builds), `preset_kind`, `embedded` (C++ sources and convolver impulses, which live in the project JSON) and `licence` (plug-ins: "unknown: not packaged"). A packaged file's references in `project.json` become `package:assets/<name>`, so no device path of a packaged file travels with it; a file left out keeps its path and its hash, so Locate… can check a copy.
+- **No new dependency:** the zip reader and writer are our own (`app/lib/model/zip_archive.dart`, stored and deflated entries through `dart:io`'s raw deflate, no zip64, no encryption) rather than the `archive` package ([Fact] MIT, its `LICENSE` in archive 3.6.1 on pub.dev, read 2026-11-11): the reader is small enough to check whole, and every limit is ours.
+- **Untrusted on the way in:** every archive name must be relative, `/`-separated and plain (no `..`, `.`-leading parts, drive letters, backslashes, control characters or links; zip-slip), and names are never used as output paths: files are written under names made here, inside the project's own folders. Limits: 20,000 entries, 4 GiB in all, 1 GiB per audio file, 256 MiB per build, 64 MiB of project JSON, 4 MiB of manifest, presets at their own 4 MiB, 1 MiB of theme; a deflated entry stops at the size it declared (zip bombs), and size and CRC are checked. A packaged file whose hash differs from its manifest is left out and named. Only files the manifest lists in their kind's folder are read, each at most once (a manifest naming one twice, or listing more files than the archive holds, is refused), and the 4 GiB counts what is actually unpacked, so an import stops and removes its files once past it. Paths in a project are untrusted too: only plain local absolute paths are looked at (no network shares, device paths or URLs; they become missing files when a project opens), and an export packages or hashes only the project's own files; Locate… checks the copy it made, not the file picked.
+- **Builds through the trust store:** a build is unpacked only for this device's ABI and for sources it was built from; it asks Trust or Block once per build fingerprint (`library:<sha256>` in `native-trust.json`, beside the sources' fingerprints), and it loads only while that Trust stands (`NativeComponentManager` checks again at each prepare); the sources' own trust is still asked as before. A blocked or unanswered build is deleted and the sources build here.
+- **Defaults in the checklist:** audio and samples start ticked; builds, presets and the theme start unticked (device-specific or the user's own library); presets offered are those for a device the project uses (a track doesn't record which preset it came from); the theme is offered when the one in force is a custom one.
+- **On import:** presets join the user's under a free name; the theme waits for **Add theme** (`Settings.addTheme`, which doesn't choose it); a file that is still missing shows the banner.
+- **Open (owner):** whether the export should also offer to package recordings that no clip uses (they are listed under Files today and packaged when ticked); whether a plug-in's licence should be confirmable in the checklist once plug-in hosting exists.
+
+## 2026-11-11: the .caw language is deleted from the engine (#160, WP-D)
+
+Carries out the owner's decision of 2026-11-10 ("C++ replaces the .caw language"; old projects are dropped).
+
+- **Deleted:** the compiler and VM (`compile.*`, `vm.*`, `builtins.*`, `synth.*`, `tables.*`, `program.h`, `ops.h`), the built-in libraries (`engine/lib/`), the function reference generator (`docs.cpp`, and with it `docs/library.md` and `docs/agent-guide.md`), the .caw example templates and their golden hashes, `language_test`, `variables_test`, `synth_test`, `library_test` and `golden_test`, the CLI's `check`, `templates`, `docs` and single-module `render`, and the C API's `caw_check`, `caw_library`, `caw_template_*`, `caw_engine_set_param`, `caw_engine_set_global` and `caw_worker_pool_submit_check`. The engine CI no longer checks or renders examples. `docs/synth.md` went with the patch compiler.
+- **Kept:** pattern text (the note-clip format, #158) and the per-pattern result the pattern tab reads; the two example patterns (`examples/acid-line.caw`, `chords.caw`), because the app bundles them and its test reads them.
+- **A track is its instrument and inserts:** `Engine::Chain` is gone (Install only makes a slot a track); one mix-graph node per track; no voices, seams, code swaps, swap timing, `.caw` params, globals, exports or imports (this ends #78 and #133's export budget). A layer without an instrument plays nothing. `LayerSpec.chain`, the project's `globals`, `voices`, `swap`, `seam_crossfade` and key fields are not read.
+- **C API 21** (18 is audio, 19 modulation, 20 is not used, and per-note FX, merged after, is 22). A module that is not a pattern reports an error on line 1.
+- **Tests play C++:** every engine test that used a .caw source as a signal plays `org.caw.test.osc` (`engine/tests/test_signal.h`) or a built-in. The mixer goldens moved onto it and were re-recorded on purpose; the Library parity tests keep frozen hashes of the ports' output, recorded while they still matched the .caw built-ins. Every other golden is unchanged.
+- **Bug fixed on the way:** a track's instrument installed while nothing sounds counted as still ringing at the first Play, which mixed in 5 ms of a phantom tail (a free-running source started at twice its level); a new instrument now starts idle.
+- **Open, for the owner:** an instrument track keeps running after a Stop until its output is quiet (or 30 s), and a never-quiet effect there now ends at that cap without the 20 ms fade buses get; a bus whose capped tail has faded comes back while a child track still rings out. The app still sends `voices`, `swap`, `seam_crossfade` and the key (Settings' light-mode voice cap and swap timing now change nothing): removing those settings is UI work.
+
+## 2026-11-11: What agents may do on GitHub and in git (owner)
+
+**Decision (owner, 2026-11-11):**
+- **Merging is allowed:** agents may merge local branches into the session branch.
+- **Issues:** agents may close, label and comment on issues in this repository when the work they track is done or superseded.
+- **Deleting branches** needs the owner's express direction or approval every time, so those commands always ask.
+- **Where it lives:** `.claude/settings.json`, in `permissions` and in the `autoMode` allow notes.
+
+## 2026-11-11: Desktop plays to desktop strengths (owner)
+
+**Decision (owner, 2026-11-11, after a desktop review with screenshots at 1366×768 and 1920×1080).** Phones stay exactly as they are; on desktop:
+- **Ctrl+S saves everywhere.** Moving a track up or down becomes Alt+Up and Alt+Down. WASD stays for everything else.
+- **A left-drag on empty space selects, at once.** In Arrange it draws a time selection; in the piano roll it draws a selection box. A middle-drag or Space+drag pans.
+- **A click selects at once.** A double-click on a clip opens its notes, and a right-click opens the menu. On phones, a double tap still opens the menu.
+- **Desktop look changes:**
+  - a command palette (Ctrl+Shift+P);
+  - the project menu as a dropdown that shows shortcut keys;
+  - compact right-click menus (keys shown, never off screen);
+  - device editors as non-modal, resizable floating windows (several open at once, sizes remembered);
+  - the mixer as a dockable panel (Ctrl+M) with wider strips;
+  - Settings and the theme editor at a readable width;
+  - the full-screen piano roll fitting the pattern, with a title bar and close;
+  - a bottom dock area, so the focus panel doesn't squeeze the lanes.
+- **Behaviour fixes that need no look change:** a mouse drags at once, right-click does whatever a long press does, the wheel turns knobs, Esc closes pages, and Windows remembers its window and accepts files dropped from Explorer.
+
+## 2026-11-11: MIDI clip loops and clip automation, how they are built (Claude, to confirm)
+
+Carries out the first two bullets of the owner's decision below ([App](app.md)). the loop point is `ClipDoc.loopSteps` (`loop_steps` in the engine's project JSON, 0 = the pattern's length, so older projects play the same). Clip lanes keep points in clip time and the app unrolls them onto the timeline for the engine: inside a clip its lane plays, elsewhere the track's lane on the same target (or the control's value); where clips with lanes on one target overlap, the later-starting one wins until it ends. Move to clip takes the track lane's values over the clip's first loop and removes the track lane. Clip automation is not drawn in Arrange's clip bodies yet.
+
+## 2026-11-11: MIDI clip loops, clip automation and project packaging (owner)
+
+**Decision (owner, 2026-11-11, answers to Claude's questions):**
+- **MIDI loops as in REAPER.** In REAPER, a looped item repeats at its source's length ([Fact] cockos.com/wiki "Loop Source", read 2026-11-11). Here each **clip** has its own loop point, a bar dragged in the piano roll. A clip longer than its loop repeats from that bar, so a pattern can be written at any length and looped at any point. Clips that share a pattern can loop at different points.
+- **Clip automation** belongs to the clip. It loops with the clip's MIDI and moves and extends with it, so it never needs redrawing after the clip is lengthened or moved. Track automation along the timeline stays for song-wide moves. Lanes drawn on a clip are clip automation by default, and a menu moves a lane between the clip and the track.
+- **Project packaging.** The `.caw` project file (#159) always carries the project's C++ source. On export, the user can also package samples and audio (clips, sampler and drum samples, impulse responses), built C++ binaries for this device, third-party plug-ins (only where their licence allows; otherwise they are listed as needed), user presets, and the theme profile.
+- **Export shows a checklist** of every dependency: its type, what uses it, its size, and whether it was found. Each has a package box, and Package everything sits at the top.
+- **A project opened with something missing** opens with a banner naming it, offering Locate… and Replace…. The parts that need it stay silent until they are fixed.
+
+## 2026-11-11: Theme profiles and edit animations (owner)
+
+**Decision (owner, 2026-11-11, answers to Claude's questions):**
+- **A theme is a full profile:**
+  - **look:** colours, fonts and size, corner roundness, glass, glow and density;
+  - **layout:** track height and header width, panel sizes, the dock layout, and the toolbar buttons' order and visibility;
+  - **behaviour:** gestures, menu style, haptics, motion and snap defaults.
+
+  Switching theme switches all of it. Profiles can be saved, duplicated, imported and exported, as colour themes are today.
+- **Edit animations:** anything an edit adds, deletes, moves or resizes animates. That covers notes, clips and tracks, lengths and sizes, and panels. The style is the user's choice, Subtle (the default) or Playful.
+- **Turning animations off:** one switch turns off every animation except the ones that help use the app (drag ghosts, snapping, press feedback). Each kind of edit animation also has its own switch (`EditMotion` in `app/lib/ui/motion.dart`).
+
+## 2026-11-11: Touch editing in Arrange and the piano roll (owner)
+
+**Decision (owner, 2026-11-11, answers to Claude's questions):**
+- **Clips:** a long press on a clip picks it up whole (no stretching) and drags it in time and onto any track, snapping to the grid (Shift or a resting second finger frees it, as elsewhere). It can't go before the project start. A **double tap** on a clip opens the menu the long press used to open.
+- **Tracks:** a long press on a track header picks the track up for reordering. Following REAPER, a plain up and down drag only reorders. Dropping with the finger in the right-most third of a track nests the dragged track under it: any track can be a parent, and the routing follows (the child feeds its parent). A double tap on a header opens the track menu.
+- **Piano roll paste** lands right after the end of the copied selection, and the pasted copy becomes the selection, so repeated pastes chain end to end.
+- **Selection box:** a long press on empty grid (about 0.35 s, with a haptic tick), then a drag, draws a box that **adds** to the selection. A double tap on empty grid clears the selection, so a stray tap can't. Undo can take back a selection the box just made. The select tool stays as it is.
+- **Tremolo and ratchet tools:** a ratchet count per note (2–8 even repeats with a velocity ramp), a **ratchet brush** (drag over notes to set their count), tremolo as a volume wobble, a **vibrato** tool (pitch), and curve handles on pitch bends.
+- **Advanced menus** (the note menu, the piano roll's ⋯, the Arrange menus): grouped into sections with the most-used items first. Numbers get a big slider, a type-in field and a reset.
+- **Build** can open anything text-based, but its focus is C++. It opens on C++, and it should be clear that C++ is what it is for.
+
+**How Arrange does it (Claude, choices to confirm; [App](app.md)):**
+- **A plain track becomes a parent by turning into a bus folder** (`makeParent`): it keeps its id, effects, sends, fader and volume and pan lanes, so what it nests plays through them as in REAPER, and its instrument and clips move to a new first track inside it of the same name. The engine's bus slots only sum and run effects; letting a bus also play an instrument is an engine change left for later, so the parent's own clips are not on its row as in REAPER.
+- **A second finger frees a long-press lift from the grid**, as the owner asked; it still makes a copy during a quick drag (the earlier choice), and the clip menu duplicates.
+- **The double tap replaces the clip's old double tap** (which opened its notes): the menu's first entry, Edit notes, does that. A plain tap on a header now waits out the double tap before opening the focus view, while the header's buttons answer at once.
+- **The menus' numbers:** the track menu's Volume (dB) and Pan apply live; the clip menu's Length (bars) applies when let go or entered, since it rebuilds the project.
+- **Audio clips** (done, 2026-11-11, branch `clip-loops`) follow the same rule (`app/lib/ui/arrange/audio_clip_view.dart`): a long press lifts the clip whole (edges included) onto any track on the grid, never before the project start, a resting second finger freeing it; a double tap or a right-click opens the menu, whose first item opens the Clip tab.
+
+## 2026-11-11: Audio review fixes: declick lengths (to confirm)
+
+**Decision (Claude, for the owner to confirm; [engine](engine.md#audio-clips)):**
+- **Clip voices declick over 4 ms** (to confirm): a voice cut by a seek, loop wrap, stop, mode change, mute or edit fades out over 4 ms while one starting mid-clip fades in over 4 ms; a clip's loop seam crossfades over 4 ms. A voice starting at its clip's start is left as authored (no fade), so a clip's own attack is unchanged. The review asked for 2–5 ms.
+- **The sampler fades stolen voices and voices of replaced zones over 5 ms** (to confirm), and steals the oldest releasing voice before the oldest held one.
+- **SFZ export copies only WAV, FLAC and MP3 files** (by extension and first bytes, up to 1 GB), named uniquely against `samples/` without regard to case: a project's zone paths are untrusted and could otherwise copy any readable file into the exported folder.
+- **Recording splits a take into a new file before 4 GB** (WAV's 32-bit sizes) rather than writing RF64, so every take stays a plain WAV the decoders and other apps read.
+
+## 2026-11-11: Audio assets, clips, sampler and input (WP-J; choices to confirm)
+
+**Decision (Claude, for the owner to confirm; the owner put all three in the beta, see below; [engine](engine.md#audio-assets-clips-the-sampler-and-audio-input-api-18)):**
+- **Decoders: miniaudio's bundled dr_wav, dr_flac and dr_mp3**, already vendored (miniaudio 0.11.25; [Fact] the file's licence block, read 2026-11-11: "a choice of public domain or MIT-0", which covers the dr_libs code it carries). No new dependency. They are compiled a second time inside the core with every function `static` (`platform/decode_miniaudio.c`), so the core decodes in builds without device audio and never clashes with the device copy.
+- **Time-stretch: our own WSOLA** (Verhelst and Roelands, ICASSP 1993), not a library: [Fact] Rubber Band is GPL with a paid commercial licence (breakfastquay.com/rubberband, read 2026-11-11) and SoundTouch is LGPL v2.1 (surina.net/soundtouch, read 2026-11-11), both excluded by the licence rule. WSOLA is cheap and keeps transients; a phase vocoder for sustained tonal material is left for later. Varispeed (resampling) is the second mode.
+- **An audio track is a layer with `audio_clips`/`input`, played by a built-in instrument** (`org.caw.audio-track`), so clips get the track's inserts, sends, buses, keys, latency compensation and every render path without new mix-graph code. A layer plays an instrument or audio clips, not both.
+- **Assets are referenced by absolute path** (a project `assets` table, or a clip's `path`), shared process-wide within a 1 GiB budget; sampler zones name paths in the sampler's state JSON, whose keys mirror SFZ opcodes so import and export are one-to-one.
+- **Monitoring goes through the track's chain**, in the same duplex callback; `auto` monitors while armed and stopped, or while recording.
+- **Takes:** WAV float by default, one file per armed track per take, a new take at each loop wrap, placed by the round-trip latency (override, then the last good ping, then the device's buffer estimate, an [Assumption] until measured on the S22+).
+- **App side (Claude, 2026-11-11, branch `audio-ui`; to confirm in the APK):** imports are **copied** into the project's own `audio/<project>/` folder (so a project never depends on a file elsewhere, and deleting the project deletes them); **recordings** go to its `recordings/` folder inside that, and a crash's takes are offered back when the project opens (or kept in Files). Audio dropped on a track with an instrument or MIDI clips goes on a **new audio track under it** rather than replacing anything. A **fixed** clip stores its length in seconds (`length_seconds`), so the app never has to re-fit lengths after a tempo change. New clips have **no edge fades** (as the engine); a loop recording's passes become **one clip with takes** (the newest playing), not stacked lanes, so comping is swapping whole takes for now. The input choice, latency override, punch and take format are **app-wide** (`audio-input.json`), not per project. The latency ping asks first every time until the user ticks *Don't ask again*. Mixed MIDI and audio selections split only their MIDI clips.
+- **Open (owner):** a default edge fade (REAPER-style 1 ms or none); whether a musical clip's default stretch is WSOLA (it is); whether recordings should stay with the project (as now) or in a shared library; whether loop takes should show as stacked take lanes for comping; whether imports should be referenced in place instead of copied (saves storage, breaks if the file moves).
+
+## 2026-11-11: the app stops using .caw (WP-C; choices made for the owner, to confirm)
+
+- **Engine Lab moves to Settings › About and beta as "Engine diagnostics"** (to confirm with the owner; #139 says "Settings or a debug view"). It keeps the meters, the master scope and spectrum and each track's signal path; the .caw module report went with the language.
+- **Mixer, Automation and Exporter are retired as workspaces** (#139 step 4). The mixer is Arrange's mixer card on every screen size, now with the master strip (master FX, level, meters) at its start; on desktop it replaces the docked volume/pan strip and the Mix layout preset. Track automation is the focus view's Automation tab and the lanes under tracks; the .caw module-parameter and global lanes are gone. Export is a page from the project menu (Export…, Ctrl+3) holding the Export song sheet and the loop, length, one-shot, wavetable and MIDI exports, profiles, history and queue; the wavetable export sweeps a track's C++ instrument (engine API 17). The phone's ⋮ More button went, having nothing left to list.
+- **Old projects:** a project with .caw sound modules loads with them, their tracks' .caw chains, the globals and their lanes dropped, and a one-line yellow banner names them (owner, 2026-11-10: old projects are dropped; the app must not crash). Patterns stay (#158).
+- **Settings › Code editor** drops the rows that only served the .caw editor (completion chips, the Library button, compact controls); their stored values stay in `settings.json` until WP-D.
+- **Templates:** the C++ starters replace the .caw templates in Files (New from a starter…) and the track cards' Add track; the two pattern templates (acid line, chords) are bundled in Dart so the engine's `caw_templates` is no longer called.
+
+## 2026-11-11: Per-note FX host, sources, C API and app (#127 steps 4–7; choices to confirm)
+
+**Decision (Claude, from the architect's design; [architecture](architecture.md#the-per-note-fx-host-notefxhost-fact-steps-47-branch-note-fx-host-2026-11-11), [engine](engine.md#per-note-fx-host-127-steps-46)):**
+- **Overflow is a lane, not a side path:** the voice bus gains `CAW_LANE_REST` (note id 0), the lane every voice without its own slot renders into, so the overflow chain hears exactly the unassigned voices. An instrument built before the bit plays those voices dry; it is a 3.1 addition, not a new revision.
+- **B + 2 chains:** two spare slot chains let a stolen slot fade out for 10 ms while the new note starts on a fresh chain; with the spares busy the note goes to overflow. "Oldest released" is the released note that started first.
+- **Time in frames, not blocks:** a slot's chain starts on its note's frame and its tail runs max(declared tail, 128 frames), capped at 2 s, past the note's last sound, then fades; so playback at any buffer size and an export give the same bits. `quiet()` alone doesn't free a slot (it is learnt at block ends).
+- **Budget read at each note-on** (not at the next project update): a quality change applies to the next notes; slots are allocated for B.
+- **API 22**, leaving 20 and 21 to parallel branches (delete-caw); per-note components are addressed with a bit on the component index (`CAW_NOTE_COMPONENT`) rather than new setter functions; per-note components keep no saved state.
+- **Note sources as link sources** (`note.pitch` … `note.age`, target `noteComponent` only); pitch reads pitch / 127, age runs 0 to 1 over 2 s: first choices.
+- **To confirm (owner, in the APK):** (1) the look: the PER NOTE section above the track effects with a voice-budget chip and slot dots, violet per-note cards, and Run per note / Run on whole track in the card menus (or a per-card toggle only); (2) over budget, overflow to one shared chain (built, the default) or steal the oldest held note; (3) the default budget per phone (8; Eco 4, High 16) after a CPU measurement on the S22+; (4) the name and range of the age source (0–2 s).
+
+## 2026-11-11: Per-note FX steps 1–3 and descriptor domains (#127, #120; choices to confirm)
+
+**Decision (Claude, from the architect's design; [architecture](architecture.md#per-note-processing-127-and-descriptor-domains-120)):**
+- **No v4:** the new descriptor fields and the voice bus are C interface revision 3.1 under the v3 growth rules, so `caw_get_component_v3` and every 3.0 component keep working (they read as whole-only).
+- **Named "domain", not "scope":** `CAW_SCOPE_*` is already the oscilloscope in `caw.h`.
+- **Whole is always set**, and the C++ SDK default is whole-only: a third-party effect runs per note only when its author declares it (a silent opt-in could run unprepared state per note). The built-in stereo effects opt in; keyed effects, the racks and the limiter do not.
+- **Lanes are summed before the instrument's shared stage**, so turning per-note FX on does not change the instrument's own effects and volume, and with no bus the sound is bit-identical. The Flagship calls `run()` once per control period (16 frames); step 4's host must handle such short runs cheaply.
+- **ENDED means no voice plays the note at the block's end**, raised every such block (also for a lane assigned before its note starts), so the host never waits on a note the instrument dropped. Mono and legato lanes follow the note the voice plays now. A drum hit's room send stays dry.
+- **`org.caw.downmix` is new and internal:** `org.caw.utility`'s Mono mode is stereo in and out and cannot feed a mono port; the downmix is unlisted while track chains take stereo only. Dual mono is `ModuleRegistry::createDualMono`, an adapter, not a graph feature.
+- **The listing** adds `domains`, `capabilities` and `cpu_class` (snake_case like its other keys) to `caw_engine_components`; no new function, so the API number stays 17 (step 6 took 22).
+- **Cost classes are judged, not measured** ([Assumption] until the S22+ measurement).
+- **To confirm (owner):** the name "domain" in the UI (the app says "Run per note" / "Run on whole track"); the look and budget questions are in the steps 4–7 entry above.
+
+## 2026-11-11: Modulators and routing anything to anywhere, #161 (choices to confirm)
+
+**Decision (Claude, for the owner to confirm in the APK; [engine](engine.md#modulation-project-modulators-and-links-161), [ui](ui.md#modulation-on-touch)):**
+- **One model.** Project links reuse the racks' and Flagship's route record and rules (amount and polarity of the knob's normalized travel, summed per knob, base value untouched), widened to (layer, component index, parameter) and to volume, pan, sends and other modulators, plus a per-link curve. The shared arithmetic is `engine/src/mod_route.h`; the FX rack calls it. A device's internal matrix stays (its per-voice sources, such as Flagship's envelopes, can't be project-level).
+- **A project-level `modulators` list**, each with a `layer` (where it is shown) and an `input` (what it hears), rather than modulator components inside track chains: chains stay audio-only, and a modulator on one track can hear another.
+- **Modulators live in a "Modulators" lane at the bottom of each track's FX stack** (the master's holds the project's), not on a separate strip. To confirm: the owner may prefer a strip in the mixer or the Arrange view.
+- **Timing: a fixed 16-frame grid from Play and a 96-frame (2 ms) look-behind**, instead of ordering tracks so a source runs before its target in the same block: block-size independent, export equals playback, and the mix graph's order (sends, keys) is untouched. A follower is 2 ms late, which is below any envelope's attack. Modulators restart at each Play.
+- **Loops are refused** like routing loops, through followers only (notes make none, so an envelope can move its own track); a follower moving its own track is refused (to confirm: self-ducking could be allowed later, it is stable with the look-behind).
+- **Volume and send links move the fader's travel** (the app's REAPER-like taper, 0 dB three quarters up), pan its −1..1 travel; master volume takes no links yet.
+- **Budgets:** 64 modulators, 256 links, 32 links per knob, 8 outputs per modulator.
+- **C API version 19** (18 is the audio-engine branch's); merge both and keep 19.
+
+## 2026-11-11: MIDI devices (WP-H; choices made for the owner)
+
+- **The engine path:** device MIDI reaches a track's instrument through a new C API (API 15) into `Midi2InputQueue`, placed at the frame it was played from the device's timestamp, one callback late so the spacing is kept (Android's MIDI timestamps are `System.nanoTime`, the engine's `steady_clock` on Android). On-screen keys keep note previews. MIDI 1.0 is converted to MIDI 2.0 at the edge (`midi_device.cpp`, the UMP specification's min-centre-max upscaling written from the published algorithm, [Assumption] not re-read against the PDF).
+- **Device notes are previews with their own id range**, so everything that ends previews (Stop's fade, mute) ends them, but the app's notes-off backstop for the on-screen keys does not.
+- **Controller learn maps in the app, not through F6.5:** a mapped CC calls the knob's live path (`DeviceTarget.setLive`, the same as a drag) on the knob's curve, as F6.5's rule says, and is not passed on. F6.5's `setCcMappings` belongs to graphs that take host events, which the Engine's live mix graph does not get from devices; doing it there would mean re-preparing the graph while stopped. Revisit if CC timing must be sample-accurate.
+- **Android facts [Fact, developer.android.com, checked 2026-11-11]:** `MidiManager.getDevicesForTransport` and `registerDeviceCallback(int, Executor, DeviceCallback)` are API 33 with `TRANSPORT_MIDI_BYTE_STREAM` (1) and `TRANSPORT_UNIVERSAL_MIDI_PACKETS` (2); a MIDI 2.0 USB device shows both interfaces; UMP bytes arrive 4 to a word in network order; `MidiDeviceInfo.getDefaultProtocol` (API 33) returns `PROTOCOL_UMP_USE_MIDI_CI` (0) or `PROTOCOL_UNKNOWN` (-1) when MIDI-CI is needed. C.A.W reads a UMP interface only with a pre-negotiated protocol and then leaves that USB device's MIDI 1.0 interface closed. BLE MIDI: scan filter on service UUID `03B80E5A-EDE8-4B33-A751-6CE34EC4C700`, then `openBluetoothDevice`, kept open (android.media.midi package summary and `MidiManager`). Permissions: on Android 12+ `BLUETOOTH_SCAN` (declared `neverForLocation`) and `BLUETOOTH_CONNECT` are runtime permissions; legacy `BLUETOOTH`, `BLUETOOTH_ADMIN` and `ACCESS_FINE_LOCATION` are declared with `maxSdkVersion 30` (Bluetooth permissions page). Asked only when the user starts a scan.
+- **Windows: WinMM through dart:ffi**, not the runner: the binding compiles on every platform (so `flutter analyze` and the tests check it here) and needs no C++ in the runner. [Fact, learn.microsoft.com, checked 2026-11-11]: `midiInOpen` with `CALLBACK_FUNCTION`; `MIM_DATA`'s dwParam2 is milliseconds from `midiInStart`. Constant values and `MIDIINCAPSW` layout are from the SDK headers as known [Assumption]. **Windows MIDI Services is not used:** it needs its own SDK runtime and service on Windows 11, not a modest change; WinMM keeps working beside it.
+- **Open (owner):** which device wins when several play at once (today every device not turned off plays the target track); whether a mapped CC should also reach the instrument; soft takeover for mapped knobs.
+
+## 2026-11-11: Arrange and mixer leftovers, WP-K1 (choices to confirm)
+
+**Decision (Claude, for the owner to confirm in the APK; [App](app.md), [REAPER flow](reaper-flow.md)):**
+- **The master is a stand-in track** (`masterLayerOf`, id `\u0000master`) whose effect list *is* `ProjectDoc.masterComponents`, so the FX stack, device editors and live displays open master effects without a second code path; the engine gets the null layer. Sidechain keys and track presets are hidden on master effects ([Assumption] the engine's master chain takes no key; not checked).
+- **Mixer strips now list C++ effects too** (they showed only the .caw chain), since FX drag between strips needs them; a C++ slot opens its device UI, a .caw slot the inspector as before.
+- **FX drag copies by default, Alt or Shift moves** (REAPER, UG 11.5: drag copies, Alt-drag moves); on a phone the copy's toast offers **Move**. A copied .caw effect gets its own module so its knobs are its own.
+- **Region drag:** a plain drag still moves the region alone (unchanged); Alt takes its clips, Ctrl or a second finger copies region and clips (the plan's phone gesture). "Clips in a region" are those that start inside it, moved whole. [Assumption] REAPER's exact default for a region drag was not checked.
+- **1–0 take the digits from counts in the arranger:** a digit an area binds on its own runs that action unless a count is already being typed, so `4]` no longer works in the arranger while 1–0 are bound (unbinding them in Key bindings brings counts back). The roll and code editor keep digit counts.
+- **Templates:** `new_project_template` replaces `new_project_start` (the old First loop choice carries over); saved templates are JSON files in `<app support>/templates/`; saving under an existing name replaces it; inserted track templates go at the end of the list with fresh ids and copied modules. Bundled starters: First loop and Song sketch; tracks Drums, Bass, Keys, Pad and Reverb bus.
+- **Record modes:** a setting (`midi_record_mode`, default *New clip, takes*, the earlier behaviour) on Record's long-press. Overdub and Replace write into the clip under each note (its pattern, so linked clips change together, as REAPER's pooled items); notes outside any clip make a new clip; locked clips are left alone. Next/Previous take have no default keys because T is tap tempo.
+- **Lane arm** is per lane and saved only when off (`armed: false`); a control with no lane is still written (REAPER's "add envelopes for controls tweaked in write mode").
+- **No app track cap:** the engine's `maxLayers()` refusal (349 layers at the fallback budget) is the only limit, shown as the engine error.
+
+## 2026-11-11: Song renders and stems (choices to confirm)
+
+**Decision (Claude, for the owner to confirm; [engine](engine.md#song-renders), [app](app.md)):**
+- **A stem is what a track or bus sends on** (after its effects, volume, pan and latency compensation), **with the master's volume, DC filter and start fade but not the master's effects or limiter** (`stems_through_master`, on by default). Why: the stems that reach the master then add up to the mix, and the levels match it, as REAPER's stems of the track outputs do; master effects can't be split per stem.
+- **Normalising takes one gain from the mix for every file** (`normalize_each` off), so normalised stems still add up; LUFS normalising stops at a −1 dBTP true-peak ceiling by default.
+- **One pass per range renders every file of it** through engine output taps (a small offline-only hook in `engine.cpp`), rather than one render per stem: the stems line up by construction, and a phone renders ten stems for the cost of one.
+- **Results stay in the app's support folder until saved** (Save, or Save all into a folder through the system's folder picker); they don't appear in Files yet.
+- **The sheet keeps the old Exporter** (Quick Export, one-shot, wavetable, MIDI) below its Export song button, rather than replacing it.
+
+## 2026-11-11: VST3 interface headers for the plug-in builder (#162)
+
+- **Licence [Fact, checked 2026-11-11]:** Steinberg's VST3 SDK is MIT. The `LICENSE.txt` of `steinbergmedia/vst3sdk`, `vst3_pluginterfaces`, `vst3_base` and `vst3_public_sdk` (default branches, read 2026-11-11) is the MIT License, "Copyright (c) 2026, Steinberg Media Technologies GmbH"; the `vst3_pluginterfaces` tag `v3.8.0_build_66` (commit `31d6eeba`, 2025-10-20) already carries it, so the change came with VST 3.8.0. No GPL or proprietary licence remains on the parts used.
+- **Dependency:** `steinbergmedia/vst3_pluginterfaces` **v3.8.1_build_84** (commit `4f547e8e`, 2026-08-11, the latest tag on 2026-11-11), MIT. Only the interface headers and two of their files (`base/funknown.cpp`, `base/coreiids.cpp`) are compiled; the SDK's helper classes, VSTGUI and the validator are not fetched. Fetched at configure time by `caw_add_vst3_plugin` (`engine/cmake/CAWVst3.cmake`), not vendored, not in the app or the engine library; the build stops if the fetched `LICENSE.txt` is not MIT.
+- **Why:** VST3 is the export target after CLAP (roadmap 9.3): the same component library builds as a `.vst3` bundle through a second wrapper around the C interface ([native module SDK](native-module-sdk.md#export-as-a-vst3-plug-in)).
+- **[Assumption]** the "VST" name and logo are trademarks with their own usage guidelines (the repository README's "License & Usage guidelines"), separate from the code licence; C.A.W does not use the logo. Not checked further.
+
+## 2026-11-11: The Drums editor (choices to confirm)
+
+**Decision (Claude, for the owner to confirm; [UI](ui.md#device-editors), [app](app.md)):** the editor follows the owner's layout (stacked layer cards under a pad grid, a draggable hero, a Character strip). Choices made on the owner's behalf:
+- **Pads** read MPC-style, pad 1 at the bottom left; the picked pad sets the engine's `view_pad`, which no longer marks a preset as edited (it is a view setting).
+- **Explode moves the notes** out of the drums track's clips onto the new tracks (a clip's pattern is copied first, so a shared pattern is untouched); pattern notes count as channel 1 for a pad on a channel. **[Assumption]**
+- **Per-layer randomize and mutate** take the engine's whole-pad result and apply only that layer's knobs (no new C API).
+- **Samples picked from the device are copied** into app storage (`drum_samples/`); a project names them by that path.
+- **A component entry keeps up to 16384 parameter values** (the drums' 10392 with room); 256 cut a kit short when a project or an undo step was read back.
+
+## 2026-11-11: One drum instrument, built (choices to confirm)
+
+**Decision (Claude, for the owner to confirm; [engine](engine.md#drums-orgcawdrums)):**
+- **Flat parameter ids, 64 pads × 162** (`a1_body_freq` .. `d16_rnd_pos`, 10392 in all with the 24 kit-wide ones, each with a `group` tag). Why: every knob stays automatable, modulatable, MIDI-mappable and in presets and undo with no new machinery. The trade-off: a 2.9 MB descriptor for the app to parse, about 6 MB of parameter state per instance, and a knob page that must be built from the groups (no generic page can show 10392 knobs). The alternative, a pad's deep settings in the component's state with only a few automatable knobs per pad, keeps the descriptor small but loses automation of most knobs. **To confirm.**
+- **The smallest descriptor extension:** `ParameterDescriptor::group` (a slash path, `"a1/body"`, `"kit/glue"`), emitted as `"group"` by `caw_engine_components` for built-ins only; the plain-C component interface is unchanged.
+- **Explode to tracks, not multi-output (for now).** The instrument chain has one stereo output; carrying a component's extra outputs into child tracks needs the chain, the mixer graph and the project's routing changed. So the per-pad `out` is stored and the processor keeps nine buses (Out 2..9 skip the kit effects), and `caw_drums_explode` gives the app one Single-mode Drums per used pad, with the notes to move. Multi-output is a follow-up. **To confirm.**
+- **Samples by reference in the project** (`"samples": [{"slot", "path"}]` or `{"slot", "builtin"}`), decoded by the engine on the control thread, instead of a call passing float data: the project then reloads and exports with its samples. Built-in samples are the library's sounds rendered by the engine (nothing to license). Mono, 30 s a slot, 64 MB an instance, WAV only. The app must copy a user's file somewhere it keeps (a `content://` file can't be opened by path). **[Assumption]**
+- **Bank layout:** bank A's Auto notes are 36..51 (the General MIDI keys, so the kits' sounds sit where GM puts them), each bank the next 16, from a configurable `base_note`. The default kit (808) fills bank A; banks B..D start empty.
+- **Defaults made for the owner:** the old drums' sounds carried over as closely as measured (their renders within 1 dB in level); centre-panned voices at full level on both sides (a balance, not constant power); the variation's sequence restarts at every Play, so a render repeats; a random sound is level-matched to about −1 dBFS; quality Eco/Normal/High sets the drives' oversampling (1/2/4×), the metal's band-limiting (none/polyBLEP/2× rate) and the resonator's modes (8/16/32).
+- **API 11** (10 is the settings redesign's): `caw_drums_info`, `caw_drums_randomize`, `caw_drums_explode`, and the component entry's `samples`.
+- **The deep settings ("Drums: deep settings and real quality", below), as built:**
+  - **Extend, don't add a second instrument:** the new controls are new layers on every pad (`press`, `penv`, `sub`, and the effects split into `drive`, `filter`, `eq`, `dyn`, `space`), so a pad's ids went from 119 to 162; nothing shipped used the old layout, so `press_dest`/`press_amt` and `body_sub`/`body_sub_oct` were replaced (by one amount per pressure destination, and by the Sub layer) rather than kept beside them.
+  - **The pitch-shape editor is four breakpoints** (time, semitones, curve per segment) next to the analog Curve mode, not a free-form drawing: it stays a set of automatable knobs. **To confirm** that four points are enough.
+  - **The room is a send** now: each pad's `room_send` (default 1) feeds it, and `room` is its return level (it was a dry/wet mix on the whole bus); the Clean sub never reaches it. **To confirm.**
+  - **Width keeps the low end mono** with a 4th-order high-pass on the side signal (`width_hz`, 200 Hz default), and a Clean sub is added after the pan, so it is always mono.
+  - **The clipper's ceiling is exact** (a hard limit at full scale after the oversampled curve), on each pad and on the kit.
+  - **Note learn is the app's job:** the engine reports the last note (key, channel, velocity, a count) in the display data; the app writes it into the pad's `note`.
+
+## 2026-11-11: One drum instrument (owner)
+
+**Decision (owner, verbatim):** "take all the drum plugs and make them in to one that can make any kick, hihat, snare, tom, crash, rimshot, etc. It should make all the drum sounds a drum can make and be extremely customisable. The kick should be more than it is, same with the hat, to the point that it's just crazy what it can do."
+- **Structure:** "Make it work like a MIDI kit with pads, or just standalone, one sound per track": a Kit mode (pads on MIDI notes, a GM-style default map) and a Single mode (one sound per track, any note).
+- **Sound source:** synthesis plus a sample layer. **Editor** (for the app): layers as stacked cards, a draggable waveform hero, a Character strip of macros.
+- **Extras, all four:** randomize and mutate; per-hit variation (velocity layers and round-robin-style subtle changes); choke groups and per-pad outputs; pad and kit effects.
+- **Later the same day:** 16 pads × 4 banks (A..D) = 64 pads, like an MPC; pads not used cost nothing and only sounding voices run. Pitch: "Both, switchable": a pitch tracking switch per sound (off a fixed pitch; on chromatic from the note, with a mono option and glide between overlapping notes, for 808 basslines), on Kit pads too. Samples: the user's files and a small built-in pack of one-shots the engine renders from presets (nothing to license), listed and loaded through the app. Outputs: "Each one will be routed to a specific note so you only really need one track to work it, but it should also allow an automatic create-per-track workflow. And have support for native pads and stuff like that, like hardware pads that use MIDI natively": one track by default with an editable note map per pad, an "explode to tracks" workflow, per-pad note learn, a channel option (e.g. 10), velocity, and polyphonic pressure as a modulation source (to choke or damp a cymbal by squeezing). The old kick, snare, hats and kit migrate to it.
+
+## 2026-11-11: Drums: deep settings and real quality, every genre (owner)
+
+**Owner's words:** "The drum instrument needs to have an in-depth set of settings and effects to make all the sounds extremely versatile and be actual good quality. Research how different kicks, snares, hats etc. are made and make sure it has all of the settings. You should be able to make a kick a legitimate dubstep kick, an 808 kick, or just a normal-sounding kick. Make it so it can even sound acoustic even though it's generated."
+
+**What this requires of `org.caw.drums`:**
+1. **Research per drum type, with sources.** Every control needed to build each sound must exist.
+   - **Kicks:** dubstep/riddim (punch + sub + distorted mid, clipped, short click), 808 (long tuned boom with glide and saturation), techno rumble, trap, hardstyle, house/909, acoustic (beater, shell resonance, port, room).
+   - **Snares:** 808/909; acoustic (head modes + wires, rimshot, ghost notes); claps; trap and dubstep layered snares.
+   - **Hats:** closed, open and pedal; the 808 square bank; modal cymbals with choke and openness.
+   - **Toms, cymbals (crash, ride, bell, china) and percussion.**
+2. **Real acoustic realism:**
+   - modal/physical layers with enough modes;
+   - strike position and damping;
+   - velocity changing the spectrum, not just the level;
+   - per-hit micro-variation;
+   - a room/body stage.
+3. **Effects deep enough for these genres:**
+   - multi-type distortion with pre/post filter;
+   - a clipper, EQ, compressor and transient shaper;
+   - a pitch-envelope shape editor;
+   - a layered sub with its own envelope;
+   - width that keeps the sub mono;
+   - a room send.
+4. **Quality checked numerically** against research targets (spectrum, pitch curve, decay, crest factor), with genre-accurate factory presets ("Dubstep kick", "808 kick" long and short, "Acoustic kick", "Acoustic snare", "Ride", "Crash", …).
+
+## 2026-11-11: Finish the whole roadmap, then optimize, then a fit-and-finish pass (owner)
+
+**Owner's words:** "Don't stop until everything in the roadmap is completely done. I want you continuously working… once everything in the roadmap is done, go and optimize everything so it's fast, it's quick and that it runs extremely well. Then make sure everything is user friendly. Don't change the layout or things in the app, just make sure it fits well in the UI."
+
+**The order:**
+1. Every roadmap item (beta scope above).
+2. A performance pass across the engine and the app.
+3. A user-friendliness pass that keeps the layout and features as they are and only fixes fit, spacing, overflow, labels and feedback.
+
+## 2026-11-11: The beta's scope: the whole roadmap, plus drums, effects and audio (owner)
+
+**The owner's words:** "Make sure everything in the roadmap is done. Including the routing and the hard stuff too."
+
+**Owner's answers:**
+- **Audio in the beta:** audio clips on tracks, audio recording, and a sampler instrument all ship in v1.0.0-beta.1. Before this, the roadmap put Stages 3, 4 and 7 after Release 1.
+- **Per-note effects:** built for the beta (#127). Instruments expose per-voice audio, and effects can run per note.
+- **New screens:** the modulator routing canvas, the testing suite, the sample-pack maker, CLAP export, the export sheet with stems, templates, and master FX slots. Each is designed in the existing device-kit style, and the owner reviews it in the APK; changes come after.
+- **MIDI storage (#158), locked in:** clips are stored as pattern text in the project; standard MIDI files (.mid, including MPE) are used for import and export.
+
+**Also decided today:**
+- **Effects:** every Kilohearts-style effect is built in. That includes the multiband rack and the FX rack with modulators, and a browser with category tabs, search, favourites and recently used.
+- **Drums:** one drum instrument (`org.caw.drums`) replaces Kick, Snare, Hats and Kit. Its structure:
+  - two modes: a 16-pad × 4-bank kit, or a single sound per track;
+  - layers: synthesis plus a sample layer;
+  - pitch tracking per sound, switchable, with glide;
+  - each pad on its own MIDI note, with an "explode to tracks" workflow;
+  - hardware MIDI pads supported.
+
+**Still the roadmap's call:** Stages 8–10 stay after Release 1: Faust, plug-in hosting, and iOS/macOS/Linux builds.
+
+## 2026-11-11: Racks and the effect browser (fx-racks, choices to confirm)
+
+**Decision (owner):** a multiband rack (as Multipass) and an FX rack with modulators (as Snap Heap); the browser's nine tabs, search, favourites, recents, a description and icon per effect. **Choices made on the owner's behalf, to confirm** ([engine](engine.md#racks-containers-fx-racks), [UI](ui.md#the-effect-browser)):
+- **Children live in the rack's parameters** (`<slot>_fx` holds a 24-bit hash of the child's id, the child's knobs `s2.cutoff`), so the project file, presets, undo and automation needed no new format.
+- **No racks inside racks**, so there is no depth to bound. **Sizes:** the FX rack holds 8 effects in one serial lane and has 16 routes; the multiband rack holds 4 effects a band. Snap Heap's parallel lanes, Multipass's Pre/Post FX lanes and per-lane mix, and modulators inside the multiband rack are not built; a multiband rack's knobs take automation, not modulation (a rack can't sit in an FX rack), until #161.
+- **Fixed modulators** (4 LFOs, 2 followers, 2 note envelopes, random, 8 macros) instead of Kilohearts' free list of up to 32.
+- **Modulation runs on a 16-frame grid**, as the Flagship's.
+- **The modulation route record is meant to be reused for #161** (route anything anywhere): [Proposal] in [engine](engine.md#racks-containers-fx-racks); #161's design is still the owner's.
+- **Browser:** an All tab before the nine; Favourites are the Files favourites; Recently used keeps the last 12 picks app-wide; an effect no catalog lists goes under Utility.
+- **Factory presets:** FX rack Wobble filter, Dub space, Ducked delay, Drifting tape, Note sweep; multiband rack Multiband glue, Air exciter, Tight low end, Split space.
+
+## 2026-11-11: Dynamics and Drive effects (fx-dynamics; choices to confirm)
+
+**Decision (owner, 2026-11-11):** "any effect you would reasonably want is already there", Kilohearts-style; all four groups equally important. The Dynamics and Drive group added Dynamics, Multiband dynamics with an OTT mode, a De-esser, a Clipper and Phase distortion, and five curves, spread and dynamics to the saturator (see [engine reference](engine.md#dynamics-and-drive-research-and-technique-fx-dynamics-2026-11-11)). **Choices made on the owner's behalf, to confirm:**
+- **Extend, don't duplicate:** the new distortion types are saturator modes (appended, so saved projects keep their mode), not a second distortion effect; expansion and upward compression live in Dynamics, not in the gate or compressor.
+- **Multiband opens in OTT mode at 50 % depth.** OTT's per-band numbers are the commonly quoted ones for Ableton's OTT preset, not confirmed ([Assumption]).
+- **Upward lift never spikes:** an instant-attack detector limits the lift, so the attack knob shapes only the downward side and expansion.
+- **Clipper overshoot:** with oversampling and without Clip to 0 dB the output can pass the ceiling by a few dB (the IIR half-bands' phase); clipping again would bring the aliases back. Clip to 0 dB guarantees full scale. A linear-phase half-band would reduce the overshoot at the cost of latency (a follow-up if wanted).
+- **Phase distortion's latency** is a fixed 48 frames (1 ms at 48 kHz), declared, so the swing is ±46 frames whatever the sample rate.
+- **Not built:** an envelope follower as a modulation source (projects don't route modulation outputs yet); Bitcrush's ADC/DAC quality and dither, Faturator's color and stereo turbo, and Shaper's drawn curve as their own controls.
+
+## 2026-11-11: Creative and Pitch & Time effects (fx-creative, choices to confirm)
+
+**Decision (Claude, for the owner to confirm):** eight new built-ins (tape stop, reverser, stutter, pitch shifter, frequency shifter, trance gate, bitcrush, ring mod; [engine](engine.md#c-api-engineincludecawh)) with plugin UIs ([app](app.md)). No new dependency.
+- **A ninth device family, Creative** (yellow → pink), for both browser tabs, so these read apart from the modulation family's pink → violet.
+- **Tape stop's trigger is a knob** (`stop`, at or above 0.5 stops), so a lane or an LFO can trigger it, plus a hold-to-stop pad; Kilohearts has a Play switch. A start spins up from the tape under the head now (not where it stopped), and once at speed crossfades back to the live input over 12 ms, so the tape stop adds no lasting delay.
+- **Reverser's longest chunk is 2 s** (a half note at 60 BPM), to keep its buffer modest on a phone (4 MB at 48 kHz, as the tape stop's 8 s; the stutter's 3 s slice takes 1.2 MB).
+- **Pitch shifter: no formant-preserve mode.** It would need an FFT shifter with a spectral-envelope correction, or PSOLA with pitch detection: more latency and CPU. Its grain size sets its latency (half a grain), so the grain is not automatable or modulatable, as the ducker's look-ahead.
+- **Frequency shifter's "Both"** puts the upper sideband on the left and the lower on the right (a stereo effect), rather than summing both (which is ring modulation, already the ring mod).
+- **Trance gate:** one pattern (32 step levels saved with the device), not Kilohearts' eight pattern slots; Tie as a switch (a step after a sounding one doesn't retrigger) rather than per-step ties drawn by dragging.
+- **Stutter** is not a Kilohearts snapin; built as a seeded beat repeat (Ableton's Beat Repeat is the model), with a hold pad for live use.
+- **Ring mod** with a key: giving it a key turns its carrier to Sidechain, and removing the key turns it back to Sine. The sidechain key is the existing keyed-effect port (as the ducker's).
+- **Bitcrush stays separate from the saturator's Crush mode**: it models a converter pair (anti-alias and anti-image filters, jitter, dither, fractional bits); the saturator's mode is unchanged.
+
+## 2026-11-11: Space, Modulation and Utility effects (fx-space, choices to confirm)
+
+**Decision (Claude, for the owner to confirm):** eleven new built-ins for the browser's Space, Modulation and Utility tabs (convolver, shimmer, Haas, ensemble, doubler, vibrato, tremolo, auto-pan, rotary, imager, channel mixer; [engine](engine.md#c-api-engineincludecawh)) with plugin UIs ([app](app.md)). No new dependency. One C API addition: `caw_engine_set_component_state`, API version 14 (the next free number after the drums and meters branches).
+- **New effects beside the old ones, not extensions:** the ensemble is a separate multi-voice unit (`org.caw.chorus` stays the small three-knob chorus, its presets untouched); the imager is multiband with meters (`org.caw.utility` and `org.caw.stereo.width` stay); the shimmer reuses the reverb kernel as its own device rather than a mode of `org.caw.reverb.pro`.
+- **Impulse responses are generated, not shipped:** nine types from seeded noise, chirps, combs and grains, so nothing is licensed. A user WAV is decoded on the control thread with every size checked, capped at 10 s and 16 MB, and stored in the project (base64 of the file) so it travels with it; a 10 s stereo file at 48 kHz adds up to about 5 MB to the project (the decoded floats, base64).
+- **Loading a WAV rebuilds the chain:** the other effects on that track keep their values and saved state but restart their running sound (a delay's echoes) with a 20 ms crossfade. An undo of the load changes the project but not what plays until a reload.
+- **Response length by quality:** 5 s at High, 3.5 s at Normal, 2 s at Eco (longer files are trimmed).
+- **Other Kilohearts snapins of this area:** Stereo (Mid, Width, Pan) is covered by the existing utility and the imager; Gain by the utility; Chorus (delay, rate, depth, spread, taps) by the ensemble; Reverb's Early (early/late balance) is not a control of `org.caw.reverb.pro` (follow-up). Not built here: a "Trance gate" and "Ring mod" belong to fx-creative.
+
+## 2026-11-11: EQ & Filter effects (fx-filters, choices to confirm)
+
+**Decision (Claude, for the owner to confirm):** nine new built-ins for the browser's EQ & Filter tab (ladder, nonlinear filter, comb, resonator, formant, disperser, 3-band EQ, tilt EQ, graphic EQ; [engine](engine.md#c-api-engineincludecawh)) with plugin UIs ([app](app.md)). No new dependency, no C API change.
+- **Slice EQ is the existing parametric EQ, extended:** `org.caw.eq` already had mid/side per band and an analyser, so Low cut 96 and High cut 96 (eight Butterworth stages) were appended to its types (saved projects keep their type numbers) instead of a second parametric EQ.
+- **The 3-band EQ's id is `org.caw.eq.dj`**, beside the parametric EQ, with DJ kill switches Kilohearts' 3-Band EQ lacks.
+- **The graphic EQ** stands in for Carve EQ (whose page lists only "a 31 band graphic EQ"): 31 third-octave bells corrected for their overlap, so the drawn curve is what you hear.
+- **The tilt EQ** has no Kilohearts counterpart; it is the parametric EQ's Tilt band as its own small device, with mid/side.
+- **The comb adds feedback** (positive and negative, with damping) to Kilohearts' feed-forward comb, and tunes to a note or Hz.
+- **Not built:** Filter Table (a wavetable-driven filter; it needs a table editor and its own design) and the ladder's diode topology (its coupled stages need their own derivation). The resonator's modal ratios come from beam theory, not checked against a published table ([Assumption]).
+
+## 2026-11-11: Settings as a category list, every setting real (choices to confirm)
+
+**Decision (owner):** Settings opens on a list of sections with icons; a search finds any setting and jumps to it, highlighted; new Audio and MIDI, Editing, Projects and files and Export settings; full control of the audio device and buffer; nothing hidden. **Choices made on the owner's behalf, to confirm:**
+- **Twelve sections** in this order: Audio, MIDI and input, Metronome and recording, Editing, Code editor, Look, Feel, Performance, Projects and files, Export, Keys and shortcuts, About and beta. Long-press menus moved to Feel, the Automate write mode to Metronome and recording, and the piano roll's look into Editing.
+- **The sample rate** applies at the next start: the engine is made at one rate, and remaking it while running was judged too risky for this change.
+- **Buffer sizes** offered: Auto (the buffer mode) or 16, 32, 48, 64, 96, 128, 192, 256, 384, 512, 768, 1024, 2048, 4096 and 8192 frames. miniaudio gives no list of the sizes a device allows, so the page shows what the device actually granted (Device now).
+- **Exclusive mode** off by default; it is offered only on WASAPI and AAudio and falls back to shared when refused.
+- **New project** defaults to Blank at 140 BPM, 4/4 (the earlier blank project's values); the menu item is now "New project" and says what it opens.
+- **Defaults that keep today's behaviour:** autosave 0.5 s after an edit, 20 restore points, MIDI thru on, every keyboard and channel, velocity Linear, on-screen keys by touch at C3, click Classic at 100%, no pre-roll, a 0 ms recording offset, the roll at 1/16 with snap and Draw, the arrangement following the playhead (new: it pages when the playhead leaves the view), the wheel zooming only with Ctrl, deleting a track without asking.
+- **Clear caches** empties the app's temporary folder (renders waiting for the save picker); nothing else is a cache today.
+- **Not built (no engine or app path yet):** an audio input device and input monitoring (the engine has no audio input), keeping audio running in the background as a setting (background playback is not implemented, `.claude/rules/app.md`), normalize and tail length for exports (the renderer has neither).
+
+## 2026-11-11: Routing and the ducker (#175, choices made for the owner)
+
+**Decision (Claude, for the owner to confirm):**
+- **Sends go to bus folders only.** A send's destination is a folder with its bus on; there is no separate "aux" track type. "New reverb bus" makes such a folder at the end of the track list, running the reverb fully wet, with the send at −6 dB. Why: one bus model (REAPER's folders) instead of two, and a bus already has volume, pan, mute, solo and now effects.
+- **Routing loops are refused by the engine and never sent by the app.** The engine refuses the whole update naming the loop; the app leaves loop-making sends and keys out of the engine's copy (in track order, routes to parent buses first) and shows them faded, so moving a bus can't silence the project. The project keeps them.
+- **Keys come from any track or bus, pre-fader by default, and keep their source running while it is muted.** A muted kick can drive a ducker, which is how sidechain ducking is usually set up. Keys are not delayed for latency compensation (they arrive early); the ducker's look-ahead covers a late one.
+- **The ducker's three triggers in one device**, Tempo by default (it sounds with no setup); giving it a key switches it to Audio. Audio's default response is Trigger (the whole drawn shape per hit, re-arming 4 dB under the threshold), with Follow (classic envelope ducking) as the other choice. Look-ahead (up to 10 ms) adds latency only while it is on. A lows-only or highs-only duck through a Linkwitz-Riley crossover.
+- **Mute and solo go to the engine as a project update** (40 ms debounce) instead of the one-layer live call, so solo and mute reach through folders, buses and sends correctly.
+- **The master FX chain** already exists in the engine (`master_components`); strip slots for it are left for the master-chain step of gap 9.
+
+## 2026-11-10: Polish round, night (owner)
+
+**Decision (owner) (#175):**
+- **User presets:** every effect and instrument gets an easy way to save the user's own presets.
+- **Device screens:** more usable on mobile, with more inspiration from Vital. The EQ is singled out as confusing. "Everything doesn't need to be a separate screen."
+- **Modulation:**
+  - Routing an LFO or envelope to a knob is easy and mobile-friendly.
+  - The amount can always be adjusted.
+  - Several modulators can drive one knob, as in Vital.
+- **Routing:** sends, buses and sidechain are easy and work correctly throughout.
+- **A ducking plug-in** that works well ("there's literally no free one… that works well").
+- **The Builder** is clearer about being for writing code, and easier to navigate.
+- **Every screen** gets a polish pass for missing pieces, missing feedback and hard-to-use spots: super user friendly, and it looks cool.
+- **Clarified (owner):**
+  - The device that is confusing is the synth (the Flagship editor), not the EQ.
+  - Saved presets live in a global library on the device and can be exported as files.
+  - The public beta ships as a GitHub pre-release tagged `v1.0.0-beta.1` (APK and Windows zip).
+  - The .caw language is removed before the beta (#160), and project files use the .caw extension (#159).
+  - After this round the roadmap continues without the owner, who is asked only where a call is genuinely theirs.
+
+## 2026-11-10: Release APK splits its Dart debug info out; no obfuscation (app performance pass)
+
+**Decided on the owner's behalf ("optimize everything", #174), to confirm:** CI builds the APK with `--split-debug-info` and keeps the symbols as an artifact (and a release asset), about 0.73 MB off the download; release stack traces need `flutter symbolize` with them. `--obfuscate` is not used: it saves only 0.13 MB more and garbles type names in error texts users see. Project files are written as compact JSON (the indented form cost a second encode per save). Signing is unchanged. [performance](performance.md#release-build)
+
+## 2026-11-10: Frame and feel, as built (choices to confirm)
+
+**Built** from the evening round's frame decisions ([app](app.md), Frame; Motion and feel). **Choices made on the owner's behalf, to confirm:**
+- **The bars' grip** sits at the top centre of the section, over the toolbar's top edge; a pull of 28 dp (half of 56) hides or shows, a flick counts, and a tap on the hidden tab shows them. In landscape only Arrange has one (its toolbar is the only bar). The hidden state stays across sections.
+- **Haptic mapping:** a step is `PRIMITIVE_TICK`, a tap a softer `PRIMITIVE_CLICK`, a grab a click, a drop `PRIMITIVE_LOW_TICK`, a threshold a tick then a click, an error two clicks. Strength 50% plays the base scales (0.45–0.8); 0% halves them, 100% is 1.5 times. Ticks are limited to one per 35 ms and skip 35 ms after a tap.
+- **Press feedback** is a dip to 92% and a glow; Reduced motion keeps only the glow.
+- **The side panel** is resizable only on a phone in landscape (desktop keeps 34%), between 30% and 80%, snapping at ½ and ⅔; the panel moves on release, with a ghost while dragging, instead of resizing live.
+- **Layout › Auto** uses the desktop frame at a shortest side of 600 dp or 900 × 480 dp (before: 900 dp wide alone, which a phone with a small display size could reach in landscape). Desktop on a small window starts with all panels as tabs of one group.
+- **Floating windows** no longer blur what is under them.
+
+## 2026-11-10: One synth: the presets, the migration and the quality knobs (built; choices to confirm)
+
+**Built** from the owner's evening round (#174, below): "every instrument that can will be replaced by the better synth".
+- **Presets are the engine's.** Named parameter sets of a built-in (`engine/src/presets.cpp`), listed with the components (`"presets"`) and named by an entry's `"preset"`; the app's preset browser reads that list first (`DevicePresets.engine`). Flagship has Init, Morph pad, Mono bass, Acid 303 and Basic; the app keeps four extra Dart starters (Supersaw lead, Soft pad, Pluck, Vowel keys).
+- **Flagship grew what a 303 and a mono bass need, for every patch:** a voice mode (Poly, Mono, Legato) with glide, an Accent source (0 up to velocity 0.7, 1 at 1), a second source per mod slot that scales its amount (`via`), a Running LFO mode (synced rate, not locked to the song's position, as Morph's drift was) and a Classic table (Morph's four shapes). New parameters were appended after the mod slots, so saved slot destinations keep their meaning.
+- **Old projects migrate in the engine** (one mapping, in C++): a project or sample-pack request naming a retired synth plays Flagship with its preset and its knobs mapped; lanes move to the Flagship knob in the same units and are dropped otherwise (choice made for the owner: the retired synths existed for a day, and a lane on, say, the bass's `env` has no single Flagship knob). The app asks the engine for the same migration (`caw_migrate_instrument`) when it opens a project, so its knobs show Flagship's values. The retired synths' code is deleted; their sound survives as measured references (`kRetiredSynthReferences`) the presets are compared with.
+- **How close:** the mono and two-oscillator presets (Mono bass, Acid 303, Basic) are perceptually the same by the owner's bar (level within 0.5 dB, every band within 1 dB). Morph pad's unison starts each copy at a random phase, which neither synth repeats, so a 2 s render differs from the old one about as much as two old renders with another phase seed do: within 1.2 dB, bands within 2 dB RMS. A bright square through 16 kHz lacks the old polyBLEP square's aliases (up to 9 dB less between the harmonics). Numbers: [performance](performance.md#one-synth-2026-11-10).
+- **Quality** (owner-approved): Eco, Normal (default), High, in Settings › Engine: Eco caps unison at 4 copies, turns the saturator's oversampling off, thins the reverbs and halves the effects' display updates; High oversamples the saturator 4x. **The audio buffer** (owner-approved): Auto (default: a 1024-frame buffer while not recording, the smallest while recording), Low latency, Battery. Choices made for the owner, to confirm: the Eco cap of 4 copies, the 1024-frame size, and that Auto keeps AAudio's low-latency path and Battery leaves it.
+- **Second performance pass (choices made for the owner, under "perceptually the same"):** Flagship's poly voices whose filter 1 is set alike share one filter with their level before it (the Morph synth's way), and its oscillator phases move on in fixed point; both change bits inaudibly (every measured band within 0.01 dB), so the affected goldens were re-recorded. The First loop now costs what it did with the retired synths ([performance](performance.md#one-synth-2026-11-10)).
+- **Not built, with reasons** ([performance](performance.md#one-synth-2026-11-10)): tracks on several cores (a wake-up and barrier per 64-frame chunk cost about what a track's chunk does; it waits for a phone measurement), an Android performance-hint session (binder calls from the audio thread), flush-to-zero (the owner's decision is open).
+
+## 2026-11-10: Owner feedback, evening round (owner)
+
+**Decision (owner), after trying the latest APK (#174):**
+- **Top bars:** they hide only on a deliberate pull, using a visible handle that follows the finger. Scrolling never hides them.
+- **Feedback:** every touch or drag gives feedback, visual and subtle haptic.
+- **Haptics:** subtle everywhere, using the phone's high-definition haptic primitives, with a strength setting and an off switch.
+- **Landscape side panel:** it is resizable, two thirds of the width by default.
+- **Desktop mode on the phone:** Settings offers Auto, Phone or Desktop. Auto uses the desktop layout when the window is big enough (DeX, an external display).
+- **Arranger:**
+  - Clips show their MIDI notes, as in REAPER. Audio clips will show waveforms once audio clips exist.
+  - Folders nest to any depth.
+  - Each track's automation lanes sit under it, behind an arrow.
+- **One synth:** "every instrument that can will be replaced by the better synth". Morph, Bass, Acid and Basic become Flagship presets, and old projects load them as the matching preset. The drum instruments stay.
+- **Plugin UIs:** every instrument and effect gets a real plugin UI, modern vector, "in the theme of the app, but more colorful". Knob pages are only a fallback.
+- **CPU:** the basic project sits at 35–40% on the S22+. The owner allows:
+  - invisible optimizations;
+  - a quality setting (Eco, Normal, High);
+  - a bigger audio buffer when not recording;
+  - "make the plugins take advantage of the hardware of the phone… optimize them to hell".
+
+## 2026-11-10: Clip editing and the ruler, REAPER-style (built; choices to confirm)
+
+**Built** from the owner's calls below and [REAPER's flow](reaper-flow.md) gaps 1 and 2 ([app](app.md), Clip editing; Loop range, markers and regions). **Choices made on the owner's behalf, to confirm:**
+- **Phone multi-select is a Select mode**, from the clip bar's ☑ or a clip's long-press › Select several: taps add or remove clips and a long-press drag in empty lane space draws a box. A two-finger marquee was not used: two fingers already pinch-zoom and, during a drag, mean copy.
+- **Keys:** S splits; next track keeps ↓ only (W and ↑ stay previous); G glues, Ctrl+D duplicates, F2 opens Properties. Delete removes the selected clips while any are selected and the track otherwise (REAPER's Delete acts on the selection).
+- **Split of MIDI:** REAPER's "Allow trim of MIDI items when splitting" (a note-off at the split, UG 22.9.1) and its unpooled split parts (UG 13.35): the left clip keeps its pattern, the right gets its own pattern without the crossing note. Before, the right part shared the pattern and played the crossing note's tail again.
+- **Where Split cuts:** the playhead; while stopped, a tap on empty lane space moves it (REAPER's edit cursor), shown as a dim line.
+- **Glue** makes a non-looping clip and keeps the originals' patterns in the project (REAPER keeps the originals' media).
+- **Lock** blocks drag, trim, split, glue and delete; **Mute** keeps the clip on the timeline and sends it to the engine as muted (so a track whose clips are all muted stays silent instead of free-running).
+- **The loop button sits in Arrange's toolbar (⟳), not the transport**, which another branch is changing; R toggles it. Off, the whole song loops as before (C.A.W. has no "stop at the end"). Turned on with no range drawn, it takes the time selection, else four bars from the playhead's bar. A range past the last clip lengthens the song.
+- **The loop export is the loop range while it is on** (Export's description says so); there is no separate range choice yet (build step 6).
+- **The ruler** is 44 px on a phone (36 px wide), bar numbers and the loop range in its top half, markers and regions sharing its bottom half (one lane). A tap on it moves the playhead.
+- **Marker keys:** REAPER's M, ] and [ are the layer's mute and length in Arrange, so markers take Shift+M (REAPER: insert marker with a name) and Ctrl+] / Ctrl+[; Shift+R adds a region over the time selection, else the loop range.
+- **A new region** covers the time selection when the long press is inside it, else four bars from the bar pressed. **Dragging a region moves only the region**, not its clips (REAPER moves the contents with it, UG 9.8); moving or copying the clips is left for later.
+
+## 2026-11-10: Match REAPER's whole flow, made easy (owner)
+
+**Decision (owner):** "look at the flow of REAPER and match that as well", after the arranger (#172), and "The goal is to make it really easy to use." REAPER's flow is followed where it is simple and direct; where it is powerful but fiddly (deep dialogs, modifier gestures, the routing matrix) C.A.W. offers one obvious easy path with sensible defaults and keeps REAPER's depth behind it. The study, the gaps and the plan ranked by "makes a song easier to finish" are in [REAPER's flow and C.A.W's](reaper-flow.md); nothing in it is built, and the phone look of each new screen waits for the owner ([vision](vision.md#open-owner-decisions)).
+
+## 2026-11-10: The effects suite's engine choices (on the owner's behalf, to confirm)
+
+**Decision (made during #173's engine work; the owner has not confirmed it):**
+- **Display data:** components publish a float block about 60 times a second through a lock-free two-slot seqlock (`caw/display.hpp`), read with `caw_engine_component_display` (API version 6), which never waits (it skips a busy control thread). Expensive display work (the EQ's FFT) runs only while a UI reads.
+- **Look-ahead latency:** a descriptor declares one latency, so the compressor and limiter always delay by 240 frames (5 ms at 48 kHz) and their look-ahead knob moves the detector within that delay, instead of changing the latency the engine compensates.
+- **External sidechain:** built 2026-11-11 (#175): the compressor and gate take a key from another track (Sidechain: External), as does the ducker.
+- **References, all maths, no code or dependency taken:** the soft-knee curve (Giannoulis, Massberg and Reiss, "Digital Dynamic Range Compressor Design", JAES 2012); the polyphase IIR half-band design (Valenzuela and Constantinides, IEE Proc. G, 1983); trapezoidal SVF EQ bands as `eq.hpp` already used. Nothing from Airwindows, Vital, Surge or any GPL source.
+
+## 2026-11-10: A complete built-in suite with visual device UIs (owner)
+
+**Decision (owner):** the effects get the flagship synth's treatment, "everything you would need to make something, already built in" (#173).
+- **Engine, in this order:** a parametric EQ, a compressor with sidechain, a master limiter, full reverb and delay, multi-mode saturation, then the rest of a stock kit.
+- **Look:** every device's UI is "completely visual, fun to use and easy to use". Today's knob pages are "strictly a fallback if there's no UI built in".
+- **Where it opens:** on the phone a device opens as a full-screen editor with tabs for its sections.
+- **The flagship synth** gets its visual UI in the same work, mod matrix included.
+
+## 2026-11-10: Recording flow and automation writing, as built (REAPER flow gaps 3 and 4)
+
+**Built** from the owner's choices ("Touch, button in transport"; "Piano keys + pads toggle"; [app](app.md), Frame). **Choices made on the owner's behalf, to confirm:**
+- **Automate's look:** a small lane icon in the transport between the position and the keys button: grey off, a red outline with the mode's letter (T, L, W, R) on, filled red while writing. The mode is saved in Settings.
+- **Held means a finger down anywhere:** a move counts as held while any finger or mouse button is down, so every control is let go when the last finger lifts; a move with none down (a key, a typed value) is held for 0.4 s.
+- **Write overwrites every lane in the project** (no per-lane arming yet) and then falls back to Read (REAPER's option, not its default).
+- **Latch on a new lane keeps its last value after Stop**; on an existing lane it returns to what the lane had. Touch returns over a quarter step.
+- **Thinning** keeps points that bend the line by more than 0.4% of the parameter's range (volume measured in dB).
+- **Volume lanes reach +12 dB** like the faders (engine API 7); the automation screen draws them on the fader's taper in dB.
+- **The click** is the engine's own (a 30 ms sine blip, higher and louder on the bar), not a hidden track: simpler and real-time safe. It clicks while recording by default; *always* and *off* are on Record's long-press, with the count-in (1 bar by default; none or 2).
+- **Takes:** a loop recording keeps every pass as a take of one clip (`ClipDoc.takes`), the newest playing, picked from the clip menu's Takes; there is no take chip on the clip yet. A single pass is a plain clip.
+- **"Keep take?"** is a toast with Undo for 5 s; Undo removes the clip and its take patterns.
+- **Keys:** a piano from C1 to C8 with 30 dp white keys, opening on C3; velocity by where the key is struck (soft at the top, full at the bottom). **Pads:** General MIDI drums MPC-style on a drum track (found by its instrument or name), the project's key elsewhere. Record opens the keys when no USB keyboard is connected.
+- **Keys:** Ctrl+R records and Alt+B shows the keys (REAPER's); Automate has no default key.
+
+## 2026-11-10: Owner calls for the REAPER flow (owner)
+
+**Decision (owner), from `docs/reaper-flow.md`'s top gaps:**
+- **S splits** clips at the playhead, as in REAPER. Next track moves to another key.
+- **Automation writes in Touch mode.** An Automate button in the transport turns it on, and moves made while playing are written. Latch, Write and Read are on a long-press.
+- **Recording without a USB keyboard:** a slide-up on-screen keyboard (scrollable octaves) with a switch to a 4×4 drum pad grid, plus a metronome and count-in.
+- **Loop range:** drag along the ruler to set it, as in REAPER, with handles to adjust it. The loop button toggles it, and a long-press on the ruler adds a marker or region.
+
+## 2026-11-10: The arranger works like REAPER's (owner)
+
+**Decision (owner):** "I would like the arranger to work like REAPER… Look at how REAPER does it and we're going to copy them" (#172). It covers:
+- **Clips:** clips drag between tracks.
+- **New tracks by dropping:** dropping below the last track creates a new track. The same applies to files, instruments and effects dropped on the empty area.
+- **Instruments are added exactly like effects:** the same browser and drag and drop, as in REAPER, where an instrument is a plug-in in the track's FX chain. They are no longer picked from a long list on a held track.
+
+- **A blueprint, not a list (owner, 2026-11-10):** "The goal is to make the arranger feel like a blueprint and not just like a list. It should work about the same way REAPER does." Clips, tracks, instruments, effects and files are grabbed and dropped where they sit; clips are created, moved, copied and trimmed on the timeline with ghosts and drop targets; long-press menus stay as the secondary path.
+
+REAPER's behaviour is taken from its user guide ([UI design](ui.md#reaper-reference-the-arranger-copies-it)). Built in #172 ([app](app.md), Arranger). **Choices made on the owner's behalf, to confirm:**
+- **Copy on a phone:** a second finger touched down during a clip drag toggles copy (REAPER's Ctrl); the piano roll's resting second finger still means Shift.
+- **Folders:** REAPER's folder tracks hold items, but C.A.W.'s folders have no instrument, so a clip or asset dropped on a folder goes to its first track inside (a new one in an empty folder).
+- **New tracks from a drop are empty but for the drop** (as in REAPER): a clip dragged below the last track gets a track with no instrument, named after its pattern; an instrument's or effect's track is named after it.
+- **Copies have their own notes** (REAPER's plain Ctrl-drag doesn't pool MIDI); a linked copy stays in the clip menu.
+- **Phone gestures where REAPER uses a mouse:** a track header is dragged after a long press (a long press released without moving opens the menu); a double-tap in empty lane space draws a one-bar clip in place of Ctrl+drag.
+- **Not done:** Alt-drag stretch of a clip edge (Alt-drag shifts the source offset). S to split and dragging several selected clips together came with clip editing (below).
+
+## 2026-11-10: A flagship synth that can do everything (owner)
+
+**Decision (owner):** "the goal is to build one synth that can do all the things", with unison and detune that work "as it does in Vital". It is a new built-in instrument beside Morph, which stays as the simple one (#171).
+- **First version, in order:** three wavetable oscillators with Vital-style unison (up to 16 voices, detune with a power curve, stereo spread, blend, random phase, stack modes); two filters; a mod matrix (envelopes, LFOs, random to any knob); a built-in effects rack reusing the Library kernels.
+- **Not Vital's code:** Vital is GPL-3.0 and C.A.W. takes permissive dependencies only, so nothing of Vital's code, presets or wavetables is copied. The behaviour is reproduced from public descriptions in original code.
+- The mod matrix's UI (owner, 2026-11-10, #173): Vital-style, a source dragged onto any knob makes a route, and the knob's ring shows and sets its amount.
+
+## 2026-11-10: MIDI files are an import and export format (on the owner's behalf, to confirm)
+
+**Decision (made on the owner's behalf during autonomous work on #158; the owner has not confirmed it):** note clips keep being stored as C.A.W.'s own text note form (pattern text, `app/lib/model/pattern_doc.dart`) inside the project; project storage does not change. C.A.W. imports and exports Standard MIDI Files (SMF format 0 and 1, MIDI 1.0; format 2 reads as format 1) so clips move to and from other DAWs. Per-note pitch bend and expression export as MIDI 1.0 pitch bend, channel pressure and CC74 on per-note channels (MPE lower zone: channel 1 manages, channels 2–16 carry one note each, with an MPE Configuration Message and each channel's bend range by RPN) when a clip has any; otherwise plain notes on channel 1. MIDI 2.0 clip files for clips are later.
+- **Why:** the text form already maps notes, microtones and per-note curves one to one and is what the piano roll edits; a binary store would need a second editable form anyway. SMF is what other DAWs exchange, and MPE carries per-note bends in MIDI 1.0.
+- **Where:** a Dart reader/writer (`app/lib/model/midi_file.dart`) and clip conversion (`app/lib/model/midi_clips.dart`), so files convert off the UI isolate and without engine changes. The engine's own converter (`engine/src/midifile.cpp`) stays for MIDI 2.0 clips (`.midi2`) only; the piano roll's `.mid` import and export moved to the Dart converter (2026-11-10, #168). Imported files are listed in Files by name with the patterns their parts became (`midi_files` in the project JSON, additive); the notes still live only in the patterns. [Assumption] A dropped multi-part file puts its first part on the target track and the others on new tracks under it. [Proposal] Whether to keep one converter (and which) is open in [vision](vision.md#open-owner-decisions).
+- **Files are untrusted:** reading caps the file at 16 MB, 2 097 152 events, 1 048 576 notes and 4 194 304 expression changes, checks every length, and fails with a message instead of guessing.
+
+## 2026-11-10: The logo is the faceted crow head, "C5" (owner)
+
+**Decision (owner):** the placeholder outline crow and Flutter's default launcher icon are replaced. The owner wanted it abstract ("like a kernel"), glitchy and fun, coloured like a real crow and in the app's colours, and approved only after many rounds of drafts ("let's go with C5"): a tilted, faceted crow head in black glass with an iridescent feather sheen (green, cyan, purple), a large beak with a neon-green edge that doesn't reach the top of the head, a chin under it, a back that hangs a little lower, and a pink eye, on a frosted graphite tile. The chip "pins" and circuit traces were tried and dropped. It is the in-app mark and the Android and Windows launcher icon (`docs/app.md`); the source drawings are in `app/assets/logo/`. Logo changes need the owner's explicit yes.
+
+## 2026-11-10: The engine carries inefficient plug-ins; efficient ones are easy to write (owner)
+
+**Decision (owner):** "we have to build around people who aren't going to make very efficient plugins. We should also make it very easy to make them efficient as well." The performance goal for a whole project on the owner's phone (Galaxy S22+, 25–30% CPU on 2026-11-10) is 15–20%, reached by engine and host work with the existing instruments unchanged; the built-in instruments are optimized later and separately. The SDK and the testing suite should make the efficient path the easy one (for example block-based helpers, letting the host skip silent voices, and showing each component's CPU cost). [Proposal] Which helpers to build is not decided yet.
+
+## 2026-11-10: No fixed polyphony cap; the program sets its own (owner)
+
+**Decision (owner):** "remove the cap on how many notes a synth can play at once unless it's specified in the program; if someone wants to crash the program by abusing it, let them." The engine imposes no practical limit on held notes or note events: its note lists are sized very large when an instrument is set up (never grown on the audio thread, which would cause dropouts). A C++ instrument chooses its own voice count (`caw::VoicePool<Voice, N>`); the built-in instruments get generous counts. Overload is the user's responsibility, not a guarded limit.
+
+Built (engine pass, 2026-11-10):
+- **Polyphony (owner):** the host sets no practical cap; a program sets its own. Built: a native instrument's note list holds 1,024 notes and 4,096 events a block (360 KB a track; 4,096 and 16,384 took 1.5 MB, second audio review 2026-11-10), set aside when its chain is built (never grown on the audio thread); the built-in basic and Morph synths have 128 voices; a C++ instrument picks its own with `caw::VoicePool<Voice, N>`, which walks only the voices sounding.
+- **CPU (owner, verbatim):** "if you can just change the engine to get 15 to 20% with the existing inefficient instruments that would be very impressive. Unfortunately we have to build around people who aren't going to make very efficient plugins. We should also make it very easy to make them efficient as well." The First loop measured 25–30% on the owner's Galaxy S22+; the target is 15–20%. Measured results and what is left: [performance](performance.md#native-instruments-first-loop-2026-11-10).
+- **Chosen for that:** the host skips a component that has fallen silent. A component may say so (`ModuleProcessor::quiet()`; C interface extension `caw.quiet.v1`, read through `get_extension` so older hosts never see it, rather than a new `process` return code, which hosts that check for 1 would treat as a failure; CLAP export: `CLAP_PROCESS_SLEEP`), and only one that says so sleeps. The host used to put a component to sleep on its declared tail too (input silent past `tailFrames`, output all zeros), but it fell asleep on a block boundary with its timed state (an LFO, a control grid) frozen there, so after a pause the output depended on the device's buffer size and playback no longer matched the export (second audio review, 2026-11-10); that rule is gone. The engine and SDK build with `-fno-trapping-math` (no result changes; Clang's default), so GCC builds vectorize too.
+
+## 2026-11-10: Owner feedback on the open beta (look and feel)
+
+**Owner, after trying the APK:** most things feel okay for now. Changes asked for (not built unless marked):
+- **Meters** work about the way REAPER's do, and fall faster than today's 24 dB/s while staying smooth. [Fact, 2026-11-10] REAPER sets meter decay in dB/s as a preference; its factory default is not confirmed here, so the app gets a decay setting with a faster default. Built (2026-11-10): Settings → Meter fall, 96 dB/s ("Medium") by default; the owner found the first default (48) slow and said the 96 then labelled "Very fast" should be medium. Master and stereo track meters show left and right.
+- **Look** (built, #168): the whole app a little darker, with less green in the background (a grey-to-black frosted backdrop).
+- **Arrange** (built, #168): track headers can be resized (drag their right edge for the width, a row's bottom edge for the height; saved). [Assumption] One height for every track, not per track.
+- **Track headers, REAPER-style** (built, #168): the track's colour tints the header panel and its edge, instead of a thin colour stripe. Colours carry meaning by folder: tracks in a folder take shades of the folder's colour (a top-level track keeps its own); the user can still override a colour.
+- **Phone landscape** (built, #168) feels bad and everything is too big (owner screenshot: the status row and the toolbar take a third of the height, the rail's icons and labels are large, the FX panel's knob labels are cut off). Make landscape compact: one combined top row, smaller icons, a narrow rail without labels, more height for the tracks. [Assumption] The "one combined top row" is built by moving the status row's contents into the rail (project, More) and the transport (tempo, CPU), so the section's toolbar is the only top row.
+- **Bars hide on scroll** (built, #168): scrolling down tucks the top bars (status row, toolbar) away so the main content gets the screen; scrolling up brings them back, snapping fully shown or fully hidden.
+- **Zoom** (built, #168) in Arrange and the piano roll: pinch with two fingers, on-screen buttons or a slider, time and height zoom separately, and Ctrl + scroll on desktop.
+- **Build feels like VS Code** (built, #169): an explorer (the Files browser; a drawer on the phone, a resizable sidebar when wide) replaces the row of module chips, one slim row of open tabs with Build, and the code gets the rest of the space (the status line, bottom bar and the .caw Builder's track mix are gone from Build).
+- **New files** (built, #169): + New offers Pattern, Instrument, Effect and Text file (owner: "JSON only where a project actually uses it": the component manifest is the one JSON file, so there is no JSON template; a text file of any name goes into the open C++ component). [Assumption] Text files belong to a C++ component because a project has no other place for loose files yet.
+- **Pattern files** (built, #169): the header block is hidden from the text; name and length are fields beside the kind badge. [Assumption] `summary` and other header keys stay in the file unedited (no field yet), to keep the row small.
+- **The Library reference** (built, #169) keeps the function Library's look and covers the C++ SDK (with instruments), `caw::lib`, the built-in components and C.A.W's text formats.
+- A good sample pack comes later; the owner's focus now is how things feel and work.
+
+## 2026-11-10: Native libraries in the APK are compressed
+
+**Decision (Claude, the owner left it open):** the APK stores native libraries compressed (`useLegacyPackaging = true`). The on-device compiler alone is about 78 MB uncompressed, which made the APK 114 MB. Compressed, the download is much smaller, and Android unpacks the libraries once at install, so the installed size grows a little. For a beta handed out as a download, the download size matters more. Easy to revert if the owner prefers.
+
+## 2026-11-10: Installables move to GitHub Releases once the current work is done (owner)
+
+**Decision (owner):** once the current roadmap work is done, builds are published as GitHub Releases (a tagged version with the APK and the Windows build attached) instead of being picked up from Actions artifacts. Built (2026-11-10): `app.yml` publishes a release from a version tag or from Run workflow with **release** ticked (README). No release has been made yet; the first one waits for the current work. A release needs a stable signing key (the repository's Android signing secrets) so each APK installs over the last; the version comes from `app/pubspec.yaml` (`app/lib/version.dart` matches it).
 
 ## 2026-11-10: Sound need only be perceptually the same (owner)
 
@@ -19,8 +575,8 @@ updated: 2026-11-10
 
 **Decision (owner):** the .caw sound language is removed completely and replaced by C++. [Proposal, not built] Status: .caw still runs today; nothing below is built yet.
 - **Order (owner):** C++ instruments come first, then .caw is removed. Today every instrument is a .caw module and C++ components are stereo effects only, so note-playing C++ instruments (and C++ built-ins for the starter sounds) must exist before the language goes, and the app never goes silent in between.
-- **Patterns (owner):** note clips are stored as standard MIDI instead of .caw-style pattern text. [Fact, 2026-11-10] a Standard MIDI File is binary, and so is MIDI 2.0's MIDI Clip File (midi.org M2-116-U, June 2023); midi.org publishes no official text form of either. So the app stores standard MIDI and keeps its readable text view of notes in the editor, rather than inventing a text MIDI format. The owner wants notes writable as text-based MIDI and accepts that this needs C.A.W.'s own text form: a documented text format that maps one-to-one to the stored MIDI.
-- **Project files (owner):** the project file itself takes the `.caw` extension (today `.cawproj`).
+- **Patterns:** the owner asked for note clips stored as standard MIDI with a text form of C.A.W.'s own (#158). [Fact, 2026-11-10] a Standard MIDI File is binary, and so is MIDI 2.0's MIDI Clip File (midi.org M2-116-U, June 2023); midi.org publishes no official text form of either. How this was settled for now: "MIDI files are an import and export format" (2026-11-10, below the logo entry), pending the owner's confirmation.
+- **Project files (owner):** the project file itself takes the `.caw` extension (built 2026-11-11, #159, below; old `.cawproj` files still import).
 - **Old projects (owner):** dropped. Projects and the "First loop" template made of .caw sounds are not converted; this follows "no project compatibility before Release 1" (2026-11-03).
 - **Sharing (owner):** shared sounds are C++, so each asks Trust / Block once per exact code, as now; Isolated (a separate process) stays planned. The sandbox that made a downloaded .caw module safe goes with the language.
 
@@ -410,7 +966,6 @@ updated: 2026-11-10
 - Keep the permanent engine blueprint, milestone ledger and recovery guide current; one coherent review PR is the delivery target.
 - The graph compiler must not impose arbitrary node/connection/block caps. Resource limits must reflect actual memory, hardware and host safety budgets, with explicit errors and no silent content loss.
 
-
 ## 2026-11-02: Adaptive concurrency and batching
 
 - Concurrency and batching are foundational capabilities, selected automatically according to graph dependencies, workload size, deadlines and available hardware.
@@ -484,7 +1039,6 @@ updated: 2026-11-10
 - **Automation:** track volume and pan lanes follow song time and are interpolated in the native callback. Global and module-parameter automation remain future work.
 - **Piano-roll multi-clip behavior:** selected companion clips are visible as read-only references; linked clips that share a source edit together. Editing multiple independent sources as one operation remains a follow-up.
 
-
 ## 2026-11-02: Graph compile and preparation require an explicit working-memory budget
 
 - Graph compilation and prepared execution require a non-zero GraphResourceBudget.maxWorkingBytes; the API does not silently choose an arbitrary fixed node or connection cap.
@@ -496,7 +1050,6 @@ updated: 2026-11-10
 ## 2026-11-02 — Effect-chain length is resource-governed, not a fixed product cap
 
 Project layers and synth patches may describe dynamically sized module/effect chains. Parsing and engine preparation must preserve every authored chain element; no silent truncation or arbitrary eight-effect ceiling is allowed. Memory and processing costs are handled by explicit host resource budgets and clear preparation errors. This change does not remove unrelated limits such as the current project layer-slot model or export-buffer capacity; those remain separate integration work.
-
 
 ## 2026-11-06: Native C++ effects in playback (updated 2026-11-09)
 

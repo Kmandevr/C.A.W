@@ -1,5 +1,6 @@
 // First-class native module contract. This is deliberately independent of Flutter and host audio APIs.
 #pragma once
+#include <cstddef>
 #include <cstdint>
 #include <string_view>
 namespace caw {
@@ -102,6 +103,9 @@ struct ParameterDescriptor {
     // automation lane (`automatable`, above) or a MIDI CC mapping the parameter does not allow.
     bool modulatable = true;
     bool midiMappable = true;
+    // Display only: where an editor files the parameter, as a slash path ("a1/body": pad A1's body layer; "kit/glue").
+    // Built-in components set it (docs/engine.md); it is not part of the C interface, so a loaded component has none.
+    std::string_view group;
 };
 enum class UiControlKind : uint8_t { Slider, Toggle, Dropdown, XYPad, Button, Curve };
 struct UiControlDescriptor {
@@ -118,6 +122,25 @@ enum class ModuleRole : uint8_t { Unspecified, Instrument, Generator, Effect, Ut
 // tailFrames value of a component whose output may never fall silent after its input does
 // (an oscillator, a feedback delay at full feedback).
 inline constexpr uint32_t kInfiniteTail = UINT32_MAX;
+// Processing domains (#120): where a host may run the component, as a bitmask. Every component runs whole
+// (on a track, a bus or the master), so kDomainWhole is always set. The other bits add places:
+// - kDomainPerChannel: one instance per channel of a wider signal (a mono-in, mono-out effect run as dual mono).
+// - kDomainPerVoice, kDomainPerNote: an effect (one stereo audio input and one stereo audio output) may run
+//   once per note, in a per-note FX slot (#127); an instrument (no audio input, one stereo audio output, an
+//   event input) exposes a voice bus (ProcessBlock::voices). The beta treats PerVoice as PerNote.
+// A component that keeps a sidechain, measures (an analyzer) or must see the whole mix (a limiter) opts out.
+// Default: whole only, so a component runs per note only when its author says it can.
+inline constexpr uint32_t kDomainWhole = 1u, kDomainPerChannel = 2u, kDomainPerVoice = 4u, kDomainPerNote = 8u;
+inline constexpr uint32_t kKnownDomains = kDomainWhole | kDomainPerChannel | kDomainPerVoice | kDomainPerNote;
+// What a component needs or offers (#120), as a bitmask; hosts list them and may refuse what they lack.
+// NotesIn: plays notes from an event input. MidiIn: reads other MIDI (controllers) from an event input.
+// EventsOut: writes events. SampleAssets: loads sample files. NeedsTransport: follows the song's tempo or
+// position. ExportClap: may be exported as a CLAP plugin.
+inline constexpr uint32_t kCapabilityNotesIn = 1u, kCapabilityMidiIn = 2u, kCapabilityEventsOut = 4u,
+                          kCapabilitySampleAssets = 8u, kCapabilityNeedsTransport = 16u, kCapabilityExportClap = 32u;
+inline constexpr uint32_t kKnownCapabilities = 63u;
+// A rough cost hint (#120), so a host can warn before it runs many copies (per note, Eco quality).
+enum class CpuClass : uint8_t { Unspecified, Light, Medium, Heavy };
 struct ModuleDescriptor {
     std::string_view id;           // stable, unique identity (reverse-DNS style, "org.example.delay")
     uint32_t apiVersion = 1;       // the contract version this descriptor follows
@@ -134,9 +157,14 @@ struct ModuleDescriptor {
     uint32_t latencyFrames = 0;    // processing delay a host compensates for, in frames
     uint32_t tailFrames = 0;       // frames of output after the input goes silent, or kInfiniteTail
     uint32_t maxStateBytes = 0;    // most bytes saveState writes; hosts size the buffer from it
+    // Appended in C interface revision 3.1 (#120). A component loaded from an older build reads whole-only.
+    uint32_t domains = kDomainWhole;    // kDomain* bits; kDomainWhole always set
+    uint32_t capabilities = 0;          // kCapability* bits
+    CpuClass cpuClass = CpuClass::Unspecified;
 };
-// Audio ports with an explicit layout. Stereo is the ordinary default for audio in and out;
-// a layout change between connected ports is never implicit (the graph refuses a mismatch).
+// Audio ports with an explicit layout. Stereo is the ordinary default for audio in and out. Between connected
+// ports the graph widens only mono into stereo (duplicated); any other layout change is refused, so stereo
+// into mono goes through an explicit downmix (org.caw.downmix).
 constexpr PortDescriptor audioPort(std::string_view id, bool input, ChannelLayout layout = ChannelLayout::Stereo,
                                    uint32_t discreteChannels = 0) noexcept {
     PortDescriptor port;
@@ -156,7 +184,11 @@ enum class ModuleValidation : uint8_t {
     EmptyUiControlId, InvalidUiControlKind, DuplicateUiControlId, UiControlMissingParameter,
     InvalidUiControlRange, TooManyChannels, InvalidSummingPort, InvalidPortDefault,
     InvalidParameterStep, InvalidParameterCurve, InvalidParameterSmoothing,
-    InvalidModuleVersion, InvalidModuleRole, InvalidParameterChoices, EmptyParameterChoice
+    InvalidModuleVersion, InvalidModuleRole, InvalidParameterChoices, EmptyParameterChoice,
+    // #120: an unknown domain bit, no kDomainWhole; a domain the ports cannot take (PerChannel needs one mono
+    // audio input and one mono audio output; PerNote and PerVoice the effect or instrument shape above);
+    // an unknown capability bit, a capability without the port it needs, or an unknown cpuClass.
+    InvalidDomains, DomainPortMismatch, InvalidCapabilities
 };
 ModuleValidation validateModuleDescriptor(const ModuleDescriptor& descriptor) noexcept;
 bool moduleDescriptorsMatch(const ModuleDescriptor& a, const ModuleDescriptor& b) noexcept;
@@ -211,6 +243,33 @@ inline bool audioProcessBlockValid(const AudioProcessBlock& block) noexcept {
     if (block.output.channelCount != 0 && block.output.frames < block.frames) return false;
     return true;
 }
+// The voice bus (#127; the C interface's CawVoiceBus, caw_component.h, gives the protocol in full): lanes the
+// host owns, each for one note id, that an instrument declaring kDomainPerNote renders matching voices into.
+// The instrument clears an ASSIGNED lane's stretch, renders the note's voice there instead of its mix, calls
+// run(hostData, offset, frames) so the host processes the stretch in place, then adds every ASSIGNED lane into
+// its mix before its shared stage. It sets kLaneEnded on a lane whose note no voice plays at the block's end.
+// caw::VoiceLanes (caw/instrument.hpp) does this bookkeeping.
+// kLaneRest (host): the overflow lane, note id 0, that every voice without a lane of its own renders into.
+inline constexpr uint32_t kLaneAssigned = 1u, kLaneWritten = 2u, kLaneEnded = 4u, kLaneRest = 8u;
+struct VoiceLane {
+    uint32_t structSize = sizeof(VoiceLane);
+    uint32_t noteId = 0;
+    uint32_t flags = 0;
+    uint32_t channelCount = 2;
+    float* channels[2] = {nullptr, nullptr};
+};
+struct VoiceBus {
+    uint32_t structSize = sizeof(VoiceBus);
+    uint32_t laneCount = 0;
+    uint32_t laneStride = sizeof(VoiceLane);  // bytes from one lane to the next
+    VoiceLane* lanes = nullptr;
+    void* hostData = nullptr;
+    void (*run)(void* hostData, uint32_t offset, uint32_t frames) = nullptr;
+};
+inline VoiceLane* voiceLaneAt(const VoiceBus& bus, uint32_t index) noexcept {
+    return reinterpret_cast<VoiceLane*>(reinterpret_cast<unsigned char*>(bus.lanes) + static_cast<size_t>(bus.laneStride) * index);
+}
+
 // Every port of a node, by type, each list in descriptor order (the k-th audio input is the k-th
 // input port of type Audio). Audio views follow the AudioProcessBlock frames rule. Modulation
 // buffers hold `frames` floats. A control input is read as *controlIn[k]; a control output is
@@ -238,6 +297,9 @@ struct ProcessBlock {
     const ParameterValue* parameters = nullptr;  // as in AudioProcessBlock
     uint32_t parameterCount = 0;
     const Transport* transport = nullptr;        // as in AudioProcessBlock
+    // An instrument declaring kDomainPerNote: the host's per-note FX lanes for this block, or null (render as
+    // without a bus). Others ignore it.
+    const VoiceBus* voices = nullptr;
 };
 struct StereoProcessBlock {
     const float* inputLeft = nullptr;
@@ -282,6 +344,21 @@ public:
     }
     virtual void deactivate() noexcept {}
     virtual void reset() noexcept {}
+    // Audio thread, right after a process that succeeded: true when the output from here on is silence (all
+    // zeros) until an event arrives or an audio input is not silent, whatever the parameters and the transport
+    // do: an instrument with no voice sounding, an effect whose tail has died out. A host may then skip process
+    // until that changes and use silence instead (the component's time does not move meanwhile). Default:
+    // never quiet, always run (a declared tail alone never puts a component to sleep, so its output doesn't
+    // depend on the host's block size). Say quiet only when nothing timed is left running (see docs/native-module-sdk.md).
+    virtual bool quiet() const noexcept { return false; }
+    // Live display data for the component's UI (#173): any thread but the audio thread, at any time while the
+    // instance exists (process() may be running): copies the latest display block the processor published into
+    // out (at most max floats) and returns how many floats it copied, 0 when it has none. Never blocks, locks or
+    // allocates. A processor that publishes keeps a caw::DisplayBuffer (caw/display.hpp) and forwards to its
+    // read(); the layout of the floats is the component's own (documented beside it).
+    virtual uint32_t readDisplay(float* out, uint32_t max) const noexcept {
+        (void)out; (void)max; return 0;
+    }
     virtual uint32_t stateVersion() const noexcept { return 1; }
     // Called on the control thread, possibly while process() runs: keep it safe against processing.
     virtual bool saveState(uint8_t* destination, uint32_t capacity, uint32_t& written) const noexcept {
@@ -313,6 +390,24 @@ static_assert(sizeof(Event) == sizeof(CawEvent) && offsetof(Event, frame) == off
               offsetof(Event, kind) == offsetof(CawEvent, kind) && offsetof(Event, flags) == offsetof(CawEvent, flags) &&
               offsetof(Event, noteId) == offsetof(CawEvent, note_id) && offsetof(Event, data) == offsetof(CawEvent, data));
 static_assert(kInfiniteTail == CAW_INFINITE_TAIL);
+static_assert(kDomainWhole == CAW_DOMAIN_WHOLE && kDomainPerChannel == CAW_DOMAIN_PER_CHANNEL &&
+              kDomainPerVoice == CAW_DOMAIN_PER_VOICE && kDomainPerNote == CAW_DOMAIN_PER_NOTE);
+static_assert(kCapabilityNotesIn == CAW_CAPABILITY_NOTES_IN && kCapabilityMidiIn == CAW_CAPABILITY_MIDI_IN &&
+              kCapabilityEventsOut == CAW_CAPABILITY_EVENTS_OUT && kCapabilitySampleAssets == CAW_CAPABILITY_SAMPLE_ASSETS &&
+              kCapabilityNeedsTransport == CAW_CAPABILITY_NEEDS_TRANSPORT && kCapabilityExportClap == CAW_CAPABILITY_EXPORT_CLAP);
+static_assert(static_cast<uint32_t>(CpuClass::Heavy) == CAW_CPU_HEAVY);
+static_assert(kLaneAssigned == CAW_LANE_ASSIGNED && kLaneWritten == CAW_LANE_WRITTEN && kLaneEnded == CAW_LANE_ENDED &&
+              kLaneRest == CAW_LANE_REST);
+// The voice bus crosses the C interface as is (the host's lanes reach a component without copying).
+static_assert(sizeof(VoiceLane) == sizeof(CawVoiceLane) && offsetof(VoiceLane, noteId) == offsetof(CawVoiceLane, note_id) &&
+              offsetof(VoiceLane, flags) == offsetof(CawVoiceLane, flags) &&
+              offsetof(VoiceLane, channelCount) == offsetof(CawVoiceLane, channel_count) &&
+              offsetof(VoiceLane, channels) == offsetof(CawVoiceLane, channels));
+static_assert(sizeof(VoiceBus) == sizeof(CawVoiceBus) && offsetof(VoiceBus, laneCount) == offsetof(CawVoiceBus, lane_count) &&
+              offsetof(VoiceBus, laneStride) == offsetof(CawVoiceBus, lane_stride) &&
+              offsetof(VoiceBus, lanes) == offsetof(CawVoiceBus, lanes) &&
+              offsetof(VoiceBus, hostData) == offsetof(CawVoiceBus, host_data) && offsetof(VoiceBus, run) == offsetof(CawVoiceBus, run));
+static_assert(std::is_standard_layout_v<VoiceLane> && std::is_standard_layout_v<VoiceBus>);
 static_assert(alignof(Event) == alignof(CawEvent) && std::is_standard_layout_v<Event> &&
               std::is_trivially_copyable_v<Event> && std::is_standard_layout_v<CawEvent>);
 }  // namespace caw::detail

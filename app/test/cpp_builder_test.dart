@@ -110,7 +110,12 @@ void main() {
       List<String> labels(String line, {String file = '', List<CppCompletion> knobs = const []}) =>
           staticCompletions(CppCompletionContext.at(line, line.length), file, knobs: knobs).map((c) => c.label).toList();
       expect(labels('p.def'), contains('defaultValue'));
-      expect(labels('caw::lib::'), containsAll(['drive', 'PingPongDelay', 'noteSeconds']));
+      // The bare list holds the 40 shortest of the Library's names; longer ones come with the letters typed.
+      expect(labels('caw::lib::'), contains('drive'));
+      expect(labels('caw::lib::'), hasLength(40));
+      expect(labels('caw::lib::Ping'), contains('PingPongDelay'));
+      expect(labels('caw::lib::note'), contains('noteSeconds'));
+      expect(labels('caw::lib::uni'), contains('unisonLayout'));
       expect(labels('caw::lib::'), isNot(contains('ModuleDescriptor')));
       expect(labels('ret'), contains('return'));
       expect(labels('fee', file: 'double feedbackAmount = 0;'), contains('feedbackAmount'));
@@ -147,6 +152,24 @@ COMPLETION: process : [#bool#]process(<#const AudioProcessBlock &block#>)
     for (final e in cppReference) {
       expect(RegExp('\\b${RegExp.escape(e.name)}\\b').hasMatch(headers), isTrue, reason: '${e.qualified} is not in the SDK');
     }
+  });
+
+  test('every built-in in the Library is registered in the engine with those knobs', () {
+    // Every engine/src/builtin_*.cpp: the components, instruments, flagship and effects suite.
+    final src = (Directory('../engine/src').listSync().whereType<File>().map((f) => f.path)
+            .where((p) => RegExp(r'builtin_[a-z_]+\.cpp$').hasMatch(p)).toList()..sort())
+        .map((p) => File(p).readAsStringSync())
+        .join('\n');
+    for (final b in cppBuiltins) {
+      expect(src, contains('"${b.id}"'), reason: '${b.id} is not a built-in');
+      for (final k in b.knobs) {
+        expect(src, contains('"$k"'), reason: '${b.id} has no knob $k');
+      }
+    }
+    // Internal components (ModuleRegistry::addInternal) play by id but are never listed, so the Library leaves them out.
+    const internal = {'org.caw.downmix', 'org.caw.test.osc'};
+    final ids = RegExp(r'"(org\.caw\.[a-z.]+)"').allMatches(src).map((m) => m.group(1)).toSet().difference(internal);
+    expect(ids, cppBuiltins.map((b) => b.id).toSet(), reason: 'a built-in is missing from the Library');
   });
 
   test('check and completion arguments share the build flags, compile nothing and link nothing', () {

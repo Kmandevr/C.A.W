@@ -1,7 +1,7 @@
 ---
 title: Vision and principles
 summary: Owner-approved product direction, actual platform support, current product boundaries and unresolved owner decisions.
-updated: 2026-11-10
+updated: 2026-11-11
 ---
 
 # Vision and principles
@@ -22,7 +22,7 @@ C.A.W. is a code-driven sound-design and music-production workspace for creating
 
 **Current delivery priority (owner, 2026-11-06):** create a working prototype before building out the full architecture. Deliver a narrow, useful end-to-end slice and expand it through working product behavior. Plan for future compatibility and extensibility where they affect today's interfaces, but do not build comprehensive migration systems, marketplace plumbing or speculative frameworks ahead of demonstrated need.
 
-The current repository still contains the constrained .caw language and VM; that is an implementation fact, not the chosen destination. Useful existing engine capabilities are to be migrated into the C++ Library/SDK and shared component system before the old language and VM are removed. The owner has waived backwards compatibility for old .caw source and pre-release projects.
+The .caw language and VM were removed on 2026-11-11 (#160), once C++ built-ins and the app made the same music; the owner waived compatibility with old .caw sources and pre-release projects.
 
 ## Platforms and actual support
 
@@ -38,25 +38,24 @@ Do not describe a platform as supported for release solely because Flutter or th
 
 ## Current product capabilities — summary
 
-The app currently has eight workspaces: Builder, Arranger, Mixer, Engine Lab, Automation, Exporter, Files and Plugin Builder.
+The app has three sections: Build (C++ components and patterns), Files and Arrange (tracks and clips, with the mixer, the automation lanes and the FX stack). Export is a page from the project menu and Engine diagnostics are in Settings.
 
 The repository currently includes:
-- A portable C++20 engine and constrained .caw module language for code-defined generators, effects, patterns, libraries and synth patches (current implementation, not the target language). The planned C++ authoring/toolchain and shared component SDK are not implemented yet.
-- Module parameters, project globals, exported signals and reusable functions.
+- A portable C++20 engine with built-in C++ instruments and effects and the project's own C++ components, written and built in Build.
 - Pattern editing with a piano roll and drum grid, note expressions, velocity/chance curves and pattern generators.
 - Arrangement clips, nested folders, stereo folder buses and track/folder volume-pan automation.
 - Track mixer controls, master output level and stereo peak meters.
-- Engine Lab scope/spectrum inspection and engine diagnostics.
+- Engine diagnostics (Settings › About and beta): scope/spectrum inspection and meters.
 - MIDI pattern import/export, including Standard MIDI Files and MIDI 2.0 Clip Files, plus a native MIDI 2.0 UMP decoder/input-queue primitive.
 - Native offline WAV rendering, loop/free-length/one-shot/wavetable export, named profiles, export history and a bounded in-memory queue.
-- Portable .cawproj and .caw import/export, project-local folders, tags, saved searches and restore points.
-- Plugin Builder for validating and packaging .caw source modules.
+- Portable .caw project import/export (packages with their dependencies; old .cawproj files import), project-local folders, tags, saved searches and restore points.
+- CLAP plug-in project export of a C++ component (Build › Export as plug-in).
 
 Important boundaries:
-- USB/Bluetooth MIDI device discovery, connection and live Engine voice routing are not implemented.
+- USB, Bluetooth and UMP MIDI devices (Android) and WinMM ports (Windows) play instruments at the frame they were played; not yet tested on the owner's hardware. MIDI clock and output are not implemented.
 - Audio-file import, audio clips, sample editing and WAV/SFZ multisample authoring are not implemented.
-- Sends, general sidechain routing and parallel mixer paths are not complete. Native effect chains on tracks and the master are built (engine).
-- Module/global parameter automation and stems export remain approved v2 work.
+- Sends to bus folders, sidechain keys (the ducker, compressor and gate) and bus effects are built (2026-11-11, #175); receives, parallel paths inside a track and a routing matrix are not. Native effect chains on tracks, buses and the master are built (engine).
+- Instrument and effect knob automation is built; stems export is in the Export song sheet.
 - Audio/MIDI recording, input monitoring, recording latency compensation, take lanes and comping are not implemented; they are planned later in the permanent roadmap. (Plugin delay compensation for native effects is built.)
 - The modular graph executor and native module registry are foundations, not the active playback/mixer path. External CLAP/VST3 binary hosting is not implemented. Dynamic loading of C.A.W. native components, under the user's explicit trust choice, is built in the engine; no screen uses it yet.
 - Video synchronization is not planned at this time.
@@ -107,4 +106,9 @@ Only the owner can settle these questions. Do not silently convert them into imp
 | How AutoStacc delivers the free app and the support bundles | Open |
 | Initial trust state for a newly encountered native component | Open; each component's trust level must be explicitly chosen by the user; no silent trust assignment ([decisions](decisions.md), 2026-11-06) |
 | How the optional AutoStacc cloud library syncs with project folders and the global library | Open; compatibility is required ([decisions](decisions.md), 2026-11-03) |
+| Note clips stored as pattern text with .mid import/export, instead of stored as MIDI (#158) | Decided on the owner's behalf 2026-11-10, to confirm; also whether the app keeps one MIDI converter, the Dart one or the engine's ([decisions](decisions.md)) |
+| Android developer verification for the sideloaded APK | Open. **[Fact, checked 2026-11-10]** Google requires apps on certified Android devices to come from registered developers, from 2026-09-30 in Brazil, Indonesia, Singapore and Thailand and globally in 2027 (no US or EU date yet); a free limited-distribution account reaches only 20 devices, and ADB installs and an advanced sideloading flow remain ([Android Developers Blog](https://android-developers.googleblog.com/2026/03/android-developer-verification-rolling-out-to-all-developers.html)). The owner decides whether and when to register `com.kmandevr.caw` with its signing key; it is not needed for `v1.0.0-beta.1` |
+| Audio (2026-11-11, branch `audio-ui`): the look of the audio clips, the input sheet, Settings › Audio's input part and the sampler editor (in the APK); a default edge fade; recordings kept with the project or in a shared library; loop takes as stacked lanes for comping; imports copied (now) or referenced in place ([decisions](decisions.md#2026-11-11-audio-assets-clips-sampler-and-input-wp-j-choices-to-confirm)) | Open |
 | Whether effect tails should carry across a layer loop restart in every case | Open; see [engine playback](engine.md#playback) |
+| Piano roll (WP-K2, 2026-11-11): the look of the Quantize… sheet and the step bar (in the APK); whether Ctrl+U should use the sheet's last settings; whether the slide-up on-screen keys should also step; the MIDI CC numbers for automation lanes (CC7 volume, CC10 pan, others from CC20, as proposed in #11), the volume curve (127·√gain) and how parameter lanes scale ([app](app.md)) | Open |
+| Matching REAPER's flow ([REAPER's flow](reaper-flow.md)): the phone look of the new screens (Export sheet, send knob). S splits, Touch automation from a transport button and on-screen keys with pads (owner, 2026-11-10). The clip bar, the ruler with the loop range, markers and regions, the recording flow and automation writing are built; their look and the choices made for them are to confirm ([decisions](decisions.md)) | Open |

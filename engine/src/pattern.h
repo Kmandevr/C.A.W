@@ -9,6 +9,9 @@
 
 namespace caw {
 
+// A note name such as C4, F#2 or Bb0 gives its MIDI note number (C4 = 60).
+bool noteNumber(const std::string& s, double& out);
+
 constexpr int kMaxRatchet = 8;
 
 constexpr double kMaxBend = 48.0;  // semitones either way (the app draws within +-12 by default)
@@ -77,8 +80,16 @@ struct PatternResult {
 
 PatternResult parsePattern(std::string_view source);
 
-// JSON fields describing a pattern (no braces), for caw_check and the project result.
+// JSON fields describing a pattern (no braces), for the project result's module entry.
 std::string describePattern(const Pattern& p);
+
+// Which note of `to` (an edit of `from`) carries on each note of `from`: its index in to.notes, or -1 when the edit
+// deleted it. Pattern text has no note ids, so notes are matched by content, on the control thread: first notes
+// that are the same (start, length, pitch and ratchets; a curve or velocity edit keeps the note), in order; then,
+// among the rest, a changed note takes the edited note that overlaps it in time, nearest in pitch, then in start,
+// then in length (a move, stretch or transpose while it still overlaps its old place). Each note of `to` carries
+// on at most one. Past 2^24 pairs of changed notes the second pass is skipped (their sounding notes end).
+std::vector<int> matchPatternNotes(const Pattern& from, const Pattern& to);
 
 // Whether a note plays on a given repeat of its layer, from its probability and the seed. Same answer every time.
 bool notePlays(const PatternNote& n, uint32_t index, int64_t repeat, uint32_t seed);

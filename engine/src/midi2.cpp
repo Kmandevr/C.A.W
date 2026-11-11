@@ -49,6 +49,13 @@ bool decodeMidi2ChannelVoice(uint32_t w0, uint32_t w1, Midi2Event& out) noexcept
             event.type = Midi2EventType::ChannelPressure;
             event.value = static_cast<double>(w1) / 4294967295.0;
             break;
+        case 0xC:
+            // Program Change: the program is byte 1 of word 1 (the bank, when its flag is set, is not used).
+            event.type = Midi2EventType::ProgramChange;
+            event.note = 0;
+            event.index = static_cast<uint8_t>((w1 >> 24) & 0x7F);
+            event.value = static_cast<double>(event.index) / 127.0;
+            break;
         case 0xE: {
             event.type = Midi2EventType::PitchBend;
             event.value = (static_cast<double>(w1) - 2147483648.0) / 2147483648.0;

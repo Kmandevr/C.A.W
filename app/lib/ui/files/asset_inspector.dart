@@ -24,7 +24,23 @@ class AssetInspector extends StatelessWidget {
         FileAssetType.builtinEffect => 'Built-in · ${asset.native!.id}',
         FileAssetType.cppComponent => 'C++ components · ${asset.cpp!.componentId}',
         FileAssetType.cppFile => 'C++ components / ${asset.cpp!.name}',
-        _ => asset.module!.folderPath.isEmpty ? '.caw modules' : '.caw modules / ${asset.module!.folderPath}',
+        FileAssetType.devicePreset => 'Presets · ${asset.native?.label ?? asset.preset!.componentId}',
+        FileAssetType.trackPreset => 'Presets · track',
+        FileAssetType.sampleFile => 'Sample packs · ${[
+            if (asset.sample!.noteName.isNotEmpty) asset.sample!.noteName,
+            if (asset.sample!.velocity > 0) 'velocity ${asset.sample!.velocity}',
+            if (asset.sample!.seconds > 0) '${asset.sample!.seconds.toStringAsFixed(2)} s',
+            if (asset.sample!.looped) 'looped',
+          ].join(' · ')}',
+        FileAssetType.audioFile => 'Audio files · ${[
+            if (asset.audio!.seconds > 0) '${asset.audio!.seconds.toStringAsFixed(2)} s',
+            if (asset.audio!.channels > 0) asset.audio!.channels == 1 ? 'mono' : 'stereo',
+            if (asset.audio!.sourceRate > 0) '${(asset.audio!.sourceRate / 1000).toStringAsFixed(1)} kHz',
+            if (asset.audio!.bpm != null) '${asset.audio!.bpm!.toStringAsFixed(0)} BPM',
+            if (asset.audio!.recorded) 'recorded',
+          ].join(' · ')}',
+        FileAssetType.midiFile => 'MIDI files · ${asset.midi!.parts.length} part${asset.midi!.parts.length == 1 ? '' : 's'}',
+        _ => asset.module!.folderPath.isEmpty ? 'Patterns' : 'Patterns / ${asset.module!.folderPath}',
       };
 
   @override
@@ -86,7 +102,7 @@ class AssetInspector extends StatelessWidget {
         if (a.type == FileAssetType.cppFile)
           line(Icons.notes, '${'\n'.allMatches(a.cpp!.files[a.filePath] ?? '').length + 1} lines'),
         if (a.module != null && a.module!.tags.isNotEmpty) line(Icons.sell_outlined, a.module!.tags.join(', ')),
-        if (a.type != FileAssetType.cppFile && a.type != FileAssetType.cawLibrary)
+        if (a.type != FileAssetType.cppFile && a.sample == null)
           line(Icons.view_stream_outlined, uses.isEmpty ? 'Not used on any track' : 'Used on ${uses.join(', ')}',
               color: uses.isEmpty ? Neon.dim : Neon.text),
         if (!compact && a.drag != null)

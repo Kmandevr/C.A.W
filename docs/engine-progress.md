@@ -1,7 +1,7 @@
 ---
 title: Native engine refactor progress
 summary: Live milestone ledger and exact continuation point for the native engine refactor.
-updated: 2026-11-09
+updated: 2026-11-11
 ---
 
 # Native engine refactor progress
@@ -41,7 +41,7 @@ updated: 2026-11-09
 - **Graph runtime is still limited:** since Foundation F3 (PR #72) it runs planar N-channel audio of any layout (mono … 7.1, Discrete, up to 64 channels per port) with a prepared-buffer byte budget, with any number of audio, modulation, control and event ports per node since F5.1/F5.2, 8–192 kHz. Since F4.1 a summing input takes any number of connections (fan-in, summed in connection order; events merged by frame); other inputs take one driver. No custom channel mapping, cross-domain conversion or delayed feedback edges, and nothing yet routes MIDI devices or patterns into graph events. Processors receive resolved parameter values (F6.1/F6.2), including modulation links from other nodes (F6.3), automation lanes (F6.4) and MIDI CC mappings from host events (F6.5), and the Engine's .caw params resolve through the same model (F6.6); nothing feeds those host events from MIDI devices yet.
 - `ModuleProcessor` has the generic borrowed planar `process(AudioProcessBlock)` with a stereo adapter (F2/F3), and the executor calls only that. Port descriptors identify audio/control/modulation/event types, but typed descriptors do not provide runtime buffers for those domains.
 - `ModuleRegistry` supports static registrations and explicit-trust dynamic loading. The Engine C API and Dart FFI expose load/unload; the live adapter processes stereo effects with parameters on tracks and the master. Per-component trust UI/store, capability negotiation and native crash isolation remain incomplete. Trusted native code is in-process and not sandboxed; Isolated is rejected until a separate-process host exists, while the .caw VM remains the constrained untrusted-code path.
-- MIDI 2.0 decoding/queue are primitives only. `Midi2Event` has no sample timestamp, there is no live USB/Bluetooth device adapter, and events are not routed into Engine voices. Queue overflow is counted but not surfaced through the app.
+- MIDI 2.0 decoding and the input queue carry device MIDI into instruments at its frame (API 15, [engine](engine.md)); the drop count is `caw_engine_midi_dropped`. MIDI 2.0 MIDI-CI, clock and SysEx are not handled.
 - The app C API/FFI remains API v1. The app submits project compilation, source checks and offline WAV renders to the native worker pool; it does not submit graph execution or native module work.
 - Existing synth modulation, sidechain ducking effects, per-note expression and project automation are partial foundations, not the unified parameter/routing system requested.
 

@@ -11,6 +11,8 @@ import '../engine/engine.dart';
 import '../platform/cpp_build.dart';
 import '../platform/cpp_compiler.dart';
 import 'app_state.dart';
+import 'cpp_starters.dart';
+import 'arrange_fx.dart';
 import 'cpp_completion.dart';
 import 'cpp_component.dart';
 import 'cpp_diagnostics.dart';
@@ -123,6 +125,25 @@ extension CppBuilderState on AppState {
     }
     return doc;
   }
+
+  /// A copy of a bundled C++ starter (examples/cpp/starters), added to the project under a free name. It ships
+  /// with the app like the blank templates, so it is the user's own code from here on.
+  CppComponentDoc addCppStarter(CppStarter starter) {
+    var n = starter.name;
+    var k = 1;
+    while (project.cppComponents.any((c) => c.name == n)) {
+      n = '${starter.name} ${++k}';
+    }
+    final doc = starter.copy(id: newId('cpp'), displayName: n);
+    editProject((p) => p.cppComponents.add(doc));
+    cppWorkbench(doc.id).own = true;
+    final trust = nativeComponents?.trust;
+    if (trust != null) {
+      trust.markAuthored(doc);
+      unawaited(_saveTrust(trust));
+    }
+    return doc;
+  }
 }
 
 /// The session behind one C++ editor tab. Code lives in [texts] while editing and autosaves into the project
@@ -168,6 +189,20 @@ class CppWorkbench extends ChangeNotifier {
 
   /// The built effect's descriptor while it is loaded (its knobs), null before the first build.
   NativeComponentInfo? info;
+
+  String? _artifact;
+
+  /// The library file of the last build this session, else the one the engine loaded (the Build tools' test and
+  /// sample-pack renders load it again); null before a build.
+  String? get artifactPath => _artifact ?? state.nativeComponents?.artifactOf(componentId);
+
+  /// The build before the last one, while its library file is a different file that still exists (the testing
+  /// suite's "previous build" comparison).
+  String? previousArtifactPath;
+
+  /// Sets the last build's library file without building (widget tests of the Build tools).
+  @visibleForTesting
+  set debugArtifactPath(String path) => _artifact = path;
 
   Timer? _saveTimer, _checkTimer;
   int _editGeneration = 0;
@@ -239,6 +274,19 @@ class CppWorkbench extends ChangeNotifier {
     if (!texts.containsKey(path) || currentFile == path) return;
     currentFile = path;
     notifyListeners();
+  }
+
+  /// Adds a new file (plain text, a header, JSON...) to the component and opens it; false for an unsafe path or
+  /// one that exists. It is saved with the rest after a pause.
+  bool addFile(String path, [String text = '']) {
+    if (!CppComponentDoc.isSafeRelativePath(path) || texts.containsKey(path)) return false;
+    texts[path] = text;
+    currentFile = path;
+    _dirty = true;
+    _saveTimer?.cancel();
+    _saveTimer = Timer(saveDelay, () => unawaited(save()));
+    notifyListeners();
+    return true;
   }
 
   /// The editor's text of [path] changed: autosave and a check follow after a pause.
@@ -427,6 +475,7 @@ class CppWorkbench extends ChangeNotifier {
         final status = state.nativeStatus;
         final id = c.componentId;
         if (status != null && status.loaded.contains(id)) {
+          _keepArtifact(manager.artifactOf(id));
           await _built(c, before);
         } else if (status?.buildFailed[id] case final CppBuildResult failed) {
           _failed(failed);
@@ -453,6 +502,7 @@ class CppWorkbench extends ChangeNotifier {
                   reload: builds > 0);
           if (loaded.ok) {
             state.editProject((_) {}); // send the project again so tracks pick the effect up
+            _keepArtifact(result.artifactPath);
             await _built(c, before);
           } else {
             phase = CppBuildPhase.failed;
@@ -466,6 +516,13 @@ class CppWorkbench extends ChangeNotifier {
     }
     if (!_disposed) notifyListeners();
     return true;
+  }
+
+  void _keepArtifact(String? path) {
+    if (path == null) return;
+    final old = artifactPath;
+    if (old != null && old != path && File(old).existsSync()) previousArtifactPath = old;
+    _artifact = path;
   }
 
   void _failed(CppBuildResult result) {
@@ -543,6 +600,32 @@ class CppWorkbench extends ChangeNotifier {
         for (var i = 0; i < state.project.masterComponents.length; i++)
           if (state.project.masterComponents[i].id == componentId) CppEffectUse(null, i, state.project.masterComponents[i]),
       ];
+
+  /// Whether this component plays notes (an instrument) rather than shaping sound: its descriptor once built, else
+  /// its code deriving from `caw::InstrumentProcessor`.
+  bool get isInstrument => info?.isInstrument ?? texts.values.any((s) => s.contains('InstrumentProcessor'));
+
+  /// "Try it on a track": an instrument plays [layer] (its notes stay), an effect joins the end of its chain. With no
+  /// [layer] (or a folder) a new track named after the component gets it. The track is selected and returned; null
+  /// when nothing changed (it is already there). One project undo step.
+  LayerDoc? tryOn(LayerDoc? layer) {
+    final c = component;
+    if (c == null) return null;
+    var target = layer;
+    if (target == null || target.isFolder) {
+      state.addLayer();
+      target = state.project.layers.last..name = c.name;
+    }
+    if (isInstrument) {
+      if (target.instrument?.id == componentId) return null;
+      state.setNativeInstrument(target, componentId);
+    } else {
+      if (target.components.any((u) => u.id == componentId)) return null;
+      if (state.addNativeEffect(target, componentId) == null) return null;
+    }
+    state.selectLayer(target);
+    return target;
+  }
 
   /// The use's index in the engine's chain, which leaves out components the engine hasn't loaded.
   int? engineIndex(CppEffectUse u) {

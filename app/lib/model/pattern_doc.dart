@@ -155,6 +155,9 @@ class Steps implements Comparable<Steps> {
   /// The multiple of [grid] at or below this.
   Steps floorTo(Steps grid) => grid.times((this / grid).floor());
 
+  /// The multiple of [grid] at or above this.
+  Steps ceilTo(Steps grid) => grid.times((this / grid).ceil());
+
   Steps clamp(Steps lo, Steps hi) => this < lo ? lo : (this > hi ? hi : this);
 
   static Steps max(Steps a, Steps b) => a >= b ? a : b;
@@ -304,6 +307,43 @@ class NoteExpression {
     return ((position / grid).round() * grid).clamp(0.0, 1.0).toDouble();
   }
 
+  /// The same curves after the note moved from [oldAt] (steps) and [oldLen] long to [newAt] and [newLen]: every point
+  /// keeps its place on the grid (owner, 2026-11-10: stretching a note doesn't move its slide points). Points that
+  /// fall outside the new note are dropped, and the curve's value where it is cut becomes a point on the new edge.
+  NoteExpression rebased(double oldAt, double oldLen, double newAt, double newLen) {
+    if (isEmpty || newLen <= 0 || oldLen <= 0 || (oldAt == newAt && oldLen == newLen)) return this;
+    List<NotePoint> move(List<NotePoint> c) {
+      if (c.isEmpty) return c;
+      // A fraction of the new note for a fraction of the old one.
+      double t(double u) => (oldAt + u * oldLen - newAt) / newLen;
+      double u(double t) => (newAt + t * newLen - oldAt) / oldLen;
+      final out = <NotePoint>[];
+      final firstT = t(c.first.t);
+      if (firstT < 0 && t(c.last.t) > 0) out.add(NotePoint(0, valueAt(c, u(0)), _segmentAt(c, u(0))));
+      for (final p in c) {
+        final x = t(p.t);
+        if (x >= 0 && x <= 1) out.add(NotePoint(_round(x), p.v, p.k));
+      }
+      if (t(c.last.t) > 1 && firstT < 1) out.add(NotePoint(1, valueAt(c, u(1))));
+      // Every point fell outside: the note holds the value the curve had over it.
+      if (out.isEmpty) out.add(NotePoint(0, valueAt(c, u(firstT < 0 ? 0 : 1))));
+      return out;
+    }
+
+    return copyWith(bend: move(bend), press: move(press), timbre: move(timbre));
+  }
+
+  // The bend of the segment that holds [u], so a cut segment keeps its shape's direction.
+  static double _segmentAt(List<NotePoint> c, double u) {
+    for (var i = 0; i + 1 < c.length; i++) {
+      if (u <= c[i + 1].t) return c[i].k;
+    }
+    return 0;
+  }
+
+  // Point times to 6 decimals, so the pattern text stays short.
+  static double _round(double x) => (x * 1e6).roundToDouble() / 1e6;
+
   /// A curve's value at [u] 0..1, holding the first and last values outside the points (as the engine plays it).
   static double valueAt(List<NotePoint> c, double u, {double empty = 0}) {
     if (c.isEmpty) return empty;
@@ -433,6 +473,9 @@ class PatternNote {
 }
 
 /// Notes cut or copied, with starts relative to the earliest one.
+/// Which way a ratchet's velocity ramp goes ([PatternDoc.ratchetRamp]).
+enum RatchetRamp { fadeIn, fadeOut }
+
 class PatternClip {
   const PatternClip(this.notes, this.span);
 
@@ -817,6 +860,13 @@ class PatternDoc {
   PatternDoc setName(String value) =>
       _setHeader('name', value.replaceAll(RegExp(r'[#\r\n]'), '').trim(), const ['caw', 'kind']);
 
+  /// Rewrites the `summary:` line (or adds one after `name:`); an empty value removes it. `#` and line breaks are
+  /// dropped, as for the name.
+  PatternDoc setSummary(String value) {
+    final v = value.replaceAll(RegExp(r'[#\r\n]'), ' ').trim();
+    return _setHeader('summary', v.isEmpty ? null : v, const ['caw', 'kind', 'name']);
+  }
+
   /// Rewrites the `length:` line as steps or bars (or adds it); both null removes it, so the notes decide.
   PatternDoc setLength({int? steps, int? bars}) {
     if (steps != null && bars != null) throw ArgumentError('give steps or bars, not both');
@@ -1014,11 +1064,15 @@ class PatternDoc {
 
   /// Changes lengths by [dLen], each at least [kMinNoteLength] (1/32 step) and at most [kPatternMaxSteps].
   PatternDoc resize(Set<int> sel, Steps dLen) =>
-      _map(sel, (n) => n.copyWith(len: (n.len + dLen).clamp(kMinNoteLength, Steps(kPatternMaxSteps))));
+      _map(sel, (n) => _withLength(n, n.at, (n.len + dLen).clamp(kMinNoteLength, Steps(kPatternMaxSteps))));
 
   /// Sets lengths exactly (clamped like [resize]).
   PatternDoc setNoteLength(Set<int> sel, Steps len) =>
-      _map(sel, (n) => n.copyWith(len: len.clamp(kMinNoteLength, Steps(kPatternMaxSteps))));
+      _map(sel, (n) => _withLength(n, n.at, len.clamp(kMinNoteLength, Steps(kPatternMaxSteps))));
+
+  /// [n] starting at [at] and [len] long, its expression points kept where they were on the grid.
+  static PatternNote _withLength(PatternNote n, Steps at, Steps len) => n.copyWith(at: at, len: len,
+      expr: n.expr.rebased(n.at.toDouble(), n.len.toDouble(), at.toDouble(), len.toDouble()));
 
   /// Stretches every note in [sel] by the same [d] at one end: the end, or with [start] the start, which moves while
   /// the end stays. A note keeps at least [min] (never less than [kMinNoteLength]; one already shorter keeps its
@@ -1027,9 +1081,9 @@ class PatternDoc {
     final lo = Steps.max(kMinNoteLength, min ?? kMinNoteLength);
     return _map(sel, (n) {
       final keep = Steps.min(lo, n.len);
-      if (!start) return n.copyWith(len: (n.len + d).clamp(keep, Steps(kPatternMaxSteps)));
+      if (!start) return _withLength(n, n.at, (n.len + d).clamp(keep, Steps(kPatternMaxSteps)));
       final at = (n.at + d).clamp(Steps.zero, n.end - keep);
-      return n.copyWith(at: at, len: n.end - at);
+      return _withLength(n, at, n.end - at);
     });
   }
 
@@ -1067,8 +1121,14 @@ class PatternDoc {
     return paste(copy(sel), s.map((n) => n.at).reduce(Steps.min) + offset);
   }
 
-  /// The E key: copies the selection to start where it ends.
-  ({PatternDoc doc, Set<int> ids}) copyAfter(Set<int> sel) => duplicate(sel, copy(sel).span);
+  /// The E key: copies the selection to start where it ends, on the next line of [grid] at or after its end when one
+  /// is given (owner, 2026-11-11: copies chain end to end).
+  ({PatternDoc doc, Set<int> ids}) copyAfter(Set<int> sel, {Steps? grid}) {
+    final span = copy(sel).span;
+    if (grid == null || grid <= Steps.zero || _selected(sel).isEmpty) return duplicate(sel, span);
+    final start = _selected(sel).map((n) => n.at).reduce(Steps.min);
+    return duplicate(sel, (start + span).ceilTo(grid) - start);
+  }
 
   /// Chord inversion up, per start time in the selection: the lowest note goes up by octaves to just above the
   /// highest (a single note goes up an octave). A chord whose new note would pass 127 stays as it is.
@@ -1117,6 +1177,69 @@ class PatternDoc {
           len: Steps.max(grid, n.len.roundTo(grid)).clamp(kMinNoteLength, Steps(kPatternMaxSteps)),
         ),
       );
+
+  /// The quantize sheet (REAPER's Quantize events, UG 13.23): each selected note's start, end or both pulled toward
+  /// the nearest line of [grid] by [strength] (0..1, 1 lands on the line), where [swing] (0..1) moves every second
+  /// line later by up to half a grid (0.5: a 3:2 feel; 2/3: triplets; 1: dotted). With [what] = ends the start stays;
+  /// with both, an end that would land on or before its new start goes to the next line after it. A note keeps at
+  /// least [kMinNoteLength]. Then [humanTiming] (steps) and [humanVelocity] nudge the notes as [humanize] does, with
+  /// [seed]. Lengths are not rounded (the Ctrl+U [quantize] does that).
+  PatternDoc quantizeWith(Set<int> sel, Steps grid,
+      {double strength = 1,
+      double swing = 0,
+      QuantizeWhat what = QuantizeWhat.starts,
+      double humanTiming = 0,
+      double humanVelocity = 0,
+      int seed = 1}) {
+    if (grid <= Steps.zero) return this;
+    final st = Steps.fromDouble(strength.clamp(0, 1).toDouble(), maxDenominator: 100);
+    final shift = grid * Steps.fromDouble(swing.clamp(0, 1).toDouble(), maxDenominator: 100) / Steps(2);
+    final max = Steps(kPatternMaxSteps);
+    final out = _map(sel, (n) {
+      var at = n.at, end = n.end;
+      if (what != QuantizeWhat.ends) {
+        at = (n.at + (swungLine(n.at, grid, shift) - n.at) * st).clamp(Steps.zero, max);
+      }
+      if (what == QuantizeWhat.starts) {
+        end = at + n.len;
+      } else {
+        var target = swungLine(n.end, grid, shift);
+        if (target <= at) target = swungLineAfter(at, grid, shift);
+        end = n.end + (target - n.end) * st;
+      }
+      final len = Steps.max(kMinNoteLength, end - at).clamp(kMinNoteLength, max);
+      return at == n.at && len == n.len ? n : n.copyWith(at: at, len: len);
+    });
+    return humanTiming > 0 || humanVelocity > 0
+        ? out.humanize(sel, timing: humanTiming, velocity: humanVelocity, seed: seed)
+        : out;
+  }
+
+  /// The line of [grid] nearest [t] (ties go earlier), where every second line sits [shift] later (the swing).
+  static Steps swungLine(Steps t, Steps grid, Steps shift) {
+    final pair = grid.times(2);
+    final base = pair.times((t / pair).floor());
+    Steps? best;
+    for (final c in [base, base + grid + shift, base + pair]) {
+      if (best == null) {
+        best = c;
+        continue;
+      }
+      final dc = c >= t ? c - t : t - c, db = best >= t ? best - t : t - best;
+      if (dc < db) best = c;
+    }
+    return best!;
+  }
+
+  /// The first swung line of [grid] after [t].
+  static Steps swungLineAfter(Steps t, Steps grid, Steps shift) {
+    final pair = grid.times(2);
+    final base = pair.times((t / pair).floor());
+    for (final c in [base, base + grid + shift, base + pair, base + pair + grid + shift]) {
+      if (c > t) return c;
+    }
+    return base + pair.times(2);
+  }
 
   /// Cuts each selected note that spans [time] into two. The left part keeps the id and the comment and loses
   /// `slide`; ids holds both parts of every note cut.
@@ -1183,6 +1306,134 @@ class PatternDoc {
     });
   }
 
+  /// Connects the selection's notes (#16): each chord (the notes that start together; one note is a chord of one)
+  /// lasts until the next chord starts, and with [glide] (0..1 of the note) each note bends over its last part into
+  /// the pitch of the note it pairs with in the next chord, so the line slides rather than steps. Pairing: chords
+  /// with as many notes pair by rank (lowest to lowest, highest to highest); otherwise each note pairs with the next
+  /// chord's nearest pitch (the lower on a tie). A glide past [NoteExpression.maxBend] semitones is left out (that
+  /// note only gets longer); a note's bend before its glide is kept. The last chord keeps its length. With [sel]
+  /// empty every note connects.
+  PatternDoc connect(Set<int> sel, {double glide = 0}) {
+    final s = sel.isEmpty ? notes : _selected(sel);
+    final chords = <Steps, List<PatternNote>>{};
+    for (final n in s) {
+      (chords[n.at] ??= []).add(n);
+    }
+    final starts = chords.keys.toList()..sort();
+    final g = _round3(glide.clamp(0, 1).toDouble());
+    final next = <int, PatternNote>{};
+    for (var i = 0; i + 1 < starts.length; i++) {
+      final a = [...chords[starts[i]]!]..sort((x, y) => x.pitch.compareTo(y.pitch));
+      final b = [...chords[starts[i + 1]]!]..sort((x, y) => x.pitch.compareTo(y.pitch));
+      final len = starts[i + 1] - starts[i];
+      for (var r = 0; r < a.length; r++) {
+        final n = a[r];
+        final double to;
+        if (a.length == b.length) {
+          to = b[r].pitch;
+        } else {
+          var best = b.first.pitch;
+          for (final m in b) {
+            if ((m.pitch - n.pitch).abs() < (best - n.pitch).abs()) best = m.pitch;
+          }
+          to = best;
+        }
+        var expr = n.expr;
+        final dp = to - n.pitch;
+        if (g > 0 && dp != 0 && dp.abs() <= NoteExpression.maxBend) {
+          final from = 1 - g;
+          final kept = [for (final p in expr.bend) if (p.t < from) p];
+          expr = expr.copyWith(bend: [
+            if (kept.isEmpty && from > 0) const NotePoint(0, 0),
+            ...kept,
+            NotePoint(NoteExpression._round(from), NoteExpression.valueAt(expr.bend, from)),
+            NotePoint(1, dp),
+          ]);
+        }
+        next[n.id] = n.copyWith(len: len, expr: expr);
+      }
+    }
+    return next.isEmpty ? this : _withNotes([for (final n in notes) next[n.id] ?? n]);
+  }
+
+  /// A tremolo's level (0..1) at [phase] (cycles; the fraction counts) for [depth] 0..1: 1 at the top of the wave,
+  /// 1 - depth at its bottom. Each wave starts at its top.
+  static double tremoloLevel(TremoloWave wave, double phase, double depth) {
+    final p = phase - phase.floorToDouble();
+    final w = switch (wave) {
+      TremoloWave.sine => math.cos(2 * math.pi * p),
+      TremoloWave.triangle => 1 - 4 * math.min(p, 1 - p),
+      TremoloWave.square => p < 0.5 ? 1.0 : -1.0,
+    };
+    return 1 - depth.clamp(0, 1) * (1 - w) / 2;
+  }
+
+  /// Tremolo as the notes' volume (#16): each selected note's pressure (volume) curve follows [wave] with one cycle
+  /// every [cycle] steps from the note's start, dipping by [depth], times the curve it had. Sine takes 8 points a
+  /// cycle, triangle 2 and square 4 (its edges are two points at one time). Refused whole (this doc) past
+  /// [kPatternMaxGenerated] points.
+  PatternDoc tremolo(Set<int> sel, {required Steps cycle, double depth = 0.5, TremoloWave wave = TremoloWave.sine}) {
+    if (cycle <= Steps.zero || sel.isEmpty) return this;
+    final per = switch (wave) { TremoloWave.sine => 8, TremoloWave.triangle => 2, TremoloWave.square => 2 };
+    var total = 0;
+    for (final n in _selected(sel)) {
+      total += ((n.len / cycle).toDouble() * per).ceil() * (wave == TremoloWave.square ? 2 : 1) + 2;
+      if (total > kPatternMaxGenerated) return this;
+    }
+    final d = depth.clamp(0, 1).toDouble();
+    return _map(sel, (n) {
+      final cycles = (n.len / cycle).toDouble();
+      final old = n.expr.press;
+      // At the note's end, the level just before it (a square's last half holds to the end).
+      double at(double u) => _round3(NoteExpression.valueAt(old, u, empty: 1) *
+          tremoloLevel(wave, u >= 1 ? cycles - 1e-9 : u * cycles, d));
+      final pts = <NotePoint>[];
+      final count = (cycles * per).ceil();
+      for (var i = 0; i <= count; i++) {
+        final u = math.min(1.0, i / per / cycles);
+        if (wave == TremoloWave.square && i > 0 && u < 1) {
+          // The edge: the level before it, then after it, at one time.
+          final before = _round3(NoteExpression.valueAt(old, u, empty: 1) * tremoloLevel(wave, i / per - 0.25, d));
+          pts.add(NotePoint(NoteExpression._round(u), before));
+        }
+        if (pts.isNotEmpty && pts.last.t >= 1) break;
+        pts.add(NotePoint(NoteExpression._round(u), at(u)));
+      }
+      if (pts.last.t < 1) pts.add(NotePoint(1, at(1)));
+      return n.copyWith(expr: n.expr.copyWith(press: List.unmodifiable(pts)));
+    });
+  }
+
+  /// Tremolo as repeats (#16, a drum roll or a mandolin's tremolo): each selected note becomes hits every [rate]
+  /// over its length at its pitch, each hit's velocity the note's times the [wave]'s level ([tremoloLevel], one cycle
+  /// every [cycle] steps). The hits keep the note's chance; its other extras and expression are left out. Refused
+  /// whole past [kPatternMaxGenerated] hits. Returns the hits' ids.
+  ({PatternDoc doc, Set<int> ids}) tremoloRepeat(Set<int> sel,
+      {required Steps rate, required Steps cycle, double depth = 0.5, TremoloWave wave = TremoloWave.sine}) {
+    if (rate <= Steps.zero || cycle <= Steps.zero) return (doc: this, ids: <int>{});
+    final add = <({Steps at, double pitch, Steps len, double vel})>[];
+    final probs = <double>[];
+    for (final n in _selected(sel)) {
+      final count = (n.len / rate).ceil();
+      if (add.length + count > kPatternMaxGenerated) return (doc: this, ids: <int>{});
+      for (var i = 0; i < count; i++) {
+        final t = n.at + rate.times(i);
+        add.add((
+          at: t,
+          pitch: n.pitch,
+          len: Steps.min(rate, n.end - t),
+          vel: n.vel * tremoloLevel(wave, ((t - n.at) / cycle).toDouble(), depth),
+        ));
+        probs.add(n.prob);
+      }
+    }
+    if (add.isEmpty) return (doc: this, ids: <int>{});
+    final r = _addAll(add, remove: _selected(sel).map((n) => n.id).toSet());
+    // _addAll gives the hits ids in order, from the doc's next id.
+    final prob = {for (final (i, id) in (r.ids.toList()..sort()).indexed) id: probs[i]};
+    return (doc: r.doc._map(r.ids, (n) => prob[n.id] == 1 ? n : n.copyWith(prob: prob[n.id])), ids: r.ids);
+  }
+
   /// Sets each selected note's velocity, or chance, from [f] of the note (the Curve tool's shapes). Returns this
   /// same doc when no value changes, so a gesture that changes nothing makes no undo step.
   PatternDoc shape(Set<int> sel, double Function(PatternNote n) f, {bool chance = false}) {
@@ -1229,6 +1480,48 @@ class PatternDoc {
   PatternDoc setProb(Set<int> sel, double prob) => _map(sel, (n) => n.copyWith(prob: _round3(prob.clamp(0, 1).toDouble())));
   PatternDoc setRatchet(Set<int> sel, int ratchet) => _map(sel, (n) => n.copyWith(ratchet: ratchet.clamp(1, 8)));
   PatternDoc setSlide(Set<int> sel, bool slide) => _map(sel, (n) => n.copyWith(slide: slide));
+
+  /// Vibrato on the selected notes (the roll's Vibrato tool): [depth] semitones (0..12), [rate] Hz (0.1..30) and
+  /// [fade] the share of the note it takes to reach full depth (0..1). Their bend, volume and timbre curves stay.
+  PatternDoc setVibrato(Set<int> sel, {required double depth, required double rate, double fade = 0}) {
+    final d = _round3(depth.clamp(0, 12).toDouble()), r = _round3(rate.clamp(0.1, 30).toDouble());
+    final f = _round3(fade.clamp(0, 1).toDouble());
+    return _map(sel, (n) => n.copyWith(expr: n.expr.copyWith(vibDepth: d, vibRate: d == 0 ? n.expr.vibRate : r, vibFade: f)));
+  }
+
+  /// A ratchet's repeats with a velocity ramp (owner, 2026-11-11). The engine plays a ratchet's repeats at one
+  /// velocity, so each selected note with a ratchet of 2 or more is written out as that many notes, each a repeat
+  /// long, whose velocities ramp: [ramp] up (fade in) from (1 - [depth]) of the note's velocity to all of it, or down
+  /// (fade out). Each repeat keeps the note's chance and its curves (the engine runs those over each repeat anyway);
+  /// a slide stays on the first. Returns the notes (written out or not) that replace the selection.
+  ({PatternDoc doc, Set<int> ids}) ratchetRamp(Set<int> sel, {required RatchetRamp ramp, double depth = 0.7}) {
+    final picked = _selected(sel).where((n) => n.ratchet > 1).toList();
+    if (picked.isEmpty) return (doc: this, ids: {for (final n in _selected(sel)) n.id});
+    final dep = depth.clamp(0, 1).toDouble();
+    final gone = {for (final n in picked) n.id};
+    final out = [for (final n in notes) if (!gone.contains(n.id)) n];
+    final ids = {for (final n in _selected(sel)) if (!gone.contains(n.id)) n.id};
+    var id = _nextId;
+    for (final n in picked) {
+      final r = n.ratchet, part = n.len / Steps(r);
+      for (var q = 0; q < r; q++) {
+        final x = q / (r - 1);
+        final level = ramp == RatchetRamp.fadeIn ? 1 - dep * (1 - x) : 1 - dep * x;
+        out.add(n.copyWith(
+          id: id,
+          at: n.at + part.times(q),
+          len: part,
+          vel: _round3((n.vel * level).clamp(0, 1).toDouble()),
+          ratchet: 1,
+          slide: q == 0 && n.slide,
+          trailingComment: q == 0 ? n.trailingComment : null,
+          line: null,
+        ));
+        ids.add(id++);
+      }
+    }
+    return (doc: _withNotes(out, id), ids: ids);
+  }
 
   PatternDoc _insertEquivalent(PatternNote note) {
     final inserted = insert(note.at, note.pitch, note.len, vel: note.vel);
@@ -1456,3 +1749,9 @@ class PatternDoc {
   PatternDoc invertPitch(Set<int> sel, double center) =>
       _map(sel, (n) => n.copyWith(pitch: (2 * center - n.pitch).clamp(0, 127).toDouble()));
 }
+
+/// What the quantize sheet moves: note starts, note ends, or both.
+enum QuantizeWhat { starts, ends, both }
+
+/// A tremolo's wave.
+enum TremoloWave { sine, triangle, square }

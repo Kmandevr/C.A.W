@@ -58,10 +58,14 @@ class NativeComponentManager {
   /// App-private JSON: {component id: {source fingerprint: artifact path}}.
   final File cacheFile;
   final Map<String, String> _loadedFingerprint = {};  // component id -> fingerprint of what the engine has
+  final Map<String, String> _loadedArtifact = {};     // component id -> the library file the engine loaded
   Map<String, Map<String, String>>? _cache;
 
   /// Every component id the engine has loaded, for ProjectDoc.toEngineJson(playableComponents:).
   Set<String> get loaded => _loadedFingerprint.keys.toSet();
+
+  /// The library file the engine loaded for component [id] (the Build tools test and render it), or null.
+  String? artifactOf(String id) => _loadedArtifact[id];
 
   Future<NativeComponentsStatus> prepare(ProjectDoc project) async {
     final status = NativeComponentsStatus();
@@ -84,6 +88,13 @@ class NativeComponentManager {
         continue;
       }
       var artifact = cache[id]?[fingerprint];
+      // A build that came in a project package loads only while the user's Trust for exactly that file stands.
+      if (artifact != null && isImportedBuild(artifact) && await File(artifact).exists() &&
+          trust.decide(id, importedLibraryKey(await NativeTrustStore.libraryFingerprint(artifact))) !=
+              NativeComponentTrust.trusted) {
+        cache[id]!.remove(fingerprint);
+        artifact = null;
+      }
       if (artifact == null || !await File(artifact).exists()) {
         final result = await build(project, component);
         if (!result.success || result.artifactPath == null) {
@@ -98,12 +109,35 @@ class NativeComponentManager {
       final loaded = await load(artifactPath: artifact, expectedComponentId: id, trust: choice, reload: reload);
       if (loaded.ok) {
         _loadedFingerprint[id] = fingerprint;
+        _loadedArtifact[id] = artifact;
         status.loaded.add(id);
       } else {
         status.loadFailed[id] = loaded.error;
       }
     }
     return status;
+  }
+
+  /// The trust store's key for a built library that came in a package: its own fingerprint, apart from its sources'.
+  static String importedLibraryKey(String sha256) => 'library:$sha256';
+
+  /// Whether [path] is a build unpacked from a package (ProjectStorage.nativeImportsDirectory), not one made here.
+  static bool isImportedBuild(String path) => path.replaceAll('\\', '/').contains('/native-imports/');
+
+  /// This device's build of [component]'s current sources, if there is one (the export packages it).
+  Future<String?> builtArtifact(CppComponentDoc component) async {
+    final path = (await _readCache())[component.componentId]?[NativeTrustStore.sourceFingerprint(component)];
+    return path != null && await File(path).exists() ? path : null;
+  }
+
+  /// A packaged build of [componentId] (for sources with [sourceFingerprint]) the user chose to trust: the choice
+  /// is remembered for that file's fingerprint, and the build is used instead of building those sources here.
+  Future<void> adoptImportedBuild(String componentId, String sourceFingerprint, String path, String sha256) async {
+    trust.remember(componentId, importedLibraryKey(sha256), NativeComponentTrust.trusted);
+    await trust.save();
+    final cache = await _readCache();
+    (cache[componentId] ??= {})[sourceFingerprint] = path;
+    await _writeCache(cache);
   }
 
   Future<Map<String, Map<String, String>>> _readCache() async {

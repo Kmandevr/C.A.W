@@ -3,6 +3,7 @@ import 'package:caw/engine/component_info.dart';
 import 'package:caw/model/app_state.dart';
 import 'package:caw/model/arrange_fx.dart';
 import 'package:caw/model/cpp_component.dart';
+import 'package:caw/model/files_catalog.dart';
 import 'package:caw/model/project.dart';
 import 'package:caw/model/settings.dart';
 import 'package:caw/ui/arrange/fx_stack.dart';
@@ -28,29 +29,29 @@ const _width = NativeComponentInfo(id: 'org.caw.stereo.width', name: 'Width', ro
   ComponentPortInfo(id: 'out', type: 'audio', input: false, layout: 'stereo', channels: 2),
 ]);
 
-ProjectDoc _project() => ProjectDoc(id: 'p', name: 'Instruments', modules: [
-      ModuleDoc(id: 'gen', name: 'Saw', source: 'saw(freq)'),
-      ModuleDoc(id: 'fx', name: 'Fold', source: '---\nkind: effect\n---\nin'),
-    ], layers: [
-      LayerDoc(id: 'a', name: 'Lead', color: 0, generatorId: 'gen', effectIds: ['fx']),
+const _saw = NativeComponentInfo(id: 'org.caw.synth.saw', name: 'Saw', role: 'instrument', builtin: true,
+    ports: _instrumentPorts);
+
+ProjectDoc _project() => ProjectDoc(id: 'p', name: 'Instruments', layers: [
+      LayerDoc(id: 'a', name: 'Lead', color: 0, instrument: ComponentUseDoc('org.caw.synth.saw'),
+          components: [ComponentUseDoc('org.caw.stereo.width')]),
       LayerDoc(id: 'b', name: 'Bass', color: 1),
     ]);
 
 void main() {
   group('model', () {
-    test('an instrument replaces the generator and round-trips through the project file', () {
+    test('an instrument replaces another and round-trips through the project file', () {
       final layer = _project().layers.first;
-      expect(layer.chain, ['gen', 'fx']);
+      layer.instrument!.params['cutoff'] = 300;
       layer.setInstrument('org.caw.synth.basic');
-      expect(layer.generatorId, isNull);
-      expect(layer.chain, ['fx'], reason: 'with a C++ instrument only the .caw effects run');
+      expect(layer.instrument!.params, isEmpty, reason: 'another instrument starts from its defaults');
+      expect(layer.components.single.id, 'org.caw.stereo.width', reason: 'the effects stay');
       layer.instrument!.params['cutoff'] = 900;
       layer.setInstrument('org.caw.synth.basic');
       expect(layer.instrument!.params['cutoff'], 900, reason: 'the same instrument keeps its values');
       final back = LayerDoc.fromJson(jsonDecode(jsonEncode(layer.toJson())) as Map<String, dynamic>);
       expect(back.instrument?.id, 'org.caw.synth.basic');
       expect(back.instrument?.params['cutoff'], 900);
-      expect(back.generatorId, isNull);
       layer.setInstrument(null);
       expect(layer.toJson().containsKey('instrument'), isFalse);
     });
@@ -65,7 +66,7 @@ void main() {
       final played = engine({'local.lead.cpp1'});
       final layer = (played['layers'] as List).first as Map<String, dynamic>;
       expect(layer['instrument'], 'local.lead.cpp1');
-      expect(layer['chain'], ['fx']);
+      expect(layer.containsKey('chain'), isFalse);
       expect((played['automation'] as List).single['target_type'], 'instrument');
       final waiting = engine(<String>{});
       expect(((waiting['layers'] as List).first as Map<String, dynamic>).containsKey('instrument'), isFalse);
@@ -112,32 +113,49 @@ void main() {
       sections.dispose();
     });
 
-    testWidgets('the track menu lists C++ instruments next to .caw ones; choosing one makes it the instrument',
+    testWidgets('the track menu has one Instrument… entry: the browser lists the instruments, not effects',
         (tester) async {
-      s.componentCatalog.set(const [_synth, _width]);
+      s.componentCatalog.set(const [_saw, _synth, _width]);
+      s.nativeCatalog = const [_saw, _synth, _width];
       tester.view.physicalSize = const Size(412, 900);
       tester.view.devicePixelRatio = 1;
       addTearDown(tester.view.reset);
       await tester.pumpWidget(MaterialApp(home: SectionScope(controller: sections,
           child: Scaffold(body: ListenableBuilder(listenable: s, builder: (_, _) => ArrangerScreen(state: s))))));
       await tester.pump();
-      await tester.longPress(find.byKey(const ValueKey('track-header-a')));
+      // A double tap opens the track menu (owner, 2026-11-11).
+      await tester.tap(find.byKey(const ValueKey('track-header-a')));
+      await tester.pump(const Duration(milliseconds: 60));
+      await tester.tap(find.byKey(const ValueKey('track-header-a')));
       await tester.pumpAndSettle();
-      expect(find.text('Instrument · Saw'), findsOneWidget);
-      expect(find.text('Instrument · Basic synth'), findsOneWidget);
-      expect(find.text('Instrument · Width'), findsNothing, reason: 'an effect is not an instrument');
-      await tester.tap(find.text('Instrument · Basic synth'));
+      expect(find.text('Instrument · Saw…'), findsOneWidget);
+      expect(find.textContaining('Instrument · Basic synth'), findsNothing, reason: 'no long list any more');
+      await tester.tap(find.text('Instrument · Saw…'));
+      await tester.pumpAndSettle();
+      expect(find.text('INSTRUMENTS'), findsOneWidget);
+      expect(find.text('Saw'), findsOneWidget);
+      expect(find.text('Width'), findsNothing, reason: 'an effect is not an instrument');
+      await tester.tap(find.text('Basic synth'));
+      await tester.pumpAndSettle();
+      // The track had the Saw: replacing it asks first.
+      expect(find.text('Replace the instrument?'), findsOneWidget);
+      await tester.tap(find.text('Replace'));
       await tester.pumpAndSettle();
       final layer = s.project.layers.first;
       expect(layer.instrument?.id, 'org.caw.synth.basic');
-      expect(layer.generatorId, isNull);
-      // Back to the .caw generator: the C++ instrument goes.
-      await tester.longPress(find.byKey(const ValueKey('track-header-a')));
+      // Back to the Saw, and Cancel keeps what it has.
+      // A double tap opens the track menu (owner, 2026-11-11).
+      await tester.tap(find.byKey(const ValueKey('track-header-a')));
+      await tester.pump(const Duration(milliseconds: 60));
+      await tester.tap(find.byKey(const ValueKey('track-header-a')));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Instrument · Saw'));
+      await tester.tap(find.text('Instrument · Basic synth…'));
       await tester.pumpAndSettle();
-      expect(layer.instrument, isNull);
-      expect(layer.generatorId, 'gen');
+      await tester.tap(find.text('Saw'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Cancel'));
+      await tester.pumpAndSettle();
+      expect(layer.instrument?.id, 'org.caw.synth.basic');
       await tester.pump(const Duration(seconds: 1));
     });
 
@@ -184,8 +202,6 @@ void main() {
       expect(p.name, 'First loop');
       expect([for (final l in p.layers) l.name], ['Kick', 'Hats', 'Bass', 'Lead', 'Acid', 'Pad']);
       for (final l in p.layers) {
-        expect(l.generatorId, isNull, reason: l.name);
-        expect(l.effectIds, isEmpty, reason: l.name);
         expect(l.instrument?.id, startsWith('org.caw.'), reason: l.name);
         expect(l.clips.single.lengthSteps, p.loopSteps, reason: l.name);
         expect(l.components.every((c) => c.id.startsWith('org.caw.')), isTrue, reason: l.name);
@@ -205,14 +221,44 @@ void main() {
       for (final m in p.modules) {
         expect(result[m.id]?.ok, isTrue, reason: m.name);
       }
-      final names = {for (final c in await e.nativeComponents()) if (c.isInstrument) c.id: c.name};
-      expect(names, containsPair('org.caw.drum.kick', 'Kick'));
-      expect(names, containsPair('org.caw.drum.hats', 'Hi-hats'));
-      expect(names, containsPair('org.caw.drum.snare', 'Snare'));
-      expect(names, containsPair('org.caw.drum.kit', 'Drum kit'));
-      expect(names, containsPair('org.caw.bass', 'Bass'));
-      expect(names, containsPair('org.caw.synth.acid', 'Acid synth'));
-      expect(names, containsPair('org.caw.synth.morph', 'Morph synth'));
+      final infos = await e.nativeComponents();
+      final names = {for (final c in infos) if (c.isInstrument) c.id: c.name};
+      expect(names, containsPair('org.caw.drums', 'Drums'));
+      expect(names, containsPair('org.caw.synth.flagship', 'Flagship'));
+      // One synth (2026-11-10): the bass, acid, morph and basic synths are Flagship presets now; one drum instrument
+      // (2026-11-11): the kick, snare, hats and kit are org.caw.drums.
+      for (final id in ComponentUseDoc.retiredInstruments) {
+        expect(names.containsKey(id), isFalse, reason: id);
+      }
+      final flagship = infos.firstWhere((c) => c.id == 'org.caw.synth.flagship');
+      expect(flagship.presets.map((p) => p.name), containsAll(['Init', 'Morph pad', 'Mono bass', 'Acid 303', 'Basic']));
+      expect(flagship.presets.firstWhere((p) => p.name == 'Mono bass').params['voice_mode'], 2);
+      // The starter's tracks name their presets; resolved, they hold the values the First loop's old synths had.
+      final drums = infos.firstWhere((c) => c.id == 'org.caw.drums');
+      expect(drums.presets.map((p) => p.name), containsAll(['Kit: 808', 'Kit: 909', '808 Kick', 'Crash']));
+      // An old drum migrates: Single mode, its values on pad A1, no preset.
+      final kick = Engine.resolveInstrument({'id': 'org.caw.drum.kick', 'params': {'tune': 60}})!;
+      expect(kick['migrated'], isTrue);
+      expect(kick['id'], 'org.caw.drums');
+      expect(kick['preset'], isNull);
+      expect((kick['params'] as Map)['a1_body_freq'], 60);
+      final resolved = s.starterProject()..resolveInstruments(Engine.resolveInstrument);
+      final old = {
+        'Bass': {'id': 'org.caw.bass', 'params': {'cutoff': 270, 'resonance': 0.45, 'env': 0.6, 'decay': 0.18, 'sustain': 0.2}},
+        'Lead': {'id': 'org.caw.synth.morph', 'params': {'shape': 0.66, 'drift': 0.15, 'unison': 3, 'detune': 0.1,
+          'cutoff': 2600, 'attack': 0.005, 'decay': 0.25, 'sustain': 0.5, 'release': 0.3}},
+        'Acid': {'id': 'org.caw.synth.acid', 'params': {'resonance': 0.8}},
+        'Pad': {'id': 'org.caw.synth.morph', 'params': <String, double>{}},
+      };
+      for (final MapEntry(key: name, value: entry) in old.entries) {
+        final layer = resolved.layers.firstWhere((l) => l.name == name);
+        final migrated = Engine.resolveInstrument(entry)!;
+        expect(layer.instrument!.id, 'org.caw.synth.flagship', reason: name);
+        expect(layer.instrument!.preset, migrated['preset'], reason: name);
+        expect(layer.instrument!.params, {
+          for (final e in (migrated['params'] as Map).entries) e.key as String: (e.value as num).toDouble(),
+        }, reason: name);
+      }
       e.play();
       e.pullForTest(48000 * 2);
       for (var i = 0; i < p.layers.length; i++) {

@@ -5,13 +5,28 @@ import 'package:flutter/material.dart';
 
 import 'glass.dart';
 
-/// One look: a colour for each slot, plus whether active things glow. Saved as a readable theme file.
+/// One theme: a colour for each slot, whether active things glow, and (owner, 2026-11-11: a theme is a full profile)
+/// the rest of its look, layout and behaviour in [profile]. Saved as a readable theme file.
 class CawTheme {
-  const CawTheme({required this.name, required this.colors, this.glow = true});
+  const CawTheme({required this.name, required this.colors, this.glow = true, this.profile = const {}});
 
   final String name;
   final Map<String, Color> colors;
   final bool glow;
+
+  /// The profile's values by key (`look.font`, `layout.track_height`, `behaviour.motion`, ...), as the file writes
+  /// them. Settings reads and fills them ([Settings.captureProfile]); a key left out (a colours-only theme from
+  /// before profiles, a value added later) keeps the current setting when the theme is chosen. Empty for the
+  /// starter themes, which share the user's own settings.
+  final Map<String, String> profile;
+
+  /// The parts of a profile, in file order: a key starts with one of them and a dot.
+  static const profileParts = ['look', 'layout', 'behaviour'];
+
+  static bool isProfileKey(String key) {
+    final dot = key.indexOf('.');
+    return dot > 0 && profileParts.contains(key.substring(0, dot)) && dot < key.length - 1;
+  }
 
   /// Every colour slot, in file order, with what it colours.
   static const slots = {
@@ -39,8 +54,11 @@ class CawTheme {
   /// The colour of [slot]; a slot the theme leaves out comes from Calm neon.
   Color operator [](String slot) => colors[slot] ?? calmNeon.colors[slot] ?? const Color(0xFFFF00FF);
 
-  CawTheme copyWith({String? name, Map<String, Color>? colors, bool? glow}) =>
-      CawTheme(name: name ?? this.name, colors: colors ?? this.colors, glow: glow ?? this.glow);
+  CawTheme copyWith({String? name, Map<String, Color>? colors, bool? glow, Map<String, String>? profile}) => CawTheme(
+      name: name ?? this.name,
+      colors: colors ?? this.colors,
+      glow: glow ?? this.glow,
+      profile: profile ?? this.profile);
 
   CawTheme withColor(String slot, Color c) => copyWith(colors: {...colors, slot: c});
 
@@ -55,13 +73,24 @@ class CawTheme {
     return Color(h.length == 6 ? 0xFF000000 | v : v);
   }
 
-  /// The theme file: a header like a module's, then one `slot: #RRGGBB` line per colour.
+  /// The theme file: a header like a module's, then one `slot: #RRGGBB` line per colour, then the profile's
+  /// `part.key: value` lines by part (look, layout, behaviour; a layout value may be one line of JSON). With no
+  /// profile the file is exactly a colours-only theme, as before profiles.
   String toFile() {
     final b = StringBuffer('---\nkind: theme\nname: $name\n---\n');
     b.writeln('// C.A.W theme: one colour per line as #RRGGBB. Missing lines fall back to Calm neon.');
     b.writeln('glow: ${glow ? 'on' : 'off'}');
     for (final s in slots.keys) {
       b.writeln('$s: ${hex(this[s])}');
+    }
+    if (profile.isNotEmpty) {
+      b.writeln('// The look, layout and behaviour. Missing lines keep the current settings.');
+      for (final part in profileParts) {
+        final keys = profile.keys.where((k) => k.startsWith('$part.')).toList()..sort();
+        for (final k in keys) {
+          b.writeln('$k: ${profile[k]!.replaceAll('\n', ' ')}');
+        }
+      }
     }
     return b.toString();
   }
@@ -71,6 +100,7 @@ class CawTheme {
     String? kind, name;
     var glow = true;
     final colors = <String, Color>{};
+    final profile = <String, String>{};
     final lines = text.replaceAll('\r', '').split('\n');
     for (var i = 0; i < lines.length; i++) {
       final line = lines[i].trim();
@@ -87,6 +117,10 @@ class CawTheme {
         case 'glow':
           glow = !{'off', 'false', 'no', '0'}.contains(value.toLowerCase());
         default:
+          if (isProfileKey(key)) {
+            if (value.length <= 64 * 1024) profile[key] = value;
+            continue;
+          }
           if (!slots.containsKey(key)) continue;
           final c = parseHex(value);
           if (c == null) throw FormatException('Line ${i + 1}: "$value" is not a #RRGGBB colour');
@@ -94,7 +128,8 @@ class CawTheme {
       }
     }
     if (kind != 'theme') throw const FormatException('Not a theme file (it needs "kind: theme")');
-    return CawTheme(name: (name == null || name.isEmpty) ? 'Imported theme' : name, colors: colors, glow: glow);
+    return CawTheme(
+        name: (name == null || name.isEmpty) ? 'Imported theme' : name, colors: colors, glow: glow, profile: profile);
   }
 }
 
@@ -161,6 +196,9 @@ class Neon {
   static bool light = false;
   static bool showScopes = true;
 
+  /// The theme's glow strength (Settings, a theme's look): scales every [glow], 1 as designed.
+  static double glowStrength = 1;
+
   static const Color bg = _ThemeColor('bg');
   static const Color panel = _ThemeColor('panel');
   static const Color panelHi = _ThemeColor('panelHi');
@@ -196,11 +234,22 @@ class Neon {
 
   /// The glow around active things; nothing when the theme turns glow off.
   static List<BoxShadow> glow(Color c, {double strength = 0.55}) {
-    final scale = performanceMode == 0 ? 1.0 : performanceMode == 1 ? 0.55 : 0.0;
+    final scale = (performanceMode == 0 ? 1.0 : performanceMode == 1 ? 0.55 : 0.0) * glowStrength;
     return active.glow && !light && scale > 0
-        ? [BoxShadow(color: c.withValues(alpha: strength * scale), blurRadius: 12, spreadRadius: -2)]
+        ? [BoxShadow(color: c.withValues(alpha: (strength * scale).clamp(0.0, 1.0)), blurRadius: 12, spreadRadius: -2)]
         : const [];
   }
+
+  /// A button style that only adds the pressed glow and the hover tint (merged under a button's own style).
+  static ButtonStyle pressedGlow(Color accent, Color text) => ButtonStyle(
+        overlayColor: WidgetStateProperty.resolveWith((s) => s.contains(WidgetState.pressed)
+            ? accent.withValues(alpha: 0.20)
+            : s.contains(WidgetState.hovered)
+                ? text.withValues(alpha: 0.08)
+                : s.contains(WidgetState.focused)
+                    ? text.withValues(alpha: 0.10)
+                    : null),
+      );
 
   /// True when the compact density is on.
   static bool compact(BuildContext context) => Theme.of(context).visualDensity == VisualDensity.compact;
@@ -208,9 +257,12 @@ class Neon {
   /// Material theme for [look] (the active theme by default). Compact density shrinks paddings and tap targets.
   /// With [glass] (the Glass setting, by default): see-through fills with solid outlines on sliders, buttons and
   /// switches, a transparent scaffold over the [GlassBackdrop], and translucent dialogs, menus and sheets.
-  static ThemeData theme({CawTheme? look, bool compact = false, bool? glass}) {
+  /// [fontFamily] is the UI font (null: the system's; [mono] for the bundled one) and [roundness] scales the corners
+  /// of dialogs, menus, chips and buttons (1 as designed).
+  static ThemeData theme({CawTheme? look, bool compact = false, bool? glass, String? fontFamily, double roundness = 1}) {
     final t = look ?? active;
     final g = glass ?? Glass.active;
+    double r(double v) => v * roundness;
     final bg = t['bg'], panel = t['panel'], panelHi = t['panelHi'], line = t['line'], text = t['text'];
     final green = t['green'], pink = t['pink'], blue = t['blue'];
     final scheme = ColorScheme.dark(
@@ -226,12 +278,21 @@ class Neon {
     return ThemeData(
       useMaterial3: true,
       colorScheme: scheme,
+      fontFamily: fontFamily,
+      fontFamilyFallback: fontFamily == mono ? monoFallback : null,
       visualDensity: compact ? VisualDensity.compact : VisualDensity.standard,
       materialTapTargetSize: compact ? MaterialTapTargetSize.shrinkWrap : MaterialTapTargetSize.padded,
       listTileTheme: ListTileThemeData(dense: compact),
       scaffoldBackgroundColor: g ? Colors.transparent : bg,
       canvasColor: bg,
       dividerColor: line,
+      // Every press shows (owner, 2026-11-10: feedback on every touch): a quick accent ripple on every InkWell, list
+      // tile, chip and button, and a soft accent glow on icon buttons while held. InkRipple is the cheaper, snappier
+      // ripple. (highlightColor stays the default: scrollbars take their thumb colour from it.)
+      splashFactory: InkRipple.splashFactory,
+      splashColor: green.withValues(alpha: 0.16),
+      hoverColor: text.withValues(alpha: 0.06),
+      iconButtonTheme: IconButtonThemeData(style: pressedGlow(green, text)),
       sliderTheme: g
           ? SliderThemeData(
               trackHeight: 7,
@@ -279,27 +340,38 @@ class Neon {
           ? DialogThemeData(
               backgroundColor: panelHi.withValues(alpha: 0.9),
               shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(20),
+                borderRadius: BorderRadius.circular(r(20)),
                 side: BorderSide(color: Colors.white.withValues(alpha: 0.14)),
               ),
             )
-          : null,
+          : roundness == 1
+              ? null
+              : DialogThemeData(shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(r(28)))),
       popupMenuTheme: g
           ? PopupMenuThemeData(
               color: panelHi.withValues(alpha: 0.92),
               shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(14),
+                borderRadius: BorderRadius.circular(r(14)),
                 side: BorderSide(color: Colors.white.withValues(alpha: 0.14)),
               ),
             )
-          : null,
+          : roundness == 1
+              ? null
+              : PopupMenuThemeData(shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(r(4)))),
       bottomSheetTheme: g ? BottomSheetThemeData(backgroundColor: panelHi.withValues(alpha: 0.92)) : null,
       inputDecorationTheme: InputDecorationTheme(
         isDense: true,
-        border: OutlineInputBorder(borderSide: BorderSide(color: line)),
-        enabledBorder: OutlineInputBorder(borderSide: BorderSide(color: line)),
-        focusedBorder: OutlineInputBorder(borderSide: BorderSide(color: blue)),
+        border: OutlineInputBorder(borderSide: BorderSide(color: line), borderRadius: BorderRadius.circular(r(4))),
+        enabledBorder: OutlineInputBorder(borderSide: BorderSide(color: line), borderRadius: BorderRadius.circular(r(4))),
+        focusedBorder: OutlineInputBorder(borderSide: BorderSide(color: blue), borderRadius: BorderRadius.circular(r(4))),
       ),
+      // Material 3's own corners (8 and 12) unless the theme's roundness changes them.
+      chipTheme: roundness == 1
+          ? null
+          : ChipThemeData(shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(r(8)))),
+      cardTheme: roundness == 1
+          ? null
+          : CardThemeData(shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(r(12)))),
       navigationBarTheme: NavigationBarThemeData(
         backgroundColor: panel,
         indicatorColor: green.withValues(alpha: 0.18),

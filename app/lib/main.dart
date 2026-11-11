@@ -4,11 +4,16 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'model/app_state.dart';
+import 'model/audio_record.dart';
+import 'model/automation_writer.dart';
 import 'model/live_midi.dart';
 import 'model/problem_log.dart';
 import 'model/settings.dart';
+import 'platform/haptics_device.dart';
+import 'platform/mic_permission.dart';
 import 'platform/midi_input.dart';
 import 'ui/glass.dart';
+import 'ui/haptics.dart';
 import 'ui/shell.dart';
 import 'ui/theme.dart';
 
@@ -27,30 +32,81 @@ Future<void> main() async {
   LicenseRegistry.addLicense(() async* {
     yield LicenseEntryWithLineBreaks(['JetBrains Mono'], await rootBundle.loadString('assets/fonts/OFL.txt'));
   });
+  Haptics.device = platformHapticsDevice(); // the vibrator's fine primitives on Android
   final settings = await Settings.open();
   final state = AppState(settings: settings);
   // One MIDI listener for the app's life, above the shell (which a theme change rebuilds).
-  LiveMidi.current = LiveMidi(state, platformMidiInput());
+  LiveMidi.current = LiveMidi(state, platformMidiInput(clock: () => state.engine?.midiClockNs ?? 0));
+  AutomationWriter.current = AutomationWriter(state); // the transport's Automate button
+  // Audio recording follows the transport's Record (armed audio tracks); the input choice is app-wide.
+  final midi = LiveMidi.current!;
+  AudioRecorder.current = AudioRecorder(state, permission: platformMicPermission())
+    ..follow(midi, () => midi.recording)
+    ..load();
+
   runApp(CawApp(state: state));
   state.init();
 }
 
-class CawApp extends StatelessWidget {
+class CawApp extends StatefulWidget {
   const CawApp({super.key, required this.state});
   final AppState state;
 
   @override
-  Widget build(BuildContext context) => ListenableBuilder(
-        listenable: state.settings,
-        builder: (context, _) => MaterialApp(
-          title: 'C.A.W',
-          debugShowCheckedModeBanner: false,
-          themeAnimationDuration: Duration.zero, // theme edits repaint once, with no animation frames
-          theme: Neon.theme(look: state.settings.activeTheme, compact: state.settings.compact),
-          // The glass backdrop sits behind every route (glass off: the plain background).
-          builder: (context, child) => GlassBackdrop(child: child ?? const SizedBox.shrink()),
-          // A new key after a theme or glass change (including a profile that turns glass or blur off) rebuilds every screen, so colours fixed at build time repaint too.
-          home: Shell(key: ValueKey((state.settings.lookRevision, Glass.active, Glass.blurChosen)), state: state),
-        ),
-      );
+  State<CawApp> createState() => _CawAppState();
+}
+
+class _CawAppState extends State<CawApp> {
+  AppState get state => widget.state;
+
+  // The theme with what it was made from: a change that leaves the look alone keeps the same theme, so nothing that
+  // reads the theme rebuilds for it.
+  ThemeData? _theme;
+  Object? _themeFrom;
+
+  ThemeData _themeFor(Settings s) {
+    final from = (s.activeTheme, s.compact, Glass.active, s.uiFont, s.roundness);
+    if (_theme == null || from != _themeFrom) {
+      _theme = Neon.theme(look: s.activeTheme, compact: s.compact, fontFamily: s.uiFont.family, roundness: s.roundness);
+      _themeFrom = from;
+    }
+    return _theme!;
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    state.settings.addListener(_settingsChanged);
+  }
+
+  @override
+  void dispose() {
+    state.settings.removeListener(_settingsChanged);
+    super.dispose();
+  }
+
+  // A Settings slider being dragged (adjust) is shown by the Settings page itself: the app around it stays as it is.
+  void _settingsChanged() {
+    if (!state.settings.adjusting) setState(() {});
+  }
+
+  @override
+  Widget build(BuildContext context) => MaterialApp(
+    title: 'C.A.W',
+    debugShowCheckedModeBanner: false,
+    themeAnimationDuration: Duration.zero, // theme edits repaint once, with no animation frames
+    theme: _themeFor(state.settings),
+    // The glass backdrop sits behind every route (glass off: the plain background). The theme's text size scales
+    // the system's.
+    builder: (context, child) {
+      final body = GlassBackdrop(child: child ?? const SizedBox.shrink());
+      final scale = state.settings.textScale;
+      if (scale == 1) return body;
+      final mq = MediaQuery.of(context);
+      return MediaQuery(
+          data: mq.copyWith(textScaler: TextScaler.linear(mq.textScaler.scale(16) / 16 * scale)), child: body);
+    },
+    // A new key after a theme or glass change (including a profile that turns glass or blur off) rebuilds every screen, so colours fixed at build time repaint too.
+    home: Shell(key: ValueKey((state.settings.lookRevision, Glass.active, Glass.blurChosen)), state: state),
+  );
 }

@@ -1,4 +1,5 @@
-// Arrange's mixer card (phone, owner 2026-11-09): a glass card over the tracks with narrow strips; tap one to widen it.
+// Arrange's mixer card (owner 2026-11-09): a glass card over the tracks with the master strip and narrow track strips;
+// tap one to widen it.
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -6,17 +7,17 @@ import 'package:flutter/material.dart';
 import '../../model/app_state.dart';
 import '../../model/project.dart';
 import '../glass.dart';
-import '../mixer_screen.dart';
+import 'channel_strip.dart';
+import '../routing_view.dart';
 import '../theme.dart';
+import '../volume_fader.dart';
+import 'track_color.dart';
 import '../widgets.dart';
 
 class MixerCard extends StatefulWidget {
-  const MixerCard({super.key, required this.state, required this.onClose, this.onSlot});
+  const MixerCard({super.key, required this.state, required this.onClose});
   final AppState state;
   final VoidCallback onClose;
-
-  /// A chain slot of a widened strip was tapped (Arrange opens that track's FX).
-  final void Function(LayerDoc layer, String moduleId)? onSlot;
 
   @override
   State<MixerCard> createState() => _MixerCardState();
@@ -40,24 +41,27 @@ class _MixerCardState extends State<MixerCard> {
           const SizedBox(width: 12),
           const Text('MIXER', style: TextStyle(color: Neon.dim, fontSize: 10, letterSpacing: 1.4, fontWeight: FontWeight.w800)),
           const Spacer(),
+          IconButton(key: const ValueKey('mixer-card-routing'), tooltip: 'Routing', iconSize: 18,
+            onPressed: () => showRoutingView(context, s), icon: const Icon(Icons.account_tree_outlined)),
           IconButton(tooltip: 'Close mixer', iconSize: 18, onPressed: widget.onClose, icon: const Icon(Icons.close)),
         ])),
         Expanded(child: LayoutBuilder(builder: (context, box) {
           final h = math.max(_stripHeight, box.maxHeight);
-          return SingleChildScrollView(child: SizedBox(height: h, child: layers.isEmpty
-            ? const Center(child: Text('Add a track to mix it.', style: TextStyle(color: Neon.dim)))
-            : ListView(
+          return SingleChildScrollView(child: SizedBox(height: h, child: ListView(
                 key: const ValueKey('mixer-card-strips'),
                 scrollDirection: Axis.horizontal,
                 padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
                 children: [
+                  Padding(padding: const EdgeInsets.only(right: 6), child: MasterStrip(state: s)),
+                  if (layers.isEmpty)
+                    const SizedBox(width: 180, child: Center(child: Text('Add a track to mix it.',
+                        style: TextStyle(color: Neon.dim)))),
                   for (final l in layers)
                     Padding(padding: const EdgeInsets.only(right: 4), child: AnimatedSize(
                       duration: const Duration(milliseconds: 160),
                       child: _wide == l.id
                           ? ChannelStrip(key: ValueKey('wide-${l.id}'), state: s, layer: l,
-                              index: s.project.layers.indexOf(l),
-                              onSlot: (id) => widget.onSlot?.call(l, id))
+                              index: s.project.layers.indexOf(l))
                           : _NarrowStrip(state: s, layer: l, index: s.project.layers.indexOf(l),
                               onTap: () => setState(() => _wide = l.id)),
                     )),
@@ -79,7 +83,7 @@ class _NarrowStrip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final tint = Neon.layer(layer.color);
+    final tint = trackColor(state, layer);
     return SizedBox(width: 52, child: GlassPanel(tint: tint, radius: 8, child: ValueListenableBuilder<int>(
       valueListenable: state.layerValueTick(layer.id),
       builder: (context, _, _) => Column(children: [
@@ -96,28 +100,21 @@ class _NarrowStrip extends StatelessWidget {
           ),
         )),
         Expanded(child: Row(children: [
-          Expanded(child: RotatedBox(quarterTurns: 3, child: SliderTheme(
-            data: SliderTheme.of(context).copyWith(trackHeight: 3,
-              thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 7)),
-            child: Slider(
-              value: layer.volume.clamp(0.0, 1.0).toDouble(),
-              activeColor: tint,
-              semanticFormatterCallback: (v) => '${layer.name} level ${(v * 100).round()}%',
-              onChanged: (v) => state.mixLayer(layer, volume: v)),
-          ))),
-          SizedBox(width: 6, child: PeakMeter(state: state, color: tint, vertical: true,
-            read: () => index < state.layerMeters.length ? state.layerMeters[index].peak : 0.0)),
+          Expanded(child: VolumeFader(value: layer.volume, color: tint, label: '${layer.name} level',
+            onChanged: (v) => state.mixLayer(layer, volume: v))),
+          SizedBox(width: layer.isStereo ? 9 : 6, child: TrackMeter(state: state, index: index, stereo: layer.isStereo,
+            color: tint, vertical: true)),
           const SizedBox(width: 4),
         ])),
-        Text('${(layer.volume * 100).round()}%', style: Neon.code(size: 9, color: Neon.dim)),
+        Text(VolumeTaper.label(layer.volume), style: Neon.code(size: 9, color: Neon.dim)),
         const SizedBox(height: 2),
         ToggleChip(label: 'M', size: 34, on: layer.mute, color: Neon.yellow,
           tooltip: layer.mute ? 'Unmute ${layer.name}' : 'Mute ${layer.name}',
-          onTap: () => layer.isFolder ? state.editLayer(layer, (l) => l.mute = !l.mute) : state.mixLayer(layer, mute: !layer.mute)),
+          onTap: () => state.mixLayer(layer, mute: !layer.mute)),
         const SizedBox(height: 3),
         ToggleChip(label: 'S', size: 34, on: layer.solo, color: Neon.blue,
           tooltip: layer.solo ? 'Unsolo ${layer.name}' : 'Solo ${layer.name}',
-          onTap: () => layer.isFolder ? state.editLayer(layer, (l) => l.solo = !l.solo) : state.mixLayer(layer, solo: !layer.solo)),
+          onTap: () => state.mixLayer(layer, solo: !layer.solo)),
         const SizedBox(height: 6),
       ]),
     )));

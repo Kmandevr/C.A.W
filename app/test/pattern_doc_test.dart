@@ -603,6 +603,92 @@ void main() {
       expect((h.notes[1].at.toDouble() - 4).abs(), lessThanOrEqualTo(0.25));
     });
 
+    test('the quantize sheet: strength, swing, starts, ends and both (WP-K2)', () {
+      final d = body('0.4 C3 1\n1.3 D3 1\n');
+      final g = Steps.one;
+      expect(d.quantizeWith({1, 2}, g).notes.map((n) => n.at), [Steps.zero, Steps.one]);
+      expect(d.quantizeWith({1, 2}, g).notes.map((n) => n.len), [Steps.one, Steps.one], reason: 'starts only keep lengths');
+      // Full swing moves every second line half a grid later: 0, 1.5, 2, 3.5 …
+      expect(d.quantizeWith({2}, g, swing: 1).notes.last.at, Steps(3, 2));
+      // 2/3 swing is a triplet feel: the off line at 4/3.
+      expect(d.quantizeWith({2}, g, swing: 2 / 3).notes.last.at, Steps(4, 3));
+      expect(d.quantizeWith({1}, g, strength: 0.5).notes.first.at, Steps(1, 5));
+      expect(d.quantizeWith({1}, g, strength: 0).notes.first.at, Steps(2, 5));
+      expect(identical(d.quantizeWith({1, 2}, g, strength: 0).notes.first, d.notes.first), isTrue);
+      // Ends: the start stays and the end goes to its line.
+      final e = body('0 C3 0.6\n0.4 D3 0.3\n0.9 E3 0.2\n');
+      expect(e.quantizeWith({1}, g, what: QuantizeWhat.ends).notes.first.len, Steps.one);
+      expect(e.quantizeWith({1}, g, what: QuantizeWhat.ends).notes.first.at, Steps.zero);
+      final both = e.quantizeWith({2, 3}, g, what: QuantizeWhat.both);
+      expect([both.byId(2)!.at, both.byId(2)!.len], [Steps.zero, Steps.one]);
+      // An end that would land on its new start goes to the next line.
+      expect([both.byId(3)!.at, both.byId(3)!.len], [Steps.one, Steps.one]);
+      // Humanize after: repeatable with a seed, and off by default.
+      final h = d.quantizeWith({1, 2}, g, humanTiming: 0.2, humanVelocity: 0.1, seed: 3);
+      expect(h.serialize(), d.quantizeWith({1, 2}, g, humanTiming: 0.2, humanVelocity: 0.1, seed: 3).serialize());
+      expect(h.serialize(), isNot(d.quantizeWith({1, 2}, g).serialize()));
+      expect(doc(h.serialize()).notes.length, 2);
+    });
+
+    test('connect: chords last to the next, voices pair by rank or nearest pitch, glides bend into them (#16)', () {
+      final d = body('0 C3,E3,G3 4\n2 D3,F3,A3 2\n4 C3 1\n');
+      final c = d.connect({}, glide: 0.25);
+      expect(c.notes.map((n) => n.len), [Steps(2), Steps(2), Steps(2), Steps(2), Steps(2), Steps(2), Steps.one]);
+      List<double> ends() => [for (final n in c.notes.take(6)) n.expr.bend.last.v];
+      // Three into three by rank (C→D, E→F, G→A); three into one by nearest pitch (all to C3).
+      expect(ends(), [2, 1, 2, -2, -5, -9]);
+      expect(c.notes.first.expr.bend, const [NotePoint(0, 0), NotePoint(0.75, 0), NotePoint(1, 2)]);
+      expect(c.notes.last.expr.isEmpty, isTrue);
+      // No glide: legato only. A selection connects only its own notes.
+      expect(d.connect({}).notes.every((n) => n.expr.isEmpty), isTrue);
+      final part = d.connect({1, 7});
+      expect(part.notes.first.len, Steps(4));
+      expect(part.notes[1].len, Steps(4), reason: 'unselected notes stay');
+      // The text keeps it.
+      expect(doc(c.serialize()).notes.map((n) => n.expr), c.notes.map((n) => n.expr));
+      // A leap past the bend range only lengthens.
+      final far = body('0 C1 1\n1 C7 1\n').connect({}, glide: 0.5);
+      expect(far.notes.first.len, Steps.one);
+      expect(far.notes.first.expr.isEmpty, isTrue);
+    });
+
+    test('tremolo writes the volume curve: sine, square, depth, repeatable (#16)', () {
+      final d = body('0 C3 4\n');
+      final sine = d.tremolo({1}, cycle: Steps(2), depth: 0.5);
+      final p = sine.notes.single.expr.press;
+      expect(p.length, 17);
+      expect(p.first, const NotePoint(0, 1));
+      expect(p[4], const NotePoint(0.25, 0.5), reason: 'half a cycle in: the bottom');
+      expect(p.last, const NotePoint(1, 1));
+      expect(sine.serialize(), d.tremolo({1}, cycle: Steps(2), depth: 0.5).serialize());
+      final square = d.tremolo({1}, cycle: Steps(2), depth: 1, wave: TremoloWave.square).notes.single.expr.press;
+      expect(square, const [
+        NotePoint(0, 1), NotePoint(0.25, 1), NotePoint(0.25, 0), NotePoint(0.5, 0), NotePoint(0.5, 1), //
+        NotePoint(0.75, 1), NotePoint(0.75, 0), NotePoint(1, 0),
+      ]);
+      expect(doc(d.tremolo({1}, cycle: Steps(2), wave: TremoloWave.square).serialize()).notes.single.expr.press.length, 8);
+      final tri = d.tremolo({1}, cycle: Steps(4), depth: 0.4, wave: TremoloWave.triangle).notes.single.expr.press;
+      expect(tri, const [NotePoint(0, 1), NotePoint(0.5, 0.6), NotePoint(1, 1)]);
+      // It multiplies a volume curve already there.
+      final shaped = body('0 C3 4 1 press 0:0.5 1:0.5\n').tremolo({1}, cycle: Steps(4), depth: 1, wave: TremoloWave.triangle);
+      expect(shaped.notes.single.expr.press, const [NotePoint(0, 0.5), NotePoint(0.5, 0), NotePoint(1, 0.5)]);
+      expect(PatternDoc.tremoloLevel(TremoloWave.sine, 0.5, 0.3), closeTo(0.7, 1e-9));
+    });
+
+    test('tremolo as repeats: hits at the rate, velocities on the wave, chance kept (#16)', () {
+      final d = body('0 C3 2 0.8 prob 0.5\n4 E3 1\n');
+      final r = d.tremoloRepeat({1}, rate: Steps(1, 2), cycle: Steps(2), depth: 0.5, wave: TremoloWave.square);
+      final hits = r.doc.notes.where((n) => r.ids.contains(n.id)).toList();
+      expect(hits.map((n) => n.at), [Steps.zero, Steps(1, 2), Steps.one, Steps(3, 2)]);
+      expect(hits.map((n) => n.vel), [0.8, 0.8, 0.4, 0.4]);
+      expect(hits.every((n) => n.prob == 0.5 && n.pitch == 48 && n.len == Steps(1, 2)), isTrue);
+      expect(r.doc.notes.length, 5, reason: 'the note became its hits; the other note stays');
+      expect(r.doc.serialize(), d.tremoloRepeat({1}, rate: Steps(1, 2), cycle: Steps(2), depth: 0.5, wave: TremoloWave.square).doc.serialize());
+      // A last hit is cut at the note's end.
+      final cut = body('0 C3 1.5\n').tremoloRepeat({1}, rate: Steps.one, cycle: Steps(2));
+      expect(cut.doc.notes.map((n) => n.len), [Steps.one, Steps(1, 2)]);
+    });
+
     test('chord stamp follows the key', () {
       final d = body('0 A2 2\n');
       expect(d.chordStamp({1}, key: aMinor).doc.notes.map((n) => n.pitch), [45, 48, 52]); // A C E
@@ -673,4 +759,39 @@ void main() {
     });
   });
 
+
+  group('stretching keeps expression points on the grid (#170)', () {
+    test('a longer note keeps its slide where it was; the value after the last point holds', () {
+      final d = body('0 C3 4 1 bend 0:0 0.5:0 1:-5\n');
+      final n = d.notes.single;
+      final longer = d.stretch({n.id}, Steps(4)).notes.single;
+      expect(longer.len, Steps(8));
+      // Steps 0, 2 and 4 of an 8-step note.
+      expect(longer.expr.bend, const [NotePoint(0, 0), NotePoint(0.25, 0), NotePoint(0.5, -5)]);
+    });
+
+    test('a shorter note drops the points past its end and ends on the curve\'s value there', () {
+      final d = body('0 C3 4 1 bend 0:0 0.5:0 1:-4 press 0:1 1:0\n');
+      final n = d.notes.single;
+      final shorter = d.stretch({n.id}, Steps(-1)).notes.single;
+      expect(shorter.len, Steps(3));
+      // Steps 0, 2 and the new end at 3 (half way down the slide: -2).
+      expect(shorter.expr.bend.map((p) => p.t), [0, closeTo(2 / 3, 1e-6), 1]);
+      expect(shorter.expr.bend.map((p) => p.v), [0, 0, -2]);
+      expect(shorter.expr.press.last.v, closeTo(0.25, 1e-9));
+    });
+
+    test('stretching the start keeps the points too', () {
+      final d = body('4 C3 4 1 bend 0:0 1:6\n');
+      final n = d.notes.single;
+      final earlier = d.stretch({n.id}, Steps(-4), start: true).notes.single;
+      expect(earlier.at, Steps(0));
+      expect(earlier.expr.bend, const [NotePoint(0.5, 0), NotePoint(1, 6)]);
+      final later = d.stretch({n.id}, Steps(2), start: true).notes.single;
+      expect(later.expr.bend.first, const NotePoint(0, 3));
+      expect(later.expr.bend.last, const NotePoint(1, 6));
+      // Keyboard resizes go through the same rule.
+      expect(d.resize({n.id}, Steps(4)).notes.single.expr.bend, const [NotePoint(0, 0), NotePoint(0.5, 6)]);
+    });
+  });
 }

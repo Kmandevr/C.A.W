@@ -1,13 +1,14 @@
-// The project library manager (from the old Files screen): portable project/module files, restore points, folders, tags, bulk edits.
-import 'dart:convert';
+// The project library manager (from the old Files screen): portable project files, restore points, and the patterns'
+// folders, tags and bulk edits.
 
-import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
 import '../../model/app_state.dart';
 import '../../model/project.dart';
 import '../theme.dart';
 import '../widgets.dart';
+import '../adaptive_sheet.dart';
+import 'project_file_actions.dart';
 
 class LibraryManagerView extends StatefulWidget {
   const LibraryManagerView({super.key, required this.state, required this.onOpenBuilder});
@@ -21,7 +22,6 @@ class LibraryManagerView extends StatefulWidget {
 class _LibraryManagerViewState extends State<LibraryManagerView> {
   String _folderPath = '';
   String _query = '';
-  String _sort = 'name';
   bool _selectionMode = false;
   bool _searchAllFolders = false;
   final Set<String> _selectedModuleIds = {};
@@ -133,7 +133,7 @@ class _LibraryManagerViewState extends State<LibraryManagerView> {
     final result = await showDialog<String>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Rename module'),
+        title: const Text('Rename pattern'),
         content: TextFormField(
           initialValue: name,
           autofocus: true,
@@ -157,11 +157,11 @@ class _LibraryManagerViewState extends State<LibraryManagerView> {
     final proceed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Delete module?'),
-        content: Text('Delete "${module.name}"? Tracks using it will have the generator/effect reference removed. This cannot be undone.'),
+        title: const Text('Delete pattern?'),
+        content: Text('Delete "${module.name}"? Clips playing it are removed from their tracks. This cannot be undone.'),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Delete module')),
+          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Delete pattern')),
         ],
       ),
     );
@@ -265,12 +265,9 @@ class _LibraryManagerViewState extends State<LibraryManagerView> {
         if (_query.trim().isEmpty) return true;
         final q = _query.trim().toLowerCase();
         return module.name.toLowerCase().contains(q) ||
-          state.kindOf(module.id).toLowerCase().contains(q) ||
           module.tags.any((tag) => tag.toLowerCase().contains(q));
       }).toList();
-      modules.sort((a, b) => _sort == 'kind'
-        ? state.kindOf(a.id).compareTo(state.kindOf(b.id))
-        : a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+      modules.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
       final sourceCounts = <String, int>{};
       for (final module in state.project.modules) {
         final source = module.source.trim();
@@ -281,12 +278,12 @@ class _LibraryManagerViewState extends State<LibraryManagerView> {
           const Text('CURRENT PROJECT', style: TextStyle(color: Neon.blue, fontWeight: FontWeight.w800)),
           const SizedBox(height: 4),
           Text(state.project.name, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
-          Text('${state.project.modules.length} modules · ${state.project.layers.length} tracks',
+          Text('${state.project.modules.length} patterns · ${state.project.layers.length} tracks',
             style: const TextStyle(color: Neon.dim, fontSize: 12)),
           const SizedBox(height: 10),
           Wrap(spacing: 8, runSpacing: 8, children: [
             FilledButton.icon(onPressed: () => exportPortableProject(context, state),
-              icon: const Icon(Icons.file_upload_outlined), label: const Text('Export .cawproj')),
+              icon: const Icon(Icons.file_upload_outlined), label: const Text('Export project…')),
             OutlinedButton.icon(onPressed: () async {
               await importPortableProject(context, state);
               if (mounted) {
@@ -355,18 +352,16 @@ class _LibraryManagerViewState extends State<LibraryManagerView> {
         const SizedBox(height: 14),
         NeonPanel(color: Neon.green, child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Row(children: [
-            Expanded(child: Text(_folderPath.isEmpty ? 'PROJECT MODULES' : _folderPath.toUpperCase(),
+            Expanded(child: Text(_folderPath.isEmpty ? 'PROJECT PATTERNS' : _folderPath.toUpperCase(),
               style: const TextStyle(color: Neon.green, fontWeight: FontWeight.w800))),
-            IconButton(tooltip: _selectionMode ? 'Exit bulk selection' : 'Select modules',
+            IconButton(tooltip: _selectionMode ? 'Exit bulk selection' : 'Select patterns',
               onPressed: () => setState(() { _selectionMode = !_selectionMode; _selectedModuleIds.clear(); }),
               icon: Icon(_selectionMode ? Icons.close : Icons.checklist)),
-            IconButton(tooltip: 'Import .caw module into this folder', onPressed: () => importCawModule(context, state, _folderPath),
-              icon: const Icon(Icons.file_open_outlined)),
           ]),
           Row(children: [
             Expanded(child: TextField(
               controller: _searchController,
-              decoration: const InputDecoration(prefixIcon: Icon(Icons.search), hintText: 'Search name, type or tags'),
+              decoration: const InputDecoration(prefixIcon: Icon(Icons.search), hintText: 'Search name or tags'),
               onChanged: (value) => setState(() {
                 _query = value;
                 if (value.trim().isEmpty) _searchAllFolders = false;
@@ -374,16 +369,6 @@ class _LibraryManagerViewState extends State<LibraryManagerView> {
             )),
             IconButton(tooltip: 'Save current search', onPressed: _query.trim().isEmpty ? null : _saveSearch,
               icon: const Icon(Icons.bookmark_add_outlined)),
-            const SizedBox(width: 4),
-            DropdownButton<String>(
-              value: _sort,
-              underline: const SizedBox.shrink(),
-              items: const [
-                DropdownMenuItem(value: 'name', child: Text('Name')),
-                DropdownMenuItem(value: 'kind', child: Text('Kind')),
-              ],
-              onChanged: (value) { if (value != null) setState(() => _sort = value); },
-            ),
           ]),
           if (_query.trim().isNotEmpty)
             Align(
@@ -458,7 +443,7 @@ class _LibraryManagerViewState extends State<LibraryManagerView> {
                       child: Icon(Icons.copy_all, size: 14, color: Neon.yellow))),
               ]),
               subtitle: Wrap(spacing: 4, runSpacing: 2, children: [
-                Text(state.kindOf(module.id).toUpperCase(), style: Neon.code(size: 9, color: Neon.dim)),
+                Text('PATTERN', style: Neon.code(size: 9, color: Neon.dim)),
                 if (_searchAllFolders && module.folderPath.isNotEmpty)
                   Text(module.folderPath, style: const TextStyle(color: Neon.dim, fontSize: 9)),
                 for (final tag in module.tags)
@@ -476,40 +461,37 @@ class _LibraryManagerViewState extends State<LibraryManagerView> {
                       }
                     }),
                   )
-                : Icon(Icons.description_outlined,
-                    color: state.isEffect(module.id) ? Neon.pink : state.isPattern(module.id) ? Neon.yellow : Neon.green),
+                : const Icon(Icons.description_outlined, color: Neon.yellow),
               trailing: _selectionMode ? null : Wrap(spacing: 0, runSpacing: 0, children: [
                 IconButton(
-                  tooltip: 'Solo preview in Builder',
-                  onPressed: state.isLibrary(module.id) ? null : () {
+                  tooltip: 'Solo preview in Build',
+                  onPressed: () {
                     state.selectModule(module.id);
                     if (!state.previewOnly) state.setPreviewOnly(true);
                     widget.onOpenBuilder();
                   },
                   icon: const Icon(Icons.play_arrow, color: Neon.green),
                 ),
-                IconButton(tooltip: 'Open in Builder', onPressed: () {
+                IconButton(tooltip: 'Open in Build', onPressed: () {
                   state.selectModule(module.id);
                   widget.onOpenBuilder();
                 }, icon: const Icon(Icons.edit_outlined)),
                 PopupMenuButton<String>(
-                  tooltip: 'Module actions',
+                  tooltip: 'Pattern actions',
                   onSelected: (action) {
                     if (action == 'rename') _renameModule(module);
                     if (action == 'tags') _editTags(module);
                     if (action == 'delete') _deleteModule(module);
-                    if (action == 'export') exportCawModule(context, module);
                     if (action == 'root') state.moveModuleToFolder(module.id, '');
                     if (action.startsWith('folder:')) {
                       state.moveModuleToFolder(module.id, action.substring('folder:'.length));
                     }
                   },
                   itemBuilder: (_) => [
-                    const PopupMenuItem(value: 'rename', child: Text('Rename module')),
+                    const PopupMenuItem(value: 'rename', child: Text('Rename pattern')),
                     const PopupMenuItem(value: 'tags', child: Text('Edit tags')),
-                    const PopupMenuItem(value: 'export', child: Text('Export .caw')),
                     const PopupMenuDivider(),
-                    const PopupMenuItem(value: 'delete', child: Text('Delete module')),
+                    const PopupMenuItem(value: 'delete', child: Text('Delete pattern')),
                     const PopupMenuDivider(),
                     const PopupMenuItem(value: 'root', child: Text('Move to project root')),
                     for (final folder in folders)
@@ -531,123 +513,11 @@ class _LibraryManagerViewState extends State<LibraryManagerView> {
         ])),
         const SizedBox(height: 12),
         const NeonPanel(color: Neon.yellow, child: Text(
-          'Portable formats currently supported here: .cawproj project files and .caw module source. Library folders and tags are stored inside the project. Use Exporter for WAV audio, MIDI patterns and wavetable output. Import/export file pickers let you choose your own operating-system folders.',
+          'Portable formats here: .caw project files (Import also opens old .cawproj files). Folders and tags are stored inside the project. Use Export (the project menu) for WAV audio, MIDI patterns and wavetables. Import/export file pickers let you choose your own operating-system folders.',
           style: TextStyle(color: Neon.dim, fontSize: 12))),
       ]);
     },
   );
-}
-
-String _safeFileName(String value) =>
-    value.trim().replaceAll(RegExp(r'[^A-Za-z0-9 _-]+'), '').replaceAll(RegExp(r'\s+'), '_');
-
-Future<void> exportPortableProject(BuildContext context, AppState state) async {
-  try {
-    await state.flush();
-    final name = _safeFileName(state.project.name);
-    final bytes = utf8.encode(const JsonEncoder.withIndent('  ').convert(state.project.toJson()));
-    final saved = await FilePicker.saveFile(
-      fileName: '${name.isEmpty ? 'Caw_Project' : name}.cawproj',
-      bytes: bytes,
-      mimeType: 'application/json',
-      type: FileType.custom,
-      allowedExtensions: const ['cawproj'],
-    );
-    if (context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(saved == null ? 'Project export cancelled.' : 'Exported project file.')));
-    }
-  } catch (e) {
-    if (context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Project export failed: $e')));
-    }
-  }
-}
-
-Future<void> importPortableProject(BuildContext context, AppState state) async {
-  try {
-    final file = await FilePicker.pickFile(
-      type: FileType.custom,
-      allowedExtensions: const ['cawproj', 'json'],
-    );
-    if (file == null) return;
-    final decoded = jsonDecode(await file.xFile.readAsString());
-    if (decoded is! Map<String, dynamic> || decoded['caw_app_project'] is! num) {
-      throw const FormatException('This is not a C.A.W. project file.');
-    }
-    final version = (decoded['caw_app_project'] as num).toInt();
-    if (version > ProjectDoc.fileVersion) {
-      throw FormatException('This project uses a newer format (v$version); this app supports v${ProjectDoc.fileVersion}.');
-    }
-    final project = ProjectDoc.fromJson(decoded);
-    if (!context.mounted) return;
-    final proceed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Import project?'),
-        content: Text('Open "${project.name}" as a new project? Your current project will be autosaved first.'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Import')),
-        ],
-      ),
-    );
-    if (proceed != true) return;
-    await state.importProject(project);
-    if (context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Imported "${state.project.name}".')));
-    }
-  } catch (e) {
-    if (context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Project import failed: $e')));
-    }
-  }
-}
-
-Future<void> importCawModule(BuildContext context, AppState state, String folderPath) async {
-  try {
-    final file = await FilePicker.pickFile(
-      type: FileType.custom,
-      allowedExtensions: const ['caw'],
-    );
-    if (file == null) return;
-    final source = await file.xFile.readAsString();
-    final id = state.importModuleSource(source, fileName: file.name, folderPath: folderPath);
-    if (context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Imported module "${state.project.module(id)?.name ?? file.name}".')));
-    }
-  } catch (e) {
-    if (context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Module import failed: $e')));
-    }
-  }
-}
-
-Future<void> exportCawModule(BuildContext context, ModuleDoc module) async {
-  try {
-    final name = _safeFileName(module.name);
-    final saved = await FilePicker.saveFile(
-      fileName: '${name.isEmpty ? 'Module' : name}.caw',
-      bytes: utf8.encode(module.source),
-      mimeType: 'text/plain',
-      type: FileType.custom,
-      allowedExtensions: const ['caw'],
-    );
-    if (context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(saved == null ? 'Module export cancelled.' : 'Exported "${module.name}.caw".')));
-    }
-  } catch (e) {
-    if (context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Module export failed: $e')));
-    }
-  }
 }
 
 Future<void> createProjectRestorePoint(BuildContext context, AppState state) async {
@@ -666,7 +536,7 @@ Future<void> showProjectRestorePoints(BuildContext context, AppState state) asyn
   try {
     final points = await state.listRestorePoints();
     if (!context.mounted) return;
-    final selected = await showDialog<String>(
+    final selected = await showDialogOrSheet<String>(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Project restore points'),

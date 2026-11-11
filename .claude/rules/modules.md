@@ -1,12 +1,11 @@
 ---
 paths:
-  - "examples/**"
-  - "**/*.caw"
+  - "examples/*.caw"
 ---
 
-# Sound modules (.caw)
+# Example patterns (examples/*.caw)
 
-- One module per file: a metadata header (`caw` format version, `kind`, `name`, `summary`, `params`) then code. The implemented format and syntax are in `docs/engine.md`; change that reference and its tests when the format changes.
-- `summary:` is one line saying what the sound is; the repo map shows it.
-- Only original work or work with a licence that allows redistribution. Never paste community bytebeat formulas without the author's permission; credit and licence go in the header.
-- Every example must pass the current CLI validation/render checks and the Engine CI example-render gate; do not describe the CLI as future work.
+- The two files here are note patterns (`kind: pattern`), the text the app bundles as its pattern examples (`app/lib/model/pattern_templates.dart`, which must match them word for word: `app/test/pattern_templates_test.dart`). The format is in `docs/engine.md` ("Patterns"); change that reference and its tests when the format changes.
+- `summary:` is one line saying what the pattern is; the repo map shows it.
+- Only original work, or work with a licence that allows redistribution; credit and licence go in the header. Never paste community bytebeat formulas or other patterns of unknown licence.
+- C++ starters live in `examples/cpp/` and follow the SDK's rules (`docs/native-module-sdk.md`).

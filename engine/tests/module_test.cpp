@@ -402,3 +402,63 @@ TEST(module_descriptor_rejects_bad_identity_role_and_choices) {
     p.maximum = kMaxParameterChoices - 1;
     CHECK(validateModuleDescriptor(d) == ModuleValidation::Ok);
 }
+
+TEST(module_descriptor_domains_and_capabilities_follow_the_ports) {
+    static constexpr PortDescriptor stereo[] = {stereoInput("in"), stereoOutput("out")};
+    static constexpr PortDescriptor mono[] = {audioPort("in", true, ChannelLayout::Mono), audioPort("out", false, ChannelLayout::Mono)};
+    static constexpr PortDescriptor keyed[] = {stereoInput("in"), stereoInput("key"), stereoOutput("out")};
+    static constexpr PortDescriptor instrument[] = {{"notes", PortType::Event, ChannelLayout::None, true, 0, true, 0.0f},
+                                                    stereoOutput("out")};
+    ModuleDescriptor d;
+    d.id = "org.caw.test.domains";
+    d.ports = stereo;
+    d.portCount = 2;
+    CHECK(d.domains == kDomainWhole && d.capabilities == 0 && d.cpuClass == CpuClass::Unspecified);  // the defaults
+    d.domains = kDomainWhole | kDomainPerNote | kDomainPerVoice;
+    CHECK(validateModuleDescriptor(d) == ModuleValidation::Ok);
+    d.domains = kDomainPerNote;  // whole is always set
+    CHECK(validateModuleDescriptor(d) == ModuleValidation::InvalidDomains);
+    d.domains = 0;
+    CHECK(validateModuleDescriptor(d) == ModuleValidation::InvalidDomains);
+    d.domains = kDomainWhole | 16u;
+    CHECK(validateModuleDescriptor(d) == ModuleValidation::InvalidDomains);
+    d.domains = kDomainWhole | kDomainPerChannel;  // per channel needs mono in and out
+    CHECK(validateModuleDescriptor(d) == ModuleValidation::DomainPortMismatch);
+    d.ports = mono;
+    CHECK(validateModuleDescriptor(d) == ModuleValidation::Ok);
+    d.domains = kDomainWhole | kDomainPerNote;  // per note needs the stereo effect or the instrument shape
+    CHECK(validateModuleDescriptor(d) == ModuleValidation::DomainPortMismatch);
+    d.ports = keyed;
+    d.portCount = 3;
+    CHECK(validateModuleDescriptor(d) == ModuleValidation::DomainPortMismatch);
+    d.ports = instrument;
+    d.portCount = 2;
+    CHECK(validateModuleDescriptor(d) == ModuleValidation::Ok);
+    d.capabilities = kCapabilityNotesIn | kCapabilityMidiIn;
+    CHECK(validateModuleDescriptor(d) == ModuleValidation::Ok);
+    d.capabilities = kCapabilityEventsOut;  // no event output
+    CHECK(validateModuleDescriptor(d) == ModuleValidation::InvalidCapabilities);
+    d.capabilities = 64u;
+    CHECK(validateModuleDescriptor(d) == ModuleValidation::InvalidCapabilities);
+    d.capabilities = 0;
+    d.ports = stereo;
+    d.capabilities = kCapabilityNotesIn;  // no event input
+    CHECK(validateModuleDescriptor(d) == ModuleValidation::InvalidCapabilities);
+    d.capabilities = kCapabilitySampleAssets | kCapabilityNeedsTransport | kCapabilityExportClap;
+    d.cpuClass = CpuClass::Heavy;
+    CHECK(validateModuleDescriptor(d) == ModuleValidation::Ok);
+    d.cpuClass = static_cast<CpuClass>(9);
+    CHECK(validateModuleDescriptor(d) == ModuleValidation::InvalidCapabilities);
+    d.cpuClass = CpuClass::Light;
+    // The match covers all three, so a rebuild that changes them is not taken for the old one.
+    ModuleDescriptor other = d;
+    CHECK(moduleDescriptorsMatch(d, other));
+    other.domains = kDomainWhole;
+    CHECK(!moduleDescriptorsMatch(d, other));
+    other = d;
+    other.capabilities = 0;
+    CHECK(!moduleDescriptorsMatch(d, other));
+    other = d;
+    other.cpuClass = CpuClass::Medium;
+    CHECK(!moduleDescriptorsMatch(d, other));
+}

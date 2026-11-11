@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:re_editor/re_editor.dart';
 import 'package:re_highlight/languages/cpp.dart';
 import 'package:re_highlight/languages/json.dart';
+import 'package:re_highlight/languages/plaintext.dart';
 
 import '../../model/cpp_diagnostics.dart';
 import '../theme.dart';
@@ -22,6 +23,7 @@ CodeHighlightTheme cppHighlightTheme() {
     languages: {
       'cpp': CodeHighlightThemeMode(mode: langCpp),
       'json': CodeHighlightThemeMode(mode: langJson),
+      'plaintext': CodeHighlightThemeMode(mode: langPlaintext),
     },
     theme: {
       'root': c(Neon.text),
@@ -49,7 +51,12 @@ CodeHighlightTheme cppHighlightTheme() {
 }
 
 /// The highlighter language of a file.
-String languageOf(String path) => path.endsWith('.json') ? 'json' : 'cpp';
+String languageOf(String path) {
+  final dot = path.lastIndexOf('.');
+  final ext = dot < 0 || dot < path.lastIndexOf('/') ? '' : path.substring(dot + 1).toLowerCase();
+  if (ext == 'json') return 'json';
+  return const {'cpp', 'cc', 'cxx', 'c', 'h', 'hpp', 'hh', 'hxx', 'inl', 'ipp'}.contains(ext) ? 'cpp' : 'plaintext';
+}
 
 /// One underline in a line: [start]..[end] (0-based, end exclusive).
 class LineMark {

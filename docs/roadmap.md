@@ -1,7 +1,7 @@
 ---
 title: C.A.W. roadmap
 summary: Permanent product roadmap: verified current state, ordered implementation stages, future production capabilities, performance gates and explicit scope boundaries.
-updated: 2026-11-10
+updated: 2026-11-11
 ---
 
 # C.A.W. roadmap
@@ -44,16 +44,16 @@ An overview by area, checked against the repository on 2026-11-03. The stage tab
 | Area | Implemented today | Remaining work |
 |---|---|---|
 | App/platforms | Eight Flutter workspaces; Android and Windows app CI artifacts; autosave; per-editor undo/redo; project format version check | App-wide undo, crash recovery, project migrations, onboarding/help; iOS/macOS builds; Linux app is not a shipped CI artifact |
-| Engine | Portable C++20 engine, current constrained .caw module VM, stereo playback/mixer, offline renderer, worker pool and adaptive workload policy | The C++ authoring toolchain, shared component SDK and Library are not built; the typed graph and N-channel contract have integration gaps (Foundation, issue #28) |
+| Engine | Portable C++20 engine, built-in C++ instruments and effects, stereo playback/mixer, offline renderer, worker pool and adaptive workload policy | The C++ authoring toolchain, shared component SDK and Library are not built; the typed graph and N-channel contract have integration gaps (Foundation, issue #28) |
 | Patterns | Piano roll, drum grid, note expressions, lane curves, generators, MIDI file import/export | Kit-row routing, code-generated procedural patterns/Freeze and advanced groove/quantize extensions |
-| Arrangement | MIDI clip timeline, linked/independent clips, nested folders, stereo folder buses, track/folder volume-pan automation, module-parameter and project-global automation | Audio clips, clip automation, tempo map, markers/sections and consolidation |
+| Arrangement | MIDI clip timeline, linked/independent clips, nested folders, stereo folder buses, track/folder volume-pan automation, module-parameter and project-global automation; audio clips (2026-11-11) | Clip automation, tempo map, markers/sections and consolidation |
 | Mixer | Track volume/pan/mute/solo, generator/effect chains, folder buses and master output | Sends, general sidechain routing, parallel paths, master effect chain and integrated visual track/routing inspector |
 | Sound/synth | Code generators/effects, house synth patch compiler/playback, built-in wavetable morph/phase warp, LFOs and modulation matrix | Custom/imported wavetable authoring, drawn LFO curves and additional warp modes |
-| MIDI | MIDI pattern import/export and MIDI 2.0 UMP decoder/input-queue primitive | USB/Bluetooth device I/O, controller learn, clock and live Engine voice routing |
-| Export | WAV loop/free-length/one-shot/wavetable, MIDI, profiles/history and bounded in-memory queue | SFZ multisample workflow, stems, persistent queue and broader batch delivery |
-| Audio assets | Generated audio and module/effect processing | Audio import, non-destructive audio clips, sample editor and multisample mapping |
-| Recording | No audio or live MIDI recording workflow | MIDI/audio recording, monitoring, latency compensation, punch, loop recording, takes and comping |
-| Plugins | Plugin Builder currently validates/packages native .caw source; native SDK/graph foundations exist | Replace the legacy .caw packaging path with C++ component build/package; dynamic native loading/isolation and external CLAP/VST3/AU hosting |
+| MIDI | MIDI pattern import/export; USB, Bluetooth, UMP (Android) and WinMM (Windows) devices into instruments at their frame; controller learn | MIDI clock, MIDI-CI, MIDI output |
+| Export | WAV loop/free-length/one-shot/wavetable, MIDI, profiles/history and bounded in-memory queue | Stems, persistent queue and broader batch delivery |
+| Audio assets | Audio import into the project, non-destructive audio clips, the sampler with zone mapping and SFZ (2026-11-11) | Sample editor, generated audio as assets |
+| Recording | MIDI and audio recording, monitoring, latency compensation, punch, loop takes, crash recovery (2026-11-11) | Comping, device-loss handling, hardware timing checks |
+| Plugins | C++ components export as CLAP and VST3 plug-ins (`engine/plugin/`); native SDK/graph foundations exist | Dynamic native loading/isolation and external CLAP/VST3/AU hosting |
 | AI/video | No in-app AI; video sync is not planned | AI remains excluded; video sync remains off-roadmap |
 
 ## Roadmap sequence
@@ -61,7 +61,7 @@ An overview by area, checked against the repository on 2026-11-03. The stage tab
 **Current order (owner, 2026-11-10):** work goes issue by issue, bottom up (engine first, then the app), one area of the code per branch; UI work only where it is simple. Anything unclear, needing the owner's direction, or seeming to conflict with an earlier decision is not started: the owner gets a notification with the question, and work moves on to the next clear item. C++ replaces the .caw language first ([decisions](decisions.md)), then the owner's three new roles ([vision](vision.md)):
 1. #156 C++ instruments, then #157 C++ built-in instruments and a starter project (with #122, the useful .caw built-ins ported to the Library), #17 and #127 (independent instances, per-note and per-channel processing for instruments).
 2. #158 note clips as standard MIDI with a text form; #161 C++ modulators and routing anything anywhere (with #32).
-3. #160 remove the .caw language, then #159 `.caw` project files.
+3. #160 remove the .caw language (done 2026-11-11), then #159 `.caw` project files.
 4. #163 testing suite, #164 sample-pack maker, #162 plug-in builder (CLAP first).
 5. Then the stages below, in order, skipping what the .caw removal makes obsolete.
 
@@ -69,15 +69,15 @@ The stages are ordered by dependency and product value: first the **C++ creation
 
 ### Creation-platform foundation — C++ language, Library/SDK and shared component model
 
-This is the product's programming and extension foundation. It precedes dependent editor, visual, generated-UI and plugin work. It does not claim that the new toolchain or SDK already exists. The current engine remains C++20, but its .caw DSL/VM is only the present authoring implementation.
+This is the product's programming and extension foundation. It precedes dependent editor, visual, generated-UI and plugin work. It does not claim that the new toolchain or SDK already exists. The .caw DSL and VM were removed on 2026-11-11 (#160).
 
 | # | Item | Status | Where | Depends on | What's missing |
 |---|---|---|---|---|---|
 | CP.1 | General-purpose C++ source, project and local/offline build toolchain integrated with C.A.W. | Partial | both | Existing C++20 engine/toolchain | The installable SDK, v1 manifest/helper, structured diagnostics and Linux/Windows/Android repository-CI fixture exist; the PR #125 component matrix is still being verified. The app now persists project-owned C++ sources and exact dependency pins, builds locally with CMake, reuses a build directory and returns a verified artifact path. The Engine has an explicit-trust dynamic loader/C API and Dart FFI; the Engine plays native stereo effects with their parameters on tracks (`LayerDoc.components`) and the master (`ProjectDoc.masterComponents`), before the limiter. Still missing: on-device compiler/toolchain bundling (Android: a native library in a dedicated `:compiler` process; a toolchain manifest validator exists and the CMake runner refuses on Android), dependency acquisition/cache and proactive prefetch, per-component trust UI/store, parameter mapping, track-chain integration and full project handoff. No remote build service; GitHub Actions is repository CI only |
-| CP.2 | Shared component descriptor and lifecycle: identity, roles, typed ports, parameters, assets, events/MIDI, note/voice/channel processing scopes, channel layouts, state, capabilities, UI metadata and resource/real-time contracts | Partial | engine | CP.1; integrate with Foundation F1–F6 | Public C++ SDK exposes processor, typed ports, parameter descriptors, events, process blocks and versioned state; descriptor validation and explicit-trust dynamic loading are implemented. The Engine plays native stereo effects with their parameters on tracks (`LayerDoc.components`) and the master (`ProjectDoc.masterComponents`). The descriptor now carries name, component version, role, latency, tail, maximum state size, choice parameters and modulation/automation/MIDI flags that the executor enforces, with stereo-default port helpers. Assets/lifecycle metadata, the stable C interface v3 and app trust UI remain; explicit per-note/per-voice/per-channel processing semantics and preservation of note/voice/channel context also remain |
+| CP.2 | Shared component descriptor and lifecycle: identity, roles, typed ports, parameters, assets, events/MIDI, note/voice/channel processing scopes, channel layouts, state, capabilities, UI metadata and resource/real-time contracts | Partial | engine | CP.1; integrate with Foundation F1–F6 | Public C++ SDK exposes processor, typed ports, parameter descriptors, events, process blocks and versioned state; descriptor validation and explicit-trust dynamic loading are implemented. The Engine plays native stereo effects with their parameters on tracks (`LayerDoc.components`) and the master (`ProjectDoc.masterComponents`). The descriptor now carries name, component version, role, latency, tail, maximum state size, choice parameters and modulation/automation/MIDI flags that the executor enforces, with stereo-default port helpers. Assets/lifecycle metadata, the stable C interface v3 and app trust UI remain. Processing domains (whole, per channel, per voice, per note), capabilities and a cost class are declared (revision 3.1, #120), and per-note effects run through instruments' voice buses (#127) |
 | CP.3 | Comprehensive C.A.W. Library/SDK for DSP, native stereo/multichannel synthesis, unison/voice processing, MIDI/per-note expression, tables/samples, math, bit manipulation, data and general-purpose utilities | Planned | engine | CP.1, CP.2 | Existing .caw built-ins and engine algorithms need to be catalogued, migrated or replaced behind shared C++ APIs; native stereo generation, per-channel DSP, per-note/per-voice processing and many requested facilities are not yet complete |
 | CP.4 | Stable extension and registration contracts, capability negotiation, state/API versioning and explicit ownership/lifetime rules | Planned | engine | CP.2 | Existing native SDK v1 is a starting point, not the complete contract |
-| CP.5 | Port useful existing .caw/VM algorithms and sound capabilities into the C++ Library/SDK and native components | Planned | engine | CP.1–CP.4 | No migration has been done; preserve useful capabilities, not old syntax or implementation details |
+| CP.5 | Port useful existing .caw/VM algorithms and sound capabilities into the C++ Library/SDK and native components | Done | engine | CP.1–CP.4 | The Library ports (#122) and the C++ built-ins (#157) carry them; the language went with #160 (2026-11-11) |
 
 **Exit gate:** ordinary C++ components compile and register through the shared contracts; the SDK and Library expose useful documented APIs; typed ports, parameters, assets, events, state, lifecycle, processing scopes and real-time requirements have explicit contracts; simultaneous notes and unison voices retain independent expression until explicit merge; native stereo instruments and effects preserve left/right information; N-channel processing respects resource budgets without a fixed product ceiling; the selected existing capabilities have tested C++ paths. The old .caw editor and VM remain only as a temporary migration path until the later authoring-interface stage's retirement gate. No old-source or pre-release-project compatibility layer is required.
 
@@ -92,13 +92,13 @@ Comes first (owner, 2026-11-03), before the remaining Stage 0 and Stage 1 featur
 | F1 | Typed module graph: validation, stable order, prepared executor, safe publication and retirement | Partial | engine | — | Built and tested; the Engine's mix graph runs playback and render (F4.3). The graph-runtime publication helper isn't used by the Engine yet |
 | F2 | Resource-scalable N-channel processing contract: explicit layouts (mono, stereo, surround and discrete), planar channel buffers, generic process block, stereo fast path | Partial | engine | — | The current executor still has a 64-channel port ceiling, which is an implementation limit rather than the target contract; replace it with resource-budget-derived capacity and clear refusal when budgets are exceeded. The native C SDK is still left/right with no channel count; its layout contract must be extended explicitly |
 | F3 | Planar N-channel graph executor | Implemented | engine | F1, F2 | Built and tested (1, 2, 4, 6, 8 and Discrete(3) channels, no allocation in `process()`; PR #72). Add resource-budget-derived capacity tests and remove the temporary fixed port ceiling as part of the channel-contract completion. Typed ports beyond one audio input and output came with F5.1 |
-| F4 | One graph runs everything: .caw layers, synth voices, effects, folder buses and master migrated into the graph | Implemented | engine | F3 | F4.1 fan-in, F4.2 float routing, F4.3 one mix graph for playback and offline render, F4.4 every module of a track (its generator or voice pool, then each effect) as its own node, at most 32 per track with a clear error beyond. Golden hashes were re-recorded in F4.2 and F4.4 for the owner-approved float edges (at most 1 LSB of 24-bit) |
+| F4 | One graph runs everything: .caw layers, synth voices, effects, folder buses and master migrated into the graph | Implemented | engine | F3 | F4.1 fan-in, F4.2 float routing, F4.3 one mix graph for playback and offline render, F4.4 every module of a track as its own node (since #160 a track is one node: its instrument and inserts). Golden hashes were re-recorded in F4.2 and F4.4 for the owner-approved float edges (at most 1 LSB of 24-bit) |
 | F5 | Typed control, modulation and event/MIDI ports in the runtime | Implemented | engine | F3 | Any number of audio (sidechain), modulation, control and event ports per node, typed nodes checked at prepare, no implicit type conversion (F5.1). Event ports carry a C.A.W event with a note id and raw MIDI 2.0 UMP (owner, 2026-11-04), merge by frame, count overflow and fail out-of-order output (F5.2). This event identity is not yet a complete per-note/per-voice audio-processing context; connect note/voice identity and expression to the corresponding voice/audio path. MIDI devices and patterns do not feed graph events yet |
-| F6 | One parameter model for manual values, automation, modulation and MIDI mappings | Implemented | engine | F4, F5 | F6.1: the parameter resolver (`params.h`: curves, step, smoothing, touch, modulation links in id order) and its descriptor fields. F6.2: the graph executor resolves every node's parameters each block and passes them to processors; manual values arrive from the control thread through a lock-free queue. F6.3: modulation links from a node's modulation output to another node's parameter, applied in link-id order. F6.4: automation lanes on node parameters, read at the transport position with the Engine's own lane algorithm (bit-identical values, seeks included); a touch overrides until playback restarts, and stopping holds the last played value. F6.5: MIDI CC mappings from the graph's host events (MIDI 1.0 and 2.0 UMP Control Changes), applied as the base at the event's frame, like a knob (smoothed, a touch). F6.6: the Engine's .caw params and globals resolve through it too (manual value, automation lane, touch until playback restarts), with golden hashes unchanged. Not wired yet: modulation links and CC mappings from projects or MIDI devices (stages 5 and 6) |
+| F6 | One parameter model for manual values, automation, modulation and MIDI mappings | Implemented | engine | F4, F5 | F6.1: the parameter resolver (`params.h`: curves, step, smoothing, touch, modulation links in id order) and its descriptor fields. F6.2: the graph executor resolves every node's parameters each block and passes them to processors; manual values arrive from the control thread through a lock-free queue. F6.3: modulation links from a node's modulation output to another node's parameter, applied in link-id order. F6.4: automation lanes on node parameters, read at the transport position with the Engine's own lane algorithm (bit-identical values, seeks included); a touch overrides until playback restarts, and stopping holds the last played value. F6.5: MIDI CC mappings from the graph's host events (MIDI 1.0 and 2.0 UMP Control Changes), applied as the base at the event's frame, like a knob (smoothed, a touch). F6.6: the Engine's component chains resolve through it (manual value, automation lane, touch until playback restarts). Project modulation is wired by the Engine's own host, not graph links (#161); CC mappings from projects or MIDI devices into graphs are not (stages 5 and 6) |
 | F7 | Explicit resource budgets instead of fixed object caps | Partial | engine | — | Graph working memory, project state and export buffers are budgets. The caps audit (2026-11-04, [engine status](engine-build-status.md)) lists what remains. F7.1: the app keeps every automation lane and point and any pattern size the engine accepts. F7.2: no 64-bar limit; songs run to the 32-bit step count. F7.3: the slot capacity is a runtime value (part A), and the Engine grows past 64 layers within its budget (part B, merged unfinished; fixes in #94). F7.3 parts A and B: more than 64 layers, up to the memory budget. Still to do: silent clamps in the engine (render lengths), fixed structure (64 layers, 32 voices, 32 modules per track) and safety bounds to make configurable |
 | F8 | Latency modes (low latency for live playing, stable for lighter CPU) and adaptive concurrency | Partial | both | F4 | Worker pool, workload planner and performance profiles exist; the per-mode buffer/latency behavior is not built |
 | F9 | Project format versions and migration of older projects | Later | app | — | Deferred by the owner (2026-11-03): the app hasn't shipped and there are no projects to keep, so no backwards compatibility is promised before Release 1 and the format stays at version 2. Today files carry a version and the file-manager import refuses newer ones; storage loads don't check it. The migration framework and its tests are built before Release 1 (R.7) |
-| F10 | Seeded randomness everywhere: a project seed, per-module seeds that follow it unless pinned, seeding switchable off per module or project, and native plugins given a seed and a deterministic random source | Planned | both | F6 | `.caw` randomness already uses the one project seed (`rand`, `randi`, `hash`, `noise`, note probability); no per-module seed or on/off switch exists, and the native SDK passes plugins no seed (needs an ABI change the owner approves). Owner, 2026-11-03 |
+| F10 | Seeded randomness everywhere: a project seed, per-module seeds that follow it unless pinned, seeding switchable off per module or project, and native plugins given a seed and a deterministic random source | Planned | both | F6 | Note probability uses the one project seed; no per-module seed or on/off switch exists, and the native SDK passes plugins no seed (needs an ABI change the owner approves). Owner, 2026-11-03 |
 
 **Exit gate:** live playback and offline render both run through the one graph; golden hashes change only where the owner-approved float graph edges round (F4.2, F4.4), each change cross-checked against the old engine with the same rounding; N-channel buffers are tested with real processing beyond stereo; budgets fail with clear errors instead of silent truncation; Engine, App and Docs CI are green.
 
@@ -108,7 +108,7 @@ These are three interfaces to the same C++ components and project state, not sep
 
 | # | Item | Status | Where | Depends on | What's missing |
 |---|---|---|---|---|---|
-| UI.1 | Practical C++ code editor: project tree, tabs, highlighting, SDK-aware completion/docs, diagnostics, navigation, formatting, refactoring, build/run/preview and debugging | Planned | app | CP.1–CP.3 | The current editor targets .caw syntax and has no C++ IDE/toolchain integration |
+| UI.1 | Practical C++ code editor: project tree, tabs, highlighting, SDK-aware completion/docs, diagnostics, navigation, formatting, refactoring, build/run/preview and debugging | Planned | app | CP.1–CP.3 | Build edits and builds C++ components (the .caw editor is gone, #160); no full IDE integration yet |
 | UI.2 | Import/drop existing C++ source and projects with supported build configuration/dependencies; register valid components automatically | Planned | both | CP.1, CP.2, UI.1 | Not built |
 | UI.3 | Component visual editor: typed DSP composition using built-in Library operations, Faust-generated components and user C++ components; reusable subgraphs and visual editing of DSP behavior | Planned | both | CP.2–CP.3, Foundation F1–F6 | Not built; graphs must compile/prepare into the native runtime, not a separate interpreter |
 | UI.3a | Shared visual framework and component workspace: touch/desktop canvas, typed ports, conversion nodes, groups, inspectors, undo/redo and reusable DSP sections | Planned | app | UI.3, CP.2–CP.4 | Not built; component graph remains distinct from project routing graph |
@@ -118,7 +118,7 @@ These are three interfaces to the same C++ components and project state, not sep
 | UI.5 | Optional custom and hybrid component interfaces, with processing/UI separation | Planned | both | UI.4 | Not built |
 | UI.6 | Mixer/component browser integration: load components like plugins, expose selected controls, change parameters live and reuse the same processors in tracks/chains/graphs | Planned | both | CP.2, UI.4, Foundation | Existing Mixer and native module/graph foundations are partial; the shared C++ component workflow is not built |
 | UI.7 | Shared MIDI performance and routing across C++ components, visual graphs, on-screen keys/pads and external devices | Planned | both | CP.2, Foundation F5–F6, Stage 5 | MIDI file import/export and UMP decoding exist; USB/Bluetooth I/O and live Engine voice routing are not built |
-| UI.8 | Remove old .caw editor paths, templates, parser/compiler/VM and obsolete docs after equivalent retained workflows pass tests | Planned | both | CP.5, UI.1–UI.7 | Not started; do not remove the old path before its replacements work |
+| UI.8 | Remove old .caw editor paths, templates, parser/compiler/VM and obsolete docs after equivalent retained workflows pass tests | Done | both | CP.5, UI.1–UI.7 | The app (WP-C) and the engine (#160, 2026-11-11) |
 
 **Exit gate:** one C++ component appears in the code/component browser, as a typed visual block and in the generated performance UI; all three use the same implementation, parameters, state and event routing. Generated UI works without custom code; custom/hybrid UI is optional. C++ and visual graphs use the same prepared native execution path. MIDI uses the shared event model. The old .caw path is removed only after retained workflows are verified.
 
@@ -127,7 +127,7 @@ These are three interfaces to the same C++ components and project state, not sep
 | # | Item | Status | Where | Depends on | What's missing |
 |---|---|---|---|---|---|
 | 0.1 | Automation for module parameters and project globals, with serialization and native engine integration | Implemented | both | — | Done (PR #68). Moves into the graph with F4/F6 |
-| 0.2 | WAV/SFZ multisample: import WAV samples (own or third-party), map zones by hand (key ranges, velocity layers), play them in C.A.W, export WAV + SFZ | Planned | both | Foundation; project folders | No audio import, sampler zones or SFZ export exist. Samples live in the project folder or the global library; this pulls the needed parts of Stages 3 and 4 forward (owner, 2026-11-03) |
+| 0.2 | WAV/SFZ multisample: import WAV samples (own or third-party), map zones by hand (key ranges, velocity layers), play them in C.A.W, export WAV + SFZ | Partial | both | Foundation; project folders | Engine built (API 18, [engine](engine.md#sampler-orgcawsampler)): `org.caw.sampler` with zones over the asset store, SFZ import and export. The app's sampler editor maps zones by hand (drag over keys and velocity, samples dropped on keys) and imports and exports SFZ with the samples copied ([app](app.md), Audio). Samples live in the project folder or the global library (owner, 2026-11-03) |
 | 0.3 | Stems export through the native export pipeline | Planned | both | Foundation (per-bus graph renders) | No stems export exists |
 
 **Exit gate:** automation remains fully functional; the refactored engine uses one coherent execution model; retained capabilities have tests; the portable fallback works; callback safety, deterministic behavior, playback/export parity, performance budgets and CI are verified. Compatibility with old .caw source and pre-release projects is not required. Device performance claims require real-device evidence.
@@ -155,13 +155,13 @@ Built on the graph from the Foundation stage. Do not keep a second mixer or crea
 | # | Item | Status | Where | Depends on | What's missing |
 |---|---|---|---|---|---|
 | 2.1 | Sends and returns (pre/post fader) | Planned | both | F4 | Not built |
-| 2.2 | General sidechain routing and modulation connections | Planned | both | F4, F5 | Not built |
+| 2.2 | General sidechain routing and modulation connections | Partial | both | F4, F5 | Sidechain keys (#175) and project modulation (#161: modulators and links from any output to any knob, volume, pan or send, loops refused; [engine](engine.md#modulation-project-modulators-and-links-161)) are built; the visual routing canvas (UI.3b) is not |
 | 2.3 | Parallel routing and effect paths | Planned | both | F4 | Effects run in a fixed serial chain today |
 | 2.4 | Master effect chain and master controls | Partial | both | F4 | Master output level exists; no master effect chain |
 | 2.5 | Track, folder, bus and master routing view | Partial | app | 2.1–2.3 | Signal-chain inspection with live signal pulses exists; the editable track/routing workspace is UI.3b |
 | 2.6 | Metering: level, peak, clipping, stereo width/correlation, phase, loudness where cost is justified | Partial | both | F4 | Master and per-layer peak meters and a scope exist; no correlation, phase or loudness meters |
 | 2.7 | Engine side of typed conditional routing and regional processing: event/condition/action rules, cross-track MIDI/audio triggers, clip/region/note context, preloaded effect paths and route actions (the editor is UI.3c). First rule: a kick MIDI note ducks the bass track | Planned | engine | F4–F6, 2.1–2.3 (external hardware sources wait for Stage 5) | Not built; design and real-time scheduling requirements are in [visual routing design](visual-routing-and-library-integration.md) |
-| 2.8 | Native channel-aware and note/voice-aware effect processing, explicit channel mapping and conversion | Planned | both | CP.2–CP.3, F2–F5 | Components must declare processing scope and accepted/produced layouts; preserve note/voice/channel context until an explicit processing or mix boundary; compatible routing should work by default and conversions/downmixes must never be silent |
+| 2.8 | Native channel-aware and note/voice-aware effect processing, explicit channel mapping and conversion | Partial | both | CP.2–CP.3, F2–F5 | Built (#120, #127, 2026-11-11): components declare domains (whole, per channel, per voice, per note); mono into stereo duplicates, stereo into mono only through `org.caw.downmix`, PerChannel mono effects run as dual mono; a track's effects run per note through the instrument's voice bus (`noteComponents`, B slots and an overflow chain, per-note modulation sources) with the app's Per note section ([engine](engine.md#per-note-fx-host-127-steps-46)). Remaining: note sources in the app's mod matrix, explicit channel maps beyond stereo, per-channel effects in track chains, the S22+ CPU measurement |
 
 **Exit gate:** tests prove actual audio routing, send levels, sidechain behavior, parallel paths, master processing, channel isolation, stereo behavior and overload handling. Conditional routes must prove MIDI-triggered ducking, threshold-triggered preloaded effects, regional activation, bounded rule execution, cycle handling, persistence and identical live/offline semantics.
 
@@ -169,11 +169,11 @@ Built on the graph from the Foundation stage. Do not keep a second mixer or crea
 
 | # | Item | Status | Where | Depends on | What's missing |
 |---|---|---|---|---|---|
-| 3.1 | Import and preview common audio formats | Planned | both | 0.2 (WAV import) | WAV import arrives with 0.2; other formats and preview are not built |
-| 3.2 | Audio clips on the timeline, positions in beats; each clip *musical* (follows tempo, stretched) or *fixed* (original speed) (owner, 2026-11-03) | Planned | both | F4 | Not built; *musical* clips need time-stretching (8.1) |
-| 3.3 | Waveform summaries | Planned | both | 3.1 | Not built |
-| 3.4 | Trim, split, move, duplicate, source offset, loop, fade, clip gain, reverse; selection, snapping, grouping, undo | Planned | app | 3.2, 1.6 | Not built |
-| 3.5 | Originals untouched: edits saved as non-destructive clip operations; one asset identity for generated and imported audio | Planned | both | 3.1 | Not built |
+| 3.1 | Import and preview common audio formats | Built, untested on hardware | both | 0.2 (WAV import) | WAV, FLAC and MP3 imported through the system picker or Files into the project's folder, decoded off the UI isolate ([app](app.md), Audio); no audition of a file before placing it |
+| 3.2 | Audio clips on the timeline, positions in beats; each clip *musical* (follows tempo, stretched) or *fixed* (original speed) (owner, 2026-11-03) | Built, untested on hardware | both | F4 | Fixed clips keep their seconds at any tempo, musical ones their steps, WSOLA or varispeed ([app](app.md), Audio); not yet heard on the S22+ |
+| 3.3 | Waveform summaries | Built, untested on hardware | both | 3.1 | Clips, the inspector and the sampler draw `caw_asset_peaks`, cached per zoom level; the cost on a long project is not measured on a phone |
+| 3.4 | Trim, split, move, duplicate, source offset, loop, fade, clip gain, reverse; selection, snapping, grouping, undo | Partial | app | 3.2, 1.6 | Built: move (across tracks, copy), edge trims with loop extend, split, duplicate, fades with curves, gain, reverse, pitch, mode, mute, lock, selection with the MIDI clips', snapping and one undo step each. Not built: grouping, the marquee and glue for audio clips |
+| 3.5 | Originals untouched: edits saved as non-destructive clip operations; one asset identity for generated and imported audio | Partial | both | 3.1 | Imports are copies in the project's folder, never changed; clips are fields over them. Generated audio is not an asset yet, and a missing file only leaves its clip silent (no report in the app yet) |
 
 **Exit gate:** project save/reopen preserves asset references and edits; missing assets are reported; originals remain unchanged; phone playback and editing stay responsive.
 
@@ -182,8 +182,8 @@ Built on the graph from the Foundation stage. Do not keep a second mixer or crea
 | # | Item | Status | Where | Depends on | What's missing |
 |---|---|---|---|---|---|
 | 4.1 | Sample editor: crop/trim, fades, gain/normalize, reverse, loop points | Planned | both | 3.5 | Not built |
-| 4.2 | Sampler zones beyond 0.2: round-robin groups and audition | Planned | both | 0.2 | Key ranges and velocity layers arrive with 0.2 |
-| 4.3 | Shared asset model for generated sounds, imported samples and zones | Planned | both | 3.5 | Not built |
+| 4.2 | Sampler zones beyond 0.2: round-robin groups and audition | Built, untested on hardware | both | 0.2 | The sampler's editor makes round-robin groups from selected zones, sets choke groups, and its keys audition the zones ([app](app.md), Audio) |
+| 4.3 | Shared asset model for generated sounds, imported samples and zones | Partial | both | 3.5 | The asset store is shared by clips and sampler zones; drums samples and generated sounds still load on their own |
 | 4.4 | Transient slicing and sample-to-pattern | Later | both | 4.1 | After basic editing and mapping are reliable |
 
 **Exit gate:** sample projects save/load correctly, mapping and velocity selection are deterministic, and WAV/SFZ interchange and memory limits are tested.
@@ -192,11 +192,11 @@ Built on the graph from the Foundation stage. Do not keep a second mixer or crea
 
 | # | Item | Status | Where | Depends on | What's missing |
 |---|---|---|---|---|---|
-| 5.1 | USB and Bluetooth MIDI device discovery, connection, status and reconnect | Planned | both | F5 | A MIDI 2.0 UMP decoder and input-queue primitive exist; no device I/O |
-| 5.2 | Note/CC routing, controller learn and editable mappings | Planned | both | 5.1, F6 | Not built |
+| 5.1 | USB and Bluetooth MIDI device discovery, connection, status and reconnect | Built, untested on hardware | both | F5 | Android USB, Bluetooth LE (in-app scan) and UMP devices, Windows WinMM ports; a device list with activity lights and on/off; frame-accurate engine input (API 15). Windows MIDI Services not used ([app](app.md)) |
+| 5.2 | Note/CC routing, controller learn and editable mappings | Built, untested on hardware | both | 5.1, F6 | Learn MIDI CC on any knob's long-press sheet; mappings in the project, listed and removable in Settings › MIDI; MPE and bend range ([app](app.md)) |
 | 5.3 | MIDI clock in/out and sync | Planned | engine | 5.1 | Not built |
 | 5.4 | Control surfaces with assignable controls and feedback | Planned | both | 5.2 | Not built |
-| 5.5 | On-screen performance keys, metronome and count-in | Planned | app | — | Not built |
+| 5.5 | On-screen performance keys, metronome and count-in | Built | both | — | Slide-up keys and 4×4 pads, the engine's click and a count-in ([app](app.md), Frame: Record; 2026-11-10) |
 | 5.6 | Audio output settings: output device choice, buffer size/latency mode, and project render rate (48 kHz default, 44.1/96 selectable) with resampling to the device | Partial | both | F8 | Exports already render at 44.1 or 48 kHz; no output device choice, 96 kHz project rate, device resampling or latency setting in the app |
 
 **Exit gate:** supported hardware connects reliably, events reach the intended tracks/voices, reconnect is safe, output settings take effect without glitches, and timing is verified on real devices.
@@ -207,7 +207,7 @@ Built on the graph from the Foundation stage. Do not keep a second mixer or crea
 |---|---|---|---|---|---|
 | 6.1 | Song markers, named sections and navigation | Planned | app | — | Not built |
 | 6.2 | Tempo maps and time-signature changes | Planned | both | F4 | One tempo and meter per project today |
-| 6.3 | Clip-following automation and complete parameter/modulation automation | Partial | both | F6 | Track and project automation lanes exist; clip automation does not |
+| 6.3 | Clip-following automation and complete parameter/modulation automation | Partial | both | F6 | Track and project automation lanes exist, drawn by hand or written from the controls (Automate: Touch, Latch, Write, Read); clip automation does not |
 | 6.4 | Consolidate/bounce and render selected tracks, folders and groups | Planned | both | 0.3 | Not built |
 | 6.5 | Batch export, persistent/recoverable export queue, delivery presets | Partial | both | 0.3 | Export profiles, history and a bounded in-memory queue exist; the queue isn't persistent and there's no batch delivery |
 | 6.6 | MIDI and audio quantize/alignment across the arrangement | Planned | both | 1.4, 3.2 | Not built |
@@ -217,17 +217,17 @@ Built on the graph from the Foundation stage. Do not keep a second mixer or crea
 
 ### Stage 7 — Recording and performance workflow
 
-Recording is part of the product direction and the last stage before Release 1. It is not implemented today.
+Recording is part of the product direction and the last stage before Release 1. MIDI and audio recording are built; hardware timing and recovery from device loss are not verified.
 
 | # | Item | Status | Where | Depends on | What's missing |
 |---|---|---|---|---|---|
-| 7.1 | MIDI recording from devices and on-screen controls | Planned | both | 5.1, 5.5 | Not built |
-| 7.2 | Audio input selection, channel configuration and input monitoring | Planned | both | 5.6 | No audio input path exists |
-| 7.3 | Multitrack audio recording to arrangement tracks | Planned | both | 3.2, 7.2 | Not built |
-| 7.4 | Input latency measurement and compensation | Planned | engine | 7.2 | Not built |
-| 7.5 | Punch in/out and loop recording; take lanes and comping | Planned | both | 7.3 | Not built |
-| 7.6 | Count-in, metronome options and monitoring controls | Planned | app | 5.5 | Not built |
-| 7.7 | Recording recovery after interruption, device loss or low storage | Planned | both | 1.7, 7.3 | Not built |
+| 7.1 | MIDI recording from devices and on-screen controls | Partial | both | 5.1, 5.5 | Record writes a take from a MIDI device (placed at its timestamps) or the on-screen keys and pads, with loop passes as takes and a Keep take? toast ([app](app.md)); no record modes (overdub, replace) |
+| 7.2 | Audio input selection, channel configuration and input monitoring | Built, untested on hardware | both | 5.6 | Settings › Audio's input device and channels, the RECORD_AUDIO request when input is turned on or a track armed, each track's channel, mono or stereo and monitoring ([app](app.md), Audio); untested on the S22+ |
+| 7.3 | Multitrack audio recording to arrangement tracks | Built, untested on hardware | both | 3.2, 7.2 | Record records every armed audio track; takes become clips where they were played ([app](app.md), Audio) |
+| 7.4 | Input latency measurement and compensation | Partial | both | 7.2 | Takes are placed by the round-trip latency; Settings › Audio measures it with the ping (after a warning) or takes a typed offset. Not yet measured on a phone |
+| 7.5 | Punch in/out and loop recording; take lanes and comping | Partial | both | 7.3 | Punch over the loop range or the time selection; a loop recording's passes stack as one clip's takes, swapped whole by the take chip. Comping parts of takes is not built |
+| 7.6 | Count-in, metronome options and monitoring controls | Partial | app | 5.5 | Metronome off, while recording or always, and a 0–2 bar count-in on Record's long-press; no click sound choice or monitoring controls |
+| 7.7 | Recording recovery after interruption, device loss or low storage | Partial | both | 1.7, 7.3 | Takes a crash left are offered back when the project opens; a failed write ends the take keeping what was written, a full ring is filled with silence and reported. Device-loss handling in the app is not built |
 
 **Exit gate:** recording is reliable on supported hardware, timing/latency behavior is measured, files recover safely after interruption, and the audio callback remains bounded.
 
@@ -271,9 +271,9 @@ These stages ship as updates. Their order still holds.
 |---|---|---|---|---|---|
 | 9.1 | Native module host and lifecycle with three user-chosen modes per plugin/module: Isolated (separate process), Trusted (in-process) or Blocked (owner, 2026-11-03) | Partial | engine | F4 | The native SDK, static registry and module lifecycle contract exist; no dynamic loading, isolation or trust modes. The default mode for unseen code is an open owner question |
 | 9.2 | External CLAP hosting, then VST3 and AU where licensing and platforms allow | Conditional | engine | 9.1 | Not built. **[Assumption]** Out-of-process isolation on Android is unverified and may be desktop-first |
-| 9.3 | Export any C.A.W graph/component as CLAP, then VST3, using adapters around the shared component and parameter contracts | Partial | engine | CP.2–CP.4, F4 | CLAP export of component libraries is built for Linux and Windows (#162, `engine/plugin/clap/`); missing: graphs, VST3, macOS bundles, the app's Export button, a third-party host check |
+| 9.3 | Export any C.A.W graph/component as CLAP, then VST3, using adapters around the shared component and parameter contracts | Partial | engine | CP.2–CP.4, F4 | CLAP and VST3 export of component libraries is built for Linux and Windows (#162, `engine/plugin/clap/`, `engine/plugin/vst3/`); missing: graphs, macOS bundles, the app's Export button, a third-party host check |
 | 9.4 | iOS, macOS and Linux app builds with platform audio/device testing | Conditional | both | — | Not configured in CI; iOS ships without C++ authoring (owner, 2026-11-09) |
-| 9.5 | Plugin Builder packages C++ components; binary plugin hosting/export remains a separate adapter workflow | Partial | app | CP.1–CP.4, UI.1 | The current Plugin Builder validates/packages .caw source; it must move to the shared C++ component build and descriptor contract |
+| 9.5 | Plugin Builder packages C++ components; binary plugin hosting/export remains a separate adapter workflow | Partial | app | CP.1–CP.4, UI.1 | The .caw Plugin Builder is gone (#160); C++ components export through `engine/plugin/` (CLAP, VST3) |
 
 **Exit gate:** each claimed plugin format and platform has real build, host/device and lifecycle tests; all three trust modes work and a crash in an Isolated plugin cannot take down the app.
 

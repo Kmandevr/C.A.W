@@ -8,56 +8,58 @@ import 'package:flutter/services.dart';
 
 import '../actions/actions.dart';
 import '../model/cpp_workbench.dart';
+import '../model/automation_writer.dart';
 import '../model/live_midi.dart';
 import '../model/app_state.dart';
+import '../model/settings.dart';
+import '../platform/system_bars.dart';
 import 'arranger_screen.dart';
-import 'exporter_screen.dart';
-import 'mixer_screen.dart';
-import 'automation_screen.dart';
+import 'audio_record_ui.dart';
+import 'export_page.dart';
 import 'cpp/build_section.dart';
 import 'dock/dock_controller.dart';
 import 'dock/dock_view.dart';
 import 'dock/floating_window.dart';
 import 'dock/layout.dart';
-import 'engine_lab_screen.dart';
 import 'file_manager_screen.dart';
-import 'plugin_builder_screen.dart';
+import 'files/project_file_actions.dart';
 import 'key_router.dart';
 import 'theme.dart';
-import 'theme_editor.dart';
+import 'settings/settings_page.dart';
 import 'widgets.dart';
+import 'feedback.dart';
 import 'glass.dart';
+import 'haptics.dart';
+import 'frame/bars_handle.dart';
 import 'frame/frame_widgets.dart';
+import 'frame/live_keys.dart';
+import 'frame/record_tools.dart';
 import 'frame/sections.dart';
 import 'frame/strain.dart';
+import 'adaptive_sheet.dart';
+import 'arrange/templates_ui.dart';
+import '../model/templates.dart';
 
 /// The panel each view shortcut shows, by the index KeyRouter's `onView` passes.
-const _viewPanels = [
-  Panels.builder,
-  Panels.arrangement,
-  Panels.mixer,
-  Panels.engineLab,
-  Panels.automation,
-  Panels.exporter,
-  Panels.files,
-  Panels.pluginBuilder,
-];
+const _viewPanels = [Panels.builder, Panels.arrangement, Panels.files];
 
 /// The keyboard area of each panel.
 Area _areaOf(String panel) => switch (panel) {
       Panels.builder => Area.builder,
       Panels.arrangement => Area.arranger,
-      Panels.exporter => Area.exporter,
       _ => Area.global,
     };
 
-/// The screen shape that keeps its own layout, from the shell's size. Tablets (shortest side 600 dp or more) get the
-/// desktop layout with touch (owner, 2026-11-09).
-FormFactor formFactorFor(Size size) => size.width >= 900 || size.shortestSide >= 600
-    ? FormFactor.desktop
-    : size.width > size.height
-        ? FormFactor.phoneLandscape
-        : FormFactor.phonePortrait;
+/// The screen shape that keeps its own layout, from the shell's size in logical pixels (the window's pixels over its
+/// density, so a DeX window, an external display or a freeform window counts by its real room, not by the device).
+/// [LayoutMode.auto]: the desktop frame when the window is big enough (a shortest side of 600 dp, as a tablet, owner
+/// 2026-11-09; or 900 dp wide and 480 dp tall, so a phone in landscape stays a phone). [LayoutMode.desktop] forces
+/// it and [LayoutMode.phone] never uses it (owner, 2026-11-10).
+FormFactor formFactorFor(Size size, {LayoutMode mode = LayoutMode.auto}) {
+  final big = size.shortestSide >= 600 || (size.width >= 900 && size.height >= 480);
+  if (mode == LayoutMode.desktop || (mode == LayoutMode.auto && big)) return FormFactor.desktop;
+  return size.width > size.height ? FormFactor.phoneLandscape : FormFactor.phonePortrait;
+}
 
 /// The section a docked panel belongs to (the rail highlights it), or null for the others.
 Section? sectionOfPanel(String panel) => switch (panel) {
@@ -96,9 +98,17 @@ class _ShellState extends State<Shell> {
 
   AppState get s => widget.state;
 
+  // Settings › Layout, followed while running.
+  late LayoutMode _layoutMode = s.settings.layoutMode;
+
+  void _onSettings() {
+    if (s.settings.layoutMode != _layoutMode && mounted) setState(() => _layoutMode = s.settings.layoutMode);
+  }
+
   @override
   void initState() {
     super.initState();
+    s.settings.addListener(_onSettings);
     _sections.addListener(_onSection);
     _life = AppLifecycleListener(
       onPause: () {
@@ -119,6 +129,7 @@ class _ShellState extends State<Shell> {
 
   @override
   void dispose() {
+    s.settings.removeListener(_onSettings);
     _life.dispose();
     _dock.dispose();
     _sections.removeListener(_onSection);
@@ -134,47 +145,53 @@ class _ShellState extends State<Shell> {
     if (_dock.form == FormFactor.desktop) _dock.reveal(panelOfSection(now));
   }
 
-  /// Opens the selected .caw module in Build (the older screens' "open in Builder").
-  void _openBuilder() {
+  /// A change of frame while running (Settings › Layout, a rotation, a window or display change): the section in
+  /// front stays in front. Desktop shows its docked panel; a phone shows the section of the panel last used.
+  void _switchForm(FormFactor form) {
+    final was = _dock.form;
+    _dock.form = form;
+    if (!_homeShown) return;
+    // After this frame: both notify listeners that are being built now.
+    if (form == FormFactor.desktop) {
+      final section = _sections.current;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && _dock.form == FormFactor.desktop) _dock.reveal(panelOfSection(section));
+      });
+    } else if (was == FormFactor.desktop) {
+      final section = sectionOfPanel(_dock.keyPanel);
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && section != null && _dock.form != FormFactor.desktop) _sections.show(section);
+      });
+    }
+  }
+
+  /// Opens the selected pattern in Build (Arrange's "Open in Sounds" on a clip).
+  void _openPattern() {
     final id = s.selectedModuleId;
-    id == null ? _sections.show(Section.build) : _sections.openBuild(BuildTab(BuildTabKind.caw, id));
+    id == null || !s.isPattern(id)
+        ? _sections.show(Section.build)
+        : _sections.openBuild(BuildTab(BuildTabKind.pattern, id));
     if (_dock.form == FormFactor.desktop) _dock.reveal(Panels.builder);
   }
 
-  /// Shows [panel]: docked on desktop; on a phone its section, or a page of its own for the other workspaces.
+  /// Shows [panel]: docked on desktop; on a phone its section.
   void _reveal(BuildContext context, String panel) {
     if (_dock.form == FormFactor.desktop) return _dock.reveal(panel);
     final section = sectionOfPanel(panel);
-    if (section != null) return _sections.show(section);
-    final screen = _screens()[panel];
-    if (screen == null) return;
-    Navigator.of(context).push(MaterialPageRoute<void>(
-      builder: (_) => GlassPage(
-        child: Scaffold(
-          backgroundColor: Glass.active ? Colors.transparent : null,
-          appBar: AppBar(title: Text(dockPanelTitle(panel)), backgroundColor: Colors.transparent),
-          body: SafeArea(top: false, child: screen),
-        ),
-      ),
-    ));
+    if (section != null) _sections.show(section);
   }
 
   Map<String, Widget> _screens() => {
         Panels.builder: BuildSection(state: s),
         Panels.arrangement: ArrangerScreen(
           state: s,
-          onOpenPattern: _openBuilder,
+          onOpenPattern: _openPattern,
           onOpenModule: (id) {
             s.selectModule(id);
-            _openBuilder();
+            _openPattern();
           },
         ),
-        Panels.mixer: MixerScreen(state: s, onOpenBuilder: _openBuilder),
-        Panels.engineLab: EngineLabScreen(state: s, onOpenBuilder: _openBuilder),
-        Panels.automation: AutomationScreen(state: s),
-        Panels.exporter: ExporterScreen(state: s),
-        Panels.files: FileManagerScreen(state: s, onOpenBuilder: _openBuilder),
-        Panels.pluginBuilder: PluginBuilderScreen(state: s, onOpenBuilder: _openBuilder),
+        Panels.files: FileManagerScreen(state: s, onOpenBuilder: _openPattern),
       };
 
   @override
@@ -182,13 +199,7 @@ class _ShellState extends State<Shell> {
         listenable: s,
         builder: (context, _) {
           if (!s.ready) return const Scaffold(body: Center(child: CrowLogo(size: 64)));
-          // Build opens on the selected .caw module until the user opens something else.
-          final selected = s.selectedModuleId;
-          if (_sections.buildTabs.isEmpty && selected != null) {
-            WidgetsBinding.instance.addPostFrameCallback((_) {
-              if (mounted && _sections.buildTabs.isEmpty) _sections.addBuild(BuildTab(BuildTabKind.caw, selected));
-            });
-          }
+          // Build opens on its start page (what it is for, new code, examples) until something is opened.
           // Built once per app-state change; a layout change (a divider drag, a tab) reuses them, so it rebuilds
           // only the dock, not the screens.
           final screens = _screens();
@@ -199,9 +210,16 @@ class _ShellState extends State<Shell> {
               child: GlassStrainWatcher(
                 state: s,
                 child: Scaffold(
-                  body: SafeArea(
-                    child: LayoutBuilder(builder: (context, box) {
-                      _dock.form = formFactorFor(box.biggest);
+                  // Phones draw edge to edge (owner, 2026-11-10): the bars' backgrounds reach under the system bars
+                  // and the camera cutout, and each part pads its controls clear of them. Desktop keeps a safe area.
+                  body: Builder(builder: (context) {
+                    final pad = MediaQuery.paddingOf(context);
+                    return LayoutBuilder(builder: (context, box) {
+                      final room = pad.deflateSize(box.biggest);
+                      final form = formFactorFor(room, mode: _layoutMode);
+                      _dock.narrow = formFactorFor(room) != FormFactor.desktop;
+                      if (form != _dock.form) _switchForm(form);
+                      SystemBars.apply(fullScreen: _dock.form == FormFactor.phoneLandscape);
                       if (!_homeShown) {
                         _homeShown = true;
                         WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -216,13 +234,14 @@ class _ShellState extends State<Shell> {
                               ? _areaOf(_dock.keyPanel)
                               : _areaOf(panelOfSection(_sections.current)),
                           onView: (i) => _reveal(context, _viewPanels[i]),
+                          onExport: () => showExportPage(context, s),
                           child: _dock.form == FormFactor.desktop
-                              ? _desktop(context, screens)
-                              : _phone(context, screens, landscape: _dock.form == FormFactor.phoneLandscape),
+                              ? SafeArea(child: _desktop(context, screens))
+                              : _phone(context, screens, pad, landscape: _dock.form == FormFactor.phoneLandscape),
                         ),
                       );
-                    }),
-                  ),
+                    });
+                  }),
                 ),
               ),
             ),
@@ -230,27 +249,44 @@ class _ShellState extends State<Shell> {
         },
       );
 
-  Widget? _banner() => s.engineError != null || s.audioError != null || s.openError != null
-      ? Container(
-          width: double.infinity,
-          color: Neon.pink.withValues(alpha: 0.15),
-          padding: const EdgeInsets.all(8),
-          child: Text(s.engineError ?? s.audioError ?? s.openError!, style: const TextStyle(color: Neon.pink)),
-        )
-      : null;
+  /// What the transport shows from the app state: it rebuilds only when one of these changes (frame_widgets.dart,
+  /// Selected), not on every app-state change.
+  Object _transportLook() => (s.transportOn, s.canUndo, s.canRedo, s.pausedStep, s.project, s.project.bpm,
+      s.project.name, LiveMidi.current, AutomationWriter.current);
+
+  Widget? _banner() {
+    final error = s.engineError ?? s.audioError ?? s.openError;
+    // A note about the project just opened (its .caw sounds were left out), one line, until the next project opens.
+    final notice = error == null ? s.openNotice : null;
+    // Files the project plays that aren't here: one line with Locate… and Replace… (project_file_actions.dart).
+    if (error == null && notice == null && s.missingFiles.isNotEmpty) return MissingFilesBanner(state: s);
+    if (error == null && notice == null) return null;
+    final color = error != null ? Neon.pink : Neon.yellow;
+    return Container(
+      key: ValueKey(error != null ? 'banner-error' : 'banner-notice'),
+      width: double.infinity,
+      color: color.withValues(alpha: 0.15),
+      padding: const EdgeInsets.all(8),
+      child: Text(error ?? notice!, maxLines: error != null ? null : 1, overflow: error != null ? null : TextOverflow.ellipsis,
+          style: TextStyle(color: color)),
+    );
+  }
 
   /// Desktop and tablets: the rail, the transport bar and the docking panels.
   Widget _desktop(BuildContext context, Map<String, Widget> screens) => Row(children: [
-        SectionRail(
-          current: sectionOfPanel(_dock.keyPanel),
-          onSelect: (section) {
-            _sections.show(section);
-            _dock.reveal(panelOfSection(section));
-          },
+        Selected(
+          select: () => sectionOfPanel(_dock.keyPanel),
+          builder: (_) => SectionRail(
+            current: sectionOfPanel(_dock.keyPanel),
+            onSelect: (section) {
+              _sections.show(section);
+              _dock.reveal(panelOfSection(section));
+            },
+          ),
         ),
         Expanded(
           child: Column(children: [
-            _TransportBar(state: s, dock: _dock),
+            Selected(select: _transportLook, builder: (_) => _TransportBar(state: s, dock: _dock)),
             ?_banner(),
             Expanded(
               child: LayoutBuilder(
@@ -285,80 +321,122 @@ class _ShellState extends State<Shell> {
                 ]),
               ),
             ),
+            // The on-screen keys and pads slide up from the bottom edge here.
+            if (LiveMidi.current case final m?)
+              TakeToast(midi: m, child: AudioRecordFeedback(state: s, child: LiveKeysPanel(midi: m, state: s))),
           ]),
         ),
       ]);
 
   /// Phones: one section at a time. Portrait has the status row on top and the transport and section bar at the
-  /// bottom (both hide while the keyboard is open); landscape has the rail on the left.
-  Widget _phone(BuildContext context, Map<String, Widget> screens, {required bool landscape}) {
+  /// bottom (both hide while the keyboard is open); landscape has a narrow rail on the left with the project and More,
+  /// the tempo and CPU in the transport, and no status row, so the tracks get the height (owner, 2026-11-10). The
+  /// top bars hide when their grip is pulled up and come back when it is pulled down (or its tab tapped).
+  Widget _phone(BuildContext context, Map<String, Widget> screens, EdgeInsets pad, {required bool landscape}) {
     final keyboard = MediaQuery.viewInsetsOf(context).bottom > 0;
-    final status = _StatusRow(state: s, onTools: () => _showTools(context));
-    final body = Listener(
-      behavior: HitTestBehavior.translucent,
-      onPointerDown: (_) {
-        if (_reach) setState(() => _reach = false);
-      },
-      child: IndexedStack(
-        index: sectionOrder.indexOf(_sections.current),
-        children: [
-          for (final section in sectionOrder) screens[panelOfSection(section)] ?? const SizedBox.shrink(),
-        ],
+    // The content is padded clear of the edges here, so the screens inside see no padding of their own.
+    final content = MediaQuery.removePadding(
+      context: context,
+      removeLeft: true,
+      removeTop: true,
+      removeRight: true,
+      removeBottom: true,
+      child: Listener(
+        behavior: HitTestBehavior.translucent,
+        onPointerDown: (_) {
+          if (_reach) setState(() => _reach = false);
+        },
+        child: SectionSwitcher(
+          index: sectionOrder.indexOf(_sections.current),
+          children: [
+            for (final section in sectionOrder) screens[panelOfSection(section)] ?? const SizedBox.shrink(),
+          ],
+        ),
       ),
     );
+    // The top bars hide only on a deliberate pull of this grip (owner, 2026-11-10); in landscape only Arrange has a
+    // bar to hide (its toolbar). It hides while the keyboard is open, which keeps the bars shown.
+    final grip = !keyboard && !_reach && (!landscape || _sections.current == Section.arrange);
+    final body = !grip ? content : Stack(children: [
+      Positioned.fill(child: content),
+      Positioned(top: 0, left: 0, right: 0, child: Center(child: BarsHandle(sections: _sections))),
+    ]);
     if (landscape) {
-      return Row(children: [
-        SectionRail(current: _sections.current, onSelect: _sections.show),
-        Expanded(
-          child: Column(children: [
-            status,
-            ?_banner(),
-            Expanded(child: body),
-            if (!keyboard) BottomTransport(state: s, midi: LiveMidi.current, compact: true),
-          ]),
+      final small = IconButton.styleFrom(iconSize: 18, visualDensity: VisualDensity.compact,
+          minimumSize: const Size(34, 34), padding: const EdgeInsets.all(6));
+      return Theme(
+        // Compact landscape: smaller icons and denser controls everywhere in it.
+        data: Theme.of(context).copyWith(
+          visualDensity: VisualDensity.compact,
+          iconButtonTheme: IconButtonThemeData(style: small.merge(Theme.of(context).iconButtonTheme.style)),
         ),
-      ]);
+        child: Row(children: [
+          Selected(select: () => (_sections.current, pad, s.project.name), builder: (_) => SectionRail(
+            compact: true,
+            inset: EdgeInsets.only(left: pad.left, top: pad.top, bottom: pad.bottom),
+            current: _sections.current,
+            onSelect: _sections.show,
+            top: Tooltip(
+              message: '${s.project.name}: project menu',
+              child: InkWell(
+                key: const ValueKey('project-menu'),
+                onTap: () => showProjectMenu(context, s),
+                child: const Pressable(child: SizedBox(height: 40, child: Center(child: CrowLogo(size: 22)))),
+              ),
+            ),
+          )),
+          Expanded(
+            child: Column(children: [
+              SizedBox(height: pad.top),
+              ?_banner(),
+              Expanded(child: Padding(padding: EdgeInsets.only(right: pad.right), child: body)),
+              if (!keyboard)
+                Selected(select: () => (_transportLook(), pad), builder: (_) => BottomTransport(
+                  state: s,
+                  midi: LiveMidi.current,
+                  compact: true,
+                  inset: EdgeInsets.only(right: pad.right, bottom: pad.bottom),
+                  extras: [
+                    _BpmButton(state: s),
+                    const SizedBox(width: 8),
+                    _CpuReadout(state: s),
+                    const SizedBox(width: 8),
+                  ],
+                )),
+            ]),
+          ),
+        ]),
+      );
     }
+    final status = Selected(select: () => (s.project, s.project.name, s.project.bpm),
+        builder: (_) => _StatusRow(state: s));
+    final bar = Glass.active ? Neon.panel.withValues(alpha: 0.6) : Neon.panel;
     return Column(children: [
-      if (!_reach) status,
+      // The system status bar's strip keeps the bar colour; the status row tucks away under it.
+      if (pad.top > 0) Container(height: pad.top, color: bar),
+      if (!_reach)
+        ValueListenableBuilder<bool>(
+          valueListenable: _sections.barsShown,
+          builder: (context, shown, child) => TuckAway(shown: shown || keyboard, child: child!),
+          child: status,
+        ),
       ?_banner(),
-      Expanded(child: body),
+      Expanded(child: Padding(padding: EdgeInsets.only(left: pad.left, right: pad.right), child: body)),
       if (_reach) status,
       if (!keyboard) ...[
-        BottomTransport(state: s, midi: LiveMidi.current),
-        SectionBar(sections: _sections, onReach: () => setState(() => _reach = true)),
+        Selected(select: () => (_transportLook(), pad), builder: (_) =>
+            BottomTransport(state: s, midi: LiveMidi.current, inset: EdgeInsets.only(left: pad.left, right: pad.right))),
+        Selected(select: () => (_sections.current, pad.bottom), builder: (_) =>
+            SectionBar(sections: _sections, bottomInset: pad.bottom, onReach: () => setState(() => _reach = true))),
       ],
     ]);
   }
-
-  /// The phone's other workspaces (the mixer, automation, export, the engine lab, the .caw plugin builder).
-  Future<void> _showTools(BuildContext context) => showGlassSheet<void>(
-        context: context,
-        backgroundColor: Neon.panel,
-        isScrollControlled: true,
-        builder: (sheet) => SafeArea(
-          child: ListView(shrinkWrap: true, children: [
-            const Heading('More'),
-            for (final id in const [Panels.mixer, Panels.automation, Panels.exporter, Panels.engineLab, Panels.pluginBuilder])
-              ListTile(
-                dense: true,
-                leading: Icon(_panelIcon(id), color: Neon.dim, size: 19),
-                title: Text(dockPanelTitle(id)),
-                onTap: () {
-                  Navigator.pop(sheet);
-                  _reveal(context, id);
-                },
-              ),
-          ]),
-        ),
-      );
 }
 
-/// The phone's slim top row: the project (tap for its menu), the tempo, the song position and CPU, and More.
+/// The phone's slim top row: the project (tap for its menu, Export among it), the tempo, and CPU.
 class _StatusRow extends StatelessWidget {
-  const _StatusRow({required this.state, required this.onTools});
+  const _StatusRow({required this.state});
   final AppState state;
-  final VoidCallback onTools;
 
   @override
   Widget build(BuildContext context) {
@@ -378,37 +456,51 @@ class _StatusRow extends StatelessWidget {
         Expanded(
           child: InkWell(
             key: const ValueKey('project-menu'),
+            borderRadius: BorderRadius.circular(8),
             onTap: () => showProjectMenu(context, state),
-            child: Row(children: [
+            child: Pressable(child: Row(children: [
               Flexible(
                 child: Text(p.name,
                     overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700)),
               ),
               const Icon(Icons.arrow_drop_down, color: Neon.dim, size: 18),
-            ]),
+            ])),
           ),
         ),
         _BpmButton(state: state),
         const SizedBox(width: 8),
-        ValueListenableBuilder<int>(
-          valueListenable: state.tick,
-          builder: (context, _, _) {
-            final cpu = (state.meters.cpu * 100).clamp(0, 999).toStringAsFixed(0);
-            return Text('CPU $cpu%', style: Neon.code(size: 11, color: state.meters.cpu > 0.85 ? Neon.pink : Neon.dim));
-          },
-        ),
-        IconButton(
-          key: const ValueKey('more-tools'),
-          tooltip: 'More: mixer, automation, export…',
-          iconSize: 19,
-          constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
-          color: Neon.dim,
-          icon: const Icon(Icons.more_vert),
-          onPressed: onTools,
-        ),
+        _CpuReadout(state: state),
+        const SizedBox(width: 8),
       ]),
     );
   }
+}
+
+/// The engine's CPU load, in percent; pink over 85%.
+class _CpuReadout extends StatelessWidget {
+  const _CpuReadout({required this.state});
+  final AppState state;
+
+  @override
+  Widget build(BuildContext context) => SizedBox(
+        // A live island (widgets.dart) of a fixed size: read about 30 times a second while playing, it rebuilds, lays
+        // out and repaints alone, not the bar around it.
+        width: 58,
+        height: 16,
+        child: LiveIsland(
+          child: ValueListenableBuilder<int>(
+            valueListenable: state.tick,
+            builder: (context, _, _) {
+              final cpu = (state.meters.cpu * 100).clamp(0, 999).toStringAsFixed(0);
+              return Align(
+                alignment: Alignment.centerRight,
+                child: Text('CPU $cpu%', maxLines: 1, softWrap: false,
+                    style: Neon.code(size: 11, color: state.meters.cpu > 0.85 ? Neon.pink : Neon.dim)),
+              );
+            },
+          ),
+        ),
+      );
 }
 
 /// The layout menu: the presets, and every panel (tap to show it).
@@ -428,7 +520,6 @@ Future<void> showLayoutMenu(BuildContext context, DockController dock) => showGl
                 emptySelectionAllowed: true,
                 segments: const [
                   ButtonSegment(value: DockPreset.arrange, label: Text('Arrange')),
-                  ButtonSegment(value: DockPreset.mix, label: Text('Mix')),
                   ButtonSegment(value: DockPreset.code, label: Text('Code')),
                 ],
                 selected: const {},
@@ -458,12 +549,7 @@ Future<void> showLayoutMenu(BuildContext context, DockController dock) => showGl
 IconData _panelIcon(String id) => switch (id) {
       Panels.builder => Icons.code,
       Panels.arrangement => Icons.view_timeline,
-      Panels.mixer => Icons.tune,
-      Panels.engineLab => Icons.account_tree,
-      Panels.automation => Icons.show_chart,
-      Panels.exporter => Icons.ios_share,
       Panels.files => Icons.folder_open,
-      Panels.pluginBuilder => Icons.extension,
       _ => Icons.dashboard,
     };
 
@@ -485,96 +571,117 @@ class _TransportBar extends StatelessWidget {
               border: Border(bottom: BorderSide(color: Colors.white.withValues(alpha: 0.08))),
             )
           : const BoxDecoration(color: Neon.panel, border: Border(bottom: BorderSide(color: Neon.line))),
-      child: Row(children: [
-        const CrowLogo(size: 30),
-        const SizedBox(width: 8),
-        Expanded(
-          child: InkWell(
-            onTap: () => showProjectMenu(context, state),
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
-              const Text('C.A.W', style: TextStyle(fontSize: 11, letterSpacing: 2, color: Neon.dim, fontWeight: FontWeight.w800)),
-              Row(children: [
-                Flexible(
-                  child: Text(p.name, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+      // Desktop on a phone (Settings › Layout) can make the bar narrow: the project name then keeps a modest width and
+      // the readouts and buttons scroll sideways instead of overflowing.
+      child: LayoutBuilder(builder: (context, box) {
+        final narrow = box.maxWidth < 720;
+        Widget name(Widget c) =>
+            narrow ? ConstrainedBox(constraints: const BoxConstraints(maxWidth: 120), child: c) : Expanded(child: c);
+        final tail = <Widget>[
+          Column(crossAxisAlignment: CrossAxisAlignment.end, mainAxisSize: MainAxisSize.min, children: [
+            _BpmButton(state: state),
+            // The position and CPU change about 30 times a second while playing: a live island (widgets.dart).
+            SizedBox(width: 170, height: 15, child: LiveIsland(child: ValueListenableBuilder<int>(
+              valueListenable: state.tick,
+              builder: (context, _, _) {
+                final m = state.meters;
+                final cpu = (m.cpu * 100).clamp(0, 999).toStringAsFixed(0);
+                // Paused, it shows where play will resume.
+                return Align(alignment: Alignment.centerRight, child: Text(maxLines: 1, softWrap: false, m.playing
+                    ? '${transportPosition(m.position, m.loopLength, p.engineLoopSteps, p.stepsPerBar)} · CPU $cpu%'
+                    : state.pausedStep != null
+                        ? '${transportPosition(state.pausedStep!, p.engineLoopSteps, p.engineLoopSteps, p.stepsPerBar)} paused'
+                          ' · CPU $cpu%'
+                    : 'CPU $cpu%',
+                    style: Neon.code(size: 11, color: m.cpu > 0.85 ? Neon.pink : Neon.dim)));
+              },
+            ))),
+          ]),
+          // Undo and redo of project edits (Ctrl+Z, Ctrl+Shift+Z); an editor with its own history keeps its keys.
+          Pressable(child: IconButton(
+            key: const ValueKey('transport-undo'),
+            tooltip: 'Undo (Ctrl+Z)',
+            color: Neon.text,
+            visualDensity: VisualDensity.compact,
+            constraints: const BoxConstraints(minWidth: 40, minHeight: 44),
+            icon: const Icon(Icons.undo),
+            onPressed: state.canUndo ? state.undo : null,
+          )),
+          Pressable(child: IconButton(
+            key: const ValueKey('transport-redo'),
+            tooltip: 'Redo (Ctrl+Shift+Z)',
+            color: Neon.text,
+            visualDensity: VisualDensity.compact,
+            constraints: const BoxConstraints(minWidth: 40, minHeight: 44),
+            icon: const Icon(Icons.redo),
+            onPressed: state.canRedo ? state.redo : null,
+          )),
+          Pressable(child: IconButton(
+            tooltip: 'Layout and panels',
+            color: Neon.dim,
+            icon: const Icon(Icons.dashboard_customize),
+            onPressed: () => showLayoutMenu(context, dock),
+          )),
+          if (AutomationWriter.current case final w?) AutomateButton(writer: w, state: state, size: 40),
+          if (LiveMidi.current case final m?) KeysButton(midi: m),
+          // Only while there is somewhere to stop from, so a phone's transport keeps room for the project name.
+          if (playing || state.pausedStep != null) Pressable(child: IconButton(
+            key: const ValueKey('transport-stop'),
+            tooltip: 'Stop, back to the start (Shift+Space)',
+            color: Neon.green,
+            visualDensity: VisualDensity.compact,
+            constraints: const BoxConstraints(minWidth: 40, minHeight: 44),
+            icon: const Icon(Icons.stop),
+            onPressed: state.stopPlayback,
+          )),
+          Tooltip(
+            message: playing ? 'Pause (Space)' : state.pausedStep != null ? 'Resume (Space)' : 'Play (Space)',
+            child: InkWell(
+              borderRadius: BorderRadius.circular(28),
+              onTap: () {
+                Haptics.tap();
+                state.togglePlay();
+              },
+              child: Pressable(circle: true, child: AnimatedContainer(
+                duration: const Duration(milliseconds: 150),
+                width: 52,
+                height: 52,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: playing ? Neon.green : Colors.transparent,
+                  border: Border.all(color: Neon.green, width: 2),
+                  boxShadow: Neon.glow(Neon.green, strength: playing ? 0.8 : 0.3),
                 ),
-                const Icon(Icons.arrow_drop_down, color: Neon.dim),
-              ]),
-            ]),
-          ),
-        ),
-        ValueListenableBuilder<int>(
-          valueListenable: state.tick,
-          builder: (context, _, _) {
-            final m = state.meters;
-            final cpu = (m.cpu * 100).clamp(0, 999).toStringAsFixed(0);
-            return Column(crossAxisAlignment: CrossAxisAlignment.end, mainAxisSize: MainAxisSize.min, children: [
-              _BpmButton(state: state),
-              // Paused, it shows where play will resume.
-              Text(m.playing
-                  ? '${transportPosition(m.position, m.loopLength, p.engineLoopSteps, p.stepsPerBar)} · CPU $cpu%'
-                  : state.pausedStep != null
-                      ? '${transportPosition(state.pausedStep!, p.engineLoopSteps, p.engineLoopSteps, p.stepsPerBar)} paused'
-                        ' · CPU $cpu%'
-                  : 'CPU $cpu%',
-                  style: Neon.code(size: 11, color: m.cpu > 0.85 ? Neon.pink : Neon.dim)),
-            ]);
-          },
-        ),
-        // Undo and redo of project edits (Ctrl+Z, Ctrl+Shift+Z); an editor with its own history keeps its keys.
-        IconButton(
-          key: const ValueKey('transport-undo'),
-          tooltip: 'Undo (Ctrl+Z)',
-          color: Neon.text,
-          visualDensity: VisualDensity.compact,
-          constraints: const BoxConstraints(minWidth: 40, minHeight: 44),
-          icon: const Icon(Icons.undo),
-          onPressed: state.canUndo ? state.undo : null,
-        ),
-        IconButton(
-          key: const ValueKey('transport-redo'),
-          tooltip: 'Redo (Ctrl+Shift+Z)',
-          color: Neon.text,
-          visualDensity: VisualDensity.compact,
-          constraints: const BoxConstraints(minWidth: 40, minHeight: 44),
-          icon: const Icon(Icons.redo),
-          onPressed: state.canRedo ? state.redo : null,
-        ),
-        IconButton(
-          tooltip: 'Layout and panels',
-          color: Neon.dim,
-          icon: const Icon(Icons.dashboard_customize),
-          onPressed: () => showLayoutMenu(context, dock),
-        ),
-        // Only while there is somewhere to stop from, so a phone's transport keeps room for the project name.
-        if (playing || state.pausedStep != null) IconButton(
-          key: const ValueKey('transport-stop'),
-          tooltip: 'Stop, back to the start (Shift+Space)',
-          color: Neon.green,
-          visualDensity: VisualDensity.compact,
-          constraints: const BoxConstraints(minWidth: 40, minHeight: 44),
-          icon: const Icon(Icons.stop),
-          onPressed: state.stopPlayback,
-        ),
-        Tooltip(
-          message: playing ? 'Pause (Space)' : state.pausedStep != null ? 'Resume (Space)' : 'Play (Space)',
-          child: InkWell(
-            borderRadius: BorderRadius.circular(28),
-            onTap: state.togglePlay,
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 150),
-              width: 52,
-              height: 52,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: playing ? Neon.green : Colors.transparent,
-                border: Border.all(color: Neon.green, width: 2),
-                boxShadow: Neon.glow(Neon.green, strength: playing ? 0.8 : 0.3),
-              ),
-              child: Icon(playing ? Icons.pause : Icons.play_arrow, color: playing ? Neon.bg : Neon.green, size: 30),
+                child: Icon(playing ? Icons.pause : Icons.play_arrow, color: playing ? Neon.bg : Neon.green, size: 30),
+              )),
             ),
           ),
-        ),
-      ]),
+          RecordButton(midi: LiveMidi.current, state: state),
+        ];
+        return Row(children: [
+          const CrowLogo(size: 30),
+          const SizedBox(width: 8),
+          name(
+            InkWell(
+              onTap: () => showProjectMenu(context, state),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+                const Text('C.A.W', style: TextStyle(fontSize: 11, letterSpacing: 2, color: Neon.dim, fontWeight: FontWeight.w800)),
+                Row(children: [
+                  Flexible(
+                    child: Text(p.name, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+                  ),
+                  const Icon(Icons.arrow_drop_down, color: Neon.dim),
+                ]),
+              ]),
+            ),
+          ),
+          if (narrow)
+            Expanded(child: SingleChildScrollView(scrollDirection: Axis.horizontal, reverse: true,
+                child: Row(mainAxisSize: MainAxisSize.min, children: tail)))
+          else
+            ...tail,
+        ]);
+      }),
     );
   }
 }
@@ -613,7 +720,7 @@ class _BpmButton extends StatelessWidget {
         parse: parseBpm,
         keyboardType: const TextInputType.numberWithOptions(decimal: true),
         apply: (v) => state.editProject((p) => p.bpm = v));
-    void pad() => showDialog<void>(context: context, builder: (_) => _TapTempoPad(state: state));
+    void pad() => showDialogOrSheet<void>(context: context, builder: (_) => _TapTempoPad(state: state));
     // A screen reader gets both actions: double-tap types, a long-press opens the pad.
     return Semantics(
       button: true,
@@ -661,7 +768,10 @@ class _TapTempoPad extends StatelessWidget {
               child: FilledButton(
                 key: const ValueKey('tap-pad'),
                 autofocus: true,
-                onPressed: state.tapTempo,
+                onPressed: () {
+                  Haptics.tap();
+                  state.tapTempo();
+                },
                 child: const Text('TAP', style: TextStyle(fontSize: 24, fontWeight: FontWeight.w900)),
               ),
             ),
@@ -675,6 +785,7 @@ Future<void> showProjectMenu(BuildContext context, AppState s) async {
   final projects = await s.listProjects();
   if (!context.mounted) return;
   final keys = KeyRouter.of(context); // the sheet's own context is outside the router
+  final outer = context; // for what opens after the sheet closes
   await showGlassSheet<void>(
     context: context,
     backgroundColor: Neon.panel,
@@ -706,7 +817,13 @@ Future<void> showProjectMenu(BuildContext context, AppState s) async {
           ),
           ListTile(
             leading: const Icon(Icons.add, color: Neon.green),
-            title: const Text('New blank project'),
+            title: const Text('New project'),
+            subtitle: Text(
+                switch (s.templateById(s.settings.newProjectTemplate)) {
+                  final t? => 'From the ${t.name} template (Settings › Projects and files)',
+                  null => 'Blank, ${s.settings.newProjectBpm.toStringAsFixed(0)} BPM, ${s.settings.newProjectBeatsPerBar}/4',
+                },
+                style: const TextStyle(color: Neon.dim)),
             onTap: () {
               Navigator.pop(context);
               s.newProject();
@@ -714,11 +831,41 @@ Future<void> showProjectMenu(BuildContext context, AppState s) async {
           ),
           ListTile(
             leading: const Icon(Icons.auto_awesome_mosaic, color: Neon.green),
-            title: const Text('New from template'),
-            subtitle: const Text('First loop: drums, bass, a lead and an acid line on C++ instruments', style: TextStyle(color: Neon.dim)),
+            title: const Text('New from template…'),
+            subtitle: const Text('The starters and the templates you saved', style: TextStyle(color: Neon.dim)),
             onTap: () {
               Navigator.pop(context);
-              s.newProjectFromTemplate();
+              if (outer.mounted) showProjectTemplates(outer, s);
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.bookmark_add_outlined, color: Neon.blue),
+            title: const Text('Save as template…'),
+            onTap: () {
+              Navigator.pop(context);
+              if (outer.mounted) saveProjectTemplate(outer, s);
+            },
+          ),
+          ListTile(
+            key: const ValueKey('project-export'),
+            leading: const Icon(Icons.ios_share, color: Neon.yellow),
+            title: const Text('Export…'),
+            subtitle: const Text('The song or stems, a loop, a one-shot, a wavetable or MIDI',
+                style: TextStyle(color: Neon.dim)),
+            onTap: () {
+              Navigator.pop(context);
+              if (outer.mounted) showExportPage(outer, s);
+            },
+          ),
+          ListTile(
+            key: const ValueKey('project-export-file'),
+            leading: const Icon(Icons.file_upload_outlined, color: Neon.yellow),
+            title: const Text('Export project…'),
+            subtitle: const Text('A .caw file, with the samples, builds, presets and theme you tick',
+                style: TextStyle(color: Neon.dim)),
+            onTap: () {
+              Navigator.pop(context);
+              if (outer.mounted) exportPortableProject(outer, s);
             },
           ),
           ListTile(
@@ -732,11 +879,13 @@ Future<void> showProjectMenu(BuildContext context, AppState s) async {
           ListTile(
             leading: const Icon(Icons.settings, color: Neon.dim),
             title: const Text('Settings…'),
-            subtitle: const Text('Theme, density, live coding', style: TextStyle(color: Neon.dim)),
+            subtitle: const Text('Audio, MIDI, recording, editing, look, projects, export and more',
+                style: TextStyle(color: Neon.dim)),
             onTap: () async {
               final nav = Navigator.of(context);
               nav.pop();
-              await nav.push(MaterialPageRoute<void>(builder: (_) => GlassPage(child: SettingsPage(settings: s.settings,
+              await nav.push(MaterialPageRoute<void>(builder: (_) => GlassPage(child: SettingsPage(settings: s.settings, state: s,
+                  engineProfile: s.hardwareProfile, executionPlan: s.auditionPlan,
                   onEditKeys: keys == null ? null : (c) => keys.showKeyBindings(c)))));
               s.settings.commitLook();
             },
@@ -780,52 +929,13 @@ Future<void> showProjectMenu(BuildContext context, AppState s) async {
   );
 }
 
-/// The crow mark, drawn in neon so it needs no image asset.
+/// The crow mark: a faceted black-glass crow head with a feather sheen, a neon-green beak edge and a pink eye.
+/// Its source drawing is `assets/logo/caw_mark.svg`; the launcher icons are rendered from `caw_icon.svg`.
 class CrowLogo extends StatelessWidget {
   const CrowLogo({super.key, this.size = 32});
   final double size;
 
   @override
-  Widget build(BuildContext context) => SizedBox(width: size, height: size, child: CustomPaint(painter: _CrowPainter()));
-}
-
-class _CrowPainter extends CustomPainter {
-  @override
-  void paint(Canvas canvas, Size size) {
-    final w = size.width, h = size.height;
-    final body = Path()
-      ..moveTo(0.12 * w, 0.62 * h) // tail
-      ..lineTo(0.34 * w, 0.52 * h)
-      ..quadraticBezierTo(0.40 * w, 0.30 * h, 0.62 * w, 0.28 * h) // back to head
-      ..quadraticBezierTo(0.70 * w, 0.20 * h, 0.78 * w, 0.26 * h) // crown
-      ..lineTo(0.96 * w, 0.32 * h) // beak tip
-      ..lineTo(0.78 * w, 0.37 * h)
-      ..quadraticBezierTo(0.74 * w, 0.62 * h, 0.50 * w, 0.68 * h) // breast
-      ..lineTo(0.30 * w, 0.66 * h)
-      ..close();
-    final legs = Path()
-      ..moveTo(0.48 * w, 0.68 * h)
-      ..lineTo(0.46 * w, 0.86 * h)
-      ..moveTo(0.56 * w, 0.66 * h)
-      ..lineTo(0.58 * w, 0.86 * h);
-    final glow = Paint()
-      ..color = Neon.green.withValues(alpha: 0.5)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = w * 0.09
-      ..maskFilter = MaskFilter.blur(BlurStyle.normal, w * 0.06);
-    final line = Paint()
-      ..color = Neon.green
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = w * 0.05
-      ..strokeJoin = StrokeJoin.round
-      ..strokeCap = StrokeCap.round;
-    canvas.drawPath(body, glow);
-    canvas.drawPath(body, Paint()..color = Neon.bg);
-    canvas.drawPath(body, line);
-    canvas.drawPath(legs, line);
-    canvas.drawCircle(Offset(0.72 * w, 0.29 * h), w * 0.035, Paint()..color = Neon.pink);
-  }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+  Widget build(BuildContext context) => Image.asset('assets/logo/caw_mark.png',
+      width: size, height: size, filterQuality: FilterQuality.medium, semanticLabel: 'C.A.W.');
 }

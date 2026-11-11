@@ -1,6 +1,5 @@
-// The caw command-line tool: check modules, render modules or projects to WAV, and move patterns to and from MIDI
-// files (used by CI and AI agents).
-#include <chrono>
+// The caw command-line tool: render projects to WAV, move patterns to and from MIDI files, test C++ components and
+// make sample packs (used by CI and AI agents).
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -10,10 +9,7 @@
 #include <string>
 #include <vector>
 
-#include "capi_internal.h"
-#include "compile.h"
 #include "component_test.h"
-#include "docs.h"
 #include "json.h"
 #include "midifile.h"
 #include "pattern.h"
@@ -24,35 +20,22 @@
 
 namespace {
 
-// A whole-number argument, or -1 when it isn't one or doesn't fit an int (callers check the range).
-int wholeArg(const std::string& text) {
-    char* end = nullptr;
-    const long long v = std::strtoll(text.c_str(), &end, 10);
-    if (text.empty() || *end != '\0' || v < -1 || v > 2147483647) return -1;
-    return static_cast<int>(v);
-}
-
 const char* kUsage =
     "usage:\n"
-    "  caw check [--code] FILE.caw...        compile modules; prints errors, exits 1 if any fail; --code prints\n"
-    "                                        the code a synth patch becomes\n"
-    "  caw render INPUT -o OUT.wav [options] render a module (.caw) or project (.json)\n"
+    "  caw render PROJECT.json -o OUT.wav [options]  render a project\n"
     "      --loop (default)  one exact project loop      --seconds S   free length\n"
-    "      --oneshot LAYER   one pass of a layer, trimmed --wavetable MODULE [--param P] [--frames N]\n"
+    "      --oneshot LAYER   one pass of a layer, trimmed; a C++ instrument layer with no notes plays one\n"
+    "                        [--note N (60)] [--velocity 0..1 (1)] [--note-seconds S (0.5)] to its tail\n"
+    "      --wavetable TARGET [--param P] [--frames N]  TARGET: a C++ instrument layer or a built-in\n"
+    "                        instrument id; P is swept over its range across the frames\n"
     "      --rate 44100|48000   --float (32-bit float; default 24-bit)\n"
-    "      --bpm B --bars N  tempo and loop length when rendering a single module (default 120, 4)\n"
-    "      --steps N         a single module's layer length in 16ths (default: the whole loop)\n"
-    "      --pattern FILE    play a single module from a pattern's notes\n"
     "  caw midi import IN.mid -o OUT.caw     a MIDI file (.mid, or a MIDI 2.0 clip .midi2) as a pattern\n"
     "      --track N (0-based; default all)  --channel C (1-16; default all)  --name NAME\n"
     "      --no-bend (ignore pitch bend)     --no-slides (keep legato overlaps as notes)\n"
     "  caw midi export PATTERN.caw -o OUT.mid|OUT.midi2 [--bpm B] [--beats N] [--clip]\n"
     "      a pattern as a MIDI 1.0 file, or a MIDI 2.0 clip file with --clip or a .midi2 name\n"
     "      (default 120 BPM, 4 beats per bar)\n"
-    "  caw templates                         list the bundled starter templates\n"
-    "  caw docs [--check] [--dir DIR]        write DIR/library.md and DIR/agent-guide.md (default DIR: docs);\n"
-    "                                        --check fails if they're stale, a function is undocumented, or an\n"
-    "                                        example doesn't compile or is silent\n"
+
     "  caw test-component ID|LIBRARY [options]  render a C++ effect offline with a test signal and print its\n"
     "                                        measurements (JSON by default; docs/engine.md \"Component testing\")\n"
     "      --id ID --trust trusted|isolated|blocked   for a built LIBRARY (required: no default trust)\n"
@@ -63,7 +46,7 @@ const char* kUsage =
     "      --compare ID|LIBRARY [--compare-id ID --compare-trust T]   null test against another component or build\n"
     "      --bypass (null test against the dry input)  --align none|declared|measured (default declared)\n"
     "      --wav OUT.wav --input-wav IN.wav --no-cpu --fft N --request FILE.json (the request as JSON)\n"
-    "      --report json|text  --strict (exit 1 when the result has warnings)\n"
+    "      --report json|text  --strict (exit 1 when the result has warnings; a request's failed checks exit 1)\n"
     "  caw sample-pack [INSTRUMENT] --out DIR [options]  render an instrument over notes, velocities and parameter\n"
     "                                        steps to named WAV files plus a manifest (docs/engine.md \"Sample packs\")\n"
     "      --request FILE.json (the request as JSON; the options below override its keys)\n"
@@ -72,7 +55,8 @@ const char* kUsage =
     "      --notes C3,E3,60 | FROM:TO[:STEP]   --vel 64,127   --step NAME=V1,V2,... (repeatable)\n"
     "      --name NAME --pattern '{name}_{note}_{vel}_{param}'  --hold S --max S --tail-db DB\n"
     "      --rate R --bits 16|24|32 --mono --trim-db DB --no-trim --fade-in MS --fade-out MS\n"
-    "      --normalize peak|rms [--target DB] [--group]  --loop  --sfz  --max-files N  --overwrite\n";
+    "      --normalize peak|rms [--target DB] [--group]  --loop  --loop-xfade MS  --rr N  --dither tpdf\n"
+    "      --sfz  --max-files N  --overwrite\n";
 
 bool readFile(const std::string& path, std::string& out) {
     std::ifstream f(path, std::ios::binary);
@@ -88,59 +72,6 @@ bool endsWith(const std::string& s, const char* suffix) {
     return s.size() >= n && s.compare(s.size() - n, n, suffix) == 0;
 }
 
-int check(int argc, char** argv) {
-    int failed = 0, files = 0;
-    bool code = false;
-    for (int i = 2; i < argc; ++i) {
-        if (std::string(argv[i]) == "--code") {
-            code = true;
-            continue;
-        }
-        ++files;
-        std::string src;
-        if (!readFile(argv[i], src)) {
-            std::printf("%s: can't read the file\n", argv[i]);
-            ++failed;
-            continue;
-        }
-        if (caw::moduleKindOf(src) == caw::ModuleKind::Pattern) {
-            caw::PatternResult pr = caw::parsePattern(src);
-            if (pr.pattern) {
-                std::printf("%s: ok (pattern, %zu notes, %d steps in 4/4)\n", argv[i], pr.pattern->notes.size(),
-                            pr.pattern->steps(4));
-            } else {
-                std::printf("%s: %s\n", argv[i], pr.error.c_str());
-                ++failed;
-            }
-            continue;
-        }
-        caw::CompileResult r = caw::compileModule(src);
-        if (r.program) {
-            if (r.program->kind == caw::ModuleKind::Library)
-                std::printf("%s: ok (library %s, %zu functions)\n", argv[i], r.program->ns.c_str(),
-                            r.program->functions.size());
-            else if (r.program->synth) {
-                const size_t steps = r.program->synthFx.size();
-                std::printf("%s: ok (synth, %zu params, %zu effect step%s)\n", argv[i], r.program->params.size(), steps,
-                            steps == 1 ? "" : "s");
-                if (code) {
-                    std::printf("%s", r.program->synthCode.c_str());
-                    for (const std::string& fx : r.program->synthFx)
-                        std::printf(fx[0] == '@' ? "\n# then the project module %s\n" : "\n%s", fx[0] == '@' ? fx.c_str() + 1 : fx.c_str());
-                }
-            } else
-                std::printf("%s: ok (%s, %zu params)\n", argv[i],
-                            r.program->kind == caw::ModuleKind::Effect ? "effect" : "generator",
-                            r.program->params.size());
-        } else {
-            std::printf("%s: %s\n", argv[i], r.error.c_str());
-            ++failed;
-        }
-    }
-    if (files == 0) std::fputs(kUsage, stderr);
-    return failed || files == 0 ? 1 : 0;
-}
-
 double db(double v) { return v > 0 ? 20.0 * std::log10(v) : -999.0; }
 
 int render(int argc, char** argv) {
@@ -152,10 +83,6 @@ int render(int argc, char** argv) {
     std::string out;
     caw::ExportOptions o;
     bool floatOut = false;
-    double bpm = 120;
-    int bars = 4;
-    int steps = 0;
-    std::string patternFile;
     for (int i = 3; i < argc; ++i) {
         const std::string a = argv[i];
         auto val = [&](const char* name) -> std::string {
@@ -177,13 +104,12 @@ int render(int argc, char** argv) {
             o.kind = caw::ExportKind::Wavetable;
             o.target = val("--wavetable");
         } else if (a == "--param") o.param = val("--param");
+        else if (a == "--note") o.note = std::atof(val("--note").c_str());
+        else if (a == "--velocity") o.velocity = std::atof(val("--velocity").c_str());
+        else if (a == "--note-seconds") o.noteSeconds = std::atof(val("--note-seconds").c_str());
         else if (a == "--frames") o.frames = std::atoi(val("--frames").c_str());
         else if (a == "--rate") o.sampleRate = std::atoi(val("--rate").c_str());
         else if (a == "--float") floatOut = true;
-        else if (a == "--bpm") bpm = std::atof(val("--bpm").c_str());
-        else if (a == "--bars") bars = wholeArg(val("--bars"));
-        else if (a == "--steps") steps = wholeArg(val("--steps"));
-        else if (a == "--pattern") patternFile = val("--pattern");
         else {
             std::fprintf(stderr, "unknown option %s\n%s", a.c_str(), kUsage);
             return 2;
@@ -199,34 +125,10 @@ int render(int argc, char** argv) {
         return 1;
     }
     caw::ProjectSpec p;
-    if (endsWith(input, ".json")) {
-        std::string err;
-        if (!caw::parseProject(text, p, err)) {
-            std::fprintf(stderr, "%s: %s\n", input.c_str(), err.c_str());
-            return 1;
-        }
-    } else {
-        // The same song-length rule as a project file: whole bars up to the 32-bit step count (F7.2).
-        const caw::ProjectSpec defaults;
-        if (bars < 1 || bars > caw::maxLoopBars(defaults.beatsPerBar) || steps < 0 ||
-            steps > caw::maxArrangementSteps(defaults.beatsPerBar)) {
-            std::fprintf(stderr, "--bars must be 1 to %d and --steps 0 to %d\n", caw::maxLoopBars(defaults.beatsPerBar),
-                caw::maxArrangementSteps(defaults.beatsPerBar));
-            return 2;
-        }
-        p = caw::singleModuleProject(text, bpm, bars);
-        p.layers[0].lengthSteps = steps;
-        if (!patternFile.empty()) {
-            std::string pat;
-            if (!readFile(patternFile, pat)) {
-                std::fprintf(stderr, "%s: can't read the file\n", patternFile.c_str());
-                return 1;
-            }
-            p.modules.push_back({"pattern", pat, {}});
-            p.layers[0].pattern = "pattern";
-        }
-        if (o.kind == caw::ExportKind::Wavetable || o.kind == caw::ExportKind::OneShot)
-            o.target = o.kind == caw::ExportKind::Wavetable ? "m" : "l";
+    std::string err;
+    if (!caw::parseProject(text, p, err)) {
+        std::fprintf(stderr, "%s: %s\n", input.c_str(), err.c_str());
+        return 1;
     }
     caw::RenderResult r;
     if (!caw::renderExport(p, o, r)) {
@@ -238,7 +140,6 @@ int render(int argc, char** argv) {
     spec.channels = r.channels;
     spec.float32 = floatOut || o.kind == caw::ExportKind::Wavetable;
     spec.loop = r.loop;
-    std::string err;
     if (!caw::writeFile(out, caw::encodeWav(spec, r.samples.data(), r.frames), err)) {
         std::fprintf(stderr, "%s\n", err.c_str());
         return 1;
@@ -339,68 +240,6 @@ int midi(int argc, char** argv) {
 
 }  // namespace
 
-std::string today() {
-    const auto days = std::chrono::floor<std::chrono::days>(std::chrono::system_clock::now());
-    const std::chrono::year_month_day ymd{days};
-    char buf[16];
-    std::snprintf(buf, sizeof buf, "%04d-%02u-%02u", static_cast<int>(ymd.year()), static_cast<unsigned>(ymd.month()),
-                  static_cast<unsigned>(ymd.day()));
-    return buf;
-}
-
-// A generated note keeps its `updated:` date unless its content changes.
-std::string updatedOf(const std::string& text) {
-    const size_t p = text.find("\nupdated: ");
-    return p == std::string::npos ? "" : text.substr(p + 10, 10);
-}
-
-int docs(int argc, char** argv) {
-    bool check = false;
-    std::string dir = "docs";
-    for (int i = 2; i < argc; ++i) {
-        const std::string a = argv[i];
-        if (a == "--check") check = true;
-        else if (a == "--dir" && i + 1 < argc) dir = argv[++i];
-        else {
-            std::fputs(kUsage, stderr);
-            return 2;
-        }
-    }
-    int bad = 0;
-    for (const std::string& problem : caw::checkLibrary()) {
-        std::printf("FAIL %s\n", problem.c_str());
-        ++bad;
-    }
-    struct Out {
-        const char* file;
-        std::string (*make)(const std::string&);
-    };
-    for (const Out& out : {Out{"library.md", caw::libraryReference}, Out{"agent-guide.md", caw::agentGuide}}) {
-        const std::string path = dir + "/" + out.file;
-        std::string old;
-        readFile(path, old);
-        const std::string keep = updatedOf(old);
-        const bool same = !keep.empty() && out.make(keep) == old;
-        if (same) {
-            std::printf("ok   %s is up to date\n", path.c_str());
-            continue;
-        }
-        if (check) {
-            std::printf("FAIL %s is stale: run caw docs and commit it\n", path.c_str());
-            ++bad;
-            continue;
-        }
-        std::string err;
-        const std::string text = out.make(today());
-        if (!caw::writeFile(path, std::vector<uint8_t>(text.begin(), text.end()), err)) {
-            std::fprintf(stderr, "%s\n", err.c_str());
-            return 1;
-        }
-        std::printf("wrote %s\n", path.c_str());
-    }
-    return bad ? 1 : 0;
-}
-
 bool isLibraryPath(const std::string& s) {
     return s.find('/') != std::string::npos || s.find('\\') != std::string::npos || endsWith(s, ".so") ||
            endsWith(s, ".dll") || endsWith(s, ".dylib");
@@ -474,6 +313,16 @@ void printTextReport(const caw::Json& r) {
             }
     if (const caw::Json* w = r.get("warnings"))
         for (const caw::Json& x : w->arr) std::printf("  warning: %s\n", x.str.c_str());
+    if (const caw::Json* c = r.get("checks")) {
+        for (const caw::Json& x : c->arr) {
+            const caw::Json* v = x.get("value");
+            std::printf("  check %s: %s (%s)\n", x.string("path").c_str(), x.boolean("pass", false) ? "pass" : "FAIL",
+                        v && v->type == caw::Json::Type::Number ? std::to_string(v->num).c_str()
+                        : v && v->type == caw::Json::Type::Bool ? (v->b ? "true" : "false")
+                                                                 : "missing");
+        }
+        std::printf("  %s\n", r.boolean("passed", false) ? "all checks passed" : "checks FAILED");
+    }
 }
 
 int testComponent(int argc, char** argv) {
@@ -588,6 +437,7 @@ int testComponent(int argc, char** argv) {
     if (report == "json" || !ok) std::printf("%s\n", result.c_str());
     else printTextReport(parsed);
     if (!ok) return 1;
+    if (!parsed.boolean("passed", true)) return 1;  // a request's checks (thresholds) failed
     const caw::Json* warnings = parsed.get("warnings");
     return strict && warnings && !warnings->arr.empty() ? 1 : 0;
 }
@@ -703,6 +553,13 @@ int samplePack(int argc, char** argv) {
         else if (a == "--fade-out") top.emplace_back("fade_out_ms", num("--fade-out"));
         else if (a == "--max-files") top.emplace_back("max_files", num("--max-files"));
         else if (a == "--loop") top.emplace_back("loop", jsonBool(true));
+        else if (a == "--loop-xfade") {  // a loop whose seam is crossfaded over MS
+            caw::Json l;
+            l.type = caw::Json::Type::Object;
+            l.obj["crossfade_ms"] = num("--loop-xfade");
+            top.emplace_back("loop", l);
+        } else if (a == "--rr") top.emplace_back("round_robins", num("--rr"));
+        else if (a == "--dither") top.emplace_back("dither", jsonString(val("--dither")));
         else if (a == "--sfz") top.emplace_back("sfz", jsonBool(true));
         else if (a == "--overwrite") top.emplace_back("overwrite", jsonBool(true));
         else if (a == "--no-trim") top.emplace_back("trim", jsonBool(false));
@@ -841,16 +698,10 @@ int main(int argc, char** argv) {
         return 2;
     }
     const std::string cmd = argv[1];
-    if (cmd == "check") return check(argc, argv);
     if (cmd == "render") return render(argc, argv);
-    if (cmd == "docs") return docs(argc, argv);
     if (cmd == "midi") return midi(argc, argv);
     if (cmd == "test-component") return testComponent(argc, argv);
     if (cmd == "sample-pack") return samplePack(argc, argv);
-    if (cmd == "templates") {
-        for (int i = 0; i < caw::kTemplateCount; ++i) std::printf("%s\n", caw::kTemplateFiles[i]);
-        return 0;
-    }
     std::fputs(kUsage, stderr);
     return 2;
 }

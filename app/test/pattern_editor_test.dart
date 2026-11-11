@@ -6,6 +6,7 @@ import 'package:caw/model/app_state.dart';
 import 'package:caw/model/pattern_doc.dart';
 import 'package:caw/model/project.dart';
 import 'package:caw/ui/pattern_editor.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -19,7 +20,6 @@ void main() {
     tester.view.devicePixelRatio = 1;
     final s = AppState();
     s.engine = Engine.create();
-    s.templates = Engine.templates();
     s.project = s.starterProject();
     final m = ModuleDoc(id: 'line', name: 'line', source: '---\nkind: pattern\n---\n');
     s.project.modules.add(m);
@@ -46,7 +46,6 @@ void main() {
     tester.view.devicePixelRatio = 1;
     final s = AppState();
     s.engine = Engine.create();
-    s.templates = Engine.templates();
     s.project = s.starterProject();
     final m = ModuleDoc(id: 'line', name: 'line', source: '---\nkind: pattern\n---\n');
     s.project.modules.add(m);
@@ -70,12 +69,44 @@ void main() {
     s.dispose();
   }, skip: skip != null);
 
+  testWidgets('zoom per axis: an upright pinch changes the row height and saves it, the zoom bar zooms time',
+      (tester) async {
+    tester.view.physicalSize = const Size(800, 800);
+    tester.view.devicePixelRatio = 1;
+    final s = AppState();
+    s.engine = Engine.create();
+    s.project = s.starterProject();
+    final m = ModuleDoc(id: 'line', name: 'line', source: '---\nkind: pattern\n---\n');
+    s.project.modules.add(m);
+    s.ready = true;
+    s.starting = false;
+    await tester.pumpWidget(MaterialApp(home: Scaffold(body: PatternEditor(state: s, module: m))));
+    final row0 = s.settings.roll.rowHeight;
+    final a = await tester.startGesture(const Offset(400, 300), kind: PointerDeviceKind.touch);
+    final b = await tester.startGesture(const Offset(400, 400), kind: PointerDeviceKind.touch);
+    await a.moveBy(const Offset(0, -25));
+    await b.moveBy(const Offset(0, 25));
+    await a.up();
+    await b.up();
+    await tester.pumpAndSettle();
+    expect(s.settings.roll.rowHeight, closeTo(row0 * 1.5, 0.5));
+    expect(m.source.split('---').last.trim(), isEmpty, reason: 'a pinch draws nothing');
+    await tester.tap(find.byKey(const ValueKey('roll-zoom')));
+    await tester.pumpAndSettle();
+    final time = find.byKey(const ValueKey('roll-zoom-time'));
+    final before = tester.widget<Slider>(time).value;
+    await tester.tap(find.byTooltip('Zoom in'));
+    await tester.pumpAndSettle();
+    expect(tester.widget<Slider>(time).value, greaterThan(before));
+    expect(s.settings.roll.rowHeight, closeTo(row0 * 1.5, 0.5), reason: 'time zoom leaves the rows alone');
+    s.dispose();
+  }, skip: skip != null);
+
   testWidgets('the menu runs a generator: Euclid writes 3 hits in 8 steps', (tester) async {
     tester.view.physicalSize = const Size(1200, 800);
     tester.view.devicePixelRatio = 1;
     final s = AppState();
     s.engine = Engine.create();
-    s.templates = Engine.templates();
     s.project = s.starterProject();
     final m = ModuleDoc(id: 'line', name: 'line', source: '---\nkind: pattern\n---\n');
     s.project.modules.add(m);
@@ -85,7 +116,9 @@ void main() {
     expect(find.byTooltip('Draw tool'), findsOneWidget);
     await tester.tap(find.byTooltip('More'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Generate: Euclid'));
+    await tester.ensureVisible(find.text('Euclid'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Euclid'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Apply'));
     await tester.pump(const Duration(milliseconds: 200));
@@ -98,7 +131,6 @@ void main() {
     tester.view.devicePixelRatio = 1;
     final s = AppState();
     s.engine = Engine.create();
-    s.templates = Engine.templates();
     s.project = s.starterProject();
     final m = ModuleDoc(id: 'line', name: 'line', source: '---\nkind: pattern\n---\n1 C3 1\n5 C3 1\n9 C3 1\n13 C3 1\n');
     s.project.modules.add(m);
@@ -126,7 +158,6 @@ void main() {
     tester.view.devicePixelRatio = 1;
     final s = AppState();
     s.engine = Engine.create();
-    s.templates = Engine.templates();
     s.project = s.starterProject();
     final m = ModuleDoc(id: 'line', name: 'line', source: '---\nkind: pattern\n---\n');
     s.project.modules.add(m);
@@ -161,7 +192,6 @@ void main() {
     tester.view.devicePixelRatio = 1;
     final s = AppState();
     s.engine = Engine.create();
-    s.templates = Engine.templates();
     s.project = s.starterProject();
     final m = ModuleDoc(id: 'line', name: 'line', source: '---\nkind: pattern\n---\n0 C3 4\n');
     s.project.modules.add(m);
@@ -186,7 +216,7 @@ void main() {
     await tester.ensureVisible(find.text('Vibrato').first);
     await tester.tap(find.widgetWithText(ActionChip, 'Vibrato'));
     await tester.pump();
-    Navigator.of(tester.element(find.text('Expression'))).pop();
+    Navigator.of(tester.element(find.text('EXPRESSION'))).pop();
     await tester.pumpAndSettle();
     await tester.pump(const Duration(milliseconds: 200));
     expect(m.source, contains('vib 0.4 5.5 0.3'));

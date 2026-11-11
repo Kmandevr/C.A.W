@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 
 import '../model/pattern_doc.dart';
 import 'theme.dart';
+import 'widgets.dart';
 
 /// Shapes to stamp on a note (the owner asked for presets besides drawing and the vibrato knob).
 final List<(String, NoteExpression Function(NoteExpression))> expressionPresets = [
@@ -24,6 +25,46 @@ final List<(String, NoteExpression Function(NoteExpression))> expressionPresets 
   ('Clear', (e) => NoteExpression.none),
 ];
 
+/// Curve [c] as the editors draw it, at [u] (0..1) across a note [widthPx] wide (owner, 2026-11-10: "the bend was
+/// always smooth ... just the UI"): the stored curve, with the corner at each point softened over at most [soften] px
+/// each side (a third of a segment at most) by a monotone cubic through the point's true value, so the point stays
+/// where it is drawn and nothing overshoots. Display only: the sound and the stored points follow
+/// [NoteExpression.valueAt].
+double displayCurveAt(List<NotePoint> c, double u, double widthPx, {double empty = 0, double soften = 6}) {
+  if (c.isEmpty) return empty;
+  final raw = NoteExpression.valueAt(c, u, empty: empty);
+  if (c.length < 2 || widthPx <= 0) return raw;
+  final r = soften / widthPx;
+  // Only the points either side of u can have a window over it.
+  var hi = c.length;
+  for (var lo = 0; lo < hi;) {
+    final mid = (lo + hi) >> 1;
+    c[mid].t < u ? lo = mid + 1 : hi = mid;
+  }
+  for (final i in [hi - 1, hi]) {
+    if (i < 0 || i >= c.length) continue;
+    final t = c[i].t;
+    final left = i > 0 ? c[i - 1].t : 0.0, right = i + 1 < c.length ? c[i + 1].t : 1.0;
+    final rl = math.min(r, (t - left) / 3), rr = math.min(r, (right - t) / 3);
+    if (rl <= 1e-9 || rr <= 1e-9 || u <= t - rl || u >= t + rr) continue;
+    final ta = t - rl, tb = t + rr, eps = math.min(rl, rr) * 0.05;
+    double at(double x) => NoteExpression.valueAt(c, x, empty: empty);
+    final a = at(ta), b = at(tb), v = c[i].v;
+    final dl = (v - a) / rl, dr = (b - v) / rr;
+    // The slope through the point: none at a peak or a valley, else the harmonic mean of the two sides.
+    final m = dl * dr <= 0 ? 0.0 : 2 / (1 / dl + 1 / dr);
+    // Each end keeps the stored curve's slope there, limited so the cubic stays monotone (Fritsch-Carlson).
+    double limit(double s, double d) => d == 0 || s / d < 0 ? 0 : (s / d > 3 ? 3 * d : s);
+    final sa = limit((a - at(ta - eps)) / eps, dl), sb = limit((at(tb + eps) - b) / eps, dr);
+    double hermite(double p0, double m0, double p1, double m1, double h, double x) {
+      final x2 = x * x, x3 = x2 * x;
+      return (2 * x3 - 3 * x2 + 1) * p0 + (x3 - 2 * x2 + x) * h * m0 + (-2 * x3 + 3 * x2) * p1 + (x3 - x2) * h * m1;
+    }
+    return u < t ? hermite(a, sa, v, m, rl, (u - ta) / rl) : hermite(v, m, b, sb, rr, (u - t) / rr);
+  }
+  return raw;
+}
+
 /// The vibrato knobs, the presets and an editor per curve, for the notes the extras panel is showing.
 class ExpressionPanel extends StatelessWidget {
   const ExpressionPanel(
@@ -40,14 +81,8 @@ class ExpressionPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final e = expr;
-    Widget slider(String label, double v, double min, double max, String Function(double) show, NoteExpression Function(double) set) =>
-        Row(children: [
-          SizedBox(width: 92, child: Text('$label ${show(v)}', style: Neon.code(size: 12))),
-          Expanded(child: Slider(value: v.clamp(min, max), min: min, max: max, onChanged: (x) => onChanged(set(x)))),
-        ]);
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      const SizedBox(height: 8),
-      const Text('Expression', style: TextStyle(fontWeight: FontWeight.w700)),
+      const Heading('Expression'),
       Wrap(spacing: 6, runSpacing: 4, children: [
         for (final (name, f) in expressionPresets) ActionChip(label: Text(name), onPressed: () => onChanged(f(e))),
       ]),
@@ -56,9 +91,13 @@ class ExpressionPanel extends StatelessWidget {
           style: TextStyle(color: Neon.dim, fontSize: 12)),
       NoteCurveEditor(
           points: e.bend, min: -12, max: 12, zero: 0, snap: 1, timeSnap: timeSnap, color: color, onChanged: (p) => onChanged(e.copyWith(bend: p))),
-      slider('Vibrato', e.vibDepth, 0, 2, (v) => v.toStringAsFixed(2), (v) => e.copyWith(vibDepth: v)),
-      slider('Rate', e.vibRate, 0.5, 12, (v) => '${v.toStringAsFixed(1)} Hz', (v) => e.copyWith(vibRate: v)),
-      slider('Fade-in', e.vibFade, 0, 1, (v) => '${(v * 100).round()}%', (v) => e.copyWith(vibFade: v)),
+      // Vibrato: big sliders with a type-in and a reset (none, 5 Hz, no fade-in).
+      ValueSlider(label: 'Vibrato depth', value: e.vibDepth, min: 0, max: 2, reset: 0, scale: 100, unit: ' cents',
+          onChanged: (v) => onChanged(e.copyWith(vibDepth: v))),
+      ValueSlider(label: 'Vibrato rate', value: e.vibRate, min: 0.5, max: 12, reset: const NoteExpression().vibRate,
+          decimals: 1, unit: ' Hz', onChanged: (v) => onChanged(e.copyWith(vibRate: v))),
+      ValueSlider(label: 'Vibrato fade-in', value: e.vibFade, min: 0, max: 1, reset: 0, scale: 100, unit: '%',
+          onChanged: (v) => onChanged(e.copyWith(vibFade: v))),
       Text('Volume over the note', style: TextStyle(color: Neon.dim, fontSize: 12)),
       NoteCurveEditor(
           points: e.press, min: 0, max: 1, zero: 1, snap: valueSnap, timeSnap: timeSnap, color: color, onChanged: (p) => onChanged(e.copyWith(press: p))),
@@ -194,7 +233,7 @@ class _CurvePainter extends CustomPainter {
     if (points.isEmpty) return;
     final path = Path();
     for (var x = 0.0; x <= size.width; x += 2) {
-      final y = s._y(NoteExpression.valueAt(points, x / size.width), size);
+      final y = s._y(displayCurveAt(points, x / size.width, size.width), size);
       x == 0 ? path.moveTo(x, y) : path.lineTo(x, y);
     }
     canvas.drawPath(path, Paint()

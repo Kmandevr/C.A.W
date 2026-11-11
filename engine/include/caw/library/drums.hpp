@@ -6,6 +6,7 @@
 #include "../detmath.hpp"
 #include "distortion.hpp"
 #include "envelope.hpp"
+#include "fastmath.hpp"
 #include "filter.hpp"
 #include "oscillator.hpp"
 
@@ -51,7 +52,10 @@ struct KickSettings {
     double drive = 1.5;    // 1 clean .. 10 heavy
 };
 
-class KickVoice {
+// Fast: the body's sine and the drive use the Library's fast maths (fastmath.hpp), several times cheaper and
+// the same sound (within 1e-9); KickVoice is the exact version, FastKickVoice the fast one.
+template <bool Fast>
+class BasicKickVoice {
 public:
     void set(const KickSettings& s, double sampleRate) noexcept {
         sr_ = sampleRate;
@@ -59,6 +63,7 @@ public:
         punch_ = detail::clampTo(s.punch, 0.0, 1.0);
         click_ = detail::clampTo(s.click, 0.0, 1.0);
         drive_ = detail::clampTo(s.drive, 1.0, 10.0);
+        if constexpr (Fast) saturator_.set(drive_);
         amp_.set(0.001, detail::clampTo(s.decay, 0.01, 4.0), sampleRate);
         drop_.set(0.0005, 0.04 + punch_ * 0.08, sampleRate);
         clickEnv_.set(0.0001, 0.008, sampleRate);
@@ -77,10 +82,14 @@ public:
         if (!active()) return 0.0;
         const double d = drop_.next();
         const double f = tune_ * (1.0 + 10.0 * punch_ * d * d);
-        const double body = sineWave(phase_);
+        double body = 0.0;
+        if constexpr (Fast) body = fastSinCycles(phase_);
+        else body = sineWave(phase_);
         phase_ = wrap01(phase_ + f / sr_);
         const double click = clickEnv_.next() * click_ * clickFilter_.high(noise_.next());
-        double y = drive((body + click) * amp_.next(), drive_);
+        double y = 0.0;
+        if constexpr (Fast) y = saturator_.process((body + click) * amp_.next());
+        else y = drive((body + click) * amp_.next(), drive_);
         y = toneFilter_.low(y) * velocity_ * choke_.next();
         if (!amp_.active() || choke_.done()) clear();
         return y;
@@ -102,8 +111,11 @@ private:
     OnePole clickFilter_, toneFilter_;
     Noise noise_{0x4b1c};
     detail::Choke choke_;
+    Saturator saturator_;
     double sr_ = 48000.0, tune_ = 48.0, punch_ = 0.6, click_ = 0.3, drive_ = 1.5, velocity_ = 1.0, phase_ = 0.0;
 };
+using KickVoice = BasicKickVoice<false>;
+using FastKickVoice = BasicKickVoice<true>;
 
 // Snare: a short two-mode body (triangle and sine, with a little pitch drop) plus high-passed noise.
 struct SnareSettings {

@@ -48,9 +48,17 @@ void main() {
       expect((DockLayout.preset(FormFactor.desktop).root as SplitNode).weights.first, closeTo(0.62, 1e-9));
     });
 
-    test('the Mix and Code presets lead with the mixer and the builder', () {
-      expect(DockLayout.preset(FormFactor.desktop, DockPreset.mix).visible.first, Panels.mixer);
+    test('the Code preset leads with the builder', () {
       expect(DockLayout.preset(FormFactor.desktop, DockPreset.code).visible.first, Panels.builder);
+    });
+
+    test('the retired workspaces are no panels: a saved layout naming one drops it (#139)', () {
+      expect(Panels.all, [Panels.arrangement, Panels.builder, Panels.files]);
+      for (final gone in ['mixer', 'automation', 'exporter', 'engineLab', 'pluginBuilder']) {
+        expect(Panels.known(gone), isFalse, reason: gone);
+      }
+      final l = DockLayout.fromJson({'tabs': ['arrangement', 'mixer', 'exporter'], 'active': 1})!;
+      expect(l.panels, [Panels.arrangement]);
     });
   });
 
@@ -59,60 +67,60 @@ void main() {
 
     test('activate shows a panel in its group; the visible list is each group\'s active panel', () {
       expect(base.visible, [Panels.arrangement, Panels.builder]);
-      final l = base.activate(Panels.mixer);
-      expect(l.visible, [Panels.arrangement, Panels.mixer]);
+      final l = base.activate(Panels.files);
+      expect(l.visible, [Panels.arrangement, Panels.files]);
       expectValid(l);
     });
 
     test('dock to the centre moves a panel into another group and shows it there', () {
-      final l = base.dock(Panels.mixer, target: Panels.arrangement);
+      final l = base.dock(Panels.files, target: Panels.arrangement);
       expectValid(l);
       final top = (l.root as SplitNode).children.first as TabsNode;
-      expect(top.panels, [Panels.arrangement, Panels.mixer]);
-      expect(top.activePanel, Panels.mixer);
-      expect(l.panels.where((p) => p == Panels.mixer), hasLength(1));
+      expect(top.panels, [Panels.arrangement, Panels.files]);
+      expect(top.activePanel, Panels.files);
+      expect(l.panels.where((p) => p == Panels.files), hasLength(1));
     });
 
     test('dock to an edge splits the target, and a same-axis split joins its parent', () {
       // Bottom of the arrangement, in a column layout: a third row of the root, sharing the arrangement's share.
-      final l = base.dock(Panels.mixer, target: Panels.arrangement, edge: DockEdge.bottom);
+      final l = base.dock(Panels.files, target: Panels.arrangement, edge: DockEdge.bottom);
       expectValid(l);
       final root = l.root as SplitNode;
       expect(root.axis, DockAxis.column);
       expect(root.children, hasLength(3));
-      expect((root.children[1] as TabsNode).panels, [Panels.mixer]);
+      expect((root.children[1] as TabsNode).panels, [Panels.files]);
       expect(root.weights[0], closeTo(0.275, 1e-9));
       expect(root.weights[1], closeTo(0.275, 1e-9));
       // Right of the arrangement: a row nested in the column.
-      final r = base.dock(Panels.mixer, target: Panels.arrangement, edge: DockEdge.right);
+      final r = base.dock(Panels.files, target: Panels.arrangement, edge: DockEdge.right);
       expectValid(r);
       final row = (r.root as SplitNode).children.first as SplitNode;
       expect(row.axis, DockAxis.row);
-      expect([for (final c in row.children) (c as TabsNode).panels.first], [Panels.arrangement, Panels.mixer]);
+      expect([for (final c in row.children) (c as TabsNode).panels.first], [Panels.arrangement, Panels.files]);
     });
 
     test('moving the only panel of a group removes the group and collapses its split', () {
-      final single = DockLayout(SplitNode(DockAxis.row, [TabsNode([Panels.arrangement]), TabsNode([Panels.mixer])]));
-      final l = single.dock(Panels.mixer, target: Panels.arrangement);
+      final single = DockLayout(SplitNode(DockAxis.row, [TabsNode([Panels.arrangement]), TabsNode([Panels.files])]));
+      final l = single.dock(Panels.files, target: Panels.arrangement);
       expectValid(l);
       expect(l.root, isA<TabsNode>());
-      expect((l.root as TabsNode).panels, [Panels.arrangement, Panels.mixer]);
+      expect((l.root as TabsNode).panels, [Panels.arrangement, Panels.files]);
     });
 
     test('a panel can\'t dock onto itself, onto a missing target, or be an unknown id', () {
       expect(identical(base.dock(Panels.arrangement, target: Panels.arrangement, edge: DockEdge.left), base), isTrue);
       final small = DockLayout(TabsNode([Panels.arrangement]));
-      expect(identical(small.dock(Panels.mixer, target: Panels.files), small), isTrue);
+      expect(identical(small.dock(Panels.builder, target: Panels.files), small), isTrue);
       expect(identical(small.dock('nope', target: Panels.arrangement), small), isTrue);
     });
 
     test('remove keeps at least one panel and keeps a neighbour in view', () {
       final one = DockLayout(TabsNode([Panels.arrangement]));
       expect(identical(one.remove(Panels.arrangement), one), isTrue);
-      final l = base.activate(Panels.mixer).remove(Panels.mixer);
+      final l = base.activate(Panels.files).remove(Panels.files);
       expectValid(l);
-      expect(l.contains(Panels.mixer), isFalse);
-      expect(l.visible.last, isNot(Panels.mixer));
+      expect(l.contains(Panels.files), isFalse);
+      expect(l.visible.last, isNot(Panels.files));
       // Removing the last tab of a group removes the group.
       final g = base.remove(Panels.arrangement);
       expectValid(g);
@@ -142,12 +150,12 @@ void main() {
 
     test('docking many panels onto one edge keeps every share at the minimum or more', () {
       var l = DockLayout.preset(FormFactor.desktop);
-      for (final p in [Panels.mixer, Panels.files, Panels.exporter, Panels.automation]) {
+      for (final p in [Panels.builder, Panels.files]) {
         l = l.dock(p, target: Panels.arrangement, edge: DockEdge.right);
       }
       expectValid(l);
       final row = l.root as SplitNode;
-      expect(row.children, hasLength(6));
+      expect(row.children, hasLength(3));
       for (final w in row.weights) {
         expect(w, greaterThanOrEqualTo(DockLayout.minWeight - 1e-9));
       }
@@ -155,13 +163,13 @@ void main() {
 
     test('a hand-built tree loses repeated and unknown ids', () {
       final l = DockLayout(SplitNode(DockAxis.row, [
-        TabsNode([Panels.arrangement, 'gone', Panels.mixer], 2),
-        TabsNode([Panels.mixer]),
+        TabsNode([Panels.arrangement, 'gone', Panels.files], 2),
+        TabsNode([Panels.files]),
       ]));
       expectValid(l);
       expect(l.root, isA<TabsNode>());
-      expect((l.root as TabsNode).panels, [Panels.arrangement, Panels.mixer]);
-      expect((l.root as TabsNode).activePanel, Panels.mixer);
+      expect((l.root as TabsNode).panels, [Panels.arrangement, Panels.files]);
+      expect((l.root as TabsNode).activePanel, Panels.files);
     });
 
     test('long sequences of random edits always leave a valid layout', () {
@@ -188,7 +196,7 @@ void main() {
   group('JSON', () {
     test('a layout survives a round trip, through text as well', () {
       final l = DockLayout.preset(FormFactor.desktop)
-          .dock(Panels.mixer, target: Panels.arrangement, edge: DockEdge.bottom)
+          .dock(Panels.builder, target: Panels.arrangement, edge: DockEdge.bottom)
           .activate(Panels.files);
       final back = DockLayout.fromJson(jsonDecode(jsonEncode(l.toJson())))!;
       expect(back.toJson(), l.toJson());
@@ -200,19 +208,19 @@ void main() {
         'split': 'row',
         'weights': [1, 1, 1],
         'children': [
-          {'tabs': ['arrangement', 'gone', 'mixer'], 'active': 9},
-          {'tabs': ['mixer', 'nope']},
+          {'tabs': ['arrangement', 'gone', 'builder'], 'active': 9},
+          {'tabs': ['builder', 'nope']},
           {'tabs': ['files']},
         ],
       })!;
       expectValid(l);
-      expect(l.panels, [Panels.arrangement, Panels.mixer, Panels.files]);
+      expect(l.panels, [Panels.arrangement, Panels.builder, Panels.files]);
       expect((l.root as SplitNode).children, hasLength(2));
     });
 
     test('the active tab is the same panel after dropped ids, and ids are the Panels constants', () {
-      final l = DockLayout.fromJson(jsonDecode('{"tabs": ["old", "mixer", "files"], "active": 1}'))!;
-      expect((l.root as TabsNode).activePanel, Panels.mixer);
+      final l = DockLayout.fromJson(jsonDecode('{"tabs": ["old", "builder", "files"], "active": 1}'))!;
+      expect((l.root as TabsNode).activePanel, Panels.builder);
       for (final p in l.panels) {
         expect(identical(p, Panels.all.firstWhere((q) => q == p)), isTrue, reason: p);
       }
@@ -231,7 +239,7 @@ void main() {
       final l = DockLayout.fromJson({
         'split': 'column',
         'weights': ['a', -2],
-        'children': [{'tabs': ['arrangement']}, {'tabs': ['mixer']}],
+        'children': [{'tabs': ['arrangement']}, {'tabs': ['files']}],
       })!;
       expect((l.root as SplitNode).weights, [0.5, 0.5]);
       Object? deep = {'tabs': ['arrangement']};

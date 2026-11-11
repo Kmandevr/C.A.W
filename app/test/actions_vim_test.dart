@@ -68,6 +68,13 @@ void main() {
     expect(r.calls.last, 'roll.notes.down*10');
     expect(r.key('0').handled, isFalse);
     r.vim.area = Area.arranger;
+    // The arranger binds 1–0 to its marker jumps (REAPER's), so a digit there runs that instead of starting a count;
+    // with them unbound, digits are counts again.
+    r.keys('4');
+    expect(r.calls.last, 'arranger.marker.go4*1');
+    for (var n = 0; n <= 9; n++) {
+      r.vim.keymap.unbind(Area.arranger, KeySeq.parse('$n'));
+    }
     r.keys('4 ]');
     expect(r.calls.last, 'arranger.layer.longer*4');
   });

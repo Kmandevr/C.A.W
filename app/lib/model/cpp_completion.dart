@@ -58,6 +58,59 @@ class CppCompletionContext {
 
 final _identifier = RegExp(r'[A-Za-z_][A-Za-z0-9_]{2,}');
 
+final _fileWords = FileWords();
+
+/// The words (identifiers of three or more characters) of the file being edited, kept up to date by the edit
+/// instead of scanned again (#174): a keystroke re-reads only the changed span, widened to whole words, not the
+/// whole file (a 5,000-line file took 6 ms a keystroke).
+class FileWords {
+  String _text = '';
+  final Map<String, int> _counts = {};
+
+  static bool _part(int c) => c == 95 || (c >= 48 && c <= 57) || ((c | 32) >= 97 && (c | 32) <= 122);
+
+  void _count(String text, int from, int to, int by) {
+    for (final m in _identifier.allMatches(text.substring(from, to))) {
+      final w = m.group(0)!;
+      final n = (_counts[w] ?? 0) + by;
+      if (n <= 0) {
+        _counts.remove(w);
+      } else {
+        _counts[w] = n;
+      }
+    }
+  }
+
+  /// Every distinct word of [text].
+  Iterable<String> of(String text) {
+    final old = _text;
+    if (identical(old, text)) return _counts.keys;
+    final m = old.length < text.length ? old.length : text.length;
+    var p = 0;
+    while (p < m && old.codeUnitAt(p) == text.codeUnitAt(p)) {
+      p++;
+    }
+    var q = 0;
+    while (q < m - p && old.codeUnitAt(old.length - 1 - q) == text.codeUnitAt(text.length - 1 - q)) {
+      q++;
+    }
+    // Widen the changed span to whole words; the text around it is the same in both.
+    var from = p;
+    while (from > 0 && _part(old.codeUnitAt(from - 1))) {
+      from--;
+    }
+    var oldEnd = old.length - q, newEnd = text.length - q;
+    while (oldEnd < old.length && _part(old.codeUnitAt(oldEnd))) {
+      oldEnd++;
+      newEnd++;
+    }
+    _count(old, from, oldEnd, -1);
+    _count(text, from, newEnd, 1);
+    _text = text;
+    return _counts.keys;
+  }
+}
+
 /// The instant list for [context]: SDK names (members after a dot, a namespace's names after `ns::`), keywords
 /// and the identifiers of [fileText], filtered by the typed prefix; at most [limit].
 /// [knobs] are the effect's built parameters (id with range and unit), offered with that detail.
@@ -97,20 +150,17 @@ List<CppCompletion> staticCompletions(CppCompletionContext context, String fileT
     }
   }
   if (!context.afterMember || out.length < 4) {
-    final words = <String>{};
-    for (final m in _identifier.allMatches(fileText)) {
-      words.add(m.group(0)!);
-      if (words.length > 4000) break;
-    }
-    for (final w in words) {
-      add(CppCompletion(w));
+    for (final w in _fileWords.of(fileText)) {
+      if (w != prefix && matches(w) && seen.add(w)) out.add(CppCompletion(w)); // add(), without a throwaway object
     }
   }
   out.sort((a, b) {
     final ea = a.label.startsWith(prefix) ? 0 : 1, eb = b.label.startsWith(prefix) ? 0 : 1;
     if (ea != eb) return ea - eb;
     final da = a.detail.isEmpty ? 1 : 0, db = b.detail.isEmpty ? 1 : 0; // known names before plain words
-    return da != db ? da - db : a.label.length - b.label.length;
+    if (da != db) return da - db;
+    final dl = a.label.length - b.label.length;
+    return dl != 0 ? dl : a.label.compareTo(b.label); // ties in a fixed order, whatever order the words came in
   });
   return out.take(limit).toList();
 }

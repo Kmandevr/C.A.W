@@ -1,0 +1,11 @@
+{
+  "format": "caw.component",
+  "version": 1,
+  "component": {
+    "id": "org.caw.examples.euclid",
+    "name": "Euclidean gate (modulator)"
+  },
+  "sources": [
+    "src/euclid_modulator.cpp"
+  ]
+}

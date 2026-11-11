@@ -16,6 +16,16 @@
 namespace caw {
 
 namespace {
+// The layout rules (#120): the same layout and channel count connect; a mono output also feeds a stereo input
+// (duplicated: L = R = the mono signal, unity, no pan law). Stereo into mono needs an explicit downmix
+// (org.caw.downmix); every other mismatch is refused.
+bool layoutsConnect(const PortDescriptor& from, const PortDescriptor& to) noexcept {
+    if (from.layout == to.layout && portChannelCount(from) == portChannelCount(to)) return true;
+    return from.type == PortType::Audio && from.layout == ChannelLayout::Mono && to.layout == ChannelLayout::Stereo;
+}
+// The executor's check on resolved channels (compileGraph has checked the layouts).
+bool channelsConnect(uint32_t from, uint32_t to) noexcept { return from == to || (from == 1 && to == 2); }
+
 bool addEstimatedBytes(std::size_t& total, std::size_t count, std::size_t elementBytes) noexcept {
     const std::size_t maximum = std::numeric_limits<std::size_t>::max();
     if (count != 0 && elementBytes > (maximum - total) / count) return false;
@@ -247,9 +257,8 @@ CompiledGraph compileGraph(const std::vector<GraphNode>& nodes,
             if (sourcePort.input || !destinationPort.input) { fail(GraphError::DirectionMismatch); return out; }
             if (sourcePort.type != destinationPort.type) { fail(GraphError::PortTypeMismatch); return out; }
             // Discrete ports share one layout value, so compare resolved channel counts too:
-            // routing is never truncated or padded.
-            if (sourcePort.layout != destinationPort.layout ||
-                portChannelCount(sourcePort) != portChannelCount(destinationPort)) {
+            // routing is never truncated or padded. The one widening allowed (#120): mono into stereo, duplicated.
+            if (!layoutsConnect(sourcePort, destinationPort)) {
                 fail(GraphError::ChannelLayoutMismatch);
                 return out;
             }
@@ -626,7 +635,7 @@ GraphError GraphExecutor::prepare(const std::vector<GraphNode>& nodes,
             const Port& from = ports_[nodePortBase_[edge.sourceNode] + edge.sourcePort];
             Port& to = ports_[nodePortBase_[edge.destinationNode] + edge.destinationPort];
             // compileGraph already checks direction, type and channels; keep the executor safe on its own.
-            if (from.input || !to.input || from.type != to.type || from.channels != to.channels) {
+            if (from.input || !to.input || from.type != to.type || !channelsConnect(from.channels, to.channels)) {
                 reset(); return GraphError::ChannelLayoutMismatch;
             }
             if (to.summing) { ++to.sum; continue; }
@@ -638,7 +647,9 @@ GraphError GraphExecutor::prepare(const std::vector<GraphNode>& nodes,
                 controlInTable_[to.table] = controlOutTable_[from.table];
                 continue;
             }
-            for (uint32_t c = 0; c < to.channels; ++c) inputTable_[to.table + c] = outputTable_[from.table + c];
+            // A mono source feeds every channel of a stereo input (both point at its one buffer).
+            for (uint32_t c = 0; c < to.channels; ++c)
+                inputTable_[to.table + c] = outputTable_[from.table + (from.channels == 1 ? 0 : c)];
         }
         uint32_t sumChannels = 0, sumCount = 0, sourceTotal = 0;
         for (const Port& port : ports_) {
@@ -856,7 +867,7 @@ bool GraphExecutor::setRouting(const GraphConnection* edges, uint32_t edgeCount,
         const Port& from = ports_[source];
         const Port& to = ports_[destination];
         if (from.input || from.type != PortType::Audio || !to.input || to.type != PortType::Audio ||
-            from.channels != to.channels) return false;
+            !channelsConnect(from.channels, to.channels)) return false;
         if (to.summing ? to.sum == UINT32_MAX : !routePlain_) return false;
         // Both ends must run, the source first (an unlisted node's position is UINT32_MAX).
         if (routePosition_[edge.destinationNode] == UINT32_MAX ||
@@ -884,7 +895,8 @@ bool GraphExecutor::setRouting(const GraphConnection* edges, uint32_t edgeCount,
             const uint32_t source = directStaging_[g];
             for (uint32_t c = 0; c < port.channels; ++c)
                 inputTable_[port.table + c] =
-                    source == UINT32_MAX ? zero_.data() : outputTable_[ports_[source].table + c];
+                    source == UINT32_MAX ? zero_.data()
+                                         : outputTable_[ports_[source].table + (ports_[source].channels == 1 ? 0 : c)];
         }
     std::copy_n(order, orderCount, order_.begin());
     runCount_ = orderCount;
@@ -995,7 +1007,8 @@ bool GraphExecutor::processValidated(const ConstChannelBufferView& input, const 
                 float* destination = sumTable_[sum.tableBase + c];
                 std::fill_n(destination, frames, 0.0f);
                 for (uint32_t s = 0; s < sum.sourceCount; ++s) {
-                    const float* source = outputTable_[ports_[sumSources_[sum.sourceBase + s]].table + c];
+                    const Port& from = ports_[sumSources_[sum.sourceBase + s]];
+                    const float* source = outputTable_[from.table + (from.channels == 1 ? 0 : c)];  // mono: duplicated
                     for (uint32_t i = 0; i < frames; ++i) destination[i] = routeAdd(destination[i], routeSample(source[i]));
                 }
             }

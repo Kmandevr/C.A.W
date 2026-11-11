@@ -1,6 +1,9 @@
 // Sample-pack maker: batch-renders an instrument (and effects) over notes, velocities and parameter steps to named WAV files.
 #include "sample_pack.h"
 
+#include "presets.h"
+#include "utf8_path.h"
+
 #include <algorithm>
 #include <atomic>
 #include <cctype>
@@ -16,6 +19,7 @@
 #include <system_error>
 
 #include "builtin_components.h"
+#include "caw/detmath.hpp"
 #include "caw/instrument.hpp"
 #include "component_chain.h"
 #include "json.h"
@@ -34,6 +38,7 @@ constexpr std::size_t kMaxAxisValues = 128;
 constexpr double kMaxFileSeconds = 60.0;
 constexpr double kQuietSeconds = 0.25;
 constexpr std::size_t kMaxNameChars = 150;
+constexpr double kMaxRoundRobins = 16;
 constexpr int kLoopWindow = 64;  // frames either side of the seam compared when choosing a loop start
 
 // ---------------------------------------------------------------- small helpers
@@ -67,12 +72,6 @@ std::string fmt(double v, const char* f = "%.10g") {
     return buf;
 }
 
-fs::path utf8Path(const std::string& s) { return fs::path(std::u8string(s.begin(), s.end())); }
-
-std::string pathText(const fs::path& p) {
-    const auto u = p.u8string();
-    return std::string(u.begin(), u.end());
-}
 
 struct Out {
     std::string s;
@@ -392,7 +391,7 @@ std::string sanitizeFileName(std::string_view name) {
 }
 
 std::string expandNamePattern(std::string_view pattern, std::string_view name, int note, int velocity,
-                              std::string_view param, uint32_t index) {
+                              std::string_view param, uint32_t index, int roundRobin) {
     std::string s;
     for (std::size_t i = 0; i < pattern.size(); ++i) {
         if (pattern[i] == '{') {
@@ -406,6 +405,7 @@ std::string expandNamePattern(std::string_view pattern, std::string_view name, i
                 else if (token == "vel") s += std::to_string(velocity);
                 else if (token == "param") s += param;
                 else if (token == "index") s += std::to_string(index);
+                else if (token == "rr") s += roundRobin > 0 ? std::to_string(roundRobin) : std::string();
                 else known = false;
                 if (known) {
                     i = close;
@@ -511,6 +511,27 @@ PackLoop findLoop(const std::vector<float>& left, const std::vector<float>& righ
     return best;
 }
 
+std::size_t crossfadeLoop(std::vector<float>& left, std::vector<float>& right, const PackLoop& loop, std::size_t frames,
+                          bool equalPower) {
+    if (!loop.found || loop.end < loop.start || loop.end >= left.size()) return 0;
+    const std::size_t length = loop.end - loop.start + 1;
+    const std::size_t X = std::min({frames, length, loop.start});
+    // Frame k of the fade: the loop's own audio at end - X + 1 + k fades out while the audio that led into the
+    // loop's start, at start - X + k, fades in. At the last frame the loop plays what came just before its start,
+    // so wrapping to `start` continues the sound as it first ran. Equal power (sin/cos gains, whose squares sum to
+    // 1) keeps the level of unrelated material; linear (gains summing to 1) keeps it for material that matches. The
+    // audio before the loop is only read: the fade writes inside the loop, which starts after it.
+    for (std::size_t k = 0; k < X; ++k) {
+        const std::size_t i = loop.end + 1 - X + k, j = loop.start - X + k;
+        const double t = static_cast<double>(k + 1) / static_cast<double>(X + 1);
+        const double in = equalPower ? detSin(t * kPi / 2.0) : t;
+        const double out = equalPower ? detCos(t * kPi / 2.0) : 1.0 - t;
+        left[i] = static_cast<float>(left[i] * out + left[j] * in);
+        right[i] = static_cast<float>(right[i] * out + right[j] * in);
+    }
+    return X;
+}
+
 // ---------------------------------------------------------------- WAV and SFZ
 
 namespace {
@@ -572,6 +593,18 @@ std::vector<uint8_t> encodePackWav(const PackWavSpec& spec, const std::vector<fl
     }
     tag(b, "data");
     u32(b, dataBytes);
+    // TPDF dither (Lipshitz, Wannamaker and Vanderkooy, "Quantization and Dither: A Theoretical Survey", JAES
+    // 40(5), 1992): the difference of two independent uniform values, +-1 LSB triangular, added before rounding,
+    // makes the rounding error's first two moments independent of the signal (no distortion, a steady noise floor).
+    // Seeded xorshift32 per file, so the same request gives the same bytes. Exact digital silence stays silent.
+    const bool dither = !flt && spec.dither == PackDither::Tpdf;
+    uint32_t state = spec.ditherSeed * 2654435761u | 1u;
+    auto uniform = [&state]() {
+        state ^= state << 13;
+        state ^= state >> 17;
+        state ^= state << 5;
+        return static_cast<double>(state) / 4294967296.0;
+    };
     for (uint32_t i = 0; i < frames; ++i)
         for (uint32_t c = 0; c < ch; ++c) {
             float v = c == 0 ? left[i] : right[i];
@@ -583,11 +616,13 @@ std::vector<uint8_t> encodePackWav(const PackWavSpec& spec, const std::vector<fl
                 continue;
             }
             const double d = std::clamp(static_cast<double>(v), -1.0, 1.0);
+            const double noise = dither ? uniform() - uniform() : 0.0;  // in LSBs
+            const double tpdf = dither && v != 0.0f ? noise : 0.0;
             if (spec.bitDepth == 16) {
-                const int32_t s = std::clamp(static_cast<int32_t>(std::floor(d * 32767.0 + 0.5)), -32768, 32767);
+                const int32_t s = std::clamp(static_cast<int32_t>(std::floor(d * 32767.0 + tpdf + 0.5)), -32768, 32767);
                 u16(b, static_cast<uint32_t>(s) & 0xFFFFu);
             } else {
-                const int32_t s = std::clamp(static_cast<int32_t>(std::floor(d * 8388607.0 + 0.5)), -8388608, 8388607);
+                const int32_t s = std::clamp(static_cast<int32_t>(std::floor(d * 8388607.0 + tpdf + 0.5)), -8388608, 8388607);
                 const uint32_t u = static_cast<uint32_t>(s);
                 b.push_back(static_cast<uint8_t>(u));
                 b.push_back(static_cast<uint8_t>(u >> 8));
@@ -612,7 +647,8 @@ std::string sfzText(std::string_view title, const std::vector<SfzRegion>& region
     std::vector<const SfzRegion*> order;
     for (const SfzRegion& r : regions) order.push_back(&r);
     std::stable_sort(order.begin(), order.end(), [](const SfzRegion* a, const SfzRegion* b) {
-        return a->note != b->note ? a->note < b->note : a->velocity < b->velocity;
+        return a->note != b->note ? a->note < b->note : a->velocity != b->velocity ? a->velocity < b->velocity
+                                                                                   : a->roundRobin < b->roundRobin;
     });
     for (const SfzRegion* r : order) {
         const std::size_t ni = static_cast<std::size_t>(std::find(notes.begin(), notes.end(), r->note) - notes.begin());
@@ -624,6 +660,8 @@ std::string sfzText(std::string_view title, const std::vector<SfzRegion>& region
         s += "<region> sample=" + r->sample + " lokey=" + std::to_string(lokey) + " hikey=" + std::to_string(hikey) +
              " pitch_keycenter=" + std::to_string(r->note) + " lovel=" + std::to_string(lovel) +
              " hivel=" + std::to_string(hivel);
+        if (r->roundRobins > 1)
+            s += " seq_length=" + std::to_string(r->roundRobins) + " seq_position=" + std::to_string(r->roundRobin);
         if (r->loop)
             s += " loop_mode=loop_continuous loop_start=" + std::to_string(r->loopStart) +
                  " loop_end=" + std::to_string(r->loopEnd);
@@ -646,7 +684,7 @@ bool parseSamplePackRequest(std::string_view json, SamplePackRequest& out, std::
     if (!onlyKeys(j, {"instrument", "effects", "output_dir", "name", "name_pattern", "notes", "velocities", "params",
                       "hold_seconds", "max_seconds", "tail_threshold_db", "sample_rate", "block_size", "tempo",
                       "bit_depth", "channels", "trim", "fade_in_ms", "fade_out_ms", "normalize", "loop", "sfz",
-                      "manifest", "max_files", "overwrite"},
+                      "manifest", "max_files", "overwrite", "round_robins", "dither"},
                   "the request", error))
         return false;
     SamplePackRequest r;
@@ -770,14 +808,99 @@ bool parseSamplePackRequest(std::string_view json, SamplePackRequest& out, std::
             r.loop = l->b;
         } else if (l->type == Json::Type::Object) {
             r.loop = true;
-            if (!onlyKeys(*l, {"enabled", "min_seconds", "max_seconds"}, "loop", error) ||
+            std::string shape = "equal_power";
+            if (!onlyKeys(*l, {"enabled", "min_seconds", "max_seconds", "crossfade_ms", "crossfade"}, "loop", error) ||
                 !flag(*l, "enabled", r.loop, error) ||
                 !number(*l, "min_seconds", r.loopMinSeconds, 0.001, kMaxFileSeconds, error) ||
-                !number(*l, "max_seconds", r.loopMaxSeconds, 0.001, kMaxFileSeconds, error))
+                !number(*l, "max_seconds", r.loopMaxSeconds, 0.001, kMaxFileSeconds, error) ||
+                !number(*l, "crossfade_ms", r.loopCrossfadeMs, 0, 10000, error) || !text(*l, "crossfade", shape, error))
                 return false;
+            if (shape != "equal_power" && shape != "linear") {
+                error = "loop 'crossfade' must be equal_power or linear";
+                return false;
+            }
+            r.loopCrossfadeEqualPower = shape == "equal_power";
         } else {
             error = "'loop' must be true, false or {\"enabled\", \"min_seconds\", \"max_seconds\"}";
             return false;
+        }
+    }
+    if (const Json* rr = j.get("round_robins")) {
+        double count = r.roundRobins;
+        if (rr->type == Json::Type::Number) {
+            if (!number(j, "round_robins", count, 1, kMaxRoundRobins, error)) return false;
+        } else if (rr->type == Json::Type::Object) {
+            if (!onlyKeys(*rr, {"count", "preroll_ms", "vary"}, "round_robins", error) ||
+                !number(*rr, "count", count, 1, kMaxRoundRobins, error) ||
+                !number(*rr, "preroll_ms", r.roundRobinPrerollMs, 0, 1000, error))
+                return false;
+            if (const Json* v = rr->get("vary")) {
+                if (v->type != Json::Type::Array || v->arr.size() > kMaxAxes) {
+                    error = "round_robins 'vary' must be a list of at most " + std::to_string(kMaxAxes) + " parameters";
+                    return false;
+                }
+                for (const Json& e : v->arr) {
+                    PackVary pv;
+                    double effect = -1;
+                    if (e.type != Json::Type::Object || !onlyKeys(e, {"id", "effect", "amount"}, "vary", error) ||
+                        !text(e, "id", pv.id, error) || !number(e, "effect", effect, 0, kMaxEffects - 1, error) ||
+                        !number(e, "amount", pv.amount, 0, 1e9, error)) {
+                        if (error.empty()) error = "each 'vary' entry must be {\"id\", \"effect\", \"amount\"}";
+                        return false;
+                    }
+                    if (pv.id.empty() || !e.get("amount")) {
+                        error = "each 'vary' entry needs an 'id' and an 'amount'";
+                        return false;
+                    }
+                    if (e.get("effect")) {
+                        if (effect != std::floor(effect) || effect >= static_cast<double>(r.effects.size())) {
+                            error = "vary 'effect' must index 'effects'";
+                            return false;
+                        }
+                        pv.effect = static_cast<int>(effect);
+                    }
+                    r.roundRobinVary.push_back(std::move(pv));
+                }
+            }
+        } else {
+            error = "'round_robins' must be a count or {\"count\", \"preroll_ms\", \"vary\"}";
+            return false;
+        }
+        if (count != std::floor(count)) {
+            error = "'round_robins' must be a whole number";
+            return false;
+        }
+        r.roundRobins = static_cast<int>(count);
+    }
+    if (const Json* d = j.get("dither")) {
+        if (d->type != Json::Type::String || (d->str != "none" && d->str != "tpdf")) {
+            error = "'dither' must be \"none\" or \"tpdf\"";
+            return false;
+        }
+        r.dither = d->str == "tpdf" ? PackDither::Tpdf : PackDither::None;
+    }
+    // A retired synth (2026-11-10, one synth) renders as Flagship with its preset; steps on its old knobs move
+    // the Flagship knob they map to, and a step on one that maps to none is refused.
+    if (r.instrument.library.empty() && isLegacyInstrument(r.instrument.id)) {
+        const std::string legacy = r.instrument.id;
+        migrateLegacyInstrument(r.instrument.id, r.instrument.params);
+        for (PackParamAxis& axis : r.params) {
+            if (axis.effect >= 0) continue;
+            const std::string to = migratedLegacyParameter(legacy, axis.id);
+            if (to.empty()) {
+                error = "'" + legacy + "' now plays as a Flagship preset, which has no knob for '" + axis.id + "'";
+                return false;
+            }
+            axis.id = to;
+        }
+        for (PackVary& v : r.roundRobinVary) {
+            if (v.effect >= 0) continue;
+            const std::string to = migratedLegacyParameter(legacy, v.id);
+            if (to.empty()) {
+                error = "'" + legacy + "' now plays as a Flagship preset, which has no knob for '" + v.id + "'";
+                return false;
+            }
+            v.id = to;
         }
     }
     out = std::move(r);
@@ -821,8 +944,23 @@ struct Cell {
     std::vector<double> axisValues;  // constrained, one per axis
     std::string paramText;           // the {param} expansion
     std::size_t combo = 0;           // index of the parameter combination
+    int rr = 0;                      // round robin take, from 0
     std::string file;                // with .wav
 };
+
+// A deterministic value in [-1, 1] for a round robin's variation (0 for the first take, so a pack of one take per
+// cell renders as without round robins).
+double varyAmount(const Cell& c, std::size_t entry) {
+    if (c.rr == 0) return 0.0;
+    uint32_t h = 2166136261u;
+    for (uint32_t v : {static_cast<uint32_t>(c.note), static_cast<uint32_t>(c.velocity), static_cast<uint32_t>(c.combo),
+                       static_cast<uint32_t>(c.rr), static_cast<uint32_t>(entry)})
+        for (int k = 0; k < 4; ++k) h = (h ^ ((v >> (8 * k)) & 255u)) * 16777619u;
+    h ^= h >> 15;
+    h *= 0x2c1b3c6du;
+    h ^= h >> 12;
+    return static_cast<double>(h) / 2147483647.5 - 1.0;
+}
 
 struct Rendered {
     std::vector<float> left, right;
@@ -869,6 +1007,17 @@ public:
                     }
                     st.values[k].value = cell.axisValues[a];
                 }
+            for (std::size_t v = 0; v < req_.roundRobinVary.size(); ++v)
+                if (req_.roundRobinVary[v].effect + 1 == static_cast<int>(s)) {
+                    const PackVary& pv = req_.roundRobinVary[v];
+                    const uint32_t k = paramIndex(d, pv.id);
+                    if (k == d.parameterCount) {
+                        error = "component '" + comps[s]->id + "' has no parameter '" + pv.id + "' to vary";
+                        return false;
+                    }
+                    st.values[k].value =
+                        constrainParameter(d.parameters[k], st.values[k].value + pv.amount * varyAmount(cell, v));
+                }
             if (s == 0 && !st.processor->usesProcessPorts()) {
                 error = "instrument '" + comps[s]->id + "' does not take note events (processPorts)";
                 return false;
@@ -882,6 +1031,9 @@ public:
             stages.push_back(std::move(st));
         }
         const std::size_t B = req_.blockSize;
+        // A later round robin first runs the chain on silence (its free-running state moves on), then plays.
+        const std::size_t pre = static_cast<std::size_t>(
+            std::llround(static_cast<double>(cell.rr) * req_.roundRobinPrerollMs * 0.001 * req_.sampleRate));
         const std::size_t maxFrames = static_cast<std::size_t>(std::llround(req_.maxSeconds * req_.sampleRate));
         const std::size_t off = std::max<std::size_t>(1, static_cast<std::size_t>(std::llround(req_.holdSeconds * req_.sampleRate)));
         const std::size_t quietNeed = static_cast<std::size_t>(std::llround(kQuietSeconds * req_.sampleRate));
@@ -902,18 +1054,8 @@ public:
         std::size_t quiet = 0, lastLoud = 0;
         bool anyLoud = false;
         bool aborted = false;
-        for (std::size_t at = 0; at < maxFrames; at += B) {
-            if (cancelled(cancel)) {
-                error = "cancelled";
-                aborted = true;
-                break;
-            }
-            const uint32_t m = static_cast<uint32_t>(std::min(B, maxFrames - at));
-            Event events[2];
-            uint32_t count = 0;
-            if (at == 0) events[count++] = notes::noteOn(0, noteId, cell.note, cell.velocity / 127.0);
-            if (off >= at && off < at + m) events[count++] = notes::noteOff(static_cast<uint32_t>(off - at), noteId, key);
-            transport.beat = static_cast<double>(at) / req_.sampleRate * req_.tempo / 60.0;
+        // One block of the chain: the instrument with `events`, then each effect.
+        auto runBlock = [&](uint32_t m, const Event* events, uint32_t count) {
             std::fill_n(L.data(), m, 0.0f);
             std::fill_n(R.data(), m, 0.0f);
             for (std::size_t s = 0; s < stages.size(); ++s) {
@@ -959,6 +1101,26 @@ public:
                     if (!std::isfinite(R[i])) R[i] = 0.0f;
                 }
             }
+        };
+        for (std::size_t done = 0; done < pre;) {  // a round robin's pre-roll: silence, nothing kept
+            const uint32_t m = static_cast<uint32_t>(std::min(B, pre - done));
+            transport.beat = 0.0;
+            runBlock(m, nullptr, 0);
+            done += m;
+        }
+        for (std::size_t at = 0; at < maxFrames; at += B) {
+            if (cancelled(cancel)) {
+                error = "cancelled";
+                aborted = true;
+                break;
+            }
+            const uint32_t m = static_cast<uint32_t>(std::min(B, maxFrames - at));
+            Event events[2];
+            uint32_t count = 0;
+            if (at == 0) events[count++] = notes::noteOn(0, noteId, cell.note, cell.velocity / 127.0);
+            if (off >= at && off < at + m) events[count++] = notes::noteOff(static_cast<uint32_t>(off - at), noteId, key);
+            transport.beat = static_cast<double>(at) / req_.sampleRate * req_.tempo / 60.0;
+            runBlock(m, events, count);
             for (uint32_t i = 0; i < m; ++i) {
                 out.left.push_back(L[i]);
                 out.right.push_back(R[i]);
@@ -1144,7 +1306,7 @@ std::string renderSamplePack(const SamplePackRequest& req, NativeModuleTrust tru
     }
     uint64_t combos = 1;
     for (const PackParamAxis& a : req.params) combos *= a.values.size();
-    const uint64_t total = combos * req.notes.size() * req.velocities.size();
+    const uint64_t total = combos * req.notes.size() * req.velocities.size() * static_cast<uint64_t>(req.roundRobins);
     if (total > req.maxFiles)
         return failure("the pack would be " + std::to_string(total) + " files, more than 'max_files' (" +
                        std::to_string(req.maxFiles) + ")");
@@ -1157,6 +1319,15 @@ std::string renderSamplePack(const SamplePackRequest& req, NativeModuleTrust tru
     if (ec) return failure("can't resolve the output directory '" + req.outputDir + "'");
 
     const std::string packName = sanitizeFileName(req.name);
+    // Round robins need their take in the name: added at the end when the pattern doesn't place it.
+    std::string pattern = req.namePattern;
+    if (req.roundRobins > 1 && pattern.find("{rr}") == std::string::npos && pattern.find("{index}") == std::string::npos)
+        pattern += "_rr{rr}";
+    for (const PackVary& v : req.roundRobinVary) {
+        const ModuleDescriptor& d = *descs[static_cast<std::size_t>(v.effect + 1)];
+        if (paramIndex(d, v.id) == d.parameterCount)
+            return failure("component '" + std::string(d.id) + "' has no parameter '" + v.id + "' to vary");
+    }
     std::vector<Cell> cells;
     std::vector<std::string> comboText;
     for (uint64_t c = 0; c < combos; ++c) {
@@ -1176,17 +1347,20 @@ std::string renderSamplePack(const SamplePackRequest& req, NativeModuleTrust tru
         const std::string ptext = sanitizeFileName(paramLabel(label));
         comboText.push_back(req.params.empty() ? "" : ptext);
         for (int note : req.notes)
-            for (int vel : req.velocities) {
-                Cell cell;
-                cell.note = note;
-                cell.velocity = vel;
-                cell.axisValues = values;
-                cell.paramText = comboText.back();
-                cell.combo = static_cast<std::size_t>(c);
-                cell.file = expandNamePattern(req.namePattern, packName, note, vel, cell.paramText,
-                                              static_cast<uint32_t>(cells.size())) + ".wav";
-                cells.push_back(std::move(cell));
-            }
+            for (int vel : req.velocities)
+                for (int rr = 0; rr < req.roundRobins; ++rr) {
+                    Cell cell;
+                    cell.note = note;
+                    cell.velocity = vel;
+                    cell.axisValues = values;
+                    cell.paramText = comboText.back();
+                    cell.combo = static_cast<std::size_t>(c);
+                    cell.rr = rr;
+                    cell.file = expandNamePattern(pattern, packName, note, vel, cell.paramText,
+                                                  static_cast<uint32_t>(cells.size()), req.roundRobins > 1 ? rr + 1 : 0) +
+                                ".wav";
+                    cells.push_back(std::move(cell));
+                }
     }
     // Names: unique (case-insensitively, for Windows and Android storage) and writable before anything renders.
     std::map<std::string, std::size_t> seen;
@@ -1198,7 +1372,7 @@ std::string renderSamplePack(const SamplePackRequest& req, NativeModuleTrust tru
         const auto [it, fresh] = seen.emplace(lower(cells[i].file), i);
         if (!fresh)
             return failure("two samples would both be named '" + cells[i].file +
-                           "': put {note}, {vel} and {param} (or {index}) in 'name_pattern'");
+                           "': put {note}, {vel} and {param} (or {index}), and {rr} with round robins, in 'name_pattern'");
         fs::path p;
         if (!targetPath(dir, cells[i].file, req.overwrite, p, error)) return failure(error);
     }
@@ -1233,6 +1407,7 @@ std::string renderSamplePack(const SamplePackRequest& req, NativeModuleTrust tru
     struct Prepared {
         Rendered r;
         PackLoop loop;
+        std::size_t crossfade = 0;
         std::vector<std::string> warnings;
     };
     auto prepare = [&](const Cell& cell, Prepared& p) -> bool {
@@ -1264,6 +1439,12 @@ std::string renderSamplePack(const SamplePackRequest& req, NativeModuleTrust tru
                 p.loop.start -= p.r.trimmed;
                 p.loop.end -= p.r.trimmed;
             }
+        }
+        p.crossfade = 0;
+        if (p.loop.found && req.loopCrossfadeMs > 0) {
+            const std::size_t want = static_cast<std::size_t>(std::llround(req.loopCrossfadeMs * sr / 1000.0));
+            p.crossfade = crossfadeLoop(p.r.left, p.r.right, p.loop, want, req.loopCrossfadeEqualPower);
+            if (p.crossfade < want) p.warnings.push_back("loop_crossfade_shortened");
         }
         std::size_t fi = fadeIn, fo = fadeOut;
         if (p.loop.found) {  // fades stay outside the loop
@@ -1331,6 +1512,8 @@ std::string renderSamplePack(const SamplePackRequest& req, NativeModuleTrust tru
         spec.channels = req.channels;
         spec.bitDepth = req.bitDepth;
         spec.rootNote = cell.note;
+        spec.dither = req.bitDepth == 32 ? PackDither::None : req.dither;
+        spec.ditherSeed = static_cast<uint32_t>(i + 1);
         spec.loop = p.loop.found;
         spec.loopStart = static_cast<uint32_t>(p.loop.start);
         spec.loopEnd = static_cast<uint32_t>(p.loop.end);
@@ -1344,6 +1527,7 @@ std::string renderSamplePack(const SamplePackRequest& req, NativeModuleTrust tru
         files.ki("note", cell.note);
         files.ks("note_name", noteName(cell.note));
         files.ki("velocity", cell.velocity);
+        if (req.roundRobins > 1) files.ki("round_robin", cell.rr + 1);
         files.key("params");
         files.raw("{");
         for (std::size_t a = 0; a < req.params.size(); ++a) {
@@ -1373,6 +1557,7 @@ std::string renderSamplePack(const SamplePackRequest& req, NativeModuleTrust tru
             files.ki("start", static_cast<int64_t>(p.loop.start));
             files.ki("end", static_cast<int64_t>(p.loop.end));
             files.kv("match_db", p.loop.matchDb);
+            files.ki("crossfade_frames", static_cast<int64_t>(p.crossfade));
             files.raw("}");
         } else {
             files.raw("null");
@@ -1391,6 +1576,8 @@ std::string renderSamplePack(const SamplePackRequest& req, NativeModuleTrust tru
             reg.sample = cell.file;
             reg.note = cell.note;
             reg.velocity = cell.velocity;
+            reg.roundRobin = cell.rr + 1;
+            reg.roundRobins = req.roundRobins;
             reg.loop = p.loop.found;
             reg.loopStart = spec.loopStart;
             reg.loopEnd = spec.loopEnd;
@@ -1441,6 +1628,12 @@ std::string renderSamplePack(const SamplePackRequest& req, NativeModuleTrust tru
         body.ks("normalize_scope", req.normalizeGroup ? "group" : "file");
     }
     body.kb("loop", req.loop);
+    if (req.loop && req.loopCrossfadeMs > 0) {
+        body.kv("loop_crossfade_ms", req.loopCrossfadeMs);
+        body.ks("loop_crossfade", req.loopCrossfadeEqualPower ? "equal_power" : "linear");
+    }
+    body.ki("round_robins", req.roundRobins);
+    body.ks("dither", req.bitDepth != 32 && req.dither == PackDither::Tpdf ? "tpdf" : "none");
     body.raw("}");
     body.ki("file_count", static_cast<int64_t>(cells.size()));
     body.key("files");

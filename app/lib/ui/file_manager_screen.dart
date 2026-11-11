@@ -3,21 +3,40 @@ import 'package:flutter/material.dart';
 
 import '../model/app_state.dart';
 import '../model/files_catalog.dart';
+import '../model/sample_packs.dart';
+import '../model/user_presets.dart';
+import 'frame/frame_widgets.dart' show AwakeListenableBuilder, ScrollFade;
 import 'files/asset_actions.dart';
 import 'files/asset_inspector.dart';
 import 'files/asset_views.dart';
 import 'files/files_tree.dart';
 import 'files/library_manager.dart';
+import 'files/project_file_actions.dart';
 import 'glass.dart';
+import 'audio_file_actions.dart';
+import 'midi_file_actions.dart';
 import 'theme.dart';
 import 'tokens.dart';
+import 'widgets.dart' show ResetOnDoubleTap;
 
 /// The Files section. Landscape and desktop (wider than tall, or 900 dp and up) show the folder tree on the left;
 /// portrait puts it in a drawer and leads with the breadcrumb. Tap selects, double-tap opens in Build, a long
 /// press without moving opens the item's menu and a long press that moves drags it onto a track.
 class FileManagerScreen extends StatefulWidget {
-  const FileManagerScreen({super.key, required this.state, this.onOpenBuilder = _none});
+  const FileManagerScreen({super.key, required this.state, this.onOpenBuilder = _none, this.explorer = false,
+      this.folder, this.onOpenAsset, this.activeKey});
   final AppState state;
+
+  /// Build's explorer (#169): one column (breadcrumb, search, a list of folders and items), no filters, tree
+  /// drawer or inspector, and a tap opens the item ([onOpenAsset], else as a double-tap would).
+  final bool explorer;
+
+  /// The folder shown first (and again whenever it changes), e.g. the open component's.
+  final String? folder;
+  final ValueChanged<FileAsset>? onOpenAsset;
+
+  /// The item open in the editor, highlighted in the explorer.
+  final String? activeKey;
 
   /// Opens the Builder when Files is shown without the three-section frame (no SectionScope).
   final VoidCallback onOpenBuilder;
@@ -29,12 +48,12 @@ class FileManagerScreen extends StatefulWidget {
 }
 
 class _FileManagerScreenState extends State<FileManagerScreen> {
-  String _path = 'fx';
+  late String _path = widget.folder ?? 'fx';
   String? _selected;
   String _query = '';
   bool _searchOpen = false;
   final Set<FileAssetFilter> _filters = {};
-  double _size = 0.35; // 0..1; under [_listBelow] the grid is a list
+  late double _size = widget.explorer ? 0 : 0.35; // 0..1; under [_listBelow] the grid is a list
   static const _listBelow = 0.12;
   final _scaffold = GlobalKey<ScaffoldState>();
   final _search = TextEditingController();
@@ -59,6 +78,14 @@ class _FileManagerScreenState extends State<FileManagerScreen> {
     state.refreshNativeCatalog().then((_) {
       if (mounted) setState(() {});
     });
+    state.refreshSamplePacks();
+  }
+
+  @override
+  void didUpdateWidget(FileManagerScreen old) {
+    super.didUpdateWidget(old);
+    final f = widget.folder;
+    if (f != null && f != old.folder) _go(f);
   }
 
   @override
@@ -146,24 +173,30 @@ class _FileManagerScreenState extends State<FileManagerScreen> {
   Future<void> _newMenu(Offset at, FilesFolder folder) async {
     final action = await showCompactMenu<String>(context, at, const [
       MenuEntry('cpp', Icons.memory, 'New C++ effect'),
-      MenuEntry('effect', Icons.tune, 'New .caw effect'),
-      MenuEntry('generator', Icons.waves, 'New .caw instrument'),
+      MenuEntry('cpp-instrument', Icons.piano_outlined, 'New C++ instrument'),
+      MenuEntry('starter', Icons.auto_awesome_outlined, 'New from a starter…'),
       MenuEntry('pattern', Icons.piano, 'New pattern'),
     ]);
     if (action == null || !mounted) return;
-    if (action == 'cpp') {
-      _actions.newCppEffect();
-    } else {
-      _actions.newCawModule(action, folderPath: folder.libraryPath);
+    switch (action) {
+      case 'cpp':
+        _actions.newCppEffect();
+      case 'cpp-instrument':
+        _actions.newCppEffect(instrument: true);
+      case 'starter':
+        await _actions.newFromStarter();
+      case 'pattern':
+        _actions.newPattern();
     }
   }
 
   /// ⋯: everything the old Files screen had (portable files, restore points, the library manager).
   Future<void> _projectMenu(Offset at, FilesFolder folder) async {
     final action = await showCompactMenu<String>(context, at, const [
-      MenuEntry('export', Icons.file_upload_outlined, 'Export .cawproj'),
+      MenuEntry('export', Icons.file_upload_outlined, 'Export project…'),
       MenuEntry('import', Icons.file_open_outlined, 'Import project'),
-      MenuEntry('module', Icons.note_add_outlined, 'Import .caw module'),
+      MenuEntry('midi', Icons.piano, 'Import MIDI file as clips'),
+      MenuEntry('audio', Icons.graphic_eq_rounded, 'Import audio files (WAV, FLAC, MP3)'),
       MenuEntry('restore', Icons.bookmark_add_outlined, 'Create restore point', dividerBefore: true),
       MenuEntry('history', Icons.history, 'Version history'),
       MenuEntry('library', Icons.folder_copy_outlined, 'Project library (folders, tags)', dividerBefore: true),
@@ -175,8 +208,10 @@ class _FileManagerScreenState extends State<FileManagerScreen> {
       case 'import':
         await importPortableProject(context, state);
         if (mounted) setState(() => _selected = null);
-      case 'module':
-        await importCawModule(context, state, folder.libraryPath);
+      case 'midi':
+        await importMidiFile(context, state);
+      case 'audio':
+        await importAudioFiles(context, state, place: false);
       case 'restore':
         await createProjectRestorePoint(context, state);
       case 'history':
@@ -197,52 +232,147 @@ class _FileManagerScreenState extends State<FileManagerScreen> {
     return SizedBox(
       height: 40,
       child: Row(children: [
-        if (!wide) _iconButton(Icons.account_tree_outlined, 'Folders', () => _scaffold.currentState?.openDrawer()),
+        if (!wide && !widget.explorer)
+          _iconButton(Icons.account_tree_outlined, 'Folders', () => _scaffold.currentState?.openDrawer()),
+        // The explorer has no tree beside it: every folder, indented, from one menu.
+        if (widget.explorer)
+          Builder(builder: (c) => _iconButton(Icons.account_tree_outlined, 'Folders', () async {
+                final all = <(FilesFolder, int)>[];
+                void walk(List<FilesFolder> level, int depth) {
+                  for (final f in level) {
+                    all.add((f, depth));
+                    walk(f.children, depth + 1);
+                  }
+                }
+
+                walk(state.filesTree, 0);
+                final path = await showCompactMenu<String>(context, _centerOf(c), [
+                  for (final (f, depth) in all) MenuEntry(f.path, folderIcon(f.kind), '${'    ' * depth}${f.label}'),
+                ]);
+                if (path != null && mounted) _go(path);
+              })),
         Expanded(child: _breadcrumb(trail, searching)),
         if (wide)
           SizedBox(width: 200, child: _searchField())
         else
           _iconButton(Icons.search, 'Search', () => setState(() => _searchOpen = !_searchOpen), selected: _searchOpen),
-        Builder(builder: (c) => _iconButton(Icons.add, 'New', () => _newMenu(_centerOf(c), folder))),
+        // Build's own + New makes new files there.
+        if (!widget.explorer) Builder(builder: (c) => _iconButton(Icons.add, 'New', () => _newMenu(_centerOf(c), folder))),
         Builder(builder: (c) => _iconButton(Icons.more_vert, 'Project files', () => _projectMenu(_centerOf(c), folder))),
       ]),
     );
   }
 
   Widget _filterBar(int count, {required bool narrow}) {
-    Widget toggle(FileAssetFilter f, IconData icon, String tip) => _iconButton(icon, tip, () => setState(() {
-          if (!_filters.remove(f)) _filters.add(f);
-        }), selected: _filters.contains(f));
+    // Labelled, so what each filter does is plain (the icons alone were guesswork).
+    Widget toggle(FileAssetFilter f, IconData icon, String label) {
+      final on = _filters.contains(f);
+      return Padding(
+        padding: const EdgeInsets.only(right: Space.xs),
+        child: FilterChip(
+          key: ValueKey('filter ${f.name}'),
+          selected: on,
+          showCheckmark: false,
+          visualDensity: VisualDensity.compact,
+          materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          padding: const EdgeInsets.symmetric(horizontal: 2),
+          labelPadding: const EdgeInsets.only(left: 2, right: 4),
+          avatar: Icon(icon, size: 14, color: on ? Neon.blue : Neon.dim),
+          label: Text(label, style: TextStyle(fontSize: 11.5, color: on ? Neon.text : Neon.dim)),
+          selectedColor: Neon.blue.withValues(alpha: 0.16),
+          side: BorderSide(color: on ? Neon.blue.withValues(alpha: 0.6) : Colors.white.withValues(alpha: 0.1)),
+          onSelected: (_) => setState(() {
+            if (!_filters.remove(f)) _filters.add(f);
+          }),
+        ),
+      );
+    }
     return SizedBox(
       height: 40,
       child: Row(children: [
-        Expanded(child: SingleChildScrollView(scrollDirection: Axis.horizontal, child: Row(children: [
-          toggle(FileAssetFilter.effects, Icons.auto_awesome, 'Effects'),
-          toggle(FileAssetFilter.instruments, Icons.waves, 'Instruments'),
-          toggle(FileAssetFilter.code, Icons.code, 'Code'),
-          toggle(FileAssetFilter.patterns, Icons.piano, 'Patterns'),
-          const SizedBox(width: Space.xs),
-          Text('$count', style: TypeScale.number(size: TypeScale.caption, color: Neon.dim)),
-        ]))),
+        // The chips scroll on a phone; a fade says there are more.
+        Expanded(child: ScrollFade(child: SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          padding: const EdgeInsets.only(left: Space.s),
+          child: Row(children: [
+            toggle(FileAssetFilter.effects, Icons.auto_awesome, 'Effects'),
+            toggle(FileAssetFilter.instruments, Icons.waves, 'Instruments'),
+            toggle(FileAssetFilter.code, Icons.code, 'Code'),
+            toggle(FileAssetFilter.patterns, Icons.piano, 'Patterns'),
+            const SizedBox(width: Space.xs),
+            Text('$count item${count == 1 ? '' : 's'}', style: TypeScale.number(size: TypeScale.caption, color: Neon.dim)),
+            const SizedBox(width: Space.s),
+          ]),
+        ))),
+        // A phone gets one list/icons toggle instead of the size slider, so the filters keep the room.
+        if (narrow)
+          _iconButton(_size < _listBelow ? Icons.grid_view : Icons.view_list, _size < _listBelow ? 'Show as icons' : 'Show as a list',
+              () => setState(() => _size = _size < _listBelow ? 0.35 : 0)),
+        if (!narrow) ...[
         Tooltip(message: 'List', child: Icon(Icons.view_list, size: 14, color: _size < _listBelow ? Neon.blue : Neon.dim)),
         SizedBox(
-          width: narrow ? 64 : 110,
+          width: 110,
           child: SliderTheme(
             data: SliderTheme.of(context).copyWith(
               trackHeight: 2,
               thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
               overlayShape: const RoundSliderOverlayShape(overlayRadius: 14),
             ),
-            child: Slider(
+            child: ResetOnDoubleTap(onReset: () => setState(() => _size = widget.explorer ? 0 : 0.35), child: Slider(
               value: _size,
               label: 'Icon size',
               semanticFormatterCallback: (v) => v < _listBelow ? 'List' : 'Icons ${(v * 100).round()}%',
               onChanged: (v) => setState(() => _size = v),
-            ),
+            )),
           ),
         ),
         const Tooltip(message: 'Large icons', child: Icon(Icons.grid_view, size: 14, color: Neon.dim)),
+        ],
         const SizedBox(width: Space.s),
+      ]),
+    );
+  }
+
+  /// Build's explorer: one tap to each kind of code (C++ components, patterns), with counts; the group
+  /// the explorer stands in is lit.
+  Widget _explorerGroups(String path) {
+    final p = state.project;
+    final patterns = p.modules.where((m) => state.isPattern(m.id)).length;
+    Widget group(String key, String to, IconData icon, Color color, String label, int count) {
+      final on = path == to || path.startsWith('$to/');
+      return Padding(
+        padding: const EdgeInsets.only(right: Space.xs),
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            key: ValueKey('explorer group $key'),
+            borderRadius: BorderRadius.circular(Radii.s),
+            onTap: () => _go(to),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(Radii.s),
+                color: on ? color.withValues(alpha: 0.14) : null,
+                border: Border.all(color: on ? color.withValues(alpha: 0.6) : Colors.white.withValues(alpha: 0.08)),
+              ),
+              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                Icon(icon, size: 13, color: color),
+                const SizedBox(width: 4),
+                Text(label, style: TextStyle(fontSize: 11.5, color: on ? Neon.text : Neon.dim)),
+                const SizedBox(width: 4),
+                Text('$count', style: TypeScale.number(size: 10.5, color: Neon.dim)),
+              ]),
+            ),
+          ),
+        ),
+      );
+    }
+
+    return SizedBox(
+      height: 32,
+      child: ListView(scrollDirection: Axis.horizontal, padding: const EdgeInsets.symmetric(horizontal: Space.s), children: [
+        group('cpp', 'code/cpp', Icons.memory, Neon.pink, 'C++', p.cppComponents.length),
+        group('patterns', 'audio/patterns', Icons.queue_music, Neon.yellow, 'Patterns', patterns),
       ]),
     );
   }
@@ -256,6 +386,11 @@ class _FileManagerScreenState extends State<FileManagerScreen> {
       FilesFolderKind.builtin => 'Built-in effects appear once the engine is running.',
       FilesFolderKind.cppEffects || FilesFolderKind.cppList => 'No C++ effects yet. Hold this folder or tap + for a new one.',
       FilesFolderKind.patterns => 'No patterns yet. Tap + for a new one.',
+      FilesFolderKind.presets => 'Your presets show here: Save preset… in a device, or Save track preset… in its ⋯ '
+          'menu. Drag one onto a track, or onto the empty area for a new track.',
+      FilesFolderKind.audioFiles => 'Audio files show here (⋯ › Import audio files, or a recording); drag one onto a '
+          'track, or onto the empty area for a new audio track.',
+      FilesFolderKind.midiFiles => 'Imported MIDI files show here (⋯ › Import MIDI file as clips); drag one onto a track.',
       _ => 'This folder is empty.',
     };
   }
@@ -272,14 +407,17 @@ class _FileManagerScreenState extends State<FileManagerScreen> {
     final extent = 64 + 96 * ((_size - _listBelow) / (1 - _listBelow)).clamp(0.0, 1.0);
     final actions = _actions;
     Widget assetItem(FileAsset a) {
-      final selected = a.key == _selected;
+      final selected = a.key == (widget.explorer ? widget.activeKey ?? _selected : _selected);
       final fav = state.isFavourite(a);
       final warning = a.type == FileAssetType.cppComponent && state.cppStatus(a.cpp!) != null;
       return AssetGestures(
         key: ValueKey(a.key),
         asset: a,
-        onSelect: () => setState(() => _selected = a.key),
-        onOpen: () => actions.open(a),
+        onSelect: () {
+          setState(() => _selected = a.key);
+          if (widget.explorer) (widget.onOpenAsset ?? actions.open)(a);
+        },
+        onOpen: () => widget.explorer ? null : actions.open(a),
         onMenu: (at) => actions.assetMenu(a, at),
         child: list
             ? AssetRow(asset: a, selected: selected, favourite: fav, warning: warning,
@@ -320,11 +458,12 @@ class _FileManagerScreenState extends State<FileManagerScreen> {
   }
 
   @override
-  Widget build(BuildContext context) => ListenableBuilder(
-        listenable: state,
+  // Asleep while Files is behind another section (frame_widgets.dart).
+  Widget build(BuildContext context) => AwakeListenableBuilder(
+        listenable: Listenable.merge([state, state.userPresets, state.samplePacksTick]),
         builder: (context, _) => LayoutBuilder(builder: (context, c) {
           // A small docked panel in a landscape window still uses the drawer: the tree needs room beside the grid.
-          final wide = (c.maxWidth > c.maxHeight || c.maxWidth >= 900) && c.maxWidth >= 560;
+          final wide = !widget.explorer && (c.maxWidth > c.maxHeight || c.maxWidth >= 900) && c.maxWidth >= 560;
           final tree = state.filesTree;
           var trail = state.folderTrail(_path);
           if (trail.isEmpty) trail = state.folderTrail('fx');
@@ -356,11 +495,12 @@ class _FileManagerScreenState extends State<FileManagerScreen> {
           );
           final main = Column(children: [
             _toolbar(trail, wide, searching),
+            if (widget.explorer && !searching) _explorerGroups(folder.path),
             if (!wide && _searchOpen)
               Padding(padding: const EdgeInsets.fromLTRB(Space.s, 0, Space.s, Space.xs), child: _searchField(autofocus: true)),
-            _filterBar(subfolders.length + assets.length, narrow: c.maxWidth < 360),
+            if (!widget.explorer) _filterBar(subfolders.length + assets.length, narrow: c.maxWidth < 480),
             Expanded(child: _grid(folder, subfolders, assets, searching)),
-            if (selected != null && !sideInspector)
+            if (selected != null && !sideInspector && !widget.explorer)
               Padding(
                 padding: const EdgeInsets.fromLTRB(Space.s, 0, Space.s, Space.s),
                 child: GlassPanel(child: inspector(compact: true)),
@@ -385,6 +525,7 @@ class _FileManagerScreenState extends State<FileManagerScreen> {
                 ),
             ]);
           }
+          if (widget.explorer) return main;
           return Scaffold(
             key: _scaffold,
             backgroundColor: Colors.transparent,

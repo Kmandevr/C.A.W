@@ -1,41 +1,54 @@
-// The FX tab: a track's FX stack (its .caw chain, then its native C++ effects) as cards with knobs, and a Routing view.
+// The FX tab: a track's FX chain like REAPER's (its instrument first, then its native C++ effects), built-ins as their
+// plugin UIs inline and the rest as knob cards, and a Routing view.
 import 'package:flutter/material.dart';
 
 import '../../engine/component_info.dart';
-import '../../engine/engine.dart';
 import '../../model/app_state.dart';
 import '../../model/arrange_fx.dart';
 import '../../model/cpp_component.dart';
+import '../../model/mixer_fx.dart';
+import '../../model/note_fx.dart';
 import '../../model/project.dart';
+import '../../model/routing_edit.dart';
+import '../../model/device_target.dart';
+import '../devices/modulators/modulator_devices.dart' show ModulatorsSection;
+import '../devices/device_editor.dart';
+import '../devices/device_inline.dart';
 import '../files/asset_picker.dart';
 import '../frame/sections.dart';
 import '../glass.dart';
 import '../theme.dart';
+import '../volume_fader.dart';
+import 'arrange_drag.dart';
+import 'track_color.dart';
 import 'knob.dart';
 import 'long_press_menu.dart';
+import 'note_fx_section.dart';
 
-/// Opens the Build tab for a .caw module or C++ component; falls back to [onOpenModule] for a module when the
-/// app has no sections (tests, the docking shell).
-void openSource(BuildContext context, BuildTab tab, {ValueChanged<String>? onOpenModule}) {
-  final sections = SectionController.maybeOf(context);
-  if (sections != null) {
-    sections.openBuild(tab);
-  } else if (tab.kind == BuildTabKind.caw) {
-    onOpenModule?.call(tab.id);
-  }
+/// Opens the Build tab for a C++ component (nothing without sections: tests).
+void openSource(BuildContext context, BuildTab tab) => SectionController.maybeOf(context)?.openBuild(tab);
+
+/// Asks for an effect or an instrument (the same browser, as in REAPER) and puts it on [layer]; an instrument
+/// replaces the track's, after asking.
+Future<void> addEffectTo(BuildContext context, AppState state, LayerDoc layer) async {
+  // The master's chain takes C++ effects only.
+  final master = isMasterLayer(layer);
+  final pick = await showAssetPicker(context, state, kinds: {AssetKind.nativeEffect}, instruments: !master);
+  if (pick != null && context.mounted) await dropOnTrack(context, state, layer, pick);
 }
 
-/// Asks for an effect (the filtered browser) and puts it on [layer].
-Future<void> addEffectTo(BuildContext context, AppState state, LayerDoc layer) async {
-  final pick = await showAssetPicker(context, state, kinds: {AssetKind.nativeEffect, AssetKind.cawModule});
-  if (pick != null) state.dropAsset(layer, pick);
+/// The same browser showing only instruments: picks [layer]'s instrument (the track menu's Instrument…, the
+/// instrument slot's Add and Replace).
+Future<void> pickInstrument(BuildContext context, AppState state, LayerDoc layer) async {
+  final pick = await showAssetPicker(context, state, kinds: {AssetKind.nativeEffect},
+      title: 'Instrument', effects: false);
+  if (pick != null && context.mounted) await dropOnTrack(context, state, layer, pick);
 }
 
 class FxStack extends StatefulWidget {
-  const FxStack({super.key, required this.state, required this.layer, this.onOpenModule});
+  const FxStack({super.key, required this.state, required this.layer});
   final AppState state;
   final LayerDoc layer;
-  final ValueChanged<String>? onOpenModule;
 
   @override
   State<FxStack> createState() => _FxStackState();
@@ -43,28 +56,38 @@ class FxStack extends StatefulWidget {
 
 class _FxStackState extends State<FxStack> {
   bool _routing = false;
+  final _scroll = ScrollController();
 
-  /// The selected card: ('caw' | 'native' | 'instrument', index).
+  @override
+  void dispose() {
+    _scroll.dispose();
+    super.dispose();
+  }
+
+  /// The selected card: ('native' | 'instrument', index).
   (String, int)? _selected;
 
   AppState get s => widget.state;
   LayerDoc get layer => widget.layer;
 
+  /// A bus folder or the master: effects only, no instrument.
+  bool get _nativeOnly => layer.isFolder || isMasterLayer(layer);
+
   @override
   Widget build(BuildContext context) {
     s.componentCatalog.refreshIfStale();
-    if (layer.isFolder) {
+    if (layer.isFolder && !layer.busEnabled) {
       return const Center(child: Padding(padding: EdgeInsets.all(16), child: Text(
-        'A folder mixes its tracks; effects go on the tracks inside it.',
+        'This folder only groups its tracks. Turn its bus on (Mixer) to give it effects of its own.',
         textAlign: TextAlign.center, style: TextStyle(color: Neon.dim))));
     }
     return DragTarget<AssetDrag>(
-      onWillAcceptWithDetails: (d) => d.data.kind != AssetKind.pattern,
-      onAcceptWithDetails: (d) => s.dropAsset(layer, d.data),
+      onWillAcceptWithDetails: (d) => d.data.kind != AssetKind.pattern && d.data.kind != AssetKind.midiFile && d.data.kind != AssetKind.audioFile,
+      onAcceptWithDetails: (d) => dropOnTrack(context, s, layer, d.data),
       builder: (context, hovering, _) => DecoratedBox(
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(10),
-          border: hovering.isEmpty ? null : Border.all(color: Neon.layer(layer.color), width: 1.5)),
+          border: hovering.isEmpty ? null : Border.all(color: trackColor(s, layer), width: 1.5)),
         child: ValueListenableBuilder<Map<String, NativeComponentInfo>>(
           valueListenable: s.componentCatalog,
           builder: (context, _, _) => Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
@@ -81,7 +104,7 @@ class _FxStackState extends State<FxStack> {
     Text(_routing ? 'ROUTING' : 'FX STACK', style: const TextStyle(
       color: Neon.dim, fontSize: 10, letterSpacing: 1.3, fontWeight: FontWeight.w800)),
     const Spacer(),
-    IconButton(
+    if (!isMasterLayer(layer)) IconButton(
       key: const ValueKey('fx-routing-toggle'),
       tooltip: _routing ? 'FX stack' : 'Routing',
       iconSize: 18,
@@ -89,7 +112,7 @@ class _FxStackState extends State<FxStack> {
       onPressed: () => setState(() => _routing = !_routing),
       icon: Icon(_routing ? Icons.view_agenda_outlined : Icons.account_tree_outlined)),
     IconButton(
-      tooltip: 'Add effect',
+      tooltip: 'Add FX or instrument',
       iconSize: 18,
       color: Neon.green,
       onPressed: () => addEffectTo(context, s, layer),
@@ -97,33 +120,38 @@ class _FxStackState extends State<FxStack> {
   ]));
 
   Widget _stack(BuildContext context) {
-    final glow = Neon.layer(layer.color);
-    return ListView(padding: const EdgeInsets.fromLTRB(8, 0, 8, 24), children: [
-      if (layer.instrument != null) ...[
+    final glow = trackColor(s, layer);
+    // Inline plugin UIs take drags on their heroes and knobs, so the stack also scrolls by its thumb, in a gutter
+    // of its own on the right, and by the devices' headers.
+    return Scrollbar(controller: _scroll, thumbVisibility: true, interactive: true, thickness: 6,
+      radius: const Radius.circular(3), child: ListView(
+      key: const ValueKey('fx-stack-list'),
+      controller: _scroll,
+      padding: const EdgeInsets.fromLTRB(8, 0, 14, 24), children: [
+      // The instrument is the chain's first slot (REAPER: an instrument is FX, usually first in the chain). A bus
+      // folder has no instrument: only its effects.
+      if (isMasterLayer(layer)) ...[
+        const _GroupLabel('MASTER EFFECTS', null, note: 'On the whole mix, before the master level and the safety limiter'),
+      ] else if (layer.isFolder) ...[
+        const _GroupLabel('BUS EFFECTS', null, note: 'On everything this bus hears: its tracks and the sends to it'),
+      ] else if (layer.instrument != null) ...[
         const _GroupLabel('INSTRUMENT · C++', null, note: 'Plays the track\'s notes'),
         _NativeEffectCard(key: ValueKey('fx-instrument-${layer.instrument!.id}'), state: s, layer: layer, index: -1,
           instrument: true, selected: _selected == ('instrument', 0), glow: glow,
           onSelect: () => setState(() => _selected = ('instrument', 0))),
-        const SizedBox(height: 6),
+      ] else ...[
+        const _GroupLabel('INSTRUMENT', null, note: 'Nothing plays this track\'s notes yet'),
+        Align(alignment: Alignment.centerLeft, child: TextButton.icon(
+          key: const ValueKey('fx-add-instrument'),
+          onPressed: () => pickInstrument(context, s, layer),
+          icon: const Icon(Icons.piano, size: 18),
+          label: const Text('Instrument'))),
       ],
-      _GroupLabel('CODE EFFECTS · .caw', layer.effectIds.isEmpty ? 'None' : null),
-      if (layer.effectIds.isNotEmpty)
-        ReorderableListView(
-          key: const ValueKey('fx-caw-list'),
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          buildDefaultDragHandles: false,
-          onReorderItem: (from, to) => s.moveCawEffect(layer, from, to),
-          children: [
-            for (var i = 0; i < layer.effectIds.length; i++)
-              _CawEffectCard(key: ValueKey('fx-caw-$i-${layer.effectIds[i]}'), state: s, layer: layer, index: i,
-                selected: _selected == ('caw', i), glow: glow,
-                onSelect: () => setState(() => _selected = ('caw', i)),
-                onOpenModule: widget.onOpenModule),
-          ],
-        ),
       const SizedBox(height: 6),
-      const _GroupLabel('NATIVE EFFECTS · C++', null, note: 'After the code chain, before volume and pan'),
+      // Per-note FX (#127): above the track's effects, as they run (each note, then the whole track).
+      if (!_nativeOnly && layer.instrument != null && layer.noteComponents.isNotEmpty)
+        NoteFxSection(key: const ValueKey('note-fx-section'), state: s, layer: layer),
+      if (!_nativeOnly) const _GroupLabel('NATIVE EFFECTS · C++', null, note: 'After the instrument, before volume and pan'),
       if (layer.components.isEmpty) const _GroupLabel('', 'None'),
       if (layer.components.isNotEmpty)
         ReorderableListView(
@@ -143,8 +171,10 @@ class _FxStackState extends State<FxStack> {
       Align(alignment: Alignment.centerLeft, child: TextButton.icon(
         onPressed: () => addEffectTo(context, s, layer),
         icon: const Icon(Icons.add, size: 18),
-        label: const Text('Effect'))),
-    ]);
+        label: const Text('FX'))),
+      // Project modulation (#161): this track's modulators, under its effects (the master's: the project's own).
+      ModulatorsSection(state: s, layer: layer),
+    ]));
   }
 }
 
@@ -237,71 +267,6 @@ Widget _iconAction({required String tooltip, required IconData icon, required Vo
       padding: EdgeInsets.zero, constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
       icon: Icon(icon));
 
-class _CawEffectCard extends StatelessWidget {
-  const _CawEffectCard({super.key, required this.state, required this.layer, required this.index,
-    required this.selected, required this.glow, required this.onSelect, this.onOpenModule});
-  final AppState state;
-  final LayerDoc layer;
-  final int index;
-  final bool selected;
-  final Color glow;
-  final VoidCallback onSelect;
-  final ValueChanged<String>? onOpenModule;
-
-  @override
-  Widget build(BuildContext context) {
-    final id = layer.effectIds[index];
-    final m = state.project.module(id);
-    final info = state.info[id];
-    final failed = info != null && !info.ok;
-    final params = info?.params.where((p) => !p.global).toList() ?? const <ParamInfo>[];
-    void open() => openSource(context, BuildTab(BuildTabKind.caw, id), onOpenModule: onOpenModule);
-    Future<void> menu(Offset at) async {
-      final v = await showLongPressMenu<String>(context, at: at, title: m?.name ?? 'Effect',
-        style: state.settings.longPressMenu, actions: [
-          const MenuAction('open', 'Open code', Icons.code),
-          if (index > 0) const MenuAction('up', 'Move up', Icons.arrow_upward),
-          if (index < layer.effectIds.length - 1) const MenuAction('down', 'Move down', Icons.arrow_downward),
-          const MenuAction('remove', 'Remove', Icons.delete_outline, danger: true),
-        ]);
-      if (v == 'open' && context.mounted) open();
-      if (v == 'up') state.moveCawEffect(layer, index, index - 1);
-      if (v == 'down') state.moveCawEffect(layer, index, index + 1);
-      if (v == 'remove') state.removeCawEffect(layer, index);
-    }
-    return _FxCard(
-      index: index,
-      title: m?.name ?? 'Missing module',
-      subtitle: failed ? 'Error: ${info.error}' : '.caw effect',
-      color: failed ? Neon.pink : Neon.violet,
-      glow: glow,
-      selected: selected,
-      onSelect: onSelect,
-      onTitle: open,
-      onMenu: menu,
-      actions: [
-        _iconAction(tooltip: 'Remove ${m?.name ?? 'effect'}', icon: Icons.close,
-          onPressed: () => state.removeCawEffect(layer, index)),
-      ],
-      body: params.isEmpty
-          ? const SizedBox.shrink()
-          : ValueListenableBuilder<int>(
-              valueListenable: state.moduleValueTick(id),
-              builder: (context, _, _) => Wrap(spacing: 2, runSpacing: 4, children: [
-                for (final p in params)
-                  if (p.kind == ParamKind.number)
-                    Knob(value: m?.params[p.name] ?? p.defaultValue, min: p.min, max: p.max, step: p.step,
-                      defaultValue: p.defaultValue, label: p.name, color: Neon.violet,
-                      onChanged: (v) => state.setParam(id, p.name, v))
-                  else
-                    _ChoiceParam(label: p.name, value: m?.params[p.name] ?? p.defaultValue,
-                      choices: p.kind == ParamKind.toggle ? const ['Off', 'On'] : p.choices, min: p.kind == ParamKind.toggle ? 0 : p.min,
-                      onChanged: (v) => state.setParam(id, p.name, v)),
-              ])),
-    );
-  }
-}
-
 /// A native component's card: one of the track's C++ effects, or (with [instrument]) its C++ instrument.
 class _NativeEffectCard extends StatelessWidget {
   const _NativeEffectCard({super.key, required this.state, required this.layer, required this.index,
@@ -336,13 +301,18 @@ class _NativeEffectCard extends StatelessWidget {
         style: state.settings.longPressMenu, actions: [
           MenuAction('bypass', use.bypass ? 'Turn on' : 'Bypass', Icons.power_settings_new, checked: use.bypass),
           if (cpp != null) const MenuAction('open', 'Open code', Icons.code),
+          if (instrument) const MenuAction('replace', 'Replace…', Icons.swap_horiz),
           if (!instrument && index > 0) const MenuAction('up', 'Move up', Icons.arrow_upward),
           if (!instrument && index < layer.components.length - 1) const MenuAction('down', 'Move down', Icons.arrow_downward),
+          if (!instrument && !layer.isFolder && !isMasterLayer(layer))
+            MenuAction('pernote', 'Run per note', Icons.scatter_plot,
+              enabled: state.perNoteBlocker(layer, use.id) == null, hint: state.perNoteBlocker(layer, use.id)),
           if (info != null && info.parameters.isNotEmpty) const MenuAction('reset', 'Reset knobs', Icons.restart_alt),
           const MenuAction('remove', 'Remove', Icons.delete_outline, danger: true),
         ]);
       if (v == 'bypass') _bypass(!use.bypass);
       if (v == 'open' && context.mounted) open();
+      if (v == 'replace' && context.mounted) await pickInstrument(context, state, layer);
       if (v == 'up') state.moveNativeEffect(layer, index, index - 1);
       if (v == 'down') state.moveNativeEffect(layer, index, index + 1);
       if (v == 'reset' && info != null) {
@@ -351,9 +321,40 @@ class _NativeEffectCard extends StatelessWidget {
         }
         state.commitNativeParams(layer);
       }
+      if (v == 'pernote') state.runPerNote(layer, index);
       if (v == 'remove') _remove();
     }
     final failed = status == NativeEffectState.buildFailed || status == NativeEffectState.loadFailed;
+    final openKey = ValueKey(instrument ? 'fx-instrument-open' : 'fx-open-$index');
+    final bypassKey = ValueKey(instrument ? 'fx-instrument-bypass' : 'fx-bypass-$index');
+    final target = DeviceTarget(state, layer.id, instrument ? DeviceTarget.instrumentSlot : index);
+    // A built-in with a plugin UI shows it right here (owner, 2026-11-10: "Show the UI right in the FX tab"); ⤢ and
+    // the name open it full screen. Third-party and project C++ keep the knob card.
+    if (status == NativeEffectState.playing && cpp == null && hasInlineDevice(target)) {
+      return DeviceInline(
+        key: ValueKey('fx-device-${instrument ? 'instrument' : index}'),
+        target: target,
+        leading: index < 0
+            ? const SizedBox(width: 32, height: 36, child: Icon(Icons.piano, size: 18, color: Neon.dim))
+            : ReorderableDragStartListener(index: index, child: const Tooltip(message: 'Drag to reorder',
+                child: SizedBox(width: 32, height: 36, child: Icon(Icons.drag_indicator, size: 18, color: Neon.dim)))),
+        titleKey: ValueKey(instrument ? 'fx-instrument-title' : 'fx-native-title-$index'),
+        onTitle: () => openDeviceEditor(context, state, layer, target.slot),
+        onMenu: menu,
+        selected: selected,
+        glow: glow,
+        onSelect: onSelect,
+        actions: [
+          _iconAction(key: openKey, tooltip: 'Open $name full screen', icon: Icons.open_in_full,
+            onPressed: () => openDeviceEditor(context, state, layer, target.slot)),
+          _iconAction(key: bypassKey, tooltip: use.bypass ? 'Turn on $name' : 'Bypass $name',
+            icon: Icons.power_settings_new, color: use.bypass ? Neon.dim : Neon.green,
+            onPressed: () => _bypass(!use.bypass)),
+          // Replace… is in the header's long-press menu, leaving room for the preset on a phone.
+          _iconAction(tooltip: 'Remove $name', icon: Icons.close, onPressed: _remove),
+        ],
+      );
+    }
     return _FxCard(
       index: index,
       title: name,
@@ -364,15 +365,19 @@ class _NativeEffectCard extends StatelessWidget {
       selected: selected,
       dimmed: use.bypass || status == NativeEffectState.needsTrust || status == NativeEffectState.blocked,
       onSelect: onSelect,
-      onTitle: cpp == null ? null : open,
+      onTitle: cpp == null ? () => openDeviceEditor(context, state, layer, instrument ? -1 : index) : open,
       onMenu: menu,
       actions: [
+        _iconAction(key: openKey, tooltip: 'Open $name',
+          icon: Icons.open_in_full, onPressed: () => openDeviceEditor(context, state, layer, instrument ? -1 : index)),
         if (failed) const Tooltip(message: 'Build failed', child: Padding(padding: EdgeInsets.symmetric(horizontal: 6),
           child: Icon(Icons.error, size: 16, color: Neon.pink))),
-        _iconAction(key: ValueKey(instrument ? 'fx-instrument-bypass' : 'fx-bypass-$index'),
+        _iconAction(key: bypassKey,
           tooltip: use.bypass ? 'Turn on $name' : 'Bypass $name',
           icon: Icons.power_settings_new, color: use.bypass ? Neon.dim : Neon.green,
           onPressed: () => _bypass(!use.bypass)),
+        if (instrument) _iconAction(key: const ValueKey('fx-instrument-replace'), tooltip: 'Replace $name',
+          icon: Icons.swap_horiz, onPressed: () => pickInstrument(context, state, layer)),
         _iconAction(tooltip: 'Remove $name', icon: Icons.close, onPressed: _remove),
       ],
       body: _body(context, status, use, info, cpp, open),
@@ -424,6 +429,7 @@ class _NativeEffectCard extends StatelessWidget {
               else
                 Knob(key: ValueKey('knob-${use.id}-${p.id}'), value: use.params[p.id] ?? p.defaultValue,
                   min: p.min, max: p.max, step: p.step, defaultValue: p.defaultValue, label: p.label,
+                  exponential: p.exponential,
                   enabled: !use.bypass,
                   color: isBuiltinComponent(use.id) ? Neon.blue : Neon.green,
                   valueText: (v) => '${v.toStringAsFixed(p.max - p.min > 20 ? 0 : 2)}${p.unit.isEmpty ? '' : ' ${p.unit}'}',
@@ -464,7 +470,7 @@ class _ChoiceParam extends StatelessWidget {
   }
 }
 
-/// The same chain left to right: instrument, .caw effects, native effects, volume and pan, the output. Read-only
+/// The same chain left to right: instrument, native effects, volume and pan, the output. Read-only
 /// for now; the free routing canvas comes with the engine's routing model (`docs/decisions.md`).
 class _RoutingView extends StatelessWidget {
   const _RoutingView({required this.state, required this.layer});
@@ -473,22 +479,23 @@ class _RoutingView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final p = state.project;
-    final out = p.layers.where((f) => f.id == layer.parentId && f.isFolder && f.busEnabled).firstOrNull;
+    final out = state.outputOf(layer);
     final nodes = <(String, String, Color, bool)>[
       if (layer.instrument case final inst?)
         (state.componentInfo(inst.id)?.label ?? state.cppComponentFor(inst.id)?.name ?? builtinComponentName(inst.id),
           inst.bypass ? 'Bypassed' : (state.componentPlayable(inst.id) ? 'C++ instrument' : 'Not loaded'),
           isBuiltinComponent(inst.id) ? Neon.blue : Neon.green, inst.bypass || !state.componentPlayable(inst.id))
       else
-        (p.module(layer.generatorId)?.name ?? 'No instrument', 'Instrument', Neon.green, false),
-      for (final id in layer.effectIds) (p.module(id)?.name ?? 'Missing', '.caw', Neon.violet, false),
+        ('No instrument', 'Instrument', Neon.green, false),
       for (final c in layer.components)
         (state.componentInfo(c.id)?.label ?? state.cppComponentFor(c.id)?.name ?? builtinComponentName(c.id),
           c.bypass ? 'Bypassed' : (state.componentPlayable(c.id) ? 'C++' : 'Not loaded'),
           isBuiltinComponent(c.id) ? Neon.blue : Neon.green, c.bypass || !state.componentPlayable(c.id)),
       ('Volume · Pan', '${(layer.volume * 100).round()}%', Neon.yellow, false),
       (out?.name ?? 'Master', 'Output', Neon.pink, false),
+      for (final send in layer.sends)
+        (state.layerById(send.to)?.name ?? 'Missing bus', 'Send · ${VolumeTaper.label(send.level)}${send.pre ? ' · pre' : ''}',
+          Neon.violet, send.mute),
     ];
     return SingleChildScrollView(
       key: const ValueKey('fx-routing'),

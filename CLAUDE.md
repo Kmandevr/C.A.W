@@ -1,6 +1,6 @@
 # C.A.W
 
-**C.A.W** (Code Auditioning Workspace; crow logo) is an experimental, code-driven sound-design and music workspace. The current Flutter app ships Android and Windows builds; the portable C++20 engine is also built and tested by Linux/Windows CI. The app currently has eight workspaces. Do not infer that every roadmap feature is implemented: [docs/app.md](docs/app.md) describes shipped app behavior, [docs/engine-build-status.md](docs/engine-build-status.md) describes native implementation and integration boundaries, and [docs/core-and-feature-plan.md](docs/core-and-feature-plan.md) records planned work. Audio processing is local. There is no current in-app AI, model-inference or cloud-audio integration. AI coding assistants may be used as development tools; that is not a C.A.W product feature. The owner's product direction is in [docs/vision.md](docs/vision.md).
+**C.A.W** (Code Auditioning Workspace; crow logo) is an experimental, code-driven sound-design and music workspace. The current Flutter app ships Android and Windows builds; the portable C++20 engine is also built and tested by Linux/Windows CI. The app has three sections: Build, Files and Arrange. Do not infer that every roadmap feature is implemented: [docs/app.md](docs/app.md) describes shipped app behavior, [docs/engine-build-status.md](docs/engine-build-status.md) describes native implementation and integration boundaries, and [docs/core-and-feature-plan.md](docs/core-and-feature-plan.md) records planned work. Audio processing is local. There is no current in-app AI, model-inference or cloud-audio integration. AI coding assistants may be used as development tools; that is not a C.A.W product feature. The owner's product direction is in [docs/vision.md](docs/vision.md).
 
 ## Start of every session
 
@@ -11,14 +11,14 @@ Tasks and bugs live in GitHub Issues: use the `tasks` skill to find, claim and f
 - Keep facts, proposals, assumptions and open questions apart, as `docs/vision.md` and `docs/architecture.md` label them. Never present a proposal as built, and never build an open question as settled: ask the owner.
 - Never invent facts about libraries, versions, licences, platform behaviour or devices. Check a primary source and date it, or label it an assumption.
 - The audio callback never allocates, locks, logs, does I/O or calls into the UI layer (details: `.claude/rules/engine.md`).
-- Downloaded `.caw` modules are untrusted: the constrained language has no filesystem/network/system calls and is bounded. Native SDK modules are in-process code, not sandboxed; third-party binaries load only under the user's per-item choice of Isolated, Trusted or Blocked (`docs/decisions.md`), never silently. Never ship a GitHub token or other secret.
+- Downloaded projects and modules are untrusted: parse them with limits. Native components are in-process code, not sandboxed: third-party binaries load only under the user's per-item choice of Isolated, Trusted or Blocked (`docs/decisions.md`), never silently. Never ship a GitHub token or other secret.
 - Dependencies must have permissive licences (no GPL/AGPL; C.A.W. itself is Apache-2.0). Record each new one in `docs/decisions.md`.
 - The owner works from Android (Galaxy S22+): every build, test and installable comes from GitHub Actions; do not assume a PC/IDE.
 - Record decisions and new facts in `docs/` before ending a session, and rewrite superseded text where it stands instead of appending (details: `.claude/rules/docs.md`).
 
 ## Layout
 
-`docs/` is the plan and memory ([docs/how-it-works.md](docs/how-it-works.md) shows how the code connects), `scripts/` holds repository tooling and `.claude/` the agent setup ([.claude/README.md](.claude/README.md)). Code: `engine/` (C++ engine and `caw` CLI), `app/` (Flutter) and `examples/` (starter modules). Conventions for each kind of file load from `.claude/rules/` when you touch it.
+`docs/` is the plan and memory ([docs/how-it-works.md](docs/how-it-works.md) shows how the code connects), `scripts/` holds repository tooling and `.claude/` the agent setup ([.claude/README.md](.claude/README.md)). Code: `engine/` (C++ engine and `caw` CLI), `app/` (Flutter) and `examples/` (C++ starters and example patterns). Conventions for each kind of file load from `.claude/rules/` when you touch it.
 
 ## Read in layers
 

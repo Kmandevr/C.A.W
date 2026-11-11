@@ -16,8 +16,10 @@
 #include "analysis.h"
 #include "builtin_components.h"
 #include "caw/detmath.hpp"
+#include "caw/instrument.hpp"
 #include "json.h"
 #include "params.h"
+#include "utf8_path.h"
 #include "wav.h"
 
 namespace caw {
@@ -29,6 +31,9 @@ constexpr uint32_t kMaxSweepSteps = 64;
 constexpr std::size_t kMaxResponseFrames = 1u << 20;  // frequency response FFT
 constexpr std::size_t kMaxLagFrames = 1u << 17;       // latency search window
 constexpr double kQuietDb = -90.0;                    // IR length and tail end: below the input's peak by this
+constexpr uint32_t kEventOutCapacity = 1024;          // events a component may emit per block (counted, not kept)
+constexpr std::size_t kMaxTestNotes = 4096;
+constexpr std::size_t kMaxChecks = 256;
 
 // ---------------------------------------------------------------- request parsing
 
@@ -208,6 +213,61 @@ bool parseSignal(const Json& j, TestSignal& s, std::string& error) {
     return true;
 }
 
+bool parseNotes(const Json& j, std::vector<TestNote>& out, std::string& error) {
+    if (j.type != Json::Type::Array || j.arr.size() > kMaxTestNotes) {
+        error = "'notes' must be an array of at most 4096 notes";
+        return false;
+    }
+    for (const Json& n : j.arr) {
+        TestNote t;
+        if (n.type != Json::Type::Object || !onlyKeys(n, {"pitch", "velocity", "start", "length"}, "a note", error) ||
+            !number(n, "pitch", t.pitch, error) || !number(n, "velocity", t.velocity, error) ||
+            !number(n, "start", t.start, error) || !number(n, "length", t.length, error)) {
+            if (error.empty()) error = "each note must be an object";
+            return false;
+        }
+        if (!(t.pitch >= 0 && t.pitch <= 127) || !(t.velocity >= 1 && t.velocity <= 127) ||
+            !(t.start >= 0 && t.start <= kMaxRenderSeconds) || !(t.length > 0 && t.length <= kMaxRenderSeconds)) {
+            error = "a note needs 'pitch' 0..127, 'velocity' 1..127, 'start' 0..120 s and 'length' above 0, at most 120 s";
+            return false;
+        }
+        out.push_back(t);
+    }
+    return true;
+}
+
+bool parseChecks(const Json& j, std::vector<TestCheck>& out, std::string& error) {
+    if (j.type != Json::Type::Array || j.arr.size() > kMaxChecks) {
+        error = "'checks' must be an array of at most 256 checks";
+        return false;
+    }
+    for (const Json& c : j.arr) {
+        TestCheck t;
+        if (c.type != Json::Type::Object || !onlyKeys(c, {"path", "min", "max", "equals"}, "a check", error) ||
+            !text(c, "path", t.path, error) || !number(c, "min", t.min, error) || !number(c, "max", t.max, error)) {
+            if (error.empty()) error = "each check must be an object";
+            return false;
+        }
+        t.hasMin = c.get("min") != nullptr;
+        t.hasMax = c.get("max") != nullptr;
+        if (const Json* e = c.get("equals")) {
+            t.hasEquals = true;
+            if (e->type == Json::Type::Bool) t.equalsIsBool = true, t.equalsBool = e->b;
+            else if (e->type == Json::Type::Number) t.equalsNumber = e->num;
+            else {
+                error = "a check's 'equals' must be a boolean or a number";
+                return false;
+            }
+        }
+        if (t.path.empty() || !(t.hasMin || t.hasMax || t.hasEquals)) {
+            error = "a check needs a 'path' and at least one of 'min', 'max' or 'equals'";
+            return false;
+        }
+        out.push_back(std::move(t));
+    }
+    return true;
+}
+
 // ---------------------------------------------------------------- WAV input
 
 uint32_t le(const uint8_t* p, int n) {
@@ -221,11 +281,12 @@ bool readWav(const std::string& path, std::vector<float>& left, std::vector<floa
     // A regular file, read up to what the longest allowed test signal needs (120 s, 192 kHz, 32-bit stereo).
     constexpr std::uintmax_t kMaxWavBytes = 200u * 1024u * 1024u;
     std::error_code ec;
-    if (!std::filesystem::is_regular_file(path, ec) || std::filesystem::file_size(path, ec) > kMaxWavBytes || ec) {
+    const std::filesystem::path file = utf8Path(path);
+    if (!std::filesystem::is_regular_file(file, ec) || std::filesystem::file_size(file, ec) > kMaxWavBytes || ec) {
         error = "'" + path + "' is not a readable WAV file of at most 200 MB";
         return false;
     }
-    std::ifstream f(path, std::ios::binary);
+    std::ifstream f(file, std::ios::binary);
     if (!f) {
         error = "can't read the WAV file '" + path + "'";
         return false;
@@ -340,6 +401,56 @@ bool isStereoEffect(const ModuleDescriptor& d) noexcept {
     const PortDescriptor& out = d.ports[1];
     return in.type == PortType::Audio && in.input && portChannelCount(in) == 2 && out.type == PortType::Audio &&
            !out.input && portChannelCount(out) == 2;
+}
+
+// A component's ports by kind, each list in descriptor order (as ProcessBlock lists them).
+struct AudioPort {
+    uint32_t index = 0, channels = 0;
+};
+struct PortLayout {
+    std::vector<AudioPort> audioIn, audioOut;
+    uint32_t eventIn = 0, eventOut = 0, modulationIn = 0, modulationOut = 0, controlOut = 0;
+    std::vector<float> controlInDefaults;
+};
+PortLayout portLayout(const ModuleDescriptor& d) {
+    PortLayout l;
+    for (uint32_t k = 0; k < d.portCount && d.ports; ++k) {
+        const PortDescriptor& p = d.ports[k];
+        switch (p.type) {
+            case PortType::Audio: (p.input ? l.audioIn : l.audioOut).push_back({k, portChannelCount(p)}); break;
+            case PortType::Event: ++(p.input ? l.eventIn : l.eventOut); break;
+            case PortType::Modulation: ++(p.input ? l.modulationIn : l.modulationOut); break;
+            case PortType::Control:
+                if (p.input) l.controlInDefaults.push_back(p.defaultValue);
+                else ++l.controlOut;
+                break;
+        }
+    }
+    return l;
+}
+// What the harness can drive: a first audio output of 1 or 2 channels, every audio port at most 2 channels (a
+// mono port takes the mid), and an audio input or an event input to feed. Anything but a plain stereo effect runs
+// through processPorts.
+bool testable(const ModuleDescriptor& d, const PortLayout& l, bool usesPorts, std::string& why) {
+    if (l.audioOut.empty()) {
+        why = "has no audio output to measure";
+        return false;
+    }
+    for (const auto* list : {&l.audioIn, &l.audioOut})
+        for (const AudioPort& p : *list)
+            if (p.channels < 1 || p.channels > 2) {
+                why = "has a " + std::to_string(p.channels) + "-channel audio port (the harness drives mono and stereo)";
+                return false;
+            }
+    if (l.audioIn.empty() && l.eventIn == 0) {
+        why = "has no audio or event input to feed";
+        return false;
+    }
+    if (!isStereoEffect(d) && !usesPorts) {
+        why = "has ports beyond one stereo input and output but does not take them (processPorts)";
+        return false;
+    }
+    return true;
 }
 
 // ---------------------------------------------------------------- measurements
@@ -633,6 +744,71 @@ bool writeStereoWav(const std::string& path, const std::vector<float>& l, const 
     return writeFile(path, encodeWav(spec, inter.data(), static_cast<int64_t>(l.size())), error);
 }
 
+// The value at a dotted path ("output.channels.0.peak_db") in a parsed result, or null.
+const Json* atPath(const Json& root, const std::string& path) {
+    const Json* j = &root;
+    std::size_t from = 0;
+    while (j && from <= path.size()) {
+        const std::size_t dot = path.find('.', from);
+        const std::string part = path.substr(from, dot == std::string::npos ? std::string::npos : dot - from);
+        if (j->type == Json::Type::Object) {
+            j = j->get(part);
+        } else if (j->type == Json::Type::Array && !part.empty() && part.find_first_not_of("0123456789") == std::string::npos &&
+                   part.size() < 10) {
+            const std::size_t k = std::stoul(part);
+            j = k < j->arr.size() ? &j->arr[k] : nullptr;
+        } else {
+            return nullptr;
+        }
+        if (dot == std::string::npos) return j;
+        from = dot + 1;
+    }
+    return nullptr;
+}
+
+// Evaluates each threshold against the result written so far (`o` holds an object still open) and appends
+// "checks" (each with its value and whether it passed) and "passed" (all of them). A missing or null value fails.
+void writeChecks(Out& o, const std::vector<TestCheck>& checks) {
+    Json result;
+    std::string error;
+    const bool parsed = parseJson(o.s + "}", result, error);
+    bool all = true;
+    o.key("checks");
+    o.raw("[");
+    for (const TestCheck& c : checks) {
+        const Json* v = parsed ? atPath(result, c.path) : nullptr;
+        bool pass = v != nullptr;
+        if (pass && c.hasEquals) {
+            pass = c.equalsIsBool ? v->type == Json::Type::Bool && v->b == c.equalsBool
+                                  : v->type == Json::Type::Number && v->num == c.equalsNumber;
+        }
+        if (pass && (c.hasMin || c.hasMax)) {
+            pass = v->type == Json::Type::Number && (!c.hasMin || v->num >= c.min) && (!c.hasMax || v->num <= c.max);
+        }
+        all = all && pass;
+        o.item();
+        o.raw("{");
+        o.ks("path", c.path);
+        o.key("value");
+        if (!v || v->type == Json::Type::Null) o.raw("null");
+        else if (v->type == Json::Type::Bool) o.boolean(v->b);
+        else if (v->type == Json::Type::Number) o.num(v->num);
+        else if (v->type == Json::Type::String) o.str(v->str);
+        else o.raw("null");  // an object or array is not a value to compare
+        if (c.hasMin) o.kv("min", c.min);
+        if (c.hasMax) o.kv("max", c.max);
+        if (c.hasEquals) {
+            o.key("equals");
+            if (c.equalsIsBool) o.boolean(c.equalsBool);
+            else o.num(c.equalsNumber);
+        }
+        o.kb("pass", pass);
+        o.raw("}");
+    }
+    o.raw("]");
+    o.kb("passed", all);
+}
+
 std::string failure(const std::string& error) {
     return "{\"ok\":false,\"error\":\"" + jsonEscape(error) + "\"}";
 }
@@ -649,7 +825,8 @@ bool parseComponentTestRequest(std::string_view json, ComponentTestRequest& out,
         return false;
     }
     if (!onlyKeys(j, {"component", "sample_rate", "block_size", "signal", "tail_seconds", "tempo", "cpu", "fft_size",
-                      "bands_per_octave", "compare", "align", "bypass", "sweep", "write_wav", "write_input_wav"},
+                      "bands_per_octave", "compare", "align", "bypass", "sweep", "write_wav", "write_input_wav", "notes",
+                      "inputs", "checks"},
                   "the request", error))
         return false;
     const Json* comp = j.get("component");
@@ -703,6 +880,25 @@ bool parseComponentTestRequest(std::string_view json, ComponentTestRequest& out,
         out.hasCompare = true;
         if (!parseComponent(*c, out.compare, "'compare'", error)) return false;
     }
+    if (const Json* n = j.get("notes"))
+        if (!parseNotes(*n, out.notes, error)) return false;
+    if (const Json* in = j.get("inputs")) {
+        if (in->type != Json::Type::Object) {
+            error = "'inputs' must be an object of audio input port id to signal";
+            return false;
+        }
+        for (const auto& [port, sig] : in->obj) {
+            TestSignal t;
+            if (!parseSignal(sig, t, error)) return false;
+            if (t.kind == TestSignalKind::Wav) {
+                error = "an 'inputs' signal can't be a WAV file (use the main 'signal')";
+                return false;
+            }
+            out.inputs.emplace_back(port, std::move(t));
+        }
+    }
+    if (const Json* c = j.get("checks"))
+        if (!parseChecks(*c, out.checks, error)) return false;
     if (const Json* s = j.get("sweep")) {
         if (s->type != Json::Type::Object || !onlyKeys(*s, {"param", "steps", "from", "to"}, "sweep", error)) {
             if (error.empty()) error = "'sweep' must be an object";
@@ -847,16 +1043,11 @@ bool prepareRegistry(ModuleRegistry& registry, const TestComponent& c, std::stri
 
 bool renderComponent(const ModuleRegistry& registry, const TestComponent& c, double sampleRate, uint32_t blockSize,
                      double tempo, const std::vector<float>& inL, const std::vector<float>& inR, bool timing,
-                     ComponentRender& out, std::string& error) {
+                     ComponentRender& out, std::string& error, const std::vector<TestNote>& notes,
+                     const std::vector<StereoBuffer>& extraInputs) {
     const ModuleDescriptor* d = registry.find(c.id);
     if (!d) {
         error = "component '" + c.id + "' is not loaded";
-        return false;
-    }
-    if (!isStereoEffect(*d)) {
-        error = "component '" + c.id +
-                "' must have one stereo audio input and one stereo audio output (testing instruments, with note "
-                "input, is not built yet)";
         return false;
     }
     std::unique_ptr<ModuleProcessor> p = registry.create(c.id);
@@ -865,6 +1056,12 @@ bool renderComponent(const ModuleRegistry& registry, const TestComponent& c, dou
         return false;
     }
     const ModuleDescriptor& own = p->descriptor();
+    const PortLayout ports = portLayout(own);
+    std::string why;
+    if (!testable(own, ports, true, why)) {  // ports first; whether it takes them is known once active
+        error = "component '" + c.id + "' " + why;
+        return false;
+    }
     std::vector<ParameterValue> values(own.parameterCount);
     for (uint32_t k = 0; k < own.parameterCount; ++k) values[k].value = constrainParameter(own.parameters[k], own.parameters[k].defaultValue);
     for (const auto& [name, v] : c.params) {
@@ -881,6 +1078,11 @@ bool renderComponent(const ModuleRegistry& registry, const TestComponent& c, dou
                 " Hz, blocks of " + std::to_string(blockSize);
         return false;
     }
+    if (!testable(own, ports, p->usesProcessPorts(), why)) {
+        p->deactivate();
+        error = "component '" + c.id + "' " + why;
+        return false;
+    }
     out.latencyFrames = own.latencyFrames;
     out.tailFrames = own.tailFrames;
     const std::size_t n = inL.size();
@@ -888,36 +1090,155 @@ bool renderComponent(const ModuleRegistry& registry, const TestComponent& c, dou
     out.right.assign(n, 0.0f);
     out.failedBlocks = 0;
     out.blockMicros.clear();
+    out.extraOutputs.clear();
     if (timing) out.blockMicros.reserve(n / blockSize + 1);
-    std::vector<float> stageL(blockSize), stageR(blockSize);
+    const bool simple = isStereoEffect(own) && !p->usesProcessPorts();
+
+    // Every port's buffers, set aside before the render (the component may not keep or write its inputs).
+    const std::size_t B = blockSize;
+    std::vector<std::vector<float>> inBuf, outBuf;  // per channel, block-sized
+    std::vector<std::vector<const float*>> inPtr;
+    std::vector<std::vector<float*>> outPtr;
+    std::vector<ConstChannelBufferView> audioIn(ports.audioIn.size());
+    std::vector<ChannelBufferView> audioOut(ports.audioOut.size());
+    for (std::size_t k = 0; k < ports.audioIn.size(); ++k) {
+        inPtr.emplace_back();
+        for (uint32_t ch = 0; ch < ports.audioIn[k].channels; ++ch) {
+            inBuf.emplace_back(B, 0.0f);
+            inPtr.back().push_back(inBuf.back().data());
+        }
+    }
+    for (std::size_t k = 0; k < ports.audioOut.size(); ++k) {
+        outPtr.emplace_back();
+        for (uint32_t ch = 0; ch < ports.audioOut[k].channels; ++ch) {
+            outBuf.emplace_back(B, 0.0f);
+            outPtr.back().push_back(outBuf.back().data());
+        }
+        if (k > 0) out.extraOutputs.push_back({std::string(own.ports[ports.audioOut[k].index].id), {}});
+    }
+    for (auto& e : out.extraOutputs) e.second.reserve(n * 2);
+    std::vector<std::vector<float>> modIn(ports.modulationIn, std::vector<float>(B, 0.0f));
+    std::vector<std::vector<float>> modOut(ports.modulationOut, std::vector<float>(B, 0.0f));
+    std::vector<const float*> modInPtr;
+    std::vector<float*> modOutPtr;
+    for (auto& m : modIn) modInPtr.push_back(m.data());
+    for (auto& m : modOut) modOutPtr.push_back(m.data());
+    std::vector<float> ctlIn(ports.controlInDefaults), ctlOut(ports.controlOut, 0.0f);
+    std::vector<const float*> ctlInPtr;
+    std::vector<float*> ctlOutPtr;
+    for (float& v : ctlIn) ctlInPtr.push_back(&v);
+    for (float& v : ctlOut) ctlOutPtr.push_back(&v);
+    std::vector<EventInput> eventIn(ports.eventIn);
+    std::vector<std::vector<Event>> eventOutBuf(ports.eventOut, std::vector<Event>(kEventOutCapacity));
+    std::vector<EventOutput> eventOut(ports.eventOut);
+    out.eventsOut = 0;
+
+    // The notes as one frame-ordered list of ons and offs (a note's id is its place in the list, from 1).
+    std::vector<std::pair<std::size_t, Event>> timeline;
+    for (std::size_t k = 0; k < notes.size(); ++k) {
+        const TestNote& t = notes[k];
+        const std::size_t on = static_cast<std::size_t>(std::llround(std::max(0.0, t.start) * sampleRate));
+        const std::size_t off = on + std::max<std::size_t>(1, static_cast<std::size_t>(std::llround(t.length * sampleRate)));
+        const uint32_t id = static_cast<uint32_t>(k + 1);
+        const uint8_t key = static_cast<uint8_t>(std::clamp<long>(std::lround(t.pitch), 0, 127));
+        timeline.push_back({on, notes::noteOn(0, id, t.pitch, std::clamp(t.velocity, 1.0, 127.0) / 127.0)});
+        timeline.push_back({off, notes::noteOff(0, id, key)});
+    }
+    std::stable_sort(timeline.begin(), timeline.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
+    std::vector<Event> blockEvents;
+    blockEvents.reserve(timeline.size());
+    std::size_t nextEvent = 0;
+
     Transport transport;
     transport.tempo = tempo;
     transport.playing = true;
+    // A source's channel `ch` of a stereo pair for a port of `channels` channels (mono: the mid).
+    auto fill = [&](float* dst, const std::vector<float>* l, const std::vector<float>* r, uint32_t channels, uint32_t ch,
+                    std::size_t at, uint32_t m) {
+        for (uint32_t i = 0; i < m; ++i) {
+            const float a = l && at + i < l->size() ? (*l)[at + i] : 0.0f;
+            const float b = r && at + i < r->size() ? (*r)[at + i] : a;
+            dst[i] = channels == 1 ? 0.5f * (a + b) : ch == 0 ? a : ch == 1 ? b : 0.0f;
+        }
+    };
     for (std::size_t at = 0; at < n; at += blockSize) {
         const uint32_t m = static_cast<uint32_t>(std::min<std::size_t>(blockSize, n - at));
-        std::copy_n(inL.data() + at, m, stageL.data());  // the component may not keep or write its input
-        std::copy_n(inR.data() + at, m, stageR.data());
-        const float* in[2] = {stageL.data(), stageR.data()};
-        float* o[2] = {out.left.data() + at, out.right.data() + at};
-        AudioProcessBlock block;
-        block.input = {in, 2, m};
-        block.output = {o, 2, m};
-        block.frames = m;
-        block.sampleRate = sampleRate;
-        block.parameters = values.empty() ? nullptr : values.data();
-        block.parameterCount = own.parameterCount;
+        for (std::size_t k = 0; k < ports.audioIn.size(); ++k) {
+            const std::vector<float>* l = k == 0 ? &inL : k - 1 < extraInputs.size() ? &extraInputs[k - 1].left : nullptr;
+            const std::vector<float>* r = k == 0 ? &inR : k - 1 < extraInputs.size() ? &extraInputs[k - 1].right : nullptr;
+            for (uint32_t ch = 0; ch < ports.audioIn[k].channels; ++ch)
+                fill(const_cast<float*>(inPtr[k][ch]), l, r, ports.audioIn[k].channels, ch, at, m);
+            audioIn[k] = {inPtr[k].data(), ports.audioIn[k].channels, m};
+        }
+        for (std::size_t k = 0; k < ports.audioOut.size(); ++k) {
+            for (float* o : outPtr[k]) std::fill_n(o, m, 0.0f);
+            audioOut[k] = {outPtr[k].data(), ports.audioOut[k].channels, m};
+        }
+        blockEvents.clear();
+        while (nextEvent < timeline.size() && timeline[nextEvent].first < at + m) {
+            Event e = timeline[nextEvent].second;
+            e.frame = static_cast<uint32_t>(timeline[nextEvent].first > at ? timeline[nextEvent].first - at : 0);
+            blockEvents.push_back(e);
+            ++nextEvent;
+        }
+        for (std::size_t k = 0; k < eventIn.size(); ++k)
+            eventIn[k] = k == 0 ? EventInput{blockEvents.data(), static_cast<uint32_t>(blockEvents.size())} : EventInput{};
+        for (std::size_t k = 0; k < eventOut.size(); ++k) eventOut[k] = {eventOutBuf[k].data(), kEventOutCapacity, 0};
         transport.beat = static_cast<double>(at) / sampleRate * tempo / 60.0;
-        block.transport = &transport;
         const auto t0 = std::chrono::steady_clock::now();
-        const bool ok = p->process(block);
+        bool ok;
+        if (simple) {
+            AudioProcessBlock block;
+            block.input = audioIn[0];
+            block.output = audioOut[0];
+            block.frames = m;
+            block.sampleRate = sampleRate;
+            block.parameters = values.empty() ? nullptr : values.data();
+            block.parameterCount = own.parameterCount;
+            block.transport = &transport;
+            ok = p->process(block);
+        } else {
+            ProcessBlock block;
+            block.frames = m;
+            block.sampleRate = sampleRate;
+            block.audioIn = audioIn.data();
+            block.audioInCount = static_cast<uint32_t>(audioIn.size());
+            block.audioOut = audioOut.data();
+            block.audioOutCount = static_cast<uint32_t>(audioOut.size());
+            block.modulationIn = modInPtr.data();
+            block.modulationInCount = static_cast<uint32_t>(modInPtr.size());
+            block.modulationOut = modOutPtr.data();
+            block.modulationOutCount = static_cast<uint32_t>(modOutPtr.size());
+            block.controlIn = ctlInPtr.data();
+            block.controlInCount = static_cast<uint32_t>(ctlInPtr.size());
+            block.controlOut = ctlOutPtr.data();
+            block.controlOutCount = static_cast<uint32_t>(ctlOutPtr.size());
+            block.eventIn = eventIn.data();
+            block.eventInCount = static_cast<uint32_t>(eventIn.size());
+            block.eventOut = eventOut.data();
+            block.eventOutCount = static_cast<uint32_t>(eventOut.size());
+            block.parameters = values.empty() ? nullptr : values.data();
+            block.parameterCount = own.parameterCount;
+            block.transport = &transport;
+            ok = p->processPorts(block);
+        }
         if (timing)
             out.blockMicros.push_back(
                 std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now() - t0).count());
-        if (!ok) {
+        for (const EventOutput& e : eventOut) out.eventsOut += std::min(e.count, e.capacity);
+        if (!ok) {  // as in the app: a failed effect passes its main input, a failed instrument is silent
             ++out.failedBlocks;
-            std::copy_n(inL.data() + at, m, o[0]);
-            std::copy_n(inR.data() + at, m, o[1]);
+            for (std::size_t k = 0; k < ports.audioOut.size(); ++k)
+                for (uint32_t ch = 0; ch < ports.audioOut[k].channels; ++ch)
+                    if (k == 0 && !ports.audioIn.empty()) fill(outPtr[k][ch], &inL, &inR, ports.audioOut[k].channels, ch, at, m);
+                    else std::fill_n(outPtr[k][ch], m, 0.0f);
         }
+        const uint32_t mainChannels = ports.audioOut[0].channels;
+        std::copy_n(outPtr[0][0], m, out.left.data() + at);
+        std::copy_n(outPtr[0][mainChannels > 1 ? 1 : 0], m, out.right.data() + at);
+        for (std::size_t k = 1; k < ports.audioOut.size(); ++k)  // interleaved by channel
+            for (uint32_t i = 0; i < m; ++i)
+                for (uint32_t ch = 0; ch < ports.audioOut[k].channels; ++ch) out.extraOutputs[k - 1].second.push_back(outPtr[k][ch][i]);
     }
     p->deactivate();
     return true;
@@ -941,9 +1262,35 @@ std::string runComponentTest(const ComponentTestRequest& request) try {
     if (!prepareRegistry(registry, req.component, error)) return failure(error);
     const ModuleDescriptor* d = registry.find(req.component.id);
 
+    const PortLayout ports = portLayout(*d);
+    const bool fedNotes = ports.audioIn.empty();  // an instrument: the notes are its signal
+    if (fedNotes && req.notes.empty()) req.notes.push_back(TestNote{60, 100, 0, 1.0});
+    if (fedNotes && req.bypass) return failure("'bypass' needs a component with an audio input");
+    if (!req.notes.empty() && ports.eventIn == 0)
+        return failure("component '" + req.component.id + "' has no event input for 'notes'");
     std::vector<float> inL, inR;
-    if (!generateTestSignal(req.signal, req.sampleRate, inL, inR, error)) return failure(error);
-    const std::size_t S = inL.size();
+    std::size_t S = 0;
+    if (fedNotes) {
+        req.signal.kind = TestSignalKind::Silence;  // no input to measure against (no THD, latency or response)
+        for (const TestNote& n : req.notes)
+            S = std::max(S, static_cast<std::size_t>(std::llround(n.start * req.sampleRate)) +
+                                std::max<std::size_t>(1, static_cast<std::size_t>(std::llround(n.length * req.sampleRate))));
+        if (static_cast<double>(S) / req.sampleRate > kMaxRenderSeconds) return failure("the notes must end within 120 s");
+        inL.assign(S, 0.0f);
+        inR.assign(S, 0.0f);
+    } else {
+        if (!generateTestSignal(req.signal, req.sampleRate, inL, inR, error)) return failure(error);
+        S = inL.size();
+    }
+    // Later audio inputs (a sidechain, a second bus) by port id; the rest stay silent.
+    std::vector<StereoBuffer> extras(ports.audioIn.size() > 1 ? ports.audioIn.size() - 1 : 0);
+    for (const auto& [port, signal] : req.inputs) {
+        std::size_t k = 1;
+        while (k < ports.audioIn.size() && d->ports[ports.audioIn[k].index].id != port) ++k;
+        if (k == ports.audioIn.size())
+            return failure("component '" + req.component.id + "' has no audio input '" + port + "' after its first");
+        if (!generateTestSignal(signal, req.sampleRate, extras[k - 1].left, extras[k - 1].right, error)) return failure(error);
+    }
     double tail = req.tailSeconds;
     if (tail < 0) {
         tail = d->tailFrames == kInfiniteTail
@@ -963,8 +1310,11 @@ std::string runComponentTest(const ComponentTestRequest& request) try {
 
     ComponentRender main;
     if (!renderComponent(registry, req.component, req.sampleRate, req.blockSize, req.tempo, inL, inR, req.cpu, main,
-                         error))
+                         error, req.notes, extras))
         return failure(error);
+    if (fedNotes)  // an instrument's tail and quiet level are measured against its own peak while the notes play
+        for (std::size_t i = 0; i < S; ++i)
+            inputPeak = std::max({inputPeak, std::fabs(static_cast<double>(main.left[i])), std::fabs(static_cast<double>(main.right[i]))});
     const ModuleDescriptor& desc = *registry.find(req.component.id);
     if (!req.writeInputWav.empty() && !writeStereoWav(req.writeInputWav, inL, inR, req.sampleRate, error))
         return failure(error);
@@ -1001,16 +1351,17 @@ std::string runComponentTest(const ComponentTestRequest& request) try {
     o.ki("sample_rate", static_cast<uint64_t>(req.sampleRate));
     o.ki("block_size", req.blockSize);
     o.kv("tempo", req.tempo);
-    o.ks("signal", signalName(req.signal.kind));
-    if (req.signal.kind != TestSignalKind::Wav && req.signal.kind != TestSignalKind::Buffer &&
+    o.ks("signal", fedNotes ? "notes" : signalName(req.signal.kind));
+    if (!req.notes.empty()) o.ki("notes", req.notes.size());
+    if (!fedNotes && req.signal.kind != TestSignalKind::Wav && req.signal.kind != TestSignalKind::Buffer &&
         req.signal.kind != TestSignalKind::Silence)
         o.kv("level_db", req.signal.levelSet ? req.signal.level : req.signal.kind == TestSignalKind::Impulse ? 0.0 : -6.0);
-    if (req.signal.kind == TestSignalKind::Sine) o.kv("frequency", req.signal.frequency);
-    if (req.signal.kind == TestSignalKind::Sweep) {
+    if (!fedNotes && req.signal.kind == TestSignalKind::Sine) o.kv("frequency", req.signal.frequency);
+    if (!fedNotes && req.signal.kind == TestSignalKind::Sweep) {
         o.kv("start_frequency", req.signal.startFrequency);
         o.kv("end_frequency", std::min(req.signal.endFrequency, 0.95 * req.sampleRate / 2));
     }
-    if (req.signal.kind == TestSignalKind::WhiteNoise || req.signal.kind == TestSignalKind::PinkNoise) {
+    if (!fedNotes && (req.signal.kind == TestSignalKind::WhiteNoise || req.signal.kind == TestSignalKind::PinkNoise)) {
         o.ki("seed", req.signal.seed);
         o.kb("decorrelated", req.signal.decorrelated);
     }
@@ -1021,6 +1372,37 @@ std::string runComponentTest(const ComponentTestRequest& request) try {
     o.raw("{");
     measure(o, ctx, main, true, warnings);
     o.raw("}");
+    // Every port the component has, and what its later outputs carried (the first is "output" above).
+    o.key("ports");
+    o.raw("{");
+    o.ki("audio_inputs", ports.audioIn.size());
+    o.ki("audio_outputs", ports.audioOut.size());
+    o.ki("event_inputs", ports.eventIn);
+    o.ki("event_outputs", ports.eventOut);
+    o.ki("modulation_inputs", ports.modulationIn);
+    o.ki("modulation_outputs", ports.modulationOut);
+    o.ki("control_inputs", ports.controlInDefaults.size());
+    o.ki("control_outputs", ports.controlOut);
+    o.ki("events_out", main.eventsOut);
+    o.key("other_outputs");
+    o.raw("[");
+    for (std::size_t k = 0; k < main.extraOutputs.size(); ++k) {
+        const uint32_t ch = ports.audioOut[k + 1].channels;
+        std::vector<float>& v = main.extraOutputs[k].second;
+        const analysis::Levels raw = analysis::levels(v.data(), v.size());
+        sanitize(v);
+        const analysis::Levels lv = analysis::levels(v.data(), v.size());
+        o.item();
+        o.raw("{");
+        o.ks("port", main.extraOutputs[k].first);
+        o.ki("channels", ch);
+        o.kv("peak_db", lv.peakDb);
+        o.kv("rms_db", lv.rmsDb);
+        o.ki("nan", raw.nan);
+        o.ki("inf", raw.inf);
+        o.raw("}");
+    }
+    o.raw("]}");
 
     if (req.cpu && !main.blockMicros.empty()) {
         std::vector<double> t = main.blockMicros;
@@ -1047,7 +1429,8 @@ std::string runComponentTest(const ComponentTestRequest& request) try {
         registerBuiltinComponents(other);
         if (!prepareRegistry(other, req.compare, error)) return failure(error);
         ComponentRender cmp;
-        if (!renderComponent(other, req.compare, req.sampleRate, req.blockSize, req.tempo, inL, inR, false, cmp, error))
+        if (!renderComponent(other, req.compare, req.sampleRate, req.blockSize, req.tempo, inL, inR, false, cmp, error,
+                             req.notes, extras))
             return failure(error);
         sanitize(cmp.left);
         sanitize(cmp.right);
@@ -1080,7 +1463,8 @@ std::string runComponentTest(const ComponentTestRequest& request) try {
             std::erase_if(c.params, [&](const auto& p) { return p.first == req.sweepParam; });
             c.params.emplace_back(req.sweepParam, raw);
             ComponentRender r;
-            if (!renderComponent(registry, c, req.sampleRate, req.blockSize, req.tempo, inL, inR, false, r, error))
+            if (!renderComponent(registry, c, req.sampleRate, req.blockSize, req.tempo, inL, inR, false, r, error, req.notes,
+                                 extras))
                 return failure(error);
             std::vector<std::string> pointWarnings;
             o.item();
@@ -1103,7 +1487,9 @@ std::string runComponentTest(const ComponentTestRequest& request) try {
         o.item();
         o.str(w);
     }
-    o.raw("]}");
+    o.raw("]");
+    if (!req.checks.empty()) writeChecks(o, req.checks);
+    o.raw("}");
     return o.s;
 } catch (const std::bad_alloc&) {
     return failure("out of memory: the test is too long for this device");

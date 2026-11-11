@@ -1,6 +1,20 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <!-- MIDI keyboards are optional: the app installs on devices without MIDI support. -->
     <uses-feature android:name="android.software.midi" android:required="false" />
+    <!-- Haptics.kt plays touch feedback through the Vibrator (a normal permission, granted at install). -->
+    <uses-permission android:name="android.permission.VIBRATE" />
+    <!-- Audio input (recording, monitoring, the latency ping): asked at run time only when the user turns input on or
+         arms a track (MicPermission.kt). -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <!-- Bluetooth MIDI (BluetoothMidi.kt), asked for only when the user starts a scan in Settings › MIDI. Android 12+:
+         the Nearby devices permissions, and the scan never derives location. Android 11 and earlier: the legacy
+         permissions and location, which a scan needed there (developer.android.com Bluetooth permissions, 2026-11-11). -->
+    <uses-feature android:name="android.hardware.bluetooth_le" android:required="false" />
+    <uses-permission android:name="android.permission.BLUETOOTH_SCAN" android:usesPermissionFlags="neverForLocation" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+    <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" android:maxSdkVersion="30" />
     <application
         android:label="C.A.W"
         android:name="${applicationName}"

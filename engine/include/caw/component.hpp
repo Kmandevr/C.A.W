@@ -8,6 +8,7 @@
 #include <string_view>
 #include <vector>
 
+#include "display.hpp"
 #include "module.hpp"
 
 #if defined(_WIN32)
@@ -192,6 +193,11 @@ int32_t process(void* p, const CawProcessBlock* block) noexcept {
             ports.parameters = self.parameters.data();
             ports.parameterCount = block->parameter_count;
             ports.transport = transport;
+            // 3.1: the voice bus, when the host's block has the field (the C and C++ structs share a layout).
+            if (block->struct_size >= offsetof(CawProcessBlock, voices) + sizeof(block->voices) && block->voices &&
+                block->voices->struct_size >= sizeof(CawVoiceBus) && block->voices->lane_stride >= sizeof(CawVoiceLane) &&
+                (block->voices->lane_count == 0 || block->voices->lanes) && block->voices->run)
+                ports.voices = reinterpret_cast<const VoiceBus*>(block->voices);
             ok = processor.processPorts(ports);
         } else {
             if (block->audio_in_count > 1 || block->audio_out_count > 1) return 0;
@@ -233,7 +239,36 @@ int32_t loadState(void* p, const uint8_t* source, uint32_t size, uint32_t versio
     }
 }
 
-inline const void* noExtension(void*, const char*) noexcept { return nullptr; }
+template <class Type>
+int32_t quiet(void* p) noexcept {
+    try {
+        return instance<Type>(p)->processor.quiet() ? 1 : 0;
+    } catch (...) {
+        return 0;
+    }
+}
+
+template <class Type>
+uint32_t readDisplay(void* p, float* destination, uint32_t capacity) noexcept {
+    try {
+        if (!p || !destination || capacity == 0) return 0;
+        const uint32_t n = instance<Type>(p)->processor.readDisplay(destination, capacity);
+        return n > capacity ? capacity : n;
+    } catch (...) {
+        return 0;
+    }
+}
+
+// The extensions every exported component offers: CAW_EXTENSION_QUIET (from ModuleProcessor::quiet()) and
+// CAW_EXTENSION_DISPLAY (from ModuleProcessor::readDisplay(); 0 floats unless the processor publishes).
+template <class Type>
+const void* extension(void*, const char* id) noexcept {
+    static const CawQuietExtension kQuiet{sizeof(CawQuietExtension), &quiet<Type>};
+    static const CawDisplayExtension kDisplay{sizeof(CawDisplayExtension), kMaxDisplayFloats, &readDisplay<Type>};
+    if (id && std::string_view(id) == CAW_EXTENSION_QUIET) return &kQuiet;
+    if (id && std::string_view(id) == CAW_EXTENSION_DISPLAY) return &kDisplay;
+    return nullptr;
+}
 
 template <class Type>
 bool exportComponent(const ModuleDescriptor& d, Exported& exported) noexcept {
@@ -305,6 +340,10 @@ bool exportComponent(const ModuleDescriptor& d, Exported& exported) noexcept {
         c.ui_control_info_size = sizeof(CawUiControlInfo);
         c.ui_controls = e->uiControls.empty() ? nullptr : e->uiControls.data();
         c.custom_ui_id = e->text(d.customUiId);
+        c.domains = d.domains;
+        c.capabilities = d.capabilities;
+        c.cpu_class = static_cast<uint32_t>(d.cpuClass);
+        c.reserved = 0;
 
         CawComponentV3& t = e->table;
         t.struct_size = sizeof(CawComponentV3);
@@ -318,7 +357,7 @@ bool exportComponent(const ModuleDescriptor& d, Exported& exported) noexcept {
         t.process = &process<Type>;
         t.save_state = &saveState<Type>;
         t.load_state = &loadState<Type>;
-        t.get_extension = &noExtension;
+        t.get_extension = &extension<Type>;
         return true;
     } catch (...) {
         return false;

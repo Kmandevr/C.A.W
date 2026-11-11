@@ -1,260 +1,19 @@
-// Settings page (theme, density, live coding, licences) and the theme editor with live preview, import and export.
+// The theme editor (Settings › Look › Theme): pick a theme (a whole profile), edit its colours, look, layout and
+// behaviour with a live preview, and save, duplicate, import or export it.
 import 'dart:convert';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
-import '../engine/execution.dart';
-import '../model/problem_log.dart';
 import '../model/settings.dart';
-import '../version.dart';
+import 'haptics.dart';
 import 'motion.dart';
 import 'theme.dart';
 import 'widgets.dart';
-import 'glass.dart';
 
-class SettingsPage extends StatelessWidget {
-  const SettingsPage({super.key, required this.settings, this.engineProfile, this.executionPlan, this.onEditKeys});
-  final Settings settings;
-
-  /// Opens the key bindings editor; null hides its row (no key router above).
-  final Future<void> Function(BuildContext context)? onEditKeys;
-  final EngineHardwareProfile? engineProfile;
-  final EngineExecutionPlan? executionPlan;
-
-  @override
-  Widget build(BuildContext context) => ListenableBuilder(
-        listenable: settings,
-        builder: (context, _) => Scaffold(
-          appBar: AppBar(title: const Text('Settings'), backgroundColor: Neon.panel),
-          body: ListView(padding: const EdgeInsets.all(12), children: [
-            const _AboutBeta(),
-            const Heading('Look'),
-            ListTile(
-              leading: Icon(Icons.palette, color: Neon.pink),
-              title: const Text('Theme'),
-              subtitle: Text(settings.themeName, style: TextStyle(color: Neon.dim)),
-              trailing: const Icon(Icons.chevron_right),
-              onTap: () =>
-                  Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => GlassPage(child: ThemeEditor(settings: settings)))),
-            ),
-            ListTile(
-              leading: Icon(Icons.density_medium, color: Neon.blue),
-              title: const Text('Density'),
-              subtitle: Text(settings.compact ? 'Compact: more on screen' : 'Comfortable: 48 dp touch targets',
-                  style: TextStyle(color: Neon.dim)),
-            ),
-            SegmentedButton<Density>(
-              showSelectedIcon: false,
-              segments: const [
-                ButtonSegment(value: Density.comfortable, label: Text('Comfortable')),
-                ButtonSegment(value: Density.compact, label: Text('Compact')),
-              ],
-              selected: {settings.density},
-              onSelectionChanged: (v) => settings.update((s) => s.density = v.first),
-            ),
-            const Heading('Motion and feel'),
-            ListTile(
-              leading: Icon(Icons.animation, color: Neon.violet),
-              title: const Text('Motion'),
-              subtitle: Text(
-                  Motion.minimalProfile
-                      ? 'Off while the Minimal profile is on'
-                      : 'Smooth, distance-aware animations and snapping',
-                  style: TextStyle(color: Neon.dim)),
-            ),
-            SegmentedButton<MotionLevel>(
-              showSelectedIcon: false,
-              segments: const [
-                ButtonSegment(value: MotionLevel.full, label: Text('Full')),
-                ButtonSegment(value: MotionLevel.reduced, label: Text('Reduced')),
-                ButtonSegment(value: MotionLevel.off, label: Text('Off')),
-              ],
-              selected: {settings.motion},
-              onSelectionChanged: (v) => settings.update((s) => s.motion = v.first),
-            ),
-            SwitchListTile(
-              contentPadding: EdgeInsets.zero,
-              secondary: Icon(Icons.vibration, color: Neon.blue),
-              title: const Text('Haptic ticks'),
-              subtitle: const Text('A light tick when something snaps or a note is placed (Android)'),
-              value: settings.haptics,
-              onChanged: (v) => settings.update((s) => s.haptics = v),
-            ),
-            SwitchListTile(
-              contentPadding: EdgeInsets.zero,
-              secondary: Icon(Icons.touch_app, color: Neon.yellow),
-              title: const Text('Quick actions bar'),
-              subtitle: const Text('A floating row of shortcut buttons at the bottom of a phone screen'),
-              value: settings.quickActions,
-              onChanged: (v) => settings.update((s) => s.quickActions = v),
-            ),
-            SwitchListTile(
-              contentPadding: EdgeInsets.zero,
-              secondary: Icon(Icons.blur_on, color: Neon.blue),
-              title: const Text('Glass'),
-              subtitle: Text(
-                  Neon.performanceMode >= 3
-                      ? 'Off while the Minimal profile is on'
-                      : 'See-through panels, tracks and controls over a soft background',
-                  style: TextStyle(color: Neon.dim)),
-              value: settings.glass,
-              onChanged: (v) => settings.update((s) => s.glass = v),
-            ),
-            SwitchListTile(
-              contentPadding: EdgeInsets.zero,
-              secondary: Icon(Icons.blur_linear, color: Neon.violet),
-              title: const Text('Frosted blur'),
-              subtitle: Text(
-                  Neon.performanceMode >= 2
-                      ? 'Off while the Lightweight or Minimal profile is on'
-                      : 'Blur behind sheets and menus; off keeps the glass look and costs far less',
-                  style: TextStyle(color: Neon.dim)),
-              value: settings.glassBlur,
-              onChanged: settings.glass ? (v) => settings.update((s) => s.glassBlur = v) : null,
-            ),
-            ListTile(
-              contentPadding: EdgeInsets.zero,
-              leading: Icon(Icons.graphic_eq, color: Neon.green),
-              title: Text(settings.reactiveGlow == 0
-                  ? 'Music-reactive glow: off'
-                  : 'Music-reactive glow: ${(settings.reactiveGlow * 100).round()}%'),
-              subtitle: Slider(
-                value: settings.reactiveGlow,
-                divisions: 20,
-                onChanged: (v) => settings.adjust((s) => s.reactiveGlow = v),
-                onChangeEnd: (_) => settings.save(),
-              ),
-            ),
-            const Heading('Performance'),
-            InputDecorator(
-              decoration: const InputDecoration(labelText: 'Performance profile'),
-              child: DropdownButtonHideUnderline(child: DropdownButton<PerformanceMode>(
-                value: settings.performanceMode,
-                isExpanded: true,
-                items: [
-                  for (final mode in PerformanceMode.values)
-                    DropdownMenuItem(value: mode, child: Text(mode.label)),
-                ],
-                onChanged: (mode) {
-                  if (mode != null) settings.update((s) => s.performanceMode = mode);
-                },
-              )),
-            ),
-            Padding(
-              padding: const EdgeInsets.only(top: 6, bottom: 8),
-              child: Text(settings.performanceMode.description,
-                style: const TextStyle(color: Neon.dim, fontSize: 12)),
-            ),
-            SwitchListTile(
-              contentPadding: EdgeInsets.zero,
-              secondary: Icon(Icons.auto_mode, color: Neon.blue),
-              title: const Text('Automatically switch to Lightweight on overload'),
-              subtitle: const Text('Keeps the interface responsive while reducing the voice budget.'),
-              value: settings.lightAuto,
-              onChanged: (v) => settings.update((s) => s.lightAuto = v),
-            ),
-            const Heading('Engine'),
-            ListTile(
-              leading: Icon(Icons.memory, color: Neon.green),
-              title: const Text('Native hardware profile'),
-              subtitle: Text(
-                engineProfile == null
-                    ? 'Unavailable: the native engine did not load'
-                    : '${engineProfile!.logicalCores} logical cores · '
-                        '${engineProfile!.memoryBudgetMiB} MiB work budget · '
-                        'SIMD ${engineProfile!.supportsSimd ? 'available' : 'unavailable'} · '
-                        'GPU compute ${engineProfile!.supportsGpuCompute ? 'available' : 'unavailable'}',
-                style: TextStyle(color: Neon.dim),
-              ),
-            ),
-            if (executionPlan != null)
-              ListTile(
-                leading: Icon(Icons.tune, color: Neon.blue),
-                title: const Text('Interactive workload plan'),
-                subtitle: Text(
-                  '${executionPlan!.workerThreads} worker(s) · '
-                      '${executionPlan!.maxConcurrentJobs} concurrent job(s) · '
-                      '${executionPlan!.preferredBatchFrames} preferred batch frames · '
-                      '${executionPlan!.latencySensitive ? 'latency-sensitive' : 'throughput-oriented'}',
-                  style: TextStyle(color: Neon.dim),
-                ),
-              ),
-            const Heading('Live coding'),
-            SwitchListTile(
-              secondary: Icon(Icons.bolt, color: Neon.green),
-              title: const Text('Auto-update'),
-              subtitle: Text('Code swaps in by itself after you stop typing', style: TextStyle(color: Neon.dim)),
-              value: settings.liveUpdate,
-              onChanged: (v) => settings.update((s) => s.liveUpdate = v),
-            ),
-            ListTile(
-              enabled: settings.liveUpdate,
-              leading: Icon(Icons.timer_outlined, color: Neon.yellow),
-              title: Text('Delay: ${settings.liveDelayMs} ms', style: Neon.code(size: 14)),
-              subtitle: Slider(
-                min: 100,
-                max: 2000,
-                divisions: 38,
-                value: settings.liveDelayMs.clamp(100, 2000).toDouble(),
-                onChanged: settings.liveUpdate
-                    ? (v) {
-                        settings.liveDelayMs = v.round();
-                        settings.preview(null); // shows the value; saved when the drag ends
-                      }
-                    : null,
-                onChangeEnd: (v) => settings.update((s) => s.liveDelayMs = v.round()),
-              ),
-            ),
-            ListTile(
-              leading: Icon(Icons.av_timer, color: Neon.blue),
-              title: const Text('Swap timing'),
-              subtitle: Text('When new code takes over the playing sound', style: TextStyle(color: Neon.dim)),
-              trailing: SegmentedButton<SwapTiming>(
-                showSelectedIcon: false,
-                segments: const [
-                  ButtonSegment(value: SwapTiming.now, label: Text('Now')),
-                  ButtonSegment(value: SwapTiming.beat, label: Text('Beat')),
-                  ButtonSegment(value: SwapTiming.bar, label: Text('Bar')),
-                ],
-                selected: {settings.swapTiming},
-                onSelectionChanged: (v) => settings.update((s) => s.swapTiming = v.first),
-              ),
-            ),
-            if (onEditKeys != null)
-              ListTile(
-                key: const ValueKey('settings-keys'),
-                leading: Icon(Icons.keyboard_alt_outlined, color: Neon.yellow),
-                title: const Text('Key bindings'),
-                subtitle: Text('Choose what each key does', style: TextStyle(color: Neon.dim)),
-                trailing: const Icon(Icons.chevron_right),
-                onTap: () => onEditKeys!(context),
-              ),
-            SwitchListTile(
-              secondary: Icon(Icons.keyboard, color: Neon.yellow),
-              title: const Text('Vim keys in the code editor'),
-              subtitle: Text('With a keyboard: WASD moves, I types, Esc stops typing', style: TextStyle(color: Neon.dim)),
-              value: settings.vimCode,
-              onChanged: (v) => settings.update((s) => s.vimCode = v),
-            ),
-            const Heading('Code editor'),
-            ..._editorSettings(context, settings),
-            const Heading('Piano roll'),
-            ..._rollSettings(settings),
-            const Heading('About'),
-            ListTile(
-              leading: Icon(Icons.description_outlined, color: Neon.dim),
-              title: const Text('Licences'),
-              subtitle: Text('Including JetBrains Mono (SIL Open Font License 1.1)', style: TextStyle(color: Neon.dim)),
-              onTap: () => showLicensePage(context: context, applicationName: 'C.A.W'),
-            ),
-          ]),
-        ),
-      );
-}
-
-/// Pick a theme, change its colours with a live preview, and save, duplicate, export or import it.
+/// Pick a theme, change its colours (with a live preview) and the rest of its profile, and save, duplicate, export
+/// or import it. A profile value changed here is in force at once; with a custom theme chosen it is saved into that
+/// theme too ([Settings.save]). Starter themes are read-only: a change offers a duplicate.
 class ThemeEditor extends StatefulWidget {
   const ThemeEditor({super.key, required this.settings});
   final Settings settings;
@@ -269,7 +28,11 @@ class _ThemeEditorState extends State<ThemeEditor> {
   String? _openSlot;
   bool _dirty = false;
 
+  /// A look, layout or behaviour value was changed while a starter theme is chosen: offer a duplicate.
+  bool _profileEdited = false;
+
   Settings get s => widget.settings;
+  bool get _starter => s.isStarter(s.themeName);
 
   @override
   void dispose() {
@@ -287,49 +50,61 @@ class _ThemeEditorState extends State<ThemeEditor> {
     s.preview(t);
   }
 
-  void _choose(CawTheme t) {
+  Future<void> _choose(CawTheme t) async {
     setState(() {
       _draft = t;
       _name.text = t.name;
       _dirty = false;
+      _profileEdited = false;
     });
-    s.update((x) {
-      x.preview(null);
-      x.themeName = t.name;
-    });
+    s.preview(null);
+    await s.chooseTheme(t.name);
+    if (mounted) setState(() => _draft = s.theme);
+  }
+
+  /// Changes a profile value: in force and saved (into the chosen custom theme too).
+  void _set(void Function(Settings) change) {
+    Haptics.tap();
+    s.update(change);
+    setState(() => _profileEdited = true);
   }
 
   void _say(String text) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
 
+  /// The theme as the editor shows it: the colours being edited and the profile in force.
+  CawTheme get _whole => _draft.copyWith(profile: s.captureProfile());
+
   Future<void> _save() async {
     final name = _name.text.trim().isEmpty ? _draft.name : _name.text.trim();
-    final replacing = s.isStarter(s.themeName) ? null : s.themeName;
-    final saved = await s.saveTheme(_draft.copyWith(name: name), replacing: replacing);
+    final replacing = _starter ? null : s.themeName;
+    final saved = await s.saveTheme(_whole.copyWith(name: name), replacing: replacing);
     if (!mounted) return;
     setState(() {
       _draft = saved;
       _name.text = saved.name;
       _dirty = false;
+      _profileEdited = false;
     });
     _say('Saved theme "${saved.name}"');
   }
 
   Future<void> _duplicate() async {
-    final copy = await s.saveTheme(_draft.copyWith(name: s.freeName('${_draft.name} copy')));
+    final copy = await s.saveTheme(_whole.copyWith(name: s.freeName('${_draft.name} copy')));
     if (!mounted) return;
-    _choose(copy);
+    await _choose(copy);
   }
 
   Future<void> _delete() async {
     await s.deleteTheme(s.themeName);
-    if (mounted) _choose(s.theme);
+    if (mounted) await _choose(s.theme);
   }
 
   Future<void> _export() async {
+    final t = _whole;
     try {
       final saved = await FilePicker.saveFile(
-          fileName: '${_draft.name}.theme', bytes: utf8.encode(_draft.toFile()), mimeType: 'text/plain');
-      if (mounted) _say(saved == null ? 'Not exported (picker closed).' : 'Exported ${_draft.name}.theme');
+          fileName: '${t.name}.theme', bytes: utf8.encode(t.toFile()), mimeType: 'text/plain');
+      if (mounted) _say(saved == null ? 'Not exported (picker closed).' : 'Exported ${t.name}.theme');
     } catch (e) {
       if (mounted) _say('Could not export: $e');
     }
@@ -342,16 +117,179 @@ class _ThemeEditorState extends State<ThemeEditor> {
       final t = CawTheme.parse(await f.xFile.readAsString());
       final saved = await s.saveTheme(t.copyWith(name: s.freeName(t.name)));
       if (!mounted) return;
-      _choose(saved);
+      await _choose(saved);
       _say('Imported "${saved.name}"');
     } catch (e) {
       if (mounted) _say(e is FormatException ? 'Not a theme: ${e.message}' : 'Could not import: $e');
     }
   }
 
+  // The rows, in Settings' style.
+  Text _sub(String text) => Text(text, style: const TextStyle(color: Neon.dim, fontSize: 12));
+
+  Widget _switch(String key, String title, String subtitle, bool value, void Function(Settings, bool) set) =>
+      SwitchListTile(
+        key: ValueKey('theme-$key'),
+        dense: true,
+        contentPadding: const EdgeInsets.symmetric(horizontal: 8),
+        title: Text(title),
+        subtitle: _sub(subtitle),
+        value: value,
+        onChanged: (v) => _set((x) => set(x, v)),
+      );
+
+  Widget _choice<T>(String key, String title, T value, List<(T, String)> choices, void Function(Settings, T) set,
+          {String? subtitle}) =>
+      ListTile(
+        dense: true,
+        contentPadding: const EdgeInsets.symmetric(horizontal: 8),
+        title: Text(title),
+        subtitle: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          if (subtitle != null) _sub(subtitle),
+          const SizedBox(height: 6),
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: SegmentedButton<T>(
+              key: ValueKey('theme-$key'),
+              showSelectedIcon: false,
+              style: const ButtonStyle(
+                  visualDensity: VisualDensity.compact, tapTargetSize: MaterialTapTargetSize.shrinkWrap),
+              segments: [for (final (v, label) in choices) ButtonSegment(value: v, label: Text(label))],
+              selected: {value},
+              onSelectionChanged: (v) => _set((x) => set(x, v.first)),
+            ),
+          ),
+        ]),
+      );
+
+  /// A slider: shown while it moves ([Settings.adjust]), saved when let go; a double-tap puts back [reset].
+  Widget _slider(String key, String title, double value, double min, double max, String Function(double) show,
+          void Function(Settings, double) set, double reset, {int? divisions}) =>
+      ListTile(
+        dense: true,
+        contentPadding: const EdgeInsets.symmetric(horizontal: 8),
+        title: Row(children: [
+          Expanded(child: Text(title)),
+          Text(show(value), style: Neon.code(size: 12, color: Neon.yellow)),
+        ]),
+        subtitle: ResetOnDoubleTap(
+          onReset: () => _set((x) => set(x, reset)),
+          child: Slider(
+            key: ValueKey('theme-$key'),
+            value: value.clamp(min, max).toDouble(),
+            min: min,
+            max: max,
+            divisions: divisions,
+            onChanged: (v) => s.adjust((x) => set(x, v)),
+            onChangeEnd: (_) {
+              s.save();
+              Haptics.tick();
+              setState(() => _profileEdited = true);
+            },
+          ),
+        ),
+      );
+
+  String _pct(double v) => '${(v * 100).round()}%';
+  String _px(double v) => v == 0 ? 'Default' : '${v.round()} px';
+
+  List<Widget> _look() => [
+        const Heading('Look'),
+        SwitchListTile(
+          key: const ValueKey('theme-glow'),
+          dense: true,
+          contentPadding: const EdgeInsets.symmetric(horizontal: 8),
+          title: const Text('Glow'),
+          subtitle: _sub('A soft glow on active things (off is lighter on slow phones)'),
+          value: _draft.glow,
+          onChanged: (v) => _edit(_draft.copyWith(glow: v)),
+        ),
+        _slider('glowStrength', 'Glow strength', s.glowStrength, 0, Settings.maxGlowStrength, _pct,
+            (x, v) => x.glowStrength = (v * 20).round() / 20, 1, divisions: 40),
+        _choice<UiFont>('font', 'Font', s.uiFont, [for (final f in UiFont.values) (f, f.label)],
+            (x, v) => x.uiFont = v, subtitle: 'The app\'s text; code always uses JetBrains Mono'),
+        _slider('textScale', 'Text size', s.textScale, Settings.minTextScale, Settings.maxTextScale, _pct,
+            (x, v) => x.textScale = (v * 20).round() / 20, 1, divisions: 9),
+        _slider('roundness', 'Corner roundness', s.roundness, 0, Settings.maxRoundness,
+            (v) => v == 0 ? 'Square' : _pct(v), (x, v) => x.roundness = (v * 10).round() / 10, 1, divisions: 20),
+        _switch('glass', 'Glass', 'See-through panels, tracks and controls over a soft background', s.glass,
+            (x, v) => x.glass = v),
+        _choice<Density>('density', 'Density', s.density,
+            const [(Density.comfortable, 'Roomy'), (Density.compact, 'Compact')], (x, v) => x.density = v),
+      ];
+
+  List<Widget> _layout() {
+    final dock = s.dockLayouts.keys.where((k) => !k.endsWith('_floating')).length;
+    final e = s.editor;
+    return [
+      const Heading('Layout'),
+      _slider('trackHeight', 'Track height', s.trackHeight == 0 ? Settings.minTrackHeight - 4 : s.trackHeight,
+          Settings.minTrackHeight - 4, Settings.maxTrackHeight, (v) => _px(v < Settings.minTrackHeight ? 0 : v),
+          (x, v) => x.trackHeight = v < Settings.minTrackHeight ? 0 : v.roundToDouble(), 0),
+      _slider('headerWidth', 'Track header width', s.headerWidth == 0 ? Settings.minHeaderWidth - 8 : s.headerWidth,
+          Settings.minHeaderWidth - 8, Settings.maxHeaderWidth, (v) => _px(v < Settings.minHeaderWidth ? 0 : v),
+          (x, v) => x.headerWidth = v < Settings.minHeaderWidth ? 0 : v.roundToDouble(), 0),
+      _slider('trackGap', 'Gap between tracks', s.trackGap, 0, Settings.maxTrackGap, (v) => '${v.round()} px',
+          (x, v) => x.trackGap = v.roundToDouble(), 6, divisions: 24),
+      _slider('focusShare', 'Focus panel width', s.focusPanelShare, Settings.minFocusPanelShare,
+          Settings.maxFocusPanelShare, _pct, (x, v) => x.focusPanelShare = v, Settings.defaultFocusPanelShare),
+      ListTile(
+        key: const ValueKey('theme-dock'),
+        dense: true,
+        contentPadding: const EdgeInsets.symmetric(horizontal: 8),
+        title: const Text('Docked panels'),
+        subtitle: _sub(dock == 0
+            ? 'The presets on every screen shape; arrange the panels and the theme keeps them'
+            : 'Kept for $dock screen shape${dock == 1 ? '' : 's'} (phone, landscape, desktop) as you arranged them'),
+        trailing: dock == 0
+            ? null
+            : TextButton(onPressed: () => _set((x) => x.dockLayouts = {}), child: const Text('Presets')),
+      ),
+      ListTile(
+        key: const ValueKey('theme-toolbars'),
+        dense: true,
+        contentPadding: const EdgeInsets.symmetric(horizontal: 8),
+        title: const Text('Toolbars'),
+        subtitle: _sub([
+          'Key row: ${e.keyRow.length} keys',
+          e.soloButton ? 'Solo shown' : 'Solo hidden',
+          e.scope ? 'scope shown' : 'scope hidden',
+          e.barOnTop ? 'Run bar on top' : 'Run bar below',
+        ].join(' · ')),
+      ),
+    ];
+  }
+
+  List<Widget> _behaviour() => [
+        const Heading('Behaviour'),
+        _choice<LongPressMenuStyle>('longPress', 'Long-press menus', s.longPressMenu,
+            const [(LongPressMenuStyle.list, 'List'), (LongPressMenuStyle.ring, 'Ring')], (x, v) => x.longPressMenu = v),
+        _switch('haptics', 'Haptics', 'A light touch on presses, steps, snaps, grabs and drops', s.haptics,
+            (x, v) => x.haptics = v),
+        _slider('hapticStrength', 'Haptic strength', s.hapticStrength, 0, 1, _pct, (x, v) => x.hapticStrength = v,
+            0.5, divisions: 10),
+        _choice<MotionLevel>('motion', 'Motion', s.motion,
+            const [(MotionLevel.full, 'Full'), (MotionLevel.reduced, 'Reduced'), (MotionLevel.off, 'Off')],
+            (x, v) => x.motion = v,
+            subtitle: 'Off keeps drag ghosts, snapping and press feedback'),
+        _choice<EditMotionStyle>('editStyle', 'Edit animations', s.editMotionStyle,
+            [for (final v in EditMotionStyle.values) (v, v.label)], (x, v) => x.editMotionStyle = v),
+        for (final k in EditMotionKind.values)
+          _switch('edit-${k.name}', 'Animate ${k.name}', k.label, s.editMotionKinds.contains(k),
+              (x, v) => x.editMotionKinds = v ? {...x.editMotionKinds, k} : ({...x.editMotionKinds}..remove(k))),
+        _switch('snap', 'Snap to grid', 'Whether the piano roll opens with snapping on', s.rollSnap,
+            (x, v) => x.rollSnap = v),
+        _choice<int>('grid', 'Grid', s.rollGrid, [for (final g in Settings.rollGrids) (g, '1/$g')],
+            (x, v) => x.rollGrid = v),
+        _choice<ValueGrid>('valueGrid', 'Value grid', s.roll.valueGrid, [for (final g in ValueGrid.values) (g, g.label)],
+            (x, v) => x.roll = x.roll.copyWith(valueGrid: v)),
+      ];
+
   @override
-  Widget build(BuildContext context) {
-    final starter = s.isStarter(s.themeName) && !_dirty;
+  Widget build(BuildContext context) => ListenableBuilder(listenable: s, builder: (context, _) => _build(context));
+
+  Widget _build(BuildContext context) {
+    final starter = _starter && !_dirty;
     return Scaffold(
       appBar: AppBar(
         title: const Text('Theme'),
@@ -386,13 +324,13 @@ class _ThemeEditorState extends State<ThemeEditor> {
           FilledButton.icon(
             onPressed: _dirty ? _save : null,
             icon: const Icon(Icons.save),
-            label: Text(s.isStarter(s.themeName) ? 'Save copy' : 'Save'),
+            label: Text(_starter ? 'Save copy' : 'Save'),
           ),
         ]),
         const SizedBox(height: 4),
         Row(children: [
           TextButton.icon(onPressed: _duplicate, icon: const Icon(Icons.copy), label: const Text('Duplicate')),
-          if (!s.isStarter(s.themeName))
+          if (!_starter)
             TextButton.icon(
               onPressed: _delete,
               icon: Icon(Icons.delete_outline, color: Neon.pink),
@@ -401,14 +339,23 @@ class _ThemeEditorState extends State<ThemeEditor> {
           const Spacer(),
           if (starter) Text('Starter themes save as a copy', style: TextStyle(color: Neon.dim, fontSize: 12)),
         ]),
-        SwitchListTile(
-          contentPadding: EdgeInsets.zero,
-          title: const Text('Glow'),
-          subtitle:
-              Text('A soft glow on active things (off is lighter on slow phones)', style: TextStyle(color: Neon.dim)),
-          value: _draft.glow,
-          onChanged: (v) => _edit(_draft.copyWith(glow: v)),
-        ),
+        if (_starter && _profileEdited)
+          Container(
+            key: const ValueKey('theme-offer-duplicate'),
+            margin: const EdgeInsets.only(top: 6),
+            padding: const EdgeInsets.fromLTRB(10, 4, 4, 4),
+            decoration: BoxDecoration(
+              color: Neon.yellow.withValues(alpha: 0.1),
+              border: Border.all(color: Neon.yellow.withValues(alpha: 0.5)),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Row(children: [
+              Expanded(
+                child: _sub('${s.themeName} is a starter theme: these changes stay in your settings, not in it.'),
+              ),
+              TextButton(onPressed: _duplicate, child: const Text('Duplicate')),
+            ]),
+          ),
         const Heading('Colours'),
         for (final e in CawTheme.slots.entries) ...[
           ListTile(
@@ -426,6 +373,9 @@ class _ThemeEditorState extends State<ThemeEditor> {
               onChanged: (c) => _edit(_draft.withColor(e.key, c)),
             ),
         ],
+        ..._look(),
+        ..._layout(),
+        ..._behaviour(),
       ]),
     );
   }
@@ -577,269 +527,3 @@ class _ColorPickerState extends State<ColorPicker> {
       );
 }
 
-/// The roll's sizes, look and touch choices; sliders show the value while dragging and save when let go.
-List<Widget> _rollSettings(Settings settings) {
-  final r = settings.roll;
-  Widget slider(String label, IconData icon, double value, double min, double max, String Function(double) show,
-      RollLook Function(double) set) {
-    return ListTile(
-      leading: Icon(icon, color: Neon.blue),
-      title: Text('$label: ${show(value)}', style: Neon.code(size: 14)),
-      subtitle: Slider(
-        min: min,
-        max: max,
-        value: value.clamp(min, max),
-        onChanged: (v) {
-          settings.roll = set(v);
-          settings.preview(null);
-        },
-        onChangeEnd: (v) => settings.update((s) => s.roll = set(v)),
-      ),
-    );
-  }
-
-  String px(double v) => '${v.round()} px';
-  return [
-    slider('Row height', Icons.height, r.rowHeight, 10, 40, px, (v) => r.copyWith(rowHeight: v.roundToDouble())),
-    slider('Velocity lane', Icons.equalizer, r.velocityLane, 32, 160, px,
-        (v) => r.copyWith(velocityLane: v.roundToDouble())),
-    slider('Chance lane', Icons.casino_outlined, r.chanceLane, 24, 120, px,
-        (v) => r.copyWith(chanceLane: v.roundToDouble())),
-    slider('Grid lines', Icons.grid_4x4, r.gridStrength, 0.2, 2, (v) => '${(v * 100).round()}%',
-        (v) => r.copyWith(gridStrength: (v * 10).round() / 10)),
-    slider('Grab zone', Icons.pan_tool_alt_outlined, r.grab, 6, 40, px, (v) => r.copyWith(grab: v.roundToDouble())),
-    slider('Hold for extras', Icons.touch_app_outlined, r.holdMs.toDouble(), 250, 1500, (v) => '${v.round()} ms',
-        (v) => r.copyWith(holdMs: (v / 50).round() * 50)),
-    ListTile(
-      leading: Icon(Icons.piano, color: Neon.yellow),
-      title: const Text('Key names'),
-      subtitle: SegmentedButton<KeyLabels>(
-        showSelectedIcon: false,
-        segments: const [
-          ButtonSegment(value: KeyLabels.none, label: Text('None')),
-          ButtonSegment(value: KeyLabels.octaves, label: Text('C')),
-          ButtonSegment(value: KeyLabels.all, label: Text('All')),
-        ],
-        selected: {r.keyLabels},
-        onSelectionChanged: (v) => settings.update((s) => s.roll = s.roll.copyWith(keyLabels: v.first)),
-      ),
-    ),
-    ListTile(
-      leading: Icon(Icons.swipe, color: Neon.green),
-      title: const Text('Drag on empty grid (draw tool; a tap still draws)'),
-      subtitle: SegmentedButton<EmptyDrag>(
-        showSelectedIcon: false,
-        segments: const [
-          ButtonSegment(value: EmptyDrag.scroll, label: Text('Scroll')),
-          ButtonSegment(value: EmptyDrag.select, label: Text('Select')),
-          ButtonSegment(value: EmptyDrag.draw, label: Text('Draw')),
-        ],
-        selected: {r.emptyDrag},
-        onSelectionChanged: (v) => settings.update((s) => s.roll = s.roll.copyWith(emptyDrag: v.first)),
-      ),
-    ),
-  ];
-}
-
-/// The code editor's key row, chips, buttons and Controls panel.
-List<Widget> _editorSettings(BuildContext context, Settings settings) {
-  final e = settings.editor;
-  Widget toggle(String title, String? sub, IconData icon, bool value, EditorLook Function(bool) set) => SwitchListTile(
-        secondary: Icon(icon, color: Neon.blue),
-        title: Text(title),
-        subtitle: sub == null ? null : Text(sub, style: TextStyle(color: Neon.dim)),
-        value: value,
-        onChanged: (v) => settings.update((s) => s.editor = set(v)),
-      );
-  return [
-    ListTile(
-      leading: Icon(Icons.keyboard_alt_outlined, color: Neon.yellow),
-      title: const Text('Key row'),
-      subtitle: Text(e.keyRow.map((k) => k.trim()).join('  '),
-          maxLines: 1, overflow: TextOverflow.ellipsis, style: Neon.code(size: 12, color: Neon.dim)),
-      trailing: const Icon(Icons.chevron_right),
-      onTap: () => showGlassSheet<void>(
-        context: context,
-        backgroundColor: Neon.panel,
-        isScrollControlled: true,
-        builder: (_) => _KeyRowEditor(settings: settings),
-      ),
-    ),
-    toggle('Completion chips', 'Function names above the keyboard as you type', Icons.auto_awesome, e.chips,
-        (v) => e.copyWith(chips: v)),
-    if (e.chips)
-      ListTile(
-        leading: Icon(Icons.text_fields, color: Neon.blue),
-        title: Text('After ${e.chipLetters} letter${e.chipLetters == 1 ? '' : 's'}, up to ${e.chipCount} chips',
-            style: Neon.code(size: 14)),
-        subtitle: Row(children: [
-          Expanded(
-            child: Slider(
-              min: 1,
-              max: 4,
-              divisions: 3,
-              value: e.chipLetters.toDouble(),
-              onChanged: (v) => settings.update((s) => s.editor = s.editor.copyWith(chipLetters: v.round())),
-            ),
-          ),
-          Expanded(
-            child: Slider(
-              min: 3,
-              max: 16,
-              divisions: 13,
-              value: e.chipCount.toDouble(),
-              onChanged: (v) => settings.update((s) => s.editor = s.editor.copyWith(chipCount: v.round())),
-            ),
-          ),
-        ]),
-      ),
-    toggle('Library button', 'F1 still opens it', Icons.menu_book, e.libraryButton, (v) => e.copyWith(libraryButton: v)),
-    toggle('Solo preview button', 'Also in the module\'s ⋮ menu when hidden', Icons.hearing, e.soloButton,
-        (v) => e.copyWith(soloButton: v)),
-    toggle('Scope', 'Light mode hides it too', Icons.show_chart, e.scope, (v) => e.copyWith(scope: v)),
-    toggle('Run bar on top', 'The key row and Run above the code instead of by the keyboard', Icons.vertical_align_top,
-        e.barOnTop, (v) => e.copyWith(barOnTop: v)),
-    toggle('Compact controls', 'Denser slider rows; tap a header to fold its group', Icons.density_small,
-        e.compactControls, (v) => e.copyWith(compactControls: v)),
-  ];
-}
-
-/// Edits the symbol key row: add keys, drag to reorder, remove, or go back to the default.
-class _KeyRowEditor extends StatefulWidget {
-  const _KeyRowEditor({required this.settings});
-  final Settings settings;
-
-  @override
-  State<_KeyRowEditor> createState() => _KeyRowEditorState();
-}
-
-class _KeyRowEditorState extends State<_KeyRowEditor> {
-  late List<String> _keys = List.of(widget.settings.editor.keyRow);
-  // A stable id per row, so dragging keeps each row's widget (two keys may be the same text).
-  late List<int> _ids = List.generate(_keys.length, (i) => i);
-  late int _nextId = _keys.length;
-  final _add = TextEditingController();
-
-  @override
-  void dispose() {
-    _add.dispose();
-    super.dispose();
-  }
-
-  void _save() => widget.settings.update((s) => s.editor = s.editor.copyWith(keyRow: _keys));
-
-  void _addKey() {
-    // A trailing space is kept, so a key like "let " types the space too.
-    final k = _add.text;
-    if (k.trim().isEmpty || _keys.length >= 64) return; // the row holds at most 64 keys
-    setState(() {
-      _keys.add(k);
-      _ids.add(_nextId++);
-    });
-    _add.clear();
-    _save();
-  }
-
-  @override
-  Widget build(BuildContext context) => SafeArea(
-        child: Padding(
-          padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
-          child: SizedBox(
-            height: MediaQuery.of(context).size.height * 0.7,
-            child: Column(children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 12, 8, 4),
-                child: Row(children: [
-                  const Expanded(child: Text('Key row', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700))),
-                  TextButton(
-                    onPressed: () {
-                      setState(() {
-                        _keys = List.of(EditorLook.defaultKeyRow);
-                        _ids = List.generate(_keys.length, (i) => _nextId++);
-                      });
-                      _save();
-                    },
-                    child: const Text('Default'),
-                  ),
-                ]),
-              ),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: Row(children: [
-                  Expanded(
-                    child: TextField(
-                      controller: _add,
-                      maxLength: 16,
-                      style: Neon.code(size: 15),
-                      decoration: const InputDecoration(hintText: 'New key, e.g. sine( or "let "'),
-                      onSubmitted: (_) => _addKey(),
-                    ),
-                  ),
-                  IconButton(tooltip: 'Add', onPressed: _addKey, icon: const Icon(Icons.add)),
-                ]),
-              ),
-              Expanded(
-                child: ReorderableListView(
-                  onReorderItem: (from, to) {
-                    setState(() {
-                      _keys.insert(to, _keys.removeAt(from));
-                      _ids.insert(to, _ids.removeAt(from));
-                    });
-                    _save();
-                  },
-                  children: [
-                    for (var i = 0; i < _keys.length; i++)
-                      ListTile(
-                        key: ValueKey(_ids[i]),
-                        title: Text(_keys[i].endsWith(' ') ? '${_keys[i].trim()} ␣' : _keys[i], style: Neon.code(size: 15)),
-                        trailing: IconButton(
-                          tooltip: 'Remove',
-                          icon: const Icon(Icons.close),
-                          onPressed: () {
-                            setState(() {
-                              _keys.removeAt(i);
-                              _ids.removeAt(i);
-                            });
-                            _save();
-                          },
-                        ),
-                      ),
-                  ],
-                ),
-              ),
-            ]),
-          ),
-        ),
-      );
-}
-
-/// The version, that this is an open beta, and "Report a problem": the report (version, platform, recent errors) is
-/// copied for the user to paste into a new issue. Nothing is sent from the app.
-class _AboutBeta extends StatelessWidget {
-  const _AboutBeta();
-
-  @override
-  Widget build(BuildContext context) => Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        ListTile(
-          leading: const Icon(Icons.science_outlined, color: Neon.yellow),
-          title: const Text('C.A.W open beta'),
-          subtitle: Text('Version $appVersion · things may change or break; projects are saved as you go',
-              style: TextStyle(color: Neon.dim)),
-        ),
-        ListTile(
-          key: const ValueKey('report-problem'),
-          leading: const Icon(Icons.bug_report_outlined, color: Neon.pink),
-          title: const Text('Report a problem'),
-          subtitle: Text('Copies a report (version, device, recent errors) to paste at $issuesUrl',
-              style: TextStyle(color: Neon.dim)),
-          onTap: () async {
-            await Clipboard.setData(ClipboardData(text: ProblemLog.report()));
-            if (!context.mounted) return;
-            ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-              content: Text('Report copied. Paste it into a new issue at $issuesUrl'),
-              duration: const Duration(seconds: 6),
-            ));
-          },
-        ),
-      ]);
-}

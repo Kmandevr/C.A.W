@@ -1,6 +1,7 @@
 // Routes hardware keys through the action system (keymap, Vim modes, counts, `:` commands, macros) and shows its badge.
 import 'dart:async';
 import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -12,10 +13,14 @@ import '../actions/keys.dart';
 import '../actions/macro.dart';
 import '../actions/vim.dart';
 import '../model/app_state.dart';
+import '../model/automation_writer.dart';
+import '../model/live_midi.dart';
 import '../model/settings.dart';
 import 'glass.dart';
 import 'key_bindings.dart';
 import 'theme.dart';
+import 'volume_fader.dart';
+import 'widgets.dart' show confirmTrackDelete;
 import 'touch_quick_actions.dart';
 
 /// Whether a focused text editor, rather than the global action router, should receive this key.
@@ -43,12 +48,17 @@ typedef ActionTarget = bool Function(String id, int count, String? arg);
 
 class KeyRouter extends StatefulWidget {
   const KeyRouter(
-      {super.key, required this.state, required this.screenArea, required this.onView, required this.child});
+      {super.key, required this.state, required this.screenArea, required this.onView, this.onExport, required this.child});
   final AppState state;
 
-  /// The area of the screen showing (Builder, Arranger, Exporter) when no editor inside it has focus.
+  /// The area of the screen showing (Build, Arrange) when no editor inside it has focus.
   final Area screenArea;
+
+  /// Shows a section: 0 Build, 1 Arrange, 2 Files.
   final ValueChanged<int> onView;
+
+  /// Opens the Export page (the project menu's Export…); null leaves `view.exporter` unhandled.
+  final VoidCallback? onExport;
   final Widget child;
 
   static KeyRouterState? of(BuildContext context) => context.findAncestorStateOfType<KeyRouterState>();
@@ -197,6 +207,9 @@ class KeyRouterState extends State<KeyRouter> {
     if (r.toast != null) _say(r.toast!, error: r.error);
   }
 
+  /// Shows [text] in the key badge's toast (a screen's action that did nothing says why).
+  void toast(String text) => _say(text, error: true);
+
   void _say(String text, {bool error = false}) {
     if (!mounted) return;
     _toastTimer?.cancel();
@@ -225,7 +238,7 @@ class KeyRouterState extends State<KeyRouter> {
   bool _global(String id, int count, String? arg) {
     final p = s.project;
     void bpm(double d) => s.editProject((p) => p.bpm = (p.bpm + d * count).clamp(20, 400).toDouble());
-    void master(double d) => s.editProject((p) => p.master = (p.master + d * count).clamp(0, 1).toDouble());
+    void master(double d) => s.editProject((p) => p.master = (p.master + d * count).clamp(0.0, VolumeTaper.maxGain).toDouble());
     final layers = p.layers;
     final layer = layers.isEmpty ? null : layers[_layer.clamp(0, layers.length - 1)];
     switch (id) {
@@ -235,6 +248,14 @@ class KeyRouterState extends State<KeyRouter> {
         s.stopPlayback();
       case 'transport.tap':
         s.tapTempo();
+      case 'transport.record':
+        LiveMidi.current?.toggleRecord();
+      case 'transport.automate':
+        final w = AutomationWriter.current;
+        w?.setArmed(!w.armed);
+      case 'view.liveKeys':
+        final m = LiveMidi.current;
+        if (m != null) m.keysOpen = !m.keysOpen;
       case 'edit.undo':
         if (!s.undo()) _say('Nothing to undo');
       case 'edit.redo':
@@ -254,17 +275,10 @@ class KeyRouterState extends State<KeyRouter> {
       case 'view.arranger':
         widget.onView(1);
       case 'view.exporter':
-        widget.onView(5);
-      case 'view.mixer':
-        widget.onView(2);
-      case 'view.engineLab':
-        widget.onView(3);
-      case 'view.automation':
-        widget.onView(4);
+        if (widget.onExport == null) return false;
+        widget.onExport!();
       case 'view.files':
-        widget.onView(6);
-      case 'view.pluginBuilder':
-        widget.onView(7);
+        widget.onView(2);
       case 'transport.tempoUp':
         bpm(1);
       case 'transport.tempoDown':
@@ -305,8 +319,9 @@ class KeyRouterState extends State<KeyRouter> {
         if (layer != null) _say(layers[_layer].name);
       case 'arranger.vol.up' || 'arranger.vol.down':
         if (layer == null) return false;
-        final d = (id.endsWith('up') ? 0.05 : -0.05) * count;
-        s.mixLayer(layer, volume: (layer.volume + d).clamp(0, 1).toDouble());
+        // 1 dB a press (from silence, up from -60 dB), at most 0 dB.
+        final db = (layer.volume <= 0 ? -61.0 : VolumeTaper.db(layer.volume)) + (id.endsWith('up') ? 1.0 : -1.0) * count;
+        s.mixLayer(layer, volume: db < -60 ? 0 : math.min(VolumeTaper.maxGain, math.pow(10, db / 20).toDouble()));
       case 'arranger.pan.left' || 'arranger.pan.right':
         if (layer == null) return false;
         final d = (id.endsWith('right') ? 0.1 : -0.1) * count;
@@ -321,7 +336,11 @@ class KeyRouterState extends State<KeyRouter> {
         s.addLayer();
       case 'arranger.layer.delete':
         if (layer == null) return false;
-        s.removeLayer(layer);
+        if (s.settings.confirmDelete) {
+          unawaited(confirmTrackDelete(context, s, layer).then((ok) { if (ok) s.removeLayer(layer); }));
+        } else {
+          s.removeLayer(layer);
+        }
       case 'arranger.layer.moveUp' || 'arranger.layer.moveDown':
         if (layer == null) return false;
         final to = (_layer + (id.endsWith('Up') ? -1 : 1)).clamp(0, layers.length - 1);

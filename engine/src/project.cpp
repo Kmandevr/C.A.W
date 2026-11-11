@@ -1,10 +1,15 @@
 // Reads the project JSON into a ProjectSpec: values clamp to a safe range, song positions out of range are refused.
 #include "project.h"
 
+#include "modulation_links.h"
+
+#include "presets.h"
+
 #include <algorithm>
 #include <cctype>
 #include <cmath>
 
+#include "audio_clips.h"
 #include "json.h"
 
 namespace caw {
@@ -26,14 +31,6 @@ bool wholeIn(double v, int lo, int hi, int& out) {
 }
 
 std::string range(int lo, int hi) { return std::to_string(lo) + " to " + std::to_string(hi); }
-
-std::vector<std::string> idList(const Json* arr) {
-    std::vector<std::string> out;
-    if (!arr || arr->type != Json::Type::Array) return out;
-    for (const Json& j : arr->arr)
-        if (j.type == Json::Type::String) out.push_back(j.str);
-    return out;
-}
 
 // One component entry: an id string, or {"id", "params": {name: number}, "bypass", "state", "state_version"}.
 bool componentEntry(const Json& j, const std::string& where, ComponentSpec& c, std::string& error) {
@@ -69,6 +66,52 @@ bool componentEntry(const Json& j, const std::string& where, ComponentSpec& c, s
                 c.params.emplace_back(k, v.num);
             }
         }
+        // The sidechain key: {"layer": id, "tap": "pre" | "post", "level": gain} (null or absent: none).
+        if (const Json* k = j.get("key"); k && k->type != Json::Type::Null) {
+            if (k->type != Json::Type::Object || k->string("layer").empty()) {
+                error = where + ": component '" + c.id + "' key must be {\"layer\": id, \"tap\": \"pre\"|\"post\", \"level\": n}";
+                return false;
+            }
+            c.hasKey = true;
+            c.key.layer = k->string("layer");
+            const std::string tap = k->string("tap", "pre");
+            if (tap != "pre" && tap != "post") {
+                error = where + ": component '" + c.id + "' key tap must be \"pre\" or \"post\"";
+                return false;
+            }
+            c.key.pre = tap == "pre";
+            c.key.level = clampd(k->number("level", 1.0), 0.0, kMaxMixGain);
+        }
+        // Samples: [{"slot": n, "path": file} or {"slot": n, "builtin": name}] (docs/engine.md, "Drums", Samples).
+        if (const Json* ss = j.get("samples"); ss && ss->type != Json::Type::Null) {
+            constexpr size_t kMaxSamples = 256;
+            if (ss->type != Json::Type::Array || ss->arr.size() > kMaxSamples) {
+                error = where + ": component '" + c.id + "' samples must be an array of at most 256 entries";
+                return false;
+            }
+            for (const Json& s : ss->arr) {
+                const double slot = s.type == Json::Type::Object ? s.number("slot", -1) : -1;
+                SampleRefSpec r;
+                if (s.type == Json::Type::Object) {
+                    r.path = s.string("path");
+                    r.builtin = s.string("builtin");
+                }
+                if (!(slot >= 0 && slot < 65536 && slot == std::floor(slot)) || r.path.empty() == r.builtin.empty() ||
+                    r.path.size() > 4096 || r.builtin.size() > 256) {
+                    error = where + ": component '" + c.id + "' sample entries must be {\"slot\": n, \"path\": file} or {\"slot\": n, \"builtin\": name}";
+                    return false;
+                }
+                r.slot = static_cast<uint32_t>(slot);
+                c.samples.push_back(std::move(r));
+            }
+        }
+        // A built-in preset's values under the entry's own params (docs/engine.md, Presets).
+        if (const Json* pr = j.get("preset"); pr && pr->type != Json::Type::Null) {
+            if (pr->type != Json::Type::String || !applyBuiltinPreset(c.id, pr->str, c.params)) {
+                error = where + ": component '" + c.id + "' has no preset '" + (pr->type == Json::Type::String ? pr->str : "") + "'";
+                return false;
+            }
+        }
     }
     if (c.id.empty()) {
         error = where + ": every component needs an id";
@@ -99,6 +142,117 @@ bool componentList(const Json* arr, const std::string& where, std::vector<Compon
 
 }  // namespace
 
+std::string routeTarget(const ProjectSpec& p, const LayerSpec& layer) {
+    std::string parent = layer.parentId;
+    for (size_t depth = 0; !parent.empty() && depth < p.layers.size(); ++depth) {
+        const LayerSpec* found = nullptr;
+        for (const LayerSpec& l : p.layers)
+            if (l.id == parent) found = &l;
+        if (!found) return {};
+        if (found->folder && found->busEnabled) return found->id;
+        parent = found->parentId;
+    }
+    return {};
+}
+
+bool validateRouting(const ProjectSpec& p, std::string& error) {
+    const size_t n = p.layers.size();
+    std::map<std::string, size_t> index;
+    for (size_t i = 0; i < n; ++i) index.emplace(p.layers[i].id, i);
+    auto label = [&](size_t i) {
+        const LayerSpec& l = p.layers[i];
+        return "'" + (l.name.empty() ? l.id : l.name) + "'";
+    };
+    // Edges run from what is heard to what hears it: a layer to its bus (or nothing: the master), to the buses
+    // it sends to, and a key's source to the layer whose component it keys.
+    std::vector<std::vector<size_t>> edges(n);
+    for (size_t i = 0; i < n; ++i) {
+        const LayerSpec& l = p.layers[i];
+        const bool plays = !(l.folder && !l.busEnabled);  // an organization-only folder carries no audio
+        if (plays) {
+            const std::string to = routeTarget(p, l);
+            if (!to.empty()) edges[i].push_back(index.at(to));
+        }
+        for (const SendSpec& s : l.sends) {
+            auto it = index.find(s.to);
+            if (it == index.end()) {
+                error = "layer " + label(i) + " sends to '" + s.to + "', which is not in the project";
+                return false;
+            }
+            const LayerSpec& to = p.layers[it->second];
+            if (!to.folder || !to.busEnabled) {
+                error = "layer " + label(i) + " sends to " + label(it->second) + ", which is not a bus";
+                return false;
+            }
+            if (it->second == i) {
+                error = "layer " + label(i) + " sends to itself";
+                return false;
+            }
+            if (!plays) {
+                error = "folder " + label(i) + " has no bus, so it has nothing to send";
+                return false;
+            }
+            edges[i].push_back(it->second);
+        }
+        for (const ComponentSpec& c : l.components) {
+            if (!c.hasKey) continue;
+            auto it = index.find(c.key.layer);
+            if (it == index.end()) {
+                error = "layer " + label(i) + ": component '" + c.id + "' is keyed by '" + c.key.layer + "', which is not in the project";
+                return false;
+            }
+            if (it->second == i) {
+                error = "layer " + label(i) + ": component '" + c.id + "' can't be keyed by its own layer";
+                return false;
+            }
+            const LayerSpec& from = p.layers[it->second];
+            if (from.folder && !from.busEnabled) {
+                error = "layer " + label(i) + ": component '" + c.id + "' is keyed by folder " + label(it->second) +
+                        ", which has no bus";
+                return false;
+            }
+            edges[it->second].push_back(i);
+        }
+    }
+    // A modulator that hears a layer's audio orders it before every layer its links move (#161).
+    if (!modulationEdges(p, index, edges, error)) return false;
+    // Depth-first search for a loop; the path to it names the layers in the message.
+    std::vector<uint8_t> state(n, 0);  // 0 unseen, 1 on the path, 2 done
+    std::vector<size_t> path, at;
+    for (size_t start = 0; start < n; ++start) {
+        if (state[start]) continue;
+        path.assign(1, start);
+        at.assign(1, 0);
+        state[start] = 1;
+        while (!path.empty()) {
+            const size_t x = path.back();
+            if (at.back() == edges[x].size()) {
+                state[x] = 2;
+                path.pop_back();
+                at.pop_back();
+                continue;
+            }
+            const size_t y = edges[x][at.back()++];
+            if (state[y] == 1) {
+                std::string loop;
+                bool on = false;
+                for (size_t k : path) {
+                    on = on || k == y;
+                    if (on) loop += label(k) + " -> ";
+                }
+                error = "routing makes a loop: " + loop + label(y) + " (a layer can't hear itself)";
+                return false;
+            }
+            if (state[y] == 0) {
+                state[y] = 1;
+                path.push_back(y);
+                at.push_back(0);
+            }
+        }
+    }
+    return true;
+}
+
 const ModuleSpec* ProjectSpec::module(const std::string& id) const {
     for (const ModuleSpec& m : modules)
         if (m.id == id) return &m;
@@ -128,13 +282,22 @@ bool parseProject(std::string_view text, ProjectSpec& out, std::string& error) {
     out.name = root.string("name");
     out.bpm = clampd(root.number("bpm", 120), 20, 400);
     out.beatsPerBar = clampi(root.number("beats_per_bar", 4), 1, 16);
-    out.voices = clampi(root.number("voices", 32), 1, 32);  // a cap: each generator plays its own voices: count
     const int maxBars = maxLoopBars(out.beatsPerBar);
     const int maxSteps = maxArrangementSteps(out.beatsPerBar);
     if (!wholeIn(root.number("loop_bars", 4), 1, maxBars, out.loopBars)) {
         error = "loop_bars must be a whole number from " + range(1, maxBars) + " at " +
             std::to_string(out.beatsPerBar) + " beats per bar";
         return false;
+    }
+    out.loopRange = root.boolean("loop_range", false);
+    if (out.loopRange) {
+        if (!wholeIn(root.number("loop_start_steps", 0), 0, maxSteps - 1, out.loopStartSteps) ||
+            !wholeIn(root.number("loop_end_steps", 0), 1, maxSteps, out.loopEndSteps) ||
+            out.loopEndSteps <= out.loopStartSteps) {
+            error = "loop_start_steps and loop_end_steps must be whole numbers from " + range(0, maxSteps) +
+                ", the end after the start";
+            return false;
+        }
     }
     const auto pointStepsOk = [&](const Json* points, std::string& message, const std::string& owner) {
         if (!points || points->type != Json::Type::Array) return true;
@@ -149,14 +312,7 @@ bool parseProject(std::string_view text, ProjectSpec& out, std::string& error) {
         return true;
     };
     out.seed = static_cast<uint32_t>(clampd(root.number("seed", 0), 0, 4294967295.0));
-    out.master = clampd(root.number("master", 0.7), 0, 1);
-    out.seamCrossfade = root.boolean("seam_crossfade", true);
-    {
-        const std::string swap = root.string("swap", "now");
-        out.swapMode = swap == "beat" ? 1 : swap == "bar" ? 2 : 0;
-    }
-    out.keyRoot = clampi(root.number("key_root", 9), 0, 11);
-    out.keyScale = clampi(root.number("key_scale", 1), 0, 13);
+    out.master = clampd(root.number("master", 0.7), 0, kMaxMixGain);
 
     if (const Json* deps = root.get("dependencies"); deps && deps->type == Json::Type::Array) {
         if (deps->arr.size() > 4096) {
@@ -194,23 +350,27 @@ bool parseProject(std::string_view text, ProjectSpec& out, std::string& error) {
     }
 
     if (!componentList(root.get("master_components"), "master_components", out.masterComponents, error)) return false;
+    for (const ComponentSpec& c : out.masterComponents)
+        if (c.hasKey) {
+            error = "master_components: component '" + c.id + "' can't take a sidechain key on the master (put it on a bus)";
+            return false;
+        }
     if (const Json* mods = root.get("modules"); mods && mods->type == Json::Type::Array) {
         for (const Json& m : mods->arr) {
             if (m.type != Json::Type::Object) continue;
             ModuleSpec spec;
             spec.id = m.string("id");
-            spec.name = m.string("name");
             spec.source = m.string("source");
-            // Ids with control characters are left out: the engine names its hidden modules with them.
+            // Ids with control characters are left out: the engine names its internal modules with them.
             bool control = false;
             for (unsigned char ch : spec.id) control = control || ch < 0x20;
             if (spec.id.empty() || control) continue;
-            if (const Json* ps = m.get("params"); ps && ps->type == Json::Type::Object)
-                for (const auto& [k, v] : ps->obj)
-                    if (v.type == Json::Type::Number && std::isfinite(v.num)) spec.params[k] = v.num;
             out.modules.push_back(std::move(spec));
         }
     }
+    std::map<std::string, AssetRef> assets;  // the "assets" table audio clips name
+    if (!parseAssetTable(root, assets, error)) return false;
+    double audioEndSteps = 0;  // the last audio clip's end
     if (const Json* layers = root.get("layers"); layers && layers->type == Json::Type::Array) {
         for (const Json& l : layers->arr) {
             if (l.type != Json::Type::Object) continue;
@@ -218,9 +378,19 @@ bool parseProject(std::string_view text, ProjectSpec& out, std::string& error) {
             spec.id = l.string("id");
             spec.name = l.string("name");
             if (spec.id.empty()) continue;
-            spec.chain = idList(l.get("chain"));
             const std::string layerName = "layer '" + spec.id + "'";
             if (!componentList(l.get("components"), layerName + " components", spec.components, error)) return false;
+            if (!componentList(l.get("noteComponents"), layerName + " noteComponents", spec.noteComponents, error)) return false;
+            for (const ComponentSpec& c : spec.noteComponents)
+                if (c.hasKey) {
+                    error = layerName + " noteComponents: component '" + c.id + "' can't take a sidechain key per note";
+                    return false;
+                }
+            if (const Json* v = l.get("noteVoices"); v && v->type != Json::Type::Null &&
+                                                      !wholeIn(l.number("noteVoices", 8), 1, 16, spec.noteVoices)) {
+                error = layerName + ": noteVoices must be a whole number from 1 to 16";
+                return false;
+            }
             if (const Json* inst = l.get("instrument"); inst && inst->type != Json::Type::Null) {
                 if (inst->type != Json::Type::String && inst->type != Json::Type::Object) {
                     error = layerName + " instrument must be a component id or {\"id\": ...}";
@@ -237,6 +407,31 @@ bool parseProject(std::string_view text, ProjectSpec& out, std::string& error) {
             spec.parentId = l.string("parent");
             spec.folder = l.boolean("folder", false);
             spec.busEnabled = l.boolean("bus", true);
+            if (!parseAudioTrack(l, assets, layerName, static_cast<double>(maxSteps), spec, audioEndSteps, error)) return false;
+            if (const Json* sends = l.get("sends"); sends && sends->type != Json::Type::Null) {
+                if (sends->type != Json::Type::Array) {
+                    error = layerName + ": sends must be a list of {\"to\": bus id, \"level\", \"pre\", \"mute\"}";
+                    return false;
+                }
+                if (sends->arr.size() > static_cast<size_t>(kMaxSends)) {
+                    error = layerName + " has more than " + std::to_string(kMaxSends) + " sends";
+                    return false;
+                }
+                for (const Json& sj : sends->arr) {
+                    SendSpec send;
+                    if (sj.type == Json::Type::Object) {
+                        send.to = sj.string("to");
+                        send.level = clampd(sj.number("level", 1.0), 0.0, kMaxMixGain);
+                        send.pre = sj.boolean("pre", false);
+                        send.mute = sj.boolean("mute", false);
+                    }
+                    if (send.to.empty()) {
+                        error = layerName + ": every send needs a \"to\" bus";
+                        return false;
+                    }
+                    spec.sends.push_back(std::move(send));
+                }
+            }
             if (const Json* clips = l.get("clips"); clips && clips->type == Json::Type::Array) {
                 for (const Json& c : clips->arr) {
                     if (c.type != Json::Type::Object) continue;
@@ -261,7 +456,13 @@ bool parseProject(std::string_view text, ProjectSpec& out, std::string& error) {
                         error = clipName + ": source_offset_steps must be a whole number from " + range(0, maxSteps);
                         return false;
                     }
+                    if (!wholeIn(c.number("loop_steps", 0), 0, maxSteps, clip.loopSteps)) {
+                        error = clipName + ": loop_steps must be a whole number from " + range(0, maxSteps) +
+                            " (0 loops at the pattern's length)";
+                        return false;
+                    }
                     clip.loop = c.boolean("loop", true);
+                    clip.mute = c.boolean("mute", false);
                     if (!clip.pattern.empty()) spec.clips.push_back(std::move(clip));
                 }
             }
@@ -275,14 +476,15 @@ bool parseProject(std::string_view text, ProjectSpec& out, std::string& error) {
                         for (const Json& point : points->arr) {
                             if (point.type != Json::Type::Object) continue;
                             lane.points.push_back({point.number("step", 0),
-                                clampd(point.number("value", lane.target == "volume" ? 0.8 : 0), lane.target == "volume" ? 0 : -1, 1)});
+                                clampd(point.number("value", lane.target == "volume" ? 0.8 : 0), lane.target == "volume" ? 0 : -1,
+                                       lane.target == "volume" ? kMaxMixGain : 1)});  // volume: a gain to +12 dB, as the faders
                         }
                     }
                     std::stable_sort(lane.points.begin(), lane.points.end(), [](const auto& a, const auto& b) { return a.step < b.step; });
                     if (!lane.points.empty()) spec.automation.push_back(std::move(lane));
                 }
             }
-            spec.volume = clampd(l.number("volume", 0.8), 0, 1);
+            spec.volume = clampd(l.number("volume", 0.8), 0, kMaxMixGain);
             spec.pan = clampd(l.number("pan", 0), -1, 1);
             spec.mute = l.boolean("mute", false);
             spec.solo = l.boolean("solo", false);
@@ -301,7 +503,7 @@ bool parseProject(std::string_view text, ProjectSpec& out, std::string& error) {
                 lane.moduleId = laneJson.string("layer");
                 lane.component = 0;
                 if (lane.moduleId.empty()) continue;
-            } else if (lane.targetType == "component") {
+            } else if (lane.targetType == "component" || lane.targetType == "noteComponent") {
                 // {"target_type":"component","layer":id (absent: the master),"component":index,"target":param}
                 lane.moduleId = laneJson.string("layer");
                 const double index = laneJson.number("component", -1);
@@ -309,7 +511,7 @@ bool parseProject(std::string_view text, ProjectSpec& out, std::string& error) {
                 lane.component = static_cast<int>(index);
             }
             if ((lane.targetType != "param" && lane.targetType != "global" && lane.targetType != "component" &&
-                 lane.targetType != "instrument") ||
+                 lane.targetType != "instrument" && lane.targetType != "noteComponent") ||
                 lane.target.empty() || (lane.targetType == "param" && lane.moduleId.empty())) continue;
             if (!pointStepsOk(laneJson.get("points"), error, "")) return false;
             if (const Json* points = laneJson.get("points"); points && points->type == Json::Type::Array) {
@@ -331,8 +533,12 @@ bool parseProject(std::string_view text, ProjectSpec& out, std::string& error) {
         for (const auto& point : lane.points)
             automationEndStep = std::max<int64_t>(automationEndStep, static_cast<int64_t>(std::ceil(point.step)));
     const int64_t stepsPerBar = out.beatsPerBar * 4;
+    automationEndStep = std::max<int64_t>(automationEndStep, static_cast<int64_t>(std::ceil(audioEndSteps)));
     if (automationEndStep > 0)
         out.loopBars = std::max(out.loopBars, static_cast<int>((automationEndStep + stepsPerBar - 1) / stepsPerBar));
+    // The song reaches the loop range's end, so playback gets there.
+    if (out.loopRange)
+        out.loopBars = std::max(out.loopBars, static_cast<int>((out.loopEndSteps + stepsPerBar - 1) / stepsPerBar));
 
     // Reject malformed parent references and cycles before the audio thread sees routing indices.
     // A chain has fewer ancestors than there are layers, so the walk is bounded by the layer count.
@@ -355,49 +561,30 @@ bool parseProject(std::string_view text, ProjectSpec& out, std::string& error) {
             parent = found->parentId;
         }
     }
-    if (const Json* g = root.get("globals"); g && g->type == Json::Type::Object)
-        for (const auto& [k, v] : g->obj)
-            if (v.type == Json::Type::Number && std::isfinite(v.num)) out.globals[k] = v.num;
+    // Project modulation (#161): modulators and links (modulation_links.cpp), before the routing check that orders them.
+    if (!parseModulation(root, [](const Json& j, const std::string& where, ComponentSpec& c, std::string& e) {
+            return componentEntry(j, where, c, e);
+        }, out, error))
+        return false;
+    if (!validateRouting(out, error)) return false;
     if (const Json* a = root.get("audition"); a && a->type == Json::Type::Object) {
-        out.auditionChain = idList(a->get("chain"));
         if (!wholeIn(a->number("length_steps", 0), 0, maxSteps, out.auditionSteps)) {
             error = "audition length_steps must be a whole number from " + range(0, maxSteps);
             return false;
         }
         out.auditionPattern = a->string("pattern");
-    }
-    out.auditionOnly = root.boolean("audition_only", false) && !out.auditionChain.empty();
-    return true;
-}
-
-std::string refName(const std::string& name) {
-    std::string out;
-    bool gap = false;
-    for (const char ch : name) {
-        const unsigned char c = static_cast<unsigned char>(ch);
-        if (std::isalnum(c)) {
-            if (gap && !out.empty()) out += '_';
-            out += static_cast<char>(std::tolower(c));
-            gap = false;
-        } else {
-            gap = true;
+        if (!componentList(a->get("components"), "audition components", out.auditionComponents, error)) return false;
+        if (const Json* inst = a->get("instrument"); inst && inst->type != Json::Type::Null) {
+            if (inst->type != Json::Type::String && inst->type != Json::Type::Object) {
+                error = "audition instrument must be a component id or {\"id\": ...}";
+                return false;
+            }
+            if (!componentEntry(*inst, "audition instrument", out.auditionInstrument, error)) return false;
+            out.hasAuditionInstrument = true;
         }
     }
-    return out;
-}
-
-ProjectSpec singleModuleProject(const std::string& source, double bpm, int bars) {
-    ProjectSpec p;
-    p.bpm = bpm;
-    p.loopBars = bars;
-    p.modules.push_back({"m", source, {}});
-    LayerSpec l;
-    l.id = "l";
-    l.name = "module";
-    l.chain = {"m"};
-    l.volume = 1.0;
-    p.layers.push_back(l);
-    return p;
+    out.auditionOnly = root.boolean("audition_only", false) && out.hasAuditionInstrument;
+    return true;
 }
 
 }  // namespace caw

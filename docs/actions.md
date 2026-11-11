@@ -2,7 +2,7 @@
 title: Actions, keys and macros
 summary: Implemented action routing, macros, keymap persistence and configurable toolbars, plus clearly identified UI gaps.
 covers: [app/lib/actions/, app/lib/ui/key_router.dart, app/lib/ui/key_bindings.dart, app/lib/ui/pattern_editor.dart, app/lib/ui/touch_quick_actions.dart]
-updated: 2026-11-05
+updated: 2026-11-11
 ---
 
 # Actions, keys and macros
@@ -65,7 +65,7 @@ The owner wants the whole app, code editor included, to work like Vim (2026-10-2
   - **Insert:** keys type text, in the code editor, name fields and the command line.
   - **Visual:** movement keys extend the selection: a time × pitch rectangle in the roll, cells in the grid, layers in the Arranger.
   - Esc always returns to Normal, and the mode shows in the status bar.
-- **Counts:** a number before a command repeats it. `3E` copies the selection three times after itself, `12W` moves notes up an octave, and `4]` makes a layer four steps longer. That's why the grid sizes moved from 1–4 to Alt+1–4.
+- **Counts:** a number before a command repeats it. `3E` copies the selection three times after itself, `12W` moves notes up an octave, and `4]` makes a layer four steps longer. That's why the grid sizes moved from 1–4 to Alt+1–4. A digit an area binds on its own runs that action instead: the arranger binds 1–0 to its marker jumps (REAPER's), so counts there need those keys unbound in the key bindings editor.
 - **Command line:** `:` opens it, with completion. Every action is a command by its name (`:quantize`, `:export loop`), and some take values: `:bpm 140`, `:grid 1/16`, `:key A minor`, `:len 4 bars`, `:vel 80%`.
 - **Repeat:** `.` repeats the last change. With a count, `5.` repeats it five times.
 - **Recording macros:**
@@ -89,12 +89,15 @@ Keys marked † are the owner's own scheme (2026-10-28). The rest are proposals 
 | --- | --- |
 | Play / pause (resumes where it paused; the id `transport.playstop` stays, so saved keymaps keep it) | Space |
 | Stop: the next play starts from the beginning | Shift+Space |
+| Record into the armed or selected track; again stops and keeps the take (REAPER's key) | Ctrl+R |
+| Automate on or off (the transport's button; its mode is on the button's long-press) | — |
+| On-screen keys and pads (REAPER's virtual MIDI keyboard key; `view.liveKeys`) | Alt+B |
 | Undo / redo (the piano roll's own history inside it, a text field's own text undo while one has focus, such as the code editor; the project's everywhere else) | Ctrl+Z / Ctrl+Shift+Z (also Ctrl+Y) |
 | Save now (projects also autosave) | Ctrl+S |
 | Action list | ? |
-| Show the Code / Arrange / Export panel | Ctrl+1 / Ctrl+2 / Ctrl+3 (already built; the panel is revealed in the dock) |
-| Go to Mixer / Engine Lab / Automation | Ctrl+4 / Ctrl+5 / Ctrl+6 |
-| Go to Files / Plugin Builder | Ctrl+7 / Ctrl+8 |
+| Show Build / Arrange | Ctrl+1 / Ctrl+2 (the panel is revealed in the dock) |
+| Open the Export page (the project menu's Export…) | Ctrl+3 |
+| Go to Files | Ctrl+7 |
 | New, open, duplicate, rename, delete project | — / Ctrl+O / — / F2 in the project menu / — |
 | Tap tempo | T |
 | Tempo up / down 1 BPM (Shift: 0.1) | Ctrl+= / Ctrl+- |
@@ -140,9 +143,11 @@ Notes:
 | Select all / none | Ctrl+A / Esc |
 | Select next / previous note in time | Tab / Shift+Tab |
 | Add the note at the cursor to the selection | Ctrl+Shift+Space |
-| Copy / cut / paste at the cursor / duplicate | Ctrl+C / Ctrl+X / Ctrl+V / Ctrl+D |
+| Copy / cut / paste (after the copied notes, chaining) / duplicate | Ctrl+C / Ctrl+X / Ctrl+V / Ctrl+D |
 | Split notes at the cursor / join selected notes | Ctrl+E / Ctrl+J (Ableton uses these: [Live 12 manual](https://www.ableton.com/live-manual/12/live-keyboard-shortcuts/)) |
 | Quantize selected notes to the grid | Ctrl+U (as in Live) |
+| Quantize… (sheet: grid, starts/ends/both, strength, swing, humanize, previewed live) | ⋮ menu (no default key) |
+| Step input on / off; a rest skips a grid step | ⋮ menu, the step bar's Rest (no default keys) |
 | Hear the selected notes | Enter |
 
 Note values and extras:
@@ -164,9 +169,9 @@ Grid and view:
 | Snap (magnet) on / off (grid off) | N |
 | Adaptive / fixed grid | Alt+F |
 | Drag a length without snapping | hold Shift while dragging |
-| Tools: draw, select, curve, erase | B, V, C, X |
+| Tools: draw, select, curve, erase, ratchet brush | B, V, C, X, — |
 | Switch piano roll / drum grid | G |
-| Zoom in / out / fit the pattern | Ctrl+= / Ctrl+- / F |
+| Zoom in / out / fit the pattern (also Ctrl + wheel; Ctrl + Shift + wheel for the row height) | Ctrl+= / Ctrl+- / F |
 | Show velocity lane / extras lanes | Alt+V / Alt+X (Ctrl+1/2/3 always switch areas, owner) |
 | Hear notes on / off | ⋮ menu (no default key) |
 
@@ -176,21 +181,34 @@ Generators (buttons; no default keys):
 | --- | --- |
 | Euclid, random in key, arpeggiate, humanize, chord stamp | — |
 | Legato (stretch each note to the next) | — |
+| Connect notes (each chord to the next, voices gliding into it), tremolo (volume or repeats), vibrato (pitch) | — |
 | Reverse selection, invert pitch around the cursor | — |
 
 ### Arranger
 
 | Action | Default keys |
 | --- | --- |
-| Select previous / next layer | W / S, ↑ / ↓ |
+| Select previous / next layer | W, ↑ / ↓ (S splits since 2026-11-10, owner: as in REAPER) |
 | Pan left / right | A / D |
-| Volume up / down | = / - |
+| Volume up / down (1 dB a press, at most 0 dB) | = / - |
 | Mute / solo the layer | M / Alt+S |
 | Open the layer's menu (generator, pattern, effects, length) | Enter |
 | Layer length shorter / longer | [ / ] |
-| Add layer / delete layer | Ctrl+N / Delete |
+| Add layer / delete layer (Delete removes the selected clips instead while any are selected, as REAPER's Delete removes selected items) | Ctrl+N / Delete |
 | Move layer up / down | Ctrl+W / Ctrl+S |
 | Change layer colour | — |
+| Split clips at the playhead: the selected ones, or every clip under it (REAPER's S) | S |
+| Glue the selected clips on each track into one | G |
+| Duplicate the selected clips after themselves, with their own notes (REAPER's Ctrl+D; [Assumption] not checked in the guide) | Ctrl+D |
+| Delete the selected clips | — (Delete, above) |
+| Clip properties (REAPER's F2) | F2 |
+| Select several clips (Select mode: taps add, a long-press drag draws a box) | — |
+| Loop range on / off (REAPER's R; on with none drawn takes the time selection, else four bars) | R |
+| Add a marker at the playhead (REAPER's M is the layer's mute here) | Shift+M |
+| Add a region over the time selection, else the loop range (REAPER's Shift+R) | Shift+R |
+| Go to the next / previous marker or region (REAPER's ] and [ are the layer's length here) | Ctrl+] / Ctrl+[ |
+| Go to marker 1–10, in time order (REAPER's 1–0; these take the digits from counts here) | 1 … 9, 0 |
+| Markers and regions: the list (jump, rename, loop, duplicate a region with its clips) | — |
 
 ### Exporter
 

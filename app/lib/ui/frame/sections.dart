@@ -5,8 +5,8 @@ import 'package:flutter/widgets.dart';
 /// The three main tab types (owner, 2026-11-09, `docs/decisions.md` "The app's layout").
 enum Section { build, files, arrange }
 
-/// What a Build tab edits: a project C++ component (by its component id) or a .caw module (by its module id).
-enum BuildTabKind { cpp, caw }
+/// What a Build tab edits: a project C++ component (by its component id) or a pattern (by its module id).
+enum BuildTabKind { cpp, pattern }
 
 @immutable
 class BuildTab {
@@ -35,10 +35,25 @@ class SectionController extends ChangeNotifier {
   String? _focusedLayer;
   String? get focusedLayer => _focusedLayer;
 
+  /// The top bars (the status row, Arrange's toolbar). They hide only on a deliberate pull of their handle
+  /// (owner, 2026-11-10: "Hide only on a deliberate pull"); scrolling never hides them.
+  final ValueNotifier<bool> barsShown = ValueNotifier(true);
+
+  /// While the handle is pulled: how far the bars are toward hidden, from 0 (shown) to 1 (hidden), so they follow the
+  /// finger; null otherwise.
+  final ValueNotifier<double?> barsPull = ValueNotifier(null);
+
   void show(Section s) {
     if (_current == s) return;
     _current = s;
     notifyListeners();
+  }
+
+  @override
+  void dispose() {
+    barsShown.dispose();
+    barsPull.dispose();
+    super.dispose();
   }
 
   /// Opens [tab] in Build (adding it when new) and brings Build to the front.
@@ -49,7 +64,7 @@ class SectionController extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Adds [tab] to Build without bringing Build to the front (the shell opens the selected .caw module at start).
+  /// Adds [tab] to Build without bringing Build to the front.
   void addBuild(BuildTab tab) {
     if (_tabs.contains(tab)) return;
     _tabs.add(tab);
@@ -69,7 +84,7 @@ class SectionController extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Drops tabs whose component or module is gone ([exists] says which still are).
+  /// Drops tabs whose component or pattern is gone ([exists] says which still are).
   void pruneBuild(bool Function(BuildTab tab) exists) {
     final before = _tabs.length;
     _tabs.removeWhere((t) => !exists(t));
@@ -97,15 +112,22 @@ class SectionScope extends InheritedNotifier<SectionController> {
 
 /// What can be dragged from Files (or a browser sheet) onto a track or an effect slot.
 enum AssetKind {
-  nativeEffect, // a native stereo effect: a built-in (org.caw.*) or a project C++ component, by component id
-  cawModule,    // a project .caw module, by module id
+  nativeEffect, // a native component, by component id: a stereo effect or an instrument, built-in (org.caw.*) or the project's C++
   pattern,      // a MIDI pattern source, by module id
+  midiFile,     // an imported MIDI file (its parts are patterns), by MidiFileDoc id
+  devicePreset, // a user device preset (a component with its values), by preset id
+  trackPreset,  // a user track preset (an instrument and effects), by preset id
+  audioFile,    // an audio file: a project asset by its id, or a WAV in app storage by its absolute path
 }
 
 @immutable
 class AssetDrag {
-  const AssetDrag(this.kind, this.id, this.name);
+  const AssetDrag(this.kind, this.id, this.name, {this.instrument = false});
   final AssetKind kind;
   final String id;
   final String name;
+
+  /// An instrument: it plays a track instead of joining its effects, as REAPER's
+  /// instruments are FX in the chain that come first (docs/ui.md, REAPER reference).
+  final bool instrument;
 }

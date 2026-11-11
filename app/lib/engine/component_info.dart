@@ -43,6 +43,7 @@ class ComponentParameterInfo {
     this.modulatable = true,
     this.midiMappable = true,
     this.choices = const [],
+    this.group = '',
   });
 
   final String id;
@@ -53,6 +54,9 @@ class ComponentParameterInfo {
   final int smoothingFrames;
   final bool automatable, modulatable, midiMappable;
   final List<String> choices; // labels for min, min + 1, ..., max
+
+  /// Where a built-in shows the knob, a slash path (`kit/glue`, `a1/body`); empty when the descriptor gives none.
+  final String group;
 
   /// The name to show: the display name, or the id when there is none.
   String get label => name.isEmpty ? id : name;
@@ -72,6 +76,7 @@ class ComponentParameterInfo {
         modulatable: j['modulatable'] != false,
         midiMappable: j['midi_mappable'] != false,
         choices: [for (final c in (j['choices'] as List? ?? const [])) c as String],
+        group: j['group'] as String? ?? '',
       );
 }
 
@@ -99,6 +104,24 @@ class ComponentUiControlInfo {
       );
 }
 
+/// A built-in preset: a name and the parameter values it sets (the others keep their defaults).
+class ComponentPresetInfo {
+  const ComponentPresetInfo({required this.name, this.description = '', this.params = const {}});
+  final String name, description;
+  final Map<String, double> params;
+
+  factory ComponentPresetInfo.fromJson(Map<String, dynamic> j) => ComponentPresetInfo(
+        name: j['name'] as String? ?? '',
+        description: j['description'] as String? ?? '',
+        params: {
+          for (final e in ((j['params'] as Map?) ?? const {}).entries)
+            if (e.value is num) e.key as String: (e.value as num).toDouble(),
+        },
+      );
+}
+
+final _paramIndex = Expando<Map<String, ComponentParameterInfo>>('parameters by id');
+
 class NativeComponentInfo {
   const NativeComponentInfo({
     required this.id,
@@ -113,6 +136,9 @@ class NativeComponentInfo {
     this.parameters = const [],
     this.uiControls = const [],
     this.builtin = false,
+    this.presets = const [],
+    this.domains = const ['whole'],
+    this.cpuClass = 'unspecified',
   });
 
   final String id, name;
@@ -129,7 +155,31 @@ class NativeComponentInfo {
   /// Part of the engine (the Library's stereo tools): always there, no trust choice, can't be unloaded.
   final bool builtin;
 
+  /// A built-in's named parameter sets (Flagship's "Mono bass", "Acid 303"...), in display order.
+  final List<ComponentPresetInfo> presets;
+
+  /// Where it may run (#120): "whole", "per_channel", "per_voice", "per_note". An effect with "per_note" (or
+  /// "per_voice") can run once per note; an instrument with it has a voice bus, so it can host per-note effects.
+  final List<String> domains;
+
+  /// Its author's cost hint: "unspecified", "light", "medium" or "heavy" (not a measurement).
+  final String cpuClass;
+
+  bool get runsPerNote => domains.contains('per_note') || domains.contains('per_voice');
+
   String get label => name.isEmpty ? id : name;
+
+  /// Parameter [id], or null. A long list is indexed on first use, so a descriptor with thousands of knobs (the
+  /// drums' 10392) costs one hash lookup per knob, not a scan; a short one (or a rack's, rebuilt per read) is scanned.
+  ComponentParameterInfo? param(String id) {
+    if (parameters.length < 64) {
+      for (final p in parameters) {
+        if (p.id == id) return p;
+      }
+      return null;
+    }
+    return (_paramIndex[this] ??= {for (final p in parameters) p.id: p})[id];
+  }
 
   /// An instrument plays a track's notes: one event input and one stereo audio output, no audio input (the engine
   /// checks the same shape; docs/native-module-sdk.md).
@@ -155,6 +205,11 @@ class NativeComponentInfo {
           for (final u in (j['ui_controls'] as List? ?? const [])) ComponentUiControlInfo.fromJson(u as Map<String, dynamic>)
         ],
         builtin: j['builtin'] == true,
+        presets: [
+          for (final p in (j['presets'] as List? ?? const [])) ComponentPresetInfo.fromJson(p as Map<String, dynamic>)
+        ],
+        domains: [for (final d in (j['domains'] as List? ?? const ['whole'])) if (d is String) d],
+        cpuClass: j['cpu_class'] as String? ?? 'unspecified',
       );
 
   /// Parses the whole caw_engine_components result; an error result gives an empty list.

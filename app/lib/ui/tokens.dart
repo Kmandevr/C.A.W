@@ -9,10 +9,14 @@ class Space {
   static const double xs = 4, s = 8, m = 12, l = 16, xl = 24;
 }
 
-/// Corner radii: small for chips and notes, medium for buttons and cards, large for sheets and panels.
+/// Corner radii: small for chips and notes, medium for buttons and cards, large for sheets and panels, each times
+/// the theme's corner roundness ([scale]; Settings sets it, 1 as designed, 0 square).
 class Radii {
   Radii._();
-  static const double s = 6, m = 10, l = 14;
+  static double scale = 1;
+  static double get s => 6 * scale;
+  static double get m => 10 * scale;
+  static double get l => 14 * scale;
 }
 
 /// Touch targets: 48 dp when comfortable (Android's guidance), 36 dp when compact.

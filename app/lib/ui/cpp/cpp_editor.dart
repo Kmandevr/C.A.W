@@ -11,18 +11,28 @@ import '../../model/cpp_completion.dart';
 import '../../model/cpp_diagnostics.dart';
 import '../../model/cpp_versions.dart';
 import '../../model/cpp_workbench.dart';
+import '../feedback.dart';
+import '../frame/sections.dart';
 import '../glass.dart';
+import '../haptics.dart';
+import '../code_prefs.dart';
 import '../theme.dart';
 import 'code_style.dart';
+import 'cpp_library.dart';
 import 'key_row.dart';
 import 'panels.dart';
+import 'plugin_export_screen.dart';
+import 'sample_pack_screen.dart';
+import 'test_suite_screen.dart';
+import 'tool_kit.dart';
+import '../adaptive_sheet.dart';
 
 /// One file's editor state, kept with its session so undo survives switching tabs and files.
 class CppFileView {
   CppFileView(String text) {
     controller = CodeLineEditingController(
       codeLines: CodeLines.fromText(text),
-      options: const CodeLineOptions(indentSize: 4),
+      options: CodeLineOptions(indentSize: CodePrefs.tabWidth), // Settings › Code editor, when the file opens
       spanBuilder: ({required context, required index, required codeLine, required textSpan, required style}) {
         final m = marks[index];
         return m == null ? textSpan : decorateSpan(textSpan, m);
@@ -52,19 +62,14 @@ final _views = Expando<Map<String, CppFileView>>('cpp file views');
 
 Map<String, CppFileView> _viewsOf(CppWorkbench w) => _views[w] ??= {};
 
-/// The Build tabs menu the top row's file name opens (from BuildSection).
-class BuildTabsMenu {
-  const BuildTabsMenu({required this.entries, required this.onSelect, required this.onClose, required this.onStart});
-  final List<({Object tab, String name, bool active, bool cpp})> entries;
-  final ValueChanged<Object> onSelect, onClose;
-  final VoidCallback onStart;
-}
-
 class CppEditor extends StatefulWidget {
-  const CppEditor({super.key, required this.workbench, this.tabs});
+  const CppEditor({super.key, required this.workbench, this.bar});
 
   final CppWorkbench workbench;
-  final BuildTabsMenu? tabs;
+
+  /// Build's tab strip (explorer, open tabs, + New), at the start of the one top row; without it the row names
+  /// the component and file.
+  final Widget? bar;
 
   @override
   State<CppEditor> createState() => CppEditorState();
@@ -223,6 +228,21 @@ class CppEditorState extends State<CppEditor> {
     if (next != null) jumpTo(next);
   }
 
+  /// Puts the cursor at the start of 0-based [line] of the current file (the switcher's symbols).
+  void goToLine(int line) {
+    final c = view.controller;
+    final l = line.clamp(0, c.lineCount - 1);
+    c.selection = CodeLineSelection.collapsed(index: l, offset: 0);
+    c.makeCursorCenterIfInvisible();
+  }
+
+  void jumpToPreviousError() {
+    final sel = view.controller.selection;
+    final prev = previousError(w.diagnostics,
+        file: w.currentFile, line: sel.extentIndex + 1, column: sel.extentOffset + 1, order: w.fileOrder);
+    if (prev != null) jumpTo(prev);
+  }
+
   void insert(String text) {
     final c = view.controller;
     // A multi-line insert keeps the cursor line's indent.
@@ -244,6 +264,7 @@ class CppEditorState extends State<CppEditor> {
 
   void _scheduleCompletion({bool force = false}) {
     _completionTimer?.cancel();
+    if (languageOf(w.currentFile) == 'plaintext') return _closeCompletion();
     final ctx = _contextNow();
     if (ctx == null || ctx.trigger == 'none') return _closeCompletion();
     if (!force && !ctx.opensAutomatically) return _closeCompletion();
@@ -347,10 +368,7 @@ class CppEditorState extends State<CppEditor> {
         jumpTo(d);
       }));
 
-  void _showRef() => _sheet('Reference', (c) => RefList(onInsert: (t) {
-        Navigator.pop(c);
-        insert(t);
-      }));
+  void showLibrary() => showCppLibrarySheet(context, onInsert: insert);
 
   void _showSnippets() => _sheet('Snippets', (c) => SnippetList(onInsert: (t) {
         Navigator.pop(c);
@@ -388,7 +406,7 @@ class CppEditorState extends State<CppEditor> {
   }
 
   void _viewVersion(BuildContext c, CppVersion v) {
-    showDialog<void>(
+    showDialogOrSheet<void>(
       context: c,
       builder: (d) => AlertDialog(
         title: Text(v.label, style: const TextStyle(fontSize: 14)),
@@ -417,7 +435,9 @@ class CppEditorState extends State<CppEditor> {
 
   void _mirrorIndicator() => _paragraphs.value = _boundIndicator?.value;
 
-  double get _gutterWidth => 14 + 7.6 * math.max(3, view.controller.lineCount.toString().length);
+  // Line numbers off (Settings › Code editor): only the problem marks' strip.
+  double get _gutterWidth =>
+      CodePrefs.lineNumbers ? 14 + 7.6 * math.max(3, view.controller.lineCount.toString().length) : 8;
 
   Widget _editor() {
     final v = view;
@@ -428,19 +448,21 @@ class CppEditorState extends State<CppEditor> {
           bindings: {
             const SingleActivator(LogicalKeyboardKey.keyB, control: true): runBuild,
             const SingleActivator(LogicalKeyboardKey.space, control: true): () => _scheduleCompletion(force: true),
+            const SingleActivator(LogicalKeyboardKey.f8): jumpToNextError,
+            const SingleActivator(LogicalKeyboardKey.f8, shift: true): jumpToPreviousError,
           },
           child: CodeEditor(
             key: ValueKey('code $path'),
             controller: v.controller,
             scrollController: _scroll,
             focusNode: _focus,
-            wordWrap: false,
+            wordWrap: CodePrefs.wrap,
             autofocus: false, // the keyboard opens when the code is tapped, not when a tab opens
             chunkAnalyzer: const NonCodeChunkAnalyzer(),
             padding: const EdgeInsets.fromLTRB(6, 6, 24, 48),
             style: CodeEditorStyle(
               fontFamily: 'JetBrainsMono',
-              fontSize: 12.5,
+              fontSize: CodePrefs.cppFontSize,
               fontHeight: 1.45,
               textColor: Neon.text,
               backgroundColor: Colors.transparent,
@@ -499,9 +521,11 @@ class CppEditorState extends State<CppEditor> {
     ]);
   }
 
-  CodeHighlightTheme? _cpp, _json;
-  CodeHighlightTheme _themeFor(String path) =>
-      languageOf(path) == 'json' ? (_json ??= _only(cppHighlightTheme(), 'json')) : (_cpp ??= _only(cppHighlightTheme(), 'cpp'));
+  final Map<String, CodeHighlightTheme> _themes = {};
+  CodeHighlightTheme _themeFor(String path) {
+    final lang = languageOf(path);
+    return _themes[lang] ??= _only(cppHighlightTheme(), lang);
+  }
   static CodeHighlightTheme _only(CodeHighlightTheme t, String lang) =>
       CodeHighlightTheme(languages: {lang: t.languages[lang]!}, theme: t.theme);
 
@@ -564,134 +588,275 @@ class CppEditorState extends State<CppEditor> {
     return null;
   }
 
-  Widget _topRow() {
-    final errors = w.errorCount;
-    final tabs = widget.tabs;
-    final status = switch (w.phase) {
-      CppBuildPhase.building => ('Building…', Neon.dim),
-      CppBuildPhase.built => (w.buildMessage ?? 'Built', Neon.green),
-      CppBuildPhase.failed => (w.buildMessage ?? 'Build failed', Neon.pink),
-      CppBuildPhase.idle => (w.checking ? 'Checking…' : '', Neon.dim),
-    };
+  /// Problems and the Library beside the code (landscape and desktop); null until toggled: open on a wide desktop.
+  bool? _side;
+
+  /// Which page the side panel shows: the Library (true) or Problems.
+  bool _sideLibrary = false;
+
+  Widget _iconAction(String id, IconData icon, String tip, VoidCallback? onTap, {Color? color, String? label, double height = 36}) {
+    final c = color ?? Neon.dim;
+    if (label != null) {
+      return Pressable(
+        child: TextButton.icon(
+          key: ValueKey(id),
+          style: TextButton.styleFrom(
+            foregroundColor: c,
+            visualDensity: VisualDensity.compact,
+            padding: const EdgeInsets.symmetric(horizontal: 6),
+            minimumSize: Size(0, height),
+            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          ),
+          onPressed: onTap,
+          icon: Icon(icon, size: 15),
+          label: Text(label, style: const TextStyle(fontSize: 11.5)),
+        ),
+      );
+    }
+    return Pressable(
+      child: IconButton(
+        key: ValueKey(id),
+        tooltip: tip,
+        iconSize: height < 30 ? 16 : 18,
+        visualDensity: VisualDensity.compact,
+        constraints: BoxConstraints.tightFor(width: height < 30 ? 30 : 34, height: height),
+        padding: EdgeInsets.zero,
+        onPressed: onTap,
+        icon: Icon(icon, color: c),
+      ),
+    );
+  }
+
+  /// Problems: beside the code when there is a side panel, else a half sheet.
+  void _problems(bool wide) {
+    Haptics.tap();
+    if (wide) {
+      setState(() {
+        _side = true;
+        _sideLibrary = false;
+      });
+    } else {
+      showProblems();
+    }
+  }
+
+  void _showSide({required bool library}) => setState(() => _sideLibrary = library);
+
+  void _library(bool wide) {
+    Haptics.tap();
+    if (wide) {
+      setState(() {
+        _side = true;
+        _sideLibrary = true;
+      });
+    } else {
+      showLibrary();
+    }
+  }
+
+  /// The top row: Build's tabs (or the file's name), the side-panel toggle when wide, and ▶ Build.
+  Widget _topRow({required bool wide, required bool side}) {
     return SizedBox(
       height: 36,
       child: Row(children: [
-        PopupMenuButton<void Function()>(
-          key: const ValueKey('file menu'),
-          tooltip: 'Files, tabs and versions',
-          padding: EdgeInsets.zero,
-          onSelected: (f) => f(),
-          itemBuilder: (c) => [
-            for (final f in w.fileOrder)
-              PopupMenuItem(
-                height: 34,
-                value: () => w.selectFile(f),
-                child: Row(children: [
-                  Icon(f == w.currentFile ? Icons.radio_button_checked : Icons.description_outlined, size: 16, color: Neon.dim),
-                  const SizedBox(width: 8),
-                  Text(f, style: Neon.code(size: 12)),
-                ]),
-              ),
-            const PopupMenuDivider(),
-            PopupMenuItem(height: 34, value: _showVersions, child: const Text('Versions…', style: TextStyle(fontSize: 13))),
-            if (tabs != null) ...[
-              const PopupMenuDivider(),
-              for (final t in tabs.entries)
-                PopupMenuItem(
-                  height: 34,
-                  value: () => tabs.onSelect(t.tab),
-                  child: Row(children: [
-                    Icon(t.cpp ? Icons.code : Icons.graphic_eq, size: 16, color: t.active ? Neon.green : Neon.dim),
-                    const SizedBox(width: 8),
-                    Expanded(child: Text(t.name, style: const TextStyle(fontSize: 13), overflow: TextOverflow.ellipsis)),
-                    IconButton(
-                      tooltip: 'Close tab',
-                      iconSize: 16,
-                      visualDensity: VisualDensity.compact,
-                      icon: const Icon(Icons.close),
-                      onPressed: () {
-                        Navigator.pop(c);
-                        tabs.onClose(t.tab);
-                      },
-                    ),
-                  ]),
-                ),
-              PopupMenuItem(height: 34, value: tabs.onStart, child: const Text('Start page…', style: TextStyle(fontSize: 13))),
-            ],
-          ],
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-            child: Row(mainAxisSize: MainAxisSize.min, children: [
-              ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 170),
+        Expanded(
+          child: widget.bar ??
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 10),
                 child: Text('${w.name} · ${w.currentFile.split('/').last}',
                     style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600), overflow: TextOverflow.ellipsis),
               ),
-              const Icon(Icons.arrow_drop_down, size: 18),
-            ]),
-          ),
         ),
-        if (errors > 0)
-          InkWell(
-            key: const ValueKey('error count'),
-            onTap: jumpToNextError,
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 9),
-              child: Row(children: [
-                const Icon(Icons.error, size: 15, color: Neon.pink),
-                const SizedBox(width: 3),
-                Text('$errors', style: Neon.code(size: 12, color: Neon.pink)),
-              ]),
-            ),
-          ),
-        Expanded(
-          child: Text(status.$1,
-              textAlign: TextAlign.right,
-              style: TextStyle(fontSize: 11.5, color: status.$2),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis),
-        ),
-        IconButton(
-          key: const ValueKey('build'),
-          tooltip: 'Build (Ctrl+B)',
-          iconSize: 20,
-          onPressed: w.phase == CppBuildPhase.building ? null : runBuild,
-          icon: w.phase == CppBuildPhase.building
-              ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
-              : Icon(Icons.play_arrow, color: w.phase == CppBuildPhase.built ? Neon.green : Neon.text),
-        ),
+        if (wide)
+          _iconAction('side panel', side ? Icons.vertical_split : Icons.vertical_split_outlined,
+              side ? 'Hide Problems and Library' : 'Show Problems and Library', () => setState(() => _side = !side),
+              color: side ? Neon.blue : null),
+        Padding(padding: const EdgeInsets.only(left: 2, right: 4), child: _BuildButton(phase: w.phase, onBuild: runBuild)),
       ]),
     );
   }
 
-  Widget _bottomBar({required bool side}) {
-    Widget item(String id, IconData icon, String label, VoidCallback onTap, {Color? color}) => Expanded(
-          child: InkWell(
-            key: ValueKey(id),
-            onTap: onTap,
-            child: SizedBox(
-              height: 36,
-              child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-                Icon(icon, size: 17, color: color ?? Neon.dim),
-                const SizedBox(width: 5),
-                Text(label, style: TextStyle(fontSize: 12, color: color ?? Neon.text)),
+  /// Under the tabs, in the mono font like a code tool: the C++ badge, the file's breadcrumb (tap: the component's
+  /// files), what the last build did (with "Try it on a track") or the problems, ‹ › between errors, then Problems,
+  /// the Library, Versions and ⋯ (Snippets, ♪ Test), labelled when there is room.
+  Widget _crumbRow({required bool wide, required bool side, required double width}) {
+    final errors = w.errorCount;
+    final count = w.diagnostics.length;
+    final labels = width >= 640;
+    final parts = w.currentFile.split('/');
+    final crumb = PopupMenuButton<String>(
+      key: const ValueKey('breadcrumb'),
+      tooltip: "${w.name}'s files",
+      padding: EdgeInsets.zero,
+      position: PopupMenuPosition.under,
+      constraints: const BoxConstraints(minWidth: 200),
+      onSelected: (f) {
+        Haptics.tap();
+        w.selectFile(f);
+      },
+      itemBuilder: (c) => [
+        for (final f in w.fileOrder)
+          PopupMenuItem(
+            height: 34,
+            value: f,
+            child: Row(children: [
+              Icon(f == w.currentFile ? Icons.radio_button_checked : Icons.description_outlined, size: 16, color: Neon.dim),
+              const SizedBox(width: 8),
+              Flexible(child: Text(f, style: Neon.code(size: 12), overflow: TextOverflow.ellipsis)),
+            ]),
+          ),
+      ],
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          Flexible(
+            child: Text.rich(
+              TextSpan(children: [
+                if (width >= 420) ...[
+                  TextSpan(text: w.name, style: Neon.code(size: 11, color: Neon.dim)),
+                  TextSpan(text: ' › ', style: Neon.code(size: 11, color: Neon.dim.withValues(alpha: 0.6))),
+                  for (final p in parts.take(parts.length - 1)) ...[
+                    TextSpan(text: p, style: Neon.code(size: 11, color: Neon.dim)),
+                    TextSpan(text: ' › ', style: Neon.code(size: 11, color: Neon.dim.withValues(alpha: 0.6))),
+                  ],
+                ],
+                TextSpan(text: parts.last, style: Neon.code(size: 11, color: Neon.text)),
               ]),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
             ),
           ),
-        );
-    final count = w.diagnostics.length;
+          const Icon(Icons.arrow_drop_down, size: 14, color: Neon.dim),
+        ]),
+      ),
+    );
     return Container(
-      decoration: BoxDecoration(border: Border(top: BorderSide(color: Neon.line))),
+      height: 28,
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.18),
+        border: Border(bottom: BorderSide(color: Colors.white.withValues(alpha: 0.05))),
+      ),
       child: Row(children: [
-        if (!side) ...[
-          item('bar problems', Icons.error_outline, count == 0 ? 'Problems' : 'Problems $count', showProblems,
-              color: w.errorCount > 0 ? Neon.pink : null),
-          item('bar ref', Icons.menu_book_outlined, 'Ref', _showRef),
+        const SizedBox(width: 6),
+        Container(
+          key: const ValueKey('cpp badge'),
+          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(4),
+            border: Border.all(color: (w.isInstrument ? Neon.green : Neon.pink).withValues(alpha: 0.6)),
+          ),
+          child: Text('C++', style: Neon.code(size: 9.5, color: w.isInstrument ? Neon.green : Neon.pink)),
+        ),
+        Expanded(child: Align(alignment: Alignment.centerLeft, child: crumb)),
+        ConstrainedBox(
+          constraints: BoxConstraints(maxWidth: math.max(90.0, width * 0.45)),
+          child: _StatusChip(editor: this, wide: wide),
+        ),
+        if (errors > 0) ...[
+          _iconAction('previous error', Icons.keyboard_arrow_up, 'Previous error (Shift+F8)', jumpToPreviousError, height: 28),
+          _iconAction('next error', Icons.keyboard_arrow_down, 'Next error (F8)', jumpToNextError, height: 28),
         ],
-        item('bar snippets', Icons.content_paste_go, 'Snippets', _showSnippets),
-        item('bar test', Icons.music_note, 'Test', _showTest),
+        _iconAction('bar problems', Icons.report_outlined, count == 0 ? 'Problems' : 'Problems ($count)', () => _problems(wide),
+            color: errors > 0 ? Neon.pink : (count > 0 ? Neon.yellow : null),
+            label: labels ? (count == 0 ? 'Problems' : 'Problems $count') : null,
+            height: 28),
+        _iconAction('bar library', Icons.menu_book_outlined, 'Library: the C++ reference', () => _library(wide),
+            color: Neon.blue, label: labels ? 'Library' : null, height: 28),
+        _iconAction('bar versions', Icons.history, 'Versions: every successful build', _showVersions,
+            label: labels ? 'Versions' : null, height: 28),
+        SizedBox(
+          width: 30,
+          height: 28,
+          child: PopupMenuButton<void Function()>(
+            key: const ValueKey('more'),
+            tooltip: 'Snippets, ♪ Test and the Build tools',
+            padding: EdgeInsets.zero,
+            iconSize: 16,
+            icon: const Icon(Icons.more_vert, color: Neon.dim),
+            constraints: const BoxConstraints(minWidth: 180),
+            onSelected: (f) => f(),
+            itemBuilder: (c) => [
+              PopupMenuItem(key: const ValueKey('bar snippets'), height: 34, value: _showSnippets,
+                  child: const Text('Snippets', style: TextStyle(fontSize: 13))),
+              PopupMenuItem(key: const ValueKey('bar test'), height: 34, value: _showTest,
+                  child: const Text('♪ Test: play it with knobs', style: TextStyle(fontSize: 13))),
+              const PopupMenuDivider(),
+              PopupMenuItem(key: const ValueKey('bar test suite'), height: 34,
+                  value: () => openToolPage(context, TestSuiteScreen(workbench: w)),
+                  child: const Text('Test suite…', style: TextStyle(fontSize: 13))),
+              if (w.isInstrument)
+                PopupMenuItem(key: const ValueKey('bar sample pack'), height: 34,
+                    value: () => openSamplePackMaker(context, w.state, instrumentId: w.componentId),
+                    child: const Text('Make sample pack…', style: TextStyle(fontSize: 13))),
+              PopupMenuItem(key: const ValueKey('bar export plugin'), height: 34,
+                  value: () => openToolPage(context, PluginExportScreen(workbench: w)),
+                  child: const Text('Export as plug-in…', style: TextStyle(fontSize: 13))),
+            ],
+          ),
+        ),
+        const SizedBox(width: 2),
       ]),
     );
+  }
+
+  // ---------- try it on a track ----------
+
+  /// Puts the built instrument or effect on a track the user picks (the selected one first, or a new one), says
+  /// where it went and offers Show (Arrange, focused on that track).
+  Future<void> tryOnTrack() async {
+    Haptics.tap();
+    final s = w.state;
+    final selected = s.project.layers.where((l) => l.id == s.selectedLayerId && !l.isFolder).firstOrNull;
+    final tracks = [?selected, ...s.project.layers.where((l) => !l.isFolder && l != selected)];
+    const fresh = '\u0000new';
+    final pick = await showGlassSheet<String>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      constraints: BoxConstraints(maxHeight: MediaQuery.sizeOf(context).height * 0.6),
+      builder: (c) => ListView(shrinkWrap: true, padding: const EdgeInsets.only(bottom: 12), children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 2),
+          child: Text('Try ${w.name} on a track', style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 6),
+          child: Text(
+              w.isInstrument ? 'It plays the track\'s notes in place of its sound. Undo takes it back.' : 'It joins the end of the track\'s effects.',
+              style: const TextStyle(fontSize: 12, color: Neon.dim)),
+        ),
+        ListTile(
+          key: const ValueKey('try new track'),
+          dense: true,
+          leading: const Icon(Icons.add, color: Neon.green, size: 20),
+          title: const Text('New track', style: TextStyle(fontSize: 13)),
+          subtitle: Text('Named ${w.name}', style: const TextStyle(fontSize: 11.5, color: Neon.dim)),
+          onTap: () => Navigator.pop(c, fresh),
+        ),
+        for (final l in tracks)
+          ListTile(
+            key: ValueKey('try ${l.id}'),
+            dense: true,
+            leading: Container(width: 10, height: 10, decoration: BoxDecoration(shape: BoxShape.circle, color: Neon.layer(l.color))),
+            title: Text(l.name, style: const TextStyle(fontSize: 13)),
+            trailing: l == selected ? const Text('selected', style: TextStyle(fontSize: 11, color: Neon.dim)) : null,
+            onTap: () => Navigator.pop(c, l.id),
+          ),
+      ]),
+    );
+    if (pick == null || !mounted) return;
+    final layer = pick == fresh ? null : s.project.layers.where((l) => l.id == pick).firstOrNull;
+    final done = w.tryOn(layer);
+    if (!mounted) return;
+    final where = done ?? layer;
+    final sections = SectionController.maybeOf(context);
+    ScaffoldMessenger.maybeOf(context)?.showSnackBar(SnackBar(
+      content: Text(done == null ? '${w.name} is already on ${where?.name ?? 'that track'}' : '${w.name} is on ${done.name}'),
+      action: where == null || sections == null
+          ? null
+          : SnackBarAction(label: 'Show', onPressed: () => sections.focusLayer(where.id)),
+    ));
+    setState(() {});
   }
 
   @override
@@ -700,47 +865,38 @@ class CppEditorState extends State<CppEditor> {
     // The soft keyboard, from the window itself: a Scaffold above may already have taken it out of viewInsets.
     final view = View.of(context);
     final keyboard = view.viewInsets.bottom / view.devicePixelRatio > 80 || mq.viewInsets.bottom > 80;
-    final wide = mq.size.width > mq.size.height && mq.size.width >= 600;
-    final note = w.checkNote;
-    final column = Column(children: [
-      _topRow(),
-      if (note != null && w.diagnostics.isEmpty)
-        Padding(
-          padding: const EdgeInsets.fromLTRB(10, 0, 10, 2),
-          child: Text(note, style: TextStyle(fontSize: 11, color: Neon.dim), maxLines: 1, overflow: TextOverflow.ellipsis),
-        ),
-      Expanded(child: _editor()),
-      if (keyboard)
-        CodeEditorTapRegion(child: CodeKeyRow(target: _target, onChanged: () => setState(() {})))
-      else
-        _bottomBar(side: wide),
-    ]);
-    if (!wide) return column;
-    return Row(children: [
-      Expanded(child: column),
-      SizedBox(width: 290, child: Padding(padding: const EdgeInsets.all(4), child: _SidePanel(editor: this))),
-    ]);
+    return LayoutBuilder(builder: (context, box) {
+      // Room beside the code: landscape or desktop with at least 600 dp for the editor itself.
+      final wide = mq.size.width > mq.size.height && box.maxWidth >= 600;
+      final side = wide && (_side ?? box.maxWidth >= 1100);
+      final column = Column(children: [
+        _topRow(wide: wide, side: side),
+        _crumbRow(wide: wide, side: side, width: box.maxWidth),
+        Expanded(child: _editor()),
+        if (keyboard) CodeEditorTapRegion(child: CodeKeyRow(target: _target, onChanged: () => setState(() {}))),
+      ]);
+      if (!side) return column;
+      return Row(children: [
+        Expanded(child: column),
+        SizedBox(width: 290, child: Padding(padding: const EdgeInsets.all(4), child: _SidePanel(editor: this))),
+      ]);
+    });
   }
 }
 
-/// Landscape and desktop: Problems and Ref beside the code.
-class _SidePanel extends StatefulWidget {
+/// Landscape and desktop: Problems and the Library beside the code.
+class _SidePanel extends StatelessWidget {
   const _SidePanel({required this.editor});
   final CppEditorState editor;
 
   @override
-  State<_SidePanel> createState() => _SidePanelState();
-}
-
-class _SidePanelState extends State<_SidePanel> {
-  bool _ref = false;
-
-  @override
   Widget build(BuildContext context) {
-    final e = widget.editor;
-    Widget tab(String label, bool on, VoidCallback tap) => Expanded(
+    final e = editor;
+    final library = e._sideLibrary;
+    Widget tab(String id, String label, bool on, bool toLibrary) => Expanded(
           child: InkWell(
-            onTap: tap,
+            key: ValueKey(id),
+            onTap: () => e._showSide(library: toLibrary),
             child: Container(
               height: 32,
               alignment: Alignment.center,
@@ -753,11 +909,11 @@ class _SidePanelState extends State<_SidePanel> {
     return GlassPanel(
       child: Column(children: [
         Row(children: [
-          tab(count == 0 ? 'Problems' : 'Problems $count', !_ref, () => setState(() => _ref = false)),
-          tab('Ref', _ref, () => setState(() => _ref = true)),
+          tab('side problems', count == 0 ? 'Problems' : 'Problems $count', !library, false),
+          tab('side library', 'Library', library, true),
         ]),
         Expanded(
-          child: _ref ? RefList(onInsert: e.insert) : ProblemsList(workbench: e.w, onJump: e.jumpTo),
+          child: library ? CppLibraryView(onInsert: e.insert) : ProblemsList(workbench: e.w, onJump: e.jumpTo),
         ),
       ]),
     );
@@ -825,6 +981,7 @@ class _GutterPainter extends CustomPainter {
           Paint()..color = error ? Neon.pink : Neon.yellow,
         );
       }
+      if (!CodePrefs.lineNumbers) continue;
       final tp = TextPainter(
         text: TextSpan(
           text: '${p.index + 1}',
@@ -925,4 +1082,168 @@ class _HintPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(_HintPainter old) => true;
+}
+
+/// ▶ Build, labelled: a ring while building, green with a check once built and unchanged since.
+class _BuildButton extends StatelessWidget {
+  const _BuildButton({required this.phase, required this.onBuild});
+  final CppBuildPhase phase;
+  final VoidCallback onBuild;
+
+  @override
+  Widget build(BuildContext context) {
+    final building = phase == CppBuildPhase.building;
+    final built = phase == CppBuildPhase.built;
+    final color = built ? Neon.green : (phase == CppBuildPhase.failed ? Neon.pink : Neon.text);
+    return Tooltip(
+      message: building ? 'Building…' : 'Build and load it (Ctrl+B)',
+      child: Pressable(
+        glow: Neon.green,
+        child: OutlinedButton.icon(
+          key: const ValueKey('build'),
+          style: OutlinedButton.styleFrom(
+            foregroundColor: color,
+            backgroundColor: built ? Neon.green.withValues(alpha: 0.12) : Colors.white.withValues(alpha: 0.04),
+            side: BorderSide(color: color.withValues(alpha: built ? 0.8 : 0.45)),
+            visualDensity: VisualDensity.compact,
+            padding: const EdgeInsets.only(left: 6, right: 9),
+            minimumSize: const Size(0, 28),
+            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(7)),
+          ),
+          onPressed: building
+              ? null
+              : () {
+                  Haptics.tap();
+                  onBuild();
+                },
+          icon: building
+              ? const SizedBox(width: 13, height: 13, child: CircularProgressIndicator(strokeWidth: 2, color: Neon.green))
+              : Icon(built ? Icons.check : Icons.play_arrow, size: 17),
+          label: Text(building ? 'Building' : 'Build', style: Neon.code(size: 12, color: building ? Neon.dim : color)),
+        ),
+      ),
+    );
+  }
+}
+
+/// What happened, in a word or two, and where the result went: Building…, ✓ Built · on Pad (tap: show it in
+/// Arrange) with "Try it", the error count (tap: the next error), a build that failed without a line (tap: Problems),
+/// Checking…, or Not built.
+class _StatusChip extends StatelessWidget {
+  const _StatusChip({required this.editor, required this.wide});
+  final CppEditorState editor;
+  final bool wide;
+
+  @override
+  Widget build(BuildContext context) {
+    final w = editor.w;
+    final errors = w.errorCount;
+    final warnings = w.warningCount;
+    final uses = w.uses;
+    final layers = [for (final u in uses) u.layer?.name ?? 'Master'];
+    String text;
+    Color color;
+    IconData? icon;
+    VoidCallback? onTap;
+    var tip = '';
+    var tryIt = false;
+    switch (w.phase) {
+      case CppBuildPhase.building:
+        text = 'Building…';
+        color = Neon.dim;
+      case CppBuildPhase.failed when errors == 0:
+        text = 'Build failed';
+        color = Neon.pink;
+        icon = Icons.report_gmailerrorred;
+        tip = w.buildMessage ?? 'Build failed';
+        onTap = () => editor._problems(wide);
+      case _ when errors > 0:
+        text = '$errors error${errors == 1 ? '' : 's'}';
+        color = Neon.pink;
+        icon = Icons.error;
+        tip = 'Go to the next error (F8)';
+        onTap = editor.jumpToNextError;
+      case CppBuildPhase.built:
+        color = Neon.green;
+        icon = Icons.check_circle;
+        tip = w.buildMessage ?? 'Built and loaded';
+        if (layers.isEmpty) {
+          text = 'Built';
+          tryIt = true;
+        } else {
+          text = 'Built · on ${layers.first}${layers.length > 1 ? ' +${layers.length - 1}' : ''}';
+          final first = uses.first.layer;
+          final sections = SectionController.maybeOf(context);
+          if (first != null && sections != null) onTap = () => sections.focusLayer(first.id);
+          tip = '${w.buildMessage ?? 'Built'}: playing on ${layers.join(', ')}. Tap to show it.';
+        }
+      case CppBuildPhase.idle when w.checking || w.checkScheduled:
+        text = 'Checking…';
+        color = Neon.dim;
+      case _ when warnings > 0:
+        text = '$warnings warning${warnings == 1 ? '' : 's'}';
+        color = Neon.yellow;
+        icon = Icons.warning_amber;
+        onTap = () => editor._problems(wide);
+      case _:
+        text = w.builds > 0 ? 'Edited · build again' : 'Not built yet';
+        color = Neon.dim;
+        tip = 'Build it to hear it (Ctrl+B)';
+        onTap = editor.runBuild;
+    }
+    final building = w.phase == CppBuildPhase.building;
+    final chip = InkWell(
+      key: const ValueKey('build status'),
+      borderRadius: BorderRadius.circular(10),
+      onTap: onTap == null
+          ? null
+          : () {
+              Haptics.tap();
+              onTap!();
+            },
+      child: Container(
+        height: 20,
+        padding: const EdgeInsets.symmetric(horizontal: 7),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(10),
+          color: color.withValues(alpha: 0.1),
+          border: Border.all(color: color.withValues(alpha: 0.35)),
+        ),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          if (building)
+            const SizedBox(width: 10, height: 10, child: CircularProgressIndicator(strokeWidth: 1.5, color: Neon.green))
+          else if (icon != null)
+            Icon(icon, size: 12, color: color),
+          if (building || icon != null) const SizedBox(width: 4),
+          Flexible(
+            child: Text(text, maxLines: 1, overflow: TextOverflow.ellipsis, style: Neon.code(size: 10.5, color: color)),
+          ),
+        ]),
+      ),
+    );
+    return Row(mainAxisSize: MainAxisSize.min, children: [
+      Flexible(child: tip.isEmpty ? chip : Tooltip(message: tip, child: chip)),
+      if (tryIt || (w.phase == CppBuildPhase.built && uses.isNotEmpty))
+        Padding(
+          padding: const EdgeInsets.only(left: 4),
+          child: Pressable(
+            child: TextButton.icon(
+              key: const ValueKey('try on track'),
+              style: TextButton.styleFrom(
+                foregroundColor: Neon.green,
+                visualDensity: VisualDensity.compact,
+                padding: const EdgeInsets.symmetric(horizontal: 6),
+                minimumSize: const Size(0, 24),
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+              onPressed: editor.tryOnTrack,
+              icon: const Icon(Icons.queue_play_next, size: 14),
+              label: Text(tryIt ? (MediaQuery.sizeOf(context).width >= 480 ? 'Try it on a track' : 'Try it') : 'Try on…',
+                  style: const TextStyle(fontSize: 11)),
+            ),
+          ),
+        ),
+    ]);
+  }
 }

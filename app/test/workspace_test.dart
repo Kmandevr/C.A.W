@@ -1,23 +1,24 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:caw/actions/actions.dart';
 import 'package:caw/actions/macro.dart';
 import 'package:caw/engine/engine.dart';
 import 'package:caw/model/app_state.dart';
+import 'package:caw/model/pattern_templates.dart';
 import 'package:caw/model/project.dart';
 import 'package:caw/model/settings.dart';
-import 'package:caw/ui/automation_screen.dart';
+import 'package:caw/ui/arrange/automation_panel.dart';
 import 'package:caw/ui/theme.dart';
-import 'package:caw/ui/builder_screen.dart';
 import 'package:caw/ui/arranger_screen.dart';
-import 'package:caw/ui/engine_lab_screen.dart';
-import 'package:caw/ui/exporter_screen.dart';
+import 'package:caw/ui/settings/engine_diagnostics.dart';
+import 'package:caw/ui/export_page.dart';
 import 'package:caw/ui/files/library_manager.dart';
-import 'package:caw/ui/mixer_screen.dart';
+import 'package:caw/ui/arrange/channel_strip.dart';
 import 'package:caw/ui/key_router.dart';
-import 'package:caw/ui/plugin_builder_screen.dart';
+import 'package:caw/ui/volume_fader.dart';
 import 'package:caw/ui/widgets.dart';
 
 void main() {
@@ -61,7 +62,7 @@ void main() {
     await tester.pump();
     expect(first.hasFocus, isTrue);
 
-    routerKey.currentState!.vim.run(const ActionRef.action('view.mixer'));
+    routerKey.currentState!.vim.run(const ActionRef.action('view.files'));
     expect(selectedView, 2);
   });
 
@@ -82,6 +83,58 @@ void main() {
     expect(PeakMeter.fraction(PeakMeter.db(2.0)), 1.0);
   });
 
+  testWidgets('a stereo track meters each side; a mono one shows one meter', (tester) async {
+    // Owner, 2026-11-10 (feel pass): stereo track meters, from the engine's caw_engine_layer_meter_stereo.
+    final mono = LayerDoc(id: 'm', name: 'M', color: 0);
+    final stereo = LayerDoc(id: 's', name: 'S', color: 0)..instrument = ComponentUseDoc('org.caw.drum.kick');
+    expect(mono.isStereo, isFalse);
+    expect(stereo.isStereo, isTrue);
+    expect((LayerDoc(id: 'f', name: 'F', color: 0)..isFolder = true).isStereo, isTrue);
+    state.layerMeters = const [LayerMeterValue(peak: 0.5, peakL: 0.5, peakR: 0.125, active: true)];
+    Widget strip(bool isStereo) => MaterialApp(home: Scaffold(body: Center(child: SizedBox(width: 10, height: 120,
+        child: TrackMeter(state: state, index: 0, stereo: isStereo, color: Colors.green, vertical: true)))));
+    await tester.pumpWidget(strip(true));
+    state.tick.value++;
+    await tester.pump();
+    PeakMeterState m() => tester.state<PeakMeterState>(find.byType(PeakMeter));
+    expect(m().shownDb, closeTo(-6.02, 0.01)); // left
+    expect(m().shownRightDb, closeTo(-18.06, 0.01)); // right
+    await tester.pumpWidget(strip(false));
+    state.tick.value++;
+    await tester.pump();
+    expect(find.byType(PeakMeter), findsOneWidget);
+    expect(m().shownDb, closeTo(-6.02, 0.01)); // the louder side
+  });
+
+  testWidgets('a stereo meter shows left and right apart, and the fall rate follows the setting', (tester) async {
+    final wall = PeakMeter.clock, start = tester.binding.clock.now(), fall = PeakMeter.fallDbPerSecond;
+    addTearDown(() { PeakMeter.clock = wall; PeakMeter.fallDbPerSecond = fall; });
+    PeakMeter.clock = () => tester.binding.clock.now().difference(start);
+    final settings = Settings()..fromJson({'meter_fall': 96});
+    expect(settings.meterFall, 96);
+    expect(PeakMeter.fallDbPerSecond, fall, reason: 'fromJson alone does not apply it');
+    settings.adjust((x) => x.meterFall = 96);
+    expect(PeakMeter.fallDbPerSecond, 96);
+    var l = 0.0, r = 0.0;
+    await tester.pumpWidget(MaterialApp(home: Scaffold(body: PeakMeter(
+        state: state, read: () => l, readRight: () => r, color: Colors.green))));
+    PeakMeterState m() => tester.state<PeakMeterState>(find.byType(PeakMeter));
+    expect(find.byType(Bar), findsNWidgets(2));
+    l = 0.5;
+    r = 0.25;
+    state.tick.value++;
+    await tester.pump();
+    expect(m().shownDb, closeTo(-6.02, 0.01));
+    expect(m().shownRightDb, closeTo(-12.04, 0.01));
+    l = r = 0;
+    state.tick.value++;
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 16));
+    await tester.pump(const Duration(milliseconds: 250));
+    expect(m().shownDb, closeTo(-6.02 - 96 * .266, 0.05));
+    await tester.pumpAndSettle();
+  });
+
   testWidgets('peak meters rise at once, fall on wall-clock time, hold the peak and show a clip', (tester) async {
     final wall = PeakMeter.clock, start = tester.binding.clock.now();
     addTearDown(() => PeakMeter.clock = wall);
@@ -98,13 +151,13 @@ void main() {
     expect(m().shownDb, closeTo(-6.02, 0.01));
     expect(tester.widget<Bar>(find.byType(Bar)).value, closeTo(0.9, 0.001));
     expect(tester.binding.hasScheduledFrame, isFalse, reason: 'while sound comes in, the reads move it: no ticker');
-    // A silent read, then no more (the engine went quiet): the bar still falls 24 dB a second, the line holds 1.5 s.
+    // A silent read, then no more (the engine went quiet): the bar falls at the set rate, the line holds 1.5 s.
     peak = 0;
     state.tick.value++;
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 16));
     await tester.pump(const Duration(milliseconds: 500));
-    expect(m().shownDb, closeTo(-6.02 - 24 * .516, 0.01));
+    expect(m().shownDb, closeTo(-6.02 - PeakMeter.fallDbPerSecond * .516, 0.01));
     expect(m().holdDb, closeTo(-6.02, 0.01));
     await tester.pump(const Duration(seconds: 3));
     await tester.pump(const Duration(seconds: 1));
@@ -154,108 +207,43 @@ void main() {
     expect(appNotifications, 0);
   });
 
-  testWidgets('Mixer inspector divider exposes accessible width adjustments', (tester) async {
-    tester.view.physicalSize = const Size(1400, 900);
-    tester.view.devicePixelRatio = 1;
-    addTearDown(tester.view.resetPhysicalSize);
-    addTearDown(tester.view.resetDevicePixelRatio);
-
-    state.project = ProjectDoc(id: 'project-1', name: 'Accessible mixer', layers: [
-      LayerDoc(id: 'layer-1', name: 'Lead', color: 0),
-    ]);
-    await tester.pumpWidget(MaterialApp(
-      home: Scaffold(body: MixerScreen(state: state, onOpenBuilder: () {})),
-    ));
-
-    final dividerFinder = find.byWidgetPredicate((widget) =>
-      widget is Semantics && widget.properties.label == 'Mixer inspector width');
-    final focusFinder = find.ancestor(of: dividerFinder, matching: find.byType(Focus)).first;
-    final focus = tester.widget<Focus>(focusFinder);
-    expect(focus.focusNode!.canRequestFocus, isTrue);
-    final divider = tester.widgetList<Semantics>(find.byType(Semantics))
-      .firstWhere((node) => node.properties.label == 'Mixer inspector width');
-    expect(divider.properties.onIncrease, isNotNull);
-    expect(divider.properties.onDecrease, isNotNull);
-    expect(divider.properties.value, '34 percent');
-
-    divider.properties.onIncrease!();
-    await tester.pump();
-    final adjusted = tester.widgetList<Semantics>(find.byType(Semantics))
-      .firstWhere((node) => node.properties.label == 'Mixer inspector width');
-    expect(adjusted.properties.value, '36 percent');
-
-    adjusted.properties.onDecrease!();
-    await tester.pump();
-    final restored = tester.widgetList<Semantics>(find.byType(Semantics))
-      .firstWhere((node) => node.properties.label == 'Mixer inspector width');
-    expect(restored.properties.value, '34 percent');
+  test('track and master gain go up to +12 dB, as the engine allows', () {
+    // Owner, 2026-11-10: faders like REAPER's, to +12 dB (a gain of 3.981); the model held them at 0 dB.
+    state.project = ProjectDoc(id: 'project-1', name: 'Gain test', master: 0.7, layers: [LayerDoc(id: 'l', name: 'L', color: 0)]);
+    state.setMaster(2.0);
+    expect(state.project.master, closeTo(2.0, 1e-9));
+    state.setMaster(9.0);
+    expect(state.project.master, closeTo(kMaxMixGain, 1e-9));
+    state.mixLayer(state.project.layers.first, volume: 3.0);
+    expect(state.project.layers.first.volume, closeTo(3.0, 1e-9));
+    state.mixLayer(state.project.layers.first, volume: -1.0);
+    expect(state.project.layers.first.volume, 0.0);
+    expect(kMaxMixGain, closeTo(math.pow(10, 12 / 20), 1e-12));
   });
 
-  testWidgets('Mixer inspector divider supports keyboard resizing', (tester) async {
-    tester.view.physicalSize = const Size(1400, 900);
-    tester.view.devicePixelRatio = 1;
-    addTearDown(tester.view.resetPhysicalSize);
-    addTearDown(tester.view.resetDevicePixelRatio);
+  /// The master strip and every track's strip, as Arrange's mixer card and focus view show them.
+  Widget strips() => MaterialApp(home: Scaffold(body: ListenableBuilder(listenable: state, builder: (_, _) =>
+      SizedBox(height: 700, child: ListView(key: const ValueKey('mixer-strips'), scrollDirection: Axis.horizontal, children: [
+        MasterStrip(state: state),
+        for (final (i, l) in state.project.layers.indexed) ChannelStrip(state: state, layer: l, index: i),
+      ])))));
 
-    state.project = ProjectDoc(id: 'project-1', name: 'Keyboard mixer', layers: [
-      LayerDoc(id: 'layer-1', name: 'Lead', color: 0),
-    ]);
-    await tester.pumpWidget(MaterialApp(
-      home: Scaffold(body: MixerScreen(state: state, onOpenBuilder: () {})),
-    ));
+  testWidgets('Mixer strips: the fader, pan and typed values set the shared model', (tester) async {
+    final layer = LayerDoc(id: 'layer-1', name: 'Bass', color: 0, volume: 0.5);
+    state.project = ProjectDoc(id: 'project-1', name: 'Workspace test', layers: [layer]);
 
-    final focusFinder = find.byWidgetPredicate((widget) =>
-      widget is Focus && widget.focusNode?.debugLabel == 'Mixer inspector width');
-    final focus = tester.widget<Focus>(focusFinder);
-    focus.focusNode!.requestFocus();
-    await tester.pump();
-    expect(focus.focusNode!.hasFocus, isTrue);
-    expect(tester.binding.focusManager.primaryFocus, same(focus.focusNode));
-    await tester.sendKeyDownEvent(LogicalKeyboardKey.arrowLeft);
-    await tester.sendKeyUpEvent(LogicalKeyboardKey.arrowLeft);
-    await tester.pump();
-
-    final divider = tester.widgetList<Semantics>(find.byType(Semantics))
-      .firstWhere((node) => node.properties.label == 'Mixer inspector width');
-    expect(divider.properties.value, '36 percent');
-
-    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
-    await tester.pump();
-    final restored = tester.widgetList<Semantics>(find.byType(Semantics))
-      .firstWhere((node) => node.properties.label == 'Mixer inspector width');
-    expect(restored.properties.value, '34 percent');
-  });
-
-  testWidgets('Mixer strips: a slot opens its parameters, the fader, pan and typed values set the shared model', (tester) async {
-    final module = ModuleDoc(id: 'gen-1', name: 'Bass synth', source: '');
-    final layer = LayerDoc(id: 'layer-1', name: 'Bass', color: 0, generatorId: module.id, volume: 0.5);
-    state.project = ProjectDoc(id: 'project-1', name: 'Workspace test', modules: [module], layers: [layer]);
-    state.selectedModuleId = null;
-    state.info[module.id] = const ModuleInfo(ok: true, kind: 'generator');
-
-    await tester.pumpWidget(MaterialApp(
-      home: Scaffold(body: MixerScreen(state: state, onOpenBuilder: () {})),
-    ));
+    await tester.pumpWidget(strips());
 
     expect(find.text('MASTER'), findsOneWidget);
     expect(find.text('Bass'), findsOneWidget);
-    expect(find.text('MODULE INSPECTOR'), findsNothing);
-    // A chain slot opens its module's parameters (a sheet on narrow panels).
-    await tester.tap(find.text('Bass synth'));
-    await tester.pumpAndSettle();
-    expect(find.text('MODULE INSPECTOR'), findsOneWidget);
-    expect(state.selectedLayerId, 'layer-1');
-    expect(state.selectedModuleId, module.id);
-    Navigator.of(tester.element(find.text('MODULE INSPECTOR'))).pop();
-    await tester.pumpAndSettle();
 
-    tester.widget<Slider>(find.descendant(of: find.byKey(const ValueKey('fader-layer-1')), matching: find.byType(Slider)))
-      .onChanged!(0.72);
+    tester.widget<VolumeFader>(find.descendant(of: find.byKey(const ValueKey('fader-layer-1')), matching: find.byType(VolumeFader)))
+      .onChanged(0.72);
     await tester.pump();
     expect(layer.volume, closeTo(0.72, 0.0001));
-    expect(find.text('72%'), findsOneWidget);
+    expect(find.text('-2.9 dB'), findsOneWidget);
 
-    // Typed values: the level in percent, the pan as C, 30L or 30R.
+    // Typed values: the level in dB, the pan as C, 30L or 30R.
     await tester.tap(find.byKey(const ValueKey('level-layer-1')));
     await tester.pumpAndSettle();
     await tester.enterText(find.byType(TextField), 'NaN');
@@ -263,10 +251,10 @@ void main() {
     await tester.pump();
     expect(find.text('Not a value'), findsOneWidget);
     expect(layer.volume, closeTo(0.72, 0.0001));
-    await tester.enterText(find.byType(TextField), '40');
+    await tester.enterText(find.byType(TextField), '-6');
     await tester.tap(find.text('Set'));
     await tester.pumpAndSettle();
-    expect(layer.volume, closeTo(0.4, 0.0001));
+    expect(layer.volume, closeTo(0.5012, 0.0001));
     await tester.tap(find.byKey(const ValueKey('pan-value-layer-1')));
     await tester.pumpAndSettle();
     await tester.enterText(find.byType(TextField), 'left');
@@ -282,25 +270,13 @@ void main() {
     await tester.pump(const Duration(milliseconds: 600));
   });
 
-  testWidgets('Builder exposes the existing folder-bus route control', (tester) async {
+  testWidgets('a strip routes its track to a folder bus', (tester) async {
     final folder = LayerDoc(id: 'bus', name: 'Drum bus', color: 0, isFolder: true, busEnabled: true);
     final track = LayerDoc(id: 'kick', name: 'Kick', color: 1);
-    state.project = ProjectDoc(id: 'builder-route', name: 'Builder routing', layers: [folder, track]);
-    state.selectedLayerId = track.id;
+    state.project = ProjectDoc(id: 'strip-route', name: 'Strip routing', layers: [folder, track]);
 
-    await tester.pumpWidget(MaterialApp(
-      home: Scaffold(body: BuilderScreen(state: state)),
-    ));
-
-    // A narrow panel keeps the track's mix behind the tune button.
-    expect(find.text('ROUTE'), findsNothing);
-    await tester.tap(find.byTooltip('Track mix'));
-    await tester.pump();
-    expect(find.text('ROUTE'), findsOneWidget);
-    final routePicker = find.ancestor(
-      of: find.text('Master'),
-      matching: find.byType(DropdownButton<String?>),
-    ).first;
+    await tester.pumpWidget(strips());
+    final routePicker = find.ancestor(of: find.text('Master').last, matching: find.byType(DropdownButton<String?>)).first;
     await tester.tap(routePicker);
     await tester.pumpAndSettle();
     await tester.tap(find.text('Drum bus').last);
@@ -310,56 +286,23 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('in a short docked panel the strips keep a usable fader and the panel scrolls', (tester) async {
-    tester.view.physicalSize = const Size(390, 300);
-    tester.view.devicePixelRatio = 1;
-    addTearDown(tester.view.resetPhysicalSize);
-    addTearDown(tester.view.resetDevicePixelRatio);
-    state.project = ProjectDoc(id: 'short', name: 'Short panel', layers: [LayerDoc(id: 'l', name: 'Lead', color: 0)]);
-    await tester.pumpWidget(MaterialApp(home: Scaffold(body: MixerScreen(state: state, onOpenBuilder: () {}))));
-    expect(tester.takeException(), isNull);
-    // The fader is turned upright, so its length is its rotated box's height.
-    expect(tester.getSize(find.byKey(const ValueKey('fader-l'))).height, greaterThanOrEqualTo(100));
-  });
-
   testWidgets('Mixer strips stay usable on phone widths with long effect chains', (tester) async {
     tester.view.physicalSize = const Size(360, 900);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
+    state.project = ProjectDoc(id: 'mobile-mixer', name: 'Mobile mixer', layers: [
+      LayerDoc(id: 'mobile-layer', name: 'Mobile layer', color: 0, instrument: ComponentUseDoc('org.caw.synth.flagship'),
+          components: [for (var i = 1; i <= 6; i++) ComponentUseDoc('org.caw.fx$i')]),
+      for (var i = 1; i <= 4; i++) LayerDoc(id: 'more-$i', name: 'Track $i', color: i),
+    ]);
 
-    final modules = [
-      ModuleDoc(id: 'gen', name: 'Generator', source: ''),
-      for (var i = 1; i <= 6; i++)
-        ModuleDoc(id: 'fx$i', name: 'Effect $i', source: ''),
-    ];
-    state.project = ProjectDoc(id: 'mobile-mixer', name: 'Mobile mixer',
-      modules: modules,
-      layers: [
-        LayerDoc(id: 'mobile-layer', name: 'Mobile layer', color: 0,
-          generatorId: 'gen', effectIds: ['fx1', 'fx2', 'fx3', 'fx4', 'fx5', 'fx6']),
-        for (var i = 1; i <= 4; i++) LayerDoc(id: 'more-$i', name: 'Track $i', color: i),
-      ]);
-    state.selectedLayerId = 'mobile-layer';
-    state.selectedModuleId = 'gen';
-    state.info = {
-      'gen': const ModuleInfo(ok: true, kind: 'generator'),
-      for (var i = 1; i <= 6; i++) 'fx$i': const ModuleInfo(ok: true, kind: 'effect'),
-    };
-
-    await tester.pumpWidget(MaterialApp(
-      home: Scaffold(body: MixerScreen(state: state, onOpenBuilder: () {})),
-    ));
+    await tester.pumpWidget(strips());
     expect(tester.takeException(), isNull);
     // The slot list scrolls inside its strip; the strips scroll sideways.
-    await tester.ensureVisible(find.text('Effect 6'));
+    await tester.ensureVisible(find.text('Fx6'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Effect 6'));
-    await tester.pumpAndSettle();
-    expect(state.selectedModuleId, 'fx6');
-    expect(find.text('MODULE INSPECTOR'), findsOneWidget);
-    Navigator.of(tester.element(find.text('MODULE INSPECTOR'))).pop();
-    await tester.pumpAndSettle();
+    expect(find.text('Fx6'), findsOneWidget);
     await tester.scrollUntilVisible(find.text('Track 4'), 200, scrollable: find.descendant(
       of: find.byKey(const ValueKey('mixer-strips')), matching: find.byType(Scrollable)).first);
     expect(find.text('Track 4'), findsOneWidget);
@@ -378,18 +321,17 @@ void main() {
       home: Scaffold(
         body: ListenableBuilder(
           listenable: state,
-          builder: (context, _) => AutomationScreen(state: state),
+          builder: (context, _) => TrackAutomationPanel(state: state, layer: layer),
         ),
       ),
     ));
 
-    expect(find.text('PROJECT AUTOMATION'), findsOneWidget);
     expect(find.text('VOLUME'), findsOneWidget);
     final sliders = tester.widgetList<Slider>(find.byType(Slider)).toList();
     expect(sliders.length, 4);
     sliders[1].onChanged!(0.55);
     await tester.pump();
-    expect(lane.points.first.value, closeTo(0.55, 0.0001));
+    expect(lane.points.first.value, closeTo(VolumeTaper.gain(0.55), 0.0001), reason: 'volume points ride the fader taper');
 
     await tester.tap(find.byTooltip('Add midpoint point'));
     await tester.pump();
@@ -401,7 +343,7 @@ void main() {
     updatedPointSliders[5].onChanged!(0.6);
     await tester.pump();
     expect(lane.points.last.step, greaterThan(512));
-    expect(lane.points.last.value, greaterThan(0.5));
+    expect(lane.points.last.value, closeTo(VolumeTaper.gain(0.6), 1e-9));
 
     await tester.tap(find.byTooltip('Remove automation point').last);
     await tester.pump();
@@ -424,7 +366,7 @@ void main() {
 
     await tester.pumpWidget(MaterialApp(
       home: Scaffold(
-        body: ListenableBuilder(listenable: state, builder: (context, _) => AutomationScreen(state: state)),
+        body: ListenableBuilder(listenable: state, builder: (context, _) => TrackAutomationPanel(state: state, layer: layer)),
       ),
     ));
 
@@ -436,22 +378,19 @@ void main() {
     final valueSlider = tester.widgetList<Slider>(find.byType(Slider)).last;
     valueSlider.onChanged!(0.45);
     await tester.pump();
-    expect(lane.points.last.value, closeTo(0.45, 0.0001));
+    expect(lane.points.last.value, closeTo(VolumeTaper.gain(0.45), 0.0001));
     expect(tester.takeException(), isNull);
     await tester.pump(const Duration(milliseconds: 600));
   });
 
-  testWidgets('Engine Lab reports compiled modules and track signal paths', (tester) async {
-    final module = ModuleDoc(id: 'gen-1', name: 'Noise core', source: '');
+  testWidgets('Engine diagnostics (Settings › About and beta) report the meters, the scope and track signal paths',
+      (tester) async {
     final pattern = ModuleDoc(id: 'pat-1', name: 'Beat pattern', source: '---\\nkind: pattern\\n---\\n0 C3 1');
-    final layer = LayerDoc(id: 'layer-1', name: 'Noise', color: 0,
-      generatorId: module.id, patternId: pattern.id);
-    state.project = ProjectDoc(id: 'project-1', name: 'Engine Lab test', modules: [module, pattern], layers: [layer]);
-    state.info[module.id] = const ModuleInfo(ok: true, kind: 'generator', summary: 'Noise generator');
+    final layer = LayerDoc(id: 'layer-1', name: 'Noise', color: 0, instrument: ComponentUseDoc('org.caw.synth.flagship'),
+      components: [ComponentUseDoc('org.caw.chorus')], patternId: pattern.id);
+    state.project = ProjectDoc(id: 'project-1', name: 'Diagnostics test', modules: [pattern], layers: [layer]);
 
-    await tester.pumpWidget(MaterialApp(
-      home: Scaffold(body: EngineLabScreen(state: state, onOpenBuilder: () {})),
-    ));
+    await tester.pumpWidget(MaterialApp(home: Scaffold(body: EngineDiagnostics(state: state))));
 
     final scrollable = find.byType(Scrollable).first;
     expect(find.text('CPU'), findsOneWidget);
@@ -460,13 +399,9 @@ void main() {
     expect(tester.widgetList<CustomPaint>(find.byType(CustomPaint)).length, greaterThanOrEqualTo(3));
     await tester.scrollUntilVisible(find.text('TRACK SIGNAL PATHS'), 200, scrollable: scrollable);
     expect(find.text('MIDI'), findsOneWidget);
-    await tester.scrollUntilVisible(find.text('COMPILED MODULES'), 200, scrollable: scrollable);
-    expect(find.text('COMPILED MODULES'), findsOneWidget);
-    expect(find.text('Noise core'), findsAtLeastNWidgets(1));
-    expect(find.text('Noise generator'), findsOneWidget);
-    await tester.scrollUntilVisible(find.text('Beat pattern').first, 200, scrollable: scrollable);
-    await tester.tap(find.text('Beat pattern').first);
-    expect(state.selectedModuleId, pattern.id);
+    expect(find.text('Beat pattern'), findsOneWidget);
+    expect(find.text('Chorus'), findsOneWidget);
+    expect(find.text('COMPILED MODULES'), findsNothing);
   });
 
   testWidgets('Arranger master gain uses the native value-only update path', (tester) async {
@@ -482,14 +417,15 @@ void main() {
     await tester.tap(find.byTooltip('Settings'));
     await tester.pumpAndSettle();
 
-    final slider = tester.widget<Slider>(find.byType(Slider).first);
-    slider.onChanged!(0.42);
+    final fader = find.byWidgetPredicate((w) => w is VolumeFader && w.label == 'Master level');
+    tester.widget<VolumeFader>(fader).onChanged(0.42);
     await tester.pump();
 
     expect(state.project.master, closeTo(0.42, 0.0001));
     expect(valueTicks, 1);
     expect(appNotifications, 0);
-    expect(tester.widget<Slider>(find.byType(Slider).first).value, closeTo(0.42, 0.0001));
+    expect(tester.widget<VolumeFader>(fader).value, closeTo(0.42, 0.0001));
+    expect(find.text('-7.5 dB'), findsOneWidget);
     await tester.pump(const Duration(milliseconds: 600));
   });
 
@@ -560,15 +496,14 @@ void main() {
     expect(identical(playheadBefore, painted('PlayheadPainter').painter), isFalse);
   });
 
-  testWidgets('File Manager exposes portable project and module actions', (tester) async {
+  testWidgets('File Manager exposes portable project and pattern actions', (tester) async {
     tester.view.physicalSize = const Size(800, 900);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
     state.project = ProjectDoc(id: 'project-1', name: 'Portable project', modules: [
-      ModuleDoc(id: 'gen-1', name: 'Bass', source: '---\\nkind: generator\\n---\\nsin(110)'),
+      ModuleDoc(id: 'gen-1', name: 'Bass', source: '---\nkind: pattern\n---\n0 A1 1 1'),
     ]);
-    state.info['gen-1'] = const ModuleInfo(ok: true, kind: 'generator');
     state.createLibraryFolder('Synths');
     state.saveLibrarySearch('Bass search', 'bass');
 
@@ -578,13 +513,13 @@ void main() {
 
     expect(find.text('CURRENT PROJECT'), findsOneWidget);
     expect(find.text('Portable project'), findsOneWidget);
-    expect(find.text('Export .cawproj'), findsOneWidget);
+    expect(find.text('Export project…'), findsOneWidget);
     expect(find.text('Import project'), findsOneWidget);
-    expect(find.byTooltip('Import .caw module into this folder'), findsOneWidget);
+    expect(find.byTooltip('Import .caw module into this folder'), findsNothing);
     expect(find.text('Bass'), findsOneWidget);
     expect(find.text('Bass search'), findsOneWidget);
     final soloPreview = find.ancestor(
-      of: find.byTooltip('Solo preview in Builder'),
+      of: find.byTooltip('Solo preview in Build'),
       matching: find.byType(IconButton),
     ).first;
     await tester.tap(soloPreview);
@@ -596,7 +531,7 @@ void main() {
     await tester.pump();
     expect(tester.widget<TextField>(find.byType(TextField)).controller?.text, 'bass');
 
-    await tester.tap(find.byTooltip('Select modules'));
+    await tester.tap(find.byTooltip('Select patterns'));
     await tester.pump();
     await tester.tap(find.byType(Checkbox).first);
     await tester.pump();
@@ -615,7 +550,7 @@ void main() {
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
-    final module = ModuleDoc(id: 'nested-module', name: 'Old bass', source: 'sine(110)',
+    final module = ModuleDoc(id: 'nested-module', name: 'Old bass', source: '---\nkind: pattern\n---\n0 A1 1 1',
       folderPath: 'Synths/Bass', tags: ['low']);
     state.project = ProjectDoc(id: 'files-search', name: 'Files search',
       modules: [module], libraryFolders: ['Synths', 'Synths/Bass']);
@@ -634,11 +569,11 @@ void main() {
     expect(find.text('Old bass'), findsOneWidget);
     expect(find.text('Synths/Bass'), findsWidgets);
 
-    final moduleActions = find.byTooltip('Module actions');
+    final moduleActions = find.byTooltip('Pattern actions');
     await tester.ensureVisible(moduleActions);
     await tester.tap(moduleActions);
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Rename module'));
+    await tester.tap(find.text('Rename pattern'));
     await tester.pumpAndSettle();
     await tester.enterText(find.byType(TextField).last, 'Sub bass');
     await tester.tap(find.text('Rename'));
@@ -648,10 +583,10 @@ void main() {
     await tester.ensureVisible(moduleActions);
     await tester.tap(moduleActions);
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Delete module'));
+    await tester.tap(find.text('Delete pattern'));
     await tester.pumpAndSettle();
-    expect(find.text('Delete module?'), findsOneWidget);
-    await tester.tap(find.text('Delete module').last);
+    expect(find.text('Delete pattern?'), findsOneWidget);
+    await tester.tap(find.text('Delete pattern').last);
     await tester.pumpAndSettle();
     expect(state.project.module('nested-module'), isNull);
     await tester.pump(const Duration(milliseconds: 600));
@@ -660,7 +595,7 @@ void main() {
 
   testWidgets('Exporter queues and removes a reproducible quick-export snapshot', (tester) async {
     await tester.pumpWidget(MaterialApp(
-      home: Scaffold(body: ExporterScreen(state: state)),
+      home: Scaffold(body: ExportPage(state: state)),
     ));
 
     await tester.tap(find.text('Queue'));
@@ -668,6 +603,8 @@ void main() {
     expect(find.text('EXPORT QUEUE · 1'), findsOneWidget);
     expect(find.textContaining('bars.wav').first, findsOneWidget);
     expect(find.text('loop · 48 kHz'), findsOneWidget);
+    await tester.ensureVisible(find.byTooltip('Remove queued export'));  // below the Export song panel
+    await tester.pumpAndSettle();
     await tester.tap(find.byTooltip('Remove queued export'));
     await tester.pumpAndSettle();
     expect(find.textContaining('EXPORT QUEUE'), findsNothing);
@@ -682,7 +619,7 @@ void main() {
         createdAtMs: DateTime(2026, 11, 1).millisecondsSinceEpoch),
     ];
     await tester.pumpWidget(MaterialApp(
-      home: Scaffold(body: ExporterScreen(state: state)),
+      home: Scaffold(body: ExportPage(state: state)),
     ));
 
     expect(find.text('Choose a saved profile'), findsOneWidget);
@@ -706,7 +643,7 @@ void main() {
     addTearDown(tester.view.resetDevicePixelRatio);
 
     await tester.pumpWidget(MaterialApp(
-      home: Scaffold(body: ExporterScreen(state: state)),
+      home: Scaffold(body: ExportPage(state: state)),
     ));
     await tester.tap(find.text('Advanced'));
     await tester.pumpAndSettle();
@@ -755,7 +692,7 @@ void main() {
 
   testWidgets('Exporter switches between quick loop and advanced MIDI options', (tester) async {
     await tester.pumpWidget(MaterialApp(
-      home: Scaffold(body: ExporterScreen(state: state)),
+      home: Scaffold(body: ExportPage(state: state)),
     ));
 
     expect(find.text('Quick Export'), findsWidgets);
@@ -777,7 +714,7 @@ void main() {
     ];
 
     await tester.pumpWidget(MaterialApp(
-      home: Scaffold(body: ExporterScreen(state: state)),
+      home: Scaffold(body: ExportPage(state: state)),
     ));
 
     expect(find.text('RECENT EXPORTS'), findsOneWidget);
@@ -789,30 +726,6 @@ void main() {
     await tester.tap(find.text('Pattern MIDI').last);
     await tester.pumpAndSettle();
     expect(find.text('Export MIDI'), findsOneWidget);
-  });
-
-  testWidgets('Plugin Builder exposes the native module workflow and honest target boundary', (tester) async {
-    await tester.pumpWidget(MaterialApp(
-      home: Scaffold(body: PluginBuilderScreen(state: state, onOpenBuilder: () {})),
-    ));
-
-    expect(find.text('Guided'), findsOneWidget);
-    expect(find.text('Advanced'), findsOneWidget);
-    expect(find.textContaining('This screen edits and validates .caw modules.'), findsOneWidget);
-
-    await tester.tap(find.text('Blank effect'));
-    await tester.pump();
-    expect(state.project.modules, hasLength(1));
-    expect(state.kindOf(state.project.modules.single.id), 'effect');
-    state.project.modules.single.params['drive'] = 0.35;
-    await tester.tap(find.text('Advanced'));
-    await tester.pumpAndSettle();
-    expect(find.text('Clone as new module'), findsOneWidget);
-    await tester.tap(find.text('Clone as new module'));
-    await tester.pumpAndSettle();
-    expect(state.project.modules, hasLength(2));
-    expect(state.kindOf(state.project.modules.last.id), 'effect');
-    expect(state.project.modules.last.params['drive'], closeTo(0.35, 0.0001));
   });
 
   test('imported projects receive a new identity and preserve project content', () async {
@@ -838,8 +751,8 @@ void main() {
       'name': 'Imported',
       'library_folders': ['Good/Child', '../outside', 'Bad\\\\Path'],
       'modules': [
-        {'id': 'safe', 'name': 'Safe', 'source': '', 'folder_path': 'Good/Child'},
-        {'id': 'unsafe', 'name': 'Unsafe', 'source': '', 'folder_path': '../../outside'},
+        {'id': 'safe', 'name': 'Safe', 'source': '---\nkind: pattern\n---\n', 'folder_path': 'Good/Child'},
+        {'id': 'unsafe', 'name': 'Unsafe', 'source': '---\nkind: pattern\n---\n', 'folder_path': '../../outside'},
       ],
       'layers': [],
     });
@@ -850,17 +763,11 @@ void main() {
     expect(imported.module('unsafe')?.folderPath, '');
   });
 
-  test('library folder operations preserve modules through rename and delete', () {
-    final id = state.importModuleSource(
-      '---\\nkind: generator\\nname: Folder test\\n---\\nsin(220)',
-      fileName: 'Folder.caw',
-      folderPath: 'Drums/Kicks',
-    );
-    final secondId = state.importModuleSource(
-      '---\\nkind: effect\\nname: Folder effect\\n---\\nidentity',
-      fileName: 'Effect.caw',
-      folderPath: 'Drums/Kicks',
-    );
+  test('library folder operations preserve patterns through rename and delete', () {
+    state.createLibraryFolder('Drums/Kicks');
+    final id = state.addModule(const PatternTemplate('Folder.caw', '---\nkind: pattern\nname: Folder test\n---\n0 C2 1 1'));
+    final secondId = state.addModule(const PatternTemplate('Second.caw', '---\nkind: pattern\nname: Folder second\n---\n0 D2 1 1'));
+    state.moveModulesToFolder([id, secondId], 'Drums/Kicks');
     expect(state.project.libraryFolders, containsAll(['Drums', 'Drums/Kicks']));
     expect(state.project.module(id)?.folderPath, 'Drums/Kicks');
 
@@ -899,18 +806,9 @@ void main() {
     expect(state.deleteLibraryFolder('Sounds'), isTrue);
     expect(state.project.module(id)?.folderPath, '');
     expect(state.project.libraryFolders, isNot(contains('Sounds/Synths')));
-    expect(state.project.module(id)?.source, contains('sin(220)'));
-    expect(state.project.module(secondId)?.source, contains('identity'));
+    expect(state.project.module(id)?.source, contains('0 C2 1 1'));
+    expect(state.project.module(secondId)?.source, contains('0 D2 1 1'));
   });
 
-  test('imported module source becomes a new project module', () {
-    final id = state.importModuleSource(
-      '---\nkind: generator\nname: Imported bass\n---\nsin(110)',
-      fileName: 'Bass.caw',
-    );
-
-    expect(state.project.module(id)?.name, 'Imported bass');
-    expect(state.project.module(id)?.source, contains('sin(110)'));
-  });
 
 }

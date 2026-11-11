@@ -1,11 +1,44 @@
-// A compact rotary knob for effect cards: drag up or down to turn, double-tap for the default, a tick at the centre.
+// A compact rotary knob for effect cards: drag up or down to turn, double-tap for the default, a tick at the centre;
+// exponential parameters turn on a log taper.
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../haptics.dart';
 import '../motion.dart';
 import '../theme.dart';
+
+/// Where a value sits along a control's travel (0..1) and back. Linear by default; an exponential parameter
+/// (`curve: exponential` in a component's descriptor: times, frequencies, rates) moves little at the start of the
+/// travel and a lot at the end (owner, 2026-11-10): a log scale when the range is above zero, otherwise a curve
+/// that spans three decades from the minimum.
+class Taper {
+  const Taper(this.min, this.max, {this.exponential = false});
+  final double min, max;
+  final bool exponential;
+
+  static const _decades = 1000.0;
+
+  bool get _log => min > 0 && max > min;
+
+  double position(double value) {
+    final range = max - min;
+    if (range <= 0) return 0;
+    final v = value.clamp(min, max).toDouble();
+    if (!exponential) return (v - min) / range;
+    if (_log) return math.log(v / min) / math.log(max / min);
+    return math.log(1 + (v - min) / range * (_decades - 1)) / math.log(_decades);
+  }
+
+  double value(double position) {
+    final t = position.clamp(0.0, 1.0).toDouble();
+    final range = max - min;
+    if (!exponential || range <= 0) return min + t * range;
+    if (_log) return (min * math.pow(max / min, t)).clamp(min, max).toDouble();
+    return (min + (math.pow(_decades, t) - 1) / (_decades - 1) * range).clamp(min, max).toDouble();
+  }
+}
 
 class Knob extends StatefulWidget {
   const Knob({
@@ -22,7 +55,11 @@ class Knob extends StatefulWidget {
     this.onChangeEnd,
     this.enabled = true,
     this.size = 34,
+    this.exponential = false,
   });
+
+  /// Turn on an exponential taper ([Taper]): the parameter descriptor's `curve: exponential`.
+  final bool exponential;
 
   final double value, min, max, step;
   final double? defaultValue;
@@ -42,6 +79,11 @@ class Knob extends StatefulWidget {
 
 class _KnobState extends State<Knob> {
   double? _dragValue;
+  // The travel position during a drag, so slow drags still move along a curved or stepped taper.
+  double? _dragPos;
+  bool _held = false;
+
+  Taper get _taper => Taper(widget.min, widget.max, exponential: widget.exponential);
 
   double get _centre => (widget.min + widget.max) / 2;
 
@@ -54,9 +96,16 @@ class _KnobState extends State<Knob> {
   void _set(double next) {
     final before = _dragValue ?? widget.value;
     next = _quantize(next);
-    // Reaching the centre ticks once (owner: light haptics on a knob reaching centre).
+    // Reaching the centre ticks once (owner: light haptics on a knob reaching centre), and so does each step: a
+    // stepped knob's every value, a smooth knob's every 1/24 of its travel (Haptics rate-limits a fast turn).
     final c = _centre;
-    if (before != next && before != c && (next == c || (before - c) * (next - c) < 0)) Motion.tick();
+    final notches = widget.step > 0 ? null : 24;
+    int notch(double v) => notches == null ? ((v - widget.min) / widget.step).round() : (_taper.position(v) * notches).floor();
+    if (before != next && before != c && (next == c || (before - c) * (next - c) < 0)) {
+      Motion.tick();
+    } else if (before != next && notch(before) != notch(next)) {
+      Haptics.tick();
+    }
     _dragValue = next;
     if (next != widget.value) widget.onChanged(next);
   }
@@ -77,8 +126,7 @@ class _KnobState extends State<Knob> {
 
   @override
   Widget build(BuildContext context) {
-    final range = widget.max - widget.min;
-    final norm = range <= 0 ? 0.0 : ((widget.value - widget.min) / range).clamp(0.0, 1.0).toDouble();
+    final norm = _taper.position(widget.value);
     final text = _describe(widget.value);
     final color = widget.enabled ? widget.color : Neon.dim;
     return Semantics(
@@ -94,28 +142,53 @@ class _KnobState extends State<Knob> {
         waitDuration: const Duration(milliseconds: 600),
         child: GestureDetector(
           behavior: HitTestBehavior.opaque,
-          onVerticalDragStart: widget.enabled ? (_) => _dragValue = widget.value : null,
+          onVerticalDragStart: widget.enabled
+              ? (_) {
+                  _dragValue = widget.value;
+                  _dragPos = _taper.position(widget.value);
+                  Haptics.grab();
+                  setState(() => _held = true);
+                }
+              : null,
           onVerticalDragUpdate: widget.enabled
               ? (d) {
                   // 200 px of travel covers the range; hold Shift on a desktop for fine moves.
                   final fine = HardwareKeyboard.instance.isShiftPressed ? 0.2 : 1.0;
-                  final raw = (_dragValue ?? widget.value) - d.delta.dy / 200 * range * fine;
-                  final before = _dragValue ?? widget.value;
-                  _set(raw);
-                  // Keep sub-step travel so slow drags still move a stepped knob.
-                  if (widget.step > 0 && _dragValue == before) _dragValue = raw.clamp(widget.min, widget.max).toDouble();
+                  final pos = ((_dragPos ?? _taper.position(widget.value)) - d.delta.dy / 200 * fine).clamp(0.0, 1.0).toDouble();
+                  _dragPos = pos;
+                  _set(_taper.value(pos));
                 }
               : null,
-          onVerticalDragEnd: widget.enabled ? (_) { _dragValue = null; widget.onChangeEnd?.call(); } : null,
+          onVerticalDragEnd: widget.enabled
+              ? (_) {
+                  _dragValue = null;
+                  _dragPos = null;
+                  setState(() => _held = false);
+                  widget.onChangeEnd?.call();
+                }
+              : null,
+          onVerticalDragCancel: () {
+            if (_held) setState(() => _held = false);
+          },
           onDoubleTap: widget.enabled && widget.defaultValue != null
               ? () { _set(widget.defaultValue!); _dragValue = null; widget.onChangeEnd?.call(); }
               : null,
           child: SizedBox(
             width: math.max(48, widget.size + 14),
             child: Column(mainAxisSize: MainAxisSize.min, children: [
-              SizedBox(width: widget.size + 6, height: widget.size + 6, child: Center(child: CustomPaint(
-                size: Size.square(widget.size),
-                painter: _KnobPainter(norm, color, bipolar: widget.min < 0 && widget.max > 0),
+              // Held, the knob grows a little and glows (feedback.dart's press look).
+              SizedBox(width: widget.size + 6, height: widget.size + 6, child: Center(child: AnimatedScale(
+                key: const ValueKey('knob-held'),
+                scale: _held && Motion.of(context) == MotionLevel.full ? 1.1 : 1,
+                duration: Motion.fade(Motion.small, Motion.of(context)),
+                child: DecoratedBox(
+                  decoration: BoxDecoration(shape: BoxShape.circle,
+                    boxShadow: _held ? [BoxShadow(color: color.withValues(alpha: 0.35), blurRadius: 10)] : null),
+                  child: RepaintBoundary(child: CustomPaint(
+                    size: Size.square(widget.size),
+                    painter: _KnobPainter(norm, color, bipolar: widget.min < 0 && widget.max > 0),
+                  )),
+                ),
               ))),
               Text(widget.label, maxLines: 1, overflow: TextOverflow.ellipsis,
                 style: const TextStyle(fontSize: 9, color: Neon.dim)),

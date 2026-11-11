@@ -5,6 +5,8 @@
 #include <cstdio>
 #include <cstring>
 
+#include "utf8_path.h"
+
 namespace caw {
 
 namespace {
@@ -22,7 +24,7 @@ void tag(std::vector<uint8_t>& b, const char* t) { b.insert(b.end(), t, t + 4); 
 
 // Everything before the samples, with the RIFF size already set for the data and its pad byte.
 std::vector<uint8_t> wavHeader(const WavSpec& spec, int64_t frames) {
-    const uint32_t bytesPer = spec.float32 ? 4 : 3;
+    const uint32_t bytesPer = static_cast<uint32_t>(spec.bytesPerSample());
     const uint32_t blockAlign = bytesPer * static_cast<uint32_t>(spec.channels);
     const uint32_t dataBytes = static_cast<uint32_t>(frames) * blockAlign;
     std::vector<uint8_t> b;
@@ -68,24 +70,44 @@ std::vector<uint8_t> wavHeader(const WavSpec& spec, int64_t frames) {
     return b;
 }
 
-void appendSamples(std::vector<uint8_t>& b, const WavSpec& spec, const float* x, int64_t frames) {
+uint32_t ditherStart(const WavSpec& spec) { return spec.ditherSeed * 2654435761u | 1u; }
+
+// TPDF dither as the sample-pack maker has it (Lipshitz, Wannamaker and Vanderkooy, "Quantization and Dither: A
+// Theoretical Survey", JAES 40(5), 1992): the difference of two independent uniform values, +-1 LSB triangular,
+// added before rounding, makes the rounding error's first two moments independent of the signal.
+double uniform(uint32_t& state) {
+    state ^= state << 13;
+    state ^= state >> 17;
+    state ^= state << 5;
+    return static_cast<double>(state) / 4294967296.0;
+}
+
+void appendSamples(std::vector<uint8_t>& b, const WavSpec& spec, const float* x, int64_t frames, uint32_t& dither) {
     const int64_t n = frames * spec.channels;
+    const bool sixteen = spec.pcmBits == 16;
+    const double scale = sixteen ? 32767.0 : 8388607.0;
+    const int32_t lo = sixteen ? -32768 : -8388608, hi = sixteen ? 32767 : 8388607;
     for (int64_t i = 0; i < n; ++i) {
         float v = std::isfinite(x[i]) ? x[i] : 0.0f;
         if (spec.float32) {
             uint32_t bits;
             std::memcpy(&bits, &v, 4);
             u32(b, bits);
-        } else {
-            double d = v < -1.0f ? -1.0 : (v > 1.0f ? 1.0 : static_cast<double>(v));
-            int32_t s = static_cast<int32_t>(std::floor(d * 8388607.0 + 0.5));
-            if (s > 8388607) s = 8388607;
-            if (s < -8388608) s = -8388608;
-            const uint32_t u = static_cast<uint32_t>(s);
-            b.push_back(static_cast<uint8_t>(u));
-            b.push_back(static_cast<uint8_t>(u >> 8));
-            b.push_back(static_cast<uint8_t>(u >> 16));
+            continue;
         }
+        double d = v < -1.0f ? -1.0 : (v > 1.0f ? 1.0 : static_cast<double>(v));
+        double tpdf = 0.0;
+        if (spec.dither) {
+            const double noise = uniform(dither) - uniform(dither);  // in LSBs; drawn for every sample
+            if (v != 0.0f) tpdf = noise;
+        }
+        int32_t s = static_cast<int32_t>(std::floor(d * scale + tpdf + 0.5));
+        if (s > hi) s = hi;
+        if (s < lo) s = lo;
+        const uint32_t u = static_cast<uint32_t>(s);
+        b.push_back(static_cast<uint8_t>(u));
+        b.push_back(static_cast<uint8_t>(u >> 8));
+        if (!sixteen) b.push_back(static_cast<uint8_t>(u >> 16));
     }
 }
 
@@ -93,9 +115,11 @@ void appendSamples(std::vector<uint8_t>& b, const WavSpec& spec, const float* x,
 
 std::vector<uint8_t> encodeWav(const WavSpec& spec, const float* x, int64_t frames) {
     std::vector<uint8_t> b = wavHeader(spec, frames);
-    const uint32_t dataBytes = static_cast<uint32_t>(frames) * (spec.float32 ? 4u : 3u) * static_cast<uint32_t>(spec.channels);
+    const uint32_t dataBytes = static_cast<uint32_t>(frames) * static_cast<uint32_t>(spec.bytesPerSample()) *
+        static_cast<uint32_t>(spec.channels);
     b.reserve(b.size() + dataBytes + 1);
-    appendSamples(b, spec, x, frames);
+    uint32_t dither = ditherStart(spec);
+    appendSamples(b, spec, x, frames, dither);
     if (dataBytes & 1) b.push_back(0);  // chunks are padded to an even size
     return b;
 }
@@ -106,7 +130,7 @@ bool WavFileWriter::open(const std::string& path, const WavSpec& spec, int64_t f
     abandon();
     path_ = path;
     part_ = path + ".part";
-    file_ = std::fopen(part_.c_str(), "wb");
+    file_ = openFile(utf8Path(part_), "wb");
     if (!file_) {
         error = "can't open " + part_ + " for writing";
         return false;
@@ -115,6 +139,7 @@ bool WavFileWriter::open(const std::string& path, const WavSpec& spec, int64_t f
     frames_ = frames;
     written_ = 0;
     failed_ = false;
+    ditherState_ = ditherStart(spec);
     buffer_ = wavHeader(spec, frames);
     if (std::fwrite(buffer_.data(), 1, buffer_.size(), file_) != buffer_.size()) {
         error = "couldn't write all of " + path;
@@ -128,7 +153,7 @@ bool WavFileWriter::write(const float* x, int64_t frames) {
     if (!file_ || failed_) return false;
     if (frames > frames_ - written_) frames = frames_ - written_;
     buffer_.clear();
-    appendSamples(buffer_, spec_, x, frames);
+    appendSamples(buffer_, spec_, x, frames, ditherState_);
     failed_ = std::fwrite(buffer_.data(), 1, buffer_.size(), file_) != buffer_.size();
     written_ += frames;
     return !failed_;
@@ -139,20 +164,21 @@ bool WavFileWriter::finish(std::string& error) {
         error = "no WAV file is open";
         return false;
     }
-    const uint64_t dataBytes = static_cast<uint64_t>(frames_) * (spec_.float32 ? 4u : 3u) * static_cast<uint32_t>(spec_.channels);
+    const uint64_t dataBytes = static_cast<uint64_t>(frames_) * static_cast<uint32_t>(spec_.bytesPerSample()) *
+        static_cast<uint32_t>(spec_.channels);
     if (!failed_ && (dataBytes & 1)) failed_ = std::fputc(0, file_) == EOF;
     const bool complete = written_ == frames_;
     const bool closed = std::fclose(file_) == 0;
     file_ = nullptr;
     if (failed_ || !closed || !complete) {
         error = complete ? "couldn't write all of " + path_ : "the render ended before the WAV was complete";
-        std::remove(part_.c_str());
+        removeFile(part_);
         return false;
     }
-    std::remove(path_.c_str());  // rename doesn't replace an existing file on Windows
-    if (std::rename(part_.c_str(), path_.c_str()) != 0) {
+    removeFile(path_);  // rename doesn't replace an existing file on Windows
+    if (!renameFile(part_, path_)) {
         error = "couldn't move " + part_ + " to " + path_;
-        std::remove(part_.c_str());
+        removeFile(part_);
         return false;
     }
     return true;
@@ -162,11 +188,11 @@ void WavFileWriter::abandon() {
     if (!file_) return;
     std::fclose(file_);
     file_ = nullptr;
-    std::remove(part_.c_str());
+    removeFile(part_);
 }
 
 bool writeFile(const std::string& path, const std::vector<uint8_t>& bytes, std::string& error) {
-    std::FILE* f = std::fopen(path.c_str(), "wb");
+    std::FILE* f = openFile(utf8Path(path), "wb");
     if (!f) {
         error = "can't open " + path + " for writing";
         return false;

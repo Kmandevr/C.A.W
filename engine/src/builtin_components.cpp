@@ -1,7 +1,10 @@
 // Built-in components (the C.A.W. Library, #121): stereo effects and an instrument, registered in every Engine.
 #include "builtin_components.h"
+#include "builtin_modulators.h"
 
+#include "builtin_effects.h"
 #include "builtin_instruments.h"
+#include "builtin_test_signal.h"
 
 #include <algorithm>
 #include <cmath>
@@ -10,6 +13,7 @@
 #include "caw/instrument.hpp"
 #include "caw/library/delay.hpp"
 #include "caw/library/distortion.hpp"
+#include "caw/library/fastmath.hpp"
 #include "caw/library/stereo.hpp"
 
 namespace caw {
@@ -29,6 +33,16 @@ ParameterDescriptor parameter(std::string_view id, std::string_view name, double
     return p;
 }
 
+// A time, frequency, rate or gain: the knob tapers (each step of its travel multiplies the value), so it turns finely
+// near the bottom of a wide range.
+ParameterDescriptor tapered(std::string_view id, std::string_view name, double def, double lo, double hi,
+                            std::string_view unit = {}) {
+    ParameterDescriptor p = parameter(id, name, def, lo, hi);
+    p.unit = unit;
+    p.curve = ParameterCurve::Exponential;
+    return p;
+}
+
 ModuleDescriptor descriptor(std::string_view id, std::string_view name, const ParameterDescriptor* params) {
     ModuleDescriptor d;
     d.id = id;
@@ -38,6 +52,8 @@ ModuleDescriptor descriptor(std::string_view id, std::string_view name, const Pa
     d.portCount = 2;
     d.parameters = params;
     d.parameterCount = 1;
+    d.domains = kDomainWhole | kDomainPerNote;  // #120: stereo effects may run per note
+    d.cpuClass = CpuClass::Light;
     return d;
 }
 
@@ -98,7 +114,7 @@ ParameterDescriptor shapeParameter() {
 }
 const ParameterDescriptor kDistortionParams[] = {
     shapeParameter(),
-    parameter("drive", "Drive", 4.0, 1.0, 20.0),
+    tapered("drive", "Drive", 4.0, 1.0, 20.0),
     parameter("bits", "Bits", 8.0, 1.0, 24.0),
     parameter("mix", "Mix", 1.0, 0.0, 1.0),
     parameter("output", "Output", 1.0, 0.0, 2.0),
@@ -107,6 +123,7 @@ ModuleDescriptor distortionDescriptor() {
     ModuleDescriptor d = descriptor("org.caw.distortion", "Distortion", kDistortionParams);
     d.role = ModuleRole::Effect;
     d.parameterCount = 5;
+    d.cpuClass = CpuClass::Medium;
     return d;
 }
 const ModuleDescriptor kDistortion = distortionDescriptor();
@@ -116,30 +133,81 @@ double paramAt(const AudioProcessBlock& b, uint32_t k, uint32_t i, double fallba
     return b.parameters[k].samples ? b.parameters[k].samples[i] : b.parameters[k].value;
 }
 
+// No knob among the first `count` ramps in this block (the usual case): each holds one value for every frame.
+bool steadyKnobs(const AudioProcessBlock& b, uint32_t count) noexcept {
+    for (uint32_t k = 0; k < count && k < b.parameterCount && b.parameters; ++k)
+        if (b.parameters[k].samples) return false;
+    return true;
+}
+
+// The shapes' per-sample maths is the Library's fast kind (fastmath.hpp: the same curves within 1e-9), and
+// what depends only on the knobs is worked out once per value, not per sample.
 class Distortion final : public ModuleProcessor {
 public:
     const ModuleDescriptor& descriptor() const noexcept override { return kDistortion; }
     using ModuleProcessor::process;
     bool process(const AudioProcessBlock& b) noexcept override {
         if (!stereo(b)) return false;
+        if (steadyKnobs(b, 5) && static_cast<int>(paramAt(b, 0, 0, 0.0)) == 0) return processDrive(b);
         for (uint32_t i = 0; i < b.frames; ++i) {
             const int shape = static_cast<int>(paramAt(b, 0, i, 0.0));
             const double amount = paramAt(b, 1, i, 4.0), bits = paramAt(b, 2, i, 8.0);
             const double mix = paramAt(b, 3, i, 1.0), out = paramAt(b, 4, i, 1.0);
+            if (shape == 0) saturator_.set(amount);
+            if (shape == 3 && bits != bits_) {
+                bits_ = bits;
+                const double whole = bits < 1.0 ? 1.0 : (bits > 24.0 ? 24.0 : bits);
+                steps_ = detPow(2.0, std::floor(whole) - 1.0);
+            }
             for (uint32_t c = 0; c < 2; ++c) {
                 const double x = b.input.channels[c][i];
                 double y = 0.0;
                 switch (shape) {
                     case 1: y = lib::hardClip(x, amount); break;
-                    case 2: y = lib::fold(x, amount); break;
-                    case 3: y = lib::crush(x, bits); break;
-                    default: y = lib::drive(x, amount); break;
+                    case 2: y = lib::fastSinCycles(finiteOr0(x) * amount * 0.25); break;  // lib::fold
+                    case 3: y = std::floor(finiteOr0(x) * steps_ + 0.5) / steps_; break;  // lib::crush
+                    default: y = saturator_.process(x); break;                             // lib::drive
                 }
                 b.output.channels[c][i] = static_cast<float>((x + (y - x) * mix) * out);
             }
         }
         return true;
     }
+
+private:
+    // Drive with every knob holding still: the knobs read once, and a sample the same on both sides (a centred
+    // instrument) driven once for both (2026-11-10 second performance pass; the same bits as the loop above).
+    bool processDrive(const AudioProcessBlock& b) noexcept {
+        saturator_.set(paramAt(b, 1, 0, 4.0));
+        const double mix = paramAt(b, 3, 0, 1.0), out = paramAt(b, 4, 0, 1.0);
+        const float* inL = b.input.channels[0];
+        const float* inR = b.input.channels[1];
+        float* outL = b.output.channels[0];
+        float* outR = b.output.channels[1];
+        const auto shape = [&](double x, double y) noexcept { return static_cast<float>((x + (y - x) * mix) * out); };
+        uint32_t i = 0;
+        for (; i + 1 < b.frames; i += 2) {  // two frames at a time (Saturator::process2: the same bits)
+            const double l[2] = {inL[i], inL[i + 1]}, r[2] = {inR[i], inR[i + 1]};
+            double yl[2], yr[2];
+            saturator_.process2(l, yl);
+            const bool same = r[0] == l[0] && r[1] == l[1];
+            if (!same) saturator_.process2(r, yr);
+            for (int j = 0; j < 2; ++j) {
+                outL[i + j] = shape(l[j], yl[j]);
+                outR[i + j] = same ? outL[i + j] : shape(r[j], yr[j]);
+            }
+        }
+        for (; i < b.frames; ++i) {
+            const double l = inL[i], r = inR[i];
+            const float yl = shape(l, saturator_.process(l));
+            outL[i] = yl;
+            outR[i] = r == l ? yl : shape(r, saturator_.process(r));
+        }
+        return true;
+    }
+
+    lib::Saturator saturator_;
+    double bits_ = -1.0, steps_ = 128.0;
 };
 
 // Ping-pong delay: synced to the song's tempo (a note division) or free (milliseconds), with feedback,
@@ -157,7 +225,7 @@ ParameterDescriptor syncParameter() {
 }
 const ParameterDescriptor kDelayParams[] = {
     syncParameter(),
-    parameter("time", "Time (free)", 375.0, 1.0, 4000.0),
+    tapered("time", "Time (free)", 375.0, 1.0, 4000.0, "ms"),
     parameter("feedback", "Feedback", 0.45, 0.0, 0.95),
     parameter("cross", "Ping-pong", 1.0, 0.0, 1.0),
     parameter("mix", "Mix", 0.35, 0.0, 1.0),
@@ -166,6 +234,7 @@ ModuleDescriptor delayDescriptor() {
     ModuleDescriptor d = descriptor("org.caw.delay.pingpong", "Ping-pong delay", kDelayParams);
     d.role = ModuleRole::Effect;
     d.parameterCount = 5;
+    d.cpuClass = CpuClass::Medium;
     d.tailFrames = kInfiniteTail;  // with feedback it rings until it is quiet
     return d;
 }
@@ -190,6 +259,20 @@ public:
         if (!stereo(b)) return false;
         // The host gives the tempo even while stopped; without a transport at all, the last tempo seen holds.
         if (b.transport) tempo_ = b.transport->tempo;
+        if (steadyKnobs(b, 5)) {  // the knobs and the target read once (the same bits as the loop below)
+            const int sync = static_cast<int>(paramAt(b, 0, 0, 3.0));
+            const double target = sync > 0 && sync < 8 ? lib::noteSeconds(tempo_, kDivisionWholeNotes[sync])
+                                                       : paramAt(b, 1, 0, 375.0) / 1000.0;
+            const double feedback = paramAt(b, 2, 0, 0.45), cross = paramAt(b, 3, 0, 1.0), mix = paramAt(b, 4, 0, 0.35);
+            for (uint32_t i = 0; i < b.frames; ++i) {
+                seconds_ = seconds_ < 0.0 ? target : seconds_ + (target - seconds_) * glide_;
+                float l = b.input.channels[0][i], r = b.input.channels[1][i];
+                delay_.process(seconds_, feedback, cross, mix, l, r);
+                b.output.channels[0][i] = l;
+                b.output.channels[1][i] = r;
+            }
+            return true;
+        }
         for (uint32_t i = 0; i < b.frames; ++i) {
             const int sync = static_cast<int>(paramAt(b, 0, i, 3.0));
             const double target = sync > 0 && sync < 8 ? lib::noteSeconds(tempo_, kDivisionWholeNotes[sync])
@@ -213,7 +296,7 @@ private:
 
 // Stereo chorus: rate, depth and mix; the two sides sweep a quarter cycle apart.
 const ParameterDescriptor kChorusParams[] = {
-    parameter("rate", "Rate", 0.6, 0.05, 5.0),
+    tapered("rate", "Rate", 0.6, 0.05, 5.0, "Hz"),
     parameter("depth", "Depth", 0.5, 0.0, 1.0),
     parameter("mix", "Mix", 0.5, 0.0, 1.0),
 };
@@ -221,6 +304,7 @@ ModuleDescriptor chorusDescriptor() {
     ModuleDescriptor d = descriptor("org.caw.chorus", "Chorus", kChorusParams);
     d.role = ModuleRole::Effect;
     d.parameterCount = 3;
+    d.cpuClass = CpuClass::Medium;
     d.tailFrames = 9600;  // the 50 ms line empties, at rates up to 192 kHz
     return d;
 }
@@ -237,13 +321,38 @@ public:
         }
         return true;
     }
-    void reset() noexcept override { chorus_.clear(); }
+    void reset() noexcept override {
+        chorus_.clear();
+        left_ = 0;
+    }
     using ModuleProcessor::process;
+    // The LFO runs at the control rate (lib::Chorus::control every 16 frames, carried across blocks so a
+    // block's size doesn't move it), the sweep gliding in between: perceptually the per-sample sweep.
     bool process(const AudioProcessBlock& b) noexcept override {
         if (!stereo(b)) return false;
+        if (steadyKnobs(b, 3)) {  // the knobs read once (the same bits as the loop below)
+            const double rate = paramAt(b, 0, 0, 0.6), depth = paramAt(b, 1, 0, 0.5), mix = paramAt(b, 2, 0, 0.5);
+            for (uint32_t i = 0; i < b.frames; ++i) {
+                if (left_ == 0) {
+                    chorus_.control(rate, depth, kControlFrames);
+                    left_ = kControlFrames;
+                }
+                --left_;
+                float l = b.input.channels[0][i], r = b.input.channels[1][i];
+                chorus_.step(mix, l, r);
+                b.output.channels[0][i] = l;
+                b.output.channels[1][i] = r;
+            }
+            return true;
+        }
         for (uint32_t i = 0; i < b.frames; ++i) {
+            if (left_ == 0) {
+                chorus_.control(paramAt(b, 0, i, 0.6), paramAt(b, 1, i, 0.5), kControlFrames);
+                left_ = kControlFrames;
+            }
+            --left_;
             float l = b.input.channels[0][i], r = b.input.channels[1][i];
-            chorus_.process(paramAt(b, 0, i, 0.6), paramAt(b, 1, i, 0.5), paramAt(b, 2, i, 0.5), l, r);
+            chorus_.step(paramAt(b, 2, i, 0.5), l, r);
             b.output.channels[0][i] = l;
             b.output.channels[1][i] = r;
         }
@@ -251,210 +360,11 @@ public:
     }
 
 private:
+    static constexpr uint32_t kControlFrames = 16;
     lib::Chorus chorus_;
+    uint32_t left_ = 0;  // frames until the next control
 };
 
-
-// The basic synth ("org.caw.synth.basic"): 16 voices of two oscillators (saw, square, triangle or sine; the second
-// detuned and mixed in), a resonant low-pass filter that follows the envelope, and an ADSR envelope. Velocity sets
-// the level; a note's pressure scales it and its timbre opens the filter. Deterministic maths (caw/detmath.hpp),
-// so it renders the same bits on every device.
-constexpr std::string_view kWaves[] = {"Saw", "Square", "Triangle", "Sine"};
-ParameterDescriptor waveParameter(std::string_view id, std::string_view name, double def) {
-    ParameterDescriptor p = parameter(id, name, def, 0.0, 3.0);
-    p.step = 1.0;
-    p.choices = kWaves;
-    p.choiceCount = 4;
-    p.smoothingFrames = 0;
-    return p;
-}
-ParameterDescriptor timeParameter(std::string_view id, std::string_view name, double def, double hi) {
-    ParameterDescriptor p = parameter(id, name, def, 0.001, hi);
-    p.unit = "s";
-    p.curve = ParameterCurve::Exponential;
-    return p;
-}
-ParameterDescriptor cutoffParameter() {
-    ParameterDescriptor p = parameter("cutoff", "Cutoff", 2400.0, 40.0, 18000.0);
-    p.unit = "Hz";
-    p.curve = ParameterCurve::Exponential;
-    return p;
-}
-ParameterDescriptor detuneParameter() {
-    ParameterDescriptor p = parameter("detune", "Detune", 7.0, -100.0, 100.0);
-    p.unit = "cents";
-    return p;
-}
-const ParameterDescriptor kSynthParams[] = {
-    waveParameter("wave1", "Wave 1", 0.0),
-    waveParameter("wave2", "Wave 2", 1.0),
-    detuneParameter(),
-    parameter("mix", "Osc 2", 0.5, 0.0, 1.0),
-    cutoffParameter(),
-    parameter("resonance", "Resonance", 0.2, 0.0, 1.0),
-    parameter("env", "Filter env", 0.5, 0.0, 1.0),
-    timeParameter("attack", "Attack", 0.005, 10.0),
-    timeParameter("decay", "Decay", 0.3, 10.0),
-    parameter("sustain", "Sustain", 0.7, 0.0, 1.0),
-    timeParameter("release", "Release", 0.25, 10.0),
-    parameter("volume", "Volume", 0.5, 0.0, 1.0),
-};
-enum SynthParam : uint32_t { kWave1, kWave2, kDetune, kMix, kCutoff, kResonance, kEnv, kAttack, kDecay, kSustain, kRelease, kVolume };
-constexpr PortDescriptor kInstrumentPorts[] = {
-    {"notes", PortType::Event, ChannelLayout::None, true, 0, true, 0.0f},
-    stereoOutput("out"),
-};
-ModuleDescriptor synthDescriptor() {
-    ModuleDescriptor d = descriptor("org.caw.synth.basic", "Basic synth", kSynthParams);
-    d.role = ModuleRole::Instrument;
-    d.ports = kInstrumentPorts;
-    d.parameterCount = 12;
-    d.tailFrames = 1920000;  // a 10 s release at up to 192 kHz
-    return d;
-}
-const ModuleDescriptor kSynth = synthDescriptor();
-
-class BasicSynth final : public InstrumentProcessor {
-public:
-    const ModuleDescriptor& descriptor() const noexcept override { return kSynth; }
-    bool activate(double sampleRate, uint32_t) noexcept override {
-        sampleRate_ = sampleRate;
-        voices_.clear();
-        return true;
-    }
-    void reset() noexcept override { voices_.clear(); }
-
-protected:
-    void onNote(const NoteMessage& m) noexcept override {
-        switch (m.type) {
-            case NoteMessageType::On: {
-                Voice& v = voices_.start(m.noteId);
-                v.stage = Stage::Attack;
-                v.velocity = m.velocity;
-                v.pressure = 1.0;
-                v.timbre = 0.0;
-                setPitch(v, m.pitch);
-                if (v.level == 0.0) {  // a silent voice starts clean; a stolen one continues from its level (no click)
-                    v.phase1 = v.phase2 = 0.0;
-                    v.ic1 = v.ic2 = 0.0;
-                }
-                break;
-            }
-            case NoteMessageType::Off:
-                if (Voice* v = voices_.find(m.noteId); v && v->held) {
-                    v->held = false;
-                    v->stage = Stage::Release;
-                }
-                break;
-            case NoteMessageType::Pitch:
-                if (Voice* v = voices_.find(m.noteId)) setPitch(*v, m.pitch);
-                break;
-            case NoteMessageType::Pressure:
-                if (Voice* v = voices_.find(m.noteId)) v->pressure = m.value;
-                break;
-            case NoteMessageType::Timbre:
-                if (Voice* v = voices_.find(m.noteId)) v->timbre = m.value;
-                break;
-            case NoteMessageType::Other: break;
-        }
-    }
-
-    void render(float* left, float* right, uint32_t frames, uint32_t offset, const ProcessBlock& b) noexcept override {
-        for (uint32_t i = 0; i < frames; ++i) left[i] = right[i] = 0.0f;
-        const double sr = sampleRate_;
-        for (Voice& v : voices_) {
-            if (!v.active) continue;
-            for (uint32_t i = 0; i < frames; ++i) {
-                const uint32_t at = offset + i;
-                if ((i & 15u) == 0) {  // control rate: envelope rates and the filter every 16 frames
-                    const double detune = parameterAt(b, kDetune, at, 7.0);
-                    v.inc1 = v.freq / sr;
-                    v.inc2 = v.freq * detPow(2.0, detune / 1200.0) / sr;
-                    attackStep_ = 1.0 / std::max(1.0, parameterAt(b, kAttack, at, 0.005) * sr);
-                    decayCoef_ = detExp(-1.0 / std::max(1.0, parameterAt(b, kDecay, at, 0.3) * sr / 5.0));
-                    releaseCoef_ = detExp(-1.0 / std::max(1.0, parameterAt(b, kRelease, at, 0.25) * sr / 5.0));
-                    const double octaves = 5.0 * parameterAt(b, kEnv, at, 0.5) * v.level + 4.0 * v.timbre;
-                    double fc = parameterAt(b, kCutoff, at, 2400.0) * detPow(2.0, octaves);
-                    fc = std::clamp(fc, 20.0, 0.45 * sr);
-                    const double g = detTan(3.14159265358979323846 * fc / sr);
-                    const double k = 2.0 - 1.9 * std::clamp(parameterAt(b, kResonance, at, 0.2), 0.0, 1.0);
-                    v.a1 = 1.0 / (1.0 + g * (g + k));
-                    v.a2 = g * v.a1;
-                    v.a3 = g * v.a2;
-                }
-                const double sustain = parameterAt(b, kSustain, at, 0.7);
-                switch (v.stage) {
-                    case Stage::Attack:
-                        v.level += attackStep_;
-                        if (v.level >= 1.0) { v.level = 1.0; v.stage = Stage::Decay; }
-                        break;
-                    case Stage::Decay: v.level = sustain + (v.level - sustain) * decayCoef_; break;
-                    case Stage::Release: v.level *= releaseCoef_; break;
-                }
-                const double o1 = oscillator(static_cast<int>(parameterAt(b, kWave1, at, 0.0)), v.phase1, v.inc1);
-                const double o2 = oscillator(static_cast<int>(parameterAt(b, kWave2, at, 1.0)), v.phase2, v.inc2);
-                const double mix = parameterAt(b, kMix, at, 0.5);
-                const double x = o1 * (1.0 - 0.5 * mix) + o2 * mix;
-                v.phase1 += v.inc1;
-                v.phase1 -= std::floor(v.phase1);
-                v.phase2 += v.inc2;
-                v.phase2 -= std::floor(v.phase2);
-                // Low-pass state-variable filter (topology-preserving form).
-                const double v3 = x - v.ic2;
-                const double v1 = v.a1 * v.ic1 + v.a2 * v3;
-                const double v2 = v.ic2 + v.a2 * v.ic1 + v.a3 * v3;
-                v.ic1 = 2.0 * v1 - v.ic1;
-                v.ic2 = 2.0 * v2 - v.ic2;
-                const double y = v2 * v.level * v.velocity * v.pressure * parameterAt(b, kVolume, at, 0.5) * 0.3;
-                left[i] += static_cast<float>(y);
-                right[i] += static_cast<float>(y);
-            }
-            if (v.stage == Stage::Release && v.level < 1e-5) {
-                v.active = false;
-                v.level = 0.0;
-            }
-        }
-    }
-
-private:
-    enum class Stage : uint8_t { Attack, Decay, Release };
-    struct Voice {
-        bool active = false, held = false;
-        uint32_t noteId = 0;
-        uint64_t age = 0;
-        Stage stage = Stage::Attack;
-        double level = 0, velocity = 1, pressure = 1, timbre = 0;
-        double freq = 261.6255653005986, inc1 = 0, inc2 = 0, phase1 = 0, phase2 = 0;
-        double ic1 = 0, ic2 = 0, a1 = 1, a2 = 0, a3 = 0;
-    };
-    static void setPitch(Voice& v, double pitch) noexcept { v.freq = 440.0 * detPow(2.0, (pitch - 69.0) / 12.0); }
-    // PolyBLEP: the step of a saw or square smoothed over one sample, so high notes alias less.
-    static double blep(double t, double dt) noexcept {
-        if (t < dt) {
-            t /= dt;
-            return t + t - t * t - 1.0;
-        }
-        if (t > 1.0 - dt) {
-            t = (t - 1.0) / dt;
-            return t * t + t + t + 1.0;
-        }
-        return 0.0;
-    }
-    static double oscillator(int wave, double t, double dt) noexcept {
-        switch (wave) {
-            case 1: {
-                const double u = t + 0.5 - std::floor(t + 0.5);
-                return (t < 0.5 ? 1.0 : -1.0) + blep(t, dt) - blep(u, dt);
-            }
-            case 2: return 4.0 * std::fabs(t - 0.5) - 1.0;
-            case 3: return detSin(2.0 * 3.14159265358979323846 * t);
-            default: return 2.0 * t - 1.0 - blep(t, dt);
-        }
-    }
-    VoicePool<Voice, 16> voices_;
-    double sampleRate_ = 48000.0;
-    double attackStep_ = 0, decayCoef_ = 0, releaseCoef_ = 0;
-};
 
 template <class T>
 ModuleProcessor* make() noexcept {
@@ -469,8 +379,10 @@ void registerBuiltinComponents(ModuleRegistry& registry) {
     registry.add(kDistortion, &make<Distortion>);
     registry.add(kDelay, &make<PingPong>);
     registry.add(kChorus, &make<ChorusEffect>);
-    registry.add(kSynth, &make<BasicSynth>);
-    registerBuiltinInstruments(registry);  // the drums, bass, acid and morph synths (builtin_instruments.cpp)
+    registerBuiltinEffects(registry);  // the effects suite (#173, builtin_effects*.cpp)
+    registerBuiltinInstruments(registry);  // the drums and Flagship (builtin_instruments.cpp, builtin_flagship.cpp)
+    registerBuiltinModulators(registry);  // LFO, envelope, follower, steps, random, macros, MIDI to CV (#161)
+    registerTestSignal(registry);  // org.caw.test.osc, internal: for tests, never listed (builtin_test_signal.cpp)
 }
 
 }  // namespace caw

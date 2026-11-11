@@ -90,9 +90,18 @@ public:
                 block.output.channels[c][i] =
                     static_cast<float>(block.input.channels[c][i] * (samples ? samples[i] : fixed));
         }
-        blocks_.fetch_add(1, std::memory_order_relaxed);
+        const uint64_t n = blocks_.fetch_add(1, std::memory_order_relaxed) + 1;
+        // Display data (caw.display.v1), every block: {blocks processed, the block's left output peak}.
+        float peak = 0.0f;
+        for (uint32_t i = 0; i < block.frames; ++i) {
+            const float v = block.output.channels[0][i] < 0 ? -block.output.channels[0][i] : block.output.channels[0][i];
+            peak = v > peak ? v : peak;
+        }
+        const float shown[2] = {static_cast<float>(n), peak};
+        display_.publish(shown, 2);
         return true;
     }
+    uint32_t readDisplay(float* out, uint32_t max) const noexcept override { return display_.read(out, max); }
     void reset() noexcept override { blocks_.store(0, std::memory_order_relaxed); }
     uint32_t stateVersion() const noexcept override { return 7; }
     // Safe while processing: the count is atomic.
@@ -113,6 +122,7 @@ public:
 
 private:
     std::atomic<uint64_t> blocks_{0};
+    caw::DisplayBuffer<2> display_;
 };
 
 // The bundle's fourth component: a feedback echo (240 frames, feedback 0.5) with a declared tail, so

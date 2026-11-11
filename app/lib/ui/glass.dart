@@ -4,7 +4,8 @@ import 'dart:ui' as ui;
 import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter/material.dart';
 
-import 'motion.dart';
+import 'haptics.dart';
+import 'panel_motion.dart';
 import 'theme.dart';
 import 'tokens.dart';
 
@@ -52,17 +53,19 @@ class GlassPage extends StatelessWidget {
 /// A docked panel's surface. With glass on: a translucent tint, a soft highlight along the top and a thin
 /// white edge, and no blur (docked panels redraw often). With glass off: the plain panel colour and line border.
 class GlassPanel extends StatelessWidget {
-  const GlassPanel({super.key, required this.child, this.radius = Radii.m, this.tint});
+  const GlassPanel({super.key, required this.child, this.radius, this.tint});
 
   final Widget child;
-  final double radius;
+
+  /// The corners ([Radii.m] when null).
+  final double? radius;
 
   /// The colour the tint leans to (a track colour, say); the panel colour by default.
   final Color? tint;
 
   @override
   Widget build(BuildContext context) {
-    final r = BorderRadius.circular(radius);
+    final r = BorderRadius.circular(radius ?? Radii.m);
     if (!Glass.active) {
       return DecoratedBox(
         decoration: BoxDecoration(
@@ -94,15 +97,22 @@ class GlassPanel extends StatelessWidget {
 /// behind it under a see-through tint, or with blur off a denser tint, a top highlight and a bright edge. With
 /// glass off: the solid raised panel colour.
 class GlassOverlay extends StatelessWidget {
-  const GlassOverlay({super.key, required this.child, this.radius = Radii.l, this.padding = EdgeInsets.zero});
+  const GlassOverlay({super.key, required this.child, this.blur = true, this.radius, this.padding = EdgeInsets.zero});
 
   final Widget child;
-  final double radius;
+
+  /// The corners ([Radii.l] when null).
+  final double? radius;
   final EdgeInsetsGeometry padding;
+
+  /// False for a surface that stays up over live content (a floating window): the glass look without the backdrop
+  /// blur, which would be recomputed on every frame something under it repaints.
+  final bool blur;
 
   @override
   Widget build(BuildContext context) {
-    final r = BorderRadius.circular(radius);
+    final r = BorderRadius.circular(radius ?? Radii.l);
+    final blurred = blur && Glass.blur;
     if (!Glass.active) {
       return DecoratedBox(
         decoration: BoxDecoration(
@@ -117,7 +127,7 @@ class GlassOverlay extends StatelessWidget {
       );
     }
     final body = DecoratedBox(
-      decoration: Glass.blur
+      decoration: blurred
           ? BoxDecoration(
               borderRadius: r,
               color: Neon.panelHi.withValues(alpha: 0.55),
@@ -128,7 +138,7 @@ class GlassOverlay extends StatelessWidget {
     );
     return ClipRRect(
       borderRadius: r,
-      child: Glass.blur
+      child: blurred
           ? BackdropFilter(filter: ui.ImageFilter.blur(sigmaX: Glass.blurSigma, sigmaY: Glass.blurSigma), child: body)
           : body,
     );
@@ -148,7 +158,9 @@ class GlassBackdrop extends StatelessWidget {
     return Stack(
       fit: StackFit.expand,
       children: [
-        RepaintBoundary(child: CustomPaint(painter: _BackdropPainter(Neon.bg, [Neon.green, Neon.blue, Neon.violet]))),
+        // Grey and black (owner, 2026-11-10: not green): soft neutral light from the theme's text colour, with one
+        // faint touch of the accent blue, so the frost still reads as glass rather than a flat colour.
+        RepaintBoundary(child: CustomPaint(painter: _BackdropPainter(Neon.bg, [Neon.text, Neon.text, Neon.blue]))),
         child,
       ],
     );
@@ -167,11 +179,18 @@ class _BackdropPainter extends CustomPainter {
   final List<Color> glows;
 
   /// Where each glow sits (fractions of the screen), its radius (of the longer side) and strength.
-  static const _spots = [(0.12, 0.05, 0.9, 0.13), (0.95, 0.55, 0.8, 0.10), (0.3, 1.05, 0.9, 0.08)];
+  static const _spots = [(0.12, 0.0, 0.95, 0.075), (0.95, 0.6, 0.8, 0.045), (0.3, 1.05, 0.9, 0.05)];
 
   @override
   void paint(Canvas canvas, Size size) {
-    canvas.drawRect(Offset.zero & size, Paint()..color = bg);
+    final rect = Offset.zero & size;
+    // A dark grey that deepens to black towards the bottom.
+    canvas.drawRect(rect, Paint()..shader = LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter,
+        colors: [Color.lerp(bg, const Color(0xFF2A2A30), 0.55)!, bg]).createShader(rect));
+    // A faint diagonal sheen, like light across frosted glass.
+    canvas.drawRect(rect, Paint()..shader = LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight,
+        colors: [const Color(0x00FFFFFF), const Color(0x0AFFFFFF), const Color(0x00FFFFFF)],
+        stops: const [0.30, 0.45, 0.62]).createShader(rect));
     final long = size.longestSide;
     for (var i = 0; i < _spots.length && i < glows.length; i++) {
       final (x, y, r, a) = _spots[i];
@@ -194,7 +213,8 @@ class _BackdropPainter extends CustomPainter {
 }
 
 /// A bottom sheet that slides up as frosted glass (a plain sheet with glass off). Takes the same arguments as the
-/// `showModalBottomSheet` calls it replaces. Reduced and Off motion show it without the slide.
+/// `showModalBottomSheet` calls it replaces. It rises as an edit animation of panels ([sheetAnimation]); Reduced and
+/// Off motion show it without the slide.
 Future<T?> showGlassSheet<T>({
   required BuildContext context,
   required WidgetBuilder builder,
@@ -204,6 +224,7 @@ Future<T?> showGlassSheet<T>({
   BoxConstraints? constraints,
 }) {
   final glass = Glass.active;
+  Haptics.tap(); // a sheet opening is felt too
   return showModalBottomSheet<T>(
     context: context,
     isScrollControlled: isScrollControlled,
@@ -212,7 +233,7 @@ Future<T?> showGlassSheet<T>({
     constraints: constraints,
     backgroundColor: glass ? Colors.transparent : (backgroundColor ?? Neon.panel),
     elevation: glass ? 0 : null,
-    sheetAnimationStyle: Motion.of(context) == MotionLevel.full ? null : AnimationStyle.noAnimation,
+    sheetAnimationStyle: sheetAnimation(context), // an edit animation of panels (Subtle, Playful or none)
     builder: glass ? (c) => _GlassSheet(handle: showDragHandle, child: builder(c)) : builder,
   );
 }
@@ -238,7 +259,7 @@ class _GlassSheet extends StatelessWidget {
   final Widget child;
   final bool handle;
 
-  static const _radius = BorderRadius.vertical(top: Radius.circular(Radii.l + 6));
+  static BorderRadius get _radius => BorderRadius.vertical(top: Radius.circular(Radii.l + 6 * Radii.scale));
 
   @override
   Widget build(BuildContext context) {

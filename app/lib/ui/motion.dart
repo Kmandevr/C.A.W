@@ -1,14 +1,16 @@
-// Motion and feel: the motion setting, distance-aware settle durations, the small-overshoot curve, snapping maths, haptics.
+// Motion and feel: the motion setting, distance-aware settle durations, the small-overshoot curve, snapping maths.
 import 'dart:math' as math;
 
-import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
-/// How much the app moves (owner, 2026-11-04): Full; Reduced keeps fades but no movement or springs; Off.
+import 'haptics.dart';
+
+/// How much the app moves (owner, 2026-11-04): Full; Reduced keeps fades but no movement or springs; Off keeps only
+/// the motion that helps use the app (owner, 2026-11-11: drag ghosts, snapping, press feedback; [Motion.usability]).
 enum MotionLevel {
   full('Full'),
   reduced('Reduced: fades only'),
-  off('Off');
+  off('Off: only drags, snapping and presses');
 
   const MotionLevel(this.label);
   final String label;
@@ -21,8 +23,9 @@ class Motion {
   /// The user's choice. [effective] combines it with the performance profile and the system setting.
   static MotionLevel setting = MotionLevel.full;
 
-  /// Haptic ticks on snaps, detents and placed notes (on by default, owner).
-  static bool haptics = true;
+  /// Haptics on or off (on by default, owner): the same switch as [Haptics.enabled].
+  static bool get haptics => Haptics.enabled;
+  static set haptics(bool on) => Haptics.enabled = on;
 
   /// True while the Minimal performance profile is on: it turns motion off.
   static bool minimalProfile = false;
@@ -57,6 +60,15 @@ class Motion {
     return d <= 0 ? 0 : math.min(2 / d, 0.04);
   }
 
+  /// The level that motion which helps use the app runs at (drag ghosts, snap settles, press and grab feedback,
+  /// drop targets; owner, 2026-11-11): the Off switch leaves it on as Full, and Reduced (or the system's
+  /// reduce-motion setting) still turns its movement into a fade. Pass the result to [move], [fade] and
+  /// [settleCurve] in place of the plain level.
+  static MotionLevel usability(MotionLevel level) => level == MotionLevel.off ? MotionLevel.full : level;
+
+  /// [usability] for the widget tree under [context].
+  static MotionLevel usabilityOf(BuildContext context) => usability(of(context));
+
   /// A movement's duration at [level]: zero unless motion is full (Reduced and Off don't move things).
   static Duration move(Duration d, MotionLevel level) => level == MotionLevel.full ? d : Duration.zero;
 
@@ -67,10 +79,8 @@ class Motion {
   static Curve settleCurve(double distancePx, MotionLevel level) =>
       level == MotionLevel.full ? OvershootCurve(overshoot(distancePx)) : Curves.linear;
 
-  /// A light tick on Android when something snaps, clicks into a detent, or a note is placed.
-  static void tick() {
-    if (haptics) HapticFeedback.selectionClick();
-  }
+  /// A light tick when something snaps, clicks into a detent, or a note is placed ([Haptics.tick], rate-limited).
+  static void tick() => Haptics.tick();
 }
 
 /// Ease-out that passes the end by [amount] (a fraction of the distance) and settles back on it.
@@ -119,4 +129,81 @@ class Snap {
     final off = (v - to(v, grid)).abs();
     return (1 - off / reach).clamp(0.0, 1.0);
   }
+}
+
+/// What an edit animation is for (owner, 2026-11-11): each kind can be turned off on its own.
+enum EditMotionKind {
+  notes('Notes added, deleted and moved'),
+  clips('Clips added, deleted and moved'),
+  tracks('Tracks added, deleted and reordered'),
+  lengths('Lengths and sizes changing'),
+  panels('Panels, menus and pages');
+
+  const EditMotionKind(this.label);
+  final String label;
+}
+
+/// How edit animations feel (owner, 2026-11-11: the user's choice, Subtle by default).
+enum EditMotionStyle {
+  subtle('Subtle'),
+  playful('Playful');
+
+  const EditMotionStyle(this.label);
+  final String label;
+}
+
+/// Edit animations: what appears, disappears, moves or resizes because of an edit. Separate from the motion that
+/// helps use the app (drag ghosts, snapping, press feedback: [Motion.usability], kept even when motion is Off).
+/// Settings sets the statics.
+class EditMotion {
+  EditMotion._();
+
+  static EditMotionStyle style = EditMotionStyle.subtle;
+
+  /// The kinds turned on (all by default).
+  static Set<EditMotionKind> kinds = {...EditMotionKind.values};
+
+  /// How long an edit animation of [kind] runs under [context], or null when it doesn't run: Motion Off (or the
+  /// Minimal profile), the kind turned off. Reduced motion keeps it as a fade ([fadeOnly]).
+  static Duration? of(BuildContext context, EditMotionKind kind) =>
+      durationFor(Motion.of(context), kind);
+
+  static Duration? durationFor(MotionLevel level, EditMotionKind kind) {
+    if (level == MotionLevel.off || !kinds.contains(kind)) return null;
+    return switch (style) {
+      EditMotionStyle.subtle => const Duration(milliseconds: 160),
+      EditMotionStyle.playful => const Duration(milliseconds: 260),
+    };
+  }
+
+  /// True when only a fade may run (Reduced motion): no scaling, sliding or springs.
+  static bool fadeOnly(BuildContext context) => Motion.of(context) == MotionLevel.reduced;
+
+  /// For motion that already had its own length before edit styles (panels, sheets, pages, the section switch):
+  /// [subtle] itself for Subtle (so Subtle looks as it did), [playfulScale] times longer for Playful, and null when
+  /// it doesn't run (motion Off or the Minimal profile, or [kind] turned off).
+  static const playfulScale = 1.5;
+  static Duration? scaled(MotionLevel level, EditMotionKind kind, Duration subtle) {
+    if (level == MotionLevel.off || !kinds.contains(kind)) return null;
+    return style == EditMotionStyle.playful ? subtle * playfulScale : subtle;
+  }
+
+  /// [subtle] for Subtle; Playful's small overshoot otherwise (for motion that had its own curve before styles).
+  static Curve curveOr(Curve subtle) => style == EditMotionStyle.playful ? playfulCurve : subtle;
+
+  /// Playful's ease-out with a small overshoot: a gentler back curve than [Curves.easeOutBack], so a sheet or page
+  /// passing its place by a few pixels doesn't uncover the edge behind it for long.
+  static const Curve playfulCurve = Cubic(0.34, 1.32, 0.64, 1);
+
+  /// The kinds as saved in settings and theme files (their names, in [EditMotionKind] order).
+  static List<String> kindNames(Set<EditMotionKind> kinds) =>
+      [for (final k in EditMotionKind.values) if (kinds.contains(k)) k.name];
+  static Set<EditMotionKind> parseKinds(Iterable<Object?> names) =>
+      {for (final k in EditMotionKind.values) if (names.contains(k.name)) k};
+
+  /// The curve for things appearing or moving: an ease-out for Subtle, a small overshoot for Playful.
+  static Curve get curve => style == EditMotionStyle.playful ? Curves.easeOutBack : Curves.easeOutCubic;
+
+  /// The curve for things going away.
+  static const Curve exitCurve = Curves.easeInCubic;
 }

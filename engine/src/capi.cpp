@@ -1,5 +1,6 @@
 // C API implementation (everything except the audio device, which lives in engine/platform).
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -7,15 +8,16 @@
 #include <string>
 
 #include "caw.h"
+#include "builtin_drums.h"
+#include "presets.h"
 #include "capi_internal.h"
-#include "compile.h"
 #include "component_test.h"
 #include "sample_pack.h"
-#include "docs.h"
 #include "json.h"
 #include "midifile.h"
 #include "pattern.h"
 #include "render.h"
+#include "render_stems.h"
 #include "wav.h"
 
 namespace {
@@ -45,24 +47,6 @@ void caw_free(char* s) { std::free(s); }
 
 // Nothing may throw across the C API: running out of memory becomes an error the host can show.
 const char* const kOutOfMemory = "out of memory: the project is too big for this device";
-
-char* caw_check(const char* source) try {
-    using namespace caw;
-    if (moduleKindOf(source ? source : "") == ModuleKind::Pattern) {
-        PatternResult pr = parsePattern(source);
-        if (!pr.pattern)
-            return dup("{\"ok\":false,\"kind\":\"pattern\",\"error\":\"" + jsonEscape(pr.error) +
-                       "\",\"line\":" + std::to_string(pr.line) + ",\"col\":" + std::to_string(pr.col) + "}");
-        return dup("{\"ok\":true," + describePattern(*pr.pattern) + "}");
-    }
-    CompileResult r = compileModule(source ? source : "");
-    if (!r.program)
-        return dup("{\"ok\":false,\"error\":\"" + jsonEscape(r.error) + "\",\"line\":" + std::to_string(r.line) +
-                   ",\"col\":" + std::to_string(r.col) + "}");
-    return dup("{\"ok\":true," + describeProgram(*r.program) + "}");
-} catch (const std::bad_alloc&) {
-    return dup(std::string("{\"ok\":false,\"error\":\"") + kOutOfMemory + "\",\"line\":0,\"col\":0}");
-}
 
 CawEngine* caw_engine_create(int32_t sample_rate) try {
     if (sample_rate < 8000 || sample_rate > 192000) return nullptr;
@@ -141,10 +125,6 @@ int32_t caw_engine_unload_component(CawEngine* e, const char* component_id) try 
     return 0;
 }
 
-void caw_engine_set_param(CawEngine* e, const char* module_id, const char* name, double value) {
-    if (e && module_id && name) e->engine->setParam(module_id, name, value);
-}
-
 int32_t caw_engine_set_component_param(CawEngine* e, const char* layer_id, uint32_t index, const char* param_id,
                                        double value) try {
     return e && e->engine && param_id &&
@@ -160,6 +140,20 @@ int32_t caw_engine_set_component_bypass(CawEngine* e, const char* layer_id, uint
     return 0;
 }
 
+int32_t caw_engine_set_send(CawEngine* e, const char* layer_id, uint32_t index, double level, int32_t pre,
+                            int32_t mute) try {
+    return e && e->engine && layer_id && e->engine->setSend(layer_id, index, level, pre != 0, mute != 0) ? 1 : 0;
+} catch (...) {
+    return 0;
+}
+
+int32_t caw_engine_component_display(CawEngine* e, const char* layer_id, uint32_t index, float* out, int32_t max) try {
+    if (!e || !e->engine || !out || max <= 0) return e && e->engine ? 0 : -1;
+    return e->engine->componentDisplay(layer_id ? layer_id : "", index, out, static_cast<uint32_t>(max));
+} catch (...) {
+    return 0;
+}
+
 char* caw_engine_component_states(CawEngine* e, const char* layer_id) try {
     if (!e || !e->engine) return nullptr;
     return dup(e->engine->componentStatesJson(layer_id ? layer_id : ""));
@@ -167,8 +161,12 @@ char* caw_engine_component_states(CawEngine* e, const char* layer_id) try {
     return nullptr;
 }
 
-void caw_engine_set_global(CawEngine* e, const char* name, double value) {
-    if (e && name) e->engine->setGlobal(name, value);
+int32_t caw_engine_set_component_state(CawEngine* e, const char* layer_id, uint32_t index, const uint8_t* data,
+                                       int32_t size, uint32_t version) try {
+    if (!e || !e->engine || size < 0 || (size > 0 && !data)) return 0;
+    return e->engine->setComponentState(layer_id ? layer_id : "", index, data, static_cast<size_t>(size), version) ? 1 : 0;
+} catch (...) {
+    return 0;
 }
 
 void caw_engine_set_layer_mix(CawEngine* e, const char* layer_id, double volume, double pan, int32_t mute,
@@ -206,6 +204,28 @@ void caw_engine_play_at(CawEngine* e, double step) {
     if (e) e->engine->play(step);
 }
 
+void caw_engine_play_count_in(CawEngine* e, double step, int32_t beats) {
+    if (e) e->engine->playCountIn(step, beats);
+}
+
+void caw_engine_set_metronome(CawEngine* e, int32_t on) {
+    if (e) e->engine->setMetronome(on != 0);
+}
+
+void caw_engine_set_metronome_sound(CawEngine* e, double volume, int32_t sound) {
+    if (e) e->engine->setMetronomeSound(volume, sound);
+}
+
+void caw_engine_test_tone(CawEngine* e, double seconds) {
+    if (e) e->engine->testTone(seconds);
+}
+
+int32_t caw_engine_test_tone_sounding(CawEngine* e) { return e && e->engine->testToneSounding() ? 1 : 0; }
+
+void caw_engine_release_touches(CawEngine* e) {
+    if (e) e->engine->releaseTouches();
+}
+
 void caw_engine_stop(CawEngine* e) {
     if (e) e->engine->stop();
 }
@@ -226,7 +246,7 @@ void caw_engine_meters(CawEngine* e, CawMeters* out) {
     out->loop_length = m.loopLength;
 }
 
-int32_t caw_engine_layer_meter(CawEngine* e, int32_t index, CawLayerMeter* out) {
+int32_t caw_engine_layer_meter_stereo(CawEngine* e, int32_t index, CawLayerMeter* out, float* peak_l, float* peak_r) {
     if (!e || !out) return 0;
     caw::LayerMeter m;
     const bool ok = e->engine->layerMeter(index, m);
@@ -234,7 +254,40 @@ int32_t caw_engine_layer_meter(CawEngine* e, int32_t index, CawLayerMeter* out) 
     out->progress = m.progress;
     out->active = m.active ? 1 : 0;
     out->overloaded = m.overloaded ? 1 : 0;
+    if (peak_l) *peak_l = m.peakL;
+    if (peak_r) *peak_r = m.peakR;
     return ok ? 1 : 0;
+}
+
+int32_t caw_engine_layer_meter(CawEngine* e, int32_t index, CawLayerMeter* out) {
+    return caw_engine_layer_meter_stereo(e, index, out, nullptr, nullptr);
+}
+
+void caw_engine_loudness(CawEngine* e, CawLoudness* out) {
+    if (!out) return;
+    *out = CawLoudness{CAW_METER_NONE, CAW_METER_NONE, CAW_METER_NONE, CAW_METER_NONE, CAW_METER_NONE,
+                       CAW_METER_NONE, CAW_METER_NONE, CAW_METER_NONE, 0.0f, 0.0f};
+    if (!e) return;
+    const caw::LoudnessMeter::Reading r = e->engine->loudness();
+    out->momentary_lufs = r.momentary;
+    out->short_term_lufs = r.shortTerm;
+    out->integrated_lufs = r.integrated;
+    out->momentary_max_lufs = r.momentaryMax;
+    out->short_term_max_lufs = r.shortTermMax;
+    out->true_peak_l_dbtp = r.truePeakL;
+    out->true_peak_r_dbtp = r.truePeakR;
+    out->true_peak_max_dbtp = r.truePeakMax;
+    out->correlation = e->engine->masterCorrelation();
+    out->integrated_seconds = static_cast<float>(r.integratedSeconds);
+}
+
+void caw_engine_loudness_reset(CawEngine* e) {
+    if (e) e->engine->resetLoudness();
+}
+
+int32_t caw_engine_layer_correlation(CawEngine* e, int32_t index, float* out) {
+    if (!e || !out) return 0;
+    return e->engine->layerCorrelation(index, *out) ? 1 : 0;
 }
 
 int32_t caw_engine_scope(CawEngine* e, int32_t index, float* out, int32_t n) {
@@ -322,18 +375,6 @@ int32_t caw_pattern_export(const char* pattern_source, double bpm, int32_t beats
     return 1;
 }
 
-char* caw_library(void) { return dup(caw::libraryJson()); }
-
-int32_t caw_template_count(void) { return caw::kTemplateCount; }
-
-const char* caw_template_file(int32_t i) {
-    return i >= 0 && i < caw::kTemplateCount ? caw::kTemplateFiles[i] : nullptr;
-}
-
-const char* caw_template_source(int32_t i) {
-    return i >= 0 && i < caw::kTemplateCount ? caw::kTemplateSources[i] : nullptr;
-}
-
 char* caw_component_test(const char* request_json, int32_t trust_level, const char* output_dir,
                          const char* input_dir) try {
     if (!request_json) return dup("{\"ok\":false,\"error\":\"missing request\"}");
@@ -363,3 +404,89 @@ char* caw_sample_pack_render(const char* request_json, int32_t trust_level, int3
 }
 
 }  // extern "C"
+
+extern "C" char* caw_migrate_instrument(const char* entry_json) try {
+    if (!entry_json) return dup("{\"ok\":false,\"error\":\"missing entry\"}");
+    return dup(caw::migrateInstrumentJson(entry_json));
+} catch (...) {
+    return dup(std::string("{\"ok\":false,\"error\":\"") + kOutOfMemory + "\"}");
+}
+
+extern "C" char* caw_drums_info(void) try {
+    return dup(caw::drumsInfoJson());
+} catch (...) {
+    return dup(std::string("{\"ok\":false,\"error\":\"") + kOutOfMemory + "\"}");
+}
+
+extern "C" char* caw_drums_randomize(int32_t type, uint32_t seed, double amount, int32_t pad, const char* current_json) try {
+    return dup(caw::drumsRandomizeJson(type, seed, std::isfinite(amount) ? amount : 0.0, pad,
+                                       current_json ? std::string_view(current_json) : std::string_view()));
+} catch (...) {
+    return dup(std::string("{\"ok\":false,\"error\":\"") + kOutOfMemory + "\"}");
+}
+
+extern "C" char* caw_drums_explode(const char* entry_json) try {
+    if (!entry_json) return dup("{\"ok\":false,\"error\":\"missing entry\"}");
+    return dup(caw::drumsExplodeJson(entry_json));
+} catch (...) {
+    return dup(std::string("{\"ok\":false,\"error\":\"") + kOutOfMemory + "\"}");
+}
+
+extern "C" void caw_engine_set_quality(CawEngine* e, int32_t quality) {
+    if (e && e->engine) e->engine->setQuality(quality);
+}
+
+extern "C" int32_t caw_engine_quality(CawEngine* e) { return e && e->engine ? e->engine->quality() : CAW_QUALITY_NORMAL; }
+
+// ---- Device MIDI (API 15) ----
+
+extern "C" int64_t caw_midi_clock_ns(void) { return caw::Engine::midiClockNs(); }
+
+extern "C" int32_t caw_engine_midi_ump(CawEngine* e, const char* layer_id, const uint32_t* words, int32_t count,
+                                       int64_t time_ns) try {
+    return e && e->engine && layer_id ? e->engine->midiUmp(layer_id, words, count, time_ns) : 0;
+} catch (...) {
+    return 0;
+}
+
+extern "C" int32_t caw_engine_midi_bytes(CawEngine* e, const char* layer_id, const uint8_t* bytes, int32_t count,
+                                         int64_t time_ns) try {
+    return e && e->engine && layer_id ? e->engine->midiBytes(layer_id, bytes, count, time_ns) : 0;
+} catch (...) {
+    return 0;
+}
+
+extern "C" void caw_engine_midi_release(CawEngine* e, const char* layer_id) try {
+    if (e && e->engine) e->engine->midiRelease(layer_id ? layer_id : "");
+} catch (...) {
+}
+
+extern "C" void caw_engine_set_midi_options(CawEngine* e, int32_t flags, double bend_range, double note_bend_range,
+                                            double delay_ms) {
+    if (e && e->engine) e->engine->setMidiOptions((flags & CAW_MIDI_MPE) != 0, bend_range, note_bend_range, delay_ms);
+}
+
+extern "C" int64_t caw_engine_midi_dropped(CawEngine* e) {
+    return e && e->engine ? static_cast<int64_t>(e->engine->midiDropped()) : 0;
+}
+
+extern "C" int64_t caw_engine_position_at(CawEngine* e, int64_t time_ns) {
+    return e && e->engine ? e->engine->positionAt(time_ns) : -1;
+}
+
+extern "C" char* caw_render_song(const char* project_json, const char* request_json, int32_t* progress,
+                                 int32_t* cancel) try {
+    caw::SongRenderResult r;
+    if (!project_json || !request_json) {
+        r.error = "missing argument";
+        return dup(caw::songRenderResultJson(r));
+    }
+    caw::ProjectSpec p;
+    caw::SongRenderRequest req;
+    if (!caw::parseProject(project_json, p, r.error) || !caw::parseSongRenderRequest(request_json, req, r.error))
+        return dup(caw::songRenderResultJson(r));
+    caw::renderSong(p, req, r, progress, cancel);
+    return dup(caw::songRenderResultJson(r));
+} catch (const std::bad_alloc&) {
+    return dup(std::string("{\"ok\":false,\"error\":\"") + kOutOfMemory + "\",\"files\":[]}");
+}

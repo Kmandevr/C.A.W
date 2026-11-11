@@ -185,6 +185,7 @@ public:
         const Event* events = b.eventInCount > 0 && b.eventIn ? b.eventIn[0].events : nullptr;
         const uint32_t count = events ? b.eventIn[0].count : 0;
         uint32_t done = 0, e = 0, splits = 0;
+        beginBlock(b);
         auto dispatch = [&](const Event& event) noexcept {
             NoteMessage m;
             if (readNote(event, m)) {
@@ -204,33 +205,150 @@ public:
             render(left + done, right + done, next - done, done, b);
             done = next;
         }
+        endBlock(b);
         return true;
     }
 
 protected:
+    // Once at the start of each block, before its first event or render(): a place to read the block's knob
+    // values that note handling needs (a voice mode, a glide time). Does nothing unless overridden.
+    virtual void beginBlock(const ProcessBlock&) noexcept {}
     // A note message, on the frame render() continues from.
     virtual void onNote(const NoteMessage& message) noexcept = 0;
     // Any other event (a controller, pitch bend): ignored unless overridden.
     virtual void onEvent(const Event&) noexcept {}
+    // Once at the end of each block, after its last render(): where VoiceLanes::endBlock marks the ended notes.
+    virtual void endBlock(const ProcessBlock&) noexcept {}
     // Writes `frames` frames to left and right (which start at frame `offset` of the block; read a
     // parameter with parameterAt(block, k, offset + i, fallback)).
     virtual void render(float* left, float* right, uint32_t frames, uint32_t offset, const ProcessBlock& block) noexcept = 0;
 };
 
+// The voice bus from the instrument's side (#127; the protocol is CawVoiceBus in caw_component.h). An instrument
+// declaring kDomainPerNote binds it in beginBlock() and, for each stretch [offset, offset + n) of the block it
+// renders:
+//     if (lanes.any()) {
+//         lanes.begin(offset, n);                        // clears the assigned lanes' stretch
+//         for each voice:
+//             if (VoiceLane* lane = lanes.laneFor(voice.noteId)) render into lane->channels[c] + offset;
+//             else render into the mix;
+//         lanes.runAndSum(mixL, mixR, offset, n);        // the host's per-note FX, then every lane into the mix
+//     }
+// before its shared stage, and in endBlock() calls lanes.endBlock(playing), playing(noteId) saying whether a
+// voice still plays that note. Every frame of the block goes through exactly one run(), also while no voice
+// sounds (a lane's FX tail): an instrument that rests while idle keeps running while any() is true. Without a
+// bus (voices null) any() is false and the instrument renders exactly as without this helper.
+class VoiceLanes {
+public:
+    static constexpr uint32_t kMaxLanes = 64;  // lanes past this are left alone (their notes play in the mix)
+    // The block's bus (b.voices), or none. Lanes the host has not assigned, or without two channels, are skipped.
+    void bind(const ProcessBlock& b) noexcept {
+        count_ = 0;
+        bus_ = nullptr;
+        rest_ = nullptr;
+        const VoiceBus* bus = b.voices;
+        if (!bus || bus->structSize < sizeof(VoiceBus) || bus->laneStride < sizeof(VoiceLane) || !bus->run ||
+            bus->laneCount == 0 || !bus->lanes)
+            return;
+        for (uint32_t i = 0; i < bus->laneCount && count_ < kMaxLanes; ++i) {
+            VoiceLane* lane = voiceLaneAt(*bus, i);
+            if (lane->structSize < sizeof(VoiceLane) || !(lane->flags & kLaneAssigned) || lane->channelCount < 2 ||
+                !lane->channels[0] || !lane->channels[1])
+                continue;
+            lane->flags &= kLaneAssigned | kLaneRest;  // the out bits are this block's
+            if (lane->flags & kLaneRest) {
+                if (!rest_) rest_ = lane;  // the overflow lane (one): voices without a lane of their own
+            }
+            lanes_[count_++] = lane;
+        }
+        if (count_) bus_ = bus;
+    }
+    bool any() const noexcept { return count_ != 0; }
+    uint32_t count() const noexcept { return count_; }
+    VoiceLane& lane(uint32_t k) const noexcept { return *lanes_[k]; }
+    // The k (0..count()-1) of the lane for this note, or -1: a voice with none plays in the mix.
+    int indexOf(uint32_t noteId) const noexcept {
+        if (noteId == 0) return -1;
+        for (uint32_t k = 0; k < count_; ++k)
+            if (lanes_[k]->noteId == noteId) return static_cast<int>(k);
+        return -1;
+    }
+    // The lane a voice playing this note renders into (marked written): its own, else the host's overflow lane
+    // (kLaneRest) unless `rest` is false; null: the voice plays in the mix.
+    VoiceLane* laneFor(uint32_t noteId, bool rest = true) noexcept {
+        const int k = indexOf(noteId);
+        VoiceLane* lane = k >= 0 ? lanes_[k] : rest ? rest_ : nullptr;
+        if (lane) lane->flags |= kLaneWritten;
+        return lane;
+    }
+    // Clears the stretch [offset, offset + n) of every lane, before voices render into it.
+    void begin(uint32_t offset, uint32_t n) noexcept {
+        for (uint32_t k = 0; k < count_; ++k)
+            for (int c = 0; c < 2; ++c)
+                for (uint32_t i = 0; i < n; ++i) lanes_[k]->channels[c][offset + i] = 0.0f;
+    }
+    // The host processes the lanes' stretch in place.
+    void run(uint32_t offset, uint32_t n) noexcept {
+        if (bus_) bus_->run(bus_->hostData, offset, n);
+    }
+    // Adds every lane's stretch into the mix, in lane order (left and right start at the stretch's first frame).
+    void sumInto(float* left, float* right, uint32_t offset, uint32_t n) const noexcept {
+        for (uint32_t k = 0; k < count_; ++k) {
+            const float* l = lanes_[k]->channels[0] + offset;
+            const float* r = lanes_[k]->channels[1] + offset;
+            for (uint32_t i = 0; i < n; ++i) left[i] += l[i], right[i] += r[i];
+        }
+    }
+    void runAndSum(float* left, float* right, uint32_t offset, uint32_t n) noexcept {
+        run(offset, n);
+        sumInto(left, right, offset, n);
+    }
+    // The note's voice stopped (it was stolen, say): its lane, if any, ends now.
+    void end(uint32_t noteId) noexcept {
+        const int k = indexOf(noteId);
+        if (k >= 0) lanes_[k]->flags |= kLaneEnded;
+    }
+    // At the block's end: every lane whose note no voice plays (playing(noteId) false) has ended.
+    template <class Playing>
+    void endBlock(Playing&& playing) noexcept {
+        for (uint32_t k = 0; k < count_; ++k)
+            if (!(lanes_[k]->flags & kLaneRest) && !playing(lanes_[k]->noteId)) lanes_[k]->flags |= kLaneEnded;
+    }
+
+private:
+    const VoiceBus* bus_ = nullptr;
+    VoiceLane* rest_ = nullptr;
+    VoiceLane* lanes_[kMaxLanes] = {};
+    uint32_t count_ = 0;
+};
+
 // Fixed voices assigned by note id: a free voice, else the oldest released, else the oldest held
 // (stolen). Voice needs the members `bool active`, `bool held`, `uint32_t noteId` and `uint64_t age`;
 // start() sets them, the instrument clears `held` on its off and `active` when the voice is silent.
+//
+// N is the instrument's own polyphony: the host sets no limit of its own (owner, 2026-11-10), so a pool of
+// hundreds of voices is fine. forEachActive() and find() walk only the voices sounding (start() lists a
+// voice; one found silent is dropped from the list), so a large N costs memory, not time.
 template <class Voice, uint32_t N>
 class VoicePool {
 public:
     static_assert(N > 0, "a pool needs at least one voice");
-    Voice& start(uint32_t noteId) noexcept {
+    static_assert(N <= 65535, "a pool holds up to 65535 voices");
+    // With `lanes`, a voice stolen from a note that has a voice-bus lane ends that lane (VoiceLanes::end).
+    Voice& start(uint32_t noteId, VoiceLanes* lanes = nullptr) noexcept {
         Voice* pick = nullptr;
-        for (Voice& v : voices_)
-            if (!v.active) { pick = &v; break; }
-        for (int pass = 0; pass < 2 && !pick; ++pass)
-            for (Voice& v : voices_)
-                if ((pass == 1 || !v.held) && (!pick || v.age < pick->age)) pick = &v;
+        prune();
+        if (live_ < N) {  // a free voice: one not sounding (the list holds every voice that is)
+            pick = &voices_[free()];
+        } else {
+            for (int pass = 0; pass < 2 && !pick; ++pass)
+                for (Voice& v : voices_)
+                    if ((pass == 1 || !v.held) && (!pick || v.age < pick->age)) pick = &v;
+        }
+        const uint32_t index = static_cast<uint32_t>(pick - voices_);
+        if (index >= touched_) touched_ = index + 1;
+        if (!pick->active) list_[live_++] = static_cast<uint16_t>(index);
+        else if (lanes && pick->noteId != noteId) lanes->end(pick->noteId);  // stolen
         pick->active = true;
         pick->held = true;
         pick->noteId = noteId;
@@ -239,18 +357,56 @@ public:
     }
     // The voice playing note `noteId` (held or releasing), or null.
     Voice* find(uint32_t noteId) noexcept {
-        for (Voice& v : voices_)
-            if (v.active && v.noteId == noteId) return &v;
+        prune();
+        for (uint32_t i = 0; i < live_; ++i) {
+            Voice& v = voices_[list_[i]];
+            if (v.noteId == noteId) return &v;
+        }
         return nullptr;
+    }
+    // f(voice) for each sounding voice, in the order they started; f may clear `active` (the voice is
+    // then dropped from the list).
+    template <class F>
+    void forEachActive(F&& f) noexcept {
+        uint32_t keep = 0;
+        for (uint32_t i = 0; i < live_; ++i) {
+            Voice& v = voices_[list_[i]];
+            if (v.active) f(v);
+            if (v.active) list_[keep++] = list_[i];
+        }
+        live_ = keep;
+    }
+    uint32_t activeCount() noexcept {
+        prune();
+        return live_;
     }
     Voice* begin() noexcept { return voices_; }
     Voice* end() noexcept { return voices_ + N; }
+    // Only the voices started since the last clear are not as new (a free voice is the first by index, so they
+    // are the first touched_): a Play doesn't rewrite the whole pool.
     void clear() noexcept {
-        for (Voice& v : voices_) v = Voice{};
+        for (uint32_t i = 0; i < touched_; ++i) voices_[i] = Voice{};
+        live_ = 0;
+        touched_ = 0;
     }
 
 private:
+    void prune() noexcept {
+        uint32_t keep = 0;
+        for (uint32_t i = 0; i < live_; ++i)
+            if (voices_[list_[i]].active) list_[keep++] = list_[i];
+        live_ = keep;
+    }
+    // A voice not sounding, the first by index (with the list pruned, live_ < N means one exists).
+    uint32_t free() noexcept {
+        for (uint32_t i = 0; i < N; ++i)
+            if (!voices_[i].active) return i;
+        return 0;
+    }
     Voice voices_[N]{};
+    uint16_t list_[N]{};  // the sounding voices (and some found silent since), in the order they started
+    uint32_t live_ = 0;
+    uint32_t touched_ = N;  // voices_[touched_..N) are as new (Voice{}); unknown at first
     uint64_t clock_ = 0;
 };
 

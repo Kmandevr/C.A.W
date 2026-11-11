@@ -2,7 +2,10 @@
 // Not wired into the shell yet; each panel's body comes from the caller.
 import 'package:flutter/material.dart';
 
+import '../feedback.dart';
+import '../frame/frame_widgets.dart' show Dormant;
 import '../glass.dart';
+import '../haptics.dart';
 import '../motion.dart';
 import '../theme.dart';
 import '../tokens.dart';
@@ -12,12 +15,7 @@ import 'layout.dart';
 String dockPanelTitle(String id) => switch (id) {
   Panels.arrangement => 'Arrange',
   Panels.builder => 'Build',
-  Panels.mixer => 'Mixer',
-  Panels.engineLab => 'Engine lab',
-  Panels.automation => 'Automation',
-  Panels.exporter => 'Export',
   Panels.files => 'Files',
-  Panels.pluginBuilder => 'Plugins',
   _ => id,
 };
 
@@ -68,7 +66,8 @@ class _DockViewState extends State<DockView> {
             child: LayoutBuilder(
               builder: (c, box) => MediaQuery(
                 data: MediaQuery.of(c).copyWith(size: box.biggest),
-                child: Builder(builder: (c) => widget.panelBuilder(c, id)),
+                // A tab out of sight doesn't rebuild until it is shown again.
+                child: Dormant(awake: shown, child: Builder(builder: (c) => widget.panelBuilder(c, id))),
               ),
             ),
           ),
@@ -254,19 +253,20 @@ class _Divider extends StatefulWidget {
   State<_Divider> createState() => _DividerState();
 }
 
-class _DividerState extends State<_Divider> {
+class _DividerState extends State<_Divider> with GrabFeedback {
   List<double>? _start;
   double _moved = 0;
 
   @override
   Widget build(BuildContext context) {
     final row = widget.axis == DockAxis.row;
-    final level = Motion.of(context);
     final active = _start != null;
-    void start(DragStartDetails _) => setState(() {
+    void start(DragStartDetails _) {
       _start = widget.weights;
       _moved = 0;
-    });
+      grab();
+    }
+
     void update(double delta) {
       final s = _start;
       if (s == null) return;
@@ -274,11 +274,18 @@ class _DividerState extends State<_Divider> {
       widget.onDrag(s, _moved);
     }
 
-    void end([_]) => setState(() => _start = null);
+    void end([_]) {
+      if (_start == null) return;
+      _start = null;
+      release();
+    }
+
     return Semantics(
       label: 'Resize panels',
       child: MouseRegion(
         cursor: row ? SystemMouseCursors.resizeColumn : SystemMouseCursors.resizeRow,
+        onEnter: (_) => hover(true),
+        onExit: (_) => hover(false),
         child: GestureDetector(
           key: ValueKey('dock-divider-${widget.axis.name}-${widget.index}'),
           behavior: HitTestBehavior.translucent,
@@ -290,15 +297,15 @@ class _DividerState extends State<_Divider> {
           onVerticalDragUpdate: row ? null : (d) => update(d.delta.dy),
           onVerticalDragEnd: row ? null : end,
           onVerticalDragCancel: row ? null : end,
+          // The grip grows and lights while held (and on hover with a mouse).
           child: Center(
-            child: AnimatedContainer(
-              duration: Motion.fade(Motion.small, level),
-              width: row ? 3 : (active ? 56 : 32),
-              height: row ? (active ? 56 : 32) : 3,
-              decoration: BoxDecoration(
-                color: active ? Roles.accent : Neon.line,
-                borderRadius: BorderRadius.circular(2),
-              ),
+            child: GripMark(
+              axis: row ? Axis.horizontal : Axis.vertical,
+              grabbed: active,
+              hovered: hovered,
+              length: 32,
+              color: Roles.accent,
+              restColor: Neon.line,
             ),
           ),
         ),
@@ -384,6 +391,7 @@ class _GroupState extends State<_Group> {
                 onAcceptWithDetails: (d) {
                   final e = _edgeFor(d.offset);
                   setState(() => _hover = null);
+                  Haptics.drop();
                   widget.onDrop(d.data, e);
                 },
                 builder: (context, candidates, _) => Stack(
@@ -394,7 +402,8 @@ class _GroupState extends State<_Group> {
                     IgnorePointer(
                       child: AnimatedOpacity(
                         opacity: candidates.isNotEmpty && _hover != null ? 1 : 0,
-                        duration: Motion.fade(Motion.small, level),
+                        // Where a dragged panel would land: help, so it stays with motion Off.
+                        duration: Motion.fade(Motion.small, Motion.usability(level)),
                         child: _DropPreview(edge: _hover ?? DockEdge.center),
                       ),
                     ),
@@ -556,7 +565,8 @@ class _Tab extends StatelessWidget {
     return LongPressDraggable<String>(
       data: id,
       dragAnchorStrategy: pointerDragAnchorStrategy,
-      hapticFeedbackOnStart: Motion.haptics,
+      hapticFeedbackOnStart: false,
+      onDragStarted: Haptics.grab,
       feedback: Material(
         type: MaterialType.transparency,
         child: Transform.translate(

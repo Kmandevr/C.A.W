@@ -1,5 +1,5 @@
 // The Android host: thermal and battery-saver signals for the resource adapter, the C++ compiler channel, MIDI
-// keyboard input and saving exports.
+// devices and the Bluetooth MIDI scan, saving exports, haptics and the microphone permission.
 package com.kmandevr.caw
 
 import android.content.BroadcastReceiver
@@ -18,6 +18,9 @@ class MainActivity : FlutterActivity() {
     private var thermalListener: PowerManager.OnThermalStatusChangedListener? = null
     private var powerSaveReceiver: BroadcastReceiver? = null
     private var pendingSave: Pair<String, MethodChannel.Result>? = null
+    private var bluetoothMidi: BluetoothMidi? = null
+    private var pendingFolder: FolderSave? = null
+    private var micPermission: MicPermission? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -58,6 +61,23 @@ class MainActivity : FlutterActivity() {
         // WAV never has to fit in memory (#91).
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, FILES_METHOD_CHANNEL)
             .setMethodCallHandler { call, result ->
+                if (call.method == "saveFolder") {
+                    // Stems: the system's folder picker, then each file copied into a new document there.
+                    val paths = call.argument<List<String>>("paths")
+                    val names = call.argument<List<String>>("names")
+                    if (paths == null || names == null || paths.size != names.size || pendingSave != null || pendingFolder != null) {
+                        result.error("busy", "a save is already open or the files are missing", null)
+                        return@setMethodCallHandler
+                    }
+                    pendingFolder = FolderSave(paths, names, call.argument<String>("mime") ?: "audio/wav", result)
+                    try {
+                        startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT_TREE), SAVE_FOLDER_REQUEST)
+                    } catch (e: Exception) {
+                        pendingFolder = null
+                        result.error("unavailable", e.message, null)
+                    }
+                    return@setMethodCallHandler
+                }
                 val path = call.argument<String>("path")
                 val name = call.argument<String>("name")
                 if (call.method != "saveCopy" || path == null || name == null || pendingSave != null) {
@@ -78,8 +98,22 @@ class MainActivity : FlutterActivity() {
                 }
             }
 
-        EventChannel(flutterEngine.dartExecutor.binaryMessenger, MIDI_EVENT_CHANNEL)
-            .setStreamHandler(MidiInput(applicationContext))
+        // Touch feedback with the vibrator's fine primitives (Haptics.kt).
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, HAPTICS_METHOD_CHANNEL).setMethodCallHandler(Haptics(this))
+
+        // RECORD_AUDIO, asked only when audio input is turned on or a track is armed (MicPermission.kt).
+        val mic = MicPermission(this)
+        micPermission = mic
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, PERMISSIONS_METHOD_CHANNEL).setMethodCallHandler(mic)
+
+        // MIDI devices (MidiInput.kt) and the in-app Bluetooth LE MIDI scan (BluetoothMidi.kt).
+        val midi = MidiInput(applicationContext)
+        EventChannel(flutterEngine.dartExecutor.binaryMessenger, MIDI_EVENT_CHANNEL).setStreamHandler(midi)
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, MIDI_METHOD_CHANNEL).setMethodCallHandler(midi)
+        val bluetooth = BluetoothMidi(this)
+        bluetoothMidi = bluetooth
+        EventChannel(flutterEngine.dartExecutor.binaryMessenger, BLUETOOTH_EVENT_CHANNEL).setStreamHandler(bluetooth)
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, BLUETOOTH_METHOD_CHANNEL).setMethodCallHandler(bluetooth)
 
         EventChannel(flutterEngine.dartExecutor.binaryMessenger, RESOURCE_EVENT_CHANNEL)
             .setStreamHandler(object : EventChannel.StreamHandler {
@@ -157,6 +191,7 @@ class MainActivity : FlutterActivity() {
 
     @Deprecated("startActivityForResult keeps this simple; the app has one save at a time")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        if (requestCode == SAVE_FOLDER_REQUEST) return saveIntoFolder(resultCode, data)
         if (requestCode != SAVE_REQUEST) return super.onActivityResult(requestCode, resultCode, data)
         val (path, result) = pendingSave ?: return
         pendingSave = null
@@ -176,8 +211,46 @@ class MainActivity : FlutterActivity() {
         }.start()
     }
 
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        if (bluetoothMidi?.onPermissionResult(requestCode) == true) return
+        if (micPermission?.onPermissionResult(requestCode) == true) return
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+    }
+
+    private class FolderSave(val paths: List<String>, val names: List<String>, val mime: String,
+                             val result: MethodChannel.Result)
+
+    private fun saveIntoFolder(resultCode: Int, data: Intent?) {
+        val save = pendingFolder ?: return
+        pendingFolder = null
+        val tree = data?.data
+        if (resultCode != RESULT_OK || tree == null) return save.result.success(-1)
+        val main = android.os.Handler(mainLooper)
+        Thread {
+            try {
+                val parent = android.provider.DocumentsContract.buildDocumentUriUsingTree(
+                    tree, android.provider.DocumentsContract.getTreeDocumentId(tree))
+                var copied = 0
+                for (i in save.paths.indices) {
+                    val doc = android.provider.DocumentsContract.createDocument(contentResolver, parent, save.mime, save.names[i])
+                        ?: throw java.io.IOException("cannot create " + save.names[i])
+                    java.io.FileInputStream(save.paths[i]).use { input ->
+                        val output = contentResolver.openOutputStream(doc, "wt") ?: throw java.io.IOException("cannot open " + save.names[i])
+                        output.use { input.copyTo(it, 1 shl 16) }
+                    }
+                    copied++
+                }
+                main.post { save.result.success(copied) }
+            } catch (e: Exception) {
+                main.post { save.result.error("failed", e.message, null) }
+            }
+        }.start()
+    }
+
     override fun onDestroy() {
         stopMonitoring()
+        bluetoothMidi?.close()
+        bluetoothMidi = null
         super.onDestroy()
     }
 
@@ -186,7 +259,13 @@ class MainActivity : FlutterActivity() {
         private const val RESOURCE_EVENT_CHANNEL = "caw/resource_signals/events"
         private const val COMPILER_METHOD_CHANNEL = "caw/compiler"
         private const val MIDI_EVENT_CHANNEL = "caw/midi"
+        private const val MIDI_METHOD_CHANNEL = "caw/midi/control"
+        private const val BLUETOOTH_EVENT_CHANNEL = "caw/midi/bluetooth/events"
+        private const val BLUETOOTH_METHOD_CHANNEL = "caw/midi/bluetooth"
         private const val FILES_METHOD_CHANNEL = "caw/files"
+        private const val HAPTICS_METHOD_CHANNEL = "caw/haptics"
+        private const val PERMISSIONS_METHOD_CHANNEL = "caw/permissions"
         private const val SAVE_REQUEST = 4711
+        private const val SAVE_FOLDER_REQUEST = 4712
     }
 }

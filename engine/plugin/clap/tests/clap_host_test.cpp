@@ -620,6 +620,82 @@ TEST(clap_notes_and_midi_reach_an_instrument_as_caw_events) {
     CHECK_EQ(moreOut.list.size(), 4u);
 }
 
+TEST(clap_a_repeated_note_without_host_ids_ends_the_one_before) {
+    // Audio review fix 2: with note id -1, a second Note On on the same channel and key took the slot of the
+    // first, whose id then never got an off (a stuck note). It now ends first.
+    constexpr uint32_t kFrames = 128;
+    ClapLibrary lib(CAW_CLAP_FIXTURE);
+    Plug p(lib, kSynth);
+    CHECK(p.plugin && p.activate(kFrames));
+    if (!p.active) return;
+    InEvents events;
+    events.note(0, CLAP_EVENT_NOTE_ON, -1, 0, 60, 1.0);
+    events.note(10, CLAP_EVENT_NOTE_ON, -1, 0, 60, 0.5);
+    events.midi(20, 0x90, 64, 127);
+    events.midi(30, 0x90, 64, 127);
+    events.note(64, CLAP_EVENT_NOTE_OFF, -1, 0, 60, 0.0);
+    events.midi(70, 0x80, 64, 0);
+    Stereo out(kFrames);
+    OutEvents outEvents;
+    CHECK_EQ(run(p, nullptr, out, kFrames, events, outEvents), CLAP_PROCESS_CONTINUE);
+    CHECK_NEAR(out.l[15], 0.05, 1e-6);  // only the second note on key 60 sounds
+    CHECK_EQ(out.l[100], 0.0f);         // and every note has ended
+    int ons = 0, offs = 0;
+    for (const auto& e : outEvents.list) {
+        ons += e.header.type == CLAP_EVENT_NOTE_ON;
+        offs += e.header.type == CLAP_EVENT_NOTE_OFF;
+    }
+    CHECK_EQ(ons, 4);
+    CHECK_EQ(offs, 4);
+}
+
+TEST(clap_a_wildcard_off_ends_every_note_on_its_key_even_with_host_ids) {
+    // Second audio review, fix 6: two notes with host ids on one channel and key left only the second in the
+    // wrapper's table, so an off with note id -1 (a CLAP wildcard) for that key ended only the second.
+    constexpr uint32_t kFrames = 128;
+    ClapLibrary lib(CAW_CLAP_FIXTURE);
+    Plug p(lib, kSynth);
+    CHECK(p.plugin && p.activate(kFrames));
+    if (!p.active) return;
+    InEvents events;
+    events.note(0, CLAP_EVENT_NOTE_ON, 5, 0, 60, 1.0);
+    events.note(10, CLAP_EVENT_NOTE_ON, 6, 0, 60, 0.5);
+    events.note(64, CLAP_EVENT_NOTE_OFF, -1, 0, 60, 0.0);
+    Stereo out(kFrames);
+    OutEvents outEvents;
+    CHECK_EQ(run(p, nullptr, out, kFrames, events, outEvents), CLAP_PROCESS_CONTINUE);
+    CHECK_NEAR(out.l[20], 0.15, 1e-4);  // both sound
+    CHECK_EQ(out.l[100], 0.0f);         // and both have ended
+    int offs = 0;
+    for (const auto& e : outEvents.list) offs += e.header.type == CLAP_EVENT_NOTE_OFF;
+    CHECK_EQ(offs, 2);
+    // A later wildcard off for the whole channel finds nothing left to end.
+    InEvents more;
+    more.note(0, CLAP_EVENT_NOTE_OFF, -1, 0, -1, 0.0);
+    OutEvents moreOut;
+    CHECK_EQ(run(p, nullptr, out, kFrames, more, moreOut), CLAP_PROCESS_CONTINUE);
+    CHECK_EQ(moreOut.list.size(), 0u);
+}
+
+TEST(clap_a_full_event_list_still_delivers_every_off) {
+    // Second audio review, fix 6: the wrapper dropped events past its list's capacity, offs too (a stuck note).
+    // Room for every held note's off is now kept back, as the Engine's note list does.
+    constexpr uint32_t kFrames = 128;
+    ClapLibrary lib(CAW_CLAP_FIXTURE);
+    Plug p(lib, kSynth);
+    CHECK(p.plugin && p.activate(kFrames));
+    if (!p.active) return;
+    InEvents events;
+    for (int16_t k = 0; k < 8; ++k) events.note(0, CLAP_EVENT_NOTE_ON, 100 + k, 0, static_cast<int16_t>(60 + k), 0.5);
+    for (int i = 0; i < 1100; ++i) events.midi(1, 0xB0, 1, static_cast<uint8_t>(i % 128));  // more than fits
+    for (int16_t k = 0; k < 8; ++k) events.note(64, CLAP_EVENT_NOTE_OFF, 100 + k, 0, static_cast<int16_t>(60 + k), 0.0);
+    Stereo out(kFrames);
+    OutEvents outEvents;
+    CHECK_EQ(run(p, nullptr, out, kFrames, events, outEvents), CLAP_PROCESS_CONTINUE);
+    CHECK_NEAR(out.l[30], 0.4, 1e-4);  // eight notes sound
+    CHECK_EQ(out.l[100], 0.0f);        // and every one has ended
+}
+
 TEST(clap_transport_reaches_the_component_while_playing) {
     ClapLibrary lib(CAW_CLAP_FIXTURE);
     Plug p(lib, kTransport);
