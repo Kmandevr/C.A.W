@@ -1,4 +1,5 @@
 // Per-note FX (#127 steps 4-6): slots equal solo renders, deterministic overflow and steals, tails, quality caps, refusals, JSON, parity.
+#include <algorithm>
 #include <cmath>
 #include <map>
 #include <memory>

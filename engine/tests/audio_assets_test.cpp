@@ -697,7 +697,7 @@ TEST(sfz_export_copies_samples_and_the_c_api_round_trips) {
 TEST(sfz_export_never_overwrites_copies_only_audio_and_keeps_unicode_names) {
     const std::string dir = tempDir("sfzexport2");
     const std::string a = writeWav(dir + "/src a.wav", 48000, 1, 100, [](int64_t i, int) { return noiseAt(i, 0); });
-    const std::string u = writeWav(dir + "/\xc3\xbcn\xc3\xafc\xc3\xb6de.wav", 48000, 1, 100, [](int64_t i, int) { return noiseAt(i, 1); });
+    const std::string u = writeWav(dir + "/\xc3\xbc" "n\xc3\xaf" "c\xc3\xb6" "de.wav", 48000, 1, 100, [](int64_t i, int) { return noiseAt(i, 1); });
     std::filesystem::create_directories(dir + "/out/samples");
     {
         std::ofstream keep(dir + "/out/samples/Src_A.wav", std::ios::binary);  // the same name but for case
