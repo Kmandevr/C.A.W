@@ -916,6 +916,7 @@ Future<void> showProjectMenu(BuildContext context, AppState s) async {
               final nav = Navigator.of(context);
               nav.pop();
               await nav.push(MaterialPageRoute<void>(builder: (_) => GlassPage(child: SettingsPage(settings: s.settings,
+                  engineProfile: s.hardwareProfile, executionPlan: s.auditionPlan,
                   onEditKeys: keys == null ? null : (c) => keys.showKeyBindings(c)))));
               s.settings.commitLook();
             },
