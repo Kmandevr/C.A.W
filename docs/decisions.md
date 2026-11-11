@@ -74,14 +74,13 @@ The phases:
 5. motion;
 6. completion and sharing.
 
-Open questions for the owner (`docs/vision.md`):
-- a separate file that a theme names, or part of the theme;
-- whether toolbars and menus move from the keymap into it;
-- whether a layout may hide features or only reorder and collapse them;
-- flow-only or coordinates;
-- custom labels;
-- layouts inside project packages;
-- one file for every screen shape or one per shape.
+**Owner's answers (2026-11-11):**
+- **Both:** the layout is part of the theme file, which is the whole theme. The theme editor can still change everything a theme supports, in any theme, not only your own.
+- **One home:** toolbars and menus move from the key bindings into the layout. Key bindings keep only keys and macros.
+- **No hiding:** a layout may reorder and collapse things (into ⋯ or overflow) but never hide features.
+- **Flow and priorities,** not coordinates.
+
+Still open: custom labels, layouts inside project packages, and one file for every screen shape or one per shape. Until answered: no custom labels, a packaged layout is offered and never applied silently, and one file uses conditions.
 
 ## 2026-11-11: A theme editor that builds the theme for you (owner)
 
