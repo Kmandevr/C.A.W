@@ -51,8 +51,12 @@ extern "C" {
    caw_engine_midi_release, caw_engine_set_midi_options, caw_engine_midi_dropped and caw_engine_position_at.
    Nothing else changes.
    16 (2026-11-11): song renders and stems: caw_render_song and caw_worker_pool_submit_song (aligned mix, track,
-   bus and region renders; bounds, tail, normalise, 16-bit dither). Nothing else changes. */
-#define CAW_API_VERSION 16
+   bus and region renders; bounds, tail, normalise, 16-bit dither). Nothing else changes.
+   17 (2026-11-11): C++ in place of .caw (#160 prep), no new functions: the project JSON's "audition" takes a C++
+   "instrument" and native "components" as a track does (the preview needs no .caw chain); caw_render's wavetable
+   target may be a layer with a C++ instrument or a built-in instrument's id (its parameter swept), and a one-shot of
+   a C++ instrument layer with no notes plays one C4 for 0.5 s to its tail. */
+#define CAW_API_VERSION 17
 /* The component index that names a layer's native instrument rather than one of its "components". */
 #define CAW_INSTRUMENT_INDEX 0xFFFFFFFFu
 
@@ -83,8 +87,9 @@ typedef struct CawRenderOptions {
     int32_t float32;      /* 1 = 32-bit float, 0 = 24-bit PCM (wavetables are always float) */
     int32_t frames;       /* wavetable frames, 1..256 */
     double seconds;       /* free-length duration */
-    const char* target;   /* one-shot: layer id; wavetable: module id */
-    const char* param;    /* wavetable: param to sweep, or NULL */
+    const char* target;   /* one-shot: layer id; wavetable: a layer with a C++ instrument, a built-in instrument's
+                             id, or a .caw module id */
+    const char* param;    /* wavetable: the parameter (or .caw param) to sweep, or NULL */
 } CawRenderOptions;
 
 /* Workload identifiers shared by the app, project tools and native add-ons. */

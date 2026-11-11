@@ -177,6 +177,56 @@ TEST(audition_only_uses_the_dedicated_audition_slot) {
     CHECK_NEAR(left[200], static_cast<float>(0.8 * 0.5 * std::cos(kPi / 4.0)), 1e-5);
 }
 
+TEST(audition_plays_a_cpp_instrument_and_its_effects) {
+    // The Builder's preview of a C++ instrument: the project JSON's audition names the instrument and effects.
+    ProjectSpec p;
+    std::string error;
+    CHECK(parseProject(R"({"caw_project":1,"bpm":120,"master":1,
+        "modules":[{"id":"pat","source":"---\nkind: pattern\n---\n4 C4 4 1\n"}],
+        "layers":[{"id":"song","instrument":{"id":"org.caw.test.osc","params":{"shape":4,"level":0.3}}}],
+        "audition":{"instrument":{"id":"org.caw.test.osc","params":{"shape":4,"level":0.5}},
+                    "components":[{"id":"org.caw.stereo.balance","params":{"pan":1}}]},
+        "audition_only":true})", p, error));
+    CHECK(error.empty());
+    CHECK(p.auditionOnly && p.hasAuditionInstrument && p.auditionChain.empty());
+    CHECK_EQ(p.auditionComponents.size(), 1u);
+    Engine e(48000);
+    e.setMasterBypass(true);
+    CHECK(e.setProject(p).find("\"ok\":true") != std::string::npos);
+    e.play();
+    std::vector<float> l(2048), r(2048);
+    for (int i = 0; i < 2048; i += 64) e.process(l.data() + i, r.data() + i, 64);
+    // Only the preview sounds (the song's layer is silent): DC 0.5, volume 0.8, centred, then balanced right.
+    CHECK_NEAR(l[2000], 0.0, 1e-6);
+    CHECK_NEAR(r[2000], 0.8 * 0.5 * std::cos(kPi / 4.0), 1e-5);
+    float scope[64];
+    CHECK_EQ(e.scope(kScopeAudition, scope, 64), 64);
+    CHECK(std::fabs(scope[63]) > 0.1f);
+
+    // In Notes mode it plays the audition's pattern: silent until step 4 (24000 frames), then the note.
+    p.auditionInstrument.params = {{"shape", 4}, {"level", 0.5}, {"mode", 1}};
+    p.auditionComponents.clear();
+    p.auditionPattern = "pat";
+    Engine notes(48000);
+    notes.setMasterBypass(true);
+    CHECK(notes.setProject(p).find("\"ok\":true") != std::string::npos);
+    notes.play();
+    std::vector<float> nl(30000), nr(30000);
+    for (int i = 0; i < 30000; i += 64) notes.process(nl.data() + i, nr.data() + i, std::min(64, 30000 - i));
+    CHECK_EQ(nl[23000], 0.0f);
+    CHECK_NEAR(nl[29000], 0.8 * 0.5 * std::cos(kPi / 4.0), 1e-5);
+    // Audition off: the song plays again and the preview's slot falls silent.
+    p.auditionOnly = false;
+    CHECK(notes.setProject(p).find("\"ok\":true") != std::string::npos);
+    for (int i = 0; i < 30000; i += 64) notes.process(nl.data() + i, nr.data() + i, std::min(64, 30000 - i));
+    CHECK_NEAR(nl[29999], 0.3 * 0.8 * std::cos(kPi / 4.0), 1e-5);
+
+    // A bad audition instrument refuses the JSON with a message naming it.
+    ProjectSpec bad;
+    CHECK(!parseProject(R"({"caw_project":1,"audition":{"instrument":3}})", bad, error));
+    CHECK(error.find("audition instrument") != std::string::npos);
+}
+
 TEST(audition_slot_follows_the_last_layer_slot_and_both_play) {
     Engine e(48000);
     CHECK_EQ(e.layerCapacity(), kInitialLayerCapacity);

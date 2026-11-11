@@ -422,6 +422,12 @@ bool ModuleRegistry::add(const ModuleDescriptor& descriptor, ModuleFactory facto
     return true;
 }
 
+bool ModuleRegistry::addInternal(const ModuleDescriptor& descriptor, ModuleFactory factory) {
+    if (!add(descriptor, factory)) return false;
+    registrations_.back().internal = true;
+    return true;
+}
+
 ModuleLoadResult ModuleRegistry::loadSharedLibrary(
     const std::string& path, std::string_view expectedId, NativeModuleTrust trust, bool replace) {
     if (trust == NativeModuleTrust::Blocked)
@@ -549,7 +555,8 @@ std::vector<const ModuleDescriptor*> ModuleRegistry::loadedComponents() const {
 std::vector<const ModuleDescriptor*> ModuleRegistry::builtinComponents() const {
     std::vector<const ModuleDescriptor*> out;
     for (const ModuleRegistration& registration : registrations_)
-        if (!registration.component && registration.factory && registration.descriptor) out.push_back(registration.descriptor);
+        if (!registration.component && !registration.internal && registration.factory && registration.descriptor)
+            out.push_back(registration.descriptor);
     return out;
 }
 

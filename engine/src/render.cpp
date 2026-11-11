@@ -4,9 +4,12 @@
 #include <algorithm>
 #include <atomic>
 #include <cmath>
+#include <cstdio>
 #include <memory>
 
+#include "builtin_components.h"
 #include "compile.h"
+#include "component_test.h"
 #include "engine.h"
 #include "pattern.h"
 #include "vm.h"
@@ -149,8 +152,97 @@ int64_t loopFrames(const ProjectSpec& p, int sr, int steps) {
     return static_cast<int64_t>(std::floor(steps * stepLen + 0.5));
 }
 
+// Each frame's DC offset removed, then the whole table normalised to a peak of 1, into out.samples.
+void finishWavetable(std::vector<double>& table, int frames, RenderResult& out) {
+    for (int f = 0; f < frames; ++f) {
+        double mean = 0;
+        for (int i = 0; i < kWavetableFrame; ++i) mean += table[static_cast<size_t>(f) * kWavetableFrame + i];
+        mean /= kWavetableFrame;
+        for (int i = 0; i < kWavetableFrame; ++i) table[static_cast<size_t>(f) * kWavetableFrame + i] -= mean;
+    }
+    double peak = 0;
+    for (double v : table) peak = std::max(peak, std::fabs(v));
+    const double scale = peak > 0 ? 1.0 / peak : 0.0;
+    for (size_t i = 0; i < table.size(); ++i) out.samples[i] = static_cast<float>(table[i] * scale);
+}
+
+// A C++ instrument's wavetable. The target is a layer with an instrument (played with the layer's values) or a
+// built-in component's id. Each frame is a fresh instance holding A0 (MIDI 21, 27.5 Hz) at a sample rate of
+// 27.5 * 2048, so one cycle of the note is one 2048-frame frame; the frame is the cycle after kWarmCycles, past
+// the note's attack, as the mid of the instrument's output. With a param, frame f sets it to
+// min + (max - min) * f / (frames - 1) (one frame: its default), constrained as the host constrains it. A
+// component's saved state (a user wavetable, drum samples) isn't loaded: built-ins render their own sound.
+constexpr int kWarmCycles = 3;
+constexpr double kWavetableNoteHz = 27.5;  // A0
+
+bool componentWavetableTarget(const ProjectSpec& p, const std::string& target, TestComponent& c) {
+    for (const LayerSpec& l : p.layers)
+        if (l.id == target && l.hasInstrument && !l.folder) {
+            c.id = l.instrument.id;
+            c.params = l.instrument.params;
+            return true;
+        }
+    if (p.module(target)) return false;  // a .caw module (until #160 removes them)
+    c.id = target;
+    return true;
+}
+
+bool renderComponentWavetable(TestComponent c, const ExportOptions& o, RenderResult& out, int32_t* progress,
+                              int32_t* cancel) {
+    ModuleRegistry registry;
+    registerBuiltinComponents(registry);
+    const ModuleDescriptor* d = registry.find(c.id);
+    if (!d) {
+        out.error = "no module, instrument layer or built-in component '" + o.target + "' to make a wavetable from";
+        return false;
+    }
+    bool notesIn = false;
+    for (uint32_t k = 0; k < d->portCount; ++k) notesIn = notesIn || (d->ports[k].type == PortType::Event && d->ports[k].input);
+    if (!notesIn) {
+        out.error = "component '" + c.id + "' takes no notes: a wavetable is made from an instrument";
+        return false;
+    }
+    const ParameterDescriptor* swept = nullptr;
+    for (uint32_t k = 0; k < d->parameterCount; ++k)
+        if (d->parameters[k].id == o.param) swept = &d->parameters[k];
+    if (!o.param.empty() && !swept) {
+        out.error = "component '" + c.id + "' has no parameter '" + o.param + "'";
+        return false;
+    }
+    const int frames = std::clamp(o.frames, 1, 256);
+    out.channels = 1;
+    out.sampleRate = o.sampleRate;
+    out.frames = static_cast<int64_t>(frames) * kWavetableFrame;
+    out.samples.assign(static_cast<size_t>(out.frames), 0.0f);
+    std::vector<double> table(static_cast<size_t>(out.frames), 0.0);
+    const double sr = kWavetableNoteHz * kWavetableFrame;
+    const size_t length = static_cast<size_t>(kWarmCycles + 1) * kWavetableFrame;
+    const std::vector<float> silence(length, 0.0f);
+    const std::vector<TestNote> note = {{21, 127, 0, static_cast<double>(length) / sr + 1.0}};
+    const size_t base = c.params.size();
+    if (swept) c.params.push_back({o.param, swept->defaultValue});
+    for (int f = 0; f < frames; ++f) {
+        if (cancelled(cancel)) {
+            out.error = "cancelled";
+            return false;
+        }
+        if (swept)
+            c.params[base].second = frames == 1 ? swept->defaultValue
+                                                : swept->minimum + (swept->maximum - swept->minimum) * f / (frames - 1);
+        ComponentRender r;
+        if (!renderComponent(registry, c, sr, 64, 120, silence, silence, false, r, out.error, note)) return false;
+        const size_t from = static_cast<size_t>(kWarmCycles) * kWavetableFrame;
+        for (int i = 0; i < kWavetableFrame; ++i)
+            table[static_cast<size_t>(f) * kWavetableFrame + i] = 0.5 * (static_cast<double>(r.left[from + i]) + r.right[from + i]);
+        setProgress(progress, static_cast<double>(f + 1) / frames);
+    }
+    finishWavetable(table, frames, out);
+    return true;
+}
+
 bool renderWavetable(const ProjectSpec& p, const ExportOptions& o, RenderResult& out, int32_t* progress,
                      int32_t* cancel) {
+    if (TestComponent c; componentWavetableTarget(p, o.target, c)) return renderComponentWavetable(c, o, out, progress, cancel);
     const ModuleSpec* m = p.module(o.target);
     if (!m) {
         out.error = "no module '" + o.target + "' to make a wavetable from";
@@ -239,17 +331,9 @@ bool renderWavetable(const ProjectSpec& p, const ExportOptions& o, RenderResult&
             const double* y = inst.process(ctx);
             for (int i = 0; i < kBlock; ++i) table[static_cast<size_t>(f) * kWavetableFrame + b + i] = y[i];
         }
-        // Remove each frame's DC offset so the table is centred.
-        double mean = 0;
-        for (int i = 0; i < kWavetableFrame; ++i) mean += table[static_cast<size_t>(f) * kWavetableFrame + i];
-        mean /= kWavetableFrame;
-        for (int i = 0; i < kWavetableFrame; ++i) table[static_cast<size_t>(f) * kWavetableFrame + i] -= mean;
         setProgress(progress, static_cast<double>(f + 1) / frames);
     }
-    double peak = 0;
-    for (double v : table) peak = std::max(peak, std::fabs(v));
-    const double scale = peak > 0 ? 1.0 / peak : 0.0;
-    for (size_t i = 0; i < table.size(); ++i) out.samples[i] = static_cast<float>(table[i] * scale);
+    finishWavetable(table, frames, out);
     return true;
 }
 
@@ -263,6 +347,8 @@ bool prepareExport(const ProjectSpec& in, const ExportOptions& o, ProjectSpec& p
     p = in;
     p.auditionOnly = false;
     p.auditionChain.clear();
+    p.hasAuditionInstrument = false;
+    p.auditionComponents.clear();
     return true;
 }
 
@@ -282,6 +368,60 @@ void playedSpan(const ProjectSpec& p, const ExportOptions& o, int64_t& keepFrom,
         keepFrom = 0;
         total = static_cast<int64_t>(std::floor(std::clamp(o.seconds, 0.1, 600.0) * sr + 0.5));
     }
+}
+
+// A one-shot's silent end trimmed, keeping 5 ms after the last sound above -80 dB.
+void trimSilentEnd(RenderResult& out, int sr) {
+    int64_t last = -1;
+    for (int64_t f = 0; f < out.frames; ++f)
+        if (std::fabs(out.samples[static_cast<size_t>(f) * 2]) > 1e-4f ||
+            std::fabs(out.samples[static_cast<size_t>(f) * 2 + 1]) > 1e-4f)
+            last = f;
+    const int64_t end = std::min<int64_t>(out.frames, last + 1 + sr / 200);
+    out.frames = std::max<int64_t>(end, 1);
+    out.samples.resize(static_cast<size_t>(out.frames) * 2);
+}
+
+// The one-shot of a C++ instrument layer with no notes of its own (no pattern, clips or length): its instrument and
+// effects play one note (o.note, o.velocity, held o.noteSeconds) from the start, and the render runs on until the
+// output has stayed below -80 dB for 0.25 s after the note's end (30 s at most), then the silent end is trimmed.
+bool renderInstrumentNote(ProjectSpec& p, LayerSpec only, const ExportOptions& o, RenderResult& out, int32_t* progress,
+                          int32_t* cancel) {
+    const int sr = o.sampleRate;
+    const int64_t most = static_cast<int64_t>(30) * sr;
+    const double held = std::clamp(o.noteSeconds, 0.001, 29.0);
+    const double steps = held * p.bpm * 4.0 / 60.0;
+    const int stepsPerBar = p.beatsPerBar * 4;
+    const int64_t mostSteps = static_cast<int64_t>(std::ceil(30.0 * p.bpm * 4.0 / 60.0));
+    char line[96];
+    std::snprintf(line, sizeof line, "0 %.17g %.17g %.17g\n", std::clamp(o.note, 0.0, 127.0), steps,
+                  std::clamp(o.velocity, 0.0, 1.0));
+    const std::string id = "\x01oneshot-note";
+    p.modules.push_back({id, "---\nkind: pattern\nlength: " + std::to_string(mostSteps / stepsPerBar + 2) + " bars\n---\n" + line, {}});
+    p.loopBars = maxLoopBars(p.beatsPerBar);
+    only.pattern = id;
+    p.layers = {only};
+    out.samples.clear();
+    out.channels = 2;
+    out.sampleRate = sr;
+    const int64_t noteEnd = static_cast<int64_t>(std::ceil(held * sr));
+    int64_t frame = 0, lastLoud = 0;
+    bool finished = false;
+    const bool ok = recordTo(p, sr, 0, most, [&](const float* lr, int n) {
+        for (int i = 0; i < n; ++i, ++frame) {
+            if (std::fabs(lr[i * 2]) > 1e-4f || std::fabs(lr[i * 2 + 1]) > 1e-4f) lastLoud = frame;
+            out.samples.push_back(lr[i * 2]);
+            out.samples.push_back(lr[i * 2 + 1]);
+        }
+        finished = frame > noteEnd && frame - std::max(lastLoud, noteEnd) > sr / 4;
+        return !finished;
+    }, out.error, progress, cancel);
+    if (!ok && !finished) return false;
+    out.error.clear();
+    setProgress(progress, 1.0);
+    out.frames = frame;
+    trimSilentEnd(out, sr);
+    return true;
 }
 
 }  // namespace
@@ -312,8 +452,18 @@ bool renderExport(const ProjectSpec& in, const ExportOptions& o, RenderResult& o
             LayerSpec only = *layer;
             only.mute = false;
             only.solo = false;
+            only.parentId.clear();  // its folder and send targets aren't in the render
+            only.sends.clear();
             int64_t len;
-            if (!only.pattern.empty()) {
+            if (only.hasInstrument && !only.folder && only.pattern.empty() && only.clips.empty() && only.lengthSteps == 0)
+                return renderInstrumentNote(p, only, o, out, progress, cancel);
+            if (!only.clips.empty()) {
+                // Its clips set the length: to the end of the last one.
+                int64_t end = 0;
+                for (const ClipSpec& c : only.clips) end = std::max<int64_t>(end, int64_t{c.startSteps} + c.lengthSteps);
+                p.loopBars = maxLoopBars(p.beatsPerBar);  // the project loop never cuts the layer short
+                len = loopFrames(p, sr, static_cast<int>(std::min<int64_t>(end, maxArrangementSteps(p.beatsPerBar))));
+            } else if (!only.pattern.empty()) {
                 // A pattern sets the layer's length.
                 p.loopBars = maxLoopBars(p.beatsPerBar);  // the project loop never cuts the layer short
                 len = loopFrames(p, sr, parsePattern(p.module(only.pattern)->source).pattern->steps(p.beatsPerBar));
@@ -326,15 +476,7 @@ bool renderExport(const ProjectSpec& in, const ExportOptions& o, RenderResult& o
             len = std::min<int64_t>(len, static_cast<int64_t>(30) * sr);
             p.layers = {only};
             if (!record(p, sr, 0, len, out, progress, cancel)) return false;
-            // Trim the silent end, keeping 5 ms after the last sound above -80 dB.
-            int64_t last = -1;
-            for (int64_t f = 0; f < out.frames; ++f)
-                if (std::fabs(out.samples[static_cast<size_t>(f) * 2]) > 1e-4f ||
-                    std::fabs(out.samples[static_cast<size_t>(f) * 2 + 1]) > 1e-4f)
-                    last = f;
-            const int64_t end = std::min<int64_t>(out.frames, last + 1 + sr / 200);
-            out.frames = std::max<int64_t>(end, 1);
-            out.samples.resize(static_cast<size_t>(out.frames) * 2);
+            trimSilentEnd(out, sr);
             return true;
         }
         case ExportKind::Wavetable:

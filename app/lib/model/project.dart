@@ -667,6 +667,7 @@ class ProjectDoc {
   /// The engine's project JSON (docs/engine.md, "Project file"). Modules get the code last run, not unrun edits.
   String toEngineJson(
       {List<String>? audition, String? auditionPattern, bool auditionOnly = false, int voices = 8, String swap = 'now',
+      ComponentUseDoc? auditionInstrument, List<ComponentUseDoc> auditionComponents = const [],
       Set<String>? playableComponents, Map<String, String>? sourceOverrides, Set<String> suspendLanes = const {}}) {
     final engineLoopBars = engineLoopSteps ~/ stepsPerBar;
     // Native components the engine hasn't loaded (awaiting trust, blocked, failed to build) are left out, so the
@@ -747,8 +748,15 @@ class ProjectDoc {
               'solo': l.solo,
             },
         ],
-        if (audition != null) 'audition': {'chain': audition, 'pattern': ?auditionPattern},
-        'audition_only': auditionOnly && audition != null,
+        // The preview: .caw modules, or a C++ instrument and its effects (left out while not loaded), as a track plays.
+        if (audition != null || auditionInstrument != null) 'audition': {
+          'chain': audition ?? const <String>[],
+          'pattern': ?auditionPattern,
+          if (auditionInstrument != null && (playableComponents?.contains(auditionInstrument.id) ?? true))
+            'instrument': auditionInstrument.toJson(),
+          if (playable(auditionComponents).isNotEmpty) 'components': [for (final c in playable(auditionComponents)) c.toJson()],
+        },
+        'audition_only': auditionOnly && (audition != null || auditionInstrument != null),
       });
     return result;
   }

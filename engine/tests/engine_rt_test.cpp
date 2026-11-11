@@ -601,6 +601,39 @@ TEST(count_in_metronome_and_released_touches_never_allocate_on_the_audio_thread)
     CHECK_EQ(operations, 0u);
 }
 
+TEST(the_test_signal_never_allocates_on_the_audio_thread) {
+    // org.caw.test.osc (the internal test signal) free-running and played by chords, with shape and mode changes.
+    ProjectSpec p;
+    p.bpm = 150;
+    p.loopBars = 1;
+    p.modules.push_back({"pat", "---\nkind: pattern\nlength: 16\n---\n0 C4,E4,G4 2 1\n4 D2 1 1 slide\n8 E2 4 1 ratchet 4\n", {}});
+    for (const char* id : {"free", "notes"}) {
+        LayerSpec l = layer(id, {});
+        l.hasInstrument = true;
+        l.instrument.id = "org.caw.test.osc";
+        if (std::strcmp(id, "notes") == 0) {
+            l.pattern = "pat";
+            l.instrument.params = {{"mode", 1}};
+        }
+        p.layers.push_back(l);
+    }
+    Engine e(48000);
+    CHECK(e.setProject(p).find("\"ok\":true") != std::string::npos);
+    e.play();
+    std::vector<float> l(192), r(192);
+    for (int k = 0; k < 50; ++k) e.process(l.data(), r.data(), 192);
+    std::size_t operations = 0;
+    for (int round = 0; round < 7; ++round) {
+        e.setComponentParam("free", Engine::kInstrumentIndex, "shape", round);
+        e.setComponentParam("notes", Engine::kInstrumentIndex, "shape", 6 - round);
+        e.setComponentParam("free", Engine::kInstrumentIndex, "mode", round % 2);
+        cawtest::AllocationScope scope;
+        for (int k = 0; k < 60; ++k) e.process(l.data(), r.data(), 192);
+        operations += scope.count();
+    }
+    CHECK_EQ(operations, 0u);
+}
+
 TEST(device_midi_never_allocates_on_the_audio_thread) {
     // MIDI from a device (API 15), stopped and playing, on a native instrument and a .caw voice chain: notes, poly
     // and channel pressure, bend, sustain, CCs, MPE and a release, all played from the queue without allocating.

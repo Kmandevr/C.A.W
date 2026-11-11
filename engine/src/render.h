@@ -15,9 +15,11 @@ struct ExportOptions {
     ExportKind kind = ExportKind::Loop;
     int sampleRate = 48000;
     double seconds = 8.0;  // Free
-    std::string target;    // OneShot: layer id. Wavetable: module id
-    std::string param;     // Wavetable: the param swept across frames (empty = none)
+    std::string target;    // OneShot: layer id. Wavetable: a layer with a C++ instrument, a built-in id, or a .caw module
+    std::string param;     // Wavetable: the parameter (or .caw param) swept across frames (empty = none)
     int frames = 64;       // Wavetable frame count
+    // OneShot of a C++ instrument layer with no notes of its own (no pattern, clips or length): the note it plays.
+    double note = 60, velocity = 1.0, noteSeconds = 0.5;  // MIDI pitch, 0..1, seconds held
 };
 
 // The most frames a WAV file holds at the widest format (stereo 32-bit float), whose sizes are 32-bit.

@@ -224,6 +224,16 @@ void main() {
     final ap = jsonDecode(sample().toEngineJson(audition: ['m1'], auditionPattern: 'pat')) as Map<String, dynamic>;
     expect(ap['audition'], {'chain': ['m1'], 'pattern': 'pat'});
     expect(a['audition_only'], true);
+    // A C++ instrument and its effects audition as a track plays them; one not loaded is left out.
+    final synth = ComponentUseDoc('org.caw.synth.flagship', {'flt1_cutoff': 800});
+    final width = ComponentUseDoc('org.caw.stereo.width', {'width': 1.5});
+    final c = jsonDecode(sample().toEngineJson(
+        auditionInstrument: synth, auditionComponents: [width], auditionPattern: 'pat', auditionOnly: true)) as Map<String, dynamic>;
+    expect(c['audition'], {'chain': [], 'pattern': 'pat', 'instrument': synth.toJson(), 'components': [width.toJson()]});
+    expect(c['audition_only'], true);
+    final unloaded = jsonDecode(sample().toEngineJson(
+        auditionInstrument: ComponentUseDoc('com.me.synth'), auditionOnly: true, playableComponents: {})) as Map<String, dynamic>;
+    expect(unloaded['audition'], {'chain': []});
   });
 
   test('songs keep clips, automation and loop length past 64 bars (F7.2, owner 2026-11-04)', () {

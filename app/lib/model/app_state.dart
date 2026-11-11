@@ -535,23 +535,30 @@ class AppState extends ChangeNotifier {
   }
 
   /// What Solo preview plays for the selected module: a generator alone, an effect after a generator that uses it,
-  /// or a pattern through the sound of a layer that plays it. Each plays the pattern of its layer, if it has one.
-  ({List<String> chain, String? pattern})? get preview {
+  /// or a pattern through the sound of a layer that plays it (its .caw generator, or its C++ instrument and effects).
+  /// Each plays the pattern of its layer, if it has one.
+  ({List<String> chain, String? pattern, ComponentUseDoc? instrument, List<ComponentUseDoc> components})? get preview {
     final m = project.module(selectedModuleId);
     if (m == null || isLibrary(m.id)) return null;
     String? firstGenerator() => project.modules.where((x) => isGenerator(x.id)).map((x) => x.id).firstOrNull;
     if (isPattern(m.id)) {
-      final layer = project.layers.where((l) => l.clips.any((clip) => clip.patternId == m.id) && l.generatorId != null).firstOrNull;
+      final layer = project.layers.where((l) => l.clips.any((clip) => clip.patternId == m.id) &&
+          (l.generatorId != null || (!l.isFolder && l.instrument != null))).firstOrNull;
+      if (layer != null && layer.generatorId == null) {
+        return (chain: layer.chain, pattern: m.id, instrument: layer.instrument, components: layer.components);
+      }
       final gen = layer?.generatorId ?? firstGenerator();
-      return gen == null ? null : (chain: layer?.chain ?? [gen], pattern: m.id);
+      return gen == null ? null : (chain: layer?.chain ?? [gen], pattern: m.id, instrument: null, components: const <ComponentUseDoc>[]);
     }
     if (!isEffect(m.id)) {
       final layer = project.layers.where((l) => l.generatorId == m.id).firstOrNull;
-      return (chain: [m.id], pattern: layer?.clips.firstOrNull?.patternId ?? layer?.patternId);
+      return (chain: [m.id], pattern: layer?.clips.firstOrNull?.patternId ?? layer?.patternId, instrument: null,
+          components: const <ComponentUseDoc>[]);
     }
     final layer = project.layers.where((l) => l.effectIds.contains(m.id) && l.generatorId != null).lastOrNull;
     final gen = layer?.generatorId ?? firstGenerator();
-    return (chain: [?gen, m.id], pattern: layer?.clips.firstOrNull?.patternId ?? layer?.patternId);
+    return (chain: [?gen, m.id], pattern: layer?.clips.firstOrNull?.patternId ?? layer?.patternId, instrument: null,
+        components: const <ComponentUseDoc>[]);
   }
 
   String _engineJson({Map<String, String>? sourceOverrides}) {
@@ -559,6 +566,8 @@ class AppState extends ChangeNotifier {
     return project.toEngineJson(
         audition: pv?.chain,
         auditionPattern: pv?.pattern,
+        auditionInstrument: pv?.instrument,
+        auditionComponents: pv?.components ?? const [],
         auditionOnly: previewOnly,
         voices: settings.lightMode ? 4 : 32, // global cap; each generator chooses its own voice count
         swap: settings.swapTiming.name,
