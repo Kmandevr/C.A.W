@@ -27,7 +27,7 @@ import 'file_manager_screen.dart';
 import 'plugin_builder_screen.dart';
 import 'key_router.dart';
 import 'theme.dart';
-import 'theme_editor.dart';
+import 'settings/settings_page.dart';
 import 'widgets.dart';
 import 'feedback.dart';
 import 'glass.dart';
@@ -916,11 +916,12 @@ Future<void> showProjectMenu(BuildContext context, AppState s) async {
           ListTile(
             leading: const Icon(Icons.settings, color: Neon.dim),
             title: const Text('Settings…'),
-            subtitle: const Text('Theme, density, live coding', style: TextStyle(color: Neon.dim)),
+            subtitle: const Text('Audio, MIDI, recording, editing, look, projects, export and more',
+                style: TextStyle(color: Neon.dim)),
             onTap: () async {
               final nav = Navigator.of(context);
               nav.pop();
-              await nav.push(MaterialPageRoute<void>(builder: (_) => GlassPage(child: SettingsPage(settings: s.settings,
+              await nav.push(MaterialPageRoute<void>(builder: (_) => GlassPage(child: SettingsPage(settings: s.settings, state: s,
                   engineProfile: s.hardwareProfile, executionPlan: s.auditionPlan,
                   onEditKeys: keys == null ? null : (c) => keys.showKeyBindings(c)))));
               s.settings.commitLook();

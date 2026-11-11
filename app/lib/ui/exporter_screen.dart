@@ -48,7 +48,7 @@ class ExporterScreen extends StatefulWidget {
 class _ExporterScreenState extends State<ExporterScreen> {
   // Settings › Export: what the exporter opens with.
   late ExportKind _kind = ExportKind.values.firstWhere((k) => k.name == s.settings.exportKind, orElse: () => ExportKind.loop);
-  bool _advanced = false;
+  late bool _advanced = _kind != ExportKind.loop; // a non-loop default needs the full exporter
   late int _rate = s.settings.exportSampleRate;
   late bool _float = s.settings.exportFloat32;
   late double _seconds = s.settings.exportSeconds;

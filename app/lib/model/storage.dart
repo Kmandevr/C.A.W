@@ -224,3 +224,84 @@ class ProjectStorage {
 
   Future<void> setLastOpened(String id) => _settings.writeAsString(jsonEncode({'last': id}));
 }
+
+/// What the app's folders take on the device, in bytes (Settings › Projects and files).
+class StorageUse {
+  const StorageUse({this.projects = 0, this.restorePoints = 0, this.themes = 0, this.other = 0, this.caches = 0});
+  final int projects, restorePoints, themes, other, caches;
+  int get total => projects + restorePoints + themes + other + caches;
+
+  /// Measures [support] (the app support folder: projects/, its restore-points/, themes/ and the rest, such as
+  /// settings and C++ builds) and [temp] (caches: renders waiting for the save picker), off the UI isolate.
+  static Future<StorageUse> measure(Directory support, Directory? temp) {
+    final s = support.path, t = temp?.path, sep = Platform.pathSeparator;
+    return Isolate.run(() {
+      var projects = 0, restore = 0, themes = 0, other = 0, caches = 0;
+      int size(FileSystemEntity f) {
+        try {
+          return f is File ? f.lengthSync() : 0;
+        } catch (_) {
+          return 0;
+        }
+      }
+      final projectsDir = '$s${sep}projects', restoreDir = '$projectsDir${sep}restore-points', themesDir = '$s${sep}themes';
+      if (Directory(s).existsSync()) {
+        for (final f in Directory(s).listSync(recursive: true, followLinks: false)) {
+          final n = size(f);
+          if (f.path.startsWith(restoreDir)) {
+            restore += n;
+          } else if (f.path.startsWith(projectsDir)) {
+            projects += n;
+          } else if (f.path.startsWith(themesDir)) {
+            themes += n;
+          } else {
+            other += n;
+          }
+        }
+      }
+      if (t != null && Directory(t).existsSync()) {
+        for (final f in Directory(t).listSync(recursive: true, followLinks: false)) {
+          caches += size(f);
+        }
+      }
+      return StorageUse(projects: projects, restorePoints: restore, themes: themes, other: other, caches: caches);
+    });
+  }
+
+  /// Deletes what is in [temp] (finished renders not saved yet; never projects or settings) and returns the bytes
+  /// freed. A file in use stays.
+  static Future<int> clearCaches(Directory temp) {
+    final t = temp.path;
+    return Isolate.run(() {
+      var freed = 0;
+      final dir = Directory(t);
+      if (!dir.existsSync()) return 0;
+      for (final f in dir.listSync(followLinks: false)) {
+        try {
+          if (f is File) {
+            final n = f.lengthSync();
+            f.deleteSync();
+            freed += n;
+          } else if (f is Directory) {
+            var n = 0;
+            for (final g in f.listSync(recursive: true, followLinks: false)) {
+              if (g is File) n += g.lengthSync();
+            }
+            f.deleteSync(recursive: true);
+            freed += n;
+          }
+        } catch (_) {
+          // In use or not ours to delete: left.
+        }
+      }
+      return freed;
+    });
+  }
+
+  static String format(int bytes) {
+    if (bytes < 1024) return '$bytes B';
+    if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(0)} KB';
+    if (bytes < 1024 * 1024 * 1024) return '${(bytes / 1024 / 1024).toStringAsFixed(1)} MB';
+    return '${(bytes / 1024 / 1024 / 1024).toStringAsFixed(2)} GB';
+  }
+}

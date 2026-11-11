@@ -181,7 +181,7 @@ class LiveMidi extends ChangeNotifier {
       final preRoll = state.settings.preRollBars * state.project.stepsPerBar;
       if (preRoll > 0 && from > 0) {
         start = math.max(0.0, from - preRoll);
-        state.seekTo(start);
+        state.pausedStep = start; // not seekTo: its notification would end this recording as a Stop does
       }
       countInBeats = state.settings.countInBars * state.project.beatsPerBar;
       state.togglePlay(countInBeats: countInBeats);

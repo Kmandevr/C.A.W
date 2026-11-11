@@ -330,10 +330,18 @@ class AudioStatus {
     this.periods = 0,
     this.exclusive = false,
     this.lowLatency = false,
+    this.requestedDevice = '',
+    this.requestedFrames = 0,
+    this.exclusiveRequested = false,
   });
   final bool running, exclusive, lowLatency;
   final String backend, device;
   final int sampleRate, periodFrames, periods;
+
+  /// What was asked for (caw_audio_configure), running or not.
+  final String requestedDevice;
+  final int requestedFrames;
+  final bool exclusiveRequested;
 
   /// The output buffer's length in ms (every period queued), the delay a played note adds before the speaker; the
   /// converter and the speaker add a little more.
@@ -348,6 +356,9 @@ class AudioStatus {
         periods: (j['periods'] as num?)?.toInt() ?? 0,
         exclusive: j['exclusive'] == true,
         lowLatency: j['low_latency'] == true,
+        requestedDevice: j['requested_device'] as String? ?? '',
+        requestedFrames: (j['requested_frames'] as num?)?.toInt() ?? 0,
+        exclusiveRequested: j['exclusive_requested'] == true,
       );
 }
 
@@ -669,15 +680,16 @@ class Engine {
   /// Ends every knob touch, so automation lanes rule again without a restart (Touch mode letting go).
   void releaseTouches() => _b.releaseTouches(_handle);
 
-  /// Runs [frames] of audio with no device, discarding it: for tests, which play the transport without a sound card.
-  /// Never call it while the device is on.
-  void pullForTest(int frames) {
+  /// Runs [frames] of audio with no device and returns the left channel: for tests, which play the transport without
+  /// a sound card. Never call it while the device is on.
+  Float32List pullForTest(int frames) {
     final l = calloc<Float>(frames), r = calloc<Float>(frames);
     try {
       for (var i = 0; i < frames; i += 512) {
         final n = frames - i < 512 ? frames - i : 512;
         _b.process(_handle, l + i, r + i, n);
       }
+      return Float32List.fromList(l.asTypedList(frames));
     } finally {
       calloc.free(l);
       calloc.free(r);
