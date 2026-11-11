@@ -1,7 +1,7 @@
 // Golden hashes of the fx-space effects (fx_space_test.cpp, fx_space_effects_match_their_golden_renders): id, busy settings, hash.
 // Recorded 2026-11-11 on the first version; change one only for an intended sound change.
-    {"org.caw.ensemble", false, 0x56adb5f8e164946bull},
-    {"org.caw.ensemble", true, 0x93f81f9897f84ff2ull},
+    {"org.caw.ensemble", false, 0x50ee1fca505f63d4ull},
+    {"org.caw.ensemble", true, 0x1fa60a9d455347faull},
     {"org.caw.doubler", false, 0xdcbd3b097bd92be1ull},
     {"org.caw.doubler", true, 0x3dc87399255cb4fbull},
     {"org.caw.vibrato", false, 0x63666758af0dbe74ull},

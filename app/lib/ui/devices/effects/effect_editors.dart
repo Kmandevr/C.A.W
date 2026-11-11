@@ -12,6 +12,7 @@ import 'eq_editor.dart';
 import 'filter_editor.dart';
 import 'mod_editors.dart';
 import 'space_editors.dart';
+import 'space/space_fx.dart'; // fx-space
 import 'utility_editors.dart';
 
 // An EQ band's knobs: `bandN_` or the built-in EQ's `bN_` (org.caw.eq).
@@ -64,5 +65,8 @@ final Map<String, DeviceEditorEntry> _byId = {
   'org.caw.utility': singlePage('utility', 'UTILITY', Icons.tune, DeviceFamily.utility, () => const StereoPage()),
   'org.caw.stereo.width': singlePage('width', 'WIDTH', Icons.tune, DeviceFamily.utility, () => const StereoPage()),
   'org.caw.stereo.balance': singlePage('balance', 'BALANCE', Icons.tune, DeviceFamily.utility, () => const StereoPage()),
+  // fx-space begin
+  ...fxSpaceEditors,
+  // fx-space end
 };
 

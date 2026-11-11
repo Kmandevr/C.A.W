@@ -122,7 +122,8 @@ const ModuleDescriptor& ensembleDescriptor() {
 }
 
 // 2 to 8 voices, each a delay swept by its own LFO (phases spread evenly around the cycle), read between samples
-// and panned across the field (alternately left and right, `spread` wide). The sweep's depth is worked out from the
+// (from the left and right inputs in turn, each around its own centre between 0.6 and 1.4 x `delay`) and panned
+// evenly across the field, `spread` wide. The sweep's depth is worked out from the
 // detune in cents and the rate (a sine of depth D samples at f Hz bends the pitch by at most 2 pi f D / rate), so
 // the pitch wobble stays as set whatever the rate. Vintage adds a fast, shallow second sine to the slow one, as the
 // bucket-brigade string ensembles did; Random glides between seeded random values.
@@ -147,7 +148,7 @@ protected:
             delay_[v].reset();
         }
         for (auto& f : tone_) f.clear();
-        mix_.reset();
+        mix_.reset(), dry_.reset();
         shown_ = 0;
     }
     void control(uint32_t at) noexcept override {
@@ -162,7 +163,7 @@ protected:
         // The most the delay's slope may reach for that detune, per LFO shape.
         const double slopePerDepth = motion == kMTriangle ? 4.0 * hz / sr : motion == kMVintage ? kTwoPi * hz * 2.5 / sr
                                                                                                  : kTwoPi * hz / sr;
-        const double depth = std::min(0.9 * base, dev / slopePerDepth);
+        const double depth = std::min(0.5 * base, dev / slopePerDepth);
         const double spread = std::clamp(param(kESpread, at), 0.0, 1.0);
         for (int v = 0; v < voices_; ++v) {
             const double phase = static_cast<double>(v) / voices_;
@@ -179,11 +180,13 @@ protected:
                 m = 0.7 * m + 0.3 * fast_[v].block(static_cast<int>(kControlFrames));
             }
             if (v == 0) shown_ = m;
-            delay_[v].set(base + depth * m, kControlFrames);
-            // Pan: voices alternate sides, the outer ones furthest out.
-            const double place = voices_ == 1 ? 0.0 : (2.0 * v / (voices_ - 1) - 1.0);
-            const double pan = spread * ((v & 1) ? -place : place);
-            pan_[v] = lib::constantPowerPan(pan);
+            // Each voice its own centre, 0.6 .. 1.4 x the delay in a shuffled order (not left to right), so the voices
+            // differ broadband and the sides decorrelate.
+            const double own = 0.6 + 0.8 * static_cast<double>((v * 3) % voices_) / (voices_ - 1);
+            delay_[v].set(base * own + depth * m, kControlFrames);
+            // Pan: the voices evenly from left to right, `spread` wide (each reads the left or right input in turn).
+            const double place = 2.0 * v / (voices_ - 1) - 1.0;
+            pan_[v] = lib::constantPowerPan(spread * place);
         }
         for (int v = voices_; v < kMaxVoices; ++v) delay_[v].set(base, kControlFrames);
         depthMs_ = depth * 1000.0 / sr;
@@ -191,7 +194,10 @@ protected:
         useTone_ = tone < 19999.0;
         for (auto& f : tone_) f.set(tone, 0.70710678118654752, sr);
         norm_ = 1.4142135623730951 / std::sqrt(static_cast<double>(voices_));
-        mix_.set(std::clamp(param(kEMix, at), 0.0, 1.0), kControlFrames);
+        // An equal-power blend: the voices are decorrelated from the dry, so their powers add.
+        const double m = std::clamp(param(kEMix, at), 0.0, 1.0);
+        mix_.set(detSin(0.5 * kPi * m), kControlFrames);
+        dry_.set(detCos(0.5 * kPi * m), kControlFrames);
     }
     void run(const float* inL, const float* inR, float* outL, float* outR, uint32_t n) noexcept override {
         for (uint32_t i = 0; i < n; ++i) {
@@ -208,9 +214,9 @@ protected:
             }
             wl *= norm_, wr *= norm_;
             if (useTone_) wl = tone_[0].lowpass(wl), wr = tone_[1].lowpass(wr);
-            const double m = mix_.next();
-            outL[i] = static_cast<float>(xl + (wl - xl) * m);
-            outR[i] = static_cast<float>(xr + (wr - xr) * m);
+            const double w = mix_.next(), d = dry_.next();
+            outL[i] = static_cast<float>(xl * d + wl * w);
+            outR[i] = static_cast<float>(xr * d + wr * w);
         }
     }
     uint32_t fillDisplay(float* out, bool) noexcept override {
@@ -226,7 +232,7 @@ protected:
 private:
     ModLine line_[2];
     lib::Lfo slow_[kMaxVoices], fast_[kMaxVoices];
-    Ramp delay_[kMaxVoices], mix_;
+    Ramp delay_[kMaxVoices], mix_, dry_;
     lib::PanGains pan_[kMaxVoices];
     lib::Svf tone_[2];
     int voices_ = 4;

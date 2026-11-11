@@ -7,6 +7,7 @@ import 'package:flutter/scheduler.dart';
 import '../engine/engine.dart';
 import 'arrange_fx.dart';
 import 'device_target.dart';
+import 'fx_space_display.dart'; // fx-space
 import 'project.dart';
 
 /// One frame of what a device shows besides its parameters, read from the engine at the meter rate.
@@ -118,6 +119,9 @@ DeviceDisplayFrame decodeDisplay(String componentId, List<double> f, int n) {
   double at(int i) => i < n ? f[i] : 0;
   Map<String, double> named(List<String> names, int from) =>
       {for (var i = 0; i < names.length && from + i < n; ++i) names[i]: f[from + i]};
+  // fx-space begin
+  if (decodeFxSpaceDisplay(componentId, f, n) case final space?) return space;
+  // fx-space end
   switch (componentId) {
     case 'org.caw.eq':
       final bins = at(0).toInt();

@@ -2,6 +2,7 @@
 import 'package:flutter/material.dart';
 
 import '../../theme.dart';
+import '../effects/space/space_fx.dart' show fxSpaceFamilies; // fx-space
 
 /// The families devices are coloured by (owner, 2026-11-10: "in the theme of the app, but more colorful").
 enum DeviceFamily { eq, dynamics, space, drive, filter, modulation, utility, synth, drums }
@@ -51,6 +52,7 @@ DeviceFamily? familyOfComponent(String id) => switch (id) {
       'org.caw.utility' || 'org.caw.stereo.width' || 'org.caw.stereo.balance' => DeviceFamily.utility,
       'org.caw.drum.kick' || 'org.caw.drum.snare' || 'org.caw.drum.hats' || 'org.caw.drum.kit' => DeviceFamily.drums,
       _ when id.startsWith('org.caw.synth.') || id == 'org.caw.bass' => DeviceFamily.synth,
+      _ when fxSpaceFamilies.containsKey(id) => fxSpaceFamilies[id], // fx-space
       _ => null,
     };
 
