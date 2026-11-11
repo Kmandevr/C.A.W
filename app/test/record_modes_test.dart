@@ -21,6 +21,8 @@ class FakeMidi implements MidiInput {
   Stream<MidiMessage> get messages => notes.stream;
   @override
   Stream<List<String>> get devices => names.stream;
+  @override
+  dynamic noSuchMethod(Invocation i) => i.isGetter ? const Stream<Never>.empty() : null;  // device ports, Bluetooth
 }
 
 class QuietState extends AppState {
