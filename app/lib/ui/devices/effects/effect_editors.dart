@@ -5,6 +5,7 @@ import '../../../engine/component_info.dart';
 import '../device_registry.dart';
 import '../kit/device_style.dart';
 import 'drive_editors.dart';
+import 'dynamics/catalog.dart' show fxDynamicsEditors; // fx-dynamics
 import 'ducker_editor.dart';
 import 'dynamics_editors.dart';
 import 'effect_page.dart';
@@ -64,5 +65,6 @@ final Map<String, DeviceEditorEntry> _byId = {
   'org.caw.utility': singlePage('utility', 'UTILITY', Icons.tune, DeviceFamily.utility, () => const StereoPage()),
   'org.caw.stereo.width': singlePage('width', 'WIDTH', Icons.tune, DeviceFamily.utility, () => const StereoPage()),
   'org.caw.stereo.balance': singlePage('balance', 'BALANCE', Icons.tune, DeviceFamily.utility, () => const StereoPage()),
+  ...fxDynamicsEditors, // fx-dynamics: dynamics, multiband, de-esser, clipper, phase distortion
 };
 

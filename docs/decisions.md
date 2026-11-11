@@ -27,6 +27,16 @@ updated: 2026-11-11
 
 **Still the roadmap's call:** Stages 8–10 stay after Release 1: Faust, plug-in hosting, and iOS/macOS/Linux builds.
 
+## 2026-11-11: Dynamics and Drive effects (fx-dynamics; choices to confirm)
+
+**Decision (owner, 2026-11-11):** "any effect you would reasonably want is already there", Kilohearts-style; all four groups equally important. The Dynamics and Drive group added Dynamics, Multiband dynamics with an OTT mode, a De-esser, a Clipper and Phase distortion, and five curves, spread and dynamics to the saturator (see [engine reference](engine.md#dynamics-and-drive-research-and-technique-fx-dynamics-2026-11-11)). **Choices made on the owner's behalf, to confirm:**
+- **Extend, don't duplicate:** the new distortion types are saturator modes (appended, so saved projects keep their mode), not a second distortion effect; expansion and upward compression live in Dynamics, not in the gate or compressor.
+- **Multiband opens in OTT mode at 50 % depth.** OTT's per-band numbers are the commonly quoted ones for Ableton's OTT preset, not confirmed ([Assumption]).
+- **Upward lift never spikes:** an instant-attack detector limits the lift, so the attack knob shapes only the downward side and expansion.
+- **Clipper overshoot:** with oversampling and without Clip to 0 dB the output can pass the ceiling by a few dB (the IIR half-bands' phase); clipping again would bring the aliases back. Clip to 0 dB guarantees full scale. A linear-phase half-band would reduce the overshoot at the cost of latency (a follow-up if wanted).
+- **Phase distortion's latency** is a fixed 48 frames (1 ms at 48 kHz), declared, so the swing is ±46 frames whatever the sample rate.
+- **Not built:** an envelope follower as a modulation source (projects don't route modulation outputs yet); Bitcrush's ADC/DAC quality and dither, Faturator's color and stereo turbo, and Shaper's drawn curve as their own controls.
+
 ## 2026-11-11: Settings as a category list, every setting real (choices to confirm)
 
 **Decision (owner):** Settings opens on a list of sections with icons; a search finds any setting and jumps to it, highlighted; new Audio and MIDI, Editing, Projects and files and Export settings; full control of the audio device and buffer; nothing hidden. **Choices made on the owner's behalf, to confirm:**

@@ -248,7 +248,12 @@ std::string number(double v) {
 
 }  // namespace
 
+// fx-dynamics begin
+const std::vector<BuiltinPreset>* fxDynamicsPresets(std::string_view id);  // builtin_fx_dynamics_presets.cpp
+// fx-dynamics end
+
 const std::vector<BuiltinPreset>& builtinPresets(std::string_view componentId) {
+    if (const auto* p = fxDynamicsPresets(componentId)) return *p;  // fx-dynamics
     if (componentId == kFlagship) return flagshipPresets();
     if (componentId == "org.caw.ducker") return duckerPresets();
     return kNone;
