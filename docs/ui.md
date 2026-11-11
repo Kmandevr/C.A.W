@@ -15,9 +15,8 @@ The owner's goal (2026-10-28) is a capable, lightweight music-production workspa
 - **Composition view:** a horizontal arrangement timeline with tracks and reusable MIDI clips. The old session grid is retired, not retained as an alternate view.
 - **Look:** neon but calm. The colours stay, glow is used sparingly, and transitions are short and simple.
 - **New files and startup** (owner, 2026-10-28):
-  - **New modules:** a new sound, effect, pattern or library starts as an empty file. A faint hint (not part of the file) shows an example header and first line until you start typing. Templates stay one choice away in the same New menu.
+  - **New files:** a new pattern or C++ component starts from a blank one. A faint hint (not part of the file) shows an example header and first line until you start typing. Templates stay one choice away in the same New menu.
   - **Startup (owner, 2026-11-04, replacing the 2026-10-28 startup screen):** the app opens straight into the last project, or the "First loop" template on a first run. New, New from template and Open are in the project menu ([UI plan](ui-plan.md)).
-  - With no header, an empty file is a byte-mode generator. That is how the language already works ([engine](engine.md#module-files-caw)).
 - **Look details** (owner, 2026-10-28):
   - **Calm neon** stays: near-black, thin neon lines, and glow only on what's active (playhead, selected notes, meters).
   - **No repeated titles or developer notes (owner, 2026-11-05):** a panel doesn't repeat its tab name as a heading, and notes about how the engine works stay out of the screens. Accent colours and card styles are not yet unified.
