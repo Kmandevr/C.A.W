@@ -746,13 +746,30 @@ TEST(the_flagship_fold_warp_folds_a_sine_into_odd_harmonics) {
     CHECK(a.left == b.left);
 }
 
+TEST(the_pluck_and_fm_bell_presets_darken_as_their_notes_fade) {
+    // The .caw synth.pluck and synth.fm as presets: bright at the start, duller later (their filter or FM index
+    // falls with an envelope).
+    Engine e(48000);
+    std::unique_ptr<ModuleProcessor> p = make(e);
+    if (!p) return;
+    for (const char* name : {"Pluck", "FM bell"}) {
+        Values v;
+        for (const auto& [id, x] : findBuiltinPreset(kId, name)->values) v.emplace_back(std::string(id), x);
+        p->reset();
+        const Stereo s = play(*p, {notes::noteOn(0, 1, 57, 1)}, 36000, v);
+        const std::vector<double> early = spectrum(s.left, 480, 4096), late = spectrum(s.left, 28000, 4096);
+        auto bright = [](const std::vector<double>& sp) { return bandPower(sp, 600, 8000, 4096) / bandPower(sp, 150, 300, 4096); };
+        if (!(bright(early) > 4 * bright(late))) cawtest::fail(__FILE__, __LINE__, std::string(name) + " does not darken");
+    }
+}
+
 TEST(flagship_presets_set_their_values_and_an_entry_names_one) {
     // Every preset names only Flagship's parameters, within their ranges.
     Engine e(48000);
     std::unique_ptr<ModuleProcessor> p = make(e);
     if (!p) return;
     const ModuleDescriptor& d = p->descriptor();
-    CHECK_EQ(builtinPresets(kId).size(), 5u);
+    CHECK_EQ(builtinPresets(kId).size(), 7u);
     for (const BuiltinPreset& preset : builtinPresets(kId))
         for (const auto& [id, v] : preset.values) {
             const int k = paramIndex(d, std::string(id));
