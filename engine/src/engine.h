@@ -74,6 +74,10 @@ public:
     // of the graph-working budget, so growing past 64 layers spreads it rather than multiplying it).
     size_t exportBuffersPerLayer() const noexcept { return exportPerSlot_; }
     size_t exportBufferBudget() const noexcept { return exportPerSlot_ * static_cast<size_t>(kExportBudgetSlots); }
+    // Control thread: bytes the export buffers and the slots' export pointer tables hold now (a table a
+    // larger one replaced counts until the audio thread hands it back); setProject keeps it within
+    // exportBufferBudget() buffers' worth.
+    size_t exportBytes() const noexcept;
 
     // Control thread. Each returns quickly; compiling happens here, never on the audio thread.
     std::string setProject(const ProjectSpec& p);  // live: commands are applied by the audio callback
@@ -168,6 +172,8 @@ private:
     struct Retired;
     struct AutomationData;
     struct ExportPool;
+    struct ExportTable;
+    void dropExportTable(ExportTable* t) noexcept;  // control thread
     struct MixGraph;  // the graph that routes slots, folder buses and master (engine.cpp)
     struct SlotTable;  // the slots, their mix graph and order list at one capacity (engine.cpp)
     struct DelayLine;  // a track's latency-compensation delay (engine.cpp)
@@ -240,8 +246,8 @@ private:
     const double sr_;
     double trackGainCoef_ = -1.0;  // audio thread: the track gain glide's per-sample factor, worked out on first use
     const EngineResourceBudget resourceBudget_;
-    // Export buffers each slot may hold: fixed at construction from the budget (as the first export
-    // pool sized it at 64 layers), so every slot added by a grow gets the same.
+    // Export buffers one layer may hold: fixed at construction from the budget (a 65-slot share), so
+    // every slot added by a grow gets the same. Each slot's pointer table holds only what its chain exports.
     const size_t exportPerSlot_;
     int maxLayers_ = kInitialLayerCapacity;  // set once in the constructor
     int pendingMax_ = 0;                     // pending_ entries; set once in the constructor
