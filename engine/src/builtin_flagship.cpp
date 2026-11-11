@@ -103,21 +103,26 @@ constexpr uint32_t modParam(uint32_t s, uint32_t p) { return kModBase + s * kMod
 constexpr uint32_t kVoiceMode = kModBase + kSlots * kModCount, kGlide = kVoiceMode + 1;
 constexpr uint32_t kViaBase = kGlide + 1;  // modN_via: a second source the slot's amount is multiplied by
 constexpr uint32_t viaParam(uint32_t s) { return kViaBase + s; }
-constexpr uint32_t kParamCount = kViaBase + kSlots;
-static_assert(kParamCount == 209, "the parameter list's size is part of the documented layout");
+// Added after the via sources (2026-11-11, #171 FM warp): each oscillator's FM ratio, the modulator's speed as a
+// whole multiple of the note (the FM warp only). Appended for the same reason; not mod destinations.
+constexpr uint32_t kFmRatioBase = kViaBase + kSlots;
+constexpr uint32_t fmRatioParam(uint32_t o) { return kFmRatioBase + o; }
+constexpr uint32_t kParamCount = kFmRatioBase + kOscs;
+static_assert(kParamCount == 212, "the parameter list's size is part of the documented layout");
 
 enum Source : int {
     kSrcNone, kSrcEnv1, kSrcEnv2, kSrcEnv3, kSrcLfo1, kSrcLfo2, kSrcLfo3, kSrcRandom, kSrcVelocity, kSrcNote,
     kSrcBend, kSrcPressure, kSrcTimbre, kSrcModWheel, kSrcAccent, kSourceCount
 };
 enum FilterType : int { kLadderLp, kLadderHp, kLadderBp, kSvfLp, kSvfHp, kSvfBp, kSvfNotch, kComb, kFormant, kFilterTypeCount };
-enum Warp : int { kWarpNone, kWarpBend, kWarpSync, kWarpMirror, kWarpQuantize };
+enum Warp : int { kWarpNone, kWarpBend, kWarpSync, kWarpMirror, kWarpQuantize, kWarpFm, kWarpFold, kWarpCount };
 enum Dest : int { kToFilter1, kToFilter2, kToBoth, kToBypass };
 enum VoiceMode : int { kPoly, kMono, kLegato };
 
 constexpr std::string_view kOffOn[] = {"Off", "On"};
 constexpr std::string_view kTables[] = {"Basic", "Analog", "Vocal", "Harmonic", "Classic"};
-constexpr std::string_view kWarps[] = {"None", "Bend", "Sync", "Mirror", "Quantize"};
+constexpr std::string_view kWarps[] = {"None", "Bend", "Sync", "Mirror", "Quantize", "FM", "Fold"};
+static_assert(sizeof(kWarps) / sizeof(kWarps[0]) == kWarpCount);
 constexpr std::string_view kStacks[] = {"Off", "Octave", "2 octaves", "Fifth", "Major chord", "Minor chord", "Harmonics"};
 constexpr std::string_view kDests[] = {"Filter 1", "Filter 2", "Both", "Bypass"};
 constexpr std::string_view kFilterTypes[] = {"Ladder LP", "Ladder HP", "Ladder BP", "SVF LP", "SVF HP",
@@ -247,6 +252,8 @@ public:
         for (uint32_t s = 0; s < kSlots; ++s)
             pick("mod" + std::to_string(s + 1) + "_via", "Mod " + std::to_string(s + 1) + " scaled by", kSrcNone, kSources,
                  count(kSources));
+        for (uint32_t o = 0; o < kOscs; ++o)
+            whole("osc" + std::to_string(o + 1) + "_fm_ratio", "Osc " + std::to_string(o + 1) + " FM ratio", 1.0, 1.0, 16.0);
     }
 
 private:
@@ -437,10 +444,24 @@ const Tables& tables() {
 
 inline float whole(float t) noexcept { return static_cast<float>(static_cast<int32_t>(t)); }  // floor, for t >= 0
 
+// sin(2 pi u) for u >= 0 (cycles), within about 0.001 of the true sine: a parabola refined once (no trig, no
+// branch). The FM and fold warps' modulator; at this error it is a slightly different timbre, not noise.
+inline float sineCycles(float u) noexcept {
+    const float x = 2.0f * (u - whole(u)) - 1.0f;  // -1..1: sin(2 pi u) = -sin(pi x)
+    const float y = 4.0f * x * (1.0f - std::fabs(x));
+    return -(y + 0.225f * (y * std::fabs(y) - y));
+}
+
 // The phase t (0..1) after the warp. w1, w2 are worked out at the control rate.
 template <int W>
 inline float warp(float t, float w1, float w2, float w3) noexcept {
-    if constexpr (W == kWarpBend) {
+    if constexpr (W == kWarpFm) {
+        // Phase modulation by a sine w2 (a whole number) times per cycle, depth w1 cycles (below 1): the cycle
+        // stays periodic, so FM at a harmonic ratio costs one table read like the other warps.
+        float y = t + w1 * sineCycles(w2 * t) + 1.0f;
+        y -= whole(y);
+        return y < 0.99999994f ? y : 0.99999994f;
+    } else if constexpr (W == kWarpBend) {
         const float y = t * (1.0f + w1 * (1.0f - t));  // pulls the cycle's start forward: 0 and 1 stay put
         return y < 0.99999994f ? y : 0.99999994f;
     } else if constexpr (W == kWarpSync) {
@@ -461,6 +482,7 @@ struct OscKey {
     int table = -1;
     double position = 0, level = 0, pan = 0, pitch = 0, amount = 0;
     int warp = 0;
+    int fmRatio = 1;
     lib::UnisonSettings unison{-1};
     bool operator==(const OscKey&) const = default;
 };
@@ -570,6 +592,10 @@ void addStack(const OscVoice& o, float* L, float* R, uint32_t n, uint32_t first)
                 const float u = B[k] + (B[k + 1] - B[k]) * fr;
                 v += (u - v) * mix;
             }
+            if constexpr (W == kWarpFold) {
+                // A wavefolder on the read value (lib::fold's sin(x drive pi / 2)), drive w1, blended in by w2.
+                v += w2 * (sineCycles(0.25f * w1 * v + 64.0f) - v);
+            }
             L[i] += v * gl;
             R[i] += v * gr;
         }
@@ -588,6 +614,8 @@ void addOscillator(const OscVoice& o, float* L, float* R, uint32_t n, uint32_t f
         case kWarpSync: addStackWarp<kWarpSync>(o, L, R, n, first); break;
         case kWarpMirror: addStackWarp<kWarpMirror>(o, L, R, n, first); break;
         case kWarpQuantize: addStackWarp<kWarpQuantize>(o, L, R, n, first); break;
+        case kWarpFm: addStackWarp<kWarpFm>(o, L, R, n, first); break;
+        case kWarpFold: addStackWarp<kWarpFold>(o, L, R, n, first); break;
         default: addStackWarp<kWarpNone>(o, L, R, n, first); break;
     }
 }
@@ -1401,7 +1429,8 @@ private:
         o.pitchOffset[2] = clampd(at(kOscFine), -100.0, 100.0) / 100.0;
         key.pitch = v.pitch + o.pitchOffset[0] + o.pitchOffset[1] + o.pitchOffset[2];
         key.amount = clampd(at(kOscWarpAmount), 0.0, 1.0);
-        key.warp = key.amount > 0.0 ? clampi(at(kOscWarp), 0, 4) : kWarpNone;
+        key.warp = key.amount > 0.0 ? clampi(at(kOscWarp), 0, kWarpCount - 1) : kWarpNone;
+        key.fmRatio = key.warp == kWarpFm ? clampi(P(fmRatioParam(index)), 1, 16) : 1;
         lib::UnisonSettings& u = key.unison;
         // Eco quality caps each oscillator at 4 copies (the outermost and the centre kept: the stack is laid out
         // again for 4, so its detune and spread stay as wide).
@@ -1477,6 +1506,16 @@ private:
                 o.w2 = static_cast<float>(1.0 / steps);
                 break;
             }
+            case kWarpFm:
+                o.w1 = static_cast<float>(0.75 * amount);  // up to 0.75 cycles: an index of about 4.7 radians
+                o.w2 = static_cast<float>(key.fmRatio);
+                faster = 1.0 + kTwoPi * 0.75 * amount * key.fmRatio;  // the fastest the modulated phase runs
+                break;
+            case kWarpFold:
+                o.w1 = static_cast<float>(1.0 + 7.0 * amount);  // drive 1..8
+                o.w2 = static_cast<float>(amount < 0.25 ? 4.0 * amount : 1.0);
+                faster = o.w1;  // folding spreads the harmonics about as far as the drive
+                break;
             default: break;
         }
         o.warpMode = key.warp;
