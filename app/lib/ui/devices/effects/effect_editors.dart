@@ -15,6 +15,7 @@ import 'filters/filters_editors.dart';
 // fx-filters end
 import 'filter_editor.dart';
 import 'mod_editors.dart';
+import 'racks/rack_editors.dart';  // fx-racks
 import 'space_editors.dart';
 import 'space/space_fx.dart'; // fx-space
 import 'utility_editors.dart';
@@ -80,5 +81,8 @@ final Map<String, DeviceEditorEntry> _byId = {
   // fx-filters begin
   ...filtersEditors,
   // fx-filters end
+  // fx-racks begin
+  ...rackEditors,
+  // fx-racks end
 };
 

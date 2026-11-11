@@ -504,7 +504,7 @@ TEST(fx_space_the_convolver_plays_a_loaded_file_exactly_after_its_latency_and_sa
     CHECK_EQ(written, 0u);
 }
 
-// The app loads a WAV impulse into a playing convolver through caw_engine_set_component_state (API 11): the chain is
+// The app loads a WAV impulse into a playing convolver through caw_engine_set_component_state (API 14): the chain is
 // rebuilt off the audio thread with the file as the convolver's state, the other effects keep their values, and a bad
 // file, a wrong index or a missing layer change nothing.
 TEST(fx_space_a_playing_convolver_takes_a_wav_through_the_c_api) {

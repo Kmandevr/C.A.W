@@ -6,6 +6,39 @@ updated: 2026-11-11
 
 # Decisions
 
+## 2026-11-11: VST3 interface headers for the plug-in builder (#162)
+
+- **Licence [Fact, checked 2026-11-11]:** Steinberg's VST3 SDK is MIT. The `LICENSE.txt` of `steinbergmedia/vst3sdk`, `vst3_pluginterfaces`, `vst3_base` and `vst3_public_sdk` (default branches, read 2026-11-11) is the MIT License, "Copyright (c) 2026, Steinberg Media Technologies GmbH"; the `vst3_pluginterfaces` tag `v3.8.0_build_66` (commit `31d6eeba`, 2025-10-20) already carries it, so the change came with VST 3.8.0. No GPL or proprietary licence remains on the parts used.
+- **Dependency:** `steinbergmedia/vst3_pluginterfaces` **v3.8.1_build_84** (commit `4f547e8e`, 2026-08-11, the latest tag on 2026-11-11), MIT. Only the interface headers and two of their files (`base/funknown.cpp`, `base/coreiids.cpp`) are compiled; the SDK's helper classes, VSTGUI and the validator are not fetched. Fetched at configure time by `caw_add_vst3_plugin` (`engine/cmake/CAWVst3.cmake`), not vendored, not in the app or the engine library; the build stops if the fetched `LICENSE.txt` is not MIT.
+- **Why:** VST3 is the export target after CLAP (roadmap 9.3): the same component library builds as a `.vst3` bundle through a second wrapper around the C interface ([native module SDK](native-module-sdk.md#export-as-a-vst3-plug-in)).
+- **[Assumption]** the "VST" name and logo are trademarks with their own usage guidelines (the repository README's "License & Usage guidelines"), separate from the code licence; C.A.W does not use the logo. Not checked further.
+
+## 2026-11-11: One drum instrument, built (choices to confirm)
+
+**Decision (Claude, for the owner to confirm; [engine](engine.md#drums-orgcawdrums)):**
+- **Flat parameter ids, 64 pads × 162** (`a1_body_freq` .. `d16_rnd_pos`, 10392 in all with the 24 kit-wide ones, each with a `group` tag). Why: every knob stays automatable, modulatable, MIDI-mappable and in presets and undo with no new machinery. The trade-off: a 2.9 MB descriptor for the app to parse, about 6 MB of parameter state per instance, and a knob page that must be built from the groups (no generic page can show 10392 knobs). The alternative, a pad's deep settings in the component's state with only a few automatable knobs per pad, keeps the descriptor small but loses automation of most knobs. **To confirm.**
+- **The smallest descriptor extension:** `ParameterDescriptor::group` (a slash path, `"a1/body"`, `"kit/glue"`), emitted as `"group"` by `caw_engine_components` for built-ins only; the plain-C component interface is unchanged.
+- **Explode to tracks, not multi-output (for now).** The instrument chain has one stereo output; carrying a component's extra outputs into child tracks needs the chain, the mixer graph and the project's routing changed. So the per-pad `out` is stored and the processor keeps nine buses (Out 2..9 skip the kit effects), and `caw_drums_explode` gives the app one Single-mode Drums per used pad, with the notes to move. Multi-output is a follow-up. **To confirm.**
+- **Samples by reference in the project** (`"samples": [{"slot", "path"}]` or `{"slot", "builtin"}`), decoded by the engine on the control thread, instead of a call passing float data: the project then reloads and exports with its samples. Built-in samples are the library's sounds rendered by the engine (nothing to license). Mono, 30 s a slot, 64 MB an instance, WAV only. The app must copy a user's file somewhere it keeps (a `content://` file can't be opened by path). **[Assumption]**
+- **Bank layout:** bank A's Auto notes are 36..51 (the General MIDI keys, so the kits' sounds sit where GM puts them), each bank the next 16, from a configurable `base_note`. The default kit (808) fills bank A; banks B..D start empty.
+- **Defaults made for the owner:** the old drums' sounds carried over as closely as measured (their renders within 1 dB in level); centre-panned voices at full level on both sides (a balance, not constant power); the variation's sequence restarts at every Play, so a render repeats; a random sound is level-matched to about −1 dBFS; quality Eco/Normal/High sets the drives' oversampling (1/2/4×), the metal's band-limiting (none/polyBLEP/2× rate) and the resonator's modes (8/16/32).
+- **API 11** (10 is the settings redesign's): `caw_drums_info`, `caw_drums_randomize`, `caw_drums_explode`, and the component entry's `samples`.
+- **The deep settings ("Drums: deep settings and real quality", below), as built:**
+  - **Extend, don't add a second instrument:** the new controls are new layers on every pad (`press`, `penv`, `sub`, and the effects split into `drive`, `filter`, `eq`, `dyn`, `space`), so a pad's ids went from 119 to 162; nothing shipped used the old layout, so `press_dest`/`press_amt` and `body_sub`/`body_sub_oct` were replaced (by one amount per pressure destination, and by the Sub layer) rather than kept beside them.
+  - **The pitch-shape editor is four breakpoints** (time, semitones, curve per segment) next to the analog Curve mode, not a free-form drawing: it stays a set of automatable knobs. **To confirm** that four points are enough.
+  - **The room is a send** now: each pad's `room_send` (default 1) feeds it, and `room` is its return level (it was a dry/wet mix on the whole bus); the Clean sub never reaches it. **To confirm.**
+  - **Width keeps the low end mono** with a 4th-order high-pass on the side signal (`width_hz`, 200 Hz default), and a Clean sub is added after the pan, so it is always mono.
+  - **The clipper's ceiling is exact** (a hard limit at full scale after the oversampled curve), on each pad and on the kit.
+  - **Note learn is the app's job:** the engine reports the last note (key, channel, velocity, a count) in the display data; the app writes it into the pad's `note`.
+
+## 2026-11-11: One drum instrument (owner)
+
+**Decision (owner, verbatim):** "take all the drum plugs and make them in to one that can make any kick, hihat, snare, tom, crash, rimshot, etc. It should make all the drum sounds a drum can make and be extremely customisable. The kick should be more than it is, same with the hat, to the point that it's just crazy what it can do."
+- **Structure:** "Make it work like a MIDI kit with pads, or just standalone, one sound per track": a Kit mode (pads on MIDI notes, a GM-style default map) and a Single mode (one sound per track, any note).
+- **Sound source:** synthesis plus a sample layer. **Editor** (for the app): layers as stacked cards, a draggable waveform hero, a Character strip of macros.
+- **Extras, all four:** randomize and mutate; per-hit variation (velocity layers and round-robin-style subtle changes); choke groups and per-pad outputs; pad and kit effects.
+- **Later the same day:** 16 pads × 4 banks (A..D) = 64 pads, like an MPC; pads not used cost nothing and only sounding voices run. Pitch: "Both, switchable": a pitch tracking switch per sound (off a fixed pitch; on chromatic from the note, with a mono option and glide between overlapping notes, for 808 basslines), on Kit pads too. Samples: the user's files and a small built-in pack of one-shots the engine renders from presets (nothing to license), listed and loaded through the app. Outputs: "Each one will be routed to a specific note so you only really need one track to work it, but it should also allow an automatic create-per-track workflow. And have support for native pads and stuff like that, like hardware pads that use MIDI natively": one track by default with an editable note map per pad, an "explode to tracks" workflow, per-pad note learn, a channel option (e.g. 10), velocity, and polyphonic pressure as a modulation source (to choke or damp a cymbal by squeezing). The old kick, snare, hats and kit migrate to it.
+
 ## 2026-11-11: Drums: deep settings and real quality, every genre (owner)
 
 **Owner's words:** "The drum instrument needs to have an in-depth set of settings and effects to make all the sounds extremely versatile and be actual good quality. Research how different kicks, snares, hats etc. are made and make sure it has all of the settings. You should be able to make a kick a legitimate dubstep kick, an 808 kick, or just a normal-sounding kick. Make it so it can even sound acoustic even though it's generated."
@@ -61,6 +94,17 @@ updated: 2026-11-11
 
 **Still the roadmap's call:** Stages 8–10 stay after Release 1: Faust, plug-in hosting, and iOS/macOS/Linux builds.
 
+## 2026-11-11: Racks and the effect browser (fx-racks, choices to confirm)
+
+**Decision (owner):** a multiband rack (as Multipass) and an FX rack with modulators (as Snap Heap); the browser's nine tabs, search, favourites, recents, a description and icon per effect. **Choices made on the owner's behalf, to confirm** ([engine](engine.md#racks-containers-fx-racks), [UI](ui.md#the-effect-browser)):
+- **Children live in the rack's parameters** (`<slot>_fx` holds a 24-bit hash of the child's id, the child's knobs `s2.cutoff`), so the project file, presets, undo and automation needed no new format.
+- **No racks inside racks**, so there is no depth to bound. **Sizes:** the FX rack holds 8 effects in one serial lane and has 16 routes; the multiband rack holds 4 effects a band. Snap Heap's parallel lanes, Multipass's Pre/Post FX lanes and per-lane mix, and modulators inside the multiband rack are not built; a multiband rack's knobs take automation, not modulation (a rack can't sit in an FX rack), until #161.
+- **Fixed modulators** (4 LFOs, 2 followers, 2 note envelopes, random, 8 macros) instead of Kilohearts' free list of up to 32.
+- **Modulation runs on a 16-frame grid**, as the Flagship's.
+- **The modulation route record is meant to be reused for #161** (route anything anywhere): [Proposal] in [engine](engine.md#racks-containers-fx-racks); #161's design is still the owner's.
+- **Browser:** an All tab before the nine; Favourites are the Files favourites; Recently used keeps the last 12 picks app-wide; an effect no catalog lists goes under Utility.
+- **Factory presets:** FX rack Wobble filter, Dub space, Ducked delay, Drifting tape, Note sweep; multiband rack Multiband glue, Air exciter, Tight low end, Split space.
+
 ## 2026-11-11: Dynamics and Drive effects (fx-dynamics; choices to confirm)
 
 **Decision (owner, 2026-11-11):** "any effect you would reasonably want is already there", Kilohearts-style; all four groups equally important. The Dynamics and Drive group added Dynamics, Multiband dynamics with an OTT mode, a De-esser, a Clipper and Phase distortion, and five curves, spread and dynamics to the saturator (see [engine reference](engine.md#dynamics-and-drive-research-and-technique-fx-dynamics-2026-11-11)). **Choices made on the owner's behalf, to confirm:**
@@ -86,7 +130,7 @@ updated: 2026-11-11
 
 ## 2026-11-11: Space, Modulation and Utility effects (fx-space, choices to confirm)
 
-**Decision (Claude, for the owner to confirm):** eleven new built-ins for the browser's Space, Modulation and Utility tabs (convolver, shimmer, Haas, ensemble, doubler, vibrato, tremolo, auto-pan, rotary, imager, channel mixer; [engine](engine.md#c-api-engineincludecawh)) with plugin UIs ([app](app.md)). No new dependency. One C API addition: `caw_engine_set_component_state`, API version 11 (the next free number when this branch was merged; if another branch took 11 first, this one moves to the next).
+**Decision (Claude, for the owner to confirm):** eleven new built-ins for the browser's Space, Modulation and Utility tabs (convolver, shimmer, Haas, ensemble, doubler, vibrato, tremolo, auto-pan, rotary, imager, channel mixer; [engine](engine.md#c-api-engineincludecawh)) with plugin UIs ([app](app.md)). No new dependency. One C API addition: `caw_engine_set_component_state`, API version 14 (the next free number after the drums and meters branches).
 - **New effects beside the old ones, not extensions:** the ensemble is a separate multi-voice unit (`org.caw.chorus` stays the small three-knob chorus, its presets untouched); the imager is multiband with meters (`org.caw.utility` and `org.caw.stereo.width` stay); the shimmer reuses the reverb kernel as its own device rather than a mode of `org.caw.reverb.pro`.
 - **Impulse responses are generated, not shipped:** nine types from seeded noise, chirps, combs and grains, so nothing is licensed. A user WAV is decoded on the control thread with every size checked, capped at 10 s and 16 MB, and stored in the project (base64 of the file) so it travels with it; a 10 s stereo file at 48 kHz adds up to about 5 MB to the project (the decoded floats, base64).
 - **Loading a WAV rebuilds the chain:** the other effects on that track keep their values and saved state but restart their running sound (a delay's echoes) with a 20 ms crossfade. An undo of the load changes the project but not what plays until a reload.

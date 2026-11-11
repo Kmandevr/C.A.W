@@ -12,6 +12,7 @@
 
 #include "component_chain.h"
 #include "execution.h"
+#include "meters.h"
 #include "module_registry.h"
 #include "pattern.h"
 #include "program.h"
@@ -112,7 +113,7 @@ public:
     // id: the master's; its instrument has index kInstrumentIndex), as each component's save_state writes it now; store it in the project so a
     // reload or an export starts from it. {"ok":false,...} if the layer has no chain.
     std::string componentStatesJson(const std::string& layerId);
-    // Gives a playing native component a new saved state (API version 11): the convolver's WAV impulse, a preset's
+    // Gives a playing native component a new saved state (API version 14): the convolver's WAV impulse, a preset's
     // state. The component's chain is rebuilt here, on the control thread, with every component's current values
     // and state and this one's replaced, then crossfaded in as a project update would. False (nothing changes) when
     // there is no such component or it refuses the state.
@@ -164,6 +165,14 @@ public:
     void clearOverload();
     Meters meters();
     bool layerMeter(int index, LayerMeter& out);
+    // The master's loudness (BS.1770-5 / EBU Tech 3341: momentary, short-term, integrated since the last Play or
+    // reset) and true peak, after the safety limiter (meters.h). Not the audio thread.
+    LoudnessMeter::Reading loudness();
+    void resetLoudness();
+    // Stereo correlation (-1..1, 0 while silent) of the master, or of a project layer (track or folder bus, what
+    // it sends on). False for an index that is not a project layer.
+    float masterCorrelation() const noexcept { return masterCorrelation_.read(); }
+    bool layerCorrelation(int index, float& out);
     int scope(int index, float* out, int n);  // a project layer index, kScopeMaster or kScopeAudition
     int64_t loopLength();                     // samples in the project loop
     // Mix-graph routing updates the graph refused; always 0 unless the routing derivation is wrong.
@@ -372,6 +381,8 @@ private:
     std::atomic<uint32_t> routingRejections_{0};  // mix-graph routes the executor refused (never expected)
     std::unique_ptr<std::atomic<float>[]> masterScope_;
     std::atomic<int> masterScopePos_{0};
+    std::unique_ptr<LoudnessMeter> loudness_;  // the master's (about 100 KB: its gating histogram)
+    CorrelationMeter masterCorrelation_;
 
     // ---- control-thread state ----
     std::mutex ctl_;

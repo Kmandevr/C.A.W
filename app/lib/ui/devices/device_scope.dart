@@ -83,7 +83,14 @@ Color modSourceColor(ModSource s) => switch (s) {
       ModSource.lfo1 => Neon.blue,
       ModSource.lfo2 => Color.lerp(Neon.blue, Neon.violet, 0.6)!,
       ModSource.lfo3 => Color.lerp(Neon.blue, Colors.white, 0.5)!,
+      ModSource.lfo4 => Color.lerp(Neon.blue, Neon.green, 0.35)!,
       ModSource.random => Neon.pink,
+      ModSource.follow1 => Color.lerp(Neon.yellow, Neon.pink, 0.45)!,
+      ModSource.follow2 => Color.lerp(Neon.yellow, Neon.pink, 0.75)!,
+      ModSource.macro1 || ModSource.macro2 || ModSource.macro3 || ModSource.macro4 =>
+        Color.lerp(Neon.violet, Colors.white, 0.1 * (s.index - ModSource.macro1.index))!,
+      ModSource.macro5 || ModSource.macro6 || ModSource.macro7 || ModSource.macro8 =>
+        Color.lerp(Neon.violet, Neon.pink, 0.15 * (s.index - ModSource.macro5.index + 1))!,
       ModSource.none => Neon.dim,
       _ => Neon.yellow,
     };

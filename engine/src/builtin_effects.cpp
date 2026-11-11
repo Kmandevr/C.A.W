@@ -10,6 +10,8 @@
 #include "builtin_fx_filters.h"
 // fx-filters end
 
+#include "builtin_fx_racks.h"  // fx-racks
+
 #include <algorithm>
 
 namespace caw {
@@ -172,6 +174,9 @@ void registerBuiltinEffects(ModuleRegistry& registry) {
     // fx-filters begin
     fx::registerFilters(registry);
     // fx-filters end
+    // fx-racks begin
+    fx::registerRacks(registry);  // builtin_fx_racks*.cpp (a rack looks its children up when it is built)
+    // fx-racks end
 }
 
 }  // namespace caw

@@ -461,7 +461,10 @@ void main() {
     final e = Engine.create();
     final engine = {for (final c in await e.nativeComponents()) c.id: c};
     e.dispose();
-    for (final id in [...builtinEffects, ...builtinInstruments]) {
+    for (final id in retiredDrums) {
+      expect(engine.containsKey(id), isFalse, reason: '$id is retired');
+    }
+    for (final id in [...builtinEffects, ...engineInstruments]) {
       final want = engine[id], have = builtinInfo(id);
       expect(want, isNotNull, reason: id);
       expect([for (final p in have.parameters) (p.id, p.min, p.max, p.defaultValue, p.choices.join('|'))],

@@ -39,9 +39,15 @@ extern "C" {
    10 (2026-11-11): the audio device's choice and state (caw_audio_devices, caw_audio_configure,
    caw_audio_status), the metronome's sound and volume (caw_engine_set_metronome_sound) and a test tone
    (caw_engine_test_tone). Nothing else changes.
-   11 (2026-11-11): caw_engine_set_component_state (a playing component's new saved state: the convolver's WAV
+   11 (2026-11-11): org.caw.drums (64 pads; the old org.caw.drum.* migrate to it through caw_migrate_instrument):
+   caw_drums_info, caw_drums_randomize, caw_drums_explode; a component entry's "samples" ([{"slot", "path"} or
+   {"slot", "builtin"}]) fills its sample slots; a parameter in caw_engine_components may carry "group".
+   12 (2026-11-11, roadmap 2.6): live loudness and correlation meters (caw_engine_loudness,
+   caw_engine_loudness_reset, caw_engine_layer_correlation). Nothing else changes.
+   13 (2026-11-11): 11 and 12 together (the drums branch and the meters branch merged).
+   14 (2026-11-11): caw_engine_set_component_state (a playing component's new saved state: the convolver's WAV
    impulse). Nothing else changes. */
-#define CAW_API_VERSION 11
+#define CAW_API_VERSION 14
 /* The component index that names a layer's native instrument rather than one of its "components". */
 #define CAW_INSTRUMENT_INDEX 0xFFFFFFFFu
 
@@ -174,7 +180,7 @@ CAW_API int32_t caw_engine_component_display(CawEngine* e, const char* layer_id,
    index CAW_INSTRUMENT_INDEX). Store "state" and
    "version" (as "state_version") in the project's entry so a reload or an export starts from it. */
 CAW_API char* caw_engine_component_states(CawEngine* e, const char* layer_id);
-/* A new saved state for a playing component (API version 11), addressed as in caw_engine_set_component_param:
+/* A new saved state for a playing component (API version 14), addressed as in caw_engine_set_component_param:
    [size] bytes at [data] (0: an empty state) as save_state would write them, at state [version]. The convolver
    (org.caw.convolver) also takes a WAV file's bytes as its state: its impulse response (checked as untrusted, at
    most 10 s). The component's chain is rebuilt off the audio thread with every component's current values and
@@ -327,6 +333,26 @@ CAW_API char* caw_sample_pack_render(const char* request_json, int32_t trust_lev
    Needs no engine; free with caw_free. The engine migrates a project it is given too. */
 CAW_API char* caw_migrate_instrument(const char* entry_json);
 
+/* Drums (API version 11; docs/engine.md "Drums"). Pure functions: no engine needed; free each result with caw_free.
+   caw_drums_info: the instrument's layout as JSON: {"ok", "banks", "pads_per_bank", "pads", "parameters", "globals",
+   "layers": [{"id", "name", "params": [suffix]}], "types": [name], "sounds": [{"name", "type", "description",
+   "params": {suffix: value}}], "kits": [{"name", "preset", "description", "pads": {pad: sound}}], "samples": [built-in
+   sample names], "gm": [{"note", "name", "pad"}], "display": {offsets}}. A sound's params are a pad's values
+   ("body_freq"); prefix them with the pad ("a1_") to set them.
+   caw_drums_randomize: a random (current_json NULL or with no "params") or mutated sound of drum `type` (an index of
+   "types"; -1 keeps the current sound's type) for pad `pad` (0 = A1 .. 63 = D16): the same type, seed, amount and
+   current values always give the same result. amount 0..1 is how far each knob moves toward its random target
+   (a fresh sound uses 1 when amount is 0); every drawn knob stays inside the type's range (a random kick is still a
+   kick). current_json: {"params": {id: value}} with ids prefixed for that pad or bare suffixes. Returns {"ok",
+   "type", "pad", "params": {"a1_...": value}} with every one of the pad's parameters.
+   caw_drums_explode: for a Drums instrument entry ({"id", "params", "samples"}), one track per used pad:
+   {"ok", "tracks": [{"pad", "name", "notes": [key] | "other" | "all" | {"channel": n}, "choke", "instrument":
+   {"id", "params", "samples"}}], "kit": {the kit effects' values}}: each track's instrument plays that pad's sound
+   alone (Single mode, pad A1); the caller moves the pad's notes to it. */
+CAW_API char* caw_drums_info(void);
+CAW_API char* caw_drums_randomize(int32_t type, uint32_t seed, double amount, int32_t pad, const char* current_json);
+CAW_API char* caw_drums_explode(const char* entry_json);
+
 /* Sound quality, for the device's budget: Eco lowers oversampling, caps unison copies at 4, halves display
    updates and thins the built-in reverbs; High raises oversampling where a built-in has it. Takes effect at
    the next block (settings that size memory, such as oversampling, at the next project update). */
@@ -385,6 +411,34 @@ CAW_API void caw_engine_set_metronome_sound(CawEngine* e, double volume, int32_t
    opening or closing the device drops it. */
 CAW_API void caw_engine_test_tone(CawEngine* e, double seconds);
 CAW_API int32_t caw_engine_test_tone_sounding(CawEngine* e);
+
+/* Live loudness and correlation meters (API version 12, roadmap 2.6), read from the UI at 10 Hz or more. The
+   master's loudness is measured on what the device plays (after the master chain and the safety limiter, the test
+   tone included) per ITU-R BS.1770-5 (11/2023) and EBU Tech 3341 V4 (11/2023): K-weighted,
+   left and right weighted 1. Momentary is the last 400 ms, short-term the last 3 s (both ungated), integrated the
+   gated loudness (400 ms blocks every 100 ms, the -70 LUFS absolute gate and the relative gate 10 LU below) since
+   the last Play or caw_engine_loudness_reset. True peak is 4x oversampled with BS.1770-5 Annex 2's interpolating
+   filter (2x at 96 kHz, none from 192 kHz). A value with no reading yet, or of silence, is CAW_METER_NONE. */
+#define CAW_METER_NONE (-200.0f)
+typedef struct CawLoudness {
+    float momentary_lufs;
+    float short_term_lufs;
+    float integrated_lufs;
+    float momentary_max_lufs;   /* the loudest since the last reset (EBU Mode's maxima) */
+    float short_term_max_lufs;
+    float true_peak_l_dbtp;     /* each side's true peak since the last read */
+    float true_peak_r_dbtp;
+    float true_peak_max_dbtp;   /* the louder side's, since the last reset */
+    float correlation;          /* the master's stereo correlation: 1 mono, 0 unrelated or silent, -1 opposite */
+    float integrated_seconds;   /* audio the integrated loudness has measured */
+} CawLoudness;
+CAW_API void caw_engine_loudness(CawEngine* e, CawLoudness* out);
+/* Starts the integrated loudness, the maxima and the true-peak maximum again (Play does this too). */
+CAW_API void caw_engine_loudness_reset(CawEngine* e);
+/* A project layer's stereo correlation (a track or a folder bus, of what it sends on after volume and pan),
+   over about 300 ms: 1 identical sides, 0 unrelated or silent, -1 opposite. 1 on success, 0 if layer_index is not a
+   project layer. */
+CAW_API int32_t caw_engine_layer_correlation(CawEngine* e, int32_t layer_index, float* out);
 
 #ifdef __cplusplus
 }

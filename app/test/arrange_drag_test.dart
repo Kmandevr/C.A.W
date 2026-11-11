@@ -433,7 +433,7 @@ void main() {
       await tester.tap(find.byTooltip('Add FX or instrument'));
       await tester.pumpAndSettle();
       expect(find.text('INSTRUMENTS'), findsOneWidget);
-      expect(find.text('BUILT-IN'), findsOneWidget);
+      expect(find.text('UTILITY'), findsOneWidget); // built-ins by category (EffectCatalog)
       expect(find.text('Width'), findsOneWidget);
       await tester.tap(find.text('Saw'));
       await tester.pumpAndSettle();
