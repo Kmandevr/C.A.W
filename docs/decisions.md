@@ -13,6 +13,15 @@ updated: 2026-11-11
 - **Why:** VST3 is the export target after CLAP (roadmap 9.3): the same component library builds as a `.vst3` bundle through a second wrapper around the C interface ([native module SDK](native-module-sdk.md#export-as-a-vst3-plug-in)).
 - **[Assumption]** the "VST" name and logo are trademarks with their own usage guidelines (the repository README's "License & Usage guidelines"), separate from the code licence; C.A.W does not use the logo. Not checked further.
 
+## 2026-11-11: The Drums editor (choices to confirm)
+
+**Decision (Claude, for the owner to confirm; [UI](ui.md#device-editors), [app](app.md)):** the editor follows the owner's layout (stacked layer cards under a pad grid, a draggable hero, a Character strip). Choices made on the owner's behalf:
+- **Pads** read MPC-style, pad 1 at the bottom left; the picked pad sets the engine's `view_pad`, which no longer marks a preset as edited (it is a view setting).
+- **Explode moves the notes** out of the drums track's clips onto the new tracks (a clip's pattern is copied first, so a shared pattern is untouched); pattern notes count as channel 1 for a pad on a channel. **[Assumption]**
+- **Per-layer randomize and mutate** take the engine's whole-pad result and apply only that layer's knobs (no new C API).
+- **Samples picked from the device are copied** into app storage (`drum_samples/`); a project names them by that path.
+- **A component entry keeps up to 16384 parameter values** (the drums' 10392 with room); 256 cut a kit short when a project or an undo step was read back.
+
 ## 2026-11-11: One drum instrument, built (choices to confirm)
 
 **Decision (Claude, for the owner to confirm; [engine](engine.md#drums-orgcawdrums)):**
