@@ -115,6 +115,10 @@ struct Engine::Slot {
     std::atomic<int> scopePos{0};
 
     bool ctlBusy = false;  // control thread only: a layer holds this slot, or it is still fading out
+    // Offline renders only (setOutputTap): where this slot's output is also copied, at the frame it plays in the
+    // current process() call; null when it isn't tapped.
+    float* tapL = nullptr;
+    float* tapR = nullptr;
 
     // The slot's export pointer table (in Engine::ExportPool). `exports` is the audio thread's, set only by
     // a SetExports command; `ctlExports` is the control thread's, the newest table it sent. The control
@@ -3192,6 +3196,21 @@ bool Engine::layerCorrelation(int index, float& out) {
     return true;
 }
 
+bool Engine::setOutputTap(const std::string& layerId, float* left, float* right) {
+    std::lock_guard<std::mutex> lock(ctl_);
+    auto it = layers_.find(layerId);
+    if (!left || !right || it == layers_.end() || it->second.slot < 0) return false;
+    Slot& s = ctlSlot(it->second.slot);
+    s.tapL = left;
+    s.tapR = right;
+    return true;
+}
+
+void Engine::clearOutputTaps() {
+    std::lock_guard<std::mutex> lock(ctl_);
+    for (int i = 0; i < ctlTable_->capacity; ++i) ctlSlot(i).tapL = ctlSlot(i).tapR = nullptr;
+}
+
 int Engine::scope(int index, float* out, int n) {
     std::lock_guard<std::mutex> lock(ctl_);
     n = std::min(n, kScopeSize);
@@ -5480,6 +5499,10 @@ void Engine::runTrackNode(int slot, const float* const* in, float* outL, float* 
         runRoutes(s, preL, preR, outL, outR, m, !(target > 0.0), false);
     }
     if (s.delay || s.delayFadeLeft > 0) runDelay(s, outL, outR, m);  // in time where it meets the others
+    if (s.tapL) {  // an offline stem: what the track sends on, as it meets the others
+        std::copy_n(outL, m, s.tapL + tapAt_);
+        std::copy_n(outR, m, s.tapR + tapAt_);
+    }
     s.previewQuiet = sig > kPreviewQuiet ? 0 : s.previewQuiet + m;
     if (previewChunk_) {
         s.previewN += m;  // the transport isn't moving: its place in the loop stays; the preview's time runs on
@@ -5568,6 +5591,10 @@ void Engine::runBusNode(int slot, const float* inL, const float* inR, float* out
     s.previewQuiet = std::max(peakL, peakR) > kPreviewQuiet ? 0 : s.previewQuiet + m;
     if (routes) runRoutes(s, insertL_, insertR_, outL, outR, m, !(target > 0.0), true);
     if (s.delay || s.delayFadeLeft > 0) runDelay(s, outL, outR, m);  // in time where it meets the others
+    if (s.tapL) {  // an offline stem: the bus's output, as it meets the others
+        std::copy_n(outL, m, s.tapL + tapAt_);
+        std::copy_n(outR, m, s.tapR + tapAt_);
+    }
     if (s.removing && s.gain == 0.0 && canRetire(3)) {
         // Faded out: the slot is free again, with its inserts, delay and routes.
         Retired r{nullptr, &s, nullptr, nullptr, nullptr, nullptr, s.inserts};
@@ -5631,6 +5658,8 @@ void Engine::runMasterNode(const float* inL, const float* inR, float* outL, floa
         } else if (playing_ && playRampIn_ > 0) {
             const int len = std::max(1, static_cast<int>(kStopSeconds * sr_));
             fade = 1.0 - static_cast<double>(playRampIn_--) / len;
+        } else {
+            fade = 1.0;  // a fade in that ended earlier in this chunk is done: the rest is at full level
         }
         float ol, orr;
         if (toneLeft_ > 0) {
@@ -5780,6 +5809,7 @@ void Engine::process(float* left, float* right, int frames) noexcept {
             if (previewing_) {
                 previewChunk_ = true;
                 midiChunkFrom_ = i;
+                tapAt_ = i;
                 done = processChunk(left + i, right + i, m);
                 previewChunk_ = false;
             } else {
@@ -5812,6 +5842,7 @@ void Engine::process(float* left, float* right, int frames) noexcept {
             // Stopped with previews: they play, the transport stays where it is.
             previewChunk_ = true;
             midiChunkFrom_ = i;
+            tapAt_ = i;
             const int m = processChunk(left + i, right + i, std::min(frames - i, kBlock));
             previewChunk_ = false;
             i += m;
@@ -5821,6 +5852,7 @@ void Engine::process(float* left, float* right, int frames) noexcept {
         const int64_t wrap = wrapAt();
         const int maxM = static_cast<int>(std::min<int64_t>({static_cast<int64_t>(frames - i), kBlock, wrap - g_}));
         midiChunkFrom_ = i;
+        tapAt_ = i;
         const int m = processChunk(left + i, right + i, maxM);
         if (stopEnded_) {
             stopEnded_ = false;

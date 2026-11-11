@@ -311,6 +311,35 @@ class NativeEngineWorkPool {
     }
   }
 
+  /// A song render (the Export sheet: the mix and stems, caw_render_song) as an offline job; its result is the
+  /// engine's JSON ({"ok", "error", "files": [...]}), or its error message when it fails or is cancelled.
+  NativeEngineJob submitSong({required String projectJson, required String requestJson}) {
+    final json = projectJson.toNativeUtf8();
+    final request = requestJson.toNativeUtf8();
+    try {
+      const workload = EngineWorkload.offlineRender;
+      var began = false;
+      var tracked = false;
+      try {
+        _beginWorkload(workload);
+        began = true;
+        final handle = _bindings.workerPoolSubmitSong(_handle, json, request, NativeJobPriority.offline.index);
+        if (handle == nullptr) throw StateError('native render queue is full or has no available capacity');
+        final job = NativeEngineJob._(_bindings, handle, includeResult: true);
+        _trackJob(job, workload);
+        tracked = true;
+        return job;
+      } catch (_) {
+        if (began && !tracked) _finishWorkload(workload);
+        rethrow;
+      }
+    } finally {
+      calloc
+        ..free(json)
+        ..free(request);
+    }
+  }
+
   void _beginWorkload(EngineWorkload workload) {
     if (workload == EngineWorkload.offlineRender) {
       _renderJobs++;

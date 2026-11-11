@@ -28,6 +28,15 @@ updated: 2026-11-11
 - **Lane arm** is per lane and saved only when off (`armed: false`); a control with no lane is still written (REAPER's "add envelopes for controls tweaked in write mode").
 - **No app track cap:** the engine's `maxLayers()` refusal (349 layers at the fallback budget) is the only limit, shown as the engine error.
 
+## 2026-11-11: Song renders and stems (choices to confirm)
+
+**Decision (Claude, for the owner to confirm; [engine](engine.md#song-renders), [app](app.md)):**
+- **A stem is what a track or bus sends on** (after its effects, volume, pan and latency compensation), **with the master's volume, DC filter and start fade but not the master's effects or limiter** (`stems_through_master`, on by default). Why: the stems that reach the master then add up to the mix, and the levels match it, as REAPER's stems of the track outputs do; master effects can't be split per stem.
+- **Normalising takes one gain from the mix for every file** (`normalize_each` off), so normalised stems still add up; LUFS normalising stops at a −1 dBTP true-peak ceiling by default.
+- **One pass per range renders every file of it** through engine output taps (a small offline-only hook in `engine.cpp`), rather than one render per stem: the stems line up by construction, and a phone renders ten stems for the cost of one.
+- **Results stay in the app's support folder until saved** (Save, or Save all into a folder through the system's folder picker); they don't appear in Files yet.
+- **The sheet keeps the old Exporter** (Quick Export, one-shot, wavetable, MIDI) below its Export song button, rather than replacing it.
+
 ## 2026-11-11: VST3 interface headers for the plug-in builder (#162)
 
 - **Licence [Fact, checked 2026-11-11]:** Steinberg's VST3 SDK is MIT. The `LICENSE.txt` of `steinbergmedia/vst3sdk`, `vst3_pluginterfaces`, `vst3_base` and `vst3_public_sdk` (default branches, read 2026-11-11) is the MIT License, "Copyright (c) 2026, Steinberg Media Technologies GmbH"; the `vst3_pluginterfaces` tag `v3.8.0_build_66` (commit `31d6eeba`, 2025-10-20) already carries it, so the change came with VST 3.8.0. No GPL or proprietary licence remains on the parts used.

@@ -19,6 +19,7 @@
 #include "midifile.h"
 #include "pattern.h"
 #include "render.h"
+#include "render_stems.h"
 #include "wav.h"
 
 namespace {
@@ -511,4 +512,21 @@ extern "C" int64_t caw_engine_midi_dropped(CawEngine* e) {
 
 extern "C" int64_t caw_engine_position_at(CawEngine* e, int64_t time_ns) {
     return e && e->engine ? e->engine->positionAt(time_ns) : -1;
+}
+
+extern "C" char* caw_render_song(const char* project_json, const char* request_json, int32_t* progress,
+                                 int32_t* cancel) try {
+    caw::SongRenderResult r;
+    if (!project_json || !request_json) {
+        r.error = "missing argument";
+        return dup(caw::songRenderResultJson(r));
+    }
+    caw::ProjectSpec p;
+    caw::SongRenderRequest req;
+    if (!caw::parseProject(project_json, p, r.error) || !caw::parseSongRenderRequest(request_json, req, r.error))
+        return dup(caw::songRenderResultJson(r));
+    caw::renderSong(p, req, r, progress, cancel);
+    return dup(caw::songRenderResultJson(r));
+} catch (const std::bad_alloc&) {
+    return dup(std::string("{\"ok\":false,\"error\":\"") + kOutOfMemory + "\",\"files\":[]}");
 }

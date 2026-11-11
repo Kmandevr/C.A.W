@@ -169,7 +169,7 @@ add_library(caw_core STATIC
   # fx-filters begin
   src/builtin_fx_filters.cpp src/builtin_fx_filters_comb.cpp src/builtin_fx_filters_formant.cpp src/builtin_fx_filters_eq.cpp src/builtin_fx_filters_presets.cpp
   # fx-filters end
-  src/render.cpp src/synth.cpp src/tables.cpp src/vm.cpp src/wav.cpp
+  src/render.cpp src/render_stems.cpp src/synth.cpp src/tables.cpp src/vm.cpp src/wav.cpp
   "${CAW_TEMPLATES_CPP}" "${CAW_STDLIB_CPP}")
 # fx-racks begin
 target_sources(caw_core PRIVATE src/builtin_fx_racks.cpp src/builtin_fx_racks_fx.cpp src/builtin_fx_racks_multiband.cpp
@@ -234,6 +234,7 @@ target_include_directories(caw_cli PRIVATE src)
   target_sources(caw_tests PRIVATE tests/ducker_test.cpp)  # the ducker driven directly (#175 audio review)
   target_sources(caw_tests PRIVATE tests/stereo_path_test.cpp)  # stereo end to end: buses and WAV export (#17, #121)
   target_sources(caw_tests PRIVATE tests/meters_test.cpp)  # loudness (BS.1770-5, EBU Tech 3341), true peak, correlation
+  target_sources(caw_tests PRIVATE tests/render_stems_test.cpp)  # song renders: stems, bounds, tail, normalise, dither, parity
   target_sources(caw_tests PRIVATE tests/fx_dynamics_test.cpp)  # fx-dynamics: the Dynamics and Drive effects
   target_sources(caw_tests PRIVATE tests/fx_creative_test.cpp)  # fx-creative: the Creative and Pitch & Time effects
   target_sources(caw_tests PRIVATE tests/fx_space_test.cpp)  # fx-space: Space, Modulation and Utility effects

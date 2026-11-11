@@ -49,8 +49,10 @@ extern "C" {
    impulse). Nothing else changes.
    15 (2026-11-11): MIDI device input, frame-accurate: caw_midi_clock_ns, caw_engine_midi_ump, caw_engine_midi_bytes,
    caw_engine_midi_release, caw_engine_set_midi_options, caw_engine_midi_dropped and caw_engine_position_at.
-   Nothing else changes. */
-#define CAW_API_VERSION 15
+   Nothing else changes.
+   16 (2026-11-11): song renders and stems: caw_render_song and caw_worker_pool_submit_song (aligned mix, track,
+   bus and region renders; bounds, tail, normalise, 16-bit dither). Nothing else changes. */
+#define CAW_API_VERSION 16
 /* The component index that names a layer's native instrument rather than one of its "components". */
 #define CAW_INSTRUMENT_INDEX 0xFFFFFFFFu
 
@@ -481,6 +483,21 @@ CAW_API int64_t caw_engine_midi_dropped(CawEngine* e);
    [time_ns] on the MIDI clock, worked out from the last callback's start; -1 while stopped. Recording places a
    played note with it. */
 CAW_API int64_t caw_engine_position_at(CawEngine* e, int64_t time_ns);
+
+/* Song renders for the Export sheet (API version 15, roadmap 0.3, 6.4, 6.5): the mix and aligned stems (a file per
+   track and per folder bus: what it sends to its parent or the master, after its effects, volume and pan) over the
+   song, the loop range, a time selection or each region, with a tail (none, seconds, or until silent), peak or
+   loudness (BS.1770-5) normalisation, 16/24-bit PCM (TPDF dither at 16) or 32-bit float, and names from a pattern.
+   One engine pass per range renders every file of it, so they start on the same frame and have the same length.
+   request_json is described in docs/engine.md ("Song renders"); every file goes into its existing "out_dir". The
+   result is JSON {"ok", "error", "files":[{"path", "name", "kind", "layer", "region", "frames", "gain_db",
+   "peak_db", "lufs"}]}; free it with caw_free. progress gets 0..1000 and a non-zero *cancel stops it (either may be
+   NULL); on failure or cancel no file of the request is left. Blocks the caller for the whole render: call it from
+   a worker, never the UI or audio thread. caw_worker_pool_submit_song runs it as a cancellable job whose
+   caw_job_result is that JSON (caw_job_error the message when it fails). */
+CAW_API char* caw_render_song(const char* project_json, const char* request_json, int32_t* progress, int32_t* cancel);
+CAW_API CawJob* caw_worker_pool_submit_song(CawWorkerPool* pool, const char* project_json, const char* request_json,
+                                            int32_t priority);
 
 #ifdef __cplusplus
 }

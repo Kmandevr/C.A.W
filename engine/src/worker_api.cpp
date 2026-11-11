@@ -2,6 +2,7 @@
 #include "caw.h"
 #include "capi_internal.h"
 #include "hardware.h"
+#include "json.h"
 #include "scheduler.h"
 
 #include <algorithm>
@@ -16,7 +17,7 @@
 #include <string>
 
 namespace {
-enum class TaskKind { Check, Project, Render };
+enum class TaskKind { Check, Project, Render, Song };
 enum class State : int32_t { Queued = 0, Running = 1, Succeeded = 2, Failed = 3, Cancelled = 4 };
 
 struct JobState {
@@ -40,6 +41,7 @@ struct WorkItem {
     std::string outPath;
     std::string target;
     std::string param;
+    std::string request;  // Song: the render request JSON
     CawRenderOptions options{};
     CawEngine* engine = nullptr;
     ~WorkItem() { if (engine) engine->releaseAsync(); }
@@ -83,7 +85,7 @@ void execute(void* raw) noexcept {
     int32_t expected = static_cast<int32_t>(State::Queued);
     if (!state->state.compare_exchange_strong(expected, static_cast<int32_t>(State::Running),
                                               std::memory_order_acq_rel)) return;
-    if (item->kind == TaskKind::Render && atomicLoad(&state->cancel) != 0) {
+    if ((item->kind == TaskKind::Render || item->kind == TaskKind::Song) && atomicLoad(&state->cancel) != 0) {
         finish(state, State::Cancelled);
         return;
     }
@@ -121,6 +123,25 @@ void execute(void* raw) noexcept {
             }
             caw_free(output);
             finish(state, State::Succeeded);
+            return;
+        }
+
+        if (item->kind == TaskKind::Song) {
+            char* output = caw_render_song(item->projectJson.c_str(), item->request.c_str(), &state->progress,
+                                           &state->cancel);
+            const std::string text = output ? output : "";
+            caw_free(output);
+            caw::Json parsed;
+            std::string parseError;
+            const bool read = caw::parseJson(text, parsed, parseError);
+            const bool ok = read && parsed.boolean("ok", false);
+            std::lock_guard<std::mutex> lock(state->mutex);
+            state->result = text;
+            if (!ok) {  // the message, as caw_job_error gives it; the whole JSON stays the result
+                state->error = read ? parsed.string("error", "native song render failed") : "native song render failed";
+                state->resultCode.store(1, std::memory_order_relaxed);
+            }
+            finish(state, ok ? State::Succeeded : atomicLoad(&state->cancel) != 0 ? State::Cancelled : State::Failed);
             return;
         }
 
@@ -284,6 +305,19 @@ CawJob* caw_worker_pool_submit_render(CawWorkerPool* pool, const char* project_j
     return nullptr;
 }
 
+CawJob* caw_worker_pool_submit_song(CawWorkerPool* pool, const char* project_json, const char* request_json,
+                                    int32_t priority) try {
+    if (!pool || !project_json || !request_json) return nullptr;
+    auto item = std::make_unique<WorkItem>();
+    item->state = std::make_shared<JobState>();
+    item->kind = TaskKind::Song;
+    item->projectJson = project_json;
+    item->request = request_json;
+    return submit(pool, std::move(item), priority);
+} catch (...) {
+    return nullptr;
+}
+
 int32_t caw_job_get_status(CawJob* job, CawJobStatus* out) try {
     if (!job || !out || !job->state) return 1;
     constexpr size_t minimumSize = offsetof(CawJobStatus, result_code) + sizeof(int32_t);
@@ -351,7 +385,8 @@ void caw_job_cancel(CawJob* job) {
     }
     // A running render checks its cancellation flag between render blocks. Running
     // compilation/check jobs are intentionally non-interruptible; queued jobs can cancel.
-    if (current == static_cast<int32_t>(State::Running) && job->state->kind == TaskKind::Render)
+    if (current == static_cast<int32_t>(State::Running) &&
+        (job->state->kind == TaskKind::Render || job->state->kind == TaskKind::Song))
         atomicStore(&job->state->cancel, 1);
 }
 
