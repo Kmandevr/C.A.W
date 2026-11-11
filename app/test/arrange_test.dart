@@ -272,9 +272,12 @@ void main() {
       await tester.pump(const Duration(milliseconds: 100));
       await gesture.moveBy(const Offset(0, 120));
       await tester.pump(const Duration(milliseconds: 100));
-      // Past the next device's whole plugin UI.
-      await gesture.moveBy(Offset(0, tester.getSize(find.byKey(const ValueKey('fx-inline-1'))).height));
-      await tester.pump(const Duration(milliseconds: 100));
+      // Past the next device's whole plugin UI, in finger-sized steps (one jump over it can land short of its middle).
+      final past = tester.getSize(find.byKey(const ValueKey('fx-inline-1'))).height;
+      for (var moved = 0.0; moved < past; moved += 20) {
+        await gesture.moveBy(const Offset(0, 20));
+        await tester.pump(const Duration(milliseconds: 50));
+      }
       await gesture.up();
       await tester.pumpAndSettle();
       expect(layer.components.map((c) => c.id), ['org.caw.stereo.width', 'org.caw.chorus']);
