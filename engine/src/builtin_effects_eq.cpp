@@ -1,4 +1,4 @@
-// The built-in parametric EQ (#173, "org.caw.eq"): 8 bands of 12 types, stereo/mid/side per band, a live spectrum.
+// The built-in parametric EQ (#173, "org.caw.eq"): 8 bands of 14 types, stereo/mid/side per band, a live spectrum.
 #include "builtin_effects.h"
 
 #include <algorithm>
@@ -8,7 +8,7 @@
 #include "caw/library/eq.hpp"
 #include "caw/library/spectrum.hpp"
 
-// Original code (C.A.W. is Apache-2.0). Every band is one to four trapezoidal state-variable filter stages
+// Original code (C.A.W. is Apache-2.0). Every band is one to eight trapezoidal state-variable filter stages
 // (caw/library/eq.hpp, EqFilter): minimum phase, no latency, and stable however fast a knob moves.
 
 namespace caw::fx {
@@ -21,7 +21,8 @@ constexpr uint32_t bandParam(uint32_t b, uint32_t p) { return b * kBandParams + 
 constexpr uint32_t kOutput = kBands * kBandParams;
 
 constexpr std::string_view kTypes[] = {"Bell", "Low shelf", "High shelf", "Low cut 12", "Low cut 24", "Low cut 48",
-                                       "High cut 12", "High cut 24", "High cut 48", "Notch", "Band-pass", "Tilt"};
+                                       "High cut 12", "High cut 24", "High cut 48", "Notch", "Band-pass", "Tilt",
+                                       "Low cut 96", "High cut 96"};  // the 96s appended (fx-filters): old numbers kept
 static_assert(sizeof(kTypes) / sizeof(kTypes[0]) == static_cast<size_t>(lib::EqType::Count));
 constexpr std::string_view kChannels[] = {"Stereo", "Mid", "Side", "Left", "Right"};
 enum Channel : int { kStereo, kMid, kSide, kLeft, kRight };

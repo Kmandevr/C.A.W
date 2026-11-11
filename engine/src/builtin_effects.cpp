@@ -3,6 +3,9 @@
 // fx-creative begin
 #include "builtin_fx_creative.h"
 // fx-creative end
+// fx-filters begin
+#include "builtin_fx_filters.h"
+// fx-filters end
 
 #include "builtin_fx_racks.h"  // fx-racks
 
@@ -164,6 +167,9 @@ void registerBuiltinEffects(ModuleRegistry& registry) {
     fx::registerDucker(registry);
     fx::registerFxDynamics(registry);  // fx-dynamics
     fx::registerCreative(registry);  // fx-creative
+    // fx-filters begin
+    fx::registerFilters(registry);
+    // fx-filters end
     // fx-racks begin
     fx::registerRacks(registry);  // builtin_fx_racks*.cpp (a rack looks its children up when it is built)
     // fx-racks end

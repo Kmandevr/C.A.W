@@ -129,11 +129,13 @@ struct SvfState {
 };
 
 enum class EqType : int {
-    Bell, LowShelf, HighShelf, LowCut12, LowCut24, LowCut48, HighCut12, HighCut24, HighCut48, Notch, BandPass, Tilt, Count
+    Bell, LowShelf, HighShelf, LowCut12, LowCut24, LowCut48, HighCut12, HighCut24, HighCut48, Notch, BandPass, Tilt,
+    LowCut96, HighCut96,  // appended (fx-filters, Slice EQ's 96 dB/octave): earlier types keep their numbers
+    Count
 };
 
 // A parametric EQ band's coefficients: a bell, low or high shelf (eq.hpp's EqBand maths: exact gain, no bump),
-// low or high cut at 12, 24 or 48 dB/octave (Butterworth stages, Q_i = 1 / (2 cos((2i - 1) pi / 2N)), the last,
+// low or high cut at 12, 24, 48 or 96 dB/octave (Butterworth stages, Q_i = 1 / (2 cos((2i - 1) pi / 2N)), the last,
 // sharpest stage's Q scaled by q / 0.707 so q above 0.707 adds a resonant peak at the corner), a notch, a
 // band-pass (unity at the centre) or a tilt (a high shelf at the frequency, the whole band `db` / 2 down: -db/2
 // below, +db/2 above). set() costs a tan and a pow or two and is skipped when nothing changed; the stages share
@@ -141,7 +143,7 @@ enum class EqType : int {
 // pair or mid and side.
 class EqFilter {
 public:
-    static constexpr int kMaxStages = 4;
+    static constexpr int kMaxStages = 8;
     void set(EqType type, double hz, double db, double q, double sampleRate) noexcept {
         if (type == type_ && hz == hz_ && db == db_ && q == q_ && sampleRate == rate_) return;
         type_ = type, hz_ = hz, db_ = db, q_ = q, rate_ = sampleRate;
@@ -175,15 +177,21 @@ public:
                 break;
             }
             case EqType::LowCut12: case EqType::LowCut24: case EqType::LowCut48:
-            case EqType::HighCut12: case EqType::HighCut24: case EqType::HighCut48: {
+            case EqType::HighCut12: case EqType::HighCut24: case EqType::HighCut48:
+            case EqType::LowCut96: case EqType::HighCut96: {
                 static constexpr double kQ2[1] = {0.70710678118654752};
                 static constexpr double kQ4[2] = {0.54119610014619698, 1.30656296487637652};
                 static constexpr double kQ8[4] = {0.50979557910415917, 0.60134488693504528, 0.89997622313641570,
                                                   2.56291544774150617};
-                const bool low = type == EqType::LowCut12 || type == EqType::LowCut24 || type == EqType::LowCut48;
+                // 16th order: Q_i = 1 / (2 cos((2i - 1) pi / 32)), i = 1..8.
+                static constexpr double kQ16[8] = {0.50241928618815568, 0.52249861493968885, 0.56694403481635769, 0.64682178335999008,
+                                                   0.7881546234512502, 1.0606776859903471, 1.7224470982383342, 5.1011486186891553};
+                const bool low = type == EqType::LowCut12 || type == EqType::LowCut24 || type == EqType::LowCut48 ||
+                                 type == EqType::LowCut96;
                 const int order = (type == EqType::LowCut12 || type == EqType::HighCut12) ? 2
-                                  : (type == EqType::LowCut24 || type == EqType::HighCut24) ? 4 : 8;
-                const double* qs = order == 2 ? kQ2 : order == 4 ? kQ4 : kQ8;
+                                  : (type == EqType::LowCut24 || type == EqType::HighCut24) ? 4
+                                  : (type == EqType::LowCut96 || type == EqType::HighCut96) ? 16 : 8;
+                const double* qs = order == 2 ? kQ2 : order == 4 ? kQ4 : order == 8 ? kQ8 : kQ16;
                 stages_ = order / 2;
                 for (int i = 0; i < stages_; ++i) {
                     double sq = qs[i];
