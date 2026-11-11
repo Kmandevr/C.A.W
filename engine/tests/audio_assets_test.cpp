@@ -739,3 +739,10 @@ TEST(audio_clips_and_the_sampler_match_their_golden_render) {
     }
     std::filesystem::remove_all(dir);
 }
+
+TEST(the_sampler_is_listed_and_the_audio_track_player_is_not) {
+    Engine e(48000);
+    const std::string list = e.nativeComponentsJson();
+    CHECK(list.find("\"org.caw.sampler\"") != std::string::npos);
+    CHECK(list.find("org.caw.audio-track") == std::string::npos);
+}

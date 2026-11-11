@@ -685,7 +685,7 @@ Roadmap 0.2, 3.1–3.5, 4.2–4.3 and 7.2–7.7 on the engine side (WP-J). Code:
 
 ### Audio clips
 
-A layer with `"audio_clips"` (and/or `"input"`) is an audio track: the engine plays it with the built-in instrument `org.caw.audio-track` (it can't also name an `instrument`; a folder can't have clips), so a clip goes through the track's inserts, volume, pan, sends, folder buses, sidechain keys and latency compensation like any instrument, live and in every render (song renders, stems, exports).
+A layer with `"audio_clips"` (and/or `"input"`) is an audio track: the engine plays it with the built-in instrument `org.caw.audio-track` (internal: `caw_engine_components` never lists it; it can't also name an `instrument`; a folder can't have clips), so a clip goes through the track's inserts, volume, pan, sends, folder buses, sidechain keys and latency compensation like any instrument, live and in every render (song renders, stems, exports).
 
 ```json
 "assets": [ { "id": "a1", "path": "/abs/loop.wav", "bpm": 120 } ],

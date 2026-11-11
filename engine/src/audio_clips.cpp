@@ -493,6 +493,7 @@ bool monitorsStopped(const ModuleProcessor& processor) noexcept {
     return p && p->monitoringStopped();
 }
 
-void registerAudioTrack(ModuleRegistry& registry) { registry.add(playerDescriptor(), &makePlayer); }
+// Internal: never listed among the instruments (a layer becomes an audio track through "audio_clips"/"input").
+void registerAudioTrack(ModuleRegistry& registry) { registry.addInternal(playerDescriptor(), &makePlayer); }
 
 }  // namespace caw
