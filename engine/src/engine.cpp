@@ -5544,18 +5544,30 @@ void Engine::process(float* left, float* right, int frames) noexcept {
     posFlag_.store(g_, std::memory_order_relaxed);
 }
 
-void Engine::reportLoad(double load) noexcept {
-    loadAvg_ = 0.9 * loadAvg_ + 0.1 * load;
+// Tuned at 512-frame callbacks at 48 kHz (10.7 ms): the average kept 0.9 of itself a callback, 20 callbacks over
+// 0.85 shed a layer and 100 callbacks passed before the next. The same in seconds, for any callback size.
+void Engine::reportLoad(double load, int frames) noexcept {
+    constexpr double kTick = 512.0 / 48000.0;
+    constexpr double kOverSeconds = 20 * kTick, kCoolSeconds = 100 * kTick;
+    constexpr double kSlack = 1e-9;  // summed callback lengths land a hair under the product
+    if (frames <= 0) return;
+    const double dt = static_cast<double>(frames) / sr_;
+    if (dt != loadDt_) {  // the size rarely changes: pow only then
+        loadDt_ = dt;
+        loadKeep_ = std::pow(0.9, dt / kTick);
+    }
+    loadAvg_ = loadKeep_ * loadAvg_ + (1.0 - loadKeep_) * (std::isfinite(load) ? load : 0.0);
     cpu_.store(static_cast<float>(loadAvg_), std::memory_order_relaxed);
-    if (overCooldown_ > 0) --overCooldown_;
+    coolSeconds_ = std::max(0.0, coolSeconds_ - dt);
     if (loadAvg_ > 0.85) {
-        if (++overCount_ >= 20 && overCooldown_ == 0) {
+        overSeconds_ += dt;
+        if (overSeconds_ >= kOverSeconds - kSlack && coolSeconds_ <= kSlack) {
             overloadPending_ = true;
-            overCount_ = 0;
-            overCooldown_ = 100;
+            overSeconds_ = 0;
+            coolSeconds_ = kCoolSeconds;
         }
     } else {
-        overCount_ = 0;
+        overSeconds_ = 0;
     }
 }
 

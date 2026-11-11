@@ -84,7 +84,7 @@ void callback(ma_device* dev, void* output, const void*, ma_uint32 frames) {
     }
     const double used = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
     const double budget = static_cast<double>(frames) / static_cast<double>(dev->sampleRate);
-    a->owner->engine->reportLoad(budget > 0 ? used / budget : 0.0);
+    a->owner->engine->reportLoad(budget > 0 ? used / budget : 0.0, static_cast<int>(frames));
 }
 
 void setError(const std::string& msg, char* error, int32_t len) {

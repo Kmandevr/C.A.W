@@ -172,7 +172,9 @@ public:
 
     // Audio thread: no allocation, locks or I/O.
     void process(float* left, float* right, int frames) noexcept;
-    void reportLoad(double load) noexcept;  // fraction of the callback's time budget used
+    // One callback's share of its time budget used, for [frames] frames at the engine's rate. The average, the time
+    // over budget before a layer is shed and the rest after it go by time, so any callback size behaves alike.
+    void reportLoad(double load, int frames) noexcept;
 
     struct Chain;
 
@@ -333,7 +335,8 @@ private:
     int64_t loopLen_ = 0; // samples per project loop
     double dcL_[2] = {0, 0}, dcR_[2] = {0, 0}, limEnv_ = 0;
     double loadAvg_ = 0;
-    int overCount_ = 0, overCooldown_ = 0;
+    double overSeconds_ = 0, coolSeconds_ = 0;  // time over budget so far, time left before another layer is shed
+    double loadDt_ = 0, loadKeep_ = 0;          // the last callback's length and the average's weight for it
     bool overloadPending_ = false;
     int processCount_ = 0;
     int64_t chunkId_ = 0;
