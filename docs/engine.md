@@ -246,7 +246,7 @@ Errors give a line and column, counting the header lines, for example `line 5, c
 - **Threads:** the control thread compiles code and sends messages to the audio thread through a lock-free queue. The audio thread hands retired programs back the same way, so it never allocates, locks or frees. Parameter and mix values are atomics.
 - **Globals and exports:**
   - A global's value comes from the project's `globals` (or its default), and changes take effect without recompiling.
-  - Each layer has as many export buffers as its chain exports (lazily allocated, within a project-wide budget, #133). They're filled while its chain runs, so they're also ready for the effects later in that chain.
+  - Each layer has as many export buffers, and export table entries, as its chain exports (lazily allocated, within a project-wide budget; a layer past it is not installed, with a layer error, #133). They're filled while its chain runs, so they're also ready for the effects later in that chain.
 - **Determinism:**
   - The output doesn't depend on the device's buffer size.
   - The engine builds with `-ffp-contract=off` (MSVC `/fp:precise`, which never contracts), and `-fno-trapping-math` (Clang's default; it changes no result, since nothing reads floating-point exception flags, and lets GCC vectorize loops with selects).
