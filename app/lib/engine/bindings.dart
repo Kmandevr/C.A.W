@@ -4,7 +4,7 @@ import 'dart:io';
 
 import 'package:ffi/ffi.dart';
 
-const int cawApiVersion = 17;  // must equal CAW_API_VERSION in engine/include/caw.h
+const int cawApiVersion = 21;  // must equal CAW_API_VERSION in engine/include/caw.h
 
 final class CawMetersStruct extends Struct {
   @Float()
@@ -112,8 +112,6 @@ class Bindings {
   Bindings._(DynamicLibrary lib)
       : apiVersion = lib.lookupFunction<Int32 Function(), int Function()>('caw_api_version'),
         free = lib.lookupFunction<Void Function(Pointer<Utf8>), void Function(Pointer<Utf8>)>('caw_free'),
-        check = lib.lookupFunction<Pointer<Utf8> Function(Pointer<Utf8>), Pointer<Utf8> Function(Pointer<Utf8>)>(
-            'caw_check'),
         create = lib.lookupFunction<Pointer<Void> Function(Int32), Pointer<Void> Function(int)>('caw_engine_create'),
         destroy = lib.lookupFunction<Void Function(Pointer<Void>), void Function(Pointer<Void>)>('caw_engine_destroy'),
         setProject = lib.lookupFunction<Pointer<Utf8> Function(Pointer<Void>, Pointer<Utf8>),
@@ -129,8 +127,6 @@ class Bindings {
             int Function(Pointer<Void>, Pointer<Utf8>)>('caw_engine_unload_component'),
         components = lib.lookupFunction<Pointer<Utf8> Function(Pointer<Void>), Pointer<Utf8> Function(Pointer<Void>)>(
             'caw_engine_components'),
-        setParam = lib.lookupFunction<Void Function(Pointer<Void>, Pointer<Utf8>, Pointer<Utf8>, Double),
-            void Function(Pointer<Void>, Pointer<Utf8>, Pointer<Utf8>, double)>('caw_engine_set_param'),
         setComponentParam = lib.lookupFunction<Int32 Function(Pointer<Void>, Pointer<Utf8>, Uint32, Pointer<Utf8>, Double),
             int Function(Pointer<Void>, Pointer<Utf8>, int, Pointer<Utf8>, double)>('caw_engine_set_component_param'),
         setSend = lib.lookupFunction<Int32 Function(Pointer<Void>, Pointer<Utf8>, Uint32, Double, Int32, Int32),
@@ -143,8 +139,6 @@ class Bindings {
             int Function(Pointer<Void>, Pointer<Utf8>, int, Pointer<Uint8>, int, int)>('caw_engine_set_component_state'),
         componentDisplay = lib.lookupFunction<Int32 Function(Pointer<Void>, Pointer<Utf8>, Uint32, Pointer<Float>, Int32),
             int Function(Pointer<Void>, Pointer<Utf8>, int, Pointer<Float>, int)>('caw_engine_component_display'),
-        setGlobal = lib.lookupFunction<Void Function(Pointer<Void>, Pointer<Utf8>, Double),
-            void Function(Pointer<Void>, Pointer<Utf8>, double)>('caw_engine_set_global'),
         setLayerMix = lib.lookupFunction<Void Function(Pointer<Void>, Pointer<Utf8>, Double, Double, Int32, Int32),
             void Function(Pointer<Void>, Pointer<Utf8>, double, double, int, int)>('caw_engine_set_layer_mix'),
         setMaster = lib.lookupFunction<Void Function(Pointer<Void>, Double),
@@ -201,12 +195,6 @@ class Bindings {
                 Pointer<Int32>, Pointer<Utf8>, Int32),
             int Function(Pointer<Utf8>, Pointer<CawRenderOptionsStruct>, Pointer<Utf8>, Pointer<Int32>, Pointer<Int32>,
                 Pointer<Utf8>, int)>('caw_render'),
-        library = lib.lookupFunction<Pointer<Utf8> Function(), Pointer<Utf8> Function()>('caw_library'),
-        templateCount = lib.lookupFunction<Int32 Function(), int Function()>('caw_template_count'),
-        templateFile =
-            lib.lookupFunction<Pointer<Utf8> Function(Int32), Pointer<Utf8> Function(int)>('caw_template_file'),
-        templateSource =
-            lib.lookupFunction<Pointer<Utf8> Function(Int32), Pointer<Utf8> Function(int)>('caw_template_source'),
         patternFromMidi = lib.lookupFunction<Pointer<Utf8> Function(Pointer<Uint8>, Int32),
             Pointer<Utf8> Function(Pointer<Uint8>, int)>('caw_pattern_from_midi'),
         patternExport = lib.lookupFunction<Int32 Function(Pointer<Utf8>, Double, Int32, Int32, Pointer<Utf8>, Pointer<Utf8>, Int32),
@@ -227,9 +215,6 @@ class Bindings {
             Int32 Function(Pointer<Void>, Pointer<CawExecutionRequestStruct>, Pointer<CawExecutionPlanStruct>),
             int Function(Pointer<Void>, Pointer<CawExecutionRequestStruct>, Pointer<CawExecutionPlanStruct>)>(
             'caw_worker_pool_apply'),
-        workerPoolSubmitCheck = lib.lookupFunction<
-            Pointer<Void> Function(Pointer<Void>, Pointer<Utf8>, Int32),
-            Pointer<Void> Function(Pointer<Void>, Pointer<Utf8>, int)>('caw_worker_pool_submit_check'),
         workerPoolSubmitProject = lib.lookupFunction<
             Pointer<Void> Function(Pointer<Void>, Pointer<Void>, Pointer<Utf8>, Int32),
             Pointer<Void> Function(Pointer<Void>, Pointer<Void>, Pointer<Utf8>, int)>('caw_worker_pool_submit_project'),
@@ -297,8 +282,6 @@ class Bindings {
 
   final int Function() apiVersion;
   final void Function(Pointer<Utf8>) free;
-  final Pointer<Utf8> Function(Pointer<Utf8>) check;
-  final Pointer<Utf8> Function() library;
   final Pointer<Void> Function(int) create;
   final void Function(Pointer<Void>) destroy;
   final Pointer<Utf8> Function(Pointer<Void>, Pointer<Utf8>) setProject;
@@ -306,14 +289,12 @@ class Bindings {
   final Pointer<Utf8> Function(Pointer<Void>, Pointer<Utf8>, Pointer<Utf8>, int) reloadComponent;
   final int Function(Pointer<Void>, Pointer<Utf8>) unloadComponent;
   final Pointer<Utf8> Function(Pointer<Void>) components;
-  final void Function(Pointer<Void>, Pointer<Utf8>, Pointer<Utf8>, double) setParam;
   final int Function(Pointer<Void>, Pointer<Utf8>, int, Pointer<Utf8>, double) setComponentParam;
   final int Function(Pointer<Void>, Pointer<Utf8>, int, double, int, int) setSend;
   final int Function(Pointer<Void>, Pointer<Utf8>, int, int) setComponentBypass;
   final Pointer<Utf8> Function(Pointer<Void>, Pointer<Utf8>) componentStates;
   final int Function(Pointer<Void>, Pointer<Utf8>, int, Pointer<Uint8>, int, int) setComponentState;
   final int Function(Pointer<Void>, Pointer<Utf8>, int, Pointer<Float>, int) componentDisplay;
-  final void Function(Pointer<Void>, Pointer<Utf8>, double) setGlobal;
   final void Function(Pointer<Void>, Pointer<Utf8>, double, double, int, int) setLayerMix;
   final void Function(Pointer<Void>, double) setMaster;
   final void Function(Pointer<Void>, Pointer<Utf8>, int, double, double) noteOn;
@@ -343,9 +324,6 @@ class Bindings {
   final void Function(Pointer<Void>) audioStop;
   final int Function(Pointer<Utf8>, Pointer<CawRenderOptionsStruct>, Pointer<Utf8>, Pointer<Int32>, Pointer<Int32>,
       Pointer<Utf8>, int) render;
-  final int Function() templateCount;
-  final Pointer<Utf8> Function(int) templateFile;
-  final Pointer<Utf8> Function(int) templateSource;
   final Pointer<Utf8> Function(Pointer<Uint8>, int) patternFromMidi;
   final int Function(Pointer<Utf8>, double, int, int, Pointer<Utf8>, Pointer<Utf8>, int) patternExport;
   final int Function(Pointer<CawHardwareProfileStruct>) hardwareProfileDetect;
@@ -354,7 +332,6 @@ class Bindings {
   final Pointer<Void> Function(int) workerPoolCreate;
   final void Function(Pointer<Void>) workerPoolDestroy;
   final int Function(Pointer<Void>, Pointer<CawExecutionRequestStruct>, Pointer<CawExecutionPlanStruct>) workerPoolApply;
-  final Pointer<Void> Function(Pointer<Void>, Pointer<Utf8>, int) workerPoolSubmitCheck;
   final Pointer<Void> Function(Pointer<Void>, Pointer<Void>, Pointer<Utf8>, int) workerPoolSubmitProject;
   final Pointer<Void> Function(Pointer<Void>, Pointer<Utf8>, Pointer<CawRenderOptionsStruct>, Pointer<Utf8>, int)
       workerPoolSubmitRender;

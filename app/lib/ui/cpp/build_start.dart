@@ -1,7 +1,7 @@
 // Build's start page (no tab open): what Build is for, three starting cards, examples, the Library and the project's code.
 import 'package:flutter/material.dart';
 
-import '../../engine/engine.dart' show Template;
+import '../../model/pattern_templates.dart' show PatternTemplate;
 import '../../model/app_state.dart';
 import '../../model/cpp_starters.dart';
 import '../../model/cpp_workbench.dart';
@@ -16,7 +16,7 @@ import '../frame/sections.dart';
 class StarterExample {
   StarterExample(this.key, this.kind, this.name, this.summary, {this.template, this.starter});
   final String key, kind, name, summary;
-  final Template? template;
+  final PatternTemplate? template;
   final CppStarter? starter;
 
   /// Plays notes (an instrument), changes sound (an effect), or is notes for a track (a pattern).
@@ -26,7 +26,7 @@ class StarterExample {
         _ => 'Instruments',
       };
 
-  static StarterExample of(Template t) {
+  static StarterExample of(PatternTemplate t) {
     String field(String key) => RegExp('^$key:\\s*(.*)\$', multiLine: true).firstMatch(t.source)?.group(1)?.trim() ?? '';
     final name = field('name');
     return StarterExample(t.file, field('kind'), name.isEmpty ? t.file : name, field('summary'), template: t);
@@ -38,7 +38,7 @@ class StarterExample {
 
 /// The examples: the C++ starters, then the pattern templates (the .caw sound modules are replaced by the starters,
 /// #122).
-List<StarterExample> starterExamples(List<Template> templates) => [
+List<StarterExample> starterExamples(List<PatternTemplate> templates) => [
       for (final s in cppStarters) StarterExample.cpp(s),
       for (final t in templates) StarterExample.of(t),
     ].where((e) => e.starter != null || e.kind == 'pattern').toList();
@@ -88,7 +88,7 @@ class BuildStartView extends StatelessWidget {
   }
 
   Future<void> _examples(BuildContext context) async {
-    final examples = starterExamples(state.templates);
+    final examples = starterExamples(state.patternExamples);
     final picked = await showGlassSheet<StarterExample>(
       context: context,
       isScrollControlled: true,

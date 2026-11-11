@@ -3,7 +3,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
-import '../../engine/engine.dart' show Template;
+import '../../model/pattern_templates.dart' show PatternTemplate;
 import '../../model/app_state.dart';
 import '../../model/pattern_doc.dart';
 import '../../model/project.dart';
@@ -312,7 +312,7 @@ class _ClipTab extends StatelessWidget {
           leading: const Icon(Icons.queue_music, size: 18, color: Neon.yellow), title: const Text('New pattern on this track'),
           onTap: () {
             Haptics.tap();
-            final id = state.addModule(Template('${layer.name} notes.caw', PatternDoc.blank(name: '${layer.name} notes').serialize()));
+            final id = state.addModule(PatternTemplate('${layer.name} notes', PatternDoc.blank(name: '${layer.name} notes').serialize()));
             state.addClip(layer, id);
           }),
         for (final p in patterns)

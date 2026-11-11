@@ -1,10 +1,15 @@
 // The pattern templates Build's "Open an example" lists (the note-clip text form, #158), bundled with the app as the
 // C++ starters are (cpp_starters.dart). They match examples/acid-line.caw and examples/chords.caw
-// (test/pattern_templates_test.dart), so the engine's .caw template API isn't needed for them (#160).
-import '../engine/engine.dart' show Template;
+// (test/pattern_templates_test.dart).
 
-const List<Template> patternTemplates = [
-  Template('acid-line.caw', '''---
+/// A pattern's text and the file it comes from (or a name to start a new one with).
+class PatternTemplate {
+  const PatternTemplate(this.file, this.source);
+  final String file, source;
+}
+
+const List<PatternTemplate> patternTemplates = [
+  PatternTemplate('acid-line.caw', '''---
 caw: 1
 kind: pattern
 name: Acid line
@@ -26,7 +31,7 @@ length: 16
 14     G2    1    0.6
 15     E2    1    0.8
 '''),
-  Template('chords.caw', '''---
+  PatternTemplate('chords.caw', '''---
 caw: 1
 kind: pattern
 name: Chords

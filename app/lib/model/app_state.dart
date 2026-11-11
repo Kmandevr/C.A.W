@@ -160,7 +160,7 @@ class AppState extends ChangeNotifier {
   /// The project storage once opened (the C++ Builder's desktop build materializes sources through it).
   ProjectStorage? get storage => _storage;
   /// The pattern templates Build's examples list (bundled with the app, pattern_templates.dart).
-  List<Template> templates = patternTemplates;
+  List<PatternTemplate> patternExamples = patternTemplates;
 
   ProjectDoc project = ProjectDoc(id: newId('p'), name: 'Untitled');
   Map<String, ModuleInfo> info = {};
@@ -388,14 +388,7 @@ class AppState extends ChangeNotifier {
 
   // ---------- starter content ----------
 
-  Template? template(String file) {
-    for (final t in templates) {
-      if (t.file == file) return t;
-    }
-    return null;
-  }
-
-  ModuleDoc moduleFromTemplate(Template t) =>
+  ModuleDoc moduleFromPattern(PatternTemplate t) =>
       ModuleDoc(id: newId('m'), name: headerValue(t.source, 'name') ?? t.file.replaceAll('.caw', ''), source: t.source);
 
   /// A first project made of the engine's built-in C++ instruments (#157): kick, hats, bass, a lead, and a muted
@@ -1026,8 +1019,8 @@ class AppState extends ChangeNotifier {
     return name;
   }
 
-  String addModule(Template t) {
-    final m = moduleFromTemplate(t);
+  String addModule(PatternTemplate t) {
+    final m = moduleFromPattern(t);
     m.name = _freeModuleName(m.name);
     project.modules.add(m);
     selectedModuleId = m.id;
@@ -1643,7 +1636,7 @@ class AppState extends ChangeNotifier {
       final original = project.module(patternId);
       if (original == null) return;
       final copy = ModuleDoc(id: newId('m'), name: '${original.name} copy',
-          source: original.source, runSource: original.runSource, params: Map.of(original.params));
+          source: original.source, runSource: original.runSource);
       project.modules.add(copy);
       patternId = copy.id;
     }

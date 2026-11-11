@@ -337,7 +337,7 @@ extension ArrangeFx on AppState {
     final original = project.module(patternId);
     if (original == null) return null;
     final source = ModuleDoc(id: newId('m'), name: '${original.name} copy',
-        source: original.source, runSource: original.runSource, params: Map.of(original.params));
+        source: original.source, runSource: original.runSource);
     final copied = ClipDoc(id: newId('c'), patternId: source.id, startSteps: start,
         lengthSteps: clip.lengthSteps.clamp(1, project.maxArrangementSteps - start).toInt(),
         sourceOffsetSteps: clip.sourceOffsetSteps, loop: clip.loop);

@@ -1,7 +1,7 @@
 // The C++ Builder's widgets: the key row and cursor key, the Problems list jump, and BuildSection's tabs.
 import 'dart:io';
 
-import 'package:caw/engine/engine.dart' show Template;
+import 'package:caw/model/pattern_templates.dart' show PatternTemplate;
 import 'package:caw/model/app_state.dart';
 import 'package:caw/model/cpp_component.dart';
 import 'package:caw/model/cpp_diagnostics.dart';
@@ -380,16 +380,16 @@ void main() {
     });
 
     testWidgets('Open an example lists the C++ starters and pattern templates by kind and opens a copy', (tester) async {
-      state.templates = const [
-        Template('fold.caw', '---\ncaw: 1\nkind: effect\nname: Fold\nsummary: Wavefolder\n---\nout = in;\n'),
-        Template('chords.caw', '---\ncaw: 1\nkind: pattern\nname: Chords\nsummary: Four bars\n---\n'),
+      state.patternExamples = const [
+        PatternTemplate('fold.caw', '---\ncaw: 1\nkind: effect\nname: Fold\nsummary: Wavefolder\n---\nout = in;\n'),
+        PatternTemplate('chords.caw', '---\ncaw: 1\nkind: pattern\nname: Chords\nsummary: Four bars\n---\n'),
       ];
       final sections = await pump(tester);
       await tester.tap(find.byKey(const ValueKey('open example')));
       await tester.pumpAndSettle();
       expect(find.text('INSTRUMENTS'), findsOneWidget);
       // The .caw sound modules are replaced by the C++ starters; patterns stay.
-      final listed = starterExamples(state.templates);
+      final listed = starterExamples(state.patternExamples);
       expect({for (final e in listed) e.group}, {'Instruments', 'Effects', 'Patterns'});
       expect(listed.map((e) => e.key), containsAll(['cpp/bass', 'cpp/glitch-fx', 'chords.caw']));
       expect(listed.map((e) => e.key), isNot(contains('fold.caw')));

@@ -12,40 +12,21 @@ void main() {
   final lib = Platform.environment['CAW_LIB'];
   final skip = lib == null || lib.isEmpty ? 'set CAW_LIB to the built engine library' : null;
 
-  test('templates, check, project sync and render work through the C API', () async {
-    final templates = Engine.templates();
-    expect(templates.length, greaterThanOrEqualTo(7));
-    final kick = templates.firstWhere((t) => t.file == 'kick.caw');
-    final info = Engine.check(kick.source);
-    expect(info.ok, isTrue);
-    expect(info.params.map((p) => p.name), containsAll(['punch', 'decay']));
-    final punch = info.params.firstWhere((p) => p.name == 'punch');
-    expect(punch.tip, contains('pitch drops'));
-    expect(punch.header, 'Kick');
-    final rich = Engine.check('global swing = 0.1 in 0..0.5\nparam wave = saw in [sine, saw]\nparam on1 = on\nexport let x = 1\nwave');
-    expect(rich.ok, isTrue);
-    expect(rich.params[0].global, isTrue);
-    expect(rich.params[1].kind, ParamKind.choice);
-    expect(rich.params[1].choices, ['sine', 'saw']);
-    expect(rich.params[2].kind, ParamKind.toggle);
-    expect(rich.exports.single.name, 'x');
-    final bad = Engine.check('t >>');
-    expect(bad.ok, isFalse);
-    expect(bad.line, 1);
-
+  test('project sync, pattern results and render work through the C API', () async {
+    final kick = PatternTemplate('kick', '---\nkind: pattern\nname: Kick\nlength: 4\n---\n0 C2 1 1\n');
     final e = Engine.create();
     final p = ProjectDoc(id: 'p', name: 'T', modules: [
       ModuleDoc(id: 'k', name: 'Kick', source: kick.source),
       ModuleDoc(id: 'x', name: 'Broken', source: 'sin('),
     ], layers: [
-      LayerDoc(id: 'l', name: 'Kick', color: 0, instrument: ComponentUseDoc('org.caw.drums'), lengthSteps: 4),
+      LayerDoc(id: 'l', name: 'Kick', color: 0, instrument: ComponentUseDoc('org.caw.drums'), patternId: 'k'),
     ]);
     final result = await e.setProject(p.toEngineJson());
     expect(result['k']!.ok, isTrue);
-    expect(result['k']!.ref, 'kick');
-    expect(result['k']!.exports.single.name, 'env');
-    expect(result['x']!.ok, isFalse);
-    expect(result['x']!.error, contains('line 1'));
+    expect(result['k']!.isPattern, isTrue);
+    expect(result['k']!.name, 'Kick');
+    expect(result['x']!.ok, isFalse, reason: 'not a pattern: the .caw sound modules are gone (#160)');
+    expect(result['x']!.line, 1);
     e.play();
     final m = e.meters();
     expect(m.loopLength, greaterThan(0));
@@ -127,22 +108,23 @@ void main() {
     e.dispose();
   }, skip: skip);
 
-  test('a generator plays the notes of a pattern', () async {
+  test('an instrument plays the notes of a pattern, and a broken pattern says where', () async {
     final line = patternTemplates.firstWhere((t) => t.file == 'acid-line.caw');
-    final info = Engine.check(line.source);
-    expect(info.ok, isTrue);
-    expect(info.isPattern, isTrue);
-    expect(info.noteCount, 11);
-    expect(Engine.check('---\nkind: pattern\n---\n0 H2 1').line, 4);
     final p = ProjectDoc(id: 'p', name: 'T', modules: [
       ModuleDoc(id: 'n', name: 'Line', source: line.source),
+      ModuleDoc(id: 'b', name: 'Broken', source: '---\nkind: pattern\n---\n0 H2 1'),
     ], layers: [
       LayerDoc(id: 'l', name: 'Acid', color: 0, instrument: ComponentUseDoc('org.caw.synth.flagship'), patternId: 'n'),
     ]);
     final e = Engine.create();
     final result = await e.setProject(p.toEngineJson());
     expect(result['n']!.ok, isTrue);
+    expect(result['n']!.isPattern, isTrue);
+    expect(result['n']!.noteCount, 11);
+    expect(result['b']!.ok, isFalse);
+    expect(result['b']!.line, 4);
     e.dispose();
+    p.modules.removeLast();
     final dir = await Directory.systemTemp.createTemp('caw');
     final midiOut = '${dir.path}/acid.mid';
     final midiSource = line.source;
@@ -194,19 +176,5 @@ void main() {
     // Not silent: some 32-bit or 16-bit sample past the header is non-zero.
     expect(bytes.skip(1000).any((b) => b != 0), isTrue);
     await dir.delete(recursive: true);
-  }, skip: skip);
-
-  test('the function library and library modules come through the C API', () {
-    final lib = Library.builtIn;
-    final adsr = lib.find('env.adsr')!;
-    expect(adsr.category, 'Envelopes');
-    expect(adsr.args.first.name, 'gate');
-    expect(lib.find('drum.kick'), isNotNull);
-    expect(lib.constants, contains('scale.minor'));
-    final mine = Engine.check('---\nkind: library\nnamespace: mine\nname: Mine\n---\n/// Doubles.\n/// x: anything\nfn twice(x) = x * 2');
-    expect(mine.ok, isTrue);
-    expect(mine.isLibrary, isTrue);
-    expect(mine.functions.single.name, 'mine.twice');
-    expect(lib.withProject([mine]).find('mine.twice')!.category, 'Mine');
   }, skip: skip);
 }
