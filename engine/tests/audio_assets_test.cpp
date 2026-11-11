@@ -149,6 +149,40 @@ TEST(assets_refuse_garbage_truncated_and_missing_files) {
     std::filesystem::remove_all(dir);
 }
 
+TEST(assets_decode_stops_at_the_budget_from_the_files_own_rate_and_channels) {
+    // The decoder's limits come from the file's real rate and channel count, before the samples are decoded: a file
+    // whose kept samples (at most two channels) would pass the budget is refused, and many channels cost two.
+    const std::string dir = tempDir("decodebudget");
+    std::string error;
+    const std::string mono = writeWav(dir + "/mono.wav", 48000, 1, 300000, [](int64_t i, int) { return noiseAt(i, 0); }, false);
+    std::ifstream f(mono, std::ios::binary);
+    const std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+    AudioAsset a;
+    CHECK(!decodeAsset(bytes.data(), bytes.size(), 48000, "mono", a, error, 1u << 20));  // 1.2 MB of floats
+    CHECK(error.find("budget") != std::string::npos);
+    error.clear();
+    CHECK(decodeAsset(bytes.data(), bytes.size(), 48000, "mono", a, error, 2u << 20));
+    CHECK_EQ(a.frames, int64_t{300000});
+    // 32 channels of 20000 frames: 2.5 MB interleaved, but only the first two are kept (160 kB).
+    const std::string wide = writeWav(dir + "/wide.wav", 48000, 32, 20000, [](int64_t i, int c) { return c * 0.01f + 0 * i; });
+    std::ifstream g(wide, std::ios::binary);
+    const std::vector<uint8_t> wb((std::istreambuf_iterator<char>(g)), std::istreambuf_iterator<char>());
+    AudioAsset w;
+    CHECK(decodeAsset(wb.data(), wb.size(), 48000, "wide", w, error, 400000));
+    CHECK_EQ(w.sourceChannels, 32u);
+    CHECK_EQ(w.channels, 2u);
+    CHECK_NEAR(w.data[1][5000], 0.01, 1e-4);
+    // The store passes what its budget has left (less the assets in use).
+    AssetStore& s = AssetStore::global();
+    const uint64_t was = s.budget();
+    s.purge();
+    s.setBudget(1u << 20);
+    CHECK(s.load(mono, 48000, error) == nullptr);
+    CHECK(error.find("budget") != std::string::npos);
+    s.setBudget(was);
+    std::filesystem::remove_all(dir);
+}
+
 TEST(assets_share_by_refcount_and_the_budget_evicts_only_unused_ones) {
     const std::string dir = tempDir("budget");
     std::string error;

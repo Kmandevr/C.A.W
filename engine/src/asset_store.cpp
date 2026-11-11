@@ -149,15 +149,15 @@ int32_t readPeaks(const AudioAsset& a, int64_t start, int64_t end, int32_t bucke
 }
 
 bool decodeAsset(const uint8_t* bytes, size_t size, double rate, const std::string& name, AudioAsset& out,
-                 std::string& error) {
+                 std::string& error, uint64_t maxBytes) {
     if (!(rate >= 8000 && rate <= 192000)) {
         error = "the engine rate must be 8000..192000 Hz";
         return false;
     }
     CawDecodedAudio d;
     char why[256] = {0};
-    // The most frames any rate up to 768 kHz may hold in kMaxAssetSeconds, checked again below at the real rate.
-    if (!caw_decode_audio(bytes, size, static_cast<uint64_t>(kMaxAssetSeconds * 768000.0), &d, why, sizeof why)) {
+    // The decoder sets its limits from the file's own rate and channels before decoding anything.
+    if (!caw_decode_audio(bytes, size, kMaxAssetSeconds, maxBytes, &d, why, sizeof why)) {
         error = name + ": " + why;
         return false;
     }
@@ -172,14 +172,20 @@ bool decodeAsset(const uint8_t* bytes, size_t size, double rate, const std::stri
     out.path = name;
     out.rate = rate;
     out.sourceRate = d.sample_rate;
-    out.sourceChannels = d.channels;
+    out.sourceChannels = d.source_channels;
     out.sourceFrames = static_cast<int64_t>(d.frames);
     out.channels = d.channels >= 2 ? 2 : 1;
+    // The resampled planes, checked against the budget before they are made (upsampling grows them).
+    const double resampled = std::floor(static_cast<double>(d.frames) * rate / d.sample_rate) + 1;
+    if (resampled * out.channels * sizeof(float) > static_cast<double>(maxBytes)) {
+        error = name + ": the file needs more memory than the audio budget has left";
+        return false;
+    }
     try {
         std::vector<float> plane(static_cast<size_t>(d.frames));
         for (uint32_t c = 0; c < out.channels; ++c) {
             for (uint64_t i = 0; i < d.frames; ++i) {
-                const float v = d.interleaved[i * d.channels + c];
+                const float v = d.interleaved[i * d.channels + c];  // d.channels: the kept ones
                 plane[static_cast<size_t>(i)] = std::isfinite(v) ? std::clamp(v, -8.0f, 8.0f) : 0.0f;
             }
             out.data[c] = resampleChannel(plane.data(), static_cast<int64_t>(d.frames), d.sample_rate, rate);
@@ -205,6 +211,14 @@ std::string keyOf(const std::string& path, double rate) {
     return path + r;
 }
 }  // namespace
+
+uint64_t AssetStore::roomLeft() {
+    std::lock_guard<std::mutex> g(lock_);
+    uint64_t held = 0;
+    for (const auto& [k, e] : entries_)
+        if (e.asset.use_count() > 1) held += e.asset->bytes();
+    return held < budget_ ? budget_ - held : 0;
+}
 
 bool AssetStore::makeRoom(uint64_t need) {
     uint64_t total = 0;
@@ -283,7 +297,7 @@ std::shared_ptr<const AudioAsset> AssetStore::load(const std::string& path, doub
         return nullptr;
     }
     auto a = std::make_shared<AudioAsset>();
-    if (!decodeAsset(bytes.data(), bytes.size(), rate, path, *a, error)) return nullptr;
+    if (!decodeAsset(bytes.data(), bytes.size(), rate, path, *a, error, roomLeft())) return nullptr;
     std::lock_guard<std::mutex> g(lock_);
     return insert(key, std::move(a), size, time, error);
 }
@@ -291,7 +305,7 @@ std::shared_ptr<const AudioAsset> AssetStore::load(const std::string& path, doub
 std::shared_ptr<const AudioAsset> AssetStore::loadBytes(const std::string& name, const uint8_t* bytes, size_t size,
                                                         double rate, std::string& error) {
     auto a = std::make_shared<AudioAsset>();
-    if (!decodeAsset(bytes, size, rate, "mem:" + name, *a, error)) return nullptr;
+    if (!decodeAsset(bytes, size, rate, "mem:" + name, *a, error, roomLeft())) return nullptr;
     std::lock_guard<std::mutex> g(lock_);
     return insert(keyOf("mem:" + name, rate), std::move(a), size, 0, error);
 }
