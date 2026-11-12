@@ -514,6 +514,7 @@ class AppState extends ChangeNotifier {
       // The platform's figure and the route, now and then (a Bluetooth link can settle after it opens).
       _latencyReadUs = now;
       unawaited(latency.refresh());
+      checkAudioDevice();
     }
     tick.value++;
     if (meters.overloaded > before.overloaded && settings.lightAuto && !settings.lightMode) {
@@ -1152,18 +1153,43 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Called when the app goes to the background or returns.
+  /// Whether the app is in front (the lifecycle's last word): the microphone is released behind it unless a
+  /// recording runs (`AudioRecorder`).
+  final foreground = ValueNotifier<bool>(true);
+
+  /// Called when the app goes to the background or returns. Playing, the output keeps running behind (nothing on
+  /// this path waits on the audio thread); stopped, the device closes and reopens on return. On return a device the
+  /// system stopped while away (a disconnect that could not be reopened) opens again too.
   void lifecycle({required bool foreground}) {
     _poller.setVisible(foreground);
+    this.foreground.value = foreground;
     final e = engine;
     if (e == null) return;
     if (!foreground) {
       flush();
       if (!meters.playing) e.stopAudio();
-    } else if (!e.audioOn) {
+    } else if (!e.audioOn || !e.audioStatus().running) {
       _openAudio(e);
       notifyListeners();
     }
+  }
+
+  /// A device the system stopped while the transport plays (miniaudio gives up on an AAudio stream it could not
+  /// reopen after a disconnect, and the status then says not running) opens again; true when it had to. Called by
+  /// the meter poll now and then, and by the background playback's slow check while the app is behind.
+  bool checkAudioDevice() {
+    final e = engine;
+    if (e == null || !useAudioDevice || !e.audioOn || !_transportOn) return false;
+    if (e.audioStatus().running) return false;
+    _openAudio(e);
+    notifyListeners();
+    return true;
+  }
+
+  /// Behind the app with the transport stopped (the notification's Stop): the device closes as it does when the
+  /// app goes behind stopped, and reopens on return.
+  void releaseAudioBehind() {
+    if (!foreground.value && !meters.playing && !_transportOn) engine?.stopAudio();
   }
 
   /// Opens the device: null when it runs, else why not ([audioError] either way). It may run on the system default

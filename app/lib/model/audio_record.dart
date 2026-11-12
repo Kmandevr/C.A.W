@@ -94,6 +94,9 @@ class AudioRecorder extends ChangeNotifier {
             ? null : File('${state.settings.dir!.path}${Platform.pathSeparator}audio-input.json')) {
     state.tick.addListener(_poll);
     state.latency.addListener(_applyLatency);
+    state.addListener(_onState);
+    state.foreground.addListener(_onState);
+    micBusy.addListener(notifyListeners);
   }
 
   static AudioRecorder? current;
@@ -106,8 +109,20 @@ class AudioRecorder extends ChangeNotifier {
   bool _recording = false;
   bool get recording => _recording;
 
-  /// Whether the input opened (it needs the permission and a device).
+  /// Whether the input is open on the engine (it needs the permission, a device and something that uses it).
   bool inputOpen = false;
+
+  /// Another app has the microphone (or the input stopped delivering): the output plays on, the input is silence,
+  /// and the input is tried again quietly every [retryEvery] until it delivers (docs/app.md, Audio input).
+  final micBusy = ValueNotifier<bool>(false);
+
+  /// How often a busy input is checked and tried again.
+  static Duration retryEvery = const Duration(seconds: 2);
+  Timer? _health;
+  bool _pinging = false;
+  bool _wanted = false;
+  bool _disposed = false;
+  Future<void>? _inputQueue;  // the opens and closes in order; null until the first (made in the caller's zone)
 
   /// The last problem, in one line (permission refused, no input, a failed write), or null.
   final message = ValueNotifier<String?>(null);
@@ -127,15 +142,43 @@ class AudioRecorder extends ChangeNotifier {
 
   // ---------- the input ----------
 
-  /// Opens the input on the chosen device, asking for the microphone first (Android). False when refused or when
-  /// no input opens; [message] says why.
-  Future<bool> openInput() async {
+  /// Whether something uses the microphone now: an armed track, a track monitoring its input ("on"), a recording
+  /// or the latency ping. Only then is it open (owner, 2026-11-12: never compete with other apps for it).
+  bool get inputNeeded =>
+      _recording || _starting || _pinging ||
+      state.project.layers.any((l) => !l.isFolder && l.input != null && (l.input!.armed || l.input!.monitor == 'on'));
+
+  /// Open while the input is on, something uses it and the app is in front (a recording keeps it in the
+  /// background too; Android gives a background app silence anyway).
+  bool get _wantInput => prefs.enabled && inputNeeded && (state.foreground.value || _recording);
+
+  /// Turns audio input on (asking for the microphone first, on Android) and opens it if something uses it now
+  /// ([force]: the caller is about to). False when refused or when it did not open; [message] says why.
+  Future<bool> openInput({bool force = false}) async {
     if (!await permission.request()) {
       message.value = 'Microphone permission refused: audio input stays off (allow it in the system settings).';
       inputOpen = false;
       notifyListeners();
       return false;
     }
+    if (!prefs.enabled) {
+      prefs.enabled = true;
+      unawaited(prefs.save());
+    }
+    if (!force && !inputNeeded) {
+      _wanted = _wantInput;
+      notifyListeners();
+      return true;  // on, and it opens when a track is armed or monitors
+    }
+    final ok = await _open();
+    _wanted = _wantInput || force;
+    notifyListeners();
+    return ok;
+  }
+
+  // Opens the engine's input (the permission is granted). True when it opened, or when only the microphone is busy
+  // (it is tried again quietly); false, with [message], otherwise.
+  Future<bool> _open() async {
     final r = await io.configureInput(enabled: true, deviceId: prefs.deviceId, deviceName: prefs.deviceName,
         channels: prefs.channels);
     if (prefs.latencyOverride >= 0) io.setInputLatency(prefs.latencyOverride);
@@ -143,24 +186,92 @@ class AudioRecorder extends ChangeNotifier {
     unawaited(state.latency.refresh().then((_) => _applyLatency()));
     inputOpen = r != 1;
     final status = io.inputStatus();
-    if (status.isNotEmpty && status['running'] == false && state.engine?.audioOn == true) {
-      inputOpen = false;
-      message.value = 'Audio input did not open${status['error'] is String ? ': ${status['error']}' : ''}.';
+    final failed = status.isNotEmpty && status['running'] == false && state.engine?.audioOn == true;
+    if (failed) {
+      // With the permission granted, an input that does not open is held by another app (or gone): the output
+      // plays on, and it is tried again quietly. [inputOpen] stays true, as the engine keeps it asked for.
+      micBusy.value = true;
+    } else {
+      await _checkHealth(retry: false);
     }
-    if (!prefs.enabled) {
-      prefs.enabled = true;
-      unawaited(prefs.save());
-    }
-    notifyListeners();
+    _watchHealth();
     return inputOpen;
   }
 
+  // Closes the engine's input; audio input stays on (it opens again when something uses it).
+  Future<void> _release() async {
+    _health?.cancel();
+    _health = null;
+    micBusy.value = false;
+    if (!inputOpen) return;
+    await io.configureInput(enabled: false);
+    inputOpen = false;
+    if (!_disposed) notifyListeners();
+  }
+
+  /// Turns audio input off (Settings › Audio): the microphone closes and arming asks again.
   Future<void> closeInput() async {
+    await _release();
     await io.configureInput(enabled: false);
     inputOpen = false;
     prefs.enabled = false;
+    _wanted = false;
     unawaited(prefs.save());
     notifyListeners();
+  }
+
+  // The project, the transport or the lifecycle changed: open the input when something starts using it (only
+  // with the permission already granted, so this never asks) and close it when nothing does.
+  void _onState() {
+    final want = _wantInput;
+    if (want == _wanted) return;
+    _wanted = want;
+    final before = _inputQueue;
+    _inputQueue = () async {
+      if (before != null) await before;
+      if (_disposed) return;
+      if (_wantInput && !inputOpen) {
+        if (await permission.granted()) await _open();
+        notifyListeners();
+      } else if (!_wantInput && inputOpen && !_recording && !_pinging) {
+        await _release();
+      }
+    }();
+  }
+
+  /// Settles pending opens and closes (tests).
+  Future<void> settled() => _inputQueue ?? Future<void>.value();
+
+  void _watchHealth() {
+    if (_health != null || !inputOpen) return;
+    _health = Timer.periodic(retryEvery, (_) => unawaited(_checkHealth(retry: true)));
+  }
+
+  // Whether the input delivers: the engine's state ("stalled", "stopped", "failed": another app has the
+  // microphone, or it was disconnected) or Android saying our capture is silenced. Busy and [retry]: asked again,
+  // which reopens only the input (the output is never touched).
+  bool _checking = false;
+  Future<void> _checkHealth({required bool retry}) async {
+    if (_checking || !inputOpen) return;
+    _checking = true;
+    try {
+      if (_disposed) return;
+      final st = io.inputStatus()['state'];
+      final engineBusy = st == 'stalled' || st == 'stopped' || st == 'failed';
+      final silenced = state.foreground.value && await permission.inputSilenced();
+      if (_disposed) return;
+      if (engineBusy && retry && state.foreground.value) {
+        await io.configureInput(enabled: true, deviceId: prefs.deviceId, deviceName: prefs.deviceName,
+            channels: prefs.channels);
+        if (_disposed) return;
+        final again = io.inputStatus()['state'];
+        micBusy.value = again != 'open' || silenced;
+      } else {
+        micBusy.value = engineBusy || silenced;
+      }
+    } finally {
+      _checking = false;
+    }
   }
 
   /// A new input choice (Settings › Audio): saved, and the input reopens on it when it is on.
@@ -169,13 +280,13 @@ class AudioRecorder extends ChangeNotifier {
     if (deviceName != null) prefs.deviceName = deviceName;
     if (channels != null) prefs.channels = channels.clamp(1, 32);
     await prefs.save();
-    if (prefs.enabled) await openInput();
+    if (prefs.enabled && inputOpen) await _open();
     notifyListeners();
   }
 
   /// Arms or disarms [layer] (an audio track): arming opens the input first, with the permission.
   Future<bool> arm(LayerDoc layer, bool on) async {
-    if (on && !inputOpen && !await openInput()) return false;
+    if (on && !inputOpen && !await openInput(force: true)) return false;
     state.setAudioArmed(layer, on);
     notifyListeners();
     return true;
@@ -184,7 +295,11 @@ class AudioRecorder extends ChangeNotifier {
   /// After the app made a new engine (start-up, a rate change) the input opens on it again: only when it was on
   /// and the permission is already granted, so start-up never asks.
   Future<void> reapply() async {
-    if (prefs.enabled && await permission.granted()) await openInput();
+    _health?.cancel();
+    _health = null;
+    _wanted = _wantInput;
+    if (_wanted && await permission.granted()) await _open();
+    notifyListeners();
   }
 
   Object? _engine;
@@ -251,7 +366,7 @@ class AudioRecorder extends ChangeNotifier {
   /// engine refused; [message] says why.
   Future<bool> start() async {
     if (_recording || state.armedAudioTracks.isEmpty) return false;
-    if (!inputOpen && !await openInput()) return false;
+    if (!inputOpen && !await openInput(force: true)) return false;
     final dir = state.recordingsDirectory;
     await dir.create(recursive: true);
     final r = await io.recordStart(request(dir));
@@ -417,7 +532,17 @@ class AudioRecorder extends ChangeNotifier {
 
   /// Plays the ping and waits for its answer (about a second). Null when it couldn't start.
   Future<PingResult?> ping({Duration poll = const Duration(milliseconds: 150), int tries = 20}) async {
-    if (!inputOpen && !await openInput()) return null;
+    _pinging = true;
+    try {
+      return await _ping(poll, tries);
+    } finally {
+      _pinging = false;
+      _onState();  // nothing else uses it: the microphone closes again
+    }
+  }
+
+  Future<PingResult?> _ping(Duration poll, int tries) async {
+    if (!inputOpen && !await openInput(force: true)) return null;
     if (!io.pingStart()) return null;
     for (var i = 0; i < tries; i++) {
       await Future<void>.delayed(poll);
@@ -440,6 +565,11 @@ class AudioRecorder extends ChangeNotifier {
   void dispose() {
     state.tick.removeListener(_poll);
     state.latency.removeListener(_applyLatency);
+    state.removeListener(_onState);
+    state.foreground.removeListener(_onState);
+    _disposed = true;
+    _health?.cancel();
+    micBusy.dispose();
     message.dispose();
     lastRecording.dispose();
     levels.dispose();

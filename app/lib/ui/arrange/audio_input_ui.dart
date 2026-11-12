@@ -1,5 +1,6 @@
 // An audio track's input in the arranger: the arm button (tap arms, asking for the microphone first; hold for the
-// input), the input sheet (channel, mono or stereo, monitoring) and the input meter shown while armed.
+// input), the input sheet (channel, mono or stereo, monitoring) and the input meter shown while armed (or, while
+// another app has the microphone, the note saying so).
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -12,6 +13,7 @@ import '../../model/project.dart';
 import '../feedback.dart';
 import '../glass.dart';
 import '../haptics.dart';
+import '../motion.dart';
 import '../theme.dart';
 
 void _say(BuildContext context, String text) =>
@@ -67,11 +69,17 @@ class AudioArmButton extends StatelessWidget {
   }
 }
 
+/// The note shown where the input meters are while another app has the microphone (owner, 2026-11-12).
+const micBusyNote = 'Microphone in use by another app';
+
 /// The input level of an armed track, a thin bar in the header (green, yellow near the top, red at clipping).
+/// While another app has the microphone it fades to [micBusyNote] ([upright]: a narrow bar has no room for text,
+/// so it turns yellow and says it in its tooltip).
 class AudioInputMeter extends StatelessWidget {
-  const AudioInputMeter({super.key, required this.layer, this.height = 6});
+  const AudioInputMeter({super.key, required this.layer, this.height = 6, this.upright = false});
   final LayerDoc layer;
   final double height;
+  final bool upright;
 
   @override
   Widget build(BuildContext context) {
@@ -80,10 +88,22 @@ class AudioInputMeter extends StatelessWidget {
       return CustomPaint(key: ValueKey('audio-input-meter-${layer.id}'), size: Size(double.infinity, height),
           painter: InputMeterPainter(0));
     }
-    return ValueListenableBuilder<List<double>>(valueListenable: rec.levels, builder: (context, _, _) {
+    final meter = ValueListenableBuilder<List<double>>(valueListenable: rec.levels, builder: (context, _, _) {
       final v = rec.levelOf(layer);
       return CustomPaint(key: ValueKey('audio-input-meter-${layer.id}'), size: Size(double.infinity, height),
           painter: InputMeterPainter(v));
+    });
+    return ValueListenableBuilder<bool>(valueListenable: rec.micBusy, builder: (context, busy, _) {
+      final Widget note = upright
+          ? Tooltip(message: micBusyNote, child: Container(height: height,
+              decoration: BoxDecoration(color: Neon.yellow.withValues(alpha: 0.6), borderRadius: BorderRadius.circular(2))))
+          : Tooltip(message: '$micBusyNote: playing goes on, the input is tried again when it is free',
+              child: const Text(micBusyNote, maxLines: 1, overflow: TextOverflow.ellipsis, softWrap: false,
+                  style: TextStyle(color: Neon.yellow, fontSize: 9, height: 1)));
+      return AnimatedSwitcher(
+        duration: Motion.fade(Motion.standard, Motion.of(context)),
+        child: busy ? KeyedSubtree(key: ValueKey('mic-busy-${layer.id}'), child: note)
+            : KeyedSubtree(key: ValueKey('mic-meter-${layer.id}'), child: meter));
     });
   }
 }
@@ -138,6 +158,14 @@ class AudioInputPanel extends StatelessWidget {
         if (rec != null && !rec.inputOpen)
           const Padding(padding: EdgeInsets.only(top: 4), child: Text('Input is off: arming turns it on (Settings › Audio '
               'picks the device).', style: TextStyle(color: Neon.dim, fontSize: 11))),
+        if (rec != null)
+          ValueListenableBuilder<bool>(valueListenable: rec.micBusy, builder: (context, busy, _) => AnimatedSize(
+            duration: Motion.fade(Motion.standard, Motion.of(context)),
+            child: busy
+                ? const Padding(key: ValueKey('audio-input-mic-busy'), padding: EdgeInsets.only(top: 4),
+                    child: Text('$micBusyNote: playing goes on, and the input comes back when it is free.',
+                        style: TextStyle(color: Neon.yellow, fontSize: 11)))
+                : const SizedBox(width: double.infinity))),
         label('CHANNEL'),
         Wrap(spacing: 6, runSpacing: 6, children: [
           for (var ch = 0; ch < math.max(1, deviceChannels - (input.channels == 2 ? 1 : 0)); ch++)
