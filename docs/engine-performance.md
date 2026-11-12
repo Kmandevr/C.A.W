@@ -204,13 +204,52 @@ The 64-voice Flagship and the 32-track song, over budget in the baseline (about 
 
 ### 4. Precision and layout
 
+**What changed (2026-11-12, branch `speed-layout`, on phase 3's head `d636c1e`):** callgrind on phase 3's head showed the remaining cost spread over filters, delay lines, oversamplers and mixing, each run sample by sample with its state loaded and stored per sample and its two sides one after the other. The phase stages those loops over the run (each stage over the whole run, its state in registers) and runs a stereo pair's two sides as one two-wide double vector (`src/stereo_pair.h`: `Pair`, SSE2 or NEON on GCC and Clang, a plain struct elsewhere; Delay Pro's and the filters' former `filters::Pair` moved there). Each sample meets each side's operations in the scalar order, so where nothing fuses the bits are the scalar code's; on Arm64 a contraction may pair a different multiply with an add (a last-bit difference).
+
+- **EQ** (`builtin_effects_eq.cpp`, `Eq::run`, `runMono`, `runStereo`): band by band over the run, each band's channel and fade worked out once per run; a stereo band's SVF stages two-wide (`EqFilter::stage`, `scale` added to `eq.hpp`).
+- **Delay Pro** (`builtin_effects_space.cpp`, `DelayPro::run`): both sides as one vector: the time glide, the Hermite read, the tone filters (`Svf` accessors added to `filter.hpp`) and the feedback drive (`tanhApproxPair`).
+- **Saturator** (`builtin_effects_saturator.cpp`, `runBlock<M>`): staged over the run per mode (ramps, drive and bias, oversampler up, the curve over every oversampled value, down, tape and DC filters, tone, dynamics, mix); the crusher and a mode change keep the per-sample path. The Library's `Oversampler2x` gained `upBlock` and `downBlock` (`oversample.hpp`: `up()`/`down()` over a block, state in registers).
+- **Sends** (`engine.cpp`, `Engine::runRoutes`): a send's sum into its destination in float (`routeAdd`; a float sum of two floats is the double sum's rounding, the same bits). The send's and track's gains stay double: rounded to float they moved the mix reference's master crusher's steps (−77 dBFS residual against −120).
+- **Kept double:** phase accumulators, the feedback filters (EQ, Delay Pro's tone, the DC blockers, the oversampler's allpasses), delay-line positions and the gains above. Flagship, Drums and the reverbs are unchanged in this phase.
+- **Vectorised, checked with `-fopt-info-vec-optimized` and Arm64 disassembly (GCC 13, the engine's flags):** the EQ's per-run loops (`builtin_effects_eq.cpp` lines 142–205: 16-byte vectors on both targets), the send's float sum and settled gain (`engine.cpp` 3979, 3999), the Saturator's staged loops (15 loops in `runBlock`); the two-wide code is NEON on Arm64 (instructions on `.2d` vectors: `Eq::run` 287, `DelayPro::run` 161, each `Saturator::runBlock<M>` 148–549, `Oversampler2x::block` 60–65).
+- **Every reference render passes unchanged:** worst stable null −128.9 dBFS (Shimmer busy, as before; the EQ, Delay Pro and Saturator references at −131.4 to −132.5 dBFS) on x86-64 GCC 13 Release, Debug with sanitizers, and Arm64 GCC 13 with the engine's flags under qemu.
+
+**[Fact, Bench runs, 10 s × 3 runs, Neoverse-N2 cores both times]** mean µs. Before: [43199779899](https://github.com/Kmandevr/C.A.W/actions/runs/43199779899) (`727c95d`, the code of `d636c1e`). After: [43237437033](https://github.com/Kmandevr/C.A.W/actions/runs/43237437033) (`f6f2d00`).
+
+| Scenario | Android arm64 before | after | change | Linux arm64 before | after | change |
+|---|---:|---:|---:|---:|---:|---:|
+| First loop (6 tracks) | 145.1 | 145.2 | +0.1% | 152.2 | 153.3 | +0.7% |
+| Three tracks | 234.7 | 220.7 | −6.0% | 246.1 | 227.0 | −7.8% |
+| Typical song (8 tracks) | 761.8 | 717.9 | −5.8% | 778.4 | 722.4 | −7.2% |
+| Typical song + extras | 1,033.8 | 969.6 | −6.2% | 1,035.3 | 958.6 | −7.4% |
+| Flagship heavy, 64 voices held | 3,960.8 | 3,970.7 | +0.2% | 3,920.9 | 3,937.3 | +0.4% |
+| Flagship heavy, 16 voices held | 1,028.7 | 1,029.1 | 0.0% | 1,017.3 | 1,019.1 | +0.2% |
+| Drums kit, 16 pads busy | 280.9 | 279.0 | −0.7% | 311.4 | 311.4 | 0.0% |
+| Song, 16 tracks | 1,446.1 | 1,368.3 | −5.4% | 1,478.7 | 1,366.0 | −7.6% |
+| Song, 32 tracks + heavy FX | 4,623.7 | 4,201.6 | −9.1% | 4,771.2 | 4,211.8 | −11.7% |
+| Tail: notes | 192.5 | 188.6 | −2.0% | 184.3 | 183.0 | −0.7% |
+| Tail: ringing out | 118.2 | 115.6 | −2.2% | 112.0 | 111.3 | −0.6% |
+| Tail: silence after | 17.8 | 17.6 | −1.1% | 18.0 | 18.0 | 0.0% |
+| Tail project, no notes | 10.3 | 10.3 | 0.0% | 11.4 | 11.4 | 0.0% |
+
+**[Fact, callgrind, 2026-11-12]** M Ir per second of audio in `Engine::process`, x86-64 GCC 13.3 Release, measured as in phase 3; before is phase 3's after column (the unchanged scenarios, First loop, Flagship and Drums, count the same to the decimal).
+
 | Scenario | Before | After | Change |
 |---|---:|---:|---:|
-| Typical song (8 tracks) | | | |
-| Flagship heavy, 64 voices held | | | |
-| Drums kit, 16 pads busy | | | |
-| Song, 32 tracks + heavy FX | | | |
-| Tail: silence after | | | |
+| First loop (6 tracks) | 246.4 | 246.4 | 0.0% |
+| Three tracks | 380.2 | 358.1 | −5.8% |
+| Typical song (8 tracks) | 1,170.3 | 1,084.0 | −7.4% |
+| Typical song + extras | 1,611.0 | 1,500.2 | −6.9% |
+| Flagship heavy, 64 voices held | 6,109.6 | 6,109.6 | 0.0% |
+| Flagship heavy, 16 voices held | 1,603.8 | 1,603.8 | 0.0% |
+| Drums kit, 16 pads busy | 441.5 | 441.5 | 0.0% |
+| Song, 16 tracks | 2,107.3 | 1,955.5 | −7.2% |
+| Song, 32 tracks + heavy FX | 6,665.5 | 5,896.1 | −11.5% |
+| Tail (30 s: notes, ringing, silence) | 145.2 | 142.0 | −2.2% |
+| Tail project, no notes | 24.2 | 24.2 | 0.0% |
+
+- **Typical song:** −5.8% on Android arm64 (−7.2% Linux arm64); the effect-heavy 32-track song −9.1% (−11.7%), now at 79% of the budget on Android arm64.
+- **What is left (callgrind, song8 after):** the reverbs (`lib::Reverb::process` 6.9%, `ReverbPro`), Flagship's voice filters (6.8%) and oscillators (`addStackWarp` 4.8%), the effects' silence scan in `EffectBase::process` (3.9%), the EQ's control-rate parameter reads (`Eq::control`, 3.3% inclusive) and Delay Pro (3.0%). Flagship's filters are high-Q feedback filters, which stay double; the parallel mixer (phase 5) is the next step.
 
 ### 5. Parallel mixer
 
