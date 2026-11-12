@@ -6,6 +6,10 @@ updated: 2026-11-12
 
 # Decisions
 
+## 2026-11-12: No shared buses; work the REAPER way (owner)
+
+**Decision (owner):** "I don't love the use of busses. I like REAPER's way of working." The shared reverb-bus idea (A7) is dropped. Routing stays REAPER-style: tracks, folders and sends between tracks, with no separate bus concept added. Speed for heavy Flagship patches comes from the engine itself.
+
 ## 2026-11-12: Open alpha and beta: what the names mean (owner)
 
 **Decision (owner):**
