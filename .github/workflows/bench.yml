@@ -2,7 +2,7 @@
 name: Bench
 on:
   push:
-    branches: [Main]
+    branches: [Main, speed-maths]  # TEMPORARY: speed phase 3 measurement; removed before merge
     paths:
       - "engine/**"
       - "!engine/compiler/**"
