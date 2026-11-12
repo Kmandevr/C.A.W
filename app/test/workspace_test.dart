@@ -85,6 +85,10 @@ void main() {
 
   testWidgets('a stereo track meters each side; a mono one shows one meter', (tester) async {
     // Owner, 2026-11-10 (feel pass): stereo track meters, from the engine's caw_engine_layer_meter_stereo.
+    // The meters' clock is the test's (fake) one, so a busy machine can't let the bars fall between reads.
+    final wall = PeakMeter.clock, start = tester.binding.clock.now();
+    addTearDown(() => PeakMeter.clock = wall);
+    PeakMeter.clock = () => tester.binding.clock.now().difference(start);
     final mono = LayerDoc(id: 'm', name: 'M', color: 0);
     final stereo = LayerDoc(id: 's', name: 'S', color: 0)..instrument = ComponentUseDoc('org.caw.drum.kick');
     expect(mono.isStereo, isFalse);

@@ -2,6 +2,7 @@
 import 'package:flutter/material.dart';
 
 import '../../../model/drums.dart';
+import '../kit/param_watch.dart';
 import '../device_registry.dart';
 import '../device_scope.dart';
 import '../kit/device_style.dart';
@@ -94,7 +95,7 @@ class DrumsInline extends StatelessWidget {
         ValueListenableBuilder<int>(valueListenable: sel.pad, builder: (context, pad, _) => Column(
           crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: [
             DrumVoiceHeader(pad: pad),
-            DrumHero(pad: pad, height: 160),
+            watchDevice(context, (_) => DrumHero(pad: pad, height: 160)), // its own watch (param_watch.dart)
             DrumCharacterStrip(pad: pad, size: 34),
           ])),
       ]),

@@ -354,6 +354,11 @@ class AppState extends ChangeNotifier {
   /// Bumped on every meter poll (about 30 times a second) so meters can repaint without rebuilding screens.
   final ValueNotifier<int> tick = ValueNotifier(0);
 
+  /// Whether the engine is sounding: playing, or a meter not yet back to silence (a preview, a held note, a test
+  /// tone, a tail still to be heard). Stopped and silent, the engine runs no component or modulator, so device
+  /// motion that shows them holds still (MotionClock, lib/ui/devices/kit/hero.dart).
+  final ValueNotifier<bool> sounding = ValueNotifier(false);
+
   /// Aggregate value tick retained for diagnostics and external listeners. Workspaces use the scoped ticks below
   /// so parameter, track and master drags don't rebuild unrelated controls.
   late final ValueNotifier<int> values = ValueNotifier(0)..addListener(_docChanged);
@@ -490,6 +495,7 @@ class AppState extends ChangeNotifier {
     masterValueTick.dispose();
     values.dispose();
     tick.dispose();
+    sounding.dispose();
     revealStartRequests.dispose();
     for (final notifier in _moduleValueTicks.values) { notifier.dispose(); }
     for (final notifier in _layerValueTicks.values) { notifier.dispose(); }
@@ -529,6 +535,7 @@ class AppState extends ChangeNotifier {
     final heardYet = outputLatencyUs <= 0 || now - _lastLoudUs > outputLatencyUs;
     final loud = meters.playing || meters.peakL > 0 || meters.peakR > 0 || layerMeters.any((m) => m.peak > 0);
     if (loud) _lastLoudUs = now;
+    sounding.value = loud || !heardYet;
     return loud || !heardYet;
   }
 

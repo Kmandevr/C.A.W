@@ -88,8 +88,10 @@ class _DeviceKnobState extends State<DeviceKnob> {
   @override
   Widget build(BuildContext context) {
     final app = DeviceScope.of(context).target.state;
-    // Project modulation (#161): its links, the output being dragged and assign mode redraw the knob.
-    return KeyParam(
+    // Its own values rebuild it alone, its focus and screen-reader value with it (param_watch.dart): a knob step
+    // doesn't rebuild the editor around it. Project modulation (#161): its links, the output being dragged and
+    // assign mode redraw the knob.
+    return ParamWatch(target: DeviceScope.of(context).target, builder: (context) => KeyParam(
       paramId: widget.paramId,
       onType: () {
         final t = DeviceScope.of(context).target;
@@ -99,9 +101,8 @@ class _DeviceKnobState extends State<DeviceKnob> {
       kind: DeviceScope.of(context).target.param(widget.paramId)?.isChoice ?? false ? KeyParamKind.choice : KeyParamKind.range,
       child: ListenableBuilder(
         listenable: Listenable.merge([app.modulationTick, app.draggingModulation, app.assigningModulation]),
-        // Its own values rebuild it alone (param_watch.dart): a knob step doesn't rebuild the editor around it.
-        builder: (context, _) => ParamWatch(target: DeviceScope.of(context).target, builder: _build)),
-    );
+        builder: (context, _) => _build(context)),
+    ));
   }
 
   Widget _build(BuildContext context) {
@@ -124,7 +125,7 @@ class _DeviceKnobState extends State<DeviceKnob> {
     final routes = canMod ? matrix!.routesTo(p.id) : const <ModRoute>[];
     final text = widget.valueText?.call(value) ?? formatParamValue(p, value);
     final label = widget.label ?? shortParamLabel(p, p.id);
-    _motion.run((routes.isNotEmpty || links.isNotEmpty) && motionRuns(context));
+    _motion.run((routes.isNotEmpty || links.isNotEmpty) && motionRuns(context), sounding: app.sounding);
     ModLinkDoc? selLink() => links.where((l) => l.id == _lastLink).firstOrNull ?? links.lastOrNull;
 
     void set(double v) {

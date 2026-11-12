@@ -110,7 +110,7 @@ class DrivePage extends StatelessWidget {
         height: 210,
         caption: 'TRANSFER',
         grid: false,
-        readout: Text('${shortParamLabel(t.param('drive'), 'Drive')} ${formatParamValue(t.param('drive'), t.value('drive'))}'),
+        readout: Builder(builder: (context) => Text('${shortParamLabel(t.param('drive'), 'Drive')} ${formatParamValue(t.param('drive'), t.value('drive'))}')),
         child: const _DriveHero(),
       )),
       KnobRow(['drive', 'bias', 'tone', if (shape == DriveShape.crush) ...['bits', 'rate'], if (shape == DriveShape.bitShape) 'bits',

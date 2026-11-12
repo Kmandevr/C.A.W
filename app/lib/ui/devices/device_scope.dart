@@ -49,7 +49,13 @@ class DeviceScope extends InheritedWidget {
   static bool isInline(BuildContext context) =>
       context.getInheritedWidgetOfExactType<DeviceScope>()?.inline ?? false;
 
-  static DeviceScope? maybeOf(BuildContext context) => context.dependOnInheritedWidgetOfExactType<DeviceScope>();
+  static DeviceScope? maybeOf(BuildContext context) {
+    onLookup?.call(context);
+    return context.dependOnInheritedWidgetOfExactType<DeviceScope>();
+  }
+
+  /// Hears every [of] and [maybeOf] (ParamWatch, kit/param_watch.dart: which part of the editor a widget is in).
+  static void Function(BuildContext context)? onLookup;
 
   /// Makes route [slot] the selected one (what a ring or two-finger drag on its knob sets).
   static void maybeSelect(BuildContext context, int slot) {
@@ -63,6 +69,7 @@ class DeviceScope extends InheritedWidget {
     focusSource: focusSource, openSource: openSource ?? this.openSource, inline: inline, assigning: assigning, selectedSlot: selectedSlot, child: child);
 
   static DeviceScope of(BuildContext context) {
+    onLookup?.call(context);
     final s = context.dependOnInheritedWidgetOfExactType<DeviceScope>();
     assert(s != null, 'a device control outside a DeviceScope');
     return s!;

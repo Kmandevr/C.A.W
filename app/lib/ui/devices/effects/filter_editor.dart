@@ -61,7 +61,7 @@ class FilterPage extends StatelessWidget {
         height: 200,
         caption: 'FILTER ≈',
         grid: false,
-        readout: Text('${formatParamValue(t.param('cutoff'), t.value('cutoff'))} Hz'),
+        readout: Builder(builder: (context) => Text('${formatParamValue(t.param('cutoff'), t.value('cutoff'))} Hz')),
         child: const _FilterHero(),
       )),
       const KnobRow(['cutoff', 'resonance', 'drive', 'mix'], size: 54),

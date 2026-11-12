@@ -33,7 +33,7 @@ class TranceGatePage extends StatelessWidget {
         height: 190,
         caption: 'PATTERN',
         grid: false,
-        readout: Text('${gateSteps(scope)} steps · ${formatParamValue(scope.target.param('rate'), scope.target.value('rate'))}'),
+        readout: Builder(builder: (context) => Text('${gateSteps(scope)} steps · ${formatParamValue(scope.target.param('rate'), scope.target.value('rate'))}')),
         child: const _GateHero(),
       )),
       Row(children: const [
@@ -199,7 +199,7 @@ class BitcrushPage extends StatelessWidget {
         height: 180,
         caption: 'CRUSHED ≈',
         grid: false,
-        readout: Text('${t.value('bits').toStringAsFixed(1)} bit · ${formatParamValue(t.param('rate'), t.value('rate'))}'),
+        readout: Builder(builder: (context) => Text('${t.value('bits').toStringAsFixed(1)} bit · ${formatParamValue(t.param('rate'), t.value('rate'))}')),
         child: const _CrushHero(),
       )),
       KnobRow(const ['bits', 'rate', 'jitter', 'dither'], size: 52),
