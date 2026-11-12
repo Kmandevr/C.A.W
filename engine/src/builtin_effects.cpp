@@ -13,6 +13,8 @@
 #include "builtin_fx_racks.h"  // fx-racks
 
 #include <algorithm>
+#include <bit>
+#include <cstring>
 
 namespace caw {
 namespace fx {
@@ -125,25 +127,42 @@ bool EffectBase::process(const AudioProcessBlock& b) noexcept {
             left_ = kControlFrames;
         }
         const uint32_t n = std::min(left_, b.frames - i);
-        bool zero[kControlFrames];
-        double inPeak = inPeak_;
+        // The peaks as integer maxima of the magnitudes' bits (for floats that are not NaN, the same order as their
+        // values; a NaN counts as 0, as the float maxima ignored it), and the silence count from the last frame in
+        // this run that was not silent: no carried branch, so the loops vectorize; the values are the same as the
+        // frame-by-frame float maxima and count gave.
+        // Signed 32-bit lanes (the magnitudes' bits are below 2^31): SSE2 compares those, not unsigned ones.
+        constexpr int32_t kAbs = 0x7fffffff, kInf = 0x7f800000;
+        int32_t silentBits;
+        std::memcpy(&silentBits, &kSilent, 4);
+        int32_t inMax = 0;
+        int32_t zero[kControlFrames];
         for (uint32_t k = 0; k < n; ++k) {
-            const float l = inL[i + k], r = inR[i + k];
-            zero[k] = l == 0.0f && r == 0.0f;
-            const double a = l < 0 ? -l : l, c = r < 0 ? -r : r;
-            inPeak = std::max(inPeak, std::max(a, c));
+            int32_t l, r;
+            std::memcpy(&l, inL + i + k, 4);
+            std::memcpy(&r, inR + i + k, 4);
+            l &= kAbs, r &= kAbs;
+            zero[k] = (l | r) == 0 ? 1 : 0;
+            l = l > kInf ? 0 : l, r = r > kInf ? 0 : r;
+            const int32_t a = l > r ? l : r;
+            inMax = a > inMax ? a : inMax;
         }
-        inPeak_ = inPeak;
+        inPeak_ = std::max(inPeak_, static_cast<double>(std::bit_cast<float>(inMax)));
         runAt_ = i;
         run(inL + i, inR + i, outL + i, outR + i, n);
-        double outPeak = outPeak_;
+        int32_t outMax = 0;
+        int32_t loud = 0;  // 1 + the last frame that was not silent (0: all were)
         for (uint32_t k = 0; k < n; ++k) {
-            const float l = outL[i + k], r = outR[i + k];
-            const float a = std::max(l < 0 ? -l : l, r < 0 ? -r : r);
-            outPeak = std::max(outPeak, static_cast<double>(a));
-            silent_ = zero[k] && a < kSilent ? silent_ + 1 : 0;
+            int32_t l, r;
+            std::memcpy(&l, outL + i + k, 4);
+            std::memcpy(&r, outR + i + k, 4);
+            l &= kAbs, r &= kAbs;
+            const int32_t a = l > r ? l : r;  // a NaN's bits are above every number's: never silent
+            outMax = a > outMax && a <= kInf ? a : outMax;
+            loud = zero[k] && a < silentBits ? loud : static_cast<int32_t>(k) + 1;
         }
-        outPeak_ = outPeak;
+        outPeak_ = std::max(outPeak_, static_cast<double>(std::bit_cast<float>(outMax)));
+        silent_ = loud == 0 ? silent_ + n : n - static_cast<uint32_t>(loud);
         left_ -= n;
         i += n;
         if (left_ == 0 && silent_ >= idleAfter) {  // at a grid point: the same frame at any block size

@@ -133,15 +133,19 @@ protected:
     }
 
     void run(const float* inL, const float* inR, float* outL, float* outR, uint32_t n) noexcept override {
-        for (uint32_t i = 0; i < n; ++i) {
-            const double xl = inL[i], xr = inR[i];
-            double l = xl, r = xr;
-            for (uint32_t a = 0; a < active_; ++a) {
-                Band& band = bands_[order_[a]];
-                if (band.w != band.target)
+        // Band by band over the run (each band's state stays in registers and there is no switch per sample); every
+        // sample goes through the same operations in the same order as frame by frame, so the bits are the same.
+        double L[kControlFrames], R[kControlFrames];
+        for (uint32_t i = 0; i < n; ++i) L[i] = inL[i], R[i] = inR[i];
+        for (uint32_t a = 0; a < active_; ++a) {
+            Band& band = bands_[order_[a]];
+            const lib::EqFilter& f = band.filter;
+            const bool fading = band.w != band.target;
+            for (uint32_t i = 0; i < n; ++i) {
+                if (fading && band.w != band.target)
                     band.w = band.target > band.w ? std::min(band.target, band.w + fadeStep_) : std::max(band.target, band.w - fadeStep_);
                 const double w = band.w;
-                const lib::EqFilter& f = band.filter;
+                double l = L[i], r = R[i];
                 switch (band.channel) {
                     case kMid: {
                         const double m = 0.5 * (l + r), s = 0.5 * (l - r);
@@ -162,14 +166,17 @@ protected:
                         r += (f.process(band.right, r) - r) * w;
                         break;
                 }
+                L[i] = l, R[i] = r;
             }
+        }
+        for (uint32_t i = 0; i < n; ++i) {
             out_ += (outTarget_ - out_) * outCoef_;
             if (out_ - outTarget_ < 1e-12 && outTarget_ - out_ < 1e-12) out_ = outTarget_;
-            l *= out_;
-            r *= out_;
+            const double l = L[i] * out_, r = R[i] * out_;
             outL[i] = static_cast<float>(l);
             outR[i] = static_cast<float>(r);
-            analyzer_.push(static_cast<float>(0.5 * (xl + xr)), static_cast<float>(0.5 * (l + r)));
+            // The display's spectrum: only while a UI reads it (the audio doesn't depend on it).
+            if (watching_) analyzer_.push(static_cast<float>(0.5 * (static_cast<double>(inL[i]) + inR[i])), static_cast<float>(0.5 * (l + r)));
         }
     }
 
@@ -178,6 +185,7 @@ protected:
         out[1] = static_cast<float>(analyzer_.lowHz());
         out[2] = static_cast<float>(analyzer_.highHz());
         out[3] = watched ? 1.0f : 0.0f;
+        watching_ = watched;
         if (watched) {
             analyzer_.analyze(out + kDisplayPre, out + kDisplayPost);
             for (uint32_t j = 0; j < kSpectrumBins; ++j) {
@@ -223,6 +231,7 @@ private:
     uint32_t active_ = 0;
     double out_ = 1.0, outTarget_ = 1.0, outCoef_ = 0.0, fadeStep_ = 0.0;
     bool first_ = true;
+    bool watching_ = false;  // a UI read the display lately: the analyzer hears the audio
     lib::SpectrumAnalyzer analyzer_;
     double tan_[kSpectrumBins] = {};
 };

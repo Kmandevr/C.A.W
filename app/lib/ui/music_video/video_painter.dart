@@ -114,6 +114,14 @@ void _paintShot(Canvas canvas, Size size, VideoFrameInput f, DirectedShot shot) 
 
 double _unit(Size s) => math.min(s.width, s.height) / 360;
 
+/// The steps a timeline shot (arrangement or piano roll) shows: its left edge and width. The camera's centre sits
+/// at its anchor across the view, else 0.4 of the way in on the arrangement and 0.35 on the piano roll.
+({double left, double visible}) videoView(DirectedShot shot, ShotCamera cam) {
+  final visible = shot.visibleSteps / cam.zoom;
+  final anchor = cam.anchor ?? (shot.kind == VideoShot.pianoRoll ? 0.35 : 0.4);
+  return (left: cam.center - visible * anchor, visible: visible);
+}
+
 void _text(Canvas canvas, String text, Offset at, double size, Color color,
     {FontWeight weight = FontWeight.w600, double? maxWidth, TextAlign align = TextAlign.left, bool mono = false,
     double letterSpacing = 0}) {
@@ -169,8 +177,7 @@ void _grid(Canvas canvas, Rect area, VideoScene s, double left, double visible, 
 void _flythrough(Canvas canvas, Size size, VideoFrameInput f, DirectedShot shot, ShotCamera cam) {
   final s = f.scene;
   final u = _unit(size);
-  final visible = shot.visibleSteps / cam.zoom;
-  final left = cam.center - visible * 0.4;
+  final (:left, :visible) = videoView(shot, cam);
   final playing = <int>{for (final c in s.clips) if (c.start <= f.step && c.end > f.step) c.track};
 
   // The tracks with clips (up to a dozen), each a lane.
@@ -284,8 +291,7 @@ void _pianoRoll(Canvas canvas, Size size, VideoFrameInput f, DirectedShot shot, 
   final u = _unit(size);
   final clip = shot.clip == null ? null : s.clips[shot.clip!];
   final color = clip == null ? Neon.blue : _track(s, clip.track);
-  final visible = shot.visibleSteps / cam.zoom;
-  final left = cam.center - visible * 0.35;
+  final (:left, :visible) = videoView(shot, cam);
   final span = math.max(8.0, shot.pitchSpan / math.sqrt(cam.zoom));
   final top = shot.pitchCenter + span / 2;
   final header = size.height * 0.1;

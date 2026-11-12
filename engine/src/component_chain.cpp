@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <bit>
+#include <chrono>
 #include <cmath>
 #include <cstring>
 
@@ -44,7 +45,50 @@ bool stereoAudio(const PortDescriptor& p) noexcept {
     return p.type == PortType::Audio && p.layout == ChannelLayout::Stereo && portChannelCount(p) == 2;
 }
 
+std::atomic<ChainProfile*> gProfile{nullptr};
+
+uint64_t nowNs() noexcept {
+    return static_cast<uint64_t>(
+        std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now().time_since_epoch()).count());
+}
+
+// Times one entry's block into its profile slot (no slot: nothing), less the time of chains nested inside it (a
+// per-note FX slot inside its instrument, a rack's own chain), so each slot holds its own time. Audio thread only.
+uint64_t gNestedNs = 0;
+struct ProfileScope {
+    ChainProfile::Slot* slot;
+    uint64_t t0, outer = 0;
+    bool ran = false;
+    ProfileScope(ChainProfile* p, const void* processor, const std::string* id) noexcept
+        : slot(p ? p->slot(processor, id) : nullptr), t0(slot ? nowNs() : 0) {
+        if (!slot) return;
+        outer = gNestedNs;
+        gNestedNs = 0;
+    }
+    ~ProfileScope() {
+        if (!slot) return;
+        const uint64_t took = nowNs() - t0;
+        slot->ns += took - std::min(took, gNestedNs);
+        ++slot->calls;
+        slot->ran += ran ? 1 : 0;
+        gNestedNs = outer + took;
+    }
+};
+
 }  // namespace
+
+void ChainProfile::set(ChainProfile* profile) noexcept { gProfile.store(profile, std::memory_order_release); }
+ChainProfile* ChainProfile::current() noexcept { return gProfile.load(std::memory_order_acquire); }
+
+ChainProfile::Slot* ChainProfile::slot(const void* processor, const std::string* id) noexcept {
+    for (uint32_t k = 0; k < used; ++k)
+        if (slots[k].processor == processor) return &slots[k];
+    if (used == kSlots) return nullptr;
+    Slot& s = slots[used++];
+    s.processor = processor;
+    s.id = id;
+    return &s;
+}
 
 bool ComponentChain::isKeyedEffect(const ModuleDescriptor& d) noexcept {
     if (!d.ports || d.portCount < 3 || d.portCount > 4) return false;
@@ -587,7 +631,13 @@ const ParameterValue* ComponentChain::modulated(const Entry& e, std::size_t inde
             mod->values[x.param] = ParameterValue{nullptr, modulatedValue(p, base.value, off[0])};
         } else if (buffer < mod->sampleBuffers && mod->samples) {
             double* out = mod->samples + static_cast<std::size_t>(buffer++) * kMaxFrames;
-            for (uint32_t i = 0; i < m; ++i) out[i] = modulatedValue(p, base.samples ? base.samples[i] : base.value, off[i]);
+            if (base.samples) {
+                for (uint32_t i = 0; i < m; ++i) out[i] = modulatedValue(p, base.samples[i], off[i]);
+            } else {  // a held base: its normalized value once (modulatedValue's arithmetic, the same bits)
+                const double n0 = normalizeParameter(p, base.value);
+                for (uint32_t i = 0; i < m; ++i)
+                    out[i] = constrainParameter(p, denormalizeParameter(p, std::clamp(n0 + off[i], 0.0, 1.0)));
+            }
             mod->values[x.param] = ParameterValue{out, out[0]};
         }
     }
@@ -605,6 +655,9 @@ bool ComponentChain::runModulator(std::size_t index, uint32_t m, double sampleRa
                                   float* const* outs, uint32_t outCount) noexcept {
     if (!modulators_ || index >= entries_.size() || m == 0 || m > kMaxFrames) return false;
     Entry& e = *entries_[index];
+    ProfileScope scope(gProfile.load(std::memory_order_relaxed), e.processor.get(), &e.id);
+    if (scope.slot) scope.slot->modulator = true;
+    scope.ran = true;
     const bool playing = time && time->playing;
     resolveEntry(e, index, m, time, playing, modNewPlay_);
     for (uint32_t k = 0; k < outCount; ++k) std::fill_n(outs[k], m, 0.0f);
@@ -652,8 +705,10 @@ void ComponentChain::process(float* left, float* right, uint32_t m, double sampl
     Transport transport;  // what each component sees of the song: the tempo always, the position while playing
     if (time) transport = {time->tempo, static_cast<double>(time->start) / time->stepLength / 4.0, time->beatsPerBar, playing};
     const double bypassStep = 1.0 / std::max(1.0, kBypassSeconds * sampleRate);
+    ChainProfile* const profile = gProfile.load(std::memory_order_relaxed);
     for (std::size_t index = 0; index < entries_.size(); ++index) {
         Entry& e = *entries_[index];
+        ProfileScope scope(profile, e.processor.get(), &e.id);
         const std::size_t count = e.resolvers.size();
         resolveEntry(e, index, m, time, playing, newPlay);
         const double target = e.bypass.load(std::memory_order_relaxed) ? 0.0 : 1.0;
@@ -667,6 +722,7 @@ void ComponentChain::process(float* left, float* right, uint32_t m, double sampl
         const bool events = (notes_ && notes_->count() > 0) || (key && key->count > 0) || (e.noteEvents && noteEventCount_ > 0);
         if (e.asleep && on && !events && (notes_ || (peakAbs(left, m) == 0.0f && peakAbs(right, m) == 0.0f))) continue;
         e.asleep = false;
+        scope.ran = true;
         std::copy_n(left, m, stageL_.data());
         std::copy_n(right, m, stageR_.data());
         const float* in[2] = {stageL_.data(), stageR_.data()};
