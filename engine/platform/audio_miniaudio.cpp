@@ -57,6 +57,12 @@ struct Audio {
     ma_uint32 inputChannels = 0;
     ma_uint32 duplexBufferFrames = 0;  // miniaudio's duplex ring buffer's starting fill, in the latency estimate
     std::string inputDeviceId, inputError;
+#if defined(_WIN32)
+    // The last WASAPI endpoint ids read for their kind, so caw_audio_latency's polls skip COM until the device moves.
+    std::wstring kindOutId, kindInId;
+    const char* kindOut = "unknown";
+    const char* kindIn = "unknown";
+#endif
     float l[kChunk], r[kChunk];
 };
 
@@ -571,8 +577,12 @@ std::string latencyJson(CawEngine* e, Audio* a) {
 #endif
 #if defined(_WIN32)
     if (a->context.backend == ma_backend_wasapi) {
-        out.kind = wasapiKind(a->device.playback.id.wasapi);
-        if (a->input) in.kind = wasapiKind(a->device.capture.id.wasapi);
+        auto cached = [](const wchar_t* id, std::wstring& lastId, const char*& kind) {
+            if (lastId != id) { lastId = id; kind = wasapiKind(id); }
+            return kind;
+        };
+        out.kind = cached(a->device.playback.id.wasapi, a->kindOutId, a->kindOut);
+        if (a->input) in.kind = cached(a->device.capture.id.wasapi, a->kindInId, a->kindIn);
     }
 #endif
     // The duplex ring buffer's two capture periods (see openDevice) hold the input back before the callback reads it.
