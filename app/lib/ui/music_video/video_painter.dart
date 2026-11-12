@@ -305,10 +305,11 @@ TextPainter _layoutText(String text, double size, Color color, {required FontWei
 
 /// Forgets the laid-out text (a theme change, or the tests between fonts).
 void clearVideoTextCache() {
-  for (final tp in _texts.values) {
+  for (final tp in [..._texts.values, ..._overlayTexts.values]) {
     tp.dispose();
   }
   _texts.clear();
+  _overlayTexts.clear();
 }
 
 Paint _glow(Color c, double sigma, {double alpha = 0.8}) => Paint()

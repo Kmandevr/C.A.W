@@ -514,6 +514,8 @@ void main() {
   });
 
   group('goldens', () {
+    // Text laid out by the tests before the fonts loaded mustn't be reused in a golden.
+    setUp(clearVideoTextCache);
     for (final t in [VideoTab.shots, VideoTab.look, VideoTab.media, VideoTab.export]) {
       testWidgets('golden: the sheet at 360 dp, ${t.label}', (tester) async {
         final s = AppState(settings: Settings());
