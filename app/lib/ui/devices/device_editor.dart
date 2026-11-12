@@ -15,6 +15,7 @@ import '../theme.dart';
 import '../tokens.dart';
 import 'device_registry.dart';
 import 'device_scope.dart';
+import 'kit/param_watch.dart';
 import 'kit/key_param.dart';
 import 'sidechain_bar.dart';
 import 'kit/device_style.dart';
@@ -132,10 +133,8 @@ class _DeviceEditorState extends State<DeviceEditor> {
   @override
   Widget build(BuildContext context) {
     s.componentCatalog.refreshIfStale();
-    return ListenableBuilder(
-      listenable: Listenable.merge([s, s.componentCatalog, t.tick]),
-      builder: (context, _) => _build(context),
-    );
+    // Rebuilt by a value it shows, not by a knob step of a value only that knob shows (param_watch.dart).
+    return ParamWatch(target: t, page: true, also: Listenable.merge([s, s.componentCatalog]), builder: _build);
   }
 
   Widget _build(BuildContext context) {

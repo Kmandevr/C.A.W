@@ -1,6 +1,7 @@
 // Arrange: the focus view (open, next track, close by swipe, tap and Back), the FX stack and long-press menus.
 import 'dart:io';
 
+import 'package:caw/ui/devices/kit/hero.dart' show MotionClock;
 import 'package:caw/engine/component_info.dart';
 import 'package:caw/engine/engine.dart';
 import 'package:caw/model/app_state.dart';
@@ -234,6 +235,9 @@ void main() {
 
     testWidgets('a built-in native effect shows its plugin UI inline; a knob, bypass, reorder and remove edit the project',
         (tester) async {
+    // A modulated knob or a device visual moves on every frame; hold it still so the screen settles.
+    MotionClock.hold = true;
+    addTearDown(() => MotionClock.hold = false);
       listenForHaptics(tester);
       s.componentCatalog.set(const [_width, _chorus]);
       final layer = s.project.layers.first;
@@ -565,6 +569,42 @@ void main() {
       await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
       await settle(tester);
       expect(barW(), lessThan(before));
+    });
+
+    testWidgets('a pinch scales the lanes as laid out and lays them out once, where a layout per move would be',
+        (tester) async {
+      await pumpArranger(tester, const Size(412, 900));
+      await settle(tester);
+      final ruler = find.byWidgetPredicate((w) => w is CustomPaint && w.painter.runtimeType.toString() == '_RulerPainter');
+      double barW() => (tester.widget<CustomPaint>(ruler).painter as dynamic).stepW as double;
+      final view = tester.stateList<ScrollableState>(find.byType(Scrollable))
+          .where((st) => axisDirectionToAxis(st.axisDirection) == Axis.horizontal)
+          .reduce((a, b) => a.position.maxScrollExtent >= b.position.maxScrollExtent ? a : b).position;
+      view.jumpTo(40);
+      await tester.pump();
+      final w0 = barW();
+      final end = find.byTooltip('Song end: playback loops back to the start');
+      final x0 = tester.getCenter(end).dx;
+      final at = tester.getCenter(find.byKey(const ValueKey('track-header-b'))) + const Offset(200, 0);
+      final a = await tester.startGesture(at - const Offset(40, 0), kind: PointerDeviceKind.touch);
+      final b = await tester.startGesture(at + const Offset(40, 0), kind: PointerDeviceKind.touch);
+      // 80 → 100 px apart: 1.25×, inside the rebase window: the lanes keep their layout, scaled.
+      for (var i = 0; i < 2; i++) {
+        await a.moveBy(const Offset(-5, 0));
+        await b.moveBy(const Offset(5, 0));
+        await tester.pump();
+      }
+      expect(barW(), w0, reason: 'no layout while the fingers move');
+      expect(find.byWidgetPredicate((w) => w is Transform && w.transform.getMaxScaleOnAxis() > 1.2), findsOneWidget);
+      expect(tester.getCenter(end).dx, closeTo(at.dx + (x0 - at.dx) * 1.25, 0.5), reason: 'drawn where it will lie');
+      await a.up();
+      await b.up();
+      await tester.pump();
+      await tester.pump();
+      expect(barW(), closeTo(w0 * 1.25, 1e-6), reason: 'laid out once at the pinch\'s zoom');
+      // The song's end mark moved away from the fingers' midpoint by the zoom, as a layout per move moves it.
+      expect(tester.getCenter(end).dx, closeTo(at.dx + (x0 - at.dx) * 1.25, 0.5));
+      await settle(tester);
     });
 
     test('tracks in a folder take shades of its colour unless they have their own', () {

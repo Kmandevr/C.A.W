@@ -3,6 +3,7 @@
 // and after a rebinding; Vim keys' H J K L as the arrows; the transport's back-to-start; pages and sheets mid-exit.
 import 'dart:convert';
 
+import 'package:caw/ui/devices/kit/hero.dart' show MotionClock;
 import 'package:caw/actions/actions.dart';
 import 'package:caw/actions/hints.dart';
 import 'package:caw/actions/keymap.dart';
@@ -292,6 +293,9 @@ void main() {
 
     keyTest('FX chain: Enter opens the effect, and the device editor\'s keys move and change its controls',
         (tester) async {
+    // A modulated knob or a device visual moves on every frame; hold it still so the screen settles.
+    MotionClock.hold = true;
+    addTearDown(() => MotionClock.hold = false);
       s = stateWith('org.caw.utility', make: () => s);
       final l = s.project.layers.first;
       await pumpApp(tester, SizedBox(height: 800, child: FxStack(state: s, layer: l)));

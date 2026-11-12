@@ -1,4 +1,5 @@
 // The fx-space reverbs' plugin UIs: the convolver (its impulse response's envelope on a decay x size pad) and the shimmer (rising octave layers).
+import '../../kit/repaint.dart';
 import 'dart:math' as math;
 import 'dart:typed_data';
 
@@ -167,7 +168,8 @@ class _IrPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant _IrPainter o) => true;
+  bool shouldRepaint(covariant _IrPainter o) =>
+      paintInputsChanged([o.values, o.decay, o.size, o.length, o.reverse, o.source, o.color, o.second], [values, decay, size, length, reverse, source, color, second]);
 }
 
 /// The shimmer: each round of the tail drawn as a layer a shift higher (an octave or a fifth), fading by the
@@ -221,5 +223,6 @@ class _ShimmerPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant _ShimmerPainter o) => true;
+  bool shouldRepaint(covariant _ShimmerPainter o) =>
+      paintInputsChanged([o.secs, o.amount, o.decay, o.shift, o.color, o.second], [secs, amount, decay, shift, color, second]);
 }

@@ -164,6 +164,47 @@ TEST(track_meters_read_each_side_for_stereo_tracks) {
     caw_engine_destroy(engine);
 }
 
+TEST(all_track_meters_read_in_one_call) {
+    // Beta plan B4.8: the app read one C API call per track every poll; caw_engine_layer_meters reads them all at
+    // once, the same values caw_engine_layer_meter_stereo gives, and resets them the same way.
+    CawEngine* engine = caw_engine_create(48000);
+    CHECK(engine != nullptr);
+    if (!engine) return;
+    char* result = caw_engine_set_project(engine,
+        R"({"caw_project":1,"bpm":120,"master":1,
+            "layers":[{"id":"l","instrument":{"id":"org.caw.test.osc","params":{"shape":4,"level":0.5}},"volume":0.5,"pan":-1},
+                      {"id":"c","instrument":{"id":"org.caw.test.osc","params":{"shape":4,"level":0.5}},"volume":1,"pan":0.5}]})");
+    CHECK(result && std::string(result).find("\"ok\":true") != std::string::npos);
+    caw_free(result);
+    caw_engine_play(engine);
+    std::vector<float> l(256), r(256);
+    for (int k = 0; k < 40; ++k) caw_engine_process(engine, l.data(), r.data(), 256);
+    CHECK_EQ(caw_engine_layer_meters(engine, nullptr, 0), 2);  // the count alone, nothing read
+    CawLayerMeterStereo m[3] = {};
+    m[2].peak = -1;
+    CHECK_EQ(caw_engine_layer_meters(engine, m, 3), 2);
+    CHECK(m[0].active == 1 && m[1].active == 1);
+    CHECK_NEAR(m[0].peak_l, 0.25, 1e-4);
+    CHECK_EQ(m[0].peak_r, 0.0f);
+    CHECK_NEAR(m[0].peak, 0.25, 1e-4);
+    const double gr = std::sin((0.5 + 1.0) * kPi / 4.0);
+    CHECK_NEAR(m[1].peak_r, 0.5 * gr, 1e-4);
+    CHECK_NEAR(m[1].peak, 0.5 * gr, 1e-4);
+    CHECK_EQ(m[2].peak, -1.0f);  // past the layer count: untouched
+    // Read since the last call, as the one-track read is.
+    CawLayerMeter one{};
+    CHECK_EQ(caw_engine_layer_meter(engine, 1, &one), 1);
+    CHECK_EQ(one.peak, 0.0f);
+    for (int k = 0; k < 4; ++k) caw_engine_process(engine, l.data(), r.data(), 256);
+    CHECK_EQ(caw_engine_layer_meters(engine, m, 1), 2);  // a short array: only the first is read
+    CHECK(m[0].peak > 0.2f);
+    float left = -1, right = -1;
+    CHECK_EQ(caw_engine_layer_meter_stereo(engine, 1, &one, &left, &right), 1);
+    CHECK(right > 0.2f);  // the second was not read (nor reset) by the short call
+    CHECK_EQ(caw_engine_layer_meters(nullptr, m, 3), 0);
+    caw_engine_destroy(engine);
+}
+
 TEST(audition_only_uses_the_dedicated_audition_slot) {
     ProjectSpec p = project({});
     p.hasAuditionInstrument = true;

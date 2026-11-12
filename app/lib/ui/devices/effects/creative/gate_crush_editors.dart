@@ -1,4 +1,5 @@
 // The gate and crush plugin UIs (fx-creative): the trance gate's drawable step pattern and the bitcrusher's stair-stepped wave.
+import '../../kit/repaint.dart';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -177,7 +178,8 @@ class _GatePainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant _GatePainter o) => true;
+  bool shouldRepaint(covariant _GatePainter o) =>
+      paintInputsChanged([o.levels, o.attack, o.decay, o.sustain, o.release, o.length, o.swing, o.stepMs, o.step, o.env, o.color, o.second, o.active, o.pad, o.top, o.bottom], [levels, attack, decay, sustain, release, length, swing, stepMs, step, env, color, second, active, pad, top, bottom]);
 }
 
 // ---------- Bitcrush ----------
@@ -294,5 +296,6 @@ class _CrushPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant _CrushPainter o) => true;
+  bool shouldRepaint(covariant _CrushPainter o) =>
+      paintInputsChanged([o.bits, o.rate, o.dac, o.jitter, o.color, o.second, o.active], [bits, rate, dac, jitter, color, second, active]);
 }

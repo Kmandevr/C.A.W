@@ -43,7 +43,9 @@ Future<void> main() async {
   DesktopWindow.current = platformDesktopWindow(); // the window's title and files opened with or dropped on it
   final settings = await Settings.open();
   // The frame-rate setting: the screen's rates, then Auto's idle drop or the cap (Settings keeps its cap up to date).
-  final frameRate = FrameRateController(device: platformDisplayRate())..setCap(settings.frameRate);
+  final frameRate = FrameRateController(device: platformDisplayRate())
+    ..setCap(settings.frameRate)
+    ..setProfileCap(settings.profileFrameCap);
   FrameRateController.current = frameRate;
   unawaited(frameRate.start());
   final state = AppState(settings: settings);

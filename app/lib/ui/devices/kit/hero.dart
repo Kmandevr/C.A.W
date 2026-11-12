@@ -1,5 +1,4 @@
 // A device's hero visual frame (a tinted canvas with a grid and readouts), live display frames, a running phase for motion, and a level history.
-import 'dart:async';
 import 'dart:math' as math;
 import 'dart:typed_data';
 
@@ -98,59 +97,49 @@ class _GridPainter extends CustomPainter {
   bool shouldRepaint(covariant _GridPainter o) => o.color != color;
 }
 
-/// Seconds since a visual's motion started, advanced about 30 times a second: the display data's rate. A Ticker
-/// would ask for a frame on every screen refresh (120 a second on the S22+) for motion drawn at 30 (#174); this asks
-/// for one frame per step, reads the frame's time (the clock a Ticker reads, so tests stay deterministic), and makes
-/// no frames at all while stopped ([run] false) or while the app is in the background.
+/// Seconds since a visual's motion started, advanced on every frame the screen draws (beta plan B3: device motion
+/// at the display's rate, up to 240 Hz, not the display data's 30). It is a Ticker's time, so tests stay
+/// deterministic; it asks for no frames at all while stopped ([run] false), and none come while the app is in the
+/// background. Callers stop it in sleeping sections and covered routes ([motionRuns] reads [TickerMode]).
 class MotionClock {
-  final ValueNotifier<double> seconds = ValueNotifier(0);
-  Timer? _timer;
-  Duration? _start;
-  bool _pending = false, _disposed = false;
+  /// Holds every device's motion still, as reduced motion does, for tests that wait for the screen to settle
+  /// (`pumpAndSettle` never ends while a clock runs on every frame).
+  @visibleForTesting
+  static bool hold = false;
 
-  bool get running => _timer != null;
+  final ValueNotifier<double> seconds = ValueNotifier(0);
+  Ticker? _ticker;
+  bool _disposed = false;
+
+  bool get running => _ticker != null;
 
   /// Starts or stops the clock; stopped, it starts from 0 again next time.
   void run(bool on) {
     if (on == running || _disposed) return;
     if (!on) {
-      _timer!.cancel();
-      _timer = null;
-      _start = null;
+      _ticker!.dispose();
+      _ticker = null;
       return;
     }
-    _timer = Timer.periodic(const Duration(microseconds: 33333), (_) => _step());
-    _step();
-  }
-
-  void _step() {
-    final b = SchedulerBinding.instance;
-    if (_pending || (b.lifecycleState != null && b.lifecycleState != AppLifecycleState.resumed)) return;
-    _pending = true;
-    b.scheduleFrameCallback((stamp) {
-      _pending = false;
-      if (_disposed || _timer == null) return;
-      final start = _start ??= stamp;
-      seconds.value = (stamp - start).inMicroseconds / 1e6;
-    });
-    b.scheduleFrame();
+    _ticker = Ticker((elapsed) => seconds.value = elapsed.inMicroseconds / 1e6, debugLabel: 'MotionClock')..start();
   }
 
   void dispose() {
     _disposed = true;
-    _timer?.cancel();
-    _timer = null;
+    _ticker?.dispose();
+    _ticker = null;
     seconds.dispose();
   }
 }
 
 /// Whether motion may run under [context]: full motion, and the part of the screen shown (not a dormant section or
 /// a covered route, whose tickers are off).
-bool motionRuns(BuildContext context) => Motion.of(context) == MotionLevel.full && TickerMode.valuesOf(context).enabled;
+bool motionRuns(BuildContext context) =>
+    !MotionClock.hold && Motion.of(context) == MotionLevel.full && TickerMode.valuesOf(context).enabled;
 
 /// Seconds since the visual started, for motion that shows state (a ping-pong ball, a sweeping notch, an LFO dot).
-/// It runs only with full motion (so the Minimal profile and reduced motion stop it), and redraws at about 30 Hz,
-/// the display data's rate, to keep the editor light on CPU ([MotionClock]); otherwise [builder] gets a fixed time.
+/// It runs only with full motion (so the Minimal profile and reduced motion stop it), and redraws on every frame
+/// while shown ([MotionClock]); otherwise [builder] gets a fixed time.
 class DevicePhase extends StatefulWidget {
   const DevicePhase({super.key, required this.builder, this.still = 0.35});
   final Widget Function(BuildContext context, double seconds) builder;
@@ -177,10 +166,12 @@ class _DevicePhaseState extends State<DevicePhase> {
     super.dispose();
   }
 
+  // In a layer and a build scope of its own (as a LiveIsland): a motion frame rebuilds, lays out and repaints the
+  // visual alone, not a LayoutBuilder above it or the page around it.
   @override
-  Widget build(BuildContext context) => ValueListenableBuilder<double>(
+  Widget build(BuildContext context) => RepaintBoundary(child: LayoutBuilder(builder: (_, _) => ValueListenableBuilder<double>(
     valueListenable: _clock.seconds,
-    builder: (context, t, _) => widget.builder(context, _clock.running ? t : widget.still));
+    builder: (context, t, _) => widget.builder(context, _clock.running ? t : widget.still))));
 }
 
 /// The last [length] values of a few lanes (input level, gain reduction...), newest last: a scrolling history.
