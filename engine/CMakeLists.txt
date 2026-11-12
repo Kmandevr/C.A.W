@@ -28,14 +28,17 @@ target_compile_features(caw_sdk INTERFACE cxx_std_20)
 # Clang is either clang or clang-cl (MSVC-style flags, which ignore -ffp-contract and still fuse
 # multiply-adds under /fp:precise), so its flags are chosen from the consuming build's frontend:
 # here for the build tree, and in CAWConfig.cmake for installed consumers.
+# The engine's own targets (CAW_ENGINE_FP_FLAGS, set at the end of this file) skip these and use CAW_FP_FLAGS:
+# an interface option comes after a target's own on the command line, so it would override them.
+set(_caw_sdk_fp "$<NOT:$<BOOL:$<TARGET_PROPERTY:CAW_ENGINE_FP_FLAGS>>>")
 target_compile_options(caw_sdk INTERFACE
-  "$<$<COMPILE_LANG_AND_ID:CXX,MSVC>:/fp:precise>"
-  "$<$<COMPILE_LANG_AND_ID:CXX,GNU,AppleClang>:-ffp-contract=off;-fno-fast-math;-fno-trapping-math>")
+  "$<$<AND:${_caw_sdk_fp},$<COMPILE_LANG_AND_ID:CXX,MSVC>>:/fp:precise>"
+  "$<$<AND:${_caw_sdk_fp},$<COMPILE_LANG_AND_ID:CXX,GNU,AppleClang>>:-ffp-contract=off;-fno-fast-math;-fno-trapping-math>")
 if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
   if(CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
-    target_compile_options(caw_sdk INTERFACE "$<BUILD_INTERFACE:/fp:precise;/clang:-ffp-contract=off>")
+    target_compile_options(caw_sdk INTERFACE "$<BUILD_INTERFACE:$<${_caw_sdk_fp}:/fp:precise;/clang:-ffp-contract=off>>")
   else()
-    target_compile_options(caw_sdk INTERFACE "$<BUILD_INTERFACE:-ffp-contract=off;-fno-fast-math;-fno-trapping-math>")
+    target_compile_options(caw_sdk INTERFACE "$<BUILD_INTERFACE:$<${_caw_sdk_fp}:-ffp-contract=off;-fno-fast-math;-fno-trapping-math>>")
   endif()
 endif()
 set_target_properties(caw_sdk PROPERTIES EXPORT_NAME SDK)
@@ -82,17 +85,33 @@ if(CAW_INSTALL_SDK)
   )
 endif()
 
-# Determinism: no fast-math and no fused multiply-add contraction, so every platform rounds alike.
-# -fno-trapping-math changes no result (the engine never reads floating-point exception flags; it is
-# Clang's default): it lets GCC vectorize loops with selects, such as the mixer's saturating sums.
-# MSVC's /fp:precise never contracts; clang-cl's does, so it also gets /clang:-ffp-contract=off.
+# Floating point (speed phase 2, docs/engine.md "Determinism"): output must sound the same, not give the same bits
+# (owner, 2026-11-12), so the engine's own code gets the fast-math subsets that measured faster and pass every
+# reference render: fused multiply-adds (-ffp-contract=fast; Arm64 has FMA, the x86-64 baseline has none, so no
+# change there), no errno from maths functions, no trapping, no signed zeros and reassociation (GCC reassociates only
+# with those two). Never -ffinite-math-only: the mix's NaN/Inf guards (route_math.h, finiteOr0) must stay, and
+# fp_mode_test.cpp checks them under these flags. Left out: -freciprocal-math (no gain). MSVC keeps /fp:precise
+# (clang-cl also /clang:-ffp-contract=off): Windows isn't the speed target, and /fp:fast's NaN handling is unchecked.
+# _caw_fp_strict is the SDK's strict set: components get it (CAW::SDK above), and so do tests of exact IEEE results.
 if(MSVC)
-  set(CAW_FLAGS /W4 /fp:precise /utf-8 /EHsc)
+  set(_caw_fp_strict /fp:precise)
   if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
-    list(APPEND CAW_FLAGS /clang:-ffp-contract=off)
+    list(APPEND _caw_fp_strict /clang:-ffp-contract=off)
   endif()
+  set(_caw_fp_default ${_caw_fp_strict})
 else()
-  set(CAW_FLAGS -Wall -Wextra -ffp-contract=off -fno-fast-math -fno-trapping-math)
+  # -fno-trapping-math changes no result (nothing reads floating-point exception flags; it is Clang's default).
+  set(_caw_fp_strict -ffp-contract=off -fno-fast-math -fno-trapping-math)
+  set(_caw_fp_default -ffp-contract=fast -fno-math-errno -fno-trapping-math -fno-signed-zeros -fassociative-math)
+endif()
+# -DCAW_FP_FLAGS=... (a ;-list) overrides them, to measure a flag or build strictly.
+if(NOT DEFINED CAW_FP_FLAGS)
+  set(CAW_FP_FLAGS ${_caw_fp_default})
+endif()
+if(MSVC)
+  set(CAW_FLAGS /W4 ${CAW_FP_FLAGS} /utf-8 /EHsc)
+else()
+  set(CAW_FLAGS -Wall -Wextra ${CAW_FP_FLAGS})
 endif()
 # Build speed only (the output is the same): Visual Studio builds compile one file at a time per target
 # unless asked; /MP compiles a target's files in parallel.
@@ -223,6 +242,7 @@ target_include_directories(caw_cli PRIVATE src)
   target_sources(caw_tests PRIVATE tests/voice_bus_test.cpp)  # #127 the voice bus; #120 built-in declarations, C 3.0/3.1
   target_sources(caw_tests PRIVATE tests/audio_assets_test.cpp)  # assets, audio clips, the sampler, SFZ, input (WP-J)
   target_sources(caw_tests PRIVATE tests/speed_free_wins_test.cpp)  # speed phase 1: Eco oversampling, silent work skipped, master sleep
+  target_sources(caw_tests PRIVATE tests/fp_mode_test.cpp)  # speed phase 2: the flush-to-zero guard, NaN/Inf guards under the build flags
   add_library(caw_test_component MODULE tests/native_component_fixture.cpp)
   target_link_libraries(caw_test_component PRIVATE CAW::SDK)
   target_compile_options(caw_test_component PRIVATE ${CAW_FLAGS})
@@ -296,6 +316,20 @@ add_executable(caw_bench bench/caw_bench.cpp src/capi.cpp src/capi_modulation.cp
   target_include_directories(caw_bench PRIVATE src)
   target_link_libraries(caw_bench PRIVATE caw_core)
 endif()
+
+# Tests whose expected values are exact IEEE arithmetic get the strict flags whatever CAW_FP_FLAGS is (an option on
+# a source comes after the target's): the Library's exact bits and signed zeros as components get them, and the
+# graph's routing (copies keep -0.0f; gains apply in order), computed without reassociation or folded signed zeros.
+if(CAW_TOOLS)
+  set_source_files_properties(tests/library_kernels_test.cpp tests/builtin_instruments_test.cpp tests/graph_channels_test.cpp
+    PROPERTIES COMPILE_OPTIONS "${_caw_fp_strict}")
+endif()
+# The engine's own targets take CAW_FP_FLAGS (in CAW_FLAGS) instead of the SDK's strict floating-point flags.
+foreach(_caw_target caw_core caw_engine caw_cli caw_tests caw_rt_tests caw_bench)
+  if(TARGET ${_caw_target})
+    set_property(TARGET ${_caw_target} PROPERTY CAW_ENGINE_FP_FLAGS ON)
+  endif()
+endforeach()
 
 # CLAP export (docs/native-module-sdk.md): plug-ins of the example and a test bundle, and a host test.
 if(CAW_CLAP AND CAW_TOOLS)
