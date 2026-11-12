@@ -32,14 +32,17 @@ struct SvfOutput {
 class Svf {
 public:
     void set(double cutoff, double q, double sampleRate) noexcept { setWith<false>(cutoff, q, sampleRate); }
-    // set() with fastmath.hpp's tanApprox (within 1e-9 relative): cheaper, for a cutoff that moves every few blocks.
+    // set() with fastmath.hpp's tanApprox (within 1e-8 relative): cheaper, for a cutoff that moves every few blocks.
     void setApprox(double cutoff, double q, double sampleRate) noexcept { setWith<true>(cutoff, q, sampleRate); }
     template <bool Approx>
     void setWith(double cutoff, double q, double sampleRate) noexcept {
-        if (cutoff == cutoff_ && q == q_ && sampleRate == rate_) return;  // unchanged: no tan
+        // The rate is stored negated for setApprox(), so set() after setApprox() (or back) with the same
+        // arguments works the coefficients out again instead of keeping the other form's.
+        const double key = Approx ? -sampleRate : sampleRate;
+        if (cutoff == cutoff_ && q == q_ && key == rate_) return;  // unchanged: no tan
         cutoff_ = cutoff;
         q_ = q;
-        rate_ = sampleRate;
+        rate_ = key;
         double fc = finiteOr0(cutoff);
         const double top = 0.49 * sampleRate;
         fc = fc < 10.0 ? 10.0 : (fc > top ? top : fc);
@@ -207,16 +210,17 @@ inline double softClip(double x) noexcept {
 class MultiLadder {
 public:
     void set(double cutoff, double resonance, double sampleRate) noexcept { setWith<false>(cutoff, resonance, sampleRate); }
-    // set() with fastmath.hpp's tanApprox (within 1e-9 relative): cheaper, for a cutoff that moves every few blocks.
+    // set() with fastmath.hpp's tanApprox (within 1e-8 relative): cheaper, for a cutoff that moves every few blocks.
     void setApprox(double cutoff, double resonance, double sampleRate) noexcept {
         setWith<true>(cutoff, resonance, sampleRate);
     }
     template <bool Approx>
     void setWith(double cutoff, double resonance, double sampleRate) noexcept {
-        if (cutoff == cutoff_ && resonance == resonance_ && sampleRate == rate_) return;  // unchanged: no tan
+        const double key = Approx ? -sampleRate : sampleRate;  // negated for setApprox(), as in Svf::setWith
+        if (cutoff == cutoff_ && resonance == resonance_ && key == rate_) return;  // unchanged: no tan
         cutoff_ = cutoff;
         resonance_ = resonance;
-        rate_ = sampleRate;
+        rate_ = key;
         double fc = finiteOr0(cutoff);
         const double top = 0.45 * sampleRate;
         fc = fc < 10.0 ? 10.0 : (fc > top ? top : fc);
