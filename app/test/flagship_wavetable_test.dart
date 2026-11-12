@@ -4,6 +4,7 @@ import 'dart:io';
 import 'dart:math' as math;
 import 'dart:typed_data';
 
+import 'package:caw/ui/devices/kit/hero.dart' show MotionClock;
 import 'package:caw/engine/engine.dart';
 import 'package:caw/model/app_state.dart';
 import 'package:caw/model/arrange_fx.dart';
@@ -88,6 +89,9 @@ void main() {
     }
 
     testWidgets('without an engine it says the wavetable was not imported and changes nothing', (tester) async {
+    // A modulated knob or a device visual moves on every frame; hold it still so the screen settles.
+    MotionClock.hold = true;
+    addTearDown(() => MotionClock.hold = false);
       var picked = 0, asked = 0;
       pickWavetableWav = () async {
         picked++;
@@ -114,6 +118,9 @@ void main() {
     });
 
     testWidgets('a cancelled pick or frame choice asks nothing more', (tester) async {
+    // A modulated knob or a device visual moves on every frame; hold it still so the screen settles.
+    MotionClock.hold = true;
+    addTearDown(() => MotionClock.hold = false);
       var asked = 0;
       pickWavetableWav = () async => null;
       pickWavetableSplit = (_) async {

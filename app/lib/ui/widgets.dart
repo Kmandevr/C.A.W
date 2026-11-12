@@ -60,24 +60,44 @@ class ScopeView extends StatefulWidget {
 
 class _ScopeViewState extends State<ScopeView> {
   final Float32List _buf = Float32List(512);
+  int _read = 0, _shown = -1; // the reads into [_buf] so far, and the tick last read
 
+  @override
+  void didUpdateWidget(ScopeView old) {
+    super.didUpdateWidget(old);
+    if (old.index != widget.index || !identical(old.state, widget.state)) _shown = -1;
+  }
+
+  // A live island (beta plan B4.6): its 30 reads a second repaint only the scope, and a frame with no new read (a
+  // rebuild from above) neither reads nor redraws it.
   @override
   Widget build(BuildContext context) => SizedBox(
         height: widget.height,
-        child: ValueListenableBuilder<int>(
+        child: LiveIsland(child: ValueListenableBuilder<int>(
           valueListenable: widget.state.tick,
-          builder: (context, _, _) {
-            widget.state.engine?.scope(widget.index, _buf);
-            return CustomPaint(painter: _ScopePainter(_buf, widget.color), size: Size.infinite);
+          builder: (context, tick, _) {
+            if (tick != _shown) {
+              _shown = tick;
+              widget.state.engine?.scope(widget.index, _buf);
+              _read++;
+            }
+            return CustomPaint(painter: _ScopePainter(_buf, _read, widget.color, glow: Neon.performanceMode < 2),
+                size: Size.infinite);
           },
-        ),
+        )),
       );
 }
 
 class _ScopePainter extends CustomPainter {
-  _ScopePainter(this.samples, this.color);
+  _ScopePainter(this.samples, this.read, this.color, {required this.glow});
   final Float32List samples;
+
+  /// Which read of [samples] this draws (the buffer is reused, so its contents can't be compared).
+  final int read;
   final Color color;
+
+  /// The blurred glow under the line: Full and Balanced only (Lightweight and Minimal draw the line alone).
+  final bool glow;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -89,13 +109,15 @@ class _ScopePainter extends CustomPainter {
       final y = mid - samples[i].clamp(-1.0, 1.0) * (mid - 2);
       i == 0 ? path.moveTo(x, y) : path.lineTo(x, y);
     }
-    canvas.drawPath(
-        path,
-        Paint()
-          ..color = color.withValues(alpha: 0.35)
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = 4
-          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 3));
+    if (glow) {
+      canvas.drawPath(
+          path,
+          Paint()
+            ..color = color.withValues(alpha: 0.35)
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 4
+            ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 3));
+    }
     canvas.drawPath(
         path,
         Paint()
@@ -105,7 +127,8 @@ class _ScopePainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant _ScopePainter old) => true;
+  bool shouldRepaint(covariant _ScopePainter old) =>
+      old.read != read || !identical(old.samples, samples) || old.color != color || old.glow != glow;
 }
 
 /// A horizontal bar for a 0..1 value, drawn in neon. With glass on: a faint fill and a solid outline, for the

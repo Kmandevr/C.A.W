@@ -1,5 +1,6 @@
 // The dynamics family's plugin UIs: compressor (level history under a knee graph with a moving dot), limiter (ceiling over the
 // gain-reduction history), gate (threshold on a scrolling level) and transient shaper (a hit's envelope reshaped).
+import '../kit/repaint.dart';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -172,7 +173,8 @@ class _CompPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant _CompPainter o) => true;
+  bool shouldRepaint(covariant _CompPainter o) =>
+      paintInputsChanged([o.hist, o.thr, o.ratio, o.knee, o.makeup, o.inset, o.detector, o.color, o.second, o.active], [hist, thr, ratio, knee, makeup, inset, detector, color, second, active]);
 }
 
 /// A level history in [area]: input as a grey fill from the bottom, output as a line in [color], gain reduction as
@@ -334,7 +336,8 @@ class _LimiterPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant _LimiterPainter o) => true;
+  bool shouldRepaint(covariant _LimiterPainter o) =>
+      paintInputsChanged([o.hist, o.area, o.y, o.ceiling, o.gain, o.color, o.active], [hist, area, y, ceiling, gain, color, active]);
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -450,7 +453,8 @@ class _GatePainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant _GatePainter o) => true;
+  bool shouldRepaint(covariant _GatePainter o) =>
+      paintInputsChanged([o.hist, o.thr, o.range, o.color, o.second, o.active], [hist, thr, range, color, second, active]);
 }
 
 // ---------------------------------------------------------------------------------------------------------------

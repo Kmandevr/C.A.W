@@ -1,6 +1,7 @@
 // The sampler's editor (org.caw.sampler), in the device kit's style: ZONES (the zone map over keys and velocity,
 // the keyboard that takes dropped samples and plays them, the zone's waveform with its loop points, the zone
 // inspector, round robins, SFZ import and export) and SOUND (level, envelope and filter knobs).
+import '../kit/repaint.dart';
 import 'dart:convert';
 import 'dart:math' as math;
 
@@ -431,7 +432,8 @@ class _ZoneMapPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant _ZoneMapPainter old) => true;
+  bool shouldRepaint(covariant _ZoneMapPainter old) =>
+      paintInputsChanged([old.zones, old.selected, old.accent, old.lo, old.hi, old.rectOf], [zones, selected, accent, lo, hi, rectOf]);
 }
 
 // ---------- the keyboard ----------
@@ -501,7 +503,8 @@ class _KeysPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant _KeysPainter old) => true;
+  bool shouldRepaint(covariant _KeysPainter old) =>
+      paintInputsChanged([old.lo, old.hi, old.accent, old.zones, old.hover], [lo, hi, accent, zones, hover]);
 }
 
 // ---------- the zone's waveform ----------
@@ -577,7 +580,7 @@ class _ZoneWaveformState extends State<ZoneWaveform> {
             peaks: () => WaveformCache.instance.peaks(widget.state.audioIo, z.path, info.seconds, info.seconds / w),
             window: ClipWindow(offset: 0, perPixel: info.seconds / w, fileSeconds: info.seconds),
             color: widget.accent.withValues(alpha: 0.85), gain: 1, fadeIn: 0, fadeOut: 0,
-            inCurve: FadeCurve.linear, outCurve: FadeCurve.linear))),
+            inCurve: FadeCurve.linear, outCurve: FadeCurve.linear, path: z.path))),
         if (z.loopEnd > z.loopStart)
           Positioned(left: x(z.loopStart), width: math.max(1, x(z.loopEnd) - x(z.loopStart)), top: 0, bottom: 0,
               child: IgnorePointer(child: ColoredBox(color: Neon.yellow.withValues(alpha: 0.10)))),

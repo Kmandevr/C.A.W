@@ -1,6 +1,4 @@
 // Live display data from the engine (spectrum, gain reduction, levels) that device editors draw, polled while one is open.
-import 'dart:async';
-
 import 'package:flutter/foundation.dart';
 import 'package:flutter/scheduler.dart';
 
@@ -55,31 +53,30 @@ class _NoDisplay extends DeviceDisplaySource {
   ValueListenable<DeviceDisplayFrame?> frames(DeviceTarget target) => _empty;
 }
 
-/// Frames from the engine: each device being shown is read about 30 times a second while anything listens (an
-/// editor is open) and the track's engine plays it; nothing is polled otherwise.
+/// Frames from the engine: each device being shown is read on the app's shared meter tick ([AppState.tick], about
+/// 30 a second while anything plays or sounds) while anything listens (an editor is open); nothing is polled
+/// otherwise, and no timer of its own runs (beta plan B4.5).
 class EngineDisplaySource extends DeviceDisplaySource {
-  EngineDisplaySource({this.interval = const Duration(milliseconds: 33)});
-  final Duration interval;
+  EngineDisplaySource();
   final Map<String, _Poll> _polls = {};
 
   @override
   ValueListenable<DeviceDisplayFrame?> frames(DeviceTarget target) =>
-      _polls.putIfAbsent('${target.layerId}\u0000${target.slot}\u0000${target.displayChild}', () => _Poll(target, interval));
+      _polls.putIfAbsent('${target.layerId}\u0000${target.slot}\u0000${target.displayChild}', () => _Poll(target));
 }
 
 class _Poll extends ValueNotifier<DeviceDisplayFrame?> {
-  _Poll(this.target, this.interval) : super(null);
+  _Poll(this.target) : super(null);
   final DeviceTarget target;
-  final Duration interval;
   final Float32List _buffer = Float32List(Engine.maxDisplayFloats);
-  Timer? _timer;
+  ValueListenable<int>? _tick;
   int _listeners = 0;
 
   @override
   void addListener(VoidCallback listener) {
     super.addListener(listener);
     if (_listeners++ == 0 && target.state.engine != null) {
-      _timer = Timer.periodic(interval, (_) => _read());
+      _tick = target.state.tick..addListener(_read);
       _read();
     }
   }
@@ -89,8 +86,8 @@ class _Poll extends ValueNotifier<DeviceDisplayFrame?> {
     super.removeListener(listener);
     if (--_listeners <= 0) {
       _listeners = 0;
-      _timer?.cancel();
-      _timer = null;
+      _tick?.removeListener(_read);
+      _tick = null;
     }
   }
 

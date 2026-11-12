@@ -1,4 +1,5 @@
 // The pitch and frequency plugin UIs (fx-creative): pitch shifter (a semitone ruler), frequency shifter (partials moved by the same hertz) and ring mod (carrier, input and product).
+import '../../kit/repaint.dart';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -134,7 +135,8 @@ class _PitchPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant _PitchPainter o) => true;
+  bool shouldRepaint(covariant _PitchPainter o) =>
+      paintInputsChanged([o.semis, o.live, o.phase, o.color, o.second, o.active], [semis, live, phase, color, second, active]);
 }
 
 // ---------- Frequency shifter ----------
@@ -272,7 +274,8 @@ class _ShiftPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant _ShiftPainter o) => true;
+  bool shouldRepaint(covariant _ShiftPainter o) =>
+      paintInputsChanged([o.left, o.right, o.feedback, o.color, o.second, o.active], [left, right, feedback, color, second, active]);
 }
 
 // ---------- Ring mod ----------
@@ -412,5 +415,6 @@ class _RingPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant _RingPainter o) => true;
+  bool shouldRepaint(covariant _RingPainter o) =>
+      paintInputsChanged([o.source, o.freq, o.bias, o.rectify, o.mix, o.drift, o.color, o.second, o.active], [source, freq, bias, rectify, mix, drift, color, second, active]);
 }

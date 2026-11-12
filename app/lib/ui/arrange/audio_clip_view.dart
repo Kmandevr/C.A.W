@@ -338,7 +338,7 @@ class AudioClipViewState extends State<AudioClipView> {
             window: ClipWindow(offset: offset, perPixel: per, fileSeconds: fileSeconds, reverse: c.reverse,
                 loop: c.loop, loopStart: c.loopStart, loopEnd: c.loopEnd),
             color: wave, gain: gain, fadeIn: fadeInPx, fadeOut: fadeOutPx, inCurve: inCurve, outCurve: outCurve,
-            top: top)))),
+            top: top, path: asset?.path)))),
         if (top > 0) Positioned(left: 12, right: 12, top: 1, height: 13, child: Row(children: [
           if (c.lock) Icon(Icons.lock, key: ValueKey('audio-locked-${c.id}'), size: 9, color: color),
           if (c.mute) Icon(Icons.volume_off, key: ValueKey('audio-muted-${c.id}'), size: 9, color: color),

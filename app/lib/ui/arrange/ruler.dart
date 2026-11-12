@@ -242,8 +242,13 @@ class _ArrangeRulerState extends State<ArrangeRuler> {
   }
 }
 
+/// How far past each side of the view the ruler and grid paint, in views (0 at rest): a time pinch shows the lanes
+/// scaled ([ArrangerScreen]), and zooming out brings in what was beside the view before it lays out again.
+final arrangeSpanReveal = ValueNotifier<double>(0);
+
 class _RulerPainter extends CustomPainter {
-  _RulerPainter(this.stepW, this.barSteps, this.scroll, this.height) : super(repaint: scroll);
+  _RulerPainter(this.stepW, this.barSteps, this.scroll, this.height)
+      : super(repaint: Listenable.merge([scroll, arrangeSpanReveal]));
   final double stepW, height;
   final int barSteps;
   final ScrollController scroll;
@@ -254,8 +259,9 @@ class _RulerPainter extends CustomPainter {
     var from = 0.0, to = math.min(size.width, 4096.0);
     if (scroll.hasClients) {
       final pos = scroll.positions.last;
-      from = pos.pixels.clamp(0.0, size.width).toDouble();
-      to = (pos.pixels + pos.viewportDimension).clamp(from, size.width).toDouble();
+      final reveal = pos.viewportDimension * arrangeSpanReveal.value;
+      from = (pos.pixels - reveal).clamp(0.0, size.width).toDouble();
+      to = (pos.pixels + pos.viewportDimension + reveal).clamp(from, size.width).toDouble();
     }
     // A label every bar, or every 4, 16, 64… bars when bars are narrower than a label (owner, 2026-11-11: far out it
     // still reads); a tick at each label.

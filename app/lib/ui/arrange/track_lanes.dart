@@ -1,7 +1,9 @@
 // A track's automation lanes in the arranger, REAPER-style: rows under the track behind its envelope button, edited
 // in place (tap adds a point, drag moves one, double-tap deletes it, drag a segment's handle moves the segment).
+import 'dart:typed_data';
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart' show setEquals;
 import 'package:flutter/gestures.dart' show DragStartBehavior;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -512,13 +514,20 @@ class _LaneRowState extends State<LaneRow> {
   Widget build(BuildContext context) {
     final points = lane.points;
     final writer = AutomationWriter.current;
-    final curve = CustomPaint(size: Size(widget.width, _h),
-      painter: _LanePainter(lane: lane, stepW: widget.stepW, pad: _pad, writer: writer, selected: _selected));
-    // While the Automate button writes this lane, it repaints with the playhead so the new values show live.
+    final size = Size(widget.width, _h);
+    // The curve is recorded once in a layer of its own and repaints only when its points, zoom or selection change;
+    // while the Automate button writes this lane, a small painter over it draws the values being written with the
+    // playhead (beta plan B4.7).
+    Widget still(Set<int> selected) => RepaintBoundary(child: CustomPaint(size: size,
+      painter: _LanePainter(lane: lane, stepW: widget.stepW, pad: _pad, selected: selected)));
+    final curve = still(_selected);
     final live = writer == null ? curve : ListenableBuilder(listenable: writer, builder: (context, child) =>
         writer.writing ? ValueListenableBuilder<int>(valueListenable: lane.state.tick,
-            builder: (context, _, _) => CustomPaint(size: Size(widget.width, _h),
-              painter: _LanePainter(lane: lane, stepW: widget.stepW, pad: _pad, writer: writer)))
+            builder: (context, _, _) => Stack(children: [
+              still(const {}),
+              CustomPaint(size: size, painter: _LiveLanePainter(lane: lane, stepW: widget.stepW, pad: _pad,
+                  live: writer.liveSamples(lane.key))),
+            ]))
             : child!, child: curve);
     return Focus(
       focusNode: _keys,
@@ -588,45 +597,71 @@ class _LaneRowState extends State<LaneRow> {
   }
 }
 
+/// A lane's curve and points, from a copy of them taken when it is made (so a repaint is skipped when nothing moved).
 class _LanePainter extends CustomPainter {
-  _LanePainter({required this.lane, required this.stepW, required this.pad, this.writer, this.selected = const {}})
-      : live = writer?.liveSamples(lane.key);
+  _LanePainter({required this.lane, required this.stepW, required this.pad, this.selected = const {}})
+      : shape = Float64List.fromList([for (final p in lane.points) ...[p.step, lane.fraction(p.value)]]),
+        color = lane.color;
   final ArrangeLane lane;
   final double stepW, pad;
   final Set<int> selected;
-  final AutomationWriter? writer;
-  final List<(double, double)>? live;
+  final Color color;
+
+  /// Each point's step and height fraction, in pairs.
+  final Float64List shape;
 
   @override
   void paint(Canvas canvas, Size size) {
     final h = size.height - 2 * pad;
-    double y(double v) => pad + (1 - lane.fraction(v)) * h;
-    canvas.drawRect(Offset.zero & size, Paint()..color = lane.color.withValues(alpha: 0.04));
+    double y(double f) => pad + (1 - f) * h;
+    canvas.drawRect(Offset.zero & size, Paint()..color = color.withValues(alpha: 0.04));
     canvas.drawLine(Offset(0, size.height - 0.5), Offset(size.width, size.height - 0.5),
         Paint()..color = Neon.line.withValues(alpha: 0.6));
-    final points = lane.points;
-    if (points.isNotEmpty) {
+    final n = shape.length ~/ 2;
+    if (n > 0) {
       // Before the first point and after the last the lane holds their values, as the engine plays it.
-      final path = Path()..moveTo(0, y(points.first.value));
-      for (final p in points) {
-        path.lineTo(p.step * stepW, y(p.value));
+      final path = Path()..moveTo(0, y(shape[1]));
+      for (var i = 0; i < n; i++) {
+        path.lineTo(shape[2 * i] * stepW, y(shape[2 * i + 1]));
       }
-      path.lineTo(size.width, y(points.last.value));
+      path.lineTo(size.width, y(shape[2 * n - 1]));
       final fill = Path.from(path)..lineTo(size.width, size.height)..lineTo(0, size.height)..close();
-      canvas.drawPath(fill, Paint()..color = lane.color.withValues(alpha: 0.10));
-      canvas.drawPath(path, Paint()..color = lane.color..style = PaintingStyle.stroke..strokeWidth = 1.6);
-      final dot = Paint()..color = lane.color;
+      canvas.drawPath(fill, Paint()..color = color.withValues(alpha: 0.10));
+      canvas.drawPath(path, Paint()..color = color..style = PaintingStyle.stroke..strokeWidth = 1.6);
+      final dot = Paint()..color = color;
       final ring = Paint()..color = Neon.text..style = PaintingStyle.stroke..strokeWidth = 1;
-      for (var i = 0; i < points.length; i++) {
-        final p = points[i];
-        final at = Offset(p.step * stepW, y(p.value));
+      for (var i = 0; i < n; i++) {
+        final at = Offset(shape[2 * i] * stepW, y(shape[2 * i + 1]));
         // A selected point is larger, with a bright ring.
         final r = selected.contains(i) ? 5.5 : 4.0;
         canvas.drawCircle(at, r, dot);
         canvas.drawCircle(at, r, selected.contains(i) ? (Paint()..color = Neon.yellow..style = PaintingStyle.stroke..strokeWidth = 1.6) : ring);
       }
     }
-    // What the Automate button is writing now, in red over the lane (it joins the lane when the take ends).
+  }
+
+  @override
+  bool shouldRepaint(covariant _LanePainter old) {
+    if (old.stepW != stepW || old.pad != pad || old.color != color || old.shape.length != shape.length) return true;
+    if (!setEquals(old.selected, selected)) return true;
+    for (var i = 0; i < shape.length; i++) {
+      if (old.shape[i] != shape[i]) return true;
+    }
+    return false;
+  }
+}
+
+/// What the Automate button is writing now, in red over the lane (it joins the lane when the take ends).
+class _LiveLanePainter extends CustomPainter {
+  _LiveLanePainter({required this.lane, required this.stepW, required this.pad, required this.live});
+  final ArrangeLane lane;
+  final double stepW, pad;
+  final List<(double, double)>? live;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final h = size.height - 2 * pad;
+    double y(double v) => pad + (1 - lane.fraction(v)) * h;
     final s = live;
     if (s != null && s.isNotEmpty) {
       final path = Path()..moveTo(s.first.$1 * stepW, y(s.first.$2));
@@ -637,6 +672,7 @@ class _LanePainter extends CustomPainter {
     }
   }
 
+  // Redrawn on every read while a take runs: the samples grow in place.
   @override
-  bool shouldRepaint(covariant _LanePainter old) => true;
+  bool shouldRepaint(covariant _LiveLanePainter old) => true;
 }

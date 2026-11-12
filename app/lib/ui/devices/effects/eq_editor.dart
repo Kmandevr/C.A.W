@@ -1,4 +1,5 @@
 // The EQ's plugin UI (Pro-Q and Vital-like): the live spectrum behind a summed curve, a big node per band to drag, pinch for Q, a band strip, type tiles.
+import '../kit/repaint.dart';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -672,5 +673,6 @@ class _EqPainter extends CustomPainter {
   static String _hz(double v) => v >= 1000 ? '${(v / 1000).toStringAsFixed(v >= 10000 ? 1 : 2)} kHz' : '${v.round()} Hz';
 
   @override
-  bool shouldRepaint(covariant _EqPainter o) => true;
+  bool shouldRepaint(covariant _EqPainter o) =>
+      paintInputsChanged([o.adding, o.bands, o.y, o.node, o.selected, o.active, o.spectrum, o.rangeDb, o.color], [adding, bands, y, node, selected, active, spectrum, rangeDb, color]);
 }

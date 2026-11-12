@@ -12,8 +12,9 @@ import '../motion.dart';
 import '../pointer_input.dart';
 import '../theme.dart';
 import '../tokens.dart' show Radii;
-import '../widgets.dart' show ResetOnDoubleTap;
+import '../widgets.dart' show LiveIsland, ResetOnDoubleTap;
 import 'device_scope.dart';
+import 'kit/param_watch.dart';
 import 'kit/key_param.dart';
 import 'midi_learn.dart';
 import 'modulators/modulator_devices.dart' show modulatorColor, showModLinkSheet;
@@ -98,7 +99,8 @@ class _DeviceKnobState extends State<DeviceKnob> {
       kind: DeviceScope.of(context).target.param(widget.paramId)?.isChoice ?? false ? KeyParamKind.choice : KeyParamKind.range,
       child: ListenableBuilder(
         listenable: Listenable.merge([app.modulationTick, app.draggingModulation, app.assigningModulation]),
-        builder: (context, _) => _build(context)),
+        // Its own values rebuild it alone (param_watch.dart): a knob step doesn't rebuild the editor around it.
+        builder: (context, _) => ParamWatch(target: DeviceScope.of(context).target, builder: _build)),
     );
   }
 
@@ -231,7 +233,9 @@ class _DeviceKnobState extends State<DeviceKnob> {
       final projOffer = projDrag ?? projAssign;
       final projAssigned = projAssign != null && links.any((l) => l.ref == projAssign);
       final selected = selLink();
-      final face = SizedBox(width: _box, height: _box, child: ValueListenableBuilder<double>(
+      // A live island (widgets.dart): a modulated knob's ring moves on every frame (MotionClock) and lays out and
+      // repaints nothing around it.
+      final face = SizedBox(width: _box, height: _box, child: LiveIsland(child: ValueListenableBuilder<double>(
         valueListenable: _motion.seconds,
         builder: (context, seconds, _) => CustomPaint(
           painter: DeviceKnobPainter(
@@ -255,7 +259,7 @@ class _DeviceKnobState extends State<DeviceKnob> {
               bipolar: offering.naturallyBipolar).span(pos), modSourceColor(offering)) : null,
           ),
         ),
-      ));
+      )));
       return Semantics(
         label: label,
         value: text,
@@ -669,8 +673,11 @@ class DeviceChoice extends StatelessWidget {
   final Color? color;
   final String? label;
 
+  // Its own values rebuild it alone (param_watch.dart).
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => ParamWatch(target: DeviceScope.of(context).target, builder: _body);
+
+  Widget _body(BuildContext context) {
     final scope = DeviceScope.of(context);
     final t = scope.target;
     final p = t.param(paramId);
@@ -739,8 +746,11 @@ class DevicePower extends StatelessWidget {
   final String paramId;
   final Color? color;
 
+  // Its own values rebuild it alone (param_watch.dart).
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => ParamWatch(target: DeviceScope.of(context).target, builder: _body);
+
+  Widget _body(BuildContext context) {
     final scope = DeviceScope.of(context);
     final t = scope.target;
     final p = t.param(paramId);
@@ -770,8 +780,11 @@ class DeviceSlider extends StatelessWidget {
   final String? label;
   final Color? color;
 
+  // Its own values rebuild it alone (param_watch.dart).
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => ParamWatch(target: DeviceScope.of(context).target, builder: _body);
+
+  Widget _body(BuildContext context) {
     final scope = DeviceScope.of(context);
     final t = scope.target;
     final p = t.param(paramId);

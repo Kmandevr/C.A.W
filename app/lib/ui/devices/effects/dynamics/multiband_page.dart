@@ -1,4 +1,5 @@
 // fx-dynamics: the Multiband dynamics UI (org.caw.multiband): three band columns with live level and gain meters, draggable crossovers and thresholds.
+import '../../kit/repaint.dart';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -205,5 +206,6 @@ class _MultibandPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant _MultibandPainter o) => true;
+  bool shouldRepaint(covariant _MultibandPainter o) =>
+      paintInputsChanged([o.area, o.x1, o.x2, o.yOf, o.ott, o.bands, o.color, o.second, o.active], [area, x1, x2, yOf, ott, bands, color, second, active]);
 }

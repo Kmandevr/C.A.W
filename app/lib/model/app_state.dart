@@ -507,7 +507,7 @@ class AppState extends ChangeNotifier {
     if (before.playing != meters.playing) {
       EngineExecutionPolicy.updateRuntimeSignals(audioActive: meters.playing);
     }
-    layerMeters = [for (var i = 0; i < project.layers.length; i++) e.layerMeter(i)];
+    layerMeters = e.layerMeters(project.layers.length); // one C API call for every track (beta plan B4.8)
     final now = nowUs;
     meterTimeline.push(MeterReading(now, meters, layerMeters));
     if (e.audioOn && now - _latencyReadUs > 3000000) {
@@ -735,6 +735,10 @@ class AppState extends ChangeNotifier {
     if (e == null) return;
     _livePending = null; // the project as it is now supersedes a drag step not yet sent
     _docGen++;
+    // What a sync can change that the screens show: listeners hear of it only when one of these differs (an edit
+    // already notified when it was made; a sync with the same result rebuilds nothing; beta plan B4.4).
+    final before = (info: info, error: engineError, warnings: e.lastProjectWarnings, on: _transportOn,
+        id: _engineProjectId);
     final json = _engineJson();
     final id = project.id;
     try {
@@ -756,7 +760,10 @@ class AppState extends ChangeNotifier {
         }
       }
     }
-    notifyListeners();
+    if (!mapEquals(before.info, info) || before.error != engineError || before.on != _transportOn ||
+        before.id != _engineProjectId || !listEquals(before.warnings, e.lastProjectWarnings)) {
+      notifyListeners();
+    }
   }
 
   /// The project whose state the engine holds (null before the first project loads): see [_syncNow].
