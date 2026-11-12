@@ -175,7 +175,7 @@ Grid and view:
 | Drag a length without snapping | hold Shift while dragging |
 | Tools: draw, select, curve, erase, ratchet brush | B, V, C, X, — |
 | Switch piano roll / drum grid | G |
-| Zoom in / out / fit the pattern (also Ctrl + wheel; Ctrl + Shift + wheel for the row height) | Ctrl+= / Ctrl+- / F |
+| Zoom in / out / fit the pattern, gliding there (also Ctrl + wheel, at once; Ctrl + Shift + wheel for the row height) | Ctrl+= / Ctrl+- / F |
 | Show velocity lane / extras lanes | Alt+V / Alt+X (Ctrl+1/2/3 always switch areas, owner) |
 | Hear notes on / off | ⋮ menu (no default key) |
 
@@ -213,7 +213,10 @@ Generators (buttons; no default keys):
 | Add a marker at the playhead (REAPER's M is the layer's mute here) | Shift+M |
 | Add a region over the time selection, else the loop range (REAPER's Shift+R) | Shift+R |
 | Go to the next / previous marker or region (REAPER's ] and [ are the layer's length here) | Ctrl+] / Ctrl+[ |
-| Go to marker 1–10, in time order (REAPER's 1–0; these take the digits from counts here) | 1 … 9, 0 |
+| Go to marker 1–10, in time order (REAPER's 1–0; these take the digits from counts here); a marker off screen glides into view | 1 … 9, 0 |
+| Zoom to fit the song: the whole song in the view, from its start (`arranger.zoom.fit`; the zoom bar's ⛶) | — |
+| Zoom to the selection: the selected clips, else the time selection, fill the view (`arranger.zoom.selection`) | — |
+| Show the start: the view glides back to the song's start (`arranger.view.start`) | — |
 | Markers and regions: the list (jump, rename, loop, duplicate a region with its clips) | — |
 
 ### Exporter

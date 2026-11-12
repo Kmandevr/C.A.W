@@ -2,6 +2,7 @@
 // edges to trim (the right one past the file's end loops it), the top corners for fades (their dot bends the curve)
 // and the top-middle handle for gain. Tap selects; as a MIDI clip (owner, 2026-11-11), a long press picks it up whole
 // and carries it in time and across tracks on the grid, and a double tap or a right-click opens its menu.
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/gestures.dart';
@@ -240,11 +241,28 @@ class AudioClipViewState extends State<AudioClipView> {
   }
 
   final _clicks = ClickCounter();
+  Timer? _opening;
+
+  @override
+  void dispose() {
+    _opening?.cancel();
+    super.dispose();
+  }
 
   void _tap() {
     final ctrl = HardwareKeyboard.instance.isControlPressed;
     if (ctrl || (widget.selectMode?.call() ?? false)) {
       s.selectAudioClip(widget.layer, c, additive: true);
+    } else if (s.selectedClipIds.contains(c.id) && widget.onOpen != null) {
+      // A tap on the selected clip opens its editor, the Clip tab (owner, 2026-11-11); a finger's waits out the
+      // double tap that opens the menu instead, since the Clip tab moves the clip.
+      final open = widget.onOpen!;
+      if (_clicks.mouse) return open();
+      _opening = Timer(kDoubleTapTimeout, () {
+        _opening = null;
+        if (mounted) open();
+      });
+      return;
     } else {
       s.selectAudioClip(widget.layer, c);
     }
@@ -351,11 +369,13 @@ class AudioClipViewState extends State<AudioClipView> {
           // The body: select, open, menu and move (from the first few pixels, before the scroll views take it).
           Positioned.fill(child: MediaQuery(
             data: mq.copyWith(gestureSettings: const DeviceGestureSettings(touchSlop: kTouchSlop / 2)),
-            // A tap selects at once; a quick second tap opens the menu as well (its first item opens the Clip tab), as a
+            // A tap selects at once (on the selected clip, it opens the Clip tab); a quick second tap opens the menu as well (its first item opens the Clip tab), as a
             // right-click does; a long press lifts. A mouse's double-click opens the Clip tab (owner, 2026-11-11).
             child: Listener(onPointerDown: _clicks.down, onPointerUp: _clicks.up, child: GestureDetector(
               key: ValueKey('audio-clip-${c.id}'),
               onTap: () {
+                _opening?.cancel();
+                _opening = null;
                 if (_clicks.doubleClick && widget.onOpen != null) {
                   widget.onOpen!();
                 } else if (_clicks.doubleTap) {

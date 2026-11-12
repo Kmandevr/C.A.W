@@ -51,6 +51,8 @@ This is the implementation ledger for the unified modular engine. A documented c
 
 - Audio (API 18, WP-J; [engine](engine.md#audio-assets-clips-the-sampler-and-audio-input-api-18)): the asset store (WAV/FLAC/MP3 decoded with miniaudio's bundled decoders, sinc-resampled, refcounted within a budget, peaks), audio clips on tracks played by `org.caw.audio-track` through the track's chain and routing (fixed or musical; WSOLA or varispeed; fades, reverse, loop, pitch), `org.caw.sampler` (zones, round robins, loops with crossfades, ADSR, SVF, SFZ import and export), and audio input (a duplex device, monitoring through armed tracks, takes recorded on a writer thread with latency compensation, punch, loop takes, recovery, a latency ping). Tested with goldens and an allocation test; the device side was run only on ALSA's null device here.
 
+- App-only view state stays out of the engine: a track's own row height and collapse state (`LayerDoc.height`, `collapse`), its spacer and open lanes are saved in the project JSON but not in `toEngineJson`, and changing them doesn't re-send the project.
+
 ## Not yet implemented
 
 - Audio's leftovers: the app's UI for all of the above; audition of an asset outside a project; per-clip loop-seam crossfades and anti-aliased varispeed; a higher-quality stretch than WSOLA (phase vocoder) for tonal material; tempo maps (clips follow one project tempo); recording measured on real devices (latency estimate, AAudio duplex on the S22+).

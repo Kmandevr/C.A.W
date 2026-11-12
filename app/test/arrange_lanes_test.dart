@@ -147,13 +147,16 @@ void main() {
           [null, null, named('Outer').id, named('Mid').id, named('Inner').id]);
       // Colours shade down the tree from the top folder.
       expect(trackColor(s, named('Keys')), isNot(trackColor(s, named('Outer'))));
+      // A collapsed folder draws the tracks inside it as thin bars, at any depth; opened, each keeps its own state.
+      String rows() => [for (final l in s.visibleLayers) '${l.name}:${s.shownCollapse(l).name}'].join(' ');
+      s.setTrackCollapse([named('Keys')], TrackCollapse.compact);
       s.setFolderCollapsed(named('Mid'), true);
-      expect(s.visibleLayers.map((l) => l.name), ['Bass', 'Outer', 'Mid']);
+      expect(rows(), 'Bass:normal Outer:normal Mid:normal Inner:thin Keys:thin');
       s.setFolderCollapsed(named('Mid'), false);
       s.setFolderCollapsed(named('Outer'), true);
-      expect(s.visibleLayers.map((l) => l.name), ['Bass', 'Outer']);
+      expect(rows(), 'Bass:normal Outer:normal Mid:thin Inner:thin Keys:thin');
       s.setFolderCollapsed(named('Outer'), false);
-      expect(s.visibleLayers, hasLength(5));
+      expect(rows(), 'Bass:normal Outer:normal Mid:normal Inner:normal Keys:compact');
     });
 
     test('out of a folder one level at a time; dropped beside a track it joins that track\'s folder', () {
@@ -216,6 +219,7 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('lanes-button-a')));
       await tester.pump();
       expect(keys().showLanes, isTrue);
+      await tester.pump(const Duration(milliseconds: 500)); // the lanes grow open under it
       expect(LayerDoc.fromJson(keys().toJson()).showLanes, isTrue, reason: 'saved per track');
       final row = tester.getRect(find.byKey(ValueKey('lane-row-$key')));
       final lane = tester.getRect(find.byKey(const ValueKey('track-header-a')));
@@ -228,6 +232,8 @@ void main() {
           greaterThanOrEqualTo(row.bottom + kLaneAddRowHeight - 0.5));
       await tester.tap(find.byKey(const ValueKey('lanes-button-a')));
       await tester.pump();
+      expect(find.byKey(ValueKey('lane-row-$key')), findsOneWidget, reason: 'they shrink away');
+      await tester.pump(const Duration(milliseconds: 500));
       expect(find.byKey(ValueKey('lane-row-$key')), findsNothing);
       await tester.pump(const Duration(seconds: 2));
     });

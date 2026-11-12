@@ -36,7 +36,10 @@ import 'arrange/edit_motion.dart';
 import 'arrange/fx_stack.dart';
 import 'arrange/long_press_menu.dart';
 import 'arrange/mixer_card.dart';
+import 'follow_gate.dart';
 import 'frame/sections.dart';
+import 'presence.dart';
+import 'view_glide.dart';
 import 'feedback.dart' show GrabFeedback, GripMark, Pressable;
 import 'haptics.dart';
 import 'motion.dart';
@@ -74,9 +77,9 @@ class ArrangerScreen extends StatefulWidget {
   State<ArrangerScreen> createState() => _ArrangerScreenState();
 }
 
-class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProviderStateMixin {
+class _ArrangerScreenState extends State<ArrangerScreen> with TickerProviderStateMixin {
   bool settings = false, cardsView = false, mixerCard = false, zoomBar = false;
-  final _headerTaps = _HeaderTaps();
+  final _headerTaps = ClickCounter();
 
   /// Phone portrait: the focus panel opened up over the pinned track (owner, 2026-11-10: it can open higher).
   bool _panelHigh = false;
@@ -84,21 +87,198 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
   /// The Files browser beside (or under) the tracks, so files can be dragged onto a track or into the FX stack
   /// without leaving Arrange (owner, 2026-11-10).
   bool _browser = false;
+  bool _browserWas = false, _browserLeaving = false;
+  Timer? _browserTimer;
 
   /// Time zoom: pixels per 16th step (× 0.85 at compact density).
   double zoom = 18.0;
-  static const minZoom = 3.0, maxZoom = 64.0;
+  /// Zoomed all the way out a multi-hour song fits a phone (owner, 2026-11-11: REAPER zooms out "a metric ton").
+  static const minZoom = 0.002, maxZoom = 64.0;
 
-  // The zoom buttons glide to their new zoom ([Motion.standard]); a pinch, slider or Ctrl + wheel follows at once.
-  late final AnimationController _zoomAnim = AnimationController(vsync: this, duration: Motion.standard)
-    ..addListener(_zoomFrame);
-  double _zoomFrom = 18, _zoomTarget = 18;
-  double? _zoomFocal;
+  /// Moves the view makes on its own glide (owner, 2026-11-11); a touch stops them. See [_animateViewTo].
+  late final ViewGlide _glide = ViewGlide(this, read: _viewPlace, apply: _applyView);
+
+  double get _zoomScale => Neon.compact(context) ? 0.85 : 1.0;
+
+  ViewPlace _viewPlace() {
+    final p = _hScroll.hasClients ? _hScroll.positions.last : null;
+    return (left: p == null ? 0.0 : p.pixels / _stepW, zoom: _stepW);
+  }
+
+  void _applyView(ViewPlace v) {
+    final z = (v.zoom / _zoomScale).clamp(minZoom, maxZoom).toDouble();
+    if ((z - zoom).abs() < 1e-9) {
+      if (!_hScroll.hasClients) return;
+      final p = _hScroll.positions.last;
+      p.jumpTo((v.left * _stepW).clamp(0.0, p.maxScrollExtent).toDouble());
+      return;
+    }
+    _setZoom(z, leftStep: math.max(0.0, v.left));
+  }
+
+  /// The one way the view moves on its own (owner, 2026-11-11): its left edge to [leftStep] (steps) and its zoom to
+  /// [zoom], together, in a glide of 150–350 ms by distance that a new move retargets and a touch stops; at once with
+  /// motion off. Without [leftStep], [keep] (pixels from the lanes' left edge; the middle by default) stays put.
+  void _animateViewTo({double? leftStep, double? zoom, double? keep}) {
+    if (!_hScroll.hasClients) return;
+    final view = _hScroll.positions.last.viewportDimension;
+    _glide.to(left: leftStep == null ? null : math.max(0.0, leftStep),
+        zoom: zoom == null ? null : zoom.clamp(minZoom, maxZoom).toDouble() * _zoomScale,
+        keep: keep ?? view / 2, view: view, level: Motion.of(context));
+  }
+
+  /// The tracks' up-and-down glide, the same helper at a fixed zoom (left is pixels).
+  late final ViewGlide _vGlide = ViewGlide(this,
+      read: () => (left: _drag.vScroll.hasClients ? _drag.vScroll.positions.last.pixels : 0.0, zoom: 1.0),
+      apply: (v) {
+        if (!_drag.vScroll.hasClients) return;
+        final p = _drag.vScroll.positions.last;
+        p.jumpTo(v.left.clamp(0.0, p.maxScrollExtent).toDouble());
+      });
+
+  /// Glides the tracks up or down so [layerId]'s row shows, when it is out of the view (a track picked with the
+  /// keyboard, or focused and pinned).
+  void _revealTrack(String layerId) {
+    final row = ArrangeDrag.rectOf(_drag.headerKey(layerId)), view = ArrangeDrag.rectOf(_drag.vViewport);
+    if (row == null || view == null || !_drag.vScroll.hasClients) return;
+    final p = _drag.vScroll.positions.last;
+    double? to;
+    if (row.top < view.top) to = p.pixels - (view.top - row.top) - 8;
+    if (row.bottom > view.bottom) to = p.pixels + (row.bottom - view.bottom) + 8;
+    if (to == null) return;
+    _vGlide.to(left: to, view: view.height, level: Motion.of(context));
+  }
+
+  // What was selected at the last build: a change the view can't see (the keyboard, a paste) glides it into view.
+  String? _selLayerSeen;
+  Set<String> _selClipsSeen = const {};
+
+  void _revealSelection() {
+    final s = widget.state;
+    final layer = s.selectedLayerId, clips = s.selectedClipIds.toSet();
+    final layerMoved = layer != _selLayerSeen && _selLayerSeen != null;
+    final added = clips.difference(_selClipsSeen);
+    _selLayerSeen = layer;
+    _selClipsSeen = clips;
+    if (!layerMoved && added.isEmpty) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (layerMoved && layer != null) _revealTrack(layer);
+      if (added.isEmpty || !_hScroll.hasClients) return;
+      final picked = [for (final c in s.selectedClips) if (added.contains(c.clip.id)) c];
+      if (picked.isEmpty) return;
+      final a = picked.map((c) => c.clip.startSteps.toDouble()).reduce(math.min);
+      final b = picked.map((c) => (c.clip.startSteps + c.clip.lengthSteps).toDouble()).reduce(math.max);
+      final p = _hScroll.positions.last;
+      final l = p.pixels / _stepW, r = (p.pixels + p.viewportDimension) / _stepW;
+      // Only when none of it shows: a clip tapped at the view's edge stays where it is.
+      if (b < l || a > r) _revealRange(a, b);
+    });
+  }
+
+  /// The zoom the view is at or gliding to.
+  double get _zoomAim => _glide.target.zoom / _zoomScale;
+
+  /// The view reached this far right (steps): the timeline keeps going a few screens past it, past the last clip
+  /// and the playhead, so scrolling right never meets a wall (owner, 2026-11-11). Scrolling doesn't change the song.
+  double _reachSteps = 0;
+
+  void _onHScroll() {
+    if (!_hScroll.hasClients) return;
+    final p = _hScroll.positions.last;
+    if (!p.hasContentDimensions || p.pixels + p.viewportDimension * 2 < p.maxScrollExtent) return;
+    final reach = (p.pixels + p.viewportDimension) / _stepW;
+    if (reach > _reachSteps + 1) setState(() => _reachSteps = reach);
+  }
+
+  /// Glides the view so [step] shows, a tenth in, when it is off screen (a jump to a marker).
+  void _reveal(double step) {
+    if (!_hScroll.hasClients) return;
+    final p = _hScroll.positions.last;
+    final x = step * _stepW;
+    if (x >= p.pixels && x <= p.pixels + p.viewportDimension - 24) return;
+    _animateViewTo(leftStep: step - p.viewportDimension * 0.1 / _stepW);
+  }
+
+  /// Glides the view so steps [from]..[to] show: as it is when they do, else panned there, zoomed out to fit them
+  /// when they are wider than the view (go to a clip, zoom to the selection with [fit]).
+  void _revealRange(double from, double to, {bool fit = false}) {
+    if (!_hScroll.hasClients) return;
+    final p = _hScroll.positions.last;
+    final view = p.viewportDimension;
+    if (view <= 0) return;
+    final span = math.max(1.0, to - from);
+    if (fit || span * _stepW > view * 0.9) {
+      final z = (view * 0.9 / span / _zoomScale).clamp(minZoom, maxZoom).toDouble();
+      final z2 = fit ? z : math.min(zoom, z);
+      _animateViewTo(leftStep: from - view * 0.05 / (z2 * _zoomScale), zoom: z2);
+      return;
+    }
+    final l = p.pixels / _stepW, r = (p.pixels + view) / _stepW;
+    if (from >= l && to <= r) return;
+    _animateViewTo(leftStep: from < l ? from - view * 0.1 / _stepW : to - view * 0.9 / _stepW);
+  }
+
+  /// Glides the view back to the request's step (⏮: [AppState.requestRevealStart], or Show the start): always for a
+  /// double tap, else only when that step is off screen.
+  void _revealStart() {
+    final req = widget.state.revealStartRequests.value;
+    final step = req?.step ?? 0;
+    if (req != null && !req.always && _hScroll.hasClients) {
+      final p = _hScroll.positions.last;
+      final l = p.pixels / _stepW, r = (p.pixels + p.viewportDimension) / _stepW;
+      if (step >= l && step <= r) return;
+    }
+    _animateViewTo(leftStep: step <= 0 ? 0 : step - _startMargin);
+  }
+
+  /// Steps left of a revealed start that is not the project's start, so it sits a little in from the edge.
+  double get _startMargin => _hScroll.hasClients ? _hScroll.positions.last.viewportDimension * 0.05 / _stepW : 0;
+
+  /// Zoom to fit: the whole song in the view, from its start.
+  void _zoomToFit() {
+    if (!_hScroll.hasClients) return;
+    final p = _hScroll.positions.last;
+    final end = math.max(widget.state.project.stepsPerBar, widget.state.project.engineLoopSteps);
+    final z = (p.viewportDimension * 0.95 / end / _zoomScale).clamp(minZoom, maxZoom).toDouble();
+    _animateViewTo(leftStep: 0, zoom: z);
+  }
+
+  /// Zoom to the selection: the selected clips, else the time selection, fill the view.
+  bool _zoomToSelection() {
+    final s = widget.state;
+    final clips = s.selectedClips.toList();
+    double? a, b;
+    if (clips.isNotEmpty) {
+      a = clips.map((c) => c.clip.startSteps.toDouble()).reduce(math.min);
+      b = clips.map((c) => (c.clip.startSteps + c.clip.lengthSteps).toDouble()).reduce(math.max);
+    } else if (s.timeSelectionStart != null && s.timeSelectionEnd != null && s.timeSelectionStart != s.timeSelectionEnd) {
+      a = math.min(s.timeSelectionStart!, s.timeSelectionEnd!).toDouble();
+      b = math.max(s.timeSelectionStart!, s.timeSelectionEnd!).toDouble();
+    }
+    if (a == null || b == null) return false;
+    _revealRange(a, b, fit: true);
+    return true;
+  }
+
+  // A pinch, the slider or Ctrl + wheel follow at once; the zoom buttons glide ([_animateViewTo]).
 
   // Two fingers on the timeline: a sideways pinch zooms time, an up-and-down pinch the track height.
   final Map<int, Offset> _touches = {};
   double _pinchDx0 = 0, _pinchDy0 = 0, _pinchZoom0 = 0, _pinchH0 = 0;
   bool _pinchX = false, _pinchY = false;
+  // The touches' global positions, and the track whose header a vertical pinch resizes (null: every track's).
+  final Map<int, Offset> _touchesAt = {};
+  String? _pinchRow;
+
+  /// The track whose header is under [global], if any.
+  LayerDoc? _headerAt(Offset global) {
+    for (final l in widget.state.visibleLayers) {
+      final r = ArrangeDrag.rectOf(_drag.headerKey(l.id));
+      if (r != null && r.contains(global)) return l;
+    }
+    return null;
+  }
   // A header resize in progress, shown before it is saved when the drag ends.
   double? _dragHeaderW, _dragTrackH;
 
@@ -124,6 +304,69 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
       if (h != null) x.trackHeight = h;
     }).then((_) { if (mounted) setState(() { _dragHeaderW = null; _dragTrackH = null; }); });
   }
+  /// A row's bottom-edge drag or vertical pinch in progress (owner, 2026-11-11): the track and its height as dragged,
+  /// shown snapped through normal, compact and thin, and saved (one undo step) when it ends.
+  String? _rowDragId;
+  double _rowDragRaw = 0;
+
+  static (TrackCollapse, double) rowSnap(double raw) => trackRowSnap(raw);
+
+  /// [l]'s row height: its own or the default, compact or thin (thin inside a collapsed folder).
+  double _rowHeight(LayerDoc l) {
+    if (l.id == _rowDragId) return rowSnap(_rowDragRaw).$2;
+    return switch (widget.state.shownCollapse(l)) {
+      TrackCollapse.thin => LayerDoc.thinHeight,
+      TrackCollapse.compact => LayerDoc.compactHeight,
+      TrackCollapse.normal => l.height ?? _trackHeight,
+    };
+  }
+
+  TrackCollapse _rowCollapse(LayerDoc l) => l.id == _rowDragId ? rowSnap(_rowDragRaw).$1 : widget.state.shownCollapse(l);
+
+  /// A row's bottom edge moved by [dy]: this track's height, ticking as it snaps into another state. With Shift it is
+  /// every track's default height instead, as the toolbar's height menu sets it.
+  void _rowResize(LayerDoc l, double dy) {
+    if (HardwareKeyboard.instance.isShiftPressed && _rowDragId == null) {
+      setState(() => _dragTrackH = (_trackHeight + dy).clamp(Settings.minTrackHeight, Settings.maxTrackHeight).toDouble());
+      return;
+    }
+    _rowResizeTo(l, (_rowDragId == l.id ? _rowDragRaw : _rowHeight(l)) + dy);
+  }
+
+  void _rowResizeTo(LayerDoc l, double raw) {
+    final before = _rowCollapse(l);
+    setState(() {
+      _rowGen++;
+      _rowDragId = l.id;
+      _rowDragRaw = raw.clamp(0.0, LayerDoc.maxHeight).toDouble();
+    });
+    if (rowSnap(_rowDragRaw).$1 != before) Motion.tick();
+  }
+
+  /// Bumped as rows change height under the finger or finish gliding, so the rows below take their new places as
+  /// they are instead of gliding there again (TrackRowMotion's epoch).
+  int _rowGen = 0;
+  final Map<String, bool> _lanesSeen = {};
+  bool _settlePending = false;
+
+  void _rowsSettled() {
+    if (_settlePending) return;
+    _settlePending = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _settlePending = false;
+      if (mounted) setState(() => _rowGen++);
+    });
+  }
+
+  void _rowResizeEnd() {
+    final id = _rowDragId;
+    if (id == null) return _saveHeaderSize();
+    final layer = widget.state.project.layers.where((l) => l.id == id).firstOrNull;
+    final (collapse, h) = rowSnap(_rowDragRaw);
+    setState(() => _rowDragId = null);
+    if (layer != null) widget.state.setTrackCollapse([layer], collapse, height: collapse == TrackCollapse.normal ? h : null);
+  }
+
   // The timeline can be millions of bars long (F7.2), so the ruler and grid paint only what this shows.
   final _hScroll = ScrollController();
 
@@ -146,7 +389,7 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
   final _lanesBox = GlobalKey(debugLabel: 'lanes');
 
   /// The timeline's step width and track height at the last build, for the marquee's hit test.
-  double _stepW = 18, _laneTrackH = 60;
+  double _stepW = 18;
 
   final _keys = FocusNode(debugLabel: 'arranger keys', skipTraversal: true);
   KeyRouterState? _router;
@@ -168,6 +411,8 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
     if (!identical(old.state, widget.state)) {
       old.state.tick.removeListener(_followPlayhead);
       widget.state.tick.addListener(_followPlayhead);
+      old.state.revealStartRequests.removeListener(_revealStart);
+      widget.state.revealStartRequests.addListener(_revealStart);
     }
   }
 
@@ -175,19 +420,45 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
   void initState() {
     super.initState();
     widget.state.tick.addListener(_followPlayhead);
+    widget.state.revealStartRequests.addListener(_revealStart);
+    _hScroll.addListener(_onHScroll);
   }
 
-  /// Settings › Editing › Follow the playhead: while playing, when the playhead leaves the view the timeline pages on
-  /// so it shows near the left edge (REAPER's continuous-scroll-off follow). Not while a finger or a drag is on it.
+  /// Settings › Editing › Follow the playhead: while playing, the view keeps the playhead in sight, paging on when it
+  /// leaves the view (REAPER's continuous-scroll-off follow) or, Smooth, scrolling so it stays a third in. It never
+  /// pulls the view while the user scrolls, zooms or drags, and waits [FollowGate]'s quiet spell after that or after
+  /// the selection (clips, a time selection) changes (owner, 2026-11-11).
+  late final FollowGate _follow = FollowGate(widget.state.settings);
+  Object? _selectionSeen;
+
+  /// The selection that pauses following when it changes: clips and the time selection, not the track.
+  Object _selectionKey() {
+    final s = widget.state;
+    return Object.hash(s.timeSelectionStart, s.timeSelectionEnd, Object.hashAllUnordered(s.selectedClipIds));
+  }
+
   void _followPlayhead() {
     final s = widget.state;
-    if (!s.settings.followPlayhead || !s.meters.playing || !_hScroll.hasClients) return;
+    final sel = _selectionKey();
+    if (_selectionSeen != null && sel != _selectionSeen) _follow.touch();
+    _selectionSeen = sel;
+    if (!_follow.allows(playing: s.meters.playing) || !_hScroll.hasClients) return;
     if (_touches.isNotEmpty || _drag.active) return;
     final p = _hScroll.positions.last;
     final x = s.playheadStep * _stepW;
     final view = p.viewportDimension;
-    if (view <= 0 || (x >= p.pixels && x <= p.pixels + view - 24)) return;
-    p.jumpTo((x - view * 0.1).clamp(0.0, p.maxScrollExtent).toDouble());
+    if (view <= 0) return;
+    if (s.settings.followSmooth) {
+      // The tracks glide under a still playhead: the scroll moves painted layers, nothing is built again.
+      _glide.stop();
+      final to = (x - view / 3).clamp(0.0, p.maxScrollExtent).toDouble();
+      if ((to - p.pixels).abs() >= 0.5) p.jumpTo(to);
+      return;
+    }
+    // A page step glides (owner, 2026-11-11); while it runs the playhead is already on its way into view.
+    if (_glide.active) return;
+    if (x >= p.pixels && x <= p.pixels + view - 24) return;
+    _animateViewTo(leftStep: s.playheadStep - view * 0.1 / _stepW);
   }
 
   @override
@@ -253,8 +524,15 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
         } else {
           _router?.toast('Make a time selection or a loop range first');
         }
+      case 'arranger.zoom.fit':
+        _zoomToFit();
+      case 'arranger.zoom.selection':
+        if (!_zoomToSelection()) _router?.toast('Select clips or a time range to zoom to');
+      case 'arranger.view.start':
+        _revealStart();
       case 'arranger.marker.next' || 'arranger.marker.prev':
         if (!s.jumpToMarker(next: id.endsWith('next'))) _router?.toast('No marker that way');
+        _reveal(s.playheadStep);
       case 'arranger.take.next' || 'arranger.take.prev':
         final withTakes = [for (final c in s.selectedClips) if (c.clip.takes.length > 1) c];
         if (withTakes.isEmpty) _router?.toast('Select a clip with takes (a loop recording)');
@@ -266,6 +544,7 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
       case final go when go.startsWith('arranger.marker.go'):
         final n = int.tryParse(go.substring('arranger.marker.go'.length)) ?? 0;
         if (!s.jumpToMarkerNumber(n)) _router?.toast('No marker $n');
+        _reveal(s.playheadStep);
       default:
         return false;
     }
@@ -293,12 +572,12 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
     _marquee.value = null;
     if (box == null) return;
     final s = widget.state;
-    final inset = _clipInset(_laneTrackH);
     final hit = <PlacedClip>[];
     for (final layer in s.visibleLayers) {
       final lane = _drag.laneRect(layer.id);
       if (lane == null) continue;
-      final top = lane.top + inset, bottom = lane.top + _laneTrackH - inset;
+      final inset = _clipInset(lane.height);
+      final top = lane.top + inset, bottom = lane.bottom - inset;
       if (box.bottom < top || box.top > bottom) continue;
       for (final clip in layer.clips) {
         final left = lane.left + clip.startSteps * _stepW;
@@ -312,12 +591,16 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
 
   @override
   void dispose() {
-    _headerTaps.dispose();
     widget.state.tick.removeListener(_followPlayhead);
+    widget.state.revealStartRequests.removeListener(_revealStart);
     _router?.unregister(Area.arranger, _keys);
     _keys.dispose();
     _marquee.dispose();
-    _zoomAnim.dispose();
+    _panelOut.dispose();
+    _browserTimer?.cancel();
+    _glide.dispose();
+    _vGlide.dispose();
+    _hScroll.removeListener(_onHScroll);
     _trackGhost?.remove();
     _trackGhostAt.dispose();
     _drag.dispose();
@@ -327,36 +610,20 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
 
   /// Sets the time zoom, keeping the timeline point under [focal] (pixels from the lanes' left edge; the middle of
   /// the view by default) where it is.
-  void _setZoom(double z, {double? focal}) {
+  /// With [leftStep], that step goes to the view's left edge instead.
+  void _setZoom(double z, {double? focal, double? leftStep}) {
     z = z.clamp(minZoom, maxZoom).toDouble();
-    if (z == zoom) return;
+    if (z == zoom && leftStep == null) return;
     final pos = _hScroll.hasClients ? _hScroll.positions.last : null;
-    final f = focal ?? (pos?.viewportDimension ?? 0) / 2;
-    final anchor = pos == null ? null : (pos.pixels + f) / zoom;
+    final f = leftStep != null ? 0.0 : focal ?? (pos?.viewportDimension ?? 0) / 2;
+    final anchor = leftStep ?? (pos == null ? null : (pos.pixels + f) / _stepW);
     super.setState(() => zoom = z); // the zoom alone: the headers stay as built
     if (anchor == null) return;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || !_hScroll.hasClients) return;
       final p = _hScroll.positions.last;
-      p.jumpTo((anchor * zoom - f).clamp(0.0, p.maxScrollExtent).toDouble());
+      p.jumpTo((anchor * _stepW - f).clamp(0.0, p.maxScrollExtent).toDouble());
     });
-  }
-
-  /// The zoom buttons: a short glide to [z] (at once when motion is off).
-  void _animateZoom(double z) {
-    _zoomTarget = z.clamp(minZoom, maxZoom).toDouble();
-    if (Motion.of(context) != MotionLevel.full) {
-      _setZoom(_zoomTarget);
-      return;
-    }
-    _zoomFrom = zoom;
-    _zoomFocal = null;
-    _zoomAnim.forward(from: 0);
-  }
-
-  void _zoomFrame() {
-    final t = Curves.easeOutCubic.transform(_zoomAnim.value);
-    _setZoom(_zoomFrom + (_zoomTarget - _zoomFrom) * t, focal: _zoomFocal);
   }
 
   /// The mouse pointer panning the view (middle-drag or Space+drag), if any.
@@ -382,6 +649,7 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
       return;
     }
     _touches[e.pointer] = e.localPosition;
+    _touchesAt[e.pointer] = e.position;
     _drag.pinching = _touches.length >= 2;
     if (_touches.length == 2) {
       final ps = _touches.values.toList();
@@ -393,7 +661,16 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
       // Fingers side by side zoom time, one above the other the height; diagonal, both.
       _pinchX = dx > 24 && dx >= dy * 0.6;
       _pinchY = dy > 24 && dy >= dx * 0.6;
-      _zoomAnim.stop();
+      // Both fingers on one track's header, one above the other: that track's height only (owner, 2026-11-11).
+      final at = _touchesAt.values.toList();
+      final row = _pinchY && e.localPosition.dx < headW && ps[0].dx < headW && ps[1].dx < headW
+          ? _headerAt(Offset((at[0].dx + at[1].dx) / 2, (at[0].dy + at[1].dy) / 2)) : null;
+      _pinchRow = row?.id;
+      if (row != null) {
+        _pinchX = false;
+        _pinchH0 = _rowHeight(row);
+      }
+      _glide.stop();
     }
   }
 
@@ -406,7 +683,10 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
     if (_pinchX) {
       _setZoom(_pinchZoom0 * (ps[0].dx - ps[1].dx).abs() / _pinchDx0, focal: (ps[0].dx + ps[1].dx) / 2 - headW);
     }
-    if (_pinchY) {
+    final row = _pinchRow == null ? null : widget.state.project.layers.where((l) => l.id == _pinchRow).firstOrNull;
+    if (_pinchY && row != null) {
+      _rowResizeTo(row, _pinchH0 * (ps[0].dy - ps[1].dy).abs() / _pinchDy0);
+    } else if (_pinchY) {
       setState(() => _dragTrackH = (_pinchH0 * (ps[0].dy - ps[1].dy).abs() / _pinchDy0)
           .clamp(Settings.minTrackHeight, Settings.maxTrackHeight).toDouble());
     }
@@ -421,11 +701,13 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
       _resting = null;
       _drag.free.value = false;
     }
+    _touchesAt.remove(e.pointer);
     if (_touches.remove(e.pointer) == null) return;
     _drag.pinching = _touches.length >= 2;
     if (_touches.length == 1 && (_pinchX || _pinchY)) {
       _pinchX = _pinchY = false;
-      _saveHeaderSize();
+      _pinchRow = null;
+      _rowResizeEnd();
     }
   }
 
@@ -502,7 +784,8 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
     final midi = LiveMidi.current;
     // Sections, the most used first (owner, 2026-11-11); volume and pan edit in place.
     const track = 'Track', mix = 'Mix', record = 'Record', clips = 'Clips', move = 'Move', lanes = 'Automation',
-        more = 'More';
+        collapse = 'Collapse', more = 'More';
+    final shown = s.shownCollapse(layer);
     final v = await showLongPressMenu<String>(context, at: at, title: layer.name, style: s.settings.longPressMenu, actions: [
       if (!layer.isFolder) ...[
         const MenuAction('fx', 'Effects', Icons.graphic_eq, section: track),
@@ -586,6 +869,11 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
           Icons.remove_circle_outline, section: lanes),
       if (hasPan) const MenuAction('remove-automation-pan', 'Remove pan automation', Icons.remove_circle_outline,
           section: lanes),
+      // REAPER's track heights (owner, 2026-11-11): the row's full height, compact (name, M and S) or a thin bar.
+      for (final (c, label, icon) in const [(TrackCollapse.normal, 'Normal', Icons.view_stream_outlined),
+          (TrackCollapse.compact, 'Compact', Icons.view_headline), (TrackCollapse.thin, 'Thin', Icons.horizontal_rule)])
+        MenuAction('collapse:${c.name}', label, icon, checked: shown == c, section: collapse),
+      if (layer.height != null) const MenuAction('default-height', 'Default height', Icons.height, section: collapse),
       MenuAction('template', layer.isFolder ? 'Save folder as track template…' : 'Save as track template…',
           Icons.bookmark_add_outlined, section: more),
       const MenuAction('delete', 'Delete', Icons.delete_outline, danger: true, section: more),
@@ -628,6 +916,10 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
       if (folder != null) s.moveTrack(layer, folder, TrackDrop.into);
     }
     if (v == 'bus') s.setFolderBus(layer, !layer.busEnabled);
+    if (v.startsWith('collapse:')) {
+      s.setTrackCollapse(_collapseTargets(layer), TrackCollapse.values.byName(v.substring(9)));
+    }
+    if (v == 'default-height') s.resetTrackHeight(layer);
     if (v == 'lanes') s.setLanesShown(layer, !layer.showLanes);
     if (v == 'automation-volume') s.addAutomationLane(layer, 'volume');
     if (v == 'automation-pan') s.addAutomationLane(layer, 'pan');
@@ -644,30 +936,43 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
     }
   }
 
+  /// The tracks the menu's Collapse applies to: the selected tracks, which is the one the menu is for (the arranger
+  /// selects one track at a time today; a multi-track selection would join here).
+  List<LayerDoc> _collapseTargets(LayerDoc layer) => [layer];
+
   // ---------- a track header dragged (owner, 2026-11-11, after REAPER: a long press picks the track up; up and
   // down reorders, the right-most third of another header nests it there) ----------
 
   LayerDoc? _pressed, _dragged;
   Offset _pressAt = Offset.zero, _trackAt = Offset.zero;
+
+  /// A finger's hold that hasn't moved yet: let go now, it opens the track menu.
+  bool _held = false;
+
+  List<ModuleDoc> get _patterns => [for (final m in widget.state.project.modules) if (widget.state.isPattern(m.id)) m];
   OverlayEntry? _trackGhost;
   final _trackGhostAt = ValueNotifier<Offset>(Offset.zero);
 
   void _trackDrag(LayerDoc layer, _HeaderPhase phase, Offset at) {
     switch (phase) {
       case _HeaderPhase.press:
-        // A long press lifts the track at once (the ghost and a tick); let go without moving, it stays put.
+        // A long press lifts the track at once (the ghost and a tick); let go without moving, it stays put and the
+        // track menu opens (owner, 2026-11-11).
         Motion.tick();
         _pressed = layer;
         _pressAt = at;
+        _held = true;
         _startTrackDrag(layer, at);
         _trackHover();
       case _HeaderPhase.grab:
         _pressed = layer;
         _pressAt = at;
+        _held = false;
         _startTrackDrag(layer, at);
       case _HeaderPhase.move:
         if (_dragged == null && _pressed == layer && (at - _pressAt).distance > 10) _startTrackDrag(layer, at);
         if (_dragged != layer) return;
+        if ((at - _pressAt).distance > 10) _held = false;
         _trackAt = at;
         _trackGhostAt.value = at;
         _drag.point(at);
@@ -678,7 +983,13 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
           return;
         }
         final spot = _drag.hover.value;
+        final menu = _held;
+        _held = false;
         _endTrackDrag();
+        if (menu) {
+          _trackMenu(layer, _pressAt, _patterns);
+          return;
+        }
         if (spot == null) return;
         final target = widget.state.project.layers.where((l) => l.id == spot.layerId).firstOrNull;
         widget.state.moveTrack(layer, spot.newTrack ? null : target, spot.where);
@@ -850,22 +1161,60 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
   @override
   Widget build(BuildContext context) {
     final s = widget.state;
+    _revealSelection();
+    // A header's quick second tap where its first was counts even when the first moved the track away (the focus
+    // view pins it on top) and the panel or a lane is there now: it opens that track's effects (owner, 2026-11-11).
+    // A press on another header is a first tap there (its own handler counted it).
+    return Listener(behavior: HitTestBehavior.translucent, onPointerDown: (e) {
+      if (!_headerTaps.secondHere(e)) return;
+      final l = s.project.layers.where((x) => x.id == _headerTaps.lastTarget).firstOrNull;
+      if (l != null) _openTrack(l, tab: FocusTab.fx);
+    // The track cards slide in over the arrangement and back out (owner, 2026-11-11); the arrangement isn't built
+    // while they cover it.
+    }, child: Stack(children: [
+      if (!cardsView) Positioned.fill(child: _main(context)),
+      Positioned.fill(child: Presence(from: const Offset(0, 0.08), child: !cardsView ? null : ColoredBox(
+        color: Neon.bg,
+        child: Column(children: [
+          TrackCardsHeader(onBack: () => setState(() => cardsView = false)),
+          Expanded(child: TrackCardsScreen(state: s, onOpenModule: widget.onOpenModule ?? s.selectModule,
+              onBack: () => setState(() => cardsView = false))),
+        ])))),
+    ]));
+  }
+
+  /// The track whose focus panel is on its way out, and the one shown last (owner, 2026-11-11: the panel leaves as
+  /// it came).
+  LayerDoc? _closing, _shownFocus;
+  late final AnimationController _panelOut = AnimationController(vsync: this)
+    ..addStatusListener((st) {
+      if (st == AnimationStatus.dismissed && _closing != null && mounted) setState(() => _closing = null);
+    });
+
+  Widget _main(BuildContext context) {
+    final s = widget.state;
     final p = s.project;
-    if (cardsView) {
-      return Column(children: [
-        TrackCardsHeader(onBack: () => setState(() => cardsView = false)),
-        Expanded(child: TrackCardsScreen(state: s, onOpenModule: widget.onOpenModule ?? s.selectModule,
-            onBack: () => setState(() => cardsView = false))),
-      ]);
-    }
     final focused = p.layers.where((l) => l.id == _focusId && !l.isFolder).firstOrNull;
+    if (focused != null) {
+      _closing = null;
+      _shownFocus = focused;
+    } else if (_shownFocus != null) {
+      final d = EditMotion.scaled(Motion.of(context), EditMotionKind.panels, Motion.panel);
+      if (d != null && p.layers.contains(_shownFocus)) {
+        _closing = _shownFocus;
+        _panelOut.duration = d;
+        _panelOut.reverse(from: 1);
+      }
+      _shownFocus = null;
+    }
+    // The panel's track: the focused one, or the one whose panel is leaving.
+    final shownTrack = focused ?? _closing;
     final layout = focusLayoutFor(MediaQuery.sizeOf(context));
-    final patterns = p.modules.where((m) => s.isPattern(m.id)).toList();
-    final callbacks = _callbacks(patterns);
+    final callbacks = _callbacks(_patterns);
     final focusable = _focusable;
     final fi = focused == null ? -1 : focusable.indexOf(focused);
     Widget panel(bool sheet) => FocusPanel(
-      state: s, layer: focused!, tab: _tab, bottomSheetStyle: sheet,
+      state: s, layer: shownTrack!, tab: _tab, bottomSheetStyle: sheet,
       onTab: (t) => setState(() => _tab = t),
       onClose: () { _panelHigh = false; _focus(null); },
       expanded: _panelHigh,
@@ -877,8 +1226,14 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
       onBrowse: () => setState(() => _browser = !_browser),
     );
 
+    // On its way out the panel slides and fades back where it came from, and takes no touches.
+    Widget leaving(Widget panel, Offset to) => _closing == null ? panel : IgnorePointer(child: FadeTransition(
+      opacity: CurvedAnimation(parent: _panelOut, curve: Curves.easeOutCubic),
+      child: Motion.of(context) != MotionLevel.full ? panel : SlideTransition(
+        position: Tween(begin: to, end: Offset.zero).animate(CurvedAnimation(parent: _panelOut, curve: Curves.easeOutCubic)),
+        child: panel)));
     final Widget body;
-    if (focused != null && layout == FocusLayout.pinned) {
+    if (shownTrack != null && layout == FocusLayout.pinned) {
       // Phone portrait: the track pinned at the top (still scrollable and editable), its panel below.
       // Opened higher, the panel slides up over the track and leaves only a sliver of it.
       body = LayoutBuilder(builder: (context, box) {
@@ -888,26 +1243,38 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
             height: _panelHigh ? 0 : pinnedH + 4,
             child: ClipRect(child: OverflowBox(alignment: Alignment.topCenter, minHeight: pinnedH + 4, maxHeight: pinnedH + 4,
               child: Column(children: [
-                SizedBox(height: pinnedH, child: _timeline(context, [focused], callbacks, pinned: true)),
+                SizedBox(height: pinnedH, child: _timeline(context, [shownTrack], callbacks, pinned: true)),
                 const SizedBox(height: 4),
               ])))),
-          Expanded(child: SlideIn(from: const Offset(0, 0.12), child: panel(true))),
+          Expanded(child: leaving(SlideIn(from: const Offset(0, 0.12), child: panel(true)), const Offset(0, 0.12))),
         ]);
       });
-    } else if (focused != null) {
+    } else if (shownTrack != null) {
       // Landscape and desktop: a right side panel; the tracks keep their full height.
       // Its size is FocusSidePane's (focus_panel.dart): resizable on a phone, two thirds by default.
       body = FocusSidePane(settings: s.settings, desktop: MediaQuery.sizeOf(context).width >= 900,
-        tracks: _arrangement(context, callbacks), panel: panel(false));
+        tracks: _arrangement(context, callbacks), panel: leaving(panel(false), const Offset(0.15, 0)));
     } else {
       body = _arrangement(context, callbacks);
     }
 
-    final withBrowser = !_browser ? body : LayoutBuilder(builder: (context, box) {
+    // The Files pane leaves as it came: its room stays while it slides out (owner, 2026-11-11).
+    if (_browserWas && !_browser) {
+      final d = EditMotion.scaled(Motion.of(context), EditMotionKind.panels, Motion.panel);
+      if (d != null) {
+        _browserLeaving = true;
+        _browserTimer?.cancel();
+        _browserTimer = Timer(d, () { if (mounted) setState(() => _browserLeaving = false); });
+      }
+    }
+    if (_browser) _browserLeaving = false;
+    _browserWas = _browser;
+    final paneRoom = _browser || _browserLeaving;
+    final withBrowser = LayoutBuilder(builder: (context, box) {
       // The same Files browser as Build's explorer; hold an item and drag it onto a track or the FX stack.
-      final pane = SlideIn(
+      final pane = Presence(
         from: box.maxWidth >= 600 ? const Offset(0.15, 0) : const Offset(0, 0.15),
-        child: Padding(padding: const EdgeInsets.all(4), child: GlassPanel(key: const ValueKey('arrange-browser'),
+        child: !_browser ? null : Padding(padding: const EdgeInsets.all(4), child: GlassPanel(key: const ValueKey('arrange-browser'),
           child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
             SizedBox(height: 30, child: Row(children: [
               const SizedBox(width: 10),
@@ -924,12 +1291,12 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
       if (box.maxWidth >= 600) {
         return Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
           Expanded(child: body),
-          SizedBox(width: math.min(300.0, box.maxWidth * 0.32), child: pane),
+          if (paneRoom) SizedBox(width: math.min(300.0, box.maxWidth * 0.32), child: pane),
         ]);
       }
       return Column(children: [
         Expanded(child: body),
-        SizedBox(height: math.max(160.0, box.maxHeight * 0.4), child: pane),
+        if (paneRoom) SizedBox(height: math.max(160.0, box.maxHeight * 0.4), child: pane),
       ]);
     });
 
@@ -951,7 +1318,7 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
           _toolbar(context, focused),
           AnimatedSize(duration: Motion.move(Motion.standard, Motion.of(context)), curve: Curves.easeOutCubic,
             alignment: Alignment.topCenter,
-            child: zoomBar ? _zoomBar() : const SizedBox(width: double.infinity)),
+            child: Presence(from: const Offset(0, -0.3), child: zoomBar ? _zoomBar() : null)),
         ])),
         if (settings) _settingsPanel(),
         Expanded(child: _withDockedClipBar(withBrowser, focused)),
@@ -1094,11 +1461,13 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
     return SizedBox(height: 36, child: Row(key: const ValueKey('arrange-zoom-bar'), children: [
       const SizedBox(width: 6),
       const Tooltip(message: 'Time zoom', child: Icon(Icons.swap_horiz, size: 16, color: Neon.dim)),
-      icon(Icons.remove, 'Zoom out', () => _animateZoom(_zoomAnim.isAnimating ? _zoomTarget / 1.4 : zoom / 1.4)),
-      Expanded(flex: 3, child: ResetOnDoubleTap(onReset: () => _animateZoom(18), child: Slider(key: const ValueKey('arrange-zoom-time'),
+      icon(Icons.remove, 'Zoom out', () => _animateViewTo(zoom: _zoomAim / 1.4)),
+      Expanded(flex: 3, child: ResetOnDoubleTap(onReset: () => _animateViewTo(zoom: 18), child: Slider(key: const ValueKey('arrange-zoom-time'),
         value: (math.log(zoom / minZoom) / ratio).clamp(0.0, 1.0).toDouble(),
-        onChanged: (v) { _zoomAnim.stop(); _setZoom(minZoom * math.exp(v * ratio)); }))),
-      icon(Icons.add, 'Zoom in', () => _animateZoom(_zoomAnim.isAnimating ? _zoomTarget * 1.4 : zoom * 1.4)),
+        onChanged: (v) { _glide.stop(); _setZoom(minZoom * math.exp(v * ratio)); }))),
+      icon(Icons.add, 'Zoom in', () => _animateViewTo(zoom: _zoomAim * 1.4)),
+      IconButton(key: const ValueKey('arrange-zoom-fit'), onPressed: _zoomToFit, tooltip: 'Zoom to fit the song',
+        visualDensity: VisualDensity.compact, iconSize: 18, icon: const Icon(Icons.fit_screen, color: Neon.dim)),
       const SizedBox(width: 6),
       const Tooltip(message: 'Track height', child: Icon(Icons.swap_vert, size: 16, color: Neon.dim)),
       Expanded(flex: 2, child: ResetOnDoubleTap(onReset: () {
@@ -1150,20 +1519,59 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
     // The gap between tracks (Settings, chosen from the track height menu), so tracks don't sit on each other.
     final gap = pinned ? 0.0 : s.settings.trackGap;
     final headW = _headerWidth;
-    if (!pinned) {
-      _stepW = stepW;
-      _laneTrackH = trackHeight;
-    }
+    if (!pinned) _stepW = stepW;
     // The song ends at its last clip or automation point (or the shortest length) and playback loops back there,
     // as in Reaper. The timeline always reaches 64 bars past it, so a clip can go anywhere and the song grows with it.
     final end = p.engineLoopSteps;
-    final width = math.max(560.0, math.min(p.maxArrangementSteps, math.max(p.timelineSteps, end + 64 * p.stepsPerBar)) * stepW);
+    // A few screens past the furthest of the song's end, the playhead and where the view has been: it never meets a
+    // wall on the right (owner, 2026-11-11).
+    final screens = 3 * MediaQuery.sizeOf(context).width / stepW;
+    final reach = math.max(math.max(p.timelineSteps.toDouble(), end + 64.0 * p.stepsPerBar),
+        math.max(s.playheadStep, _reachSteps) + screens);
+    final width = math.max(560.0, math.min(p.maxArrangementSteps.toDouble(), reach) * stepW);
     // The ruler holds the bar numbers and loop range over the markers and regions: taller on a phone, for a finger.
     final ruler = pinned ? 20.0 : (_phone ? 44.0 : 36.0);
     final focusId = _focusId;
     final drag = pinned ? null : _drag;
     // The rows' total height, so the New track zone fills the rest of the view below the last track.
-    final rows = layers.fold<double>(0, (h, l) => h + trackHeight + (pinned ? 0 : lanesHeight(s, l) + l.spaceBelow) + gap);
+    // Each track's own row height (owner, 2026-11-11): its own height or the default, compact or thin.
+    double rowH(LayerDoc l) => pinned ? trackHeight : _rowHeight(l);
+    // A row's height glides to a new one (a collapse, a folder, the height menu; owner, 2026-11-11), in the lengths
+    // edit-motion kind; the header and its lane glide together, and only they rebuild while it runs. A drag follows
+    // the finger at once.
+    final rowGlide = pinned || _dragTrackH != null || _rowDragId != null || EditMotion.fadeOnly(context) ? Duration.zero
+        : EditMotion.of(context, EditMotionKind.lengths) ?? Duration.zero;
+    // While it glides the row is laid out at the larger of its old and new heights and clipped to the height shown,
+    // so a header's controls never squeeze.
+    Widget glideRow(LayerDoc l, Widget Function(double h) build) {
+      final target = rowH(l);
+      return TweenAnimationBuilder<double>(
+        tween: Tween(end: target), duration: rowGlide, curve: EditMotion.curve, onEnd: _rowsSettled,
+        builder: (context, h, _) {
+          if ((h - target).abs() < 0.01) return build(target);
+          final room = math.max(h, target);
+          return SizedBox(height: math.max(0.0, h), child: ClipRect(child: OverflowBox(alignment: Alignment.topCenter,
+            minHeight: room, maxHeight: room, child: build(room))));
+        });
+    }
+    // A track's automation lanes open and close by growing and shrinking under it, header and lanes together
+    // (owner, 2026-11-11); once they have, the rows below take their places as they are.
+    final lanesD = pinned ? null : EditMotion.of(context, EditMotionKind.lengths);
+    Widget lanesReveal(LayerDoc l, Widget? lanes) {
+      final open = lanes != null;
+      if (_lanesSeen[l.id] != null && _lanesSeen[l.id] != open && lanesD != null) {
+        Timer(lanesD + const Duration(milliseconds: 20), _rowsSettled);
+      }
+      _lanesSeen[l.id] = open;
+      return AnimatedSwitcher(duration: lanesD ?? Duration.zero,
+        switchInCurve: EditMotion.curve, switchOutCurve: EditMotion.exitCurve,
+        transitionBuilder: (child, a) => SizeTransition(sizeFactor: a, alignment: Alignment.topCenter,
+            child: FadeTransition(opacity: a, child: child)),
+        child: lanes ?? const SizedBox(width: double.infinity));
+    }
+    // A thin row keeps its automation lanes closed.
+    bool lanesOpen(LayerDoc l) => !pinned && l.showLanes && canHaveLanes(l) && _rowCollapse(l) != TrackCollapse.thin;
+    final rows = layers.fold<double>(0, (h, l) => h + rowH(l) + (pinned ? 0 : (lanesOpen(l) ? lanesHeight(s, l) : 0) + l.spaceBelow) + gap);
     // Edit animations (owner, 2026-11-11): rows glide when tracks are added, deleted, reordered or nested, and a
     // track an edit added grows in. The first build, and the pinned track, just show what is there.
     final appearing = pinned || _knownTracks == null ? const <String>{}
@@ -1172,17 +1580,39 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
     Widget row(String side, LayerDoc layer, List<Widget> children) => pinned
         ? Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: children)
         : TrackRowMotion(key: ValueKey('row-$side-${layer.id}'), id: '$side:${layer.id}', memory: _rowMemory,
-            epoch: trackHeight, appear: appearing.contains(layer.id),
+            epoch: (trackHeight, _rowGen), appear: appearing.contains(layer.id),
             child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start,
               children: children));
     // Two fingers scroll by their average, so a pinch zooms without dragging the view; the pointers are read raw.
     return ScrollConfiguration(
       behavior: ScrollConfiguration.of(context).copyWith(multitouchDragStrategy: MultitouchDragStrategy.averageBoundaryPointers),
       child: Listener(
-      onPointerDown: (e) => _touchDown(e, headW),
+      onPointerDown: (e) {
+        _follow.hold();
+        _glide.stop();
+        _vGlide.stop();
+        _touchDown(e, headW);
+      },
       onPointerMove: (e) => _touchMove(e, headW),
-      onPointerUp: _touchUp,
-      onPointerCancel: _touchUp,
+      onPointerUp: (e) {
+        _follow.release();
+        _touchUp(e);
+      },
+      onPointerCancel: (e) {
+        _follow.release();
+        _touchUp(e);
+      },
+      onPointerSignal: (_) {
+        _follow.touch();
+        _glide.stop();
+        _vGlide.stop();
+      },
+      onPointerPanZoomStart: (_) {
+        _follow.hold();
+        _glide.stop();
+        _vGlide.stop();
+      },
+      onPointerPanZoomEnd: (_) => _follow.release(),
       child: LayoutBuilder(builder: (context, view) {
         // A pixel short of the view, so a few tracks still don't scroll (the lanes' column fills the view anyway).
         final zoneH = math.max(view.maxHeight - ruler - rows - 1, math.max(80.0, trackHeight * 1.5));
@@ -1200,26 +1630,28 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
             child: Text(pinned ? 'FOCUS · swipe ‹ ›' : 'TRACKS',
               style: const TextStyle(color: Neon.dim, fontSize: 10, letterSpacing: 1.3))))),
         for (final layer in layers) row('h', layer, [
-          _TimelineHeader(key: drag?.headerKey(layer.id), state: s, layer: layer, index: p.layers.indexOf(layer),
+          glideRow(layer, (h) => _TimelineHeader(key: drag?.headerKey(layer.id), state: s, layer: layer,
+            index: p.layers.indexOf(layer),
             taps: _headerTaps,
             drag: drag, onTrackDrag: drag == null ? null : (phase, at) => _trackDrag(layer, phase, at),
-            depth: pinned ? 0 : s.folderDepth(layer), trackHeight: trackHeight,
+            depth: pinned ? 0 : s.folderDepth(layer), trackHeight: h,
+            collapse: pinned ? TrackCollapse.normal : _rowCollapse(layer),
+            // A narrow header stands its meter up; a phone's narrowest one drops a compact row's M and S until the
+            // track is selected (owner, 2026-11-11).
+            uprightMeter: headW < uprightMeterWidth,
+            hideMuteSolo: _phone && headW <= Settings.minHeaderWidth + 0.5,
+            pinned: pinned,
             focused: layer.id == focusId,
             // The pinned track: a tap goes back to all tracks, a sideways swipe to the next or previous one.
             onTap: pinned ? () => _focus(null) : () => callbacks.onTap(layer),
-            // A finger's tap lights the track up at once; the focus view it opens (or, pinned, closes) waits out
-            // the double tap that opens the menu.
-            onSelect: layer.isFolder ? null : pinned ? () {} : () { if (s.selectedLayerId != layer.id) s.selectLayer(layer); },
             onSwipe: pinned ? _step : null,
             onFx: () => callbacks.onFx(layer),
             onMenu: (at) => callbacks.onMenu(layer, at),
-            onResize: pinned ? null : (dy) => setState(() => _dragTrackH = (_trackHeight + dy)
-                .clamp(Settings.minTrackHeight, Settings.maxTrackHeight).toDouble()),
-            onResizeEnd: _saveHeaderSize),
+            onResize: pinned ? null : (dy) => _rowResize(layer, dy),
+            onResizeEnd: _rowResizeEnd)),
           // The track's automation lanes, open under it (REAPER's envelope lanes, UG 18.16).
-          if (!pinned && layer.showLanes && canHaveLanes(layer))
-            TrackLaneHeaders(key: ValueKey('lane-headers-${layer.id}'), state: s, layer: layer,
-              indent: folderIndent(s.folderDepth(layer))),
+          if (!pinned) lanesReveal(layer, lanesOpen(layer) ? TrackLaneHeaders(key: ValueKey('lane-headers-${layer.id}'),
+              state: s, layer: layer, indent: folderIndent(s.folderDepth(layer))) : null),
           if (layer.spaceBelow > 0 && !pinned) _SpacerHeader(state: s, layer: layer),
           SizedBox(height: gap),
         ]),
@@ -1253,10 +1685,11 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
                 ? SizedBox(height: ruler, width: width, child: CustomPaint(painter: _BarRuler(stepW, p.stepsPerBar, _hScroll)))
                 : ArrangeRuler(state: s, stepW: stepW, width: width, height: ruler, scroll: _hScroll)),
             for (final layer in layers) row('l', layer, [
-              _TimelineLane(key: drag?.laneKey(layer.id), state: s, layer: layer, width: width, stepW: stepW,
-                trackHeight: trackHeight, selectedIds: s.selectedClipIds, callbacks: callbacks, drag: drag),
-              if (!pinned && layer.showLanes && canHaveLanes(layer))
-                TrackLaneRows(state: s, layer: layer, stepW: stepW, width: width),
+              glideRow(layer, (h) => _TimelineLane(key: drag?.laneKey(layer.id), state: s, layer: layer, width: width,
+                stepW: stepW, trackHeight: h, selectedIds: s.selectedClipIds, callbacks: callbacks, drag: drag,
+                thin: !pinned && _rowCollapse(layer) == TrackCollapse.thin)),
+              if (!pinned) lanesReveal(layer, lanesOpen(layer)
+                  ? TrackLaneRows(state: s, layer: layer, stepW: stepW, width: width) : null),
               // A spacer and the gap leave the timeline empty too, so lanes stay level with their headers.
               if (layer.spaceBelow > 0 && !pinned) SizedBox(height: layer.spaceBelow),
               SizedBox(height: gap),
@@ -1264,6 +1697,19 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
             if (drag != null) SizedBox(width: width,
               child: NewTrackZone(key: drag.newTrackLane, state: s, drag: drag, height: zoneH, stepW: stepW)),
           ]))),
+          // One hint while no track holds a clip (owner, 2026-11-11), centred in the view below the ruler; it fades
+          // out with the first clip.
+          if (!pinned) Positioned(left: 10, top: ruler + (view.maxHeight - ruler) / 2 - 8, child: IgnorePointer(
+            child: AnimatedSwitcher(
+              duration: EditMotion.of(context, EditMotionKind.panels) ?? Duration.zero,
+              switchInCurve: EditMotion.curve, switchOutCurve: EditMotion.exitCurve,
+              child: s.project.layers.any((l) => l.clips.isNotEmpty || l.audioClips.isNotEmpty)
+                  ? const SizedBox.shrink()
+                  : SizedBox(key: const ValueKey('arrange-hint'), height: 16, child: Text(
+                      s.project.layers.every((l) => l.isFolder || l.isAudio)
+                          ? 'Drop audio here, or arm the track and record'
+                          : 'Double-tap for a clip, or drop a pattern here',
+                      style: const TextStyle(color: Neon.dim, fontSize: 10)))))),
           // A live island (widgets.dart): the line moves about 30 times a second while playing, and without it the
           // timeline around it would lay out and repaint with it.
           Positioned.fill(child: IgnorePointer(child: LiveIsland(child: ValueListenableBuilder<int>(
@@ -1293,11 +1739,12 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
     final tracks = s.project.layers.isEmpty
         ? _EmptyArrangement(onAdd: () { Haptics.tap(); s.addLayer(); }, onBrowse: () => setState(() => _browser = true))
         : _timeline(context, s.visibleLayers, callbacks);
-    if (!mixerCard) return tracks;
+    // The mixer card slides up over the tracks and back down (owner, 2026-11-11).
     return LayoutBuilder(builder: (context, box) => Stack(children: [
       Positioned.fill(child: tracks),
       Positioned(left: 6, right: 6, bottom: 6, height: math.min(box.maxHeight - 12, math.max(320.0, box.maxHeight * 0.86)),
-        child: SlideIn(from: const Offset(0, 0.15), child: MixerCard(state: s, onClose: () => setState(() => mixerCard = false)))),
+        child: Presence(from: const Offset(0, 0.15), child: !mixerCard ? null
+            : MixerCard(state: s, onClose: () => setState(() => mixerCard = false)))),
     ]));
   }
 }
@@ -1310,10 +1757,10 @@ class _TrackCallbacks {
   final void Function(LayerDoc layer, Offset at) onMenu;
   final void Function(LayerDoc layer, ClipDoc clip, Offset at) onClipMenu;
 
-  /// A mouse's double-click on a MIDI clip: its notes, in the focus panel's Clip tab.
+  /// A tap on the selected MIDI clip, or a mouse's double-click on one: its notes, in the focus panel's Clip tab.
   final void Function(LayerDoc layer, ClipDoc clip) onClipOpen;
 
-  /// An audio clip's double-click, or its menu's Clip settings…: the track's Clip tab (its inspector).
+  /// A tap on the selected audio clip, its double-click, or its menu's Clip settings…: the track's Clip tab.
   final void Function(LayerDoc layer)? onAudioOpen;
 
   /// Whether Select mode is on: a tap on a clip adds or removes it, a long-press drag in a lane draws a box.
@@ -1326,25 +1773,36 @@ class _TrackCallbacks {
 enum _Marquee { start, move, end }
 
 /// A compact track header (owner, 2026-11-09): name, M, S and FX always show; record-arm, input, the instrument and
-/// the rest are in the track menu (a double tap, or right-click on a desktop). A tap opens the track's focus view.
-/// The selected or focused track glows in its own colour, brighter.
+/// the rest are in the track menu (a hold, or right-click on a desktop). A tap focuses the track, a double tap opens
+/// its effects. The selected or focused track glows in its own colour, brighter. Its row is normal, compact (the name,
+/// M and S in one row) or a thin bar ([TrackCollapse]; owner, 2026-11-11).
 class _TimelineHeader extends StatelessWidget {
   const _TimelineHeader({super.key, required this.state, required this.layer, required this.index, required this.depth,
     required this.taps,
     required this.trackHeight, required this.onTap, required this.onFx, required this.onMenu,
-    this.focused = false, this.onSelect, this.onSwipe, this.onResize, this.onResizeEnd, this.drag, this.onTrackDrag});
+    this.collapse = TrackCollapse.normal, this.uprightMeter = false, this.hideMuteSolo = false, this.pinned = false,
+    this.focused = false, this.onSwipe, this.onResize, this.onResizeEnd, this.drag,
+    this.onTrackDrag});
   final AppState state;
   final LayerDoc layer;
   final int index, depth;
+
+  /// The row's height (the track's own, the default, or its compact or thin height).
   final double trackHeight;
+  final TrackCollapse collapse;
+
+  /// The meter stands upright at the header's edge (a narrow header).
+  final bool uprightMeter;
+
+  /// A compact row at a phone's narrowest header width: M and S show only on the selected or focused track.
+  final bool hideMuteSolo;
+
+  /// The focus view's pinned track: a second tap anywhere on it is a double tap (the first tap moved it here).
+  final bool pinned;
   final bool focused;
   final VoidCallback onTap, onFx;
   final void Function(Offset at) onMenu;
-  final _HeaderTaps taps;
-
-  /// A finger's tap: what shows at once (the track lights up) when [onTap] then opens something that moves the
-  /// headers, which waits out the double tap. Null: [onTap] answers at once (a folder's tap only selects it).
-  final VoidCallback? onSelect;
+  final ClickCounter taps;
   final ValueChanged<int>? onSwipe;
 
   /// A drag on the row's bottom edge, by this many pixels; null on the focus view's pinned track.
@@ -1352,7 +1810,7 @@ class _TimelineHeader extends StatelessWidget {
   final VoidCallback? onResizeEnd;
 
   /// Dragging the header moves the track (REAPER): a long press picks it up on a touch screen (released without
-  /// moving, it stays put), a plain drag with a mouse. Null on the pinned track.
+  /// moving, it opens the track menu), a plain drag with a mouse. Null on the pinned track.
   final ArrangeDrag? drag;
   final void Function(_HeaderPhase phase, Offset at)? onTrackDrag;
 
@@ -1361,11 +1819,20 @@ class _TimelineHeader extends StatelessWidget {
     final color = trackColor(state, layer);
     final selected = focused || state.selectedLayerId == layer.id;
     final fxCount = layer.components.length;
-    final thin = trackHeight < 52;
+    final low = trackHeight < 52;
     // REAPER-style (owner, 2026-11-10): the track's colour tints the whole header and its left edge, no outline.
     final edge = BorderSide(color: selected ? color : color.withValues(alpha: 0.75), width: selected ? 4 : 3);
-    final box = Container(height: trackHeight,
-      padding: EdgeInsets.fromLTRB(6 + folderIndent(depth), thin ? 2 : 4, 2, thin ? 2 : 4),
+    final compact = collapse == TrackCollapse.compact;
+    final Widget box;
+    if (collapse == TrackCollapse.thin) {
+      // A sliver in the track's colour, indented like the track's header; still tapped, held and dragged.
+      box = Container(key: ValueKey('thin-track-${layer.id}'), height: trackHeight, width: double.infinity,
+        padding: EdgeInsets.only(left: folderIndent(depth)),
+        decoration: const BoxDecoration(border: Border(bottom: BorderSide(color: Neon.bg))),
+        child: ColoredBox(color: color.withValues(alpha: selected ? 0.95 : 0.55)));
+    } else {
+      box = Container(height: trackHeight,
+      padding: EdgeInsets.fromLTRB(6 + folderIndent(depth), compact || low ? 2 : 4, 2, compact || low ? 2 : 4),
       decoration: Glass.active
           ? BoxDecoration(
               gradient: LinearGradient(begin: Alignment.centerLeft, end: Alignment.centerRight, colors: [
@@ -1374,7 +1841,7 @@ class _TimelineHeader extends StatelessWidget {
               ]),
               border: Border(
                 left: edge,
-                bottom: BorderSide(color: Colors.black.withValues(alpha: 0.35)),
+                bottom: BorderSide(color: Neon.bg.withValues(alpha: 0.6)),
                 right: BorderSide(color: Neon.ink.withValues(alpha: 0.05)),
               ),
               boxShadow: selected ? [BoxShadow(color: color.withValues(alpha: 0.28), blurRadius: 12)] : null)
@@ -1382,7 +1849,7 @@ class _TimelineHeader extends StatelessWidget {
               border: Border(left: edge, bottom: const BorderSide(color: Neon.bg))),
       child: LayoutBuilder(builder: (context, box) {
         final oneRow = box.maxHeight < 56;
-        final chip = box.maxWidth < 86 ? 20.0 : box.maxWidth < 150 ? 24.0 : 30.0;
+        final chip = compact || box.maxWidth < 86 ? 20.0 : box.maxWidth < 150 ? 24.0 : 30.0;
         final mute = _button(ToggleChip(label: 'M', size: chip, tooltip: layer.isFolder ? 'Mute folder' : 'Mute',
             on: layer.mute, color: Neon.yellow,
             onTap: () => layer.isFolder
@@ -1395,13 +1862,24 @@ class _TimelineHeader extends StatelessWidget {
                 : state.mixLayer(layer, solo: !layer.solo)));
         // A stereo track (a native instrument or effect, or a folder) meters each side; an empty track one bar.
         // An armed audio track shows its input's level instead (REAPER's record-armed meter).
-        final meter = layer.input?.armed ?? false
-            ? Center(child: AudioInputMeter(layer: layer, height: thin ? 5 : 7))
+        final armed = layer.input?.armed ?? false;
+        final meter = armed
+            ? Center(child: AudioInputMeter(layer: layer, height: low ? 5 : 7))
             : TrackMeter(key: ValueKey('meter-${layer.id}'), state: state, index: index, stereo: layer.isStereo,
                 color: color);
+        // Upright (a narrow header, or a compact row): a thin bar at the header's right edge, a live island of a
+        // fixed size like the sideways one (owner, 2026-11-11).
+        final standUp = uprightMeter || collapse != TrackCollapse.normal;
+        final upright = Padding(
+          padding: const EdgeInsets.only(left: 3, right: 1),
+          child: SizedBox(key: ValueKey('upright-meter-${layer.id}'), width: layer.isStereo || armed ? 7 : 4,
+            height: box.maxHeight, child: armed
+                ? RotatedBox(quarterTurns: 3, child: AudioInputMeter(layer: layer, height: 7))
+                : LiveIsland(child: TrackMeter(key: ValueKey('meter-${layer.id}'), state: state, index: index,
+                    stereo: layer.isStereo, color: color, vertical: true))));
         // FX: drawn at 18 dp, touched over about 34 dp; a dot tells the track has effects. A very narrow header
         // drops it: a tap on the header opens the track's effects too.
-        final showFx = box.maxWidth >= 104;
+        final showFx = box.maxWidth - (uprightMeter || collapse != TrackCollapse.normal ? 11 : 0) >= 104;
         final fx = layer.isFolder
             ? Tooltip(message: layer.busEnabled ? 'Folder with a group bus' : 'Folder',
                 child: SizedBox(width: 26, height: 26, child: Icon(Icons.account_tree_outlined, size: 15, color: color)))
@@ -1433,42 +1911,69 @@ class _TimelineHeader extends StatelessWidget {
               if (!layer.showLanes && laneCount > 0) Positioned(right: 2, top: 2, child: Container(width: 5, height: 5,
                 decoration: const BoxDecoration(color: Neon.blue, shape: BoxShape.circle))),
             ]))))));
-        final top = SizedBox(height: thin ? 24 : 28, child: Row(children: [
-          if (layer.isFolder)
-            _button(IconButton(padding: EdgeInsets.zero, constraints: const BoxConstraints(minWidth: 24, minHeight: 24),
+        // What the content has beside an upright meter.
+        final w = box.maxWidth - (standUp ? 11 : 0);
+        // A control that drops or comes back as the header narrows or shortens fades and scales (owner, 2026-11-11).
+        Widget pop(String id, bool show, Widget child) => _HeaderPop(key: ValueKey('pop-$id-${layer.id}'), show: show,
+            child: child);
+        final chevron = !layer.isFolder ? null
+            : _button(IconButton(padding: EdgeInsets.zero, constraints: const BoxConstraints(minWidth: 24, minHeight: 24),
+              key: ValueKey('folder-chevron-${layer.id}'),
               // 24 px wide: a padded 48 px target overflowed a phone's one-row folder header.
               style: IconButton.styleFrom(tapTargetSize: MaterialTapTargetSize.shrinkWrap),
-              tooltip: layer.collapsed ? 'Show folder' : 'Hide folder',
+              tooltip: layer.collapsed ? 'Open folder' : 'Collapse folder',
               icon: Icon(layer.collapsed ? Icons.chevron_right : Icons.expand_more, color: color, size: 18),
-              onPressed: () => state.setFolderCollapsed(layer, !layer.collapsed))),
-          const SizedBox(width: 3),
-          Expanded(child: Tooltip(
+              onPressed: () => state.setFolderCollapsed(layer, !layer.collapsed)));
+        // The name's tooltip shows on hover only: a finger's hold on it opens the track menu.
+        final name = Expanded(child: Tooltip(triggerMode: TooltipTriggerMode.manual,
             message: layer.isFolder
                 ? (layer.busEnabled ? 'Folder with a group bus' : 'Folder')
                 : layer.isAudio ? 'Audio track · ${layer.input?.label ?? 'no input'} · hold for more'
                 : 'Instrument: ${layer.instrument != null ? state.componentInfo(layer.instrument!.id)?.label ?? layer.instrument!.id
-                    : 'none'} · double-tap for more',
+                    : 'none'} · hold for more',
             child: Text(layer.name, maxLines: 1, overflow: TextOverflow.ellipsis,
               style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700,
-                color: Color.lerp(Neon.text, color, selected ? 0.35 : 0.15))))),
+                color: Color.lerp(Neon.text, color, selected ? 0.35 : 0.15)))));
+        // The upright meter and the sideways one cross-fade as the header crosses the width.
+        // M and S beside the name need their chips, the folder's chevron and a little of the name.
+        final msRoom = (layer.isFolder ? 27 : 3) + 2 * chip + 2 + 14;
+        Widget withMeter(Widget content) => Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Expanded(child: content), pop('upright', standUp, upright)]);
+        if (compact) {
+          // The name, M and S in one row; at a phone's narrowest width M and S wait for the track to be selected.
+          final ms = !hideMuteSolo || selected;
+          return withMeter(SizedBox(height: box.maxHeight, child: Row(children: [
+            ?chevron,
+            const SizedBox(width: 3),
+            name,
+            pop('ms', ms && w >= msRoom, Row(mainAxisSize: MainAxisSize.min, children: [mute, const SizedBox(width: 2), solo])),
+          ])));
+        }
+        final top = SizedBox(height: low ? 24 : 28, child: Row(children: [
+          ?chevron,
+          const SizedBox(width: 3),
+          name,
           // A deep folder's header can get narrow: M and S move to their own row's place, the icons go first.
-          if (oneRow && box.maxWidth >= 72) ...[mute, const SizedBox(width: 2), solo],
+          if (oneRow) pop('ms', w >= msRoom, Row(mainAxisSize: MainAxisSize.min, children: [mute, const SizedBox(width: 2), solo])),
           // Arm sits by the name when the header has room for both; a phone's one-row header puts it by the meter.
           if (layer.isAudio && !oneRow) _button(AudioArmButton(state: state, layer: layer, size: chip)),
           // A folder's icon only says what it is: a narrow header gives its room to the name.
-          if (showFx && (!layer.isFolder || box.maxWidth >= 140)) fx,
+          pop('fx', showFx && (!layer.isFolder || w >= 140), fx),
         ]));
         if (oneRow) {
           // One row (a phone's default height): the envelope button sits at the meter's end, as high as the room
           // under the name allows.
-          final room = box.maxHeight - (thin ? 26 : 32);
+          final room = box.maxHeight - (low ? 26 : 32);
           final lanes = room >= 12 ? lanesButton(30, math.min(18.0, room)) : null;
           final arm = layer.isAudio ? _button(AudioArmButton(state: state, layer: layer, size: math.max(12.0, math.min(18.0, room)))) : null;
-          return Column(mainAxisSize: MainAxisSize.min, children: [top, SizedBox(height: thin ? 2 : 4),
-            lanes == null && arm == null ? meter : Row(children: [?arm, Expanded(child: meter), ?lanes])]);
+          final under = standUp
+              ? (lanes == null && arm == null ? null : Row(children: [?arm, const Spacer(), ?lanes]))
+              : lanes == null && arm == null ? meter : Row(children: [?arm, Expanded(child: meter), ?lanes]);
+          return withMeter(Column(mainAxisSize: MainAxisSize.min, children: [top,
+            if (under != null) ...[SizedBox(height: low ? 2 : 4), under]]));
         }
         final lanes = lanesButton(26, 26);
-        return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        return withMeter(Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           top,
           const SizedBox(height: 4),
           SizedBox(height: 26, child: Row(children: [
@@ -1476,13 +1981,14 @@ class _TimelineHeader extends StatelessWidget {
             const SizedBox(width: 3),
             solo,
             const SizedBox(width: 8),
-            Expanded(child: meter),
+            Expanded(child: pop('meter', !standUp, meter)),
             // A very narrow header leaves it to the long-press menu's Show automation lanes.
-            if (lanes != null && box.maxWidth >= 100) lanes else const SizedBox(width: 4),
+            if (lanes != null && w >= 100) lanes else const SizedBox(width: 4),
           ])),
-        ]);
+        ]));
       }),
     );
+    }
     // Where a dragged track would land on this one: a line above or below it, or the folder lit up.
     final target = drag == null ? box : ValueListenableBuilder<DragSpot?>(
       valueListenable: drag!.hover,
@@ -1524,35 +2030,29 @@ class _TimelineHeader extends StatelessWidget {
     ]);
     final resizable = onResize == null ? guided : Stack(children: [
       guided,
-      // The row's bottom edge: drag it to make every track thinner or taller (saved).
-      Positioned(left: 0, right: 0, bottom: 0, height: 8, child: _ResizeGrip(
-        key: ValueKey('track-height-grip-${layer.id}'), axis: Axis.vertical, label: 'Resize tracks',
+      // The row's bottom edge: drag it to make this track thinner or taller, through compact and thin (saved);
+      // with Shift, every track's default height. A thin bar is all edge.
+      Positioned(left: 0, right: 0, bottom: 0, height: math.min(8.0, trackHeight), child: _ResizeGrip(
+        key: ValueKey('track-height-grip-${layer.id}'), axis: Axis.vertical, label: 'Resize track',
         onDrag: onResize!, onEnd: onResizeEnd ?? () {})),
     ]);
     return Semantics(
       button: true,
       selected: selected,
       label: '${layer.name} track',
-      // A tap selects at once; a quick second tap opens the track menu as well (owner, 2026-11-11), with no double
-      // tap in the gesture arena to hold the first back. A long press picks the track up (on the pinned track, which
-      // can't move, it opens the menu too). The outermost pointer handler sees a press last: a press on one of the
-      // header's buttons (M, S, FX, the arrows) isn't counted, and it clears the mark the button left.
+      // A tap focuses the track at once; a quick second tap switches the focus view to its effects (owner,
+      // 2026-11-11), with no double tap in the gesture arena to hold the first back. The first tap moves the track
+      // (the pinned track goes to the top), so a second tap anywhere on the pinned track counts. A hold opens the
+      // menu when let go without moving and picks the track up when it moves (on the pinned track, which can't move,
+      // it opens the menu). The outermost pointer handler sees a press last: a press on one of the header's buttons
+      // (M, S, FX, the arrows) isn't counted, and it clears the mark the button left.
       child: Listener(onPointerDown: (e) {
-        _onHeaderButton ? taps.count.reset() : taps.count.down(e, target: layer.id);
+        _onHeaderButton ? taps.reset() : taps.down(e, target: layer.id, anywhere: pinned);
         _onHeaderButton = false;
-      }, onPointerUp: taps.count.up, child: GestureDetector(
+      }, onPointerUp: taps.up, child: GestureDetector(
         key: ValueKey('track-header-${layer.id}'),
         behavior: HitTestBehavior.opaque,
-        onTap: () {
-          taps.cancel();
-          if (taps.count.doubleTap) return onMenu(taps.count.position);
-          final select = onSelect;
-          if (taps.count.mouse || select == null) return onTap();
-          // A finger: the track lights up at once; what the tap opens (the focus view, which moves the headers)
-          // waits out the double tap, so a quick second tap lands on the same header and opens its menu instead.
-          select();
-          taps.open = Timer(kDoubleTapTimeout, onTap);
-        },
+        onTap: () => taps.twice ? onFx() : onTap(),
         onLongPressStart: (d) => onTrackDrag == null ? onMenu(d.globalPosition) : onTrackDrag!(_HeaderPhase.press, d.globalPosition),
         onLongPressMoveUpdate: onTrackDrag == null ? null : (d) => onTrackDrag!(_HeaderPhase.move, d.globalPosition),
         onLongPressEnd: onTrackDrag == null ? null : (d) => onTrackDrag!(_HeaderPhase.release, d.globalPosition),
@@ -1582,23 +2082,40 @@ class _TimelineHeader extends StatelessWidget {
 /// sees the press last).
 bool _onHeaderButton = false;
 
-/// The headers' taps, shared by the arranger's headers: [count] tells a tap from a double tap (each press names its
-/// track, so a tap on the next header is a first), and [open] is a finger's tap that opens something (the focus
-/// view), waiting out the double tap.
-class _HeaderTaps {
-  final count = ClickCounter();
-  Timer? open;
-
-  void cancel() {
-    open?.cancel();
-    open = null;
-  }
-
-  void dispose() => cancel();
-}
-
 double _gainDb(double g) => g <= 0.001 ? -60 : (20 * math.log(g) / math.ln10).clamp(-60.0, 12.0).toDouble();
 double _dbGain(double db) => db <= -60 ? 0 : math.pow(10, db / 20).toDouble();
+
+/// Where a dragged track height lands: thin below halfway to compact, compact below halfway to the shortest normal
+/// row, else a normal row of that height.
+(TrackCollapse, double) trackRowSnap(double raw) {
+  if (raw < (LayerDoc.thinHeight + LayerDoc.compactHeight) / 2) return (TrackCollapse.thin, LayerDoc.thinHeight);
+  if (raw < (LayerDoc.compactHeight + LayerDoc.minHeight) / 2) return (TrackCollapse.compact, LayerDoc.compactHeight);
+  return (TrackCollapse.normal, raw.clamp(LayerDoc.minHeight, LayerDoc.maxHeight).toDouble());
+}
+
+/// A header control that drops ([show] false) or comes back as the header narrows or shortens: it fades and scales
+/// out and in, in the lengths edit-motion kind (a fade alone with Reduced motion, at once with motion Off).
+class _HeaderPop extends StatelessWidget {
+  const _HeaderPop({super.key, required this.show, required this.child});
+  final bool show;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final d = EditMotion.of(context, EditMotionKind.lengths) ?? Duration.zero;
+    final fade = EditMotion.fadeOnly(context);
+    return AnimatedSwitcher(duration: d, switchInCurve: EditMotion.curve, switchOutCurve: EditMotion.exitCurve,
+      // The header lays out for what shows now; a control on its way out fades over its neighbours.
+      layoutBuilder: (current, previous) => Stack(alignment: Alignment.centerLeft, clipBehavior: Clip.none,
+          children: [for (final p in previous) Positioned(left: 0, child: p), ?current]),
+      transitionBuilder: (child, a) => FadeTransition(opacity: a,
+          child: fade ? child : ScaleTransition(scale: Tween(begin: 0.6, end: 1.0).animate(a), child: child)),
+      child: show ? KeyedSubtree(key: const ValueKey(true), child: child) : const SizedBox.shrink(key: ValueKey(false)));
+  }
+}
+
+/// Below this header width a track's meter stands upright at the header's edge (owner, 2026-11-11).
+const uprightMeterWidth = 120.0;
 
 /// How far a track [depth] folders down is indented: 10 px a level for four levels, then 3 px a level up to
 /// 60 px, so a deep tree still leaves a phone's narrow header room for the name.
@@ -1632,7 +2149,9 @@ class _ResizeGripState extends State<_ResizeGrip> with GrabFeedback {
     void start() => grab();
     void update(double d) => widget.onDrag(d);
     void end() { release(); widget.onEnd(); }
+    // The tooltip shows on hover only: a finger's hold belongs to what is under the grip (a thin track's menu).
     return Semantics(label: widget.label, child: Tooltip(message: widget.label, waitDuration: const Duration(milliseconds: 600),
+      triggerMode: TooltipTriggerMode.manual,
       child: MouseRegion(
         cursor: sideways ? SystemMouseCursors.resizeColumn : SystemMouseCursors.resizeRow,
         onEnter: (_) => hover(true),
@@ -1656,10 +2175,14 @@ double _clipInset(double trackHeight) => trackHeight < 60 ? 3 : 8;
 
 class _TimelineLane extends StatefulWidget {
   const _TimelineLane({super.key, required this.state, required this.layer, required this.width,
-    required this.stepW, required this.trackHeight, required this.selectedIds, required this.callbacks, this.drag});
+    required this.stepW, required this.trackHeight, required this.selectedIds, required this.callbacks, this.drag,
+    this.thin = false});
   final AppState state;
   final LayerDoc layer;
   final double width, stepW, trackHeight;
+
+  /// A thin row: its clips are bars (also while it glides there).
+  final bool thin;
   final Set<String> selectedIds;
   final _TrackCallbacks callbacks;
 
@@ -1784,6 +2307,8 @@ class _TimelineLaneState extends State<_TimelineLane> {
   Widget build(BuildContext context) {
     final trackHeight = widget.trackHeight, stepW = widget.stepW;
     final height = trackHeight;
+    final thin = widget.thin;
+    final blocks = stepW * 16 < 4;
     final color = trackColor(state, layer);
     final leaving = EditMotion.of(context, EditMotionKind.clips);
     final appearing = _clipChanges(leaving);
@@ -1843,6 +2368,20 @@ class _TimelineLaneState extends State<_TimelineLane> {
           width: math.max(1.0, (state.timeSelectionEnd! - state.timeSelectionStart!).abs() * stepW), height: height,
           child: IgnorePointer(child: Container(color: Neon.blue.withValues(alpha: .09)))),
 
+      // A thin row (owner, 2026-11-11): each clip is a bar in its colour; the track's header opens it out again. Far
+      // out (a bar under 4 px) the clips are blocks too, merged per pixel column, so nothing is built per clip.
+      if (thin || blocks) ...[
+        Positioned.fill(child: IgnorePointer(child: RepaintBoundary(child: CustomPaint(
+          key: ValueKey('clip-blocks-${layer.id}'),
+          painter: _ClipBlocksPainter([
+            for (final clip in layer.clips) (clip.startSteps.toDouble(), clip.lengthSteps.toDouble(),
+                (clip.color == null ? color : Neon.layer(clip.color!)).withValues(alpha: clip.mute ? 0.3 : 0.8)),
+            for (final clip in layer.audioClips) (clip.startSteps.toDouble(), clip.lengthAt(state.project.bpm),
+                audioClipColor(state, layer, clip).withValues(alpha: clip.mute ? 0.3 : 0.8)),
+          ], stepW, inset: thin ? 1 : _clipInset(trackHeight)))))),
+        if (thin) for (final clip in layer.clips) Positioned(left: clip.startSteps * stepW, top: 0, width: 1, height: 1,
+            child: SizedBox(key: ValueKey('thin-clip-${clip.id}'))),
+      ] else ...[
       for (final clip in layer.clips) () {
         final rect = Rect.fromLTWH(clip.startSteps * stepW, _clipInset(trackHeight),
             math.max(12.0, clip.lengthSteps * stepW), trackHeight - 2 * _clipInset(trackHeight));
@@ -1866,16 +2405,13 @@ class _TimelineLaneState extends State<_TimelineLane> {
             stepW: stepW, drag: widget.drag, height: trackHeight - 2 * _clipInset(trackHeight),
             color: audioClipColor(state, layer, clip), selected: widget.selectedIds.contains(clip.id),
             selectMode: widget.callbacks.selectMode, onOpen: () => widget.callbacks.onAudioOpen?.call(layer))),
+      ],
       if (_drawing case (final from, final to))
         Positioned(left: from * stepW, top: _clipInset(trackHeight), width: (to - from) * stepW,
           height: trackHeight - 2 * _clipInset(trackHeight), child: IgnorePointer(child: DecoratedBox(
             key: const ValueKey('clip-draw-preview'),
             decoration: BoxDecoration(borderRadius: BorderRadius.circular(5), color: color.withValues(alpha: 0.18),
               border: Border.all(color: color))))),
-      if (layer.clips.isEmpty && layer.audioClips.isEmpty && !layer.isFolder)
-        Positioned(left: 10, top: trackHeight * 0.38, child: IgnorePointer(child: Text(
-          layer.isAudio ? 'Drop audio here, or arm the track and record' : 'Double-tap for a clip, or drop a pattern here',
-          style: const TextStyle(color: Neon.dim, fontSize: 10)))),
     ]),
   ));
     final drag = widget.drag;
@@ -1943,6 +2479,56 @@ class _SpacerHeader extends StatelessWidget {
   return (from, (position.pixels + position.viewportDimension).clamp(from, size.width).toDouble());
 }
 
+/// A lane's clips as plain blocks (a thin row, or zoomed far out): one rectangle per pixel column at most, so a long
+/// song's thousands of clips cost a few hundred rectangles.
+class _ClipBlocksPainter extends CustomPainter {
+  _ClipBlocksPainter(this.clips, this.stepW, {required this.inset});
+  final List<(double start, double length, Color color)> clips;
+  final double stepW, inset;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint();
+    final top = inset, h = math.max(1.0, size.height - 2 * inset);
+    // Clips that start in the same pixel column as the block before, in the same colour, extend it.
+    var left = -1.0, right = -1.0;
+    Color? c;
+    void flush() {
+      if (c != null) canvas.drawRect(Rect.fromLTRB(left, top, math.max(left + 1, right), top + h), paint..color = c);
+    }
+    final sorted = [...clips]..sort((a, b) => a.$1.compareTo(b.$1));
+    for (final (start, length, color) in sorted) {
+      final l = start * stepW, r = (start + length) * stepW;
+      if (c != null && color == c && l <= right + 1) {
+        right = math.max(right, r);
+        continue;
+      }
+      flush();
+      left = l.floorToDouble();
+      right = r;
+      c = color;
+    }
+    flush();
+  }
+
+  @override
+  bool shouldRepaint(covariant _ClipBlocksPainter old) =>
+      old.stepW != stepW || old.inset != inset || old.clips.length != clips.length ||
+      [for (var i = 0; i < clips.length; i++) old.clips[i] != clips[i]].any((d) => d);
+}
+
+/// The arrangement grid's step, in 16th steps: 1, a beat, a bar, or 4, 16, 64… bars, whichever keeps its lines at
+/// least 5 px apart at [stepW] pixels a step.
+int arrangeGridEvery(double stepW, int barSteps) {
+  if (stepW >= 5) return 1;
+  if (stepW * 4 >= 5) return 4;
+  var every = barSteps;
+  while (every * stepW < 5 && every < (1 << 40)) {
+    every *= 4;
+  }
+  return every;
+}
+
 class _ArrangementGrid extends CustomPainter {
   _ArrangementGrid(this.stepW, this.barSteps, this.scroll) : super(repaint: scroll);
   final double stepW;
@@ -1953,8 +2539,9 @@ class _ArrangementGrid extends CustomPainter {
     final minor = Paint()..color = Neon.line.withValues(alpha: .55)..strokeWidth = .6;
     final major = Paint()..color = Neon.dim.withValues(alpha: .35)..strokeWidth = 1;
     final (from, to) = visibleSpan(scroll, size);
-    // Zoomed out, the minor lines thin to beats, then to bars only, so they stay at least 5 px apart.
-    final every = stepW >= 5 ? 1 : stepW * 4 >= 5 ? 4 : barSteps;
+    // Zoomed out, the minor lines thin to beats, then to bars, then every 4, 16, 64… bars, so they stay at least
+    // 5 px apart and nothing is drawn per bar however far out (owner, 2026-11-11).
+    final every = arrangeGridEvery(stepW, barSteps);
     for (var n = (from / stepW / every).floor() * every; n * stepW <= to; n += every) {
       final x = n * stepW;
       canvas.drawLine(Offset(x, 0), Offset(x, size.height), n % barSteps == 0 ? major : minor);
@@ -1974,10 +2561,10 @@ class _BarRuler extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     final barW = barSteps * stepW;
     final (from, to) = visibleSpan(scroll, size);
-    // A label every bar, or every 2, 4, 8… bars when bars are narrower than a label.
+    // A label every bar, or every 4, 16, 64… bars when bars are narrower than a label.
     var every = 1;
-    while (every * barW < 28 && every < 1 << 16) {
-      every *= 2;
+    while (every * barW < 28 && every < 1 << 30) {
+      every *= 4;
     }
     for (var b = (from / barW / every).floor() * every; b * barW <= to; b += every) {
       final label = TextPainter(text: TextSpan(text: '${b + 1}', style: Neon.code(size: 10, color: Neon.dim)),
@@ -2091,8 +2678,12 @@ class _TimelineClipState extends State<_TimelineClip> {
     _lastSnap = at;
   }
 
+  /// A finger's tap on the selected clip: its notes open once the double-tap window has passed.
+  Timer? _opening;
+
   @override
   void dispose() {
+    _opening?.cancel();
     _removeGhost();
     _ghostState.dispose();
     super.dispose();
@@ -2302,7 +2893,7 @@ class _TimelineClipState extends State<_TimelineClip> {
     }
     final name = _name;
     // The notes sit under the name when the clip is tall enough for both, else they fill it.
-    final preview = MidiClipPreview.of(widget.state.project, c, stepW: widget.stepW,
+    final preview = MidiClipPreview.of(widget.state.project, c, stepW: widget.stepW, trim: start - c.startSteps,
       top: widget.height >= 34 ? 15 : 1, color: Color.lerp(widget.color, Neon.ink, 0.45)!.withValues(alpha: 0.9));
     // On the pinned track the clip itself slides in time; elsewhere its ghost shows where it goes and it stays dim.
     final shown = dragging && !sourceDragging && _drag == null ? (_moveTarget() - c.startSteps) * widget.stepW : 0.0;
@@ -2311,8 +2902,10 @@ class _TimelineClipState extends State<_TimelineClip> {
     final mq = MediaQuery.of(context);
     return Opacity(opacity: ghosted ? 0.35 : c.mute ? 0.45 : 1,
       child: Transform.translate(offset: Offset(shown + (start - c.startSteps) * widget.stepW, 0),
-      child: Transform.scale(scaleX: length / c.lengthSteps,
-        alignment: Alignment.centerLeft,
+      // An edge drag changes the clip's width, never its content's scale (owner, 2026-11-11, as REAPER): longer shows
+      // more (the next repeats, or nothing), shorter crops, and a left trim keeps the notes where they are.
+      child: OverflowBox(key: ValueKey('clip-body-${c.id}'), alignment: Alignment.centerLeft,
+        minWidth: math.max(12.0, length * widget.stepW), maxWidth: math.max(12.0, length * widget.stepW),
         child: Material(color: ClipLook.under(widget.color, widget.selected), // the theme's clip fill and corners
           borderRadius: BorderRadius.circular(ClipLook.radius(widget.height)),
           child: Stack(children: [
@@ -2335,6 +2928,8 @@ class _TimelineClipState extends State<_TimelineClip> {
           onLongPressEnd: _liftEnd,
           onSecondaryTapUp: (d) => widget.callbacks.onClipMenu(widget.layer, c, d.globalPosition),
           onTap: () {
+            _opening?.cancel();
+            _opening = null;
             if (_clicks.doubleClick) return widget.callbacks.onClipOpen(widget.layer, c);
             if (_clicks.doubleTap) return widget.callbacks.onClipMenu(widget.layer, c, _clicks.position);
             final (ctrl, shift) = _tapKeys;
@@ -2345,7 +2940,14 @@ class _TimelineClipState extends State<_TimelineClip> {
             } else if (shift) {
               widget.state.selectClipRange(widget.layer, c);
             } else if (widget.state.selectedClipIds.contains(c.id)) {
-              widget.state.activateClip(widget.layer, c);
+              // A tap on the selected clip opens its notes in the piano roll (owner, 2026-11-11). The roll moves the
+              // clip (the focus view), so a finger's waits out the double tap that opens the menu instead.
+              final layer = widget.layer;
+              if (_clicks.mouse) return widget.callbacks.onClipOpen(layer, c);
+              _opening = Timer(kDoubleTapTimeout, () {
+                _opening = null;
+                if (mounted) widget.callbacks.onClipOpen(layer, c);
+              });
             } else {
               widget.state.selectClip(widget.layer, c);
             }
@@ -2364,11 +2966,12 @@ class _TimelineClipState extends State<_TimelineClip> {
               border: Border.all(
                 color: Glass.active || widget.selected ? widget.color : widget.color.withValues(alpha: .7),
                 width: widget.selected ? 1.6 : 1)),
-            padding: const EdgeInsets.fromLTRB(13, 4, 13, 3),
+            // A compact row's clip has room for its name only.
+            padding: widget.height < 26 ? const EdgeInsets.fromLTRB(13, 1, 13, 0) : const EdgeInsets.fromLTRB(13, 4, 13, 3),
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Text(name, maxLines: 1, overflow: TextOverflow.ellipsis,
                 style: TextStyle(color: widget.color, fontSize: 10, fontWeight: FontWeight.w800)),
-              Expanded(child: Align(alignment: Alignment.bottomLeft,
+              if (widget.height >= 26) Expanded(child: Align(alignment: Alignment.bottomLeft,
                 child: Row(children: [
                   if (c.lock) Icon(Icons.lock, key: ValueKey('clip-locked-${c.id}'), size: 9, color: widget.color),
                   if (c.mute) Icon(Icons.volume_off, key: ValueKey('clip-muted-${c.id}'), size: 9, color: widget.color),
