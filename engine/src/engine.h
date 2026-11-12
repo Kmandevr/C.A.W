@@ -240,7 +240,11 @@ private:
     struct SendTable;  // where a slot's sends and keys go, with their delays (engine.cpp)
 
     void drainRetired();
-    bool canRetire(size_t count) const noexcept;
+    size_t retireRoom() const noexcept;  // audio thread: entries the retired queue and its overflow can still take
+    bool canRetire(size_t count) const noexcept;  // outside the graph
+    // Inside the graph (speed phase 5c): whether `count` more fit in the node's own list and its share of the room.
+    static bool canRetireNode(const RetireList& list, int count) noexcept;
+    void assignRetireBudgets() noexcept;  // audio thread, before the graph: each node list's share of the room
     bool send(const Cmd& c);
     std::string setProjectImpl(const ProjectSpec& p, bool offline);
     void applyCommands() noexcept;
@@ -249,8 +253,9 @@ private:
                 ComponentChain* components = nullptr) noexcept;
     void retireEntry(const Retired& r) noexcept;  // audio thread: to the control thread, to be freed
     // Inside the graph (speed phase 5a): a node's retirements go to its own list, pushed after the graph has run.
-    void nodeRetire(RetireList& list, const Retired& r) noexcept;
-    void nodeRetireChain(RetireList& list, ComponentChain* chain) noexcept;  // null: nothing
+    // False (and an assert) only if it doesn't fit, which canRetireNode rules out: then nothing is retired.
+    bool nodeRetire(RetireList& list, const Retired& r) noexcept;
+    bool nodeRetireChain(RetireList& list, ComponentChain* chain) noexcept;  // null: nothing (true)
     void flushRetires() noexcept;
     void bindTable() noexcept;  // audio thread: cache the current table's slots, graph and sizes
     void markLive(int slot) noexcept;  // audio thread: the slot joins the in-use list the per-chunk loops visit
@@ -386,10 +391,9 @@ private:
     int masterFadeLeft_ = 0;
     float masterFadeL_[kBlock], masterFadeR_[kBlock];  // audio thread: a replaced master chain's output while it fades
     float masterStageL_[kBlock], masterStageR_[kBlock];  // audio thread: the master chain runs here
-    // Audio thread: what the master node hands back in a chunk, and how many retirements every node's list holds
-    // (canRetire counts them as pushed; flushRetires pushes them after the graph). Per-slot lists are in Slot.
+    // Audio thread: what the master node hands back in a chunk (flushRetires pushes it after the graph, with each
+    // slot's list, which is in Slot; assignRetireBudgets shares the room out before the graph).
     std::unique_ptr<RetireList> masterRetires_;
-    int retiresHeld_ = 0;
 
     // ---- shared ----
     std::unique_ptr<Spsc<Cmd, 1024>> cmds_;

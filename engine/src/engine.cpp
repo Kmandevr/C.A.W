@@ -51,10 +51,14 @@ struct Engine::Retired {
 // pushed to the retired queue by the callback thread once the graph has run (flushRetires), so nodes never touch the
 // shared queue. Bounded: a track node retires at most 3 things a chunk (a fading instrument, inserts and delay), a
 // bus node at most 5 (its fading inserts and delay, then its slot, fading inserts and delay when it is freed).
+// Each list has its own share of the queue's free room for the chunk (`budget`, at most kCapacity), handed out by
+// the callback thread before the graph runs (speed phase 5c), so a node's canRetireNode reads only its own list and
+// gives the same answer whichever thread runs it, and whenever.
 struct Engine::RetireList {
     static constexpr int kCapacity = 8;
     Retired items[kCapacity];
     int count = 0;
+    int budget = 0;
 };
 
 // Per-layer audio and meter state. Fields above `vol` belong to the audio thread.
@@ -85,6 +89,7 @@ struct Engine::Slot {
     float insL[kBlock] = {}, insR[kBlock] = {};
     float fadeL[kBlock] = {}, fadeR[kBlock] = {};
     RetireList retires;  // what this slot's node handed back this chunk (flushRetires)
+    bool routingChanged = false;  // its node freed it this chunk: routing is re-derived (ORed after the graph)
     DelayLine* delayFading = nullptr;   // the delay `delay` replaced, crossfading out (null: no delay)
     int delayFadeLeft = 0;
     bool delayStale = false;            // stopped or silent: the delay holds old audio; clear before it runs
@@ -505,6 +510,10 @@ struct Engine::MixGraph {
     int maxRoutes() const noexcept { return slots * kMaxRoutes; }
     std::vector<int> inFirst, inCount;     // [slots] each: where d's routes start in inRoutes, and how many
     std::vector<InRoute> inRoutes;         // [maxRoutes()]
+    // updateRouting builds the next tables here and swaps them in only once the executor accepts the routing they
+    // go with, so pullRoutes never reads tables made for another order (speed phase 5c).
+    std::vector<int> inFirstNext, inCountNext;
+    std::vector<InRoute> inRoutesNext;
     std::vector<GraphDependency> dependencies;  // [maxRoutes()]
 
     // capacity: layer slots; the graph also routes the audition slot after them.
@@ -516,7 +525,9 @@ struct Engine::MixGraph {
           slotOrder(static_cast<size_t>(slots), 0), stack(static_cast<size_t>(slots) + 1, 0), position(static_cast<size_t>(slots) + 1, UINT32_MAX),
           order(static_cast<size_t>(nodeCount()), 0), edges(static_cast<size_t>(maxEdges()), GraphConnection{}),
           inFirst(static_cast<size_t>(slots), 0), inCount(static_cast<size_t>(slots), 0),
-          inRoutes(static_cast<size_t>(maxRoutes())), dependencies(static_cast<size_t>(maxRoutes())) {
+          inRoutes(static_cast<size_t>(maxRoutes())), inFirstNext(static_cast<size_t>(slots), 0),
+          inCountNext(static_cast<size_t>(slots), 0), inRoutesNext(static_cast<size_t>(maxRoutes())),
+          dependencies(static_cast<size_t>(maxRoutes())) {
         const int kNodes = nodeCount();
         ids.reserve(kNodes);
         nodes.reserve(kNodes);
@@ -560,6 +571,7 @@ struct Engine::MixGraph {
         b += (position.capacity() + order.capacity()) * sizeof(uint32_t);
         b += edges.capacity() * sizeof(GraphConnection);
         b += (inFirst.capacity() + inCount.capacity()) * sizeof(int) + inRoutes.capacity() * sizeof(InRoute);
+        b += (inFirstNext.capacity() + inCountNext.capacity()) * sizeof(int) + inRoutesNext.capacity() * sizeof(InRoute);
         b += dependencies.capacity() * sizeof(GraphDependency);
         return b;
     }
@@ -2663,46 +2675,76 @@ void Engine::updateTiming() noexcept {
 
 int64_t Engine::wrapAt() const noexcept { return loopRange_ && g_ < loopTo_ ? loopTo_ : loopLen_; }
 
-bool Engine::canRetire(size_t count) const noexcept {
+size_t Engine::retireRoom() const noexcept {
     // The callback may use the queue plus its preallocated overflow list. When
     // overflow is already in use, retire() appends there until the control thread
     // drains the queue and a later callback can move the pending entries across.
-    // Retirements the graph's nodes hold (flushRetires pushes them after the graph) take room as if pushed already.
     const size_t pendingFree = static_cast<size_t>(pendingMax_ - pendingCount_);
-    const size_t need = count + static_cast<size_t>(retiresHeld_);
-    if (pendingCount_ != 0) return need <= pendingFree;
-    return need <= retired_->writable() + pendingFree;
+    if (pendingCount_ != 0) return pendingFree;
+    return retired_->writable() + pendingFree;
 }
 
-// Audio thread, inside the graph: a node hands something back into its own list (never the shared queue).
-void Engine::nodeRetire(RetireList& list, const Retired& r) noexcept {
-    if (list.count < RetireList::kCapacity) {
+// Outside the graph (the callback thread; the node lists are empty there: flushRetires).
+bool Engine::canRetire(size_t count) const noexcept { return count <= retireRoom(); }
+
+// Inside the graph: what fits in the node's own list and its share of the room (assignRetireBudgets).
+bool Engine::canRetireNode(const RetireList& list, int count) noexcept {
+    return count >= 0 && list.count + count <= list.budget;
+}
+
+// Audio thread, before the graph runs: each list's share of the queue's free room, in the order flushRetires
+// pushes them (the live slots by index, the master's last), so what any node may retire this chunk is fixed
+// before any of them runs, on whichever thread (speed phase 5c).
+void Engine::assignRetireBudgets() noexcept {
+    size_t room = retireRoom();
+    auto give = [&room](RetireList& list) noexcept {
+        const size_t b = std::min(room, static_cast<size_t>(RetireList::kCapacity));
+        list.budget = static_cast<int>(b);
+        room -= b;
+    };
+    for (int k = 0; k < liveCount_; ++k) give(slotAt(live_[k]).retires);
+    give(*masterRetires_);
+}
+
+// Audio thread, inside the graph: a node hands something back into its own list (never the shared queue, which
+// another node may be using: speed phase 5c). The callers asked canRetireNode first, so it always fits; if one
+// didn't, the item stays with its owner's caller unretired this chunk (a leak at worst, never a free while the
+// graph may still read it).
+bool Engine::nodeRetire(RetireList& list, const Retired& r) noexcept {
+    if (list.count < list.budget && list.count < RetireList::kCapacity) {
         list.items[list.count++] = r;
-        ++retiresHeld_;
-    } else {
-        retireEntry(r);  // never: the list holds the most a node retires in a chunk
+        return true;
     }
+    assert(!"a graph node retired more than canRetireNode allowed");
+    return false;
 }
 
-void Engine::nodeRetireChain(RetireList& list, ComponentChain* chain) noexcept {
-    if (!chain) return;
+bool Engine::nodeRetireChain(RetireList& list, ComponentChain* chain) noexcept {
+    if (!chain) return true;
     Retired r;
     r.masterChain = chain;
-    nodeRetire(list, r);
+    return nodeRetire(list, r);
 }
 
 // Audio thread, once the graph has run a chunk: every node's retirements into the queue, slot by slot, the master's
-// last. canRetire() counted them while they were held, so there is room.
+// last. Each fits its share of the room (assignRetireBudgets, canRetireNode), so the queue takes them all.
+// The nodes' routing flags too (a bus freed inside the graph re-derives the routing before the next chunk).
 void Engine::flushRetires() noexcept {
     for (int k = 0; k < liveCount_; ++k) {
-        RetireList& list = slotAt(live_[k]).retires;
+        Slot& s = slotAt(live_[k]);
+        RetireList& list = s.retires;
         for (int j = 0; j < list.count; ++j) retireEntry(list.items[j]);
         list.count = 0;
+        list.budget = 0;
+        if (s.routingChanged) {
+            s.routingChanged = false;
+            routingDirty_ = true;
+        }
     }
     RetireList& master = *masterRetires_;
     for (int j = 0; j < master.count; ++j) retireEntry(master.items[j]);
     master.count = 0;
-    retiresHeld_ = 0;
+    master.budget = 0;
 }
 
 void Engine::retire(Slot* freed, std::shared_ptr<const Pattern>* pattern, AutomationData* automation,
@@ -3189,7 +3231,8 @@ void Engine::feedDeviceMidi(Slot& s, NoteEvents& notes, int m) noexcept {
     const int64_t end = midiChunkFrom_ + m;
     for (uint32_t k = 0; k < midiPendingCount_; ++k) {
         PendingMidi& p = midiPending_[k];
-        if (p.done || p.e.target != s.index || p.frame >= end) continue;
+        // Its own messages only (target first): another slot's node may be marking its own done at the same time.
+        if (p.e.target != s.index || p.done || p.frame >= end) continue;
         const int64_t at = p.frame - midiChunkFrom_;
         s.deviceNotes.apply(notes, p.e, static_cast<uint32_t>(at < 0 ? 0 : at), o);
         p.done = true;
@@ -3578,8 +3621,7 @@ void Engine::runInstrument(Slot& s, int m) noexcept {
         s.instR[i] = s.fadeR[i] + (s.instR[i] - s.fadeR[i]) * w;
     }
     if (s.instrumentFadeLeft == 0 && s.instrumentFading) {
-        if (canRetire(1)) {
-            nodeRetireChain(s.retires, s.instrumentFading);
+        if (canRetireNode(s.retires, 1) && nodeRetireChain(s.retires, s.instrumentFading)) {
             s.instrumentFading = nullptr;
         } else {
             s.instrumentFadeLeft = 1;  // no room to hand it back yet: try again next block
@@ -3740,6 +3782,7 @@ int Engine::processChunk(float* l, float* r, int maxFrames) noexcept {
         routingDirty_ = false;
         updateRouting();
     }
+    assignRetireBudgets();  // what each node may hand back this chunk, fixed before any of them runs
     float* outputs[2] = {l, r};
     const bool ran = mixGraph_->executor.process(ConstChannelBufferView{}, ChannelBufferView{outputs, 2, static_cast<uint32_t>(m)},
                                                  static_cast<uint32_t>(m));
@@ -3852,19 +3895,21 @@ void Engine::updateRouting() noexcept {
     // order they run, each one's routes by index. Each is also a dependency of the destination's node on the
     // source's for the executor's levels (the edges carry only children into their buses).
     auto nodeOf = [&](int x) noexcept { return slotAt(x).bus ? g.busNode(x) : g.trackNode(x); };
-    for (int k = 0; k < count; ++k) g.inCount[g.slotOrder[k]] = 0;
+    // Into the staging tables (swapped in once the executor accepts): every live slot's count, so slots that don't
+    // run this chunk pull nothing.
+    for (int j = 0; j < liveCount_; ++j) g.inCountNext[live_[j]] = 0;
     for (int k = 0; k < count; ++k) {
         const Slot& s = slotAt(g.slotOrder[k]);
         if (s.sends)
             for (int j = 0; j < s.sends->count; ++j)
-                if (s.routeOk[j]) ++g.inCount[s.sends->routes[j].dest];
+                if (s.routeOk[j]) ++g.inCountNext[s.sends->routes[j].dest];
     }
     int routed = 0;
     for (int k = 0; k < count; ++k) {
         const int x = g.slotOrder[k];
-        g.inFirst[x] = routed;
-        routed += g.inCount[x];
-        g.inCount[x] = 0;  // refilled below
+        g.inFirstNext[x] = routed;
+        routed += g.inCountNext[x];
+        g.inCountNext[x] = 0;  // refilled below
     }
     uint32_t dependencyCount = 0;
     for (int k = 0; k < count; ++k) {
@@ -3874,7 +3919,7 @@ void Engine::updateRouting() noexcept {
         for (int j = 0; j < s.sends->count; ++j) {
             if (!s.routeOk[j]) continue;
             const int d = s.sends->routes[j].dest;
-            g.inRoutes[static_cast<size_t>(g.inFirst[d] + g.inCount[d]++)] = MixGraph::InRoute{s.sends, j};
+            g.inRoutesNext[static_cast<size_t>(g.inFirstNext[d] + g.inCountNext[d]++)] = MixGraph::InRoute{s.sends, j};
             g.dependencies[dependencyCount++] = GraphDependency{nodeOf(x), nodeOf(d)};
         }
     }
@@ -3892,21 +3937,30 @@ void Engine::updateRouting() noexcept {
     g.order[nodeCount++] = g.masterNode();
     // Valid by construction. A rejection would keep the previous routing (safe: stale nodes output
     // zeros) but must never pass unnoticed: it is counted and asserts in debug builds.
-    if (!g.executor.setRouting(g.edges.data(), edgeCount, g.order.data(), nodeCount, g.dependencies.data(),
-                               dependencyCount)) {
-        routingRejections_.fetch_add(1, std::memory_order_relaxed);
-        assert(!"mix graph rejected a derived route");
+    if (g.executor.setRouting(g.edges.data(), edgeCount, g.order.data(), nodeCount, g.dependencies.data(),
+                              dependencyCount)) {
+        // Accepted: the pull tables made for this order go live (swapping vectors never allocates).
+        g.inFirst.swap(g.inFirstNext);
+        g.inCount.swap(g.inCountNext);
+        g.inRoutes.swap(g.inRoutesNext);
+        return;
     }
+    routingRejections_.fetch_add(1, std::memory_order_relaxed);
+    assert(!"mix graph rejected a derived route");
+    // The old order keeps running, but its pull tables may name route tables freed since (a SetSends retired them),
+    // so nothing is pulled and no route is written until a routing update is accepted.
+    std::fill(g.inCount.begin(), g.inCount.end(), 0);
+    for (int j = 0; j < liveCount_; ++j) std::fill_n(slotAt(live_[j]).routeOk, kMaxRoutes, false);
 }
 
 // A track's latency compensation, with the crossfade of a delay change.
 void Engine::runDelay(Slot& s, float* outL, float* outR, int m) noexcept {
     if (s.delayStale) {  // it held the song's last frames from before a stop or a silence
         if (s.delay) s.delay->clear();
-        if (s.delayFading && canRetire(1)) {  // a change that was still crossfading is over: the new timing holds
-            Retired r;
-            r.delay = s.delayFading;
-            nodeRetire(s.retires, r);
+        Retired r;
+        r.delay = s.delayFading;
+        // A change that was still crossfading is over: the new timing holds.
+        if (s.delayFading && canRetireNode(s.retires, 1) && nodeRetire(s.retires, r)) {
             s.delayFading = nullptr;
             s.delayFadeLeft = 0;
         } else if (s.delayFading) {
@@ -3930,10 +3984,9 @@ void Engine::runDelay(Slot& s, float* outL, float* outR, int m) noexcept {
         outR[i] = s.fadeR[i] + (outR[i] - s.fadeR[i]) * w;
     }
     if (s.delayFadeLeft == 0 && s.delayFading) {
-        if (canRetire(1)) {
-            Retired r;
-            r.delay = s.delayFading;
-            nodeRetire(s.retires, r);
+        Retired r;
+        r.delay = s.delayFading;
+        if (canRetireNode(s.retires, 1) && nodeRetire(s.retires, r)) {
             s.delayFading = nullptr;
         } else {
             s.delayFadeLeft = 1;  // no room to hand it back yet: try again next block
@@ -3972,8 +4025,8 @@ void Engine::runInserts(Slot& s, float* L, float* R, int m) noexcept {
             L[i] = s.fadeL[i] + (L[i] - s.fadeL[i]) * w;
             R[i] = s.fadeR[i] + (R[i] - s.fadeR[i]) * w;
         }
-        if (s.insertsFadeLeft == 0 && s.insertsFading && canRetire(1)) {
-            nodeRetireChain(s.retires, s.insertsFading);
+        if (s.insertsFadeLeft == 0 && s.insertsFading && canRetireNode(s.retires, 1) &&
+            nodeRetireChain(s.retires, s.insertsFading)) {
             s.insertsFading = nullptr;
         } else if (s.insertsFadeLeft == 0 && s.insertsFading) {
             s.insertsFadeLeft = 1;  // no room to hand it back yet: hold the new chain at full and try again
@@ -4395,9 +4448,10 @@ void Engine::runBusNode(int slot, const float* inL, const float* inR, float* out
         std::copy_n(outL, m, s.tapL + tapAt_);
         std::copy_n(outR, m, s.tapR + tapAt_);
     }
-    if (s.removing && s.gain == 0.0 && canRetire(3)) {
+    if (s.removing && s.gain == 0.0 && canRetireNode(s.retires, 3)) {
         // Faded out: the slot is free again, with its inserts, delay and routes.
         // Held until the graph has run (flushRetires): a destination of its routes still reads their outputs.
+        // canRetireNode(3) leaves room for all three, so none is refused (nodeRetire asserts it).
         Retired r{&s, nullptr, nullptr, nullptr, nullptr, s.inserts};
         r.delay = s.delay;
         r.sends = s.sends;
@@ -4418,7 +4472,7 @@ void Engine::runBusNode(int slot, const float* inL, const float* inR, float* out
         s.removing = false;
         s.previewing = false;
         s.insertTail = false;
-        routingDirty_ = true;
+        s.routingChanged = true;  // the callback thread re-derives the routing after the graph (flushRetires)
     }
 }
 
@@ -4564,8 +4618,7 @@ void Engine::runMasterNode(const float* inL, const float* inR, float* outL, floa
                 stageR[i] = masterFadeR_[i] + (stageR[i] - masterFadeR_[i]) * w;
             }
             if (masterFadeLeft_ == 0 && masterFading_) {
-                if (canRetire(1)) {
-                    nodeRetireChain(*masterRetires_, masterFading_);
+                if (canRetireNode(*masterRetires_, 1) && nodeRetireChain(*masterRetires_, masterFading_)) {
                     masterFading_ = nullptr;
                 } else {
                     masterFadeLeft_ = 1;
