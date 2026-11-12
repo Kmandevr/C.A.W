@@ -312,19 +312,13 @@ protected:
             Pair wet = read;
             if (!freeze_) {  // Svf::highpass and ::lowpass (the reads are finite: finiteOr0 passes them as they are)
                 if (useLow_) {
-                    const Pair v3 = wet - low2;
-                    const Pair v1 = lowA1 * low1 + lowA2 * v3;
-                    const Pair v2 = low2 + lowA2 * low1 + lowA3 * v3;
-                    low1 = two * v1 - low1;
-                    low2 = two * v2 - low2;
+                    Pair v1, v2;
+                    lib::Svf::step(wet, low1, low2, lowA1, lowA2, lowA3, two, v1, v2);
                     wet = wet - lowK * v1 - v2;
                 }
                 if (useHigh_) {
-                    const Pair v3 = wet - high2;
-                    const Pair v1 = highA1 * high1 + highA2 * v3;
-                    const Pair v2 = high2 + highA2 * high1 + highA3 * v3;
-                    high1 = two * v1 - high1;
-                    high2 = two * v2 - high2;
+                    Pair v1, v2;
+                    lib::Svf::step(wet, high1, high2, highA1, highA2, highA3, two, v1, v2);
                     wet = v2;
                 }
             }
