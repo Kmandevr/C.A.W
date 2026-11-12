@@ -26,8 +26,8 @@ namespace tol {
 // 2^-22 (-132.4 dBFS) from the render it was recorded from: a render within -122.4 dBFS of that one always passes.
 constexpr double kNullPeakDbfs = -120.0;
 // Chaotic: short-term loudness (RMS of 50 ms windows) and the same of the first difference (where clicks and
-// brightness show), per channel, within 0.1 dB; the mean power in each 1/3-octave band (25 Hz to 20 kHz) within
-// 0.5 dB. Levels more than 60 dB below the reference's loudest window or band (and anything below -120 dBFS)
+// brightness show), per channel, within 0.1 dB; the mean power in each 1/3-octave band (25 Hz to 20 kHz) and below
+// 20 Hz (DC included, so an offset shows) within 0.5 dB. Levels more than 60 dB below the reference's loudest window or band (and anything below -120 dBFS)
 // count as that floor.
 constexpr int kWindowFrames = 2400;
 constexpr double kLoudnessDb = 0.1;
@@ -35,17 +35,19 @@ constexpr double kBandDb = 0.5;
 constexpr double kFloorBelowLoudestDb = 60.0;
 constexpr double kAbsoluteFloorDbfs = -120.0;
 // An onset: the first frame above -60 dBFS after at least 10 ms at or below -80 dBFS (frame 0 counts as after
-// silence). Onset frames must match exactly.
+// silence). A chaotic render has the same onsets, each within 2 frames (a level that grew by a float step can cross
+// the threshold a frame apart); stable renders keep timing exact through the null.
 constexpr float kOnsetLevel = 1e-3f;
 constexpr float kSilenceLevel = 1e-4f;
 constexpr int kSilenceFrames = 480;
+constexpr uint32_t kOnsetSlackFrames = 2;
 }  // namespace tol
 
 // What a chaotic comparison looks at.
 struct Features {
     uint32_t frames = 0;
     std::vector<float> loud[2], bright[2];  // dB per 50 ms window
-    std::vector<float> bands[2];            // dB per 1/3-octave band
+    std::vector<float> bands[2];            // dB below 20 Hz, then per 1/3-octave band
     std::vector<uint32_t> onsets[2];        // frames
 };
 
@@ -74,38 +76,43 @@ std::vector<uint8_t> encodeAudio(const Audio& a);
 bool decodeAudio(const std::vector<uint8_t>& bytes, uint32_t frames, Audio& out);
 
 // One suite's references, engine/tests/references/<suite>.cawref. check() compares a render with its reference, or,
-// under `caw_tests --update-references` (or --update-golden), records it; the file is written when the set goes.
+// under `caw_tests --update-references` (or --update-golden), records it; the file is written when the set goes,
+// unless a failure was logged while it lived. Comparing, every stored reference must be compared before the set goes.
 // CAW_REFERENCE_REPORT=1 prints each comparison's measurements (REF lines) for classifying cases.
 class References {
 public:
     explicit References(std::string suite);
+    // The suite's file in `dir` instead, recording when `updating` (for tolerance_test.cpp).
+    References(std::string suite, std::string dir, bool updating);
     ~References();
     References(const References&) = delete;
     References& operator=(const References&) = delete;
+    // Fails the test (at file:line) unless the render is accepted.
     void check(const std::string& name, const Audio& render, Class c, const char* file, int line);
+    // "" when the render is accepted (or recorded), else why not.
+    std::string compare(const std::string& name, const Audio& render, Class c);
     std::string path() const;
-    // Store only the first `frames` of each stable render's waveform (0: all of it); the whole render is then also
-    // compared as heard (the chaotic comparison) against features recorded from it.
-    void storeWaveformFrames(uint32_t frames);
+    bool loaded() const { return loaded_; }
+    size_t size() const { return entries_.size(); }
 
 private:
     struct Entry {
         std::string name;
         Class cls = Class::Stable;
         uint32_t frames = 0;
-        uint32_t waveFrames = 0;    // Stable: how many of the frames the waveform holds
-        std::vector<uint8_t> wave;  // Stable
-        std::string alias;          // Stable, the same waveform as an earlier entry
-        Features features;          // Chaotic, or a stable render longer than its waveform
+        std::vector<uint8_t> wave;  // Stable: the whole render
+        std::string alias;          // Stable: the same waveform as an earlier entry
+        Features features;          // Chaotic
+        bool compared = false;
     };
-    const Entry* find(const std::string& name) const;
+    Entry* find(const std::string& name);
     bool load();
     bool save() const;
-    std::string suite_;
+    std::string suite_, dir_;
     std::vector<Entry> entries_;
     bool loaded_ = false;
     bool updating_ = false;
-    uint32_t waveFrames_ = 0;
+    int failuresAtStart_ = 0;
 };
 
 }  // namespace cawtest

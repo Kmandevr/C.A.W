@@ -145,9 +145,6 @@ double biggestStep(const std::vector<float>& x, size_t from, size_t to) {
     return m;
 }
 
-// The input repeats each second: a reference's waveform holds its first 1.25 s (the start, the silent bar and the
-// wake-up after it), the whole 2 s render is also compared as heard (tolerance.h).
-constexpr uint32_t kWaveformFrames = 60000;
 // How each case is compared with its reference (tolerance.h).
 // Chaotic (2026-11-12 probes, docs/engine.md "Reference renders"): the phase distortion amplifies a one-float-step
 // change of its input to -117 dBFS (busy) and -126 dBFS (default); every other case is stable.
@@ -311,7 +308,6 @@ TEST(fx_dynamics_effects_fall_quiet_publish_their_display_and_match_their_refere
     }
     const Stereo in = music(48000 * 2);
     cawtest::References refs("fx_dynamics");
-    refs.storeWaveformFrames(kWaveformFrames);
     for (const Case& c : cases()) {
         std::unique_ptr<ModuleProcessor> p = make(e, c.id);
         const Stereo out = run(*p, in, c.values, 64);
