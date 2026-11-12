@@ -9,11 +9,7 @@ Owner, 2026-11-12: wrap everything up toward the v1.0.0-alpha.1 "Open alpha" rel
 - Every speed gain is kept. A gain is rejected only if it makes the engine unstable.
 
 ## Done and verified
-- **In Main:**
-  - speed phases 1-4
-  - frame-rate setting
-  - music video editor (#182, #183)
-  - latency and atomic-save fixes
+- **In Main:** speed phases 1-4, the frame-rate setting, the music video editor (#182, #183), the latency and atomic-save fixes.
 - **On the session branch, pushed and not yet in Main:**
   - Flagship A2: −20% on the heavy patch on Android arm64; audio review clean
   - ui-frames: cheap frames, profile frame caps, smooth meters fix, C API 25; engine ctest passed
@@ -40,6 +36,4 @@ Owner, 2026-11-12: wrap everything up toward the v1.0.0-alpha.1 "Open alpha" rel
 3. Then start the Benchmark, A3–A5 and the release steps.
 
 ## Read first
-- docs/beta-readiness-plan.md
-- docs/decisions.md (top entries)
-- .claude/rules/engine.md
+- docs/beta-readiness-plan.md, docs/decisions.md (top entries), .claude/rules/engine.md
