@@ -17,7 +17,6 @@
 #include "builtin_components.h"
 #include "caw/detmath.hpp"
 #include "caw/instrument.hpp"
-#include "fp_mode.h"
 #include "json.h"
 #include "params.h"
 #include "utf8_path.h"
@@ -1162,7 +1161,9 @@ bool renderComponent(const ModuleRegistry& registry, const TestComponent& c, dou
             dst[i] = channels == 1 ? 0.5f * (a + b) : ch == 0 ? a : ch == 1 ? b : 0.0f;
         }
     };
-    const ScopedFlushDenormals flushDenormals;  // as the Engine runs a component (fp_mode.h)
+    // No flush-to-zero guard here (the Engine and the sample-pack renderer hold one, fp_mode.h): the suite reports
+    // a component's subnormal output ("denormals"), which slows it on a target with no guard (32-bit Arm, MSVC Arm64);
+    // flushed, it would never show. Its CPU figures can therefore include that slowdown on x86-64 and Arm64.
     for (std::size_t at = 0; at < n; at += blockSize) {
         const uint32_t m = static_cast<uint32_t>(std::min<std::size_t>(blockSize, n - at));
         for (std::size_t k = 0; k < ports.audioIn.size(); ++k) {
