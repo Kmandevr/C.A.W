@@ -13,6 +13,7 @@ import '../model/automation_writer.dart';
 import '../model/live_midi.dart';
 import '../model/app_state.dart';
 import '../model/settings.dart';
+import '../model/telemetry/telemetry.dart';
 import '../model/audio_edit.dart' show audioExtensions;
 import '../platform/desktop_window.dart';
 import '../platform/system_bars.dart';
@@ -47,6 +48,8 @@ import 'arrange/templates_ui.dart';
 import '../model/templates.dart';
 import 'pointer_input.dart';
 import 'music_video/video_setup_sheet.dart';
+import 'privacy/feedback_sheet.dart';
+import 'privacy/privacy_pages.dart';
 
 /// The panel each view shortcut shows, by the index KeyRouter's `onView` passes.
 const _viewPanels = [Panels.builder, Panels.arrangement, Panels.files];
@@ -162,9 +165,33 @@ class _ShellState extends State<Shell> {
     }());
   }
 
+  // The first-run page and the once-only question after a beta build (docs/app.md "Privacy, telemetry and
+  // feedback"), shown once the project and telemetry have both loaded; queued feedback that went out says so.
+  bool _privacyShown = false;
+  StreamSubscription<FeedbackSent>? _feedbackSent;
+
+  void _privacyCheck() {
+    final t = Telemetry.current;
+    if (t == null) return;
+    t.app.screen = () => _sections.current.name; // usage.screens: which section is in front
+    _feedbackSent ??= t.feedbackSent.listen((_) {
+      if (mounted) ScaffoldMessenger.maybeOf(context)?.showSnackBar(const SnackBar(content: Text('Sent, thanks')));
+    });
+    if (_privacyShown || !s.ready || !(t.firstRunNeeded || t.askKeepNeeded)) return;
+    _privacyShown = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted) return;
+      if (t.firstRunNeeded) await showFirstRun(context, t);
+      if (mounted && t.askKeepNeeded) await askKeepTelemetry(context, t);
+    });
+  }
+
   @override
   void initState() {
     super.initState();
+    s.addListener(_privacyCheck);
+    Telemetry.active.addListener(_privacyCheck);
+    _privacyCheck();
     s.addListener(_syncTitle);
     _syncTitle();
     _opened = DesktopWindow.current.openedFiles.listen(_openFiles);
@@ -189,6 +216,9 @@ class _ShellState extends State<Shell> {
 
   @override
   void dispose() {
+    s.removeListener(_privacyCheck);
+    Telemetry.active.removeListener(_privacyCheck);
+    unawaited(_feedbackSent?.cancel());
     s.removeListener(_syncTitle);
     unawaited(_opened?.cancel());
     s.settings.removeListener(_onSettings);
@@ -964,6 +994,18 @@ Future<void> showProjectMenu(BuildContext context, AppState s) async {
               s.settings.commitLook();
             },
           ),
+          if (Telemetry.current case final t?)
+            ListTile(
+              key: const ValueKey('project-feedback'),
+              leading: const Icon(Icons.rate_review_outlined, color: Neon.blue),
+              title: const Text('Send feedback'),
+              subtitle: const Text('A bug, an idea, something confusing or praise; posted publicly',
+                  style: TextStyle(color: Neon.dim)),
+              onTap: () {
+                Navigator.pop(context);
+                if (outer.mounted) showFeedbackSheet(outer, t);
+              },
+            ),
           const Heading('Open'),
           for (final p in projects)
             ListTile(

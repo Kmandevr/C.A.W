@@ -1,6 +1,6 @@
 ---
 title: Beta readiness plan
-summary: The owner's 2026-11-12 direction for engine speed A1-A7, a 240 fps UI, the stress test, the startup screen, telemetry and feedback, and the caw-telemetry contract (section H); planned, not built.
+summary: The owner's 2026-11-12 direction for engine speed A1-A7, a 240 fps UI, the stress test, the startup screen, telemetry and feedback, and the C.A.W-Telemetry contract (section H, with its 2026-11-12 updates); telemetry and feedback (E, F) are built, the rest planned.
 updated: 2026-11-12
 ---
 
@@ -270,3 +270,20 @@ The email is never published; the server keeps it privately for the owner.
 ---
 
 **Done when:** A1–A6 are merged with numbers and A7 is written up and asked; B–G are merged after the owner approves each look; all tests are green; docs are updated; and the owner has a before/after table of results. Ask the owner for a release APK check on the S22+ and a Windows check at the end.
+
+## Updates to section H (2026-11-12, owner)
+
+**[Fact]** Agreed with the owner on 2026-11-12 and passed on by the owner's other session, which runs the relay. The verbatim prompt above is unchanged; where it differs, these win. The other copy of the contract is `PLAN.md` in Kmandevr/C.A.W-Telemetry.
+
+- **Repository:** the data repository is **Kmandevr/C.A.W-Telemetry** (not `caw-telemetry`). Reports appear at `data/<first 2 hex of receipt>/<receipt>.json` on its `main` branch; the Privacy Policy and Terms are its `PRIVACY.md` and `TERMS.md`.
+- **Relay and key:** `https://caw-telemetry.kmandevr.workers.dev`, app key `caw-beta-1` (not a secret), the `--dart-define` defaults CI passes. Release builds still send only when the user turns telemetry on. `GET /` is a health check that needs no key.
+- **Feedback** becomes Issues in Kmandevr/C.A.W-Telemetry, not C.A.W; the app shows the issue URL the relay returns.
+- **`errors[].where`** is a relative C.A.W source location: it starts with `lib/`, `src/`, `engine/`, `app/`, `platform/`, `include/` or `package:caw/` and ends with `:<line>`. Absolute paths get a 400, so the app makes frames relative on the device and drops any it can't.
+- **Rules the relay enforces:** `deleteHash` is SHA-256 of the delete key's 32 raw bytes, lowercase hex; `cpuLoadHistogram` is exactly 10 numbers from 0 to 1; `osVersion` is digits only; `audio.backend` is `a-z`, `0-9` and `_` only; a receipt is good for one POST (a second gets a 400), so each report gets a fresh one and a 400 on a resend counts as sent.
+- **Publishing and limits:** publishing is hourly (a lookup moves from 202 to 200 within about an hour). Per sender per UTC day: 10 reports, 5 feedback posts, 200 lookups. The app sends one daily report a day; stress-test results take the other slots ([decisions](decisions.md), 2026-11-12).
+- **Differences between PLAN.md (fetched 2026-11-12) and section H, for the owner:**
+  - PLAN.md narrows types H leaves open: `maxClockMHz` at most 4 numbers; `frames.slowPct`, the stress scenario percentages and `topCosts[].pct` are integers; `topCosts` at most 10; `frames.p50ms`/`p99ms` at 0.1 ms. The app sends these shapes.
+  - PLAN.md's `screens` accept any id of `a-z 0-9 _ . -`; the app sends only its three section ids.
+  - The Privacy Policy says "at most once a day … one report", but stress-test results now go as reports of their own; and it points to "Settings → Privacy", while the app has Privacy under Settings › About and beta (a top-level section would change the existing Settings goldens). One of the two needs the owner's choice.
+  - Neither copy says how an unknown number (RAM, refresh rate on some platforms) is sent; the app sends 0, and leaves `osVersion` out when it has no digits.
+

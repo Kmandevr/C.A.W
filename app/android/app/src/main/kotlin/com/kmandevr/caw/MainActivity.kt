@@ -3,6 +3,7 @@
 // (DisplayRate.kt), the microphone permission and the audio route (AudioRoute.kt).
 package com.kmandevr.caw
 
+import android.app.ActivityManager
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -30,6 +31,8 @@ class MainActivity : FlutterActivity() {
             .setMethodCallHandler { call, result ->
                 if (call.method == "read") {
                     result.success(readResourceSignals())
+                } else if (call.method == "device") {
+                    result.success(readDeviceFacts())
                 } else {
                     result.notImplemented()
                 }
@@ -136,6 +139,19 @@ class MainActivity : FlutterActivity() {
                     stopMonitoring()
                 }
             })
+    }
+
+    // The device facts an anonymous telemetry report carries (docs/app.md "Privacy, telemetry and feedback"): the
+    // Android release, total RAM and the SoC model (Android 12+). Nothing that identifies the device or its owner.
+    private fun readDeviceFacts(): Map<String, Any?> {
+        val memory = ActivityManager.MemoryInfo()
+        (getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager)?.getMemoryInfo(memory)
+        val soc = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) Build.SOC_MODEL else null
+        return mapOf(
+            "osRelease" to Build.VERSION.RELEASE,
+            "totalMemBytes" to memory.totalMem,
+            "socModel" to soc,
+        )
     }
 
     private fun readResourceSignals(): Map<String, Any?> {

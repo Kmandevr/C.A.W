@@ -60,6 +60,12 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 env:
+  # Telemetry (docs/app.md "Privacy, telemetry and feedback"; beta readiness plan E1, G1): the build channel (beta: on
+  # by default; release: off until the user turns it on) and the relay. None of these is a secret: the URL and the
+  # app key ship in the app. Repository variables of the same names override them.
+  CAW_CHANNEL: ${{ vars.CAW_CHANNEL || 'beta' }}
+  CAW_RELAY_URL: ${{ vars.CAW_RELAY_URL || 'https://caw-telemetry.kmandevr.workers.dev' }}
+  CAW_APP_KEY: ${{ vars.CAW_APP_KEY || 'caw-beta-1' }}
   FLUTTER_VERSION: 3.47.7
   FLUTTER_SHA_LINUX: af7455f540df951184c7953fbe3cf884766e7541dacf8571f9f582db03dd6230
   FLUTTER_SHA_WINDOWS: c2c875da25a1a1448d18ee4e8f398b2f6fce888b4775d8f9130538e16d826cb4
@@ -270,7 +276,9 @@ jobs:
           # --split-debug-info keeps the Dart stack-trace tables out of the APK (libapp.so 10.2 -> 8.8 MB, docs/
           # performance.md); a reported trace is decoded with `flutter symbolize -d app.android-arm64.symbols`.
           # No --obfuscate: it saves only 0.13 MB more and would garble type names in the app's own error texts.
-          flutter build apk --release --target-platform android-arm64 --split-debug-info=build/symbols
+          flutter build apk --release --target-platform android-arm64 --split-debug-info=build/symbols \
+            --dart-define=CAW_CHANNEL="$CAW_CHANNEL" --dart-define=CAW_RELAY_URL="$CAW_RELAY_URL" \
+            --dart-define=CAW_APP_KEY="$CAW_APP_KEY"
           ccache --show-stats || true
           mv build/app/outputs/flutter-apk/app-release.apk "$GITHUB_WORKSPACE/caw-android.apk"
           (cd build/symbols && zip -q "$GITHUB_WORKSPACE/caw-android-symbols.zip" ./*.symbols)
@@ -318,7 +326,8 @@ jobs:
         working-directory: app
         run: |
           flutter --disable-analytics
-          flutter build windows --release
+          flutter build windows --release --dart-define=CAW_CHANNEL="$env:CAW_CHANNEL" `
+            --dart-define=CAW_RELAY_URL="$env:CAW_RELAY_URL" --dart-define=CAW_APP_KEY="$env:CAW_APP_KEY"
       - uses: actions/upload-artifact@v7
         with:
           name: caw-windows

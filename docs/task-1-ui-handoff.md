@@ -19,7 +19,7 @@ Implemented UI/workflow foundations include:
 - Build: C++ effects and instruments in a code editor (checks, completion, the Library), patterns, and a plug-in page per component (Write → Build → Test → Export: the test suite, CLAP/VST3 plug-in projects, sample packs).
 - Piano roll and drum grid, including note stretching from either end, snapping of notes and every curve to a time and value grid, note-expression editing, lane curves, pattern generators, multi-selection and MIDI pattern file import/export.
 - Arrangement timeline (no 64-bar limit since F7.2; the engine takes more than 64 layers since F7.3, within its layer and export-buffer budgets, but the add buttons still stop at 64: F7.3 part C) with reusable MIDI and audio clips, clip editing, nested folders and stereo folder buses; taps answer on the same frame.
-- Mixer controls for tracks and master output; engine diagnostics in Settings › About and beta.
+- Mixer controls for tracks and master output; engine diagnostics, Privacy and Send feedback in Settings › About and beta.
 - Track/folder volume-pan automation.
 - Export of WAV loop/free-length/one-shot/wavetable outputs and MIDI patterns, with profiles, history and an in-memory queue; saving copies the finished file to the picked place in chunks. The Music video sheet (Export page and project menu) renders the arrangement as an MP4 ([app](app.md)).
 - Files: a Unity-style tree, grid and inspector over built-in effects, C++ components, patterns, audio and MIDI files, with drag and the effect picker; project (.caw) import and export, library folders, tags, saved searches and restore points stay in its ⋯ menu.
