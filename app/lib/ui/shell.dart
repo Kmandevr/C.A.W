@@ -47,6 +47,7 @@ import 'arrange/templates_ui.dart';
 import '../model/templates.dart';
 import 'pointer_input.dart';
 import 'music_video/video_setup_sheet.dart';
+import 'music_video/video_render_chip.dart';
 
 /// The panel each view shortcut shows, by the index KeyRouter's `onView` passes.
 const _viewPanels = [Panels.builder, Panels.arrangement, Panels.files];
@@ -271,7 +272,8 @@ class _ShellState extends State<Shell> {
               controller: _dock,
               child: GlassStrainWatcher(
                 state: s,
-                child: Scaffold(
+                // A music video rendering in the background shows its chip over every section (owner, 2026-11-12).
+                child: VideoRenderOverlay(state: s, child: Scaffold(
                   // Phones draw edge to edge (owner, 2026-11-10): the bars' backgrounds reach under the system bars
                   // and the camera cutout, and each part pads its controls clear of them. Desktop keeps a safe area.
                   body: Builder(builder: (context) {
@@ -304,7 +306,7 @@ class _ShellState extends State<Shell> {
                       );
                     });
                   }),
-                ),
+                )),
               ),
             ),
           );

@@ -162,6 +162,11 @@ class KeyAreaState extends State<KeyArea> {
 
   // With no key router above (a screen shown alone), the area's own default keys still work.
   KeyEventResult _alone(KeyEvent e) {
+    // Typing in a text field inside the area is the field's (the music video's Text tab), not the area's keys.
+    final ctx = FocusManager.instance.primaryFocus?.context;
+    if (ctx != null && (ctx.widget is EditableText || ctx.findAncestorWidgetOfExactType<EditableText>() != null)) {
+      return KeyEventResult.ignored;
+    }
     final chord = keyChordFromEvent(e);
     if (chord == null) return KeyEventResult.ignored;
     final km = _defaults ??= Keymap.defaults(_registry);

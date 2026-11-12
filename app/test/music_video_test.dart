@@ -7,6 +7,7 @@ import 'dart:math' as math;
 import 'package:caw/model/app_state.dart';
 import 'package:caw/model/music_video.dart';
 import 'package:caw/model/music_video_director.dart';
+import 'package:caw/model/music_video_edit.dart';
 import 'package:caw/model/music_video_meters.dart';
 import 'package:caw/model/music_video_scene.dart';
 import 'package:caw/model/project.dart';
@@ -85,6 +86,7 @@ class _FakeAudio implements SongRenderHandle {
 }
 
 void main() {
+  setUp(resetMusicVideoSheet);
   group('director', () {
     test('the same seed gives the same shots; another seed cuts differently', () {
       final scene = _scene();
@@ -377,13 +379,19 @@ void main() {
     }
   });
 
-  /// Scrolls [key] into view (building it first if the list hasn't yet) and taps it.
+  /// The tab's list (the sheet's preview and lane stay above it).
+  Finder tabList() => find.descendant(
+      of: find.byWidgetPredicate((w) => w is ListView && w.key is PageStorageKey && '${(w.key as PageStorageKey).value}'.startsWith('video-tab-')),
+      matching: find.byType(Scrollable)).first;
+
+  /// Scrolls [key] into view in the tab's list (building it first if the list hasn't yet) and taps it.
   Future<void> tapKey(WidgetTester tester, String key) async {
     final f = find.byKey(ValueKey(key));
     if (f.evaluate().isEmpty) {
-      // Above or below: scroll back to the top, then down until it is built.
-      await tester.scrollUntilVisible(find.byType(MusicVideoPreview), -200, scrollable: find.byType(Scrollable).first);
-      if (f.evaluate().isEmpty) await tester.scrollUntilVisible(f, 200, scrollable: find.byType(Scrollable).first);
+      // Above or below: back to the top, then down until it is built.
+      await tester.drag(tabList(), const Offset(0, 6000));
+      await tester.pump();
+      if (f.evaluate().isEmpty) await tester.scrollUntilVisible(f, 200, scrollable: tabList());
     }
     await tester.ensureVisible(f);
     await tester.pump();
@@ -402,29 +410,35 @@ void main() {
     await tester.pump();
     expect(find.text('MUSIC VIDEO'), findsOneWidget);
 
+    // The preview, lane and tabs show at once; the export bar is pinned under them.
+    expect(find.byType(MusicVideoPreview), findsOneWidget);
+    expect(find.byKey(const ValueKey('video-render')), findsOneWidget);
+    expect(find.byKey(const ValueKey('video-tab-export')), findsOneWidget);
+
     // A new video with notes has every shot on, Falling notes too; every shot off: the render can't start.
     for (final shot in VideoShot.values) {
       await tapKey(tester, 'video-shot-${shot.name}');
     }
     expect(find.text('Switch on at least one shot.'), findsWidgets);
+    expect(tester.widget<FilledButton>(find.byKey(const ValueKey('video-render'))).onPressed, isNull);
     await tapKey(tester, 'video-shot-mixer');
 
     // Smooth follow: off by default; the switch turns it on for the preview's plan, and off again.
-    Future<MusicVideoPreview> previewNow() async {
-      await tester.scrollUntilVisible(find.byType(MusicVideoPreview), -200, scrollable: find.byType(Scrollable).first);
-      return tester.widget<MusicVideoPreview>(find.byType(MusicVideoPreview));
-    }
-    expect((await previewNow()).plan.smoothFollow, isFalse);
+    MusicVideoPreview previewNow() => tester.widget<MusicVideoPreview>(find.byType(MusicVideoPreview));
+    expect(previewNow().plan.smoothFollow, isFalse);
     await tapKey(tester, 'video-smooth-follow');
     await tester.pump(const Duration(seconds: 1));
     expect(find.textContaining('a third of the way in'), findsOneWidget);
-    expect((await previewNow()).plan.smoothFollow, isTrue);
-    expect((await previewNow()).options.smoothFollow, isTrue);
+    expect(previewNow().plan.smoothFollow, isTrue);
+    expect(previewNow().options.smoothFollow, isTrue);
     await tapKey(tester, 'video-smooth-follow');
     await tester.pump(const Duration(seconds: 1));
     expect(find.textContaining('a third of the way in'), findsNothing);
-    expect((await previewNow()).plan.smoothFollow, isFalse);
+    expect(previewNow().plan.smoothFollow, isFalse);
 
+    // The size, rate and quality are on the Export tab.
+    await tester.tap(find.byKey(const ValueKey('video-tab-export')));
+    await tester.pumpAndSettle();
     // A custom size that is odd is refused, then an even one is fine.
     await tapKey(tester, 'video-res-custom');
     await tester.enterText(find.byKey(const ValueKey('video-size-w')), '721');
@@ -440,12 +454,19 @@ void main() {
     await tapKey(tester, 'video-res-p2160');
     expect(find.textContaining('at most 2160'), findsWidgets);
     await tapKey(tester, 'video-res-p720');
-    expect(find.textContaining('1280 × 720'), findsOneWidget);
+    expect(find.textContaining('1280 × 720'), findsWidgets);
+
+    // 24 fps and the quality: the bitrate and the file's size show, in the tab and the pinned bar.
+    await tapKey(tester, 'video-fps-24');
+    await tapKey(tester, 'video-quality-high');
+    final o = MusicVideoDoc.fromJson(s.project.musicVideo).options;
+    expect((o.fps, o.quality), (24, VideoQuality.high));
+    expect(find.textContaining('${(o.bitrate / 1e6).toStringAsFixed(1)} Mbit/s'), findsWidgets);
+    expect(find.textContaining('24 fps · High'), findsOneWidget);
 
     // The preview plays (a silent clock with no engine), moves on, and stops.
-    await tester.drag(find.byType(ListView).first, const Offset(0, 4000));
+    await tester.tap(find.byKey(const ValueKey('video-preview-play')));
     await tester.pump();
-    await tapKey(tester, 'video-preview-play');
     final preview = tester.state<MusicVideoPreviewState>(find.byType(MusicVideoPreview));
     expect(preview.playing, isTrue);
     await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 120)));
