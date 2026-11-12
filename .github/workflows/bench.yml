@@ -2,7 +2,7 @@
 name: Bench
 on:
   push:
-    branches: [Main, speed-layout]
+    branches: [Main]
     paths:
       - "engine/**"
       - "!engine/compiler/**"
