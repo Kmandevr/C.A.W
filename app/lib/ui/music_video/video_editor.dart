@@ -265,7 +265,7 @@ class MusicVideoEditorState extends State<MusicVideoEditor> implements VideoEdit
     );
     Widget tool(String key, String tip, IconData icon, VoidCallback? on, {Color? color}) => IconButton(
           key: ValueKey(key), tooltip: tip, iconSize: 20, color: color ?? Neon.dim, onPressed: enabled ? on : null,
-          icon: Icon(icon));
+          padding: EdgeInsets.zero, constraints: const BoxConstraints(minWidth: 40, minHeight: 40), icon: Icon(icon));
     return CallbackShortcuts(
       bindings: {
         const SingleActivator(LogicalKeyboardKey.delete): delete,
@@ -283,9 +283,9 @@ class MusicVideoEditorState extends State<MusicVideoEditor> implements VideoEdit
       },
       child: Focus(
         focusNode: _focus,
-        child: GestureDetector(
-          behavior: HitTestBehavior.translucent,
-          onTapDown: (_) => _focus.requestFocus(),
+        child: Listener(
+          // Any touch or click in the editor gives it the keyboard (its shortcuts).
+          onPointerDown: (_) => _focus.requestFocus(),
           child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
             Row(children: [
               Expanded(child: SingleChildScrollView(scrollDirection: Axis.horizontal, child: Row(children: [
@@ -302,10 +302,6 @@ class MusicVideoEditorState extends State<MusicVideoEditor> implements VideoEdit
                 tool('video-undo', 'Undo (Ctrl+Z)', Icons.undo, canUndo ? undo : null),
                 tool('video-redo', 'Redo (Ctrl+Shift+Z)', Icons.redo, canRedo ? redo : null),
               ]))),
-              IconButton(key: const ValueKey('video-lane-zoom-out'), tooltip: 'Zoom out', iconSize: 18,
-                  onPressed: () => _laneKey.currentState?.zoom(0.5, _fitPx(context)), icon: const Icon(Icons.zoom_out)),
-              IconButton(key: const ValueKey('video-lane-zoom-in'), tooltip: 'Zoom in', iconSize: 18,
-                  onPressed: () => _laneKey.currentState?.zoom(2, _fitPx(context)), icon: const Icon(Icons.zoom_in)),
             ]),
             VideoReveal(_busy ? const Padding(padding: EdgeInsets.only(bottom: 4), child: LinearProgressIndicator(minHeight: 3)) : null),
             lane,
@@ -319,6 +315,10 @@ class MusicVideoEditorState extends State<MusicVideoEditor> implements VideoEdit
                     setState(() => d.snap = v);
                     widget.onSave();
                   })),
+              IconButton(padding: EdgeInsets.zero, constraints: const BoxConstraints(minWidth: 36, minHeight: 36), key: const ValueKey('video-lane-zoom-out'), tooltip: 'Zoom out', iconSize: 18,
+                  onPressed: () => _laneKey.currentState?.zoom(0.5, _fitPx(context)), icon: const Icon(Icons.zoom_out)),
+              IconButton(padding: EdgeInsets.zero, constraints: const BoxConstraints(minWidth: 36, minHeight: 36), key: const ValueKey('video-lane-zoom-in'), tooltip: 'Zoom in', iconSize: 18,
+                  onPressed: () => _laneKey.currentState?.zoom(2, _fitPx(context)), icon: const Icon(Icons.zoom_in)),
             ]),
             VideoReveal(_message == null ? null : Padding(padding: const EdgeInsets.only(top: 6), child: Text(_message!,
                 key: const ValueKey('video-editor-message'), maxLines: 2, overflow: TextOverflow.ellipsis,

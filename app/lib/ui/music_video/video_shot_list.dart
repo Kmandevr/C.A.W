@@ -3,6 +3,7 @@
 // (in the FX stack's card style) and how the shot begins.
 import 'dart:math' as math;
 
+import 'package:flutter/gestures.dart' show DragStartBehavior;
 import 'package:flutter/material.dart';
 
 import '../../model/music_video.dart';
@@ -361,19 +362,19 @@ class LayoutDiagram extends StatelessWidget {
                 top: d.vertical ? d.from * size.height : d.at * size.height - 12,
                 width: d.vertical ? 24 : (d.to - d.from) * size.width,
                 height: d.vertical ? (d.to - d.from) * size.height : 24,
-                child: GestureDetector(
+                child: _DividerHandle(
                   key: ValueKey('video-layout-divider-${d.index}'),
-                  behavior: HitTestBehavior.opaque,
-                  onPanStart: (_) {
+                  vertical: d.vertical,
+                  onStart: () {
                     Haptics.grab();
                     host.begin();
                   },
-                  onPanUpdate: (e) {
+                  onMove: (global) {
                     final box = context.findRenderObject() as RenderBox;
-                    final local = box.globalToLocal(e.globalPosition);
+                    final local = box.globalToLocal(global);
                     host.live(() => layout.setSplit(d.index, d.vertical ? local.dx / size.width : local.dy / size.height));
                   },
-                  onPanEnd: (_) {
+                  onEnd: () {
                     Haptics.drop();
                     host.end();
                   },
@@ -628,3 +629,23 @@ Color _swatch(VideoEffectColor c) => switch (c) {
       VideoEffectColor.violet => Neon.violet,
       VideoEffectColor.white => Colors.white,
     };
+
+/// A divider's grip: it takes drags across its line only (sideways for a vertical divider, up and down for a
+/// horizontal one), so the sheet still scrolls the other way.
+class _DividerHandle extends StatelessWidget {
+  const _DividerHandle({super.key, required this.vertical, required this.onStart, required this.onMove, required this.onEnd,
+      required this.child});
+  final bool vertical;
+  final VoidCallback onStart, onEnd;
+  final ValueChanged<Offset> onMove;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) => vertical
+      ? GestureDetector(behavior: HitTestBehavior.opaque, dragStartBehavior: DragStartBehavior.down, onHorizontalDragStart: (_) => onStart(),
+          onHorizontalDragUpdate: (d) => onMove(d.globalPosition), onHorizontalDragEnd: (_) => onEnd(),
+          onHorizontalDragCancel: onEnd, child: child)
+      : GestureDetector(behavior: HitTestBehavior.opaque, dragStartBehavior: DragStartBehavior.down, onVerticalDragStart: (_) => onStart(),
+          onVerticalDragUpdate: (d) => onMove(d.globalPosition), onVerticalDragEnd: (_) => onEnd(),
+          onVerticalDragCancel: onEnd, child: child);
+}

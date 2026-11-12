@@ -4,6 +4,7 @@ import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart' show DragStartBehavior;
 import 'package:flutter/material.dart';
 
 import '../../model/music_video_director.dart' show VideoTransition;
@@ -63,7 +64,10 @@ class ShotLaneState extends State<ShotLane> {
   final Map<String, (VideoCut, Timer)> _leaving = {};
   Map<String, VideoCut> _last = {};
 
-  double get pxPerStep => _px ?? 0;
+  double _shownPx = 0;
+
+  /// Pixels per step as last drawn.
+  double get pxPerStep => _shownPx;
   bool get dragging => _drag != null;
 
   @override
@@ -145,6 +149,7 @@ class ShotLaneState extends State<ShotLane> {
     return LayoutBuilder(builder: (context, box) {
       final fit = _fit(box.maxWidth);
       final px = _px ?? fit;
+      _shownPx = px;
       final spb = widget.stepsPerBar;
       final width = math.max(box.maxWidth, (widget.end - widget.start) * px + 16);
       double x(double step) => 8 + (step - widget.start) * px;
@@ -172,13 +177,15 @@ class ShotLaneState extends State<ShotLane> {
               Padding(
                 padding: const EdgeInsets.fromLTRB(5, 4, 5, 3),
                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Row(children: [
-                    if (w > 30) Icon(videoViewIcon(view), size: 12, color: color),
-                    if (w > 30) const SizedBox(width: 3),
-                    Expanded(child: Text(c.layout.panels.length > 1 ? c.layout.preset.label : view.label,
-                        maxLines: 1, overflow: TextOverflow.clip,
-                        style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w800, color: Neon.text))),
-                  ]),
+                  Text.rich(
+                    TextSpan(children: [
+                      if (w > 48) WidgetSpan(alignment: PlaceholderAlignment.middle, child: Padding(
+                          padding: const EdgeInsets.only(right: 3), child: Icon(videoViewIcon(view), size: 12, color: color))),
+                      TextSpan(text: c.layout.panels.length > 1 ? c.layout.preset.label : view.label),
+                    ]),
+                    maxLines: 1, overflow: TextOverflow.clip, softWrap: false,
+                    style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w800, color: Neon.text),
+                  ),
                   const Spacer(),
                   if (w > 44)
                     Text([
@@ -205,6 +212,8 @@ class ShotLaneState extends State<ShotLane> {
             : GestureDetector(
                 key: ValueKey('video-lane-shot-${c.id}'),
                 behavior: HitTestBehavior.opaque,
+                // From where the finger went down, so the block follows it with no jump.
+                dragStartBehavior: DragStartBehavior.down,
                 onTap: () {
                   Haptics.tap();
                   widget.onSelect(c.id);
@@ -276,6 +285,7 @@ class ShotLaneState extends State<ShotLane> {
                     child: GestureDetector(
                       key: ValueKey('video-lane-cut-$i'),
                       behavior: HitTestBehavior.opaque,
+                      dragStartBehavior: DragStartBehavior.down,
                       onHorizontalDragStart: (d) => _startDrag(null, i, LaneDrag.cut, d.globalPosition.dx),
                       onHorizontalDragUpdate: (d) => _updateDrag(d.globalPosition.dx, px),
                       onHorizontalDragEnd: (_) => _endDrag(),
