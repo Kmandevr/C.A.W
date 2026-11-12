@@ -36,6 +36,9 @@ struct RenderResult {
 
 constexpr int kWavetableFrame = 2048;
 
+// The frame a step starts on, as the engine places it (Engine::play, loop exports and stem ranges; sample_time.h).
+int64_t stepFrame(const ProjectSpec& p, int sr, int64_t steps);
+
 // Every layer's pattern parses: false and a message naming the first that doesn't, so an export never silently drops
 // a broken one.
 bool checkExportModules(const ProjectSpec& p, std::string& error);

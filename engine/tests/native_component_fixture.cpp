@@ -1,6 +1,7 @@
 // Shared-library fixture for the explicit-trust ModuleRegistry loading tests.
 #include <atomic>
 #include <cstring>
+#include <limits>
 #include <new>
 
 #include <caw/component.hpp>
@@ -209,6 +210,28 @@ public:
     }
 };
 
+// The bundle's ninth component: passes its input with NaN, +Inf and -Inf mixed in (one each, every 4 frames),
+// so tests can check the mix's guards (route_math.h, the master's finiteOr0 and limiter) under the build's flags.
+const caw::ModuleDescriptor kPoisonDescriptor{"org.caw.tests.native-loader.poison", 1, kPorts, 2, nullptr, 0,
+                                              nullptr, 0, {}};
+
+class PoisonProcessor final : public caw::ModuleProcessor {
+public:
+    const caw::ModuleDescriptor& descriptor() const noexcept override { return kPoisonDescriptor; }
+    using caw::ModuleProcessor::process;
+    bool process(const caw::AudioProcessBlock& block) noexcept override {
+        if (block.input.channelCount != 2 || block.output.channelCount != 2) return false;
+        using L = std::numeric_limits<float>;
+        const float bad[4] = {0.0f, L::quiet_NaN(), L::infinity(), -L::infinity()};
+        for (uint32_t c = 0; c < 2; ++c)
+            for (uint32_t i = 0; i < block.frames; ++i) {
+                const uint32_t k = (i + c) % 4;
+                block.output.channels[c][i] = k == 0 ? block.input.channels[c][i] : bad[k];
+            }
+        return true;
+    }
+};
+
 // The bundle's seventh component: reports the transport it sees, left the tempo / 1000 and right the
 // song position in beats / 100 (-1 on both without a transport).
 const caw::ModuleDescriptor kTransportDescriptor{"org.caw.tests.native-loader.transport", 1, kPorts, 2, nullptr, 0,
@@ -327,5 +350,5 @@ private:
 #ifndef CAW_TEST_OMIT_ENTRY  // the second fixture plays a library without the v2 entry point
 // A bundle of two components (owner, 2026-11-09: a package may hold several).
 CAW_EXPORT_COMPONENTS(TestNativeProcessor, HalfProcessor, GainProcessor, EchoProcessor, LateProcessor, DroneProcessor, TransportProcessor,
-                      RecorderProcessor)
+                      RecorderProcessor, PoisonProcessor)
 #endif

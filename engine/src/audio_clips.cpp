@@ -12,6 +12,7 @@
 #include "handover.h"
 #include "json.h"
 #include "project.h"
+#include "sample_time.h"
 #include "time_stretch.h"
 #include "caw/instrument.hpp"
 
@@ -310,7 +311,7 @@ public:
                 if (cc.src.loopEnd <= cc.src.loopStart) cc.src.loop = false;
                 cc.src.seam = std::llround(kClipDeclickSeconds * rate);
             }
-            cc.offsetFrames = std::floor(c.offsetSeconds * rate + 0.5);
+            cc.offsetFrames = sampletime::roundFrames(c.offsetSeconds, rate);
             cc.pitchRatio = detPow(2.0, c.pitch / 12.0);
             cc.fadeIn = static_cast<int64_t>(std::llround(c.fadeInSeconds * rate));
             cc.fadeOut = static_cast<int64_t>(std::llround(c.fadeOutSeconds * rate));
@@ -376,7 +377,7 @@ public:
             return true;
         }
         const double tempo = b.transport->tempo > 0 ? b.transport->tempo : 120.0;
-        const double stepLen = 60.0 * sr_ / (tempo * 4.0);
+        const double stepLen = sampletime::stepFrames(sr_, tempo);
         const int64_t pos = std::llround(b.transport->beat * 4.0 * stepLen);
         if (pos != expected_) {
             for (Voice& v : voices_) fadeOut(v);  // a seek or a loop wrap: every voice starts again
@@ -390,7 +391,7 @@ public:
                     fadeOut(v);
                     continue;
                 }
-                const int64_t cs = static_cast<int64_t>(std::floor(c.spec.startSteps * stepLen + 0.5));
+                const int64_t cs = static_cast<int64_t>(sampletime::roundFrames(c.spec.startSteps, stepLen));
                 const double here = v.anchorS + v.slope * static_cast<double>(t0 - v.anchorT);
                 v.drift = here - (c.offsetFrames + v.slope * static_cast<double>(pos - cs));
             }
@@ -408,9 +409,9 @@ public:
         for (Voice& v : voices_) v.seen = false;
         for (size_t ci = first; ci < tl->clips.size(); ++ci) {
             const CompiledClip& c = tl->clips[ci];
-            const int64_t cs = static_cast<int64_t>(std::floor(c.spec.startSteps * stepLen + 0.5));
+            const int64_t cs = static_cast<int64_t>(sampletime::roundFrames(c.spec.startSteps, stepLen));
             if (cs >= end) break;  // sorted by start
-            const int64_t ce = static_cast<int64_t>(std::floor((c.spec.startSteps + c.spec.lengthSteps) * stepLen + 0.5));
+            const int64_t ce = static_cast<int64_t>(sampletime::roundFrames(c.spec.startSteps + c.spec.lengthSteps, stepLen));
             if (ce <= pos) continue;
             Voice* v = voiceFor(static_cast<int>(ci));
             if (v) v->seen = true;

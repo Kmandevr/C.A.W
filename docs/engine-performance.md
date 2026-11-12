@@ -112,13 +112,47 @@ Each phase's pull request fills its table from the Bench workflow's summary on t
 
 ### 2. Floating point
 
+**What changed (2026-11-12, branch `speed-fp`, on phase 1's head with `speed-free-wins` a58f91e):** flush-to-zero in every `Engine::process` call and sample-pack render (`ScopedFlushDenormals`, x86 FTZ+DAZ, Arm64 FPCR.FZ), and the engine's own code built with `-ffp-contract=fast -fno-math-errno -fno-trapping-math -fno-signed-zeros -fassociative-math` (GCC and Clang; MSVC unchanged; `CAW::SDK` stays strict). Never `-ffinite-math-only`. Every reference render passes unchanged (the tightened comparators of `f151501`), on x86-64 GCC 13 and Clang 18 and Arm64 GCC 13 under qemu ([engine](engine.md), "Determinism").
+
+**[Fact, Bench runs, 10 s × 3 runs, the same Neoverse-N2 cores in every run]** mean µs. Before: [43151692751](https://github.com/Kmandevr/C.A.W/actions/runs/43151692751) (commit `9642466`, phase 1 + a58f91e, strict flags). Per flag: [43153040577](https://github.com/Kmandevr/C.A.W/actions/runs/43153040577) (flush-to-zero alone) and [43153509392](https://github.com/Kmandevr/C.A.W/actions/runs/43153509392) (with `-ffp-contract=fast` only). After: [43152503064](https://github.com/Kmandevr/C.A.W/actions/runs/43152503064) (all). Linux x64 ran on different CPUs (AMD EPYC 9V45, Intel Xeon 8573C, EPYC 9V74), so it is not compared; its instruction counts are below.
+
+| Scenario | Android arm64 before | FTZ | + FMA | after (all) | change | Linux arm64 before | after | change |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| Typical song (8 tracks) | 855 | 856 | 800 | 789 | −7.7% | 894 | 809 | −9.6% |
+| Typical song + extras | 1,192 | 1,188 | 1,103 | 1,089 | −8.6% | 1,212 | 1,080 | −10.8% |
+| Flagship heavy, 64 voices held | 4,873 | 4,879 | 4,421 | 4,199 | −13.8% | 4,817 | 4,128 | −14.3% |
+| Flagship heavy, 16 voices held | 1,265 | 1,265 | 1,145 | 1,091 | −13.7% | 1,247 | 1,072 | −14.0% |
+| Drums kit, 16 pads busy | 337 | 336 | 301 | 296 | −12.0% | 374 | 324 | −13.3% |
+| Song, 16 tracks | 1,609 | 1,600 | 1,506 | 1,484 | −7.7% | 1,681 | 1,525 | −9.3% |
+| Song, 32 tracks + heavy FX | 5,367 | 5,287 | 5,016 | 4,782 | −10.9% | 5,563 | 5,009 | −10.0% |
+| Tail: ringing out | 134 | 133 | 123 | 120 | −9.8% | 130 | 114 | −12.5% |
+| Tail: silence after | 19 | 19 | 18 | 18 | −6.2% | 20 | 18 | −7.4% |
+| Tail project, no notes | 10 | 10 | 10 | 10 | −0.7% | 11 | 11 | +0.3% |
+
+The 64-voice Flagship and the 32-track song, over budget in the baseline (about 100% of a core), now take 79% and 90% on Android arm64. Worst cases fell with the means (Android song32 8,824 → 5,627 µs; Flagship heavy 5,235 → 4,459 µs).
+
+**[Fact, callgrind, 2026-11-12]** M Ir/s in `Engine::process` (the method of phase 1: `caw_bench 2 500 --runs 1 --only ID`; tail phases as fixed windows: notes 0–2 s, ringing 2–16 s, silence 16–30 s), Linux x64 GCC 13.3 Release, `9642466` against `8bce5ab`. Per flag, cumulative, on `7678418` (the same engine code but a58f91e's 11 lines): flush-to-zero 0.00% everywhere; `-ffp-contract=fast` 0.00% (no FMA in the x86-64 baseline); `-fno-math-errno` Drums −0.8%, others within ±0.05%; `-fno-signed-zeros` about −1% (Flagship +1.5%); `-freciprocal-math` within ±0.1% of that (dropped); `-fassociative-math` a further 1–3%. Clang 18 on the same code, strict against the chosen flags: song8 −1.9%, Drums −3.6%, Flagship heavy −0.6%, song32 −1.8%.
+
 | Scenario | Before | After | Change |
 |---|---:|---:|---:|
-| Typical song (8 tracks) | | | |
-| Flagship heavy, 64 voices held | | | |
-| Drums kit, 16 pads busy | | | |
-| Song, 32 tracks + heavy FX | | | |
-| Tail: silence after | | | |
+| First loop (6 tracks) | 246.3 | 234.1 | −5.0% |
+| Three tracks | 400.5 | 384.2 | −4.1% |
+| Typical song (8 tracks) | 1,148.5 | 1,124.2 | −2.1% |
+| Typical song + extras | 1,549.6 | 1,511.3 | −2.5% |
+| Flagship heavy, 64 voices held | 6,216.8 | 6,266.3 | +0.8% |
+| Flagship heavy, 16 voices held | 1,638.5 | 1,645.0 | +0.4% |
+| Drums kit, 16 pads busy | 400.3 | 382.8 | −4.4% |
+| Song, 16 tracks | 2,046.4 | 2,009.0 | −1.8% |
+| Song, 32 tracks + heavy FX | 6,544.8 | 6,438.1 | −1.6% |
+| Tail: notes | 353.1 | 340.8 | −3.5% |
+| Tail: ringing out | 239.8 | 228.9 | −4.6% |
+| Tail: silence after | 39.4 | 38.0 | −3.6% |
+| Tail project, no notes | 24.1 | 24.2 | +0.4% |
+
+- **Typical song:** −7.7% on Android arm64 (−9.6% Linux arm64); most of it is fused multiply-adds (−6.5%), which only Arm64 has, so x86-64 gains only the 2% the fast-math subsets give.
+- **Flush-to-zero** costs nothing measurable and gains little in these scenarios (−1.5% on the 32-track song, else within ±0.6%): the kernels' own guards already settle decays at 0, so the bench meets few subnormals. It is kept for what the guards miss (third-party components, new code) at a few cycles per callback; the guards stay ([engine](engine.md), "Determinism").
+- **After the audio review (2026-11-12):** sample positions are computed strictly out of line (`src/sample_time.*`), `detmath`'s range reduction is kept from reassociation, `wrap01` normalises −0 in its bits and the flush guard is ordered ([engine](engine.md), "Determinism"). **[Fact, callgrind, x86-64 GCC 13.3 Release, 2 s of playback (a 3 s run minus a 1 s run of `caw_bench S 500 --runs 1 --only ID`), `6717492` against the fixes]** song8 2,394 → 2,403 M (+0.4%), Flagship heavy 16 voices 3,291 → 3,292 M (+0.03%), Drums kit 896 → 891 M (−0.6%). Contraction stays everywhere else, so the Arm64 gain above should hold; the Bench tables were measured before these fixes and are not re-run yet.
+- **Flagship on x86-64 GCC:** +0.4–0.8% instructions, all in its unison oscillator loop (`addTwice<6, false>`, +4.3%, GCC's code after reassociation), while its filter and the rest fall. Not acted on: on Arm64, where it ships, Flagship gains 14%.
 
 ### 3. Maths
 

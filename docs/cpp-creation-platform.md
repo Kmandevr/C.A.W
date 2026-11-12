@@ -179,7 +179,7 @@ Make the Library the easiest and fastest route into the engine: built-in, Librar
 
 ### Audio and DSP
 
-**[Fact, 2026-11-09]** The Library's public home is `engine/include/caw/library/` (header-only, installed with `CAW::SDK`), next to the deterministic maths in `caw/detmath.hpp`. It holds stereo tools, distortion, delays, oscillators, filters, envelopes, drum voices, smoothers, an LFO, a band-limited wavetable and a reverb; the list is in the [SDK note](native-module-sdk.md#the-library).
+**[Fact, 2026-11-09]** The Library's public home is `engine/include/caw/library/` (header-only, installed with `CAW::SDK`), next to the deterministic maths in `caw/detmath.hpp` (built with the SDK's strict flags; the engine's own code uses faster ones, [engine](engine.md), "Determinism"). It holds stereo tools, distortion, delays, oscillators, filters, envelopes, drum voices, smoothers, an LFO, a band-limited wavetable and a reverb; the list is in the [SDK note](native-module-sdk.md#the-library).
 
 Provide reusable implementations and building blocks for:
 

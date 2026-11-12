@@ -10,6 +10,7 @@
 
 #include "detmath.h"
 #include "json.h"
+#include "sample_time.h"
 
 namespace caw {
 
@@ -314,10 +315,11 @@ PatternResult parsePattern(std::string_view src) {
         }
         for (size_t a = 0; a < p->notes.size(); ++a) {
             const PatternNote& n = p->notes[a];
-            const double part = n.len / n.ratchet;
             for (int q = 0; q < n.ratchet; ++q) {
-                p->events.push_back({n.at + part * q, static_cast<uint32_t>(a), static_cast<uint16_t>(q), true});
-                p->events.push_back({n.at + part * (q + 1), static_cast<uint32_t>(a), static_cast<uint16_t>(q), false});
+                p->events.push_back({sampletime::ratchetStep(n.at, n.len, n.ratchet, q), static_cast<uint32_t>(a),
+                                     static_cast<uint16_t>(q), true});
+                p->events.push_back({sampletime::ratchetStep(n.at, n.len, n.ratchet, q + 1), static_cast<uint32_t>(a),
+                                     static_cast<uint16_t>(q), false});
             }
         }
         std::stable_sort(p->events.begin(), p->events.end(), [](const PatternEvent& a, const PatternEvent& b) {
