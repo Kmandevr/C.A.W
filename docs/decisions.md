@@ -6,6 +6,16 @@ updated: 2026-11-12
 
 # Decisions
 
+## 2026-11-12: Open alpha and beta: what the names mean (owner)
+
+**Decision (owner):**
+- **Alpha** means the app itself is unofficially released. The public line is the **open alpha**: v1.0.0-alpha.1, then -alpha.2 and so on. Anyone who downloads the app is an alpha tester.
+- **Beta** means unofficially released content: tagged `-beta.N` builds of changes not yet in the public alpha. Anyone on the Beta channel is beta-testing the alpha.
+- **Every change** is an opt-in channel with each Main build.
+- **Releases:** pushes to Main never make a release. The owner tags a build once it is stable.
+
+**[Assumption, Claude, to confirm]** Everyone using the open alpha is a tester. So the alpha builds use the telemetry contract's `beta` channel, which means on by default with the first-run notice. The `release` channel (off until the user opts in) is kept for a later official release.
+
 ## 2026-11-12: Beta readiness: speed, smoothness, a stress test, telemetry and feedback (owner)
 
 **Decision (owner, through the owner's other session; confirmed in this session):** the full direction is in the [beta readiness plan](beta-readiness-plan.md) and issue #187.
