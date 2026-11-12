@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "audio_clips.h"
+#include "builtin_flagship.h"
 #include "caw/instrument.hpp"
 #include "component_chain.h"
 #include "engine.h"
@@ -748,6 +749,359 @@ void graphPlanarBench(double secs) {
     }
 }
 
+// ---------- The suite (`caw_bench SECONDS 500 [options]`): fixed scenarios at a stated callback, repeated, for CI ----------
+// Options: --frames N (callback size, default 256), --runs N (default 3), --only ID[,ID] (scenario ids), --label TEXT,
+// --json PATH and --md PATH (machine-readable results and a markdown table). Each run plays every scenario in turn
+// (a fresh Engine each: set up, 0.25 s stopped to apply the project, then Play); a scenario's result is the median
+// of its runs' means and p99s and the largest worst case of any run. docs/engine-performance.md has the numbers.
+
+// A MIDI note's name in the pattern language (36: C2).
+std::string noteName(int midi) {
+    static const char* const names[] = {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"};
+    return std::string(names[midi % 12]) + std::to_string(midi / 12 - 1);
+}
+
+// One Flagship patch at its heaviest: Init with all three oscillators at 16 copies (osc 1 through the fold warp,
+// Flagship's 2x oversampled path), both filters on with drive (ladder, then SVF in series), every effect on and
+// three LFO slots. `voices` notes are held for the whole run (64: Flagship's full polyphony).
+ProjectSpec flagshipHeavy(int voices) {
+    ProjectSpec p;
+    p.name = "Flagship heavy";
+    p.bpm = 120;
+    p.loopBars = 64;  // 128 s: the notes never end or restart within a run
+    std::string notes;
+    for (int i = 0; i < voices; ++i) notes += "0 " + noteName(30 + i) + " 1024 0.8\n";
+    p.modules = {{"held", patternSource("Held", "64 bars", notes)}};
+    std::vector<std::pair<std::string, double>> v = {
+        {"osc1_unison", 16}, {"osc1_warp", 6 /* Fold */}, {"osc1_warp_amt", 0.4},
+        {"osc2_on", 1}, {"osc2_unison", 16}, {"osc2_table", 1}, {"osc2_frame", 0.5},
+        {"osc3_on", 1}, {"osc3_unison", 16}, {"osc3_octave", -1}, {"osc3_dest", 2 /* both filters */},
+        {"flt1_drive", 4}, {"flt1_resonance", 0.4}, {"flt2_on", 1}, {"flt2_drive", 3},
+        {"fx_dist_on", 1}, {"fx_eq_on", 1}, {"fx_chorus_on", 1}, {"fx_delay_on", 1}, {"fx_reverb_on", 1},
+        {"mod2_src", 4}, {"mod2_amt", 0.3}, {"mod3_src", 5}, {"mod3_amt", 0.2}, {"mod4_src", 1},
+        {"env1_sustain", 1}, {"volume", 0.3}};
+    // Slot destinations are a parameter's index + 1: filter 1's and filter 2's cutoffs, osc 2's frame.
+    v.push_back({"mod2_dst", flagshipParameterIndex("flt1_cutoff") + 1.0});
+    v.push_back({"mod3_dst", flagshipParameterIndex("flt2_cutoff") + 1.0});
+    v.push_back({"mod4_dst", flagshipParameterIndex("osc2_frame") + 1.0});
+    v.push_back({"mod4_amt", 0.2});
+    addInstrumentLayer(p, "Flagship", "org.caw.synth.flagship", v, "held", 0.5);
+    p.layers.back().clips.back().lengthSteps = p.loopSteps();
+    return p;
+}
+
+// org.caw.drums' default kit with its kit-wide glue, drive, room and clipper on, all 16 pads of bank A (MIDI 36..51)
+// in a busy 16th-note pattern with flams and rolls: 3-4 hits on every step, every pad at least twice a bar.
+ProjectSpec drumsBusy() {
+    ProjectSpec p;
+    p.name = "Drums kit";
+    p.bpm = 128;
+    p.loopBars = 1;
+    std::string notes;
+    for (int at = 0; at < 16; ++at) {
+        std::string hits = noteName(36 + at % 16);                        // each pad once, in turn
+        hits += "," + noteName(36 + (at * 5 + 3) % 16);                   // and again, out of step
+        hits += "," + noteName(at % 2 ? 42 : 44);                         // the hats every step
+        if (at % 4 == 2) hits += "," + noteName(38);                         // the snare
+        notes += std::to_string(at) + " " + hits + " 1 " + (at % 4 == 0 ? "1" : "0.7") + (at % 8 == 7 ? " ratchet 3" : "") + "\n";
+    }
+    p.modules = {{"kit", patternSource("Kit", "16", notes)}};
+    addInstrumentLayer(p, "Drums", "org.caw.drums",
+                       {{"glue", 0.6}, {"kit_drive_type", 2}, {"kit_drive", 3}, {"room", 0.3}, {"kit_clip", 1}, {"kit_clip_gain", 3},
+                        {"kit_low", 2}, {"kit_high", 1}},
+                       "kit", 0.8);
+    return p;
+}
+
+// The typical song's eight instrument tracks repeated to `n` (ids made unique), with its buses, master and LFOs.
+// `heavy` adds to every track an EQ, a compressor and a saturator, a reverb on every fourth and a delay on every
+// third; puts the tracks in two group buses (EQ, compressor, saturator each) and sends each to a third bus (a short
+// plate reverb with a chorus and EQ) as well.
+ProjectSpec bigSong(int n, bool heavy) {
+    const ProjectSpec base = typicalSong(false);
+    std::vector<LayerSpec> tracks, buses;
+    for (const LayerSpec& l : base.layers) (l.folder ? buses : tracks).push_back(l);
+    ProjectSpec p = base;
+    p.name = std::to_string(n) + " tracks" + (heavy ? ", heavy FX" : "");
+    p.layers.clear();
+    if (heavy) {
+        for (const char* g : {"GroupA", "GroupB"}) {
+            LayerSpec f;
+            f.id = f.name = g;
+            f.folder = true;
+            f.components = {component("org.caw.eq", {{"b2_gain", 1.5}, {"b7_gain", 1}}),
+                            component("org.caw.compressor", {{"threshold", -16}, {"ratio", 3}}),
+                            component("org.caw.saturator", {{"drive", 2}})};
+            p.layers.push_back(f);
+        }
+        LayerSpec plate = buses.front();
+        plate.id = plate.name = "PlateBus";
+        plate.components = {component("org.caw.reverb.pro", {{"mix", 1}, {"decay", 1.2}, {"size", 0.3}}),
+                            component("org.caw.chorus"), component("org.caw.eq", {{"b2_gain", -4}})};
+        buses.push_back(plate);
+    }
+    for (int i = 0; i < n; ++i) {
+        LayerSpec l = tracks[static_cast<size_t>(i) % tracks.size()];
+        if (i >= static_cast<int>(tracks.size())) l.id = l.name = l.id + " " + std::to_string(i + 1);
+        if (heavy) {
+            l.parentId = i % 2 ? "GroupA" : "GroupB";
+            l.components.push_back(component("org.caw.eq", {{"b3_gain", -2}, {"b6_gain", 2}}));
+            l.components.push_back(component("org.caw.compressor", {{"threshold", -18}, {"ratio", 4}}));
+            l.components.push_back(component(i % 2 ? "org.caw.saturator" : "org.caw.distortion", {{"drive", 3}}));
+            if (i % 4 == 0) l.components.push_back(component("org.caw.reverb.pro", {{"mix", 0.2}}));
+            if (i % 3 == 0) l.components.push_back(component("org.caw.delay.pro", {{"mix", 0.2}}));
+            l.sends.push_back({"PlateBus", 0.15, false, false});
+            if (l.sends.size() < 2) l.sends.push_back({"RevBus", 0.1, false, false});
+        }
+        p.layers.push_back(l);
+    }
+    for (const LayerSpec& b : buses) p.layers.push_back(b);
+    return p;
+}
+
+// A reverb and delay tail fading to silence: one bar (2 s) of chords on a Flagship pad (release 1.5 s) and a pluck,
+// through a long reverb (8 s), a feedback delay and a filter, and sent to a reverb bus; then nothing for the rest
+// of a 32 s loop. With `notes` false the same project plays no notes at all: the floor a sleeping project costs.
+ProjectSpec tailSong(bool notes) {
+    ProjectSpec p;
+    p.name = notes ? "Tail" : "Tail, no notes";
+    p.bpm = 120;
+    p.loopBars = 16;
+    const std::string pad = notes ? "0 A3,C4,E4,G4 8 0.8\n8 F3,A3,C4,E4 8 0.8\n" : "";
+    std::string pluck;
+    if (notes)
+        for (int at = 0; at < 16; at += 2) pluck += std::to_string(at) + (at % 4 ? " E5" : " A5") + " 1/2 0.7\n";
+    p.modules = {{"pad", patternSource("Pad", "16 bars", pad)}, {"pluck", patternSource("Pluck", "16 bars", pluck)}};
+    addInstrumentLayer(p, "Pad", "org.caw.synth.flagship", {{"env1_release", 1.5}, {"flt1_type", 3}}, "pad", 0.5,
+                       {component("org.caw.filter", {{"cutoff", 3000}}), component("org.caw.reverb.pro", {{"mix", 0.35}, {"decay", 8}})});
+    addInstrumentLayer(p, "Pluck", "org.caw.synth.flagship",
+                       {{"osc1_unison", 3}, {"env1_decay", 0.2}, {"env1_sustain", 0}, {"env1_release", 0.2}}, "pluck", 0.4,
+                       {component("org.caw.delay.pro", {{"feedback", 0.6}, {"mix", 0.3}}), component("org.caw.eq", {{"b6_gain", 2}})});
+    for (LayerSpec& l : p.layers) l.sends.push_back({"RevBus", 0.3, false, false});
+    LayerSpec rev;
+    rev.id = rev.name = "RevBus";
+    rev.folder = true;
+    rev.components = {component("org.caw.reverb.pro", {{"mix", 1}, {"decay", 6}})};
+    p.layers.push_back(rev);
+    p.masterComponents = {component("org.caw.compressor", {{"threshold", -10}}), component("org.caw.limiter")};
+    return p;
+}
+
+struct SuiteScenario {
+    const char* id;
+    const char* name;
+    std::function<ProjectSpec(const std::string&)> make;
+    bool tail = false;  // played for kTailSeconds and reported as three phases (notes, ringing, silence)
+};
+
+constexpr double kTailSeconds = 30.0;
+constexpr double kTailNotesSeconds = 2.0;   // the bar the notes play in (at 120 BPM)
+constexpr float kSilence = 1e-5f;           // -100 dBFS: below this the output counts as silent
+
+std::vector<SuiteScenario> suiteScenarios() {
+    return {
+        {"first_loop", "First loop (6 tracks)", [](const std::string&) { return firstLoop(); }},
+        {"three_tracks", "Three tracks", [](const std::string&) { return threeTracks(); }},
+        {"song8", "Typical song (8 tracks)", [](const std::string&) { return typicalSong(false); }},
+        {"song8_extras", "Typical song + extras", [](const std::string& d) { return typicalSong(true, d); }},
+        {"flagship_heavy", "Flagship heavy, 64 voices held", [](const std::string&) { return flagshipHeavy(64); }},
+        {"flagship_heavy16", "Flagship heavy, 16 voices held", [](const std::string&) { return flagshipHeavy(16); }},
+        {"drums_kit", "Drums kit, 16 pads busy", [](const std::string&) { return drumsBusy(); }},
+        {"song16", "Song, 16 tracks", [](const std::string&) { return bigSong(16, false); }},
+        {"song32_heavy", "Song, 32 tracks + heavy FX", [](const std::string&) { return bigSong(32, true); }},
+        {"tail", "Tail", [](const std::string&) { return tailSong(true); }, true},
+        {"tail_floor", "Tail project, no notes", [](const std::string&) { return tailSong(false); }},
+    };
+}
+
+struct SuiteStats {
+    double meanUs = 0, p99Us = 0, maxUs = 0;
+    size_t callbacks = 0;
+    size_t maxAt = 0;  // the callback the worst case was, counted from Play
+};
+
+SuiteStats stats(const std::vector<double>& us, size_t from, size_t to) {
+    SuiteStats s;
+    if (to <= from) return s;
+    s.maxAt = static_cast<size_t>(std::max_element(us.begin() + static_cast<std::ptrdiff_t>(from), us.begin() + static_cast<std::ptrdiff_t>(to)) - us.begin());
+    std::vector<double> x(us.begin() + static_cast<std::ptrdiff_t>(from), us.begin() + static_cast<std::ptrdiff_t>(to));
+    for (double v : x) s.meanUs += v;
+    s.meanUs /= static_cast<double>(x.size());
+    std::sort(x.begin(), x.end());
+    s.p99Us = x[std::min(x.size() - 1, x.size() * 99 / 100)];
+    s.maxUs = x.back();
+    s.callbacks = x.size();
+    return s;
+}
+
+struct SuiteRow {
+    std::string id, name;
+    std::vector<SuiteStats> runs;
+    double seconds = -1;  // tail phases: the length of the phase in audio seconds
+};
+
+double median(std::vector<double> v) {
+    std::sort(v.begin(), v.end());
+    const size_t n = v.size();
+    return n == 0 ? 0.0 : n % 2 ? v[n / 2] : 0.5 * (v[n / 2 - 1] + v[n / 2]);
+}
+
+std::string jsonEscape(const std::string& s) {
+    std::string o;
+    for (char c : s) {
+        if (c == '"' || c == '\\') o += '\\';
+        if (static_cast<unsigned char>(c) >= 0x20) o += c;
+    }
+    return o;
+}
+
+const char* targetName() {
+#if defined(__ANDROID__) && defined(__aarch64__)
+    return "android-arm64";
+#elif defined(__ANDROID__)
+    return "android";
+#elif defined(__linux__) && defined(__aarch64__)
+    return "linux-arm64";
+#elif defined(__linux__) && defined(__x86_64__)
+    return "linux-x64";
+#elif defined(_WIN32)
+    return "windows";
+#else
+    return "other";
+#endif
+}
+
+int runSuite(double secs, int argc, char** argv) {
+    int frames = 256, runs = 3;
+    std::string only, label = targetName(), jsonPath, mdPath;
+    for (int a = 3; a < argc; ++a) {
+        const std::string k = argv[a];
+        const char* v = a + 1 < argc ? argv[a + 1] : nullptr;
+        if (!v) { std::fprintf(stderr, "%s needs a value\n", k.c_str()); return 2; }
+        if (k == "--frames") frames = std::atoi(v);
+        else if (k == "--runs") runs = std::atoi(v);
+        else if (k == "--only") only = std::string(",") + v + ",";
+        else if (k == "--label") label = v;
+        else if (k == "--json") jsonPath = v;
+        else if (k == "--md") mdPath = v;
+        else { std::fprintf(stderr, "unknown option %s\n", k.c_str()); return 2; }
+        ++a;
+    }
+    if (frames < 16 || frames > 8192 || runs < 1 || runs > 50 || secs <= 0) { std::fprintf(stderr, "bad --frames, --runs or SECONDS\n"); return 2; }
+    const double budgetUs = 1e6 * frames / kRate;
+    const std::string dir = (std::filesystem::temp_directory_path() / "caw_bench_suite").string();
+    std::filesystem::create_directories(dir);
+    std::vector<SuiteScenario> all = suiteScenarios();
+    std::vector<SuiteRow> rows;
+    std::map<std::string, size_t> rowOf;
+    auto row = [&](const std::string& id, const std::string& name) -> SuiteRow& {
+        auto it = rowOf.find(id);
+        if (it != rowOf.end()) return rows[it->second];
+        rowOf[id] = rows.size();
+        rows.push_back({id, name, {}, -1});
+        return rows.back();
+    };
+    std::printf("caw_bench suite: %s, callback %d frames at %d Hz (budget %.1f us), %.0f s per scenario, %d runs\n",
+                label.c_str(), frames, kRate, budgetUs, secs, runs);
+    std::vector<float> l(static_cast<size_t>(frames)), r(static_cast<size_t>(frames));
+    for (int run = 0; run < runs; ++run) {
+        for (const SuiteScenario& sc : all) {
+            if (!only.empty() && only.find(std::string(",") + sc.id + ",") == std::string::npos) continue;
+            Engine e(kRate);
+            const std::string warn = e.setProject(sc.make(dir));
+            if (warn.find("\"ok\":true") == std::string::npos) {
+                std::fprintf(stderr, "%s: setProject: %s\n", sc.id, warn.c_str());
+                return 3;
+            }
+            for (int c = 0; c < kRate / 4 / frames; ++c) e.process(l.data(), r.data(), frames);  // apply the project
+            e.play();
+            const int calls = static_cast<int>((sc.tail ? kTailSeconds : secs) * kRate / frames);
+            std::vector<double> us(static_cast<size_t>(calls));
+            std::vector<float> peak(static_cast<size_t>(calls));
+            for (int c = 0; c < calls; ++c) {
+                const auto t0 = Clock::now();
+                e.process(l.data(), r.data(), frames);
+                us[static_cast<size_t>(c)] = std::chrono::duration<double, std::micro>(Clock::now() - t0).count();
+                float m = 0;
+                for (int i = 0; i < frames; ++i) m = std::max(m, std::max(std::fabs(l[static_cast<size_t>(i)]), std::fabs(r[static_cast<size_t>(i)])));
+                peak[static_cast<size_t>(c)] = m;
+            }
+            const size_t n = us.size();
+            if (!sc.tail) {
+                row(sc.id, sc.name).runs.push_back(stats(us, 0, n));
+                continue;
+            }
+            // Phases: the notes' bar; the tail, until the last callback louder than kSilence; the silence after it.
+            const size_t notesEnd = std::min(n, static_cast<size_t>(kTailNotesSeconds * kRate / frames));
+            size_t loud = notesEnd;
+            for (size_t c = notesEnd; c < n; ++c)
+                if (peak[c] > kSilence) loud = c + 1;
+            const double perCall = static_cast<double>(frames) / kRate;
+            SuiteRow& a = row(std::string(sc.id) + "_notes", std::string(sc.name) + ": notes (2 s)");
+            a.runs.push_back(stats(us, 0, notesEnd));
+            a.seconds = notesEnd * perCall;
+            SuiteRow& b = row(std::string(sc.id) + "_ringing", std::string(sc.name) + ": ringing out");
+            b.runs.push_back(stats(us, notesEnd, loud));
+            b.seconds = (loud - notesEnd) * perCall;
+            SuiteRow& s = row(std::string(sc.id) + "_silence", std::string(sc.name) + ": silence after");
+            s.runs.push_back(stats(us, loud, n));
+            s.seconds = (n - loud) * perCall;
+        }
+    }
+    struct Out { const SuiteRow* row; double mean, p99, worst, worstAtS; size_t callbacks; };
+    std::vector<Out> out;
+    for (const SuiteRow& x : rows) {
+        std::vector<double> means, p99s;
+        double worst = 0, worstAt = 0;
+        for (const SuiteStats& s : x.runs) {
+            means.push_back(s.meanUs), p99s.push_back(s.p99Us);
+            if (s.maxUs > worst) worst = s.maxUs, worstAt = static_cast<double>(s.maxAt) * frames / kRate;
+        }
+        out.push_back({&x, median(means), median(p99s), worst, worstAt, x.runs.empty() ? 0 : x.runs.front().callbacks});
+    }
+    std::printf("%-40s %10s %10s %10s %8s %8s %8s\n", "scenario", "mean us", "p99 us", "worst us", "mean %", "worst %", "worst at");
+    for (const Out& o : out)
+        std::printf("%-40s %10.1f %10.1f %10.1f %7.2f%% %7.1f%% %7.2fs%s\n", o.row->name.c_str(), o.mean, o.p99, o.worst,
+                    100 * o.mean / budgetUs, 100 * o.worst / budgetUs, o.worstAtS,
+                    o.row->seconds >= 0 ? (" (" + std::to_string(o.row->seconds).substr(0, 5) + " s)").c_str() : "");
+    if (!jsonPath.empty()) {
+        std::string j = "{\"tool\":\"caw_bench\",\"format\":1,\"label\":\"" + jsonEscape(label) + "\",\"target\":\"" + targetName() +
+                        "\",\"compiler\":\"" + jsonEscape(__VERSION__) + "\",\"rate\":" + std::to_string(kRate) +
+                        ",\"frames\":" + std::to_string(frames) + ",\"budget_us\":" + std::to_string(budgetUs) +
+                        ",\"runs\":" + std::to_string(runs) + ",\"seconds\":" + std::to_string(secs) + ",\"scenarios\":[";
+        for (size_t k = 0; k < out.size(); ++k) {
+            const Out& o = out[k];
+            j += std::string(k ? "," : "") + "{\"id\":\"" + o.row->id + "\",\"name\":\"" + jsonEscape(o.row->name) +
+                 "\",\"callbacks\":" + std::to_string(o.callbacks) + ",\"mean_us\":" + std::to_string(o.mean) +
+                 ",\"p99_us\":" + std::to_string(o.p99) + ",\"worst_us\":" + std::to_string(o.worst) +
+                 ",\"mean_load_pct\":" + std::to_string(100 * o.mean / budgetUs) +
+                 ",\"worst_load_pct\":" + std::to_string(100 * o.worst / budgetUs) +
+                 ",\"worst_at_s\":" + std::to_string(o.worstAtS);
+            if (o.row->seconds >= 0) j += ",\"phase_s\":" + std::to_string(o.row->seconds);
+            j += ",\"run_means_us\":[";
+            for (size_t q = 0; q < o.row->runs.size(); ++q) j += (q ? "," : "") + std::to_string(o.row->runs[q].meanUs);
+            j += "],\"run_worst_us\":[";
+            for (size_t q = 0; q < o.row->runs.size(); ++q) j += (q ? "," : "") + std::to_string(o.row->runs[q].maxUs);
+            j += "]}";
+        }
+        j += "]}\n";
+        std::ofstream(jsonPath) << j;
+    }
+    if (!mdPath.empty()) {
+        std::ofstream md(mdPath);
+        char line[512];
+        std::snprintf(line, sizeof line, "### %s: %d frames at %d Hz (budget %.0f us), %.0f s x %d runs\n\n", label.c_str(),
+                      frames, kRate, budgetUs, secs, runs);
+        md << line << "| Scenario | Mean us | p99 us | Worst us | Mean load | Worst load | Worst at |\n|---|---:|---:|---:|---:|---:|---:|\n";
+        for (const Out& o : out) {
+            std::snprintf(line, sizeof line, "| %s | %.1f | %.1f | %.1f | %.2f%% | %.1f%% | %.2f s |\n", o.row->name.c_str(), o.mean,
+                          o.p99, o.worst, 100 * o.mean / budgetUs, 100 * o.worst / budgetUs, o.worstAtS);
+            md << line;
+        }
+    }
+    return 0;
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -757,6 +1111,7 @@ int main(int argc, char** argv) {
     // (`caw_bench SECONDS 100 K`: only the K-th of those, from 0); N = 200 times the flagship synth's voices; N = 300
     // times each built-in effect.
     const int only = argc > 2 ? std::atoi(argv[2]) : 0;
+    if (only == 500) return runSuite(secs, argc, argv);  // `caw_bench SECONDS 500 [options]`: the CI suite (runSuite)
     std::printf("callback %d frames at %d Hz (budget %.0f us); %.0f s per scenario\n", kCallback, kRate,
                 1e6 * kCallback / kRate, secs);
     {
