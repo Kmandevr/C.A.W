@@ -11,6 +11,7 @@ import '../../model/project.dart';
 import '../frame/sections.dart';
 import '../theme.dart';
 import 'templates_ui.dart';
+import '../panel_motion.dart';
 
 /// What a drag over the tracks points at: a track (and, for a dragged header, where on it), or the empty area below
 /// the last track, where a drop makes a new track.
@@ -195,7 +196,7 @@ Future<bool> dropOnTrack(BuildContext context, AppState state, LayerDoc layer, A
   final track = state.dropTrackFor(layer, newName: asset.name);
   if (state.replacesInstrument(track, asset)) {
     final old = state.instrumentName(track);
-    final ok = await showDialog<bool>(context: context, builder: (context) => AlertDialog(
+    final ok = await showDialog<bool>(context: context, animationStyle: dialogAnimation(context), builder: (context) => AlertDialog(
       title: const Text('Replace the instrument?'),
       content: Text('${track.name} plays $old. Replace it with ${asset.name}?'),
       actions: [

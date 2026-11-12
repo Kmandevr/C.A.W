@@ -12,6 +12,10 @@ import '../glass.dart';
 import '../haptics.dart';
 import '../motion.dart';
 import '../theme.dart';
+import '../key_router.dart';
+import '../keyboard/key_area.dart';
+import '../../actions/actions.dart';
+import '../../actions/macro.dart' show ActionRef;
 import '../widgets.dart' show LiveIsland;
 import 'live_keys.dart';
 import 'record_tools.dart';
@@ -86,10 +90,10 @@ class SectionBar extends StatelessWidget {
           height: 48 + bottomInset,
           padding: EdgeInsets.only(bottom: bottomInset),
           decoration: _barDecoration(top: true),
-          child: Row(children: [
+          child: SectionKeys(child: Row(children: [
             for (final s in sectionOrder)
               Expanded(child: _SectionButton(section: s, selected: sections.current == s, onTap: () => sections.show(s))),
-          ]),
+          ])),
         ),
       );
 }
@@ -137,6 +141,43 @@ class _SectionButton extends StatelessWidget {
   }
 }
 
+/// The section bar's (or rail's) keys: the arrows and WASD step to the previous or next section and show it, Enter
+/// goes into the section shown (its first area), Esc from an area comes back here.
+class SectionKeys extends StatefulWidget {
+  const SectionKeys({super.key, required this.child});
+  final Widget child;
+
+  @override
+  State<SectionKeys> createState() => _SectionKeysState();
+}
+
+class _SectionKeysState extends State<SectionKeys> {
+  final _area = GlobalKey<KeyAreaState>();
+
+  bool _key(String id, int count, String? arg) {
+    final a = _area.currentState;
+    if (a == null) return false;
+    switch (id) {
+      case 'sections.prev' || 'sections.next':
+        for (var i = 0; i < count; i++) {
+          moveFocusIn(a.node, id == 'sections.prev' ? KeyMove.prev : KeyMove.next);
+        }
+        activateFocused();
+      case 'sections.open':
+        if (a.controlFocused) activateFocused();
+        // Once the section is on screen, its first area takes the focus.
+        WidgetsBinding.instance.addPostFrameCallback((_) => KeyRouterState.active.value?.focusFirstArea(except: a.node));
+      default:
+        return false;
+    }
+    return true;
+  }
+
+  @override
+  Widget build(BuildContext context) =>
+      KeyArea(key: _area, area: Area.sections, label: 'Sections', onAction: _key, child: widget.child);
+}
+
 /// The slim rail on the left in landscape, on tablets and on desktop.
 class SectionRail extends StatelessWidget {
   const SectionRail({super.key, required this.current, required this.onSelect, this.top, this.bottom,
@@ -163,9 +204,11 @@ class SectionRail extends StatelessWidget {
         child: Column(children: [
           ?top,
           const SizedBox(height: 4),
-          for (final s in sectionOrder)
-            SizedBox(height: compact ? 44 : 56,
-              child: _SectionButton(section: s, selected: current == s, onTap: () => onSelect(s), label: !compact)),
+          SectionKeys(child: Column(mainAxisSize: MainAxisSize.min, children: [
+            for (final s in sectionOrder)
+              SizedBox(height: compact ? 44 : 56,
+                child: _SectionButton(section: s, selected: current == s, onTap: () => onSelect(s), label: !compact)),
+          ])),
           const Spacer(),
           ?bottom,
         ]),
@@ -286,6 +329,7 @@ class _BottomTransportState extends State<BottomTransport> {
           ...widget.extras,
           if (writer != null) AutomateButton(writer: writer, state: s, size: 34),
           if (midi != null) KeysButton(midi: midi, constraints: narrow),
+          BackToStartButton(state: s, iconSize: 21, constraints: narrow),
           Pressable(child: IconButton(
             key: const ValueKey('transport-stop'),
             tooltip: 'Stop, back to the start (Shift+Space)',
@@ -341,6 +385,65 @@ class _BottomTransportState extends State<BottomTransport> {
     final step = s.playheadStep.floor().clamp(0, p.engineLoopSteps - 1);
     final text = '${step ~/ p.stepsPerBar + 1}.${(step % p.stepsPerBar) ~/ 4 + 1}';
     return m.playing ? text : s.pausedStep != null ? '$text ‖' : text;
+  }
+}
+
+/// The transport's ⏮ (owner, 2026-11-11): one tap goes back to the loop start when a loop is on, else the project
+/// start, at once; a second tap soon after goes on to the project start ([ClickCounter]), and the views follow
+/// ([AppState.revealStartRequests]). Playing, play goes on from there; stopped, it only moves. Home and Ctrl+Home do
+/// the same from the keyboard, and the tooltip names the keys in force.
+class BackToStartButton extends StatefulWidget {
+  const BackToStartButton({super.key, required this.state, this.iconSize = 22, this.constraints});
+  final AppState state;
+  final double iconSize;
+  final BoxConstraints? constraints;
+
+  @override
+  State<BackToStartButton> createState() => _BackToStartButtonState();
+}
+
+class _BackToStartButtonState extends State<BackToStartButton> {
+  final _clicks = ClickCounter();
+  bool _pointer = false; // a press by finger or mouse acts on its down; the button's own press is the keyboard's
+
+  String _keys(String id, String fallback) {
+    final r = KeyRouter.of(context) ?? KeyRouterState.active.value;
+    final keys = r?.keymap.keysFor(Area.global, ActionRef.action(id)) ?? const [];
+    return keys.isEmpty ? fallback : keys.first.format();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final s = widget.state;
+    final loop = s.project.loopsRange;
+    final tip = '${loop ? 'Back to the loop start' : 'Back to the start'} (${_keys('transport.toStart', 'Home')}) · '
+        'double tap: the project start (${_keys('transport.toProjectStart', 'Ctrl+Home')})';
+    return Listener(
+      onPointerDown: (e) {
+        _pointer = true;
+        _clicks.down(e, target: this);
+        Haptics.tap();
+        // The first tap acts at once; the second adds the jump to the project start.
+        s.backToStart(projectStart: _clicks.twice);
+      },
+      onPointerUp: _clicks.up,
+      child: Pressable(child: IconButton(
+        key: const ValueKey('transport-start'),
+        tooltip: tip,
+        iconSize: widget.iconSize,
+        visualDensity: VisualDensity.compact,
+        constraints: widget.constraints ?? const BoxConstraints(minWidth: 40, minHeight: 44),
+        color: Neon.green,
+        icon: const Icon(Icons.skip_previous),
+        onPressed: () {
+          if (_pointer) {
+            _pointer = false;
+            return;
+          }
+          s.backToStart();
+        },
+      )),
+    );
   }
 }
 

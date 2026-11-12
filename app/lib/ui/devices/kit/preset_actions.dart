@@ -13,6 +13,7 @@ import '../../../model/user_presets.dart';
 import '../../haptics.dart';
 import '../../theme.dart';
 import 'presets.dart';
+import '../../panel_motion.dart';
 
 /// The file picker behind export and import; tests replace both.
 class PresetFiles {
@@ -63,7 +64,7 @@ typedef PresetName = ({String name, String category});
 /// cancelled.
 Future<PresetName?> askPresetName(BuildContext context, {required String title, required String initial,
     String category = '', List<String> tags = const []}) => showDialog<PresetName>(
-      context: context,
+      context: context, animationStyle: dialogAnimation(context),
       builder: (context) => _PresetNameDialog(title: title, initial: initial, category: category, tags: tags));
 
 class _PresetNameDialog extends StatefulWidget {
@@ -120,7 +121,7 @@ class _PresetNameDialogState extends State<_PresetNameDialog> {
 
 /// Asks before replacing preset [name]; true to go on.
 Future<bool> confirmReplace(BuildContext context, String name) async => await showDialog<bool>(
-      context: context,
+      context: context, animationStyle: dialogAnimation(context),
       builder: (context) => AlertDialog(
         title: const Text('Replace the preset?'),
         content: Text('"$name" already exists. Replace it with these settings?'),

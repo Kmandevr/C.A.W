@@ -15,6 +15,7 @@ import 'platform/mic_permission.dart';
 import 'platform/midi_input.dart';
 import 'ui/glass.dart';
 import 'ui/haptics.dart';
+import 'ui/keyboard/keyboard_layer.dart';
 import 'ui/page_closer.dart';
 import 'ui/shell.dart';
 import 'ui/theme.dart';
@@ -114,7 +115,9 @@ class _CawAppState extends State<CawApp> with WidgetsBindingObserver {
     // The glass backdrop sits behind every route (glass off: the plain background). The theme's text size scales
     // the system's.
     builder: (context, child) {
-      final body = GlassBackdrop(child: PageCloser(observer: _closer, child: child ?? const SizedBox.shrink()));
+      // Keys from a page, menu or sheet in front reach the key router; the focus ring and the hint strip draw on top.
+      final body = GlassBackdrop(child: PageCloser(observer: _closer,
+          child: KeyboardLayer(observer: _closer, child: child ?? const SizedBox.shrink())));
       final scale = state.settings.textScale;
       if (scale == 1) return body;
       final mq = MediaQuery.of(context);

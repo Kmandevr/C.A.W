@@ -12,6 +12,7 @@ import '../model/audio_edit.dart';
 import '../model/project.dart';
 import 'haptics.dart';
 import 'theme.dart';
+import 'panel_motion.dart';
 
 void _say(BuildContext context, String text) =>
     ScaffoldMessenger.maybeOf(context)?.showSnackBar(SnackBar(content: Text(text)));
@@ -54,7 +55,7 @@ Future<List<AudioClipDoc>> importAudioSources(BuildContext context, AppState sta
   final progress = ValueNotifier<(String, double)>(('', 0));
   var cancelled = false;
   final dialog = showDialog<void>(
-    context: context,
+    context: context, animationStyle: dialogAnimation(context),
     barrierDismissible: false,
     builder: (context) => AlertDialog(
       key: const ValueKey('audio-import-progress'),

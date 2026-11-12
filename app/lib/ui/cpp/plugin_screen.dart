@@ -15,13 +15,14 @@ import 'plugin_export_screen.dart';
 import 'sample_pack_screen.dart';
 import 'test_suite_screen.dart';
 import 'tool_kit.dart';
+import '../panel_motion.dart';
 
 /// Builds [w]; code from elsewhere asks "Trust and build" first (the editor's ▶ Build and the plug-in page share it).
 Future<void> buildWithTrust(BuildContext context, CppWorkbench w) async {
   final ok = await w.build();
   if (ok || !context.mounted) return;
   final trust = await showDialog<bool>(
-    context: context,
+    context: context, animationStyle: dialogAnimation(context),
     builder: (c) => AlertDialog(
       title: const Text('Native code from elsewhere'),
       content: const Text('This effect came with the project, not from this device. Building runs it in the app '

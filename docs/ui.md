@@ -252,12 +252,12 @@ The broader UI specification below records design intent as well as current beha
 ## Keyboard (PC)
 
 - **Everything without a mouse:**
-  - Tab and arrow keys move focus between panels and inside grids, with a visible neon focus ring.
-  - Enter opens or plays. The Menu key or Shift+F10 opens the same options as a long-press.
-  - Every control can be adjusted from the keyboard: arrows for steps, Shift+arrows for fine steps, typing a number to set it.
+  - Tab and Shift+Tab move between the parts of a screen (keyboard contexts) in reading order; arrows and WASD (H J K L with Vim keys everywhere) move inside one; a theme-coloured focus ring marks the focused control, and a hint strip lists the keys that work there ([actions](actions.md#keyboard-focus)). Built for the FX chain, device editors, the mixer, Files, Build, Settings, the section bar, menus, sheets and dialogs; Arrange's tracks and clips and the piano roll are the next batch.
+  - Enter opens or goes in; Esc goes up a level. The Menu key or Shift+F10 opens the same options as a long-press.
+  - A device control is adjusted from the keyboard: Up/Down or +/− for steps, Shift for fine steps, Home for its default, Enter to type a number.
 - **Shortcuts like Reaper's where they overlap:** Space for play/pause (owner, 2026-11-05: Space pauses, and Shift+Space stops), Ctrl+Z for undo, and Ctrl+S for save. **[Assumption]** Reaper's default keymap must be checked against its current action list before the shortcuts are fixed.
 - **Section shortcuts:** Ctrl+1 Build, Ctrl+2 Files, Ctrl+3 Arrange, in the rail's order; the Export page has no default key ([actions](actions.md)).
-- **Shortcut overlay:** `?` shows every shortcut for the current screen.
+- **Shortcut overlay:** `?` shows every shortcut for the current screen; the hint strip shows the focused context's.
 - **Customisable, like Reaper** (owner, 2026-10-28): every command is an action with keys you can change per area, plus macros and your own toolbars. The keys are changed in the key bindings editor (Settings › Keys and shortcuts › Key bindings, built 2026-11-05); details in [actions](actions.md).
 - **Vim-style** (owner, 2026-10-28): with a keyboard, the whole app works modally: modes, counts, `:` commands, `.` and recorded macros. The code editor has optional Vim editing. See [actions](actions.md#vim-style-control).
 

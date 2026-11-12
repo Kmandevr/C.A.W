@@ -29,7 +29,7 @@ import 'file_manager_screen.dart';
 import 'files/project_file_actions.dart';
 import 'midi_file_actions.dart';
 import 'key_router.dart';
-import 'page_closer.dart';
+import 'panel_motion.dart';
 import 'theme.dart';
 import 'settings/settings_page.dart';
 import 'widgets.dart';
@@ -314,7 +314,7 @@ class _ShellState extends State<Shell> {
   /// What the transport shows from the app state: it rebuilds only when one of these changes (frame_widgets.dart,
   /// Selected), not on every app-state change.
   Object _transportLook() => (s.transportOn, s.canUndo, s.canRedo, s.pausedStep, s.project, s.project.bpm,
-      s.project.name, LiveMidi.current, AutomationWriter.current);
+      s.project.name, LiveMidi.current, AutomationWriter.current, s.project.loopsRange);
 
   Widget? _banner() {
     final error = s.engineError ?? s.audioError ?? s.openError;
@@ -686,6 +686,7 @@ class _TransportBar extends StatelessWidget {
           )),
           if (AutomationWriter.current case final w?) AutomateButton(writer: w, state: state, size: 40),
           if (LiveMidi.current case final m?) KeysButton(midi: m),
+          BackToStartButton(state: state),
           // Only while there is somewhere to stop from, so a phone's transport keeps room for the project name.
           if (playing || state.pausedStep != null) Pressable(child: IconButton(
             key: const ValueKey('transport-stop'),
@@ -865,7 +866,7 @@ Future<void> showProjectMenu(BuildContext context, AppState s) async {
               Navigator.pop(context);
               final c = TextEditingController(text: s.project.name);
               final name = await showDialog<String>(
-                context: context,
+                context: context, animationStyle: dialogAnimation(context),
                 builder: (context) => AlertDialog(
                   title: const Text('Rename project'),
                   content: TextField(controller: c, autofocus: true, onSubmitted: (v) => Navigator.pop(context, v)),
@@ -957,7 +958,7 @@ Future<void> showProjectMenu(BuildContext context, AppState s) async {
             onTap: () async {
               final nav = Navigator.of(context);
               nav.pop();
-              await nav.push(MaterialPageRoute<void>(settings: closablePage, builder: (_) => GlassPage(child: SettingsPage(settings: s.settings, state: s,
+              await nav.push(panelRoute<void>(nav.context, (_) => GlassPage(child: SettingsPage(settings: s.settings, state: s,
                   engineProfile: s.hardwareProfile, executionPlan: s.auditionPlan,
                   onEditKeys: keys == null ? null : (c) => keys.showKeyBindings(c)))));
               s.settings.commitLook();
@@ -978,7 +979,7 @@ Future<void> showProjectMenu(BuildContext context, AppState s) async {
                 tooltip: 'Delete',
                 onPressed: () async {
                   final ok = await showDialog<bool>(
-                    context: context,
+                    context: context, animationStyle: dialogAnimation(context),
                     builder: (context) => AlertDialog(
                       title: Text('Delete ${p.name}?'),
                       actions: [

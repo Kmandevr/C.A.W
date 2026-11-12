@@ -10,6 +10,7 @@ import '../device_scope.dart';
 import '../midi_learn.dart';
 import '../kit/feel.dart';
 import 'mod_routing.dart';
+import '../../panel_motion.dart';
 
 /// A route's amount as a full-width slider (46 dp tall): drag anywhere along it, sideways; the further the finger
 /// moves up or down off the slider the finer the drag (a video scrubber), and a second finger is fine too. The
@@ -60,7 +61,7 @@ class _ModAmountSliderState extends State<ModAmountSlider> {
   Future<void> _type() async {
     DeviceFeel.tap();
     final field = TextEditingController(text: (r.amount * 100).toStringAsFixed(0));
-    final typed = await showDialog<double>(context: context, builder: (c) => AlertDialog(
+    final typed = await showDialog<double>(context: context, animationStyle: dialogAnimation(context), builder: (c) => AlertDialog(
       title: Text('${r.source.label} amount', style: const TextStyle(fontSize: 14)),
       content: TextField(
         key: const ValueKey('modamount-type'),
@@ -247,7 +248,7 @@ class _SourceMenu extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = modSourceColor(route.source);
-    return PopupMenuButton<ModSource>(
+    return PopupMenuButton<ModSource>( popUpAnimationStyle: menuAnimation(context),
       key: ValueKey('modroute-src-${route.slot}'),
       tooltip: 'Change the source',
       onSelected: (s) {
@@ -326,7 +327,7 @@ class _ViaRow extends StatelessWidget {
   Widget build(BuildContext context) => Row(children: [
     const Text('Scaled by', style: TextStyle(fontSize: 11, color: Neon.dim)),
     const SizedBox(width: 8),
-    PopupMenuButton<ModSource>(
+    PopupMenuButton<ModSource>( popUpAnimationStyle: menuAnimation(context),
       key: ValueKey('modroute-via-${route.slot}'),
       tooltip: 'Scale this amount by another source',
       onSelected: (s) {

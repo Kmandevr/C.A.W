@@ -8,6 +8,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../actions/actions.dart';
+import '../actions/hints.dart';
 import '../actions/key_event.dart';
 import '../actions/keymap.dart';
 import '../actions/keys.dart';
@@ -18,8 +19,9 @@ import '../model/automation_writer.dart';
 import '../model/live_midi.dart';
 import '../model/settings.dart';
 import 'glass.dart';
+import 'keyboard/key_area.dart';
 import 'key_bindings.dart';
-import 'page_closer.dart';
+import 'panel_motion.dart';
 import 'pointer_input.dart';
 import 'theme.dart';
 import 'volume_fader.dart';
@@ -70,8 +72,17 @@ class KeyRouter extends StatefulWidget {
   State<KeyRouter> createState() => KeyRouterState();
 }
 
-class KeyRouterState extends State<KeyRouter> {
+class KeyRouterState extends State<KeyRouter> implements KeyAreaHost {
+  /// The router in force, for the app-level keyboard layer (pushed pages, menus, the focus ring and hint strip).
+  static final ValueNotifier<KeyRouterState?> active = ValueNotifier(null);
+
   final ActionRegistry registry = ActionRegistry.standard();
+
+  /// Ticks when what the hint strip shows may have changed (keys rebound, a setting).
+  final ValueNotifier<int> revision = ValueNotifier(0);
+
+  /// The router's own focus node: the home screen's keys pass through it.
+  final FocusNode rootNode = FocusNode(debugLabel: 'key-router');
   late final Keymap _defaults = Keymap.defaults(registry);
   late final VimController vim;
   // Several editors can offer one area (the Builder's roll and a full-screen one): the focused one wins, else the newest.
@@ -93,11 +104,21 @@ class KeyRouterState extends State<KeyRouter> {
     vim.onMacroRecorded = (_) => _saveKeymap();
     vim.addListener(_changed);
     _loadKeymap();
+    KeyAreaHost.current = this;
+    active.value = this;
+    // A desktop has a keyboard: the hint strip's default is on there from the start.
+    if (const {TargetPlatform.windows, TargetPlatform.linux, TargetPlatform.macOS}.contains(defaultTargetPlatform)) {
+      KeyAreaHost.keyboardSeen.value = true;
+    }
   }
 
   @override
   void dispose() {
     vim.removeListener(_changed);
+    if (KeyAreaHost.current == this) KeyAreaHost.current = null;
+    if (active.value == this) active.value = null;
+    rootNode.dispose();
+    revision.dispose();
     _toastTimer?.cancel();
     _prefixTimer?.cancel();
     _commandController.dispose();
@@ -106,6 +127,7 @@ class KeyRouterState extends State<KeyRouter> {
 
   void _changed() {
     if (mounted) setState(() {});
+    revision.value++;
   }
 
   File? get _keymapFile {
@@ -119,6 +141,7 @@ class KeyRouterState extends State<KeyRouter> {
       if (f == null || !await f.exists()) return;
       final mine = Keymap.parse(await f.readAsString(), registry: registry);
       vim.keymap = mine.mergedOver(_defaults);
+      revision.value++;
     } catch (_) {
       // A damaged keymap file falls back to the default keys.
     }
@@ -147,25 +170,77 @@ class KeyRouterState extends State<KeyRouter> {
   /// Saves the keymap (keys, toolbars, macros) to keys.txt after a change made outside the key router.
   Future<void> saveKeymap() => _saveKeymap();
 
-  /// An editor or screen offers its actions while [focus] has focus (or always, for a screen's own area).
+  /// An editor or screen offers its actions while [focus] has focus (or always, for a screen's own area); a
+  /// [KeyArea] offers its context's actions while the keyboard focus is inside it.
+  @override
   void register(Area area, FocusNode focus, ActionTarget run) {
     unregister(area, focus);
     (_targets[area] ??= []).add((focus: focus, run: run));
   }
 
+  @override
   void unregister(Area area, FocusNode focus) => _targets[area]?.removeWhere((t) => t.focus == focus);
 
-  ({FocusNode focus, ActionTarget run})? _target(Area area) {
+  /// The targets that may run [area]'s actions: the focused ones (innermost first), then for a screen's own area
+  /// the newest of the rest; a keyboard-focus context's unfocused areas only when none is focused (a `:` command).
+  Iterable<ActionTarget> _targetsFor(Area area) sync* {
     final list = _targets[area];
-    if (list == null || list.isEmpty) return null;
-    return list.where((t) => t.focus.hasFocus).firstOrNull ?? list.last;
+    if (list == null || list.isEmpty) return;
+    final focused = list.where((t) => t.focus.hasFocus).toList()..sort((a, b) => focusDepth(b.focus).compareTo(focusDepth(a.focus)));
+    for (final t in focused) {
+      yield t.run;
+    }
+    if (area.navigates && focused.isNotEmpty) return;
+    for (final t in list.reversed) {
+      if (!t.focus.hasFocus) yield t.run;
+    }
   }
 
-  Area get _area {
-    if (_targets[Area.pattern]?.any((t) => t.focus.hasFocus) ?? false) return Area.pattern;
-    if (s.settings.vimCode && (_targets[Area.code]?.any((t) => t.focus.hasFocus) ?? false)) return Area.code;
-    return widget.screenArea;
+  /// Whether the keyboard focus is in the home screen under this router (not a pushed page, menu or sheet).
+  bool get ownsFocus {
+    final p = FocusManager.instance.primaryFocus;
+    if (p == null || p == rootNode) return true;
+    for (var n = p.parent; n != null; n = n.parent) {
+      if (n == rootNode) return true;
+    }
+    return false;
   }
+
+  /// The key context: the innermost focused editor or area, else the screen's area; on a pushed page outside every
+  /// area, [Area.page].
+  Area get _area {
+    Area? best;
+    var depth = -1;
+    _targets.forEach((area, list) {
+      if (area == Area.code && !s.settings.vimCode) return;
+      for (final t in list) {
+        if (!t.focus.hasFocus) continue;
+        final d = focusDepth(t.focus);
+        // The Builder and the code editor share a node: the code editor's Vim mode wins there.
+        if (d > depth || (d == depth && area == Area.code)) {
+          depth = d;
+          best = area;
+        }
+      }
+    });
+    if (best != null) return best!;
+    return ownsFocus ? widget.screenArea : Area.page;
+  }
+
+  /// The key context the hint strip shows.
+  Area get contextArea => _area;
+
+  /// The hint strip's entries for [area], from the keymap in force.
+  List<KeyHint> hintsFor(Area area) => contextHints(registry, vim.keymap, area, vimKeys: s.settings.vimKeys);
+
+  /// Whether the hint strip shows (Settings › Keys; by default once a keyboard is in use).
+  bool get hintsOn => KeyAreaHost.hintsOn(s.settings.keyHints);
+
+  /// The keymap in force.
+  Keymap get keymap => vim.keymap;
+
+  /// Whether Vim keys (H J K L as arrows) are on.
+  bool get vimKeys => s.settings.vimKeys;
 
   bool _editingText() {
     final ctx = FocusManager.instance.primaryFocus?.context;
@@ -193,6 +268,17 @@ class KeyRouterState extends State<KeyRouter> {
       chord: chord,
     )) {
       return KeyEventResult.ignored;
+    }
+    if (!_keyboard) KeyAreaHost.keyboardSeen.value = true;
+    // Vim keys: H J K L are the arrows in a keyboard-focus context that doesn't bind the letter itself.
+    if (s.settings.vimKeys && a.navigates && vim.pendingKeys.isEmpty && !vim.commandLineOpen) {
+      final arrow = vimArrowFor(chord);
+      if (arrow != null && vim.keymap.lookup(a, KeySeq.one(chord)) == null) chord = arrow;
+    }
+    // Enter, Esc and Tab that have nothing to do here go on to the focused widget (a button's press, a page's close).
+    if (vim.pendingKeys.isEmpty && !vim.commandLineOpen && vim.mode == VimMode.normal) {
+      final ref = vim.keymap.lookup(a, KeySeq.one(chord));
+      if (ref != null && !ref.isMacro && !_focusMoveApplies(ref.id)) return KeyEventResult.ignored;
     }
     _keyboard = true;
     if (vim.area != a) vim.area = a;
@@ -233,10 +319,13 @@ class KeyRouterState extends State<KeyRouter> {
 
   FutureOr<void> _handle(String id, {int count = 1, String? arg}) {
     final def = registry[id];
-    // An editor or screen that has the action runs it: the focused editor first, then the screen showing.
-    for (final area in [_area, def?.area, widget.screenArea]) {
-      final t = area == null ? null : _target(area);
-      if (t != null && t.run(id, count, arg)) return null;
+    // An editor or screen that has the action runs it: the focused editor first, then the screen showing (unless
+    // the focus is on a page in front of it).
+    final areas = {_area, ?def?.area, if (ownsFocus) widget.screenArea};
+    for (final area in areas) {
+      for (final run in _targetsFor(area)) {
+        if (run(id, count, arg)) return null;
+      }
     }
     if (_global(id, count, arg)) return null;
     _say('${def?.name ?? id}: not available here', error: true);
@@ -276,9 +365,26 @@ class KeyRouterState extends State<KeyRouter> {
       case 'view.keys':
         showKeyBindings(context);
       case 'focus.next':
-        FocusManager.instance.primaryFocus?.nextFocus();
+        _cycleAreas(1);
       case 'focus.prev':
-        FocusManager.instance.primaryFocus?.previousFocus();
+        _cycleAreas(-1);
+      case 'focus.in':
+        if (!(KeyArea.ofNode(FocusManager.instance.primaryFocus)?.enter() ?? false)) return false;
+      case 'focus.out':
+        if (!_focusOut()) return false;
+      case 'transport.toStart':
+        s.backToStart();
+      case 'transport.toProjectStart':
+        s.backToStart(projectStart: true);
+      case 'page.up' || 'page.down' || 'page.left' || 'page.right':
+        final scope = FocusManager.instance.primaryFocus?.enclosingScope;
+        if (scope == null) return false;
+        final move = KeyMove.values.byName(id.substring(5));
+        for (var i = 0; i < count; i++) {
+          if (!moveFocusIn(scope, move)) return i > 0;
+        }
+      case 'page.activate':
+        if (!activateFocused()) return false;
       case 'view.builder':
         widget.onView(0);
       case 'view.arranger':
@@ -363,20 +469,96 @@ class KeyRouterState extends State<KeyRouter> {
     return true;
   }
 
+  // ---------- keyboard focus ----------
+
+  /// Whether a focus move ([ActionRef] [id]) would do something here; when it wouldn't, its key goes on to the
+  /// focused widget (Enter presses a button, Esc closes a page).
+  bool _focusMoveApplies(String id) {
+    final p = FocusManager.instance.primaryFocus;
+    switch (id) {
+      case 'focus.in':
+        final a = KeyArea.ofNode(p);
+        return a != null && keyItems(a.node).isNotEmpty;
+      case 'focus.out':
+        final a = KeyArea.around(p);
+        if (a == null) return false;
+        if (p != a.node) return true;
+        return a.parent != null || _sectionBar(except: a) != null;
+      default:
+        return true;
+    }
+  }
+
+  /// The section bar or rail, when it is on screen (and isn't [except]).
+  FocusNode? _sectionBar({KeyAreaState? except}) {
+    for (final t in _targets[Area.sections] ?? const <({FocusNode focus, ActionTarget run})>[]) {
+      if (t.focus != except?.node && isShownNode(t.focus)) return t.focus;
+    }
+    return null;
+  }
+
+  /// Esc: from a control to its area, from an area to the area around it or the section bar.
+  bool _focusOut() {
+    final p = FocusManager.instance.primaryFocus;
+    final a = KeyArea.around(p);
+    if (a == null) return false;
+    if (p != a.node) {
+      a.node.requestFocus();
+      return true;
+    }
+    final up = a.parent?.node ?? _sectionBar(except: a);
+    if (up == null) return false;
+    up.requestFocus();
+    return true;
+  }
+
+  /// The areas on screen in front (this router's screens, or the page in front), in reading order.
+  List<FocusNode> visibleAreas() {
+    final nodes = <FocusNode>{};
+    _targets.forEach((area, list) {
+      for (final t in list) {
+        if (isShownNode(t.focus)) nodes.add(t.focus);
+      }
+    });
+    return readingOrder(nodes.toList());
+  }
+
+  /// Focuses the first area on screen in reading order (other than [except]): Enter on the section bar.
+  void focusFirstArea({FocusNode? except}) {
+    final first = visibleAreas().where((n) => n != except).firstOrNull;
+    if (first != null) focusAndReveal(first);
+  }
+
+  /// Tab and Shift+Tab: the next or previous area of the screen in front, round and round.
+  void _cycleAreas(int d) {
+    final areas = visibleAreas();
+    final p = FocusManager.instance.primaryFocus;
+    if (areas.isEmpty) {
+      d > 0 ? p?.nextFocus() : p?.previousFocus();
+      return;
+    }
+    var i = -1;
+    // The area holding the focus: the innermost listed node it is in.
+    for (var n = p; n != null && i < 0; n = n.parent) {
+      i = areas.indexOf(n);
+    }
+    final next = i < 0 ? (d > 0 ? 0 : areas.length - 1) : (i + d) % areas.length;
+    focusAndReveal(areas[next]);
+  }
+
   // ---------- UI ----------
 
   Future<void> showActionList(BuildContext context) async {
     final ref = await showDialog<ActionRef>(
-      context: context,
+      context: context, animationStyle: dialogAnimation(context),
       builder: (_) => _ActionList(registry: registry, keymap: vim.keymap, area: _area),
     );
     if (ref != null) _show(vim.run(ref)); // "Edit keys" returns view.keys, which opens the editor
   }
 
   /// The key bindings editor (Settings, the action list, or the "Key bindings" action). Each change saves keys.txt.
-  Future<void> showKeyBindings(BuildContext context) => Navigator.of(context).push(MaterialPageRoute<void>(
-        settings: closablePage,
-        builder: (_) => GlassPage(child: KeyBindingsPage(
+  Future<void> showKeyBindings(BuildContext context) => Navigator.of(context).push(panelRoute<void>(context,
+        (_) => GlassPage(child: KeyBindingsPage(
           registry: registry,
           keymap: () => vim.keymap,
           defaults: _defaults,
@@ -400,6 +582,7 @@ class KeyRouterState extends State<KeyRouter> {
       if (vim.pendingKeys.isNotEmpty) Text(vim.pendingKeys, style: const TextStyle(color: Neon.blue)),
     ];
     return Focus(
+      focusNode: rootNode,
       autofocus: true,
       onKeyEvent: (_, e) => handle(e),
       child: Stack(children: [

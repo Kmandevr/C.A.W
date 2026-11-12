@@ -18,7 +18,7 @@ import 'export_sheet.dart';
 import 'music_video/video_setup_sheet.dart';
 import 'glass.dart';
 import 'haptics.dart';
-import 'page_closer.dart';
+import 'panel_motion.dart';
 import 'theme.dart';
 import 'widgets.dart';
 
@@ -46,9 +46,8 @@ class _QueuedExport {
 }
 
 /// Opens the Export page over the frame (it was the Export workspace, folded into the project menu with #139).
-Future<void> showExportPage(BuildContext context, AppState state) => Navigator.of(context).push(MaterialPageRoute<void>(
-      settings: closablePage,
-      builder: (_) => GlassPage(
+Future<void> showExportPage(BuildContext context, AppState state) => Navigator.of(context).push(panelRoute<void>(context,
+      (_) => GlassPage(
         child: Scaffold(
           backgroundColor: Glass.active ? Colors.transparent : null,
           appBar: AppBar(title: const Text('Export'), backgroundColor: Colors.transparent),
@@ -177,7 +176,7 @@ class _ExportPageState extends State<ExportPage> {
   Future<void> _saveProfile() async {
     final controller = TextEditingController(text: _profileName ?? 'My export');
     final name = await showDialog<String>(
-      context: context,
+      context: context, animationStyle: dialogAnimation(context),
       builder: (context) => AlertDialog(
         title: const Text('Save export profile'),
         content: TextField(controller: controller, autofocus: true,

@@ -15,11 +15,13 @@ import '../theme.dart';
 import '../tokens.dart';
 import 'device_registry.dart';
 import 'device_scope.dart';
+import 'kit/key_param.dart';
 import 'sidechain_bar.dart';
 import 'kit/device_style.dart';
 import 'kit/feel.dart';
 import 'kit/preset_browser.dart';
 import '../page_closer.dart';
+import '../panel_motion.dart';
 import 'kit/presets.dart';
 import 'visuals/mod_routing.dart';
 import 'visuals/mod_sheet.dart';
@@ -43,26 +45,16 @@ Future<void> openDeviceEditor(BuildContext context, AppState state, LayerDoc lay
       barrierLabel: 'Close the device',
       barrierColor: Colors.black.withValues(alpha: 0.25),
       transitionDuration: Motion.fade(Motion.standard, level),
-      transitionBuilder: (context, a, _, child) => FadeTransition(opacity: a, child: ScaleTransition(
-        scale: Tween(begin: level == MotionLevel.full ? 0.97 : 1.0, end: 1.0).animate(
-          CurvedAnimation(parent: a, curve: Curves.easeOutCubic)),
-        child: child)),
+      // In and out with the theme's entrance and exit kinds (Esc, a tap outside and × all run the exit).
+      transitionBuilder: (context, a, _, child) => popupTransition(context, a, child),
       pageBuilder: (context, _, _) => _DeviceWindow(target: target),
     );
   }
-  return Navigator.of(context).push(PageRouteBuilder<void>(
-    settings: closablePage,
-    transitionDuration: Motion.fade(Motion.panel, level),
-    reverseTransitionDuration: Motion.fade(Motion.standard, level),
-    pageBuilder: (context, _, _) => GlassPage(child: Scaffold(
+  // A page that comes in and goes out as the theme's pages do (panelRoute), whether closed by Back, Esc or ←.
+  return Navigator.of(context).push(panelRoute<void>(context, (context) => GlassPage(child: Scaffold(
       backgroundColor: Colors.transparent,
       body: SafeArea(child: DeviceEditor(target: target, onClose: () => Navigator.of(context).maybePop())),
-    )),
-    transitionsBuilder: (context, a, _, child) => FadeTransition(opacity: a, child: SlideTransition(
-      position: Tween(begin: Offset(0, level == MotionLevel.full ? 0.04 : 0), end: Offset.zero)
-          .animate(CurvedAnimation(parent: a, curve: Curves.easeOutCubic)),
-      child: child)),
-  ));
+    ))));
 }
 
 /// The floating window on wide screens: drag its header to move it.
@@ -239,7 +231,7 @@ class _DeviceEditorState extends State<DeviceEditor> {
         const SizedBox(width: 4),
       ])),
     );
-    return DeviceFingers.counter(child: Column(key: const ValueKey('device-editor'), crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+    return DeviceFingers.counter(child: DeviceKeyArea(label: '$title device', child: Column(key: const ValueKey('device-editor'), crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       header,
       Container(height: 2, decoration: BoxDecoration(gradient: LinearGradient(colors: Neon.ramp([
         color.withValues(alpha: 0.0), color.withValues(alpha: 0.8), second.withValues(alpha: 0.8), second.withValues(alpha: 0.0)])))),
@@ -254,7 +246,7 @@ class _DeviceEditorState extends State<DeviceEditor> {
         duration: Motion.fade(Motion.small, Motion.of(context)),
         opacity: t.bypass ? 0.55 : 1,
         child: body)),
-    ]));
+    ])));
   }
 }
 

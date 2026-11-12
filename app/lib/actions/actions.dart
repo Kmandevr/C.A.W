@@ -6,19 +6,33 @@ import 'catalogue.dart';
 /// The Vim-style mode: Normal runs actions, Insert types text, Visual makes movement extend the selection.
 enum VimMode { normal, insert, visual }
 
-/// Where an action or key binding applies, like Reaper's sections. [code] is the code editor's Vim mode.
+/// Where an action or key binding applies, like Reaper's sections. [code] is the code editor's Vim mode. The areas
+/// after [code] are keyboard-focus contexts (docs/actions.md "Keyboard focus"): the part of the screen with the
+/// keyboard focus picks one, and its keys win over the global ones while it has the focus.
 enum Area {
   global('global', 'Global'),
   builder('builder', 'Sounds'),
   pattern('roll', 'Pattern editor'),
   arranger('arranger', 'Tracks'),
   exporter('exporter', 'Export'),
-  code('code', 'Code editor (Vim)');
+  code('code', 'Code editor (Vim)'),
+  sections('sections', 'Section bar'),
+  fx('fx', 'FX chain'),
+  device('device', 'Device controls'),
+  mixer('mixer', 'Mixer'),
+  files('files', 'Files'),
+  tabs('tabs', 'Build tabs'),
+  settings('settings', 'Settings'),
+  page('page', 'Pages and panels'),
+  menu('menus', 'Menus and sheets');
 
   /// The name used in keymap files.
   final String fileName;
   final String label;
   const Area(this.fileName, this.label);
+
+  /// A keyboard-focus context, where arrows and WASD move (and, with Vim keys on, H J K L too).
+  bool get navigates => index > Area.code.index;
 
   /// Reads an area name from a keymap file ("roll" or "pattern" both mean [pattern]).
   static Area? parse(String name) {

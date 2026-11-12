@@ -12,6 +12,7 @@ import '../device_scope.dart';
 import 'feel.dart';
 import 'grab_gesture.dart';
 import 'hero.dart';
+import 'key_param.dart';
 
 /// Draws a small picture of choice [index] in [rect] (a mode's curve, a filter's shape, a waveform).
 typedef ChoiceIcon = void Function(Canvas canvas, Rect rect, int index, Color color);
@@ -77,10 +78,10 @@ class ModeTiles extends StatelessWidget {
       for (var k = to; k < from + per && rows > 1; k++) const Expanded(child: SizedBox()),
       ]));
     }
-    if (rows == 1) return row(0);
-    return Column(mainAxisSize: MainAxisSize.min, children: [
+    // The keyboard steps through the tiles as one control.
+    return KeyParam(paramId: p.id, kind: KeyParamKind.choice, child: rows == 1 ? row(0) : Column(mainAxisSize: MainAxisSize.min, children: [
       for (var r = 0; r < rows; r++) Padding(padding: EdgeInsets.only(top: r == 0 ? 0 : 4), child: row(r * per)),
-    ]);
+    ]));
   }
 }
 
@@ -129,7 +130,7 @@ class DeviceToggle extends StatelessWidget {
     if (p == null) return const SizedBox.shrink();
     final on = t.value(p.id) >= (p.min + p.max) / 2;
     final c = color ?? scope.accent;
-    return Semantics(
+    return KeyParam(paramId: p.id, kind: KeyParamKind.toggle, child: Semantics(
       toggled: on,
       label: p.label,
       child: GestureDetector(
@@ -156,7 +157,7 @@ class DeviceToggle extends StatelessWidget {
           ]),
         )),
       ),
-    );
+    ));
   }
 }
 

@@ -20,6 +20,7 @@ import '../glass.dart';
 import '../pattern_fields.dart' show editPatternHeader;
 import '../theme.dart';
 import 'asset_views.dart';
+import '../panel_motion.dart';
 
 /// Actions shared by the Files screen and its inspector. [onOpenBuilder] is the old shell's fallback for opening
 /// a module when there is no SectionScope; [onSelect] makes a new or copied asset the selection.
@@ -78,7 +79,7 @@ class FilesActions {
   Future<String?> askName(String title, String initial, {String label = 'Name'}) async {
     var value = initial;
     final result = await showDialog<String>(
-      context: context,
+      context: context, animationStyle: dialogAnimation(context),
       builder: (context) => AlertDialog(
         title: Text(title),
         content: TextFormField(
@@ -121,7 +122,7 @@ class FilesActions {
   Future<void> delete(FileAsset a) async {
     final uses = state.usesOf(a);
     final proceed = await showDialog<bool>(
-      context: context,
+      context: context, animationStyle: dialogAnimation(context),
       builder: (context) => AlertDialog(
         title: Text('Delete "${a.name}"?'),
         content: Text(a.sample != null
