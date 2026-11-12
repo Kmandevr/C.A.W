@@ -1,7 +1,7 @@
 ---
 title: Native module SDK
 summary: C ABI host contract and C++ component SDK, validation, real-time rules, state and packaging.
-updated: 2026-11-11
+updated: 2026-11-12
 covers: [engine/include/caw_component.h, engine/include/caw/display.hpp, engine/include/caw/modulator.hpp, examples/cpp/modulator/, engine/include/caw/library/, engine/src/sample_pack.*, engine/plugin/clap/, engine/cmake/CAWClap.cmake, engine/plugin/vst3/, engine/cmake/CAWVst3.cmake, engine/include/caw/module.hpp, engine/include/caw/component.hpp, engine/include/caw/instrument.hpp, engine/CMakeLists.txt, engine/cmake/, examples/cpp/minimal/, examples/cpp/poly-synth/, scripts/caw-component-build.js, .github/workflows/cpp-components.yml, engine/src/module.*, engine/src/module_registry.*, engine/src/graph.*, engine/src/component_test.*, engine/src/analysis.*]
 ---
 
@@ -90,7 +90,7 @@ The rules that matter:
 - **Make `saveState` safe while `process` runs:** the host may save a playing project.
 - **Make `reset()` clear what you hold.** The host calls it so the next play starts from silence.
 - **Say when you are silent, and the host stops calling you.** Override `bool quiet() const noexcept` to return true, right after a `process`, when your output from then on is silence until an event arrives or your input is not silent (an instrument with no voice sounding, an effect whose tail has died out). The host then skips you, so a silent track costs nearly nothing; your time does not move meanwhile, so restart anything timed (a control grid, an LFO you care about) at the next note, and say quiet only once nothing timed that a later note starts from is still running (the acid synth waits for its filter envelope too). `CAW_EXPORT_COMPONENT` offers it through the C interface's `caw.quiet.v1` extension (`CawQuietExtension`), and the CLAP export reports it as `CLAP_PROCESS_SLEEP`. Without it the host keeps calling you: a declared `tailFrames` alone never puts you to sleep, because you would fall asleep on a block boundary with your timed state frozen there, and playback would then depend on the device's buffer size (second audio review, 2026-11-10).
-- **Use the Library for the same sound everywhere:** `caw/library/` ([below](#the-library)) and `caw/detmath.hpp` give the same bits on every device.
+- **Use the Library for the same sound everywhere:** `caw/library/` ([below](#the-library)) and `caw/detmath.hpp` sound the same on every device.
 
 ## Testing your effect
 
@@ -174,9 +174,9 @@ A modulator (#161) is a component whose outputs are modulation ports (one float 
 - `fastmath.hpp` also has `fastLog` (within 1e-15, basic operations only), `dbToGain` and `gainToDb`.
 - `eq.hpp` also has `EqFilter` with `EqType`: a parametric band (bell, shelves, low and high cuts at 12/24/48 dB as Butterworth stages, notch, band-pass, tilt) on `SvfMix` stages whose state lives in `SvfState` per channel, and `magnitude2(tan(pi f / rate))`, its exact response for a display. The built-in EQ's band.
 - `dynamics.hpp`: `compressorGainDb` (soft-knee curve), `expanderGainDb` (with a range floor), `timeCoefficient`, `EnvelopeFollower` (attack and release; it lands on a steady input instead of creeping through subnormal numbers), `SlidingMinimum` (the minimum of the last N values in O(1), ring set aside in `prepare`) and `TruePeak` (4× windowed-sinc inter-sample peak estimate, 4 frames late).
-- `oversample.hpp`: `HalfBandDesign` (polyphase IIR half-band coefficients by the elliptic design of Valenzuela and Constantinides, IEE Proc. G 1983; 8 sections and a 0.04 transition: stop band below −99 dB, ripple below 1e-6 dB), `AllpassChain` and `Oversampler2x` (`up`, `down`; no latency).
+- `oversample.hpp`: `HalfBandDesign` (polyphase IIR half-band coefficients by the elliptic design of Valenzuela and Constantinides, IEE Proc. G 1983; 8 sections and a 0.04 transition: stop band below −99 dB, ripple below 1e-6 dB), `AllpassChain` and `Oversampler2x` (`up`, `down`; no latency; its two branches run side by side as two-wide vectors with GCC and Clang, the same bits as two chains).
 - `spectrum.hpp`: `SpectrumAnalyzer`, a display analyzer: two signals in one 2048-point FFT, log-frequency bins in dB with smoothing. For UIs only (it uses the platform's maths); `prepare` allocates.
-- `reverb.hpp`: `Reverb` with `ReverbSettings` (`size`, `decay` as RT60 seconds, `damping`, `preDelay`, `width`, `mix`, and since #173 `modulation` with `modRate`, which sweeps each line's length by up to 0.8 ms, and `freeze`; both off by default, which leaves the sound as it was): an 8-line feedback delay network with Hadamard mixing and input all-passes, original code. `prepare(rate, maxBlock, maxPreDelay)` allocates; `process` is denormal-safe and NaN-proof, and the measured RT60 is within 5 % of `decay`. `tailFrames()` gives a component's tail. Changing `size` can click on a ringing tail.
+- `reverb.hpp`: `Reverb` with `ReverbSettings` (`size`, `decay` as RT60 seconds, `damping`, `preDelay`, `width`, `mix`, and since #173 `modulation` with `modRate`, which sweeps each line's length by up to 0.8 ms, and `freeze`; both off by default, which leaves the sound as it was): an 8-line feedback delay network with Hadamard mixing and input all-passes, original code. `prepare(rate, maxBlock, maxPreDelay)` allocates; `process` is denormal-safe and NaN-proof, and the measured RT60 is within 5 % of `decay`; the block form `process(left, right, frames)` gives the same bits as frame by frame at about two thirds of the cost (two-wide vectors with GCC and Clang). `tailFrames()` gives a component's tail. Changing `size` can click on a ringing tail.
 
 ```cpp
 lib::Svf filter;

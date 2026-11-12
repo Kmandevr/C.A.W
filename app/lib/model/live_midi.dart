@@ -305,7 +305,9 @@ class LiveMidi extends ChangeNotifier {
       countInBeats = state.settings.countInBars * state.project.beatsPerBar;
       state.togglePlay(countInBeats: countInBeats);
       countInEnds = countInBeats > 0 && state.transportOn
-          ? DateTime.now().add(Duration(microseconds: (countInBeats * 60e6 / state.project.bpm).round()))
+          // The clicks are heard an output latency after they render (Settings › Audio › Latency).
+          ? DateTime.now().add(Duration(
+              microseconds: (countInBeats * 60e6 / state.project.bpm).round() + state.outputLatencyUs))
           : null;
     }
     _wraps = 0;

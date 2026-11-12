@@ -409,17 +409,17 @@ class _ZoneMapPainter extends CustomPainter {
       canvas.drawRRect(RRect.fromRectAndRadius(r, const Radius.circular(3)),
           Paint()..color = hue.withValues(alpha: on ? 0.45 : 0.20));
       canvas.drawRRect(RRect.fromRectAndRadius(r, const Radius.circular(3)), Paint()
-        ..color = on ? Colors.white : hue.withValues(alpha: 0.8)
+        ..color = on ? Neon.ink : hue.withValues(alpha: 0.8)
         ..style = PaintingStyle.stroke
         ..strokeWidth = on ? 1.6 : 1);
       // The root key: a tick at the zone's foot.
       final rx = (z.root - lo + 0.5) * kw;
       if (rx >= r.left && rx <= r.right) {
-        canvas.drawLine(Offset(rx, r.bottom - 6), Offset(rx, r.bottom), Paint()..color = Colors.white..strokeWidth = 2);
+        canvas.drawLine(Offset(rx, r.bottom - 6), Offset(rx, r.bottom), Paint()..color = Neon.ink..strokeWidth = 2);
       }
       if (r.width > 34 && r.height > 14) {
         final tp = TextPainter(text: TextSpan(text: z.seqLength > 1 ? '${z.name} · ${z.seqPosition}/${z.seqLength}' : z.name,
-            style: Neon.code(size: 9, color: Colors.white)), textDirection: TextDirection.ltr, maxLines: 1,
+            style: Neon.code(size: 9, color: Neon.ink)), textDirection: TextDirection.ltr, maxLines: 1,
             ellipsis: '…')
           ..layout(maxWidth: r.width - 6);
         tp.paint(canvas, Offset(r.left + 3, r.top + 2));

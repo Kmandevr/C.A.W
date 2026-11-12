@@ -15,9 +15,10 @@ import '../model/settings.dart';
 import '../engine/component_info.dart';
 import '../model/arrange_fx.dart';
 import 'export_sheet.dart';
+import 'music_video/video_setup_sheet.dart';
 import 'glass.dart';
 import 'haptics.dart';
-import 'page_closer.dart';
+import 'panel_motion.dart';
 import 'theme.dart';
 import 'widgets.dart';
 
@@ -45,9 +46,8 @@ class _QueuedExport {
 }
 
 /// Opens the Export page over the frame (it was the Export workspace, folded into the project menu with #139).
-Future<void> showExportPage(BuildContext context, AppState state) => Navigator.of(context).push(MaterialPageRoute<void>(
-      settings: closablePage,
-      builder: (_) => GlassPage(
+Future<void> showExportPage(BuildContext context, AppState state) => Navigator.of(context).push(panelRoute<void>(context,
+      (_) => GlassPage(
         child: Scaffold(
           backgroundColor: Glass.active ? Colors.transparent : null,
           appBar: AppBar(title: const Text('Export'), backgroundColor: Colors.transparent),
@@ -176,7 +176,7 @@ class _ExportPageState extends State<ExportPage> {
   Future<void> _saveProfile() async {
     final controller = TextEditingController(text: _profileName ?? 'My export');
     final name = await showDialog<String>(
-      context: context,
+      context: context, animationStyle: dialogAnimation(context),
       builder: (context) => AlertDialog(
         title: const Text('Save export profile'),
         content: TextField(controller: controller, autofocus: true,
@@ -853,6 +853,20 @@ class _ExportPageState extends State<ExportPage> {
           padding: const EdgeInsets.only(top: 12),
           child: Text(_message!, style: TextStyle(color: _messageIsError ? Neon.pink : Neon.green)),
         ),
+      const SizedBox(height: 12),
+      // The arrangement music video (docs/decisions.md "Arrangement music video").
+      NeonPanel(color: Neon.pink, child: Row(children: [
+        const Expanded(child: Text('A music video of the arrangement: shots cut by an auto director, rendered with the song.',
+            style: TextStyle(color: Neon.dim, fontSize: 12))),
+        const SizedBox(width: 8),
+        FilledButton.icon(
+          key: const ValueKey('open-music-video'),
+          style: FilledButton.styleFrom(backgroundColor: Neon.pink, foregroundColor: Neon.bg, minimumSize: const Size(0, 48)),
+          onPressed: busy ? null : () => showMusicVideoSheet(context, s),
+          icon: const Icon(Icons.movie_filter_outlined),
+          label: const Text('Music video…', style: TextStyle(fontWeight: FontWeight.w800)),
+        ),
+      ])),
     ]);
   }
 

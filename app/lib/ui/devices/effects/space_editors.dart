@@ -107,7 +107,7 @@ class _ReverbPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size sz) {
     final w = sz.width, h = sz.height;
-    final ice = Color.lerp(second, Colors.white, 0.45)!;
+    final ice = Color.lerp(second, Neon.ink, 0.45)!;
     final tone = freeze ? ice : color;
     // The room: a back wall that shrinks (deeper room) with size, joined to the view's corners.
     final depth = 0.18 + size * 0.42;
@@ -421,7 +421,7 @@ class _DelayPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    final faint = Paint()..color = Colors.white.withValues(alpha: 0.08);
+    final faint = Paint()..color = Neon.ink.withValues(alpha: 0.08);
     canvas.drawLine(Offset(0, laneL), Offset(size.width, laneL), faint);
     canvas.drawLine(Offset(0, laneR), Offset(size.width, laneR), faint);
     paintLabel(canvas, 'L', Offset(4, laneL - 8), color, size: 9, weight: FontWeight.w800);
@@ -435,7 +435,7 @@ class _DelayPainter extends CustomPainter {
     }
     // The ball: travels the echoes in real time and loops.
     final now = seconds % span;
-    final hot = Color.lerp(Colors.white, Neon.pink, drive.clamp(0.0, 1.0) * 0.6)!;
+    final hot = Color.lerp(Neon.ink, Neon.pink, drive.clamp(0.0, 1.0) * 0.6)!;
     var firstL = true, firstR = true;
     for (final (s, right, level) in taps) {
       if (s > span) continue;
@@ -484,11 +484,11 @@ class _DelayPainter extends CustomPainter {
       final ya = (a.$2 ? laneR : laneL) - tall * a.$3, yb = (next.$2 ? laneR : laneL) - tall * next.$3;
       final bx = x(a.$1) + (x(next.$1) - x(a.$1)) * f;
       final by = ya + (yb - ya) * f - math.sin(f * math.pi) * 14;
-      canvas.drawCircle(Offset(bx, by), 9, Paint()..color = Colors.white.withValues(alpha: 0.15));
-      canvas.drawCircle(Offset(bx, by), 4.5, Paint()..color = Colors.white);
+      canvas.drawCircle(Offset(bx, by), 9, Paint()..color = Neon.ink.withValues(alpha: 0.15));
+      canvas.drawCircle(Offset(bx, by), 4.5, Paint()..color = Neon.ink);
     }
     if (freeze) {
-      paintLabel(canvas, '❄ FROZEN', Offset(size.width - 8, 30), Color.lerp(second, Colors.white, 0.4)!, size: 10, align: 1,
+      paintLabel(canvas, '❄ FROZEN', Offset(size.width - 8, 30), Color.lerp(second, Neon.ink, 0.4)!, size: 10, align: 1,
           weight: FontWeight.w800);
     }
   }

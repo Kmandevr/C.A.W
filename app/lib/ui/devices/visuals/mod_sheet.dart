@@ -10,6 +10,7 @@ import '../device_scope.dart';
 import '../midi_learn.dart';
 import '../kit/feel.dart';
 import 'mod_routing.dart';
+import '../../panel_motion.dart';
 
 /// A route's amount as a full-width slider (46 dp tall): drag anywhere along it, sideways; the further the finger
 /// moves up or down off the slider the finer the drag (a video scrubber), and a second finger is fine too. The
@@ -60,7 +61,7 @@ class _ModAmountSliderState extends State<ModAmountSlider> {
   Future<void> _type() async {
     DeviceFeel.tap();
     final field = TextEditingController(text: (r.amount * 100).toStringAsFixed(0));
-    final typed = await showDialog<double>(context: context, builder: (c) => AlertDialog(
+    final typed = await showDialog<double>(context: context, animationStyle: dialogAnimation(context), builder: (c) => AlertDialog(
       title: Text('${r.source.label} amount', style: const TextStyle(fontSize: 14)),
       content: TextField(
         key: const ValueKey('modamount-type'),
@@ -128,7 +129,7 @@ class _AmountBar extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final r = RRect.fromRectAndRadius(Offset.zero & size, const Radius.circular(12));
-    canvas.drawRRect(r, Paint()..color = Colors.white.withValues(alpha: 0.04));
+    canvas.drawRRect(r, Paint()..color = Neon.ink.withValues(alpha: 0.04));
     canvas.drawRRect(r, Paint()
       ..color = color.withValues(alpha: held ? 0.9 : 0.35)
       ..style = PaintingStyle.stroke
@@ -139,7 +140,7 @@ class _AmountBar extends CustomPainter {
     final x = mid + amount * mid;
     final fill = Rect.fromLTRB(amount < 0 ? x : mid, 0, amount < 0 ? mid : x, size.height);
     canvas.drawRect(fill, Paint()
-      ..shader = LinearGradient(colors: [color.withValues(alpha: 0.18), color.withValues(alpha: 0.5)],
+      ..shader = LinearGradient(colors: Neon.ramp([color.withValues(alpha: 0.18), color.withValues(alpha: 0.5)]),
           begin: amount < 0 ? Alignment.centerRight : Alignment.centerLeft,
           end: amount < 0 ? Alignment.centerLeft : Alignment.centerRight).createShader(fill));
     // Bipolar: a faint mirror shows the route also swings the other way.
@@ -247,7 +248,7 @@ class _SourceMenu extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = modSourceColor(route.source);
-    return PopupMenuButton<ModSource>(
+    return PopupMenuButton<ModSource>( popUpAnimationStyle: menuAnimation(context),
       key: ValueKey('modroute-src-${route.slot}'),
       tooltip: 'Change the source',
       onSelected: (s) {
@@ -326,7 +327,7 @@ class _ViaRow extends StatelessWidget {
   Widget build(BuildContext context) => Row(children: [
     const Text('Scaled by', style: TextStyle(fontSize: 11, color: Neon.dim)),
     const SizedBox(width: 8),
-    PopupMenuButton<ModSource>(
+    PopupMenuButton<ModSource>( popUpAnimationStyle: menuAnimation(context),
       key: ValueKey('modroute-via-${route.slot}'),
       tooltip: 'Scale this amount by another source',
       onSelected: (s) {

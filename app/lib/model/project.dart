@@ -371,6 +371,9 @@ class MidiFileDoc {
   }
 }
 
+/// A track's row in the arrangement: full height, compact (name, M and S) or a thin bar (owner, 2026-11-11).
+enum TrackCollapse { normal, compact, thin }
+
 class LayerDoc {
   LayerDoc({
     required this.id,
@@ -396,6 +399,8 @@ class LayerDoc {
     this.spaceBelow = 0,
     this.ownColor = false,
     this.showLanes = false,
+    this.collapse = TrackCollapse.normal,
+    this.height,
     List<AudioClipDoc>? audioClips,
     this.input,
   }) : clips = clips ?? [], automation = automation ?? [], components = components ?? [],
@@ -421,6 +426,20 @@ class LayerDoc {
   /// The track's automation lanes are open under it in the arrangement (its envelope button; hidden by default).
   /// Saved with the project, never sent to the engine.
   bool showLanes;
+
+  /// How much of the track's row shows in the arrangement (owner, 2026-11-11, after REAPER): its full [height],
+  /// [compactHeight] (the name, M and S in one row) or a [thinHeight] sliver. Saved, never sent to the engine.
+  TrackCollapse collapse;
+
+  /// The track's own row height when [collapse] is normal, in logical pixels (null: the global default, the
+  /// Settings track height). Clamped to [minHeight]..[maxHeight]; saved, never sent to the engine.
+  double? height;
+
+  /// A compact row: the name, M and S in one row. A thin row: a sliver in the track's colour.
+  static const compactHeight = 28.0, thinHeight = 8.0;
+
+  /// A track's own height range (Settings.minTrackHeight..maxTrackHeight).
+  static const minHeight = 40.0, maxHeight = 160.0;
   String? patternId; // a legacy single pattern (migrated to a clip at load); it sets the layer's length
   int lengthSteps; // 16ths; 0 follows the project loop
   double volume, pan;
@@ -493,6 +512,8 @@ class LayerDoc {
         if (spaceBelow > 0) 'space_below': spaceBelow,
         if (ownColor) 'own_color': true,
         if (showLanes) 'show_lanes': true,
+        if (collapse != TrackCollapse.normal) 'collapse': collapse.name,
+        if (height != null) 'height': height,
         if (audioClips.isNotEmpty) 'audio_clips': [for (final c in audioClips) c.toJson()],
         if (input != null) 'input': input!.toJson(),
       };
@@ -525,6 +546,11 @@ class LayerDoc {
         },
         ownColor: j['own_color'] == true,
         showLanes: j['show_lanes'] == true,
+        collapse: TrackCollapse.values.where((c) => c.name == j['collapse']).firstOrNull ?? TrackCollapse.normal,
+        height: switch (j['height']) {
+          final num v when v.isFinite => v.toDouble().clamp(minHeight, maxHeight),
+          _ => null,
+        },
         audioClips: j['folder'] == true ? null
             : [for (final c in ((j['audio_clips'] as List?) ?? const []).take(4096)) ?AudioClipDoc.fromJson(c)],
         input: j['folder'] == true ? null : AudioInputDoc.fromJson(j['input']),

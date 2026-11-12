@@ -9,6 +9,7 @@ import '../theme.dart';
 import '../widgets.dart';
 import '../adaptive_sheet.dart';
 import 'project_file_actions.dart';
+import '../panel_motion.dart';
 
 class LibraryManagerView extends StatefulWidget {
   const LibraryManagerView({super.key, required this.state, required this.onOpenBuilder});
@@ -38,7 +39,7 @@ class _LibraryManagerViewState extends State<LibraryManagerView> {
   Future<void> _createFolder() async {
     var name = '';
     final result = await showDialog<String>(
-      context: context,
+      context: context, animationStyle: dialogAnimation(context),
       builder: (context) => AlertDialog(
         title: const Text('New library folder'),
         content: TextFormField(
@@ -67,7 +68,7 @@ class _LibraryManagerViewState extends State<LibraryManagerView> {
   Future<void> _renameFolder(String path) async {
     var name = path.split('/').last;
     final result = await showDialog<String>(
-      context: context,
+      context: context, animationStyle: dialogAnimation(context),
       builder: (context) => AlertDialog(
         title: const Text('Rename folder'),
         content: TextFormField(
@@ -107,7 +108,7 @@ class _LibraryManagerViewState extends State<LibraryManagerView> {
   Future<void> _deleteFolder(String path) async {
     final parent = path.contains('/') ? path.substring(0, path.lastIndexOf('/')) : '';
     final proceed = await showDialog<bool>(
-      context: context,
+      context: context, animationStyle: dialogAnimation(context),
       builder: (context) => AlertDialog(
         title: const Text('Delete folder?'),
         content: Text('Delete "$path"? Modules in this folder and its subfolders will move to the parent folder. Folder nodes are removed; module source is never deleted.'),
@@ -131,7 +132,7 @@ class _LibraryManagerViewState extends State<LibraryManagerView> {
   Future<void> _renameModule(ModuleDoc module) async {
     var name = module.name;
     final result = await showDialog<String>(
-      context: context,
+      context: context, animationStyle: dialogAnimation(context),
       builder: (context) => AlertDialog(
         title: const Text('Rename pattern'),
         content: TextFormField(
@@ -155,7 +156,7 @@ class _LibraryManagerViewState extends State<LibraryManagerView> {
 
   Future<void> _deleteModule(ModuleDoc module) async {
     final proceed = await showDialog<bool>(
-      context: context,
+      context: context, animationStyle: dialogAnimation(context),
       builder: (context) => AlertDialog(
         title: const Text('Delete pattern?'),
         content: Text('Delete "${module.name}"? Clips playing it are removed from their tracks. This cannot be undone.'),
@@ -174,7 +175,7 @@ class _LibraryManagerViewState extends State<LibraryManagerView> {
   Future<void> _editTags(ModuleDoc module) async {
     var value = module.tags.join(', ');
     final result = await showDialog<String>(
-      context: context,
+      context: context, animationStyle: dialogAnimation(context),
       builder: (context) => AlertDialog(
         title: Text('Tags · ${module.name}'),
         content: TextFormField(
@@ -199,7 +200,7 @@ class _LibraryManagerViewState extends State<LibraryManagerView> {
     if (count == 0) return;
     var value = '';
     final result = await showDialog<String>(
-      context: context,
+      context: context, animationStyle: dialogAnimation(context),
       builder: (context) => AlertDialog(
         title: Text('Tags · $count modules'),
         content: TextFormField(
@@ -226,7 +227,7 @@ class _LibraryManagerViewState extends State<LibraryManagerView> {
     if (_query.trim().isEmpty) return;
     var name = '';
     final result = await showDialog<String>(
-      context: context,
+      context: context, animationStyle: dialogAnimation(context),
       builder: (context) => AlertDialog(
         title: const Text('Save library search'),
         content: TextFormField(
@@ -336,7 +337,7 @@ class _LibraryManagerViewState extends State<LibraryManagerView> {
                 style: const TextStyle(color: Neon.dim, fontSize: 10)),
               selected: _folderPath == folder,
               onTap: () => setState(() => _folderPath = folder),
-              trailing: PopupMenuButton<String>(
+              trailing: PopupMenuButton<String>( popUpAnimationStyle: menuAnimation(context),
                 tooltip: 'Folder actions',
                 onSelected: (action) {
                   if (action == 'rename') _renameFolder(folder);
@@ -412,7 +413,7 @@ class _LibraryManagerViewState extends State<LibraryManagerView> {
                 icon: const Icon(Icons.sell_outlined, size: 16),
                 label: const Text('Tag selected'),
               ),
-              PopupMenuButton<String>(
+              PopupMenuButton<String>( popUpAnimationStyle: menuAnimation(context),
                 tooltip: 'Move selected modules',
                 enabled: _selectedModuleIds.isNotEmpty,
                 onSelected: (destination) {
@@ -477,7 +478,7 @@ class _LibraryManagerViewState extends State<LibraryManagerView> {
                   state.selectModule(module.id);
                   widget.onOpenBuilder();
                 }, icon: const Icon(Icons.edit_outlined)),
-                PopupMenuButton<String>(
+                PopupMenuButton<String>( popUpAnimationStyle: menuAnimation(context),
                   tooltip: 'Pattern actions',
                   onSelected: (action) {
                     if (action == 'rename') _renameModule(module);
@@ -567,7 +568,7 @@ Future<void> showProjectRestorePoints(BuildContext context, AppState state) asyn
     );
     if (!context.mounted || selected == null) return;
     final proceed = await showDialog<bool>(
-      context: context,
+      context: context, animationStyle: dialogAnimation(context),
       builder: (context) => AlertDialog(
         title: const Text('Restore this version?'),
         content: const Text('The current project will first be saved as a restore point. The selected version will then replace the current project.'),

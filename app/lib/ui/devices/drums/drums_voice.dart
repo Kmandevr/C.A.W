@@ -109,7 +109,7 @@ class DrumCharacterStrip extends StatelessWidget {
       key: const ValueKey('drum-character'),
       margin: const EdgeInsets.only(bottom: 8),
       padding: const EdgeInsets.fromLTRB(6, 4, 6, 0),
-      decoration: BoxDecoration(borderRadius: BorderRadius.circular(14), color: Colors.white.withValues(alpha: 0.03),
+      decoration: BoxDecoration(borderRadius: BorderRadius.circular(14), color: Neon.ink.withValues(alpha: 0.03),
         border: Border.all(color: Neon.line)),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
         const Text('CHARACTER', style: TextStyle(fontSize: 9, letterSpacing: 1.4, fontWeight: FontWeight.w900, color: Neon.dim)),

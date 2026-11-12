@@ -6,15 +6,15 @@ import 'package:flutter/material.dart';
 import '../feedback.dart';
 import '../glass.dart';
 import '../haptics.dart';
-import '../page_closer.dart';
+import '../../actions/actions.dart';
+import '../keyboard/key_area.dart';
+import '../panel_motion.dart';
 import '../theme.dart';
 
-/// Opens a Build tool full screen (it slides in over the editor like a device editor); Esc and the mouse's Back
-/// button close it.
-Future<void> openToolPage(BuildContext context, Widget page) => Navigator.of(context).push(MaterialPageRoute<void>(
-      settings: closablePage,
-      builder: (_) => GlassPage(child: page),
-    ));
+/// Opens a Build tool full screen, coming in and going out as the theme's pages do ([panelRoute]); Esc and the
+/// mouse's Back button close it.
+Future<void> openToolPage(BuildContext context, Widget page) =>
+    Navigator.of(context).push(panelRoute<void>(context, (_) => GlassPage(child: page)));
 
 /// A Build tool's page: the back arrow, a glowing badge, the title and what it works on, then [children] in a
 /// centred column (560 dp wide at most, so desktop reads like the phone), and an optional [bottom] action bar.
@@ -50,16 +50,18 @@ class ToolPage extends StatelessWidget {
           ])),
         ]),
       ),
-      Expanded(child: SingleChildScrollView(
+      // The page's steps and cards, in reading order for the keyboard (arrows or WASD, Space or Enter presses).
+      Expanded(child: KeyArea(area: Area.page, label: title, autofocus: true, child: SingleChildScrollView(
         padding: const EdgeInsets.fromLTRB(12, 12, 12, 24),
         child: Center(child: ConstrainedBox(constraints: const BoxConstraints(maxWidth: 560),
           child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: children))),
-      )),
+      ))),
       if (bottom != null)
         Container(
           padding: const EdgeInsets.fromLTRB(12, 8, 12, 10),
           decoration: BoxDecoration(border: Border(top: BorderSide(color: Neon.line))),
-          child: Center(child: ConstrainedBox(constraints: const BoxConstraints(maxWidth: 560), child: bottom)),
+          child: Center(child: ConstrainedBox(constraints: const BoxConstraints(maxWidth: 560),
+              child: KeyArea(area: Area.page, label: '$title actions', child: bottom!))),
         ),
     ])),
   );
@@ -119,10 +121,10 @@ class ToolCard extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(14),
-        gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [
+        gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: Neon.ramp([
           Color.lerp(Neon.panel, c, 0.08)!.withValues(alpha: 0.85),
           Neon.panel.withValues(alpha: 0.7),
-        ]),
+        ])),
         border: Border.all(color: c.withValues(alpha: 0.35)),
         boxShadow: [BoxShadow(color: c.withValues(alpha: 0.10), blurRadius: 16)],
       ),
@@ -319,7 +321,7 @@ class _BandPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    final grid = Paint()..color = Colors.white.withValues(alpha: 0.06);
+    final grid = Paint()..color = Neon.ink.withValues(alpha: 0.06);
     for (final hz in const [100.0, 1000.0, 10000.0]) {
       final x = xOf(hz, size.width);
       canvas.drawLine(Offset(x, 0), Offset(x, size.height), grid);
@@ -351,7 +353,7 @@ class _BandPainter extends CustomPainter {
       ..close();
     canvas.drawPath(fill, Paint()
       ..shader = LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter,
-          colors: [color.withValues(alpha: 0.28), color.withValues(alpha: 0.02)]).createShader(Offset.zero & size));
+          colors: Neon.ramp([color.withValues(alpha: 0.28), color.withValues(alpha: 0.02)])).createShader(Offset.zero & size));
     canvas.drawPath(path, Paint()
       ..color = color.withValues(alpha: 0.35)
       ..style = PaintingStyle.stroke
@@ -395,7 +397,7 @@ class _WavePainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final half = size.height / 2;
-    final mid = Paint()..color = Colors.white.withValues(alpha: 0.07);
+    final mid = Paint()..color = Neon.ink.withValues(alpha: 0.07);
     canvas.drawLine(Offset(0, half / 2), Offset(size.width, half / 2), mid);
     canvas.drawLine(Offset(0, half * 1.5), Offset(size.width, half * 1.5), mid);
     void lane(List<(double, double)> cols, double y0, Color c) {

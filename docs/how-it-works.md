@@ -2,7 +2,7 @@
 title: How it works
 summary: The path a sound takes from a project edit to the speaker and to a WAV, the file that owns each step, and where to make each kind of change.
 covers: [engine/include/caw/module.hpp, engine/include/caw/component.hpp, engine/include/caw/instrument.hpp, engine/src/note_events.h, engine/CMakeLists.txt, engine/cmake/, examples/cpp/minimal/, scripts/caw-component-build.js, .github/workflows/cpp-components.yml, engine/src/engine.h, engine/src/capi.cpp, engine/src/module.*, engine/src/module_registry.*, engine/src/graph.*, engine/src/dependency.*, engine/src/execution.*, engine/src/hardware.*, engine/src/scheduler.*, engine/src/worker_api.cpp, engine/src/midi2.*, app/lib/engine/engine.dart, app/lib/engine/execution.dart, app/lib/engine/bindings.dart, app/lib/model/app_state.dart]
-updated: 2026-11-11
+updated: 2026-11-12
 ---
 
 # How it works
@@ -11,7 +11,7 @@ The map for an agent new to the repo. It shows how the parts connect; the detail
 
 ## From a keystroke to sound
 
-1. **Text.** A project module is a pattern: plain text, a header, then one line per note ([engine](engine.md#patterns)). In the app it is `ModuleDoc.source` (`app/lib/model/project.dart`); the piano roll edits it through `app/lib/model/pattern_doc.dart`. A track is a C++ instrument and its effects (`LayerDoc.instrument`, `LayerDoc.components`).
+1. **Text.** A project module is a pattern: plain text, a header, then one line per note ([engine](engine.md#patterns)). In the app it is `ModuleDoc.source` (`app/lib/model/project.dart`); the piano roll edits it through `app/lib/model/pattern_doc.dart`. A track is a C++ instrument and its effects (`LayerDoc.instrument`, `LayerDoc.components`). What only the screen uses (a track's own row height and collapse state, `LayerDoc.height` and `collapse`, its spacer and open lanes) is saved with the project but never sent to the engine (`AppState._changed(engine: false)`).
 2. **Edit to project JSON.** `AppState.editSource` (`app/lib/model/app_state.dart`) stores the text. On Run, or auto-update after a pause, the text becomes the module's `run_source`. `_syncNow` turns the whole project into the engine's project JSON (`Project.toEngineJson`) and sends it. Edits the engine never sees, such as an arrangement spacer (`AppState.setSpaceBelow`), save and redraw without a sync.
 3. **Off the UI thread.** Project updates and offline WAV renders are native jobs submitted to the bounded C++ `AdaptiveWorkerPool`. The app owns each opaque job handle, polls its versioned status/progress and retrieves its result/error; no native worker calls Dart. Project jobs retain the engine handle until completion, so disposal waits safely for accepted work. Jobs use foreground or offline priority, and the app starts with an interactive-preview concurrency budget. Live auto-update uses the result of its one project update. The native pool never touches the audio callback.
 4. **C API.** `caw_engine_set_project` (`engine/src/capi.cpp`) hands the JSON to `Engine::setProjectJson` (`engine/src/engine.h`). `engine/include/caw.h` is the only door into the engine, for the app, the CLI's tests and any future plugin.
@@ -22,7 +22,7 @@ The map for an agent new to the repo. It shows how the parts connect; the detail
 9. **Built-ins.** Every built-in instrument and effect is a C++ component registered in `registerBuiltinComponents` (`engine/src/builtin_components.cpp`), built on the Library headers (`engine/include/caw/library/`), as a user's component is.
 10. **Back to the screen.** The app reads meters and scopes through `caw_engine_meters`, `caw_engine_layer_meter` and `caw_engine_scope`, polled by `app/lib/model/poller.dart` only while something can change.
 
-Space pauses: `AppState.togglePlay` keeps the playhead as a step and resumes there through `Engine.playAt` (`caw_engine_play_at` in `engine/src/capi.cpp`, which `Engine::play` in `engine/src/engine.h` converts with the tempo then in effect). Every project edit saves, and every save feeds the undo history (`ProjectHistory`, `app/lib/model/history.dart`): whole-project snapshots, one per burst of edits; undo restores one and re-syncs the engine. On launch, `AppState.openStorage` opens the last project, or the "First loop" template on a first run. `AppState` also owns transport timing. Tap Tempo keeps up to five increasing tap timestamps, starts a new measurement after a pause longer than two seconds, averages the intervals and clamps the resulting project tempo to 20–400 BPM. The project update then follows the normal sync and save path. The Arranger's project settings sheet (`app/lib/ui/arranger_screen.dart`) still keeps its own copy of this logic; issue #19 moves it onto `AppState.tapTempo`.
+Space pauses: `AppState.togglePlay` keeps the playhead as a step and resumes there through `Engine.playAt` (`caw_engine_play_at` in `engine/src/capi.cpp`, which `Engine::play` in `engine/src/engine.h` converts with the tempo then in effect). Every project edit saves, and every save feeds the undo history (`ProjectHistory`, `app/lib/model/history.dart`): whole-project snapshots, one per burst of edits; undo restores one and re-syncs the engine. On launch, `AppState.openStorage` opens the last project, or a copy of the bundled default project (`app/lib/model/default_project.dart`) on a first run. `AppState` also owns transport timing, including latency compensation (`app/lib/model/latency_comp.dart`): `playheadStep` is the render position less the output latency and the meters are read from a short timeline at the time they are heard; the transport's ⏮ (`AppState.backToStart`) seeks to the loop or project start and asks the views to come back through `revealStartRequests` (`requestRevealStart`). Tap Tempo keeps up to five increasing tap timestamps, starts a new measurement after a pause longer than two seconds, averages the intervals and clamps the resulting project tempo to 20–400 BPM. The project update then follows the normal sync and save path. The Arranger's project settings sheet (`app/lib/ui/arranger_screen.dart`) still keeps its own copy of this logic; issue #19 moves it onto `AppState.tapTempo`.
 
 ## Modular engine foundation (PR #25)
 
@@ -51,7 +51,7 @@ The modular foundation is real native C++ code, but it is not yet the active pla
 
 ## Export
 
-`caw_render` (`engine/src/render.cpp`) drives the same `Engine` offline, so a file matches what was heard bit for bit, and writes it with `engine/src/wav.cpp`. The app submits it as an offline-priority native job with progress and cancellation (the Export area). The CLI (`engine/cli/main.cpp`) uses the same native render call.
+`caw_render` (`engine/src/render.cpp`) drives the same `Engine` offline, so a file sounds the same as what was heard (timing exact, sound within the perceptual tolerance of `docs/decisions.md`, 2026-11-12), and writes it with `engine/src/wav.cpp`. The app submits it as an offline-priority native job with progress and cancellation (the Export area). The CLI (`engine/cli/main.cpp`) uses the same native render call.
 
 ## Where to change what
 

@@ -20,7 +20,7 @@ void main() {
     tester.view.devicePixelRatio = 1;
     final s = AppState();
     s.engine = Engine.create();
-    s.project = s.starterProject();
+    s.project = s.demoProject();
     final m = ModuleDoc(id: 'line', name: 'line', source: '---\nkind: pattern\n---\n');
     s.project.modules.add(m);
     s.ready = true;
@@ -46,7 +46,7 @@ void main() {
     tester.view.devicePixelRatio = 1;
     final s = AppState();
     s.engine = Engine.create();
-    s.project = s.starterProject();
+    s.project = s.demoProject();
     final m = ModuleDoc(id: 'line', name: 'line', source: '---\nkind: pattern\n---\n');
     s.project.modules.add(m);
     s.ready = true;
@@ -75,7 +75,7 @@ void main() {
     tester.view.devicePixelRatio = 1;
     final s = AppState();
     s.engine = Engine.create();
-    s.project = s.starterProject();
+    s.project = s.demoProject();
     final m = ModuleDoc(id: 'line', name: 'line', source: '---\nkind: pattern\n---\n');
     s.project.modules.add(m);
     s.ready = true;
@@ -107,7 +107,7 @@ void main() {
     tester.view.devicePixelRatio = 1;
     final s = AppState();
     s.engine = Engine.create();
-    s.project = s.starterProject();
+    s.project = s.demoProject();
     final m = ModuleDoc(id: 'line', name: 'line', source: '---\nkind: pattern\n---\n');
     s.project.modules.add(m);
     s.ready = true;
@@ -131,7 +131,7 @@ void main() {
     tester.view.devicePixelRatio = 1;
     final s = AppState();
     s.engine = Engine.create();
-    s.project = s.starterProject();
+    s.project = s.demoProject();
     final m = ModuleDoc(id: 'line', name: 'line', source: '---\nkind: pattern\n---\n1 C3 1\n5 C3 1\n9 C3 1\n13 C3 1\n');
     s.project.modules.add(m);
     s.ready = true;
@@ -158,7 +158,7 @@ void main() {
     tester.view.devicePixelRatio = 1;
     final s = AppState();
     s.engine = Engine.create();
-    s.project = s.starterProject();
+    s.project = s.demoProject();
     final m = ModuleDoc(id: 'line', name: 'line', source: '---\nkind: pattern\n---\n');
     s.project.modules.add(m);
     s.ready = true;
@@ -193,7 +193,7 @@ void main() {
     tester.view.devicePixelRatio = 1;
     final s = AppState();
     s.engine = Engine.create();
-    s.project = s.starterProject();
+    s.project = s.demoProject();
     final m = ModuleDoc(id: 'line', name: 'line', source: '---\nkind: pattern\n---\n0 C3 4\n');
     s.project.modules.add(m);
     s.ready = true;

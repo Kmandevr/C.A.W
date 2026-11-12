@@ -73,7 +73,7 @@ class _ProjectsSettingsState extends State<ProjectsSettings> {
             (blankTemplateId, 'Blank'),
             ...switch (widget.deps.state) {
               final app? => [for (final t in app.projectTemplates) (t.id, t.name)],
-              null => [(firstLoopTemplateId, 'First loop')],
+              null => [(firstLoopTemplateId, 'Mid tempo')],
             },
             // A saved template that was deleted elsewhere still shows until another is picked.
             if (s.newProjectTemplate != blankTemplateId && widget.deps.state?.templateById(s.newProjectTemplate) == null &&

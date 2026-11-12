@@ -1,10 +1,25 @@
 ---
 title: Decisions
 summary: Dated record of what was chosen and why, newest first.
-updated: 2026-11-11
+updated: 2026-11-12
 ---
 
 # Decisions
+
+## 2026-11-12: Perceptually identical, not bit-identical; speed first (owner)
+
+**Decision (owner):** engine output must be **perceptually identical and consistent**, not bit-identical, across platforms, live playback against export, and repeated runs. This replaces every earlier promise of identical bits (the 2026-11-03 "Exports are always bit-identical" and golden-hash entries, and the 2026-11-10 "perceptually the same" entry, rewritten below to point here).
+
+- **Still exact:** note, clip and automation timing to the sample; every seeded random choice (stutter, randomise, round robins, seeded noise); discrete behaviour (triggers, step choices).
+- **Tests:** golden hashes are replaced by tolerance tests against the current renders, which stay as the references. Stable paths: the null residual against the reference stays below −120 dBFS peak. Chaotic paths (feedback near self-oscillation, self-resonant filters, free-running or unison phase): loudness over time within 0.1 dB and per-band spectrum within a stated tolerance. Discrete: identical note events, triggers and seeded choices. Real bugs (wrong gain, clicks, broken filters) must still fail, shown by a deliberately broken case.
+- **Allowed for speed, where the tolerance tests pass:** flush-to-zero, FMA and fast-math (keeping the NaN/inf guards that protect the mix), system or approximate maths instead of `caw/detmath.hpp` on per-sample paths, float instead of double on signal paths (double stays for phase accumulators and low-cutoff feedback filters), and a parallel mixer that sums in a fixed order. `detmath`'s bit operations stay wherever exact bits are behaviour (bitcrush, glitch masks).
+- **Process:** measure first (a CI bench on Linux and Android arm64 with a baseline in [engine performance](engine-performance.md)), then one pull request per phase (free wins, floating point, maths, precision and layout, parallel mixer), each with before/after numbers. Claude asks the owner before any audible change and when a phase gains less than 5%.
+
+## 2026-11-12: Default project (owner, 2026-11-12)
+
+- **Decision (owner):** "Here's the project I made, that will essentially be the default." The owner's "mid tempo" project (90 BPM, A minor; Track 3, Bass, Drums, Layer 4 on Flagship, the 808 kit and built-in effects) is what a first run, a deleted last project and the bundled project template open.
+- **How:** the project.json from the owner's exported .caw package is bundled as `app/assets/projects/default.json`. Its unused C++ component and the package's device binary (.so) were left out: a bundled default must not carry native code (in-process, not sandboxed; see the trust decision) or depend on a compiler. Each copy gets fresh ids with references remapped, so two copies never collide (`lib/model/default_project.dart`). The bundled template keeps the id `builtin:first-loop`, now labelled *Mid tempo*, so a saved "New project starts from" setting still finds it.
+- **Kept:** the code-built First loop stays as `AppState.demoProject()`, a test and benchmark fixture whose shape many tests depend on; the engine's First loop goldens and `caw_bench` scenario encode their own projects and do not change.
 
 ## 2026-11-11: one plug-in page per C++ component (owner's "the plug-in workflow is confusing"; Claude, a proposal for the owner's review)
 
@@ -30,6 +45,13 @@ updated: 2026-11-11
 - **Sample pack out of the app:** a stored .zip through the save picker, not a folder picker. Why: Android's picker hands back a document, not a writable folder path, and one file is easier to share.
 - **VST3 in the export page:** one format per package (CLAP or VST3), not both. Why: it keeps the page and the generated workflow simple; a second export makes the other format. Folders from Steinberg's "Plug-in Locations" page (read 2026-11-11).
 - **Learned CCs in a .mid export:** a lane on a knob with a learned CC uses that CC and channel, values on the knob's travel; a CC learned by two lanes goes to the first. The "mod-wheel-mapped target" is read as a knob with CC1 learned; a mod-matrix route from the mod wheel is not turned into CC1, since the lane holds the knob's values, not the wheel's (open question for the owner).
+
+## 2026-11-11: the master loudness meter measures only while read (Claude, performance pass)
+
+The live master loudness meter (BS.1770-5 K-weighting and the 4x true-peak filter, every sample) cost about 6 % of a three-track project's audio work, and nothing in the app reads it (`caw_engine_loudness` has no caller in `app/lib`; [performance](performance.md#song-scenarios-2026-11-11)).
+
+- **Decision (Claude, a small assumption for the app; the owner may reverse it):** the Engine's master meter measures from the start until 30 s pass with no read, then stops; the next read starts it over as a reset does (`LoudnessMeter::sleepWhenUnread`, `engine/src/meters.*`). Its momentary and short-term values are then those of the last 30 s it measured, and the integrated value counts only the time something was reading. Export loudness uses its own meter and is unchanged; a `LoudnessMeter` made outside the Engine measures always.
+- **No sound changed:** every other speed-up of the pass gives the same bits (no golden render was re-recorded), so it needs no perceptual check.
 
 ## 2026-11-11: the .caw project file and its package format (#159; Claude, choices to confirm)
 
@@ -57,6 +79,47 @@ Carries out the owner's decision of 2026-11-10 ("C++ replaces the .caw language"
 - **Bug fixed on the way:** a track's instrument installed while nothing sounds counted as still ringing at the first Play, which mixed in 5 ms of a phantom tail (a free-running source started at twice its level); a new instrument now starts idle.
 - **Open, for the owner:** an instrument track keeps running after a Stop until its output is quiet (or 30 s), and a never-quiet effect there now ends at that cap without the 20 ms fade buses get; a bus whose capped tail has faded comes back while a child track still rings out. The app still sends `voices`, `swap`, `seam_crossfade` and the key (Settings' light-mode voice cap and swap timing now change nothing): removing those settings is UI work.
 
+## 2026-11-11: Latency compensation for Bluetooth and other outputs (owner)
+
+**Decision (owner, 2026-11-11).** Compensate for output latency on Bluetooth speakers and headphones, and on any output with noticeable delay (USB, HDMI, casting).
+
+The owner added (2026-11-11): inputs too (Bluetooth headsets' and USB microphones, a per-input offset, the ping split into input and output, takes placed by input + output), and meters, note highlights and the playhead in step with what is heard (a timeline of meter reads read at the heard time).
+
+**Built (Claude, branch `latency-comp`; the look of the page and badge for the owner's review):**
+- **Measure:** the engine reports each side's latency (C API 23, `caw_audio_latency`; [engine](engine.md#audio-input-and-recording)): AAudio's timestamps where it has them, else the queued buffers. The routed device comes from Android's `AudioManager` (`AudioRoute.kt`) and its device callback; on Windows from the endpoint's bus and form factor (WASAPI property store), else its name. Each device keeps an offset on top of the platform's figure, preset by its kind, typed in, tapped along (median of eight taps) or, for an input, split from the loopback ping.
+- **Apply:** `AppState.playheadStep` is the heard position (so the playhead, follow, live MIDI and automation writing move with it); meters read `audibleMeters`/`audibleLayerMeters` everywhere (the arranger playhead and master meter, the mixer strips, track meters, track cards, the transport position and the music video preview; CPU, overload and `playing` stay on `meters`); MIDI takes are placed at the heard step, audio takes by output + input latency; the count-in countdown waits the output latency. The metronome and count-in clicks are rendered with the music, so they are heard with the same delay and need nothing.
+- **Show:** `LatencyBadge` (+N ms, the tip on tap) while the output adds more than 50 ms.
+- **Facts read 2026-11-11:** [Fact] the NDK's AAudio reference: `AAudioStream_getTimestamp` "returns the time at which a particular frame was played on a speaker or headset, or was recorded on a microphone"; `AAudioStream_get*()` may be called from the data callback (not done here: the engine reads it on the caller's thread); device types `AAUDIO_DEVICE_BLUETOOTH_A2DP`, `BLE_HEADSET`, `BLE_SPEAKER`, `BLE_BROADCAST` ([NDK audio reference](https://developer.android.com/ndk/reference/group/audio)). **[Fact, read 2026-11-12]** `AudioManager.getDevices` and `registerAudioDeviceCallback` were added in API level 23 and `getAudioDevicesForAttributes` in 33 ([AudioManager](https://developer.android.com/reference/android/media/AudioManager)); the `AudioDeviceInfo` TYPE_* values the app maps (A2DP 8, SCO 7, BLE headset 26, BLE speaker 27, BLE broadcast 30, BLE hearing aid 33 (API 37), USB headset 22, HDMI 9, eARC 29 and the rest) match the reference ([AudioDeviceInfo](https://developer.android.com/reference/android/media/AudioDeviceInfo)). [Fact, read 2026-11-12] Windows' `PKEY_AudioEndpoint_FormFactor` holds an `EndpointFormFactor` (Headphones, Headset, SPDIF, DigitalAudioDisplayDevice for HDMI or DisplayPort, …) ([Microsoft Learn](https://learn.microsoft.com/en-us/windows/win32/api/mmdeviceapi/ne-mmdeviceapi-endpointformfactor)); **[Assumption]** a Bluetooth endpoint's bus name is `BTHENUM` (classic) or `BTHLE…` (LE). **[Assumption]** whether A2DP's link delay is inside AAudio's timestamps is undocumented; a published phone test measured average Bluetooth latency from about 244 ms to 484 ms by handset ([Android Authority](https://androidauthority.com/smartphone-bluetooth-latency-973198/)), so presets are typical figures (Bluetooth 200 ms, LE 100 ms, a Bluetooth microphone 150 ms) meant to be calibrated. **[Assumption]** a tap along includes the finger's own touch delay (tens of ms on phones, not measured).
+- **Open (owner):** the page's and badge's look in the APK, and where the badge sits (the transport row belongs to another branch: it places `LatencyBadge`); whether compensation should default off for wired outputs.
+
+## 2026-11-11: Every change animates (owner)
+
+**Decision (owner, 2026-11-11):** "As a rule of thumb, if anything changes it should animate to its changed state." That covers moves, size changes, things appearing and disappearing, and panels and pages opening and closing, both in and out. Each animation is short, follows the theme's animation tokens, and respects Off, Reduced and the per-kind switches. Motion that helps use the app (drags following the finger) stays immediate. The fit-and-finish pass audits the whole app against this rule.
+
+## 2026-11-11: The whole app works from the keyboard (owner)
+
+**Decision (owner, 2026-11-11).** "That's what I meant by vim": everything reachable with the keyboard alone, with the arrow keys or WASD, and the keys change with the context. Some examples:
+- select, duplicate and move tracks and clips;
+- select and edit notes in the piano roll;
+- pick an effect in a chain, open it, move between its knobs and change them;
+- the same in the mixer, Files, Build and Settings.
+
+**[Proposal]** The design:
+- every area has a visible keyboard focus and a context: Arrange tracks, Arrange clips, piano roll, FX chain, device knobs, mixer, Files, Build, a menu or sheet;
+- arrows and WASD move within the context; Enter opens or edits; Esc goes up a level; Tab moves to the next area;
+- the existing action keymap (`lib/actions/`) adds actions per context;
+- a which-key style hint strip shows the keys that work in the current context, and can be turned off;
+- the existing Vim mode stays as the alternative keymap.
+
+**[Fact]** Batch A is built (2026-11-12, [actions](actions.md#keyboard-focus)): the section bar, FX chain, device controls, mixer, Files, Build, Settings, pages, menus, sheets and dialogs, with the focus ring, the hint strip, the transport's ⏮ (Home, Ctrl+Home) and exit animations outside Arrange.
+
+**[Proposal]** Batch B, Arrange and the piano roll (after the track-headers work merges, since it owns `arranger_screen.dart`, `track_lanes.dart`, `clip_*.dart`, `audio_clip_view.dart` and `pattern_editor.dart`):
+- **Tracks** (the Arranger area's keys stay: W/↑ ↓ select, A/D pan, = − volume, M, Alt+S, Alt+↑/↓ move, Enter the menu, Delete): the focused header wears the ring (`KeyRingBox`); Shift+↑/↓ extend the selection; Tab from the headers goes to the clips.
+- **Clips** (a new context): ← → (A D) the previous or next clip on the track, ↑ ↓ the clip at the same time on the track above or below, Shift extends, Alt+← → move by a grid step, Ctrl+D duplicate, Delete, Enter opens a MIDI clip's notes in the focus panel's Clip tab (an audio clip its Clip tab), Esc back to the track; S, G and F2 as now. The ring sits on the focused clip.
+- **Piano roll notes**: the roll's existing keys (its Ctrl+WASD cursor) stay; a focused-note ring, ← → the previous or next note in time, ↑ ↓ the nearest note above or below, Alt+↑/↓ transpose, Enter adds a note at the cursor, Delete removes; the hint strip shows the roll's keys.
+- **⏮ in the views**: Arrange and the roll listen to `AppState.revealStartRequests` (scroll there when `always`, else only when the step is off screen) and the playhead's jump animates (`_PlayheadPainter`).
+- **Clashes to settle with the owner**: WASD already pans and selects in the Arranger and moves the roll's cursor, so the clip context's A/D and W/S need the owner's choice.
+
 ## 2026-11-11: Track headers that shrink, collapse and open editors (owner)
 
 **Decision (owner, 2026-11-11):**
@@ -79,6 +142,19 @@ Carries out the owner's decision of 2026-11-10 ("C++ replaces the .caw language"
   - a **hold opens the track menu** when released without moving, and a hold followed by a drag reorders or nests the track as before;
   - right-click opens the menu with a mouse.
 - **Clips:** a tap on an already selected clip opens its editor (the piano roll for MIDI, the audio editor for audio). A double tap still opens the clip menu.
+- **Header taps, clarified (owner, 2026-11-11):** "a normal tap on the head would just focus it": a single tap focuses at once (selects, and opens or pins the focus view on its tab, in the same frame); a quick second tap switches that view to the FX tab, counted anywhere on the newly pinned track or at the first tap's place.
+- **Following the playhead (owner, 2026-11-11):** while the user zooms, scrolls or drags, following never pulls the view; it resumes a set delay after the last interaction or selection change (Settings › Editing › **Resume after**, 0.5–10 s, 2.5 s by default, or Never: until the next Play). **Follow the playhead** off stops it in both editors; its style is **Page** (the default) or **Smooth** (the playhead stays a third in).
+- **More from the owner the same day:** everything that animates in animates out; a moved note or clip slides there quickly (90–120 ms); the arrangement zooms out "a metric ton" and never ends on the right; moves the view makes on its own glide; clip edges change a clip's width, never its content's scale; the Arrange hint shows only while no track has a clip, centred in the view.
+
+**How it is built (Claude, choices to confirm; [App](app.md), Arranger):**
+- **Thin rows:** 8 px; a tap, double tap and hold work as on any header (no special "expand one step" double tap, so the gestures stay one rule); the whole bar is the bottom-edge grip, and the menu, a drag or a pinch opens it. Compact rows are 28 px. A row snaps thin below 18 px and compact below 34 px while dragged.
+- **Every track's height at once:** Shift + drag on a bottom edge, the toolbar's height menu, the zoom bar's slider or an upright pinch on the lanes (the global default, which tracks without their own follow, as do the theme's header styles).
+- **Collapse ▸ in the track menu** applies to the menu's track: the arranger selects one track at a time today. **[Open (owner)]** whether a multi-track selection should come.
+- **A folder's chevron** draws its contents as thin bars instead of hiding them; their own states come back when it opens.
+- **The upright meter** starts below a 120 px header.
+- **The piano roll's playhead:** the roll draws the song's playhead while the song plays its clip (opened for a clip, along that clip's repeats; in Build, the first unmuted clip of the pattern under the playhead, wrapped to its loop) and follows it by the same rule (`FollowGate`) and style as Arrange. There is no follow control in the transport to put the style in; it is in Settings › Editing.
+- **One glide for view moves:** `ViewGlide` (`lib/ui/view_glide.dart`) moves a view's left edge and zoom together (zoom on a log scale; a zoom with no new left keeps the view's middle still), for both editors; ⏮ reaches it through `AppState.requestRevealStart()` (a counter, `revealStartRequests`, that the arranger and the roll listen to). A clip or track selected while out of view (the keyboard, a paste) glides in; one partly in view stays put.
+- **A header's second tap where the first was** counts whatever is there now (on a phone the first tap pins the track on top and the focus panel takes its old place) and opens the first track's effects (`ClickCounter.secondHere`).
 
 ## 2026-11-11: Arrangement music video (owner)
 
@@ -88,10 +164,13 @@ Carries out the owner's decision of 2026-11-10 ("C++ replaces the .caw language"
 - **Any aspect ratio and any resolution,** with presets for 9:16, 16:9 and 1:1.
 - **Preview:** a quick unrendered preview before recording.
 
-**[Proposal]** It renders offline:
-- the frames come from the same widgets drawn off screen at the chosen size, in step with the offline audio render;
-- they are encoded with the platform's own encoders (Android MediaCodec/MediaMuxer, Windows Media Foundation), so no GPL dependency;
-- the output is an MP4 with H.264 and AAC.
+**Built (Claude, 2026-11-11; choices to confirm; [App](app.md) "Music video" has the behaviour):**
+- **Offline and deterministic.** Frames come from one painter drawn off screen at the chosen size, at song time N / fps (never wall time), in step with the engine's offline song render of the range; meters come from per-frame peak and RMS of the rendered mix and track stems. The same project, setup and seed give the same frames (a test compares frame hashes).
+- **Shots are drawn by dedicated painters**, not by the editing screens: the flythrough, mixer, piano roll and device views are drawn from the project in the theme's colours. Why: the editing widgets read the live transport, meters and gestures and couldn't be driven by a render clock without changing screens other work owns; one painter also makes the preview and the render the same picture. Open (owner): whether the shots should look closer to the real screens.
+- **The director is seeded and uses note energy, not rendered loudness,** to choose mixer shots, so the preview (before any audio is rendered) cuts exactly as the render.
+- **Format:** MP4, H.264 video at about 0.1 bit per pixel per frame (2–80 Mbit/s) with a key frame a second (Android), AAC-LC at 160 kbit/s, 48 kHz stereo.
+- **Encoders: the platforms' own, no new package.** [Fact] Android MediaCodec, MediaMuxer and MediaCodecList are Android SDK APIs (developer.android.com reference pages, read 2026-11-11); Windows' H.264 encoder (Mfh264enc.dll, input I420, IYUV, NV12, YUY2 or YV12) and AAC encoder (Mfaacenc.dll, 16-bit PCM at 44.1 or 48 kHz, 1, 2 or 6 channels, 12,000 to 24,000 bytes a second) are Media Foundation transforms that ship with Windows 7 and later (Microsoft Learn "H.264 Video Encoder" and "AAC Encoder", read 2026-11-11). Both are called through the SDKs the app already builds with; C.A.W adds and redistributes no codec library, so no licence enters the project. [Assumption] the largest Windows frame is 4096 × 2304 until an encoder reports less; the Android limit is the first H.264 encoder's reported widths and heights, and the encoder chosen must take the exact size. Open (owner): codec patent terms for distributing the videos are the platform vendors' and the user's, not checked here.
+- **Linux and tests** write a list of frame hashes instead of a video; no MP4 encoder there yet.
 
 ## 2026-11-11: A REAPER-style layout file (owner; design, questions open)
 
@@ -136,6 +215,13 @@ Still open: custom labels, layouts inside project packages, and one file for eve
 
   The aim is a workspace that feels like home.
 
+**How it is built (Claude, 2026-11-11; choices for the owner to confirm):**
+- **Meter colours** get no slots of their own: meters draw in their track's colour, the warning accent and the danger accent (`pink`, kept red to magenta by the builder) at 0 dB, so the builder's track ramp and accents colour them. New slots would need every old theme file to fall back.
+- **Header style** is a preset of the existing header width and track height (Compact 112 px × 48 px, Roomy 200 px × 88 px), not a second header layout.
+- **One radius token:** the corner roundness also squares off device knob caps below 100% and sets clip corners (Rounded = 5 px × roundness; Square and Round are the other clip shapes). Arrange's audio clips and many fixed corners don't follow it yet.
+- **Haptic style** is Light (as designed), Firm (1.6×) or Off per kind, on top of the strength.
+- **Animation style** (owner's follow-up of 2026-11-11): pace, curve, entrance and exit as theme tokens; Subtle and Playful became two of its looks, Standard keeps the app exactly as it was, and Reduced and Off keep their rules.
+
 ## 2026-11-11: Light and dark for every built-in theme (owner)
 
 **Decision (owner, 2026-11-11).** The built-in themes become four families, each with a light and a dark version:
@@ -145,6 +231,10 @@ Still open: custom labels, layouts inside project packages, and one file for eve
 - **Amber** (today's Amber terminal).
 
 One switch picks light or dark for whichever family is chosen, so nothing is set up colour by colour. The light and dark versions keep the family's character, and their accents stay recognisably the same, with no jarring colour differences. **[Proposal]** The switch also offers "Follow the system", which tracks Android's and Windows' dark mode. A custom theme profile can carry a light and a dark palette too, and it keeps its look and layout settings when the switch flips.
+
+- Flat (owner, 2026-11-11): Neon's counterpart, a standard DAW look without glow or glass.
+- **How it is built (Claude, 2026-11-11):** light palettes come from one generator (`lightFrom`, its reverse `darkFrom`; [App](app.md)) that keeps each hue and moves lightness until WCAG AA holds on every surface (4.5:1 text, dim and accents; 3:1 track colours), so a custom theme's "Make light version" is the same algorithm. Dawn is designed light first and its dark palette is generated. Dusk dark's dim text moved from #6C6C80 to #7E7E93 to pass 4.5:1 on its raised panels. Follow system is built. Flat's no-glow, no-glass and solid fills belong to the theme, not the profile, so the user's Glass switch and glow strength come back on leaving Flat.
+- **Flat's references (read 2026-11-11), not copied:** [Fact] Ableton Live 12's manual (2.3.2 "Theme & Colors", ableton.com/en/live-manual/12/first-steps) offers colour schemes with a light or dark appearance or the OS's, a warm, cool or neutral tone, and high contrast. [Fact] Bitwig's user guide ("User Interfacing", bitwig.com/userguide/latest/user_interfacing): an active control is tinted orange, an inactive one uses a neutral colour such as white, grey or silver. [Fact] REAPER's theme development reference (reaper.fm/sdk/walter/images.php): a theme file controls the colours and fonts of much of the interface, with its default theme as the example. Flat takes the shared idea (neutral grey surfaces, one restrained accent per role, state shown by tint) with its own values; no theme file or exact colour of theirs is used.
 
 ## 2026-11-11: Finding things on a phone (owner)
 
@@ -208,8 +298,8 @@ Carries out the first two bullets of the owner's decision below ([App](app.md)).
 ## 2026-11-11: Touch editing in Arrange and the piano roll (owner)
 
 **Decision (owner, 2026-11-11, answers to Claude's questions):**
-- **Clips:** a long press on a clip picks it up whole (no stretching) and drags it in time and onto any track, snapping to the grid (Shift or a resting second finger frees it, as elsewhere). It can't go before the project start. A **double tap** on a clip opens the menu the long press used to open.
-- **Tracks:** a long press on a track header picks the track up for reordering. Following REAPER, a plain up and down drag only reorders. Dropping with the finger in the right-most third of a track nests the dragged track under it: any track can be a parent, and the routing follows (the child feeds its parent). A double tap on a header opens the track menu.
+- **Clips:** a long press on a clip picks it up whole (no stretching) and drags it in time and onto any track, snapping to the grid (Shift or a resting second finger frees it, as elsewhere). It can't go before the project start. A **double tap** on a clip opens the menu the long press used to open; a tap on an already selected clip opens its editor (owner, 2026-11-11, "Track headers that shrink…").
+- **Tracks:** a long press on a track header picks the track up for reordering. Following REAPER, a plain up and down drag only reorders. Dropping with the finger in the right-most third of a track nests the dragged track under it: any track can be a parent, and the routing follows (the child feeds its parent). A hold let go without moving opens the track menu; a double tap on a header opens its effects (owner, 2026-11-11, "Track headers that shrink…").
 - **Piano roll paste** lands right after the end of the copied selection, and the pasted copy becomes the selection, so repeated pastes chain end to end.
 - **Selection box:** a long press on empty grid (about 0.35 s, with a haptic tick), then a drag, draws a box that **adds** to the selection. A double tap on empty grid clears the selection, so a stray tap can't. Undo can take back a selection the box just made. The select tool stays as it is.
 - **Tremolo and ratchet tools:** a ratchet count per note (2–8 even repeats with a velocity ramp), a **ratchet brush** (drag over notes to set their count), tremolo as a volume wobble, a **vibrato** tool (pitch), and curve handles on pitch bends.
@@ -219,7 +309,7 @@ Carries out the first two bullets of the owner's decision below ([App](app.md)).
 **How Arrange does it (Claude, choices to confirm; [App](app.md)):**
 - **A plain track becomes a parent by turning into a bus folder** (`makeParent`): it keeps its id, effects, sends, fader and volume and pan lanes, so what it nests plays through them as in REAPER, and its instrument and clips move to a new first track inside it of the same name. The engine's bus slots only sum and run effects; letting a bus also play an instrument is an engine change left for later, so the parent's own clips are not on its row as in REAPER.
 - **A second finger frees a long-press lift from the grid**, as the owner asked; it still makes a copy during a quick drag (the earlier choice), and the clip menu duplicates.
-- **The double tap replaces the clip's old double tap** (which opened its notes): the menu's first entry, Edit notes, does that. No tap waits for the double tap (owner, 2026-11-11: "significant delay between the selection and the track actually lighting up"): the first tap selects at once and a quick second tap adds the menu (`ClickCounter`, no double-tap recognizer in the gesture arena). Only a finger's tap on a header holds back the focus view it opens for the double-tap time, since the focus view moves the headers out from under the second tap; the track lights up at once.
+- **The double tap replaces the clip's old double tap** (which opened its notes): the menu's first entry, Edit notes, does that. No tap waits for the double tap (owner, 2026-11-11: "significant delay between the selection and the track actually lighting up"): the first tap selects at once and a quick second tap adds the menu (`ClickCounter`, no double-tap recognizer in the gesture arena). A header's tap opens the focus view at once, and its second tap counts anywhere on the pinned track the first tap moved (owner, 2026-11-11). Only a finger's tap on an already selected clip holds back the editor it opens for the double-tap time, since the editor moves the clip out from under the second tap; the selection itself shows at once.
 - **The menus' numbers:** the track menu's Volume (dB) and Pan apply live; the clip menu's Length (bars) applies when let go or entered, since it rebuilds the project.
 - **Audio clips** (done, 2026-11-11, branch `clip-loops`) follow the same rule (`app/lib/ui/arrange/audio_clip_view.dart`): a long press lifts the clip whole (edges included) onto any track on the grid, never before the project start, a resting second finger freeing it; a double tap or a right-click opens the menu, whose first item opens the Clip tab.
 
@@ -687,7 +777,7 @@ Built (engine pass, 2026-11-10):
 
 ## 2026-11-10: Sound need only be perceptually the same (owner)
 
-**Decision (owner):** "so long as someone can't perceive the difference it's fine." Where making output bit-identical (every device, playback against export) is expensive, a cheaper way that sounds effectively the same is acceptable. Golden renders still pin the sound so changes are deliberate; they check bit-exactness where it is cheap (offline renders of the same build), and a comparison within an inaudible tolerance where exactness would cost real-time performance (for example live playback against export with different block sizes).
+**Decision (owner):** "so long as someone can't perceive the difference it's fine." Where bit-identical output is expensive, a cheaper way that sounds effectively the same is acceptable. Extended on 2026-11-12: output need only be perceptually identical everywhere, checked by tolerance tests (entry above).
 
 ## 2026-11-10: CLAP headers for the plug-in builder (#162)
 
@@ -1028,8 +1118,8 @@ Built (engine pass, 2026-11-10):
 ## 2026-11-03: Reliability over old-engine compatibility
 
 - **The old engine's sound and behavior carry no weight (owner).** The goal is the most reliable engine possible. There is no need to reproduce how the pre-Foundation engine sounded or worked, and no support for its quirks.
-- **Golden hashes guard determinism and regressions, not the old sound.** Same source and settings must still give the same bits on every platform and every run. When an intended engine change alters output, the pull request re-records the hashes and states why, with a measurement; it does not need the owner's approval first. This replaces the earlier rule that every golden-hash change goes to the owner.
-- **Unchanged:** exports bit-identical across platforms; a real-time-safe callback; tests never weakened; bug fixes start with a failing test; the owner is asked before native SDK ABI changes and new dependencies.
+- **Reference renders guard regressions, not the old sound.** When an intended engine change alters output, the pull request re-records the references and states why, with a measurement; it does not need the owner's approval first. Since 2026-11-12 they are compared within a perceptual tolerance, not bit for bit (entry of that day).
+- **Unchanged:** a real-time-safe callback; tests never weakened; bug fixes start with a failing test; the owner is asked before native SDK ABI changes and new dependencies.
 
 ## 2026-11-03: Merging, and no project compatibility before Release 1
 
@@ -1049,7 +1139,7 @@ Built (engine pass, 2026-11-10):
 
 - **One graph runs everything (eventual engine core).** Code (.caw) layers, synth voices, effects, folder buses, sends and master all become nodes of the one typed module graph. The current layer → effects → folder bus → master mixer is migrated into it, not kept as a parallel path. Timing: first, as the roadmap's Foundation stage (see the next entry).
 - **Stage 0 SFZ means full import and mapping.** The first multisample version imports WAV samples (own or third-party), maps zones (key ranges, velocity layers) by hand, plays them in C.A.W and exports WAV + .sfz. This pulls the needed parts of roadmap Stage 3 (audio import) and Stage 4 (sampler zones, WAV/SFZ interchange) into Stage 0.
-- **Exports are always bit-identical.** Offline renders and exports produce the same bits on every platform. Live preview may use faster maths (SIMD, threads, reduced quality) only when it is labelled as a preview mode; golden tests cover the export path.
+- **Exports were to be bit-identical** on every platform; superseded on 2026-11-12: output, exports included, need only be perceptually identical (entry of that day).
 - **Low-end target includes budget phones:** Galaxy A1x-class, 3–4 GB RAM, Android 10+. Voice counts, buffer sizes and benchmark budgets are set for that class.
 - **Precision:** graph audio buffers are 32-bit float; 64-bit is used where accuracy needs it (phase/time accumulators, sensitive filter state). The .caw VM keeps its 64-bit JavaScript number semantics, which bytebeat compatibility requires.
 - **Latency is adjustable:** a low-latency mode for playing live when timing matters, and a lighter, more stable mode (larger buffers, less CPU) when it doesn't. This is the workload-policy model in [engine-next](engine-next.md) §9.

@@ -29,7 +29,7 @@ import 'file_manager_screen.dart';
 import 'files/project_file_actions.dart';
 import 'midi_file_actions.dart';
 import 'key_router.dart';
-import 'page_closer.dart';
+import 'panel_motion.dart';
 import 'theme.dart';
 import 'settings/settings_page.dart';
 import 'widgets.dart';
@@ -46,6 +46,7 @@ import 'adaptive_sheet.dart';
 import 'arrange/templates_ui.dart';
 import '../model/templates.dart';
 import 'pointer_input.dart';
+import 'music_video/video_setup_sheet.dart';
 
 /// The panel each view shortcut shows, by the index KeyRouter's `onView` passes.
 const _viewPanels = [Panels.builder, Panels.arrangement, Panels.files];
@@ -313,7 +314,7 @@ class _ShellState extends State<Shell> {
   /// What the transport shows from the app state: it rebuilds only when one of these changes (frame_widgets.dart,
   /// Selected), not on every app-state change.
   Object _transportLook() => (s.transportOn, s.canUndo, s.canRedo, s.pausedStep, s.project, s.project.bpm,
-      s.project.name, LiveMidi.current, AutomationWriter.current);
+      s.project.name, LiveMidi.current, AutomationWriter.current, s.project.loopsRange);
 
   Widget? _banner() {
     final error = s.engineError ?? s.audioError ?? s.openError;
@@ -508,7 +509,7 @@ class _StatusRow extends StatelessWidget {
       decoration: Glass.active
           ? BoxDecoration(
               color: Neon.panel.withValues(alpha: 0.6),
-              border: Border(bottom: BorderSide(color: Colors.white.withValues(alpha: 0.08))),
+              border: Border(bottom: BorderSide(color: Neon.ink.withValues(alpha: 0.08))),
             )
           : const BoxDecoration(color: Neon.panel, border: Border(bottom: BorderSide(color: Neon.line))),
       child: Row(children: [
@@ -629,7 +630,7 @@ class _TransportBar extends StatelessWidget {
       decoration: Glass.active
           ? BoxDecoration(
               color: Neon.panel.withValues(alpha: 0.6),
-              border: Border(bottom: BorderSide(color: Colors.white.withValues(alpha: 0.08))),
+              border: Border(bottom: BorderSide(color: Neon.ink.withValues(alpha: 0.08))),
             )
           : const BoxDecoration(color: Neon.panel, border: Border(bottom: BorderSide(color: Neon.line))),
       // Desktop on a phone (Settings › Layout) can make the bar narrow: the project name then keeps a modest width and
@@ -649,7 +650,7 @@ class _TransportBar extends StatelessWidget {
                 final cpu = (m.cpu * 100).clamp(0, 999).toStringAsFixed(0);
                 // Paused, it shows where play will resume.
                 return Align(alignment: Alignment.centerRight, child: Text(maxLines: 1, softWrap: false, m.playing
-                    ? '${transportPosition(m.position, m.loopLength, p.engineLoopSteps, p.stepsPerBar)} · CPU $cpu%'
+                    ? '${transportPosition(state.playheadStep, p.engineLoopSteps, p.engineLoopSteps, p.stepsPerBar)} · CPU $cpu%'
                     : state.pausedStep != null
                         ? '${transportPosition(state.pausedStep!, p.engineLoopSteps, p.engineLoopSteps, p.stepsPerBar)} paused'
                           ' · CPU $cpu%'
@@ -685,6 +686,7 @@ class _TransportBar extends StatelessWidget {
           )),
           if (AutomationWriter.current case final w?) AutomateButton(writer: w, state: state, size: 40),
           if (LiveMidi.current case final m?) KeysButton(midi: m),
+          BackToStartButton(state: state),
           // Only while there is somewhere to stop from, so a phone's transport keeps room for the project name.
           if (playing || state.pausedStep != null) Pressable(child: IconButton(
             key: const ValueKey('transport-stop'),
@@ -864,7 +866,7 @@ Future<void> showProjectMenu(BuildContext context, AppState s) async {
               Navigator.pop(context);
               final c = TextEditingController(text: s.project.name);
               final name = await showDialog<String>(
-                context: context,
+                context: context, animationStyle: dialogAnimation(context),
                 builder: (context) => AlertDialog(
                   title: const Text('Rename project'),
                   content: TextField(controller: c, autofocus: true, onSubmitted: (v) => Navigator.pop(context, v)),
@@ -920,6 +922,16 @@ Future<void> showProjectMenu(BuildContext context, AppState s) async {
             },
           ),
           ListTile(
+            key: const ValueKey('project-music-video'),
+            leading: const Icon(Icons.movie_filter_outlined, color: Neon.pink),
+            title: const Text('Music video…'),
+            subtitle: const Text('The arrangement as a video, cut by an auto director', style: TextStyle(color: Neon.dim)),
+            onTap: () {
+              Navigator.pop(context);
+              if (outer.mounted) showMusicVideoSheet(outer, s);
+            },
+          ),
+          ListTile(
             key: const ValueKey('project-export-file'),
             leading: const Icon(Icons.file_upload_outlined, color: Neon.yellow),
             title: const Text('Export project…'),
@@ -946,7 +958,7 @@ Future<void> showProjectMenu(BuildContext context, AppState s) async {
             onTap: () async {
               final nav = Navigator.of(context);
               nav.pop();
-              await nav.push(MaterialPageRoute<void>(settings: closablePage, builder: (_) => GlassPage(child: SettingsPage(settings: s.settings, state: s,
+              await nav.push(panelRoute<void>(nav.context, (_) => GlassPage(child: SettingsPage(settings: s.settings, state: s,
                   engineProfile: s.hardwareProfile, executionPlan: s.auditionPlan,
                   onEditKeys: keys == null ? null : (c) => keys.showKeyBindings(c)))));
               s.settings.commitLook();
@@ -967,7 +979,7 @@ Future<void> showProjectMenu(BuildContext context, AppState s) async {
                 tooltip: 'Delete',
                 onPressed: () async {
                   final ok = await showDialog<bool>(
-                    context: context,
+                    context: context, animationStyle: dialogAnimation(context),
                     builder: (context) => AlertDialog(
                       title: Text('Delete ${p.name}?'),
                       actions: [

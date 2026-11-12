@@ -1,7 +1,7 @@
 ---
 title: Architecture
 summary: Technical architecture, verified engine/app boundaries and clearly labelled future design proposals.
-updated: 2026-11-11
+updated: 2026-11-12
 covers: [app/pubspec.yaml, engine/CMakeLists.txt]
 ---
 
@@ -107,10 +107,11 @@ JUCE (9: AGPLv3/commercial) and Tracktion Engine (GPL-3.0-or-later/commercial, d
 
 ### Bits and determinism
 
-The owner's requirement: the same project, seed and settings give the same samples on every platform, in playback, in the plugin and in WAV export, where that is cheap; where exactness would cost real-time performance, output that is perceptually the same is enough (owner, 2026-11-10, [decisions](decisions.md)).
+The owner's requirement (2026-11-12, [decisions](decisions.md)): the same project, seed and settings sound **perceptually identical** on every platform, in playback, in the plugin and in WAV export, and on every run; identical bits are not required.
 
+- **Exact:** note, clip and automation timing to the sample, every seeded random choice and discrete behaviour (triggers, step choices).
 - **Randomness is seeded, never live:** a note's chance and the built-ins' noise come from the project seed and counter-based hashes, so jumping to any position gives the same result.
-- **Floats are made repeatable too:** compile with strict IEEE behaviour (no fast-math), and use the engine's own `sin`/`exp` approximations rather than each platform's maths library, whose last bits differ between systems. Golden-render tests in CI compare the exact bits. **[Fact, 2026-11-09]** Those maths functions are public SDK code (`engine/include/caw/detmath.hpp`), and `CAW::SDK` passes the strict flags (`-ffp-contract=off -fno-fast-math`, plus `-fno-trapping-math` since 2026-11-10, which changes no result; MSVC `/fp:precise`; clang-cl also `/clang:-ffp-contract=off`, which the engine now uses too) to every component built against it, so components repeat bit for bit too.
+- **Floats may differ in the last bits:** tolerance tests against reference renders (a null residual below −120 dBFS on stable paths; loudness and per-band spectrum on chaotic ones) replace bit-exact golden hashes, so faster maths (flush-to-zero, FMA, approximations, float paths, parallel mixing in a fixed order) is allowed where they pass. **[Fact, 2026-11-12]** The engine still builds with strict IEEE flags and its own `caw/detmath.hpp` maths until the speed phases change them; `CAW::SDK` passes the same flags to components.
 
 ### Instruments, wavetables and samples — current status and remaining design
 
@@ -178,7 +179,7 @@ C++ itself remains general-purpose. Only code scheduled in the audio callback mu
 
 ### This repository (C.A.W.)
 
-The current repository contains the portable C++20 engine and CLI, platform audio layer, Flutter app (whose bundled assets are the code font and the crow logo), tests, documentation and bundled examples.
+The current repository contains the portable C++20 engine and CLI, platform audio layer, Flutter app (whose bundled assets are the code font, the crow logo and the default project), tests, documentation and bundled examples.
 
 ### C++ component source
 

@@ -142,12 +142,12 @@ class _EqPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    final grid = Paint()..color = Colors.white.withValues(alpha: 0.05);
+    final grid = Paint()..color = Neon.ink.withValues(alpha: 0.05);
     for (final hz in [100.0, 1000.0, 10000.0]) {
       final x = freqToX(hz, size.width);
       canvas.drawLine(Offset(x, 0), Offset(x, size.height), grid);
     }
-    canvas.drawLine(Offset(0, y(0)), Offset(size.width, y(0)), Paint()..color = Colors.white.withValues(alpha: 0.1));
+    canvas.drawLine(Offset(0, y(0)), Offset(size.width, y(0)), Paint()..color = Neon.ink.withValues(alpha: 0.1));
     if (spectrum case final s? when s.isNotEmpty) {
       final p = Path()..moveTo(0, size.height);
       for (var i = 0; i < s.length; i++) {
@@ -266,7 +266,7 @@ class _GrPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final r = RRect.fromRectAndRadius(Offset.zero & size, const Radius.circular(3));
-    canvas.drawRRect(r, Paint()..color = Colors.white.withValues(alpha: 0.05));
+    canvas.drawRRect(r, Paint()..color = Neon.ink.withValues(alpha: 0.05));
     if (gr == null) return;
     final h = (gr!.abs() / 24).clamp(0.0, 1.0) * size.height;
     canvas.drawRect(Rect.fromLTWH(0, 0, size.width, h), Paint()..color = color.withValues(alpha: 0.8));
@@ -286,7 +286,7 @@ class _CurvePainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     Offset pt(double x, double v) => Offset((x + 1) / 2 * size.width, (1 - (v.clamp(-1.0, 1.0) + 1) / 2) * size.height);
-    final faint = Paint()..color = Colors.white.withValues(alpha: 0.06);
+    final faint = Paint()..color = Neon.ink.withValues(alpha: 0.06);
     canvas.drawLine(pt(-1, -1), pt(1, 1), faint);
     canvas.drawLine(pt(-1, 0), pt(1, 0), faint);
     canvas.drawLine(pt(0, -1), pt(0, 1), faint);
@@ -334,7 +334,7 @@ class _EchoPainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     final span = math.max(2.0, d.seconds * 8); // the view shows about eight echoes, at least two seconds
     final mid = size.height / 2;
-    canvas.drawLine(Offset(0, mid), Offset(size.width, mid), Paint()..color = Colors.white.withValues(alpha: 0.06));
+    canvas.drawLine(Offset(0, mid), Offset(size.width, mid), Paint()..color = Neon.ink.withValues(alpha: 0.06));
     canvas.drawLine(const Offset(3, 4), Offset(3, size.height - 4), Paint()..color = Neon.text..strokeWidth = 2);
     var level = d.mix.clamp(0.0, 1.0);
     for (var k = 1; k < 64 && level > 0.01; k++) {

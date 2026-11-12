@@ -16,6 +16,7 @@ import '../haptics.dart';
 import '../theme.dart';
 import 'tool_kit.dart';
 import '../pointer_input.dart';
+import '../panel_motion.dart';
 
 /// Opens the maker full screen, with [instrumentId] picked when given.
 Future<void> openSamplePackMaker(BuildContext context, AppState state, {String? instrumentId}) =>
@@ -157,7 +158,7 @@ class SamplePackScreenState extends State<SamplePackScreen> {
     var overwrite = false;
     if (await dir.exists() && dir.listSync().isNotEmpty) {
       if (!mounted) return;
-      final replace = await showDialog<bool>(context: context, builder: (c) => AlertDialog(
+      final replace = await showDialog<bool>(context: context, animationStyle: dialogAnimation(context), builder: (c) => AlertDialog(
         title: Text('Replace "$folder"?'),
         content: const Text('A pack with this name exists. Files with the same names are replaced; others stay.'),
         actions: [

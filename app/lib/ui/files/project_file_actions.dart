@@ -15,6 +15,7 @@ import '../../model/storage.dart';
 import '../../platform/save_copy.dart';
 import '../glass.dart';
 import '../theme.dart';
+import '../panel_motion.dart';
 
 void _snack(BuildContext context, String text, {SnackBarAction? action}) =>
     ScaffoldMessenger.maybeOf(context)?.showSnackBar(SnackBar(content: Text(text), action: action));
@@ -237,7 +238,7 @@ Future<void> importProjectFromPath(BuildContext context, AppState state, String 
         confirm: (project) async {
           if (!context.mounted) return false;
           return await showDialog<bool>(
-                context: context,
+                context: context, animationStyle: dialogAnimation(context),
                 builder: (context) => AlertDialog(
                   title: const Text('Import project?'),
                   content: Text('Open "${project.name}" as a new project? Your current project will be autosaved first.'),
@@ -270,7 +271,7 @@ Future<void> importProjectFromPath(BuildContext context, AppState state, String 
 /// Asks Trust or Block for a C++ build that came in a package: it runs in the app with full access, so it is asked
 /// once for exactly this file (its fingerprint) and never assumed. Closing the dialog leaves it unused.
 Future<NativeComponentTrust?> askPackagedBuildTrust(BuildContext context, ImportedBinary b) => showDialog<NativeComponentTrust>(
-      context: context,
+      context: context, animationStyle: dialogAnimation(context),
       builder: (context) => AlertDialog(
         key: const ValueKey('packaged-build-trust'),
         title: const Text('Use the packaged C++ build?'),
@@ -348,7 +349,7 @@ Future<void> replaceMissingFile(BuildContext context, AppState state) async {
   final target = missing.length == 1
       ? missing.first
       : await showDialog<ProjectDependency>(
-          context: context,
+          context: context, animationStyle: dialogAnimation(context),
           builder: (context) => SimpleDialog(title: const Text('Replace which file?'), children: [
             for (final m in missing)
               SimpleDialogOption(

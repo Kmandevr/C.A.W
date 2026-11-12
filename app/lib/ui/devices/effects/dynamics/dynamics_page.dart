@@ -122,12 +122,12 @@ class _DynamicsPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    final faint = Paint()..color = Colors.white.withValues(alpha: 0.07);
+    final faint = Paint()..color = Neon.ink.withValues(alpha: 0.07);
     for (final d in [-60.0, -48.0, -36.0, -24.0, -12.0]) {
       canvas.drawLine(pt(d, -_floor), pt(d, 0), faint);
       canvas.drawLine(pt(-_floor, d), pt(0, d), faint);
     }
-    canvas.drawLine(pt(-_floor, -_floor), pt(0, 0), Paint()..color = Colors.white.withValues(alpha: 0.14));
+    canvas.drawLine(pt(-_floor, -_floor), pt(0, 0), Paint()..color = Neon.ink.withValues(alpha: 0.14));
     // The three regions, tinted: lifted (above the unity line) in the family colour, cut in pink.
     final path = Path();
     for (var i = 0; i <= 120; i++) {
@@ -142,8 +142,8 @@ class _DynamicsPainter extends CustomPainter {
     if (level case final l? when l > -_floor) {
       final x = l.clamp(-_floor, 0.0);
       final p = pt(x, out(x));
-      canvas.drawCircle(p, 10, Paint()..color = Colors.white.withValues(alpha: 0.15));
-      canvas.drawCircle(p, 5, Paint()..color = Colors.white);
+      canvas.drawCircle(p, 10, Paint()..color = Neon.ink.withValues(alpha: 0.15));
+      canvas.drawCircle(p, 5, Paint()..color = Neon.ink);
     }
     canvas.restore();
     paintHandle(canvas, lowAt, second, active: active == 'low', r: 7, label: 'L');
@@ -154,7 +154,7 @@ class _DynamicsPainter extends CustomPainter {
     // The gain change now: a bar from the middle of the right edge, up for lift, down for cut (24 dB each way).
     final bx = size.width - 12, mid = plot.center.dy, half = plot.height / 2;
     canvas.drawLine(Offset(bx, plot.top), Offset(bx, plot.bottom), Paint()
-      ..color = Colors.white.withValues(alpha: 0.08)
+      ..color = Neon.ink.withValues(alpha: 0.08)
       ..strokeWidth = 6);
     if (gain case final g?) {
       final y = mid - (g / 24).clamp(-1.0, 1.0) * half;

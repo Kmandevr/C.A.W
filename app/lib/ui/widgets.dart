@@ -15,6 +15,7 @@ import 'theme.dart';
 import 'glass.dart';
 import 'haptics.dart';
 import 'pointer_input.dart' show ClickCounter;
+import 'panel_motion.dart';
 
 class NeonPanel extends StatelessWidget {
   const NeonPanel({super.key, required this.child, this.color, this.padding = const EdgeInsets.all(12)});
@@ -171,7 +172,7 @@ class TrackMeter extends StatelessWidget {
   final Color color;
   final bool vertical;
 
-  LayerMeterValue? get _meter => index < state.layerMeters.length ? state.layerMeters[index] : null;
+  LayerMeterValue? get _meter => index < state.audibleLayerMeters.length ? state.audibleLayerMeters[index] : null;
 
   /// A sideways meter's height: two 5 dp bars and a gap, or one bar (drawn at least 7 dp tall with glass).
   double get _sidewaysHeight => stereo ? 11 : Glass.active ? 7 : 4;
@@ -551,7 +552,7 @@ class Heading extends StatelessWidget {
 Future<void> typeValue(BuildContext context, {required String title, required String initial,
     required double? Function(String) parse, required void Function(double) apply,
     TextInputType keyboardType = TextInputType.text}) async {
-  final v = await showDialog<double>(context: context,
+  final v = await showDialog<double>(context: context, animationStyle: dialogAnimation(context),
     builder: (context) => ValueDialog(title: title, initial: initial, parse: parse, keyboardType: keyboardType));
   if (v != null) apply(v);
 }
@@ -670,7 +671,7 @@ class _ResetOnDoubleTapState extends State<ResetOnDoubleTap> {
 Future<bool> confirmTrackDelete(BuildContext context, AppState state, LayerDoc layer) async {
   if (!state.settings.confirmDelete) return true;
   final ok = await showDialog<bool>(
-    context: context,
+    context: context, animationStyle: dialogAnimation(context),
     builder: (context) => AlertDialog(
       title: Text('Delete "${layer.name}"?'),
       content: Text(layer.isFolder ? 'The folder and the tracks in it go.' : 'Its clips and effects go with it.'),

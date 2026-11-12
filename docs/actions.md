@@ -2,7 +2,7 @@
 title: Actions, keys and macros
 summary: Implemented action routing, macros, keymap persistence and configurable toolbars, plus clearly identified UI gaps.
 covers: [app/lib/actions/, app/lib/ui/key_router.dart, app/lib/ui/key_bindings.dart, app/lib/ui/pattern_editor.dart, app/lib/ui/touch_quick_actions.dart]
-updated: 2026-11-11
+updated: 2026-11-12
 ---
 
 # Actions, keys and macros
@@ -12,7 +12,7 @@ updated: 2026-11-11
 ## How it works
 
 - **Everything is an action.** Each command the app can do has an id (`roll.notes.up`), a name and a description. Buttons, menus, keys and macros all run actions, so anything you can tap, you can bind. Reaper works the same way ([Sound on Sound](https://www.soundonsound.com/techniques/automate-anything-reapers-custom-actions)).
-- **Areas, like Reaper's sections:** Global, Sounds (`builder`), Pattern editor (roll and grid), Tracks (Arranger), Export and Code editor (Vim) (`Area` in `app/lib/actions/actions.dart`). A key can do different things in each area. Global keys work everywhere unless the area has its own binding.
+- **Areas, like Reaper's sections:** Global, Sounds (`builder`), Pattern editor (roll and grid), Tracks (Arranger), Export and Code editor (Vim) (`Area` in `app/lib/actions/actions.dart`), and the keyboard-focus contexts below. A key can do different things in each area. Global keys work everywhere unless the area has its own binding.
 - **The action list** (`?`, or Help → Actions):
   - search every action by name, with its keys
   - show the current key bindings for each action; **Edit keys** opens the key bindings editor
@@ -103,7 +103,12 @@ Keys marked † are the owner's own scheme (2026-10-28). The rest are proposals 
 | Master volume up / down | — |
 | Unmute layers the engine muted (overload) | — |
 | Full screen for the current editor | F11 |
-| Focus next / previous panel | Tab / Shift+Tab (focus traversal) |
+| Next / previous area, in reading order (`focus.next`, `focus.prev`) | Tab / Shift+Tab |
+| Go in: into the focused area; on a button, presses it (`focus.in`) | Enter |
+| Up a level: from a control to its area, from an area to the section bar, or closes the page (`focus.out`) | Esc |
+| Back to start: the loop start while a loop is on, else the project start (`transport.toStart`, the transport's ⏮) | Home |
+| Back to the project start, and the views scroll there (`transport.toProjectStart`, ⏮ double tap) | Ctrl+Home |
+| Focus the Build explorer (shown first if hidden; again hides it) / the Build tabs / the editor, from any section | Ctrl+Shift+E / Ctrl+Shift+B / Ctrl+Shift+Enter |
 | Open the long-press menu | Menu key or Shift+F10 |
 
 ### Builder (code)
@@ -170,7 +175,7 @@ Grid and view:
 | Drag a length without snapping | hold Shift while dragging |
 | Tools: draw, select, curve, erase, ratchet brush | B, V, C, X, — |
 | Switch piano roll / drum grid | G |
-| Zoom in / out / fit the pattern (also Ctrl + wheel; Ctrl + Shift + wheel for the row height) | Ctrl+= / Ctrl+- / F |
+| Zoom in / out / fit the pattern, gliding there (also Ctrl + wheel, at once; Ctrl + Shift + wheel for the row height) | Ctrl+= / Ctrl+- / F |
 | Show velocity lane / extras lanes | Alt+V / Alt+X (Ctrl+1/2/3 always switch areas, owner) |
 | Hear notes on / off | ⋮ menu (no default key) |
 
@@ -208,7 +213,10 @@ Generators (buttons; no default keys):
 | Add a marker at the playhead (REAPER's M is the layer's mute here) | Shift+M |
 | Add a region over the time selection, else the loop range (REAPER's Shift+R) | Shift+R |
 | Go to the next / previous marker or region (REAPER's ] and [ are the layer's length here) | Ctrl+] / Ctrl+[ |
-| Go to marker 1–10, in time order (REAPER's 1–0; these take the digits from counts here) | 1 … 9, 0 |
+| Go to marker 1–10, in time order (REAPER's 1–0; these take the digits from counts here); a marker off screen glides into view | 1 … 9, 0 |
+| Zoom to fit the song: the whole song in the view, from its start (`arranger.zoom.fit`; the zoom bar's ⛶) | — |
+| Zoom to the selection: the selected clips, else the time selection, fill the view (`arranger.zoom.selection`) | — |
+| Show the start: the view glides back to the song's start (`arranger.view.start`) | — |
 | Markers and regions: the list (jump, rename, loop, duplicate a region with its clips) | — |
 
 ### Exporter
@@ -218,6 +226,27 @@ Generators (buttons; no default keys):
 | Export now | Ctrl+E |
 | Next export kind (loop, free, one-shot, wavetable) | K |
 | Cancel the export | Esc |
+
+## Keyboard focus
+
+The whole app works from the keyboard (owner, 2026-11-11, [decisions](decisions.md)). Each part of a screen that takes keys is a **context**, an `Area` after `code` (`Area.navigates`), drawn by a `KeyArea` (`lib/ui/keyboard/key_area.dart`); while it or a control in it has the focus its keys win over the global ones. Tab and Shift+Tab move between contexts in reading order; Enter goes into one (its first control) and Esc comes back out. Inside a context the arrows and WASD both move; with **Vim keys everywhere** on (Settings › Keys and shortcuts, `vim_keys`) H J K L act as the arrows too, modifiers included (`vimArrowFor` in `lib/actions/hints.dart`). Every key below is rebindable per context in the key bindings editor.
+
+| Context | Keys |
+| --- | --- |
+| Section bar (`sections`) | ← → / A D (also ↑ ↓ / W S) the previous or next section, Enter into it |
+| FX chain (`fx`) | ↑ ↓ / W S select, Enter opens the effect's editor, Space bypass, Ctrl+D duplicate, Delete or Backspace remove, Alt+↑ / Alt+↓ (Alt+W / Alt+S) reorder, Insert add |
+| Device controls (`device`), in a device editor as a page or a floating window | ← → / A D the previous or next control in reading order, ↑ ↓ / W S or + − change it, Shift+↑ / Shift+↓ fine, Home its default, Enter types a value (a toggle or choice steps) |
+| Mixer (`mixer`) | ← → / A D strips, ↑ ↓ (W up; S is solo) level, pan and sends, + − change, Home the default (0 dB, centre), M mute, S solo |
+| Files (`files`) | arrows / WASD move the selection (a row of the grid up and down), Enter opens, F2 renames, Delete deletes after asking |
+| Build tabs (`tabs`) | ← → / A D switch tabs, Enter opens the tab and goes to its editor, Delete or Ctrl+W closes it |
+| Settings (`settings`) | ↑ ↓ / W S rows, Space toggles or presses, → / D a switch on or a slider up, ← / A off or down |
+| Pages and panels (`page`: Build tool pages and the plug-in page's steps, Files' folders and inspector) | arrows / WASD move between controls in reading order, Space presses |
+| Menus, sheets and dialogs (`menus`) | ↑ ↓ move, a letter jumps to the item it starts (type-ahead), Enter chooses, Esc closes |
+
+- **Focus ring:** the focused control wears a ring in the theme's `Neon.ink` edged with the selection accent, the focused context a softer accent outline (`KeyRing` in `lib/ui/tokens.dart`); it follows light and dark palettes and shows only while the keyboard is in use.
+- **Hint strip** (which-key): a strip at the bottom lists the keys that work in the focused context, read from the keymap (`keyHintsFor` in `lib/actions/hints.dart`), so a rebinding shows at once; then Tab, Esc and `?` (the action list). Settings › Keys and shortcuts › **Key hints** (`key_hints`) turns it off; unset, it shows once a hardware keyboard is used and on a desktop.
+- **Screen readers:** each context is a labelled semantics container; device controls say their name and value; FX cards their place, name and bypass. Focus order is reading order (`keyItems`: rows top to bottom, each left to right).
+- **Arrange and the piano roll** (tracks, clips, notes) are the next batch: [Proposal] in [decisions](decisions.md).
 
 ## Remaining UI gaps and owner review
 

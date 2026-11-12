@@ -123,10 +123,8 @@ void main() {
       await tester.pumpWidget(MaterialApp(home: SectionScope(controller: sections,
           child: Scaffold(body: ListenableBuilder(listenable: s, builder: (_, _) => ArrangerScreen(state: s))))));
       await tester.pump();
-      // A double tap opens the track menu (owner, 2026-11-11).
-      await tester.tap(find.byKey(const ValueKey('track-header-a')));
-      await tester.pump(const Duration(milliseconds: 60));
-      await tester.tap(find.byKey(const ValueKey('track-header-a')));
+      // A hold let go without moving opens the track menu (owner, 2026-11-11).
+      await tester.longPress(find.byKey(const ValueKey('track-header-a')));
       await tester.pumpAndSettle();
       expect(find.text('Instrument · Saw…'), findsOneWidget);
       expect(find.textContaining('Instrument · Basic synth'), findsNothing, reason: 'no long list any more');
@@ -144,10 +142,8 @@ void main() {
       final layer = s.project.layers.first;
       expect(layer.instrument?.id, 'org.caw.synth.basic');
       // Back to the Saw, and Cancel keeps what it has.
-      // A double tap opens the track menu (owner, 2026-11-11).
-      await tester.tap(find.byKey(const ValueKey('track-header-a')));
-      await tester.pump(const Duration(milliseconds: 60));
-      await tester.tap(find.byKey(const ValueKey('track-header-a')));
+      // A hold let go without moving opens the track menu (owner, 2026-11-11).
+      await tester.longPress(find.byKey(const ValueKey('track-header-a')));
       await tester.pumpAndSettle();
       await tester.tap(find.text('Instrument · Basic synth…'));
       await tester.pumpAndSettle();
@@ -196,9 +192,9 @@ void main() {
     });
   });
 
-  group('First loop', () {
+  group('the demo project (the code-built First loop)', () {
     test('is made of built-in C++ instruments playing patterns, with no .caw sounds', () {
-      final p = AppState().starterProject();
+      final p = AppState().demoProject();
       expect(p.name, 'First loop');
       expect([for (final l in p.layers) l.name], ['Kick', 'Hats', 'Bass', 'Lead', 'Acid', 'Pad']);
       for (final l in p.layers) {
@@ -215,7 +211,7 @@ void main() {
     final lib = Platform.environment['CAW_LIB'];
     test('the engine plays it, and lists its instruments with readable names', () async {
       final s = AppState();
-      final p = s.starterProject();
+      final p = s.demoProject();
       final e = Engine.create();
       final result = await e.setProject(p.toEngineJson());
       for (final m in p.modules) {
@@ -233,7 +229,7 @@ void main() {
       final flagship = infos.firstWhere((c) => c.id == 'org.caw.synth.flagship');
       expect(flagship.presets.map((p) => p.name), containsAll(['Init', 'Morph pad', 'Mono bass', 'Acid 303', 'Basic']));
       expect(flagship.presets.firstWhere((p) => p.name == 'Mono bass').params['voice_mode'], 2);
-      // The starter's tracks name their presets; resolved, they hold the values the First loop's old synths had.
+      // The demo's tracks name their presets; resolved, they hold the values the First loop's old synths had.
       final drums = infos.firstWhere((c) => c.id == 'org.caw.drums');
       expect(drums.presets.map((p) => p.name), containsAll(['Kit: 808', 'Kit: 909', '808 Kick', 'Crash']));
       // An old drum migrates: Single mode, its values on pad A1, no preset.
@@ -242,7 +238,7 @@ void main() {
       expect(kick['id'], 'org.caw.drums');
       expect(kick['preset'], isNull);
       expect((kick['params'] as Map)['a1_body_freq'], 60);
-      final resolved = s.starterProject()..resolveInstruments(Engine.resolveInstrument);
+      final resolved = s.demoProject()..resolveInstruments(Engine.resolveInstrument);
       final old = {
         'Bass': {'id': 'org.caw.bass', 'params': {'cutoff': 270, 'resonance': 0.45, 'env': 0.6, 'decay': 0.18, 'sustain': 0.2}},
         'Lead': {'id': 'org.caw.synth.morph', 'params': {'shape': 0.66, 'drift': 0.15, 'unison': 3, 'detune': 0.1,

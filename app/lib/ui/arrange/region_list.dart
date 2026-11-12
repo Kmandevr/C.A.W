@@ -12,6 +12,7 @@ import '../theme.dart';
 import '../widgets.dart';
 import 'long_press_menu.dart';
 import '../pointer_input.dart';
+import '../panel_motion.dart';
 
 /// "bar.beat" (1-based) of [step].
 String barBeat(ProjectDoc p, int step) {
@@ -32,7 +33,7 @@ String barsLength(ProjectDoc p, int steps) {
 /// Asks for [m]'s new name and keeps it.
 Future<void> renameMarker(BuildContext context, AppState s, MarkerDoc m) async {
   final c = TextEditingController(text: m.name);
-  final name = await showDialog<String>(context: context, builder: (context) => AlertDialog(
+  final name = await showDialog<String>(context: context, animationStyle: dialogAnimation(context), builder: (context) => AlertDialog(
     title: Text(m.isRegion ? 'Rename region' : 'Rename marker'),
     content: TextField(key: const ValueKey('marker-name'), controller: c, autofocus: true,
       onSubmitted: (v) => Navigator.of(context).pop(v)),

@@ -4,6 +4,8 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
 import '../glass.dart';
+import '../motion.dart';
+import '../panel_motion.dart';
 import '../theme.dart';
 import '../tokens.dart';
 import 'dock_controller.dart';
@@ -31,8 +33,38 @@ class FloatingWindow extends StatefulWidget {
   State<FloatingWindow> createState() => _FloatingWindowState();
 }
 
-class _FloatingWindowState extends State<FloatingWindow> {
+class _FloatingWindowState extends State<FloatingWindow> with SingleTickerProviderStateMixin {
   Rect get _r => widget.panel.rect;
+
+  // In with the theme's entrance, and out with its exit before ⇲ docks it ([popupTransition]); none with motion Off.
+  late final AnimationController _show = AnimationController(vsync: this);
+  bool _docking = false;
+
+  /// How long the window takes to come or go (a popup's, at the theme's pace).
+  static const _pace = Duration(milliseconds: 200);
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final d = EditMotion.scaled(Motion.of(context), EditMotionKind.panels, _pace);
+    _show.duration = d ?? Duration.zero;
+    if (_show.status == AnimationStatus.dismissed && !_docking) {
+      d == null ? _show.value = 1 : _show.forward();
+    }
+  }
+
+  @override
+  void dispose() {
+    _show.dispose();
+    super.dispose();
+  }
+
+  Future<void> _dock() async {
+    if (_docking) return;
+    _docking = true;
+    if (_show.duration != Duration.zero) await _show.reverse().orCancel.catchError((_) {});
+    if (mounted) widget.onDock();
+  }
 
   void _move(Offset d, {bool resize = false}) {
     final dx = d.dx / widget.area.width, dy = d.dy / widget.area.height;
@@ -79,7 +111,7 @@ class _FloatingWindowState extends State<FloatingWindow> {
       top: _r.top * a.height,
       width: _r.width * a.width,
       height: _r.height * a.height,
-      child: Stack(children: [
+      child: popupTransition(context, _show, Stack(children: [
         Positioned.fill(child: Listener(
         onPointerDown: (_) => widget.onRaise(),
         // No blur: a floating window stays over live, repainting panels (the playhead, meters), where a backdrop
@@ -96,7 +128,7 @@ class _FloatingWindowState extends State<FloatingWindow> {
               child: MouseRegion(cursor: SystemMouseCursors.move, child: Container(
                 height: 30,
                 padding: const EdgeInsets.only(left: 10),
-                color: Colors.white.withValues(alpha: 0.04),
+                color: Neon.ink.withValues(alpha: 0.04),
                 child: Row(children: [
                   Expanded(child: Text(widget.title, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600))),
                   IconButton(
@@ -106,7 +138,7 @@ class _FloatingWindowState extends State<FloatingWindow> {
                     visualDensity: VisualDensity.compact,
                     color: Neon.dim,
                     icon: const Icon(Icons.call_to_action),
-                    onPressed: widget.onDock,
+                    onPressed: _dock,
                   ),
                 ]),
               )),
@@ -149,7 +181,7 @@ class _FloatingWindowState extends State<FloatingWindow> {
             SystemMouseCursors.resizeUpRightDownLeft, (d) => _resizeEdges(d, right: true, top: true))),
         Positioned(left: 0, bottom: 0, width: c, height: c, child: _edge('bottom-left',
             SystemMouseCursors.resizeUpRightDownLeft, (d) => _resizeEdges(d, left: true, bottom: true))),
-      ]),
+      ])),
     );
   }
 }

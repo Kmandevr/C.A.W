@@ -1,0 +1,613 @@
+// Draws one music-video frame at any size from the scene, the director's plan, the song step and the meters: the
+// arrangement flythrough, mixer, piano-roll and device shots, their transitions and the title card, in the theme.
+import 'dart:math' as math;
+import 'dart:typed_data';
+import 'dart:ui' as ui;
+
+import 'package:flutter/material.dart';
+
+import '../../model/music_video.dart';
+import '../../model/music_video_director.dart';
+import '../../model/music_video_meters.dart';
+import '../../model/music_video_scene.dart';
+import '../theme.dart';
+
+/// Everything one frame depends on (no wall clock: the same input draws the same frame).
+class VideoFrameInput {
+  const VideoFrameInput({required this.scene, required this.plan, required this.step, required this.seconds,
+      this.levels = VideoLevels.silent, this.titleCard = false, this.title = '', this.artist = ''});
+  final VideoScene scene;
+  final ShotPlan plan;
+
+  /// The song position (sixteenth steps) and the seconds since the video's start.
+  final double step, seconds;
+  final VideoLevels levels;
+  final bool titleCard;
+  final String title, artist;
+
+  static VideoFrameInput forOptions({required VideoScene scene, required ShotPlan plan, required double step,
+          required double seconds, required MusicVideoOptions options, VideoLevels levels = VideoLevels.silent}) =>
+      VideoFrameInput(scene: scene, plan: plan, step: step, seconds: seconds, levels: levels,
+          titleCard: options.titleCard, title: options.title.trim().isEmpty ? scene.name : options.title.trim(),
+          artist: options.artist.trim());
+}
+
+/// The frame as a widget painter (the preview), drawing exactly what [paintVideoFrame] draws for the render.
+class VideoFramePainter extends CustomPainter {
+  VideoFramePainter(this.input, {super.repaint});
+  final VideoFrameInput Function() input;
+
+  @override
+  void paint(Canvas canvas, Size size) => paintVideoFrame(canvas, size, input());
+
+  @override
+  bool shouldRepaint(VideoFramePainter oldDelegate) => true;
+}
+
+double _ease(double x) {
+  final t = x.clamp(0.0, 1.0);
+  return t * t * (3 - 2 * t);
+}
+
+/// Paints the frame [f] into [size].
+void paintVideoFrame(Canvas canvas, Size size, VideoFrameInput f) {
+  final rect = Offset.zero & size;
+  canvas.save();
+  canvas.clipRect(rect);
+  canvas.drawRect(rect, Paint()..color = Neon.bg);
+  final plan = f.plan;
+  final i = plan.indexAt(f.step);
+  final shot = plan.shots[i];
+  final into = shot.transitionSteps <= 0 ? 1.0 : (f.step - shot.start) / shot.transitionSteps;
+  if (i > 0 && into < 1 && shot.transition != VideoTransition.cut) {
+    final prev = plan.shots[i - 1];
+    final p = _ease(into);
+    switch (shot.transition) {
+      case VideoTransition.crossfade:
+        _paintShot(canvas, size, f, prev);
+        canvas.saveLayer(rect, Paint()..color = Color.fromRGBO(0, 0, 0, p));
+        _paintShot(canvas, size, f, shot);
+        canvas.restore();
+      case VideoTransition.push:
+        // The new shot pushes the old one out (sideways on a wide frame, upwards on a tall one).
+        final wide = size.width >= size.height;
+        final d = wide ? Offset(size.width * p, 0) : Offset(0, size.height * p);
+        canvas.save();
+        canvas.translate(-d.dx, -d.dy);
+        _paintShot(canvas, size, f, prev);
+        canvas.restore();
+        canvas.save();
+        canvas.translate(wide ? size.width - d.dx : 0, wide ? 0 : size.height - d.dy);
+        _paintShot(canvas, size, f, shot);
+        canvas.restore();
+      case VideoTransition.cut:
+        break;
+    }
+  } else {
+    _paintShot(canvas, size, f, shot);
+  }
+  _paintHud(canvas, size, f);
+  if (f.titleCard) _paintTitle(canvas, size, f);
+  canvas.restore();
+}
+
+void _paintShot(Canvas canvas, Size size, VideoFrameInput f, DirectedShot shot) {
+  canvas.save();
+  canvas.clipRect(Offset.zero & size);
+  canvas.drawRect(Offset.zero & size, Paint()..color = Neon.bg);
+  final cam = f.plan.camera(shot, f.step);
+  switch (shot.kind) {
+    case VideoShot.flythrough:
+      _flythrough(canvas, size, f, shot, cam);
+    case VideoShot.pianoRoll:
+      _pianoRoll(canvas, size, f, shot, cam);
+    case VideoShot.mixer:
+      _mixer(canvas, size, f, shot, cam);
+    case VideoShot.devices:
+      _device(canvas, size, f, shot, cam);
+  }
+  canvas.restore();
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Helpers
+
+double _unit(Size s) => math.min(s.width, s.height) / 360;
+
+/// The steps a timeline shot (arrangement or piano roll) shows: its left edge and width. The camera's centre sits
+/// at its anchor across the view, else 0.4 of the way in on the arrangement and 0.35 on the piano roll.
+({double left, double visible}) videoView(DirectedShot shot, ShotCamera cam) {
+  final visible = shot.visibleSteps / cam.zoom;
+  final anchor = cam.anchor ?? (shot.kind == VideoShot.pianoRoll ? 0.35 : 0.4);
+  return (left: cam.center - visible * anchor, visible: visible);
+}
+
+void _text(Canvas canvas, String text, Offset at, double size, Color color,
+    {FontWeight weight = FontWeight.w600, double? maxWidth, TextAlign align = TextAlign.left, bool mono = false,
+    double letterSpacing = 0}) {
+  if (text.isEmpty || size <= 0) return;
+  final tp = TextPainter(
+    text: TextSpan(text: text, style: TextStyle(fontSize: size, color: color, fontWeight: weight,
+        letterSpacing: letterSpacing, fontFamily: mono ? Neon.mono : null, fontFamilyFallback: mono ? Neon.monoFallback : null)),
+    textDirection: TextDirection.ltr,
+    textAlign: align,
+    maxLines: 1,
+    ellipsis: '…',
+  )..layout(maxWidth: maxWidth ?? double.infinity);
+  final dx = switch (align) {
+    TextAlign.center => -tp.width / 2,
+    TextAlign.right => -tp.width,
+    _ => 0.0,
+  };
+  tp.paint(canvas, at + Offset(dx, 0));
+  tp.dispose();
+}
+
+Paint _glow(Color c, double sigma, {double alpha = 0.8}) => Paint()
+  ..color = c.withValues(alpha: alpha * Neon.glowStrength.clamp(0.0, 1.5) / 1.5 * 1.2)
+  ..maskFilter = MaskFilter.blur(BlurStyle.normal, sigma);
+
+Color _track(VideoScene s, int t) => t >= 0 && t < s.tracks.length ? Color(s.tracks[t].color) : Neon.pink;
+
+String _barBeat(VideoScene s, double step) {
+  final st = math.max(0.0, step);
+  final bar = (st / s.stepsPerBar).floor() + 1;
+  final beat = ((st % s.stepsPerBar) / 4).floor() + 1;
+  return '$bar.$beat';
+}
+
+bool _isBlack(int pitch) => const [1, 3, 6, 8, 10].contains(pitch % 12);
+
+void _grid(Canvas canvas, Rect area, VideoScene s, double left, double visible, double u, {bool beats = true}) {
+  final spb = s.stepsPerBar;
+  final x0 = (left / 4).floor() * 4;
+  final bar = Paint()..color = Neon.line.withValues(alpha: 0.9)..strokeWidth = math.max(1, u * 0.8);
+  final beat = Paint()..color = Neon.line.withValues(alpha: 0.35)..strokeWidth = math.max(1, u * 0.5);
+  for (var st = x0.toDouble(); st <= left + visible; st += 4) {
+    final x = area.left + (st - left) / visible * area.width;
+    final isBar = st % spb == 0;
+    if (!isBar && (!beats || visible > spb * 12)) continue;
+    canvas.drawLine(Offset(x, area.top), Offset(x, area.bottom), isBar ? bar : beat);
+  }
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Arrangement flythrough: the camera follows the playhead along a slightly tilted arrangement.
+
+void _flythrough(Canvas canvas, Size size, VideoFrameInput f, DirectedShot shot, ShotCamera cam) {
+  final s = f.scene;
+  final u = _unit(size);
+  final (:left, :visible) = videoView(shot, cam);
+  final playing = <int>{for (final c in s.clips) if (c.start <= f.step && c.end > f.step) c.track};
+
+  // The tracks with clips (up to a dozen), each a lane.
+  final lanes = <int>[];
+  for (var t = 0; t < s.tracks.length && lanes.length < 12; t++) {
+    if (s.clips.any((c) => c.track == t)) lanes.add(t);
+  }
+  if (lanes.isEmpty) lanes.add(-1);
+
+  // A gentle tilt, as if flying over the timeline: perspective about the centre.
+  canvas.save();
+  final cx = size.width / 2, cy = size.height / 2;
+  final m = Matrix4.identity()
+    ..translateByDouble(cx, cy, 0, 1)
+    ..setEntry(3, 2, 0.9 / math.max(size.width, size.height))
+    ..rotateX(0.32)
+    ..translateByDouble(-cx, -cy, 0, 1);
+  canvas.transform(m.storage);
+  final area = Rect.fromLTRB(-size.width * 0.25, size.height * 0.12, size.width * 1.25, size.height * 1.02);
+  final spanSteps = visible * area.width / size.width;
+  final leftWide = left - visible * 0.25;
+  double x(double st) => area.left + (st - leftWide) / spanSteps * area.width;
+
+  _grid(canvas, area, s, leftWide, spanSteps, u);
+  final laneH = math.min(area.height / lanes.length, size.height * 0.16);
+  final lanesTop = area.top + (area.height - laneH * lanes.length) / 2;
+  for (var k = 0; k < lanes.length; k++) {
+    final t = lanes[k];
+    final top = lanesTop + k * laneH;
+    if (k.isOdd) canvas.drawRect(Rect.fromLTWH(area.left, top, area.width, laneH), Paint()..color = Neon.panel.withValues(alpha: 0.35));
+    if (t < 0) continue;
+    final color = _track(s, t);
+    for (final c in s.clips) {
+      if (c.track != t || c.end < leftWide || c.start > leftWide + spanSteps) continue;
+      final r = RRect.fromRectAndRadius(Rect.fromLTRB(x(c.start), top + laneH * 0.1, x(c.end), top + laneH * 0.9),
+          Radius.circular(4 * u));
+      final live = c.start <= f.step && c.end > f.step;
+      if (live) canvas.drawRRect(r, _glow(color, 6 * u, alpha: 0.35));
+      canvas.drawRRect(r, Paint()..color = color.withValues(alpha: live ? 0.28 : 0.16));
+      canvas.drawRRect(r, Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = math.max(1, u * (live ? 1.4 : 0.8))
+        ..color = color.withValues(alpha: live ? 0.95 : 0.55));
+      final inner = r.outerRect.deflate(laneH * 0.08);
+      if (c.audio) {
+        // An audio clip: a stylised wave, deterministic in its position.
+        final path = Path();
+        for (var px = inner.left; px <= inner.right; px += 3 * u) {
+          final st = leftWide + (px - area.left) / area.width * spanSteps;
+          final a = (math.sin(st * 1.7) * 0.5 + math.sin(st * 0.37) * 0.5).abs();
+          path.moveTo(px, inner.center.dy - a * inner.height / 2);
+          path.lineTo(px, inner.center.dy + a * inner.height / 2);
+        }
+        canvas.drawPath(path, Paint()..color = color.withValues(alpha: 0.6)..strokeWidth = math.max(1, u * 0.8));
+        continue;
+      }
+      final lo = c.lowPitch, hi = math.max(c.highPitch, c.lowPitch + 1);
+      for (final ni in c.notes) {
+        final n = s.notes[ni];
+        if (n.end < leftWide || n.start > leftWide + spanSteps) continue;
+        final nh = (inner.height / (hi - lo + 1)).clamp(2 * u, 6 * u);
+        final y = inner.bottom - (n.pitch - lo) / (hi - lo) * (inner.height - nh) - nh;
+        final nr = Rect.fromLTRB(x(n.start), y, math.max(x(n.end) - u, x(n.start) + 2 * u), y + nh);
+        final on = n.start <= f.step && n.end > f.step;
+        if (on) canvas.drawRect(nr.inflate(2 * u), _glow(color, 4 * u));
+        canvas.drawRect(nr, Paint()..color = on ? Color.lerp(color, Colors.white, 0.6)! : color.withValues(alpha: 0.7));
+      }
+      _text(canvas, c.name, Offset(r.left + 4 * u, r.top + 2 * u), 7 * u, Neon.text.withValues(alpha: live ? 0.95 : 0.6),
+          maxWidth: math.max(0, r.width - 8 * u));
+    }
+  }
+  // The playhead.
+  final px = x(f.step);
+  canvas.drawLine(Offset(px, area.top), Offset(px, area.bottom), _glow(Neon.pink, 6 * u)..strokeWidth = 6 * u);
+  canvas.drawLine(Offset(px, area.top), Offset(px, area.bottom), Paint()..color = Neon.text..strokeWidth = 1.6 * u);
+  canvas.restore();
+
+  // The ruler and section names, flat on top.
+  final ruler = Rect.fromLTWH(0, 0, size.width, size.height * 0.1);
+  canvas.drawRect(ruler, Paint()..color = Neon.panel.withValues(alpha: 0.9));
+  for (var bar = (left / s.stepsPerBar).floor(); bar * s.stepsPerBar <= left + visible; bar++) {
+    if (bar < 0) continue;
+    final st = bar * s.stepsPerBar.toDouble();
+    final bx = (st - left) / visible * size.width;
+    if (visible > s.stepsPerBar * 10 && bar % 4 != 0) continue;
+    _text(canvas, '${bar + 1}', Offset(bx + 3 * u, ruler.bottom - 13 * u), 8 * u, Neon.dim, mono: true);
+  }
+  for (final sec in s.sections) {
+    if (sec.name.isEmpty || sec.step < left - visible || sec.step > left + visible) continue;
+    final sx = (sec.step - left) / visible * size.width;
+    _text(canvas, sec.name.toUpperCase(), Offset(sx + 3 * u, 4 * u), 8 * u, Neon.yellow,
+        weight: FontWeight.w800, letterSpacing: 1.2 * u, maxWidth: size.width * 0.5);
+  }
+  final hx = (f.step - left) / visible * size.width;
+  canvas.drawLine(Offset(hx, 0), Offset(hx, ruler.bottom), Paint()..color = Neon.pink..strokeWidth = 1.5 * u);
+  canvas.drawLine(Offset(0, ruler.bottom), Offset(size.width, ruler.bottom), Paint()..color = Neon.line..strokeWidth = u);
+  if (playing.isNotEmpty) {
+    // A soft sweep of the playing tracks' colours along the bottom edge.
+    final colors = [for (final t in playing.take(4)) _track(s, t).withValues(alpha: 0.25)];
+    if (colors.length == 1) colors.add(colors.first);
+    canvas.drawRect(Rect.fromLTWH(0, size.height * 0.94, size.width, size.height * 0.06),
+        Paint()..shader = ui.Gradient.linear(Offset(0, size.height), Offset(size.width, size.height), colors));
+  }
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Piano-roll close-up of one clip.
+
+void _pianoRoll(Canvas canvas, Size size, VideoFrameInput f, DirectedShot shot, ShotCamera cam) {
+  final s = f.scene;
+  final u = _unit(size);
+  final clip = shot.clip == null ? null : s.clips[shot.clip!];
+  final color = clip == null ? Neon.blue : _track(s, clip.track);
+  final (:left, :visible) = videoView(shot, cam);
+  final span = math.max(8.0, shot.pitchSpan / math.sqrt(cam.zoom));
+  final top = shot.pitchCenter + span / 2;
+  final header = size.height * 0.1;
+  final keys = size.width * 0.12;
+  final roll = Rect.fromLTRB(keys, header, size.width, size.height);
+  final rowH = roll.height / span;
+  double y(double pitch) => roll.top + (top - pitch) * rowH;
+  double x(double st) => roll.left + (st - left) / visible * roll.width;
+
+  final active = <int>{};
+  if (clip != null) {
+    for (final ni in clip.notes) {
+      final n = s.notes[ni];
+      if (n.start > f.step) break;
+      if (n.end > f.step) active.add(n.pitch.round());
+    }
+  }
+  // Rows and keys.
+  for (var p = (top - span).floor(); p <= top.ceil(); p++) {
+    final ry = y(p + 0.5);
+    final black = _isBlack(p);
+    canvas.drawRect(Rect.fromLTWH(roll.left, ry, roll.width, rowH),
+        Paint()..color = black ? Colors.black.withValues(alpha: 0.22) : Neon.panel.withValues(alpha: 0.25));
+    final lit = active.contains(p);
+    final key = Rect.fromLTWH(0, ry, keys - u, rowH - 0.5 * u);
+    canvas.drawRect(key, Paint()..color = lit ? color : (black ? Neon.bg : Neon.text.withValues(alpha: 0.82)));
+    if (lit) canvas.drawRect(key, _glow(color, 5 * u));
+    if (p % 12 == 0) {
+      _text(canvas, 'C${p ~/ 12 - 1}', Offset(keys - 3 * u, ry + rowH / 2 - 4 * u), math.min(8 * u, rowH * 0.8),
+          Neon.bg, align: TextAlign.right, mono: true);
+    }
+  }
+  _grid(canvas, roll, s, left, visible, u);
+
+  // Notes.
+  if (clip != null) {
+    final list = clip.notes;
+    var lo = 0, hi = list.length;
+    final from = left - 64;
+    while (lo < hi) {
+      final mid = (lo + hi) >> 1;
+      if (s.notes[list[mid]].start < from) {
+        lo = mid + 1;
+      } else {
+        hi = mid;
+      }
+    }
+    for (var k = lo; k < list.length; k++) {
+      final n = s.notes[list[k]];
+      if (n.start > left + visible) break;
+      if (n.end < left) continue;
+      final r = RRect.fromRectAndRadius(
+          Rect.fromLTRB(x(n.start), y(n.pitch + 0.5) + u, math.max(x(n.end) - u, x(n.start) + 3 * u), y(n.pitch - 0.5) - u),
+          Radius.circular(2.5 * u));
+      final on = n.start <= f.step && n.end > f.step;
+      final age = (f.step - n.start).clamp(0.0, 4.0) / 4;
+      if (on) canvas.drawRRect(r.inflate(3 * u), _glow(color, (8 - 4 * age) * u, alpha: 0.9));
+      canvas.drawRRect(r, Paint()..color = on ? Color.lerp(color, Colors.white, 0.55 - 0.3 * age)! : color.withValues(alpha: 0.35 + 0.55 * n.vel));
+    }
+  }
+  final px = x(f.step);
+  canvas.drawLine(Offset(px, roll.top), Offset(px, roll.bottom), _glow(Neon.pink, 5 * u)..strokeWidth = 5 * u);
+  canvas.drawLine(Offset(px, roll.top), Offset(px, roll.bottom), Paint()..color = Neon.text..strokeWidth = 1.4 * u);
+
+  canvas.drawRect(Rect.fromLTWH(0, 0, size.width, header), Paint()..color = Neon.panel);
+  canvas.drawRect(Rect.fromLTWH(0, header - 2 * u, size.width, 2 * u), Paint()..color = color);
+  final track = clip == null ? '' : s.tracks[clip.track].name;
+  _text(canvas, (clip?.name ?? 'Notes').toUpperCase(), Offset(10 * u, header * 0.18), 11 * u, Neon.text,
+      weight: FontWeight.w800, letterSpacing: 1.4 * u, maxWidth: size.width * 0.6);
+  _text(canvas, track, Offset(10 * u, header * 0.18 + 14 * u), 8 * u, color, maxWidth: size.width * 0.6);
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Mixer: channel strips with meters.
+
+void _mixer(Canvas canvas, Size size, VideoFrameInput f, DirectedShot shot, ShotCamera cam) {
+  final s = f.scene;
+  final u = _unit(size);
+  final wide = size.width > size.height;
+  final maxStrips = wide ? 10 : 6;
+  final strips = <int>[];
+  for (var t = 0; t < s.tracks.length; t++) {
+    if (s.tracks[t].isFolder || s.tracks[t].depth > 0) continue;
+    if (s.clips.any((c) => c.track == t)) strips.add(t);
+  }
+  final focus = shot.track;
+  if (focus != null && !strips.contains(focus)) strips.insert(0, focus);
+  while (strips.length > maxStrips) {
+    strips.removeAt(strips.lastIndexWhere((t) => t != focus));
+  }
+
+  // The zoom pushes in on the focus strip.
+  canvas.save();
+  final focusX = focus == null ? 0.5 : (strips.indexOf(focus) + 0.5) / (strips.length + 1.5);
+  canvas.translate(size.width * focusX, size.height / 2);
+  canvas.scale(cam.zoom);
+  canvas.translate(-size.width * focusX, -size.height / 2);
+
+  final n = strips.length + 1.5; // the master is wider
+  final w = size.width / n;
+  final area = Rect.fromLTRB(0, size.height * 0.06, size.width, size.height * 0.94);
+  double fallbackLevel(int t) {
+    // No stem for this track: its notes sounding now, as a stand-in.
+    var v = 0.0;
+    for (var i = s.firstNoteFrom(f.step - 16); i < s.notes.length && s.notes[i].start <= f.step; i++) {
+      final nt = s.notes[i];
+      if (nt.track == t && nt.end > f.step) v = math.max(v, nt.vel * (1 - (f.step - nt.start).clamp(0.0, 8.0) / 16));
+    }
+    return v * 0.8;
+  }
+
+  for (var k = 0; k <= strips.length; k++) {
+    final master = k == strips.length;
+    final t = master ? -1 : strips[k];
+    final color = master ? Neon.pink : _track(s, t);
+    final r = Rect.fromLTWH(k * w + 3 * u, area.top, (master ? w * 1.5 : w) - 6 * u, area.height);
+    final rr = RRect.fromRectAndRadius(r, Radius.circular(8 * u));
+    canvas.drawRRect(rr, Paint()..color = Neon.panel.withValues(alpha: 0.9));
+    canvas.drawRRect(rr, Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = u * (t == focus ? 1.6 : 0.8)
+      ..color = t == focus ? color : Neon.line);
+    canvas.drawRect(Rect.fromLTWH(r.left + 6 * u, r.top + 4 * u, r.width - 12 * u, 2.5 * u), Paint()..color = color);
+    final name = master ? 'MASTER' : s.tracks[t].name;
+    _text(canvas, name, Offset(r.center.dx, r.bottom - 14 * u), 7.5 * u, Neon.text,
+        align: TextAlign.center, maxWidth: r.width - 4 * u, weight: FontWeight.w700);
+
+    // The pan knob.
+    final knobC = Offset(r.center.dx, r.top + 22 * u);
+    final pan = master ? 0.0 : s.tracks[t].pan;
+    _knob(canvas, knobC, math.min(10 * u, r.width * 0.3), 0.5 + pan / 2, color, u, bipolar: true);
+
+    // Meters and the fader.
+    final meter = Rect.fromLTRB(r.left + r.width * 0.18, r.top + 40 * u, r.right - r.width * 0.18, r.bottom - 22 * u);
+    final levels = master
+        ? [f.levels.peakL, f.levels.peakR]
+        : [f.levels.tracks[s.tracks[t].id] ?? fallbackLevel(t)];
+    final gap = 2 * u;
+    final mw = (meter.width - gap * (levels.length - 1)) / levels.length;
+    for (var c = 0; c < levels.length; c++) {
+      final mr = Rect.fromLTWH(meter.left + c * (mw + gap), meter.top, mw * (master ? 1 : 0.55), meter.height);
+      canvas.drawRRect(RRect.fromRectAndRadius(mr, Radius.circular(2 * u)), Paint()..color = Colors.black.withValues(alpha: 0.35));
+      final db = levels[c] <= 1e-5 ? -60.0 : 20 * math.log(levels[c]) / math.ln10;
+      final h = ((db + 60) / 60).clamp(0.0, 1.0) * mr.height;
+      final lit = Rect.fromLTRB(mr.left, mr.bottom - h, mr.right, mr.bottom);
+      final shader = ui.Gradient.linear(mr.bottomLeft, mr.topLeft, [Neon.green, Neon.yellow, Neon.pink], [0, 0.75, 1]);
+      if (h > 0) {
+        canvas.drawRect(lit, _glow(color, 4 * u, alpha: 0.4));
+        canvas.drawRect(lit, Paint()..shader = shader);
+      }
+    }
+    if (master) {
+      final rms = f.levels.rms <= 1e-5 ? -60.0 : 20 * math.log(f.levels.rms) / math.ln10;
+      final ry = meter.bottom - ((rms + 60) / 60).clamp(0.0, 1.0) * meter.height;
+      canvas.drawLine(Offset(meter.left, ry), Offset(meter.right, ry), Paint()..color = Neon.text..strokeWidth = 1.2 * u);
+    } else {
+      final vol = s.tracks[t].volume.clamp(0.0, 1.0);
+      final fx = meter.right - mw * 0.2;
+      canvas.drawLine(Offset(fx, meter.top), Offset(fx, meter.bottom), Paint()..color = Neon.line..strokeWidth = 2 * u);
+      final fy = meter.bottom - vol * meter.height;
+      final cap = RRect.fromRectAndRadius(Rect.fromCenter(center: Offset(fx, fy), width: mw * 0.5 + 6 * u, height: 8 * u),
+          Radius.circular(2 * u));
+      canvas.drawRRect(cap, Paint()..color = Neon.text);
+      canvas.drawRect(Rect.fromCenter(center: Offset(fx, fy), width: mw * 0.5 + 6 * u, height: u), Paint()..color = color);
+    }
+  }
+  canvas.restore();
+}
+
+void _knob(Canvas canvas, Offset c, double r, double value, Color color, double u, {bool bipolar = false, bool hot = false}) {
+  const start = math.pi * 0.75, sweep = math.pi * 1.5;
+  final v = value.clamp(0.0, 1.0);
+  canvas.drawCircle(c, r, Paint()..color = Neon.bg);
+  final ring = Rect.fromCircle(center: c, radius: r * 0.82);
+  canvas.drawArc(ring, start, sweep, false, Paint()
+    ..style = PaintingStyle.stroke
+    ..strokeWidth = r * 0.16
+    ..color = Neon.line);
+  final from = bipolar ? start + sweep / 2 : start;
+  final to = start + sweep * v;
+  final arc = Paint()
+    ..style = PaintingStyle.stroke
+    ..strokeCap = StrokeCap.round
+    ..strokeWidth = r * 0.16
+    ..color = color;
+  if (hot) canvas.drawArc(ring, math.min(from, to), (to - from).abs(), false, _glow(color, r * 0.3)..style = PaintingStyle.stroke..strokeWidth = r * 0.4);
+  canvas.drawArc(ring, math.min(from, to), (to - from).abs(), false, arc);
+  final a = to;
+  canvas.drawLine(c + Offset(math.cos(a), math.sin(a)) * r * 0.2, c + Offset(math.cos(a), math.sin(a)) * r * 0.62,
+      Paint()..color = Neon.text..strokeWidth = math.max(1, r * 0.1)..strokeCap = StrokeCap.round);
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Device: a device's faceplate with its knobs, the automated one moving, and the lane's curve under it.
+
+double _shown(double v) => v >= 0 && v <= 1 ? v : 0.5 + math.atan(v / 50) / math.pi;
+
+void _device(Canvas canvas, Size size, VideoFrameInput f, DirectedShot shot, ShotCamera cam) {
+  final s = f.scene;
+  final u = _unit(size);
+  final lane = shot.lane == null ? null : s.lanes[shot.lane!];
+  final t = shot.track ?? lane?.track ?? -1;
+  final color = _track(s, t);
+  final track = t >= 0 && t < s.tracks.length ? s.tracks[t] : null;
+  final device = track == null || track.devices.isEmpty
+      ? null
+      : track.devices[(lane?.device ?? 0).clamp(0, track.devices.length - 1)];
+
+  canvas.save();
+  canvas.translate(size.width / 2, size.height / 2);
+  canvas.scale(cam.zoom);
+  canvas.translate(-size.width / 2, -size.height / 2);
+
+  final plate = Rect.fromLTRB(size.width * 0.06, size.height * 0.08, size.width * 0.94, size.height * 0.68);
+  final rr = RRect.fromRectAndRadius(plate, Radius.circular(14 * u));
+  canvas.drawRRect(rr.inflate(4 * u), _glow(color, 14 * u, alpha: 0.25));
+  canvas.drawRRect(rr, Paint()..color = Color.lerp(Neon.bg, color, 0.07)!);
+  canvas.drawRRect(rr, Paint()..style = PaintingStyle.stroke..strokeWidth = 1.2 * u..color = color.withValues(alpha: 0.8));
+  canvas.drawRRect(RRect.fromRectAndRadius(Rect.fromLTWH(plate.left + 12 * u, plate.top + 10 * u, plate.width - 24 * u, 3 * u),
+      Radius.circular(2 * u)), Paint()..shader = ui.Gradient.linear(plate.topLeft, plate.topRight, [color, Neon.violet]));
+  final title = (device?.name ?? lane?.label ?? 'Device').toUpperCase();
+  _text(canvas, title, Offset(plate.left + 14 * u, plate.top + 20 * u), 13 * u, Neon.text,
+      weight: FontWeight.w800, letterSpacing: 1.6 * u, maxWidth: plate.width - 28 * u);
+  _text(canvas, track?.name ?? 'Master', Offset(plate.left + 14 * u, plate.top + 38 * u), 8.5 * u, color,
+      maxWidth: plate.width - 28 * u);
+
+  // Knobs: the device's parameters (up to eight, by name), the lane's own one first and lit.
+  final params = device == null ? <MapEntry<String, double>>[] : (device.params.entries.toList()..sort((a, b) => a.key.compareTo(b.key)));
+  final knobs = <(String, double, bool)>[];
+  if (lane != null) knobs.add((lane.label, lane.valueAt(f.step), true));
+  for (final p in params) {
+    if (knobs.length >= 8) break;
+    if (lane != null && p.key == lane.label) continue;
+    knobs.add((p.key, _shown(p.value), false));
+  }
+  if (knobs.isEmpty) knobs.add(('level', f.levels.rms.clamp(0.0, 1.0) * 2, false));
+  final cols = knobs.length <= 4 ? knobs.length : 4;
+  final rows = (knobs.length / cols).ceil();
+  final grid = Rect.fromLTRB(plate.left + 10 * u, plate.top + 56 * u, plate.right - 10 * u, plate.bottom - 10 * u);
+  final cw = grid.width / cols, ch = grid.height / rows;
+  for (var k = 0; k < knobs.length; k++) {
+    final (name, value, hot) = knobs[k];
+    final c = Offset(grid.left + (k % cols + 0.5) * cw, grid.top + (k ~/ cols + 0.42) * ch);
+    final r = math.min(cw, ch) * (hot ? 0.36 : 0.3);
+    _knob(canvas, c, r, value, hot ? color : Neon.blue, u, hot: hot);
+    _text(canvas, name.toUpperCase(), c + Offset(0, r + 4 * u), 7 * u, hot ? Neon.text : Neon.dim,
+        align: TextAlign.center, maxWidth: cw - 6 * u, weight: FontWeight.w700);
+  }
+  canvas.restore();
+
+  // The lane's curve around the playhead (two bars either side), and a scope from the levels.
+  final strip = Rect.fromLTRB(size.width * 0.06, size.height * 0.74, size.width * 0.94, size.height * 0.94);
+  canvas.drawRRect(RRect.fromRectAndRadius(strip, Radius.circular(10 * u)), Paint()..color = Neon.panel.withValues(alpha: 0.85));
+  final window = s.stepsPerBar * 4.0;
+  final from = f.step - window / 2;
+  final path = Path();
+  for (var k = 0; k <= 96; k++) {
+    final st = from + window * k / 96;
+    final v = lane?.valueAt(st) ?? (0.5 + 0.4 * math.sin(st * 0.8) * f.levels.rms.clamp(0.0, 1.0));
+    final pt = Offset(strip.left + strip.width * k / 96, strip.bottom - 6 * u - v * (strip.height - 12 * u));
+    k == 0 ? path.moveTo(pt.dx, pt.dy) : path.lineTo(pt.dx, pt.dy);
+  }
+  canvas.drawPath(path, _glow(color, 4 * u)..style = PaintingStyle.stroke..strokeWidth = 4 * u);
+  canvas.drawPath(path, Paint()..style = PaintingStyle.stroke..strokeWidth = 1.6 * u..color = color);
+  final now = lane?.valueAt(f.step) ?? 0.5;
+  final dot = Offset(strip.center.dx, strip.bottom - 6 * u - now * (strip.height - 12 * u));
+  canvas.drawLine(Offset(strip.center.dx, strip.top), Offset(strip.center.dx, strip.bottom), Paint()..color = Neon.pink..strokeWidth = u);
+  canvas.drawCircle(dot, 4 * u, _glow(Neon.pink, 4 * u));
+  canvas.drawCircle(dot, 2.5 * u, Paint()..color = Neon.text);
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// The position readout and the title card.
+
+void _paintHud(Canvas canvas, Size size, VideoFrameInput f) {
+  final u = _unit(size);
+  _text(canvas, _barBeat(f.scene, f.step), Offset(size.width - 8 * u, size.height - 16 * u), 8 * u,
+      Neon.text.withValues(alpha: 0.7), align: TextAlign.right, mono: true);
+}
+
+void _paintTitle(Canvas canvas, Size size, VideoFrameInput f) {
+  // Shown for three seconds, fading out over the last one.
+  const hold = 2.0, fade = 1.0;
+  if (f.seconds >= hold + fade) return;
+  final a = f.seconds < hold ? 1.0 : 1 - _ease((f.seconds - hold) / fade);
+  final u = _unit(size);
+  canvas.saveLayer(Offset.zero & size, Paint()..color = Color.fromRGBO(0, 0, 0, a));
+  canvas.drawRect(Offset.zero & size, Paint()..color = Neon.bg.withValues(alpha: 0.82));
+  final c = size.center(Offset.zero);
+  final rise = (1 - _ease(f.seconds / 0.8)) * 12 * u;
+  _text(canvas, f.title, c + Offset(0, -18 * u + rise), 26 * u, Neon.text, align: TextAlign.center,
+      weight: FontWeight.w900, maxWidth: size.width * 0.9, letterSpacing: 1.0 * u);
+  final bar = Rect.fromCenter(center: c + Offset(0, 16 * u), width: math.min(size.width * 0.5, 160 * u) * _ease(f.seconds / 1.2),
+      height: 3 * u);
+  canvas.drawRect(bar.inflate(2 * u), _glow(Neon.pink, 5 * u));
+  canvas.drawRect(bar, Paint()..shader = ui.Gradient.linear(bar.centerLeft, bar.centerRight, [Neon.yellow, Neon.pink]));
+  if (f.artist.isNotEmpty) {
+    _text(canvas, f.artist.toUpperCase(), c + Offset(0, 26 * u), 11 * u, Neon.dim, align: TextAlign.center,
+        weight: FontWeight.w700, maxWidth: size.width * 0.9, letterSpacing: 2.4 * u);
+  }
+  canvas.restore();
+}
+
+/// Draws the frame at [width] × [height] pixels off screen and returns its RGBA bytes (top row first).
+Future<Uint8List> rasterizeVideoFrame(VideoFrameInput f, int width, int height) async {
+  final recorder = ui.PictureRecorder();
+  final canvas = Canvas(recorder, Rect.fromLTWH(0, 0, width.toDouble(), height.toDouble()));
+  paintVideoFrame(canvas, Size(width.toDouble(), height.toDouble()), f);
+  final picture = recorder.endRecording();
+  final image = await picture.toImage(width, height);
+  picture.dispose();
+  try {
+    final data = await image.toByteData(format: ui.ImageByteFormat.rawRgba);
+    if (data == null) throw StateError('the frame could not be read');
+    return data.buffer.asUint8List(data.offsetInBytes, data.lengthInBytes);
+  } finally {
+    image.dispose();
+  }
+}

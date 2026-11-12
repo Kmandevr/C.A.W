@@ -118,7 +118,7 @@ void main() {
       expect(Haptics.enabled, isFalse);
       expect(EditMotion.style, EditMotionStyle.playful);
 
-      await s.chooseTheme('Night');
+      await s.chooseTheme('Dusk');
       expect(s.trackHeight, 60, reason: 'the starters share the values in force before Big');
       expect(s.longPressMenu, LongPressMenuStyle.list);
       expect(s.motion, MotionLevel.full);
@@ -150,7 +150,7 @@ void main() {
       expect(s.theme.profile['layout.header_width'], '180.0');
       expect(File('${dir.path}/themes/Mine.theme').readAsStringSync(), contains('layout.header_width: 180.0'));
 
-      await s.chooseTheme('Calm neon');
+      await s.chooseTheme('Neon');
       await s.update((x) => x.headerWidth = 140);
       expect(calmNeon.profile, isEmpty);
       expect(s.themeNamed('Mine').profile['layout.header_width'], '180.0');
@@ -234,14 +234,14 @@ void main() {
     });
   });
 
-  testWidgets('the theme editor groups Colours, Look, Layout and Behaviour, and a starter offers a duplicate',
+  testWidgets('the theme editor groups the builder, Feel, Layout, Behaviour and Advanced, and a starter offers a duplicate',
       (tester) async {
     tester.view.physicalSize = const Size(800, 6000);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
     final s = Settings();
     await tester.pumpWidget(MaterialApp(home: ThemeEditor(settings: s)));
-    for (final h in ['COLOURS', 'LOOK', 'LAYOUT', 'BEHAVIOUR']) {
+    for (final h in ['PALETTE BUILDER', 'FEEL', 'LAYOUT', 'BEHAVIOUR', 'Advanced: every colour']) {
       expect(find.text(h), findsOneWidget, reason: h);
     }
     expect(find.byKey(const ValueKey('theme-offer-duplicate')), findsNothing);

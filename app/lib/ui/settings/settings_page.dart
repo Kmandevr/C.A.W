@@ -5,7 +5,9 @@ import 'package:flutter/material.dart';
 import '../../engine/execution.dart';
 import '../../model/app_state.dart';
 import '../../model/settings.dart';
+import '../../actions/actions.dart';
 import '../feedback.dart';
+import '../keyboard/key_area.dart';
 import '../haptics.dart';
 import '../panel_motion.dart';
 import '../theme.dart';
@@ -94,13 +96,13 @@ class _SettingsPageState extends State<SettingsPage> {
           if (!wide) {
             return Scaffold(
               appBar: AppBar(title: const Text('Settings'), backgroundColor: Neon.panel),
-              body: list,
+              body: SettingsKeyArea(label: 'Settings categories', autofocus: true, child: list),
             );
           }
           return Scaffold(
             appBar: AppBar(title: Text('Settings · ${_open.title}'), backgroundColor: Neon.panel),
             body: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-              SizedBox(width: 340, child: list),
+              SizedBox(width: 340, child: SettingsKeyArea(label: 'Settings categories', autofocus: true, child: list)),
               const VerticalDivider(width: 1, color: Neon.line),
               Expanded(
                 child: SettingsSectionBody(
@@ -231,21 +233,24 @@ class SettingsSectionPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Scaffold(
         appBar: AppBar(title: Text(section.title), backgroundColor: Neon.panel),
-        body: SettingsSectionBody(section: section, deps: deps, highlight: highlight),
+        body: SettingsSectionBody(section: section, deps: deps, highlight: highlight, autofocus: true),
       );
 }
 
 /// A section's settings, scrolled to [highlight] (which flashes) when one is given.
 class SettingsSectionBody extends StatelessWidget {
-  const SettingsSectionBody({super.key, required this.section, required this.deps, this.highlight});
+  const SettingsSectionBody({super.key, required this.section, required this.deps, this.highlight, this.autofocus = false});
   final SettingsSection section;
   final SettingsDeps deps;
   final String? highlight;
 
+  /// Takes the keyboard focus when shown (a section's own page).
+  final bool autofocus;
+
   @override
   Widget build(BuildContext context) => ListenableBuilder(
         listenable: deps.settings,
-        builder: (context, _) => SettingsHighlight(
+        builder: (context, _) => SettingsKeyArea(label: 'Settings: ${section.title}', autofocus: autofocus, child: SettingsHighlight(
           id: highlight,
           // A column, not a lazy list, so the row a search jumps to exists to scroll to.
           child: SingleChildScrollView(
@@ -266,6 +271,30 @@ class SettingsSectionBody extends StatelessWidget {
               SettingsSection.about => AboutSettings(deps: deps),
             },
           ),
-        ),
+        )),
       );
+}
+
+/// A Settings list's keys (owner, 2026-11-11): up and down (or W and S) move between rows, left and right turn the
+/// focused switch off or on (a slider takes its own arrows), Space toggles or presses, Enter presses.
+class SettingsKeyArea extends StatelessWidget {
+  const SettingsKeyArea({super.key, required this.label, required this.child, this.autofocus = false});
+  final String label;
+  final Widget child;
+  final bool autofocus;
+
+  static bool _key(String id, int count, String? arg) {
+    if (id != 'settings.left' && id != 'settings.right') return false;
+    final ctx = FocusManager.instance.primaryFocus?.context;
+    if (ctx == null) return false;
+    final on = findWidgetUnder<Switch>(ctx)?.value;
+    if (on == null) return false;
+    // Already where the arrow points: nothing to do, but the key is still the switch's.
+    if (on != (id == 'settings.right')) activateFocused();
+    return true;
+  }
+
+  @override
+  Widget build(BuildContext context) =>
+      KeyArea(area: Area.settings, label: label, autofocus: autofocus, onAction: _key, child: child);
 }

@@ -1,34 +1,27 @@
 # Handoff
 
-Commit: 4cfc5a3
-
-Branch: ccr-56285e11-0xrj3h (PR #167 open, subscribed, CI green at aa1ee28)
+Commit: b8422d8
+Branch: ccr-56285e11-0xrj3h (PR #178 open into Main, watched; Main protected: PRs only, owner said merge yourself when CI is green)
 
 ## Goal
-Owner (2026-11-11, latest): "Don't stop until everything in the roadmap is completely done. I want you continuously working. Restart when your limit goes out." After the roadmap: optimize everything (fast, quick, runs extremely well), then a user-friendliness pass that does NOT change the layout or things in the app, only makes everything fit well in the UI. Wake-up scheduled 2026-11-11T17:31Z (owner's 10:31 pm).
-Owner (2026-11-10): work through everything discussed toward the open beta, without the owner's input except where a call is genuinely theirs; don't message them unless something is on fire.
+Owner (2026-11-12, newest): optimise the engine (engine/) for speed. Decision recorded (decisions.md top entry "Perceptually identical, not bit-identical"). Order: tolerance tests replace golden hashes → CI bench baseline (done: `docs/engine-performance.md`, `.github/workflows/bench.yml`) → phases, one PR each: 1 free wins (LTO, quiet/sleep everywhere, Eco lowers oversampling/FFT), 2 floating point (FTZ everywhere incl. offline, FMA/fast-math where tolerance passes, keep NaN/inf guards), 3 maths (detmath out of per-sample paths; keep bit ops for bitcrush/glitch), 4 precision/layout (float signal paths, double for phase/low-cutoff feedback; block-wise stages for NEON), 5 parallel mixer (architect review first; lock-free worker pool, fixed-order sum, big/little, fallback). audio-reviewer after each phase, code-reviewer before each PR. Ask owner if audible or a phase gains <5%. Done when all merged, tests green, before/after table per scenario (target ≈3–4x headroom on a typical song; report real number). No UI changes; C API only if needed (bump + app).
+Then: earlier goal (v1.0.0-beta.1: fit-and-finish, docs pass, version bump, pre-release).
 
-## Done and verified (on this branch, pushed)
-- Bend-in-clips fix; decisions (polyphony, landscape, inefficient plug-ins).
-- Logo C5 (owner-approved) in app, Android adaptive icon, Windows icon, SVGs in `app/assets/logo/`. Logo changes need the owner's explicit yes.
-- GitHub Releases in `.github/workflows/app.yml` (tag v* or Run workflow + release); APK native libs compressed. No release made yet.
-- Library kernels: lfo/wavetable/reverb/smoothing headers + tests (not yet used by any built-in).
-- MIDI file import/export in Dart (`app/lib/model/midi_file.dart`, `app/lib/model/midi_clips.dart`, `app/lib/ui/midi_file_actions.dart`).
+## Done and verified (pushed)
+- Merged: default-project (owner's mid tempo is default/template), keyboard-a, track-headers (one `RevealStartRequest` back-to-start hook kept), latency-comp (C API 23; UI reads heard playhead/meters), engine-bench (baseline: flagship_heavy 64v ≈103% and song32_heavy ≈100% of budget on Android-arm64 target).
+- Fixed: decisions.md conflict markers (ee40c08 had them), bench MSVC `__VERSION__`.
 
-## Open
-- Merged and pushed on the session branch (4cfc5a3, API 17): settings, routing/ducker + fixes, #133, all four FX groups + racks/browser, drums engine + editor, parity ports + C++ starters, engine leftovers (meters, VST3), MIDI devices (API 15), build tools, piano roll (K2), arrange/mixer (K1), stems/export sheet (API 16), engine off .caw (WP-B, API 17).
-- Running (worktrees): off-caw-app (WP-C), audio-engine (WP-J engine, API 18), modulators (WP-F #161, API 19); architect designing #127 (WP-G) into architecture.md.
-- Next: WP-D delete the .caw language (after WP-C; pattern templates acid-line/chords need a Dart home first), WP-E (#159 .caw project extension), WP-G build from the architect's plan, WP-J app UI after the engine, then the optimization pass, the fit-and-finish pass (no layout changes), WP-N docs, version bump, release.
-- Known flaky timing tests to fix in the cleanup pass: double-tap in pattern_editor and files, the cpp_builder live-check debounce. Fixed so far: tap tempo (fake clock), export queue wait.
-- Closing done issues on GitHub was blocked by auto mode: ask the owner (#7 #21 #24 #36 #38 #40 #76 #123 #128 #137 #168 #170 #172 #175; superseded #32 #54).
-- Owner choices to batch: every "to confirm" entry in decisions.md (2026-11-10/11), the Engine Lab placement, and the new screens' looks.
+## Open (agents in worktrees `.claude/worktrees/<name>`; on restart read `git log ccr-56285e11-0xrj3h..<name>` and finish/merge)
+- `tolerance-tests`: replace goldens with tolerance tests (−120 dBFS residual stable; loudness 0.1 dB + band spectrum chaotic; discrete exact; broken-case tests).
+- `speed-free-wins`: phase 1 (must keep existing goldens passing; new tests in engine/tests/speed_free_wins_test.cpp).
+- Owner questions open: latency badge placement; compensation default off for wired?; keyboard batch B WASD clash; per-note FX look/over-budget; plugin page state in project?; Reset curve meaning; layout-file custom labels/packages/one file.
+- Next waves after speed: keyboard batch B (spec in decisions "The whole app works from the keyboard"), layout file phase 1, phone ⋯ More/search/hints, desktop look batch C, midi_clips learned-CC, platform-modularity plan.
 
 ## Next
-- Merge each agent as it reports (registries and API numbers conflict: keep all entries), audio-review engine merges, build an APK and send it with what's new.
-- Then the next waves from the audit: WP-H MIDI devices, WP-I stems/render parity, WP-K screens; then WP-B/C/D (#160), WP-E (#159), WP-F (#161), WP-G (#127), WP-J (audio clips/recording/sampler); WP-N docs; WP-O release.
-
-## Owner's calls pending
-- Confirm MIDI storage (pattern text + SMF exchange); Android developer verification (2027, see vision.md).
+- #178 green on 3bd5bd7 → merge into Main, dispatch app.yml with installables, send APK link.
+- Merge tolerance-tests, then phase 1 (rebase on it), each its own PR into Main.
 
 ## Read first
-- `docs/decisions.md`, `docs/app.md`
+- `docs/decisions.md` (top entry)
+- `docs/engine-performance.md`
+- `.claude/rules/engine.md`

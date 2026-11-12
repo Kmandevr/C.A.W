@@ -7,6 +7,15 @@ const _p = Area.pattern;
 const _r = Area.arranger;
 const _e = Area.exporter;
 const _c = Area.code;
+const _sec = Area.sections;
+const _fx = Area.fx;
+const _dev = Area.device;
+const _mix = Area.mixer;
+const _fil = Area.files;
+const _tab = Area.tabs;
+const _set = Area.settings;
+const _pg = Area.page;
+const _mnu = Area.menu;
 
 /// Default toolbars per area (docs/actions.md "Phone toolbar").
 const Map<Area, List<String>> standardToolbars = {
@@ -61,8 +70,24 @@ const List<ActionDef> standardActions = [
   ActionDef('view.fullscreen', 'Full screen', _g, description: 'Full screen for the current editor', defaultKeys: [
     'F11',
   ]),
-  ActionDef('focus.next', 'Focus next panel', _g, defaultKeys: ['Tab'], toast: false),
-  ActionDef('focus.prev', 'Focus previous panel', _g, defaultKeys: ['Shift+Tab'], toast: false),
+  // Keyboard focus (owner, 2026-11-11: the whole app works from the keyboard). The ids stay, so saved keymaps keep them.
+  ActionDef('focus.next', 'Next area', _g,
+      description: 'The next part of this screen, in reading order', defaultKeys: ['Tab'], toast: false),
+  ActionDef('focus.prev', 'Previous area', _g, defaultKeys: ['Shift+Tab'], toast: false),
+  ActionDef('focus.in', 'Go in', _g,
+      description: 'Into the focused area; on a button, presses it', defaultKeys: ['Enter'], toast: false),
+  ActionDef('focus.out', 'Up a level', _g,
+      description: 'From a control to its area, from an area to the section bar, or closes the page',
+      defaultKeys: ['Esc'], toast: false),
+  // The transport's ⏮ (owner, 2026-11-11).
+  ActionDef('transport.toStart', 'Back to start', _g,
+      description: 'To the loop start when a loop is on, else the project start', defaultKeys: ['Home'], toast: false),
+  ActionDef('transport.toProjectStart', 'Back to the project start', _g, defaultKeys: ['Ctrl+Home'], toast: false),
+  // The Build section's parts, like VS Code's (proposal keys): they work from any area, so they are global.
+  ActionDef('build.focus.explorer', 'Focus the explorer', _g,
+      description: 'Shows it if hidden; again hides it', defaultKeys: ['Ctrl+Shift+E'], toast: false),
+  ActionDef('build.focus.tabs', 'Focus the Build tabs', _g, defaultKeys: ['Ctrl+Shift+B'], toast: false),
+  ActionDef('build.focus.editor', 'Focus the editor', _g, defaultKeys: ['Ctrl+Shift+Enter'], toast: false),
   ActionDef('menu.open', 'Open the long-press menu', _g, defaultKeys: ['Menu', 'Shift+F10'], toast: false),
   // Vim-style control, run by the Vim controller itself.
   ActionDef('vim.commandLine', 'Command line', _g, defaultKeys: [':'], internal: true, toast: false),
@@ -263,6 +288,12 @@ const List<ActionDef> standardActions = [
   ActionDef('arranger.marker.add', 'Add marker at the playhead', _r, defaultKeys: ['Shift+M'], isChange: true),
   ActionDef('arranger.region.add', 'Add region', _r, description: 'Over the time selection, else the loop range',
       defaultKeys: ['Shift+R'], isChange: true),
+  ActionDef('arranger.zoom.fit', 'Zoom to fit the song', _r, description: 'The whole song in the view, from its start',
+      toast: false),
+  ActionDef('arranger.zoom.selection', 'Zoom to the selection', _r,
+      description: 'The selected clips, else the time selection, fill the view', toast: false),
+  ActionDef('arranger.view.start', 'Show the start', _r, description: 'The view glides back to the song\'s start',
+      toast: false),
   ActionDef('arranger.marker.next', 'Go to next marker', _r, defaultKeys: ['Ctrl+]'], toast: false),
   ActionDef('arranger.marker.prev', 'Go to previous marker', _r, defaultKeys: ['Ctrl+['], toast: false),
   // REAPER's 1–0: the first ten markers, in time order. Bound digits run their action instead of starting a count.
@@ -326,4 +357,73 @@ const List<ActionDef> standardActions = [
   ActionDef('code.vim.searchNext', 'Next match', _c, description: 'Vim n', defaultKeys: ['N'], toast: false),
   ActionDef('code.vim.visual', 'Visual', _c,
       description: 'Vim v: movement extends the selection', defaultKeys: ['V'], setsMode: VimMode.visual, toast: false),
+
+  // Keyboard-focus contexts (docs/actions.md "Keyboard focus"). Arrows and WASD both move; Vim keys add H J K L.
+  ActionDef('sections.prev', 'Previous section', _sec, defaultKeys: ['Left', 'A', 'Up', 'W'], toast: false),
+  ActionDef('sections.next', 'Next section', _sec, defaultKeys: ['Right', 'D', 'Down', 'S'], toast: false),
+  ActionDef('sections.open', 'Into the section', _sec, defaultKeys: ['Enter'], toast: false),
+
+  ActionDef('fx.up', 'Previous effect', _fx, defaultKeys: ['Up', 'W'], toast: false),
+  ActionDef('fx.down', 'Next effect', _fx, defaultKeys: ['Down', 'S'], toast: false),
+  ActionDef('fx.open', 'Open the effect', _fx, description: 'Its editor', defaultKeys: ['Enter'], toast: false),
+  ActionDef('fx.bypass', 'Bypass', _fx, description: 'On / off', defaultKeys: ['Space'], isChange: true),
+  ActionDef('fx.duplicate', 'Duplicate the effect', _fx, defaultKeys: ['Ctrl+D'], isChange: true),
+  ActionDef('fx.delete', 'Remove the effect', _fx, defaultKeys: ['Delete', 'Backspace'], isChange: true),
+  ActionDef('fx.moveUp', 'Move the effect up', _fx, defaultKeys: ['Alt+Up', 'Alt+W'], isChange: true, toast: false),
+  ActionDef('fx.moveDown', 'Move the effect down', _fx, defaultKeys: ['Alt+Down', 'Alt+S'], isChange: true, toast: false),
+  ActionDef('fx.add', 'Add FX or instrument', _fx, defaultKeys: ['Insert']),
+
+  ActionDef('device.prev', 'Previous control', _dev, description: 'In reading order', defaultKeys: ['Left', 'A'], toast: false),
+  ActionDef('device.next', 'Next control', _dev, description: 'In reading order', defaultKeys: ['Right', 'D'], toast: false),
+  ActionDef('device.inc', 'Value up', _dev, defaultKeys: ['Up', 'W', '+', '='], isChange: true, toast: false),
+  ActionDef('device.dec', 'Value down', _dev, defaultKeys: ['Down', 'S', '-'], isChange: true, toast: false),
+  ActionDef('device.incFine', 'Value up fine', _dev, defaultKeys: ['Shift+Up', 'Shift+W'], isChange: true, toast: false),
+  ActionDef('device.decFine', 'Value down fine', _dev, defaultKeys: ['Shift+Down', 'Shift+S'], isChange: true, toast: false),
+  ActionDef('device.reset', 'Default value', _dev, defaultKeys: ['Home'], isChange: true, toast: false),
+  ActionDef('device.type', 'Type a value', _dev, defaultKeys: ['Enter'], toast: false),
+
+  // S is solo here (owner's M/S), so down is the arrow (and J with Vim keys).
+  ActionDef('mixer.left', 'Previous strip', _mix, defaultKeys: ['Left', 'A'], toast: false),
+  ActionDef('mixer.right', 'Next strip', _mix, defaultKeys: ['Right', 'D'], toast: false),
+  ActionDef('mixer.up', 'Previous control', _mix, description: 'Level, pan, sends', defaultKeys: ['Up', 'W'], toast: false),
+  ActionDef('mixer.down', 'Next control', _mix, description: 'Level, pan, sends', defaultKeys: ['Down'], toast: false),
+  ActionDef('mixer.inc', 'Value up', _mix, defaultKeys: ['+', '='], isChange: true, toast: false),
+  ActionDef('mixer.dec', 'Value down', _mix, defaultKeys: ['-'], isChange: true, toast: false),
+  ActionDef('mixer.reset', 'Default value', _mix, description: '0 dB, centre, the send\'s default', defaultKeys: ['Home'],
+      isChange: true, toast: false),
+  ActionDef('mixer.mute', 'Mute', _mix, defaultKeys: ['M'], isChange: true),
+  ActionDef('mixer.solo', 'Solo', _mix, defaultKeys: ['S'], isChange: true),
+
+  ActionDef('files.left', 'Left', _fil, defaultKeys: ['Left', 'A'], toast: false),
+  ActionDef('files.right', 'Right', _fil, defaultKeys: ['Right', 'D'], toast: false),
+  ActionDef('files.up', 'Up', _fil, defaultKeys: ['Up', 'W'], toast: false),
+  ActionDef('files.down', 'Down', _fil, defaultKeys: ['Down', 'S'], toast: false),
+  ActionDef('files.open', 'Open', _fil, defaultKeys: ['Enter'], toast: false),
+  ActionDef('files.rename', 'Rename', _fil, defaultKeys: ['F2']),
+  ActionDef('files.delete', 'Delete', _fil, description: 'Asks first', defaultKeys: ['Delete']),
+
+  ActionDef('tabs.prev', 'Previous tab', _tab, defaultKeys: ['Left', 'A'], toast: false),
+  ActionDef('tabs.next', 'Next tab', _tab, defaultKeys: ['Right', 'D'], toast: false),
+  ActionDef('tabs.open', 'Open the tab', _tab, description: 'And go to its editor', defaultKeys: ['Enter'], toast: false),
+  ActionDef('tabs.close', 'Close the tab', _tab, defaultKeys: ['Delete', 'Ctrl+W']),
+
+  ActionDef('settings.up', 'Previous row', _set, defaultKeys: ['Up', 'W'], toast: false),
+  ActionDef('settings.down', 'Next row', _set, defaultKeys: ['Down', 'S'], toast: false),
+  ActionDef('settings.left', 'Less / off', _set, description: 'A switch off; a slider down', defaultKeys: ['Left', 'A'],
+      toast: false),
+  ActionDef('settings.right', 'More / on', _set, description: 'A switch on; a slider up', defaultKeys: ['Right', 'D'],
+      toast: false),
+  ActionDef('settings.toggle', 'Toggle or press', _set, defaultKeys: ['Space'], toast: false),
+
+  ActionDef('page.up', 'Up', _pg, defaultKeys: ['Up', 'W'], toast: false),
+  ActionDef('page.down', 'Down', _pg, defaultKeys: ['Down', 'S'], toast: false),
+  ActionDef('page.left', 'Left', _pg, defaultKeys: ['Left', 'A'], toast: false),
+  ActionDef('page.right', 'Right', _pg, defaultKeys: ['Right', 'D'], toast: false),
+  ActionDef('page.activate', 'Press', _pg, defaultKeys: ['Space'], toast: false),
+
+  // Menus, sheets and dialogs: letters jump to the item they start (type-ahead), so only the arrows move.
+  ActionDef('menu.item.up', 'Previous item', _mnu, defaultKeys: ['Up'], toast: false),
+  ActionDef('menu.item.down', 'Next item', _mnu, defaultKeys: ['Down'], toast: false),
+  ActionDef('menu.item.choose', 'Choose', _mnu, defaultKeys: ['Enter'], toast: false),
+  ActionDef('menu.item.close', 'Close', _mnu, defaultKeys: ['Esc'], toast: false),
 ];

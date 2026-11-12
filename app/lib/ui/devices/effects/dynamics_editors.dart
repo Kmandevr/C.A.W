@@ -141,7 +141,7 @@ class _CompPainter extends CustomPainter {
       ..style = PaintingStyle.stroke);
     Offset pt(double inDb, double outDb) =>
         Offset(inset.left + dbUnit(inDb) * inset.width, inset.bottom - dbUnit(outDb) * inset.height);
-    final faint = Paint()..color = Colors.white.withValues(alpha: 0.08);
+    final faint = Paint()..color = Neon.ink.withValues(alpha: 0.08);
     canvas.drawLine(pt(-60, -60), pt(0, 0), faint);
     for (final d in [-48.0, -36.0, -24.0, -12.0]) {
       canvas.drawLine(pt(d, -60), pt(d, 0), faint);
@@ -162,8 +162,8 @@ class _CompPainter extends CustomPainter {
     canvas.drawCircle(tp, 3, Paint()..color = second);
     if (detector case final d? when d > -60) {
       final at = pt(d.clamp(-60.0, 0.0), out(d.clamp(-60.0, 0.0)));
-      canvas.drawCircle(at, 10, Paint()..color = Colors.white.withValues(alpha: 0.15));
-      canvas.drawCircle(at, 5, Paint()..color = Colors.white);
+      canvas.drawCircle(at, 10, Paint()..color = Neon.ink.withValues(alpha: 0.15));
+      canvas.drawCircle(at, 5, Paint()..color = Neon.ink);
     }
     canvas.restore();
     paintLabel(canvas, '${ratio >= 19.95 ? '∞' : ratio.toStringAsFixed(ratio < 10 ? 1 : 0)}:1', Offset(inset.right - 6, inset.bottom - 10),
@@ -198,7 +198,7 @@ void paintHistory(Canvas canvas, Rect area, LevelHistory hist, Color color, {boo
     ..close();
   canvas.save();
   canvas.clipRect(area);
-  canvas.drawPath(input, Paint()..color = Colors.white.withValues(alpha: 0.10));
+  canvas.drawPath(input, Paint()..color = Neon.ink.withValues(alpha: 0.1));
   canvas.drawPath(output, Paint()
     ..color = color.withValues(alpha: 0.85)
     ..style = PaintingStyle.stroke
@@ -315,11 +315,11 @@ class _LimiterPainter extends CustomPainter {
     canvas.clipRect(area);
     canvas.drawPath(input, Paint()
       ..shader = LinearGradient(begin: Alignment.bottomCenter, end: Alignment.topCenter,
-          colors: [color.withValues(alpha: 0.1), color.withValues(alpha: 0.45)]).createShader(area));
+          colors: Neon.ramp([color.withValues(alpha: 0.1), color.withValues(alpha: 0.45)])).createShader(area));
     canvas.drawPath(gr, Paint()..color = Neon.pink.withValues(alpha: 0.5));
     canvas.restore();
     for (final db in [-6.0, -12.0, -18.0]) {
-      canvas.drawLine(Offset(0, y(db)), Offset(area.right, y(db)), Paint()..color = Colors.white.withValues(alpha: 0.05));
+      canvas.drawLine(Offset(0, y(db)), Offset(area.right, y(db)), Paint()..color = Neon.ink.withValues(alpha: 0.05));
       paintLabel(canvas, '${db.round()}', Offset(area.right - 4, y(db) - 6), Neon.dim, size: 8, align: 1);
     }
     final cy = y(ceiling);
@@ -437,7 +437,7 @@ class _GatePainter extends CustomPainter {
         ..color = (open ? color : Neon.dim).withValues(alpha: open ? 0.7 : 0.3)
         ..strokeWidth = math.max(1.0, dx * 0.7));
     }
-    canvas.drawLine(Offset(0, mid), Offset(size.width, mid), Paint()..color = Colors.white.withValues(alpha: 0.08));
+    canvas.drawLine(Offset(0, mid), Offset(size.width, mid), Paint()..color = Neon.ink.withValues(alpha: 0.08));
     final ta = amp(thr);
     for (final y in [mid - ta, mid + ta]) {
       strokeGlow(canvas, Path()
@@ -549,7 +549,7 @@ class _TransientPainter extends CustomPainter {
       i == 0 ? shaped.moveTo(px, y(sh)) : shaped.lineTo(px, y(sh));
     }
     canvas.drawPath(orig, Paint()
-      ..color = Colors.white.withValues(alpha: 0.3)
+      ..color = Neon.ink.withValues(alpha: 0.3)
       ..style = PaintingStyle.stroke
       ..strokeWidth = 1.2);
     final split = x(0.03);
@@ -563,7 +563,7 @@ class _TransientPainter extends CustomPainter {
     fillFade(canvas, shaped, base, size, second, alpha: 0.3);
     strokeGlow(canvas, shaped, second, width: 2.4);
     canvas.restore();
-    canvas.drawLine(Offset(split, top), Offset(split, base), Paint()..color = Colors.white.withValues(alpha: 0.1));
+    canvas.drawLine(Offset(split, top), Offset(split, base), Paint()..color = Neon.ink.withValues(alpha: 0.1));
     paintLabel(canvas, 'ATTACK ${_pct(attack)}', Offset(8, base - 2), active == 'attack' ? Neon.text : color, size: 9,
         weight: FontWeight.w800);
     paintLabel(canvas, 'SUSTAIN ${_pct(sustain)}', Offset(size.width - 8, top + 18), active == 'sustain' ? Neon.text : second,

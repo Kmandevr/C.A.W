@@ -257,10 +257,11 @@ class _RulerPainter extends CustomPainter {
       from = pos.pixels.clamp(0.0, size.width).toDouble();
       to = (pos.pixels + pos.viewportDimension).clamp(from, size.width).toDouble();
     }
-    // A label every bar, or every 2, 4, 8… bars when bars are narrower than a label; a tick at each bar.
+    // A label every bar, or every 4, 16, 64… bars when bars are narrower than a label (owner, 2026-11-11: far out it
+    // still reads); a tick at each label.
     var every = 1;
-    while (every * barW < 28 && every < 1 << 16) {
-      every *= 2;
+    while (every * barW < (every >= 1024 ? 40 : 28) && every < 1 << 30) {
+      every *= 4;
     }
     final tick = Paint()..color = Neon.dim.withValues(alpha: 0.4)..strokeWidth = 1;
     canvas.drawLine(Offset(from, size.height - 0.5), Offset(to, size.height - 0.5), Paint()..color = Neon.line);

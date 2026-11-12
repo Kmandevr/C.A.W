@@ -1,7 +1,7 @@
 ---
 title: C.A.W vault
 summary: Vault home: links to every note.
-updated: 2026-11-10
+updated: 2026-11-12
 ---
 
 # C.A.W vault
@@ -30,6 +30,7 @@ Project memory for C.A.W. Open this docs/ folder as a vault in Obsidian, or read
 - [Modular engine implementation status](engine-build-status.md): evidence-based ledger of built engine components, incomplete integrations and verification
 - [Native module SDK](native-module-sdk.md): the versioned C ABI contract and remaining host/loading work
 - [App](app.md): factual inventory of the eight current workspaces, engine integration, storage, build and tests
+- [Engine performance](engine-performance.md): the CI bench suite (`caw_bench SECONDS 500`, the Bench workflow), its scenarios, the per-target baseline and the speed phases' before/after tables
 - [Performance](performance.md): how the engine and app are measured for low-end devices, the audit's ranked bottlenecks, fixes with before/after numbers, and next steps
 - [Actions, keys and macros](actions.md): draft for review: every command as an action, customisable keys per area, macros, toolbars and the default keymap
 - [UI design](ui.md): current editor implementation, phone/desktop interaction design and performance constraints

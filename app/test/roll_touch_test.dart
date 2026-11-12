@@ -10,6 +10,7 @@ import 'package:caw/model/project.dart';
 import 'package:caw/ui/motion.dart';
 import 'package:caw/ui/pattern_editor.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 // At 1200 x 800: 44 px of keys, 28 px a step, rows 16 px; the top note's row middle is at y = 140.
@@ -77,7 +78,7 @@ void main() {
     addTearDown(tester.view.reset);
     final s = AppState();
     s.engine = Engine.create();
-    s.project = s.starterProject();
+    s.project = s.demoProject();
     final m = ModuleDoc(id: 'line', name: 'line', source: '---\nkind: pattern\n---\n$body');
     s.project.modules.add(m);
     s.ready = true;
@@ -124,6 +125,22 @@ void main() {
     expect(RollPaintStats.edits, 0);
     await settle(tester);
     expect(notes(m).map((n) => n.at).last, Steps(9));
+    s.dispose();
+  }, skip: skip);
+
+  testWidgets('a note moved by a key slides there quickly (about a tenth of a second)', (tester) async {
+    final (s, m) = await open(tester, '0 C3 1\n');
+    await tester.tapAt(Offset(_x(0.5), _top)); // selects it
+    await settle(tester);
+    expect(RollPaintStats.edits, 0);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyD);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+    expect(RollPaintStats.edits, greaterThan(0), reason: 'part way');
+    await tester.pump(const Duration(milliseconds: 90));
+    expect(RollPaintStats.edits, 0, reason: 'there by ~120 ms');
+    await settle(tester);
+    expect(notes(m).single.at, isNot(Steps.zero), reason: 'written when the edits pause');
     s.dispose();
   }, skip: skip);
 

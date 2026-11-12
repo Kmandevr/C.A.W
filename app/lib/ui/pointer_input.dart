@@ -228,7 +228,9 @@ void panBy(Offset delta, {ScrollController? h, ScrollController? v}) {
 /// A mouse's double-click is its second left click within [kDoubleTapTimeout] of the first press; a finger's (or
 /// pen's) double tap is its second press within [kDoubleTapTimeout] of the first tap's lift, as Flutter's own double
 /// tap counts it. Both land within [kDoubleTapSlop] of the first press, on the same [down] `target` (a widget shared
-/// by several items names the item), and a third press starts again.
+/// by several items names the item), and a third press starts again. A press with `anywhere` (a widget that moved
+/// under the finger after the first tap, such as the focus view's pinned track) counts wherever it lands on that
+/// target.
 class ClickCounter {
   // When the window for a second press closes: a first click's press (a mouse) or a first tap's lift (a finger) plus
   // the double-tap time. The gesture binding's clock is the wall clock, and a test's fake clock under test.
@@ -253,18 +255,23 @@ class ClickCounter {
   /// A double-click or a double tap.
   bool get twice => _double;
 
+  /// What the last press went to.
+  Object? get lastTarget => _lastTarget;
+
   /// Where the last press went down, globally and in the [Listener]'s own coordinates.
   Offset get position => _lastPos;
   Offset get localPosition => _local;
 
-  void down(PointerDownEvent e, {Object? target}) {
+  /// A press. With [anywhere] a second press on the same [target] counts wherever it lands (a track the first tap
+  /// moved).
+  void down(PointerDownEvent e, {Object? target, bool anywhere = false}) {
     final now = _now;
     _mouse = isMousePointer(e.kind);
     // Only the left button double-clicks; a right-click neither counts nor opens the window.
     final counts = !_mouse || e.buttons == kPrimaryMouseButton;
     final end = _windowEnd;
     _double = counts && end != null && !now.isAfter(end) && target == _lastTarget &&
-        (e.position - _lastPos).distance <= kDoubleTapSlop;
+        (anywhere || (e.position - _lastPos).distance <= kDoubleTapSlop);
     // A mouse's window opens at its first click; a finger's at its first tap's lift ([up]). A third press starts again.
     _windowEnd = _mouse && counts && !_double ? now.add(kDoubleTapTimeout) : null;
     _pointer = !_mouse && counts && !_double ? e.pointer : null;
@@ -272,6 +279,25 @@ class ClickCounter {
     _local = e.localPosition;
     _lastTarget = target;
     _downAt = now;
+    _lastPointer = e.pointer;
+  }
+
+  /// The pointer of the last press counted.
+  int? get lastPointer => _lastPointer;
+  int? _lastPointer;
+
+  /// How near the first press a [secondHere] must land: a finger's second tap, not a neighbour's.
+  static const herePx = 36.0;
+
+  /// A press that lands where the first one did, inside the window, on something that isn't a target (what was under
+  /// the first moved away): counted as the second press of [lastTarget] ([twice]). False, and nothing counted, when
+  /// it doesn't.
+  bool secondHere(PointerDownEvent e) {
+    if (e.pointer == _lastPointer) return false;
+    final end = _windowEnd;
+    if (end == null || _now.isAfter(end) || (e.position - _lastPos).distance > herePx) return false;
+    down(e, target: _lastTarget);
+    return _double;
   }
 
   /// A lift: a finger's first tap (short, and not moved past the touch slop) opens the window for its second.

@@ -139,7 +139,7 @@ class DisperserPage extends StatelessWidget {
           double y(double ms) => h - 12 - (h - 36) * ((math.log(math.max(ms, 0.1)) / math.ln10 + 1) / 4).clamp(0.0, 1.0);
           paintFrequencyGrid(canvas, size, h - 12);
           for (final (ms, l) in [(1.0, '1 ms'), (10.0, '10 ms'), (100.0, '100 ms')]) {
-            canvas.drawLine(Offset(0, y(ms)), Offset(w, y(ms)), Paint()..color = Colors.white.withValues(alpha: 0.04));
+            canvas.drawLine(Offset(0, y(ms)), Offset(w, y(ms)), Paint()..color = Neon.ink.withValues(alpha: 0.04));
             paintLabel(canvas, l, Offset(4, y(ms) - 6), Neon.dim, size: 8);
           }
           Path curve(double fc) => responsePath(size, (hz) => disperserDelayMs(hz, stages: stages, freq: fc, q: q), y, lo: 0, hi: 1e4);

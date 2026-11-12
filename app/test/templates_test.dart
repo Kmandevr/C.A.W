@@ -3,6 +3,7 @@
 import 'dart:io';
 
 import 'package:caw/model/app_state.dart';
+import 'package:caw/model/default_project.dart';
 import 'package:caw/model/project.dart';
 import 'package:caw/model/routing.dart';
 import 'package:caw/model/settings.dart';
@@ -30,6 +31,8 @@ ProjectDoc project() => ProjectDoc(id: 'p', name: 'My song', bpm: 97, modules: [
     ]);
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+  setUpAll(loadDefaultProject);
   late AppState s;
   setUp(() {
     s = AppState(settings: Settings());
@@ -37,14 +40,14 @@ void main() {
   });
   tearDown(() => s.dispose());
 
-  test('the bundled starters: First loop and Song sketch, and five track templates', () {
-    expect(s.projectTemplates.map((t) => t.name), ['First loop', 'Song sketch']);
+  test('the bundled starters: Mid tempo and Song sketch, and five track templates', () {
+    expect(s.projectTemplates.map((t) => t.name), ['Mid tempo', 'Song sketch']);
     expect(s.trackTemplates.map((t) => t.name), ['Drums', 'Bass', 'Keys', 'Pad', 'Reverb bus']);
     final sketch = s.projectFromTemplate(s.templateById('builtin:song-sketch')!);
     expect(sketch.layers.map((l) => l.name), ['Drums', 'Bass', 'Keys', 'Pad', 'Reverb bus']);
     final bus = sketch.layers.last;
     expect(sketch.layers.firstWhere((l) => l.name == 'Pad').sends.single.to, bus.id);
-    expect(s.projectFromTemplate(s.templateById(firstLoopTemplateId)!).name, 'First loop');
+    expect(s.projectFromTemplate(s.templateById(firstLoopTemplateId)!).name, 'mid tempo');
   });
 
   test('a project saved as a template comes back as a new project with its tracks and clips', () {
@@ -64,7 +67,7 @@ void main() {
   test('New project opens the template Settings names, or a blank one', () {
     expect(s.newProjectDoc().layers, isEmpty);
     s.settings.newProjectTemplate = firstLoopTemplateId;
-    expect(s.newProjectDoc().name, 'First loop');
+    expect(s.newProjectDoc().name, 'mid tempo');
     s.settings.newProjectTemplate = s.saveProjectTemplate('Mine').id;
     expect(s.newProjectDoc().name, 'Mine');
     s.settings.newProjectTemplate = 'gone';

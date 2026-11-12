@@ -346,6 +346,11 @@ void main() {
       return Offset(r.right - r.width / 6, r.center.dy);
     }
 
+    Future<void> hold(WidgetTester tester, Finder f) async {
+      await tester.longPress(f);
+      await tester.pumpAndSettle();
+    }
+
     Future<void> doubleTap(WidgetTester tester, Finder f) async {
       await tester.tap(f);
       await tester.pump(const Duration(milliseconds: 60));
@@ -366,7 +371,7 @@ void main() {
       expect(layer('c').parentId, 'f');
     });
 
-    testWidgets('a long press picks a header up at once; let go in place it stays, no menu; a double tap opens it',
+    testWidgets('a long press picks a header up at once; let go in place it stays and the menu opens',
         (tester) async {
       await pump(tester, size: const Size(412, 900));
       final head = find.byKey(const ValueKey('track-header-c'));
@@ -376,13 +381,16 @@ void main() {
       await g.up();
       await settle(tester);
       expect(s.project.layers.map((l) => l.id), ['a', 'f', 'b', 'c']);
-      expect(find.text('Rename'), findsNothing, reason: 'a long press opens no menu');
+      expect(find.text('Rename'), findsOneWidget, reason: 'a hold let go without moving opens the menu');
+      await tester.tapAt(const Offset(5, 5));
+      await settle(tester);
+      expect(find.text('Rename'), findsNothing);
 
       final a = tester.getRect(find.byKey(const ValueKey('track-header-a')));
       await dragHeader(tester, 'c', Offset(a.center.dx - 60, a.top + 4), touch: true);
       expect(s.project.layers.first.id, 'c');
 
-      await doubleTap(tester, find.byKey(const ValueKey('track-header-b')));
+      await hold(tester, find.byKey(const ValueKey('track-header-b')));
       expect(find.text('Rename'), findsOneWidget);
       expect(find.byKey(const ValueKey('menu-section-Track')), findsOneWidget, reason: 'grouped in sections');
     });
@@ -569,7 +577,7 @@ void main() {
     testWidgets("the track menu's volume takes a typed value and resets; the clip length applies on Enter",
         (tester) async {
       await pump(tester);
-      await doubleTap(tester, find.byKey(const ValueKey('track-header-a')));
+      await hold(tester, find.byKey(const ValueKey('track-header-a')));
       expect(find.byKey(const ValueKey('menu-section-Mix')), findsOneWidget);
       expect(find.byKey(const ValueKey('menu-number-slider-volume')), findsOneWidget);
       await tester.enterText(find.byKey(const ValueKey('menu-number-field-volume')), '-6');
@@ -594,7 +602,7 @@ void main() {
     testWidgets('the ring style lists the same entries; a number opens its editor over the ring', (tester) async {
       s.settings.longPressMenu = LongPressMenuStyle.ring;
       await pump(tester);
-      await doubleTap(tester, find.byKey(const ValueKey('track-header-a')));
+      await hold(tester, find.byKey(const ValueKey('track-header-a')));
       expect(find.byKey(const ValueKey('long-press-ring')), findsOneWidget);
       await tester.tap(find.byTooltip('Pan'));
       await tester.pumpAndSettle();

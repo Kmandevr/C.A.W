@@ -12,6 +12,7 @@ import '../device_scope.dart';
 import 'feel.dart';
 import 'grab_gesture.dart';
 import 'hero.dart';
+import 'key_param.dart';
 
 /// Draws a small picture of choice [index] in [rect] (a mode's curve, a filter's shape, a waveform).
 typedef ChoiceIcon = void Function(Canvas canvas, Rect rect, int index, Color color);
@@ -60,7 +61,7 @@ class ModeTiles extends StatelessWidget {
               duration: Motion.fade(Motion.small, Motion.of(context)),
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(10),
-                color: k == sel ? c.withValues(alpha: 0.2) : Colors.white.withValues(alpha: 0.03),
+                color: k == sel ? c.withValues(alpha: 0.2) : Neon.ink.withValues(alpha: 0.03),
                 border: Border.all(color: k == sel ? c : Neon.line, width: k == sel ? 1.5 : 1),
                 boxShadow: k == sel ? [BoxShadow(color: c.withValues(alpha: 0.25), blurRadius: 10)] : null),
               child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
@@ -77,10 +78,10 @@ class ModeTiles extends StatelessWidget {
       for (var k = to; k < from + per && rows > 1; k++) const Expanded(child: SizedBox()),
       ]));
     }
-    if (rows == 1) return row(0);
-    return Column(mainAxisSize: MainAxisSize.min, children: [
+    // The keyboard steps through the tiles as one control.
+    return KeyParam(paramId: p.id, kind: KeyParamKind.choice, child: rows == 1 ? row(0) : Column(mainAxisSize: MainAxisSize.min, children: [
       for (var r = 0; r < rows; r++) Padding(padding: EdgeInsets.only(top: r == 0 ? 0 : 4), child: row(r * per)),
-    ]);
+    ]));
   }
 }
 
@@ -129,7 +130,7 @@ class DeviceToggle extends StatelessWidget {
     if (p == null) return const SizedBox.shrink();
     final on = t.value(p.id) >= (p.min + p.max) / 2;
     final c = color ?? scope.accent;
-    return Semantics(
+    return KeyParam(paramId: p.id, kind: KeyParamKind.toggle, child: Semantics(
       toggled: on,
       label: p.label,
       child: GestureDetector(
@@ -145,7 +146,7 @@ class DeviceToggle extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: 12),
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(18),
-            color: on ? c.withValues(alpha: 0.22) : Colors.white.withValues(alpha: 0.03),
+            color: on ? c.withValues(alpha: 0.22) : Neon.ink.withValues(alpha: 0.03),
             border: Border.all(color: on ? c : Neon.line),
             boxShadow: on ? [BoxShadow(color: c.withValues(alpha: 0.3), blurRadius: 10)] : null),
           child: Row(mainAxisSize: MainAxisSize.min, children: [
@@ -156,7 +157,7 @@ class DeviceToggle extends StatelessWidget {
           ]),
         )),
       ),
-    );
+    ));
   }
 }
 
@@ -276,7 +277,7 @@ class _MeterPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final r = RRect.fromRectAndRadius(Offset.zero & size, const Radius.circular(4));
-    canvas.drawRRect(r, Paint()..color = Colors.white.withValues(alpha: 0.05));
+    canvas.drawRRect(r, Paint()..color = Neon.ink.withValues(alpha: 0.05));
     canvas.save();
     canvas.clipRRect(r);
     final h = size.height * v;

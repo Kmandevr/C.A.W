@@ -28,6 +28,7 @@ class ClipSlot extends StatefulWidget {
 
 class _ClipSlotState extends State<ClipSlot> with SingleTickerProviderStateMixin {
   Duration _glide = Duration.zero;
+  Curve _curve = EditMotion.curve;
   AnimationController? _in;
 
   @override
@@ -49,7 +50,14 @@ class _ClipSlotState extends State<ClipSlot> with SingleTickerProviderStateMixin
       return;
     }
     final kind = old.rect.topLeft != widget.rect.topLeft ? EditMotionKind.clips : EditMotionKind.lengths;
+    // A move alone (the same size somewhere else) is a short, snappy slide (owner, 2026-11-11).
+    if (old.rect.size == widget.rect.size) {
+      _glide = EditMotion.nudge(context, kind) ?? Duration.zero;
+      _curve = EditMotion.nudgeCurve;
+      return;
+    }
     _glide = EditMotion.fadeOnly(context) ? Duration.zero : EditMotion.of(context, kind) ?? Duration.zero;
+    _curve = EditMotion.curve;
   }
 
   @override
@@ -62,13 +70,15 @@ class _ClipSlotState extends State<ClipSlot> with SingleTickerProviderStateMixin
   Widget build(BuildContext context) {
     var child = widget.child;
     final appear = _in;
-    if (appear != null) {
+    if (appear != null && EditMotion.feel.enter != MotionTransition.standard) {
+      child = EditMotion.transition(appear, child, fadeOnly: EditMotion.fadeOnly(context)); // the theme's entrance
+    } else if (appear != null) {
       final t = CurvedAnimation(parent: appear, curve: EditMotion.curve);
       child = FadeTransition(opacity: CurvedAnimation(parent: appear, curve: Curves.easeOut), child: EditMotion.fadeOnly(context)
           ? child
           : ScaleTransition(scale: Tween(begin: 0.82, end: 1.0).animate(t), alignment: Alignment.centerLeft, child: child));
     }
-    return AnimatedPositioned.fromRect(rect: widget.rect, duration: _glide, curve: EditMotion.curve, child: child);
+    return AnimatedPositioned.fromRect(rect: widget.rect, duration: _glide, curve: _curve, child: child);
   }
 }
 
@@ -106,6 +116,12 @@ class _LeavingClipState extends State<LeavingClip> with SingleTickerProviderStat
       alignment: Alignment.topLeft,
       child: Text(widget.name, maxLines: 1, overflow: TextOverflow.clip,
         style: TextStyle(color: widget.color, fontSize: 10, fontWeight: FontWeight.w800)));
+    if (EditMotion.feel.exit != MotionTransition.standard) {
+      // The theme's exit kind, run backwards from shown to gone.
+      return Positioned.fromRect(rect: widget.rect, child: IgnorePointer(child: KeyedSubtree(
+          key: const ValueKey('clip-leaving'),
+          child: EditMotion.transition(ReverseAnimation(_c), box, enter: false, fadeOnly: EditMotion.fadeOnly(context)))));
+    }
     return Positioned.fromRect(rect: widget.rect, child: IgnorePointer(child: FadeTransition(
       key: const ValueKey('clip-leaving'),
       opacity: Tween(begin: 1.0, end: 0.0).animate(t),

@@ -60,3 +60,17 @@ class Roles {
   /// Track [i]'s colour, wrapping over the theme's track colours.
   static Color track(int i) => Neon.layer(i);
 }
+
+/// The keyboard focus ring (owner, 2026-11-11: the whole app works from the keyboard): the ink colour, which stands
+/// out from every surface in a light or dark palette, edged with the selection accent. A focused area gets a softer
+/// accent outline; the focused control inside it the full ring.
+class KeyRing {
+  KeyRing._();
+  static const Color color = Neon.ink;
+  static const Color accent = Roles.selection;
+  static const double width = 2, areaWidth = 1.5;
+
+  /// How far the ring stands off the control it marks.
+  static const double gap = 2;
+  static double get radius => Radii.s;
+}

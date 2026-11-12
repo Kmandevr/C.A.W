@@ -101,16 +101,16 @@ class _PdPainter extends CustomPainter {
       i == 0 ? dry.moveTo(x, s) : dry.lineTo(x, s);
       i == 0 ? wet.moveTo(x, y) : wet.lineTo(x, y);
     }
-    canvas.drawLine(Offset(area.left, mid), Offset(area.right, mid), Paint()..color = Colors.white.withValues(alpha: 0.08));
+    canvas.drawLine(Offset(area.left, mid), Offset(area.right, mid), Paint()..color = Neon.ink.withValues(alpha: 0.08));
     canvas.drawPath(dry, Paint()
-      ..color = Colors.white.withValues(alpha: 0.18)
+      ..color = Neon.ink.withValues(alpha: 0.18)
       ..style = PaintingStyle.stroke
       ..strokeWidth = 1.4);
     strokeGlow(canvas, wet, color, width: active ? 2.8 : 2.2);
     // The delay strip: 0..2 ms with the centre marked, a dot per side.
     final sy = size.height - 16;
     canvas.drawLine(Offset(area.left, sy), Offset(area.right, sy), Paint()
-      ..color = Colors.white.withValues(alpha: 0.1)
+      ..color = Neon.ink.withValues(alpha: 0.1)
       ..strokeWidth = 4
       ..strokeCap = StrokeCap.round);
     canvas.drawLine(Offset(area.center.dx, sy - 6), Offset(area.center.dx, sy + 6), Paint()..color = Neon.dim);

@@ -3,13 +3,14 @@ import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
+import '../actions/actions.dart';
 import '../model/app_state.dart';
 import '../model/files_catalog.dart';
 import '../model/sample_packs.dart';
 import '../model/user_presets.dart';
 import 'frame/frame_widgets.dart' show AwakeListenableBuilder, ScrollFade;
+import 'keyboard/key_area.dart';
 import 'files/asset_actions.dart';
 import 'files/asset_inspector.dart';
 import 'files/asset_views.dart';
@@ -17,7 +18,7 @@ import 'files/files_tree.dart';
 import 'files/library_manager.dart';
 import 'files/project_file_actions.dart';
 import 'glass.dart';
-import 'page_closer.dart';
+import 'panel_motion.dart';
 import 'audio_file_actions.dart';
 import 'midi_file_actions.dart';
 import 'theme.dart';
@@ -223,8 +224,8 @@ class _FileManagerScreenState extends State<FileManagerScreen> {
       case 'history':
         await showProjectRestorePoints(context, state);
       case 'library':
-        await Navigator.of(context).push(MaterialPageRoute<void>(settings: closablePage,
-            builder: (_) => LibraryManagerPage(state: state, onOpenBuilder: widget.onOpenBuilder)));
+        await Navigator.of(context).push(panelRoute<void>(context,
+            (_) => LibraryManagerPage(state: state, onOpenBuilder: widget.onOpenBuilder)));
     }
   }
 
@@ -286,7 +287,7 @@ class _FileManagerScreenState extends State<FileManagerScreen> {
           avatar: Icon(icon, size: 14, color: on ? Neon.blue : Neon.dim),
           label: Text(label, style: TextStyle(fontSize: 11.5, color: on ? Neon.text : Neon.dim)),
           selectedColor: Neon.blue.withValues(alpha: 0.16),
-          side: BorderSide(color: on ? Neon.blue.withValues(alpha: 0.6) : Colors.white.withValues(alpha: 0.1)),
+          side: BorderSide(color: on ? Neon.blue.withValues(alpha: 0.6) : Neon.ink.withValues(alpha: 0.1)),
           onSelected: (_) => setState(() {
             if (!_filters.remove(f)) _filters.add(f);
           }),
@@ -359,7 +360,7 @@ class _FileManagerScreenState extends State<FileManagerScreen> {
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(Radii.s),
                 color: on ? color.withValues(alpha: 0.14) : null,
-                border: Border.all(color: on ? color.withValues(alpha: 0.6) : Colors.white.withValues(alpha: 0.08)),
+                border: Border.all(color: on ? color.withValues(alpha: 0.6) : Neon.ink.withValues(alpha: 0.08)),
               ),
               child: Row(mainAxisSize: MainAxisSize.min, children: [
                 Icon(icon, size: 13, color: color),
@@ -465,47 +466,50 @@ class _FileManagerScreenState extends State<FileManagerScreen> {
     return LayoutBuilder(builder: (context, c) {
       // As the grid lays out: as many columns as fit [extent] wide (SliverGridDelegateWithMaxCrossAxisExtent).
       final columns = list ? 1 : math.max(1, ((c.maxWidth - 2 * Space.s) / (extent + Space.xs)).ceil());
-      return Focus(
+      return KeyArea(
+        area: Area.files,
+        label: widget.explorer ? 'Explorer' : 'Files',
         focusNode: _keys,
-        onKeyEvent: (_, e) => _onKey(e, assets, columns),
+        onAction: (id, count, _) => _onKey(id, count, assets, columns),
         child: GestureDetector(behavior: HitTestBehavior.deferToChild, onTap: () => setState(() => _selected = null),
             child: body),
       );
     });
   }
 
-  /// The grid's keys (owner, 2026-11-11: a desktop browses Files from the keyboard).
+  /// The grid's keys (owner, 2026-11-11: a desktop browses Files from the keyboard): the Files context's arrows and
+  /// WASD move the selection, Enter opens, F2 renames, Delete deletes (asking first).
   final _keys = FocusNode(debugLabel: 'files-grid');
 
-  KeyEventResult _onKey(KeyEvent e, List<FileAsset> assets, int columns) {
-    if ((e is! KeyDownEvent && e is! KeyRepeatEvent) || assets.isEmpty) return KeyEventResult.ignored;
-    final k = e.logicalKey;
+  bool _onKey(String id, int count, List<FileAsset> assets, int columns) {
+    if (assets.isEmpty) return false;
     final i = assets.indexWhere((a) => a.key == _selected);
-    final step = switch (k) {
-      LogicalKeyboardKey.arrowRight => 1,
-      LogicalKeyboardKey.arrowLeft => -1,
-      LogicalKeyboardKey.arrowDown => columns,
-      LogicalKeyboardKey.arrowUp => -columns,
-      _ => 0,
-    };
+    final step = switch (id) {
+          'files.right' => 1,
+          'files.left' => -1,
+          'files.down' => columns,
+          'files.up' => -columns,
+          _ => 0,
+        } *
+        count;
     if (step != 0) {
       final next = i < 0 ? (step > 0 ? 0 : assets.length - 1) : (i + step).clamp(0, assets.length - 1);
       setState(() => _selected = assets[next].key);
-      return KeyEventResult.handled;
+      return true;
     }
-    if (i < 0 || e is KeyRepeatEvent) return KeyEventResult.ignored;
+    if (i < 0) return false;
     final a = assets[i], actions = _actions;
-    switch (k) {
-      case LogicalKeyboardKey.enter || LogicalKeyboardKey.numpadEnter:
+    switch (id) {
+      case 'files.open':
         (widget.explorer ? (widget.onOpenAsset ?? actions.open) : actions.open)(a);
-      case LogicalKeyboardKey.f2 when !a.builtin && a.sample == null:
+      case 'files.rename' when !a.builtin && a.sample == null:
         unawaited(actions.rename(a));
-      case LogicalKeyboardKey.delete when !a.builtin:
+      case 'files.delete' when !a.builtin:
         unawaited(actions.delete(a));
       default:
-        return KeyEventResult.ignored;
+        return false;
     }
-    return KeyEventResult.handled;
+    return true;
   }
 
   @override
@@ -561,7 +565,8 @@ class _FileManagerScreenState extends State<FileManagerScreen> {
             return Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
               SizedBox(
                 width: c.maxWidth >= 900 ? 240 : 200,
-                child: Padding(padding: const EdgeInsets.all(Space.s), child: GlassPanel(child: treeView)),
+                child: Padding(padding: const EdgeInsets.all(Space.s), child: GlassPanel(
+                    child: KeyArea(area: Area.page, label: 'Folders', child: treeView))),
               ),
               Expanded(child: main),
               if (sideInspector)
@@ -569,9 +574,9 @@ class _FileManagerScreenState extends State<FileManagerScreen> {
                   width: 280,
                   child: Padding(
                     padding: const EdgeInsets.all(Space.s),
-                    child: GlassPanel(child: selected == null
+                    child: GlassPanel(child: KeyArea(area: Area.page, label: 'Inspector', child: selected == null
                         ? const Center(child: Text('Tap an item to see it here', style: TextStyle(color: Neon.dim, fontSize: TypeScale.label)))
-                        : Align(alignment: Alignment.topCenter, child: inspector(compact: false))),
+                        : Align(alignment: Alignment.topCenter, child: inspector(compact: false)))),
                   ),
                 ),
             ]);
@@ -586,7 +591,7 @@ class _FileManagerScreenState extends State<FileManagerScreen> {
               child: SafeArea(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 Padding(padding: const EdgeInsets.fromLTRB(Space.l, Space.m, Space.l, Space.xs),
                     child: Text('FOLDERS', style: TypeScale.heading())),
-                Expanded(child: treeView),
+                Expanded(child: KeyArea(area: Area.page, label: 'Folders', autofocus: true, child: treeView)),
               ])),
             ),
             body: main,

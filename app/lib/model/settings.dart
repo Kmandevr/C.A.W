@@ -6,6 +6,7 @@ import 'dart:math' as math;
 import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 
+import '../ui/arrange/clip_look.dart';
 import '../ui/code_prefs.dart';
 import '../ui/glass.dart';
 import '../ui/haptics.dart';
@@ -215,7 +216,7 @@ enum VelocityCurve {
       };
 }
 
-/// What New project starts from: an empty project, or the First loop template.
+/// What New project starts from: an empty project, or the bundled Mid tempo template.
 /// How the exporter names a file: project, tempo and length (the default), the project alone, or the project and
 /// the date and time.
 enum ExportNaming {
@@ -224,6 +225,17 @@ enum ExportNaming {
   dated('Project, date and time');
 
   const ExportNaming(this.label);
+  final String label;
+}
+
+/// Which palette the chosen theme shows (owner, 2026-11-11: one switch for light or dark; Follow system tracks
+/// Android's and Windows' dark mode, live).
+enum LookMode {
+  dark('Dark'),
+  light('Light'),
+  system('Follow system');
+
+  const LookMode(this.label);
   final String label;
 }
 
@@ -246,6 +258,15 @@ class Settings extends ChangeNotifier {
   final Directory? dir;
 
   String themeName = calmNeon.name;
+
+  /// Light, dark or the system's ([platformBrightness]). Only the palette changes: the profile stays.
+  LookMode lookMode = LookMode.dark;
+
+  /// The platform's light or dark setting, kept up to date by the app ([setPlatformBrightness]).
+  Brightness platformBrightness = Brightness.dark;
+
+  /// True when the light palette shows.
+  bool get showsLight => lookMode == LookMode.light || (lookMode == LookMode.system && platformBrightness == Brightness.light);
   Density density = Density.compact; // owner, 2026-11-09: compact, not oversized
 
   /// Live coding: code swaps in by itself [liveDelayMs] after the last edit, at [swapTiming].
@@ -266,10 +287,13 @@ class Settings extends ChangeNotifier {
     Motion.setting = motion;
     Motion.haptics = haptics;
     Haptics.strength = hapticStrength;
-    Glass.enabled = glass;
+    Glass.enabled = glass && !activeTheme.flat; // the Flat family never shows glass, whatever the switch says
     Glass.blurEnabled = glassBlur;
     Motion.minimalProfile = performanceMode == PerformanceMode.minimal;
-    EditMotion.style = editMotionStyle;
+    EditMotion.feel = motionFeel;
+    Haptics.feel = {...hapticFeel};
+    ClipLook.corner = clipCorner;
+    ClipLook.fill = clipFill;
     EditMotion.kinds = {...editMotionKinds};
     Radii.scale = roundness;
     Neon.glowStrength = glowStrength;
@@ -285,7 +309,21 @@ class Settings extends ChangeNotifier {
   MotionLevel motion = MotionLevel.full;
 
   /// Edit animations (owner, 2026-11-11): their style, and the kinds turned on ([EditMotion]).
-  EditMotionStyle editMotionStyle = EditMotionStyle.subtle;
+  EditMotionStyle get editMotionStyle =>
+      motionFeel.curve == MotionCurve.bouncy ? EditMotionStyle.playful : EditMotionStyle.subtle;
+  set editMotionStyle(EditMotionStyle v) =>
+      motionFeel = v == EditMotionStyle.playful ? MotionFeel.playful : MotionFeel.subtle;
+
+  /// The theme's animation style (owner, 2026-11-11): pace, curve, entrance and exit ([EditMotion.feel]). Subtle and
+  /// Playful ([editMotionStyle]) are two of its looks.
+  MotionFeel motionFeel = MotionFeel.subtle;
+
+  /// Each haptic kind's feel, Light, Firm or Off ([Haptics.feel]); a kind left out is Light.
+  Map<HapticKind, HapticFeel> hapticFeel = {};
+
+  /// Arrange's clips: corner shape and fill ([ClipLook]).
+  ClipCorner clipCorner = ClipCorner.rounded;
+  ClipFill clipFill = ClipFill.standard;
   Set<EditMotionKind> editMotionKinds = {...EditMotionKind.values};
 
   /// A theme's look besides its colours: the UI font, the text size (times the system's), the corners' roundness
@@ -352,6 +390,14 @@ class Settings extends ChangeNotifier {
   /// Vim editing in the code editor (WASD moves; I types). Off by default.
   bool vimCode = false;
 
+  /// Vim keys in the keyboard-focus areas (FX chain, mixer, Files, Settings...): H J K L move like the arrows. Off by
+  /// default (the owner's movement keys are WASD).
+  bool vimKeys = false;
+
+  /// The key hint strip (which keys work where the keyboard focus is): null follows the keyboard (shown once a
+  /// hardware keyboard is used, and on a desktop), true or false as chosen in Settings › Keys.
+  bool? keyHints;
+
   /// Recording (owner, 2026-11-10): when the metronome clicks, and how many bars the count-in has (0: none).
   Metronome metronome = Metronome.recording;
   int countInBars = 1;
@@ -415,6 +461,15 @@ class Settings extends ChangeNotifier {
   double rollNoteSteps = 0;
   static const rollNoteLengths = [0.0, 1.0, 2.0, 4.0, 8.0, 16.0];
   bool followPlayhead = true;
+
+  /// How long after the last interaction (or selection change) the view follows the playhead again, in seconds
+  /// (owner, 2026-11-11); 0 is Never: it waits for the next Play.
+  double followResume = 2.5;
+
+  /// Smooth following (owner, 2026-11-11): the view scrolls continuously so the playhead stays a third from the left;
+  /// off, it pages on when the playhead nears the edge (the default).
+  bool followSmooth = false;
+  static const minFollowResume = 0.5, maxFollowResume = 10.0;
   bool wheelZooms = false;
   bool confirmDelete = false;
 
@@ -466,8 +521,9 @@ class Settings extends ChangeNotifier {
   List<CawTheme> get themes => [...starterThemes, ...customThemes];
   bool isStarter(String name) => starterThemes.any((t) => t.name == name);
   CawTheme themeNamed(String name) => themes.firstWhere((t) => t.name == name, orElse: () => calmNeon);
-  CawTheme get theme => themeNamed(themeName);
-  CawTheme get activeTheme => _draft ?? theme;
+  /// The chosen theme in the palette shown ([showsLight]); the same object while the theme and mode stay.
+  CawTheme get theme => themeNamed(themeName).shown(showsLight);
+  CawTheme get activeTheme => (_draft ?? themeNamed(themeName)).shown(showsLight);
   bool get compact => density == Density.compact;
 
   /// Opens the settings next to the projects folder (the app support folder), or [base] in tests.
@@ -491,6 +547,7 @@ class Settings extends ChangeNotifier {
 
   Map<String, dynamic> toJson() => {
         'theme': themeName,
+        'theme_mode': lookMode.name,
         'density': density.name,
         'live_update': liveUpdate,
         'live_delay_ms': liveDelayMs,
@@ -499,8 +556,14 @@ class Settings extends ChangeNotifier {
         'light_mode': lightMode, // retained for older builds that read settings.json
         'light_auto': lightAuto,
         'vim_code': vimCode,
+        'vim_keys': vimKeys,
+        if (keyHints != null) 'key_hints': keyHints,
         'motion': motion.name,
         'edit_motion_style': editMotionStyle.name,
+        'motion_feel': motionFeel.encode(),
+        'haptic_feel': Haptics.encodeFeel(hapticFeel),
+        'clip_corner': clipCorner.name,
+        'clip_fill': clipFill.name,
         'edit_motion_kinds': EditMotion.kindNames(editMotionKinds),
         'ui_font': uiFont.name,
         'text_scale': textScale,
@@ -556,6 +619,8 @@ class Settings extends ChangeNotifier {
         'roll_tool': rollTool.name,
         'roll_note_steps': rollNoteSteps,
         'follow_playhead': followPlayhead,
+        'follow_resume': followResume,
+        'follow_smooth': followSmooth,
         'wheel_zooms': wheelZooms,
         'confirm_delete': confirmDelete,
         'code_font_size': codeFontSize,
@@ -584,7 +649,10 @@ class Settings extends ChangeNotifier {
   void fromJson(Map<String, dynamic> j) {
     T pick<T extends Enum>(List<T> values, Object? v, T fallback) =>
         values.where((e) => e.name == v).firstOrNull ?? fallback;
-    themeName = (j['theme'] as String?) ?? themeName;
+    final savedTheme = j['theme'] as String?;
+    // A name from before the families (Calm neon, Night, Amber terminal) is that family, dark.
+    themeName = legacyThemeNames[savedTheme] ?? savedTheme ?? themeName;
+    lookMode = pick(LookMode.values, j['theme_mode'], lookMode);
     density = pick(Density.values, j['density'], density);
     liveUpdate = (j['live_update'] as bool?) ?? liveUpdate;
     liveDelayMs = ((j['live_delay_ms'] as num?)?.toInt() ?? liveDelayMs).clamp(0, 10000);
@@ -597,8 +665,14 @@ class Settings extends ChangeNotifier {
     }
     lightAuto = (j['light_auto'] as bool?) ?? lightAuto;
     vimCode = (j['vim_code'] as bool?) ?? vimCode;
+    vimKeys = (j['vim_keys'] as bool?) ?? vimKeys;
+    if (j['key_hints'] is bool) keyHints = j['key_hints'] as bool;
     motion = pick(MotionLevel.values, j['motion'], motion);
     editMotionStyle = pick(EditMotionStyle.values, j['edit_motion_style'], editMotionStyle);
+    motionFeel = MotionFeel.decode(j['motion_feel'] as String?) ?? motionFeel;
+    if (j['haptic_feel'] is String) hapticFeel = Haptics.decodeFeel(j['haptic_feel'] as String);
+    clipCorner = pick(ClipCorner.values, j['clip_corner'], clipCorner);
+    clipFill = pick(ClipFill.values, j['clip_fill'], clipFill);
     final kinds = j['edit_motion_kinds'];
     if (kinds is List) editMotionKinds = EditMotion.parseKinds(kinds);
     uiFont = pick(UiFont.values, j['ui_font'], uiFont);
@@ -696,6 +770,11 @@ class Settings extends ChangeNotifier {
     final len = j['roll_note_steps'];
     if (len is num && rollNoteLengths.contains(len.toDouble())) rollNoteSteps = len.toDouble();
     followPlayhead = flag('follow_playhead') ?? followPlayhead;
+    followSmooth = flag('follow_smooth') ?? followSmooth;
+    final resume = j['follow_resume'];
+    if (resume is num && resume.isFinite) {
+      followResume = resume <= 0 ? 0 : resume.toDouble().clamp(minFollowResume, maxFollowResume);
+    }
     wheelZooms = flag('wheel_zooms') ?? wheelZooms;
     confirmDelete = flag('confirm_delete') ?? confirmDelete;
     codeFontSize = num_('code_font_size', minCodeFontSize, maxCodeFontSize) ?? codeFontSize;
@@ -732,7 +811,9 @@ class Settings extends ChangeNotifier {
         if (f is! File || !f.path.endsWith('.theme')) continue;
         try {
           final t = CawTheme.parse(await f.readAsString());
-          if (!isStarter(t.name) && !found.any((x) => x.name == t.name)) found.add(t);
+          // A custom theme named like a family added later (Flat, Dawn...) keeps its colours under a new name.
+          final named = isStarter(t.name) ? t.copyWith(name: '${t.name} (mine)') : t;
+          if (!isStarter(named.name) && !found.any((x) => x.name == named.name)) found.add(named);
         } catch (_) {
           // A damaged theme file is skipped, not fatal.
         }
@@ -755,8 +836,8 @@ class Settings extends ChangeNotifier {
   /// glow strength), the profiles chosen ([_profileRevision]: a new dock layout is read when the shell is made) and
   /// the code editor's font, tabs, numbers and wrap (read when an editor builds). A change rebuilds the screens once
   /// on leaving Settings. A profile value saved into the theme (a track height, say) doesn't count by itself.
-  String get _lookKey => '${activeTheme.copyWith(profile: const {}).toFile()}|$roundness|$glowStrength|'
-      '$_profileRevision|$codeFontSize|$codeTabWidth|$codeLineNumbers|$codeWrap';
+  String get _lookKey => '${activeTheme.copyWith(profile: const {}).toFile()}|${activeTheme.light}|$roundness|$glowStrength|'
+      '$_profileRevision|$codeFontSize|$codeTabWidth|$codeLineNumbers|$codeWrap|$clipCorner|$clipFill';
 
   /// Bumped each time a theme's profile is put in force, so the screens (and the dock) are made again from it.
   int _profileRevision = 0;
@@ -853,7 +934,26 @@ class Settings extends ChangeNotifier {
   void preview(CawTheme? draft) {
     _draft = draft;
     Neon.active = activeTheme;
+    _applyPerformanceMode();
     notifyListeners();
+  }
+
+  /// Light, dark or follow the system: only the palette changes, the profile in force stays. Saved.
+  Future<void> setLookMode(LookMode mode) => update((x) => x.lookMode = mode);
+
+  /// The platform's light or dark mode changed (or is first known, [quiet]: nothing is built yet). With Follow
+  /// system on, the palette follows at once and the screens are made again once ([commitLook]).
+  void setPlatformBrightness(Brightness b, {bool quiet = false}) {
+    if (b == platformBrightness) return;
+    platformBrightness = b;
+    if (lookMode != LookMode.system) return;
+    Neon.active = activeTheme;
+    _applyPerformanceMode();
+    if (quiet) {
+      _shownLook = _lookKey;
+    } else {
+      commitLook();
+    }
   }
 
   /// After leaving the settings: if the look changed, rebuild every screen once so fixed colours repaint too.
@@ -890,7 +990,14 @@ class Settings extends ChangeNotifier {
       'behaviour.haptic_strength': n(hapticStrength),
       'behaviour.motion': motion.name,
       'behaviour.edit_style': editMotionStyle.name,
+      'behaviour.motion_feel': motionFeel.encode(),
+      'behaviour.haptic_feel': Haptics.encodeFeel(hapticFeel),
+      'look.clip_corner': clipCorner.name,
+      'look.clip_fill': clipFill.name,
       'behaviour.edit_kinds': EditMotion.kindNames(editMotionKinds).join(','),
+      'behaviour.follow': on(followPlayhead),
+      'behaviour.follow_resume': followResume <= 0 ? 'never' : n(followResume),
+      'behaviour.follow_style': followSmooth ? 'smooth' : 'page',
       'behaviour.snap': on(rollSnap),
       'behaviour.grid': '$rollGrid',
       'behaviour.value_grid': roll.valueGrid.name,
@@ -942,8 +1049,22 @@ class Settings extends ChangeNotifier {
     hapticStrength = number('behaviour.haptic_strength', 0, 1) ?? hapticStrength;
     motion = pick(MotionLevel.values, 'behaviour.motion') ?? motion;
     editMotionStyle = pick(EditMotionStyle.values, 'behaviour.edit_style') ?? editMotionStyle;
+    motionFeel = MotionFeel.decode(profile['behaviour.motion_feel']) ?? motionFeel;
+    final feel = profile['behaviour.haptic_feel'];
+    if (feel != null) hapticFeel = Haptics.decodeFeel(feel);
+    clipCorner = pick(ClipCorner.values, 'look.clip_corner') ?? clipCorner;
+    clipFill = pick(ClipFill.values, 'look.clip_fill') ?? clipFill;
     final kinds = profile['behaviour.edit_kinds'];
     if (kinds != null) editMotionKinds = EditMotion.parseKinds(kinds.split(',').map((k) => k.trim()));
+    followPlayhead = flag('behaviour.follow') ?? followPlayhead;
+    final resume = profile['behaviour.follow_resume'];
+    if (resume?.trim().toLowerCase() == 'never') {
+      followResume = 0;
+    } else {
+      followResume = number('behaviour.follow_resume', minFollowResume, maxFollowResume) ?? followResume;
+    }
+    final style = profile['behaviour.follow_style']?.trim().toLowerCase();
+    if (style == 'smooth' || style == 'page') followSmooth = style == 'smooth';
     rollSnap = flag('behaviour.snap') ?? rollSnap;
     final grid = int.tryParse(profile['behaviour.grid'] ?? '');
     if (grid != null && rollGrids.contains(grid)) rollGrid = grid;

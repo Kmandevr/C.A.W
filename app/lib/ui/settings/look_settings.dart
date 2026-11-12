@@ -1,4 +1,4 @@
-// Settings › Look: theme, density, layout, glass and blur, reactive glow, meter fall and the arrangement's sizes.
+// Settings › Look: theme family and Mode (dark, light, follow system), the theme editor, density, layout, glass and blur, reactive glow, meter fall and the arrangement's sizes.
 import 'package:flutter/material.dart';
 
 import '../../model/settings.dart';
@@ -18,6 +18,16 @@ class LookSettings extends StatelessWidget {
     final s = deps.settings;
     String px(double v) => v == 0 ? 'Default' : '${v.round()} px';
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      settingDropdown<String>('look.family', s.themeName, [for (final t in s.themes) (t.name, t.name)],
+          (v) => s.chooseTheme(v),
+          icon: Icons.palette_outlined,
+          subtitle: s.isStarter(s.themeName) ? 'A built-in family, light and dark' : 'Your own theme'),
+      settingChoice<LookMode>('look.mode', s.lookMode, [for (final m in LookMode.values) (m, m.label)],
+          (v) => s.setLookMode(v),
+          icon: Icons.contrast,
+          subtitle: s.lookMode == LookMode.system
+              ? 'Follows the system: ${s.platformBrightness == Brightness.light ? 'light' : 'dark'} now'
+              : 'Only the palette changes; the look, layout and behaviour stay'),
       settingAction('look.theme',
           icon: Icons.palette, iconColor: Neon.pink, subtitle: s.themeName,
           onTap: () => Navigator.of(context)
@@ -37,7 +47,9 @@ class LookSettings extends StatelessWidget {
           }),
       settingSwitch('look.glass', s.glass, (v) => s.update((x) => x.glass = v),
           icon: Icons.blur_on,
-          subtitle: Neon.performanceMode >= 3
+          subtitle: s.activeTheme.flat
+              ? 'Off in the Flat theme'
+              : Neon.performanceMode >= 3
               ? 'Off while the Minimal profile is on'
               : 'See-through panels, tracks and controls over a soft background'),
       settingSwitch('look.blur', s.glassBlur, s.glass ? (v) => s.update((x) => x.glassBlur = v) : null,

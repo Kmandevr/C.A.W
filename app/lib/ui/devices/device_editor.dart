@@ -15,11 +15,13 @@ import '../theme.dart';
 import '../tokens.dart';
 import 'device_registry.dart';
 import 'device_scope.dart';
+import 'kit/key_param.dart';
 import 'sidechain_bar.dart';
 import 'kit/device_style.dart';
 import 'kit/feel.dart';
 import 'kit/preset_browser.dart';
 import '../page_closer.dart';
+import '../panel_motion.dart';
 import 'kit/presets.dart';
 import 'visuals/mod_routing.dart';
 import 'visuals/mod_sheet.dart';
@@ -43,26 +45,16 @@ Future<void> openDeviceEditor(BuildContext context, AppState state, LayerDoc lay
       barrierLabel: 'Close the device',
       barrierColor: Colors.black.withValues(alpha: 0.25),
       transitionDuration: Motion.fade(Motion.standard, level),
-      transitionBuilder: (context, a, _, child) => FadeTransition(opacity: a, child: ScaleTransition(
-        scale: Tween(begin: level == MotionLevel.full ? 0.97 : 1.0, end: 1.0).animate(
-          CurvedAnimation(parent: a, curve: Curves.easeOutCubic)),
-        child: child)),
+      // In and out with the theme's entrance and exit kinds (Esc, a tap outside and × all run the exit).
+      transitionBuilder: (context, a, _, child) => popupTransition(context, a, child),
       pageBuilder: (context, _, _) => _DeviceWindow(target: target),
     );
   }
-  return Navigator.of(context).push(PageRouteBuilder<void>(
-    settings: closablePage,
-    transitionDuration: Motion.fade(Motion.panel, level),
-    reverseTransitionDuration: Motion.fade(Motion.standard, level),
-    pageBuilder: (context, _, _) => GlassPage(child: Scaffold(
+  // A page that comes in and goes out as the theme's pages do (panelRoute), whether closed by Back, Esc or ←.
+  return Navigator.of(context).push(panelRoute<void>(context, (context) => GlassPage(child: Scaffold(
       backgroundColor: Colors.transparent,
       body: SafeArea(child: DeviceEditor(target: target, onClose: () => Navigator.of(context).maybePop())),
-    )),
-    transitionsBuilder: (context, a, _, child) => FadeTransition(opacity: a, child: SlideTransition(
-      position: Tween(begin: Offset(0, level == MotionLevel.full ? 0.04 : 0), end: Offset.zero)
-          .animate(CurvedAnimation(parent: a, curve: Curves.easeOutCubic)),
-      child: child)),
-  ));
+    ))));
 }
 
 /// The floating window on wide screens: drag its header to move it.
@@ -210,7 +202,7 @@ class _DeviceEditorState extends State<DeviceEditor> {
           width: 30, height: 30,
           decoration: BoxDecoration(borderRadius: BorderRadius.circular(9),
             gradient: LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight,
-              colors: [color.withValues(alpha: 0.9), second.withValues(alpha: 0.75)]),
+              colors: Neon.ramp([color.withValues(alpha: 0.9), second.withValues(alpha: 0.75)])),
             boxShadow: Neon.glow(color, strength: 0.35)),
           child: Icon(style?.icon ?? Icons.extension_outlined, size: 17, color: Neon.bg)),
         const SizedBox(width: 8),
@@ -239,22 +231,22 @@ class _DeviceEditorState extends State<DeviceEditor> {
         const SizedBox(width: 4),
       ])),
     );
-    return DeviceFingers.counter(child: Column(key: const ValueKey('device-editor'), crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+    return DeviceFingers.counter(child: DeviceKeyArea(label: '$title device', child: Column(key: const ValueKey('device-editor'), crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       header,
-      Container(height: 2, decoration: BoxDecoration(gradient: LinearGradient(colors: [
-        color.withValues(alpha: 0.0), color.withValues(alpha: 0.8), second.withValues(alpha: 0.8), second.withValues(alpha: 0.0)]))),
+      Container(height: 2, decoration: BoxDecoration(gradient: LinearGradient(colors: Neon.ramp([
+        color.withValues(alpha: 0.0), color.withValues(alpha: 0.8), second.withValues(alpha: 0.8), second.withValues(alpha: 0.0)])))),
       if (bypass) SidechainBar(target: t, color: color),
       if (tabs != null) SizedBox(height: 34, child: Row(children: [
         for (var i = 0; i < tabs.length; i++)
           Expanded(child: _Tab(section: tabs[i], selected: i == tab, color: color, onTap: () => setState(() => _tab = i))),
       ])),
-      Container(height: 1, color: Colors.white.withValues(alpha: 0.06)),
+      Container(height: 1, color: Neon.ink.withValues(alpha: 0.06)),
       ?strip,
       Expanded(child: AnimatedOpacity(
         duration: Motion.fade(Motion.small, Motion.of(context)),
         opacity: t.bypass ? 0.55 : 1,
         child: body)),
-    ]));
+    ])));
   }
 }
 

@@ -167,7 +167,7 @@ class _CombPainter extends CustomPainter {
         ? [for (var k = 1; k <= 3; k++) (fMax * k / 4, '${(fMax * k / 4000).toStringAsFixed(1)}k')]
         : [(100.0, '100'), (1000.0, '1k'), (10000.0, '10k')];
     for (final (hz, l) in marks) {
-      canvas.drawLine(Offset(fx(hz), 0), Offset(fx(hz), h), Paint()..color = Colors.white.withValues(alpha: 0.05));
+      canvas.drawLine(Offset(fx(hz), 0), Offset(fx(hz), h), Paint()..color = Neon.ink.withValues(alpha: 0.05));
       paintLabel(canvas, l, Offset(fx(hz) + 3, h - 7), Neon.dim, size: 8);
     }
     Path curve(double at) {

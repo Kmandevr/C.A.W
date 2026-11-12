@@ -137,7 +137,7 @@ class _ShapeChips extends StatelessWidget {
               alignment: Alignment.center,
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(16),
-                color: on(e.value) ? scope.accent.withValues(alpha: 0.22) : Colors.white.withValues(alpha: 0.03),
+                color: on(e.value) ? scope.accent.withValues(alpha: 0.22) : Neon.ink.withValues(alpha: 0.03),
                 border: Border.all(color: on(e.value) ? scope.accent : Neon.line)),
               padding: const EdgeInsets.symmetric(horizontal: 4),
               child: FittedBox(fit: BoxFit.scaleDown, child: Row(mainAxisSize: MainAxisSize.min, children: [
@@ -312,7 +312,7 @@ class _DuckPainter extends CustomPainter {
     trace.lineTo(0, _DuckGeometry.top);
     canvas.drawPath(trace, Paint()..color = Neon.pink.withValues(alpha: 0.12));
     // Unity and silence.
-    final line = Paint()..color = Colors.white.withValues(alpha: 0.08);
+    final line = Paint()..color = Neon.ink.withValues(alpha: 0.08);
     canvas.drawLine(Offset(0, _DuckGeometry.top), Offset(size.width, _DuckGeometry.top), line);
     canvas.drawLine(Offset(0, _DuckGeometry.top + span), Offset(size.width, _DuckGeometry.top + span), line);
     // The floor (how deep it ducks): a guide line with the depth handle on it.

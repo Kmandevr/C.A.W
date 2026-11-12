@@ -35,7 +35,7 @@ void main() {
     addTearDown(tester.view.reset);
     final s = AppState();
     s.engine = Engine.create();
-    s.project = s.starterProject();
+    s.project = s.demoProject();
     final m = ModuleDoc(id: 'line', name: 'line', source: '---\nkind: pattern\n---\n$body');
     s.project.modules.add(m);
     s.ready = true;
@@ -127,7 +127,7 @@ void main() {
   testWidgets('golden: the snap magnet and its menu on a phone', (tester) async {
     final s = AppState();
     s.engine = Engine.create();
-    s.project = s.starterProject();
+    s.project = s.demoProject();
     final m = ModuleDoc(id: 'line', name: 'line', source: '---\nkind: pattern\n---\n0 C3 4\n');
     s.project.modules.add(m);
     s.ready = true;

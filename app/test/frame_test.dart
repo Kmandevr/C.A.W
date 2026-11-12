@@ -42,7 +42,7 @@ void main() {
 
   testWidgets('dragging the bottom transport scrubs by whole bars; stopped, play resumes there', (tester) async {
     final s = AppState();
-    s.project = s.starterProject();
+    s.project = s.demoProject();
     await tester.pumpWidget(MaterialApp(home: Scaffold(body: Align(
         alignment: Alignment.bottomCenter, child: SizedBox(width: 390, child: BottomTransport(state: s))))));
     // 48 px a bar: two bars to the right.

@@ -207,12 +207,12 @@ class _DrivePainter extends CustomPainter {
     final side = math.min(size.height - 30, size.width * 0.62);
     final sq = Rect.fromLTWH(12, 24, side, side);
     Offset pt(double x, double y) => Offset(sq.left + (x + 1) / 2 * sq.width, sq.top + (1 - (y.clamp(-1.15, 1.15) + 1) / 2) * sq.height);
-    final faint = Paint()..color = Colors.white.withValues(alpha: 0.08);
+    final faint = Paint()..color = Neon.ink.withValues(alpha: 0.08);
     canvas.drawRect(sq, faint..style = PaintingStyle.stroke);
     faint.style = PaintingStyle.fill;
     canvas.drawLine(pt(-1, 0), pt(1, 0), faint);
     canvas.drawLine(pt(0, -1), pt(0, 1), faint);
-    canvas.drawLine(pt(-1, -1), pt(1, 1), Paint()..color = Colors.white.withValues(alpha: 0.12));
+    canvas.drawLine(pt(-1, -1), pt(1, 1), Paint()..color = Neon.ink.withValues(alpha: 0.12));
     // A live curve from the engine when it has one (non-zero), else the drawing's.
     final live = engineCurve.length == 65 && engineCurve.any((v) => v != 0);
     final path = Path();
@@ -225,7 +225,7 @@ class _DrivePainter extends CustomPainter {
     canvas.save();
     canvas.clipRect(sq.inflate(2));
     canvas.drawPath(path, Paint()
-      ..shader = LinearGradient(colors: [second, color, second]).createShader(sq)
+      ..shader = LinearGradient(colors: Neon.ramp([second, color, second])).createShader(sq)
       ..style = PaintingStyle.stroke
       ..strokeWidth = active ? 3 : 2.4
       ..strokeCap = StrokeCap.round
@@ -235,8 +235,8 @@ class _DrivePainter extends CustomPainter {
       final a = math.pow(10, db / 20).toDouble().clamp(0.0, 1.0);
       for (final x in [a, -a]) {
         final p = pt(x, curve(x));
-        canvas.drawCircle(p, 9, Paint()..color = Colors.white.withValues(alpha: 0.14));
-        canvas.drawCircle(p, 4, Paint()..color = Colors.white);
+        canvas.drawCircle(p, 9, Paint()..color = Neon.ink.withValues(alpha: 0.14));
+        canvas.drawCircle(p, 4, Paint()..color = Neon.ink);
       }
     }
     // The harmonics of a sine, odd in the family colour, even in its second colour.

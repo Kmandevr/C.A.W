@@ -2,6 +2,7 @@
 import 'package:flutter/material.dart';
 
 import 'glass.dart';
+import 'panel_motion.dart';
 
 /// Below this width a dialog shows as a bottom sheet.
 const double sheetBelowWidth = 600;
@@ -9,7 +10,7 @@ const double sheetBelowWidth = 600;
 /// Shows [builder]'s dialog (usually an [AlertDialog]) as a dialog on a wide screen and as a glass bottom sheet on a
 /// phone. In the sheet the dialog's own card is see-through and full width, so the sheet's glass is its surface.
 Future<T?> showDialogOrSheet<T>({required BuildContext context, required WidgetBuilder builder}) {
-  if (MediaQuery.sizeOf(context).width >= sheetBelowWidth) return showDialog<T>(context: context, builder: builder);
+  if (MediaQuery.sizeOf(context).width >= sheetBelowWidth) return showDialog<T>(context: context, animationStyle: dialogAnimation(context), builder: builder);
   return showGlassSheet<T>(
     context: context,
     isScrollControlled: true,

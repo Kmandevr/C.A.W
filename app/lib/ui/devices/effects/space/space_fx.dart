@@ -100,9 +100,9 @@ class _BarPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final r = RRect.fromRectAndRadius(Rect.fromLTWH(0, size.height / 2 - 3, size.width, 6), const Radius.circular(3));
-    canvas.drawRRect(r, Paint()..color = Colors.white.withValues(alpha: 0.07));
+    canvas.drawRRect(r, Paint()..color = Neon.ink.withValues(alpha: 0.07));
     final x0 = centred ? size.width / 2 : 0.0;
-    if (centred) canvas.drawLine(Offset(x0, 0), Offset(x0, size.height), Paint()..color = Colors.white24);
+    if (centred) canvas.drawLine(Offset(x0, 0), Offset(x0, size.height), Paint()..color = Neon.ink.withAlpha(0x3D));
     if (v case final x?) {
       final px = ((x - lo) / (hi - lo)).clamp(0.0, 1.0) * size.width;
       final bad = centred ? x < 0 : false;

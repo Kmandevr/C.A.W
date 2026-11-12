@@ -64,6 +64,24 @@ struct ChainTime {
     const ChainModulation* modulation = nullptr;  // project modulation of this chain's parameters (null: none)
 };
 
+// Benchmark-only (caw_bench's profile mode): the time each component spends in a chain, per processor. Off (null)
+// everywhere else, where it costs one relaxed load per chain per block. Fixed slots, so the audio thread never
+// allocates; processors past kSlots are not counted.
+struct ChainProfile {
+    static constexpr uint32_t kSlots = 512;
+    struct Slot {
+        const void* processor = nullptr;
+        const std::string* id = nullptr;  // the chain entry's id (lives as long as the chain)
+        uint64_t ns = 0, calls = 0, ran = 0;  // calls: blocks seen; ran: blocks it actually processed
+        bool modulator = false;
+    };
+    Slot slots[kSlots];
+    uint32_t used = 0;
+    Slot* slot(const void* processor, const std::string* id) noexcept;
+    static void set(ChainProfile* profile) noexcept;
+    static ChainProfile* current() noexcept;
+};
+
 // Built and configured on the control thread, then handed to the audio thread, which alone calls
 // process() and reset(); destroyed on the control thread after the audio thread retires it. The
 // control thread may change values (setValue, setValues, setBypass) and save state (saveStates)

@@ -132,9 +132,12 @@ extension ArrangeFx on AppState {
 
   /// Adds native effect [componentId] to [layer]'s inserts (at [at], or the end). A folder has inserts only while
   /// its bus is on (a reverb bus).
-  ComponentUseDoc? addNativeEffect(LayerDoc layer, String componentId, {int? at}) {
-    if ((layer.isFolder && !layer.busEnabled) || layer.components.length >= 64 || componentId.isEmpty) return null;
-    final use = ComponentUseDoc(componentId);
+  ComponentUseDoc? addNativeEffect(LayerDoc layer, String componentId, {int? at}) =>
+      componentId.isEmpty ? null : insertNativeEffect(layer, ComponentUseDoc(componentId), at: at);
+
+  /// Puts [use] (a new effect, or a copy of one: the FX chain's Ctrl+D) into [layer]'s inserts at [at], or the end.
+  ComponentUseDoc? insertNativeEffect(LayerDoc layer, ComponentUseDoc use, {int? at}) {
+    if ((layer.isFolder && !layer.busEnabled) || layer.components.length >= 64 || use.id.isEmpty) return null;
     final before = List.of(layer.components);
     editProject((p) {
       layer.components.insert((at ?? layer.components.length).clamp(0, layer.components.length), use);

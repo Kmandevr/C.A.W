@@ -4,7 +4,7 @@ import 'dart:io';
 
 import 'package:ffi/ffi.dart';
 
-const int cawApiVersion = 22;  // must equal CAW_API_VERSION in engine/include/caw.h
+const int cawApiVersion = 23;  // must equal CAW_API_VERSION in engine/include/caw.h
 
 /// CawNoteFxStats (API 22, #127): a layer's per-note FX slots.
 final class CawNoteFxStatsStruct extends Struct {
@@ -262,6 +262,9 @@ class Bindings {
             int Function(Pointer<Void>, Pointer<Utf8>, Pointer<Utf8>, int, int)>('caw_audio_configure'),
         audioStatus = lib.lookupFunction<Pointer<Utf8> Function(Pointer<Void>), Pointer<Utf8> Function(Pointer<Void>)>(
             'caw_audio_status'),
+        // API 23: the running device's output and input latency.
+        audioLatency = lib.lookupFunction<Pointer<Utf8> Function(Pointer<Void>), Pointer<Utf8> Function(Pointer<Void>)>(
+            'caw_audio_latency'),
         setMetronomeSound = lib.lookupFunction<Void Function(Pointer<Void>, Double, Int32),
             void Function(Pointer<Void>, double, int)>('caw_engine_set_metronome_sound'),
         testTone = lib.lookupFunction<Void Function(Pointer<Void>, Double), void Function(Pointer<Void>, double)>(
@@ -390,6 +393,7 @@ class Bindings {
   final Pointer<Utf8> Function() audioDevices;
   final int Function(Pointer<Void>, Pointer<Utf8>, Pointer<Utf8>, int, int) audioConfigure;
   final Pointer<Utf8> Function(Pointer<Void>) audioStatus;
+  final Pointer<Utf8> Function(Pointer<Void>) audioLatency;
   final void Function(Pointer<Void>, double, int) setMetronomeSound;
   final void Function(Pointer<Void>, double) testTone;
   final int Function(Pointer<Void>) testToneSounding;

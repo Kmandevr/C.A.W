@@ -132,7 +132,7 @@ void main() {
   Future<AppState> startState(WidgetTester tester) async {
     final s = AppState();
     s.engine = Engine.create();
-    s.project = s.starterProject();
+    s.project = s.demoProject();
     s.selectedModuleId = s.project.modules.first.id;
     s.ready = true;
     s.starting = false;

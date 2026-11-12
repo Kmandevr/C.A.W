@@ -24,6 +24,7 @@ import 'volume_fader.dart';
 import 'arrange/track_color.dart';
 import 'widgets.dart';
 import 'glass.dart';
+import 'panel_motion.dart';
 
 class TrackCardsScreen extends StatelessWidget {
   const TrackCardsScreen({super.key, required this.state, required this.onOpenModule, this.onBack});
@@ -149,8 +150,8 @@ class _ProjectStrip extends StatelessWidget {
             const SizedBox(height: 10),
             PeakMeter(
                 state: state,
-                read: () => state.meters.peakL,
-                readRight: () => state.meters.peakR,
+                read: () => state.audibleMeters.peakL,
+                readRight: () => state.audibleMeters.peakR,
                 color: Neon.blue),
           ]),
         ),
@@ -392,7 +393,7 @@ String _detail(AppState s, LayerDoc layer) {
 Future<void> _rename(BuildContext context, AppState state, LayerDoc layer) async {
   final c = TextEditingController(text: layer.name);
   final name = await showDialog<String>(
-    context: context,
+    context: context, animationStyle: dialogAnimation(context),
     builder: (context) => AlertDialog(
       title: const Text('Rename track'),
       content: TextField(controller: c, autofocus: true, onSubmitted: (v) => Navigator.pop(context, v)),
@@ -457,7 +458,7 @@ class _TrackCard extends StatelessWidget {
                   ValueListenableBuilder<int>(
                     valueListenable: state.tick,
                     builder: (context, _, _) {
-                      final m = index < state.layerMeters.length ? state.layerMeters[index] : null;
+                      final m = index < state.audibleLayerMeters.length ? state.audibleLayerMeters[index] : null;
                       if (m?.overloaded != true) return const SizedBox();
                       return const Padding(
                         padding: EdgeInsets.only(right: 6),
@@ -507,7 +508,7 @@ class _Lane extends StatelessWidget {
           final song = math.max(1, p.engineLoopSteps);
           final stepW = box.maxWidth / song;
           final tracks = layer.isFolder ? _childrenOf(p, layer).toList() : [layer];
-          final notes = Color.lerp(color, Colors.white, 0.35)!;
+          final notes = Color.lerp(color, Neon.ink, 0.35)!;
           Widget clipBox(Key key, double start, double length, bool muted, Widget? body) {
             final left = start * stepW;
             final width = math.max(2.0, math.min(length * stepW, box.maxWidth - left));
@@ -542,7 +543,7 @@ class _Lane extends StatelessWidget {
             ValueListenableBuilder<int>(
               valueListenable: state.tick,
               builder: (context, _, _) {
-                final m = index < state.layerMeters.length ? state.layerMeters[index] : null;
+                final m = index < state.audibleLayerMeters.length ? state.audibleLayerMeters[index] : null;
                 final at = state.meters.playing ? (m?.progress ?? 0) : -1.0;
                 return CustomPaint(painter: _PlayheadPainter(at, color));
               },
@@ -839,7 +840,7 @@ class _TrackSheet extends StatelessWidget {
         ToggleChip(label: 'M', tooltip: 'Mute', on: layer.mute, color: Neon.yellow, onTap: () => s.mixLayer(layer, mute: !layer.mute)),
         const SizedBox(width: 6),
         ToggleChip(label: 'S', tooltip: 'Solo', on: layer.solo, color: Neon.blue, onTap: () => s.mixLayer(layer, solo: !layer.solo)),
-        PopupMenuButton<String>(
+        PopupMenuButton<String>( popUpAnimationStyle: menuAnimation(context),
           onSelected: (v) async {
             switch (v) {
               case 'rename':

@@ -25,6 +25,7 @@ import 'key_row.dart';
 import 'panels.dart';
 import 'plugin_screen.dart';
 import '../adaptive_sheet.dart';
+import '../panel_motion.dart';
 
 /// One file's editor state, kept with its session so undo survives switching tabs and files.
 class CppFileView {
@@ -680,7 +681,7 @@ class CppEditorState extends State<CppEditor> {
     final count = w.diagnostics.length;
     final labels = width >= 640;
     final parts = w.currentFile.split('/');
-    final crumb = PopupMenuButton<String>(
+    final crumb = PopupMenuButton<String>( popUpAnimationStyle: menuAnimation(context),
       key: const ValueKey('breadcrumb'),
       tooltip: "${w.name}'s files",
       padding: EdgeInsets.zero,

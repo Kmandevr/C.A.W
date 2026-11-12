@@ -15,6 +15,7 @@ import 'platform/mic_permission.dart';
 import 'platform/midi_input.dart';
 import 'ui/glass.dart';
 import 'ui/haptics.dart';
+import 'ui/keyboard/keyboard_layer.dart';
 import 'ui/page_closer.dart';
 import 'ui/shell.dart';
 import 'ui/theme.dart';
@@ -59,7 +60,7 @@ class CawApp extends StatefulWidget {
   State<CawApp> createState() => _CawAppState();
 }
 
-class _CawAppState extends State<CawApp> {
+class _CawAppState extends State<CawApp> with WidgetsBindingObserver {
   AppState get state => widget.state;
 
   // Which route is in front, for Esc and the mouse's Back button on closable pages.
@@ -82,11 +83,19 @@ class _CawAppState extends State<CawApp> {
   @override
   void initState() {
     super.initState();
+    // The system's light or dark mode, for Mode: Follow system (known before the first frame, then followed live).
+    WidgetsBinding.instance.addObserver(this);
+    state.settings.setPlatformBrightness(WidgetsBinding.instance.platformDispatcher.platformBrightness, quiet: true);
     state.settings.addListener(_settingsChanged);
   }
 
   @override
+  void didChangePlatformBrightness() =>
+      state.settings.setPlatformBrightness(WidgetsBinding.instance.platformDispatcher.platformBrightness);
+
+  @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     state.settings.removeListener(_settingsChanged);
     super.dispose();
   }
@@ -106,7 +115,9 @@ class _CawAppState extends State<CawApp> {
     // The glass backdrop sits behind every route (glass off: the plain background). The theme's text size scales
     // the system's.
     builder: (context, child) {
-      final body = GlassBackdrop(child: PageCloser(observer: _closer, child: child ?? const SizedBox.shrink()));
+      // Keys from a page, menu or sheet in front reach the key router; the focus ring and the hint strip draw on top.
+      final body = GlassBackdrop(child: PageCloser(observer: _closer,
+          child: KeyboardLayer(observer: _closer, child: child ?? const SizedBox.shrink())));
       final scale = state.settings.textScale;
       if (scale == 1) return body;
       final mq = MediaQuery.of(context);

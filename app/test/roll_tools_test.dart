@@ -43,7 +43,7 @@ Future<void> _menu(WidgetTester tester, String item) async {
 Future<AppState> _state(String source, {String id = 'line'}) async {
   final s = AppState();
   s.engine = Engine.create();
-  s.project = s.starterProject();
+  s.project = s.demoProject();
   s.project.modules.add(ModuleDoc(id: id, name: id, source: source));
   s.ready = true;
   s.starting = false;

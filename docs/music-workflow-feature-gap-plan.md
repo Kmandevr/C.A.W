@@ -2,7 +2,7 @@
 title: Music workflow implementation gaps
 summary: Factual snapshot of implemented and incomplete music-workflow capabilities; sequencing belongs to the permanent roadmap.
 covers: [app/lib/model/app_state.dart, app/lib/model/lane_curve.dart, app/lib/model/pattern_doc.dart, app/lib/model/poller.dart, app/lib/model/project.dart, app/lib/model/storage.dart]
-updated: 2026-11-11
+updated: 2026-11-12
 ---
 
 # Music workflow implementation gaps
@@ -29,7 +29,7 @@ This note records the current implementation gaps in C.A.W.'s music-production w
 
 - **[Implemented]** Songs of any length the 32-bit step count holds, with no 64-bar limit (F7.2, 2026-11-04).
 - **[Implemented in the engine]** More than 64 layers, bounded by the memory budget (F7.3), with their export buffers held to a project-wide share (#133); the app's add buttons still stop at 64 until F7.3 part C.
-- **[Implemented]** Arrangement-first horizontal timeline, track lanes, reusable MIDI clip sources, linked and independent duplicates, move/resize/split, source-offset shift, time selection, multi-selection/reference notes, nested folders and optional stereo folder buses. An adjustable gap between tracks and app-only spacer rows separate tracks on screen.
+- **[Implemented]** Arrangement-first horizontal timeline, track lanes, reusable MIDI clip sources, linked and independent duplicates, move/resize/split, source-offset shift, time selection, multi-selection/reference notes, nested folders and optional stereo folder buses. An adjustable gap between tracks and app-only spacer rows separate tracks on screen; each track has its own row height and a normal, compact or thin collapse state (app-only, saved; [app](app.md), Arranger).
 - **[Implemented]** Track and folder-bus volume/pan automation is serialized and played by the native engine.
 - **[Implemented]** Project/timeline automation lanes target module parameters by module ID or named project globals; the app edits song-time points and the native VM evaluates them per sample. Track volume/pan lanes remain separate.
 - **[Incomplete]** Audio clips, clip-following automation, tempo/time-signature maps, song markers/sections and consolidation/bounce.
@@ -62,7 +62,8 @@ This note records the current implementation gaps in C.A.W.'s music-production w
 - **[Implemented foundation]** MIDI 2.0 UMP decoding and bounded input-queue primitives, plus MIDI pattern file import/export.
 - **[Implemented, Android and Windows]** MIDI devices: USB, Bluetooth (scanned and connected in the app) and UMP devices on Android, WinMM ports on Windows ([app](app.md)); every Channel Voice message plays the armed or selected track at the frame it was played through the engine's device input (`app/lib/model/live_midi.dart`). Record captures a take while playing and writes it at Stop as a new pattern clip from the bar where recording began. Controller learn maps CCs to knobs.
 - **[Incomplete]** Bluetooth MIDI pairing inside the app, controller learn/mapping, external clock/sync and control-surface support.
-- **[Incomplete]** Audio recording, input monitoring, recording latency compensation (MIDI takes are timed from the polled playhead), punch-in/out, loop recording, take lanes and comping.
+- **[Implemented, not yet run on a device]** Output and input latency compensation (Bluetooth, USB, HDMI): MIDI takes at the step that was heard when the note was played, audio takes by output + input latency, the playhead and meters at the heard time ([app](app.md)).
+- **[Incomplete]** Take lanes and comping beyond a loop's stacked takes.
 
 ## Implementation constraints
 

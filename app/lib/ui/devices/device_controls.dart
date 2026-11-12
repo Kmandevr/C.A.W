@@ -11,13 +11,16 @@ import '../feedback.dart';
 import '../motion.dart';
 import '../pointer_input.dart';
 import '../theme.dart';
+import '../tokens.dart' show Radii;
 import '../widgets.dart' show ResetOnDoubleTap;
 import 'device_scope.dart';
+import 'kit/key_param.dart';
 import 'midi_learn.dart';
 import 'modulators/modulator_devices.dart' show modulatorColor, showModLinkSheet;
 import 'kit/feel.dart';
 import 'kit/hero.dart' show MotionClock, motionRuns;
 import 'visuals/mod_sheet.dart';
+import '../panel_motion.dart';
 
 /// [p]'s knob travel (its descriptor's curve).
 Taper taperOf(ComponentParameterInfo p) => Taper(p.min, p.max, exponential: p.exponential);
@@ -85,9 +88,18 @@ class _DeviceKnobState extends State<DeviceKnob> {
   Widget build(BuildContext context) {
     final app = DeviceScope.of(context).target.state;
     // Project modulation (#161): its links, the output being dragged and assign mode redraw the knob.
-    return ListenableBuilder(
-      listenable: Listenable.merge([app.modulationTick, app.draggingModulation, app.assigningModulation]),
-      builder: (context, _) => _build(context));
+    return KeyParam(
+      paramId: widget.paramId,
+      onType: () {
+        final t = DeviceScope.of(context).target;
+        final p = t.param(widget.paramId);
+        if (p != null && !p.isChoice) _typeValue(context, p, t.value(p.id));
+      },
+      kind: DeviceScope.of(context).target.param(widget.paramId)?.isChoice ?? false ? KeyParamKind.choice : KeyParamKind.range,
+      child: ListenableBuilder(
+        listenable: Listenable.merge([app.modulationTick, app.draggingModulation, app.assigningModulation]),
+        builder: (context, _) => _build(context)),
+    );
   }
 
   Widget _build(BuildContext context) {
@@ -446,7 +458,7 @@ class _DeviceKnobState extends State<DeviceKnob> {
     final t = DeviceScope.of(context).target;
     DeviceFeel.tap();
     final field = TextEditingController(text: value.toStringAsFixed(p.max - p.min > 20 ? 1 : 3));
-    final typed = await showDialog<double>(context: context, builder: (c) => AlertDialog(
+    final typed = await showDialog<double>(context: context, animationStyle: dialogAnimation(context), builder: (c) => AlertDialog(
       title: Text(p.label, style: const TextStyle(fontSize: 14)),
       content: TextField(
         key: const ValueKey('dknob-type'),
@@ -562,7 +574,7 @@ class DeviceKnobPainter extends CustomPainter {
     }
     canvas.drawArc(rect, a0, sweep, false, stroke
       ..shader = SweepGradient(startAngle: 0, endAngle: math.pi * 2, transform: GradientRotation(_start),
-          colors: [color.withValues(alpha: 0.65), color, Color.lerp(color, Colors.white, 0.35)!],
+          colors: Neon.ramp([color.withValues(alpha: 0.65), color, Color.lerp(color, Neon.ink, 0.35)!]),
           stops: const [0, 0.5, 0.75]).createShader(rect));
     stroke.shader = null;
     // One ring per route, outside the track, in its source's colour (up to four; the badge counts the rest).
@@ -599,10 +611,20 @@ class DeviceKnobPainter extends CustomPainter {
         canvas.drawArc(rr, _start + _sweep * (lo + (hi - lo) * k / n), _sweep * (hi - lo) / n, false, dash);
       }
     }
-    canvas.drawCircle(c, r - 4.5, Paint()..color = Neon.panelHi);
-    canvas.drawCircle(c, r - 4.5, Paint()
-      ..color = Colors.white.withValues(alpha: 0.06)
-      ..style = PaintingStyle.stroke);
+    // The cap: round as designed; below full corner roundness ([Radii.scale]) it squares off toward a tile.
+    final face = Paint()..color = Neon.panelHi;
+    final rim = Paint()
+      ..color = Neon.ink.withValues(alpha: 0.06)
+      ..style = PaintingStyle.stroke;
+    if (Radii.scale >= 1) {
+      canvas.drawCircle(c, r - 4.5, face);
+      canvas.drawCircle(c, r - 4.5, rim);
+    } else {
+      final cap = RRect.fromRectAndRadius(
+          Rect.fromCircle(center: c, radius: r - 4.5), Radius.circular((r - 4.5) * (0.25 + 0.75 * Radii.scale)));
+      canvas.drawRRect(cap, face);
+      canvas.drawRRect(cap, rim);
+    }
     final a = _start + _sweep * pos;
     final dir = Offset(math.cos(a), math.sin(a));
     canvas.drawLine(c + dir * (r * 0.3), c + dir * (r - 5), Paint()
@@ -616,10 +638,10 @@ class DeviceKnobPainter extends CustomPainter {
       canvas.drawArc(rect, _start + _sweep * math.min(pos, m), _sweep * (m - pos).abs(), false, Paint()
         ..style = PaintingStyle.stroke
         ..strokeWidth = 3
-        ..color = Colors.white.withValues(alpha: 0.45));
+        ..color = Neon.ink.withValues(alpha: 0.45));
       final dot = c + Offset(math.cos(am), math.sin(am)) * r;
-      canvas.drawCircle(dot, 4.5, Paint()..color = Colors.white.withValues(alpha: 0.25));
-      canvas.drawCircle(dot, 2.6, Paint()..color = Colors.white);
+      canvas.drawCircle(dot, 4.5, Paint()..color = Neon.ink.withValues(alpha: 0.25));
+      canvas.drawCircle(dot, 2.6, Paint()..color = Neon.ink);
     }
   }
 
@@ -697,11 +719,16 @@ class DeviceChoice extends StatelessWidget {
         onChanged: (k) { if (k != null) pick(k); },
       )));
     }
-    if (label == null) return body;
+    // The keyboard steps through it (a dropdown's own button also opens it with Enter).
+    final keyed = names.length <= maxSegments
+        ? KeyParam(paramId: p.id, kind: KeyParamKind.choice,
+            child: Semantics(label: label ?? p.label, value: names[i], child: body))
+        : body;
+    if (label == null) return keyed;
     return Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
       Text(label!, style: const TextStyle(fontSize: 9, color: Neon.dim)),
       const SizedBox(height: 2),
-      body,
+      keyed,
     ]);
   }
 }
@@ -753,7 +780,11 @@ class DeviceSlider extends StatelessWidget {
     final v = t.value(p.id);
     final c = color ?? scope.accent;
     final bipolar = p.min < 0 && p.max > 0;
-    return ResetOnDoubleTap(
+    return KeyParam(paramId: p.id, child: Semantics(
+      label: label ?? p.label,
+      value: formatParamValue(p, v),
+      slider: true,
+      child: ResetOnDoubleTap(
       onReset: () => t.set(p.id, p.defaultValue),
       child: LayoutBuilder(builder: (context, box) {
         void at(double x) => t.setLive(p.id, taper.value(x / box.maxWidth));
@@ -788,7 +819,7 @@ class DeviceSlider extends StatelessWidget {
           )),
         ));
       }),
-    );
+    )));
   }
 }
 
@@ -801,7 +832,7 @@ class _SliderPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final r = RRect.fromRectAndRadius(Offset.zero & size, const Radius.circular(6));
-    canvas.drawRRect(r, Paint()..color = Colors.white.withValues(alpha: 0.04));
+    canvas.drawRRect(r, Paint()..color = Neon.ink.withValues(alpha: 0.04));
     canvas.drawRRect(r, Paint()
       ..color = Neon.line
       ..style = PaintingStyle.stroke);

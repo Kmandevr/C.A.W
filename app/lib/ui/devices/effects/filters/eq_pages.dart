@@ -152,7 +152,7 @@ class _Eq3Painter extends CustomPainter {
     strokeGlow(canvas, path, colors[0], width: 2.4);
     for (final (x, id) in [(lx, 'low_x'), (hx, 'high_x')]) {
       canvas.drawLine(Offset(x, 20), Offset(x, h), Paint()
-        ..color = Colors.white.withValues(alpha: active == id ? 0.6 : 0.25)
+        ..color = Neon.ink.withValues(alpha: active == id ? 0.6 : 0.25)
         ..strokeWidth = active == id ? 2 : 1);
       paintHandle(canvas, Offset(x, 30), colors[1], active: active == id, r: 6);
     }
@@ -299,7 +299,7 @@ class _GeqPainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     final w = size.width, h = size.height;
     for (final db in [-12.0, -6.0, 0.0, 6.0, 12.0]) {
-      canvas.drawLine(Offset(0, y(db)), Offset(w, y(db)), Paint()..color = Colors.white.withValues(alpha: db == 0 ? 0.12 : 0.04));
+      canvas.drawLine(Offset(0, y(db)), Offset(w, y(db)), Paint()..color = Neon.ink.withValues(alpha: db == 0 ? 0.12 : 0.04));
     }
     // The analyser behind (the output's spectrum while it plays).
     if (spectrum case final s? when s.isNotEmpty) {
