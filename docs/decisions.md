@@ -6,6 +6,18 @@ updated: 2026-11-12
 
 # Decisions
 
+## 2026-11-12: Beta readiness: speed, smoothness, a stress test, telemetry and feedback (owner)
+
+**Decision (owner, through the owner's other session; confirmed in this session):** the full direction is in the [beta readiness plan](beta-readiness-plan.md) and issue #187.
+- **Engine speed beyond phases 1-5:** audio-thread scheduling with platform hints (A1), Flagship voices side by side (A2), the first callback after Play (A3), per-callback loops bounded to active slots (A4, #133), CPU-feature dispatch (A5), and a pool sized from real core types (A6). A shared reverb bus (A7) is a proposal for the owner only.
+- **Frames:** the UI runs at the display's full rate, up to 240 Hz, and asks for no frames when idle.
+- **Stress test:** a built-in test on Android, Windows and Linux.
+- **Startup:** a startup screen in C.A.W's own style.
+- **Telemetry:** anonymous, on by default in beta builds and off in release builds, and all of it published in `Kmandevr/caw-telemetry`.
+- **Feedback:** a form whose reports are posted as public issues.
+- **Split of work:** this repository builds sections A-G. The owner's other session builds caw-telemetry, the relay and the privacy and terms texts. Section H is the shared contract, and only the owner changes it.
+- **Process:** every look (B settings, C, D, E, F) is asked of the owner before it is built. Anything that sends data off the device gets a security review.
+
 ## 2026-11-12: Frame rate: Auto by default, caps the screen has (owner)
 
 **Decision (owner):** the app uses high-refresh screens (60, 120, up to 240 Hz where the screen has them), with a **Frame rate** setting (Settings › Performance; the app has no Display page). **Auto** (the default) runs at the screen's highest rate while anything moves and drops to its lowest when the screen is still, to save battery. Fixed caps are 60 / 90 / 120 / 144 / 240 Hz, shown only where the screen supports them. Playback follows the cap: one rate everywhere, playhead, meters and the music video preview. The OS has the last word (battery saver, its peak-rate setting): the app only asks.
