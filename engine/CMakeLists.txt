@@ -28,14 +28,17 @@ target_compile_features(caw_sdk INTERFACE cxx_std_20)
 # Clang is either clang or clang-cl (MSVC-style flags, which ignore -ffp-contract and still fuse
 # multiply-adds under /fp:precise), so its flags are chosen from the consuming build's frontend:
 # here for the build tree, and in CAWConfig.cmake for installed consumers.
+# The engine's own targets (CAW_ENGINE_FP_FLAGS, set at the end of this file) skip these and use CAW_FP_FLAGS:
+# an interface option comes after a target's own on the command line, so it would override them.
+set(_caw_sdk_fp "$<NOT:$<BOOL:$<TARGET_PROPERTY:CAW_ENGINE_FP_FLAGS>>>")
 target_compile_options(caw_sdk INTERFACE
-  "$<$<COMPILE_LANG_AND_ID:CXX,MSVC>:/fp:precise>"
-  "$<$<COMPILE_LANG_AND_ID:CXX,GNU,AppleClang>:-ffp-contract=off;-fno-fast-math;-fno-trapping-math>")
+  "$<$<AND:${_caw_sdk_fp},$<COMPILE_LANG_AND_ID:CXX,MSVC>>:/fp:precise>"
+  "$<$<AND:${_caw_sdk_fp},$<COMPILE_LANG_AND_ID:CXX,GNU,AppleClang>>:-ffp-contract=off;-fno-fast-math;-fno-trapping-math>")
 if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
   if(CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
-    target_compile_options(caw_sdk INTERFACE "$<BUILD_INTERFACE:/fp:precise;/clang:-ffp-contract=off>")
+    target_compile_options(caw_sdk INTERFACE "$<BUILD_INTERFACE:$<${_caw_sdk_fp}:/fp:precise;/clang:-ffp-contract=off>>")
   else()
-    target_compile_options(caw_sdk INTERFACE "$<BUILD_INTERFACE:-ffp-contract=off;-fno-fast-math;-fno-trapping-math>")
+    target_compile_options(caw_sdk INTERFACE "$<BUILD_INTERFACE:$<${_caw_sdk_fp}:-ffp-contract=off;-fno-fast-math;-fno-trapping-math>>")
   endif()
 endif()
 set_target_properties(caw_sdk PROPERTIES EXPORT_NAME SDK)
@@ -87,12 +90,19 @@ endif()
 # Clang's default): it lets GCC vectorize loops with selects, such as the mixer's saturating sums.
 # MSVC's /fp:precise never contracts; clang-cl's does, so it also gets /clang:-ffp-contract=off.
 if(MSVC)
-  set(CAW_FLAGS /W4 /fp:precise /utf-8 /EHsc)
+  set(_caw_fp_default /fp:precise)
   if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
-    list(APPEND CAW_FLAGS /clang:-ffp-contract=off)
+    list(APPEND _caw_fp_default /clang:-ffp-contract=off)
   endif()
 else()
-  set(CAW_FLAGS -Wall -Wextra -ffp-contract=off -fno-fast-math -fno-trapping-math)
+  set(_caw_fp_default -ffp-contract=off -fno-fast-math -fno-trapping-math)
+endif()
+set(CAW_FP_FLAGS "${_caw_fp_default}" CACHE STRING "Floating-point flags of the engine's own targets (the SDK's stay strict)")
+mark_as_advanced(CAW_FP_FLAGS)
+if(MSVC)
+  set(CAW_FLAGS /W4 ${CAW_FP_FLAGS} /utf-8 /EHsc)
+else()
+  set(CAW_FLAGS -Wall -Wextra ${CAW_FP_FLAGS})
 endif()
 # Build speed only (the output is the same): Visual Studio builds compile one file at a time per target
 # unless asked; /MP compiles a target's files in parallel.
@@ -223,6 +233,7 @@ target_include_directories(caw_cli PRIVATE src)
   target_sources(caw_tests PRIVATE tests/voice_bus_test.cpp)  # #127 the voice bus; #120 built-in declarations, C 3.0/3.1
   target_sources(caw_tests PRIVATE tests/audio_assets_test.cpp)  # assets, audio clips, the sampler, SFZ, input (WP-J)
   target_sources(caw_tests PRIVATE tests/speed_free_wins_test.cpp)  # speed phase 1: Eco oversampling, silent work skipped, master sleep
+  target_sources(caw_tests PRIVATE tests/fp_mode_test.cpp)  # speed phase 2: the flush-to-zero guard, NaN/Inf guards under the build flags
   add_library(caw_test_component MODULE tests/native_component_fixture.cpp)
   target_link_libraries(caw_test_component PRIVATE CAW::SDK)
   target_compile_options(caw_test_component PRIVATE ${CAW_FLAGS})
@@ -296,6 +307,13 @@ add_executable(caw_bench bench/caw_bench.cpp src/capi.cpp src/capi_modulation.cp
   target_include_directories(caw_bench PRIVATE src)
   target_link_libraries(caw_bench PRIVATE caw_core)
 endif()
+
+# The engine's own targets take CAW_FP_FLAGS (in CAW_FLAGS) instead of the SDK's strict floating-point flags.
+foreach(_caw_target caw_core caw_engine caw_cli caw_tests caw_rt_tests caw_bench)
+  if(TARGET ${_caw_target})
+    set_property(TARGET ${_caw_target} PROPERTY CAW_ENGINE_FP_FLAGS ON)
+  endif()
+endforeach()
 
 # CLAP export (docs/native-module-sdk.md): plug-ins of the example and a test bundle, and a host test.
 if(CAW_CLAP AND CAW_TOOLS)

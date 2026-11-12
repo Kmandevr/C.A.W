@@ -22,6 +22,7 @@
 #include <thread>
 
 #include "detmath.h"
+#include "fp_mode.h"
 #include "json.h"
 #include "params.h"
 
@@ -4457,6 +4458,7 @@ void Engine::pickOverloadVictim() noexcept {
 }
 
 void Engine::process(float* left, float* right, int frames) noexcept {
+    const ScopedFlushDenormals flushDenormals;  // live callbacks, exports and renders alike (fp_mode.h)
     // Whether any layer is soloed, worked out once per callback rather than once per layer and block.
     updateSolo();
     applyCommands();

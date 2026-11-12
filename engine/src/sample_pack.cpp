@@ -22,6 +22,7 @@
 #include "caw/detmath.hpp"
 #include "caw/instrument.hpp"
 #include "component_chain.h"
+#include "fp_mode.h"
 #include "json.h"
 #include "params.h"
 
@@ -975,6 +976,7 @@ public:
 
     // One cell: fresh instances, a note on held for the hold, then off; until quiet (or the most frames).
     bool render(const Cell& cell, Rendered& out, int32_t* cancel, std::string& error) {
+        const ScopedFlushDenormals flushDenormals;  // as the Engine renders (fp_mode.h)
         std::vector<Stage> stages;
         std::vector<const PackComponent*> comps{&req_.instrument};
         for (const PackComponent& e : req_.effects) comps.push_back(&e);
