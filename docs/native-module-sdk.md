@@ -90,7 +90,7 @@ The rules that matter:
 - **Make `saveState` safe while `process` runs:** the host may save a playing project.
 - **Make `reset()` clear what you hold.** The host calls it so the next play starts from silence.
 - **Say when you are silent, and the host stops calling you.** Override `bool quiet() const noexcept` to return true, right after a `process`, when your output from then on is silence until an event arrives or your input is not silent (an instrument with no voice sounding, an effect whose tail has died out). The host then skips you, so a silent track costs nearly nothing; your time does not move meanwhile, so restart anything timed (a control grid, an LFO you care about) at the next note, and say quiet only once nothing timed that a later note starts from is still running (the acid synth waits for its filter envelope too). `CAW_EXPORT_COMPONENT` offers it through the C interface's `caw.quiet.v1` extension (`CawQuietExtension`), and the CLAP export reports it as `CLAP_PROCESS_SLEEP`. Without it the host keeps calling you: a declared `tailFrames` alone never puts you to sleep, because you would fall asleep on a block boundary with your timed state frozen there, and playback would then depend on the device's buffer size (second audio review, 2026-11-10).
-- **Use the Library for the same sound everywhere:** `caw/library/` ([below](#the-library)) and `caw/detmath.hpp` sound the same on every device.
+- **Use the Library for the same sound everywhere:** `caw/library/` ([below](#the-library)) and `caw/detmath.hpp` sound the same on every device (the engine checks its own built-ins against reference renders within a perceptual tolerance, [engine](engine.md)).
 
 ## Testing your effect
 
