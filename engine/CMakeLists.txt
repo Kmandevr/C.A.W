@@ -85,20 +85,29 @@ if(CAW_INSTALL_SDK)
   )
 endif()
 
-# Determinism: no fast-math and no fused multiply-add contraction, so every platform rounds alike.
-# -fno-trapping-math changes no result (the engine never reads floating-point exception flags; it is
-# Clang's default): it lets GCC vectorize loops with selects, such as the mixer's saturating sums.
-# MSVC's /fp:precise never contracts; clang-cl's does, so it also gets /clang:-ffp-contract=off.
+# Floating point (speed phase 2, docs/engine.md "Determinism"): output must sound the same, not give the same bits
+# (owner, 2026-11-12), so the engine's own code gets the fast-math subsets that measured faster and pass every
+# reference render: fused multiply-adds (-ffp-contract=fast; Arm64 has FMA, the x86-64 baseline has none, so no
+# change there), no errno from maths functions, no trapping, no signed zeros and reassociation (GCC reassociates only
+# with those two). Never -ffinite-math-only: the mix's NaN/Inf guards (route_math.h, finiteOr0) must stay, and
+# fp_mode_test.cpp checks them under these flags. Left out: -freciprocal-math (no gain). MSVC keeps /fp:precise
+# (clang-cl also /clang:-ffp-contract=off): Windows isn't the speed target, and /fp:fast's NaN handling is unchecked.
+# _caw_fp_strict is the SDK's strict set: components get it (CAW::SDK above), and so do tests of exact IEEE results.
 if(MSVC)
-  set(_caw_fp_default /fp:precise)
+  set(_caw_fp_strict /fp:precise)
   if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
-    list(APPEND _caw_fp_default /clang:-ffp-contract=off)
+    list(APPEND _caw_fp_strict /clang:-ffp-contract=off)
   endif()
+  set(_caw_fp_default ${_caw_fp_strict})
 else()
-  set(_caw_fp_default -ffp-contract=off -fno-fast-math -fno-trapping-math)
+  # -fno-trapping-math changes no result (nothing reads floating-point exception flags; it is Clang's default).
+  set(_caw_fp_strict -ffp-contract=off -fno-fast-math -fno-trapping-math)
+  set(_caw_fp_default -ffp-contract=fast -fno-math-errno -fno-trapping-math -fno-signed-zeros -fassociative-math)
 endif()
-set(CAW_FP_FLAGS "${_caw_fp_default}" CACHE STRING "Floating-point flags of the engine's own targets (the SDK's stay strict)")
-mark_as_advanced(CAW_FP_FLAGS)
+# -DCAW_FP_FLAGS=... (a ;-list) overrides them, to measure a flag or build strictly.
+if(NOT DEFINED CAW_FP_FLAGS)
+  set(CAW_FP_FLAGS ${_caw_fp_default})
+endif()
 if(MSVC)
   set(CAW_FLAGS /W4 ${CAW_FP_FLAGS} /utf-8 /EHsc)
 else()
@@ -308,6 +317,13 @@ add_executable(caw_bench bench/caw_bench.cpp src/capi.cpp src/capi_modulation.cp
   target_link_libraries(caw_bench PRIVATE caw_core)
 endif()
 
+# Tests whose expected values are exact IEEE arithmetic get the strict flags whatever CAW_FP_FLAGS is (an option on
+# a source comes after the target's): the Library's exact bits and signed zeros as components get them, and the
+# graph's routing (copies keep -0.0f; gains apply in order), computed without reassociation or folded signed zeros.
+if(CAW_TOOLS)
+  set_source_files_properties(tests/library_kernels_test.cpp tests/builtin_instruments_test.cpp tests/graph_channels_test.cpp
+    PROPERTIES COMPILE_OPTIONS "${_caw_fp_strict}")
+endif()
 # The engine's own targets take CAW_FP_FLAGS (in CAW_FLAGS) instead of the SDK's strict floating-point flags.
 foreach(_caw_target caw_core caw_engine caw_cli caw_tests caw_rt_tests caw_bench)
   if(TARGET ${_caw_target})
