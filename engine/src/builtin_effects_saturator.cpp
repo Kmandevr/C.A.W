@@ -192,17 +192,86 @@ protected:
         // (the curve inlined, no switch per sample); the arithmetic is the same either way.
         if (switching_ || fade_ < 1.0) return runWith<-1>(inL, inR, outL, outR, n);
         switch (mode_) {
-            case kTube: return runWith<kTube>(inL, inR, outL, outR, n);
-            case kSoft: return runWith<kSoft>(inL, inR, outL, outR, n);
-            case kHard: return runWith<kHard>(inL, inR, outL, outR, n);
-            case kFold: return runWith<kFold>(inL, inR, outL, outR, n);
+            case kTube: return runBlock<kTube>(inL, inR, outL, outR, n);
+            case kSoft: return runBlock<kSoft>(inL, inR, outL, outR, n);
+            case kHard: return runBlock<kHard>(inL, inR, outL, outR, n);
+            case kFold: return runBlock<kFold>(inL, inR, outL, outR, n);
             case kCrush: return runWith<kCrush>(inL, inR, outL, outR, n);
-            case kFuzz: return runWith<kFuzz>(inL, inR, outL, outR, n);
-            case kRectify: return runWith<kRectify>(inL, inR, outL, outR, n);
-            case kTriFold: return runWith<kTriFold>(inL, inR, outL, outR, n);
-            case kBitShape: return runWith<kBitShape>(inL, inR, outL, outR, n);
-            case kFat: return runWith<kFat>(inL, inR, outL, outR, n);
-            default: return runWith<kTape>(inL, inR, outL, outR, n);
+            case kFuzz: return runBlock<kFuzz>(inL, inR, outL, outR, n);
+            case kRectify: return runBlock<kRectify>(inL, inR, outL, outR, n);
+            case kTriFold: return runBlock<kTriFold>(inL, inR, outL, outR, n);
+            case kBitShape: return runBlock<kBitShape>(inL, inR, outL, outR, n);
+            case kFat: return runBlock<kFat>(inL, inR, outL, outR, n);
+            default: return runBlock<kTape>(inL, inR, outL, outR, n);
+        }
+    }
+    // runWith<M>'s arithmetic for one mode (not the crusher) and no change under way, stage by stage over the run:
+    // the ramps, each side's drive and bias, its oversampler up (Oversampler2x::upBlock), the curve over every
+    // oversampled value (a loop that vectorizes), down, the tape and DC filters and the tone, then the dynamics
+    // and the mix. Each sample meets the same operations in the same order (speed phase 4).
+    template <int M>
+    void runBlock(const float* inL, const float* inR, float* outL, float* outR, uint32_t n) noexcept {
+        constexpr uint32_t K = kControlFrames;
+        double drive[K], bias0[K], outGain[K], mix[K], sp[K];
+        for (uint32_t i = 0; i < n; ++i) {
+            drive[i] = drive_.next(), bias0[i] = bias_.next(), outGain[i] = out_.next(), mix[i] = mix_.next();
+            sp[i] = spreadOn_ ? spread_.next() : 0.0;
+        }
+        const double steps = steps_;
+        double v[2][K];
+        for (int c = 0; c < 2; ++c) {
+            const float* in = c ? inR : inL;
+            double x[K], off[K], up[2 * K], up4[4 * K];
+            for (uint32_t i = 0; i < n; ++i) {
+                const double bias = spreadOn_ ? bias0[i] + (c == 0 ? sp[i] : -sp[i]) : bias0[i];
+                // The curve's value at the bias, worked out again only when the bias (or the mode) moved.
+                if (bias != offsetBias_[c] || M != offsetMode_[c] || steps != offsetSteps_[c]) {
+                    offsetBias_[c] = bias;
+                    offsetMode_[c] = M;
+                    offsetSteps_[c] = steps;
+                    offset_[c] = curve(M, bias, steps);
+                }
+                off[i] = offset_[c];
+                x[i] = static_cast<double>(in[i]) * drive[i] + bias;
+            }
+            double* y = v[c];
+            if (factor_ == 4) {
+                os_[c].upBlock(x, up, static_cast<int>(n));
+                os4_[c].upBlock(up, up4, static_cast<int>(2 * n));
+                for (uint32_t i = 0; i < n; ++i)
+                    for (int k = 0; k < 4; ++k) up4[4 * i + k] = curve(M, up4[4 * i + k], steps) - off[i];
+                os4_[c].downBlock(up4, up, static_cast<int>(2 * n));
+                os_[c].downBlock(up, y, static_cast<int>(n));
+            } else if (oversample_) {
+                os_[c].upBlock(x, up, static_cast<int>(n));
+                for (uint32_t i = 0; i < n; ++i)
+                    for (int k = 0; k < 2; ++k) up[2 * i + k] = curve(M, up[2 * i + k], steps) - off[i];
+                os_[c].downBlock(up, y, static_cast<int>(n));
+            } else {
+                for (uint32_t i = 0; i < n; ++i) y[i] = curve(M, x[i], steps) - off[i];
+            }
+            if (M == kTape)  // tape's gentle top-end loss
+                for (uint32_t i = 0; i < n; ++i) y[i] = tape_[c].low(y[i]);
+            for (uint32_t i = 0; i < n; ++i) y[i] = dc_[c].high(y[i]);  // the bias's offset and an asymmetric curve's DC
+            if (!tone_filter_.identity())
+                for (uint32_t i = 0; i < n; ++i) y[i] = tone_filter_.process(tone_[c], y[i]);
+        }
+        if (dynOn_) {  // the envelopes, linked, before the dynamics gain (which follows them at control rate)
+            for (uint32_t i = 0; i < n; ++i) {
+                const double xl = inL[i], xr = inR[i];
+                const double a = std::max(xl < 0 ? -xl : xl, xr < 0 ? -xr : xr);
+                const double b = std::max(v[0][i] < 0 ? -v[0][i] : v[0][i], v[1][i] < 0 ? -v[1][i] : v[1][i]);
+                envIn_.process(a);
+                envOut_.process(b);
+                const double g = dyn_.next();
+                v[0][i] *= g, v[1][i] *= g;
+            }
+        }
+        for (uint32_t i = 0; i < n; ++i) {
+            const double xl = inL[i], xr = inR[i];
+            const double wl = v[0][i] * outGain[i], wr = v[1][i] * outGain[i];
+            outL[i] = static_cast<float>(xl + (wl - xl) * mix[i]);
+            outR[i] = static_cast<float>(xr + (wr - xr) * mix[i]);
         }
     }
     // M: the mode for the whole run, or -1: mode_ as it is at each sample (a change under way).

@@ -54,13 +54,20 @@ public:
         a2_ = g * a1_;
         a3_ = g * a2_;
     }
+    // One sample of the filter's core on a finite x: v1 (band) and v2 (low) out, the state s1, s2 stepped. For a
+    // double or a two-wide vector (every operand the same type, two = 2), so every form shares one copy.
+    template <class T>
+    static void step(T x, T& s1, T& s2, T a1, T a2, T a3, T two, T& v1, T& v2) noexcept {
+        const T v3 = x - s2;
+        v1 = a1 * s1 + a2 * v3;
+        v2 = s2 + a2 * s1 + a3 * v3;
+        s1 = two * v1 - s1;
+        s2 = two * v2 - s2;
+    }
     SvfOutput process(double input) noexcept {
         const double x = finiteOr0(input);
-        const double v3 = x - ic2_;
-        const double v1 = a1_ * ic1_ + a2_ * v3;
-        const double v2 = ic2_ + a2_ * ic1_ + a3_ * v3;
-        ic1_ = 2.0 * v1 - ic1_;
-        ic2_ = 2.0 * v2 - ic2_;
+        double v1, v2;
+        step(x, ic1_, ic2_, a1_, a2_, a3_, 2.0, v1, v2);
         return {v2, v1, x - k_ * v1 - v2, x - k_ * v1};
     }
     double lowpass(double x) noexcept { return process(x).low; }
@@ -75,11 +82,8 @@ public:
         for (uint32_t i = 0; i < frames; ++i) {
             Pair x = {static_cast<double>(l[i]), static_cast<double>(r[i])};
             x = x - x == zero ? x : zero;  // finiteOr0
-            const Pair v3 = x - s2;
-            const Pair v1 = a1 * s1 + a2 * v3;
-            const Pair v2 = s2 + a2 * s1 + a3 * v3;
-            s1 = two * v1 - s1;
-            s2 = two * v2 - s2;
+            Pair v1, v2;
+            step(x, s1, s2, a1, a2, a3, two, v1, v2);
             l[i] = static_cast<float>(v2[0]);
             r[i] = static_cast<float>(v2[1]);
         }
@@ -100,6 +104,14 @@ public:
         if (ic1_ < 1e-20 && ic1_ > -1e-20) ic1_ = 0.0;
         if (ic2_ < 1e-20 && ic2_ > -1e-20) ic2_ = 0.0;
     }
+    // process()'s coefficients and state, for a caller running its arithmetic on several channels at once.
+    double a1() const noexcept { return a1_; }
+    double a2() const noexcept { return a2_; }
+    double a3() const noexcept { return a3_; }
+    double k() const noexcept { return k_; }
+    double ic1() const noexcept { return ic1_; }
+    double ic2() const noexcept { return ic2_; }
+    void setState(double s1, double s2) noexcept { ic1_ = s1, ic2_ = s2; }
     // Takes another filter's coefficients (no tan): the second side of a stereo pair set like the first.
     void setLike(const Svf& other) noexcept {
         a1_ = other.a1_, a2_ = other.a2_, a3_ = other.a3_, k_ = other.k_;
