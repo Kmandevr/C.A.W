@@ -85,7 +85,7 @@ The .caw VM, whose costs the 2026-10-28 engine audit measured (integer conversio
 2. **`Poller`** (`app/lib/model/poller.dart`) replaces the `Ticker`:
    - about 30 reads a second only while playing, plus 1 s after stopping; the meters fall on their own clock after that
    - then no timers, no frames and no FFI calls
-   - nothing at all while the app is in the background
+   - nothing at all while the app is in the background, except a 2-second device check while playing behind the app (`background_playback.dart`, 2026-11-12), and Android's foreground service keeps the process from being frozen then; a battery-restricted C.A.W may still be interrupted, so Settings › Audio offers Android's battery page ([app](app.md))
    - Tests in `app/test/poller_test.dart` check the rate, the settle, the idle and the background.
 3. **The audio device closes after 30 s stopped and idle.** Play (or resuming a pause) reopens it, as the app already did after returning from the background. **[Assumption]** Reopening takes well under a second on Android; check it on the phone.
 
