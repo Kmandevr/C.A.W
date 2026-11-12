@@ -124,9 +124,6 @@ bool record(const ProjectSpec& p, int sr, int64_t keepFrom, int64_t total, Rende
     }, out.error, progress, cancel);
 }
 
-int64_t loopFrames(const ProjectSpec& p, int sr, int steps) {
-    return static_cast<int64_t>(sampletime::roundFrames(steps, sampletime::stepFrames(sr, p.bpm)));
-}
 
 // Each frame's DC offset removed, then the whole table normalised to a peak of 1, into out.samples.
 void finishWavetable(std::vector<double>& table, int frames, RenderResult& out) {
@@ -243,10 +240,10 @@ bool prepareExport(const ProjectSpec& in, const ExportOptions& o, ProjectSpec& p
 void playedSpan(const ProjectSpec& p, const ExportOptions& o, int64_t& keepFrom, int64_t& total) {
     const int sr = o.sampleRate;
     if (o.kind == ExportKind::Loop && p.loopRange && p.loopEndSteps > p.loopStartSteps && p.loopEndSteps <= p.loopSteps()) {
-        keepFrom = loopFrames(p, sr, p.loopEndSteps);
-        total = keepFrom + keepFrom - loopFrames(p, sr, p.loopStartSteps);
+        keepFrom = stepFrame(p, sr, p.loopEndSteps);
+        total = keepFrom + keepFrom - stepFrame(p, sr, p.loopStartSteps);
     } else if (o.kind == ExportKind::Loop) {
-        keepFrom = loopFrames(p, sr, p.loopSteps());
+        keepFrom = stepFrame(p, sr, p.loopSteps());
         total = 2 * keepFrom;
     } else {
         keepFrom = 0;
@@ -346,16 +343,16 @@ bool renderExport(const ProjectSpec& in, const ExportOptions& o, RenderResult& o
                 int64_t end = 0;
                 for (const ClipSpec& c : only.clips) end = std::max<int64_t>(end, int64_t{c.startSteps} + c.lengthSteps);
                 p.loopBars = maxLoopBars(p.beatsPerBar);  // the project loop never cuts the layer short
-                len = loopFrames(p, sr, static_cast<int>(std::min<int64_t>(end, maxArrangementSteps(p.beatsPerBar))));
+                len = stepFrame(p, sr, static_cast<int>(std::min<int64_t>(end, maxArrangementSteps(p.beatsPerBar))));
             } else if (!only.pattern.empty()) {
                 // A pattern sets the layer's length.
                 p.loopBars = maxLoopBars(p.beatsPerBar);  // the project loop never cuts the layer short
-                len = loopFrames(p, sr, parsePattern(p.module(only.pattern)->source).pattern->steps(p.beatsPerBar));
+                len = stepFrame(p, sr, parsePattern(p.module(only.pattern)->source).pattern->steps(p.beatsPerBar));
             } else if (only.lengthSteps > 0) {
                 p.loopBars = maxLoopBars(p.beatsPerBar);  // the project loop never cuts the layer short
-                len = loopFrames(p, sr, only.lengthSteps);
+                len = stepFrame(p, sr, only.lengthSteps);
             } else {
-                len = loopFrames(p, sr, p.loopSteps());
+                len = stepFrame(p, sr, p.loopSteps());
             }
             len = std::min<int64_t>(len, static_cast<int64_t>(30) * sr);
             p.layers = {only};
@@ -401,6 +398,10 @@ bool renderExportToWav(const ProjectSpec& in, const ExportOptions& o, const std:
     spec.channels = r.channels;
     spec.loop = r.loop;
     return writeFile(path, encodeWav(spec, r.samples.data(), r.frames), error);
+}
+
+int64_t stepFrame(const ProjectSpec& p, int sr, int64_t steps) {
+    return static_cast<int64_t>(sampletime::roundFrames(static_cast<double>(steps), sampletime::stepFrames(sr, p.bpm)));
 }
 
 }  // namespace caw
