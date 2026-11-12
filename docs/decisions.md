@@ -31,6 +31,13 @@ updated: 2026-11-11
 - **VST3 in the export page:** one format per package (CLAP or VST3), not both. Why: it keeps the page and the generated workflow simple; a second export makes the other format. Folders from Steinberg's "Plug-in Locations" page (read 2026-11-11).
 - **Learned CCs in a .mid export:** a lane on a knob with a learned CC uses that CC and channel, values on the knob's travel; a CC learned by two lanes goes to the first. The "mod-wheel-mapped target" is read as a knob with CC1 learned; a mod-matrix route from the mod wheel is not turned into CC1, since the lane holds the knob's values, not the wheel's (open question for the owner).
 
+## 2026-11-11: the master loudness meter measures only while read (Claude, performance pass)
+
+The live master loudness meter (BS.1770-5 K-weighting and the 4x true-peak filter, every sample) cost about 6 % of a three-track project's audio work, and nothing in the app reads it (`caw_engine_loudness` has no caller in `app/lib`; [performance](performance.md#song-scenarios-2026-11-11)).
+
+- **Decision (Claude, a small assumption for the app; the owner may reverse it):** the Engine's master meter measures from the start until 30 s pass with no read, then stops; the next read starts it over as a reset does (`LoudnessMeter::sleepWhenUnread`, `engine/src/meters.*`). Its momentary and short-term values are then those of the last 30 s it measured, and the integrated value counts only the time something was reading. Export loudness uses its own meter and is unchanged; a `LoudnessMeter` made outside the Engine measures always.
+- **No sound changed:** every other speed-up of the pass gives the same bits (no golden render was re-recorded), so it needs no perceptual check.
+
 ## 2026-11-11: the .caw project file and its package format (#159; Claude, choices to confirm)
 
 Carries out the owner's packaging bullets of "MIDI clip loops, clip automation and project packaging" (below); [App](app.md) has the flows.
@@ -56,6 +63,22 @@ Carries out the owner's decision of 2026-11-10 ("C++ replaces the .caw language"
 - **Tests play C++:** every engine test that used a .caw source as a signal plays `org.caw.test.osc` (`engine/tests/test_signal.h`) or a built-in. The mixer goldens moved onto it and were re-recorded on purpose; the Library parity tests keep frozen hashes of the ports' output, recorded while they still matched the .caw built-ins. Every other golden is unchanged.
 - **Bug fixed on the way:** a track's instrument installed while nothing sounds counted as still ringing at the first Play, which mixed in 5 ms of a phantom tail (a free-running source started at twice its level); a new instrument now starts idle.
 - **Open, for the owner:** an instrument track keeps running after a Stop until its output is quiet (or 30 s), and a never-quiet effect there now ends at that cap without the 20 ms fade buses get; a bus whose capped tail has faded comes back while a child track still rings out. The app still sends `voices`, `swap`, `seam_crossfade` and the key (Settings' light-mode voice cap and swap timing now change nothing): removing those settings is UI work.
+
+## 2026-11-11: Latency compensation for Bluetooth and other outputs (owner)
+
+**Decision (owner, 2026-11-11).** Compensate for output latency on Bluetooth speakers and headphones, and on any output with noticeable delay (USB, HDMI, casting).
+
+**[Proposal]** How:
+- **Measure:** the output latency comes from the platform (Android AAudio/AudioTrack timestamps and the routed device type; Windows device and stream latency). Each output device gets a manual offset, saved per device, with presets for Bluetooth, and a tap-along or loopback calibration.
+- **Apply:**
+  - the playhead, meters, note highlights and the music-video preview show what you hear, not what was just rendered;
+  - recordings and MIDI takes are placed by the known round trip;
+  - metronome and count-in follow too.
+- **Show:** while Bluetooth adds more than about 50 ms, a small badge says so, because live playing and monitoring through Bluetooth will always feel late.
+
+## 2026-11-11: Every change animates (owner)
+
+**Decision (owner, 2026-11-11):** "As a rule of thumb, if anything changes it should animate to its changed state." That covers moves, size changes, things appearing and disappearing, and panels and pages opening and closing, both in and out. Each animation is short, follows the theme's animation tokens, and respects Off, Reduced and the per-kind switches. Motion that helps use the app (drags following the finger) stays immediate. The fit-and-finish pass audits the whole app against this rule.
 
 ## 2026-11-11: The whole app works from the keyboard (owner)
 
@@ -103,10 +126,13 @@ Carries out the owner's decision of 2026-11-10 ("C++ replaces the .caw language"
 - **Any aspect ratio and any resolution,** with presets for 9:16, 16:9 and 1:1.
 - **Preview:** a quick unrendered preview before recording.
 
-**[Proposal]** It renders offline:
-- the frames come from the same widgets drawn off screen at the chosen size, in step with the offline audio render;
-- they are encoded with the platform's own encoders (Android MediaCodec/MediaMuxer, Windows Media Foundation), so no GPL dependency;
-- the output is an MP4 with H.264 and AAC.
+**Built (Claude, 2026-11-11; choices to confirm; [App](app.md) "Music video" has the behaviour):**
+- **Offline and deterministic.** Frames come from one painter drawn off screen at the chosen size, at song time N / fps (never wall time), in step with the engine's offline song render of the range; meters come from per-frame peak and RMS of the rendered mix and track stems. The same project, setup and seed give the same frames (a test compares frame hashes).
+- **Shots are drawn by dedicated painters**, not by the editing screens: the flythrough, mixer, piano roll and device views are drawn from the project in the theme's colours. Why: the editing widgets read the live transport, meters and gestures and couldn't be driven by a render clock without changing screens other work owns; one painter also makes the preview and the render the same picture. Open (owner): whether the shots should look closer to the real screens.
+- **The director is seeded and uses note energy, not rendered loudness,** to choose mixer shots, so the preview (before any audio is rendered) cuts exactly as the render.
+- **Format:** MP4, H.264 video at about 0.1 bit per pixel per frame (2–80 Mbit/s) with a key frame a second (Android), AAC-LC at 160 kbit/s, 48 kHz stereo.
+- **Encoders: the platforms' own, no new package.** [Fact] Android MediaCodec, MediaMuxer and MediaCodecList are Android SDK APIs (developer.android.com reference pages, read 2026-11-11); Windows' H.264 encoder (Mfh264enc.dll, input I420, IYUV, NV12, YUY2 or YV12) and AAC encoder (Mfaacenc.dll, 16-bit PCM at 44.1 or 48 kHz, 1, 2 or 6 channels, 12,000 to 24,000 bytes a second) are Media Foundation transforms that ship with Windows 7 and later (Microsoft Learn "H.264 Video Encoder" and "AAC Encoder", read 2026-11-11). Both are called through the SDKs the app already builds with; C.A.W adds and redistributes no codec library, so no licence enters the project. [Assumption] the largest Windows frame is 4096 × 2304 until an encoder reports less; the Android limit is the first H.264 encoder's reported widths and heights, and the encoder chosen must take the exact size. Open (owner): codec patent terms for distributing the videos are the platform vendors' and the user's, not checked here.
+- **Linux and tests** write a list of frame hashes instead of a video; no MP4 encoder there yet.
 
 ## 2026-11-11: A REAPER-style layout file (owner; design, questions open)
 

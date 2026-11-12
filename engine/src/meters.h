@@ -23,6 +23,8 @@ public:
 private:
     double ll_ = 0, rr_ = 0, lr_ = 0;
     double perFrame_ = 0;  // -1 / (window x rate): the decay is exp(perFrame_ x frames)
+    int keepFrames_ = -1;  // the block size keep_ was worked out for
+    double keep_ = 1;
     std::atomic<float> value_{0.0f};
 };
 
@@ -54,6 +56,12 @@ public:
     // Any thread: the integrated loudness, the maxima and the true-peak maximum start again (the audio thread
     // clears them at its next block).
     void requestReset() noexcept { resetAsked_.fetch_add(1, std::memory_order_relaxed); }
+    // Before the audio thread runs it: from now on the meter measures only while something reads it, from the start
+    // until kUnreadSeconds pass with no read(), and again from the next read() (which starts it over, as a reset
+    // does). The Engine's master meter does this: nothing in the app reads it yet, and it costs about as much as
+    // a light effect (2026-11-11 performance pass).
+    static constexpr double kUnreadSeconds = 30.0;
+    void sleepWhenUnread(bool on) noexcept { sleepWhenUnread_ = on; }
     // Off the audio thread (one reader at a time): the momentary and short-term values as last published, the
     // integrated loudness worked out now, and the true peaks (those since the last read are reset by reading).
     Reading read() noexcept;
@@ -89,11 +97,18 @@ private:
     std::array<double, 30> subs_{};  // the last 30 sub-blocks' mean squares (sum of both sides), a ring
     int subPos_ = 0, subCount_ = 0;
     uint32_t resetSeen_ = 0;
-    double tpHistory_[2][12] = {};
+    // The last 12 samples per side, written twice (at tpPos_ and tpPos_ + 12), so the window is always contiguous:
+    // the sample k back is at tpPos_ + 12 - k.
+    double tpHistory_[2][24] = {};
     int tpPos_ = 0;
     double tpMax_ = 0, mMax_ = 0, sMax_ = 0;
 
     std::atomic<uint32_t> resetAsked_{0};
+    std::atomic<uint32_t> reads_{0};  // bumped by read()
+    bool sleepWhenUnread_ = false;
+    uint32_t readsSeen_ = 0;          // audio thread
+    double unreadFrames_ = 0;         // audio thread: frames since a read() was last seen
+    bool asleep_ = false;             // audio thread: not measuring (no read lately)
     std::atomic<float> momentary_{kMeterNone}, shortTerm_{kMeterNone}, momentaryMax_{kMeterNone},
         shortTermMax_{kMeterNone}, truePeakL_{0}, truePeakR_{0}, truePeakMax_{0};
     std::atomic<uint64_t> blocks_{0};  // 400 ms blocks counted since the reset (any loudness)

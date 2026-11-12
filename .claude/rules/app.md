@@ -13,3 +13,4 @@ paths:
 - No secrets in any build. GitHub tokens come from the device-flow sign-in and live in the platform's secure storage.
 - Phone screens first: compact panels, sensible defaults, the symbol key row for code entry, errors on one line next to the code. Desktop gets keyboard shortcuts on top, not a different app.
 - Start each file with a one-line `//` comment saying what it is for (the repo map reads it).
+- Every visible state change animates to its new state, in and out, through the theme's motion tokens (`lib/ui/motion.dart`) and respecting Off/Reduced; a drag follows the finger with no lag (owner, 2026-11-11).

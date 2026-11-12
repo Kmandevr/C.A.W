@@ -46,6 +46,7 @@ import 'adaptive_sheet.dart';
 import 'arrange/templates_ui.dart';
 import '../model/templates.dart';
 import 'pointer_input.dart';
+import 'music_video/video_setup_sheet.dart';
 
 /// The panel each view shortcut shows, by the index KeyRouter's `onView` passes.
 const _viewPanels = [Panels.builder, Panels.arrangement, Panels.files];
@@ -918,6 +919,16 @@ Future<void> showProjectMenu(BuildContext context, AppState s) async {
             onTap: () {
               Navigator.pop(context);
               if (outer.mounted) showExportPage(outer, s);
+            },
+          ),
+          ListTile(
+            key: const ValueKey('project-music-video'),
+            leading: const Icon(Icons.movie_filter_outlined, color: Neon.pink),
+            title: const Text('Music video…'),
+            subtitle: const Text('The arrangement as a video, cut by an auto director', style: TextStyle(color: Neon.dim)),
+            onTap: () {
+              Navigator.pop(context);
+              if (outer.mounted) showMusicVideoSheet(outer, s);
             },
           ),
           ListTile(

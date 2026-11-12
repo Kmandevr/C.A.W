@@ -81,34 +81,76 @@ private:
 class Oversampler2x {
 public:
     explicit Oversampler2x(const HalfBandDesign& d = HalfBandDesign()) noexcept { set(d); }
+    // The two branches of each direction run side by side (lane 0 the even branch, lane 1 the odd), each lane the
+    // same arithmetic as an AllpassChain of its coefficients, so the two-wide vectors (GCC and Clang: SSE2 or NEON)
+    // give the same bits as two chains one after the other (2026-11-11 performance pass).
     void set(const HalfBandDesign& d) noexcept {
-        up0_.set(d, 0);
-        up1_.set(d, 1);
-        down0_.set(d, 0);
-        down1_.set(d, 1);
+        n_ = d.count() / 2;
+        for (int i = 0; i < kStages; ++i)
+            for (int lane = 0; lane < 2; ++lane) {
+                const int k = 2 * i + lane;
+                a_[i][lane] = i < n_ && k < d.count() ? d.coefficient(k) : 0.0;
+            }
     }
     void up(double x, double out[2]) noexcept {
-        out[0] = up0_.process(x);
-        out[1] = up1_.process(x);
+        const double in[2] = {x, x};
+        run(up_, in, out);
     }
     double down(const double in[2]) noexcept {
         // y[m] = (A0 on the even samples v[2m] + A1 on the odd ones, one high-rate sample later: v[2m - 1]) / 2.
-        const double a = down0_.process(in[0]);
-        const double b = down1_.process(held_);
+        const double both[2] = {in[0], held_};
+        double out[2];
+        run(down_, both, out);
         held_ = in[1];
-        return 0.5 * (a + b);
+        return 0.5 * (out[0] + out[1]);
     }
     void clear() noexcept {
-        up0_.clear();
-        up1_.clear();
-        down0_.clear();
-        down1_.clear();
+        for (int i = 0; i < kStages; ++i)
+            for (int lane = 0; lane < 2; ++lane) up_.x[i][lane] = up_.y[i][lane] = down_.x[i][lane] = down_.y[i][lane] = 0.0;
         held_ = 0.0;
     }
 
 private:
-    AllpassChain up0_, up1_, down0_, down1_;
+    static constexpr int kStages = HalfBandDesign::kMax / 2;
+    struct State {
+        alignas(16) double x[kStages][2] = {}, y[kStages][2] = {};
+    };
+    // Each lane: y = a (x - y1) + x1 per stage, flushed below 1e-25, into the next stage (AllpassChain::process).
+    void run(State& s, const double in[2], double out[2]) noexcept {
+#if defined(__GNUC__)
+        typedef double Pair __attribute__((vector_size(16)));
+        const Pair tiny = {1e-25, 1e-25}, zero = {0.0, 0.0};
+        Pair x = {in[0], in[1]};
+        for (int i = 0; i < n_; ++i) {
+            Pair a, x1, y1;
+            __builtin_memcpy(&a, a_[i], sizeof a);
+            __builtin_memcpy(&x1, s.x[i], sizeof x1);
+            __builtin_memcpy(&y1, s.y[i], sizeof y1);
+            Pair y = a * (x - y1) + x1;
+            __builtin_memcpy(s.x[i], &x, sizeof x);
+            y = ((y < tiny) & (y > -tiny)) ? zero : y;
+            __builtin_memcpy(s.y[i], &y, sizeof y);
+            x = y;
+        }
+        out[0] = x[0];
+        out[1] = x[1];
+#else
+        for (int lane = 0; lane < 2; ++lane) {
+            double x = in[lane];
+            for (int i = 0; i < n_; ++i) {
+                const double y = a_[i][lane] * (x - s.y[i][lane]) + s.x[i][lane];
+                s.x[i][lane] = x;
+                s.y[i][lane] = y < 1e-25 && y > -1e-25 ? 0.0 : y;
+                x = s.y[i][lane];
+            }
+            out[lane] = x;
+        }
+#endif
+    }
+    alignas(16) double a_[kStages][2] = {};
+    State up_, down_;
     double held_ = 0.0;
+    int n_ = 4;
 };
 
 }  // namespace caw::lib

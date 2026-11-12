@@ -259,8 +259,43 @@ public:
     // feedback chains are independent, so a CPU overlaps them (a ladder sample is a long chain of dependent
     // operations, and running the sides one after the other leaves it waiting). The same bits as two process()
     // calls.
+    // With GCC or Clang the pair runs as two-wide double vectors (SSE2 or NEON; each lane's arithmetic is step()'s,
+    // so the bits are the same; 2026-11-11 performance pass).
     template <LadderMode Mode>
     void processPair(MultiLadder& other, float* left, float* right, uint32_t frames) noexcept {
+#if defined(__GNUC__)
+        typedef double Pair __attribute__((vector_size(16)));
+        const Pair G = {G_, other.G_}, in = {in_, other.in_}, c0 = {c_[0], other.c_[0]}, c1 = {c_[1], other.c_[1]};
+        const Pair c2 = {c_[2], other.c_[2]}, c3 = {c_[3], other.c_[3]};
+        const Pair zero = {0.0, 0.0}, three = {3.0, 3.0}, minusThree = {-3.0, -3.0}, k27 = {27.0, 27.0}, k9 = {9.0, 9.0};
+        const Pair four = {4.0, 4.0}, six = {6.0, 6.0}, two = {2.0, 2.0};
+        Pair s0 = {s_[0], other.s_[0]}, s1 = {s_[1], other.s_[1]}, s2 = {s_[2], other.s_[2]}, s3 = {s_[3], other.s_[3]};
+        for (uint32_t i = 0; i < frames; ++i) {
+            Pair x = {static_cast<double>(left[i]), static_cast<double>(right[i])};
+            x = x - x == zero ? x : zero;  // finiteOr0
+            const Pair w = x * in - (c0 * s0 + c1 * s1 + c2 * s2 + c3 * s3);
+            const Pair f = w - w == zero ? w : zero;  // softClip's finiteOr0 (an infinity is held at +-3 below)
+            const Pair c = w < minusThree ? minusThree : (w > three ? three : f);
+            const Pair cc = c * c;
+            const Pair u = c * (k27 + cc) / (k27 + k9 * cc);
+            const Pair v0 = (u - s0) * G, y0 = v0 + s0;
+            s0 = y0 + v0;
+            const Pair v1 = (y0 - s1) * G, y1 = v1 + s1;
+            s1 = y1 + v1;
+            const Pair v2 = (y1 - s2) * G, y2 = v2 + s2;
+            s2 = y2 + v2;
+            const Pair v3 = (y2 - s3) * G, y3 = v3 + s3;
+            s3 = y3 + v3;
+            Pair y;
+            if constexpr (Mode == LadderMode::LowPass) y = y3;
+            else if constexpr (Mode == LadderMode::HighPass) y = u - four * y0 + six * y1 - four * y2 + y3;
+            else y = four * (y1 - two * y2 + y3);
+            left[i] = static_cast<float>(y[0]);
+            right[i] = static_cast<float>(y[1]);
+        }
+        s_[0] = s0[0], s_[1] = s1[0], s_[2] = s2[0], s_[3] = s3[0];
+        other.s_[0] = s0[1], other.s_[1] = s1[1], other.s_[2] = s2[1], other.s_[3] = s3[1];
+#else
         Lane a = lane(), b = other.lane();
         for (uint32_t i = 0; i < frames; ++i) {
             left[i] = static_cast<float>(a.template step<Mode>(left[i]));
@@ -268,6 +303,7 @@ public:
         }
         store(a);
         other.store(b);
+#endif
     }
     // A silent tail would decay into subnormal numbers (slow on many CPUs): a caller that knows its input is
     // silent can flush the state with this once per block.

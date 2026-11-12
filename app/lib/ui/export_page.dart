@@ -15,6 +15,7 @@ import '../model/settings.dart';
 import '../engine/component_info.dart';
 import '../model/arrange_fx.dart';
 import 'export_sheet.dart';
+import 'music_video/video_setup_sheet.dart';
 import 'glass.dart';
 import 'haptics.dart';
 import 'panel_motion.dart';
@@ -852,6 +853,20 @@ class _ExportPageState extends State<ExportPage> {
           padding: const EdgeInsets.only(top: 12),
           child: Text(_message!, style: TextStyle(color: _messageIsError ? Neon.pink : Neon.green)),
         ),
+      const SizedBox(height: 12),
+      // The arrangement music video (docs/decisions.md "Arrangement music video").
+      NeonPanel(color: Neon.pink, child: Row(children: [
+        const Expanded(child: Text('A music video of the arrangement: shots cut by an auto director, rendered with the song.',
+            style: TextStyle(color: Neon.dim, fontSize: 12))),
+        const SizedBox(width: 8),
+        FilledButton.icon(
+          key: const ValueKey('open-music-video'),
+          style: FilledButton.styleFrom(backgroundColor: Neon.pink, foregroundColor: Neon.bg, minimumSize: const Size(0, 48)),
+          onPressed: busy ? null : () => showMusicVideoSheet(context, s),
+          icon: const Icon(Icons.movie_filter_outlined),
+          label: const Text('Music video…', style: TextStyle(fontWeight: FontWeight.w800)),
+        ),
+      ])),
     ]);
   }
 
