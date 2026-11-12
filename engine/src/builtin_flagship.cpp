@@ -1,6 +1,7 @@
 // The flagship synth (#171): three wavetable oscillators with unison, two filters, a mod matrix and an effects rack.
 #include "builtin_flagship.h"
 #include "quality.h"
+#include "stereo_pair.h"
 
 #include <algorithm>
 #include <bit>
@@ -677,26 +678,96 @@ struct OscKey {
     bool operator==(const OscKey&) const = default;
 };
 
-// The fold warp's 2x decimator for one side (the half-band all-pass pair of lib::Oversampler2x's down()).
+// The fold warp's 2x decimator for one side (the half-band all-pass pair of lib::Oversampler2x's down()): per
+// stage, lane 0 the even branch's all-pass and lane 1 the odd one's, each lane lib::AllpassChain's arithmetic.
+// A block at a time with the state in registers, and a stereo pair's two sides in one loop (four independent
+// all-pass chains): the same bits as one chain per branch and side, sample by sample (speed A2, 2026-11-12).
 struct Decimator2x {
-    lib::AllpassChain a0, a1;
+    static constexpr int kStages = 4;  // per branch: lib::HalfBandDesign(2 * kStages)
+    alignas(16) double a[kStages][2] = {};
+    alignas(16) double x1[kStages][2] = {}, y1[kStages][2] = {};
     double held = 0.0;
     void set(const lib::HalfBandDesign& d) noexcept {
-        a0.set(d, 0);
-        a1.set(d, 1);
+        for (int i = 0; i < kStages; ++i)
+            for (int lane = 0; lane < 2; ++lane) a[i][lane] = d.coefficient(2 * i + lane);
         clear();
     }
-    float down(const float* in) noexcept {
-        const double a = a0.process(in[0]);
-        const double b = a1.process(held);
-        held = in[1];
-        return static_cast<float>(0.5 * (a + b));
-    }
     void clear() noexcept {
-        a0.clear();
-        a1.clear();
+        for (int i = 0; i < kStages; ++i) x1[i][0] = x1[i][1] = y1[i][0] = y1[i][1] = 0.0;
         held = 0.0;
     }
+    // out[f] += the low-rate sample of in[2f], in[2f + 1], for f < n; with `r`, rOut[f] += r's of rIn likewise.
+    static void down(Decimator2x& l, const float* in, float* out, Decimator2x* r, const float* rIn, float* rOut,
+                     uint32_t n) noexcept {
+#if defined(__GNUC__)
+        if (r) return downBlock<true>(l, in, out, *r, rIn, rOut, n);
+        downBlock<false>(l, in, out, l, nullptr, nullptr, n);
+#else
+        l.downScalar(in, out, n);
+        if (r) r->downScalar(rIn, rOut, n);
+#endif
+    }
+
+private:
+#if defined(__GNUC__)
+    template <bool Two>
+    static void downBlock(Decimator2x& l, const float* in, float* out, Decimator2x& r, const float* rIn, float* rOut,
+                          uint32_t n) noexcept {
+        const Pair tiny = splat(1e-25), zero = splat(0.0);
+        Pair a[kStages], x[kStages], y[kStages], ra[kStages], rx[kStages], ry[kStages];
+        for (int i = 0; i < kStages; ++i) {
+            a[i] = pairOf(l.a[i][0], l.a[i][1]), x[i] = pairOf(l.x1[i][0], l.x1[i][1]), y[i] = pairOf(l.y1[i][0], l.y1[i][1]);
+            if constexpr (Two)
+                ra[i] = pairOf(r.a[i][0], r.a[i][1]), rx[i] = pairOf(r.x1[i][0], r.x1[i][1]), ry[i] = pairOf(r.y1[i][0], r.y1[i][1]);
+        }
+        double held = l.held, rHeld = r.held;
+        // y = a (x - y1) + x1 per stage, flushed below 1e-25, into the next stage (AllpassChain::process).
+        const auto stage = [&](Pair v, Pair& s, Pair& t, Pair c) noexcept {
+            Pair o = c * (v - t) + s;
+            s = v;
+            o = ((o < tiny) & (o > -tiny)) ? zero : o;
+            t = o;
+            return o;
+        };
+        for (uint32_t f = 0; f < n; ++f) {
+            Pair v = pairOf(static_cast<double>(in[2 * f]), held);
+            held = in[2 * f + 1];
+            Pair w = zero;
+            if constexpr (Two) {
+                w = pairOf(static_cast<double>(rIn[2 * f]), rHeld);
+                rHeld = rIn[2 * f + 1];
+            }
+            for (int i = 0; i < kStages; ++i) {
+                v = stage(v, x[i], y[i], a[i]);
+                if constexpr (Two) w = stage(w, rx[i], ry[i], ra[i]);
+            }
+            out[f] += static_cast<float>(0.5 * (lane(v, 0) + lane(v, 1)));
+            if constexpr (Two) rOut[f] += static_cast<float>(0.5 * (lane(w, 0) + lane(w, 1)));
+        }
+        for (int i = 0; i < kStages; ++i) {
+            l.x1[i][0] = lane(x[i], 0), l.x1[i][1] = lane(x[i], 1), l.y1[i][0] = lane(y[i], 0), l.y1[i][1] = lane(y[i], 1);
+            if constexpr (Two)
+                r.x1[i][0] = lane(rx[i], 0), r.x1[i][1] = lane(rx[i], 1), r.y1[i][0] = lane(ry[i], 0), r.y1[i][1] = lane(ry[i], 1);
+        }
+        l.held = held;
+        if constexpr (Two) r.held = rHeld;
+    }
+#else
+    void downScalar(const float* in, float* out, uint32_t n) noexcept {
+        for (uint32_t f = 0; f < n; ++f) {
+            double v[2] = {static_cast<double>(in[2 * f]), held};
+            held = in[2 * f + 1];
+            for (int lane = 0; lane < 2; ++lane)
+                for (int i = 0; i < kStages; ++i) {
+                    const double o = a[i][lane] * (v[lane] - y1[i][lane]) + x1[i][lane];
+                    x1[i][lane] = v[lane];
+                    y1[i][lane] = o < 1e-25 && o > -1e-25 ? 0.0 : o;
+                    v[lane] = y1[i][lane];
+                }
+            out[f] += static_cast<float>(0.5 * (v[0] + v[1]));
+        }
+    }
+#endif
 };
 
 struct OscVoice {
@@ -839,9 +910,10 @@ void addStack(const OscVoice& o, const float* gL, const float* gR, float* L, flo
 // then the table reads (a gather: scalar loads), then the interpolation, the morph, the fold and the sums, so the
 // compiler vectorizes the first and the last. Each sample's arithmetic is the one-pass loop's, in its order, so
 // the bits are the same. Mono (R null) sums into the left only.
-template <int W, bool Morph>
+template <int W, bool Morph, uint32_t N>
 void addTwice(OscVoice& o, const float* gL, const float* gR, float* L, float* R, uint32_t n, uint32_t first,
              Decimator2x& dl, Decimator2x* dr) noexcept {
+    if constexpr (N != 0) n = N;
     float hl[2 * kControlFrames] = {}, hr[2 * kControlFrames] = {};
     const uint32_t count = 2 * n;
     for (int c = 0; c < o.count; ++c) {
@@ -886,9 +958,7 @@ void addTwice(OscVoice& o, const float* gL, const float* gR, float* L, float* R,
             for (uint32_t i = 0; i < count; ++i) hl[i] += read(i) * gl;
         }
     }
-    for (uint32_t i = 0; i < n; ++i) L[i] += dl.down(hl + 2 * i);
-    if (dr)
-        for (uint32_t i = 0; i < n; ++i) R[i] += dr->down(hr + 2 * i);
+    Decimator2x::down(dl, hl, L, dr, hr, R, n);
 }
 
 template <int W>
@@ -906,12 +976,15 @@ void addTwiceWarp(OscVoice& o, const float* gL, const float* gR, float* L, float
     if (mono) {
         float g[kMaxCopies];
         for (int c = 0; c < o.count; ++c) g[c] = 2.0f * o.monoGain[c];
-        if (o.mix != 0.0f) addTwice<W, true>(o, g, nullptr, L, nullptr, n, first, o.foldM, nullptr);
-        else addTwice<W, false>(o, g, nullptr, L, nullptr, n, first, o.foldM, nullptr);
+        if (o.mix != 0.0f) addTwice<W, true, 0>(o, g, nullptr, L, nullptr, n, first, o.foldM, nullptr);
+        else addTwice<W, false, 0>(o, g, nullptr, L, nullptr, n, first, o.foldM, nullptr);
+    } else if (n == kControlFrames) {  // a whole period (the usual case): fixed-length loops, as addStackWarp
+        if (o.mix != 0.0f) addTwice<W, true, kControlFrames>(o, gL, gR, L, R, n, first, o.foldL, &o.foldR);
+        else addTwice<W, false, kControlFrames>(o, gL, gR, L, R, n, first, o.foldL, &o.foldR);
     } else if (o.mix != 0.0f) {
-        addTwice<W, true>(o, gL, gR, L, R, n, first, o.foldL, &o.foldR);
+        addTwice<W, true, 0>(o, gL, gR, L, R, n, first, o.foldL, &o.foldR);
     } else {
-        addTwice<W, false>(o, gL, gR, L, R, n, first, o.foldL, &o.foldR);
+        addTwice<W, false, 0>(o, gL, gR, L, R, n, first, o.foldL, &o.foldR);
     }
 }
 
@@ -1028,21 +1101,14 @@ struct VoiceFilter {
     bool monoCapable() const noexcept { return !on || type <= kLadderBp || type == kSvfLp; }
     void processMono(float* L, uint32_t n) noexcept {
         if (!on) return;
-        monoUsed = true;
         float dry[kControlFrames];
-        const bool wet = mix >= 1.0f;
-        if (!wet) std::copy(L, L + n, dry);
-        if (drive) driveMono(L, n);
-        if (type == kLadderLp || type == kLadderHp || type == kLadderBp) {
-            ladder[0].flushDenormals();
-            if (type == kLadderLp) ladder[0].process<lib::LadderMode::LowPass>(L, n);
-            else if (type == kLadderHp) ladder[0].process<lib::LadderMode::HighPass>(L, n);
-            else ladder[0].process<lib::LadderMode::BandPass>(L, n);
-        } else {
+        beginMono(L, n, dry);
+        if (type == kLadderLp) ladder[0].process<lib::LadderMode::LowPass>(L, n);
+        else if (type == kLadderHp) ladder[0].process<lib::LadderMode::HighPass>(L, n);
+        else if (type == kLadderBp) ladder[0].process<lib::LadderMode::BandPass>(L, n);
+        else
             for (uint32_t i = 0; i < n; ++i) L[i] = static_cast<float>(svf[0].lowpass(static_cast<double>(L[i])));
-        }
-        if (!wet)
-            for (uint32_t i = 0; i < n; ++i) L[i] = dry[i] + (L[i] - dry[i]) * mix;
+        endMono(L, n, dry);
     }
     bool monoUsed = false;  // the left side ran alone: the right's state is behind
     double cutoffSet = -1.0, resonanceSet = -1.0;  // what configure() was last given
@@ -1060,26 +1126,9 @@ struct VoiceFilter {
 
     void process(float* L, float* R, uint32_t n) noexcept {
         if (!on) return;
-        if (monoUsed) {  // back to stereo: the right side continues from the left's state, which both had
-            monoUsed = false;
-            ladder[1] = ladder[0];
-            svf[1] = svf[0];
-        }
         float dryL[kControlFrames], dryR[kControlFrames];
-        const bool wet = mix >= 1.0f;
-        if (!wet) std::copy(L, L + n, dryL), std::copy(R, R + n, dryR);
-        if (drive) {  // both sides at once (Saturator::process2Approx: each lane processApprox()'s steps)
-            for (uint32_t i = 0; i < n; ++i) {
-                const double in[2] = {static_cast<double>(L[i]), static_cast<double>(R[i])};
-                double out[2];
-                saturator.process2Approx(in, out);
-                L[i] = static_cast<float>(out[0]);
-                R[i] = static_cast<float>(out[1]);
-            }
-        }
+        begin(L, R, n, dryL, dryR);
         if (type <= kLadderBp) {  // both sides in one loop
-            ladder[0].flushDenormals();
-            ladder[1].flushDenormals();
             if (type == kLadderLp) ladder[0].processPair<lib::LadderMode::LowPass>(ladder[1], L, R, n);
             else if (type == kLadderHp) ladder[0].processPair<lib::LadderMode::HighPass>(ladder[1], L, R, n);
             else ladder[0].processPair<lib::LadderMode::BandPass>(ladder[1], L, R, n);
@@ -1098,11 +1147,96 @@ struct VoiceFilter {
                 default: break;
             }
         }
-        if (!wet)
+        end(L, R, n, dryL, dryR);
+    }
+
+    // Several voices' filters side by side (speed A2, 2026-11-12): a ladder or an SVF low-pass is a long chain of
+    // dependent operations per sample, so a CPU running one voice's waits; K pairs' chains in one loop overlap.
+    // Stereo: voice k's L[k], R[k] through *f[k] (process()), K voices. Mono: L[k] through *f[k]'s left side
+    // (processMono()), 2K voices, two to a pair. Every filter is on and of one type, a ladder or the SVF low-pass
+    // (sideBySide()). Each sample's arithmetic is the one-voice path's, so the bits are the same.
+    template <int K>
+    static void stereoSideBySide(VoiceFilter* const* f, float* const* L, float* const* R, uint32_t n) noexcept {
+        float dryL[K][kControlFrames], dryR[K][kControlFrames];
+        for (int k = 0; k < K; ++k) f[k]->begin(L[k], R[k], n, dryL[k], dryR[k]);
+        if (f[0]->type <= kLadderBp) {
+            lib::MultiLadder* lf[2 * K];
+            for (int k = 0; k < K; ++k) lf[2 * k] = &f[k]->ladder[0], lf[2 * k + 1] = &f[k]->ladder[1];
+            ladderPairs<K>(f[0]->type, lf, L, R, n);
+        } else {
+            lib::Svf* sf[2 * K];
+            for (int k = 0; k < K; ++k) sf[2 * k] = &f[k]->svf[0], sf[2 * k + 1] = &f[k]->svf[1];
+            lib::Svf::lowpassPairs<K>(sf, L, R, n);
+        }
+        for (int k = 0; k < K; ++k) f[k]->end(L[k], R[k], n, dryL[k], dryR[k]);
+    }
+    template <int K>
+    static void monoSideBySide(VoiceFilter* const* f, float* const* L, uint32_t n) noexcept {
+        float dry[2 * K][kControlFrames];
+        float* left[K];
+        float* right[K];
+        for (int k = 0; k < 2 * K; ++k) f[k]->beginMono(L[k], n, dry[k]);
+        for (int k = 0; k < K; ++k) left[k] = L[2 * k], right[k] = L[2 * k + 1];
+        if (f[0]->type <= kLadderBp) {
+            lib::MultiLadder* lf[2 * K];
+            for (int k = 0; k < 2 * K; ++k) lf[k] = &f[k]->ladder[0];
+            ladderPairs<K>(f[0]->type, lf, left, right, n);
+        } else {
+            lib::Svf* sf[2 * K];
+            for (int k = 0; k < 2 * K; ++k) sf[k] = &f[k]->svf[0];
+            lib::Svf::lowpassPairs<K>(sf, left, right, n);
+        }
+        for (int k = 0; k < 2 * K; ++k) f[k]->endMono(L[k], n, dry[k]);
+    }
+    // Whether two voices' filters can run side by side.
+    static bool sideBySide(const VoiceFilter& a, const VoiceFilter& b) noexcept {
+        return a.on && b.on && a.type == b.type && (a.type <= kLadderBp || a.type == kSvfLp);
+    }
+
+private:
+    template <int K>
+    static void ladderPairs(int type, lib::MultiLadder* const* lf, float* const* left, float* const* right,
+                            uint32_t n) noexcept {
+        if (type == kLadderLp) lib::MultiLadder::processPairs<lib::LadderMode::LowPass, K>(lf, left, right, n);
+        else if (type == kLadderHp) lib::MultiLadder::processPairs<lib::LadderMode::HighPass, K>(lf, left, right, n);
+        else lib::MultiLadder::processPairs<lib::LadderMode::BandPass, K>(lf, left, right, n);
+    }
+    // process()'s steps before and after the filter itself: back to stereo after a mono run, the dry copy for
+    // the mix, the drive and the denormal flush; then the dry/wet mix.
+    void begin(float* L, float* R, uint32_t n, float* dryL, float* dryR) noexcept {
+        if (monoUsed) {  // back to stereo: the right side continues from the left's state, which both had
+            monoUsed = false;
+            ladder[1] = ladder[0];
+            svf[1] = svf[0];
+        }
+        if (!(mix >= 1.0f)) std::copy(L, L + n, dryL), std::copy(R, R + n, dryR);
+        if (drive) {  // both sides at once (Saturator::process2Approx: each lane processApprox()'s steps)
+            for (uint32_t i = 0; i < n; ++i) {
+                const double in[2] = {static_cast<double>(L[i]), static_cast<double>(R[i])};
+                double out[2];
+                saturator.process2Approx(in, out);
+                L[i] = static_cast<float>(out[0]);
+                R[i] = static_cast<float>(out[1]);
+            }
+        }
+        if (type <= kLadderBp) ladder[0].flushDenormals(), ladder[1].flushDenormals();
+    }
+    void end(float* L, float* R, uint32_t n, const float* dryL, const float* dryR) noexcept {
+        if (!(mix >= 1.0f))
             for (uint32_t i = 0; i < n; ++i) {
                 L[i] = dryL[i] + (L[i] - dryL[i]) * mix;
                 R[i] = dryR[i] + (R[i] - dryR[i]) * mix;
             }
+    }
+    void beginMono(float* L, uint32_t n, float* dry) noexcept {
+        monoUsed = true;
+        if (!(mix >= 1.0f)) std::copy(L, L + n, dry);
+        if (drive) driveMono(L, n);
+        if (type <= kLadderBp) ladder[0].flushDenormals();
+    }
+    void endMono(float* L, uint32_t n, const float* dry) noexcept {
+        if (!(mix >= 1.0f))
+            for (uint32_t i = 0; i < n; ++i) L[i] = dry[i] + (L[i] - dry[i]) * mix;
     }
 };
 
@@ -1132,7 +1266,7 @@ struct Voice {
     bool mono = false;  // the mono or legato voice: its pitch follows `glide` at each control
     double configuredPitch = -1.0;  // the pitch its oscillators and filters were last worked out for
     double moving[kSlots] = {};     // the values the slots moved, as its sections were last worked out
-    bool shared = false;            // its level goes into the instrument's shared filter 1 (see renderVoice)
+    bool shared = false;            // its level goes into the instrument's shared filter 1 (see startVoice)
     lib::Glide glide;   // in semitones, stepped once per control period
 };
 
@@ -2049,10 +2183,28 @@ private:
     // A constant-size memset the compiler writes as a few vector stores (a plain loop can become a memset call).
     static void zero(float* x) noexcept { std::memset(x, 0, kControlFrames * sizeof(float)); }
 
-    // One voice's piece of the period: its oscillators into their filters, the filters, the level.
-    void renderVoice(Voice& v, float* outL, float* outR, uint32_t n, uint32_t first) noexcept {
+    // A voice's piece of the period between its oscillators and its output: its filters' buffers, and where it
+    // goes. Voices wait in a short queue (renderPeriod) so that several voices' filters run side by side.
+    struct VoiceWork {
+        enum Kind { kStereo, kMono } kind = kStereo;  // filter 1 (and 2) on both sides, or filter 1 on the left alone
+        Voice* v = nullptr;
+        float* outL = nullptr;
+        float* outR = nullptr;
+        bool second = false, bypass = false;  // filter 2's path carries anything; an oscillator bypasses the filters
         float f1L[kControlFrames], f1R[kControlFrames], f2L[kControlFrames], f2R[kControlFrames];
         float byL[kControlFrames], byR[kControlFrames];
+    };
+    static constexpr uint32_t kQueue = 8;  // voices waiting for their filters (up to four side by side)
+
+    // One voice's oscillators into its filters' buffers. A voice in the instrument's shared filter 1 is finished
+    // here (false); otherwise w waits for its filters (true).
+    bool startVoice(Voice& v, VoiceWork& w, uint32_t n, uint32_t first) noexcept {
+        float* const f1L = w.f1L;
+        float* const f1R = w.f1R;
+        float* const f2L = w.f2L;
+        float* const f2R = w.f2R;
+        float* const byL = w.byL;
+        float* const byR = w.byR;
         bool bypass = false, second = v.filter[1].on;  // second: filter 2's path carries anything
         bool feeds[kOscs] = {};  // Osc FM listens to it
         for (uint32_t k = 0; k < kOscs; ++k) {
@@ -2062,6 +2214,9 @@ private:
             second = second || o.dest == kToFilter2 || (v.parallel && o.dest == kToBoth);
             if (o.warpMode == kWarpFmOsc) feeds[fmSource(k)] = true;
         }
+        w.v = &v;
+        w.second = second;
+        w.bypass = bypass;
         // Whole periods cleared (a fixed count: inline stores, no memset call).
         zero(f1L), zero(f1R);
         if (second) zero(f2L), zero(f2R);
@@ -2107,64 +2262,137 @@ private:
             v.shared = !second && !bypass && sharedOn_ && v.filter[0].sameAs(shared_);
             if (v.shared) {
                 float amp[kControlFrames];
-                const double step = (v.gain1 - v.gain0) / kControlFrames;
-                for (uint32_t i = 0; i < n; ++i)
-                    amp[i] = static_cast<float>(v.env[0].next() * (v.gain0 + step * static_cast<double>(first + i)));
+                levelOf(v, amp, n, first);
                 for (uint32_t i = 0; i < n; ++i) {
                     sharedL_[i] += f1L[i] * amp[i];
                     sharedR_[i] += f1R[i] * amp[i];
                 }
                 sharedUsed_ = true;
                 if (!v.env[0].active()) v.active = false;
-                return;
+                return false;
             }
         }
         // A centred voice through filter 1 alone (the bass, the acid line, Basic): one side filtered, both sides
         // the same bits as before at half the filter's cost (2026-11-10 performance pass).
+        w.kind = VoiceWork::kStereo;
         if (!second && !bypass && v.filter[0].monoCapable()) {
             bool centred = true;
             for (const OscVoice& o : v.osc)
                 if (o.on && o.count > 0) centred = centred && o.centred;
-            if (centred) {
-                v.filter[0].processMono(f1L, n);
-                float amp[kControlFrames];
-                const double step = (v.gain1 - v.gain0) / kControlFrames;
-                for (uint32_t i = 0; i < n; ++i)
-                    amp[i] = static_cast<float>(v.env[0].next() * (v.gain0 + step * static_cast<double>(first + i)));
-                for (uint32_t i = 0; i < n; ++i) {
-                    const float y = f1L[i] * amp[i];
-                    outL[i] += y;
-                    outR[i] += y;
-                }
-                if (!v.env[0].active()) v.active = false;
-                return;
-            }
+            if (centred) w.kind = VoiceWork::kMono;
         }
-        v.filter[0].process(f1L, f1R, n);
-        // The voice's output: filter 1's, through or beside filter 2's, plus the bypass.
-        float* yL = f1L;
-        float* yR = f1R;
-        if (second) {
-            if (v.parallel) {
-                v.filter[1].process(f2L, f2R, n);
-                for (uint32_t i = 0; i < n; ++i) f1L[i] += f2L[i], f1R[i] += f2R[i];
-            } else {
-                for (uint32_t i = 0; i < n; ++i) f2L[i] += f1L[i], f2R[i] += f1R[i];
-                v.filter[1].process(f2L, f2R, n);
-                yL = f2L;
-                yR = f2R;
-            }
-        }
-        if (bypass)
-            for (uint32_t i = 0; i < n; ++i) yL[i] += byL[i], yR[i] += byR[i];
-        float amp[kControlFrames];
+        return true;
+    }
+
+    // The level ramp times envelope 1 over the piece.
+    static void levelOf(Voice& v, float* amp, uint32_t n, uint32_t first) noexcept {
         const double step = (v.gain1 - v.gain0) / kControlFrames;
         for (uint32_t i = 0; i < n; ++i) amp[i] = static_cast<float>(v.env[0].next() * (v.gain0 + step * static_cast<double>(first + i)));
-        for (uint32_t i = 0; i < n; ++i) {
-            outL[i] += yL[i] * amp[i];
-            outR[i] += yR[i] * amp[i];
+    }
+
+    // The queued voices' filters, then each voice's output in the order they were queued (so the sums are the
+    // one-voice-at-a-time path's). Voices whose filter 1 is set to the same ladder or SVF low-pass run side by
+    // side, four or two at a time, then their filter 2 likewise (VoiceFilter::stereoSideBySide).
+    void finishVoices(VoiceWork* q, uint32_t count, uint32_t n, uint32_t first) noexcept {
+        bool done[kQueue] = {};
+        for (uint32_t i = 0; i < count; ++i) {
+            if (done[i]) continue;
+            VoiceWork* group[4] = {&q[i]};
+            int size = 1;
+            const VoiceWork::Kind kind = q[i].kind;
+            for (uint32_t j = i + 1; j < count && size < 4; ++j)
+                if (!done[j] && q[j].kind == kind && VoiceFilter::sideBySide(q[i].v->filter[0], q[j].v->filter[0]))
+                    group[size++] = &q[j], done[j] = true;
+            done[i] = true;
+            if (kind == VoiceWork::kMono) filterMono(group, size, n);
+            else filterStereo(group, size, n);
         }
-        if (!v.env[0].active()) v.active = false;
+        for (uint32_t i = 0; i < count; ++i) {
+            VoiceWork& w = q[i];
+            Voice& v = *w.v;
+            float amp[kControlFrames];
+            levelOf(v, amp, n, first);
+            if (w.kind == VoiceWork::kMono) {
+                for (uint32_t k = 0; k < n; ++k) {
+                    const float y = w.f1L[k] * amp[k];
+                    w.outL[k] += y;
+                    w.outR[k] += y;
+                }
+            } else {
+                // The voice's output: filter 1's, through or beside filter 2's, plus the bypass.
+                const bool through = w.second && !v.parallel;
+                float* yL = through ? w.f2L : w.f1L;
+                float* yR = through ? w.f2R : w.f1R;
+                if (w.bypass)
+                    for (uint32_t k = 0; k < n; ++k) yL[k] += w.byL[k], yR[k] += w.byR[k];
+                for (uint32_t k = 0; k < n; ++k) {
+                    w.outL[k] += yL[k] * amp[k];
+                    w.outR[k] += yR[k] * amp[k];
+                }
+            }
+            if (!v.env[0].active()) v.active = false;
+        }
+    }
+
+    // Filter 1 of `size` centred voices (their left sides), two at a time where it can.
+    static void filterMono(VoiceWork* const* g, int size, uint32_t n) noexcept {
+        VoiceFilter* f[4];
+        float* L[4];
+        for (int k = 0; k < size; ++k) f[k] = &g[k]->v->filter[0], L[k] = g[k]->f1L;
+        int k = 0;
+        if (size == 4) VoiceFilter::monoSideBySide<2>(f, L, n), k = 4;
+        else if (size >= 2) VoiceFilter::monoSideBySide<1>(f, L, n), k = 2;
+        for (; k < size; ++k) f[k]->processMono(L[k], n);
+    }
+
+    // Filters 1 and 2 of `size` stereo voices whose filter 1 runs side by side; their filter 2 too where it can.
+    static void filterStereo(VoiceWork* const* g, int size, uint32_t n) noexcept {
+        {
+            VoiceFilter* f[4];
+            float* L[4];
+            float* R[4];
+            for (int k = 0; k < size; ++k) f[k] = &g[k]->v->filter[0], L[k] = g[k]->f1L, R[k] = g[k]->f1R;
+            sideBySide(f, L, R, size, n);
+        }
+        // Filter 2: in series it hears filter 1's output added to its own oscillators'.
+        VoiceFilter* f[4];
+        float* L[4];
+        float* R[4];
+        int m = 0;
+        for (int k = 0; k < size; ++k) {
+            VoiceWork& w = *g[k];
+            if (!w.second) continue;
+            if (!w.v->parallel)
+                for (uint32_t i = 0; i < n; ++i) w.f2L[i] += w.f1L[i], w.f2R[i] += w.f1R[i];
+            f[m] = &w.v->filter[1], L[m] = w.f2L, R[m] = w.f2R, ++m;
+        }
+        // The ones set alike side by side, in order; the rest one at a time.
+        VoiceFilter* h[4];
+        float* hL[4];
+        float* hR[4];
+        bool done[4] = {};
+        for (int a = 0; a < m; ++a) {
+            if (done[a]) continue;
+            int c = 0;
+            for (int b = a; b < m; ++b)
+                if (!done[b] && (b == a || VoiceFilter::sideBySide(*f[a], *f[b]))) h[c] = f[b], hL[c] = L[b], hR[c] = R[b], ++c, done[b] = true;
+            sideBySide(h, hL, hR, c, n);
+        }
+        for (int k = 0; k < size; ++k) {
+            VoiceWork& w = *g[k];
+            if (w.second && w.v->parallel)
+                for (uint32_t i = 0; i < n; ++i) w.f1L[i] += w.f2L[i], w.f1R[i] += w.f2R[i];
+        }
+    }
+    // `size` filters, side by side in fours and twos where they can (sideBySide()), else one at a time.
+    static void sideBySide(VoiceFilter* const* f, float* const* L, float* const* R, int size, uint32_t n) noexcept {
+        if (size >= 2 && VoiceFilter::sideBySide(*f[0], *f[1])) {
+            if (size == 4) return VoiceFilter::stereoSideBySide<4>(f, L, R, n);
+            VoiceFilter::stereoSideBySide<2>(f, L, R, n);
+            if (size == 3) f[2]->process(L[2], R[2], n);
+            return;
+        }
+        for (int k = 0; k < size; ++k) f[k]->process(L[k], R[k], n);
     }
 
     // One piece (n <= kControlFrames frames) of the control period, sinceControl_ frames into it; `at` is its
@@ -2179,6 +2407,16 @@ private:
         float L[kControlFrames] = {}, R[kControlFrames] = {};
         zero(sharedL_), zero(sharedR_);
         sharedUsed_ = false;
+        // Each voice's oscillators, then its filters with up to seven others' (finishVoices: side by side where
+        // they are set alike), its level and its sum, in the voices' order.
+        VoiceWork queue[kQueue];
+        uint32_t queued = 0;
+        const auto render = [&](Voice& v, float* outL, float* outR) noexcept {
+            VoiceWork& w = queue[queued];
+            w.outL = outL;
+            w.outR = outR;
+            if (startVoice(v, w, n, first) && ++queued == kQueue) finishVoices(queue, queued, n, first), queued = 0;
+        };
         if (lanes_.any()) {
             // The voice bus (#127): a voice whose note has a lane renders there (with its own filter 1, never the
             // shared one, which sums voices), the host runs its per-note FX, and the lanes join the voices' sum
@@ -2187,14 +2425,16 @@ private:
             voices_.forEachActive([&](Voice& v) noexcept {
                 if (VoiceLane* lane = lanes_.laneFor(v.noteId)) {
                     v.shared = false;
-                    renderVoice(v, lane->channels[0] + at, lane->channels[1] + at, n, first);
+                    render(v, lane->channels[0] + at, lane->channels[1] + at);
                 } else {
-                    renderVoice(v, L, R, n, first);
+                    render(v, L, R);
                 }
             });
+            finishVoices(queue, queued, n, first);
             lanes_.runAndSum(L, R, at, n);
         } else {
-            voices_.forEachActive([&](Voice& v) noexcept { renderVoice(v, L, R, n, first); });
+            voices_.forEachActive([&](Voice& v) noexcept { render(v, L, R); });
+            finishVoices(queue, queued, n, first);
         }
         runShared(L, R, n);
         const double volumeStep = (volume1_ - volume0_) / kControlFrames;
@@ -2328,7 +2568,7 @@ private:
     lib::CombFilter combs_[kVoices][kFilters * 2];
     const lib::Wavetable* table_[kTableChoices] = {};  // the built-in tables, then User
     std::shared_ptr<const UserTable> user_;            // the loaded user table (the state), or none
-    lib::HalfBandDesign half_{8, 0.04};               // the fold warp's decimators
+    lib::HalfBandDesign half_{2 * Decimator2x::kStages, 0.04};               // the fold warp's decimators
     const std::atomic<int>* quality_ = nullptr;  // the building Engine's (quality.h)
     Clock clock_;
     const Transport* transport_ = nullptr;
@@ -2369,7 +2609,7 @@ private:
     lib::PingPongDelay delay_;
     double delayTime0_ = 0.0, delayTime1_ = 0.0, delayFeedback_ = 0.35, delayMix_ = 0.25;
     lib::Reverb reverb_;
-    VoiceFilter shared_;        // filter 1 for the voices whose filter 1 is set alike (renderVoice)
+    VoiceFilter shared_;        // filter 1 for the voices whose filter 1 is set alike (startVoice)
     bool sharedOn_ = false;     // filter 1 (unmodulated) is linear, alone and without key tracking
     bool sharedUsed_ = false, sharedQuiet_ = true, sharedRan_ = false;  // fed this piece; resting; fed this period
     float sharedPeak_ = 0.0f;  // its loudest output this period
