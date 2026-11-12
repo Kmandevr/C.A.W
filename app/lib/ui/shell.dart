@@ -650,7 +650,7 @@ class _TransportBar extends StatelessWidget {
                 final cpu = (m.cpu * 100).clamp(0, 999).toStringAsFixed(0);
                 // Paused, it shows where play will resume.
                 return Align(alignment: Alignment.centerRight, child: Text(maxLines: 1, softWrap: false, m.playing
-                    ? '${transportPosition(m.position, m.loopLength, p.engineLoopSteps, p.stepsPerBar)} · CPU $cpu%'
+                    ? '${transportPosition(state.playheadStep, p.engineLoopSteps, p.engineLoopSteps, p.stepsPerBar)} · CPU $cpu%'
                     : state.pausedStep != null
                         ? '${transportPosition(state.pausedStep!, p.engineLoopSteps, p.engineLoopSteps, p.stepsPerBar)} paused'
                           ' · CPU $cpu%'

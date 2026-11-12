@@ -111,10 +111,11 @@ class MusicVideoPreviewState extends State<MusicVideoPreview> with SingleTickerP
     final st = _live ? s.playheadStep : _silentFrom + _silent.elapsedMicroseconds / 1e6 * widget.scene.bpm / 15;
     // Live meters, held and falling as the render's are.
     if (_live) {
-      final m = s.meters;
+      final m = s.audibleMeters;
+      final heard = s.audibleLayerMeters;
       final tracks = <String, double>{};
-      for (var i = 0; i < s.layerMeters.length && i < s.project.layers.length; i++) {
-        tracks[s.project.layers[i].id] = math.max(s.layerMeters[i].peak, (_levels.tracks[s.project.layers[i].id] ?? 0) * 0.9);
+      for (var i = 0; i < heard.length && i < s.project.layers.length; i++) {
+        tracks[s.project.layers[i].id] = math.max(heard[i].peak, (_levels.tracks[s.project.layers[i].id] ?? 0) * 0.9);
       }
       _levels = VideoLevels(peakL: math.max(m.peakL, _levels.peakL * 0.9), peakR: math.max(m.peakR, _levels.peakR * 0.9),
           rms: math.max((m.peakL + m.peakR) * 0.35, _levels.rms * 0.9), tracks: tracks);

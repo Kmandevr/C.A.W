@@ -150,8 +150,8 @@ class _ProjectStrip extends StatelessWidget {
             const SizedBox(height: 10),
             PeakMeter(
                 state: state,
-                read: () => state.meters.peakL,
-                readRight: () => state.meters.peakR,
+                read: () => state.audibleMeters.peakL,
+                readRight: () => state.audibleMeters.peakR,
                 color: Neon.blue),
           ]),
         ),
@@ -458,7 +458,7 @@ class _TrackCard extends StatelessWidget {
                   ValueListenableBuilder<int>(
                     valueListenable: state.tick,
                     builder: (context, _, _) {
-                      final m = index < state.layerMeters.length ? state.layerMeters[index] : null;
+                      final m = index < state.audibleLayerMeters.length ? state.audibleLayerMeters[index] : null;
                       if (m?.overloaded != true) return const SizedBox();
                       return const Padding(
                         padding: EdgeInsets.only(right: 6),
@@ -543,7 +543,7 @@ class _Lane extends StatelessWidget {
             ValueListenableBuilder<int>(
               valueListenable: state.tick,
               builder: (context, _, _) {
-                final m = index < state.layerMeters.length ? state.layerMeters[index] : null;
+                final m = index < state.audibleLayerMeters.length ? state.audibleLayerMeters[index] : null;
                 final at = state.meters.playing ? (m?.progress ?? 0) : -1.0;
                 return CustomPaint(painter: _PlayheadPainter(at, color));
               },

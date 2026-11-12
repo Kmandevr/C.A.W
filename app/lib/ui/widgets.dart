@@ -172,7 +172,7 @@ class TrackMeter extends StatelessWidget {
   final Color color;
   final bool vertical;
 
-  LayerMeterValue? get _meter => index < state.layerMeters.length ? state.layerMeters[index] : null;
+  LayerMeterValue? get _meter => index < state.audibleLayerMeters.length ? state.audibleLayerMeters[index] : null;
 
   /// A sideways meter's height: two 5 dp bars and a gap, or one bar (drawn at least 7 dp tall with glass).
   double get _sidewaysHeight => stereo ? 11 : Glass.active ? 7 : 4;

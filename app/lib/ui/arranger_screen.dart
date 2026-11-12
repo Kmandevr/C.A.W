@@ -57,10 +57,6 @@ import 'key_router.dart';
 import 'midi_file_actions.dart';
 
 
-double endPosition(AppState state, ProjectDoc project, int loopLength) {
-  return project.engineLoopSteps * state.meters.position / loopLength;
-}
-
 /// Where the focus view's panel goes: under a pinned track (phone portrait) or beside the tracks.
 enum FocusLayout { pinned, side }
 
@@ -1718,7 +1714,7 @@ class _ArrangerScreenState extends State<ArrangerScreen> with TickerProviderStat
               // Stopped, a dimmer line shows where play starts and Split cuts (REAPER's edit cursor).
               final playing = s.meters.playing && s.meters.loopLength > 0;
               return CustomPaint(painter: _PlayheadPainter(stepW,
-                playing ? endPosition(s, p, s.meters.loopLength) : s.playheadStep, stopped: !playing));
+                s.playheadStep, stopped: !playing));
             },
           )))),
           if (!pinned) Positioned.fill(child: IgnorePointer(child: ValueListenableBuilder<Rect?>(
@@ -3186,7 +3182,7 @@ class _ProjectSettingsState extends State<_ProjectSettings> {
               ]),
             ),
           ),
-          SizedBox(width: 120, child: PeakMeter(state: s, read: () => s.meters.peakL, readRight: () => s.meters.peakR, color: Neon.blue)),
+          SizedBox(width: 120, child: PeakMeter(state: s, read: () => s.audibleMeters.peakL, readRight: () => s.audibleMeters.peakR, color: Neon.blue)),
         ]),
         SwitchListTile(
           contentPadding: EdgeInsets.zero,
