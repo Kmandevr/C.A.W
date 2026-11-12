@@ -95,6 +95,44 @@ public:
         }
 #endif
     }
+    // K pairs' low-passes in one loop: pair k is left[k] through *f[2k] and right[k] through *f[2k + 1], each with
+    // its own coefficients (so a pair can be two mono voices). The chains are independent, so a CPU overlaps them
+    // (several voices side by side, speed A2, 2026-11-12). The same bits as lowpass() on each filter's samples
+    // (and as K lowpassPair() calls on pairs set alike); the buffers must not overlap.
+    template <int K>
+    static void lowpassPairs(Svf* const* f, float* const* left, float* const* right, uint32_t frames) noexcept {
+#if defined(__GNUC__)
+        typedef double Pair __attribute__((vector_size(16)));
+        const Pair zero = {0.0, 0.0}, two = {2.0, 2.0};
+        Pair s1[K], s2[K], a1[K], a2[K], a3[K];
+        for (int k = 0; k < K; ++k) {
+            const Svf& a = *f[2 * k];
+            const Svf& b = *f[2 * k + 1];
+            s1[k] = Pair{a.ic1_, b.ic1_}, s2[k] = Pair{a.ic2_, b.ic2_};
+            a1[k] = Pair{a.a1_, b.a1_}, a2[k] = Pair{a.a2_, b.a2_}, a3[k] = Pair{a.a3_, b.a3_};
+        }
+        for (uint32_t i = 0; i < frames; ++i) {
+            for (int k = 0; k < K; ++k) {
+                Pair x = {static_cast<double>(left[k][i]), static_cast<double>(right[k][i])};
+                x = x - x == zero ? x : zero;  // finiteOr0
+                Pair v1, v2;
+                step(x, s1[k], s2[k], a1[k], a2[k], a3[k], two, v1, v2);
+                left[k][i] = static_cast<float>(v2[0]);
+                right[k][i] = static_cast<float>(v2[1]);
+            }
+        }
+        for (int k = 0; k < K; ++k) {
+            f[2 * k]->ic1_ = s1[k][0], f[2 * k + 1]->ic1_ = s1[k][1];
+            f[2 * k]->ic2_ = s2[k][0], f[2 * k + 1]->ic2_ = s2[k][1];
+        }
+#else
+        for (int k = 0; k < K; ++k)
+            for (uint32_t i = 0; i < frames; ++i) {
+                left[k][i] = static_cast<float>(f[2 * k]->lowpass(static_cast<double>(left[k][i])));
+                right[k][i] = static_cast<float>(f[2 * k + 1]->lowpass(static_cast<double>(right[k][i])));
+            }
+#endif
+    }
     double highpass(double x) noexcept { return process(x).high; }
     double bandpass(double x) noexcept { return process(x).band; }
     void clear() noexcept { ic1_ = ic2_ = 0.0; }
@@ -289,46 +327,70 @@ public:
     // so the bits are the same; 2026-11-11 performance pass).
     template <LadderMode Mode>
     void processPair(MultiLadder& other, float* left, float* right, uint32_t frames) noexcept {
+        MultiLadder* f[2] = {this, &other};
+        processPairs<Mode, 1>(f, &left, &right, frames);
+    }
+    // K pairs' blocks in one loop: pair k is left[k] through *f[2k] and right[k] through *f[2k + 1] (each filter
+    // with its own constants, so a pair can be one stereo voice's two sides or two mono voices). K independent
+    // feedback chains overlap where one alone leaves the CPU waiting (several voices side by side, speed A2,
+    // 2026-11-12). The same bits as K processPair() calls; the buffers must not overlap.
+    template <LadderMode Mode, int K>
+    static void processPairs(MultiLadder* const* f, float* const* left, float* const* right, uint32_t frames) noexcept {
 #if defined(__GNUC__)
         typedef double Pair __attribute__((vector_size(16)));
-        const Pair G = {G_, other.G_}, in = {in_, other.in_}, c0 = {c_[0], other.c_[0]}, c1 = {c_[1], other.c_[1]};
-        const Pair c2 = {c_[2], other.c_[2]}, c3 = {c_[3], other.c_[3]};
         const Pair zero = {0.0, 0.0}, three = {3.0, 3.0}, minusThree = {-3.0, -3.0}, k27 = {27.0, 27.0}, k9 = {9.0, 9.0};
         const Pair four = {4.0, 4.0}, six = {6.0, 6.0}, two = {2.0, 2.0};
-        Pair s0 = {s_[0], other.s_[0]}, s1 = {s_[1], other.s_[1]}, s2 = {s_[2], other.s_[2]}, s3 = {s_[3], other.s_[3]};
-        for (uint32_t i = 0; i < frames; ++i) {
-            Pair x = {static_cast<double>(left[i]), static_cast<double>(right[i])};
-            x = x - x == zero ? x : zero;  // finiteOr0
-            const Pair w = x * in - (c0 * s0 + c1 * s1 + c2 * s2 + c3 * s3);
-            const Pair f = w - w == zero ? w : zero;  // softClip's finiteOr0 (an infinity is held at +-3 below)
-            const Pair c = w < minusThree ? minusThree : (w > three ? three : f);
-            const Pair cc = c * c;
-            const Pair u = c * (k27 + cc) / (k27 + k9 * cc);
-            const Pair v0 = (u - s0) * G, y0 = v0 + s0;
-            s0 = y0 + v0;
-            const Pair v1 = (y0 - s1) * G, y1 = v1 + s1;
-            s1 = y1 + v1;
-            const Pair v2 = (y1 - s2) * G, y2 = v2 + s2;
-            s2 = y2 + v2;
-            const Pair v3 = (y2 - s3) * G, y3 = v3 + s3;
-            s3 = y3 + v3;
-            Pair y;
-            if constexpr (Mode == LadderMode::LowPass) y = y3;
-            else if constexpr (Mode == LadderMode::HighPass) y = u - four * y0 + six * y1 - four * y2 + y3;
-            else y = four * (y1 - two * y2 + y3);
-            left[i] = static_cast<float>(y[0]);
-            right[i] = static_cast<float>(y[1]);
+        Pair G[K], in[K], c0[K], c1[K], c2[K], c3[K], s0[K], s1[K], s2[K], s3[K];
+        for (int k = 0; k < K; ++k) {
+            const MultiLadder& a = *f[2 * k];
+            const MultiLadder& b = *f[2 * k + 1];
+            G[k] = Pair{a.G_, b.G_}, in[k] = Pair{a.in_, b.in_};
+            c0[k] = Pair{a.c_[0], b.c_[0]}, c1[k] = Pair{a.c_[1], b.c_[1]};
+            c2[k] = Pair{a.c_[2], b.c_[2]}, c3[k] = Pair{a.c_[3], b.c_[3]};
+            s0[k] = Pair{a.s_[0], b.s_[0]}, s1[k] = Pair{a.s_[1], b.s_[1]};
+            s2[k] = Pair{a.s_[2], b.s_[2]}, s3[k] = Pair{a.s_[3], b.s_[3]};
         }
-        s_[0] = s0[0], s_[1] = s1[0], s_[2] = s2[0], s_[3] = s3[0];
-        other.s_[0] = s0[1], other.s_[1] = s1[1], other.s_[2] = s2[1], other.s_[3] = s3[1];
+        for (uint32_t i = 0; i < frames; ++i) {
+            for (int k = 0; k < K; ++k) {
+                Pair x = {static_cast<double>(left[k][i]), static_cast<double>(right[k][i])};
+                x = x - x == zero ? x : zero;  // finiteOr0
+                const Pair w = x * in[k] - (c0[k] * s0[k] + c1[k] * s1[k] + c2[k] * s2[k] + c3[k] * s3[k]);
+                const Pair fw = w - w == zero ? w : zero;  // softClip's finiteOr0 (an infinity is held at +-3 below)
+                const Pair c = w < minusThree ? minusThree : (w > three ? three : fw);
+                const Pair cc = c * c;
+                const Pair u = c * (k27 + cc) / (k27 + k9 * cc);
+                const Pair v0 = (u - s0[k]) * G[k], y0 = v0 + s0[k];
+                s0[k] = y0 + v0;
+                const Pair v1 = (y0 - s1[k]) * G[k], y1 = v1 + s1[k];
+                s1[k] = y1 + v1;
+                const Pair v2 = (y1 - s2[k]) * G[k], y2 = v2 + s2[k];
+                s2[k] = y2 + v2;
+                const Pair v3 = (y2 - s3[k]) * G[k], y3 = v3 + s3[k];
+                s3[k] = y3 + v3;
+                Pair y;
+                if constexpr (Mode == LadderMode::LowPass) y = y3;
+                else if constexpr (Mode == LadderMode::HighPass) y = u - four * y0 + six * y1 - four * y2 + y3;
+                else y = four * (y1 - two * y2 + y3);
+                left[k][i] = static_cast<float>(y[0]);
+                right[k][i] = static_cast<float>(y[1]);
+            }
+        }
+        for (int k = 0; k < K; ++k) {
+            MultiLadder& a = *f[2 * k];
+            MultiLadder& b = *f[2 * k + 1];
+            a.s_[0] = s0[k][0], a.s_[1] = s1[k][0], a.s_[2] = s2[k][0], a.s_[3] = s3[k][0];
+            b.s_[0] = s0[k][1], b.s_[1] = s1[k][1], b.s_[2] = s2[k][1], b.s_[3] = s3[k][1];
+        }
 #else
-        Lane a = lane(), b = other.lane();
-        for (uint32_t i = 0; i < frames; ++i) {
-            left[i] = static_cast<float>(a.template step<Mode>(left[i]));
-            right[i] = static_cast<float>(b.template step<Mode>(right[i]));
+        for (int k = 0; k < K; ++k) {
+            Lane a = f[2 * k]->lane(), b = f[2 * k + 1]->lane();
+            for (uint32_t i = 0; i < frames; ++i) {
+                left[k][i] = static_cast<float>(a.template step<Mode>(left[k][i]));
+                right[k][i] = static_cast<float>(b.template step<Mode>(right[k][i]));
+            }
+            f[2 * k]->store(a);
+            f[2 * k + 1]->store(b);
         }
-        store(a);
-        other.store(b);
 #endif
     }
     // A silent tail would decay into subnormal numbers (slow on many CPUs): a caller that knows its input is
