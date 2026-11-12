@@ -4,7 +4,7 @@ on:
   # Main and pull requests; a branch's own pushes run only through its pull request, so nothing runs twice
   # (gpt/** branches get the Quick check until they open one).
   push:
-    branches: [Main]
+    branches: [Main, speed-parallel]
     paths:
       - "engine/**"
       - "!engine/compiler/**"  # the compiler wrapper has its own workflow
