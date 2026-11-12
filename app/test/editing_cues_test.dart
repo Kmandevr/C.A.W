@@ -8,6 +8,7 @@ import 'package:caw/model/arrange_edit.dart';
 import 'package:caw/model/arrange_markers.dart';
 import 'package:caw/model/project.dart';
 import 'package:caw/model/settings.dart';
+import 'package:caw/ui/arrange/clip_preview.dart';
 import 'package:caw/ui/arrange/edit_cues.dart';
 import 'package:caw/ui/arranger_screen.dart';
 import 'package:caw/ui/key_router.dart';
@@ -328,4 +329,86 @@ void main() {
       await settle(tester);
     });
   });
+
+  group('note lines in clips (owner, 2026-11-12: "Thin note lines")', () {
+    // A dense pattern: chords over three octaves, every step.
+    final dense = StringBuffer('---\nkind: pattern\nlength: 64\n---\n');
+    for (var i = 0; i < 64; i++) {
+      for (final p in [36, 43, 48, 52, 55, 60, 64, 67, 72]) {
+        dense.writeln('$i ${['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'][p % 12]}${p ~/ 12 - 1} 1 1');
+      }
+    }
+
+    test('the layout keeps lines between 1 and 2 px with a gap, whatever the height and range', () {
+      for (final h in [6.0, 10.0, 14.0, 22.0, 40.0, 60.0, 120.0]) {
+        for (final range in [0.0, 1.0, 5.0, 12.0, 24.0, 48.0, 100.0]) {
+          final l = noteLineLayout(60, 60 + range, h);
+          expect(l.thickness, inInclusiveRange(kNoteLineMin, kNoteLineMax), reason: 'h $h range $range');
+          final lines = ((range + 1) / l.perLine).ceil();
+          if (lines > 1 && h >= lines * (kNoteLineMax + kNoteLineGap)) {
+            expect(l.row, greaterThanOrEqualTo(l.thickness + kNoteLineGap - 1e-9), reason: 'h $h range $range');
+          }
+          expect(l.top + l.row * (lines - 1) + l.thickness, lessThanOrEqualTo(h + 1e-6), reason: 'fits the clip');
+        }
+      }
+    });
+
+    test('zoomed far out, no note line is thicker than the maximum; drums draw small ticks', () {
+      final cache = ClipPictureCache();
+      final p = cache.parsed('pat', dense.toString(), dense.toString(), 4);
+      expect(p.doc!.notes, isNotEmpty);
+      for (final stepW in [0.02, 0.1, 0.5, 2.0, 8.0, 24.0]) {
+        for (final drums in [false, true]) {
+          final spy = _SpyCanvas();
+          ClipPictureCache.paintNotes(spy, p, stepW, 40, Colors.white, drums: drums);
+          expect(spy.paths, hasLength(1), reason: 'one batched path a pattern');
+          var contours = 0;
+          for (final m in spy.paths.single.computeMetrics()) {
+            contours++;
+            final b = m.extractPath(0, m.length).getBounds();
+            expect(b.height, lessThanOrEqualTo((drums ? kDrumTickHeight : kNoteLineMax) + 1e-6),
+                reason: 'stepW $stepW drums $drums: a ${b.height} px tall mark');
+            if (drums) expect(b.width, lessThanOrEqualTo(kNoteLineMax + 1e-6));
+          }
+          expect(contours, p.doc!.notes.length);
+        }
+      }
+    });
+
+    Future<void> goldenAt(WidgetTester tester, int bars, String name) async {
+      s.project = ProjectDoc(id: 'p', name: 'Lines', modules: [
+        ModuleDoc(id: 'pat', name: 'Chords', source: dense.toString()),
+        ModuleDoc(id: 'lead', name: 'Lead', source: '---\nkind: pattern\nlength: 16\n---\n0 C4 2 1\n2 E4 2 1\n4 G4 4 1\n8 B4 2 1\n10 D5 6 1\n'),
+        ModuleDoc(id: 'beat', name: 'Beat', source: '---\nkind: pattern\nlength: 16\n---\n0 C2 1 1\n4 D2 1 1\n8 C2 1 1\n10 F#2 1 1\n12 D2 1 1\n14 F#2 1 1\n'),
+      ], layers: [
+        LayerDoc(id: 'a', name: 'Keys', color: 0, clips: [ClipDoc(id: 'c1', patternId: 'pat', startSteps: 0, lengthSteps: bars * 16)]),
+        LayerDoc(id: 'b', name: 'Lead', color: 2, clips: [ClipDoc(id: 'c2', patternId: 'lead', startSteps: 0, lengthSteps: bars * 16)]),
+        LayerDoc(id: 'd', name: 'Drums', color: 4, instrument: ComponentUseDoc('org.caw.drums'),
+            clips: [ClipDoc(id: 'c3', patternId: 'beat', startSteps: 0, lengthSteps: bars * 16)]),
+      ]);
+      await pumpGolden(tester, Scaffold(body: ListenableBuilder(listenable: s, builder: (_, _) => ArrangerScreen(state: s))),
+          goldenSizes['phone']!);
+      await tester.tap(find.byKey(const ValueKey('arrange-zoom')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('arrange-zoom-fit')));
+      await tester.pumpAndSettle();
+      await expectLater(goldenScreen, matchesGoldenFile('goldens/$name'));
+      await tester.pump(const Duration(seconds: 1));
+    }
+
+    testWidgets('golden: zoomed out (64 bars) the clips show thin note lines and drum ticks, at phone size',
+        (tester) => goldenAt(tester, 64, 'arrange_notes_zoomed_out_phone.png'));
+
+    testWidgets('golden: a mid zoom (4 bars), at phone size',
+        (tester) => goldenAt(tester, 4, 'arrange_notes_mid_zoom_phone.png'));
+  });
+}
+
+/// Records the paths a painter draws.
+class _SpyCanvas implements Canvas {
+  final paths = <Path>[];
+  @override
+  void drawPath(Path path, Paint paint) => paths.add(path);
+  @override
+  dynamic noSuchMethod(Invocation invocation) => null;
 }

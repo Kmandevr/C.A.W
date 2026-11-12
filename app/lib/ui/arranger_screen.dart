@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../actions/actions.dart';
+import '../model/drums.dart' show drumsComponentId;
 import '../model/app_state.dart';
 import '../model/arrange_edit.dart';
 import '../model/audio_edit.dart';
@@ -2402,11 +2403,21 @@ class _TimelineLaneState extends State<_TimelineLane> {
         Positioned.fill(child: IgnorePointer(child: RepaintBoundary(child: CustomPaint(
           key: ValueKey('clip-blocks-${layer.id}'),
           painter: _ClipBlocksPainter([
+            // Far out a MIDI clip's block is a glass tint with its notes over it as thin lines (owner, 2026-11-12:
+            // "Thin note lines"), as its body shows them nearer in; a thin row stays a solid bar.
             for (final clip in layer.clips) (clip.startSteps.toDouble(), clip.lengthSteps.toDouble(),
-                (clip.color == null ? color : Neon.layer(clip.color!)).withValues(alpha: clip.mute ? 0.3 : 0.8)),
+                (clip.color == null ? color : Neon.layer(clip.color!))
+                    .withValues(alpha: clip.mute ? 0.3 : thin ? 0.8 : 0.32)),
             for (final clip in layer.audioClips) (clip.startSteps.toDouble(), clip.lengthAt(state.project.bpm),
                 audioClipColor(state, layer, clip).withValues(alpha: clip.mute ? 0.3 : 0.8)),
-          ], stepW, inset: thin ? 1 : _clipInset(trackHeight)))))),
+          ], stepW, inset: thin ? 1 : _clipInset(trackHeight), notes: thin ? const [] : [
+            for (final clip in layer.clips)
+              if (MidiClipPreview.of(state.project, clip, stepW: stepW, top: 1,
+                  drums: layer.instrument?.id == drumsComponentId,
+                  color: Color.lerp(clip.color == null ? color : Neon.layer(clip.color!), Neon.ink, 0.45)!
+                      .withValues(alpha: clip.mute ? 0.4 : 0.9)) case final preview?)
+                (clip.startSteps.toDouble(), clip.lengthSteps.toDouble(), preview),
+          ]))))),
         if (thin) for (final clip in layer.clips) Positioned(left: clip.startSteps * stepW, top: 0, width: 1, height: 1,
             child: SizedBox(key: ValueKey('thin-clip-${clip.id}'))),
       ] else ...[
@@ -2511,9 +2522,12 @@ class _SpacerHeader extends StatelessWidget {
 /// A lane's clips as plain blocks (a thin row, or zoomed far out): one rectangle per pixel column at most, so a long
 /// song's thousands of clips cost a few hundred rectangles.
 class _ClipBlocksPainter extends CustomPainter {
-  _ClipBlocksPainter(this.clips, this.stepW, {required this.inset});
+  _ClipBlocksPainter(this.clips, this.stepW, {required this.inset, this.notes = const []});
   final List<(double start, double length, Color color)> clips;
   final double stepW, inset;
+
+  /// The MIDI clips' notes drawn over their blocks (each from its pattern's cached picture).
+  final List<(double start, double length, MidiClipPreview preview)> notes;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -2538,12 +2552,24 @@ class _ClipBlocksPainter extends CustomPainter {
       c = color;
     }
     flush();
+    for (final (start, length, preview) in notes) {
+      final w = length * stepW;
+      if (w < 1) continue;
+      canvas.save();
+      canvas.translate(start * stepW, top);
+      preview.paint(canvas, Size(w, h));
+      canvas.restore();
+    }
   }
 
   @override
   bool shouldRepaint(covariant _ClipBlocksPainter old) =>
       old.stepW != stepW || old.inset != inset || old.clips.length != clips.length ||
-      [for (var i = 0; i < clips.length; i++) old.clips[i] != clips[i]].any((d) => d);
+      [for (var i = 0; i < clips.length; i++) old.clips[i] != clips[i]].any((d) => d) ||
+      old.notes.length != notes.length ||
+      [for (var i = 0; i < notes.length; i++)
+        old.notes[i].$1 != notes[i].$1 || old.notes[i].$2 != notes[i].$2 || !old.notes[i].$3.sameAs(notes[i].$3)]
+          .any((d) => d);
 }
 
 /// The arrangement grid's step, in 16th steps: 1, a beat, a bar, or 4, 16, 64… bars, whichever keeps its lines at
@@ -2971,6 +2997,7 @@ class _TimelineClipState extends State<_TimelineClip> {
     final name = _name;
     // The notes sit under the name when the clip is tall enough for both, else they fill it.
     final preview = MidiClipPreview.of(widget.state.project, c, stepW: widget.stepW, trim: start - c.startSteps,
+      drums: widget.layer.instrument?.id == drumsComponentId,
       top: widget.height >= 34 ? 15 : 1, color: Color.lerp(widget.color, Neon.ink, 0.45)!.withValues(alpha: 0.9));
     // On the pinned track the clip itself slides in time; elsewhere its ghost shows where it goes and it stays dim.
     final shown = dragging && !sourceDragging && _drag == null ? (_moveTarget() - c.startSteps) * widget.stepW : 0.0;

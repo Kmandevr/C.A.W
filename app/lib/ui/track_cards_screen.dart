@@ -12,6 +12,7 @@ import '../model/cpp_starters.dart';
 import '../model/cpp_workbench.dart';
 import '../model/pattern_doc.dart';
 import '../model/pattern_templates.dart' show PatternTemplate;
+import '../model/drums.dart' show drumsComponentId;
 import '../model/project.dart';
 import 'arrange/audio_waveform.dart';
 import 'arrange/clip_preview.dart';
@@ -535,7 +536,7 @@ class _Lane extends StatelessWidget {
             for (final t in tracks) ...[
               for (final c in t.clips)
                 clipBox(ValueKey('card-clip-${c.id}'), c.startSteps.toDouble(), c.lengthSteps.toDouble(), c.mute || t.mute,
-                    layer.isFolder ? null : _midiNotes(p, c, stepW, notes)),
+                    layer.isFolder ? null : _midiNotes(p, c, stepW, notes, drums: layer.instrument?.id == drumsComponentId)),
               for (final c in t.audioClips)
                 clipBox(ValueKey('card-audio-${c.id}'), c.startSteps, c.lengthAt(p.bpm), c.mute || t.mute,
                     layer.isFolder ? null : _waveform(c, stepW, notes)),
@@ -552,8 +553,8 @@ class _Lane extends StatelessWidget {
         }),
       );
 
-  Widget? _midiNotes(ProjectDoc p, ClipDoc c, double stepW, Color notes) {
-    final preview = MidiClipPreview.of(p, c, stepW: stepW, top: 1, color: notes);
+  Widget? _midiNotes(ProjectDoc p, ClipDoc c, double stepW, Color notes, {bool drums = false}) {
+    final preview = MidiClipPreview.of(p, c, stepW: stepW, top: 1, color: notes, drums: drums);
     return preview == null ? null : RepaintBoundary(child: CustomPaint(
       key: ValueKey('card-notes-${c.id}'),
       painter: ClipPreviewPainter(preview),
