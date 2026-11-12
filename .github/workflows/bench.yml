@@ -2,7 +2,7 @@
 name: Bench
 on:
   push:
-    branches: [Main, speed-flagship]  # TEMPORARY (speed A2): reverted before the pull request
+    branches: [Main]
     paths:
       - "engine/**"
       - "!engine/compiler/**"
