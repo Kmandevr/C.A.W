@@ -14,7 +14,11 @@ updated: 2026-11-12
 - **Every change** is an opt-in channel with each Main build.
 - **Releases:** pushes to Main never make a release. The owner tags a build once it is stable.
 
-**[Assumption, Claude, to confirm]** Everyone using the open alpha is a tester. So the alpha builds use the telemetry contract's `beta` channel, which means on by default with the first-run notice. The `release` channel (off until the user opts in) is kept for a later official release.
+**Telemetry (owner confirmed):** everyone using the open alpha is a tester, so the alpha builds use the telemetry contract's `beta` channel: on by default, with the first-run notice. The `release` channel (off until the user opts in) is kept for a later official release.
+
+**Automatic updates (owner):** an opt-in setting, off by default ("people don't like change on things like DAWs"), that installs new alpha or beta releases of the chosen channel in the background without the user seeing it, as far as each platform allows. It can be turned off at any time.
+
+**Compatibility (owner):** from the official 1.0 release on, backwards compatibility with future updates is a priority: projects, settings and saved files from 1.0 must keep opening in later versions.
 
 ## 2026-11-12: Beta readiness: speed, smoothness, a stress test, telemetry and feedback (owner)
 
