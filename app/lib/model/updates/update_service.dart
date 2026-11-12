@@ -4,12 +4,14 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:isolate';
 
 import 'package:flutter/foundation.dart';
 
 import '../../platform/update_installer.dart';
 import '../../version.dart';
 import '../atomic_file.dart';
+import '../sha256.dart';
 import 'release_version.dart';
 import 'releases.dart';
 import 'update_fetch.dart';
@@ -68,6 +70,9 @@ enum AutoUpdateLevel {
         all => true,
       };
 }
+
+/// What checking a download against its published SHA-256 found.
+enum DownloadCheck { verified, unverified, mismatch }
 
 class UpdateService extends ChangeNotifier {
   UpdateService({
@@ -301,14 +306,19 @@ class UpdateService extends ChangeNotifier {
       final dir = await installer.downloadDir();
       final target = File('${dir.path}${Platform.pathSeparator}${_safeName(asset.name)}');
       await deleteStaleDownloads(dir, keep: target);
+      DownloadCheck check;
       try {
-        _ready = await fetcher.download(asset.url, target);
+        final file = await fetcher.download(asset.url, target);
+        check = await verifyDownload(file, asset);
+        if (check == DownloadCheck.mismatch) return null; // deleted; tried again later
+        _ready = file;
         _readyLabel = r.label;
       } catch (_) {
         return null; // offline or refused: tried again at the next idle moment
       }
       if (installer.platform == UpdatePlatform.windows) {
-        downloadedNote = '${r.label} downloaded to ${dir.path}: close C.A.W, unzip it into a folder and run caw.exe.';
+        downloadedNote = '${check == DownloadCheck.unverified ? 'Unverified (no published checksum): ' : ''}'
+            '${r.label} downloaded to ${dir.path}: close C.A.W, unzip it into a folder and run caw.exe.';
         unawaited(_save());
         return UpdateOutcome(downloadedNote!, file: _ready);
       }
@@ -392,7 +402,38 @@ class UpdateService extends ChangeNotifier {
     final target = File('${dir.path}${Platform.pathSeparator}${_safeName(asset.name)}');
     await deleteStaleDownloads(dir, keep: target);
     final file = await fetcher.download(asset.url, target, progress: progress, cancel: cancel);
-    return installer.install(file, kind);
+    final check = await verifyDownload(file, asset);
+    if (check == DownloadCheck.mismatch) {
+      return const UpdateOutcome('The download did not match its published checksum, so it was deleted.');
+    }
+    final outcome = await installer.install(file, kind);
+    if (check == DownloadCheck.unverified && kind == AssetKind.zip) {
+      return UpdateOutcome('Unverified: this release publishes no checksum. ${outcome.message}', file: outcome.file);
+    }
+    return outcome;
+  }
+
+  /// Checks [file] against [asset]'s published SHA-256 (hashed off the UI isolate). A mismatch, or a digest and a
+  /// notes line that disagree, deletes the file. No published checksum (older releases) is [DownloadCheck.unverified]:
+  /// Android still checks the APK's signature against the installed app's; on Windows the app says so plainly.
+  static Future<DownloadCheck> verifyDownload(File file, ReleaseAsset asset) async {
+    final want = asset.sha256;
+    if (asset.checksumConflict) {
+      await _delete(file);
+      return DownloadCheck.mismatch;
+    }
+    if (want == null) return DownloadCheck.unverified;
+    final path = file.path;
+    final got = await Isolate.run(() => sha256OfFileSync(path));
+    if (got == want) return DownloadCheck.verified;
+    await _delete(file);
+    return DownloadCheck.mismatch;
+  }
+
+  static Future<void> _delete(File f) async {
+    try {
+      await f.delete();
+    } catch (_) {}
   }
 
   /// Deletes everything in [dir] but [keep] (earlier or broken downloads).

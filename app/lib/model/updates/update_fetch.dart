@@ -85,6 +85,10 @@ class UpdateFetcher {
   static const maxJsonBytes = 256 * 1024;
   static const maxDownloadBytes = 300 * 1024 * 1024;
 
+  /// A download stalls out after this long without a byte, and gives up after [downloadLimit] in all.
+  static const idleTimeout = Duration(seconds: 30);
+  static const downloadLimit = Duration(minutes: 30);
+
   /// GETs [url] (https only, no redirects) and decodes it as JSON, refusing more than [maxJsonBytes].
   Future<Object?> getJson(Uri url) async {
     if (url.scheme != 'https') throw const UpdateFetchError('Not https');
@@ -130,7 +134,12 @@ class UpdateFetcher {
   /// redirect, must pass [allowedDownload]; at most 5 redirects and [maxBytes]. [progress] gets bytes so far and
   /// the expected total (or -1). [cancel] stops it and deletes the partial file.
   Future<File> download(Uri url, File to,
-      {void Function(int got, int total)? progress, DownloadCancel? cancel, int maxBytes = maxDownloadBytes}) async {
+      {void Function(int got, int total)? progress,
+      DownloadCancel? cancel,
+      int maxBytes = maxDownloadBytes,
+      Duration idle = idleTimeout,
+      Duration limit = downloadLimit}) async {
+    if (!pinnedReleaseAsset(url)) throw const UpdateFetchError('Download refused: not a C.A.W release asset');
     var hop = url;
     UpdateResponse? res;
     for (var i = 0; ; i++) {
@@ -172,16 +181,20 @@ class UpdateFetcher {
       r.close?.call();
     }
     cancel?._listeners.add(() => stop(const DownloadCancelled()));
-    sub = r.body.listen((chunk) {
+    final overall = Timer(limit, () => stop(const UpdateFetchError('The download took too long')));
+    sub = r.body.timeout(idle, onTimeout: (sink) {
+      sink.addError(const UpdateFetchError('The download stalled'));
+      sink.close();
+    }).listen((chunk) {
       got += chunk.length;
       if (got > maxBytes) return stop(const UpdateFetchError('The download is larger than allowed'));
       sink.add(chunk);
       progress?.call(got, r.length);
-    }, onError: (Object e) => stop(UpdateFetchError('The download broke off ($e)')), onDone: () {
+    }, onError: (Object e) => stop(e is UpdateFetchError ? e : UpdateFetchError('The download broke off ($e)')), onDone: () {
       if (!done.isCompleted) done.complete();
     }, cancelOnError: true);
     try {
-      await done.future;
+      await done.future.whenComplete(overall.cancel);
       await sink.close();
       if (r.length >= 0 && got != r.length) throw const UpdateFetchError('The download is incomplete');
       if (await to.exists()) await to.delete();

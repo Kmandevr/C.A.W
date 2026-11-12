@@ -2,19 +2,22 @@
 // PackageInstaller session (the system asks the user unless Android allows an update without asking).
 package com.kmandevr.caw
 
+import android.Manifest
 import android.app.Activity
 import android.app.PendingIntent
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
-import android.content.IntentFilter
+import android.content.pm.ApplicationInfo
 import android.content.pm.PackageInstaller
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import java.io.File
+import java.security.SecureRandom
 
 /**
  * `canInstall`: PackageManager.canRequestPackageInstalls() (API 26; needs REQUEST_INSTALL_PACKAGES).
@@ -23,8 +26,11 @@ import java.io.File
  *   (PackageManager.getInstallSourceInfo, API 30), so an update may install without the prompt.
  * `install` {path, silent}: a PackageInstaller session (MODE_FULL_INSTALL) with the APK copied in; on API 31+ it asks
  *   for USER_ACTION_NOT_REQUIRED when [silent], else USER_ACTION_REQUIRED. Only a file directly inside the cache's
- *   updates/ folder ending in .apk is accepted. The session's result comes back on the channel as `status`
- *   {status, message}; STATUS_PENDING_USER_ACTION opens the system's confirmation.
+ *   updates/ folder ending in .apk is accepted. The session's result comes to [UpdateStatusReceiver], a manifest
+ *   receiver that is not exported (no other app can send to it, on every API level), through an explicit
+ *   PendingIntent carrying a random token; it is reported on the channel as `status` {status, message}.
+ *   STATUS_PENDING_USER_ACTION opens the system's confirmation, and only when that intent resolves to a system app
+ *   holding INSTALL_PACKAGES (the platform's package installer); anything else is refused.
  *
  * Android itself refuses a package signed with another key, or with a lower versionCode than the installed one,
  * whatever this code asks. A successful update replaces the running app: Android stops it; it is not restarted.
@@ -38,7 +44,9 @@ import java.io.File
  * - versionCode protects against downgrades: developer.android.com/studio/publish/versioning
  */
 class UpdateInstaller(private val activity: Activity, private val channel: () -> MethodChannel?) {
-    private var receiver: BroadcastReceiver? = null
+    init {
+        current = this
+    }
 
     fun handle(call: MethodCall, result: MethodChannel.Result) {
         when (call.method) {
@@ -101,10 +109,13 @@ class UpdateInstaller(private val activity: Activity, private val channel: () ->
                             session.fsync(out)
                         }
                     }
-                    listen()
+                    // Explicit: only UpdateStatusReceiver (not exported) gets it. Mutable because the installer
+                    // fills in EXTRA_STATUS and EXTRA_INTENT; the explicit component can't be changed by a fill-in.
+                    val intent = Intent(activity, UpdateStatusReceiver::class.java)
+                        .setAction(ACTION_STATUS)
+                        .putExtra(EXTRA_TOKEN, token)
                     val flags = PendingIntent.FLAG_UPDATE_CURRENT or
                         (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) PendingIntent.FLAG_MUTABLE else 0)
-                    val intent = Intent(ACTION_STATUS).setPackage(activity.packageName)
                     session.commit(PendingIntent.getBroadcast(activity, id, intent, flags).intentSender)
                 }
                 main.post { result.success(null) }
@@ -114,36 +125,64 @@ class UpdateInstaller(private val activity: Activity, private val channel: () ->
         }.start()
     }
 
-    // The session's outcome: the system's confirmation when it asks for one, else reported to Dart.
-    private fun listen() {
-        if (receiver != null) return
-        val r = object : BroadcastReceiver() {
-            override fun onReceive(context: Context, intent: Intent) {
-                val status = intent.getIntExtra(PackageInstaller.EXTRA_STATUS, PackageInstaller.STATUS_FAILURE)
-                if (status == PackageInstaller.STATUS_PENDING_USER_ACTION) {
-                    @Suppress("DEPRECATION")
-                    val confirm = intent.getParcelableExtra<Intent>(Intent.EXTRA_INTENT)
-                    if (confirm != null) activity.startActivity(confirm.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-                }
-                val message = intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE) ?: ""
-                channel()?.invokeMethod("status", mapOf("status" to status, "message" to message))
+    /** The session's outcome, from [UpdateStatusReceiver]. */
+    internal fun onStatus(intent: Intent) {
+        if (intent.getStringExtra(EXTRA_TOKEN) != token) return
+        var status = intent.getIntExtra(PackageInstaller.EXTRA_STATUS, PackageInstaller.STATUS_FAILURE)
+        var message = intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE) ?: ""
+        if (status == PackageInstaller.STATUS_PENDING_USER_ACTION) {
+            @Suppress("DEPRECATION")
+            val confirm = intent.getParcelableExtra<Intent>(Intent.EXTRA_INTENT)
+            if (confirm != null && isSystemInstaller(confirm)) {
+                activity.startActivity(confirm.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            } else {
+                status = PackageInstaller.STATUS_FAILURE
+                message = "refused a confirmation that is not the system's installer"
             }
         }
-        val filter = IntentFilter(ACTION_STATUS)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            activity.registerReceiver(r, filter, Context.RECEIVER_NOT_EXPORTED)
-        } else {
-            activity.registerReceiver(r, filter)
+        channel()?.invokeMethod("status", mapOf("status" to status, "message" to message))
+    }
+
+    /** Whether [confirm] opens a system app that holds INSTALL_PACKAGES (only the platform's package installer). */
+    private fun isSystemInstaller(confirm: Intent): Boolean {
+        val pm = activity.packageManager
+        return try {
+            val pkg = confirm.component?.packageName
+                ?: pm.resolveActivity(confirm, PackageManager.MATCH_DEFAULT_ONLY)?.activityInfo?.packageName
+                ?: return false
+            if (confirm.`package` != null && confirm.`package` != pkg) return false
+            val app = pm.getApplicationInfo(pkg, 0)
+            (app.flags and ApplicationInfo.FLAG_SYSTEM) != 0 &&
+                pm.checkPermission(Manifest.permission.INSTALL_PACKAGES, pkg) == PackageManager.PERMISSION_GRANTED
+        } catch (e: Exception) {
+            false
         }
-        receiver = r
     }
 
     fun dispose() {
-        receiver?.let { activity.unregisterReceiver(it) }
-        receiver = null
+        if (current === this) current = null
     }
 
     companion object {
-        private const val ACTION_STATUS = "com.kmandevr.caw.UPDATE_STATUS"
+        internal const val ACTION_STATUS = "com.kmandevr.caw.UPDATE_STATUS"
+        private const val EXTRA_TOKEN = "com.kmandevr.caw.UPDATE_TOKEN"
+
+        /** A fresh random token per process: a status without it is ignored. */
+        private val token: String = ByteArray(16).also { SecureRandom().nextBytes(it) }.joinToString("") { "%02x".format(it) }
+
+        @Volatile
+        internal var current: UpdateInstaller? = null
+    }
+}
+
+/**
+ * Receives the install session's status. Declared in the manifest with exported="false", so only C.A.W's own
+ * PendingIntent (sent by the system on C.A.W's behalf) reaches it, on every API level; it hands the status to the
+ * running [UpdateInstaller].
+ */
+class UpdateStatusReceiver : BroadcastReceiver() {
+    override fun onReceive(context: Context, intent: Intent) {
+        if (intent.action != UpdateInstaller.ACTION_STATUS) return
+        UpdateInstaller.current?.onStatus(intent)
     }
 }

@@ -29,10 +29,17 @@ enum UpdateChannel {
 
 /// One downloadable file of a release.
 class ReleaseAsset {
-  const ReleaseAsset({required this.name, required this.url, required this.size});
+  const ReleaseAsset({required this.name, required this.url, required this.size, this.sha256, this.checksumConflict = false});
   final String name;
   final Uri url;
   final int size;
+
+  /// The published SHA-256 (lower-case hex): GitHub's own asset digest, else the release notes'
+  /// `SHA256 <name>: <hex>` line CI writes. Null for older releases with neither.
+  final String? sha256;
+
+  /// The digest and the notes disagree: the asset is refused.
+  final bool checksumConflict;
 }
 
 /// One release as the source lists it.
@@ -80,11 +87,25 @@ const String rollingTag = 'latest-main';
 /// releases used objects.githubusercontent.com).
 const Set<String> downloadHosts = {'github.com', 'objects.githubusercontent.com', 'release-assets.githubusercontent.com'};
 
+/// Where every release asset's own URL must start (the first hop; redirects are host-checked by [allowedDownload]).
+const String releaseDownloadPrefix = 'https://github.com/Kmandevr/C.A.W/releases/download/';
+
+/// Whether [u] is a release asset of this repository: the pinned prefix, with no `..` or encoded tricks in the path.
+bool pinnedReleaseAsset(Uri u) =>
+    allowedDownload(u) &&
+    u.toString().startsWith(releaseDownloadPrefix) &&
+    !u.pathSegments.contains('..') &&
+    !u.path.contains('%') &&
+    !u.hasQuery &&
+    !u.hasFragment;
+
 /// Whether [u] may be downloaded from: https on the default port, an allowed host, no user info.
 bool allowedDownload(Uri u) =>
     u.scheme == 'https' && downloadHosts.contains(u.host.toLowerCase()) && u.userInfo.isEmpty && (!u.hasPort || u.port == 443);
 
 final _buildLine = RegExp(r'^\s*Build:\s*([0-9a-f]{7,40})\s*$', multiLine: true, caseSensitive: false);
+final _shaLine = RegExp(r'^\s*SHA256\s+(\S{1,200}):\s*([0-9a-fA-F]{64})\s*$', multiLine: true);
+final _digest = RegExp(r'^(?:sha256:)?([0-9a-fA-F]{64})$');
 final _versionLine = RegExp(r'^\s*Version:\s*v?(\S{1,64})\s*$', multiLine: true, caseSensitive: false);
 
 String _text(Object? v, int max) => v is String ? (v.length > max ? v.substring(0, max) : v) : '';
@@ -99,6 +120,7 @@ List<ReleaseInfo> parseGitHubReleases(Object? json) {
     final tag = _text(r['tag_name'], 100);
     if (tag.isEmpty) continue;
     final notes = _text(r['body'], 20000);
+    final noted = {for (final m in _shaLine.allMatches(notes)) m.group(1)!: m.group(2)!.toLowerCase()};
     final rolling = tag == rollingTag;
     final version = rolling
         ? ReleaseVersion.tryParse(_versionLine.firstMatch(notes)?.group(1) ?? '')
@@ -111,8 +133,17 @@ List<ReleaseInfo> parseGitHubReleases(Object? json) {
         final name = _text(a['name'], 200);
         final url = Uri.tryParse(_text(a['browser_download_url'], 2000));
         final size = a['size'];
-        if (name.isEmpty || url == null || !allowedDownload(url)) continue;
-        assets.add(ReleaseAsset(name: name, url: url, size: size is int && size >= 0 ? size : 0));
+        if (name.isEmpty || url == null || !pinnedReleaseAsset(url)) continue;
+        // GitHub's digest ("sha256:<hex>"; REST release asset schema, checked 2026-11-12) and CI's notes line.
+        final digest = _digest.firstMatch(_text(a['digest'], 100))?.group(1)?.toLowerCase();
+        final note = noted[name];
+        assets.add(ReleaseAsset(
+          name: name,
+          url: url,
+          size: size is int && size >= 0 ? size : 0,
+          sha256: digest ?? note,
+          checksumConflict: digest != null && note != null && digest != note,
+        ));
       }
     }
     final page = Uri.tryParse(_text(r['html_url'], 2000));
@@ -166,8 +197,9 @@ ReleaseInfo? updateFor(List<ReleaseInfo> all, UpdateChannel channel, ReleaseVers
 /// The platforms an update can be installed on.
 enum UpdatePlatform { android, windows, other }
 
-/// What a downloaded asset is: an Android package, a Windows installer, or a zip of the app's files.
-enum AssetKind { apk, installer, zip }
+/// What a downloaded asset is: an Android package or a zip of the app's files. (No Windows installer kind: an
+/// installer would run code, which needs a signed installer first; decisions.md.)
+enum AssetKind { apk, zip }
 
 /// The file of [r] for [platform], with its kind; null when there is none (the download link is offered instead).
 (ReleaseAsset, AssetKind)? assetFor(ReleaseInfo r, UpdatePlatform platform) {
@@ -178,9 +210,6 @@ enum AssetKind { apk, installer, zip }
         if (named(a, '-android.apk')) return (a, AssetKind.apk);
       }
     case UpdatePlatform.windows:
-      for (final a in r.assets) {
-        if (named(a, '-windows.msi') || named(a, '-windows-setup.exe')) return (a, AssetKind.installer);
-      }
       for (final a in r.assets) {
         if (named(a, '-windows.zip')) return (a, AssetKind.zip);
       }

@@ -7,6 +7,7 @@ import 'dart:io';
 
 import 'package:caw/model/app_state.dart';
 import 'package:caw/model/project.dart';
+import 'package:caw/model/sha256.dart';
 import 'package:caw/model/settings.dart';
 import 'package:caw/model/storage.dart';
 import 'package:caw/model/updates/release_version.dart';
@@ -190,6 +191,8 @@ void main() {
       expect(assetFor(r, UpdatePlatform.windows)!.$2, AssetKind.zip);
       expect(assetFor(r, UpdatePlatform.other), isNull);
       expect(assetFor(all.firstWhere((r) => r.tag == 'v1.0.0-beta.1'), UpdatePlatform.windows), isNull);
+      final installerOnly = parseGitHubReleases([rel('v9.0.0', assets: ['caw-9.0.0-windows.msi', 'caw-9.0.0-windows-setup.exe'])]);
+      expect(assetFor(installerOnly.single, UpdatePlatform.windows), isNull, reason: 'no Windows installer is ever run');
     });
   });
 
@@ -286,7 +289,7 @@ void main() {
 
     test('too large is refused, before and while downloading', () async {
       final t = FakeTransport();
-      final a = Uri.parse('https://github.com/a.apk');
+      final a = Uri.parse('https://github.com/Kmandevr/C.A.W/releases/download/v1/a.apk');
       t.answers[a.toString()] = () => UpdateResponse(status: 200, length: 500, body: Stream.value(List.filled(500, 0)));
       final f = UpdateFetcher(transport: t);
       await expectLater(f.download(a, File('${tmp.path}/a.apk'), maxBytes: 100), throwsA(isA<UpdateFetchError>()));
@@ -295,10 +298,102 @@ void main() {
       expect(File('${tmp.path}/a.apk.part').existsSync(), isFalse);
     });
 
+    test('the first URL must be this repository\'s release download path', () async {
+      final f = UpdateFetcher(transport: FakeTransport());
+      for (final bad in [
+        'https://github.com/a.apk',
+        'https://github.com/someone/else/releases/download/v1/a.apk',
+        'https://github.com/Kmandevr/C.A.W/releases/download/../../x/a.apk',
+        'https://objects.githubusercontent.com/a.apk',
+      ]) {
+        await expectLater(f.download(Uri.parse(bad), File('${tmp.path}/a.apk')), throwsA(isA<UpdateFetchError>()), reason: bad);
+      }
+      final parsed = parseGitHubReleases([
+        {
+          'tag_name': 'v1.0.0',
+          'assets': [
+            {'name': 'x-android.apk', 'size': 1, 'browser_download_url': 'https://github.com/other/repo/releases/download/v1/x-android.apk'},
+          ],
+        },
+      ]);
+      expect(parsed.single.assets, isEmpty, reason: 'an asset outside the pinned path is never offered');
+    });
+
+    test('a download that stalls times out', () async {
+      final t = FakeTransport();
+      final body = StreamController<List<int>>();
+      final a = Uri.parse('https://github.com/Kmandevr/C.A.W/releases/download/v1/a.apk');
+      t.answers[a.toString()] = () => UpdateResponse(status: 200, length: 1000, body: body.stream);
+      final run = UpdateFetcher(transport: t)
+          .download(a, File('${tmp.path}/a.apk'), idle: const Duration(milliseconds: 50));
+      body.add([1, 2, 3]);
+      await expectLater(run, throwsA(isA<UpdateFetchError>().having((e) => e.message, 'message', contains('stalled'))));
+      expect(File('${tmp.path}/a.apk.part').existsSync(), isFalse);
+      await body.close();
+    });
+
+    group('checksums', () {
+      final bytes = [1, 2, 3, 4];
+      final good = sha256Hex(bytes);
+      List<ReleaseInfo> releaseWith({String? digest, String? note, String name = 'caw-1.0.0-alpha.2-android.apk'}) =>
+          parseGitHubReleases([
+            {
+              'tag_name': 'v1.0.0-alpha.2',
+              'body': note == null ? '' : 'Notes\nSHA256 $name: $note\n',
+              'assets': [
+                {
+                  'name': name,
+                  'size': bytes.length,
+                  'browser_download_url': 'https://github.com/Kmandevr/C.A.W/releases/download/v1.0.0-alpha.2/$name',
+                  'digest': ?digest,
+                },
+              ],
+            },
+          ]);
+
+      test('read from GitHub\'s digest or the notes line; a disagreement is a conflict', () {
+        expect(releaseWith(digest: 'sha256:$good').single.assets.single.sha256, good);
+        expect(releaseWith(note: good.toUpperCase()).single.assets.single.sha256, good);
+        expect(releaseWith().single.assets.single.sha256, isNull);
+        expect(releaseWith(digest: 'sha256:$good', note: 'a' * 64).single.assets.single.checksumConflict, isTrue);
+      });
+
+      Future<(UpdateOutcome, FakeInstaller)> run(List<ReleaseInfo> list, {UpdatePlatform platform = UpdatePlatform.android, List<int>? served}) async {
+        final t = FakeTransport();
+        final inst = FakeInstaller(tmp, platform: platform);
+        final s = service(source: ListSource(list), transport: t, installer: inst);
+        await s.check();
+        final r = s.offer!;
+        final asset = assetFor(r, platform)!.$1;
+        final body = served ?? bytes;
+        t.answers[asset.url.toString()] = () => UpdateResponse(status: 200, length: body.length, body: Stream.value(body));
+        return (await s.downloadAndInstall(r), inst);
+      }
+
+      test('a matching download installs; a mismatch is deleted and refused', () async {
+        var (o, inst) = await run(releaseWith(note: good));
+        expect(o.started, isTrue);
+        expect(inst.installs, hasLength(1));
+        (o, inst) = await run(releaseWith(note: good), served: [9, 9, 9, 9]);
+        expect(o.message, contains('did not match'));
+        expect(inst.installs, isEmpty);
+        expect(tmp.listSync().whereType<File>().where((f) => f.path.endsWith('.apk')), isEmpty);
+        (o, inst) = await run(releaseWith(digest: 'sha256:$good', note: 'a' * 64));
+        expect(inst.installs, isEmpty, reason: 'digest and notes disagree');
+      });
+
+      test('no published checksum: Android goes on (it checks the signature), Windows says unverified', () async {
+        var (o, inst) = await run(releaseWith());
+        expect(inst.installs, hasLength(1));
+        (o, inst) = await run(releaseWith(name: 'caw-1.0.0-alpha.2-windows.zip'), platform: UpdatePlatform.windows);
+        expect(o.message, startsWith('Unverified'));
+      });
+    });
+
     test('cancel stops the download and deletes the partial file', () async {
       final t = FakeTransport();
       final body = StreamController<List<int>>();
-      final a = Uri.parse('https://github.com/a.apk');
+      final a = Uri.parse('https://github.com/Kmandevr/C.A.W/releases/download/v1/a.apk');
       t.answers[a.toString()] = () => UpdateResponse(status: 200, length: 1000, body: body.stream);
       final cancel = DownloadCancel();
       final run = UpdateFetcher(transport: t).download(a, File('${tmp.path}/a.apk'), cancel: cancel, progress: (got, _) {

@@ -129,8 +129,8 @@ class AndroidUpdateInstaller extends UpdateInstaller {
   }
 }
 
-/// Windows: an installer is opened by the system (the user confirms there); a zip of the app's files is shown in
-/// Explorer to unzip by hand: nothing is installed for the user.
+/// Windows: the downloaded zip of the app's files is shown in Explorer to unzip by hand; nothing is run or
+/// installed for the user.
 class WindowsUpdateInstaller extends UpdateInstaller {
   WindowsUpdateInstaller({Future<ProcessResult> Function(String, List<String>)? run}) : _run = run ?? Process.run;
   final Future<ProcessResult> Function(String, List<String>) _run;
@@ -142,10 +142,6 @@ class WindowsUpdateInstaller extends UpdateInstaller {
   Future<UpdateOutcome> install(File file, AssetKind kind, {bool silent = false}) async {
     final folder = file.parent.path;
     try {
-      if (kind == AssetKind.installer) {
-        await _run('explorer', [file.path]);
-        return UpdateOutcome('The installer is open: follow it, then start C.A.W again.', started: true, file: file);
-      }
       await _run('explorer', ['/select,', file.path]);
     } catch (_) {
       // Explorer didn't open: the message still says where the file is.

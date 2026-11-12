@@ -383,6 +383,11 @@ jobs:
               echo
               echo "This APK is signed with a throwaway key: uninstall the previous C.A.W. before installing it."
             fi
+            echo
+            # One line per asset; the app's updater checks a download against it (lib/model/updates/releases.dart).
+            for f in "caw-$version-android.apk" "caw-$version-windows.zip" "caw-$version-android-symbols.zip"; do
+              echo "SHA256 $f: $(sha256sum "$f" | cut -d' ' -f1)"
+            done
           } > notes.md
           prerelease=""
           [[ "$version" == *-* ]] && prerelease="--prerelease"
@@ -427,16 +432,20 @@ jobs:
             echo "- Android (arm64): caw-main-android.apk"
             echo "- Windows (x64): caw-main-windows.zip, unzip and run caw.exe"
             echo
-            # The app reads these two lines (lib/model/updates/releases.dart).
+            # The app reads these lines (lib/model/updates/releases.dart).
             echo "Version: $version"
             echo "Build: $short"
+            for f in caw-main-android.apk caw-main-windows.zip; do
+              echo "SHA256 $f: $(sha256sum "$f" | cut -d' ' -f1)"
+            done
           } > notes.md
           git tag -f latest-main "$GITHUB_SHA"
           git push -f origin refs/tags/latest-main
           if gh release view latest-main >/dev/null 2>&1; then
+            # Assets first, notes last: the notes never name a build (or checksums) whose files aren't there yet.
+            gh release upload latest-main caw-main-android.apk caw-main-windows.zip --clobber
             gh release edit latest-main --title "Every change (untested): $short" --notes-file notes.md \
               --prerelease --latest=false
-            gh release upload latest-main caw-main-android.apk caw-main-windows.zip --clobber
           else
             gh release create latest-main --title "Every change (untested): $short" --notes-file notes.md \
               --prerelease --latest=false caw-main-android.apk caw-main-windows.zip
