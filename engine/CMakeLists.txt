@@ -339,12 +339,6 @@ endif()
 # Sample positions (src/sample_time.h): note, clip, loop and automation timing is exact to the sample on every
 # platform, so this file is strict in every build, the app's included: no fused multiply-add, no reassociation.
 set_source_files_properties(src/sample_time.cpp PROPERTIES COMPILE_OPTIONS "${_caw_fp_strict}")
-# The engine's own targets take CAW_FP_FLAGS (in CAW_FLAGS) instead of the SDK's strict floating-point flags.
-foreach(_caw_target caw_core caw_engine caw_cli caw_tests caw_rt_tests caw_bench)
-  if(TARGET ${_caw_target})
-    set_property(TARGET ${_caw_target} PROPERTY CAW_ENGINE_FP_FLAGS ON)
-  endif()
-endforeach()
 
 # CLAP export (docs/native-module-sdk.md): plug-ins of the example and a test bundle, and a host test.
 if(CAW_CLAP AND CAW_TOOLS)
@@ -356,3 +350,12 @@ if(CAW_VST3 AND CAW_TOOLS)
   include(cmake/CAWVst3.cmake)
   add_subdirectory(plugin/vst3)
 endif()
+
+# The engine's own targets take CAW_FP_FLAGS (in CAW_FLAGS) instead of the SDK's strict floating-point flags: every
+# program that links caw_core, the CLAP and VST3 host tests included (set after their subdirectories define them), so
+# no program mixes strict and fast copies of one inline function. Components and plug-ins stay strict (CAW::SDK).
+foreach(_caw_target caw_core caw_engine caw_cli caw_tests caw_rt_tests caw_bench caw_clap_tests caw_vst3_tests)
+  if(TARGET ${_caw_target})
+    set_property(TARGET ${_caw_target} PROPERTY CAW_ENGINE_FP_FLAGS ON)
+  endif()
+endforeach()
