@@ -991,7 +991,7 @@ struct VoiceFilter {
                 case kLadderLp:
                 case kLadderHp:
                 case kLadderBp:
-                    if (c == 0) ladder[0].set(cutoff, resonance, sampleRate);
+                    if (c == 0) ladder[0].setApprox(cutoff, resonance, sampleRate);
                     else ladder[1].setLike(ladder[0]);  // one tan for the pair
                     break;
                 case kComb:
@@ -1000,23 +1000,23 @@ struct VoiceFilter {
                 case kFormant: formant[c].set(morph, cutoff / 1000.0, 4.0 + 16.0 * resonance, sampleRate); break;
                 default:
                     if (resonance != qFor) qFor = resonance, q = lib::resonanceQ(resonance);  // a pow: only on a change
-                    if (c == 0) svf[0].set(cutoff, q, sampleRate);
+                    if (c == 0) svf[0].setApprox(cutoff, q, sampleRate);
                     else svf[1].setLike(svf[0]);  // one tan for the pair
                     break;
             }
         }
     }
-    // The drive on one side, two samples at a time (Saturator::process2: each lane process()'s bits).
+    // The drive on one side, two samples at a time (Saturator::process2Approx: each lane processApprox()'s steps).
     void driveMono(float* x, uint32_t n) noexcept {
         uint32_t i = 0;
         for (; i + 1 < n; i += 2) {
             const double in[2] = {static_cast<double>(x[i]), static_cast<double>(x[i + 1])};
             double out[2];
-            saturator.process2(in, out);
+            saturator.process2Approx(in, out);
             x[i] = static_cast<float>(out[0]);
             x[i + 1] = static_cast<float>(out[1]);
         }
-        if (i < n) x[i] = static_cast<float>(saturator.process(static_cast<double>(x[i])));
+        if (i < n) x[i] = static_cast<float>(saturator.processApprox(static_cast<double>(x[i])));
     }
     template <class F>
     void each(float* x, uint32_t n, F&& f) noexcept {
@@ -1068,11 +1068,11 @@ struct VoiceFilter {
         float dryL[kControlFrames], dryR[kControlFrames];
         const bool wet = mix >= 1.0f;
         if (!wet) std::copy(L, L + n, dryL), std::copy(R, R + n, dryR);
-        if (drive) {  // both sides at once (Saturator::process2: each lane process()'s bits)
+        if (drive) {  // both sides at once (Saturator::process2Approx: each lane processApprox()'s steps)
             for (uint32_t i = 0; i < n; ++i) {
                 const double in[2] = {static_cast<double>(L[i]), static_cast<double>(R[i])};
                 double out[2];
-                saturator.process2(in, out);
+                saturator.process2Approx(in, out);
                 L[i] = static_cast<float>(out[0]);
                 R[i] = static_cast<float>(out[1]);
             }
@@ -2298,7 +2298,7 @@ private:
             for (; i + 1 < n; i += 2) {
                 const double in[2] = {x[i], x[i + 1]};
                 double d[2];
-                saturator_.process2(in, d);
+                saturator_.process2Approx(in, d);
                 for (int j = 0; j < 2; ++j) x[i + j] = static_cast<float>(in[j] == 0.0 ? 0.0 : in[j] + (d[j] - in[j]) * distMix_);
             }
         }
@@ -2310,7 +2310,7 @@ private:
             case 1: return lib::hardClip(x, distDrive_);
             case 2: return lib::fastSinCycles(finiteOr0(x) * distDrive_ * 0.25);  // lib::fold: sin(x d pi / 2)
             case 3: return std::floor(finiteOr0(x) * crushSteps_ + 0.5) / crushSteps_;
-            default: return saturator_.process(x);
+            default: return saturator_.processApprox(x);
         }
     }
 

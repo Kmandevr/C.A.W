@@ -307,7 +307,7 @@ protected:
                 back[0] = read[0], back[1] = read[1];
             } else {
                 for (int c = 0; c < 2; ++c)  // drive 0 is clean; the curve fades in over the first fifth
-                    back[c] = (wet[c] + (lib::fastTanh(wet[c] * satK_) * satInv_ - wet[c]) * satMix_) * fb;
+                    back[c] = (wet[c] + (lib::tanhApprox(wet[c] * satK_) * satInv_ - wet[c]) * satMix_) * fb;
             }
             double feedL, feedR;
             if (mode_ == kPingPong) {  // the input enters on the left (mono), the echoes cross over
