@@ -422,11 +422,14 @@ void main() {
 
     keyTest('without a loop a tap goes to the project start; Home and Ctrl+Home from the keyboard',
         (tester) async {
+      final asks = <RevealStartRequest>[];
+      s.revealStartRequests.addListener(() => asks.add(s.revealStartRequests.value!));
       await pumpTransport(tester);
       s.seekTo(24);
       await tester.tap(find.byKey(const ValueKey('transport-start')));
       await tester.pump(const Duration(milliseconds: 500));
       expect(s.playheadStep, 0);
+      expect(asks.single.always, isFalse, reason: 'one tap: a view scrolls only if the start is off its screen');
       s.project
         ..loopRange = true
         ..loopStartSteps = 16
@@ -436,6 +439,7 @@ void main() {
       expect(s.playheadStep, 16);
       await key(tester, LogicalKeyboardKey.home, ctrl: true);
       expect(s.playheadStep, 0);
+      expect(asks.last.always, isTrue, reason: 'Ctrl+Home reveals the project start');
       final tip = tester.widget<IconButton>(find.byKey(const ValueKey('transport-start'))).tooltip!;
       expect(tip, contains('Home'));
       expect(tip, contains('Ctrl+Home'));

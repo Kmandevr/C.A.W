@@ -952,8 +952,14 @@ class AppState extends ChangeNotifier {
     } else {
       notifyListeners();
     }
+    requestRevealStart(step: at.toDouble(), always: projectStart);
+  }
+
+  /// Asks the views (Arrange, an open piano roll) to come back to [step]: with [always] they scroll there, else each
+  /// scrolls only when [step] is off its screen (the view decides).
+  void requestRevealStart({double step = 0, bool always = true}) {
     revealStartRequests.value =
-        RevealStartRequest(at.toDouble(), always: projectStart || at == 0, serial: (revealStartRequests.value?.serial ?? 0) + 1);
+        RevealStartRequest(step, always: always, serial: (revealStartRequests.value?.serial ?? 0) + 1);
   }
 
   /// Where the playhead is now, in sixteenth steps (paused: where play resumes; stopped: 0).
