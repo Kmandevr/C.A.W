@@ -253,6 +253,26 @@ The 64-voice Flagship and the 32-track song, over budget in the baseline (about 
 
 ### 5. Parallel mixer
 
+**[Proposal]** (the architect's plan, 2026-11-12; 5a and 5b built, 5c to 5e not yet): run the mix graph's independent nodes on several cores, summing in a fixed order so the output keeps its bits.
+
+- **5a, per-task scratch and pull routes (built, serial, bit-identical):** every slot node has its own scratch (the signal through its inserts, a crossfade's old output) instead of the Engine's shared buffers; the track gain glide's factor is set when the Engine is made, not on first use; sends and sidechain keys are pulled: a source writes each route into a buffer of its own route table (`SendTable::Route::outL/outR`, its key notes in the table), and the destination sums its routes when it runs (`Engine::pullRoutes`) in the old push order (its sources in the order they run, each one's routes by index; the float sums of phase 4), so no node writes another's state; `ModulationHost::forChain` has an output per slot and the master's (the values and samples scratch it points to is still the plan's, used by one chain at a time: per-worker in 5c); what a node retires waits in its own list (at most 8 a chunk) and the callback thread pushes the lists after the graph has run (`flushRetires`), `canRetire` counting what the lists hold.
+- **5b, levels (built, still serial):** `GraphExecutor::setRouting` takes order-only dependencies (each send and key) and sorts the order into dependency levels, a stable counting sort, with the output node (the master) alone and last; `processValidated` runs level by level. No node of a level reads another of the same level.
+- **5c, `mix_pool`:** worker threads made off the audio thread, woken per chunk; the callback thread joins in on the levels, each worker spinning briefly and then waiting on a `std::atomic` (C++20 `wait`/`notify`), with a fallback to the serial path when the pool isn't there or a chunk is small. The retire count becomes an atomic reservation and the modulation scratch per worker.
+- **5d, platform thread tuning:** behind a new header, thread_tuning.h in engine/src (not written yet), with the platform parts in `engine/platform/` (priorities, affinity to the big cores where the OS allows).
+- **5e, load and battery policy:** how many workers to use for a project's load, and when one core is enough.
+- **Native components:** third-party native components run in a serial lane until the module format can declare a component parallel-safe ([decisions](decisions.md)).
+
+**5a and 5b, measured** (2026-11-12, x86-64 GCC 13 Release, the engine's fast flags; callgrind instructions inside `Engine::process` for `caw_bench 2 500 --runs 1 --only ID`; before = `speed-layout` 05f5065, after = this branch merged with it):
+
+| Scenario | Before | After | Change |
+|---|---:|---:|---:|
+| Typical song (`song8`) | 2,030.2 M | 2,026.4 M | −0.19% |
+| 32 tracks + heavy FX (`song32_heavy`) | 11,043.7 M | 11,024.0 M | −0.18% |
+
+The same bits: every reference render's raw float digest (164 renders across the four `caw_tests` shards) and 200 random routed mixes (buses nested, sends, keys into duckers, notes and audio keys, latency compensation, a live send change, a mute, a bus removed and a stop and play) match the old code bit for bit. `engine/tests/mix_graph_test.cpp` checks the levels over random graphs and that level-by-level output is the same bits as the old order.
+
+Wall-clock results per target, once the threads run (5c):
+
 | Scenario | Before | After | Change |
 |---|---:|---:|---:|
 | Song, 16 tracks | | | |
