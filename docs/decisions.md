@@ -1,7 +1,7 @@
 ---
 title: Decisions
 summary: Dated record of what was chosen and why, newest first.
-updated: 2026-11-11
+updated: 2026-11-12
 ---
 
 # Decisions
@@ -94,6 +94,15 @@ Carries out the owner's decision of 2026-11-10 ("C++ replaces the .caw language"
 - the existing action keymap (`lib/actions/`) adds actions per context;
 - a which-key style hint strip shows the keys that work in the current context, and can be turned off;
 - the existing Vim mode stays as the alternative keymap.
+
+**[Fact]** Batch A is built (2026-11-12, [actions](actions.md#keyboard-focus)): the section bar, FX chain, device controls, mixer, Files, Build, Settings, pages, menus, sheets and dialogs, with the focus ring, the hint strip, the transport's ⏮ (Home, Ctrl+Home) and exit animations outside Arrange.
+
+**[Proposal]** Batch B, Arrange and the piano roll (after the track-headers work merges, since it owns `arranger_screen.dart`, `track_lanes.dart`, `clip_*.dart`, `audio_clip_view.dart` and `pattern_editor.dart`):
+- **Tracks** (the Arranger area's keys stay: W/↑ ↓ select, A/D pan, = − volume, M, Alt+S, Alt+↑/↓ move, Enter the menu, Delete): the focused header wears the ring (`KeyRingBox`); Shift+↑/↓ extend the selection; Tab from the headers goes to the clips.
+- **Clips** (a new context): ← → (A D) the previous or next clip on the track, ↑ ↓ the clip at the same time on the track above or below, Shift extends, Alt+← → move by a grid step, Ctrl+D duplicate, Delete, Enter opens a MIDI clip's notes in the focus panel's Clip tab (an audio clip its Clip tab), Esc back to the track; S, G and F2 as now. The ring sits on the focused clip.
+- **Piano roll notes**: the roll's existing keys (its Ctrl+WASD cursor) stay; a focused-note ring, ← → the previous or next note in time, ↑ ↓ the nearest note above or below, Alt+↑/↓ transpose, Enter adds a note at the cursor, Delete removes; the hint strip shows the roll's keys.
+- **⏮ in the views**: Arrange and the roll listen to `AppState.revealStartRequests` (scroll there when `always`, else only when the step is off screen) and the playhead's jump animates (`_PlayheadPainter`).
+- **Clashes to settle with the owner**: WASD already pans and selects in the Arranger and moves the roll's cursor, so the clip context's A/D and W/S need the owner's choice.
 
 ## 2026-11-11: Track headers that shrink, collapse and open editors (owner)
 

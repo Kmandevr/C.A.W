@@ -1,11 +1,12 @@
 ---
 title: Log
 summary: Dated history of changes, newest first.
-updated: 2026-11-11
+updated: 2026-11-12
 ---
 
 # Log
 
+- 2026-11-12: the whole app from the keyboard, first batch (branch `keyboard-a`, owner's decision of 2026-11-11): keyboard contexts as keymap areas (section bar, FX chain, device controls, mixer, Files, Build tabs, Settings, pages, menus) with Tab/Shift+Tab between them, arrows and WASD (H J K L with Vim keys everywhere) within, Enter in, Esc out; a theme-coloured focus ring; a which-key hint strip from the keymap (Settings › Keys › Key hints); menu type-ahead; Ctrl+Shift+E/B/Enter for Build's parts; semantics labels on device controls and FX cards; the transport's ⏮ (Home, Ctrl+Home, double tap, `AppState.requestRevealStart`); pages, sheets, dialogs, popup menus and floating windows go out with the theme's exit; tests in `test/keyboard_focus_test.dart`.
 - 2026-11-11: music video Smooth follow (branch `video-smooth`, owner's decision of the day): a switch in the setup sheet's Style section, off by default; on, the arrangement flythrough and piano-roll close-ups hold the playhead a third of the way in and scroll the song under it, one zoom per shot eased only at a cut from the same kind, the same cuts as off; off keeps the spring camera and its frames (hashes pinned in `test/music_video_test.dart`); the live preview follows the switch.
 - 2026-11-11: a theme editor that builds the theme for you (branch `theme-modes`, owner's decision of the day): a palette builder (moods, one or two seeds, harmonies, Shuffle; `buildPalettes`, deterministic and AA in both modes), a live mini Arrange, device and piano roll, Start from a family or the current theme, a Feel section (haptic style per kind, corners from sharp to soft on buttons, clips and knob caps, font, track headers, clip corners and fill, glow, glass, motion), the theme's animation style (pace, curve, entrance, exit; presets Calm, Snappy, Bouncy, Minimal) through `Motion` and `EditMotion`, Advanced colours folded, and goldens of the editor on a phone and a desktop.
 - 2026-11-11: light and dark themes (branch `theme-modes`, owner's decision of the day): five built-in families (Neon, Flat, Dusk, Dawn, Amber; Calm neon, Night and Amber terminal migrate to Neon, Dusk and Amber dark), each with a dark and a light palette from one contrast-safe generator (`theme_palette.dart`, WCAG AA tested per palette), a Mode switch (Dark, Light, Follow system, live) in Settings › Look and the theme editor, custom themes with both palettes and Make light/dark version, `light.*` lines in theme files, `Neon.ink` in place of fixed white in drawn code, Flat with no glow, glass or gradients, and goldens of Arrange, the EQ and Settings in Dawn light, Neon light and Flat.
