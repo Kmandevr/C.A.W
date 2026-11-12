@@ -1,4 +1,4 @@
-# Engine speed: builds Release caw_bench and runs its suite (caw_bench SECONDS 500) on Linux x64, Linux Arm64 and an Android arm64 binary on Arm64 hardware.
+# Engine speed: builds Release caw_bench and runs its suite (caw_bench SECONDS 500) on Linux x64, Linux Arm64 and an Android arm64 binary on Arm64 hardware, with the mix graph on one thread and on 3 pool workers.
 name: Bench
 on:
   push:
@@ -32,6 +32,8 @@ env:
   RUNS: ${{ inputs.runs || '3' }}
   # The NDK the APK's engine is built with (Flutter's ndkVersion; app.yml caches the same one).
   NDK_VERSION: 28.2.13676358
+  # The mix pool's workers each target is timed with (speed phase 5c): one thread, then 3 workers.
+  MIX_THREADS: "0 3"
 
 jobs:
   linux:
@@ -56,13 +58,15 @@ jobs:
           c++ --version | head -1
       - name: Run the suite
         run: |
-          build/caw_bench "$SECONDS_PER" 500 --runs "$RUNS" --label "${{ matrix.name }}" \
-            --json "bench-${{ matrix.slug }}.json" --md "bench-${{ matrix.slug }}.md"
-          cat "bench-${{ matrix.slug }}.md" >> "$GITHUB_STEP_SUMMARY"
+          for t in $MIX_THREADS; do
+            build/caw_bench "$SECONDS_PER" 500 --runs "$RUNS" --threads "$t" --label "${{ matrix.name }}, $t mix workers" \
+              --json "bench-${{ matrix.slug }}-t$t.json" --md "bench-${{ matrix.slug }}-t$t.md"
+            cat "bench-${{ matrix.slug }}-t$t.md" >> "$GITHUB_STEP_SUMMARY"
+          done
       - uses: actions/upload-artifact@v7
         with:
           name: bench-${{ matrix.slug }}
-          path: bench-${{ matrix.slug }}.*
+          path: bench-${{ matrix.slug }}-t*
 
   # Android: caw_bench cross-compiled with the APK's NDK for arm64-v8a as a static bionic executable (no
   # /system/bin/linker64 needed), then run on the ubuntu-24.04-arm runner: real Arm64 cores under a Linux kernel,
@@ -107,13 +111,16 @@ jobs:
           file caw_bench || true
           lscpu | grep -E 'Model name|^CPU\(s\)' || true
           # bionic's temp directory default is Android's; point it at the runner's.
-          TMPDIR="$RUNNER_TEMP" ./caw_bench "$SECONDS_PER" 500 --runs "$RUNS" --label "Android arm64 (bionic, on Linux arm64)" \
-            --json bench-android-arm64.json --md bench-android-arm64.md
-          cat bench-android-arm64.md >> "$GITHUB_STEP_SUMMARY"
+          for t in $MIX_THREADS; do
+            TMPDIR="$RUNNER_TEMP" ./caw_bench "$SECONDS_PER" 500 --runs "$RUNS" --threads "$t" \
+              --label "Android arm64 (bionic, on Linux arm64), $t mix workers" \
+              --json "bench-android-arm64-t$t.json" --md "bench-android-arm64-t$t.md"
+            cat "bench-android-arm64-t$t.md" >> "$GITHUB_STEP_SUMMARY"
+          done
       - uses: actions/upload-artifact@v7
         with:
           name: bench-android-arm64
-          path: bench-android-arm64.*
+          path: bench-android-arm64-t*
 
   summary:
     name: Summary
@@ -129,7 +136,7 @@ jobs:
         run: |
           python3 -I - <<'EOF' >> "$GITHUB_STEP_SUMMARY"
           import json, glob
-          order = ["linux-x64", "linux-arm64", "android-arm64"]
+          order = [f"{t}-t{n}" for t in ("linux-x64", "linux-arm64", "android-arm64") for n in (0, 3)]
           data = {}
           for f in glob.glob("bench-*.json"):
               with open(f) as h:
