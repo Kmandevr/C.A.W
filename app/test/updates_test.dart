@@ -116,7 +116,15 @@ void main() {
   late Directory tmp;
   setUp(() async => tmp = await Directory.systemTemp.createTemp('caw-updates'));
   tearDown(() async {
-    if (await tmp.exists()) await tmp.delete(recursive: true);
+    // A queued settings write can still land while the folder goes: try a few times, never fail the test for it.
+    for (var i = 0; i < 5; i++) {
+      try {
+        if (await tmp.exists()) await tmp.delete(recursive: true);
+        return;
+      } on FileSystemException {
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+      }
+    }
   });
 
   UpdateService service(
