@@ -253,11 +253,13 @@ The 64-voice Flagship and the 32-track song, over budget in the baseline (about 
 
 ### 5. Parallel mixer
 
-**[Proposal]** (the architect's plan, 2026-11-12; 5a and 5b built, 5c to 5e not yet): run the mix graph's independent nodes on several cores, summing in a fixed order so the output keeps its bits.
+The architect's plan (2026-11-12; 5a, 5b and 5c built, 5d and 5e still **[Proposal]**): run the mix graph's independent nodes on several cores, summing in a fixed order so the output keeps its bits.
 
 - **5a, per-task scratch and pull routes (built, serial, bit-identical):** every slot node has its own scratch (the signal through its inserts, a crossfade's old output) instead of the Engine's shared buffers; the track gain glide's factor is set when the Engine is made, not on first use; sends and sidechain keys are pulled: a source writes each route into a buffer of its own route table (`SendTable::Route::outL/outR`, its key notes in the table), and the destination sums its routes when it runs (`Engine::pullRoutes`) in the old push order (its sources in the order they run, each one's routes by index; the float sums of phase 4), so no node writes another's state; `ModulationHost::forChain` has an output per slot and the master's (the values and samples scratch it points to is still the plan's, used by one chain at a time: per-worker in 5c); what a node retires waits in its own list (at most 8 a chunk) and the callback thread pushes the lists after the graph has run (`flushRetires`), `canRetire` counting what the lists hold.
 - **5b, levels (built, still serial):** `GraphExecutor::setRouting` takes order-only dependencies (each send and key) and sorts the order into dependency levels, a stable counting sort, with the output node (the master) alone and last; `processValidated` runs level by level. No node of a level reads another of the same level.
-- **5c, `mix_pool`:** worker threads made off the audio thread, woken per chunk; the callback thread joins in on the levels, each worker spinning briefly and then waiting on a `std::atomic` (C++20 `wait`/`notify`), with a fallback to the serial path when the pool isn't there or a chunk is small. The retire count becomes an atomic reservation and the modulation scratch per worker.
+- **5c, `mix_pool` (built, same bits):** `engine/src/mix_pool.{h,cpp}`, portable (`std::thread`, `std::atomic`). Worker threads are made and joined on the control thread (`Engine::startMixPool`; the platform's `startLiveMixPool` before the device starts, `stopLiveMixPool` after it stops). For a level with two or more nodes that may run in parallel, `GraphExecutor` hands them to `MixPool::run`: it publishes the level through an epoch in one 64-bit claim word (epoch, task count, next index, so a late claim can't take an index of the next level), claims tasks itself and spins until the level's done count is reached; it never waits on a sleeping worker and makes no system call unless one sleeps. Workers spin about 50 µs (a pause or yield instruction), then sleep in `std::atomic<uint32_t>::wait` on the epoch; `notify_all` only while the sleepers count is set; parked (no spin) while nothing plays. Each worker holds `ScopedFlushDenormals`. Every node writes only its own buffers and every sum happens at its destination in the fixed order, so the output is the same bits as on one thread. Hardened first (the 5a/5b audio review): each node's retire list gets its share of the queue's room before the graph runs (`assignRetireBudgets`, `canRetireNode`; no shared count, no push mid-graph), the pull tables are staged and swapped in only when `setRouting` accepts, a freed bus flags its own slot (ORed into `routingDirty_` after the graph), the modulation values and samples scratch is per lane (`MixPool::lane()`), and `feedDeviceMidi` reads only its own slot's flags. **Only nodes without parameters and typed ports run in parallel** (their parameter resolution shares the executor's automation scratch and merge counter; the mixer's nodes have none). A node whose chains hold a third-party native component, or that is silent or idle this chunk, runs on the callback thread first. When: `MixParallel::Auto` (live) once the measured load stays above 0.4 for 0.5 s, back to one thread once it stays below 0.08 for 5 s; offline renders `Always` unless a live device runs; never while the bench profiles components. Workers: `MixPool::defaultWorkers()` = min(hardware threads − 1, 3); `caw_bench --threads N`.
+  - **[Fact, 2026-11-12, local test]** Android NDK r30's libc++ (Clang 21) defines `__cpp_lib_atomic_wait` (201907) and a static arm64 executable using `std::atomic<unsigned>::wait`/`notify_all` links (`__libcpp_atomic_wait`, `__cxx_atomic_notify_all` from libc++_static) and runs under qemu. **[Fact, Bench run [43258432456](https://github.com/Kmandevr/C.A.W/actions/runs/43258432456), 2026-11-12]** NDK 28.2.13676358 (the APK's) builds `mix_pool.cpp` into the static `android-29` arm64 `caw_bench`, and its `--threads 3` run uses the pool on the Arm64 runner. No futex or WaitOnAddress wrapper was needed.
+  - **Checked** (2026-11-12): all 164 reference renders' raw-bit digests the same on 0, 1, 2, 3 and 4 workers (x86-64 GCC 13 Release; Arm64 fast flags under qemu, 0 against 3 workers), and CTest checks it on every CI target (`caw_parallel_identity`: each shard again with `--mix-threads 3`); 200 random routed mixes the same bits as 5a/5b on 0, 1, 2, 3 and 4 workers; `engine/tests/mix_pool_test.cpp`; ThreadSanitizer (Clang 18, `CAW_TSAN`) clean on the pool tests with a 10,000-callback stress run (CI's ThreadSanitizer job) and on the whole `caw_tests` suite with `--mix-threads 3`.
 - **5d, platform thread tuning:** behind a new header, thread_tuning.h in engine/src (not written yet), with the platform parts in `engine/platform/` (priorities, affinity to the big cores where the OS allows).
 - **5e, load and battery policy:** how many workers to use for a project's load, and when one core is enough.
 - **Native components:** third-party native components run in a serial lane until the module format can declare a component parallel-safe ([decisions](decisions.md)).
@@ -271,11 +273,29 @@ The 64-voice Flagship and the 32-track song, over budget in the baseline (about 
 
 The same bits: every reference render's raw float digest (164 renders across the four `caw_tests` shards) and 200 random routed mixes (buses nested, sends, keys into duckers, notes and audio keys, latency compensation, a live send change, a mute, a bus removed and a stop and play) match the old code bit for bit. `engine/tests/mix_graph_test.cpp` checks the levels over random graphs and that level-by-level output is the same bits as the old order.
 
-Wall-clock results per target, once the threads run (5c):
+**5c, measured** **[Fact, Bench run [43258432456](https://github.com/Kmandevr/C.A.W/actions/runs/43258432456), commit `dd50ac7`, 10 s × 3 runs, 256 frames at 48 kHz, budget 5,333 µs, Neoverse-N2 (4 vCPU) for both]** mean µs / worst µs, the mix graph on one thread (`--threads 0`) against 3 pool workers (`--threads 3`, `Always`: every level of two or more busy nodes on the pool, whatever the load). An earlier run on `44f7382` (run [43254413064](https://github.com/Kmandevr/C.A.W/actions/runs/43254413064)) gave means within 3%.
 
-| Scenario | Before | After | Change |
-|---|---:|---:|---:|
-| Song, 16 tracks | | | |
-| Song, 32 tracks + heavy FX | | | |
-| Typical song + extras | | | |
-| Worst case, 32 tracks + heavy FX | | | |
+| Scenario | Android arm64, 1 thread | Android arm64, 3 workers | Linux arm64, 1 thread | Linux arm64, 3 workers |
+|---|---:|---:|---:|---:|
+| First loop (6 tracks) | 146 / 1,038 | 82 / 813 | 154 / 901 | 84 / 1,190 |
+| Three tracks | 222 / 550 | 127 / 700 | 227 / 523 | 127 / 794 |
+| Typical song (8 tracks) | 719 / 1,147 | 292 / 1,936 | 726 / 1,029 | 291 / 1,399 |
+| Typical song + extras | 978 / 1,496 | 414 / 3,010 | 964 / 1,374 | 410 / 3,501 |
+| Flagship heavy, 64 voices held | 3,964 / 4,219 | 3,967 / 4,210 | 3,946 / 4,302 | 3,957 / 4,230 |
+| Flagship heavy, 16 voices held | 1,029 / 1,127 | 1,029 / 1,129 | 1,021 / 1,144 | 1,020 / 1,119 |
+| Drums kit, 16 pads busy | 284 / 446 | 284 / 418 | 312 / 459 | 312 / 463 |
+| Song, 16 tracks | 1,369 / 2,345 | 453 / 3,606 | 1,374 / 2,096 | 457 / 4,582 |
+| Song, 32 tracks + heavy FX | 4,208 / 5,321 | 1,251 / 3,977 | 4,234 / 4,919 | 1,268 / 4,891 |
+| Tail: notes (2 s) | 189 / 223 | 150 / 224 | 184 / 235 | 145 / 222 |
+| Tail: ringing out | 116 / 236 | 104 / 252 | 112 / 213 | 100 / 267 |
+| Tail: silence after | 17 / 108 | 21 / 234 | 18 / 94 | 22 / 154 |
+| Tail project, no notes | 10 / 52 | 15 / 79 | 11 / 71 | 16 / 75 |
+
+What it shows:
+
+- **Means:** the multi-track songs run 2.5–3.4 times faster (the 32-track heavy song from 79% of the budget to 23%); one-track scenarios (Flagship, Drums) are unchanged, as their levels have one busy node.
+- **Typical song headroom:** on Android arm64 the baseline's 859 µs (6.2 times the budget) is now 292 µs: **18.3 times the budget**, 2.9 times the baseline's headroom (the owner's target was about 3–4 times). On one thread, with phases 1 to 5b, it is 719 µs (7.4 times).
+- **The light scenarios cost a little more on the pool** (the tail's silence and the empty project: +4–5 µs, the claim and wake-up per level): the Auto mode keeps them on one thread (their load is far under 0.4).
+- **Worst cases are higher on the pool** in several songs (the 16-track song's 2,345 → 3,606 µs on Android, 2,096 → 4,582 µs on Linux arm64), while the means and p99s fall: a worker preempted in the middle of a node makes the callback spin until it resumes. The runner's 4 vCPUs are fully taken by the callback and 3 workers, with no thread priorities. **[Assumption]** 5d's audio-priority workers on the phone's big cores bring these down; until then this is the pool's main risk, and Auto only turns the pool on above 0.4 load, where one thread already risks the budget.
+- **[Assumption]** the runner's Neoverse-N2 cores are all the same kind; the S22+'s Cortex-X2/A710/A510 are not, so a worker on a little core can hold a level back. The relative gains are an upper bound for the phone.
+- Linux x64 (Xeon 8573C, 4 vCPU, likely two cores with two hyperthreads each): typical song 819 → 466 µs, 32-track song 4,292 → 1,842 µs (run 43254413064).
