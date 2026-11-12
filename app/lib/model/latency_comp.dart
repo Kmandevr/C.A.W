@@ -10,6 +10,7 @@ import 'package:flutter/foundation.dart';
 
 import '../engine/engine.dart';
 import '../platform/audio_route.dart';
+import 'atomic_file.dart';
 
 /// What a device of each kind is expected to add in all, in ms, before anything is measured. [Assumption] typical
 /// figures, not measured on the owner's devices: A2DP Bluetooth about 150 to 250 ms (published phone tests range
@@ -100,9 +101,7 @@ class LatencyStore {
     final f = file;
     if (f == null) return;
     try {
-      final tmp = File('${f.path}.tmp');
-      await tmp.writeAsString(jsonEncode(toJson()), flush: true);
-      await tmp.rename(f.path);
+      await writeFileAtomically(f, jsonEncode(toJson()));
     } catch (_) {
       // A full disk keeps the offsets for this session only.
     }

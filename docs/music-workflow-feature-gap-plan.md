@@ -19,7 +19,7 @@ This note records the current implementation gaps in C.A.W.'s music-production w
 - **[Implemented]** Patterns hold any number of notes and curve points in the app as in the engine (F7.1, 2026-11-04).
 - **[Implemented]** Opening straight into the last project; New, New from template and Open are in the project menu.
 - **[Implemented]** Pause and resume (Space) on the same beat, and Stop (Shift+Space) back to the start (2026-11-05, `caw_engine_play_at`).
-- **[Implemented]** Project-wide undo and redo in the transport (whole-project snapshots, one per burst of edits, 100 steps). The piano roll, library and automation keep their own histories too.
+- **[Implemented]** Project-wide undo and redo in the transport (whole-project snapshots, one per burst of edits, 100 steps). Saves write the project through a temporary file, one write at a time, so a burst of saves always leaves the newest whole project on disk. The piano roll, library and automation keep their own histories too.
 - **[Implemented]** MIDI pattern import/export (.mid, .midi2) through the pattern editor. Imported MIDI tempo is not applied to project tempo.
 - **[Implemented]** Curve tool for velocity and chance lane curves; per-note expression editors support pitch bend, pressure/volume, timbre and vibrato, including editable points and segment bends.
 - **[Implemented]** Pattern actions include Euclidean, random-in-key, arpeggiate, humanize, chord stamp, legato, reverse and pitch inversion.
@@ -43,6 +43,7 @@ This note records the current implementation gaps in C.A.W.'s music-production w
 ### Export and file workflow
 
 - **[Implemented]** Native offline WAV rendering, loop/free-length/one-shot/wavetable export, MIDI pattern export, named export profiles, export history and a sequential in-memory queue (up to 50 jobs).
+- **[Implemented]** The arrangement music video: an offline MP4 render, cut by an auto director or edited as shots on a lane (layouts, looks, effects, auto-cut), saved with the project ([app](app.md)); the platform encoders are not yet run on a device.
 - **[Partial]** Queue state is not persisted across restarts; batch/stem rendering and multi-destination automation are incomplete.
 - **[Incomplete]** SFZ multisample workflow, stems export, persistent/recoverable export queue and broader batch delivery.
 

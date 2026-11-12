@@ -384,7 +384,7 @@ void main() {
     await tester.pump();
     expect(find.text('MUSIC VIDEO'), findsOneWidget);
 
-    // Every shot off: the render can't start.
+    // A new video with notes has every shot on, Falling notes too; every shot off: the render can't start.
     for (final shot in VideoShot.values) {
       await tapKey(tester, 'video-shot-${shot.name}');
     }
@@ -436,6 +436,10 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('video-preview-play')));
     await tester.pump();
     expect(preview.playing, isFalse);
+
+    // The setup saves with the project.
+    expect(s.project.musicVideo?['options']?['resolution'], 'p720');
+    await tester.pump(const Duration(seconds: 1)); // the project's save
   });
 
   testWidgets('the Export page opens the Music video sheet', (tester) async {

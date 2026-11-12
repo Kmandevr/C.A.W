@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'cpp_component.dart';
+import 'atomic_file.dart';
 
 class CppVersion {
   const CppVersion({required this.number, required this.time, required this.files});
@@ -67,9 +68,7 @@ class CppVersionStore {
     }
     final file = _file(projectId, componentEntryId);
     await file.parent.create(recursive: true);
-    final tmp = File('${file.path}.tmp');
-    await tmp.writeAsString(jsonEncode([for (final v in versions) v.toJson()]));
-    await tmp.rename(file.path);
+    await writeFileAtomically(file, jsonEncode([for (final v in versions) v.toJson()]), flush: false);
     return version;
   }
 

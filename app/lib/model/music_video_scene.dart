@@ -1,7 +1,9 @@
 // The music video's view of a project: tracks, clips, notes unrolled onto the timeline, automation lanes, sections
 // and per-bar energy, with the activity queries the auto director asks (what plays, what moves, what is loud).
 import 'dart:math' as math;
+import 'dart:typed_data';
 
+import 'arrange_edit.dart' show clipNotes;
 import 'pattern_doc.dart';
 import 'project.dart';
 
@@ -38,9 +40,18 @@ class SceneClip {
 }
 
 class SceneNote {
-  const SceneNote(this.start, this.end, this.pitch, this.vel, this.track, this.clip);
+  const SceneNote(this.start, this.end, this.pitch, this.vel, this.track, this.clip, [this.expr = NoteExpression.none]);
   final double start, end, pitch, vel;
   final int track, clip;
+
+  /// The note's own pitch bend and vibrato (and pressure and timbre), as the pattern holds them.
+  final NoteExpression expr;
+
+  /// Whether its pitch moves (a bend curve or vibrato), so the views draw it as a bent line.
+  bool get bends => expr.bend.any((p) => p.v != 0) || expr.vibDepth > 0;
+
+  /// The pitch offset in semitones at [u] 0..1 through the note, at [bpm] (vibrato runs in seconds).
+  double bendAt(double u, double bpm) => expr.pitchAt(u, u * (end - start) * 15 / bpm);
 }
 
 /// An automation lane in song steps with values scaled 0..1 (by the range the caller knows, else the lane's own).
@@ -127,6 +138,58 @@ class VideoScene {
 
   int get stepsPerBar => beatsPerBar * 4;
 
+  /// The longest note, in steps.
+  late final double maxNoteSteps = notes.fold(0.0, (m, n) => math.max(m, n.end - n.start));
+
+  /// The interval index's bucket, in steps: each bucket lists the notes that started before it and still sound in
+  /// it, so a long note (a drone) costs one entry a bucket instead of every frame walking every note after it.
+  static const noteBucketSteps = 16.0;
+
+  late final List<Int32List> _carried = () {
+    final ends = notes.fold(0.0, (m, n) => math.max(m, n.end));
+    final buckets = (ends / noteBucketSteps).ceil() + 1;
+    final lists = List<List<int>?>.filled(buckets, null);
+    for (var i = 0; i < notes.length; i++) {
+      final n = notes[i];
+      final first = (n.start / noteBucketSteps).floor() + 1;
+      for (var b = math.max(0, first); b < buckets && b * noteBucketSteps < n.end; b++) {
+        (lists[b] ??= []).add(i);
+      }
+    }
+    return [for (final l in lists) l == null ? Int32List(0) : Int32List.fromList(l)];
+  }();
+
+  /// The indexes of the notes that sound somewhere in [from, to) (start before [to], end after [from]), each once:
+  /// those carried into [from]'s bucket, then those starting from that bucket on.
+  Iterable<int> notesSounding(double from, double to) sync* {
+    final b = (from / noteBucketSteps).floor();
+    if (b >= 0 && b < _carried.length) {
+      for (final i in _carried[b]) {
+        if (notes[i].end > from && notes[i].start < to) yield i;
+      }
+    }
+    for (var i = firstNoteFrom(math.max(0, b) * noteBucketSteps); i < notes.length && notes[i].start < to; i++) {
+      if (notes[i].end > from) yield i;
+    }
+  }
+
+  /// The lowest and highest pitch the notes of the tracks not in [hidden] (ids) play, bends included; middle C's
+  /// octave when there are none.
+  (double, double) pitchRange({Set<String> hidden = const {}}) {
+    var lo = double.infinity, hi = double.negativeInfinity;
+    for (final n in notes) {
+      if (hidden.isNotEmpty && n.track >= 0 && n.track < tracks.length && hidden.contains(tracks[n.track].id)) continue;
+      var a = n.pitch, b = n.pitch;
+      for (final p in n.expr.bend) {
+        a = math.min(a, n.pitch + p.v);
+        b = math.max(b, n.pitch + p.v);
+      }
+      lo = math.min(lo, a - n.expr.vibDepth);
+      hi = math.max(hi, b + n.expr.vibDepth);
+    }
+    return lo.isFinite ? (lo, hi) : (60, 71);
+  }
+
   /// The first index in [notes] starting at or after [step].
   int firstNoteFrom(double step) {
     var lo = 0, hi = notes.length;
@@ -148,10 +211,11 @@ class VideoScene {
     }
   }
 
-  /// The clip with the most notes starting in [a, b), or null when none.
-  int? busiestClip(double a, double b) {
+  /// The clip with the most notes starting in [a, b) (on [track] only, when given), or null when none.
+  int? busiestClip(double a, double b, {int? track}) {
     final counts = <int, int>{};
     for (final n in notesStartingIn(a, b)) {
+      if (track != null && n.track != track) continue;
       counts[n.clip] = (counts[n.clip] ?? 0) + 1;
     }
     int? best;
@@ -180,9 +244,10 @@ class VideoScene {
   }
 
   /// The lane that moves most in [a, b) and how far (0..1), or null when nothing moves more than [threshold].
-  (int, double)? movingLane(double a, double b, {double threshold = 0.05}) {
+  (int, double)? movingLane(double a, double b, {double threshold = 0.05, int? track}) {
     (int, double)? best;
     for (var i = 0; i < lanes.length; i++) {
+      if (track != null && lanes[i].track != track) continue;
       final m = lanes[i].movement(a, b);
       if (m > threshold && (best == null || m > best.$2)) best = (i, m);
     }
@@ -252,20 +317,18 @@ VideoScene buildVideoScene(ProjectDoc p, {required int Function(LayerDoc) colorO
       if (m == null) continue;
       final doc = docs.putIfAbsent(m.id, () => PatternDoc.parse(m.source).doc ?? PatternDoc.parse(m.runSource).doc);
       if (doc == null || doc.notes.isEmpty) continue;
-      final length = c.loopLength(doc.lengthSteps(p.beatsPerBar)).toDouble();
-      final offset = c.sourceOffsetSteps.toDouble();
-      final reps = c.loop ? (c.lengthSteps / length).ceil() + 1 : 1;
-      for (var k = 0; k < reps && notes.length < kSceneMaxNotes; k++) {
-        for (final n in doc.notes) {
-          final at = n.at.toDouble();
-          if (at < offset || (c.loop && at >= offset + length)) continue;
-          final s = clip.start + (at - offset) + k * length;
-          if (s >= clip.end || s < clip.start) continue;
-          final e = math.min(clip.end, s + n.len.toDouble());
-          notes.add(SceneNote(s, e, n.pitch, n.vel, t, ci));
-          clip.lowPitch = math.min(clip.lowPitch, n.pitch);
-          clip.highPitch = math.max(clip.highPitch, n.pitch);
-        }
+      // The notes as the engine plays them (#183): the source window from the offset, wrapping to the pattern's
+      // start while the clip loops, a note already sounding at the window's start kept from there, and notes cut at
+      // the window's edges. The same rule the arranger draws and edits with ([clipNotes]).
+      // A clip that would pass the cap shows its notes up to it.
+      final played = clipNotes(doc, c, p.beatsPerBar, limit: kSceneMaxNotes - notes.length, truncate: true) ?? const [];
+      for (final n in played) {
+        final s = clip.start + n.at.toDouble();
+        final e = math.min(clip.end, s + n.len.toDouble());
+        if (e <= s) continue;
+        notes.add(SceneNote(s, e, n.pitch, n.vel, t, ci, n.expr));
+        clip.lowPitch = math.min(clip.lowPitch, n.pitch);
+        clip.highPitch = math.max(clip.highPitch, n.pitch);
       }
     }
     for (final a in l.audioClips) {

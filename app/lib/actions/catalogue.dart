@@ -16,6 +16,7 @@ const _tab = Area.tabs;
 const _set = Area.settings;
 const _pg = Area.page;
 const _mnu = Area.menu;
+const _vid = Area.video;
 
 /// Default toolbars per area (docs/actions.md "Phone toolbar").
 const Map<Area, List<String>> standardToolbars = {
@@ -372,6 +373,24 @@ const List<ActionDef> standardActions = [
   ActionDef('fx.moveUp', 'Move the effect up', _fx, defaultKeys: ['Alt+Up', 'Alt+W'], isChange: true, toast: false),
   ActionDef('fx.moveDown', 'Move the effect down', _fx, defaultKeys: ['Alt+Down', 'Alt+S'], isChange: true, toast: false),
   ActionDef('fx.add', 'Add FX or instrument', _fx, defaultKeys: ['Insert']),
+  // The music video editor's shot lane and list (owner, 2026-11-12).
+  ActionDef('video.add', 'Add a shot', _vid, description: 'At the cursor, in an empty stretch', defaultKeys: ['A'],
+      isChange: true),
+  ActionDef('video.split', 'Split the shot', _vid, description: 'At the cursor', defaultKeys: ['S'], isChange: true),
+  ActionDef('video.duplicate', 'Duplicate the shot', _vid, description: 'Right after it',
+      defaultKeys: ['Ctrl+D'], isChange: true),
+  ActionDef('video.delete', 'Delete the shot', _vid, defaultKeys: ['Delete', 'Backspace'], isChange: true),
+  ActionDef('video.undo', 'Undo a lane edit', _vid, defaultKeys: ['Ctrl+Z'], toast: false),
+  ActionDef('video.redo', 'Redo a lane edit', _vid, defaultKeys: ['Ctrl+Shift+Z', 'Ctrl+Y'], toast: false),
+  ActionDef('video.nudgeLeft', 'Move the shot earlier', _vid, description: 'By the snap', defaultKeys: ['Left'],
+      isChange: true, toast: false),
+  ActionDef('video.nudgeRight', 'Move the shot later', _vid, description: 'By the snap', defaultKeys: ['Right'],
+      isChange: true, toast: false),
+  ActionDef('video.previous', 'Previous shot', _vid, defaultKeys: ['['], toast: false),
+  ActionDef('video.following', 'Next shot', _vid, defaultKeys: [']'], toast: false),
+  ActionDef('video.autocut', 'Auto-cut…', _vid, description: 'Fill the lane from the triggers', defaultKeys: ['Ctrl+Shift+A']),
+  ActionDef('video.fullScreen', 'Editor full screen', _vid, description: 'Open or close the full-screen editor',
+      defaultKeys: ['F11']),
 
   ActionDef('device.prev', 'Previous control', _dev, description: 'In reading order', defaultKeys: ['Left', 'A'], toast: false),
   ActionDef('device.next', 'Next control', _dev, description: 'In reading order', defaultKeys: ['Right', 'D'], toast: false),
