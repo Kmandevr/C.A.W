@@ -2312,6 +2312,7 @@ void Engine::play(double fromStep) {
     c.playCount = playCount_ + 1;
     c.touchStamp = touchCounter_;
     if (!send(c)) return;  // nothing changed on the audio side, so keep the control side as it was
+    transportSends_.fetch_add(1, std::memory_order_release);
     playCount_ = c.playCount;
     loudness_->requestReset();  // the integrated loudness measures this play
 }
@@ -2326,6 +2327,7 @@ void Engine::playCountIn(double fromStep, int beats) {
     c.playCount = playCount_ + 1;
     c.touchStamp = touchCounter_;
     if (!send(c)) return;
+    transportSends_.fetch_add(1, std::memory_order_release);
     playCount_ = c.playCount;
     loudness_->requestReset();
 }
@@ -2417,7 +2419,7 @@ void Engine::stop() {
     std::lock_guard<std::mutex> lock(ctl_);
     Cmd c;
     c.type = Cmd::Stop;
-    send(c);
+    if (send(c)) transportSends_.fetch_add(1, std::memory_order_release);
 }
 
 void Engine::startPlay(double fromStep, uint64_t playCount, uint32_t touchStamp) noexcept {

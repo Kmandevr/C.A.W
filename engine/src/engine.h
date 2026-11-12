@@ -180,6 +180,10 @@ public:
     // Ends every knob touch now, as a Play does, so the lanes rule again (an automation Touch write released).
     void releaseTouches();
     void stop();
+    // Any thread: how many Play, count-in and Stop commands have been queued, counted after each is queued. A
+    // device callback holding rendered frames (BlockFifo) drops them when this moves, so the new position starts
+    // on its next frame.
+    uint32_t transportSends() const noexcept { return transportSends_.load(std::memory_order_acquire); }
     void clearOverload();
     Meters meters();
     bool layerMeter(int index, LayerMeter& out);
@@ -383,6 +387,7 @@ private:
     std::unique_ptr<Spsc<Retired, 1024>> retired_;
     std::atomic<float> cpu_{0}, peakL_{0}, peakR_{0};
     std::atomic<bool> playingFlag_{false};
+    std::atomic<uint32_t> transportSends_{0};  // transportSends()
     std::atomic<bool> bypass_{false};
     std::atomic<int64_t> posFlag_{0}, loopLenFlag_{0};
     std::atomic<int> overloadedFlag_{0};

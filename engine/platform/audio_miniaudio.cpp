@@ -20,6 +20,7 @@
 #include <mmdeviceapi.h>
 #endif
 
+#include "block_fifo.h"
 #include "caw.h"
 #include "capi_internal.h"
 #include "miniaudio.h"
@@ -64,6 +65,11 @@ struct Audio {
     const char* kindIn = "unknown";
 #endif
     float l[kChunk], r[kChunk];
+    // Playback only: the engine renders whole kBlock-frame blocks whatever size the callback is (BlockFifo, the
+    // owner's fixed-block idea, 2026-11-12). Fresh at every open; dropped on a Play or Stop (transportSeen).
+    caw::BlockFifo<caw::kBlock> fifo;
+    uint32_t transportSeen = 0;
+    int fifoLatency = 0;  // frames it can hold back (0 when the period is whole blocks), in the output latency
 };
 
 // The larger buffer (Auto while not recording, Battery): 1024 frames, about 21 ms at 48 kHz, so the callback
@@ -187,6 +193,27 @@ void callback(ma_device* dev, void* output, const void* input, ma_uint32 frames)
     caw::LiveAudio& live = a->owner->engine->liveAudio();
     const auto* in = static_cast<const float*>(input);
     const int ch = a->input && in ? static_cast<int>(a->inputChannels) : 0;
+    if (!a->input) {
+        // Playback only: fixed blocks through the FIFO, rendered straight into a->l/r and interleaved from there.
+        const uint32_t sent = a->owner->engine->transportSends();
+        if (sent != a->transportSeen) {
+            a->transportSeen = sent;
+            a->fifo.flush();
+        }
+        while (done < frames) {
+            const int n = static_cast<int>(frames - done < kChunk ? frames - done : kChunk);
+            a->fifo.pull(a->l, a->r, n, kChunk, [&](float* l, float* r, int m) {
+                live.beginCallback(nullptr, 0, m);
+                a->owner->engine->process(l, r, m);
+                live.afterCallback(l, r, m);  // the latency ping (it needs the input: inactive here)
+            });
+            for (int i = 0; i < n; ++i) {
+                out[(done + i) * 2] = a->l[i];
+                out[(done + i) * 2 + 1] = a->r[i];
+            }
+            done += static_cast<ma_uint32>(n);
+        }
+    }
     while (done < frames) {
         const int n = static_cast<int>(frames - done < kChunk ? frames - done : kChunk);
         live.beginCallback(ch ? in + static_cast<size_t>(done) * ch : nullptr, ch, n);  // monitoring and recording
@@ -269,6 +296,11 @@ ma_result openDevice(Audio* a, const CawEngine* e, const ma_device_id* id, ma_ui
         return r;
     }
     readAAudioModes(a);
+    // miniaudio calls back with a fixed size (its intermediary buffer, noFixedSizedCallback off): what it holds
+    // back on top is at most a block short of one, unless that size is whole blocks.
+    a->fifo.flush();
+    a->transportSeen = e->engine->transportSends();
+    a->fifoLatency = duplex ? 0 : caw::BlockFifo<caw::kBlock>::maxLatency(static_cast<int>(a->device.playback.intermediaryBufferCap));
     if (duplex) {
         a->inputChannels = a->device.capture.channels;
         e->engine->liveAudio().setDeviceChannels(static_cast<int>(a->inputChannels));
@@ -587,6 +619,7 @@ std::string latencyJson(CawEngine* e, Audio* a) {
 #endif
     // The duplex ring buffer's two capture periods (see openDevice) hold the input back before the callback reads it.
     if (a->input) in.frames += toEngineFrames(a->duplexBufferFrames, c.internalSampleRate, rate);
+    out.frames += a->fifoLatency;  // the fixed-block FIFO, at the engine's rate already (callback frames are)
     return "{\"running\":true,\"sample_rate\":" + std::to_string(rate) + ",\"output\":" + sideJson(out, rate, true) +
            ",\"input\":" + sideJson(in, rate, a->input) + "}";
 }

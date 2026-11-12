@@ -6,6 +6,10 @@ updated: 2026-11-12
 
 # Decisions
 
+## 2026-11-12: The engine renders in fixed blocks at the device (owner's idea)
+
+**Decision (owner's idea, with the engine lead's agreement):** the engine always renders in fixed-size blocks, whatever size the device's callback is. The callback takes frames from a small FIFO preallocated at device open, which renders whole engine blocks when it runs short, so Bluetooth and background callbacks of 441, 960, 1920 or random frames never reach the engine and its behaviour is the same on every route and in export. **Built** (`engine/src/block_fifo.h`, the playback callback in `engine/platform/audio_miniaudio.cpp`): 64-frame blocks (`kBlock`, the engine's own chunk); a callback that is whole blocks passes straight through; otherwise at most 63 frames wait, and the reported output latency adds them; the FIFO is new at each open and drops what it holds on a Play, count-in or Stop. The engine itself stays correct for any size (offline renders and other hosts call it with any size): a second line of defence, not a replacement. **Open:** a duplex device keeps its old path until the audio-resilience branch's separate capture device lands. Details: [engine](engine.md) ("Fixed engine blocks at the device").
+
 ## 2026-11-12: No shared buses; work the REAPER way (owner)
 
 **Decision (owner):** "I don't love the use of busses. I like REAPER's way of working." The shared reverb-bus idea (A7) is dropped. Routing stays REAPER-style: tracks, folders and sends between tracks, with no separate bus concept added. Speed for heavy Flagship patches comes from the engine itself.
