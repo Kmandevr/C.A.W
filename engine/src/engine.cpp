@@ -3862,12 +3862,15 @@ int Engine::processChunk(float* l, float* r, int maxFrames) noexcept {
     }
     assignRetireBudgets();  // what each node may hand back this chunk, fixed before any of them runs
     // Speed phase 5c: the pool runs each level's nodes at once, but a node holding third-party native code stays on
-    // this thread (the serial lane: such code may not be safe to run twice at once; docs/decisions.md).
+    // this thread (the serial lane: such code may not be safe to run twice at once; docs/decisions.md), and so does
+    // one with nothing to run this chunk (silent or idle: it only writes zeros), so a level with one busy node isn't
+    // handed to the pool for nothing.
     if (mixParallel_) {
         MixGraph& g = *mixGraph_;
         for (int k = 0; k < liveCount_; ++k) {
             const int i = live_[k];
-            const bool serial = slotForeign(slotAt(i));
+            const Slot& s = slotAt(i);
+            const bool serial = (s.mode != Slot::Mode::Play && s.mode != Slot::Mode::Bus) || slotForeign(s);
             g.executor.setNodeSerial(g.trackNode(i), serial);
             g.executor.setNodeSerial(g.busNode(i), serial);
         }

@@ -1021,7 +1021,7 @@ int runSuite(double secs, int argc, char** argv) {
         return rows.back();
     };
     std::printf("caw_bench suite: %s, callback %d frames at %d Hz (budget %.1f us), %.0f s per scenario, %d runs, "
-                "%d mix workers\n", label.c_str(), frames, kRate, budgetUs, secs, runs, threads);
+                "--threads %d\n", label.c_str(), frames, kRate, budgetUs, secs, runs, threads);
     std::vector<float> l(static_cast<size_t>(frames)), r(static_cast<size_t>(frames));
     for (int run = 0; run < runs; ++run) {
         for (const SuiteScenario& sc : all) {
@@ -1119,7 +1119,7 @@ int runSuite(double secs, int argc, char** argv) {
     if (!mdPath.empty()) {
         std::ofstream md(mdPath);
         char line[512];
-        std::snprintf(line, sizeof line, "### %s: %d frames at %d Hz (budget %.0f us), %.0f s x %d runs, %d mix workers\n\n",
+        std::snprintf(line, sizeof line, "### %s: %d frames at %d Hz (budget %.0f us), %.0f s x %d runs, --threads %d\n\n",
                       label.c_str(), frames, kRate, budgetUs, secs, runs, threads);
         md << line << "| Scenario | Mean us | p99 us | Worst us | Mean load | Worst load | Worst at |\n|---|---:|---:|---:|---:|---:|---:|\n";
         for (const Out& o : out) {
