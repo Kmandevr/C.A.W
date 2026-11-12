@@ -97,6 +97,14 @@ public:
         if (ic1_ < 1e-20 && ic1_ > -1e-20) ic1_ = 0.0;
         if (ic2_ < 1e-20 && ic2_ > -1e-20) ic2_ = 0.0;
     }
+    // process()'s coefficients and state, for a caller running its arithmetic on several channels at once.
+    double a1() const noexcept { return a1_; }
+    double a2() const noexcept { return a2_; }
+    double a3() const noexcept { return a3_; }
+    double k() const noexcept { return k_; }
+    double ic1() const noexcept { return ic1_; }
+    double ic2() const noexcept { return ic2_; }
+    void setState(double s1, double s2) noexcept { ic1_ = s1, ic2_ = s2; }
     // Takes another filter's coefficients (no tan): the second side of a stereo pair set like the first.
     void setLike(const Svf& other) noexcept {
         a1_ = other.a1_, a2_ = other.a2_, a3_ = other.a3_, k_ = other.k_;
