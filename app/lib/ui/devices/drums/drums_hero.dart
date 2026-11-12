@@ -58,7 +58,7 @@ class _DrumHeroState extends State<DrumHero> {
       color: c,
       height: widget.height,
       caption: '${padLabel(widget.pad)} · ${p.used ? p.typeName.toUpperCase() : 'EMPTY'}${shape.points && body ? ' · POINTS' : ''}',
-      readout: Text(readout),
+      readout: Builder(builder: (context) => Text(readout)),
       child: LayoutBuilder(builder: (context, box) {
         final size = Size(box.maxWidth, box.maxHeight);
         return GrabGesture(

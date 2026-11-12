@@ -33,7 +33,7 @@ class ReverbPage extends StatelessWidget {
         height: 200,
         caption: 'REVERB',
         grid: false,
-        readout: Text('${formatParamValue(t.param('decay'), t.value('decay'))} · size ${(t.value('size') * 100).round()}%'),
+        readout: Builder(builder: (context) => Text('${formatParamValue(t.param('decay'), t.value('decay'))} · size ${(t.value('size') * 100).round()}%')),
         child: const _ReverbHero(),
       )),
       Row(children: [
@@ -226,7 +226,7 @@ class DelayPage extends StatelessWidget {
         height: 190,
         caption: 'ECHOES',
         grid: false,
-        readout: Text(_ms(delaySeconds(scope, 'sync', 'time'))),
+        readout: Builder(builder: (context) => Text(_ms(delaySeconds(scope, 'sync', 'time')))),
         child: const _DelayHero(),
       )),
       // The sync pickers and Freeze: one row, or wrapped in a narrow column (inline beside the hero).

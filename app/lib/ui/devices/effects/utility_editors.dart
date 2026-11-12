@@ -29,10 +29,10 @@ class StereoPage extends StatelessWidget {
         height: 210,
         caption: 'STEREO FIELD',
         grid: false,
-        readout: Text([
+        readout: Builder(builder: (context) => Text([
           if (t.param('width') != null) 'width ${(t.value('width') * 100).round()}%',
           if (t.param('pan') != null) 'pan ${formatParamValue(t.param('pan'), t.value('pan'), pan: true)}',
-        ].join(' · ')),
+        ].join(' · '))),
         child: const _FieldHero(),
       )),
       DeviceDisplay(builder: (context, f) => _Correlation(value: f?.values['correlation'])),

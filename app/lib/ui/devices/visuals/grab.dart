@@ -27,9 +27,12 @@ class _GrabPanState extends State<GrabPan> {
   DateTime? _lastTap;
   Offset _lastTapAt = Offset.zero;
 
+  // The gesture binding's sampling clock (the test's fake clock under test), as GrabGesture and ClickCounter read.
+  static DateTime get _now => GestureBinding.instance.samplingClock.now();
+
   void _end() {
     widget.onEnd();
-    final now = DateTime.now();
+    final now = _now;
     final tap = (_at - _down).distance < 8 && now.difference(_downAt) < const Duration(milliseconds: 300);
     if (!tap) {
       _lastTap = null;
@@ -56,7 +59,7 @@ class _GrabPanState extends State<GrabPan> {
           ..grabs = widget.grabs
           ..onStart = (d) {
             _down = _at = d.localPosition;
-            _downAt = DateTime.now();
+            _downAt = _now;
             widget.onStart(d.localPosition);
           }
           ..onUpdate = (d) {

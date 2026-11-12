@@ -185,7 +185,7 @@ class ReverserPage extends StatelessWidget {
         height: 180,
         caption: 'REVERSED CHUNKS',
         grid: false,
-        readout: Text(free ? '${t.value('time').round()} ms' : formatParamValue(t.param('sync'), t.value('sync'))),
+        readout: Builder(builder: (context) => Text(free ? '${t.value('time').round()} ms' : formatParamValue(t.param('sync'), t.value('sync')))),
         child: const _ReverserHero(),
       )),
       const LabelledChoice('SYNC', 'sync'),

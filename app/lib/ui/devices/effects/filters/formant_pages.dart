@@ -54,7 +54,8 @@ class FormantPage extends StatelessWidget {
   Widget build(BuildContext context) {
     final scope = DeviceScope.of(context);
     final t = scope.target;
-    final fs = formantsAt(t.value('vowel_x'), t.value('vowel_y'), t.value('shift'));
+    // Read where it is drawn (a lazy read: the hero and readout watch it, not the page; param_watch.dart).
+    List<double> fs() => formantsAt(t.value('vowel_x'), t.value('vowel_y'), t.value('shift'));
     return effectPage('formant', [
       XYPad(key: const ValueKey('formant-pad'), xParam: 'vowel_x', yParam: 'vowel_y', height: 170, caption: 'VOWEL',
         painter: (dot) => _VowelPainter(dot, scope.accent, scope.secondary)),
@@ -63,9 +64,9 @@ class FormantPage extends StatelessWidget {
         height: 96,
         caption: 'FORMANTS ≈',
         grid: false,
-        readout: Text('${fs[0].round()} · ${fs[1].round()} · ${fs[2].round()} Hz'),
-        child: CustomPaint(painter: _FormantCurvePainter(fs, t.value('q'), t.value('lows'), t.value('highs'), t.value('mix'),
-          scope.secondary), child: const SizedBox.expand()),
+        readout: Builder(builder: (context) => Text('${fs()[0].round()} · ${fs()[1].round()} · ${fs()[2].round()} Hz')),
+        child: Builder(builder: (context) => CustomPaint(painter: _FormantCurvePainter(fs(), t.value('q'), t.value('lows'),
+          t.value('highs'), t.value('mix'), scope.secondary), child: const SizedBox.expand())),
       ),
       const KnobRow(['shift', 'q', 'lows', 'highs', 'mix'], size: 50, labels: {'shift': 'Gender'}),
       const DeviceFold(child: ParamGrid(only: ['output'])),
@@ -126,14 +127,15 @@ class DisperserPage extends StatelessWidget {
   Widget build(BuildContext context) {
     final scope = DeviceScope.of(context);
     final t = scope.target;
-    final stages = t.value('amount') * 64;
+    // Read where it is drawn (a lazy read: the hero and readout watch it, not the page; param_watch.dart).
+    double stages() => t.value('amount') * 64;
     return effectPage('disperser', [
       HeroWithMeters(height: 200, gr: false, hero: HeroCanvas(
         color: scope.accent,
         height: 200,
         caption: 'DELAY ≈',
         grid: false,
-        readout: Text('${stages.toStringAsFixed(0)} stages'),
+        readout: Builder(builder: (context) => Text('${stages().toStringAsFixed(0)} stages')),
         child: DragHero(heroKey: 'disperser-hero', xParam: 'freq', yParam: 'amount', paint: (canvas, size, active, f) {
           final w = size.width, h = size.height;
           final freq = t.value('freq'), q = 0.3 * math.pow(30, t.value('pinch')).toDouble(), spread = t.value('spread');
@@ -144,12 +146,12 @@ class DisperserPage extends StatelessWidget {
             canvas.drawLine(Offset(0, y(ms)), Offset(w, y(ms)), Paint()..color = Neon.ink.withValues(alpha: 0.04));
             paintLabel(canvas, l, Offset(4, y(ms) - 6), Neon.dim, size: 8);
           }
-          Path curve(double fc) => responsePath(size, (hz) => disperserDelayMs(hz, stages: stages, freq: fc, q: q), y, lo: 0, hi: 1e4);
+          Path curve(double fc) => responsePath(size, (hz) => disperserDelayMs(hz, stages: stages(), freq: fc, q: q), y, lo: 0, hi: 1e4);
           if (spread > 0.01) strokeGlow(canvas, curve(math.min(freq * math.pow(2, spread), 21600)), scope.secondary, width: 1.6);
           final main = curve(freq);
           fillFade(canvas, main, h, size, scope.accent, alpha: 0.3);
           strokeGlow(canvas, main, scope.accent, width: 2.4);
-          paintHandle(canvas, Offset(freqToX(freq, w), y(disperserDelayMs(freq, stages: stages, freq: freq, q: q)).clamp(28.0, h - 16)),
+          paintHandle(canvas, Offset(freqToX(freq, w), y(disperserDelayMs(freq, stages: stages(), freq: freq, q: q)).clamp(28.0, h - 16)),
             scope.accent, active: active, r: 8);
         }),
       )),
