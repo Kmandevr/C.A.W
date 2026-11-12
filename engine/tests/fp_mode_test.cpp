@@ -1,11 +1,14 @@
 // Speed phase 2 ("floating point"): the flush-to-zero guard (fp_mode.h) and the mix's NaN/Inf guards under the build's flags.
 #include <algorithm>
+#include <bit>
+#include <cstdint>
 #include <cmath>
 #include <limits>
 #include <string>
 #include <vector>
 
 #include "caw/detmath.hpp"
+#include "caw/library/oscillator.hpp"
 #include "engine.h"
 #include "fp_mode.h"
 #include "native_component_test_path.h"
@@ -111,4 +114,15 @@ TEST(detmath_range_reduction_survives_the_builds_flags_at_large_arguments) {
     double worstExp = 0;
     for (double x = -700; x < 700; x += 0.0137) worstExp = std::max(worstExp, std::fabs(detExp(x) - std::exp(x)) / std::exp(x));
     CHECK(worstExp <= 1e-15);
+}
+
+TEST(wrap01_turns_minus_zero_into_plus_zero_under_the_builds_flags) {
+    // A -0 phase must leave as +0: -0 out of an oscillator would fail the mix's bit-mask silence test
+    // (route_math.h allPositiveZero). Under -fno-signed-zeros, `phase + 0.0` may be folded to `phase`.
+    volatile double minusZero = -0.0;
+    CHECK_EQ(std::bit_cast<uint64_t>(lib::wrap01(minusZero)), uint64_t{0});
+    //PZ
+    volatile double half = 0.5, one = 1.0;
+    CHECK_EQ(lib::wrap01(half), 0.5);
+    CHECK_EQ(std::bit_cast<uint64_t>(lib::wrap01(one)), uint64_t{0});
 }

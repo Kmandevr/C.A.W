@@ -209,4 +209,11 @@ inline uint32_t byteSwap(uint32_t x) {
 // NaN and infinities become 0 before anything reaches the speakers.
 inline double finiteOr0(double d) { return std::isfinite(d) ? d : 0.0; }
 
+// x, with -0 made +0. In its bits, not as x + 0.0: the engine builds with -fno-signed-zeros, which lets the compiler
+// fold x + 0.0 to x and leave the -0 (an integer compare and select, which no floating-point flag touches).
+inline double positiveZero(double x) noexcept {
+    const uint64_t bits = std::bit_cast<uint64_t>(x);
+    return std::bit_cast<double>(bits == (uint64_t{1} << 63) ? uint64_t{0} : bits);
+}
+
 }  // namespace caw
