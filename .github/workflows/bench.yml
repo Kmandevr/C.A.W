@@ -2,7 +2,7 @@
 name: Bench
 on:
   push:
-    branches: [Main]
+    branches: [Main, engine-bench]  # TEMPORARY: engine-bench, to run before the file is on Main
     paths:
       - "engine/**"
       - "!engine/compiler/**"
