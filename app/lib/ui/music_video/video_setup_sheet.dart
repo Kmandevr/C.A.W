@@ -351,7 +351,6 @@ class _MusicVideoPanelState extends State<MusicVideoPanel> {
     final (a, b) = _span;
     final plan = planVideo(_scene, o, _doc.timeline, start: a.toDouble(), end: b.toDouble());
     final (w, h) = o.size;
-    final busy = _jobs.running;
     return LayoutBuilder(builder: (context, box) {
       final wide = widget.fullScreen && box.maxWidth >= MusicVideoPanel.wideFrom;
       final previewMax = wide ? 520.0 : (box.maxHeight.isFinite ? box.maxHeight * 0.27 : 220.0).clamp(120.0, 360.0);
@@ -359,7 +358,7 @@ class _MusicVideoPanelState extends State<MusicVideoPanel> {
           end: b.toDouble(), position: _position, doc: _doc, bitmaps: _images.images, maxHeight: previewMax);
       return MusicVideoEditor(
         key: _editorKey,
-        doc: _doc, scene: _scene, start: a.toDouble(), end: b.toDouble(), aspect: w / h, enabled: !busy,
+        doc: _doc, scene: _scene, start: a.toDouble(), end: b.toDouble(), aspect: w / h, 
         playhead: _position,
         onSeek: (st) => _previewKey.currentState?.seek(st),
         onChanged: () => setState(() {}),
@@ -373,7 +372,7 @@ class _MusicVideoPanelState extends State<MusicVideoPanel> {
         frame: (context, ed, parts) {
           final header = _Header(fullScreen: widget.fullScreen,
               onFullScreen: widget.fullScreen ? (widget.onClose ?? () => Navigator.of(context).maybePop())
-                  : (busy ? null : () => _openFullScreen(a.toDouble(), b.toDouble())));
+                  : () => _openFullScreen(a.toDouble(), b.toDouble()));
           final tabs = _TabBar(selected: _tab, onPick: _pickTab, selectedShot: ed.selected != null);
           final content = _TabBody(tab: _tab, child: ListView(
             key: PageStorageKey('video-tab-${_tab.name}'),
@@ -411,7 +410,6 @@ class _MusicVideoPanelState extends State<MusicVideoPanel> {
   }
 
   List<Widget> _tabChildren(MusicVideoEditorState ed, VideoEditorParts parts, ShotPlan plan, int a, int b) {
-    final busy = _jobs.running;
     final cut = ed.selected == null ? null : _doc.timeline.byId(ed.selected!);
     final (w, h) = o.size;
     final spb = p.stepsPerBar;
@@ -429,7 +427,7 @@ class _MusicVideoPanelState extends State<MusicVideoPanel> {
                   'A tap on a cut marker picks its transition.'),
           const SizedBox(height: 6),
           parts.list,
-          ..._director(busy),
+          ..._director(),
         ];
       case VideoTab.look:
         if (cut == null) {
@@ -456,14 +454,14 @@ class _MusicVideoPanelState extends State<MusicVideoPanel> {
         return [
           VideoSection('TITLE CARD', children: [
             VideoPill(key: const ValueKey('video-title-card'), label: 'TITLE CARD', on: o.titleCard,
-                onTap: busy ? null : () => _set(() => o.titleCard = !o.titleCard)),
-            TextField(key: const ValueKey('video-title'), controller: _title, enabled: !busy,
+                onTap: () => _set(() => o.titleCard = !o.titleCard)),
+            TextField(key: const ValueKey('video-title'), controller: _title, 
                 decoration: InputDecoration(isDense: true, labelText: 'Title', hintText: p.name),
                 onChanged: (v) {
                   setState(() => o.title = v);
                   _store();
                 }),
-            TextField(key: const ValueKey('video-artist'), controller: _artist, enabled: !busy,
+            TextField(key: const ValueKey('video-artist'), controller: _artist, 
                 decoration: const InputDecoration(isDense: true, labelText: 'Artist'),
                 onChanged: (v) {
                   setState(() => o.artist = v);
@@ -495,27 +493,27 @@ class _MusicVideoPanelState extends State<MusicVideoPanel> {
                 ])),
         ];
       case VideoTab.export:
-        return _exportSettings(busy, a, b);
+        return _exportSettings(a, b);
     }
   }
 
   static String _clock(double secs) => '${secs ~/ 60}:${(secs % 60).floor().toString().padLeft(2, '0')}';
 
-  List<Widget> _director(bool busy) => [
+  List<Widget> _director() => [
         VideoSection('AUTO DIRECTOR', children: [
           const VideoNote('The director cuts the video while the lane is empty; Auto-cut uses its shots, style and seed.'),
           const SizedBox(height: 6),
           Wrap(spacing: 6, runSpacing: 6, children: [
             for (final shot in VideoShot.values)
               VideoPill(key: ValueKey('video-shot-${shot.name}'), label: shot.label.toUpperCase(), on: o.shots.contains(shot),
-                  onTap: busy ? null : () => _set(() => o.shots.contains(shot) ? o.shots.remove(shot) : o.shots.add(shot))),
+                  onTap: () => _set(() => o.shots.contains(shot) ? o.shots.remove(shot) : o.shots.add(shot))),
           ]),
           VideoNote(o.shots.isEmpty
               ? 'Switch on at least one shot.'
               : [for (final x in o.shots) x.description].join('. ')),
           const SizedBox(height: 8),
           VideoTiles<VideoStyle>(keyPrefix: 'video-style', values: VideoStyle.values, selected: o.style,
-              label: (v) => v.label, enabled: (_) => !busy, onPick: (v) => _set(() => o.style = v),
+              label: (v) => v.label,  onPick: (v) => _set(() => o.style = v),
               icon: (v) => switch (v) {
                     VideoStyle.calm => Icons.waves,
                     VideoStyle.energetic => Icons.bolt,
@@ -530,7 +528,7 @@ class _MusicVideoPanelState extends State<MusicVideoPanel> {
             padding: const EdgeInsets.only(top: 8),
             child: Align(alignment: Alignment.centerLeft, child: VideoPill(key: const ValueKey('video-smooth-follow'),
                 label: 'SMOOTH FOLLOW', on: o.smoothFollow,
-                onTap: busy ? null : () => _set(() => o.smoothFollow = !o.smoothFollow))),
+                onTap: () => _set(() => o.smoothFollow = !o.smoothFollow))),
           ),
           VideoReveal(switchKey: o.smoothFollow, VideoNote(o.smoothFollow
               ? 'The arrangement and piano roll hold the playhead a third of the way in and scroll the song under it; '
@@ -538,10 +536,10 @@ class _MusicVideoPanelState extends State<MusicVideoPanel> {
               : 'Off: the camera springs after the playhead and zooms through each shot.')),
           Row(children: [
             const Text('Seed', style: TextStyle(color: Neon.dim, fontSize: 12)),
-            IconButton(key: const ValueKey('video-seed-down'), onPressed: busy || o.seed <= 1 ? null : () => _set(() => o.seed--),
+            IconButton(key: const ValueKey('video-seed-down'), onPressed: o.seed <= 1 ? null : () => _set(() => o.seed--),
                 icon: const Icon(Icons.remove)),
             Text('${o.seed}', style: Neon.code(size: 14, color: videoAccent)),
-            IconButton(key: const ValueKey('video-seed-up'), onPressed: busy ? null : () => _set(() => o.seed++),
+            IconButton(key: const ValueKey('video-seed-up'), onPressed: () => _set(() => o.seed++),
                 icon: const Icon(Icons.add)),
             const Expanded(child: Text('Another seed cuts differently; the same seed always cuts the same.',
                 style: TextStyle(color: Neon.dim, fontSize: 11))),
@@ -549,7 +547,7 @@ class _MusicVideoPanelState extends State<MusicVideoPanel> {
         ]),
       ];
 
-  List<Widget> _exportSettings(bool busy, int a, int b) {
+  List<Widget> _exportSettings(int a, int b) {
     final (w, h) = o.size;
     final problem = o.problem(_caps);
     final clock = FrameClock(fps: o.fps, startStep: a.toDouble(), endStep: b.toDouble(), bpm: p.bpm);
@@ -558,7 +556,7 @@ class _MusicVideoPanelState extends State<MusicVideoPanel> {
     return [
       VideoSection('RANGE', children: [
         VideoTiles<VideoRange>(keyPrefix: 'video-range', values: VideoRange.values, selected: _range, height: 40,
-            label: (v) => v.label, enabled: (v) => !busy && _rangeOk(v), onPick: (v) => _set(() => o.range = v)),
+            label: (v) => v.label, enabled: _rangeOk, onPick: (v) => _set(() => o.range = v)),
         VideoNote('${_clock(secs)} · bars ${a ~/ p.stepsPerBar + 1} to ${(b / p.stepsPerBar).ceil()}'),
       ]),
       VideoSection('ASPECT RATIO', children: [
@@ -568,7 +566,7 @@ class _MusicVideoPanelState extends State<MusicVideoPanel> {
           selected: _customAspect ? 'Custom' : o.aspect.label,
           height: 40,
           label: (v) => v,
-          enabled: (_) => !busy,
+          
           onPick: (v) => _set(() {
             _customAspect = v == 'Custom';
             if (!_customAspect) {
@@ -587,7 +585,7 @@ class _MusicVideoPanelState extends State<MusicVideoPanel> {
       ]),
       VideoSection('RESOLUTION', children: [
         VideoTiles<VideoResolution>(keyPrefix: 'video-res', values: VideoResolution.values, selected: o.resolution,
-            height: 40, label: (v) => v.label, enabled: (_) => !busy, onPick: (v) => _set(() {
+            height: 40, label: (v) => v.label,  onPick: (v) => _set(() {
               if (v == VideoResolution.custom) {
                 final (cw, chh) = o.size;
                 o.customWidth = cw;
@@ -614,12 +612,12 @@ class _MusicVideoPanelState extends State<MusicVideoPanel> {
       ]),
       VideoSection('FRAME RATE', children: [
         VideoTiles<int>(keyPrefix: 'video-fps', values: MusicVideoOptions.frameRates, selected: o.fps, height: 40,
-            label: (v) => '$v fps', enabled: (_) => !busy, onPick: (v) => _set(() => o.fps = v)),
+            label: (v) => '$v fps',  onPick: (v) => _set(() => o.fps = v)),
         VideoNote('${clock.frameCount} frames${o.fps == 24 ? ' · 24 fps: the film look' : ''}.'),
       ]),
       VideoSection('QUALITY', children: [
         VideoTiles<VideoQuality>(keyPrefix: 'video-quality', values: VideoQuality.values, selected: o.quality, height: 54,
-            label: (v) => v.label, enabled: (_) => !busy, onPick: (v) => _set(() => o.quality = v),
+            label: (v) => v.label,  onPick: (v) => _set(() => o.quality = v),
             icon: (v) => switch (v) {
                   VideoQuality.small => Icons.compress,
                   VideoQuality.balanced => Icons.balance,
