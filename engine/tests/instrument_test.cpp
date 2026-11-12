@@ -1,4 +1,5 @@
 // Native instruments on tracks: notes reach them on their frames, previews, stop, values, state, reloads, the built-in synth.
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstring>

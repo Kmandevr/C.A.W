@@ -83,7 +83,7 @@ jobs:
           cmake -S engine -B engine/build-tsan -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCAW_TSAN=ON \
             -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
       - name: Build
-        run: cmake --build engine/build-tsan --target caw_tests --parallel
+        run: cmake --build engine/build-tsan --target caw_tests --parallel -- -k  # every compile error at once
       - name: Mix pool tests and stress run
         env:
           CAW_POOL_STRESS_CHUNKS: "10000"

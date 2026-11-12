@@ -74,7 +74,10 @@ TEST(mix_pool_runs_every_task_exactly_once_on_several_threads) {
             pool.setDelayForTest(delay);
             Rng rng(workers * 7 + delay);
             uint32_t offCaller = 0;
-            for (int run = 0; run < 300; ++run) {
+            // 300 runs, and on until a worker has taken a task (a loaded machine may leave them all to the caller for
+            // a while).
+            const auto until = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+            for (int run = 0; run < 300 || (offCaller == 0 && std::chrono::steady_clock::now() < until); ++run) {
                 const uint32_t n = 1 + static_cast<uint32_t>(rng.below(24));
                 Tally t(n);
                 t.caller = std::this_thread::get_id();
