@@ -1,6 +1,6 @@
-// The Music video sheet (Export page and project menu): shots, style, smooth follow, range, aspect, resolution, frame
-// rate and title card in the device kit's look, the live preview, and the offline render with progress, cancel and
-// the save picker.
+// The Music video sheet (Export page and project menu): the live preview, the editor (shot lane, shot list,
+// auto-cut), the director's shots, style, smooth follow, range, aspect, resolution, frame rate and title card in the
+// device kit's look, and the offline render with progress, cancel and the save picker. Edits save with the project.
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -11,6 +11,7 @@ import '../../model/app_state.dart';
 import '../../model/arrange_fx.dart';
 import '../../model/music_video.dart';
 import '../../model/music_video_director.dart';
+import '../../model/music_video_edit.dart';
 import '../../model/music_video_scene.dart';
 import '../../model/project.dart';
 import '../../model/song_export.dart';
@@ -20,13 +21,14 @@ import '../arrange/track_color.dart';
 import '../feedback.dart';
 import '../glass.dart';
 import '../haptics.dart';
-import '../motion.dart';
 import '../theme.dart';
 import '../widgets.dart';
+import 'video_editor.dart';
+import 'video_editor_page.dart';
 import 'video_preview.dart';
+import 'video_kit.dart';
 import 'video_render.dart';
 
-Color get _accent => Neon.pink;
 Color get _second => Neon.violet;
 
 /// The setup the sheet last used, for the next time it opens (this run of the app).
@@ -86,7 +88,16 @@ class MusicVideoPanel extends StatefulWidget {
 }
 
 class _MusicVideoPanelState extends State<MusicVideoPanel> {
-  late final MusicVideoOptions o = _lastOptions?.copy() ?? MusicVideoOptions();
+  /// The video as the project saved it (versioned), or a new one with the setup last used.
+  late final MusicVideoDoc _doc = p.musicVideo != null
+      ? MusicVideoDoc.fromJson(p.musicVideo, maxStep: p.maxArrangementSteps.toDouble())
+      // A new video: the setup last used this run, its shots the defaults with Falling notes when the song has notes
+      // (owner's go-ahead, 2026-11-12).
+      : MusicVideoDoc(options: (_lastOptions?.copy() ?? MusicVideoOptions())
+          ..shots = VideoShot.forNewVideo(hasNotes: _scene.notes.isNotEmpty));
+  MusicVideoOptions get o => _doc.options;
+  final _position = ValueNotifier<double>(0);
+  final _previewKey = GlobalKey<MusicVideoPreviewState>();
   late final VideoEncoder _encoder = widget.encoder ?? platformVideoEncoder();
   VideoEncoderCaps _caps = VideoEncoderCaps.fallback;
   late bool _customAspect = !VideoAspect.presets.contains(o.aspect);
@@ -116,6 +127,7 @@ class _MusicVideoPanelState extends State<MusicVideoPanel> {
   void dispose() {
     _lastOptions = o.copy();
     _render?.cancel();
+    _position.dispose();
     for (final c in [_title, _artist, _aw, _ah, _cw, _ch]) {
       c.dispose();
     }
@@ -147,7 +159,19 @@ class _MusicVideoPanelState extends State<MusicVideoPanel> {
   void _set(VoidCallback change) {
     Haptics.tap();
     setState(change);
+    _store();
   }
+
+  /// Auto-cut's loudness from the range's rendered audio.
+  Future<List<double>?> Function() _loudness(int a, int b) => () async => analyzeSongLoudness(projectJson:
+      p.toEngineJson(), scene: _scene, startStep: a, endStep: b, workDir: await _workDir(), audio: widget.audio,
+      cancelled: () => !mounted);
+
+  /// Saves the video's setup and shots with the project.
+  void _store() => s.setMusicVideo(_doc.toJson());
+
+  Future<Directory> _workDir() async => widget.workDir ??
+      Directory('${(await getApplicationSupportDirectory()).path}${Platform.pathSeparator}music_video');
 
   int? _int(TextEditingController c) => int.tryParse(c.text.trim());
 
@@ -165,11 +189,10 @@ class _MusicVideoPanelState extends State<MusicVideoPanel> {
       ..title = _title.text
       ..artist = _artist.text;
     final (a, b) = _span;
-    final dir = widget.workDir ??
-        Directory('${(await getApplicationSupportDirectory()).path}${Platform.pathSeparator}music_video');
+    final dir = await _workDir();
     _scene = videoSceneFor(s);
     final render = MusicVideoRender(projectJson: p.toEngineJson(), scene: _scene, options: o.copy(), startStep: a,
-        endStep: b, encoder: _encoder, workDir: dir, audio: widget.audio);
+        endStep: b, encoder: _encoder, workDir: dir, audio: widget.audio, timeline: _doc.timeline.copy());
     render.addListener(() {
       if (mounted) setState(() {});
     });
@@ -218,7 +241,7 @@ class _MusicVideoPanelState extends State<MusicVideoPanel> {
   @override
   Widget build(BuildContext context) {
     final (a, b) = _span;
-    final plan = directVideo(_scene, o, start: a.toDouble(), end: b.toDouble());
+    final plan = planVideo(_scene, o, _doc.timeline, start: a.toDouble(), end: b.toDouble());
     final (w, h) = o.size;
     final problem = o.problem(_caps);
     final render = _render;
@@ -231,39 +254,61 @@ class _MusicVideoPanelState extends State<MusicVideoPanel> {
       padding: EdgeInsets.fromLTRB(12, 0, 12, 16 + MediaQuery.viewInsetsOf(context).bottom),
       children: [
         const _Header(),
-        _Section('PREVIEW', children: [
-          MusicVideoPreview(state: s, scene: _scene, plan: plan, options: o, start: a.toDouble(), end: b.toDouble()),
-          _Note('${plan.shots.length} shots over $length, cut by the ${o.style.label.toLowerCase()} director. '
-              'The preview draws them live with the song; the render draws every frame offline.'),
+        VideoSection('PREVIEW', children: [
+          MusicVideoPreview(key: _previewKey, state: s, scene: _scene, plan: plan, options: o, start: a.toDouble(),
+              end: b.toDouble(), position: _position),
+          VideoNote(_doc.timeline.isEmpty
+              ? '${plan.shots.length} shots over $length, cut by the ${o.style.label.toLowerCase()} director. '
+                  'The preview draws them live with the song; the render draws every frame offline, the same.'
+              : '${plan.shots.length} shots over $length from the lane (empty stretches show the arrangement). '
+                  'The preview and the render draw them the same.'),
         ]),
-        _Section('SHOTS', children: [
+        VideoSection('SHOT LANE', children: [
+          MusicVideoEditor(
+            doc: _doc, scene: _scene, start: a.toDouble(), end: b.toDouble(), aspect: w / h, enabled: !busy,
+            playhead: _position,
+            onSeek: (st) => _previewKey.currentState?.seek(st),
+            onChanged: () => setState(() {}),
+            onSave: _store,
+            loudness: _loudness(a, b),
+            settings: s.settings,
+            onFullScreen: () async {
+              await openMusicVideoEditorPage(context, state: s, doc: _doc, scene: _scene, start: a.toDouble(),
+                  end: b.toDouble(), onSave: _store, loudness: _loudness(a, b));
+              if (mounted) setState(() {});
+            },
+          ),
+        ]),
+        VideoSection('SHOTS', children: [
           Wrap(spacing: 6, runSpacing: 6, children: [
             for (final shot in VideoShot.values)
-              _Pill(key: ValueKey('video-shot-${shot.name}'), label: shot.label.toUpperCase(), on: o.shots.contains(shot),
+              VideoPill(key: ValueKey('video-shot-${shot.name}'), label: shot.label.toUpperCase(), on: o.shots.contains(shot),
                   onTap: busy ? null : () => _set(() => o.shots.contains(shot) ? o.shots.remove(shot) : o.shots.add(shot))),
           ]),
-          _Note(o.shots.isEmpty ? 'Switch on at least one shot.' : [for (final x in o.shots) x.description].join('. ')),
+          VideoNote(o.shots.isEmpty
+              ? 'Switch on at least one shot.'
+              : 'The auto director and Auto-cut pick from these. ${[for (final x in o.shots) x.description].join('. ')}.'),
         ]),
-        _Section('STYLE', children: [
-          _Tiles<VideoStyle>(keyPrefix: 'video-style', values: VideoStyle.values, selected: o.style,
+        VideoSection('STYLE', children: [
+          VideoTiles<VideoStyle>(keyPrefix: 'video-style', values: VideoStyle.values, selected: o.style,
               label: (v) => v.label, enabled: (_) => !busy, onPick: (v) => _set(() => o.style = v),
               icon: (v) => switch (v) {
                     VideoStyle.calm => Icons.waves,
                     VideoStyle.energetic => Icons.bolt,
                     VideoStyle.minimal => Icons.crop_square,
                   }),
-          _Note(switch (o.style) {
+          VideoNote(switch (o.style) {
             VideoStyle.calm => 'Long shots of four to eight bars, crossfades, a slow camera.',
             VideoStyle.energetic => 'Cuts on the bar and the beat, pushes at sections and drops, a quick camera.',
             VideoStyle.minimal => 'Few, long shots and slow fades.',
           }),
           Padding(
             padding: const EdgeInsets.only(top: 8),
-            child: Align(alignment: Alignment.centerLeft, child: _Pill(key: const ValueKey('video-smooth-follow'),
+            child: Align(alignment: Alignment.centerLeft, child: VideoPill(key: const ValueKey('video-smooth-follow'),
                 label: 'SMOOTH FOLLOW', on: o.smoothFollow,
                 onTap: busy ? null : () => _set(() => o.smoothFollow = !o.smoothFollow))),
           ),
-          _Reveal(switchKey: o.smoothFollow, _Note(o.smoothFollow
+          VideoReveal(switchKey: o.smoothFollow, VideoNote(o.smoothFollow
               ? 'The arrangement and piano roll hold the playhead a third of the way in and scroll the song under it; '
                   'the zoom changes only at cuts.'
               : 'Off: the camera springs after the playhead and zooms through each shot.')),
@@ -271,20 +316,20 @@ class _MusicVideoPanelState extends State<MusicVideoPanel> {
             const Text('Seed', style: TextStyle(color: Neon.dim, fontSize: 12)),
             IconButton(key: const ValueKey('video-seed-down'), onPressed: busy || o.seed <= 1 ? null : () => _set(() => o.seed--),
                 icon: const Icon(Icons.remove)),
-            Text('${o.seed}', style: Neon.code(size: 14, color: _accent)),
+            Text('${o.seed}', style: Neon.code(size: 14, color: videoAccent)),
             IconButton(key: const ValueKey('video-seed-up'), onPressed: busy ? null : () => _set(() => o.seed++),
                 icon: const Icon(Icons.add)),
             const Expanded(child: Text('Another seed cuts differently; the same seed always cuts the same.',
                 style: TextStyle(color: Neon.dim, fontSize: 11))),
           ]),
         ]),
-        _Section('RANGE', children: [
-          _Tiles<VideoRange>(keyPrefix: 'video-range', values: VideoRange.values, selected: _range, height: 40,
+        VideoSection('RANGE', children: [
+          VideoTiles<VideoRange>(keyPrefix: 'video-range', values: VideoRange.values, selected: _range, height: 40,
               label: (v) => v.label, enabled: (v) => !busy && _rangeOk(v), onPick: (v) => _set(() => o.range = v)),
-          _Note('$length · bars ${a ~/ p.stepsPerBar + 1} to ${(b / p.stepsPerBar).ceil()}'),
+          VideoNote('$length · bars ${a ~/ p.stepsPerBar + 1} to ${(b / p.stepsPerBar).ceil()}'),
         ]),
-        _Section('ASPECT RATIO', children: [
-          _Tiles<String>(
+        VideoSection('ASPECT RATIO', children: [
+          VideoTiles<String>(
             keyPrefix: 'video-aspect',
             values: [for (final x in VideoAspect.presets) x.label, 'Custom'],
             selected: _customAspect ? 'Custom' : o.aspect.label,
@@ -300,14 +345,15 @@ class _MusicVideoPanelState extends State<MusicVideoPanel> {
               }
             }),
           ),
-          _Reveal(_customAspect
-              ? _Pair(keyPrefix: 'video-aspect', a: _aw, b: _ah, sep: ':', onChanged: () => setState(() {
-                  o.aspect = VideoAspect(_int(_aw) ?? 0, _int(_ah) ?? 0);
-                }))
+          VideoReveal(_customAspect
+              ? _Pair(keyPrefix: 'video-aspect', a: _aw, b: _ah, sep: ':', onChanged: () {
+                  setState(() => o.aspect = VideoAspect(_int(_aw) ?? 0, _int(_ah) ?? 0));
+                  _store();
+                })
               : null),
         ]),
-        _Section('RESOLUTION', children: [
-          _Tiles<VideoResolution>(keyPrefix: 'video-res', values: VideoResolution.values, selected: o.resolution,
+        VideoSection('RESOLUTION', children: [
+          VideoTiles<VideoResolution>(keyPrefix: 'video-res', values: VideoResolution.values, selected: o.resolution,
               height: 40, label: (v) => v.label, enabled: (_) => !busy, onPick: (v) => _set(() {
                 if (v == VideoResolution.custom) {
                   final (cw, chh) = o.size;
@@ -318,41 +364,50 @@ class _MusicVideoPanelState extends State<MusicVideoPanel> {
                 }
                 o.resolution = v;
               })),
-          _Reveal(o.resolution == VideoResolution.custom
-              ? _Pair(keyPrefix: 'video-size', a: _cw, b: _ch, sep: '×', onChanged: () => setState(() {
-                  o.customWidth = _int(_cw) ?? 0;
-                  o.customHeight = _int(_ch) ?? 0;
-                }))
+          VideoReveal(o.resolution == VideoResolution.custom
+              ? _Pair(keyPrefix: 'video-size', a: _cw, b: _ch, sep: '×', onChanged: () {
+                  setState(() {
+                    o.customWidth = _int(_cw) ?? 0;
+                    o.customHeight = _int(_ch) ?? 0;
+                  });
+                  _store();
+                })
               : null),
-          _Reveal(problem != null && o.shots.isNotEmpty
+          VideoReveal(problem != null && o.shots.isNotEmpty
               ? Padding(padding: const EdgeInsets.only(top: 6), child: Text(problem, key: const ValueKey('video-size-problem'),
                   maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: Neon.pink, fontSize: 11)))
               : null),
-          _Note('$w × $h · ${(o.bitrate / 1e6).toStringAsFixed(1)} Mbit/s · '
+          VideoNote('$w × $h · ${(o.bitrate / 1e6).toStringAsFixed(1)} Mbit/s · '
               'this encoder takes up to ${_caps.maxLong} × ${_caps.maxShort}'),
         ]),
-        _Section('FRAME RATE', children: [
-          _Tiles<int>(keyPrefix: 'video-fps', values: MusicVideoOptions.frameRates, selected: o.fps, height: 40,
+        VideoSection('FRAME RATE', children: [
+          VideoTiles<int>(keyPrefix: 'video-fps', values: MusicVideoOptions.frameRates, selected: o.fps, height: 40,
               label: (v) => '$v fps', enabled: (_) => !busy, onPick: (v) => _set(() => o.fps = v)),
-          _Note('${clock.frameCount} frames.'),
+          VideoNote('${clock.frameCount} frames.'),
         ]),
-        _Section('TITLE CARD', children: [
-          _Pill(key: const ValueKey('video-title-card'), label: 'TITLE CARD', on: o.titleCard,
+        VideoSection('TITLE CARD', children: [
+          VideoPill(key: const ValueKey('video-title-card'), label: 'TITLE CARD', on: o.titleCard,
               onTap: busy ? null : () => _set(() => o.titleCard = !o.titleCard)),
-          _Reveal(o.titleCard
+          VideoReveal(o.titleCard
               ? Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
                   TextField(key: const ValueKey('video-title'), controller: _title, enabled: !busy,
                       decoration: InputDecoration(isDense: true, labelText: 'Title', hintText: p.name),
-                      onChanged: (v) => setState(() => o.title = v)),
+                      onChanged: (v) {
+                        setState(() => o.title = v);
+                        _store();
+                      }),
                   TextField(key: const ValueKey('video-artist'), controller: _artist, enabled: !busy,
                       decoration: const InputDecoration(isDense: true, labelText: 'Artist'),
-                      onChanged: (v) => setState(() => o.artist = v)),
+                      onChanged: (v) {
+                        setState(() => o.artist = v);
+                        _store();
+                      }),
                 ])
               : null),
-          _Note('Three seconds over the opening shot. The video uses the current theme, ${Neon.active.name}.'),
+          VideoNote('Three seconds over the opening shot. The video uses the current theme, ${Neon.active.name}.'),
         ]),
         const SizedBox(height: 12),
-        _Reveal(busy && render != null
+        VideoReveal(busy && render != null
             ? Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
           Row(children: [
             Expanded(child: Text(
@@ -363,13 +418,13 @@ class _MusicVideoPanelState extends State<MusicVideoPanel> {
               render.cancel();
             }, child: const Text('Cancel')),
           ]),
-          Bar(value: render.progress, color: _accent, height: 6),
+          Bar(value: render.progress, color: videoAccent, height: 6),
         ])
             : Pressable(
-            glow: _accent,
+            glow: videoAccent,
             child: FilledButton.icon(
               key: const ValueKey('video-render'),
-              style: FilledButton.styleFrom(backgroundColor: _accent, foregroundColor: Neon.bg,
+              style: FilledButton.styleFrom(backgroundColor: videoAccent, foregroundColor: Neon.bg,
                   minimumSize: const Size.fromHeight(52)),
               onPressed: problem == null ? _start : null,
               icon: const Icon(Icons.movie_creation_outlined),
@@ -378,12 +433,12 @@ class _MusicVideoPanelState extends State<MusicVideoPanel> {
             ),
           ),
           switchKey: busy),
-        _Reveal(!busy && render?.output != null
+        VideoReveal(!busy && render?.output != null
             ? Padding(padding: const EdgeInsets.only(top: 8), child: FilledButton.tonalIcon(
                 key: const ValueKey('video-save'), onPressed: _save, icon: const Icon(Icons.save_alt),
                 label: Text('Save .${_encoder.extension}')))
             : null),
-        _Reveal(problem != null || _message != null
+        VideoReveal(problem != null || _message != null
             ? Padding(
                 padding: const EdgeInsets.only(top: 8),
                 child: Text(problem ?? _message!, key: const ValueKey('video-message'), maxLines: 2,
@@ -392,7 +447,7 @@ class _MusicVideoPanelState extends State<MusicVideoPanel> {
               )
             : null),
         if (!platformWritesMp4)
-          const _Note('This platform has no MP4 encoder yet: Render writes a list of frame hashes (Android and '
+          const VideoNote('This platform has no MP4 encoder yet: Render writes a list of frame hashes (Android and '
               'Windows write H.264 + AAC MP4).'),
       ],
     );
@@ -407,63 +462,14 @@ class _Header extends StatelessWidget {
         padding: const EdgeInsets.only(bottom: 6),
         child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
           Row(children: [
-            Icon(Icons.movie_filter_outlined, size: 18, color: _accent),
+            Icon(Icons.movie_filter_outlined, size: 18, color: videoAccent),
             const SizedBox(width: 8),
             const Text('MUSIC VIDEO', style: TextStyle(fontSize: 13, letterSpacing: 1.6, fontWeight: FontWeight.w800)),
           ]),
           const SizedBox(height: 6),
           Container(height: 3, decoration: BoxDecoration(borderRadius: BorderRadius.circular(2),
-              gradient: LinearGradient(colors: [_accent, _second]))),
+              gradient: LinearGradient(colors: [videoAccent, _second]))),
         ]),
-      );
-}
-
-/// Shows [child] (or nothing) and animates the change: the height eases and the content fades, in the theme's
-/// motion tokens (instant with motion Off). [switchKey] marks a swap between two children of the same kind.
-class _Reveal extends StatelessWidget {
-  const _Reveal(this.child, {this.switchKey});
-  final Widget? child;
-  final Object? switchKey;
-
-  @override
-  Widget build(BuildContext context) {
-    final d = Motion.fade(Motion.standard, Motion.of(context));
-    return AnimatedSize(
-      duration: d,
-      curve: Curves.easeOutCubic,
-      alignment: Alignment.topCenter,
-      child: AnimatedSwitcher(
-        duration: d,
-        child: KeyedSubtree(key: ValueKey(switchKey ?? child != null), child: child ?? const SizedBox(width: double.infinity)),
-      ),
-    );
-  }
-}
-
-class _Section extends StatelessWidget {
-  const _Section(this.title, {required this.children});
-  final String title;
-  final List<Widget> children;
-
-  @override
-  Widget build(BuildContext context) => Padding(
-        padding: const EdgeInsets.only(top: 10),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-          Padding(padding: const EdgeInsets.only(bottom: 6), child: Text(title,
-              style: TextStyle(fontSize: 10, letterSpacing: 1.4, fontWeight: FontWeight.w800, color: _accent))),
-          ...children,
-        ]),
-      );
-}
-
-class _Note extends StatelessWidget {
-  const _Note(this.text);
-  final String text;
-
-  @override
-  Widget build(BuildContext context) => Padding(
-        padding: const EdgeInsets.only(top: 6),
-        child: Text(text, style: const TextStyle(color: Neon.dim, fontSize: 11)),
       );
 }
 
@@ -496,92 +502,3 @@ class _Pair extends StatelessWidget {
       );
 }
 
-/// A row of choice tiles (the device kit's mode tiles), as the Export sheet's.
-class _Tiles<T> extends StatelessWidget {
-  const _Tiles({required this.keyPrefix, required this.values, required this.selected, required this.label,
-      required this.onPick, this.icon, this.enabled, this.height = 54});
-  final String keyPrefix;
-  final List<T> values;
-  final T selected;
-  final String Function(T) label;
-  final IconData Function(T)? icon;
-  final bool Function(T)? enabled;
-  final void Function(T) onPick;
-  final double height;
-
-  @override
-  Widget build(BuildContext context) => SizedBox(
-        height: height,
-        child: Row(children: [
-          for (var k = 0; k < values.length; k++)
-            Expanded(child: Padding(
-              padding: EdgeInsets.only(right: k < values.length - 1 ? 4 : 0),
-              child: _tile(context, values[k]),
-            )),
-        ]),
-      );
-
-  Widget _tile(BuildContext context, T v) {
-    final on = v == selected;
-    final ok = enabled?.call(v) ?? true;
-    final c = _accent;
-    return Semantics(
-      button: true,
-      selected: on,
-      enabled: ok,
-      label: label(v),
-      child: GestureDetector(
-        key: ValueKey('$keyPrefix-${v is Enum ? v.name : v}'),
-        behavior: HitTestBehavior.opaque,
-        onTap: ok && !on ? () => onPick(v) : null,
-        child: Pressable(enabled: ok, glow: c, child: AnimatedContainer(
-          duration: Motion.fade(Motion.small, Motion.of(context)),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(10),
-            color: on ? c.withValues(alpha: 0.2) : Colors.white.withValues(alpha: ok ? 0.03 : 0.0),
-            border: Border.all(color: on ? c : Neon.line.withValues(alpha: ok ? 1 : 0.4), width: on ? 1.5 : 1),
-            boxShadow: on ? [BoxShadow(color: c.withValues(alpha: 0.25), blurRadius: 10)] : null,
-          ),
-          child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-            if (icon != null) Icon(icon!(v), size: 18, color: on ? c : (ok ? Neon.dim : Neon.dim.withValues(alpha: 0.4))),
-            Padding(padding: const EdgeInsets.symmetric(horizontal: 4), child: Text(label(v).toUpperCase(),
-                maxLines: 1, overflow: TextOverflow.ellipsis,
-                style: TextStyle(fontSize: 9.5, letterSpacing: 0.3, fontWeight: FontWeight.w800,
-                    color: on ? Neon.text : (ok ? Neon.dim : Neon.dim.withValues(alpha: 0.4))))),
-          ]),
-        )),
-      ),
-    );
-  }
-}
-
-/// An on/off pill (the device kit's toggle).
-class _Pill extends StatelessWidget {
-  const _Pill({super.key, required this.label, required this.on, required this.onTap});
-  final String label;
-  final bool on;
-  final VoidCallback? onTap;
-
-  @override
-  Widget build(BuildContext context) => Semantics(toggled: on, label: label, child: GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onTap: onTap,
-        child: Pressable(glow: _accent, radius: 18, child: AnimatedContainer(
-          duration: Motion.fade(Motion.small, Motion.of(context)),
-          height: 36,
-          padding: const EdgeInsets.symmetric(horizontal: 12),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(18),
-            color: on ? _accent.withValues(alpha: 0.22) : Colors.white.withValues(alpha: 0.03),
-            border: Border.all(color: on ? _accent : Neon.line),
-            boxShadow: on ? [BoxShadow(color: _accent.withValues(alpha: 0.3), blurRadius: 10)] : null,
-          ),
-          child: Row(mainAxisSize: MainAxisSize.min, children: [
-            Icon(on ? Icons.check_circle : Icons.circle_outlined, size: 15, color: on ? _accent : Neon.dim),
-            const SizedBox(width: 6),
-            Text(label, style: TextStyle(fontSize: 10, letterSpacing: 1, fontWeight: FontWeight.w800,
-                color: on ? Neon.text : Neon.dim)),
-          ]),
-        )),
-      ));
-}

@@ -24,7 +24,8 @@ enum Area {
   tabs('tabs', 'Build tabs'),
   settings('settings', 'Settings'),
   page('page', 'Pages and panels'),
-  menu('menus', 'Menus and sheets');
+  menu('menus', 'Menus and sheets'),
+  video('video', 'Music video editor');
 
   /// The name used in keymap files.
   final String fileName;

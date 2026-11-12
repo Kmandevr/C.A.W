@@ -1989,6 +1989,12 @@ class AppState extends ChangeNotifier {
     _changed();
   }
 
+  /// Saves the music video's setup and shots ([ProjectDoc.musicVideo]) with the project; nothing the engine plays.
+  void setMusicVideo(Map<String, dynamic> json) {
+    project.musicVideo = json;
+    _changed(engine: false);
+  }
+
   Future<List<ProjectSummary>> listProjects() async => await _storage?.list() ?? const [];
 
   Future<void> _switchTo(ProjectDoc p, {bool saveCurrent = true}) async {
