@@ -6,6 +6,12 @@ updated: 2026-11-12
 
 # Decisions
 
+## 2026-11-12: Frame rate: Auto by default, caps the screen has (owner)
+
+**Decision (owner):** the app uses high-refresh screens (60, 120, up to 240 Hz where the screen has them), with a **Frame rate** setting (Settings › Performance; the app has no Display page). **Auto** (the default) runs at the screen's highest rate while anything moves and drops to its lowest when the screen is still, to save battery. Fixed caps are 60 / 90 / 120 / 144 / 240 Hz, shown only where the screen supports them. Playback follows the cap: one rate everywhere, playhead, meters and the music video preview. The OS has the last word (battery saver, its peak-rate setting): the app only asks.
+
+**Why the platform channel:** no new dependency; Android's own window request (`preferredDisplayModeId`, `preferredRefreshRate`) is enough, behind `DisplayRateDevice`. Windows draws at the monitor's rate and offers Auto only. Details in [app](app.md) (Frame rate).
+
 ## 2026-11-12: Perceptually identical, not bit-identical; speed first (owner)
 
 **Decision (owner):** engine output must be **perceptually identical and consistent**, not bit-identical, across platforms, live playback against export, and repeated runs. This replaces every earlier promise of identical bits (the 2026-11-03 "Exports are always bit-identical" and golden-hash entries, and the 2026-11-10 "perceptually the same" entry, rewritten below to point here).

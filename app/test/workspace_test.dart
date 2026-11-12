@@ -150,7 +150,12 @@ void main() {
     await tester.pump();
     expect(m().shownDb, closeTo(-6.02, 0.01));
     expect(tester.widget<Bar>(find.byType(Bar)).value, closeTo(0.9, 0.001));
-    expect(tester.binding.hasScheduledFrame, isFalse, reason: 'while sound comes in, the reads move it: no ticker');
+    expect(tester.binding.hasScheduledFrame, isTrue, reason: 'between reads the bar falls on every frame');
+    await tester.pump(const Duration(milliseconds: 25));
+    expect(m().shownDb, closeTo(-6.02 - PeakMeter.fallDbPerSecond * .025, 0.01), reason: 'a frame between reads');
+    state.tick.value++; // the next read, as loud: up at once
+    await tester.pump();
+    expect(m().shownDb, closeTo(-6.02, 0.01));
     // A silent read, then no more (the engine went quiet): the bar falls at the set rate, the line holds 1.5 s.
     peak = 0;
     state.tick.value++;

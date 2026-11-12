@@ -1,4 +1,6 @@
 // Entry point: loads the settings, starts the app state (engine, audio, startup choice) and shows the shell.
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -10,9 +12,11 @@ import 'model/live_midi.dart';
 import 'model/problem_log.dart';
 import 'model/settings.dart';
 import 'platform/desktop_window.dart';
+import 'platform/display_rate.dart';
 import 'platform/haptics_device.dart';
 import 'platform/mic_permission.dart';
 import 'platform/midi_input.dart';
+import 'ui/frame_rate.dart';
 import 'ui/glass.dart';
 import 'ui/haptics.dart';
 import 'ui/keyboard/keyboard_layer.dart';
@@ -38,6 +42,10 @@ Future<void> main() async {
   Haptics.device = platformHapticsDevice(); // the vibrator's fine primitives on Android
   DesktopWindow.current = platformDesktopWindow(); // the window's title and files opened with or dropped on it
   final settings = await Settings.open();
+  // The frame-rate setting: the screen's rates, then Auto's idle drop or the cap (Settings keeps its cap up to date).
+  final frameRate = FrameRateController(device: platformDisplayRate())..setCap(settings.frameRate);
+  FrameRateController.current = frameRate;
+  unawaited(frameRate.start());
   final state = AppState(settings: settings);
   // One MIDI listener for the app's life, above the shell (which a theme change rebuilds).
   LiveMidi.current = LiveMidi(state, platformMidiInput(clock: () => state.engine?.midiClockNs ?? 0));
