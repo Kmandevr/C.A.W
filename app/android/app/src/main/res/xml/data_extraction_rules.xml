@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android 12 and later (android:dataExtractionRules): cloud backup and device-to-device transfer keep everything
+     as before except telemetry's state (delete keys, queued feedback with its email). See backup_rules.xml. -->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="file" path="telemetry.json" />
+        <exclude domain="file" path="telemetry.json.tmp" />
+        <exclude domain="file" path="telemetry.json.bad" />
+        <exclude domain="file" path="telemetry.json.bad.tmp" />
+        <exclude domain="root" path="app_flutter/telemetry.json" />
+        <exclude domain="root" path="app_flutter/telemetry.json.tmp" />
+        <exclude domain="root" path="app_flutter/telemetry.json.bad" />
+        <exclude domain="root" path="app_flutter/telemetry.json.bad.tmp" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="file" path="telemetry.json" />
+        <exclude domain="file" path="telemetry.json.tmp" />
+        <exclude domain="file" path="telemetry.json.bad" />
+        <exclude domain="file" path="telemetry.json.bad.tmp" />
+        <exclude domain="root" path="app_flutter/telemetry.json" />
+        <exclude domain="root" path="app_flutter/telemetry.json.tmp" />
+        <exclude domain="root" path="app_flutter/telemetry.json.bad" />
+        <exclude domain="root" path="app_flutter/telemetry.json.bad.tmp" />
+    </device-transfer>
+</data-extraction-rules>

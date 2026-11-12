@@ -90,9 +90,16 @@ class MidiMessage {
 
 /// A MIDI device the platform sees.
 class MidiPort {
-  const MidiPort({required this.id, required this.name, this.kind = 'usb', this.ump = false, this.open = true, this.off = false});
+  const MidiPort({required this.id, required this.name, this.kind = 'usb', this.ump = false, this.open = true, this.off = false,
+      this.usbVendorId, this.usbProductId});
   final int id;
+
+  /// The port's name as shown: it can be one the user set (a Bluetooth name, a renamed port), so it never leaves
+  /// the device.
   final String name;
+
+  /// A USB device's vendor and product ids (Android).
+  final int? usbVendorId, usbProductId;
 
   /// 'usb', 'bluetooth' or 'virtual' (Android); 'port' on Windows.
   final String kind;
@@ -178,6 +185,8 @@ class _AndroidMidiInput implements MidiInput {
               ump: d['ump'] == true,
               open: d['open'] == true,
               off: d['off'] == true,
+              usbVendorId: d['usbVendor'] is int ? d['usbVendor'] as int : null,
+              usbProductId: d['usbProductId'] is int ? d['usbProductId'] as int : null,
             ),
       ]);
 
