@@ -6,6 +6,34 @@ updated: 2026-11-12
 
 # Decisions
 
+## 2026-11-12: The music video's second round: export, layout, text, images, transitions, camera, the beat and speed (owner)
+
+**Decision (owner, 2026-11-12, answers of the day):**
+- **Export:** 24 fps and a quality or file-size choice (small, balanced or high, the bitrate shown); range as it is; transitions, processing and effects "on the beat" in the export.
+- **Layout:** the sheet and editor in clear sections or tabs (Shots/Edit, Look/Effects, Text & media, Export), the preview kept in sight, a pinned compact export bar with Render, in the app's design language and clearly better on a phone.
+- **Text and titles:** overlays per shot (title, artist, free text) with size, place, a palette colour and in/out animations (fade, slide, pop, typewriter) that can sync to the beat; the Title card becomes one preset.
+- **Images:** the user's image (cover art, logo, watermark) as an overlay or a background, per shot or for the whole video, picked with the system picker, copied into the project's assets, decoded with size limits.
+- **Transitions:** crossfade, slide, zoom, flash, wipe, glitch, their length in beats or bars, per cut (cut marker → picker); auto-cut picks transitions to match the style.
+- **Camera moves:** keyframed pan and zoom per shot (start and end framing, eased); the auto camera stays the default.
+- **Effects on the beat:** presets per effect ("pulse on every beat", "flash on the downbeat") and beat markers on the lane.
+- **Speed** ("really slow to build the video"): profile first with numbers, fix what it shows; render in the background while the user works with a progress chip and a done notice, only while the app is open (the mediaPlayback foreground service approved for playback on another branch is not extended here); a quick draft render; before and after in seconds per rendered second.
+- **Storage:** everything saves with the project; the format's version goes up, older projects read, parsing bounded.
+
+**Built (Claude, 2026-11-12; choices to confirm, [App](app.md) "Music video" has the behaviour, [performance](performance.md#music-video-render-2026-11-12) the numbers):**
+- **Quality:** Small, Balanced and High are 0.05, 0.1 and 0.2 bit per pixel per frame (1–40, 2–80 and 4–80 Mbit/s); Balanced is what every video used, so a saved video renders as it did. **Draft:** 360 on the short side, 15 fps, Small, saved with `_draft` in its name.
+- **"On the beat in the export"** read as: the export draws each frame at its song time, so transitions timed in beats or bars, the effects' beat presets and beat-synced text land on the beat in the file exactly as in the preview; the Export tab says what is on the beat. [Assumption] No separate export-wide beat switch was added; open (owner): whether one was wanted.
+- **Layout:** the preview (about a quarter of the height on a phone) and the lane stay on top, four tabs under them (Shots, Look, Text & media, Export; the words without icons under 420 dp), the export bar pinned at the bottom with Draft and Render. The full-screen page is the same panel on the same video (from 900 dp the preview and lane on the left, the tabs on the right). The director's settings moved into the Shots tab as "Auto director".
+- **The Title card stays its own switch** at the top of Text & media, the first of the text presets (Title card, Title, Artist, Lower third, Text): drawn as before, so earlier videos' frames are unchanged (the pinned frame hashes pass). Title and Artist overlays read the title card's fields.
+- **Text on the beat** (the default for a new overlay): it comes in on the first beat of its span, a popped text pulses on every beat, a typewriter types a letter a sixteenth.
+- **Images** go into `video-assets/<project>/` beside the projects (deleted with the project), saved by file name only (`img<n>.<ext>`, checked against a pattern), so a downloaded project can't point the app at other files. Limits: 24 MB a file, 8,192 px a side and 40 megapixels (read from the header before decoding), kept at most 2,048 px on the long side. [Assumption] Project packages (zip) don't carry them yet; open (owner): whether they should.
+- **Transitions:** Push stays beside the six new ones (saved videos use it). Lengths offered: half a beat, 1, 2 and 3 beats, a bar, two bars. Flash is one burst at the cut; Flash and Glitch carry a note for photosensitive viewers. Auto-cut's matching (`styledTransition`) is on by default, also for auto-cut settings saved before it (its sheet's settings save with the video).
+- **Camera moves** frame the whole shot (zoom 1–3×, the place kept inside the picture) with four eases and five presets; with one, the views keep their own width (no opening zoom) and still follow the song.
+- **Beat presets** set the drive, pulse length and amount; an Off-beat drive was added for "hit the off-beat". The lane ticks every beat and dots each beat effect's hits.
+- **Speed** (profile first; [performance](performance.md#music-video-render-2026-11-12)): the render keeps a profile; frames rasterise up to three ahead of the encoder (about 64 MB at most); Android frames go through the codec's input Surface (the GPU converts RGBA to YUV) over a binary channel into two reused buffers, with a row-at-a-time CPU path where the Surface fails; the encoder no longer waits 10 ms a frame for output mid-stream; laid-out text is kept between frames. Not done: more than one raster thread (Flutter rasterises on one), and caching whole static layers as pictures (the views move every frame; the profile shows rasterising, not recording, is the cost).
+- **Background render:** one at a time (`MusicVideoJobs`), a chip over the app with progress, Cancel, then Save or why it failed; it continues only while the app is open, with no foreground service.
+- **Storage:** `music_video` `version: 2` (texts, image assets and layers, camera moves, the new transitions and drive, 24 fps, quality); version 1 reads as it was; bounded: 32 texts and 16 images a shot or video, 32 assets.
+- **No new dependency and no engine C API change** (`file_picker` was already in use).
+
 ## 2026-11-12: No shared buses; work the REAPER way (owner)
 
 **Decision (owner):** "I don't love the use of busses. I like REAPER's way of working." The shared reverb-bus idea (A7) is dropped. Routing stays REAPER-style: tracks, folders and sends between tracks, with no separate bus concept added. Speed for heavy Flagship patches comes from the engine itself.

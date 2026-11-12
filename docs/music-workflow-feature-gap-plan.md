@@ -43,7 +43,7 @@ This note records the current implementation gaps in C.A.W.'s music-production w
 ### Export and file workflow
 
 - **[Implemented]** Native offline WAV rendering, loop/free-length/one-shot/wavetable export, MIDI pattern export, named export profiles, export history and a sequential in-memory queue (up to 50 jobs).
-- **[Implemented]** The arrangement music video: an offline MP4 render, cut by an auto director or edited as shots on a lane (layouts, looks, effects, auto-cut), saved with the project ([app](app.md)); the platform encoders are not yet run on a device.
+- **[Implemented]** The arrangement music video: an offline MP4 render, cut by an auto director or edited as shots on a lane (layouts, looks, effects, transitions, camera moves, text overlays, images, auto-cut), with drafts and a background render, saved with the project ([app](app.md)); the platform encoders are not yet run on a device.
 - **[Partial]** Queue state is not persisted across restarts; batch/stem rendering and multi-destination automation are incomplete.
 - **[Incomplete]** SFZ multisample workflow, stems export, persistent/recoverable export queue and broader batch delivery.
 
