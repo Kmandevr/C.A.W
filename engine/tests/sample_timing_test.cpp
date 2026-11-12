@@ -1,10 +1,14 @@
 // Note timing is exact to the sample on every platform: ratchets and fractional starts land where strict maths puts them.
+#include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
 #include <string>
 #include <vector>
 
 #include "engine.h"
+#include "midifile.h"
+#include "pattern.h"
 #include "project.h"
 #include "sample_time.h"
 #include "test.h"
@@ -86,5 +90,84 @@ TEST(sample_time_helpers_match_strict_maths_across_a_sweep) {
                         }
         }
     CHECK(checked > 100000);
+    CHECK_EQ(mismatches, 0);
+}
+
+namespace {
+
+// The absolute ticks of every note-on (velocity > 0) in a Standard MIDI File, over all its tracks.
+std::vector<int64_t> noteOnTicks(const std::vector<uint8_t>& b) {
+    std::vector<int64_t> out;
+    size_t p = 14;  // past MThd
+    while (p + 8 <= b.size()) {
+        const size_t len = (size_t{b[p + 4]} << 24) | (size_t{b[p + 5]} << 16) | (size_t{b[p + 6]} << 8) | b[p + 7];
+        const size_t end = std::min(b.size(), p + 8 + len);
+        size_t i = p + 8;
+        int64_t tick = 0;
+        uint8_t status = 0;
+        auto vlq = [&]() {
+            uint64_t v = 0;
+            while (i < end) {
+                const uint8_t c = b[i++];
+                v = (v << 7) | (c & 0x7f);
+                if (!(c & 0x80)) break;
+            }
+            return v;
+        };
+        while (i < end) {
+            tick += static_cast<int64_t>(vlq());
+            if (i >= end) break;
+            if (b[i] == 0xff) {  // meta: type, length, data
+                i += 2;
+                i += vlq();
+                continue;
+            }
+            if (b[i] == 0xf0 || b[i] == 0xf7) {
+                ++i;
+                i += vlq();
+                continue;
+            }
+            if (b[i] & 0x80) status = b[i++];
+            const int data = (status & 0xf0) == 0xc0 || (status & 0xf0) == 0xd0 ? 1 : 2;
+            if ((status & 0xf0) == 0x90 && i + 1 < end && b[i + 1] > 0) out.push_back(tick);
+            i += static_cast<size_t>(data);
+        }
+        p = end;
+    }
+    std::sort(out.begin(), out.end());
+    return out;
+}
+
+}  // namespace
+
+TEST(midi_export_puts_ratchet_repeats_on_the_strict_tick) {
+    // The exported repeats come from the same strict step as playback (sample_time.h ratchetStep), so a file is the
+    // same on every platform: each note-on at llround(step * ticks per step) of the strict step.
+    const RatchetCase cases[] = {{44100, 60, 2, 1, 6}, {44100, 77, 1.25, 1.25, 6}, {44100, 140, 2, 1.25, 7},
+                                 {22050, 77, 5.25, 0.75, 7}, {22050, 60, 0.75, 1.25, 7}};
+    constexpr double kStepTicks = kMidiExportPpq / 4.0;
+    for (const RatchetCase& c : cases) {
+        char line[96];
+        std::snprintf(line, sizeof line, "%.17g C4 %.17g 1 ratchet %d\n", c.at, c.len, c.ratchet);
+        const PatternResult r = parsePattern(std::string("---\nkind: pattern\nlength: 32\n---\n") + line);
+        CHECK(r.pattern != nullptr);
+        if (!r.pattern) continue;
+        const std::vector<int64_t> got = noteOnTicks(patternToSmf(*r.pattern, c.bpm, 4));
+        CHECK_EQ(got.size(), static_cast<size_t>(c.ratchet));
+        for (int sub = 0; sub < c.ratchet && static_cast<size_t>(sub) < got.size(); ++sub)
+            CHECK_EQ(got[static_cast<size_t>(sub)],
+                     static_cast<int64_t>(std::llround(cawtest::strictRatchetStep(c.at, c.len, c.ratchet, sub) * kStepTicks)));
+    }
+}
+
+TEST(tempo_synced_effects_place_the_song_beat_on_the_strict_frame) {
+    // fx::creative::StepClock locks to the song's frame, floor(beat * 60 * rate / tempo + 0.5), through sample_time.h.
+    int mismatches = 0;
+    for (const double rate : {22050.0, 44100.0, 48000.0, 96000.0})
+        for (const double tempo : {60.0, 77.0, 93.0, 133.0, 174.0, 87.5})
+            for (int k = 0; k < 2000; ++k) {
+                const double beat = k / 7.0;
+                if (sampletime::roundBeatFrames(beat, rate, tempo) != cawtest::strictBeatFrame(beat, rate, tempo)) ++mismatches;
+            }
     CHECK_EQ(mismatches, 0);
 }

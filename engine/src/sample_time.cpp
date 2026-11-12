@@ -21,6 +21,10 @@ double roundRepeat(int64_t k, double steps, double stepFrames) noexcept {
 
 double clipStep(double timeline, double step, double from) noexcept { return timeline + (step - from); }
 
+double roundBeatFrames(double beat, double rate, double tempo) noexcept {
+    return std::floor(beat * 60.0 * rate / tempo + 0.5);
+}
+
 double beatOffset(double pos, double beat, double beatFrames) noexcept { return pos - beat * beatFrames; }
 
 }  // namespace caw::sampletime

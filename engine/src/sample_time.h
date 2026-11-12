@@ -30,6 +30,8 @@ CAW_STRICT_FN double roundFrames(double x, double scale) noexcept;
 CAW_STRICT_FN double roundRepeat(int64_t k, double steps, double stepFrames) noexcept;
 // timeline + (step - from): a source step `step` moved to a clip placed at `timeline` that starts at source step `from`.
 CAW_STRICT_FN double clipStep(double timeline, double step, double from) noexcept;
+// floor(beat * 60 * rate / tempo + 0.5): the frame a song beat (quarter notes) falls on, at `tempo` BPM.
+CAW_STRICT_FN double roundBeatFrames(double beat, double rate, double tempo) noexcept;
 // pos - beat * beatFrames: how far past the start of beat `beat` sample `pos` is.
 CAW_STRICT_FN double beatOffset(double pos, double beat, double beatFrames) noexcept;
 
