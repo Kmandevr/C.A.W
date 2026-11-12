@@ -42,6 +42,10 @@ The relay does not store IP addresses. To limit abuse it counts requests per sen
 
 Cloudflare and GitHub process the requests as hosting providers, under their own privacy policies. Cloudflare, like any web service, sees the connection's IP address while handling it.
 
+## Update check
+
+Separately from telemetry, C.A.W checks GitHub Releases for updates at most once a day, through an unauthenticated request to api.github.com that sends nothing about you beyond what any web request carries (your IP address and the generic user agent "CAW-app"). You can turn the check off in Settings › About and beta › Updates.
+
 ## Feedback
 
 If you use **Send feedback** in the app (in the project menu, or Settings › About and beta › Privacy), your text and any attachments you choose (device info, the last Benchmark result, an error log; each shown to you before sending) are posted as a **public** Issue in this repository. Please don't include personal details. If you add a contact email, it is **not** published: it's kept privately for up to 180 days so the developer can reply, then deleted.

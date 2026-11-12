@@ -6,7 +6,9 @@
     <exclude domain="file" path="telemetry.json" />
     <exclude domain="file" path="telemetry.json.tmp" />
     <exclude domain="file" path="telemetry.json.bad" />
+    <exclude domain="file" path="telemetry.json.bad.tmp" />
     <exclude domain="root" path="app_flutter/telemetry.json" />
     <exclude domain="root" path="app_flutter/telemetry.json.tmp" />
     <exclude domain="root" path="app_flutter/telemetry.json.bad" />
+    <exclude domain="root" path="app_flutter/telemetry.json.bad.tmp" />
 </full-backup-content>

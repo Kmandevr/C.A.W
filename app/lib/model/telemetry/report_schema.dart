@@ -184,13 +184,12 @@ class TelemetryAllowList {
   // may be an explicit null.
   /// One `device.peripherals` entry, or null without a kind and connection.
   Object? peripheral(Object? v) => switch (_object({
+        // No model (a USB product string can be the owner's own) and no inUse (security review, 2026-11-12).
         'kind': _oneOf(peripheralKinds),
         'connection': _oneOf(connections),
-        'model': _makerText(80),
         'vendorId': _match(_usbId),
         'productId': _match(_usbId),
         'channels': _int(0, 1024),
-        'inUse': _bool,
       })(v)) {
         final Map<String, Object?> m when m.containsKey('kind') && m.containsKey('connection') => m,
         _ => null,
@@ -212,8 +211,11 @@ class TelemetryAllowList {
     'ramGB': _nullable(_int(0, 4096)),
     'gpu': _nullable(_hardwareText),
     'refreshHz': _nullable(_int(0, 1000)),
+    // Pixels to the nearest 10, and no dpi (security review, 2026-11-12).
     'screen': (v) => switch (_object({
-          'widthPx': _int(0, 100000), 'heightPx': _int(0, 100000), 'dpi': _int(0, 10000), 'displays': _int(0, 64),
+          'widthPx': (w) => _int(0, 100000)(w) is int && (w as int) % 10 == 0 ? w : null,
+          'heightPx': (h) => _int(0, 100000)(h) is int && (h as int) % 10 == 0 ? h : null,
+          'displays': _int(0, 64),
         })(v)) {
           final Map<String, Object?> m when m.containsKey('widthPx') && m.containsKey('heightPx') => m,
           _ => null,
@@ -226,7 +228,7 @@ class TelemetryAllowList {
       'sampleRate': _nullable(_int(0, 1000000)),
       'output': _oneOf(connections),
     }),
-    'peripherals': _list(peripheral, 16),
+    'peripherals': _list(peripheral, 8), // H2 allows 16; the app sends at most 8
     'profile': _oneOf({'full', 'balanced', 'lightweight', 'minimal'}),
     'eco': _bool,
   });

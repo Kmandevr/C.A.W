@@ -288,10 +288,10 @@ The email is never published; the server keeps it privately for the owner.
 - **Delete:** `/v1/delete` accepts any receipt and key; unknown or already-deleted receipts aren't counted.
 - **Keys:** `caw-release-1` for release-channel builds beside `caw-beta-1`.
 - **Device and peripherals (all optional):** `platform` also `ios` and `macos`; `arch` (arm64, arm, x64, x86, riscv64, other); `osName`; `osVersion` as major or major.minor[.build]; `manufacturer` and `model`, maker-defined only; `formFactor` (phone, tablet, laptop, desktop, tv, other, unknown); `screen` `{widthPx, heightPx, dpi?, displays?}`; `audio.output` (builtin, usb, bluetooth, wired, hdmi, displayport, network, other, unknown); `peripherals`, up to 16 `{kind, connection, model?, vendorId?, productId?, channels?, inUse?}`. Never a name the user can set, a serial number, a hardware address, a port path or a full OS build string.
+- **What the app actually sends of these (security review, 2026-11-12):** no `peripherals[].model` and no `inUse`; at most 8 peripherals, sorted by kind; `screen` without `dpi`, pixels to the nearest 10. `model` only from the platform's maker data.
 - **Dashboard:** `https://caw-telemetry.kmandevr.workers.dev/dashboard` shows everything collected; the data is kept 400 days on the relay (PRIVACY.md).
 - **Differences between PLAN.md (fetched 2026-11-12) and section H, for the owner:**
   - PLAN.md's `screens` accept any id of `a-z 0-9 _ . -`; the app sends only its three section ids.
-  - PLAN.md doesn't list scenario ids; the app names the plan's ten (C1) and sends any other, such as the bench's `tail`, as "other".
-  - A daily report can carry a Benchmark result that couldn't get its own slot that day; PLAN.md counts stress results from stress reports only.
+  - PLAN.md now lists the same ten Benchmark scenario ids as the app; any other, such as the bench's `tail`, arrives as "other". The relay counts Benchmark results from daily reports too, so the fallback onto the next daily report stays.
   - PRIVACY.md calls it the **Stress test**; the app's UI says **Benchmark**.
 

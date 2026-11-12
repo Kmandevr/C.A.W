@@ -122,7 +122,7 @@ class FirstRunPage extends StatelessWidget {
                   const SizedBox(height: 18),
                   const _Point(Icons.upload_outlined, Neon.green, 'What is sent', [
                     'Once a day: the device (maker, model, OS, CPU, memory, screen, audio setup) and the kinds of '
-                        'peripherals in use (a USB MIDI keyboard\'s maker-given product name and ids), how well C.A.W runs '
+                        'peripherals connected (with a USB device\'s vendor and product ids), how well C.A.W runs '
                         '(CPU load, dropouts, frame and startup times), which built-in instruments, effects and screens you '
                         'use, project size as a range, and error types with the line of C.A.W code. Benchmark results each '
                         'time you run one.',

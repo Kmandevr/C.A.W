@@ -180,11 +180,10 @@ class MidiInput(context: Context) : EventChannel.StreamHandler, MethodChannel.Me
                     else -> "virtual"
                 },
                 "ump" to (info.id in umpIds),
-                // A USB device's own descriptor (maker-defined): vendor and product ids and its product string,
-                // for the anonymous telemetry's peripherals. Never the port name, which can be renamed.
+                // A USB device's vendor and product ids, for the anonymous telemetry's peripherals. Never a name: not
+                // the port name (it can be renamed) nor the USB product string (DIY boards let their owner set it).
                 "usbVendor" to usbDeviceOf(info)?.vendorId,
                 "usbProductId" to usbDeviceOf(info)?.productId,
-                "usbProduct" to usbDeviceOf(info)?.productName,
                 "open" to open.containsKey(info.id),
                 "off" to (nameOf(info) in closedNames),
             )

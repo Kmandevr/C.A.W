@@ -692,16 +692,19 @@ void main() {
     test('the new device fields pass in their shapes', () {
       final d = device({
         'platform': 'android', 'arch': 'arm64', 'osName': 'Android', 'osVersion': '14', 'manufacturer': 'samsung',
-        'model': 'SM-S906B', 'formFactor': 'phone', 'screen': {'widthPx': 2340, 'heightPx': 1080, 'displays': 1},
+        'model': 'SM-S906B', 'formFactor': 'phone', 'screen': {'widthPx': 2340, 'heightPx': 1080, 'dpi': 420, 'displays': 1},
         'audio': {'backend': 'aaudio', 'output': 'bluetooth'},
         'peripherals': [
-          {'kind': 'midi', 'connection': 'usb', 'model': 'Keystep 37', 'vendorId': '1c75', 'productId': '0288', 'inUse': true},
+          {'kind': 'midi', 'connection': 'usb', 'model': "Kman's Teensy", 'vendorId': '16c0', 'productId': '0485', 'inUse': true},
         ],
       });
+      expect(d['screen'], {'widthPx': 2340, 'heightPx': 1080, 'displays': 1}, reason: 'no dpi');
+      expect(device({'screen': {'widthPx': 2341, 'heightPx': 1080}}).containsKey('screen'), isFalse, reason: 'to 10 px');
+      expect((d['peripherals'] as List).single, {'kind': 'midi', 'connection': 'usb', 'vendorId': '16c0', 'productId': '0485'},
+          reason: 'a USB product string can be set by a DIY board\'s owner');
       expect(d['arch'], 'arm64');
       expect(d['model'], 'SM-S906B');
       expect((d['audio'] as Map)['output'], 'bluetooth');
-      expect((d['peripherals'] as List).single, containsPair('vendorId', '1c75'));
       expect(device({'platform': 'macos'})['platform'], 'macos');
       expect(device({'arch': 'mips'}).containsKey('arch'), isFalse);
       expect(device({'formFactor': 'watch'}).containsKey('formFactor'), isFalse);
@@ -724,7 +727,7 @@ void main() {
         expect(text, isNot(contains(banned)), reason: banned);
       }
       final list = d['peripherals'] as List;
-      expect(list, hasLength(16));
+      expect(list, hasLength(8));
       expect(list.first, {'kind': 'midi', 'connection': 'bluetooth'});
     });
 
@@ -734,17 +737,19 @@ void main() {
         input: AudioEndpoint(name: 'Microphone', kind: AudioDeviceKind.builtIn),
       );
       final list = peripheralsOf(route: route, midi: const [
-        MidiPort(id: 1, name: "Kman's keys (renamed)", kind: 'usb', usbVendorId: 0x1c75, usbProductId: 0x0288,
-            usbProduct: 'KeyStep 37'),
+        MidiPort(id: 1, name: "Kman's keys (renamed)", kind: 'usb', usbVendorId: 0x1c75, usbProductId: 0x0288),
         MidiPort(id: 2, name: "Kman's WIDI", kind: 'bluetooth'),
         MidiPort(id: 3, name: 'Port 1', kind: 'port', open: false),
       ]);
+      // Sorted by kind and connection; ids for USB, never a name (not even the USB product string) or an in-use flag.
       expect(list, [
-        {'kind': 'audio-output', 'connection': 'bluetooth', 'inUse': true},
-        {'kind': 'midi', 'connection': 'usb', 'model': 'KeyStep 37', 'vendorId': '1c75', 'productId': '0288', 'inUse': true},
-        {'kind': 'midi', 'connection': 'bluetooth', 'inUse': true},
-        {'kind': 'midi', 'connection': 'unknown', 'inUse': false},
+        {'kind': 'audio-output', 'connection': 'bluetooth'},
+        {'kind': 'midi', 'connection': 'bluetooth'},
+        {'kind': 'midi', 'connection': 'unknown'},
+        {'kind': 'midi', 'connection': 'usb', 'vendorId': '1c75', 'productId': '0288'},
       ]);
+      final many = peripheralsOf(midi: [for (var i = 0; i < 12; i++) MidiPort(id: i, name: 'p$i', kind: 'usb')]);
+      expect(many, hasLength(maxPeripherals));
       expect(jsonEncode(list), isNot(contains('Kman')));
       expect(connectionOf(AudioDeviceKind.remote), 'network');
       expect(archOf(Abi.androidArm64), 'arm64');
