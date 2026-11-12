@@ -757,6 +757,10 @@ class Engine {
   /// The device's callback size in frames while it plays (0 when stopped).
   int get bufferFrames => _b.audioBufferFrames(_handle);
 
+  /// Behind the app with nothing monitoring: a larger output buffer (AAudio, no reopen); false restores it (API 26).
+  /// Returns the buffer size now in frames (0 where there is none).
+  int setAudioBackground(bool background) => _b.audioSetBackground(_handle, background ? 1 : 0);
+
   /// An instrument entry ({"id", "params", "preset"}) as the engine plays it (caw_migrate_instrument): a retired
   /// synth becomes Flagship with its preset and knobs mapped ("migrated": true, "lanes": old knob to new), and an
   /// entry naming a preset gets the preset's values under its own. Null when the engine refuses it.

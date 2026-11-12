@@ -82,8 +82,12 @@ extern "C" {
    24: taken by branch speed-parallel (caw_audio_threads), built at the same time.
    25 (2026-11-12, beta plan B4.8): caw_engine_layer_meters reads every project layer's stereo meter in one call
    into a caller's array of CawLayerMeterStereo (the app's meter poll made one call per track). Nothing else
-   changes. */
-#define CAW_API_VERSION 25
+   changes.
+   26 (2026-11-12, audio-resilience): caw_audio_set_background (a larger AAudio output buffer behind the app, without
+   reopening); the input is a capture device of its own (caw_audio_configure_input no longer reopens the output),
+   and caw_audio_status's "input" gains "state", "underruns", "dropped_frames", "missing_frames" and "drift_ppm"
+   and the top level "stopped_by_system". Nothing else changes. */
+#define CAW_API_VERSION 26
 /* The component index that names a layer's native instrument rather than one of its "components". */
 #define CAW_INSTRUMENT_INDEX 0xFFFFFFFFu
 /* A component index with this bit (API version 22) names component (index & ~CAW_NOTE_COMPONENT) of the layer's
@@ -438,6 +442,11 @@ CAW_API int32_t caw_engine_quality(CawEngine* e);
 CAW_API void caw_audio_set_buffer_mode(CawEngine* e, int32_t mode, int32_t recording);
 /* The device's callback size in frames while it runs (0 when stopped or unknown). */
 CAW_API int32_t caw_audio_buffer_frames(CawEngine* e);
+/* API version 26. Behind the app ([background] != 0) the AAudio output's buffer size is raised to the stream's
+   capacity (more latency, fewer dropouts while Android schedules a background app less), and 0 restores the size
+   it had; no reopen. Call it only while nothing monitors the input. Returns the buffer size now in frames (0 where
+   the backend has no such size, or nothing runs); caw_audio_latency reports the new latency. */
+CAW_API int32_t caw_audio_set_background(CawEngine* e, int32_t background);
 
 /* API version 10. The playback devices the platform's audio backend lists, as JSON: {"backend": name,
    "exclusive": whether this backend takes an exclusive-mode request (WASAPI, AAudio), "devices": [{"name",
@@ -598,11 +607,15 @@ CAW_API char* caw_sfz_export(const char* state_json, const char* sfz_path, int32
 /* Audio input. The capture devices, as caw_audio_devices lists playback ones, plus "channels" (the most the
    device offers; 0 unknown). On Android the app needs the RECORD_AUDIO permission before input opens. */
 CAW_API char* caw_audio_input_devices(void);
-/* Opens (enabled != 0) or closes the input: the device then runs duplex, input and output in one callback, so
-   monitoring adds no buffer of its own. [device_id]/[device_name] as caw_audio_configure (both empty: the default
-   input), [channels] 1..32 (0: 2). A running device reopens. Returns as caw_audio_configure. caw_audio_status gains
-   "input": {"enabled", "running", "device", "device_id", "channels", "sample_rate", "period_frames",
-   "latency_frames" (the device's own estimate, input plus output buffers)}. */
+/* Opens (enabled != 0) or closes the input: a capture device of its own beside the output (API 26; never duplex),
+   whose frames reach the output callback through a lock-free bridge that follows the two clocks' drift; a missing
+   input is silence and the output never waits for it. [device_id]/[device_name] as caw_audio_configure (both
+   empty: the default input), [channels] 1..32 (0: 2). Only the input opens or closes (the output plays on), and
+   the device opens outside the lock caw_audio_status takes. Returns as caw_audio_configure. caw_audio_status gains
+   "input": {"enabled", "running", "state" ("off", "open", "stalled", "stopped", "failed"), "device", "device_id",
+   "channels", "sample_rate", "period_frames", "duplex_buffer_frames" (the bridge's fill), "latency_frames" (the
+   device's own estimate, input plus output buffers plus that fill), "underruns", "dropped_frames",
+   "missing_frames" (output frames the input was missing since it first delivered), "drift_ppm", "error"}. */
 CAW_API int32_t caw_audio_configure_input(CawEngine* e, int32_t enabled, const char* device_id,
                                           const char* device_name, int32_t channels);
 /* Each input channel's peak (0..1+) since the last call; returns the channels written (at most max). */

@@ -56,7 +56,21 @@ class BackgroundPlayback {
   final hint = ValueNotifier<bool>(false);
   bool _hintDue = false, _hintGiven = false;
 
+  // Behind the app with the output playing and nothing monitoring (the microphone is released there unless a take
+  // runs), the output takes a larger buffer (AAudio, no reopen) to ride out Android's background scheduling; in
+  // front it goes back, and the latency compensation reads the device again (audio review, 2026-11-12).
+  bool _bigBuffer = false;
+  void _applyBuffer() {
+    final e = state.engine;
+    final want = !state.foreground.value && _shown != null && !_recording;
+    if (e == null || want == _bigBuffer) return;
+    _bigBuffer = want;
+    e.setAudioBackground(want);
+    unawaited(state.latency.refresh());
+  }
+
   void _onForeground() {
+    _applyBuffer();
     if (state.foreground.value) {
       _heldPaused = false;
       if (_hintDue) {
@@ -99,7 +113,7 @@ class BackgroundPlayback {
     final want = playing || recording || (_heldPaused && !state.foreground.value);
     final next = want ? (playing: playing, recording: recording) : null;
     _updateCheck();
-    if (next == _shown) return;
+    if (next == _shown) return _applyBuffer();
     // Android lets a foreground service start only while the app is in front (Android 12+): from behind, only a
     // running one is updated or stopped.
     if (next != null && _shown == null && !state.foreground.value) return;
@@ -122,6 +136,7 @@ class BackgroundPlayback {
         _shown = null;  // refused: tried again on the next change while in front
       }
     }();
+    _applyBuffer();
   }
 
   void _updateCheck() {

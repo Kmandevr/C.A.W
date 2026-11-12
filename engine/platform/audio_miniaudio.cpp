@@ -32,7 +32,10 @@ constexpr int kChunk = 512;
 // One audio output per process. When Android recreates the app's screen (it lost focus while playing, say), a new
 // copy of the app starts with a new engine while the old one, which nothing controls any more, may still be
 // playing; the two would sound together. Starting audio on an engine therefore closes any other engine's device.
-// Only start and stop take this lock (never the audio callback).
+// Only the control calls take these locks (never the audio callback). gOpLock is held through each call that opens,
+// closes or reconfigures a device (taken first), gDeviceLock only while the shared state changes, so the status and
+// latency polls (gDeviceLock alone) never wait for a slow device open, and no context is destroyed under an open.
+std::mutex gOpLock;
 std::mutex gDeviceLock;
 CawEngine* gActive = nullptr;
 
@@ -56,12 +59,16 @@ struct Audio {
     // The input (API 18): a capture device of its own beside the output (never duplex), open only while the app
     // asks for it, feeding the output callback through the bridge; `input` while it is open, else why it did not
     // open. A capture that stops, starves or fails never touches the output: its frames are silence.
-    ma_device capture;
+    ma_device* capture = nullptr;  // its own allocation per open (swapped in under the lock), null while closed
     bool input = false;
     ma_uint32 inputChannels = 0;
     ma_uint32 duplexBufferFrames = 0;  // the bridge's starting fill, in the latency estimate
     std::string inputDeviceId, inputError;
     caw::InputBridge bridge;
+    // Behind the app (caw_audio_set_background): the output's AAudio buffer raised toward its capacity, and the
+    // size to restore on return.
+    bool background = false;
+    int32_t savedBufferFrames = 0;
 #if defined(_WIN32)
     // The last WASAPI endpoint ids read for their kind, so caw_audio_latency's polls skip COM until the device moves.
     std::wstring kindOutId, kindInId;
@@ -215,22 +222,69 @@ void captureCallback(ma_device* dev, void* output, const void* input, ma_uint32 
     static_cast<Audio*>(dev->pUserData)->bridge.push(static_cast<const float*>(input), static_cast<int>(frames));
 }
 
-// Closes the input alone; the output plays on. The capture callback has stopped once ma_device_uninit returns.
-void closeCapture(CawEngine* e, Audio* a) {
-    if (!a->input) return;
-    ma_device_uninit(&a->capture);
-    a->bridge.close();
+#if defined(__ANDROID__)
+ma_result signalJob(ma_job* job) {
+    ma_event_signal(reinterpret_cast<ma_event*>(job->data.custom.data0));
+    return MA_SUCCESS;
+}
+#endif
+
+// Before a device is uninitialised, no reroute job may still be queued for it: miniaudio's AAudio error callback
+// posts one to the context's job thread (ma_stream_error_callback__aaudio), and run after ma_device_uninit it would
+// lock the device's destroyed reroute mutex ([Fact] miniaudio 0.11.25 source, read 2026-11-12:
+// ma_job_process__device__aaudio_reroute; ma_device_uninit__aaudio sets isTearingDown and then destroys the
+// mutex without waiting for the queue). So the device is marked as tearing down first (no new job is posted), and a
+// job posted after any earlier ones is waited for: the job thread runs them in order.
+void drainRerouteJobs(Audio* a, ma_device* d) {
+#if defined(__ANDROID__)
+    if (!d || a->context.backend != ma_backend_aaudio) return;
+    __atomic_store_n(&d->aaudio.isTearingDown.value, MA_TRUE, __ATOMIC_SEQ_CST);
+    ma_event done;
+    if (ma_event_init(&done) != MA_SUCCESS) return;
+    ma_job job = ma_job_init(MA_JOB_TYPE_CUSTOM);
+    job.data.custom.proc = signalJob;
+    job.data.custom.data0 = reinterpret_cast<ma_uintptr>(&done);
+    if (ma_device_job_thread_post(&a->context.aaudio.jobThread, &job) == MA_SUCCESS) ma_event_wait(&done);
+    ma_event_uninit(&done);
+#else
+    (void)a;
+    (void)d;
+#endif
+}
+
+// Under gDeviceLock: takes the input out (the output plays on, its input silence from the next chunk) and returns
+// its device, for destroyCapture after the lock.
+ma_device* detachCapture(CawEngine* e, Audio* a) {
+    ma_device* d = a->capture;
+    a->capture = nullptr;
+    a->bridge.close();  // no pull() reads it from here; a push() still running is ignored once it sees it closed
     a->input = false;
     a->inputChannels = 0;
     a->duplexBufferFrames = 0;
     a->inputDeviceId.clear();
     e->engine->liveAudio().setDeviceChannels(0);
+    return d;
+}
+
+// Outside gDeviceLock (gOpLock held, so the context lives): stops and frees a detached capture device. The capture
+// callback has stopped once ma_device_uninit returns.
+void destroyCapture(Audio* a, ma_device* d) {
+    if (!d) return;
+    drainRerouteJobs(a, d);
+    ma_device_uninit(d);
+    delete d;
+}
+
+// Closes the input alone, all under the caller's locks.
+void closeCapture(CawEngine* e, Audio* a) {
+    if (a->capture) destroyCapture(a, detachCapture(e, a));
+    else detachCapture(e, a);
 }
 
 // Whether the input is open and delivering: its device still started (an AAudio stream that could not be reopened
 // after a disconnect is stopped by miniaudio) and not starved for longer than the bridge allows.
 bool captureHealthy(const Audio* a) {
-    return a->input && ma_device_get_state(&a->capture) == ma_device_state_started && !a->bridge.stalled();
+    return a->input && a->capture && ma_device_get_state(a->capture) == ma_device_state_started && !a->bridge.stalled();
 }
 
 void setError(const std::string& msg, char* error, int32_t len) {
@@ -243,6 +297,7 @@ void stopLocked(CawEngine* e) {
     if (!e || !e->audio) return;
     auto* a = static_cast<Audio*>(e->audio);
     closeCapture(e, a);
+    drainRerouteJobs(a, &a->device);
     ma_device_uninit(&a->device);  // the callback has stopped once this returns
     ma_context_uninit(&a->context);
     e->engine->liveAudio().setDeviceChannels(0);
@@ -301,25 +356,47 @@ ma_result openDevice(Audio* a, const CawEngine* e, const ma_device_id* id, ma_ui
     return MA_SUCCESS;
 }
 
-// Opens and starts the input on [a]'s context beside the running output: the chosen capture device (by id, else
-// by name; else the default, which on AAudio Android routes), 1..32 channels, shared, at the engine's rate. A
-// failure (no permission, no microphone, another app holding it) leaves the output as it was and says why.
-void openCapture(CawEngine* e, Audio* a) {
-    closeCapture(e, a);
-    a->inputError.clear();
+int64_t toEngineFrames(int64_t frames, ma_uint32 deviceRate, int engineRate) {
+    if (deviceRate == 0 || static_cast<int>(deviceRate) == engineRate) return frames;
+    return frames * engineRate / static_cast<int64_t>(deviceRate);
+}
+
+// What the input opens as, copied under the lock so the device can open outside it.
+struct CaptureRequest {
+    std::string id, name;
+    int channels = 2;
+    int rate = 48000;
+    bool lowLatency = true;
+};
+
+CaptureRequest captureRequest(const CawEngine* e) {
+    CaptureRequest q;
+    q.id = e->inputId;
+    q.name = e->inputName;
+    q.channels = e->inputChannels;
+    q.rate = static_cast<int>(e->engine->sampleRate());
+    q.lowLatency = e->bufferMode != CAW_BUFFER_BATTERY;
+    return q;
+}
+
+// Opens (not starts) a capture device on [a]'s context: the chosen one (by id, else by name; else the default,
+// which on AAudio Android routes), 1..32 channels, shared, at the engine's rate. Touches no shared state, so it
+// runs outside gDeviceLock (gOpLock held). Null and [why] when it did not open (no permission, no microphone,
+// another app holding it); [deviceId] the id of a chosen device that opened.
+ma_device* initCapture(Audio* a, const CaptureRequest& q, std::string& deviceId, std::string& why) {
     ma_device_id chosen;
     bool found = false;
-    if ((!e->inputId.empty() || !e->inputName.empty()) && a->context.backend != ma_backend_aaudio) {
+    if ((!q.id.empty() || !q.name.empty()) && a->context.backend != ma_backend_aaudio) {
         ma_device_info* capture = nullptr;
         ma_uint32 count = 0;
         if (ma_context_get_devices(&a->context, nullptr, nullptr, &capture, &count) == MA_SUCCESS) {
-            for (ma_uint32 i = 0; i < count && !found && !e->inputId.empty(); ++i)
-                if (e->inputId == deviceIdText(a->context.backend, capture[i].id)) {
+            for (ma_uint32 i = 0; i < count && !found && !q.id.empty(); ++i)
+                if (q.id == deviceIdText(a->context.backend, capture[i].id)) {
                     chosen = capture[i].id;
                     found = true;
                 }
-            for (ma_uint32 i = 0; i < count && !found && !e->inputName.empty(); ++i)
-                if (e->inputName == capture[i].name) {
+            for (ma_uint32 i = 0; i < count && !found && !q.name.empty(); ++i)
+                if (q.name == capture[i].name) {
                     chosen = capture[i].id;
                     found = true;
                 }
@@ -327,38 +404,65 @@ void openCapture(CawEngine* e, Audio* a) {
     }
     ma_device_config cfg = ma_device_config_init(ma_device_type_capture);
     cfg.capture.format = ma_format_f32;
-    cfg.capture.channels = static_cast<ma_uint32>(e->inputChannels);
+    cfg.capture.channels = static_cast<ma_uint32>(q.channels);
     cfg.capture.pDeviceID = found ? &chosen : nullptr;
     cfg.capture.shareMode = ma_share_mode_shared;
-    cfg.sampleRate = static_cast<ma_uint32>(e->engine->sampleRate());
-    cfg.performanceProfile = e->bufferMode != CAW_BUFFER_BATTERY ? ma_performance_profile_low_latency
-                                                                : ma_performance_profile_conservative;
+    cfg.sampleRate = static_cast<ma_uint32>(q.rate);
+    cfg.performanceProfile = q.lowLatency ? ma_performance_profile_low_latency : ma_performance_profile_conservative;
     cfg.dataCallback = captureCallback;
     cfg.pUserData = a;
-    ma_result r = ma_device_init(&a->context, &cfg, &a->capture);
+    auto* d = new ma_device();
+    const ma_result r = ma_device_init(&a->context, &cfg, d);
     if (r != MA_SUCCESS) {
-        a->inputError = std::string("can't open the audio input: ") + ma_result_description(r);
-        return;
+        delete d;
+        why = std::string("can't open the audio input: ") + ma_result_description(r);
+        return nullptr;
     }
-    const ma_uint32 channels = std::min<ma_uint32>(a->capture.capture.channels, caw::kMaxInputChannels);
-    const ma_uint32 period = std::max<ma_uint32>(1, a->capture.capture.internalPeriodSizeInFrames);
-    const ma_uint32 outPeriod = std::max<ma_uint32>(1, a->device.playback.internalPeriodSizeInFrames);
-    // The output starts reading once two capture periods and one output callback are queued (so neither side's
-    // burst runs it dry), and skips back there when the clocks drift four periods apart. Starved for 250 ms, the
-    // input counts as stopped (the status says so; the app tries it again).
-    const int prime = static_cast<int>(2 * period + outPeriod);
-    a->bridge.open(static_cast<int>(channels), prime, static_cast<int>(4 * std::max(period, outPeriod)),
-                   static_cast<int64_t>(e->engine->sampleRate()) / 4);
+    deviceId = found ? deviceIdText(a->context.backend, chosen) : std::string();
+    return d;
+}
+
+// Under gDeviceLock: an opened capture device becomes the input. The output starts reading once two capture
+// periods and one output callback are queued (so neither side's burst runs it dry), follows the clocks' drift, and
+// jumps back (crossfaded) only when they come eight periods apart. Starved for 250 ms, the input counts as stopped
+// (the status says so; the app tries it again). All in the engine's frames: the bridge runs at the engine's rate.
+void attachCapture(CawEngine* e, Audio* a, ma_device* d, std::string deviceId) {
+    const int rate = static_cast<int>(e->engine->sampleRate());
+    const auto& c = d->capture;
+    const auto& p = a->device.playback;
+    const ma_uint32 channels = std::min<ma_uint32>(c.channels, caw::kMaxInputChannels);
+    const int64_t period = std::max<int64_t>(1, toEngineFrames(c.internalPeriodSizeInFrames, c.internalSampleRate, rate));
+    const int64_t outPeriod = std::max<int64_t>(1, toEngineFrames(p.internalPeriodSizeInFrames, p.internalSampleRate, rate));
+    a->bridge.open(static_cast<int>(channels), static_cast<int>(2 * period + outPeriod),
+                   static_cast<int>(8 * std::max(period, outPeriod)), rate / 4, rate);
+    a->capture = d;
     a->input = true;
     a->inputChannels = channels;
     a->duplexBufferFrames = static_cast<ma_uint32>(a->bridge.prime());
-    if (found) a->inputDeviceId = deviceIdText(a->context.backend, chosen);
+    a->inputDeviceId = std::move(deviceId);
     e->engine->liveAudio().setDeviceChannels(static_cast<int>(channels));
-    // [Assumption] the round trip is about both sides' buffers and the bridge's fill; a ping measures it.
-    const ma_uint32 in = period * std::max<ma_uint32>(1, a->capture.capture.internalPeriods);
-    const ma_uint32 out = outPeriod * std::max<ma_uint32>(1, a->device.playback.internalPeriods);
-    e->engine->liveAudio().setDeviceLatency(static_cast<int64_t>(in) + out + a->duplexBufferFrames);
-    r = ma_device_start(&a->capture);
+    // [Assumption] the round trip is about both sides' buffers and the bridge's fill; a ping measures it. Each
+    // side's buffer is in its device's frames, converted; the fill is already the engine's.
+    const int64_t in = toEngineFrames(static_cast<int64_t>(c.internalPeriodSizeInFrames) * std::max<ma_uint32>(1, c.internalPeriods),
+                                      c.internalSampleRate, rate);
+    const int64_t out = toEngineFrames(static_cast<int64_t>(p.internalPeriodSizeInFrames) * std::max<ma_uint32>(1, p.internalPeriods),
+                                       p.internalSampleRate, rate);
+    e->engine->liveAudio().setDeviceLatency(in + out + a->duplexBufferFrames);
+}
+
+// Opens and starts the input beside the running output, all under the caller's locks (caw_audio_start's path;
+// caw_audio_configure_input opens it outside gDeviceLock). A failure leaves the output as it was and says why.
+void openCapture(CawEngine* e, Audio* a) {
+    closeCapture(e, a);
+    a->inputError.clear();
+    std::string id, why;
+    ma_device* d = initCapture(a, captureRequest(e), id, why);
+    if (!d) {
+        a->inputError = why;
+        return;
+    }
+    attachCapture(e, a, d, std::move(id));
+    const ma_result r = ma_device_start(d);
     if (r != MA_SUCCESS) {
         a->inputError = std::string("can't start the audio input: ") + ma_result_description(r);
         closeCapture(e, a);
@@ -448,26 +552,28 @@ int32_t reopenLocked(CawEngine* e) {
 const char* inputState(const CawEngine* e, const Audio* a) {
     if (!e->inputEnabled || !a) return "off";
     if (!a->input) return "failed";
-    if (ma_device_get_state(&a->capture) != ma_device_state_started) return "stopped";
+    if (!a->capture || ma_device_get_state(a->capture) != ma_device_state_started) return "stopped";
     return a->bridge.stalled() ? "stalled" : "open";
 }
 
 std::string inputStatus(const CawEngine* e, const Audio* a) {
-    const bool running = a && a->input;
+    const bool running = a && a->input && a->capture;
     std::string out = std::string("{\"enabled\":") + (e->inputEnabled ? "true" : "false") +
                       ",\"running\":" + (running ? "true" : "false") + ",\"state\":\"" + inputState(e, a) + "\"" +
                       ",\"requested_device\":" + quoted(e->inputName.c_str()) +
                       ",\"requested_device_id\":" + quoted(e->inputId.c_str()) +
                       ",\"requested_channels\":" + std::to_string(e->inputChannels);
     if (running) {
-        const auto& c = a->capture.capture;
+        const auto& c = a->capture->capture;
         out += ",\"device\":" + quoted(c.name) + ",\"device_id\":" + quoted(a->inputDeviceId.c_str()) +
                ",\"channels\":" + std::to_string(a->inputChannels) + ",\"sample_rate\":" + std::to_string(c.internalSampleRate) +
                ",\"period_frames\":" + std::to_string(c.internalPeriodSizeInFrames) +
                ",\"duplex_buffer_frames\":" + std::to_string(a->duplexBufferFrames) +
                ",\"latency_frames\":" + std::to_string(e->engine->liveAudio().latency()) +
                ",\"underruns\":" + std::to_string(a->bridge.underruns()) +
-               ",\"dropped_frames\":" + std::to_string(a->bridge.dropped());
+               ",\"dropped_frames\":" + std::to_string(a->bridge.dropped()) +
+               ",\"missing_frames\":" + std::to_string(a->bridge.missing()) +
+               ",\"drift_ppm\":" + std::to_string(static_cast<int64_t>((a->bridge.ratio() - 1.0) * 1e6));
     }
     return out + ",\"error\":" + quoted(a ? a->inputError.c_str() : "") + "}";
 }
@@ -547,11 +653,6 @@ const char* wasapiKind(const wchar_t* id) {
 }
 #endif
 
-int64_t toEngineFrames(int64_t frames, ma_uint32 deviceRate, int engineRate) {
-    if (deviceRate == 0 || static_cast<int>(deviceRate) == engineRate) return frames;
-    return frames * engineRate / static_cast<int64_t>(deviceRate);
-}
-
 // Every queued period of one side, at the engine's rate: the whole latency where nothing better is known
 // (WASAPI, ALSA, PulseAudio). [Assumption] a converter, the driver and the speaker (or a Bluetooth link) add more;
 // the per-device offset in the app covers that.
@@ -612,10 +713,13 @@ std::string latencyJson(CawEngine* e, Audio* a) {
     if (!a) return "{\"running\":false,\"sample_rate\":" + std::to_string(rate) + ",\"output\":" +
                    sideJson(SideLatency{}, rate, false) + ",\"input\":" + sideJson(SideLatency{}, rate, false) + "}";
     const auto& p = a->device.playback;
-    const auto& c = a->capture.capture;
+    const bool input = a->input && a->capture;
     SideLatency out = bufferLatency(p.internalPeriodSizeInFrames, p.internalPeriods, p.internalSampleRate, rate);
     SideLatency in;
-    if (a->input) in = bufferLatency(c.internalPeriodSizeInFrames, c.internalPeriods, c.internalSampleRate, rate);
+    if (input) {
+        const auto& c = a->capture->capture;
+        in = bufferLatency(c.internalPeriodSizeInFrames, c.internalPeriods, c.internalSampleRate, rate);
+    }
 #if defined(__ANDROID__)
     if (a->context.backend == ma_backend_aaudio) {
         ma_mutex_lock(&a->device.aaudio.rerouteLock);
@@ -623,12 +727,12 @@ std::string latencyJson(CawEngine* e, Audio* a) {
         if (aaudioLatency(a, a->device.aaudio.pStreamPlayback, true, rate, t)) out = t;
         else out.deviceId = t.deviceId;
         ma_mutex_unlock(&a->device.aaudio.rerouteLock);
-        if (a->input) {  // the input's own device, under its own reroute lock
-            ma_mutex_lock(&a->capture.aaudio.rerouteLock);
+        if (input) {  // the input's own device, under its own reroute lock
+            ma_mutex_lock(&a->capture->aaudio.rerouteLock);
             SideLatency ti;
-            if (aaudioLatency(a, a->capture.aaudio.pStreamCapture, false, rate, ti)) in = ti;
+            if (aaudioLatency(a, a->capture->aaudio.pStreamCapture, false, rate, ti)) in = ti;
             else in.deviceId = ti.deviceId;
-            ma_mutex_unlock(&a->capture.aaudio.rerouteLock);
+            ma_mutex_unlock(&a->capture->aaudio.rerouteLock);
         }
     }
 #endif
@@ -639,13 +743,55 @@ std::string latencyJson(CawEngine* e, Audio* a) {
             return kind;
         };
         out.kind = cached(a->device.playback.id.wasapi, a->kindOutId, a->kindOut);
-        if (a->input) in.kind = cached(a->capture.capture.id.wasapi, a->kindInId, a->kindIn);
+        if (input) in.kind = cached(a->capture->capture.id.wasapi, a->kindInId, a->kindIn);
     }
 #endif
-    // The bridge's starting fill (see openCapture) holds the input back before the callback reads it.
-    if (a->input) in.frames += toEngineFrames(a->duplexBufferFrames, c.internalSampleRate, rate);
+    // The bridge's fill (see attachCapture) holds the input back before the callback reads it; it runs at the
+    // engine's rate already.
+    if (input) in.frames += a->duplexBufferFrames;
     return "{\"running\":true,\"sample_rate\":" + std::to_string(rate) + ",\"output\":" + sideJson(out, rate, true) +
-           ",\"input\":" + sideJson(in, rate, a->input) + "}";
+           ",\"input\":" + sideJson(in, rate, input) + "}";
+}
+
+// Behind the app (and not monitoring), a larger output buffer rides out the scheduling gaps Android gives a
+// background app; in front it goes back to the size it had. AAudio only: AAudioStream_setBufferSizeInFrames
+// changes how many frames are queued (the latency) up to the stream's capacity, without reopening it
+// ([Fact] developer.android.com NDK AAudio reference, read 2026-11-12: "adjust the latency of the buffer by
+// changing the threshold where blocking will occur", "cannot be set higher than getBufferCapacityInFrames",
+// API 26; miniaudio 0.11.25 loads getBufferCapacityInFrames but not the setter, so it is looked up in the
+// libaaudio.so it opened). Under the reroute lock, so the stream is the one miniaudio has; a reroute meanwhile
+// opens a new stream at its own default. Returns the output's buffer size now, in frames (0: not AAudio).
+int32_t setBackground(Audio* a, bool on) {
+#if defined(__ANDROID__)
+    if (a->context.backend != ma_backend_aaudio || !a->context.aaudio.hAAudio) return 0;
+    using SetSize = int32_t (*)(void*, int32_t);
+    using Int = int32_t (*)(void*);
+    auto setSize = reinterpret_cast<SetSize>(dlsym(a->context.aaudio.hAAudio, "AAudioStream_setBufferSizeInFrames"));
+    auto getSize = reinterpret_cast<Int>(dlsym(a->context.aaudio.hAAudio, "AAudioStream_getBufferSizeInFrames"));
+    auto capacity = reinterpret_cast<Int>(dlsym(a->context.aaudio.hAAudio, "AAudioStream_getBufferCapacityInFrames"));
+    if (!setSize || !getSize || !capacity) return 0;
+    int32_t now = 0;
+    ma_mutex_lock(&a->device.aaudio.rerouteLock);
+    void* stream = a->device.aaudio.pStreamPlayback;
+    if (stream) {
+        if (on && !a->background) {
+            a->savedBufferFrames = getSize(stream);
+            const int32_t cap = capacity(stream);
+            if (cap > 0) setSize(stream, cap);
+            a->background = true;
+        } else if (!on && a->background) {
+            if (a->savedBufferFrames > 0) setSize(stream, a->savedBufferFrames);
+            a->background = false;
+        }
+        now = getSize(stream);
+    }
+    ma_mutex_unlock(&a->device.aaudio.rerouteLock);
+    return now > 0 ? now : 0;
+#else
+    (void)a;
+    (void)on;
+    return 0;
+#endif
 }
 
 }  // namespace
@@ -654,18 +800,21 @@ extern "C" {
 
 int32_t caw_audio_start(CawEngine* e, char* error, int32_t error_len) {
     if (!e) return 1;
+    std::lock_guard<std::mutex> op(gOpLock);
     std::lock_guard<std::mutex> lock(gDeviceLock);
     return startLocked(e, error, error_len);
 }
 
 void caw_audio_stop(CawEngine* e) {
     if (!e) return;
+    std::lock_guard<std::mutex> op(gOpLock);
     std::lock_guard<std::mutex> lock(gDeviceLock);
     stopLocked(e);
 }
 
 void caw_audio_set_buffer_mode(CawEngine* e, int32_t mode, int32_t recording) {
     if (!e) return;  // a reopen that fails leaves the device closed: caw_audio_status says so
+    std::lock_guard<std::mutex> op(gOpLock);
     std::lock_guard<std::mutex> lock(gDeviceLock);
     const bool wasLowLatency = e->bufferMode != CAW_BUFFER_BATTERY;
     e->bufferMode = mode == CAW_BUFFER_LOW_LATENCY || mode == CAW_BUFFER_BATTERY ? mode : CAW_BUFFER_AUTO;
@@ -723,6 +872,7 @@ char* caw_audio_devices(void) {
 int32_t caw_audio_configure(CawEngine* e, const char* device_id, const char* device_name, int32_t period_frames,
                             int32_t flags) {
     if (!e) return 1;
+    std::lock_guard<std::mutex> op(gOpLock);
     std::lock_guard<std::mutex> lock(gDeviceLock);
     std::string id = device_id ? std::string(device_id).substr(0, 511) : std::string();
     std::string name = device_name ? std::string(device_name).substr(0, MA_MAX_DEVICE_NAME_LENGTH) : std::string();
@@ -773,26 +923,66 @@ char* caw_audio_input_devices(void) {
 int32_t caw_audio_configure_input(CawEngine* e, int32_t enabled, const char* device_id, const char* device_name,
                                   int32_t channels) {
     if (!e) return 1;
-    std::lock_guard<std::mutex> lock(gDeviceLock);
+    std::lock_guard<std::mutex> op(gOpLock);  // held throughout: the context outlives the open below
     const bool on = enabled != 0;
     std::string id = device_id ? std::string(device_id).substr(0, 511) : std::string();
     std::string name = device_name ? std::string(device_name).substr(0, MA_MAX_DEVICE_NAME_LENGTH) : std::string();
     const int ch = channels <= 0 ? 2 : (channels > 32 ? 32 : channels);
-    auto* running = static_cast<Audio*>(e->audio);
-    // Unchanged, and either off or open and delivering: nothing to do. Asked again with input on while it is not
-    // (it failed to open because RECORD_AUDIO was not granted yet or another app held the microphone, or it
-    // stopped or starved since), it is tried again. Only the input opens or closes: the output plays on.
-    if (on == e->inputEnabled && id == e->inputId && name == e->inputName && ch == e->inputChannels &&
-        (!on || !running || captureHealthy(running)))
-        return running && running->fallback ? 2 : 0;
-    e->inputEnabled = on;
-    e->inputId = std::move(id);
-    e->inputName = std::move(name);
-    e->inputChannels = ch;
-    if (!running) return 0;
-    if (on) openCapture(e, running);
-    else closeCapture(e, running);
+    Audio* running = nullptr;
+    ma_device* old = nullptr;
+    CaptureRequest q;
+    {
+        std::lock_guard<std::mutex> lock(gDeviceLock);
+        running = static_cast<Audio*>(e->audio);
+        // Unchanged, and either off or open and delivering: nothing to do. Asked again with input on while it is
+        // not (it failed to open because RECORD_AUDIO was not granted yet or another app held the microphone, or it
+        // stopped or starved since), it is tried again. Only the input opens or closes: the output plays on.
+        if (on == e->inputEnabled && id == e->inputId && name == e->inputName && ch == e->inputChannels &&
+            (!on || !running || captureHealthy(running)))
+            return running && running->fallback ? 2 : 0;
+        e->inputEnabled = on;
+        e->inputId = std::move(id);
+        e->inputName = std::move(name);
+        e->inputChannels = ch;
+        if (!running) return 0;
+        old = detachCapture(e, running);
+        running->inputError.clear();
+        q = captureRequest(e);
+    }
+    // The slow part outside gDeviceLock, so the status and latency polls never wait for it: close the old input,
+    // open the new one (gOpLock keeps the context and the output as they are meanwhile).
+    destroyCapture(running, old);
+    if (!on) return running->fallback ? 2 : 0;
+    std::string deviceId, why;
+    ma_device* d = initCapture(running, q, deviceId, why);
+    {
+        std::lock_guard<std::mutex> lock(gDeviceLock);
+        if (!d) {
+            running->inputError = why;
+            return running->fallback ? 2 : 0;
+        }
+        attachCapture(e, running, d, std::move(deviceId));
+    }
+    const ma_result r = ma_device_start(d);
+    if (r != MA_SUCCESS) {
+        ma_device* failed = nullptr;
+        {
+            std::lock_guard<std::mutex> lock(gDeviceLock);
+            running->inputError = std::string("can't start the audio input: ") + ma_result_description(r);
+            failed = detachCapture(e, running);
+        }
+        destroyCapture(running, failed);
+    }
     return running->fallback ? 2 : 0;
+}
+
+int32_t caw_audio_set_background(CawEngine* e, int32_t background) {
+    if (!e) return 0;
+    std::lock_guard<std::mutex> op(gOpLock);
+    std::lock_guard<std::mutex> lock(gDeviceLock);
+    auto* a = static_cast<Audio*>(e->audio);
+    if (!a) return 0;
+    return setBackground(a, background != 0);
 }
 
 char* caw_audio_status(CawEngine* e) {

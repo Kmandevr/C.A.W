@@ -249,7 +249,8 @@ class AudioRecorder extends ChangeNotifier {
 
   // Whether the input delivers: the engine's state ("stalled", "stopped", "failed": another app has the
   // microphone, or it was disconnected) or Android saying our capture is silenced. Busy and [retry]: asked again,
-  // which reopens only the input (the output is never touched).
+  // which reopens only the input (the output is never touched); never during a take, which would reopen capture
+  // mid-take (the take keeps its timing with silence where the input is missing, and says so at its end).
   bool _checking = false;
   Future<void> _checkHealth({required bool retry}) async {
     if (_checking || !inputOpen) return;
@@ -260,7 +261,7 @@ class AudioRecorder extends ChangeNotifier {
       final engineBusy = st == 'stalled' || st == 'stopped' || st == 'failed';
       final silenced = state.foreground.value && await permission.inputSilenced();
       if (_disposed) return;
-      if (engineBusy && retry && state.foreground.value) {
+      if (engineBusy && retry && state.foreground.value && !_recording && !_starting) {
         await io.configureInput(enabled: true, deviceId: prefs.deviceId, deviceName: prefs.deviceName,
             channels: prefs.channels);
         if (_disposed) return;
@@ -375,9 +376,14 @@ class AudioRecorder extends ChangeNotifier {
       return false;
     }
     _recording = true;
+    _missingAtStart = _missingFrames();
     notifyListeners();
     return true;
   }
+
+  // Output frames the input was missing since it opened (the engine's bridge), to mark a take's gaps.
+  int _missingAtStart = 0;
+  int _missingFrames() => (io.inputStatus()['missing_frames'] as num?)?.toInt() ?? 0;
 
   /// Stops recording and places the takes. Returns what it placed.
   Future<AudioRecording?> stop() async {
@@ -387,8 +393,14 @@ class AudioRecorder extends ChangeNotifier {
     final r = await io.recordStop();
     final placed = placeTakes(r.takes, droppedFrames: r.droppedFrames, error: r.error);
     lastRecording.value = placed;
+    final missing = _missingFrames() - _missingAtStart;
     if (r.droppedFrames > 0) {
       message.value = '${r.droppedFrames} frames were dropped while recording (filled with silence; the device was busy).';
+    } else if (missing > 0) {
+      // The microphone stopped delivering during the take (another app took it): the take keeps its place and
+      // timing, with silence there.
+      final ms = (missing * 1000 / state.settings.sampleRate).round();
+      message.value = 'The microphone was missing for $ms ms of this take (silence there; the take stays in time).';
     }
     return placed;
   }

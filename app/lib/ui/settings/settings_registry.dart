@@ -1,4 +1,6 @@
 // Every setting's id, section, title, description and search words, so Settings' search finds any of them.
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 
 import '../../model/settings.dart';
@@ -305,11 +307,17 @@ const List<SettingEntry> settingEntries = [
   _E('about.licences', _ab, 'Licences', 'Open-source licences, JetBrains Mono included', ['license', 'licence', 'open source']),
 ];
 
+/// Settings that exist only on Android (their rows hide elsewhere, so search leaves them out there).
+const androidOnlySettings = {'audio.background'};
+
+/// Whether [e]'s row is on its page on this platform.
+bool settingAvailable(SettingEntry e) => !androidOnlySettings.contains(e.id) || Platform.isAndroid;
+
 /// The entries matching [query], grouped by section in page order.
 Map<SettingsSection, List<SettingEntry>> searchSettings(String query) {
   final out = <SettingsSection, List<SettingEntry>>{};
   for (final e in settingEntries) {
-    if (e.matches(query)) (out[e.section] ??= []).add(e);
+    if (settingAvailable(e) && e.matches(query)) (out[e.section] ??= []).add(e);
   }
   return out;
 }

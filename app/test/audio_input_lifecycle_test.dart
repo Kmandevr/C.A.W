@@ -104,21 +104,21 @@ void main() {
     final before = io.inputConfigs.length;
     // The engine says the input stopped delivering (the output plays on regardless).
     io.inputStatusNow = {'enabled': true, 'running': true, 'state': 'stalled', 'channels': 2};
-    await Future<void>.delayed(const Duration(milliseconds: 80));
+    await until(() => rec.micBusy.value == true);
     expect(rec.micBusy.value, isTrue);
     expect(io.inputConfigs.length, greaterThan(before), reason: 'retried');
     expect(io.inputConfigs.skip(before).every((c) => c.enabled), isTrue, reason: 'never turned off by a retry');
     expect(rec.message.value, isNull, reason: 'quietly: no error line');
     // Free again.
     io.inputStatusNow = {'enabled': true, 'running': true, 'state': 'open', 'channels': 2};
-    await Future<void>.delayed(const Duration(milliseconds: 80));
+    await until(() => rec.micBusy.value == false);
     expect(rec.micBusy.value, isFalse);
     // Android silencing our capture for another app counts as busy too, with no retry needed.
     mic.silenced = true;
-    await Future<void>.delayed(const Duration(milliseconds: 80));
+    await until(() => rec.micBusy.value == true);
     expect(rec.micBusy.value, isTrue);
     mic.silenced = false;
-    await Future<void>.delayed(const Duration(milliseconds: 80));
+    await until(() => rec.micBusy.value == false);
     expect(rec.micBusy.value, isFalse);
     // Released, nothing is checked any more.
     await rec.arm(vox(), false);
@@ -128,6 +128,25 @@ void main() {
     await Future<void>.delayed(const Duration(milliseconds: 80));
     expect(io.inputConfigs.length, count);
     expect(rec.micBusy.value, isFalse);
+  });
+
+  test('during a take the busy input is never reopened, and the gap is told at its end', () async {
+    s.project.layers.single.input!.armed = true;
+    await rec.arm(vox(), true);
+    await rec.settled();
+    io.inputStatusNow = {'enabled': true, 'running': true, 'state': 'open', 'channels': 2, 'missing_frames': 0};
+    expect(await rec.start(), isTrue);
+    final before = io.inputConfigs.length;
+    // Another app takes the microphone mid-take: busy, but no reopen while recording.
+    io.inputStatusNow = {'enabled': true, 'running': true, 'state': 'stalled', 'channels': 2, 'missing_frames': 4800};
+    await until(() => rec.micBusy.value == true);
+    expect(rec.micBusy.value, isTrue);
+    expect(io.inputConfigs.length, before, reason: 'reopening capture would cut the take');
+    await rec.stop();
+    expect(rec.message.value, contains('missing for 100 ms'));
+    // After the take the quiet retries resume.
+    await until(() => io.inputConfigs.length > before);
+    expect(io.inputConfigs.length, greaterThan(before));
   });
 
   test('the Android channel answers whether our input is silenced, and a missing plugin means no', () async {
@@ -154,4 +173,12 @@ void main() {
     expect(find.text(micBusyNote), findsNothing);
     expect(find.byKey(const ValueKey('audio-input-meter-v')), findsOneWidget);
   });
+}
+
+/// Waits (real time, a few seconds at most) until [done]: the retry timer runs every 20 ms here, and a loaded CI
+/// machine may take longer than a fixed wait.
+Future<void> until(bool Function() done) async {
+  for (var i = 0; i < 300 && !done(); i++) {
+    await Future<void>.delayed(const Duration(milliseconds: 10));
+  }
 }

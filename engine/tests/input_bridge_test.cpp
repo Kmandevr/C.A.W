@@ -198,3 +198,87 @@ TEST(input_bridge_closed_gives_no_input_and_refuses_oversized_pulls) {
     b.push(big.data(), 16);
     CHECK(b.dropped() >= 16);
 }
+
+// The two devices' clocks never agree exactly: a phone's capture and playback can differ by hundreds of ppm. The
+// bridge follows the difference with a small change in its read rate, so in normal running there is no gap, no
+// splice and no creep in the input's delay (audio review of 2026-11-12).
+TEST(input_bridge_follows_clock_drift_with_no_gaps_splices_or_creep) {
+    for (const double ppm : {-500.0, -100.0, 100.0, 500.0}) {
+        InputBridge bridge;
+        bridge.open(1, 2 * kCapPeriod + kOutBlock, 4 * kCapPeriod, kTestRate / 4, kTestRate);
+        std::vector<float> buf(kCapPeriod);
+        int64_t captured = 0;
+        const double w = 2.0 * 3.14159265358979 * 440.0 / kTestRate;
+        float prev = 0.0f, maxStep = 0.0f;
+        double lo = 1e9, hi = -1e9, ratioSum = 0.0;
+        int ch = 0, ratioN = 0;
+        bool started = false;
+        const int pulls = 5 * 60 * kTestRate / kOutBlock;  // five minutes
+        for (int k = 0; k < pulls; ++k) {
+            // The capture device delivers whole periods on its own clock, `ppm` fast or slow against the output's.
+            const auto due = static_cast<int64_t>((k + 1) * static_cast<double>(kOutBlock) * (1.0 + ppm * 1e-6)) + 2 * kCapPeriod;
+            while (captured < due) {
+                for (int i = 0; i < kCapPeriod; ++i) buf[static_cast<size_t>(i)] = 0.5f * static_cast<float>(std::sin(w * static_cast<double>(captured + i)));
+                bridge.push(buf.data(), kCapPeriod);
+                captured += kCapPeriod;
+            }
+            const float* in = bridge.pull(kOutBlock, ch);
+            CHECK(in != nullptr);
+            for (int i = 0; i < kOutBlock; ++i) {
+                if (started) maxStep = std::max(maxStep, std::fabs(in[i] - prev));
+                prev = in[i];
+            }
+            started = started || std::fabs(prev) > 0.0f;
+            if (k > 30 * kTestRate / kOutBlock) {  // settled after 30 s: the delay holds still
+                lo = std::min(lo, bridge.delay());
+                hi = std::max(hi, bridge.delay());
+            }
+            if (k > pulls - 60 * kTestRate / kOutBlock) {  // the read rate over the last minute
+                ratioSum += bridge.ratio();
+                ++ratioN;
+            }
+        }
+        // A 440 Hz sine at 0.5 moves at most 0.029 a frame; a gap, a fade or a splice moves far more (or fades).
+        CHECK(maxStep < 0.5f * static_cast<float>(w) * 1.1f);
+        CHECK_EQ(bridge.underruns(), static_cast<int64_t>(0));
+        CHECK_EQ(bridge.skipped(), static_cast<int64_t>(0));
+        CHECK_EQ(bridge.missing(), static_cast<int64_t>(0));
+        CHECK(hi - lo < kCapPeriod);  // the input's delay stable within one capture period
+        // It found the drift. The fill it measures wanders a little as the capture's bursts slide past the output's
+        // blocks (a cycle of about 40 s at 100 ppm), and the loop follows that: within 25 ppm.
+        CHECK(std::fabs(ratioSum / ratioN - 1.0 - ppm * 1e-6) < 25e-6);
+    }
+}
+
+// A real discontinuity (the output stalled while capture ran on, so the queue overflowed its slack) jumps back to
+// the starting fill through a crossfade, not a hard splice.
+TEST(input_bridge_resync_after_an_output_stall_is_crossfaded) {
+    InputBridge bridge;
+    bridge.open(1, 2 * kCapPeriod + kOutBlock, 4 * kCapPeriod, kTestRate / 4, kTestRate);
+    std::vector<float> buf(kCapPeriod);
+    int64_t captured = 0;
+    const double w = 2.0 * 3.14159265358979 * 440.0 / kTestRate;
+    auto capture = [&](int64_t due) {
+        while (captured < due) {
+            for (int i = 0; i < kCapPeriod; ++i) buf[static_cast<size_t>(i)] = 0.5f * static_cast<float>(std::sin(w * static_cast<double>(captured + i)));
+            bridge.push(buf.data(), kCapPeriod);
+            captured += kCapPeriod;
+        }
+    };
+    int ch = 0;
+    float prev = 0.0f, maxStep = 0.0f;
+    int64_t outAt = 0;
+    for (int k = 0; k < 400; ++k) {
+        capture(outAt + kOutBlock + 2 * kCapPeriod + (k >= 200 ? 4800 : 0));  // at 200 the output stalled 100 ms
+        const float* in = bridge.pull(kOutBlock, ch);
+        for (int i = 0; i < kOutBlock; ++i) {
+            if (k > 20) maxStep = std::max(maxStep, std::fabs(in[i] - prev));
+            prev = in[i];
+        }
+        outAt += kOutBlock;
+    }
+    CHECK(bridge.skipped() > 0);
+    // Two sines a few ms apart crossfaded over kFade frames: each step stays near the sine's own.
+    CHECK(maxStep < 0.5f * static_cast<float>(w) * 1.1f + 1.0f / InputBridge::kFade);
+}
+
