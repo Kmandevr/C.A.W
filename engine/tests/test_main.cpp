@@ -16,6 +16,8 @@ bool updateGolden = false;
 static int failures = 0;
 static const char* current = "";
 
+int failureCount() { return failures; }
+
 void fail(const char* file, int line, const std::string& msg) {
     ++failures;
     std::printf("FAIL %s (%s:%d): %s\n", current, file, line, msg.c_str());

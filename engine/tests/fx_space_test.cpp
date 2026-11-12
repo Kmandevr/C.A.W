@@ -143,9 +143,6 @@ double toneLevel(const std::vector<float>& x, size_t from, size_t to, double hz)
 }
 // A reference's name: the effect's id, and " busy" for its busy settings.
 std::string caseName(const char* id, bool busy) { return std::string(id) + (busy ? " busy" : ""); }
-// The input repeats each second: a reference's waveform holds its first 1.25 s (the start, the silent bar and the
-// wake-up after it), the whole 2 s render is also compared as heard (tolerance.h).
-constexpr uint32_t kWaveformFrames = 60000;
 // How each case is compared with its reference (tolerance.h): all stable (2026-11-12 probes, docs/engine.md).
 cawtest::Class effectClass(const char*, bool) { return cawtest::Class::Stable; }
 
@@ -389,7 +386,6 @@ TEST(fx_space_effects_match_their_reference_renders) {
     Engine e(48000);
     const Stereo in = music(48000 * 2);
     cawtest::References refs("fx_space");
-    refs.storeWaveformFrames(kWaveformFrames);
     for (const char* id : kSpaceSuite)
         for (bool b : {false, true}) {
             std::unique_ptr<ModuleProcessor> p = make(e, id);

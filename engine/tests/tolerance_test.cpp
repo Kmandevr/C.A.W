@@ -1,9 +1,13 @@
 // The tolerance comparators (tolerance.h): the reference codec, last-bit changes accepted, real bugs rejected.
 #include <algorithm>
+#include <chrono>
 #include <cmath>
+#include <cstdio>
+#include <filesystem>
 #include <memory>
 #include <string>
 #include <utility>
+#include <system_error>
 #include <vector>
 
 #include "caw/detmath.hpp"
@@ -180,7 +184,9 @@ TEST(chaotic_comparison_accepts_another_phase_and_rejects_real_bugs) {
     const cawtest::Features fref = cawtest::measureFeatures(filtered);
     CHECK(!fref.onsets[0].empty());
     CHECK(!cawtest::compareChaotic(fref, cawtest::measureFeatures(through("org.caw.filter", in, {{"resonance", 0.3}, {"cutoff", 1300}}))).empty());
-    CHECK(!cawtest::compareChaotic(fref, cawtest::measureFeatures(late(filtered))).empty());
+    // Onsets may move by up to 2 frames in a chaotic render (stable renders stay exact through the null), no more.
+    CHECK_ACCEPTED(cawtest::compareChaotic(fref, cawtest::measureFeatures(late(filtered))));
+    CHECK(!cawtest::compareChaotic(fref, cawtest::measureFeatures(late(late(late(filtered))))).empty());
     CHECK(!cawtest::compareChaotic(fref, cawtest::measureFeatures(clicked(filtered, 30000, 4, 0.05f))).empty());
 }
 
@@ -194,4 +200,86 @@ TEST(exact_comparison_of_discrete_results) {
     std::vector<float> x(10000, 0.0f);
     x[100] = 0.5f, x[101] = 0.2f, x[300] = 0.5f, x[5000] = 5e-4f, x[5003] = 2e-3f;
     CHECK(cawtest::compareExact(cawtest::onsets(x), std::vector<uint32_t>{100, 5003}).empty());
+}
+
+namespace {
+
+std::vector<uint8_t> fileBytes(const std::string& path) {
+    std::vector<uint8_t> b;
+    if (std::FILE* f = std::fopen(path.c_str(), "rb")) {
+        uint8_t buf[4096];
+        for (size_t n; (n = std::fread(buf, 1, sizeof buf, f)) > 0;) b.insert(b.end(), buf, buf + n);
+        std::fclose(f);
+    }
+    return b;
+}
+void writeBytes(const std::string& path, const std::vector<uint8_t>& b) {
+    if (std::FILE* f = std::fopen(path.c_str(), "wb")) {
+        if (!b.empty()) std::fwrite(b.data(), 1, b.size(), f);
+        std::fclose(f);
+    }
+}
+
+}  // namespace
+
+TEST(reference_files_round_trip_and_refuse_damaged_ones) {
+    // A folder of its own (other runs may share the temporary folder).
+    const std::filesystem::path where = std::filesystem::temp_directory_path() /
+        ("caw_tolerance_references_" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    std::error_code ec;
+    std::filesystem::remove_all(where, ec);
+    std::filesystem::create_directories(where, ec);
+    const std::string dir = where.generic_string();
+    const Audio m = music(24000), filtered = through("org.caw.filter", m), verb = through("org.caw.reverb.pro", m);
+    {
+        // Recorded: two stable renders (one twice, stored once), a chaotic one; a name recorded twice is refused.
+        cawtest::References w("selftest", dir, true);
+        CHECK_ACCEPTED(w.compare("music", m, cawtest::Class::Stable));
+        CHECK_ACCEPTED(w.compare("music again", m, cawtest::Class::Stable));
+        CHECK_ACCEPTED(w.compare("filtered", filtered, cawtest::Class::Stable));
+        CHECK_ACCEPTED(w.compare("reverb", verb, cawtest::Class::Chaotic));
+        CHECK(!w.compare("music", m, cawtest::Class::Stable).empty());
+    }
+    const std::string path = dir + "/selftest.cawref";
+    const std::vector<uint8_t> bytes = fileBytes(path);
+    CHECK(bytes.size() > 1000);
+    CHECK(bytes.size() < cawtest::encodeAudio(m).size() * 2);  // the repeat is an alias
+    {
+        // Read back: every render accepted; a changed one, another class, an unknown name and another length not.
+        cawtest::References r("selftest", dir, false);
+        CHECK(r.loaded());
+        CHECK_EQ(r.size(), size_t{4});
+        CHECK_ACCEPTED(r.compare("music", m, cawtest::Class::Stable));
+        CHECK_ACCEPTED(r.compare("music again", m, cawtest::Class::Stable));
+        CHECK_ACCEPTED(r.compare("filtered", filtered, cawtest::Class::Stable));
+        CHECK_ACCEPTED(r.compare("reverb", verb, cawtest::Class::Chaotic));
+        CHECK(!r.compare("music again", gained(m, 0.5), cawtest::Class::Stable).empty());
+        CHECK(!r.compare("reverb", gained(verb, 0.5), cawtest::Class::Chaotic).empty());
+        CHECK(!r.compare("filtered", filtered, cawtest::Class::Chaotic).empty());
+        CHECK(!r.compare("unknown", m, cawtest::Class::Stable).empty());
+        CHECK(!r.compare("music", music(24001), cawtest::Class::Stable).empty());
+    }
+    // Damaged files are refused whole, never read past their end: truncated anywhere, a byte too many, another magic.
+    std::vector<std::vector<uint8_t>> damaged;
+    for (size_t cut : {size_t{0}, size_t{7}, size_t{11}, size_t{40}, bytes.size() / 3, bytes.size() / 2, bytes.size() - 1})
+        damaged.emplace_back(bytes.begin(), bytes.begin() + static_cast<std::ptrdiff_t>(cut));
+    damaged.push_back(bytes);
+    damaged.back().push_back(0);
+    damaged.push_back(bytes);
+    damaged.back()[6] = '9';
+    for (const std::vector<uint8_t>& d : damaged) {
+        writeBytes(path, d);
+        cawtest::References r("selftest", dir, false);
+        CHECK(!r.loaded());
+        CHECK_EQ(r.size(), size_t{0});
+        CHECK(!r.compare("music", m, cawtest::Class::Stable).empty());
+    }
+    // A waveform whose stream is cut short does not decode, nor one whose residual would overflow.
+    std::vector<uint8_t> wave = cawtest::encodeAudio(m);
+    Audio back;
+    wave.resize(wave.size() - 16);
+    CHECK(!cawtest::decodeAudio(wave, static_cast<uint32_t>(m.frames()), back));
+    std::vector<uint8_t> huge(64, 0xFF);  // a raw 64-bit escape everywhere
+    CHECK(!cawtest::decodeAudio(huge, 100, back));
+    std::filesystem::remove_all(where, ec);
 }
