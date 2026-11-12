@@ -31,7 +31,11 @@ struct SvfOutput {
 // cutoff or q changes (every 16 frames is plenty), process() every sample.
 class Svf {
 public:
-    void set(double cutoff, double q, double sampleRate) noexcept {
+    void set(double cutoff, double q, double sampleRate) noexcept { setWith<false>(cutoff, q, sampleRate); }
+    // set() with fastmath.hpp's tanApprox (within 1e-9 relative): cheaper, for a cutoff that moves every few blocks.
+    void setApprox(double cutoff, double q, double sampleRate) noexcept { setWith<true>(cutoff, q, sampleRate); }
+    template <bool Approx>
+    void setWith(double cutoff, double q, double sampleRate) noexcept {
         if (cutoff == cutoff_ && q == q_ && sampleRate == rate_) return;  // unchanged: no tan
         cutoff_ = cutoff;
         q_ = q;
@@ -41,7 +45,7 @@ public:
         fc = fc < 10.0 ? 10.0 : (fc > top ? top : fc);
         double qq = finiteOr0(q);
         qq = qq < 0.1 ? 0.1 : (qq > 40.0 ? 40.0 : qq);
-        const double g = detTan(kPi * fc / sampleRate);
+        const double g = Approx ? tanApprox(kPi * fc / sampleRate) : detTan(kPi * fc / sampleRate);
         k_ = 1.0 / qq;
         a1_ = 1.0 / (1.0 + g * (g + k_));
         a2_ = g * a1_;
@@ -194,7 +198,13 @@ inline double softClip(double x) noexcept {
 
 class MultiLadder {
 public:
-    void set(double cutoff, double resonance, double sampleRate) noexcept {
+    void set(double cutoff, double resonance, double sampleRate) noexcept { setWith<false>(cutoff, resonance, sampleRate); }
+    // set() with fastmath.hpp's tanApprox (within 1e-9 relative): cheaper, for a cutoff that moves every few blocks.
+    void setApprox(double cutoff, double resonance, double sampleRate) noexcept {
+        setWith<true>(cutoff, resonance, sampleRate);
+    }
+    template <bool Approx>
+    void setWith(double cutoff, double resonance, double sampleRate) noexcept {
         if (cutoff == cutoff_ && resonance == resonance_ && sampleRate == rate_) return;  // unchanged: no tan
         cutoff_ = cutoff;
         resonance_ = resonance;
@@ -202,7 +212,7 @@ public:
         double fc = finiteOr0(cutoff);
         const double top = 0.45 * sampleRate;
         fc = fc < 10.0 ? 10.0 : (fc > top ? top : fc);
-        const double g = detTan(kPi * fc / sampleRate);
+        const double g = Approx ? tanApprox(kPi * fc / sampleRate) : detTan(kPi * fc / sampleRate);
         const double r0 = finiteOr0(resonance);
         const double k = 3.95 * (r0 < 0.0 ? 0.0 : (r0 > 1.0 ? 1.0 : r0));
         G_ = g / (1.0 + g);

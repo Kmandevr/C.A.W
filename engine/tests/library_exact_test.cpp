@@ -3,6 +3,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <limits>
 #include <vector>
 
 #include "caw/library/delay.hpp"
@@ -94,6 +95,57 @@ TEST(library_fast_maths_matches_the_exact_maths_within_a_billionth) {
         CHECK(std::memcmp(&got, &want, sizeof got) == 0);
     }
     CHECK(!std::signbit(lib::wrap01(-0.0)));
+}
+
+TEST(library_audio_rate_approximations_stay_far_below_hearing) {
+    // tanhApprox (and the Saturator's Approx forms on it) within 5e-9 of tanh; tanApprox within 1e-8 relative of
+    // detTan up to a filter's 0.49 of the sample rate; filters set either way give the same sound to -160 dB.
+    double worstTanh = 0, worstRel0 = 0, worstSat = 0, worstPair = 0, worstTan = 0;
+    lib::Saturator sat;
+    sat.set(3.0);
+    for (int i = -200000; i <= 200000; ++i) {
+        const double t = i * 0.0002;  // -40 .. 40
+        worstTanh = std::max(worstTanh, std::fabs(lib::tanhApprox(t) - detTanh(t)));
+        if (t != 0.0 && std::fabs(t) < 0.1) worstRel0 = std::max(worstRel0, std::fabs(lib::tanhApprox(t) / detTanh(t) - 1.0));
+        worstSat = std::max(worstSat, std::fabs(sat.processApprox(t * 0.05) - sat.process(t * 0.05)));
+        const double in[2] = {t * 0.05, -t * 0.031};
+        double out[2];
+        sat.process2Approx(in, out);
+        worstPair = std::max({worstPair, std::fabs(out[0] - sat.processApprox(in[0])), std::fabs(out[1] - sat.processApprox(in[1]))});
+        if (i >= 0 && i <= 49000) {  // pi * fc / sr for fc 0 .. 0.49 sr
+            const double x = kPi * i / 100000.0;
+            const double want = detTan(x);
+            if (want != 0.0) worstTan = std::max(worstTan, std::fabs(lib::tanApprox(x) / want - 1.0));
+        }
+    }
+    CHECK(worstTanh < 5e-9);
+    CHECK(worstRel0 < 2e-9);
+    CHECK(worstSat < 2e-8);  // 5e-9 x the level-matching gain (1 / tanh(3))
+    CHECK(worstPair < 1e-15);
+    CHECK(worstTan < 1e-8);
+    CHECK_EQ(lib::tanhApprox(std::nan("")), 0.0);
+    CHECK_EQ(lib::tanhApprox(0.0), 0.0);
+    CHECK(lib::tanhApprox(1e300) <= 1.0 && lib::tanhApprox(-1e300) >= -1.0);
+    {
+        double in[2] = {std::nan(""), std::numeric_limits<double>::infinity()}, out[2] = {1, 1};
+        sat.process2Approx(in, out);
+        CHECK_EQ(out[0], 0.0);
+        CHECK_EQ(out[1], 0.0);
+    }
+    lib::Svf a, b;
+    lib::MultiLadder la, lb;
+    double worstFilter = 0;
+    for (int k = 0; k < 4800; ++k) {
+        const double fc = 40.0 * std::pow(2.0, 9.2 * k / 4800.0);  // 40 Hz .. 0.49 of 48 kHz, moving
+        a.set(fc, 2.0, 48000.0);
+        b.setApprox(fc, 2.0, 48000.0);
+        la.set(fc, 0.6, 48000.0);
+        lb.setApprox(fc, 0.6, 48000.0);
+        const double x = std::sin(0.05 * k) * 0.5;
+        worstFilter = std::max(worstFilter, std::fabs(a.lowpass(x) - b.lowpass(x)));
+        worstFilter = std::max(worstFilter, std::fabs(la.process<lib::LadderMode::LowPass>(x) - lb.process<lib::LadderMode::LowPass>(x)));
+    }
+    CHECK(worstFilter < 1e-8);  // -160 dB
 }
 
 TEST(library_block_oscillators_follow_morph_wave) {
