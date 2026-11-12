@@ -255,6 +255,7 @@ TEST(latency_without_a_device_reports_none) {
     CHECK(s.find("\"sample_rate\":44100") != std::string::npos);
     CHECK(s.find("\"output\":{") != std::string::npos && s.find("\"input\":{") != std::string::npos);
     CHECK(s.find("\"source\":\"none\"") != std::string::npos);
+    CHECK(s.find("\"kind\":\"unknown\"") != std::string::npos);
     caw_engine_destroy(c);
     lat = caw_audio_latency(nullptr);
     CHECK(std::string(lat) == "{\"running\":false}");

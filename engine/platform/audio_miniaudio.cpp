@@ -12,6 +12,13 @@
 #include <dlfcn.h>
 #include <time.h>
 #endif
+#if defined(_WIN32)
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#include <mmdeviceapi.h>
+#endif
 
 #include "caw.h"
 #include "capi_internal.h"
@@ -410,7 +417,74 @@ struct SideLatency {
     int64_t frames = 0;
     const char* source = "none";  // "timestamp" (AAudio's presentation time), "buffers" (the queued periods), "none"
     int32_t deviceId = 0;         // AAudio's routed device id (AudioDeviceInfo.getId() on Android); 0 elsewhere
+    const char* kind = "unknown"; // the endpoint's link, where the backend says (WASAPI); the app's AudioDeviceKind names
 };
+
+#if defined(_WIN32)
+// The kind of link a WASAPI endpoint is, from its property store: the bus that enumerated it
+// (DEVPKEY_Device_EnumeratorName: [Assumption] "BTHENUM" for classic Bluetooth audio, "BTHLEDEVICE" for Bluetooth LE,
+// "USB" for USB audio, the names Windows' bus drivers use in hardware ids) and else its EndpointFormFactor
+// (PKEY_AudioEndpoint_FormFactor, VT_UI4; Microsoft Learn, read 2026-11-12). ole32 is loaded at run time, as
+// miniaudio does. Called off the audio thread (caw_audio_latency); COM is initialised for the call.
+const char* wasapiKind(const wchar_t* id) {
+    if (!id || !id[0]) return "unknown";
+    HMODULE ole = LoadLibraryW(L"ole32.dll");
+    if (!ole) return "unknown";
+    using CoInit = HRESULT(WINAPI*)(LPVOID, DWORD);
+    using CoUninit = void(WINAPI*)();
+    using CoCreate = HRESULT(WINAPI*)(REFCLSID, LPUNKNOWN, DWORD, REFIID, LPVOID*);
+    using PvClear = HRESULT(WINAPI*)(PROPVARIANT*);
+    auto coInit = reinterpret_cast<CoInit>(reinterpret_cast<void*>(GetProcAddress(ole, "CoInitializeEx")));
+    auto coUninit = reinterpret_cast<CoUninit>(reinterpret_cast<void*>(GetProcAddress(ole, "CoUninitialize")));
+    auto coCreate = reinterpret_cast<CoCreate>(reinterpret_cast<void*>(GetProcAddress(ole, "CoCreateInstance")));
+    auto pvClear = reinterpret_cast<PvClear>(reinterpret_cast<void*>(GetProcAddress(ole, "PropVariantClear")));
+    const char* kind = "unknown";
+    if (coInit && coUninit && coCreate && pvClear) {
+        const HRESULT init = coInit(nullptr, COINIT_MULTITHREADED);
+        static const CLSID kEnumerator = {0xBCDE0395, 0xE52F, 0x467C, {0x8E, 0x3D, 0xC4, 0x57, 0x92, 0x91, 0x69, 0x2E}};
+        static const IID kIEnumerator = {0xA95664D2, 0x9614, 0x4F35, {0xA7, 0x46, 0xDE, 0x8D, 0xB6, 0x36, 0x17, 0xE6}};
+        static const PROPERTYKEY kFormFactor = {{0x1da5d803, 0xd492, 0x4edd, {0x8c, 0x23, 0xe0, 0xc0, 0xff, 0xee, 0x7f, 0x0e}}, 0};
+        static const PROPERTYKEY kBus = {{0xa45c254e, 0xdf1c, 0x4efd, {0x80, 0x20, 0x67, 0xd1, 0x46, 0xa8, 0x50, 0xe0}}, 24};
+        IMMDeviceEnumerator* en = nullptr;
+        if (SUCCEEDED(coCreate(kEnumerator, nullptr, CLSCTX_ALL, kIEnumerator, reinterpret_cast<void**>(&en))) && en) {
+            IMMDevice* dev = nullptr;
+            if (SUCCEEDED(en->GetDevice(id, &dev)) && dev) {
+                IPropertyStore* store = nullptr;
+                if (SUCCEEDED(dev->OpenPropertyStore(STGM_READ, &store)) && store) {
+                    PROPVARIANT v;
+                    PropVariantInit(&v);
+                    if (SUCCEEDED(store->GetValue(kBus, &v)) && v.vt == VT_LPWSTR && v.pwszVal) {
+                        const wchar_t* b = v.pwszVal;
+                        if (_wcsicmp(b, L"BTHENUM") == 0) kind = "bluetooth";
+                        else if (_wcsnicmp(b, L"BTHLE", 5) == 0) kind = "bluetoothLe";
+                        else if (_wcsicmp(b, L"USB") == 0) kind = "usb";
+                    }
+                    pvClear(&v);
+                    if (std::strcmp(kind, "unknown") == 0) {
+                        PropVariantInit(&v);
+                        if (SUCCEEDED(store->GetValue(kFormFactor, &v)) && v.vt == VT_UI4) {
+                            switch (v.ulVal) {  // EndpointFormFactor
+                                case 0: kind = "remote"; break;                  // RemoteNetworkDevice
+                                case 1: case 4: kind = "builtIn"; break;         // Speakers, Microphone
+                                case 2: case 3: case 5: case 8: kind = "wired"; break;  // LineLevel, Headphones, Headset, SPDIF
+                                case 9: kind = "hdmi"; break;                    // DigitalAudioDisplayDevice (HDMI, DisplayPort)
+                                default: break;
+                            }
+                        }
+                        pvClear(&v);
+                    }
+                    store->Release();
+                }
+                dev->Release();
+            }
+            en->Release();
+        }
+        if (init == S_OK || init == S_FALSE) coUninit();
+    }
+    FreeLibrary(ole);
+    return kind;
+}
+#endif
 
 int64_t toEngineFrames(int64_t frames, ma_uint32 deviceRate, int engineRate) {
     if (deviceRate == 0 || static_cast<int>(deviceRate) == engineRate) return frames;
@@ -468,7 +542,8 @@ std::string sideJson(const SideLatency& s, int engineRate, bool running) {
     char buf[48];
     std::snprintf(buf, sizeof buf, "%.2f", ms);
     return std::string("{\"running\":") + (running ? "true" : "false") + ",\"frames\":" + std::to_string(s.frames) +
-           ",\"ms\":" + buf + ",\"source\":\"" + s.source + "\",\"device_id\":" + std::to_string(s.deviceId) + "}";
+           ",\"ms\":" + buf + ",\"source\":\"" + s.source + "\",\"device_id\":" + std::to_string(s.deviceId) +
+           ",\"kind\":\"" + s.kind + "\"}";
 }
 
 std::string latencyJson(CawEngine* e, Audio* a) {
@@ -492,6 +567,12 @@ std::string latencyJson(CawEngine* e, Audio* a) {
             else in.deviceId = ti.deviceId;
         }
         ma_mutex_unlock(&a->device.aaudio.rerouteLock);
+    }
+#endif
+#if defined(_WIN32)
+    if (a->context.backend == ma_backend_wasapi) {
+        out.kind = wasapiKind(a->device.playback.id.wasapi);
+        if (a->input) in.kind = wasapiKind(a->device.capture.id.wasapi);
     }
 #endif
     // The duplex ring buffer's two capture periods (see openDevice) hold the input back before the callback reads it.

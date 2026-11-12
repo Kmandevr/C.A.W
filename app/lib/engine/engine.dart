@@ -175,19 +175,21 @@ class AudioDeviceList {
 
 /// One side of the device's latency (caw_audio_latency): [frames] at the engine's rate, where the figure came from
 /// ("timestamp": AAudio's presentation or capture time; "buffers": the queued periods; "none") and AAudio's routed
-/// device id (AudioDeviceInfo.getId() on Android; 0 elsewhere).
+/// device id (AudioDeviceInfo.getId() on Android; 0 elsewhere). [kind] is the endpoint's link where the backend
+/// says (WASAPI's bus and form factor: an AudioDeviceKind name), else 'unknown'.
 class SideLatency {
-  const SideLatency({this.running = false, this.frames = 0, this.ms = 0, this.source = 'none', this.deviceId = 0});
+  const SideLatency({this.running = false, this.frames = 0, this.ms = 0, this.source = 'none', this.deviceId = 0,
+      this.kind = 'unknown'});
   final bool running;
   final int frames, deviceId;
   final double ms;
-  final String source;
+  final String source, kind;
 
   static SideLatency fromJson(Object? o) {
     if (o is! Map) return const SideLatency();
     return SideLatency(running: o['running'] == true, frames: (o['frames'] as num?)?.round() ?? 0,
         ms: (o['ms'] as num?)?.toDouble() ?? 0, source: o['source'] as String? ?? 'none',
-        deviceId: (o['device_id'] as num?)?.round() ?? 0);
+        deviceId: (o['device_id'] as num?)?.round() ?? 0, kind: o['kind'] as String? ?? 'unknown');
   }
 }
 

@@ -196,7 +196,8 @@ class LatencyComp extends ChangeNotifier {
   Future<void> refresh() async {
     final d = readDevice?.call() ?? const DeviceLatency();
     final info = await route.current(AudioRouteHint(outputId: d.output.deviceId, inputId: d.input.deviceId,
-        outputName: outputName?.call() ?? '', inputName: inputName?.call() ?? ''));
+        outputName: outputName?.call() ?? '', inputName: inputName?.call() ?? '', outputKind: d.output.kind,
+        inputKind: d.input.kind));
     final changed = info.output != routeInfo.output || info.input != routeInfo.input ||
         (d.output.frames - device.output.frames).abs() > 48 || (d.input.frames - device.input.frames).abs() > 48 ||
         d.running != device.running;

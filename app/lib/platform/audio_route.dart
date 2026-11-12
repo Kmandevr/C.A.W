@@ -50,12 +50,19 @@ class AudioRouteInfo {
   final AudioEndpoint output, input;
 }
 
-/// What the engine knows of the running device: AAudio's routed device ids (0 when unknown) and the names the
-/// backend gave.
+/// What the engine knows of the running device: AAudio's routed device ids (0 when unknown), the names the
+/// backend gave and the kinds it read (WASAPI's bus and form factor; 'unknown' elsewhere).
 class AudioRouteHint {
-  const AudioRouteHint({this.outputId = 0, this.inputId = 0, this.outputName = '', this.inputName = ''});
+  const AudioRouteHint({this.outputId = 0, this.inputId = 0, this.outputName = '', this.inputName = '',
+      this.outputKind = 'unknown', this.inputKind = 'unknown'});
   final int outputId, inputId;
-  final String outputName, inputName;
+  final String outputName, inputName, outputKind, inputKind;
+}
+
+/// The engine's kind name, else the device's name read by [kindFromName].
+AudioDeviceKind hintedKind(String engineKind, String name) {
+  final k = AudioDeviceKind.values.where((k) => k.name == engineKind).firstOrNull;
+  return k != null && k != AudioDeviceKind.unknown ? k : kindFromName(name);
 }
 
 abstract class AudioRoute {
@@ -65,15 +72,15 @@ abstract class AudioRoute {
   Stream<void> get changes;
 }
 
-/// Android's AudioDeviceInfo TYPE_* to a kind (constants from the platform's AudioDeviceInfo reference).
+/// Android's AudioDeviceInfo TYPE_* to a kind (constant values from the AudioDeviceInfo reference, read 2026-11-12).
 AudioDeviceKind androidDeviceKind(int type) => switch (type) {
       1 || 2 || 15 || 24 => AudioDeviceKind.builtIn,         // earpiece, speaker, mic, speaker safe
-      3 || 4 || 5 || 13 || 19 || 31 => AudioDeviceKind.wired, // headset, headphones, line analog, dock, aux, dock analog
+      3 || 4 || 5 || 6 || 13 || 19 || 31 => AudioDeviceKind.wired, // headset, headphones, line analog/digital, dock, aux, dock analog
       7 || 8 => AudioDeviceKind.bluetooth,                     // SCO, A2DP
-      23 || 26 || 27 || 30 => AudioDeviceKind.bluetoothLe,     // hearing aid, BLE headset, BLE speaker, BLE broadcast
+      23 || 26 || 27 || 30 || 33 => AudioDeviceKind.bluetoothLe, // hearing aid, BLE headset, speaker, broadcast, hearing aid
       11 || 12 || 22 => AudioDeviceKind.usb,                   // USB device, accessory, headset
       9 || 10 || 29 => AudioDeviceKind.hdmi,                   // HDMI, ARC, eARC
-      20 || 25 => AudioDeviceKind.remote,                      // IP, remote submix
+      20 || 25 || 32 => AudioDeviceKind.remote,                // IP, remote submix, multichannel speaker group
       _ => AudioDeviceKind.unknown,
     };
 
@@ -150,15 +157,16 @@ class AndroidAudioRoute implements AudioRoute {
   Stream<void> get changes => _events.receiveBroadcastStream().map((_) {}).handleError((Object _) {});
 }
 
-/// Windows and the desktop builds: the engine's device names, read by [kindFromName]; no change events (a device
+/// Windows and the desktop builds: the kind the engine read from WASAPI's property store, else the device's name
+/// ([kindFromName]); no change events (a device
 /// switch in Settings reopens the device, and the app looks again then).
 class NamedAudioRoute implements AudioRoute {
   const NamedAudioRoute();
 
   @override
   Future<AudioRouteInfo> current(AudioRouteHint hint) async => AudioRouteInfo(
-      output: AudioEndpoint(name: hint.outputName, kind: kindFromName(hint.outputName)),
-      input: AudioEndpoint(name: hint.inputName, kind: kindFromName(hint.inputName)));
+      output: AudioEndpoint(name: hint.outputName, kind: hintedKind(hint.outputKind, hint.outputName)),
+      input: AudioEndpoint(name: hint.inputName, kind: hintedKind(hint.inputKind, hint.inputName)));
 
   @override
   Stream<void> get changes => const Stream.empty();

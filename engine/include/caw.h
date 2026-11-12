@@ -78,7 +78,7 @@ extern "C" {
    "noteComponent"; the link sources "note.pitch", "note.velocity", "note.pressure", "note.timbre", "note.gate" and
    "note.age"; caw_engine_note_fx_stats. The voice bus (caw_component.h) gains CAW_LANE_REST. Nothing else changes.
    23 (2026-11-11): caw_audio_latency, the running device's output and input latency (AAudio's timestamps where it
-   has them, else the queued buffers) and the routed device's id. Nothing else changes. */
+   has them, else the queued buffers), the routed device's id and, on WASAPI, its kind. Nothing else changes. */
 #define CAW_API_VERSION 23
 /* The component index that names a layer's native instrument rather than one of its "components". */
 #define CAW_INSTRUMENT_INDEX 0xFFFFFFFFu
@@ -455,7 +455,8 @@ CAW_API char* caw_audio_status(CawEngine* e);
    only while input is open}. "source": "timestamp" (AAudio: AAudioStream_getTimestamp's presentation or capture
    time against the frames written or read, read now), "buffers" (every queued period: WASAPI, ALSA, PulseAudio,
    or AAudio before its first timestamp) or "none". "device_id": AAudio's routed device (AudioDeviceInfo.getId()
-   on Android), 0 elsewhere. A Bluetooth or other link may add delay no backend reports: the app keeps a
+   on Android), 0 elsewhere. "kind": the endpoint's link where the backend says ("bluetooth", "bluetoothLe", "usb",
+   "hdmi", "wired", "builtIn", "remote"; WASAPI's bus and form factor), else "unknown". A Bluetooth or other link may add delay no backend reports: the app keeps a
    per-device offset on top. Takes the device lock: call it off the audio thread. Free with caw_free. */
 CAW_API char* caw_audio_latency(CawEngine* e);
 /* The metronome's (and count-in's) click: [volume] 0..1 (1 the default) and its CAW_CLICK_* sound. */

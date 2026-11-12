@@ -275,6 +275,18 @@ void main() {
       expect(kindFromName('Speakers (USB Audio Device)'), AudioDeviceKind.usb);
       expect(kindFromName('LG TV (NVIDIA High Definition Audio)'), AudioDeviceKind.hdmi);
     });
+
+    test('Windows: the kind WASAPI reported wins over the name; unknown falls back to the name', () async {
+      const route = NamedAudioRoute();
+      var r = await route.current(const AudioRouteHint(outputName: 'Headphones (Jabra Elite)', outputKind: 'bluetooth',
+          inputName: 'Microphone (USB Audio Device)'));
+      expect(r.output.kind, AudioDeviceKind.bluetooth, reason: 'the name says nothing; the bus does');
+      expect(r.input.kind, AudioDeviceKind.usb, reason: 'no kind from the engine: the name');
+      r = await route.current(const AudioRouteHint(outputName: 'Speakers (Realtek(R) Audio)', outputKind: 'hdmi'));
+      expect(r.output.kind, AudioDeviceKind.hdmi);
+      expect(hintedKind('nonsense', 'Bluetooth speaker'), AudioDeviceKind.bluetooth);
+      expect(androidDeviceKind(33), AudioDeviceKind.bluetoothLe);
+    });
   });
 
   testWidgets('the Latency page shows both sides and types an output offset; the badge appears', (tester) async {
