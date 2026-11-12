@@ -6,7 +6,6 @@ updated: 2026-11-12
 
 # Decisions
 
-<<<<<<< HEAD
 ## 2026-11-12: Perceptually identical, not bit-identical; speed first (owner)
 
 **Decision (owner):** engine output must be **perceptually identical and consistent**, not bit-identical, across platforms, live playback against export, and repeated runs. This replaces every earlier promise of identical bits (the 2026-11-03 "Exports are always bit-identical" and golden-hash entries, and the 2026-11-10 "perceptually the same" entry, rewritten below to point here).
@@ -15,13 +14,12 @@ updated: 2026-11-12
 - **Tests:** golden hashes are replaced by tolerance tests against the current renders, which stay as the references. Stable paths: the null residual against the reference stays below −120 dBFS peak. Chaotic paths (feedback near self-oscillation, self-resonant filters, free-running or unison phase): loudness over time within 0.1 dB and per-band spectrum within a stated tolerance. Discrete: identical note events, triggers and seeded choices. Real bugs (wrong gain, clicks, broken filters) must still fail, shown by a deliberately broken case.
 - **Allowed for speed, where the tolerance tests pass:** flush-to-zero, FMA and fast-math (keeping the NaN/inf guards that protect the mix), system or approximate maths instead of `caw/detmath.hpp` on per-sample paths, float instead of double on signal paths (double stays for phase accumulators and low-cutoff feedback filters), and a parallel mixer that sums in a fixed order. `detmath`'s bit operations stay wherever exact bits are behaviour (bitcrush, glitch masks).
 - **Process:** measure first (a CI bench on Linux and Android arm64 with a baseline in [engine](engine.md)), then one pull request per phase (free wins, floating point, maths, precision and layout, parallel mixer), each with before/after numbers. Claude asks the owner before any audible change and when a phase gains less than 5%.
-=======
+
 ## 2026-11-12: Default project (owner, 2026-11-12)
 
 - **Decision (owner):** "Here's the project I made, that will essentially be the default." The owner's "mid tempo" project (90 BPM, A minor; Track 3, Bass, Drums, Layer 4 on Flagship, the 808 kit and built-in effects) is what a first run, a deleted last project and the bundled project template open.
 - **How:** the project.json from the owner's exported .caw package is bundled as `app/assets/projects/default.json`. Its unused C++ component and the package's device binary (.so) were left out: a bundled default must not carry native code (in-process, not sandboxed; see the trust decision) or depend on a compiler. Each copy gets fresh ids with references remapped, so two copies never collide (`lib/model/default_project.dart`). The bundled template keeps the id `builtin:first-loop`, now labelled *Mid tempo*, so a saved "New project starts from" setting still finds it.
 - **Kept:** the code-built First loop stays as `AppState.demoProject()`, a test and benchmark fixture whose shape many tests depend on; the engine's First loop goldens and `caw_bench` scenario encode their own projects and do not change.
->>>>>>> default-project
 
 ## 2026-11-11: one plug-in page per C++ component (owner's "the plug-in workflow is confusing"; Claude, a proposal for the owner's review)
 
