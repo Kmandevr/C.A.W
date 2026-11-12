@@ -45,7 +45,13 @@ struct Engine::Slot {
     bool removing = false;
     bool track = false;      // installed as a track: its instrument plays the notes, through its inserts
     bool fresh = true;       // the track has not played yet since it was installed or play started
-    bool overloaded = false;
+    bool overloaded = false;  // shed: the device ran out of time (setShed keeps Engine::overloadedFlag_ counting these)
+    uint64_t shedSeq = 0;       // audio thread: when it was shed, in shed order (the newest shed comes back first)
+    double shedCost = 0;        // audio thread: what it is taken to cost: the meter's drop after it was shed, at most
+                                // an equal share of the load when it was shed (a load falling for another reason
+                                // then must not make it look too costly ever to come back)
+    double restoreDelay = 0;    // audio thread: seconds under the restore load before it comes back (doubles on a re-shed)
+    double restoredAt = -1e9;   // audio thread: the load clock when it last came back
     bool bus = false;
     int parentSlot = -1;
     AutomationData* automation = nullptr;
@@ -955,6 +961,7 @@ std::string Engine::setProject(const ProjectSpec& p) {
 }
 
 std::string Engine::setProjectOffline(const ProjectSpec& p) {
+    offline_.store(true, std::memory_order_relaxed);
     return setProjectImpl(p, true);
 }
 
@@ -2702,9 +2709,9 @@ void Engine::applyCommands() noexcept {
                     markLive(c.slot);
                     s.removing = false;
                     s.fresh = true;
-                    s.overloaded = false;
+                    setShed(s, false);
+                    s.restoreDelay = 0;
                     s.bus = false;
-                    s.overloadFlag.store(false, std::memory_order_relaxed);
                     s.k = -1;
                     s.epoch = -1;
                     updateSolo();
@@ -3018,13 +3025,7 @@ void Engine::applyCommands() noexcept {
                 bindTable();
                 break;
             }
-            case Cmd::ClearOverload:
-                for (int i = 0; i < slotCount_; ++i) {
-                    slotAt(i).overloaded = false;
-                    slotAt(i).overloadFlag.store(false, std::memory_order_relaxed);
-                }
-                overloadedFlag_.store(0, std::memory_order_relaxed);
-                break;
+            case Cmd::ClearOverload: resetShedding(); break;
         }
     }
 }
@@ -3633,6 +3634,7 @@ int Engine::planChunk(int maxFrames) noexcept {
                 s.track = false;
                 s.active = false;
                 s.removing = false;
+                setShed(s, false);  // a removed layer is no longer one the device shed
                 s.mode = Slot::Mode::Idle;
                 routingDirty_ = true;
             }
@@ -4465,19 +4467,72 @@ void Engine::runMasterNode(const float* inL, const float* inR, float* outL, floa
     loudness_->process(outL, outR, m);  // K-weighting and true peak per sample; the rest each 100 ms
 }
 
+void Engine::setShed(Slot& s, bool shed) noexcept {
+    if (s.overloaded == shed) return;
+    s.overloaded = shed;
+    s.overloadFlag.store(shed, std::memory_order_relaxed);
+    overloadedFlag_.fetch_add(shed ? 1 : -1, std::memory_order_relaxed);
+}
+
 void Engine::pickOverloadVictim() noexcept {
-    int best = -1;
+    int best = -1, audible = 0;
     for (int k = 0; k < liveCount_; ++k) {
         const int i = live_[k];
         const Slot& s = slotAt(i);
         if (!s.active || s.overloaded || slotTarget(s) == 0.0) continue;
+        ++audible;
         if (best < 0 || s.order > slotAt(best).order) best = i;
     }
-    if (best >= 0) {
-        slotAt(best).overloaded = true;
-        slotAt(best).overloadFlag.store(true, std::memory_order_relaxed);
-        overloadedFlag_.fetch_add(1, std::memory_order_relaxed);
+    if (best < 0) return;
+    Slot& s = slotAt(best);
+    setShed(s, true);
+    s.shedSeq = ++shedSeq_;
+    s.shedCost = shedLoad_ / audible;  // until measured: an equal share
+    // Shed again soon after it came back: it waits twice as long next time (2 s, 4 s ... 32 s), so a layer the
+    // device can only just not carry settles out instead of coming and going.
+    s.restoreDelay = loadClock_ - s.restoredAt < kReshedSeconds ? std::min(kRestoreMaxSeconds, 2.0 * std::max(s.restoreDelay, kRestoreSeconds))
+                                                                 : kRestoreSeconds;
+    measureSlot_ = best;
+    measureFrom_ = shedLoad_;
+    shedTotal_.fetch_add(1, std::memory_order_relaxed);
+}
+
+void Engine::restoreOne() noexcept {
+    // The newest shed first (shedding takes the newest layer, so this brings back the oldest layer first in time).
+    int best = -1;
+    for (int k = 0; k < liveCount_; ++k) {
+        const int i = live_[k];
+        const Slot& s = slotAt(i);
+        if (!s.active || !s.overloaded) continue;
+        if (best < 0 || s.shedSeq > slotAt(best).shedSeq) best = i;
     }
+    if (best < 0) return;
+    Slot& s = slotAt(best);
+    // Back once it has waited its delay, if the load now plus what it was seen to cost stays under kRestoreCeiling;
+    // else, after kTrialSeconds more of quiet, back on trial all the same: a cost seen while the device was
+    // throttled reads high, and a song shed to silence must not stay silent. A trial that overloads again is shed
+    // within 10 s of coming back, which doubles its delay, so trials grow rarer (at most one every 40 s).
+    if (underSeconds_ < s.restoreDelay) return;
+    if (loadAvg_ + s.shedCost > kRestoreCeiling && underSeconds_ < s.restoreDelay + kTrialSeconds) return;
+    setShed(s, false);  // its gain fades back in as a mute's does (slotTarget)
+    s.restoredAt = loadClock_;
+    if (measureSlot_ == best) measureSlot_ = -1;
+    restoredTotal_.fetch_add(1, std::memory_order_relaxed);
+    underSeconds_ = 0;  // the next one waits for another quiet stretch with this one playing
+}
+
+void Engine::resetShedding() noexcept {
+    for (int i = 0; i < slotCount_; ++i) {
+        setShed(slotAt(i), false);
+        slotAt(i).restoreDelay = 0;
+        slotAt(i).shedCost = 0;
+    }
+    overloadedFlag_.store(0, std::memory_order_relaxed);
+    overShare_ = 0;
+    coolSeconds_ = underSeconds_ = 0;
+    loadAvg_ = 0;
+    measureSlot_ = -1;
+    overloadPending_ = restorePending_ = false;
 }
 
 void Engine::process(float* left, float* right, int frames) noexcept {
@@ -4489,9 +4544,15 @@ void Engine::process(float* left, float* right, int frames) noexcept {
     takeDeviceMidi(frames);
     takeToneRequest();
     if (!playing_ && monitorWanted_.load(std::memory_order_relaxed)) wakeMonitors();
+    // A device (re)start or the app going to the background: a throttled stretch must not thin the song for good.
+    if (sheddingReset_.exchange(false, std::memory_order_acq_rel)) resetShedding();
     if (overloadPending_) {
         overloadPending_ = false;
         pickOverloadVictim();
+    }
+    if (restorePending_) {
+        restorePending_ = false;
+        restoreOne();
     }
     int i = 0;
     while (i < frames) {
@@ -4566,31 +4627,52 @@ void Engine::process(float* left, float* right, int frames) noexcept {
     posFlag_.store(g_, std::memory_order_relaxed);
 }
 
-// Tuned at 512-frame callbacks at 48 kHz (10.7 ms): the average kept 0.9 of itself a callback, 20 callbacks over
-// 0.85 shed a layer and 100 callbacks passed before the next. The same in seconds, for any callback size.
+// Shedding (the device ran out of time) and its recovery, by time rather than callbacks, so any callback size
+// behaves the same. The meter: an average of each callback's load that keeps 0.9 of itself per 10.7 ms (512
+// frames at 48 kHz). Shedding: the share of the last ~0.25 s spent in callbacks over 0.85 of their budget (an
+// average with a 0.25 s time constant, weighted by each callback's length) passing 0.7, which takes about 0.3 s
+// of nearly all-over callbacks: one stalled callback, however late (the first after Play, a device restart or
+// reroute, a background burst), is its own length's share and sheds nothing. After a shed, 1.07 s before the
+// next. Recovery: the meter under 0.6 for 2 s brings back one layer (the newest shed), only if the load now plus
+// what that layer was seen to cost when shed (the meter's drop in the second after, at most an equal share of
+// the load then) stays under 0.75, or on trial after 8 s more of quiet; then another 2 s for the next. Hysteresis: shed
+// over 0.85, back under 0.6 and only to under 0.75, so a returning layer does not cross 0.85 again; and one shed
+// again within 10 s of coming back waits twice as long each time (up to 32 s). Never in an offline engine.
 void Engine::reportLoad(double load, int frames) noexcept {
     constexpr double kTick = 512.0 / 48000.0;
-    constexpr double kOverSeconds = 20 * kTick, kCoolSeconds = 100 * kTick;
-    constexpr double kSlack = 1e-9;  // summed callback lengths land a hair under the product
+    constexpr double kCoolSeconds = 100 * kTick;
+    constexpr double kOverLoad = 0.85, kOverShare = 0.7, kShareSeconds = 0.25;
     if (frames <= 0) return;
+    if (!std::isfinite(load)) load = 0.0;
     const double dt = static_cast<double>(frames) / sr_;
-    if (dt != loadDt_) {  // the size rarely changes: pow only then
+    if (dt != loadDt_) {  // the size rarely changes: pow and exp only then
         loadDt_ = dt;
         loadKeep_ = std::pow(0.9, dt / kTick);
+        shareKeep_ = std::exp(-dt / kShareSeconds);
     }
-    loadAvg_ = loadKeep_ * loadAvg_ + (1.0 - loadKeep_) * (std::isfinite(load) ? load : 0.0);
+    loadClock_ += dt;
+    loadAvg_ = loadKeep_ * loadAvg_ + (1.0 - loadKeep_) * load;
     cpu_.store(static_cast<float>(loadAvg_), std::memory_order_relaxed);
+    if (offline_.load(std::memory_order_relaxed)) return;  // an export renders as fast as it can: it never sheds
+    overShare_ = shareKeep_ * overShare_ + (1.0 - shareKeep_) * (load > kOverLoad ? 1.0 : 0.0);
+    const bool wasCooling = coolSeconds_ > 0;
     coolSeconds_ = std::max(0.0, coolSeconds_ - dt);
-    if (loadAvg_ > 0.85) {
-        overSeconds_ += dt;
-        if (overSeconds_ >= kOverSeconds - kSlack && coolSeconds_ <= kSlack) {
-            overloadPending_ = true;
-            overSeconds_ = 0;
-            coolSeconds_ = kCoolSeconds;
-        }
-    } else {
-        overSeconds_ = 0;
+    if (wasCooling && coolSeconds_ <= 0 && measureSlot_ >= 0) {
+        // A second after a shed the meter shows the load without that layer: what it cost.
+        Slot& s = slotAt(measureSlot_);
+        if (s.overloaded) s.shedCost = std::clamp(measureFrom_ - loadAvg_, 0.0, s.shedCost);
+        measureSlot_ = -1;
     }
+    if (overShare_ > kOverShare && coolSeconds_ <= kSlackSeconds) {
+        overloadPending_ = true;
+        shedLoad_ = loadAvg_;
+        coolSeconds_ = kCoolSeconds;
+        underSeconds_ = 0;
+        return;
+    }
+    underSeconds_ = loadAvg_ < kRestoreLoad ? underSeconds_ + dt : 0.0;
+    if (overloadedFlag_.load(std::memory_order_relaxed) > 0 && coolSeconds_ <= 0 && underSeconds_ >= kRestoreSeconds - kSlackSeconds)
+        restorePending_ = true;  // process() brings one back, if it fits (restoreOne)
 }
 
 }  // namespace caw

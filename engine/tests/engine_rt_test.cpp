@@ -721,3 +721,31 @@ TEST(the_block_fifo_never_allocates_on_the_audio_thread) {
     }
     CHECK_EQ(operations, std::size_t{0});
 }
+
+TEST(shedding_and_its_recovery_never_allocate_on_the_audio_thread) {
+    // reportLoad sheds a layer under load, brings it back once the load drops, and a reset brings all back.
+    ProjectSpec p;
+    p.bpm = 120;
+    p.loopBars = 1;
+    p.modules.push_back({"acid", kAcidLine});
+    p.layers = {layer("a", "org.caw.test.osc", "acid"), layer("b", "org.caw.test.osc", "acid")};
+    Engine e(48000);
+    CHECK(e.setProject(p).find("\"ok\":true") != std::string::npos);
+    e.play();
+    std::vector<float> l(512), r(512);
+    for (int k = 0; k < 20; ++k) e.process(l.data(), r.data(), 512);
+    std::size_t operations = 0;
+    {
+        cawtest::AllocationScope scope;
+        for (int k = 0; k < 1500; ++k) {  // 16 s: hot for 1.5 s, then cool
+            e.process(l.data(), r.data(), 512);
+            e.reportLoad(k < 140 ? 1.4 : 0.1, 512);
+        }
+        e.requestSheddingReset();
+        e.process(l.data(), r.data(), 512);
+        operations = scope.count();
+    }
+    CHECK_EQ(operations, std::size_t{0});
+    CHECK(e.sheddingStats().shed >= 1);
+    CHECK_EQ(e.sheddingStats().restored, e.sheddingStats().shed);
+}

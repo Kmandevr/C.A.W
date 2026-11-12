@@ -300,6 +300,7 @@ ma_result openDevice(Audio* a, const CawEngine* e, const ma_device_id* id, ma_ui
     // back on top is at most a block short of one, unless that size is whole blocks.
     a->fifo.flush();
     a->transportSeen = e->engine->transportSends();
+    e->engine->requestSheddingReset();  // a fresh device: its first callbacks' stalls and a throttled stretch before don't count
     a->fifoLatency = duplex ? 0 : caw::BlockFifo<caw::kBlock>::maxLatency(static_cast<int>(a->device.playback.intermediaryBufferCap));
     if (duplex) {
         a->inputChannels = a->device.capture.channels;

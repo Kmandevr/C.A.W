@@ -11,6 +11,8 @@ The owner asked for a faster engine, measured first (2026-11-12, [decisions](dec
 
 ## The suite
 
+Long runs (`caw_bench SECONDS 600`) and per-track callback-size checks (`caw_bench SECONDS 601`) are in [engine](engine.md) ("Long runs and callback sizes").
+
 `caw_bench SECONDS 500 [--frames N] [--runs N] [--only ID,ID] [--label TEXT] [--json PATH] [--md PATH]` (`engine/bench/caw_bench.cpp`, `runSuite`). Defaults: **256-frame callbacks at 48 kHz, a budget of 5,333 µs per callback**, 3 runs. Each run plays every scenario in turn on a fresh `Engine` (set the project, 0.25 s stopped so the project is applied, then Play) and times each `Engine::process` call. A scenario's result: the **median of the runs' means** (and p99s) and the **largest worst case of any run**, with the time after Play the worst case happened; load is time ÷ budget. `--json` writes every number, each run's mean and worst too (`format: 1`); `--md` writes a markdown table. The bench changes no engine code; it builds projects from built-in instruments and effects only.
 
 | Id | Scenario |

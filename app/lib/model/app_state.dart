@@ -1164,6 +1164,9 @@ class AppState extends ChangeNotifier {
     _poller.setVisible(foreground);
     final e = engine;
     if (e == null) return;
+    // A throttled stretch in the background must not thin the song for good: layers the engine shed come back
+    // and its load history is forgotten, going away and coming back (the engine sheds again if it must).
+    e.clearOverload();
     if (!foreground) {
       flush();
       if (!meters.playing) e.stopAudio();

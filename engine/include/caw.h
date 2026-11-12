@@ -82,8 +82,12 @@ extern "C" {
    24: taken by branch speed-parallel (caw_audio_threads), built at the same time.
    25 (2026-11-12, beta plan B4.8): caw_engine_layer_meters reads every project layer's stereo meter in one call
    into a caller's array of CawLayerMeterStereo (the app's meter poll made one call per track). Nothing else
-   changes. */
-#define CAW_API_VERSION 25
+   changes.
+   26 (2026-11-12, branch bt-clicks): caw_engine_shedding_stats, how many layers the engine shed because the device
+   ran out of time and how many came back on their own. Shed layers now come back by themselves once the load has
+   stayed low (CawMeters.overloaded falls again), and caw_engine_clear_overload also forgets the load history.
+   Nothing else changes. */
+#define CAW_API_VERSION 26
 /* The component index that names a layer's native instrument rather than one of its "components". */
 #define CAW_INSTRUMENT_INDEX 0xFFFFFFFFu
 /* A component index with this bit (API version 22) names component (index & ~CAW_NOTE_COMPONENT) of the layer's
@@ -301,6 +305,14 @@ CAW_API void caw_engine_set_metronome(CawEngine* e, int32_t on);
 CAW_API void caw_engine_release_touches(CawEngine* e);
 CAW_API void caw_engine_stop(CawEngine* e);
 CAW_API void caw_engine_clear_overload(CawEngine* e);
+/* Layers shed since the engine was made (the telemetry's dropouts), how many came back on their own, and how many
+   are shed now (as CawMeters.overloaded). Any thread; never blocks. API version 26. */
+typedef struct CawSheddingStats {
+    int64_t shed;
+    int64_t restored;
+    int32_t muted_now;
+} CawSheddingStats;
+CAW_API void caw_engine_shedding_stats(CawEngine* e, CawSheddingStats* out);
 CAW_API void caw_engine_meters(CawEngine* e, CawMeters* out);
 CAW_API int32_t caw_engine_layer_meter(CawEngine* e, int32_t layer_index, CawLayerMeter* out);
 /* The same, with each side's sample peak since the last read in *peak_l and *peak_r (either may be NULL); the

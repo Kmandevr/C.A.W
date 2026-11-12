@@ -794,7 +794,7 @@ TEST(c_api_plays_and_addresses_a_layers_instrument) {
     CawEngine* engine = caw_engine_create(48000);
     CHECK(engine != nullptr);
     if (!engine) return;
-    CHECK_EQ(caw_api_version(), 25);  // 25: every track meter in one call (24: speed-parallel's audio threads); 23: device latency; 22: per-note FX (#127); 21: the .caw language removed (#160; 20 unused); 19: project modulation; 18: audio clips, sampler, input; 17: C++ wavetable, one-shot, audition; 16: song renders; 15: MIDI devices; 14: component state; 13: drums and meters; 10: device choice
+    CHECK_EQ(caw_api_version(), 26);  // 26: shedding comes back and its stats; 25: every track meter in one call (24: speed-parallel's audio threads); 23: device latency; 22: per-note FX (#127); 21: the .caw language removed (#160; 20 unused); 19: project modulation; 18: audio clips, sampler, input; 17: C++ wavetable, one-shot, audition; 16: song renders; 15: MIDI devices; 14: component state; 13: drums and meters; 10: device choice
     char* result = caw_engine_set_project(engine,
         R"({"caw_project":1,"bpm":120,"modules":[{"id":"p","source":"---\nkind: pattern\nname: P\nlength: 16\n---\n0 C4 4 1\n"}],
             "layers":[{"id":"t","pattern":"p","instrument":{"id":"org.caw.synth.flagship","params":{"flt1_cutoff":900}}}]})");
@@ -806,6 +806,11 @@ TEST(c_api_plays_and_addresses_a_layers_instrument) {
     char* states = caw_engine_component_states(engine, "t");
     CHECK(states && std::string(states).find("\"index\":4294967295") != std::string::npos);
     caw_free(states);
+    CawSheddingStats shed{-1, -1, -1};  // API 26: nothing shed yet
+    caw_engine_shedding_stats(engine, &shed);
+    CHECK(shed.shed == 0 && shed.restored == 0 && shed.muted_now == 0);
+    caw_engine_shedding_stats(nullptr, &shed);  // no engine: zeros
+    CHECK_EQ(shed.shed, int64_t{0});
     caw_engine_destroy(engine);
 }
 

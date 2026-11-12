@@ -185,6 +185,18 @@ public:
     // on its next frame.
     uint32_t transportSends() const noexcept { return transportSends_.load(std::memory_order_acquire); }
     void clearOverload();
+    // Any thread, never blocks (a device opening, the app going to the background): every shed layer comes back and
+    // the load history is forgotten at the next callback, so a throttled stretch doesn't thin the song for good.
+    void requestSheddingReset() noexcept { sheddingReset_.store(true, std::memory_order_release); }
+    // Any thread: layers shed since the engine was made, and how many came back on their own (reportLoad).
+    struct SheddingStats {
+        uint64_t shed = 0, restored = 0;
+        int mutedNow = 0;
+    };
+    SheddingStats sheddingStats() const noexcept {
+        return {shedTotal_.load(std::memory_order_relaxed), restoredTotal_.load(std::memory_order_relaxed),
+                overloadedFlag_.load(std::memory_order_relaxed)};
+    }
     Meters meters();
     bool layerMeter(int index, LayerMeter& out);
     // Every project layer's meter under one lock, as layerMeter reads each: sink(ctx, i, meter) for the first
@@ -290,6 +302,9 @@ private:
     // Where playback from g_ goes back: the loop range's end while it is on and ahead, else the song end.
     int64_t wrapAt() const noexcept;
     void pickOverloadVictim() noexcept;
+    void restoreOne() noexcept;      // audio thread: the newest shed layer back, if it fits
+    void resetShedding() noexcept;   // audio thread: every shed layer back, the load history forgotten
+    void setShed(Slot& s, bool shed) noexcept;
 
     const double sr_;
     double trackGainCoef_ = -1.0;  // audio thread: the track gain glide's per-sample factor, worked out on first use
@@ -361,10 +376,20 @@ private:
     double stepLen_ = 0;  // samples per 16th note
     int64_t loopLen_ = 0; // samples per project loop
     double dcL_[2] = {0, 0}, dcR_[2] = {0, 0}, limEnv_ = 0;
+    // Shedding and recovery (reportLoad; audio thread).
+    static constexpr double kRestoreLoad = 0.6, kRestoreCeiling = 0.75, kRestoreSeconds = 2.0;
+    static constexpr double kRestoreMaxSeconds = 32.0, kReshedSeconds = 10.0, kTrialSeconds = 8.0;
+    static constexpr double kSlackSeconds = 1e-9;  // summed callback lengths land a hair under the product
     double loadAvg_ = 0;
-    double overSeconds_ = 0, coolSeconds_ = 0;  // time over budget so far, time left before another layer is shed
-    double loadDt_ = 0, loadKeep_ = 0;          // the last callback's length and the average's weight for it
-    bool overloadPending_ = false;
+    double coolSeconds_ = 0;                    // time left before another layer is shed
+    double overShare_ = 0;                      // share of the last ~0.25 s spent in callbacks over 0.85
+    double underSeconds_ = 0;                   // how long the meter has stayed under kRestoreLoad
+    double loadClock_ = 0;                      // seconds of callbacks reported
+    double loadDt_ = 0, loadKeep_ = 0, shareKeep_ = 0;  // the last callback's length and the averages' weights for it
+    double shedLoad_ = 0, measureFrom_ = 0;     // the meter when the last layer was shed
+    int measureSlot_ = -1;                      // the slot shed last, its cost not measured yet
+    uint64_t shedSeq_ = 0;
+    bool overloadPending_ = false, restorePending_ = false;
     int processCount_ = 0;
     int64_t chunkId_ = 0;
     bool routingDirty_ = true;  // re-derive graph routing before the next chunk
@@ -390,7 +415,10 @@ private:
     std::atomic<uint32_t> transportSends_{0};  // transportSends()
     std::atomic<bool> bypass_{false};
     std::atomic<int64_t> posFlag_{0}, loopLenFlag_{0};
-    std::atomic<int> overloadedFlag_{0};
+    std::atomic<int> overloadedFlag_{0};  // layers shed now
+    std::atomic<uint64_t> shedTotal_{0}, restoredTotal_{0};
+    std::atomic<bool> sheddingReset_{false};  // requestSheddingReset()
+    std::atomic<bool> offline_{false};        // set by setProjectOffline: reportLoad never sheds
     std::atomic<uint32_t> routingRejections_{0};  // mix-graph routes the executor refused (never expected)
     std::unique_ptr<std::atomic<float>[]> masterScope_;
     std::atomic<int> masterScopePos_{0};
