@@ -80,12 +80,36 @@ constexpr double kLn2Lo = 1.90821492927058770002e-10;
 constexpr double kLn2 = 0.69314718055994530942;
 constexpr double kHalfPi = 1.57079632679489661923;
 
+// (x - k * hi) - k * lo, in that order: Cody-Waite range reduction, exact for |x| up to about 1e15 to within the
+// rounding of k * hi. The engine's own code builds with -fassociative-math (engine/CMakeLists.txt), which would fold
+// it into x - k * (hi + lo), where hi + lo rounds to hi and lo is lost (twice the error at every |x|, and exp off by
+// 1e-13). So Clang is told not to reassociate here (instruction flags, kept through inlining and link-time
+// optimisation), and GCC's optimiser sees the partial result only through an empty asm that leaves it in its register
+// (no instruction is emitted). A fused multiply-add (Arm64) may still compute x - k * hi with one rounding: more
+// exact, never less. MSVC never reassociates under /fp:precise.
+inline double reduce(double x, double k, double hi, double lo) {
+#if defined(__clang__)
+#pragma clang fp reassociate(off)
+    return (x - k * hi) - k * lo;
+#else
+    double t = x - k * hi;
+#if defined(__GNUC__) && (defined(__x86_64__) || defined(__SSE2_MATH__))
+    __asm__("" : "+x"(t));
+#elif defined(__GNUC__) && (defined(__aarch64__) || (defined(__arm__) && defined(__ARM_FP)))
+    __asm__("" : "+w"(t));
+#elif defined(__GNUC__)
+    __asm__("" : "+m"(t));
+#endif
+    return t - k * lo;
+#endif
+}
+
 }  // namespace detail
 
 inline double detSin(double x) {
     if (!std::isfinite(x)) return 0.0;
     const double k = std::floor(x / kTwoPi + 0.5);
-    double r = (x - k * detail::kTwoPiHi) - k * detail::kTwoPiLo;  // now in [-pi, pi]
+    double r = detail::reduce(x, k, detail::kTwoPiHi, detail::kTwoPiLo);  // now in [-pi, pi]
     if (r > detail::kHalfPi) r = kPi - r;
     else if (r < -detail::kHalfPi) r = -kPi - r;
     return detail::sinPoly(r);
@@ -103,7 +127,7 @@ inline double detExp(double x) {
     if (x > 709.0) x = 709.0;
     if (x < -745.0) return 0.0;
     const double k = std::floor(x / detail::kLn2 + 0.5);
-    const double r = (x - k * detail::kLn2Hi) - k * detail::kLn2Lo;  // |r| <= 0.35
+    const double r = detail::reduce(x, k, detail::kLn2Hi, detail::kLn2Lo);  // |r| <= 0.35
     double p = 1.0 / 6227020800.0;                    // 1/13!
     p = p * r + 1.0 / 479001600.0;
     p = p * r + 1.0 / 39916800.0;

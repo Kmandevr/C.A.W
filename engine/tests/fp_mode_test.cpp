@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 
+#include "caw/detmath.hpp"
 #include "engine.h"
 #include "fp_mode.h"
 #include "native_component_test_path.h"
@@ -85,4 +86,22 @@ TEST(nan_and_inf_from_a_track_leave_the_mix_finite_under_the_builds_flags) {
         CHECK(loudest > 0.05f);  // not muted to silence: the clean track still plays
         CHECK(loudest <= 1.0f);  // and the safety limit holds (the master's limiter, or the bypassed mix's clamp)
     }
+}
+
+TEST(detmath_range_reduction_survives_the_builds_flags_at_large_arguments) {
+    // detSin and detExp reduce their argument as (x - k*hi) - k*lo (detmath.hpp, detail::reduce). Built strict, the
+    // sine is within half an ulp of x of the true value at every |x| (the rounding of k*hi); a fused multiply-add
+    // only makes it closer. -fassociative-math folding it into x - k*(hi + lo) loses lo: about 0.9 ulp, and exp
+    // 1e-13 off. This file builds with the engine's flags, so it checks the reduction as the engine runs it.
+    double worstSin = 0;
+    for (double decade = 1e3; decade <= 1e15; decade *= 10)
+        for (int i = 0; i < 2000; ++i) {
+            const double x = decade * (1.0 + i * 4.5e-3), ulp = std::nextafter(x, 2 * x) - x;
+            worstSin = std::max(worstSin, std::fabs(detSin(x) - std::sin(x)) / ulp);
+            worstSin = std::max(worstSin, std::fabs(detSin(-x) - std::sin(-x)) / ulp);
+        }
+    CHECK(worstSin <= 0.55);
+    double worstExp = 0;
+    for (double x = -700; x < 700; x += 0.0137) worstExp = std::max(worstExp, std::fabs(detExp(x) - std::exp(x)) / std::exp(x));
+    CHECK(worstExp <= 1e-15);
 }
