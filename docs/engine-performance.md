@@ -73,13 +73,42 @@ Each phase's pull request fills its table from the Bench workflow's summary on t
 
 ### 1. Free wins
 
+**What changed (2026-11-12, branch `speed-free-wins`):** link-time optimisation by default for Clang (the Android build) and MSVC ([engine](engine.md)); Flagship's FM and fold warps read their tables in three passes as the unwarped copies do, its filters' drive runs two samples at a time (`lib::Saturator::process2`), and its reverb runs a block at a time (the Library's block form), all giving the same bits; silent work skipped in the master loudness and correlation meters, silent tracks, settled silent sends and settled buses (the same bits); the master DC blocker settles at 0 below −240 dBFS, so the master chain sleeps within a second of a tail; Eco renders Flagship's FM and fold warps without oversampling and runs the clipper's chosen factor one stage lower ([engine](engine.md)). Every reference render passes without re-recording, and every golden hash passed unchanged before the DC blocker's settling (the one change below the last bit, at −240 dBFS).
+
+**[Fact, Bench run [43143114934](https://github.com/Kmandevr/C.A.W/actions/runs/43143114934), commit `05abbe1`, 10 s × 3 runs]** mean µs against the baseline above, on the arm64 targets (the same Neoverse-N2 cores both times). The Linux x64 runners differed between runs (baseline Xeon 8573C; this run EPYC 9V74), so its numbers are not compared.
+
+| Scenario | Android arm64 before | after | change | Linux arm64 before | after | change |
+|---|---:|---:|---:|---:|---:|---:|
+| Typical song (8 tracks) | 859 | 854 | −0.6% | 891 | 901 | +1.1% |
+| Typical song + extras | 1,199 | 1,187 | −1.0% | 1,203 | 1,224 | +1.7% |
+| Flagship heavy, 64 voices held | 5,501 | 4,869 | −11.5% | 5,697 | 4,817 | −15.4% |
+| Flagship heavy, 16 voices held | 1,425 | 1,264 | −11.3% | 1,464 | 1,249 | −14.7% |
+| Drums kit, 16 pads busy | 339 | 336 | −0.9% | 372 | 373 | +0.3% |
+| Song, 16 tracks | 1,609 | 1,600 | −0.6% | 1,669 | 1,690 | +1.3% |
+| Song, 32 tracks + heavy FX | 5,311 | 5,250 | −1.2% | 5,525 | 5,694 | +3.1% |
+| Tail: silence after | 40 | 19 | −53% | 40 | 20 | −51% |
+| Tail project, no notes | 29 | 10 | −64% | 31 | 11 | −63% |
+
+**[Fact, callgrind, 2026-11-12]** instructions per second of audio (M Ir/s) in `Engine::process`, `caw_bench 2 500 --runs 1`, Linux x64 GCC 13.3 Release (no LTO: GCC's default), base `3f75be6`; tail phases as fixed windows (notes 0–2 s, ringing 2–16 s, silence 16–30 s). Instruction counts don't depend on the machine's load, so they show changes of under 1% that the CI timings' noise hides.
+
 | Scenario | Before | After | Change |
 |---|---:|---:|---:|
-| Typical song (8 tracks) | 859 | | |
-| Flagship heavy, 64 voices held | 5,501 | | |
-| Drums kit, 16 pads busy | 339 | | |
-| Song, 32 tracks + heavy FX | 5,311 | | |
-| Tail: silence after | 40 | | |
+| First loop (6 tracks) | 245.9 | 246.1 | +0.1% |
+| Three tracks | 399.1 | 400.3 | +0.3% |
+| Typical song (8 tracks) | 1,150.9 | 1,147.8 | −0.3% |
+| Typical song + extras | 1,551.7 | 1,548.9 | −0.2% |
+| Flagship heavy, 64 voices held | 6,805.1 | 6,214.5 | −8.7% |
+| Flagship heavy, 16 voices held | 1,786.1 | 1,637.9 | −8.3% |
+| Drums kit, 16 pads busy | 399.4 | 400.2 | +0.2% |
+| Song, 16 tracks | 2,049.3 | 2,045.1 | −0.2% |
+| Song, 32 tracks + heavy FX | 6,549.7 | 6,542.3 | −0.1% |
+| Tail: notes | 352.3 | 352.3 | 0.0% |
+| Tail: ringing out | 241.3 | 239.2 | −0.9% |
+| Tail: silence after | 79.9 | 38.9 | −51.3% |
+| Tail project, no notes | 62.8 | 24.0 | −61.8% |
+
+- **LTO:** with GCC 13 it adds instructions (on the base: song8 +1.9%, song32 +2.8%, Drums +3.2%), and the first Bench run with it on ([43142179871](https://github.com/Kmandevr/C.A.W/actions/runs/43142179871)) had Linux arm64's song32 at 5,660 µs; with Clang 18 it is neutral by callgrind (song8 −0.4%, song32 −0.6%, Flagship 16 voices −0.6%, Drums +0.8%). So it is on by default for Clang and MSVC only. **[Assumption]** Android's ThinLTO helps a little on the phone; the arm64 differences above are within the runners' noise for the scenarios it alone touches.
+- **Typical song:** the phase gains under 5% on a typical song (−0.6% on Android, −0.3% by callgrind); it is kept, as every measured gain is ([decisions](decisions.md), 2026-11-12). The gains are in Flagship's FM and fold warps and drive (11–15% on arm64) and in silence (50–65%). The heavy song's +3% on Linux arm64 is noise: its instructions fell 0.1%, and its run-to-run worst cases differ by 20%.
 
 ### 2. Floating point
 

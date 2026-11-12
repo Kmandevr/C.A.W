@@ -65,6 +65,8 @@ public:
     // Off the audio thread (one reader at a time): the momentary and short-term values as last published, the
     // integrated loudness worked out now, and the true peaks (those since the last read are reset by reading).
     Reading read() noexcept;
+    // Audio thread: x[0..n) holds only zeros (either sign).
+    static bool allZero(const float* x, int n) noexcept;
 
     // K-weighting for `sampleRate`: the BS.1770 pre-filter (a high shelf, then a high-pass) designed from its
     // analogue prototype, so it is the Recommendation's 48 kHz table at 48 kHz and the same curve at any rate.
@@ -85,6 +87,7 @@ private:
         }
     };
     void clearAudioState() noexcept;
+    bool atRest() const noexcept;
     void endSubBlock() noexcept;
     double truePeak(int side, double x) noexcept;
 
@@ -101,6 +104,7 @@ private:
     // the sample k back is at tpPos_ + 12 - k.
     double tpHistory_[2][24] = {};
     int tpPos_ = 0;
+    bool settled_ = true;  // atRest() after the last samples measured: silence in skips the per-sample work
     double tpMax_ = 0, mMax_ = 0, sMax_ = 0;
 
     std::atomic<uint32_t> resetAsked_{0};

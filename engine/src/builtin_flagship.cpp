@@ -672,6 +672,7 @@ struct OscKey {
     int warp = 0;
     int fmRatio = 1;
     double modRatio = 1.0;  // Osc FM: the modulating oscillator's pitch over this one's (its octave, semitones, fine)
+    bool once = false;      // the FM or fold warp at the sample rate (Eco quality), not at twice it
     lib::UnisonSettings unison{-1};
     bool operator==(const OscKey&) const = default;
 };
@@ -810,6 +811,7 @@ void addStack(const OscVoice& o, const float* gL, const float* gR, float* L, flo
             float t = t0 + static_cast<float>(static_cast<int32_t>(first + i)) * dt;
             t -= whole(t);
             float x;
+            if constexpr (W == kWarpFm || W == kWarpFold) t = t < 0.99999994f ? t : 0.99999994f;  // as addTwice
             if constexpr (W == kWarpFmOsc) x = fmOscPhase(t, w1, fm[first + i]) * m;
             else x = warp<W>(t, w1, w2, w3) * m;
             const int32_t k = static_cast<int32_t>(x);
@@ -818,6 +820,9 @@ void addStack(const OscVoice& o, const float* gL, const float* gR, float* L, flo
             if constexpr (Morph) {
                 const float u = B[k] + (B[k + 1] - B[k]) * fr;
                 v += (u - v) * mix;
+            }
+            if constexpr (W == kWarpFold) {  // Eco: the fold at the sample rate (addTwice's fold, not oversampled)
+                v += w2 * (sineCycles(0.25f * w1 * v + 64.0f) - v);
             }
             L[i] += v * gl;
             R[i] += v * gr;
@@ -830,32 +835,55 @@ void addStack(const OscVoice& o, const float* gL, const float* gR, float* L, flo
 // its gains, and the sum comes down through a half-band decimator. What FM's far sidebands and the folder make
 // above the high rate's Nyquist (up to 1.5 times the sample rate) lands in the decimator's stop band instead of
 // on the audible spectrum. R null: mono into L (gL).
+// Each copy in three passes, as addCopy (speed phase 1, 2026-11-12): the warped phases' indices and fractions,
+// then the table reads (a gather: scalar loads), then the interpolation, the morph, the fold and the sums, so the
+// compiler vectorizes the first and the last. Each sample's arithmetic is the one-pass loop's, in its order, so
+// the bits are the same. Mono (R null) sums into the left only.
 template <int W, bool Morph>
 void addTwice(OscVoice& o, const float* gL, const float* gR, float* L, float* R, uint32_t n, uint32_t first,
              Decimator2x& dl, Decimator2x* dr) noexcept {
     float hl[2 * kControlFrames] = {}, hr[2 * kControlFrames] = {};
+    const uint32_t count = 2 * n;
     for (int c = 0; c < o.count; ++c) {
         if (!o.a[c]) continue;
         const float* A = o.a[c];
         const float* B = o.b[c];
         const float m = o.size[c], t0 = static_cast<float>(o.phase[c] * (1.0 / 4294967296.0)), dt = static_cast<float>(o.dt[c]);
         const float half = 0.5f * dt, gl = gL[c], gr = gR ? gR[c] : 0.0f, mix = o.mix, w1 = o.w1, w2 = o.w2, w3 = o.w3;
-        for (uint32_t i = 0; i < 2 * n; ++i) {
+        int32_t index[2 * kControlFrames];
+        float fr[2 * kControlFrames], a[4 * kControlFrames], b[4 * kControlFrames];  // a: A[k], A[k + 1] per sample
+        for (uint32_t i = 0; i < count; ++i) {
             float t = t0 + static_cast<float>(static_cast<int32_t>(first + (i >> 1))) * dt + ((i & 1u) ? half : 0.0f);
             t -= whole(t);
             t = t < 0.99999994f ? t : 0.99999994f;
             const float x = warp<W>(t, w1, w2, w3) * m;
             const int32_t k = static_cast<int32_t>(x);
-            const float fr = x - static_cast<float>(k);
-            float v = A[k] + (A[k + 1] - A[k]) * fr;
+            index[i] = k;
+            fr[i] = x - static_cast<float>(k);
+        }
+        for (uint32_t i = 0; i < count; ++i) {
+            const size_t k = static_cast<uint32_t>(index[i]);
+            std::memcpy(a + 2 * i, A + k, 2 * sizeof(float));
+            if constexpr (Morph) std::memcpy(b + 2 * i, B + k, 2 * sizeof(float));
+        }
+        const auto read = [&](uint32_t i) noexcept {
+            float v = a[2 * i] + (a[2 * i + 1] - a[2 * i]) * fr[i];
             if constexpr (Morph) {
-                const float u = B[k] + (B[k + 1] - B[k]) * fr;
+                const float u = b[2 * i] + (b[2 * i + 1] - b[2 * i]) * fr[i];
                 v += (u - v) * mix;
             }
             // A wavefolder on the read value (lib::fold's sin(x drive pi / 2)), drive w1, blended in by w2.
             if constexpr (W == kWarpFold) v += w2 * (sineCycles(0.25f * w1 * v + 64.0f) - v);
-            hl[i] += v * gl;
-            hr[i] += v * gr;
+            return v;
+        };
+        if (dr) {
+            for (uint32_t i = 0; i < count; ++i) {
+                const float v = read(i);
+                hl[i] += v * gl;
+                hr[i] += v * gr;
+            }
+        } else {
+            for (uint32_t i = 0; i < count; ++i) hl[i] += read(i) * gl;
         }
     }
     for (uint32_t i = 0; i < n; ++i) L[i] += dl.down(hl + 2 * i);
@@ -899,12 +927,18 @@ void addOscillator(OscVoice& o, float* L, float* R, uint32_t n, uint32_t first, 
         case kWarpSync: addStackWarp<kWarpSync>(o, gL, gR, L, R, n, first, fm); break;
         case kWarpMirror: addStackWarp<kWarpMirror>(o, gL, gR, L, R, n, first, fm); break;
         case kWarpQuantize: addStackWarp<kWarpQuantize>(o, gL, gR, L, R, n, first, fm); break;
-        case kWarpFm: addTwiceWarp<kWarpFm>(o, gL, gR, L, R, n, first, mono); break;
+        case kWarpFm:
+            if (o.key.once) addStackWarp<kWarpFm>(o, gL, gR, L, R, n, first, fm);  // Eco
+            else addTwiceWarp<kWarpFm>(o, gL, gR, L, R, n, first, mono);
+            break;
         case kWarpFmOsc:
             if (fm) addStackWarp<kWarpFmOsc>(o, gL, gR, L, R, n, first, fm);
             else addStackWarp<kWarpNone>(o, gL, gR, L, R, n, first, fm);
             break;
-        case kWarpFold: addTwiceWarp<kWarpFold>(o, gL, gR, L, R, n, first, mono); break;
+        case kWarpFold:
+            if (o.key.once) addStackWarp<kWarpFold>(o, gL, gR, L, R, n, first, fm);  // Eco
+            else addTwiceWarp<kWarpFold>(o, gL, gR, L, R, n, first, mono);
+            break;
         default: addStackWarp<kWarpNone>(o, gL, gR, L, R, n, first, fm); break;
     }
 }
@@ -972,6 +1006,18 @@ struct VoiceFilter {
             }
         }
     }
+    // The drive on one side, two samples at a time (Saturator::process2: each lane process()'s bits).
+    void driveMono(float* x, uint32_t n) noexcept {
+        uint32_t i = 0;
+        for (; i + 1 < n; i += 2) {
+            const double in[2] = {static_cast<double>(x[i]), static_cast<double>(x[i + 1])};
+            double out[2];
+            saturator.process2(in, out);
+            x[i] = static_cast<float>(out[0]);
+            x[i + 1] = static_cast<float>(out[1]);
+        }
+        if (i < n) x[i] = static_cast<float>(saturator.process(static_cast<double>(x[i])));
+    }
     template <class F>
     void each(float* x, uint32_t n, F&& f) noexcept {
         for (uint32_t i = 0; i < n; ++i) x[i] = static_cast<float>(f(static_cast<double>(x[i])));
@@ -986,7 +1032,7 @@ struct VoiceFilter {
         float dry[kControlFrames];
         const bool wet = mix >= 1.0f;
         if (!wet) std::copy(L, L + n, dry);
-        if (drive) each(L, n, [&](double v) noexcept { return saturator.process(v); });
+        if (drive) driveMono(L, n);
         if (type == kLadderLp || type == kLadderHp || type == kLadderBp) {
             ladder[0].flushDenormals();
             if (type == kLadderLp) ladder[0].process<lib::LadderMode::LowPass>(L, n);
@@ -1022,9 +1068,14 @@ struct VoiceFilter {
         float dryL[kControlFrames], dryR[kControlFrames];
         const bool wet = mix >= 1.0f;
         if (!wet) std::copy(L, L + n, dryL), std::copy(R, R + n, dryR);
-        if (drive) {
-            each(L, n, [&](double v) noexcept { return saturator.process(v); });
-            each(R, n, [&](double v) noexcept { return saturator.process(v); });
+        if (drive) {  // both sides at once (Saturator::process2: each lane process()'s bits)
+            for (uint32_t i = 0; i < n; ++i) {
+                const double in[2] = {static_cast<double>(L[i]), static_cast<double>(R[i])};
+                double out[2];
+                saturator.process2(in, out);
+                L[i] = static_cast<float>(out[0]);
+                R[i] = static_cast<float>(out[1]);
+            }
         }
         if (type <= kLadderBp) {  // both sides in one loop
             ladder[0].flushDenormals();
@@ -1062,6 +1113,9 @@ struct Voice {
     uint32_t noteId = 0;
     uint64_t age = 0;
     bool starting = false, fresh = false;  // the next control sets the note's start (and, fresh, its phases)
+    // Eco's FM and fold warps at the sample rate (OscKey::once), latched when the voice starts from silence: a
+    // quality change while a note sounds never switches its oscillators between the 1x and the decimated path.
+    bool ecoWarps = false;
     uint32_t seed = 0;
     double notePitch = 60.0, pitch = 60.0, velocity = 1.0, pressure = 0.0, timbre = 0.0;
     lib::Adsr env[kEnvs];
@@ -1218,6 +1272,7 @@ protected:
                 }
                 Voice& v = voices_.start(m.noteId, &lanes_);
                 v.fresh = !v.env[0].active();  // a stolen voice continues from where it is (no click)
+                if (v.fresh) v.ecoWarps = qualityNow(quality_) == kQualityEco;
                 v.starting = true;
                 v.mono = false;
                 v.seed = hash32(++started_ * 0x9E3779B9U);
@@ -1287,6 +1342,7 @@ protected:
         }
         Voice& v = voices_.start(m.noteId, &lanes_);
         v.fresh = !v.env[0].active();
+        if (v.fresh) v.ecoWarps = qualityNow(quality_) == kQualityEco;
         v.starting = true;
         v.mono = true;
         v.seed = hash32(++started_ * 0x9E3779B9U);
@@ -1769,6 +1825,9 @@ private:
         key.amount = clampd(at(kOscWarpAmount), 0.0, 1.0);
         key.warp = key.amount > 0.0 ? clampi(at(kOscWarp), 0, kWarpCount - 1) : kWarpNone;
         key.fmRatio = key.warp == kWarpFm ? clampi(P(fmRatioParam(index)), 1, 16) : 1;
+        // Eco quality renders the FM and fold warps at the sample rate (no 2x oversampling): they alias more. The
+        // voice's choice from its start holds while it sounds.
+        key.once = (key.warp == kWarpFm || key.warp == kWarpFold) && v.ecoWarps;
         if (key.warp == kWarpFmOsc) {  // the modulator's tuning against this one's (both follow the note)
             const uint32_t m = fmSource(index);
             const double offset = 12.0 * clampi(P(oscParam(m, kOscOctave)), -4, 4) + clampi(P(oscParam(m, kOscSemi)), -12, 12) +
@@ -1870,8 +1929,8 @@ private:
                 break;
             default: break;
         }
-        const bool twice = key.warp == kWarpFold || key.warp == kWarpFm;
-        if (twice && (o.warpMode != key.warp || o.key.table < 0)) {  // into FM or fold: fresh decimators
+        const bool twice = (key.warp == kWarpFold || key.warp == kWarpFm) && !key.once;
+        if (twice && (o.warpMode != key.warp || o.key.table < 0 || o.key.once)) {  // into FM or fold: fresh decimators
             o.foldL.set(half_);
             o.foldR.set(half_);
             o.foldM.set(half_);
@@ -2175,9 +2234,14 @@ private:
             float fl = static_cast<float>(l), fr = static_cast<float>(r);
             if (chorusOn_) chorus_.step(chorusMix_, fl, fr);
             if (delayOn_) delay_.process((delayTime0_ + delayStep * at) / sr_, delayFeedback_, 1.0, delayMix_, fl, fr);
-            if (reverbOn_) reverb_.process(fl, fr);
-            const double volume = volume0_ + volumeStep * at;
-            const float ol = static_cast<float>(finiteOr0(fl * volume)), orr = static_cast<float>(finiteOr0(fr * volume));
+            L[i] = fl;
+            R[i] = fr;
+        }
+        // The reverb, last, over the period at once (lib::Reverb's block form: the frame-by-frame bits).
+        if (reverbOn_) reverb_.process(L, R, static_cast<int>(n));
+        for (uint32_t i = 0; i < n; ++i) {
+            const double volume = volume0_ + volumeStep * static_cast<double>(first + i);
+            const float ol = static_cast<float>(finiteOr0(L[i] * volume)), orr = static_cast<float>(finiteOr0(R[i] * volume));
             left[i] = ol;
             right[i] = orr;
             peak = std::max(peak, std::max(std::fabs(ol), std::fabs(orr)));

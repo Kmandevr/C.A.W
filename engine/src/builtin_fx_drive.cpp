@@ -165,10 +165,11 @@ protected:
         ceiling_.set(lib::dbToGain(ceilingDb_), kControlFrames);
         out_.set(master_ ? 1.0 : lib::dbToGain(param(kCOutput, at)), kControlFrames);
         mix_.set(master_ ? 1.0 : std::clamp(param(kCMix, at), 0.0, 1.0), kControlFrames);
-        // Auto: off in Eco, 2x in Normal, 4x in High; a chosen factor is honoured, but Eco holds it to 2x.
+        // Auto: off in Eco, 2x in Normal, 4x in High; a chosen factor is honoured, but Eco runs one stage fewer,
+        // at most 2x (2x off, 4x and 8x at 2x).
         const int q = quality(), pick = choice(kCOversample, at);
         int stages = pick == 0 ? (q == kQualityEco ? 0 : (q == kQualityHigh ? 2 : 1)) : std::clamp(pick - 1, 0, kMaxStages);
-        if (q == kQualityEco) stages = std::min(stages, 1);
+        if (q == kQualityEco) stages = std::clamp(stages - 1, 0, 1);
         for (auto& o : os_) o.setStages(stages);
     }
     void run(const float* inL, const float* inR, float* outL, float* outR, uint32_t n) noexcept override {
