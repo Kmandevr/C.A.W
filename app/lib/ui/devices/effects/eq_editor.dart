@@ -17,6 +17,7 @@ import '../kit/hero.dart';
 import '../visuals/filter_curve.dart' show freqToX, xToFreq;
 import 'effect_page.dart';
 import '../../pointer_input.dart';
+import '../../panel_motion.dart';
 
 /// The band shapes the engine's EQ offers, in its choice order (`org.caw.eq`'s `bN_type`).
 enum EqShape { bell, lowShelf, highShelf, lowCut12, lowCut24, lowCut48, highCut12, highCut24, highCut48, notch, bandPass, tilt,
@@ -546,7 +547,7 @@ class _EqViewState extends State<_EqView> {
           widget.onSelect(b.n);
           final box = context.findRenderObject() as RenderBox;
           final at = box.localToGlobal(p);
-          final k = await showMenu<int>(context: context, position: RelativeRect.fromLTRB(at.dx, at.dy, at.dx, at.dy), items: [
+          final k = await showMenu<int>(context: context, popUpAnimationStyle: menuAnimation(context), position: RelativeRect.fromLTRB(at.dx, at.dy, at.dx, at.dy), items: [
             for (var i = 0; i < tp.choices.length; i++)
               PopupMenuItem(value: i, height: 36, child: Row(children: [
                 SizedBox(width: 26, height: 14, child: CustomPaint(painter: _ShapeIconPainter(eqShapeOf(tp.choices[i]), b.color))),

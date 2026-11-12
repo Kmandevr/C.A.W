@@ -24,6 +24,7 @@ import 'build_start.dart';
 import 'cpp_editor.dart';
 import 'cpp_library.dart';
 import 'quick_open.dart';
+import '../panel_motion.dart';
 
 /// Build's tabs are project C++ components (the C++ editor) and patterns (the pattern editor).
 /// Wide screens (landscape or desktop) show the explorer as a sidebar that can be dragged wider or hidden
@@ -220,7 +221,7 @@ class _BuildSectionState extends State<BuildSection> {
           ]),
         );
     final pick = await showMenu<String>(
-      context: context,
+      context: context, popUpAnimationStyle: menuAnimation(context),
       position: RelativeRect.fromRect(at & const Size(1, 1), Offset.zero & overlay.size),
       constraints: const BoxConstraints(minWidth: 230, maxWidth: 280),
       color: Neon.panel,
@@ -320,7 +321,7 @@ class _BuildSectionState extends State<BuildSection> {
     final controller = TextEditingController(text: 'notes.txt');
     String? error;
     await showDialog<String>(
-      context: context,
+      context: context, animationStyle: dialogAnimation(context),
       builder: (context) => StatefulBuilder(
         builder: (context, setDialog) {
           void done() {

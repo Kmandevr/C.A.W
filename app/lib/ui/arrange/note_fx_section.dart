@@ -13,6 +13,7 @@ import '../glass.dart';
 import '../theme.dart';
 import 'knob.dart';
 import 'long_press_menu.dart';
+import '../panel_motion.dart';
 
 class NoteFxSection extends StatefulWidget {
   const NoteFxSection({super.key, required this.state, required this.layer});
@@ -53,7 +54,7 @@ class _NoteFxSectionState extends State<NoteFxSection> {
   Future<void> _pickVoices(BuildContext context) async {
     final box = context.findRenderObject() as RenderBox?;
     final at = box == null ? Offset.zero : box.localToGlobal(Offset.zero);
-    final v = await showMenu<int>(context: context, position: RelativeRect.fromLTRB(at.dx, at.dy, at.dx, at.dy),
+    final v = await showMenu<int>(context: context, popUpAnimationStyle: menuAnimation(context), position: RelativeRect.fromLTRB(at.dx, at.dy, at.dx, at.dy),
       items: [
         for (final n in const [1, 2, 4, 6, 8, 12, 16])
           CheckedPopupMenuItem(value: n, checked: n == layer.noteVoices, child: Text('$n voices')),

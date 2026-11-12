@@ -176,7 +176,7 @@ class _ExportPageState extends State<ExportPage> {
   Future<void> _saveProfile() async {
     final controller = TextEditingController(text: _profileName ?? 'My export');
     final name = await showDialog<String>(
-      context: context,
+      context: context, animationStyle: dialogAnimation(context),
       builder: (context) => AlertDialog(
         title: const Text('Save export profile'),
         content: TextField(controller: controller, autofocus: true,

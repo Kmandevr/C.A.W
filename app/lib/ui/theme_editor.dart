@@ -155,7 +155,7 @@ class _ThemeEditorState extends State<ThemeEditor> {
 
   /// A colour from the picker in a dialog (the builder's custom seed).
   Future<Color?> _pickColor(Color start) => showDialog<Color>(
-    context: context,
+    context: context, animationStyle: dialogAnimation(context),
     builder: (c) {
       var picked = start;
       return AlertDialog(

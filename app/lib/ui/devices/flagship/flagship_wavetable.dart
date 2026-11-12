@@ -13,6 +13,7 @@ import '../../haptics.dart';
 import '../../theme.dart';
 import '../device_scope.dart';
 import '../kit/feel.dart';
+import '../../panel_motion.dart';
 
 /// The largest WAV file the flagship imports (kMaxWtWavBytes in engine/src/builtin_flagship.cpp).
 const maxWavetableBytes = 8 * 1024 * 1024;
@@ -34,7 +35,7 @@ Future<Uint8List?> defaultPickWavetableWav() async {
 Future<int?> Function(BuildContext context) pickWavetableSplit = defaultPickWavetableSplit;
 
 Future<int?> defaultPickWavetableSplit(BuildContext context) => showDialog<int>(
-      context: context,
+      context: context, animationStyle: dialogAnimation(context),
       builder: (context) => const _SplitDialog(),
     );
 

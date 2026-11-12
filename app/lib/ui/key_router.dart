@@ -550,7 +550,7 @@ class KeyRouterState extends State<KeyRouter> implements KeyAreaHost {
 
   Future<void> showActionList(BuildContext context) async {
     final ref = await showDialog<ActionRef>(
-      context: context,
+      context: context, animationStyle: dialogAnimation(context),
       builder: (_) => _ActionList(registry: registry, keymap: vim.keymap, area: _area),
     );
     if (ref != null) _show(vim.run(ref)); // "Edit keys" returns view.keys, which opens the editor

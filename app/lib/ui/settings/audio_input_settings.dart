@@ -9,6 +9,7 @@ import '../../model/audio_record.dart';
 import '../haptics.dart';
 import '../theme.dart';
 import 'settings_widgets.dart';
+import '../panel_motion.dart';
 
 class AudioInputSettings extends StatefulWidget {
   const AudioInputSettings({super.key, required this.recorder});
@@ -53,7 +54,7 @@ class _AudioInputSettingsState extends State<AudioInputSettings> {
   Future<void> _measure() async {
     if (!r.prefs.pingWarned) {
       var remember = false;
-      final ok = await showDialog<bool>(context: context, builder: (context) => StatefulBuilder(
+      final ok = await showDialog<bool>(context: context, animationStyle: dialogAnimation(context), builder: (context) => StatefulBuilder(
         builder: (context, set) => AlertDialog(
           key: const ValueKey('latency-warning'),
           title: const Text('Measure the latency'),
@@ -96,7 +97,7 @@ class _AudioInputSettingsState extends State<AudioInputSettings> {
   Future<void> _typeOffset() async {
     final controller = TextEditingController(
         text: r.prefs.latencyOverride < 0 ? '' : r.latency.ms.toStringAsFixed(1));
-    final v = await showDialog<String>(context: context, builder: (context) => AlertDialog(
+    final v = await showDialog<String>(context: context, animationStyle: dialogAnimation(context), builder: (context) => AlertDialog(
       title: const Text('Recording offset'),
       content: TextField(key: const ValueKey('latency-offset-field'), controller: controller, autofocus: true,
           keyboardType: const TextInputType.numberWithOptions(decimal: true),

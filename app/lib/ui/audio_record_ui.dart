@@ -9,6 +9,7 @@ import '../model/app_state.dart';
 import '../model/audio_edit.dart';
 import '../model/audio_record.dart';
 import 'haptics.dart';
+import 'panel_motion.dart';
 
 class AudioRecordFeedback extends StatefulWidget {
   const AudioRecordFeedback({super.key, required this.state, required this.child, this.recorder});
@@ -113,7 +114,7 @@ class _AudioRecordFeedbackState extends State<AudioRecordFeedback> {
 
 /// Asks whether to add the takes a crash left (each named, with its length) to the project.
 Future<bool?> showRecoveredTakes(BuildContext context, List<RecordedAudioTake> takes) => showDialog<bool>(
-      context: context,
+      context: context, animationStyle: dialogAnimation(context),
       builder: (context) => AlertDialog(
         key: const ValueKey('audio-recovery'),
         title: const Text('Recover recordings?'),

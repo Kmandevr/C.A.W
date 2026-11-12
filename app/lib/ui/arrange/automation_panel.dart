@@ -6,6 +6,7 @@ import '../../model/project.dart';
 import '../theme.dart';
 import '../volume_fader.dart' show VolumeTaper;
 import '../widgets.dart';
+import '../panel_motion.dart';
 
 /// One track's lanes (the focus view's Automation tab): its volume and pan lanes with their points, or a way to add one.
 class TrackAutomationPanel extends StatelessWidget {
@@ -75,7 +76,7 @@ class _AddLane extends StatelessWidget {
   final LayerDoc layer;
 
   @override
-  Widget build(BuildContext context) => PopupMenuButton<String>(
+  Widget build(BuildContext context) => PopupMenuButton<String>( popUpAnimationStyle: menuAnimation(context),
         tooltip: 'Add automation lane',
         onSelected: (target) => state.addAutomationLane(layer, target),
         itemBuilder: (_) => [

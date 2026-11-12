@@ -283,7 +283,7 @@ class _PresetBrowserState extends State<PresetBrowser> {
           },
           icon: const Icon(Icons.save_outlined, size: 16),
           label: const Text('Save preset…', style: TextStyle(fontSize: 12)))),
-        PopupMenuButton<String>(
+        PopupMenuButton<String>( popUpAnimationStyle: menuAnimation(context),
           key: const ValueKey('preset-more'),
           tooltip: 'More',
           icon: const Icon(Icons.more_vert, size: 20),

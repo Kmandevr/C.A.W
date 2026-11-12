@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import '../glass.dart';
 import '../haptics.dart';
 import '../theme.dart';
+import '../panel_motion.dart';
 
 /// One thing the switcher can open: [title] is matched, [detail] says where it is.
 class QuickItem {
@@ -68,7 +69,7 @@ Future<void> showQuickOpen(BuildContext context, List<QuickItem> items) async {
 
   if (wide) {
     await showDialog<void>(
-      context: context,
+      context: context, animationStyle: dialogAnimation(context),
       barrierColor: Colors.black26,
       builder: (c) => Align(
         alignment: const Alignment(0, -0.75),

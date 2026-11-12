@@ -8,6 +8,7 @@ import '../motion.dart';
 import '../theme.dart';
 import '../pointer_input.dart';
 import '../tokens.dart';
+import '../panel_motion.dart';
 
 IconData assetIcon(FileAssetType t) => switch (t) {
       FileAssetType.builtinEffect => Icons.graphic_eq,
@@ -339,7 +340,7 @@ Future<T?> showCompactMenu<T>(BuildContext context, Offset at, List<MenuEntry<T>
   final overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
   final size = overlay.size;
   return showMenu<T>(
-    context: context,
+    context: context, popUpAnimationStyle: menuAnimation(context),
     position: RelativeRect.fromLTRB(at.dx, at.dy, size.width - at.dx, size.height - at.dy),
     color: Neon.panelHi.withValues(alpha: 0.96),
     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(Radii.m), side: BorderSide(color: Neon.ink.withValues(alpha: 0.12))),

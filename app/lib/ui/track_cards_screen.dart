@@ -24,6 +24,7 @@ import 'volume_fader.dart';
 import 'arrange/track_color.dart';
 import 'widgets.dart';
 import 'glass.dart';
+import 'panel_motion.dart';
 
 class TrackCardsScreen extends StatelessWidget {
   const TrackCardsScreen({super.key, required this.state, required this.onOpenModule, this.onBack});
@@ -392,7 +393,7 @@ String _detail(AppState s, LayerDoc layer) {
 Future<void> _rename(BuildContext context, AppState state, LayerDoc layer) async {
   final c = TextEditingController(text: layer.name);
   final name = await showDialog<String>(
-    context: context,
+    context: context, animationStyle: dialogAnimation(context),
     builder: (context) => AlertDialog(
       title: const Text('Rename track'),
       content: TextField(controller: c, autofocus: true, onSubmitted: (v) => Navigator.pop(context, v)),
@@ -839,7 +840,7 @@ class _TrackSheet extends StatelessWidget {
         ToggleChip(label: 'M', tooltip: 'Mute', on: layer.mute, color: Neon.yellow, onTap: () => s.mixLayer(layer, mute: !layer.mute)),
         const SizedBox(width: 6),
         ToggleChip(label: 'S', tooltip: 'Solo', on: layer.solo, color: Neon.blue, onTap: () => s.mixLayer(layer, solo: !layer.solo)),
-        PopupMenuButton<String>(
+        PopupMenuButton<String>( popUpAnimationStyle: menuAnimation(context),
           onSelected: (v) async {
             switch (v) {
               case 'rename':

@@ -42,6 +42,36 @@ AnimationStyle? sheetAnimation(BuildContext context) {
       duration: d, reverseDuration: Motion.paced(sheetExit), curve: EditMotion.curveOr(Curves.easeOutCubic));
 }
 
+/// How long a dialog fades in and out with Subtle (Material's own).
+const dialogFade = Duration(milliseconds: 150);
+
+/// The animation style for a dialog under [context]: Material's own fade with the app's own feel and full motion
+/// (null); otherwise the theme's pace and curve, in and out alike; still a fade with Reduced motion (a fade is not
+/// movement); none with motion Off or panels turned off.
+AnimationStyle? dialogAnimation(BuildContext context) {
+  final level = Motion.of(context);
+  final d = EditMotion.scaled(level, EditMotionKind.panels, dialogFade);
+  if (d == null) return AnimationStyle.noAnimation;
+  if (level == MotionLevel.full && EditMotion.feel == MotionFeel.subtle) return null;
+  final curve = EditMotion.curveOr(Curves.easeOut);
+  return AnimationStyle(duration: d, reverseDuration: d, curve: curve, reverseCurve: curve);
+}
+
+/// How long a popup menu opens with Subtle (Material's own); it closes in a third of that.
+const menuOpen = Duration(milliseconds: 300);
+
+/// The animation style for a popup menu under [context] ([showMenu], [PopupMenuButton]): Material's own grow and
+/// fade with the app's own feel and full motion (null); otherwise the theme's pace and curve, out as it came in;
+/// none with motion Off or panels turned off.
+AnimationStyle? menuAnimation(BuildContext context) {
+  final level = Motion.of(context);
+  final d = EditMotion.scaled(level, EditMotionKind.panels, menuOpen);
+  if (d == null) return AnimationStyle.noAnimation;
+  if (level == MotionLevel.full && EditMotion.feel == MotionFeel.subtle) return null;
+  final curve = EditMotion.curveOr(Curves.easeOut);
+  return AnimationStyle(duration: d, reverseDuration: d * (1 / 3), curve: curve, reverseCurve: curve);
+}
+
 /// The transition for a window or menu over the page (a device's floating window, a long-press menu): in with the
 /// theme's entrance kind, out with its exit kind (a fade with Reduced motion); its route's duration decides Off.
 Widget popupTransition(BuildContext context, Animation<double> animation, Widget child) =>

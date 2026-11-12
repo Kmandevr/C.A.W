@@ -15,6 +15,8 @@ import 'package:caw/model/project.dart';
 import 'package:caw/model/settings.dart';
 import 'package:caw/ui/arrange/fx_stack.dart';
 import 'package:caw/ui/cpp/build_section.dart';
+import 'package:caw/ui/dock/dock_controller.dart' show FloatingPanel;
+import 'package:caw/ui/dock/floating_window.dart';
 import 'package:caw/ui/frame/sections.dart';
 import 'package:caw/ui/arrange/mixer_card.dart';
 import 'package:caw/ui/devices/kit/key_param.dart';
@@ -486,6 +488,66 @@ void main() {
       expect(y, lessThan(900), reason: 'partly on screen');
       await tester.pumpAndSettle();
       expect(find.text('the sheet'), findsNothing);
+
+      // A dialog and a popup menu go out at the theme's pace too.
+      EditMotion.feel = MotionFeel.presets['Calm']!;
+      showDialog<void>(context: ctx, animationStyle: dialogAnimation(ctx), builder: (_) => const Text('the dialog'));
+      await tester.pumpAndSettle();
+      Navigator.of(ctx).pop();
+      await tester.pump();
+      await tester.pump(Motion.paced(dialogFade) ~/ 2);
+      expect(opacityOf(find.text('the dialog')), inExclusiveRange(0, 1), reason: 'fading out');
+      await tester.pumpAndSettle();
+      expect(find.text('the dialog'), findsNothing);
+      showMenu<int>(context: ctx, popUpAnimationStyle: menuAnimation(ctx), position: const RelativeRect.fromLTRB(10, 10, 10, 10),
+          items: const [PopupMenuItem(value: 1, child: Text('the item'))]);
+      await tester.pumpAndSettle();
+      Navigator.of(ctx).pop();
+      await tester.pump();
+      await tester.pump(Motion.paced(menuOpen) ~/ 6);
+      expect(find.text('the item'), findsOneWidget, reason: 'the menu is still closing');
+      await tester.pumpAndSettle();
+      expect(find.text('the item'), findsNothing);
+    });
+
+    keyTest('a floating window comes in, and goes out before it docks; none with motion Off', (tester) async {
+      Motion.setting = MotionLevel.full;
+      var docked = 0;
+      Widget window() => MaterialApp(home: Scaffold(body: LayoutBuilder(builder: (_, box) => Stack(children: [
+            FloatingWindow(
+              panel: const FloatingPanel('files', Rect.fromLTWH(0.1, 0.1, 0.5, 0.5)),
+              area: box.biggest,
+              title: 'Files',
+              onPlace: (_, {save = true}) {},
+              onDock: () => docked++,
+              onRaise: () {},
+              child: const Text('inside'),
+            ),
+          ]))));
+      double opacity() => tester
+          .widgetList<FadeTransition>(find.ancestor(of: find.text('inside'), matching: find.byType(FadeTransition)))
+          .map((t) => t.opacity.value)
+          .fold(1.0, (a, b) => a * b);
+      await tester.pumpWidget(window());
+      await tester.pump(const Duration(milliseconds: 60));
+      expect(opacity(), inExclusiveRange(0, 1), reason: 'coming in');
+      await tester.pumpAndSettle();
+      expect(opacity(), 1);
+      await tester.tap(find.byKey(const ValueKey('float-dock-files')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 80));
+      expect(docked, 0, reason: 'still going out');
+      expect(opacity(), lessThan(1));
+      await tester.pumpAndSettle();
+      expect(docked, 1);
+
+      Motion.setting = MotionLevel.off;
+      await tester.pumpWidget(const SizedBox());
+      await tester.pumpWidget(window());
+      expect(opacity(), 1, reason: 'Off: there at once');
+      await tester.tap(find.byKey(const ValueKey('float-dock-files')));
+      await tester.pump();
+      expect(docked, 2, reason: 'Off: docks at once');
     });
   });
 }

@@ -97,7 +97,7 @@ class _KeyBindingsPageState extends State<KeyBindingsPage> {
                   label: const Text('Add a key'),
                   onPressed: () async {
                     final seq = await showDialog<KeySeq>(
-                      context: context,
+                      context: context, animationStyle: dialogAnimation(context),
                       builder: (_) => KeyCaptureDialog(registry: widget.registry, keymap: _k, area: d.area, ref: ref),
                     );
                     if (seq == null) return;
@@ -140,7 +140,7 @@ class _KeyBindingsPageState extends State<KeyBindingsPage> {
 
   Future<void> _resetAll() async {
     final ok = await showDialog<bool>(
-      context: context,
+      context: context, animationStyle: dialogAnimation(context),
       builder: (context) => AlertDialog(
         backgroundColor: Neon.panel,
         title: const Text('Reset every key?'),

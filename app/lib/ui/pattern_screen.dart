@@ -17,6 +17,7 @@ import 'pattern_fields.dart';
 import 'theme.dart';
 import 'widgets.dart';
 import 'pointer_input.dart';
+import 'panel_motion.dart';
 
 class PatternScreen extends StatefulWidget {
   const PatternScreen({super.key, required this.state});
@@ -278,7 +279,7 @@ class _PatternScreenState extends State<PatternScreen> {
   Future<void> _rename(ModuleDoc m) async {
     final c = TextEditingController(text: m.name);
     final name = await showDialog<String>(
-      context: context,
+      context: context, animationStyle: dialogAnimation(context),
       builder: (context) => AlertDialog(
         title: const Text('Rename pattern'),
         content: TextField(controller: c, autofocus: true, onSubmitted: (v) => Navigator.pop(context, v)),
@@ -297,7 +298,7 @@ class _PatternScreenState extends State<PatternScreen> {
   Future<void> _delete(ModuleDoc m) async {
     final used = s.project.layers.where((l) => l.clips.any((c) => c.patternId == m.id)).map((l) => l.name).toList();
     final ok = await showDialog<bool>(
-      context: context,
+      context: context, animationStyle: dialogAnimation(context),
       builder: (context) => AlertDialog(
         title: Text('Delete ${m.name}?'),
         content: Text(used.isEmpty ? 'Its notes will be gone.' : 'It is played by: ${used.join(', ')}. Those clips go.'),
@@ -382,7 +383,7 @@ class _PatternScreenState extends State<PatternScreen> {
             icon: const Icon(Icons.headphones_outlined, color: Neon.dim),
             selectedIcon: const Icon(Icons.headphones, color: Neon.blue),
           ),
-        PopupMenuButton<String>(
+        PopupMenuButton<String>( popUpAnimationStyle: menuAnimation(context),
           onSelected: (v) => switch (v) {
             'rename' => _rename(m),
             'solo' => s.setPreviewOnly(!s.previewOnly),

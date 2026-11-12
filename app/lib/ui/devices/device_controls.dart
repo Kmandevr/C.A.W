@@ -20,6 +20,7 @@ import 'modulators/modulator_devices.dart' show modulatorColor, showModLinkSheet
 import 'kit/feel.dart';
 import 'kit/hero.dart' show MotionClock, motionRuns;
 import 'visuals/mod_sheet.dart';
+import '../panel_motion.dart';
 
 /// [p]'s knob travel (its descriptor's curve).
 Taper taperOf(ComponentParameterInfo p) => Taper(p.min, p.max, exponential: p.exponential);
@@ -457,7 +458,7 @@ class _DeviceKnobState extends State<DeviceKnob> {
     final t = DeviceScope.of(context).target;
     DeviceFeel.tap();
     final field = TextEditingController(text: value.toStringAsFixed(p.max - p.min > 20 ? 1 : 3));
-    final typed = await showDialog<double>(context: context, builder: (c) => AlertDialog(
+    final typed = await showDialog<double>(context: context, animationStyle: dialogAnimation(context), builder: (c) => AlertDialog(
       title: Text(p.label, style: const TextStyle(fontSize: 14)),
       content: TextField(
         key: const ValueKey('dknob-type'),

@@ -866,7 +866,7 @@ Future<void> showProjectMenu(BuildContext context, AppState s) async {
               Navigator.pop(context);
               final c = TextEditingController(text: s.project.name);
               final name = await showDialog<String>(
-                context: context,
+                context: context, animationStyle: dialogAnimation(context),
                 builder: (context) => AlertDialog(
                   title: const Text('Rename project'),
                   content: TextField(controller: c, autofocus: true, onSubmitted: (v) => Navigator.pop(context, v)),
@@ -979,7 +979,7 @@ Future<void> showProjectMenu(BuildContext context, AppState s) async {
                 tooltip: 'Delete',
                 onPressed: () async {
                   final ok = await showDialog<bool>(
-                    context: context,
+                    context: context, animationStyle: dialogAnimation(context),
                     builder: (context) => AlertDialog(
                       title: Text('Delete ${p.name}?'),
                       actions: [
