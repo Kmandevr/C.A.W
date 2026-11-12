@@ -16,6 +16,11 @@ double denormalizeParameter(const ParameterDescriptor& parameter, double normali
 // Clamp to the range, then (step > 0) snap to minimum + k * step and clamp again. NaN reads as
 // the minimum.
 double constrainParameter(const ParameterDescriptor& parameter, double plain) noexcept;
+// out[i] = constrainParameter(p, denormalizeParameter(p, clamp(n0 + offset[i], 0, 1))) for i < count, with the
+// curve's log worked out once for the block (the same bits, which a block split must not change): a held base
+// under audio-rate modulation.
+void denormalizeOffsets(const ParameterDescriptor& parameter, double n0, const float* offset, uint32_t count,
+                        double* out) noexcept;
 
 // An automation lane's value at `at` (in steps): the first point's value before it, the last
 // point's after it, linear between neighbours, and the later point's value at a jump (two points

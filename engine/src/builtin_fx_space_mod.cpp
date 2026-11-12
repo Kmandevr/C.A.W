@@ -186,7 +186,8 @@ protected:
             delay_[v].set(base * own + depth * m, kControlFrames);
             // Pan: the voices evenly from left to right, `spread` wide (each reads the left or right input in turn).
             const double place = 2.0 * v / (voices_ - 1) - 1.0;
-            pan_[v] = lib::constantPowerPan(spread * place);
+            const double pan = spread * place;  // a sin and a cos: worked out again only when the pan moved
+            if (pan != panFor_[v]) panFor_[v] = pan, pan_[v] = lib::constantPowerPan(pan);
         }
         for (int v = voices_; v < kMaxVoices; ++v) delay_[v].set(base, kControlFrames);
         depthMs_ = depth * 1000.0 / sr;
@@ -196,8 +197,9 @@ protected:
         norm_ = 1.4142135623730951 / std::sqrt(static_cast<double>(voices_));
         // An equal-power blend: the voices are decorrelated from the dry, so their powers add.
         const double m = std::clamp(param(kEMix, at), 0.0, 1.0);
-        mix_.set(detSin(0.5 * kPi * m), kControlFrames);
-        dry_.set(detCos(0.5 * kPi * m), kControlFrames);
+        if (m != mixFor_) mixFor_ = m, wetGain_ = detSin(0.5 * kPi * m), dryGain_ = detCos(0.5 * kPi * m);
+        mix_.set(wetGain_, kControlFrames);
+        dry_.set(dryGain_, kControlFrames);
     }
     void run(const float* inL, const float* inR, float* outL, float* outR, uint32_t n) noexcept override {
         for (uint32_t i = 0; i < n; ++i) {
@@ -234,6 +236,8 @@ private:
     lib::Lfo slow_[kMaxVoices], fast_[kMaxVoices];
     Ramp delay_[kMaxVoices], mix_, dry_;
     lib::PanGains pan_[kMaxVoices];
+    double panFor_[kMaxVoices] = {1e300, 1e300, 1e300, 1e300, 1e300, 1e300, 1e300, 1e300};  // control: pan_ is for these
+    double mixFor_ = -1.0, wetGain_ = 0.0, dryGain_ = 1.0;                                    // control: the mix's sin, cos
     lib::Svf tone_[2];
     int voices_ = 4;
     bool useTone_ = true;
@@ -716,7 +720,7 @@ protected:
         oversample_ = driven_ && quality() == kQualityHigh;
         mix_.set(std::clamp(param(kRMix, at), 0.0, 1.0), kControlFrames);
     }
-    double shape(double x) const noexcept { return lib::fastTanh(x * drive_) / std::sqrt(drive_); }
+    double shape(double x) const noexcept { return lib::tanhApprox(x * drive_) / std::sqrt(drive_); }
     void run(const float* inL, const float* inR, float* outL, float* outR, uint32_t n) noexcept override {
         for (uint32_t i = 0; i < n; ++i) {
             const double xl = inL[i], xr = inR[i];

@@ -94,10 +94,13 @@ protected:
         threshold_ = param(kThreshold, at);
         ratio_ = std::max(1.0, param(kRatio, at));
         knee_ = param(kKnee, at);
-        attack_ = lib::timeCoefficient(param(kAttack, at) * 0.001, sr);
+        // Each coefficient (an exp) worked out again only when its time or the rate moved.
+        const double attack = param(kAttack, at) * 0.001;
+        if (attack != attackFor_ || sr != rateFor_) attackFor_ = attack, attack_ = lib::timeCoefficient(attack, sr);
         double release = param(kRelease, at) * 0.001;
         if (on(kAutoRelease, at)) release *= 0.3 + 1.7 * sustained_;  // fast after a transient, slow when held down
-        release_ = lib::timeCoefficient(release, sr);
+        if (release != releaseFor_ || sr != rateFor_) releaseFor_ = release, release_ = lib::timeCoefficient(release, sr);
+        rateFor_ = sr;
         makeupDb_ = param(kMakeup, at);
         if (on(kAutoMakeup, at)) makeupDb_ -= 0.5 * lib::compressorGainDb(0.0, threshold_, ratio_, knee_);
         // A level under this is below the knee by more than 0.01 dB, where the curve is exactly 0 dB: no log needed.
@@ -198,6 +201,7 @@ private:
     double ms_[2] = {}, env_[2] = {};
     bool external_ = false;
     double threshold_ = -18, ratio_ = 4, knee_ = 6, attack_ = 0, release_ = 0, makeupDb_ = 0;
+    double attackFor_ = -1.0, releaseFor_ = -1.0, rateFor_ = -1.0;  // control: the times attack_, release_ are for
     double kneeStartDb_ = 1e300, quietBelow_ = 0.0;     // control: below quietBelow_ (linear) the curve gives 0 dB
     double gainDb_[2] = {1e300, 1e300}, gainOf_[2] = {1.0, 1.0};  // run: dbToGain(gainDb_) last worked out
     double mix_ = 1, link_ = 1, rmsCoef_ = 0, sustainCoef_ = 0, sustained_ = 0;

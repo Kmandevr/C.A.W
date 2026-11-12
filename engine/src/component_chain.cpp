@@ -633,10 +633,8 @@ const ParameterValue* ComponentChain::modulated(const Entry& e, std::size_t inde
             double* out = mod->samples + static_cast<std::size_t>(buffer++) * kMaxFrames;
             if (base.samples) {
                 for (uint32_t i = 0; i < m; ++i) out[i] = modulatedValue(p, base.samples[i], off[i]);
-            } else {  // a held base: its normalized value once (modulatedValue's arithmetic, the same bits)
-                const double n0 = normalizeParameter(p, base.value);
-                for (uint32_t i = 0; i < m; ++i)
-                    out[i] = constrainParameter(p, denormalizeParameter(p, std::clamp(n0 + off[i], 0.0, 1.0)));
+            } else {  // a held base: its normalized value and the curve's log once (modulatedValue's bits)
+                denormalizeOffsets(p, normalizeParameter(p, base.value), off, m, out);
             }
             mod->values[x.param] = ParameterValue{out, out[0]};
         }
