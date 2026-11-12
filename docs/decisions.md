@@ -17,6 +17,13 @@ updated: 2026-11-12
 - **Feedback:** a form whose reports are posted as public issues.
 - **Split of work:** this repository builds sections A-G. The owner's other session builds caw-telemetry, the relay and the privacy and terms texts. Section H is the shared contract, and only the owner changes it.
 - **Process:** every look (B settings, C, D, E, F) is asked of the owner before it is built. Anything that sends data off the device gets a security review.
+- **Looks (owner's answers, 2026-11-12):**
+  - **Startup (D):** a "waveform reveal". The crow draws itself from a moving audio waveform line. Then the real loading steps appear under it as a small list that ticks off each step.
+  - **Stress test (C):** both a full-screen Benchmark screen and a card in Settings › Performance that opens it, with Quick and Full runs. Results show tier badges, the limits found, a ranked "what's holding it back" list, per-scenario rows and Share/Save JSON. While it runs, a live load graph shows.
+  - **Privacy and feedback (E, F):** simple sheets.
+    - First run is one scrollable page: a plain summary, links to the full texts, and Continue.
+    - Feedback is a bottom sheet with type chips, a text box, attachment toggles that expand to show exactly what is attached, an optional email field, and Send.
+  - **Frame-rate caps (B2):** Lightweight caps at 60 Hz and Minimal at 30 Hz while moving. Full and Balanced follow the Frame rate setting.
 
 ## 2026-11-12: Frame rate: Auto by default, caps the screen has (owner)
 
