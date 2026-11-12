@@ -401,7 +401,15 @@ class _NativeEffectCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final card = _card(context);
-    return selected && keyFocus ? KeyRingBox(child: card) : card;
+    final use = _use;
+    final name = state.componentInfo(use.id)?.label ?? state.cppComponentFor(use.id)?.name ?? builtinComponentName(use.id);
+    // The chain's selection, named for screen readers (the chain's keys act on it).
+    return Semantics(
+      container: true,
+      selected: selected,
+      label: '${instrument ? 'Instrument' : 'Effect ${index + 1}'}: $name${use.bypass ? ', bypassed' : ''}',
+      child: selected && keyFocus ? KeyRingBox(child: card) : card,
+    );
   }
 
   Widget _card(BuildContext context) {

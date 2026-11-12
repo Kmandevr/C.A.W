@@ -283,6 +283,11 @@ void main() {
       await key(tester, LogicalKeyboardKey.delete);
       expect(l.components.map((c) => c.id), ['org.caw.utility', 'org.caw.eq']);
       expect(find.byKey(const ValueKey('key-ring-box')), findsOneWidget, reason: 'the picked effect wears the ring');
+      final semantics = tester.ensureSemantics();
+      await tester.pump();
+      expect(find.bySemanticsLabel(RegExp(r'^Effect 2: .*')), findsOneWidget, reason: 'each effect is named');
+      expect(find.bySemanticsLabel('Keys FX chain'), findsOneWidget, reason: 'the area is named');
+      semantics.dispose();
     });
 
     keyTest('FX chain: Enter opens the effect, and the device editor\'s keys move and change its controls',
@@ -306,6 +311,12 @@ void main() {
       final param = KeyParam.focused!;
       final id = param.widget.paramId;
       final p = s.componentInfo('org.caw.utility')!.param(id)!;
+      final semantics = tester.ensureSemantics();
+      await tester.pump();
+      final node = tester.getSemantics(find.byWidget(param.widget));
+      expect(node.label, contains(p.name), reason: 'the focused control is named for a screen reader');
+      expect(node.value, isNotEmpty);
+      semantics.dispose();
       final before = l.components.first.params[id] ?? p.defaultValue;
       await key(tester, LogicalKeyboardKey.arrowUp);
       final up = l.components.first.params[id]!;

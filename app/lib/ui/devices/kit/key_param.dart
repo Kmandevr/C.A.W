@@ -95,8 +95,36 @@ class KeyParamState extends State<KeyParam> {
     }
   }
 
+  /// What a screen reader says for the control: its value as the device shows it (a choice's name, on or off, else
+  /// the number and unit).
+  static String spoken(double v, {required List<String> choices, required double min, required String unit,
+      required bool toggle, required double max}) {
+    if (toggle) return v >= (min + max) / 2 ? 'on' : 'off';
+    final i = (v - min).round();
+    if (choices.isNotEmpty && i >= 0 && i < choices.length) return choices[i];
+    final text = v.abs() >= 100 ? v.toStringAsFixed(0) : v.toStringAsFixed(2);
+    return unit.isEmpty ? text : '$text $unit';
+  }
+
   @override
-  Widget build(BuildContext context) => Focus(focusNode: node, child: widget.child);
+  Widget build(BuildContext context) {
+    // The control's name, value and up/down for screen readers, on the node the keyboard focuses (owner,
+    // 2026-11-11: focusable controls are labelled).
+    final t = DeviceScope.maybeOf(context)?.target;
+    final p = t?.param(widget.paramId);
+    final focus = Focus(focusNode: node, child: widget.child);
+    if (t == null || p == null) return focus;
+    final toggle = widget.kind == KeyParamKind.toggle;
+    final now = t.value(p.id);
+    return Semantics(
+      label: p.name,
+      value: spoken(now, choices: p.choices, min: p.min, max: p.max, unit: p.unit, toggle: toggle),
+      toggled: toggle ? now >= (p.min + p.max) / 2 : null,
+      focusable: true,
+      focused: node.hasFocus,
+      child: focus,
+    );
+  }
 }
 
 /// The device editor's keys (an [Area.device] area): the focused control's value; a press with no control focused
