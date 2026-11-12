@@ -32,7 +32,7 @@ env:
   RUNS: ${{ inputs.runs || '3' }}
   # The NDK the APK's engine is built with (Flutter's ndkVersion; app.yml caches the same one).
   NDK_VERSION: 28.2.13676358
-  CAW_FP_EXPERIMENT: "-DCAW_FP_FLAGS=-ffp-contract=off;-fno-fast-math;-fno-trapping-math"  # TEMPORARY: per-flag measurement
+  CAW_FP_EXPERIMENT: "-DCAW_FP_FLAGS=-ffp-contract=fast;-fno-trapping-math"  # TEMPORARY: per-flag measurement
 
 jobs:
   linux:
