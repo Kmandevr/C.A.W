@@ -5,16 +5,32 @@ import 'dart:math' as math;
 
 import 'music_video.dart';
 import 'music_video_edit.dart';
+import 'music_video_overlay.dart';
 import 'music_video_scene.dart';
 
-enum VideoTransition { cut, crossfade, push }
+/// How a shot replaces the one before (owner, 2026-11-12: crossfade, slide, zoom, flash, wipe and glitch join the
+/// cut, crossfade and push the director uses). Saved by name.
+enum VideoTransition {
+  cut('Cut'),
+  crossfade('Crossfade'),
+  push('Push'),
+  slide('Slide'),
+  zoom('Zoom'),
+  flash('Flash'),
+  wipe('Wipe'),
+  glitch('Glitch');
+
+  const VideoTransition(this.label);
+  final String label;
+}
 
 /// One shot: what it shows, from [start] to [end] (song steps), how it begins and where its camera goes.
 class DirectedShot {
   const DirectedShot({required this.kind, required this.start, required this.end, this.clip, this.track, this.lane,
       this.transition = VideoTransition.cut, this.transitionSteps = 0, this.zoomFrom = 1, this.zoomTo = 1,
       this.visibleSteps = 64, this.leadSteps = 0, this.pitchCenter = 60, this.pitchSpan = 24, this.section = false,
-      this.panel, this.layout, this.panelShots = const [], this.effects = const [], this.animateLayout = false});
+      this.panel, this.layout, this.panelShots = const [], this.effects = const [], this.animateLayout = false,
+      this.camera, this.texts = const [], this.images = const []});
   final VideoShot kind;
   final double start, end;
 
@@ -49,8 +65,15 @@ class DirectedShot {
   /// A layout change from the shot before animates over the transition instead of cutting.
   final bool animateLayout;
 
+  /// The shot's keyframed camera over the whole frame, or null for the auto camera alone.
+  final VideoCameraMove? camera;
+
+  /// The shot's own text overlays and image layers (the whole video's are on the plan's input).
+  final List<VideoText> texts;
+  final List<VideoImageLayer> images;
+
   /// Whether it draws more than one view or applies any effect (else it draws exactly as a director's shot).
-  bool get edited => (layout != null && panelShots.length > 1) || effects.isNotEmpty || animateLayout;
+  bool get edited => (layout != null && panelShots.length > 1) || effects.isNotEmpty || animateLayout || camera != null;
 
   @override
   String toString() => '${kind.name}[$start..$end ${transition.name}]';
@@ -357,17 +380,19 @@ ShotPlan planFromTimeline(VideoScene scene, VideoTimeline timeline, MusicVideoOp
     final a = math.max(c.start, start), b = math.min(c.end, end);
     if (b <= a) continue;
     gap(t, a);
-    final panels = [for (final p in c.layout.panels) panelShot(p, a, b, c.zoom)];
+    // A keyframed camera frames the whole shot; the views then keep their own width (no opening zoom).
+    final zoom = c.camera != null ? 1.0 : c.zoom;
+    final panels = [for (final p in c.layout.panels) panelShot(p, a, b, zoom)];
     final first = panels.first;
     final tSteps = c.transition == VideoTransition.cut && !c.animateLayout
         ? 0.0
         : math.min((b - a) / 2, c.transitionSteps > 0 ? c.transitionSteps : 4.0);
     shots.add(DirectedShot(
       kind: first.kind, start: a, end: b, clip: first.clip, track: first.track, lane: first.lane,
-      transition: c.transition, transitionSteps: tSteps, zoomFrom: c.zoom, zoomTo: 1,
+      transition: c.transition, transitionSteps: tSteps, zoomFrom: zoom, zoomTo: 1,
       visibleSteps: first.visibleSteps, pitchCenter: first.pitchCenter, pitchSpan: first.pitchSpan,
       panel: first.panel, layout: c.layout, panelShots: panels, effects: [for (final e in c.effects) if (e.on) e],
-      animateLayout: c.animateLayout,
+      animateLayout: c.animateLayout, camera: c.camera, texts: c.texts, images: c.images,
     ));
     t = b;
   }

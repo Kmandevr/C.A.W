@@ -206,11 +206,7 @@ class _ShotEditorState extends State<ShotEditor> {
       EffectStack(effects: c.effects, scene: widget.scene, host: h, panels: c.layout.panels.length),
       _label('TRANSITION'),
       VideoTiles<VideoTransition>(keyPrefix: 'video-transition', values: VideoTransition.values, selected: c.transition,
-          height: 40, label: (v) => switch (v) {
-                VideoTransition.cut => 'Cut',
-                VideoTransition.crossfade => 'Crossfade',
-                VideoTransition.push => 'Push',
-              },
+          height: 40, label: (v) => v.label,
           onPick: (v) => h.edit(() {
                 c.transition = v;
                 if (v != VideoTransition.cut && c.transitionSteps <= 0) c.transitionSteps = 4;
