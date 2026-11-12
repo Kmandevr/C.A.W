@@ -48,6 +48,10 @@ import 'live_playhead.dart';
 import 'feedback.dart';
 import 'view_glide.dart';
 
+// The gesture binding's sampling clock, for double taps: the wall clock in the app, the test's fake clock under test,
+// so a busy machine can't split a double tap (as ClickCounter in pointer_input.dart).
+DateTime _gestureNow() => GestureBinding.instance.samplingClock.now();
+
 enum PatternTool { draw, select, curve, erase, ratchet }
 
 /// Paint counts of the roll's layers, for the frame benchmark in the tests: the whole roll, and the live curve on top.
@@ -1621,7 +1625,7 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
     final n = base?.byId(id);
     var pts = _curveView.value.points;
     if (!cancel && !_bMoved && n != null && start != null && hit != null) {
-      final now = DateTime.now();
+      final now = _gestureNow();
       if (hit.point != null) {
         // A tap on a point: a second one on the same point soon after removes it.
         final t = _bTapped;
@@ -2544,7 +2548,7 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
     _tapCandidate = null;
     final tapAt = _tapAt;
     if (hit != null && !outside && hit == _tapNote && tapAt != null &&
-        DateTime.now().difference(tapAt) < const Duration(milliseconds: 350)) {
+        _gestureNow().difference(tapAt) < const Duration(milliseconds: 350)) {
       _tapNote = null;
       _dragStart = null;
       _dragBase = null;
@@ -2621,7 +2625,7 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
 
   /// A tap on empty grid: a second one soon after, near it, clears the selection (a single tap leaves it).
   void _emptyTapped(Offset p) {
-    final last = _emptyTap, now = DateTime.now();
+    final last = _emptyTap, now = _gestureNow();
     if (last != null && now.difference(last.when) < kDoubleTapTimeout && (p - last.at).distance < 48) {
       _emptyTap = null;
       if (_sel.isNotEmpty) setState(() => _sel = {});
@@ -2735,7 +2739,7 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
     }
     // A tap on an existing note that moved nothing arms the double tap; a note just drawn doesn't.
     _tapNote = _tapCandidate != null && identical(_dragBase, _doc) ? _tapCandidate : null;
-    _tapAt = DateTime.now();
+    _tapAt = _gestureNow();
     _tapCandidate = null;
     if (_dragBase != null && _doc != null && !identical(_dragBase, _doc)) {
       // One undo step for the whole drag.

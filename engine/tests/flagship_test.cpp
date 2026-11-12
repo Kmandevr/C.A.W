@@ -18,7 +18,9 @@
 #include "caw/library/unison.hpp"
 #include "caw/library/wavetable.hpp"
 #include "analysis.h"
+#include "filter_pairs.h"
 #include "presets.h"
+#include "tolerance.h"
 #include "caw.h"
 #include "engine.h"
 #include "project.h"
@@ -53,9 +55,10 @@ struct Stereo {
     std::vector<float> left, right;
 };
 
-// Plays `events` through an activated flagship in `block`-frame blocks with `values` over the defaults.
-Stereo play(ModuleProcessor& p, const std::vector<Event>& events, uint32_t frames, const Values& values = {},
-            uint32_t block = 64) {
+// Plays `events` through an activated flagship in blocks of the sizes in `blocks` (repeated) with `values` over
+// the defaults.
+Stereo playBlocks(ModuleProcessor& p, const std::vector<Event>& events, uint32_t frames, const Values& values,
+                  const std::vector<uint32_t>& blocks) {
     const ModuleDescriptor& d = p.descriptor();
     std::vector<ParameterValue> params(d.parameterCount);
     for (uint32_t k = 0; k < d.parameterCount; ++k) params[k].value = d.parameters[k].defaultValue;
@@ -66,12 +69,13 @@ Stereo play(ModuleProcessor& p, const std::vector<Event>& events, uint32_t frame
     Stereo out;
     out.left.resize(frames);
     out.right.resize(frames);
-    std::vector<float> l(block), r(block);
+    const uint32_t most = *std::max_element(blocks.begin(), blocks.end());
+    std::vector<float> l(most), r(most);
     float* channels[2] = {l.data(), r.data()};
-    const ChannelBufferView audio{channels, 2, block};
-    size_t next = 0;
-    for (uint32_t start = 0; start < frames; start += block) {
+    size_t next = 0, turn = 0;
+    for (uint32_t start = 0, block = blocks[0]; start < frames; start += block, block = blocks[++turn % blocks.size()]) {
         const uint32_t n = std::min(block, frames - start);
+        const ChannelBufferView audio{channels, 2, n};
         std::vector<Event> in;
         while (next < events.size() && events[next].frame < start + n) {
             Event e = events[next++];
@@ -92,6 +96,11 @@ Stereo play(ModuleProcessor& p, const std::vector<Event>& events, uint32_t frame
         std::memcpy(out.right.data() + start, r.data(), n * sizeof(float));
     }
     return out;
+}
+// play() in `block`-frame blocks.
+Stereo play(ModuleProcessor& p, const std::vector<Event>& events, uint32_t frames, const Values& values = {},
+            uint32_t block = 64) {
+    return playBlocks(p, events, frames, values, {block});
 }
 
 std::unique_ptr<ModuleProcessor> make(Engine& e) {
@@ -143,6 +152,22 @@ double hzOf(double pitch) { return 440.0 * std::pow(2.0, (pitch - 69.0) / 12.0);
 }  // namespace
 
 // ---------- Library kernels ----------
+
+TEST(library_filters_side_by_side_match_each_filter_alone_under_the_engine_s_flags) {
+    // Speed A2 (2026-11-12): K pairs in one loop against 2K filters one at a time. The engine's flags may fuse or
+    // reorder the two paths differently (about 1 ulp of the double arithmetic): each float sample within one float
+    // step plus 1e-12 of the peak (caw_exact_tests checks the bits, built strict).
+    using lib::LadderMode;
+    const cawtest::PairRun runs[] = {
+        cawtest::ladderPairs<LadderMode::LowPass, 2>(true),  cawtest::ladderPairs<LadderMode::LowPass, 4>(false),
+        cawtest::ladderPairs<LadderMode::HighPass, 2>(false), cawtest::ladderPairs<LadderMode::HighPass, 4>(true),
+        cawtest::ladderPairs<LadderMode::BandPass, 2>(true), cawtest::ladderPairs<LadderMode::BandPass, 4>(false),
+        cawtest::svfPairs<2>(),                               cawtest::svfPairs<4>()};
+    for (const cawtest::PairRun& r : runs) {
+        CHECK(r.peak > 1.0);
+        CHECK(cawtest::pairWorst(r) <= 1.0);
+    }
+}
 
 TEST(unison_layout_spreads_copies_by_the_detune_curve_and_pans_mirror_pairs) {
     lib::UnisonVoice v[16];
@@ -562,6 +587,84 @@ TEST(the_flagship_renders_the_same_bits_at_any_block_size) {
         CHECK(energy > 1.0);
         if (differ) cawtest::fail(__FILE__, __LINE__, std::string(v ? "busy" : "default") + ": " + std::to_string(differ) + " samples differ by block size");
     }
+}
+
+TEST(the_flagship_s_voices_side_by_side_sound_as_each_voice_alone) {
+    // Speed A2 (2026-11-12; its audio review): voices whose filters are set alike run side by side, the rest one at
+    // a time. Twelve notes, each set apart by its own note expression: timbre picks filter 1's type (0 ladder
+    // low-pass, 0.125 ladder high-pass, 0.375 SVF low-pass, 0.5 SVF high-pass), pressure pans it (stereo; centred
+    // voices take the mono path), the highest notes (70, the primer's 72) turn filter 1 off, key tracking gives
+    // every voice its own cutoff. So the queue holds up to four centred ladder low-passes (side by side), two stereo SVF low-passes (a
+    // pair), a lone ladder high-pass, an SVF high-pass and unfiltered voices, and more than the eight it holds at
+    // once (checked by instrumenting finishVoices, 2026-11-12). Notes start and end mid-period (a 5 ms release, so
+    // voices end inside finishVoices) in uneven blocks. Every effect is off and no slot moves an instrument-wide
+    // parameter, so the voices are independent but for the instrument's volume, which rises from 0 over the first
+    // period after a reset and restarts its ramp at each note-on: a primer voice (filter off) starts at frame 0 in
+    // every run and the notes from frame 40, when the volume has settled. The reference is each note played with
+    // only the primer, less the primer's share: by the tolerance tests' null (below -120 dBFS; rounding only).
+    Engine e(48000);
+    std::unique_ptr<ModuleProcessor> p = make(e);
+    if (!p) return;
+    const ModuleDescriptor& d = p->descriptor();
+    const double type = paramIndex(d, "flt1_type") + 1, pan = paramIndex(d, "osc1_pan") + 1, on = paramIndex(d, "flt1_on") + 1;
+    const Values patch = plain({{"osc1_frame", 1.0 / 3.0}, {"osc1_phase_rand", 0}, {"flt1_on", 1}, {"flt1_type", 0}, {"flt1_cutoff", 900},
+                                {"flt1_resonance", 0.5}, {"flt1_keytrack", 0.5}, {"env1_release", 0.005},
+                                {"mod1_src", 12}, {"mod1_dst", type}, {"mod1_amt", 1},
+                                {"mod2_src", 11}, {"mod2_dst", pan}, {"mod2_amt", 0.4},
+                                {"mod3_src", 9}, {"mod3_dst", on}, {"mod3_amt", -1}});
+    struct Note {
+        uint32_t id, on, off;
+        uint8_t pitch;
+        double timbre, pressure;
+    };
+    const std::vector<Note> list = {
+        {1, 40, 3001, 45, 0, 0},        {2, 53, 2507, 50, 0, 0},        {3, 69, 4100, 52, 0, 0},
+        {4, 80, 1733, 55, 0, 0},        {5, 47, 3333, 48, 0.375, 0.6},  {6, 61, 2222, 53, 0.375, 0.3},
+        {7, 43, 1999, 47, 0.125, 0.3},  {8, 90, 2805, 70, 0, 0},        {9, 101, 3611, 58, 0.5, 0.5},
+        {10, 2051, 5003, 45, 0, 0},     {11, 2373, 4777, 57, 0.375, 0.2}, {12, 2607, 5555, 43, 0, 0}};
+    const auto eventsOf = [](const std::vector<Note>& notes) {
+        std::vector<Event> ev;
+        for (const Note& n : notes) {
+            ev.push_back(notes::noteOn(n.on, n.id, n.pitch, 1.0));
+            if (n.timbre != 0.0) ev.push_back(notes::noteTimbre(n.on, n.id, n.pitch, n.timbre));
+            if (n.pressure != 0.0) ev.push_back(notes::notePressure(n.on, n.id, n.pitch, n.pressure));
+            ev.push_back(notes::noteOff(n.off, n.id, n.pitch));
+        }
+        std::stable_sort(ev.begin(), ev.end(), [](const Event& a, const Event& b) { return a.frame < b.frame; });
+        return ev;
+    };
+    const uint32_t frames = 7200;
+    const Note primer = {100, 0, 5400, 72, 0, 0};
+    const std::vector<uint32_t> uneven = {37, 64, 5, 128, 1, 300, 16, 23};
+    std::vector<Note> all = list;
+    all.push_back(primer);
+    const Stereo together = playBlocks(*p, eventsOf(all), frames, patch, uneven);
+    p->reset();
+    const Stereo first = play(*p, eventsOf({primer}), frames, patch);
+    std::vector<double> sumL(frames), sumR(frames);
+    for (uint32_t i = 0; i < frames; ++i) sumL[i] = first.left[i], sumR[i] = first.right[i];
+    for (const Note& n : list) {
+        p->reset();
+        const Stereo alone = play(*p, eventsOf({n, primer}), frames, patch);
+        double level = 0;
+        for (uint32_t i = 0; i < frames; ++i) {
+            const double l = static_cast<double>(alone.left[i]) - first.left[i];
+            sumL[i] += l, sumR[i] += static_cast<double>(alone.right[i]) - first.right[i];
+            level = std::max(level, std::fabs(l));
+        }
+        CHECK(level > 1e-3);  // every voice sounds
+    }
+    cawtest::Audio sum{std::vector<float>(frames), std::vector<float>(frames)};
+    for (uint32_t i = 0; i < frames; ++i) sum.l[i] = static_cast<float>(sumL[i]), sum.r[i] = static_cast<float>(sumR[i]);
+    const cawtest::Audio now{together.left, together.right};
+    CHECK(analysis::levels(now.l.data(), frames).peak > 0.05);
+    const double residual = cawtest::nullResidualDbfs(sum, now);
+    if (!(residual < cawtest::tol::kNullPeakDbfs))
+        cawtest::fail(__FILE__, __LINE__, "side by side vs alone: " + std::to_string(residual) + " dBFS");
+    // The tail: every voice has ended, so all fall silent together.
+    bool silent = true;
+    for (uint32_t i = frames - 600; i < frames; ++i) silent = silent && now.l[i] == 0.0f && now.r[i] == 0.0f;
+    CHECK(silent);
 }
 
 TEST(the_flagship_falls_silent_after_release_and_says_so) {

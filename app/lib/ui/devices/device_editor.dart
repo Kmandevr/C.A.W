@@ -15,6 +15,7 @@ import '../theme.dart';
 import '../tokens.dart';
 import 'device_registry.dart';
 import 'device_scope.dart';
+import 'kit/hero.dart' show MotionTouch;
 import 'kit/param_watch.dart';
 import 'kit/key_param.dart';
 import 'sidechain_bar.dart';
@@ -134,7 +135,9 @@ class _DeviceEditorState extends State<DeviceEditor> {
   Widget build(BuildContext context) {
     s.componentCatalog.refreshIfStale();
     // Rebuilt by a value it shows, not by a knob step of a value only that knob shows (param_watch.dart).
-    return ParamWatch(target: t, page: true, also: Listenable.merge([s, s.componentCatalog]), builder: _build);
+    // A finger or button down on it lets its motion move with the song stopped (MotionClock).
+    return MotionTouch(child: ParamWatch(target: t, page: true, also: Listenable.merge([s, s.componentCatalog]),
+        builder: _build));
   }
 
   Widget _build(BuildContext context) {

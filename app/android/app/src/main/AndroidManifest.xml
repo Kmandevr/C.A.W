@@ -15,10 +15,17 @@
     <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
     <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" android:maxSdkVersion="30" />
+    <!-- Anonymous telemetry and feedback (HTTPS to the C.A.W-Telemetry relay). No plugin the app uses adds it, so
+         release builds need it here (debug and profile have their own for development). -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Backups keep projects and settings but never telemetry's state: it holds the delete keys for this device's
+         public reports and queued feedback with its email (res/xml/backup_rules.xml, data_extraction_rules.xml). -->
     <application
         android:label="C.A.W"
         android:name="${applicationName}"
-        android:icon="@mipmap/ic_launcher">
+        android:icon="@mipmap/ic_launcher"
+        android:fullBackupContent="@xml/backup_rules"
+        android:dataExtractionRules="@xml/data_extraction_rules">
         <activity
             android:name=".MainActivity"
             android:exported="true"

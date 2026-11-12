@@ -55,8 +55,8 @@ class CombPage extends StatelessWidget {
         height: 200,
         caption: flanger ? 'FLANGER ≈' : 'PHASER ≈',
         grid: false,
-        readout: Text(flanger ? '${formatParamValue(t.param('delay'), t.value('delay'))} ms'
-            : '${formatParamValue(t.param('center'), t.value('center'))} Hz'),
+        readout: Builder(builder: (context) => Text(flanger ? '${formatParamValue(t.param('delay'), t.value('delay'))} ms'
+            : '${formatParamValue(t.param('center'), t.value('center'))} Hz')),
         child: _CombHero(flanger: flanger),
       )),
       Row(children: [

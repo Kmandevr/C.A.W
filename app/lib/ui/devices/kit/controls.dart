@@ -13,6 +13,7 @@ import 'feel.dart';
 import 'grab_gesture.dart';
 import 'hero.dart';
 import 'key_param.dart';
+import 'param_watch.dart';
 
 /// Draws a small picture of choice [index] in [rect] (a mode's curve, a filter's shape, a waveform).
 typedef ChoiceIcon = void Function(Canvas canvas, Rect rect, int index, Color color);
@@ -29,8 +30,11 @@ class ModeTiles extends StatelessWidget {
   final double height;
   final int? perRow;
 
+  // Its own values rebuild it alone (param_watch.dart).
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => watchDevice(context, _body);
+
+  Widget _body(BuildContext context) {
     final scope = DeviceScope.of(context);
     final t = scope.target;
     final p = t.param(paramId);
@@ -122,8 +126,11 @@ class DeviceToggle extends StatelessWidget {
   final IconData? icon;
   final Color? color;
 
+  // Its own values rebuild it alone (param_watch.dart).
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => watchDevice(context, _body);
+
+  Widget _body(BuildContext context) {
     final scope = DeviceScope.of(context);
     final t = scope.target;
     final p = t.param(paramId);
@@ -180,8 +187,11 @@ class _XYPadState extends State<XYPad> {
   bool _active = false;
   double _x = 0, _y = 0;
 
+  // Its own values rebuild it alone (param_watch.dart).
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => watchDevice(context, _body);
+
+  Widget _body(BuildContext context) {
     final scope = DeviceScope.of(context);
     final t = scope.target;
     final px = t.param(widget.xParam), py = t.param(widget.yParam);
@@ -189,8 +199,8 @@ class _XYPadState extends State<XYPad> {
     final tx = taperOf(px), ty = taperOf(py);
     final c = widget.color ?? scope.accent;
     return HeroCanvas(color: c, height: widget.height, caption: widget.caption,
-      readout: Text('${shortParamLabel(px, px.id)} ${formatParamValue(px, t.value(px.id))} · '
-          '${shortParamLabel(py, py.id)} ${formatParamValue(py, t.value(py.id))}'),
+      readout: Builder(builder: (context) => Text('${shortParamLabel(px, px.id)} ${formatParamValue(px, t.value(px.id))} · '
+          '${shortParamLabel(py, py.id)} ${formatParamValue(py, t.value(py.id))}')),
       child: LayoutBuilder(builder: (context, box) {
         final w = box.maxWidth, h = box.maxHeight;
         final dot = Offset(tx.position(t.value(px.id)) * w, (1 - ty.position(t.value(py.id))) * h);

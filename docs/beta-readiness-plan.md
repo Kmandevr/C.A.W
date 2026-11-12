@@ -1,6 +1,6 @@
 ---
 title: Beta readiness plan
-summary: The owner's 2026-11-12 direction for engine speed A1-A7, a 240 fps UI, the stress test, the startup screen, telemetry and feedback, and the caw-telemetry contract (section H); planned, not built.
+summary: The owner's 2026-11-12 direction for engine speed A1-A7, a 240 fps UI, the stress test, the startup screen, telemetry and feedback, and the C.A.W-Telemetry contract (section H, with its 2026-11-12 updates); telemetry and feedback (E, F) are built, the rest planned.
 updated: 2026-11-12
 ---
 
@@ -270,3 +270,28 @@ The email is never published; the server keeps it privately for the owner.
 ---
 
 **Done when:** A1–A6 are merged with numbers and A7 is written up and asked; B–G are merged after the owner approves each look; all tests are green; docs are updated; and the owner has a before/after table of results. Ask the owner for a release APK check on the S22+ and a Windows check at the end.
+
+## Updates to section H (2026-11-12, owner)
+
+**[Fact]** Agreed with the owner on 2026-11-12 and passed on by the owner's other session, which runs the relay. The verbatim prompt above is unchanged; where it differs, these win. The other copy of the contract is `PLAN.md` in Kmandevr/C.A.W-Telemetry.
+
+- **Repository:** the data repository is **Kmandevr/C.A.W-Telemetry** (not `caw-telemetry`). Reports appear at `data/<first 2 hex of receipt>/<receipt>.json` on its `main` branch; the Privacy Policy and Terms are its `PRIVACY.md` and `TERMS.md`.
+- **Relay and key:** `https://caw-telemetry.kmandevr.workers.dev`, app key `caw-beta-1` (not a secret), the `--dart-define` defaults CI passes. Release builds still send only when the user turns telemetry on. `GET /` is a health check that needs no key.
+- **Feedback** becomes Issues in Kmandevr/C.A.W-Telemetry, not C.A.W; the app shows the issue URL the relay returns.
+- **`errors[].where`** is a relative C.A.W source location: it starts with `lib/`, `src/`, `engine/`, `app/`, `platform/`, `include/` or `package:caw/` and ends with `:<line>`. Absolute paths get a 400, so the app makes frames relative on the device and drops any it can't.
+- **Rules the relay enforces:** `deleteHash` is SHA-256 of the delete key's 32 raw bytes, lowercase hex; `cpuLoadHistogram` is exactly 10 numbers from 0 to 1; `osVersion` is digits only; `audio.backend` is `a-z`, `0-9` and `_` only; a receipt is good for one POST (a second gets a 400), so each report gets a fresh one and a 400 on a resend counts as sent.
+- **Publishing and limits:** publishing is hourly (a lookup moves from 202 to 200 within about an hour). Per sender per UTC day: 10 reports, 5 feedback posts, 200 lookups. The app sends one daily report a day; stress-test results take the other slots ([decisions](decisions.md), 2026-11-12).
+- **`app.build` (owner, 2026-11-12):** reports may carry `app.build` and feedback a top-level `build`: optional, 7–12 lowercase hex characters, the short commit the build came from. `app.version`, `engineVersion` and `capiVersion` stay required, and `app.version` is the real version from pubspec.
+- **PLAN.md's stricter rules are H's too (owner, 2026-11-12):** `maxClockMHz` at most 4 values; `frames.slowPct`, the stress scenario percentages and `topCosts[].pct` whole numbers; `topCosts` at most 10.
+- **Reports:** one daily report plus one per Benchmark (stress test) run, at most 10 a day, each with an optional top-level `"kind": "daily" | "stress"` (default daily; a stress report carries `stress`).
+- **Unknowns are `null` or left out, never 0:** every measurement (core counts, clocks, RAM, refresh rate, buffer size, sample rate, `exclusive`/`lowLatency`, every `perf` number, `cpuLoadHistogram`), `osVersion`, `cpu` and `gpu`.
+- **Delete:** `/v1/delete` accepts any receipt and key; unknown or already-deleted receipts aren't counted.
+- **Keys:** `caw-release-1` for release-channel builds beside `caw-beta-1`.
+- **Device and peripherals (all optional):** `platform` also `ios` and `macos`; `arch` (arm64, arm, x64, x86, riscv64, other); `osName`; `osVersion` as major or major.minor[.build]; `manufacturer` and `model`, maker-defined only; `formFactor` (phone, tablet, laptop, desktop, tv, other, unknown); `screen` `{widthPx, heightPx, dpi?, displays?}`; `audio.output` (builtin, usb, bluetooth, wired, hdmi, displayport, network, other, unknown); `peripherals`, up to 16 `{kind, connection, model?, vendorId?, productId?, channels?, inUse?}`. Never a name the user can set, a serial number, a hardware address, a port path or a full OS build string.
+- **What the app actually sends of these (security review, 2026-11-12):** no `peripherals[].model` and no `inUse`; at most 8 peripherals, sorted by kind; `screen` without `dpi`, pixels to the nearest 10. `model` only from the platform's maker data.
+- **Dashboard:** `https://caw-telemetry.kmandevr.workers.dev/dashboard` shows everything collected; the data is kept 400 days on the relay (PRIVACY.md).
+- **Differences between PLAN.md (fetched 2026-11-12) and section H, for the owner:**
+  - PLAN.md's `screens` accept any id of `a-z 0-9 _ . -`; the app sends only its three section ids.
+  - PLAN.md now lists the same ten Benchmark scenario ids as the app; any other, such as the bench's `tail`, arrives as "other". The relay counts Benchmark results from daily reports too, so the fallback onto the next daily report stays.
+  - PRIVACY.md calls it the **Stress test**; the app's UI says **Benchmark**.
+

@@ -121,6 +121,7 @@ void main() {
       expect(s.redo(), isTrue);
       expect(s.project.bpm, 150);
       expect(s.redo(), isFalse);
+      await s.flush(); // the saves the undos queued land before tearDown deletes the folder
     });
   });
   testWidgets('undoing typed pattern text shows the old text in the editor, and the next keystroke keeps the undo', (tester) async {

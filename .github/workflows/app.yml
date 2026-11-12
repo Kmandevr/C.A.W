@@ -60,6 +60,14 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 env:
+  # Telemetry (docs/app.md "Privacy, telemetry and feedback"; beta readiness plan E1, G1): the build channel (beta: on
+  # by default; release: off until the user turns it on) and the relay. None of these is a secret: the URL and the
+  # app key ship in the app. Repository variables of the same names override them. Each build also gets CAW_BUILD,
+  # the first 12 characters of the commit it was built from (reports' app.build).
+  # The channel is beta here; the "Telemetry channel" step switches a published final release to release.
+  CAW_CHANNEL: ${{ vars.CAW_CHANNEL || 'beta' }}
+  CAW_RELAY_URL: ${{ vars.CAW_RELAY_URL || 'https://caw-telemetry.kmandevr.workers.dev' }}
+  CAW_APP_KEY: ${{ vars.CAW_APP_KEY || 'caw-beta-1' }}
   FLUTTER_VERSION: 3.47.7
   FLUTTER_SHA_LINUX: af7455f540df951184c7953fbe3cf884766e7541dacf8571f9f582db03dd6230
   FLUTTER_SHA_WINDOWS: c2c875da25a1a1448d18ee4e8f398b2f6fce888b4775d8f9130538e16d826cb4
@@ -257,6 +265,21 @@ jobs:
         if: steps.package-cache.outputs.cache-hit != 'true' && steps.llvm-cache.outputs.cache-hit != 'true'
         run: |
           echo "::warning::This APK has no C++ compiler yet: the Compiler workflow has not cached its LLVM build. Re-run this job when it has."
+      - name: Telemetry channel
+        # Release channel only for a final version published as a GitHub Release (a tag push, or Run workflow with
+        # "release"); a pre-release version such as 1.0.0-beta.1 is a beta build, as are plain Main and dispatch builds.
+        shell: bash
+        env:
+          PUBLISHING: ${{ startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.release) }}
+          KEY_VAR: ${{ vars.CAW_APP_KEY }}
+        run: |
+          version=$(sed -n 's/^version: *\([^+]*\).*/\1/p' app/pubspec.yaml)
+          channel=$CAW_CHANNEL
+          [[ "$PUBLISHING" == true && "$version" != *-* ]] && channel=release
+          echo "CAW_CHANNEL=$channel" >> "$GITHUB_ENV"
+          # Each channel's app key (owner, 2026-11-12), unless a repository variable names one.
+          if [[ "$channel" == release && -z "$KEY_VAR" ]]; then echo "CAW_APP_KEY=caw-release-1" >> "$GITHUB_ENV"; fi
+          echo "Telemetry channel for $version: $channel"
       - name: Build
         working-directory: app
         env:
@@ -270,7 +293,9 @@ jobs:
           # --split-debug-info keeps the Dart stack-trace tables out of the APK (libapp.so 10.2 -> 8.8 MB, docs/
           # performance.md); a reported trace is decoded with `flutter symbolize -d app.android-arm64.symbols`.
           # No --obfuscate: it saves only 0.13 MB more and would garble type names in the app's own error texts.
-          flutter build apk --release --target-platform android-arm64 --split-debug-info=build/symbols
+          flutter build apk --release --target-platform android-arm64 --split-debug-info=build/symbols \
+            --dart-define=CAW_CHANNEL="$CAW_CHANNEL" --dart-define=CAW_RELAY_URL="$CAW_RELAY_URL" \
+            --dart-define=CAW_APP_KEY="$CAW_APP_KEY" --dart-define=CAW_BUILD="${GITHUB_SHA::12}"
           ccache --show-stats || true
           mv build/app/outputs/flutter-apk/app-release.apk "$GITHUB_WORKSPACE/caw-android.apk"
           (cd build/symbols && zip -q "$GITHUB_WORKSPACE/caw-android-symbols.zip" ./*.symbols)
@@ -314,11 +339,28 @@ jobs:
           path: ~\AppData\Local\Pub\Cache
           key: pub-windows-${{ hashFiles('app/pubspec.lock') }}
           restore-keys: pub-windows-
+      - name: Telemetry channel
+        # Release channel only for a final version published as a GitHub Release (a tag push, or Run workflow with
+        # "release"); a pre-release version such as 1.0.0-beta.1 is a beta build, as are plain Main and dispatch builds.
+        shell: bash
+        env:
+          PUBLISHING: ${{ startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.release) }}
+          KEY_VAR: ${{ vars.CAW_APP_KEY }}
+        run: |
+          version=$(sed -n 's/^version: *\([^+]*\).*/\1/p' app/pubspec.yaml)
+          channel=$CAW_CHANNEL
+          [[ "$PUBLISHING" == true && "$version" != *-* ]] && channel=release
+          echo "CAW_CHANNEL=$channel" >> "$GITHUB_ENV"
+          # Each channel's app key (owner, 2026-11-12), unless a repository variable names one.
+          if [[ "$channel" == release && -z "$KEY_VAR" ]]; then echo "CAW_APP_KEY=caw-release-1" >> "$GITHUB_ENV"; fi
+          echo "Telemetry channel for $version: $channel"
       - name: Build
         working-directory: app
         run: |
           flutter --disable-analytics
-          flutter build windows --release
+          flutter build windows --release --dart-define=CAW_CHANNEL="$env:CAW_CHANNEL" `
+            --dart-define=CAW_RELAY_URL="$env:CAW_RELAY_URL" --dart-define=CAW_APP_KEY="$env:CAW_APP_KEY" `
+            --dart-define=CAW_BUILD="$($env:GITHUB_SHA.Substring(0, 12))"
       - uses: actions/upload-artifact@v7
         with:
           name: caw-windows

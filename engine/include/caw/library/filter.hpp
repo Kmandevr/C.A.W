@@ -73,7 +73,9 @@ public:
     double lowpass(double x) noexcept { return process(x).low; }
     // The low-pass of a stereo pair whose right side was set like this one (setLike): both sides in one loop,
     // laid out side by side so the compiler runs them as one two-wide vector (each side's arithmetic is
-    // lowpass()'s, so the bits are the same).
+    // lowpass()'s: the same bits built strict, as CAW::SDK builds; under -ffp-contract=fast -fassociative-math the
+    // vector and scalar paths may be fused differently, about 1 ulp, so the same within the tolerance tests and
+    // bit-identical on the builds checked).
     void lowpassPair(Svf& right, float* l, float* r, uint32_t frames) noexcept {
 #if defined(__GNUC__)  // GCC and Clang (the Android, Linux and Windows-Clang builds): a two-wide vector, SSE2 or NEON
         typedef double Pair __attribute__((vector_size(16)));
@@ -97,8 +99,9 @@ public:
     }
     // K pairs' low-passes in one loop: pair k is left[k] through *f[2k] and right[k] through *f[2k + 1], each with
     // its own coefficients (so a pair can be two mono voices). The chains are independent, so a CPU overlaps them
-    // (several voices side by side, speed A2, 2026-11-12). The same bits as lowpass() on each filter's samples
-    // (and as K lowpassPair() calls on pairs set alike); the buffers must not overlap.
+    // (several voices side by side, speed A2, 2026-11-12). Each filter's arithmetic is lowpass()'s (and K
+    // lowpassPair() calls' on pairs set alike): the same bits built strict, within about 1e-12 relative under the
+    // engine's fast flags (bit-identical on the builds checked); the buffers must not overlap.
     template <int K>
     static void lowpassPairs(Svf* const* f, float* const* left, float* const* right, uint32_t frames) noexcept {
 #if defined(__GNUC__)
@@ -321,10 +324,11 @@ public:
     }
     // A stereo pair's blocks, `left` through this filter and `right` through `other`, in one loop: the two
     // feedback chains are independent, so a CPU overlaps them (a ladder sample is a long chain of dependent
-    // operations, and running the sides one after the other leaves it waiting). The same bits as two process()
-    // calls.
-    // With GCC or Clang the pair runs as two-wide double vectors (SSE2 or NEON; each lane's arithmetic is step()'s,
-    // so the bits are the same; 2026-11-11 performance pass).
+    // operations, and running the sides one after the other leaves it waiting). Each side's arithmetic is two
+    // process() calls'.
+    // With GCC or Clang the pair runs as two-wide double vectors (SSE2 or NEON; each lane's arithmetic is step()'s;
+    // 2026-11-11 performance pass): the same bits built strict, within about 1e-12 relative under the engine's
+    // fast flags, which may fuse the two paths differently (bit-identical on the builds checked).
     template <LadderMode Mode>
     void processPair(MultiLadder& other, float* left, float* right, uint32_t frames) noexcept {
         MultiLadder* f[2] = {this, &other};
@@ -333,7 +337,8 @@ public:
     // K pairs' blocks in one loop: pair k is left[k] through *f[2k] and right[k] through *f[2k + 1] (each filter
     // with its own constants, so a pair can be one stereo voice's two sides or two mono voices). K independent
     // feedback chains overlap where one alone leaves the CPU waiting (several voices side by side, speed A2,
-    // 2026-11-12). The same bits as K processPair() calls; the buffers must not overlap.
+    // 2026-11-12). Each filter's arithmetic is K processPair() calls' (the same bits built strict, within about
+    // 1e-12 relative under the engine's fast flags); the buffers must not overlap.
     template <LadderMode Mode, int K>
     static void processPairs(MultiLadder* const* f, float* const* left, float* const* right, uint32_t frames) noexcept {
 #if defined(__GNUC__)

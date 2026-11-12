@@ -321,6 +321,7 @@ void main() {
       final gone = s.deleteAssets(s.sampleAssets);
       await s.finishAssetDeletion(gone);
       expect(pack.existsSync(), isFalse);
+      await s.userPresets.flush(); // the restored preset's save, before the folder goes
     });
   });
 

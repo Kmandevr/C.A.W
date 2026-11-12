@@ -283,7 +283,7 @@ class RotaryPage extends StatelessWidget {
     final speed = t.value('speed').round();
     return effectPage('rotary', [
       HeroWithMeters(height: 200, gr: false, hero: liveHero(context: context, caption: 'ROTARY', height: 200,
-        readout: Text(const ['CHORALE', 'TREMOLO', 'BRAKE'][speed.clamp(0, 2)]),
+        readout: Builder(builder: (context) => Text(const ['CHORALE', 'TREMOLO', 'BRAKE'][speed.clamp(0, 2)])),
         builder: (context, secs, v) => GestureDetector(
           key: const ValueKey('rotary-hero'),
           behavior: HitTestBehavior.opaque,

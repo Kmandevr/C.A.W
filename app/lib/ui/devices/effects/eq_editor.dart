@@ -15,6 +15,7 @@ import '../kit/device_style.dart';
 import '../kit/feel.dart';
 import '../kit/grab_gesture.dart';
 import '../kit/hero.dart';
+import '../kit/param_watch.dart';
 import '../visuals/filter_curve.dart' show freqToX, xToFreq;
 import 'effect_page.dart';
 import '../../pointer_input.dart';
@@ -140,7 +141,9 @@ class _EqEditorPageState extends State<EqEditorPage> {
     }
 
     final colors = spectrumColors();
-    final bands = [
+    // The bands' values, read where they are drawn: the hero, the band strip and the readout each have their own
+    // watch (param_watch.dart), so a knob step rebuilds them and the knob, not the page.
+    List<_Band> bandsNow() => [
       for (final n in numbers)
         _Band(
           n,
@@ -152,8 +155,10 @@ class _EqEditorPageState extends State<EqEditorPage> {
           colors[(n - 1) % colors.length]),
     ];
     final range = math.min(24.0, t.param(id(numbers.first, 'gain'))?.max ?? 18);
-    final selBand = bands.firstWhere((b) => b.n == sel);
-    final free = bands.where((b) => !b.on).firstOrNull;
+    final selColor = colors[(sel - 1) % colors.length];
+    final selOn = isOn(sel);
+    final free = numbers.where((n) => !isOn(n)).firstOrNull;
+    final freeColor = free == null ? null : colors[(free - 1) % colors.length];
     final typeP = t.param(id(sel, 'type'));
     return effectPage('eq', [
       LayoutBuilder(builder: (context, box) => HeroCanvas(
@@ -162,39 +167,46 @@ class _EqEditorPageState extends State<EqEditorPage> {
         caption: 'EQ',
         readout: const LevelReadout(),
         grid: false,
-        child: DeviceDisplay(builder: (context, f) => _EqView(
-          bands: bands, prefix: prefix, selected: sel, rangeDb: range, spectrum: f?.spectrum,
-          adding: _adding && free != null ? free : null,
-          onAdded: () => setState(() => _adding = false),
-          onSelect: (n) => setState(() => _selected = n))),
+        child: watchDevice(context, (context) {
+          final bands = bandsNow();
+          final adding = _adding && free != null ? bands.firstWhere((b) => b.n == free) : null;
+          return DeviceDisplay(builder: (context, f) => _EqView(
+            bands: bands, prefix: prefix, selected: sel, rangeDb: range, spectrum: f?.spectrum,
+            adding: adding,
+            onAdded: () => setState(() => _adding = false),
+            onSelect: (n) => setState(() => _selected = n)));
+        }),
       )),
       if (_adding && free != null) Padding(padding: const EdgeInsets.only(top: 6), child: Text(
-        '${PointerInput.tapCap} the curve where band ${free.n} goes', key: const ValueKey('eq-add-hint'), textAlign: TextAlign.center,
-        style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: free.color))),
+        '${PointerInput.tapCap} the curve where band $free goes', key: const ValueKey('eq-add-hint'), textAlign: TextAlign.center,
+        style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: freeColor))),
       const SizedBox(height: 6),
       // The band strip: a tap selects a band (its controls below); "+" adds one where you next tap the curve.
-      SizedBox(height: 52, child: Row(children: [
-        for (final b in bands) Expanded(child: Padding(padding: const EdgeInsets.symmetric(horizontal: 2), child: _BandChip(
+      SizedBox(height: 52, child: watchDevice(context, (context) => Row(children: [
+        for (final b in bandsNow()) Expanded(child: Padding(padding: const EdgeInsets.symmetric(horizontal: 2), child: _BandChip(
           band: b, selected: b.n == sel,
           onTap: () => setState(() => _selected = b.n)))),
         Padding(padding: const EdgeInsets.only(left: 2), child: _AddChip(
-          active: _adding, enabled: free != null, color: free?.color ?? Neon.dim,
+          active: _adding, enabled: free != null, color: freeColor ?? Neon.dim,
           onTap: () => setState(() => _adding = !_adding))),
-      ])),
+      ]))),
       const SizedBox(height: 8),
-      _BandReadout(band: selBand, type: typeP == null ? '' : formatParamValue(typeP, t.value(typeP.id))),
-      ControlGroup(
+      watchDevice(context, (context) => _BandReadout(band: bandsNow().firstWhere((b) => b.n == sel),
+          type: typeP == null ? '' : formatParamValue(typeP, t.value(typeP.id)))),
+      watchDevice(context, (context) {
+        final shape = shapeOf(id(sel, 'type'));
+        return ControlGroup(
         title: 'BAND $sel',
-        color: selBand.color,
-        trailing: _BandPower(on: selBand.on, color: selBand.color, n: sel, onTap: () => t.set(id(sel, 'on'), selBand.on ? 0 : 1)),
+        color: selColor,
+        trailing: _BandPower(on: selOn, color: selColor, n: sel, onTap: () => t.set(id(sel, 'on'), selOn ? 0 : 1)),
         child: LayoutBuilder(builder: (context, box) {
-          final types = _TypeGrid(paramId: id(sel, 'type'), color: selBand.color);
+          final types = _TypeGrid(paramId: id(sel, 'type'), color: selColor);
           final knobs = Column(crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: [
-            KnobRow([id(sel, 'freq'), if (eqHasGain(selBand.shape)) id(sel, 'gain'), id(sel, 'q')], size: 54, color: selBand.color,
+            KnobRow([id(sel, 'freq'), if (eqHasGain(shape)) id(sel, 'gain'), id(sel, 'q')], size: 54, color: selColor,
               labels: {id(sel, 'freq'): 'Frequency', id(sel, 'gain'): 'Gain', id(sel, 'q'): 'Width (Q)'}),
             Row(children: [
               const SizedBox(width: 64, child: Text('CHANNEL', style: TextStyle(fontSize: 9, letterSpacing: 1.2, fontWeight: FontWeight.w800, color: Neon.dim))),
-              Expanded(child: Align(alignment: Alignment.centerLeft, child: DeviceChoice(id(sel, 'channel'), color: selBand.color))),
+              Expanded(child: Align(alignment: Alignment.centerLeft, child: DeviceChoice(id(sel, 'channel'), color: selColor))),
             ]),
           ]);
           if (box.maxWidth < 700) {
@@ -206,7 +218,8 @@ class _EqEditorPageState extends State<EqEditorPage> {
             Expanded(flex: 4, child: knobs),
           ]);
         }),
-      ),
+      );
+      }),
       ControlGroup(title: 'OUTPUT', color: scope.accent, child: ParamGrid(skip: {
         for (final p in params) if (_bandId.hasMatch(p.id)) p.id,
       })),

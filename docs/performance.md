@@ -338,21 +338,25 @@ Beta readiness plan B3–B5 (owner, 2026-11-12, [beta readiness plan](beta-readi
 | Arranger playing, 120 frames | 117 frames, 236 builds, 642 painted; raster 4.0–4.6 ms | the same (the playhead's live island); raster 4.5 ms |
 | Arranger sideways scroll, 30 frames | 840 painted | 390 painted (waveforms in their own layers) |
 | Arranger pinch zoom, 30 frames | 87,390 builds, 90,150 painted, 125–298 ms a frame | 5,856 builds, 7,259 painted (two rebases), 35–52 ms a frame; the release lays out once: 2,914 builds |
-| Ping-pong delay editor stopped, one second | 30 frames, 990 painted (33 a motion frame) | 120 frames, 240 painted (2 a frame: motion on every frame in its own layer) |
-| Phaser editor stopped | 30 frames, 990 painted | 120 frames, 240 painted |
-| Flagship editor stopped or playing | 30 frames, 8,040 painted (268 a frame: a modulated knob's ring laid out its whole card) | 120 frames, 240 painted (2 a frame) |
+| Ping-pong delay editor stopped, one second | 30 frames, 990 painted (33 a motion frame) | 0 frames once idle (the battery rule); with a finger held on it 119 frames, 238 painted (2 a frame: motion on every frame in its own layer) |
+| Phaser editor stopped | 30 frames, 990 painted | 0 frames once idle; a finger held: 119 frames, 238 painted |
+| Flagship editor stopped | 30 frames, 8,040 painted (268 a frame: a modulated knob's ring laid out its whole card) | 0 frames once idle; a finger held: 119 frames, 238 painted |
+| Ping-pong / phaser / Flagship editor playing | 30 frames | 120 / 120 / 119 frames, 1,410 / 1,380 / 238 painted |
+| EQ / compressor editor stopped | 0 frames | 0 frames, a finger held too (no motion) |
 | EQ / compressor editor playing | 30 frames, 750 / 450 painted | the same |
-| Flagship, 20 steps of its first parameter | 30,028 builds, 16,509 painted | 13,787 builds, 11,732 painted (its cards rebuild on their own values) |
-| EQ, 20 steps of its first parameter | 10,490 builds | 10,670 builds (the page shows it; the watches add a few elements) |
-| First knob, 20 steps: EQ `b1_freq`, compressor `threshold`, ping-pong `feedback`, phaser `rate`, Flagship `osc1_frame` | 10,260; 7,140; 6,560; 8,460; 30,020 builds | 10,420; 7,400; 6,720; 8,760; 31,180 builds (each is drawn by its editor's hero too, which is built in the page) |
+| Flagship, 20 steps of its first parameter | 30,028 builds, 16,509 painted | 14,627 builds, 11,694 painted (its cards rebuild on their own values) |
+| EQ, 20 steps of its first parameter (`b1_on`: the page shows it) | 10,490 builds | 11,290 builds |
+| Ping-pong `sync`, phaser `stages`, compressor `threshold`, 20 steps (first parameter) | 6,560; 8,460; 7,140 builds | 7,208 (the page picks its knobs by it); 1,860; 1,080 builds |
+| First knob, 20 steps: EQ `b1_freq`, compressor `threshold`, ping-pong `feedback`, phaser `rate`, Flagship `osc1_frame` | 10,260; 7,140; 6,560; 8,460; 30,020 builds | 3,400; 1,080; 1,560; 1,100; 1,120 builds (the knob and the hero; at `bde0faa`, with only the controls watched: 10,420; 7,400; 6,720; 8,760; 31,180) |
+| A knob step, every built-in (`perf_knobs_bench_test.dart`: widgets rebuilt per live step of each of its first six knobs, motion off, the most of any knob) | at `bde0faa`: 211–654 for effects (median 364 a step over all), drums 1,147, Flagship 1,570, racks 577–981 | 45–74 for most, bitcrush 100, ducker 114 (its curve's handles), EQ 173 (the curve, band strip, readout and band controls), drums 68, Flagship 56 (median 52); racks 603–1,013 (a rack's parameters choose its children, so its page rebuilds) |
 | Device editors' raster, playing | 9.4–15 ms | 10–13 ms (the same picture) |
 
 - **What changed** (details in [app](app.md), Frame rate):
-  - Device motion is a Ticker while shown (`MotionClock`) inside its own repaint boundary and build scope (`DevicePhase`, the knob's face as a `LiveIsland`): a motion frame repaints 2 render objects instead of the card or page around it. It runs every frame while shown, so an open editor with motion asks for every frame (120 at 120 Hz, was 30); reduced or no motion, Minimal, the background and covered routes stop it.
+  - Device motion is a Ticker (`MotionClock`) inside its own repaint boundary and build scope (`DevicePhase`, the knob's face as a `LiveIsland`): a motion frame repaints 2 render objects instead of the card or page around it. It asks for every frame (120 at 120 Hz, was 30) only while something moves: the engine sounds (`AppState.sounding`) or a finger is down on the editor (`MotionTouch`); stopped, silent and untouched the engine runs no modulator (`Engine::process`), so the clock holds its time and asks for none, and Auto's idle drop comes (the battery rule, 2026-11-12). Reduced or no motion, Minimal, the background and covered routes stop it.
   - Device display reads ride the shared meter tick instead of their own 33 ms timers, so they stop when the poller does.
   - Waveforms: cached 512 px tiles of one `drawRawPoints` batch each per clip, zoom and size (was a `drawLine` per pixel across the whole clip on every repaint), repainted only for their own file's peaks; track cards' playhead is a live island over its own layer.
   - `AppState._syncNow` notifies only on a real change; scopes read and redraw only on a new tick, as live islands; automation curves are cached in their own layer under a small live painter.
-  - Device painters compare their inputs; controls, the preset chip and Flagship's cards rebuild on their own values (`ParamWatch`). Editors whose hero is built in the page (most) still rebuild the page for the values the hero draws: moving each hero into its own watch is per-editor work, not done.
+  - Device painters compare their inputs; controls, the preset chip, Flagship's cards and every editor's hero rebuild on their own values (`ParamWatch`): `HeroCanvas` watches its visual and its readout, a watch also counts what its subtree reads in layout and paint (a `LayoutBuilder`, a painter) and what a widget rebuilt on its own reads (found by its `DeviceScope` lookup), and editors read the values their hero draws inside it, not in the page. A knob step rebuilds the knob and the hero.
   - The meter poll reads all tracks in one C API call (API 25) into a kept native buffer.
   - The pinch transforms the laid-out lanes and lays out at its end (or past 0.6×/1.6×), landing exactly where a layout per move would (`arrange_test`, "a pinch scales the lanes").
 - **Not measured here:** frame times on the S22+ and Windows in a release build (the plan's B5 asks the owner to check them and record them here).

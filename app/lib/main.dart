@@ -11,6 +11,7 @@ import 'model/automation_writer.dart';
 import 'model/live_midi.dart';
 import 'model/problem_log.dart';
 import 'model/settings.dart';
+import 'model/telemetry/app_telemetry.dart';
 import 'platform/desktop_window.dart';
 import 'platform/display_rate.dart';
 import 'platform/haptics_device.dart';
@@ -25,6 +26,7 @@ import 'ui/shell.dart';
 import 'ui/theme.dart';
 
 Future<void> main() async {
+  final startup = Stopwatch()..start(); // the telemetry report's startup time (to the first project open)
   WidgetsFlutterBinding.ensureInitialized();
   // Open beta: errors are kept (on the device only) for "Report a problem", then handled as before.
   final flutterError = FlutterError.onError;
@@ -57,6 +59,10 @@ Future<void> main() async {
   AudioRecorder.current = AudioRecorder(state, permission: platformMicPermission())
     ..follow(midi, () => midi.recording)
     ..load();
+
+  // Anonymous telemetry and feedback (docs/app.md "Privacy, telemetry and feedback"); its first-run page shows over
+  // the shell once it has loaded.
+  unawaited(startAppTelemetry(state, startup: startup));
 
   runApp(CawApp(state: state));
   state.init();

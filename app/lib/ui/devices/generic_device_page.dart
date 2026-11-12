@@ -300,7 +300,7 @@ class _UiCurveState extends State<UiCurve> {
     final c = scope.accent;
     final label = widget.control.label.isNotEmpty ? widget.control.label : p.label;
     return HeroCanvas(color: c, height: widget.height, caption: label,
-      readout: Text(formatParamValue(p, t.value(p.id))),
+      readout: Builder(builder: (context) => Text(formatParamValue(p, t.value(p.id)))),
       child: LayoutBuilder(builder: (context, box) => GrabGesture(
         key: ValueKey('curve-${p.id}'),
         onStart: (_, _) {

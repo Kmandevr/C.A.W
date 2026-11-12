@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 
 import '../../../model/flagship_shapes.dart';
 import '../../arrange/knob.dart' show Taper;
-import '../kit/hero.dart' show MotionClock, motionRuns;
+import '../kit/hero.dart' show MotionClock, deviceSounding, motionRuns;
 import '../../theme.dart';
 import '../device_scope.dart';
 import 'grab.dart';
@@ -32,7 +32,7 @@ class _LfoViewState extends State<LfoView> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    _motion.run(motionRuns(context));
+    _motion.run(motionRuns(context), sounding: deviceSounding(context));
   }
 
   @override
