@@ -111,7 +111,7 @@ The owner's requirement (2026-11-12, [decisions](decisions.md)): the same projec
 
 - **Exact:** note, clip and automation timing to the sample, every seeded random choice and discrete behaviour (triggers, step choices).
 - **Randomness is seeded, never live:** a note's chance and the built-ins' noise come from the project seed and counter-based hashes, so jumping to any position gives the same result.
-- **Floats may differ in the last bits:** tolerance tests against reference renders (a null residual below −120 dBFS on stable paths; loudness and per-band spectrum on chaotic ones) replace bit-exact golden hashes, so faster maths (flush-to-zero, FMA, approximations, float paths, parallel mixing in a fixed order) is allowed where they pass. **[Fact, 2026-11-12]** The engine still builds with strict IEEE flags and its own `caw/detmath.hpp` maths until the speed phases change them; `CAW::SDK` passes the same flags to components.
+- **Floats may differ in the last bits:** tolerance tests against reference renders (a null residual below −120 dBFS on stable paths; loudness and per-band spectrum on chaotic ones) replace bit-exact golden hashes (**[Fact, 2026-11-12]** built: `engine/tests/tolerance.h`, references in `engine/tests/references/`; FMA and fast-math test builds pass them all), so faster maths (flush-to-zero, FMA, approximations, float paths, parallel mixing in a fixed order) is allowed where they pass. **[Fact, 2026-11-12]** The engine still builds with strict IEEE flags and its own `caw/detmath.hpp` maths until the speed phases change them; `CAW::SDK` passes the same flags to components.
 
 ### Instruments, wavetables and samples — current status and remaining design
 
