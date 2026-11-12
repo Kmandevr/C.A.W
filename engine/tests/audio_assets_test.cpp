@@ -22,6 +22,7 @@
 #include "project.h"
 #include "render_stems.h"
 #include "test.h"
+#include "tolerance.h"
 #include "time_stretch.h"
 #include "utf8_path.h"
 #include "wav.h"
@@ -1164,14 +1165,13 @@ TEST(latency_ping_finds_a_simulated_loopback) {
     CHECK_EQ(e.liveAudio().latency(), int64_t{733});
 }
 
-// ---------------------------------------------------------------- golden
+// ---------------------------------------------------------------- reference render
 
-TEST(audio_clips_and_the_sampler_match_their_golden_render) {
+TEST(audio_clips_and_the_sampler_match_their_reference_render) {
     // Every clip mode (direct with fades, musical WSOLA with pitch and a loop, reversed varispeed) and the sampler
-    // (a looped zone, a filter, a chord) through the master, 1.5 s in 64-frame blocks. Change the hash only for an
-    // intended sound change (the failure prints the new one).
-    constexpr uint64_t kGolden = 0x6dde60ef58cef603ull;  // recorded 2026-11-11, GCC 13
-    const std::string dir = tempDir("golden");
+    // (a looped zone, a filter, a chord) through the master, 1.5 s in 64-frame blocks, against
+    // references/audio_assets.cawref (stable). Re-record only for an intended sound change.
+    const std::string dir = tempDir("reference");
     const std::string p = writeWav(dir + "/n.wav", 44100, 2, 44100, [](int64_t i, int c) {
         return static_cast<float>(0.4 * std::sin(2 * 3.14159265358979 * (220.0 + 110 * c) * i / 44100.0) + 0.2 * noiseAt(i, c));
     }, false);
@@ -1190,25 +1190,19 @@ TEST(audio_clips_and_the_sampler_match_their_golden_render) {
     Engine e(48000);
     CHECK(e.setProjectJson(json).find("\"ok\":true") != std::string::npos);
     e.play();
-    uint64_t h = 1469598103934665603ull;
     float l[64], r[64], peak = 0;
+    cawtest::Audio audio;
     for (int k = 0; k < 48000 * 3 / 2 / 64; ++k) {
         e.process(l, r, 64);
+        audio.l.insert(audio.l.end(), l, l + 64);
+        audio.r.insert(audio.r.end(), r, r + 64);
         for (int i = 0; i < 64; ++i) {
             peak = std::max(peak, std::fabs(l[i]));
-            for (float v : {l[i], r[i]}) {
-                uint32_t bits;
-                std::memcpy(&bits, &v, 4);
-                h = (h ^ bits) * 1099511628211ull;
-            }
         }
     }
     CHECK(peak > 0.05f);
-    if (h != kGolden) {
-        char buf[64];
-        std::snprintf(buf, sizeof buf, "golden 0x%016llxull", static_cast<unsigned long long>(h));
-        cawtest::fail(__FILE__, __LINE__, buf);
-    }
+    cawtest::References refs("audio_assets");
+    CHECK_REFERENCE(refs, "clips and sampler", audio, cawtest::Class::Stable);
     std::filesystem::remove_all(utf8Path(dir));
 }
 
