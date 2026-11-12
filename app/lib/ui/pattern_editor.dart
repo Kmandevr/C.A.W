@@ -41,6 +41,7 @@ import 'adaptive_sheet.dart';
 import 'follow_gate.dart';
 import 'frame/frame_widgets.dart' show ScrollFade;
 import 'haptics.dart';
+import 'live_playhead.dart';
 import 'feedback.dart';
 import 'view_glide.dart';
 
@@ -369,11 +370,11 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
 
   /// Where the song's playhead is in the roll's time, while it plays this pattern; null otherwise. Opened for a clip,
   /// that clip's repeats run on along the roll as it draws them; in Build, the first clip of the pattern under the
-  /// playhead, wrapped to its loop.
-  double? _playStep() {
+  /// playhead, wrapped to its loop. [smooth]: between reads too ([AppState.smoothPlayheadStep]), for drawing.
+  double? _playStep({bool smooth = false}) {
     final d = _doc;
     if (d == null || !s.meters.playing) return null;
-    final ph = s.playheadStep;
+    final ph = smooth ? s.smoothPlayheadStep : s.playheadStep;
     final own = widget.clip;
     if (own != null && widget.layer != null) {
       if (ph < own.startSteps || ph >= own.startSteps + own.lengthSteps) return null;
@@ -391,13 +392,21 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
     return null;
   }
 
+  /// True while Smooth follow scrolls the roll on each read: the playhead is then drawn at the read too, so it holds
+  /// still a third in rather than running ahead between the view's steps.
+  bool _scrollFollows = false;
+
   void _followPlayhead() {
     if (!mounted) return;
     if (_selSeen != null && !identical(_sel, _selSeen)) _follow.touch();
     _selSeen = _sel;
     final at = _playStep();
-    if (!_follow.allows(playing: s.meters.playing) || at == null || _pointers.isNotEmpty || _gridW <= 0) return;
+    if (!_follow.allows(playing: s.meters.playing) || at == null || _pointers.isNotEmpty || _gridW <= 0) {
+      _scrollFollows = false;
+      return;
+    }
     final x = at * _pxPerStep;
+    _scrollFollows = s.settings.followSmooth;
     if (s.settings.followSmooth) {
       _glide.stop();
       final to = math.max(0.0, x - _gridW / 3);
@@ -3110,13 +3119,13 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
                       rowH: _rowH, scrollX: _scrollX, scrollY: _scrollY, keyW: _keyW, rulerH: _rulerH, gridH: h,
                       color: _noteColor, label: loopLengthLabel(loop, s.project.beatsPerBar),
                       active: _loopLive != null || _loopHover)))),
-                  // The song's playhead while it plays this pattern (a live island: it moves about 30 times a second
-                  // without rebuilding the roll).
-                  Positioned.fill(child: IgnorePointer(child: RepaintBoundary(child: ValueListenableBuilder<int>(
-                    valueListenable: s.tick,
-                    builder: (context, _, _) => CustomPaint(key: const ValueKey('roll-playhead'),
-                      painter: RollPlayheadPainter(step: _playStep(), pxPerStep: _pxPerStep, scrollX: _scrollX,
-                        left: _keyW, bottom: _rulerH + h)))))),
+                  // The song's playhead while it plays this pattern (a live island: it moves on every frame while
+                  // playing, live_playhead.dart, without rebuilding the roll; with Smooth follow it moves with the reads).
+                  Positioned.fill(child: IgnorePointer(child: RepaintBoundary(child: PlayheadFrames(
+                    state: s,
+                    builder: (context) => CustomPaint(key: const ValueKey('roll-playhead'),
+                      painter: RollPlayheadPainter(step: _playStep(smooth: !_scrollFollows), pxPerStep: _pxPerStep,
+                        scrollX: _scrollX, left: _keyW, bottom: _rulerH + h)))))),
                   // A mouse over the bar: its length and what it does (a finger sees the length on the ruler).
                   if (loop != null && clip != null && _loopHover && _loopLive == null)
                     Positioned(

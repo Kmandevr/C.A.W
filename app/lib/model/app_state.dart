@@ -21,6 +21,7 @@ import 'default_project.dart';
 import 'history.dart';
 import 'mixer_fx.dart' show masterLayerId;
 import 'pattern_doc.dart';
+import 'playhead_clock.dart';
 import 'settings.dart';
 import 'storage.dart';
 import 'pattern_templates.dart';
@@ -502,6 +503,7 @@ class AppState extends ChangeNotifier {
     if (e == null) return false;
     final before = meters;
     meters = e.meters();
+    _readPlayhead();
     if (before.playing != meters.playing) {
       EngineExecutionPolicy.updateRuntimeSignals(audioActive: meters.playing);
     }
@@ -1050,6 +1052,7 @@ class AppState extends ChangeNotifier {
       _transportOn = true;
     }
     meters = e.meters();
+    _readPlayhead();
     _poller.wake();
     notifyListeners();
   }
@@ -1062,6 +1065,7 @@ class AppState extends ChangeNotifier {
     if (e != null) {
       e.stop(); // the engine ignores a stop when it isn't playing
       meters = e.meters();
+      _readPlayhead();
       _poller.wake();
     }
     notifyListeners();
@@ -1076,6 +1080,7 @@ class AppState extends ChangeNotifier {
       _markPlayStart(at);
       e.playAt(at);
       meters = e.meters();
+      _readPlayhead();
       _poller.wake();
     } else {
       pausedStep = at;
@@ -1116,6 +1121,29 @@ class AppState extends ChangeNotifier {
     final m = meters;
     if (m.playing && m.loopLength > 0) return heardStep(m.position * project.engineLoopSteps / m.loopLength);
     return pausedStep ?? 0;
+  }
+
+  /// The playhead between reads ([PlayheadClock]): [playheadStep] at the last engine read, run on at the tempo and
+  /// settled onto each new read, for drawing it at the screen's rate. Stopped or paused it is [playheadStep] exactly.
+  final PlayheadClock playheadClock = PlayheadClock();
+
+  /// [playheadClock] now: where to draw the playhead in this frame.
+  double get smoothPlayheadStep =>
+      meters.playing && playheadClock.playing ? playheadClock.at(nowUs) : playheadStep;
+
+  // Hands the read just taken to [playheadClock], over the range [heardStep] wraps in.
+  void _readPlayhead() {
+    final p = project;
+    final (from, to) = p.loopsRange
+        ? (p.loopStartSteps.toDouble(), p.loopEndSteps.toDouble())
+        : (0.0, p.engineLoopSteps.toDouble());
+    playheadClock.read(
+        step: playheadStep,
+        atUs: nowUs,
+        playing: meters.playing && meters.loopLength > 0,
+        stepsPerSecond: p.bpm / 15,
+        from: from,
+        to: to);
   }
 
   void clearOverload() {

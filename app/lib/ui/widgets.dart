@@ -282,8 +282,9 @@ class _MeterChannel {
 
 class PeakMeterState extends State<PeakMeter> with SingleTickerProviderStateMixin {
   late final Ticker _ticker = createTicker(_frame);
-  Duration _last = Duration.zero, _built = Duration.zero;
+  Duration _last = Duration.zero;
   Duration _lastRead = Duration.zero;
+  Object? _builtKey; // what the last build showed, to a 500th of the bar
   final _left = _MeterChannel(), _right = _MeterChannel();
 
   bool get _stereo => widget.readRight != null;
@@ -331,28 +332,31 @@ class PeakMeterState extends State<PeakMeter> with SingleTickerProviderStateMixi
     _left.take(peak);
     final right = widget.readRight?.call() ?? 0.0;
     if (_stereo) _right.take(right);
-    // Sound coming in: the reads drive the meter. Silence: the ticker finishes the fall (the reads may stop soon).
-    if (peak > 0 || right > 0) {
-      _ticker.stop();
-    } else if (!_empty && !_ticker.isActive) {
-      _last = _built = Duration.zero;
+    // A read rises at once; between reads, and after the reads report silence, the ticker lets the bar fall on
+    // every frame at the screen's rate (the frame-rate setting), then stops once it has fallen.
+    if (!_empty && !_ticker.isActive) {
+      _last = Duration.zero;
       _ticker.start();
     }
-    if (mounted) setState(() {});
+    _rebuild();
   }
 
-  // The tail after the reads report silence: about 30 updates a second, then the ticker stops.
   void _frame(Duration elapsed) {
     final dt = (elapsed - _last).inMicroseconds / 1e6;
     _last = elapsed;
     _lastRead = PeakMeter.clock();
     _fall(dt);
-    if (_empty) {
-      _ticker.stop();
-    } else if (elapsed - _built < const Duration(milliseconds: 33)) {
-      return;
-    }
-    _built = elapsed;
+    if (_empty) _ticker.stop();
+    _rebuild();
+  }
+
+  // Builds again only when the bars would show a change (a 500th of their height, or the clip light).
+  void _rebuild() {
+    int at(double db) => (PeakMeter.fraction(db) * 500).round();
+    final key = (at(_left.shownDb), at(_left.holdDb), _left.clipped,
+        _stereo ? (at(_right.shownDb), at(_right.holdDb), _right.clipped) : null);
+    if (key == _builtKey || !mounted) return;
+    _builtKey = key;
     setState(() {});
   }
 
