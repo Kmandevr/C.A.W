@@ -22,7 +22,8 @@ namespace caw {
 // sleeps). Around each callback (Engine::process): beginCallback(true) wakes sleeping workers before the callback
 // plans its first chunk (the Engine asks when its last callback used the pool), and from then, or from the first
 // level begin() publishes, they spin through the callback's levels and chunks (a pause instruction between loads);
-// endCallback() lets them spin kGraceMicros more, then sleep in std::atomic<uint32_t>::wait. A worker never
+// endCallback() lets them spin kGraceMicros more, then sleep in std::atomic<uint32_t>::wait. A spinning worker
+// yields its core every 64 pauses (to the system's threads, which then need not preempt a node). A worker never
 // spins more than kMaxSpinMicros without work. Each task must write only its own state: which thread runs which
 // task, and when, is not fixed.
 class MixPool final : public ParallelRunner {

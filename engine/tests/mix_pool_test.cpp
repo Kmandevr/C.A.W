@@ -740,15 +740,16 @@ TEST(mix_pool_engine_auto_drops_workers_that_cost_more_than_they_give) {
             e.reportLoad(load, 256);
         }
     };
+    // 0.8: above Auto's threshold, below the 0.85 at which the engine mutes a layer (which would empty the levels).
     auto one = [&] {
         e.process(l, r, 256);
-        e.reportLoad(0.9, 256);
+        e.reportLoad(0.8, 256);
     };
-    callbacks(0.9, 1.0);
+    callbacks(0.8, 1.0);
     e.process(l, r, 256);
     CHECK(e.mixParallelForTest());
     CHECK(e.mixParallelLevelsForTest() > 0);
-    callbacks(0.9, 3.0);
+    callbacks(0.8, 3.0);
     CHECK(e.mixParallelForTest());  // a pool that barely waits keeps going, with every worker
     CHECK_EQ(e.mixActiveWorkers(), 2u);
     e.mixPoolForTest()->setHoldForTest(3000);  // each worker's node takes 3 ms more: the callback waits for it
@@ -761,10 +762,10 @@ TEST(mix_pool_engine_auto_drops_workers_that_cost_more_than_they_give) {
     while (e.mixParallelForTest() && steps++ < 2000) one();
     CHECK(!e.mixParallelForTest());
     e.mixPoolForTest()->setHoldForTest(0);
-    callbacks(0.9, 5.0);
+    callbacks(0.8, 5.0);
     e.process(l, r, 256);
     CHECK(!e.mixParallelForTest());  // not again before kMixRetrySeconds
-    callbacks(0.9, 6.0);
+    callbacks(0.8, 6.0);
     e.process(l, r, 256);
     CHECK(e.mixParallelForTest());  // tried again, with every worker
     CHECK_EQ(e.mixActiveWorkers(), 2u);

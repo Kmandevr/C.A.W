@@ -4809,6 +4809,8 @@ void Engine::pickOverloadVictim() noexcept {
 
 void Engine::process(float* left, float* right, int frames) noexcept {
     const ScopedFlushDenormals flushDenormals;  // live callbacks, exports and renders alike (fp_mode.h)
+    // Speed phase 5d: this call's own time, which Auto splits into the wait for workers and the rest (reportLoad).
+    const auto processStart = pool_ ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
     // Whether any layer is soloed, worked out once per callback rather than once per layer and block.
     updateSolo();
     applyCommands();
@@ -4902,7 +4904,10 @@ void Engine::process(float* left, float* right, int frames) noexcept {
     toneActive_.store(toneLeft_ > 0, std::memory_order_release);
     playingFlag_.store(playing_, std::memory_order_relaxed);
     posFlag_.store(g_, std::memory_order_relaxed);
-    if (pool_) pool_->endCallback();  // the workers spin a little longer, then sleep until the next callback
+    if (pool_) {
+        pool_->endCallback();  // the workers spin a little longer, then sleep until the next callback
+        processNs_ += std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - processStart).count();
+    }
     poolUsedLast_ = poolUsed_;
     poolUsed_ = false;
 }
@@ -4929,8 +4934,15 @@ void Engine::reportLoad(double load, int frames) noexcept {
         const double used = std::isfinite(load) ? std::max(0.0, load) * dt : 0.0;
         pool_->reportWork(static_cast<int64_t>(used * 1e9), static_cast<int64_t>(dt * 1e9));
     }
-    waitAvg_ = loadKeep_ * waitAvg_ + (1.0 - loadKeep_) * (static_cast<double>(waitNs) * 1e-9 / dt);
-    workAvg_ = loadKeep_ * workAvg_ + (1.0 - loadKeep_) * (static_cast<double>(workerNs) * 1e-9 / dt);
+    // As shares of the measured load: the wait's and the workers' time against the process() time they were part
+    // of, times the load the platform measured (the callback's whole time over its budget).
+    const double proc = static_cast<double>(processNs_);
+    processNs_ = 0;
+    const double measured = std::isfinite(load) ? std::max(0.0, load) : 0.0;
+    const double waitShare = proc > 0 ? measured * std::min(1.0, static_cast<double>(waitNs) / proc) : 0.0;
+    const double workShare = proc > 0 ? measured * (static_cast<double>(workerNs) / proc) : 0.0;
+    waitAvg_ = loadKeep_ * waitAvg_ + (1.0 - loadKeep_) * waitShare;
+    workAvg_ = loadKeep_ * workAvg_ + (1.0 - loadKeep_) * workShare;
     waitShare_.store(static_cast<float>(waitAvg_), std::memory_order_relaxed);
     // The pool's Auto mode (speed phase 5c), with hysteresis: on after a while above kMixParallelLoad, off only
     // after longer below kMixSerialLoad (the load measured while parallel is lower: it must not flip straight back).
