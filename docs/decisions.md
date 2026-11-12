@@ -6,6 +6,13 @@ updated: 2026-11-12
 
 # Decisions
 
+## 2026-11-12: Play-ahead and run on any hardware, for 1.2.0 (owner)
+
+**Decision (owner):** C.A.W adapts to the hardware it runs on, so the same project runs everywhere, from a desktop to a low-end phone and, as a publicity stunt, a hacked graphing calculator ("it's a stunt, if it works it's fine"). The means is dynamic play-ahead: things are rendered ahead of time and in batches where it makes sense, and the switch to real time when a user needs low latency must be completely invisible. Release 1.2.0, after the open alpha.
+
+- **Kept:** the real-time-safe callback, live and export perceptually identical, exports never changed to save CPU, REAPER-style routing without shared buses, no audible change without asking.
+- **[Proposal] (Claude):** the design (a live set and an ahead set per chunk, worker rings with adaptive depth, Drain and Snapshot handovers, intent signals from the app), the hardware ladder, ten related optimisations, the calculator renderer and the order are in the [play-ahead plan](play-ahead-plan.md) (#191). A1 is measured first, since it may close much of the S22+'s gap alone. The owner's open questions are in the [vision register](vision.md#open-owner-decisions).
+
 ## 2026-11-12: No shared buses; work the REAPER way (owner)
 
 **Decision (owner):** "I don't love the use of busses. I like REAPER's way of working." The shared reverb-bus idea (A7) is dropped. Routing stays REAPER-style: tracks, folders and sends between tracks, with no separate bus concept added. Speed for heavy Flagship patches comes from the engine itself.
