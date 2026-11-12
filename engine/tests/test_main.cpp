@@ -1,4 +1,4 @@
-// Runs every registered test; `caw_tests --update-golden` rewrites engine/tests/golden.txt.
+// Runs every registered test; `caw_tests --update-references` (or --update-golden) re-records engine/tests/references/.
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -45,7 +45,7 @@ int main(int argc, char** argv) {
     unsigned int shardIndex = 0;
     unsigned int shardCount = 1;
     for (int i = 1; i < argc; ++i) {
-        if (std::strcmp(argv[i], "--update-golden") == 0) {
+        if (std::strcmp(argv[i], "--update-references") == 0 || std::strcmp(argv[i], "--update-golden") == 0) {
             cawtest::updateGolden = true;
         } else if (std::strcmp(argv[i], "--shard-index") == 0 && i + 1 < argc) {
             shardIndex = static_cast<unsigned int>(std::strtoul(argv[++i], nullptr, 10));
@@ -56,7 +56,7 @@ int main(int argc, char** argv) {
         }
     }
     if (shardCount == 0 || shardIndex >= shardCount || (cawtest::updateGolden && shardCount != 1)) {
-        std::fprintf(stderr, "invalid test shard configuration (golden updates must run unsharded)\n");
+        std::fprintf(stderr, "invalid test shard configuration (reference updates must run unsharded)\n");
         return 2;
     }
 

@@ -15,6 +15,7 @@
 #include "note_events.h"
 #include "project.h"
 #include "test.h"
+#include "tolerance.h"
 
 using namespace caw;
 
@@ -746,8 +747,8 @@ TEST(the_built_in_synth_is_listed_as_an_instrument_and_starts_on_its_frame) {
     synth->deactivate();
 }
 
-// FNV-1a over the float bits of an interleaved render.
-uint64_t renderHash(const ProjectSpec& p, int64_t frames, float* peak) {
+// FNV-1a over the float bits of an interleaved render (`out` collects the render for its reference).
+uint64_t renderHash(const ProjectSpec& p, int64_t frames, float* peak, cawtest::Audio* out = nullptr) {
     Engine e(48000);
     if (!ok(e.setProjectOffline(p))) return 0;
     e.play();
@@ -755,6 +756,7 @@ uint64_t renderHash(const ProjectSpec& p, int64_t frames, float* peak) {
     std::vector<float> l(256), r(256);
     for (int64_t done = 0; done < frames; done += 256) {
         e.process(l.data(), r.data(), 256);
+        if (out) out->l.insert(out->l.end(), l.begin(), l.end()), out->r.insert(out->r.end(), r.begin(), r.end());
         for (int i = 0; i < 256; ++i)
             for (float v : {l[static_cast<size_t>(i)], r[static_cast<size_t>(i)]}) {
                 if (peak) *peak = std::max(*peak, std::fabs(v));
@@ -769,7 +771,7 @@ uint64_t renderHash(const ProjectSpec& p, int64_t frames, float* peak) {
     return h;
 }
 
-TEST(the_basic_preset_matches_its_golden_render) {
+TEST(the_basic_preset_matches_its_reference_render) {
     // Chords, a slide, a ratchet and a quarter tone, two oscillators through the filter, into a ping-pong delay:
     // an old project's basic synth, which now plays Flagship's Basic preset with its knobs mapped.
     ProjectSpec p = instrumentTrack(kBasic, "0 C3 4 1\n0 G3 4 0.8\n4 51 2 0.9 slide\n6 F3 2 0.9\n8 60.5 4 0.7 ratchet 3\n"
@@ -779,22 +781,12 @@ TEST(the_basic_preset_matches_its_golden_render) {
     p.layers[0].instrument.params = {{"wave2", 1}, {"cutoff", 1200}, {"resonance", 0.4}, {"release", 0.4}};
     p.layers[0].components = {{"org.caw.delay.pingpong", {{"sync", 3}, {"mix", 0.3}}}};
     float peak = 0;
-    const uint64_t h = renderHash(p, 48000 * 2, &peak);
+    cawtest::Audio audio;
+    const uint64_t h = renderHash(p, 48000 * 2, &peak, &audio);
+    cawtest::References refs("basic_preset");
+    CHECK_REFERENCE(refs, "basic preset", audio, cawtest::Class::Stable);
     CHECK(peak > 0.05f);
     CHECK(peak <= 1.0f);
-    // Re-recorded: voice summing order (engine pass), the ping-pong fix, and a released voice stopping on its own
-    // frame rather than at the end of a render call (second audio review, fix 1: at most 15 frames below -100 dB),
-    // and the ping-pong's left line taking the mono average at full cross, not the sum (fix 2: 6 dB quieter echoes).
-    // Re-recorded (one synth, 2026-11-10): the basic synth is now Flagship's Basic preset (perceptually the same,
-    // builtin_instruments_test.cpp).
-    // And again: the fixed-point oscillator phase; and (second performance pass) the poly voices' shared filter 1
-    // and the phases moving on in fixed point.
-    constexpr uint64_t kGolden = 0xaa03efa87235874aull;
-    if (h != kGolden) {
-        char buf[96];
-        std::snprintf(buf, sizeof buf, "the Basic preset renders 0x%016llxull", static_cast<unsigned long long>(h));
-        cawtest::fail(__FILE__, __LINE__, buf);
-    }
     CHECK_EQ(renderHash(p, 48000 * 2, nullptr), h);  // the same bits from a second engine
 }
 
