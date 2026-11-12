@@ -58,7 +58,7 @@ An overview by area, checked against the repository on 2026-11-03. The stage tab
 
 ## Roadmap sequence
 
-**After 1.0 (owner, 2026-11-12):** the 2.0 landmark is render-ahead (rendering ahead of the playhead, so heavy projects play smoothly). The owner already has it essentially ready, but 1.0 comes first. **[Proposal]** It is planned and not built in this repository yet.
+**After 1.0 (owner, 2026-11-12):** render-ahead is planned for 1.2.0, a major feature but not a full version update (rendering ahead of the playhead, so heavy projects play smoothly). The owner already has it essentially ready, but 1.0 comes first. **[Proposal]** It is planned and not built in this repository yet.
 
 **Current order (owner, 2026-11-10):** work goes issue by issue, bottom up (engine first, then the app), one area of the code per branch; UI work only where it is simple. Anything unclear, needing the owner's direction, or seeming to conflict with an earlier decision is not started: the owner gets a notification with the question, and work moves on to the next clear item. C++ replaces the .caw language first ([decisions](decisions.md)), then the owner's three new roles ([vision](vision.md)):
 1. #156 C++ instruments, then #157 C++ built-in instruments and a starter project (with #122, the useful .caw built-ins ported to the Library), #17 and #127 (independent instances, per-note and per-channel processing for instruments).
