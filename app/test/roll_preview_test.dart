@@ -51,7 +51,7 @@ void main() {
     addTearDown(tester.view.reset);
     final s = _Recorder();
     s.engine = Engine.create();
-    s.project = s.starterProject();
+    s.project = s.demoProject();
     final m = ModuleDoc(id: 'line', name: 'line', source: '---\nkind: pattern\n---\n$body');
     s.project.modules.add(m);
     // A layer with an instrument plays this pattern, so its notes have something to sound on.

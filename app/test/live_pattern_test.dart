@@ -15,7 +15,7 @@ void main() {
 
   test('the engine project can carry a pattern text in place of its run source', () {
     final s = AppState();
-    s.project = s.starterProject();
+    s.project = s.demoProject();
     final m = s.project.modules.first;
     final json = jsonDecode(s.project.toEngineJson(sourceOverrides: {m.id: 'live text'})) as Map<String, dynamic>;
     final modules = (json['modules'] as List).cast<Map<String, dynamic>>();
@@ -28,7 +28,7 @@ void main() {
 
   test('a live step built from the cached project matches a full build, and an edit between steps shows', () {
     final s = AppState();
-    s.project = s.starterProject();
+    s.project = s.demoProject();
     s.starting = false;
     addTearDown(s.dispose);
     final m = s.project.modules.first;
@@ -48,7 +48,7 @@ void main() {
   test('a live pattern step reaches the engine without touching the model or notifying', () async {
     final s = AppState();
     s.engine = Engine.create();
-    s.project = s.starterProject();
+    s.project = s.demoProject();
     s.ready = true;
     s.starting = false;
     s.useAudioDevice = false;

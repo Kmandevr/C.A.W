@@ -1,4 +1,4 @@
-// Tests how the app opens (UI plan U1): straight into the last project, or the "First loop" template on a first run
+// Tests how the app opens (UI plan U1): straight into the last project, or the default project on a first run
 // or when the last project is gone (a damaged one says so). There is no startup screen.
 import 'dart:io';
 
@@ -8,6 +8,7 @@ import 'package:caw/model/storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
   late Directory root;
   late ProjectStorage storage;
 
@@ -35,10 +36,11 @@ void main() {
     expect(s.savedProjects.map((p) => p.name), containsAll(['Alpha', 'Beta']));
   });
 
-  test('a first run opens the First loop template', () async {
+  test('a first run opens the default project', () async {
     final s = await open();
     expect(s.starting, isFalse);
-    expect(s.project.name, s.starterProject().name);
+    expect(s.project.name, 'mid tempo');
+    expect(s.project.layers.map((l) => l.name), ['Track 3', 'Bass', 'Drums', 'Layer 4']);
   });
 
   test('a last project that is gone opens the template instead', () async {

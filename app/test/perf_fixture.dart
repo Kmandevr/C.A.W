@@ -1,12 +1,12 @@
-// A big project for the performance benchmarks: the First loop grown to 16 tracks, with long patterns, many clips,
+// A big project for the performance benchmarks: the demo project (the code-built First loop) grown to 16 tracks, with long patterns, many clips,
 // native effects and automation lanes, so per-edit work scales the way a real song's would.
 import 'package:caw/model/app_state.dart';
 import 'package:caw/model/project.dart';
 
-/// The First loop, plus tracks until there are [tracks]: each new one plays its own 4-bar pattern of [notes] notes
+/// The demo project, plus tracks until there are [tracks]: each new one plays its own 4-bar pattern of [notes] notes
 /// in [clips] clips, with an effect and a volume lane.
 ProjectDoc bigProject(AppState s, {int tracks = 16, int notes = 64, int clips = 8}) {
-  final p = s.starterProject();
+  final p = s.demoProject();
   final instruments = ['org.caw.synth.morph', 'org.caw.bass', 'org.caw.synth.acid', 'org.caw.synth.morph'];
   for (var t = p.layers.length; t < tracks; t++) {
     final lines = StringBuffer('---\ncaw: 1\nkind: pattern\nname: Line $t\nlength: 4 bars\n---\n');

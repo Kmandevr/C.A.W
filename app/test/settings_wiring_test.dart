@@ -208,7 +208,7 @@ void main() {
     live.dispose();
   });
 
-  test('new project: Settings\' tempo and time signature, or the First loop template', () async {
+  test('new project: Settings\' tempo and time signature, or a template', () async {
     final s = AppState();
     s.settings
       ..newProjectBpm = 96

@@ -21,7 +21,7 @@ void main() {
   AppState app() {
     final s = AppState();
     s.engine = Engine.create();
-    s.project = s.starterProject();
+    s.project = s.demoProject();
     s.ready = true;
     s.starting = false;
     return s;

@@ -19,7 +19,7 @@ void main() {
     addTearDown(tester.view.reset);
     final s = AppState();
     s.engine = Engine.create();
-    s.project = s.starterProject();
+    s.project = s.demoProject();
     s.selectedModuleId = s.project.modules.last.id;
     s.ready = true;
     s.starting = false;
@@ -57,7 +57,7 @@ void main() {
     addTearDown(tester.view.reset);
     final s = AppState();
     s.engine = Engine.create();
-    s.project = s.starterProject();
+    s.project = s.demoProject();
     final pattern = s.project.modules.firstWhere((m) => s.isPattern(m.id));
     s.project.layers.first.clips.add(ClipDoc(id: 'far', patternId: pattern.id,
         startSteps: s.project.maxArrangementSteps - 16, lengthSteps: 16));  // the last bar the step count holds
@@ -81,7 +81,7 @@ void main() {
     addTearDown(tester.view.reset);
     final s = AppState();
     s.engine = Engine.create();
-    s.project = s.starterProject()..beatsPerBar = 12;
+    s.project = s.demoProject()..beatsPerBar = 12;
     s.ready = true;
     s.starting = false;
     await tester.pumpWidget(MaterialApp(home: Scaffold(body: ArrangerScreen(state: s))));

@@ -448,7 +448,7 @@ void main() {
       final s = AppState();
       addTearDown(s.dispose);
       s.engine = Engine.create();
-      s.project = s.starterProject();
+      s.project = s.demoProject();
       s.ready = true;
       s.starting = false;
       s.useAudioDevice = false;

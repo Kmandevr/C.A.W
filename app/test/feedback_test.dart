@@ -43,7 +43,7 @@ void main() {
 
   Future<AppState> pumpTransport(WidgetTester tester) async {
     final s = AppState();
-    s.project = s.starterProject();
+    s.project = s.demoProject();
     final sections = SectionController();
     await tester.pumpWidget(MaterialApp(home: Scaffold(body: Column(children: [
       const Spacer(),

@@ -67,6 +67,8 @@ flutter:
   assets:
     - assets/fonts/OFL.txt
     - assets/logo/caw_mark.png
+    # The default project (owner, 2026-11-12): what a first run and the bundled Mid tempo template open.
+    - assets/projects/default.json
 
   # JetBrains Mono 2.304 (SIL Open Font License 1.1, see assets/fonts/OFL.txt): the code and number font.
   fonts:

@@ -17,7 +17,7 @@ void main() {
     s.starting = false;
     s.useAudioDevice = false;
     addTearDown(s.dispose);
-    await s.importProject(s.starterProject());
+    await s.importProject(s.demoProject());
     expect(s.engineError, isNull);
     expect(s.info, isNotEmpty); // the starter's patterns are loaded
 
@@ -38,7 +38,7 @@ void main() {
     s.engine!.stop();
 
     // An edit refused within the same project keeps that project's last good state (unchanged behaviour).
-    await s.importProject(s.starterProject());
+    await s.importProject(s.demoProject());
     expect(s.engineError, isNull);
     final loaded = Map.of(s.info);
     for (final l in s.project.layers.take(5)) {

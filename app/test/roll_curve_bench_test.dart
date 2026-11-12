@@ -20,7 +20,7 @@ void main() {
     addTearDown(tester.view.reset);
     final s = AppState();
     s.engine = Engine.create();
-    s.project = s.starterProject();
+    s.project = s.demoProject();
     final m = ModuleDoc(id: 'line', name: 'line', source: '---\nkind: pattern\n---\n0 C3 8 1 bend 0:0 0.5:2 1:0\n4 E3 4\n');
     s.project.modules.add(m);
     s.ready = true;

@@ -141,13 +141,14 @@ final Expando<TemplateStore> _stores = Expando('templates');
 /// The id Settings › Projects stores for "Blank" as the default for New project.
 const blankTemplateId = '';
 
-/// The bundled First loop's id (the app's starter project, [AppState.starterProject]).
+/// The bundled default project's template id (the app's starter project, [AppState.starterProject]; it was the
+/// code-built First loop until 2026-11-12, and the id stays so saved settings keep pointing at it).
 const firstLoopTemplateId = 'builtin:first-loop';
 
 /// A short name for template [id] where only the settings are at hand (Settings' summaries).
 String templateLabel(String id) => switch (id) {
       blankTemplateId => 'Blank',
-      firstLoopTemplateId => 'First loop',
+      firstLoopTemplateId => 'Mid tempo',
       'builtin:song-sketch' => 'Song sketch',
       _ => 'a saved template',
     };
@@ -320,8 +321,9 @@ extension Templates on AppState {
   // ---------- bundled starters ----------
 
   List<TemplateDoc> _bundledProjects() => [
-        TemplateDoc(id: firstLoopTemplateId, name: 'First loop', kind: TemplateKind.project, bundled: true,
-            summary: 'Drums, bass, a lead and an acid line on C++ instruments', json: const {}),
+        TemplateDoc(id: firstLoopTemplateId, name: 'Mid tempo', kind: TemplateKind.project, bundled: true,
+            summary: '90 BPM in A minor: 808 drums, a mono bass, ducked ratcheted chords and a ping-pong arp',
+            json: const {}),
         TemplateDoc(id: 'builtin:song-sketch', name: 'Song sketch', kind: TemplateKind.project, bundled: true,
             summary: 'Empty drums, bass, keys and pad tracks with a reverb bus, ready to record',
             json: _songSketch().toJson()),
