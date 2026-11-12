@@ -7,10 +7,15 @@ enum VideoShot {
   flythrough('Arrangement', 'The camera flies along the arrangement with the playhead; notes light up'),
   mixer('Mixer', 'Channel strips with meters from the rendered audio'),
   pianoRoll('Piano roll', 'Close-ups of the busiest clip, its notes glowing as they play'),
-  devices('Devices', 'A device with its knobs moving to the automation');
+  devices('Devices', 'A device with its knobs moving to the automation'),
+  falling('Falling notes', 'Notes fall onto a piano keyboard and light its keys as they play');
 
   const VideoShot(this.label, this.description);
   final String label, description;
+
+  /// The shots a new video's director uses (Falling notes, added 2026-11-12, is switched on by choice, so a video
+  /// set up before it cuts as it did).
+  static const directorDefaults = {flythrough, mixer, pianoRoll, devices};
 }
 
 /// How the director cuts: how often, how shots change and how the camera moves.
@@ -127,7 +132,7 @@ class MusicVideoOptions {
     this.artist = '',
     this.seed = 1,
     this.smoothFollow = false,
-  })  : shots = shots ?? {...VideoShot.values},
+  })  : shots = shots ?? {...VideoShot.directorDefaults},
         aspect = aspect ?? VideoAspect.portrait;
 
   static const frameRates = [30, 60];
@@ -154,6 +159,43 @@ class MusicVideoOptions {
         shots: {...shots}, style: style, range: range, aspect: aspect, resolution: resolution,
         customWidth: customWidth, customHeight: customHeight, fps: fps, titleCard: titleCard, title: title,
         artist: artist, seed: seed, smoothFollow: smoothFollow);
+
+  Map<String, dynamic> toJson() => {
+        'shots': [for (final s in VideoShot.values) if (shots.contains(s)) s.name],
+        'style': style.name, 'range': range.name, 'aspect': [aspect.w, aspect.h], 'resolution': resolution.name,
+        'custom_size': [customWidth, customHeight], 'fps': fps, 'title_card': titleCard, 'title': title,
+        'artist': artist, 'seed': seed, 'smooth_follow': smoothFollow,
+      };
+
+  /// Reads saved options (untrusted): unknown names fall back to the defaults, numbers are clamped.
+  static MusicVideoOptions fromJson(Object? j) {
+    if (j is! Map) return MusicVideoOptions();
+    T pick<T extends Enum>(List<T> values, Object? name, T fallback) =>
+        values.where((v) => v.name == name).firstOrNull ?? fallback;
+    int whole(Object? v, int fallback, int lo, int hi) => v is num && v.isFinite ? v.round().clamp(lo, hi) : fallback;
+    String text(Object? v) => v is String ? (v.length > 200 ? v.substring(0, 200) : v) : '';
+    final shots = j['shots'] is List
+        ? {for (final n in j['shots'] as List) ?VideoShot.values.where((v) => v.name == n).firstOrNull}
+        : null;
+    final aspect = j['aspect'] is List && (j['aspect'] as List).length == 2 ? j['aspect'] as List : const [9, 16];
+    final custom = j['custom_size'] is List && (j['custom_size'] as List).length == 2 ? j['custom_size'] as List : const [1080, 1920];
+    final fps = whole(j['fps'], 30, 1, 240);
+    return MusicVideoOptions(
+      shots: shots,
+      style: pick(VideoStyle.values, j['style'], VideoStyle.energetic),
+      range: pick(VideoRange.values, j['range'], VideoRange.song),
+      aspect: VideoAspect(whole(aspect[0], 9, 1, VideoAspect.maxTerm), whole(aspect[1], 16, 1, VideoAspect.maxTerm)),
+      resolution: pick(VideoResolution.values, j['resolution'], VideoResolution.p1080),
+      customWidth: whole(custom[0], 1080, 2, 16384),
+      customHeight: whole(custom[1], 1920, 2, 16384),
+      fps: frameRates.contains(fps) ? fps : 30,
+      titleCard: j['title_card'] != false,
+      title: text(j['title']),
+      artist: text(j['artist']),
+      seed: whole(j['seed'], 1, 1, 1 << 30),
+      smoothFollow: j['smooth_follow'] == true,
+    );
+  }
 
   /// The frame's width and height.
   (int, int) get size => resolution == VideoResolution.custom ? (customWidth, customHeight) : presetSize(aspect, resolution);

@@ -668,6 +668,10 @@ class ProjectDoc {
   /// Controller learn: hardware CCs mapped to knobs (Settings › MIDI lists them).
   List<MidiCcMapping> midiMappings = [];
 
+  /// The music video's saved setup, shots, layouts, effects and looks (`music_video_edit.dart` reads it, versioned;
+  /// null until the video is first edited). Kept as JSON here so the project model doesn't depend on the video's.
+  Map<String, dynamic>? musicVideo;
+
   /// Project modulation (#161, modulation.dart): modulators and the links from their outputs to any knob.
   List<ModulatorDoc> modulators = [];
   List<ModLinkDoc> modLinks = [];
@@ -903,6 +907,7 @@ class ProjectDoc {
         if (modulators.isNotEmpty) 'modulators': [for (final m in modulators) m.toJson()],
         if (modLinks.isNotEmpty) 'modulation': [for (final l in modLinks) l.toJson()],
         if (assets.isNotEmpty) 'assets': [for (final a in assets) a.toJson()],
+        if (musicVideo != null) 'music_video': musicVideo,
       };
 
   /// Brings each track's instrument up to what the engine plays, with [resolve] (`Engine.resolveInstrument`): a
@@ -1058,6 +1063,7 @@ class ProjectDoc {
     project.markers = [
       for (final raw in ((j['markers'] as List?) ?? const []).take(1024)) ?MarkerDoc.fromJson(raw, project.maxArrangementSteps),
     ];
+    if (j['music_video'] is Map) project.musicVideo = Map<String, dynamic>.from(j['music_video'] as Map);
     for (final layer in project.layers) {
       for (final clip in layer.audioClips) {
         clip.ensureSeconds(project.bpm);

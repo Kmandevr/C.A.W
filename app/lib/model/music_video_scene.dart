@@ -137,6 +137,26 @@ class VideoScene {
 
   int get stepsPerBar => beatsPerBar * 4;
 
+  /// The longest note, in steps (how far back a view looks for notes still sounding).
+  late final double maxNoteSteps = notes.fold(0.0, (m, n) => math.max(m, n.end - n.start));
+
+  /// The lowest and highest pitch the notes of the tracks not in [hidden] (ids) play, bends included; middle C's
+  /// octave when there are none.
+  (double, double) pitchRange({Set<String> hidden = const {}}) {
+    var lo = double.infinity, hi = double.negativeInfinity;
+    for (final n in notes) {
+      if (hidden.isNotEmpty && n.track >= 0 && n.track < tracks.length && hidden.contains(tracks[n.track].id)) continue;
+      var a = n.pitch, b = n.pitch;
+      for (final p in n.expr.bend) {
+        a = math.min(a, n.pitch + p.v);
+        b = math.max(b, n.pitch + p.v);
+      }
+      lo = math.min(lo, a - n.expr.vibDepth);
+      hi = math.max(hi, b + n.expr.vibDepth);
+    }
+    return lo.isFinite ? (lo, hi) : (60, 71);
+  }
+
   /// The first index in [notes] starting at or after [step].
   int firstNoteFrom(double step) {
     var lo = 0, hi = notes.length;
@@ -158,10 +178,11 @@ class VideoScene {
     }
   }
 
-  /// The clip with the most notes starting in [a, b), or null when none.
-  int? busiestClip(double a, double b) {
+  /// The clip with the most notes starting in [a, b) (on [track] only, when given), or null when none.
+  int? busiestClip(double a, double b, {int? track}) {
     final counts = <int, int>{};
     for (final n in notesStartingIn(a, b)) {
+      if (track != null && n.track != track) continue;
       counts[n.clip] = (counts[n.clip] ?? 0) + 1;
     }
     int? best;
@@ -190,9 +211,10 @@ class VideoScene {
   }
 
   /// The lane that moves most in [a, b) and how far (0..1), or null when nothing moves more than [threshold].
-  (int, double)? movingLane(double a, double b, {double threshold = 0.05}) {
+  (int, double)? movingLane(double a, double b, {double threshold = 0.05, int? track}) {
     (int, double)? best;
     for (var i = 0; i < lanes.length; i++) {
+      if (track != null && lanes[i].track != track) continue;
       final m = lanes[i].movement(a, b);
       if (m > threshold && (best == null || m > best.$2)) best = (i, m);
     }

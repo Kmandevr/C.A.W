@@ -4,6 +4,7 @@
 import 'dart:math' as math;
 
 import 'music_video.dart';
+import 'music_video_edit.dart';
 import 'music_video_scene.dart';
 
 enum VideoTransition { cut, crossfade, push }
@@ -12,7 +13,8 @@ enum VideoTransition { cut, crossfade, push }
 class DirectedShot {
   const DirectedShot({required this.kind, required this.start, required this.end, this.clip, this.track, this.lane,
       this.transition = VideoTransition.cut, this.transitionSteps = 0, this.zoomFrom = 1, this.zoomTo = 1,
-      this.visibleSteps = 64, this.leadSteps = 0, this.pitchCenter = 60, this.pitchSpan = 24, this.section = false});
+      this.visibleSteps = 64, this.leadSteps = 0, this.pitchCenter = 60, this.pitchSpan = 24, this.section = false,
+      this.panel, this.layout, this.panelShots = const [], this.effects = const [], this.animateLayout = false});
   final VideoShot kind;
   final double start, end;
 
@@ -32,6 +34,23 @@ class DirectedShot {
 
   /// The shot starts at a section or a drop.
   final bool section;
+
+  /// The panel this view draws as (its look, the falling keyboard's range and hidden tracks), or null for defaults.
+  final VideoPanel? panel;
+
+  /// An edited shot's split layout: [panelShots] draw in its places, one each, in order. Null (the director's own
+  /// shots) draws this shot's [kind] across the frame.
+  final VideoLayout? layout;
+  final List<DirectedShot> panelShots;
+
+  /// The shot's effect stack, in order, over everything its panels draw.
+  final List<VideoEffect> effects;
+
+  /// A layout change from the shot before animates over the transition instead of cutting.
+  final bool animateLayout;
+
+  /// Whether it draws more than one view or applies any effect (else it draws exactly as a director's shot).
+  bool get edited => (layout != null && panelShots.length > 1) || effects.isNotEmpty || animateLayout;
 
   @override
   String toString() => '${kind.name}[$start..$end ${transition.name}]';
@@ -168,7 +187,8 @@ class ShotCamera {
 }
 
 /// Plans the shots for [scene] over [start, end) with [options]' shots, style and seed.
-ShotPlan directVideo(VideoScene scene, MusicVideoOptions options, {required double start, required double end}) {
+ShotPlan directVideo(VideoScene scene, MusicVideoOptions options, {required double start, required double end,
+    List<double>? cutsAt}) {
   final spb = scene.stepsPerBar;
   final rules = _rules(options.style);
   final rng = _Rng(options.seed * 2654435761 + 12345);
@@ -179,8 +199,8 @@ ShotPlan directVideo(VideoScene scene, MusicVideoOptions options, {required doub
   final sections = [for (final s in scene.sections) if (s.step > start && s.step < end) s];
 
   // Cut points: a chosen length, snapped onto the grid; a section inside the shot (past its shortest) cuts there.
-  final cuts = <double>[start];
-  var t = start;
+  final cuts = cutsAt ?? <double>[start];
+  var t = cutsAt == null ? start : end;
   while (t < end) {
     final pick = rules.lengths[(rng.next() * rules.lengths.length).floor().clamp(0, rules.lengths.length - 1)];
     final len = pick > 0 ? pick * spb.toDouble() : -pick * 4.0;
@@ -213,6 +233,7 @@ ShotPlan directVideo(VideoScene scene, MusicVideoOptions options, {required doub
         VideoShot.pianoRoll => busiest == null ? 0 : 0.6 + 2.5 * density,
         VideoShot.devices => moving != null ? 2.0 + 2.0 * moving.$2 : (scene.tracks.any((x) => x.devices.isNotEmpty) ? 0.25 : 0),
         VideoShot.mixer => scene.tracks.isEmpty ? 0 : 0.5 + 3.0 * energy * energy,
+        VideoShot.falling => noteCount == 0 ? 0 : 0.5 + 2.0 * density,
       };
       if (k == prevKind && enabled.length > 1) weights[k] = weights[k]! * 0.25;
     }
@@ -228,37 +249,7 @@ ShotPlan directVideo(VideoScene scene, MusicVideoOptions options, {required doub
       r -= w;
     }
 
-    // What the shot looks at.
-    int? clip, track, lane;
-    var pitchCenter = 60.0, pitchSpan = 24.0;
-    switch (kind) {
-      case VideoShot.pianoRoll:
-        clip = busiest;
-        if (clip != null) {
-          final notes = scene.notesStartingIn(a, b).where((n) => n.clip == clip).toList();
-          final lo = notes.isEmpty ? scene.clips[clip].lowPitch : notes.map((n) => n.pitch).reduce(math.min);
-          final hi = notes.isEmpty ? scene.clips[clip].highPitch : notes.map((n) => n.pitch).reduce(math.max);
-          pitchCenter = (lo + hi) / 2;
-          pitchSpan = math.max(12.0, hi - lo + 6);
-          track = scene.clips[clip].track;
-        }
-      case VideoShot.devices:
-        if (moving != null) {
-          lane = moving.$1;
-          track = scene.lanes[lane].track;
-        } else {
-          // No automation moves: the busiest track that has a device, its knobs at rest.
-          final c = busiest == null ? null : scene.clips[busiest].track;
-          track = c != null && scene.tracks[c].devices.isNotEmpty
-              ? c
-              : scene.tracks.indexWhere((x) => x.devices.isNotEmpty);
-          if (track < 0) track = null;
-        }
-      case VideoShot.mixer:
-        track = busiest == null ? null : scene.clips[busiest].track;
-      case VideoShot.flythrough:
-        break;
-    }
+    final focus = shotFocus(scene, kind, a, b, busiest: busiest, moving: moving);
     final first = i == 0;
     final transition = first
         ? VideoTransition.cut
@@ -268,11 +259,11 @@ ShotPlan directVideo(VideoScene scene, MusicVideoOptions options, {required doub
         ? (rng.next() < 0.5 ? rules.zoomFrom : 1 / rules.zoomFrom)
         : rules.zoomFrom;
     shots.add(DirectedShot(
-      kind: kind, start: a, end: b, clip: clip, track: track, lane: lane, transition: transition,
+      kind: kind, start: a, end: b, clip: focus.clip, track: focus.track, lane: focus.lane, transition: transition,
       transitionSteps: tSteps, zoomFrom: drop ? 0.6 : zoomFrom, zoomTo: 1,
-      visibleSteps: kind == VideoShot.pianoRoll ? rules.rollBars * spb : rules.bars * spb,
+      visibleSteps: _visibleSteps(kind, rules, spb),
       leadSteps: kind == VideoShot.flythrough || kind == VideoShot.pianoRoll ? spb * (first ? 0.0 : 0.5) : 0,
-      pitchCenter: pitchCenter, pitchSpan: pitchSpan, section: atSection || drop,
+      pitchCenter: focus.pitchCenter, pitchSpan: focus.pitchSpan, section: atSection || drop,
     ));
     prevKind = kind;
   }
@@ -280,4 +271,127 @@ ShotPlan directVideo(VideoScene scene, MusicVideoOptions options, {required doub
     shots.add(DirectedShot(kind: enabled.first, start: start, end: math.max(end, start + 1)));
   }
   return ShotPlan(shots, omega: rules.omega, bpm: scene.bpm, smoothFollow: options.smoothFollow);
+}
+
+
+/// How many steps a view shows across by default (the falling notes' look-ahead is two bars).
+double _visibleSteps(VideoShot kind, _StyleRules rules, int spb) => switch (kind) {
+      VideoShot.pianoRoll => rules.rollBars * spb,
+      VideoShot.falling => 2.0 * spb,
+      _ => rules.bars * spb,
+    };
+
+/// What a shot of [kind] over [a, b) looks at: the piano roll's clip and pitch window, the device's lane and track,
+/// the mixer's focus track, the falling keyboard's pitch range. [trackId] keeps it to that track's clips;
+/// [hidden] leaves tracks out of the falling notes' range.
+({int? clip, int? track, int? lane, double pitchCenter, double pitchSpan}) shotFocus(VideoScene scene, VideoShot kind,
+    double a, double b, {int? busiest, (int, double)? moving, String? trackId, Set<String> hidden = const {}}) {
+  final only = trackId == null ? null : scene.tracks.indexWhere((t) => t.id == trackId);
+  if (only != null && only >= 0) {
+    busiest = scene.busiestClip(a, b, track: only) ??
+        scene.clips.indexWhere((c) => c.track == only && !c.audio && c.end > a && c.start < b);
+    if (busiest < 0) busiest = scene.clips.indexWhere((c) => c.track == only && !c.audio);
+    if (busiest < 0) busiest = null;
+    moving = scene.movingLane(a, b, track: only);
+  } else {
+    busiest ??= scene.busiestClip(a, b);
+    moving ??= scene.movingLane(a, b);
+  }
+  int? clip, track, lane;
+  var pitchCenter = 60.0, pitchSpan = 24.0;
+  switch (kind) {
+    case VideoShot.pianoRoll:
+      clip = busiest;
+      if (clip != null) {
+        final notes = scene.notesStartingIn(a, b).where((n) => n.clip == clip).toList();
+        final lo = notes.isEmpty ? scene.clips[clip].lowPitch : notes.map((n) => n.pitch).reduce(math.min);
+        final hi = notes.isEmpty ? scene.clips[clip].highPitch : notes.map((n) => n.pitch).reduce(math.max);
+        pitchCenter = (lo + hi) / 2;
+        pitchSpan = math.max(12.0, hi - lo + 6);
+        track = scene.clips[clip].track;
+      }
+    case VideoShot.devices:
+      if (moving != null) {
+        lane = moving.$1;
+        track = scene.lanes[lane].track;
+      } else {
+        // No automation moves: the busiest track that has a device, its knobs at rest.
+        final c = only != null && only >= 0 ? only : (busiest == null ? null : scene.clips[busiest].track);
+        track = c != null && scene.tracks[c].devices.isNotEmpty ? c : scene.tracks.indexWhere((x) => x.devices.isNotEmpty);
+        if (track < 0) track = null;
+      }
+    case VideoShot.mixer:
+      track = only != null && only >= 0 ? only : (busiest == null ? null : scene.clips[busiest].track);
+    case VideoShot.falling:
+      // The keyboard spans every note the shown tracks play in the whole song, so it never jumps at a cut.
+      final (lo, hi) = scene.pitchRange(hidden: hidden);
+      pitchCenter = (lo + hi) / 2;
+      pitchSpan = hi - lo;
+    case VideoShot.flythrough:
+      break;
+  }
+  return (clip: clip, track: track, lane: lane, pitchCenter: pitchCenter, pitchSpan: pitchSpan);
+}
+
+/// The shots the edited lane [timeline] gives over [start, end): each shot clipped to the range, its panels as
+/// shots of their own, and the gaps shown as the arrangement (owner's lane; [directVideo] is used while it is empty).
+ShotPlan planFromTimeline(VideoScene scene, VideoTimeline timeline, MusicVideoOptions options,
+    {required double start, required double end}) {
+  final rules = _rules(options.style);
+  final spb = scene.stepsPerBar;
+  DirectedShot panelShot(VideoPanel p, double a, double b, double zoom) {
+    final f = shotFocus(scene, p.view, a, b, trackId: p.trackId, hidden: p.hiddenTracks);
+    final visible = p.bars != null ? p.bars! * spb : _visibleSteps(p.view, rules, spb);
+    return DirectedShot(kind: p.view, start: a, end: b, clip: f.clip, track: f.track, lane: f.lane, zoomFrom: zoom,
+        zoomTo: 1, visibleSteps: visible, pitchCenter: f.pitchCenter, pitchSpan: f.pitchSpan, panel: p);
+  }
+
+  final shots = <DirectedShot>[];
+  void gap(double a, double b) {
+    if (b - a <= 1e-9) return;
+    shots.add(DirectedShot(kind: VideoShot.flythrough, start: a, end: b, visibleSteps: rules.bars * spb));
+  }
+
+  var t = start;
+  for (final c in timeline.cuts) {
+    final a = math.max(c.start, start), b = math.min(c.end, end);
+    if (b <= a) continue;
+    gap(t, a);
+    final panels = [for (final p in c.layout.panels) panelShot(p, a, b, c.zoom)];
+    final first = panels.first;
+    final tSteps = c.transition == VideoTransition.cut && !c.animateLayout
+        ? 0.0
+        : math.min((b - a) / 2, c.transitionSteps > 0 ? c.transitionSteps : 4.0);
+    shots.add(DirectedShot(
+      kind: first.kind, start: a, end: b, clip: first.clip, track: first.track, lane: first.lane,
+      transition: c.transition, transitionSteps: tSteps, zoomFrom: c.zoom, zoomTo: 1,
+      visibleSteps: first.visibleSteps, pitchCenter: first.pitchCenter, pitchSpan: first.pitchSpan,
+      panel: first.panel, layout: c.layout, panelShots: panels, effects: [for (final e in c.effects) if (e.on) e],
+      animateLayout: c.animateLayout,
+    ));
+    t = b;
+  }
+  gap(t, end);
+  if (shots.isEmpty) shots.add(DirectedShot(kind: VideoShot.flythrough, start: start, end: math.max(end, start + 1)));
+  return ShotPlan(shots, omega: rules.omega, bpm: scene.bpm, smoothFollow: options.smoothFollow);
+}
+
+/// The plan the preview and the render draw: the edited lane's shots, or the auto director's while it is empty.
+ShotPlan planVideo(VideoScene scene, MusicVideoOptions options, VideoTimeline? timeline,
+        {required double start, required double end}) =>
+    timeline == null || timeline.isEmpty
+        ? directVideo(scene, options, start: start, end: end)
+        : planFromTimeline(scene, timeline, options, start: start, end: end);
+
+/// Whether drawing [plan] needs a meter per track from the render (a mixer view, or an effect that follows a track).
+bool planNeedsStems(ShotPlan plan) => plan.shots.any((s) =>
+    s.kind == VideoShot.mixer ||
+    s.panelShots.any((p) => p.kind == VideoShot.mixer) ||
+    s.effects.any((e) => e.drive == VideoDrive.track));
+
+/// The views the auto director gives [cuts] (song steps, in order; [start] first and the end last), weighted by
+/// what plays as [directVideo]'s are, with [options]' shots, style and seed.
+List<DirectedShot> directShotsAt(VideoScene scene, MusicVideoOptions options, List<double> cuts) {
+  final probe = directVideo(scene, options, start: cuts.first, end: cuts.last, cutsAt: cuts);
+  return probe.shots;
 }

@@ -8,9 +8,11 @@ import 'package:flutter/foundation.dart';
 
 import '../../model/music_video.dart';
 import '../../model/music_video_director.dart';
+import '../../model/music_video_edit.dart';
 import '../../model/music_video_meters.dart';
 import '../../model/music_video_scene.dart';
 import '../../model/song_export.dart';
+import '../../model/music_video_autocut.dart' show audioLoudness;
 import '../../platform/video_encoder.dart';
 import 'video_painter.dart';
 
@@ -34,8 +36,13 @@ const int kVideoSampleRate = 48000;
 /// One render: [run] it once; [cancel] stops it at the next frame (or the audio render at its next block).
 class MusicVideoRender extends ChangeNotifier {
   MusicVideoRender({required this.projectJson, required this.scene, required this.options, required this.startStep,
-      required this.endStep, required this.encoder, required this.workDir, SongRenderStarter? audio})
+      required this.endStep, required this.encoder, required this.workDir, SongRenderStarter? audio, this.timeline})
       : _audio = audio ?? startNativeSongRender;
+
+  /// The edited lane's shots (null or empty: the auto director's).
+  final VideoTimeline? timeline;
+  late final ShotPlan plan =
+      planVideo(scene, options, timeline, start: startStep.toDouble(), end: endStep.toDouble());
 
   final String projectJson;
   final VideoScene scene;
@@ -71,14 +78,14 @@ class MusicVideoRender extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// The engine request for the audio: the range once through, no tail, 16-bit at 48 kHz, with track stems when the
-  /// mixer shot wants their meters.
+  /// The engine request for the audio: the range once through, no tail, 16-bit at 48 kHz, with track stems when a
+  /// mixer view or an effect following a track wants their meters.
   Map<String, dynamic> audioRequest(String outDir) => {
         'out_dir': outDir,
         'project': 'video',
         'pattern': '{kind}_{index}',
         'mix': true,
-        'tracks': options.shots.contains(VideoShot.mixer),
+        'tracks': planNeedsStems(plan),
         'buses': false,
         'bounds': 'selection',
         'start_steps': startStep,
@@ -93,7 +100,6 @@ class MusicVideoRender extends ChangeNotifier {
   /// Renders everything; the finished file (in [workDir]) or null when cancelled or failed ([error] says why).
   Future<File?> run() async {
     final (width, height) = options.size;
-    final plan = directVideo(scene, options, start: startStep.toDouble(), end: endStep.toDouble());
     final audioDir = Directory('${workDir.path}${Platform.pathSeparator}audio');
     var encoding = false;
     try {
@@ -180,6 +186,49 @@ class MusicVideoRender extends ChangeNotifier {
       if (await d.exists()) await d.delete(recursive: true);
     } catch (_) {
       // Left for the next render, which clears the folder first.
+    }
+  }
+}
+
+/// Auto-cut's loudness from the rendered audio: the range's mix through the engine's song render (a worker-pool job),
+/// its meters read in a background isolate, then the RMS per beat in dB. Null when cancelled ([cancelled] is
+/// polled) or when the render fails.
+Future<List<double>?> analyzeSongLoudness({required String projectJson, required VideoScene scene, required int startStep,
+    required int endStep, required Directory workDir, SongRenderStarter? audio, bool Function()? cancelled}) async {
+  const fps = 20;
+  final dir = Directory('${workDir.path}${Platform.pathSeparator}loudness');
+  try {
+    if (await dir.exists()) await dir.delete(recursive: true);
+    await dir.create(recursive: true);
+    final job = (audio ?? startNativeSongRender)(projectJson, jsonEncode({
+      'out_dir': dir.path, 'project': 'video', 'pattern': '{kind}_{index}', 'mix': true, 'tracks': false,
+      'buses': false, 'bounds': 'selection', 'start_steps': startStep, 'end_steps': endStep,
+      'sample_rate': kVideoSampleRate, 'bit_depth': 16, 'dither': false, 'normalize': 'none', 'tail': 'none',
+    }));
+    final poll = Timer.periodic(const Duration(milliseconds: 100), (_) {
+      if (cancelled?.call() ?? false) job.cancel();
+    });
+    final String? out;
+    try {
+      out = await job.result;
+    } finally {
+      poll.cancel();
+    }
+    if (cancelled?.call() ?? false) return null;
+    final parsed = out == null ? null : jsonDecode(out);
+    if (parsed is! Map || parsed['ok'] != true) return null;
+    final mix = [for (final f in (parsed['files'] as List? ?? const [])) if (f is Map && f['kind'] == 'mix') f['path']]
+        .whereType<String>()
+        .firstOrNull;
+    if (mix == null) return null;
+    final clock = FrameClock(fps: fps, startStep: startStep.toDouble(), endStep: endStep.toDouble(), bpm: scene.bpm);
+    final meters = await analyzeVideoAudio(mixPath: mix, fps: fps, frames: clock.frameCount);
+    return audioLoudness(meters, fps: fps, bpm: scene.bpm, start: startStep.toDouble(), end: endStep.toDouble());
+  } finally {
+    try {
+      if (await dir.exists()) await dir.delete(recursive: true);
+    } catch (_) {
+      // Left for the next analysis, which clears the folder first.
     }
   }
 }

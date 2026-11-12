@@ -1,4 +1,4 @@
-// The music video's quick preview: the director's shots drawn live in a fixed-size frame while the song plays
+// The music video's quick preview: the plan's shots (the lane's, or the director's) drawn live in a fixed-size frame while the song plays
 // (the engine's playhead and meters), with play/stop and a scrub; nothing is rendered or saved.
 import 'dart:math' as math;
 
@@ -19,12 +19,15 @@ const double kPreviewShortSide = 360;
 
 class MusicVideoPreview extends StatefulWidget {
   const MusicVideoPreview({super.key, required this.state, required this.scene, required this.plan,
-      required this.options, required this.start, required this.end});
+      required this.options, required this.start, required this.end, this.position});
   final AppState state;
   final VideoScene scene;
   final ShotPlan plan;
   final MusicVideoOptions options;
   final double start, end;
+
+  /// Where the preview is (song steps), for the shot lane's playhead.
+  final ValueNotifier<double>? position;
 
   @override
   State<MusicVideoPreview> createState() => MusicVideoPreviewState();
@@ -94,8 +97,12 @@ class MusicVideoPreviewState extends State<MusicVideoPreview> with SingleTickerP
     _live = false;
   }
 
+  /// Moves the preview to [v] (the lane's cursor), playing on from there if it plays.
+  void seek(double v) => _scrub(v.clamp(widget.start, widget.end).toDouble());
+
   void _scrub(double v) {
     setState(() => _step = v);
+    widget.position?.value = v;
     if (_playing) {
       if (_live) s.seekTo(v);
       _silentFrom = v;
@@ -126,6 +133,7 @@ class MusicVideoPreviewState extends State<MusicVideoPreview> with SingleTickerP
       return;
     }
     setState(() => _step = math.max(widget.start, st));
+    widget.position?.value = _step;
     _repaint.value++;
   }
 
@@ -140,6 +148,7 @@ class MusicVideoPreviewState extends State<MusicVideoPreview> with SingleTickerP
         ? Size(kPreviewShortSide * ratio, kPreviewShortSide)
         : Size(kPreviewShortSide, kPreviewShortSide / ratio);
     final shot = widget.plan.at(_step);
+    final label = shot.panelShots.length > 1 ? shot.layout!.preset.label : shot.kind.label;
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       ConstrainedBox(
         constraints: const BoxConstraints(maxHeight: 360),
@@ -174,7 +183,7 @@ class MusicVideoPreviewState extends State<MusicVideoPreview> with SingleTickerP
           onChanged: _scrub,
         )),
         SizedBox(width: 92, child: Text(
-          '${shot.kind.label.toUpperCase()} · ${widget.plan.indexAt(_step) + 1}/${widget.plan.shots.length}',
+          '${label.toUpperCase()} · ${widget.plan.indexAt(_step) + 1}/${widget.plan.shots.length}',
           maxLines: 1, overflow: TextOverflow.ellipsis, textAlign: TextAlign.right,
           style: const TextStyle(color: Neon.dim, fontSize: 10),
         )),
