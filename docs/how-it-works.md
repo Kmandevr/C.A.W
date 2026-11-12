@@ -2,7 +2,7 @@
 title: How it works
 summary: The path a sound takes from a project edit to the speaker and to a WAV, the file that owns each step, and where to make each kind of change.
 covers: [engine/include/caw/module.hpp, engine/include/caw/component.hpp, engine/include/caw/instrument.hpp, engine/src/note_events.h, engine/CMakeLists.txt, engine/cmake/, examples/cpp/minimal/, scripts/caw-component-build.js, .github/workflows/cpp-components.yml, engine/src/engine.h, engine/src/capi.cpp, engine/src/module.*, engine/src/module_registry.*, engine/src/graph.*, engine/src/dependency.*, engine/src/execution.*, engine/src/hardware.*, engine/src/scheduler.*, engine/src/worker_api.cpp, engine/src/midi2.*, app/lib/engine/engine.dart, app/lib/engine/execution.dart, app/lib/engine/bindings.dart, app/lib/model/app_state.dart]
-updated: 2026-11-11
+updated: 2026-11-12
 ---
 
 # How it works
@@ -51,7 +51,7 @@ The modular foundation is real native C++ code, but it is not yet the active pla
 
 ## Export
 
-`caw_render` (`engine/src/render.cpp`) drives the same `Engine` offline, so a file matches what was heard bit for bit, and writes it with `engine/src/wav.cpp`. The app submits it as an offline-priority native job with progress and cancellation (the Export area). The CLI (`engine/cli/main.cpp`) uses the same native render call.
+`caw_render` (`engine/src/render.cpp`) drives the same `Engine` offline, so a file sounds the same as what was heard (timing exact, sound within the perceptual tolerance of `docs/decisions.md`, 2026-11-12), and writes it with `engine/src/wav.cpp`. The app submits it as an offline-priority native job with progress and cancellation (the Export area). The CLI (`engine/cli/main.cpp`) uses the same native render call.
 
 ## Where to change what
 

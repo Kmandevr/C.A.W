@@ -2,7 +2,7 @@
 title: Engine reference
 summary: What the built C++ engine does: patterns, playback of tracks, the project file, exports, the C API, the Drums instrument, the caw CLI, the component testing suite, the sample-pack maker and the tests.
 covers: [engine/, examples/]
-updated: 2026-11-11
+updated: 2026-11-12
 ---
 
 # Engine reference
@@ -101,7 +101,7 @@ A pattern can be imported from, and exported to, MIDI files for use in Reaper an
 - **Mix:** each layer has volume, constant-power pan, mute and solo, smoothed over 5 ms. Track and master volume are linear gains from 0 to +12 dB (3.981, `kMaxMixGain`; owner, 2026-11-10: faders like REAPER's), in the project JSON (`volume`, `master`) and the live controls alike; more is held at +12 dB. Volume automation lanes reach the same +12 dB (API version 7; before it they stopped at 0 dB), so a lane written from a fader keeps its level. The master chain is master volume, then a 5 Hz DC blocker, then a safety limiter with a ceiling of −0.2 dBFS, always last.
 - **Overload:** the host reports how much of each audio callback was used and how many frames it covered (`reportLoad(load, frames)`). Everything goes by time, so every callback size behaves as the 512-frame tuning did at 48 kHz: the average keeps 0.9 of itself per 10.7 ms, and if it stays above 85% for 0.21 s the engine mutes the newest audible layer, flags it in the meters and waits 1.07 s before it would mute another (before, these were 20 and 100 callbacks: 7 ms at 16 frames, 3.4 s at 8192). Clearing the overload unmutes them. The per-callback cost outside the layers is small at the smallest periods ([Fact, measured 2026-11-11, x86-64 Release]: 0.011 µs a callback stopped, 0.175 µs with one layer playing at 16 frames against 4.3 µs at 512). Test: `overload_shedding_goes_by_time_not_callbacks`.
 - **Threads:** the control thread parses patterns, builds chains and sends messages to the audio thread through a lock-free queue. The audio thread hands what it replaced back the same way, so it never allocates, locks or frees. Parameter and mix values are atomics.
-- **Determinism:**
+- **Determinism:** output must be perceptually identical, not bit-identical, across platforms, live against export and runs; timing, seeded choices and discrete behaviour stay exact (owner, 2026-11-12, [decisions](decisions.md)). **[Fact, 2026-11-12]** Until the speed phases change them, the build still gives the same bits:
   - The output doesn't depend on the device's buffer size.
   - The engine builds with `-ffp-contract=off` (MSVC `/fp:precise`, which never contracts), and `-fno-trapping-math` (Clang's default; it changes no result, since nothing reads floating-point exception flags, and lets GCC vectorize loops with selects).
   - The built-ins use the Library's own `sin`, `exp` and `log` (`caw/detmath.hpp`), so every platform gives the same bits.

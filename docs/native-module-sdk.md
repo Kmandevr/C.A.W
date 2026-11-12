@@ -1,7 +1,7 @@
 ---
 title: Native module SDK
 summary: C ABI host contract and C++ component SDK, validation, real-time rules, state and packaging.
-updated: 2026-11-11
+updated: 2026-11-12
 covers: [engine/include/caw_component.h, engine/include/caw/display.hpp, engine/include/caw/modulator.hpp, examples/cpp/modulator/, engine/include/caw/library/, engine/src/sample_pack.*, engine/plugin/clap/, engine/cmake/CAWClap.cmake, engine/plugin/vst3/, engine/cmake/CAWVst3.cmake, engine/include/caw/module.hpp, engine/include/caw/component.hpp, engine/include/caw/instrument.hpp, engine/CMakeLists.txt, engine/cmake/, examples/cpp/minimal/, examples/cpp/poly-synth/, scripts/caw-component-build.js, .github/workflows/cpp-components.yml, engine/src/module.*, engine/src/module_registry.*, engine/src/graph.*, engine/src/component_test.*, engine/src/analysis.*]
 ---
 
@@ -90,7 +90,7 @@ The rules that matter:
 - **Make `saveState` safe while `process` runs:** the host may save a playing project.
 - **Make `reset()` clear what you hold.** The host calls it so the next play starts from silence.
 - **Say when you are silent, and the host stops calling you.** Override `bool quiet() const noexcept` to return true, right after a `process`, when your output from then on is silence until an event arrives or your input is not silent (an instrument with no voice sounding, an effect whose tail has died out). The host then skips you, so a silent track costs nearly nothing; your time does not move meanwhile, so restart anything timed (a control grid, an LFO you care about) at the next note, and say quiet only once nothing timed that a later note starts from is still running (the acid synth waits for its filter envelope too). `CAW_EXPORT_COMPONENT` offers it through the C interface's `caw.quiet.v1` extension (`CawQuietExtension`), and the CLAP export reports it as `CLAP_PROCESS_SLEEP`. Without it the host keeps calling you: a declared `tailFrames` alone never puts you to sleep, because you would fall asleep on a block boundary with your timed state frozen there, and playback would then depend on the device's buffer size (second audio review, 2026-11-10).
-- **Use the Library for the same sound everywhere:** `caw/library/` ([below](#the-library)) and `caw/detmath.hpp` give the same bits on every device.
+- **Use the Library for the same sound everywhere:** `caw/library/` ([below](#the-library)) and `caw/detmath.hpp` sound the same on every device.
 
 ## Testing your effect
 

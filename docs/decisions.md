@@ -1,10 +1,19 @@
 ---
 title: Decisions
 summary: Dated record of what was chosen and why, newest first.
-updated: 2026-11-11
+updated: 2026-11-12
 ---
 
 # Decisions
+
+## 2026-11-12: Perceptually identical, not bit-identical; speed first (owner)
+
+**Decision (owner):** engine output must be **perceptually identical and consistent**, not bit-identical, across platforms, live playback against export, and repeated runs. This replaces every earlier promise of identical bits (the 2026-11-03 "Exports are always bit-identical" and golden-hash entries, and the 2026-11-10 "perceptually the same" entry, rewritten below to point here).
+
+- **Still exact:** note, clip and automation timing to the sample; every seeded random choice (stutter, randomise, round robins, seeded noise); discrete behaviour (triggers, step choices).
+- **Tests:** golden hashes are replaced by tolerance tests against the current renders, which stay as the references. Stable paths: the null residual against the reference stays below −120 dBFS peak. Chaotic paths (feedback near self-oscillation, self-resonant filters, free-running or unison phase): loudness over time within 0.1 dB and per-band spectrum within a stated tolerance. Discrete: identical note events, triggers and seeded choices. Real bugs (wrong gain, clicks, broken filters) must still fail, shown by a deliberately broken case.
+- **Allowed for speed, where the tolerance tests pass:** flush-to-zero, FMA and fast-math (keeping the NaN/inf guards that protect the mix), system or approximate maths instead of `caw/detmath.hpp` on per-sample paths, float instead of double on signal paths (double stays for phase accumulators and low-cutoff feedback filters), and a parallel mixer that sums in a fixed order. `detmath`'s bit operations stay wherever exact bits are behaviour (bitcrush, glitch masks).
+- **Process:** measure first (a CI bench on Linux and Android arm64 with a baseline in [engine](engine.md)), then one pull request per phase (free wins, floating point, maths, precision and layout, parallel mixer), each with before/after numbers. Claude asks the owner before any audible change and when a phase gains less than 5%.
 
 ## 2026-11-11: one plug-in page per C++ component (owner's "the plug-in workflow is confusing"; Claude, a proposal for the owner's review)
 
@@ -739,7 +748,7 @@ Built (engine pass, 2026-11-10):
 
 ## 2026-11-10: Sound need only be perceptually the same (owner)
 
-**Decision (owner):** "so long as someone can't perceive the difference it's fine." Where making output bit-identical (every device, playback against export) is expensive, a cheaper way that sounds effectively the same is acceptable. Golden renders still pin the sound so changes are deliberate; they check bit-exactness where it is cheap (offline renders of the same build), and a comparison within an inaudible tolerance where exactness would cost real-time performance (for example live playback against export with different block sizes).
+**Decision (owner):** "so long as someone can't perceive the difference it's fine." Where bit-identical output is expensive, a cheaper way that sounds effectively the same is acceptable. Extended on 2026-11-12: output need only be perceptually identical everywhere, checked by tolerance tests (entry above).
 
 ## 2026-11-10: CLAP headers for the plug-in builder (#162)
 
@@ -1080,8 +1089,8 @@ Built (engine pass, 2026-11-10):
 ## 2026-11-03: Reliability over old-engine compatibility
 
 - **The old engine's sound and behavior carry no weight (owner).** The goal is the most reliable engine possible. There is no need to reproduce how the pre-Foundation engine sounded or worked, and no support for its quirks.
-- **Golden hashes guard determinism and regressions, not the old sound.** Same source and settings must still give the same bits on every platform and every run. When an intended engine change alters output, the pull request re-records the hashes and states why, with a measurement; it does not need the owner's approval first. This replaces the earlier rule that every golden-hash change goes to the owner.
-- **Unchanged:** exports bit-identical across platforms; a real-time-safe callback; tests never weakened; bug fixes start with a failing test; the owner is asked before native SDK ABI changes and new dependencies.
+- **Reference renders guard regressions, not the old sound.** When an intended engine change alters output, the pull request re-records the references and states why, with a measurement; it does not need the owner's approval first. Since 2026-11-12 they are compared within a perceptual tolerance, not bit for bit (entry of that day).
+- **Unchanged:** a real-time-safe callback; tests never weakened; bug fixes start with a failing test; the owner is asked before native SDK ABI changes and new dependencies.
 
 ## 2026-11-03: Merging, and no project compatibility before Release 1
 
@@ -1101,7 +1110,7 @@ Built (engine pass, 2026-11-10):
 
 - **One graph runs everything (eventual engine core).** Code (.caw) layers, synth voices, effects, folder buses, sends and master all become nodes of the one typed module graph. The current layer → effects → folder bus → master mixer is migrated into it, not kept as a parallel path. Timing: first, as the roadmap's Foundation stage (see the next entry).
 - **Stage 0 SFZ means full import and mapping.** The first multisample version imports WAV samples (own or third-party), maps zones (key ranges, velocity layers) by hand, plays them in C.A.W and exports WAV + .sfz. This pulls the needed parts of roadmap Stage 3 (audio import) and Stage 4 (sampler zones, WAV/SFZ interchange) into Stage 0.
-- **Exports are always bit-identical.** Offline renders and exports produce the same bits on every platform. Live preview may use faster maths (SIMD, threads, reduced quality) only when it is labelled as a preview mode; golden tests cover the export path.
+- **Exports were to be bit-identical** on every platform; superseded on 2026-11-12: output, exports included, need only be perceptually identical (entry of that day).
 - **Low-end target includes budget phones:** Galaxy A1x-class, 3–4 GB RAM, Android 10+. Voice counts, buffer sizes and benchmark budgets are set for that class.
 - **Precision:** graph audio buffers are 32-bit float; 64-bit is used where accuracy needs it (phase/time accumulators, sensitive filter state). The .caw VM keeps its 64-bit JavaScript number semantics, which bytebeat compatibility requires.
 - **Latency is adjustable:** a low-latency mode for playing live when timing matters, and a lighter, more stable mode (larger buffers, less CPU) when it doesn't. This is the workload-policy model in [engine-next](engine-next.md) §9.
