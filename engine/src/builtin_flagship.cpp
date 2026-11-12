@@ -43,7 +43,9 @@
 // How it runs (the costs the phone budget cares about):
 // - Everything that is not audio runs once per control period of 16 frames (0.33 ms at 48 kHz): the knobs,
 //   the mod matrix, each voice's oscillator steps, mip levels, unison gains and filter coefficients. The grid
-//   runs on from block to block and restarts on a note-on, so any block size renders the same bits.
+//   runs on from block to block and restarts on a note-on, so any block size renders the same sound: the same
+//   bits on the builds checked (with -ffp-contract=fast a whole period's fixed-length loops and a shorter
+//   piece's may be fused differently, about 1 ulp; perceptual identity is the rule, docs/decisions.md).
 // - An oscillator copy (one unison voice) costs one interpolated read of a band-limited mip level per sample
 //   (two when the frame position sits between frames), plus its warp: no trig, no branches on data.
 // - Only sounding voices are visited (caw::VoicePool), only oscillators that are on, only filters and effects
@@ -681,7 +683,8 @@ struct OscKey {
 // The fold warp's 2x decimator for one side (the half-band all-pass pair of lib::Oversampler2x's down()): per
 // stage, lane 0 the even branch's all-pass and lane 1 the odd one's, each lane lib::AllpassChain's arithmetic.
 // A block at a time with the state in registers, and a stereo pair's two sides in one loop (four independent
-// all-pass chains): the same bits as one chain per branch and side, sample by sample (speed A2, 2026-11-12).
+// all-pass chains): each lane's arithmetic is one chain's, per branch and side, sample by sample (speed A2,
+// 2026-11-12), so the same within the tolerance tests and bit-identical on the builds checked.
 struct Decimator2x {
     static constexpr int kStages = 4;  // per branch: lib::HalfBandDesign(2 * kStages)
     alignas(16) double a[kStages][2] = {};
@@ -969,7 +972,9 @@ void addStackWarp(const OscVoice& o, const float* gL, const float* gR, float* L,
 }
 
 // addTwice for warp W: stereo through the left and right decimators, or mono (the halves summed once, as one
-// gain) through its own.
+// gain) through its own. N = 16 and N = 0 are the same arithmetic, but under -ffp-contract=fast the compiler may
+// fuse them differently (about 1 ulp where a block splits a period): the same within the tolerance tests,
+// bit-identical on the builds checked.
 template <int W>
 void addTwiceWarp(OscVoice& o, const float* gL, const float* gR, float* L, float* R, uint32_t n, uint32_t first,
                   bool mono) noexcept {
@@ -1154,7 +1159,8 @@ struct VoiceFilter {
     // dependent operations per sample, so a CPU running one voice's waits; K pairs' chains in one loop overlap.
     // Stereo: voice k's L[k], R[k] through *f[k] (process()), K voices. Mono: L[k] through *f[k]'s left side
     // (processMono()), 2K voices, two to a pair. Every filter is on and of one type, a ladder or the SVF low-pass
-    // (sideBySide()). Each sample's arithmetic is the one-voice path's, so the bits are the same.
+    // (sideBySide()). Each sample's arithmetic is the one-voice path's: the same within the tolerance tests, and
+    // bit-identical on the builds checked (-ffp-contract=fast may fuse the two paths differently, about 1 ulp).
     template <int K>
     static void stereoSideBySide(VoiceFilter* const* f, float* const* L, float* const* R, uint32_t n) noexcept {
         float dryL[K][kControlFrames], dryR[K][kControlFrames];
@@ -2297,8 +2303,8 @@ private:
         for (uint32_t i = 0; i < n; ++i) amp[i] = static_cast<float>(v.env[0].next() * (v.gain0 + step * static_cast<double>(first + i)));
     }
 
-    // The queued voices' filters, then each voice's output in the order they were queued (so the sums are the
-    // one-voice-at-a-time path's). Voices whose filter 1 is set to the same ladder or SVF low-pass run side by
+    // The queued voices' filters, then each voice's output in the order they were queued (so the sums are added
+    // as the one-voice-at-a-time path adds them). Voices whose filter 1 is set to the same ladder or SVF low-pass run side by
     // side, kSideBySide at a time, then their filter 2 likewise (VoiceFilter::stereoSideBySide).
     void finishVoices(VoiceWork* q, uint32_t count, uint32_t n, uint32_t first) noexcept {
         bool done[kQueue] = {};
@@ -2443,6 +2449,9 @@ private:
             voices_.forEachActive([&](Voice& v) noexcept { render(v, L, R); });
             finishVoices(queue, queued, n, first);
         }
+        // finishVoices() ends a voice after forEachActive() has kept it in the pool's list: drop it now, so the
+        // list holds only the voices sounding at the period's end (VoicePool's contract).
+        voices_.dropSilent();
         runShared(L, R, n);
         const double volumeStep = (volume1_ - volume0_) / kControlFrames;
         const double delayStep = (delayTime1_ - delayTime0_) / kControlFrames;
