@@ -259,3 +259,37 @@ The 64-voice Flagship and the 32-track song, over budget in the baseline (about 
 | Song, 32 tracks + heavy FX | | | |
 | Typical song + extras | | | |
 | Worst case, 32 tracks + heavy FX | | | |
+
+### A2. Flagship voices side by side
+
+**What changed (2026-11-12, branch `speed-flagship`, on `b0f8e08`: phases 1–4 merged; beta readiness plan item A2):** callgrind on `b0f8e08` (`caw_bench 2 500 --runs 1 --only flagship_heavy16`, instructions in `FlagshipInstrument::render`, 3,136 M) put the fold warp's oversampled stack at 50% (`addTwice`, its two decimators alone 10%), the other two oscillators' unwarped copies at 25% (`addStack`) and the voice filters with their drive at 12%. The filters are few instructions but a long chain of dependent operations per sample, so their share of the time is larger than their share of the instructions.
+
+- **The fold decimators** (`builtin_flagship.cpp`, `Decimator2x`): a block at a time with the state in registers, and a stereo voice's left and right decimators in one loop (four all-pass chains: two two-wide vectors, each lane `lib::AllpassChain`'s arithmetic), instead of each side sample by sample with its state loaded and stored per stage. Callgrind: `addTwice` 1,580 → 1,265 M.
+- **Fixed-length loops for a whole period** (`addTwice<W, Morph, N>`, `addTwiceWarp`): the usual 16-frame piece gets loops of a known length. The same for `addStack` made GCC vectorise its fixed-point phases worse (+66 M), so it stays at a run-time length.
+- **Several voices' filters side by side** (`FlagshipInstrument::startVoice`, `finishVoices`, `filterStereo`, `filterMono`; `VoiceFilter::stereoSideBySide`, `monoSideBySide`; the Library's new `MultiLadder::processPairs<Mode, K>` and `Svf::lowpassPairs<K>` in `filter.hpp`, which `processPair` now calls): each voice's oscillators go into its own buffers and wait in a queue of up to 8 voices; voices whose filter 1 (then filter 2) is the same ladder or SVF low-pass run in one loop, K stereo pairs (two centred voices share one two-wide vector), and every voice's level and sum are then added in the voices' order, so the sums are the one-voice path's. K is 4 on x86-64 and 2 on Arm64 (measured below; four voices' ladder state spills on Arm64: 62 q-register stack loads and stores in `processPairs<LowPass, 4>` against 15 for 2).
+- **Measured and not kept (no gain):** the copies' high-rate frame offsets worked out once for every copy (`addTwice` 1,082 → 1,083 M), and two unison copies summed into the high-rate buffers in one pass (1,082 → 1,093 M). The unwarped and folded copies' per-sample work (indices, the table reads, which neither SSE2 nor NEON can gather, the interpolation and the fold) is already four-wide float; what is left there is the work itself.
+- **Kept double:** the ladder and SVF states (resonant, low-cutoff feedback), the decimators' all-passes and the oscillators' 32-bit fixed-point phases. No float lanes were added.
+- **Vectorised, checked:** GCC 13 for Arm64 with the engine's flags (`-fopt-info-vec-optimized`): `addCopy`'s passes (lines 819, 841) and `addTwice`'s (927, 952, 958) are vectorised loops; in the Arm64 disassembly `MultiLadder::processPairs<LowPass, 2>` has 69 instructions on `.2d` vectors, `Svf::lowpassPairs<2>` 23, `Decimator2x::downBlock<true>` 41 and `addTwice<Fold, false, 16>` 256 on `.4s`. Clang 18 for Arm64 (`-Rpass=loop-vectorize`) vectorises the same `addCopy` and `addTwice` loops.
+- **The same bits:** a scratch render of 15 Flagship patches (the heavy patch at 16 and 7 voices, the default, mixes below 1, parallel routing with ladder BP and SVF HP, ladder HP and SVF LP at mix 0.5, centred ladder and SVF voices, the shared SVF, stereo SVF, bypass, quantize, 2x FM, Osc FM with fold; uneven blocks, staggered notes and releases) gives bit-identical output against `b0f8e08` on x86-64 GCC 13 and on Arm64 GCC 13 with the engine's flags (FMA contraction on) under qemu. Every reference render passes unchanged on x86-64 GCC 13 Release, Debug with sanitizers, and Arm64 GCC 13 with the engine's flags under qemu.
+
+**[Fact, Bench runs, 10 s × 3 runs, Neoverse-N2 cores both times]** mean µs (worst % of the budget). Before: [43260646583](https://github.com/Kmandevr/C.A.W/actions/runs/43260646583) (`b0f8e08`). After: [43267697713](https://github.com/Kmandevr/C.A.W/actions/runs/43267697713) (`49dca71`).
+
+| Scenario | Android arm64 before | after | change | Linux arm64 before | after | change |
+|---|---:|---:|---:|---:|---:|---:|
+| Flagship heavy, 64 voices held | 3,960.3 (78.9%) | 3,173.9 (67.2%) | −19.9% | 3,941.9 (79.0%) | 3,424.7 (69.6%) | −13.1% |
+| Flagship heavy, 16 voices held | 1,028.1 (21.5%) | 832.5 (18.1%) | −19.0% | 1,019.4 (21.2%) | 891.0 (18.6%) | −12.6% |
+| Typical song (8 tracks) | 711.8 | 687.5 | −3.4% | 715.4 | 703.4 | −1.7% |
+| Typical song + extras | 966.8 | 949.2 | −1.8% | 950.4 | 940.3 | −1.1% |
+| Song, 16 tracks | 1,342.1 | 1,301.8 | −3.0% | 1,359.4 | 1,341.0 | −1.4% |
+| Song, 32 tracks + heavy FX | 4,107.3 | 4,067.3 | −1.0% | 4,177.8 | 4,222.5 | +1.1% |
+
+The other scenarios have no Flagship and moved within the runners' noise. The filters' group size, timed in one Bench run ([43266125720](https://github.com/Kmandevr/C.A.W/actions/runs/43266125720), 10 s, two runs each, Flagship heavy 64 voices, mean µs): one voice at a time (the decimators and fixed loops only) 3,319 / 3,590 / 3,594 on Android arm64 / Linux arm64 / Linux x64; two voices 3,171–3,194 / 3,407–3,420 / 3,329; four 3,178–3,186 / 3,425–3,428 / 3,249–3,260. So most of the gain is the decimators, and side by side adds 4–5% on Arm64 and 10% on x86-64.
+
+**[Fact, callgrind, 2026-11-12]** M Ir per second of audio in `Engine::process`, x86-64 GCC 13.3 Release (`caw_bench 2 500 --runs 1 --only <scenario>`, divided by 2):
+
+| Scenario | Before | After | Change |
+|---|---:|---:|---:|
+| Flagship heavy, 64 voices held | 6,108.4 | 5,666.6 | −7.2% |
+| Flagship heavy, 16 voices held | 1,603.6 | 1,493.4 | −6.9% |
+
+- **What is left (callgrind, flagship_heavy16 after):** the fold stack (`addTwice` with its table reads, 43%), the unwarped copies (`addStack`, 25%), the filter drive (`VoiceFilter::begin`, 5%) and the ladders (4%). **[Proposal]** the next step for the heavy patch is fewer table reads rather than wider vectors (for example a cheaper fold at the high rate).
