@@ -243,6 +243,7 @@ target_include_directories(caw_cli PRIVATE src)
   target_sources(caw_tests PRIVATE tests/audio_assets_test.cpp)  # assets, audio clips, the sampler, SFZ, input (WP-J)
   target_sources(caw_tests PRIVATE tests/speed_free_wins_test.cpp)  # speed phase 1: Eco oversampling, silent work skipped, master sleep
   target_sources(caw_tests PRIVATE tests/fp_mode_test.cpp)  # speed phase 2: the flush-to-zero guard, NaN/Inf guards under the build flags
+  target_sources(caw_tests PRIVATE tests/sample_timing_test.cpp tests/timing_oracle.cpp)  # note timing exact to the sample
   add_library(caw_test_component MODULE tests/native_component_fixture.cpp)
   target_link_libraries(caw_test_component PRIVATE CAW::SDK)
   target_compile_options(caw_test_component PRIVATE ${CAW_FLAGS})
@@ -322,7 +323,7 @@ endif()
 # graph's routing (copies keep -0.0f; gains apply in order), computed without reassociation or folded signed zeros.
 if(CAW_TOOLS)
   set_source_files_properties(tests/library_kernels_test.cpp tests/builtin_instruments_test.cpp tests/graph_channels_test.cpp
-    PROPERTIES COMPILE_OPTIONS "${_caw_fp_strict}")
+    tests/timing_oracle.cpp PROPERTIES COMPILE_OPTIONS "${_caw_fp_strict}")
 endif()
 # The engine's own targets take CAW_FP_FLAGS (in CAW_FLAGS) instead of the SDK's strict floating-point flags.
 foreach(_caw_target caw_core caw_engine caw_cli caw_tests caw_rt_tests caw_bench)
