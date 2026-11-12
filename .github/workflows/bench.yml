@@ -32,6 +32,7 @@ env:
   RUNS: ${{ inputs.runs || '3' }}
   # The NDK the APK's engine is built with (Flutter's ndkVersion; app.yml caches the same one).
   NDK_VERSION: 28.2.13676358
+  CAW_FP_EXPERIMENT: "-DCAW_FP_FLAGS=-ffp-contract=off;-fno-fast-math;-fno-trapping-math"  # TEMPORARY: per-flag measurement
 
 jobs:
   linux:
@@ -47,7 +48,7 @@ jobs:
       - uses: actions/checkout@v7
       - name: Build caw_bench (Release)
         run: |
-          cmake -S engine -B build -DCMAKE_BUILD_TYPE=Release -DCAW_AUDIO=OFF
+          cmake -S engine -B build -DCMAKE_BUILD_TYPE=Release -DCAW_AUDIO=OFF ${CAW_FP_EXPERIMENT:+"$CAW_FP_EXPERIMENT"}
           cmake --build build --target caw_bench --parallel
       - name: Machine
         run: |
@@ -85,7 +86,7 @@ jobs:
           cmake -S engine -B build-android -DCMAKE_BUILD_TYPE=Release -DCAW_AUDIO=OFF \
             -DCMAKE_TOOLCHAIN_FILE="$NDK/build/cmake/android.toolchain.cmake" \
             -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-29 -DANDROID_STL=c++_static \
-            -DCMAKE_EXE_LINKER_FLAGS=-static
+            -DCMAKE_EXE_LINKER_FLAGS=-static ${CAW_FP_EXPERIMENT:+"$CAW_FP_EXPERIMENT"}
           cmake --build build-android --target caw_bench --parallel
           file build-android/caw_bench
       - uses: actions/upload-artifact@v7
