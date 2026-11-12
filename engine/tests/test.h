@@ -17,7 +17,8 @@ struct Case {
 
 std::vector<Case>& cases();
 void fail(const char* file, int line, const std::string& msg);
-extern bool updateGolden;
+int failureCount();  // failures so far in this run
+extern bool updateGolden;  // --update-references: re-record the reference renders (tolerance.h)
 
 struct Reg {
     Reg(const char* n, std::function<void()> f) { cases().push_back({n, std::move(f)}); }

@@ -1,4 +1,4 @@
-// The built-in effects suite (#173): kernels, each effect's response, stability, block sizes, sleep, display, goldens.
+// The built-in effects suite (#173): kernels, each effect's response, stability, block sizes, sleep, display, reference renders.
 #include <algorithm>
 #include <cmath>
 #include <complex>
@@ -27,6 +27,7 @@ static constexpr double kTestPi = 3.14159265358979323846;
 #include "engine.h"
 #include "project.h"
 #include "test.h"
+#include "tolerance.h"
 #include "test_signal.h"
 
 using namespace caw;
@@ -149,6 +150,16 @@ double gainAt(Engine& e, const char* id, const Values& v, double hz) {
     return db(rms(out.l, 24000, 48000) / rms(in.l, 24000, 48000));
 }
 
+// A reference's name: the effect's id, and " busy" for its busy settings.
+std::string caseName(const char* id, bool busy) { return std::string(id) + (busy ? " busy" : ""); }
+// How each case is compared with its reference (tolerance.h).
+// Chaotic (2026-11-12 probes, docs/engine.md "Reference renders"): the transient shaper's and the distortion's busy
+// settings amplify a one-float-step change of their input to within 3 dB of -120 dBFS; every other case is stable.
+cawtest::Class effectClass(const char* id, bool busy) {
+    const std::string s = id;
+    return busy && (s == "org.caw.transient" || s == "org.caw.distortion") ? cawtest::Class::Chaotic : cawtest::Class::Stable;
+}
+
 uint64_t hash(const Stereo& s) {
     uint64_t h = 1469598103934665603ull;
     auto mix = [&](float f) {
@@ -160,7 +171,7 @@ uint64_t hash(const Stereo& s) {
     return h;
 }
 
-// Every knob away from its default, so each effect's whole path runs (for block sizes, stability, goldens).
+// Every knob away from its default, so each effect's whole path runs (for block sizes, stability, reference renders).
 Values busy(const char* id) {
     const std::string s = id;
     if (s == "org.caw.eq")
@@ -450,36 +461,22 @@ TEST(every_effect_publishes_its_display_layout) {
     }
 }
 
-TEST(the_effects_match_their_golden_renders) {
-    // Hashes of 2 s of music through each effect at its defaults and its busy settings, 64-frame blocks, 120 BPM.
-    // Change them only for an intended sound change (the failure prints the new hash).
-    struct Golden {
-        const char* id;
-        bool busy;
-        uint64_t hash;
-    };
-    const Golden goldens[] = {
-#include "effects_golden.inc"
-    };
+TEST(the_effects_match_their_reference_renders) {
+    // 2 s of music through each effect at its defaults and its busy settings, 64-frame blocks, 120 BPM, against
+    // references/effects.cawref. Re-record only for an intended sound change (caw_tests --update-references).
     Engine e(48000);
     const Stereo in = music(48000 * 2);
+    cawtest::References refs("effects");
     for (const char* id : kSuite)
         for (bool b : {false, true}) {
             std::unique_ptr<ModuleProcessor> p = make(e, id);
             if (!p) continue;
-            const uint64_t h = hash(run(*p, in, b ? busy(id) : Values{}, 64, 120));
-            const Golden* g = nullptr;
-            for (const Golden& x : goldens)
-                if (std::strcmp(x.id, id) == 0 && x.busy == b) g = &x;
-            if (!g || g->hash != h) {
-                char buf[160];
-                std::snprintf(buf, sizeof buf, "    {\"%s\", %s, 0x%016llxull},", id, b ? "true" : "false", static_cast<unsigned long long>(h));
-                cawtest::fail(__FILE__, __LINE__, buf);
-            }
+            const Stereo out = run(*p, in, b ? busy(id) : Values{}, 64, 120);
+            CHECK_REFERENCE(refs, caseName(id, b), (cawtest::Audio{out.l, out.r}), effectClass(id, b));
         }
 }
 
-// The Library's stereo tools and the ducker (#121, #175): the same golden pattern, from a list of their own.
+// The Library's stereo tools and the ducker (#121, #175): the same reference pattern, from a list of their own.
 static const char* const kStereoTools[] = {"org.caw.stereo.balance", "org.caw.stereo.width", "org.caw.distortion",
                                     "org.caw.delay.pingpong", "org.caw.chorus",       "org.caw.ducker"};
 
@@ -495,35 +492,22 @@ static Values stereoToolBusy(const char* id) {
             {"offset", 0.25}, {"bands", 1}, {"crossover", 300}};
 }
 
-TEST(the_stereo_tools_and_the_ducker_match_their_golden_renders) {
-    // As the_effects_match_their_golden_renders (2 s of music, defaults and busy settings, 64-frame blocks, 120 BPM),
-    // with the song playing (the ducker's Tempo mode ducks on its beat), and the same bits at 37-frame blocks.
-    struct Golden {
-        const char* id;
-        bool busy;
-        uint64_t hash;
-    };
-    const Golden goldens[] = {
-#include "effects_golden.inc"
-    };
+TEST(the_stereo_tools_and_the_ducker_match_their_reference_renders) {
+    // As the_effects_match_their_reference_renders (2 s of music, defaults and busy settings, 64-frame blocks, 120 BPM),
+    // with the song playing (the ducker's Tempo mode ducks on its beat), against references/stereo_tools.cawref, and the
+    // same bits at 37-frame blocks.
     Engine e(48000);
     const Stereo in = music(48000 * 2);
+    cawtest::References refs("stereo_tools");
     for (const char* id : kStereoTools)
         for (bool b : {false, true}) {
             std::unique_ptr<ModuleProcessor> p = make(e, id);
             if (!p) continue;
             const Stereo out = run(*p, in, b ? stereoToolBusy(id) : Values{}, 64, 120, true);  // playing: the ducks
+            CHECK_REFERENCE(refs, caseName(id, b), (cawtest::Audio{out.l, out.r}), effectClass(id, b));
             const uint64_t h = hash(out);
             if (hash(run(*make(e, id), in, b ? stereoToolBusy(id) : Values{}, 37, 120, true)) != h)
                 cawtest::fail(__FILE__, __LINE__, std::string(id) + " renders differently at another block size");
-            const Golden* g = nullptr;
-            for (const Golden& x : goldens)
-                if (std::strcmp(x.id, id) == 0 && x.busy == b) g = &x;
-            if (!g || g->hash != h) {
-                char buf[160];
-                std::snprintf(buf, sizeof buf, "    {\"%s\", %s, 0x%016llxull},", id, b ? "true" : "false", static_cast<unsigned long long>(h));
-                cawtest::fail(__FILE__, __LINE__, buf);
-            }
         }
 }
 

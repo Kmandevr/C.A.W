@@ -1,4 +1,4 @@
-// The Creative and Pitch & Time effects (fx-creative): each effect's sound, block sizes, sleep, display, presets, stability, goldens.
+// The Creative and Pitch & Time effects (fx-creative): each effect's sound, block sizes, sleep, display, presets, stability, reference renders.
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -16,6 +16,7 @@
 #include "presets.h"
 #include "quality.h"
 #include "test.h"
+#include "tolerance.h"
 
 using namespace caw;
 
@@ -164,6 +165,11 @@ double crossingsHz(const std::vector<float>& x, size_t from, size_t to) {
     for (size_t i = from + 1; i < to; ++i) c += (x[i - 1] < 0) != (x[i] < 0);
     return 0.5 * static_cast<double>(c) * 48000.0 / static_cast<double>(to - from);
 }
+
+// A reference's name: the effect's id, and " busy" for its busy settings.
+std::string caseName(const char* id, bool busy) { return std::string(id) + (busy ? " busy" : ""); }
+// How each case is compared with its reference (tolerance.h): all stable (2026-11-12 probes, docs/engine.md).
+cawtest::Class effectClass(const char*, bool) { return cawtest::Class::Stable; }
 
 uint64_t hash(const Stereo& s) {
     uint64_t h = 1469598103934665603ull;
@@ -328,32 +334,18 @@ TEST(fx_creative_effects_publish_their_display_layouts) {
     }
 }
 
-TEST(fx_creative_effects_match_their_golden_renders) {
+TEST(fx_creative_effects_match_their_reference_renders) {
     // 2 s of music through each effect at its defaults and busy settings, 64-frame blocks, 120 BPM, stopped.
-    // Change a hash only for an intended sound change (the failure prints the new one).
-    struct Golden {
-        const char* id;
-        bool busy;
-        uint64_t hash;
-    };
-    const Golden goldens[] = {
-#include "fx_creative_golden.inc"
-    };
+    // Against references/fx_creative.cawref; re-record only for an intended sound change (caw_tests --update-references).
     Engine e(48000);
     const Stereo in = music(48000 * 2);
+    cawtest::References refs("fx_creative");
     for (const char* id : kCreative)
         for (bool b : {false, true}) {
             std::unique_ptr<ModuleProcessor> p = make(e, id);
             if (!p) continue;
-            const uint64_t h = hash(run(*p, in, b ? busy(id) : Values{}));
-            const Golden* g = nullptr;
-            for (const Golden& x : goldens)
-                if (std::strcmp(x.id, id) == 0 && x.busy == b) g = &x;
-            if (!g || g->hash != h) {
-                char buf[160];
-                std::snprintf(buf, sizeof buf, "    {\"%s\", %s, 0x%016llxull},", id, b ? "true" : "false", static_cast<unsigned long long>(h));
-                cawtest::fail(__FILE__, __LINE__, buf);
-            }
+            const Stereo out = run(*p, in, b ? busy(id) : Values{});
+            CHECK_REFERENCE(refs, caseName(id, b), (cawtest::Audio{out.l, out.r}), effectClass(id, b));
         }
 }
 

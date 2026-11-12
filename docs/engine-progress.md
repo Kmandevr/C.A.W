@@ -1,7 +1,7 @@
 ---
 title: Native engine refactor progress
 summary: Live milestone ledger and exact continuation point for the native engine refactor.
-updated: 2026-11-11
+updated: 2026-11-12
 ---
 
 # Native engine refactor progress
@@ -169,7 +169,7 @@ Graph compile/prepare now require an explicit working-memory budget and prefligh
 3. Establish prepared project/runtime snapshots as the publication unit. Build modules, graph, routing, schedules, buffers and migration plans off callback; publish atomically at a block boundary; reclaim old snapshots off callback. Replace per-layer partial command submission with transactional updates. Fix command timeout/drop and slot-exhaustion loss; retirement overflow now has callback-safe capacity backpressure, which still needs stress verification.
 4. Wire hardware-derived Engine resource budgets into graph compile/prepare and project/state allocation. Validate estimates against actual allocation behavior and profile on weak and strong targets.
 5. Generalize the graph executor beyond F3's planar N-channel one-in/one-out audio (fan-in exists since F4.1): custom channel mapping, multiple input/output ports, audio/control/modulation/event/MIDI buffers, timestamp ordering and delayed feedback boundaries.
-6. Integrate the prepared graph with existing VM instances, voices, patterns, imports/exports, automation, folder buses, offline rendering and state migration. Do not create a second engine. Since F4.2 the mixer routes in float and `engine/tests/mix_golden_test.cpp` hashes multi-track mixes; those hashes must hold when routing moves into the graph.
+6. Integrate the prepared graph with existing VM instances, voices, patterns, imports/exports, automation, folder buses, offline rendering and state migration. Do not create a second engine. Since F4.2 the mixer routes in float, and `engine/tests/mix_reference_test.cpp` holds multi-track mixes to their reference renders (tolerance tests since 2026-11-12); they must hold when routing moves into the graph.
 7. Replace remaining fixed project/voice/export/curve/event caps with resource-derived storage and actionable errors; remove the 64 MiB layer-silencing behavior (the 64-bar clamp went in F7.2). Surface standalone transport command failures and stress-verify callback-safe retirement backpressure and make remaining command failures explicit. Continue unified parameters, native module lifecycle, MIDI device/event routing, adaptive scheduling/batching and Flutter integration. Update docs/tests and open one coherent PR only when all acceptance criteria are met.
 
 ## Non-negotiable decisions

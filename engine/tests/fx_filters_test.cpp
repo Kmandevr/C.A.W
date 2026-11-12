@@ -1,4 +1,4 @@
-// The EQ & Filter group (fx-filters): each effect's response, stability, block sizes, sleep, display, presets and goldens.
+// The EQ & Filter group (fx-filters): each effect's response, stability, block sizes, sleep, display, presets and reference renders.
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -19,6 +19,7 @@
 #include "quality.h"
 #include "wav.h"
 #include "test.h"
+#include "tolerance.h"
 
 using namespace caw;
 
@@ -157,16 +158,10 @@ double pitchOf(const std::vector<float>& x, size_t from, size_t to) {
     return count > 1 ? 48000.0 * (count - 1) / static_cast<double>(last - first) : 0.0;
 }
 
-uint64_t hash(const Stereo& s) {
-    uint64_t h = 1469598103934665603ull;
-    auto mix = [&](float f) {
-        uint32_t bits;
-        std::memcpy(&bits, &f, 4);
-        for (int k = 0; k < 4; ++k) h = (h ^ ((bits >> (8 * k)) & 255u)) * 1099511628211ull;
-    };
-    for (size_t i = 0; i < s.size(); ++i) mix(s.l[i]), mix(s.r[i]);
-    return h;
-}
+// A reference's name: the effect's id, and " busy" for its busy settings.
+std::string caseName(const char* id, bool busy) { return std::string(id) + (busy ? " busy" : ""); }
+// How each case is compared with its reference (tolerance.h): all stable (2026-11-12 probes, docs/engine.md).
+cawtest::Class effectClass(const char*, bool) { return cawtest::Class::Stable; }
 
 Values busy(const std::string& s) {
     if (s == "org.caw.ladder") return {{"mode", 0}, {"slope", 1}, {"cutoff", 700}, {"resonance", 0.85}, {"drive", 12}, {"bias", 0.3}, {"comp", 0.7}, {"mix", 0.9}};
@@ -311,30 +306,16 @@ TEST(fx_filters_publish_their_display_layouts) {
     }
 }
 
-TEST(fx_filters_match_their_golden_renders) {
-    struct Golden {
-        const char* id;
-        bool busy;
-        uint64_t hash;
-    };
-    const Golden goldens[] = {
-#include "fx_filters_golden.inc"
-    };
+TEST(fx_filters_match_their_reference_renders) {
     Engine e(48000);
     const Stereo in = music(48000 * 2);
+    cawtest::References refs("fx_filters");
     for (const char* id : kGroup)
         for (bool b : {false, true}) {
             std::unique_ptr<ModuleProcessor> p = make(e, id);
             if (!p) continue;
-            const uint64_t h = hash(run(*p, in, b ? busy(id) : Values{}, 64));
-            const Golden* g = nullptr;
-            for (const Golden& x : goldens)
-                if (std::strcmp(x.id, id) == 0 && x.busy == b) g = &x;
-            if (!g || g->hash != h) {
-                char buf[160];
-                std::snprintf(buf, sizeof buf, "    {\"%s\", %s, 0x%016llxull},", id, b ? "true" : "false", static_cast<unsigned long long>(h));
-                cawtest::fail(__FILE__, __LINE__, buf);
-            }
+            const Stereo out = run(*p, in, b ? busy(id) : Values{}, 64);
+            CHECK_REFERENCE(refs, caseName(id, b), (cawtest::Audio{out.l, out.r}), effectClass(id, b));
         }
 }
 

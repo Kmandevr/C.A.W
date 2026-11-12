@@ -1,7 +1,7 @@
 ---
 title: Native engine recovery
 summary: Short resume guide for continuing the native engine refactor without repeating completed work.
-updated: 2026-11-09
+updated: 2026-11-12
 ---
 
 # Native engine recovery
@@ -54,7 +54,7 @@ Regression coverage added across these slices includes 8,195 graph nodes/8,194 c
 - `GraphExecutor` and `ModuleRegistry` still have no production playback integration with Engine/VM.
 - Note previews (#103) and track/folder meters (2026-11-05) run inside the Engine's existing mix-graph nodes; they add no graph features.
 - GraphExecutor is planar N-channel (F3) with typed audio (several, for sidechains), modulation, control (F5.1) and event (F5.2) ports; summing inputs accept fan-in since F4.1 and audio ones can be re-routed on the audio thread (`setRouting`, F4.3). It does not yet implement dynamic routing of non-audio ports, sends/returns, feedback boundaries or nested graphs, or receive MIDI from devices (modulation links, automation lanes and CC mappings from host events feed its resolved parameters, F6.3–F6.5; the Engine's .caw params use the same resolver, F6.6).
-- Do not create a second engine. Integrate existing VM Instances, voices, imports/exports, automation, folder buses, offline rendering and project migration into one prepared execution model. Keep the template and multi-track mixer golden hashes (`golden.txt`, `mix_golden_test.cpp`) unchanged while doing so.
+- Do not create a second engine. Integrate existing VM Instances, voices, imports/exports, automation, folder buses, offline rendering and project migration into one prepared execution model. Keep the multi-track mixer's reference renders (`mix_reference_test.cpp`, tolerance tests since 2026-11-12) passing while doing so.
 - Audio callback must remain allocation-free, lock-free, I/O-free and logging-free. No worker waits on callback. Prepare data before activation and reclaim it off callback.
 - The current `.caw` VM remains a constrained transitional path while useful capabilities are migrated; it is not the target authoring language. Trusted native C++ is not sandboxed without process isolation, and old-source/pre-release-project compatibility is not required.
 - Preserve deterministic behavior, live/offline parity and retained engine capabilities. Old `.caw` source and pre-release-project compatibility are not required.
