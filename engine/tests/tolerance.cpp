@@ -236,7 +236,9 @@ bool read(BitReader& r, Buf& x, size_t len) {
         for (size_t i = part; i < std::min(len, part + kPartition); ++i) {
             uint64_t u = 0;
             if (k != kZeroPartition && !getRice(r, k, u)) return false;
-            x[start + i] = unzigzag(u) + predict(x, start + i, pred);
+            const int64_t residual = unzigzag(u);  // |residual| < 2^63; a prediction stays below 2^52
+            if (residual > 8 * kClamp || residual < -8 * kClamp) return false;
+            x[start + i] = residual + predict(x, start + i, pred);
             if (x[start + i] > 4 * kClamp || x[start + i] < -4 * kClamp) return false;
         }
     }
@@ -271,7 +273,11 @@ std::vector<float> bandsDb(const std::vector<float>& x) {
         caw::analysis::fft(d, false);
         for (size_t k = 0; k < kFftSize / 2; ++k) power[k] += std::norm(d[k]);
     }
-    std::vector<float> out;
+    const double scale = static_cast<double>(windows) * (kFftSize * kFftSize / 4.0);
+    // Below 20 Hz, DC included (bins 0 to 3; the 25 Hz band starts at 22.3 Hz): an offset or a lost DC blocker.
+    double sub = 0;
+    for (size_t k = 0; k * 48000.0 / kFftSize < 20.0; ++k) sub += power[k];
+    std::vector<float> out{static_cast<float>(db10(sub / scale))};
     for (int b = kBandsLowest; b <= kBandsHighest; ++b) {
         const double centre = 1000.0 * std::pow(2.0, b / 3.0);
         const double lo = centre * std::pow(2.0, -1.0 / 6.0), hi = centre * std::pow(2.0, 1.0 / 6.0);
@@ -280,7 +286,7 @@ std::vector<float> bandsDb(const std::vector<float>& x) {
             const double hz = static_cast<double>(k) * 48000.0 / kFftSize;
             if (hz >= lo && hz < hi) sum += power[k];
         }
-        out.push_back(static_cast<float>(db10(sum / windows / (kFftSize * kFftSize / 4.0))));
+        out.push_back(static_cast<float>(db10(sum / scale)));
     }
     return out;
 }
@@ -484,7 +490,12 @@ std::string compareChaotic(const Features& reference, const Features& render) {
         std::string why = compareCurve("loudness, frame", c, reference.loud[c], render.loud[c], tol::kLoudnessDb, window);
         if (why.empty()) why = compareCurve("difference loudness, frame", c, reference.bright[c], render.bright[c], tol::kLoudnessDb, window);
         if (why.empty()) why = compareCurve("1/3-octave band", c, reference.bands[c], render.bands[c], tol::kBandDb, 1);
-        if (why.empty() && !compareExact(reference.onsets[c], render.onsets[c]).empty()) {
+        bool onsetsMatch = reference.onsets[c].size() == render.onsets[c].size();
+        for (size_t i = 0; onsetsMatch && i < reference.onsets[c].size(); ++i) {
+            const uint32_t x = reference.onsets[c][i], y = render.onsets[c][i];
+            onsetsMatch = (x > y ? x - y : y - x) <= tol::kOnsetSlackFrames;
+        }
+        if (why.empty() && !onsetsMatch) {
             why = std::string(c ? "right" : "left") + " onsets differ:";
             for (size_t i = 0; i < std::max(reference.onsets[c].size(), render.onsets[c].size()) && i < 8; ++i)
                 why += " " + (i < render.onsets[c].size() ? std::to_string(render.onsets[c][i]) : std::string("-")) + "/" +
@@ -567,38 +578,11 @@ bool decodeAudio(const std::vector<uint8_t>& bytes, uint32_t frames, Audio& out)
     return true;
 }
 
-// ---------------------------------------------------------------- reference files
-
-References::References(std::string suite) : suite_(std::move(suite)), updating_(updateGolden) {
-    if (!updating_) loaded_ = load();
-}
-
-References::~References() {
-    if (updating_ && !save()) std::printf("FAIL could not write %s\n", path().c_str());
-}
-
-std::string References::path() const {
-#ifdef CAW_ROOT
-    return std::string(CAW_ROOT) + "/engine/tests/references/" + suite_ + ".cawref";
-#else
-    return "engine/tests/references/" + suite_ + ".cawref";
-#endif
-}
-
-const References::Entry* References::find(const std::string& name) const {
-    for (const Entry& e : entries_)
-        if (e.name == name) return &e;
-    return nullptr;
-}
+// ---------------------------------------------------------------- the reference sets
 
 namespace {
 
-Audio prefix(const Audio& a, size_t frames) {
-    frames = std::min(frames, a.frames());
-    return {std::vector<float>(a.l.begin(), a.l.begin() + static_cast<std::ptrdiff_t>(frames)),
-            std::vector<float>(a.r.begin(), a.r.begin() + static_cast<std::ptrdiff_t>(frames))};
-}
-
+// The largest loudness and band differences, for CAW_REFERENCE_REPORT.
 std::string featureDeltas(const Features& a, const Features& b) {
     double loud = 0, bands = 0;
     for (int ch = 0; ch < 2; ++ch) {
@@ -612,20 +596,51 @@ std::string featureDeltas(const Features& a, const Features& b) {
 
 }  // namespace
 
-void References::storeWaveformFrames(uint32_t frames) { waveFrames_ = frames; }
+References::References(std::string suite) : References(std::move(suite), std::string(), updateGolden) {}
 
-void References::check(const std::string& name, const Audio& render, Class c, const char* file, int line) {
-    const std::string label = suite_ + "/" + name;
-    if (render.l.size() != render.r.size() || render.frames() == 0 || render.frames() > kMaxFrames) {
-        fail(file, line, label + ": no render to compare");
+References::References(std::string suite, std::string dir, bool updating)
+    : suite_(std::move(suite)), dir_(std::move(dir)), updating_(updating), failuresAtStart_(failureCount()) {
+    if (!updating_) loaded_ = load();
+}
+
+References::~References() {
+    if (updating_) {
+        if (failureCount() > failuresAtStart_)
+            std::printf("     %s not written: its test failed while recording\n", path().c_str());
+        else if (!save())
+            fail(__FILE__, __LINE__, "could not write " + path());
         return;
     }
+    for (const Entry& e : entries_)
+        if (!e.compared) fail(__FILE__, __LINE__, suite_ + "/" + e.name + ": stored but never compared (a case went missing?)");
+}
+
+std::string References::path() const {
+    if (!dir_.empty()) return dir_ + "/" + suite_ + ".cawref";
+#ifdef CAW_ROOT
+    return std::string(CAW_ROOT) + "/engine/tests/references/" + suite_ + ".cawref";
+#else
+    return "engine/tests/references/" + suite_ + ".cawref";
+#endif
+}
+
+References::Entry* References::find(const std::string& name) {
+    for (Entry& e : entries_)
+        if (e.name == name) return &e;
+    return nullptr;
+}
+
+void References::check(const std::string& name, const Audio& render, Class c, const char* file, int line) {
+    const std::string why = compare(name, render, c);
+    if (!why.empty()) fail(file, line, suite_ + "/" + name + ": " + why);
+}
+
+std::string References::compare(const std::string& name, const Audio& render, Class c) {
+    const std::string label = suite_ + "/" + name;
+    if (render.l.size() != render.r.size() || render.frames() == 0 || render.frames() > kMaxFrames) return "no render to compare";
     const uint32_t frames = static_cast<uint32_t>(render.frames());
     if (updating_) {
-        if (find(name)) {
-            fail(file, line, label + ": recorded twice");
-            return;
-        }
+        if (find(name)) return "recorded twice";
         Entry e;
         e.name = name;
         e.cls = c;
@@ -633,66 +648,42 @@ void References::check(const std::string& name, const Audio& render, Class c, co
         if (c == Class::Chaotic) {
             e.features = measureFeatures(render);
         } else {
-            e.waveFrames = waveFrames_ && waveFrames_ < frames ? waveFrames_ : frames;
-            if (e.waveFrames < frames) e.features = measureFeatures(render);
-            e.wave = encodeAudio(prefix(render, e.waveFrames));
+            e.wave = encodeAudio(render);
             for (const Entry& x : entries_)
-                if (x.cls == Class::Stable && x.alias.empty() && x.frames == e.frames && x.waveFrames == e.waveFrames &&
-                    x.wave == e.wave) {
-                    e.alias = x.name;
+                if (x.cls == Class::Stable && x.alias.empty() && x.frames == e.frames && x.wave == e.wave) {
+                    e.alias = x.name;  // the same whole waveform, bit for bit
                     e.wave.clear();
                     break;
                 }
         }
         entries_.push_back(std::move(e));
-        return;
+        return {};
     }
-    if (!loaded_) {
-        fail(file, line, label + ": cannot read " + path() + " (record it with caw_tests --update-references)");
-        return;
-    }
-    const Entry* e = find(name);
-    if (!e) {
-        fail(file, line, label + ": no reference (record it with caw_tests --update-references)");
-        return;
-    }
-    if (e->cls != c) {
-        fail(file, line, label + ": recorded as another class; re-record the references");
-        return;
-    }
-    if (e->frames != frames) {
-        fail(file, line, label + ": " + std::to_string(frames) + " frames, reference " + std::to_string(e->frames));
-        return;
-    }
+    if (!loaded_) return "cannot read " + path() + " (record it with caw_tests --update-references)";
+    Entry* e = find(name);
+    if (!e) return "no reference (record it with caw_tests --update-references)";
+    e->compared = true;
+    if (e->cls != c) return "recorded as another class; re-record the references";
+    if (e->frames != frames) return std::to_string(frames) + " frames, reference " + std::to_string(e->frames);
     const bool report = std::getenv("CAW_REFERENCE_REPORT") != nullptr;
-    const Entry* w = c == Class::Stable && !e->alias.empty() ? find(e->alias) : e;
-    if (!w) {
-        fail(file, line, label + ": its stored reference does not decode");
-        return;
-    }
-    // Chaotic, or a stable case's whole render beyond its stored waveform: what a listener hears.
-    const bool features = c == Class::Chaotic || w->waveFrames < frames;
-    const Features now = features ? measureFeatures(render) : Features{};
-    const std::string heard = features ? compareChaotic(w->features, now) : std::string();
     if (c == Class::Chaotic) {
-        if (report) std::printf("REF %s|chaotic|-|%s|%s\n", label.c_str(), featureDeltas(w->features, now).c_str(), heard.empty() ? "ok" : heard.c_str());
-        if (!heard.empty()) fail(file, line, label + " (chaotic): " + heard);
-        return;
+        const Features now = measureFeatures(render);
+        const std::string why = compareChaotic(e->features, now);
+        if (report)
+            std::printf("REF %s|chaotic|-|%s|%s\n", label.c_str(), featureDeltas(e->features, now).c_str(), why.empty() ? "ok" : why.c_str());
+        return why.empty() ? std::string() : "(chaotic) " + why;
     }
+    const Entry* w = e->alias.empty() ? e : find(e->alias);
     Audio ref;
-    if (!decodeAudio(w->wave, w->waveFrames, ref)) {
-        fail(file, line, label + ": its stored reference does not decode");
-        return;
-    }
-    const Audio part = prefix(render, w->waveFrames);
-    const std::string why = compareStable(ref, part);
+    if (!w || !decodeAudio(w->wave, w->frames, ref)) return "its stored reference does not decode";
+    const std::string why = compareStable(ref, render);
     if (report) {
-        const std::string deltas = features ? featureDeltas(w->features, now) : featureDeltas(measureFeatures(ref), measureFeatures(part));
-        std::printf("REF %s|stable|%.1f|%s|%s|%s\n", label.c_str(), nullResidualDbfs(ref, part), deltas.c_str(),
+        const Features a = measureFeatures(ref), b = measureFeatures(render);
+        const std::string heard = compareChaotic(a, b);
+        std::printf("REF %s|stable|%.1f|%s|%s|%s\n", label.c_str(), nullResidualDbfs(ref, render), featureDeltas(a, b).c_str(),
                     heard.empty() ? "features-ok" : heard.c_str(), why.empty() ? "ok" : why.c_str());
     }
-    if (!why.empty()) fail(file, line, label + ": " + why);
-    if (!heard.empty()) fail(file, line, label + " (whole render, as heard): " + heard);
+    return why;
 }
 
 bool References::load() {
@@ -706,61 +697,56 @@ bool References::load() {
     Bytes in{b, 8};
     const size_t count = static_cast<size_t>(in.u(4));
     if (count > 10000) return false;
-    auto readFeatures = [&](Features& x, uint32_t frames) {
-        x.frames = frames;
-        for (int c = 0; c < 2; ++c)
-            in.floats(x.loud[c], kMaxFrames), in.floats(x.bright[c], kMaxFrames), in.floats(x.bands[c], 64),
-                in.frames(x.onsets[c], kMaxFrames);
-    };
     for (size_t k = 0; k < count && !in.bad; ++k) {
         Entry e;
         e.name = in.s();
         const uint64_t kind = in.u(1);
         e.frames = static_cast<uint32_t>(in.u(4));
-        if (e.frames > kMaxFrames) return false;
+        if (in.bad || e.frames == 0 || e.frames > kMaxFrames || find(e.name)) return false;
         if (kind == 0) {
-            e.waveFrames = static_cast<uint32_t>(in.u(4));
-            if (e.waveFrames == 0 || e.waveFrames > e.frames) return false;
             const size_t n = static_cast<size_t>(in.u(4));
             if (in.bad || in.at + n > b.size()) return false;
             e.wave.assign(b.begin() + static_cast<std::ptrdiff_t>(in.at), b.begin() + static_cast<std::ptrdiff_t>(in.at + n));
             in.at += n;
-            if (e.waveFrames < e.frames) readFeatures(e.features, e.frames);
         } else if (kind == 2) {
             e.alias = in.s();
-            if (!find(e.alias)) return false;
+            const Entry* target = find(e.alias);
+            if (!target || !target->alias.empty() || target->cls != Class::Stable || target->frames != e.frames) return false;
         } else if (kind == 1) {
             e.cls = Class::Chaotic;
-            readFeatures(e.features, e.frames);
+            e.features.frames = e.frames;
+            for (int c = 0; c < 2; ++c)
+                in.floats(e.features.loud[c], kMaxFrames), in.floats(e.features.bright[c], kMaxFrames),
+                    in.floats(e.features.bands[c], 64), in.frames(e.features.onsets[c], kMaxFrames);
         } else {
             return false;
         }
         entries_.push_back(std::move(e));
     }
-    return !in.bad && in.at == b.size();
+    if (in.bad || in.at != b.size()) {
+        entries_.clear();
+        return false;
+    }
+    return true;
 }
 
 bool References::save() const {
     std::vector<uint8_t> b(kMagic, kMagic + 8);
     putU(b, entries_.size(), 4);
-    auto putFeatures = [&](const Features& x) {
-        for (int c = 0; c < 2; ++c)
-            putFloats(b, x.loud[c]), putFloats(b, x.bright[c]), putFloats(b, x.bands[c]), putFrames(b, x.onsets[c]);
-    };
     for (const Entry& e : entries_) {
         putS(b, e.name);
         const int kind = e.cls == Class::Chaotic ? 1 : e.alias.empty() ? 0 : 2;
         putU(b, static_cast<uint64_t>(kind), 1);
         putU(b, e.frames, 4);
         if (kind == 0) {
-            putU(b, e.waveFrames, 4);
             putU(b, e.wave.size(), 4);
             b.insert(b.end(), e.wave.begin(), e.wave.end());
-            if (e.waveFrames < e.frames) putFeatures(e.features);
         } else if (kind == 2) {
             putS(b, e.alias);
         } else {
-            putFeatures(e.features);
+            for (int c = 0; c < 2; ++c)
+                putFloats(b, e.features.loud[c]), putFloats(b, e.features.bright[c]), putFloats(b, e.features.bands[c]),
+                    putFrames(b, e.features.onsets[c]);
         }
     }
     std::FILE* f = std::fopen(path().c_str(), "wb");

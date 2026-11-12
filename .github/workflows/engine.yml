@@ -1,4 +1,4 @@
-# Engine tests on every push and pull request: Linux x64 and Arm64, Windows, and a sanitizer build. Same golden hashes everywhere.
+# Engine tests on every push and pull request: Linux x64 and Arm64, Windows, and a sanitizer build. The same reference renders, within their tolerances, everywhere.
 name: Engine
 on:
   # Main and pull requests; a branch's own pushes run only through its pull request, so nothing runs twice
@@ -8,13 +8,13 @@ on:
     paths:
       - "engine/**"
       - "!engine/compiler/**"  # the compiler wrapper has its own workflow
-      - "examples/**"          # templates are built in and checked by golden renders
+      - "examples/**"          # examples are built in and checked by reference renders
       - ".github/workflows/engine.yml"
   pull_request:
     paths:
       - "engine/**"
       - "!engine/compiler/**"  # the compiler wrapper has its own workflow
-      - "examples/**"          # templates are built in and checked by golden renders
+      - "examples/**"          # examples are built in and checked by reference renders
       - ".github/workflows/engine.yml"
   workflow_dispatch:
 permissions:
