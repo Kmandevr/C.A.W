@@ -2,6 +2,7 @@
 // and per-bar energy, with the activity queries the auto director asks (what plays, what moves, what is loud).
 import 'dart:math' as math;
 
+import 'arrange_edit.dart' show clipNotes;
 import 'pattern_doc.dart';
 import 'project.dart';
 
@@ -38,9 +39,18 @@ class SceneClip {
 }
 
 class SceneNote {
-  const SceneNote(this.start, this.end, this.pitch, this.vel, this.track, this.clip);
+  const SceneNote(this.start, this.end, this.pitch, this.vel, this.track, this.clip, [this.expr = NoteExpression.none]);
   final double start, end, pitch, vel;
   final int track, clip;
+
+  /// The note's own pitch bend and vibrato (and pressure and timbre), as the pattern holds them.
+  final NoteExpression expr;
+
+  /// Whether its pitch moves (a bend curve or vibrato), so the views draw it as a bent line.
+  bool get bends => expr.bend.any((p) => p.v != 0) || expr.vibDepth > 0;
+
+  /// The pitch offset in semitones at [u] 0..1 through the note, at [bpm] (vibrato runs in seconds).
+  double bendAt(double u, double bpm) => expr.pitchAt(u, u * (end - start) * 15 / bpm);
 }
 
 /// An automation lane in song steps with values scaled 0..1 (by the range the caller knows, else the lane's own).
@@ -252,20 +262,18 @@ VideoScene buildVideoScene(ProjectDoc p, {required int Function(LayerDoc) colorO
       if (m == null) continue;
       final doc = docs.putIfAbsent(m.id, () => PatternDoc.parse(m.source).doc ?? PatternDoc.parse(m.runSource).doc);
       if (doc == null || doc.notes.isEmpty) continue;
-      final length = c.loopLength(doc.lengthSteps(p.beatsPerBar)).toDouble();
-      final offset = c.sourceOffsetSteps.toDouble();
-      final reps = c.loop ? (c.lengthSteps / length).ceil() + 1 : 1;
-      for (var k = 0; k < reps && notes.length < kSceneMaxNotes; k++) {
-        for (final n in doc.notes) {
-          final at = n.at.toDouble();
-          if (at < offset || (c.loop && at >= offset + length)) continue;
-          final s = clip.start + (at - offset) + k * length;
-          if (s >= clip.end || s < clip.start) continue;
-          final e = math.min(clip.end, s + n.len.toDouble());
-          notes.add(SceneNote(s, e, n.pitch, n.vel, t, ci));
-          clip.lowPitch = math.min(clip.lowPitch, n.pitch);
-          clip.highPitch = math.max(clip.highPitch, n.pitch);
-        }
+      // The notes as the engine plays them (#183): the source window from the offset, wrapping to the pattern's
+      // start while the clip loops, a note already sounding at the window's start kept from there, and notes cut at
+      // the window's edges. The same rule the arranger draws and edits with ([clipNotes]).
+      final played = clipNotes(doc, c, p.beatsPerBar, limit: kSceneMaxNotes - notes.length);
+      if (played == null) continue;
+      for (final n in played) {
+        final s = clip.start + n.at.toDouble();
+        final e = math.min(clip.end, s + n.len.toDouble());
+        if (e <= s) continue;
+        notes.add(SceneNote(s, e, n.pitch, n.vel, t, ci, n.expr));
+        clip.lowPitch = math.min(clip.lowPitch, n.pitch);
+        clip.highPitch = math.max(clip.highPitch, n.pitch);
       }
     }
     for (final a in l.audioClips) {
