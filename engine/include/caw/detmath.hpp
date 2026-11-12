@@ -54,7 +54,8 @@ constexpr double kPi = 3.14159265358979323846;
 constexpr double kTwoPi = 6.28318530717958647692;
 
 // Built from IEEE basic operations only (no platform maths library), so every platform gives identical
-// bits when compiled without fused multiply-add contraction or fast-math (CAW's own flags).
+// bits when compiled without fused multiply-add contraction or fast-math (the flags CAW::SDK gives components;
+// the engine itself builds with fast-math subsets and gives the same sound, not the same bits).
 namespace detail {
 
 // sin(r) for |r| <= pi/2 by its Taylor series to r^19 (error below 1e-15).
