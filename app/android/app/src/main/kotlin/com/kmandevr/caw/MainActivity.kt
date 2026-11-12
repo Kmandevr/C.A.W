@@ -100,7 +100,11 @@ class MainActivity : FlutterActivity() {
             }
 
         // The music video's MP4 encoder: H.264 + AAC with MediaCodec and MediaMuxer (VideoEncoder.kt).
-        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "caw/video").setMethodCallHandler(VideoEncoder())
+        VideoEncoder().also { video ->
+            MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "caw/video").setMethodCallHandler(video)
+            // Frames as raw bytes (no codec copy): video_encoder.dart's binary path.
+            flutterEngine.dartExecutor.binaryMessenger.setMessageHandler("caw/video_frame", video.frameHandler)
+        }
 
         // Touch feedback with the vibrator's fine primitives (Haptics.kt).
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, HAPTICS_METHOD_CHANNEL).setMethodCallHandler(Haptics(this))

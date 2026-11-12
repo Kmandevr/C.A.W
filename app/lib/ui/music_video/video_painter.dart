@@ -841,19 +841,31 @@ void _paintTitle(Canvas canvas, Size size, VideoFrameInput f) {
   canvas.restore();
 }
 
-/// Draws the frame at [width] × [height] pixels off screen and returns its RGBA bytes (top row first).
-Future<Uint8List> rasterizeVideoFrame(VideoFrameInput f, int width, int height) async {
+/// Records the frame at [width] × [height] (the part of a render that must run on the UI isolate).
+ui.Picture recordVideoFrame(VideoFrameInput f, int width, int height) {
   final recorder = ui.PictureRecorder();
   final canvas = Canvas(recorder, Rect.fromLTWH(0, 0, width.toDouble(), height.toDouble()));
   paintVideoFrame(canvas, Size(width.toDouble(), height.toDouble()), f);
-  final picture = recorder.endRecording();
+  return recorder.endRecording();
+}
+
+/// [picture] rasterised (on the engine's raster thread) and read back as RGBA bytes, top row first; [timing], when
+/// given, gets the microseconds spent rasterising and reading back.
+Future<Uint8List> pictureToRgba(ui.Picture picture, int width, int height, {void Function(int raster, int read)? timing}) async {
+  final sw = Stopwatch()..start();
   final image = await picture.toImage(width, height);
   picture.dispose();
+  final raster = sw.elapsedMicroseconds;
   try {
     final data = await image.toByteData(format: ui.ImageByteFormat.rawRgba);
     if (data == null) throw StateError('the frame could not be read');
+    timing?.call(raster, sw.elapsedMicroseconds - raster);
     return data.buffer.asUint8List(data.offsetInBytes, data.lengthInBytes);
   } finally {
     image.dispose();
   }
 }
+
+/// Draws the frame at [width] × [height] pixels off screen and returns its RGBA bytes (top row first).
+Future<Uint8List> rasterizeVideoFrame(VideoFrameInput f, int width, int height) =>
+    pictureToRgba(recordVideoFrame(f, width, height), width, height);

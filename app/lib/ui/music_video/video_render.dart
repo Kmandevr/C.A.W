@@ -1,8 +1,13 @@
 // Renders the music video offline and deterministically: the audio through the engine's song render (a worker-pool
-// job), its meters from the files, then each frame drawn off screen at the render clock's time and streamed to the encoder.
+// job), its meters from the files, then each frame drawn off screen at the render clock's time and streamed to the
+// encoder, the next frames rasterising while one encodes; a profile of where the time went, drafts, and the one
+// render that runs in the background while the user works (MusicVideoJobs).
 import 'dart:async';
+import 'dart:collection';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math' as math;
+import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart';
 
@@ -33,14 +38,60 @@ enum VideoRenderPhase {
 /// The audio's sample rate (AAC at 48 kHz on both platform encoders).
 const int kVideoSampleRate = 48000;
 
+/// Where a render's time went (owner, 2026-11-12: "really slow to build the video"; profile first). Each stage's
+/// time is the time spent in it; with the pipeline the frame stages overlap, so they add up to more than [wall].
+class VideoRenderProfile {
+  int audioUs = 0, analysisUs = 0, paintUs = 0, rasterUs = 0, readbackUs = 0, encodeUs = 0, waitUs = 0, wallUs = 0;
+  int frames = 0;
+  double videoSeconds = 0;
+
+  /// Seconds of work per second of video (lower is faster; below 1 is faster than real time).
+  double get secondsPerSecond => videoSeconds <= 0 ? 0 : wallUs / 1e6 / videoSeconds;
+
+  /// The frame stages per frame, in milliseconds.
+  double perFrameMs(int us) => frames == 0 ? 0 : us / 1000 / frames;
+
+  Map<String, Object> toJson() => {
+        'frames': frames, 'video_s': videoSeconds, 'wall_s': wallUs / 1e6, 's_per_s': secondsPerSecond,
+        'audio_s': audioUs / 1e6, 'analysis_s': analysisUs / 1e6, 'paint_ms_frame': perFrameMs(paintUs),
+        'raster_ms_frame': perFrameMs(rasterUs), 'readback_ms_frame': perFrameMs(readbackUs),
+        'encode_ms_frame': perFrameMs(encodeUs), 'waiting_for_encoder_ms_frame': perFrameMs(waitUs),
+      };
+
+  /// One line for the done notice and the log.
+  String get summary => '${secondsPerSecond.toStringAsFixed(2)} s per second of video '
+      '(audio ${(audioUs / 1e6).toStringAsFixed(1)} s; a frame: paint ${perFrameMs(paintUs).toStringAsFixed(1)} ms, '
+      'raster ${perFrameMs(rasterUs).toStringAsFixed(1)} ms, read ${perFrameMs(readbackUs).toStringAsFixed(1)} ms, '
+      'encode ${perFrameMs(encodeUs).toStringAsFixed(1)} ms)';
+}
+
+/// How many frames may be rasterising or waiting for the encoder at once: up to 3, and no more than about 64 MB of
+/// frames in memory (one frame at 4K is 33 MB).
+int videoPipelineDepth(int width, int height) => (64 * 1024 * 1024 ~/ math.max(1, width * height * 4)).clamp(1, 3);
+
 /// One render: [run] it once; [cancel] stops it at the next frame (or the audio render at its next block).
 class MusicVideoRender extends ChangeNotifier {
   MusicVideoRender({required this.projectJson, required this.scene, required this.options, required this.startStep,
-      required this.endStep, required this.encoder, required this.workDir, SongRenderStarter? audio, this.timeline})
-      : _audio = audio ?? startNativeSongRender;
+      required this.endStep, required this.encoder, required this.workDir, SongRenderStarter? audio, this.timeline,
+      this.doc, this.bitmaps = const {}, this.draft = false, int? pipelineDepth})
+      : _audio = audio ?? startNativeSongRender,
+        pipelineDepth = pipelineDepth ?? videoPipelineDepth(options.size.$1, options.size.$2);
 
   /// The edited lane's shots (null or empty: the auto director's).
   final VideoTimeline? timeline;
+
+  /// The whole video's overlays and the decoded images they and the shots use.
+  final MusicVideoDoc? doc;
+  final Map<String, ui.Image> bitmaps;
+
+  /// A quick draft (low size and rate) rather than the full render.
+  final bool draft;
+
+  /// Frames in flight: 1 draws, rasterises and encodes each frame before the next (as before 2026-11-12).
+  final int pipelineDepth;
+
+  /// Where the time went, filled in as it runs.
+  final profile = VideoRenderProfile();
   late final ShotPlan plan =
       planVideo(scene, options, timeline, start: startStep.toDouble(), end: endStep.toDouble());
 
@@ -106,6 +157,7 @@ class MusicVideoRender extends ChangeNotifier {
       if (await workDir.exists()) await workDir.delete(recursive: true);
       await audioDir.create(recursive: true);
 
+      final wall = Stopwatch()..start();
       // 1. The audio.
       _set(VideoRenderPhase.audio, 0);
       final job = _audio(projectJson, jsonEncode(audioRequest(audioDir.path)));
@@ -133,10 +185,12 @@ class MusicVideoRender extends ChangeNotifier {
         if (f['kind'] == 'track' && f['layer'] is String) stems[f['layer'] as String] = f['path'] as String;
       }
       if (mix == null) throw StateError('the audio render wrote no mix');
+      profile.audioUs = wall.elapsedMicroseconds;
 
       // 2. The meters, from the files.
       _set(VideoRenderPhase.analysis, 0.25);
       final meters = await analyzeVideoAudio(mixPath: mix, stems: stems, fps: options.fps, frames: frameCount);
+      profile.analysisUs = wall.elapsedMicroseconds - profile.audioUs;
       if (_cancelled) return await _stop();
 
       // 3. Frames, one at a time at the render clock's time, straight into the encoder.
@@ -145,21 +199,69 @@ class MusicVideoRender extends ChangeNotifier {
           audioPath: mix, outputPath: file.path));
       encoding = true;
       _set(VideoRenderPhase.frames, 0.3);
-      for (var n = 0; n < frameCount; n++) {
-        if (_cancelled) return await _stop(encoding: true);
-        final input = VideoFrameInput.forOptions(scene: scene, plan: plan, step: clock.stepAt(n),
-            seconds: clock.secondsAt(n), options: options, levels: meters.levelsAt(n));
-        final rgba = await rasterizeVideoFrame(input, width, height);
+      profile.videoSeconds = clock.durationSeconds;
+      VideoFrameInput input(int n) => VideoFrameInput.forOptions(scene: scene, plan: plan, step: clock.stepAt(n),
+          seconds: clock.secondsAt(n), options: options, levels: meters.levelsAt(n), doc: doc, bitmaps: bitmaps,
+          rangeStart: startStep.toDouble(), rangeEnd: endStep.toDouble());
+      // A frame: recorded here (Flutter records pictures only on the UI isolate), then rasterised and read back by
+      // the engine's raster thread while this goes on with the next.
+      Future<Uint8List> raster(int n) {
+        final sw = Stopwatch()..start();
+        final picture = recordVideoFrame(input(n), width, height);
+        profile.paintUs += sw.elapsedMicroseconds;
+        return pictureToRgba(picture, width, height, timing: (r, b) {
+          profile.rasterUs += r;
+          profile.readbackUs += b;
+        });
+      }
+
+      Future<void> encode(Uint8List rgba) async {
+        final sw = Stopwatch()..start();
         await encoder.addFrame(rgba);
-        framesDrawn = n + 1;
-        if (n % 2 == 0 || n == frameCount - 1) _set(VideoRenderPhase.frames, 0.3 + 0.68 * framesDrawn / frameCount);
+        profile.encodeUs += sw.elapsedMicroseconds;
+      }
+
+      final queue = Queue<Future<Uint8List>>();
+      Future<void>? sending;
+      var next = 0;
+      try {
+        for (var n = 0; n < frameCount; n++) {
+          if (_cancelled) break;
+          // Keep up to [pipelineDepth] frames rasterising ahead (1: one at a time, as before).
+          while (queue.length < pipelineDepth && next < frameCount) {
+            queue.add(raster(next++));
+          }
+          final rgba = await queue.removeFirst();
+          if (sending != null) {
+            final sw = Stopwatch()..start();
+            await sending;
+            profile.waitUs += sw.elapsedMicroseconds;
+          }
+          if (_cancelled) break;
+          sending = encode(rgba);
+          // One at a time: the frame is encoded before the next is drawn.
+          if (pipelineDepth <= 1) await sending;
+          framesDrawn = n + 1;
+          profile.frames = framesDrawn;
+          if (n % 2 == 0 || n == frameCount - 1) _set(VideoRenderPhase.frames, 0.3 + 0.68 * framesDrawn / frameCount);
+        }
+        await sending;
+      } finally {
+        // Frames still rasterising when it stops (a cancel or a failure) are let go.
+        for (final f in queue) {
+          f.ignore();
+        }
+        sending?.ignore();
       }
       if (_cancelled) return await _stop(encoding: true);
+      profile.wallUs = wall.elapsedMicroseconds;
 
       // 4. The file.
       _set(VideoRenderPhase.finishing, 0.98);
       await encoder.finish();
       encoding = false;
+      profile.wallUs = wall.elapsedMicroseconds;
+      debugPrint('Music video ${draft ? 'draft' : 'render'}: ${profile.summary}');
       await _clean(audioDir);
       output = file;
       _set(VideoRenderPhase.done, 1);
@@ -230,5 +332,46 @@ Future<List<double>?> analyzeSongLoudness({required String projectJson, required
     } catch (_) {
       // Left for the next analysis, which clears the folder first.
     }
+  }
+}
+
+/// The music video render running in the background (one at a time) while the user works elsewhere (owner,
+/// 2026-11-12): the sheet starts it, the shell's progress chip shows it, and its done notice offers Save. It runs
+/// only while the app is open: no foreground service keeps it alive.
+class MusicVideoJobs extends ChangeNotifier {
+  MusicVideoJobs._();
+  static final instance = MusicVideoJobs._();
+
+  MusicVideoRender? _render;
+  String _name = 'video';
+
+  /// The render running or last finished (until [dismiss]).
+  MusicVideoRender? get render => _render;
+  bool get running => _render?.running ?? false;
+
+  /// The project name the file is saved under.
+  String get name => _name;
+
+  /// Starts [render] (the last one must have finished) and returns its file, or null.
+  Future<File?> start(MusicVideoRender render, {required String name}) async {
+    if (running) throw StateError('a music video is already rendering');
+    _render?.removeListener(notifyListeners);
+    _render = render..addListener(notifyListeners);
+    _name = name;
+    notifyListeners();
+    final out = await render.run();
+    notifyListeners();
+    return out;
+  }
+
+  /// Cancels the render running.
+  void cancel() => _render?.cancel();
+
+  /// Forgets a finished render (its notice goes).
+  void dismiss() {
+    if (running) return;
+    _render?.removeListener(notifyListeners);
+    _render = null;
+    notifyListeners();
   }
 }
