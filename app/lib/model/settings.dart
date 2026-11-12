@@ -15,6 +15,7 @@ import '../ui/motion.dart';
 import '../ui/theme.dart';
 import '../ui/tokens.dart' show Radii;
 import '../ui/widgets.dart' show PeakMeter;
+import 'atomic_file.dart';
 
 enum Density { comfortable, compact }
 
@@ -913,9 +914,7 @@ class Settings extends ChangeNotifier {
     final f = _file;
     if (f == null) return;
     await f.parent.create(recursive: true);
-    final tmp = File('${f.path}.tmp');
-    await tmp.writeAsString(const JsonEncoder.withIndent(' ').convert(toJson()), flush: true);
-    await tmp.rename(f.path);
+    await writeFileAtomically(f, const JsonEncoder.withIndent(' ').convert(toJson()));
   }
 
   /// True while [adjust] tells its listeners: a continuous control on the Settings page is moving, which the app's

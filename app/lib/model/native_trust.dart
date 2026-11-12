@@ -5,6 +5,7 @@ import 'dart:io';
 import '../engine/engine.dart';
 import 'cpp_component.dart';
 import 'sha256.dart';
+import 'atomic_file.dart';
 
 /// The owner's rules: an effect the user wrote on this device loads as Trusted without asking. Anything else (a
 /// download, a shared project's code, a library built elsewhere) asks Trust or Block once; the choice is
@@ -44,15 +45,13 @@ class NativeTrustStore {
 
   Future<void> save() async {
     await file.parent.create(recursive: true);
-    final tmp = File('${file.path}.tmp');
-    await tmp.writeAsString(jsonEncode({
+    await writeFileAtomically(file, jsonEncode({
       'authored': {for (final e in _authored.entries) e.key: e.value.toList()},
       'choices': {
         for (final e in _choices.entries)
           e.key: {for (final c in e.value.entries) c.key: c.value == NativeComponentTrust.trusted ? 'trusted' : 'blocked'},
       },
-    }));
-    await tmp.rename(file.path); // never a half-written store
+    }), flush: false); // never a half-written store
   }
 
   /// The fingerprint of a component's sources: every file and its content, in path order.
