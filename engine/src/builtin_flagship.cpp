@@ -2194,7 +2194,14 @@ private:
         float f1L[kControlFrames], f1R[kControlFrames], f2L[kControlFrames], f2R[kControlFrames];
         float byL[kControlFrames], byR[kControlFrames];
     };
-    static constexpr uint32_t kQueue = 8;  // voices waiting for their filters (up to four side by side)
+    static constexpr uint32_t kQueue = 8;  // voices waiting for their filters
+    // How many voices' filters run side by side: four on x86-64 (SSE2: 2 % faster than two on the Bench), two on
+    // Arm64, where four were no faster (Android) or 0.5 % slower (GCC; four voices' state outgrows the registers).
+#if defined(__aarch64__)
+    static constexpr int kSideBySide = 2;
+#else
+    static constexpr int kSideBySide = 4;
+#endif
 
     // One voice's oscillators into its filters' buffers. A voice in the instrument's shared filter 1 is finished
     // here (false); otherwise w waits for its filters (true).
@@ -2292,7 +2299,7 @@ private:
 
     // The queued voices' filters, then each voice's output in the order they were queued (so the sums are the
     // one-voice-at-a-time path's). Voices whose filter 1 is set to the same ladder or SVF low-pass run side by
-    // side, four or two at a time, then their filter 2 likewise (VoiceFilter::stereoSideBySide).
+    // side, kSideBySide at a time, then their filter 2 likewise (VoiceFilter::stereoSideBySide).
     void finishVoices(VoiceWork* q, uint32_t count, uint32_t n, uint32_t first) noexcept {
         bool done[kQueue] = {};
         for (uint32_t i = 0; i < count; ++i) {
@@ -2300,7 +2307,7 @@ private:
             VoiceWork* group[4] = {&q[i]};
             int size = 1;
             const VoiceWork::Kind kind = q[i].kind;
-            for (uint32_t j = i + 1; j < count && size < 4; ++j)
+            for (uint32_t j = i + 1; j < count && size < kSideBySide; ++j)
                 if (!done[j] && q[j].kind == kind && VoiceFilter::sideBySide(q[i].v->filter[0], q[j].v->filter[0]))
                     group[size++] = &q[j], done[j] = true;
             done[i] = true;
