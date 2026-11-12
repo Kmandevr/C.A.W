@@ -8,6 +8,7 @@ import 'package:path_provider/path_provider.dart';
 
 import '../ui/arrange/clip_look.dart';
 import '../ui/code_prefs.dart';
+import '../ui/frame_rate.dart';
 import '../ui/glass.dart';
 import '../ui/haptics.dart';
 import '../ui/motion.dart';
@@ -280,6 +281,11 @@ class Settings extends ChangeNotifier {
   set lightMode(bool value) => performanceMode = value ? PerformanceMode.lightweight : PerformanceMode.balanced;
   bool lightAuto = true;
 
+  /// The frame rate (owner, 2026-11-12): [FrameRateController.auto] (0: the screen's highest rate while anything
+  /// moves, its lowest when still) or a cap in Hz from [FrameRateController.caps]. Auto by default, and for a file
+  /// from before the setting or with a value it doesn't know.
+  int frameRate = FrameRateController.auto;
+
   void _applyPerformanceMode() {
     Neon.performanceMode = performanceMode.index;
     Neon.light = lightMode;
@@ -302,6 +308,7 @@ class Settings extends ChangeNotifier {
     CodePrefs.tabWidth = codeTabWidth;
     CodePrefs.lineNumbers = codeLineNumbers;
     CodePrefs.wrap = codeWrap;
+    FrameRateController.current?.setCap(frameRate);
   }
 
   /// Motion (owner, 2026-11-04): Full, Reduced (fades only) or Off (owner, 2026-11-11: Off keeps the motion that
@@ -555,6 +562,7 @@ class Settings extends ChangeNotifier {
         'performance_mode': performanceMode.name,
         'light_mode': lightMode, // retained for older builds that read settings.json
         'light_auto': lightAuto,
+        'frame_rate': frameRate,
         'vim_code': vimCode,
         'vim_keys': vimKeys,
         if (keyHints != null) 'key_hints': keyHints,
@@ -664,6 +672,8 @@ class Settings extends ChangeNotifier {
       performanceMode = j['light_mode'] == true ? PerformanceMode.lightweight : PerformanceMode.balanced;
     }
     lightAuto = (j['light_auto'] as bool?) ?? lightAuto;
+    final fr = j['frame_rate'];
+    frameRate = fr is num && FrameRateController.caps.contains(fr.toInt()) ? fr.toInt() : FrameRateController.auto;
     vimCode = (j['vim_code'] as bool?) ?? vimCode;
     vimKeys = (j['vim_keys'] as bool?) ?? vimKeys;
     if (j['key_hints'] is bool) keyHints = j['key_hints'] as bool;

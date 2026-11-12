@@ -1,6 +1,6 @@
 // The Android host: thermal and battery-saver signals for the resource adapter, the C++ compiler channel, MIDI
-// devices and the Bluetooth MIDI scan, saving exports, the music video's encoder, haptics, the microphone permission
-// and the audio route (AudioRoute.kt).
+// devices and the Bluetooth MIDI scan, saving exports, the music video's encoder, haptics, the display's refresh rate
+// (DisplayRate.kt), the microphone permission and the audio route (AudioRoute.kt).
 package com.kmandevr.caw
 
 import android.content.BroadcastReceiver
@@ -104,6 +104,9 @@ class MainActivity : FlutterActivity() {
 
         // Touch feedback with the vibrator's fine primitives (Haptics.kt).
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, HAPTICS_METHOD_CHANNEL).setMethodCallHandler(Haptics(this))
+
+        // The screen's refresh rates and the frame-rate setting's request (DisplayRate.kt).
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, DISPLAY_METHOD_CHANNEL).setMethodCallHandler(DisplayRate(this))
 
         // RECORD_AUDIO, asked only when audio input is turned on or a track is armed (MicPermission.kt).
         val mic = MicPermission(this)
@@ -272,6 +275,7 @@ class MainActivity : FlutterActivity() {
         private const val BLUETOOTH_METHOD_CHANNEL = "caw/midi/bluetooth"
         private const val FILES_METHOD_CHANNEL = "caw/files"
         private const val HAPTICS_METHOD_CHANNEL = "caw/haptics"
+        private const val DISPLAY_METHOD_CHANNEL = "caw/display"
         private const val PERMISSIONS_METHOD_CHANNEL = "caw/permissions"
         private const val AUDIO_ROUTE_METHOD_CHANNEL = "caw/audio_route"
         private const val AUDIO_ROUTE_EVENT_CHANNEL = "caw/audio_route/events"

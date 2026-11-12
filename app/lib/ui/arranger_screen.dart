@@ -37,6 +37,7 @@ import 'arrange/fx_stack.dart';
 import 'arrange/long_press_menu.dart';
 import 'arrange/mixer_card.dart';
 import 'follow_gate.dart';
+import 'live_playhead.dart';
 import 'frame/sections.dart';
 import 'presence.dart';
 import 'view_glide.dart';
@@ -441,7 +442,7 @@ class _ArrangerScreenState extends State<ArrangerScreen> with TickerProviderStat
     if (!_follow.allows(playing: s.meters.playing) || !_hScroll.hasClients) return;
     if (_touches.isNotEmpty || _drag.active) return;
     final p = _hScroll.positions.last;
-    final x = s.playheadStep * _stepW;
+    final x = s.smoothPlayheadStep * _stepW;
     final view = p.viewportDimension;
     if (view <= 0) return;
     if (s.settings.followSmooth) {
@@ -454,7 +455,7 @@ class _ArrangerScreenState extends State<ArrangerScreen> with TickerProviderStat
     // A page step glides (owner, 2026-11-11); while it runs the playhead is already on its way into view.
     if (_glide.active) return;
     if (x >= p.pixels && x <= p.pixels + view - 24) return;
-    _animateViewTo(leftStep: s.playheadStep - view * 0.1 / _stepW);
+    _animateViewTo(leftStep: s.smoothPlayheadStep - view * 0.1 / _stepW);
   }
 
   @override
@@ -1706,15 +1707,19 @@ class _ArrangerScreenState extends State<ArrangerScreen> with TickerProviderStat
                           ? 'Drop audio here, or arm the track and record'
                           : 'Double-tap for a clip, or drop a pattern here',
                       style: const TextStyle(color: Neon.dim, fontSize: 10)))))),
-          // A live island (widgets.dart): the line moves about 30 times a second while playing, and without it the
-          // timeline around it would lay out and repaint with it.
-          Positioned.fill(child: IgnorePointer(child: LiveIsland(child: ValueListenableBuilder<int>(
-            valueListenable: s.tick,
-            builder: (context, _, _) {
+          // A live island (widgets.dart): the line moves on every frame while playing (live_playhead.dart), and
+          // without it the timeline around it would lay out and repaint with it. Smooth follow scrolls in the same
+          // frame, so the line holds still a third in.
+          Positioned.fill(child: IgnorePointer(child: LiveIsland(child: PlayheadFrames(
+            state: s,
+            onFrame: () {
+              if (s.settings.followSmooth) _followPlayhead();
+            },
+            builder: (context) {
               // Stopped, a dimmer line shows where play starts and Split cuts (REAPER's edit cursor).
               final playing = s.meters.playing && s.meters.loopLength > 0;
               return CustomPaint(painter: _PlayheadPainter(stepW,
-                s.playheadStep, stopped: !playing));
+                s.smoothPlayheadStep, stopped: !playing));
             },
           )))),
           if (!pinned) Positioned.fill(child: IgnorePointer(child: ValueListenableBuilder<Rect?>(

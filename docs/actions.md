@@ -200,7 +200,7 @@ Generators (buttons; no default keys):
 | Layer length shorter / longer | [ / ] |
 | Add layer / delete layer (Delete removes the selected clips instead while any are selected, as REAPER's Delete removes selected items) | Ctrl+N / Delete |
 | Move layer up / down (Ctrl+S saves everywhere: owner, 2026-11-11) | Alt+Up / Alt+Down |
-| Copy / cut the selected clips; paste them at the edit cursor (the playhead while playing) on the selected track | Ctrl+C / Ctrl+X / Ctrl+V |
+| Copy / cut the selected clips; paste them at the edit cursor (while playing, the step the playhead is in at the last engine read) on the selected track | Ctrl+C / Ctrl+X / Ctrl+V |
 | Select every clip / clear the clip and time selections | Ctrl+A / Esc |
 | Change layer colour | — |
 | Split clips at the playhead: the selected ones, or every clip under it (REAPER's S) | S |

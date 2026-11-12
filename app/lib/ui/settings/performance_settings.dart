@@ -1,7 +1,9 @@
-// Settings › Performance: the performance profile, Lightweight on overload, and the engine's hardware profile and plan.
+// Settings › Performance: the performance profile, Lightweight on overload, the frame rate, and the engine's hardware
+// profile and plan.
 import 'package:flutter/material.dart';
 
 import '../../model/settings.dart';
+import '../frame_rate.dart';
 import '../theme.dart';
 import 'settings_deps.dart';
 import 'settings_widgets.dart';
@@ -20,6 +22,7 @@ class PerformanceSettings extends StatelessWidget {
           icon: Icons.speed, subtitle: s.performanceMode.description),
       settingSwitch('performance.lightAuto', s.lightAuto, (v) => s.update((x) => x.lightAuto = v),
           icon: Icons.auto_mode, subtitle: 'Keeps the interface responsive while reducing the voice budget'),
+      FrameRateRow(settings: s, controller: FrameRateController.current),
       settingAction('performance.hardware',
           icon: Icons.memory, iconColor: Neon.green,
           subtitle: hw == null
@@ -35,5 +38,33 @@ class PerformanceSettings extends StatelessWidget {
                   '${plan.preferredBatchFrames} preferred batch frames · '
                   '${plan.latencySensitive ? 'latency-sensitive' : 'throughput-oriented'}'),
     ]);
+  }
+}
+
+/// Frame rate: Auto and the caps the screen has ([FrameRateController.choices]); it follows the screen's rates once
+/// [controller] has read them. Without a controller, or where the platform can't ask (Windows), Auto alone.
+class FrameRateRow extends StatelessWidget {
+  const FrameRateRow({super.key, required this.settings, this.controller});
+  final Settings settings;
+  final FrameRateController? controller;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = controller;
+    Widget row() {
+      final choices = c?.choices ?? const [FrameRateController.auto];
+      final rates = c?.rates ?? const <double>[];
+      final screen = rates.isEmpty ? '' : ' (this screen: ${{for (final r in rates) r.round()}.join(', ')} Hz)';
+      final subtitle = c == null || !c.device.canRequest
+          ? 'Follows the screen\'s own rate$screen; a cap isn\'t available here'
+          : settings.frameRate == FrameRateController.auto
+              ? 'The highest rate while anything moves, the lowest when still$screen'
+              : 'At most ${settings.frameRate} Hz everywhere, playback included$screen';
+      return settingDropdown<int>('performance.frameRate', settings.frameRate,
+          [for (final v in choices) (v, FrameRateController.label(v))], (v) => settings.update((x) => x.frameRate = v),
+          icon: Icons.slow_motion_video, subtitle: subtitle);
+    }
+
+    return c == null ? row() : ListenableBuilder(listenable: c, builder: (_, _) => row());
   }
 }
