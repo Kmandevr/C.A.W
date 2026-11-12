@@ -6,9 +6,9 @@
 namespace caw {
 
 // A stereo pair's two channels run through the same arithmetic in one vector on GCC and Clang (the plain struct
-// elsewhere: MSVC and clang-cl). Each lane's arithmetic is the scalar one in the scalar order, so on a target
-// without fused multiply-adds the bits are the scalar code's; where the compiler fuses (Arm64), it may pair a
-// different multiply with the add than in scalar code: a last-bit difference (speed phase 4, engine-performance.md).
+// elsewhere: MSVC and clang-cl). Each lane's arithmetic is the scalar one in the scalar order, but the engine's
+// flags let the compiler fuse multiply-adds (Arm64) and reassociate sums, so the vector and the scalar code may
+// differ in the last bits: the same arithmetic up to fusing or reassociation (speed phase 4, engine-performance.md).
 #if defined(__GNUC__)
 typedef double Pair __attribute__((vector_size(16)));
 inline Pair pairOf(double a, double b) noexcept { return Pair{a, b}; }
