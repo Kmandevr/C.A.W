@@ -108,6 +108,12 @@ final _packs = Expando<List<SamplePackInfo>>('sample packs');
 final _root = Expando<Directory>('sample packs root');
 final _ticks = Expando<ValueNotifier<int>>('sample packs tick');
 
+/// A WAV deleted in Files' select mode is renamed with this until its Undo is no longer offered.
+const deletedSampleSuffix = '.deleted';
+
+/// The set-aside WAVs whose Undo is still offered (kept by [SamplePacks.refreshSamplePacks]).
+final Set<String> setAsideSamples = {};
+
 extension SamplePacks on AppState {
   /// The folder this project's packs live in (null without storage, unless a test set one).
   Directory? get samplePacksRoot => _root[this] ?? storage?.samplePacksDirectory(project.id);
@@ -126,6 +132,14 @@ extension SamplePacks on AppState {
     final list = <SamplePackInfo>[];
     if (root != null && await root.exists()) {
       for (final d in root.listSync().whereType<Directory>()) {
+        // A WAV set aside by a delete whose Undo is no longer offered (the app closed meanwhile) goes now.
+        for (final f in d.listSync().whereType<File>()) {
+          if (f.path.endsWith(deletedSampleSuffix) && !setAsideSamples.contains(f.path)) {
+            try {
+              f.deleteSync();
+            } catch (_) {}
+          }
+        }
         final p = SamplePackInfo.read(d);
         if (p != null) list.add(p);
       }

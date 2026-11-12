@@ -111,6 +111,8 @@ The app has three sections, Build, Files and Arrange, and nothing else (#139 ste
 
 **Docking (desktop and tablets):** each screen shape keeps its own saved layout. The Arrange preset puts the arrangement in one group and the other panels as tabs in a second. Tap a tab to show it. Long-press a tab and drag it onto another group to join it or split it, drag a divider to resize, maximise a panel to fill the view, or float it in a window over the layout. The layout button in the transport offers the Arrange, Mix and Code presets and shows any panel. Each screen lays out for its panel's size.
 
+**Select mode (owner, 2026-11-12, "Select mode + folders"):** in Files › Projects a Select button or a long press on a card, and elsewhere in Files the toolbar's ☑ or an item menu's Select, turns on checkboxes that grow in beside each item and a bottom bar that slides up ("N selected", select all / none, the actions); Delete asks once and the message after it offers Undo. Project folders take a held card dragged onto them ([App](app.md), Files).
+
 **Glass (on by default):** a soft ambient background behind see-through panels, cards, track headers and the transport; bottom sheets slide up as frosted glass; sliders, level bars, switches, buttons, M/S toggles and clips have a light fill and a solid outline ([App](app.md), Look).
 
 **The frame (owner, 2026-11-09):** three sections, Build, Files and Arrange; the other workspaces folded into them (#139 step 4, 2026-11-11), so there is no ⋮ More ([app](app.md), Frame).

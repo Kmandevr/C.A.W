@@ -6,6 +6,20 @@ updated: 2026-11-12
 
 # Decisions
 
+## 2026-11-12: Files › Projects: select mode and folders (owner)
+
+**Request (owner):** an easy way to mass-delete projects and files, and better-organised project files: a real integration rather than a list, with metadata (the version a project was built with, dates and so on) and folders to sort projects into.
+
+**Look (owner's choice, "Select mode + folders"):** in Files › Projects, a Select button or a long press turns on checkboxes and a bottom bar ("N selected", Delete, Move to folder, Export, select all / none); Delete asks once and is undoable; mass delete also works for the other files Files lists; folders can be created, renamed, deleted (when empty, or asking to move the contents up), nested and dragged into; old projects show at the top level; each card shows name, last edited and created dates, the app version it was last saved with, track count, length and tempo; a sort menu (name, last edited, created, size) and a search box above the list. Metadata is read cheaply (an index or a small read, off the UI isolate).
+
+**Choices (Claude, within the owner's look):**
+- **Folders in an index file** (`projects/library.json`), not directories: project ids and file paths never change, and old projects need no migration (no entry: top level).
+- **Undoable delete through a trash** (`projects/trash/<batch>/`), not restore points: the project and everything that belongs to it move in one rename each; Undo moves them back; the batch is deleted when the Undo message closes, or at the next start. Files' other items undo through project undo (one step), kept presets and set-aside WAVs.
+- **New project fields** `created` and `saved_with` (`{version, build}`); old projects read as *unknown* rather than guessing from file times. `appBuild` (pubspec's `+N`) joins `appVersion`.
+- **Last edited** is the file's modified time, which now changes only when the content does (saving identical text is skipped).
+- **Export** of several projects saves each as a plain `.caw` (the project JSON) into one picked folder; the single-project Export project… keeps packaging samples.
+- **Long press** on a project card starts select mode, as chosen; on other Files items it still opens the item's menu (whose new Select entry starts select mode), so their existing gestures and keyboard Delete stay as they were.
+
 ## 2026-11-12: Open alpha and beta: what the names mean (owner)
 
 **Decision (owner):**

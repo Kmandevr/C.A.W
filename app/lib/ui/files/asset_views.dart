@@ -9,6 +9,7 @@ import '../theme.dart';
 import '../pointer_input.dart';
 import '../tokens.dart';
 import '../panel_motion.dart';
+import 'selection_bar.dart' show SelectCheck;
 
 IconData assetIcon(FileAssetType t) => switch (t) {
       FileAssetType.builtinEffect => Icons.graphic_eq,
@@ -31,6 +32,7 @@ Color assetColor(FileAssetType t) => switch (t) {
     };
 
 IconData folderIcon(FilesFolderKind k) => switch (k) {
+      FilesFolderKind.projects => Icons.library_music,
       FilesFolderKind.favourites => Icons.star_rounded,
       FilesFolderKind.effects => Icons.auto_awesome,
       FilesFolderKind.builtin => Icons.inventory_2_outlined,
@@ -45,7 +47,11 @@ IconData folderIcon(FilesFolderKind k) => switch (k) {
       FilesFolderKind.samplePacks => Icons.library_music_outlined,
     };
 
-Color folderColor(FilesFolderKind k) => k == FilesFolderKind.favourites ? Neon.yellow : Neon.blue;
+Color folderColor(FilesFolderKind k) => switch (k) {
+      FilesFolderKind.favourites => Neon.yellow,
+      FilesFolderKind.projects => Neon.green,
+      _ => Neon.blue,
+    };
 
 /// A small type badge ("FX", "C++", "MIDI").
 class TypeBadge extends StatelessWidget {
@@ -217,10 +223,13 @@ BoxDecoration _selection(bool selected) => BoxDecoration(
 /// A grid tile: the icon with its badge, then the name.
 class AssetTile extends StatelessWidget {
   const AssetTile({super.key, required this.asset, required this.extent, this.selected = false, this.favourite = false,
-    this.warning = false});
+    this.warning = false, this.checked});
   final FileAsset asset;
   final double extent;
   final bool selected, favourite, warning;
+
+  /// Select mode's checkbox (null outside it).
+  final bool? checked;
 
   @override
   // No Tooltip: its long press would win over the drag and the menu. The name is on the tile.
@@ -236,6 +245,7 @@ class AssetTile extends StatelessWidget {
                 child: Stack(clipBehavior: Clip.none, children: [
                   AssetIcon(type: asset.type, size: extent * 0.5, warning: warning),
                   if (favourite) const Positioned(left: -4, top: -4, child: Icon(Icons.star_rounded, size: 12, color: Neon.yellow)),
+                  Positioned(left: -6, bottom: -4, child: SelectCheck(checked: checked, size: 16)),
                 ]),
               ),
             ),
@@ -250,10 +260,13 @@ class AssetTile extends StatelessWidget {
 /// A list row (the smallest size): 34 dp tall.
 class AssetRow extends StatelessWidget {
   const AssetRow({super.key, required this.asset, this.selected = false, this.favourite = false, this.warning = false,
-    this.detail});
+    this.detail, this.checked});
   final FileAsset asset;
   final bool selected, favourite, warning;
   final String? detail;
+
+  /// Select mode's checkbox (null outside it).
+  final bool? checked;
 
   @override
   Widget build(BuildContext context) => Container(
@@ -261,6 +274,7 @@ class AssetRow extends StatelessWidget {
         decoration: _selection(selected),
         padding: const EdgeInsets.symmetric(horizontal: Space.s),
         child: Row(children: [
+          SelectCheck(checked: checked, size: 18),
           AssetIcon(type: asset.type, size: 22, badge: false, warning: warning),
           const SizedBox(width: Space.s),
           Expanded(child: Text(asset.name, maxLines: 1, overflow: TextOverflow.ellipsis,
