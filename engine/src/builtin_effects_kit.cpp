@@ -146,7 +146,7 @@ protected:
             const bool driven = g > 1.0001;
             double y[2];
             for (int c = 0; c < 2; ++c) {
-                const double v = driven ? lib::fastTanh(x[c] * g) : x[c];
+                const double v = driven ? lib::tanhApprox(x[c] * g) : x[c];
                 double o;
                 switch (type_) {
                     case kLp12: o = a_[c].lowpass(v); break;

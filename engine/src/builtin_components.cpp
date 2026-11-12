@@ -172,7 +172,7 @@ public:
                     case 1: y = lib::hardClip(x, amount); break;
                     case 2: y = lib::fastSinCycles(finiteOr0(x) * amount * 0.25); break;  // lib::fold
                     case 3: y = std::floor(finiteOr0(x) * steps_ + 0.5) / steps_; break;  // lib::crush
-                    default: y = saturator_.process(x); break;                             // lib::drive
+                    default: y = saturator_.processApprox(x); break;                             // lib::drive
                 }
                 b.output.channels[c][i] = static_cast<float>((x + (y - x) * mix) * out);
             }
@@ -192,12 +192,12 @@ private:
         float* outR = b.output.channels[1];
         const auto shape = [&](double x, double y) noexcept { return static_cast<float>((x + (y - x) * mix) * out); };
         uint32_t i = 0;
-        for (; i + 1 < b.frames; i += 2) {  // two frames at a time (Saturator::process2: the same bits)
+        for (; i + 1 < b.frames; i += 2) {  // two frames at a time (Saturator::process2Approx: processApprox()'s steps)
             const double l[2] = {inL[i], inL[i + 1]}, r[2] = {inR[i], inR[i + 1]};
             double yl[2], yr[2];
-            saturator_.process2(l, yl);
+            saturator_.process2Approx(l, yl);
             const bool same = r[0] == l[0] && r[1] == l[1];
-            if (!same) saturator_.process2(r, yr);
+            if (!same) saturator_.process2Approx(r, yr);
             for (int j = 0; j < 2; ++j) {
                 outL[i + j] = shape(l[j], yl[j]);
                 outR[i + j] = same ? outL[i + j] : shape(r[j], yr[j]);
@@ -205,9 +205,9 @@ private:
         }
         for (; i < b.frames; ++i) {
             const double l = inL[i], r = inR[i];
-            const float yl = shape(l, saturator_.process(l));
+            const float yl = shape(l, saturator_.processApprox(l));
             outL[i] = yl;
-            outR[i] = r == l ? yl : shape(r, saturator_.process(r));
+            outR[i] = r == l ? yl : shape(r, saturator_.processApprox(r));
         }
         return true;
     }

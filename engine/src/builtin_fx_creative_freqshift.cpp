@@ -125,7 +125,7 @@ protected:
             double y[2];
             for (int c = 0; c < 2; ++c) {
                 // The loop soft-limited, so it can't run away (and not read at all while there is none).
-                const double v = fb > 0.0 ? x[c] + fb * lib::fastTanh(ring_.read(c, d - 1.0)) : x[c];
+                const double v = fb > 0.0 ? x[c] + fb * lib::tanhApprox(ring_.read(c, d - 1.0)) : x[c];
                 double I, Q;
                 hilbert_[c].process(v, I, Q);
                 phase_[c] += shift_[c].next();

@@ -234,16 +234,16 @@ const ModuleDescriptor& nlDescriptor() {
 // metallic), and a rectifier-flavoured curve (the negative half folded up a little: octave-ish growl).
 inline double shapeOf(int shape, double v) noexcept {
     switch (shape) {
-        case kWarm: return lib::fastTanh(v);
-        case kDiode: return v >= 0.0 ? lib::fastTanh(v) : 0.6 * lib::fastTanh(v / 0.6);
+        case kWarm: return lib::tanhApprox(v);
+        case kDiode: return v >= 0.0 ? lib::tanhApprox(v) : 0.6 * lib::tanhApprox(v / 0.6);
         case kHard: return v > 1.0 ? 1.0 : (v < -1.0 ? -1.0 : v);
         case kFold: {
             const double c = v > 6.0 ? 6.0 : (v < -6.0 ? -6.0 : v);
             return lib::fastSinCycles(c / kTwoPi);
         }
         case kRectify: {
-            const double t = lib::fastTanh(v);
-            return t + 0.35 * t * t - 0.35 * lib::fastTanh(v * v * 0.25);  // slope 1 at 0, a bent, lopsided top
+            const double t = lib::tanhApprox(v);
+            return t + 0.35 * t * t - 0.35 * lib::tanhApprox(v * v * 0.25);  // slope 1 at 0, a bent, lopsided top
         }
         default: return v;
     }
@@ -330,7 +330,7 @@ protected:
                 double a = finiteOr0(x[c]) * drive;
                 // Driven into a shape, the input meets a soft ceiling at 4 (the band saturates near 1): the dry part
                 // a high-pass, notch or all-pass passes stays bounded however hard it is driven.
-                if (!clean_) a = 4.0 * lib::fastTanh(0.25 * a);
+                if (!clean_) a = 4.0 * lib::tanhApprox(0.25 * a);
                 double v;
                 if (factor_ == 2) {
                     double up[2];

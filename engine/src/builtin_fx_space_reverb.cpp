@@ -776,7 +776,7 @@ protected:
             double loop[2];
             for (int c = 0; c < 2; ++c) {
                 const double band = high_[c].lowpass(low_[c].highpass(fb_[c]));
-                loop[c] = lib::fastTanh(a * shift_[c].process(band));
+                loop[c] = lib::tanhApprox(a * shift_[c].process(band));
                 loopPeak_ = std::max(loopPeak_, std::fabs(loop[c]));
             }
             float wl = static_cast<float>(xl + loop[0]), wr = static_cast<float>(xr + loop[1]);
