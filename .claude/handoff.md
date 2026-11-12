@@ -21,7 +21,7 @@ Owner, 2026-11-12: wrap everything up toward the v1.0.0-alpha.1 "Open alpha" rel
 
 ## Open (worktrees in .claude/worktrees/<name>; on restart read `git log ccr-56285e11-0xrj3h..<name>`)
 - **speed-parallel:** phase 5 review fixes plus A1/A6 scheduling. It took C API 24; reconcile with 25 on merge. Keep Auto off where the worst case is worse than serial.
-- **telemetry-feedback:** security fixes in progress (USB iProduct dropped, screen and peripherals coarsened, `.bad.tmp` backup rule). The relay contract is in C.A.W-Telemetry's PLAN.md.
+- **telemetry-feedback:** security fixes in progress (USB iProduct dropped, screen and peripherals coarsened, a backup rule for the corrupt-file temp copy). The relay contract is in C.A.W-Telemetry's PLAN.md.
 - **startup-screen:** startup screen plus the update system. Security fixes in progress: the receiver must not be exported, no Windows installer kind, a pinned download path, SHA-256 in release notes, timeouts, CI upload order.
 - **editing-cues:** roll cursor and loop, loop collapse, drag guides and gestures are done. The zoomed-out thin note lines are in progress.
 - **project-library:** select mode, folders and metadata.
@@ -33,6 +33,11 @@ Owner, 2026-11-12: wrap everything up toward the v1.0.0-alpha.1 "Open alpha" rel
   - A7: a reverb-bus proposal for the owner.
   - Delta updates: research done, ask the owner.
   - Fit-and-finish, the docs pass, G2 per-platform notes, the bump to 1.0.0-alpha.1, the release.
+
+## Next
+1. When the app tests pass, open a PR for the session branch into Main (frames, meters, Flagship), merge it when green, and send the APK.
+2. Merge each open branch as its agent reports, with its checks run.
+3. Then start the Benchmark, A3–A5 and the release steps.
 
 ## Read first
 - docs/beta-readiness-plan.md
