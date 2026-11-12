@@ -22,6 +22,7 @@ import 'ui/haptics.dart';
 import 'ui/keyboard/keyboard_layer.dart';
 import 'ui/page_closer.dart';
 import 'ui/shell.dart';
+import 'ui/startup_screen.dart';
 import 'ui/theme.dart';
 
 Future<void> main() async {
@@ -133,6 +134,9 @@ class _CawAppState extends State<CawApp> with WidgetsBindingObserver {
           data: mq.copyWith(textScaler: TextScaler.linear(mq.textScaler.scale(16) / 16 * scale)), child: body);
     },
     // A new key after a theme or glass change (including a profile that turns glass or blur off) rebuilds every screen, so colours fixed at build time repaint too.
-    home: Shell(key: ValueKey((state.settings.lookRevision, Glass.active, Glass.blurChosen)), state: state),
+    // The startup screen stays in front until the project is open, then fades away over the shell.
+    home: StartupGate(
+        state: state,
+        child: Shell(key: ValueKey((state.settings.lookRevision, Glass.active, Glass.blurChosen)), state: state)),
   );
 }

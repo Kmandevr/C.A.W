@@ -11,7 +11,7 @@ This file is a concise handoff, not a live Git branch/CI tracker. Previous commi
 
 ## Current implementation
 
-The Flutter app has three sections, Build, Files and Arrange (the mixer and automation are part of Arrange; Export is a page from the project menu). They share one AppState and the same native engine/project model. The app opens straight into the last project, with the arrangement in front; there is no startup screen. The transport's tempo is typed with a tap or tapped on a pad (#19), and its undo and redo walk one project history. Space pauses and resumes where it paused; Shift+Space stops. Settings → Key bindings changes what each key does.
+The Flutter app has three sections, Build, Files and Arrange (the mixer and automation are part of Arrange; Export is a page from the project menu). They share one AppState and the same native engine/project model. The app opens straight into the last project, with the arrangement in front; while it loads, the startup screen (the waveform reveal, `lib/ui/startup_screen.dart`) shows the real loading steps and goes the moment the project is open. The transport's tempo is typed with a tap or tapped on a pad (#19), and its undo and redo walk one project history. Space pauses and resumes where it paused; Shift+Space stops. Settings → Key bindings changes what each key does.
 
 The app reference [App](app.md) is the authoritative inventory of implemented screens and behavior. The [UI design](ui.md) describes the design direction and current editor state. The [core development plan](core-and-feature-plan.md) gives the ordered work sequence.
 

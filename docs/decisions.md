@@ -24,6 +24,7 @@ updated: 2026-11-12
     - First run is one scrollable page: a plain summary, links to the full texts, and Continue.
     - Feedback is a bottom sheet with type chips, a text box, attachment toggles that expand to show exactly what is attached, an optional email field, and Send.
   - **Frame-rate caps (B2):** Lightweight caps at 60 Hz and Minimal at 30 Hz while moving. Full and Balanced follow the Frame rate setting.
+- **Built, D startup screen (2026-11-12; Claude's choices, details in [app](app.md), "Startup screen"):** the waveform reveal on a fixed #07070B background that the Android launch theme (no icon on Android 12+'s splash: the crow draws itself in Flutter), the Windows and the Linux window share; four real steps from `AppState.init`; the screen leaves the moment loading is done, cutting the reveal short with a 160 ms fade over the already usable app; still logo for Reduced, Off and Minimal. Startup numbers in [performance](performance.md#startup-screen-2026-11-12-beta-readiness-d2).
 
 ## 2026-11-12: Frame rate: Auto by default, caps the screen has (owner)
 

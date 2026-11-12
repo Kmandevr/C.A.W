@@ -47,6 +47,7 @@ import 'arrange/templates_ui.dart';
 import '../model/templates.dart';
 import 'pointer_input.dart';
 import 'music_video/video_setup_sheet.dart';
+import 'startup_screen.dart';
 
 /// The panel each view shortcut shows, by the index KeyRouter's `onView` passes.
 const _viewPanels = [Panels.builder, Panels.arrangement, Panels.files];
@@ -260,7 +261,8 @@ class _ShellState extends State<Shell> {
   Widget build(BuildContext context) => ListenableBuilder(
         listenable: s,
         builder: (context, _) {
-          if (!s.ready) return const Scaffold(body: Center(child: CrowLogo(size: 64)));
+          // Until the project is open the startup screen is in front (StartupGate, above the shell).
+          if (!s.ready) return const ColoredBox(color: startupBackground);
           // Build opens on its start page (what it is for, new code, examples) until something is opened.
           // Built once per app-state change; a layout change (a divider drag, a tab) reuses them, so it rebuilds
           // only the dock, not the screens.

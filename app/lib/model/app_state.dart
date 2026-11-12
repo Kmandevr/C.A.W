@@ -24,6 +24,7 @@ import 'pattern_doc.dart';
 import 'playhead_clock.dart';
 import 'settings.dart';
 import 'storage.dart';
+import 'startup_progress.dart';
 import 'pattern_templates.dart';
 import 'templates.dart';
 
@@ -348,6 +349,9 @@ class AppState extends ChangeNotifier {
 
   /// True until the first project opens (the last one, or the template on a first run); nothing is saved before.
   bool starting = true;
+
+  /// The loading steps as [init] runs them, for the startup screen.
+  final StartupProgress startup = StartupProgress();
   String? lastProjectId;
   List<ProjectSummary> savedProjects = const [];
 
@@ -405,6 +409,7 @@ class AppState extends ChangeNotifier {
   AudioStatus? get audioStatus => engine?.audioStatus();
 
   Future<void> init() async {
+    startup.begin(StartupStep.engine);
     await latency.load();
     _resourcePressureSubscription = ResourceSignals.changes.listen(
       (pressure) => EngineExecutionPolicy.updateRuntimeSignals(pressure: pressure),
@@ -418,8 +423,10 @@ class AppState extends ChangeNotifier {
       auditionPlan = EngineExecutionPolicy.plan(workload: EngineWorkload.interactiveAudition);
       await _audioConfigured;  // the choice is in the engine before the device opens (no reopen right after)
       _openAudio(engine!);
+      startup.finish(StartupStep.engine);
     } catch (e) {
       engineError = 'The sound engine did not load: $e';
+      startup.finish(StartupStep.engine, ok: false);
     }
     try {
       await openStorage(await ProjectStorage.open());
@@ -427,6 +434,9 @@ class AppState extends ChangeNotifier {
       // Never stuck on the logo: show the app with whatever opened, and say why.
       openError = 'Projects could not be opened: $e';
       starting = false;
+      for (final step in StartupStep.values) {
+        if (startup.begun(step) && !startup.done(step)) startup.finish(step, ok: false);
+      }
     } finally {
       ready = true;
       notifyListeners();
@@ -439,31 +449,40 @@ class AppState extends ChangeNotifier {
   /// and Open are in the project menu.
   Future<void> openStorage(ProjectStorage storage) async {
     _storage = storage;
+    startup.begin(StartupStep.components);
     await loadDefaultProject();
     final e = engine;
+    var componentsOk = true;
     if (e != null) {
       try {
         nativeComponents = await deviceNativeComponentManager(e, storage);
       } catch (_) {
         nativeComponents = null;  // no compiler on this device: projects play without their C++ effects
+        componentsOk = false;
       }
     }
+    startup.finish(StartupStep.components, ok: componentsOk);
+    startup.begin(StartupStep.projects);
     lastProjectId = await storage.lastOpened();
     savedProjects = await listProjects();
     final id = lastProjectId;
     final last = id == null ? null : await storage.load(id);
     // A damaged file reads as null too; it stays on disk, and the app says so instead of replacing it silently.
     final damaged = id != null && last == null && await storage.has(id);
+    startup.finish(StartupStep.projects);
+    final opening = last ?? starterProject();
+    startup.begin(StartupStep.project, project: opening.name);
     starting = false;
     String? error = damaged ? 'The last project could not be read, so the default project opened instead. '
         'Its file is still in the projects folder.' : null;
     try {
-      await _switchTo(last ?? starterProject(), saveCurrent: false);
+      await _switchTo(opening, saveCurrent: false);
     } catch (e) {
       if (last == null) rethrow;
       error = 'The last project, "${last.name}", could not be opened ($e), so the default project opened instead.';
       await _switchTo(starterProject(), saveCurrent: false);
     }
+    startup.finish(StartupStep.project);
     openError = error;
   }
 
@@ -490,6 +509,7 @@ class AppState extends ChangeNotifier {
     masterValueTick.dispose();
     values.dispose();
     tick.dispose();
+    startup.dispose();
     revealStartRequests.dispose();
     for (final notifier in _moduleValueTicks.values) { notifier.dispose(); }
     for (final notifier in _layerValueTicks.values) { notifier.dispose(); }

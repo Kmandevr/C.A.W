@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The startup screen's background (Neon's dark #07070B), the same in light and dark mode: the native splash and
+     the window behind Flutter use it, so the first Flutter frame (lib/ui/startup_screen.dart) shows no flash. -->
+<resources>
+    <color name="caw_startup">#FF07070B</color>
+</resources>

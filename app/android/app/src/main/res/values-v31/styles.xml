@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android 12 (API 31) and up: the styles of values-v27/, plus the system splash screen (SplashScreen API). It is the
+     startup screen's colour with no icon: the crow draws itself in Flutter's first frames (the waveform reveal), so
+     a system icon there would vanish and redraw. The system dismisses the splash when the app draws its first frame
+     (developer.android.com/develop/ui/views/launch/splash-screen, read 2026-11-12). -->
+<resources>
+    <style name="LaunchTheme" parent="@android:style/Theme.Black.NoTitleBar">
+        <item name="android:windowBackground">@drawable/launch_background</item>
+        <item name="android:windowSplashScreenBackground">@color/caw_startup</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@android:color/transparent</item>
+        <item name="android:windowLayoutInDisplayCutoutMode">shortEdges</item>
+    </style>
+    <style name="NormalTheme" parent="@android:style/Theme.Black.NoTitleBar">
+        <item name="android:windowBackground">@color/caw_startup</item>
+        <item name="android:windowLayoutInDisplayCutoutMode">shortEdges</item>
+    </style>
+</resources>
