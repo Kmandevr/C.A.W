@@ -811,6 +811,7 @@ void addStack(const OscVoice& o, const float* gL, const float* gR, float* L, flo
             float t = t0 + static_cast<float>(static_cast<int32_t>(first + i)) * dt;
             t -= whole(t);
             float x;
+            if constexpr (W == kWarpFm || W == kWarpFold) t = t < 0.99999994f ? t : 0.99999994f;  // as addTwice
             if constexpr (W == kWarpFmOsc) x = fmOscPhase(t, w1, fm[first + i]) * m;
             else x = warp<W>(t, w1, w2, w3) * m;
             const int32_t k = static_cast<int32_t>(x);
@@ -1112,6 +1113,9 @@ struct Voice {
     uint32_t noteId = 0;
     uint64_t age = 0;
     bool starting = false, fresh = false;  // the next control sets the note's start (and, fresh, its phases)
+    // Eco's FM and fold warps at the sample rate (OscKey::once), latched when the voice starts from silence: a
+    // quality change while a note sounds never switches its oscillators between the 1x and the decimated path.
+    bool ecoWarps = false;
     uint32_t seed = 0;
     double notePitch = 60.0, pitch = 60.0, velocity = 1.0, pressure = 0.0, timbre = 0.0;
     lib::Adsr env[kEnvs];
@@ -1268,6 +1272,7 @@ protected:
                 }
                 Voice& v = voices_.start(m.noteId, &lanes_);
                 v.fresh = !v.env[0].active();  // a stolen voice continues from where it is (no click)
+                if (v.fresh) v.ecoWarps = qualityNow(quality_) == kQualityEco;
                 v.starting = true;
                 v.mono = false;
                 v.seed = hash32(++started_ * 0x9E3779B9U);
@@ -1337,6 +1342,7 @@ protected:
         }
         Voice& v = voices_.start(m.noteId, &lanes_);
         v.fresh = !v.env[0].active();
+        if (v.fresh) v.ecoWarps = qualityNow(quality_) == kQualityEco;
         v.starting = true;
         v.mono = true;
         v.seed = hash32(++started_ * 0x9E3779B9U);
@@ -1819,8 +1825,9 @@ private:
         key.amount = clampd(at(kOscWarpAmount), 0.0, 1.0);
         key.warp = key.amount > 0.0 ? clampi(at(kOscWarp), 0, kWarpCount - 1) : kWarpNone;
         key.fmRatio = key.warp == kWarpFm ? clampi(P(fmRatioParam(index)), 1, 16) : 1;
-        // Eco quality renders the FM and fold warps at the sample rate (no 2x oversampling): they alias more.
-        key.once = (key.warp == kWarpFm || key.warp == kWarpFold) && qualityNow(quality_) == kQualityEco;
+        // Eco quality renders the FM and fold warps at the sample rate (no 2x oversampling): they alias more. The
+        // voice's choice from its start holds while it sounds.
+        key.once = (key.warp == kWarpFm || key.warp == kWarpFold) && v.ecoWarps;
         if (key.warp == kWarpFmOsc) {  // the modulator's tuning against this one's (both follow the note)
             const uint32_t m = fmSource(index);
             const double offset = 12.0 * clampi(P(oscParam(m, kOscOctave)), -4, 4) + clampi(P(oscParam(m, kOscSemi)), -12, 12) +
