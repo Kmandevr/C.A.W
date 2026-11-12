@@ -470,8 +470,10 @@ void _flythrough(Canvas canvas, Size size, VideoFrameInput f, DirectedShot shot,
     // A soft sweep of the playing tracks' colours along the bottom edge.
     final colors = [for (final t in playing.take(4)) _track(s, t).withValues(alpha: 0.25)];
     if (colors.length == 1) colors.add(colors.first);
+    // More than two colours need their stops (dart:ui throws without them): spread them evenly.
+    final stops = [for (var i = 0; i < colors.length; ++i) i / (colors.length - 1)];
     canvas.drawRect(Rect.fromLTWH(0, size.height * 0.94, size.width, size.height * 0.06),
-        Paint()..shader = ui.Gradient.linear(Offset(0, size.height), Offset(size.width, size.height), colors));
+        Paint()..shader = ui.Gradient.linear(Offset(0, size.height), Offset(size.width, size.height), colors, stops));
   }
 }
 

@@ -15,6 +15,7 @@ import '../ui/motion.dart';
 import '../ui/theme.dart';
 import '../ui/tokens.dart' show Radii;
 import '../ui/widgets.dart' show PeakMeter;
+import 'atomic_file.dart';
 
 enum Density { comfortable, compact }
 
@@ -309,7 +310,16 @@ class Settings extends ChangeNotifier {
     CodePrefs.lineNumbers = codeLineNumbers;
     CodePrefs.wrap = codeWrap;
     FrameRateController.current?.setCap(frameRate);
+    FrameRateController.current?.setProfileCap(profileFrameCap);
   }
+
+  /// The frame-rate cap the performance profile sets, in Hz (owner, 2026-11-12): Lightweight 60, Minimal 30; Full
+  /// and Balanced none (the Frame rate setting alone). The lower of it and [frameRate] is in force.
+  int get profileFrameCap => switch (performanceMode) {
+        PerformanceMode.lightweight => 60,
+        PerformanceMode.minimal => 30,
+        _ => 0,
+      };
 
   /// Motion (owner, 2026-11-04): Full, Reduced (fades only) or Off (owner, 2026-11-11: Off keeps the motion that
   /// helps use the app, [Motion.usability]). Minimal and the system setting lower it further.
@@ -913,9 +923,7 @@ class Settings extends ChangeNotifier {
     final f = _file;
     if (f == null) return;
     await f.parent.create(recursive: true);
-    final tmp = File('${f.path}.tmp');
-    await tmp.writeAsString(const JsonEncoder.withIndent(' ').convert(toJson()), flush: true);
-    await tmp.rename(f.path);
+    await writeFileAtomically(f, const JsonEncoder.withIndent(' ').convert(toJson()));
   }
 
   /// True while [adjust] tells its listeners: a continuous control on the Settings page is moving, which the app's

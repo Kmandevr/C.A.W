@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import '../../panel_motion.dart';
 import 'package:flutter/services.dart';
 
+import 'param_watch.dart';
 import '../../../model/app_state.dart';
 import '../../../model/arrange_fx.dart';
 import '../../../model/device_target.dart';
@@ -61,9 +62,11 @@ class _DevicePresetChipState extends State<DevicePresetChip> {
   }
 
   @override
+  // Its own watch (param_watch.dart): it compares every value with the presets, so a knob step rebuilds the chip,
+  // not the editor around it.
   Widget build(BuildContext context) => ListenableBuilder(
     listenable: t.state.userPresets,
-    builder: (context, _) {
+    builder: (context, _) => ParamWatch(target: t, builder: (context) {
       final name = DevicePresets.label(t);
       final quick = DevicePresets.currentUser(t) != null && DevicePresets.modified(t);
       final color = widget.color;
@@ -98,7 +101,7 @@ class _DevicePresetChipState extends State<DevicePresetChip> {
               onTap: () => quickSavePreset(context, t),
               child: SizedBox(width: 30, height: 34, child: Icon(Icons.save_outlined, size: 17, color: color))))),
         ])));
-    },
+    }),
   );
 }
 

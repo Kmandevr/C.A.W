@@ -263,6 +263,15 @@ class _ArrangerScreenState extends State<ArrangerScreen> with TickerProviderStat
   // Two fingers on the timeline: a sideways pinch zooms time, an up-and-down pinch the track height.
   final Map<int, Offset> _touches = {};
   double _pinchDx0 = 0, _pinchDy0 = 0, _pinchZoom0 = 0, _pinchH0 = 0;
+  // A time pinch draws the lanes laid out at the zoom it started from, scaled sideways by [_pinchScale] (beta plan
+  // B4.9): no clip lays out or repaints while the fingers move. With [_pinchAt], the scroll position a layout per
+  // move would have reached (the view's own scrolling, [_pinchSeen] on, added in), it is exactly the view a layout
+  // per move would show; the lanes lay out once at that zoom when the pinch ends, or when the scale passes
+  // [_pinchRebase]. [_pinchJump]: a rebase's scroll to [_pinchAt] is still to come (after its frame).
+  final _pinchView = ValueNotifier<Matrix4?>(null);
+  double _pinchScale = 1, _pinchAt = 0, _pinchSeen = 0;
+  bool _pinchJump = false;
+  static const _pinchRebase = (0.6, 1.6);
   bool _pinchX = false, _pinchY = false;
   // The touches' global positions, and the track whose header a vertical pinch resizes (null: every track's).
   final Map<int, Offset> _touchesAt = {};
@@ -600,6 +609,7 @@ class _ArrangerScreenState extends State<ArrangerScreen> with TickerProviderStat
     _hScroll.removeListener(_onHScroll);
     _trackGhost?.remove();
     _trackGhostAt.dispose();
+    _pinchView.dispose();
     _drag.dispose();
     _hScroll.dispose();
     super.dispose();
@@ -620,6 +630,46 @@ class _ArrangerScreenState extends State<ArrangerScreen> with TickerProviderStat
       if (!mounted || !_hScroll.hasClients) return;
       final p = _hScroll.positions.last;
       p.jumpTo((anchor * _stepW - f).clamp(0.0, p.maxScrollExtent).toDouble());
+    });
+  }
+
+  /// A time pinch's move to zoom [z] around [focal] (pixels from the lanes' left edge): what [_setZoom] would do,
+  /// drawn as a scale of the lanes as laid out.
+  void _pinchTo(double z, double focal) {
+    z = z.clamp(minZoom, maxZoom).toDouble();
+    final pos = _hScroll.hasClients ? _hScroll.positions.last : null;
+    if (pos == null) return _setZoom(z, focal: focal);
+    if (_pinchView.value == null && _pinchScale == 1 && !_pinchJump) _pinchAt = _pinchSeen = pos.pixels;
+    if (!_pinchJump) {
+      _pinchAt += pos.pixels - _pinchSeen; // the fingers' own scrolling
+      _pinchSeen = pos.pixels;
+    }
+    final scale = z / zoom;
+    if (scale == _pinchScale) return;
+    // As _setZoom moves it: the step under the focal point stays there.
+    _pinchAt = math.max(0.0, (_pinchAt + focal) * scale / _pinchScale - focal);
+    _pinchScale = scale;
+    if (_pinchJump || scale < _pinchRebase.$1 || scale > _pinchRebase.$2) return _pinchCommit();
+    arrangeSpanReveal.value = 1 / _pinchRebase.$1 - 1;
+    _pinchView.value = Matrix4.diagonal3Values(scale, 1, 1)..setTranslationRaw(pos.pixels - _pinchAt, 0, 0);
+  }
+
+  /// Lays the lanes out at the pinch's zoom and scroll position (once, as the pinch ends or rebases).
+  void _pinchCommit() {
+    if (_pinchView.value == null && _pinchScale == 1) return;
+    final target = _pinchAt;
+    final z = (zoom * _pinchScale).clamp(minZoom, maxZoom).toDouble();
+    _pinchScale = 1;
+    _pinchView.value = null;
+    arrangeSpanReveal.value = 0;
+    if (z != zoom) super.setState(() => zoom = z); // the zoom alone: the headers stay as built
+    _pinchJump = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _pinchJump = false;
+      if (!mounted || !_hScroll.hasClients) return;
+      final p = _hScroll.positions.last;
+      p.jumpTo(target.clamp(0.0, p.maxScrollExtent).toDouble());
+      _pinchAt = _pinchSeen = p.pixels;
     });
   }
 
@@ -678,7 +728,7 @@ class _ArrangerScreenState extends State<ArrangerScreen> with TickerProviderStat
     if (_touches.length != 2) return;
     final ps = _touches.values.toList();
     if (_pinchX) {
-      _setZoom(_pinchZoom0 * (ps[0].dx - ps[1].dx).abs() / _pinchDx0, focal: (ps[0].dx + ps[1].dx) / 2 - headW);
+      _pinchTo(_pinchZoom0 * (ps[0].dx - ps[1].dx).abs() / _pinchDx0, (ps[0].dx + ps[1].dx) / 2 - headW);
     }
     final row = _pinchRow == null ? null : widget.state.project.layers.where((l) => l.id == _pinchRow).firstOrNull;
     if (_pinchY && row != null) {
@@ -702,6 +752,7 @@ class _ArrangerScreenState extends State<ArrangerScreen> with TickerProviderStat
     if (_touches.remove(e.pointer) == null) return;
     _drag.pinching = _touches.length >= 2;
     if (_touches.length == 1 && (_pinchX || _pinchY)) {
+      _pinchCommit();
       _pinchX = _pinchY = false;
       _pinchRow = null;
       _rowResizeEnd();
@@ -1664,7 +1715,10 @@ class _ArrangerScreenState extends State<ArrangerScreen> with TickerProviderStat
       Expanded(child: RepaintBoundary(child: SingleChildScrollView(key: drag?.hViewport, controller: _hScroll, scrollDirection: Axis.horizontal,
         child: Listener(
           onPointerSignal: (e) => _wheel(e, _hScroll.hasClients ? e.localPosition.dx - _hScroll.positions.last.pixels : null),
-          child: SizedBox(key: pinned ? null : _lanesBox, width: width, child: Stack(children: [
+          // A time pinch scales the lanes as laid out ([_pinchTo]); at rest the transform is the identity.
+          child: ValueListenableBuilder<Matrix4?>(valueListenable: _pinchView, builder: (context, m, child) =>
+              Transform(transform: m ?? Matrix4.identity(), child: child),
+            child: RepaintBoundary(child: SizedBox(key: pinned ? null : _lanesBox, width: width, child: Stack(children: [
           // One grid behind every track, through the gaps and spacers and down to the bottom of the view
           // below the last track (owner: like Reaper).
           Positioned(left: 0, right: 0, top: ruler, bottom: 0, child: IgnorePointer(child: RepaintBoundary(child: CustomPaint(
@@ -1730,7 +1784,7 @@ class _ArrangerScreenState extends State<ArrangerScreen> with TickerProviderStat
               final local = Rect.fromPoints(me.globalToLocal(box.topLeft), me.globalToLocal(box.bottomRight));
               return CustomPaint(painter: _MarqueePainter(local));
             }))),
-        ])))))),
+        ])))))))),
     ]))));
       })));
   }
@@ -2471,13 +2525,15 @@ class _SpacerHeader extends StatelessWidget {
     );
   }
 }
-/// The part of a timeline [size] wide that [scroll] shows, in pixels (all of it, up to 4096 px, before layout).
+/// The part of a timeline [size] wide that [scroll] shows, in pixels (all of it, up to 4096 px, before layout),
+/// widened by [arrangeSpanReveal] during a time pinch.
 (double, double) visibleSpan(ScrollController scroll, Size size) {
   if (!scroll.hasClients) return (0, math.min(size.width, 4096));
   // While the focus view swaps one timeline for another, the old one is attached for a frame too: use the newest.
   final position = scroll.positions.last;
-  final from = position.pixels.clamp(0.0, size.width).toDouble();
-  return (from, (position.pixels + position.viewportDimension).clamp(from, size.width).toDouble());
+  final reveal = position.viewportDimension * arrangeSpanReveal.value; // a time pinch's margin (ruler.dart)
+  final from = (position.pixels - reveal).clamp(0.0, size.width).toDouble();
+  return (from, (position.pixels + position.viewportDimension + reveal).clamp(from, size.width).toDouble());
 }
 
 /// A lane's clips as plain blocks (a thin row, or zoomed far out): one rectangle per pixel column at most, so a long
@@ -2531,7 +2587,8 @@ int arrangeGridEvery(double stepW, int barSteps) {
 }
 
 class _ArrangementGrid extends CustomPainter {
-  _ArrangementGrid(this.stepW, this.barSteps, this.scroll) : super(repaint: scroll);
+  _ArrangementGrid(this.stepW, this.barSteps, this.scroll)
+      : super(repaint: Listenable.merge([scroll, arrangeSpanReveal]));
   final double stepW;
   final int barSteps;
   final ScrollController scroll;
@@ -2554,7 +2611,7 @@ class _ArrangementGrid extends CustomPainter {
 }
 
 class _BarRuler extends CustomPainter {
-  _BarRuler(this.stepW, this.barSteps, this.scroll) : super(repaint: scroll);
+  _BarRuler(this.stepW, this.barSteps, this.scroll) : super(repaint: Listenable.merge([scroll, arrangeSpanReveal]));
   final double stepW;
   final int barSteps;
   final ScrollController scroll;

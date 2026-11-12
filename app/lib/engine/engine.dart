@@ -77,6 +77,16 @@ class ModuleInfo {
   /// The pattern's number of notes.
   final int noteCount;
 
+  @override
+  bool operator ==(Object other) =>
+      other is ModuleInfo && other.ok == ok && other.error == error && other.line == line && other.col == col &&
+      other.kind == kind && other.name == name && other.summary == summary && other.noteCount == noteCount &&
+      other.warnings.length == warnings.length &&
+      Iterable.generate(warnings.length).every((i) => other.warnings[i] == warnings[i]);
+
+  @override
+  int get hashCode => Object.hash(ok, error, line, col, kind, name, summary, noteCount, Object.hashAll(warnings));
+
   static ModuleInfo fromJson(Map<String, dynamic> j) => ModuleInfo(
         ok: j['ok'] == true,
         error: (j['error'] as String?) ?? '',
@@ -288,6 +298,8 @@ class Engine {
   final Pointer<CawMetersStruct> _meters = calloc<CawMetersStruct>();
   final Pointer<CawLayerMeterStruct> _layer = calloc<CawLayerMeterStruct>();
   final Pointer<Float> _layerSides = calloc<Float>(2);
+  Pointer<CawLayerMeterStereoStruct> _layers = calloc<CawLayerMeterStereoStruct>(16);
+  int _layersCapacity = 16;
   final Pointer<Float> _scope = calloc<Float>(1024);
   final Pointer<Float> _display = calloc<Float>(maxDisplayFloats);
   Pointer<Utf8>? _displayLayer;
@@ -841,6 +853,30 @@ class Engine {
         overloaded: m.overloaded != 0);
   }
 
+  /// The meters of project layers 0 to [count] - 1 in one C API call (API 25) into a native buffer that is kept
+  /// and grows only when the project does; each reads and resets as [layerMeter] does. A layer the engine doesn't
+  /// have (yet) reads as silent and inactive.
+  List<LayerMeterValue> layerMeters(int count) {
+    if (count <= 0) return const [];
+    if (count > _layersCapacity) {
+      calloc.free(_layers);
+      _layersCapacity = count + 8;
+      _layers = calloc<CawLayerMeterStereoStruct>(_layersCapacity);
+    }
+    final have = _b.layerMeters(_handle, _layers, count);
+    return List.generate(count, (i) {
+      if (i >= have) return const LayerMeterValue();
+      final m = (_layers + i).ref;
+      return LayerMeterValue(
+          peak: m.peak,
+          peakL: m.peakL,
+          peakR: m.peakR,
+          progress: m.progress,
+          active: m.active != 0,
+          overloaded: m.overloaded != 0);
+    }, growable: false);
+  }
+
   /// Copies the latest samples of a layer (project index), the audition or the master into [out].
   void scope(int index, Float32List out) {
     final n = out.length > 1024 ? 1024 : out.length;
@@ -901,6 +937,7 @@ class Engine {
     calloc.free(_meters);
     calloc.free(_layer);
     calloc.free(_layerSides);
+    calloc.free(_layers);
     calloc.free(_scope);
     calloc.free(_display);
     final displayLayer = _displayLayer;

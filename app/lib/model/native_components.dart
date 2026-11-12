@@ -11,6 +11,7 @@ import 'cpp_component.dart';
 import 'native_trust.dart';
 import 'project.dart';
 import 'storage.dart';
+import 'atomic_file.dart';
 
 /// Loads a built library into the engine (Engine.loadNativeComponent); a function, so tests can stand in for it.
 typedef NativeLoad = Future<NativeComponentLoadResult> Function(
@@ -170,8 +171,6 @@ class NativeComponentManager {
       builds.removeWhere((_, path) => !File(path).existsSync());
     }
     await cacheFile.parent.create(recursive: true);
-    final tmp = File('${cacheFile.path}.tmp');
-    await tmp.writeAsString(jsonEncode(cache));
-    await tmp.rename(cacheFile.path);
+    await writeFileAtomically(cacheFile, jsonEncode(cache), flush: false);
   }
 }

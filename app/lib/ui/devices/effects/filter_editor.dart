@@ -1,5 +1,6 @@
 // The filter's plugin UI: its response with the cutoff handle, the LFO and envelope modulation drawn as a band and a moving curve,
 // type and LFO-shape tiles.
+import '../kit/repaint.dart';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -217,5 +218,6 @@ class _FilterPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant _FilterPainter o) => true;
+  bool shouldRepaint(covariant _FilterPainter o) =>
+      paintInputsChanged([o.response, o.cut, o.moved, o.lfoAmt, o.envAmt, o.y, o.color, o.second, o.active, o.live], [response, cut, moved, lfoAmt, envAmt, y, color, second, active, live]);
 }

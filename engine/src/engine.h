@@ -183,6 +183,9 @@ public:
     void clearOverload();
     Meters meters();
     bool layerMeter(int index, LayerMeter& out);
+    // Every project layer's meter under one lock, as layerMeter reads each: sink(ctx, i, meter) for the first
+    // min(count, capacity) layers. Returns the layer count. Allocates nothing.
+    int layerMeters(int capacity, void (*sink)(void* ctx, int index, const LayerMeter& meter), void* ctx);
     // The master's loudness (BS.1770-5 / EBU Tech 3341: momentary, short-term, integrated since the last Play or
     // reset) and true peak, after the safety limiter (meters.h). Not the audio thread.
     LoudnessMeter::Reading loudness();
@@ -466,6 +469,7 @@ private:
     SlotTable* ctlTable_ = nullptr;  // the newest table sent (alive until a newer one replaces it)
     std::atomic<int> ctlCapacity_{0};  // ctlTable_'s layer capacity, for layerCapacity()
     Slot& ctlSlot(int i) noexcept;
+    void readLayerMeter(int index, LayerMeter& out);  // ctl_ held, index a project layer
     std::string grow(int capacity);  // a larger slot table, sent to the audio thread; "" or an error
     double ctlSr_ = 0;
     int64_t ctlLoopLen_ = 0;

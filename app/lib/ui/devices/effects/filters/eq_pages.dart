@@ -1,4 +1,5 @@
 // The 3-band EQ's, the tilt EQ's and the graphic EQ's plugin UIs: band regions with crossover handles, a tilting line, and 31 bars drawn with a finger.
+import '../../kit/repaint.dart';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -159,7 +160,8 @@ class _Eq3Painter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant _Eq3Painter o) => true;
+  bool shouldRepaint(covariant _Eq3Painter o) =>
+      paintInputsChanged([o.gains, o.kills, o.low, o.high, o.out, o.y, o.peaks, o.active, o.colors], [gains, kills, low, high, out, y, peaks, active, colors]);
 }
 
 // ---------- Tilt ----------
@@ -336,5 +338,6 @@ class _GeqPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant _GeqPainter o) => true;
+  bool shouldRepaint(covariant _GeqPainter o) =>
+      paintInputsChanged([o.gains, o.spectrum, o.curve, o.y, o.color, o.second, o.active], [gains, spectrum, curve, y, color, second, active]);
 }

@@ -177,4 +177,31 @@ void main() {
     expect(bytes.skip(1000).any((b) => b != 0), isTrue);
     await dir.delete(recursive: true);
   }, skip: skip);
+
+  test('every track meter in one call (API 25) reads what one call per track reads, into a buffer that grows', () async {
+    final line = patternTemplates.firstWhere((t) => t.file == 'acid-line.caw');
+    final p = ProjectDoc(id: 'p', name: 'T', modules: [ModuleDoc(id: 'n', name: 'Line', source: line.source)], layers: [
+      for (var i = 0; i < 20; i++)
+        LayerDoc(id: 'l$i', name: 'T$i', color: 0, instrument: ComponentUseDoc('org.caw.synth.flagship'),
+            patternId: i.isEven ? 'n' : null),
+    ]);
+    final e = Engine.create();
+    await e.setProject(p.toEngineJson());
+    e.play();
+    e.pullForTest(48000);
+    final all = e.layerMeters(22); // two past the project's layers, past the first buffer's 16
+    expect(all.length, 22);
+    expect(all.take(20).every((m) => m.active), isTrue);
+    expect(all[0].peak, greaterThan(0));
+    expect(all[0].peak, closeTo(all[0].peakL > all[0].peakR ? all[0].peakL : all[0].peakR, 1e-6));
+    expect(all.skip(20).every((m) => !m.active && m.peak == 0), isTrue, reason: 'no such layer: silent');
+    expect(e.layerMeter(0).peak, 0, reason: 'read and reset, as a one-track read is');
+    e.pullForTest(4800);
+    final one = e.layerMeter(0).peak;
+    e.pullForTest(4800);
+    expect(e.layerMeters(1).single.peak, greaterThan(0));
+    expect(one, greaterThan(0));
+    expect(e.layerMeters(0), isEmpty);
+    e.dispose();
+  }, skip: skip);
 }

@@ -1,5 +1,6 @@
 // The space family's plugin UIs: the reverb (a room with ripples and its decaying tail, freeze) and the delays (echo taps you
 // drag on left and right lanes, a ball bouncing through them in real time), for org.caw.reverb.pro, delay.pro and delay.pingpong.
+import '../kit/repaint.dart';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -176,7 +177,8 @@ class _ReverbPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant _ReverbPainter o) => true;
+  bool shouldRepaint(covariant _ReverbPainter o) =>
+      paintInputsChanged([o.decay, o.size, o.damping, o.predelay, o.seconds, o.freeze, o.active, o.color, o.second], [decay, size, damping, predelay, seconds, freeze, active, color, second]);
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -494,5 +496,6 @@ class _DelayPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant _DelayPainter o) => true;
+  bool shouldRepaint(covariant _DelayPainter o) =>
+      paintInputsChanged([o.taps, o.x, o.laneL, o.laneR, o.tall, o.span, o.seconds, o.drive, o.pingPong, o.freeze, o.active, o.color, o.second], [taps, x, laneL, laneR, tall, span, seconds, drive, pingPong, freeze, active, color, second]);
 }

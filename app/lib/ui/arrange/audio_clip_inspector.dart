@@ -93,7 +93,8 @@ class _Inspector extends StatelessWidget {
             Positioned.fill(child: CustomPaint(key: const ValueKey('audio-inspector-wave'), painter: AudioClipPainter(
               peaks: () => WaveformCache.instance.peaks(state.audioIo, asset.path, asset.seconds, per),
               window: ClipWindow(offset: 0, perPixel: per, fileSeconds: asset.seconds),
-              color: Neon.dim, gain: 1, fadeIn: 0, fadeOut: 0, inCurve: FadeCurve.linear, outCurve: FadeCurve.linear))),
+              color: Neon.dim, gain: 1, fadeIn: 0, fadeOut: 0, inCurve: FadeCurve.linear, outCurve: FadeCurve.linear,
+              path: asset.path))),
             Positioned(left: (from / per).clamp(0, box.maxWidth), top: 0, bottom: 0,
               width: math.max(2.0, math.min(used, asset.seconds) / per),
               child: IgnorePointer(child: DecoratedBox(decoration: BoxDecoration(

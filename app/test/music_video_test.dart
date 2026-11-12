@@ -359,6 +359,24 @@ void main() {
     }
   });
 
+  testWidgets('every step of the song draws, with three or more tracks playing at once', (tester) async {
+    // A frame with 3+ playing tracks once threw: their colour sweep had more than two colours and no stops.
+    final song = _song();
+    final extra = [
+      for (var i = 0; i < 3; i++)
+        LayerDoc(id: 'x$i', name: 'Extra $i', color: 3 + i, clips: [ClipDoc(id: 'x$i', patternId: 'beat', lengthSteps: 256)],
+            instrument: ComponentUseDoc('org.caw.synth.saw', {'cutoff': 0.5})),
+    ];
+    song.layers.addAll(extra);
+    final scene = _scene(song);
+    final plan = directVideo(scene, MusicVideoOptions(), start: 0, end: 256);
+    for (var step = 0.0; step < 256; step += 8) {
+      final input = VideoFrameInput(scene: scene, plan: plan, step: step + 0.5, seconds: step / 8);
+      final bytes = await tester.runAsync(() => rasterizeVideoFrame(input, 64, 64));
+      expect(bytes!.length, 64 * 64 * 4, reason: 'step $step');
+    }
+  });
+
   /// Scrolls [key] into view (building it first if the list hasn't yet) and taps it.
   Future<void> tapKey(WidgetTester tester, String key) async {
     final f = find.byKey(ValueKey(key));

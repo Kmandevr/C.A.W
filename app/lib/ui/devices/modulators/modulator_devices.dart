@@ -1,4 +1,5 @@
 // Project modulators (#161) as device-kit devices on a track's FX stack: output chips to drag or tap onto any knob, an LFO you draw, steps, envelopes, followers, macros, their links.
+import '../kit/repaint.dart';
 import 'dart:async';
 import 'dart:math' as math;
 
@@ -654,7 +655,8 @@ class _CurvePainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(_CurvePainter old) => true;
+  bool shouldRepaint(covariant _CurvePainter old) =>
+      paintInputsChanged([old.f, old.color, old.now, old.custom], [f, color, now, custom]);
 }
 
 /// The step sequencer's bars: drag across them to set each step's level (the steps past its length dimmed).
@@ -718,7 +720,8 @@ class _StepsPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(_StepsPainter old) => true;
+  bool shouldRepaint(covariant _StepsPainter old) =>
+      paintInputsChanged([old.values, old.count, old.color, old.now], [values, count, color, now]);
 }
 
 /// The envelope's shape (attack, decay to sustain, a held part, release) with its level now.

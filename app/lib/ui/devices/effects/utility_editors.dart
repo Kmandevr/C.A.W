@@ -1,5 +1,6 @@
 // The utility family's plugin UI (utility, width, balance): the stereo field as a fan you drag (pan sideways, width up or pinch),
 // phase and mono marks, the output's correlation.
+import '../kit/repaint.dart';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -218,5 +219,6 @@ class _FieldPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant _FieldPainter o) => true;
+  bool shouldRepaint(covariant _FieldPainter o) =>
+      paintInputsChanged([o.pan, o.width, o.gain, o.bassHz, o.secs, o.channels, o.invertL, o.invertR, o.bassMono, o.active, o.color, o.second], [pan, width, gain, bassHz, secs, channels, invertL, invertR, bassMono, active, color, second]);
 }

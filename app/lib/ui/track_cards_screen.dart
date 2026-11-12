@@ -540,14 +540,16 @@ class _Lane extends StatelessWidget {
                 clipBox(ValueKey('card-audio-${c.id}'), c.startSteps, c.lengthAt(p.bpm), c.mute || t.mute,
                     layer.isFolder ? null : _waveform(c, stepW, notes)),
             ],
-            ValueListenableBuilder<int>(
+            // A live island (widgets.dart): the line moves on every read without repainting the clips and
+            // waveforms under it (beta plan B4.1).
+            LiveIsland(child: ValueListenableBuilder<int>(
               valueListenable: state.tick,
               builder: (context, _, _) {
                 final m = index < state.audibleLayerMeters.length ? state.audibleLayerMeters[index] : null;
                 final at = state.meters.playing ? (m?.progress ?? 0) : -1.0;
                 return CustomPaint(painter: _PlayheadPainter(at, color));
               },
-            ),
+            )),
           ]);
         }),
       );
@@ -564,7 +566,7 @@ class _Lane extends StatelessWidget {
     final asset = state.project.asset(c.assetId);
     final fileSeconds = asset?.seconds ?? 0;
     final per = c.sourcePerStep(state.project.bpm, asset?.bpm) / stepW;
-    return CustomPaint(
+    return RepaintBoundary(child: CustomPaint(
       key: ValueKey('card-wave-${c.id}'),
       size: Size.infinite,
       painter: AudioClipPainter(
@@ -573,8 +575,9 @@ class _Lane extends StatelessWidget {
             : WaveformCache.instance.peaks(state.audioIo, asset.path, fileSeconds, per.abs()),
         window: ClipWindow(offset: c.offsetSeconds, perPixel: per, fileSeconds: fileSeconds, reverse: c.reverse,
             loop: c.loop, loopStart: c.loopStart, loopEnd: c.loopEnd),
-        color: wave, gain: c.gain, fadeIn: 0, fadeOut: 0, inCurve: c.fadeInCurve, outCurve: c.fadeOutCurve),
-    );
+        color: wave, gain: c.gain, fadeIn: 0, fadeOut: 0, inCurve: c.fadeInCurve, outCurve: c.fadeOutCurve,
+        path: asset?.path),
+    ));
   }
 }
 

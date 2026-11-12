@@ -1,4 +1,5 @@
 // The formant filter's plugin UI (vowels on an XY pad over the response they make) and the disperser's (its group delay, dragged for frequency and amount).
+import '../../kit/repaint.dart';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -112,7 +113,8 @@ class _FormantCurvePainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant _FormantCurvePainter o) => true;
+  bool shouldRepaint(covariant _FormantCurvePainter o) =>
+      paintInputsChanged([o.formants, o.q, o.lows, o.highs, o.mix, o.color], [formants, q, lows, highs, mix, color]);
 }
 
 /// The disperser: its group delay over frequency (drag: sideways the frequency, up the amount; the right side's

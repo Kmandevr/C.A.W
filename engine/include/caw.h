@@ -78,8 +78,12 @@ extern "C" {
    "noteComponent"; the link sources "note.pitch", "note.velocity", "note.pressure", "note.timbre", "note.gate" and
    "note.age"; caw_engine_note_fx_stats. The voice bus (caw_component.h) gains CAW_LANE_REST. Nothing else changes.
    23 (2026-11-11): caw_audio_latency, the running device's output and input latency (AAudio's timestamps where it
-   has them, else the queued buffers), the routed device's id and, on WASAPI, its kind. Nothing else changes. */
-#define CAW_API_VERSION 23
+   has them, else the queued buffers), the routed device's id and, on WASAPI, its kind. Nothing else changes.
+   24: taken by branch speed-parallel (caw_audio_threads), built at the same time.
+   25 (2026-11-12, beta plan B4.8): caw_engine_layer_meters reads every project layer's stereo meter in one call
+   into a caller's array of CawLayerMeterStereo (the app's meter poll made one call per track). Nothing else
+   changes. */
+#define CAW_API_VERSION 25
 /* The component index that names a layer's native instrument rather than one of its "components". */
 #define CAW_INSTRUMENT_INDEX 0xFFFFFFFFu
 /* A component index with this bit (API version 22) names component (index & ~CAW_NOTE_COMPONENT) of the layer's
@@ -104,6 +108,16 @@ typedef struct CawLayerMeter {
     int32_t active;
     int32_t overloaded;
 } CawLayerMeter;
+
+/* One layer's meter with each side's peak (caw_engine_layer_meters, API version 25). */
+typedef struct CawLayerMeterStereo {
+    float peak;      /* the louder side's, since the last read */
+    float peak_l;
+    float peak_r;
+    float progress;  /* 0..1 through this layer's own loop */
+    int32_t active;
+    int32_t overloaded;
+} CawLayerMeterStereo;
 
 enum { CAW_EXPORT_LOOP = 0, CAW_EXPORT_FREE = 1, CAW_EXPORT_ONESHOT = 2, CAW_EXPORT_WAVETABLE = 3 };
 
@@ -293,6 +307,10 @@ CAW_API int32_t caw_engine_layer_meter(CawEngine* e, int32_t layer_index, CawLay
    meter's peak is the louder of the two. Either call resets both sides. API version 5. */
 CAW_API int32_t caw_engine_layer_meter_stereo(CawEngine* e, int32_t layer_index, CawLayerMeter* out, float* peak_l,
                                               float* peak_r);
+/* Every project layer's meter at once, as caw_engine_layer_meter_stereo reads one (and resets it): the first
+   min(count, capacity) layers go into out[0..]. Returns the project's layer count (0 for a NULL engine), so a
+   caller with too small an array can grow it; out may be NULL with capacity 0. API version 25. */
+CAW_API int32_t caw_engine_layer_meters(CawEngine* e, CawLayerMeterStereo* out, int32_t capacity);
 /* Latest n (<= 1024) output samples of a layer (by project index), the audition (CAW_SCOPE_AUDITION) or the
    master (CAW_SCOPE_MASTER). */
 #define CAW_SCOPE_MASTER (-1)

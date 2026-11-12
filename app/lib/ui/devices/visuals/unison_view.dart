@@ -1,4 +1,5 @@
 // A unison stack fanned out: each copy where it pans, as tall as its level, as high as its detune; drag for spread and detune.
+import '../kit/repaint.dart';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -105,5 +106,6 @@ class _UnisonPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant _UnisonPainter o) => true;
+  bool shouldRepaint(covariant _UnisonPainter o) =>
+      paintInputsChanged([o.copies, o.maxSemis, o.color, o.active], [copies, maxSemis, color, active]);
 }

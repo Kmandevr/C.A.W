@@ -1,5 +1,6 @@
 // Effect visuals drawn from parameters: an EQ curve with draggable band nodes, a saturation transfer curve, a
 // compressor's transfer graph, delay echoes and a reverb tail. All are approximations computed in Dart (labelled "≈").
+import '../kit/repaint.dart';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -192,7 +193,8 @@ class _EqPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant _EqPainter o) => true;
+  bool shouldRepaint(covariant _EqPainter o) =>
+      paintInputsChanged([o.curve, o.nodes, o.y, o.color, o.active, o.spectrum], [curve, nodes, y, color, active, spectrum]);
 }
 
 /// A saturation curve: input level across, output up, for shape [type] (0 drive, 1 hard clip, 2 fold, 3 crush)
@@ -310,7 +312,8 @@ class _CurvePainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant _CurvePainter o) => true;
+  bool shouldRepaint(covariant _CurvePainter o) =>
+      paintInputsChanged([o.f, o.color, o.label, o.marker], [f, color, label, marker]);
 }
 
 /// Delay echoes: one bar per repeat at [seconds] apart, each [feedback] times the last, alternating sides when
@@ -351,7 +354,8 @@ class _EchoPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant _EchoPainter o) => true;
+  bool shouldRepaint(covariant _EchoPainter o) =>
+      paintInputsChanged([o.d], [d]);
 }
 
 /// A reverb tail: early reflections then a decay [decaySeconds] long, denser with [size], darker with [damping].
@@ -392,5 +396,6 @@ class _TailPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant _TailPainter o) => true;
+  bool shouldRepaint(covariant _TailPainter o) =>
+      paintInputsChanged([o.r], [r]);
 }

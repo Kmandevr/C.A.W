@@ -6,6 +6,24 @@ updated: 2026-11-12
 
 # Decisions
 
+## 2026-11-12: No shared buses; work the REAPER way (owner)
+
+**Decision (owner):** "I don't love the use of busses. I like REAPER's way of working." The shared reverb-bus idea (A7) is dropped. Routing stays REAPER-style: tracks, folders and sends between tracks, with no separate bus concept added. Speed for heavy Flagship patches comes from the engine itself.
+
+## 2026-11-12: Open alpha and beta: what the names mean (owner)
+
+**Decision (owner):**
+- **Alpha** means the app itself is unofficially released. The public line is the **open alpha**: v1.0.0-alpha.1, then -alpha.2 and so on. Anyone who downloads the app is an alpha tester.
+- **Beta** means unofficially released content: tagged `-beta.N` builds of changes not yet in the public alpha. Anyone on the Beta channel is beta-testing the alpha.
+- **Every change** is an opt-in channel with each Main build.
+- **Releases:** pushes to Main never make a release. The owner tags a build once it is stable.
+
+**Telemetry (owner confirmed):** everyone using the open alpha is a tester, so the alpha builds use the telemetry contract's `beta` channel: on by default, with the first-run notice. The `release` channel (off until the user opts in) is kept for a later official release.
+
+**Automatic updates (owner):** an opt-in setting, off by default ("people don't like change on things like DAWs"), that installs new alpha or beta releases of the chosen channel in the background without the user seeing it, as far as each platform allows. It can be turned off at any time.
+
+**Compatibility (owner):** from the official 1.0 release on, backwards compatibility with future updates is a priority: projects, settings and saved files from 1.0 must keep opening in later versions.
+
 ## 2026-11-12: Beta readiness: speed, smoothness, a stress test, telemetry and feedback (owner)
 
 **Decision (owner, through the owner's other session; confirmed in this session):** the full direction is in the [beta readiness plan](beta-readiness-plan.md) and issue #187.
@@ -80,6 +98,7 @@ updated: 2026-11-12
 - **Built, speed phase 2 "floating point" (2026-11-12; Claude's choices, [engine](engine.md), "Determinism"; numbers in [engine performance](engine-performance.md#2-floating-point)):** flush-to-zero on the audio thread (every `Engine::process` call, so live, exports and renders alike, and sample-pack renders; an RAII guard that clears only what it set). The engine's own code builds with `-ffp-contract=fast -fno-math-errno -fno-trapping-math -fno-signed-zeros -fassociative-math` (GCC and Clang): each measured faster on Arm64 or x86-64, and every reference passes unchanged. Fused multiply-adds alone gave −6.5% of the typical song on Android arm64 and the subsets another −1.2% (−7.7% in all, −13.8% on the heaviest Flagship); flush-to-zero alone is within noise, kept as a guard. Not taken: `-ffinite-math-only` (it removes the NaN/Inf guards; a test now feeds NaN and Inf from a track), `-freciprocal-math` (no gain), a higher x86-64 baseline for FMA (it would need runtime dispatch) and MSVC's `/fp:fast` (Windows isn't the speed target; its NaN handling is unchecked). `CAW::SDK` keeps the strict flags, so the Library still gives the same bits in a component on every platform; the Library's exact-bit tests run in their own strict executable (`caw_exact_tests`), and every program that links `caw_core` builds with the engine's flags (the graph routing tests guard their expected values instead). Sample positions (`src/sample_time.cpp`) stay strict in every build, so note, clip, loop and MIDI-export timing is the same on every platform.
 - **Built, speed phase 3 "maths" (2026-11-12; Claude's choices; numbers in [engine performance](engine-performance.md#3-maths)):** a rational `lib::tanhApprox` (within 5e-9) for every per-sample tanh in the built-ins, `tanApprox` for Flagship's voice-filter coefficients, and control-rate exps, pows and sin/cos worked out only when their inputs move; `detmath` and every older Library function keep their bits, and every reference passes unchanged. The typical song gains −3.5% on Android arm64 (−4.5% Linux arm64), under 5%, kept: the owner keeps every gain. Not taken: `fastExp` in the modulation path (a block-split bit test holds it to `denormalizeParameter`'s bits).
 - **Built, speed phase 4 "precision and layout" (2026-11-12; Claude's choices; numbers in [engine performance](engine-performance.md#4-precision-and-layout)):** the EQ, Delay Pro and the Saturator staged over the run with a stereo pair's sides as one two-wide double vector (`src/stereo_pair.h`), the Library's `Oversampler2x` over a block, and a send's sum into its destination in float (the same bits). Gains, feedback filters, phases and delay positions stay double: the send and track gains in float moved a downstream crusher's steps (−77 dBFS against −120), so they were kept. Every reference passes unchanged; the typical song gains −5.8% on Android arm64 (−7.2% Linux arm64).
+- **Built, speed A2 "Flagship voices side by side" (2026-11-12; Claude's choices; numbers in [engine performance](engine-performance.md#a2-flagship-voices-side-by-side)):** the fold warp's decimators run a block at a time with a voice's two sides in one loop, and voices whose filters are set alike run them side by side (`MultiLadder::processPairs`, `Svf::lowpassPairs`), four voices at a time on x86-64 and two on Arm64 because four measured no faster there (their state spills); each voice is still summed in the voices' order, so the output keeps its bits (checked on x86-64 and Arm64). Filter and decimator state stays double. Two unison-copy changes that measured no gain were not kept. Flagship heavy at 64 voices: −19.9% on Android arm64 (worst callback 78.9% → 67.2% of the budget), −13.1% on Linux arm64.
 - **Process:** measure first (a CI bench on Linux and Android arm64 with a baseline in [engine performance](engine-performance.md)), then one pull request per phase (free wins, floating point, maths, precision and layout, parallel mixer), each with before/after numbers. Claude asks the owner before any audible change. Every measured gain is kept, however small, even under 1% in a rarely used path: the engine should run fast enough for the weakest device. The only reason to turn a gain down is that it makes the engine unstable (owner, 2026-11-12, replacing the earlier "ask when a phase gains less than 5%").
 
 ## 2026-11-12: Default project (owner, 2026-11-12)
