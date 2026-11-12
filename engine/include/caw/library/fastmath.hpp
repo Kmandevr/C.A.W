@@ -88,6 +88,33 @@ inline double fastTanh(double x) noexcept {
     return x < 0.0 ? -t : t;
 }
 
+// tanh(x) within 5e-9 (absolute; 1e-9 relative near 0), for audio-rate curves: about half fastTanh's cost, with no
+// exponential and no branch (so it vectorizes). |x| is held at 10 (tanh(10) is 1 - 4.1e-9), then x P(x^2) / Q(x^2),
+// a rational fit of degree 5 over 5 in x^2 (C.A.W. 2026-11-12, fitted by weighted least squares, worst fit error
+// 1.3e-10 on 0..10). NaN gives 0. Not fastTanh's bits: use it where the sound, not the bits, is what matters.
+// tanhApprox's x P(x^2) / Q(x^2) on an x already held to -10..10: for a double or a GCC/Clang two-wide vector, so
+// the scalar and vector forms share one copy of the fit.
+template <class T>
+inline T tanhApproxRational(T x) noexcept {
+    const T s = x * x;
+    T p = s * 3.217632110003212e-11 + 1.0357852250132971e-07;
+    p = p * s + 4.092017186705684e-05;
+    p = p * s + 0.0043728758223902315;
+    p = p * s + 0.14059264090233234;
+    p = p * s + 0.9999999993415611;
+    T q = s * 2.6742358055163463e-09 + 2.4792909092118756e-06;
+    q = q * s + 0.0004906653531677001;
+    q = q * s + 0.02901487015638532;
+    q = q * s + 0.4739259712575389;
+    q = q * s + 1.0;
+    return x * p / q;
+}
+inline double tanhApprox(double x) noexcept {
+    x = x == x ? x : 0.0;
+    x = x > 10.0 ? 10.0 : (x < -10.0 ? -10.0 : x);
+    return tanhApproxRational(x);
+}
+
 // sin(2 pi t) for a phase t in cycles (any |t| below 2^31), within 1e-9; NaN gives 0.
 inline double fastSinCycles(double t) noexcept {
     if (!(t > -2147483648.0 && t < 2147483648.0)) return 0.0;
@@ -102,6 +129,14 @@ inline double fastSinCycles(double t) noexcept {
     p = p * r2 + 1.0 / 120.0;
     p = p * r2 - 1.0 / 6.0;
     return r + r * r2 * p;
+}
+
+// tan(x) for |x| < pi/2 as two fastSinCycles, within 1e-8 relative while cos(x) >= 0.03 (a filter's tan(pi fc / sr)
+// up to fc = 0.49 sr): cheaper than detTan for coefficients worked out at control rate. 0 where cos(x) is 0.
+inline double tanApprox(double x) noexcept {
+    const double t = x * 0.15915494309189535;  // 1 / (2 pi)
+    const double c = fastSinCycles(t + 0.25);
+    return c == 0.0 ? 0.0 : fastSinCycles(t) / c;
 }
 
 // The Library's drive() with its level-matching worked out once: set() costs a tanh (call it when the
@@ -156,6 +191,28 @@ public:
 #else
         out[0] = process(in[0]);
         out[1] = process(in[1]);
+#endif
+    }
+
+    // process() and process2() with tanhApprox: the same curve within 5e-9 x the level-matching gain, about half
+    // the cost (two at a time as a two-wide vector on GCC and Clang). Where the compiler fuses multiply-adds
+    // (Arm64, x86 with FMA) a vector lane and processApprox() can differ by a few ulps (about -300 dBFS), so a
+    // different block split may change the lowest bits: the same sound, not the same bits.
+    double processApprox(double x) const noexcept { return tanhApprox(finiteOr0(x) * amount_) * gain_; }
+    void process2Approx(const double* in, double* out) const noexcept {
+#if defined(__GNUC__)
+        typedef double D2 __attribute__((vector_size(16)));
+        const D2 zero = {0.0, 0.0}, lim = {10.0, 10.0};
+        D2 x = {in[0], in[1]};
+        x = x - x == zero ? x : zero;  // finiteOr0 (NaN and infinities give 0)
+        x = x * amount_;
+        x = x > lim ? lim : (x < -lim ? -lim : x);
+        const D2 v = tanhApproxRational(x) * gain_;
+        out[0] = v[0];
+        out[1] = v[1];
+#else
+        out[0] = processApprox(in[0]);
+        out[1] = processApprox(in[1]);
 #endif
     }
 

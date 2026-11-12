@@ -33,6 +33,22 @@ double denormalizeParameter(const ParameterDescriptor& p, double normalized) noe
     return clampToRange(p, p.minimum + n * (p.maximum - p.minimum));
 }
 
+void denormalizeOffsets(const ParameterDescriptor& p, double n0, const float* offset, uint32_t count,
+                        double* out) noexcept {
+    const bool expo = p.maximum > p.minimum && p.curve == ParameterCurve::Exponential;
+    const double logRatio = expo ? detLog(p.maximum / p.minimum) : 0.0;  // denormalizeParameter's, once
+    for (uint32_t i = 0; i < count; ++i) {
+        const double c = std::clamp(n0 + offset[i], 0.0, 1.0);
+        const double n = std::isnan(c) ? 0.0 : c;
+        double v;
+        if (!(p.maximum > p.minimum) || n <= 0.0) v = p.minimum;
+        else if (n >= 1.0) v = p.maximum;
+        else if (expo) v = clampToRange(p, p.minimum * detExp(n * logRatio));
+        else v = clampToRange(p, p.minimum + n * (p.maximum - p.minimum));
+        out[i] = constrainParameter(p, v);
+    }
+}
+
 double constrainParameter(const ParameterDescriptor& p, double plain) noexcept {
     double v = clampToRange(p, plain);
     // The same steps as the Engine's automation path, so values match it bit for bit.

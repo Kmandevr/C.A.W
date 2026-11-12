@@ -62,7 +62,7 @@ const ModuleDescriptor& satDescriptor() {
 [[gnu::always_inline]] inline double curve(int mode, double x, double steps = 128.0) noexcept {
     switch (mode) {
         case kTube:  // asymmetric: the positive side a tanh, the negative an exponential that flattens at -2/3 (even harmonics)
-            return x >= 0.0 ? lib::fastTanh(x) : (lib::fastExp(1.5 * x) - 1.0) * (1.0 / 1.5);
+            return x >= 0.0 ? lib::tanhApprox(x) : (lib::fastExp(1.5 * x) - 1.0) * (1.0 / 1.5);
         case kSoft: {  // cubic: 1.5 u - 0.5 u^3 with u = 2x/3, flat at +-1 from |x| = 1.5
             const double u = x * (2.0 / 3.0);
             return u >= 1.0 ? 1.0 : (u <= -1.0 ? -1.0 : 1.5 * u - 0.5 * u * u * u);
@@ -71,9 +71,9 @@ const ModuleDescriptor& satDescriptor() {
         case kFold: return lib::fastSinCycles(x * 0.15915494309189535);  // sin(x): folds back past pi/2
         case kFuzz: {  // tanh(x + x^3): squarer than tanh; the negative side clips at -0.7 (a fuzz's asymmetry)
             const double u = x + x * x * x;
-            return x >= 0.0 ? lib::fastTanh(u) : 0.7 * lib::fastTanh(u * (1.0 / 0.7));
+            return x >= 0.0 ? lib::tanhApprox(u) : 0.7 * lib::tanhApprox(u * (1.0 / 0.7));
         }
-        case kRectify: return lib::fastTanh(x < 0.0 ? -x : x);  // full wave: the octave up (its DC is removed after)
+        case kRectify: return lib::tanhApprox(x < 0.0 ? -x : x);  // full wave: the octave up (its DC is removed after)
         case kTriFold: {  // a triangle: up to 1 at x = 1, back to 0 at 2, -1 at 3, and on
             const double t = (x + 1.0) * 0.25;
             const double f = t - lib::fast_detail::floorSmall(t);
@@ -84,10 +84,10 @@ const ModuleDescriptor& satDescriptor() {
             return std::floor(v * steps + 0.5) / steps;
         }
         case kFat: {  // tanh plus half its square: a strong second harmonic (Faturator-style weight)
-            const double t = lib::fastTanh(x);
+            const double t = lib::tanhApprox(x);
             return t + 0.5 * t * t;
         }
-        default: return lib::fastTanh(x);                               // tape: tanh
+        default: return lib::tanhApprox(x);                               // tape: tanh
     }
 }
 
@@ -124,7 +124,8 @@ protected:
     void control(uint32_t at) noexcept override {
         const int mode = std::clamp(choice(kMode, at), 0, kModeCount - 1);
         driveDb_ = std::clamp(param(kDrive, at), 0.0, 36.0);
-        drive_.set(lib::dbToGain(driveDb_), kControlFrames);
+        if (driveDb_ != driveDbFor_) driveDbFor_ = driveDb_, driveGain_ = lib::dbToGain(driveDb_);  // an exp: on a change
+        drive_.set(driveGain_, kControlFrames);
         biasValue_ = std::clamp(param(kBias, at), -1.0, 1.0) * 0.5;
         bias_.set(biasValue_, kControlFrames);
         toneValue_ = std::clamp(param(kTone, at), -1.0, 1.0);
@@ -148,10 +149,12 @@ protected:
             switching_ = true;
         }
         autoDb_ = on(kAutoGain, at) ? -0.5 * driveDb_ : 0.0;
-        out_.set(lib::dbToGain(param(kOutput, at) + autoDb_), kControlFrames);
+        const double outDb = param(kOutput, at) + autoDb_;
+        if (outDb != outDbFor_) outDbFor_ = outDb, outGain_ = lib::dbToGain(outDb);
+        out_.set(outGain_, kControlFrames);
         mix_.set(std::clamp(param(kMix, at), 0.0, 1.0), kControlFrames);
         const double bits = std::clamp(param(kBits, at), 1.0, 16.0);
-        steps_ = detPow(2.0, bits - 1.0);
+        if (bits != bitsFor_) bitsFor_ = bits, steps_ = detPow(2.0, bits - 1.0);  // a pow: on a change
         crushStep_ = std::clamp(param(kRate, at), 200.0, 48000.0) / rate();
         spreadValue_ = std::clamp(param(kSpread, at), 0.0, 1.0);
         spreadOn_ = spreadValue_ > 0.0 || spread_.value != 0.0;
@@ -315,6 +318,7 @@ private:
     int factor_ = 2;
     double driveDb_ = 6, biasValue_ = 0, toneValue_ = 0, autoDb_ = 0, steps_ = 128, crushStep_ = 0.25;
     double crushPhase_ = 1.0, held_[2] = {};
+    double driveDbFor_ = -1e300, driveGain_ = 1, outDbFor_ = -1e300, outGain_ = 1, bitsFor_ = -1;  // control: last worked out
     double offset_[2] = {}, offsetBias_[2] = {}, offsetSteps_[2] = {};  // curve(offsetMode_, offsetBias_, ...) per side
     int offsetMode_[2] = {-1, -1};
 };

@@ -172,27 +172,27 @@ struct Drive {
             q = exp2d(std::floor(bits) - 1.0);
         }
         if (type == kDriveTube) {  // a biased tanh: even harmonics; the bias's offset taken out, held within +-1
-            tubeBias = lib::fastTanh(0.3);
+            tubeBias = lib::tanhApprox(0.3);
             tubeNorm = 1.0 / (1.0 + tubeBias);
         }
         if (type == kDriveDecimate) holdFrames = static_cast<uint32_t>(amount + 0.5);  // hold every n-th sample
-        if (type == kDriveRectify || type == kDriveAsym) norm = 1.0 / lib::fastTanh(amount);
+        if (type == kDriveRectify || type == kDriveAsym) norm = 1.0 / lib::tanhApprox(amount);
     }
     double curveAt(double x) const noexcept {
         switch (type) {
-            case kDriveSoft: return sat.process(x);
+            case kDriveSoft: return sat.processApprox(x);
             case kDriveHard: return lib::hardClip(x, amount);
             case kDriveFold: return lib::fastSinCycles(x * amount * 0.25);
-            case kDriveTube: return (lib::fastTanh(amount * x + 0.3) - tubeBias) * tubeNorm;
+            case kDriveTube: return (lib::tanhApprox(amount * x + 0.3) - tubeBias) * tubeNorm;
             case kDriveRectify: {  // half the wave folded up: an octave of grit over the original
-                const double t = lib::fastTanh(amount * x) * norm;
+                const double t = lib::tanhApprox(amount * x) * norm;
                 return (0.5 * t + (t < 0.0 ? -t : t)) * (2.0 / 3.0);
             }
             case kDriveAsym: {  // positive half driven harder than the negative: even harmonics
                 const double y = amount * x;
-                return (y > 0.0 ? lib::fastTanh(y) : lib::fastTanh(0.5 * y)) * norm;
+                return (y > 0.0 ? lib::tanhApprox(y) : lib::tanhApprox(0.5 * y)) * norm;
             }
-            case kDriveClipSoft: return lib::fastTanh(amount * x);
+            case kDriveClipSoft: return lib::tanhApprox(amount * x);
             default: return x;
         }
     }
@@ -356,7 +356,7 @@ void readPad(const ProcessBlock& b, uint32_t pad, uint32_t at, PadSettings& s, u
     if (s.bodyOn) {
         s.wave = clampi(v(kBodyWave), 0, kWaveSquare);
         s.shape = clampd(v(kBodyShape), 0, 1);
-        s.shapeNorm = s.shape > 0 ? 1.0 / lib::fastTanh(1.0 + 9.0 * s.shape) : 1.0;
+        s.shapeNorm = s.shape > 0 ? 1.0 / lib::tanhApprox(1.0 + 9.0 * s.shape) : 1.0;
         s.fold = clampd(v(kBodyFold), 0, 1);
         s.freq = clampd(v(kBodyFreq), 20, 2000);
         s.pitchSt = clampd(v(kBodyPitch) + 12.0 * punch, 0, 96);
@@ -1079,7 +1079,7 @@ private:
             v.subFollow = v.body ? s.subFollow : 0.0;
             v.subEnv.set(s.subAttack, s.subHold, s.subDecay * decayMul, s.subCurve, sr);
             v.subDrive = s.subDrive > 0.0 ? 1.0 + 9.0 * s.subDrive : 0.0;
-            v.subNorm = v.subDrive > 0.0 ? 1.0 / lib::fastTanh(v.subDrive) : 1.0;
+            v.subNorm = v.subDrive > 0.0 ? 1.0 / lib::tanhApprox(v.subDrive) : 1.0;
             v.subFilter = s.subLp < 1999.0;
             if (v.subFilter) v.subLpf.set(s.subLp, sr);
             v.subClean = s.subClean;
@@ -1261,7 +1261,7 @@ private:
             v.phase2 += dt * v.p2ratio;
             v.phase2 -= std::floor(v.phase2);
         }
-        if (v.shapeAmt > 0.0) y = lib::fastTanh(y * v.shapeAmt) * v.shapeNorm;
+        if (v.shapeAmt > 0.0) y = lib::tanhApprox(y * v.shapeAmt) * v.shapeNorm;
         if (v.fold > 0.0) y = lib::fastSinCycles(y * v.fold * 0.25);
         return y * v.bodyEnv.next();
     }
@@ -1276,12 +1276,12 @@ private:
         double y;
         switch (v.subWave) {
             case kSubTriangle: y = lib::triangleWave(v.subPhase); break;
-            case kSubWarm: y = lib::fastTanh(2.0 * lib::fastSinCycles(v.subPhase)) * 1.0373; break;
+            case kSubWarm: y = lib::tanhApprox(2.0 * lib::fastSinCycles(v.subPhase)) * 1.0373; break;
             default: y = lib::fastSinCycles(v.subPhase); break;
         }
         v.subPhase += dt;
         v.subPhase -= std::floor(v.subPhase);
-        if (v.subDrive > 0.0) y = lib::fastTanh(y * v.subDrive) * v.subNorm;
+        if (v.subDrive > 0.0) y = lib::tanhApprox(y * v.subDrive) * v.subNorm;
         if (v.subFilter) y = v.subLpf.low(y);
         return y * env * v.subLevel;
     }

@@ -130,7 +130,7 @@ inline double clipCurve(int mode, double u, double knee) noexcept {
         }
         case kAnalog: {
             constexpr double tb = 0.09966799462495582;  // tanh(0.1)
-            return (lib::fastTanh(u + kAnalogBias) - tb) / (1.0 + tb);
+            return (lib::tanhApprox(u + kAnalogBias) - tb) / (1.0 + tb);
         }
         default: return a >= 1.0 ? s : u;
     }

@@ -156,13 +156,51 @@ The 64-voice Flagship and the 32-track song, over budget in the baseline (about 
 
 ### 3. Maths
 
+**What changed (2026-11-12, branch `speed-maths`, on phase 2's head `82ee8fe`):** the measured cost of `detmath` itself was small (callgrind, x86-64, song8: about 4% of `Engine::process` inlined from `detmath.hpp`, most of it `finiteOr0`; the Library's `fastmath.hpp` curves 6.6%), so the phase went after the per-sample curves as much as the control-rate calls.
+
+- **Audio rate:** a new `lib::tanhApprox` (a rational fit, within 5e-9 of tanh, about half `fastTanh`'s cost, no branch) for every per-sample tanh in the built-ins: the saturator's curves (`builtin_effects_saturator.cpp`, `curve`), Delay Pro's feedback drive (`builtin_effects_space.cpp`, `DelayPro::run`), the drum drives, shapers and sub (`builtin_drums.cpp`), the filter drives (`builtin_fx_filters.cpp`), the analog drive, kit, freqshift, rotary and reverb loops; the `Saturator`'s `processApprox`/`process2Approx` for Flagship's voice-filter drive and distortion (`builtin_flagship.cpp`, `VoiceFilter`, `distortInPlace`) and the distortion component (`builtin_components.cpp`).
+- **Control rate, cheaper:** Flagship's voice filters set their SVF and ladder with `setApprox` (`tanApprox`: two `fastSinCycles` instead of `detTan`'s two `detSin`; `builtin_flagship.cpp`, `VoiceFilter::configure`).
+- **Control rate, only on a change (the same bits):** the compressor's attack and release coefficients (`builtin_effects_dynamics.cpp`, `Compressor::control`), the saturator's drive and output gains and its bit depth's `detPow` (`Saturator::control`), the Ensemble's per-voice pans and its mix's sin and cos (`builtin_fx_space_mod.cpp`, `Ensemble::control`).
+- **Per sample, hoisted (the same bits):** an LFO on an exponential parameter computed `detLog(max / min)` (and a libm `frexp`) every sample; `denormalizeOffsets` (`params.cpp`) takes it once per block (`component_chain.cpp`, `modulated`). Its `detExp` stays: `note_fx_test.cpp`'s block-split test holds this path to `denormalizeParameter`'s bits (a `fastExp` there failed it).
+- **Kept exact:** `detmath`'s functions, every older Library function and `caw_exact_tests`; bit operations, seeded random and hashes untouched. Every reference render passes unchanged: worst stable null −128.9 dBFS (Shimmer busy; most stay at the −132.5 dBFS storage floor) on x86-64 GCC 13 Release and on Arm64 GCC 13 with the engine's flags under qemu.
+
+**[Fact, Bench runs, 10 s × 3 runs, Neoverse-N2 cores both times]** mean µs. Before: [43197482949](https://github.com/Kmandevr/C.A.W/actions/runs/43197482949) (`d6cbd65`: phase 2's head with only the Bench trigger). After: [43199779899](https://github.com/Kmandevr/C.A.W/actions/runs/43199779899) (`727c95d`).
+
+| Scenario | Android arm64 before | after | change | Linux arm64 before | after | change |
+|---|---:|---:|---:|---:|---:|---:|
+| First loop (6 tracks) | 150.7 | 145.1 | −3.7% | 157.1 | 152.2 | −3.1% |
+| Three tracks | 248.1 | 234.7 | −5.4% | 259.5 | 246.1 | −5.2% |
+| Typical song (8 tracks) | 789.7 | 761.8 | −3.5% | 815.2 | 778.4 | −4.5% |
+| Typical song + extras | 1,088.2 | 1,033.8 | −5.0% | 1,092.7 | 1,035.3 | −5.3% |
+| Flagship heavy, 64 voices held | 4,194.2 | 3,960.8 | −5.6% | 4,143.2 | 3,920.9 | −5.4% |
+| Flagship heavy, 16 voices held | 1,089.7 | 1,028.7 | −5.6% | 1,070.7 | 1,017.3 | −5.0% |
+| Drums kit, 16 pads busy | 294.6 | 280.9 | −4.7% | 322.7 | 311.4 | −3.5% |
+| Song, 16 tracks | 1,488.0 | 1,446.1 | −2.8% | 1,547.5 | 1,478.7 | −4.4% |
+| Song, 32 tracks + heavy FX | 4,832.0 | 4,623.7 | −4.3% | 5,061.3 | 4,771.2 | −5.7% |
+| Tail: notes | 197.7 | 192.5 | −2.6% | 188.6 | 184.3 | −2.3% |
+| Tail: ringing out | 120.8 | 118.2 | −2.2% | 114.3 | 112.0 | −2.0% |
+| Tail: silence after | 17.7 | 17.8 | +0.6% | 18.0 | 18.0 | 0.0% |
+| Tail project, no notes | 10.3 | 10.3 | 0.0% | 11.4 | 11.4 | 0.0% |
+
+**[Fact, callgrind, 2026-11-12]** M Ir per second of audio in `Engine::process`, x86-64 GCC 13.3 Release: a 3 s run minus a 1 s run of `caw_bench S 500 --runs 1 --only ID`, divided by 2 (the tail: its whole 30 s run, the phases together), `82ee8fe` against the changes.
+
 | Scenario | Before | After | Change |
 |---|---:|---:|---:|
-| Typical song (8 tracks) | | | |
-| Flagship heavy, 64 voices held | | | |
-| Drums kit, 16 pads busy | | | |
-| Song, 32 tracks + heavy FX | | | |
-| Tail: silence after | | | |
+| First loop (6 tracks) | 250.3 | 246.4 | −1.6% |
+| Three tracks | 389.8 | 380.2 | −2.5% |
+| Typical song (8 tracks) | 1,201.3 | 1,170.3 | −2.6% |
+| Typical song + extras | 1,663.2 | 1,611.0 | −3.1% |
+| Flagship heavy, 64 voices held | 6,269.4 | 6,109.6 | −2.5% |
+| Flagship heavy, 16 voices held | 1,646.0 | 1,603.8 | −2.6% |
+| Drums kit, 16 pads busy | 445.3 | 441.5 | −0.8% |
+| Song, 16 tracks | 2,157.2 | 2,107.3 | −2.3% |
+| Song, 32 tracks + heavy FX | 6,869.8 | 6,665.5 | −3.0% |
+| Tail (30 s: notes, ringing, silence) | 146.0 | 145.2 | −0.5% |
+| Tail project, no notes | 24.2 | 24.2 | 0.0% |
+
+- **Typical song:** −3.5% on Android arm64 (−4.5% Linux arm64); kept, as every measured gain is ([decisions](decisions.md), 2026-11-12). The heavy scenarios gain 4–6% on Arm64; the 32-track song is now at 87% of the budget on Android arm64.
+- **Arm64 gains more than x86-64:** the rational tanh is multiply-adds and one divide, which Arm64 fuses (phase 2's contraction); on x86-64 without FMA it saves fewer instructions (Drums −0.8%: its tanh calls are out of line there).
+- **What is left:** the remaining maths in song8 is the compressor's per-sample dB detection (`fastLog`, `fastExp`, about 0.8%), the delay's and saturator's curves, the modulation path's `detExp` (0.6%, held to its bits) and Drums' sines (`fastSinCycles`, 4% of the Drums kit); the rest of the cost is filters, delay lines, oversamplers and mixing, the subject of phase 4.
 
 ### 4. Precision and layout
 
