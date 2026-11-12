@@ -1,12 +1,12 @@
 # C.A.W start file for chat agents
 
-Generated from `e5492f142811f19959333a6d9cbcc734445fda33` on the default branch at 2026-11-12T03:17:28Z by `scripts/agent-context.js`. Don't edit it; edit the files it bundles.
+Generated from `e314a0e0829d5e454fcdd69831bedbfaffbb8976` on the default branch at 2026-11-12T17:14:42Z by `scripts/agent-context.js`. Don't edit it; edit the files it bundles.
 
 Read this whole file before doing anything else. It replaces separately reading `AGENTS.md`, `CLAUDE.md`, `docs/vision.md` and `.claude/rules/*.md`.
 
 ## Before you start: confirm in your first reply
 
-1. The commit this file was generated from (`e5492f1`).
+1. The commit this file was generated from (`e314a0e`).
 2. The task issue number and your branch (`gpt/<issue>-<short-name>`).
 3. The progress comment's next action, or "new task" if there is none yet.
 4. Which area rules below apply to the files you will touch.
@@ -232,7 +232,7 @@ Develop on the branch the session names. Put `Closes #N` in pull requests that f
 ---
 title: Vision and principles
 summary: Owner-approved product direction, actual platform support, current product boundaries and unresolved owner decisions.
-updated: 2026-11-11
+updated: 2026-11-12
 ---
 
 # Vision and principles
@@ -341,6 +341,7 @@ Only the owner can settle these questions. Do not silently convert them into imp
 | Android developer verification for the sideloaded APK | Open. **[Fact, checked 2026-11-10]** Google requires apps on certified Android devices to come from registered developers, from 2026-09-30 in Brazil, Indonesia, Singapore and Thailand and globally in 2027 (no US or EU date yet); a free limited-distribution account reaches only 20 devices, and ADB installs and an advanced sideloading flow remain ([Android Developers Blog](https://android-developers.googleblog.com/2026/03/android-developer-verification-rolling-out-to-all-developers.html)). The owner decides whether and when to register `com.kmandevr.caw` with its signing key; it is not needed for `v1.0.0-beta.1` |
 | Audio (2026-11-11, branch `audio-ui`): the look of the audio clips, the input sheet, Settings › Audio's input part and the sampler editor (in the APK); a default edge fade; recordings kept with the project or in a shared library; loop takes as stacked lanes for comping; imports copied (now) or referenced in place ([decisions](decisions.md#2026-11-11-audio-assets-clips-sampler-and-input-wp-j-choices-to-confirm)) | Open |
 | Whether effect tails should carry across a layer loop restart in every case | Open; see [engine playback](engine.md#playback) |
+| Music video editor (2026-11-12, #182): the editor's look, to check in the APK. The other questions were answered the same day (full screen, empty stretches, effect targets, the Strobe warning, Falling notes for new videos, keys in the catalogue; [decisions](decisions.md#2026-11-12-the-music-video-editors-open-questions-answered-owner)) | Open (look only) |
 | Piano roll (WP-K2, 2026-11-11): the look of the Quantize… sheet and the step bar (in the APK); whether Ctrl+U should use the sheet's last settings; whether the slide-up on-screen keys should also step; the MIDI CC numbers for automation lanes (CC7 volume, CC10 pan, others from CC20, as proposed in #11), the volume curve (127·√gain) and how parameter lanes scale ([app](app.md)) | Open |
 | Matching REAPER's flow ([REAPER's flow](reaper-flow.md)): the phone look of the new screens (Export sheet, send knob). S splits, Touch automation from a transport button and on-screen keys with pads (owner, 2026-11-10). The clip bar, the ruler with the loop range, markers and regions, the recording flow and automation writing are built; their look and the choices made for them are to confirm ([decisions](decisions.md)) | Open |
 
