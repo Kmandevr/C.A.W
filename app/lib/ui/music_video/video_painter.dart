@@ -1,5 +1,6 @@
-// Draws one music-video frame at any size from the scene, the director's plan, the song step and the meters: the
-// arrangement flythrough, mixer, piano-roll and device shots, their transitions and the title card, in the theme.
+// Draws one music-video frame at any size from the scene, the plan, the song step and the meters: the arrangement
+// flythrough, mixer, piano-roll, device and falling-notes views, split layouts, looks, effects, transitions and the
+// title card, in the theme. The preview and the render both draw through [paintVideoFrame].
 import 'dart:math' as math;
 import 'dart:typed_data';
 import 'dart:ui' as ui;
@@ -8,9 +9,13 @@ import 'package:flutter/material.dart';
 
 import '../../model/music_video.dart';
 import '../../model/music_video_director.dart';
+import '../../model/music_video_edit.dart';
 import '../../model/music_video_meters.dart';
 import '../../model/music_video_scene.dart';
 import '../theme.dart';
+
+part 'video_falling.dart';
+part 'video_effects.dart';
 
 /// Everything one frame depends on (no wall clock: the same input draws the same frame).
 class VideoFrameInput {
@@ -92,21 +97,139 @@ void paintVideoFrame(Canvas canvas, Size size, VideoFrameInput f) {
 }
 
 void _paintShot(Canvas canvas, Size size, VideoFrameInput f, DirectedShot shot) {
+  if (!shot.edited) {
+    _paintView(canvas, size, f, shot, shot);
+    return;
+  }
+  final panels = shot.panelShots.length;
+  final whole = [for (final e in shot.effects) if (e.panelIn(panels) == null) e];
+  if (whole.isEmpty) {
+    _paintPanels(canvas, size, f, shot);
+    return;
+  }
+  // The shot's effect stack works on its picture: its panels drawn once, then each effect in turn.
+  _withEffects(canvas, size, f, whole, (c) => _paintPanels(c, size, f, shot));
+}
+
+/// Draws what [paint] draws into [size] through [effects] in order (each redraws the picture so far once).
+void _withEffects(Canvas canvas, Size size, VideoFrameInput f, List<VideoEffect> effects, void Function(Canvas) paint) {
+  if (effects.isEmpty) {
+    paint(canvas);
+    return;
+  }
+  final recorder = ui.PictureRecorder();
+  paint(Canvas(recorder, Offset.zero & size));
+  var picture = recorder.endRecording();
+  for (final e in effects) {
+    final next = _applyEffect(picture, size, f, e);
+    picture.dispose();
+    picture = next;
+  }
   canvas.save();
   canvas.clipRect(Offset.zero & size);
+  canvas.drawPicture(picture);
+  canvas.restore();
+  picture.dispose();
+}
+
+/// The shot's panels in their places; with an animated layout change, sliding from the last shot's places over
+/// the transition (a panel with no place before grows from its right edge, one with no place after folds away).
+void _paintPanels(Canvas canvas, Size size, VideoFrameInput f, DirectedShot shot) {
+  final layout = shot.layout;
+  if (layout == null || shot.panelShots.isEmpty) {
+    _paintView(canvas, size, f, shot, shot);
+    return;
+  }
+  final rects = layout.rects();
+  final i = f.plan.indexAt(shot.start);
+  final prev = i > 0 && identical(f.plan.shots[i], shot) ? f.plan.shots[i - 1] : null;
+  final into = shot.transitionSteps <= 0 ? 1.0 : (f.step - shot.start) / shot.transitionSteps;
+  final morph = shot.animateLayout && prev != null && into < 1;
   canvas.drawRect(Offset.zero & size, Paint()..color = Neon.bg);
-  final cam = f.plan.camera(shot, f.step);
-  switch (shot.kind) {
+  void place(DirectedShot view, DirectedShot owner, PanelRect r) {
+    if (r.width <= 1e-4 || r.height <= 1e-4) return;
+    final rect = Rect.fromLTRB(r.left * size.width, r.top * size.height, r.right * size.width, r.bottom * size.height);
+    // The effects aimed at this panel of [owner] run on the panel alone.
+    final k = owner.panelShots.indexOf(view);
+    final own = [for (final e in owner.effects) if (k >= 0 && e.panelIn(owner.panelShots.length) == k) e];
+    canvas.save();
+    canvas.translate(rect.left, rect.top);
+    _withEffects(canvas, rect.size, f, own, (c) => _paintView(c, rect.size, f, view, owner));
+    canvas.restore();
+  }
+
+  if (!morph) {
+    for (var k = 0; k < shot.panelShots.length && k < rects.length; k++) {
+      place(shot.panelShots[k], shot, rects[k]);
+    }
+  } else {
+    final p = _ease(into);
+    final before = prev.layout?.rects() ?? const [PanelRect(0, 0, 1, 1)];
+    final beforeShots = prev.panelShots.isEmpty ? [prev] : prev.panelShots;
+    for (var k = beforeShots.length; k-- > rects.length;) {
+      if (k < before.length) place(beforeShots[k], prev, PanelRect.lerp(before[k], before[k].folded, p));
+    }
+    for (var k = 0; k < shot.panelShots.length && k < rects.length; k++) {
+      place(shot.panelShots[k], shot, PanelRect.lerp(k < before.length ? before[k] : rects[k].folded, rects[k], p));
+    }
+  }
+  // Hairlines between the panels, in the theme's line colour.
+  final hair = Paint()
+    ..color = Neon.line
+    ..strokeWidth = math.max(1, _unit(size) * 0.8);
+  if (!morph) {
+    for (final d in layout.dividers()) {
+      if (d.vertical) {
+        canvas.drawLine(Offset(d.at * size.width, d.from * size.height), Offset(d.at * size.width, d.to * size.height), hair);
+      } else {
+        canvas.drawLine(Offset(d.from * size.width, d.at * size.height), Offset(d.to * size.width, d.at * size.height), hair);
+      }
+    }
+  }
+}
+
+/// One view of [view]'s kind filling [size], in its panel's look, with its own camera ([owner] is the shot on the
+/// plan it belongs to).
+void _paintView(Canvas canvas, Size size, VideoFrameInput f, DirectedShot view, DirectedShot owner) {
+  final look = _lk;
+  _lk = view.panel?.look ?? _defaultLook;
+  canvas.save();
+  canvas.clipRect(Offset.zero & size);
+  _paintBackground(canvas, size);
+  final cam = f.plan.camera(view, f.step);
+  switch (view.kind) {
     case VideoShot.flythrough:
-      _flythrough(canvas, size, f, shot, cam);
+      _flythrough(canvas, size, f, view, cam);
     case VideoShot.pianoRoll:
-      _pianoRoll(canvas, size, f, shot, cam);
+      _pianoRoll(canvas, size, f, view, cam);
     case VideoShot.mixer:
-      _mixer(canvas, size, f, shot, cam);
+      _mixer(canvas, size, f, view, cam);
     case VideoShot.devices:
-      _device(canvas, size, f, shot, cam);
+      _device(canvas, size, f, view, cam);
+    case VideoShot.falling:
+      _falling(canvas, size, f, view, cam);
   }
   canvas.restore();
+  _lk = look;
+}
+
+/// The look being drawn. Painting is synchronous, so [_paintView] sets it around each view and puts it back.
+VideoLook _lk = _defaultLook;
+final VideoLook _defaultLook = VideoLook();
+
+void _paintBackground(Canvas canvas, Size size) {
+  final r = Offset.zero & size;
+  switch (_lk.background) {
+    case VideoBackground.theme:
+      canvas.drawRect(r, Paint()..color = Neon.bg);
+    case VideoBackground.black:
+      canvas.drawRect(r, Paint()..color = const Color(0xff000000));
+    case VideoBackground.panel:
+      canvas.drawRect(r, Paint()..color = Neon.panel);
+    case VideoBackground.gradient:
+      canvas.drawRect(r, Paint()..shader = ui.Gradient.linear(r.topCenter, r.bottomCenter,
+          [Color.lerp(Neon.bg, Neon.violet, 0.28)!, Neon.bg, Color.lerp(Neon.bg, Neon.pink, 0.18)!], [0, 0.55, 1]));
+  }
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -144,10 +267,70 @@ void _text(Canvas canvas, String text, Offset at, double size, Color color,
 }
 
 Paint _glow(Color c, double sigma, {double alpha = 0.8}) => Paint()
-  ..color = c.withValues(alpha: alpha * Neon.glowStrength.clamp(0.0, 1.5) / 1.5 * 1.2)
+  ..color = c.withValues(alpha: (alpha * Neon.glowStrength.clamp(0.0, 1.5) / 1.5 * 1.2 * _lk.glow).clamp(0.0, 1.0))
   ..maskFilter = MaskFilter.blur(BlurStyle.normal, sigma);
 
-Color _track(VideoScene s, int t) => t >= 0 && t < s.tracks.length ? Color(s.tracks[t].color) : Neon.pink;
+/// Track [t]'s colour in the look's palette.
+Color _track(VideoScene s, int t) {
+  final own = t >= 0 && t < s.tracks.length ? Color(s.tracks[t].color) : Neon.pink;
+  final n = math.max(1, s.tracks.length - 1);
+  final x = t < 0 ? 0.0 : (t / n).clamp(0.0, 1.0);
+  return switch (_lk.palette) {
+    VideoPalette.tracks => own,
+    VideoPalette.accent => Neon.pink,
+    VideoPalette.mono => Neon.text,
+    VideoPalette.warm => Color.lerp(Neon.yellow, Neon.pink, x)!,
+    VideoPalette.cool => Color.lerp(Neon.blue, Neon.violet, x)!,
+  };
+}
+
+/// A note's block [r] in [color] in the look's note style; [standard] draws the view's own shape.
+void _noteBox(Canvas canvas, Rect r, Color color, double u, void Function(Paint paint) standard) {
+  final paint = Paint()..color = color;
+  switch (_lk.noteStyle) {
+    case VideoNoteStyle.standard:
+      standard(paint);
+    case VideoNoteStyle.block:
+      canvas.drawRect(r, paint);
+    case VideoNoteStyle.rounded:
+      canvas.drawRRect(RRect.fromRectAndRadius(r, Radius.circular(math.min(r.height / 2, 5 * u))), paint);
+    case VideoNoteStyle.outline:
+      canvas.drawRRect(RRect.fromRectAndRadius(r.deflate(0.6 * u), Radius.circular(2 * u)), paint
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = math.max(1, 1.2 * u));
+    case VideoNoteStyle.line:
+      final h = math.max(1.5 * u, r.height * 0.3);
+      canvas.drawRect(Rect.fromLTRB(r.left, r.center.dy - h / 2, r.right, r.center.dy + h / 2), paint);
+  }
+}
+
+/// A note whose pitch bends: a line [width] thick through its time, offset by the bend ([along] maps 0..1 through
+/// the note to a point on its unbent centre line; [offset] a bend in semitones to a shift).
+void _bentNote(Canvas canvas, SceneNote n, double bpm, Offset Function(double u) along, Offset Function(double semis) offset,
+    double width, Color color, {Paint? glow}) {
+  final path = Path();
+  const steps = 24;
+  for (var k = 0; k <= steps; k++) {
+    final u = k / steps;
+    final pt = along(u) + offset(n.bendAt(u, bpm));
+    k == 0 ? path.moveTo(pt.dx, pt.dy) : path.lineTo(pt.dx, pt.dy);
+  }
+  final line = Paint()
+    ..style = PaintingStyle.stroke
+    ..strokeWidth = width
+    ..strokeCap = StrokeCap.round
+    ..strokeJoin = StrokeJoin.round
+    ..color = color;
+  if (_lk.noteStyle == VideoNoteStyle.outline) line.strokeWidth = math.max(1, width * 0.25);
+  if (_lk.noteStyle == VideoNoteStyle.line) line.strokeWidth = math.max(1, width * 0.3);
+  if (glow != null) {
+    canvas.drawPath(path, glow
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = width * 2
+      ..strokeCap = StrokeCap.round);
+  }
+  canvas.drawPath(path, line);
+}
 
 String _barBeat(VideoScene s, double step) {
   final st = math.max(0.0, step);
@@ -159,6 +342,7 @@ String _barBeat(VideoScene s, double step) {
 bool _isBlack(int pitch) => const [1, 3, 6, 8, 10].contains(pitch % 12);
 
 void _grid(Canvas canvas, Rect area, VideoScene s, double left, double visible, double u, {bool beats = true}) {
+  if (!_lk.grid) return;
   final spb = s.stepsPerBar;
   final x0 = (left / 4).floor() * 4;
   final bar = Paint()..color = Neon.line.withValues(alpha: 0.9)..strokeWidth = math.max(1, u * 0.8);
@@ -242,8 +426,16 @@ void _flythrough(Canvas canvas, Size size, VideoFrameInput f, DirectedShot shot,
         final y = inner.bottom - (n.pitch - lo) / (hi - lo) * (inner.height - nh) - nh;
         final nr = Rect.fromLTRB(x(n.start), y, math.max(x(n.end) - u, x(n.start) + 2 * u), y + nh);
         final on = n.start <= f.step && n.end > f.step;
+        final fill = on ? Color.lerp(color, Colors.white, 0.6)! : color.withValues(alpha: 0.7);
+        if (n.bends) {
+          // The note's line bends with its pitch (a semitone is the lane's pitch step).
+          final semi = (inner.height - nh) / (hi - lo);
+          _bentNote(canvas, n, s.bpm, (t) => Offset(nr.left + (nr.right - nr.left) * t, nr.center.dy),
+              (b) => Offset(0, -b * semi), nh, fill, glow: on ? _glow(color, 4 * u) : null);
+          continue;
+        }
         if (on) canvas.drawRect(nr.inflate(2 * u), _glow(color, 4 * u));
-        canvas.drawRect(nr, Paint()..color = on ? Color.lerp(color, Colors.white, 0.6)! : color.withValues(alpha: 0.7));
+        _noteBox(canvas, nr, fill, u, (paint) => canvas.drawRect(nr, paint));
       }
       _text(canvas, c.name, Offset(r.left + 4 * u, r.top + 2 * u), 7 * u, Neon.text.withValues(alpha: live ? 0.95 : 0.6),
           maxWidth: math.max(0, r.width - 8 * u));
@@ -348,8 +540,15 @@ void _pianoRoll(Canvas canvas, Size size, VideoFrameInput f, DirectedShot shot, 
           Radius.circular(2.5 * u));
       final on = n.start <= f.step && n.end > f.step;
       final age = (f.step - n.start).clamp(0.0, 4.0) / 4;
+      final fill = on ? Color.lerp(color, Colors.white, 0.55 - 0.3 * age)! : color.withValues(alpha: 0.35 + 0.55 * n.vel);
+      if (n.bends) {
+        final rr = r.outerRect;
+        _bentNote(canvas, n, s.bpm, (t) => Offset(rr.left + (rr.right - rr.left) * t, rr.center.dy),
+            (b) => Offset(0, -b * rowH), rr.height, fill, glow: on ? _glow(color, (8 - 4 * age) * u, alpha: 0.9) : null);
+        continue;
+      }
       if (on) canvas.drawRRect(r.inflate(3 * u), _glow(color, (8 - 4 * age) * u, alpha: 0.9));
-      canvas.drawRRect(r, Paint()..color = on ? Color.lerp(color, Colors.white, 0.55 - 0.3 * age)! : color.withValues(alpha: 0.35 + 0.55 * n.vel));
+      _noteBox(canvas, r.outerRect, fill, u, (paint) => canvas.drawRRect(r, paint));
     }
   }
   final px = x(f.step);

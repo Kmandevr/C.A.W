@@ -17,9 +17,11 @@ const kClipEditMaxNotes = 20000;
 /// null), with times from [from]: its source window from the offset, repeated while the clip loops, and notes cut at
 /// the window's edges as the engine cuts them (`compileArrangement`). With [tails], a note already sounding at [from]
 /// is kept from there, as the engine plays it; without, a note that started before [from] is left out (a split: its
-/// note-on stays in the left clip). Null when there would be more than [limit] notes.
+/// note-on stays in the left clip). Null when there would be more than [limit] notes, or with [truncate] the first
+/// [limit] of them.
 List<PatternNote>? clipNotes(PatternDoc src, ClipDoc clip, int beatsPerBar,
-    {int? from, int? to, bool tails = true, int limit = kClipEditMaxNotes}) {
+    {int? from, int? to, bool tails = true, int limit = kClipEditMaxNotes, bool truncate = false}) {
+  if (truncate && limit <= 0) return [];
   final lo = from ?? clip.startSteps, hi = to ?? clip.startSteps + clip.lengthSteps;
   final sourceLength = clip.loopLength(src.lengthSteps(beatsPerBar));
   var sourcePos = clip.sourceOffsetSteps, consumed = 0, timeline = clip.startSteps;
@@ -44,6 +46,7 @@ List<PatternNote>? clipNotes(PatternDoc src, ClipDoc clip, int beatsPerBar,
             ? n.copyWith(at: at, len: len, ratchet: 1, slide: false,
                 expr: n.expr.rebased(n.at.toDouble(), n.len.toDouble(), cs.toDouble(), len.toDouble()))
             : n.copyWith(at: at));
+        if (truncate && out.length >= limit) return out;
         if (out.length > limit) return null;
       }
     }
