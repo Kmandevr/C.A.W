@@ -5,6 +5,8 @@
 #include "graph.h"
 
 #include <algorithm>
+#include <bit>
+#include <cstdint>
 #include <cmath>
 #include <limits>
 #include <memory>
@@ -45,6 +47,18 @@ float signal(uint32_t channel, uint32_t frame) noexcept {
 }
 
 float gainFor(uint32_t channel) noexcept { return 0.5f + 0.25f * static_cast<float>(channel); }
+
+// The sign bit, read from the bits: under the engine's -fno-signed-zeros (this file's flags) GCC may fold
+// std::signbit(x) into x < 0, which is false for -0.0f.
+bool signBit(float x) noexcept { return (std::bit_cast<uint32_t>(x) >> 31) != 0; }
+
+// x through two gain nodes, each product rounded to float as the nodes do. The rounded first product goes through a
+// volatile: this file builds with the engine's flags (-fassociative-math), which could otherwise fold the expected
+// value into x * (gain * gain).
+float twiceGained(float x, uint32_t channel) noexcept {
+    volatile float once = x * gainFor(channel);
+    return once * gainFor(channel);
+}
 
 class Generator final : public ModuleProcessor {
 public:
@@ -169,7 +183,7 @@ TEST(graph_executor_routes_host_input_channels_through_n_channel_chain) {
         CHECK(executor.process(in.constView(frames), out.view(frames), frames));
         for (uint32_t c = 0; c < layout.channels; ++c)
             for (uint32_t i = 0; i < frames; ++i)
-                CHECK_EQ(out.data[c][i], (signal(c, i + 17) * gainFor(c)) * gainFor(c));
+                CHECK_EQ(out.data[c][i], twiceGained(signal(c, i + 17), c));
         // A missing host input is silence on every channel, not stale data.
         CHECK(executor.process(ConstChannelBufferView{}, out.view(frames), frames));
         for (uint32_t c = 0; c < layout.channels; ++c) CHECK_EQ(out.data[c][frames - 1], 0.0f);
@@ -559,7 +573,7 @@ TEST(graph_executor_summing_input_with_one_source_still_starts_from_positive_zer
           GraphError::Ok);
     Planar out(1, 8, 5.0f);
     CHECK(executor.process(ConstChannelBufferView{}, out.view(8), 8));
-    CHECK(!std::signbit(out.data[0][0]));
+    CHECK(!signBit(out.data[0][0]));
 }
 
 TEST(graph_compiler_allows_multiple_drivers_only_on_summing_inputs) {
@@ -875,7 +889,7 @@ TEST(graph_dynamic_routing_routes_plain_inputs_directly_when_reserved) {
             for (uint32_t i = 0; i < 16; ++i) routed[c][i] = out.data[c][i];
         ok = !executor.setRouting(twoIntoPlain, 2, order, 3) && ok;  // rejected; the previous route stays
         ok = executor.process(host.constView(16), out.view(16), 16) && ok;
-        ok = out.data[0][0] == routed[0][0] && std::signbit(out.data[0][0]) && ok;
+        ok = std::bit_cast<uint32_t>(out.data[0][0]) == std::bit_cast<uint32_t>(routed[0][0]) && signBit(out.data[0][0]) && ok;
         ok = executor.setRouting(fromOther, 1, order, 3) && executor.process(host.constView(16), out.view(16), 16) && ok;
         switched = out.data[0][3];
         ok = executor.setRouting(nullptr, 0, order, 3) && executor.process(host.constView(16), out.view(16), 16) && ok;
@@ -888,7 +902,7 @@ TEST(graph_dynamic_routing_routes_plain_inputs_directly_when_reserved) {
         for (uint32_t i = 0; i < 16; ++i) {
             const float v[] = {-0.0f, std::numeric_limits<float>::max(), -std::numeric_limits<float>::max(), 0.375f};
             CHECK_EQ(routed[c][i], v[(i + c) % 4]);
-            CHECK_EQ(std::signbit(routed[c][i]), std::signbit(v[(i + c) % 4]));
+            CHECK_EQ(std::bit_cast<uint32_t>(routed[c][i]), std::bit_cast<uint32_t>(v[(i + c) % 4]));
         }
     CHECK_EQ(switched, signal(0, 43));
     CHECK_EQ(silent, 0.0f);  // no route: silence, not the host's 0.5

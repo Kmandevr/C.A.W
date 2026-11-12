@@ -217,7 +217,6 @@ target_include_directories(caw_cli PRIVATE src)
   target_sources(caw_tests PRIVATE tests/component_test_test.cpp)  # the component testing suite (#163)
   target_sources(caw_tests PRIVATE tests/test_signal_test.cpp)  # org.caw.test.osc, the internal test signal
   target_sources(caw_tests PRIVATE tests/sample_pack_test.cpp)  # the sample-pack maker (#164)
-  target_sources(caw_tests PRIVATE tests/library_kernels_test.cpp)  # Library LFO, wavetable, reverb, smoothers
   target_sources(caw_tests PRIVATE tests/flagship_test.cpp)  # the flagship synth (#171) and its kernels
   target_sources(caw_tests PRIVATE tests/flagship_tables_test.cpp)  # its warps' aliasing and its user wavetable
   target_sources(caw_tests PRIVATE tests/quality_test.cpp)  # the quality setting (Eco, Normal, High) and the buffer mode
@@ -311,6 +310,19 @@ target_include_directories(caw_cli PRIVATE src)
     "CAW_TEST_COMPONENT_PATH_DEFAULT=\"$<TARGET_FILE:caw_test_component>\"")
   target_link_libraries(caw_rt_tests PRIVATE caw_core)
   add_test(NAME caw_rt_tests COMMAND caw_rt_tests)
+  # The Library as components get it: built with CAW::SDK's strict floating point (this target takes no
+  # CAW_FP_FLAGS), its exact bits and signed zeros checked. Header-only, so it links nothing of caw_core: caw_tests and
+  # caw_rt_tests hold only code built with the engine's flags, and this only strict code (an inline function compiled
+  # both ways in one program leaves the linker to pick one copy for every caller).
+  add_executable(caw_exact_tests tests/test_main.cpp tests/library_kernels_test.cpp  # LFO, wavetable, reverb, smoothers
+                                 tests/library_exact_test.cpp)  # oscillators, fast maths, filters, envelopes, drum voices
+  target_link_libraries(caw_exact_tests PRIVATE CAW::SDK)
+  if(MSVC)
+    target_compile_options(caw_exact_tests PRIVATE /W4 /utf-8 /EHsc)
+  else()
+    target_compile_options(caw_exact_tests PRIVATE -Wall -Wextra)
+  endif()
+  add_test(NAME caw_exact_tests COMMAND caw_exact_tests)
   
   # Times the engine like an audio callback (see docs/performance.md); run it on a release build.
 add_executable(caw_bench bench/caw_bench.cpp src/capi.cpp src/capi_modulation.cpp platform/audio_none.cpp)
@@ -319,12 +331,10 @@ add_executable(caw_bench bench/caw_bench.cpp src/capi.cpp src/capi_modulation.cp
   target_link_libraries(caw_bench PRIVATE caw_core)
 endif()
 
-# Tests whose expected values are exact IEEE arithmetic get the strict flags whatever CAW_FP_FLAGS is (an option on
-# a source comes after the target's): the Library's exact bits and signed zeros as components get them, and the
-# graph's routing (copies keep -0.0f; gains apply in order), computed without reassociation or folded signed zeros.
+# The strict reference the timing tests compare with (an option on a source comes after the target's). It includes no
+# engine or SDK header, so it shares no inline function with the code caw_tests runs.
 if(CAW_TOOLS)
-  set_source_files_properties(tests/library_kernels_test.cpp tests/builtin_instruments_test.cpp tests/graph_channels_test.cpp
-    tests/timing_oracle.cpp PROPERTIES COMPILE_OPTIONS "${_caw_fp_strict}")
+  set_source_files_properties(tests/timing_oracle.cpp PROPERTIES COMPILE_OPTIONS "${_caw_fp_strict}")
 endif()
 # Sample positions (src/sample_time.h): note, clip, loop and automation timing is exact to the sample on every
 # platform, so this file is strict in every build, the app's included: no fused multiply-add, no reassociation.
