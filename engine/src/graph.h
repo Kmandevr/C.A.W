@@ -36,11 +36,18 @@ struct GraphDependency {
 };
 
 // Runs the tasks of one graph level at once (speed phase 5c; MixPool is the engine's): task(context, i) for every
-// i in [0, count), on the calling thread and any others, returning once all have run. Audio-thread safe.
+// i in [0, count), on the calling thread and any others. begin() publishes them and returns at once, so the caller
+// can do other work (the level's serial nodes) while others start; finish() returns once all have run (the caller
+// takes what is left). Audio-thread safe.
 class ParallelRunner {
 public:
     using Task = void (*)(void* context, uint32_t index) noexcept;
-    virtual void run(Task task, void* context, uint32_t count) noexcept = 0;
+    virtual void begin(Task task, void* context, uint32_t count) noexcept = 0;
+    virtual void finish() noexcept = 0;
+    void run(Task task, void* context, uint32_t count) noexcept {
+        begin(task, context, count);
+        finish();
+    }
 
 protected:
     ~ParallelRunner() = default;
@@ -245,10 +252,12 @@ public:
     uint32_t orderedNode(uint32_t k) const noexcept { return k < runCount_ ? order_[k] : UINT32_MAX; }
     // Tests only, from the next setRouting() on: false runs the order as given, as one level (the old serial order).
     void setLevelOrderForTest(bool on) noexcept { levelOrder_ = on; }
-    // Parallel levels (speed phase 5c). Audio thread, between process() calls. With a runner, each level with at
-    // least two nodes that may run in parallel hands them to it as one run; the level's other nodes run first on the
-    // calling thread, and with a runner every node of a level runs before a failure in it is reported (the first in
-    // level order). A node may run in parallel when it has no parameters and no typed ports (a node's parameter
+    // Parallel levels (speed phases 5c, 5d). Audio thread, between process() calls. With a runner, each level with
+    // at least two nodes that may run in parallel hands them to it as one run, longest first (each node's time in
+    // the last chunk it ran on the runner); the level's other nodes run on the calling thread once the run is
+    // published, before it claims any. With or without a runner, every node of a level runs before a failure in it
+    // is reported (the first in level order), and a failure stops the graph after that level (a graph without
+    // levels stops at its failing node). A node may run in parallel when it has no parameters and no typed ports (a node's parameter
     // resolution shares the executor's automation scratch) and is not marked serial. Null: everything on the
     // calling thread, as before. Nodes of one level read only earlier levels' outputs and each writes only its own
     // buffers, so the output is the same bits either way.
@@ -455,6 +464,7 @@ private:
     ParallelRunner* runner_ = nullptr;
     std::vector<uint8_t> nodeSerial_;
     std::vector<uint32_t> levelTasks_;
+    std::vector<uint32_t> nodeCost_;  // [nodes] each parallel node's last run on the runner, ns (sorts the next level)
     uint32_t taskFrames_ = 0;
     const EventInput* taskEvents_ = nullptr;
     std::atomic<uint32_t> taskFailed_{UINT32_MAX};  // the lowest failed position in order_ this level

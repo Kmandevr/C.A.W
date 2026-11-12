@@ -21,6 +21,7 @@
 #include "native_component_test_path.h"
 #include "project.h"
 #include "test.h"
+#include "thread_tuning.h"
 #include "test_signal.h"
 
 using namespace caw;
@@ -136,7 +137,108 @@ TEST(mix_pool_parks_stops_and_starts_again) {
             CHECK_EQ(pool.workers(), 2u);
         }
     }
-    CHECK(MixPool::defaultWorkers() <= 3u);
+    // The machine's fast cores less the callback's, at most cores - 2 on 4 or fewer, at most kMaxWorkers (5d).
+    CHECK_EQ(MixPool::defaultWorkers(), tuning::poolWorkers(tuning::topology(), MixPool::kMaxWorkers));
+    CHECK(MixPool::defaultWorkers() <= MixPool::kMaxWorkers);
+}
+
+// Speed phase 5d (the 5c audio review): a restarted pool's workers took part in its first run only from its second
+// on (stop() left the wake word one ahead of the epoch the next run published).
+TEST(mix_pool_a_restarted_pool_uses_its_workers_from_its_first_run) {
+    MixPool pool;
+    for (int round = 0; round < 4; ++round) {
+        CHECK(pool.start(2));
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));  // the workers asleep
+        struct Wait {
+            std::thread::id caller;
+            std::atomic<uint32_t> off{0};
+        } w;
+        w.caller = std::this_thread::get_id();
+        // Each task waits (up to 2 s) until some task ran off the caller: only workers that join this first run end it.
+        pool.run([](void* c, uint32_t) noexcept {
+            Wait& x = *static_cast<Wait*>(c);
+            if (std::this_thread::get_id() != x.caller) {
+                x.off.fetch_add(1);
+                return;
+            }
+            const auto until = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+            while (x.off.load() == 0 && std::chrono::steady_clock::now() < until) std::this_thread::yield();
+        }, &w, 8);
+        CHECK(w.off.load() > 0);
+        pool.stop();
+    }
+}
+
+// Speed phase 5d: core kinds and the worker count from per-core numbers.
+TEST(mix_pool_sizes_from_core_kinds) {
+    using tuning::CoreKind;
+    // A Galaxy S22+-like phone by cpu_capacity [Assumption: the values are illustrative]: four little cores, three
+    // big, one prime.
+    const int cpus[8] = {0, 1, 2, 3, 4, 5, 6, 7};
+    const int64_t phone[8] = {280, 280, 280, 280, 750, 750, 750, 1024};
+    CoreKind kinds[8];
+    tuning::Topology t = tuning::classifyCores(cpus, phone, 8, "cpu_capacity", kinds);
+    CHECK(t.hybrid);
+    CHECK_EQ(t.cores, 8u);
+    CHECK_EQ(t.fast, 4u);
+    CHECK_EQ(t.fastMask, 0xF0ull);
+    for (int i = 0; i < 4; ++i) CHECK(kinds[i] == CoreKind::Little);
+    for (int i = 4; i < 8; ++i) CHECK(kinds[i] == CoreKind::Big);
+    CHECK_EQ(tuning::poolWorkers(t, MixPool::kMaxWorkers), 3u);  // the big cores less the callback's
+    // Every core the same: Other, all fast.
+    const int64_t same[8] = {1024, 1024, 1024, 1024, 1024, 1024, 1024, 1024};
+    t = tuning::classifyCores(cpus, same, 8, "cpu_capacity", kinds);
+    CHECK(!t.hybrid);
+    CHECK_EQ(t.fast, 8u);
+    CHECK(kinds[3] == CoreKind::Other);
+    CHECK_EQ(tuning::poolWorkers(t, MixPool::kMaxWorkers), 4u);  // capped
+    // 4 cores (the CI runners): at most cores - 2.
+    t = tuning::classifyCores(cpus, same, 4, "cpu_capacity", kinds);
+    CHECK_EQ(tuning::poolWorkers(t, MixPool::kMaxWorkers), 2u);
+    t = tuning::classifyCores(cpus, same, 2, "cpu_capacity", kinds);
+    CHECK_EQ(tuning::poolWorkers(t, MixPool::kMaxWorkers), 0u);
+    t = tuning::classifyCores(cpus, same, 1, "cpu_capacity", kinds);
+    CHECK_EQ(tuning::poolWorkers(t, MixPool::kMaxWorkers), 0u);
+    // A hybrid laptop by EfficiencyClass (+1): 2 P-cores (4 threads), 8 E-cores.
+    const int cpus12[12] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11};
+    const int64_t laptop[12] = {2, 2, 2, 2, 1, 1, 1, 1, 1, 1, 1, 1};
+    CoreKind k12[12];
+    t = tuning::classifyCores(cpus12, laptop, 12, "EfficiencyClass", k12);
+    CHECK(t.hybrid);
+    CHECK_EQ(t.fast, 4u);
+    CHECK_EQ(tuning::poolWorkers(t, MixPool::kMaxWorkers), 3u);
+    // Nothing known: every core Other.
+    const int64_t none[4] = {-1, -1, -1, -1};
+    t = tuning::classifyCores(cpus, none, 4, "none", kinds);
+    CHECK(!t.hybrid);
+    CHECK_EQ(t.fast, 4u);
+    CHECK(std::string(t.source) == "none");
+    CHECK(std::string(tuning::coreKindName(CoreKind::Big)) == "big");
+}
+
+// Speed phase 5d: a live pool notes the callback thread (its core, its tuning for the workers) and runs as before.
+TEST(mix_pool_live_pool_notes_the_callback_and_runs) {
+    MixPool pool;
+    CHECK(pool.start(2, MixPool::Kind::Live));
+    CHECK(pool.kind() == MixPool::Kind::Live);
+    for (int cb = 0; cb < 50; ++cb) {
+        pool.beginCallback(true);
+        Tally t(10);
+        t.caller = std::this_thread::get_id();
+        pool.run(&tallyTask, &t, 10);
+        bool once = true;
+        for (uint32_t i = 0; i < 10; ++i) once = once && t.hits[i].load() == 1;
+        CHECK(once);
+        pool.endCallback();
+    }
+    CHECK_EQ(pool.callbackCpu() >= 0, tuning::currentCpu() >= 0);
+    pool.setActive(1);
+    CHECK_EQ(pool.active(), 1u);
+    Tally t(10);
+    t.caller = std::this_thread::get_id();
+    pool.run(&tallyTask, &t, 10);
+    CHECK(pool.workers() == 2u);
+    pool.stop();
 }
 
 // ---- the executor's levels on the pool ----
@@ -148,6 +250,10 @@ struct PullNet {
     std::vector<std::vector<uint32_t>> pulls;
     std::vector<std::atomic<uint32_t>>* offCaller = nullptr;
     std::thread::id caller;
+    int failing = -1;                          // this node's process() fails
+    std::vector<std::atomic<uint32_t>>* runs = nullptr;  // each node's process() calls
+    int waiter = -1;                           // this node waits (up to 2 s) until another ran off the caller
+    std::atomic<uint32_t> waiterSaw{0};        // ... and it saw one
 };
 
 const PortDescriptor kBusPorts[2] = {{"in", PortType::Audio, ChannelLayout::Stereo, true, 0, true},
@@ -172,7 +278,22 @@ public:
             }
         frame_ += b.frames;
         if (net_.offCaller && std::this_thread::get_id() != net_.caller) (*net_.offCaller)[index_].fetch_add(1);
-        return true;
+        if (net_.runs) (*net_.runs)[index_].fetch_add(1);
+        if (net_.waiter == static_cast<int>(index_) && net_.offCaller) {
+            const auto until = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+            for (;;) {
+                uint32_t other = 0;
+                for (size_t n = 0; n < net_.offCaller->size(); ++n)
+                    if (n != index_) other += (*net_.offCaller)[n].load();
+                if (other > 0) {
+                    net_.waiterSaw.fetch_add(1);
+                    break;
+                }
+                if (std::chrono::steady_clock::now() >= until) break;
+                std::this_thread::yield();
+            }
+        }
+        return net_.failing != static_cast<int>(index_);
     }
 private:
     PullNet& net_;
@@ -301,6 +422,69 @@ TEST(mix_pool_a_serial_node_runs_on_the_calling_thread) {
     CHECK_EQ(offCaller[5].load(), 0u);
     CHECK_EQ(offCaller[8].load(), 0u);  // the output, alone in its level
     CHECK(elsewhere > 0);
+}
+
+// Speed phase 5d (the 5c audio review): a level's serial nodes run once its parallel ones are published, so the
+// workers start on them meanwhile (5c ran the serial ones first, the workers idle). Node 3 is serial and waits for a
+// parallel node of its level to run on a worker.
+TEST(mix_pool_serial_nodes_run_while_the_workers_start_the_level) {
+    MixPool pool;
+    CHECK(pool.start(3));
+    RandomGraph g;
+    g.nodes = 9;
+    g.output = 8;
+    for (uint32_t n = 0; n < 9; ++n) g.order.push_back(n);
+    for (uint32_t n = 0; n < 8; ++n) g.edges.push_back(GraphConnection{n, 1, 8, 0});
+    Executor x;
+    CHECK(x.prepare(g));
+    std::vector<std::atomic<uint32_t>> offCaller(9);
+    x.net.offCaller = &offCaller;
+    x.net.caller = std::this_thread::get_id();
+    x.net.waiter = 3;
+    x.exec.setParallelRunner(&pool);
+    x.exec.setNodeSerial(3, true);
+    float l[64], r[64];
+    for (int block = 0; block < 5 && x.net.waiterSaw.load() == 0; ++block) {
+        for (auto& o : offCaller) o.store(0);
+        CHECK(x.exec.process(nullptr, nullptr, l, r, 64));
+    }
+    CHECK(x.net.waiterSaw.load() > 0);
+    CHECK_EQ(offCaller[3].load(), 0u);
+}
+
+// Speed phase 5d (the 5c audio review): one rule for a failing node with and without the pool: its whole level runs,
+// the graph stops after it (the first failure in level order is reported), and the next block runs again.
+TEST(mix_pool_a_failing_node_has_one_rule_on_and_off_the_pool) {
+    RandomGraph g;
+    g.nodes = 10;
+    g.output = 9;
+    for (uint32_t n = 0; n < 10; ++n) g.order.push_back(n);
+    for (uint32_t n = 0; n < 6; ++n) g.edges.push_back(GraphConnection{n, 1, 6 + n % 3, 0});  // level 0: 0..5
+    for (uint32_t n = 6; n < 9; ++n) g.edges.push_back(GraphConnection{n, 1, 9, 0});          // level 1: 6..8
+    std::vector<uint32_t> counts[2];
+    for (int pass = 0; pass < 2; ++pass) {
+        MixPool pool;
+        CHECK(pool.start(3));
+        Executor x;
+        CHECK(x.prepare(g));
+        std::vector<std::atomic<uint32_t>> runs(10);
+        x.net.runs = &runs;
+        x.net.failing = 2;
+        if (pass == 1) x.exec.setParallelRunner(&pool);
+        float l[64], r[64];
+        for (int block = 0; block < 20; ++block) {
+            for (int i = 0; i < 64; ++i) l[i] = r[i] = 1.0f;
+            CHECK(!x.exec.process(nullptr, nullptr, l, r, 64));
+            bool silent = true;
+            for (int i = 0; i < 64; ++i) silent = silent && l[i] == 0.0f && r[i] == 0.0f;
+            CHECK(silent);
+            CHECK_EQ(x.exec.lastFailedNode(), 2u);
+        }
+        for (auto& c : runs) counts[pass].push_back(c.load());
+    }
+    for (uint32_t n = 0; n < 6; ++n) CHECK_EQ(counts[0][n], 20u);  // the failing node's whole level ran
+    for (uint32_t n = 6; n < 10; ++n) CHECK_EQ(counts[0][n], 0u);  // nothing after it
+    CHECK(counts[0] == counts[1]);
 }
 
 // ---- the Engine ----
@@ -532,6 +716,95 @@ TEST(mix_pool_engine_auto_goes_parallel_under_load_and_back_with_hysteresis) {
     e.setMixParallel(Engine::MixParallel::Never);
     e.process(l, r, 256);
     CHECK(!e.mixParallelForTest());
+}
+
+// Speed phase 5d (the 5c audio review): Auto weighs the time the callback waits for workers. While the pool costs
+// more than it gives (workers held after they claim a node), Auto drops workers one by one, then goes back to one
+// thread and stays there for kMixRetrySeconds whatever the load; a pool that waits little keeps every worker.
+TEST(mix_pool_engine_auto_drops_workers_that_cost_more_than_they_give) {
+    Engine e(48000);
+    CHECK(e.startMixPool(2));
+    e.setMixParallel(Engine::MixParallel::Auto);
+    ProjectSpec p;  // six tracks holding notes: one level of six busy nodes every chunk
+    p.bpm = 120;
+    p.loopBars = 1;
+    p.modules.push_back({"held", "---\nkind: pattern\nlength: 16\n---\n0 C4 16 1\n"});
+    for (int i = 0; i < 6; ++i)
+        p.layers.push_back(cawtest::testSignalNotesLayer("t" + std::to_string(i), Shape::Saw, "held", {{"level", 0.1}}));
+    CHECK(ok(e.setProject(p)));
+    e.play();
+    float l[256], r[256];
+    auto callbacks = [&](double load, double seconds) {
+        for (int k = 0; k < static_cast<int>(seconds * 48000 / 256); ++k) {
+            e.process(l, r, 256);
+            e.reportLoad(load, 256);
+        }
+    };
+    auto one = [&] {
+        e.process(l, r, 256);
+        e.reportLoad(0.9, 256);
+    };
+    callbacks(0.9, 1.0);
+    e.process(l, r, 256);
+    CHECK(e.mixParallelForTest());
+    CHECK(e.mixParallelLevelsForTest() > 0);
+    callbacks(0.9, 3.0);
+    CHECK(e.mixParallelForTest());  // a pool that barely waits keeps going, with every worker
+    CHECK_EQ(e.mixActiveWorkers(), 2u);
+    e.mixPoolForTest()->setHoldForTest(3000);  // each worker's node takes 3 ms more: the callback waits for it
+    // One worker fewer after a while, then none and one thread (each step kMixWaitSeconds once the average is up).
+    int steps = 0;
+    while (e.mixActiveWorkers() == 2u && steps++ < 2000) one();
+    CHECK_EQ(e.mixActiveWorkers(), 1u);
+    CHECK(e.mixParallelForTest());
+    steps = 0;
+    while (e.mixParallelForTest() && steps++ < 2000) one();
+    CHECK(!e.mixParallelForTest());
+    e.mixPoolForTest()->setHoldForTest(0);
+    callbacks(0.9, 5.0);
+    e.process(l, r, 256);
+    CHECK(!e.mixParallelForTest());  // not again before kMixRetrySeconds
+    callbacks(0.9, 6.0);
+    e.process(l, r, 256);
+    CHECK(e.mixParallelForTest());  // tried again, with every worker
+    CHECK_EQ(e.mixActiveWorkers(), 2u);
+}
+
+// Speed phase 5d (the 5c audio review): an offline render's pool goes serial while a live device runs, checked
+// every callback (5c checked once, when the render started).
+TEST(mix_pool_engine_offline_pool_steps_aside_for_a_live_device) {
+    Engine a(48000);
+    if (a.mixPoolForTest()) return;  // --mix-threads N: every Engine has the test's pool, and renders keep it
+    a.useOfflineMixPool();
+    if (a.mixWorkers() == 0) return;  // a machine too small for workers
+    CHECK(ok(a.setProject(randomMix(4))));
+    a.play();
+    float l[256], r[256];
+    a.process(l, r, 256);
+    CHECK(a.mixParallelForTest());
+    {
+        Engine live(48000);
+        live.startLiveMixPool();
+        a.process(l, r, 256);
+        CHECK(!a.mixParallelForTest());
+        CHECK(a.mixPoolForTest()->parked());
+        live.stopLiveMixPool();
+    }
+    a.process(l, r, 256);
+    CHECK(a.mixParallelForTest());
+}
+
+// Speed phase 5d: the diagnostics the C API returns (caw_audio_threads).
+TEST(mix_pool_engine_reports_its_audio_threads) {
+    Engine e(48000);
+    CHECK(e.startMixPool(2, true));
+    float l[256], r[256];
+    for (int k = 0; k < 40; ++k) e.process(l, r, 256);
+    const std::string j = e.audioThreadsJson();
+    for (const char* key : {"\"callback_cpu\":", "\"core_kind\":", "\"clock_khz\":", "\"max_khz\":", "\"hint\":",
+                            "\"mmcss\":", "\"worker_tuning\":", "\"workers\":2", "\"active_workers\":2", "\"wait_share\":",
+                            "\"cores\":", "\"fast_cores\":", "\"hybrid\":", "\"core_source\":"})
+        CHECK(j.find(key) != std::string::npos);
 }
 
 TEST(mix_pool_engine_stopped_parks_the_pool_and_play_wakes_it) {

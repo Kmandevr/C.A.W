@@ -4,6 +4,7 @@
 #include "route_math.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <new>
 #include <limits>
@@ -391,6 +392,7 @@ void GraphExecutor::reset() noexcept {
     levelStart_.clear();
     nodeSerial_.clear();
     levelTasks_.clear();
+    nodeCost_.clear();
     parallelLevels_ = 0;
     nodeLevel_.clear();
     fanStart_.clear();
@@ -813,6 +815,7 @@ GraphError GraphExecutor::reserveRouting(uint32_t maxSourcesPerInput, const Grap
         levelStart_.assign(nodeCount + 1, 0);
         nodeSerial_.assign(nodeCount, 0);
         levelTasks_.assign(nodeCount, 0);
+        nodeCost_.assign(nodeCount, 0);
         nodeLevel_.assign(nodeCount, 0);
         fanStart_.assign(nodeCount + 1, 0);
         fanOut_.assign(fan, 0);
@@ -1073,11 +1076,16 @@ bool GraphExecutor::processValidated(const ConstChannelBufferView& input, const 
         for (uint32_t k = 0; k < runCount_; ++k)
             if (!runNode(order_[k], frames, events)) { fail(order_[k], output, frames); return false; }
     } else if (!runner_ || !levelsSorted_) {
-        for (uint32_t l = 0; l < levelCount_; ++l)
+        // One rule with and without a runner: the whole level runs, then the first failure in it stops the graph.
+        for (uint32_t l = 0; l < levelCount_; ++l) {
+            uint32_t failed = UINT32_MAX;
             for (uint32_t k = levelStart_[l]; k < levelStart_[l + 1]; ++k)
-                if (!runNode(order_[k], frames, events)) { fail(order_[k], output, frames); return false; }
+                if (!runNode(order_[k], frames, events) && failed == UINT32_MAX) failed = k;
+            if (failed != UINT32_MAX) { fail(order_[failed], output, frames); return false; }
+        }
     } else {
-        // Speed phase 5c: a level's parallel nodes go to the runner as one run, its serial ones run here first.
+        // Speed phases 5c, 5d: a level's parallel nodes go to the runner as one run, longest first (last chunk's
+        // times), and its serial ones run here once the run is published, while the workers start on it.
         for (uint32_t l = 0; l < levelCount_; ++l) {
             uint32_t tasks = 0, failed = UINT32_MAX;
             const uint32_t first = levelStart_[l], end = levelStart_[l + 1];
@@ -1085,15 +1093,25 @@ bool GraphExecutor::processValidated(const ConstChannelBufferView& input, const 
                 for (uint32_t k = first; k < end; ++k)
                     if (parallelNode(order_[k])) levelTasks_[tasks++] = k;
             if (tasks < 2) tasks = 0;
+            if (tasks != 0) {
+                const uint32_t* cost = nodeCost_.data();
+                const uint32_t* order = order_.data();
+                // In place, no allocation; ties keep level order. Which thread runs which node doesn't change a bit.
+                std::sort(levelTasks_.data(), levelTasks_.data() + tasks, [cost, order](uint32_t a, uint32_t b) {
+                    const uint32_t ca = cost[order[a]], cb = cost[order[b]];
+                    return ca != cb ? ca > cb : a < b;
+                });
+                taskFrames_ = frames;
+                taskEvents_ = &events;
+                taskFailed_.store(UINT32_MAX, std::memory_order_relaxed);
+                runner_->begin(&GraphExecutor::runLevelTask, this, tasks);
+            }
             for (uint32_t k = first; k < end; ++k) {
                 if (tasks != 0 && parallelNode(order_[k])) continue;
                 if (!runNode(order_[k], frames, events) && failed == UINT32_MAX) failed = k;
             }
             if (tasks != 0) {
-                taskFrames_ = frames;
-                taskEvents_ = &events;
-                taskFailed_.store(UINT32_MAX, std::memory_order_relaxed);
-                runner_->run(&GraphExecutor::runLevelTask, this, tasks);
+                runner_->finish();
                 failed = std::min(failed, taskFailed_.load(std::memory_order_relaxed));
                 ++parallelLevels_;
             }
@@ -1108,7 +1126,13 @@ bool GraphExecutor::processValidated(const ConstChannelBufferView& input, const 
 void GraphExecutor::runLevelTask(void* executor, uint32_t index) noexcept {
     GraphExecutor& g = *static_cast<GraphExecutor*>(executor);
     const uint32_t k = g.levelTasks_[index];
-    if (g.runNode(g.order_[k], g.taskFrames_, *g.taskEvents_)) return;
+    const uint32_t node = g.order_[k];
+    const auto t0 = std::chrono::steady_clock::now();
+    const bool ran = g.runNode(node, g.taskFrames_, *g.taskEvents_);
+    // Its own slot, read by the calling thread after the run's finish (the runner orders it): no race.
+    const int64_t ns = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - t0).count();
+    g.nodeCost_[node] = static_cast<uint32_t>(std::clamp<int64_t>(ns, 0, UINT32_MAX));
+    if (ran) return;
     uint32_t seen = g.taskFailed_.load(std::memory_order_relaxed);
     while (k < seen && !g.taskFailed_.compare_exchange_weak(seen, k, std::memory_order_relaxed)) {
     }

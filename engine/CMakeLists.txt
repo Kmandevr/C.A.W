@@ -170,6 +170,15 @@ target_sources(caw_core PRIVATE src/modulation_links.cpp src/builtin_modulators.
 # modulators end
 target_sources(caw_core PRIVATE src/sample_time.cpp)  # sample positions of steps and seconds, built strict (below)
 target_sources(caw_core PRIVATE src/mix_pool.cpp)  # speed phase 5c: the mix graph's real-time worker pool
+# Speed phase 5d: thread priorities, affinity and hints for the pool and the callback, one platform file each.
+if(WIN32)
+  set(CAW_THREAD_TUNING platform/thread_tuning_win.cpp)
+elseif(CMAKE_SYSTEM_NAME MATCHES "Linux|Android")
+  set(CAW_THREAD_TUNING platform/thread_tuning_posix.cpp)
+else()
+  set(CAW_THREAD_TUNING platform/thread_tuning_none.cpp)
+endif()
+target_sources(caw_core PRIVATE src/thread_tuning.cpp ${CAW_THREAD_TUNING})
 target_sources(caw_core PRIVATE src/note_fx_host.cpp)  # per-note FX (#127): slot racks, the voice-bus host, the manager
 target_include_directories(caw_core PRIVATE src)
 target_compile_options(caw_core PRIVATE ${CAW_FLAGS})

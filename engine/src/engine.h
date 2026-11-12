@@ -224,15 +224,28 @@ public:
     // MixPool::kMaxWorkers; 0 makes a pool that runs everything on the callback thread), or stop them. False if the
     // threads could not be made (then it runs serially).
     bool startMixPool(uint32_t workers);
+    bool startMixPool(uint32_t workers, bool live);  // live: workers tuned to the device's callback (thread_tuning.h)
     void stopMixPool() noexcept;
     uint32_t mixWorkers() const noexcept;
     // When the pool is used: Auto (the default) once the callbacks' measured load (reportLoad) has stayed above
-    // kMixParallelLoad for kMixParallelSeconds, back to one thread once it stays below kMixSerialLoad for
-    // kMixSerialSeconds; Always; or Never. Any thread; read at each callback.
+    // kMixParallelLoad for kMixParallelSeconds, back to one thread once the load less the time the callback spent
+    // waiting for workers stays below kMixSerialLoad for kMixSerialSeconds; Always; or Never. Any thread; read at
+    // each callback. Auto also sizes the pool from that wait (speed phase 5d): while the callback waits more than
+    // kMixWaitShare of the budget and longer than the workers ran tasks (the pool costs more than it gives) for
+    // kMixWaitSeconds, one worker fewer takes tasks; at none, one thread, not tried again for kMixRetrySeconds;
+    // while the wait stays under kMixWaitShare / 4 for kMixGrowSeconds, one more.
     enum class MixParallel : int { Auto = 0, Always = 1, Never = 2 };
     void setMixParallel(MixParallel mode) noexcept { mixMode_.store(static_cast<int>(mode), std::memory_order_relaxed); }
     static constexpr double kMixParallelLoad = 0.4, kMixParallelSeconds = 0.5;
     static constexpr double kMixSerialLoad = 0.08, kMixSerialSeconds = 5.0;
+    static constexpr double kMixWaitShare = 0.1, kMixWaitSeconds = 0.5, kMixGrowSeconds = 2.0, kMixRetrySeconds = 10.0;
+    // Auto's workers now (tests, diagnostics): those taking tasks, at most mixWorkers().
+    uint32_t mixActiveWorkers() const noexcept;
+    // Audio thread diagnostics (speed phase 5d) as JSON, for caw_audio_threads; reads the callback core's clock
+    // from sysfs or the power API, so never on the audio thread.
+    std::string audioThreadsJson() const;
+    // The platform layer, once its device runs: whether the callback thread joined MMCSS "Pro Audio" (Windows).
+    void setCallbackMmcss(bool mmcss) noexcept;
     // The platform, around a live device (before it starts, after it stops): the pool with
     // MixPool::defaultWorkers(), Auto, and the count of live devices offline renders check.
     void startLiveMixPool();
@@ -420,6 +433,11 @@ private:
     bool mixParallel_ = false;
     bool mixAuto_ = false;
     double mixOverSeconds_ = 0, mixUnderSeconds_ = 0;
+    // Speed phase 5d (audio thread): Auto's workers and the wait it weighs (shares of the budget, averaged).
+    uint32_t mixActive_ = 0;
+    double waitAvg_ = 0, workAvg_ = 0, mixLosingSeconds_ = 0, mixGrowSeconds_ = 0, mixRetrySeconds_ = 0;
+    std::atomic<float> waitShare_{0};
+    int retireStart_ = 0;  // where assignRetireBudgets hands out what is left after the even shares
     bool wantsMixPool() const noexcept;
     bool slotForeign(const Slot& s) noexcept;  // a node in the serial lane: it holds third-party native code
     // Retirements waiting for room in the queue (pendingMax_ entries: two per slot at maxLayers() and
@@ -543,6 +561,7 @@ private:
     // The mix pool (speed phase 5c). Last, so its threads are joined before anything they could touch goes.
     std::atomic<int> mixMode_{0};
     bool liveDevice_ = false;  // control thread: startLiveMixPool counted this Engine in liveDevices()
+    bool offlinePool_ = false; // useOfflineMixPool's: serial while any live device runs (checked each callback)
     std::unique_ptr<MixPool> pool_;
 };
 

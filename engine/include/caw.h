@@ -78,8 +78,10 @@ extern "C" {
    "noteComponent"; the link sources "note.pitch", "note.velocity", "note.pressure", "note.timbre", "note.gate" and
    "note.age"; caw_engine_note_fx_stats. The voice bus (caw_component.h) gains CAW_LANE_REST. Nothing else changes.
    23 (2026-11-11): caw_audio_latency, the running device's output and input latency (AAudio's timestamps where it
-   has them, else the queued buffers), the routed device's id and, on WASAPI, its kind. Nothing else changes. */
-#define CAW_API_VERSION 23
+   has them, else the queued buffers), the routed device's id and, on WASAPI, its kind. Nothing else changes.
+   24 (2026-11-12, speed phase 5d): caw_audio_threads, the audio callback's core, its clock and kind, the
+   scheduling the platform gave the callback and the mix pool's workers, and the pool's size. Nothing else changes. */
+#define CAW_API_VERSION 24
 /* The component index that names a layer's native instrument rather than one of its "components". */
 #define CAW_INSTRUMENT_INDEX 0xFFFFFFFFu
 /* A component index with this bit (API version 22) names component (index & ~CAW_NOTE_COMPONENT) of the layer's
@@ -459,6 +461,16 @@ CAW_API char* caw_audio_status(CawEngine* e);
    "hdmi", "wired", "builtIn", "remote"; WASAPI's bus and form factor), else "unknown". A Bluetooth or other link may add delay no backend reports: the app keeps a
    per-device offset on top. Takes the device lock: call it off the audio thread. Free with caw_free. */
 CAW_API char* caw_audio_latency(CawEngine* e);
+/* The audio thread and the mix pool (API 24; free with caw_free), JSON: "callback_cpu" (the core the callback ran on,
+   sampled every 32 callbacks; -1 unknown or no device), "core_kind" ("big", "little", "other" when every core is one
+   kind, "unknown"), "clock_khz" and "max_khz" (that core's clock now and its top, -1 where unreadable),
+   "hint" (an Android performance hint session covers the callback and the workers), "mmcss" (the callback is in
+   MMCSS "Pro Audio", Windows), "callback_tuning" and "worker_tuning" (what the platform granted: "priority",
+   "realtime", "fast_cores", "mmcss", "no_power_throttling"), "workers", "active_workers" (those Auto lets take
+   work), "wait_share" (the callback's averaged wait for workers, as a share of its budget), "cores", "fast_cores",
+   "hybrid" and "core_source" ("cpu_capacity", "cpuinfo_max_freq", "EfficiencyClass", "none"). Reads the clock from
+   the system: call it every second or so, not per frame. */
+CAW_API char* caw_audio_threads(CawEngine* e);
 /* The metronome's (and count-in's) click: [volume] 0..1 (1 the default) and its CAW_CLICK_* sound. */
 #define CAW_CLICK_CLASSIC 0
 #define CAW_CLICK_WOOD 1

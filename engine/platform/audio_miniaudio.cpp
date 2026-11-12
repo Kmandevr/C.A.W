@@ -256,6 +256,10 @@ ma_result openDevice(Audio* a, const CawEngine* e, const ma_device_id* id, ma_ui
     }
     cfg.dataCallback = callback;
     cfg.pUserData = a;
+    // WASAPI: miniaudio's audio thread joins MMCSS "Pro Audio" (AvSetMmThreadCharacteristicsA in
+    // ma_device_start__wasapi_nolock, on that thread, miniaudio 0.11.25); the default usage joins no MMCSS task.
+    // The mix pool's workers then join the same task (thread_tuning_win.cpp), never above the callback.
+    cfg.wasapi.usage = ma_wasapi_usage_pro_audio;
     a->exclusive = exclusive && takesExclusive(a->context.backend);
     cfg.playback.shareMode = a->exclusive ? ma_share_mode_exclusive : ma_share_mode_shared;
     ma_result r = ma_device_init(&a->context, &cfg, &a->device);
@@ -301,6 +305,10 @@ ma_result openDevice(Audio* a, const CawEngine* e, const ma_device_id* id, ma_ui
         e->engine->stopLiveMixPool();
         return r;
     }
+#if defined(_WIN32)
+    // ma_device_start returns once the WASAPI thread has started (and joined MMCSS, or failed to).
+    if (a->context.backend == ma_backend_wasapi) e->engine->setCallbackMmcss(a->device.wasapi.hAvrtHandle != nullptr);
+#endif
     return MA_SUCCESS;
 }
 

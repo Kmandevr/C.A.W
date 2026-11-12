@@ -764,7 +764,8 @@ void graphPlanarBench(double secs) {
 // ---------- The suite (`caw_bench SECONDS 500 [options]`): fixed scenarios at a stated callback, repeated, for CI ----------
 // Options: --frames N (callback size, default 256), --runs N (default 3), --only ID[,ID] (scenario ids), --label TEXT,
 // --threads N (the mix pool's workers, speed phase 5c: 0, the default, runs the mix graph on one thread; N > 0 runs
-// every level of two or more nodes on the pool, whatever the load, as Engine::MixParallel::Always),
+// every level of two or more nodes on the pool, whatever the load, as Engine::MixParallel::Always; `auto` takes
+// MixPool::defaultWorkers(), the count a live device gets on this machine, speed phase 5d),
 // --json PATH and --md PATH (machine-readable results and a markdown table). Each run plays every scenario in turn
 // (a fresh Engine each: set up, 0.25 s stopped to apply the project, then Play); a scenario's result is the median
 // of its runs' means and p99s and the largest worst case of any run. docs/engine-performance.md has the numbers.
@@ -994,7 +995,7 @@ int runSuite(double secs, int argc, char** argv) {
         if (!v) { std::fprintf(stderr, "%s needs a value\n", k.c_str()); return 2; }
         if (k == "--frames") frames = std::atoi(v);
         else if (k == "--runs") runs = std::atoi(v);
-        else if (k == "--threads") threads = std::atoi(v);
+        else if (k == "--threads") threads = std::string(v) == "auto" ? static_cast<int>(MixPool::defaultWorkers()) : std::atoi(v);
         else if (k == "--only") only = std::string(",") + v + ",";
         else if (k == "--label") label = v;
         else if (k == "--json") jsonPath = v;

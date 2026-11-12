@@ -8,6 +8,7 @@
 #include "graph.h"
 #include "meters.h"
 #include "mix_pool.h"
+#include "thread_tuning.h"
 #include "route_math.h"
 #include "caw/library/stereo.hpp"
 #include "hardware.h"
@@ -606,9 +607,49 @@ bool Engine::mixLayerSerialForTest(const std::string& layerId) const {
 
 uint32_t Engine::mixParallelLevelsForTest() const noexcept { return mixGraph_->executor.parallelLevelsRun(); }
 
-bool Engine::startMixPool(uint32_t workers) {
+bool Engine::startMixPool(uint32_t workers) { return startMixPool(workers, false); }
+
+bool Engine::startMixPool(uint32_t workers, bool live) {
     if (!pool_) pool_ = std::make_unique<MixPool>();
-    return pool_->start(workers);
+    const bool ok = pool_->start(workers, live ? MixPool::Kind::Live : MixPool::Kind::Offline);
+    mixActive_ = pool_->workers();
+    pool_->setActive(mixActive_);
+    return ok;
+}
+
+uint32_t Engine::mixActiveWorkers() const noexcept { return pool_ ? pool_->active() : 0; }
+
+void Engine::setCallbackMmcss(bool mmcss) noexcept {
+    if (pool_) pool_->setCallbackMmcss(mmcss);
+}
+
+std::string Engine::audioThreadsJson() const {
+    const tuning::Topology& t = tuning::topology();
+    const int cpu = pool_ ? pool_->callbackCpu() : -1;
+    const tuning::CoreClock clock = tuning::coreClock(cpu);
+    const uint32_t tuned = pool_ ? pool_->workerTuning() : 0;
+    const uint32_t cbTuned = pool_ ? pool_->callbackTuning() : 0;
+    auto flags = [](uint32_t bits) {
+        std::string f = "[";
+        const std::pair<uint32_t, const char*> names[] = {
+            {tuning::kAppliedPriority, "priority"}, {tuning::kAppliedRealtime, "realtime"},
+            {tuning::kAppliedAffinity, "fast_cores"}, {tuning::kAppliedMmcss, "mmcss"},
+            {tuning::kAppliedNoThrottle, "no_power_throttling"}};
+        for (const auto& [bit, name] : names)
+            if (bits & bit) f += std::string(f.size() > 1 ? "," : "") + "\"" + name + "\"";
+        return f + "]";
+    };
+    std::string j = "{\"callback_cpu\":" + std::to_string(cpu);
+    j += ",\"core_kind\":\"" + std::string(tuning::coreKindName(tuning::coreKind(cpu))) + "\"";
+    j += ",\"clock_khz\":" + std::to_string(clock.currentKHz) + ",\"max_khz\":" + std::to_string(clock.maxKHz);
+    j += ",\"hint\":" + std::string(pool_ && pool_->hintActive() ? "true" : "false");
+    j += ",\"mmcss\":" + std::string(pool_ && pool_->callbackMmcss() ? "true" : "false");
+    j += ",\"callback_tuning\":" + flags(cbTuned) + ",\"worker_tuning\":" + flags(tuned);
+    j += ",\"workers\":" + std::to_string(mixWorkers()) + ",\"active_workers\":" + std::to_string(mixActiveWorkers());
+    j += ",\"wait_share\":" + std::to_string(waitShare_.load(std::memory_order_relaxed));
+    j += ",\"cores\":" + std::to_string(t.cores) + ",\"fast_cores\":" + std::to_string(t.fast);
+    j += ",\"hybrid\":" + std::string(t.hybrid ? "true" : "false") + ",\"core_source\":\"" + t.source + "\"}";
+    return j;
 }
 
 void Engine::stopMixPool() noexcept { pool_.reset(); }
@@ -621,7 +662,8 @@ void Engine::startLiveMixPool() {
         gLiveDevices.fetch_add(1, std::memory_order_relaxed);
     }
     if (gTestMixThreads.load(std::memory_order_relaxed) >= 0) return;  // a test's pool stays
-    startMixPool(MixPool::defaultWorkers());
+    offlinePool_ = false;
+    startMixPool(MixPool::defaultWorkers(), true);
     setMixParallel(MixParallel::Auto);
 }
 
@@ -637,7 +679,8 @@ int Engine::liveDevices() noexcept { return gLiveDevices.load(std::memory_order_
 
 void Engine::useOfflineMixPool() {
     if (gTestMixThreads.load(std::memory_order_relaxed) >= 0 || liveDevices() != 0) return;
-    startMixPool(MixPool::defaultWorkers());
+    startMixPool(MixPool::defaultWorkers(), false);
+    offlinePool_ = true;
     setMixParallel(MixParallel::Always);
 }
 
@@ -649,6 +692,8 @@ void Engine::setMixThreadsForTest(int workers) noexcept {
 // bench profiles components (ChainProfile's slots are shared).
 bool Engine::wantsMixPool() const noexcept {
     if (!pool_ || ChainProfile::current()) return false;
+    // An offline render's pool leaves the cores to a live device that started meanwhile (checked every callback).
+    if (offlinePool_ && liveDevices() != 0) return false;
     switch (static_cast<MixParallel>(mixMode_.load(std::memory_order_relaxed))) {
         case MixParallel::Always: return true;
         case MixParallel::Never: return false;
@@ -2773,15 +2818,28 @@ bool Engine::canRetireNode(const RetireList& list, int count) noexcept {
 // Audio thread, before the graph runs: each list's share of the queue's free room, in the order flushRetires
 // pushes them (the live slots by index, the master's last), so what any node may retire this chunk is fixed
 // before any of them runs, on whichever thread (speed phase 5c).
+// When the room is short, every list first gets an even share, and what is left goes round from a starting list
+// that moves on each chunk, so no slot is always last (5c's greedy order starved the higher slots).
 void Engine::assignRetireBudgets() noexcept {
-    size_t room = retireRoom();
-    auto give = [&room](RetireList& list) noexcept {
-        const size_t b = std::min(room, static_cast<size_t>(RetireList::kCapacity));
-        list.budget = static_cast<int>(b);
-        room -= b;
-    };
-    for (int k = 0; k < liveCount_; ++k) give(slotAt(live_[k]).retires);
-    give(*masterRetires_);
+    const size_t room = retireRoom();
+    const int lists = liveCount_ + 1;  // the live slots, then the master's
+    auto list = [this](int k) noexcept -> RetireList& { return k < liveCount_ ? slotAt(live_[k]).retires : *masterRetires_; };
+    constexpr size_t cap = RetireList::kCapacity;
+    if (room >= cap * static_cast<size_t>(lists)) {
+        for (int k = 0; k < lists; ++k) list(k).budget = static_cast<int>(cap);
+        return;
+    }
+    const size_t even = room / static_cast<size_t>(lists);
+    size_t left = room - even * static_cast<size_t>(lists);
+    for (int k = 0; k < lists; ++k) list(k).budget = static_cast<int>(even);
+    retireStart_ = retireStart_ % lists;
+    for (int i = 0; i < lists && left > 0; ++i) {
+        RetireList& l = list((retireStart_ + i) % lists);
+        const size_t more = std::min(left, cap - static_cast<size_t>(l.budget));
+        l.budget += static_cast<int>(more);
+        left -= more;
+    }
+    retireStart_ = (retireStart_ + 1) % lists;
 }
 
 // Audio thread, inside the graph: a node hands something back into its own list (never the shared queue, which
@@ -4754,9 +4812,14 @@ void Engine::process(float* left, float* right, int frames) noexcept {
     updateSolo();
     applyCommands();
     updateSolo();
-    // The pool for this callback (speed phase 5c); idle workers sleep at once while nothing plays.
+    // The pool for this callback (speed phase 5c); idle workers sleep at once while nothing plays. Speed phase 5d:
+    // a wake goes out now, so sleeping workers are up by the first level (the chunk's planning runs meanwhile).
     mixParallel_ = wantsMixPool();
-    if (pool_) pool_->park(!mixParallel_ || (!playing_ && !previewing_ && countInLeft_ == 0));
+    if (pool_) {
+        const bool idle = !mixParallel_ || (!playing_ && !previewing_ && countInLeft_ == 0);
+        pool_->park(idle);
+        pool_->beginCallback(!idle);
+    }
     takeDeviceMidi(frames);
     takeToneRequest();
     if (!playing_ && monitorWanted_.load(std::memory_order_relaxed)) wakeMonitors();
@@ -4835,6 +4898,7 @@ void Engine::process(float* left, float* right, int frames) noexcept {
     toneActive_.store(toneLeft_ > 0, std::memory_order_release);
     playingFlag_.store(playing_, std::memory_order_relaxed);
     posFlag_.store(g_, std::memory_order_relaxed);
+    if (pool_) pool_->endCallback();  // the workers spin a little longer, then sleep until the next callback
 }
 
 // Tuned at 512-frame callbacks at 48 kHz (10.7 ms): the average kept 0.9 of itself a callback, 20 callbacks over
@@ -4851,19 +4915,66 @@ void Engine::reportLoad(double load, int frames) noexcept {
     }
     loadAvg_ = loadKeep_ * loadAvg_ + (1.0 - loadKeep_) * (std::isfinite(load) ? load : 0.0);
     cpu_.store(static_cast<float>(loadAvg_), std::memory_order_relaxed);
+    // Speed phase 5d: what the callback spent waiting for workers, and what the workers ran, as shares of the
+    // budget; and the callback's time to the performance hint (atomics; the hint's own thread reports it).
+    int64_t waitNs = 0, workerNs = 0;
+    if (pool_) {
+        pool_->takeTimes(waitNs, workerNs);
+        const double used = std::isfinite(load) ? std::max(0.0, load) * dt : 0.0;
+        pool_->reportWork(static_cast<int64_t>(used * 1e9), static_cast<int64_t>(dt * 1e9));
+    }
+    waitAvg_ = loadKeep_ * waitAvg_ + (1.0 - loadKeep_) * (static_cast<double>(waitNs) * 1e-9 / dt);
+    workAvg_ = loadKeep_ * workAvg_ + (1.0 - loadKeep_) * (static_cast<double>(workerNs) * 1e-9 / dt);
+    waitShare_.store(static_cast<float>(waitAvg_), std::memory_order_relaxed);
     // The pool's Auto mode (speed phase 5c), with hysteresis: on after a while above kMixParallelLoad, off only
     // after longer below kMixSerialLoad (the load measured while parallel is lower: it must not flip straight back).
+    // The off test leaves out the wait (time the callback spun for workers, not work of its own).
+    mixRetrySeconds_ = std::max(0.0, mixRetrySeconds_ - dt);
+    const double work = loadAvg_ - waitAvg_;
     if (loadAvg_ > kMixParallelLoad) {
         mixUnderSeconds_ = 0;
         mixOverSeconds_ += dt;
-        if (mixOverSeconds_ >= kMixParallelSeconds - kSlack) mixAuto_ = true;
-    } else if (loadAvg_ < kMixSerialLoad) {
+        if (mixOverSeconds_ >= kMixParallelSeconds - kSlack && !mixAuto_ && mixRetrySeconds_ <= kSlack) {
+            mixAuto_ = true;
+            mixActive_ = pool_ ? pool_->workers() : 0;
+            mixLosingSeconds_ = mixGrowSeconds_ = 0;
+        }
+    } else if (work < kMixSerialLoad) {
         mixOverSeconds_ = 0;
         mixUnderSeconds_ += dt;
         if (mixUnderSeconds_ >= kMixSerialSeconds - kSlack) mixAuto_ = false;
     } else {
         mixOverSeconds_ = mixUnderSeconds_ = 0;
     }
+    // Auto's workers: one fewer while the pool costs the callback more than it gives, one more while it waits little.
+    const bool autoOn = static_cast<MixParallel>(mixMode_.load(std::memory_order_relaxed)) == MixParallel::Auto;
+    if (pool_ && autoOn && mixAuto_ && mixParallel_) {
+        const uint32_t all = pool_->workers();
+        if (waitAvg_ > kMixWaitShare && waitAvg_ > workAvg_) {
+            mixGrowSeconds_ = 0;
+            mixLosingSeconds_ += dt;
+            if (mixLosingSeconds_ >= kMixWaitSeconds - kSlack) {
+                mixLosingSeconds_ = 0;
+                if (mixActive_ > 0) --mixActive_;
+                if (mixActive_ == 0) {  // one thread does better: stay there a while
+                    mixAuto_ = false;
+                    mixActive_ = all;
+                    mixRetrySeconds_ = kMixRetrySeconds;
+                    waitAvg_ = workAvg_ = 0;
+                }
+            }
+        } else if (waitAvg_ < kMixWaitShare / 4 && mixActive_ < all) {
+            mixLosingSeconds_ = 0;
+            mixGrowSeconds_ += dt;
+            if (mixGrowSeconds_ >= kMixGrowSeconds - kSlack) {
+                mixGrowSeconds_ = 0;
+                ++mixActive_;
+            }
+        } else {
+            mixLosingSeconds_ = mixGrowSeconds_ = 0;
+        }
+    }
+    if (pool_) pool_->setActive(autoOn ? mixActive_ : pool_->workers());
     coolSeconds_ = std::max(0.0, coolSeconds_ - dt);
     if (loadAvg_ > 0.85) {
         overSeconds_ += dt;
