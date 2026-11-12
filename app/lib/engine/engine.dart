@@ -173,6 +173,39 @@ class AudioDeviceList {
       );
 }
 
+/// One side of the device's latency (caw_audio_latency): [frames] at the engine's rate, where the figure came from
+/// ("timestamp": AAudio's presentation or capture time; "buffers": the queued periods; "none") and AAudio's routed
+/// device id (AudioDeviceInfo.getId() on Android; 0 elsewhere). [kind] is the endpoint's link where the backend
+/// says (WASAPI's bus and form factor: an AudioDeviceKind name), else 'unknown'.
+class SideLatency {
+  const SideLatency({this.running = false, this.frames = 0, this.ms = 0, this.source = 'none', this.deviceId = 0,
+      this.kind = 'unknown'});
+  final bool running;
+  final int frames, deviceId;
+  final double ms;
+  final String source, kind;
+
+  static SideLatency fromJson(Object? o) {
+    if (o is! Map) return const SideLatency();
+    return SideLatency(running: o['running'] == true, frames: (o['frames'] as num?)?.round() ?? 0,
+        ms: (o['ms'] as num?)?.toDouble() ?? 0, source: o['source'] as String? ?? 'none',
+        deviceId: (o['device_id'] as num?)?.round() ?? 0, kind: o['kind'] as String? ?? 'unknown');
+  }
+}
+
+/// The running device's output and input latency as the platform reports it (API 23).
+class DeviceLatency {
+  const DeviceLatency({this.running = false, this.sampleRate = 0, this.output = const SideLatency(),
+      this.input = const SideLatency()});
+  final bool running;
+  final int sampleRate;
+  final SideLatency output, input;
+
+  static DeviceLatency fromJson(Map<String, dynamic> j) => DeviceLatency(running: j['running'] == true,
+      sampleRate: (j['sample_rate'] as num?)?.round() ?? 0, output: SideLatency.fromJson(j['output']),
+      input: SideLatency.fromJson(j['input']));
+}
+
 /// The device as it runs (caw_audio_status). The rate, period and periods are what the device gave, which can differ
 /// from what was asked. [exclusive] and [lowLatency] are read from the stream at open on AAudio ([modesReadBack]; a
 /// later reroute may change them); on WASAPI [exclusive] is what opened (it refuses rather than share); elsewhere
@@ -322,6 +355,16 @@ class Engine {
     final j = jsonDecode(r.toDartString()) as Map<String, dynamic>;
     _b.free(r);
     return AudioStatus.fromJson(j);
+  }
+
+  /// How late the running device's output and input are (caw_audio_latency, API 23). Takes the device lock: cheap,
+  /// but not for every frame (the app reads it every couple of seconds and on a route change).
+  DeviceLatency audioLatency() {
+    final r = _b.audioLatency(_handle);
+    if (r == nullptr) return const DeviceLatency();
+    final j = jsonDecode(r.toDartString()) as Map<String, dynamic>;
+    _b.free(r);
+    return DeviceLatency.fromJson(j);
   }
 
   /// The device's status as the engine wrote it (API 18 adds its "input" object).

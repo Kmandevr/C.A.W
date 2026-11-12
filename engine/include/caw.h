@@ -76,8 +76,10 @@ extern "C" {
    instrument's voices and its shared stage) and "noteVoices" (1..16, default 8); component indices with CAW_NOTE_COMPONENT address them (knobs and bypass fan
    out to every slot, the display reads the newest note's slot); automation lanes and modulation links of kind
    "noteComponent"; the link sources "note.pitch", "note.velocity", "note.pressure", "note.timbre", "note.gate" and
-   "note.age"; caw_engine_note_fx_stats. The voice bus (caw_component.h) gains CAW_LANE_REST. Nothing else changes. */
-#define CAW_API_VERSION 22
+   "note.age"; caw_engine_note_fx_stats. The voice bus (caw_component.h) gains CAW_LANE_REST. Nothing else changes.
+   23 (2026-11-11): caw_audio_latency, the running device's output and input latency (AAudio's timestamps where it
+   has them, else the queued buffers), the routed device's id and, on WASAPI, its kind. Nothing else changes. */
+#define CAW_API_VERSION 23
 /* The component index that names a layer's native instrument rather than one of its "components". */
 #define CAW_INSTRUMENT_INDEX 0xFFFFFFFFu
 /* A component index with this bit (API version 22) names component (index & ~CAW_NOTE_COMPONENT) of the layer's
@@ -447,6 +449,16 @@ CAW_API int32_t caw_audio_configure(CawEngine* e, const char* device_id, const c
    change them); on WASAPI "exclusive" is what opened (it refuses rather than share); elsewhere they are what was
    asked. Free with caw_free. */
 CAW_API char* caw_audio_status(CawEngine* e);
+/* API version 23. How late the running device is, as JSON: {"running", "sample_rate" (the engine's), "output":
+   {"running", "frames" (engine frames from a sample leaving the engine to the speaker), "ms", "source", "device_id"},
+   "input": the same for the microphone (to the engine reading it; miniaudio's duplex ring buffer included), running
+   only while input is open}. "source": "timestamp" (AAudio: AAudioStream_getTimestamp's presentation or capture
+   time against the frames written or read, read now), "buffers" (every queued period: WASAPI, ALSA, PulseAudio,
+   or AAudio before its first timestamp) or "none". "device_id": AAudio's routed device (AudioDeviceInfo.getId()
+   on Android), 0 elsewhere. "kind": the endpoint's link where the backend says ("bluetooth", "bluetoothLe", "usb",
+   "hdmi", "wired", "builtIn", "remote"; WASAPI's bus and form factor), else "unknown". A Bluetooth or other link may add delay no backend reports: the app keeps a
+   per-device offset on top. Takes the device lock: call it off the audio thread. Free with caw_free. */
+CAW_API char* caw_audio_latency(CawEngine* e);
 /* The metronome's (and count-in's) click: [volume] 0..1 (1 the default) and its CAW_CLICK_* sound. */
 #define CAW_CLICK_CLASSIC 0
 #define CAW_CLICK_WOOD 1
