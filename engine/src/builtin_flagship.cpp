@@ -8,6 +8,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <cstdlib>  // TEMPORARY experiment
 #include <memory>
 #include <mutex>
 #include <new>
@@ -2300,7 +2301,8 @@ private:
             VoiceWork* group[4] = {&q[i]};
             int size = 1;
             const VoiceWork::Kind kind = q[i].kind;
-            for (uint32_t j = i + 1; j < count && size < 4; ++j)
+            static const int kMost = std::getenv("CAW_A2_GROUP") ? std::atoi(std::getenv("CAW_A2_GROUP")) : 4;  // TEMPORARY
+            for (uint32_t j = i + 1; j < count && size < kMost; ++j)
                 if (!done[j] && q[j].kind == kind && VoiceFilter::sideBySide(q[i].v->filter[0], q[j].v->filter[0]))
                     group[size++] = &q[j], done[j] = true;
             done[i] = true;
