@@ -217,7 +217,7 @@ void main() {
   test('with the engine: the queue renders the mix and stems to aligned WAV files (needs CAW_LIB)', () async {
     final s = AppState(settings: Settings());
     addTearDown(s.dispose);
-    s.project = s.starterProject();
+    s.project = s.demoProject();
     final q = ExportQueue(tmp);
     await q.load();
     final done = Completer<ExportJob>();

@@ -273,7 +273,7 @@ void main() {
       testWidgets(name, (tester) async {
         final st = AppState();
         Motion.setting = MotionLevel.off;
-        st.project = st.starterProject();
+        st.project = st.demoProject();
         st.componentCatalog.set(builtinInfos());
         st.selectedModuleId = st.project.modules.first.id;
         st.ready = true;

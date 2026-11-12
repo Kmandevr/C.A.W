@@ -265,7 +265,7 @@ const List<SettingEntry> settingEntries = [
   _E('projects.autosave', _pr, 'Autosave', 'How soon after an edit the project is saved', ['save', 'interval', 'delay']),
   _E('projects.restorePoints', _pr, 'Restore points kept', 'How many restore points each project keeps',
       ['history', 'backup', 'versions', 'undo']),
-  _E('projects.newStart', _pr, 'New project starts from', 'Blank, or the First loop template', ['template', 'new']),
+  _E('projects.newStart', _pr, 'New project starts from', 'Blank, or the Mid tempo template', ['template', 'new']),
   _E('projects.newTempo', _pr, 'New project tempo', 'A blank project\'s BPM', ['bpm', 'tempo', 'new']),
   _E('projects.newMeter', _pr, 'New project time signature', 'A blank project\'s beats per bar', ['meter', '4/4', 'beats']),
   _E('projects.storage', _pr, 'Storage used', 'What projects, restore points, themes and caches take', ['space', 'disk', 'size']),

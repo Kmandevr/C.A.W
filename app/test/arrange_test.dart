@@ -640,7 +640,7 @@ void main() {
   testWidgets('with the engine: the built-ins list their knobs, and a knob on a track moves live (needs CAW_LIB)',
       (tester) async {
     s.engine = Engine.create();
-    s.project = s.starterProject();
+    s.project = s.demoProject();
     final layer = s.project.layers.firstWhere((l) => !l.isFolder);
     await tester.runAsync(() async {
       s.componentCatalog.refreshIfStale();
@@ -670,7 +670,7 @@ void _steppedKnobs() {
     final s = AppState(settings: Settings());
     addTearDown(s.dispose);
     s.engine = Engine.create();
-    s.project = s.starterProject();
+    s.project = s.demoProject();
     await tester.runAsync(() async {
       s.componentCatalog.refreshIfStale();
       for (var i = 0; i < 250 && s.componentInfo('org.caw.synth.flagship') == null; i++) {

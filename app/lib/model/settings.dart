@@ -216,7 +216,7 @@ enum VelocityCurve {
       };
 }
 
-/// What New project starts from: an empty project, or the First loop template.
+/// What New project starts from: an empty project, or the bundled Mid tempo template.
 /// How the exporter names a file: project, tempo and length (the default), the project alone, or the project and
 /// the date and time.
 enum ExportNaming {

@@ -15,6 +15,7 @@ import 'project.dart';
 import 'project_dependencies.dart';
 import 'automation_writer.dart' show AutomationTarget;
 import 'clip_automation.dart';
+import 'default_project.dart';
 import 'history.dart';
 import 'mixer_fx.dart' show masterLayerId;
 import 'pattern_doc.dart';
@@ -316,10 +317,11 @@ class AppState extends ChangeNotifier {
   }
 
   /// Reads the saved projects from [storage] and opens straight into the last one: the arrangement is home (UI
-  /// plan U1). On a first run, or when the last project is gone, it opens the "First loop" template. New, Template
+  /// plan U1). On a first run, or when the last project is gone, it opens the default project ([starterProject]). New, Template
   /// and Open are in the project menu.
   Future<void> openStorage(ProjectStorage storage) async {
     _storage = storage;
+    await loadDefaultProject();
     final e = engine;
     if (e != null) {
       try {
@@ -335,13 +337,13 @@ class AppState extends ChangeNotifier {
     // A damaged file reads as null too; it stays on disk, and the app says so instead of replacing it silently.
     final damaged = id != null && last == null && await storage.has(id);
     starting = false;
-    String? error = damaged ? 'The last project could not be read, so the First loop template opened instead. '
+    String? error = damaged ? 'The last project could not be read, so the default project opened instead. '
         'Its file is still in the projects folder.' : null;
     try {
       await _switchTo(last ?? starterProject(), saveCurrent: false);
     } catch (e) {
       if (last == null) rethrow;
-      error = 'The last project, "${last.name}", could not be opened ($e), so the First loop template opened instead.';
+      error = 'The last project, "${last.name}", could not be opened ($e), so the default project opened instead.';
       await _switchTo(starterProject(), saveCurrent: false);
     }
     openError = error;
@@ -402,11 +404,15 @@ class AppState extends ChangeNotifier {
   ModuleDoc moduleFromPattern(PatternTemplate t) =>
       ModuleDoc(id: newId('m'), name: headerValue(t.source, 'name') ?? t.file.replaceAll('.caw', ''), source: t.source);
 
-  /// A first project made of the engine's built-in C++ instruments (#157): kick, hats, bass, a lead, and a muted
+  /// The starter project: what a first run, a deleted last project and the bundled template open. A fresh copy of
+  /// the owner's bundled default project ("mid tempo", 2026-11-12; [defaultProject]), read by [openStorage].
+  ProjectDoc starterProject() => defaultProject();
+
+  /// A demo project built in code, for tests and benchmarks that depend on its shape (the app's starter until
+  /// 2026-11-12, "First loop"): the engine's built-in C++ instruments (#157) as kick, hats, bass, a lead, and a muted
   /// acid line and pad, each playing a pattern over the 4-bar loop; the bass, lead, acid and pad are Flagship
-  /// presets (one synth, 2026-11-10) with the knobs the First loop always had, in Flagship's terms. Its patterns are written here, not read from
-  /// the .caw templates, so it doesn't depend on them.
-  ProjectDoc starterProject() {
+  /// presets (one synth, 2026-11-10). Its patterns are written here, not read from the .caw templates.
+  ProjectDoc demoProject() {
     final p = ProjectDoc(id: newId('p'), name: 'First loop');
     ModuleDoc pattern(String name, String summary, String length, String notes) {
       final m = ModuleDoc(

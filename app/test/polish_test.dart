@@ -111,7 +111,7 @@ void main() {
     AppState app() {
       final a = AppState();
       a.engine = Engine.create();
-      a.project = a.starterProject();
+      a.project = a.demoProject();
       a.selectedModuleId = a.project.modules.first.id;
       a.ready = true;
       a.starting = false;

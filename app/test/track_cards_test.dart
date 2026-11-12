@@ -53,7 +53,7 @@ Future<void> _openSheet(WidgetTester tester, LayerDoc l) async {
 
 /// Folders, an audio track, a sampler and per-note FX: a bus folder holding a track and a nested folder.
 ProjectDoc _mixed(AppState s) {
-  final p = s.starterProject();
+  final p = s.demoProject();
   p.assets.add(AudioAssetDoc(id: 'a1', path: '/nowhere/loop.wav', name: 'Loop', seconds: 2));
   p.layers.addAll([
     LayerDoc(id: 'bus', name: 'Drum bus', color: 2, isFolder: true),
@@ -71,7 +71,7 @@ final _noEngine = _lib?.isEmpty ?? true;
 
 void main() {
   testWidgets('each card names its C++ instrument and preset, not "No instrument"', (tester) async {
-    final s = _state((s) => s.starterProject());
+    final s = _state((s) => s.demoProject());
     await _show(tester, s);
     expect(find.textContaining('No instrument'), findsNothing);
     for (final l in s.project.layers) {
@@ -84,7 +84,7 @@ void main() {
   });
 
   testWidgets('each card draws its clips with their notes (Arrange\'s clip preview, loops included)', (tester) async {
-    final s = _state((s) => s.starterProject());
+    final s = _state((s) => s.demoProject());
     final bass = s.project.layers.firstWhere((l) => l.name == 'Bass');
     bass.clips.single
       ..loop = true
@@ -121,7 +121,7 @@ void main() {
   });
 
   testWidgets('the panel lists the track\'s clips and opens a clip\'s notes in Build', (tester) async {
-    final s = _state((s) => s.starterProject());
+    final s = _state((s) => s.demoProject());
     final kick = s.project.layers.first;
     String? opened;
     await _show(tester, s, onOpen: (id) => opened = id);
@@ -137,7 +137,7 @@ void main() {
   });
 
   testWidgets('an empty track\'s panel starts a pattern as a clip on it', (tester) async {
-    final s = _state((s) => s.starterProject()..layers.clear());
+    final s = _state((s) => s.demoProject()..layers.clear());
     final track = s.addEmptyTrack();
     await _show(tester, s);
     expect(_detail(tester, track), contains('No clips'));
@@ -176,7 +176,7 @@ void main() {
   });
 
   testWidgets('the panel stays open on its track through undo and redo, and its mix edits stick', (tester) async {
-    final s = _state((s) => s.starterProject());
+    final s = _state((s) => s.demoProject());
     final bass = s.project.layers.firstWhere((l) => l.name == 'Bass');
     await _show(tester, s);
     await _openSheet(tester, bass);
@@ -225,7 +225,7 @@ void main() {
   });
 
   testWidgets('Back and Android\'s back gesture leave the cards for the arrangement', (tester) async {
-    final s = _state((s) => s.starterProject());
+    final s = _state((s) => s.demoProject());
     var backs = 0;
     tester.view.physicalSize = const Size(412, 900);
     tester.view.devicePixelRatio = 1;
@@ -244,7 +244,7 @@ void main() {
   });
 
   testWidgets('with the engine: cards name the loaded instruments, and the panel\'s FX stack and mix work', (tester) async {
-    final s = _state((s) => s.starterProject());
+    final s = _state((s) => s.demoProject());
     s.engine = Engine.create();
     await tester.runAsync(() async {
       s.info = await s.engine!.setProject(s.project.toEngineJson());
