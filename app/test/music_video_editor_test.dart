@@ -1,5 +1,7 @@
 // The music video editor's widgets on a phone-sized screen: the shot lane (select, drag, trim, cut markers, add,
 // split, undo and redo, keyboard shortcuts) and the shot list (expand, layout, views, effects), and auto-cut's flow.
+import 'dart:async';
+
 import 'package:caw/model/app_state.dart';
 import 'package:caw/model/music_video.dart';
 import 'package:caw/model/music_video_autocut.dart';
@@ -32,7 +34,8 @@ class _Host {
   int changed = 0, saved = 0;
 }
 
-Future<(MusicVideoDoc, _Host)> _pump(WidgetTester tester, {List<VideoCut>? cuts}) async {
+Future<(MusicVideoDoc, _Host)> _pump(WidgetTester tester, {List<VideoCut>? cuts, AutoCutRunner? runner,
+    double end = 256}) async {
   tester.view.physicalSize = const Size(1080, 2400);
   tester.view.devicePixelRatio = 2.6;
   addTearDown(tester.view.reset);
@@ -41,7 +44,7 @@ Future<(MusicVideoDoc, _Host)> _pump(WidgetTester tester, {List<VideoCut>? cuts}
   await tester.pumpWidget(MaterialApp(home: Scaffold(body: SingleChildScrollView(child: Padding(
     padding: const EdgeInsets.all(12),
     child: StatefulBuilder(builder: (context, setState) => MusicVideoEditor(
-      doc: doc, scene: _scene(), start: 0, end: 256, aspect: 9 / 16, runner: _here,
+      doc: doc, scene: _scene(), start: 0, end: end, aspect: 9 / 16, runner: runner ?? _here,
       onChanged: () => host.changed++, onSave: () => host.saved++)),
   )))));
   await tester.pump();
@@ -270,5 +273,99 @@ void main() {
     expect(s.project.musicVideo!['shots'], isEmpty);
     expect(find.textContaining('cut by the'), findsOneWidget); // the director again
     await tester.pump(const Duration(seconds: 1)); // the project's save
+  });
+
+  group('review fixes', () {
+    testWidgets('a shot past the range end: its Length and Start steppers are off, and nothing throws', (tester) async {
+      final (doc, _) = await _pump(tester, end: 128, cuts: [VideoCut(id: 's1', start: 0, length: 32),
+          VideoCut(id: 's2', start: 192, length: 32)]);
+      await _tapKey(tester, 'video-shot-s2');
+      for (final k in ['video-length-up', 'video-length-down', 'video-start-up', 'video-start-down']) {
+        expect(tester.widget<IconButton>(_key(k)).onPressed, isNull, reason: k);
+      }
+      expect(find.textContaining('outside the range'), findsOneWidget);
+      expect((doc.timeline.byId('s2')!.start, doc.timeline.byId('s2')!.length), (192.0, 32.0));
+    });
+
+    testWidgets('an edit that changes nothing leaves no undo step', (tester) async {
+      final (doc, _) = await _pump(tester, cuts: [VideoCut(id: 's1', start: 0, length: 64)]);
+      final editor = tester.state<MusicVideoEditorState>(find.byType(MusicVideoEditor));
+      editor.setCursor(16); // inside s1: Add can't
+      await tester.pump();
+      editor.add();
+      await tester.pump();
+      expect(editor.canUndo, isFalse);
+      editor.select('s1');
+      editor.nudge(-1); // at the range's start already
+      await tester.pump();
+      expect(editor.canUndo, isFalse);
+      expect(doc.timeline.cuts.length, 1);
+      // A real change still makes one, and an empty edit after it keeps redo.
+      editor.nudge(1);
+      await tester.pump();
+      expect(editor.canUndo, isTrue);
+      editor.undo();
+      await tester.pump();
+      expect(editor.canRedo, isTrue);
+      editor.nudge(-1);
+      await tester.pump();
+      expect(editor.canRedo, isTrue);
+      await tester.pumpAndSettle();
+    });
+
+    testWidgets('auto-cut Replace replaces only the range; shots outside it stay', (tester) async {
+      final (doc, _) = await _pump(tester, end: 128, cuts: [VideoCut(id: 's9', start: 192, length: 32)]);
+      final editor = tester.state<MusicVideoEditorState>(find.byType(MusicVideoEditor));
+      await editor.runAutoCut(AutoCutSettings(), AutoCutMode.replace);
+      await tester.pumpAndSettle();
+      final t = doc.timeline;
+      expect(t.byId('s9'), isNotNull);
+      expect(t.cuts.where((c) => c.start < 128).last.end, 128);
+      expect(t.cuts.first.start, 0);
+    });
+
+    testWidgets('a failing auto-cut clears busy and says why on one line', (tester) async {
+      Future<List<VideoCut>> boom(VideoScene scene, AutoCutSettings settings, MusicVideoOptions options,
+              {required double start, required double end, List<double>? loudness}) =>
+          Future.error(StateError('no isolate'));
+      final (doc, _) = await _pump(tester, runner: boom);
+      final editor = tester.state<MusicVideoEditorState>(find.byType(MusicVideoEditor));
+      await editor.runAutoCut(AutoCutSettings(), AutoCutMode.replace);
+      await tester.pumpAndSettle();
+      expect(editor.busy, isFalse);
+      expect(find.textContaining('Auto-cut failed: no isolate'), findsOneWidget);
+      expect(tester.widget<TextButton>(_key('video-autocut')).onPressed, isNotNull);
+      expect(doc.timeline.isEmpty, isTrue);
+    });
+
+    testWidgets("while auto-cut runs, keys and lane gestures don't edit", (tester) async {
+      final gate = Completer<List<VideoCut>>();
+      Future<List<VideoCut>> slow(VideoScene scene, AutoCutSettings settings, MusicVideoOptions options,
+              {required double start, required double end, List<double>? loudness}) =>
+          gate.future;
+      final (doc, _) = await _pump(tester, runner: slow, cuts: [VideoCut(id: 's1', start: 0, length: 32),
+          VideoCut(id: 's2', start: 64, length: 32)]);
+      final t = doc.timeline;
+      final editor = tester.state<MusicVideoEditorState>(find.byType(MusicVideoEditor));
+      await tester.tap(_key('video-lane-shot-s2'));
+      await tester.pump();
+      expect(editor.selected, 's2');
+      final run = editor.runAutoCut(AutoCutSettings(interval: false, bursts: false, tracks: false, loudness: false),
+          AutoCutMode.fillGaps);
+      await tester.pump();
+      expect(editor.busy, isTrue);
+      await tester.sendKeyEvent(LogicalKeyboardKey.delete);
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+      await tester.pump();
+      expect([for (final c in t.cuts) c.start], [0, 64]);
+      final lane = tester.state<ShotLaneState>(find.byType(ShotLane));
+      await tester.drag(_key('video-lane-shot-s2'), Offset(32 * lane.pxPerStep, 0), touchSlopX: 0, warnIfMissed: false);
+      await tester.pump();
+      expect(t.byId('s2')!.start, 64);
+      gate.complete(const []);
+      await run;
+      await tester.pumpAndSettle();
+      expect(editor.busy, isFalse);
+    });
   });
 }

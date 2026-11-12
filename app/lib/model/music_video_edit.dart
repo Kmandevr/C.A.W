@@ -567,6 +567,8 @@ class VideoTimeline {
     if (i < 0) return false;
     final c = cuts[i];
     final (a, _) = _room(i, lo, hi);
+    // No room for the edge (the shot lies before the range's start or against its neighbour): nothing to do.
+    if (c.end - kVideoMinShotSteps < a) return false;
     final s = snapStep(start, snap, stepsPerBar).clamp(a, c.end - kVideoMinShotSteps).toDouble();
     if (s == c.start) return false;
     c.length = c.end - s;
@@ -581,6 +583,8 @@ class VideoTimeline {
     if (i < 0) return false;
     final c = cuts[i];
     final (_, b) = _room(i, lo, hi);
+    // No room for the edge (the shot lies at or past the range's end): nothing to do.
+    if (b < c.start + kVideoMinShotSteps) return false;
     final e = snapStep(end, snap, stepsPerBar).clamp(c.start + kVideoMinShotSteps, b).toDouble();
     if (e == c.end) return false;
     c.length = e - c.start;
@@ -634,19 +638,21 @@ class VideoTimeline {
     return true;
   }
 
-  /// A copy of shot [id] right after it: the later shots move along by its length (those pushed past [hi] are cut
-  /// short or dropped). Null when there is no room before [hi].
+  /// A copy of shot [id] right after it: the later shots inside the range ([c.end, hi)) move along by its length,
+  /// those pushed past [hi] cut short or dropped. Shots already past [hi] stay as they are. Null when there is no
+  /// room before [hi].
   VideoCut? duplicate(String id, {required double hi}) {
     final i = indexOf(id);
     if (i < 0) return null;
     final c = cuts[i];
     if (c.end >= hi) return null;
     final len = c.length;
-    for (final later in cuts.sublist(i + 1)) {
-      later.start += len;
+    final pushed = [for (final x in cuts.sublist(i + 1)) if (x.start >= c.end && x.start < hi) x];
+    for (final x in pushed) {
+      x.start += len;
     }
-    cuts.removeWhere((x) => x.start >= hi);
-    for (final x in cuts) {
+    cuts.removeWhere((x) => pushed.contains(x) && x.start >= hi);
+    for (final x in pushed) {
       if (x.end > hi) x.length = hi - x.start;
     }
     final dup = c.copy(id: newId())..start = c.end;
@@ -667,6 +673,36 @@ class VideoTimeline {
       changed = trimEnd(id, c.start + length, snap: snap, stepsPerBar: stepsPerBar, lo: lo, hi: hi) || changed;
     }
     return changed;
+  }
+
+  /// Replaces what lies in [lo, hi) with [fresh]: shots inside it go, a shot across an edge keeps its part
+  /// outside, and shots outside it stay (auto-cut over a loop or selection range).
+  void replaceRange(List<VideoCut> fresh, double lo, double hi) {
+    final keep = <VideoCut>[];
+    for (final c in cuts) {
+      if (c.end <= lo || c.start >= hi) {
+        keep.add(c);
+        continue;
+      }
+      if (c.start < lo && lo - c.start >= kVideoMinShotSteps) keep.add(c.copy()..length = lo - c.start);
+      if (c.end > hi && c.end - hi >= kVideoMinShotSteps) {
+        final before = c.start < lo;
+        keep.add(c.copy(id: before ? newId() : c.id)
+          ..start = hi
+          ..length = c.end - hi);
+      }
+    }
+    cuts
+      ..clear()
+      ..addAll(keep)
+      ..addAll([
+        for (final f in fresh)
+          if (math.min(f.end, hi) - math.max(f.start, lo) >= kVideoMinShotSteps)
+            f.copy(id: newId())
+              ..start = math.max(f.start, lo)
+              ..length = math.min(f.end, hi) - math.max(f.start, lo),
+      ]);
+    _sort();
   }
 
   /// Replaces every shot with [fresh].

@@ -20,7 +20,11 @@ enum LaneDrag { move, trimStart, trimEnd, cut }
 class ShotLane extends StatefulWidget {
   const ShotLane({super.key, required this.timeline, required this.stepsPerBar, required this.start, required this.end,
       required this.snap, required this.selected, required this.cursor, required this.onSelect,
-      required this.onCursor, required this.onBeginEdit, required this.onEdit, required this.onEndEdit, this.playhead});
+      required this.onCursor, required this.onBeginEdit, required this.onEdit, required this.onEndEdit, this.playhead,
+      this.enabled = true});
+
+  /// Off while auto-cut or a render runs: taps still choose and set the cursor, drags don't edit.
+  final bool enabled;
 
   final VideoTimeline timeline;
   final int stepsPerBar;
@@ -104,6 +108,7 @@ class ShotLaneState extends State<ShotLane> {
   }
 
   void _startDrag(String? id, int cut, LaneDrag mode, double globalX) {
+    if (!widget.enabled) return;
     final c = id == null ? null : widget.timeline.byId(id);
     final origin = switch (mode) {
       LaneDrag.move || LaneDrag.trimStart => c!.start,

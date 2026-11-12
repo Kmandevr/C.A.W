@@ -26,26 +26,24 @@ part of 'video_painter.dart';
 /// Where the keys of [lo]..[hi] sit across [width]: white keys share it evenly, a black key straddles the line
 /// between its neighbours.
 class VideoKeyboard {
-  VideoKeyboard(this.lo, this.hi, this.width) {
+  VideoKeyboard(this.lo, this.hi, this.width) : _below = Int32List(math.max(0, hi - lo) + 2) {
+    // How many white keys lie below each key, once, so a span is a lookup.
     var n = 0;
     for (var p = lo; p <= hi; p++) {
+      _below[p - lo] = n;
       if (!_isBlack(p)) n++;
     }
+    _below[_below.length - 1] = n;
     whites = math.max(1, n);
     whiteWidth = width / whites;
   }
   final int lo, hi;
   final double width;
+  final Int32List _below;
   late final int whites;
   late final double whiteWidth;
 
-  int _whitesBelow(int p) {
-    var n = 0;
-    for (var k = lo; k < p; k++) {
-      if (!_isBlack(k)) n++;
-    }
-    return n;
-  }
+  int _whitesBelow(int p) => _below[(p - lo).clamp(0, _below.length - 1)];
 
   /// Key [p]'s left and right edges.
   (double, double) span(int p) {
@@ -114,10 +112,9 @@ void _falling(Canvas canvas, Size size, VideoFrameInput f, DirectedShot shot, Sh
   final lit = <int, Color>{};
   canvas.save();
   canvas.clipRect(fall);
-  for (var i = s.firstNoteFrom(f.step - s.maxNoteSteps - 1); i < s.notes.length; i++) {
+  for (final i in s.notesSounding(f.step, f.step + ahead + 1e-9)) {
     final n = s.notes[i];
-    if (n.start > f.step + ahead) break;
-    if (n.end <= f.step || !shown(n.track) || n.pitch < lo - 0.5 || n.pitch > hi + 0.5) continue;
+    if (!shown(n.track) || n.pitch < lo - 0.5 || n.pitch > hi + 0.5) continue;
     final color = _track(s, n.track);
     final on = n.start <= f.step;
     final key = n.pitch.round();

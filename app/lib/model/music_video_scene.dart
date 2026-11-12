@@ -1,6 +1,7 @@
 // The music video's view of a project: tracks, clips, notes unrolled onto the timeline, automation lanes, sections
 // and per-bar energy, with the activity queries the auto director asks (what plays, what moves, what is loud).
 import 'dart:math' as math;
+import 'dart:typed_data';
 
 import 'arrange_edit.dart' show clipNotes;
 import 'pattern_doc.dart';
@@ -137,8 +138,40 @@ class VideoScene {
 
   int get stepsPerBar => beatsPerBar * 4;
 
-  /// The longest note, in steps (how far back a view looks for notes still sounding).
+  /// The longest note, in steps.
   late final double maxNoteSteps = notes.fold(0.0, (m, n) => math.max(m, n.end - n.start));
+
+  /// The interval index's bucket, in steps: each bucket lists the notes that started before it and still sound in
+  /// it, so a long note (a drone) costs one entry a bucket instead of every frame walking every note after it.
+  static const noteBucketSteps = 16.0;
+
+  late final List<Int32List> _carried = () {
+    final ends = notes.fold(0.0, (m, n) => math.max(m, n.end));
+    final buckets = (ends / noteBucketSteps).ceil() + 1;
+    final lists = List<List<int>?>.filled(buckets, null);
+    for (var i = 0; i < notes.length; i++) {
+      final n = notes[i];
+      final first = (n.start / noteBucketSteps).floor() + 1;
+      for (var b = math.max(0, first); b < buckets && b * noteBucketSteps < n.end; b++) {
+        (lists[b] ??= []).add(i);
+      }
+    }
+    return [for (final l in lists) l == null ? Int32List(0) : Int32List.fromList(l)];
+  }();
+
+  /// The indexes of the notes that sound somewhere in [from, to) (start before [to], end after [from]), each once:
+  /// those carried into [from]'s bucket, then those starting from that bucket on.
+  Iterable<int> notesSounding(double from, double to) sync* {
+    final b = (from / noteBucketSteps).floor();
+    if (b >= 0 && b < _carried.length) {
+      for (final i in _carried[b]) {
+        if (notes[i].end > from && notes[i].start < to) yield i;
+      }
+    }
+    for (var i = firstNoteFrom(math.max(0, b) * noteBucketSteps); i < notes.length && notes[i].start < to; i++) {
+      if (notes[i].end > from) yield i;
+    }
+  }
 
   /// The lowest and highest pitch the notes of the tracks not in [hidden] (ids) play, bends included; middle C's
   /// octave when there are none.
@@ -287,8 +320,8 @@ VideoScene buildVideoScene(ProjectDoc p, {required int Function(LayerDoc) colorO
       // The notes as the engine plays them (#183): the source window from the offset, wrapping to the pattern's
       // start while the clip loops, a note already sounding at the window's start kept from there, and notes cut at
       // the window's edges. The same rule the arranger draws and edits with ([clipNotes]).
-      final played = clipNotes(doc, c, p.beatsPerBar, limit: kSceneMaxNotes - notes.length);
-      if (played == null) continue;
+      // A clip that would pass the cap shows its notes up to it.
+      final played = clipNotes(doc, c, p.beatsPerBar, limit: kSceneMaxNotes - notes.length, truncate: true) ?? const [];
       for (final n in played) {
         final s = clip.start + n.at.toDouble();
         final e = math.min(clip.end, s + n.len.toDouble());

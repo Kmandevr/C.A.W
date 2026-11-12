@@ -161,19 +161,23 @@ class _ShotEditorState extends State<ShotEditor> {
   Widget build(BuildContext context) {
     final panel = c.layout.panels[_panel.clamp(0, c.layout.panels.length - 1)];
     final g = widget.snap.grid(spb);
+    // A shot wholly outside the range (the song got shorter, or the range is a loop or selection) keeps its place.
+    final inRange = c.start < widget.end && c.end > widget.start;
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       _label('SPAN'),
+      VideoReveal(inRange ? null : const VideoNote('This shot lies outside the range: the video doesn\'t show it, and its '
+          'span is kept as it is.')),
       Row(children: [
         Expanded(child: _Stepper(keyPrefix: 'video-start', label: 'Start', value: videoBarBeat(c.start, spb),
-            onDown: () => h.edit(() => widget.timeline.setSpan(c.id, start: c.start - g, snap: widget.snap, stepsPerBar: spb,
+            onDown: !inRange ? null : () => h.edit(() => widget.timeline.setSpan(c.id, start: c.start - g, snap: widget.snap, stepsPerBar: spb,
                 lo: widget.start, hi: widget.end)),
-            onUp: () => h.edit(() => widget.timeline.setSpan(c.id, start: c.start + g, snap: widget.snap, stepsPerBar: spb,
+            onUp: !inRange ? null : () => h.edit(() => widget.timeline.setSpan(c.id, start: c.start + g, snap: widget.snap, stepsPerBar: spb,
                 lo: widget.start, hi: widget.end)))),
         const SizedBox(width: 8),
         Expanded(child: _Stepper(keyPrefix: 'video-length', label: 'Length', value: videoLength(c.length, spb),
-            onDown: c.length <= g ? null : () => h.edit(() => widget.timeline.setSpan(c.id, length: c.length - g,
+            onDown: !inRange || c.length <= g ? null : () => h.edit(() => widget.timeline.setSpan(c.id, length: c.length - g,
                 snap: widget.snap, stepsPerBar: spb, lo: widget.start, hi: widget.end)),
-            onUp: () => h.edit(() => widget.timeline.setSpan(c.id, length: c.length + g, snap: widget.snap,
+            onUp: !inRange ? null : () => h.edit(() => widget.timeline.setSpan(c.id, length: c.length + g, snap: widget.snap,
                 stepsPerBar: spb, lo: widget.start, hi: widget.end)))),
       ]),
       _label('LAYOUT'),

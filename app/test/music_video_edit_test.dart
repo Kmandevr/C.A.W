@@ -334,6 +334,95 @@ void main() {
     });
   });
 
+  group('review fixes', () {
+    const beat = VideoSnap.beat;
+
+    test('a shot past the range end: trims refuse instead of throwing, and nothing changes', () {
+      final t = VideoTimeline([VideoCut(id: 's1', start: 0, length: 16), VideoCut(id: 's2', start: 300, length: 20)]);
+      expect(t.trimEnd('s2', 340, snap: beat, stepsPerBar: 16, hi: 256), isFalse);
+      expect(t.setSpan('s2', length: 24, snap: beat, stepsPerBar: 16, hi: 256), isFalse);
+      expect((t.byId('s2')!.start, t.byId('s2')!.length), (300.0, 20.0));
+      // A shot whose start edge has no room after the range's start.
+      final u = VideoTimeline([VideoCut(id: 's1', start: 0, length: 8)]);
+      expect(u.trimStart('s1', 4, snap: beat, stepsPerBar: 16, lo: 16, hi: 64), isFalse);
+      expect(u.byId('s1')!.start, 0);
+    });
+
+    test('duplicate pushes only the shots inside the range and leaves those past its end alone', () {
+      final t = VideoTimeline([
+        VideoCut(id: 's1', start: 0, length: 16),
+        VideoCut(id: 's2', start: 16, length: 16),
+        VideoCut(id: 's3', start: 80, length: 16), // past the range (0..64): never pushed
+      ]);
+      final dup = t.duplicate('s1', hi: 64)!;
+      expect(dup.start, 16);
+      expect((t.byId('s2')!.start, t.byId('s2')!.end), (32.0, 48.0));
+      expect((t.byId('s3')!.start, t.byId('s3')!.end), (80.0, 96.0));
+    });
+
+    test('replacing a range keeps the shots outside it, and the outside parts of shots across its edges', () {
+      final t = VideoTimeline([
+        VideoCut(id: 's1', start: 0, length: 40), // across the range's start (32)
+        VideoCut(id: 's2', start: 48, length: 8),
+        VideoCut(id: 's3', start: 120, length: 16), // across its end (128)
+        VideoCut(id: 's4', start: 200, length: 16), // outside
+      ]);
+      t.replaceRange([VideoCut(id: 'a0', start: 32, length: 64), VideoCut(id: 'a1', start: 96, length: 32)], 32, 128);
+      expect([for (final c in t.cuts) (c.start, c.end)],
+          [(0.0, 32.0), (32.0, 96.0), (96.0, 128.0), (128.0, 136.0), (200.0, 216.0)]);
+      expect(t.byId('s1')!.end, 32);
+      expect(t.byId('s4')!.start, 200);
+      expect(t.cuts.map((c) => c.id).toSet().length, 5);
+    });
+
+    test('a dense clip over the note cap keeps the notes up to the cap', () {
+      // 64 notes a bar for 3,200 bars: 204,800 notes, past the 200,000 cap.
+      final dense = StringBuffer('---\ncaw: 1\nkind: pattern\nname: D\nlength: 1 bar\n---\n');
+      for (var i = 0; i < 64; i++) {
+        dense.write('${i / 4} C4 0.25 1\n');
+      }
+      final s = _sceneOf([ClipDoc(id: 'c', patternId: 'm', lengthSteps: 16 * 3200)], source: dense.toString());
+      expect(s.notes.length, kSceneMaxNotes);
+      expect(s.clips.single.notes.length, kSceneMaxNotes);
+    });
+
+    test('the notes sounding over a span, through the interval index, with a whole-song drone', () {
+      const src = '---\ncaw: 1\nkind: pattern\nname: N\nlength: 64 bars\n---\n0 C2 1024 1\n';
+      final p = ProjectDoc(id: 'p', name: 'p', bpm: 120, loopBars: 64, modules: [
+        ModuleDoc(id: 'drone', name: 'Drone', source: src),
+        ModuleDoc(id: 'm', name: 'M', source: _quarters),
+      ], layers: [
+        LayerDoc(id: 'a', name: 'A', color: 0, clips: [ClipDoc(id: 'd', patternId: 'drone', lengthSteps: 1024, loop: false)]),
+        LayerDoc(id: 'b', name: 'B', color: 1, clips: [ClipDoc(id: 'q', patternId: 'm', lengthSteps: 1024)]),
+      ]);
+      final s = buildVideoScene(p, colorOf: (_) => 0xffffffff);
+      for (final (a, b) in [(0.0, 4.0), (500.5, 532.0), (17.0, 17.5), (1000.0, 1100.0), (63.9, 64.1)]) {
+        final brute = {for (var i = 0; i < s.notes.length; i++) if (s.notes[i].start < b && s.notes[i].end > a) i};
+        final got = s.notesSounding(a, b).toList();
+        expect(got.toSet(), brute, reason: '$a..$b');
+        expect(got.length, got.toSet().length, reason: 'each note once');
+      }
+      // The drone doesn't make a frame walk the whole song: few notes are looked at past the span's bucket.
+      expect(s.notesSounding(500, 501).length, 2); // the drone and the quarter note there
+    });
+
+    test("the keyboard's spans: white keys side by side, each black key across a white key's edge", () {
+      final kb = VideoKeyboard(21, 108, 520);
+      var x = 0.0;
+      for (var p = 21; p <= 108; p++) {
+        final (l, r) = kb.span(p);
+        if (const [1, 3, 6, 8, 10].contains(p % 12)) {
+          final edge = (l + r) / 2;
+          expect((edge / kb.whiteWidth - (edge / kb.whiteWidth).round()).abs(), lessThan(1e-9));
+        } else {
+          expect(l, closeTo(x, 1e-9));
+          x = r;
+        }
+      }
+      expect(x, closeTo(520, 1e-9));
+    });
+  });
+
   group('saving', () {
     test('the video saves with the project and reads back', () {
       final doc = MusicVideoDoc(options: MusicVideoOptions(style: VideoStyle.calm, seed: 9, shots: {VideoShot.falling},

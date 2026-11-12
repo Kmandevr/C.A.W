@@ -1,6 +1,8 @@
 // The music video editor in the setup sheet (owner, 2026-11-12): the shot lane and list with Auto-cut, Add, Split,
 // Duplicate, Delete, undo and redo, the snap, desktop keyboard shortcuts on top, and the auto-cut sheet (its
 // triggers' settings; re-running asks before it replaces edits, or fills only the empty space).
+import 'dart:convert';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -68,13 +70,23 @@ class MusicVideoEditorState extends State<MusicVideoEditor> implements VideoEdit
     super.dispose();
   }
 
-  // VideoEditHost: every change is one undo step, saved when it ends.
+  /// Auto-cut (or its loudness render) is running.
+  bool get busy => _busy;
+
+  /// Whether edits land now: not while auto-cut or a render runs.
+  bool get canEdit => widget.enabled && !_busy;
+
+  // VideoEditHost: every change is one undo step, saved when it ends; a change that changed nothing leaves none.
   bool _open = false;
+  String _before = '';
+  List<VideoTimeline> _redoBefore = const [];
 
   @override
   void begin() {
     if (_open) return;
     _open = true;
+    _before = jsonEncode(t.toJson());
+    _redoBefore = [..._redo];
     _undo.add(t.copy());
     if (_undo.length > _maxUndo) _undo.removeAt(0);
     _redo.clear();
@@ -91,6 +103,15 @@ class MusicVideoEditorState extends State<MusicVideoEditor> implements VideoEdit
   void end() {
     if (!_open) return;
     _open = false;
+    if (jsonEncode(t.toJson()) == _before) {
+      // Nothing changed: drop the step and keep what redo had.
+      _undo.removeLast();
+      _redo
+        ..clear()
+        ..addAll(_redoBefore);
+      setState(() {});
+      return;
+    }
     setState(() {});
     widget.onChanged();
     widget.onSave();
@@ -105,14 +126,14 @@ class MusicVideoEditorState extends State<MusicVideoEditor> implements VideoEdit
   }
 
   void undo() {
-    if (_undo.isEmpty) return;
+    if (_undo.isEmpty || !canEdit) return;
     Haptics.tap();
     _redo.add(t.copy());
     _restore(_undo.removeLast());
   }
 
   void redo() {
-    if (_redo.isEmpty) return;
+    if (_redo.isEmpty || !canEdit) return;
     Haptics.tap();
     _undo.add(t.copy());
     _restore(_redo.removeLast());
@@ -134,6 +155,7 @@ class MusicVideoEditorState extends State<MusicVideoEditor> implements VideoEdit
   }
 
   void add() {
+    if (!canEdit) return;
     VideoCut? made;
     edit(() => made = t.add(cursor, snap: d.snap, stepsPerBar: spb, lo: widget.start, hi: widget.end));
     if (made == null) {
@@ -145,6 +167,7 @@ class MusicVideoEditorState extends State<MusicVideoEditor> implements VideoEdit
 
   @override
   void split() {
+    if (!canEdit) return;
     final id = selected ?? t.at(cursor)?.id;
     if (id == null) return _say('Put the cursor inside a shot to split it.');
     final c = t.byId(id)!;
@@ -158,7 +181,7 @@ class MusicVideoEditorState extends State<MusicVideoEditor> implements VideoEdit
   @override
   void duplicate() {
     final id = selected;
-    if (id == null) return;
+    if (id == null || !canEdit) return;
     if ((t.byId(id)?.end ?? widget.end) >= widget.end) return _say('No room after it before the end.');
     VideoCut? dup;
     edit(() => dup = t.duplicate(id, hi: widget.end));
@@ -168,14 +191,14 @@ class MusicVideoEditorState extends State<MusicVideoEditor> implements VideoEdit
   @override
   void delete() {
     final id = selected;
-    if (id == null) return;
+    if (id == null || !canEdit) return;
     edit(() => t.delete(id));
     setState(() => selected = null);
   }
 
   void nudge(int dir) {
     final c = selected == null ? null : t.byId(selected!);
-    if (c == null) return;
+    if (c == null || !canEdit) return;
     edit(() => t.move(c.id, c.start + dir * d.snap.grid(spb), snap: d.snap, stepsPerBar: spb, lo: widget.start,
         hi: widget.end));
   }
@@ -230,25 +253,38 @@ class MusicVideoEditorState extends State<MusicVideoEditor> implements VideoEdit
       _busy = true;
       _message = settings.fromAudio ? 'Rendering the audio to read its loudness…' : 'Cutting…';
     });
-    List<double>? loudness;
-    if (settings.fromAudio && widget.loudness != null) {
-      loudness = await widget.loudness!();
-      if (!mounted) return;
-      if (loudness == null) setState(() => _message = 'The audio could not be read; the notes stand in for loudness.');
+    String? failed;
+    List<VideoCut>? cuts;
+    try {
+      List<double>? loudness;
+      if (settings.fromAudio && widget.loudness != null) {
+        loudness = await widget.loudness!();
+        if (!mounted) return;
+        if (loudness == null) setState(() => _message = 'The audio could not be read; the notes stand in for loudness.');
+      }
+      final run = widget.runner ?? autoCutInBackground;
+      cuts = await run(widget.scene, settings, d.options, start: widget.start, end: widget.end, loudness: loudness);
+    } catch (e) {
+      failed = e is StateError ? e.message : '$e';
+    } finally {
+      if (mounted) setState(() => _busy = false);
     }
-    final run = widget.runner ?? autoCutInBackground;
-    final cuts = await run(widget.scene, settings, d.options, start: widget.start, end: widget.end, loudness: loudness);
     if (!mounted) return;
-    var added = cuts.length;
+    if (cuts == null) {
+      _say('Auto-cut failed: ${failed ?? 'no result'}'.split('\n').first);
+      return;
+    }
+    final fresh = cuts;
+    var added = fresh.length;
     edit(() {
       if (mode == AutoCutMode.replace) {
-        t.replaceAll(cuts);
+        // Only the range: shots outside a loop or selection range stay.
+        t.replaceRange(fresh, widget.start, widget.end);
       } else {
-        added = t.fillGaps(cuts, widget.start, widget.end);
+        added = t.fillGaps(fresh, widget.start, widget.end);
       }
     });
     setState(() {
-      _busy = false;
       selected = null;
       _message = mode == AutoCutMode.replace ? 'Auto-cut made $added shots.' : 'Auto-cut filled the empty space with $added shots.';
     });
@@ -261,13 +297,13 @@ class MusicVideoEditorState extends State<MusicVideoEditor> implements VideoEdit
     final lane = ShotLane(
       key: _laneKey, timeline: t, stepsPerBar: spb, start: widget.start, end: widget.end, snap: d.snap,
       selected: selected, cursor: cursor, playhead: widget.playhead, onSelect: select, onCursor: setCursor,
-      onBeginEdit: begin, onEdit: () => live(() {}), onEndEdit: end,
+      onBeginEdit: begin, onEdit: () => live(() {}), onEndEdit: end, enabled: enabled,
     );
     Widget tool(String key, String tip, IconData icon, VoidCallback? on, {Color? color}) => IconButton(
           key: ValueKey(key), tooltip: tip, iconSize: 20, color: color ?? Neon.dim, onPressed: enabled ? on : null,
           padding: EdgeInsets.zero, constraints: const BoxConstraints(minWidth: 40, minHeight: 40), icon: Icon(icon));
     return CallbackShortcuts(
-      bindings: {
+      bindings: !enabled ? const {} : {
         const SingleActivator(LogicalKeyboardKey.delete): delete,
         const SingleActivator(LogicalKeyboardKey.backspace): delete,
         const SingleActivator(LogicalKeyboardKey.keyD, control: true): duplicate,
@@ -324,8 +360,8 @@ class MusicVideoEditorState extends State<MusicVideoEditor> implements VideoEdit
                 key: const ValueKey('video-editor-message'), maxLines: 2, overflow: TextOverflow.ellipsis,
                 style: const TextStyle(fontSize: 11, color: Neon.dim))), switchKey: _message),
             const SizedBox(height: 8),
-            ShotList(timeline: t, scene: widget.scene, snap: d.snap, selected: selected, onSelect: select, host: this,
-                aspect: widget.aspect, start: widget.start, end: widget.end),
+            AbsorbPointer(absorbing: !enabled, child: ShotList(timeline: t, scene: widget.scene, snap: d.snap, selected: selected, onSelect: select, host: this,
+                aspect: widget.aspect, start: widget.start, end: widget.end)),
           ]),
         ),
       ),
