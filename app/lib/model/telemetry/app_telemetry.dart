@@ -12,7 +12,9 @@ import '../../ui/frame_rate.dart';
 import '../../version.dart';
 import '../app_state.dart';
 import '../problem_log.dart';
+import '../live_midi.dart';
 import '../settings.dart';
+import 'peripherals.dart';
 import 'device_probe.dart';
 import 'telemetry.dart';
 import 'telemetry_config.dart';
@@ -33,6 +35,7 @@ Future<Telemetry> startAppTelemetry(AppState state, {required Stopwatch startup,
     ..appVersion = appVersion
     ..engineVersion = appVersion // the engine is built with the app; it reports no version of its own
     ..capiVersion = cawApiVersion
+    ..build = t.config.build
     ..isBuiltin = builtins.contains;
   app.profile = () => switch (state.settings.performanceMode) {
         PerformanceMode.fullExperience => 'full',
@@ -47,6 +50,25 @@ Future<Telemetry> startAppTelemetry(AppState state, {required Stopwatch startup,
     final displays = WidgetsBinding.instance.platformDispatcher.displays;
     return displays.isEmpty ? 0 : displays.first.refreshRate.round();
   };
+  app.display = () {
+    final displays = WidgetsBinding.instance.platformDispatcher.displays;
+    if (displays.isEmpty) return const {};
+    final d = displays.first;
+    int ten(double v) => (v / 10).round() * 10; // rounded to 10, as the relay keeps it
+    final w = d.size.width, h = d.size.height;
+    return {'widthPx': ten(w > h ? w : h), 'heightPx': ten(w > h ? h : w), 'displays': displays.length};
+  };
+  // Android tells a phone from a tablet by the screen's shortest side (600 dp, the app's own tablet line).
+  app.formFactor = () {
+    if (!Platform.isAndroid) return 'unknown';
+    final displays = WidgetsBinding.instance.platformDispatcher.displays;
+    if (displays.isEmpty) return 'unknown';
+    final d = displays.first;
+    return d.size.shortestSide / d.devicePixelRatio >= 600 ? 'tablet' : 'phone';
+  };
+  app.audioOutput = () => connectionOf(state.latency.routeInfo.output.kind);
+  app.peripherals = () =>
+      peripheralsOf(route: state.latency.routeInfo, midi: LiveMidi.current?.ports ?? const []);
   app.audio = () {
     final a = state.audioStatus;
     if (a == null || !a.running) return const {};

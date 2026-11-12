@@ -10,6 +10,10 @@ import 'package:caw/model/telemetry/telemetry_config.dart';
 import 'package:caw/ui/privacy/feedback_sheet.dart';
 import 'package:caw/ui/privacy/my_data_page.dart';
 import 'package:caw/ui/privacy/privacy_pages.dart';
+import 'package:caw/model/settings.dart';
+import 'package:caw/ui/settings/settings_deps.dart';
+import 'package:caw/ui/settings/settings_page.dart';
+import 'package:caw/ui/settings/privacy_settings.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -31,7 +35,7 @@ class _Relay implements RelayHttp {
 class _Probe implements DeviceProbe {
   @override
   Future<DeviceFacts> read() async =>
-      const DeviceFacts(platform: 'android', osVersion: '14', cpu: 'SM8450', big: 4, little: 4, maxClockMHz: [3000, 1800], ramGB: 8);
+      const DeviceFacts(platform: 'android', osVersion: '14', cpu: 'SM8450', big: 4, little: 4, other: 0, maxClockMHz: [3000, 1800], ramGB: 8);
 }
 
 /// A loaded telemetry on a fixed day; [reports] daily reports already sent.
@@ -53,6 +57,7 @@ Future<(Telemetry, _Relay)> _telemetry(WidgetTester tester, {int reports = 0}) a
     ..isBuiltin = const {'org.caw.reverb'}.contains;
   await tester.runAsync(() async {
     await t.load();
+    await t.acceptFirstRun();
     for (var i = 0; i < reports; i++) {
       t.onMeters(cpu: 0.3, playing: true, overloaded: 0);
       await t.tick(seconds: 600, foreground: true);
@@ -77,6 +82,7 @@ void main() {
     var continued = false;
     await _pump(tester, FirstRunPage(telemetryOn: true, onContinue: () => continued = true));
     expect(find.text('What is sent'), findsOneWidget);
+    await tester.scrollUntilVisible(find.text('What is never sent'), 200, scrollable: find.byType(Scrollable).first);
     expect(find.text('What is never sent'), findsOneWidget);
     await tester.scrollUntilVisible(find.text('Turning it off'), 200, scrollable: find.byType(Scrollable).first);
     expect(find.text('All of it is public'), findsOneWidget);
@@ -102,10 +108,19 @@ void main() {
       await t.closeDay();
     });
     expect(t.queued, hasLength(1));
-    await _pump(tester, PrivacyPage(telemetry: t));
+    Telemetry.current = t;
+    addTearDown(() => Telemetry.current = null);
+    await _pump(tester, SettingsPage(settings: Settings()));
+    // Settings › About and beta › Privacy, the published policy's path.
+    await tester.tap(find.text('About and beta'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Privacy'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('workers.dev/dashboard'), findsOneWidget);
     expect(find.text('Send anonymous telemetry'), findsOneWidget);
     expect(find.textContaining('1 waiting'), findsOneWidget);
-    await tester.tap(find.byKey(const ValueKey('privacy-toggle')));
+    expect(find.text('Send feedback'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('switch-privacy.telemetry')));
     await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 10)));
     await tester.pumpAndSettle();
     expect(t.enabled, isFalse);
@@ -134,6 +149,11 @@ void main() {
     await tester.tap(find.byKey(ValueKey('report-repo-${r.receipt}')));
     expect(copied, [r.receipt, 'https://github.com/Kmandevr/C.A.W-Telemetry/blob/main/data/${r.receipt.substring(0, 2)}/${r.receipt}.json']);
     await tester.tap(find.byKey(const ValueKey('my-data-export')));
+    await tester.pumpAndSettle();
+    // The warning comes before the save picker (security review, 2026-11-12).
+    expect(find.textContaining('Keep this file private'), findsOneWidget);
+    expect(exported, isNull);
+    await tester.tap(find.byKey(const ValueKey('my-data-export-confirm')));
     await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 10)));
     await tester.pumpAndSettle();
     expect((jsonDecode(exported!) as Map)['receipts'], hasLength(2));
@@ -162,7 +182,7 @@ void main() {
     for (final k in ['Bug', 'Idea', "Something's confusing", 'Praise']) {
       expect(find.text(k), findsOneWidget);
     }
-    expect(find.text('No stress-test result yet'), findsOneWidget);
+    expect(find.text('No Benchmark result yet'), findsOneWidget);
     final send = find.byKey(const ValueKey('feedback-send'));
     expect(tester.widget<ButtonStyleButton>(send).onPressed, isNull, reason: 'no text yet');
     await tester.tap(find.text('Idea'));
@@ -190,7 +210,9 @@ void main() {
 
     testWidgets('Privacy page, phone', (tester) async {
       final (t, _) = await _telemetry(tester, reports: 1);
-      await pumpGolden(tester, PrivacyPage(telemetry: t), phone360);
+      Telemetry.current = t;
+      addTearDown(() => Telemetry.current = null);
+      await pumpGolden(tester, PrivacyPage(deps: SettingsDeps(settings: Settings())), phone360);
       await expectLater(goldenScreen, matchesGoldenFile('goldens/privacy_settings_phone.png'));
     });
 

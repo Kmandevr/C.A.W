@@ -178,8 +178,8 @@ class _FeedbackFormState extends State<FeedbackForm> {
           decoration: const InputDecoration(hintText: 'What happened, or what would you like?', border: OutlineInputBorder()),
         ),
         _attachment('device', 'Attach device info', _device, (v) => setState(() => _device = v), _deviceInfo, ''),
-        _attachment('stress', 'Attach last stress-test result', _stress,
-            t.lastStress == null ? null : (v) => setState(() => _stress = v), t.lastStress, 'No stress-test result yet'),
+        _attachment('stress', 'Attach last Benchmark result', _stress,
+            t.lastStress == null ? null : (v) => setState(() => _stress = v), t.lastStress, 'No Benchmark result yet'),
         _attachment('errors', 'Attach recent error log', _errors, (v) => setState(() => _errors = v), _errorLog, ''),
         const SizedBox(height: 6),
         TextField(

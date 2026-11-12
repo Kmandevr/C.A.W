@@ -9,6 +9,7 @@ import 'dart:math';
 
 import 'package:flutter/foundation.dart';
 
+import '../atomic_file.dart';
 import '../sha256.dart';
 import 'day_stats.dart';
 import 'device_probe.dart';
@@ -20,6 +21,10 @@ import 'telemetry_config.dart';
 abstract class TelemetryStore {
   Future<String?> read();
   Future<void> write(String text);
+
+  /// Keeps an unreadable state file aside (`telemetry.json.bad`) before anything is saved over it, so its receipts
+  /// and delete keys can still be recovered by hand.
+  Future<void> keepBad(String text);
 }
 
 class FileTelemetryStore implements TelemetryStore {
@@ -38,26 +43,44 @@ class FileTelemetryStore implements TelemetryStore {
   @override
   Future<void> write(String text) async {
     try {
-      final tmp = File('${file.path}.tmp');
-      await tmp.writeAsString(text, flush: true);
-      await tmp.rename(file.path);
+      // One write at a time per path, through a temporary copy and a rename: the queue, receipts and delete keys
+      // are never left half-written, and an older save can't land after a newer one.
+      await writeFileAtomically(file, text);
     } catch (_) {
       // Storage full or gone: the state lives on in memory for this run.
+    }
+  }
+
+  @override
+  Future<void> keepBad(String text) async {
+    try {
+      await writeFileAtomically(File('${file.path}.bad'), text);
+    } catch (_) {
+      // nothing more to do
     }
   }
 }
 
 class MemoryTelemetryStore implements TelemetryStore {
-  String? text;
+  String? text, bad;
   @override
   Future<String?> read() async => text;
   @override
   Future<void> write(String text) async => this.text = text;
+  @override
+  Future<void> keepBad(String text) async => bad = text;
 }
+
+T? _as<T>(Object? v) => v is T ? v : null;
+int _int(Object? v, [int or = 0]) => v is num && v.isFinite ? v.toInt() : or;
 
 /// What the rest of the app tells telemetry (filled in by main and the shell; null parts read as unknown).
 class TelemetryApp {
   String appVersion = '0.0.0';
+
+  /// The short commit the build came from (`--dart-define=CAW_BUILD`), or null in a local build: H2 `app.build` and
+  /// H4 `build` (contract addition, owner 2026-11-12).
+  String? build;
   String engineVersion = 'unknown';
   int capiVersion = 0;
 
@@ -71,6 +94,13 @@ class TelemetryApp {
   String Function()? profile;
   bool Function()? eco;
   int Function()? refreshHz;
+
+  /// H2 `device.screen` ({widthPx, heightPx, displays}), `device.audio.output`, `device.peripherals` and, where the
+  /// probe can't tell (Android), `device.formFactor`.
+  Map<String, Object?> Function()? display;
+  String Function()? audioOutput;
+  List<Map<String, Object?>> Function()? peripherals;
+  String Function()? formFactor;
 
   /// The built-in component ids the engine knows (H2: only these may be named).
   bool Function(String id)? isBuiltin;
@@ -95,7 +125,10 @@ class ReportRecord {
     this.sent,
   });
 
-  final String receipt, deleteKey, day, json;
+  final String receipt, deleteKey, day;
+
+  /// The exact JSON sent; empty once the record is old (only the receipt and key are kept, [Telemetry.keepJsonFor]).
+  String json;
   final ReportKind kind;
   final DateTime created;
   ReportStatus status;
@@ -110,23 +143,22 @@ class ReportRecord {
         'sent': sent?.toUtc().toIso8601String(),
       };
 
+  /// Null when [j] lacks a receipt or key; any other wrong-typed field falls back to a default.
   static ReportRecord? fromJson(Object? j) {
     if (j is! Map) return null;
-    try {
-      return ReportRecord(
-        receipt: j['receipt'] as String,
-        deleteKey: j['deleteKey'] as String,
-        day: j['day'] as String,
-        kind: ReportKind.values.byName(j['kind'] as String? ?? 'daily'),
-        json: j['json'] as String,
-        created: DateTime.parse(j['created'] as String),
-        status: ReportStatus.values.byName(j['status'] as String? ?? 'queued'),
-        attempts: (j['attempts'] as num?)?.toInt() ?? 0,
-        sent: j['sent'] == null ? null : DateTime.parse(j['sent'] as String),
-      );
-    } catch (_) {
-      return null;
-    }
+    final receipt = _as<String>(j['receipt']), key = _as<String>(j['deleteKey']);
+    if (receipt == null || key == null) return null;
+    return ReportRecord(
+      receipt: receipt,
+      deleteKey: key,
+      day: _as<String>(j['day']) ?? '',
+      kind: ReportKind.values.where((k) => k.name == j['kind']).firstOrNull ?? ReportKind.daily,
+      json: _as<String>(j['json']) ?? '',
+      created: DateTime.tryParse(_as<String>(j['created']) ?? '') ?? DateTime.utc(1970),
+      status: ReportStatus.values.where((s) => s.name == j['status']).firstOrNull ?? ReportStatus.sent,
+      attempts: _int(j['attempts']),
+      sent: DateTime.tryParse(_as<String>(j['sent']) ?? ''),
+    );
   }
 }
 
@@ -210,6 +242,12 @@ class Telemetry extends ChangeNotifier {
   static const defaultBackOff = Duration(hours: 1);
   static const offlinePause = Duration(minutes: 15);
 
+  /// Sent records keep their JSON this long; after that only the receipt, key, day and status (a few hundred bytes).
+  static const keepJsonFor = Duration(days: 30);
+
+  /// At most this many records are kept (queued ones always); the oldest sent records past it go.
+  static const maxRecords = 3000;
+
   late final TelemetryAllowList allowList = TelemetryAllowList(isBuiltin: (id) => app.isBuiltin?.call(id) ?? false);
 
   // ---------- state ----------
@@ -233,7 +271,10 @@ class Telemetry extends ChangeNotifier {
   String _feedbackDay = '';
   int _feedbackSubmitted = 0, _feedbackPosted = 0;
   bool _loaded = false;
-  bool _busy = false;
+
+  /// Yesterday's counts between the day's end and their report being queued (saved, so a kill in between loses
+  /// nothing).
+  final List<DayStats> _closing = [];
 
   final _feedbackSent = StreamController<FeedbackSent>.broadcast();
 
@@ -241,6 +282,9 @@ class Telemetry extends ChangeNotifier {
   Stream<FeedbackSent> get feedbackSent => _feedbackSent.stream;
 
   bool get enabled => _enabled ?? false;
+
+  /// On, and the first-run page accepted: only then is anything collected, kept or sent.
+  bool get _active => enabled && _accepted;
   BuildChannel get channel => config.channel;
 
   /// The first-run page (E2) hasn't been accepted yet.
@@ -262,40 +306,54 @@ class Telemetry extends ChangeNotifier {
 
   String get _today => utcDay(_now());
 
+  /// [d] (a relay's Retry-After, or the default) held between none and 24 hours.
+  static Duration capWait(Duration? d) {
+    if (d == null) return defaultBackOff;
+    if (d.isNegative) return Duration.zero;
+    return d > const Duration(hours: 24) ? const Duration(hours: 24) : d;
+  }
+
+  // ---------- one relay conversation at a time ----------
+
+  // The last job queued, or null when none is waiting (so a job starts in the caller's own zone at once).
+  Future<void>? _tail;
+
+  /// Runs [job] after every earlier one: sending, feedback, Check, Delete and turning off never overlap, so a record
+  /// can't be wiped while its POST is out, and one feedback entry can't be posted twice.
+  Future<T> _serial<T>(Future<T> Function() job) {
+    final prev = _tail;
+    final result = prev == null ? job() : prev.then((_) => job());
+    late final Future<void> tail;
+    tail = result.then<void>((_) {}, onError: (Object _) {}).whenComplete(() {
+      if (identical(_tail, tail)) _tail = null;
+    });
+    _tail = tail;
+    return result;
+  }
+
   // ---------- loading, saving and the channel default (E1) ----------
 
   Future<void> load() async {
-    Map<String, Object?> j = const {};
+    Map<Object?, Object?> j = const {};
+    final text = await _store.read();
+    if (text != null) {
+      Object? decoded;
+      try {
+        decoded = jsonDecode(text);
+      } catch (_) {
+        decoded = null;
+      }
+      if (decoded is Map) {
+        j = decoded;
+      } else {
+        await _store.keepBad(text); // before anything is saved over it
+      }
+    }
     try {
-      final text = await _store.read();
-      if (text != null) j = (jsonDecode(text) as Map).cast<String, Object?>();
+      _parse(j);
     } catch (_) {
-      j = const {};
+      // A field of a shape no version wrote: what parsed so far stays.
     }
-    _enabled = j['enabled'] as bool?;
-    _lastChannel = j['channel'] as String?;
-    _accepted = j['accepted'] == true;
-    _askKeep = j['askKeep'] == true;
-    _stats = DayStats.fromJson(j['stats']);
-    for (final r in (j['reports'] as List?) ?? const []) {
-      final rec = ReportRecord.fromJson(r);
-      if (rec != null) _reports.add(rec);
-    }
-    _dailySentDay = j['dailySentDay'] as String?;
-    _postsDay = j['postsDay'] as String? ?? '';
-    _postsToday = (j['postsToday'] as num?)?.toInt() ?? 0;
-    _lookupDay = j['lookupDay'] as String? ?? '';
-    _lookupsToday = (j['lookupsToday'] as num?)?.toInt() ?? 0;
-    _reportBackOffUntil = DateTime.tryParse(j['reportBackOff'] as String? ?? '');
-    _feedbackBackOffUntil = DateTime.tryParse(j['feedbackBackOff'] as String? ?? '');
-    _pendingStress = (j['pendingStress'] as Map?)?.cast<String, Object?>();
-    for (final f in (j['feedback'] as List?) ?? const []) {
-      if (f is Map) _feedbackQueue.add(f.cast<String, Object?>());
-    }
-    _feedbackDay = j['feedbackDay'] as String? ?? '';
-    _feedbackSubmitted = (j['feedbackSubmitted'] as num?)?.toInt() ?? 0;
-    _feedbackPosted = (j['feedbackPosted'] as num?)?.toInt() ?? 0;
-
     final channel = config.channel.name;
     if (_enabled == null) {
       _enabled = config.channel == BuildChannel.beta; // a first install: on in beta, off in release
@@ -310,26 +368,80 @@ class Telemetry extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> _save() => _store.write(jsonEncode({
-        'enabled': _enabled,
-        'channel': _lastChannel,
-        'accepted': _accepted,
-        'askKeep': _askKeep,
-        'stats': _stats?.toJson(),
-        'reports': [for (final r in _reports) r.toJson()],
-        'dailySentDay': _dailySentDay,
-        'postsDay': _postsDay,
-        'postsToday': _postsToday,
-        'lookupDay': _lookupDay,
-        'lookupsToday': _lookupsToday,
-        'reportBackOff': _reportBackOffUntil?.toUtc().toIso8601String(),
-        'feedbackBackOff': _feedbackBackOffUntil?.toUtc().toIso8601String(),
-        'pendingStress': _pendingStress,
-        'feedback': _feedbackQueue,
-        'feedbackDay': _feedbackDay,
-        'feedbackSubmitted': _feedbackSubmitted,
-        'feedbackPosted': _feedbackPosted,
-      }));
+  void _parse(Map<Object?, Object?> j) {
+    _enabled = _as<bool>(j['enabled']);
+    _lastChannel = _as<String>(j['channel']);
+    _accepted = j['accepted'] == true;
+    _askKeep = j['askKeep'] == true;
+    _stats = DayStats.fromJson(j['stats']);
+    for (final c in _as<List>(j['closing']) ?? const []) {
+      final s = DayStats.fromJson(c);
+      if (s != null) _closing.add(s);
+    }
+    for (final r in _as<List>(j['reports']) ?? const []) {
+      final rec = ReportRecord.fromJson(r);
+      if (rec != null) _reports.add(rec);
+    }
+    _dailySentDay = _as<String>(j['dailySentDay']);
+    _postsDay = _as<String>(j['postsDay']) ?? '';
+    _postsToday = _int(j['postsToday']);
+    _lookupDay = _as<String>(j['lookupDay']) ?? '';
+    _lookupsToday = _int(j['lookupsToday']);
+    _reportBackOffUntil = DateTime.tryParse(_as<String>(j['reportBackOff']) ?? '');
+    _feedbackBackOffUntil = DateTime.tryParse(_as<String>(j['feedbackBackOff']) ?? '');
+    _pendingStress = _as<Map>(j['pendingStress'])?.cast<String, Object?>();
+    for (final f in _as<List>(j['feedback']) ?? const []) {
+      if (f is Map && f['body'] is Map) _feedbackQueue.add(f.cast<String, Object?>());
+    }
+    _feedbackDay = _as<String>(j['feedbackDay']) ?? '';
+    _feedbackSubmitted = _int(j['feedbackSubmitted']);
+    _feedbackPosted = _int(j['feedbackPosted']);
+  }
+
+  /// Old records lose their JSON, and past [maxRecords] the oldest sent ones go (deletions asked first).
+  void _age() {
+    final now = _now();
+    for (final r in _reports) {
+      if (r.status != ReportStatus.queued && r.json.isNotEmpty && now.difference(r.created) > keepJsonFor) r.json = '';
+    }
+    var over = _reports.length - maxRecords;
+    for (final pass in [ReportStatus.deleteRequested, null]) {
+      for (var i = 0; i < _reports.length && over > 0;) {
+        final r = _reports[i];
+        if (r.status != ReportStatus.queued && (pass == null || r.status == pass)) {
+          _reports.removeAt(i);
+          over--;
+        } else {
+          i++;
+        }
+      }
+    }
+  }
+
+  Future<void> _save() {
+    _age();
+    return _store.write(jsonEncode({
+      'enabled': _enabled,
+      'channel': _lastChannel,
+      'accepted': _accepted,
+      'askKeep': _askKeep,
+      'stats': _stats?.toJson(),
+      'closing': [for (final c in _closing) c.toJson()],
+      'reports': [for (final r in _reports) r.toJson()],
+      'dailySentDay': _dailySentDay,
+      'postsDay': _postsDay,
+      'postsToday': _postsToday,
+      'lookupDay': _lookupDay,
+      'lookupsToday': _lookupsToday,
+      'reportBackOff': _reportBackOffUntil?.toUtc().toIso8601String(),
+      'feedbackBackOff': _feedbackBackOffUntil?.toUtc().toIso8601String(),
+      'pendingStress': _pendingStress,
+      'feedback': _feedbackQueue,
+      'feedbackDay': _feedbackDay,
+      'feedbackSubmitted': _feedbackSubmitted,
+      'feedbackPosted': _feedbackPosted,
+    }));
+  }
 
   // ---------- the user's choices (E2, E3) ----------
 
@@ -342,16 +454,24 @@ class Telemetry extends ChangeNotifier {
   /// The once-only question after a beta build: keep sending or not.
   Future<void> answerKeep(bool keep) async {
     _askKeep = false;
-    _setEnabledQuietly(keep);
-    await _save();
+    if (!keep) _enabled = false; // stop collecting now; the wipe waits for any POST in flight
+    await _serial(() async {
+      _setEnabledQuietly(keep);
+      await _save();
+    });
     notifyListeners();
   }
 
-  /// Settings › Privacy's toggle. Off stops sending at once and wipes the queue and the day's counts.
+  /// Settings › Privacy's toggle. Off stops collecting at once and wipes the queue and the day's counts (after a
+  /// POST already on its way has its answer, so a report the relay took keeps its delete key).
   Future<void> setEnabled(bool on) async {
-    _setEnabledQuietly(on);
     _askKeep = false;
-    await _save();
+    if (!on) _enabled = false;
+    notifyListeners();
+    await _serial(() async {
+      _setEnabledQuietly(on);
+      await _save();
+    });
     notifyListeners();
     if (on) unawaited(pump());
   }
@@ -361,26 +481,41 @@ class Telemetry extends ChangeNotifier {
     if (on) return;
     _reports.removeWhere((r) => r.status == ReportStatus.queued);
     _stats = null;
+    _closing.clear();
     _pendingStress = null;
   }
 
-  // ---------- collecting (only while on) ----------
+  // ---------- collecting (only while on and accepted) ----------
 
   DayStats? get _collecting {
-    if (!enabled) return null;
+    if (!_active) return null;
     final day = _today;
     final s = _stats;
     if (s != null && s.day == day) return s;
-    if (s != null && !s.empty) unawaited(_queueDaily(s)); // the minute tick usually got there first ([_rollOver])
-    return _stats = DayStats(day);
+    final fresh = _stats = DayStats(day);
+    if (s != null && !s.empty) {
+      // Yesterday's counts are saved with the state before anything waits; [_rollOver] queues them.
+      _closing.add(s);
+      unawaited(_save());
+      unawaited(_serial(_rollOver));
+    }
+    return fresh;
   }
 
   /// A new UTC day: the last day's counts become its queued report.
   Future<void> _rollOver() async {
     final s = _stats;
-    if (s == null || s.day == _today) return;
-    _stats = null;
-    if (enabled && !s.empty) await _queueDaily(s);
+    if (s != null && s.day != _today) {
+      _stats = null;
+      if (!s.empty) _closing.add(s);
+      await _save();
+    }
+    while (_closing.isNotEmpty) {
+      final c = _closing.first;
+      if (_active) await _queueDaily(c);
+      _closing.remove(c);
+      await _save();
+    }
   }
 
   int _lastOverloads = -1;
@@ -436,7 +571,7 @@ class Telemetry extends ChangeNotifier {
   /// The minute tick: [seconds] of time passed with the app in front when [foreground]. Rolls the day over, saves,
   /// and sends what is due.
   Future<void> tick({required double seconds, required bool foreground}) async {
-    await _rollOver();
+    await _serial(_rollOver);
     final s = _collecting;
     if (s != null && foreground) {
       s.openSeconds += seconds;
@@ -444,7 +579,7 @@ class Telemetry extends ChangeNotifier {
       if (screen != null) s.screenSeconds[screen] = (s.screenSeconds[screen] ?? 0) + seconds;
       if (_batterySaver) s.batterySaverSeconds += seconds;
     }
-    if (enabled || _feedbackQueue.isNotEmpty) await _save();
+    if (_active || _feedbackQueue.isNotEmpty) await _save();
     await pump();
   }
 
@@ -462,10 +597,16 @@ class Telemetry extends ChangeNotifier {
 
   Future<Map<String, Object?>> _device() async {
     final facts = await (_probe?.read() ?? Future.value(const DeviceFacts(platform: null)));
+    final hz = app.refreshHz?.call() ?? 0;
+    final audio = app.audio?.call() ?? const <String, Object?>{};
+    final output = app.audioOutput?.call();
     return {
       ...facts.toJson(),
-      'refreshHz': app.refreshHz?.call() ?? 0,
-      'audio': app.audio?.call() ?? const {},
+      if (facts.formFactor == null) 'formFactor': ?app.formFactor?.call(),
+      'refreshHz': hz > 0 ? hz : null,
+      'screen': ?app.display?.call(),
+      'audio': {...audio, 'output': ?output},
+      'peripherals': ?app.peripherals?.call(),
       'profile': app.profile?.call() ?? 'balanced',
       'eco': app.eco?.call() ?? false,
     };
@@ -477,14 +618,23 @@ class Telemetry extends ChangeNotifier {
 
   /// The report for [stats] with [stress], allow-listed, as it would be queued.
   Future<Map<String, Object?>> buildReport(DayStats stats,
-      {required String receipt, required String deleteHash, Map<String, Object?>? stress}) async {
+      {required String receipt,
+      required String deleteHash,
+      Map<String, Object?>? stress,
+      ReportKind kind = ReportKind.daily}) async {
     final raw = <String, Object?>{
       'schema': reportSchemaVersion,
       'receipt': receipt,
       'deleteHash': deleteHash,
       'channel': config.channel.name,
+      'kind': stress != null && kind == ReportKind.stress ? 'stress' : 'daily',
       'day': stats.day,
-      'app': {'version': app.appVersion, 'engineVersion': app.engineVersion, 'capiVersion': app.capiVersion},
+      'app': {
+        'version': app.appVersion,
+        'engineVersion': app.engineVersion,
+        'capiVersion': app.capiVersion,
+        'build': ?app.build,
+      },
       'device': await _device(),
       'perf': stats.perf(),
       'usage': stats.usage(),
@@ -500,9 +650,10 @@ class Telemetry extends ChangeNotifier {
 
   Future<void> _queueDaily(DayStats s) async {
     final stress = _pendingStress;
-    _pendingStress = null;
     final r = newReceipt();
     final report = await buildReport(s, receipt: r.receipt, deleteHash: r.deleteHash, stress: stress);
+    if (!_active) return;
+    if (identical(_pendingStress, stress)) _pendingStress = null;
     _enqueue(ReportRecord(receipt: r.receipt, deleteKey: r.deleteKey, day: s.day, kind: ReportKind.daily,
         json: jsonEncode(report), created: _now()));
   }
@@ -521,15 +672,15 @@ class Telemetry extends ChangeNotifier {
   @visibleForTesting
   void enqueueForTest(ReportRecord rec) => _enqueue(rec);
 
-  /// Ends the day now (tests, and the day rolling over): today's counts become a queued report.
+  /// Ends the day now (tests): today's counts become a queued report.
   @visibleForTesting
-  Future<void> closeDay() async {
-    final s = _stats;
-    if (s == null || !enabled) return;
-    _stats = null;
-    await _queueDaily(s);
-    await _save();
-  }
+  Future<void> closeDay() => _serial(() async {
+        final s = _stats;
+        if (s == null || !_active) return;
+        _stats = null;
+        await _queueDaily(s);
+        await _save();
+      });
 
   /// What today's report holds so far (Settings › Privacy shows it beside the queue); null when off.
   Future<Map<String, Object?>?> previewToday() async {
@@ -560,52 +711,60 @@ class Telemetry extends ChangeNotifier {
 
   /// A finished stress test's H2 `stress` object, sent at once as its own report (device, app, today's perf so far,
   /// usage, errors and the result) when telemetry is on. With today's slots used up it rides on the next daily
-  /// report instead (the newest result wins). Off: nothing is sent or kept.
+  /// report instead (the newest result wins). Off, or the first-run page not yet accepted: nothing is sent or kept.
   Future<StressOutcome> sendStressReport(Map<String, Object?> stress) async {
     final clean = allowList.stress(stress) as Map<String, Object?>?;
     if (clean == null) return StressOutcome.off;
     lastStress = clean; // the feedback form's "Attach last stress-test result", kept on the device either way
-    if (!enabled) return StressOutcome.off;
-    if (!stressSlotFree) {
-      _pendingStress = clean;
+    if (!_active) return StressOutcome.off;
+    final rec = await _serial<ReportRecord?>(() async {
+      if (!_active) return null;
+      if (!stressSlotFree) {
+        _pendingStress = clean;
+        await _save();
+        return null;
+      }
+      final stats = _collecting!;
+      final r = newReceipt();
+      final report =
+          await buildReport(stats, receipt: r.receipt, deleteHash: r.deleteHash, stress: clean, kind: ReportKind.stress);
+      final rec = ReportRecord(receipt: r.receipt, deleteKey: r.deleteKey, day: stats.day, kind: ReportKind.stress,
+          json: jsonEncode(report), created: _now());
+      _enqueue(rec);
       await _save();
-      notifyListeners();
-      return StressOutcome.attachedToNextDaily;
-    }
-    final stats = _collecting!;
-    final r = newReceipt();
-    final report = await buildReport(stats, receipt: r.receipt, deleteHash: r.deleteHash, stress: clean);
-    final rec = ReportRecord(receipt: r.receipt, deleteKey: r.deleteKey, day: stats.day, kind: ReportKind.stress,
-        json: jsonEncode(report), created: _now());
-    _enqueue(rec);
-    await _save();
+      return rec;
+    });
+    notifyListeners();
+    if (rec == null) return _pendingStress == clean ? StressOutcome.attachedToNextDaily : StressOutcome.off;
     await pump();
     return rec.status == ReportStatus.queued ? StressOutcome.queued : StressOutcome.sent;
   }
 
   // ---------- sending ----------
 
+  bool _pumpWaiting = false;
+
   /// Sends what is due: queued reports (one daily report per UTC day, stress reports within the day's slots) and
   /// queued feedback. Gives up quietly offline and keeps everything for the next try.
   Future<void> pump() async {
-    if (_busy || !_loaded) return;
-    _busy = true;
-    try {
+    if (!_loaded || _pumpWaiting) return; // one already waiting covers this call
+    _pumpWaiting = true;
+    await _serial(() async {
+      _pumpWaiting = false;
       await _rollOver();
       await _sendReports();
       await _sendFeedback();
       await _save();
-    } finally {
-      _busy = false;
-    }
+    });
     notifyListeners();
   }
 
   bool _waiting(DateTime? until) => until != null && _now().isBefore(until);
 
   Future<void> _sendReports() async {
-    if (!enabled || !config.canSend || _waiting(_reportBackOffUntil) || _waiting(_offlineUntil)) return;
+    if (!_active || !config.canSend || _waiting(_reportBackOffUntil) || _waiting(_offlineUntil)) return;
     for (final rec in queued) {
+      if (!_active) return; // turned off: what is still queued is wiped
       _countDay();
       if (_postsToday >= relayReportsPerDay) return;
       if (rec.kind == ReportKind.daily && _dailySentDay == _today) continue;
@@ -613,14 +772,16 @@ class Telemetry extends ChangeNotifier {
         final reserve = _dailySentDay == _today ? 0 : 1;
         if (_postsToday >= relayReportsPerDay - reserve) continue;
       }
-      rec.attempts++;
+      final triedBefore = rec.attempts > 0;
       final res = await _relay.postReport(rec.json);
+      // Only a try that could have reached the relay counts (not a DNS failure or a refused connection).
+      if (res.mayHaveArrived) rec.attempts++;
       if (!res.offline) _postsToday++;
-      if (!enabled) return; // turned off while it was on its way
+      // The answer is recorded even if telemetry was turned off meanwhile, so an accepted report keeps its key.
       switch (res.status) {
         case 202 || 200 || 201:
           _markSent(rec);
-        case 400 when rec.attempts > 1:
+        case 400 when triedBefore:
           // A receipt is good for one POST: a 400 on a resend means an earlier try got there.
           _markSent(rec);
         case 400 || 413:
@@ -628,10 +789,11 @@ class Telemetry extends ChangeNotifier {
         case 0:
           _offlineUntil = _now().add(offlinePause);
           return;
-        default:
-          _reportBackOffUntil = _now().add(res.retryAfter ?? defaultBackOff);
+        default: // 429, 503, a redirect, anything else: wait
+          _reportBackOffUntil = _now().add(capWait(res.retryAfter));
           return;
       }
+      await _save();
     }
   }
 
@@ -648,50 +810,56 @@ class Telemetry extends ChangeNotifier {
   /// many were checked, or null when the relay can't be reached.
   Future<int?> checkOnServer() async {
     if (!config.canSend) return null;
-    var checked = 0;
-    for (final rec in _reports.where((r) => r.status == ReportStatus.sent || r.status == ReportStatus.published)) {
-      final day = _today;
-      if (_lookupDay != day) {
-        _lookupDay = day;
-        _lookupsToday = 0;
+    final checked = await _serial<int?>(() async {
+      var checked = 0;
+      for (final rec in [
+        for (final r in _reports)
+          if (r.status == ReportStatus.sent || r.status == ReportStatus.published) r,
+      ]) {
+        final day = _today;
+        if (_lookupDay != day) {
+          _lookupDay = day;
+          _lookupsToday = 0;
+        }
+        if (_lookupsToday >= lookupsPerDay) break;
+        _lookupsToday++;
+        final res = await _relay.getReport(rec.receipt);
+        if (res.offline) {
+          await _save();
+          return checked == 0 ? null : checked;
+        }
+        if (res.status < 200 || res.status >= 500 || res.backOff) break;
+        checked++;
+        rec.status = switch (res.status) {
+          200 => ReportStatus.published,
+          202 => ReportStatus.sent,
+          404 => ReportStatus.notFound,
+          _ => rec.status,
+        };
       }
-      if (_lookupsToday >= lookupsPerDay) break;
-      _lookupsToday++;
-      final res = await _relay.getReport(rec.receipt);
-      if (res.offline) {
-        await _save();
-        notifyListeners();
-        return checked == 0 ? null : checked;
-      }
-      if (res.backOff) break;
-      checked++;
-      rec.status = switch (res.status) {
-        200 => ReportStatus.published,
-        202 => ReportStatus.sent,
-        404 => ReportStatus.notFound,
-        _ => rec.status,
-      };
-    }
-    await _save();
+      await _save();
+      return checked;
+    });
     notifyListeners();
     return checked;
   }
 
-  /// "Delete my data" (H3 delete), 100 receipts per request; queued reports are simply dropped. Returns the
-  /// number the relay said it will delete, or null when it couldn't be reached or asked to wait.
+  /// "Delete my data" (H3 delete), 100 receipts per request; queued reports are simply dropped (after any POST in
+  /// flight has its answer). Returns the number the relay said it will delete, or null when it couldn't be reached
+  /// or asked to wait.
   Future<int?> deleteMyData() async {
-    _reports.removeWhere((r) => r.status == ReportStatus.queued);
-    _stats = null;
-    _pendingStress = null;
-    final sent = [
-      for (final r in _reports)
-        if (r.status == ReportStatus.sent || r.status == ReportStatus.published || r.status == ReportStatus.notFound) r,
-    ];
-    var deleted = 0;
-    if (sent.isNotEmpty) {
-      if (!config.canSend) {
+    final result = await _serial<int?>(() async {
+      _reports.removeWhere((r) => r.status == ReportStatus.queued);
+      _stats = null;
+      _closing.clear();
+      _pendingStress = null;
+      final sent = [
+        for (final r in _reports)
+          if (r.status == ReportStatus.sent || r.status == ReportStatus.published || r.status == ReportStatus.notFound) r,
+      ];
+      var deleted = 0;
+      if (sent.isNotEmpty && !config.canSend) {
         await _save();
-        notifyListeners();
         return null;
       }
       for (var i = 0; i < sent.length; i += 100) {
@@ -699,23 +867,28 @@ class Telemetry extends ChangeNotifier {
         final res = await _relay.delete([for (final r in batch) (receipt: r.receipt, deleteKey: r.deleteKey)]);
         if (res.status != 202 && res.status != 200) {
           await _save();
-          notifyListeners();
           return null;
         }
-        deleted += (res.json?['deleted'] as num?)?.toInt() ?? batch.length;
+        deleted += switch (res.json?['deleted']) {
+          final num n when n.isFinite => n.toInt(),
+          _ => batch.length,
+        };
         for (final r in batch) {
           r.status = ReportStatus.deleteRequested;
         }
+        await _save();
       }
-    }
-    await _save();
+      await _save();
+      return deleted;
+    });
     notifyListeners();
-    return deleted;
+    return result;
   }
 
   /// "Export my receipts": every receipt with its delete key, so the data can still be deleted after a reinstall.
   String exportReceipts() => const JsonEncoder.withIndent('  ').convert({
-        'about': 'C.A.W telemetry receipts. Each delete key can delete its report from caw-telemetry; keep them private.',
+        'about': 'C.A.W telemetry receipts. Each delete key can delete its report from Kmandevr/C.A.W-Telemetry; '
+            'keep this file private.',
         'exported': _now().toUtc().toIso8601String(),
         'receipts': [
           for (final r in _reports.reversed)
@@ -755,6 +928,7 @@ class Telemetry extends ChangeNotifier {
       'kind': kind.name,
       'text': text.trim(),
       'appVersion': app.appVersion,
+      'build': ?app.build,
       'platform': platform,
       'attachments': {'device': ?device, 'stress': ?stress, 'errors': ?errors},
       if (contact != null && contact.trim().isNotEmpty) 'contact': contact.trim(),
@@ -769,16 +943,18 @@ class Telemetry extends ChangeNotifier {
     if (feedbackLeftToday <= 0) return const FeedbackResult(FeedbackOutcome.dailyLimit);
     if (!config.canSend) return const FeedbackResult(FeedbackOutcome.unavailable);
     _feedbackSubmitted++;
-    final entry = {'body': body, 'created': _now().toUtc().toIso8601String()};
+    final entry = <String, Object?>{'body': body, 'created': _now().toUtc().toIso8601String()};
     _feedbackQueue.add(entry);
     await _save();
-    final res = await _postFeedback(entry, announce: false);
-    await _save();
+    // Behind any pump already running: whichever reaches the entry first posts it, once.
+    final res = await _serial(() => _postFeedback(entry, announce: false));
     notifyListeners();
     return res ?? const FeedbackResult(FeedbackOutcome.queued);
   }
 
+  /// Posts [entry] if it is still queued. Runs only inside [_serial].
   Future<FeedbackResult?> _postFeedback(Map<String, Object?> entry, {required bool announce}) async {
+    if (!_feedbackQueue.contains(entry)) return const FeedbackResult(FeedbackOutcome.sent);
     if (_waiting(_feedbackBackOffUntil)) return null;
     _feedbackCountDay();
     if (_feedbackPosted >= feedbackPerDay) return null;
@@ -788,15 +964,20 @@ class Telemetry extends ChangeNotifier {
     switch (res.status) {
       case 201 || 202 || 200:
         _feedbackQueue.remove(entry);
-        final url = res.json?['issue'] as String?;
-        final issue = url != null && url.startsWith('https://github.com/') ? url : null;
+        await _save(); // saved before anything else, so it is never posted again
+        final issue = switch (res.json?['issue']) {
+          final String url when url.startsWith('https://github.com/') && url.length < 300 => url,
+          _ => null,
+        };
         if (announce) _feedbackSent.add(FeedbackSent(issue));
         return FeedbackResult(FeedbackOutcome.sent, issueUrl: issue);
       case 400 || 413:
         _feedbackQueue.remove(entry); // the relay will never take it
+        await _save();
         return const FeedbackResult(FeedbackOutcome.invalid);
       default:
-        _feedbackBackOffUntil = _now().add(res.retryAfter ?? defaultBackOff);
+        _feedbackBackOffUntil = _now().add(capWait(res.retryAfter));
+        await _save();
         return null;
     }
   }

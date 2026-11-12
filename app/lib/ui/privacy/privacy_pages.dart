@@ -1,6 +1,6 @@
 // Privacy on screen (beta readiness plan E2, E3; owner's look 2026-11-12, "simple sheets"): the first-run page,
-// Settings › About and beta › Privacy (the toggle, exactly what's sent, My data), the once-only question after a
-// beta build, and the bundled Privacy Policy and Terms.
+// "Show exactly what's sent", the once-only question after a beta build, and the bundled Privacy Policy and Terms.
+// Settings › About and beta › Privacy itself is settings/privacy_settings.dart.
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -13,7 +13,6 @@ import '../motion.dart';
 import '../panel_motion.dart';
 import '../theme.dart';
 import '../widgets.dart';
-import 'my_data_page.dart';
 
 /// The bundled texts: copies of C.A.W-Telemetry's PRIVACY.md and TERMS.md, for reading offline.
 enum LegalText {
@@ -112,23 +111,27 @@ class FirstRunPage extends StatelessWidget {
             child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
               Expanded(
                 child: ListView(key: const ValueKey('first-run-list'), padding: const EdgeInsets.fromLTRB(20, 24, 20, 12), children: [
-                  const Text('Welcome to the C.A.W beta', style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800)),
+                  const Text('Welcome to C.A.W', style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800)),
                   const SizedBox(height: 8),
                   Text(
                       telemetryOn
-                          ? 'This beta sends anonymous performance and device data, so the developer can see how well '
+                          ? 'This early version sends anonymous performance and device data, so the developer can see how well '
                               'C.A.W runs on real devices. Nothing about you is collected.'
                           : 'This build can send anonymous performance and device data if you turn it on. It is off now.',
                       style: const TextStyle(fontSize: 14, height: 1.4)),
                   const SizedBox(height: 18),
                   const _Point(Icons.upload_outlined, Neon.green, 'What is sent', [
-                    'At most once a day: your device type and specs, how well C.A.W runs (CPU load, dropouts, frame and '
-                        'startup times), which built-in instruments, effects and screens you use, project size as a range, '
-                        'and error types with the line of C.A.W code. Stress-test results when you run one.',
+                    'Once a day: the device (maker, model, OS, CPU, memory, screen, audio setup) and the kinds of '
+                        'peripherals in use (a USB MIDI keyboard\'s maker-given product name and ids), how well C.A.W runs '
+                        '(CPU load, dropouts, frame and startup times), which built-in instruments, effects and screens you '
+                        'use, project size as a range, and error types with the line of C.A.W code. Benchmark results each '
+                        'time you run one.',
                   ]),
                   const _Point(Icons.block, Neon.pink, 'What is never sent', [
-                    'Your projects or their names, audio, code, MIDI devices or notes, file names or paths, your own '
-                        'components\' names, accounts, contact details, location, or any ID that follows you.',
+                    'Your projects or their names, audio, code, MIDI notes, file names or paths, your own components\' '
+                        'names, any name you can set (your phone\'s or computer\'s name, a Bluetooth device\'s name, a '
+                        'renamed port), serial numbers or hardware addresses, accounts, contact details, location, or any '
+                        'ID that follows you.',
                   ]),
                   const _Point(Icons.public, Neon.blue, 'All of it is public', [
                     'Every report is published in github.com/Kmandevr/C.A.W-Telemetry. Each one has a receipt only your '
@@ -192,9 +195,9 @@ Future<void> askKeepTelemetry(BuildContext context, Telemetry t) async {
     animationStyle: dialogAnimation(context),
     builder: (c) => AlertDialog(
       title: const Text('Keep sending anonymous data?'),
-      content: const Text('This is a release build, so telemetry is now off. The beta sent anonymous performance and '
-          'device data, published openly. Turn it back on to keep helping? You can change this in Settings › About '
-          'and beta › Privacy.'),
+      content: const Text('This is a release build, so telemetry is now off. The beta build sent anonymous performance and '
+          'device data, published openly. Turn it back on to keep helping? You can change this in Settings › '
+          'About and beta › Privacy.'),
       actions: [
         TextButton(key: const ValueKey('keep-off'), onPressed: () => Navigator.pop(c, false), child: const Text('Leave it off')),
         FilledButton(key: const ValueKey('keep-on'), onPressed: () => Navigator.pop(c, true), child: const Text('Turn it on')),
@@ -202,93 +205,6 @@ Future<void> askKeepTelemetry(BuildContext context, Telemetry t) async {
     ),
   );
   await t.answerKeep(keep ?? false);
-}
-
-/// Settings › About and beta › Privacy (E3).
-Future<void> showPrivacyPage(BuildContext context, Telemetry t) =>
-    Navigator.of(context).push(panelRoute<void>(context, (_) => PrivacyPage(telemetry: t)));
-
-class PrivacyPage extends StatelessWidget {
-  const PrivacyPage({super.key, required this.telemetry});
-  final Telemetry telemetry;
-
-  @override
-  Widget build(BuildContext context) => Scaffold(
-        appBar: AppBar(title: const Text('Privacy'), backgroundColor: Neon.panel),
-        body: ListenableBuilder(
-          listenable: telemetry,
-          builder: (context, _) {
-            final t = telemetry;
-            final queued = t.queued.length;
-            return ListView(padding: const EdgeInsets.fromLTRB(8, 8, 8, 32), children: [
-              SwitchListTile(
-                key: const ValueKey('privacy-toggle'),
-                dense: true,
-                contentPadding: const EdgeInsets.symmetric(horizontal: 8),
-                secondary: const Icon(Icons.insights_outlined, color: Neon.green, size: 20),
-                title: const Text('Send anonymous telemetry'),
-                subtitle: Text(
-                  [
-                    t.enabled
-                        ? 'On: one report a day about how C.A.W runs on this device, published openly'
-                        : 'Off: nothing is sent or kept',
-                    if (!t.config.canSend) 'This build has no relay set, so nothing can be sent',
-                  ].join('. '),
-                  style: const TextStyle(color: Neon.dim, fontSize: 12),
-                ),
-                value: t.enabled,
-                onChanged: (v) {
-                  Haptics.tap();
-                  t.setEnabled(v);
-                },
-              ),
-              ListTile(
-                key: const ValueKey('privacy-whats-sent'),
-                dense: true,
-                contentPadding: const EdgeInsets.symmetric(horizontal: 8),
-                leading: const Icon(Icons.data_object, color: Neon.blue, size: 20),
-                title: const Text("Show exactly what's sent"),
-                subtitle: Text(
-                    queued == 0 ? 'Nothing waiting; today\'s report so far' : '$queued waiting to be sent, and today\'s so far',
-                    style: const TextStyle(color: Neon.dim, fontSize: 12)),
-                trailing: const Icon(Icons.chevron_right),
-                onTap: () {
-                  Haptics.tap();
-                  Navigator.of(context).push(panelRoute<void>(context, (_) => WhatsSentPage(telemetry: t)));
-                },
-              ),
-              ListTile(
-                key: const ValueKey('privacy-my-data'),
-                dense: true,
-                contentPadding: const EdgeInsets.symmetric(horizontal: 8),
-                leading: const Icon(Icons.receipt_long_outlined, color: Neon.yellow, size: 20),
-                title: const Text('My data'),
-                subtitle: Text(
-                    t.reports.isEmpty ? 'No reports yet' : '${t.reports.length} report${t.reports.length == 1 ? '' : 's'}: '
-                        'see, check, export or delete them',
-                    style: const TextStyle(color: Neon.dim, fontSize: 12)),
-                trailing: const Icon(Icons.chevron_right),
-                onTap: () {
-                  Haptics.tap();
-                  showMyData(context, t);
-                },
-              ),
-              const Heading('The texts'),
-              for (final l in LegalText.values)
-                ListTile(
-                  key: ValueKey('privacy-${l.name}'),
-                  dense: true,
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 8),
-                  leading: const Icon(Icons.description_outlined, color: Neon.dim, size: 20),
-                  title: Text(l.title),
-                  subtitle: const Text('Bundled copy, readable offline', style: TextStyle(color: Neon.dim, fontSize: 12)),
-                  trailing: const Icon(Icons.chevron_right),
-                  onTap: () => showLegalText(context, l),
-                ),
-            ]);
-          },
-        ),
-      );
 }
 
 /// "Show exactly what's sent": the queued reports' JSON as it will go, and today's report so far.

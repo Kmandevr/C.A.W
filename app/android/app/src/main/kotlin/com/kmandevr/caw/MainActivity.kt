@@ -142,7 +142,8 @@ class MainActivity : FlutterActivity() {
     }
 
     // The device facts an anonymous telemetry report carries (docs/app.md "Privacy, telemetry and feedback"): the
-    // Android release, total RAM and the SoC model (Android 12+). Nothing that identifies the device or its owner.
+    // Android release, total RAM, the SoC model (Android 12+), and the maker's Build.MANUFACTURER and Build.MODEL.
+    // Never the device's own name (Settings › About phone), a serial number or a build fingerprint.
     private fun readDeviceFacts(): Map<String, Any?> {
         val memory = ActivityManager.MemoryInfo()
         (getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager)?.getMemoryInfo(memory)
@@ -151,6 +152,8 @@ class MainActivity : FlutterActivity() {
             "osRelease" to Build.VERSION.RELEASE,
             "totalMemBytes" to memory.totalMem,
             "socModel" to soc,
+            "manufacturer" to Build.MANUFACTURER,
+            "model" to Build.MODEL,
         )
     }
 

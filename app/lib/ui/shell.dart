@@ -994,18 +994,6 @@ Future<void> showProjectMenu(BuildContext context, AppState s) async {
               s.settings.commitLook();
             },
           ),
-          if (Telemetry.current case final t?)
-            ListTile(
-              key: const ValueKey('project-feedback'),
-              leading: const Icon(Icons.rate_review_outlined, color: Neon.blue),
-              title: const Text('Send feedback'),
-              subtitle: const Text('A bug, an idea, something confusing or praise; posted publicly',
-                  style: TextStyle(color: Neon.dim)),
-              onTap: () {
-                Navigator.pop(context);
-                if (outer.mounted) showFeedbackSheet(outer, t);
-              },
-            ),
           const Heading('Open'),
           for (final p in projects)
             ListTile(
@@ -1038,6 +1026,19 @@ Future<void> showProjectMenu(BuildContext context, AppState s) async {
                   }
                 },
               ),
+            ),
+          // The menu's last item (the app names in C.A.W-Telemetry's PLAN.md).
+          if (Telemetry.current case final t?)
+            ListTile(
+              key: const ValueKey('project-feedback'),
+              leading: const Icon(Icons.rate_review_outlined, color: Neon.blue),
+              title: const Text('Send feedback'),
+              subtitle: const Text('A bug, an idea, something confusing or praise; posted publicly',
+                  style: TextStyle(color: Neon.dim)),
+              onTap: () {
+                Navigator.pop(context);
+                if (outer.mounted) showFeedbackSheet(outer, t);
+              },
             ),
         ]),
       ),

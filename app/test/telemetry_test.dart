@@ -1,13 +1,18 @@
 // Tests telemetry and feedback's model (beta readiness plan E, F, H): H2 report building and rounding, the allow-list
 // (E6 and the 2026-11-12 H updates), the 1 MB queue, one daily report, Retry-After, channel defaults, receipts and
 // delete keys, stress-test reports within the relay's limits, and feedback limits, with a fake relay and clock.
+import 'dart:async';
 import 'dart:convert';
+import 'dart:ffi' show Abi;
 import 'dart:math';
 
 import 'package:caw/model/problem_log.dart';
 import 'package:caw/model/sha256.dart';
 import 'package:caw/model/telemetry/day_stats.dart';
 import 'package:caw/model/telemetry/device_probe.dart';
+import 'package:caw/model/telemetry/peripherals.dart';
+import 'package:caw/platform/audio_route.dart';
+import 'package:caw/platform/midi_input.dart';
 import 'package:caw/model/telemetry/relay_client.dart';
 import 'package:caw/model/telemetry/report_schema.dart';
 import 'package:caw/model/telemetry/telemetry.dart';
@@ -16,6 +21,9 @@ import 'package:flutter_test/flutter_test.dart';
 
 class FakeRelay implements RelayHttp {
   final requests = <({String method, Uri url, Map<String, String> headers, String? body})>[];
+
+  /// The next answer, when it should come later (a request in flight); used once.
+  Future<RelayResponse>? later;
 
   /// Answers by path prefix; the default is 202.
   RelayResponse Function(String method, String path, String? body) answer = (_, _, _) => const RelayResponse(202);
@@ -28,14 +36,25 @@ class FakeRelay implements RelayHttp {
   @override
   Future<RelayResponse> send(String method, Uri url, {required Map<String, String> headers, String? body}) async {
     requests.add((method: method, url: url, headers: headers, body: body));
+    final l = later;
+    if (l != null) {
+      later = null;
+      return l;
+    }
     return answer(method, url.path, body);
   }
+}
+
+class NullProbe implements DeviceProbe {
+  const NullProbe();
+  @override
+  Future<DeviceFacts> read() async => const DeviceFacts(platform: 'linux');
 }
 
 class FakeProbe implements DeviceProbe {
   @override
   Future<DeviceFacts> read() async => const DeviceFacts(
-      platform: 'android', osVersion: '14', cpu: 'SM8450', big: 4, little: 4, maxClockMHz: [3000, 2500, 1800], ramGB: 8);
+      platform: 'android', osVersion: '14', cpu: 'SM8450', big: 4, little: 4, other: 0, maxClockMHz: [3000, 2500, 1800], ramGB: 8);
 }
 
 
@@ -43,14 +62,15 @@ TelemetryConfig config({BuildChannel channel = BuildChannel.beta, bool relay = t
     channel: channel.name, relayUrl: relay ? 'https://caw-telemetry.kmandevr.workers.dev' : '', appKey: 'caw-beta-1');
 
 class Rig {
-  Rig({BuildChannel channel = BuildChannel.beta, MemoryTelemetryStore? store, bool relay = true, DateTime? at})
+  Rig({BuildChannel channel = BuildChannel.beta, MemoryTelemetryStore? store, bool relay = true, DateTime? at,
+      DeviceProbe? probe})
       : store = store ?? MemoryTelemetryStore(),
         now = at ?? DateTime.utc(2026, 11, 12, 10) {
     t = Telemetry(
       config: config(channel: channel, relay: relay),
       store: this.store,
       http: http,
-      probe: FakeProbe(),
+      probe: probe ?? FakeProbe(),
       now: () => now,
       random: Random(7),
     );
@@ -78,6 +98,12 @@ class Rig {
       t.onMeters(cpu: cpu, playing: true, overloaded: 0);
     }
     await t.tick(seconds: 60, foreground: true);
+  }
+
+  /// Loaded, with the first-run page accepted.
+  Future<void> ready() async {
+    await t.load();
+    await t.acceptFirstRun();
   }
 
   Future<void> nextDay() async {
@@ -108,7 +134,7 @@ void main() {
       expect(s22.clocks, [3000, 2500, 1800]);
       final pc = coreTypes(List.filled(8, 3600000));
       expect((pc.big, pc.little, pc.other), (0, 0, 8));
-      expect(coreTypes([0, 0]).other, 2);
+      expect(coreTypes([0, 0]).other, isNull, reason: 'unknown is null, never 0');
     });
 
     test('cpu, RAM and OS versions parse from the platform texts', () {
@@ -119,13 +145,17 @@ void main() {
       expect(majorVersion('14'), '14');
       expect(majorVersion('24.04'), '24');
       expect(majorVersion('unknown'), isNull);
-      expect(windowsMajor('"Windows 10 Pro" 10.0 (Build 22631)'), '11');
-      expect(windowsMajor('"Windows 10 Pro" 10.0 (Build 19045)'), '10');
+      expect(windowsOs('"Windows 10 Pro" 10.0 (Build 22631)'), (name: 'Windows 11', version: '10.0.22631'));
+      expect(windowsOs('"Windows 10 Pro" 10.0 (Build 19045)'), (name: 'Windows 10', version: '10.0.19045'));
+      expect(linuxOs('NAME="Ubuntu"\nVERSION_ID="24.04"\n'), (name: 'Ubuntu', version: '24.04'));
+      expect(osVersionOf('14'), '14');
+      expect(osVersionOf('samsung/b0qxxx/b0q:14/UP1A.231005.007/S906BXXS7DXA1:user/release-keys'), isNull);
+      expect(cpuFromCpuinfo(''), isNull);
     });
 
     test('a day becomes an H2 report with every field the contract names', () async {
       final rig = Rig();
-      await rig.t.load();
+      await rig.ready();
       await rig.use(cpu: 0.25);
       await rig.use(cpu: 0.95);
       rig.t.onFrame(5.2);
@@ -140,6 +170,7 @@ void main() {
       expect(r['day'], '2026-11-12');
       expect(r['stress'], isNull);
       final perf = r['perf'] as Map;
+      expect(r['kind'], 'daily');
       expect(perf['cpuLoadHistogram'], [0, 0, 0.5, 0, 0, 0, 0, 0, 0, 0.5]);
       expect(perf['worstCallbackPct'], 95);
       expect(perf['startupMs'], 1250);
@@ -231,14 +262,19 @@ void main() {
       expect(perf(List.filled(10, 0.1))['cpuLoadHistogram'], hasLength(10));
       expect(perf(List.filled(9, 0.1)).containsKey('cpuLoadHistogram'), isFalse);
       expect(perf(List.filled(11, 0.1)).containsKey('cpuLoadHistogram'), isFalse);
-      expect(perf([...List.filled(9, 0.0), 1.5])['cpuLoadHistogram'], hasLength(9)); // 1.5 dropped: then the relay says 400
+      expect(perf([...List.filled(9, 0.0), 1.5]).containsKey('cpuLoadHistogram'), isFalse); // never 9 values
+      expect(perf(null), {'cpuLoadHistogram': null});
       expect(histogramShares(List.filled(10, 0)), List.filled(10, 0.0));
       expect(histogramShares([1, 3, 0, 0, 0, 0, 0, 0, 0, 0]).every((v) => v >= 0 && v <= 1), isTrue);
 
       Map<String, Object?> device(Map<String, Object?> d) => (allow.device(d) as Map).cast();
       expect(device({'osVersion': '14'})['osVersion'], '14');
-      expect(device({'osVersion': '14.1'}).containsKey('osVersion'), isFalse);
+      expect(device({'osVersion': '24.04'})['osVersion'], '24.04');
+      expect(device({'osVersion': '10.0.22631'})['osVersion'], '10.0.22631');
+      expect(device({'osVersion': '10.0.22631.4460'}).containsKey('osVersion'), isFalse);
+      expect(device({'osVersion': 'UP1A.231005.007'}).containsKey('osVersion'), isFalse);
       expect(device({'osVersion': 'unknown'}).containsKey('osVersion'), isFalse);
+      expect(device({'osVersion': null}), {'osVersion': null});
       expect(device({'audio': {'backend': 'aaudio'}})['audio'], {'backend': 'aaudio'});
       expect(device({'audio': {'backend': 'wasapi_shared'}})['audio'], {'backend': 'wasapi_shared'});
       expect(device({'audio': {'backend': 'AAudio'}})['audio'], isEmpty);
@@ -260,11 +296,11 @@ void main() {
 
     test('a receipt is used once: 400 on a resend counts as sent, 400 at first is rejected', () async {
       final rig = Rig();
-      await rig.t.load();
+      await rig.ready();
       await rig.use();
       await rig.t.closeDay();
-      // The first try never got an answer (it may still have arrived).
-      rig.http.answer = (_, _, _) => const RelayResponse.offline();
+      // The first try went out but never got an answer (it may still have arrived).
+      rig.http.answer = (_, _, _) => const RelayResponse.offline(sentBody: true);
       await rig.t.pump();
       expect(rig.t.queued, hasLength(1));
       rig.now = rig.now.add(const Duration(minutes: 20));
@@ -288,7 +324,7 @@ void main() {
 
     test('My data: check, export and delete send only receipts and keys', () async {
       final rig = Rig();
-      await rig.t.load();
+      await rig.ready();
       await rig.use();
       await rig.t.closeDay();
       await rig.t.pump();
@@ -322,7 +358,7 @@ void main() {
   group('queue and sending (E4, H5)', () {
     test('the queue is capped at 1 MB, the oldest going first', () async {
       final rig = Rig(relay: false);
-      await rig.t.load();
+      await rig.ready();
       final filler = jsonEncode({'pad': 'x' * 7000});
       for (var i = 0; i < 200; i++) {
         rig.t.enqueueForTest(ReportRecord(
@@ -336,7 +372,7 @@ void main() {
 
     test('at most one daily report per UTC day', () async {
       final rig = Rig();
-      await rig.t.load();
+      await rig.ready();
       rig.http.answer = (_, _, _) => const RelayResponse.offline();
       await rig.use();
       await rig.nextDay(); // day 1 queued
@@ -355,7 +391,7 @@ void main() {
 
     test('429 and 503 keep the report and honour Retry-After', () async {
       final rig = Rig();
-      await rig.t.load();
+      await rig.ready();
       await rig.use();
       await rig.t.closeDay();
       rig.http.answer = (_, _, _) => const RelayResponse(429, retryAfter: Duration(minutes: 90));
@@ -383,7 +419,7 @@ void main() {
       expect(TelemetryConfig.parse(channel: 'beta', relayUrl: 'http://x.dev', appKey: 'k').canSend, isFalse);
       expect(TelemetryConfig.parse(channel: 'beta', relayUrl: 'https://u:p@x.dev', appKey: 'k').canSend, isFalse);
       final rig = Rig(relay: false);
-      await rig.t.load();
+      await rig.ready();
       await rig.use();
       await rig.t.closeDay();
       await rig.t.pump();
@@ -393,7 +429,7 @@ void main() {
 
     test('turning it off stops sending and wipes the queue and the day', () async {
       final rig = Rig();
-      await rig.t.load();
+      await rig.ready();
       rig.http.answer = (_, _, _) => const RelayResponse.offline();
       await rig.use();
       await rig.t.closeDay();
@@ -408,6 +444,346 @@ void main() {
       await rig.use();
       expect(rig.http.reportBodies, hasLength(before));
       expect(jsonDecode(rig.store.text!)['stats'], isNull);
+    });
+  });
+
+  group('security review fixes (2026-11-12)', () {
+    test('nothing is collected or sent before the first-run page is accepted', () async {
+      final rig = Rig(); // a fresh beta install: on by default, not yet accepted
+      await rig.t.load();
+      expect(rig.t.enabled, isTrue);
+      await rig.use();
+      rig.t.onStartup(900);
+      expect(rig.t.today, isNull, reason: 'nothing collected');
+      expect(await rig.t.previewToday(), isNull);
+      await rig.nextDay();
+      await rig.t.pump();
+      expect(rig.http.requests, isEmpty);
+      expect(rig.t.reports, isEmpty);
+      expect(await rig.t.sendStressReport({'version': 1}), StressOutcome.off);
+      expect(rig.t.reports, isEmpty);
+      // Killed on the first-run page and opened the next day: still nothing.
+      final again = Rig(store: rig.store, at: rig.now.add(const Duration(days: 1)));
+      await again.t.load();
+      await again.t.pump();
+      expect(again.http.requests, isEmpty);
+      await again.t.acceptFirstRun();
+      await again.use();
+      expect(again.t.today, isNotNull);
+    });
+
+    test('Retry-After is capped at 24 hours, and huge values are safe', () async {
+      final now = DateTime.utc(2026, 11, 12);
+      expect(parseRetryAfter('604800', now), const Duration(hours: 24));
+      expect(parseRetryAfter('99999999999999999999999', now), const Duration(hours: 24));
+      expect(parseRetryAfter('9223372036854775807', now), const Duration(hours: 24));
+      expect(parseRetryAfter('Fri, 01 Jan 2100 00:00:00 GMT', now), const Duration(hours: 24));
+      final rig = Rig();
+      await rig.ready();
+      await rig.use();
+      await rig.t.closeDay();
+      rig.http.answer = (_, _, _) => const RelayResponse(503, retryAfter: Duration(days: 3650));
+      await rig.t.pump();
+      rig.http.answer = (_, _, _) => const RelayResponse(202);
+      rig.now = rig.now.add(const Duration(hours: 24, minutes: 1));
+      await rig.t.pump();
+      expect(rig.t.queued, isEmpty);
+    });
+
+    test('answers of the wrong type never throw, and sent feedback is not posted again', () async {
+      final rig = Rig();
+      await rig.ready();
+      rig.http.answer = (_, _, _) => const RelayResponse(201, body: '{"issue": 42}');
+      final r = await rig.t.submitFeedback(rig.t.feedbackBody(kind: FeedbackKind.bug, text: 'x'));
+      expect(r.outcome, FeedbackOutcome.sent);
+      expect(r.issueUrl, isNull);
+      expect(rig.t.feedbackQueued, 0);
+      expect((jsonDecode(rig.store.text!) as Map)['feedback'], isEmpty);
+      await rig.use();
+      await rig.t.closeDay();
+      rig.http.answer = (_, _, _) => const RelayResponse(202);
+      await rig.t.pump();
+      rig.http.answer = (_, _, _) => const RelayResponse(202, body: '{"deleted": "lots"}');
+      expect(await rig.t.deleteMyData(), 1);
+      rig.http.answer = (_, _, _) => const RelayResponse(202, body: '[1, 2]');
+      expect(rig.t.reports.single.status, ReportStatus.deleteRequested);
+    });
+
+    test('a redirect is a failure: the report stays queued', () async {
+      final rig = Rig();
+      await rig.ready();
+      await rig.use();
+      await rig.t.closeDay();
+      rig.http.answer = (_, _, _) => const RelayResponse(302);
+      await rig.t.pump();
+      expect(rig.t.queued, hasLength(1));
+    });
+  });
+
+  group('code review fixes (2026-11-12)', () {
+    test('a corrupt state file is kept aside, not saved over', () async {
+      final store = MemoryTelemetryStore()..text = '{"reports": [ broken';
+      final rig = Rig(store: store);
+      await rig.t.load();
+      expect(store.bad, '{"reports": [ broken');
+      expect(store.text, isNot(contains('broken')));
+    });
+
+    test('a wrong-typed field loses only itself', () async {
+      final good = Rig();
+      await good.ready();
+      await good.use();
+      await good.t.closeDay();
+      await good.t.pump();
+      final state = (jsonDecode(good.store.text!) as Map).cast<String, Object?>()
+        ..['postsToday'] = 'many'
+        ..['reportBackOff'] = 7
+        ..['feedback'] = 'x'
+        ..['stats'] = {'day': '2026-11-13', 'cpu': 'x', 'open': 'y', 'screens': {'arrange': 'z'}, 'startupMs': '1'};
+      final store = MemoryTelemetryStore()..text = jsonEncode(state);
+      final rig = Rig(store: store, at: good.now);
+      await rig.t.load();
+      expect(rig.t.reports.single.deleteKey, good.t.reports.single.deleteKey);
+      expect(rig.t.firstRunNeeded, isFalse);
+      expect(rig.t.today?.day, '2026-11-13');
+    });
+
+    test('turning off while a POST is out keeps the record the relay took', () async {
+      final rig = Rig();
+      await rig.ready();
+      await rig.use();
+      await rig.t.closeDay();
+      final answer = Completer<RelayResponse>();
+      rig.http.answer = (_, _, _) => throw StateError('unused');
+      rig.http.later = answer.future;
+      final pumping = rig.t.pump();
+      await Future<void>.delayed(Duration.zero);
+      final off = rig.t.setEnabled(false);
+      answer.complete(const RelayResponse(202));
+      await pumping;
+      await off;
+      expect(rig.t.enabled, isFalse);
+      expect(rig.t.reports.single.status, ReportStatus.sent);
+    });
+
+    test('Delete my data waits for a POST in flight', () async {
+      final rig = Rig();
+      await rig.ready();
+      await rig.use();
+      await rig.t.closeDay();
+      final answer = Completer<RelayResponse>();
+      rig.http.later = answer.future;
+      final pumping = rig.t.pump();
+      await Future<void>.delayed(Duration.zero);
+      rig.http.answer = (_, _, _) => const RelayResponse(202, body: '{"deleted":1}');
+      final deleting = rig.t.deleteMyData();
+      answer.complete(const RelayResponse(202));
+      await pumping;
+      expect(await deleting, 1);
+      expect(rig.t.reports.single.status, ReportStatus.deleteRequested);
+    });
+
+    test('a queued feedback entry is posted once, even with a pump and a submit at the same time', () async {
+      final rig = Rig();
+      await rig.ready();
+      rig.http.answer = (_, _, _) => const RelayResponse.offline();
+      await rig.t.submitFeedback(rig.t.feedbackBody(kind: FeedbackKind.bug, text: 'first'));
+      rig.http.answer = (_, _, _) => const RelayResponse(201, body: '{}');
+      final answer = Completer<RelayResponse>();
+      rig.http.later = answer.future;
+      final pumping = rig.t.pump();
+      final submitting = rig.t.submitFeedback(rig.t.feedbackBody(kind: FeedbackKind.bug, text: 'second'));
+      await Future<void>.delayed(Duration.zero);
+      answer.complete(const RelayResponse(201, body: '{}'));
+      await pumping;
+      await submitting;
+      final texts = [
+        for (final r in rig.http.requests)
+          if (r.url.path == '/v1/feedback' && r.body != null) (jsonDecode(r.body!) as Map)['text'],
+      ];
+      expect(texts.where((t) => t == 'first'), hasLength(2), reason: 'the offline try, then once');
+      expect(texts.where((t) => t == 'second'), hasLength(1));
+      expect(rig.t.feedbackQueued, 0);
+    });
+
+    test('old records keep only receipt and key, and the list is capped', () async {
+      final rig = Rig(relay: false);
+      await rig.ready();
+      for (var i = 0; i < Telemetry.maxRecords + 50; i++) {
+        rig.t.enqueueForTest(ReportRecord(
+            receipt: i.toRadixString(16).padLeft(32, '0'), deleteKey: '1' * 64, day: '2026-01-01',
+            kind: ReportKind.daily, json: '{"pad":"${'x' * 200}"}', created: DateTime.utc(2026, 1, 1),
+            status: ReportStatus.sent));
+      }
+      await rig.t.setEnabled(true);
+      expect(rig.t.reports, hasLength(Telemetry.maxRecords));
+      expect(rig.t.reports.every((r) => r.json.isEmpty && r.deleteKey.length == 64), isTrue);
+      expect(rig.store.text!.length, lessThan(1024 * 1024));
+    });
+
+    test('a try that never left the device is not an attempt: a later 400 is a real rejection', () async {
+      final rig = Rig();
+      await rig.ready();
+      await rig.use();
+      await rig.t.closeDay();
+      rig.http.answer = (_, _, _) => const RelayResponse.offline(); // DNS failure: nothing went out
+      await rig.t.pump();
+      expect(rig.t.queued.single.attempts, 0);
+      rig.now = rig.now.add(const Duration(minutes: 20));
+      rig.http.answer = (_, _, _) => const RelayResponse(400);
+      await rig.t.pump();
+      expect(rig.t.reports.single.status, ReportStatus.rejected);
+      // A timeout after the request went out may have arrived: then a 400 means it did.
+      final b = Rig();
+      await b.ready();
+      await b.use();
+      await b.t.closeDay();
+      b.http.answer = (_, _, _) => const RelayResponse.offline(sentBody: true);
+      await b.t.pump();
+      b.now = b.now.add(const Duration(minutes: 20));
+      b.http.answer = (_, _, _) => const RelayResponse(400);
+      await b.t.pump();
+      expect(b.t.reports.single.status, ReportStatus.sent);
+    });
+
+    test('at UTC midnight yesterday is saved before anything waits', () async {
+      final rig = Rig(relay: false);
+      await rig.ready();
+      await rig.use();
+      rig.now = rig.now.add(const Duration(days: 1));
+      rig.t.onMeters(cpu: 0.2, playing: true, overloaded: 0); // the first read of the new day
+      // Killed right here: the saved state still holds yesterday.
+      final saved = rig.store.text!;
+      expect((jsonDecode(saved) as Map)['closing'], hasLength(1));
+      final next = Rig(store: MemoryTelemetryStore()..text = saved, relay: false, at: rig.now);
+      await next.t.load();
+      await next.t.pump();
+      expect(next.t.queued.single.day, '2026-11-12');
+    });
+  });
+
+  group('unknowns are null, never 0 (owner, 2026-11-12)', () {
+    test('a day with nothing measured, on a device that tells little', () async {
+      final rig = Rig(probe: const NullProbe());
+      await rig.ready();
+      rig.t.app
+        ..refreshHz = (() => 0)
+        ..audio = (() => const {});
+      await rig.t.tick(seconds: 60, foreground: true); // open, but nothing played and no frames
+      final r = (await rig.t.previewToday())!;
+      final perf = r['perf'] as Map, device = r['device'] as Map;
+      expect(perf['cpuLoadHistogram'], isNull);
+      expect(perf['worstCallbackPct'], isNull);
+      expect(perf['startupMs'], isNull);
+      expect(perf['frames'], {'p50ms': null, 'p99ms': null, 'slowPct': null});
+      expect(perf['dropouts'], 0, reason: 'counted: none happened');
+      expect(device['cores'], {'big': null, 'little': null, 'other': null});
+      for (final k in ['maxClockMHz', 'ramGB', 'refreshHz', 'cpu', 'gpu', 'osVersion']) {
+        expect(device.containsKey(k) && device[k] == null, isTrue, reason: k);
+      }
+      expect(jsonEncode(r), isNot(contains('"ramGB":0')));
+    });
+  });
+
+  group('device and peripherals (contract addition, owner 2026-11-12)', () {
+    final allow = TelemetryAllowList(isBuiltin: (_) => false);
+    Map<String, Object?> device(Map<String, Object?> d) => (allow.device(d) as Map).cast();
+
+    test('the new device fields pass in their shapes', () {
+      final d = device({
+        'platform': 'android', 'arch': 'arm64', 'osName': 'Android', 'osVersion': '14', 'manufacturer': 'samsung',
+        'model': 'SM-S906B', 'formFactor': 'phone', 'screen': {'widthPx': 2340, 'heightPx': 1080, 'displays': 1},
+        'audio': {'backend': 'aaudio', 'output': 'bluetooth'},
+        'peripherals': [
+          {'kind': 'midi', 'connection': 'usb', 'model': 'Keystep 37', 'vendorId': '1c75', 'productId': '0288', 'inUse': true},
+        ],
+      });
+      expect(d['arch'], 'arm64');
+      expect(d['model'], 'SM-S906B');
+      expect((d['audio'] as Map)['output'], 'bluetooth');
+      expect((d['peripherals'] as List).single, containsPair('vendorId', '1c75'));
+      expect(device({'platform': 'macos'})['platform'], 'macos');
+      expect(device({'arch': 'mips'}).containsKey('arch'), isFalse);
+      expect(device({'formFactor': 'watch'}).containsKey('formFactor'), isFalse);
+    });
+
+    test('names a user can set, serials, addresses and paths never pass', () {
+      final d = device({
+        'name': "Kman's S22+", 'deviceName': 'KMAN-PC', 'serial': 'R5CT1234', 'mac': 'a4:5e:60:12:34:56',
+        'model': 'a4-5e-60-12-34-56', 'manufacturer': '/dev/snd/midiC1D0',
+        'peripherals': [
+          {'kind': 'midi', 'connection': 'bluetooth', 'name': "Kman's piano", 'address': 'C4:3A:BE:00:11:22'},
+          {'kind': 'midi', 'connection': 'usb', 'model': 'ABCDEF0123456789XYZ', 'vendorId': '1C75', 'port': r'\\.\COM3'},
+          {'kind': 'audio-output', 'connection': 'bluetooth', 'model': 'C4:3A:BE:00:11:22'},
+          {'connection': 'usb', 'model': 'no kind'},
+          for (var i = 0; i < 20; i++) {'kind': 'other', 'connection': 'usb'},
+        ],
+      });
+      final text = jsonEncode(d);
+      for (final banned in ['Kman', 'KMAN', 'R5CT', 'a4:5e', 'a4-5e', 'snd', 'C4:3A', 'ABCDEF0123456789', 'COM3', '1C75', 'no kind']) {
+        expect(text, isNot(contains(banned)), reason: banned);
+      }
+      final list = d['peripherals'] as List;
+      expect(list, hasLength(16));
+      expect(list.first, {'kind': 'midi', 'connection': 'bluetooth'});
+    });
+
+    test('peripherals from the route and MIDI ports carry no name the user can set', () {
+      const route = AudioRouteInfo(
+        output: AudioEndpoint(name: "Kman's Buds2 Pro", kind: AudioDeviceKind.bluetooth),
+        input: AudioEndpoint(name: 'Microphone', kind: AudioDeviceKind.builtIn),
+      );
+      final list = peripheralsOf(route: route, midi: const [
+        MidiPort(id: 1, name: "Kman's keys (renamed)", kind: 'usb', usbVendorId: 0x1c75, usbProductId: 0x0288,
+            usbProduct: 'KeyStep 37'),
+        MidiPort(id: 2, name: "Kman's WIDI", kind: 'bluetooth'),
+        MidiPort(id: 3, name: 'Port 1', kind: 'port', open: false),
+      ]);
+      expect(list, [
+        {'kind': 'audio-output', 'connection': 'bluetooth', 'inUse': true},
+        {'kind': 'midi', 'connection': 'usb', 'model': 'KeyStep 37', 'vendorId': '1c75', 'productId': '0288', 'inUse': true},
+        {'kind': 'midi', 'connection': 'bluetooth', 'inUse': true},
+        {'kind': 'midi', 'connection': 'unknown', 'inUse': false},
+      ]);
+      expect(jsonEncode(list), isNot(contains('Kman')));
+      expect(connectionOf(AudioDeviceKind.remote), 'network');
+      expect(archOf(Abi.androidArm64), 'arm64');
+      expect(archOf(Abi.windowsX64), 'x64');
+      expect(archOf(Abi.linuxIA32), 'x86');
+    });
+
+    test('maker texts drop firmware placeholders', () {
+      expect(makerText('To Be Filled By O.E.M.'), isNull);
+      expect(makerText('LENOVO'), 'LENOVO');
+      expect(chassisFormFactor(10), 'laptop');
+      expect(chassisFormFactor(3), 'desktop');
+      expect(chassisFormFactor(null), 'unknown');
+    });
+  });
+
+  group('report kind and keys (owner, 2026-11-12)', () {
+    test('a stress report says "stress"; a daily one "daily"', () async {
+      final rig = Rig();
+      await rig.ready();
+      await rig.use();
+      await rig.t.sendStressReport({'version': 1, 'limits': {'tracks': 3, 'voices': 2, 'effects': 1}});
+      expect(rig.http.reportBodies.single['kind'], 'stress');
+      expect(rig.http.reportBodies.single['stress'], isNotNull);
+      await rig.nextDay();
+      expect(rig.http.reportBodies.last['kind'], 'daily');
+    });
+
+    test('each channel has its own app key unless the build names one', () {
+      expect(TelemetryConfig.parse(channel: 'beta', relayUrl: 'https://x.dev', appKey: '').appKey, 'caw-beta-1');
+      expect(TelemetryConfig.parse(channel: 'release', relayUrl: 'https://x.dev', appKey: '').appKey, 'caw-release-1');
+      expect(TelemetryConfig.parse(channel: 'release', relayUrl: 'https://x.dev', appKey: 'k2').appKey, 'k2');
+    });
+
+    test('the exported receipts name the repository', () async {
+      final rig = Rig();
+      await rig.ready();
+      expect(rig.t.exportReceipts(), contains('Kmandevr/C.A.W-Telemetry'));
+      expect(rig.t.exportReceipts(), isNot(contains('caw-telemetry')));
     });
   });
 
@@ -467,7 +843,7 @@ void main() {
 
     test('sent at once as its own report, shown in My data', () async {
       final rig = Rig();
-      await rig.t.load();
+      await rig.ready();
       await rig.use();
       expect(await rig.t.sendStressReport(stress), StressOutcome.sent);
       final sent = rig.http.reportBodies.single;
@@ -482,7 +858,7 @@ void main() {
 
     test('telemetry off: nothing is sent or queued', () async {
       final rig = Rig(channel: BuildChannel.release);
-      await rig.t.load();
+      await rig.ready();
       expect(await rig.t.sendStressReport(stress), StressOutcome.off);
       expect(rig.http.requests, isEmpty);
       expect(rig.t.reports, isEmpty);
@@ -492,7 +868,7 @@ void main() {
 
     test('one of the 10 daily slots is kept for the daily report, then results ride on the next daily one', () async {
       final rig = Rig();
-      await rig.t.load();
+      await rig.ready();
       await rig.use();
       for (var i = 0; i < 9; i++) {
         expect(await rig.t.sendStressReport(stress), StressOutcome.sent, reason: 'stress #$i');
@@ -512,7 +888,7 @@ void main() {
 
     test('with the daily report already sent, all ten slots can be used', () async {
       final rig = Rig();
-      await rig.t.load();
+      await rig.ready();
       await rig.use();
       await rig.nextDay(); // yesterday's daily report goes out today
       expect(rig.http.reportBodies, hasLength(1));
@@ -529,7 +905,7 @@ void main() {
 
     test('works with telemetry off, and the body has only H4\'s fields', () async {
       final rig = Rig(channel: BuildChannel.release);
-      await rig.t.load();
+      await rig.ready();
       rig.http.answer = (_, _, _) => const RelayResponse(201, body: '{"issue":"https://github.com/Kmandevr/C.A.W-Telemetry/issues/7"}');
       final b = rig.t.feedbackBody(
           kind: FeedbackKind.confusing, text: 'Where is Export?', errors: [
@@ -545,7 +921,7 @@ void main() {
 
     test('five a day; the sixth waits for tomorrow', () async {
       final rig = Rig();
-      await rig.t.load();
+      await rig.ready();
       for (var i = 0; i < 5; i++) {
         expect((await rig.t.submitFeedback(body(rig.t, 'note $i'))).outcome, FeedbackOutcome.sent);
       }
@@ -557,7 +933,7 @@ void main() {
 
     test('offline it queues, backs off on 429, and says when it went', () async {
       final rig = Rig();
-      await rig.t.load();
+      await rig.ready();
       final events = <FeedbackSent>[];
       rig.t.feedbackSent.listen(events.add);
       rig.http.answer = (_, _, _) => const RelayResponse.offline();
@@ -580,8 +956,40 @@ void main() {
 
     test('a build without a relay says so instead of queueing forever', () async {
       final rig = Rig(relay: false);
-      await rig.t.load();
+      await rig.ready();
       expect((await rig.t.submitFeedback(body(rig.t))).outcome, FeedbackOutcome.unavailable);
+    });
+  });
+
+  group('app.build (contract addition, owner 2026-11-12)', () {
+    test('a malformed build is left out of reports and feedback', () {
+      final allow = TelemetryAllowList(isBuiltin: (_) => false);
+      Map<String, Object?> app(String build) =>
+          (allow.report({'app': {'version': '0.9.0-beta.1', 'engineVersion': '0.9.0-beta.1', 'capiVersion': 23, 'build': build}})['app']
+                  as Map)
+              .cast();
+      expect(app('347855d')['build'], '347855d');
+      expect(app('347855dabc12')['build'], '347855dabc12');
+      for (final bad in ['347855', '347855dabc123', '347855D', 'g47855d', ' 347855d', 'main']) {
+        expect(app(bad).containsKey('build'), isFalse, reason: bad);
+        expect(app(bad)['version'], '0.9.0-beta.1');
+      }
+      expect(allow.feedback({'build': 'abcdef0'})['build'], 'abcdef0');
+      expect(allow.feedback({'build': 'ABCDEF0'}).containsKey('build'), isFalse);
+      expect(TelemetryConfig.parse(channel: 'beta', relayUrl: '', appKey: '', build: 'xyz').build, isNull);
+      expect(TelemetryConfig.parse(channel: 'beta', relayUrl: '', appKey: '', build: '0123456789ab').build, '0123456789ab');
+    });
+
+    test('without CAW_BUILD the field is absent', () async {
+      expect(TelemetryConfig.fromEnvironment().build, isNull, reason: 'flutter test passes no define');
+      final rig = Rig();
+      await rig.ready();
+      await rig.use();
+      expect(((await rig.t.previewToday())!['app'] as Map).containsKey('build'), isFalse);
+      expect(rig.t.feedbackBody(kind: FeedbackKind.idea, text: 'x').containsKey('build'), isFalse);
+      rig.t.app.build = '347855d';
+      expect(((await rig.t.previewToday())!['app'] as Map)['build'], '347855d');
+      expect(rig.t.feedbackBody(kind: FeedbackKind.idea, text: 'x')['build'], '347855d');
     });
   });
 

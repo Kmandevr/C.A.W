@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android 11 and earlier (android:fullBackupContent): back up the app's files as before, except telemetry's state,
+     which holds the delete keys for this device's public reports and any queued feedback with its email. Flutter's
+     path_provider puts it in the files folder ("file" domain); the "root" lines cover the app_flutter folder too. -->
+<full-backup-content>
+    <exclude domain="file" path="telemetry.json" />
+    <exclude domain="file" path="telemetry.json.tmp" />
+    <exclude domain="file" path="telemetry.json.bad" />
+    <exclude domain="root" path="app_flutter/telemetry.json" />
+    <exclude domain="root" path="app_flutter/telemetry.json.tmp" />
+    <exclude domain="root" path="app_flutter/telemetry.json.bad" />
+</full-backup-content>

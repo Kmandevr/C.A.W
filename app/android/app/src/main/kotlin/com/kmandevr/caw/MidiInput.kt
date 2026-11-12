@@ -100,6 +100,12 @@ class MidiInput(context: Context) : EventChannel.StreamHandler, MethodChannel.Me
         return (info.properties.getParcelable(MidiDeviceInfo.PROPERTY_USB_DEVICE) as? UsbDevice)?.deviceName
     }
 
+    private fun usbDeviceOf(info: MidiDeviceInfo): UsbDevice? {
+        if (info.type != MidiDeviceInfo.TYPE_USB) return null
+        @Suppress("DEPRECATION")
+        return info.properties.getParcelable(MidiDeviceInfo.PROPERTY_USB_DEVICE) as? UsbDevice
+    }
+
     /** A UMP interface this app can read without MIDI-CI. */
     private fun usableUmp(info: MidiDeviceInfo): Boolean =
         Build.VERSION.SDK_INT >= 33 && info.defaultProtocol != MidiDeviceInfo.PROTOCOL_UMP_USE_MIDI_CI &&
@@ -174,6 +180,11 @@ class MidiInput(context: Context) : EventChannel.StreamHandler, MethodChannel.Me
                     else -> "virtual"
                 },
                 "ump" to (info.id in umpIds),
+                // A USB device's own descriptor (maker-defined): vendor and product ids and its product string,
+                // for the anonymous telemetry's peripherals. Never the port name, which can be renamed.
+                "usbVendor" to usbDeviceOf(info)?.vendorId,
+                "usbProductId" to usbDeviceOf(info)?.productId,
+                "usbProduct" to usbDeviceOf(info)?.productName,
                 "open" to open.containsKey(info.id),
                 "off" to (nameOf(info) in closedNames),
             )

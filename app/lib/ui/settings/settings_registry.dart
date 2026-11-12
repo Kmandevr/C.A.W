@@ -109,8 +109,11 @@ extension AudioBufferLabel on AudioBuffer {
 
 /// One setting as the search sees it. [id] is also the row's key on its page (`SettingRow`).
 class SettingEntry {
-  const SettingEntry(this.id, this.section, this.title, this.description, [this.keywords = const []]);
+  const SettingEntry(this.id, this.section, this.title, this.description, [this.keywords = const [], this.searchable = true]);
   final String id;
+
+  /// False for a row on a page of its own inside a section (Privacy's): search lists its way in instead.
+  final bool searchable;
   final SettingsSection section;
   final String title, description;
   final List<String> keywords;
@@ -297,12 +300,22 @@ const List<SettingEntry> settingEntries = [
       ['vim', 'hjkl', 'arrows', 'navigation']),
   _E('keys.keyRow', _k, 'Key row', 'The symbol keys above the phone keyboard', ['symbols', 'toolbar', 'keyboard']),
   _E('about.beta', _ab, 'Version', 'The open beta\'s version', ['version', 'beta', 'build']),
-  _E('about.privacy', _ab, 'Privacy', 'Anonymous telemetry on or off, exactly what is sent, and My data',
-      ['privacy', 'telemetry', 'data', 'analytics', 'delete', 'receipts', 'tracking', 'my data']),
+  _E('about.privacy', _ab, 'Privacy', 'Anonymous telemetry on or off, exactly what is sent, My data, and the texts',
+      ['privacy', 'telemetry', 'analytics', 'tracking', 'data', 'delete', 'receipts', 'my data', 'gdpr']),
   _E('about.feedback', _ab, 'Send feedback', 'A bug, an idea, something confusing or praise, posted publicly',
       ['feedback', 'idea', 'suggestion', 'bug', 'praise', 'contact']),
+  // The Privacy page's rows (Settings › About and beta › Privacy): titles for their rows, not search results.
+  _E('privacy.telemetry', _ab, 'Send anonymous telemetry', 'One report a day about how C.A.W runs, published openly',
+      [], false),
+  _E('privacy.whatsSent', _ab, 'Show exactly what\'s sent', 'The reports waiting to be sent and today\'s so far, as JSON',
+      [], false),
+  _E('privacy.myData', _ab, 'My data', 'Your reports: check them on the server, export the receipts, delete them', [], false),
+  _E('privacy.feedback', _ab, 'Send feedback', 'A bug, an idea, something confusing or praise, posted publicly', [], false),
+  _E('privacy.policy', _ab, 'Privacy Policy', 'What is sent, where it goes and how to delete it (bundled copy)', [], false),
+  _E('privacy.terms', _ab, 'Terms', 'The beta\'s terms of use (bundled copy)', [], false),
+  _E('privacy.dashboard', _ab, 'Public dashboard', 'Everything collected, from every device', [], false),
   _E('about.policy', _ab, 'Privacy Policy', 'What is sent, where it goes and how to delete it (bundled copy)',
-      ['privacy', 'policy', 'gdpr', 'data']),
+      ['privacy', 'policy', 'data']),
   _E('about.terms', _ab, 'Terms', 'The beta\'s terms of use (bundled copy)', ['terms', 'conditions', 'legal']),
   _E('about.report', _ab, 'Report a problem', 'Copies a report to paste into a new issue', ['bug', 'issue', 'feedback']),
   _E('about.diagnostics', _ab, 'Engine diagnostics', 'CPU, peaks, the master scope and spectrum, and signal paths',
@@ -314,7 +327,7 @@ const List<SettingEntry> settingEntries = [
 Map<SettingsSection, List<SettingEntry>> searchSettings(String query) {
   final out = <SettingsSection, List<SettingEntry>>{};
   for (final e in settingEntries) {
-    if (e.matches(query)) (out[e.section] ??= []).add(e);
+    if (e.searchable && e.matches(query)) (out[e.section] ??= []).add(e);
   }
   return out;
 }

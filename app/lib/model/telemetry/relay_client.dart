@@ -8,10 +8,17 @@ import 'telemetry_config.dart';
 
 /// One answer from the relay. [status] 0 means the request never got an answer (offline, a timeout, TLS).
 class RelayResponse {
-  const RelayResponse(this.status, {this.body = '', this.retryAfter});
-  const RelayResponse.offline() : this(0);
+  const RelayResponse(this.status, {this.body = '', this.retryAfter, this.sentBody = true});
+
+  /// No answer. [sentBody]: whether the request had gone out whole first (a timeout waiting for the answer), so the
+  /// relay may have it; false for a DNS failure or a refused connection.
+  const RelayResponse.offline({bool sentBody = false}) : this(0, sentBody: sentBody);
 
   final int status;
+  final bool sentBody;
+
+  /// Whether this try could have reached the relay (an answer, or a request that went out whole).
+  bool get mayHaveArrived => status != 0 || sentBody;
   final String body;
 
   /// The `Retry-After` header as a wait, when there was one.
@@ -25,7 +32,7 @@ class RelayResponse {
   Map<String, Object?>? get json {
     try {
       final v = jsonDecode(body);
-      return v is Map<String, Object?> ? v : null;
+      return v is Map ? v.cast<String, Object?>() : null;
     } catch (_) {
       return null;
     }
@@ -37,16 +44,23 @@ abstract class RelayHttp {
   Future<RelayResponse> send(String method, Uri url, {required Map<String, String> headers, String? body});
 }
 
-/// `Retry-After` (RFC 9110 §10.2.3): delay-seconds or an HTTP date, read against [now]. Null when absent or unreadable.
+/// The longest wait a relay can ask for; anything longer is cut to it.
+const maxRetryAfter = Duration(hours: 24);
+
+/// `Retry-After` (RFC 9110 §10.2.3): delay-seconds or an HTTP date, read against [now], held between none and
+/// [maxRetryAfter] (a number too big for an int counts as the most). Null when absent or unreadable.
 Duration? parseRetryAfter(String? value, DateTime now) {
   if (value == null) return null;
   final v = value.trim();
-  final seconds = int.tryParse(v);
-  if (seconds != null) return seconds < 0 ? Duration.zero : Duration(seconds: seconds);
+  if (RegExp(r'^\d+$').hasMatch(v)) {
+    final seconds = v.length > 9 ? null : int.parse(v);
+    if (seconds == null || seconds >= maxRetryAfter.inSeconds) return maxRetryAfter;
+    return Duration(seconds: seconds);
+  }
   try {
-    final at = HttpDate.parse(v);
-    final d = at.difference(now);
-    return d.isNegative ? Duration.zero : d;
+    final d = HttpDate.parse(v).difference(now);
+    if (d.isNegative) return Duration.zero;
+    return d > maxRetryAfter ? maxRetryAfter : d;
   } catch (_) {
     return null;
   }
@@ -66,8 +80,11 @@ class IoRelayHttp implements RelayHttp {
     final client = HttpClient()
       ..connectionTimeout = _timeout
       ..userAgent = 'caw-app';
+    var sent = false;
     try {
       final req = await client.openUrl(method, url).timeout(_timeout);
+      // A redirect is never followed (the request would go somewhere the build didn't name): its 3xx is a failure.
+      req.followRedirects = false;
       headers.forEach(req.headers.set);
       if (body != null) {
         final bytes = utf8.encode(body);
@@ -75,7 +92,9 @@ class IoRelayHttp implements RelayHttp {
         req.contentLength = bytes.length;
         req.add(bytes);
       }
-      final res = await req.close().timeout(_timeout);
+      final answer = req.close();
+      sent = true; // from here the relay may have the request, whatever happens to the answer
+      final res = await answer.timeout(_timeout);
       final chunks = <int>[];
       await for (final c in res.timeout(_timeout)) {
         chunks.addAll(c);
@@ -85,13 +104,13 @@ class IoRelayHttp implements RelayHttp {
           body: utf8.decode(chunks, allowMalformed: true),
           retryAfter: parseRetryAfter(res.headers.value('retry-after'), _now()));
     } on SocketException {
-      return const RelayResponse.offline();
+      return RelayResponse.offline(sentBody: sent);
     } on HandshakeException {
       return const RelayResponse.offline();
     } on HttpException {
-      return const RelayResponse.offline();
+      return RelayResponse.offline(sentBody: sent);
     } on TimeoutException {
-      return const RelayResponse.offline();
+      return RelayResponse.offline(sentBody: sent);
     } on TlsException {
       return const RelayResponse.offline();
     } finally {

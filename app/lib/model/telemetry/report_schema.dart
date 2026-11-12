@@ -79,7 +79,18 @@ final _hex32 = RegExp(r'^[0-9a-f]{32}$');
 final _hex64 = RegExp(r'^[0-9a-f]{64}$');
 final _day = RegExp(r'^\d{4}-\d{2}-\d{2}$');
 final _version = RegExp(r'^[0-9A-Za-z.+-]{1,40}$');
-final _osVersion = RegExp(r'^\d{1,3}$'); // digits only (H2 update 2026-11-12)
+// The short commit a build came from (contract addition, owner 2026-11-12): 7 to 12 lowercase hex characters.
+final _build = RegExp(r'^[0-9a-f]{7,12}$');
+// Major, or major.minor[.build]: 14, 24.04, 10.0.22631 (owner, 2026-11-12); never a build fingerprint.
+final _osVersion = RegExp(r'^\d{1,4}(\.\d{1,6}){0,2}$');
+final _usbId = RegExp(r'^[0-9a-f]{4}$');
+
+/// H2's peripheral kinds and connections (contract addition, owner 2026-11-12).
+const peripheralKinds = {
+  'audio-output', 'audio-input', 'audio-interface', 'midi', 'gamepad', 'keyboard', 'mouse', 'touch', 'pen', 'display',
+  'storage', 'other',
+};
+const connections = {'builtin', 'usb', 'bluetooth', 'wired', 'hdmi', 'displayport', 'network', 'other', 'unknown'};
 final _backend = RegExp(r'^[a-z0-9_]{1,24}$'); // lowercase a-z, 0-9 and _ only (H2 update)
 final _errorType = RegExp(r'^[A-Za-z_$][A-Za-z0-9_$<>, ?]{0,79}$');
 // A relative C.A.W source location (H2 update 2026-11-12): one of the relay's prefixes, then `:<line>`; no `..`.
@@ -100,6 +111,16 @@ Object? _hardwareText(Object? v) {
   if (t.startsWith('/') || t.startsWith('~') || t.startsWith('.')) return null;
   return t;
 }
+
+/// A maker-defined name (an OS, a manufacturer, a model): hardware text of at most [max] characters that also can't
+/// be a MAC or other hardware address, or a long serial-like run of digits.
+TelemetryRule _makerText(int max) => (v) {
+      final t = _hardwareText(v);
+      if (t is! String || t.length > max) return null;
+      if (RegExp(r'([0-9A-Fa-f]{2}[-.]){5}[0-9A-Fa-f]{2}').hasMatch(t)) return null; // a MAC with - or .
+      if (RegExp(r'[0-9A-Za-z]{16,}').hasMatch(t)) return null; // a serial number or fingerprint-like run
+      return t;
+    };
 
 TelemetryRule _int(int min, int max) => (v) => v is int && v >= min && v <= max ? v : null;
 TelemetryRule _num(num min, num max) => (v) => v is num && v.isFinite && v >= min && v <= max ? v : null;
@@ -159,27 +180,58 @@ class TelemetryAllowList {
 
   bool _builtin(String id) => _componentId.hasMatch(id) && _isBuiltin(id);
 
-  late final TelemetryRule device = _object({
-    'platform': _oneOf({'android', 'windows', 'linux'}),
-    'osVersion': _match(_osVersion),
-    'cpu': _hardwareText,
-    'cores': _object({'big': _int(0, 1024), 'little': _int(0, 1024), 'other': _int(0, 1024)}),
-    'maxClockMHz': _list(_int(0, 20000), 4), // up to 4 core types (the relay's PLAN.md)
-    'ramGB': _int(0, 4096),
-    'gpu': _hardwareText,
-    'refreshHz': _int(0, 1000),
+  // Unknown measurements are null (owner, 2026-11-12): every number, cpu, gpu, osVersion, exclusive and lowLatency
+  // may be an explicit null.
+  /// One `device.peripherals` entry, or null without a kind and connection.
+  Object? peripheral(Object? v) => switch (_object({
+        'kind': _oneOf(peripheralKinds),
+        'connection': _oneOf(connections),
+        'model': _makerText(80),
+        'vendorId': _match(_usbId),
+        'productId': _match(_usbId),
+        'channels': _int(0, 1024),
+        'inUse': _bool,
+      })(v)) {
+        final Map<String, Object?> m when m.containsKey('kind') && m.containsKey('connection') => m,
+        _ => null,
+      };
+
+  late final TelemetryRule _deviceRule = _object({
+    'platform': _oneOf({'android', 'ios', 'windows', 'macos', 'linux'}),
+    'arch': _oneOf({'arm64', 'arm', 'x64', 'x86', 'riscv64', 'other'}),
+    'osName': _makerText(40),
+    'osVersion': _nullable(_match(_osVersion)),
+    'manufacturer': _makerText(40),
+    'model': _makerText(80),
+    'formFactor': _oneOf({'phone', 'tablet', 'laptop', 'desktop', 'tv', 'other', 'unknown'}),
+    'cpu': _nullable(_hardwareText),
+    'cores': _object({
+      'big': _nullable(_int(0, 1024)), 'little': _nullable(_int(0, 1024)), 'other': _nullable(_int(0, 1024)),
+    }),
+    'maxClockMHz': _nullable(_list(_int(0, 20000), 4)), // up to 4 core types (PLAN.md)
+    'ramGB': _nullable(_int(0, 4096)),
+    'gpu': _nullable(_hardwareText),
+    'refreshHz': _nullable(_int(0, 1000)),
+    'screen': (v) => switch (_object({
+          'widthPx': _int(0, 100000), 'heightPx': _int(0, 100000), 'dpi': _int(0, 10000), 'displays': _int(0, 64),
+        })(v)) {
+          final Map<String, Object?> m when m.containsKey('widthPx') && m.containsKey('heightPx') => m,
+          _ => null,
+        },
     'audio': _object({
       'backend': _match(_backend),
-      'exclusive': _bool,
-      'lowLatency': _bool,
-      'bufferFrames': _int(0, 1 << 20),
-      'sampleRate': _int(0, 1000000),
+      'exclusive': _nullable(_bool),
+      'lowLatency': _nullable(_bool),
+      'bufferFrames': _nullable(_int(0, 1 << 20)),
+      'sampleRate': _nullable(_int(0, 1000000)),
+      'output': _oneOf(connections),
     }),
+    'peripherals': _list(peripheral, 16),
     'profile': _oneOf({'full', 'balanced', 'lightweight', 'minimal'}),
     'eco': _bool,
   });
 
-  late final TelemetryRule stress = _object({
+  late final TelemetryRule _stressRule = _object({
     'version': _int(1, 1000),
     'tiers': _object({
       for (final t in const ['normal', 'heavy', 'extreme']) t: _oneOf({'comfortable', 'tight', 'over'}),
@@ -205,7 +257,7 @@ class TelemetryAllowList {
   });
 
   // An entry without a valid relative `where` is dropped whole (the relay answers an absolute path with 400).
-  late final TelemetryRule errors = _list(
+  late final TelemetryRule _errorsRule = _list(
       (v) => switch (_object({'type': _match(_errorType), 'where': _match(_where), 'count': _int(0, 1 << 30)})(v)) {
             final Map<String, Object?> m when m.containsKey('where') && m.containsKey('type') && !(m['where'] as String).contains('..') => m,
             _ => null,
@@ -217,17 +269,27 @@ class TelemetryAllowList {
     'receipt': _match(_hex32),
     'deleteHash': _match(_hex64),
     'channel': _oneOf({'beta', 'release'}),
+    'kind': _oneOf({'daily', 'stress'}), // optional, default daily (owner, 2026-11-12)
     'day': _match(_day),
-    'app': _object({'version': _match(_version), 'engineVersion': _match(_version), 'capiVersion': _int(0, 100000)}),
-    'device': device,
+    'app': _object({
+      'version': _match(_version),
+      'engineVersion': _match(_version),
+      'capiVersion': _int(0, 100000),
+      'build': _match(_build), // optional: left out when missing or malformed
+    }),
+    'device': _deviceRule,
     'perf': _object({
-      'cpuLoadHistogram': (v) => v is List && v.length == 10 ? _list(_num(0, 1), 10)(v) : null,
-      'dropouts': _int(0, 1 << 30),
-      'worstCallbackPct': _int(0, 100000),
-      'frames': _object({'p50ms': _num(0, 100000), 'p99ms': _num(0, 100000), 'slowPct': _int(0, 100)}),
-      'startupMs': _int(0, 1 << 30),
-      'thermalEvents': _int(0, 1 << 30),
-      'batterySaverMinutes': _int(0, 1 << 30),
+      'cpuLoadHistogram': _nullable((v) => v is List && v.length == 10 && v.every((e) => e is num && e.isFinite && e >= 0 && e <= 1)
+          ? List<Object?>.of(v)
+          : null),
+      'dropouts': _nullable(_int(0, 1 << 30)),
+      'worstCallbackPct': _nullable(_int(0, 100000)),
+      'frames': _object({
+        'p50ms': _nullable(_num(0, 100000)), 'p99ms': _nullable(_num(0, 100000)), 'slowPct': _nullable(_int(0, 100)),
+      }),
+      'startupMs': _nullable(_int(0, 1 << 30)),
+      'thermalEvents': _nullable(_int(0, 1 << 30)),
+      'batterySaverMinutes': _nullable(_int(0, 1 << 30)),
       'schedHint': _oneOf({'on', 'off', 'unsupported'}),
       'callbackCoreType': _oneOf({'big', 'little', 'other', 'unknown'}),
     }),
@@ -241,8 +303,8 @@ class TelemetryAllowList {
         'clips': _oneOf({'1-10', '11-50', '51-200', '201+'}),
       }),
     }),
-    'stress': _nullable(stress),
-    'errors': errors,
+    'stress': _nullable(_stressRule),
+    'errors': _errorsRule,
   });
 
   late final TelemetryRule _feedback = _object({
@@ -250,10 +312,16 @@ class TelemetryAllowList {
     'kind': _oneOf({'bug', 'idea', 'confusing', 'praise'}),
     'text': (v) => v is String && v.trim().isNotEmpty && v.length <= maxFeedbackChars ? v : null,
     'appVersion': _match(_version),
+    'build': _match(_build),
     'platform': _oneOf({'android', 'windows', 'linux'}),
-    'attachments': _object({'device': device, 'stress': stress, 'errors': errors}),
+    'attachments': _object({'device': _deviceRule, 'stress': _stressRule, 'errors': _errorsRule}),
     'contact': (v) => v is String && v.length <= 254 && _email.hasMatch(v) ? v : null,
   });
+
+  /// H2's `device`, `stress` and `errors` alone (the feedback form's attachments, a stress result), allow-listed.
+  Object? device(Object? v) => _unwrap(_deviceRule(v));
+  Object? stress(Object? v) => _unwrap(_stressRule(v));
+  Object? errors(Object? v) => _unwrap(_errorsRule(v));
 
   /// [report] with only H2's fields. The result is what gets queued and shown.
   Map<String, Object?> report(Map<String, Object?> report) => _unwrap(_report(report)) as Map<String, Object?>? ?? {};

@@ -1,5 +1,5 @@
-// Settings › About and beta: the version, Privacy (telemetry, My data), Send feedback, Report a problem (a report
-// copied to paste into an issue), Engine diagnostics, the Privacy Policy and Terms, and licences.
+// Settings › About and beta: the version, Privacy (telemetry, what's sent, My data), Send feedback, Report a problem
+// (a report copied to paste into an issue), Engine diagnostics, the Privacy Policy and Terms, and licences.
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -10,6 +10,7 @@ import '../privacy/feedback_sheet.dart';
 import '../privacy/privacy_pages.dart';
 import '../theme.dart';
 import 'engine_diagnostics.dart';
+import 'privacy_settings.dart';
 import 'settings_deps.dart';
 import 'settings_widgets.dart';
 
@@ -25,19 +26,10 @@ class AboutSettings extends StatelessWidget {
         // Telemetry and feedback exist once the app has started them (not in Settings opened alone).
         settingAction('about.privacy',
             icon: Icons.privacy_tip_outlined, iconColor: Neon.green,
-            subtitle: switch (Telemetry.current) {
-              final t? => t.enabled
-                  ? 'Anonymous telemetry on · what\'s sent, My data'
-                  : 'Anonymous telemetry off · what\'s sent, My data',
-              null => 'Anonymous telemetry, what\'s sent and My data',
-            },
-            onTap: switch (Telemetry.current) {
-              final t? => () => showPrivacyPage(context, t),
-              null => null,
-            }),
+            subtitle: privacySummary(Telemetry.current),
+            onTap: () => showPrivacyPage(context, deps)),
         settingAction('about.feedback',
             icon: Icons.rate_review_outlined, iconColor: Neon.blue,
-            subtitle: 'A bug, an idea, something confusing or praise; posted publicly',
             onTap: switch (Telemetry.current) {
               final t? => () => showFeedbackSheet(context, t),
               null => null,

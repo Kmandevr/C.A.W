@@ -73,21 +73,26 @@ class DayStats {
   }
 
   /// H2's `perf`. [schedHint] and [callbackCoreType] wait for A1's diagnostics.
-  Map<String, Object?> perf({String schedHint = 'off', String callbackCoreType = 'unknown'}) => {
-        'cpuLoadHistogram': histogramShares(cpuBuckets),
-        'dropouts': dropouts,
-        'worstCallbackPct': budgetPct5(worstCpu),
-        'frames': {
-          'p50ms': _framePercentile(0.5),
-          'p99ms': _framePercentile(0.99),
-          'slowPct': frames == 0 ? 0 : (slowFrames / frames * 100).round(), // a whole percent (PLAN.md)
-        },
-        'startupMs': startupMs50(startupMs ?? 0),
-        'thermalEvents': thermalEvents,
-        'batterySaverMinutes': minutes5(batterySaverSeconds),
-        'schedHint': schedHint,
-        'callbackCoreType': callbackCoreType,
-      };
+  /// H2's `perf`; a figure nothing measured is null (owner, 2026-11-12). [schedHint] and [callbackCoreType] wait
+  /// for A1's diagnostics.
+  Map<String, Object?> perf({String schedHint = 'off', String callbackCoreType = 'unknown'}) {
+    final played = cpuBuckets.any((c) => c > 0);
+    return {
+      'cpuLoadHistogram': played ? histogramShares(cpuBuckets) : null,
+      'dropouts': dropouts,
+      'worstCallbackPct': played ? budgetPct5(worstCpu) : null,
+      'frames': {
+        'p50ms': frames == 0 ? null : _framePercentile(0.5),
+        'p99ms': frames == 0 ? null : _framePercentile(0.99),
+        'slowPct': frames == 0 ? null : (slowFrames / frames * 100).round(), // a whole percent (PLAN.md)
+      },
+      'startupMs': startupMs == null ? null : startupMs50(startupMs!),
+      'thermalEvents': thermalEvents,
+      'batterySaverMinutes': minutes5(batterySaverSeconds),
+      'schedHint': schedHint,
+      'callbackCoreType': callbackCoreType,
+    };
+  }
 
   /// H2's `usage`.
   Map<String, Object?> usage() => {
@@ -116,44 +121,44 @@ class DayStats {
         'tracks': maxTracks, 'clips': maxClips, 'errors': errors,
       };
 
+  /// Null when [j] has no day; a wrong-typed field reads as empty, so one bad value never loses the rest.
   static DayStats? fromJson(Object? j) {
     if (j is! Map || j['day'] is! String) return null;
     final s = DayStats(j['day'] as String);
+    double d(Object? v) => v is num && v.isFinite ? v.toDouble() : 0;
+    int n(Object? v, [int or = 0]) => v is num && v.isFinite ? v.toInt() : or;
     void ints(Object? from, List<int> into) {
       if (from is! List || from.length != into.length) return;
       for (var i = 0; i < into.length; i++) {
-        into[i] = (from[i] as num?)?.toInt() ?? 0;
+        into[i] = n(from[i]);
       }
     }
 
-    double d(Object? v) => (v as num?)?.toDouble() ?? 0;
-    int n(Object? v, [int or = 0]) => (v as num?)?.toInt() ?? or;
     ints(j['cpu'], s.cpuBuckets);
     ints(j['frames'], s.frameBins);
     s
       ..dropouts = n(j['dropouts'])
       ..worstCpu = d(j['worstCpu'])
       ..slowFrames = n(j['slow'])
-      ..startupMs = (j['startupMs'] as num?)?.toInt()
+      ..startupMs = j['startupMs'] is num ? n(j['startupMs']) : null
       ..thermalEvents = n(j['thermal'])
       ..batterySaverSeconds = d(j['saver'])
       ..openSeconds = d(j['open'])
       ..playingSeconds = d(j['playing'])
       ..maxTracks = n(j['tracks'], -1)
       ..maxClips = n(j['clips'], -1);
-    if (j['screens'] case final Map m) {
-      for (final e in m.entries) {
-        if (e.key is String && e.value is num) s.screenSeconds[e.key as String] = (e.value as num).toDouble();
+    for (final (key, into) in [('screens', s.screenSeconds)]) {
+      if (j[key] case final Map m) {
+        for (final e in m.entries) {
+          if (e.key is String && e.value is num) into[e.key as String] = d(e.value);
+        }
       }
     }
-    if (j['builtins'] case final Map m) {
-      for (final e in m.entries) {
-        if (e.key is String && e.value is num) s.builtins[e.key as String] = (e.value as num).toInt();
-      }
-    }
-    if (j['errors'] case final Map m) {
-      for (final e in m.entries) {
-        if (e.key is String && e.value is num) s.errors[e.key as String] = (e.value as num).toInt();
+    for (final (key, into) in [('builtins', s.builtins), ('errors', s.errors)]) {
+      if (j[key] case final Map m) {
+        for (final e in m.entries) {
+          if (e.key is String && e.value is num) into[e.key as String] = n(e.value);
+        }
       }
     }
     return s;

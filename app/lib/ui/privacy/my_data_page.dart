@@ -82,10 +82,30 @@ class _MyDataPageState extends State<MyDataPage> {
     }
   }
 
-  Future<void> _export() => _run(() async {
-        final ok = await (widget.saveReceipts ?? _defaultSave)(t.exportReceipts());
-        if (mounted && ok) _say('Receipts saved. Keep the file private: its keys can delete your reports.');
-      });
+  Future<void> _export() async {
+    // The warning comes before the save picker, so nobody saves the keys somewhere shared without knowing.
+    final go = await showDialog<bool>(
+      context: context,
+      animationStyle: dialogAnimation(context),
+      builder: (c) => AlertDialog(
+        title: const Text('Export my receipts'),
+        content: const Text('Keep this file private: its keys can delete your reports. Anyone who has it can ask '
+            'the relay to delete them, so don\'t share it or save it to a shared folder.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Cancel')),
+          FilledButton(
+              key: const ValueKey('my-data-export-confirm'),
+              onPressed: () => Navigator.pop(c, true),
+              child: const Text('Choose where to save')),
+        ],
+      ),
+    );
+    if (go != true) return;
+    await _run(() async {
+      final ok = await (widget.saveReceipts ?? _defaultSave)(t.exportReceipts());
+      if (mounted && ok) _say('Receipts saved.');
+    });
+  }
 
   Future<void> _delete() async {
     final ok = await showDialog<bool>(
@@ -179,7 +199,7 @@ class _MyDataPageState extends State<MyDataPage> {
         child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
           Row(children: [
             Expanded(
-              child: Text('${r.day} · ${r.kind == ReportKind.stress ? 'Stress test' : 'Daily'}',
+              child: Text('${r.day} · ${r.kind == ReportKind.stress ? 'Benchmark' : 'Daily'}',
                   style: const TextStyle(fontWeight: FontWeight.w600)),
             ),
             AnimatedContainer(
@@ -223,7 +243,12 @@ class _MyDataPageState extends State<MyDataPage> {
             duration: Motion.move(Motion.panel, Motion.of(context)),
             alignment: Alignment.topCenter,
             child: open
-                ? jsonBlock(const JsonEncoder.withIndent('  ').convert(jsonDecode(r.json)), key: ValueKey('json-${r.receipt}'))
+                ? jsonBlock(
+                    r.json.isEmpty
+                        ? 'Older than ${Telemetry.keepJsonFor.inDays} days: only the receipt and its key are kept here. '
+                            'The published copy is in the repository.'
+                        : const JsonEncoder.withIndent('  ').convert(jsonDecode(r.json)),
+                    key: ValueKey('json-${r.receipt}'))
                 : const SizedBox(width: double.infinity),
           ),
         ]),
