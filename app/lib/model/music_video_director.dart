@@ -1,5 +1,6 @@
 // The music video's auto director: a deterministic shot list from the arrangement (cuts on bars, beats and sections,
-// shots weighted by what plays, moves and is loud), style transitions, and a critically damped spring camera.
+// shots weighted by what plays, moves and is loud), style transitions, and a critically damped spring camera (or,
+// with smooth follow, a camera locked to the playhead).
 import 'dart:math' as math;
 
 import 'music_video.dart';
@@ -77,8 +78,17 @@ class _Rng {
 
 /// The shot list for [scene] over [start, end) (song steps).
 class ShotPlan {
-  ShotPlan(this.shots, {required this.omega, required this.bpm});
+  ShotPlan(this.shots, {required this.omega, required this.bpm, this.smoothFollow = false});
   final List<DirectedShot> shots;
+
+  /// Smooth follow: the arrangement and piano-roll cameras lock to the playhead (see [MusicVideoOptions.smoothFollow]).
+  final bool smoothFollow;
+
+  /// Where a locked camera holds the playhead, as a fraction of the view's width from its left edge.
+  static const lockedAnchor = 1 / 3;
+
+  /// How long a locked camera takes to ease its zoom after a cut from a shot of the same kind (steps; one beat).
+  static const lockedZoomSteps = 4.0;
 
   /// The camera springs' natural frequency (radians per second).
   final double omega;
@@ -102,6 +112,7 @@ class ShotPlan {
 
   /// The camera of [shot] at [step].
   ShotCamera camera(DirectedShot shot, double step) {
+    if (smoothFollow && locks(shot.kind)) return _locked(shot, step);
     final t = math.max(0.0, (step - shot.start) * 15 / bpm);
     final zoom = springTo(t, from: shot.zoomFrom, velocity: 0, target: shot.zoomTo, omega: omega).$1;
     // The pan follows the playhead (moving at bpm/15 steps a second): it starts at rest, [leadSteps] behind.
@@ -109,13 +120,33 @@ class ShotPlan {
     final x = springFollow(t, x0: shot.start - shot.leadSteps, u0: 0, a: shot.start, v: v, omega: omega).$1;
     return ShotCamera(center: x, zoom: zoom);
   }
+
+  /// Whether smooth follow locks [kind]'s camera to the playhead.
+  static bool locks(VideoShot kind) => kind == VideoShot.flythrough || kind == VideoShot.pianoRoll;
+
+  /// The locked camera: on the playhead, at the shot's own zoom held all through it. A cut from a shot of the same
+  /// kind eases from that shot's zoom over [lockedZoomSteps] (smoothstep), the playhead staying where it is.
+  ShotCamera _locked(DirectedShot shot, double step) {
+    var zoom = shot.zoomFrom;
+    final i = indexAt(shot.start);
+    if (i > 0 && identical(shots[i], shot) && shots[i - 1].kind == shot.kind) {
+      final ease = math.min(lockedZoomSteps, (shot.end - shot.start) / 2);
+      final x = ease <= 0 ? 1.0 : ((step - shot.start) / ease).clamp(0.0, 1.0);
+      final p = x * x * (3 - 2 * x);
+      zoom = shots[i - 1].zoomFrom + (shot.zoomFrom - shots[i - 1].zoomFrom) * p;
+    }
+    return ShotCamera(center: step, zoom: zoom, anchor: lockedAnchor);
+  }
 }
 
 class ShotCamera {
-  const ShotCamera({required this.center, required this.zoom});
+  const ShotCamera({required this.center, required this.zoom, this.anchor});
 
   /// The step the view centres on, and the zoom (1 shows the shot's visible steps; above 1 shows fewer).
   final double center, zoom;
+
+  /// Where [center] sits across the view (0 the left edge, 1 the right), or null for the shot's own framing.
+  final double? anchor;
 }
 
 /// A critically damped spring after a fixed target: position and velocity [t] seconds after it was at [from]
@@ -248,5 +279,5 @@ ShotPlan directVideo(VideoScene scene, MusicVideoOptions options, {required doub
   if (shots.isEmpty) {
     shots.add(DirectedShot(kind: enabled.first, start: start, end: math.max(end, start + 1)));
   }
-  return ShotPlan(shots, omega: rules.omega, bpm: scene.bpm);
+  return ShotPlan(shots, omega: rules.omega, bpm: scene.bpm, smoothFollow: options.smoothFollow);
 }

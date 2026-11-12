@@ -1,5 +1,5 @@
-// The arrangement music video's setup (docs/decisions.md "Arrangement music video"): shots, style, range, aspect
-// ratio, resolution, frame rate and title card, the checks on them, and the frame clock that ties a frame to song time.
+// The arrangement music video's setup (docs/decisions.md "Arrangement music video"): shots, style, smooth follow,
+// range, aspect ratio, resolution, frame rate and title card, the checks on them, and the frame clock that ties a frame to song time.
 import 'dart:math' as math;
 
 /// The shots the director can cut between; each can be switched off.
@@ -126,6 +126,7 @@ class MusicVideoOptions {
     this.title = '',
     this.artist = '',
     this.seed = 1,
+    this.smoothFollow = false,
   })  : shots = shots ?? {...VideoShot.values},
         aspect = aspect ?? VideoAspect.portrait;
 
@@ -144,10 +145,15 @@ class MusicVideoOptions {
   /// The director's seed: the same seed and song always give the same video.
   int seed;
 
+  /// Smooth follow (owner, 2026-11-11; off by default): the arrangement and piano-roll shots hold the playhead a
+  /// third of the way in and scroll the song under it, their zoom held through each shot and eased only at a cut.
+  /// Off keeps the spring camera.
+  bool smoothFollow;
+
   MusicVideoOptions copy() => MusicVideoOptions(
         shots: {...shots}, style: style, range: range, aspect: aspect, resolution: resolution,
         customWidth: customWidth, customHeight: customHeight, fps: fps, titleCard: titleCard, title: title,
-        artist: artist, seed: seed);
+        artist: artist, seed: seed, smoothFollow: smoothFollow);
 
   /// The frame's width and height.
   (int, int) get size => resolution == VideoResolution.custom ? (customWidth, customHeight) : presetSize(aspect, resolution);
