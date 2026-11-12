@@ -7,6 +7,7 @@ import '../../model/app_state.dart';
 import '../../model/automation_writer.dart';
 import '../../model/live_midi.dart';
 import '../audio_record_ui.dart';
+import '../background_playback_ui.dart';
 import '../feedback.dart';
 import '../glass.dart';
 import '../haptics.dart';
@@ -372,10 +373,10 @@ class _BottomTransportState extends State<BottomTransport> {
     if (midi == null) return bar;
     return TakeToast(
       midi: midi,
-      child: AudioRecordFeedback(state: s, child: Column(mainAxisSize: MainAxisSize.min, children: [
+      child: AudioRecordFeedback(state: s, child: BackgroundHintFeedback(child: Column(mainAxisSize: MainAxisSize.min, children: [
         LiveKeysPanel(midi: midi, state: s, compact: widget.compact),
         bar,
-      ])),
+      ]))),
     );
   }
 

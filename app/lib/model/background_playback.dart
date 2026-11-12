@@ -17,6 +17,9 @@ class BackgroundPlayback {
     _sync();
   }
 
+  /// The app's one (main.dart), for Settings › Audio and the hint.
+  static BackgroundPlayback? current;
+
   final AppState state;
   final PlaybackService service;
   final AudioRecorder? Function() _recorder;
@@ -48,10 +51,44 @@ class BackgroundPlayback {
     r?.addListener(_sync);
   }
 
+  /// The one-time hint (owner, 2026-11-12): playback went behind the app while Android restricts C.A.W's battery, so
+  /// on return the app suggests Unrestricted, with Open settings and Don't show again. Once a run at most.
+  final hint = ValueNotifier<bool>(false);
+  bool _hintDue = false, _hintGiven = false;
+
   void _onForeground() {
-    if (state.foreground.value) _heldPaused = false;
+    if (state.foreground.value) {
+      _heldPaused = false;
+      if (_hintDue) {
+        _hintDue = false;
+        _hintGiven = true;
+        hint.value = true;
+      }
+    } else if (_shown != null && !_hintGiven && !_hintDue && !state.settings.backgroundHintOff) {
+      unawaited(service.batteryUnrestricted().then((unrestricted) {
+        if (unrestricted != false || _disposed || _hintGiven || state.settings.backgroundHintOff) return;
+        if (state.foreground.value) {  // back already
+          _hintGiven = true;
+          hint.value = true;
+        } else {
+          _hintDue = true;
+        }
+      }));
+    }
     _sync();
   }
+
+  /// The hint answered: closed for now, or [forever] ("Don't show again", saved in settings).
+  void dismissHint({bool forever = false}) {
+    hint.value = false;
+    if (forever) unawaited(state.settings.update((s) => s.backgroundHintOff = true));
+  }
+
+  /// Opens Android's battery page for C.A.W (Settings › Audio's row and the hint).
+  Future<bool> openBatterySettings() => service.openBatterySettings();
+
+  /// Whether C.A.W's battery is unrestricted; null where there is no such setting.
+  Future<bool?> batteryUnrestricted() => service.batteryUnrestricted();
 
   // The transport, the recording or the lifecycle changed: start, update or stop the service.
   void _sync() {
@@ -124,6 +161,7 @@ class BackgroundPlayback {
     state.foreground.removeListener(_onForeground);
     _watched?.removeListener(_sync);
     _check?.cancel();
+    hint.dispose();
     unawaited(_actions.cancel());
     if (_shown != null) unawaited(service.hide());
   }

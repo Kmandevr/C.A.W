@@ -389,6 +389,10 @@ class Settings extends ChangeNotifier {
   /// The phone's floating quick-actions bar (owner, 2026-11-04: not very useful yet, so off by default).
   bool quickActions = false;
 
+  /// The one-time hint to set C.A.W's battery to Unrestricted for background playback was answered "Don't show
+  /// again" (owner, 2026-11-12; Android).
+  bool backgroundHintOff = false;
+
   /// Glass surfaces (owner, 2026-11-04): frosted blur on floating things, a glass look on panels; on by default.
   bool glass = true;
 
@@ -589,6 +593,7 @@ class Settings extends ChangeNotifier {
         'focus_panel_share': focusPanelShare,
         'glass': glass,
         'quick_actions': quickActions,
+        'background_hint_off': backgroundHintOff,
         'track_gap': trackGap,
         if (headerWidth > 0) 'header_width': headerWidth,
         if (trackHeight > 0) 'track_height': trackHeight,
@@ -714,6 +719,7 @@ class Settings extends ChangeNotifier {
     if (fs is num && fs.isFinite) focusPanelShare = fs.toDouble().clamp(minFocusPanelShare, maxFocusPanelShare);
     if (j['glass'] is bool) glass = j['glass'] as bool;
     if (j['quick_actions'] is bool) quickActions = j['quick_actions'] as bool;
+    if (j['background_hint_off'] is bool) backgroundHintOff = j['background_hint_off'] as bool;
     final gap = j['track_gap'];
     if (gap is num && gap.isFinite) trackGap = gap.toDouble().clamp(0.0, maxTrackGap);
     final hw = j['header_width'];

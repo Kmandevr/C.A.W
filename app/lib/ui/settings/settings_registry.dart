@@ -146,6 +146,8 @@ const List<SettingEntry> settingEntries = [
       ['latency', 'mmap', 'wasapi', 'aaudio', 'low latency', 'exclusive']),
   _E('audio.quality', _a, 'Sound quality', 'Eco, Normal or High: oversampling, unison copies and reverb density',
       ['eco', 'battery', 'oversampling', 'cpu']),
+  _E('audio.background', _a, 'Background playback', 'Whether Android restricts C.A.W\'s battery behind other apps (Android)',
+      ['battery', 'unrestricted', 'background', 'optimization', 'samsung', 'sleep']),
   _E('audio.test', _a, 'Test tone', 'Plays 440 Hz for a moment to check the output', ['beep', 'sine', 'check', 'a4']),
   _E('audio.input', _a, 'Audio input', 'Record and monitor audio tracks: asks for the microphone the first time',
       ['microphone', 'mic', 'record', 'input', 'interface', 'permission']),

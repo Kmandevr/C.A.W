@@ -9,15 +9,19 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
+import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.graphics.drawable.Icon
+import android.net.Uri
 import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.os.PowerManager
+import android.provider.Settings
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 
@@ -177,7 +181,7 @@ class PlaybackService : Service() {
     }
 }
 
-/** The "caw/playback_service" channel: show, hide and the notification permission; the buttons come back as "action". */
+/** The "caw/playback_service" channel: show, hide, the notification permission and the battery choice; the buttons come back as "action". */
 class PlaybackChannel(private val activity: Activity, private val channel: MethodChannel) : MethodChannel.MethodCallHandler {
     private var pending: MethodChannel.Result? = null
 
@@ -195,6 +199,9 @@ class PlaybackChannel(private val activity: Activity, private val channel: Metho
                 result.success(null)
             }
             "notificationsAllowed" -> result.success(notificationsAllowed())
+            "batteryUnrestricted" -> result.success(
+                activity.getSystemService(PowerManager::class.java)?.isIgnoringBatteryOptimizations(activity.packageName))
+            "openBatterySettings" -> result.success(openBatterySettings())
             "requestNotifications" -> {
                 if (notificationsAllowed() || Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return result.success(notificationsAllowed())
                 if (pending != null) return result.error("busy", "a permission request is already open", null)
@@ -203,6 +210,26 @@ class PlaybackChannel(private val activity: Activity, private val channel: Metho
             }
             else -> result.notImplemented()
         }
+    }
+
+    // The app's details page first: its Battery entry holds the per-app Unrestricted / Optimized / Restricted choice
+    // ([Assumption] on Samsung One UI, one tap from there); else the system's battery-optimization list. Never the
+    // ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS dialog (owner, 2026-11-12). developer.android.com Settings and
+    // PowerManager references, read 2026-11-12.
+    private fun openBatterySettings(): Boolean {
+        val tries = listOf(
+            Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:" + activity.packageName)),
+            Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS),
+        )
+        for (intent in tries) {
+            try {
+                activity.startActivity(intent)
+                return true
+            } catch (_: ActivityNotFoundException) {
+            } catch (_: SecurityException) {
+            }
+        }
+        return false
     }
 
     private fun notificationsAllowed(): Boolean =

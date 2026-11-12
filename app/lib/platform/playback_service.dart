@@ -1,5 +1,5 @@
 // Background playback: Android's foreground service of type mediaPlayback (PlaybackService.kt) with its notification
-// ("C.A.W is playing" or "recording", Play/Pause and Stop), over "caw/playback_service"; other platforms have none.
+// ("C.A.W is playing" or "recording", Play/Pause and Stop) and the battery choice, over "caw/playback_service"; others have none.
 import 'dart:async';
 import 'dart:io';
 
@@ -24,6 +24,14 @@ abstract class PlaybackService {
 
   /// The notification's buttons, as they are pressed.
   Stream<PlaybackAction> get actions;
+
+  /// Whether the system leaves C.A.W's battery use unrestricted (Android: on the power allowlist,
+  /// `PowerManager.isIgnoringBatteryOptimizations`); null where there is no such setting (the row is hidden).
+  Future<bool?> batteryUnrestricted();
+
+  /// Opens the system page closest to C.A.W's own battery choice (Android: the app's details page, else the
+  /// battery-optimization list); false when none opened.
+  Future<bool> openBatterySettings();
 }
 
 /// Windows and the desktop test builds: the app keeps playing behind other windows anyway, with no notification.
@@ -39,6 +47,10 @@ class NoPlaybackService implements PlaybackService {
   Future<bool> requestNotifications() async => true;
   @override
   Stream<PlaybackAction> get actions => const Stream.empty();
+  @override
+  Future<bool?> batteryUnrestricted() async => null;
+  @override
+  Future<bool> openBatterySettings() async => false;
 }
 
 class AndroidPlaybackService implements PlaybackService {
@@ -74,6 +86,10 @@ class AndroidPlaybackService implements PlaybackService {
   Future<bool> requestNotifications() async => await _call<bool>('requestNotifications') ?? false;
   @override
   Stream<PlaybackAction> get actions => _actions.stream;
+  @override
+  Future<bool?> batteryUnrestricted() => _call<bool>('batteryUnrestricted');
+  @override
+  Future<bool> openBatterySettings() async => await _call<bool>('openBatterySettings') ?? false;
 }
 
 PlaybackService platformPlaybackService() => Platform.isAndroid ? AndroidPlaybackService() : const NoPlaybackService();

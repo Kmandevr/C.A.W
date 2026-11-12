@@ -60,7 +60,7 @@ Future<void> main() async {
 
   // Background playback: Android's foreground service while playing or recording, its notification driving the
   // transport (background_playback.dart).
-  BackgroundPlayback(state, platformPlaybackService());
+  BackgroundPlayback.current = BackgroundPlayback(state, platformPlaybackService());
 
   runApp(CawApp(state: state));
   state.init();
