@@ -6,9 +6,9 @@
 namespace caw {
 
 // A stereo pair's two channels run through the same arithmetic in one vector on GCC and Clang (the plain struct
-// elsewhere: MSVC and clang-cl). Each lane's arithmetic is the scalar one in the scalar order, so on a target
-// without fused multiply-adds the bits are the scalar code's; where the compiler fuses (Arm64), it may pair a
-// different multiply with the add than in scalar code: a last-bit difference (speed phase 4, engine-performance.md).
+// elsewhere: MSVC and clang-cl). Each lane's arithmetic is the scalar one in the scalar order, but the engine's
+// flags let the compiler fuse multiply-adds (Arm64) and reassociate sums, so the vector and the scalar code may
+// differ in the last bits: the same arithmetic up to fusing or reassociation (speed phase 4, engine-performance.md).
 #if defined(__GNUC__)
 typedef double Pair __attribute__((vector_size(16)));
 inline Pair pairOf(double a, double b) noexcept { return Pair{a, b}; }
@@ -60,25 +60,12 @@ inline Pair flushPair(Pair p) noexcept {
 }
 #endif
 
-// lib::tanhApprox per lane (its operations in its order; elsewhere two calls).
+// lib::tanhApprox per lane (its clamp, then the same lib::tanhApproxRational; elsewhere two calls).
 inline Pair tanhApproxPair(Pair x) noexcept {
 #if defined(__GNUC__)
     x = x == x ? x : splat(0.0);
     x = x > splat(10.0) ? splat(10.0) : (x < splat(-10.0) ? splat(-10.0) : x);
-    const Pair s = x * x;
-    Pair p = splat(3.217632110003212e-11);
-    p = p * s + 1.0357852250132971e-07;
-    p = p * s + 4.092017186705684e-05;
-    p = p * s + 0.0043728758223902315;
-    p = p * s + 0.14059264090233234;
-    p = p * s + 0.9999999993415611;
-    Pair q = splat(2.6742358055163463e-09);
-    q = q * s + 2.4792909092118756e-06;
-    q = q * s + 0.0004906653531677001;
-    q = q * s + 0.02901487015638532;
-    q = q * s + 0.4739259712575389;
-    q = q * s + 1.0;
-    return x * p / q;
+    return lib::tanhApproxRational(x);
 #else
     return pairOf(lib::tanhApprox(lane(x, 0)), lib::tanhApprox(lane(x, 1)));
 #endif

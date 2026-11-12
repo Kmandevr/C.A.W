@@ -146,6 +146,27 @@ TEST(library_audio_rate_approximations_stay_far_below_hearing) {
         worstFilter = std::max(worstFilter, std::fabs(la.process<lib::LadderMode::LowPass>(x) - lb.process<lib::LadderMode::LowPass>(x)));
     }
     CHECK(worstFilter < 1e-8);  // -160 dB
+    // set() after setApprox() with the same arguments (and back) works the coefficients out again: the cache knows
+    // which form made them.
+    for (const double fc : {1234.5, 9000.0, 15000.0, 23000.0}) {
+        lib::Svf switched, exact, switchedBack, approx;
+        switched.setApprox(fc, 2.0, 48000.0);
+        switched.set(fc, 2.0, 48000.0);
+        exact.set(fc, 2.0, 48000.0);
+        switchedBack.set(fc, 2.0, 48000.0);
+        switchedBack.setApprox(fc, 2.0, 48000.0);
+        approx.setApprox(fc, 2.0, 48000.0);
+        lib::MultiLadder lSwitched, lExact;
+        lSwitched.setApprox(fc, 0.6, 48000.0);
+        lSwitched.set(fc, 0.6, 48000.0);
+        lExact.set(fc, 0.6, 48000.0);
+        for (int k = 0; k < 64; ++k) {
+            const double x = k == 0 ? 1.0 : 0.0;
+            CHECK_EQ(switched.lowpass(x), exact.lowpass(x));
+            CHECK_EQ(switchedBack.lowpass(x), approx.lowpass(x));
+            CHECK_EQ(lSwitched.process<lib::LadderMode::LowPass>(x), lExact.process<lib::LadderMode::LowPass>(x));
+        }
+    }
 }
 
 TEST(library_block_oscillators_follow_morph_wave) {

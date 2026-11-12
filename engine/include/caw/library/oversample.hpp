@@ -106,7 +106,8 @@ public:
     }
     // up() for each of x[0..n) into out[0..2n) (each x's two in turn), and down() for each pair of in[0..2n) into
     // out[0..n): the same arithmetic sample by sample, with the state held in locals over the block instead of
-    // loaded and stored every sample (speed phase 4).
+    // loaded and stored every sample (speed phase 4). The input and output buffers must not overlap: upBlock
+    // writes out[2f] and out[2f+1] before it reads later inputs.
     void upBlock(const double* x, double* out, int n) noexcept { block<false>(x, out, n); }
     void downBlock(const double* in, double* out, int n) noexcept { block<true>(in, out, n); }
     void clear() noexcept {
