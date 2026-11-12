@@ -121,6 +121,7 @@ public:
     // The modulation of chain `chain` of `slot` (-1 the master) for this chunk, or null. `which` (0 or 1) picks
     // the scratch, so a chain and the one it replaces (crossfading) can both be modulated in one chunk; 2 is the
     // per-note FX's (ModChainKind::NoteFx), whose bindings the NoteFxHost copies (it runs inside the instrument).
+    // Each slot (and the master) has its own output (speed phase 5a): another slot's call never overwrites it.
     const ChainModulation* forChain(int slot, ModChainKind kind, const ComponentChain* chain, int which) noexcept;
     // A layer's volume, pan or send `send` offset per frame this chunk (normalized travel), or null.
     const float* volume(int slot) const noexcept;

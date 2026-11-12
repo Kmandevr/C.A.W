@@ -206,6 +206,13 @@ public:
     uint32_t mixGraphNodesRun() const noexcept;
     // Tests only, between process() calls: slots the per-chunk loops (planning, solo, routing) visit.
     int slotsScannedPerChunk() const noexcept;
+    // Tests only: the track gain glide's per-sample factor (set when the Engine is made, speed phase 5a).
+    double trackGainCoefForTest() const noexcept { return trackGainCoef_; }
+    // Tests only, between process() calls: run the mix graph in its plain order instead of level by level (speed
+    // phase 5b), from the next routing update on; the output must be the same bits.
+    void setMixLevelsForTest(bool on) noexcept;
+    // Tests only, between process() calls: the mix graph's levels at the last routing update (0: not routed).
+    uint32_t mixGraphLevelsForTest() const noexcept;
     // Tests only: skip the master DC blocker and limiter so layer output can be checked exactly.
     void setMasterBypass(bool on) { bypass_.store(on, std::memory_order_relaxed); }
 
@@ -225,6 +232,7 @@ private:
     struct Slot;
     struct Cmd;
     struct Retired;
+    struct RetireList;  // what one graph node hands back in a chunk (engine.cpp)
     struct AutomationData;
     struct MixGraph;  // the graph that routes slots, folder buses and master (engine.cpp)
     struct SlotTable;  // the slots, their mix graph and order list at one capacity (engine.cpp)
@@ -240,6 +248,10 @@ private:
                 std::vector<int>* order = nullptr, SlotTable* table = nullptr,
                 ComponentChain* components = nullptr) noexcept;
     void retireEntry(const Retired& r) noexcept;  // audio thread: to the control thread, to be freed
+    // Inside the graph (speed phase 5a): a node's retirements go to its own list, pushed after the graph has run.
+    void nodeRetire(RetireList& list, const Retired& r) noexcept;
+    void nodeRetireChain(RetireList& list, ComponentChain* chain) noexcept;  // null: nothing
+    void flushRetires() noexcept;
     void bindTable() noexcept;  // audio thread: cache the current table's slots, graph and sizes
     void markLive(int slot) noexcept;  // audio thread: the slot joins the in-use list the per-chunk loops visit
     int processChunk(float* l, float* r, int maxFrames) noexcept;  // returns the frames it ran
@@ -255,6 +267,8 @@ private:
     uint32_t keyNotes(const Slot& s, int m, Event* out, uint32_t max) const noexcept;
     void runRoutes(Slot& s, const float* preL, const float* preR, const float* postL, const float* postR, int m,
                    bool silenced, bool bus) noexcept;
+    // A destination's sends and keys when it runs, summed from its sources' route outputs; true if a send arrived.
+    bool pullRoutes(Slot& d, int m) noexcept;
     void runMasterNode(const float* inL, const float* inR, float* outL, float* outR, int m) noexcept;
     void updateRouting() noexcept;
     double slotTarget(const Slot& s) const noexcept;
@@ -285,7 +299,7 @@ private:
     void pickOverloadVictim() noexcept;
 
     const double sr_;
-    double trackGainCoef_ = -1.0;  // audio thread: the track gain glide's per-sample factor, worked out on first use
+    const double trackGainCoef_;  // the track and bus gain glide's per-sample factor (set with the Engine)
     const EngineResourceBudget resourceBudget_;
     int maxLayers_ = kInitialLayerCapacity;  // set once in the constructor
     int pendingMax_ = 0;                     // pending_ entries; set once in the constructor
@@ -370,10 +384,12 @@ private:
     int masterTailFade_ = 0;      // > 0: at its cap and still audible, fading out (frames left); -1: faded
     ComponentChain* masterFading_ = nullptr;  // audio thread: the master chain a newer one replaced, crossfading out
     int masterFadeLeft_ = 0;
-    float insertL_[kBlock], insertR_[kBlock];
-    float fadeL_[kBlock], fadeR_[kBlock];  // audio thread: a replaced chain's output during its crossfade
+    float masterFadeL_[kBlock], masterFadeR_[kBlock];  // audio thread: a replaced master chain's output while it fades
     float masterStageL_[kBlock], masterStageR_[kBlock];  // audio thread: the master chain runs here
-    float routeL_[kBlock], routeR_[kBlock];  // audio thread: a route's signal
+    // Audio thread: what the master node hands back in a chunk, and how many retirements every node's list holds
+    // (canRetire counts them as pushed; flushRetires pushes them after the graph). Per-slot lists are in Slot.
+    std::unique_ptr<RetireList> masterRetires_;
+    int retiresHeld_ = 0;
 
     // ---- shared ----
     std::unique_ptr<Spsc<Cmd, 1024>> cmds_;

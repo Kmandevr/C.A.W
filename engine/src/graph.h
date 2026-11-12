@@ -28,6 +28,13 @@ struct GraphConnection {
     uint32_t destinationPort = 0;
 };
 
+// An order-only dependency for dynamic routing (GraphExecutor::setRouting): `before` runs at a lower level than
+// `after`, though no audio edge joins them (the mixer's sends and sidechain keys, which their destinations pull).
+struct GraphDependency {
+    uint32_t before = 0;
+    uint32_t after = 0;
+};
+
 struct GraphResourceBudget {
     // Count ceilings are optional host policy. By default there is no arbitrary object-count cap.
     std::size_t maxNodes = std::numeric_limits<std::size_t>::max();
@@ -191,14 +198,16 @@ public:
     // Modulation, control and event inputs keep their unconnected values (silence, default, the
     // first event input the host events). Refused (RoutingUnavailable) while modulation links are
     // set, since routing could run a link's source late or not at all.
+    // maxDependencies: room for that many GraphDependency entries per setRouting() call.
     GraphError reserveRouting(uint32_t maxSourcesPerInput, const GraphResourceBudget& budget,
-                              bool routePlainInputs = false);
+                              bool routePlainInputs = false, uint32_t maxDependencies = 0);
     // prepare() with no connections plus reserveRouting(maxSourcesPerInput, budget, true) in one
     // step: every input is routed and none reads the host, so unconnected inputs may differ in
     // channel count (prepare() alone rejects that, as host input could not feed them all).
     GraphError prepareRouted(const std::vector<GraphNode>& nodes, const std::vector<ModuleProcessor*>& processors,
                              uint32_t outputNode, uint32_t maxFrames, double sampleRate,
-                             const GraphResourceBudget& budget, uint32_t maxSourcesPerInput);
+                             const GraphResourceBudget& budget, uint32_t maxSourcesPerInput,
+                             uint32_t maxDependencies = 0);
     // Audio-thread safe once reserveRouting() succeeded: replaces every dynamic route and the
     // execution order in one step. `order` lists the nodes to run, each at most once, and must
     // include the output node; nodes left out are not run at all. Every edge goes from a listed
@@ -206,8 +215,25 @@ public:
     // in `order`, with equal channel counts, no duplicates, at most the reserved number per summing
     // input and one per plain input. Edge order is summation order. A rejected call returns false
     // and leaves the previous routing in effect.
+    // Levels (speed phase 5b): the call also sorts the order into dependency levels. A node's level is one more
+    // than the highest of the nodes it reads (its edges' sources) or depends on (`dependencies`: each `before` is
+    // listed and earlier in `order` than its `after`, at most the reserved number), 0 for none; the output node
+    // runs alone in the last level, so no edge or dependency may leave it. Within a level nodes keep their order in
+    // `order`. process() runs level by level (serially, for now: no node of a level reads another's output, so the
+    // nodes of one level could run in any order or at once).
     bool setRouting(const GraphConnection* edges, uint32_t edgeCount, const uint32_t* order,
-                    uint32_t orderCount) noexcept;
+                    uint32_t orderCount) noexcept {
+        return setRouting(edges, edgeCount, order, orderCount, nullptr, 0);
+    }
+    bool setRouting(const GraphConnection* edges, uint32_t edgeCount, const uint32_t* order, uint32_t orderCount,
+                    const GraphDependency* dependencies, uint32_t dependencyCount) noexcept;
+    // The levels of the last accepted setRouting() (0 before any: a statically connected graph runs in its compiled
+    // order). Level l holds orderedNode(levelStart(l)) .. orderedNode(levelStart(l + 1) - 1).
+    uint32_t levelCount() const noexcept { return levelCount_; }
+    uint32_t levelStart(uint32_t level) const noexcept { return level <= levelCount_ ? levelStart_[level] : runCount_; }
+    uint32_t orderedNode(uint32_t k) const noexcept { return k < runCount_ ? order_[k] : UINT32_MAX; }
+    // Tests only, from the next setRouting() on: false runs the order as given, as one level (the old serial order).
+    void setLevelOrderForTest(bool on) noexcept { levelOrder_ = on; }
     // Control thread, one producer, lock-free: set a parameter's manual value (a knob, a typed
     // value or a mapped MIDI CC; F6.1 rules: clamped, smoothed, a touch while automated), applied
     // at the start of the next process(). False if the executor is not ready, the node or
@@ -287,6 +313,8 @@ private:
     // Runs the graph; the caller has checked ready_, frames and both host views.
     bool processValidated(const ConstChannelBufferView& input, const ChannelBufferView& output,
                           uint32_t frames, const EventInput& events) noexcept;
+    // One node's block: its summing inputs, parameters and events, then the processor. False if it failed.
+    bool runNode(uint32_t node, uint32_t frames, const EventInput& events) noexcept;
     struct EventMerge { uint32_t sourceBase, sourceCount, input; std::size_t storage; };
     void mergeEvents(const EventMerge& merge) noexcept;
 
@@ -384,6 +412,15 @@ private:
     // Dynamic routing scratch, preallocated by reserveRouting().
     std::vector<uint32_t> routePosition_, routeCount_, routeStaging_;
     std::vector<uint32_t> directStaging_;         // per port: a plain input's routed source port, or UINT32_MAX
+    // Levels (speed phase 5b), preallocated by reserveRouting(): order_ sorted by level, level l at
+    // order_[levelStart_[l] .. levelStart_[l + 1]).
+    std::vector<uint32_t> levelStart_;            // [nodes + 1]
+    std::vector<uint32_t> nodeLevel_;             // [nodes] scratch: each listed node's level
+    std::vector<uint32_t> fanStart_;              // [nodes + 1] scratch: where each node's readers start in fanOut_
+    std::vector<uint32_t> fanOut_;                // [routes + dependencies] scratch: the nodes reading each node
+    uint32_t levelCount_ = 0;
+    uint32_t dependencyCapacity_ = 0;
+    bool levelOrder_ = true;
     bool routePlain_ = false;
     bool deferHostCheck_ = false;                 // set only inside prepareRouted()
     std::size_t preparedBytes_ = 0;

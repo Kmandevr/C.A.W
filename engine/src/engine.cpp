@@ -35,6 +35,28 @@ struct Engine::AutomationData {
     std::vector<AutomationPointSpec> pan;
 };
 
+struct Engine::Retired {
+    Slot* freed = nullptr;  // a slot whose layer has faded out (by object: the audition's index can change)
+    std::shared_ptr<const Pattern>* pattern = nullptr;
+    AutomationData* automation = nullptr;
+    std::vector<int>* order = nullptr;
+    SlotTable* table = nullptr;  // a slot table (and its mix graph) a Grow replaced
+    ComponentChain* masterChain = nullptr;  // a component chain (master or a track's inserts) replaced or freed
+    ComponentAutomation* componentAutomation = nullptr;  // a component chain's automation table replaced
+    DelayLine* delay = nullptr;  // a latency-compensation delay replaced or freed
+    SendTable* sends = nullptr;  // a route table replaced or freed
+};
+
+// What one graph node (a slot's, or the master's) hands back while the graph runs (speed phase 5a): kept here and
+// pushed to the retired queue by the callback thread once the graph has run (flushRetires), so nodes never touch the
+// shared queue. Bounded: a track node retires at most 3 things a chunk (a fading instrument, inserts and delay), a
+// bus node at most 5 (its fading inserts and delay, then its slot, fading inserts and delay when it is freed).
+struct Engine::RetireList {
+    static constexpr int kCapacity = 8;
+    Retired items[kCapacity];
+    int count = 0;
+};
+
 // Per-layer audio and meter state. Fields above `vol` belong to the audio thread.
 struct Engine::Slot {
     // This slot's place in the slot table: fixed for a layer slot; the audition slot (always the
@@ -56,9 +78,13 @@ struct Engine::Slot {
     double routeGain[kMaxRoutes] = {};  // audio thread: each route's gain at the end of the last block
     bool routeOk[kMaxRoutes] = {};      // updateRouting: the route's destination runs after this slot this chunk
     bool routesStale = false;           // stopped or silent: the routes' delays hold old audio; clear them
-    // A bus's input from sends this chunk (valid while recvChunk is the chunk being run).
+    // A bus's input from sends this chunk, summed from its sources' route outputs when it runs (pullRoutes).
     float recvL[kBlock] = {}, recvR[kBlock] = {};
-    int64_t recvChunk = -1;
+    // The node's own scratch (speed phase 5a; was the Engine's, shared by every node): the signal through its
+    // inserts (the pre tap), and a replaced chain's or delay's output during a crossfade.
+    float insL[kBlock] = {}, insR[kBlock] = {};
+    float fadeL[kBlock] = {}, fadeR[kBlock] = {};
+    RetireList retires;  // what this slot's node handed back this chunk (flushRetires)
     DelayLine* delayFading = nullptr;   // the delay `delay` replaced, crossfading out (null: no delay)
     int delayFadeLeft = 0;
     bool delayStale = false;            // stopped or silent: the delay holds old audio; clear before it runs
@@ -167,10 +193,21 @@ struct Engine::SendTable {
         // tap at 0 and fades back in, so it never jumps.
         bool pre = false, mute = false, tapPre = false;
         DelayLine* delay = nullptr;  // owned; null: none
+        // Audio thread (speed phase 5a): the source writes the route's signal here, and its destination sums its
+        // routes from their sources' tables in a fixed order when it runs (pullRoutes). `chunk`: the chunk it
+        // reached its destination in (the destination then takes it: a bus marks its input received, a key its
+        // notes); `audio`: it also wrote out[LR] that chunk (a settled, silent route adds nothing).
+        float outL[kBlock] = {}, outR[kBlock] = {};
+        int64_t chunk = -1;
+        bool audio = false;
     };
     Route routes[kMaxRoutes];
     int count = 0;
     bool keys = false;  // some route keys a component: the slot runs even while muted or soloed out
+    // Audio thread: the note-ons the slot played in the chunk its routes last ran (keyNotes), which its key routes'
+    // destinations take into their keys.
+    Event keyEvents[ComponentChain::kMaxKeyEvents] = {};
+    uint32_t keyEventCount = 0;
     SendTable() = default;
     SendTable(const SendTable&) = delete;
     SendTable& operator=(const SendTable&) = delete;
@@ -214,17 +251,6 @@ struct Engine::Cmd {
     double pitch = 60, vel = 1;
 };
 
-struct Engine::Retired {
-    Slot* freed = nullptr;  // a slot whose layer has faded out (by object: the audition's index can change)
-    std::shared_ptr<const Pattern>* pattern = nullptr;
-    AutomationData* automation = nullptr;
-    std::vector<int>* order = nullptr;
-    SlotTable* table = nullptr;  // a slot table (and its mix graph) a Grow replaced
-    ComponentChain* masterChain = nullptr;  // a component chain (master or a track's inserts) replaced or freed
-    ComponentAutomation* componentAutomation = nullptr;  // a component chain's automation table replaced
-    DelayLine* delay = nullptr;  // a latency-compensation delay replaced or freed
-    SendTable* sends = nullptr;  // a route table replaced or freed
-};
 
 namespace {
 
@@ -469,6 +495,17 @@ struct Engine::MixGraph {
     std::vector<uint32_t> position;   // [slots + 1]
     std::vector<uint32_t> order;      // [nodeCount()]
     std::vector<GraphConnection> edges;  // [maxEdges()]
+    // Sends and keys pull (speed phase 5a): destination d sums inRoutes[inFirst[d] ..][inCount[d]] when it runs,
+    // in the old push order (its sources in the order they run, each one's routes by index), so the sums keep their
+    // bits. Each also orders its source's node before d's in the executor's levels (dependencies).
+    struct InRoute {
+        const SendTable* table = nullptr;  // the source's routes (alive until the graph has run: flushRetires)
+        int k = 0;                         // the route's index there
+    };
+    int maxRoutes() const noexcept { return slots * kMaxRoutes; }
+    std::vector<int> inFirst, inCount;     // [slots] each: where d's routes start in inRoutes, and how many
+    std::vector<InRoute> inRoutes;         // [maxRoutes()]
+    std::vector<GraphDependency> dependencies;  // [maxRoutes()]
 
     // capacity: layer slots; the graph also routes the audition slot after them.
     MixGraph(Engine& e, int capacity, double sampleRate, const EngineResourceBudget& engineBudget)
@@ -477,7 +514,9 @@ struct Engine::MixGraph {
           pending(static_cast<size_t>(slots) + 1, 0),
           deferred(static_cast<size_t>(slots) + 1, 0), emitted(static_cast<size_t>(slots) + 1, 0),
           slotOrder(static_cast<size_t>(slots), 0), stack(static_cast<size_t>(slots) + 1, 0), position(static_cast<size_t>(slots) + 1, UINT32_MAX),
-          order(static_cast<size_t>(nodeCount()), 0), edges(static_cast<size_t>(maxEdges()), GraphConnection{}) {
+          order(static_cast<size_t>(nodeCount()), 0), edges(static_cast<size_t>(maxEdges()), GraphConnection{}),
+          inFirst(static_cast<size_t>(slots), 0), inCount(static_cast<size_t>(slots), 0),
+          inRoutes(static_cast<size_t>(maxRoutes())), dependencies(static_cast<size_t>(maxRoutes())) {
         const int kNodes = nodeCount();
         ids.reserve(kNodes);
         nodes.reserve(kNodes);
@@ -499,7 +538,7 @@ struct Engine::MixGraph {
         GraphResourceBudget budget = makeGraphResourceBudget(engineBudget);
         budget.maxWorkingBytes = std::max(budget.maxWorkingBytes, kMinBudgetBytes);
         if (executor.prepareRouted(graphNodes, processors, masterNode(), kBlock, sampleRate, budget,
-                                   static_cast<uint32_t>(slots)) != GraphError::Ok)
+                                   static_cast<uint32_t>(slots), static_cast<uint32_t>(maxRoutes())) != GraphError::Ok)
             throw std::runtime_error("mix graph could not be prepared");
     }
 
@@ -520,6 +559,8 @@ struct Engine::MixGraph {
         b += routable.capacity() + deferred.capacity() + emitted.capacity();
         b += (position.capacity() + order.capacity()) * sizeof(uint32_t);
         b += edges.capacity() * sizeof(GraphConnection);
+        b += (inFirst.capacity() + inCount.capacity()) * sizeof(int) + inRoutes.capacity() * sizeof(InRoute);
+        b += dependencies.capacity() * sizeof(GraphDependency);
         return b;
     }
     // Everything this graph costs: the executor's own working-memory estimate plus hostBytes().
@@ -539,6 +580,11 @@ struct Engine::SlotTable {
 };
 
 uint32_t Engine::mixGraphNodesRun() const noexcept { return mixGraph_->executor.runCount(); }
+void Engine::setMixLevelsForTest(bool on) noexcept {
+    mixGraph_->executor.setLevelOrderForTest(on);
+    routingDirty_ = true;
+}
+uint32_t Engine::mixGraphLevelsForTest() const noexcept { return mixGraph_->executor.levelCount(); }
 int Engine::slotsScannedPerChunk() const noexcept { return liveCount_; }
 
 // Audio thread: slot i joins the in-use list (kept ascending, so loops over it run in index order as
@@ -592,6 +638,7 @@ Engine::Engine(double sampleRate)
 
 Engine::Engine(double sampleRate, EngineResourceBudget resourceBudget)
     : sr_(sampleRate),
+      trackGainCoef_(1.0 - detExp(-1.0 / (kGainSeconds * sampleRate))),
       resourceBudget_(resourceBudget),
       cmds_(new Spsc<Cmd, 1024>()),
       retired_(new Spsc<Retired, 1024>()),
@@ -599,6 +646,7 @@ Engine::Engine(double sampleRate, EngineResourceBudget resourceBudget)
       loudness_(std::make_unique<LoudnessMeter>()) {
     for (int i = 0; i < kScopeSize; ++i) masterScope_[i].store(0);
     midiPending_.reset(new PendingMidi[Midi2InputQueue::kCapacity]);
+    masterRetires_ = std::make_unique<RetireList>();
     loudness_->prepare(sampleRate);
     loudness_->sleepWhenUnread(true);  // it measures while something reads it (meters.h)
     audioIn_ = std::make_unique<LiveAudio>(sampleRate);
@@ -2619,9 +2667,42 @@ bool Engine::canRetire(size_t count) const noexcept {
     // The callback may use the queue plus its preallocated overflow list. When
     // overflow is already in use, retire() appends there until the control thread
     // drains the queue and a later callback can move the pending entries across.
+    // Retirements the graph's nodes hold (flushRetires pushes them after the graph) take room as if pushed already.
     const size_t pendingFree = static_cast<size_t>(pendingMax_ - pendingCount_);
-    if (pendingCount_ != 0) return count <= pendingFree;
-    return count <= retired_->writable() + pendingFree;
+    const size_t need = count + static_cast<size_t>(retiresHeld_);
+    if (pendingCount_ != 0) return need <= pendingFree;
+    return need <= retired_->writable() + pendingFree;
+}
+
+// Audio thread, inside the graph: a node hands something back into its own list (never the shared queue).
+void Engine::nodeRetire(RetireList& list, const Retired& r) noexcept {
+    if (list.count < RetireList::kCapacity) {
+        list.items[list.count++] = r;
+        ++retiresHeld_;
+    } else {
+        retireEntry(r);  // never: the list holds the most a node retires in a chunk
+    }
+}
+
+void Engine::nodeRetireChain(RetireList& list, ComponentChain* chain) noexcept {
+    if (!chain) return;
+    Retired r;
+    r.masterChain = chain;
+    nodeRetire(list, r);
+}
+
+// Audio thread, once the graph has run a chunk: every node's retirements into the queue, slot by slot, the master's
+// last. canRetire() counted them while they were held, so there is room.
+void Engine::flushRetires() noexcept {
+    for (int k = 0; k < liveCount_; ++k) {
+        RetireList& list = slotAt(live_[k]).retires;
+        for (int j = 0; j < list.count; ++j) retireEntry(list.items[j]);
+        list.count = 0;
+    }
+    RetireList& master = *masterRetires_;
+    for (int j = 0; j < master.count; ++j) retireEntry(master.items[j]);
+    master.count = 0;
+    retiresHeld_ = 0;
 }
 
 void Engine::retire(Slot* freed, std::shared_ptr<const Pattern>* pattern, AutomationData* automation,
@@ -3483,22 +3564,22 @@ void Engine::runInstrument(Slot& s, int m) noexcept {
     if (s.instrumentFading) {
         ChainTime fadeTime = time;
         fadeTime.modulation = modulation_->forChain(s.index, ModChainKind::Instrument, s.instrumentFading, 1);
-        s.instrumentFading->process(fadeL_, fadeR_, static_cast<uint32_t>(m), sr_, &fadeTime);
+        s.instrumentFading->process(s.fadeL, s.fadeR, static_cast<uint32_t>(m), sr_, &fadeTime);
     } else {
-        std::fill_n(fadeL_, m, 0.0f);
-        std::fill_n(fadeR_, m, 0.0f);
+        std::fill_n(s.fadeL, m, 0.0f);
+        std::fill_n(s.fadeR, m, 0.0f);
     }
     const int len = std::max(1, static_cast<int>(kSwapSeconds * sr_));
     for (int i = 0; i < m; ++i) {
         const float w = s.instrumentFadeLeft > 0
             ? static_cast<float>(len - s.instrumentFadeLeft + 1) / static_cast<float>(len + 1) : 1.0f;
         if (s.instrumentFadeLeft > 0) --s.instrumentFadeLeft;
-        s.instL[i] = fadeL_[i] + (s.instL[i] - fadeL_[i]) * w;
-        s.instR[i] = fadeR_[i] + (s.instR[i] - fadeR_[i]) * w;
+        s.instL[i] = s.fadeL[i] + (s.instL[i] - s.fadeL[i]) * w;
+        s.instR[i] = s.fadeR[i] + (s.instR[i] - s.fadeR[i]) * w;
     }
     if (s.instrumentFadeLeft == 0 && s.instrumentFading) {
         if (canRetire(1)) {
-            retire(nullptr, nullptr, nullptr, nullptr, nullptr, s.instrumentFading);
+            nodeRetireChain(s.retires, s.instrumentFading);
             s.instrumentFading = nullptr;
         } else {
             s.instrumentFadeLeft = 1;  // no room to hand it back yet: try again next block
@@ -3660,8 +3741,10 @@ int Engine::processChunk(float* l, float* r, int maxFrames) noexcept {
         updateRouting();
     }
     float* outputs[2] = {l, r};
-    if (!mixGraph_->executor.process(ConstChannelBufferView{}, ChannelBufferView{outputs, 2, static_cast<uint32_t>(m)},
-                                     static_cast<uint32_t>(m))) {
+    const bool ran = mixGraph_->executor.process(ConstChannelBufferView{}, ChannelBufferView{outputs, 2, static_cast<uint32_t>(m)},
+                                                 static_cast<uint32_t>(m));
+    flushRetires();  // what the nodes handed back, now that nothing in the graph reads it
+    if (!ran) {
         std::fill_n(l, m, 0.0f);
         std::fill_n(r, m, 0.0f);
         mixToneOnly(l, r, m);  // the master stage, last in the graph, did not run
@@ -3671,8 +3754,9 @@ int Engine::processChunk(float* l, float* r, int maxFrames) noexcept {
 
 // Routing as graph edges: a routable slot (active, and a bus or a track) goes to its parent when
 // that parent is an active folder bus, is dropped when its parent is anything else, and goes to master at the
-// root. Sends and sidechain keys add order but no edges (the source adds into its destination's input, runRoutes):
-// a slot runs after every slot that feeds it, whether as a child, a send or a key. The order is the old pass order
+// root. Sends and sidechain keys add order but no edges (the source writes the route's own buffer, runRoutes, and the
+// destination sums its routes when it runs, pullRoutes; each is a dependency for the executor's levels): a slot runs
+// after every slot that feeds it, whether as a child, a send or a key. The order is the old pass order
 // (processOrder_, then the remaining slots by index) with each slot held back until what feeds it has run, so a
 // track always reaches its bus in the same chunk (issue #76). A track is one node (its instrument, inserts and
 // mix). Edges into buses follow that order, which is the old accumulation order. Idle slots are left out of the
@@ -3764,6 +3848,36 @@ void Engine::updateRouting() noexcept {
             s.routeOk[k] = d >= 0 && g.position[i] < g.position[d];
         }
     }
+    // Each destination's routes (pullRoutes), in the order the sources used to add into it: the sources in the
+    // order they run, each one's routes by index. Each is also a dependency of the destination's node on the
+    // source's for the executor's levels (the edges carry only children into their buses).
+    auto nodeOf = [&](int x) noexcept { return slotAt(x).bus ? g.busNode(x) : g.trackNode(x); };
+    for (int k = 0; k < count; ++k) g.inCount[g.slotOrder[k]] = 0;
+    for (int k = 0; k < count; ++k) {
+        const Slot& s = slotAt(g.slotOrder[k]);
+        if (s.sends)
+            for (int j = 0; j < s.sends->count; ++j)
+                if (s.routeOk[j]) ++g.inCount[s.sends->routes[j].dest];
+    }
+    int routed = 0;
+    for (int k = 0; k < count; ++k) {
+        const int x = g.slotOrder[k];
+        g.inFirst[x] = routed;
+        routed += g.inCount[x];
+        g.inCount[x] = 0;  // refilled below
+    }
+    uint32_t dependencyCount = 0;
+    for (int k = 0; k < count; ++k) {
+        const int x = g.slotOrder[k];
+        const Slot& s = slotAt(x);
+        if (!s.sends) continue;
+        for (int j = 0; j < s.sends->count; ++j) {
+            if (!s.routeOk[j]) continue;
+            const int d = s.sends->routes[j].dest;
+            g.inRoutes[static_cast<size_t>(g.inFirst[d] + g.inCount[d]++)] = MixGraph::InRoute{s.sends, j};
+            g.dependencies[dependencyCount++] = GraphDependency{nodeOf(x), nodeOf(d)};
+        }
+    }
     uint32_t nodeCount = 0, edgeCount = 0;
     for (int k = 0; k < count; ++k) {
         const int x = g.slotOrder[k];
@@ -3778,7 +3892,8 @@ void Engine::updateRouting() noexcept {
     g.order[nodeCount++] = g.masterNode();
     // Valid by construction. A rejection would keep the previous routing (safe: stale nodes output
     // zeros) but must never pass unnoticed: it is counted and asserts in debug builds.
-    if (!g.executor.setRouting(g.edges.data(), edgeCount, g.order.data(), nodeCount)) {
+    if (!g.executor.setRouting(g.edges.data(), edgeCount, g.order.data(), nodeCount, g.dependencies.data(),
+                               dependencyCount)) {
         routingRejections_.fetch_add(1, std::memory_order_relaxed);
         assert(!"mix graph rejected a derived route");
     }
@@ -3791,7 +3906,7 @@ void Engine::runDelay(Slot& s, float* outL, float* outR, int m) noexcept {
         if (s.delayFading && canRetire(1)) {  // a change that was still crossfading is over: the new timing holds
             Retired r;
             r.delay = s.delayFading;
-            retireEntry(r);
+            nodeRetire(s.retires, r);
             s.delayFading = nullptr;
             s.delayFadeLeft = 0;
         } else if (s.delayFading) {
@@ -3801,9 +3916,9 @@ void Engine::runDelay(Slot& s, float* outL, float* outR, int m) noexcept {
     }
     const bool fading = s.delayFadeLeft > 0;
     if (fading) {
-        std::copy_n(outL, m, fadeL_);
-        std::copy_n(outR, m, fadeR_);
-        if (s.delayFading) s.delayFading->run(fadeL_, fadeR_, m);
+        std::copy_n(outL, m, s.fadeL);
+        std::copy_n(outR, m, s.fadeR);
+        if (s.delayFading) s.delayFading->run(s.fadeL, s.fadeR, m);
     }
     if (s.delay) s.delay->run(outL, outR, m);
     if (!fading) return;
@@ -3811,14 +3926,14 @@ void Engine::runDelay(Slot& s, float* outL, float* outR, int m) noexcept {
     for (int i = 0; i < m; ++i) {
         const float w = s.delayFadeLeft > 0 ? static_cast<float>(len - s.delayFadeLeft + 1) / static_cast<float>(len + 1) : 1.0f;
         if (s.delayFadeLeft > 0) --s.delayFadeLeft;
-        outL[i] = fadeL_[i] + (outL[i] - fadeL_[i]) * w;
-        outR[i] = fadeR_[i] + (outR[i] - fadeR_[i]) * w;
+        outL[i] = s.fadeL[i] + (outL[i] - s.fadeL[i]) * w;
+        outR[i] = s.fadeR[i] + (outR[i] - s.fadeR[i]) * w;
     }
     if (s.delayFadeLeft == 0 && s.delayFading) {
         if (canRetire(1)) {
             Retired r;
             r.delay = s.delayFading;
-            retireEntry(r);
+            nodeRetire(s.retires, r);
             s.delayFading = nullptr;
         } else {
             s.delayFadeLeft = 1;  // no room to hand it back yet: try again next block
@@ -3841,11 +3956,11 @@ void Engine::runInserts(Slot& s, float* L, float* R, int m) noexcept {
     time.modulation = modulation_->forChain(s.index, ModChainKind::Inserts, inserts, 0);  // #161
     const ChainTime* t = &time;
     if (fading) {
-        std::copy_n(L, m, fadeL_);
-        std::copy_n(R, m, fadeR_);
+        std::copy_n(L, m, s.fadeL);
+        std::copy_n(R, m, s.fadeR);
         ChainTime fadeTime = time;
         fadeTime.modulation = modulation_->forChain(s.index, ModChainKind::Inserts, s.insertsFading, 1);
-        if (s.insertsFading) s.insertsFading->process(fadeL_, fadeR_, static_cast<uint32_t>(m), sr_, &fadeTime);
+        if (s.insertsFading) s.insertsFading->process(s.fadeL, s.fadeR, static_cast<uint32_t>(m), sr_, &fadeTime);
     }
     if (inserts) inserts->process(L, R, static_cast<uint32_t>(m), sr_, t);
     if (fading) {
@@ -3854,11 +3969,11 @@ void Engine::runInserts(Slot& s, float* L, float* R, int m) noexcept {
             const float w = s.insertsFadeLeft > 0
                 ? static_cast<float>(len - s.insertsFadeLeft + 1) / static_cast<float>(len + 1) : 1.0f;
             if (s.insertsFadeLeft > 0) --s.insertsFadeLeft;
-            L[i] = fadeL_[i] + (L[i] - fadeL_[i]) * w;
-            R[i] = fadeR_[i] + (R[i] - fadeR_[i]) * w;
+            L[i] = s.fadeL[i] + (L[i] - s.fadeL[i]) * w;
+            R[i] = s.fadeR[i] + (R[i] - s.fadeR[i]) * w;
         }
         if (s.insertsFadeLeft == 0 && s.insertsFading && canRetire(1)) {
-            retire(nullptr, nullptr, nullptr, nullptr, nullptr, s.insertsFading);
+            nodeRetireChain(s.retires, s.insertsFading);
             s.insertsFading = nullptr;
         } else if (s.insertsFadeLeft == 0 && s.insertsFading) {
             s.insertsFadeLeft = 1;  // no room to hand it back yet: hold the new chain at full and try again
@@ -3905,9 +4020,9 @@ void Engine::runRoutes(Slot& s, const float* preL, const float* preR, const floa
             faderR[i] = v * pr;
         }
     };
-    // The notes the slot plays this chunk, for components keyed by it (the ducker's Notes mode).
-    Event notes[ComponentChain::kMaxKeyEvents];
-    const uint32_t noteCount = t.keys ? keyNotes(s, m, notes, ComponentChain::kMaxKeyEvents) : 0;
+    // The notes the slot plays this chunk, for components keyed by it (the ducker's Notes mode): its key routes'
+    // destinations take them from here (pullRoutes).
+    t.keyEventCount = t.keys ? keyNotes(s, m, t.keyEvents, ComponentChain::kMaxKeyEvents) : 0;
     if (s.routesStale) {
         for (int k = 0; k < t.count; ++k)
             if (t.routes[k].delay) t.routes[k].delay->clear();
@@ -3928,37 +4043,18 @@ void Engine::runRoutes(Slot& s, const float* preL, const float* preR, const floa
             r.tapPre = r.pre;  // silent: the tap can change at once
             continue;
         }
-        Slot& d = slotAt(r.dest);
-        auto skip = [&]() { s.routeGain[k] = want; };
-        float* dl = nullptr;
-        float* dr = nullptr;
         if (key) {
-            ComponentChain::KeyInput* in = d.inserts ? d.inserts->keyInput(static_cast<size_t>(r.key)) : nullptr;
-            if (!in) {
-                skip();
+            // Only read here: the destination runs after this slot (routeOk) and takes the key itself (pullRoutes).
+            const Slot& d = slotAt(r.dest);
+            if (!d.inserts || !d.inserts->keyInput(static_cast<size_t>(r.key))) {
+                s.routeGain[k] = want;
                 continue;
             }
-            in->begin(chunkId_);
-            dl = in->l;
-            dr = in->r;
-            // Merged by frame with what other sources wrote (each list is in frame order).
-            for (uint32_t k2 = 0; k2 < noteCount && in->count < ComponentChain::kMaxKeyEvents; ++k2) {
-                uint32_t at = in->count++;
-                while (at > 0 && in->events[at - 1].frame > notes[k2].frame) {
-                    in->events[at] = in->events[at - 1];
-                    --at;
-                }
-                in->events[at] = notes[k2];
-            }
-        } else {
-            if (d.recvChunk != chunkId_) {
-                std::fill_n(d.recvL, m, 0.0f);
-                std::fill_n(d.recvR, m, 0.0f);
-                d.recvChunk = chunkId_;
-            }
-            dl = d.recvL;
-            dr = d.recvR;
         }
+        // It reaches its destination this chunk (a bus's input then counts as received, a key takes the notes),
+        // with or without audio.
+        r.chunk = chunkId_;
+        r.audio = false;
         const bool postKey = key && (!r.pre || !r.tapPre);
         if (postKey) faderGains();
         const float* xl = r.tapPre || key ? preL : postL;
@@ -3977,8 +4073,8 @@ void Engine::runRoutes(Slot& s, const float* preL, const float* preR, const floa
             // (x g times 1.0 is x g: the same bits). The gain stays double: rounded to float it moves a crusher's
             // steps downstream (speed phase 4, as the track's gains).
             for (int i = 0; i < m; ++i) {
-                routeL_[i] = routeSample(static_cast<double>(xl[i]) * g);
-                routeR_[i] = routeSample(static_cast<double>(xr[i]) * g);
+                r.outL[i] = routeSample(static_cast<double>(xl[i]) * g);
+                r.outR[i] = routeSample(static_cast<double>(xr[i]) * g);
             }
         } else
         for (int i = 0; i < m; ++i) {
@@ -3990,17 +4086,60 @@ void Engine::runRoutes(Slot& s, const float* preL, const float* preR, const floa
                 xr = r.tapPre || key ? preR : postR;
             }
             const bool faded = key && !r.tapPre;
-            routeL_[i] = routeSample(static_cast<double>(xl[i]) * g * (faded ? faderL[i] : 1.0));
-            routeR_[i] = routeSample(static_cast<double>(xr[i]) * g * (faded ? faderR[i] : 1.0));
+            r.outL[i] = routeSample(static_cast<double>(xl[i]) * g * (faded ? faderL[i] : 1.0));
+            r.outR[i] = routeSample(static_cast<double>(xr[i]) * g * (faded ? faderR[i] : 1.0));
         }
         s.routeGain[k] = g;
-        if (r.delay) r.delay->run(routeL_, routeR_, m);
+        if (r.delay) r.delay->run(r.outL, r.outR, m);
+        r.audio = true;
+    }
+}
+
+// A destination's sends and keys, when it runs (speed phase 5a: pulled, where the sources used to add into it): its
+// routes in the fixed order updateRouting gave them (the order the sources ran, each one's routes by index, as the
+// sources added before), so every sum keeps its bits. A send adds into the bus's input, zeroed by the first that
+// arrives; a key into its component's key, with the source's notes merged by frame. Returns whether a send arrived.
+bool Engine::pullRoutes(Slot& d, int m) noexcept {
+    const MixGraph& g = *mixGraph_;
+    bool received = false;
+    for (int j = g.inFirst[d.index], end = j + g.inCount[d.index]; j < end; ++j) {
+        const SendTable& t = *g.inRoutes[j].table;
+        const SendTable::Route& r = t.routes[g.inRoutes[j].k];
+        if (r.chunk != chunkId_) continue;  // it didn't reach here this chunk (its source was silent or didn't run)
+        float* dl = nullptr;
+        float* dr = nullptr;
+        if (r.key >= 0) {
+            ComponentChain::KeyInput* in = d.inserts ? d.inserts->keyInput(static_cast<size_t>(r.key)) : nullptr;
+            if (!in) continue;  // never: the source checked it this chunk
+            in->begin(chunkId_);
+            dl = in->l;
+            dr = in->r;
+            // Merged by frame with what earlier sources gave (each list is in frame order).
+            for (uint32_t k2 = 0; k2 < t.keyEventCount && in->count < ComponentChain::kMaxKeyEvents; ++k2) {
+                uint32_t at = in->count++;
+                while (at > 0 && in->events[at - 1].frame > t.keyEvents[k2].frame) {
+                    in->events[at] = in->events[at - 1];
+                    --at;
+                }
+                in->events[at] = t.keyEvents[k2];
+            }
+        } else {
+            if (!received) {
+                std::fill_n(d.recvL, m, 0.0f);
+                std::fill_n(d.recvR, m, 0.0f);
+                received = true;
+            }
+            dl = d.recvL;
+            dr = d.recvR;
+        }
+        if (!r.audio) continue;  // settled and silent: adding its zeros would leave the sum as it is
         // A float sum (two floats' sum rounded once to float: the bits of the double sum's rounding), saturating.
         for (int i = 0; i < m; ++i) {
-            dl[i] = routeAdd(dl[i], routeL_[i]);
-            dr[i] = routeAdd(dr[i], routeR_[i]);
+            dl[i] = routeAdd(dl[i], r.outL[i]);
+            dr[i] = routeAdd(dr[i], r.outR[i]);
         }
     }
+    return received;
 }
 
 // The note-ons a playing slot's pattern starts in this chunk (those that play: chance, ratchets; a slide is legato
@@ -4043,8 +4182,8 @@ void Engine::runTrackNode(int slot, float* outL, float* outR, int m) noexcept {
         return;
     }
     const double target = s.target;
-    if (!(trackGainCoef_ >= 0.0)) trackGainCoef_ = 1.0 - detExp(-1.0 / (kGainSeconds * sr_));  // once per Engine
     const double gainCoef = trackGainCoef_;
+    pullRoutes(s, m);  // keys into its inserts (a track takes no sends)
     const double pan = bitsToDouble(s.pan.load(std::memory_order_relaxed));
     if ((!s.automation || s.automation->pan.empty()) && pan != s.panCache) {
         s.panCache = pan;
@@ -4055,9 +4194,9 @@ void Engine::runTrackNode(int slot, float* outL, float* outR, int m) noexcept {
     // The instrument (#17) into the native inserts, stereo through volume and pan (the pan law then works per side,
     // as balance).
     runInstrument(s, m);
-    std::copy_n(s.instL, m, insertL_);
-    std::copy_n(s.instR, m, insertR_);
-    runInserts(s, insertL_, insertR_, m);
+    std::copy_n(s.instL, m, s.insL);
+    std::copy_n(s.instR, m, s.insR);
+    runInserts(s, s.insL, s.insR, m);
     float peakL = 0, peakR = 0, sig = 0;
     int sp = s.scopePos.load(std::memory_order_relaxed);
     const bool volumeAutomated = s.automation && !s.automation->volume.empty();
@@ -4067,7 +4206,7 @@ void Engine::runTrackNode(int slot, float* outL, float* outR, int m) noexcept {
     const float* volumeMod = modulation_->volume(slot);
     const float* panMod = modulation_->pan(slot);
     const bool steady = !volumeAutomated && !panAutomated && s.gain == settled && !volumeMod && !panMod;
-    if (steady && allPositiveZero(insertL_, m) && allPositiveZero(insertR_, m) && !std::signbit(s.gain) &&
+    if (steady && allPositiveZero(s.insL, m) && allPositiveZero(s.insR, m) && !std::signbit(s.gain) &&
         !std::signbit(s.gl) && !std::signbit(s.gr)) {
         // Silence from the instrument and inserts (an asleep track): what the loop below gives, +0 everywhere
         // (+0 times gains that are not negative), without its sums.
@@ -4087,8 +4226,8 @@ void Engine::runTrackNode(int slot, float* outL, float* outR, int m) noexcept {
         const double gain = s.gain, gl = s.gl, gr = s.gr;
         float mid[kBlock], level[kBlock];
         for (int i = 0; i < m; ++i) {
-            const double vl = static_cast<double>(insertL_[i]) * gain;
-            const double vr = static_cast<double>(insertR_[i]) * gain;
+            const double vl = static_cast<double>(s.insL[i]) * gain;
+            const double vr = static_cast<double>(s.insR[i]) * gain;
             outL[i] = routeSample(vl * gl);
             outR[i] = routeSample(vr * gr);
             const double al = std::fabs(vl), ar = std::fabs(vr);
@@ -4117,8 +4256,8 @@ void Engine::runTrackNode(int slot, float* outL, float* outR, int m) noexcept {
             if (std::fabs(desired - s.gain) < 1e-6) s.gain = desired;
         }
         const double gain = volumeMod && s.gain > 0.0 ? faderGain(faderPosition(s.gain) + volumeMod[i]) : s.gain;  // muted stays silent
-        const double vl = static_cast<double>(insertL_[i]) * gain;
-        const double vr = static_cast<double>(insertR_[i]) * gain;
+        const double vl = static_cast<double>(s.insL[i]) * gain;
+        const double vr = static_cast<double>(s.insR[i]) * gain;
         const double v = 0.5 * (vl + vr);  // the scope and tail test read the mid
         double gl = s.gl, gr = s.gr;
         if (panAutomated || panMod) {
@@ -4142,8 +4281,8 @@ void Engine::runTrackNode(int slot, float* outL, float* outR, int m) noexcept {
     storeMax(s.peakR, peakR);
     s.correlation.process(outL, outR, m);
     // A modulator hears this track (#161): after its effects, and after the fader.
-    if (modulation_->listens(slot)) modulation_->tapAudio(slot, insertL_, insertR_, outL, outR, static_cast<uint32_t>(m));
-    if (s.sends && s.sends->count > 0) runRoutes(s, insertL_, insertR_, outL, outR, m, !(target > 0.0), false);
+    if (modulation_->listens(slot)) modulation_->tapAudio(slot, s.insL, s.insR, outL, outR, static_cast<uint32_t>(m));
+    if (s.sends && s.sends->count > 0) runRoutes(s, s.insL, s.insR, outL, outR, m, !(target > 0.0), false);
     if (s.delay || s.delayFadeLeft > 0) runDelay(s, outL, outR, m);  // in time where it meets the others
     if (s.tapL) {  // an offline stem: what the track sends on, as it meets the others
         std::copy_n(outL, m, s.tapL + tapAt_);
@@ -4159,7 +4298,7 @@ void Engine::runTrackNode(int slot, float* outL, float* outR, int m) noexcept {
 }
 
 // A folder bus: its children arrive summed in float on the graph's summing input, and sends into it in its own
-// input (runRoutes). Then its inserts, volume and pan, its sends, and its latency compensation.
+// input (pullRoutes). Then its inserts, volume and pan, its sends, and its latency compensation.
 void Engine::runBusNode(int slot, const float* inL, const float* inR, float* outL, float* outR, int m) noexcept {
     Slot& s = slotAt(slot);
     if (s.mode != Slot::Mode::Bus) {
@@ -4168,17 +4307,17 @@ void Engine::runBusNode(int slot, const float* inL, const float* inR, float* out
         return;
     }
     const double target = slotTarget(s);
-    const bool received = s.recvChunk == chunkId_;
+    const bool received = pullRoutes(s, m);  // sends into its input, keys into its inserts
     const bool inserts = s.inserts || s.insertsFadeLeft > 0;
     if (received || inserts) {
         for (int j = 0; j < m; ++j) {
-            insertL_[j] = received ? routeSample(static_cast<double>(inL[j]) + s.recvL[j]) : inL[j];
-            insertR_[j] = received ? routeSample(static_cast<double>(inR[j]) + s.recvR[j]) : inR[j];
+            s.insL[j] = received ? routeSample(static_cast<double>(inL[j]) + s.recvL[j]) : inL[j];
+            s.insR[j] = received ? routeSample(static_cast<double>(inR[j]) + s.recvR[j]) : inR[j];
         }
-        if (inserts) runInserts(s, insertL_, insertR_, m);
+        if (inserts) runInserts(s, s.insL, s.insR, m);
         for (int j = 0; j < m; ++j) {
-            s.outL[j] = insertL_[j];
-            s.outR[j] = insertR_[j];
+            s.outL[j] = s.insL[j];
+            s.outR[j] = s.insR[j];
         }
     } else {
         for (int j = 0; j < m; ++j) {
@@ -4187,12 +4326,11 @@ void Engine::runBusNode(int slot, const float* inL, const float* inR, float* out
         }
     }
     const bool routes = s.sends && s.sends->count > 0;
-    if (routes && !received && !inserts) {  // the pre tap, when it isn't in insertL_ already
-        std::copy_n(inL, m, insertL_);
-        std::copy_n(inR, m, insertR_);
+    if (routes && !received && !inserts) {  // the pre tap, when it isn't in insL already
+        std::copy_n(inL, m, s.insL);
+        std::copy_n(inR, m, s.insR);
     }
     const double pan = bitsToDouble(s.pan.load(std::memory_order_relaxed));
-    if (!(trackGainCoef_ >= 0.0)) trackGainCoef_ = 1.0 - detExp(-1.0 / (kGainSeconds * sr_));  // once per Engine
     const double gainCoef = trackGainCoef_;
     const float* volumeMod = modulation_->volume(slot);  // project modulation (#161)
     const float* panMod = modulation_->pan(slot);
@@ -4245,13 +4383,13 @@ void Engine::runBusNode(int slot, const float* inL, const float* inR, float* out
         }
     }
     if (modulation_->listens(slot))  // a modulator hears this bus (#161)
-        modulation_->tapAudio(slot, received || inserts || routes ? insertL_ : inL, received || inserts || routes ? insertR_ : inR,
+        modulation_->tapAudio(slot, received || inserts || routes ? s.insL : inL, received || inserts || routes ? s.insR : inR,
                               outL, outR, static_cast<uint32_t>(m));
     storeMax(s.peakL, peakL);  // a folder's meter: its mix after volume and pan
     storeMax(s.peakR, peakR);
     s.correlation.process(outL, outR, m);
     s.previewQuiet = std::max(peakL, peakR) > kPreviewQuiet ? 0 : s.previewQuiet + m;
-    if (routes) runRoutes(s, insertL_, insertR_, outL, outR, m, !(target > 0.0), true);
+    if (routes) runRoutes(s, s.insL, s.insR, outL, outR, m, !(target > 0.0), true);
     if (s.delay || s.delayFadeLeft > 0) runDelay(s, outL, outR, m);  // in time where it meets the others
     if (s.tapL) {  // an offline stem: the bus's output, as it meets the others
         std::copy_n(outL, m, s.tapL + tapAt_);
@@ -4259,15 +4397,16 @@ void Engine::runBusNode(int slot, const float* inL, const float* inR, float* out
     }
     if (s.removing && s.gain == 0.0 && canRetire(3)) {
         // Faded out: the slot is free again, with its inserts, delay and routes.
+        // Held until the graph has run (flushRetires): a destination of its routes still reads their outputs.
         Retired r{&s, nullptr, nullptr, nullptr, nullptr, s.inserts};
         r.delay = s.delay;
         r.sends = s.sends;
-        retireEntry(r);
-        retire(nullptr, nullptr, nullptr, nullptr, nullptr, s.insertsFading);
+        nodeRetire(s.retires, r);
+        nodeRetireChain(s.retires, s.insertsFading);
         if (s.delayFading) {
             Retired d;
             d.delay = s.delayFading;
-            retireEntry(d);
+            nodeRetire(s.retires, d);
         }
         s.inserts = s.insertsFading = nullptr;
         s.insertsFadeLeft = 0;
@@ -4400,11 +4539,11 @@ void Engine::runMasterNode(const float* inL, const float* inR, float* outL, floa
         const ChainTime* t = &time;
         const bool fading = masterFadeLeft_ > 0;
         if (fading) {
-            std::copy_n(stageL, m, fadeL_);
-            std::copy_n(stageR, m, fadeR_);
+            std::copy_n(stageL, m, masterFadeL_);
+            std::copy_n(stageR, m, masterFadeR_);
             ChainTime fadeTime = time;
             fadeTime.modulation = modulation_->forChain(-1, ModChainKind::Master, masterFading_, 1);
-            if (masterFading_) masterFading_->process(fadeL_, fadeR_, static_cast<uint32_t>(m), sr_, &fadeTime);
+            if (masterFading_) masterFading_->process(masterFadeL_, masterFadeR_, static_cast<uint32_t>(m), sr_, &fadeTime);
         }
         if (masterChain_) masterChain_->process(stageL, stageR, static_cast<uint32_t>(m), sr_, t);
         if (masterTailFade_ != 0 && previewChunk_) {  // the master's capped tail fading out
@@ -4421,12 +4560,12 @@ void Engine::runMasterNode(const float* inL, const float* inR, float* outL, floa
             for (int i = 0; i < m; ++i) {
                 const float w = masterFadeLeft_ > 0 ? static_cast<float>(len - masterFadeLeft_ + 1) / static_cast<float>(len + 1) : 1.0f;
                 if (masterFadeLeft_ > 0) --masterFadeLeft_;
-                stageL[i] = fadeL_[i] + (stageL[i] - fadeL_[i]) * w;
-                stageR[i] = fadeR_[i] + (stageR[i] - fadeR_[i]) * w;
+                stageL[i] = masterFadeL_[i] + (stageL[i] - masterFadeL_[i]) * w;
+                stageR[i] = masterFadeR_[i] + (stageR[i] - masterFadeR_[i]) * w;
             }
             if (masterFadeLeft_ == 0 && masterFading_) {
                 if (canRetire(1)) {
-                    retire(nullptr, nullptr, nullptr, nullptr, nullptr, masterFading_);
+                    nodeRetireChain(*masterRetires_, masterFading_);
                     masterFading_ = nullptr;
                 } else {
                     masterFadeLeft_ = 1;
