@@ -1,7 +1,7 @@
 ---
 title: Architecture
 summary: Technical architecture, verified engine/app boundaries and clearly labelled future design proposals.
-updated: 2026-11-11
+updated: 2026-11-12
 covers: [app/pubspec.yaml, engine/CMakeLists.txt]
 ---
 
@@ -178,7 +178,7 @@ C++ itself remains general-purpose. Only code scheduled in the audio callback mu
 
 ### This repository (C.A.W.)
 
-The current repository contains the portable C++20 engine and CLI, platform audio layer, Flutter app (whose bundled assets are the code font and the crow logo), tests, documentation and bundled examples.
+The current repository contains the portable C++20 engine and CLI, platform audio layer, Flutter app (whose bundled assets are the code font, the crow logo and the default project), tests, documentation and bundled examples.
 
 ### C++ component source
 

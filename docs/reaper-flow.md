@@ -1,7 +1,7 @@
 ---
 title: REAPER's flow and C.A.W's
 summary: REAPER's path from a new project to a finished render, step by step with sources, beside C.A.W's current flow, the gaps, phone equivalents and a build plan ranked by what makes a song easier to finish.
-updated: 2026-11-11
+updated: 2026-11-12
 ---
 
 # REAPER's flow and C.A.W's
@@ -125,7 +125,7 @@ All **[Fact]** from [App](app.md) unless linked elsewhere.
 
 | Step | What a user does in C.A.W today |
 |---|---|
-| New project, templates | The app opens the last project (the "First loop" template on a first run). The project menu (the project name) has New project (the default template, Blank unless chosen), New from template… (bundled starters and saved ones; ☆ sets the default), Save as template…, Duplicate, Open and Delete; the track menu saves a track or folder as a track template, and the + button's long-press inserts one (2026-11-11). |
+| New project, templates | The app opens the last project (the default project, "mid tempo", on a first run). The project menu (the project name) has New project (the default template, Blank unless chosen), New from template… (bundled starters and saved ones; ☆ sets the default), Save as template…, Duplicate, Open and Delete; the track menu saves a track or folder as a track template, and the + button's long-press inserts one (2026-11-11). |
 | Tracks, instruments | + in the Arrange toolbar adds a track; double-tap the New track zone below the last track for an empty one; drop a clip, pattern, MIDI file, instrument or effect there for a track holding it. The instrument is the FX chain's first slot, picked in the FX browser (Instrument… in the track menu, Replace, or drag and drop). Rename is in the track menu. |
 | Arm, monitor, record | Record (Ctrl+R) arms the selected track, counts in a bar and starts playback; Stop writes the take as a new pattern clip, with a "Keep take?" toast and Undo (`lib/model/live_midi.dart`). A USB keyboard (Android) or the on-screen keys and pads play the armed or selected track at any time (always-on monitoring). The metronome and count-in are on Record's long-press. Record arm and Input are in the track menu. There is no audio recording or record mode choice ([roadmap](roadmap.md) Stages 5, 7). |
 | Loop recording, takes | Each pass of a loop recording is a take of one clip; the take chip (‹ n/N ›) and the clip menu's Takes pick one; Record's long-press sets Overdub or Replace (2026-11-11). No take lanes or comping (roadmap 7.5). |

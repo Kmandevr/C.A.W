@@ -1,7 +1,7 @@
 ---
 title: UI design
 summary: Arrangement-first creative UI across three shared-state sections (Build, Files, Arrange), with touch-first phone layouts and keyboard/mouse desktop access.
-updated: 2026-11-11
+updated: 2026-11-12
 covers: [app/lib/ui/, app/lib/actions/]
 ---
 
@@ -16,7 +16,7 @@ The owner's goal (2026-10-28) is a capable, lightweight music-production workspa
 - **Look:** neon but calm. The colours stay, glow is used sparingly, and transitions are short and simple.
 - **New files and startup** (owner, 2026-10-28):
   - **New files:** a new pattern or C++ component starts from a blank one. A faint hint (not part of the file) shows an example header and first line until you start typing. Templates stay one choice away in the same New menu.
-  - **Startup (owner, 2026-11-04, replacing the 2026-10-28 startup screen):** the app opens straight into the last project, or the "First loop" template on a first run. New, New from template and Open are in the project menu ([UI plan](ui-plan.md)).
+  - **Startup (owner, 2026-11-04, replacing the 2026-10-28 startup screen):** the app opens straight into the last project, or the default project (the owner's "mid tempo", 2026-11-12) on a first run. New, New from template and Open are in the project menu ([UI plan](ui-plan.md)).
 - **Look details** (owner, 2026-10-28):
   - **Neon** (was Calm neon) stays the default: near-black, thin neon lines, and glow only on what's active (playhead, selected notes, meters).
   - **Light and dark** (owner, 2026-11-11): five built-in families (Neon, Flat, Dusk, Dawn, Amber), each with a dark and a light palette and one Mode switch (Dark, Light, Follow system). Light palettes keep the family's hues and pass WCAG AA (4.5:1 text, dim and accents; 3:1 track colours) on every surface ([App](app.md) has the algorithm). Colours by role: drawn code uses theme slots or `Neon.ink` (white on dark, the text colour on light) for faint grids, handles and highlights, never a fixed white; shadows and scrims stay black. Flat is the standard-DAW counterpart to Neon: flat greys, muted accents, no glow or glass, solid fills.

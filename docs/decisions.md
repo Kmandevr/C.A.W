@@ -1,10 +1,16 @@
 ---
 title: Decisions
 summary: Dated record of what was chosen and why, newest first.
-updated: 2026-11-11
+updated: 2026-11-12
 ---
 
 # Decisions
+
+## 2026-11-12: Default project (owner, 2026-11-12)
+
+- **Decision (owner):** "Here's the project I made, that will essentially be the default." The owner's "mid tempo" project (90 BPM, A minor; Track 3, Bass, Drums, Layer 4 on Flagship, the 808 kit and built-in effects) is what a first run, a deleted last project and the bundled project template open.
+- **How:** the project.json from the owner's exported .caw package is bundled as `app/assets/projects/default.json`. Its unused C++ component and the package's device binary (.so) were left out: a bundled default must not carry native code (in-process, not sandboxed; see the trust decision) or depend on a compiler. Each copy gets fresh ids with references remapped, so two copies never collide (`lib/model/default_project.dart`). The bundled template keeps the id `builtin:first-loop`, now labelled *Mid tempo*, so a saved "New project starts from" setting still finds it.
+- **Kept:** the code-built First loop stays as `AppState.demoProject()`, a test and benchmark fixture whose shape many tests depend on; the engine's First loop goldens and `caw_bench` scenario encode their own projects and do not change.
 
 ## 2026-11-11: one plug-in page per C++ component (owner's "the plug-in workflow is confusing"; Claude, a proposal for the owner's review)
 
