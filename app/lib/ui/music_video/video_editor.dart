@@ -10,6 +10,7 @@ import 'package:flutter/material.dart';
 import '../../model/music_video.dart';
 import '../../model/music_video_autocut.dart';
 import '../../model/music_video_edit.dart';
+import '../../model/music_video_overlay.dart';
 import '../../actions/actions.dart';
 import '../../model/music_video_scene.dart';
 import '../../model/settings.dart';
@@ -28,10 +29,15 @@ typedef AutoCutRunner = Future<List<VideoCut>> Function(VideoScene scene, AutoCu
 /// What re-running auto-cut does with shots already on the lane.
 enum AutoCutMode { replace, fillGaps }
 
+/// The editor's pieces, for a layout that places them apart (the tabbed sheet): the toolbar, the lane, the snap
+/// and zoom row, the one-line message and the shot list.
+typedef VideoEditorParts = ({Widget toolbar, Widget lane, Widget snap, Widget message, Widget list});
+
 class MusicVideoEditor extends StatefulWidget {
   const MusicVideoEditor({super.key, required this.doc, required this.scene, required this.start, required this.end,
       required this.aspect, required this.onChanged, required this.onSave, this.playhead, this.onSeek, this.loudness,
-      this.runner, this.enabled = true, this.onFullScreen, this.fullScreen = false, this.settings, this.side});
+      this.runner, this.enabled = true, this.onFullScreen, this.fullScreen = false, this.settings, this.side,
+      this.frame, this.listParts = ShotPart.all});
 
   final MusicVideoDoc doc;
   final VideoScene scene;
@@ -58,12 +64,19 @@ class MusicVideoEditor extends StatefulWidget {
   /// and the shot list. Null stacks them.
   final Widget Function(Widget lane, Widget list)? side;
 
+  /// Lays the editor's pieces out freely (the tabbed sheet); it wins over [side].
+  final Widget Function(BuildContext context, MusicVideoEditorState editor, VideoEditorParts parts)? frame;
+
+  /// What a shot's row in the list opens (all of it by default; the tabbed sheet shows the shot's look, effects
+  /// and text on their own tabs).
+  final Set<ShotPart> listParts;
+
   @override
   State<MusicVideoEditor> createState() => MusicVideoEditorState();
 }
 
 class MusicVideoEditorState extends State<MusicVideoEditor> implements VideoEditHost {
-  final List<VideoTimeline> _undo = [], _redo = [];
+  final List<_Snapshot> _undo = [], _redo = [];
   static const _maxUndo = 100;
   String? selected;
   late double cursor = widget.start;
@@ -93,15 +106,15 @@ class MusicVideoEditorState extends State<MusicVideoEditor> implements VideoEdit
   // VideoEditHost: every change is one undo step, saved when it ends; a change that changed nothing leaves none.
   bool _open = false;
   String _before = '';
-  List<VideoTimeline> _redoBefore = const [];
+  List<_Snapshot> _redoBefore = const [];
 
   @override
   void begin() {
     if (_open) return;
     _open = true;
-    _before = jsonEncode(t.toJson());
+    _before = _state();
     _redoBefore = [..._redo];
-    _undo.add(t.copy());
+    _undo.add(_Snapshot.of(d));
     if (_undo.length > _maxUndo) _undo.removeAt(0);
     _redo.clear();
   }
@@ -117,7 +130,7 @@ class MusicVideoEditorState extends State<MusicVideoEditor> implements VideoEdit
   void end() {
     if (!_open) return;
     _open = false;
-    if (jsonEncode(t.toJson()) == _before) {
+    if (_state() == _before) {
       // Nothing changed: drop the step and keep what redo had.
       _undo.removeLast();
       _redo
@@ -142,19 +155,28 @@ class MusicVideoEditorState extends State<MusicVideoEditor> implements VideoEdit
   void undo() {
     if (_undo.isEmpty || !canEdit) return;
     Haptics.tap();
-    _redo.add(t.copy());
+    _redo.add(_Snapshot.of(d));
     _restore(_undo.removeLast());
   }
 
   void redo() {
     if (_redo.isEmpty || !canEdit) return;
     Haptics.tap();
-    _undo.add(t.copy());
+    _undo.add(_Snapshot.of(d));
     _restore(_redo.removeLast());
   }
 
-  void _restore(VideoTimeline from) {
-    t.replaceWith(from);
+  /// What an undo step covers, as text (to tell whether a change changed anything): the lane and the whole video's
+  /// texts and images.
+  String _state() => jsonEncode([t.toJson(), for (final x in d.texts) x.toJson(), for (final x in d.images) x.toJson(),
+      for (final a in d.assets) a.toJson()]);
+
+  void _restore(_Snapshot from) {
+    t.replaceWith(from.timeline);
+    d
+      ..texts = from.texts
+      ..images = from.images
+      ..assets = from.assets;
     if (selected != null && t.byId(selected!) == null) selected = null;
     setState(() {});
     widget.onChanged();
@@ -340,6 +362,32 @@ class MusicVideoEditorState extends State<MusicVideoEditor> implements VideoEdit
     return true;
   }
 
+  /// The cut marker before shot [index] was tapped: its transition and length (owner, 2026-11-12: cut marker →
+  /// transition picker).
+  Future<void> pickTransition(int index) async {
+    if (!canEdit || index <= 0 || index >= t.cuts.length) return;
+    final c = t.cuts[index];
+    select(c.id);
+    Haptics.tap();
+    await showGlassSheet<void>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (ctx) => StatefulBuilder(builder: (ctx, setSheet) => Padding(
+        padding: const EdgeInsets.fromLTRB(12, 0, 12, 16),
+        child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          Row(children: [
+            Icon(Icons.compare_arrows, size: 18, color: videoAccent),
+            const SizedBox(width: 8),
+            Expanded(child: Text('INTO SHOT ${index + 1} · ${videoBarBeat(c.start, spb)}',
+                style: const TextStyle(fontSize: 13, letterSpacing: 1.4, fontWeight: FontWeight.w800))),
+          ]),
+          TransitionPicker(cut: c, stepsPerBar: spb, host: this, onChanged: () => setSheet(() {})),
+        ]),
+      )),
+    );
+  }
+
   @override
   Future<void> addEffect(List<VideoEffect> effects, VideoEffectKind kind) async {
     if (!canEdit) return;
@@ -377,13 +425,12 @@ class MusicVideoEditorState extends State<MusicVideoEditor> implements VideoEdit
     final lane = ShotLane(
       key: _laneKey, timeline: t, stepsPerBar: spb, start: widget.start, end: widget.end, snap: d.snap,
       selected: selected, cursor: cursor, playhead: widget.playhead, onSelect: select, onCursor: setCursor,
-      onBeginEdit: begin, onEdit: () => live(() {}), onEndEdit: end, enabled: enabled,
+      onBeginEdit: begin, onEdit: () => live(() {}), onEndEdit: end, enabled: enabled, onCutTap: pickTransition,
     );
     Widget tool(String key, String tip, IconData icon, VoidCallback? on, {Color? color}) => IconButton(
           key: ValueKey(key), tooltip: tip, iconSize: 20, color: color ?? Neon.dim, onPressed: enabled ? on : null,
           padding: EdgeInsets.zero, constraints: const BoxConstraints(minWidth: 40, minHeight: 40), icon: Icon(icon));
-    final top = Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-      Row(children: [
+    final toolbar = Row(children: [
         Expanded(child: SingleChildScrollView(scrollDirection: Axis.horizontal, child: Row(children: [
           TextButton.icon(
             key: const ValueKey('video-autocut'),
@@ -398,7 +445,7 @@ class MusicVideoEditorState extends State<MusicVideoEditor> implements VideoEdit
           tool('video-undo', 'Undo (Ctrl+Z)', Icons.undo, canUndo ? undo : null),
           tool('video-redo', 'Redo (Ctrl+Shift+Z)', Icons.redo, canRedo ? redo : null),
         ]))),
-        if (widget.onFullScreen != null)
+        if (widget.onFullScreen != null && widget.frame == null)
           IconButton(
             key: const ValueKey('video-editor-full-screen'),
             tooltip: widget.fullScreen ? 'Leave full screen (Esc)' : 'Full screen (F11)',
@@ -408,11 +455,9 @@ class MusicVideoEditorState extends State<MusicVideoEditor> implements VideoEdit
             onPressed: widget.enabled ? widget.onFullScreen : null,
             icon: Icon(widget.fullScreen ? Icons.close_fullscreen : Icons.open_in_full),
           ),
-      ]),
-      VideoReveal(_busy ? const Padding(padding: EdgeInsets.only(bottom: 4), child: LinearProgressIndicator(minHeight: 3)) : null),
-      lane,
-      const SizedBox(height: 6),
-      Row(children: [
+      ]);
+    final busyBar = VideoReveal(_busy ? const Padding(padding: EdgeInsets.only(bottom: 4), child: LinearProgressIndicator(minHeight: 3)) : null);
+    final snapRow = Row(children: [
         const Text('Snap', style: TextStyle(color: Neon.dim, fontSize: 11)),
         const SizedBox(width: 8),
         Expanded(child: VideoTiles<VideoSnap>(keyPrefix: 'video-snap', values: VideoSnap.values, selected: d.snap,
@@ -427,13 +472,16 @@ class MusicVideoEditorState extends State<MusicVideoEditor> implements VideoEdit
         IconButton(padding: EdgeInsets.zero, constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
             key: const ValueKey('video-lane-zoom-in'), tooltip: 'Zoom in', iconSize: 18,
             onPressed: () => _laneKey.currentState?.zoom(2, _fitPx(context)), icon: const Icon(Icons.zoom_in)),
-      ]),
-      VideoReveal(_message == null ? null : Padding(padding: const EdgeInsets.only(top: 6), child: Text(_message!,
+      ]);
+    final message = VideoReveal(_message == null ? null : Padding(padding: const EdgeInsets.only(top: 6), child: Text(_message!,
           key: const ValueKey('video-editor-message'), maxLines: 2, overflow: TextOverflow.ellipsis,
-          style: const TextStyle(fontSize: 11, color: Neon.dim))), switchKey: _message),
+          style: const TextStyle(fontSize: 11, color: Neon.dim))), switchKey: _message);
+    final top = Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      toolbar, busyBar, lane, const SizedBox(height: 6), snapRow, message,
     ]);
     final list = AbsorbPointer(absorbing: !enabled, child: ShotList(timeline: t, scene: widget.scene, snap: d.snap,
-        selected: selected, onSelect: select, host: this, aspect: widget.aspect, start: widget.start, end: widget.end));
+        selected: selected, onSelect: select, host: this, aspect: widget.aspect, start: widget.start, end: widget.end,
+        parts: widget.listParts));
     return KeyArea(
       area: Area.video,
       label: 'Music video editor',
@@ -444,9 +492,12 @@ class MusicVideoEditorState extends State<MusicVideoEditor> implements VideoEdit
           onPointerDown: (_) {
             if (!_focus.hasFocus) _focus.requestFocus();
           },
-          child: widget.side == null
-              ? Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [top, const SizedBox(height: 8), list])
-              : widget.side!(top, list),
+          child: widget.frame != null
+              ? widget.frame!(context, this, (toolbar: toolbar, lane: Column(crossAxisAlignment: CrossAxisAlignment.stretch,
+                  mainAxisSize: MainAxisSize.min, children: [busyBar, lane]), snap: snapRow, message: message, list: list))
+              : widget.side == null
+                  ? Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [top, const SizedBox(height: 8), list])
+                  : widget.side!(top, list),
       ),
     );
   }
@@ -456,6 +507,17 @@ class MusicVideoEditorState extends State<MusicVideoEditor> implements VideoEdit
     final span = (widget.end - widget.start).clamp(1.0, double.infinity);
     return ((w - 16) / span).clamp(28.0 / spb, double.infinity);
   }
+}
+
+/// An undo step: the lane and the whole video's texts, images and image assets.
+class _Snapshot {
+  _Snapshot(this.timeline, this.texts, this.images, this.assets);
+  factory _Snapshot.of(MusicVideoDoc d) => _Snapshot(d.timeline.copy(), [for (final x in d.texts) x.copy()],
+      [for (final x in d.images) x.copy()], [for (final a in d.assets) VideoImageAsset.fromJson(a.toJson())!]);
+  final VideoTimeline timeline;
+  final List<VideoText> texts;
+  final List<VideoImageLayer> images;
+  final List<VideoImageAsset> assets;
 }
 
 /// Auto-cut's settings: the four triggers, each with its sensitivity or settings, and the shortest gap between cuts.

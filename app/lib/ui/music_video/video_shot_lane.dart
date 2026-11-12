@@ -1,5 +1,6 @@
 // The music video's shot lane under the song's bars (owner, 2026-11-12), in the arranger lane's style: each shot a
-// block to drag and trim, cut markers to move, snapping to steps, beats or bars, a cursor and the preview's playhead.
+// block to drag and trim, cut markers to move (a tap picks the transition), snapping to steps, beats or bars, beat
+// markers along the lane with each beat effect's hits, a cursor and the preview's playhead.
 import 'dart:async';
 import 'dart:math' as math;
 
@@ -21,7 +22,10 @@ class ShotLane extends StatefulWidget {
   const ShotLane({super.key, required this.timeline, required this.stepsPerBar, required this.start, required this.end,
       required this.snap, required this.selected, required this.cursor, required this.onSelect,
       required this.onCursor, required this.onBeginEdit, required this.onEdit, required this.onEndEdit, this.playhead,
-      this.enabled = true});
+      this.enabled = true, this.onCutTap});
+
+  /// A tap on the cut marker before shot [index] (its transition).
+  final ValueChanged<int>? onCutTap;
 
   /// Off while auto-cut or a render runs: taps still choose and set the cursor, drags don't edit.
   final bool enabled;
@@ -196,7 +200,7 @@ class ShotLaneState extends State<ShotLane> {
                     Text([
                       if (c.layout.panels.length > 1) '${c.layout.panels.length} views',
                       if (c.effects.isNotEmpty) '${c.effects.length} FX',
-                      if (c.transition != VideoTransition.cut) c.transition.name,
+                      if (c.transition != VideoTransition.cut) c.transition.label.toLowerCase(),
                     ].join(' · '), maxLines: 1, overflow: TextOverflow.clip,
                         style: const TextStyle(fontSize: 8.5, color: Neon.dim)),
                 ]),
@@ -271,7 +275,7 @@ class ShotLaneState extends State<ShotLane> {
                   widget.onCursor(st);
                 },
                 child: CustomPaint(painter: _LanePainter(start: widget.start, end: widget.end, px: px,
-                    stepsPerBar: spb, gaps: widget.timeline.gaps(widget.start, widget.end))),
+                    stepsPerBar: spb, gaps: widget.timeline.gaps(widget.start, widget.end), hits: _hits(cuts, spb))),
               )),
               for (final c in cuts) block(c),
               for (final e in _leaving.entries)
@@ -291,6 +295,7 @@ class ShotLaneState extends State<ShotLane> {
                       key: ValueKey('video-lane-cut-$i'),
                       behavior: HitTestBehavior.opaque,
                       dragStartBehavior: DragStartBehavior.down,
+                      onTap: widget.onCutTap == null ? null : () => widget.onCutTap!(i),
                       onHorizontalDragStart: (d) => _startDrag(null, i, LaneDrag.cut, d.globalPosition.dx),
                       onHorizontalDragUpdate: (d) => _updateDrag(d.globalPosition.dx, px),
                       onHorizontalDragEnd: (_) => _endDrag(),
@@ -319,11 +324,35 @@ class ShotLaneState extends State<ShotLane> {
   }
 }
 
+/// Where the shots' beat effects hit (song steps), for the lane's markers: each beat, off-beat or bar pulse of an
+/// effect that is on, inside its shot. Bounded, so a long song with many beat effects stays quick.
+List<double> _hits(List<VideoCut> cuts, int spb) {
+  final out = <double>{};
+  for (final c in cuts) {
+    for (final e in c.effects) {
+      if (!e.on || !VideoEffectPreset.beats(e.drive)) continue;
+      final (period, offset) = switch (e.drive) {
+        VideoDrive.bar => (math.max(1, spb).toDouble(), 0.0),
+        VideoDrive.offbeat => (4.0, 2.0),
+        _ => (4.0, 0.0),
+      };
+      for (var t = ((c.start - offset) / period).ceil() * period + offset; t < c.end && out.length < 4096; t += period) {
+        out.add(t);
+      }
+    }
+  }
+  return out.toList()..sort();
+}
+
 class _LanePainter extends CustomPainter {
-  _LanePainter({required this.start, required this.end, required this.px, required this.stepsPerBar, required this.gaps});
+  _LanePainter({required this.start, required this.end, required this.px, required this.stepsPerBar, required this.gaps,
+      this.hits = const []});
   final double start, end, px;
   final int stepsPerBar;
   final List<(double, double)> gaps;
+
+  /// Where beat effects hit (song steps).
+  final List<double> hits;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -345,6 +374,22 @@ class _LanePainter extends CustomPainter {
         canvas.drawLine(Offset(hx, size.height - 4), Offset(hx + size.height, rh + 4), hatch);
       }
       canvas.restore();
+    }
+    // Beat markers along the lane (owner, 2026-11-12): a faint tick on every beat, a firmer one on the bar.
+    if (px * 4 >= 5) {
+      final beat = Paint()
+        ..color = Neon.line.withValues(alpha: 0.28)
+        ..strokeWidth = 1;
+      for (var b = (start / 4).ceil() * 4.0; b <= end; b += 4) {
+        if (b % stepsPerBar == 0) continue;
+        canvas.drawLine(Offset(x(b), size.height - 7), Offset(x(b), size.height - 2), beat);
+      }
+    }
+    // The beat effects' hits: a dot where each pulse lands.
+    final dot = Paint()..color = Neon.yellow.withValues(alpha: 0.85);
+    for (final h in hits) {
+      if (h < start || h > end) continue;
+      canvas.drawCircle(Offset(x(h), size.height - 9), px * 4 >= 8 ? 2 : 1.4, dot);
     }
     final barW = stepsPerBar * px;
     final every = barW < 18 ? 4 : (barW < 34 ? 2 : 1);
@@ -377,7 +422,8 @@ class _LanePainter extends CustomPainter {
 
   @override
   bool shouldRepaint(_LanePainter old) =>
-      old.start != start || old.end != end || old.px != px || old.stepsPerBar != stepsPerBar || !listEquals(old.gaps, gaps);
+      old.start != start || old.end != end || old.px != px || old.stepsPerBar != stepsPerBar || !listEquals(old.gaps, gaps) ||
+      !listEquals(old.hits, hits);
 }
 
 class _CutMarkerPainter extends CustomPainter {
