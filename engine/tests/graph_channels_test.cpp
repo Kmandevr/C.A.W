@@ -541,11 +541,11 @@ TEST(graph_executor_sums_fan_in_in_connection_order_bit_exactly) {
     CHECK(executor.process(ConstChannelBufferView{}, out.view(64), 64));
     for (uint32_t ch = 0; ch < 6; ++ch)
         for (uint32_t i = 0; i < 64; ++i) {
-            float expected = 0.0f;
-            expected += signal(ch, i + 2000);
-            expected += signal(ch, i);
-            expected += signal(ch, i + 1000);
-            CHECK_EQ(out.data[ch][i], expected);
+            volatile float expected = 0.0f;  // in connection order, kept from reassociation (this file's flags)
+            expected = expected + signal(ch, i + 2000);
+            expected = expected + signal(ch, i);
+            expected = expected + signal(ch, i + 1000);
+            CHECK_EQ(out.data[ch][i], static_cast<float>(expected));
         }
 }
 
@@ -651,9 +651,11 @@ TEST(graph_executor_prepares_wide_fan_in_in_linear_time) {
     CHECK(executor.prepare(nodes, edges, processors, sources + buses - 1, 16, 48000.0, kBudget) == GraphError::Ok);
     Planar out(1, 16);
     CHECK(executor.process(ConstChannelBufferView{}, out.view(16), 16));
-    float expected = 0.0f;
-    for (uint32_t i = 0; i < sources; ++i) expected += signal(0, 3 + i);
-    CHECK_EQ(out.data[0][3], expected);
+    // Summed in connection order, through a volatile: this file builds with -fassociative-math, under which Clang
+    // would otherwise vectorize the sum in another order.
+    volatile float expected = 0.0f;
+    for (uint32_t i = 0; i < sources; ++i) expected = expected + signal(0, 3 + i);
+    CHECK_EQ(out.data[0][3], static_cast<float>(expected));
 }
 
 TEST(graph_fan_in_saturates_non_finite_sources) {
