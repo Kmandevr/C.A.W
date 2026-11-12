@@ -22,6 +22,7 @@
 #include "project.h"
 #include "quality.h"
 #include "test.h"
+#include "tolerance.h"
 #include "wav.h"
 
 using namespace caw;
@@ -543,31 +544,27 @@ TEST(drums_presets_sound_like_their_names) {
     }
 }
 
-TEST(drums_golden_renders) {
+TEST(drums_match_their_reference_renders) {
     struct G {
         const char* name;
         const char* preset;
         const char* notes;
-        uint64_t hash;
     };
-    const G goldens[] = {
-        {"kit 808", "Kit: 808", kBusy, 0xf154afeb89d861afull},
-        {"kit acoustic", "Kit: Acoustic", kBusy, 0x4277419323395489ull},
-        {"kit lo-fi", "Kit: Lo-fi", kBusy, 0x27b61f64433d6d81ull},
-        {"808 bass", "808 Bass", "0 C2 2 1\n1 G2 2 1\n4 C2 1 0.8\n8 A#1 4 1\n10 C3 2 1\n", 0xbb79edb4713f220bull},
-        {"crash", "Crash", "0 C4 1 1\n", 0x42e1e2855c257f67ull},
-        {"dubstep kick", "Dubstep Kick", "0 C4 1 1\n4 C4 1 0.6\n8 C4 1 1\n", 0xda20ca6ca2c5410full},
-        {"acoustic snare", "Acoustic Snare", "0 C4 1 1\n4 C4 1 0.4\n6 C4 1 0.7\n8 C4 1 1\n", 0xda2aed96ff37d89bull},
+    const G cases[] = {
+        {"kit 808", "Kit: 808", kBusy},
+        {"kit acoustic", "Kit: Acoustic", kBusy},
+        {"kit lo-fi", "Kit: Lo-fi", kBusy},
+        {"808 bass", "808 Bass", "0 C2 2 1\n1 G2 2 1\n4 C2 1 0.8\n8 A#1 4 1\n10 C3 2 1\n"},
+        {"crash", "Crash", "0 C4 1 1\n"},
+        {"dubstep kick", "Dubstep Kick", "0 C4 1 1\n4 C4 1 0.6\n8 C4 1 1\n"},
+        {"acoustic snare", "Acoustic Snare", "0 C4 1 1\n4 C4 1 0.4\n6 C4 1 0.7\n8 C4 1 1\n"},
     };
-    for (const G& g : goldens) {
+    cawtest::References refs("drums");
+    for (const G& g : cases) {
         Values values;
         CHECK(applyBuiltinPreset("org.caw.drums", g.preset, values));
-        const uint64_t h = hashOf(renderProject(track(values, g.notes), 48000 * 2));
-        if (h != g.hash) {
-            char buf[128];
-            std::snprintf(buf, sizeof buf, "%s renders 0x%016llxull", g.name, static_cast<unsigned long long>(h));
-            cawtest::fail(__FILE__, __LINE__, buf);
-        }
+        const std::vector<float> out = renderProject(track(values, g.notes), 48000 * 2);
+        CHECK_REFERENCE(refs, g.name, cawtest::fromInterleaved(out), cawtest::Class::Stable);  // all stable (docs/engine.md)
     }
 }
 

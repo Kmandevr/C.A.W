@@ -1,4 +1,4 @@
-// The built-in C++ instruments (#157) and the Library kernels they share: listing, timing, drums, mono glides, golden renders.
+// The built-in C++ instruments (#157) and the Library kernels they share: listing, timing, drums, mono glides, reference renders.
 #include <cmath>
 #include <complex>
 #include <cstdio>
@@ -21,6 +21,7 @@
 #include "engine.h"
 #include "project.h"
 #include "test.h"
+#include "tolerance.h"
 
 using namespace caw;
 
@@ -115,7 +116,7 @@ double frequency(const std::vector<float>& v, size_t from, size_t to, double sr 
 
 std::string pattern(const std::string& notes) { return "---\nkind: pattern\nname: P\nlength: 16\n---\n" + notes; }
 
-uint64_t renderHash(const ProjectSpec& p, int64_t frames, float* peak) {
+uint64_t renderHash(const ProjectSpec& p, int64_t frames, float* peak, cawtest::Audio* out = nullptr) {
     Engine e(48000);
     if (!ok(e.setProjectOffline(p))) return 0;
     e.play();
@@ -123,6 +124,7 @@ uint64_t renderHash(const ProjectSpec& p, int64_t frames, float* peak) {
     std::vector<float> l(256), r(256);
     for (int64_t done = 0; done < frames; done += 256) {
         e.process(l.data(), r.data(), 256);
+        if (out) out->l.insert(out->l.end(), l.begin(), l.end()), out->r.insert(out->r.end(), r.begin(), r.end());
         for (int i = 0; i < 256; ++i)
             for (float v : {l[static_cast<size_t>(i)], r[static_cast<size_t>(i)]}) {
                 if (peak) *peak = std::max(*peak, std::fabs(v));
@@ -163,15 +165,15 @@ ProjectSpec track(const std::string& instrument, const std::string& notes, std::
     return p;
 }
 
-void checkGolden(const char* name, const ProjectSpec& p, uint64_t golden) {
+// Every built-in instrument's render nulls against its reference (2026-11-12 probes, docs/engine.md).
+cawtest::Class instrumentClass(const char*) { return cawtest::Class::Stable; }
+
+void checkReference(cawtest::References& refs, const char* name, const ProjectSpec& p) {
     float peak = 0;
-    const uint64_t h = renderHash(p, 48000 * 2, &peak);
+    cawtest::Audio audio;
+    const uint64_t h = renderHash(p, 48000 * 2, &peak, &audio);
+    CHECK_REFERENCE(refs, name, audio, instrumentClass(name));
     if (!(peak > 0.05f && peak <= 1.0f)) cawtest::fail(__FILE__, __LINE__, std::string(name) + ": peak out of range");
-    if (h != golden) {
-        char buf[128];
-        std::snprintf(buf, sizeof buf, "%s renders 0x%016llxull", name, static_cast<unsigned long long>(h));
-        cawtest::fail(__FILE__, __LINE__, buf);
-    }
     if (renderHash(p, 48000 * 2, nullptr) != h) cawtest::fail(__FILE__, __LINE__, std::string(name) + ": a second engine differs");
 }
 
@@ -620,95 +622,84 @@ TEST(the_morph_pad_preset_spreads_its_unison_across_the_stereo_field) {
 
 namespace {
 
-// The golden renders: a track per built-in instrument, and the effects and settings First loop uses.
-struct Golden {
+// The reference renders: a track per built-in instrument, and the effects and settings First loop uses.
+struct Render {
     const char* name;
     ProjectSpec project;
-    uint64_t hash;
 };
 
-std::vector<Golden> goldens() {
-    std::vector<Golden> g;
+std::vector<Render> referenceRenders() {
+    std::vector<Render> g;
     // The old drums' projects (kick, snare, hats, kit) play org.caw.drums with their values migrated (one drum
     // instrument, 2026-11-11): re-recorded then, close to the old renders (the_old_drums_migrate_close_to_how_they_sounded).
     // Kick: four on the floor with a pickup, tuned and driven.
     g.push_back({"kick", track("org.caw.drum.kick", "0 C2 1 1\n4 C2 1 0.8\n8 C2 1 1\n10 C2 1 0.6\n12 C2 1 1\n",
-                               {{"tune", 52}, {"drive", 3}, {"click", 0.5}}),
-                 0x87379a01adc3c23full});
+                               {{"tune", 52}, {"drive", 3}, {"click", 0.5}})});
     // Snare: backbeat and a ghost roll.
-    g.push_back({"snare", track("org.caw.drum.snare", "4 D2 1 1\n12 D2 1 1\n14 D2 1 0.4\n15 D2 1 0.6\n"), 0xa499b8f5fdb63b13ull});
+    g.push_back({"snare", track("org.caw.drum.snare", "4 D2 1 1\n12 D2 1 1\n14 D2 1 0.4\n15 D2 1 0.6\n")});
     // Hats: 16ths, open on the off-beats' last 16th, choked by the next closed one.
     g.push_back({"hats", track("org.caw.drum.hats", "0 F#2 1 0.9\n1 F#2 1 0.5\n2 F#2 1 0.8\n3 F#2 1 0.5\n4 F#2 1 0.9\n"
                                                     "5 F#2 1 0.5\n6 A#2 1 0.8\n7 F#2 1 0.5\n8 F#2 1 0.9\n9 F#2 1 0.5\n"
-                                                    "10 F#2 1 0.8\n11 F#2 1 0.5\n12 F#2 1 0.9\n13 F#2 1 0.5\n14 A#2 1 0.8\n15 F#2 1 0.5\n"),
-                 0xeebc21653a34fc9bull});
+                                                    "10 F#2 1 0.8\n11 F#2 1 0.5\n12 F#2 1 0.9\n13 F#2 1 0.5\n14 A#2 1 0.8\n15 F#2 1 0.5\n")});
     // Kit: every drum, and a key it doesn't map.
     g.push_back({"kit", track("org.caw.drum.kit", "0 C2 1 1\n2 F#2 1 0.6\n4 D2 1 1\n4 D#2 1 0.7\n6 A#2 1 0.8\n8 C2 1 1\n"
-                                                  "10 C#2 1 1\n11 B1 1 0.7\n12 E2 1 0.9\n14 G#2 1 0.6\n"),
-                 0x143dab24766f05d3ull});
+                                                  "10 C#2 1 1\n11 B1 1 0.7\n12 E2 1 0.9\n14 G#2 1 0.6\n")});
     // The retired synths' projects (bass, acid, morph) play Flagship presets with their knobs mapped (one synth,
     // 2026-11-10): re-recorded then, perceptually the same as before (the_presets_sound_like_the_synths_they_replace).
     // Bass: First loop's line, an overlap that glides, a slide.
     g.push_back({"bass", track("org.caw.bass", "0 A1 1/2 1\n2 A1 1/2 1\n3 C2 1/2 1\n4 A2 1/2 1\n6 G1 1/2 1\n8 E2 2 1\n9 C2 2 0.8\n"
                                                "11 G1 1 1 slide\n12 A1 2 1\n15 A1 1/2 1\n",
-                               {{"cutoff", 300}, {"resonance", 0.45}, {"env", 0.6}, {"decay", 0.18}, {"sustain", 0.3}}),
-                 0x2e7b10c6842e20fbull});
+                               {{"cutoff", 300}, {"resonance", 0.45}, {"env", 0.6}, {"decay", 0.18}, {"sustain", 0.3}})});
     // Acid: the Acid line pattern (slides, a ratchet, a note that plays half the time), squelchy.
     g.push_back({"acid", track("org.caw.synth.acid", "0 A1 2 1\n2 A2 1 0.7\n3 A1 1 0.8 slide\n4 C2 2 0.9\n6 A1 1 0.6 prob 0.5\n"
                                                      "8 E2 2 1 ratchet 2\n10 G1 1 0.7\n11 A1 1 0.8 slide\n12 A2 2 0.9\n14 G2 1 0.6\n15 E2 1 0.8\n",
-                               {{"resonance", 0.8}, {"wave", 1}}),
-                 0xc6412c36e63f1bfbull});
+                               {{"resonance", 0.8}, {"wave", 1}})});
     // Morph synth: a chord with a quarter tone, drifting, wide.
     g.push_back({"morph", track("org.caw.synth.morph", "0 A3 8 0.8\n0 C4 8 0.8\n0 E4 8 0.8\n8 F3 6 0.7\n8 60.5 6 0.7\n8 C4 6 0.7\n",
-                                {{"attack", 0.05}, {"release", 0.3}, {"shape", 0.6}, {"drift", 0.4}}),
-                 // Re-recorded (2026-11-10 second performance pass): poly voices whose filter 1 is set alike share
-                 // one filter, the level before it, as the Morph synth did (levels within 0.001 dB, bands 60 dB
-                 // down within 0.3 dB: the_built_in_sounds_are_perceptually_what_they_were).
-                 0xb3f91ac721338e05ull});
+                                {{"attack", 0.05}, {"release", 0.3}, {"shape", 0.6}, {"drift", 0.4}})});
     // Flagship: its default patch (a warm, wide saw stack of seven, a ladder, env 2 on the cutoff) on a
     // chord, a line over it and a bent note. Re-recorded (2026-11-10 performance pass): the unwarped oscillator
     // reads its table with a 32-bit fixed-point phase (finer than the float one; perceptually the same). The
     // flagship, bass, acid and morph renders again (second pass): the phases also move on in fixed point (the
     // step rounded to 2^-32 of a cycle: under 0.001 cent), within 0.01 dB in every band.
     g.push_back({"flagship", track("org.caw.synth.flagship", "0 A3 8 0.8\n0 C4 8 0.8\n0 E4 8 0.8\n8 F3 6 0.7\n8 60.5 6 0.7\n"
-                                                             "8 C4 6 0.7\n10 A4 1 1\n11 C5 1 0.9\n12 E5 3 0.8 bend 0:0 1:2\n"),
-                 0x4d897593de76150eull});
+                                                             "8 C4 6 0.7\n10 A4 1 1\n11 C5 1 0.9\n12 E5 3 0.8 bend 0:0 1:2\n")});
     return g;
 }
 
 // More sounds whose character must survive a faster implementation (perceptual references only, no hash):
 // First loop's Pad, Lead and Acid tracks with their effects, the basic synth, and the Morph synth's extremes.
-std::vector<Golden> references() {
-    std::vector<Golden> g = goldens();
+std::vector<Render> references() {
+    std::vector<Render> g = referenceRenders();
     const std::string chords = "0 A3,C4,E4 8 0.8\n8 F3,A3,C4 8 0.75\n";
     ProjectSpec pad = track("org.caw.synth.morph", chords);
     pad.layers[0].components = {effect("org.caw.chorus")};
-    g.push_back({"pad + chorus", pad, 0});
+    g.push_back({"pad + chorus", pad});
     ProjectSpec lead = track("org.caw.synth.morph", "0 E4 2 0.9\n2 A4 2 0.8\n4 C5 3 0.9\n8 B4 2 0.8\n10 A4 2 0.7\n12 G4 4 0.8\n",
                              {{"shape", 0.66}, {"drift", 0.15}, {"unison", 3}, {"detune", 0.1}, {"cutoff", 2600},
                               {"attack", 0.005}, {"decay", 0.25}, {"sustain", 0.5}, {"release", 0.3}});
     lead.layers[0].components = {effect("org.caw.delay.pingpong", {{"sync", 3}, {"mix", 0.3}})};
-    g.push_back({"lead + ping-pong", lead, 0});
+    g.push_back({"lead + ping-pong", lead});
     ProjectSpec acid = g[5].project;
     acid.layers[0].instrument.params = {{"resonance", 0.8}};
     acid.layers[0].components = {effect("org.caw.distortion", {{"drive", 3}, {"mix", 0.5}})};
-    g.push_back({"acid + distortion", acid, 0});
+    g.push_back({"acid + distortion", acid});
     for (int shape = 1; shape < 4; ++shape) {
         ProjectSpec d = track("org.caw.synth.morph", "0 A1 4 1\n4 A3 4 1\n8 E5 4 1\n12 A6 4 1\n");
         d.layers[0].components = {effect("org.caw.distortion", {{"shape", static_cast<double>(shape)}, {"drive", 6}, {"bits", 6}})};
-        g.push_back({shape == 1 ? "hard clip" : shape == 2 ? "fold" : "crush", d, 0});
+        g.push_back({shape == 1 ? "hard clip" : shape == 2 ? "fold" : "crush", d});
     }
     g.push_back({"morph sine", track("org.caw.synth.morph", "0 A2 8 1\n8 A5 8 1\n",
-                                     {{"unison", 1}, {"shape", 0}, {"drift", 0}, {"cutoff", 16000}}), 0});
+                                     {{"unison", 1}, {"shape", 0}, {"drift", 0}, {"cutoff", 16000}})});
     g.push_back({"morph bright square x16", track("org.caw.synth.morph", "0 A1 8 1\n8 A4,E5 8 1\n",
                                                   {{"unison", 16}, {"shape", 1}, {"drift", 0}, {"cutoff", 16000},
-                                                   {"detune", 0.5}, {"attack", 0.001}}), 0});
+                                                   {"detune", 0.5}, {"attack", 0.001}})});
     g.push_back({"morph saw sweep", track("org.caw.synth.morph", "0 C2,C3,G3,C4,E4,G4,C5,E5 16 1\n",
-                                          {{"shape", 0.5}, {"drift", 1}, {"cutoff", 9000}, {"resonance", 0.6}}), 0});
+                                          {{"shape", 0.5}, {"drift", 1}, {"cutoff", 9000}, {"resonance", 0.6}})});
     ProjectSpec basic = track("org.caw.synth.basic", "0 C3 4 1\n0 G3 4 0.8\n4 51 2 0.9 slide\n6 F3 2 0.9\n8 60.5 4 0.7 ratchet 3\n"
                                                      "12 60 4 0.6\n12 63 4 0.6\n12 67 4 0.6\n",
                               {{"wave2", 1}, {"cutoff", 1200}, {"resonance", 0.4}, {"release", 0.4}});
-    g.push_back({"basic synth", basic, 0});
+    g.push_back({"basic synth", basic});
     return g;
 }
 
@@ -807,11 +798,11 @@ TEST(the_built_in_instruments_render_the_same_at_any_block_size) {
     };
     const std::string expressive = "0 A3 6 0.9 bend 0:0 0.5:2 1:-1 vib 0.3 5.5 press 0:1 1:0.3 timbre 0:0 1:0.8\n"
                                    "2 C4 3 0.7 slide\n6 E4,G4 4 0.8 bend 0:0 1:-3\n10 C3 4 1\n12 D3 2 0.6 ratchet 3\n";
-    std::vector<Golden> cases = goldens();
+    std::vector<Render> cases = referenceRenders();
     for (const char* id : {"org.caw.synth.morph", "org.caw.synth.basic", "org.caw.bass", "org.caw.synth.acid"})
-        cases.push_back({id, track(id, expressive, {{"attack", 0.002}}), 0});
-    cases.push_back({"flagship expressive", track("org.caw.synth.flagship", expressive, {{"env1_attack", 0.002}}), 0});
-    for (const Golden& g : cases) {
+        cases.push_back({id, track(id, expressive, {{"attack", 0.002}})});
+    cases.push_back({"flagship expressive", track("org.caw.synth.flagship", expressive, {{"env1_attack", 0.002}})});
+    for (const Render& g : cases) {
         const std::vector<float> a = render(g.project, 256), b = render(g.project, 37);
         size_t differ = 0;
         for (size_t i = 0; i < a.size() && i < b.size(); ++i) differ += a[i] != b[i];
@@ -841,32 +832,31 @@ TEST(a_sleeping_component_renders_the_same_at_any_block_size) {
         out.resize(48000 * 4 * 2);
         return out;
     };
-    std::vector<Golden> cases;
+    std::vector<Render> cases;
     // A short note, then most of a bar of silence (over 1 s): the chorus's input is silent far past its tail.
     ProjectSpec chorus = track("org.caw.synth.basic", "0 A3 1 0.8\n", {{"release", 0.02}});
     chorus.layers[0].components = {effect("org.caw.chorus")};
-    cases.push_back({"basic + chorus", chorus, 0});
+    cases.push_back({"basic + chorus", chorus});
     // The synths that keep running through a gap: a released voice stops on the same frame at any block size.
     for (const char* id : {"org.caw.synth.basic", "org.caw.synth.morph"})
-        cases.push_back({id, track(id, "0 A3 1 0.8\n6 C4 1/2 0.7\n", {{"release", 0.02}, {"decay", 0.05}}), 0});
-    cases.push_back({"org.caw.bass", track("org.caw.bass", "0 A1 1 0.8\n6 C2 1/2 0.7\n"), 0});
+        cases.push_back({id, track(id, "0 A3 1 0.8\n6 C4 1/2 0.7\n", {{"release", 0.02}, {"decay", 0.05}})});
+    cases.push_back({"org.caw.bass", track("org.caw.bass", "0 A1 1 0.8\n6 C2 1/2 0.7\n")});
     // Drums and the acid synth with gaps between hits: each falls quiet and sleeps in the gaps.
-    cases.push_back({"kick", track("org.caw.drum.kick", "0 C2 1 1\n7 C2 1 0.8\n", {{"decay", 0.1}}), 0});
-    cases.push_back({"snare", track("org.caw.drum.snare", "4 D2 1 1\n13 D2 1 0.6\n"), 0});
-    cases.push_back({"hats", track("org.caw.drum.hats", "0 F#2 1 0.9\n6 A#2 1 0.8\n11 F#2 1 0.5\n"), 0});
-    cases.push_back({"kit", track("org.caw.drum.kit", "0 C2 1 1\n5 D#2 1 0.7\n9 A#2 1 0.8\n14 D2 1 1\n"), 0});
-    cases.push_back({"acid", track("org.caw.synth.acid", "0 A1 1/4 1\n5 C2 1/4 0.9\n11 A2 1/4 0.8\n", {{"decay", 1.0}}), 0});
+    cases.push_back({"kick", track("org.caw.drum.kick", "0 C2 1 1\n7 C2 1 0.8\n", {{"decay", 0.1}})});
+    cases.push_back({"snare", track("org.caw.drum.snare", "4 D2 1 1\n13 D2 1 0.6\n")});
+    cases.push_back({"hats", track("org.caw.drum.hats", "0 F#2 1 0.9\n6 A#2 1 0.8\n11 F#2 1 0.5\n")});
+    cases.push_back({"kit", track("org.caw.drum.kit", "0 C2 1 1\n5 D#2 1 0.7\n9 A#2 1 0.8\n14 D2 1 1\n")});
+    cases.push_back({"acid", track("org.caw.synth.acid", "0 A1 1/4 1\n5 C2 1/4 0.9\n11 A2 1/4 0.8\n", {{"decay", 1.0}})});
     // The flagship falls quiet between notes (no voice, effects below -94 dB) and sleeps: dry, and with every
     // effect, a free LFO and the random source moving knobs (clocks that must stand still while it sleeps).
     const char* flagshipNotes = "0 A3 1/2 0.8\n6 C4 1/2 0.7\n";
-    cases.push_back({"flagship dry", track("org.caw.synth.flagship", flagshipNotes, {{"env1_release", 0.02}}), 0});
+    cases.push_back({"flagship dry", track("org.caw.synth.flagship", flagshipNotes, {{"env1_release", 0.02}})});
     cases.push_back({"flagship + effects and LFOs",
                      track("org.caw.synth.flagship", flagshipNotes,
                            {{"env1_release", 0.05}, {"fx_chorus_on", 1}, {"fx_delay_on", 1}, {"fx_delay_feedback", 0.2},
                             {"fx_reverb_on", 1}, {"fx_reverb_decay", 0.3}, {"mod2_src", 4}, {"mod2_dst", 5}, {"mod2_amt", 0.5},
-                            {"mod2_bipolar", 1}, {"lfo1_rate", 3.3}, {"mod3_src", 7}, {"mod3_dst", 3}, {"mod3_amt", 0.3}}),
-                     0});
-    for (const Golden& g : cases) {
+                            {"mod2_bipolar", 1}, {"lfo1_rate", 3.3}, {"mod3_src", 7}, {"mod3_dst", 3}, {"mod3_amt", 0.3}})});
+    for (const Render& g : cases) {
         const std::vector<float> a = render(g.project, 64);
         for (int block : {37, 100, 512}) {
             const std::vector<float> b = render(g.project, block);
@@ -924,13 +914,14 @@ TEST(a_note_held_at_sustain_zero_settles_instead_of_decaying_into_denormals) {
     }
 }
 
-TEST(the_built_in_instruments_match_their_golden_renders) {
-    for (const Golden& g : goldens()) checkGolden(g.name, g.project, g.hash);
+TEST(the_built_in_instruments_match_their_reference_renders) {
+    cawtest::References refs("builtin_instruments");
+    for (const Render& g : referenceRenders()) checkReference(refs, g.name, g.project);
 }
 
 TEST(the_built_in_sounds_are_perceptually_what_they_were) {
     const bool print = std::getenv("CAW_PRINT_SOUNDS") != nullptr;
-    for (const Golden& g : references()) {
+    for (const Render& g : references()) {
         const Sound now = measure(g.project, 48000 * 2);
         if (print) {
             std::printf("    {\"%s\", {%.4f, %.4f, %.5f, {", g.name, now.rmsL, now.rmsR, now.correlation);
@@ -951,12 +942,12 @@ TEST(the_built_in_sounds_are_perceptually_what_they_were) {
 
 TEST(the_old_drums_migrate_close_to_how_they_sounded) {
     // One drum instrument (owner, 2026-11-11): the old drums' tracks play org.caw.drums with their values mapped
-    // onto its layers (builtin_drums_sounds.cpp). Each golden pattern is compared with the old drum's own render
+    // onto its layers (builtin_drums_sounds.cpp). Each reference pattern is compared with the old drum's own render
     // (kOldDrumReferences). Their noise is drawn from other seeds, and a click no longer starts under the body's
     // 1 ms attack, so the bar is looser than for a faster implementation of one sound: each side's level within
     // 1 dB, the correlation within 0.05, and the bands within 30 dB of the loudest within 2.5 dB RMS (none off by
     // more than 4.5 dB).
-    for (const Golden& g : goldens()) {
+    for (const Render& g : referenceRenders()) {
         const Reference* was = nullptr;
         for (const Reference& r : kOldDrumReferences)
             if (std::strcmp(r.name, g.name) == 0) was = &r;
@@ -994,7 +985,7 @@ TEST(the_presets_sound_like_the_synths_they_replace) {
     // the correlation within 0.07 and the bands within 30 dB of the loudest within 2 dB RMS. The bright square
     // through 16 kHz is not compared band by band: the old synth's polyBLEP square aliased, Flagship's band-limited
     // tables don't, so it lacks the old aliases between the harmonics (up to 9 dB at 88 Hz).
-    for (const Golden& g : references()) {
+    for (const Render& g : references()) {
         const Reference* was = nullptr;
         for (const Reference& r : kRetiredSynthReferences)
             if (std::strcmp(r.name, g.name) == 0) was = &r;

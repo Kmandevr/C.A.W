@@ -373,6 +373,17 @@ ProjectSpec threeTracks() {
 // does: notes, the mix graph, sends, buses, meters, the safety limiter).
 constexpr int kProfileCallback = 256;
 
+// The compiler that built this bench, for the JSON report (MSVC has no __VERSION__).
+std::string compilerName() {
+#if defined(__VERSION__)
+    return __VERSION__;
+#elif defined(_MSC_FULL_VER)
+    return "MSVC " + std::to_string(_MSC_FULL_VER);
+#else
+    return "unknown";
+#endif
+}
+
 const char* scenarioName(int k) {
     return k == 0 ? "first loop" : k == 1 ? "typical song" : k == 2 ? "typical song + extras" : "three tracks";
 }
@@ -1066,7 +1077,7 @@ int runSuite(double secs, int argc, char** argv) {
                     o.row->seconds >= 0 ? (" (" + std::to_string(o.row->seconds).substr(0, 5) + " s)").c_str() : "");
     if (!jsonPath.empty()) {
         std::string j = "{\"tool\":\"caw_bench\",\"format\":1,\"label\":\"" + jsonEscape(label) + "\",\"target\":\"" + targetName() +
-                        "\",\"compiler\":\"" + jsonEscape(__VERSION__) + "\",\"rate\":" + std::to_string(kRate) +
+                        "\",\"compiler\":\"" + jsonEscape(compilerName()) + "\",\"rate\":" + std::to_string(kRate) +
                         ",\"frames\":" + std::to_string(frames) + ",\"budget_us\":" + std::to_string(budgetUs) +
                         ",\"runs\":" + std::to_string(runs) + ",\"seconds\":" + std::to_string(secs) + ",\"scenarios\":[";
         for (size_t k = 0; k < out.size(); ++k) {

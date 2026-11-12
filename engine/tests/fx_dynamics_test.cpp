@@ -16,6 +16,7 @@
 #include "presets.h"
 #include "quality.h"
 #include "test.h"
+#include "tolerance.h"
 
 using namespace caw;
 
@@ -144,15 +145,14 @@ double biggestStep(const std::vector<float>& x, size_t from, size_t to) {
     return m;
 }
 
-uint64_t hash(const Stereo& s) {
-    uint64_t h = 1469598103934665603ull;
-    auto mix = [&](float f) {
-        uint32_t bits;
-        std::memcpy(&bits, &f, 4);
-        for (int k = 0; k < 4; ++k) h = (h ^ ((bits >> (8 * k)) & 255u)) * 1099511628211ull;
-    };
-    for (size_t i = 0; i < s.size(); ++i) mix(s.l[i]), mix(s.r[i]);
-    return h;
+// The input repeats each second: a reference's waveform holds its first 1.25 s (the start, the silent bar and the
+// wake-up after it), the whole 2 s render is also compared as heard (tolerance.h).
+constexpr uint32_t kWaveformFrames = 60000;
+// How each case is compared with its reference (tolerance.h).
+// Chaotic (2026-11-12 probes, docs/engine.md "Reference renders"): the phase distortion amplifies a one-float-step
+// change of its input to -117 dBFS (busy) and -126 dBFS (default); every other case is stable.
+cawtest::Class dynamicsClass(const std::string& name) {
+    return name.rfind("org.caw.phasedist ", 0) == 0 ? cawtest::Class::Chaotic : cawtest::Class::Stable;
 }
 
 // Every knob away from its default, so each path runs.
@@ -291,7 +291,7 @@ TEST(fx_dynamics_effects_stay_finite_and_bounded_whatever_their_knobs) {
     }
 }
 
-TEST(fx_dynamics_effects_fall_quiet_publish_their_display_and_match_their_goldens) {
+TEST(fx_dynamics_effects_fall_quiet_publish_their_display_and_match_their_references) {
     Engine e(48000);
     for (size_t k = 0; k < std::size(kNew); ++k) {
         std::unique_ptr<ModuleProcessor> p = make(e, kNew[k]);
@@ -309,25 +309,13 @@ TEST(fx_dynamics_effects_fall_quiet_publish_their_display_and_match_their_golden
         CHECK_EQ(out.l.back(), 0.0f);
         CHECK(peak(run(*p, sine(440, 0.5, 4800)).l) > 0.01);
     }
-    struct Golden {
-        const char* name;
-        uint64_t hash;
-    };
-    const Golden goldens[] = {
-#include "fx_dynamics_golden.inc"
-    };
     const Stereo in = music(48000 * 2);
+    cawtest::References refs("fx_dynamics");
+    refs.storeWaveformFrames(kWaveformFrames);
     for (const Case& c : cases()) {
         std::unique_ptr<ModuleProcessor> p = make(e, c.id);
-        const uint64_t h = hash(run(*p, in, c.values, 64));
-        const Golden* g = nullptr;
-        for (const Golden& x : goldens)
-            if (c.name == x.name) g = &x;
-        if (!g || g->hash != h) {
-            char buf[200];
-            std::snprintf(buf, sizeof buf, "    {\"%s\", 0x%016llxull},", c.name.c_str(), static_cast<unsigned long long>(h));
-            cawtest::fail(__FILE__, __LINE__, buf);
-        }
+        const Stereo out = run(*p, in, c.values, 64);
+        CHECK_REFERENCE(refs, c.name, (cawtest::Audio{out.l, out.r}), dynamicsClass(c.name));
     }
 }
 

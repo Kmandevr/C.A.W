@@ -1,29 +1,27 @@
 # Handoff
 
-Commit: 313975b
+Commit: b8422d8
 Branch: ccr-56285e11-0xrj3h (PR #178 open into Main, watched; Main protected: PRs only, owner said merge yourself when CI is green)
 
 ## Goal
-Owner (2026-11-11): keep working through everything planned toward v1.0.0-beta.1; build each request they gave today (all recorded in `docs/decisions.md`, newest first); then speed pass, fit-and-finish (every change animates: `.claude/rules/app.md`), docs pass, version bump, pre-release. Resume at 5:50 pm owner time (America/New_York) via a scheduled message.
+Owner (2026-11-12, newest): optimise the engine (engine/) for speed. Decision recorded (decisions.md top entry "Perceptually identical, not bit-identical"). Order: tolerance tests replace golden hashes → CI bench baseline (done: `docs/engine-performance.md`, `.github/workflows/bench.yml`) → phases, one PR each: 1 free wins (LTO, quiet/sleep everywhere, Eco lowers oversampling/FFT), 2 floating point (FTZ everywhere incl. offline, FMA/fast-math where tolerance passes, keep NaN/inf guards), 3 maths (detmath out of per-sample paths; keep bit ops for bitcrush/glitch), 4 precision/layout (float signal paths, double for phase/low-cutoff feedback; block-wise stages for NEON), 5 parallel mixer (architect review first; lock-free worker pool, fixed-order sum, big/little, fallback). audio-reviewer after each phase, code-reviewer before each PR. Ask owner if audible or a phase gains <5%. Done when all merged, tests green, before/after table per scenario (target ≈3–4x headroom on a typical song; report real number). No UI changes; C API only if needed (bump + app).
+Then: earlier goal (v1.0.0-beta.1: fit-and-finish, docs pass, version bump, pre-release).
 
-## Done and verified (on the branch, pushed)
-- Merged to Main via #176/#177: desktop batches, leftovers, track cards, Flagship extras, Plug-in page, instant taps, Windows UTF-8 fixes.
-- On #178 (pushed, CI running): themes (5 families light/dark, theme editor, feel, animation style), music video (setup, auto director, preview, MP4 via MediaCodec / Media Foundation, encoders never compiled yet: first compile is the app.yml dispatch run at 313975b). Local: `flutter analyze` clean; `flutter test -j 4` 1358 passed on the theme merge; music_video + workspace tests pass.
+## Done and verified (pushed)
+- Merged: default-project (owner's mid tempo is default/template), keyboard-a, track-headers (one `RevealStartRequest` back-to-start hook kept), latency-comp (C API 23; UI reads heard playhead/meters), engine-bench (baseline: flagship_heavy 64v ≈103% and song32_heavy ≈100% of budget on Android-arm64 target).
+- Fixed: decisions.md conflict markers (ee40c08 had them), bench MSVC `__VERSION__`.
 
-## Open (agents in worktrees `.claude/worktrees/<name>`; if the session restarted, read each branch's `git log ccr-56285e11-0xrj3h..<name>` and finish/merge it)
-- `track-headers` (+ endless scroll right, revealStart API): collapse states, per-track height, indent, upright meters, header tap=focus instantly / double tap=FX / hold=menu, selected-clip tap opens editor, follow pause + setting (2.5 s, off, never) + Smooth style, snappy move animation, resize reveals not stretch, header/panel animations in and out, empty-arrange hint centred, deep zoom out. Decisions: "Track headers that shrink…", "Every change animates".
-- `keyboard-a` (⏮ double tap also scrolls views to start via an AppState hook; arranger side in track-headers): keyboard-only contexts (FX chain, devices, mixer, Files, Build, Settings, menus), hint strip, exit animations outside Arrange, ⏮ back-to-start button (tap loop start, double tap project start, Home/Ctrl+Home). Batch B (Arrange/roll keyboard) after track-headers.
-- `default-project`: owner's "mid tempo" project (scratchpad/midtempo/clean/mid_tempo.json; owner upload b9d4a5b7-mid_tempo.caw.zip) becomes the bundled default/First loop; old builder kept as a test fixture.
-- `latency-comp`: output latency compensation (Bluetooth etc.): measured + per-device offset + calibration, audible playhead, recording placement, badge; new C API number; lists UI consumers to switch.
-- Done since: perf-pass merged (14–21 % fewer instructions, same bits); video-smooth merged. Next perf: Flagship hotspots (per-frame reverb → block form, configureVoice skip, ladder 4-lane), Android ADPF performance hint (verify NDK docs).
-- Next waves: layout file phase 1 (decisions "A REAPER-style layout file"), phone ⋯ More / search / hints (decisions "Finding things on a phone"), desktop look batch C (`scratchpad` gone after restart: see decisions "Desktop plays to desktop strengths"), midi_clips learned-CC wire-up, platform-modularity plan fold-in (commit b10d640 if still present).
-- Owner questions open: per-note FX look/over-budget; plugin pipeline state saved in project?; Reset curve meaning; layout-file custom labels/packages/one file.
+## Open (agents in worktrees `.claude/worktrees/<name>`; on restart read `git log ccr-56285e11-0xrj3h..<name>` and finish/merge)
+- `tolerance-tests`: replace goldens with tolerance tests (−120 dBFS residual stable; loudness 0.1 dB + band spectrum chaotic; discrete exact; broken-case tests).
+- `speed-free-wins`: phase 1 (must keep existing goldens passing; new tests in engine/tests/speed_free_wins_test.cpp).
+- Owner questions open: latency badge placement; compensation default off for wired?; keyboard batch B WASD clash; per-note FX look/over-budget; plugin page state in project?; Reset curve meaning; layout-file custom labels/packages/one file.
+- Next waves after speed: keyboard batch B (spec in decisions "The whole app works from the keyboard"), layout file phase 1, phone ⋯ More/search/hints, desktop look batch C, midi_clips learned-CC, platform-modularity plan.
 
 ## Next
-- When #178 CI is green: merge into Main. Check the 313975b APK run (encoder compile); send the owner the APK link.
-- Merge each agent as it reports (analyze, full `CAW_LIB=… flutter test`, docs-test --strict, push, PR).
+- #178 green on 3bd5bd7 → merge into Main, dispatch app.yml with installables, send APK link.
+- Merge tolerance-tests, then phase 1 (rebase on it), each its own PR into Main.
 
 ## Read first
-- `docs/decisions.md`
-- `docs/app.md`
-- `.claude/rules/app.md`
+- `docs/decisions.md` (top entry)
+- `docs/engine-performance.md`
+- `.claude/rules/engine.md`
