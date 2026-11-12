@@ -218,3 +218,33 @@ TEST(the_master_chain_sleeps_soon_after_a_tail_and_wakes_sample_exactly) {
     CHECK(analysis::levels(first.data(), first.size()).peak > 0.1);
     CHECK(sameBits(first, second));
 }
+
+TEST(a_quality_change_never_switches_a_held_warped_notes_oversampling) {
+    // A held FM or fold note keeps the path it started on (1x in Eco, 2x decimated otherwise) through a quality
+    // change, so the change makes no click: the same bits as the quality never changing. The next note takes the
+    // new quality.
+    for (const double w : {5.0, 6.0}) {  // FM, Fold
+        const ProjectSpec p = oneTrack("org.caw.synth.flagship", "0 A3 12 1\n",
+                                       {{"osc1_unison", 1}, {"osc1_warp", w}, {"osc1_warp_amt", 0.8}, {"flt1_on", 0},
+                                        {"fx_reverb_on", 0}});
+        for (const int from : {0, 1}) {
+            auto play = [&](bool change) {
+                Engine e(48000);
+                e.setQuality(from);
+                std::vector<float> out;
+                if (!ok(e.setProjectOffline(p))) return out;
+                e.play();
+                std::vector<float> a(256), b(256);
+                for (int done = 0; done < 48000; done += 256) {
+                    if (change && done == 12288) e.setQuality(from == 0 ? 1 : 0);  // the note is held
+                    e.process(a.data(), b.data(), 256);
+                    for (int i = 0; i < 256; ++i) out.push_back(a[static_cast<size_t>(i)]), out.push_back(b[static_cast<size_t>(i)]);
+                }
+                return out;
+            };
+            const std::vector<float> steady = play(false), changed = play(true);
+            CHECK(analysis::levels(steady.data(), steady.size()).peak > 0.05);
+            CHECK(sameBits(steady, changed));
+        }
+    }
+}
