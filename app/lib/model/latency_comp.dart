@@ -90,7 +90,13 @@ class LatencyStore {
     }
   }
 
-  Future<void> save() async {
+  // Saves run one after another: two writes sharing the temporary file could interleave and leave a broken or
+  // older file behind. Each queued save writes the offsets as they are when its turn comes, so the last wins.
+  Future<void> _saving = Future.value();
+
+  Future<void> save() => _saving = _saving.then((_) => _write());
+
+  Future<void> _write() async {
     final f = file;
     if (f == null) return;
     try {

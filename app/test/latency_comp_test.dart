@@ -76,6 +76,31 @@ void main() {
       l.dispose();
     });
 
+    test('saves started together land in order: the file always holds the newest offsets', () async {
+      final dir = await Directory.systemTemp.createTemp('lat');
+      addTearDown(() => dir.delete(recursive: true));
+      final file = File('${dir.path}/latency.json');
+      final store = LatencyStore(file);
+      for (var round = 0; round < 20; ++round) {
+        final saves = <Future<void>>[];
+        for (var i = 0; i < 8; ++i) {
+          store.enabled = i.isEven;
+          // Files of different lengths, so overlapping writes would leave a broken file.
+          store.outputs.clear();
+          for (var k = 0; k < (i * 37 + round) % 50; ++k) {
+            store.outputs['device $k'] = DeviceOffset(k.toDouble(), OffsetSource.typed);
+          }
+          saves.add(store.save());
+        }
+        await Future.wait(saves);
+        final back = LatencyStore(file);
+        await back.load();
+        expect(back.enabled, false, reason: 'round $round: the last save (disabled) must win and the file must parse');
+        store.enabled = true;
+        await store.save();
+      }
+    });
+
     test('offsets are saved per device and read back', () async {
       final dir = await Directory.systemTemp.createTemp('lat');
       addTearDown(() => dir.delete(recursive: true));
