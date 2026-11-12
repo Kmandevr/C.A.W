@@ -73,6 +73,14 @@ void main() {
     await tester.pump(const Duration(seconds: 1)); // let autosave and history timers run out
   }
 
+  /// A double tap on a header (owner, 2026-11-12: a tap only selects): its main editor, the focus view's FX tab.
+  Future<void> openTrack(WidgetTester tester, Finder f) async {
+    await tester.tap(f);
+    await tester.pump(const Duration(milliseconds: 50));
+    await tester.tap(f);
+    await tester.pump(kDoubleTapTimeout);
+  }
+
   /// A hold let go without moving: a header's menu (owner, 2026-11-11).
   Future<void> hold(WidgetTester tester, Finder f) async {
     await tester.longPress(f);
@@ -80,11 +88,10 @@ void main() {
   }
 
   group('focus view', () {
-    testWidgets('a tap pins the track on top with its panel; swipes, tap and Back go next or close', (tester) async {
+    testWidgets('a double tap pins the track on top with its panel; swipes, tap and Back go next or close', (tester) async {
       listenForHaptics(tester);
       await pumpArranger(tester, const Size(412, 900));
-      await tester.tap(find.byKey(const ValueKey('track-header-a')));
-      await tester.pump(kDoubleTapTimeout); // the focus view waits out the double tap
+      await openTrack(tester, find.byKey(const ValueKey('track-header-a')));
       await tester.pumpAndSettle();
       expect(sections.focusedLayer, 'a');
       expect(s.selectedLayerId, 'a');
@@ -119,18 +126,16 @@ void main() {
       expect(find.byKey(const ValueKey('track-header-c')), findsOneWidget);
 
       // Tapping the pinned track closes it too.
-      await tester.tap(find.byKey(const ValueKey('track-header-b')));
-      await tester.pump(kDoubleTapTimeout); // the focus view waits out the double tap
+      await openTrack(tester, find.byKey(const ValueKey('track-header-b')));
       await tester.pumpAndSettle();
       expect(sections.focusedLayer, 'b');
       await tester.tap(find.byKey(const ValueKey('track-header-b')));
-      await tester.pump(kDoubleTapTimeout); // the focus view waits out the double tap
+      await tester.pump(kDoubleTapTimeout);
       await tester.pumpAndSettle();
       expect(sections.focusedLayer, isNull);
 
       // Android Back leaves the focus view instead of the app.
-      await tester.tap(find.byKey(const ValueKey('track-header-a')));
-      await tester.pump(kDoubleTapTimeout); // the focus view waits out the double tap
+      await openTrack(tester, find.byKey(const ValueKey('track-header-a')));
       await tester.pumpAndSettle();
       expect(sections.focusedLayer, 'a');
       await tester.binding.handlePopRoute();
@@ -163,8 +168,7 @@ void main() {
         (tester) async {
       listenForHaptics(tester);
       await pumpArranger(tester, const Size(860, 400));
-      await tester.tap(find.byKey(const ValueKey('track-header-a')));
-      await tester.pump(kDoubleTapTimeout); // the focus view waits out the double tap
+      await openTrack(tester, find.byKey(const ValueKey('track-header-a')));
       await tester.pumpAndSettle();
       Rect panel() => tester.getRect(find.byKey(const ValueKey('focus-panel')));
       expect(panel().left, greaterThan(860 * 0.25));
@@ -209,8 +213,7 @@ void main() {
     testWidgets('a desktop shows the panel beside the arrangement; without the frame the focus stays local',
         (tester) async {
       await pumpArranger(tester, const Size(1400, 900), withSections: false);
-      await tester.tap(find.byKey(const ValueKey('track-header-c')));
-      await tester.pump(kDoubleTapTimeout); // the focus view waits out the double tap
+      await openTrack(tester, find.byKey(const ValueKey('track-header-c')));
       await tester.pumpAndSettle();
       final panel = tester.getRect(find.byKey(const ValueKey('focus-panel')));
       expect(panel.left, greaterThan(800));
@@ -388,8 +391,7 @@ void main() {
 
   testWidgets('phone portrait: the focus panel opens higher over the pinned track, and back', (tester) async {
     await pumpArranger(tester, const Size(412, 900));
-    await tester.tap(find.byKey(const ValueKey('track-header-a')));
-    await tester.pump(kDoubleTapTimeout); // the focus view waits out the double tap
+    await openTrack(tester, find.byKey(const ValueKey('track-header-a')));
     await settle(tester);
     final panel = find.byKey(const ValueKey('focus-panel'));
     final low = tester.getTopLeft(panel).dy;
@@ -408,8 +410,7 @@ void main() {
   testWidgets('phone portrait: dragging the focus panel\'s header follows the finger and says what letting go does',
       (tester) async {
     await pumpArranger(tester, const Size(412, 900));
-    await tester.tap(find.byKey(const ValueKey('track-header-a')));
-    await tester.pump(kDoubleTapTimeout); // the focus view waits out the double tap
+    await openTrack(tester, find.byKey(const ValueKey('track-header-a')));
     await settle(tester);
     final panel = find.byKey(const ValueKey('focus-panel'));
     final rest = tester.getTopLeft(panel).dy;
@@ -432,68 +433,60 @@ void main() {
   });
 
   group('track headers', () {
-    testWidgets('a tap focuses the track in the next frame; a quick second tap switches the focus view to its effects',
+    testWidgets('a tap only selects the track; a double tap opens its main editor, the focus view on its effects',
         (tester) async {
       await pumpArranger(tester, const Size(412, 900));
       Finder header(String id) => find.byKey(ValueKey('track-header-$id'));
       FocusTab? tab() => tester.widget<FocusPanel>(find.byType(FocusPanel)).tab;
-      // A tap focuses at once (owner, 2026-11-11): no double-tap wait.
+      // A tap selects at once and opens nothing (owner, 2026-11-12).
       await tester.tap(header('b'));
       await tester.pump();
       expect(s.selectedLayerId, 'b');
-      expect(sections.focusedLayer, 'b');
-      await tester.pumpAndSettle();
-      // Another tab, then back to all tracks.
-      await tester.tap(find.byKey(const ValueKey('focus-tab-mixer')));
-      await tester.pumpAndSettle();
-      expect(tab(), FocusTab.mixer);
-      await tester.tap(header('b')); // the pinned track: back to all tracks
-      await tester.pumpAndSettle();
       expect(sections.focusedLayer, isNull);
       await tester.pump(kDoubleTapTimeout);
+      await tester.pumpAndSettle();
+      expect(sections.focusedLayer, isNull, reason: 'no open after the double-tap window either');
+      expect(find.byKey(const ValueKey('focus-panel')), findsNothing);
+      expect(find.byKey(const ValueKey('long-press-menu')), findsNothing);
 
-      // A tap opens the focus view on the tab it had; a quick second tap on the pinned track (which moved under
-      // the finger) switches it to the effects.
+      // A double tap opens the focus view on its FX tab (the instrument and effects).
       await tester.tap(header('c'));
-      await tester.pump();
-      expect(sections.focusedLayer, 'c');
-      expect(tab(), FocusTab.mixer);
       await tester.pump(const Duration(milliseconds: 80));
       await tester.tap(header('c'));
       await tester.pump();
-      expect(sections.focusedLayer, 'c', reason: 'the double tap keeps the focus view open');
+      expect(sections.focusedLayer, 'c');
       expect(tab(), FocusTab.fx);
       expect(find.byKey(const ValueKey('long-press-menu')), findsNothing, reason: 'a double tap opens no menu');
       await tester.pumpAndSettle();
+      await tester.pump(kDoubleTapTimeout);
+      // The pinned track: a tap goes back to all tracks.
       await tester.tap(header('c'));
       await tester.pumpAndSettle();
       expect(sections.focusedLayer, isNull);
       await tester.pump(kDoubleTapTimeout);
-
       await settle(tester);
     });
 
-    testWidgets('beside the side panel a quick tap on another header is a first tap there, not a double tap',
+    testWidgets('with a mouse a click selects and a double-click opens the track; quick clicks on two headers select',
         (tester) async {
       await pumpArranger(tester, const Size(1200, 800));
       Finder header(String id) => find.byKey(ValueKey('track-header-$id'));
-      FocusTab? tab() => tester.widget<FocusPanel>(find.byType(FocusPanel)).tab;
-      await tester.tap(header('a'));
+      await tester.tap(header('a'), kind: PointerDeviceKind.mouse);
       await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const ValueKey('focus-tab-mixer')));
-      await tester.pumpAndSettle();
+      expect(s.selectedLayerId, 'a');
+      expect(sections.focusedLayer, isNull);
       await tester.pump(kDoubleTapTimeout);
-      await tester.tap(header('b'));
+      await tester.tap(header('b'), kind: PointerDeviceKind.mouse);
       await tester.pump(const Duration(milliseconds: 60));
-      await tester.tap(header('c'));
+      await tester.tap(header('c'), kind: PointerDeviceKind.mouse);
       await tester.pump();
+      expect(s.selectedLayerId, 'c');
+      expect(sections.focusedLayer, isNull, reason: 'two headers: two first clicks');
+      await tester.pump(const Duration(milliseconds: 60));
+      await tester.tap(header('c'), kind: PointerDeviceKind.mouse);
+      await tester.pumpAndSettle();
       expect(sections.focusedLayer, 'c');
-      expect(tab(), FocusTab.mixer, reason: 'two headers: two first taps');
-      // The same header again, where it still is: a double tap.
-      await tester.pump(const Duration(milliseconds: 60));
-      await tester.tap(header('c'));
-      await tester.pump();
-      expect(tab(), FocusTab.fx);
+      expect(tester.widget<FocusPanel>(find.byType(FocusPanel)).tab, FocusTab.fx);
       await settle(tester);
     });
 

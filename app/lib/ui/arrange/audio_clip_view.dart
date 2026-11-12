@@ -1,7 +1,7 @@
 // An audio clip in the arranger, REAPER-style: its waveform; drag the body to move it (onto another track too), the
 // edges to trim (the right one past the file's end loops it), the top corners for fades (their dot bends the curve)
-// and the top-middle handle for gain. Tap selects; as a MIDI clip (owner, 2026-11-11), a long press picks it up whole
-// and carries it in time and across tracks on the grid, and a double tap or a right-click opens its menu.
+// and the top-middle handle for gain. As a MIDI clip (owner, 2026-11-12): a tap selects, a double tap opens its
+// editor (the Clip tab), a hold or right-click opens its menu, and a hold that moves picks it up whole.
 import 'dart:async';
 import 'dart:math' as math;
 
@@ -21,6 +21,7 @@ import '../pointer_input.dart';
 import '../theme.dart';
 import 'arrange_drag.dart';
 import 'audio_waveform.dart';
+import 'edit_cues.dart';
 import 'long_press_menu.dart';
 import 'take_chip.dart';
 import 'track_color.dart';
@@ -30,7 +31,8 @@ enum _Grab { none, move, trimStart, trimEnd, fadeIn, fadeOut, curveIn, curveOut,
 
 class AudioClipView extends StatefulWidget {
   const AudioClipView({super.key, required this.state, required this.layer, required this.clip, required this.stepW,
-      required this.height, required this.color, required this.selected, this.drag, this.onOpen, this.selectMode});
+      required this.height, required this.color, required this.selected, this.drag, this.onOpen, this.selectMode,
+      this.guides});
   final AppState state;
   final LayerDoc layer;
   final AudioClipDoc clip;
@@ -44,6 +46,9 @@ class AudioClipView extends StatefulWidget {
 
   /// Whether Select mode is on (a tap adds or removes the clip).
   final bool Function()? selectMode;
+
+  /// The arranger's drag guides: the clip's span while it moves or an edge trims (owner, 2026-11-12).
+  final ValueNotifier<ClipGuide?>? guides;
 
   @override
   State<AudioClipView> createState() => AudioClipViewState();
@@ -105,19 +110,41 @@ class AudioClipViewState extends State<AudioClipView> {
 
   // ---------- gestures ----------
 
-  /// A long press picks the clip up: a tick, then moving carries it in time and across tracks.
+  final _hold = HoldToMove();
+
+  /// The last pointer down on the clip: the finger a hold follows.
+  int _downPointer = 0;
+
+  @override
+  void dispose() {
+    _hold.stop();
+    super.dispose();
+  }
+
+  /// A hold opens the clip's menu (owner, 2026-11-12); moving past the touch slop closes it and picks the clip up,
+  /// carried in time and across tracks from where the finger went down.
   void _lift(LongPressStartDetails d) {
-    if ((widget.drag?.pinching ?? false) || c.lock || _grab != _Grab.none) return;
-    Motion.tick();
-    _begin(_Grab.move, d.globalPosition, lift: true);
+    if ((widget.drag?.pinching ?? false) || _grab != _Grab.none) return;
+    _hold.start(_downPointer, d.globalPosition,
+      begin: (from) {
+        if (!mounted || c.lock) return;
+        Motion.tick();
+        _begin(_Grab.move, from, lift: true);
+      },
+      move: (at) { if (_lifted) _update(at); },
+      end: (cancel) {
+        if (!_lifted) return;
+        cancel ? _cancel() : _end();
+      });
+    showAudioClipMenu(context, s, widget.layer, c, d.globalPosition, onOpen: widget.onOpen);
   }
 
-  void _liftMove(LongPressMoveUpdateDetails d) {
-    if (_lifted) _update(d.globalPosition);
-  }
-
-  void _liftEnd(LongPressEndDetails _) {
-    if (_lifted) _end();
+  /// The guides for the move or trim in progress, or none.
+  void _guide() {
+    final g = widget.guides;
+    if (g == null) return;
+    final shows = _grab == _Grab.move || _grab == _Grab.trimStart || _grab == _Grab.trimEnd;
+    g.value = shows ? ClipGuide(_shownStart, _shownStart + _shownLength, widget.color) : null;
   }
 
   void _freeChanged() {
@@ -145,6 +172,7 @@ class AudioClipViewState extends State<AudioClipView> {
       _curve = g == _Grab.curveIn ? c.fadeInCurve : g == _Grab.curveOut ? c.fadeOutCurve : null;
     });
     _lifted = lift && g == _Grab.move;
+    _guide();
     if (g == _Grab.move) {
       widget.drag?.begin(onScroll: () => setState(() {}), onCancel: _cancel, lift: _lifted);
       widget.drag?.free.addListener(_freeChanged);
@@ -189,6 +217,7 @@ class AudioClipViewState extends State<AudioClipView> {
           break;
       }
     });
+    _guide();
   }
 
   void _end() {
@@ -231,6 +260,7 @@ class AudioClipViewState extends State<AudioClipView> {
   void _cancel() => _reset();
 
   void _reset() {
+    if (_grab != _Grab.none) widget.guides?.value = null;
     if (_grab == _Grab.move) {
       widget.drag?.free.removeListener(_freeChanged);
       widget.drag?.end();
@@ -241,28 +271,11 @@ class AudioClipViewState extends State<AudioClipView> {
   }
 
   final _clicks = ClickCounter();
-  Timer? _opening;
-
-  @override
-  void dispose() {
-    _opening?.cancel();
-    super.dispose();
-  }
 
   void _tap() {
     final ctrl = HardwareKeyboard.instance.isControlPressed;
     if (ctrl || (widget.selectMode?.call() ?? false)) {
       s.selectAudioClip(widget.layer, c, additive: true);
-    } else if (s.selectedClipIds.contains(c.id) && widget.onOpen != null) {
-      // A tap on the selected clip opens its editor, the Clip tab (owner, 2026-11-11); a finger's waits out the
-      // double tap that opens the menu instead, since the Clip tab moves the clip.
-      final open = widget.onOpen!;
-      if (_clicks.mouse) return open();
-      _opening = Timer(kDoubleTapTimeout, () {
-        _opening = null;
-        if (mounted) open();
-      });
-      return;
     } else {
       s.selectAudioClip(widget.layer, c);
     }
@@ -281,8 +294,6 @@ class AudioClipViewState extends State<AudioClipView> {
           onDoubleTap: onDoubleTap,
           // A long press on an edge picks the whole clip up too: it never trims.
           onLongPressStart: g == _Grab.trimStart || g == _Grab.trimEnd ? _lift : null,
-          onLongPressMoveUpdate: g == _Grab.trimStart || g == _Grab.trimEnd ? _liftMove : null,
-          onLongPressEnd: g == _Grab.trimStart || g == _Grab.trimEnd ? _liftEnd : null,
           // Along one axis, so the handle wins its drag before the scroll views do (they take a drag on the same
           // slop; a pan would need twice as far).
           onHorizontalDragStart: _vertical(g) ? null : (d) => _begin(g, d.globalPosition),
@@ -365,28 +376,22 @@ class AudioClipViewState extends State<AudioClipView> {
     return Opacity(opacity: c.mute ? 0.45 : 1, child: Transform.translate(
       offset: Offset((start - c.startSteps) * widget.stepW, dragShift),
       child: OverflowBox(alignment: Alignment.topLeft, minWidth: width, maxWidth: width, minHeight: h, maxHeight: h,
-        child: Stack(clipBehavior: Clip.none, children: [
+        child: Listener(onPointerDown: (e) => _downPointer = e.pointer, child: Stack(clipBehavior: Clip.none, children: [
           // The body: select, open, menu and move (from the first few pixels, before the scroll views take it).
           Positioned.fill(child: MediaQuery(
             data: mq.copyWith(gestureSettings: const DeviceGestureSettings(touchSlop: kTouchSlop / 2)),
-            // A tap selects at once (on the selected clip, it opens the Clip tab); a quick second tap opens the menu as well (its first item opens the Clip tab), as a
-            // right-click does; a long press lifts. A mouse's double-click opens the Clip tab (owner, 2026-11-11).
+            // A tap selects at once; a quick second tap or a double-click opens its editor, the Clip tab (owner,
+            // 2026-11-12). A hold opens the menu, as a right-click does; a hold that moves lifts the clip.
             child: Listener(onPointerDown: _clicks.down, onPointerUp: _clicks.up, child: GestureDetector(
               key: ValueKey('audio-clip-${c.id}'),
               onTap: () {
-                _opening?.cancel();
-                _opening = null;
-                if (_clicks.doubleClick && widget.onOpen != null) {
+                if (_clicks.twice && widget.onOpen != null) {
                   widget.onOpen!();
-                } else if (_clicks.doubleTap) {
-                  showAudioClipMenu(context, s, widget.layer, c, _clicks.position, onOpen: widget.onOpen);
                 } else {
                   _tap();
                 }
               },
               onLongPressStart: _lift,
-              onLongPressMoveUpdate: _liftMove,
-              onLongPressEnd: _liftEnd,
               onSecondaryTapUp: (d) => showAudioClipMenu(context, s, widget.layer, c, d.globalPosition, onOpen: widget.onOpen),
               dragStartBehavior: DragStartBehavior.down,
               onPanStart: (d) => _begin(_Grab.move, d.globalPosition),
@@ -425,7 +430,7 @@ class AudioClipViewState extends State<AudioClipView> {
                 child: Center(child: Container(width: 22, height: 3, decoration: BoxDecoration(
                     color: Neon.ink.withValues(alpha: 0.85), borderRadius: BorderRadius.circular(2))))),
           ],
-        ]),
+        ])),
       ),
     ));
   }

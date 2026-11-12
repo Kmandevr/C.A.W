@@ -254,6 +254,7 @@ The whole app works from the keyboard (owner, 2026-11-11, [decisions](decisions.
 Building the core turned up some clashes in this draft. They're resolved for now as follows, and are for the owner to change:
 - **Code editor:** in Vim mode, D moves right and A moves left, which clashes with Vim's `dd` (delete line) and `a` (append). Delete line is `X X` for now, and append has no key yet.
 - **Pattern editor:** Ctrl+A / Ctrl+D (select all, duplicate) clash with the owner's Ctrl+WASD cursor keys. The owner's keys win, so select all and duplicate have no default key; the action list or `:` still runs them.
+- **The roll's ruler** (owner, 2026-11-12): a tap moving the song's cursor and a drag drawing the song's loop are pointer gestures with no action of their own; the loop they draw is Arrange's, so Arrange's loop actions (R, the ⟳ button) turn it on and off.
 - **Keys the draft didn't give:**
   - Shift+V starts Visual mode (V is the select tool in the roll), and V does in the code editor.
   - `+` and `_` are fine velocity steps.

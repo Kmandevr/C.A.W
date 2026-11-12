@@ -13,6 +13,7 @@ import '../../model/project.dart';
 import '../haptics.dart';
 import '../motion.dart';
 import '../theme.dart';
+import 'edit_cues.dart';
 import 'long_press_menu.dart';
 import 'region_list.dart';
 
@@ -96,7 +97,16 @@ class _ArrangeRulerState extends State<ArrangeRuler> {
   void _dragEnd() {
     final edge = _edge;
     setState(() => _edge = null);
-    if (edge == null || _from == _to) return;
+    if (edge == null) return;
+    if (_from == _to) {
+      // A handle dragged onto the other end collapses the loop: it turns off and its markers go (owner,
+      // 2026-11-12); undo brings it back. A draw that never moved draws nothing.
+      if (edge != _Edge.draw) {
+        Motion.tick();
+        s.clearLoopRange();
+      }
+      return;
+    }
     Motion.tick();
     s.setLoopRange(_from, _to);
   }
@@ -226,17 +236,11 @@ class _ArrangeRulerState extends State<ArrangeRuler> {
           onHorizontalDragEnd: (_) => _dragEnd(),
           onHorizontalDragCancel: () => setState(() => _edge = null),
           child: CustomPaint(painter: _RulerPainter(w, p.stepsPerBar, widget.scroll, h)))))),
-      if (shown) ...[
-        // The loop range: a band over the top half, bright while on, with a grip at each end.
-        Positioned(key: const ValueKey('ruler-loop'), left: from * w, width: math.max(2.0, (to - from) * w), top: 1,
-          height: band - 2, child: IgnorePointer(child: DecoratedBox(decoration: BoxDecoration(
-            color: (on ? Neon.blue : Neon.dim).withValues(alpha: on ? 0.28 : 0.14),
-            borderRadius: BorderRadius.circular(3),
-            border: Border.all(color: (on ? Neon.blue : Neon.dim).withValues(alpha: on ? 0.9 : 0.4)))))),
-        for (final x in [from * w, to * w])
-          Positioned(left: x - 3, width: 6, top: 0, height: band, child: IgnorePointer(child: DecoratedBox(
-            decoration: BoxDecoration(color: on ? Neon.blue : Neon.dim, borderRadius: BorderRadius.circular(2))))),
-      ],
+      // The loop range: a band over the top half, bright while on, with a grip at each end. It fades out when it
+      // goes (a handle dragged onto the other end removes it).
+      Positioned.fill(child: IgnorePointer(child: FadeHold<(int, int, bool)>(
+        value: shown ? (from, to, on) : null,
+        builder: (context, r) => LoopBand(from: r.$1 * w, to: r.$2 * w, on: r.$3, band: band)))),
       for (final m in marks) _marker(m),
     ])));
   }
@@ -278,4 +282,24 @@ class _RulerPainter extends CustomPainter {
   @override
   bool shouldRepaint(covariant _RulerPainter old) =>
       old.stepW != stepW || old.barSteps != barSteps || old.scroll != scroll || old.height != height;
+}
+
+/// A loop range's band over the top [band] pixels of a ruler, from x [from] to [to], bright while [on], with a grip
+/// at each end (Arrange's ruler and the piano roll's).
+class LoopBand extends StatelessWidget {
+  const LoopBand({super.key, required this.from, required this.to, required this.on, required this.band});
+  final double from, to, band;
+  final bool on;
+
+  @override
+  Widget build(BuildContext context) => Stack(clipBehavior: Clip.none, children: [
+    Positioned(key: const ValueKey('ruler-loop'), left: from, width: math.max(2.0, to - from), top: 1,
+      height: band - 2, child: DecoratedBox(decoration: BoxDecoration(
+        color: (on ? Neon.blue : Neon.dim).withValues(alpha: on ? 0.28 : 0.14),
+        borderRadius: BorderRadius.circular(3),
+        border: Border.all(color: (on ? Neon.blue : Neon.dim).withValues(alpha: on ? 0.9 : 0.4))))),
+    for (final x in [from, to])
+      Positioned(left: x - 3, width: 6, top: 0, height: band, child: DecoratedBox(
+        decoration: BoxDecoration(color: on ? Neon.blue : Neon.dim, borderRadius: BorderRadius.circular(2)))),
+  ]);
 }

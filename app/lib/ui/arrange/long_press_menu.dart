@@ -1,7 +1,9 @@
 // Long-press menus (owner, 2026-11-09): a compact glass list near the finger, or a Bitwig-style ring as a setting;
 // grouped into sections, numbers with a big slider, a type-in field and a reset (owner, 2026-11-11).
+import 'dart:async';
 import 'dart:math' as math;
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -68,23 +70,219 @@ List<Object> _rowsOf<T>(List<MenuAction<T>> actions) {
 
 /// Opens a menu of [actions] at [at] (a global position, usually where the finger is) and returns the chosen
 /// value, or null when dismissed. [style] picks the list or the ring; a light haptic tick marks it opening.
+///
+/// Opened by a finger's hold ([HoldToMove.start] just before), the menu sits in the overlay rather than on a new
+/// route, so the finger that is still down keeps its gesture: moving on closes the menu and moves the item (owner,
+/// 2026-11-12). It looks and closes the same way: a tap outside, Esc, Back or a choice.
 Future<T?> showLongPressMenu<T>(BuildContext context,
     {required Offset at, required List<MenuAction<T>> actions, LongPressMenuStyle style = LongPressMenuStyle.list,
     String? title}) {
+  final held = HoldToMove._opens;
+  HoldToMove._opens = false;
   if (actions.isEmpty) return Future.value(null);
   Motion.tick();
+  final barrier = Colors.black.withValues(alpha: style == LongPressMenuStyle.ring ? 0.25 : 0.08);
+  Widget menu() => style == LongPressMenuStyle.ring
+      ? _RingMenu<T>(at: at, actions: actions, title: title)
+      : _ListMenu<T>(at: at, actions: actions, title: title);
+  if (held) return _showHeldMenu<T>(context, menu: menu, barrier: barrier);
   return showGeneralDialog<T>(
     context: context,
     barrierDismissible: true,
     barrierLabel: 'Close menu',
-    barrierColor: Colors.black.withValues(alpha: style == LongPressMenuStyle.ring ? 0.25 : 0.08),
+    barrierColor: barrier,
     transitionDuration: Motion.fade(Motion.small, Motion.of(context)),
-    pageBuilder: (context, _, _) => style == LongPressMenuStyle.ring
-        ? _RingMenu<T>(at: at, actions: actions, title: title)
-        : _ListMenu<T>(at: at, actions: actions, title: title),
+    pageBuilder: (context, _, _) => _MenuClose<T>(close: (v) => Navigator.of(context).pop(v), child: menu()),
     // In and out with the theme's entrance and exit kinds; a tap outside or Esc runs the exit too.
     transitionBuilder: (context, animation, _, child) => popupTransition(context, animation, child),
   );
+}
+
+/// How a menu's entries close it with their value: its route's pop, or the held menu's own exit.
+class _MenuClose<T> extends InheritedWidget {
+  const _MenuClose({super.key, required this.close, required super.child});
+  final void Function(T? value) close;
+
+  static void of<T>(BuildContext context, T? value) =>
+      context.dependOnInheritedWidgetOfExactType<_MenuClose<T>>()!.close(value);
+
+  @override
+  bool updateShouldNotify(_MenuClose<T> old) => false;
+}
+
+/// The held menu on screen: closes it (null), if any.
+VoidCallback? _closeHeld;
+
+/// Whether a menu opened by a hold is on screen.
+bool get longPressMenuOpen => _closeHeld != null;
+
+/// Closes the menu a hold opened, if it is still open, as if dismissed (it returns null; its exit runs with the
+/// motion setting).
+void closeLongPressMenu() => _closeHeld?.call();
+
+Future<T?> _showHeldMenu<T>(BuildContext context, {required Widget Function() menu, required Color barrier}) {
+  final done = Completer<T?>();
+  final overlay = Overlay.of(context, rootOverlay: true);
+  final route = ModalRoute.of(context);
+  final key = GlobalKey<_HeldMenuState<T>>();
+  late final OverlayEntry entry;
+  LocalHistoryEntry? back;
+  void closer() => key.currentState?.close(null);
+  void closed(T? v) {
+    if (done.isCompleted) return;
+    entry.remove();
+    entry.dispose();
+    final b = back;
+    back = null;
+    if (b != null) route?.removeLocalHistoryEntry(b);
+    if (identical(_closeHeld, closer)) _closeHeld = null;
+    done.complete(v);
+  }
+  entry = OverlayEntry(builder: (_) => _HeldMenu<T>(key: key, barrier: barrier, onClosed: closed, child: menu()));
+  // Back closes the menu first, as it would a menu's route.
+  if (route != null) {
+    back = LocalHistoryEntry(impliesAppBarDismissal: false, onRemove: () {
+      back = null;
+      key.currentState?.close(null);
+    });
+    route.addLocalHistoryEntry(back!);
+  }
+  _closeHeld = closer;
+  overlay.insert(entry);
+  return done.future;
+}
+
+/// A held menu over the page: a barrier that closes it on a tap, Esc to close, and the popup's way in and out.
+class _HeldMenu<T> extends StatefulWidget {
+  const _HeldMenu({super.key, required this.barrier, required this.onClosed, required this.child});
+  final Color barrier;
+  final void Function(T? value) onClosed;
+  final Widget child;
+
+  @override
+  State<_HeldMenu<T>> createState() => _HeldMenuState<T>();
+}
+
+class _HeldMenuState<T> extends State<_HeldMenu<T>> with SingleTickerProviderStateMixin {
+  late final AnimationController _in = AnimationController(vsync: this);
+  bool _closing = false;
+  // The menu takes the keyboard (Esc closes it) and gives it back as it closes.
+  final _focus = FocusScopeNode(debugLabel: 'held menu');
+  FocusNode? _before;
+
+  @override
+  void initState() {
+    super.initState();
+    _before = FocusManager.instance.primaryFocus;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && !_closing) _focus.requestFocus();
+    });
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_in.status != AnimationStatus.dismissed || _closing) return;
+    final d = Motion.fade(Motion.small, Motion.of(context));
+    _in.duration = d;
+    d == Duration.zero ? _in.value = 1 : _in.forward();
+  }
+
+  void close(T? value) {
+    if (_closing || !mounted) return;
+    _closing = true;
+    final before = _before;
+    if (_focus.hasFocus && before != null && before.context != null) before.requestFocus();
+    final d = Motion.fade(Motion.small, Motion.of(context));
+    if (d == Duration.zero) return widget.onClosed(value);
+    _in.reverseDuration = d;
+    _in.reverse().whenCompleteOrCancel(() => widget.onClosed(value));
+  }
+
+  @override
+  void dispose() {
+    _in.dispose();
+    _focus.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => _MenuClose<T>(close: close, child: FocusScope(
+    node: _focus,
+    onKeyEvent: (_, e) {
+      if (e is KeyDownEvent && e.logicalKey == LogicalKeyboardKey.escape) {
+        close(null);
+        return KeyEventResult.handled;
+      }
+      return KeyEventResult.ignored;
+    },
+    child: Stack(children: [
+      Positioned.fill(child: Semantics(label: 'Close menu', button: true, child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: () => close(null),
+        child: FadeTransition(opacity: _in, child: ColoredBox(color: widget.barrier))))),
+      Positioned.fill(child: IgnorePointer(ignoring: _closing, child: popupTransition(context, _in, widget.child))),
+    ])));
+}
+
+/// A finger's hold on an item (owner, 2026-11-12): held still, its menu opens ([start], called as the long press
+/// fires, just before the caller opens the menu, which then keeps the finger's gesture alive); moved past the touch
+/// slop, the item moves instead and the menu closes. From the hold on the finger is followed here, on the pointer
+/// router: [start]'s `begin` starts the move from where the hold went down, `move` follows the finger and `end`
+/// drops it (true when the finger was cancelled). A mouse drags without a hold and opens the menu with a right-click.
+class HoldToMove {
+  /// The next menu is opened by a hold ([showLongPressMenu] reads and clears it).
+  static bool _opens = false;
+
+  int? _pointer;
+  Offset _at = Offset.zero;
+  bool _moving = false;
+  void Function(Offset from)? _begin;
+  ValueChanged<Offset>? _move;
+  ValueChanged<bool>? _end;
+
+  /// Whether a hold is being followed, and whether it has turned into a move.
+  bool get holding => _pointer != null;
+  bool get moving => _moving;
+
+  void start(int pointer, Offset at, {required void Function(Offset from) begin, required ValueChanged<Offset> move,
+      required ValueChanged<bool> end}) {
+    stop();
+    _pointer = pointer;
+    _at = at;
+    _moving = false;
+    _begin = begin;
+    _move = move;
+    _end = end;
+    _opens = true;
+    GestureBinding.instance.pointerRouter.addGlobalRoute(_route);
+  }
+
+  void _route(PointerEvent e) {
+    if (e.pointer != _pointer) return;
+    if (e is PointerMoveEvent) {
+      if (!_moving && (e.position - _at).distance > kTouchSlop) {
+        _moving = true;
+        closeLongPressMenu();
+        _begin?.call(_at);
+      }
+      if (_moving) _move?.call(e.position);
+    } else if (e is PointerUpEvent || e is PointerCancelEvent) {
+      final moved = _moving, end = _end;
+      stop();
+      if (moved) end?.call(e is PointerCancelEvent);
+    }
+  }
+
+  /// Stops following the finger (the item's widget went away, or the hold ended).
+  void stop() {
+    if (_pointer != null) GestureBinding.instance.pointerRouter.removeGlobalRoute(_route);
+    _pointer = null;
+    _moving = false;
+    _begin = null;
+    _move = null;
+    _end = null;
+  }
 }
 
 /// The point to open a menu at for a widget that has no finger position (a button, a keyboard): its centre.
@@ -159,7 +357,7 @@ class _ListMenu<T> extends StatelessWidget {
   Widget _row(BuildContext context, MenuAction<T> a) {
     final color = !a.enabled ? Neon.dim.withValues(alpha: 0.6) : a.danger ? Neon.pink : Neon.text;
     return InkWell(
-      onTap: a.enabled ? () => Navigator.of(context).pop(a.value) : null,
+      onTap: a.enabled ? () => _MenuClose.of<T>(context, a.value) : null,
       child: ConstrainedBox(
         constraints: const BoxConstraints(minHeight: row),
         child: Padding(
@@ -197,14 +395,14 @@ class _RingMenuState<T> extends State<_RingMenu<T>> {
 
   /// A number entry: its editor over the ring; the ring closes with it.
   Future<void> _editNumber(BuildContext context, MenuAction<T> a) async {
-    final nav = Navigator.of(context);
+    final close = context.getInheritedWidgetOfExactType<_MenuClose<T>>()!.close;
     await showGeneralDialog<void>(context: context, barrierDismissible: true, barrierLabel: 'Close',
       barrierColor: Colors.black.withValues(alpha: 0.1),
       pageBuilder: (context, _, _) => Center(child: SizedBox(width: 280, height: _ListMenu.numberRow + 16,
         child: Material(type: MaterialType.transparency, child: GlassOverlay(radius: 12,
           padding: const EdgeInsets.symmetric(vertical: 8),
           child: MenuNumberEditor(label: a.label, icon: a.icon, number: a.number!))))));
-    if (mounted) nav.pop();
+    if (mounted) close(null);
   }
 
   @override
@@ -236,7 +434,7 @@ class _RingMenuState<T> extends State<_RingMenu<T>> {
               onEnter: (_) => setState(() => _hover = i),
               child: InkResponse(
                 radius: button / 2,
-                onTap: !a.enabled ? null : a.number == null ? () => Navigator.of(context).pop(a.value)
+                onTap: !a.enabled ? null : a.number == null ? () => _MenuClose.of<T>(context, a.value)
                     : () => _editNumber(context, a),
                 onHighlightChanged: (on) { if (on) setState(() => _hover = i); },
                 child: DecoratedBox(
