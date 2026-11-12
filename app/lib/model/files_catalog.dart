@@ -642,7 +642,11 @@ extension FilesCatalog on AppState {
       final f = File('$path$deletedSampleSuffix');
       setAsideSamples.remove(f.path);
       try {
-        if (await f.exists()) await f.delete();
+        await f.delete();
+      } catch (_) {
+        // Gone already (a refresh of the packs may sweep it first).
+      }
+      try {
         final dir = f.parent;
         if (await dir.exists() && !dir.listSync().any((e) => e.path.toLowerCase().endsWith('.wav'))) {
           await dir.delete(recursive: true);
