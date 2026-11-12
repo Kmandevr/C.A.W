@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "builtin_effects.h"
+#include "stereo_pair.h"
 #include "presets.h"
 
 namespace caw::fx {
@@ -47,28 +48,11 @@ struct Switch {
     double next() noexcept { return w = w + step >= 1.0 ? 1.0 : w + step; }
 };
 
-// Two doubles as one: a stereo pair's two channels run through the same arithmetic in one vector (SSE2 or NEON on
-// GCC and Clang; the plain struct elsewhere). Each lane's arithmetic is the scalar one, so the bits are the same.
-#if defined(__GNUC__)
-typedef double Pair __attribute__((vector_size(16)));
-inline Pair pairOf(double a, double b) noexcept { return Pair{a, b}; }
-inline double lane(const Pair& p, int i) noexcept { return p[i]; }
-#else
-struct Pair {
-    double v[2];
-    friend Pair operator+(Pair a, Pair b) noexcept { return {{a.v[0] + b.v[0], a.v[1] + b.v[1]}}; }
-    friend Pair operator-(Pair a, Pair b) noexcept { return {{a.v[0] - b.v[0], a.v[1] - b.v[1]}}; }
-    friend Pair operator*(Pair a, Pair b) noexcept { return {{a.v[0] * b.v[0], a.v[1] * b.v[1]}}; }
-};
-inline Pair pairOf(double a, double b) noexcept { return {{a, b}}; }
-inline double lane(const Pair& p, int i) noexcept { return p.v[i]; }
-#endif
-inline Pair flushPair(Pair p) noexcept {
-    double a = lane(p, 0), b = lane(p, 1);
-    if (a < 1e-20 && a > -1e-20) a = 0.0;
-    if (b < 1e-20 && b > -1e-20) b = 0.0;
-    return pairOf(a, b);
-}
+// A stereo pair's two channels as one two-wide vector (stereo_pair.h).
+using caw::Pair;
+using caw::pairOf;
+using caw::lane;
+using caw::flushPair;
 
 // A bounded, NaN-free value for a feedback state: a filter pushed past reason recovers instead of latching inf.
 inline double guard(double v, double limit = 1e3) noexcept {

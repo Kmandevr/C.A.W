@@ -3974,7 +3974,8 @@ void Engine::runRoutes(Slot& s, const float* preL, const float* preR, const floa
         }
         if (g == want && r.tapPre == r.pre && !(key && !r.tapPre)) {
             // Settled (the usual case): the loop below with nothing gliding, switching or faded, which vectorizes
-            // (x g times 1.0 is x g: the same bits).
+            // (x g times 1.0 is x g: the same bits). The gain stays double: rounded to float it moves a crusher's
+            // steps downstream (speed phase 4, as the track's gains).
             for (int i = 0; i < m; ++i) {
                 routeL_[i] = routeSample(static_cast<double>(xl[i]) * g);
                 routeR_[i] = routeSample(static_cast<double>(xr[i]) * g);
@@ -3994,9 +3995,10 @@ void Engine::runRoutes(Slot& s, const float* preL, const float* preR, const floa
         }
         s.routeGain[k] = g;
         if (r.delay) r.delay->run(routeL_, routeR_, m);
+        // A float sum (two floats' sum rounded once to float: the bits of the double sum's rounding), saturating.
         for (int i = 0; i < m; ++i) {
-            dl[i] = routeSample(static_cast<double>(dl[i]) + routeL_[i]);
-            dr[i] = routeSample(static_cast<double>(dr[i]) + routeR_[i]);
+            dl[i] = routeAdd(dl[i], routeL_[i]);
+            dr[i] = routeAdd(dr[i], routeR_[i]);
         }
     }
 }
@@ -4079,7 +4081,9 @@ void Engine::runTrackNode(int slot, float* outL, float* outR, int m) noexcept {
         }
     } else if (steady) {
         // The usual case: volume settled, no lanes. The same sums as the loop below, without its per-sample
-        // branches, and the scope written in at most two runs instead of a wrap test per sample.
+        // branches, and the scope written in at most two runs instead of a wrap test per sample. Double, not float
+        // lanes: the gains rounded to float (6e-8) move a bit crusher's steps downstream (the mix reference's
+        // master crusher, -77 dBFS; speed phase 4).
         const double gain = s.gain, gl = s.gl, gr = s.gr;
         float mid[kBlock], level[kBlock];
         for (int i = 0; i < m; ++i) {

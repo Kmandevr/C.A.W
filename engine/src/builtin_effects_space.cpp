@@ -9,6 +9,7 @@
 #include "caw/library/dynamics.hpp"
 #include "caw/library/filter.hpp"
 #include "caw/library/reverb.hpp"
+#include "stereo_pair.h"
 
 // Original code (C.A.W. is Apache-2.0). The reverb is the Library's 8-line feedback delay network
 // (caw/library/reverb.hpp) run wet only, with the pre-delay, filters, ducking and mix around it here.
@@ -284,49 +285,68 @@ protected:
         mix_.set(std::clamp(param(kDMix, at), 0.0, 1.0), kControlFrames);
     }
     void run(const float* inL, const float* inR, float* outL, float* outR, uint32_t n) noexcept override {
-        const double sr = rate();
+        // Both sides as one two-wide vector (stereo_pair.h), each lane the scalar arithmetic in its order: the time
+        // glide, the read, the filters and the feedback's drive (speed phase 4).
+        const Pair sr = splat(rate()), glide = splat(glide_), two = splat(2.0);
+        for (int c = 0; c < 2; ++c)  // the first sample after a reset starts at the target (the glide's step is 0)
+            if (seconds_[c] < 0.0) seconds_[c] = target_[c];
+        Pair seconds = pairOf(seconds_[0], seconds_[1]);
+        const Pair target = pairOf(target_[0], target_[1]);
+        Pair mod = pairOf(mod_[0].value, mod_[1].value);
+        const Pair modStep = pairOf(mod_[0].step, mod_[1].step);
+        const Pair lowA1 = splat(low_[0].a1()), lowA2 = splat(low_[0].a2()), lowA3 = splat(low_[0].a3()), lowK = splat(low_[0].k());
+        const Pair highA1 = splat(high_[0].a1()), highA2 = splat(high_[0].a2()), highA3 = splat(high_[0].a3());
+        Pair low1 = pairOf(low_[0].ic1(), low_[1].ic1()), low2 = pairOf(low_[0].ic2(), low_[1].ic2());
+        Pair high1 = pairOf(high_[0].ic1(), high_[1].ic1()), high2 = pairOf(high_[0].ic2(), high_[1].ic2());
+        const Pair satK = splat(satK_), satInv = splat(satInv_), satMix = splat(satMix_);
+        const size_t mask = size_ - 1;
+        const float* lineL = line_[0].data();
+        const float* lineR = line_[1].data();
         for (uint32_t i = 0; i < n; ++i) {
             const double xl = inL[i], xr = inR[i];
-            double read[2];
-            for (int c = 0; c < 2; ++c) {
-                seconds_[c] = seconds_[c] < 0.0 ? target_[c] : seconds_[c] + (target_[c] - seconds_[c]) * glide_;
-                if (seconds_[c] - target_[c] < 1e-12 && target_[c] - seconds_[c] < 1e-12) seconds_[c] = target_[c];
-                const double back = std::max(2.0, seconds_[c] * sr + mod_[c].next());  // the newest tap stays written
-                read[c] = hermite(line_[c].data(), back);
-            }
-            double wet[2] = {read[0], read[1]};
-            if (!freeze_) {
-                for (int c = 0; c < 2; ++c) {
-                    if (useLow_) wet[c] = low_[c].highpass(wet[c]);
-                    if (useHigh_) wet[c] = high_[c].lowpass(wet[c]);
+            seconds = seconds + (target - seconds) * glide;
+            seconds = pairSnap(seconds, target, 1e-12);
+            mod = mod + modStep;
+            const Pair back = pairMax(two, seconds * sr + mod);  // the newest tap stays written
+            const Pair read = hermite(lineL, lineR, back, mask);
+            Pair wet = read;
+            if (!freeze_) {  // Svf::highpass and ::lowpass (the reads are finite: finiteOr0 passes them as they are)
+                if (useLow_) {
+                    Pair v1, v2;
+                    lib::Svf::step(wet, low1, low2, lowA1, lowA2, lowA3, two, v1, v2);
+                    wet = wet - lowK * v1 - v2;
+                }
+                if (useHigh_) {
+                    Pair v1, v2;
+                    lib::Svf::step(wet, high1, high2, highA1, highA2, highA3, two, v1, v2);
+                    wet = v2;
                 }
             }
-            const double fb = feedback_.next();
-            double back[2];
-            if (freeze_) {
-                back[0] = read[0], back[1] = read[1];
-            } else {
-                for (int c = 0; c < 2; ++c)  // drive 0 is clean; the curve fades in over the first fifth
-                    back[c] = (wet[c] + (lib::tanhApprox(wet[c] * satK_) * satInv_ - wet[c]) * satMix_) * fb;
-            }
+            const Pair fb = splat(feedback_.next());
+            // drive 0 is clean; the curve fades in over the first fifth
+            const Pair fed = freeze_ ? read : (wet + (tanhApproxPair(wet * satK) * satInv - wet) * satMix) * fb;
             double feedL, feedR;
             if (mode_ == kPingPong) {  // the input enters on the left (mono), the echoes cross over
-                feedL = (freeze_ ? 0.0 : 0.5 * (xl + xr)) + back[1];
-                feedR = back[0];
+                feedL = (freeze_ ? 0.0 : 0.5 * (xl + xr)) + lane(fed, 1);
+                feedR = lane(fed, 0);
             } else {
-                feedL = (freeze_ ? 0.0 : xl) + back[0];
-                feedR = (freeze_ ? 0.0 : xr) + back[1];
+                feedL = (freeze_ ? 0.0 : xl) + lane(fed, 0);
+                feedR = (freeze_ ? 0.0 : xr) + lane(fed, 1);
             }
             line_[0][pos_] = store(feedL);
             line_[1][pos_] = store(feedR);
-            pos_ = (pos_ + 1) & (size_ - 1);
+            pos_ = (pos_ + 1) & mask;
             const double g = duck_.gain(xl, xr);
-            const double l = wet[0] * g, r = wet[1] * g;
+            const double l = lane(wet, 0) * g, r = lane(wet, 1) * g;
             wetPeak_ = std::max(wetPeak_, std::max(l < 0 ? -l : l, r < 0 ? -r : r));
             const double m = mix_.next();
             outL[i] = static_cast<float>(xl + (l - xl) * m);
             outR[i] = static_cast<float>(xr + (r - xr) * m);
         }
+        seconds_[0] = lane(seconds, 0), seconds_[1] = lane(seconds, 1);
+        mod_[0].value = lane(mod, 0), mod_[1].value = lane(mod, 1);
+        low_[0].setState(lane(low1, 0), lane(low2, 0)), low_[1].setState(lane(low1, 1), lane(low2, 1));
+        high_[0].setState(lane(high1, 0), lane(high2, 0)), high_[1].setState(lane(high1, 1), lane(high2, 1));
     }
     uint32_t fillDisplay(float* out, bool) noexcept override {
         out[0] = inPeakDb();
@@ -344,16 +364,20 @@ protected:
     }
 
 private:
-    // `back` samples before the write position (at least 2), by 4-point Hermite interpolation.
-    double hermite(const float* line, double back) const noexcept {
-        const size_t mask = size_ - 1;
-        const size_t whole = static_cast<size_t>(static_cast<int64_t>(back));  // back >= 2: the same value, a cheaper cast
-        const double t = back - static_cast<double>(whole);
+    // `back` samples before the write position (at least 2) on each side, by 4-point Hermite interpolation.
+    Pair hermite(const float* lineL, const float* lineR, Pair back, size_t mask) const noexcept {
+        // back >= 2: the same value as a size_t cast, a cheaper one
+        const size_t wl = static_cast<size_t>(static_cast<int64_t>(lane(back, 0)));
+        const size_t wr = static_cast<size_t>(static_cast<int64_t>(lane(back, 1)));
+        const Pair t = back - pairOf(static_cast<double>(wl), static_cast<double>(wr));
         // Samples at whole - 1, whole, whole + 1, whole + 2 frames back (newest first).
-        const double ym1 = line[(pos_ - whole + 1) & mask], y0 = line[(pos_ - whole) & mask];
-        const double y1 = line[(pos_ - whole - 1) & mask], y2 = line[(pos_ - whole - 2) & mask];
-        const double c1 = 0.5 * (y1 - ym1), c2 = ym1 - 2.5 * y0 + 2.0 * y1 - 0.5 * y2;
-        const double c3 = 0.5 * (y2 - ym1) + 1.5 * (y0 - y1);
+        const size_t pl = pos_ - wl, pr = pos_ - wr;
+        const Pair ym1 = pairOf(lineL[(pl + 1) & mask], lineR[(pr + 1) & mask]);
+        const Pair y0 = pairOf(lineL[pl & mask], lineR[pr & mask]);
+        const Pair y1 = pairOf(lineL[(pl - 1) & mask], lineR[(pr - 1) & mask]);
+        const Pair y2 = pairOf(lineL[(pl - 2) & mask], lineR[(pr - 2) & mask]);
+        const Pair c1 = splat(0.5) * (y1 - ym1), c2 = ym1 - splat(2.5) * y0 + splat(2.0) * y1 - splat(0.5) * y2;
+        const Pair c3 = splat(0.5) * (y2 - ym1) + splat(1.5) * (y0 - y1);
         return ((c3 * t + c2) * t + c1) * t + y0;
     }
     // Bounded and flushed (as the Library's delay lines): an extreme input can't latch the loop.

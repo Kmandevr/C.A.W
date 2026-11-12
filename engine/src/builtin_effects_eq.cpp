@@ -7,6 +7,7 @@
 
 #include "caw/library/eq.hpp"
 #include "caw/library/spectrum.hpp"
+#include "stereo_pair.h"
 
 // Original code (C.A.W. is Apache-2.0). Every band is one to eight trapezoidal state-variable filter stages
 // (caw/library/eq.hpp, EqFilter): minimum phase, no latency, and stable however fast a knob moves.
@@ -133,40 +134,51 @@ protected:
     }
 
     void run(const float* inL, const float* inR, float* outL, float* outR, uint32_t n) noexcept override {
-        // Band by band over the run (each band's state stays in registers and there is no switch per sample); every
-        // sample goes through the same operations in the same order as frame by frame, so the bits are the same.
+        // Band by band over the run, each band's channel and fade worked out once per run and each stage run over
+        // the whole run (its state stays in registers; no switch or branch per sample). A stereo band runs both
+        // sides as one two-wide vector (stereo_pair.h). Every sample goes through each side's scalar operations
+        // in the same order as frame by frame (speed phase 4).
         double L[kControlFrames], R[kControlFrames];
         for (uint32_t i = 0; i < n; ++i) L[i] = inL[i], R[i] = inR[i];
         for (uint32_t a = 0; a < active_; ++a) {
             Band& band = bands_[order_[a]];
             const lib::EqFilter& f = band.filter;
-            const bool fading = band.w != band.target;
-            for (uint32_t i = 0; i < n; ++i) {
-                if (fading && band.w != band.target)
-                    band.w = band.target > band.w ? std::min(band.target, band.w + fadeStep_) : std::max(band.target, band.w - fadeStep_);
-                const double w = band.w;
-                double l = L[i], r = R[i];
-                switch (band.channel) {
-                    case kMid: {
-                        const double m = 0.5 * (l + r), s = 0.5 * (l - r);
-                        const double y = m + (f.process(band.left, m) - m) * w;
-                        l = y + s, r = y - s;
-                        break;
-                    }
-                    case kSide: {
-                        const double m = 0.5 * (l + r), s = 0.5 * (l - r);
-                        const double y = s + (f.process(band.left, s) - s) * w;
-                        l = m + y, r = m - y;
-                        break;
-                    }
-                    case kLeft: l += (f.process(band.left, l) - l) * w; break;
-                    case kRight: r += (f.process(band.right, r) - r) * w; break;
-                    default:
-                        l += (f.process(band.left, l) - l) * w;
-                        r += (f.process(band.right, r) - r) * w;
-                        break;
+            double w[kControlFrames];
+            if (band.w != band.target) {
+                for (uint32_t i = 0; i < n; ++i) {
+                    if (band.w != band.target)
+                        band.w = band.target > band.w ? std::min(band.target, band.w + fadeStep_) : std::max(band.target, band.w - fadeStep_);
+                    w[i] = band.w;
                 }
-                L[i] = l, R[i] = r;
+            } else {
+                for (uint32_t i = 0; i < n; ++i) w[i] = band.w;
+            }
+            double x[kControlFrames], y[kControlFrames];
+            switch (band.channel) {
+                case kMid:
+                case kSide: {
+                    const bool mid = band.channel == kMid;
+                    for (uint32_t i = 0; i < n; ++i) x[i] = mid ? 0.5 * (L[i] + R[i]) : 0.5 * (L[i] - R[i]);
+                    runMono(f, band.left, x, y, n);
+                    for (uint32_t i = 0; i < n; ++i) {
+                        const double m = 0.5 * (L[i] + R[i]), s = 0.5 * (L[i] - R[i]);
+                        const double v = mid ? m : s;
+                        const double out = v + (y[i] - v) * w[i];
+                        if (mid) L[i] = out + s, R[i] = out - s;
+                        else L[i] = m + out, R[i] = m - out;
+                    }
+                    break;
+                }
+                case kLeft:
+                case kRight: {
+                    double* c = band.channel == kLeft ? L : R;
+                    runMono(f, band.channel == kLeft ? band.left : band.right, c, y, n);
+                    for (uint32_t i = 0; i < n; ++i) c[i] += (y[i] - c[i]) * w[i];
+                    break;
+                }
+                default:
+                    runStereo(f, band.left, band.right, L, R, w, n);
+                    break;
             }
         }
         for (uint32_t i = 0; i < n; ++i) {
@@ -177,6 +189,50 @@ protected:
             outR[i] = static_cast<float>(r);
             // The display's spectrum: only while a UI reads it (the audio doesn't depend on it).
             if (watching_) analyzer_.push(static_cast<float>(0.5 * (static_cast<double>(inL[i]) + inR[i])), static_cast<float>(0.5 * (l + r)));
+        }
+    }
+
+    // y = f.process(state, x) for each sample of the run, stage by stage (each sample through the stages in order).
+    static void runMono(const lib::EqFilter& f, lib::SvfState* state, const double* x, double* y, uint32_t n) noexcept {
+        for (uint32_t i = 0; i < n; ++i) y[i] = x[i];
+        for (int k = 0; k < f.stages(); ++k) {
+            const lib::SvfMix& c = f.stage(k);
+            lib::SvfState st = state[k];
+            for (uint32_t i = 0; i < n; ++i) y[i] = st.process(c, y[i]);
+            state[k] = st;
+        }
+        const double scale = f.scale();
+        for (uint32_t i = 0; i < n; ++i) y[i] *= scale;
+    }
+    // Both sides of a stereo band, l += (f.process(left, l) - l) w and the same on the right, as two-wide vectors:
+    // SvfState::process()'s operations lane by lane.
+    static void runStereo(const lib::EqFilter& f, lib::SvfState* left, lib::SvfState* right, double* L, double* R,
+                          const double* w, uint32_t n) noexcept {
+        Pair y[kControlFrames];
+        for (uint32_t i = 0; i < n; ++i) y[i] = pairOf(L[i], R[i]);
+        const Pair two = splat(2.0);
+        for (int k = 0; k < f.stages(); ++k) {
+            const lib::SvfMix& c = f.stage(k);
+            const Pair a1 = splat(c.a1), a2 = splat(c.a2), a3 = splat(c.a3);
+            const Pair m0 = splat(c.m0), m1 = splat(c.m1), m2 = splat(c.m2);
+            Pair ic1 = pairOf(left[k].ic1, right[k].ic1), ic2 = pairOf(left[k].ic2, right[k].ic2);
+            for (uint32_t i = 0; i < n; ++i) {
+                const Pair x = y[i];
+                const Pair v3 = x - ic2;
+                const Pair v1 = a1 * ic1 + a2 * v3;
+                const Pair v2 = ic2 + a2 * ic1 + a3 * v3;
+                ic1 = flushPair(two * v1 - ic1);
+                ic2 = flushPair(two * v2 - ic2);
+                y[i] = m0 * x + m1 * v1 + m2 * v2;
+            }
+            left[k].ic1 = lane(ic1, 0), right[k].ic1 = lane(ic1, 1);
+            left[k].ic2 = lane(ic2, 0), right[k].ic2 = lane(ic2, 1);
+        }
+        const Pair scale = splat(f.scale());
+        for (uint32_t i = 0; i < n; ++i) {
+            const Pair v = y[i] * scale, x = pairOf(L[i], R[i]), g = splat(w[i]);
+            const Pair out = x + (v - x) * g;
+            L[i] = lane(out, 0), R[i] = lane(out, 1);
         }
     }
 

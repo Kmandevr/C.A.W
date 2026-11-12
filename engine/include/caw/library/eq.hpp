@@ -225,6 +225,10 @@ public:
     }
     bool identity() const noexcept { return identity_; }
     int stages() const noexcept { return stages_; }
+    // Stage i's coefficients and the gain after the last stage, for a caller running process()'s arithmetic on
+    // several channels at once (the built-in EQ's stereo bands, two-wide).
+    const SvfMix& stage(int i) const noexcept { return mix_[i]; }
+    double scale() const noexcept { return scale_; }
     // |H|^2 at the frequency whose tan(pi f / rate) is t (precompute t per display frequency).
     double magnitude2(double t) const noexcept {
         if (identity_) return 1.0;

@@ -104,6 +104,12 @@ public:
         held_ = in[1];
         return 0.5 * (out[0] + out[1]);
     }
+    // up() for each of x[0..n) into out[0..2n) (each x's two in turn), and down() for each pair of in[0..2n) into
+    // out[0..n): the same arithmetic sample by sample, with the state held in locals over the block instead of
+    // loaded and stored every sample (speed phase 4). The input and output buffers must not overlap: upBlock
+    // writes out[2f] and out[2f+1] before it reads later inputs.
+    void upBlock(const double* x, double* out, int n) noexcept { block<false>(x, out, n); }
+    void downBlock(const double* in, double* out, int n) noexcept { block<true>(in, out, n); }
     void clear() noexcept {
         for (int i = 0; i < kStages; ++i)
             for (int lane = 0; lane < 2; ++lane) up_.x[i][lane] = up_.y[i][lane] = down_.x[i][lane] = down_.y[i][lane] = 0.0;
@@ -147,6 +153,67 @@ private:
         }
 #endif
     }
+    template <bool Down>
+    void block(const double* in, double* out, int n) noexcept {
+#if defined(__GNUC__)
+        switch (n_) {
+            case 1: return blockN<1, Down>(in, out, n);
+            case 2: return blockN<2, Down>(in, out, n);
+            case 3: return blockN<3, Down>(in, out, n);
+            case 4: return blockN<4, Down>(in, out, n);
+            case 5: return blockN<5, Down>(in, out, n);
+            default: return blockN<kStages, Down>(in, out, n);
+        }
+#else
+        for (int f = 0; f < n; ++f) {
+            if (Down) out[f] = down(in + 2 * f);
+            else up(in[f], out + 2 * f);
+        }
+#endif
+    }
+#if defined(__GNUC__)
+    // run() over a block with N stages (n_), its state in registers.
+    template <int N, bool Down>
+    void blockN(const double* in, double* out, int n) noexcept {
+        typedef double Pair __attribute__((vector_size(16)));
+        State& s = Down ? down_ : up_;
+        const Pair tiny = {1e-25, 1e-25}, zero = {0.0, 0.0};
+        Pair a[N], x1[N], y1[N];
+        for (int i = 0; i < N; ++i) {
+            __builtin_memcpy(&a[i], a_[i], sizeof(Pair));
+            __builtin_memcpy(&x1[i], s.x[i], sizeof(Pair));
+            __builtin_memcpy(&y1[i], s.y[i], sizeof(Pair));
+        }
+        double held = held_;
+        for (int f = 0; f < n; ++f) {
+            Pair x;
+            if (Down) {
+                x = Pair{in[2 * f], held};
+                held = in[2 * f + 1];
+            } else {
+                x = Pair{in[f], in[f]};
+            }
+            for (int i = 0; i < N; ++i) {
+                Pair y = a[i] * (x - y1[i]) + x1[i];
+                x1[i] = x;
+                y = ((y < tiny) & (y > -tiny)) ? zero : y;
+                y1[i] = y;
+                x = y;
+            }
+            if (Down) {
+                out[f] = 0.5 * (x[0] + x[1]);
+            } else {
+                out[2 * f] = x[0];
+                out[2 * f + 1] = x[1];
+            }
+        }
+        for (int i = 0; i < N; ++i) {
+            __builtin_memcpy(s.x[i], &x1[i], sizeof(Pair));
+            __builtin_memcpy(s.y[i], &y1[i], sizeof(Pair));
+        }
+        if (Down) held_ = held;
+    }
+#endif
     alignas(16) double a_[kStages][2] = {};
     State up_, down_;
     double held_ = 0.0;
