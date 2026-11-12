@@ -9,7 +9,9 @@ import 'package:caw/model/project.dart';
 import 'package:caw/model/settings.dart';
 import 'package:caw/ui/arrange/audio_clip_inspector.dart';
 import 'package:caw/ui/arrange/audio_waveform.dart';
+import 'package:caw/ui/arrange/focus_panel.dart';
 import 'package:caw/ui/arranger_screen.dart';
+import 'package:caw/ui/frame/sections.dart';
 import 'package:flutter/gestures.dart' show kDoubleTapTimeout;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -147,6 +149,27 @@ void main() {
     await tester.tap(find.text('Reverse'));
     await tester.pumpAndSettle();
     expect(clip().reverse, isTrue);
+    await settle(tester);
+  });
+
+  testWidgets('a tap on the selected clip opens its editor, the Clip tab', (tester) async {
+    final sections = SectionController();
+    addTearDown(sections.dispose);
+    tester.view.physicalSize = const Size(1400, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(MaterialApp(home: SectionScope(controller: sections, child: Scaffold(
+        body: ListenableBuilder(listenable: s, builder: (_, _) => ArrangerScreen(state: s))))));
+    await tester.pump();
+    await tester.tap(find.byKey(const ValueKey('audio-clip-c1')));
+    await tester.pump(kDoubleTapTimeout + const Duration(milliseconds: 50));
+    expect(s.selectedClipIds, {'c1'});
+    expect(sections.focusedLayer, isNull, reason: 'the first tap only selects');
+    await tester.tap(find.byKey(const ValueKey('audio-clip-c1')));
+    await tester.pump(kDoubleTapTimeout + const Duration(milliseconds: 50));
+    await tester.pumpAndSettle();
+    expect(sections.focusedLayer, 't1');
+    expect(tester.widget<FocusPanel>(find.byType(FocusPanel)).tab, FocusTab.clip);
     await settle(tester);
   });
 

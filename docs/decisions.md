@@ -127,7 +127,9 @@ Carries out the owner's decision of 2026-11-10 ("C++ replaces the .caw language"
 - **Collapse ▸ in the track menu** applies to the menu's track: the arranger selects one track at a time today. **[Open (owner)]** whether a multi-track selection should come.
 - **A folder's chevron** draws its contents as thin bars instead of hiding them; their own states come back when it opens.
 - **The upright meter** starts below a 120 px header.
-- **The piano roll has no playhead** to follow, so the follow rule (`FollowGate`) only drives Arrange; the roll's following is left for when it shows one. There is no follow control in the transport to put the style in; it is in Settings › Editing.
+- **The piano roll's playhead:** the roll draws the song's playhead while the song plays its clip (opened for a clip, along that clip's repeats; in Build, the first unmuted clip of the pattern under the playhead, wrapped to its loop) and follows it by the same rule (`FollowGate`) and style as Arrange. There is no follow control in the transport to put the style in; it is in Settings › Editing.
+- **One glide for view moves:** `ViewGlide` (`lib/ui/view_glide.dart`) moves a view's left edge and zoom together (zoom on a log scale; a zoom with no new left keeps the view's middle still), for both editors; ⏮ reaches it through `AppState.requestRevealStart()` (a counter, `revealStartRequests`, that the arranger and the roll listen to). A clip or track selected while out of view (the keyboard, a paste) glides in; one partly in view stays put.
+- **A header's second tap where the first was** counts whatever is there now (on a phone the first tap pins the track on top and the focus panel takes its old place) and opens the first track's effects (`ClickCounter.secondHere`).
 
 ## 2026-11-11: Arrangement music video (owner)
 
