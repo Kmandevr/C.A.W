@@ -10,6 +10,7 @@
 
 #include "builtin_effects.h"
 #include "caw/detmath.hpp"
+#include "sample_time.h"
 
 namespace caw::fx {
 
@@ -132,7 +133,7 @@ struct StepClock {
         const double sb = stepBeats > 1e-9 ? stepBeats : 1e-9;
         inc = tempo / (60.0 * rate) / sb;
         // The song's frame, rounded: a block split anywhere gives the same frame, so the same steps.
-        if (playing) pos = std::floor(beat * 60.0 * rate / tempo + 0.5) * inc, locked = true;
+        if (playing) pos = sampletime::roundBeatFrames(beat, rate, tempo) * inc, locked = true;
         else locked = false;
     }
     void advance() noexcept { pos += inc; }

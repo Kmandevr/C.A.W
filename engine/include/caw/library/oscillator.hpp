@@ -13,9 +13,9 @@ namespace caw::lib {
 inline double noteHz(double pitch) noexcept { return 440.0 * detPow(2.0, (finiteOr0(pitch) - 69.0) / 12.0); }
 
 // The phase (cycles) wrapped into 0..1. A phase in 0..2 (an oscillator's step past the end) takes a branch
-// instead of floor, with the same result (+ 0.0 makes -0 read 0, as phase - floor(phase) does).
+// instead of floor, with the same result (positiveZero makes -0 read +0, as phase - floor(phase) does).
 inline double wrap01(double phase) noexcept {
-    if (phase >= 0.0 && phase < 2.0) return phase >= 1.0 ? phase - 1.0 : phase + 0.0;
+    if (phase >= 0.0 && phase < 2.0) return phase >= 1.0 ? phase - 1.0 : positiveZero(phase);
     return phase - std::floor(phase);
 }
 

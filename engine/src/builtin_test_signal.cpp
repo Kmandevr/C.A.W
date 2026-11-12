@@ -5,6 +5,7 @@
 
 #include "caw/detmath.hpp"
 #include "caw/instrument.hpp"
+#include "sample_time.h"
 
 namespace caw {
 
@@ -135,7 +136,7 @@ protected:
         const double gl = parameterAt(b, kLeft, offset, 1.0), gr = parameterAt(b, kRight, offset, 1.0);
         const double sweepTo = parameterAt(b, kSweepTo, offset, 20000.0);
         const double sweepFrames = parameterAt(b, kSweepTime, offset, 1.0) * sr_;
-        const uint64_t period = static_cast<uint64_t>(std::floor(parameterAt(b, kPeriod, offset, 0.0) * sr_ + 0.5));
+        const uint64_t period = static_cast<uint64_t>(sampletime::roundFrames(parameterAt(b, kPeriod, offset, 0.0), sr_));
         for (uint32_t i = 0; i < frames; ++i) left[i] = right[i] = 0.0f;
         if (lanes_.any()) lanes_.begin(offset, frames);
         auto play = [&](Voice& v, bool fromNote, float* outL, float* outR) noexcept {

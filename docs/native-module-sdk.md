@@ -9,7 +9,7 @@ covers: [engine/include/caw_component.h, engine/include/caw/display.hpp, engine/
 
 **Status [Fact, checked 2026-11-09]:**
 - **Interface and SDK:** the plain-C component interface v3 and the installable C++ SDK (`CAW::SDK`) exist.
-- **Desktop build:** a manifest-driven CMake build, and CI for Linux, Windows and Android. The engine's link-time optimisation (`CAW_LTO`, [engine](engine.md)) is set for the engine's own targets only; a component built against `CAW::SDK` keeps its own build settings.
+- **Desktop build:** a manifest-driven CMake build, and CI for Linux, Windows and Android. The engine's link-time optimisation (`CAW_LTO`, [engine](engine.md)) is set for the engine's own targets only; a component built against `CAW::SDK` keeps its own build settings. So are the engine's fast-math subsets (`CAW_FP_FLAGS`, speed phase 2): `CAW::SDK` still gives a component the strict flags (`-ffp-contract=off -fno-fast-math -fno-trapping-math`, MSVC `/fp:precise`), so the Library gives the same bits in a component everywhere. Inside the engine a component runs with subnormals flushed to zero (`Engine::process` sets it); an exported CLAP or VST3 plug-in gets the host's mode, so keep the Library's denormal guards.
 - **In-app compiler:** `engine/compiler/` is built for Android by CI, and in CI it compiles real components to arm64 libraries; its first run on a phone is still to come.
 - **Loading:** explicit trust (Blocked / Trusted; Isolated is refused, since there is no sandbox), and rebuilds that switch in while playing.
 - **Playback:** stereo effects with parameters, automation, bypass, state, tails and latency compensation, on tracks and the master; instruments (an event input, a stereo output) playing a track's notes, with the same (2026-11-10, #156).

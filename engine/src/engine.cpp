@@ -22,8 +22,10 @@
 #include <thread>
 
 #include "detmath.h"
+#include "fp_mode.h"
 #include "json.h"
 #include "params.h"
+#include "sample_time.h"
 
 namespace caw {
 
@@ -307,19 +309,18 @@ std::shared_ptr<const Pattern> compileArrangement(
                 // Intersect each ratchet with the source window. This preserves both sustained
                 // note tails and the original ratchet grid when a clip starts or ends mid-note.
                 std::vector<RatchetSpan> spans;
-                const double ratchetLength = original.len / original.ratchet;
                 for (int q = 0; q < original.ratchet; ++q) {
-                    const double ratchetStart = original.at + ratchetLength * q;
-                    const double ratchetEnd = original.at + ratchetLength * (q + 1);
+                    const double ratchetStart = sampletime::ratchetStep(original.at, original.len, original.ratchet, q);
+                    const double ratchetEnd = sampletime::ratchetStep(original.at, original.len, original.ratchet, q + 1);
                     const double start = std::max(ratchetStart, sourcePos);
                     const double end = std::min(ratchetEnd, sourceEnd);
                     if (end > start)
-                        spans.push_back({timeline + (start - sourcePos), timeline + (end - sourcePos),
+                        spans.push_back({sampletime::clipStep(timeline, start, sourcePos), sampletime::clipStep(timeline, end, sourcePos),
                                          static_cast<uint16_t>(q)});
                 }
                 if (spans.empty()) continue;
                 PatternNote note = original;
-                note.at = timeline + (clippedStart - sourcePos);
+                note.at = sampletime::clipStep(timeline, clippedStart, sourcePos);
                 note.len = clippedEnd - clippedStart;
                 // The note's expression (bend, vibrato, pressure, timbre) comes along: `extra` indexes the
                 // source's list, so it is copied into the arrangement's and pointed there.
@@ -1145,8 +1146,7 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
     t.master = p.master;
     if (!send(t))
         return "{\"ok\":false,\"error\":\"audio command queue is not accepting project updates\",\"modules\":{}}";
-    const double stepLen = 60.0 * ctlSr_ / (p.bpm * 4.0);
-    ctlLoopLen_ = static_cast<int64_t>(std::floor(p.loopSteps() * stepLen + 0.5));
+    ctlLoopLen_ = static_cast<int64_t>(sampletime::roundFrames(p.loopSteps(), sampletime::stepFrames(ctlSr_, p.bpm)));
 
     const auto projectAutomation = std::make_shared<const std::vector<ProjectAutomationLaneSpec>>(p.automation);
     ctlAutomation_ = projectAutomation;
@@ -2437,7 +2437,7 @@ void Engine::startPlay(double fromStep, uint64_t playCount, uint32_t touchStamp)
     // In steps, converted with the tempo the Transport commands before it set, so a tempo change made
     // while paused still resumes on the same beat.
     {
-        const double at = std::isfinite(fromStep) && fromStep > 0 ? std::floor(fromStep * stepLen_ + 0.5) : 0.0;
+        const double at = std::isfinite(fromStep) && fromStep > 0 ? sampletime::roundFrames(fromStep, stepLen_) : 0.0;
         g_ = at > 0 && at < static_cast<double>(loopLen_) ? static_cast<int64_t>(at) : 0;
     }
     playRampIn_ = g_ > 0 || stopFade_ > 0 ? std::max(1, static_cast<int>(kStopSeconds * sr_)) : 0;
@@ -2606,11 +2606,11 @@ int Engine::scope(int index, float* out, int n) {
 // ===================== audio thread =====================
 
 void Engine::updateTiming() noexcept {
-    stepLen_ = 60.0 * sr_ / (bpm_ * 4.0);
-    loopLen_ = static_cast<int64_t>(std::floor(loopSteps_ * stepLen_ + 0.5));
+    stepLen_ = sampletime::stepFrames(sr_, bpm_);
+    loopLen_ = static_cast<int64_t>(sampletime::roundFrames(loopSteps_, stepLen_));
     if (loopLen_ < 1) loopLen_ = 1;
-    loopFrom_ = loopRange_ ? std::clamp<int64_t>(static_cast<int64_t>(std::floor(loopFromSteps_ * stepLen_ + 0.5)), 0, loopLen_ - 1) : 0;
-    loopTo_ = loopRange_ ? std::clamp<int64_t>(static_cast<int64_t>(std::floor(loopToSteps_ * stepLen_ + 0.5)), loopFrom_ + 1, loopLen_) : loopLen_;
+    loopFrom_ = loopRange_ ? std::clamp<int64_t>(static_cast<int64_t>(sampletime::roundFrames(loopFromSteps_, stepLen_)), 0, loopLen_ - 1) : 0;
+    loopTo_ = loopRange_ ? std::clamp<int64_t>(static_cast<int64_t>(sampletime::roundFrames(loopToSteps_, stepLen_)), loopFrom_ + 1, loopLen_) : loopLen_;
 }
 
 int64_t Engine::wrapAt() const noexcept { return loopRange_ && g_ < loopTo_ ? loopTo_ : loopLen_; }
@@ -3030,7 +3030,7 @@ void Engine::updateSolo() noexcept {
 }
 
 int64_t Engine::loopStart(const Slot& s, int64_t k) const noexcept {
-    return static_cast<int64_t>(std::floor(static_cast<double>(k) * (s.steps * stepLen_) + 0.5));
+    return static_cast<int64_t>(sampletime::roundRepeat(k, s.steps, stepLen_));
 }
 
 // The note's expression `into` samples after it took the voice: bend (curve + vibrato), press and timbre.
@@ -3151,7 +3151,7 @@ void Engine::previewCommand(const Cmd& c) noexcept {
     if (c.previewOp == 1) {
         if (!held) return;
         held->target = c.pitch;
-        held->glideLeft = std::max(1, static_cast<int>(std::floor(kPreviewGlideSeconds * sr_ + 0.5)));
+        held->glideLeft = std::max(1, static_cast<int>(sampletime::roundFrames(kPreviewGlideSeconds, sr_)));
         held->glideStep = (held->target - held->pitch) / held->glideLeft;
         held->motionFrom = 0;
         held->motionWait = 0;
@@ -3277,9 +3277,9 @@ bool Engine::playsNotes(const Slot& s) noexcept { return s.track; }
 bool Engine::noteSpan(const PatternNote& n, uint32_t sub, int64_t& start, int64_t& stop) const noexcept {
     const int ratchet = std::max(1, n.ratchet);
     if (sub >= static_cast<uint32_t>(ratchet)) return false;
-    const double part = n.len / ratchet;
-    start = static_cast<int64_t>(std::floor((n.at + part * sub) * stepLen_ + 0.5));
-    stop = static_cast<int64_t>(std::floor((n.at + part * (sub + 1)) * stepLen_ + 0.5));
+    const int s = static_cast<int>(sub);
+    start = static_cast<int64_t>(sampletime::roundFrames(sampletime::ratchetStep(n.at, n.len, ratchet, s), stepLen_));
+    stop = static_cast<int64_t>(sampletime::roundFrames(sampletime::ratchetStep(n.at, n.len, ratchet, s + 1), stepLen_));
     return true;
 }
 
@@ -3318,7 +3318,7 @@ void Engine::rebindNote(NoteEvents& notes, NoteEvents::Held& h, const Pattern* p
 void Engine::instrumentNotes(Slot& s, NoteEvents& notes, int m) noexcept {
     const int64_t n0 = s.n0, end = n0 + m;
     const Pattern* pat = s.pat;
-    auto sampleOf = [this](double step) { return static_cast<int64_t>(std::floor(step * stepLen_ + 0.5)); };
+    auto sampleOf = [this](double step) { return static_cast<int64_t>(sampletime::roundFrames(step, stepLen_)); };
     for (NoteEvents::Held& h : notes.held())
         if (h.active && h.rebind) rebindNote(notes, h, pat, n0);
     if (!pat) return;
@@ -3354,7 +3354,7 @@ void Engine::instrumentNotes(Slot& s, NoteEvents& notes, int m) noexcept {
                 h->sub = 0;
                 h->pitch = h->sentPitch;  // from the pitch being heard, bend included
                 h->target = n.pitch;
-                h->glideLeft = std::max(1, static_cast<int>(std::floor(stepLen_ * 0.5 + 0.5)));
+                h->glideLeft = std::max(1, static_cast<int>(sampletime::roundFrames(stepLen_, 0.5)));
                 h->glideStep = (h->target - h->pitch) / h->glideLeft;
                 express(*h, n, frame);
                 continue;
@@ -3421,7 +3421,7 @@ bool Engine::ringsAtPlay(const Slot& s) const noexcept {
 // the slot's play tail, faded to silence, before Play resets it; runInstrument mixes the tail into the first
 // chunks of the new pass.
 void Engine::playTail(Slot& s, int most) noexcept {
-    const int len = std::min({Slot::kPlayTailMax, std::max(1, most), std::max(1, static_cast<int>(kPlayTailSeconds * sr_ + 0.5))});
+    const int len = std::min({Slot::kPlayTailMax, std::max(1, most), std::max(1, static_cast<int>(sampletime::roundFrames(kPlayTailSeconds, sr_)))});
     const ChainTime time{g_, stepLen_, touchEpoch_, bpm_, static_cast<uint32_t>(beatsPerBar_), false};
     for (int done = 0; done < len;) {
         const int n = std::min(kBlock, len - done);
@@ -3560,7 +3560,8 @@ int Engine::planChunk(int maxFrames) noexcept {
             s.pat = nullptr;
             // The layer's time runs on through its loop, so time-driven effects keep moving; cut at the wrap.
             const double layerLen = s.steps <= 0 ? static_cast<double>(loopLen_) : s.steps * stepLen_;
-            const int64_t len = std::max<int64_t>(1, static_cast<int64_t>(std::floor(layerLen + 0.5)));
+            const int64_t len = std::max<int64_t>(1, s.steps <= 0 ? static_cast<int64_t>(std::floor(layerLen + 0.5))
+                                                                  : static_cast<int64_t>(sampletime::roundFrames(s.steps, stepLen_)));
             s.layerLen = layerLen;
             s.previewN = ((s.previewN % len) + len) % len;
             s.n0 = s.previewN;
@@ -4005,7 +4006,7 @@ void Engine::runRoutes(Slot& s, const float* preL, const float* preR, const floa
 uint32_t Engine::keyNotes(const Slot& s, int m, Event* out, uint32_t max) const noexcept {
     if (s.mode != Slot::Mode::Play || previewChunk_ || !s.pat) return 0;
     const Pattern& pat = *s.pat;
-    auto sampleOf = [this](double step) { return static_cast<int64_t>(std::floor(step * stepLen_ + 0.5)); };
+    auto sampleOf = [this](double step) { return static_cast<int64_t>(sampletime::roundFrames(step, stepLen_)); };
     const PatternEvent* ev = pat.events.data();
     const size_t ne = pat.events.size();
     const int64_t n0 = s.n0, end = n0 + m;
@@ -4300,7 +4301,7 @@ void Engine::runMasterNode(const float* inL, const float* inR, float* outL, floa
         if (clicks) {
             const double pos = static_cast<double>(g_ + frame);
             const double beat = std::floor(pos / beatLen);
-            if (pos - beat * beatLen < 1.0) startClick(static_cast<int64_t>(beat) % std::max(1, beatsPerBar_) == 0);
+            if (sampletime::beatOffset(pos, beat, beatLen) < 1.0) startClick(static_cast<int64_t>(beat) % std::max(1, beatsPerBar_) == 0);
         }
         if (clickLeft_ > 0) {
             const double v = nextClick();
@@ -4457,6 +4458,7 @@ void Engine::pickOverloadVictim() noexcept {
 }
 
 void Engine::process(float* left, float* right, int frames) noexcept {
+    const ScopedFlushDenormals flushDenormals;  // live callbacks, exports and renders alike (fp_mode.h)
     // Whether any layer is soloed, worked out once per callback rather than once per layer and block.
     updateSolo();
     applyCommands();

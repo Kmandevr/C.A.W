@@ -14,6 +14,7 @@
 #include "analysis.h"
 #include "json.h"
 #include "sample_pack.h"
+#include "sample_time.h"
 #include "utf8_path.h"
 
 namespace caw {
@@ -394,7 +395,7 @@ std::string LiveAudio::startRecording(std::string_view requestJson) {
     s->bpm = j.number("bpm", 120);
     if (!(s->bpm >= 20 && s->bpm <= 400)) return failJson("bpm must be 20..400");
     s->rate = static_cast<int>(std::lround(sr_));
-    s->stepLen = 60.0 * sr_ / (s->bpm * 4.0);
+    s->stepLen = sampletime::stepFrames(sr_, s->bpm);
     const double bits = j.number("bits", 32);
     if (bits != 24 && bits != 32) return failJson("bits must be 24 (PCM) or 32 (float)");
     s->float32 = bits == 32;
@@ -404,8 +405,8 @@ std::string LiveAudio::startRecording(std::string_view requestJson) {
         const double a = j.number("punch_in_steps", 0), b = j.number("punch_out_steps", 1e15);
         if (!(a >= 0 && b > a)) return failJson("punch_out_steps must be after punch_in_steps");
         s->punch = true;
-        s->punchIn = static_cast<int64_t>(std::floor(a * s->stepLen + 0.5));
-        s->punchOut = b >= 1e15 ? INT64_MAX : static_cast<int64_t>(std::floor(b * s->stepLen + 0.5));
+        s->punchIn = static_cast<int64_t>(sampletime::roundFrames(a, s->stepLen));
+        s->punchOut = b >= 1e15 ? INT64_MAX : static_cast<int64_t>(sampletime::roundFrames(b, s->stepLen));
     }
     if (const Json* mb = j.get("max_file_bytes"); mb && mb->type == Json::Type::Number) {
         if (!(mb->num >= 1024)) return failJson("max_file_bytes must be at least 1024");

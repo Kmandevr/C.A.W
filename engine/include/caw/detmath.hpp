@@ -54,7 +54,8 @@ constexpr double kPi = 3.14159265358979323846;
 constexpr double kTwoPi = 6.28318530717958647692;
 
 // Built from IEEE basic operations only (no platform maths library), so every platform gives identical
-// bits when compiled without fused multiply-add contraction or fast-math (CAW's own flags).
+// bits when compiled without fused multiply-add contraction or fast-math (the flags CAW::SDK gives components;
+// the engine itself builds with fast-math subsets and gives the same sound, not the same bits).
 namespace detail {
 
 // sin(r) for |r| <= pi/2 by its Taylor series to r^19 (error below 1e-15).
@@ -79,12 +80,36 @@ constexpr double kLn2Lo = 1.90821492927058770002e-10;
 constexpr double kLn2 = 0.69314718055994530942;
 constexpr double kHalfPi = 1.57079632679489661923;
 
+// (x - k * hi) - k * lo, in that order: Cody-Waite range reduction, exact for |x| up to about 1e15 to within the
+// rounding of k * hi. The engine's own code builds with -fassociative-math (engine/CMakeLists.txt), which would fold
+// it into x - k * (hi + lo), where hi + lo rounds to hi and lo is lost (twice the error at every |x|, and exp off by
+// 1e-13). So Clang is told not to reassociate here (instruction flags, kept through inlining and link-time
+// optimisation), and GCC's optimiser sees the partial result only through an empty asm that leaves it in its register
+// (no instruction is emitted). A fused multiply-add (Arm64) may still compute x - k * hi with one rounding: more
+// exact, never less. MSVC never reassociates under /fp:precise.
+inline double reduce(double x, double k, double hi, double lo) {
+#if defined(__clang__)
+#pragma clang fp reassociate(off)
+    return (x - k * hi) - k * lo;
+#else
+    double t = x - k * hi;
+#if defined(__GNUC__) && (defined(__x86_64__) || defined(__SSE2_MATH__))
+    __asm__("" : "+x"(t));
+#elif defined(__GNUC__) && (defined(__aarch64__) || (defined(__arm__) && defined(__ARM_FP)))
+    __asm__("" : "+w"(t));
+#elif defined(__GNUC__)
+    __asm__("" : "+m"(t));
+#endif
+    return t - k * lo;
+#endif
+}
+
 }  // namespace detail
 
 inline double detSin(double x) {
     if (!std::isfinite(x)) return 0.0;
     const double k = std::floor(x / kTwoPi + 0.5);
-    double r = (x - k * detail::kTwoPiHi) - k * detail::kTwoPiLo;  // now in [-pi, pi]
+    double r = detail::reduce(x, k, detail::kTwoPiHi, detail::kTwoPiLo);  // now in [-pi, pi]
     if (r > detail::kHalfPi) r = kPi - r;
     else if (r < -detail::kHalfPi) r = -kPi - r;
     return detail::sinPoly(r);
@@ -102,7 +127,7 @@ inline double detExp(double x) {
     if (x > 709.0) x = 709.0;
     if (x < -745.0) return 0.0;
     const double k = std::floor(x / detail::kLn2 + 0.5);
-    const double r = (x - k * detail::kLn2Hi) - k * detail::kLn2Lo;  // |r| <= 0.35
+    const double r = detail::reduce(x, k, detail::kLn2Hi, detail::kLn2Lo);  // |r| <= 0.35
     double p = 1.0 / 6227020800.0;                    // 1/13!
     p = p * r + 1.0 / 479001600.0;
     p = p * r + 1.0 / 39916800.0;
@@ -183,5 +208,12 @@ inline uint32_t byteSwap(uint32_t x) {
 
 // NaN and infinities become 0 before anything reaches the speakers.
 inline double finiteOr0(double d) { return std::isfinite(d) ? d : 0.0; }
+
+// x, with -0 made +0. In its bits, not as x + 0.0: the engine builds with -fno-signed-zeros, which lets the compiler
+// fold x + 0.0 to x and leave the -0 (an integer compare and select, which no floating-point flag touches).
+inline double positiveZero(double x) noexcept {
+    const uint64_t bits = std::bit_cast<uint64_t>(x);
+    return std::bit_cast<double>(bits == (uint64_t{1} << 63) ? uint64_t{0} : bits);
+}
 
 }  // namespace caw

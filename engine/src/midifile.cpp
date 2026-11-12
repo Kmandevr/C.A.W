@@ -10,6 +10,7 @@
 #include <numeric>
 
 #include "detmath.h"
+#include "sample_time.h"
 
 namespace caw {
 
@@ -400,11 +401,11 @@ std::vector<Segment> segments(const Pattern& p, int beatsPerBar, int64_t& length
     for (const PatternNote& n : p.notes) {
         if (n.at >= steps - 1e-9) continue;  // playback never starts these
         const int r = std::max(1, n.ratchet);
-        const double part = n.len / r;
         for (int q = 0; q < r; ++q) {
             Segment s;
-            s.on = std::llround((n.at + part * q) * kStepTicks);
-            s.off = std::llround((n.at + part * (q + 1)) * kStepTicks);
+            // The repeat's step as playback computes it (sample_time.h: strict, the same on every platform).
+            s.on = std::llround(sampletime::ratchetStep(n.at, n.len, r, q) * kStepTicks);
+            s.off = std::llround(sampletime::ratchetStep(n.at, n.len, r, q + 1) * kStepTicks);
             s.pitch = std::clamp(n.pitch, 0.0, 127.0);
             s.vel = std::clamp(n.vel, 0.0, 1.0);
             s.extra = n.extra;
