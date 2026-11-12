@@ -225,7 +225,7 @@ The flagship (#171, [engine](engine.md)) is built for the phone budget: everythi
 
 - So 8 voices of the default patch take about 2 % of one server core, a 16-copy voice about 0.3 %. The Morph synth's busy pattern (seven copies, a shared filter) costs 59 M instructions a second of audio, the flagship's default 158 M (callgrind, the instrument alone); a voice of seven copies without a filter about the same as Morph's.
 - [Assumption] On the owner's Galaxy S22+ these scale like the instruction counts (not measured on the phone).
-- The ladder is a long chain of dependent operations per sample; running a voice's two sides in one loop let the CPU overlap them (1.7× faster), and voices could be interleaved the same way next. The reverb (the Library's, unchanged) is why the flagship's starts off.
+- The ladder is a long chain of dependent operations per sample; running a voice's two sides in one loop let the CPU overlap them (1.7× faster), and several voices' filters now run side by side the same way (speed A2, [engine performance](engine-performance.md#a2-flagship-voices-side-by-side)). The reverb (the Library's, unchanged) is why the flagship's starts off.
 
 ## Effects suite (2026-11-10)
 
