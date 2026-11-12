@@ -440,13 +440,12 @@ void main() {
         .map((st) => st.position)
         .reduce((a, b) => a.maxScrollExtent >= b.maxScrollExtent ? a : b);
 
-    testWidgets('scrolling right never meets a wall; revealStart glides back to the start', (tester) async {
-      final controller = ArrangerController();
+    testWidgets('scrolling right never meets a wall; requestRevealStart glides back to the start', (tester) async {
       tester.view.physicalSize = const Size(800, 600);
       tester.view.devicePixelRatio = 1;
       addTearDown(tester.view.reset);
       await tester.pumpWidget(MaterialApp(home: Scaffold(body: ListenableBuilder(listenable: s,
-          builder: (_, _) => ArrangerScreen(state: s, controller: controller)))));
+          builder: (_, _) => ArrangerScreen(state: s)))));
       await tester.pump();
       final loop = s.project.engineLoopSteps;
       for (var i = 0; i < 12; i++) {
@@ -458,7 +457,7 @@ void main() {
       expect(p.pixels, greaterThan(loop * 18.0 * 3), reason: 'far past the song\'s end');
       expect(p.maxScrollExtent - p.pixels, greaterThan(p.viewportDimension), reason: 'and still more to the right');
       expect(s.project.engineLoopSteps, loop, reason: 'scrolling doesn\'t change the song');
-      controller.revealStart();
+      s.requestRevealStart();
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 100));
       expect(hScroll(tester).pixels, greaterThan(0), reason: 'it glides');

@@ -38,9 +38,11 @@ import 'arrange/track_color.dart';
 import 'clip_roll_parts.dart';
 import 'glass.dart';
 import 'adaptive_sheet.dart';
+import 'follow_gate.dart';
 import 'frame/frame_widgets.dart' show ScrollFade;
 import 'haptics.dart';
 import 'feedback.dart';
+import 'view_glide.dart';
 
 enum PatternTool { draw, select, curve, erase, ratchet }
 
@@ -336,6 +338,95 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
     _pxPerStep = px;
   }
 
+  /// The roll's view moves on its own the way Arrange's do ([ViewGlide]; owner, 2026-11-11): zoom keys and buttons,
+  /// fit, back to the start, the keyboard's cursor leaving the view, page following. A touch stops it.
+  late final ViewGlide _glide = ViewGlide(this,
+      read: () => (left: _scrollX / _pxPerStep, zoom: _pxPerStep),
+      apply: (v) {
+        if (!mounted) return;
+        setState(() {
+          _pxPerStep = v.zoom.clamp(_minPx, _maxPx).toDouble();
+          _scrollX = (v.left * _pxPerStep).clamp(0.0, math.max(_maxScrollX, v.left * _pxPerStep)).toDouble();
+          if (_scrollX < 0) _scrollX = 0;
+        });
+      });
+
+  /// Glides the view's left edge to [leftStep] and its zoom to [px] per step, together; without [leftStep] the
+  /// middle of the grid stays put.
+  void _animateViewTo({double? leftStep, double? px}) => _glide.to(
+      left: leftStep == null ? null : math.max(0.0, leftStep),
+      zoom: px?.clamp(_minPx, _maxPx).toDouble(), keep: _gridW / 2, view: math.max(1.0, _gridW),
+      level: Motion.of(context));
+
+  double get _pxAim => _glide.target.zoom;
+
+  /// Back to the pattern's start ([AppState.requestRevealStart], the transport's ⏮).
+  void _revealStart() => _animateViewTo(leftStep: 0);
+
+  // Following the playhead: the same rule as Arrange ([FollowGate], Settings › Editing).
+  late final FollowGate _follow = FollowGate(s.settings);
+  Object? _selSeen;
+
+  /// Where the song's playhead is in the roll's time, while it plays this pattern; null otherwise. Opened for a clip,
+  /// that clip's repeats run on along the roll as it draws them; in Build, the first clip of the pattern under the
+  /// playhead, wrapped to its loop.
+  double? _playStep() {
+    final d = _doc;
+    if (d == null || !s.meters.playing) return null;
+    final ph = s.playheadStep;
+    final own = widget.clip;
+    if (own != null && widget.layer != null) {
+      if (ph < own.startSteps || ph >= own.startSteps + own.lengthSteps) return null;
+      final loop = _loopSteps(d) ?? 1;
+      return (own.loop ? own.sourceOffsetSteps % loop : own.sourceOffsetSteps) + ph - own.startSteps;
+    }
+    final len = d.lengthSteps(s.project.beatsPerBar);
+    for (final l in s.project.layers) {
+      for (final c in l.clips) {
+        if (c.patternId != widget.module.id || c.mute || ph < c.startSteps || ph >= c.startSteps + c.lengthSteps) continue;
+        final at = c.sourceOffsetSteps + ph - c.startSteps;
+        return c.loop ? at % c.loopLength(len) : at;
+      }
+    }
+    return null;
+  }
+
+  void _followPlayhead() {
+    if (!mounted) return;
+    if (_selSeen != null && !identical(_sel, _selSeen)) _follow.touch();
+    _selSeen = _sel;
+    final at = _playStep();
+    if (!_follow.allows(playing: s.meters.playing) || at == null || _pointers.isNotEmpty || _gridW <= 0) return;
+    final x = at * _pxPerStep;
+    if (s.settings.followSmooth) {
+      _glide.stop();
+      final to = math.max(0.0, x - _gridW / 3);
+      if ((to - _scrollX).abs() >= 0.5) setState(() => _scrollX = to);
+      return;
+    }
+    if (_glide.active) return;
+    if (x >= _scrollX && x <= _scrollX + _gridW - 24) return;
+    _animateViewTo(leftStep: at - _gridW * 0.1 / _pxPerStep);
+  }
+
+  // The keyboard's cursor at the last build: when it leaves the view, the view glides after it.
+  Steps? _cursorSeen;
+
+  void _revealCursor() {
+    final at = _cursorAt;
+    if (_cursorSeen == null || at == _cursorSeen) {
+      _cursorSeen = at;
+      return;
+    }
+    _cursorSeen = at;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || _gridW <= 0) return;
+      final x = at.toDouble() * _pxPerStep;
+      if (x >= _scrollX && x <= _scrollX + _gridW - 24) return;
+      _animateViewTo(leftStep: at.toDouble() - _gridW * (x < _scrollX ? 0.1 : 0.7) / _pxPerStep);
+    });
+  }
+
   /// Row zoom to [row] pixels per note, keeping the pitch [fy] pixels below the grid's top in place.
   void _zoomY(double row, {double? fy}) {
     row = row.clamp(_minRow, _maxRow).toDouble();
@@ -359,6 +450,8 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
     _tool = ed.rollTool == StartTool.select ? PatternTool.select : PatternTool.draw;
     if (ed.rollNoteSteps > 0) _lastLen = Steps.fromDouble(ed.rollNoteSteps);
     s.settings.addListener(_settingsChanged);
+    s.tick.addListener(_followPlayhead);
+    s.revealStartRequests.addListener(_revealStart);
     _load();
   }
 
@@ -400,6 +493,9 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
     _spring.dispose();
     _editCtl.dispose();
     _scroller.dispose();
+    _glide.dispose();
+    s.tick.removeListener(_followPlayhead);
+    s.revealStartRequests.removeListener(_revealStart);
     s.settings.removeListener(_settingsChanged);
     _router?.unregister(Area.pattern, _focus);
     _flush(closing: true);
@@ -825,16 +921,13 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
       case 'roll.view.switch':
         setState(() => _grid = !_grid);
       case 'roll.view.zoomIn':
-        setState(() => _zoomX(_pxPerStep * 1.25));
+        _animateViewTo(px: _pxAim * 1.25);
       case 'roll.view.zoomOut':
-        setState(() => _zoomX(_pxPerStep / 1.25));
+        _animateViewTo(px: _pxAim / 1.25);
       case 'roll.view.fit':
-        setState(() {
-          _scrollX = 0;
-          // Clamped like zoom, so a very long pattern scrolls instead of drawing millions of grid lines.
-          _pxPerStep = (math.max(4.0, (context.size?.width ?? 400) - _keyW) / math.max(1, d.lengthSteps(s.project.beatsPerBar)))
-              .clamp(4.0, 200.0).toDouble();
-        });
+        // Clamped like zoom, so a very long pattern scrolls instead of drawing millions of grid lines.
+        _animateViewTo(leftStep: 0, px: (math.max(4.0, (context.size?.width ?? 400) - _keyW) /
+            math.max(1, d.lengthSteps(s.project.beatsPerBar))).clamp(4.0, 200.0).toDouble());
       case 'roll.view.velocityLane':
         setState(() => _velLane = !_velLane);
       case 'roll.view.extrasLanes':
@@ -1843,6 +1936,8 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
   /// a drag scrolls. Two fingers zoom and scroll, and drop an edit the first finger had started.
   void _pointerDown(PointerDownEvent e) {
     _focus.requestFocus();
+    _glide.stop();
+    _follow.hold();
     final local = e.localPosition - _origin;
     if (isMousePointer(e.kind) && _pointers.isEmpty) {
       // A right-click opens the menu (it never draws); the middle button or Space+drag pans.
@@ -2140,6 +2235,7 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
   }
 
   void _pointerUp(PointerEvent e, {required bool cancel}) {
+    _follow.release();
     if (e.pointer == _mousePan) setState(() => _mousePan = null);
     _stepKeyUp(e.pointer);
     if (_pointers.remove(e.pointer) == null) return;
@@ -2760,11 +2856,11 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
     return SizedBox(height: 36, child: Row(key: const ValueKey('roll-zoom-bar'), children: [
       const SizedBox(width: 6),
       const Tooltip(message: 'Time zoom', child: Icon(Icons.swap_horiz, size: 16, color: Neon.dim)),
-      icon(Icons.remove, 'Zoom out', () => setState(() => _zoomX(_pxPerStep / 1.25))),
-      Expanded(flex: 3, child: ResetOnDoubleTap(onReset: () => setState(() => _zoomX(28)), child: Slider(key: const ValueKey('roll-zoom-time'),
+      icon(Icons.remove, 'Zoom out', () => _animateViewTo(px: _pxAim / 1.25)),
+      Expanded(flex: 3, child: ResetOnDoubleTap(onReset: () => _animateViewTo(px: 28), child: Slider(key: const ValueKey('roll-zoom-time'),
         value: (math.log(_pxPerStep / _minPx) / ratio).clamp(0.0, 1.0).toDouble(),
-        onChanged: (v) => setState(() => _zoomX(_minPx * math.exp(v * ratio)))))),
-      icon(Icons.add, 'Zoom in', () => setState(() => _zoomX(_pxPerStep * 1.25))),
+        onChanged: (v) { _glide.stop(); setState(() => _zoomX(_minPx * math.exp(v * ratio))); }))),
+      icon(Icons.add, 'Zoom in', () => _animateViewTo(px: _pxAim * 1.25)),
       const SizedBox(width: 6),
       const Tooltip(message: 'Row height', child: Icon(Icons.swap_vert, size: 16, color: Neon.dim)),
       Expanded(flex: 2, child: ResetOnDoubleTap(onReset: () { setState(() => _zoomY(const RollLook().rowHeight)); _saveRow(); },
@@ -2784,6 +2880,7 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
         child: Text(_error ?? 'Not a pattern', style: const TextStyle(color: Neon.pink)),
       );
     }
+    _revealCursor();
     final length = d.lengthSteps(s.project.beatsPerBar);
     final selectedSourceIds = s.selectedPatternModuleIds.where((id) => id != widget.module.id).toList()..sort();
     if (_multiEditEnabled && selectedSourceIds.join('|') != _multiSourceIds.join('|')) _loadMultiDocs(s);
@@ -2942,6 +3039,8 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
                 onPointerCancel: (e) => _pointerUp(e, cancel: true),
                 onPointerSignal: (e) {
                   if (e is PointerScrollEvent) {
+                    _glide.stop();
+                    _follow.touch();
                     setState(() {
                       final f = e.localPosition - _origin;
                       final factor = e.scrollDelta.dy > 0 ? 0.9 : 1.1;
@@ -3011,6 +3110,13 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
                       rowH: _rowH, scrollX: _scrollX, scrollY: _scrollY, keyW: _keyW, rulerH: _rulerH, gridH: h,
                       color: _noteColor, label: loopLengthLabel(loop, s.project.beatsPerBar),
                       active: _loopLive != null || _loopHover)))),
+                  // The song's playhead while it plays this pattern (a live island: it moves about 30 times a second
+                  // without rebuilding the roll).
+                  Positioned.fill(child: IgnorePointer(child: RepaintBoundary(child: ValueListenableBuilder<int>(
+                    valueListenable: s.tick,
+                    builder: (context, _, _) => CustomPaint(key: const ValueKey('roll-playhead'),
+                      painter: RollPlayheadPainter(step: _playStep(), pxPerStep: _pxPerStep, scrollX: _scrollX,
+                        left: _keyW, bottom: _rulerH + h)))))),
                   // A mouse over the bar: its length and what it does (a finger sees the length on the ruler).
                   if (loop != null && clip != null && _loopHover && _loopLive == null)
                     Positioned(
@@ -4648,4 +4754,31 @@ class _QuantizeSheetState extends State<_QuantizeSheet> {
       ],
     );
   }
+}
+
+/// The song's playhead down the roll's ruler and grid: a line at [step] (the roll's time; null draws nothing).
+class RollPlayheadPainter extends CustomPainter {
+  const RollPlayheadPainter(
+      {required this.step, required this.pxPerStep, required this.scrollX, required this.left, required this.bottom});
+  final double? step;
+  final double pxPerStep, scrollX, left, bottom;
+
+  /// Where the line is, in the roll's pixels; null when there is none or it is off the grid.
+  double? get x {
+    final st = step;
+    if (st == null) return null;
+    final x = left + st * pxPerStep - scrollX;
+    return x < left ? null : x;
+  }
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final at = x;
+    if (at == null || at > size.width) return;
+    canvas.drawLine(Offset(at, 0), Offset(at, bottom), Paint()..color = Neon.blue..strokeWidth = 1.6);
+  }
+
+  @override
+  bool shouldRepaint(covariant RollPlayheadPainter old) =>
+      old.step != step || old.pxPerStep != pxPerStep || old.scrollX != scrollX || old.bottom != bottom;
 }

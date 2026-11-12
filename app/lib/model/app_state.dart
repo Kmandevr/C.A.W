@@ -236,6 +236,13 @@ class AppState extends ChangeNotifier {
   /// Bumped on every meter poll (about 30 times a second) so meters can repaint without rebuilding screens.
   final ValueNotifier<int> tick = ValueNotifier(0);
 
+  /// Bumped by [requestRevealStart]: the arranger and the piano roll listen and glide their views back to the
+  /// project's start (owner, 2026-11-11; the transport's ⏮). A counter, so the same request twice still notifies.
+  final ValueNotifier<int> revealStartRequests = ValueNotifier(0);
+
+  /// Asks every open timeline view (Arrange, the piano roll) to glide back to the start. Moves no playhead.
+  void requestRevealStart() => revealStartRequests.value++;
+
   /// Aggregate value tick retained for diagnostics and external listeners. Workspaces use the scoped ticks below
   /// so parameter, track and master drags don't rebuild unrelated controls.
   late final ValueNotifier<int> values = ValueNotifier(0)..addListener(_docChanged);
@@ -368,6 +375,7 @@ class AppState extends ChangeNotifier {
     masterValueTick.dispose();
     values.dispose();
     tick.dispose();
+    revealStartRequests.dispose();
     for (final notifier in _moduleValueTicks.values) { notifier.dispose(); }
     for (final notifier in _layerValueTicks.values) { notifier.dispose(); }
     engine?.dispose();

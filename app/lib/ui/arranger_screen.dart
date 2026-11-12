@@ -68,21 +68,11 @@ enum FocusLayout { pinned, side }
 FocusLayout focusLayoutFor(Size screen) =>
     screen.width < 900 && screen.height >= screen.width ? FocusLayout.pinned : FocusLayout.side;
 
-/// What the shell can ask of the arranger's view (owner, 2026-11-11): [revealStart] glides it to the project's start
-/// (⏮'s double tap). Calls before the arranger is built do nothing.
-class ArrangerController {
-  VoidCallback? _revealStart;
-
-  /// Glides the timeline back to the project's start.
-  void revealStart() => _revealStart?.call();
-}
-
 class ArrangerScreen extends StatefulWidget {
-  const ArrangerScreen({super.key, required this.state, this.onOpenPattern, this.onOpenModule, this.controller});
+  const ArrangerScreen({super.key, required this.state, this.onOpenPattern, this.onOpenModule});
   final AppState state;
   final VoidCallback? onOpenPattern;
   final ValueChanged<String>? onOpenModule;
-  final ArrangerController? controller;
   @override
   State<ArrangerScreen> createState() => _ArrangerScreenState();
 }
@@ -105,8 +95,89 @@ class _ArrangerScreenState extends State<ArrangerScreen> with TickerProviderStat
   /// Zoomed all the way out a multi-hour song fits a phone (owner, 2026-11-11: REAPER zooms out "a metric ton").
   static const minZoom = 0.002, maxZoom = 64.0;
 
-  /// Moves the view makes on its own glide (owner, 2026-11-11); a touch stops them.
-  late final ViewGlide _glide = ViewGlide(this);
+  /// Moves the view makes on its own glide (owner, 2026-11-11); a touch stops them. See [_animateViewTo].
+  late final ViewGlide _glide = ViewGlide(this, read: _viewPlace, apply: _applyView);
+
+  double get _zoomScale => Neon.compact(context) ? 0.85 : 1.0;
+
+  ViewPlace _viewPlace() {
+    final p = _hScroll.hasClients ? _hScroll.positions.last : null;
+    return (left: p == null ? 0.0 : p.pixels / _stepW, zoom: _stepW);
+  }
+
+  void _applyView(ViewPlace v) {
+    final z = (v.zoom / _zoomScale).clamp(minZoom, maxZoom).toDouble();
+    if ((z - zoom).abs() < 1e-9) {
+      if (!_hScroll.hasClients) return;
+      final p = _hScroll.positions.last;
+      p.jumpTo((v.left * _stepW).clamp(0.0, p.maxScrollExtent).toDouble());
+      return;
+    }
+    _setZoom(z, leftStep: math.max(0.0, v.left));
+  }
+
+  /// The one way the view moves on its own (owner, 2026-11-11): its left edge to [leftStep] (steps) and its zoom to
+  /// [zoom], together, in a glide of 150–350 ms by distance that a new move retargets and a touch stops; at once with
+  /// motion off. Without [leftStep], [keep] (pixels from the lanes' left edge; the middle by default) stays put.
+  void _animateViewTo({double? leftStep, double? zoom, double? keep}) {
+    if (!_hScroll.hasClients) return;
+    final view = _hScroll.positions.last.viewportDimension;
+    _glide.to(left: leftStep == null ? null : math.max(0.0, leftStep),
+        zoom: zoom == null ? null : zoom.clamp(minZoom, maxZoom).toDouble() * _zoomScale,
+        keep: keep ?? view / 2, view: view, level: Motion.of(context));
+  }
+
+  /// The tracks' up-and-down glide, the same helper at a fixed zoom (left is pixels).
+  late final ViewGlide _vGlide = ViewGlide(this,
+      read: () => (left: _drag.vScroll.hasClients ? _drag.vScroll.positions.last.pixels : 0.0, zoom: 1.0),
+      apply: (v) {
+        if (!_drag.vScroll.hasClients) return;
+        final p = _drag.vScroll.positions.last;
+        p.jumpTo(v.left.clamp(0.0, p.maxScrollExtent).toDouble());
+      });
+
+  /// Glides the tracks up or down so [layerId]'s row shows, when it is out of the view (a track picked with the
+  /// keyboard, or focused and pinned).
+  void _revealTrack(String layerId) {
+    final row = ArrangeDrag.rectOf(_drag.headerKey(layerId)), view = ArrangeDrag.rectOf(_drag.vViewport);
+    if (row == null || view == null || !_drag.vScroll.hasClients) return;
+    final p = _drag.vScroll.positions.last;
+    double? to;
+    if (row.top < view.top) to = p.pixels - (view.top - row.top) - 8;
+    if (row.bottom > view.bottom) to = p.pixels + (row.bottom - view.bottom) + 8;
+    if (to == null) return;
+    _vGlide.to(left: to, view: view.height, level: Motion.of(context));
+  }
+
+  // What was selected at the last build: a change the view can't see (the keyboard, a paste) glides it into view.
+  String? _selLayerSeen;
+  Set<String> _selClipsSeen = const {};
+
+  void _revealSelection() {
+    final s = widget.state;
+    final layer = s.selectedLayerId, clips = s.selectedClipIds.toSet();
+    final layerMoved = layer != _selLayerSeen && _selLayerSeen != null;
+    final added = clips.difference(_selClipsSeen);
+    _selLayerSeen = layer;
+    _selClipsSeen = clips;
+    if (!layerMoved && added.isEmpty) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (layerMoved && layer != null) _revealTrack(layer);
+      if (added.isEmpty || !_hScroll.hasClients) return;
+      final picked = [for (final c in s.selectedClips) if (added.contains(c.clip.id)) c];
+      if (picked.isEmpty) return;
+      final a = picked.map((c) => c.clip.startSteps.toDouble()).reduce(math.min);
+      final b = picked.map((c) => (c.clip.startSteps + c.clip.lengthSteps).toDouble()).reduce(math.max);
+      final p = _hScroll.positions.last;
+      final l = p.pixels / _stepW, r = (p.pixels + p.viewportDimension) / _stepW;
+      // Only when none of it shows: a clip tapped at the view's edge stays where it is.
+      if (b < l || a > r) _revealRange(a, b);
+    });
+  }
+
+  /// The zoom the view is at or gliding to.
+  double get _zoomAim => _glide.target.zoom / _zoomScale;
 
   /// The view reached this far right (steps): the timeline keeps going a few screens past it, past the last clip
   /// and the playhead, so scrolling right never meets a wall (owner, 2026-11-11). Scrolling doesn't change the song.
@@ -126,27 +197,58 @@ class _ArrangerScreenState extends State<ArrangerScreen> with TickerProviderStat
     final p = _hScroll.positions.last;
     final x = step * _stepW;
     if (x >= p.pixels && x <= p.pixels + p.viewportDimension - 24) return;
-    _glide.to(_hScroll, x - p.viewportDimension * 0.1, level: Motion.of(context));
+    _animateViewTo(leftStep: step - p.viewportDimension * 0.1 / _stepW);
   }
 
-  /// Glides the view back to the project's start.
-  void _revealStart() => _glide.to(_hScroll, 0, level: Motion.of(context));
+  /// Glides the view so steps [from]..[to] show: as it is when they do, else panned there, zoomed out to fit them
+  /// when they are wider than the view (go to a clip, zoom to the selection with [fit]).
+  void _revealRange(double from, double to, {bool fit = false}) {
+    if (!_hScroll.hasClients) return;
+    final p = _hScroll.positions.last;
+    final view = p.viewportDimension;
+    if (view <= 0) return;
+    final span = math.max(1.0, to - from);
+    if (fit || span * _stepW > view * 0.9) {
+      final z = (view * 0.9 / span / _zoomScale).clamp(minZoom, maxZoom).toDouble();
+      final z2 = fit ? z : math.min(zoom, z);
+      _animateViewTo(leftStep: from - view * 0.05 / (z2 * _zoomScale), zoom: z2);
+      return;
+    }
+    final l = p.pixels / _stepW, r = (p.pixels + view) / _stepW;
+    if (from >= l && to <= r) return;
+    _animateViewTo(leftStep: from < l ? from - view * 0.1 / _stepW : to - view * 0.9 / _stepW);
+  }
+
+  /// Glides the view back to the project's start (⏮: [AppState.requestRevealStart], or Show the start).
+  void _revealStart() => _animateViewTo(leftStep: 0);
 
   /// Zoom to fit: the whole song in the view, from its start.
   void _zoomToFit() {
     if (!_hScroll.hasClients) return;
     final p = _hScroll.positions.last;
     final end = math.max(widget.state.project.stepsPerBar, widget.state.project.engineLoopSteps);
-    final scale = Neon.compact(context) ? 0.85 : 1.0;
-    final z = (p.viewportDimension * 0.95 / end / scale).clamp(minZoom, maxZoom).toDouble();
-    _animateZoom(z, panToStep: 0);
+    final z = (p.viewportDimension * 0.95 / end / _zoomScale).clamp(minZoom, maxZoom).toDouble();
+    _animateViewTo(leftStep: 0, zoom: z);
   }
 
-  // The zoom buttons glide to their new zoom ([Motion.standard]); a pinch, slider or Ctrl + wheel follows at once.
-  late final AnimationController _zoomAnim = AnimationController(vsync: this, duration: Motion.standard)
-    ..addListener(_zoomFrame);
-  double _zoomFrom = 18, _zoomTarget = 18;
-  double? _zoomFocal;
+  /// Zoom to the selection: the selected clips, else the time selection, fill the view.
+  bool _zoomToSelection() {
+    final s = widget.state;
+    final clips = s.selectedClips.toList();
+    double? a, b;
+    if (clips.isNotEmpty) {
+      a = clips.map((c) => c.clip.startSteps.toDouble()).reduce(math.min);
+      b = clips.map((c) => (c.clip.startSteps + c.clip.lengthSteps).toDouble()).reduce(math.max);
+    } else if (s.timeSelectionStart != null && s.timeSelectionEnd != null && s.timeSelectionStart != s.timeSelectionEnd) {
+      a = math.min(s.timeSelectionStart!, s.timeSelectionEnd!).toDouble();
+      b = math.max(s.timeSelectionStart!, s.timeSelectionEnd!).toDouble();
+    }
+    if (a == null || b == null) return false;
+    _revealRange(a, b, fit: true);
+    return true;
+  }
+
+  // A pinch, the slider or Ctrl + wheel follow at once; the zoom buttons glide ([_animateViewTo]).
 
   // Two fingers on the timeline: a sideways pinch zooms time, an up-and-down pinch the track height.
   final Map<int, Offset> _touches = {};
@@ -293,13 +395,11 @@ class _ArrangerScreenState extends State<ArrangerScreen> with TickerProviderStat
   void didUpdateWidget(covariant ArrangerScreen old) {
     super.didUpdateWidget(old);
     _headersRev++;
-    if (old.controller != widget.controller) {
-      old.controller?._revealStart = null;
-      widget.controller?._revealStart = _revealStart;
-    }
     if (!identical(old.state, widget.state)) {
       old.state.tick.removeListener(_followPlayhead);
       widget.state.tick.addListener(_followPlayhead);
+      old.state.revealStartRequests.removeListener(_revealStart);
+      widget.state.revealStartRequests.addListener(_revealStart);
     }
   }
 
@@ -307,8 +407,8 @@ class _ArrangerScreenState extends State<ArrangerScreen> with TickerProviderStat
   void initState() {
     super.initState();
     widget.state.tick.addListener(_followPlayhead);
+    widget.state.revealStartRequests.addListener(_revealStart);
     _hScroll.addListener(_onHScroll);
-    widget.controller?._revealStart = _revealStart;
   }
 
   /// Settings › Editing › Follow the playhead: while playing, the view keeps the playhead in sight, paging on when it
@@ -345,7 +445,7 @@ class _ArrangerScreenState extends State<ArrangerScreen> with TickerProviderStat
     // A page step glides (owner, 2026-11-11); while it runs the playhead is already on its way into view.
     if (_glide.active) return;
     if (x >= p.pixels && x <= p.pixels + view - 24) return;
-    _glide.to(_hScroll, x - view * 0.1, level: Motion.of(context));
+    _animateViewTo(leftStep: s.playheadStep - view * 0.1 / _stepW);
   }
 
   @override
@@ -413,6 +513,8 @@ class _ArrangerScreenState extends State<ArrangerScreen> with TickerProviderStat
         }
       case 'arranger.zoom.fit':
         _zoomToFit();
+      case 'arranger.zoom.selection':
+        if (!_zoomToSelection()) _router?.toast('Select clips or a time range to zoom to');
       case 'arranger.view.start':
         _revealStart();
       case 'arranger.marker.next' || 'arranger.marker.prev':
@@ -477,15 +579,15 @@ class _ArrangerScreenState extends State<ArrangerScreen> with TickerProviderStat
   @override
   void dispose() {
     widget.state.tick.removeListener(_followPlayhead);
+    widget.state.revealStartRequests.removeListener(_revealStart);
     _router?.unregister(Area.arranger, _keys);
     _keys.dispose();
     _marquee.dispose();
-    _zoomAnim.dispose();
     _panelOut.dispose();
     _browserTimer?.cancel();
     _glide.dispose();
+    _vGlide.dispose();
     _hScroll.removeListener(_onHScroll);
-    if (widget.controller?._revealStart == _revealStart) widget.controller?._revealStart = null;
     _trackGhost?.remove();
     _trackGhostAt.dispose();
     _drag.dispose();
@@ -509,33 +611,6 @@ class _ArrangerScreenState extends State<ArrangerScreen> with TickerProviderStat
       final p = _hScroll.positions.last;
       p.jumpTo((anchor * _stepW - f).clamp(0.0, p.maxScrollExtent).toDouble());
     });
-  }
-
-  /// The zoom buttons: a short glide to [z] (at once when motion is off).
-  /// With [panToStep], the view's left edge glides to that step as it zooms (zoom to fit), both together.
-  void _animateZoom(double z, {double? panToStep}) {
-    _zoomTarget = z.clamp(minZoom, maxZoom).toDouble();
-    _glide.stop();
-    final pos = _hScroll.hasClients ? _hScroll.positions.last : null;
-    _panFromStep = pos == null ? null : pos.pixels / _stepW;
-    _panToStep = panToStep;
-    if (Motion.of(context) != MotionLevel.full) {
-      _setZoom(_zoomTarget, leftStep: panToStep);
-      return;
-    }
-    _zoomFrom = zoom;
-    _zoomFocal = null;
-    _zoomAnim.forward(from: 0);
-  }
-
-  double? _panFromStep, _panToStep;
-
-  void _zoomFrame() {
-    final t = EditMotion.curveOr(Curves.easeOutCubic).transform(_zoomAnim.value);
-    // On a log scale, so a zoom across the whole range moves evenly.
-    final z = math.exp(math.log(_zoomFrom) + (math.log(_zoomTarget) - math.log(_zoomFrom)) * t);
-    final to = _panToStep, from = _panFromStep;
-    _setZoom(z, focal: _zoomFocal, leftStep: to == null || from == null ? null : from + (to - from) * t);
   }
 
   /// The mouse pointer panning the view (middle-drag or Space+drag), if any.
@@ -582,7 +657,7 @@ class _ArrangerScreenState extends State<ArrangerScreen> with TickerProviderStat
         _pinchX = false;
         _pinchH0 = _rowHeight(row);
       }
-      _zoomAnim.stop();
+      _glide.stop();
     }
   }
 
@@ -1073,6 +1148,7 @@ class _ArrangerScreenState extends State<ArrangerScreen> with TickerProviderStat
   @override
   Widget build(BuildContext context) {
     final s = widget.state;
+    _revealSelection();
     // The track cards slide in over the arrangement and back out (owner, 2026-11-11); the arrangement isn't built
     // while they cover it.
     return Stack(children: [
@@ -1365,11 +1441,11 @@ class _ArrangerScreenState extends State<ArrangerScreen> with TickerProviderStat
     return SizedBox(height: 36, child: Row(key: const ValueKey('arrange-zoom-bar'), children: [
       const SizedBox(width: 6),
       const Tooltip(message: 'Time zoom', child: Icon(Icons.swap_horiz, size: 16, color: Neon.dim)),
-      icon(Icons.remove, 'Zoom out', () => _animateZoom(_zoomAnim.isAnimating ? _zoomTarget / 1.4 : zoom / 1.4)),
-      Expanded(flex: 3, child: ResetOnDoubleTap(onReset: () => _animateZoom(18), child: Slider(key: const ValueKey('arrange-zoom-time'),
+      icon(Icons.remove, 'Zoom out', () => _animateViewTo(zoom: _zoomAim / 1.4)),
+      Expanded(flex: 3, child: ResetOnDoubleTap(onReset: () => _animateViewTo(zoom: 18), child: Slider(key: const ValueKey('arrange-zoom-time'),
         value: (math.log(zoom / minZoom) / ratio).clamp(0.0, 1.0).toDouble(),
-        onChanged: (v) { _zoomAnim.stop(); _setZoom(minZoom * math.exp(v * ratio)); }))),
-      icon(Icons.add, 'Zoom in', () => _animateZoom(_zoomAnim.isAnimating ? _zoomTarget * 1.4 : zoom * 1.4)),
+        onChanged: (v) { _glide.stop(); _setZoom(minZoom * math.exp(v * ratio)); }))),
+      icon(Icons.add, 'Zoom in', () => _animateViewTo(zoom: _zoomAim * 1.4)),
       IconButton(key: const ValueKey('arrange-zoom-fit'), onPressed: _zoomToFit, tooltip: 'Zoom to fit the song',
         visualDensity: VisualDensity.compact, iconSize: 18, icon: const Icon(Icons.fit_screen, color: Neon.dim)),
       const SizedBox(width: 6),
@@ -1494,6 +1570,7 @@ class _ArrangerScreenState extends State<ArrangerScreen> with TickerProviderStat
       onPointerDown: (e) {
         _follow.hold();
         _glide.stop();
+        _vGlide.stop();
         _touchDown(e, headW);
       },
       onPointerMove: (e) => _touchMove(e, headW),
@@ -1508,10 +1585,12 @@ class _ArrangerScreenState extends State<ArrangerScreen> with TickerProviderStat
       onPointerSignal: (_) {
         _follow.touch();
         _glide.stop();
+        _vGlide.stop();
       },
       onPointerPanZoomStart: (_) {
         _follow.hold();
         _glide.stop();
+        _vGlide.stop();
       },
       onPointerPanZoomEnd: (_) => _follow.release(),
       child: LayoutBuilder(builder: (context, view) {

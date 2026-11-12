@@ -265,6 +265,8 @@ const List<ActionDef> standardActions = [
       defaultKeys: ['Shift+R'], isChange: true),
   ActionDef('arranger.zoom.fit', 'Zoom to fit the song', _r, description: 'The whole song in the view, from its start',
       toast: false),
+  ActionDef('arranger.zoom.selection', 'Zoom to the selection', _r,
+      description: 'The selected clips, else the time selection, fill the view', toast: false),
   ActionDef('arranger.view.start', 'Show the start', _r, description: 'The view glides back to the song\'s start',
       toast: false),
   ActionDef('arranger.marker.next', 'Go to next marker', _r, defaultKeys: ['Ctrl+]'], toast: false),
