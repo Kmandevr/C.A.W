@@ -224,12 +224,15 @@ class LiveIsland extends StatelessWidget {
   Widget build(BuildContext context) => RepaintBoundary(child: LayoutBuilder(builder: (_, _) => child));
 }
 
-/// A peak meter for one layer, folder or the master, on a dB scale, REAPER-like: the bar rises at once to each
-/// sample peak and falls at [fallDbPerSecond] (the Meter fall setting); a thin line holds the highest peak for
-/// [holdSeconds]; at [clipDb] or over it turns pink for [clipSeconds]. With [readRight] it is a stereo meter: two
-/// bars, left above right (side by side when [vertical]). It runs on wall-clock time, so it falls the same at any
-/// meter cadence. While sound comes in, the meter reads (about 30 a second) move it; once they report silence its own
-/// ticker finishes the fall at the same rate and then stops, so it never freezes partway when the engine goes quiet.
+/// A peak meter for one layer, folder or the master, on a dB scale, REAPER-like: the bar rises quickly to each
+/// sample peak (over [attackSeconds], eased, never past it) and falls at [fallDbPerSecond] (the Meter fall
+/// setting), but never below what the reads say: after a lower read it follows a line from the earlier read to the
+/// later one over the time between them, so a steady tone shows a still bar and a fading tail a smooth fall at any
+/// frame rate (the reads come about 30 times a second, the screen draws 30 to 240). A thin line holds the highest
+/// peak for [holdSeconds]; at [clipDb] or over it turns pink for [clipSeconds]. With [readRight] it is a stereo
+/// meter: two bars, left above right (side by side when [vertical]). Everything is worked out from wall-clock time
+/// ([clock]), not frames. Its ticker runs only while a bar or the peak line moves; a held line or clip light waiting
+/// to end sets a timer instead, so a settled meter asks for no frames.
 class PeakMeter extends StatefulWidget {
   const PeakMeter({super.key, required this.state, required this.read, required this.color, this.vertical = false,
       this.readRight});
@@ -258,6 +261,10 @@ class PeakMeter extends StatefulWidget {
   static Duration Function() clock = () => _wall.elapsed;
   static const holdSeconds = 1.5;
   static const clipSeconds = 3.0;
+
+  /// How long the bar takes to rise to a higher read (owner's bug, 2026-11-12: rising at once on each 30 Hz read and
+  /// falling on every frame between them made the bar twitch at 120 Hz).
+  static const attackSeconds = 0.015;
   static const clipDb = -0.1;
 
   /// A linear peak (1 = 0 dBFS) in dB, [floorDb] for silence.
@@ -274,39 +281,116 @@ class PeakMeter extends StatefulWidget {
   State<PeakMeter> createState() => PeakMeterState();
 }
 
-/// One channel's bar, held peak and clip light.
+/// One channel's bar, held peak and clip light, on wall-clock seconds. Every step is worked out exactly from the
+/// time, not the frame: the same reads give the same picture at any frame rate.
 class _MeterChannel {
   double shownDb = PeakMeter.floorDb, holdDb = PeakMeter.floorDb;
-  double holdLeft = 0, clipLeft = 0; // seconds
+  double _holdPeak = PeakMeter.floorDb, holdUntil = -1, clipUntil = -1; // seconds
+  // The rise in progress: from [_riseFrom] at [_riseAt] to [_riseTo] (null: none).
+  double? _riseTo;
+  double _riseFrom = PeakMeter.floorDb, _riseAt = 0;
+  // The floor the reads set: from [_floorFrom] at [_floorAt] to [_floorTo] over [_floorSpan] seconds.
+  double _floorFrom = PeakMeter.floorDb, _floorTo = PeakMeter.floorDb, _floorAt = 0, _floorSpan = 0.033;
+  double _lastReadAt = -1, _at = 0;
+  bool clipped = false;
 
-  bool get empty => shownDb <= PeakMeter.floorDb && holdDb <= PeakMeter.floorDb && clipLeft <= 0;
-  bool get clipped => clipLeft > 0;
+  /// A read's floor lasts this long past the read, in case the reads stop with sound left (the app paused them).
+  static const _floorLasts = 0.15;
 
-  void take(double peak) {
+  // The floor's line at [t], ignoring its end.
+  double _line(double t) => _floorFrom + (_floorTo - _floorFrom) * ((t - _floorAt) / _floorSpan).clamp(0.0, 1.0);
+
+  double _floor(double t) =>
+      _lastReadAt < 0 || t - _lastReadAt > _floorLasts ? PeakMeter.floorDb : _line(t);
+
+  /// A read at [t] of [peak] (linear) since the last ([advance] to [t] first).
+  void take(double peak, double t) {
     final d = PeakMeter.db(peak);
-    if (d > shownDb) shownDb = d;
-    if (d >= holdDb && d > PeakMeter.floorDb) {
-      holdDb = d;
-      holdLeft = PeakMeter.holdSeconds;
+    // Down, the floor follows a line to the read; up, it is there at once (the bar's rise eases it in).
+    final now = _floor(t);
+    _floorFrom = d > now ? d : now;
+    _floorTo = d;
+    _floorSpan = _lastReadAt < 0 ? 0.033 : (t - _lastReadAt).clamp(0.01, 0.1).toDouble();
+    _floorAt = t;
+    _lastReadAt = t;
+    if (d > shownDb + 0.01 && d > (_riseTo ?? PeakMeter.floorDb)) {
+      _riseFrom = shownDb;
+      _riseAt = t;
+      _riseTo = d;
     }
-    if (d >= PeakMeter.clipDb) clipLeft = PeakMeter.clipSeconds;
+    if (d >= holdDb && d > PeakMeter.floorDb) {
+      _holdPeak = holdDb = d;
+      holdUntil = t + PeakMeter.holdSeconds;
+    }
+    if (d >= PeakMeter.clipDb) clipUntil = t + PeakMeter.clipSeconds;
+    clipped = t < clipUntil;
   }
 
-  void fall(double dt) {
+  /// Moves on to [t].
+  void advance(double t) {
+    var a = _at;
+    _at = t;
+    if (t <= a) return;
     final rate = PeakMeter.fallDbPerSecond;
-    shownDb = math.max(PeakMeter.floorDb, shownDb - rate * dt);
-    // The peak line holds, then falls like the bar for whatever part of this frame came after its hold.
-    final held = math.min(holdLeft, dt);
-    holdLeft = math.max(0, holdLeft - dt);
-    holdDb = math.max(shownDb, holdDb - rate * (dt - math.max(0, held)));
-    if (clipLeft > 0) clipLeft -= dt;
+    final rise = _riseTo;
+    if (rise != null) {
+      final end = _riseAt + PeakMeter.attackSeconds;
+      if (t < end) {
+        final u = ((t - _riseAt) / PeakMeter.attackSeconds).clamp(0.0, 1.0);
+        shownDb = _riseFrom + (rise - _riseFrom) * (1 - (1 - u) * (1 - u)); // eased out, never past the read
+        _hold(t);
+        return;
+      }
+      shownDb = rise;
+      _riseTo = null;
+      a = math.max(a, end);
+    }
+    // Falling at [rate] but never below the floor: the highest of the bar's own fall and, for each moment the
+    // floor's line bends or ends in (a, t], the fall from the floor then.
+    var s = shownDb - rate * (t - a);
+    void from(double tau, double v) => s = math.max(s, v - rate * (t - tau));
+    from(a, _floor(a));
+    final bend = _floorAt + _floorSpan, end = _lastReadAt + _floorLasts;
+    if (_lastReadAt >= 0 && bend > a && bend < t && bend <= end) from(bend, _line(bend));
+    if (_lastReadAt >= 0 && end > a && end <= t) from(end, _line(end)); // the moment before it ends
+    s = math.max(s, _floor(t));
+    shownDb = math.max(PeakMeter.floorDb, s);
+    _hold(t);
+  }
+
+  void _hold(double t) {
+    // The peak line holds, then falls at the bar's rate, never below the bar.
+    holdDb = t <= holdUntil ? math.max(_holdPeak, shownDb)
+        : math.max(shownDb, _holdPeak - PeakMeter.fallDbPerSecond * (t - holdUntil));
+    clipped = t < clipUntil;
+  }
+
+  /// Whether the bar or the line moves at [t] (it needs frames).
+  bool moving(double t) {
+    if (_riseTo != null) return true;
+    final floorMoves = _lastReadAt >= 0 && t - _floorAt < _floorSpan && _floorFrom != _floorTo;
+    if (floorMoves) return true;
+    if (shownDb > _floor(t) + 1e-6 && shownDb > PeakMeter.floorDb) return true;
+    return t > holdUntil && holdDb > shownDb + 1e-6;
+  }
+
+  /// When something still to come needs a step though nothing moves (the floor's end, the line's hold, the clip
+  /// light), in seconds; null when nothing will.
+  double? nextChange(double t) {
+    final times = [
+      if (_lastReadAt >= 0 && t - _lastReadAt <= _floorLasts && _floor(t) > PeakMeter.floorDb)
+        _lastReadAt + _floorLasts,
+      if (holdUntil > t && holdDb > shownDb + 1e-6) holdUntil,
+      if (clipUntil > t) clipUntil,
+    ];
+    return times.isEmpty ? null : times.reduce(math.min);
   }
 }
 
 class PeakMeterState extends State<PeakMeter> with SingleTickerProviderStateMixin {
-  late final Ticker _ticker = createTicker(_frame);
-  Duration _last = Duration.zero;
-  Duration _lastRead = Duration.zero;
+  late final Ticker _ticker = createTicker((_) => _step());
+  double _at = -1; // the clock's seconds at the last step
+  Timer? _wake;
   Object? _builtKey; // what the last build showed, to a 500th of the bar
   final _left = _MeterChannel(), _right = _MeterChannel();
 
@@ -340,37 +424,53 @@ class PeakMeterState extends State<PeakMeter> with SingleTickerProviderStateMixi
   @override
   void dispose() {
     widget.state.tick.removeListener(_read);
+    _wake?.cancel();
     _ticker.dispose();
     super.dispose();
   }
 
-  bool get _empty => _left.empty && (!_stereo || _right.empty);
+  static double get _now => PeakMeter.clock().inMicroseconds / 1e6;
 
-  // A meter read: the peak since the last one. The time since the previous read moves the fall first.
+  // A meter read: the peak since the last one. The bars move on to now first.
   void _read() {
-    final now = PeakMeter.clock();
-    if (!_ticker.isActive) _fall((now - _lastRead).inMicroseconds / 1e6);
-    _lastRead = now;
-    final peak = widget.read();
-    _left.take(peak);
-    final right = widget.readRight?.call() ?? 0.0;
-    if (_stereo) _right.take(right);
-    // A read rises at once; between reads, and after the reads report silence, the ticker lets the bar fall on
-    // every frame at the screen's rate (the frame-rate setting), then stops once it has fallen.
-    if (!_empty && !_ticker.isActive) {
-      _last = Duration.zero;
-      _ticker.start();
-    }
+    _advance(_now);
+    final t = _at;
+    _left.take(widget.read(), t);
+    if (_stereo) _right.take(widget.readRight?.call() ?? 0.0, t);
+    _follow();
     _rebuild();
   }
 
-  void _frame(Duration elapsed) {
-    final dt = (elapsed - _last).inMicroseconds / 1e6;
-    _last = elapsed;
-    _lastRead = PeakMeter.clock();
-    _fall(dt);
-    if (_empty) _ticker.stop();
+  void _step() {
+    _advance(_now);
+    _follow();
     _rebuild();
+  }
+
+  void _advance(double t) {
+    _at = t;
+    _left.advance(t);
+    if (_stereo) _right.advance(t);
+  }
+
+  // Frames while a bar or line moves; else a timer for the next thing to change (a hold ending), or nothing.
+  void _follow() {
+    final t = _at;
+    final moving = _left.moving(t) || (_stereo && _right.moving(t));
+    if (moving) {
+      _wake?.cancel();
+      _wake = null;
+      if (!_ticker.isActive) _ticker.start();
+      return;
+    }
+    if (_ticker.isActive) _ticker.stop();
+    final next = [_left.nextChange(t), if (_stereo) _right.nextChange(t)].whereType<double>().fold<double?>(
+        null, (a, b) => a == null || b < a ? b : a);
+    _wake?.cancel();
+    _wake = next == null ? null : Timer(Duration(microseconds: ((next - t) * 1e6).ceil() + 1000), () {
+      _wake = null;
+      if (mounted) _step();
+    });
   }
 
   // Builds again only when the bars would show a change (a 500th of their height, or the clip light).
@@ -381,12 +481,6 @@ class PeakMeterState extends State<PeakMeter> with SingleTickerProviderStateMixi
     if (key == _builtKey || !mounted) return;
     _builtKey = key;
     setState(() {});
-  }
-
-  void _fall(double dt) {
-    if (dt <= 0) return;
-    _left.fall(dt);
-    if (_stereo) _right.fall(dt);
   }
 
   Widget _upright(_MeterChannel ch) {
