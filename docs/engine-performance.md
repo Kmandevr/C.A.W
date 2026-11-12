@@ -108,7 +108,7 @@ Each phase's pull request fills its table from the Bench workflow's summary on t
 | Tail project, no notes | 62.8 | 24.0 | −61.8% |
 
 - **LTO:** with GCC 13 it adds instructions (on the base: song8 +1.9%, song32 +2.8%, Drums +3.2%), and the first Bench run with it on ([43142179871](https://github.com/Kmandevr/C.A.W/actions/runs/43142179871)) had Linux arm64's song32 at 5,660 µs; with Clang 18 it is neutral by callgrind (song8 −0.4%, song32 −0.6%, Flagship 16 voices −0.6%, Drums +0.8%). So it is on by default for Clang and MSVC only. **[Assumption]** Android's ThinLTO helps a little on the phone; the arm64 differences above are within the runners' noise for the scenarios it alone touches.
-- **Typical song:** the phase gains under 5% on a typical song (−0.6% on Android, −0.3% by callgrind), so the owner is asked before it counts as done ([decisions](decisions.md), 2026-11-12). The gains are in Flagship's FM and fold warps and drive (11–15% on arm64) and in silence (50–65%). The heavy song's +3% on Linux arm64 is noise: its instructions fell 0.1%, and its run-to-run worst cases differ by 20%.
+- **Typical song:** the phase gains under 5% on a typical song (−0.6% on Android, −0.3% by callgrind); it is kept, as every measured gain is ([decisions](decisions.md), 2026-11-12). The gains are in Flagship's FM and fold warps and drive (11–15% on arm64) and in silence (50–65%). The heavy song's +3% on Linux arm64 is noise: its instructions fell 0.1%, and its run-to-run worst cases differ by 20%.
 
 ### 2. Floating point
 
