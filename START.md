@@ -1,12 +1,12 @@
 # C.A.W start file for chat agents
 
-Generated from `84cab316f5c5162c8fc1965627e7d6d2e7bf983e` on the default branch at 2026-11-10T02:50:01Z by `scripts/agent-context.js`. Don't edit it; edit the files it bundles.
+Generated from `b5ea19599e2d619bbba5b83237546d56b02204f7` on the default branch at 2026-11-12T02:15:30Z by `scripts/agent-context.js`. Don't edit it; edit the files it bundles.
 
 Read this whole file before doing anything else. It replaces separately reading `AGENTS.md`, `CLAUDE.md`, `docs/vision.md` and `.claude/rules/*.md`.
 
 ## Before you start: confirm in your first reply
 
-1. The commit this file was generated from (`84cab31`).
+1. The commit this file was generated from (`b5ea195`).
 2. The task issue number and your branch (`gpt/<issue>-<short-name>`).
 3. The progress comment's next action, or "new task" if there is none yet.
 4. Which area rules below apply to the files you will touch.
@@ -23,7 +23,7 @@ Then follow "The loop" in the AGENTS.md section.
 | `.claude/rules/claude.md` | `.claude/**`, `CLAUDE.md` |
 | `.claude/rules/docs.md` | `docs/**`, `README.md` |
 | `.claude/rules/engine.md` | `engine/**` |
-| `.claude/rules/modules.md` | `examples/**`, `**/*.caw` |
+| `.claude/rules/modules.md` | `examples/*.caw` |
 | `.claude/rules/scripts.md` | `scripts/**` |
 
 ---
@@ -174,7 +174,7 @@ The owner's decisions and repository documentation take precedence over an agent
 
 # C.A.W
 
-**C.A.W** (Code Auditioning Workspace; crow logo) is an experimental, code-driven sound-design and music workspace. The current Flutter app ships Android and Windows builds; the portable C++20 engine is also built and tested by Linux/Windows CI. The app currently has eight workspaces. Do not infer that every roadmap feature is implemented: [docs/app.md](docs/app.md) describes shipped app behavior, [docs/engine-build-status.md](docs/engine-build-status.md) describes native implementation and integration boundaries, and [docs/core-and-feature-plan.md](docs/core-and-feature-plan.md) records planned work. Audio processing is local. There is no current in-app AI, model-inference or cloud-audio integration. AI coding assistants may be used as development tools; that is not a C.A.W product feature. The owner's product direction is in [docs/vision.md](docs/vision.md).
+**C.A.W** (Code Auditioning Workspace; crow logo) is an experimental, code-driven sound-design and music workspace. The current Flutter app ships Android and Windows builds; the portable C++20 engine is also built and tested by Linux/Windows CI. The app has three sections: Build, Files and Arrange. Do not infer that every roadmap feature is implemented: [docs/app.md](docs/app.md) describes shipped app behavior, [docs/engine-build-status.md](docs/engine-build-status.md) describes native implementation and integration boundaries, and [docs/core-and-feature-plan.md](docs/core-and-feature-plan.md) records planned work. Audio processing is local. There is no current in-app AI, model-inference or cloud-audio integration. AI coding assistants may be used as development tools; that is not a C.A.W product feature. The owner's product direction is in [docs/vision.md](docs/vision.md).
 
 ## Start of every session
 
@@ -185,14 +185,14 @@ Tasks and bugs live in GitHub Issues: use the `tasks` skill to find, claim and f
 - Keep facts, proposals, assumptions and open questions apart, as `docs/vision.md` and `docs/architecture.md` label them. Never present a proposal as built, and never build an open question as settled: ask the owner.
 - Never invent facts about libraries, versions, licences, platform behaviour or devices. Check a primary source and date it, or label it an assumption.
 - The audio callback never allocates, locks, logs, does I/O or calls into the UI layer (details: `.claude/rules/engine.md`).
-- Downloaded `.caw` modules are untrusted: the constrained language has no filesystem/network/system calls and is bounded. Native SDK modules are in-process code, not sandboxed; third-party binaries load only under the user's per-item choice of Isolated, Trusted or Blocked (`docs/decisions.md`), never silently. Never ship a GitHub token or other secret.
+- Downloaded projects and modules are untrusted: parse them with limits. Native components are in-process code, not sandboxed: third-party binaries load only under the user's per-item choice of Isolated, Trusted or Blocked (`docs/decisions.md`), never silently. Never ship a GitHub token or other secret.
 - Dependencies must have permissive licences (no GPL/AGPL; C.A.W. itself is Apache-2.0). Record each new one in `docs/decisions.md`.
 - The owner works from Android (Galaxy S22+): every build, test and installable comes from GitHub Actions; do not assume a PC/IDE.
 - Record decisions and new facts in `docs/` before ending a session, and rewrite superseded text where it stands instead of appending (details: `.claude/rules/docs.md`).
 
 ## Layout
 
-`docs/` is the plan and memory ([docs/how-it-works.md](docs/how-it-works.md) shows how the code connects), `scripts/` holds repository tooling and `.claude/` the agent setup ([.claude/README.md](.claude/README.md)). Code: `engine/` (C++ engine and `caw` CLI), `app/` (Flutter) and `examples/` (starter modules). Conventions for each kind of file load from `.claude/rules/` when you touch it.
+`docs/` is the plan and memory ([docs/how-it-works.md](docs/how-it-works.md) shows how the code connects), `scripts/` holds repository tooling and `.claude/` the agent setup ([.claude/README.md](.claude/README.md)). Code: `engine/` (C++ engine and `caw` CLI), `app/` (Flutter) and `examples/` (C++ starters and example patterns). Conventions for each kind of file load from `.claude/rules/` when you touch it.
 
 ## Read in layers
 
@@ -232,7 +232,7 @@ Develop on the branch the session names. Put `Closes #N` in pull requests that f
 ---
 title: Vision and principles
 summary: Owner-approved product direction, actual platform support, current product boundaries and unresolved owner decisions.
-updated: 2026-11-10
+updated: 2026-11-11
 ---
 
 # Vision and principles
@@ -253,7 +253,7 @@ C.A.W. is a code-driven sound-design and music-production workspace for creating
 
 **Current delivery priority (owner, 2026-11-06):** create a working prototype before building out the full architecture. Deliver a narrow, useful end-to-end slice and expand it through working product behavior. Plan for future compatibility and extensibility where they affect today's interfaces, but do not build comprehensive migration systems, marketplace plumbing or speculative frameworks ahead of demonstrated need.
 
-The current repository still contains the constrained .caw language and VM; that is an implementation fact, not the chosen destination. Useful existing engine capabilities are to be migrated into the C++ Library/SDK and shared component system before the old language and VM are removed. The owner has waived backwards compatibility for old .caw source and pre-release projects.
+The .caw language and VM were removed on 2026-11-11 (#160), once C++ built-ins and the app made the same music; the owner waived compatibility with old .caw sources and pre-release projects.
 
 ## Platforms and actual support
 
@@ -269,25 +269,24 @@ Do not describe a platform as supported for release solely because Flutter or th
 
 ## Current product capabilities — summary
 
-The app currently has eight workspaces: Builder, Arranger, Mixer, Engine Lab, Automation, Exporter, Files and Plugin Builder.
+The app has three sections: Build (C++ components and patterns), Files and Arrange (tracks and clips, with the mixer, the automation lanes and the FX stack). Export is a page from the project menu and Engine diagnostics are in Settings.
 
 The repository currently includes:
-- A portable C++20 engine and constrained .caw module language for code-defined generators, effects, patterns, libraries and synth patches (current implementation, not the target language). The planned C++ authoring/toolchain and shared component SDK are not implemented yet.
-- Module parameters, project globals, exported signals and reusable functions.
+- A portable C++20 engine with built-in C++ instruments and effects and the project's own C++ components, written and built in Build.
 - Pattern editing with a piano roll and drum grid, note expressions, velocity/chance curves and pattern generators.
 - Arrangement clips, nested folders, stereo folder buses and track/folder volume-pan automation.
 - Track mixer controls, master output level and stereo peak meters.
-- Engine Lab scope/spectrum inspection and engine diagnostics.
+- Engine diagnostics (Settings › About and beta): scope/spectrum inspection and meters.
 - MIDI pattern import/export, including Standard MIDI Files and MIDI 2.0 Clip Files, plus a native MIDI 2.0 UMP decoder/input-queue primitive.
 - Native offline WAV rendering, loop/free-length/one-shot/wavetable export, named profiles, export history and a bounded in-memory queue.
-- Portable .cawproj and .caw import/export, project-local folders, tags, saved searches and restore points.
-- Plugin Builder for validating and packaging .caw source modules.
+- Portable .caw project import/export (packages with their dependencies; old .cawproj files import), project-local folders, tags, saved searches and restore points.
+- CLAP plug-in project export of a C++ component (Build › Export as plug-in).
 
 Important boundaries:
-- USB/Bluetooth MIDI device discovery, connection and live Engine voice routing are not implemented.
+- USB, Bluetooth and UMP MIDI devices (Android) and WinMM ports (Windows) play instruments at the frame they were played; not yet tested on the owner's hardware. MIDI clock and output are not implemented.
 - Audio-file import, audio clips, sample editing and WAV/SFZ multisample authoring are not implemented.
-- Sends, general sidechain routing and parallel mixer paths are not complete. Native effect chains on tracks and the master are built (engine).
-- Module/global parameter automation and stems export remain approved v2 work.
+- Sends to bus folders, sidechain keys (the ducker, compressor and gate) and bus effects are built (2026-11-11, #175); receives, parallel paths inside a track and a routing matrix are not. Native effect chains on tracks, buses and the master are built (engine).
+- Instrument and effect knob automation is built; stems export is in the Export song sheet.
 - Audio/MIDI recording, input monitoring, recording latency compensation, take lanes and comping are not implemented; they are planned later in the permanent roadmap. (Plugin delay compensation for native effects is built.)
 - The modular graph executor and native module registry are foundations, not the active playback/mixer path. External CLAP/VST3 binary hosting is not implemented. Dynamic loading of C.A.W. native components, under the user's explicit trust choice, is built in the engine; no screen uses it yet.
 - Video synchronization is not planned at this time.
@@ -338,7 +337,12 @@ Only the owner can settle these questions. Do not silently convert them into imp
 | How AutoStacc delivers the free app and the support bundles | Open |
 | Initial trust state for a newly encountered native component | Open; each component's trust level must be explicitly chosen by the user; no silent trust assignment ([decisions](decisions.md), 2026-11-06) |
 | How the optional AutoStacc cloud library syncs with project folders and the global library | Open; compatibility is required ([decisions](decisions.md), 2026-11-03) |
+| Note clips stored as pattern text with .mid import/export, instead of stored as MIDI (#158) | Decided on the owner's behalf 2026-11-10, to confirm; also whether the app keeps one MIDI converter, the Dart one or the engine's ([decisions](decisions.md)) |
+| Android developer verification for the sideloaded APK | Open. **[Fact, checked 2026-11-10]** Google requires apps on certified Android devices to come from registered developers, from 2026-09-30 in Brazil, Indonesia, Singapore and Thailand and globally in 2027 (no US or EU date yet); a free limited-distribution account reaches only 20 devices, and ADB installs and an advanced sideloading flow remain ([Android Developers Blog](https://android-developers.googleblog.com/2026/03/android-developer-verification-rolling-out-to-all-developers.html)). The owner decides whether and when to register `com.kmandevr.caw` with its signing key; it is not needed for `v1.0.0-beta.1` |
+| Audio (2026-11-11, branch `audio-ui`): the look of the audio clips, the input sheet, Settings › Audio's input part and the sampler editor (in the APK); a default edge fade; recordings kept with the project or in a shared library; loop takes as stacked lanes for comping; imports copied (now) or referenced in place ([decisions](decisions.md#2026-11-11-audio-assets-clips-sampler-and-input-wp-j-choices-to-confirm)) | Open |
 | Whether effect tails should carry across a layer loop restart in every case | Open; see [engine playback](engine.md#playback) |
+| Piano roll (WP-K2, 2026-11-11): the look of the Quantize… sheet and the step bar (in the APK); whether Ctrl+U should use the sheet's last settings; whether the slide-up on-screen keys should also step; the MIDI CC numbers for automation lanes (CC7 volume, CC10 pan, others from CC20, as proposed in #11), the volume curve (127·√gain) and how parameter lanes scale ([app](app.md)) | Open |
+| Matching REAPER's flow ([REAPER's flow](reaper-flow.md)): the phone look of the new screens (Export sheet, send knob). S splits, Touch automation from a transport button and on-screen keys with pads (owner, 2026-11-10). The clip bar, the ruler with the loop range, markers and regions, the recording flow and automation writing are built; their look and the choices made for them are to confirm ([decisions](decisions.md)) | Open |
 
 ---
 
@@ -359,6 +363,7 @@ paths:
 - No secrets in any build. GitHub tokens come from the device-flow sign-in and live in the platform's secure storage.
 - Phone screens first: compact panels, sensible defaults, the symbol key row for code entry, errors on one line next to the code. Desktop gets keyboard shortcuts on top, not a different app.
 - Start each file with a one-line `//` comment saying what it is for (the repo map reads it).
+- Every visible state change animates to its new state, in and out, through the theme's motion tokens (`lib/ui/motion.dart`) and respecting Off/Reduced; a drag follows the finger with no lag (owner, 2026-11-11).
 
 ---
 
@@ -433,11 +438,11 @@ paths:
 The design is in `docs/architecture.md` ("Audio and code execution"); this is the checklist for touching it.
 
 - **Portable core.** No OS, audio-API or UI headers outside `engine/platform/`. The core is currently CI-verified on Linux x64, Linux Arm64 and Windows x64, and is built into the Android app. iOS/macOS engine builds and WASM are portability targets, not currently verified CI targets. The desktop CLI is used by CI and external coding tools. Audio output goes through miniaudio in `engine/platform/`.
-- **Audio thread.** In the callback and everything it calls: no allocation, no locks, no logging, no I/O, no calls into the app, no exceptions, no unbounded loops. Programs arrive through a lock-free swap and are freed off the audio thread.
-- **`.caw` language boundary.** The user module language has no filesystem, network or system-call access and is subject to explicit source/program/state/execution limits; fail closed with a module-local error when limits are exceeded. This does not sandbox native SDK modules: they execute as trusted in-process code. Do not claim third-party native modules are isolated or safe to load until process isolation and host validation exist.
+- **Audio thread.** In the callback and everything it calls: no allocation, no locks, no logging, no I/O, no calls into the app, no exceptions, no unbounded loops. Chains and patterns arrive through a lock-free queue and are freed off the audio thread.
+- **Native code is trusted code.** Components run in-process, unsandboxed; one loads only under the user's explicit per-item trust choice. Do not claim third-party native modules are isolated or safe to load until process isolation and host validation exist. Project input (patterns, project JSON, WAV and MIDI files) is untrusted: parse it with explicit limits and fail closed, with an error that names the problem.
 - **C API.** The app calls the engine only through a small, versioned C API (plain structs and functions, no C++ types across it), so `dart:ffi` and any future host can bind it.
-- **Defined arithmetic.** Int32 wraparound for bitwise ops, division and modulo by 0 give 0, NaN/Inf become 0, and the safety limiter is always last. Same source and settings give the same samples on every device where that is cheap (golden-render tests check this); where exactness would cost real-time performance, output that is perceptually the same is enough (owner, 2026-11-10, `docs/decisions.md`).
-- **Tests.** Every language feature or DSP built-in gets a unit test and, where it makes sound, a golden render. A bug fix starts with a failing test. Never skip or weaken a test to get green.
+- **Defined arithmetic.** Outputs are sanitised (NaN/Inf become 0) and the safety limiter is always last. Same project and settings sound perceptually identical on every device, live and in export, checked by tolerance tests against reference renders; note, clip and automation timing, seeded random choices and discrete behaviour stay exact (owner, 2026-11-12, `docs/decisions.md`).
+- **Tests.** Every DSP built-in gets a unit test and, where it makes sound, a golden render; engine tests play `org.caw.test.osc` (`engine/tests/test_signal.h`) or a built-in. A bug fix starts with a failing test. Never skip or weaken a test to get green.
 - Start each file with a one-line `//` comment saying what it is for (the repo map reads it).
 
 ---
@@ -446,16 +451,15 @@ The design is in `docs/architecture.md` ("Audio and code execution"); this is th
 
 ---
 paths:
-  - "examples/**"
-  - "**/*.caw"
+  - "examples/*.caw"
 ---
 
-# Sound modules (.caw)
+# Example patterns (examples/*.caw)
 
-- One module per file: a metadata header (`caw` format version, `kind`, `name`, `summary`, `params`) then code. The implemented format and syntax are in `docs/engine.md`; change that reference and its tests when the format changes.
-- `summary:` is one line saying what the sound is; the repo map shows it.
-- Only original work or work with a licence that allows redistribution. Never paste community bytebeat formulas without the author's permission; credit and licence go in the header.
-- Every example must pass the current CLI validation/render checks and the Engine CI example-render gate; do not describe the CLI as future work.
+- The two files here are note patterns (`kind: pattern`), the text the app bundles as its pattern examples (`app/lib/model/pattern_templates.dart`, which must match them word for word: `app/test/pattern_templates_test.dart`). The format is in `docs/engine.md` ("Patterns"); change that reference and its tests when the format changes.
+- `summary:` is one line saying what the pattern is; the repo map shows it.
+- Only original work, or work with a licence that allows redistribution; credit and licence go in the header. Never paste community bytebeat formulas or other patterns of unknown licence.
+- C++ starters live in `examples/cpp/` and follow the SDK's rules (`docs/native-module-sdk.md`).
 
 ---
 
