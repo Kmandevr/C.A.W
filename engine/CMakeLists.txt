@@ -118,7 +118,7 @@ if(CAW_LTO AND NOT CAW_SANITIZE)
   include(CheckIPOSupported)
   check_ipo_supported(RESULT CAW_IPO_SUPPORTED OUTPUT CAW_IPO_OUTPUT LANGUAGES C CXX)
   if(CAW_IPO_SUPPORTED)
-    foreach(config RELEASE RELWITHDEBINFO MINSIZEREL)
+    foreach(config RELEASE RELWITHDEBINFO MINSIZEREL PROFILE)  # PROFILE: the Flutter Windows app's profile build
       set(CMAKE_INTERPROCEDURAL_OPTIMIZATION_${config} ON)
     endforeach()
   else()
