@@ -35,6 +35,13 @@ TEST(the_flush_guard_flushes_subnormals_and_restores_the_threads_mode) {
 #if (defined(__SSE__) || defined(_M_X64) || defined(__aarch64__)) && !defined(_M_ARM64)
         CHECK(ScopedFlushDenormals::flushing());
         CHECK_EQ(halveSmallest(), 0.0f);
+        // A value in a register, tied to the guard by fence(): the multiply can't be folded at compile time (it would
+        // give the subnormal) or moved before the mode is set, and its result can't sink past the guard's end.
+        float tiny = std::numeric_limits<float>::min();
+        ScopedFlushDenormals::fence(tiny);
+        tiny *= 0.5f;
+        ScopedFlushDenormals::fence(tiny);
+        CHECK_EQ(tiny, 0.0f);
 #endif
         {
             const ScopedFlushDenormals nested;  // a nested guard changes nothing, and leaves the outer one's mode
