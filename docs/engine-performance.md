@@ -73,13 +73,30 @@ Each phase's pull request fills its table from the Bench workflow's summary on t
 
 ### 1. Free wins
 
-| Scenario | Before | After | Change |
-|---|---:|---:|---:|
-| Typical song (8 tracks) | 859 | | |
-| Flagship heavy, 64 voices held | 5,501 | | |
-| Drums kit, 16 pads busy | 339 | | |
-| Song, 32 tracks + heavy FX | 5,311 | | |
-| Tail: silence after | 40 | | |
+**What changed (2026-11-12, branch `speed-free-wins`):** link-time optimisation for optimised builds ([engine](engine.md)); Flagship's FM and fold warps read their tables in three passes as the unwarped copies do, its filters' drive runs two samples at a time (`lib::Saturator::process2`), and its reverb runs a block at a time (the Library's block form); silent work skipped in the master loudness and correlation meters, silent tracks, settled silent sends and settled buses; Eco renders Flagship's FM and fold warps without oversampling and runs the clipper's chosen factor one stage lower ([engine](engine.md)). Every existing golden render passes unchanged, so no sound changed at Normal or High.
+
+**[Fact, callgrind, 2026-11-12]** instructions per second of audio (M Ir/s) in `Engine::process`, `caw_bench 2 500 --runs 1`, Linux x64 GCC 13.3 Release, Normal quality, base `3f75be6`; the tail phases are fixed windows (notes 0–2 s, ringing 2–16 s, silence 16–30 s). "Code only" leaves LTO off (`-DCAW_LTO=OFF`).
+
+| Scenario | Before | After | Change | Code only |
+|---|---:|---:|---:|---:|
+| First loop (6 tracks) | 245.9 | 248.2 | +0.9% | |
+| Three tracks | 399.1 | 407.9 | +2.2% | |
+| Typical song (8 tracks) | 1,150.9 | 1,164.3 | +1.2% | 1,147.4 (−0.3%) |
+| Typical song + extras | 1,551.7 | 1,575.7 | +1.5% | |
+| Flagship heavy, 64 voices held | 6,805.1 | 6,225.9 | −8.5% | |
+| Flagship heavy, 16 voices held | 1,786.1 | 1,642.2 | −8.1% | 1,637.4 (−8.3%) |
+| Drums kit, 16 pads busy | 399.4 | 412.8 | +3.4% | 399.8 (+0.1%) |
+| Song, 16 tracks | 2,049.3 | 2,073.6 | +1.2% | |
+| Song, 32 tracks + heavy FX | 6,549.7 | 6,666.9 | +1.8% | 6,541.9 (−0.1%) |
+| Tail: notes | 352.3 | 356.2 | +1.1% | |
+| Tail: ringing out | 241.3 | 240.8 | −0.2% | |
+| Tail: silence after | 79.9 | 48.1 | −39.8% | |
+| Tail project, no notes | 62.8 | 22.2 | −64.6% | 23.1 (−63.2%) |
+
+- **LTO:** on GCC 13 it adds 1–3% instructions (LTO alone on the base: song8 +1.9%, song32 +2.8%, Flagship heavy +0.4%), and interleaved wall-clock runs in the loaded container showed no difference beyond their ±5% noise. With Clang 18 (the Android compiler's family) it is neutral: song8 −0.4%, song32 −0.6%, Flagship 16 voices −0.6%, Drums +0.8% (code-only tree, LTO off against on). Instruction counts are not time (LTO's inlining trades calls for code); the Bench workflow's numbers on this branch decide whether it stays.
+- **Typical song:** the phase gains under 5% on a typical song (the code alone −0.3% on song8), so the owner is asked before it counts as done ([decisions](decisions.md), 2026-11-12). The gains are in Flagship's FM and fold warps and drive (8%) and in silence (40–65%).
+- **Left for the tolerance tests:** after a tail, the master DC blocker's decay keeps the master chain's compressor and limiter awake about 3 s longer than needed (their input is exactly 0 only once the decay reaches the last float). Settling the blocker at 0 below −240 dBFS made them sleep within a second but changed golden renders' bits (the snare goldens), so it is not in this phase.
+- **CI:** the Bench workflow's numbers for this branch go here when run (`bench.yml` on the pull request).
 
 ### 2. Floating point
 

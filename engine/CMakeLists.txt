@@ -103,6 +103,22 @@ if(CAW_SANITIZE AND NOT MSVC)
   add_compile_options(-fsanitize=address,undefined -fno-omit-frame-pointer -fno-sanitize-recover=undefined)
   add_link_options(-fsanitize=address,undefined)
 endif()
+# Link-time optimisation (speed phase 1, docs/engine-performance.md): every engine target in an optimised
+# configuration (Release, RelWithDebInfo: Android Gradle's release, MinSizeRel), when the toolchain supports it.
+# Debug and sanitizer builds stay without it. Set here, so it reaches only this directory's targets (the app's
+# Windows build includes the engine as a subdirectory); CAW_LTO=OFF turns it off.
+option(CAW_LTO "Link-time optimisation for optimised (non-Debug) builds" ON)
+if(CAW_LTO AND NOT CAW_SANITIZE)
+  include(CheckIPOSupported)
+  check_ipo_supported(RESULT CAW_IPO_SUPPORTED OUTPUT CAW_IPO_OUTPUT LANGUAGES C CXX)
+  if(CAW_IPO_SUPPORTED)
+    foreach(config RELEASE RELWITHDEBINFO MINSIZEREL)
+      set(CMAKE_INTERPROCEDURAL_OPTIMIZATION_${config} ON)
+    endforeach()
+  else()
+    message(STATUS "C.A.W: no link-time optimisation with this toolchain: ${CAW_IPO_OUTPUT}")
+  endif()
+endif()
 
 
 add_library(caw_core STATIC
@@ -199,6 +215,7 @@ target_include_directories(caw_cli PRIVATE src)
   target_sources(caw_tests PRIVATE tests/graph_layout_test.cpp)  # #120 layout rules: mono to stereo, downmix, dual mono
   target_sources(caw_tests PRIVATE tests/voice_bus_test.cpp)  # #127 the voice bus; #120 built-in declarations, C 3.0/3.1
   target_sources(caw_tests PRIVATE tests/audio_assets_test.cpp)  # assets, audio clips, the sampler, SFZ, input (WP-J)
+  target_sources(caw_tests PRIVATE tests/speed_free_wins_test.cpp)  # speed phase 1: Eco oversampling, silent work skipped, master sleep
   add_library(caw_test_component MODULE tests/native_component_fixture.cpp)
   target_link_libraries(caw_test_component PRIVATE CAW::SDK)
   target_compile_options(caw_test_component PRIVATE ${CAW_FLAGS})

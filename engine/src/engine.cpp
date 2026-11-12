@@ -3965,6 +3965,12 @@ void Engine::runRoutes(Slot& s, const float* preL, const float* preR, const floa
         // A level change glides at a fixed rate per sample (full scale in 5 ms), so it is the same at any block size.
         const double most = 1.0 / std::max(1.0, kGainSeconds * sr_);
         double g = from;
+        if (g == want && r.tapPre == r.pre && !(key && !r.tapPre) && !r.delay && peakAbs(xl, m) == 0.0f &&
+            peakAbs(xr, m) == 0.0f) {
+            // Settled and silent: every routed sample is a zero, and adding a zero leaves the destination's sum as
+            // it was (it starts at +0 and is never -0), so nothing is added.
+            continue;
+        }
         if (g == want && r.tapPre == r.pre && !(key && !r.tapPre)) {
             // Settled (the usual case): the loop below with nothing gliding, switching or faded, which vectorizes
             // (x g times 1.0 is x g: the same bits).
@@ -4057,7 +4063,20 @@ void Engine::runTrackNode(int slot, float* outL, float* outR, int m) noexcept {
     // Project modulation of the fader (#161): offsets in its travel (the app's taper) and in pan's, per frame.
     const float* volumeMod = modulation_->volume(slot);
     const float* panMod = modulation_->pan(slot);
-    if (!volumeAutomated && !panAutomated && s.gain == settled && !volumeMod && !panMod) {
+    const bool steady = !volumeAutomated && !panAutomated && s.gain == settled && !volumeMod && !panMod;
+    if (steady && allPositiveZero(insertL_, m) && allPositiveZero(insertR_, m) && !std::signbit(s.gain) &&
+        !std::signbit(s.gl) && !std::signbit(s.gr)) {
+        // Silence from the instrument and inserts (an asleep track): what the loop below gives, +0 everywhere
+        // (+0 times gains that are not negative), without its sums.
+        std::fill_n(outL, m, 0.0f);
+        std::fill_n(outR, m, 0.0f);
+        for (int i = 0; i < m;) {
+            const int run = std::min(m - i, kScopeSize - sp);
+            for (int k = 0; k < run; ++k) s.scope[sp + k].store(0.0f, std::memory_order_relaxed);
+            i += run;
+            sp = (sp + run) % kScopeSize;
+        }
+    } else if (steady) {
         // The usual case: volume settled, no lanes. The same sums as the loop below, without its per-sample
         // branches, and the scope written in at most two runs instead of a wrap test per sample.
         const double gain = s.gain, gl = s.gl, gr = s.gr;
@@ -4168,9 +4187,21 @@ void Engine::runBusNode(int slot, const float* inL, const float* inR, float* out
         std::copy_n(inR, m, insertR_);
     }
     const double pan = bitsToDouble(s.pan.load(std::memory_order_relaxed));
-    const double gainCoef = 1.0 - detExp(-1.0 / (kGainSeconds * sr_));
+    if (!(trackGainCoef_ >= 0.0)) trackGainCoef_ = 1.0 - detExp(-1.0 / (kGainSeconds * sr_));  // once per Engine
+    const double gainCoef = trackGainCoef_;
     const float* volumeMod = modulation_->volume(slot);  // project modulation (#161)
     const float* panMod = modulation_->pan(slot);
+    const bool laneFree = !s.automation || (s.automation->volume.empty() && s.automation->pan.empty());
+    if (laneFree && !volumeMod && !panMod && s.gain == (target > 0.0 ? target : 0.0)) {
+        // Settled, no lanes, no modulation (the usual case): the loop below with every frame's gains the same.
+        const double leftPan = pan > 0.0 ? 1.0 - pan : 1.0;
+        const double rightPan = pan < 0.0 ? 1.0 + pan : 1.0;
+        const double gain = s.gain;
+        for (int j = 0; j < m; ++j) {
+            s.outL[j] *= gain * leftPan;
+            s.outR[j] *= gain * rightPan;
+        }
+    } else
     for (int j = 0; j < m; ++j) {
         const double step = static_cast<double>(g_ + j) / stepLen_;
         const bool volumeAutomated = s.automation && !s.automation->volume.empty();
@@ -4295,12 +4326,14 @@ void Engine::runMasterNode(const float* inL, const float* inR, float* outL, floa
             const double sl = yl * fade + t, sr = yr * fade + t;
             const double env = std::max({std::fabs(yl), std::fabs(yr), std::fabs(sl), std::fabs(sr)});
             limEnv_ = env > limEnv_ ? env : env + (limEnv_ - env) * rel;
+            limEnv_ = limEnv_ < 1e-30 ? 0.0 : limEnv_;  // far below the ceiling (gain 1 either way): no subnormals
             const double gain = bypass ? 1.0 : (limEnv_ > kLimitCeiling ? kLimitCeiling / limEnv_ : 1.0);
             ol = static_cast<float>(sl * gain);
             orr = static_cast<float>(sr * gain);
         } else {
             const double env = std::max(std::fabs(yl), std::fabs(yr));
             limEnv_ = env > limEnv_ ? env : env + (limEnv_ - env) * rel;
+            limEnv_ = limEnv_ < 1e-30 ? 0.0 : limEnv_;  // far below the ceiling (gain 1 either way): no subnormals
             const double gain = bypass ? 1.0 : (limEnv_ > kLimitCeiling ? kLimitCeiling / limEnv_ : 1.0);
             ol = static_cast<float>(yl * gain * fade);
             orr = static_cast<float>(yr * gain * fade);

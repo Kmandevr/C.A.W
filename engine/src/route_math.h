@@ -47,4 +47,11 @@ inline float peakAbs(const float* x, int n) noexcept {
     return std::bit_cast<float>(top);
 }
 
+// Every sample of x[0..n) is +0 (all bits clear): what a silent node's arithmetic gives exactly.
+inline bool allPositiveZero(const float* x, int n) noexcept {
+    uint32_t bits = 0;
+    for (int i = 0; i < n; ++i) bits |= std::bit_cast<uint32_t>(x[i]);
+    return bits == 0;
+}
+
 }  // namespace caw

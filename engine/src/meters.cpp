@@ -2,6 +2,7 @@
 #include "meters.h"
 
 #include <algorithm>
+#include <bit>
 #include <cmath>
 
 namespace caw {
@@ -59,7 +60,8 @@ void CorrelationMeter::clear() noexcept {
 
 void CorrelationMeter::process(const float* left, const float* right, int frames) noexcept {
     if (frames <= 0) return;
-    double ll = 0, rr = 0, lr = 0;
+    double ll = 0, rr = 0, lr = 0;  // a block of zeros sums to +0 each: the loop is skipped (the same state)
+    if (!(LoudnessMeter::allZero(left, frames) && LoudnessMeter::allZero(right, frames)))
     for (int i = 0; i < frames; ++i) {
         const double l = left[i], r = right[i];
         ll += l * l;
@@ -133,7 +135,25 @@ void LoudnessMeter::prepare(double sampleRate) noexcept {
     blocks_.store(0, std::memory_order_relaxed);
 }
 
+// The block holds only zeros (either sign): what the K-weighting and the true peak turn into zeros.
+bool LoudnessMeter::allZero(const float* x, int n) noexcept {
+    uint32_t bits = 0;
+    for (int i = 0; i < n; ++i) bits |= std::bit_cast<uint32_t>(x[i]) & 0x7fffffffu;
+    return bits == 0;
+}
+
+// The filters hold 0 and so does the true-peak history: silence in gives exactly 0 out of both.
+bool LoudnessMeter::atRest() const noexcept {
+    for (int c = 0; c < 2; ++c) {
+        if (shelf_[c].z1 != 0.0 || shelf_[c].z2 != 0.0 || high_[c].z1 != 0.0 || high_[c].z2 != 0.0) return false;
+        for (int k = 0; k < 12; ++k)
+            if (tpHistory_[c][k] != 0.0) return false;  // [k + 12] is the same sample
+    }
+    return true;
+}
+
 void LoudnessMeter::clearAudioState() noexcept {
+    settled_ = true;
     for (int c = 0; c < 2; ++c) {
         shelf_[c].z1 = shelf_[c].z2 = high_[c].z1 = high_[c].z2 = 0.0;
         for (double& v : tpHistory_[c]) v = 0.0;
@@ -244,6 +264,15 @@ void LoudnessMeter::process(const float* left, const float* right, int frames) n
     double tp[2] = {0.0, 0.0};  // this block's true peak per side
     for (int i = 0; i < frames;) {
         const int n = std::min(frames - i, subLeft_);
+        // Silence into a settled meter (filters at rest, the true-peak history all 0): every K-weighted sample and
+        // every true peak would be 0, so only the counts move (the same state as the loop below leaves).
+        if (settled_ && allZero(left + i, n) && allZero(right + i, n)) {
+            tpPos_ = (tpPos_ + n) % 12;
+            subLeft_ -= n;
+            i += n;
+            if (subLeft_ == 0) endSubBlock();
+            continue;
+        }
         double sum = 0.0;
         for (int j = i; j < i + n; ++j) {
             const double l = finite(left[j]), r = finite(right[j]);
@@ -259,6 +288,7 @@ void LoudnessMeter::process(const float* left, const float* right, int frames) n
                 if (std::fabs(f->z2) < 1e-30) f->z2 = 0.0;
             }
         }
+        settled_ = atRest();
         subSum_ = finite(subSum_ + sum);
         subLeft_ -= n;
         i += n;
