@@ -32,8 +32,17 @@ using namespace caw;
 namespace {
 
 // A fresh folder; its UTF-8 text (generic_string() would be the ANSI code page on Windows).
+// This process's own parent folder, removed when the tests end, so concurrent runs (CI shards, several checkouts)
+// never share or delete each other's files.
+struct TempRoot {
+    std::filesystem::path path = std::filesystem::temp_directory_path() /
+        ("caw_wpj_" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    ~TempRoot() { std::error_code ec; std::filesystem::remove_all(path, ec); }
+};
+
 std::string tempDir(const std::string& name) {
-    const auto d = std::filesystem::temp_directory_path() / utf8Path("caw_wpj_" + name);
+    static TempRoot root;
+    const auto d = root.path / utf8Path(name);
     std::filesystem::remove_all(d);
     std::filesystem::create_directories(d);
     return pathText(d);
