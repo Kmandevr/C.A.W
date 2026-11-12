@@ -1,6 +1,6 @@
 // The Android host: thermal and battery-saver signals for the resource adapter, the C++ compiler channel, MIDI
 // devices and the Bluetooth MIDI scan, saving exports, the music video's encoder, haptics, the display's refresh rate
-// (DisplayRate.kt), the microphone permission and the audio route (AudioRoute.kt).
+// (DisplayRate.kt), the microphone permission, the audio route (AudioRoute.kt) and background playback (PlaybackService.kt).
 package com.kmandevr.caw
 
 import android.content.BroadcastReceiver
@@ -22,6 +22,7 @@ class MainActivity : FlutterActivity() {
     private var bluetoothMidi: BluetoothMidi? = null
     private var pendingFolder: FolderSave? = null
     private var micPermission: MicPermission? = null
+    private var playback: PlaybackChannel? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -112,6 +113,12 @@ class MainActivity : FlutterActivity() {
         val mic = MicPermission(this)
         micPermission = mic
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, PERMISSIONS_METHOD_CHANNEL).setMethodCallHandler(mic)
+
+        // Background playback: the foreground service and its notification's buttons (PlaybackService.kt).
+        val playbackChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, PLAYBACK_METHOD_CHANNEL)
+        val pb = PlaybackChannel(this, playbackChannel)
+        playback = pb
+        playbackChannel.setMethodCallHandler(pb)
 
         // MIDI devices (MidiInput.kt) and the in-app Bluetooth LE MIDI scan (BluetoothMidi.kt).
         val midi = MidiInput(applicationContext)
@@ -225,6 +232,7 @@ class MainActivity : FlutterActivity() {
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         if (bluetoothMidi?.onPermissionResult(requestCode) == true) return
         if (micPermission?.onPermissionResult(requestCode) == true) return
+        if (playback?.onPermissionResult(requestCode) == true) return
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
     }
 
@@ -262,6 +270,8 @@ class MainActivity : FlutterActivity() {
         stopMonitoring()
         bluetoothMidi?.close()
         bluetoothMidi = null
+        playback?.close(isFinishing)
+        playback = null
         super.onDestroy()
     }
 
@@ -277,6 +287,7 @@ class MainActivity : FlutterActivity() {
         private const val HAPTICS_METHOD_CHANNEL = "caw/haptics"
         private const val DISPLAY_METHOD_CHANNEL = "caw/display"
         private const val PERMISSIONS_METHOD_CHANNEL = "caw/permissions"
+        private const val PLAYBACK_METHOD_CHANNEL = "caw/playback_service"
         private const val AUDIO_ROUTE_METHOD_CHANNEL = "caw/audio_route"
         private const val AUDIO_ROUTE_EVENT_CHANNEL = "caw/audio_route/events"
         private const val SAVE_REQUEST = 4711

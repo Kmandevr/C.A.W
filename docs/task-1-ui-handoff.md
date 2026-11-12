@@ -33,6 +33,7 @@ The owner's UI redesign (2026-11-04) is specified in the [UI plan](ui-plan.md), 
 - Correlation, phase and loudness meters: there are only peak meters (dB) and scopes.
 - Sends, full sidechain routing, parallel mixer paths and master effect chains.
 - Audio import, audio clips and non-destructive audio editing.
+- Input health shows only as the *Microphone in use by another app* note in place of the input meters (`audio_input_ui.dart`); background playback has no in-app control beyond the Android notification.
 - Sample editing, mapping, multisample authoring and SFZ export.
 - USB/Bluetooth MIDI device discovery/connection, controller mapping and live Engine voice routing.
 - Stems export, persistent export queue and richer batch delivery.

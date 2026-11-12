@@ -65,6 +65,7 @@ This note records the current implementation gaps in C.A.W.'s music-production w
 - **[Incomplete]** Bluetooth MIDI pairing inside the app, controller learn/mapping, external clock/sync and control-surface support.
 - **[Implemented, not yet run on a device]** Output and input latency compensation (Bluetooth, USB, HDMI): MIDI takes at the step that was heard when the note was played, audio takes by output + input latency, the playhead and meters at the heard time, the playhead drawn between reads from the compensated read ([app](app.md)).
 - **[Incomplete]** Take lanes and comping beyond a loop's stacked takes.
+- **[Implemented, not yet run on a device]** Playing and recording behind other apps on Android (a `mediaPlayback` foreground service with a Play/Pause and Stop notification), and a microphone that opens only while a track is armed or monitors, a recording runs or the ping plays ([app](app.md)).
 
 ## Implementation constraints
 

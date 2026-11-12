@@ -8,6 +8,7 @@ import 'package:flutter/services.dart';
 import 'model/app_state.dart';
 import 'model/audio_record.dart';
 import 'model/automation_writer.dart';
+import 'model/background_playback.dart';
 import 'model/live_midi.dart';
 import 'model/problem_log.dart';
 import 'model/settings.dart';
@@ -15,6 +16,7 @@ import 'platform/desktop_window.dart';
 import 'platform/display_rate.dart';
 import 'platform/haptics_device.dart';
 import 'platform/mic_permission.dart';
+import 'platform/playback_service.dart';
 import 'platform/midi_input.dart';
 import 'ui/frame_rate.dart';
 import 'ui/glass.dart';
@@ -55,6 +57,10 @@ Future<void> main() async {
   AudioRecorder.current = AudioRecorder(state, permission: platformMicPermission())
     ..follow(midi, () => midi.recording)
     ..load();
+
+  // Background playback: Android's foreground service while playing or recording, its notification driving the
+  // transport (background_playback.dart).
+  BackgroundPlayback(state, platformPlaybackService());
 
   runApp(CawApp(state: state));
   state.init();

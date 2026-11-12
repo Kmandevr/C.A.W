@@ -6,6 +6,15 @@
     <!-- Audio input (recording, monitoring, the latency ping): asked at run time only when the user turns input on or
          arms a track (MicPermission.kt). -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <!-- Background playback (PlaybackService.kt): a foreground service of type mediaPlayback while playing or recording,
+         plus microphone while recording (Android 14+ needs each type's permission; microphone also needs RECORD_AUDIO
+         granted and the app in front when it starts). POST_NOTIFICATIONS (Android 13+) shows its notification in the
+         drawer; the service runs without it (developer.android.com, foreground service types and notification
+         permission, read 2026-11-12). -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!-- Bluetooth MIDI (BluetoothMidi.kt), asked for only when the user starts a scan in Settings › MIDI. Android 12+:
          the Nearby devices permissions, and the scan never derives location. Android 11 and earlier: the legacy
          permissions and location, which a scan needed there (developer.android.com Bluetooth permissions, 2026-11-11). -->
@@ -46,6 +55,11 @@
             android:name=".CompilerService"
             android:process=":compiler"
             android:exported="false" />
+        <!-- Background playback: not exported; its notification's buttons are explicit, immutable PendingIntents. -->
+        <service
+            android:name=".PlaybackService"
+            android:exported="false"
+            android:foregroundServiceType="mediaPlayback|microphone" />
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data
