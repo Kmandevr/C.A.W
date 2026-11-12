@@ -191,7 +191,9 @@ public:
     }
 
     // process() and process2() with tanhApprox: the same curve within 5e-9 x the level-matching gain, about half
-    // the cost (two at a time as a two-wide vector on GCC and Clang).
+    // the cost (two at a time as a two-wide vector on GCC and Clang). Where the compiler fuses multiply-adds
+    // (Arm64, x86 with FMA) a vector lane and processApprox() can differ by a few ulps (about -300 dBFS), so a
+    // different block split may change the lowest bits: the same sound, not the same bits.
     double processApprox(double x) const noexcept { return tanhApprox(finiteOr0(x) * amount_) * gain_; }
     void process2Approx(const double* in, double* out) const noexcept {
 #if defined(__GNUC__)
