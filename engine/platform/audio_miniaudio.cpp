@@ -213,6 +213,7 @@ void stopLocked(CawEngine* e) {
     if (!e || !e->audio) return;
     auto* a = static_cast<Audio*>(e->audio);
     ma_device_uninit(&a->device);  // the callback has stopped once this returns
+    e->engine->stopLiveMixPool();   // so the workers can go
     ma_context_uninit(&a->context);
     e->engine->liveAudio().setDeviceChannels(0);
     delete a;
@@ -288,10 +289,16 @@ ma_result openDevice(Audio* a, const CawEngine* e, const ma_device_id* id, ma_ui
         e->engine->liveAudio().setDeviceChannels(0);
     }
     e->engine->resetTestTone();  // a request made while closed is stale (the callback is not running yet)
+    try {
+        e->engine->startLiveMixPool();  // the mix graph's workers (speed phase 5c), before the callback runs
+    } catch (...) {
+        // No pool: the graph runs on the callback thread alone.
+    }
     r = ma_device_start(&a->device);
     if (r != MA_SUCCESS) {
         why = std::string("can't start the audio device: ") + ma_result_description(r);
         ma_device_uninit(&a->device);
+        e->engine->stopLiveMixPool();
         return r;
     }
     return MA_SUCCESS;

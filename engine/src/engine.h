@@ -24,6 +24,8 @@
 
 namespace caw {
 
+class MixPool;  // mix_pool.h
+
 constexpr int kBlock = 64;  // frames the mixer runs at most at once (a chunk); component chains run in these blocks
 constexpr int kScopeSize = 1024;
 // Layer slots a new Engine starts with. It grows past them (setProject) up to maxLayers(), which
@@ -216,6 +218,40 @@ public:
     // Tests only: skip the master DC blocker and limiter so layer output can be checked exactly.
     void setMasterBypass(bool on) { bypass_.store(on, std::memory_order_relaxed); }
 
+    // The mix graph's worker pool (speed phase 5c, mix_pool.h): independent nodes of a graph level (tracks, folder
+    // buses) run on several threads, the output the same bits as on one. Control thread, only while no process()
+    // runs (before a device starts, after it stops, or with no device): start `workers` threads (at most
+    // MixPool::kMaxWorkers; 0 makes a pool that runs everything on the callback thread), or stop them. False if the
+    // threads could not be made (then it runs serially).
+    bool startMixPool(uint32_t workers);
+    void stopMixPool() noexcept;
+    uint32_t mixWorkers() const noexcept;
+    // When the pool is used: Auto (the default) once the callbacks' measured load (reportLoad) has stayed above
+    // kMixParallelLoad for kMixParallelSeconds, back to one thread once it stays below kMixSerialLoad for
+    // kMixSerialSeconds; Always; or Never. Any thread; read at each callback.
+    enum class MixParallel : int { Auto = 0, Always = 1, Never = 2 };
+    void setMixParallel(MixParallel mode) noexcept { mixMode_.store(static_cast<int>(mode), std::memory_order_relaxed); }
+    static constexpr double kMixParallelLoad = 0.4, kMixParallelSeconds = 0.5;
+    static constexpr double kMixSerialLoad = 0.08, kMixSerialSeconds = 5.0;
+    // The platform, around a live device (before it starts, after it stops): the pool with
+    // MixPool::defaultWorkers(), Auto, and the count of live devices offline renders check.
+    void startLiveMixPool();
+    void stopLiveMixPool() noexcept;
+    static int liveDevices() noexcept;
+    // An offline render's Engine, before it renders: the pool with MixPool::defaultWorkers(), Always, unless a live
+    // device runs (then it stays on one thread, leaving the cores to the live audio).
+    void useOfflineMixPool();
+    // Tests only, before Engines are made: every Engine made from now on starts a pool of `workers` and uses it
+    // Always (0: Never; -1, the default: no override). Offline renders then keep that.
+    static void setMixThreadsForTest(int workers) noexcept;
+    // Tests only, between process() calls: whether the last callback ran the graph with the pool.
+    bool mixParallelForTest() const noexcept { return mixParallel_; }
+    MixPool* mixPoolForTest() noexcept { return pool_.get(); }
+    // Tests only, between process() calls: whether the layer's node ran in the serial lane at the last parallel
+    // callback, and the levels the last chunk handed to the pool.
+    bool mixLayerSerialForTest(const std::string& layerId) const;
+    uint32_t mixParallelLevelsForTest() const noexcept;
+
     // Audio thread: no allocation, locks or I/O.
     void process(float* left, float* right, int frames) noexcept;
     // One callback's share of its time budget used, for [frames] frames at the engine's rate. The average, the time
@@ -380,6 +416,12 @@ private:
     int processCount_ = 0;
     int64_t chunkId_ = 0;
     bool routingDirty_ = true;  // re-derive graph routing before the next chunk
+    // Speed phase 5c (audio thread): this callback runs the graph with the pool; Auto's choice and its timers.
+    bool mixParallel_ = false;
+    bool mixAuto_ = false;
+    double mixOverSeconds_ = 0, mixUnderSeconds_ = 0;
+    bool wantsMixPool() const noexcept;
+    bool slotForeign(const Slot& s) noexcept;  // a node in the serial lane: it holds third-party native code
     // Retirements waiting for room in the queue (pendingMax_ entries: two per slot at maxLayers() and
     // some slack; owned, so a throwing constructor cannot leak it).
     std::unique_ptr<Retired[]> pending_;
@@ -497,6 +539,11 @@ private:
     // Latency compensation for every route (each track's and bus's main output and each send, so all arrive in
     // time where they meet), sending changed delays and route tables.
     bool updateCompensation(std::map<std::string, std::vector<std::string>>& warnings);
+
+    // The mix pool (speed phase 5c). Last, so its threads are joined before anything they could touch goes.
+    std::atomic<int> mixMode_{0};
+    bool liveDevice_ = false;  // control thread: startLiveMixPool counted this Engine in liveDevices()
+    std::unique_ptr<MixPool> pool_;
 };
 
 }  // namespace caw

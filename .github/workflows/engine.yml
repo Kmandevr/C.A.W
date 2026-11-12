@@ -1,4 +1,4 @@
-# Engine tests on every push and pull request: Linux x64 and Arm64, Windows, and a sanitizer build. The same reference renders, within their tolerances, everywhere.
+# Engine tests on every push and pull request: Linux x64 and Arm64, Windows, a sanitizer build and a ThreadSanitizer run of the mix pool. The same reference renders, within their tolerances, everywhere; on one thread and on the mix pool, the same bits.
 name: Engine
 on:
   # Main and pull requests; a branch's own pushes run only through its pull request, so nothing runs twice
@@ -65,3 +65,29 @@ jobs:
         run: cmake --build engine/build --config Release --parallel
       - name: Test
         run: ctest --test-dir engine/build --build-config Release --output-on-failure --parallel 4
+
+  # The mix pool (speed phase 5c) under ThreadSanitizer: its tests and a long stress run (random graphs with sends,
+  # keys and buses, the project changed while it plays, injected worker delays), each against one thread's output.
+  tsan:
+    name: Tests (Linux ThreadSanitizer, mix pool)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: Allow ThreadSanitizer's memory layout
+        # [Assumption] TSAN maps its shadow memory at fixed addresses, and Clang 18's can stop with "unexpected memory
+        # mapping" on a kernel with more mmap randomisation than it expects (32 bits); 28 bits keeps it clear.
+        run: sudo sysctl vm.mmap_rnd_bits=28
+      - name: Configure (Clang, CAW_TSAN)
+        run: |
+          clang++ --version | head -1
+          cmake -S engine -B engine/build-tsan -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCAW_TSAN=ON \
+            -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
+      - name: Build
+        run: cmake --build engine/build-tsan --target caw_tests --parallel
+      - name: Mix pool tests and stress run
+        env:
+          CAW_POOL_STRESS_CHUNKS: "10000"
+          TSAN_OPTIONS: "halt_on_error=1 second_deadlock_stack=1"
+        run: |
+          export CAW_TEST_COMPONENT_PATH="$PWD/engine/build-tsan/caw_test_component.so"
+          engine/build-tsan/caw_tests mix_pool

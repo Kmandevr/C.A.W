@@ -389,6 +389,9 @@ void GraphExecutor::reset() noexcept {
     routeStaging_.clear();
     directStaging_.clear();
     levelStart_.clear();
+    nodeSerial_.clear();
+    levelTasks_.clear();
+    parallelLevels_ = 0;
     nodeLevel_.clear();
     fanStart_.clear();
     fanOut_.clear();
@@ -795,7 +798,7 @@ GraphError GraphExecutor::reserveRouting(uint32_t maxSourcesPerInput, const Grap
         (routePlainInputs && !addEstimatedBytes(extra, ports_.size(), sizeof(uint32_t))) ||
         !addEstimatedBytes(fan, slots, 1) || (routePlainInputs && !addEstimatedBytes(fan, ports_.size(), 1)) ||
         !addEstimatedBytes(fan, maxDependencies, 1) || !addEstimatedBytes(extra, fan, sizeof(uint32_t)) ||
-        !addEstimatedBytes(extra, nodeCount, 3u * sizeof(uint32_t)) ||
+        !addEstimatedBytes(extra, nodeCount, 4u * sizeof(uint32_t) + 1u) ||
         !addEstimatedBytes(extra, 2, sizeof(uint32_t))) return GraphError::SizeOverflow;
     if (preparedBytes_ > budget.maxWorkingBytes || extra > budget.maxWorkingBytes - preparedBytes_)
         return GraphError::ResourceBudgetExceeded;
@@ -808,6 +811,8 @@ GraphError GraphExecutor::reserveRouting(uint32_t maxSourcesPerInput, const Grap
         routePosition_.assign(nodeCount, 0);
         if (routePlainInputs) directStaging_.assign(ports_.size(), UINT32_MAX);
         levelStart_.assign(nodeCount + 1, 0);
+        nodeSerial_.assign(nodeCount, 0);
+        levelTasks_.assign(nodeCount, 0);
         nodeLevel_.assign(nodeCount, 0);
         fanStart_.assign(nodeCount + 1, 0);
         fanOut_.assign(fan, 0);
@@ -925,7 +930,8 @@ bool GraphExecutor::setRouting(const GraphConnection* edges, uint32_t edgeCount,
                                          : outputTable_[ports_[source].table + (ports_[source].channels == 1 ? 0 : c)];
         }
     runCount_ = orderCount;
-    if (!levelOrder_) {  // tests only: the order as given, one level
+    levelsSorted_ = levelOrder_;
+    if (!levelOrder_) {  // tests only: the order as given, one level (its nodes are not independent: never parallel)
         std::copy_n(order, orderCount, order_.begin());
         levelStart_[0] = 0;
         levelStart_[1] = orderCount;
@@ -1062,17 +1068,50 @@ bool GraphExecutor::processValidated(const ConstChannelBufferView& input, const 
 
     // Level by level (speed phase 5b; a statically connected graph has none and runs its compiled order). The nodes
     // of one level read only earlier levels, so their order within it doesn't change a bit.
+    parallelLevels_ = 0;
     if (levelCount_ == 0) {
         for (uint32_t k = 0; k < runCount_; ++k)
             if (!runNode(order_[k], frames, events)) { fail(order_[k], output, frames); return false; }
-    } else {
+    } else if (!runner_ || !levelsSorted_) {
         for (uint32_t l = 0; l < levelCount_; ++l)
             for (uint32_t k = levelStart_[l]; k < levelStart_[l + 1]; ++k)
                 if (!runNode(order_[k], frames, events)) { fail(order_[k], output, frames); return false; }
+    } else {
+        // Speed phase 5c: a level's parallel nodes go to the runner as one run, its serial ones run here first.
+        for (uint32_t l = 0; l < levelCount_; ++l) {
+            uint32_t tasks = 0, failed = UINT32_MAX;
+            const uint32_t first = levelStart_[l], end = levelStart_[l + 1];
+            if (end - first >= 2)
+                for (uint32_t k = first; k < end; ++k)
+                    if (parallelNode(order_[k])) levelTasks_[tasks++] = k;
+            if (tasks < 2) tasks = 0;
+            for (uint32_t k = first; k < end; ++k) {
+                if (tasks != 0 && parallelNode(order_[k])) continue;
+                if (!runNode(order_[k], frames, events) && failed == UINT32_MAX) failed = k;
+            }
+            if (tasks != 0) {
+                taskFrames_ = frames;
+                taskEvents_ = &events;
+                taskFailed_.store(UINT32_MAX, std::memory_order_relaxed);
+                runner_->run(&GraphExecutor::runLevelTask, this, tasks);
+                failed = std::min(failed, taskFailed_.load(std::memory_order_relaxed));
+                ++parallelLevels_;
+            }
+            if (failed != UINT32_MAX) { fail(order_[failed], output, frames); return false; }
+        }
     }
     float* const* result = outputTable_.data() + outputBase_[outputNode_];
     for (uint32_t c = 0; c < outputChannels_; ++c) std::copy_n(result[c], frames, output.channels[c]);
     return true;
+}
+
+void GraphExecutor::runLevelTask(void* executor, uint32_t index) noexcept {
+    GraphExecutor& g = *static_cast<GraphExecutor*>(executor);
+    const uint32_t k = g.levelTasks_[index];
+    if (g.runNode(g.order_[k], g.taskFrames_, *g.taskEvents_)) return;
+    uint32_t seen = g.taskFailed_.load(std::memory_order_relaxed);
+    while (k < seen && !g.taskFailed_.compare_exchange_weak(seen, k, std::memory_order_relaxed)) {
+    }
 }
 
 bool GraphExecutor::runNode(uint32_t node, uint32_t frames, const EventInput& events) noexcept {

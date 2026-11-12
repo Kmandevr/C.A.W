@@ -18,6 +18,7 @@
 #include "component_chain.h"
 #include "engine.h"
 #include "graph.h"
+#include "mix_pool.h"
 #include "project.h"
 #include "render.h"
 #include "wav.h"
@@ -762,6 +763,8 @@ void graphPlanarBench(double secs) {
 
 // ---------- The suite (`caw_bench SECONDS 500 [options]`): fixed scenarios at a stated callback, repeated, for CI ----------
 // Options: --frames N (callback size, default 256), --runs N (default 3), --only ID[,ID] (scenario ids), --label TEXT,
+// --threads N (the mix pool's workers, speed phase 5c: 0, the default, runs the mix graph on one thread; N > 0 runs
+// every level of two or more nodes on the pool, whatever the load, as Engine::MixParallel::Always),
 // --json PATH and --md PATH (machine-readable results and a markdown table). Each run plays every scenario in turn
 // (a fresh Engine each: set up, 0.25 s stopped to apply the project, then Play); a scenario's result is the median
 // of its runs' means and p99s and the largest worst case of any run. docs/engine-performance.md has the numbers.
@@ -983,7 +986,7 @@ const char* targetName() {
 }
 
 int runSuite(double secs, int argc, char** argv) {
-    int frames = 256, runs = 3;
+    int frames = 256, runs = 3, threads = 0;
     std::string only, label = targetName(), jsonPath, mdPath;
     for (int a = 3; a < argc; ++a) {
         const std::string k = argv[a];
@@ -991,6 +994,7 @@ int runSuite(double secs, int argc, char** argv) {
         if (!v) { std::fprintf(stderr, "%s needs a value\n", k.c_str()); return 2; }
         if (k == "--frames") frames = std::atoi(v);
         else if (k == "--runs") runs = std::atoi(v);
+        else if (k == "--threads") threads = std::atoi(v);
         else if (k == "--only") only = std::string(",") + v + ",";
         else if (k == "--label") label = v;
         else if (k == "--json") jsonPath = v;
@@ -998,7 +1002,11 @@ int runSuite(double secs, int argc, char** argv) {
         else { std::fprintf(stderr, "unknown option %s\n", k.c_str()); return 2; }
         ++a;
     }
-    if (frames < 16 || frames > 8192 || runs < 1 || runs > 50 || secs <= 0) { std::fprintf(stderr, "bad --frames, --runs or SECONDS\n"); return 2; }
+    if (frames < 16 || frames > 8192 || runs < 1 || runs > 50 || secs <= 0 || threads < 0 ||
+        threads > static_cast<int>(MixPool::kMaxWorkers)) {
+        std::fprintf(stderr, "bad --frames, --runs, --threads (0..%u) or SECONDS\n", MixPool::kMaxWorkers);
+        return 2;
+    }
     const double budgetUs = 1e6 * frames / kRate;
     const std::string dir = (std::filesystem::temp_directory_path() / "caw_bench_suite").string();
     std::filesystem::create_directories(dir);
@@ -1012,13 +1020,22 @@ int runSuite(double secs, int argc, char** argv) {
         rows.push_back({id, name, {}, -1});
         return rows.back();
     };
-    std::printf("caw_bench suite: %s, callback %d frames at %d Hz (budget %.1f us), %.0f s per scenario, %d runs\n",
-                label.c_str(), frames, kRate, budgetUs, secs, runs);
+    std::printf("caw_bench suite: %s, callback %d frames at %d Hz (budget %.1f us), %.0f s per scenario, %d runs, "
+                "%d mix workers\n", label.c_str(), frames, kRate, budgetUs, secs, runs, threads);
     std::vector<float> l(static_cast<size_t>(frames)), r(static_cast<size_t>(frames));
     for (int run = 0; run < runs; ++run) {
         for (const SuiteScenario& sc : all) {
             if (!only.empty() && only.find(std::string(",") + sc.id + ",") == std::string::npos) continue;
             Engine e(kRate);
+            if (threads > 0) {
+                if (!e.startMixPool(static_cast<uint32_t>(threads))) {
+                    std::fprintf(stderr, "could not start %d mix workers\n", threads);
+                    return 3;
+                }
+                e.setMixParallel(Engine::MixParallel::Always);
+            } else {
+                e.setMixParallel(Engine::MixParallel::Never);
+            }
             const std::string warn = e.setProject(sc.make(dir));
             if (warn.find("\"ok\":true") == std::string::npos) {
                 std::fprintf(stderr, "%s: setProject: %s\n", sc.id, warn.c_str());
@@ -1079,7 +1096,8 @@ int runSuite(double secs, int argc, char** argv) {
         std::string j = "{\"tool\":\"caw_bench\",\"format\":1,\"label\":\"" + jsonEscape(label) + "\",\"target\":\"" + targetName() +
                         "\",\"compiler\":\"" + jsonEscape(compilerName()) + "\",\"rate\":" + std::to_string(kRate) +
                         ",\"frames\":" + std::to_string(frames) + ",\"budget_us\":" + std::to_string(budgetUs) +
-                        ",\"runs\":" + std::to_string(runs) + ",\"seconds\":" + std::to_string(secs) + ",\"scenarios\":[";
+                        ",\"runs\":" + std::to_string(runs) + ",\"seconds\":" + std::to_string(secs) +
+                        ",\"threads\":" + std::to_string(threads) + ",\"scenarios\":[";
         for (size_t k = 0; k < out.size(); ++k) {
             const Out& o = out[k];
             j += std::string(k ? "," : "") + "{\"id\":\"" + o.row->id + "\",\"name\":\"" + jsonEscape(o.row->name) +
@@ -1101,8 +1119,8 @@ int runSuite(double secs, int argc, char** argv) {
     if (!mdPath.empty()) {
         std::ofstream md(mdPath);
         char line[512];
-        std::snprintf(line, sizeof line, "### %s: %d frames at %d Hz (budget %.0f us), %.0f s x %d runs\n\n", label.c_str(),
-                      frames, kRate, budgetUs, secs, runs);
+        std::snprintf(line, sizeof line, "### %s: %d frames at %d Hz (budget %.0f us), %.0f s x %d runs, %d mix workers\n\n",
+                      label.c_str(), frames, kRate, budgetUs, secs, runs, threads);
         md << line << "| Scenario | Mean us | p99 us | Worst us | Mean load | Worst load | Worst at |\n|---|---:|---:|---:|---:|---:|---:|\n";
         for (const Out& o : out) {
             std::snprintf(line, sizeof line, "| %s | %.1f | %.1f | %.1f | %.2f%% | %.1f%% | %.2f s |\n", o.row->name.c_str(), o.mean,

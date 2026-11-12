@@ -141,6 +141,10 @@ private:
     struct Retire;
     std::unique_ptr<Retire> retire_;
     ModulationPlan* ctl_ = nullptr;          // control thread: the newest plan sent (alive until a newer replaces it)
+    // The values and samples a modulated chain writes while it runs, one block per MixPool lane (speed phase 5c).
+    // Made with the first plan and kept, so a plan never outlives them.
+    std::vector<ParameterValue> laneValues_;
+    std::vector<double> laneSamples_;
     // Audio thread: the grid's clock (frames since the last Play) and the Play it counts from.
     int64_t clockNext_ = 0;
     uint64_t epoch_ = 0;

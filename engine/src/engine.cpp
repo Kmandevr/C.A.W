@@ -7,6 +7,7 @@
 #include "builtin_components.h"
 #include "graph.h"
 #include "meters.h"
+#include "mix_pool.h"
 #include "route_math.h"
 #include "caw/library/stereo.hpp"
 #include "hardware.h"
@@ -408,6 +409,9 @@ double automationValue(const std::vector<AutomationPointSpec>& points, double at
 }
 
 
+std::atomic<int> gLiveDevices{0};     // Engines with a live device (startLiveMixPool)
+std::atomic<int> gTestMixThreads{-1};  // tests: every new Engine's pool (setMixThreadsForTest)
+
 void storeMax(std::atomic<float>& a, float v) {
     float cur = a.load(std::memory_order_relaxed);
     while (v > cur && !a.compare_exchange_weak(cur, v, std::memory_order_relaxed)) {
@@ -592,6 +596,73 @@ struct Engine::SlotTable {
 };
 
 uint32_t Engine::mixGraphNodesRun() const noexcept { return mixGraph_->executor.runCount(); }
+
+bool Engine::mixLayerSerialForTest(const std::string& layerId) const {
+    const auto it = layers_.find(layerId);
+    if (it == layers_.end() || it->second.slot < 0) return false;
+    return mixGraph_->executor.nodeSerial(mixGraph_->trackNode(it->second.slot)) ||
+           mixGraph_->executor.nodeSerial(mixGraph_->busNode(it->second.slot));
+}
+
+uint32_t Engine::mixParallelLevelsForTest() const noexcept { return mixGraph_->executor.parallelLevelsRun(); }
+
+bool Engine::startMixPool(uint32_t workers) {
+    if (!pool_) pool_ = std::make_unique<MixPool>();
+    return pool_->start(workers);
+}
+
+void Engine::stopMixPool() noexcept { pool_.reset(); }
+
+uint32_t Engine::mixWorkers() const noexcept { return pool_ ? pool_->workers() : 0; }
+
+void Engine::startLiveMixPool() {
+    if (!liveDevice_) {
+        liveDevice_ = true;
+        gLiveDevices.fetch_add(1, std::memory_order_relaxed);
+    }
+    if (gTestMixThreads.load(std::memory_order_relaxed) >= 0) return;  // a test's pool stays
+    startMixPool(MixPool::defaultWorkers());
+    setMixParallel(MixParallel::Auto);
+}
+
+void Engine::stopLiveMixPool() noexcept {
+    stopMixPool();
+    if (liveDevice_) {
+        liveDevice_ = false;
+        gLiveDevices.fetch_sub(1, std::memory_order_relaxed);
+    }
+}
+
+int Engine::liveDevices() noexcept { return gLiveDevices.load(std::memory_order_relaxed); }
+
+void Engine::useOfflineMixPool() {
+    if (gTestMixThreads.load(std::memory_order_relaxed) >= 0 || liveDevices() != 0) return;
+    startMixPool(MixPool::defaultWorkers());
+    setMixParallel(MixParallel::Always);
+}
+
+void Engine::setMixThreadsForTest(int workers) noexcept {
+    gTestMixThreads.store(std::min(workers, static_cast<int>(MixPool::kMaxWorkers)), std::memory_order_relaxed);
+}
+
+// Audio thread, once per callback: whether this callback's chunks run the graph with the pool. Never while the
+// bench profiles components (ChainProfile's slots are shared).
+bool Engine::wantsMixPool() const noexcept {
+    if (!pool_ || ChainProfile::current()) return false;
+    switch (static_cast<MixParallel>(mixMode_.load(std::memory_order_relaxed))) {
+        case MixParallel::Always: return true;
+        case MixParallel::Never: return false;
+        case MixParallel::Auto: break;
+    }
+    return mixAuto_;
+}
+
+bool Engine::slotForeign(const Slot& s) noexcept {
+    for (const ComponentChain* c : {s.instrument, s.instrumentFading, s.inserts, s.insertsFading})
+        if (c && c->foreign()) return true;
+    const NoteFxHost* fx = noteFx_->forSlot(s.index);
+    return fx && fx->foreign();
+}
 void Engine::setMixLevelsForTest(bool on) noexcept {
     mixGraph_->executor.setLevelOrderForTest(on);
     routingDirty_ = true;
@@ -730,9 +801,16 @@ Engine::Engine(double sampleRate, EngineResourceBudget resourceBudget)
     updateTiming();
     ctlLoopLen_ = loopLen_;
     loopLenFlag_.store(loopLen_);
+    if (const int n = gTestMixThreads.load(std::memory_order_relaxed); n > 0) {
+        startMixPool(static_cast<uint32_t>(n));
+        setMixParallel(MixParallel::Always);
+    } else if (n == 0) {
+        setMixParallel(MixParallel::Never);
+    }
 }
 
 Engine::~Engine() {
+    stopLiveMixPool();  // the workers first: they could run nodes that read what is freed below
     // No audio thread runs any more: free everything directly.
     Cmd c;
     while (cmds_->pop(c)) {
@@ -3783,6 +3861,20 @@ int Engine::processChunk(float* l, float* r, int maxFrames) noexcept {
         updateRouting();
     }
     assignRetireBudgets();  // what each node may hand back this chunk, fixed before any of them runs
+    // Speed phase 5c: the pool runs each level's nodes at once, but a node holding third-party native code stays on
+    // this thread (the serial lane: such code may not be safe to run twice at once; docs/decisions.md).
+    if (mixParallel_) {
+        MixGraph& g = *mixGraph_;
+        for (int k = 0; k < liveCount_; ++k) {
+            const int i = live_[k];
+            const bool serial = slotForeign(slotAt(i));
+            g.executor.setNodeSerial(g.trackNode(i), serial);
+            g.executor.setNodeSerial(g.busNode(i), serial);
+        }
+        g.executor.setParallelRunner(pool_.get());
+    } else {
+        mixGraph_->executor.setParallelRunner(nullptr);
+    }
     float* outputs[2] = {l, r};
     const bool ran = mixGraph_->executor.process(ConstChannelBufferView{}, ChannelBufferView{outputs, 2, static_cast<uint32_t>(m)},
                                                  static_cast<uint32_t>(m));
@@ -4659,6 +4751,9 @@ void Engine::process(float* left, float* right, int frames) noexcept {
     updateSolo();
     applyCommands();
     updateSolo();
+    // The pool for this callback (speed phase 5c); idle workers sleep at once while nothing plays.
+    mixParallel_ = wantsMixPool();
+    if (pool_) pool_->park(!mixParallel_ || (!playing_ && !previewing_ && countInLeft_ == 0));
     takeDeviceMidi(frames);
     takeToneRequest();
     if (!playing_ && monitorWanted_.load(std::memory_order_relaxed)) wakeMonitors();
@@ -4753,6 +4848,19 @@ void Engine::reportLoad(double load, int frames) noexcept {
     }
     loadAvg_ = loadKeep_ * loadAvg_ + (1.0 - loadKeep_) * (std::isfinite(load) ? load : 0.0);
     cpu_.store(static_cast<float>(loadAvg_), std::memory_order_relaxed);
+    // The pool's Auto mode (speed phase 5c), with hysteresis: on after a while above kMixParallelLoad, off only
+    // after longer below kMixSerialLoad (the load measured while parallel is lower: it must not flip straight back).
+    if (loadAvg_ > kMixParallelLoad) {
+        mixUnderSeconds_ = 0;
+        mixOverSeconds_ += dt;
+        if (mixOverSeconds_ >= kMixParallelSeconds - kSlack) mixAuto_ = true;
+    } else if (loadAvg_ < kMixSerialLoad) {
+        mixOverSeconds_ = 0;
+        mixUnderSeconds_ += dt;
+        if (mixUnderSeconds_ >= kMixSerialSeconds - kSlack) mixAuto_ = false;
+    } else {
+        mixOverSeconds_ = mixUnderSeconds_ = 0;
+    }
     coolSeconds_ = std::max(0.0, coolSeconds_ - dt);
     if (loadAvg_ > 0.85) {
         overSeconds_ += dt;

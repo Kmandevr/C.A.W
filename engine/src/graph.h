@@ -35,6 +35,17 @@ struct GraphDependency {
     uint32_t after = 0;
 };
 
+// Runs the tasks of one graph level at once (speed phase 5c; MixPool is the engine's): task(context, i) for every
+// i in [0, count), on the calling thread and any others, returning once all have run. Audio-thread safe.
+class ParallelRunner {
+public:
+    using Task = void (*)(void* context, uint32_t index) noexcept;
+    virtual void run(Task task, void* context, uint32_t count) noexcept = 0;
+
+protected:
+    ~ParallelRunner() = default;
+};
+
 struct GraphResourceBudget {
     // Count ceilings are optional host policy. By default there is no arbitrary object-count cap.
     std::size_t maxNodes = std::numeric_limits<std::size_t>::max();
@@ -234,6 +245,22 @@ public:
     uint32_t orderedNode(uint32_t k) const noexcept { return k < runCount_ ? order_[k] : UINT32_MAX; }
     // Tests only, from the next setRouting() on: false runs the order as given, as one level (the old serial order).
     void setLevelOrderForTest(bool on) noexcept { levelOrder_ = on; }
+    // Parallel levels (speed phase 5c). Audio thread, between process() calls. With a runner, each level with at
+    // least two nodes that may run in parallel hands them to it as one run; the level's other nodes run first on the
+    // calling thread, and with a runner every node of a level runs before a failure in it is reported (the first in
+    // level order). A node may run in parallel when it has no parameters and no typed ports (a node's parameter
+    // resolution shares the executor's automation scratch) and is not marked serial. Null: everything on the
+    // calling thread, as before. Nodes of one level read only earlier levels' outputs and each writes only its own
+    // buffers, so the output is the same bits either way.
+    void setParallelRunner(ParallelRunner* runner) noexcept { runner_ = runner; }
+    // Audio thread, between process() calls: the node runs on the calling thread, never in a runner's run (a node
+    // holding third-party native code). False for every node after prepare.
+    void setNodeSerial(uint32_t node, bool serial) noexcept {
+        if (node < nodeSerial_.size()) nodeSerial_[node] = serial ? 1 : 0;
+    }
+    bool nodeSerial(uint32_t node) const noexcept { return node < nodeSerial_.size() && nodeSerial_[node] != 0; }
+    // Levels the last process() handed to the runner (tests and the bench).
+    uint32_t parallelLevelsRun() const noexcept { return parallelLevels_; }
     // Control thread, one producer, lock-free: set a parameter's manual value (a knob, a typed
     // value or a mapped MIDI CC; F6.1 rules: clamped, smoothed, a touch while automated), applied
     // at the start of the next process(). False if the executor is not ready, the node or
@@ -421,6 +448,22 @@ private:
     uint32_t levelCount_ = 0;
     uint32_t dependencyCapacity_ = 0;
     bool levelOrder_ = true;
+    bool levelsSorted_ = false;  // the last accepted routing was sorted into levels (levelOrder_ was on)
+    // Parallel levels (speed phase 5c), preallocated by reserveRouting(): nodeSerial_ [nodes] (host-set flags),
+    // levelTasks_ [nodes] (this level's parallel nodes, as positions in order_). The task's frames and events are
+    // written before the runner publishes them and read by the tasks after.
+    ParallelRunner* runner_ = nullptr;
+    std::vector<uint8_t> nodeSerial_;
+    std::vector<uint32_t> levelTasks_;
+    uint32_t taskFrames_ = 0;
+    const EventInput* taskEvents_ = nullptr;
+    std::atomic<uint32_t> taskFailed_{UINT32_MAX};  // the lowest failed position in order_ this level
+    uint32_t parallelLevels_ = 0;
+    static void runLevelTask(void* executor, uint32_t index) noexcept;
+    bool parallelNode(uint32_t node) const noexcept {
+        const NodeBlock& b = blocks_[node];
+        return !nodeSerial_[node] && b.paramCount == 0 && !b.typed;
+    }
     bool routePlain_ = false;
     bool deferHostCheck_ = false;                 // set only inside prepareRouted()
     std::size_t preparedBytes_ = 0;

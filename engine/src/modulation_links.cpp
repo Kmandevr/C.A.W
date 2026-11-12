@@ -7,6 +7,7 @@
 #include <limits>
 #include <set>
 
+#include "mix_pool.h"
 #include "mod_route.h"
 #include "spsc.h"
 
@@ -455,7 +456,8 @@ struct ModulationPlan {
     // forChain's output, one per chain owner (speed phase 5a): [0] the master's, then one per slot with modulated
     // chains, so one slot's call never overwrites what another's returned. Each holds its chainDests entries (in
     // chainDests order) and, per `which`, its bindings ([2]: a layer's per-note FX, #127, read inside its instrument).
-    // The values and samples scratch stays the plan's, used by one chain at a time.
+    // The values and samples scratch a chain writes while it runs is the host's, one per lane (speed phase 5c:
+    // MixPool::lane()), as chains of different slots may run at once; one lane runs one chain at a time.
     struct ChainOut {
         std::vector<uint32_t> dests;
         std::vector<ChainModulation::Binding> bindings[3];
@@ -463,8 +465,6 @@ struct ModulationPlan {
     };
     std::vector<ChainOut> chainOuts;
     std::vector<int> slotOut;  // [slot]: its entry in chainOuts, or -1
-    std::vector<ParameterValue> values;
-    std::vector<double> samples;
     float aL[kModGridFrames] = {}, aR[kModGridFrames] = {};
     Event cellEvents[kCellEvents] = {};
 
@@ -681,13 +681,16 @@ std::string ModulationHost::update(const ModuleRegistry& registry, const Project
     }
     plan->destPublished = std::make_unique<std::atomic<float>[]>(std::max<size_t>(1, plan->dests.size()));
     for (auto& b : plan->bindings) b.resize(std::max<size_t>(1, plan->dests.size()));
-    plan->values.resize(kValueScratch);
-    plan->samples.resize(static_cast<size_t>(kSampleScratch) * ComponentChain::kMaxFrames);
+    if (laneValues_.empty()) {  // made once, kept for the host's life (plans in flight point into lane 0's)
+        laneValues_.resize(static_cast<size_t>(MixPool::kLanes) * kValueScratch);
+        laneSamples_.resize(static_cast<size_t>(MixPool::kLanes) * kSampleScratch * ComponentChain::kMaxFrames);
+    }
+    // Lane 0's here (the modulators run on the callback thread, beginChunk); forChain points a slot's at its lane.
     auto scratch = [&](ChainModulation& cm, std::vector<ChainModulation::Binding>& bindings) {
         cm.bindings = bindings.data();
-        cm.values = plan->values.data();
+        cm.values = laneValues_.data();
         cm.valueCapacity = kValueScratch;
-        cm.samples = plan->samples.data();
+        cm.samples = laneSamples_.data();
         cm.sampleBuffers = kSampleScratch;
     };
     for (int w = 0; w < 3; ++w) scratch(plan->cm[w], plan->bindings[w]);
@@ -899,6 +902,9 @@ const ChainModulation* ModulationHost::forChain(int slot, ModChainKind kind, con
     ModulationPlan::ChainOut& o = p.chainOuts[static_cast<size_t>(out)];
     ChainModulation& cm = o.cm[which];
     cm.count = 0;
+    const size_t lane = std::min<size_t>(MixPool::lane(), MixPool::kLanes - 1);  // the thread running this slot's node
+    cm.values = laneValues_.data() + lane * kValueScratch;
+    cm.samples = laneSamples_.data() + lane * kSampleScratch * ComponentChain::kMaxFrames;
     for (uint32_t di : o.dests) {
         ModulationPlan::Dest& d = p.dests[di];  // the slot's own (its cache too)
         if (d.kind != kind) continue;
