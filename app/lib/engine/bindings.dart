@@ -4,7 +4,7 @@ import 'dart:io';
 
 import 'package:ffi/ffi.dart';
 
-const int cawApiVersion = 24;  // must equal CAW_API_VERSION in engine/include/caw.h
+const int cawApiVersion = 25;  // must equal CAW_API_VERSION in engine/include/caw.h
 
 /// CawNoteFxStats (API 22, #127): a layer's per-note FX slots.
 final class CawNoteFxStatsStruct extends Struct {
@@ -26,7 +26,7 @@ final class CawNoteFxStatsStruct extends Struct {
   external int stolen;
 }
 
-/// CawLayerMeterStereo (API 24): one layer's meter with each side's peak, as caw_engine_layer_meters fills them.
+/// CawLayerMeterStereo (API 25): one layer's meter with each side's peak, as caw_engine_layer_meters fills them.
 final class CawLayerMeterStereoStruct extends Struct {
   @Float()
   external double peak;

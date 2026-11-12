@@ -853,7 +853,7 @@ class Engine {
         overloaded: m.overloaded != 0);
   }
 
-  /// The meters of project layers 0 to [count] - 1 in one C API call (API 24) into a native buffer that is kept
+  /// The meters of project layers 0 to [count] - 1 in one C API call (API 25) into a native buffer that is kept
   /// and grows only when the project does; each reads and resets as [layerMeter] does. A layer the engine doesn't
   /// have (yet) reads as silent and inactive.
   List<LayerMeterValue> layerMeters(int count) {

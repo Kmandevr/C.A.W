@@ -408,7 +408,7 @@ TEST(per_note_fx_host_gives_the_same_bits_at_any_block_split) {
 }
 
 TEST(per_note_fx_c_api_reports_stats_size_tagged) {
-    CHECK_EQ(caw_api_version(), 24);
+    CHECK_EQ(caw_api_version(), 25);
     CawEngine* engine = caw_engine_create(48000);
     char* r = caw_engine_set_project(engine, R"({"caw_project":1,"layers":[{"id":"t","instrument":{"id":"org.caw.test.osc",
         "params":{"mode":1}},"noteComponents":["org.caw.filter"],"noteVoices":3}]})");

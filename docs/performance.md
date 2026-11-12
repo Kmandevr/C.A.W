@@ -353,7 +353,7 @@ Beta readiness plan B3–B5 (owner, 2026-11-12, [beta readiness plan](beta-readi
   - Waveforms: cached 512 px tiles of one `drawRawPoints` batch each per clip, zoom and size (was a `drawLine` per pixel across the whole clip on every repaint), repainted only for their own file's peaks; track cards' playhead is a live island over its own layer.
   - `AppState._syncNow` notifies only on a real change; scopes read and redraw only on a new tick, as live islands; automation curves are cached in their own layer under a small live painter.
   - Device painters compare their inputs; controls, the preset chip and Flagship's cards rebuild on their own values (`ParamWatch`). Editors whose hero is built in the page (most) still rebuild the page for the values the hero draws: moving each hero into its own watch is per-editor work, not done.
-  - The meter poll reads all tracks in one C API call (API 24) into a kept native buffer.
+  - The meter poll reads all tracks in one C API call (API 25) into a kept native buffer.
   - The pinch transforms the laid-out lanes and lays out at its end (or past 0.6×/1.6×), landing exactly where a layout per move would (`arrange_test`, "a pinch scales the lanes").
 - **Not measured here:** frame times on the S22+ and Windows in a release build (the plan's B5 asks the owner to check them and record them here).
 

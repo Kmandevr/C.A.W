@@ -178,7 +178,7 @@ void main() {
     await dir.delete(recursive: true);
   }, skip: skip);
 
-  test('every track meter in one call (API 24) reads what one call per track reads, into a buffer that grows', () async {
+  test('every track meter in one call (API 25) reads what one call per track reads, into a buffer that grows', () async {
     final line = patternTemplates.firstWhere((t) => t.file == 'acid-line.caw');
     final p = ProjectDoc(id: 'p', name: 'T', modules: [ModuleDoc(id: 'n', name: 'Line', source: line.source)], layers: [
       for (var i = 0; i < 20; i++)
