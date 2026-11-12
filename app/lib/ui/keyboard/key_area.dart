@@ -133,8 +133,9 @@ class KeyAreaState extends State<KeyArea> {
   /// Runs [id] for this area: the screen's own handler first, then the generic moves.
   bool run(String id, int count, String? arg) {
     if (widget.onAction?.call(id, count, arg) ?? false) return true;
-    // A screen's own area (the Build editor) has no generic moves: its actions are its screen's.
-    if (!area.navigates) return false;
+    // A screen's own area (the Build editor) has no generic moves: its actions are its screen's. The moves are the
+    // area's own actions only (not the global focus.next, say).
+    if (!area.navigates || _registry.lookup(id)?.area != area) return false;
     final dot = id.lastIndexOf('.');
     final verb = dot < 0 ? id : id.substring(dot + 1);
     final move = switch (verb) {
@@ -157,12 +158,13 @@ class KeyAreaState extends State<KeyArea> {
   }
 
   static Keymap? _defaults;
+  static final ActionRegistry _registry = ActionRegistry.standard();
 
   // With no key router above (a screen shown alone), the area's own default keys still work.
   KeyEventResult _alone(KeyEvent e) {
     final chord = keyChordFromEvent(e);
     if (chord == null) return KeyEventResult.ignored;
-    final km = _defaults ??= Keymap.defaults(ActionRegistry.standard());
+    final km = _defaults ??= Keymap.defaults(_registry);
     final ref = km.bindingsIn(area)[KeySeq.one(chord)];
     if (ref == null || ref.isMacro) return KeyEventResult.ignored;
     return run(ref.id, 1, null) ? KeyEventResult.handled : KeyEventResult.ignored;
@@ -350,6 +352,7 @@ String? itemText(BuildContext context) {
   void visit(Element e) {
     if (found != null) return;
     final w = e.widget;
+    if (w is Icon) return; // a glyph, not words
     if (w is Text) {
       found = w.data ?? w.textSpan?.toPlainText();
     } else if (w is RichText) {
@@ -357,6 +360,7 @@ String? itemText(BuildContext context) {
     } else if (w is Tooltip && w.message != null && w.message!.isNotEmpty) {
       found = w.message;
     }
+    if (found != null && found!.trim().isEmpty) found = null;
     if (found == null) e.visitChildren(visit);
   }
   if (context is Element) visit(context);

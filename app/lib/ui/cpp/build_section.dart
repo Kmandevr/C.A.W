@@ -59,13 +59,24 @@ class _BuildSectionState extends State<BuildSection> {
     super.didChangeDependencies();
     final r = KeyRouter.of(context);
     if (r == _router) return;
-    _router?.unregister(Area.builder, _editorNode);
-    _router = r?..register(Area.builder, _editorNode, _focusAction);
+    _router?.unregister(Area.global, _editorNode);
+    _router = r?..register(Area.global, _editorNode, _focusAction);
   }
 
   /// Ctrl+Shift+E, Ctrl+Shift+B and Ctrl+Shift+Enter: the explorer (shown first if hidden; again, hidden), the tabs
   /// and the editor take the keyboard focus.
   bool _focusAction(String id, int count, String? arg) {
+    if (!id.startsWith('build.focus.')) return false;
+    // From another section: Build comes forward first.
+    if (!isShownNode(_editorNode) && !isShownNode(_tabsNode)) {
+      final c = SectionController.maybeOf(context);
+      if (c == null) return false;
+      c.show(Section.build);
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && (isShownNode(_editorNode) || isShownNode(_tabsNode))) _focusAction(id, count, arg);
+      });
+      return true;
+    }
     switch (id) {
       case 'build.focus.explorer':
         final area = keyAreaUnder(_explorerKey.currentContext);
@@ -84,7 +95,9 @@ class _BuildSectionState extends State<BuildSection> {
       case 'build.focus.tabs':
         focusAndReveal(_tabsNode);
       case 'build.focus.editor':
-        if (!(KeyArea.ofNode(_editorNode)?.enter() ?? false)) _editorNode.requestFocus();
+        // The editor's first control past its own tab strip (the strip sits inside the editor's frame).
+        final first = keyItems(_editorNode).where((n) => n != _tabsNode && !n.ancestors.contains(_tabsNode)).firstOrNull;
+        first == null ? _editorNode.requestFocus() : focusAndReveal(first);
       default:
         return false;
     }
@@ -116,7 +129,7 @@ class _BuildSectionState extends State<BuildSection> {
 
   @override
   void dispose() {
-    _router?.unregister(Area.builder, _editorNode);
+    _router?.unregister(Area.global, _editorNode);
     _tabsNode.dispose();
     _editorNode.dispose();
     _own?.dispose();

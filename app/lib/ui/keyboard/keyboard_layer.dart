@@ -48,7 +48,9 @@ class _KeyboardLayerState extends State<KeyboardLayer> {
 
   KeyEventResult _onKey(KeyEvent e) {
     final router = KeyRouterState.active.value;
-    final popup = _popup;
+    // A window with areas of its own (a device editor) takes the router's keys; a plain menu, sheet or dialog the
+    // menu keys.
+    final popup = KeyArea.focused == null ? _popup : null;
     if (popup != null) return _menuKey(e, popup, router);
     if (router == null || router.ownsFocus) return KeyEventResult.ignored;
     return router.handle(e);
@@ -114,7 +116,7 @@ class _KeyboardLayerState extends State<KeyboardLayer> {
         onKeyEvent: (_, e) => _onKey(e),
         child: Stack(children: [
           widget.child,
-          Positioned.fill(child: IgnorePointer(child: KeyFocusRing(menuOpen: () => _popup != null))),
+          Positioned.fill(child: IgnorePointer(child: KeyFocusRing(menuOpen: () => _popup != null && KeyArea.focused == null))),
         ]),
       );
 }
@@ -139,7 +141,7 @@ class _KeyFocusRingState extends State<KeyFocusRing> {
   @override
   void initState() {
     super.initState();
-    FocusManager.instance.addListener(_update);
+    FocusManager.instance.addListener(_schedule);
     FocusManager.instance.addHighlightModeListener(_mode);
     KeyRouterState.active.addListener(_routerChanged);
     _routerChanged();
@@ -147,21 +149,32 @@ class _KeyFocusRingState extends State<KeyFocusRing> {
 
   @override
   void dispose() {
-    FocusManager.instance.removeListener(_update);
+    FocusManager.instance.removeListener(_schedule);
     FocusManager.instance.removeHighlightModeListener(_mode);
     KeyRouterState.active.removeListener(_routerChanged);
-    _router?.revision.removeListener(_update);
+    _router?.revision.removeListener(_schedule);
     super.dispose();
   }
 
   void _routerChanged() {
-    _router?.revision.removeListener(_update);
+    _router?.revision.removeListener(_schedule);
     _router = KeyRouterState.active.value;
-    _router?.revision.addListener(_update);
-    _update();
+    _router?.revision.addListener(_schedule);
+    _schedule();
   }
 
-  void _mode(FocusHighlightMode _) => _update();
+  void _mode(FocusHighlightMode _) => _schedule();
+
+  // Changes arrive mid-build or mid-teardown (a focus change, a router going): the ring looks after the frame.
+  void _schedule() {
+    if (_armed || !mounted) return;
+    _armed = true;
+    SchedulerBinding.instance.addPostFrameCallback((_) {
+      _armed = false;
+      _update();
+    });
+    SchedulerBinding.instance.ensureVisualUpdate();
+  }
 
   // Follows the focused control while it moves (a scroll, a strip widening): checked after each frame, which
   // costs nothing while nothing draws.
@@ -195,6 +208,7 @@ class _KeyFocusRingState extends State<KeyFocusRing> {
         _hints = hints;
       });
     }
+    // While the keyboard is in use, look again after the next frame (the focused control may move).
     if (keyboard && !_armed) {
       _armed = true;
       SchedulerBinding.instance.addPostFrameCallback((_) {
