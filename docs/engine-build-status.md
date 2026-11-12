@@ -51,7 +51,7 @@ This is the implementation ledger for the unified modular engine. A documented c
 
 - Audio (API 18, WP-J; [engine](engine.md#audio-assets-clips-the-sampler-and-audio-input-api-18)): the asset store (WAV/FLAC/MP3 decoded with miniaudio's bundled decoders, sinc-resampled, refcounted within a budget, peaks), audio clips on tracks played by `org.caw.audio-track` through the track's chain and routing (fixed or musical; WSOLA or varispeed; fades, reverse, loop, pitch), `org.caw.sampler` (zones, round robins, loops with crossfades, ADSR, SVF, SFZ import and export), and audio input (a duplex device, monitoring through armed tracks, takes recorded on a writer thread with latency compensation, punch, loop takes, recovery, a latency ping). API 23 adds `caw_audio_latency`: each side's latency from AAudio's timestamps (read under miniaudio's reroute lock), else the queued buffers, and the routed device id; the app adds per-device offsets (Settings › Audio › Latency). The AAudio path is compiled for Android (NDK r30, aarch64) but not yet run on a phone. Tested with goldens and an allocation test; the device side was run only on ALSA's null device here.
 
-- App-only view state stays out of the engine: a track's own row height and collapse state (`LayerDoc.height`, `collapse`), its spacer and open lanes are saved in the project JSON but not in `toEngineJson`, and changing them doesn't re-send the project.
+- App-only view state stays out of the engine: a track's own row height and collapse state (`LayerDoc.height`, `collapse`), its spacer and open lanes are saved in the project JSON but not in `toEngineJson`, and changing them doesn't re-send the project; so is the music video's setup and shots (`music_video`).
 
 ## Not yet implemented
 

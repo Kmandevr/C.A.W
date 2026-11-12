@@ -6,6 +6,31 @@ updated: 2026-11-12
 
 # Decisions
 
+## 2026-11-12: The music video becomes an editor (owner, #182)
+
+**Decision (owner, 2026-11-12, answers to the design questions; extends "Arrangement music video" below).**
+- **Cuts in two forms.** A shot lane under the song's bars: each shot a block to drag and trim, snapping to beats or bars from the project's tempo and steps per bar; cut markers that move; add, split, delete and duplicate. And a shot list with each shot's start, length, view and layout, effects and transition. Auto-cut fills the lane and you edit from there; re-running it asks before it replaces edits, or fills only the empty space.
+- **Auto-cut triggers (all four), each with its sensitivity or settings:** every N bars or beats; bursts of note starts; tracks entering or going quiet; loudness jumps (drops, build-ups) from the existing meter data or an offline analysis. Heavy work runs off the UI isolate.
+- **Layouts:** split presets you can resize (full, top/bottom, side by side, one big view plus a strip, 2 × 2), a view per panel, draggable dividers, a layout per shot, changes between shots cut or animate. The owner's example: the arrangement takes most of the frame with the mixers along the bottom, nothing changing out of sight.
+- **Effects:** a per-shot stack like the audio FX stack (glow, shake, zoom punch, tint, blur, vignette, chromatic shift, strobe), each with an amount and settings, able to follow a track's loudness or the beat, the same in the preview and the render.
+- **Look:** each shot or panel can change how its view looks: palette, note style, grid, glow, background.
+- **Pitch bends** show in the note views (arrangement blocks, piano roll, falling notes), in the preview and the render.
+- **A Falling notes view** like piano-song videos: a keyboard along the bottom, notes falling onto it as long as they last, the key lighting in the track's colour and the note glowing or bursting as it plays; a view for any shot or panel, with the effects; the keyboard fits the song's notes or shows all 88 keys; colours from the tracks with a per-track on/off; fall speed in bars visible; the theme's look, copying no existing app's art.
+- **Storage:** shots, layouts, effects and looks save with the project, versioned, and older projects load.
+- **Bug #183:** some MIDI notes were missing in the arrangement shot; find the cause, starting with a failing test.
+
+**Built (Claude, 2026-11-12; choices to confirm, [App](app.md) "Music video" has the behaviour):**
+- **#183's cause:** the video's scene unrolled a looping clip's notes from its source offset only (`at >= offset` each repeat), so after the loop wrapped the notes before the offset never showed; a clip trimmed on the left (which moves the offset) lost them in every repeat. Notes already sounding where the window starts (tails) were dropped and a clip that doesn't loop showed notes past its pattern's end. The scene now unrolls through `clipNotes` (`arrange_edit.dart`), the rule the arranger draws and edits with and the engine's `compileArrangement` plays.
+- **Where it lives:** a Shot lane section in the Music video sheet under the preview (lane, toolbar, snap, zoom, then the list; the chosen row opens the shot's editor). An empty lane keeps the auto director, so videos made before cut and draw as they did (the test's frame hashes are unchanged). An empty stretch between shots shows the arrangement flythrough.
+- **Snap:** Step (a sixteenth), Beat or Bar; the lane never lets shots overlap (a drag stops at the neighbours; Duplicate moves the later shots along, dropping what passes the range's end).
+- **Auto-cut:** the triggers' cuts are merged with a minimum gap (2 beats by default) where the stronger trigger keeps its place (loudness, then tracks, bursts, interval); views come from the director's weighting with the setup's shots, style and seed. Loudness reads the notes by default (no render needed) or, chosen, the rendered audio: the range rendered offline by the engine's worker pool and its RMS per beat. Burst: 12 to 3 note starts in a beat after a thinner beat; loudness: a 12 to 3 dB jump between the bars either side of a bar line; tracks: a track sounding after (or silent for) a set number of bars.
+- **Effects** apply to the whole shot (all its panels), each redrawing the shot's picture in order; drives are Steady, Beat, Bar (a pulse with a set length), Mix loudness and Track loudness (the render then asks the engine for stems). Strobe held steady flashes every eighth note. Looks are per panel; the default look draws exactly as before.
+- **Falling notes** is a sixth shot kind, off by default for the director (so earlier setups cut as they did); its keyboard spans the shown tracks' notes over the whole song (bends included, at least two octaves, white keys at the ends), so it doesn't jump at cuts.
+- **Bends** draw as a line through the note's time, offset by its bend curve and vibrato (`NoteExpression.pitchAt`); notes without one draw as before. The project holds bends only as note expressions (no separate pitch-bend lane exists).
+- **Storage:** `music_video` in the project JSON, `version: 1`: the setup, the shots, auto-cut's settings and the snap. A project without it (every earlier one) opens as a new video; the reader is bounded (4,096 shots, 16 effects a shot, unknown names to defaults, overlapping shots dropped, numbers clamped) and a newer version is read for what this one knows.
+- **Keys (desktop, while the editor has focus):** A add, S split, Delete or Backspace, Ctrl+D duplicate, Ctrl+Z, Ctrl+Shift+Z or Ctrl+Y, ← → nudge by the snap, [ ] the previous or next shot. Open (owner): whether they join the action catalogue so Settings › Keys can rebind them.
+- **No new dependency and no engine C API change.**
+
 ## 2026-11-12: Perceptually identical, not bit-identical; speed first (owner)
 
 **Decision (owner):** engine output must be **perceptually identical and consistent**, not bit-identical, across platforms, live playback against export, and repeated runs. This replaces every earlier promise of identical bits (the 2026-11-03 "Exports are always bit-identical" and golden-hash entries, and the 2026-11-10 "perceptually the same" entry, rewritten below to point here).
