@@ -1150,10 +1150,11 @@ class _ArrangerScreenState extends State<ArrangerScreen> with TickerProviderStat
     final s = widget.state;
     _revealSelection();
     // A header's quick second tap where its first was counts even when the first moved the track away (the focus
-    // view pins it on top) and something else is there now: it opens that track's effects (owner, 2026-11-11).
+    // view pins it on top) and the panel or a lane is there now: it opens that track's effects (owner, 2026-11-11).
+    // A press on another header is a first tap there (its own handler counted it).
     return Listener(behavior: HitTestBehavior.translucent, onPointerDown: (e) {
       if (!_headerTaps.secondHere(e)) return;
-      final l = s.project.layers.where((x) => x.id == _headerTaps.firstTarget).firstOrNull;
+      final l = s.project.layers.where((x) => x.id == _headerTaps.lastTarget).firstOrNull;
       if (l != null) _openTrack(l, tab: FocusTab.fx);
     // The track cards slide in over the arrangement and back out (owner, 2026-11-11); the arrangement isn't built
     // while they cover it.
@@ -1632,8 +1633,6 @@ class _ArrangerScreenState extends State<ArrangerScreen> with TickerProviderStat
             onTap: pinned ? () => _focus(null) : () => callbacks.onTap(layer),
             onSwipe: pinned ? _step : null,
             onFx: () => callbacks.onFx(layer),
-            // A second tap where the first was, on whichever track has moved there: the first one's effects.
-            onFxFor: (id) { final l = p.layers.where((x) => x.id == id).firstOrNull; if (l != null) callbacks.onFx(l); },
             onMenu: (at) => callbacks.onMenu(layer, at),
             onResize: pinned ? null : (dy) => _rowResize(layer, dy),
             onResizeEnd: _rowResizeEnd)),
@@ -1770,7 +1769,7 @@ class _TimelineHeader extends StatelessWidget {
     required this.trackHeight, required this.onTap, required this.onFx, required this.onMenu,
     this.collapse = TrackCollapse.normal, this.uprightMeter = false, this.hideMuteSolo = false, this.pinned = false,
     this.focused = false, this.onSwipe, this.onResize, this.onResizeEnd, this.drag,
-    this.onTrackDrag, this.onFxFor});
+    this.onTrackDrag});
   final AppState state;
   final LayerDoc layer;
   final int index, depth;
@@ -1789,7 +1788,6 @@ class _TimelineHeader extends StatelessWidget {
   final bool pinned;
   final bool focused;
   final VoidCallback onTap, onFx;
-  final ValueChanged<String>? onFxFor;
   final void Function(Offset at) onMenu;
   final ClickCounter taps;
   final ValueChanged<int>? onSwipe;
@@ -2036,13 +2034,12 @@ class _TimelineHeader extends StatelessWidget {
       // it opens the menu). The outermost pointer handler sees a press last: a press on one of the header's buttons
       // (M, S, FX, the arrows) isn't counted, and it clears the mark the button left.
       child: Listener(onPointerDown: (e) {
-        _onHeaderButton ? taps.reset() : taps.down(e, target: layer.id, anywhere: pinned, anyTargetHere: true);
+        _onHeaderButton ? taps.reset() : taps.down(e, target: layer.id, anywhere: pinned);
         _onHeaderButton = false;
       }, onPointerUp: taps.up, child: GestureDetector(
         key: ValueKey('track-header-${layer.id}'),
         behavior: HitTestBehavior.opaque,
-        onTap: () => !taps.twice ? onTap() : taps.firstTarget == layer.id || onFxFor == null ? onFx()
-            : onFxFor!(taps.firstTarget as String),
+        onTap: () => taps.twice ? onFx() : onTap(),
         onLongPressStart: (d) => onTrackDrag == null ? onMenu(d.globalPosition) : onTrackDrag!(_HeaderPhase.press, d.globalPosition),
         onLongPressMoveUpdate: onTrackDrag == null ? null : (d) => onTrackDrag!(_HeaderPhase.move, d.globalPosition),
         onLongPressEnd: onTrackDrag == null ? null : (d) => onTrackDrag!(_HeaderPhase.release, d.globalPosition),
