@@ -11,6 +11,7 @@
 #include <set>
 
 #include "engine.h"
+#include "fp_mode.h"
 #include "json.h"
 #include "meters.h"
 #include "render.h"
@@ -327,6 +328,8 @@ bool renderRange(const ProjectSpec& base, const SongRenderRequest& req, const st
     int64_t lastLoud = -1, done = 0;
     float mixL[kChunk], mixR[kChunk], lr[kChunk * 2];
     const double share = 1.0 / static_cast<double>(rangeCount);
+    // Engine::process holds its own; this one covers the stems' master chains and the loudness meters run after it.
+    const ScopedFlushDenormals flushDenormals;
     while (done < total) {
         if (cancelled(cancel)) {
             error = "cancelled";
