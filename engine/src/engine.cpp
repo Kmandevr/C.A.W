@@ -4278,6 +4278,12 @@ void Engine::runBusNode(int slot, const float* inL, const float* inR, float* out
     }
 }
 
+// The master DC blocker's state after a sample: with silence coming in, its decay settles at 0 once below -240 dB
+// instead of running on for seconds through ever smaller values; its output is then exactly 0, so the master
+// chain's effects fall asleep about 2.5 s sooner after a song's tail (speed phase 1). Per sample, so it settles on
+// the same frame at any block size.
+static inline double settleDc(double x, double y) noexcept { return x == 0.0 && std::fabs(y) < 1e-12 ? 0.0 : y; }
+
 void Engine::runMasterNode(const float* inL, const float* inR, float* outL, float* outR, int m) noexcept {
     // Master order: gain/DC block, trusted native stereo effects, safety limiter last.
     const double R = 1.0 - kTwoPi * 5.0 / sr_;
@@ -4357,10 +4363,10 @@ void Engine::runMasterNode(const float* inL, const float* inR, float* outL, floa
             const double xr = finiteOr0(static_cast<double>(inR[i])) * master_;
             const double yl = xl - dcL_[0] + R * dcL_[1];
             dcL_[0] = xl;
-            dcL_[1] = yl;
+            dcL_[1] = settleDc(xl, yl);
             const double yr = xr - dcR_[0] + R * dcR_[1];
             dcR_[0] = xr;
-            dcR_[1] = yr;
+            dcR_[1] = settleDc(xr, yr);
             finishSample(i, bypass ? xl : yl, bypass ? xr : yr);
         }
     } else {
@@ -4377,10 +4383,10 @@ void Engine::runMasterNode(const float* inL, const float* inR, float* outL, floa
             const double xr = finiteOr0(static_cast<double>(inR[i])) * master_;
             const double yl = xl - dcL_[0] + R * dcL_[1];
             dcL_[0] = xl;
-            dcL_[1] = yl;
+            dcL_[1] = settleDc(xl, yl);
             const double yr = xr - dcR_[0] + R * dcR_[1];
             dcR_[0] = xr;
-            dcR_[1] = yr;
+            dcR_[1] = settleDc(xr, yr);
             stageL[i] = static_cast<float>(bypass ? xl : yl);
             stageR[i] = static_cast<float>(bypass ? xr : yr);
         }

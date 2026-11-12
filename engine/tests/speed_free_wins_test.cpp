@@ -1,4 +1,4 @@
-// Speed phase 1 ("free wins"): Eco lowers oversampling, silent meters and nodes skip work exactly, the master chain sleeps after a tail and wakes sample-exactly.
+// Speed phase 1 ("free wins"): Eco lowers oversampling, silent meters and nodes skip work exactly, the master chain sleeps soon after a tail and wakes sample-exactly.
 #include <cmath>
 #include <cstring>
 #include <string>
@@ -168,10 +168,11 @@ TEST(a_silent_track_with_a_send_changes_no_bit_of_the_mix) {
     CHECK(sameBits(with, without));
 }
 
-TEST(the_master_chain_sleeps_after_a_tail_and_wakes_sample_exactly) {
+TEST(the_master_chain_sleeps_soon_after_a_tail_and_wakes_sample_exactly) {
     // A test tone at bars 1 and 5 of 8 through a master compressor and limiter: after the first note the master's
-    // effects fall asleep (once the DC blocker's decay reaches the last float), and the second note wakes them on
-    // its first frame: it plays the first note's bits.
+    // DC blocker settles at 0, so the effects see exact silence and sleep within a second of the output going below
+    // -100 dBFS (not the 3 s its decay to the last float took); the second note wakes them on its first frame and
+    // plays the first note's bits.
     ProjectSpec p;
     p.bpm = 120;
     p.loopBars = 8;
@@ -208,7 +209,7 @@ TEST(the_master_chain_sleeps_after_a_tail_and_wakes_sample_exactly) {
     ChainProfile::set(nullptr);
     CHECK(lastLoud > 0);
     CHECK(lastRan >= lastLoud);
-    CHECK(lastRan < 4 * kBar - kBar / 2);  // asleep well before the second note
+    CHECK(lastRan - lastLoud < 48000);  // asleep within a second of falling below -100 dBFS
     // Woken by the second note on its first frame: the same samples as the first note's, from the same offset.
     const size_t span = 2 * static_cast<size_t>(kBar);
     CHECK(out.size() >= 4 * static_cast<size_t>(kBar) + span);

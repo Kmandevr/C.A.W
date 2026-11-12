@@ -106,8 +106,14 @@ endif()
 # Link-time optimisation (speed phase 1, docs/engine-performance.md): every engine target in an optimised
 # configuration (Release, RelWithDebInfo: Android Gradle's release, MinSizeRel), when the toolchain supports it.
 # Debug and sanitizer builds stay without it. Set here, so it reaches only this directory's targets (the app's
-# Windows build includes the engine as a subdirectory); CAW_LTO=OFF turns it off.
-option(CAW_LTO "Link-time optimisation for optimised (non-Debug) builds" ON)
+# Windows build includes the engine as a subdirectory). On by default for Clang (the Android NDK's) and MSVC;
+# off for GCC (and MinGW), where it measured slower (more instructions, a slower Linux x64 bench); CAW_LTO sets it.
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+  set(CAW_LTO_DEFAULT OFF)
+else()
+  set(CAW_LTO_DEFAULT ON)
+endif()
+option(CAW_LTO "Link-time optimisation for optimised (non-Debug) builds" ${CAW_LTO_DEFAULT})
 if(CAW_LTO AND NOT CAW_SANITIZE)
   include(CheckIPOSupported)
   check_ipo_supported(RESULT CAW_IPO_SUPPORTED OUTPUT CAW_IPO_OUTPUT LANGUAGES C CXX)
