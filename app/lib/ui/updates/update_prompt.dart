@@ -8,6 +8,7 @@ import 'package:flutter/material.dart';
 import '../../model/app_state.dart';
 import '../../model/updates/update_service.dart';
 import '../adaptive_sheet.dart';
+import '../motion.dart';
 import '../theme.dart';
 import 'update_flow.dart';
 
@@ -100,8 +101,31 @@ class _UpdatePromptHostState extends State<UpdatePromptHost> with WidgetsBinding
       builder: (c) => AlertDialog(
         key: const ValueKey('update-prompt'),
         title: Text('Update available: ${offer.label}'),
-        content: Text('You have v${widget.service.current}. Updating is up to you; nothing changes until you choose '
-            'Update.', style: const TextStyle(color: Neon.dim)),
+        content: ListenableBuilder(
+          listenable: widget.service,
+          builder: (c, _) {
+            final size = widget.service.sizeLine(offer);
+            return Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text('You have v${widget.service.current}. Updating is up to you; nothing changes until you choose '
+                  'Update.', style: const TextStyle(color: Neon.dim)),
+              // The download size, smaller once a small update is known to fit ("Update 4.7 MB instead of 54.5 MB").
+              AnimatedSize(
+                duration: Motion.move(Motion.standard, Motion.of(c)),
+                alignment: Alignment.topLeft,
+                child: AnimatedSwitcher(
+                  duration: Motion.fade(Motion.standard, Motion.of(c)),
+                  child: size == null
+                      ? const SizedBox(key: ValueKey('update-size-none'), width: double.infinity)
+                      : Padding(
+                          key: ValueKey('update-size:$size'),
+                          padding: const EdgeInsets.only(top: 8),
+                          child: Text(size, style: const TextStyle(color: Neon.dim, fontSize: 12)),
+                        ),
+                ),
+              ),
+            ]);
+          },
+        ),
         actions: [
           TextButton(key: const ValueKey('update-never'), onPressed: () => Navigator.pop(c, 'never'),
               child: const Text('Don\'t ask again')),

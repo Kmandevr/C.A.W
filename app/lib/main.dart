@@ -33,6 +33,11 @@ import 'ui/updates/update_prompt.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // A small Windows update staged by the last run is swapped in first, before the window shows; the new build then
+  // starts in a fresh process and this one ends.
+  final updateInstaller = platformUpdateInstaller();
+  final staged = await updateInstaller.finishStaged();
+  if (staged.relaunch) exit(0);
   // Open alpha: errors are kept (on the device only) for "Report a problem", then handled as before.
   final flutterError = FlutterError.onError;
   FlutterError.onError = (details) {
@@ -69,10 +74,11 @@ Future<void> main() async {
   final updates = UpdateService(
     source: GitHubReleasesSource(fetcher),
     fetcher: fetcher,
-    installer: platformUpdateInstaller(),
+    installer: updateInstaller,
     store: settings.dir == null ? null : File('${settings.dir!.path}${Platform.pathSeparator}updates.json'),
   );
   await updates.load();
+  if (staged.note != null) updates.downloadedNote = staged.note; // "Updated to …", said once after the start
   UpdateService.running = updates;
 
   runApp(CawApp(state: state));

@@ -112,11 +112,11 @@ test('build writes a manifest of every file and patches that are checked before 
   const { old, next } = builds();
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'caw-delta-test-'));
   try {
-    for (const [n, b] of [['old.apk', old], ['new.apk', next], ['old.zip', old], ['new.zip', next]]) fs.writeFileSync(path.join(dir, n), b);
+    for (const [n, b] of [['old.apk', old], ['caw-main-android.apk', next], ['old.zip', old], ['caw-main-windows.zip', next]]) fs.writeFileSync(path.join(dir, n), b);
     const lines = [];
     const { manifest, written } = build({
       version: '1.0.0-alpha.2', build: 'abc1234', prefix: 'caw-main', out: dir, bsdiffMin: 0, log: (l) => lines.push(l),
-      apk: path.join(dir, 'new.apk'), baseApk: path.join(dir, 'old.apk'), zip: path.join(dir, 'new.zip'), baseZip: path.join(dir, 'old.zip'), baseBuild: 'def5678',
+      apk: path.join(dir, 'caw-main-android.apk'), baseApk: path.join(dir, 'old.apk'), zip: path.join(dir, 'caw-main-windows.zip'), baseZip: path.join(dir, 'old.zip'), baseBuild: 'def5678',
     });
     assert.deepEqual(written, ['caw-main-update.json', 'caw-main-android.cawpatch', 'caw-main-windows.cawpatch']);
     assert.equal(manifest.artifacts[0].files.length, 3);
