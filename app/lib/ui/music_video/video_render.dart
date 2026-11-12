@@ -1,5 +1,6 @@
 // Renders the music video offline and deterministically: the audio through the engine's song render (a worker-pool
 // job), its meters from the files, then each frame drawn off screen at the render clock's time and streamed to the encoder.
+import '../../model/busy_work.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -98,7 +99,9 @@ class MusicVideoRender extends ChangeNotifier {
       };
 
   /// Renders everything; the finished file (in [workDir]) or null when cancelled or failed ([error] says why).
-  Future<File?> run() async {
+  Future<File?> run() => BusyWork.during(_run); // no automatic update installs under a render
+
+  Future<File?> _run() async {
     final (width, height) = options.size;
     final audioDir = Directory('${workDir.path}${Platform.pathSeparator}audio');
     var encoding = false;

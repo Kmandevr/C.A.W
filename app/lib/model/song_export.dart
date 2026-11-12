@@ -1,5 +1,6 @@
 // The Export sheet's model: song-render options (source, range, format, loudness, tail, names), the engine request
 // they make, and a queue of renders that survives restarts, run one after another as native worker-pool jobs.
+import 'busy_work.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -448,7 +449,7 @@ class ExportQueue extends ChangeNotifier {
         job.progress = handle.progress;
         notifyListeners();
       });
-      out = await handle.result;
+      out = await BusyWork.during(() => handle.result); // no automatic update installs under a render
     } catch (e) {
       out = '$e';
     } finally {

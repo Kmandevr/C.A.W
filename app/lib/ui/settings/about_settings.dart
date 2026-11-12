@@ -1,14 +1,16 @@
-// Settings › About and beta: the version, Report a problem (a report copied to paste into an issue), Engine
+// Settings › About: the version, Updates, Report a problem (a report copied to paste into an issue), Engine
 // diagnostics and licences.
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../model/problem_log.dart';
+import '../../model/updates/update_service.dart';
 import '../../version.dart';
 import '../theme.dart';
 import 'engine_diagnostics.dart';
 import 'settings_deps.dart';
 import 'settings_widgets.dart';
+import 'update_settings.dart';
 
 class AboutSettings extends StatelessWidget {
   const AboutSettings({super.key, required this.deps});
@@ -18,7 +20,9 @@ class AboutSettings extends StatelessWidget {
   Widget build(BuildContext context) => Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
         settingAction('about.beta',
             icon: Icons.science_outlined, iconColor: Neon.yellow,
-            subtitle: 'C.A.W open beta $appVersion · things may change or break; projects are saved as you go'),
+            subtitle: 'C.A.W open alpha $appVersion · things may change or break; projects are saved as you go'),
+        // Updates (owner, 2026-11-12); where Settings opens without the app, an inert service that checks nothing.
+        UpdateSettings(service: UpdateService.running ?? UpdateService.inert, state: deps.state),
         SettingRow(
           id: 'about.report',
           child: ListTile(

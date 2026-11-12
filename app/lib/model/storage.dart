@@ -70,6 +70,8 @@ class ProjectStorage {
       // Reading and decoding a big project runs off the UI isolate; the decoded map comes back without a copy.
       final path = f.path;
       return ProjectDoc.fromJson(await Isolate.run(() => jsonDecode(File(path).readAsStringSync())) as Map<String, dynamic>);
+    } on NewerProjectFormat {
+      rethrow; // not damaged: the caller says so and leaves the file alone
     } catch (_) {
       return null;
     }

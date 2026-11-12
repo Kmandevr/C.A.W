@@ -161,7 +161,7 @@ void main() {
     await _pump(tester, _screen(p), const Size(360, 640));
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
-    for (final line in ['v0.9.0-beta.1', 'Open beta: expect rough edges and unexpected issues.', '© 2026 AutoStacc']) {
+    for (final line in ['v0.9.0-beta.1', 'Open alpha: expect rough edges and unexpected issues.', '© 2026 AutoStacc']) {
       final f = find.text(line);
       expect(f, findsOneWidget, reason: line);
       final r = tester.getRect(f);

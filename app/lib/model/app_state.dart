@@ -497,15 +497,25 @@ class AppState extends ChangeNotifier {
     lastProjectId = await storage.lastOpened();
     savedProjects = await listProjects();
     final id = lastProjectId;
-    final last = id == null ? null : await storage.load(id);
+    ProjectDoc? last;
+    NewerProjectFormat? newer;
+    try {
+      last = id == null ? null : await storage.load(id);
+    } on NewerProjectFormat catch (e) {
+      newer = e;
+    }
     // A damaged file reads as null too; it stays on disk, and the app says so instead of replacing it silently.
-    final damaged = id != null && last == null && await storage.has(id);
+    final damaged = newer == null && id != null && last == null && await storage.has(id);
     startup.finish(StartupStep.projects);
     final opening = last ?? starterProject();
     startup.begin(StartupStep.project, project: opening.name);
     starting = false;
     String? error = damaged ? 'The last project could not be read, so the default project opened instead. '
         'Its file is still in the projects folder.' : null;
+    if (newer != null) {
+      error = 'The last project was saved by a newer version of C.A.W, so the default project opened instead. '
+          'Its file is unchanged; update C.A.W to open it.';
+    }
     try {
       await _switchTo(opening, saveCurrent: false);
     } catch (e) {
@@ -1018,6 +1028,26 @@ class AppState extends ChangeNotifier {
 
   Future<List<RestorePointSummary>> listRestorePoints() async =>
       await _storage?.listRestorePoints(project.id) ?? const [];
+
+  /// A restore point of every saved project, the open one saved first (before installing an older C.A.W). Returns
+  /// how many were made. They live in the app's own storage: an Android uninstall deletes them too.
+  Future<int> backUpAllProjects() async {
+    final storage = _storage;
+    if (storage == null) return 0;
+    await flush();
+    var made = 0;
+    for (final summary in await listProjects()) {
+      try {
+        final doc = await storage.load(summary.id);
+        if (doc == null) continue;
+        await storage.createRestorePoint(doc, keep: settings.restorePointsKept);
+        made++;
+      } catch (_) {
+        // A project this version can't read (damaged, or from a newer version) is left as it is.
+      }
+    }
+    return made;
+  }
 
   Future<bool> restoreProjectVersion(String restorePointId) async {
     final storage = _storage;
@@ -2131,7 +2161,14 @@ class AppState extends ChangeNotifier {
   Future<void> newProjectFromTemplate(TemplateDoc t) => _switchTo(projectFromTemplate(t));
 
   Future<void> openProject(String id) async {
-    final p = await _storage?.load(id);
+    final ProjectDoc? p;
+    try {
+      p = await _storage?.load(id);
+    } on NewerProjectFormat catch (e) {
+      openError = e.toString();
+      notifyListeners();
+      return;
+    }
     if (p != null) await _switchTo(p);
   }
 
@@ -2153,7 +2190,12 @@ class AppState extends ChangeNotifier {
     await _storage?.delete(id);
     if (id == project.id) {
       final rest = await listProjects();
-      final next = rest.isEmpty ? null : await _storage?.load(rest.first.id);
+      ProjectDoc? next;
+      try {
+        next = rest.isEmpty ? null : await _storage?.load(rest.first.id);
+      } on NewerProjectFormat {
+        next = null; // left alone; a fresh default opens instead
+      }
       await _switchTo(next ?? starterProject());
     }
   }

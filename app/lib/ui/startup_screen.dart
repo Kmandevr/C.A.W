@@ -8,6 +8,7 @@ import 'package:flutter/material.dart';
 
 import '../model/app_state.dart';
 import '../model/startup_progress.dart';
+import '../model/updates/update_service.dart';
 import '../version.dart';
 import 'motion.dart';
 import 'theme.dart';
@@ -28,8 +29,8 @@ const Color _pink = Color(0xFFFF2BD6);
 /// logo fades in. Loading that ends sooner cuts it short ([StartupGate]).
 const Duration revealDuration = Duration(milliseconds: 1300);
 
-/// The open-beta notice and the copyright under the version (owner, 2026-11-12).
-const String openBetaNotice = 'Open beta: expect rough edges and unexpected issues.';
+/// The open-alpha notice and the copyright under the version (owner, 2026-11-12).
+const String openAlphaNotice = 'Open alpha: expect rough edges and unexpected issues.';
 const String copyrightLine = '© 2026 AutoStacc';
 
 /// Shows [child] (the app) with the startup screen in front until [state] is ready, then fades the screen out at
@@ -93,7 +94,11 @@ class _StartupGateState extends State<StartupGate> with SingleTickerProviderStat
             child: IgnorePointer(
               ignoring: _ready,
               child: FadeTransition(
-                  opacity: _fade, child: StartupScreen(progress: widget.state.startup, version: appVersion)),
+                  opacity: _fade,
+                  child: StartupScreen(
+                      progress: widget.state.startup,
+                      version: appVersion,
+                      updateLine: UpdateService.running?.startupLine)),
             ),
           ),
       ]);
@@ -102,9 +107,12 @@ class _StartupGateState extends State<StartupGate> with SingleTickerProviderStat
 /// The startup screen itself: the logo (revealed from a waveform at Full motion, still otherwise), the loading
 /// steps as [progress] reports them, and [version].
 class StartupScreen extends StatefulWidget {
-  const StartupScreen({super.key, required this.progress, required this.version});
+  const StartupScreen({super.key, required this.progress, required this.version, this.updateLine});
   final StartupProgress progress;
   final String version;
+
+  /// "Update available: vX" when an earlier launch's check found one (startup never waits on the network).
+  final String? updateLine;
 
   @override
   State<StartupScreen> createState() => _StartupScreenState();
@@ -160,12 +168,18 @@ class _StartupScreenState extends State<StartupScreen> with SingleTickerProvider
               const SizedBox(height: 28),
               SizedBox(width: listWidth, child: _StepList(progress: widget.progress)),
               const Spacer(flex: 6),
-              // The version, the open-beta notice and the copyright: small and quiet, fading in with the steps.
+              // The version (and an update an earlier check found), the open-alpha notice and the copyright: small
+              // and quiet, fading in with the steps.
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16),
                 child: _Appear(
                   child: Column(children: [
-                    for (final line in ['v${widget.version}', openBetaNotice, copyrightLine])
+                    for (final line in [
+                      'v${widget.version}',
+                      ?widget.updateLine,
+                      openAlphaNotice,
+                      copyrightLine,
+                    ])
                       Padding(
                         padding: const EdgeInsets.only(top: 2),
                         child: Text(line,

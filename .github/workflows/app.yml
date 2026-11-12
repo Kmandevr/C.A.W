@@ -1,5 +1,6 @@
 # App checks: analysis and tests on every pull request; the Android APK and Windows app on Main or on demand;
-# a GitHub Release (pre-release while in beta) from a version tag or from Run workflow with "release".
+# a GitHub Release (pre-release while in beta) from a version tag or from Run workflow with "release"; and each
+# push to Main that builds replaces the rolling "Every change" pre-release (tag latest-main).
 name: App
 on:
   # Pull requests test the app (analysis, tests); Main also builds the installable APK and Windows app.
@@ -270,7 +271,9 @@ jobs:
           # --split-debug-info keeps the Dart stack-trace tables out of the APK (libapp.so 10.2 -> 8.8 MB, docs/
           # performance.md); a reported trace is decoded with `flutter symbolize -d app.android-arm64.symbols`.
           # No --obfuscate: it saves only 0.13 MB more and would garble type names in the app's own error texts.
-          flutter build apk --release --target-platform android-arm64 --split-debug-info=build/symbols
+          # CAW_BUILD: the short commit, so the app's update check can tell "Every change" builds apart.
+          flutter build apk --release --target-platform android-arm64 --split-debug-info=build/symbols \
+            --dart-define=CAW_BUILD="${GITHUB_SHA::7}"
           ccache --show-stats || true
           mv build/app/outputs/flutter-apk/app-release.apk "$GITHUB_WORKSPACE/caw-android.apk"
           (cd build/symbols && zip -q "$GITHUB_WORKSPACE/caw-android-symbols.zip" ./*.symbols)
@@ -318,7 +321,7 @@ jobs:
         working-directory: app
         run: |
           flutter --disable-analytics
-          flutter build windows --release
+          flutter build windows --release --dart-define=CAW_BUILD="$($env:GITHUB_SHA.Substring(0, 7))"
       - uses: actions/upload-artifact@v7
         with:
           name: caw-windows
@@ -386,3 +389,55 @@ jobs:
           gh release create "$tag" --target "$GITHUB_SHA" --title "C.A.W. $version" $prerelease \
             --notes-file notes.md --generate-notes \
             "caw-$version-android.apk" "caw-$version-windows.zip" "caw-$version-android-symbols.zip"
+
+  # "Every change" (owner, 2026-11-12): each push to Main that builds is published as one rolling pre-release,
+  # tag latest-main, whose assets and notes are replaced each time. Never the repository's "latest" release, and
+  # pushes to Main never make a stable release (that needs a v* tag or Run workflow with "release").
+  every-change:
+    name: Every change build
+    needs: [android, windows]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/Main'
+    runs-on: ubuntu-24.04
+    # One at a time, so two pushes never race over the release; a newer push waiting replaces an older one.
+    concurrency:
+      group: every-change-release
+      cancel-in-progress: false
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v7
+        with:
+          name: caw-android-apk
+      - uses: actions/download-artifact@v7
+        with:
+          name: caw-windows-zip
+      - name: Replace the latest-main release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=$(sed -n 's/^version: *\([^+]*\).*/\1/p' app/pubspec.yaml)
+          short="${GITHUB_SHA::7}"
+          mv caw-android.apk caw-main-android.apk
+          mv caw-windows.zip caw-main-windows.zip
+          {
+            echo "Every change: untested builds. Each change to Main, built as it is; it may break."
+            echo "For tested builds use the Stable channel (the public alpha) or Beta."
+            echo
+            echo "- Android (arm64): caw-main-android.apk"
+            echo "- Windows (x64): caw-main-windows.zip, unzip and run caw.exe"
+            echo
+            # The app reads these two lines (lib/model/updates/releases.dart).
+            echo "Version: $version"
+            echo "Build: $short"
+          } > notes.md
+          git tag -f latest-main "$GITHUB_SHA"
+          git push -f origin refs/tags/latest-main
+          if gh release view latest-main >/dev/null 2>&1; then
+            gh release edit latest-main --title "Every change (untested): $short" --notes-file notes.md \
+              --prerelease --latest=false
+            gh release upload latest-main caw-main-android.apk caw-main-windows.zip --clobber
+          else
+            gh release create latest-main --title "Every change (untested): $short" --notes-file notes.md \
+              --prerelease --latest=false caw-main-android.apk caw-main-windows.zip
+          fi

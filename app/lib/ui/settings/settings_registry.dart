@@ -82,7 +82,7 @@ enum SettingsSection {
           s.exportFloat32 ? '32-bit float' : '24-bit',
         ].join(' · '),
       keys => [s.vimCode ? 'Vim keys on' : 'Vim keys off', '${s.editor.keyRow.length} keys in the row'].join(' · '),
-      about => 'Version $appVersion · open beta',
+      about => 'Version $appVersion · open alpha',
     };
   }
 }
@@ -296,7 +296,18 @@ const List<SettingEntry> settingEntries = [
   _E('keys.vimKeys', _k, 'Vim keys everywhere', 'H J K L move like the arrows in effects, mixer, Files and Settings',
       ['vim', 'hjkl', 'arrows', 'navigation']),
   _E('keys.keyRow', _k, 'Key row', 'The symbol keys above the phone keyboard', ['symbols', 'toolbar', 'keyboard']),
-  _E('about.beta', _ab, 'Version', 'The open beta\'s version', ['version', 'beta', 'build']),
+  _E('about.beta', _ab, 'Version', 'The open alpha\'s version', ['version', 'alpha', 'beta', 'build']),
+  _E('about.updates', _ab, 'Updates', 'This version, the last check, Check now and Update now',
+      ['update', 'upgrade', 'new version', 'release', 'download']),
+  _E('about.updates.check', _ab, 'Check for updates automatically', 'Once a day at most, after the app has opened',
+      ['update', 'check', 'automatic']),
+  _E('about.updates.prompts', _ab, 'Ask when an update is found', 'A small prompt after the app opens: Update, Not now or Don\'t ask again',
+      ['update', 'prompt', 'ask', 'notify']),
+  _E('about.updates.install', _ab, 'Install updates automatically', 'Off by default: downloads and installs new releases when the app is idle',
+      ['update', 'automatic', 'install', 'background']),
+  _E('about.updates.channel', _ab, 'Update channel', 'Stable, Beta or Every change', ['update', 'channel', 'beta', 'stable', 'alpha']),
+  _E('about.updates.versions', _ab, 'Install another version…', 'Every release in the channel, older ones too',
+      ['downgrade', 'older', 'version', 'rollback', 'release']),
   _E('about.report', _ab, 'Report a problem', 'Copies a report to paste into a new issue', ['bug', 'issue', 'feedback']),
   _E('about.diagnostics', _ab, 'Engine diagnostics', 'CPU, peaks, the master scope and spectrum, and signal paths',
       ['engine', 'lab', 'diagnostics', 'cpu', 'scope', 'spectrum', 'debug']),

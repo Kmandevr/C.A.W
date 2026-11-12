@@ -1,6 +1,6 @@
 // The Android host: thermal and battery-saver signals for the resource adapter, the C++ compiler channel, MIDI
 // devices and the Bluetooth MIDI scan, saving exports, the music video's encoder, haptics, the display's refresh rate
-// (DisplayRate.kt), the microphone permission and the audio route (AudioRoute.kt).
+// (DisplayRate.kt), the microphone permission, the audio route (AudioRoute.kt) and installing updates (UpdateInstaller.kt).
 package com.kmandevr.caw
 
 import android.content.BroadcastReceiver
@@ -22,9 +22,15 @@ class MainActivity : FlutterActivity() {
     private var bluetoothMidi: BluetoothMidi? = null
     private var pendingFolder: FolderSave? = null
     private var micPermission: MicPermission? = null
+    private var updateInstaller: UpdateInstaller? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+
+        val updatesChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, UPDATES_METHOD_CHANNEL)
+        val updates = UpdateInstaller(this) { updatesChannel }
+        updateInstaller = updates
+        updatesChannel.setMethodCallHandler { call, result -> updates.handle(call, result) }
 
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, RESOURCE_METHOD_CHANNEL)
             .setMethodCallHandler { call, result ->
@@ -262,11 +268,14 @@ class MainActivity : FlutterActivity() {
         stopMonitoring()
         bluetoothMidi?.close()
         bluetoothMidi = null
+        updateInstaller?.dispose()
+        updateInstaller = null
         super.onDestroy()
     }
 
     companion object {
         private const val RESOURCE_METHOD_CHANNEL = "caw/resource_signals"
+        private const val UPDATES_METHOD_CHANNEL = "caw/updates"
         private const val RESOURCE_EVENT_CHANNEL = "caw/resource_signals/events"
         private const val COMPILER_METHOD_CHANNEL = "caw/compiler"
         private const val MIDI_EVENT_CHANNEL = "caw/midi"
