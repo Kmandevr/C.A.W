@@ -17,6 +17,9 @@ import 'files/asset_views.dart';
 import 'files/files_tree.dart';
 import 'files/library_manager.dart';
 import 'files/project_file_actions.dart';
+import 'files/project_library_view.dart';
+import 'files/selection_bar.dart';
+import 'frame/sections.dart' show SectionController;
 import 'glass.dart';
 import 'panel_motion.dart';
 import 'audio_file_actions.dart';
@@ -62,6 +65,10 @@ class _FileManagerScreenState extends State<FileManagerScreen> {
   late double _size = widget.explorer ? 0 : 0.35; // 0..1; under [_listBelow] the grid is a list
   static const _listBelow = 0.12;
   final _scaffold = GlobalKey<ScaffoldState>();
+
+  /// Select mode (owner, 2026-11-12): checkboxes on the items and the bottom bar with Delete.
+  bool _selecting = false;
+  final Set<String> _checked = {};
   final _search = TextEditingController();
 
   AppState get state => widget.state;
@@ -73,7 +80,34 @@ class _FileManagerScreenState extends State<FileManagerScreen> {
         onSelect: (key) {
           if (mounted) setState(() => _selected = key);
         },
+        onStartSelect: widget.explorer ? null : _startSelect,
       );
+
+  void _startSelect([String? key]) => setState(() {
+        _selecting = true;
+        if (key != null) _checked.add(key);
+      });
+
+  void _endSelect() => setState(() {
+        _selecting = false;
+        _checked.clear();
+      });
+
+  Future<void> _deleteChecked(List<FileAsset> shown) async {
+    final list = [for (final a in shown) if (_checked.contains(a.key) && !a.builtin) a];
+    if (list.isEmpty) return;
+    final uses = {for (final a in list) ...state.usesOf(a)};
+    final ok = await confirmDelete(context, list.length, list.length == 1 ? 'item' : 'items',
+        detail: uses.isEmpty ? null : 'Some are used on ${uses.take(4).join(', ')}${uses.length > 4 ? '…' : ''}; '
+            'deleting removes them there. You can undo this from the message that follows.');
+    if (!ok || !mounted) return;
+    final done = state.deleteAssets(list);
+    SectionController.maybeOf(context)?.pruneBuild(state.buildTabExists);
+    _endSelect();
+    setState(() => _selected = null);
+    showUndoSnack(context, 'Deleted ${done.count} item${done.count == 1 ? '' : 's'}.',
+        onUndo: () => state.undoAssetDeletion(done), onGone: () => state.finishAssetDeletion(done));
+  }
 
   @override
   void initState() {
@@ -102,6 +136,10 @@ class _FileManagerScreenState extends State<FileManagerScreen> {
   }
 
   void _go(String path) => setState(() {
+        if (path != _path) {
+          _selecting = false;
+          _checked.clear();
+        }
         _path = path;
         _query = '';
         _search.clear();
@@ -234,8 +272,9 @@ class _FileManagerScreenState extends State<FileManagerScreen> {
     return box.localToGlobal(box.size.bottomLeft(Offset.zero));
   }
 
-  Widget _toolbar(List<FilesFolder> trail, bool wide, bool searching) {
+  Widget _toolbar(List<FilesFolder> trail, bool wide, bool searching, {bool canSelect = false}) {
     final folder = trail.last;
+    final projects = folder.kind == FilesFolderKind.projects;
     return SizedBox(
       height: 40,
       child: Row(children: [
@@ -259,12 +298,17 @@ class _FileManagerScreenState extends State<FileManagerScreen> {
                 if (path != null && mounted) _go(path);
               })),
         Expanded(child: _breadcrumb(trail, searching)),
-        if (wide)
+        if (projects)
+          const SizedBox.shrink()
+        else if (wide)
           SizedBox(width: 200, child: _searchField())
         else
           _iconButton(Icons.search, 'Search', () => setState(() => _searchOpen = !_searchOpen), selected: _searchOpen),
+        if (canSelect || _selecting)
+          KeyedSubtree(key: const ValueKey('files-select'), child: _iconButton(Icons.checklist, _selecting ? 'Done selecting' : 'Select',
+              () => _selecting ? _endSelect() : _startSelect(), selected: _selecting)),
         // Build's own + New makes new files there.
-        if (!widget.explorer) Builder(builder: (c) => _iconButton(Icons.add, 'New', () => _newMenu(_centerOf(c), folder))),
+        if (!widget.explorer && !projects) Builder(builder: (c) => _iconButton(Icons.add, 'New', () => _newMenu(_centerOf(c), folder))),
         Builder(builder: (c) => _iconButton(Icons.more_vert, 'Project files', () => _projectMenu(_centerOf(c), folder))),
       ]),
     );
@@ -417,20 +461,25 @@ class _FileManagerScreenState extends State<FileManagerScreen> {
       final selected = a.key == (widget.explorer ? widget.activeKey ?? _selected : _selected);
       final fav = state.isFavourite(a);
       final warning = a.type == FileAssetType.cppComponent && state.cppStatus(a.cpp!) != null;
+      final check = _selecting && !a.builtin ? _checked.contains(a.key) : null;
       return AssetGestures(
         key: ValueKey(a.key),
         asset: a,
         onSelect: () {
           _keys.requestFocus();
+          if (_selecting) {
+            if (!a.builtin) setState(() => _checked.contains(a.key) ? _checked.remove(a.key) : _checked.add(a.key));
+            return;
+          }
           setState(() => _selected = a.key);
           if (widget.explorer) (widget.onOpenAsset ?? actions.open)(a);
         },
-        onOpen: () => widget.explorer ? null : actions.open(a),
+        onOpen: () => widget.explorer || _selecting ? null : actions.open(a),
         onMenu: (at) => actions.assetMenu(a, at),
         child: list
             ? AssetRow(asset: a, selected: selected, favourite: fav, warning: warning,
-                detail: searching ? a.type.label : null)
-            : AssetTile(asset: a, extent: extent, selected: selected, favourite: fav, warning: warning),
+                detail: searching ? a.type.label : null, checked: check)
+            : AssetTile(asset: a, extent: extent, selected: selected, favourite: fav, warning: warning, checked: check),
       );
     }
 
@@ -548,19 +597,40 @@ class _FileManagerScreenState extends State<FileManagerScreen> {
             },
             onMenu: _folderMenu,
           );
-          final main = Column(children: [
-            _toolbar(trail, wide, searching),
+          final deletable = [for (final a in assets) if (!a.builtin) a];
+          _checked.removeWhere((k) => !deletable.any((a) => a.key == k));
+          final Widget main;
+          if (folder.kind == FilesFolderKind.projects) {
+            main = Column(children: [
+              _toolbar(trail, wide, false),
+              Expanded(child: ProjectLibraryView(state: state)),
+            ]);
+          } else {
+          main = Column(children: [
+            _toolbar(trail, wide, searching, canSelect: !widget.explorer && deletable.isNotEmpty),
             if (widget.explorer && !searching) _explorerGroups(folder.path),
             if (!wide && _searchOpen)
               Padding(padding: const EdgeInsets.fromLTRB(Space.s, 0, Space.s, Space.xs), child: _searchField(autofocus: true)),
             if (!widget.explorer) _filterBar(subfolders.length + assets.length, narrow: c.maxWidth < 480),
             Expanded(child: _grid(folder, subfolders, assets, searching)),
-            if (selected != null && !sideInspector && !widget.explorer)
+            if (selected != null && !sideInspector && !widget.explorer && !_selecting)
               Padding(
                 padding: const EdgeInsets.fromLTRB(Space.s, 0, Space.s, Space.s),
                 child: GlassPanel(child: inspector(compact: true)),
               ),
+            if (!widget.explorer)
+              SelectionBar(
+                visible: _selecting,
+                count: _checked.length,
+                total: deletable.length,
+                onAll: () => setState(() => _checked.addAll(deletable.map((a) => a.key))),
+                onNone: () => setState(_checked.clear),
+                actions: [
+                  SelectionAction('delete', Icons.delete_outline, 'Delete', () => _deleteChecked(assets), danger: true),
+                ],
+              ),
           ]);
+          }
           if (wide) {
             return Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
               SizedBox(

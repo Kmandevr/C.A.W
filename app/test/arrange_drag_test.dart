@@ -8,6 +8,7 @@ import 'package:caw/model/arrange_fx.dart';
 import 'package:caw/model/project.dart';
 import 'package:caw/model/routing.dart';
 import 'package:caw/model/settings.dart';
+import 'package:caw/ui/arrange/focus_panel.dart';
 import 'package:caw/ui/arrange/fx_stack.dart';
 import 'package:caw/ui/arranger_screen.dart';
 import 'package:caw/ui/frame/sections.dart';
@@ -331,7 +332,7 @@ void main() {
     Future<void> dragHeader(WidgetTester tester, String id, Offset to, {bool touch = false}) async {
       final from = tester.getCenter(find.byKey(ValueKey('track-header-$id')));
       final g = await tester.startGesture(from, kind: touch ? PointerDeviceKind.touch : PointerDeviceKind.mouse);
-      if (touch) await tester.pump(const Duration(milliseconds: 600));
+      if (touch) await tester.pump(const Duration(milliseconds: 600)); // a hold: the menu, closed by the move
       for (var i = 1; i <= 6; i++) {
         await g.moveTo(Offset.lerp(from, to, i / 6)!);
         await tester.pump();
@@ -351,13 +352,6 @@ void main() {
       await tester.pumpAndSettle();
     }
 
-    Future<void> doubleTap(WidgetTester tester, Finder f) async {
-      await tester.tap(f);
-      await tester.pump(const Duration(milliseconds: 60));
-      await tester.tap(f);
-      await tester.pumpAndSettle();
-    }
-
     testWidgets('a header dragged up and down only reorders, even over a folder; its right third nests', (tester) async {
       await pump(tester);
       final a = tester.getRect(find.byKey(const ValueKey('track-header-a')));
@@ -371,24 +365,55 @@ void main() {
       expect(layer('c').parentId, 'f');
     });
 
-    testWidgets('a long press picks a header up at once; let go in place it stays and the menu opens',
+    testWidgets('a hold on a header opens its menu at once; moving on closes it and reorders the track',
         (tester) async {
+      s.starting = false;
+      s.history.reset(jsonEncode(s.project.toJson()));
       await pump(tester, size: const Size(412, 900));
       final head = find.byKey(const ValueKey('track-header-c'));
       final g = await tester.startGesture(tester.getCenter(head));
       await tester.pump(const Duration(milliseconds: 600));
-      expect(find.byKey(const ValueKey('track-drag-ghost')), findsOneWidget, reason: 'lifted before it moves');
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(find.text('Rename'), findsOneWidget, reason: 'a hold opens the menu while the finger is still down');
+      expect(find.byKey(const ValueKey('track-drag-ghost')), findsNothing, reason: 'not picked up until it moves');
       await g.up();
       await settle(tester);
       expect(s.project.layers.map((l) => l.id), ['a', 'f', 'b', 'c']);
-      expect(find.text('Rename'), findsOneWidget, reason: 'a hold let go without moving opens the menu');
+      expect(find.text('Rename'), findsOneWidget, reason: 'let go without moving, the menu stays');
       await tester.tapAt(const Offset(5, 5));
       await settle(tester);
       expect(find.text('Rename'), findsNothing);
 
+      // Held until the menu is open, then moved: the menu closes and the track moves up.
       final a = tester.getRect(find.byKey(const ValueKey('track-header-a')));
-      await dragHeader(tester, 'c', Offset(a.center.dx - 60, a.top + 4), touch: true);
+      final from = tester.getCenter(head);
+      final g2 = await tester.startGesture(from);
+      await tester.pump(const Duration(milliseconds: 600));
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(find.text('Rename'), findsOneWidget);
+      final to = Offset(a.center.dx - 60, a.top + 4);
+      for (var i = 1; i <= 6; i++) {
+        await g2.moveTo(Offset.lerp(from, to, i / 6)!);
+        await tester.pump();
+      }
+      await tester.pumpAndSettle();
+      expect(find.text('Rename'), findsNothing, reason: 'moving past the slop closes the menu');
+      expect(find.byKey(const ValueKey('track-drag-ghost')), findsOneWidget);
+      await g2.up();
+      await settle(tester);
       expect(s.project.layers.first.id, 'c');
+      expect(find.text('Rename'), findsNothing);
+      expect(s.undo(), isTrue, reason: 'the reorder is one undo step');
+      expect(s.project.layers.map((l) => l.id), ['a', 'f', 'b', 'c']);
+
+      // Moved before the hold fires, a finger scrolls the tracks: no menu, no reorder.
+      final g3 = await tester.startGesture(tester.getCenter(head));
+      await g3.moveBy(const Offset(0, -30));
+      await tester.pump(const Duration(milliseconds: 600));
+      await g3.up();
+      await settle(tester);
+      expect(find.text('Rename'), findsNothing, reason: 'past the slop the hold never opens the menu');
+      expect(s.project.layers.map((l) => l.id), ['a', 'f', 'b', 'c']);
 
       await hold(tester, find.byKey(const ValueKey('track-header-b')));
       expect(find.text('Rename'), findsOneWidget);
@@ -458,9 +483,17 @@ void main() {
       expect(s.moveTrack(layer('f'), layer('b'), TrackDrop.into), isFalse, reason: 'the model refuses it too');
     });
 
+    /// A hold on the clip (its menu opens), then a move past the slop and back: the menu closes and the clip is
+    /// picked up where it was (owner, 2026-11-12).
     Future<TestGesture> liftClip(WidgetTester tester) async {
       final g = await tester.startGesture(tester.getCenter(find.byKey(const ValueKey('clip-c1'))));
       await tester.pump(const Duration(milliseconds: 600));
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(find.text('Edit notes'), findsOneWidget, reason: 'the hold opened the menu');
+      await g.moveBy(const Offset(0, kTouchSlop + 2));
+      await tester.pump();
+      await g.moveBy(const Offset(0, -(kTouchSlop + 2)));
+      await tester.pumpAndSettle();
       return g;
     }
 
@@ -484,7 +517,7 @@ void main() {
       final g = await liftClip(tester);
       expect(find.byKey(const ValueKey('clip-drag-ghost')), findsOneWidget, reason: 'lifted before it moves');
       expect(haptics, contains('HapticFeedbackType.selectionClick'));
-      expect(find.text('Edit notes'), findsNothing, reason: 'a long press opens no menu now');
+      expect(find.text('Edit notes'), findsNothing, reason: 'moving on closed the menu');
       // Down to Lead and far left, past the project's start.
       final to = Offset(clip.center.dx - 900, laneOf(tester, 'c').dy);
       for (var i = 1; i <= 8; i++) {
@@ -533,34 +566,52 @@ void main() {
       expect(layer('a').clips.single.startSteps, 16);
     });
 
-    testWidgets('a finger tap selects a clip in the next frame; a quick second tap opens its menu as well',
-        (tester) async {
+    testWidgets('a finger tap only selects a clip; a quick second tap opens its editor, the notes', (tester) async {
       await pump(tester);
       final clip = find.byKey(const ValueKey('clip-c1'));
+      FocusTab? tab() => tester.widget<FocusPanel>(find.byType(FocusPanel)).tab;
       await tester.tap(clip);
       await tester.pump();
       expect(s.selectedClipIds, {'c1'}, reason: 'no double-tap wait (owner, 2026-11-11)');
-      expect(find.text('Edit notes'), findsNothing);
+      // Two taps further apart than the double-tap time are two taps: both only select (owner, 2026-11-12).
+      await tester.pump(kDoubleTapTimeout + const Duration(milliseconds: 50));
+      await tester.tap(clip);
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('focus-panel')), findsNothing, reason: 'a tap on the selected clip opens nothing');
+      expect(find.text('Edit notes'), findsNothing, reason: 'nor a menu');
+      await tester.pump(kDoubleTapTimeout);
+
+      // A double tap opens the clip's editor: its notes in the focus view's Clip tab.
+      await tester.tap(clip);
       await tester.pump(const Duration(milliseconds: 80));
       await tester.tap(clip);
       await tester.pumpAndSettle();
-      expect(find.text('Edit notes'), findsOneWidget, reason: 'the second tap adds the menu');
-      expect(s.selectedClipIds, {'c1'});
-      await tester.tapAt(const Offset(5, 5));
+      expect(find.byKey(const ValueKey('focus-panel')), findsOneWidget);
+      expect(tab(), FocusTab.clip);
+      expect(find.text('Edit notes'), findsNothing, reason: 'a double tap opens no menu');
       await settle(tester);
+    });
 
-      // Two taps further apart than the double-tap time are two taps: the second opens no menu.
-      await tester.tap(clip);
-      await tester.pump(kDoubleTapTimeout + const Duration(milliseconds: 50));
-      await tester.tap(clip);
-      await tester.pump();
+    testWidgets('a mouse click selects a clip and a double-click opens its notes', (tester) async {
+      await pump(tester);
+      final clip = find.byKey(const ValueKey('clip-c1'));
+      await tester.tap(clip, kind: PointerDeviceKind.mouse);
+      await tester.pumpAndSettle();
+      expect(s.selectedClipIds, {'c1'});
+      expect(find.byKey(const ValueKey('focus-panel')), findsNothing);
+      await tester.pump(kDoubleTapTimeout);
+      await tester.tap(clip, kind: PointerDeviceKind.mouse);
+      await tester.pump(const Duration(milliseconds: 60));
+      await tester.tap(clip, kind: PointerDeviceKind.mouse);
+      await tester.pumpAndSettle();
+      expect(tester.widget<FocusPanel>(find.byType(FocusPanel)).tab, FocusTab.clip);
       expect(find.text('Edit notes'), findsNothing);
       await settle(tester);
     });
 
-    testWidgets('a double tap on a clip opens its menu, in sections; a right-click too', (tester) async {
+    testWidgets('a hold on a clip opens its menu, in sections; a right-click too', (tester) async {
       await pump(tester);
-      await doubleTap(tester, find.byKey(const ValueKey('clip-c1')));
+      await hold(tester, find.byKey(const ValueKey('clip-c1')));
       expect(find.text('Edit notes'), findsOneWidget);
       expect(find.byKey(const ValueKey('menu-section-Clip')), findsOneWidget);
       expect(find.byKey(const ValueKey('menu-section-Edit')), findsOneWidget);
@@ -590,7 +641,7 @@ void main() {
       await tester.tapAt(const Offset(5, 5));
       await tester.pumpAndSettle();
 
-      await doubleTap(tester, find.byKey(const ValueKey('clip-c1')));
+      await hold(tester, find.byKey(const ValueKey('clip-c1')));
       await tester.enterText(find.byKey(const ValueKey('menu-number-field-length-(bars)')), '2');
       await tester.testTextInput.receiveAction(TextInputAction.done);
       await tester.pump();

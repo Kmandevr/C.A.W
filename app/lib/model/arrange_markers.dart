@@ -22,6 +22,20 @@ extension ArrangeMarkers on AppState {
     endUndoStep();
   }
 
+  /// Removes the loop range: it turns off and its markers go (owner, 2026-11-12: a handle dragged onto the other
+  /// end collapses the loop). One undo step; undo brings the range back as it was.
+  void clearLoopRange() {
+    final p = project;
+    if (!p.loopRange && !p.hasLoopRange) return;
+    endUndoStep();
+    editProject((p) {
+      p.loopRange = false;
+      p.loopStartSteps = 0;
+      p.loopEndSteps = 0;
+    });
+    endUndoStep();
+  }
+
   /// The loop button and R (REAPER's repeat): turns the loop range on or off. With none drawn yet, the time selection
   /// becomes it, else the four bars from the bar the playhead is in.
   void toggleLoopRange() {

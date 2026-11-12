@@ -25,12 +25,16 @@ import '../panel_motion.dart';
 /// Actions shared by the Files screen and its inspector. [onOpenBuilder] is the old shell's fallback for opening
 /// a module when there is no SectionScope; [onSelect] makes a new or copied asset the selection.
 class FilesActions {
-  FilesActions({required this.context, required this.state, required this.onOpenBuilder, required this.onSelect});
+  FilesActions({required this.context, required this.state, required this.onOpenBuilder, required this.onSelect,
+      this.onStartSelect});
 
   final BuildContext context;
   final AppState state;
   final VoidCallback onOpenBuilder;
   final void Function(String? key) onSelect;
+
+  /// Starts select mode with the item checked (the menu's Select); null where there is no select mode.
+  final void Function(String key)? onStartSelect;
 
   /// Set when ▶ preview started the transport, so stopping the preview stops it too.
   static bool _previewStartedPlay = false;
@@ -167,7 +171,8 @@ class FilesActions {
       if (a.sample != null) const MenuEntry('save-wav', Icons.file_upload_outlined, 'Save WAV…'),
       if (a.module != null) const MenuEntry('tags', Icons.sell_outlined, 'Edit tags'),
       if (a.preset != null) const MenuEntry('export-preset', Icons.file_upload_outlined, 'Export preset file'),
-      if (!a.builtin) const MenuEntry('delete', Icons.delete_outline, 'Delete', danger: true, dividerBefore: true),
+      if (!a.builtin && onStartSelect != null) const MenuEntry('select', Icons.checklist, 'Select', dividerBefore: true),
+      if (!a.builtin) MenuEntry('delete', Icons.delete_outline, 'Delete', danger: true, dividerBefore: onStartSelect == null),
     ]);
     if (action == null || !context.mounted) return;
     switch (action) {
@@ -195,6 +200,8 @@ class FilesActions {
         } catch (e) {
           notice('Could not save: $e', error: true);
         }
+      case 'select':
+        onStartSelect?.call(a.key);
       case 'delete':
         await delete(a);
     }

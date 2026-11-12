@@ -132,27 +132,32 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  testWidgets('a double tap opens the menu (owner, 2026-11-11): reverse and split', (tester) async {
+  Future<void> hold(WidgetTester tester, Finder f) async {
+    await tester.longPress(f);
+    await tester.pumpAndSettle();
+  }
+
+  testWidgets('a hold opens the menu (owner, 2026-11-12): reverse and split', (tester) async {
     s.pausedStep = 24;
     await pump(tester);
-    // The first tap selects in the next frame (no double-tap wait); the second adds the menu.
+    // A tap selects in the next frame (no double-tap wait) and opens nothing.
     await tester.tap(find.byKey(const ValueKey('audio-clip-c1')));
     await tester.pump();
     expect(s.selectedClipIds, {'c1'});
     expect(find.text('Reverse'), findsNothing);
     await tester.pump(kDoubleTapTimeout + const Duration(milliseconds: 50));
-    await doubleTap(tester, find.byKey(const ValueKey('audio-clip-c1')));
+    await hold(tester, find.byKey(const ValueKey('audio-clip-c1')));
     await tester.tap(find.text('Split at the playhead'));
     await tester.pumpAndSettle();
     expect(s.project.layers.first.audioClips, hasLength(2));
-    await doubleTap(tester, find.byKey(const ValueKey('audio-clip-c1')));
+    await hold(tester, find.byKey(const ValueKey('audio-clip-c1')));
     await tester.tap(find.text('Reverse'));
     await tester.pumpAndSettle();
     expect(clip().reverse, isTrue);
     await settle(tester);
   });
 
-  testWidgets('a tap on the selected clip opens its editor, the Clip tab', (tester) async {
+  testWidgets('a double tap opens its editor, the Clip tab; a tap on the selected clip only selects', (tester) async {
     final sections = SectionController();
     addTearDown(sections.dispose);
     tester.view.physicalSize = const Size(1400, 900);
@@ -168,12 +173,14 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('audio-clip-c1')));
     await tester.pump(kDoubleTapTimeout + const Duration(milliseconds: 50));
     await tester.pumpAndSettle();
+    expect(sections.focusedLayer, isNull, reason: 'a tap on the selected clip only selects (owner, 2026-11-12)');
+    await doubleTap(tester, find.byKey(const ValueKey('audio-clip-c1')));
     expect(sections.focusedLayer, 't1');
     expect(tester.widget<FocusPanel>(find.byType(FocusPanel)).tab, FocusTab.clip);
     await settle(tester);
   });
 
-  testWidgets('a long press lifts it whole onto another track, on the grid, never before the start', (tester) async {
+  testWidgets('a hold that moves lifts it whole onto another track, on the grid, never before the start', (tester) async {
     s.starting = false;
     s.history.reset(jsonEncode(s.project.toJson()));
     s.arrangementSnapSteps = 4;
@@ -181,12 +188,15 @@ void main() {
     final box = tester.getRect(find.byKey(const ValueKey('audio-clip-c1')));
     final g = await tester.startGesture(box.center);
     await tester.pump(const Duration(milliseconds: 600));
-    expect(find.text('Split at the playhead'), findsNothing, reason: 'a long press opens no menu now');
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.text('Duplicate'), findsOneWidget, reason: 'a hold opens the menu (owner, 2026-11-12)');
     final to = Offset(box.center.dx - 900, tester.getCenter(find.byKey(const ValueKey('track-header-t2'))).dy);
     for (var i = 1; i <= 8; i++) {
       await g.moveTo(Offset.lerp(box.center, to, i / 8)!);
       await tester.pump();
     }
+    await tester.pumpAndSettle();
+    expect(find.text('Duplicate'), findsNothing, reason: 'moving on closed it');
     await g.up();
     await settle(tester);
     expect(s.project.layers.first.audioClips, isEmpty);

@@ -232,14 +232,12 @@ void main() {
       expect(find.byKey(const ValueKey('folder-guide-b-0')), findsOneWidget);
     });
 
-    testWidgets('a double tap opens the focus view on its effects', (tester) async {
+    testWidgets('a tap selects; a double tap opens the focus view on its effects', (tester) async {
       await pump(tester, size: const Size(1200, 800));
       await tester.tap(header('c'));
       await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const ValueKey('focus-tab-mixer')));
-      await tester.pumpAndSettle();
-      await tester.tap(header('c'));
-      await tester.pumpAndSettle(); // closes
+      expect(s.selectedLayerId, 'c');
+      expect(sections.focusedLayer, isNull, reason: 'a tap only selects (owner, 2026-11-12)');
       await tester.pump(kDoubleTapTimeout);
       await tester.tap(header('c'));
       await tester.pump(const Duration(milliseconds: 60));
@@ -272,7 +270,7 @@ void main() {
   });
 
   group('clips', () {
-    testWidgets('a tap on the selected clip opens its notes; a double tap still opens its menu', (tester) async {
+    testWidgets('a tap selects a clip, a double tap opens its notes, a hold its menu', (tester) async {
       await pump(tester, size: const Size(1200, 800));
       await tester.tap(find.byKey(const ValueKey('clip-c1')));
       await tester.pump(kDoubleTapTimeout);
@@ -282,12 +280,15 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('clip-c1')));
       await tester.pump(kDoubleTapTimeout);
       await tester.pumpAndSettle();
-      expect(sections.focusedLayer, 'a');
-      expect(tester.widget<FocusPanel>(find.byType(FocusPanel)).tab, FocusTab.clip);
-      // A double tap on it opens the menu instead.
+      expect(sections.focusedLayer, isNull, reason: 'a tap on the selected clip only selects (owner, 2026-11-12)');
       await tester.tap(find.byKey(const ValueKey('clip-c1')));
       await tester.pump(const Duration(milliseconds: 60));
       await tester.tap(find.byKey(const ValueKey('clip-c1')));
+      await tester.pumpAndSettle();
+      expect(sections.focusedLayer, 'a');
+      expect(tester.widget<FocusPanel>(find.byType(FocusPanel)).tab, FocusTab.clip);
+      expect(find.text('Edit notes'), findsNothing);
+      await tester.longPress(find.byKey(const ValueKey('clip-c1')));
       await tester.pumpAndSettle();
       expect(find.text('Edit notes'), findsOneWidget);
       await tester.tapAt(const Offset(5, 5));
@@ -566,6 +567,8 @@ void main() {
       expect(card, findsNothing);
 
       await tester.tap(header('c'));
+      await tester.pump(const Duration(milliseconds: 60));
+      await tester.tap(header('c')); // a double tap opens it (owner, 2026-11-12)
       await settle(tester);
       final panel = find.byKey(const ValueKey('focus-panel'));
       expect(panel, findsOneWidget);
