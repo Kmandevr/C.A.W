@@ -6,6 +6,7 @@ import '../../theme.dart';
 import '../device_controls.dart';
 import '../device_registry.dart';
 import '../device_scope.dart';
+import '../kit/param_watch.dart';
 import '../kit/controls.dart';
 import '../visuals/filter_curve.dart';
 import '../visuals/unison_view.dart';
@@ -160,8 +161,11 @@ class OscCard extends StatelessWidget {
   final int n;
   final bool initiallyOpen;
 
+  // Its own watch (param_watch.dart): a knob step in another card doesn't rebuild it.
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => watchDevice(context, _body);
+
+  Widget _body(BuildContext context) {
     final scope = DeviceScope.of(context);
     final t = scope.target;
     final p = 'osc${n}_';
@@ -206,8 +210,11 @@ Widget _roomy(Widget Function(bool roomy) b) => LayoutBuilder(builder: (context,
 class FilterRoutingCard extends StatelessWidget {
   const FilterRoutingCard({super.key});
 
+  // Its own watch (param_watch.dart): a knob step in another card doesn't rebuild it.
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => watchDevice(context, _body);
+
+  Widget _body(BuildContext context) {
     final scope = DeviceScope.of(context);
     final parallel = scope.target.value('flt_routing') >= 0.5;
     return DeviceExpandCard(
@@ -281,8 +288,11 @@ class FilterCard extends StatelessWidget {
   final int n;
   final bool initiallyOpen;
 
+  // Its own watch (param_watch.dart): a knob step in another card doesn't rebuild it.
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => watchDevice(context, _body);
+
+  Widget _body(BuildContext context) {
     final scope = DeviceScope.of(context);
     final t = scope.target;
     final p = 'flt${n}_';
@@ -316,8 +326,11 @@ class FilterCard extends StatelessWidget {
 class VoiceCard extends StatelessWidget {
   const VoiceCard({super.key});
 
+  // Its own watch (param_watch.dart): a knob step in another card doesn't rebuild it.
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => watchDevice(context, _body);
+
+  Widget _body(BuildContext context) {
     final scope = DeviceScope.of(context);
     final t = scope.target;
     return DeviceExpandCard(

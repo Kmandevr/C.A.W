@@ -19,7 +19,7 @@ This note records the current implementation gaps in C.A.W.'s music-production w
 - **[Implemented]** Patterns hold any number of notes and curve points in the app as in the engine (F7.1, 2026-11-04).
 - **[Implemented]** Opening straight into the last project; New, New from template and Open are in the project menu.
 - **[Implemented]** Pause and resume (Space) on the same beat, and Stop (Shift+Space) back to the start (2026-11-05, `caw_engine_play_at`).
-- **[Implemented]** Project-wide undo and redo in the transport (whole-project snapshots, one per burst of edits, 100 steps). Saves write the project through a temporary file, one write at a time, so a burst of saves always leaves the newest whole project on disk. The piano roll, library and automation keep their own histories too.
+- **[Implemented]** Project-wide undo and redo in the transport (whole-project snapshots, one per burst of edits, 100 steps). Saves write the project through a temporary file, one write at a time, so a burst of saves always leaves the newest whole project on disk. Files › Projects lists projects with their metadata (created, last edited, saved-with version, tracks, length, tempo) in folders, with select mode and an undoable mass delete. The piano roll, library and automation keep their own histories too.
 - **[Implemented]** MIDI pattern import/export (.mid, .midi2) through the pattern editor. Imported MIDI tempo is not applied to project tempo.
 - **[Implemented]** Curve tool for velocity and chance lane curves; per-note expression editors support pitch bend, pressure/volume, timbre and vibrato, including editable points and segment bends.
 - **[Implemented]** Pattern actions include Euclidean, random-in-key, arpeggiate, humanize, chord stamp, legato, reverse and pitch inversion.
@@ -36,7 +36,7 @@ This note records the current implementation gaps in C.A.W.'s music-production w
 
 ### Mixer and signal flow
 
-- **[Implemented]** Track volume/pan/mute/solo, generator/effect chains, nested folder buses, folder routing and group volume/pan, master output level, and peak meters for the master (stereo), each track and each folder, on a dB scale; volume faders in dB on a REAPER-like taper up to +12 dB (track and master gain up to +12 dB since 2026-11-10), stereo meters on stereo tracks. Routing between tracks, buses and master carries 32-bit float since 2026-11-03 (Foundation F4.2).
+- **[Implemented]** Track volume/pan/mute/solo, generator/effect chains, nested folder buses, folder routing and group volume/pan, master output level, and peak meters for the master (stereo), each track and each folder, on a dB scale; volume faders in dB on a REAPER-like taper up to +12 dB (track and master gain up to +12 dB since 2026-11-10), stereo meters on stereo tracks; every track's meter read in one engine call per 30 Hz poll (API 25, 2026-11-12). Routing between tracks, buses and master carries 32-bit float since 2026-11-03 (Foundation F4.2).
 - **[Partial]** Exported module signals and sidechain concepts exist in the engine/module system, but full user-facing routing and modulation connections are not integrated as a general mixer workflow.
 - **[Incomplete]** Sends, arbitrary buses, parallel routing/effects, master effect chain and full plugin/global parameter automation.
 

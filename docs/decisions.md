@@ -16,6 +16,23 @@ The owner heard audio break on the Galaxy S22+ when another app used the microph
 - **"Microphone in use by another app"** where the input meters are, while playback goes on and the input is retried quietly.
 - **An Android foreground service of type `mediaPlayback`** (owner-approved), plus `microphone` while recording: it runs while playing or recording, its notification says *C.A.W is playing* or *recording* with Play/Pause and Stop wired to the transport, and it stops when playback stops. Not exported; explicit `FLAG_IMMUTABLE` PendingIntents; POST_NOTIFICATIONS asked on Android 13+ the first time something plays. [Fact] (developer.android.com, read 2026-11-12: foreground service types; restrictions on starting from the background; launching a foreground service; notification runtime permission; PendingIntent): `mediaPlayback` needs FOREGROUND_SERVICE_MEDIA_PLAYBACK and no runtime permission; `microphone` needs FOREGROUND_SERVICE_MICROPHONE and RECORD_AUDIO, and on Android 14+ cannot be created while the app is in the background; apps targeting Android 12+ cannot start a foreground service from the background; a foreground service runs without POST_NOTIFICATIONS, its notice then only in the Task Manager; Android 12+ requires FLAG_IMMUTABLE or FLAG_MUTABLE. Renders are not covered (they run in front). No new dependency (the framework's `Notification.Builder`).
 - **Battery: a Settings row and a one-time hint (owner, 2026-11-12):** the test build played perfectly behind the app once C.A.W's battery was set to Unrestricted, so Settings › Audio shows whether it is restricted with an Open button to Android's page for C.A.W, and the first time playback goes behind the app while restricted a hint suggests Unrestricted (Open settings, Don't show again, saved). Not the `ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` system dialog (the owner did not choose it). Hidden on Windows and Linux. [Fact] (developer.android.com, read 2026-11-12): `PowerManager.isIgnoringBatteryOptimizations(packageName)` (API 23) says whether the app is on the power allowlist; `Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS` (API 23) shows the list of apps that may ignore battery optimizations; `ACTION_APPLICATION_DETAILS_SETTINGS` (API 9, `package:` URI) shows the app's details, and a matching activity may not exist. [Assumption] on Samsung One UI the app's details page is one tap (Battery) from the per-app Unrestricted choice, closer than the all-apps list.
+## 2026-11-12: No shared buses; work the REAPER way (owner)
+
+**Decision (owner):** "I don't love the use of busses. I like REAPER's way of working." The shared reverb-bus idea (A7) is dropped. Routing stays REAPER-style: tracks, folders and sends between tracks, with no separate bus concept added. Speed for heavy Flagship patches comes from the engine itself.
+
+## 2026-11-12: Files › Projects: select mode and folders (owner)
+
+**Request (owner):** an easy way to mass-delete projects and files, and better-organised project files: a real integration rather than a list, with metadata (the version a project was built with, dates and so on) and folders to sort projects into.
+
+**Look (owner's choice, "Select mode + folders"):** in Files › Projects, a Select button or a long press turns on checkboxes and a bottom bar ("N selected", Delete, Move to folder, Export, select all / none); Delete asks once and is undoable; mass delete also works for the other files Files lists; folders can be created, renamed, deleted (when empty, or asking to move the contents up), nested and dragged into; old projects show at the top level; each card shows name, last edited and created dates, the app version it was last saved with, track count, length and tempo; a sort menu (name, last edited, created, size) and a search box above the list. Metadata is read cheaply (an index or a small read, off the UI isolate).
+
+**Choices (Claude, within the owner's look):**
+- **Folders in an index file** (`projects/library.json`), not directories: project ids and file paths never change, and old projects need no migration (no entry: top level).
+- **Undoable delete through a trash** (`projects/trash/<batch>/`), not restore points: the project and everything that belongs to it move in one rename each; Undo moves them back; the batch is deleted when the Undo message closes, or at the next start. Files' other items undo through project undo (one step), kept presets and set-aside WAVs.
+- **New project fields** `created` and `saved_with` (`{version, build}`); old projects read as *unknown* rather than guessing from file times. `appBuild` (pubspec's `+N`) joins `appVersion`.
+- **Last edited** is the file's modified time, which now changes only when the content does (saving identical text is skipped).
+- **Export** of several projects saves each as a plain `.caw` (the project JSON) into one picked folder; the single-project Export project… keeps packaging samples.
+- **Long press** on a project card starts select mode, as chosen; on other Files items it still opens the item's menu (whose new Select entry starts select mode), so their existing gestures and keyboard Delete stay as they were.
 
 ## 2026-11-12: Open alpha and beta: what the names mean (owner)
 
@@ -30,6 +47,19 @@ The owner heard audio break on the Galaxy S22+ when another app used the microph
 **Automatic updates (owner):** an opt-in setting, off by default ("people don't like change on things like DAWs"), that installs new alpha or beta releases of the chosen channel in the background without the user seeing it, as far as each platform allows. It can be turned off at any time.
 
 **Compatibility (owner):** from the official 1.0 release on, backwards compatibility with future updates is a priority: projects, settings and saved files from 1.0 must keep opening in later versions.
+
+## 2026-11-12: Editing cues and one set of gesture rules for Arrange (owner)
+
+**Decision (owner, through the coordinating session):**
+- **Piano roll cursor** (look: like the arranger): the roll shows Arrange's edit cursor line and playhead line, across the whole roll.
+- **Piano roll ruler:** a tap or click on the ruler moves the playback cursor there, snapped, and playback jumps there if playing; a drag along it draws a loop (snapped) and turns it on, with a handle at each end, exactly as Arrange's loop. **Choice (Claude):** this is the song's loop range, the same one as Arrange's: the roll's existing "loop bar" is the clip's loop length (one end, starting at the source), not a range that can be drawn, so it stays as it was and the ruler's loop is the project's.
+- **Loop collapse:** in Arrange and the roll, a loop handle dragged so the loop has no length turns the loop off and removes its markers, on release; undo restores it.
+- **Drag guides** (look: two thin lines): while clips are moved in Arrange, two thin full-height lines in the clip's colour at its start and end, through every track and the ruler, and the start as bar.beat in a small tag on the ruler; they fade in and out; a multi-clip drag uses the selection's overall start and end. **Choice (Claude):** a trim of either edge shows them too, at where the clip will start and end; audio clips show them as MIDI clips do.
+- **Gestures for track headers and clips** (gesture changes only, the look unchanged): a single tap only selects; a double tap runs the quick action; a hold without moving opens the menu (the existing long-press menus); a hold that moves past the touch slop moves the item (a clip in time and across tracks; a header reorders the track, folders included) and closes the menu if it had opened; a finger that moves before the hold fires never gets the menu. With a mouse: click selects, double-click is the quick action, right-click the menu, drag moves. **Choice (Claude):** a clip's quick action opens its editor (a MIDI or drum pattern clip's notes in the focus view's Clip tab, the piano roll; an audio clip's Clip tab); a header's opens the focus view on its FX tab (the instrument and effects), which the double tap already did; on the focus view's pinned track a tap still returns to all tracks.
+
+- **Notes in clips when zoomed out** (owner's choice "Thin note lines", replacing the density bars the owner disliked): notes stay at their real pitch as 1–2 px lines, the pitch range fitted to the clip's height with a minimum gap so lines never merge, a tick per hit on drum clips, and no switch between zoom levels. **Choice (Claude):** far out, where a lane's clips are blocks, the block becomes a light tint with the note lines over it, from the same cached pictures.
+
+**Why the held menu is not a route:** a pushed route cancels every pointer under it (Flutter's `Navigator`), so the held finger could not go on to move the item; a menu opened by a hold is drawn in the overlay instead and closes on Esc, Back, a tap outside or a choice as before.
 
 ## 2026-11-12: Beta readiness: speed, smoothness, a stress test, telemetry and feedback (owner)
 
@@ -229,13 +259,13 @@ The owner added (2026-11-11): inputs too (Bluetooth headsets' and USB microphone
   - a vertical pinch on a header.
 - **Height per track:** each track can be resized on its own, and the global height is the default.
 - **Nested tracks are indented** under their parent, by depth, so the nesting is visible.
-- **Header gestures:**
+- **Header gestures** (superseded on 2026-11-12, above: a tap only selects, a double tap opens the track, a hold opens the menu at once):
   - a tap selects at once, and the focus view follows;
   - a **double tap opens the track's effects**: the focus view's FX tab;
   - a **hold opens the track menu** when released without moving, and a hold followed by a drag reorders or nests the track as before;
   - right-click opens the menu with a mouse.
-- **Clips:** a tap on an already selected clip opens its editor (the piano roll for MIDI, the audio editor for audio). A double tap still opens the clip menu.
-- **Header taps, clarified (owner, 2026-11-11):** "a normal tap on the head would just focus it": a single tap focuses at once (selects, and opens or pins the focus view on its tab, in the same frame); a quick second tap switches that view to the FX tab, counted anywhere on the newly pinned track or at the first tap's place.
+- **Clips** (superseded on 2026-11-12, above: a double tap opens the editor, a hold the menu): a tap on an already selected clip opens its editor (the piano roll for MIDI, the audio editor for audio). A double tap still opens the clip menu.
+- **Header taps, clarified (owner, 2026-11-11; superseded on 2026-11-12, above):** "a normal tap on the head would just focus it": a single tap focuses at once (selects, and opens or pins the focus view on its tab, in the same frame); a quick second tap switches that view to the FX tab, counted anywhere on the newly pinned track or at the first tap's place.
 - **Following the playhead (owner, 2026-11-11):** while the user zooms, scrolls or drags, following never pulls the view; it resumes a set delay after the last interaction or selection change (Settings › Editing › **Resume after**, 0.5–10 s, 2.5 s by default, or Never: until the next Play). **Follow the playhead** off stops it in both editors; its style is **Page** (the default) or **Smooth** (the playhead stays a third in).
 - **More from the owner the same day:** everything that animates in animates out; a moved note or clip slides there quickly (90–120 ms); the arrangement zooms out "a metric ton" and never ends on the right; moves the view makes on its own glide; clip edges change a clip's width, never its content's scale; the Arrange hint shows only while no track has a clip, centred in the view.
 

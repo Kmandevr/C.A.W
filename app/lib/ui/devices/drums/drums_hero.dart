@@ -1,4 +1,5 @@
 // The drums' waveform hero: the shown pad's last hit (live) or its sound drawn from the knobs (≈), its pitch curve, and drags for the pitch sweep and decay; in Points mode the pitch shape's four points drag in place.
+import '../kit/repaint.dart';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -255,5 +256,6 @@ class _HeroPainter extends CustomPainter {
   static double _soft(double v) => v.sign * math.pow(v.abs().clamp(0.0, 1.0), 0.7).toDouble();
 
   @override
-  bool shouldRepaint(covariant _HeroPainter o) => true;
+  bool shouldRepaint(covariant _HeroPainter o) =>
+      paintInputsChanged([o.color, o.second, o.sketch, o.live, o.shape, o.axis, o.active], [color, second, sketch, live, shape, axis, active]);
 }

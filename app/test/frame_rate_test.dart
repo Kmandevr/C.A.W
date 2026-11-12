@@ -1,5 +1,6 @@
 // Tests the frame-rate setting: saving and migrating it, the choices a screen's rates allow, Auto's idle drop with a
-// fake clock, timer and display, a fixed cap, Android's channel (mocked), and the Settings row.
+// fake clock, timer and display, a fixed cap, the performance profiles' caps, Android's channel (mocked), and the
+// Settings row.
 import 'dart:async';
 import 'dart:io';
 
@@ -162,6 +163,96 @@ void main() {
       timers.advance(const Duration(seconds: 1));
       expect(display.asked.last, 60);
     });
+  });
+
+  group('profile caps (owner, 2026-11-12)', () {
+    late _FakeDisplay display;
+    late _FakeTimers timers;
+    late FrameRateController c;
+
+    setUp(() async {
+      display = _FakeDisplay([30, 60, 120]);
+      timers = _FakeTimers();
+      c = FrameRateController(device: display, now: () => timers.now, timer: timers.make);
+      FrameRateController.current = c;
+      await c.start(attach: false);
+    });
+    tearDown(() {
+      FrameRateController.current = null;
+      c.dispose();
+    });
+
+    test('the profiles set the cap: Lightweight 60, Minimal 30, Full and Balanced none', () async {
+      final s = Settings();
+      final caps = <PerformanceMode, int>{};
+      for (final m in PerformanceMode.values) {
+        await s.update((x) => x.performanceMode = m);
+        caps[m] = c.profileCap;
+      }
+      expect(caps, {PerformanceMode.fullExperience: 0, PerformanceMode.balanced: 0, PerformanceMode.lightweight: 60,
+          PerformanceMode.minimal: 30});
+    });
+
+    test('under Auto it caps the moving rate and the idle drop stays', () {
+      c.setProfileCap(60);
+      expect(display.asked.last, 60);
+      expect(c.effectiveCap, 60);
+      timers.advance(const Duration(seconds: 1));
+      expect(c.idle, isTrue);
+      expect(display.asked.last, 30, reason: 'still: the lowest');
+      timers.advance(const Duration(milliseconds: 300));
+      c.onFrame();
+      expect(display.asked.last, 60, reason: 'moving again: the cap, not the screen\'s highest');
+      c.setProfileCap(0);
+      expect(display.asked.last, 120);
+    });
+
+    test('with a fixed setting, the lower of the two', () {
+      c.setCap(120);
+      c.setProfileCap(60);
+      expect(c.effectiveCap, 60);
+      expect(display.asked.last, 60);
+      expect(c.profileCaps, isTrue);
+      c.setProfileCap(30);
+      expect(display.asked.last, 30);
+      c.setCap(60);
+      c.setProfileCap(60);
+      expect(c.profileCaps, isFalse, reason: 'the setting already asks for 60');
+      expect(display.asked.last, 60);
+      c.setProfileCap(0);
+      c.setCap(120);
+      expect(display.asked.last, 120);
+    });
+  });
+
+  testWidgets('the Frame rate row says when the profile caps it', (tester) async {
+    final display = _FakeDisplay([60, 120]);
+    final timers = _FakeTimers();
+    final c = FrameRateController(device: display, now: () => timers.now, timer: timers.make);
+    FrameRateController.current = c;
+    addTearDown(() {
+      FrameRateController.current = null;
+      c.dispose();
+    });
+    await c.start(attach: false);
+    final s = Settings();
+    await s.update((x) => x.performanceMode = PerformanceMode.lightweight);
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(MaterialApp(theme: Neon.theme(), home: SettingsPage(settings: s, onEditKeys: (_) async {})));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('section-performance')));
+    await tester.pumpAndSettle();
+    final row = find.byKey(const ValueKey('setting-performance.frameRate'));
+    await tester.ensureVisible(row);
+    await tester.pumpAndSettle();
+    expect(find.descendant(of: row, matching: find.textContaining('Lightweight caps it at 60 Hz')), findsOneWidget);
+    expect(display.asked.last, 60);
+    await s.update((x) => x.performanceMode = PerformanceMode.balanced);
+    await tester.pumpAndSettle();
+    expect(find.descendant(of: row, matching: find.textContaining('caps it at')), findsNothing);
+    expect(display.asked.last, 120);
   });
 
   test('a one-rate screen or a platform that cannot ask: no idle timer', () async {

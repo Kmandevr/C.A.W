@@ -23,6 +23,7 @@ import 'mixer_fx.dart' show masterLayerId;
 import 'pattern_doc.dart';
 import 'playhead_clock.dart';
 import 'settings.dart';
+import 'project_library.dart' show TrashBatch;
 import 'storage.dart';
 import 'pattern_templates.dart';
 import 'templates.dart';
@@ -507,7 +508,7 @@ class AppState extends ChangeNotifier {
     if (before.playing != meters.playing) {
       EngineExecutionPolicy.updateRuntimeSignals(audioActive: meters.playing);
     }
-    layerMeters = [for (var i = 0; i < project.layers.length; i++) e.layerMeter(i)];
+    layerMeters = e.layerMeters(project.layers.length); // one C API call for every track (beta plan B4.8)
     final now = nowUs;
     meterTimeline.push(MeterReading(now, meters, layerMeters));
     if (e.audioOn && now - _latencyReadUs > 3000000) {
@@ -736,6 +737,10 @@ class AppState extends ChangeNotifier {
     if (e == null) return;
     _livePending = null; // the project as it is now supersedes a drag step not yet sent
     _docGen++;
+    // What a sync can change that the screens show: listeners hear of it only when one of these differs (an edit
+    // already notified when it was made; a sync with the same result rebuilds nothing; beta plan B4.4).
+    final before = (info: info, error: engineError, warnings: e.lastProjectWarnings, on: _transportOn,
+        id: _engineProjectId);
     final json = _engineJson();
     final id = project.id;
     try {
@@ -757,7 +762,10 @@ class AppState extends ChangeNotifier {
         }
       }
     }
-    notifyListeners();
+    if (!mapEquals(before.info, info) || before.error != engineError || before.on != _transportOn ||
+        before.id != _engineProjectId || !listEquals(before.warnings, e.lastProjectWarnings)) {
+      notifyListeners();
+    }
   }
 
   /// The project whose state the engine holds (null before the first project loads): see [_syncNow].
@@ -2049,6 +2057,8 @@ class AppState extends ChangeNotifier {
     } on ArgumentError {
       // An id storage refuses has no folder; its paths stay as they are and the engine refuses the project.
     }
+    // A project with no file yet is being made now: it records when (an old one without the field stays unknown).
+    if (p.created == null && !(await _storage?.has(p.id) ?? true)) p.created = DateTime.now().toUtc();
     project = p;
     openError = null;
     openNotice = switch (p.droppedModules) {
@@ -2119,17 +2129,47 @@ class AppState extends ChangeNotifier {
   }
 
   Future<void> duplicateProject() async {
-    final copy = ProjectDoc.fromJson(project.toJson()..['id'] = newId('p'));
+    final copy = ProjectDoc.fromJson(project.toJson()..['id'] = newId('p'))..created = null;
     copy.name = '${project.name} copy';
     await _switchTo(copy);
   }
 
   Future<void> deleteProject(String id) async {
+    if (id == project.id) _saveTimer?.cancel();
     await _storage?.delete(id);
-    if (id == project.id) {
-      final rest = await listProjects();
-      final next = rest.isEmpty ? null : await _storage?.load(rest.first.id);
-      await _switchTo(next ?? starterProject());
+    if (id == project.id) await _leaveGoneProject();
+  }
+
+  /// After the open project was deleted: the newest other one opens (or the default project), and the deleted one
+  /// is not saved again on the way out.
+  Future<void> _leaveGoneProject() async {
+    final rest = await listProjects();
+    final next = rest.isEmpty ? null : await _storage?.load(rest.first.id);
+    await _switchTo(next ?? starterProject(), saveCurrent: false);
+  }
+
+  /// Files › Projects' Delete: moves projects [ids] to the library's trash (undoable with [restoreProjects] until the
+  /// batch is purged). The open project is saved first and then left as [deleteProject] leaves it.
+  Future<TrashBatch?> trashProjects(List<String> ids) async {
+    final storage = _storage;
+    if (storage == null || ids.isEmpty) return null;
+    final open = ids.contains(project.id);
+    if (open) {
+      await flush();
+      _saveTimer?.cancel();
     }
+    final batch = await storage.library.trash(ids);
+    if (open) await _leaveGoneProject();
+    savedProjects = await listProjects();
+    notifyListeners();
+    return batch;
+  }
+
+  /// Undo of [trashProjects]: the projects come back (into their folders); the open project stays open.
+  Future<int> restoreProjects(TrashBatch batch) async {
+    final n = await _storage?.library.restore(batch) ?? 0;
+    savedProjects = await listProjects();
+    notifyListeners();
+    return n;
   }
 }

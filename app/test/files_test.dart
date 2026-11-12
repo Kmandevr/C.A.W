@@ -1,6 +1,7 @@
 // The Files browser (Unity-style Project window) and the asset picker: select vs open, search and filters, the portrait drawer, menus.
 import 'dart:io';
 
+import 'package:caw/ui/devices/kit/hero.dart' show MotionClock;
 import 'package:caw/engine/component_info.dart';
 import 'package:caw/engine/engine.dart';
 import 'package:caw/model/app_state.dart';
@@ -49,6 +50,9 @@ Future<SectionController> _pump(WidgetTester tester, AppState s, Size size) asyn
 
 void main() {
   testWidgets('tap selects and shows the inspector; double-tap opens in Build', (tester) async {
+    // A modulated knob or a device visual moves on every frame; hold it still so the screen settles.
+    MotionClock.hold = true;
+    addTearDown(() => MotionClock.hold = false);
     // A double tap is timed by the wall clock (DateTime.now, which the fake clock doesn't move): the selecting tap is
     // kept apart from the double tap by real time past the timeout, and the double tap's two taps go back to back.
     Future<void> apart() => tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 400)));

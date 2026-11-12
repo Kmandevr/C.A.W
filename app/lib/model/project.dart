@@ -9,6 +9,7 @@ import 'midi_mapping.dart';
 import 'modulation.dart';
 import 'pattern_doc.dart';
 import 'routing.dart';
+import '../version.dart';
 
 String newId(String prefix) {
   final r = Random.secure();
@@ -676,6 +677,15 @@ class ProjectDoc {
   List<ModulatorDoc> modulators = [];
   List<ModLinkDoc> modLinks = [];
 
+  /// When the project was first saved (Files › Projects shows it); null for one made before C.A.W recorded it
+  /// (2026-11-12), shown as unknown. Copies (Duplicate) start again; imports keep the original's.
+  DateTime? created;
+
+  /// The app version and build that last wrote the file this was read from (`saved_with`; null before 2026-11-12,
+  /// shown as unknown). [toJson] always writes the running app's.
+  String? savedWithVersion;
+  int? savedWithBuild;
+
   int get stepsPerBar => beatsPerBar * 4;
   int get loopSteps => loopBars * stepsPerBar;
   /// A song position is the engine's 32-bit step count, so a song holds whole bars up to 2^31 - 1 steps (F7.2).
@@ -908,6 +918,8 @@ class ProjectDoc {
         if (modLinks.isNotEmpty) 'modulation': [for (final l in modLinks) l.toJson()],
         if (assets.isNotEmpty) 'assets': [for (final a in assets) a.toJson()],
         if (musicVideo != null) 'music_video': musicVideo,
+        if (created != null) 'created': created!.toUtc().toIso8601String(),
+        'saved_with': {'version': appVersion, 'build': appBuild},
       };
 
   /// Brings each track's instrument up to what the engine plays, with [resolve] (`Engine.resolveInstrument`): a
@@ -998,6 +1010,11 @@ class ProjectDoc {
         return layer;
       }).toList(),
     );
+
+    project
+      ..created = projectCreatedFromJson(j['created'])
+      ..savedWithVersion = savedWithFromJson(j['saved_with']).version
+      ..savedWithBuild = savedWithFromJson(j['saved_with']).build;
 
     // .caw sound modules are gone (#160): the project loads without them and says which went.
     project.droppedModules = [
@@ -1135,3 +1152,17 @@ List<(int, String)> lengthChoices(int stepsPerBar) => [
       (8, '2 beats'),
       for (final b in [1, 2, 3, 4, 5, 6, 7, 8, 16]) (b * stepsPerBar, b == 1 ? '1 bar' : '$b bars'),
     ];
+
+/// `created` from untrusted JSON: an ISO-8601 time of at most 40 characters, else null (unknown).
+DateTime? projectCreatedFromJson(Object? raw) =>
+    raw is String && raw.length <= 40 ? DateTime.tryParse(raw)?.toUtc() : null;
+
+/// `saved_with` from untrusted JSON: a version of at most 40 printable characters and a build in 0..2^31, else nulls.
+({String? version, int? build}) savedWithFromJson(Object? raw) {
+  if (raw is! Map) return (version: null, build: null);
+  final v = raw['version'], b = raw['build'];
+  return (
+    version: v is String && v.isNotEmpty && v.length <= 40 && RegExp(r'^[\x20-\x7e]+$').hasMatch(v) ? v : null,
+    build: b is int && b >= 0 && b < 0x7fffffff ? b : null,
+  );
+}

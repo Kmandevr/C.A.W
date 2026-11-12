@@ -263,6 +263,15 @@ int32_t caw_engine_layer_meter(CawEngine* e, int32_t index, CawLayerMeter* out) 
     return caw_engine_layer_meter_stereo(e, index, out, nullptr, nullptr);
 }
 
+int32_t caw_engine_layer_meters(CawEngine* e, CawLayerMeterStereo* out, int32_t capacity) {
+    if (!e) return 0;
+    auto sink = [](void* ctx, int i, const caw::LayerMeter& m) {
+        static_cast<CawLayerMeterStereo*>(ctx)[i] =
+            CawLayerMeterStereo{m.peak, m.peakL, m.peakR, m.progress, m.active ? 1 : 0, m.overloaded ? 1 : 0};
+    };
+    return e->engine->layerMeters(out ? capacity : 0, out ? +sink : nullptr, out);
+}
+
 void caw_engine_loudness(CawEngine* e, CawLoudness* out) {
     if (!out) return;
     *out = CawLoudness{CAW_METER_NONE, CAW_METER_NONE, CAW_METER_NONE, CAW_METER_NONE, CAW_METER_NONE,

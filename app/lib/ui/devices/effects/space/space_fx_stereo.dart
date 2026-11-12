@@ -1,4 +1,5 @@
 // The fx-space stereo UIs: Haas (the two sides' arrivals and the mono comb), the imager (band widths over a vectorscope) and the channel mixer's matrix.
+import '../../kit/repaint.dart';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -91,7 +92,8 @@ class _HaasPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant _HaasPainter o) => true;
+  bool shouldRepaint(covariant _HaasPainter o) =>
+      paintInputsChanged([o.delay, o.level, o.guard, o.right, o.color, o.second], [delay, level, guard, right, color, second]);
 }
 
 /// The imager: the vectorscope of the output (mid up, side across: a vertical line is mono, a wide blob is wide), with
@@ -219,7 +221,8 @@ class _ImagerPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant _ImagerPainter o) => true;
+  bool shouldRepaint(covariant _ImagerPainter o) =>
+      paintInputsChanged([o.widths, o.freqs, o.active, o.values, o.color, o.second], [widths, freqs, active, values, color, second]);
 }
 
 /// The channel mixer: the 2 x 2 matrix as four cells (rows: the outputs, columns: the inputs), each dragged up and
@@ -318,5 +321,6 @@ class _MatrixPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant _MatrixPainter o) => true;
+  bool shouldRepaint(covariant _MatrixPainter o) =>
+      paintInputsChanged([o.values, o.active, o.color, o.second], [values, active, color, second]);
 }
