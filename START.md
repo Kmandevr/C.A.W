@@ -1,12 +1,12 @@
 # C.A.W start file for chat agents
 
-Generated from `b5ea19599e2d619bbba5b83237546d56b02204f7` on the default branch at 2026-11-12T02:15:30Z by `scripts/agent-context.js`. Don't edit it; edit the files it bundles.
+Generated from `e5492f142811f19959333a6d9cbcc734445fda33` on the default branch at 2026-11-12T03:17:28Z by `scripts/agent-context.js`. Don't edit it; edit the files it bundles.
 
 Read this whole file before doing anything else. It replaces separately reading `AGENTS.md`, `CLAUDE.md`, `docs/vision.md` and `.claude/rules/*.md`.
 
 ## Before you start: confirm in your first reply
 
-1. The commit this file was generated from (`b5ea195`).
+1. The commit this file was generated from (`e5492f1`).
 2. The task issue number and your branch (`gpt/<issue>-<short-name>`).
 3. The progress comment's next action, or "new task" if there is none yet.
 4. Which area rules below apply to the files you will touch.
@@ -442,7 +442,7 @@ The design is in `docs/architecture.md` ("Audio and code execution"); this is th
 - **Native code is trusted code.** Components run in-process, unsandboxed; one loads only under the user's explicit per-item trust choice. Do not claim third-party native modules are isolated or safe to load until process isolation and host validation exist. Project input (patterns, project JSON, WAV and MIDI files) is untrusted: parse it with explicit limits and fail closed, with an error that names the problem.
 - **C API.** The app calls the engine only through a small, versioned C API (plain structs and functions, no C++ types across it), so `dart:ffi` and any future host can bind it.
 - **Defined arithmetic.** Outputs are sanitised (NaN/Inf become 0) and the safety limiter is always last. Same project and settings sound perceptually identical on every device, live and in export, checked by tolerance tests against reference renders; note, clip and automation timing, seeded random choices and discrete behaviour stay exact (owner, 2026-11-12, `docs/decisions.md`).
-- **Tests.** Every DSP built-in gets a unit test and, where it makes sound, a golden render; engine tests play `org.caw.test.osc` (`engine/tests/test_signal.h`) or a built-in. A bug fix starts with a failing test. Never skip or weaken a test to get green.
+- **Tests.** Every DSP built-in gets a unit test and, where it makes sound, a reference render: a tolerance test (`engine/tests/tolerance.h`; stable paths null below −120 dBFS, chaotic ones match in loudness, spectrum and onsets), re-recorded with `caw_tests --update-references` only for an intended sound change; engine tests play `org.caw.test.osc` (`engine/tests/test_signal.h`) or a built-in. A bug fix starts with a failing test. Never skip or weaken a test to get green.
 - Start each file with a one-line `//` comment saying what it is for (the repo map reads it).
 
 ---
