@@ -948,9 +948,10 @@ class MusicVideoDoc {
 
   VideoImageAsset? asset(String id) => assets.where((a) => a.id == id).firstOrNull;
 
-  /// A new overlay or layer id, not used in the video yet (`prefix` t for texts, i for images).
+  /// A new overlay or layer id, not used in the video yet nor given out before (`prefix` t for texts, i for images).
   String newOverlayId(String prefix) {
     final used = {
+      ..._issued,
       for (final x in texts) x.id,
       for (final x in images) x.id,
       for (final c in timeline.cuts) ...[for (final x in c.texts) x.id, for (final x in c.images) x.id],
@@ -959,8 +960,12 @@ class MusicVideoDoc {
     while (used.contains('$prefix$n')) {
       n++;
     }
+    _issued.add('$prefix$n');
     return '$prefix$n';
   }
+
+  /// Ids given out that may not be in the video yet (a preset makes two before either is added).
+  final Set<String> _issued = {};
 
   MusicVideoDoc copy() => MusicVideoDoc(options: options.copy(), timeline: timeline.copy(), autoCut: autoCut.copy(),
       snap: snap, texts: [for (final x in texts) x.copy()],

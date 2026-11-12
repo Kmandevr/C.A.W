@@ -804,7 +804,9 @@ class _TabBar extends StatelessWidget {
   final bool selectedShot;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => LayoutBuilder(builder: (context, box) => _bar(context, box.maxWidth < 420));
+
+  Widget _bar(BuildContext context, bool narrow) {
     final level = Motion.of(context);
     return Container(
       height: 42,
@@ -831,10 +833,13 @@ class _TabBar extends StatelessWidget {
                   boxShadow: t == selected ? [BoxShadow(color: videoAccent.withValues(alpha: 0.25), blurRadius: 10)] : null,
                 ),
                 child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-                  Icon(t.icon, size: 15, color: t == selected ? videoAccent : Neon.dim),
-                  const SizedBox(width: 4),
+                  // A phone gives the words the room; wider screens show the tab's icon too.
+                  if (!narrow) ...[
+                    Icon(t.icon, size: 15, color: t == selected ? videoAccent : Neon.dim),
+                    const SizedBox(width: 4),
+                  ],
                   Flexible(child: Text(t.label.toUpperCase(), maxLines: 1, overflow: TextOverflow.ellipsis,
-                      style: TextStyle(fontSize: 9.5, letterSpacing: 0.4, fontWeight: FontWeight.w800,
+                      style: TextStyle(fontSize: 9.5, letterSpacing: narrow ? 0.1 : 0.4, fontWeight: FontWeight.w800,
                           color: t == selected ? Neon.text : Neon.dim))),
                   AnimatedOpacity(
                     duration: Motion.fade(Motion.small, level),
