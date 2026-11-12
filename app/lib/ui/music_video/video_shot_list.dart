@@ -20,6 +20,9 @@ import 'video_kit.dart';
 /// drag calls [begin], then [live] as it moves (redrawn, not saved), then [end].
 abstract class VideoEditHost {
   void edit(VoidCallback change);
+
+  /// Adds an effect of [kind] to [effects] (Strobe asks first, once, about photosensitivity).
+  Future<void> addEffect(List<VideoEffect> effects, VideoEffectKind kind);
   void begin();
   void live(VoidCallback change);
   void end();
@@ -114,6 +117,7 @@ class _ShotRow extends StatelessWidget {
                       '${videoBarBeat(cut.start, spb)} → ${videoBarBeat(cut.end, spb)}',
                       videoLength(cut.length, spb),
                       if (cut.effects.isNotEmpty) '${cut.effects.length} FX',
+                      if (cut.effects.any((e) => e.flashes)) '⚠ Strobe',
                       cut.animateLayout ? 'animate' : cut.transition.name,
                       if (cut.reason.isNotEmpty) cut.reason,
                     ].join(' · '),
@@ -199,7 +203,7 @@ class _ShotEditorState extends State<ShotEditor> {
         _LookEditor(look: panel.look, host: h),
       ])),
       _label('EFFECTS'),
-      EffectStack(effects: c.effects, scene: widget.scene, host: h),
+      EffectStack(effects: c.effects, scene: widget.scene, host: h, panels: c.layout.panels.length),
       _label('TRANSITION'),
       VideoTiles<VideoTransition>(keyPrefix: 'video-transition', values: VideoTransition.values, selected: c.transition,
           height: 40, label: (v) => switch (v) {
@@ -504,10 +508,13 @@ class _LookEditor extends StatelessWidget {
 /// A shot's effect stack, in the FX stack's style: cards to reorder, bypass and remove, each with its amount, what
 /// drives it and its settings.
 class EffectStack extends StatelessWidget {
-  const EffectStack({super.key, required this.effects, required this.scene, required this.host});
+  const EffectStack({super.key, required this.effects, required this.scene, required this.host, this.panels = 1});
   final List<VideoEffect> effects;
   final VideoScene scene;
   final VideoEditHost host;
+
+  /// The shot's layout's places, for each effect's target.
+  final int panels;
 
   @override
   Widget build(BuildContext context) => Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
@@ -525,18 +532,19 @@ class EffectStack extends StatelessWidget {
             children: [
               for (var i = 0; i < effects.length; i++)
                 KeyedSubtree(key: ObjectKey(effects[i]), child: VideoAppear(child: _EffectCard(
-                    index: i, effect: effects[i], scene: scene, host: host,
+                    index: i, effect: effects[i], scene: scene, host: host, panels: panels,
                     onRemove: () => host.edit(() => effects.removeAt(i))))),
             ],
           ),
         Align(alignment: Alignment.centerLeft, child: PopupMenuButton<VideoEffectKind>(
           key: const ValueKey('video-fx-add'),
           tooltip: 'Add an effect',
-          onSelected: (k) => host.edit(() => effects.add(VideoEffect(kind: k))),
+          onSelected: (k) => host.addEffect(effects, k),
           enabled: effects.length < kVideoMaxEffects,
           itemBuilder: (_) => [
             for (final k in VideoEffectKind.values)
               PopupMenuItem(value: k, key: ValueKey('video-fx-add-${k.name}'), child: ListTile(dense: true,
+                  trailing: k == VideoEffectKind.strobe ? Icon(Icons.warning_amber_rounded, size: 18, color: Neon.yellow) : null,
                   title: Text(k.label), subtitle: Text(k.description, style: const TextStyle(fontSize: 10)))),
           ],
           child: Padding(padding: const EdgeInsets.symmetric(vertical: 8), child: Row(mainAxisSize: MainAxisSize.min, children: [
@@ -550,8 +558,8 @@ class EffectStack extends StatelessWidget {
 
 class _EffectCard extends StatelessWidget {
   const _EffectCard({required this.index, required this.effect, required this.scene, required this.host,
-      required this.onRemove});
-  final int index;
+      required this.onRemove, this.panels = 1});
+  final int index, panels;
   final VideoEffect effect;
   final VideoScene scene;
   final VideoEditHost host;
@@ -577,8 +585,8 @@ class _EffectCard extends StatelessWidget {
               const SizedBox(width: 8),
               Expanded(child: Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.start, children: [
                 Text(e.kind.label, maxLines: 1, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
-                Text(e.kind.description, maxLines: 1, overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontSize: 9, color: Neon.dim)),
+                Text(e.flashes ? '⚠ Flashes: take care with photosensitive viewers' : e.kind.description, maxLines: 1,
+                    overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 9, color: e.flashes ? Neon.yellow : Neon.dim)),
               ])),
               IconButton(key: ValueKey('video-fx-on-$index'), tooltip: e.on ? 'Bypass' : 'Turn on', iconSize: 18,
                   color: e.on ? Neon.green : Neon.dim, onPressed: () => host.edit(() => e.on = !e.on),
@@ -587,6 +595,13 @@ class _EffectCard extends StatelessWidget {
                   onPressed: onRemove, icon: const Icon(Icons.close)),
             ])),
             Padding(padding: const EdgeInsets.symmetric(horizontal: 8), child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+              VideoReveal(panels > 1
+                  ? Padding(padding: const EdgeInsets.only(bottom: 4), child: VideoTiles<int>(
+                      keyPrefix: 'video-fx-target-$index', values: [-1, for (var k = 0; k < panels; k++) k],
+                      selected: e.panelIn(panels) ?? -1, height: 32,
+                      label: (v) => v < 0 ? 'Whole shot' : 'Panel ${v + 1}',
+                      onPick: (v) => host.edit(() => e.panel = v < 0 ? null : v)))
+                  : null),
               _SliderRow(keyName: 'video-fx-amount-$index', label: 'Amount', value: e.amount, min: 0, max: 1, divisions: 20,
                   text: (v) => '${(v * 100).round()}%', host: host, onChanged: (v) => e.amount = v),
               VideoTiles<VideoDrive>(keyPrefix: 'video-fx-drive-$index', values: VideoDrive.values, selected: e.drive,

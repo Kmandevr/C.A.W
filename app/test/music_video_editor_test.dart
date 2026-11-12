@@ -2,6 +2,10 @@
 // split, undo and redo, keyboard shortcuts) and the shot list (expand, layout, views, effects), and auto-cut's flow.
 import 'dart:async';
 
+import 'package:caw/actions/actions.dart';
+import 'package:caw/actions/keymap.dart';
+import 'package:caw/actions/keys.dart';
+import 'package:caw/actions/macro.dart';
 import 'package:caw/model/app_state.dart';
 import 'package:caw/model/music_video.dart';
 import 'package:caw/model/music_video_autocut.dart';
@@ -10,6 +14,9 @@ import 'package:caw/model/music_video_scene.dart';
 import 'package:caw/model/project.dart';
 import 'package:caw/model/settings.dart';
 import 'package:caw/ui/music_video/video_editor.dart';
+import 'package:caw/ui/music_video/video_editor_page.dart';
+import 'package:caw/ui/music_video/video_preview.dart';
+import 'package:caw/ui/page_closer.dart';
 import 'package:caw/ui/music_video/video_setup_sheet.dart';
 import 'package:caw/ui/music_video/video_shot_lane.dart';
 import 'package:flutter/material.dart';
@@ -366,6 +373,128 @@ void main() {
       await run;
       await tester.pumpAndSettle();
       expect(editor.busy, isFalse);
+    });
+  });
+
+  group("owner's follow-ups", () {
+    testWidgets('Strobe warns once about photosensitivity, and the list marks it', (tester) async {
+      final settings = Settings();
+      tester.view.physicalSize = const Size(1080, 2400);
+      tester.view.devicePixelRatio = 2.6;
+      addTearDown(tester.view.reset);
+      final doc = MusicVideoDoc(timeline: VideoTimeline([VideoCut(id: 's1', start: 0, length: 64)]));
+      await tester.pumpWidget(MaterialApp(home: Scaffold(body: SingleChildScrollView(child: MusicVideoEditor(
+          doc: doc, scene: _scene(), start: 0, end: 256, aspect: 9 / 16, runner: _here, settings: settings,
+          onChanged: () {}, onSave: () {})))));
+      final editor = tester.state<MusicVideoEditorState>(find.byType(MusicVideoEditor));
+      final fx = doc.timeline.cuts.single.effects;
+      final first = editor.addEffect(fx, VideoEffectKind.strobe);
+      await tester.pumpAndSettle();
+      expect(find.text('Strobe flashes the whole frame'), findsOneWidget);
+      await tester.tap(_key('video-strobe-ok'));
+      await tester.pumpAndSettle();
+      await first;
+      expect(fx.single.kind, VideoEffectKind.strobe);
+      expect(settings.strobeWarned, isTrue);
+      expect(find.textContaining('⚠ Strobe'), findsOneWidget);
+      // The second time it doesn't ask.
+      await editor.addEffect(fx, VideoEffectKind.strobe);
+      await tester.pumpAndSettle();
+      expect(find.text('Strobe flashes the whole frame'), findsNothing);
+      expect(fx.length, 2);
+      // Other effects never ask.
+      final fresh = Settings();
+      expect(fresh.strobeWarned, isFalse);
+      await editor.addEffect(fx, VideoEffectKind.glow);
+      await tester.pumpAndSettle();
+      expect(fx.length, 3);
+    });
+
+    testWidgets("an effect's target: the whole shot or one panel of the layout", (tester) async {
+      final (doc, _) = await _pump(tester, cuts: [VideoCut(id: 's1', start: 0, length: 64,
+          layout: VideoLayout(preset: VideoLayoutPreset.bigStrip), effects: [VideoEffect(kind: VideoEffectKind.glow)])]);
+      await _tapKey(tester, 'video-shot-s1');
+      await _tapKey(tester, 'video-fx-target-0-1');
+      expect(doc.timeline.cuts.single.effects.single.panel, 1);
+      await _tapKey(tester, 'video-fx-target-0--1');
+      expect(doc.timeline.cuts.single.effects.single.panel, isNull);
+    });
+
+    testWidgets("the editor's keys are catalogue actions in their own context", (tester) async {
+      final ids = {for (final d in ActionRegistry.standard().inArea(Area.video)) d.id};
+      expect(ids, containsAll(['video.add', 'video.split', 'video.duplicate', 'video.delete', 'video.undo',
+          'video.redo', 'video.nudgeLeft', 'video.nudgeRight', 'video.previous', 'video.following', 'video.autocut',
+          'video.fullScreen']));
+      final km = Keymap.defaults(ActionRegistry.standard());
+      expect(km.lookup(Area.video, KeySeq.parse('S')), const ActionRef.action('video.split'));
+      expect(km.lookup(Area.video, KeySeq.parse('Ctrl+S')), const ActionRef.action('project.save'));
+      // The editor runs them (here through its key context alone, as with no key router).
+      final (doc, _) = await _pump(tester, cuts: [VideoCut(id: 's1', start: 0, length: 64)]);
+      final editor = tester.state<MusicVideoEditorState>(find.byType(MusicVideoEditor));
+      expect(editor.runAction('video.following'), isTrue);
+      expect(editor.selected, 's1');
+      editor.setCursor(32);
+      await tester.pump();
+      expect(editor.runAction('video.split'), isTrue);
+      await tester.pumpAndSettle();
+      expect(doc.timeline.cuts.length, 2);
+    });
+
+    testWidgets('full screen: a closable page with the preview over the lane and list; Back closes it', (tester) async {
+      tester.view.physicalSize = const Size(1080, 2400);
+      tester.view.devicePixelRatio = 2.6;
+      addTearDown(tester.view.reset);
+      final s = AppState(settings: Settings());
+      addTearDown(s.dispose);
+      s.project = _song();
+      await tester.pumpWidget(MaterialApp(home: Scaffold(body: MusicVideoPanel(state: s))));
+      await tester.pump();
+      // A new video with notes includes Falling notes.
+      expect(s.project.musicVideo, isNull);
+      await _tapKey(tester, 'video-editor-full-screen');
+      expect(find.text('MUSIC VIDEO EDITOR'), findsOneWidget);
+      final route = ModalRoute.of(tester.element(find.byType(MusicVideoEditorPage)))!;
+      expect(route.settings.name, closablePage.name);
+      final page = tester.getRect(find.byType(MusicVideoEditorPage));
+      expect(page.width, closeTo(1080 / 2.6, 1));
+      // Phone: the preview above the lane.
+      expect(tester.getTopLeft(find.byType(MusicVideoPreview).last).dy,
+          lessThan(tester.getTopLeft(find.byType(ShotLane).last).dy));
+      // An edit there shows in the sheet after it closes.
+      final editor = tester.state<MusicVideoEditorState>(find.byType(MusicVideoEditor).last);
+      editor.add();
+      await tester.pumpAndSettle();
+      await tester.tap(_key('video-editor-close'));
+      await tester.pumpAndSettle();
+      expect(find.text('MUSIC VIDEO EDITOR'), findsNothing);
+      expect(_key('video-shot-row-s1'), findsOneWidget); // the sheet's list shows the shot made full screen
+      expect((s.project.musicVideo!['shots'] as List).length, 1);
+      expect((s.project.musicVideo!['options'] as Map)['shots'], contains('falling'));
+      // Back closes it too.
+      await _tapKey(tester, 'video-editor-full-screen');
+      expect(find.text('MUSIC VIDEO EDITOR'), findsOneWidget);
+      await tester.binding.handlePopRoute();
+      await tester.pumpAndSettle();
+      expect(find.text('MUSIC VIDEO EDITOR'), findsNothing);
+      await tester.pump(const Duration(seconds: 1));
+    });
+
+    testWidgets('full screen on a wide screen: the preview and lane beside the shot list', (tester) async {
+      tester.view.physicalSize = const Size(1600, 1000);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      final s = AppState(settings: Settings());
+      addTearDown(s.dispose);
+      s.project = _song();
+      final doc = MusicVideoDoc(timeline: VideoTimeline([VideoCut(id: 's1', start: 0, length: 64)]));
+      await tester.pumpWidget(MaterialApp(home: Scaffold(body: MusicVideoEditorPage(state: s, doc: doc, scene: _scene(),
+          start: 0, end: 256, onSave: () {}, runner: _here))));
+      await tester.pump();
+      final lane = tester.getRect(find.byType(ShotLane));
+      final row = tester.getRect(_key('video-shot-s1'));
+      expect(row.left, greaterThan(lane.right)); // the list sits to the right
+      expect(tester.getTopLeft(find.byType(MusicVideoPreview)).dy, lessThan(lane.top));
+      await tester.pump(const Duration(seconds: 1));
     });
   });
 }

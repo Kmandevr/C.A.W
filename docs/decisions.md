@@ -6,6 +6,19 @@ updated: 2026-11-12
 
 # Decisions
 
+## 2026-11-12: The music video editor's open questions answered (owner)
+
+**Decision (owner, 2026-11-12):** "do what you think best, but 1 for sure yes."
+- **Full screen: yes (owner's decision).** The editor also opens full screen, as its own closable page like the full-screen piano roll; Back or Esc closes it. On phones it uses the whole screen with the preview on top and the lane and list below; desktop gets more room.
+
+**Claude's choices with the owner's go-ahead (built 2026-11-12):**
+- **Full screen, as built:** the toolbar's full-screen button (or F11, `video.fullScreen`) pushes a closable page (`closablePage`, so Esc and the mouse's Back button close it, as Back does). A phone stacks the preview (up to two fifths of the height) over the lane and list; from 900 dp wide the preview and lane sit on the left and the shot list on the right. It edits the same video as the sheet (its undo steps are its own).
+- **An empty stretch of the lane** keeps showing the arrangement flythrough.
+- **Effects stay a per-shot stack;** each effect has a target, the whole shot (the default) or one panel of the layout. An effect aimed at a panel the layout no longer has applies to the whole shot.
+- **Strobe:** the first time Strobe is added the editor warns about photosensitive epilepsy (Cancel or Add Strobe); Settings remembers it was shown (`strobe_warned`). Strobe is marked ⚠ in the list's rows, its effect card and the add menu.
+- **Falling notes as a default shot** for new videos only, when the song has notes: a project without a saved video starts with every shot on (Falling notes too, if it has notes); saved setups keep their shots, and the defaults for a setup without a shot list stay the four earlier shots.
+- **The editor's keys join the action catalogue** in their own keyboard context, `video` (Music video editor): `video.add` A, `video.split` S, `video.duplicate` Ctrl+D, `video.delete` Delete or Backspace, `video.undo` Ctrl+Z, `video.redo` Ctrl+Shift+Z or Ctrl+Y, `video.nudgeLeft` ←, `video.nudgeRight` →, `video.previous` [, `video.following` ], `video.autocut` Ctrl+Shift+A, `video.fullScreen` F11; Settings › Keys rebinds them ([actions](actions.md#keyboard-focus)).
+
 ## 2026-11-12: The music video becomes an editor (owner, #182)
 
 **Decision (owner, 2026-11-12, answers to the design questions; extends "Arrangement music video" below).**
@@ -21,14 +34,14 @@ updated: 2026-11-12
 
 **Built (Claude, 2026-11-12; choices to confirm, [App](app.md) "Music video" has the behaviour):**
 - **#183's cause:** the video's scene unrolled a looping clip's notes from its source offset only (`at >= offset` each repeat), so after the loop wrapped the notes before the offset never showed; a clip trimmed on the left (which moves the offset) lost them in every repeat. Notes already sounding where the window starts (tails) were dropped and a clip that doesn't loop showed notes past its pattern's end. The scene now unrolls through `clipNotes` (`arrange_edit.dart`), the rule the arranger draws and edits with and the engine's `compileArrangement` plays.
-- **Where it lives:** a Shot lane section in the Music video sheet under the preview (lane, toolbar, snap, zoom, then the list; the chosen row opens the shot's editor). An empty lane keeps the auto director, so videos made before cut and draw as they did (the test's frame hashes are unchanged). An empty stretch between shots shows the arrangement flythrough.
+- **Where it lives:** a Shot lane section in the Music video sheet under the preview (lane, toolbar, snap, zoom, then the list; the chosen row opens the shot's editor), and full screen (above). An empty lane keeps the auto director, so videos made before cut and draw as they did (the test's frame hashes are unchanged). An empty stretch between shots shows the arrangement flythrough.
 - **Snap:** Step (a sixteenth), Beat or Bar; the lane never lets shots overlap (a drag stops at the neighbours; Duplicate moves the later shots inside the range along, cutting short or dropping what it pushes past the range's end; shots already past the end stay as they are). Shots wholly outside the range (a shorter song, a loop or selection range) keep their place: the list says so and its Start and Length steppers are off. An edit that changes nothing leaves no undo step, and nothing edits while auto-cut runs.
 - **Auto-cut:** Replace replaces only what lies in the video's range (a shot across its edge keeps its part outside), Fill empty space fills only the range's gaps; a failure shows on one line. The triggers' cuts are merged with a minimum gap (2 beats by default) where the stronger trigger keeps its place (loudness, then tracks, bursts, interval); views come from the director's weighting with the setup's shots, style and seed. Loudness reads the notes by default (no render needed) or, chosen, the rendered audio: the range rendered offline by the engine's worker pool and its RMS per beat. Burst: 12 to 3 note starts in a beat after a thinner beat; loudness: a 12 to 3 dB jump between the bars either side of a bar line; tracks: a track sounding after (or silent for) a set number of bars.
-- **Effects** apply to the whole shot (all its panels), each redrawing the shot's picture in order; drives are Steady, Beat, Bar (a pulse with a set length), Mix loudness and Track loudness (the render then asks the engine for stems). Strobe held steady flashes every eighth note. Looks are per panel; the default look draws exactly as before.
-- **Falling notes** is a sixth shot kind, off by default for the director (so earlier setups cut as they did); its keyboard spans the shown tracks' notes over the whole song (bends included, at least two octaves, white keys at the ends), so it doesn't jump at cuts.
+- **Effects** apply to the whole shot (all its panels) or, chosen, one panel (owner's go-ahead, above), each redrawing the picture in order; drives are Steady, Beat, Bar (a pulse with a set length), Mix loudness and Track loudness (the render then asks the engine for stems). Strobe held steady flashes every eighth note. Looks are per panel; the default look draws exactly as before.
+- **Falling notes** is a sixth shot kind, on for new videos of songs with notes (above) and off for setups made before; its keyboard spans the shown tracks' notes over the whole song (bends included, at least two octaves, white keys at the ends), so it doesn't jump at cuts.
 - **Bends** draw as a line through the note's time, offset by its bend curve and vibrato (`NoteExpression.pitchAt`); notes without one draw as before. The project holds bends only as note expressions (no separate pitch-bend lane exists).
 - **Storage:** `music_video` in the project JSON, `version: 1`: the setup, the shots, auto-cut's settings and the snap. A project without it (every earlier one) opens as a new video; the reader is bounded (4,096 shots, 16 effects a shot, unknown names to defaults, overlapping shots dropped, numbers clamped) and a newer version is read for what this one knows.
-- **Keys (desktop, while the editor has focus):** A add, S split, Delete or Backspace, Ctrl+D duplicate, Ctrl+Z, Ctrl+Shift+Z or Ctrl+Y, ← → nudge by the snap, [ ] the previous or next shot. Open (owner): whether they join the action catalogue so Settings › Keys can rebind them.
+- **Keys (desktop, while the editor has focus):** A add, S split, Delete or Backspace, Ctrl+D duplicate, Ctrl+Z, Ctrl+Shift+Z or Ctrl+Y, ← → nudge by the snap, [ ] the previous or next shot; they are catalogue actions (above).
 - **No new dependency and no engine C API change.**
 
 ## 2026-11-12: Perceptually identical, not bit-identical; speed first (owner)

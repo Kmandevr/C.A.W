@@ -13,9 +13,12 @@ enum VideoShot {
   const VideoShot(this.label, this.description);
   final String label, description;
 
-  /// The shots a new video's director uses (Falling notes, added 2026-11-12, is switched on by choice, so a video
-  /// set up before it cuts as it did).
+  /// The shots the director uses when nothing chose otherwise (a saved setup without a shot list, the tests' pinned
+  /// frames). Falling notes, added 2026-11-12, isn't among them, so a setup made before it cuts as it did.
   static const directorDefaults = {flythrough, mixer, pianoRoll, devices};
+
+  /// A new video's shots (owner's go-ahead, 2026-11-12): the defaults, and Falling notes when the song has notes.
+  static Set<VideoShot> forNewVideo({required bool hasNotes}) => {...directorDefaults, if (hasNotes) falling};
 }
 
 /// How the director cuts: how often, how shots change and how the camera moves.

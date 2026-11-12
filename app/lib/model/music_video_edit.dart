@@ -340,7 +340,7 @@ enum VideoEffectColor { accent, blue, green, yellow, violet, white }
 /// One effect in a shot's stack (like an audio FX slot: on or bypassed, an amount and its settings).
 class VideoEffect {
   VideoEffect({required this.kind, double amount = 0.5, this.drive = VideoDrive.steady, this.trackId, this.on = true,
-      this.color = VideoEffectColor.accent, double decay = 0.5})
+      this.color = VideoEffectColor.accent, double decay = 0.5, this.panel})
       : amount = amount.clamp(0.0, 1.0).toDouble(),
         decay = decay.clamp(0.05, 1.0).toDouble();
 
@@ -356,8 +356,18 @@ class VideoEffect {
   /// How long a beat or bar pulse lasts, as a fraction of the beat or bar.
   double decay;
 
-  VideoEffect copy() =>
-      VideoEffect(kind: kind, amount: amount, drive: drive, trackId: trackId, on: on, color: color, decay: decay);
+  /// What it applies to: null for the whole shot (the default), else one panel of the layout by index. A panel the
+  /// layout no longer has means the whole shot.
+  int? panel;
+
+  /// The panel it applies to in a layout of [panels] places, or null for the whole shot.
+  int? panelIn(int panels) => panel != null && panel! >= 0 && panel! < panels && panels > 1 ? panel : null;
+
+  /// Strobe flashes the frame: the editor warns once about photosensitivity and marks it.
+  bool get flashes => kind == VideoEffectKind.strobe;
+
+  VideoEffect copy() => VideoEffect(kind: kind, amount: amount, drive: drive, trackId: trackId, on: on, color: color,
+      decay: decay, panel: panel);
 
   /// How strongly it acts at [step] with [levels]: [amount] times its drive (0..1).
   double strength(double step, VideoLevels levels, int stepsPerBar) {
@@ -385,6 +395,7 @@ class VideoEffect {
         if (!on) 'on': false,
         if (color != VideoEffectColor.accent) 'color': color.name,
         if (decay != 0.5) 'decay': _r(decay),
+        if (panel != null) 'panel': panel,
       };
 
   static VideoEffect? fromJson(Object? j) {
@@ -399,6 +410,7 @@ class VideoEffect {
       on: j['on'] != false,
       color: _enum(VideoEffectColor.values, j['color'], VideoEffectColor.accent),
       decay: _num(j['decay']) ?? 0.5,
+      panel: switch (_num(j['panel'])) { final double p when p >= 0 && p < 4 => p.round(), _ => null },
     );
   }
 }

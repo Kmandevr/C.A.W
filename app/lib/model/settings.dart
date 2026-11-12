@@ -398,6 +398,9 @@ class Settings extends ChangeNotifier {
   /// hardware keyboard is used, and on a desktop), true or false as chosen in Settings › Keys.
   bool? keyHints;
 
+  /// The music video editor has shown its photosensitivity warning (the first time Strobe is added).
+  bool strobeWarned = false;
+
   /// Recording (owner, 2026-11-10): when the metronome clicks, and how many bars the count-in has (0: none).
   Metronome metronome = Metronome.recording;
   int countInBars = 1;
@@ -558,6 +561,7 @@ class Settings extends ChangeNotifier {
         'vim_code': vimCode,
         'vim_keys': vimKeys,
         if (keyHints != null) 'key_hints': keyHints,
+        if (strobeWarned) 'strobe_warned': true,
         'motion': motion.name,
         'edit_motion_style': editMotionStyle.name,
         'motion_feel': motionFeel.encode(),
@@ -667,6 +671,7 @@ class Settings extends ChangeNotifier {
     vimCode = (j['vim_code'] as bool?) ?? vimCode;
     vimKeys = (j['vim_keys'] as bool?) ?? vimKeys;
     if (j['key_hints'] is bool) keyHints = j['key_hints'] as bool;
+    strobeWarned = j['strobe_warned'] == true;
     motion = pick(MotionLevel.values, j['motion'], motion);
     editMotionStyle = pick(EditMotionStyle.values, j['edit_motion_style'], editMotionStyle);
     motionFeel = MotionFeel.decode(j['motion_feel'] as String?) ?? motionFeel;

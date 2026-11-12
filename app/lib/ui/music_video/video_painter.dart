@@ -101,16 +101,26 @@ void _paintShot(Canvas canvas, Size size, VideoFrameInput f, DirectedShot shot) 
     _paintView(canvas, size, f, shot, shot);
     return;
   }
-  if (shot.effects.isEmpty) {
+  final panels = shot.panelShots.length;
+  final whole = [for (final e in shot.effects) if (e.panelIn(panels) == null) e];
+  if (whole.isEmpty) {
     _paintPanels(canvas, size, f, shot);
     return;
   }
-  // The effect stack works on the shot's picture: its panels drawn once, then each effect in turn.
+  // The shot's effect stack works on its picture: its panels drawn once, then each effect in turn.
+  _withEffects(canvas, size, f, whole, (c) => _paintPanels(c, size, f, shot));
+}
+
+/// Draws what [paint] draws into [size] through [effects] in order (each redraws the picture so far once).
+void _withEffects(Canvas canvas, Size size, VideoFrameInput f, List<VideoEffect> effects, void Function(Canvas) paint) {
+  if (effects.isEmpty) {
+    paint(canvas);
+    return;
+  }
   final recorder = ui.PictureRecorder();
-  final inner = Canvas(recorder, Offset.zero & size);
-  _paintPanels(inner, size, f, shot);
+  paint(Canvas(recorder, Offset.zero & size));
   var picture = recorder.endRecording();
-  for (final e in shot.effects) {
+  for (final e in effects) {
     final next = _applyEffect(picture, size, f, e);
     picture.dispose();
     picture = next;
@@ -139,9 +149,12 @@ void _paintPanels(Canvas canvas, Size size, VideoFrameInput f, DirectedShot shot
   void place(DirectedShot view, DirectedShot owner, PanelRect r) {
     if (r.width <= 1e-4 || r.height <= 1e-4) return;
     final rect = Rect.fromLTRB(r.left * size.width, r.top * size.height, r.right * size.width, r.bottom * size.height);
+    // The effects aimed at this panel of [owner] run on the panel alone.
+    final k = owner.panelShots.indexOf(view);
+    final own = [for (final e in owner.effects) if (k >= 0 && e.panelIn(owner.panelShots.length) == k) e];
     canvas.save();
     canvas.translate(rect.left, rect.top);
-    _paintView(canvas, rect.size, f, view, owner);
+    _withEffects(canvas, rect.size, f, own, (c) => _paintView(c, rect.size, f, view, owner));
     canvas.restore();
   }
 

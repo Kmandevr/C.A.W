@@ -423,6 +423,58 @@ void main() {
     });
   });
 
+  group("owner's follow-ups", () {
+    test('an effect can target one panel; a panel the layout lost means the whole shot; it saves', () {
+      final e = VideoEffect(kind: VideoEffectKind.blur, panel: 1);
+      expect(e.panelIn(2), 1);
+      expect(e.panelIn(1), isNull); // a full layout: the whole shot
+      expect(e.panelIn(4), 1);
+      expect(VideoEffect(kind: VideoEffectKind.blur, panel: 3).panelIn(2), isNull);
+      expect(VideoEffect(kind: VideoEffectKind.blur).panelIn(4), isNull);
+      final back = VideoEffect.fromJson(jsonDecode(jsonEncode(e.toJson())))!;
+      expect(back.panel, 1);
+      expect(VideoEffect.fromJson({'kind': 'blur', 'panel': 9})!.panel, isNull);
+      expect(VideoEffect(kind: VideoEffectKind.strobe).flashes, isTrue);
+    });
+
+    test('a new video has Falling notes when the song has notes; saved setups keep their shots', () {
+      expect(VideoShot.forNewVideo(hasNotes: true), {...VideoShot.directorDefaults, VideoShot.falling});
+      expect(VideoShot.forNewVideo(hasNotes: false), VideoShot.directorDefaults);
+      final saved = MusicVideoDoc.fromJson({'version': 1, 'options': {'shots': ['mixer']}});
+      expect(saved.options.shots, {VideoShot.mixer});
+    });
+
+    testWidgets('a panel effect changes only its panel', (tester) async {
+      final s = _two();
+      Future<List<int>> frame(List<VideoEffect> fx) async {
+        final cut = VideoCut(id: 's1', start: 0, length: 64, effects: fx, layout: VideoLayout(
+            preset: VideoLayoutPreset.sideBySide, panels: [VideoPanel(view: VideoShot.flythrough), VideoPanel(view: VideoShot.falling)]));
+        final plan = planFromTimeline(s, VideoTimeline([cut]), MusicVideoOptions(), start: 0, end: 64);
+        return (await tester.runAsync(() => rasterizeVideoFrame(
+            VideoFrameInput(scene: s, plan: plan, step: 33, seconds: 4), 128, 64)))!.toList();
+      }
+
+      // The difference between two frames in the left and right halves (bytes that differ).
+      (int, int) diff(List<int> a, List<int> b) {
+        var l = 0, r = 0;
+        for (var i = 0; i < a.length; i += 4) {
+          if (a[i] != b[i] || a[i + 1] != b[i + 1] || a[i + 2] != b[i + 2]) ((i ~/ 4) % 128 < 64) ? l++ : r++;
+        }
+        return (l, r);
+      }
+
+      final none = await frame([]);
+      final right = await frame([VideoEffect(kind: VideoEffectKind.tint, amount: 1, panel: 1)]);
+      final whole = await frame([VideoEffect(kind: VideoEffectKind.tint, amount: 1)]);
+      final (rl, rr) = diff(none, right);
+      expect(rl, 0); // the left panel is untouched
+      expect(rr, greaterThan(100));
+      final (wl, wr) = diff(none, whole);
+      expect(wl, greaterThan(100));
+      expect(wr, greaterThan(100));
+    });
+  });
+
   group('saving', () {
     test('the video saves with the project and reads back', () {
       final doc = MusicVideoDoc(options: MusicVideoOptions(style: VideoStyle.calm, seed: 9, shots: {VideoShot.falling},

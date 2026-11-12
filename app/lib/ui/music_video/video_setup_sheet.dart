@@ -24,6 +24,7 @@ import '../haptics.dart';
 import '../theme.dart';
 import '../widgets.dart';
 import 'video_editor.dart';
+import 'video_editor_page.dart';
 import 'video_preview.dart';
 import 'video_kit.dart';
 import 'video_render.dart';
@@ -90,7 +91,10 @@ class _MusicVideoPanelState extends State<MusicVideoPanel> {
   /// The video as the project saved it (versioned), or a new one with the setup last used.
   late final MusicVideoDoc _doc = p.musicVideo != null
       ? MusicVideoDoc.fromJson(p.musicVideo, maxStep: p.maxArrangementSteps.toDouble())
-      : MusicVideoDoc(options: _lastOptions?.copy());
+      // A new video: the setup last used this run, its shots the defaults with Falling notes when the song has notes
+      // (owner's go-ahead, 2026-11-12).
+      : MusicVideoDoc(options: (_lastOptions?.copy() ?? MusicVideoOptions())
+          ..shots = VideoShot.forNewVideo(hasNotes: _scene.notes.isNotEmpty));
   MusicVideoOptions get o => _doc.options;
   final _position = ValueNotifier<double>(0);
   final _previewKey = GlobalKey<MusicVideoPreviewState>();
@@ -157,6 +161,11 @@ class _MusicVideoPanelState extends State<MusicVideoPanel> {
     setState(change);
     _store();
   }
+
+  /// Auto-cut's loudness from the range's rendered audio.
+  Future<List<double>?> Function() _loudness(int a, int b) => () async => analyzeSongLoudness(projectJson:
+      p.toEngineJson(), scene: _scene, startStep: a, endStep: b, workDir: await _workDir(), audio: widget.audio,
+      cancelled: () => !mounted);
 
   /// Saves the video's setup and shots with the project.
   void _store() => s.setMusicVideo(_doc.toJson());
@@ -261,8 +270,13 @@ class _MusicVideoPanelState extends State<MusicVideoPanel> {
             onSeek: (st) => _previewKey.currentState?.seek(st),
             onChanged: () => setState(() {}),
             onSave: _store,
-            loudness: () async => analyzeSongLoudness(projectJson: p.toEngineJson(), scene: _scene, startStep: a,
-                endStep: b, workDir: await _workDir(), audio: widget.audio, cancelled: () => !mounted),
+            loudness: _loudness(a, b),
+            settings: s.settings,
+            onFullScreen: () async {
+              await openMusicVideoEditorPage(context, state: s, doc: _doc, scene: _scene, start: a.toDouble(),
+                  end: b.toDouble(), onSave: _store, loudness: _loudness(a, b));
+              if (mounted) setState(() {});
+            },
           ),
         ]),
         VideoSection('SHOTS', children: [

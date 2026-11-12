@@ -384,8 +384,8 @@ void main() {
     await tester.pump();
     expect(find.text('MUSIC VIDEO'), findsOneWidget);
 
-    // Every shot off: the render can't start (Falling notes starts off).
-    for (final shot in VideoShot.directorDefaults) {
+    // A new video with notes has every shot on, Falling notes too; every shot off: the render can't start.
+    for (final shot in VideoShot.values) {
       await tapKey(tester, 'video-shot-${shot.name}');
     }
     expect(find.text('Switch on at least one shot.'), findsWidgets);

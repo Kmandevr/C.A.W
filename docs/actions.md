@@ -242,6 +242,7 @@ The whole app works from the keyboard (owner, 2026-11-11, [decisions](decisions.
 | Settings (`settings`) | ↑ ↓ / W S rows, Space toggles or presses, → / D a switch on or a slider up, ← / A off or down |
 | Pages and panels (`page`: Build tool pages and the plug-in page's steps, Files' folders and inspector) | arrows / WASD move between controls in reading order, Space presses |
 | Menus, sheets and dialogs (`menus`) | ↑ ↓ move, a letter jumps to the item it starts (type-ahead), Enter chooses, Esc closes |
+| Music video editor (`video`: the shot lane and list, in the sheet or full screen) | A add a shot at the cursor, S split there, Ctrl+D duplicate, Delete or Backspace delete, Ctrl+Z undo and Ctrl+Shift+Z or Ctrl+Y redo (the lane's own steps), ← → move the shot by the snap, [ ] the previous or next shot, Ctrl+Shift+A Auto-cut…, F11 full screen |
 
 - **Focus ring:** the focused control wears a ring in the theme's `Neon.ink` edged with the selection accent, the focused context a softer accent outline (`KeyRing` in `lib/ui/tokens.dart`); it follows light and dark palettes and shows only while the keyboard is in use.
 - **Hint strip** (which-key): a strip at the bottom lists the keys that work in the focused context, read from the keymap (`keyHintsFor` in `lib/actions/hints.dart`), so a rebinding shows at once; then Tab, Esc and `?` (the action list). Settings › Keys and shortcuts › **Key hints** (`key_hints`) turns it off; unset, it shows once a hardware keyboard is used and on a desktop.
