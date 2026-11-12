@@ -160,6 +160,7 @@ target_sources(caw_core PRIVATE src/builtin_fx_racks.cpp src/builtin_fx_racks_fx
 # modulators begin (#161: project modulation, its built-in modulators)
 target_sources(caw_core PRIVATE src/modulation_links.cpp src/builtin_modulators.cpp)
 # modulators end
+target_sources(caw_core PRIVATE src/sample_time.cpp)  # sample positions of steps and seconds, built strict (below)
 target_sources(caw_core PRIVATE src/note_fx_host.cpp)  # per-note FX (#127): slot racks, the voice-bus host, the manager
 target_include_directories(caw_core PRIVATE src)
 target_compile_options(caw_core PRIVATE ${CAW_FLAGS})
@@ -325,6 +326,9 @@ if(CAW_TOOLS)
   set_source_files_properties(tests/library_kernels_test.cpp tests/builtin_instruments_test.cpp tests/graph_channels_test.cpp
     tests/timing_oracle.cpp PROPERTIES COMPILE_OPTIONS "${_caw_fp_strict}")
 endif()
+# Sample positions (src/sample_time.h): note, clip, loop and automation timing is exact to the sample on every
+# platform, so this file is strict in every build, the app's included: no fused multiply-add, no reassociation.
+set_source_files_properties(src/sample_time.cpp PROPERTIES COMPILE_OPTIONS "${_caw_fp_strict}")
 # The engine's own targets take CAW_FP_FLAGS (in CAW_FLAGS) instead of the SDK's strict floating-point flags.
 foreach(_caw_target caw_core caw_engine caw_cli caw_tests caw_rt_tests caw_bench)
   if(TARGET ${_caw_target})

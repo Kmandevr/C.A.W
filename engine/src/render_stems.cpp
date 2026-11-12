@@ -15,6 +15,7 @@
 #include "meters.h"
 #include "render.h"
 #include "sample_pack.h"
+#include "sample_time.h"
 #include "utf8_path.h"
 #include "wav.h"
 
@@ -53,11 +54,11 @@ void setProgress(int32_t* p, double fraction) {
 
 bool cancelled(int32_t* c) { return c && atomicLoad(c) != 0; }
 
-double stepFrames(const ProjectSpec& p, int sr) { return 60.0 * sr / (p.bpm * 4.0); }
+double stepFrames(const ProjectSpec& p, int sr) { return sampletime::stepFrames(sr, p.bpm); }
 
 // The frame a step starts on, as the engine places it (Engine::play and the loop export round the same way).
 int64_t frameOf(const ProjectSpec& p, int sr, int64_t steps) {
-    return static_cast<int64_t>(std::floor(static_cast<double>(steps) * stepFrames(p, sr) + 0.5));
+    return static_cast<int64_t>(sampletime::roundFrames(static_cast<double>(steps), stepFrames(p, sr)));
 }
 
 double toDb(double linear) { return linear > 0 ? 20.0 * std::log10(linear) : -200.0; }
@@ -247,7 +248,7 @@ bool renderRange(const ProjectSpec& base, const SongRenderRequest& req, const st
     const int64_t start = frameOf(p, sr, range.startSteps), end = frameOf(p, sr, range.endSteps);
     const int64_t length = end - start;
     const double tailSec = std::clamp(req.tailSeconds, 0.0, kMaxTailSeconds);
-    const int64_t tailMost = req.tail == SongTail::None ? 0 : static_cast<int64_t>(std::floor(tailSec * sr + 0.5));
+    const int64_t tailMost = req.tail == SongTail::None ? 0 : static_cast<int64_t>(sampletime::roundFrames(tailSec, sr));
     const int64_t total = length + tailMost;
     if (total > kMaxWavFrames) {
         error = "the render is " + std::to_string(total) + " frames, longer than a WAV file holds";

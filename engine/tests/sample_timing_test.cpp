@@ -6,6 +6,7 @@
 
 #include "engine.h"
 #include "project.h"
+#include "sample_time.h"
 #include "test.h"
 #include "test_signal.h"
 #include "timing_oracle.h"
@@ -63,4 +64,27 @@ TEST(ratchet_repeats_land_on_the_strict_sample_at_awkward_tempos_and_rates) {
         CHECK_EQ(got.size(), want.size());
         for (size_t i = 0; i < got.size() && i < want.size(); ++i) CHECK_EQ(got[i], want[i]);
     }
+}
+
+TEST(sample_time_helpers_match_strict_maths_across_a_sweep) {
+    // The helpers every event, clip and loop position goes through (sample_time.h), against the strict reference, over
+    // rates, tempos, quarter-step starts and lengths, and ratchets: a fused or reassociated build would miss some.
+    int checked = 0, mismatches = 0;
+    for (const int rate : {22050, 44100, 48000, 96000})
+        for (const double bpm : {60.0, 77.0, 93.0, 100.0, 133.0, 140.0, 174.0, 87.5}) {
+            const double frames = sampletime::stepFrames(rate, bpm);
+            if (frames != cawtest::strictStepFrames(rate, bpm)) ++mismatches;
+            for (int at4 = 0; at4 < 64; ++at4)
+                for (int len4 = 1; len4 <= 8; ++len4)
+                    for (int ratchet = 2; ratchet <= 8; ++ratchet)
+                        for (int sub = 1; sub <= ratchet; ++sub) {
+                            const double at = at4 / 4.0, len = len4 / 4.0;
+                            const auto got = static_cast<int64_t>(
+                                sampletime::roundFrames(sampletime::ratchetStep(at, len, ratchet, sub), frames));
+                            if (got != cawtest::strictRatchetStart(rate, bpm, at, len, ratchet, sub)) ++mismatches;
+                            ++checked;
+                        }
+        }
+    CHECK(checked > 100000);
+    CHECK_EQ(mismatches, 0);
 }

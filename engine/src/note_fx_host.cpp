@@ -9,6 +9,7 @@
 #include "caw/instrument.hpp"
 #include "mod_route.h"
 #include "quality.h"
+#include "sample_time.h"
 
 namespace caw {
 
@@ -86,8 +87,8 @@ bool NoteFxRack::setBypass(std::size_t index, bool bypass) noexcept {
 // The host (audio thread, except the constructor and stats()).
 
 NoteFxHost::NoteFxHost(double sampleRate) : sr_(sampleRate > 0 ? sampleRate : 48000.0) {
-    fadeLen_ = std::max(1, static_cast<int>(kNoteFxFadeSeconds * sr_ + 0.5));
-    swapLen_ = std::max(1, static_cast<int>(0.020 * sr_ + 0.5));  // as a replaced chain's crossfade (kSwapSeconds)
+    fadeLen_ = std::max(1, static_cast<int>(sampletime::roundFrames(kNoteFxFadeSeconds, sr_)));
+    swapLen_ = std::max(1, static_cast<int>(sampletime::roundFrames(0.020, sr_)));  // as a replaced chain's crossfade (kSwapSeconds)
     // Every lane's two channels, then the crossfade scratch and the leaving notes' dry signal.
     const size_t lanes = kMaxNoteSlots + 1;
     buffers_ = std::make_unique<float[]>((lanes * 2 + 4) * kFrames);

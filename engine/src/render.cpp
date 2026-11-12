@@ -11,6 +11,7 @@
 #include "component_test.h"
 #include "engine.h"
 #include "pattern.h"
+#include "sample_time.h"
 #include "wav.h"
 
 namespace caw {
@@ -124,8 +125,7 @@ bool record(const ProjectSpec& p, int sr, int64_t keepFrom, int64_t total, Rende
 }
 
 int64_t loopFrames(const ProjectSpec& p, int sr, int steps) {
-    const double stepLen = 60.0 * sr / (p.bpm * 4.0);
-    return static_cast<int64_t>(std::floor(steps * stepLen + 0.5));
+    return static_cast<int64_t>(sampletime::roundFrames(steps, sampletime::stepFrames(sr, p.bpm)));
 }
 
 // Each frame's DC offset removed, then the whole table normalised to a peak of 1, into out.samples.
@@ -250,7 +250,7 @@ void playedSpan(const ProjectSpec& p, const ExportOptions& o, int64_t& keepFrom,
         total = 2 * keepFrom;
     } else {
         keepFrom = 0;
-        total = static_cast<int64_t>(std::floor(std::clamp(o.seconds, 0.1, 600.0) * sr + 0.5));
+        total = static_cast<int64_t>(sampletime::roundFrames(std::clamp(o.seconds, 0.1, 600.0), sr));
     }
 }
 

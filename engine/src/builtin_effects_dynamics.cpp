@@ -8,6 +8,7 @@
 
 #include "caw/library/dynamics.hpp"
 #include "caw/library/filter.hpp"
+#include "sample_time.h"
 
 // Original code (C.A.W. is Apache-2.0). The compressor's soft knee is the textbook curve (Giannoulis, Massberg and
 // Reiss, JAES 2012); the limiter is the classic look-ahead design (a sliding minimum of the gain each sample needs,
@@ -103,7 +104,7 @@ protected:
         const double kneeStart = threshold_ - 0.5 * (knee_ < 0.0 ? 0.0 : knee_) - 0.01;
         if (kneeStart != kneeStartDb_) kneeStartDb_ = kneeStart, quietBelow_ = lib::dbToGain(kneeStart);
                 mix_ = std::clamp(param(kMix, at), 0.0, 1.0);
-        lookahead_ = std::min<uint32_t>(kLookaheadFrames, static_cast<uint32_t>(param(kLookahead, at) * 0.001 * sr + 0.5));
+        lookahead_ = std::min<uint32_t>(kLookaheadFrames, static_cast<uint32_t>(sampletime::roundFrames(param(kLookahead, at) * 0.001, sr)));
         rms_ = choice(kDetect, at) == 1;
         link_ = std::clamp(param(kLink, at), 0.0, 1.0);
         const double hpf = param(kScHpf, at);
@@ -263,7 +264,7 @@ protected:
         release_ = lib::timeCoefficient(param(kLimRelease, at) * 0.001, sr);
         truePeak_ = on(kTruePeak, at);
         const uint32_t most = truePeak_ ? kLookaheadFrames - 4 : kLookaheadFrames;
-        const uint32_t window = std::clamp<uint32_t>(static_cast<uint32_t>(param(kLimLookahead, at) * 0.001 * sr + 0.5), 1u, most);
+        const uint32_t window = std::clamp<uint32_t>(static_cast<uint32_t>(sampletime::roundFrames(param(kLimLookahead, at) * 0.001, sr)), 1u, most);
         if (window != window_) {  // a new look-ahead: the moving average's sum over its new length
             window_ = window;
             resum();
