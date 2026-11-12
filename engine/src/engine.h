@@ -438,6 +438,7 @@ private:
     double waitAvg_ = 0, workAvg_ = 0, mixLosingSeconds_ = 0, mixGrowSeconds_ = 0, mixRetrySeconds_ = 0;
     std::atomic<float> waitShare_{0};
     int retireStart_ = 0;  // where assignRetireBudgets hands out what is left after the even shares
+    bool poolUsed_ = false, poolUsedLast_ = false;  // this callback, the last one handed the pool a level
     bool wantsMixPool() const noexcept;
     bool slotForeign(const Slot& s) noexcept;  // a node in the serial lane: it holds third-party native code
     // Retirements waiting for room in the queue (pendingMax_ entries: two per slot at maxLayers() and

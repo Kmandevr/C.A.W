@@ -3939,6 +3939,7 @@ int Engine::processChunk(float* l, float* r, int maxFrames) noexcept {
     float* outputs[2] = {l, r};
     const bool ran = mixGraph_->executor.process(ConstChannelBufferView{}, ChannelBufferView{outputs, 2, static_cast<uint32_t>(m)},
                                                  static_cast<uint32_t>(m));
+    if (mixGraph_->executor.parallelLevelsRun() != 0) poolUsed_ = true;
     flushRetires();  // what the nodes handed back, now that nothing in the graph reads it
     if (!ran) {
         std::fill_n(l, m, 0.0f);
@@ -4818,7 +4819,10 @@ void Engine::process(float* left, float* right, int frames) noexcept {
     if (pool_) {
         const bool idle = !mixParallel_ || (!playing_ && !previewing_ && countInLeft_ == 0);
         pool_->park(idle);
-        pool_->beginCallback(!idle);
+        // Only when the last callback handed the pool a level: a project whose levels have one busy node each
+        // (one heavy instrument) never has idle workers spinning beside the callback (on a hyperthreaded core they
+        // slow it). Otherwise the first level published wakes them.
+        pool_->beginCallback(!idle && poolUsedLast_);
     }
     takeDeviceMidi(frames);
     takeToneRequest();
@@ -4899,6 +4903,8 @@ void Engine::process(float* left, float* right, int frames) noexcept {
     playingFlag_.store(playing_, std::memory_order_relaxed);
     posFlag_.store(g_, std::memory_order_relaxed);
     if (pool_) pool_->endCallback();  // the workers spin a little longer, then sleep until the next callback
+    poolUsedLast_ = poolUsed_;
+    poolUsed_ = false;
 }
 
 // Tuned at 512-frame callbacks at 48 kHz (10.7 ms): the average kept 0.9 of itself a callback, 20 callbacks over

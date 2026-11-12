@@ -208,6 +208,9 @@ void MixPool::begin(Task task, void* context, uint32_t count) noexcept {
     done_.store(0, std::memory_order_relaxed);
     const uint32_t epoch = ++epoch_;
     claim_.store(static_cast<uint64_t>(epoch) << 32 | static_cast<uint64_t>(count) << 16, std::memory_order_release);
+    // From the first level of a callback on, the workers spin through the rest of it (endCallback ends that).
+    if (spinUntil_.load(std::memory_order_relaxed) != std::numeric_limits<int64_t>::max())
+        spinUntil_.store(std::numeric_limits<int64_t>::max(), std::memory_order_relaxed);
     publishWake();
 }
 
