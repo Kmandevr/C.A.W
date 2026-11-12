@@ -1,5 +1,6 @@
 // The startup screen (owner's "waveform reveal", 2026-11-12): the crow draws itself from a moving waveform line, the
 // real loading steps tick off under it, the version shows, and it fades away the moment loading is done.
+import 'dart:async';
 import 'dart:math' as math;
 import 'dart:ui' show PathMetric;
 
@@ -27,12 +28,18 @@ const Color _pink = Color(0xFFFF2BD6);
 /// logo fades in. Loading that ends sooner cuts it short ([StartupGate]).
 const Duration revealDuration = Duration(milliseconds: 1300);
 
+/// The open-beta notice and the copyright under the version (owner, 2026-11-12).
+const String openBetaNotice = 'Open beta: expect rough edges and unexpected issues.';
+const String copyrightLine = '© 2026 AutoStacc';
+
 /// Shows [child] (the app) with the startup screen in front until [state] is ready, then fades the screen out at
 /// once over the app, which takes input from the first frame it shows (it never waits for the reveal to finish).
+/// A launch still loading after [timeout] shows the app anyway ([AppState.startupTimedOut] says which step stuck).
 class StartupGate extends StatefulWidget {
-  const StartupGate({super.key, required this.state, required this.child});
+  const StartupGate({super.key, required this.state, required this.child, this.timeout = const Duration(seconds: 10)});
   final AppState state;
   final Widget child;
+  final Duration timeout;
 
   @override
   State<StartupGate> createState() => _StartupGateState();
@@ -46,14 +53,18 @@ class _StartupGateState extends State<StartupGate> with SingleTickerProviderStat
       if (status == AnimationStatus.dismissed && mounted) setState(() => _shown = false);
     });
 
+  Timer? _limit;
+
   @override
   void initState() {
     super.initState();
     widget.state.addListener(_changed);
+    if (!_ready) _limit = Timer(widget.timeout, widget.state.startupTimedOut);
   }
 
   @override
   void dispose() {
+    _limit?.cancel();
     widget.state.removeListener(_changed);
     _fade.dispose();
     super.dispose();
@@ -62,6 +73,7 @@ class _StartupGateState extends State<StartupGate> with SingleTickerProviderStat
   void _changed() {
     if (_ready == widget.state.ready || !mounted) return;
     setState(() => _ready = widget.state.ready);
+    if (_ready) _limit?.cancel();
     if (!_ready || !_shown) return;
     final d = Motion.fade(Motion.standard, Motion.of(context));
     if (d == Duration.zero) {
@@ -148,8 +160,24 @@ class _StartupScreenState extends State<StartupScreen> with SingleTickerProvider
               const SizedBox(height: 28),
               SizedBox(width: listWidth, child: _StepList(progress: widget.progress)),
               const Spacer(flex: 6),
-              Text('v${widget.version}',
-                  style: const TextStyle(fontFamily: Neon.mono, fontSize: 11, color: _dim, letterSpacing: 0.5)),
+              // The version, the open-beta notice and the copyright: small and quiet, fading in with the steps.
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: _Appear(
+                  child: Column(children: [
+                    for (final line in ['v${widget.version}', openBetaNotice, copyrightLine])
+                      Padding(
+                        padding: const EdgeInsets.only(top: 2),
+                        child: Text(line,
+                            textAlign: TextAlign.center,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                                fontFamily: Neon.mono, fontSize: 11, height: 1.3, color: _dim, letterSpacing: 0.5)),
+                      ),
+                  ]),
+                ),
+              ),
               const SizedBox(height: 16),
             ]);
           }),

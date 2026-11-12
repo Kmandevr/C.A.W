@@ -352,6 +352,12 @@ class AppState extends ChangeNotifier {
 
   /// The loading steps as [init] runs them, for the startup screen.
   final StartupProgress startup = StartupProgress();
+
+  /// How [init] reads the platform's thermal and power signals and makes the engine (tests replace them).
+  @visibleForTesting
+  Future<EnginePressure> Function() readPressure = ResourceSignals.read;
+  @visibleForTesting
+  Engine Function(int sampleRate) createEngine = (rate) => Engine.create(sampleRate: rate);
   String? lastProjectId;
   List<ProjectSummary> savedProjects = const [];
 
@@ -409,39 +415,64 @@ class AppState extends ChangeNotifier {
   AudioStatus? get audioStatus => engine?.audioStatus();
 
   Future<void> init() async {
-    startup.begin(StartupStep.engine);
-    await latency.load();
-    _resourcePressureSubscription = ResourceSignals.changes.listen(
-      (pressure) => EngineExecutionPolicy.updateRuntimeSignals(pressure: pressure),
-      onError: (Object _) => EngineExecutionPolicy.updateRuntimeSignals(pressure: EnginePressure.unknown),
-    );
-    EngineExecutionPolicy.updateRuntimeSignals(pressure: await ResourceSignals.read());
+    // Everything runs inside the try, so whatever throws, the finally shows the app ([StartupGate] also gives up
+    // waiting after its timeout, for a step that never ends).
     try {
-      engine = Engine.create(sampleRate: settings.sampleRate);
-      applyAudioSettings();  // before the device opens, so it opens on the chosen device at the chosen size
-      hardwareProfile = EngineExecutionPolicy.hardwareProfile;
-      auditionPlan = EngineExecutionPolicy.plan(workload: EngineWorkload.interactiveAudition);
-      await _audioConfigured;  // the choice is in the engine before the device opens (no reopen right after)
-      _openAudio(engine!);
-      startup.finish(StartupStep.engine);
-    } catch (e) {
-      engineError = 'The sound engine did not load: $e';
-      startup.finish(StartupStep.engine, ok: false);
-    }
-    try {
+      startup.begin(StartupStep.engine);
+      try {
+        await latency.load();
+        _resourcePressureSubscription = ResourceSignals.changes.listen(
+          (pressure) => EngineExecutionPolicy.updateRuntimeSignals(pressure: pressure),
+          onError: (Object _) => EngineExecutionPolicy.updateRuntimeSignals(pressure: EnginePressure.unknown),
+        );
+        EngineExecutionPolicy.updateRuntimeSignals(pressure: await readPressure());
+      } catch (_) {
+        // The signals are optional: the policy stays conservative without them.
+        EngineExecutionPolicy.updateRuntimeSignals(pressure: EnginePressure.unknown);
+      }
+      try {
+        engine = createEngine(settings.sampleRate);
+        applyAudioSettings();  // before the device opens, so it opens on the chosen device at the chosen size
+        hardwareProfile = EngineExecutionPolicy.hardwareProfile;
+        auditionPlan = EngineExecutionPolicy.plan(workload: EngineWorkload.interactiveAudition);
+        await _audioConfigured;  // the choice is in the engine before the device opens (no reopen right after)
+        _openAudio(engine!);
+        startup.finish(StartupStep.engine);
+      } catch (e) {
+        engineError = 'The sound engine did not load: $e';
+        startup.finish(StartupStep.engine, ok: false);
+      }
       await openStorage(await ProjectStorage.open());
     } catch (e) {
       // Never stuck on the logo: show the app with whatever opened, and say why.
       openError = 'Projects could not be opened: $e';
       starting = false;
-      for (final step in StartupStep.values) {
-        if (startup.begun(step) && !startup.done(step)) startup.finish(step, ok: false);
-      }
+      _failUnfinishedSteps();
     } finally {
       ready = true;
       notifyListeners();
       _poller.wake();
     }
+  }
+
+  void _failUnfinishedSteps() {
+    for (final step in StartupStep.values) {
+      if (startup.begun(step) && !startup.done(step)) startup.finish(step, ok: false);
+    }
+  }
+
+  /// Launch took longer than [StartupGate]'s limit: shows the app now, with the step still running marked failed
+  /// and a line saying why. [init] carries on; if it finishes later, the project it opens replaces this one.
+  void startupTimedOut() {
+    if (ready || _disposed) return;
+    final stuck = [for (final s in StartupStep.values) if (startup.begun(s) && !startup.done(s)) s];
+    _failUnfinishedSteps();
+    openError = stuck.isEmpty
+        ? 'Loading took too long, so the app opened without waiting.'
+        : '"${stuck.first.label}" took too long, so the app opened without waiting for it.';
+    ready = true;
+    notifyListeners();
+    _poller.wake();
   }
 
   /// Reads the saved projects from [storage] and opens straight into the last one: the arrangement is home (UI
@@ -461,7 +492,7 @@ class AppState extends ChangeNotifier {
         componentsOk = false;
       }
     }
-    startup.finish(StartupStep.components, ok: componentsOk);
+    startup.finish(StartupStep.components, ok: e != null && componentsOk);
     startup.begin(StartupStep.projects);
     lastProjectId = await storage.lastOpened();
     savedProjects = await listProjects();

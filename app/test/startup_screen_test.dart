@@ -1,7 +1,10 @@
 // The startup screen: steps tick off as loading reports them, it leaves when loading is done, a still logo without
 // motion, no overflow at 360 dp or on a desktop window, and its goldens at phone and desktop sizes mid-reveal.
+import 'dart:io';
+
 import 'package:caw/model/app_state.dart';
 import 'package:caw/model/settings.dart';
+import 'package:caw/model/storage.dart';
 import 'package:caw/model/startup_progress.dart';
 import 'package:caw/ui/glass.dart';
 import 'package:caw/ui/motion.dart';
@@ -108,6 +111,64 @@ void main() {
     s.clipSelectionChanged();
     await tester.pump();
     expect(find.byType(StartupScreen), findsNothing);
+  });
+
+  test('launch never sticks behind the screen: a failing signal read before the engine still ends ready', () async {
+    final s = AppState(settings: Settings())
+      ..readPressure = (() => throw StateError('no signals'))
+      ..createEngine = ((_) => throw StateError('no engine here'));
+    addTearDown(s.dispose);
+    await s.init();
+    expect(s.ready, isTrue);
+    expect(s.startup.failed(StartupStep.engine), isTrue);
+  });
+
+  test('C++ components are reported failed when the engine did not load', () async {
+    final root = await Directory.systemTemp.createTemp('caw-startup');
+    addTearDown(() => root.delete(recursive: true));
+    final s = AppState(settings: Settings()); // no engine
+    addTearDown(s.dispose);
+    await s.openStorage(ProjectStorage(root));
+    expect(s.startup.done(StartupStep.components), isTrue);
+    expect(s.startup.failed(StartupStep.components), isTrue);
+    expect(s.startup.failed(StartupStep.project), isFalse);
+  });
+
+  testWidgets('a launch that hangs shows the app after the safety timeout, the stuck step marked and why', (tester) async {
+    final s = AppState(settings: Settings());
+    // Disposed in the test: its meter poller's timer must stop before the test ends.
+    s.startup
+      ..finish(StartupStep.engine)
+      ..begin(StartupStep.components); // and never finishes
+    await _pump(tester, StartupGate(state: s, child: const Scaffold(body: Text('the app'))), const Size(390, 844));
+    await tester.pump(const Duration(seconds: 9));
+    expect(s.ready, isFalse);
+    expect(find.byType(StartupScreen), findsOneWidget);
+    await tester.pump(const Duration(seconds: 1, milliseconds: 100));
+    await tester.pump(Motion.standard + const Duration(milliseconds: 20));
+    expect(s.ready, isTrue);
+    expect(find.byType(StartupScreen), findsNothing);
+    expect(s.startup.failed(StartupStep.components), isTrue);
+    expect(s.startup.failed(StartupStep.engine), isFalse);
+    expect(s.openError, contains('Loading C++ components'));
+    await tester.pumpWidget(const SizedBox());
+    s.dispose();
+  });
+
+  testWidgets('the version, the open-beta notice and the copyright fit at 360 dp', (tester) async {
+    final p = StartupProgress();
+    addTearDown(p.dispose);
+    await _pump(tester, _screen(p), const Size(360, 640));
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    for (final line in ['v0.9.0-beta.1', 'Open beta: expect rough edges and unexpected issues.', '© 2026 AutoStacc']) {
+      final f = find.text(line);
+      expect(f, findsOneWidget, reason: line);
+      final r = tester.getRect(f);
+      expect(r.left, greaterThanOrEqualTo(0), reason: line);
+      expect(r.right, lessThanOrEqualTo(360), reason: line);
+      expect(r.bottom, lessThanOrEqualTo(640), reason: line);
+    }
   });
 
   for (final (name, set) in [
