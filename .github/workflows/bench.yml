@@ -56,7 +56,6 @@ jobs:
           c++ --version | head -1
       - name: Run the suite
         run: |
-          for g in 1 2 4 1 2 4; do echo "group $g"; CAW_A2_GROUP=$g build/caw_bench 10 500 --runs 1 --only flagship_heavy,flagship_heavy16 | tail -2; done  # TEMPORARY
           build/caw_bench "$SECONDS_PER" 500 --runs "$RUNS" --label "${{ matrix.name }}" \
             --json "bench-${{ matrix.slug }}.json" --md "bench-${{ matrix.slug }}.md"
           cat "bench-${{ matrix.slug }}.md" >> "$GITHUB_STEP_SUMMARY"
@@ -108,7 +107,6 @@ jobs:
           file caw_bench || true
           lscpu | grep -E 'Model name|^CPU\(s\)' || true
           # bionic's temp directory default is Android's; point it at the runner's.
-          for g in 1 2 4 1 2 4; do echo "group $g"; CAW_A2_GROUP=$g TMPDIR="$RUNNER_TEMP" ./caw_bench 10 500 --runs 1 --only flagship_heavy,flagship_heavy16 | tail -2; done  # TEMPORARY
           TMPDIR="$RUNNER_TEMP" ./caw_bench "$SECONDS_PER" 500 --runs "$RUNS" --label "Android arm64 (bionic, on Linux arm64)" \
             --json bench-android-arm64.json --md bench-android-arm64.md
           cat bench-android-arm64.md >> "$GITHUB_STEP_SUMMARY"
