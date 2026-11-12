@@ -71,7 +71,7 @@ The .caw VM, whose costs the 2026-10-28 engine audit measured (integer conversio
 2. **The meter poll never stopped.** It ran on a Flutter `Ticker`, and a running `Ticker` asks for a frame on every screen refresh, 120 times a second on the S22+'s display.
    - So even when stopped with nothing moving, the UI thread woke up every frame. It read the meters over FFI 30 times a second and redrew every meter and scope.
    - This is from the code and Flutter's `Ticker` behaviour. Battery wasn't measured on a device here.
-   - The screen's own rate is now the Frame rate setting's (2026-11-12; [app](app.md), Frame rate): Auto drops the display to its lowest rate after 1 s with no frame drawn, so a still screen also costs fewer refreshes where the system allows it.
+   - The screen's own rate is now the Frame rate setting's (2026-11-12; [app](app.md), Frame rate): Auto drops the display to its lowest rate after 1 s with no frame drawn, so a still screen also costs fewer refreshes where the system allows it. Saving settings (like any app file) goes through one queued write per path (`lib/model/atomic_file.dart`), off the UI's frame work.
 3. **The audio device stayed open while stopped.** It ran a callback writing silence for as long as the app was in the foreground.
 4. **Historical baseline (superseded 2026-10-31):** each project update started a worker isolate, about 1.8 ms in the test VM. Project updates and offline WAV renders now use the native bounded worker pool; this is no longer the current execution path. Release-device latency still needs measurement.
 
@@ -120,7 +120,7 @@ The Settings page now offers four explicit profiles:
 | Lightweight | Decorative glow and glass blur disabled; the glass look stays, unblurred (`lib/ui/glass.dart`) | Existing reduced voice budget (4 per pattern layer); meter polling remains 30 Hz |
 | Minimal | Decorative glow and glass disabled; scope panels hidden; motion off (`lib/ui/motion.dart`) | Reduced voice budget; meter polling remains 30 Hz |
 
-The legacy `light_mode` setting is still read for migration: true maps to Lightweight and false maps to Balanced. New settings persist `performance_mode` by name and also write the legacy boolean for older builds. Editing settings (the roll's look and value grid, the arrangement's track gap) are the same in every profile.
+The legacy `light_mode` setting is still read for migration: true maps to Lightweight and false maps to Balanced. New settings persist `performance_mode` by name and also write the legacy boolean for older builds. Editing settings (the roll's look and value grid, the arrangement's track gap, the music video's one-time Strobe warning, `strobe_warned`) are the same in every profile.
 
 **Important correction:** performance profiles do not lower meter polling to 15 Hz. Meter cadence stays at 30 Hz in every profile; visual simplification is preferred over slower feedback. Balanced only scales decorative glow, while Lightweight/Minimal apply the existing smaller voice budget. Minimal hides the Engine Lab master scope, whose data is a mono sum; independent left/right peak meters remain visible.
 

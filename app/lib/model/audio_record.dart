@@ -14,6 +14,7 @@ import 'app_state.dart';
 import 'audio_clips.dart';
 import 'audio_edit.dart';
 import 'project.dart';
+import 'atomic_file.dart';
 
 /// Where punch in/out comes from: none, the loop range, or the time selection.
 enum PunchMode { off, loop, selection }
@@ -68,9 +69,7 @@ class AudioInputPrefs {
     final f = file;
     if (f == null) return;
     try {
-      final tmp = File('${f.path}.tmp');
-      await tmp.writeAsString(jsonEncode(toJson()), flush: true);
-      await tmp.rename(f.path);
+      await writeFileAtomically(f, jsonEncode(toJson()));
     } catch (_) {
       // A full disk keeps the choice for this session only.
     }

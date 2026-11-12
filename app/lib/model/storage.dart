@@ -7,6 +7,7 @@ import 'package:path_provider/path_provider.dart';
 
 import 'cpp_component.dart';
 import 'project.dart';
+import 'atomic_file.dart';
 
 class ProjectSummary {
   const ProjectSummary(this.id, this.name, this.modified);
@@ -78,9 +79,7 @@ class ProjectStorage {
   /// `jsonEncode(p.toJson())` when the caller already has it (the app shares it with its undo snapshot).
   Future<void> save(ProjectDoc p, {String? json}) async {
     final f = _file(p.id);
-    final tmp = File('${f.path}.tmp');
-    await tmp.writeAsString(json ?? jsonEncode(p.toJson()), flush: true);
-    await tmp.rename(f.path);
+    await writeFileAtomically(f, json ?? jsonEncode(p.toJson()));
   }
 
   String _validatedProjectId(String id) {
