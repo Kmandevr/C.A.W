@@ -279,6 +279,9 @@ void MixPool::loop(uint32_t lane) noexcept {
             for (uint32_t n = 0; wake_.load(std::memory_order_acquire) == seen; ++n) {
                 CAW_POOL_PAUSE();
                 if ((n & 63u) == 63u) {
+                    // Gives the core to anything else waiting for it (the system's own threads), so it need not
+                    // preempt a thread that is running a node; returns at once when nothing waits.
+                    std::this_thread::yield();
                     const int64_t t = nowNs();
                     if (t >= cap || t >= spinUntil_.load(std::memory_order_relaxed) ||
                         parked_.load(std::memory_order_relaxed) || stop_.load(std::memory_order_relaxed))
