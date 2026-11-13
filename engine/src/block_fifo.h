@@ -24,8 +24,8 @@ public:
     int held() const noexcept { return held_; }
     // The most a device with callbacks of `period` frames waits here: 0 when every callback is whole blocks.
     static int maxLatency(int period) noexcept { return period > 0 && period % kFrames == 0 ? 0 : kFrames - 1; }
-    // Drops what is held (a device open, a Play or a seek: the new position starts on the next callback's
-    // first frame instead of after old audio).
+    // Drops what is held: only at a device open. Never on a Play, Stop or seek: the engine has already rendered
+    // the held frames and moved past them, so dropping them would jump the waveform (device_render.h).
     void flush() noexcept { held_ = at_ = 0; }
 
     // Fills `frames` frames of left and right. `render(l, r, n)` renders n frames, a whole number of blocks (at

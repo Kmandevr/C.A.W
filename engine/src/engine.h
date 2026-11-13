@@ -180,10 +180,6 @@ public:
     // Ends every knob touch now, as a Play does, so the lanes rule again (an automation Touch write released).
     void releaseTouches();
     void stop();
-    // Any thread: how many Play, count-in and Stop commands have been queued, counted after each is queued. A
-    // device callback holding rendered frames (BlockFifo) drops them when this moves, so the new position starts
-    // on its next frame.
-    uint32_t transportSends() const noexcept { return transportSends_.load(std::memory_order_acquire); }
     void clearOverload();
     // Any thread, never blocks (a device opening, the app going to the background): every shed layer comes back and
     // the load history is forgotten at the next callback, so a throttled stretch doesn't thin the song for good.
@@ -230,9 +226,11 @@ public:
 
     // Audio thread: no allocation, locks or I/O.
     void process(float* left, float* right, int frames) noexcept;
-    // One callback's share of its time budget used, for [frames] frames at the engine's rate. The average, the time
-    // over budget before a layer is shed and the rest after it go by time, so any callback size behaves alike.
-    void reportLoad(double load, int frames) noexcept;
+    // One callback's share of its time budget used, for [frames] frames at the engine's rate, of which the engine
+    // rendered [rendered] (0: the same; through the device's BlockFifo it renders more or fewer than it plays, and
+    // the load is counted per frame rendered). The average, the time over budget before a layer is shed and the
+    // rest after it go by time, so any callback size behaves alike.
+    void reportLoad(double load, int frames, int rendered = 0) noexcept;
 
 private:
     // First, so it outlives every component chain (built-ins keep a pointer to it).
@@ -412,7 +410,6 @@ private:
     std::unique_ptr<Spsc<Retired, 1024>> retired_;
     std::atomic<float> cpu_{0}, peakL_{0}, peakR_{0};
     std::atomic<bool> playingFlag_{false};
-    std::atomic<uint32_t> transportSends_{0};  // transportSends()
     std::atomic<bool> bypass_{false};
     std::atomic<int64_t> posFlag_{0}, loopLenFlag_{0};
     std::atomic<int> overloadedFlag_{0};  // layers shed now

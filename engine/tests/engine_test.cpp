@@ -13,6 +13,7 @@
 
 #include "caw.h"
 #include "detmath.h"
+#include "device_render.h"
 #include "engine.h"
 #include "native_component_test_path.h"
 #include "test.h"
@@ -891,6 +892,54 @@ TEST(a_single_late_callback_sheds_nothing) {
         CHECK_EQ(e.meters().overloaded, 0);
         CHECK_EQ(e.sheddingStats().shed, uint64_t{0});
     }
+}
+
+TEST(odd_callback_sizes_through_the_device_fifo_shed_nothing_under_the_threshold) {
+    // The 2026-11-12 audio review: through the device's FIFO a callback renders more or fewer frames than it
+    // plays (at 120 frames, 128 seven times in eight), so a load measured against the callback's own budget peaks
+    // over 85% while the engine's real load is under it. The load counts per frame rendered (reportLoad's third
+    // argument), and a small period that isn't whole blocks (96, a phone's low-latency burst) skips the FIFO.
+    CHECK(!DeviceRender::suits(96));
+    CHECK(!DeviceRender::suits(240));
+    CHECK(DeviceRender::suits(192));
+    CHECK(DeviceRender::suits(441));
+    CHECK(DeviceRender::suits(257));
+    for (const int period : {96, 120, 200, 300, 441, 1023}) {
+        for (const bool fifo : {true, false}) {
+            for (const double perFrame : {0.7, 0.8}) {
+                Engine e(48000);
+                e.setProject(project({dc(0.25), dc(0.5)}));
+                e.play();
+                DeviceRender dev;
+                if (fifo) dev.open(period);  // as the device does: the FIFO only where the period suits it
+                else dev.open(kBlock * 4);   // the FIFO forced on, at any period
+                CHECK_EQ(dev.usesFifo(), fifo ? DeviceRender::suits(period) : true);
+                std::vector<float> out(static_cast<size_t>(period) * 2);
+                for (int k = 0, calls = 48000 * 5 / period; k < calls; ++k) {
+                    const int rendered = dev.render(e, out.data(), period);
+                    if (!dev.usesFifo()) CHECK_EQ(rendered, period);
+                    // The callback's time: perFrame of real time for each frame rendered, against its own budget.
+                    e.reportLoad(perFrame * rendered / period, period, rendered);
+                }
+                if (e.sheddingStats().shed != 0)
+                    cawtest::fail(__FILE__, __LINE__, std::to_string(period) + "-frame callbacks at " + std::to_string(perFrame) +
+                                                          " a frame rendered shed " + std::to_string(e.sheddingStats().shed));
+                CHECK_NEAR(e.meters().cpu, perFrame, 0.02);  // the meter reads the engine's real load
+            }
+        }
+    }
+    // A real overload still sheds through the FIFO.
+    Engine e(48000);
+    e.setProject(project({dc(0.25), dc(0.5)}));
+    e.play();
+    DeviceRender dev;
+    dev.open(441);
+    std::vector<float> out(441 * 2);
+    for (int k = 0; k < 48000 / 441; ++k) {
+        const int rendered = dev.render(e, out.data(), 441);
+        e.reportLoad(0.95 * rendered / 441, 441, rendered);
+    }
+    CHECK(e.sheddingStats().shed >= 1);
 }
 
 TEST(a_shed_folder_bus_that_is_removed_is_no_longer_counted_shed) {

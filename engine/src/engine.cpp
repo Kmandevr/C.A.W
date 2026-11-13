@@ -2319,7 +2319,6 @@ void Engine::play(double fromStep) {
     c.playCount = playCount_ + 1;
     c.touchStamp = touchCounter_;
     if (!send(c)) return;  // nothing changed on the audio side, so keep the control side as it was
-    transportSends_.fetch_add(1, std::memory_order_release);
     playCount_ = c.playCount;
     loudness_->requestReset();  // the integrated loudness measures this play
 }
@@ -2334,7 +2333,6 @@ void Engine::playCountIn(double fromStep, int beats) {
     c.playCount = playCount_ + 1;
     c.touchStamp = touchCounter_;
     if (!send(c)) return;
-    transportSends_.fetch_add(1, std::memory_order_release);
     playCount_ = c.playCount;
     loudness_->requestReset();
 }
@@ -2426,7 +2424,7 @@ void Engine::stop() {
     std::lock_guard<std::mutex> lock(ctl_);
     Cmd c;
     c.type = Cmd::Stop;
-    if (send(c)) transportSends_.fetch_add(1, std::memory_order_release);
+    send(c);
 }
 
 void Engine::startPlay(double fromStep, uint64_t playCount, uint32_t touchStamp) noexcept {
@@ -4639,12 +4637,20 @@ void Engine::process(float* left, float* right, int frames) noexcept {
 // the load then) stays under 0.75, or on trial after 8 s more of quiet; then another 2 s for the next. Hysteresis: shed
 // over 0.85, back under 0.6 and only to under 0.75, so a returning layer does not cross 0.85 again; and one shed
 // again within 10 s of coming back waits twice as long each time (up to 32 s). Never in an offline engine.
-void Engine::reportLoad(double load, int frames) noexcept {
+void Engine::reportLoad(double load, int frames, int rendered) noexcept {
     constexpr double kTick = 512.0 / 48000.0;
     constexpr double kCoolSeconds = 100 * kTick;
     constexpr double kOverLoad = 0.85, kOverShare = 0.7, kShareSeconds = 0.25;
+    // ==== MERGE HOOK (branch speed-parallel; docs/engine.md "Merge notes") ====
+    // The mix pool's per-callback timing (takeTimes / reportWork) and its Auto decision run HERE, before every
+    // early return below (no frames, an offline engine, a shed), so they see every callback. Shedding must also
+    // hold off while the pool's Auto is turning on (its first callbacks' cost is not the song's).
+    // ==========================================================================
     if (frames <= 0) return;
     if (!std::isfinite(load)) load = 0.0;
+    // Through the device's FIFO a callback renders more or fewer frames than it plays (128 and 64 by turns at 96
+    // frames): the load per frame rendered is the engine's real load, without those alternating peaks.
+    if (rendered > 0 && rendered != frames) load *= static_cast<double>(frames) / static_cast<double>(rendered);
     const double dt = static_cast<double>(frames) / sr_;
     if (dt != loadDt_) {  // the size rarely changes: pow and exp only then
         loadDt_ = dt;

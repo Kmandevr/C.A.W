@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "block_fifo.h"
+#include "device_render.h"
 #include "engine.h"
 #include "midifile.h"
 #include "pattern.h"
@@ -367,14 +368,72 @@ TEST(the_engine_does_the_same_work_after_minutes_of_play_with_no_app_calls) {
     CHECK(e.meters().playing);
 }
 
-TEST(a_play_or_stop_moves_the_transport_count_the_device_fifo_watches) {
-    Engine e(48000);
-    CHECK(e.setProject(fifoSong()).find("\"ok\":true") != std::string::npos);
-    const uint32_t before = e.transportSends();
-    e.play();
-    CHECK_EQ(e.transportSends(), before + 1);
-    e.stop();
-    CHECK_EQ(e.transportSends(), before + 2);
-    e.playCountIn(0, 4);
-    CHECK_EQ(e.transportSends(), before + 3);
+TEST(a_stop_or_replay_mid_note_through_the_device_fifo_never_jumps_the_waveform) {
+    // The 2026-11-12 audio review: the device callback dropped the FIFO's held frames (1-63) on every Play and
+    // Stop, though the engine had already rendered them and moved on, so the waveform jumped and clicked. Through
+    // the FIFO (device_render.h, as the device does) a re-Play and a Stop mid-note must play exactly what the
+    // engine rendered, in order, nothing skipped: the same samples as 64-frame blocks with the same commands at
+    // the same render positions. And the Stop's fade steps no more than the sine itself does.
+    auto song = [] {
+        return cawtest::testSignalProject({cawtest::testSignalLayer("s", cawtest::Shape::Sine, {{"freq", 220.0}, {"level", 0.5}})}, 120, 4);
+    };
+    for (const int period : {441, 720, 1023, 1000, 300}) {
+        Engine e(48000);
+        e.setMasterBypass(true);
+        CHECK(e.setProject(song()).find("\"ok\":true") != std::string::npos);
+        e.play();
+        DeviceRender dev;
+        dev.open(period);
+        CHECK(dev.usesFifo());
+        std::vector<float> out(static_cast<size_t>(period) * 2), played;
+        std::vector<std::pair<int64_t, bool>> events;  // render position, Stop (else a re-Play)
+        int64_t rendered = 0, stopAt = 0;
+        int heldAtEvents = 0;
+        for (int call = 0; call < 120; ++call) {
+            if (call == 30 || call == 60 || call == 90) {
+                heldAtEvents += dev.held() > 0;
+                events.push_back({rendered, call == 90});
+                if (call == 90) {
+                    stopAt = static_cast<int64_t>(played.size());
+                    e.stop();
+                } else {
+                    e.play();
+                }
+            }
+            rendered += dev.render(e, out.data(), period);
+            for (int i = 0; i < period; ++i) played.push_back(out[static_cast<size_t>(i) * 2]);
+        }
+        CHECK(heldAtEvents > 0);  // the FIFO held frames when the transport moved
+        // The same commands at the same render positions, in 64-frame blocks with no FIFO.
+        Engine f(48000);
+        f.setMasterBypass(true);
+        CHECK(f.setProject(song()).find("\"ok\":true") != std::string::npos);
+        f.play();
+        std::vector<float> l(kBlock), r(kBlock), direct;
+        size_t next = 0;
+        for (int64_t at = 0; at < static_cast<int64_t>(played.size()); at += kBlock) {
+            while (next < events.size() && events[next].first == at) {
+                if (events[next].second) f.stop();
+                else f.play();
+                ++next;
+            }
+            f.process(l.data(), r.data(), kBlock);
+            direct.insert(direct.end(), l.begin(), l.end());
+        }
+        CHECK_EQ(next, events.size());  // every command landed on a block's start, as through the FIFO
+        size_t differ = 0, first = 0;
+        for (size_t i = 0; i < played.size(); ++i)
+            if (played[i] != direct[i] && !differ++) first = i;
+        if (differ)
+            cawtest::fail(__FILE__, __LINE__, std::to_string(period) + "-frame callbacks: " + std::to_string(differ) +
+                                                  " samples differ from the engine's render, from frame " + std::to_string(first));
+        // Around the Stop: no step steeper than the sine's own (its fade adds a little).
+        float steady = 0, worst = 0;
+        for (size_t i = 4097; i < static_cast<size_t>(period) * 29; ++i) steady = std::max(steady, std::fabs(played[i] - played[i - 1]));
+        for (size_t i = static_cast<size_t>(stopAt) + 1; i < played.size(); ++i) worst = std::max(worst, std::fabs(played[i] - played[i - 1]));
+        CHECK(steady > 0.005f);
+        if (worst > steady * 1.25f)
+            cawtest::fail(__FILE__, __LINE__, std::to_string(period) + "-frame callbacks: a step of " + std::to_string(worst) +
+                                                  " after the Stop, the sine's steepest " + std::to_string(steady));
+    }
 }

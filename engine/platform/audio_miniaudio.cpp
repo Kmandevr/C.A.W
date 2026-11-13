@@ -20,9 +20,9 @@
 #include <mmdeviceapi.h>
 #endif
 
-#include "block_fifo.h"
 #include "caw.h"
 #include "capi_internal.h"
+#include "device_render.h"
 #include "miniaudio.h"
 
 namespace {
@@ -65,10 +65,10 @@ struct Audio {
     const char* kindIn = "unknown";
 #endif
     float l[kChunk], r[kChunk];
-    // Playback only: the engine renders whole kBlock-frame blocks whatever size the callback is (BlockFifo, the
-    // owner's fixed-block idea, 2026-11-12). Fresh at every open; dropped on a Play or Stop (transportSeen).
-    caw::BlockFifo<caw::kBlock> fifo;
-    uint32_t transportSeen = 0;
+    // Playback only: the engine renders whole kBlock-frame blocks whatever size the callback is (DeviceRender's
+    // BlockFifo, the owner's fixed-block idea, 2026-11-12), unless the period is small and not whole blocks. Fresh
+    // at every open; never flushed while running (a Play or Stop keeps the frames it holds: device_render.h).
+    caw::DeviceRender render;
     int fifoLatency = 0;  // frames it can hold back (0 when the period is whole blocks), in the output latency
 };
 
@@ -189,24 +189,20 @@ void callback(ma_device* dev, void* output, const void* input, ma_uint32 frames)
     auto* a = static_cast<Audio*>(dev->pUserData);
     const auto start = std::chrono::steady_clock::now();
     auto* out = static_cast<float*>(output);
-    ma_uint32 done = 0;
     caw::LiveAudio& live = a->owner->engine->liveAudio();
     const auto* in = static_cast<const float*>(input);
     const int ch = a->input && in ? static_cast<int>(a->inputChannels) : 0;
+    int rendered = static_cast<int>(frames);
     if (!a->input) {
-        // Playback only: fixed blocks through the FIFO, rendered straight into a->l/r and interleaved from there.
-        const uint32_t sent = a->owner->engine->transportSends();
-        if (sent != a->transportSeen) {
-            a->transportSeen = sent;
-            a->fifo.flush();
-        }
+        // Playback only: fixed blocks through the FIFO (device_render.h), or straight for a small odd period.
+        rendered = a->render.render(*a->owner->engine, out, static_cast<int>(frames));
+    } else {
+        ma_uint32 done = 0;
         while (done < frames) {
             const int n = static_cast<int>(frames - done < kChunk ? frames - done : kChunk);
-            a->fifo.pull(a->l, a->r, n, kChunk, [&](float* l, float* r, int m) {
-                live.beginCallback(nullptr, 0, m);
-                a->owner->engine->process(l, r, m);
-                live.afterCallback(l, r, m);  // the latency ping (it needs the input: inactive here)
-            });
+            live.beginCallback(ch ? in + static_cast<size_t>(done) * ch : nullptr, ch, n);  // monitoring and recording
+            a->owner->engine->process(a->l, a->r, n);
+            live.afterCallback(a->l, a->r, n);  // the latency ping
             for (int i = 0; i < n; ++i) {
                 out[(done + i) * 2] = a->l[i];
                 out[(done + i) * 2 + 1] = a->r[i];
@@ -214,20 +210,10 @@ void callback(ma_device* dev, void* output, const void* input, ma_uint32 frames)
             done += static_cast<ma_uint32>(n);
         }
     }
-    while (done < frames) {
-        const int n = static_cast<int>(frames - done < kChunk ? frames - done : kChunk);
-        live.beginCallback(ch ? in + static_cast<size_t>(done) * ch : nullptr, ch, n);  // monitoring and recording
-        a->owner->engine->process(a->l, a->r, n);
-        live.afterCallback(a->l, a->r, n);  // the latency ping
-        for (int i = 0; i < n; ++i) {
-            out[(done + i) * 2] = a->l[i];
-            out[(done + i) * 2 + 1] = a->r[i];
-        }
-        done += static_cast<ma_uint32>(n);
-    }
     const double used = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
     const double budget = static_cast<double>(frames) / static_cast<double>(dev->sampleRate);
-    a->owner->engine->reportLoad(budget > 0 ? used / budget : 0.0, static_cast<int>(frames));
+    // The load per frame rendered: through the FIFO a callback renders more or fewer frames than it plays.
+    a->owner->engine->reportLoad(budget > 0 ? used / budget : 0.0, static_cast<int>(frames), rendered);
 }
 
 void setError(const std::string& msg, char* error, int32_t len) {
@@ -298,10 +284,9 @@ ma_result openDevice(Audio* a, const CawEngine* e, const ma_device_id* id, ma_ui
     readAAudioModes(a);
     // miniaudio calls back with a fixed size (its intermediary buffer, noFixedSizedCallback off): what it holds
     // back on top is at most a block short of one, unless that size is whole blocks.
-    a->fifo.flush();
-    a->transportSeen = e->engine->transportSends();
+    a->render.open(static_cast<int>(a->device.playback.intermediaryBufferCap));
     e->engine->requestSheddingReset();  // a fresh device: its first callbacks' stalls and a throttled stretch before don't count
-    a->fifoLatency = duplex ? 0 : caw::BlockFifo<caw::kBlock>::maxLatency(static_cast<int>(a->device.playback.intermediaryBufferCap));
+    a->fifoLatency = duplex ? 0 : a->render.latency();
     if (duplex) {
         a->inputChannels = a->device.capture.channels;
         e->engine->liveAudio().setDeviceChannels(static_cast<int>(a->inputChannels));
