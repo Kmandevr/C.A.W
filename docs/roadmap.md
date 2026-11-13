@@ -58,6 +58,16 @@ An overview by area, checked against the repository on 2026-11-03. The stage tab
 
 ## Roadmap sequence
 
+**Before 1.1.0 (owner, 2026-11-13; tracked in #215):** the gaps a normal DAW doesn't have, built in batches. Each finished batch ships as the next patch (1.0.2-alpha.1, 1.0.3-alpha.1, …), and 1.1.0 is the big update once all of them are in, plus more the owner adds. **[Proposal]** None of this is built yet. In planned order:
+1. **1.0.2:** the full-coverage Benchmark with a per-engine-part breakdown and the plug-in benchmark (#197).
+2. **1.0.3:** a tempo map, time signature changes, and markers and sections (#207).
+3. **1.0.4:** audio stretching with Signalsmith Stretch (licence to confirm): follow tempo, stretch to fit, pitch shift, slice to MIDI, and a sample editor (#208).
+4. **1.0.5:** comping, freeze, bounce in place, consolidate, stem export (#33) and app-wide undo (#209).
+5. **1.0.6:** clip automation and VCA groups (#210), MIDI out and MIDI clock (#211).
+6. **1.0.7:** hosting other people's plug-ins: CLAP and VST3 on Windows and CLAP on Android, behind Isolated, Trusted or Blocked (#212).
+7. **1.0.8:** a notation view (#213).
+8. **iOS and macOS builds** (#214), once the owner has an Apple Developer membership.
+
 **After 1.0 (owner, 2026-11-12):** render-ahead is planned for 1.2.0, a major feature but not a full version update (rendering ahead of the playhead, so heavy projects play smoothly). The owner already has it essentially ready, but 1.0 comes first. **[Proposal]** It is planned and not built in this repository yet.
 
 **Current order (owner, 2026-11-10):** work goes issue by issue, bottom up (engine first, then the app), one area of the code per branch; UI work only where it is simple. Anything unclear, needing the owner's direction, or seeming to conflict with an earlier decision is not started: the owner gets a notification with the question, and work moves on to the next clear item. C++ replaces the .caw language first ([decisions](decisions.md)), then the owner's three new roles ([vision](vision.md)):

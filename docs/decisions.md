@@ -6,6 +6,30 @@ updated: 2026-11-13
 
 # Decisions
 
+## 2026-11-13: The 1.1.0 requirements, built in batches (owner)
+
+**Decision (owner, 2026-11-13):**
+- **What goes in before 1.1.0:** every normal-DAW gap goes into the 1.1.0 requirements:
+  - plug-in hosting;
+  - audio stretching and editing;
+  - a tempo map, markers and sections;
+  - comping;
+  - freeze, bounce and consolidate;
+  - stem export;
+  - MIDI out and clock;
+  - app-wide undo;
+  - clip automation and VCA groups;
+  - a sample editor;
+  - a notation view;
+  - iOS and macOS builds.
+
+  Video sync stays off the roadmap.
+- **Releases:** batches ship as numbered patches, and 1.1.0 is the major update ("more will go into it").
+- **Plug-in hosting:** CLAP and VST3 on Windows and CLAP on Android, always behind the per-item Isolated, Trusted or Blocked choice.
+- **Stretching:** Signalsmith Stretch. **[Assumption]** It is MIT-licensed; to be confirmed from its source before adoption.
+
+The plan is in [roadmap](roadmap.md) and #215.
+
 ## 2026-11-13: Low latency takes AAudio's own callback sizes; the Benchmark measures the app's figure (Claude, from the owner's S22+ run)
 
 **Decision:** where AAudio is given no callback size (Low latency, Auto while recording, any size on Android 11 and older), the output takes the stream's own sizes (miniaudio's `noFixedSizedCallback`) instead of asking for the burst and reopening. **Why:** miniaudio's fixed size fell back to the stream's whole capacity (about 1950 frames on the S22+) rendered inside one burst's callback, so Low latency dropped out under 100 % load; AAudio's documentation recommends its own sizes for the lowest latency, a reopen costs a gap and on Android 11 would not reach the stream at all, and `DeviceRender` renders any size (tested). The Benchmark's timed runs now run the mix pool on Auto after an untimed warm-up, and the live runs ask for the playing buffer and Low latency, so its numbers are what the app gets ([engine](engine.md#the-benchmark)). H2 and the C API (29) are unchanged; the new numbers stay in the local JSON.
