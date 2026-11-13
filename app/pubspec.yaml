@@ -36,6 +36,8 @@ dependencies:
   cupertino_icons: ^1.0.8
   ffi: 2.2.0
   path_provider: 2.1.6
+  # Path checks for a Windows small update (BSD-3-Clause, the Dart team; docs/decisions.md "Small updates").
+  path: 1.9.1
   file_picker: 13.1.0
   # The C++ Builder's code editor (MIT; docs/decisions.md "The C++ Builder's editor is re_editor").
   re_editor: 0.10.0

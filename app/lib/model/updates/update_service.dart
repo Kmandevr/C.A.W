@@ -12,6 +12,7 @@ import '../../platform/update_installer.dart';
 import '../../version.dart';
 import '../atomic_file.dart';
 import '../sha256.dart';
+import 'delta_update.dart';
 import 'release_version.dart';
 import 'releases.dart';
 import 'update_fetch.dart';
@@ -97,6 +98,11 @@ class UpdateService extends ChangeNotifier {
   final UpdateFetcher fetcher;
   final UpdateInstaller installer;
 
+  /// Small updates (a patch from the installed build instead of the whole download).
+  late final DeltaUpdater delta = DeltaUpdater(fetcher);
+  final Map<String, DeltaPlan?> _plans = {};
+  final Map<String, Future<DeltaPlan?>> _planning = {};
+
   /// Where the choices and the last result are kept (`updates.json` beside settings.json); null keeps them in memory.
   final File? store;
   final DateTime Function() _clock;
@@ -162,6 +168,9 @@ class UpdateService extends ChangeNotifier {
   /// The update an automatic update has downloaded, ready to install when the app is idle.
   File? _ready;
   String? _readyLabel;
+
+  /// The automatic update was staged as a small Windows update (no file to keep; the next start swaps it in).
+  bool _staged = false;
 
   /// Versions the automatic update already showed Android's prompt for (once each).
   final Set<String> _autoPrompted = {};
@@ -260,6 +269,77 @@ class UpdateService extends ChangeNotifier {
   void _pick() {
     offer = updateFor(releases, channel, current, currentBuild: build);
     savedOfferLabel = offer?.label;
+    final o = offer;
+    if (o != null) unawaited(planFor(o));
+  }
+
+  static String _planKey(ReleaseInfo r, ReleaseAsset a) => '${r.tag}|${a.name}|${a.sha256}';
+
+  /// The small update for [r] on this install, once [planFor] has looked (null: none, or not looked yet).
+  DeltaPlan? planOf(ReleaseInfo r) {
+    final pick = assetFor(r, installer.platform);
+    return pick == null ? null : _plans[_planKey(r, pick.$1)];
+  }
+
+  /// Looks once for a small update to [r] (its manifest and patch, and whether this install is the build the patch
+  /// starts from); listeners hear when it is known. Never throws.
+  Future<DeltaPlan?> planFor(ReleaseInfo r) async {
+    final pick = assetFor(r, installer.platform);
+    if (pick == null) return null;
+    final key = _planKey(r, pick.$1);
+    if (_plans.containsKey(key)) return _plans[key];
+    return _planning[key] ??= () async {
+      DeltaPlan? plan;
+      try {
+        // The manifest goes beside the update folder, not in it (that folder is cleared before each download).
+        final dir = await installer.downloadDir();
+        plan = await delta.plan(r, pick.$1, pick.$2, installer, Directory('${dir.parent.path}${Platform.pathSeparator}update-check'));
+      } catch (_) {
+        plan = null;
+      }
+      _planning.remove(key);
+      _plans[key] = plan;
+      if (plan != null) notifyListeners();
+      return plan;
+    }();
+  }
+
+  /// The download size line for [r] ("Update 4.7 MB instead of 54.5 MB"), or null when the size is not known.
+  String? sizeLine(ReleaseInfo r) {
+    final pick = assetFor(r, installer.platform);
+    if (pick == null) return null;
+    final plan = planOf(r);
+    if (plan != null) return 'Update ${megabytes(plan.downloadBytes)} instead of ${megabytes(pick.$1.size)}';
+    return pick.$1.size > 0 ? 'Download ${megabytes(pick.$1.size)}' : null;
+  }
+
+  /// Gets [r]'s update ready in the update folder: first as a small update where one fits ([planFor]; Android
+  /// rebuilds and verifies the APK, Windows stages the changed files for the next start), else, or on any problem
+  /// with it, the whole download, checked against its published SHA-256.
+  Future<_Fetched> _fetch(ReleaseInfo r, ReleaseAsset asset, AssetKind kind,
+      {void Function(int got, int total)? progress, DownloadCancel? cancel}) async {
+    final dir = await installer.downloadDir();
+    final target = File('${dir.path}${Platform.pathSeparator}${_safeName(asset.name)}');
+    await deleteStaleDownloads(dir, keep: target);
+    final plan = await planFor(r);
+    if (plan != null) {
+      try {
+        if (kind == AssetKind.apk) {
+          final file = await delta.rebuildApk(plan, installer, dir, target, progress: progress, cancel: cancel);
+          return _Fetched(file, DownloadCheck.verified, patchBytes: plan.downloadBytes);
+        }
+        await delta.stageWindows(plan, installer, dir, progress: progress, cancel: cancel);
+        return _Fetched(null, DownloadCheck.verified, patchBytes: plan.downloadBytes, staged: true);
+      } on DownloadCancelled {
+        rethrow;
+      } catch (_) {
+        // Any problem with the small update: the whole download instead, and no second try at the patch.
+        _plans[_planKey(r, asset)] = null;
+      }
+    }
+    final file = await fetcher.download(asset.url, target, progress: progress, cancel: cancel);
+    final check = await verifyDownload(file, asset);
+    return _Fetched(check == DownloadCheck.mismatch ? null : file, check);
   }
 
   void setAuto(bool on) {
@@ -301,17 +381,23 @@ class UpdateService extends ChangeNotifier {
     final pick = assetFor(r, installer.platform);
     if (pick == null) return null;
     final (asset, kind) = pick;
-    if (_readyLabel != r.label || _ready == null || !await _ready!.exists()) {
+    if (_readyLabel != r.label || (_ready == null && !_staged) || (_ready != null && !await _ready!.exists())) {
       if (asset.size > UpdateFetcher.maxDownloadBytes) return null;
       final dir = await installer.downloadDir();
-      final target = File('${dir.path}${Platform.pathSeparator}${_safeName(asset.name)}');
-      await deleteStaleDownloads(dir, keep: target);
       DownloadCheck check;
       try {
-        final file = await fetcher.download(asset.url, target);
-        check = await verifyDownload(file, asset);
-        if (check == DownloadCheck.mismatch) return null; // deleted; tried again later
-        _ready = file;
+        final got = await _fetch(r, asset, kind);
+        if (got.staged) {
+          // Windows: swapped in when C.A.W next starts, which then says so.
+          _ready = null;
+          _staged = true;
+          _readyLabel = r.label;
+          return UpdateOutcome('${r.label} is ready: it is put in place the next time C.A.W starts.');
+        }
+        check = got.check;
+        if (got.file == null) return null; // deleted; tried again later
+        _ready = got.file;
+        _staged = false;
         _readyLabel = r.label;
       } catch (_) {
         return null; // offline or refused: tried again at the next idle moment
@@ -323,7 +409,7 @@ class UpdateService extends ChangeNotifier {
         return UpdateOutcome(downloadedNote!, file: _ready);
       }
     }
-    if (installer.platform != UpdatePlatform.android) return null;
+    if (installer.platform != UpdatePlatform.android || _ready == null) return null;
     if (!await installer.canInstall()) return null;
     final silent = await installer.silentPossible();
     if (silent && !background) return null; // waits for the app to be in the background
@@ -398,12 +484,14 @@ class UpdateService extends ChangeNotifier {
       return const UpdateOutcome('Allow C.A.W to install apps in Android\'s settings, then press Update again.',
           needsPermission: true);
     }
-    final dir = await installer.downloadDir();
-    final target = File('${dir.path}${Platform.pathSeparator}${_safeName(asset.name)}');
-    await deleteStaleDownloads(dir, keep: target);
-    final file = await fetcher.download(asset.url, target, progress: progress, cancel: cancel);
-    final check = await verifyDownload(file, asset);
-    if (check == DownloadCheck.mismatch) {
+    final got = await _fetch(r, asset, kind, progress: progress, cancel: cancel);
+    final saved = got.patchBytes == null ? '' : ' (${megabytes(got.patchBytes!)} instead of ${megabytes(asset.size)})';
+    if (got.staged) {
+      return UpdateOutcome('${r.label} is ready$saved: close C.A.W and open it again to finish updating.');
+    }
+    final file = got.file;
+    final check = got.check;
+    if (file == null) {
       return const UpdateOutcome('The download did not match its published checksum, so it was deleted.');
     }
     final outcome = await installer.install(file, kind);
@@ -461,4 +549,14 @@ class _NoTransport implements UpdateTransport {
   @override
   Future<UpdateResponse> get(Uri url, {required Map<String, String> headers, required Duration timeout}) async =>
       throw const UpdateFetchError('Not available here');
+}
+
+/// What [UpdateService._fetch] got: the file to install (null after a checksum mismatch, or when [staged]), its
+/// check, and the patch's size when it came as a small update.
+class _Fetched {
+  const _Fetched(this.file, this.check, {this.patchBytes, this.staged = false});
+  final File? file;
+  final DownloadCheck check;
+  final int? patchBytes;
+  final bool staged;
 }
