@@ -190,8 +190,14 @@ void main() {
     await tester.pumpWidget(MaterialApp(
         home: BenchmarkScreen(
             runner: runner,
-            saveJson: (j) async => (saved = j) != null,
-            share: (t) async => (shared = t) != null)));
+            saveJson: (j) async {
+              saved = j;
+              return true;
+            },
+            share: (t) async {
+              shared = t;
+              return true;
+            })));
     expect(find.byKey(const ValueKey('bench-quick')), findsOneWidget);
     expect(find.byKey(const ValueKey('bench-full')), findsOneWidget);
     await tester.tap(find.byKey(const ValueKey('bench-quick')));
