@@ -318,7 +318,7 @@ class NativeEngineWorkPool {
     }
   }
 
-  /// A Benchmark run (API 27; engine/stress.dart owns the handle it returns, or nullptr when the pool refused it).
+  /// A Benchmark run (API 29; engine/stress.dart owns the handle it returns, or nullptr when the pool refused it).
   Pointer<Void> submitStressRaw(Pointer<CawStressRequestStruct> request) {
     if (_disposed) return nullptr;
     return _bindings.workerPoolSubmitStress(_handle, request, NativeJobPriority.foreground.index);

@@ -42,7 +42,7 @@ final class CawLayerMeterStereoStruct extends Struct {
   external int overloaded;
 }
 
-/// CawStressRequest (API 27): one Benchmark run (caw_worker_pool_submit_stress).
+/// CawStressRequest (API 29): one Benchmark run (caw_worker_pool_submit_stress).
 final class CawStressRequestStruct extends Struct {
   @Uint32()
   external int structSize;
@@ -62,7 +62,7 @@ final class CawStressRequestStruct extends Struct {
   external Pointer<Utf8> workDir;
 }
 
-/// CawStressProgress (API 27): what a Benchmark run shows while it goes.
+/// CawStressProgress (API 29): what a Benchmark run shows while it goes.
 final class CawStressProgressStruct extends Struct {
   @Uint32()
   external int structSize;
@@ -367,7 +367,7 @@ class Bindings {
   /// Loads the engine library once per isolate.
   final DynamicLibrary _lib;
 
-  // The Benchmark (API 27, beta plan C; caw.h).
+  // The Benchmark (API 29, beta plan C; caw.h).
   late final Pointer<Utf8> Function() stressScenarios =
       _lib.lookupFunction<Pointer<Utf8> Function(), Pointer<Utf8> Function()>('caw_stress_scenarios');
   late final Pointer<Void> Function(Pointer<Void>, Pointer<CawStressRequestStruct>, int) workerPoolSubmitStress =

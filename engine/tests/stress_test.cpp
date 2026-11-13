@@ -392,3 +392,27 @@ TEST(stress_live_stats_sum_frames_and_sample_the_core) {
     CHECK_EQ(s.frames[1], 96);  // kept per callback while there is room
     CHECK_NEAR(s.loads[5], 2.0, 1e-6);
 }
+
+// Turning shedding off restores what was shed (bt-clicks' shedding reset) and sheds nothing after; on again starts
+// clean.
+TEST(stress_shedding_off_restores_shed_layers) {
+    Engine e(48000);
+    e.setProject(firstLoop());
+    std::vector<float> l(512), r(512);
+    e.process(l.data(), r.data(), 512);
+    e.play();
+    for (int c = 0; c < 400; ++c) {
+        e.process(l.data(), r.data(), 512);
+        e.reportLoad(2.0, 512);
+    }
+    CHECK(e.meters().overloaded > 0);
+    e.setShedding(false);
+    for (int c = 0; c < 400; ++c) {
+        e.process(l.data(), r.data(), 512);
+        e.reportLoad(2.0, 512);
+    }
+    CHECK_EQ(e.meters().overloaded, 0);
+    e.setShedding(true);
+    e.process(l.data(), r.data(), 512);
+    CHECK_EQ(e.meters().overloaded, 0);  // clean: no history carried over
+}

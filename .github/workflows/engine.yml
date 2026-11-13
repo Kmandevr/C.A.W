@@ -84,7 +84,7 @@ jobs:
             -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
       - name: Build
         run: cmake --build engine/build-tsan --target caw_tests --parallel -- -k  # every compile error at once
-      - name: Mix pool tests and stress run, input bridge and device FIFO tests
+      - name: Mix pool tests and stress run, input bridge, device FIFO and Benchmark tests
         env:
           CAW_POOL_STRESS_CHUNKS: "10000"
           TSAN_OPTIONS: "halt_on_error=1 second_deadlock_stack=1"
@@ -93,3 +93,4 @@ jobs:
           engine/build-tsan/caw_tests mix_pool
           engine/build-tsan/caw_tests input_
           engine/build-tsan/caw_tests fifo
+          engine/build-tsan/caw_tests stress_  # the Benchmark: two engines profiling at once, cancel, ramps
