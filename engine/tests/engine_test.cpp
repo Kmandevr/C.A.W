@@ -977,6 +977,31 @@ TEST(the_device_fifo_pulls_the_input_for_each_block_it_renders) {
     }
 }
 
+TEST(a_callback_that_misses_its_played_deadline_counts_toward_shedding) {
+    // The audio review of the merge (2026-11-13): through the FIFO a 256-frame callback that renders 320 frames at
+    // its whole budget (a raw load of 1.0: its deadline missed) reads 0.8 a frame rendered, under the 0.85 that
+    // counts a callback as over. It counts anyway: shedding goes by the played frames' deadline too.
+    Engine e(48000);
+    e.setProject(project({dc(0.25), dc(0.5)}));
+    e.play();
+    float l[256], r[256];
+    for (int k = 0; k < 48000 / 256; ++k) {
+        e.process(l, r, 256);
+        e.reportLoad(1.0, 256, 320);
+    }
+    CHECK(e.sheddingStats().shed >= 1);
+    CHECK_NEAR(e.meters().cpu, 0.8, 0.02);  // the meter still reads the load per frame rendered
+    // Under the deadline and under 0.85 a frame: nothing.
+    Engine f(48000);
+    f.setProject(project({dc(0.25), dc(0.5)}));
+    f.play();
+    for (int k = 0; k < 48000 * 3 / 256; ++k) {
+        f.process(l, r, 256);
+        f.reportLoad(0.99, 256, 320);
+    }
+    CHECK_EQ(f.sheddingStats().shed, 0u);
+}
+
 TEST(a_shed_folder_bus_that_is_removed_is_no_longer_counted_shed) {
     // The 2026-11-12 audio review: a shed bus retired through runBusNode without setShed(false), so
     // CawMeters.overloaded and the shed-now count stayed up after it was gone, and recovery kept trying.

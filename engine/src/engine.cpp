@@ -671,6 +671,9 @@ void Engine::startLiveMixPool() {
     offlinePool_ = false;
     startMixPool(MixPool::defaultWorkers(), true);
     setMixParallel(MixParallel::Auto);
+    // A new device (a reopen keeps the Engine): Auto starts serial again and decides from this device's load,
+    // rather than carrying an earlier device's choice into callbacks it has no averages for.
+    mixRestart_.store(true, std::memory_order_release);
 }
 
 void Engine::stopLiveMixPool() noexcept {
@@ -4882,6 +4885,9 @@ void Engine::resetShedding() noexcept {
     waitAvg_ = workAvg_ = 0;
     waitShare_.store(0.0f, std::memory_order_relaxed);
     mixOverSeconds_ = mixUnderSeconds_ = mixLosingSeconds_ = mixGrowSeconds_ = 0;
+    // A pool left on runs a settle again: its wait average starts from zero, so without one it would add workers
+    // (and count the pool's restart toward shedding) before the average shows what they cost.
+    if (mixAuto_) mixSettleSeconds_ = kMixSettleSeconds;
     shedLoad_ = measureFrom_ = 0;
     cpu_.store(0.0f, std::memory_order_relaxed);
     measureSlot_ = -1;
@@ -4898,6 +4904,12 @@ void Engine::process(float* left, float* right, int frames) noexcept {
     updateSolo();
     // The pool for this callback (speed phase 5c); idle workers sleep at once while nothing plays. Speed phase 5d:
     // a wake goes out now, so sleeping workers are up by the first level (the chunk's planning runs meanwhile).
+    if (mixRestart_.exchange(false, std::memory_order_acq_rel)) {  // a new device (startLiveMixPool)
+        mixAuto_ = false;
+        mixActive_ = pool_ ? pool_->workers() : 0;
+        mixOverSeconds_ = mixUnderSeconds_ = mixLosingSeconds_ = mixGrowSeconds_ = mixSettleSeconds_ = 0;
+        waitAvg_ = workAvg_ = 0;
+    }
     mixParallel_ = wantsMixPool();
     if (pool_) {
         const bool idle = !mixParallel_ || (!playing_ && !previewing_ && countInLeft_ == 0);
@@ -5029,6 +5041,8 @@ void Engine::reportLoad(double load, int frames, int rendered) noexcept {
     }
     if (frames <= 0) return;
     if (!std::isfinite(load)) load = 0.0;
+    // The callback's time against the frames it played: their deadline, which a callback over 1 missed.
+    const double raw = std::max(0.0, load);
     // Through the device's FIFO a callback renders more or fewer frames than it plays (128 and 64 by turns at 96
     // frames): the load per frame rendered is the engine's real load, without those alternating peaks.
     if (rendered > 0 && rendered != frames) load *= static_cast<double>(frames) / static_cast<double>(rendered);
@@ -5041,6 +5055,9 @@ void Engine::reportLoad(double load, int frames, int rendered) noexcept {
     loadClock_ += dt;
     loadAvg_ = loadKeep_ * loadAvg_ + (1.0 - loadKeep_) * load;
     cpu_.store(static_cast<float>(loadAvg_), std::memory_order_relaxed);
+    // While Auto's pool settles (kMixSettleSeconds): no worker added, and shedding (below) holds off.
+    const bool settling = mixSettleSeconds_ > kSlackSeconds;
+    mixSettleSeconds_ = std::max(0.0, mixSettleSeconds_ - dt);
     // The pool's Auto works per frame rendered, as the meter does (load above), so the FIFO's alternating render
     // sizes don't swing it. The wait's and the workers' shares of the load: their time against the process() time
     // they were part of, times that load (the callback's whole time over its frames' budget).
@@ -5090,7 +5107,7 @@ void Engine::reportLoad(double load, int frames, int rendered) noexcept {
                     waitAvg_ = workAvg_ = 0;
                 }
             }
-        } else if (waitAvg_ < kMixWaitShare / 4 && mixActive_ < all) {
+        } else if (!settling && waitAvg_ < kMixWaitShare / 4 && mixActive_ < all) {
             mixLosingSeconds_ = 0;
             mixGrowSeconds_ += dt;
             if (mixGrowSeconds_ >= kMixGrowSeconds - kSlackSeconds) {
@@ -5103,11 +5120,12 @@ void Engine::reportLoad(double load, int frames, int rendered) noexcept {
     }
     if (pool_) pool_->setActive(autoOn ? mixActive_ : pool_->workers());
     if (offline_.load(std::memory_order_relaxed)) return;  // an export renders as fast as it can: it never sheds
-    // While the pool's Auto turns on, its first callbacks' cost is the pool starting, not the song: they don't
-    // count toward the over-budget share, and nothing is shed until it has settled.
-    const bool settling = mixSettleSeconds_ > kSlackSeconds;
-    mixSettleSeconds_ = std::max(0.0, mixSettleSeconds_ - dt);
-    if (!settling) overShare_ = shareKeep_ * overShare_ + (1.0 - shareKeep_) * (load > kOverLoad ? 1.0 : 0.0);
+    // While the pool's Auto settles, its callbacks' cost is the pool starting, not the song: they don't count
+    // toward the over-budget share, and nothing is shed. A callback is over when its load per frame rendered
+    // passes kOverLoad, or when it missed its played frames' deadline: through the FIFO a callback that renders a
+    // block more than it plays can miss it at a per-frame load under kOverLoad.
+    const bool over = load > kOverLoad || raw >= 1.0;
+    if (!settling) overShare_ = shareKeep_ * overShare_ + (1.0 - shareKeep_) * (over ? 1.0 : 0.0);
     const bool wasCooling = coolSeconds_ > 0;
     coolSeconds_ = std::max(0.0, coolSeconds_ - dt);
     if (wasCooling && coolSeconds_ <= 0 && measureSlot_ >= 0) {
@@ -5117,6 +5135,18 @@ void Engine::reportLoad(double load, int frames, int rendered) noexcept {
         measureSlot_ = -1;
     }
     if (!settling && overShare_ > kOverShare && coolSeconds_ <= kSlackSeconds) {
+        if (pool_ && autoOn && mixAuto_ && waitAvg_ > kMixWaitShare) {
+            // The pool itself may be the overload (the callback waiting on its workers): one thread first, for
+            // kMixRetrySeconds, and the share starts again; a song still over on one thread then sheds.
+            mixAuto_ = false;
+            mixActive_ = pool_->workers();
+            mixRetrySeconds_ = kMixRetrySeconds;
+            mixLosingSeconds_ = mixGrowSeconds_ = 0;
+            waitAvg_ = workAvg_ = 0;
+            overShare_ = 0;
+            pool_->setActive(mixActive_);
+            return;
+        }
         overloadPending_ = true;
         shedLoad_ = loadAvg_;
         coolSeconds_ = kCoolSeconds;

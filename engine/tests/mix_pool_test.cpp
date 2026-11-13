@@ -739,13 +739,78 @@ TEST(mix_pool_auto_turning_on_holds_shedding_off_while_it_settles) {
     for (int k = 0; k < 2000 && !e.mixParallelForTest(); ++k) callbacks(0.6, tick);
     CHECK(e.mixParallelForTest());
     CHECK_EQ(e.sheddingStats().shed, 0u);
-    // The pool's start-up costs every callback its whole budget. Counted from the first, 0.4 s of that would shed
-    // (about 0.3 s does); held off for the first 0.25 s, the share is still under the threshold.
-    callbacks(1.2, 0.4);
-    CHECK_EQ(e.sheddingStats().shed, 0u);
-    // Still over after it has settled: that is the song, and it sheds.
+    // The pool's start-up costs every callback its whole budget. Counted from the first, 0.6 s of that would shed
+    // (about 0.3 s does); held off for kMixSettleSeconds (0.7 s), nothing is.
     callbacks(1.2, 0.6);
+    CHECK_EQ(e.sheddingStats().shed, 0u);
+    // Still over after it has settled: that is the song, and it sheds (after turning the pool off first, if the
+    // callback was waiting on its workers).
+    callbacks(1.2, 1.2);
     CHECK(e.sheddingStats().shed >= 1u);
+    // A shedding reset (a device open, the app going behind) with Auto still on settles again: its averages
+    // start from zero, so nothing sheds until they show the load again.
+    callbacks(0.6, Engine::kMixRetrySeconds + 2.0);  // past Auto's retry wait, if the shed above turned it off
+    e.requestSheddingReset();
+    e.process(l, r, 256);
+    e.reportLoad(0.6, 256, 256);
+    if (e.mixParallelForTest()) {
+        const uint64_t before = e.sheddingStats().shed;
+        callbacks(1.2, 0.6);
+        CHECK_EQ(e.sheddingStats().shed, before);
+    }
+}
+
+// The audio review of the merge (2026-11-13): shedding and Auto must not fight. When the callback is over its
+// budget while it waits on the pool's workers, the pool may be the overload: Auto goes to one thread first (and
+// waits kMixRetrySeconds before trying again), and only a song still over on one thread loses a layer.
+TEST(mix_pool_overload_while_waiting_on_workers_turns_auto_off_before_shedding) {
+    Engine e(48000);
+    CHECK(e.startMixPool(2));
+    e.setMixParallel(Engine::MixParallel::Auto);
+    CHECK(ok(e.setProject(randomMix(3))));
+    e.play();
+    float l[256], r[256];
+    auto one = [&](double load) {
+        e.process(l, r, 256);
+        e.reportLoad(load, 256, 256);
+    };
+    for (int k = 0; k < 2000 && !e.mixParallelForTest(); ++k) one(0.6);
+    CHECK(e.mixParallelForTest());
+    if (e.mixParallelLevelsForTest() == 0) return;  // nothing handed to the workers: nothing to wait on
+    e.mixPoolForTest()->setHoldForTest(3000);  // each worker's node takes 3 ms more: the callback waits on it
+    int k = 0;
+    while (e.mixParallelForTest() && e.sheddingStats().shed == 0 && k++ < 2000) one(1.2);
+    CHECK(!e.mixParallelForTest());
+    CHECK_EQ(e.sheddingStats().shed, 0u);  // one thread first, no layer lost for it
+    e.mixPoolForTest()->setHoldForTest(0);
+    for (k = 0; k < 2 * 48000 / 256; ++k) one(1.2);  // still over on one thread: now a layer goes
+    CHECK(e.sheddingStats().shed >= 1u);
+    CHECK(!e.mixParallelForTest());  // and Auto waits before it tries the pool again
+}
+
+// The audio review of the merge (2026-11-13): a device reopen keeps the Engine, so Auto starts serial again on the
+// new device instead of carrying the old one's choice with no averages behind it.
+TEST(mix_pool_a_new_live_device_starts_auto_serial_again) {
+    Engine e(48000);
+    if (e.mixPoolForTest()) return;  // --mix-threads N: the test's pool stays, and startLiveMixPool keeps it
+    e.startLiveMixPool();
+    if (e.mixWorkers() == 0) {  // a machine too small for workers
+        e.stopLiveMixPool();
+        return;
+    }
+    CHECK(ok(e.setProject(randomMix(3))));
+    e.play();
+    float l[256], r[256];
+    for (int k = 0; k < 2000 && !e.mixParallelForTest(); ++k) {
+        e.process(l, r, 256);
+        e.reportLoad(0.6, 256, 256);
+    }
+    CHECK(e.mixParallelForTest());
+    e.stopLiveMixPool();  // as a reopen does
+    e.startLiveMixPool();
+    e.process(l, r, 256);
+    CHECK(!e.mixParallelForTest());
+    e.stopLiveMixPool();
 }
 
 // Speed phase 5d (the 5c audio review): Auto weighs the time the callback waits for workers. While the pool costs

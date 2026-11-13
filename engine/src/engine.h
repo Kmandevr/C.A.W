@@ -254,8 +254,10 @@ public:
     static constexpr double kMixParallelLoad = 0.4, kMixParallelSeconds = 0.5;
     static constexpr double kMixSerialLoad = 0.08, kMixSerialSeconds = 5.0;
     static constexpr double kMixWaitShare = 0.1, kMixWaitSeconds = 0.5, kMixGrowSeconds = 2.0, kMixRetrySeconds = 10.0;
-    // Auto turning the pool on: for this long its callbacks don't count toward shedding (the pool starting, not the song).
-    static constexpr double kMixSettleSeconds = 0.25;
+    // Auto turning the pool on, or a shedding reset or a new device while it is on: for this long its callbacks
+    // don't count toward shedding and it adds no worker (the pool starting, not the song). Longer than one of
+    // Auto's worker steps (kMixWaitSeconds), so a pool that costs more than it gives can shrink first.
+    static constexpr double kMixSettleSeconds = kMixWaitSeconds + 0.2;
     // Auto's workers now (tests, diagnostics): those taking tasks, at most mixWorkers().
     uint32_t mixActiveWorkers() const noexcept;
     // Audio thread diagnostics (speed phase 5d) as JSON, for caw_audio_threads; reads the callback core's clock
@@ -499,6 +501,7 @@ private:
     std::atomic<int> overloadedFlag_{0};  // layers shed now
     std::atomic<uint64_t> shedTotal_{0}, restoredTotal_{0};
     std::atomic<bool> sheddingReset_{false};  // requestSheddingReset()
+    std::atomic<bool> mixRestart_{false};      // startLiveMixPool: Auto decides afresh on the new device
     std::atomic<bool> offline_{false};        // set by setProjectOffline: reportLoad never sheds
     std::atomic<uint32_t> routingRejections_{0};  // mix-graph routes the executor refused (never expected)
     std::unique_ptr<std::atomic<float>[]> masterScope_;
