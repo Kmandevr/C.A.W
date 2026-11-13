@@ -110,6 +110,12 @@ class MidiTempo {
   final double bpm;
 }
 
+/// A time signature event: from [tick] on, [numerator] over [denominator].
+class MidiMeter {
+  const MidiMeter(this.tick, this.numerator, this.denominator);
+  final int tick, numerator, denominator;
+}
+
 class MidiTrack {
   MidiTrack({this.name = '', required this.notes, this.endTick, this.controls = const []});
   final String name;
@@ -129,6 +135,7 @@ class MidiFile {
     this.tempos = const [],
     this.meterNumerator,
     this.meterDenominator,
+    this.meters = const [],
     required this.tracks,
     this.mpe = false,
   });
@@ -137,6 +144,10 @@ class MidiFile {
   final int ppq; // ticks per quarter note
   final List<MidiTempo> tempos; // in time order
   final int? meterNumerator, meterDenominator; // the first time signature, e.g. 6 and 8
+
+  /// Every time signature event in time order (one a tick, the last read wins). Written in place of the meter above
+  /// when not empty.
+  final List<MidiMeter> meters;
   final List<MidiTrack> tracks; // in file order (a format 1 conductor track without notes is kept, empty)
   final bool mpe; // the file sent an MPE Configuration Message
 
@@ -199,6 +210,7 @@ MidiFile readMidiFile(Uint8List data) {
     tempos: scale == 1 ? List.unmodifiable(r.tempos) : const [],
     meterNumerator: r.meter?.$2,
     meterDenominator: r.meter?.$3,
+    meters: scale == 1 ? List.unmodifiable(r.meters.values.toList()..sort((a, b) => a.tick.compareTo(b.tick))) : const [],
     tracks: List.unmodifiable(tracks),
     mpe: r.mpe,
   );
@@ -232,6 +244,7 @@ class _Reader {
   final int scale; // ticks are multiplied by this (2 for SMPTE files)
   final List<MidiTempo> tempos = [];
   (int, int, int)? meter; // tick, numerator, denominator: the earliest
+  final Map<int, MidiMeter> meters = {}; // every one, by tick
   bool mpe = false;
   int events = 0, notes = 0, points = 0;
 
@@ -316,6 +329,7 @@ class _Reader {
           case 0x58 when length >= 2:
             final m = meter;
             if (d[at] > 0 && d[at + 1] <= 6 && (m == null || tick < m.$1)) meter = (tick, d[at], 1 << d[at + 1]);
+            if (d[at] > 0 && d[at + 1] <= 6) meters[tick] = MidiMeter(tick, d[at], 1 << d[at + 1]);
           case 0x03 when name.isEmpty:
             name = _text(d.sublist(at, at + length));
         }
@@ -475,8 +489,11 @@ Uint8List writeMidiFile(MidiFile file) {
   final num = (file.meterNumerator ?? 4).clamp(1, 255), den = file.meterDenominator ?? 4;
   final denPower = math.max(0, math.min(6, (math.log(den) / math.ln2).round()));
   final end = file.tracks.fold<int>(0, (m, t) => math.max(m, t.endTick ?? _lastTick(t)));
+  int power(int den) => math.max(0, math.min(6, (math.log(den) / math.ln2).round()));
   chunk([
-    _Event(0, 0, [0xFF, 0x58, 0x04, num, denPower, 24, 8]),
+    if (file.meters.isEmpty) _Event(0, 0, [0xFF, 0x58, 0x04, num, denPower, 24, 8]),
+    for (final m in file.meters)
+      _Event(math.max(0, m.tick), 0, [0xFF, 0x58, 0x04, m.numerator.clamp(1, 255), power(m.denominator), 24, 8]),
     for (final t in tempos)
       if (t.bpm.isFinite && t.bpm > 0)
         _Event(math.max(0, t.tick), 0, [0xFF, 0x51, 0x03, ..._u24((60000000 / t.bpm).round().clamp(1, 0xFFFFFF))]),

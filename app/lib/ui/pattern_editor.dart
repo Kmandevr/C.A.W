@@ -27,6 +27,7 @@ import '../model/midi_clips.dart';
 import '../model/midi_file.dart';
 import '../model/pattern_doc.dart';
 import '../model/project.dart';
+import '../model/tempo_map.dart';
 import '../model/settings.dart';
 import 'key_router.dart';
 import 'page_closer.dart';
@@ -3216,6 +3217,8 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
                         sel: _sel,
                         length: length,
                         beatsPerBar: s.project.beatsPerBar,
+                        bars: s.project.bars,
+                        origin: widget.clip == null ? 0 : widget.clip!.startSteps - widget.clip!.sourceOffsetSteps,
                         pxPerStep: _pxPerStep,
                         rowH: _rowH,
                         scrollX: _scrollX,
@@ -4191,6 +4194,8 @@ class _RollPainter extends CustomPainter {
     required this.sel,
     required this.length,
     required this.beatsPerBar,
+    this.bars,
+    this.origin = 0,
     required this.pxPerStep,
     required this.rowH,
     required this.scrollX,
@@ -4235,6 +4240,25 @@ class _RollPainter extends CustomPainter {
   final List<PatternDoc> references;
   final Set<int> sel;
   final int length, beatsPerBar;
+
+  /// The song's bars (#207) and the song step the roll's step 0 sits on (its clip's start less its source offset):
+  /// with signature changes the bar lines and numbers follow them, numbered from the clip's first bar.
+  final BarMath? bars;
+  final int origin;
+
+  /// The bars the roll draws: the song's when its meter changes or isn't n/4, else null (every [beatsPerBar]·4).
+  BarMath? get _songBars => bars == null || (bars!.constant && bars!.signatures.first.den == 4) ? null : bars;
+
+  /// The roll steps where bars start between [t0] and [t1], with their numbers (1 is the clip's first bar).
+  List<(double, int)> _barsIn(double t0, double t1, {int every = 1}) {
+    final b = _songBars!;
+    final first = b.barAt(math.max(0, origin) / 4);
+    return [
+      for (final bar in b.bars((t0 + origin) / 4, (t1 + origin) / 4, every: every, limit: 512))
+        (bar.beat * 4 - origin, bar.bar - first + 1),
+    ];
+  }
+
   final double pxPerStep, rowH, scrollX, scrollY, cursorPitch;
   final Steps line, cursorAt;
   final ({int root, List<int> scale})? key;
@@ -4269,9 +4293,11 @@ class _RollPainter extends CustomPainter {
     final lineSteps = line.toDouble();
     final bar = beatsPerBar * 4.0;
     final t0 = scrollX / pxPerStep, t1 = (scrollX + w) / pxPerStep;
+    final songBars = _songBars == null ? null : {for (final (at, _) in _barsIn(t0 - 1, t1 + 1)) (at * 1e6).round()};
     for (var t = (t0 / lineSteps).floor() * lineSteps; t <= t1; t += lineSteps) {
       final x = t * pxPerStep - scrollX;
-      final isBar = (t % bar).abs() < 1e-9, isBeat = (t % 4).abs() < 1e-9;
+      final isBar = songBars != null ? songBars.contains((t * 1e6).round()) : (t % bar).abs() < 1e-9;
+      final isBeat = (t % 4).abs() < 1e-9;
       final c = isBar ? Neon.dim : Neon.line, a = isBar || isBeat ? 1.0 : 0.45;
       canvas.drawLine(Offset(x, 0), Offset(x, h), Paint()..color = c.withValues(alpha: (c.a * a * gridStrength).clamp(0.0, 1.0)));
     }
@@ -4425,10 +4451,22 @@ class _RollPainter extends CustomPainter {
     canvas.drawRect(Rect.fromLTWH(keyW, 0, w, rulerH), Paint()..color = Neon.panel);
     // A label every bar, or every 4, 16, 64… bars zoomed far out, so they never crowd (owner, 2026-11-11).
     var every = 1;
-    while (every * bar * pxPerStep < 28 && every < 1 << 20) {
+    final narrowest = _songBars == null ? bar
+        : _songBars!.signatures.fold<double>(double.infinity, (m, g) => math.min(m, g.barBeats * 4));
+    while (every * narrowest * pxPerStep < 28 && every < 1 << 20) {
       every *= 4;
     }
-    for (var b = (t0 / bar / every).floor() * every; b * bar <= t1; b += every) {
+    if (_songBars != null) {
+      // Bars from the song's signatures (#207), numbered from the clip's first bar.
+      for (final (at, n) in _barsIn(t0, t1, every: every)) {
+        final x = keyW + at * pxPerStep - scrollX;
+        if (x < keyW || n < 1) continue;
+        ts.text = TextSpan(text: '$n', style: const TextStyle(color: Neon.dim, fontSize: 11));
+        ts.layout();
+        ts.paint(canvas, Offset(x + 3, 3));
+      }
+    }
+    for (var b = (t0 / bar / every).floor() * every; _songBars == null && b * bar <= t1; b += every) {
       final x = keyW + b * bar * pxPerStep - scrollX;
       if (x < keyW) continue;
       ts.text = TextSpan(text: '${b + 1}', style: const TextStyle(color: Neon.dim, fontSize: 11));
@@ -4487,6 +4525,8 @@ class _RollPainter extends CustomPainter {
   @override
   bool shouldRepaint(_RollPainter o) =>
       !identical(o.doc, doc) ||
+      o.bars != bars ||
+      o.origin != origin ||
       o.references != references ||
       o.sel != sel ||
       o.pxPerStep != pxPerStep ||

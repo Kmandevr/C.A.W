@@ -871,18 +871,19 @@ class _ExportPageState extends State<ExportPage> {
   }
 
   /// A song position as bar.beat (1-based), the ruler's numbering.
-  static String _barBeat(ProjectDoc p, int steps) => '${steps ~/ p.stepsPerBar + 1}.${steps % p.stepsPerBar ~/ 4 + 1}';
+  static String _barBeat(ProjectDoc p, int steps) => p.bars.label(steps / 4);
 
   String _describe() {
     final p = s.project;
     switch (_kind) {
       case ExportKind.loop when p.loopsRange:
-        final seconds = (p.loopEndSteps - p.loopStartSteps) * 15.0 / p.bpm;
+        final seconds = p.secondsAtStep(p.loopEndSteps.toDouble()) - p.secondsAtStep(p.loopStartSteps.toDouble());
         return 'The loop range drawn on the ruler, from bar ${_barBeat(p, p.loopStartSteps)} to '
             '${_barBeat(p, p.loopEndSteps)} (${seconds.toStringAsFixed(3)} s), as it sounds when it repeats. '
             'Turn the loop range off in Arrange to export the whole song.';
       case ExportKind.loop:
-        return 'The whole mix, exactly ${p.engineLoopSteps ~/ p.stepsPerBar} bars at ${p.bpm.toStringAsFixed(1)} BPM '
+        return 'The whole mix, exactly ${p.engineLoopSteps ~/ p.stepsPerBar} bars '
+            '${p.tempoMap.length > 1 ? 'with its tempo changes' : 'at ${p.bpm.toStringAsFixed(1)} BPM'} '
             '(${p.songSeconds.toStringAsFixed(3)} s), with loop points. Drops onto Reaper\'s grid.';
       case ExportKind.free:
         return 'The whole mix from the start, for as long as you like.';

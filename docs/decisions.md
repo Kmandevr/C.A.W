@@ -6,6 +6,16 @@ updated: 2026-11-13
 
 # Decisions
 
+## 2026-11-13: Tempo lane, signature flags and the section bar: the app side's choices (Claude, within the owner's #207 looks)
+
+**Decision (Claude, 2026-11-13, for the owner to confirm; the looks themselves are the owner's):**
+- **Sections are the old regions.** A region (`MarkerDoc` with an end) is a section: one list in memory, saved apart as v3's `sections` and `markers`. Overlapping v2 regions are kept apart on load (a later one starts where the one before ends; with no room it becomes a marker), so nothing is lost.
+- **Heights:** section bar 24 / 22 px (phone / other), ruler 28 / 24, tempo lane 40 / 32. Section names are white on the section's colour; markers are a pole and a small name flag; signature flags are yellow n/d tags in the ruler's lower half; the tempo is green (line, fill and labels). A section's name starts after the flags of markers at its start.
+- **Gestures beyond the owner's list:** a tempo point drags up and down at once with a finger (one axis, so it wins over scrolling) and moves in time by hold and move; a tap on the lane adds a point, a double tap deletes one (the automation lanes' rules). A section drop snaps to the nearest bar line (Shift: any step) and is refused onto another section. Copy puts the copy in the first free place after the section.
+- **Contents of a section** are the clips and audio clips that start inside it, the automation points inside it, and its tempo and signature changes; where it lands, its tempo and signature apply from its start and what follows keeps its own, and automation points already there give way. Delete clears that span without closing the gap.
+- **The section menu** is exactly the owner's four (rename, colour, copy, delete); the old region menu's Loop this region, Select its clips and Duplicate with clips went (double tap loops; Copy is the duplicate).
+- **MIDI import** with Adopt takes the file's whole tempo map and signatures; MIDI tempos are steps, so a map exported from a ramp needs steps too (the engine side's choice).
+
 ## 2026-11-13: 1.1.0 also holds play-ahead, AutoStacc and the store releases (owner)
 
 **Decision (owner, 2026-11-13):**
