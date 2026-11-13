@@ -278,6 +278,10 @@ public:
     void setCallbackMmcss(bool mmcss) noexcept;
     // The platform, around a live device (before it starts, after it stops): the pool with
     // MixPool::defaultWorkers(), Auto, and the count of live devices offline renders check.
+    // The Benchmark's timed runs (stress_run.cpp), before they play: the pool with MixPool::defaultWorkers() on
+    // Auto, as a live device has it; a test's pool (setMixThreadsForTest) stays as it is; while a live device runs
+    // the mix stays on one thread (Never), leaving the cores to the live audio. True when the pool is the run's own.
+    bool useBenchmarkMixPool();
     void startLiveMixPool();
     void stopLiveMixPool() noexcept;
     static int liveDevices() noexcept;
@@ -480,6 +484,12 @@ private:
     double underSeconds_ = 0;                   // how long the meter has stayed under kRestoreLoad
     double loadClock_ = 0;                      // seconds of callbacks reported
     double loadDt_ = 0, loadKeep_ = 0, shareKeep_ = 0;  // the last callback's length and the averages' weights for it
+    // The weights for the last few callback lengths (a device that takes its own sizes, AAudio's, varies them every
+    // callback between a few values): pow and exp only for a length not among them.
+    struct LoadWeights { double dt = -1, load = 0, share = 0, tail = 0; };
+    static constexpr int kLoadWeights = 4;
+    LoadWeights loadWeights_[kLoadWeights];
+    int loadWeightsNext_ = 0;
     double shedLoad_ = 0, measureFrom_ = 0;     // the meter when the last layer was shed
     int measureSlot_ = -1;                      // the slot shed last, its cost not measured yet
     uint64_t shedSeq_ = 0;

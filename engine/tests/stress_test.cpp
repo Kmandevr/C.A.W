@@ -494,3 +494,40 @@ TEST(stress_dsp_runs_use_the_pool_on_auto_after_a_warm_up) {
     CHECK(ro.warmupS >= warmupSeconds(true) - 8192.0 / 48000);
     CHECK(ro.firstCallbackUs > 0);
 }
+
+// The audio review of the polish (2026-11-13): a Benchmark run starts no pool of its own while a live device runs
+// (it would take the cores from the live audio), as offline renders don't; a test's pool stays as the test set it.
+TEST(stress_dsp_runs_stay_serial_while_a_live_device_runs) {
+    const uint32_t own = Engine(48000).mixWorkers();  // 0, or a parallel shard's test pool
+    Engine live(48000);
+    live.startLiveMixPool();
+    CHECK(Engine::liveDevices() > 0);
+    RunRequest r;
+    r.scenario = "three_tracks";
+    r.seconds = 0.2;
+    Progress p;
+    const RunResult o = run(r, p, nullptr, nullptr);
+    live.stopLiveMixPool();
+    CHECK(o.ok);
+    CHECK_EQ(o.mixWorkers, own);
+    Engine e(48000);
+    if (own == 0) {
+        CHECK(e.useBenchmarkMixPool());
+        CHECK_EQ(e.mixWorkers(), MixPool::defaultWorkers());
+    } else {
+        CHECK(!e.useBenchmarkMixPool());  // the test's pool stays
+        CHECK_EQ(e.mixWorkers(), own);
+    }
+}
+
+// A device that calls back with its own sizes varies the length every callback; the load's weights for each length
+// are the same as for a steady size (kept for the last few lengths, not recomputed), so the meter reads the load.
+TEST(stress_varying_callback_lengths_meter_the_load) {
+    Engine e(48000);
+    e.setShedding(false);
+    for (int k = 0; k < 4000; ++k) {
+        const int frames = (k % 3 == 0) ? 96 : (k % 3 == 1) ? 192 : 144;
+        e.reportLoad(0.5, frames, frames);
+    }
+    CHECK_NEAR(e.meters().cpu, 0.5, 1e-6);
+}

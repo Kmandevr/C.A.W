@@ -8,7 +8,6 @@
 
 #include "component_chain.h"
 #include "engine.h"
-#include "mix_pool.h"
 #include "thread_tuning.h"
 
 namespace caw::stress {
@@ -42,18 +41,14 @@ bool scenarioProject(const std::string& id, const std::string& dir, ProjectSpec&
 }
 
 // A fresh engine set up as the Benchmark measures: the quality asked, nothing shed, the mix pool as the app's live
-// device has it (MixPool::defaultWorkers(), Auto) unless `serial` (Profile), the project applied (0.25 s stopped,
+// device has it (Engine::useBenchmarkMixPool: MixPool::defaultWorkers(), Auto) unless `serial` (Profile), the project applied (0.25 s stopped,
 // as caw_bench's suite does), then playing, and the warm-up played untimed (warmUp below).
 bool prepare(Engine& e, const ProjectSpec& p, const RunRequest& r, bool serial, std::vector<float>& l,
              std::vector<float>& rr, std::string& error) {
     e.setQuality(r.quality);
     e.setShedding(false);
-    if (serial) {
-        e.setMixParallel(Engine::MixParallel::Never);
-    } else {
-        e.startMixPool(MixPool::defaultWorkers(), false);  // offline workers (none on a machine of 1 or 2 cores: serial)
-        e.setMixParallel(Engine::MixParallel::Auto);
-    }
+    if (serial) e.setMixParallel(Engine::MixParallel::Never);
+    else e.useBenchmarkMixPool();  // offline workers on Auto; serial while a live device runs (engine.h)
     const std::string warn = e.setProject(p);
     if (warn.find("\"ok\":true") == std::string::npos) {
         error = "the project did not load: " + warn.substr(0, 300);

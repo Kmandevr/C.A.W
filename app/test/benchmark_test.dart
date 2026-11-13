@@ -169,6 +169,16 @@ void main() {
     expect(j['slope_pct_per_min'], 3.0);
   });
 
+  test('a playing-buffer run that took the device\'s own sizes says so (Android 11 and older)', () async {
+    final res = await StressRunner(backend: FakeStress(extra: {'device_sizes': true})).run(StressPlanKind.quick);
+    final live = res.scenarios.firstWhere((s) => s.live && s.buffer == StressBuffer.playing);
+    expect(live.deviceSizes, isTrue);
+    expect(live.modeLabel, contains('own sizes'));
+    expect(live.toJson()['device_sizes'], isTrue);
+    expect(res.scenarios.firstWhere((s) => !s.live).deviceSizes, isFalse); // DSP never
+    expect(res.summary(), contains('(live, device\'s own sizes)'));
+  });
+
   test('a run keeps its local numbers in the JSON export and out of H2', () async {
     final fake = FakeStress(extra: {
       'first_callback_us': 812.0, 'worst_at_s': 1.93, 'callback_core': 7, 'core_khz_start': 2995200, 'mix_workers': 3,
@@ -186,6 +196,7 @@ void main() {
     expect(j['first_callback_us'], 812.0);
     expect(j['worst_at_s'], 1.93);
     expect(j['budget_basis'], 'callback_length');
+    expect(j['device_sizes'], isFalse);
     final allow = TelemetryAllowList(isBuiltin: (id) => id.startsWith('org.caw.'));
     expect(allow.stress(sent.single), sent.single); // H2 unchanged: no new field
     expect('${sent.single}', isNot(contains('first_callback')));

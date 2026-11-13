@@ -27,11 +27,24 @@ public:
     // Before the callback first runs (a device open): the callback's fixed size. Starts empty.
     void open(int period) noexcept {
         fifo_.flush();
+        varying_ = false;
         useFifo_ = suits(period);
         latency_ = useFifo_ ? BlockFifo<kBlock>::maxLatency(period) : 0;
         meanHold_ = useFifo_ ? meanHold(period) : 0;
     }
-    bool usesFifo() const noexcept { return useFifo_; }
+    // Before the callback first runs, for a device that calls back with its own, varying sizes (AAudio given no
+    // size): `typical` its usual size (the burst). The path is chosen per callback: the FIFO for a size that suits
+    // it (whole blocks, or kFifoFrom and over) or while it still holds frames; straight only once it is empty, so a
+    // switch never drops or repeats a frame. The most frames held back is then a block short of one, whatever the
+    // sizes; the mean hold is the typical size's.
+    void openVarying(int typical) noexcept {
+        fifo_.flush();
+        varying_ = true;
+        useFifo_ = suits(typical);
+        latency_ = kBlock - 1;
+        meanHold_ = useFifo_ ? meanHold(typical) : 0;
+    }
+    bool usesFifo() const noexcept { return useFifo_; }  // varying sizes: the last callback's path
     // The most frames held back (at most kBlock - 1): what the input bridge's fill must cover, since a callback
     // renders, and pulls the input for, up to that many frames more than it plays.
     int latency() const noexcept { return latency_; }
@@ -66,6 +79,7 @@ public:
             live.afterCallback(l, r, m);  // the latency ping
             rendered += m;
         };
+        if (varying_) useFifo_ = suits(frames) || fifo_.held() > 0;
         while (done < frames) {
             const int n = frames - done < kChunk ? frames - done : kChunk;
             if (useFifo_) fifo_.pull(l_, r_, n, kChunk, engineRender);
@@ -88,7 +102,7 @@ public:
 
 private:
     BlockFifo<kBlock> fifo_;
-    bool useFifo_ = true;
+    bool useFifo_ = true, varying_ = false;
     int latency_ = 0, meanHold_ = 0;
     float l_[kChunk] = {}, r_[kChunk] = {};
 };

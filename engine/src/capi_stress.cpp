@@ -69,6 +69,9 @@ std::string resultJson(const Job& j) {
                     ",\"core_max_khz\":" + std::to_string(r.maxKHz) + ",\"mix_workers\":" + std::to_string(r.mixWorkers) +
                     ",\"mix_active_workers\":" + std::to_string(r.mixActive) +
                     ",\"warmup_xruns\":" + std::to_string(live ? j.warmupXruns : -1) +
+                    // Live: the device called back with its own sizes, not the size asked (AAudio given none, or
+                    // Android 11 and older, where a size never reaches the stream): a 1024 run is then not 1024.
+                    ",\"device_sizes\":" + (live && j.deviceSizes ? "true" : "false") +
                     // Live: each callback's budget is its own length, not its real deadline (the frames the device
                     // has queued), so over_budget overstates; the platform's xruns are the dropouts heard.
                     ",\"budget_basis\":" + str(live ? "callback_length" : "callback") + ",\"costs\":[";
@@ -192,6 +195,11 @@ RunResult runLive(Job& j) {
     }
     const int32_t xrunsTo = cawAudioXruns(e);
     const int32_t deviceFrames = caw_audio_buffer_frames(e);
+    bool deviceSizes = false;
+    if (char* status = caw_audio_status(e)) {
+        deviceSizes = std::strstr(status, "\"device_sizes\":true") != nullptr;
+        caw_free(status);
+    }
     {
         const int32_t core = meter->core.load(std::memory_order_relaxed);
         const tuning::CoreClock c = tuning::coreClock(core);
@@ -220,6 +228,7 @@ RunResult runLive(Job& j) {
         j.deviceFrames = deviceFrames;
         j.deviceRate = r.rate;
         j.xruns = xrunsFrom >= 0 && xrunsTo >= xrunsFrom ? xrunsTo - xrunsFrom : -1;
+        j.deviceSizes = deviceSizes;
         j.warmupXruns = xrunsPlay >= 0 && xrunsFrom >= xrunsPlay ? xrunsFrom - xrunsPlay : -1;
         j.callbackCore = meter->core.load(std::memory_order_relaxed);
     }

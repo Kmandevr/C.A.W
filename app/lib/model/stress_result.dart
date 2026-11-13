@@ -56,6 +56,7 @@ class ScenarioResult {
     this.mixWorkers = 0,
     this.mixActiveWorkers = 0,
     this.warmupXruns,
+    this.deviceSizes = false,
   });
 
   final String id, name;
@@ -86,6 +87,10 @@ class ScenarioResult {
   final int requestedFrames, callbackCore, coreKhzStart, coreKhzEnd, coreMaxKhz, mixWorkers, mixActiveWorkers;
   final double firstCallbackUs, worstAtS, warmupS, slopePctPerMin;
   final int? warmupXruns;
+
+  /// Live: the device called back with its own sizes, not the size asked (Low latency; or a playing-buffer run on
+  /// Android 11 and older, where a size never reaches the stream, so it ran at the burst, not 1024 frames).
+  final bool deviceSizes;
 
   bool get ran => skipped == null && error == null && callbacks > 0;
 
@@ -127,12 +132,19 @@ class ScenarioResult {
       mixWorkers: i('mix_workers'),
       mixActiveWorkers: i('mix_active_workers'),
       warmupXruns: wx >= 0 ? wx : null,
+      deviceSizes: j['mode'] == 'live' && j['device_sizes'] == true,
     );
   }
 
   /// The row's key and words: a scenario's DSP row, or its live row at a buffer.
   String get key => live ? '$id-true${buffer == null ? '' : '-$buffer'}' : '$id-false';
-  String get modeLabel => !live ? '' : buffer == StressBuffer.lowLatency ? ' · live, Low latency' : ' · live';
+  String get modeLabel => !live
+      ? ''
+      : buffer == StressBuffer.lowLatency
+          ? ' · live, Low latency'
+          : deviceSizes
+              ? ' · live, device\'s own sizes'
+              : ' · live';
 
   Map<String, Object?> toJson() => {
         'id': id,
@@ -168,6 +180,7 @@ class ScenarioResult {
             'requested_frames': requestedFrames,
             'callback_core': callbackCore,
             'warmup_xruns': warmupXruns,
+            'device_sizes': deviceSizes,
             // Each callback's budget is its own length, not its real deadline (the frames the device has queued):
             // over_budget overstates; xruns (the platform's underruns) are the dropouts heard.
             'budget_basis': 'callback_length',
@@ -411,7 +424,7 @@ class StressResult {
     b.writeln();
     for (final s in scenarios) {
       if (s.ran) {
-        b.writeln('${s.name}${s.live ? s.buffer == StressBuffer.lowLatency ? ' (live, Low latency)' : ' (live)' : ''}: mean ${s.meanPct.round()}%, p99 ${s.p99Pct.round()}%, '
+        b.writeln('${s.name}${s.live ? ' (${s.modeLabel.substring(3)})' : ''}: mean ${s.meanPct.round()}%, p99 ${s.p99Pct.round()}%, '
             'worst ${s.worstPct.round()}% of the budget, ${s.live ? '${s.dropouts} dropouts' : '${s.overBudget} callbacks over'}');
       } else {
         b.writeln('${s.name}: ${s.skipped ?? s.error ?? 'not run'}');

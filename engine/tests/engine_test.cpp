@@ -980,10 +980,11 @@ TEST(the_device_fifo_pulls_the_input_for_each_block_it_renders) {
 TEST(the_device_render_takes_the_devices_own_varying_callback_sizes) {
     // The Benchmark on a Galaxy S22+ (2026-11-13): at Low latency AAudio was given no size, and miniaudio's fixed
     // callback fell back to the stream's whole capacity (about 1950 frames) inside one burst's callback. The output
-    // now takes AAudio's own sizes (audio_miniaudio.cpp, takesDeviceSizes): DeviceRender opened at the burst, then
-    // called with whatever the stream asks, mostly the burst and sometimes not. The sound is the same frames in the
-    // same order as a plain render (whole blocks through the FIFO, so the same bits), no callback renders more than
-    // a block past what it plays, and every frame asked is played.
+    // now takes AAudio's own sizes (audio_miniaudio.cpp, takesDeviceSizes): DeviceRender opened for varying sizes
+    // at the burst, then called with whatever the stream asks, mostly the burst and sometimes not. The path is
+    // chosen per callback (the FIFO for a size that suits it or while it holds frames, straight once empty), the
+    // sound is the same frames in the same order as a plain render, the FIFO never holds more than the latency it
+    // declares (a block short of one, what the input bridge's fill covers), and every frame asked is played.
     for (const int burst : {96, 192, 240, 256}) {
         const ProjectSpec p = project({sine(440.0, 0.5), sine(97.0, 0.25)});
         Engine ref(48000), dev(48000);
@@ -992,7 +993,10 @@ TEST(the_device_render_takes_the_devices_own_varying_callback_sizes) {
         ref.play();
         dev.play();
         DeviceRender render;
-        render.open(burst);
+        render.openVarying(burst);
+        CHECK_EQ(render.latency(), kBlock - 1);
+        int switches = 0;
+        bool wasFifo = render.usesFifo();
         const int sizes[] = {burst, burst, burst / 2, burst + burst / 2, 1, burst, 700, burst, 63, 65};
         std::vector<float> played;
         std::vector<float> out(static_cast<size_t>(700) * 2);
@@ -1003,11 +1007,14 @@ TEST(the_device_render_takes_the_devices_own_varying_callback_sizes) {
             const int got = render.render(dev, out.data(), n);
             rendered += got;
             asked += n;
-            if (render.usesFifo() && (got > n + kBlock - 1 || render.held() > kBlock - 1)) bounded = false;
+            if (render.usesFifo() && (got > n + kBlock - 1 || render.held() > render.latency())) bounded = false;
             if (!render.usesFifo() && got != n) bounded = false;
+            if (render.usesFifo() != wasFifo) ++switches;
+            wasFifo = render.usesFifo();
             for (int i = 0; i < n; ++i) played.push_back(out[static_cast<size_t>(i) * 2]);
         }
         CHECK(bounded);
+        if (!DeviceRender::suits(burst)) CHECK(switches > 0);  // a small odd burst goes straight, and through the FIFO for 700
         CHECK_EQ(static_cast<int64_t>(played.size()), asked);
         CHECK(rendered >= asked && rendered < asked + kBlock);
         const std::vector<float> want = run(ref, asked);

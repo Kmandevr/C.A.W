@@ -723,7 +723,7 @@ typedef struct CawStressRequest {
    "steps", "seconds", "stop_reason": "done"|"over_budget"|"cancelled"|"error", "error", "callback_core",
    "requested_frames", "warmup_s", "first_callback_us", "slope_pct_per_min", "core_start", "core_end",
    "core_khz_start", "core_khz_end", "core_max_khz", "mix_workers", "mix_active_workers", "warmup_xruns",
-   "budget_basis", "costs": [{"id", "ns", "pct", "ran_pct", "instances", "modulator"}]}. After Play an untimed
+   "device_sizes", "budget_basis", "costs": [{"id", "ns", "pct", "ran_pct", "instances", "modulator"}]}. After Play an untimed
    warm-up (0.5 s; 1.7 s with the mix pool, Auto's decision and settle) comes before the timed span; "worst_at_s"
    counts from Play. A cancelled job's error is "cancelled".
    "dropouts": live, the platform's underrun count where it has one (AAudio), else callbacks over budget; DSP,

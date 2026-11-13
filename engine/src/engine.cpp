@@ -693,6 +693,17 @@ void Engine::useOfflineMixPool() {
     setMixParallel(MixParallel::Always);
 }
 
+bool Engine::useBenchmarkMixPool() {
+    if (gTestMixThreads.load(std::memory_order_relaxed) >= 0) return false;  // a test's pool stays
+    if (liveDevices() != 0) {
+        setMixParallel(MixParallel::Never);
+        return false;
+    }
+    startMixPool(MixPool::defaultWorkers(), false);
+    setMixParallel(MixParallel::Auto);
+    return true;
+}
+
 void Engine::setMixThreadsForTest(int workers) noexcept {
     gTestMixThreads.store(std::min(workers, static_cast<int>(MixPool::kMaxWorkers)), std::memory_order_relaxed);
 }
@@ -5063,11 +5074,23 @@ void Engine::reportLoad(double load, int frames, int rendered) noexcept {
     // frames): the load per frame rendered is the engine's real load, without those alternating peaks.
     if (rendered > 0 && rendered != frames) load *= static_cast<double>(frames) / static_cast<double>(rendered);
     const double dt = static_cast<double>(frames) / sr_;
-    if (dt != loadDt_) {  // the size rarely changes: pow and exp only then
+    if (dt != loadDt_) {  // pow and exp only for a length not among the last few (loadWeights_)
         loadDt_ = dt;
-        loadKeep_ = std::pow(0.9, dt / kTick);
-        shareKeep_ = std::exp(-dt / kShareSeconds);
-        tailKeep_ = std::exp(-dt / kMixTailSeconds);
+        const LoadWeights* w = nullptr;
+        for (const LoadWeights& c : loadWeights_)
+            if (c.dt == dt) w = &c;
+        if (!w) {
+            LoadWeights& n = loadWeights_[loadWeightsNext_];
+            loadWeightsNext_ = (loadWeightsNext_ + 1) % kLoadWeights;
+            n.dt = dt;
+            n.load = std::pow(0.9, dt / kTick);
+            n.share = std::exp(-dt / kShareSeconds);
+            n.tail = std::exp(-dt / kMixTailSeconds);
+            w = &n;
+        }
+        loadKeep_ = w->load;
+        shareKeep_ = w->share;
+        tailKeep_ = w->tail;
     }
     loadClock_ += dt;
     loadAvg_ = loadKeep_ * loadAvg_ + (1.0 - loadKeep_) * load;
