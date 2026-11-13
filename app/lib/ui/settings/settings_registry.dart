@@ -272,6 +272,8 @@ const List<SettingEntry> settingEntries = [
   _E('performance.frameRate', _p, 'Frame rate',
       'Auto: the screen\'s highest rate while anything moves, its lowest when still. Or a cap, to save battery',
       ['fps', 'hz', 'refresh rate', '120', '90', '60', '144', '240', 'smooth', 'battery', 'display', 'screen']),
+  _E('performance.benchmark', _p, 'Benchmark', 'How much this device can play: tracks, voices and effects, and what takes the time',
+      ['stress test', 'test', 'speed', 'cpu', 'tracks', 'voices', 'limits', 'score']),
   _E('performance.hardware', _p, 'Hardware profile', 'Cores, work-memory budget, SIMD and GPU compute the engine found',
       ['cpu', 'cores', 'memory', 'simd']),
   _E('performance.plan', _p, 'Workload plan', 'Workers, jobs and batch size the engine plans for live work',
