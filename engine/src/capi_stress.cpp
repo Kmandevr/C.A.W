@@ -307,7 +307,10 @@ std::shared_ptr<Job> makeJob(const CawStressRequest* q, std::string& error) {
     auto j = std::make_shared<Job>();
     j->request.scenario = scenario;
     j->scenarioId = ramp ? std::string() : scenario;
-    if (const SuiteScenario* s = ramp ? nullptr : findScenario(benchmarkScenarios(), scenario)) j->feature = s->feature;
+    if (!ramp) {
+        const std::vector<SuiteScenario> all = benchmarkScenarios();  // alive while its entry is read
+        if (const SuiteScenario* s = findScenario(all, scenario)) j->feature = s->feature;
+    }
     j->request.kind = static_cast<Kind>(q->kind);
     j->request.seconds = q->seconds;
     j->request.frames = q->mode == CAW_STRESS_DSP ? (q->frames ? q->frames : 256) : q->frames;

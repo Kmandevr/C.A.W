@@ -711,7 +711,7 @@ void Engine::setMixThreadsForTest(int workers) noexcept {
 }
 
 // Audio thread, once per callback: whether this callback's chunks run the graph with the pool. The caller also
-// leaves a profiling engine serial (process(): `wantsMixPool() && !profiling()`): a ChainProfile's slots are filled by
+// leaves a profiling engine serial (process(): `wantsMixPool() && !chunkProfile_`): a ChainProfile's slots are filled by
 // one thread at a time.
 bool Engine::wantsMixPool() const noexcept {
     if (!pool_) return false;

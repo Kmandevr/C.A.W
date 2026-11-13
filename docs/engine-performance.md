@@ -518,3 +518,28 @@ Single notes, one copy (before / ADAA / hybrid): A5 at full drive −62.0 / −6
 | Typical song (8 tracks) | 694 / 690 / 679 / – / – | 673 / 750 / 698 / – / – |
 
 So about 10–12% off the heavy patch at Per copy and 35–37% at Whole stack, the hybrid within 1–4% of ADAA only; the 16-voice and song rows are within this container's noise. **[Assumption]** Arm64 (NEON's three-operand form and 32 registers) gains at least as much; the Bench workflow measures it on the next run.
+
+### A7. Where the time goes: engine parts (#197)
+
+The Benchmark's profile runs split `Engine::process` by engine part ([engine](engine.md#the-benchmark)). **[Fact]** (Linux x64 VM, 4 vCPUs, GCC 13 Release, one 1 s profile each at 256 frames, serial, 2026-11-13; shares move by a few points run to run) the mean callback and its three largest parts:
+
+| Scenario | Mean µs | Largest parts (% of process time) |
+|---|---|---|
+| song8 | 706 | devices 82, master 5, automation 4 |
+| song32_heavy | 4,651 | devices 88, sends 3, automation 3 |
+| flagship_heavy | 2,478 | devices 99 |
+| empty | 4 | master 66, other 12, mix 9 |
+| single_sampler | 42 | samples 59, metering 22, mix 9 |
+| folders_deep | 124 | routing 50, metering 19, mix 13 |
+| sends_many | 106 | sends 41, mix 16, devices 15 |
+| sends_chained | 177 | routing 26, sends 21, mix 20 |
+| automation_dense | 809 | devices 42, automation 28, mix 27 |
+| modulation_dense | 555 | mix 53, devices 24, automation 20 |
+| voice_storm | 406 | devices 95 |
+| sample_stream | 108 | samples 55, mix 17, metering 14 |
+| resample | 69 | samples 37, mix 25, metering 20 |
+| every_effect | 1,180 | devices 95 |
+| metering_heavy | 394 | devices 48, mix 23, metering 12 |
+| worst_all | 4,494 | devices 75, mix 9, automation 6 |
+
+What it says: instruments and effects are where a real song's time goes (four fifths and more); the engine's own work shows only in projects built to stress it. A track's fader moved per sample (project modulation of volume) makes `mix` the largest part of `modulation_dense`, since the fader then runs its per-sample path; the meters (peaks, scopes, correlation) are the next largest engine part in small projects. These are this VM's shares, not a phone's.

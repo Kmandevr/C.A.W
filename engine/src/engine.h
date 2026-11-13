@@ -310,7 +310,7 @@ public:
     // The Benchmark (stress_run.h): this engine's component profile (null: off; component_chain.h). Set between
     // process() calls; the profile must outlive them. process() reads it once per call and hands it to every chain
     // in its ChainTime. A profile is filled by one thread at a time, so a profiling engine's mix runs serially: the
-    // mix pool is used only when `wantsMixPool() && !profiling()`.
+    // mix pool is used only when `wantsMixPool() && !chunkProfile_`.
     void setProfile(ChainProfile* profile) noexcept { profile_.store(profile, std::memory_order_release); }
     bool profiling() const noexcept { return profile_.load(std::memory_order_relaxed) != nullptr; }
     // Overload shedding (layers muted when the device runs out of time, and their return) on (the default) or off:

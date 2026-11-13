@@ -279,7 +279,17 @@ TEST(stress_profile_parts_add_up_and_name_the_feature) {
         CHECK_NEAR(pct, 100.0, 0.01);
         // The parts are process()'s own time; the callback's timer adds only a clock read around it.
         CHECK(us <= o.meanUs * 1.001 && us >= o.meanUs * 0.97);
+#ifdef NDEBUG
         if (top != dominant) cawtest::fail(__FILE__, __LINE__, std::string(id) + ": the largest part is " + partName(top));
+#else
+        // An unoptimized build (the sanitizer job) times unoptimized loops, so the shares shift (its meters' loops
+        // cost the most there): the feature's part is still among the two largest. Optimized builds, which the
+        // Benchmark measures, check the largest above.
+        int above = 0;
+        for (const PartRow& x : o.parts) above += x.pct > o.parts[static_cast<int>(dominant)].pct ? 1 : 0;
+        if (above > 1) cawtest::fail(__FILE__, __LINE__, std::string(id) + ": its part is not among the two largest");
+        (void)top;
+#endif
         CHECK_EQ(o.parts[static_cast<int>(Part::DeviceIo)].pct, 0.0);  // live only
         CHECK_EQ(o.parts[static_cast<int>(Part::MixPool)].pct < 1.0, true);  // a profile is serial
     }

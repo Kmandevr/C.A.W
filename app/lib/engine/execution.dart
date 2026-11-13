@@ -324,6 +324,12 @@ class NativeEngineWorkPool {
     return _bindings.workerPoolSubmitStress(_handle, request, NativeJobPriority.foreground.index);
   }
 
+  /// A plug-in benchmark (API 30; engine/component_bench.dart owns the handle, or nullptr when the pool refused it).
+  Pointer<Void> submitComponentBenchRaw(Pointer<CawComponentBenchRequestStruct> request) {
+    if (_disposed) return nullptr;
+    return _bindings.workerPoolSubmitComponentBench(_handle, request);
+  }
+
   void _beginWorkload(EngineWorkload workload) {
     if (workload == EngineWorkload.offlineRender) {
       _renderJobs++;

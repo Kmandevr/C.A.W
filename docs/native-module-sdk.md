@@ -2,7 +2,7 @@
 title: Native module SDK
 summary: C ABI host contract and C++ component SDK, validation, real-time rules, state and packaging.
 updated: 2026-11-13
-covers: [engine/include/caw_component.h, engine/include/caw/display.hpp, engine/include/caw/modulator.hpp, examples/cpp/modulator/, engine/include/caw/library/, engine/src/sample_pack.*, engine/plugin/clap/, engine/cmake/CAWClap.cmake, engine/plugin/vst3/, engine/cmake/CAWVst3.cmake, engine/include/caw/module.hpp, engine/include/caw/component.hpp, engine/include/caw/instrument.hpp, engine/CMakeLists.txt, engine/cmake/, examples/cpp/minimal/, examples/cpp/poly-synth/, scripts/caw-component-build.js, .github/workflows/cpp-components.yml, engine/src/module.*, engine/src/module_registry.*, engine/src/graph.*, engine/src/component_test.*, engine/src/analysis.*]
+covers: [engine/include/caw_component.h, engine/include/caw/display.hpp, engine/include/caw/modulator.hpp, examples/cpp/modulator/, engine/include/caw/library/, engine/src/sample_pack.*, engine/plugin/clap/, engine/cmake/CAWClap.cmake, engine/plugin/vst3/, engine/cmake/CAWVst3.cmake, engine/include/caw/module.hpp, engine/include/caw/component.hpp, engine/include/caw/profile.hpp, engine/src/component_bench.*, engine/src/component_profile.*, engine/include/caw/instrument.hpp, engine/CMakeLists.txt, engine/cmake/, examples/cpp/minimal/, examples/cpp/poly-synth/, scripts/caw-component-build.js, .github/workflows/cpp-components.yml, engine/src/module.*, engine/src/module_registry.*, engine/src/graph.*, engine/src/component_test.*, engine/src/analysis.*]
 ---
 
 # Native module SDK v1
@@ -111,6 +111,29 @@ A library is in-process code, so it loads only with an explicit `--trust trusted
 - **Cost:** median and worst time per block, in µs and as a share of the block's real time on the machine that runs the test (a desktop CPU is not a phone's).
 
 Run it at the block sizes and sample rates the app uses (`--block`, `--rate`); a result without `cpu` is the same byte for byte on every run, so it can be checked into a test. `--strict` exits 1 on any warning, for CI.
+
+## Benchmark your component
+
+The plug-in benchmark (the **Benchmark** button beside Build; hosts call `caw_worker_pool_submit_component_bench`, API 30) times your built effect or instrument offline on a worker and runs automatic checks, each pass, warn or fail with a one-line reason: allocations in `process()`, the slowdown from denormals at silence without flush-to-zero (and any subnormal output), the cost per voice (instruments), how the cost scales with the block size and the sample rate, the cost of every parameter moving, and the cost while silent (sleeping through `quiet()` passes). The measurements and thresholds are in the [engine reference](engine.md#the-plug-in-benchmark). It runs only your own builds and components you chose to trust (Trusted); nothing of it leaves the device.
+
+### Time sections of your component
+
+`CAW_PROFILE_SCOPE("name")` (`caw/profile.hpp`, included by `caw/module.hpp`) times the rest of the enclosing block as a named section, and the benchmark lists each section's share of your `process()` time, its mean per call and its calls:
+
+```cpp
+void process(const caw::StereoProcessBlock& b) noexcept override {
+    {
+        CAW_PROFILE_SCOPE("filter");
+        runFilter(b);
+    }
+    CAW_PROFILE_SCOPE("saturation");
+    runSaturation(b);
+}
+```
+
+- Name each section with a string literal; at most 32 names are kept (47 characters shown). Sections may nest; each keeps its own whole time, nested ones included.
+- Outside a benchmark a section costs a relaxed load and a predictable branch on entry and a branch on exit: leave it in your shipped code. It never allocates, locks or blocks, and records only on the benchmark's own thread, so the same plug-in playing in your project meanwhile adds nothing.
+- The SDK's `create` asks the host for the extension `caw.profile.v1` (`CAW_HOST_EXTENSION_PROFILE` in `caw_component.h`); a component written against the C interface alone can ask for it the same way (`CawProfileExtension`: `active`, `begin`, `end`, `now_ns`). A host without it (another host, a CLAP export) makes every section a no-op.
 
 ## Writing an instrument
 
