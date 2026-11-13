@@ -545,7 +545,9 @@ int Engine::slotsScannedPerChunk() const noexcept { return liveCount_; }
 // the full scans did). It leaves in processChunk once nothing is left for a loop to do there.
 // Stopped: an audio track monitoring its input runs as a held preview would, so its input is heard through its chain.
 void Engine::wakeMonitors() noexcept {
-    for (int i = 0; i < slotCount_; ++i) {
+    // Each stopped callback while monitoring is wanted: only the slots in use (an active slot is listed, A4/#133).
+    for (int k = 0; k < liveCount_; ++k) {
+        const int i = live_[k];
         Slot& s = slotAt(i);
         if (!s.active || !s.track || !s.instrument || s.previewing || !s.instrument->monitorsStopped()) continue;
         if (s.instrumentIdle) {
@@ -2425,9 +2427,10 @@ void Engine::startPlay(double fromStep, uint64_t playCount, uint32_t touchStamp)
     // Ringing tails play on into the new pass (state kept), as the effects would have.
     masterTailLeft_ = 0;
     masterTailFade_ = 0;
-    for (int i = 0; i < slotCount_; ++i) {
-        slotAt(i).insertTail = false;
-        slotAt(i).tailFade = 0;
+    // Only the slots in use (live_, A4/#133): a slot leaves the list with no tail (processChunk).
+    for (int k = 0; k < liveCount_; ++k) {
+        slotAt(live_[k]).insertTail = false;
+        slotAt(live_[k]).tailFade = 0;
     }
     touchEpoch_ = playCount;  // chains from before this Play drop their touches at their next chunk
     touchPlayStamp_ = touchStamp;
@@ -2447,12 +2450,15 @@ void Engine::startPlay(double fromStep, uint64_t playCount, uint32_t touchStamp)
     limEnv_ = 0;
     // The instruments still ringing share the play-tail budget, so Play's callback stays bounded.
     {
+        // An active slot is always in live_ (Install and ConfigureBus list it), so these visit the same slots, in
+        // the same order, as a scan of the capacity.
         int ringing = 0;
-        for (int i = 0; i < slotCount_; ++i)
-            if (ringsAtPlay(slotAt(i))) ++ringing;
+        for (int k = 0; k < liveCount_; ++k)
+            if (ringsAtPlay(slotAt(live_[k]))) ++ringing;
         const int tailLen = ringing > 0 ? std::max(1, kPlayTailBudgetFrames / ringing) : 0;
-        for (int i = 0; i < slotCount_; ++i) {
-            Slot& s = slotAt(i);
+        updateSolo();  // the loop changes no slot's activity, removal or solo, so once is enough
+        for (int k = 0; k < liveCount_; ++k) {
+            Slot& s = slotAt(live_[k]);
             if (!s.active) continue;
             s.playTailLen = s.playTailAt = 0;
             if (s.instrument) {
@@ -2472,7 +2478,6 @@ void Engine::startPlay(double fromStep, uint64_t playCount, uint32_t touchStamp)
             s.fresh = true;
             s.k = -1;
             s.epoch = -1;
-            updateSolo();
             const double target = slotTarget(s);
             s.gain = target > 0.0
                 ? (s.automation ? automationValue(s.automation->volume, 0.0, target) : target)
@@ -3652,6 +3657,8 @@ int Engine::processChunk(float* l, float* r, int maxFrames) noexcept {
         Slot& slot = slotAt(i);
         if (!slot.active && !slot.previewing && slot.mode == Slot::Mode::Idle) {
             slot.listed = false;
+            slot.insertTail = false;  // already so once it stopped previewing; startPlay no longer clears it here
+            slot.tailFade = 0;
             MixGraph& g = *mixGraph_;
             g.routable[i] = 0;
             g.target[i] = -1;
