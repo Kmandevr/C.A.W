@@ -9,6 +9,7 @@ import 'midi_mapping.dart';
 import 'modulation.dart';
 import 'pattern_doc.dart';
 import 'routing.dart';
+import 'tempo_map.dart';
 import '../version.dart';
 
 String newId(String prefix) {
@@ -334,10 +335,37 @@ class MarkerDoc {
         'color': color,
       };
 
-  /// Null for an entry without an id or a start.
+  /// A section in the project's v3 JSON: its span in beats.
+  Map<String, dynamic> toSectionJson() =>
+      {'id': id, 'name': name, 'color': color, 'start': startSteps / 4, 'end': endSteps! / 4};
+
+  /// A marker in the project's v3 JSON: its beat (and its colour, which the contract leaves to the app).
+  Map<String, dynamic> toMarkerJson() => {'id': id, 'name': name, 'beat': startSteps / 4, 'color': color};
+
+  static int _color(Object? c) => switch (c) { final int c when c >= 0 && c < LayerDoc.trackColors => c, _ => 0 };
+
+  /// A v3 section (`start` and `end` in beats); null without an id or a span.
+  static MarkerDoc? fromSectionJson(Object? raw, int maxSteps) {
+    if (raw is! Map) return null;
+    final id = _boundedProjectText(raw['id'], 64);
+    final start = raw['start'], end = raw['end'];
+    if (id.isEmpty || start is! num || end is! num || !start.isFinite || !end.isFinite) return null;
+    final at = (start * 4).round().clamp(0, maxSteps - 1).toInt();
+    final to = (end * 4).round().clamp(0, maxSteps).toInt();
+    if (to <= at) return null;
+    return MarkerDoc(id: id, name: _boundedProjectText(raw['name'], 64), startSteps: at, endSteps: to,
+        color: _color(raw['color']));
+  }
+
+  /// A marker: v3's (`beat`) or v2's (`start_steps`, a region with `end_steps`). Null for an entry without an id or
+  /// a position.
   static MarkerDoc? fromJson(Object? raw, int maxSteps) {
     if (raw is! Map) return null;
     final id = _boundedProjectText(raw['id'], 64);
+    if (raw['beat'] case final num beat when beat.isFinite && id.isNotEmpty) {
+      return MarkerDoc(id: id, name: _boundedProjectText(raw['name'], 64),
+          startSteps: (beat * 4).round().clamp(0, maxSteps - 1).toInt(), color: _color(raw['color']));
+    }
     final start = raw['start_steps'];
     if (id.isEmpty || start is! num || !start.isFinite) return null;
     final at = start.toInt().clamp(0, maxSteps - 1).toInt();
@@ -350,6 +378,29 @@ class MarkerDoc {
       color: switch (raw['color']) { final int c when c >= 0 && c < LayerDoc.trackColors => c, _ => 0 },
     );
   }
+}
+
+/// The most sections and markers a project keeps (the contract's limits).
+const kMaxSections = 256, kMaxMarkers = 1024;
+
+/// [all] with its sections apart: in time order, a section that starts inside the one before it starts at that
+/// one's end instead, and one left with no length becomes a marker at its start (an older project's regions could
+/// overlap). At most [kMaxSections] sections and [kMaxMarkers] markers stay.
+List<MarkerDoc> sectionsApart(List<MarkerDoc> all) {
+  final regions = [for (final m in all) if (m.isRegion) m]..sort((a, b) => a.startSteps.compareTo(b.startSteps));
+  final points = [for (final m in all) if (!m.isRegion) m];
+  final kept = <MarkerDoc>[];
+  for (final r in regions) {
+    final prevEnd = kept.isEmpty ? 0 : kept.last.endSteps!;
+    if (r.startSteps < prevEnd) r.startSteps = prevEnd;
+    if (r.endSteps! <= r.startSteps || kept.length >= kMaxSections) {
+      r.endSteps = null;
+      points.add(r);
+    } else {
+      kept.add(r);
+    }
+  }
+  return [...kept, ...points.take(kMaxMarkers)];
 }
 
 /// The most a track or the master gains: +12 dB, 10^(12/20) (owner, 2026-11-10: faders like REAPER's). The engine
@@ -578,8 +629,10 @@ class ProjectDoc {
   ProjectDoc({
     required this.id,
     required this.name,
-    this.bpm = 140,
-    this.beatsPerBar = 4,
+    double bpm = 140,
+    int beatsPerBar = 4,
+    List<TempoPoint>? tempoMap,
+    List<TimeSignature>? timeSignatures,
     this.loopBars = 4,
     this.key = 'A minor',
     this.seed = 0x7f3a,
@@ -598,7 +651,11 @@ class ProjectDoc {
     this.loopEndSteps = 0,
     List<MarkerDoc>? markers,
     List<AudioAssetDoc>? assets,
-  })  : midiFiles = midiFiles ?? [],
+  })  : _tempo = List.unmodifiable(normalizeTempoMap(tempoMap ?? [TempoPoint(0, bpm)], fallbackBpm: bpm)),
+        _signatures = List.unmodifiable(normalizeSignatures(
+            [for (final s in timeSignatures ?? [TimeSignature(0, 0, beatsPerBar, 4)]) (bar: s.bar, num: s.num, den: s.den)],
+            fallbackNum: beatsPerBar)),
+        midiFiles = midiFiles ?? [],
         assets = assets ?? [],
         markers = markers ?? [],
         modules = modules ?? [],
@@ -630,12 +687,69 @@ class ProjectDoc {
     }
   }
 
-  static const int fileVersion = 2;
+  /// v3 (batch 1.0.3): the tempo map, time signatures, sections and markers in beats. A v2 file reads as one tempo
+  /// (`bpm`) in its `beats_per_bar`/4, its regions as sections.
+  static const int fileVersion = 3;
 
   final String id;
   String name;
-  double bpm;
-  int beatsPerBar;
+
+  /// The tempo map (#207): sorted, the first point at beat 0 ([bpm] is its tempo). Set it whole; it is kept sorted.
+  List<TempoPoint> get tempoMap => _tempo;
+  set tempoMap(List<TempoPoint> v) {
+    _tempo = List.unmodifiable(normalizeTempoMap(v, fallbackBpm: bpm));
+    _tempoMath = null;
+  }
+  List<TempoPoint> _tempo;
+  TempoMath? _tempoMath;
+
+  /// Beat↔seconds over [tempoMap].
+  TempoMath get tempo => _tempoMath ??= TempoMath(_tempo);
+
+  /// The tempo at the start (the first point's), which older readers take as the project's one tempo.
+  double get bpm => _tempo.first.bpm;
+  set bpm(double v) => tempoMap = [_tempo.first.copyWith(bpm: v), ..._tempo.skip(1)];
+
+  /// The time signatures (#207): sorted, the first at bar 0, each change on a bar line. Set it whole; the beats are
+  /// recomputed from the bars.
+  List<TimeSignature> get timeSignatures => _signatures;
+  set timeSignatures(List<TimeSignature> v) {
+    _signatures = List.unmodifiable(normalizeSignatures([for (final s in v) (bar: s.bar, num: s.num, den: s.den)],
+        fallbackNum: beatsPerBar));
+    _barMath = null;
+  }
+  List<TimeSignature> _signatures;
+  BarMath? _barMath;
+
+  /// Bars from [timeSignatures].
+  BarMath get bars => _barMath ??= BarMath(_signatures);
+
+  /// The first bar's length in quarter notes, rounded (n in n/4): what lengths in "bars" count when nothing says
+  /// which bar. Setting it makes the first signature n/4.
+  int get beatsPerBar {
+    final s = _signatures.first;
+    return s.den == 4 ? s.num : max(1, s.barBeats.round());
+  }
+  set beatsPerBar(int v) {
+    final s = _signatures;
+    timeSignatures = [TimeSignature(0, 0, v.clamp(1, 32), 4), ...s.skip(1)];
+  }
+
+  /// The tempo and meter never change: what the engine's `bpm` and `beats_per_bar` alone describe.
+  bool get plainTempo => _tempo.length == 1 && _signatures.length == 1 && _signatures.first.den == 4;
+
+  /// Seconds from the start to sixteenth step [step], over the tempo map.
+  double secondsAtStep(double step) => tempo.secondsAt(step / 4);
+
+  /// The sixteenth step [seconds] after the start.
+  double stepAtSeconds(double seconds) => tempo.beatAt(seconds) * 4;
+
+  /// Where the engine is, in sixteenth steps, from how far it is through its loop of [engineLoopSteps] in time
+  /// ([fraction] = position / loop length, both in samples): over the tempo map, not linearly.
+  double stepAtLoopFraction(double fraction) {
+    if (_tempo.length == 1) return fraction * engineLoopSteps;
+    return stepAtSeconds(fraction * secondsAtStep(engineLoopSteps.toDouble()));
+  }
   int loopBars;
   String key;
   int seed;
@@ -668,8 +782,11 @@ class ProjectDoc {
   /// Playback loops over the range now.
   bool get loopsRange => loopRange && hasLoopRange;
 
-  /// Markers and regions on the ruler, in no particular order.
+  /// Markers and sections (regions: a [MarkerDoc] with an end), in no particular order. Sections never overlap.
   List<MarkerDoc> markers;
+
+  /// The sections, in time order (the section bar's blocks).
+  List<MarkerDoc> get sections => [for (final m in markers) if (m.isRegion) m]..sort((a, b) => a.startSteps.compareTo(b.startSteps));
 
   /// The audio files the project's clips play (copied into its storage on import, or recorded).
   List<AudioAssetDoc> assets;
@@ -745,9 +862,9 @@ class ProjectDoc {
         lane.points.fold<double>(e, (v, point) => max(v, point.step))));
     return min(maxArrangementSteps, max(max(64 * stepsPerBar, arrangementEndSteps), trackEnd.ceil()));
   }
-  double get loopSeconds => loopSteps * 15.0 / bpm;
+  double get loopSeconds => secondsAtStep(loopSteps.toDouble());
   /// How long the song plays before it loops back: [engineLoopSteps] at the tempo.
-  double get songSeconds => engineLoopSteps * 15.0 / bpm;
+  double get songSeconds => secondsAtStep(engineLoopSteps.toDouble());
 
   /// The key as the engine's numbers: root 0..11 from C, scale 0 = major or 1 = minor (scale.* order).
   /// Null for "None", so the engine uses its default (A minor).
@@ -817,7 +934,7 @@ class ProjectDoc {
         'caw_project': 1,
         'name': name,
         'bpm': bpm,
-        'beats_per_bar': beatsPerBar,
+        'beats_per_bar': beatsPerBar.clamp(1, 16),  // the engine's meter range; the signatures go by C API 31
         'loop_bars': engineLoopBars,
         if (loopsRange) ...{'loop_range': true, 'loop_start_steps': loopStartSteps, 'loop_end_steps': loopEndSteps},
         'seed': seed,
@@ -908,6 +1025,8 @@ class ProjectDoc {
         'name': name,
         'bpm': bpm,
         'beats_per_bar': beatsPerBar,
+        'tempo_map': [for (final t in tempoMap) t.toJson()],
+        'time_signatures': [for (final t in timeSignatures) t.toJson()],
         'loop_bars': loopBars,
         'key': key,
         'seed': seed,
@@ -922,7 +1041,8 @@ class ProjectDoc {
         'master_components': [for (final c in masterComponents) c.toJson()],
         if (midiFiles.isNotEmpty) 'midi_files': [for (final f in midiFiles) f.toJson()],
         if (hasLoopRange) ...{'loop_range': loopRange, 'loop_start_steps': loopStartSteps, 'loop_end_steps': loopEndSteps},
-        if (markers.isNotEmpty) 'markers': [for (final m in markers) m.toJson()],
+        if (sections.isNotEmpty) 'sections': [for (final m in sections) m.toSectionJson()],
+        if (markers.any((m) => !m.isRegion)) 'markers': [for (final m in markers) if (!m.isRegion) m.toMarkerJson()],
         if (midiMappings.isNotEmpty) 'midi_mappings': [for (final m in midiMappings) m.toJson()],
         if (modulators.isNotEmpty) 'modulators': [for (final m in modulators) m.toJson()],
         if (modLinks.isNotEmpty) 'modulation': [for (final l in modLinks) l.toJson()],
@@ -977,7 +1097,7 @@ class ProjectDoc {
     final project = ProjectDoc(
       id: j['id'] as String,
       name: (j['name'] as String?) ?? 'Untitled',
-      bpm: (j['bpm'] as num?)?.toDouble() ?? 140,
+      bpm: switch (j['bpm']) { final num b when b.isFinite => b.toDouble().clamp(kMinMapBpm, kMaxMapBpm).toDouble(), _ => 140 },
       beatsPerBar: ((j['beats_per_bar'] as num?)?.toInt() ?? 4).clamp(1, 16),  // the engine's meter range
       loopBars: (j['loop_bars'] as num?)?.toInt() ?? 4,
       key: (j['key'] as String?) ?? 'A minor',
@@ -1091,9 +1211,21 @@ class ProjectDoc {
     project.modLinks = [
       for (final raw in ((j['modulation'] as List?) ?? const []).take(kMaxModLinks)) ?ModLinkDoc.fromJson(raw),
     ];
-    project.markers = [
-      for (final raw in ((j['markers'] as List?) ?? const []).take(1024)) ?MarkerDoc.fromJson(raw, project.maxArrangementSteps),
+    // The tempo map and signatures (v3); a v2 file has neither and reads as its one tempo in n/4.
+    final maxSteps = project.maxArrangementSteps;
+    if (tempoMapFromJson(j['tempo_map'], fallbackBpm: project.bpm, maxBeat: maxSteps / 4) case final map?) {
+      project.tempoMap = map;
+    }
+    if (timeSignaturesFromJson(j['time_signatures'], fallbackNum: project.beatsPerBar, maxBar: maxSteps ~/ 4)
+        case final sigs?) {
+      project.timeSignatures = sigs;
+    }
+    // Sections and markers: v3 keeps them apart, in beats; a v2 file's `markers` held both, in steps.
+    final read = [
+      for (final raw in ((j['sections'] as List?) ?? const []).take(kMaxSections)) ?MarkerDoc.fromSectionJson(raw, maxSteps),
+      for (final raw in ((j['markers'] as List?) ?? const []).take(kMaxMarkers)) ?MarkerDoc.fromJson(raw, maxSteps),
     ];
+    project.markers = sectionsApart(read);
     if (j['music_video'] is Map) project.musicVideo = Map<String, dynamic>.from(j['music_video'] as Map);
     for (final layer in project.layers) {
       for (final clip in layer.audioClips) {

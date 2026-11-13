@@ -1,9 +1,8 @@
-// The marker and region list (REAPER's Region/Marker Manager): every marker and region in time order with its
-// position and length; tap one to jump there, long-press for rename, colour, loop, duplicate with clips and delete.
+// The marker and section list (REAPER's Region/Marker Manager): every marker and section in time order with its
+// position and length; tap one to jump there, hold for its menu (rename, colour, copy, delete).
 import 'package:flutter/material.dart';
 
 import '../../model/app_state.dart';
-import '../../model/arrange_edit.dart';
 import '../../model/arrange_markers.dart';
 import '../../model/project.dart';
 import '../glass.dart';
@@ -11,14 +10,12 @@ import '../haptics.dart';
 import '../theme.dart';
 import '../widgets.dart';
 import 'long_press_menu.dart';
+import 'section_bar.dart';
 import '../pointer_input.dart';
 import '../panel_motion.dart';
 
-/// "bar.beat" (1-based) of [step].
-String barBeat(ProjectDoc p, int step) {
-  final beat = p.stepsPerBar ~/ p.beatsPerBar;
-  return '${step ~/ p.stepsPerBar + 1}.${step % p.stepsPerBar ~/ (beat < 1 ? 1 : beat) + 1}';
-}
+/// "bar.beat" (1-based) of [step], from the time signatures.
+String barBeat(ProjectDoc p, int step) => p.bars.label(step / 4);
 
 /// A length in bars and beats ("4 bars", "2 bars 1 beat", "3 beats").
 String barsLength(ProjectDoc p, int steps) {
@@ -32,28 +29,47 @@ String barsLength(ProjectDoc p, int steps) {
 
 /// Asks for [m]'s new name and keeps it.
 Future<void> renameMarker(BuildContext context, AppState s, MarkerDoc m) async {
-  final c = TextEditingController(text: m.name);
-  final name = await showDialog<String>(context: context, animationStyle: dialogAnimation(context), builder: (context) => AlertDialog(
-    title: Text(m.isRegion ? 'Rename region' : 'Rename marker'),
-    content: TextField(key: const ValueKey('marker-name'), controller: c, autofocus: true,
-      onSubmitted: (v) => Navigator.of(context).pop(v)),
-    actions: [
-      TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Cancel')),
-      TextButton(onPressed: () => Navigator.of(context).pop(c.text), child: const Text('Rename')),
-    ]));
-  c.dispose();
+  final name = await showDialog<String>(context: context, animationStyle: dialogAnimation(context),
+      builder: (context) => _RenameDialog(title: m.isRegion ? 'Rename section' : 'Rename marker', initial: m.name));
   if (name != null) s.editMarker(m, name: name);
 }
 
-/// The long-press menu of marker or region [m] (the ruler's and the list's).
+/// The rename dialog: its text field's controller lives as long as the dialog does, through its closing animation.
+class _RenameDialog extends StatefulWidget {
+  const _RenameDialog({required this.title, required this.initial});
+  final String title, initial;
+
+  @override
+  State<_RenameDialog> createState() => _RenameDialogState();
+}
+
+class _RenameDialogState extends State<_RenameDialog> {
+  late final _c = TextEditingController(text: widget.initial);
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    title: Text(widget.title),
+    content: TextField(key: const ValueKey('marker-name'), controller: _c, autofocus: true,
+      onSubmitted: (v) => Navigator.of(context).pop(v)),
+    actions: [
+      TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Cancel')),
+      TextButton(onPressed: () => Navigator.of(context).pop(_c.text), child: const Text('Rename')),
+    ]);
+}
+
+/// The hold menu of marker [m] (the section bar's and the list's): rename, colour, delete. A section's is
+/// [sectionMenu].
 Future<void> markerMenu(BuildContext context, AppState s, MarkerDoc m, Offset at) async {
+  if (m.isRegion) return sectionMenu(context, s, m, at);
   final v = await showLongPressMenu<String>(context, at: at, title: m.name, style: s.settings.longPressMenu, actions: [
     const MenuAction('rename', 'Rename', Icons.edit_outlined),
     const MenuAction('color', 'Colour', Icons.palette_outlined),
-    if (m.isRegion) const MenuAction('loop', 'Loop this region', Icons.repeat),
-    if (m.isRegion) const MenuAction('duplicate', 'Duplicate with clips', Icons.copy_all_outlined),
-    if (m.isRegion) const MenuAction('select', 'Select its clips', Icons.select_all),
-    const MenuAction('list', 'Markers and regions…', Icons.list),
     const MenuAction('delete', 'Delete', Icons.delete_outline, danger: true),
   ]);
   if (v == null || !context.mounted) return;
@@ -62,16 +78,6 @@ Future<void> markerMenu(BuildContext context, AppState s, MarkerDoc m, Offset at
       await renameMarker(context, s, m);
     case 'color':
       s.editMarker(m, color: m.color + 1);
-    case 'loop':
-      s.setLoopRange(m.startSteps, m.endSteps!);
-    case 'duplicate':
-      // REAPER's duplicate: the copy right after the region, its clips with it.
-      if (s.moveRegionWithClips(m, m.endSteps!, copy: true) != null) Haptics.drop();
-    case 'select':
-      final clips = s.clipsInRegion(m);
-      s.selectClipsInBox(clips);
-    case 'list':
-      await showMarkerList(context, s);
     case 'delete':
       s.removeMarker(m);
   }
@@ -109,17 +115,17 @@ Future<void> showMarkerList(BuildContext context, AppState s) => showGlassSheet<
         )));
       }
       return ListView(shrinkWrap: true, children: [
-        const Heading('Markers and regions'),
+        const Heading('Markers and sections'),
         if (markers.isEmpty && regions.isEmpty)
           Padding(padding: const EdgeInsets.all(16), child: Text(
-            'None yet: ${PointerInput.hold} the ruler to add a marker or a region (Shift+M, Shift+R).',
+            'None yet: ${PointerInput.hold} the section bar or the ruler to add a section or a marker (Shift+R, Shift+M).',
             style: const TextStyle(color: Neon.dim))),
         if (markers.isNotEmpty) const Padding(padding: EdgeInsets.fromLTRB(16, 4, 16, 0), child: Text('MARKERS',
           style: TextStyle(color: Neon.dim, fontSize: 10, letterSpacing: 1.2, fontWeight: FontWeight.w800))),
         // Keys 1–9 and 0 jump to the first ten markers (REAPER's).
         for (var i = 0; i < markers.length; i++)
           row(markers[i], i < 10 ? '${(i + 1) % 10}' : '·', 'At ${barBeat(p, markers[i].startSteps)}'),
-        if (regions.isNotEmpty) const Padding(padding: EdgeInsets.fromLTRB(16, 8, 16, 0), child: Text('REGIONS',
+        if (regions.isNotEmpty) const Padding(padding: EdgeInsets.fromLTRB(16, 8, 16, 0), child: Text('SECTIONS',
           style: TextStyle(color: Neon.dim, fontSize: 10, letterSpacing: 1.2, fontWeight: FontWeight.w800))),
         for (final r in regions)
           row(r, 'R', '${barBeat(p, r.startSteps)} to ${barBeat(p, r.endSteps!)} · '

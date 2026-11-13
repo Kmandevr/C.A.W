@@ -331,7 +331,7 @@ class _ClipTab extends StatelessWidget {
               for (final c in layer.clips)
                 Padding(padding: const EdgeInsets.only(right: 4), child: ChoiceChip(
                   visualDensity: VisualDensity.compact,
-                  label: Text('${state.project.module(c.patternId)?.name ?? '?'} · ${c.startSteps ~/ state.project.stepsPerBar + 1}',
+                  label: Text('${state.project.module(c.patternId)?.name ?? '?'} · ${state.project.bars.barAt(c.startSteps / 4) + 1}',
                     style: const TextStyle(fontSize: 10)),
                   selected: c.id == clip.id,
                   onSelected: (_) => state.selectClip(layer, c))),
@@ -341,7 +341,7 @@ class _ClipTab extends StatelessWidget {
               const SizedBox(width: 6),
               Flexible(child: Text(module.name, key: const ValueKey('clip-pattern-name'), maxLines: 1, overflow: TextOverflow.ellipsis,
                 style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600))),
-              Text('  · bar ${clip.startSteps ~/ state.project.stepsPerBar + 1}', style: const TextStyle(fontSize: 11, color: Neon.dim)),
+              Text('  · bar ${state.project.bars.barAt(clip.startSteps / 4) + 1}', style: const TextStyle(fontSize: 11, color: Neon.dim)),
             ]))),
       if (sections != null)
         IconButton(key: const ValueKey('clip-open-build'), tooltip: 'Open in Build: the notes as text, full screen',

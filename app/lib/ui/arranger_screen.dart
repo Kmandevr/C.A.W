@@ -18,6 +18,7 @@ import '../model/clip_loop_edit.dart';
 import '../model/live_midi.dart';
 import '../model/pattern_doc.dart';
 import '../model/project.dart';
+import '../model/tempo_map.dart';
 import '../model/record_modes.dart';
 import '../model/settings.dart';
 import 'pointer_input.dart';
@@ -32,6 +33,8 @@ import 'arrange/clip_bar.dart';
 import 'arrange/clip_look.dart';
 import 'arrange/clip_preview.dart';
 import 'arrange/ruler.dart';
+import 'arrange/section_bar.dart';
+import 'arrange/tempo_lane.dart';
 import 'arrange/focus_panel.dart';
 import 'arrange/edit_cues.dart';
 import 'arrange/edit_motion.dart';
@@ -1592,8 +1595,10 @@ class _ArrangerScreenState extends State<ArrangerScreen> with TickerProviderStat
     final reach = math.max(math.max(p.timelineSteps.toDouble(), end + 64.0 * p.stepsPerBar),
         math.max(s.playheadStep, _reachSteps) + screens);
     final width = math.max(560.0, math.min(p.maxArrangementSteps.toDouble(), reach) * stepW);
-    // The ruler holds the bar numbers and loop range over the markers and regions: taller on a phone, for a finger.
-    final ruler = pinned ? 20.0 : (_phone ? 44.0 : 36.0);
+    // Over the lanes (#207): the section bar, the ruler (bar numbers, signature flags, the loop range) and, once the
+    // tempo changes, the tempo lane, which grows in and out. Taller on a phone, for a finger.
+    final sectionH = _phone ? 24.0 : 22.0, rulerH = _phone ? 28.0 : 24.0;
+    final tempoTarget = !pinned && p.tempoMap.length > 1 ? tempoLaneHeight(_phone) : 0.0;
     final focusId = _focusId;
     final drag = pinned ? null : _drag;
     // The rows' total height, so the New track zone fills the rest of the view below the last track.
@@ -1647,6 +1652,10 @@ class _ArrangerScreenState extends State<ArrangerScreen> with TickerProviderStat
             child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start,
               children: children));
     // Two fingers scroll by their average, so a pinch zooms without dragging the view; the pointers are read raw.
+    final tempoGlide = EditMotion.of(context, EditMotionKind.lengths) ?? Duration.zero;
+    return TweenAnimationBuilder<double>(tween: Tween(end: tempoTarget), duration: tempoGlide, curve: EditMotion.curve,
+      builder: (context, tempoH, _) {
+    final ruler = pinned ? 20.0 : sectionH + rulerH + tempoH;
     return ScrollConfiguration(
       behavior: ScrollConfiguration.of(context).copyWith(multitouchDragStrategy: MultitouchDragStrategy.averageBoundaryPointers),
       child: Listener(
@@ -1687,11 +1696,16 @@ class _ArrangerScreenState extends State<ArrangerScreen> with TickerProviderStat
       Stack(children: [SizedBox(width: headW, child: Selected(
         select: () => (_headersRev, layers.length, zoneH),
         builder: (context) => Column(children: [
-        SizedBox(height: ruler, child: Padding(
-          padding: EdgeInsets.only(left: 10, top: pinned ? 4 : 8),
-          child: Align(alignment: Alignment.centerLeft,
-            child: Text(pinned ? 'FOCUS · swipe ‹ ›' : 'TRACKS',
-              style: const TextStyle(color: Neon.dim, fontSize: 10, letterSpacing: 1.3))))),
+        SizedBox(height: ruler, child: Stack(children: [
+          Positioned(left: 0, right: 0, top: 0, height: pinned ? ruler : sectionH + rulerH, child: Padding(
+            padding: EdgeInsets.only(left: 10, top: pinned ? 4 : 8),
+            child: Align(alignment: Alignment.centerLeft,
+              child: Text(pinned ? 'FOCUS · swipe ‹ ›' : 'TRACKS',
+                style: const TextStyle(color: Neon.dim, fontSize: 10, letterSpacing: 1.3))))),
+          // The tempo lane's name, fading with it.
+          if (tempoH > 0) Positioned(left: 0, right: 0, bottom: 0, height: tempoH, child: Opacity(
+            opacity: (tempoH / tempoLaneHeight(_phone)).clamp(0.0, 1.0), child: TempoLaneHeader(state: s))),
+        ])),
         for (final layer in layers) row('h', layer, [
           glideRow(layer, (h) => _TimelineHeader(key: drag?.headerKey(layer.id), state: s, layer: layer,
             index: p.layers.indexOf(layer),
@@ -1737,7 +1751,7 @@ class _ArrangerScreenState extends State<ArrangerScreen> with TickerProviderStat
           // One grid behind every track, through the gaps and spacers and down to the bottom of the view
           // below the last track (owner: like Reaper).
           Positioned(left: 0, right: 0, top: ruler, bottom: 0, child: IgnorePointer(child: RepaintBoundary(child: CustomPaint(
-            painter: _ArrangementGrid(stepW, p.stepsPerBar, _hScroll))))),
+            painter: _ArrangementGrid(stepW, p.bars, _hScroll))))),
           // The loop range's edges, down through the lanes while it is on; they fade out when it goes.
           Positioned(left: 0, right: 0, top: ruler, bottom: 0, child: IgnorePointer(child: FadeHold<(int, int)>(
             value: p.loopsRange ? (p.loopStartSteps, p.loopEndSteps) : null,
@@ -1752,8 +1766,18 @@ class _ArrangerScreenState extends State<ArrangerScreen> with TickerProviderStat
               child: Container(color: Neon.pink.withValues(alpha: 0.7))))),
           ConstrainedBox(constraints: BoxConstraints(minHeight: pinned ? 0 : view.maxHeight), child: RepaintBoundary(child: Column(children: [
             RepaintBoundary(child: pinned
-                ? SizedBox(height: ruler, width: width, child: CustomPaint(painter: _BarRuler(stepW, p.stepsPerBar, _hScroll)))
-                : ArrangeRuler(state: s, stepW: stepW, width: width, height: ruler, scroll: _hScroll)),
+                ? SizedBox(height: ruler, width: width, child: CustomPaint(painter: _BarRuler(stepW, p.bars, _hScroll)))
+                : Column(mainAxisSize: MainAxisSize.min, children: [
+                    // Their own layers: the ruler repaints as the view scrolls, the section bar and lane don't.
+                    RepaintBoundary(child: ArrangeSectionBar(state: s, stepW: stepW, width: width, height: sectionH)),
+                    ArrangeRuler(state: s, stepW: stepW, width: width, height: rulerH, scroll: _hScroll),
+                    // It grows in under the ruler and shrinks away, laid out whole and clipped meanwhile.
+                    if (tempoH > 0) ClipRect(child: SizedBox(height: tempoH, width: width, child: OverflowBox(
+                      alignment: Alignment.topCenter, minHeight: tempoLaneHeight(_phone),
+                      maxHeight: tempoLaneHeight(_phone),
+                      child: RepaintBoundary(child: TempoLane(state: s, stepW: stepW, width: width,
+                          height: tempoLaneHeight(_phone)))))),
+                  ])),
             for (final layer in layers) row('l', layer, [
               glideRow(layer, (h) => _TimelineLane(key: drag?.laneKey(layer.id), state: s, layer: layer, width: width,
                 stepW: stepW, trackHeight: h, selectedIds: s.selectedClipIds, callbacks: callbacks, drag: drag,
@@ -1808,6 +1832,7 @@ class _ArrangerScreenState extends State<ArrangerScreen> with TickerProviderStat
         ])))))))),
     ]))));
       })));
+      });
   }
 
   Widget _arrangement(BuildContext context, _TrackCallbacks callbacks) {
@@ -2641,52 +2666,73 @@ int arrangeGridEvery(double stepW, int barSteps) {
 }
 
 class _ArrangementGrid extends CustomPainter {
-  _ArrangementGrid(this.stepW, this.barSteps, this.scroll)
+  _ArrangementGrid(this.stepW, this.bars, this.scroll)
       : super(repaint: Listenable.merge([scroll, arrangeSpanReveal]));
   final double stepW;
-  final int barSteps;
+  final BarMath bars;
   final ScrollController scroll;
   @override
   void paint(Canvas canvas, Size size) {
     final minor = Paint()..color = Neon.line.withValues(alpha: .55)..strokeWidth = .6;
     final major = Paint()..color = Neon.dim.withValues(alpha: .35)..strokeWidth = 1;
     final (from, to) = visibleSpan(scroll, size);
-    // Zoomed out, the minor lines thin to beats, then to bars, then every 4, 16, 64… bars, so they stay at least
-    // 5 px apart and nothing is drawn per bar however far out (owner, 2026-11-11).
-    final every = arrangeGridEvery(stepW, barSteps);
-    for (var n = (from / stepW / every).floor() * every; n * stepW <= to; n += every) {
-      final x = n * stepW;
-      canvas.drawLine(Offset(x, 0), Offset(x, size.height), n % barSteps == 0 ? major : minor);
+    final first = bars.signatures.first;
+    if (bars.constant && first.den == 4) {
+      // One n/4 all through: zoomed out, the minor lines thin to beats, then to bars, then every 4, 16, 64… bars,
+      // so they stay at least 5 px apart and nothing is drawn per bar however far out (owner, 2026-11-11).
+      final barSteps = first.num * 4;
+      final every = arrangeGridEvery(stepW, barSteps);
+      for (var n = (from / stepW / every).floor() * every; n * stepW <= to; n += every) {
+        final x = n * stepW;
+        canvas.drawLine(Offset(x, 0), Offset(x, size.height), n % barSteps == 0 ? major : minor);
+      }
+      return;
+    }
+    // The bars follow the signatures (#207): a major line at each bar, minor ones at its steps, or at its own beats
+    // (eighths in 6/8) when steps crowd, none inside a bar narrower than 20 px, and every 4, 16… bars further out.
+    var barW = double.infinity;
+    for (final b in bars.bars(from / stepW / 4, to / stepW / 4, limit: 64)) {
+      barW = math.min(barW, b.length * 4 * stepW);
+    }
+    if (!barW.isFinite) return;
+    var every = 1;
+    while (every * barW < 5 && every < 1 << 30) {
+      every *= 4;
+    }
+    for (final b in bars.bars(from / stepW / 4, to / stepW / 4, every: every, limit: 2048)) {
+      final x0 = b.beat * 4 * stepW;
+      canvas.drawLine(Offset(x0, 0), Offset(x0, size.height), major);
+      if (every > 1) continue;
+      final unit = 4 / bars.signatureOfBar(b.bar).den * 4;  // steps in one of the signature's beats
+      final inner = stepW >= 5 ? 1.0 : unit * stepW >= 5 ? unit : 0.0;
+      if (inner <= 0) continue;
+      for (var t = inner; t < b.length * 4 - 1e-9; t += inner) {
+        final x = x0 + t * stepW;
+        if (x > to) break;
+        canvas.drawLine(Offset(x, 0), Offset(x, size.height), minor);
+      }
     }
   }
   @override
   bool shouldRepaint(covariant _ArrangementGrid old) =>
-      old.stepW != stepW || old.barSteps != barSteps || old.scroll != scroll;
+      old.stepW != stepW || old.bars != bars || old.scroll != scroll;
 }
 
 class _BarRuler extends CustomPainter {
-  _BarRuler(this.stepW, this.barSteps, this.scroll) : super(repaint: Listenable.merge([scroll, arrangeSpanReveal]));
+  _BarRuler(this.stepW, this.bars, this.scroll) : super(repaint: Listenable.merge([scroll, arrangeSpanReveal]));
   final double stepW;
-  final int barSteps;
+  final BarMath bars;
   final ScrollController scroll;
   @override
   void paint(Canvas canvas, Size size) {
-    final barW = barSteps * stepW;
     final (from, to) = visibleSpan(scroll, size);
-    // A label every bar, or every 4, 16, 64… bars when bars are narrower than a label.
-    var every = 1;
-    while (every * barW < 28 && every < 1 << 30) {
-      every *= 4;
-    }
-    for (var b = (from / barW / every).floor() * every; b * barW <= to; b += every) {
-      final label = TextPainter(text: TextSpan(text: '${b + 1}', style: Neon.code(size: 10, color: Neon.dim)),
-        textDirection: TextDirection.ltr, maxLines: 1)..layout(maxWidth: math.max(1.0, every * barW - 2));
-      label.paint(canvas, Offset(b * barW, (size.height - label.height) / 2));
-      label.dispose();
-    }
+    paintBarNumbers(canvas, bars, stepW, from, to, (x, label, room) {
+      label.layout(maxWidth: math.max(1.0, room - 2));
+      label.paint(canvas, Offset(x, (size.height - label.height) / 2));
+    });
   }
   @override
-  bool shouldRepaint(covariant _BarRuler old) => old.stepW != stepW || old.barSteps != barSteps || old.scroll != scroll;
+  bool shouldRepaint(covariant _BarRuler old) => old.stepW != stepW || old.bars != bars || old.scroll != scroll;
 }
 
 class _PlayheadPainter extends CustomPainter {

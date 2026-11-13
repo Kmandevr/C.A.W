@@ -245,7 +245,7 @@ void main() {
   });
 
   test('songs keep clips, automation and loop length past 64 bars (F7.2, owner 2026-11-04)', () {
-    final raw = sample().toJson();
+    final raw = sample().toJson()..remove('time_signatures');  // an older file: its meter is beats_per_bar
     raw['beats_per_bar'] = 3;
     raw['loop_bars'] = 1000;
     final layers = raw['layers'] as List;
@@ -267,7 +267,7 @@ void main() {
   });
 
   test('positions past the 32-bit step count are brought inside it on load', () {
-    final raw = sample().toJson();
+    final raw = sample().toJson()..remove('time_signatures');  // an older file: its meter is beats_per_bar
     raw['beats_per_bar'] = 3;
     raw['loop_bars'] = 1 << 40;
     (raw['layers'] as List)[0]['clips'] = [
@@ -286,7 +286,7 @@ void main() {
 
   test('a meter the engine cannot play is brought into its 1..16 beats on load', () {
     for (final beats in [0, -3, 1 << 30]) {
-      final raw = sample().toJson()..['beats_per_bar'] = beats;
+      final raw = sample().toJson()..['beats_per_bar'] = beats..remove('time_signatures');
       final imported = ProjectDoc.fromJson(raw);
       expect(imported.beatsPerBar, beats < 1 ? 1 : 16);
       expect(jsonDecode(imported.toEngineJson())['loop_bars'], greaterThanOrEqualTo(1));
