@@ -1,7 +1,7 @@
 ---
 title: Architecture
 summary: Technical architecture, verified engine/app boundaries and clearly labelled future design proposals.
-updated: 2026-11-12
+updated: 2026-11-13
 covers: [app/pubspec.yaml, engine/CMakeLists.txt]
 ---
 
