@@ -4,7 +4,7 @@ import 'dart:io';
 
 import 'package:ffi/ffi.dart';
 
-const int cawApiVersion = 25;  // must equal CAW_API_VERSION in engine/include/caw.h
+const int cawApiVersion = 27;  // must equal CAW_API_VERSION in engine/include/caw.h
 
 /// CawNoteFxStats (API 22, #127): a layer's per-note FX slots.
 final class CawNoteFxStatsStruct extends Struct {
@@ -40,6 +40,46 @@ final class CawLayerMeterStereoStruct extends Struct {
   external int active;
   @Int32()
   external int overloaded;
+}
+
+/// CawStressRequest (API 27): one Benchmark run (caw_worker_pool_submit_stress).
+final class CawStressRequestStruct extends Struct {
+  @Uint32()
+  external int structSize;
+  external Pointer<Utf8> scenario;
+  @Int32()
+  external int kind;
+  @Int32()
+  external int mode;
+  @Double()
+  external double seconds;
+  @Int32()
+  external int frames;
+  @Int32()
+  external int threads;
+  @Int32()
+  external int quality;
+  external Pointer<Utf8> workDir;
+}
+
+/// CawStressProgress (API 27): what a Benchmark run shows while it goes.
+final class CawStressProgressStruct extends Struct {
+  @Uint32()
+  external int structSize;
+  @Int32()
+  external int permille;
+  @Int32()
+  external int step;
+  @Int32()
+  external int count;
+  @Int32()
+  external int held;
+  @Float()
+  external double load;
+  @Int64()
+  external int callbacks;
+  @Int64()
+  external int overBudget;
 }
 
 final class CawMetersStruct extends Struct {
@@ -321,6 +361,19 @@ class Bindings {
 
   /// Loads the engine library once per isolate.
   final DynamicLibrary _lib;
+
+  // The Benchmark (API 27, beta plan C; caw.h).
+  late final Pointer<Utf8> Function() stressScenarios =
+      _lib.lookupFunction<Pointer<Utf8> Function(), Pointer<Utf8> Function()>('caw_stress_scenarios');
+  late final Pointer<Void> Function(Pointer<Void>, Pointer<CawStressRequestStruct>, int) workerPoolSubmitStress =
+      _lib.lookupFunction<Pointer<Void> Function(Pointer<Void>, Pointer<CawStressRequestStruct>, Int32),
+          Pointer<Void> Function(Pointer<Void>, Pointer<CawStressRequestStruct>, int)>('caw_worker_pool_submit_stress');
+  late final int Function(Pointer<Void>, Pointer<CawStressProgressStruct>) stressProgress = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Pointer<CawStressProgressStruct>),
+      int Function(Pointer<Void>, Pointer<CawStressProgressStruct>)>('caw_stress_progress');
+  late final int Function(Pointer<Void>, int, Pointer<Float>, int, Pointer<Uint32>) stressHistory = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Uint32, Pointer<Float>, Int32, Pointer<Uint32>),
+      int Function(Pointer<Void>, int, Pointer<Float>, int, Pointer<Uint32>)>('caw_stress_history');
 
   // Project modulation (API 19, #161; caw.h).
   late final int Function(Pointer<Void>, Pointer<Utf8>, Pointer<Utf8>, double) setModulatorParam = _lib.lookupFunction<

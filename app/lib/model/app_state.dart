@@ -25,6 +25,7 @@ import 'playhead_clock.dart';
 import 'settings.dart';
 import 'project_library.dart' show TrashBatch;
 import 'storage.dart';
+import 'stress_runner.dart' show StressHost;
 import 'pattern_templates.dart';
 import 'templates.dart';
 
@@ -68,7 +69,7 @@ class RevealStartRequest {
   final int serial;
 }
 
-class AppState extends ChangeNotifier {
+class AppState extends ChangeNotifier implements StressHost {
   AppState({Settings? settings, AudioRoute? audioRoute, int Function()? clockUs})
       : settings = settings ?? Settings(),
         _clockUs = clockUs ?? _monotonicUs {
@@ -1161,6 +1162,37 @@ class AppState extends ChangeNotifier {
         to: to);
   }
 
+  /// True while the Benchmark runs: the transport is stopped and the device closed, and nothing reopens it (the
+  /// Benchmark's own engine has the device for its live steps; one output per process).
+  bool get stressSuspended => _stressSuspended;
+  bool _stressSuspended = false;
+  double? _stressPosition;
+
+  /// The Benchmark starts: stops the transport (keeping where it was) and closes the audio device.
+  @override
+  void suspendForStress() {
+    if (_stressSuspended) return;
+    final e = engine;
+    if (_transportOn) togglePlay(); // a pause: pausedStep keeps where it was heard
+    _stressPosition = pausedStep;
+    _stressSuspended = true;
+    e?.notesOff();
+    e?.stopAudio();
+    notifyListeners();
+  }
+
+  /// The Benchmark ended: the position comes back with the transport stopped; Play reopens the device.
+  @override
+  void resumeAfterStress() {
+    if (!_stressSuspended) return;
+    _stressSuspended = false;
+    pausedStep = _stressPosition;
+    _stressPosition = null;
+    _transportOn = false;
+    _poller.wake();
+    notifyListeners();
+  }
+
   void clearOverload() {
     engine?.clearOverload();
     _poller.wake();
@@ -1184,6 +1216,7 @@ class AppState extends ChangeNotifier {
   /// Opens the device: null when it runs, else why not ([audioError] either way). It may run on the system default
   /// because the chosen device didn't open: it plays, and [audioError] says so.
   String? _openAudio(Engine e) {
+    if (_stressSuspended) return 'The Benchmark is running'; // its own engine has the device
     final error = e.startAudio();
     if (error != null) return audioError = error;
     latency.readDevice = e.audioLatency;

@@ -65,6 +65,26 @@ class MainActivity : FlutterActivity() {
         // WAV never has to fit in memory (#91).
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, FILES_METHOD_CHANNEL)
             .setMethodCallHandler { call, result ->
+                if (call.method == "shareText") {
+                    // The Benchmark's result: the system's share sheet with the text (a summary, then its JSON).
+                    val text = call.argument<String>("text")
+                    if (text == null) {
+                        result.error("missing", "no text to share", null)
+                        return@setMethodCallHandler
+                    }
+                    try {
+                        val send = Intent(Intent.ACTION_SEND).apply {
+                            type = "text/plain"
+                            putExtra(Intent.EXTRA_TEXT, text)
+                            putExtra(Intent.EXTRA_SUBJECT, call.argument<String>("subject") ?: "")
+                        }
+                        startActivity(Intent.createChooser(send, null))
+                        result.success(true)
+                    } catch (e: Exception) {
+                        result.error("unavailable", e.message, null)
+                    }
+                    return@setMethodCallHandler
+                }
                 if (call.method == "saveFolder") {
                     // Stems: the system's folder picker, then each file copied into a new document there.
                     val paths = call.argument<List<String>>("paths")
