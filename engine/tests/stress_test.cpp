@@ -416,3 +416,28 @@ TEST(stress_shedding_off_restores_shed_layers) {
     e.process(l.data(), r.data(), 512);
     CHECK_EQ(e.meters().overloaded, 0);  // clean: no history carried over
 }
+
+// A profiling engine's mix stays serial even with a pool on Always (its profile is filled by one thread), and goes
+// back to the pool once the profile is off.
+TEST(stress_profiling_keeps_the_mix_serial) {
+    Engine e(48000);
+    CHECK(e.startMixPool(2));
+    e.setMixParallel(Engine::MixParallel::Always);
+    e.setProject(bigSong(8, false));
+    std::vector<float> l(256), r(256);
+    e.process(l.data(), r.data(), 256);
+    e.play();
+    for (int c = 0; c < 20; ++c) e.process(l.data(), r.data(), 256);
+    CHECK(e.mixParallelForTest());
+    auto profile = std::make_unique<ChainProfile>();
+    e.setProfile(profile.get());
+    for (int c = 0; c < 50; ++c) {
+        e.process(l.data(), r.data(), 256);
+        CHECK(!e.mixParallelForTest());
+    }
+    e.setProfile(nullptr);
+    CHECK(profile->used > 8);
+    e.process(l.data(), r.data(), 256);
+    CHECK(e.mixParallelForTest());
+    e.stopMixPool();
+}
