@@ -4,7 +4,7 @@ import 'dart:io';
 
 import 'package:ffi/ffi.dart';
 
-const int cawApiVersion = 23;  // must equal CAW_API_VERSION in engine/include/caw.h
+const int cawApiVersion = 25;  // must equal CAW_API_VERSION in engine/include/caw.h
 
 /// CawNoteFxStats (API 22, #127): a layer's per-note FX slots.
 final class CawNoteFxStatsStruct extends Struct {
@@ -24,6 +24,22 @@ final class CawNoteFxStatsStruct extends Struct {
   external int overflowed;
   @Uint32()
   external int stolen;
+}
+
+/// CawLayerMeterStereo (API 25): one layer's meter with each side's peak, as caw_engine_layer_meters fills them.
+final class CawLayerMeterStereoStruct extends Struct {
+  @Float()
+  external double peak;
+  @Float()
+  external double peakL;
+  @Float()
+  external double peakR;
+  @Float()
+  external double progress;
+  @Int32()
+  external int active;
+  @Int32()
+  external int overloaded;
 }
 
 final class CawMetersStruct extends Struct {
@@ -204,6 +220,8 @@ class Bindings {
             Int32 Function(Pointer<Void>, Int32, Pointer<CawLayerMeterStruct>, Pointer<Float>, Pointer<Float>),
             int Function(Pointer<Void>, int, Pointer<CawLayerMeterStruct>, Pointer<Float>, Pointer<Float>)>(
             'caw_engine_layer_meter_stereo'),
+        layerMeters = lib.lookupFunction<Int32 Function(Pointer<Void>, Pointer<CawLayerMeterStereoStruct>, Int32),
+            int Function(Pointer<Void>, Pointer<CawLayerMeterStereoStruct>, int)>('caw_engine_layer_meters'),
         scope = lib.lookupFunction<Int32 Function(Pointer<Void>, Int32, Pointer<Float>, Int32),
             int Function(Pointer<Void>, int, Pointer<Float>, int)>('caw_engine_scope'),
         process = lib.lookupFunction<Void Function(Pointer<Void>, Pointer<Float>, Pointer<Float>, Int32),
@@ -366,6 +384,7 @@ class Bindings {
   final void Function(Pointer<Void>, Pointer<CawMetersStruct>) meters;
   final int Function(Pointer<Void>, int, Pointer<CawLayerMeterStruct>) layerMeter;
   final int Function(Pointer<Void>, int, Pointer<CawLayerMeterStruct>, Pointer<Float>, Pointer<Float>) layerMeterStereo;
+  final int Function(Pointer<Void>, Pointer<CawLayerMeterStereoStruct>, int) layerMeters;
   final int Function(Pointer<Void>, int, Pointer<Float>, int) scope;
   final void Function(Pointer<Void>, Pointer<Float>, Pointer<Float>, int) process;
   final int Function(Pointer<Void>, Pointer<Utf8>, int) audioStart;

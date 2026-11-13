@@ -1,13 +1,17 @@
-// Settings › About: the version, Updates, Report a problem (a report copied to paste into an issue), Engine
-// diagnostics and licences.
+// Settings › About and beta: the version, Updates, Privacy (telemetry, what's sent, My data), Send feedback, Report a
+// problem (a report copied to paste into an issue), Engine diagnostics, the Privacy Policy and Terms, and licences.
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../model/problem_log.dart';
+import '../../model/telemetry/telemetry.dart';
 import '../../model/updates/update_service.dart';
 import '../../version.dart';
+import '../privacy/feedback_sheet.dart';
+import '../privacy/privacy_pages.dart';
 import '../theme.dart';
 import 'engine_diagnostics.dart';
+import 'privacy_settings.dart';
 import 'settings_deps.dart';
 import 'settings_widgets.dart';
 import 'update_settings.dart';
@@ -23,6 +27,17 @@ class AboutSettings extends StatelessWidget {
             subtitle: 'C.A.W open alpha $appVersion · things may change or break; projects are saved as you go'),
         // Updates (owner, 2026-11-12); where Settings opens without the app, an inert service that checks nothing.
         UpdateSettings(service: UpdateService.running ?? UpdateService.inert, state: deps.state),
+        // Telemetry and feedback exist once the app has started them (not in Settings opened alone).
+        settingAction('about.privacy',
+            icon: Icons.privacy_tip_outlined, iconColor: Neon.green,
+            subtitle: privacySummary(Telemetry.current),
+            onTap: () => showPrivacyPage(context, deps)),
+        settingAction('about.feedback',
+            icon: Icons.rate_review_outlined, iconColor: Neon.blue,
+            onTap: switch (Telemetry.current) {
+              final t? => () => showFeedbackSheet(context, t),
+              null => null,
+            }),
         SettingRow(
           id: 'about.report',
           child: ListTile(
@@ -51,6 +66,12 @@ class AboutSettings extends StatelessWidget {
               final state? => () => showEngineDiagnostics(context, state),
               null => null,
             }),
+        settingAction('about.policy',
+            icon: Icons.policy_outlined, iconColor: Neon.dim,
+            onTap: () => showLegalText(context, LegalText.privacy)),
+        settingAction('about.terms',
+            icon: Icons.gavel_outlined, iconColor: Neon.dim,
+            onTap: () => showLegalText(context, LegalText.terms)),
         settingAction('about.licences',
             icon: Icons.description_outlined, iconColor: Neon.dim,
             subtitle: 'Including JetBrains Mono (SIL Open Font License 1.1)',

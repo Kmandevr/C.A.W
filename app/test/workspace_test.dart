@@ -85,6 +85,10 @@ void main() {
 
   testWidgets('a stereo track meters each side; a mono one shows one meter', (tester) async {
     // Owner, 2026-11-10 (feel pass): stereo track meters, from the engine's caw_engine_layer_meter_stereo.
+    // The meters' clock is the test's (fake) one, so a busy machine can't let the bars fall between reads.
+    final wall = PeakMeter.clock, start = tester.binding.clock.now();
+    addTearDown(() => PeakMeter.clock = wall);
+    PeakMeter.clock = () => tester.binding.clock.now().difference(start);
     final mono = LayerDoc(id: 'm', name: 'M', color: 0);
     final stereo = LayerDoc(id: 's', name: 'S', color: 0)..instrument = ComponentUseDoc('org.caw.drum.kick');
     expect(mono.isStereo, isFalse);
@@ -96,12 +100,14 @@ void main() {
     await tester.pumpWidget(strip(true));
     state.tick.value++;
     await tester.pump();
+    await tester.pump(const Duration(milliseconds: 20)); // the rise
     PeakMeterState m() => tester.state<PeakMeterState>(find.byType(PeakMeter));
     expect(m().shownDb, closeTo(-6.02, 0.01)); // left
     expect(m().shownRightDb, closeTo(-18.06, 0.01)); // right
     await tester.pumpWidget(strip(false));
     state.tick.value++;
     await tester.pump();
+    await tester.pump(const Duration(milliseconds: 20));
     expect(find.byType(PeakMeter), findsOneWidget);
     expect(m().shownDb, closeTo(-6.02, 0.01)); // the louder side
   });
@@ -124,10 +130,11 @@ void main() {
     r = 0.25;
     state.tick.value++;
     await tester.pump();
+    await tester.pump(const Duration(milliseconds: 33));
     expect(m().shownDb, closeTo(-6.02, 0.01));
     expect(m().shownRightDb, closeTo(-12.04, 0.01));
     l = r = 0;
-    state.tick.value++;
+    state.tick.value++; // silence: the bar falls at the set rate (the floor's line to -60 dB is faster)
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 16));
     await tester.pump(const Duration(milliseconds: 250));
@@ -148,12 +155,13 @@ void main() {
     peak = 0.5; // -6 dB
     state.tick.value++;
     await tester.pump();
+    expect(tester.binding.hasScheduledFrame, isTrue, reason: 'the bar rises over the attack time');
+    await tester.pump(const Duration(milliseconds: 16));
     expect(m().shownDb, closeTo(-6.02, 0.01));
     expect(tester.widget<Bar>(find.byType(Bar)).value, closeTo(0.9, 0.001));
-    expect(tester.binding.hasScheduledFrame, isTrue, reason: 'between reads the bar falls on every frame');
-    await tester.pump(const Duration(milliseconds: 25));
-    expect(m().shownDb, closeTo(-6.02 - PeakMeter.fallDbPerSecond * .025, 0.01), reason: 'a frame between reads');
-    state.tick.value++; // the next read, as loud: up at once
+    await tester.pump(const Duration(milliseconds: 17));
+    expect(m().shownDb, closeTo(-6.02, 0.01), reason: 'between reads of a steady level it stays');
+    state.tick.value++; // the next read, as loud
     await tester.pump();
     expect(m().shownDb, closeTo(-6.02, 0.01));
     // A silent read, then no more (the engine went quiet): the bar falls at the set rate, the line holds 1.5 s.
@@ -168,17 +176,122 @@ void main() {
     await tester.pump(const Duration(seconds: 1));
     expect(m().shownDb, PeakMeter.floorDb);
     expect(m().holdDb, PeakMeter.floorDb);
+    await tester.pump(); // the frame the hold's end asked for
     expect(tester.binding.hasScheduledFrame, isFalse, reason: 'it stops ticking once empty');
     // Within 0.1 dB of 0 dBFS, or over: pink for a while.
     peak = 0.995;
     state.tick.value++;
     await tester.pump();
+    await tester.pump(const Duration(milliseconds: 16));
     expect(m().clipped, isTrue);
     expect(tester.widget<Bar>(find.byType(Bar)).color, Neon.pink);
     peak = 0;
     state.tick.value++;
     await tester.pumpAndSettle();
+    // The light waits on a timer, not frames, and goes out after its 3 s.
+    await tester.pump(const Duration(seconds: 3));
+    await tester.pump();
     expect(m().clipped, isFalse);
+    expect(tester.widget<Bar>(find.byType(Bar)).color, isNot(Neon.pink));
+  });
+
+  group('meter ballistics at any frame rate (owner\'s bug, 2026-11-12: meters twitched at 120 Hz)', () {
+    // Reads every 1/30 s of [level] at time t (seconds), drawn at [fps] for [seconds]; the bar after each frame.
+    Future<List<double>> run(WidgetTester tester, int fps, double seconds, double Function(double t) level) async {
+      final wall = PeakMeter.clock;
+      var now = Duration.zero;
+      PeakMeter.clock = () => now;
+      addTearDown(() => PeakMeter.clock = wall);
+      var peak = 0.0;
+      await tester.pumpWidget(MaterialApp(home: Scaffold(body: PeakMeter(state: state, read: () => peak, color: Colors.green))));
+      final m = tester.state<PeakMeterState>(find.byType(PeakMeter));
+      final frame = Duration(microseconds: (1e6 / fps).round());
+      const read = Duration(microseconds: 33333);
+      var nextRead = Duration.zero;
+      final shown = <double>[];
+      var frameEnd = Duration.zero;
+      while (frameEnd.inMicroseconds < seconds * 1e6) {
+        frameEnd += frame;
+        // Each read at its own time (the poller's timer), then the frame at its end (the screen's).
+        while (nextRead <= frameEnd) {
+          now = nextRead;
+          peak = level(nextRead.inMicroseconds / 1e6);
+          state.tick.value++;
+          nextRead += read;
+        }
+        now = frameEnd;
+        await tester.pump(frame);
+        shown.add(m.shownDb);
+      }
+      await tester.pumpWidget(const SizedBox());
+      return shown;
+    }
+
+    double frac(double db) => PeakMeter.fraction(db);
+
+    testWidgets('a steady tone read at 30 Hz and drawn at 120 Hz holds the bar still', (tester) async {
+      final shown = await run(tester, 120, 1.0, (_) => 0.5);
+      final settled = shown.skip(12).toList(); // after the first rise
+      for (var i = 1; i < settled.length; i++) {
+        expect((frac(settled[i]) - frac(settled[i - 1])).abs(), lessThan(0.01), reason: 'frame $i');
+      }
+      expect(settled.last, closeTo(-6.02, 0.01));
+    });
+
+    testWidgets('a step up reaches the read within the attack time, with no overshoot', (tester) async {
+      final shown = await run(tester, 240, 0.2, (t) => t < 0.05 ? 0.01 : 0.5);
+      final target = PeakMeter.db(0.5);
+      expect(shown.every((d) => d <= target + 1e-9), isTrue, reason: 'never past the read');
+      // The read of 0.5 comes at the first read at or after 50 ms (66.7 ms); the bar is there one attack later.
+      final at = shown.indexWhere((d) => (d - target).abs() < 0.01);
+      expect(at, greaterThan(0));
+      expect((at + 1) / 240, lessThanOrEqualTo(0.0667 + PeakMeter.attackSeconds + 1 / 240 + 1e-9));
+    });
+
+    testWidgets('a fading tail falls smoothly and only down', (tester) async {
+      // A tone, then a tail fading 30 dB a second (slower than the meter's fall), then silence.
+      double level(double t) => t < 0.2 ? 0.5 : t < 1.2 ? 0.5 * math.pow(10, -30 * (t - 0.2) / 20) : 0;
+      final shown = await run(tester, 120, 2.0, level);
+      final tail = shown.sublist(30); // from 0.25 s
+      for (var i = 1; i < tail.length; i++) {
+        expect(tail[i], lessThanOrEqualTo(tail[i - 1] + 1e-9), reason: 'frame $i');
+        expect((frac(tail[i]) - frac(tail[i - 1])).abs(), lessThan(0.02), reason: 'no jumps at frame $i');
+      }
+      expect(shown.last, PeakMeter.floorDb);
+    });
+
+    testWidgets('the same picture at 30, 60, 120 and 240 Hz', (tester) async {
+      double level(double t) => t < 0.3 ? 0.3 : t < 0.6 ? 0.8 : t < 1.0 ? 0.1 : 0;
+      final byRate = <int, List<double>>{};
+      for (final fps in [30, 60, 120, 240]) {
+        byRate[fps] = await run(tester, fps, 1.5, level);
+      }
+      // Compare at every 30 Hz frame time (each rate's frame that ends then).
+      for (var k = 1; k < 45; k++) {
+        final ref = byRate[30]![k - 1];
+        for (final fps in [60, 120, 240]) {
+          final i = k * fps ~/ 30 - 1;
+          expect((frac(byRate[fps]![i]) - frac(ref)).abs(), lessThan(0.01), reason: '$fps Hz at ${k / 30} s');
+        }
+      }
+    });
+
+    testWidgets('a settled meter asks for no frames', (tester) async {
+      final wall = PeakMeter.clock;
+      var now = Duration.zero;
+      PeakMeter.clock = () => now;
+      addTearDown(() => PeakMeter.clock = wall);
+      await tester.pumpWidget(MaterialApp(home: Scaffold(body: PeakMeter(state: state, read: () => 0.5, color: Colors.green))));
+      for (var i = 0; i < 10; i++) {
+        state.tick.value++;
+        for (var f = 0; f < 4; f++) {
+          now += const Duration(microseconds: 8333);
+          await tester.pump(const Duration(microseconds: 8333));
+        }
+      }
+      expect(tester.binding.hasScheduledFrame, isFalse, reason: 'a steady tone: the bar is still between reads');
+      await tester.pumpWidget(const SizedBox());
+    });
   });
 
   testWidgets('peak readouts hold the peak in dB, then show silence even after the reads stop', (tester) async {

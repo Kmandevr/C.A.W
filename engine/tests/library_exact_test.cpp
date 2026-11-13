@@ -13,6 +13,7 @@
 #include "caw/library/fastmath.hpp"
 #include "caw/library/filter.hpp"
 #include "caw/library/oscillator.hpp"
+#include "filter_pairs.h"
 #include "test.h"
 
 using namespace caw;
@@ -309,6 +310,21 @@ TEST(library_filters_pass_and_stop_what_they_should) {
     CHECK_NEAR(lib::shiftCutoff(1000, 1, 48000), 2000, 1e-6);
     CHECK_NEAR(lib::shiftCutoff(1000, 10, 48000), 0.45 * 48000, 1e-9);
     CHECK_NEAR(lib::shiftCutoff(1000, -10, 48000), 10, 1e-9);
+}
+
+TEST(library_filters_side_by_side_give_each_filter_alone_s_bits) {
+    // Speed A2 (2026-11-12): K pairs in one loop against 2K filters one at a time, each set apart, across uneven
+    // blocks. Built strict (no fused or reordered arithmetic), the bits are the same.
+    using lib::LadderMode;
+    const cawtest::PairRun runs[] = {
+        cawtest::ladderPairs<LadderMode::LowPass, 2>(true),  cawtest::ladderPairs<LadderMode::LowPass, 4>(false),
+        cawtest::ladderPairs<LadderMode::HighPass, 2>(false), cawtest::ladderPairs<LadderMode::HighPass, 4>(true),
+        cawtest::ladderPairs<LadderMode::BandPass, 2>(true), cawtest::ladderPairs<LadderMode::BandPass, 4>(false),
+        cawtest::svfPairs<2>(),                               cawtest::svfPairs<4>()};
+    for (const cawtest::PairRun& r : runs) {
+        CHECK(r.peak > 1.0);
+        CHECK_EQ(cawtest::pairBitsDiffer(r), size_t{0});
+    }
 }
 
 TEST(library_envelopes_and_glides_keep_their_times) {

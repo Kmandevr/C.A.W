@@ -130,10 +130,10 @@ class FileAsset {
   bool get previewable => module != null;
 }
 
-/// What a folder holds. Folders are paths: `fav`, `fx`, `fx/builtin`, `fx/cpp`, `code`, `code/cpp`,
+/// What a folder holds. Folders are paths: `projects` (the saved projects, their own folders inside it), `fav`, `fx`, `fx/builtin`, `fx/cpp`, `code`, `code/cpp`,
 /// `code/cpp/<component entry id>`, `audio`, `audio/patterns`,
 /// `audio/midi`, `audio/samples` (sample packs), `audio/samples/<pack>`, `presets` (the user's presets, app-wide), `packs`.
-enum FilesFolderKind { favourites, effects, builtin, cppEffects, code, cppList, cppComponent, audio, patterns, midiFiles,
+enum FilesFolderKind { projects, favourites, effects, builtin, cppEffects, code, cppList, cppComponent, audio, patterns, midiFiles,
   presets, packs, samplePacks, samplePack, audioFiles }
 
 class FilesFolder {
@@ -295,9 +295,10 @@ extension FilesCatalog on AppState {
 
   // ---------- folders ----------
 
-  /// The tree: Favourites, Effects & instruments, Code, Audio & MIDI (Packs only when the app has any: none yet).
+  /// The tree: Projects (the project library, `project_library_view.dart`), Favourites, Effects & instruments, Code, Audio & MIDI (Packs only when the app has any: none yet).
   List<FilesFolder> get filesTree {
     return [
+      const FilesFolder('projects', 'Projects', FilesFolderKind.projects),
       const FilesFolder('fav', 'Favourites', FilesFolderKind.favourites),
       const FilesFolder('fx', 'Effects & instruments', FilesFolderKind.effects, [
         FilesFolder('fx/builtin', 'Built-in', FilesFolderKind.builtin),
@@ -569,10 +570,90 @@ extension FilesCatalog on AppState {
         userPresets.remove(a.preset!.id);
       case FileAssetType.sampleFile:
         unawaited(deleteSampleFile(a.sample!.path));
+      case FileAssetType.audioFile:
+        // The asset and the clips (and takes) playing it; the file stays in the project's audio folder for undo.
+        final id = a.audio!.id;
+        editProject((p) {
+          p.assets.removeWhere((x) => x.id == id);
+          for (final l in p.layers) {
+            l.audioClips.removeWhere((c) => c.assetId == id);
+            for (final c in l.audioClips) {
+              c.takes.remove(id);
+            }
+          }
+        });
       default:
         deleteModule(a.module!.id);
     }
     if (filesFavourites.keys.remove(favouriteKey(a))) unawaited(filesFavourites.save().catchError((_) {}));
+  }
+
+  /// Select mode's Delete: every one of [assets] at once, undoably. Project items go in one undo step; presets are
+  /// kept to put back; sample WAVs are only set aside (renamed) until [finishAssetDeletion]. Built-ins are skipped.
+  AssetDeletion deleteAssets(List<FileAsset> assets) {
+    final list = [for (final a in assets) if (!a.builtin) a];
+    final presets = <UserPreset>[];
+    final samples = <String>[];
+    final inProject = list.where((a) => a.preset == null && a.sample == null).toList();
+    if (inProject.isNotEmpty) endUndoStep();
+    for (final a in list) {
+      if (a.preset != null) {
+        final old = userPresets.remove(a.preset!.id);
+        if (old != null) presets.add(old);
+      } else if (a.sample != null) {
+        final f = File(a.sample!.path);
+        try {
+          f.renameSync('${f.path}$deletedSampleSuffix');
+          samples.add(f.path);
+          setAsideSamples.add('${f.path}$deletedSampleSuffix');
+        } catch (_) {
+          // Gone already, or in use: left as it is.
+        }
+      } else {
+        deleteAsset(a);
+        continue;
+      }
+      if (filesFavourites.keys.remove(favouriteKey(a))) unawaited(filesFavourites.save().catchError((_) {}));
+    }
+    if (inProject.isNotEmpty) endUndoStep();
+    if (samples.isNotEmpty) unawaited(refreshSamplePacks());
+    return AssetDeletion(list.length, inProject.isNotEmpty ? project : null, presets, samples);
+  }
+
+  /// Undo of [deleteAssets]: project items come back with one project undo (only while the same project is open),
+  /// presets are put back and set-aside WAVs get their names again.
+  Future<void> undoAssetDeletion(AssetDeletion d) async {
+    if (d.project != null && identical(d.project, project)) undo();
+    for (final p in d.presets) {
+      userPresets.put(p);
+    }
+    for (final path in d.samples) {
+      try {
+        await File('$path$deletedSampleSuffix').rename(path);
+      } catch (_) {}
+      setAsideSamples.remove('$path$deletedSampleSuffix');
+    }
+    if (d.samples.isNotEmpty) await refreshSamplePacks();
+  }
+
+  /// The Undo snackbar closed: set-aside WAVs are deleted for good (and a pack folder left without WAVs goes).
+  Future<void> finishAssetDeletion(AssetDeletion d) async {
+    for (final path in d.samples) {
+      final f = File('$path$deletedSampleSuffix');
+      setAsideSamples.remove(f.path);
+      try {
+        await f.delete();
+      } catch (_) {
+        // Gone already (a refresh of the packs may sweep it first).
+      }
+      try {
+        final dir = f.parent;
+        if (await dir.exists() && !dir.listSync().any((e) => e.path.toLowerCase().endsWith('.wav'))) {
+          await dir.delete(recursive: true);
+        }
+      } catch (_) {}
+    }
+    if (d.samples.isNotEmpty) await refreshSamplePacks();
   }
 
   /// Whether a Build tab still has something to edit (for SectionController.pruneBuild).
@@ -582,3 +663,16 @@ extension FilesCatalog on AppState {
 }
 
 int _byName(FileAsset a, FileAsset b) => a.name.toLowerCase().compareTo(b.name.toLowerCase());
+
+/// What [FilesCatalog.deleteAssets] took, for its Undo.
+class AssetDeletion {
+  const AssetDeletion(this.count, this.project, this.presets, this.samples);
+  final int count;
+
+  /// The project the project items were deleted from (null when none were).
+  final ProjectDoc? project;
+  final List<UserPreset> presets;
+
+  /// The WAVs set aside (their paths before).
+  final List<String> samples;
+}

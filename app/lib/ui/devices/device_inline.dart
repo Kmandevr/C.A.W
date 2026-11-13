@@ -13,6 +13,8 @@ import 'device_editor.dart' show DevicePresetChip;
 import 'device_registry.dart';
 import 'device_scope.dart';
 import 'sidechain_bar.dart';
+import 'kit/hero.dart' show MotionTouch;
+import 'kit/param_watch.dart';
 import 'kit/device_style.dart';
 import 'kit/feel.dart';
 import 'kit/presets.dart';
@@ -75,10 +77,9 @@ class _DeviceInlineState extends State<DeviceInline> {
   }
 
   @override
-  Widget build(BuildContext context) => ListenableBuilder(
-    listenable: Listenable.merge([s.componentCatalog, t.tick]),
-    builder: (context, _) => _build(context),
-  );
+  // Rebuilt by a value it shows, not by a knob step of a value only that knob shows (param_watch.dart).
+  Widget build(BuildContext context) =>
+      MotionTouch(child: ParamWatch(target: t, page: true, also: s.componentCatalog, builder: _build));
 
   Widget _build(BuildContext context) {
     final use = t.use, layer = t.layer, info = t.info;

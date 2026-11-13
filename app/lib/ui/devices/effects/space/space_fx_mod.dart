@@ -1,4 +1,5 @@
 // The fx-space modulation UIs: ensemble voices, doubler takes, vibrato's pitch, tremolo and auto-pan shapes, and the rotary's spinning horn and drum.
+import '../../kit/repaint.dart';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -86,7 +87,8 @@ class _VoicesPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant _VoicesPainter o) => true;
+  bool shouldRepaint(covariant _VoicesPainter o) =>
+      paintInputsChanged([o.secs, o.spread, o.detune, o.rate, o.voices, o.color, o.second], [secs, spread, detune, rate, voices, color, second]);
 }
 
 /// The doubler: the dry in the middle and its doubles as late, slightly detuned copies to the sides (their
@@ -140,7 +142,8 @@ class _TakesPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant _TakesPainter o) => true;
+  bool shouldRepaint(covariant _TakesPainter o) =>
+      paintInputsChanged([o.secs, o.width, o.delay, o.drift, o.count, o.live, o.color, o.second], [secs, width, delay, drift, count, live, color, second]);
 }
 
 /// The vibrato: the pitch over two seconds (up to ±depth cents), left and right, on a pad of rate and depth.
@@ -197,7 +200,8 @@ class _WavePainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant _WavePainter o) => true;
+  bool shouldRepaint(covariant _WavePainter o) =>
+      paintInputsChanged([o.secs, o.rate, o.depth, o.stereo, o.shape, o.color, o.second, o.label], [secs, rate, depth, stereo, shape, color, second, label]);
 }
 
 /// Tremolo ([pan] false: the level, dipping by depth) and auto-pan ([pan] true: a dot swinging between the sides),
@@ -262,7 +266,8 @@ class _PanPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant _PanPainter o) => true;
+  bool shouldRepaint(covariant _PanPainter o) =>
+      paintInputsChanged([o.secs, o.rate, o.depth, o.offset, o.shape, o.live, o.color, o.second], [secs, rate, depth, offset, shape, live, color, second]);
 }
 
 /// The rotary speaker from above: the horn (outer, its two bells) and the drum (inner, a slotted baffle) spinning at
@@ -278,7 +283,7 @@ class RotaryPage extends StatelessWidget {
     final speed = t.value('speed').round();
     return effectPage('rotary', [
       HeroWithMeters(height: 200, gr: false, hero: liveHero(context: context, caption: 'ROTARY', height: 200,
-        readout: Text(const ['CHORALE', 'TREMOLO', 'BRAKE'][speed.clamp(0, 2)]),
+        readout: Builder(builder: (context) => Text(const ['CHORALE', 'TREMOLO', 'BRAKE'][speed.clamp(0, 2)])),
         builder: (context, secs, v) => GestureDetector(
           key: const ValueKey('rotary-hero'),
           behavior: HitTestBehavior.opaque,
@@ -334,5 +339,6 @@ class _RotorPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant _RotorPainter o) => true;
+  bool shouldRepaint(covariant _RotorPainter o) =>
+      paintInputsChanged([o.horn, o.drum, o.width, o.color, o.second], [horn, drum, width, color, second]);
 }

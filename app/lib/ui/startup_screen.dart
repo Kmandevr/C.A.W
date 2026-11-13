@@ -10,6 +10,7 @@ import '../model/app_state.dart';
 import '../model/startup_progress.dart';
 import '../model/updates/update_service.dart';
 import '../version.dart';
+import 'app_prompts.dart';
 import 'motion.dart';
 import 'theme.dart';
 
@@ -51,7 +52,7 @@ class _StartupGateState extends State<StartupGate> with SingleTickerProviderStat
   late bool _shown = !_ready;
   late final AnimationController _fade = AnimationController(vsync: this, value: 1)
     ..addStatusListener((status) {
-      if (status == AnimationStatus.dismissed && mounted) setState(() => _shown = false);
+      if (status == AnimationStatus.dismissed && mounted) _hide();
     });
 
   Timer? _limit;
@@ -61,6 +62,12 @@ class _StartupGateState extends State<StartupGate> with SingleTickerProviderStat
     super.initState();
     widget.state.addListener(_changed);
     if (!_ready) _limit = Timer(widget.timeout, widget.state.startupTimedOut);
+    AppPrompts.startupInFront.value = _shown; // the first-run page and update prompts wait until it has gone
+  }
+
+  void _hide() {
+    setState(() => _shown = false);
+    AppPrompts.startupInFront.value = false;
   }
 
   @override
@@ -68,6 +75,7 @@ class _StartupGateState extends State<StartupGate> with SingleTickerProviderStat
     _limit?.cancel();
     widget.state.removeListener(_changed);
     _fade.dispose();
+    AppPrompts.startupInFront.value = false;
     super.dispose();
   }
 
@@ -78,7 +86,7 @@ class _StartupGateState extends State<StartupGate> with SingleTickerProviderStat
     if (!_ready || !_shown) return;
     final d = Motion.fade(Motion.standard, Motion.of(context));
     if (d == Duration.zero) {
-      setState(() => _shown = false);
+      _hide();
     } else {
       _fade
         ..duration = d

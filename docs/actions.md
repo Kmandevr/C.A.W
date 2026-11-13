@@ -7,7 +7,7 @@ updated: 2026-11-12
 
 # Actions, keys and macros
 
-**[Fact, checked 2026-11-01]** The action registry, keymap parser/serializer, per-area key routing, macros, Vim core, configurable piano-roll toolbar and phone Quick Actions strips are implemented (their customise sheets open as glass sheets while Glass is on). The app stores its keymap in a private app file named keys.txt. The action list searches actions, shows their current keys and runs them; it does **not** currently edit key bindings. Keymap files can describe toolbar and long-press menu entries, but there is no in-app general keymap/menu editor. The owner can still revise defaults and open points below. See [decisions](decisions.md) and [App](app.md).
+**[Fact, checked 2026-11-01]** The action registry, keymap parser/serializer, per-area key routing, macros, Vim core, configurable piano-roll toolbar and phone Quick Actions strips are implemented (their customise sheets open as glass sheets while Glass is on). The app stores its keymap in a private app file named keys.txt. The action list searches actions, shows their current keys and runs them; it does **not** currently edit key bindings. Keymap files can describe toolbar and long-press menu entries, but there is no in-app general keymap/menu editor. The owner can still revise defaults and open points below. See [decisions](decisions.md) and [App](app.md). The piano roll's double taps (a note, empty grid, a bend point) are timed on the gesture binding's sampling clock, as `ClickCounter` is.
 
 ## How it works
 
@@ -254,6 +254,7 @@ The whole app works from the keyboard (owner, 2026-11-11, [decisions](decisions.
 Building the core turned up some clashes in this draft. They're resolved for now as follows, and are for the owner to change:
 - **Code editor:** in Vim mode, D moves right and A moves left, which clashes with Vim's `dd` (delete line) and `a` (append). Delete line is `X X` for now, and append has no key yet.
 - **Pattern editor:** Ctrl+A / Ctrl+D (select all, duplicate) clash with the owner's Ctrl+WASD cursor keys. The owner's keys win, so select all and duplicate have no default key; the action list or `:` still runs them.
+- **The roll's ruler** (owner, 2026-11-12): a tap moving the song's cursor and a drag drawing the song's loop are pointer gestures with no action of their own; the loop they draw is Arrange's, so Arrange's loop actions (R, the ⟳ button) turn it on and off.
 - **Keys the draft didn't give:**
   - Shift+V starts Visual mode (V is the select tool in the roll), and V does in the code editor.
   - `+` and `_` are fine velocity steps.

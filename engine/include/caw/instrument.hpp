@@ -380,6 +380,13 @@ public:
         prune();
         return live_;
     }
+    // Drops the voices found silent from the list now. For an instrument that clears `active` after
+    // forEachActive() has returned (a voice whose work it finished later in the period); never call it from
+    // inside forEachActive(). Real-time safe: one pass over the sounding voices.
+    void dropSilent() noexcept { prune(); }
+    // The list's length as it stands, voices found silent but not yet dropped included (activeCount() drops
+    // them first): what forEachActive() would walk.
+    uint32_t listed() const noexcept { return live_; }
     Voice* begin() noexcept { return voices_; }
     Voice* end() noexcept { return voices_ + N; }
     // Only the voices started since the last clear are not as new (a free voice is the first by index, so they

@@ -1,5 +1,6 @@
 // The utility family's plugin UI (utility, width, balance): the stereo field as a fan you drag (pan sideways, width up or pinch),
 // phase and mono marks, the output's correlation.
+import '../kit/repaint.dart';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -28,10 +29,10 @@ class StereoPage extends StatelessWidget {
         height: 210,
         caption: 'STEREO FIELD',
         grid: false,
-        readout: Text([
+        readout: Builder(builder: (context) => Text([
           if (t.param('width') != null) 'width ${(t.value('width') * 100).round()}%',
           if (t.param('pan') != null) 'pan ${formatParamValue(t.param('pan'), t.value('pan'), pan: true)}',
-        ].join(' · ')),
+        ].join(' · '))),
         child: const _FieldHero(),
       )),
       DeviceDisplay(builder: (context, f) => _Correlation(value: f?.values['correlation'])),
@@ -218,5 +219,6 @@ class _FieldPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant _FieldPainter o) => true;
+  bool shouldRepaint(covariant _FieldPainter o) =>
+      paintInputsChanged([o.pan, o.width, o.gain, o.bassHz, o.secs, o.channels, o.invertL, o.invertR, o.bassMono, o.active, o.color, o.second], [pan, width, gain, bassHz, secs, channels, invertL, invertR, bassMono, active, color, second]);
 }

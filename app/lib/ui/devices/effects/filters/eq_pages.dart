@@ -1,4 +1,5 @@
 // The 3-band EQ's, the tilt EQ's and the graphic EQ's plugin UIs: band regions with crossover handles, a tilting line, and 31 bars drawn with a finger.
+import '../../kit/repaint.dart';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -35,7 +36,7 @@ class Eq3Page extends StatelessWidget {
         height: 190,
         caption: '3-BAND ≈',
         grid: false,
-        readout: Text('${t.value('low_x').round()} · ${t.value('high_x').round()} Hz'),
+        readout: Builder(builder: (context) => Text('${t.value('low_x').round()} · ${t.value('high_x').round()} Hz')),
         child: const _Eq3Hero(),
       )),
       Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: [
@@ -159,7 +160,8 @@ class _Eq3Painter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant _Eq3Painter o) => true;
+  bool shouldRepaint(covariant _Eq3Painter o) =>
+      paintInputsChanged([o.gains, o.kills, o.low, o.high, o.out, o.y, o.peaks, o.active, o.colors], [gains, kills, low, high, out, y, peaks, active, colors]);
 }
 
 // ---------- Tilt ----------
@@ -173,20 +175,21 @@ class TiltPage extends StatelessWidget {
   Widget build(BuildContext context) {
     final scope = DeviceScope.of(context);
     final t = scope.target;
-    final tilt = t.value('tilt');
+    // Read where it is drawn (a lazy read: the hero and readout watch it, not the page; param_watch.dart).
+    double tilt() => t.value('tilt');
     return effectPage('tilt', [
       HeroWithMeters(height: 180, gr: false, hero: HeroCanvas(
         color: scope.accent,
         height: 180,
         caption: 'TILT ≈',
         grid: false,
-        readout: Text('${tilt >= 0 ? '+' : ''}${tilt.toStringAsFixed(1)} dB'),
+        readout: Builder(builder: (context) => Text('${tilt() >= 0 ? '+' : ''}${tilt().toStringAsFixed(1)} dB')),
         child: DragHero(heroKey: 'tilt-hero', xParam: 'freq', yParam: 'tilt', paint: (canvas, size, active, f) {
           final h = size.height, freq = t.value('freq'), q = t.value('q');
           double y(double db) => h * 0.5 - db / 15 * (h * 0.5 - 22);
           paintFrequencyGrid(canvas, size, y(0));
-          final path = responsePath(size, (hz) => toDb(tiltResponse(hz, tilt: tilt, freq: freq, q: q).abs) + t.value('output'), y);
-          fillFade(canvas, path, h, size, tilt >= 0 ? scope.secondary : scope.accent, alpha: 0.28);
+          final path = responsePath(size, (hz) => toDb(tiltResponse(hz, tilt: tilt(), freq: freq, q: q).abs) + t.value('output'), y);
+          fillFade(canvas, path, h, size, tilt() >= 0 ? scope.secondary : scope.accent, alpha: 0.28);
           strokeGlow(canvas, path, scope.accent, width: 2.6);
           paintLabel(canvas, 'DARKER', Offset(10, h - 20), Neon.dim, size: 8, weight: FontWeight.w800);
           paintLabel(canvas, 'BRIGHTER', Offset(size.width - 10, h - 20), Neon.dim, size: 8, align: 1, weight: FontWeight.w800);
@@ -336,5 +339,6 @@ class _GeqPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant _GeqPainter o) => true;
+  bool shouldRepaint(covariant _GeqPainter o) =>
+      paintInputsChanged([o.gains, o.spectrum, o.curve, o.y, o.color, o.second, o.active], [gains, spectrum, curve, y, color, second, active]);
 }

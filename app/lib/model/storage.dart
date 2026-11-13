@@ -8,6 +8,7 @@ import 'package:path_provider/path_provider.dart';
 import 'cpp_component.dart';
 import 'project.dart';
 import 'atomic_file.dart';
+import 'project_library.dart';
 
 class ProjectSummary {
   const ProjectSummary(this.id, this.name, this.modified);
@@ -38,24 +39,14 @@ class ProjectStorage {
   File _file(String id) => File('${_root.path}${Platform.pathSeparator}$id.json');
   File get _settings => File('${_root.path}${Platform.pathSeparator}settings.json');
 
-  /// The saved projects, newest first. Every file is read and decoded for its name, so this runs off the UI isolate:
-  /// at startup it would otherwise cost as much as opening every project (#174).
+  /// The project library (Files › Projects): folders, metadata and the trash, in `library.json` beside the projects.
+  late final ProjectLibrary library = ProjectLibrary(_root);
+
+  /// The saved projects, newest first. The library's index keeps each project's details, so only files that changed
+  /// since are read, off the UI isolate (at startup a full read would cost as much as opening every project, #174).
   Future<List<ProjectSummary>> list() async {
-    final root = _root.path, settings = _settings.path;
-    final rows = await Isolate.run(() {
-      final out = <(String, String, int)>[];
-      for (final f in Directory(root).listSync()) {
-        if (f is! File || !f.path.endsWith('.json') || f.path == settings) continue;
-        try {
-          final j = jsonDecode(f.readAsStringSync()) as Map<String, dynamic>;
-          out.add((j['id'] as String, (j['name'] as String?) ?? 'Untitled', f.lastModifiedSync().microsecondsSinceEpoch));
-        } catch (_) {
-          // A damaged file is skipped, not fatal.
-        }
-      }
-      return out;
-    });
-    final out = [for (final (id, name, at) in rows) ProjectSummary(id, name, DateTime.fromMicrosecondsSinceEpoch(at))];
+    final metas = await library.refresh();
+    final out = [for (final m in metas) ProjectSummary(m.id, m.name, m.modified)];
     out.sort((a, b) => b.modified.compareTo(a.modified));
     return out;
   }
@@ -69,7 +60,13 @@ class ProjectStorage {
     try {
       // Reading and decoding a big project runs off the UI isolate; the decoded map comes back without a copy.
       final path = f.path;
-      return ProjectDoc.fromJson(await Isolate.run(() => jsonDecode(File(path).readAsStringSync())) as Map<String, dynamic>);
+      final (text, decoded) = await Isolate.run(() {
+        final t = File(path).readAsStringSync();
+        return (t, jsonDecode(t));
+      });
+      final doc = ProjectDoc.fromJson(decoded as Map<String, dynamic>);
+      _written = (id, text);
+      return doc;
     } on NewerProjectFormat {
       rethrow; // not damaged: the caller says so and leaves the file alone
     } catch (_) {
@@ -79,10 +76,22 @@ class ProjectStorage {
 
   /// Writes through a temporary file so a crash mid-save never leaves a half-written project. [json] is [p]'s
   /// `jsonEncode(p.toJson())` when the caller already has it (the app shares it with its undo snapshot).
+  ///
+  /// Text equal to what was last read or written for that project isn't written again, so the file's modified time
+  /// is when its content last changed: Files › Projects shows it as last edited (opening a project doesn't touch it).
   Future<void> save(ProjectDoc p, {String? json}) async {
     final f = _file(p.id);
-    await writeFileAtomically(f, json ?? jsonEncode(p.toJson()));
+    final text = json ?? jsonEncode(p.toJson());
+    final last = _written;
+    // The same text may still be on its way to disk (an autosave the caller didn't wait for): a save returns only
+    // once it has landed.
+    if (last != null && last.$1 == p.id && last.$2 == text && await f.exists()) return atomicWritesDone(f);
+    _written = (p.id, text);
+    await writeFileAtomically(f, text);
   }
+
+  /// The open project's text as last read or written (one project's, to keep memory down).
+  (String, String)? _written;
 
   String _validatedProjectId(String id) {
     if (!RegExp(r'^[A-Za-z0-9_-]{1,128}$').hasMatch(id)) {
@@ -221,6 +230,7 @@ class ProjectStorage {
     '${_root.path}${Platform.pathSeparator}native-imports${Platform.pathSeparator}${_validatedProjectId(projectId)}');
 
   Future<void> delete(String id) async {
+    if (_written?.$1 == id) _written = null;
     final f = _file(id);
     if (await f.exists()) await f.delete();
     if (RegExp(r'^[A-Za-z0-9_-]{1,128}$').hasMatch(id)) {

@@ -60,7 +60,22 @@ class DeviceTarget {
   ComponentParameterInfo? param(String id) => info?.param(id);
 
   /// The parameter's current value: the project's, else its default (0 for an unknown id).
-  double value(String id) => use?.params[id] ?? param(id)?.defaultValue ?? 0;
+  double value(String id) {
+    onRead?.call(this, id);
+    return use?.params[id] ?? param(id)?.defaultValue ?? 0;
+  }
+
+  /// Hears every [value] read (ParamWatch, lib/ui/devices/kit/param_watch.dart: which widgets show which values).
+  static void Function(DeviceTarget target, String id)? onRead;
+
+  /// The one parameter the [tick] firing now moved, while it fires for a [setLive] of a plain device (null for any
+  /// other change: a rack, a modulator, a reset, undo), so a listener can tell whether it shows that value.
+  static ({DeviceTarget target, String id})? moving;
+
+  /// Whether [other] names the same device as this (the same state, track and slot, and a plain device target).
+  bool sameDevice(DeviceTarget other) =>
+      runtimeType == DeviceTarget && other.runtimeType == DeviceTarget && identical(state, other.state) &&
+      layerId == other.layerId && slot == other.slot;
 
   /// A move during a gesture: live in the engine at once, kept in the project; [commit] when the gesture ends.
   void setLive(String id, double v) {
@@ -68,10 +83,16 @@ class DeviceTarget {
     if (l == null || use == null) return;
     final p = param(id);
     if (p != null) v = clampToParam(p, v);
-    if (isInstrument) {
-      state.setInstrumentParamLive(l, id, v);
-    } else {
-      state.setNativeParamLive(l, slot, id, v);
+    final plain = runtimeType == DeviceTarget && !isRackComponent(use!.id);
+    if (plain) moving = (target: this, id: id);
+    try {
+      if (isInstrument) {
+        state.setInstrumentParamLive(l, id, v);
+      } else {
+        state.setNativeParamLive(l, slot, id, v);
+      }
+    } finally {
+      if (plain) moving = null;
     }
   }
 

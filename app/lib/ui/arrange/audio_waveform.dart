@@ -3,6 +3,7 @@
 import 'dart:collection';
 import 'dart:math' as math;
 import 'dart:typed_data';
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 
@@ -42,6 +43,11 @@ class WaveformCache extends ChangeNotifier {
   static const _maxEntries = 96;
   final LinkedHashMap<String, PeakLevel> _levels = LinkedHashMap();
   final Set<String> _loading = {};
+  final Map<String, _PathNotifier> _paths = {};
+
+  /// Fires when a level of [path] arrives, so only that file's waveforms repaint (beta plan B4.3); the cache itself
+  /// still notifies for every file.
+  Listenable of(String path) => _paths.putIfAbsent(path, _PathNotifier.new);
 
   /// The level index for [secondsPerPixel].
   static int levelFor(double secondsPerPixel) =>
@@ -76,6 +82,7 @@ class WaveformCache extends ChangeNotifier {
         while (_levels.length > _maxEntries) {
           _levels.remove(_levels.keys.first);
         }
+        _paths[path]?.changed();
         notifyListeners();
       }, onError: (Object _) {
         _loading.remove(key);
@@ -99,6 +106,10 @@ class WaveformCache extends ChangeNotifier {
   int get cachedLevels => _levels.length;
 }
 
+class _PathNotifier extends ChangeNotifier {
+  void changed() => notifyListeners();
+}
+
 /// What part of the file a clip shows: where it reads from and how fast, for [AudioClipPainter].
 class ClipWindow {
   const ClipWindow({required this.offset, required this.perPixel, required this.fileSeconds, this.reverse = false,
@@ -119,10 +130,14 @@ class ClipWindow {
 }
 
 /// Draws a clip's waveform (scaled by its gain), its fades as shaded corners with their curves, and loop seams.
+/// The waveform is one batch of line segments per [WaveTiles.tile] pixels, recorded once per clip, zoom and size
+/// and kept ([WaveTiles]), so a repaint replays a few pictures and the raster skips the tiles off screen (beta plan
+/// B4.2). With [path], only that file's arriving peaks repaint it (B4.3).
 class AudioClipPainter extends CustomPainter {
   AudioClipPainter({required this.peaks, required this.window, required this.color, required this.gain,
-      required this.fadeIn, required this.fadeOut, required this.inCurve, required this.outCurve, this.top = 0})
-      : super(repaint: WaveformCache.instance);
+      required this.fadeIn, required this.fadeOut, required this.inCurve, required this.outCurve, this.top = 0,
+      String? path})
+      : super(repaint: path == null ? WaveformCache.instance : WaveformCache.instance.of(path));
   final PeakLevel? Function() peaks;
   final ClipWindow window;
   final Color color;
@@ -138,16 +153,12 @@ class AudioClipPainter extends CustomPainter {
     final mid = top + h / 2;
     final p = peaks();
     if (p != null) {
-      final paint = Paint()
-        ..color = color
-        ..strokeWidth = 1;
-      final scale = (h / 2 - 1) * gain.clamp(0.0, 4.0);
-      for (var x = 0.0; x < size.width; x += 1) {
-        final a = window.at(x), b = window.at(x + 1);
-        final (lo, hi) = p.span(math.min(a, b), math.max(a, b));
-        if (a < 0 || a > window.fileSeconds) continue;
-        canvas.drawLine(Offset(x + 0.5, mid - (hi * scale).clamp(-h / 2, h / 2)),
-            Offset(x + 0.5, mid - (lo * scale).clamp(-h / 2, h / 2) + 0.5), paint);
+      final tiles = WaveTiles.of(p, window, size, top, gain, color);
+      final clip = canvas.getLocalClipBounds();
+      for (var i = 0; i < tiles.length; i++) {
+        final x = i * WaveTiles.tile.toDouble();
+        if (x > clip.right || x + WaveTiles.tile < clip.left) continue;
+        canvas.drawPicture(tiles[i]);
       }
     } else {
       canvas.drawLine(Offset(0, mid), Offset(size.width, mid), Paint()..color = color.withValues(alpha: 0.5));
@@ -185,4 +196,65 @@ class AudioClipPainter extends CustomPainter {
       old.window.offset != window.offset || old.window.perPixel != window.perPixel || old.gain != gain ||
       old.fadeIn != fadeIn || old.fadeOut != fadeOut || old.inCurve != inCurve || old.outCurve != outCurve ||
       old.color != color || old.window.reverse != window.reverse || old.window.loop != window.loop;
+}
+
+/// The recorded waveform tiles of one clip at one zoom: [tile] pixels each, the most recently used [maxEntries]
+/// clips kept. Each tile is one `drawRawPoints` batch of the per-pixel lines a clip draws.
+class WaveTiles {
+  static const tile = 512;
+  static const maxEntries = 48;
+  static final LinkedHashMap<Object, List<ui.Picture>> _cache = LinkedHashMap();
+
+  /// Tiles recorded since the cache was last cleared (tests).
+  @visibleForTesting
+  static int recorded = 0;
+
+  static List<ui.Picture> of(PeakLevel p, ClipWindow w, Size size, double top, double gain, Color color) {
+    final key = (p, w.offset, w.perPixel, w.fileSeconds, w.reverse, w.loop, w.loopStart, w.loopEnd, size, top,
+        gain, color);
+    final hit = _cache.remove(key);
+    if (hit != null) return _cache[key] = hit;
+    final h = size.height - top;
+    final mid = top + h / 2;
+    final scale = (h / 2 - 1) * gain.clamp(0.0, 4.0);
+    final paint = Paint()
+      ..color = color
+      ..strokeWidth = 1;
+    final tiles = <ui.Picture>[];
+    final points = Float32List(tile * 4);
+    for (var from = 0.0; from < size.width; from += tile) {
+      var n = 0;
+      for (var x = from; x < size.width && x < from + tile; x += 1) {
+        final a = w.at(x), b = w.at(x + 1);
+        final (lo, hi) = p.span(math.min(a, b), math.max(a, b));
+        if (a < 0 || a > w.fileSeconds) continue;
+        points[n++] = x + 0.5;
+        points[n++] = mid - (hi * scale).clamp(-h / 2, h / 2);
+        points[n++] = x + 0.5;
+        points[n++] = mid - (lo * scale).clamp(-h / 2, h / 2) + 0.5;
+      }
+      final recorder = ui.PictureRecorder();
+      if (n > 0) Canvas(recorder).drawRawPoints(ui.PointMode.lines, Float32List.sublistView(points, 0, n), paint);
+      tiles.add(recorder.endRecording());
+      recorded++;
+    }
+    _cache[key] = tiles;
+    while (_cache.length > maxEntries) {
+      for (final t in _cache.remove(_cache.keys.first)!) {
+        t.dispose();
+      }
+    }
+    return tiles;
+  }
+
+  @visibleForTesting
+  static void clear() {
+    for (final tiles in _cache.values) {
+      for (final t in tiles) {
+        t.dispose();
+      }
+    }
+    _cache.clear();
+    recorded = 0;
+  }
 }

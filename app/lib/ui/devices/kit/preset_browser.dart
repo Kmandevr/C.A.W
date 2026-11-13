@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import '../../panel_motion.dart';
 import 'package:flutter/services.dart';
 
+import 'param_watch.dart';
 import '../../../model/app_state.dart';
 import '../../../model/arrange_fx.dart';
 import '../../../model/device_target.dart';
@@ -61,13 +62,15 @@ class _DevicePresetChipState extends State<DevicePresetChip> {
   }
 
   @override
+  // Its own watch (param_watch.dart): it compares every value with the presets, so a knob step rebuilds the chip,
+  // not the editor around it.
   Widget build(BuildContext context) => ListenableBuilder(
     listenable: t.state.userPresets,
-    builder: (context, _) {
+    builder: (context, _) => Flexible(child: ParamWatch(target: t, builder: (context) {
       final name = DevicePresets.label(t);
       final quick = DevicePresets.currentUser(t) != null && DevicePresets.modified(t);
       final color = widget.color;
-      return Flexible(child: ConstrainedBox(constraints: BoxConstraints(maxWidth: widget.maxWidth), child: Row(
+      return ConstrainedBox(constraints: BoxConstraints(maxWidth: widget.maxWidth), child: Row(
         mainAxisSize: MainAxisSize.min, children: [
           Flexible(child: Pressable(glow: color, radius: 15, child: InkWell(
             key: widget.chipKey ?? const ValueKey('device-presets'),
@@ -97,8 +100,8 @@ class _DevicePresetChipState extends State<DevicePresetChip> {
               radius: 18,
               onTap: () => quickSavePreset(context, t),
               child: SizedBox(width: 30, height: 34, child: Icon(Icons.save_outlined, size: 17, color: color))))),
-        ])));
-    },
+        ]));
+    })),
   );
 }
 

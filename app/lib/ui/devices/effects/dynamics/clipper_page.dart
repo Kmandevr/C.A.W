@@ -1,4 +1,5 @@
 // fx-dynamics: the Clipper UI (org.caw.clipper): the curve against its ceiling with the input riding it, how far peaks went over, and Clip to 0 dB.
+import '../../kit/repaint.dart';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -165,5 +166,6 @@ class _ClipPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant _ClipPainter o) => true;
+  bool shouldRepaint(covariant _ClipPainter o) =>
+      paintInputsChanged([o.sq, o.curve, o.ceiling, o.yOf, o.input, o.color, o.second, o.active], [sq, curve, ceiling, yOf, input, color, second, active]);
 }

@@ -13,6 +13,7 @@ import 'model/automation_writer.dart';
 import 'model/live_midi.dart';
 import 'model/problem_log.dart';
 import 'model/settings.dart';
+import 'model/telemetry/app_telemetry.dart';
 import 'model/updates/update_fetch.dart';
 import 'model/updates/update_service.dart';
 import 'platform/desktop_window.dart';
@@ -32,6 +33,7 @@ import 'ui/theme.dart';
 import 'ui/updates/update_prompt.dart';
 
 Future<void> main() async {
+  final startup = Stopwatch()..start(); // the telemetry report's startup time (to the first project open)
   WidgetsFlutterBinding.ensureInitialized();
   // Open alpha: errors are kept (on the device only) for "Report a problem", then handled as before.
   final flutterError = FlutterError.onError;
@@ -50,7 +52,9 @@ Future<void> main() async {
   DesktopWindow.current = platformDesktopWindow(); // the window's title and files opened with or dropped on it
   final settings = await Settings.open();
   // The frame-rate setting: the screen's rates, then Auto's idle drop or the cap (Settings keeps its cap up to date).
-  final frameRate = FrameRateController(device: platformDisplayRate())..setCap(settings.frameRate);
+  final frameRate = FrameRateController(device: platformDisplayRate())
+    ..setCap(settings.frameRate)
+    ..setProfileCap(settings.profileFrameCap);
   FrameRateController.current = frameRate;
   unawaited(frameRate.start());
   final state = AppState(settings: settings);
@@ -74,6 +78,10 @@ Future<void> main() async {
   );
   await updates.load();
   UpdateService.running = updates;
+
+  // Anonymous telemetry and feedback (docs/app.md "Privacy, telemetry and feedback"); its first-run page shows over
+  // the shell once it has loaded and the startup screen has gone, before any update prompt (ui/app_prompts.dart).
+  unawaited(startAppTelemetry(state, startup: startup));
 
   runApp(CawApp(state: state));
   state.init();

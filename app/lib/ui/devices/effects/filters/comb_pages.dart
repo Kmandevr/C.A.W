@@ -24,14 +24,15 @@ class CombFilterPage extends StatelessWidget {
     final scope = DeviceScope.of(context);
     final t = scope.target;
     final byNote = t.value('tune') >= 0.5;
-    final hz = byNote ? noteToHz(t.value('note') + t.value('fine') / 100) : t.value('freq') * math.pow(2, t.value('fine') / 1200);
+    // Read where it is drawn (a lazy read: the hero and readout watch it, not the page; param_watch.dart).
+    double hz() => byNote ? noteToHz(t.value('note') + t.value('fine') / 100) : t.value('freq') * math.pow(2, t.value('fine') / 1200);
     return effectPage('comb', [
       HeroWithMeters(height: 200, gr: false, hero: HeroCanvas(
         color: scope.accent,
         height: 200,
         caption: 'COMB ≈',
         grid: false,
-        readout: Text(byNote ? '${noteName(t.value('note'))} · ${hz.toStringAsFixed(1)} Hz' : '${hz.toStringAsFixed(1)} Hz'),
+        readout: Builder(builder: (context) => Text(byNote ? '${noteName(t.value('note'))} · ${hz().toStringAsFixed(1)} Hz' : '${hz().toStringAsFixed(1)} Hz')),
         child: DragHero(
           heroKey: 'comb-hero',
           xParam: byNote ? 'note' : 'freq',
@@ -41,14 +42,14 @@ class CombFilterPage extends StatelessWidget {
           paint: (canvas, size, active, f) {
             final fb = t.value('feedback'), damping = t.value('damping'), mix = t.value('mix');
             final minus = t.value('polarity') >= 0.5;
-            double db(double x) => mixDb(combResponse(x, freq: hz, feedback: fb, damping: damping, minus: minus), mix);
+            double db(double x) => mixDb(combResponse(x, freq: hz(), feedback: fb, damping: damping, minus: minus), mix);
             final h = size.height;
             paintFrequencyGrid(canvas, size, _combY(0, h));
             final path = responsePath(size, db, (d) => _combY(d, h), steps: 480);
             fillFade(canvas, path, h, size, scope.accent, alpha: 0.25);
             strokeGlow(canvas, path, scope.accent, width: 1.8);
             // The fundamental's tooth carries the handle; the feedback's sign shows as a label.
-            final hx = freqToX(fb < 0 ? hz / 2 : hz, size.width);
+            final hx = freqToX(fb < 0 ? hz() / 2 : hz(), size.width);
             final hy = h * 0.5 - fb * (h * 0.5 - 24);
             canvas.drawLine(Offset(hx, 22), Offset(hx, h), Paint()..color = scope.secondary.withValues(alpha: 0.3));
             paintHandle(canvas, Offset(hx, hy), scope.accent, active: active, r: 8);
@@ -144,7 +145,7 @@ class ResonatorPage extends StatelessWidget {
         height: 200,
         caption: 'RESONATOR ≈',
         grid: false,
-        readout: Text('${noteName(t.value('note'))} · ${formatParamValue(t.param('decay'), t.value('decay'))}'),
+        readout: Builder(builder: (context) => Text('${noteName(t.value('note'))} · ${formatParamValue(t.param('decay'), t.value('decay'))}')),
         child: DragHero(
           heroKey: 'resonator-hero',
           xParam: 'note',

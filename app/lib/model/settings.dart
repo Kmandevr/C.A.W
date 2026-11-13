@@ -310,7 +310,16 @@ class Settings extends ChangeNotifier {
     CodePrefs.lineNumbers = codeLineNumbers;
     CodePrefs.wrap = codeWrap;
     FrameRateController.current?.setCap(frameRate);
+    FrameRateController.current?.setProfileCap(profileFrameCap);
   }
+
+  /// The frame-rate cap the performance profile sets, in Hz (owner, 2026-11-12): Lightweight 60, Minimal 30; Full
+  /// and Balanced none (the Frame rate setting alone). The lower of it and [frameRate] is in force.
+  int get profileFrameCap => switch (performanceMode) {
+        PerformanceMode.lightweight => 60,
+        PerformanceMode.minimal => 30,
+        _ => 0,
+      };
 
   /// Motion (owner, 2026-11-04): Full, Reduced (fades only) or Off (owner, 2026-11-11: Off keeps the motion that
   /// helps use the app, [Motion.usability]). Minimal and the system setting lower it further.

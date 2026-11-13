@@ -19,6 +19,7 @@ import '../actions/macro.dart';
 import '../engine/engine.dart';
 
 import '../model/app_state.dart';
+import '../model/arrange_markers.dart';
 import '../model/clip_loop_edit.dart';
 import '../model/lane_curve.dart';
 import '../model/live_midi.dart';
@@ -34,6 +35,8 @@ import 'note_expression.dart';
 import 'motion.dart';
 import 'theme.dart';
 import 'widgets.dart';
+import 'arrange/edit_cues.dart';
+import 'arrange/ruler.dart' show LoopBand;
 import 'arrange/track_color.dart';
 import 'clip_roll_parts.dart';
 import 'glass.dart';
@@ -44,6 +47,10 @@ import 'haptics.dart';
 import 'live_playhead.dart';
 import 'feedback.dart';
 import 'view_glide.dart';
+
+// The gesture binding's sampling clock, for double taps: the wall clock in the app, the test's fake clock under test,
+// so a busy machine can't split a double tap (as ClickCounter in pointer_input.dart).
+DateTime _gestureNow() => GestureBinding.instance.samplingClock.now();
 
 enum PatternTool { draw, select, curve, erase, ratchet }
 
@@ -313,6 +320,127 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
     if (v == 'loop') s.editLayer(layer, (_) => clip.loop = !clip.loop);
     setState(() {});
   }
+  // ---------- the ruler (owner, 2026-11-12): as Arrange's, a tap moves the song's cursor there and a drag draws the
+  // song's loop range (or moves an end of it), both on the roll's grid; the roll's time lines up with the song's
+  // through [_anchor] ----------
+
+  /// The clip the roll's time lines up with the song through: the clip it is opened for, else (in Build) the
+  /// pattern's first clip in the song; null when the pattern isn't in the song (the roll's time is the song's).
+  ClipDoc? get _anchor {
+    final own = widget.clip;
+    if (own != null && widget.layer != null) return own;
+    ClipDoc? first;
+    for (final l in s.project.layers) {
+      for (final c in l.clips) {
+        if (c.patternId == widget.module.id && (first == null || c.startSteps < first.startSteps)) first = c;
+      }
+    }
+    return first;
+  }
+
+  /// How far the roll's time is ahead of the song's at [_anchor] (roll = song + this), as the playhead maps it.
+  double _rollShift(PatternDoc d) {
+    final c = _anchor;
+    if (c == null) return 0;
+    final opened = widget.clip != null && widget.layer != null;
+    final shown = opened && c.loop ? c.sourceOffsetSteps % (_loopSteps(d) ?? 1) : c.sourceOffsetSteps;
+    return (shown - c.startSteps).toDouble();
+  }
+
+  /// A song step in the roll's time; in Build, inside a looping clip it wraps to the loop, as the playhead does.
+  double _songToRoll(PatternDoc d, double song) {
+    final roll = song + _rollShift(d);
+    final c = _anchor;
+    if (widget.clip == null && c != null && c.loop && song >= c.startSteps && song < c.startSteps + c.lengthSteps) {
+      return roll % math.max(1, c.loopLength(d.lengthSteps(s.project.beatsPerBar)));
+    }
+    return roll;
+  }
+
+  /// The song step at the roll's step [roll], on the whole steps the song's loop and cursor take.
+  int _rollToSong(PatternDoc d, double roll) => math.max(0, (roll - _rollShift(d)).round());
+
+  /// A press on the ruler (grid coordinates, so above 0) while it lasts, and the loop drag it became: which end moves
+  /// (or a new range drawn) and the range it shows, in the roll's steps (committed on release, one undo step).
+  Offset? _rulerAt;
+  _RulerEdge? _rulerEdge;
+  double _rulerFrom = 0, _rulerTo = 0;
+
+  /// The song's loop range in the roll's steps, or null when there is none.
+  (double, double)? _songLoop(PatternDoc d) {
+    final p = s.project;
+    if (!p.hasLoopRange) return null;
+    return (p.loopStartSteps + _rollShift(d), p.loopEndSteps + _rollShift(d));
+  }
+
+  /// The roll's step under the ruler's x [dx] (grid coordinates), on the roll's grid unless freed.
+  double _rulerStep(double dx) => _snapAt(_stepAt(dx));
+
+  void _rulerDown(Offset p) {
+    _rulerAt = p;
+    _rulerEdge = null;
+  }
+
+  void _rulerMove(Offset p) {
+    final at = _rulerAt, d = _doc;
+    if (at == null || d == null) return;
+    if (_rulerEdge == null) {
+      if ((p - at).distance <= (_mouse ? _mouseDragSlop : kTouchSlop)) return;
+      // A drag that starts on an end of the loop moves that end; anywhere else it draws a new range.
+      final loop = _songLoop(d);
+      double xOf(double step) => step * _pxPerStep - _scrollX;
+      if (loop != null && (at.dx - xOf(loop.$2)).abs() <= 14) {
+        _rulerEdge = _RulerEdge.end;
+      } else if (loop != null && (at.dx - xOf(loop.$1)).abs() <= 14) {
+        _rulerEdge = _RulerEdge.start;
+      } else {
+        _rulerEdge = _RulerEdge.draw;
+      }
+      _rulerFrom = _rulerEdge == _RulerEdge.draw ? _rulerStep(at.dx) : loop!.$1;
+      _rulerTo = _rulerEdge == _RulerEdge.draw ? _rulerFrom : loop!.$2;
+      Haptics.grab();
+    }
+    final step = _rulerStep(p.dx);
+    final was = _rulerEdge == _RulerEdge.start ? _rulerFrom : _rulerTo;
+    if (step == was) return;
+    Haptics.tick();
+    setState(() {
+      if (_rulerEdge == _RulerEdge.start) {
+        _rulerFrom = step;
+      } else {
+        _rulerTo = step;
+      }
+    });
+  }
+
+  void _rulerEnd({required bool cancel}) {
+    final at = _rulerAt, edge = _rulerEdge, d = _doc;
+    _rulerAt = null;
+    _rulerEdge = null;
+    if (cancel || at == null || d == null) {
+      if (edge != null) setState(() {});
+      return;
+    }
+    if (edge == null) {
+      // A tap: the song's cursor goes there (playing, playback jumps there).
+      s.seekTo(_rollToSong(d, _rulerStep(at.dx)).toDouble());
+      setState(() {});
+      return;
+    }
+    final from = _rollToSong(d, _rulerFrom), to = _rollToSong(d, _rulerTo);
+    setState(() {});
+    if (from == to) {
+      // An end dragged onto the other collapses the loop: it turns off and goes; undo brings it back.
+      if (edge != _RulerEdge.draw) {
+        Motion.tick();
+        s.clearLoopRange();
+      }
+      return;
+    }
+    Motion.tick();
+    s.setLoopRange(from, to);
+  }
+
   RollLook get _look => s.settings.roll;
   // The row height while a pinch or the zoom bar changes it; saved to the roll's look when it ends.
   double? _rowDrag;
@@ -1497,7 +1625,7 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
     final n = base?.byId(id);
     var pts = _curveView.value.points;
     if (!cancel && !_bMoved && n != null && start != null && hit != null) {
-      final now = DateTime.now();
+      final now = _gestureNow();
       if (hit.point != null) {
         // A tap on a point: a second one on the same point soon after removes it.
         final t = _bTapped;
@@ -1973,6 +2101,8 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
       _lastP = p;
       if (_loopHit(p, e.kind)) {
         _loopDown(p);
+      } else if (p.dy < 0 && p.dx >= 0) {
+        _rulerDown(p);
       } else if (_tool == PatternTool.curve) {
         // Curve tool: the lanes edit their curve; on the grid any note's curve edits where it is touched, and on
         // empty grid a tap clears the selection and a drag scrolls.
@@ -2170,11 +2300,12 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
   /// Whether a one-finger drag is under way: a note, a lane, a curve point or segment, or a pitch point.
   bool get _editing =>
       (_dragStart != null && (_dragNote != null || _lane != 0)) || _cLane != 0 || _bNote != null || _brushAt != null ||
-      _loopLive != null;
+      _loopLive != null || _rulerAt != null;
 
   void _editMove(Offset p) {
     _lastP = p;
     if (_loopLive != null) return _loopMove(p);
+    if (_rulerAt != null) return _rulerMove(p);
     if (_brushAt != null) return _brushMove(p);
     if (_bNote != null) {
       _bendMove(p);
@@ -2186,6 +2317,7 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
 
   void _editEnd({required bool cancel}) {
     if (_loopLive != null) return _loopEnd(cancel: cancel);
+    if (_rulerAt != null) return _rulerEnd(cancel: cancel);
     if (_brushAt != null) return _brushEnd(cancel: cancel);
     if (_bNote != null) return _bendEnd(cancel: cancel);
     if (_cLane != 0) return _curveEnd(cancel: cancel);
@@ -2416,7 +2548,7 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
     _tapCandidate = null;
     final tapAt = _tapAt;
     if (hit != null && !outside && hit == _tapNote && tapAt != null &&
-        DateTime.now().difference(tapAt) < const Duration(milliseconds: 350)) {
+        _gestureNow().difference(tapAt) < const Duration(milliseconds: 350)) {
       _tapNote = null;
       _dragStart = null;
       _dragBase = null;
@@ -2493,7 +2625,7 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
 
   /// A tap on empty grid: a second one soon after, near it, clears the selection (a single tap leaves it).
   void _emptyTapped(Offset p) {
-    final last = _emptyTap, now = DateTime.now();
+    final last = _emptyTap, now = _gestureNow();
     if (last != null && now.difference(last.when) < kDoubleTapTimeout && (p - last.at).distance < 48) {
       _emptyTap = null;
       if (_sel.isNotEmpty) setState(() => _sel = {});
@@ -2607,7 +2739,7 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
     }
     // A tap on an existing note that moved nothing arms the double tap; a note just drawn doesn't.
     _tapNote = _tapCandidate != null && identical(_dragBase, _doc) ? _tapCandidate : null;
-    _tapAt = DateTime.now();
+    _tapAt = _gestureNow();
     _tapCandidate = null;
     if (_dragBase != null && _doc != null && !identical(_dragBase, _doc)) {
       // One undo step for the whole drag.
@@ -3119,13 +3251,32 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
                       rowH: _rowH, scrollX: _scrollX, scrollY: _scrollY, keyW: _keyW, rulerH: _rulerH, gridH: h,
                       color: _noteColor, label: loopLengthLabel(loop, s.project.beatsPerBar),
                       active: _loopLive != null || _loopHover)))),
+                  // The song's loop range, as on Arrange's ruler (owner, 2026-11-12): a band on the ruler and, while
+                  // on, its ends down the grid; drawn or moved on the ruler, it fades out when it goes.
+                  Positioned(left: _keyW, top: 0, right: 0, height: _rulerH + h, child: IgnorePointer(child: ClipRect(
+                    child: FadeHold<(double, double, bool)>(
+                      value: _shownSongLoop(d),
+                      builder: (context, r) => Stack(clipBehavior: Clip.none, children: [
+                        LoopBand(from: r.$1 * _pxPerStep - _scrollX, to: r.$2 * _pxPerStep - _scrollX, on: r.$3,
+                          band: _rulerH * 0.5),
+                        if (r.$3) for (final at in [r.$1, r.$2])
+                          Positioned(left: at * _pxPerStep - _scrollX - 0.5, top: _rulerH, bottom: 0, width: 1,
+                            child: ColoredBox(color: Neon.blue.withValues(alpha: 0.45))),
+                      ]))))),
                   // The song's playhead while it plays this pattern (a live island: it moves on every frame while
                   // playing, live_playhead.dart, without rebuilding the roll; with Smooth follow it moves with the reads).
+                  // Stopped, a dimmer line shows where play starts (the edit cursor), as in Arrange; both run the
+                  // roll's whole height.
                   Positioned.fill(child: IgnorePointer(child: RepaintBoundary(child: PlayheadFrames(
                     state: s,
-                    builder: (context) => CustomPaint(key: const ValueKey('roll-playhead'),
-                      painter: RollPlayheadPainter(step: _playStep(smooth: !_scrollFollows), pxPerStep: _pxPerStep,
-                        scrollX: _scrollX, left: _keyW, bottom: _rulerH + h)))))),
+                    builder: (context) => ListenableBuilder(listenable: s, builder: (context, _) {
+                      final playing = s.meters.playing;
+                      return CustomPaint(key: const ValueKey('roll-playhead'),
+                        painter: RollPlayheadPainter(
+                          step: playing ? _playStep(smooth: !_scrollFollows) : _songToRoll(d, s.playheadStep),
+                          stopped: !playing, pxPerStep: _pxPerStep, scrollX: _scrollX, left: _keyW,
+                          bottom: box.maxHeight));
+                    }))))),
                   // A mouse over the bar: its length and what it does (a finger sees the length on the ruler).
                   if (loop != null && clip != null && _loopHover && _loopLive == null)
                     Positioned(
@@ -3187,6 +3338,17 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
               scrollX: _scrollX, keyW: _keyW),
       ]),
     );
+  }
+
+  /// The song's loop range to show on the ruler in the roll's steps, and whether it is on: the one being drawn or
+  /// moved, else the project's.
+  (double, double, bool)? _shownSongLoop(PatternDoc d) {
+    if (_rulerEdge != null) {
+      final a = math.min(_rulerFrom, _rulerTo), b = math.max(_rulerFrom, _rulerTo);
+      return b > a ? (a, b, true) : null;
+    }
+    final loop = _songLoop(d);
+    return loop == null ? null : (loop.$1, loop.$2, s.project.loopRange);
   }
 
   /// Drum grid rows: the pitches the pattern uses (or C3 when empty), highest first.
@@ -4768,9 +4930,13 @@ class _QuantizeSheetState extends State<_QuantizeSheet> {
 /// The song's playhead down the roll's ruler and grid: a line at [step] (the roll's time; null draws nothing).
 class RollPlayheadPainter extends CustomPainter {
   const RollPlayheadPainter(
-      {required this.step, required this.pxPerStep, required this.scrollX, required this.left, required this.bottom});
+      {required this.step, required this.pxPerStep, required this.scrollX, required this.left, required this.bottom,
+      this.stopped = false});
   final double? step;
   final double pxPerStep, scrollX, left, bottom;
+
+  /// Stopped: the edit cursor, where play starts, dimmer and thinner (as Arrange's).
+  final bool stopped;
 
   /// Where the line is, in the roll's pixels; null when there is none or it is off the grid.
   double? get x {
@@ -4784,10 +4950,14 @@ class RollPlayheadPainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     final at = x;
     if (at == null || at > size.width) return;
-    canvas.drawLine(Offset(at, 0), Offset(at, bottom), Paint()..color = Neon.blue..strokeWidth = 1.6);
+    canvas.drawLine(Offset(at, 0), Offset(at, bottom),
+        Paint()..color = stopped ? Neon.blue.withValues(alpha: 0.45) : Neon.blue..strokeWidth = stopped ? 1.2 : 1.6);
   }
 
   @override
-  bool shouldRepaint(covariant RollPlayheadPainter old) =>
-      old.step != step || old.pxPerStep != pxPerStep || old.scrollX != scrollX || old.bottom != bottom;
+  bool shouldRepaint(covariant RollPlayheadPainter old) => old.step != step || old.pxPerStep != pxPerStep ||
+      old.scrollX != scrollX || old.bottom != bottom || old.stopped != stopped;
 }
+
+/// Which end of the song's loop a drag on the roll's ruler moves, or a new range drawn.
+enum _RulerEdge { start, end, draw }

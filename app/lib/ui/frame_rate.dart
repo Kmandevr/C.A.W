@@ -1,5 +1,6 @@
 // The frame-rate setting at work: Auto (the screen's highest rate while anything moves, its lowest when still) or a cap.
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/scheduler.dart';
@@ -61,6 +62,17 @@ class FrameRateController extends ChangeNotifier {
   int get cap => _cap;
   int _cap = auto;
 
+  /// The performance profile's cap in Hz (0: none): Lightweight 60, Minimal 30 (owner, 2026-11-12). The rate in
+  /// force is the lower of it and the setting's; under Auto it caps the moving rate and the idle drop stays.
+  int get profileCap => _profileCap;
+  int _profileCap = 0;
+
+  /// The cap in force: the lower of the setting's and the profile's ([auto] when neither caps).
+  int get effectiveCap => _cap == auto ? _profileCap : (_profileCap == 0 ? _cap : math.min(_cap, _profileCap));
+
+  /// Whether the profile lowers what the setting alone would ask for.
+  bool get profileCaps => _profileCap != 0 && (_cap == auto || _profileCap < _cap);
+
   /// The rate last asked for (null: nothing asked yet; 0: no preference).
   double? get requested => _requested;
   double? _requested;
@@ -118,17 +130,29 @@ class FrameRateController extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Sets the performance profile's cap (0: none); Settings calls it whenever it applies itself.
+  void setProfileCap(int hz) {
+    final v = hz > 0 ? hz : 0;
+    if (v == _profileCap) return;
+    _profileCap = v;
+    _apply();
+    notifyListeners();
+  }
+
   bool get _auto => _cap == auto && device.canRequest && _rates.length >= 2;
+
+  // Auto's rate while anything moves: the screen's highest, or the highest under the profile's cap.
+  double get _top => _profileCap == 0 ? _rates.last : rateFor(_profileCap, _rates);
 
   void _apply() {
     _idleTimer?.cancel();
     _idleTimer = null;
     _idle = false;
     if (!device.canRequest || _rates.isEmpty) return;
-    if (_cap != auto) return _ask(rateFor(_cap, _rates));
+    if (_cap != auto) return _ask(rateFor(effectiveCap, _rates));
     if (_rates.length < 2) return _ask(0); // one rate: nothing to choose, so no preference
     _lastFrame = _now();
-    _ask(_rates.last);
+    _ask(_top);
     _armIdle(idleAfter);
   }
 
@@ -140,7 +164,7 @@ class FrameRateController extends ChangeNotifier {
     _lastFrame = t;
     if (_idle) {
       _idle = false;
-      _ask(_rates.last);
+      _ask(_top);
     }
     if (_idleTimer == null) _armIdle(idleAfter);
   }

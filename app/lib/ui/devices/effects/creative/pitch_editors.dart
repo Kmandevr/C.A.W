@@ -1,4 +1,5 @@
 // The pitch and frequency plugin UIs (fx-creative): pitch shifter (a semitone ruler), frequency shifter (partials moved by the same hertz) and ring mod (carrier, input and product).
+import '../../kit/repaint.dart';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -23,7 +24,8 @@ class PitchShiftPage extends StatelessWidget {
   Widget build(BuildContext context) {
     final scope = DeviceScope.of(context);
     final t = scope.target;
-    final semis = t.value('semitones') + t.value('cents') / 100;
+    // Read where it is drawn (a lazy read: the hero and readout watch it, not the page; param_watch.dart).
+    double semis() => t.value('semitones') + t.value('cents') / 100;
     return effectPage('pitchshift', [
       HeroWithMeters(height: 170, gr: false, hero: HeroCanvas(
         color: scope.accent,
@@ -32,7 +34,7 @@ class PitchShiftPage extends StatelessWidget {
         grid: false,
         readout: DeviceDisplay(builder: (context, f) {
           final latency = f?.values['latency_ms'] ?? (valueOr(scope, 'grain', 60) / 2);
-          return Text('${semis >= 0 ? '+' : ''}${semis.toStringAsFixed(2)} st · ${latency.toStringAsFixed(1)} ms latency');
+          return Text('${semis() >= 0 ? '+' : ''}${semis().toStringAsFixed(2)} st · ${latency.toStringAsFixed(1)} ms latency');
         }),
         child: const _PitchHero(),
       )),
@@ -134,7 +136,8 @@ class _PitchPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant _PitchPainter o) => true;
+  bool shouldRepaint(covariant _PitchPainter o) =>
+      paintInputsChanged([o.semis, o.live, o.phase, o.color, o.second, o.active], [semis, live, phase, color, second, active]);
 }
 
 // ---------- Frequency shifter ----------
@@ -171,7 +174,7 @@ class FreqShiftPage extends StatelessWidget {
         height: 180,
         caption: 'PARTIALS ≈',
         grid: false,
-        readout: Text('${t.value('shift') >= 0 ? '+' : ''}${t.value('shift').toStringAsFixed(1)} Hz'),
+        readout: Builder(builder: (context) => Text('${t.value('shift') >= 0 ? '+' : ''}${t.value('shift').toStringAsFixed(1)} Hz')),
         child: const _ShiftHero(),
       )),
       KnobRow(const ['shift', 'spread', 'feedback', 'delay', 'mix'], size: 50),
@@ -272,7 +275,8 @@ class _ShiftPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant _ShiftPainter o) => true;
+  bool shouldRepaint(covariant _ShiftPainter o) =>
+      paintInputsChanged([o.left, o.right, o.feedback, o.color, o.second, o.active], [left, right, feedback, color, second, active]);
 }
 
 // ---------- Ring mod ----------
@@ -318,7 +322,7 @@ class RingModPage extends StatelessWidget {
         height: 180,
         caption: keyed ? 'INPUT × KEY' : 'CARRIER × INPUT ≈',
         grid: false,
-        readout: Text(keyed ? 'sidechain' : formatParamValue(t.param('freq'), t.value('freq'))),
+        readout: Builder(builder: (context) => Text(keyed ? 'sidechain' : formatParamValue(t.param('freq'), t.value('freq')))),
         child: const _RingHero(),
       )),
       KnobRow([if (!keyed) 'freq', if (!keyed) 'spread', 'bias', 'rectify', 'mix'], size: 50),
@@ -412,5 +416,6 @@ class _RingPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant _RingPainter o) => true;
+  bool shouldRepaint(covariant _RingPainter o) =>
+      paintInputsChanged([o.source, o.freq, o.bias, o.rectify, o.mix, o.drift, o.color, o.second, o.active], [source, freq, bias, rectify, mix, drift, color, second, active]);
 }

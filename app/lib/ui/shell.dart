@@ -13,6 +13,7 @@ import '../model/automation_writer.dart';
 import '../model/live_midi.dart';
 import '../model/app_state.dart';
 import '../model/settings.dart';
+import '../model/telemetry/telemetry.dart';
 import '../model/audio_edit.dart' show audioExtensions;
 import '../platform/desktop_window.dart';
 import '../platform/system_bars.dart';
@@ -43,10 +44,13 @@ import 'frame/record_tools.dart';
 import 'frame/sections.dart';
 import 'frame/strain.dart';
 import 'adaptive_sheet.dart';
+import 'app_prompts.dart';
 import 'arrange/templates_ui.dart';
 import '../model/templates.dart';
 import 'pointer_input.dart';
 import 'music_video/video_setup_sheet.dart';
+import 'privacy/feedback_sheet.dart';
+import 'privacy/privacy_pages.dart';
 import 'startup_screen.dart';
 
 /// The panel each view shortcut shows, by the index KeyRouter's `onView` passes.
@@ -163,9 +167,44 @@ class _ShellState extends State<Shell> {
     }());
   }
 
+  // The first-run page and the once-only question after a beta build (docs/app.md "Privacy, telemetry and
+  // feedback"), shown once the project and telemetry have both loaded and the startup screen has gone, before any
+  // update prompt (AppPrompts: one at a time); queued feedback that went out says so.
+  bool _privacyShown = false, _privacyOpen = false;
+  StreamSubscription<FeedbackSent>? _feedbackSent;
+
+  void _privacyCheck() {
+    final t = Telemetry.current;
+    if (t == null) return;
+    t.app.screen = () => _sections.current.name; // usage.screens: which section is in front
+    _feedbackSent ??= t.feedbackSent.listen((_) {
+      if (mounted) ScaffoldMessenger.maybeOf(context)?.showSnackBar(const SnackBar(content: Text('Sent, thanks')));
+    });
+    if (_privacyShown || !s.ready || !(t.firstRunNeeded || t.askKeepNeeded)) return;
+    // The startup screen goes first; another prompt already open (an update prompt) closes first.
+    if (!AppPrompts.free) return;
+    _privacyShown = true;
+    // Held from now, so an update prompt can't open in the frame before this one does.
+    AppPrompts.showing.value = _privacyOpen = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      try {
+        if (!mounted) return;
+        if (t.firstRunNeeded) await showFirstRun(context, t);
+        if (mounted && t.askKeepNeeded) await askKeepTelemetry(context, t);
+      } finally {
+        _privacyOpen = false;
+        AppPrompts.showing.value = false;
+      }
+    });
+  }
+
   @override
   void initState() {
     super.initState();
+    s.addListener(_privacyCheck);
+    Telemetry.active.addListener(_privacyCheck);
+    AppPrompts.changes.addListener(_privacyCheck);
+    _privacyCheck();
     s.addListener(_syncTitle);
     _syncTitle();
     _opened = DesktopWindow.current.openedFiles.listen(_openFiles);
@@ -190,6 +229,11 @@ class _ShellState extends State<Shell> {
 
   @override
   void dispose() {
+    s.removeListener(_privacyCheck);
+    Telemetry.active.removeListener(_privacyCheck);
+    AppPrompts.changes.removeListener(_privacyCheck);
+    if (_privacyOpen) AppPrompts.showing.value = false; // closed with the app before its page was answered
+    unawaited(_feedbackSent?.cancel());
     s.removeListener(_syncTitle);
     unawaited(_opened?.cancel());
     s.settings.removeListener(_onSettings);
@@ -998,6 +1042,19 @@ Future<void> showProjectMenu(BuildContext context, AppState s) async {
                   }
                 },
               ),
+            ),
+          // The menu's last item (the app names in C.A.W-Telemetry's PLAN.md).
+          if (Telemetry.current case final t?)
+            ListTile(
+              key: const ValueKey('project-feedback'),
+              leading: const Icon(Icons.rate_review_outlined, color: Neon.blue),
+              title: const Text('Send feedback'),
+              subtitle: const Text('A bug, an idea, something confusing or praise; posted publicly',
+                  style: TextStyle(color: Neon.dim)),
+              onTap: () {
+                Navigator.pop(context);
+                if (outer.mounted) showFeedbackSheet(outer, t);
+              },
             ),
         ]),
       ),

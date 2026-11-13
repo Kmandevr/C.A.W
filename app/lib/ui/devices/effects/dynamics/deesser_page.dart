@@ -1,4 +1,5 @@
 // fx-dynamics: the De-esser UI (org.caw.deesser): the sibilance band on a frequency axis, its level against the threshold, and the reduction.
+import '../../kit/repaint.dart';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -146,5 +147,6 @@ class _DeessPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant _DeessPainter o) => true;
+  bool shouldRepaint(covariant _DeessPainter o) =>
+      paintInputsChanged([o.area, o.freq, o.thr, o.range, o.level, o.gr, o.color, o.second, o.active], [area, freq, thr, range, level, gr, color, second, active]);
 }

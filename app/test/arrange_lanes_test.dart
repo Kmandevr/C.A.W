@@ -94,7 +94,7 @@ void main() {
       paint(preview(_source.replaceFirst('8 G4 8 1', '8 A4 8 1'), 12));
       expect(cache.recorded, 3, reason: 'an edit records one');
       paint(preview(_source, 1));
-      expect(preview(_source, 1).density(40), isTrue, reason: 'zoomed out shows the density view');
+      expect(cache.recorded, 4, reason: 'zoomed out still draws the notes, as thin lines (owner, 2026-11-12)');
       expect(cache.length, 3, reason: 'the edit replaced its zoom''s picture');
     });
 

@@ -82,7 +82,7 @@ class UpdateService extends ChangeNotifier {
     this.store,
     DateTime Function()? clock,
     String version = appVersion,
-    this.build = appBuild,
+    this.build = appCommit,
   })  : _clock = clock ?? DateTime.now,
         current = ReleaseVersion.tryParse(version) ?? const ReleaseVersion(0, 0, 0);
 

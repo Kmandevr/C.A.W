@@ -1,5 +1,5 @@
-// What a clip shows inside its body on the timeline (REAPER-style): a MIDI clip's notes as a mini piano roll, cached
-// as a picture per pattern and zoom; a waveform painter waits for audio clips.
+// What a clip shows inside its body on the timeline (REAPER-style): a MIDI clip's notes as thin lines at their pitch,
+// a mini piano roll at every zoom (a drum clip: a tick per hit), cached as a picture per pattern and zoom.
 import 'dart:collection';
 import 'dart:math' as math;
 import 'dart:typed_data';
@@ -35,8 +35,30 @@ class ClipPreviewPainter extends CustomPainter {
   bool shouldRepaint(covariant ClipPreviewPainter old) => !preview.sameAs(old.preview);
 }
 
-/// Below this many pixels per 16th step, or this body height, a clip shows its notes' density instead of the notes.
-const kPreviewMinStepPx = 2.0, kPreviewMinHeight = 14.0;
+/// How thick a note line is drawn, in logical pixels (owner, 2026-11-12, "Thin note lines": never blocks).
+const kNoteLineMin = 1.0, kNoteLineMax = 2.0;
+
+/// The least gap between two pitch lines: closer pitches share a line rather than merge into a block.
+const kNoteLineGap = 1.0;
+
+/// A drum hit's tick: its height (a short upright mark at the hit's start).
+const kDrumTickHeight = 4.0;
+
+/// Where a pattern's note lines sit in a body [height] high over pitches [lo]..[hi]: the line's [thickness] and the
+/// distance between neighbouring [rows] (at least the thickness plus [kNoteLineGap]; pitches closer than that are
+/// gathered onto one line), and the [top] of the highest. Pure, for tests.
+({double thickness, double row, double top, int perLine}) noteLineLayout(double lo, double hi, double height) {
+  final pitches = (hi - lo).ceil() + 1;
+  final fit = height / pitches;
+  final thickness = (fit * 0.6).clamp(kNoteLineMin, kNoteLineMax).toDouble();
+  final step = thickness + kNoteLineGap;
+  // Pitches per line: 1 while each has room, else as many as it takes to keep the gap.
+  final per = fit >= step ? 1 : (step / math.max(1e-6, fit)).ceil();
+  final lines = (pitches / per).ceil();
+  final row = lines <= 1 ? 0.0 : math.min(math.max(fit * per, step), (height - thickness) / (lines - 1));
+  final span = row * (lines - 1) + thickness;
+  return (thickness: thickness, row: row, top: math.max(0.0, (height - span) / 2), perLine: per);
+}
 
 /// A pattern parsed once per source text: its notes, loop length and pitch range (bends included).
 class ParsedPattern {
@@ -96,8 +118,8 @@ class ClipPictureCache {
 
   /// The picture of one cycle of the pattern, [stepW] px per step and [height] high: recorded once per key.
   ui.Picture picture(String patternId, ParsedPattern p, {required double stepW, required double height, required Color color,
-      required bool density}) {
-    final key = '$patternId|${p.lengthSteps}|${stepW.toStringAsFixed(3)}|${height.toStringAsFixed(1)}|${color.toARGB32()}|$density';
+      bool drums = false}) {
+    final key = '$patternId|${p.lengthSteps}|${stepW.toStringAsFixed(3)}|${height.toStringAsFixed(1)}|${color.toARGB32()}|$drums';
     final hit = _pictures.remove(key);
     if (hit != null && (identical(hit.$1, p.source) || hit.$1 == p.source)) {
       _pictures[key] = hit; // most recently used last
@@ -106,7 +128,7 @@ class ClipPictureCache {
     hit?.$2.dispose();
     final recorder = ui.PictureRecorder();
     final canvas = Canvas(recorder);
-    density ? _paintDensity(canvas, p, stepW, height, color) : _paintNotes(canvas, p, stepW, height, color);
+    paintNotes(canvas, p, stepW, height, color, drums: drums);
     final picture = recorder.endRecording();
     recorded++;
     _pictures[key] = (p.source, picture);
@@ -117,55 +139,43 @@ class ClipPictureCache {
     return picture;
   }
 
-  /// The notes as bars across the pattern's own pitch range; a bent note is a ribbon whose centre follows its bend
-  /// (smoothed as the piano roll draws it).
-  static void _paintNotes(Canvas canvas, ParsedPattern p, double stepW, double height, Color color) {
+  /// The notes as thin lines at their pitch across the pattern's own range, fitted to [height] ([noteLineLayout]):
+  /// one path, one draw. A bent note's line follows its bend (smoothed as the piano roll draws it); a drum clip draws
+  /// a short tick at each hit instead. Nothing depends on the zoom but the x positions, so zooming changes it
+  /// smoothly; a note narrower than a pixel stays a pixel wide.
+  @visibleForTesting
+  static void paintNotes(Canvas canvas, ParsedPattern p, double stepW, double height, Color color, {bool drums = false}) {
     final notes = p.doc?.notes ?? const <PatternNote>[];
-    final rows = p.hi - p.lo + 1;
-    final rowH = (height / rows).clamp(1.5, 7.0).toDouble();
-    // The range sits in the middle when it doesn't fill the height.
-    final top = (height - rowH * rows) / 2;
-    double yOf(double pitch) => top + (p.hi - pitch) * rowH;
-    final fill = Paint()..color = color;
+    if (notes.isEmpty) return;
+    final l = noteLineLayout(p.lo, p.hi, height);
+    final t = l.thickness;
+    double yOf(double pitch) => l.top + ((p.hi - pitch) / l.perLine).floorToDouble() * l.row;
+    double yBent(double pitch) => l.top + (p.hi - pitch) / l.perLine * l.row;
+    final path = Path();
     for (final n in notes) {
-      final x0 = n.at.toDouble() * stepW, w = math.max(1.0, n.len.toDouble() * stepW - 0.5);
+      final x0 = n.at.toDouble() * stepW;
+      if (drums) {
+        final y = (yOf(n.pitch) + t / 2 - kDrumTickHeight / 2).clamp(0.0, math.max(0.0, height - kDrumTickHeight));
+        path.addRect(Rect.fromLTWH(x0, y.toDouble(), math.min(kNoteLineMax, math.max(kNoteLineMin, stepW * 0.5)),
+            math.min(kDrumTickHeight, height)));
+        continue;
+      }
+      final w = math.max(1.0, n.len.toDouble() * stepW - (stepW >= 4 ? 0.5 : 0));
       if (n.expr.bend.isEmpty) {
-        canvas.drawRect(Rect.fromLTWH(x0, yOf(n.pitch), w, math.max(1.0, rowH - 0.5)), fill);
+        path.addRect(Rect.fromLTWH(x0, yOf(n.pitch), w, t));
         continue;
       }
       final top = <Offset>[], bottom = <Offset>[];
-      final samples = math.max(2, (w / 2).ceil());
+      final samples = math.max(2, math.min(48, (w / 2).ceil()));
       for (var i = 0; i <= samples; i++) {
         final u = i / samples;
-        final y = yOf(n.pitch + displayCurveAt(n.expr.bend, u, w));
+        final y = yBent(n.pitch + displayCurveAt(n.expr.bend, u, w));
         top.add(Offset(x0 + u * w, y));
-        bottom.add(Offset(x0 + u * w, y + math.max(1.0, rowH - 0.5)));
+        bottom.add(Offset(x0 + u * w, y + t));
       }
-      canvas.drawPath(Path()..addPolygon([...top, ...bottom.reversed], true), fill);
+      path.addPolygon([...top, ...bottom.reversed], true);
     }
-  }
-
-  /// Zoomed out or thin: how many notes sound in each few pixels, as bars from the bottom.
-  static void _paintDensity(Canvas canvas, ParsedPattern p, double stepW, double height, Color color) {
-    final notes = p.doc?.notes ?? const <PatternNote>[];
-    final width = p.lengthSteps * stepW;
-    if (notes.isEmpty || width <= 0) return;
-    const bucketPx = 3.0;
-    final buckets = Int32List(math.max(1, (width / bucketPx).ceil()));
-    for (final n in notes) {
-      final a = (n.at.toDouble() * stepW / bucketPx).floor();
-      final b = ((n.end.toDouble() * stepW) / bucketPx).ceil();
-      for (var i = math.max(0, a); i < math.min(buckets.length, math.max(a + 1, b)); i++) {
-        buckets[i]++;
-      }
-    }
-    final most = buckets.fold<int>(1, math.max);
-    final fill = Paint()..color = color.withValues(alpha: color.a * 0.8);
-    for (var i = 0; i < buckets.length; i++) {
-      if (buckets[i] == 0) continue;
-      final h = math.max(1.5, height * buckets[i] / most);
-      canvas.drawRect(Rect.fromLTWH(i * bucketPx, height - h, bucketPx - 0.5, h), fill);
-    }
+    canvas.drawPath(path, Paint()..color = color);
   }
 }
 
@@ -174,18 +184,18 @@ class ClipPictureCache {
 class MidiClipPreview extends ClipPreview {
   MidiClipPreview({required this.patternId, required this.source, required this.runSource, required this.beatsPerBar,
       required this.sourceOffsetSteps, required this.loop, required this.stepW, required this.top, required this.color,
-      ClipPictureCache? cache, this.loopSteps})
+      ClipPictureCache? cache, this.loopSteps, this.drums = false})
       : cache = cache ?? ClipPictureCache.instance;
 
   /// The preview of [clip] from its pattern in [project], or null when the pattern is gone. [trim]: the clip's start
   /// moved by this many steps while its left edge is dragged, so the notes stay where they are on the timeline.
   static MidiClipPreview? of(ProjectDoc project, ClipDoc clip, {required double stepW, required double top,
-      required Color color, ClipPictureCache? cache, int trim = 0}) {
+      required Color color, ClipPictureCache? cache, int trim = 0, bool drums = false}) {
     final m = project.module(clip.patternId);
     if (m == null) return null;
     return MidiClipPreview(patternId: m.id, source: m.source, runSource: m.runSource, beatsPerBar: project.beatsPerBar,
         sourceOffsetSteps: clip.sourceOffsetSteps + trim, loop: clip.loop, stepW: stepW, top: top, color: color, cache: cache,
-        loopSteps: clip.loopSteps);
+        loopSteps: clip.loopSteps, drums: drums);
   }
 
   final String patternId, source, runSource;
@@ -201,8 +211,8 @@ class MidiClipPreview extends ClipPreview {
   final Color color;
   final ClipPictureCache cache;
 
-  /// Whether a clip [height] high shows the density view at this zoom.
-  bool density(double height) => stepW < kPreviewMinStepPx || height - top < kPreviewMinHeight;
+  /// A drum or percussion clip (its track plays the drums): a tick per hit instead of note lines.
+  final bool drums;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -210,9 +220,11 @@ class MidiClipPreview extends ClipPreview {
     if (p.doc == null || p.doc!.notes.isEmpty || size.width <= 0) return;
     final h = size.height - top - 2;
     if (h <= 2) return;
-    final picture = cache.picture(patternId, p, stepW: stepW, height: h, color: color, density: density(size.height));
+    final picture = cache.picture(patternId, p, stepW: stepW, height: h, color: color, drums: drums);
     final loopLength = (loopSteps ?? 0) > 0 ? loopSteps! : p.lengthSteps;
     final cycle = loopLength * stepW;
+    // A loop narrower than a pixel or so shows nothing a line could: its repeats aren't drawn one by one.
+    if (loop && cycle < 1.5 && size.width / cycle > 64) return;
     final cut = loopLength < p.lengthSteps; // notes past the loop point never play
     canvas.save();
     canvas.clipRect(Offset.zero & size);
@@ -225,7 +237,7 @@ class MidiClipPreview extends ClipPreview {
         if (cut) canvas.clipRect(Rect.fromLTWH(0, -top, cycle, size.height));
         canvas.drawPicture(picture);
         canvas.restore();
-        if (!first && x > 0) canvas.drawLine(Offset(x, top), Offset(x, size.height - 2), edge);
+        if (!first && x > 0 && cycle >= 8) canvas.drawLine(Offset(x, top), Offset(x, size.height - 2), edge);
       }
       if (!loop) break;
     }
@@ -236,7 +248,8 @@ class MidiClipPreview extends ClipPreview {
   bool sameAs(ClipPreview other) =>
       other is MidiClipPreview && other.patternId == patternId && identical(other.source, source) &&
       other.beatsPerBar == beatsPerBar && other.sourceOffsetSteps == sourceOffsetSteps && other.loop == loop &&
-      other.stepW == stepW && other.top == top && other.color == color && other.loopSteps == loopSteps;
+      other.stepW == stepW && other.top == top && other.color == color && other.loopSteps == loopSteps &&
+      other.drums == drums;
 }
 
 /// An audio clip's waveform from peak data: [peaks] holds a (min, max) pair per bucket, -1..1, each bucket

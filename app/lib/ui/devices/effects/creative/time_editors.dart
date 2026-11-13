@@ -1,4 +1,5 @@
 // The time plugin UIs (fx-creative): tape stop (its speed curve with a hold-to-stop pad), reverser (chunks played backwards) and stutter (a beat repeat's slices).
+import '../../kit/repaint.dart';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -162,7 +163,8 @@ class _TapePainter extends CustomPainter {
   static String _ms(double s) => s < 1 ? '${(s * 1000).round()} ms' : '${s.toStringAsFixed(2)} s';
 
   @override
-  bool shouldRepaint(covariant _TapePainter o) => true;
+  bool shouldRepaint(covariant _TapePainter o) =>
+      paintInputsChanged([o.curve, o.stopS, o.startS, o.state, o.progress, o.color, o.second, o.active], [curve, stopS, startS, state, progress, color, second, active]);
 }
 
 // ---------- Reverser ----------
@@ -183,7 +185,7 @@ class ReverserPage extends StatelessWidget {
         height: 180,
         caption: 'REVERSED CHUNKS',
         grid: false,
-        readout: Text(free ? '${t.value('time').round()} ms' : formatParamValue(t.param('sync'), t.value('sync'))),
+        readout: Builder(builder: (context) => Text(free ? '${t.value('time').round()} ms' : formatParamValue(t.param('sync'), t.value('sync')))),
         child: const _ReverserHero(),
       )),
       const LabelledChoice('SYNC', 'sync'),
@@ -291,7 +293,8 @@ class _ReverserPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant _ReverserPainter o) => true;
+  bool shouldRepaint(covariant _ReverserPainter o) =>
+      paintInputsChanged([o.fade, o.position, o.color, o.second, o.active], [fade, position, color, second, active]);
 }
 
 // ---------- Stutter ----------
@@ -423,5 +426,6 @@ class _StutterPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant _StutterPainter o) => true;
+  bool shouldRepaint(covariant _StutterPainter o) =>
+      paintInputsChanged([o.repeats, o.decay, o.pitch, o.gate, o.now, o.color, o.second, o.active], [repeats, decay, pitch, gate, now, color, second, active]);
 }

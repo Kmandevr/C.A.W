@@ -1,5 +1,6 @@
 // Project modulation's UI (#161): a modulator's card, assign by tap and by drag onto any device's knob, rings, drawing an
 // LFO's shape and steps, the link sheet, and the routing view's chips.
+import 'package:caw/ui/devices/kit/hero.dart' show MotionClock;
 import 'package:caw/model/app_state.dart';
 import 'package:caw/model/mod_matrix.dart';
 import 'package:caw/model/modulation.dart';
@@ -67,6 +68,9 @@ void main() {
   });
 
   testWidgets('hold an output and drop it on a knob: a link, its ring drag sets the amount', (tester) async {
+    // A modulated knob or a device visual moves on every frame; hold it still so the screen settles.
+    MotionClock.hold = true;
+    addTearDown(() => MotionClock.hold = false);
     final s = await _pump(tester, ModulatorKinds.macros);
     final id = s.project.modulators.single.id;
     final chip = tester.getCenter(find.byKey(ValueKey('modout-$id-2')));
@@ -112,6 +116,9 @@ void main() {
   });
 
   testWidgets('the link sheet and the routing view show the link', (tester) async {
+    // A modulated knob or a device visual moves on every frame; hold it still so the screen settles.
+    MotionClock.hold = true;
+    addTearDown(() => MotionClock.hold = false);
     final s = await _pump(tester, ModulatorKinds.random);
     final id = s.project.modulators.single.id;
     s.addModLink(ModSourceRef(id, 0), _cutoff);
@@ -136,6 +143,9 @@ void main() {
   });
 
   testWidgets('golden: a track\'s Modulators lane and a knob with two links (for the owner\'s look)', (tester) async {
+    // A modulated knob or a device visual moves on every frame; hold it still so the screen settles.
+    MotionClock.hold = true;
+    addTearDown(() => MotionClock.hold = false);
     Motion.setting = MotionLevel.off;
     final s = stateWith('org.caw.filter');
     final lfo = s.addModulator(ModulatorKinds.lfo, layerId: 'a')!;

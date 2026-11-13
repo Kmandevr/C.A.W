@@ -1,5 +1,6 @@
 // The mixer's FX (gap 9): the master strip's effect slots open the master chain's devices, and effects dragged from
 // one strip to another are copied (or moved, with Alt or Shift, or the toast's Move), their lanes going with a move.
+import 'package:caw/ui/devices/kit/hero.dart' show MotionClock;
 import 'package:caw/engine/component_info.dart';
 import 'dart:convert';
 
@@ -120,6 +121,9 @@ void main() {
     }
 
     testWidgets('the master strip shows its FX slots and adds FX', (tester) async {
+    // A modulated knob or a device visual moves on every frame; hold it still so the screen settles.
+    MotionClock.hold = true;
+    addTearDown(() => MotionClock.hold = false);
       await pump(tester);
       expect(find.text('No master FX'), findsOneWidget);
       s.addNativeEffect(masterLayerOf(s.project), 'org.caw.stereo.width');

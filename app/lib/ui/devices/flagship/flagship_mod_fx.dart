@@ -10,6 +10,7 @@ import '../kit/controls.dart';
 import '../kit/device_style.dart';
 import '../visuals/envelope_view.dart';
 import '../visuals/fx_visuals.dart';
+import '../kit/param_watch.dart';
 import '../visuals/lfo_view.dart';
 import '../visuals/mod_routing.dart';
 import 'flagship_editor.dart';
@@ -30,10 +31,10 @@ class EnvelopesCard extends StatelessWidget {
   const EnvelopesCard({super.key});
 
   @override
-  Widget build(BuildContext context) => const _SourcesCard(
+  Widget build(BuildContext context) => watchDevice(context, (_) => const _SourcesCard(
     storageId: 'flagship-envelopes', title: 'ENVELOPES',
     sources: [ModSource.env1, ModSource.env2, ModSource.env3],
-    labels: ['ENV 1 · AMP', 'ENV 2', 'ENV 3']);
+    labels: ['ENV 1 · AMP', 'ENV 2', 'ENV 3']));
 }
 
 /// The LFOs and random as one section, as [EnvelopesCard].
@@ -41,10 +42,10 @@ class LfosCard extends StatelessWidget {
   const LfosCard({super.key});
 
   @override
-  Widget build(BuildContext context) => const _SourcesCard(
+  Widget build(BuildContext context) => watchDevice(context, (_) => const _SourcesCard(
     storageId: 'flagship-lfos', title: 'LFOs & RANDOM',
     sources: [ModSource.lfo1, ModSource.lfo2, ModSource.lfo3, ModSource.random],
-    labels: ['LFO 1', 'LFO 2', 'LFO 3', 'RANDOM']);
+    labels: ['LFO 1', 'LFO 2', 'LFO 3', 'RANDOM']));
 }
 
 class _SourcesCard extends StatefulWidget {
