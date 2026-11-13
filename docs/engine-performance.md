@@ -1,6 +1,6 @@
 ---
 title: Engine performance
-summary: The CI bench suite (caw_bench SECONDS 500, the Bench workflow), its scenarios and targets, the baseline per target, and the speed phases' before/after tables (phases 1-5, A2-A5).
+summary: The CI bench suite (caw_bench SECONDS 500, the Bench workflow), its scenarios and targets, the baseline per target, and the speed phases' before/after tables (phases 1-5, A2-A6).
 covers: [engine/bench/, .github/workflows/bench.yml, engine/src/stress_scenarios.*]
 updated: 2026-11-13
 ---
@@ -21,7 +21,7 @@ Long runs (`caw_bench SECONDS 600`) and per-track callback-size checks (`caw_ben
 | `three_tracks` | The owner's three-track project (`400 3`) |
 | `song8` | The typical 8-track song: Drums, six Flagship tracks, percussion, reverb and delay buses, master EQ/compressor/limiter, two LFOs, a ducker (`400 1`) |
 | `song8_extras` | The same with per-note FX, a stretched audio clip and a sampler (`400 2`) |
-| `flagship_heavy` | One Flagship patch at its heaviest, **64 notes held (full polyphony)**: three oscillators at 16 unison copies (osc 1 through the 2x-oversampled fold warp), both filters with drive, all five effects, three LFO slots |
+| `flagship_heavy` | One Flagship patch at its heaviest, **64 notes held (full polyphony)**: three oscillators at 16 unison copies (osc 1 through the fold warp, Per copy: 2x oversampled until #197, ADAA at the sample rate since), both filters with drive, all five effects, three LFO slots |
 | `flagship_heavy16` | The same patch with 16 notes held |
 | `drums_kit` | `org.caw.drums`, default kit with glue, drive, room and clipper on; all 16 pads of bank A in a 16th pattern, 3-4 hits a step, ratchets |
 | `song16` | The typical song's tracks repeated to 16 |
@@ -414,7 +414,7 @@ The other scenarios have no Flagship and moved within the runners' noise. The fi
 | Flagship heavy, 64 voices held | 6,108.4 | 5,666.6 | −7.2% |
 | Flagship heavy, 16 voices held | 1,603.6 | 1,493.4 | −6.9% |
 
-- **What is left (callgrind, flagship_heavy16 after):** the fold stack (`addTwice` with its table reads, 43%), the unwarped copies (`addStack`, 25%), the filter drive (`VoiceFilter::begin`, 5%) and the ladders (4%). **[Proposal]** the next step for the heavy patch is fewer table reads rather than wider vectors (for example a cheaper fold at the high rate).
+- **What is left (callgrind, flagship_heavy16 after):** the fold stack (`addTwice` with its table reads, 43%), the unwarped copies (`addStack`, 25%), the filter drive (`VoiceFilter::begin`, 5%) and the ladders (4%). The next step taken was a fold at the sample rate with half the table reads ([A6](#a6-flagship-fold-and-drive-197)).
 
 ### A3. The first callback after Play
 
@@ -477,3 +477,44 @@ GCC on AMD EPYC 9V45 (run 43349254446; an earlier run, [43337163191](https://git
 - **MSVC is the slow x86-64 build:** on the same CPU model in one run (EPYC 9V74, 43349254446), Windows x64 took 797 µs for the typical song against GCC's 615, and 6,274 µs for the heavy Flagship against 2,716 (2.3×).
 - **Not built (no gain where it would ship):** runtime dispatch only pays on x86-64, whose shipped build is the Windows app's MSVC, where the wider instruction set measured no gain. GCC/Clang `target_clones` on a few kernels would not reach the engine-wide gain above (callees not inlined stay baseline) and does not exist in MSVC; a second AVX2 copy of the whole engine compiled into one binary breaks the one-definition rule (the linker may give baseline code an AVX2 copy of an inline Library function). Arm64 needs none: NEON and FMA are its baseline. **[Proposal]** for the owner: build the Windows engine DLL with clang-cl and the engine's GCC/Clang flags (contraction, the fast-math subsets), then measure x86-64-v3 for it, shipped either as a second DLL chosen at load by a CPU check or as the minimum Windows CPU (AVX2: Intel Haswell 2013, AMD Excavator 2015 and later); both change the Windows build, so neither is done here.
 
+
+### A6. Flagship fold and drive (#197)
+
+**What changed (2026-11-13, branch `flagship-speed`, on `e816cbc`; owner's approval on GitHub issue #197, [decisions](decisions.md)):** callgrind of `flagship_heavy` had the fold stack at 46% (`addTwice<Fold, …, 16>`: osc 1's 16 copies × 64 voices at twice the rate, a fold per copy per half-sample), the unwarped copies at 27.5% and the drive at 6.7% (`VoiceFilter::begin`, `Saturator::process2Approx` in double).
+- **ADAA fold at the sample rate** (`addFold`, `foldAdaa`, `sincNear`, `sinCyclesFine` in `builtin_flagship.cpp`): one table read a copy a sample instead of two, no decimators; each copy read as an unwarped copy is (`readCopy`, the fixed-point phase). The fold's run is a vectorised loop kept from being unrolled (`CAW_NO_UNROLL`: unrolled four times over, GCC's straight-line code spilled x86-64's 16 registers, +20% instructions), the run's largest step decides once whether the far half of the sinc is needed (it gives the same bits either way), and a voice's copies sum into local buffers first.
+- **Whole stack** (`oscN_fold_mode` 1): two folds a voice-sample instead of one a copy.
+- **The hybrid (owner, 2026-11-13, after the aliasing below):** notes whose f × (drive + 2) exceeds 10 kHz fold on the 2x path again (`addFoldTwice`, both modes, chosen when the voice starts: `foldTwiceAtStart`, `foldTwiceFor`); the rest keep ADAA. In `flagship_heavy` (drive 3.8) that is the top three of the 64 voices, G6 to A6; `flagship_heavy16` has none.
+- **Float drive** (`Saturator::processApproxFloat`, `fastmath.hpp`): four floats a vector (SSE, NEON) instead of two doubles.
+- **Tried, not kept:** the same no-unroll hint on the unwarped copies (`addCopy`): +9% instructions there.
+
+**[Fact, aliasing sweep, 2026-11-13]** The power between the harmonics over the power on them (the aliasing test's measure, Blackman-Harris, 16384 points, below 20 kHz), a sine (Classic, frame 0) folded, A4..A7 (MIDI 69..105) a semitone apart at warp amounts 0.2, 0.4, 0.6, 0.8 and 1 (drive 2.4 to 8), from scratch builds forcing one path (`-DCAW_FOLD_FORCE=0` or `1`) and the 2x fold before #197 (`e5efb7b`). The worst note over A#4..A7 (MIDI 70 and below excluded: there 48 kHz is a near multiple of the note and the measure cannot see the aliases), in dB:
+
+| Amount | One copy: before #197 / ADAA / hybrid | 7 copies per copy: before / ADAA / hybrid | 7 copies Whole stack: ADAA / hybrid |
+|---|---|---|---|
+| 0.2 | −69.3 / −64.3 / −70.5 | −70.6 / −71.6 / −71.9 | −54.4 / −75.0 |
+| 0.4 | −63.6 / −33.6 / −67.7 | −65.3 / −47.4 / −66.5 | −22.6 / −70.1 |
+| 0.6 | −62.4 / −15.4 / −66.9 | −63.0 / −28.6 / −65.6 | −6.0 / −65.7 |
+| 0.8 | −57.6 / −3.2 / −59.4 | −56.3 / −16.2 / −59.3 | −6.1 / −64.6 |
+| 1.0 | −52.5 / −4.2 / −53.9 | −51.9 / −15.5 / −53.1 | −7.6 / −60.2 |
+
+Single notes, one copy (before / ADAA / hybrid): A5 at full drive −62.0 / −67.0 / −67.0 (ADAA); A6 at full drive −63.1 / −38.7 / −68.9 (2x), at 0.6 −72.9 / −74.3 / −80.2 (2x); A7 at full drive −54.9 / −6.9 / −56.5. ADAA stays below −60 dB while f × (drive + 2) is under about 14 kHz for one copy or 7 per copy and about 12 kHz for a whole 7-copy stack (the sum of the copies folds harder), then gives way within a few semitones; the crossover at 10 kHz keeps 3.5 semitones or more of margin. Below it ADAA is sometimes several dB worse than 2x at a given note (B4 and C5 at full drive: −66 against −79 dB) but never above −60 dB. The 2x path now folds with ADAA's fine sine instead of the parabola, which is why it is 1–5 dB cleaner than before #197.
+
+**[Fact, callgrind, 2026-11-13]** M Ir per second of audio in `Engine::process`, x86-64 GCC 13.3 Release, `caw_bench 3` minus `caw_bench 1` `500 --runs 1 --only <scenario>`, halved. Before: the Flagship of `e5efb7b` (as `e816cbc`); ADAA only: the hybrid's code with `-DCAW_FOLD_FORCE=0` (as `d34e9a6`); hybrid: this branch. Whole stack is the same builds with `osc1_fold_mode` 1 in the scenario (a scratch copy; the suite's projects are unchanged).
+
+| Scenario | Before | ADAA only | Hybrid | Change | Whole stack, ADAA only | Whole stack, hybrid | Change |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| Flagship heavy, 64 voices held | 5,670.5 | 5,139.2 | 5,232.1 | −7.7% | 3,866.6 | 3,916.4 | −30.9% |
+| Flagship heavy, 16 voices held | 1,494.5 | 1,361.7 | 1,361.7 | −8.9% | 1,043.5 | 1,043.5 | −30.2% |
+| Typical song (8 tracks) | 1,101.5 | 1,101.7 | 1,101.6 | 0.0% | – | – | – |
+
+(Change: the hybrid against before.) The hybrid keeps about 82% of ADAA's saving on the 64-voice patch per copy and 96% at Whole stack: three voices of 64 on the 2x path cost 93 M/s and 50 M/s. In `flagship_heavy16` (0.5 s), ADAA took the fold stack from 664 to 530 M/s (`addFold`) and the float drive the drive from 96 to 50 M/s.
+
+**[Fact, wall time, 2026-11-13]** `caw_bench 5 500 --runs 3 --only <scenario>`, mean µs per 256-frame callback, the same Linux x64 container (4 vCPUs shared with other work), two rounds, before / ADAA only / hybrid / Whole stack ADAA only / Whole stack hybrid:
+
+| Scenario | Round 1 | Round 2 |
+|---|---|---|
+| Flagship heavy, 64 voices held | 2,817 / 2,492 / 2,524 / 1,751 / 1,817 | 2,902 / 2,521 / 2,571 / 1,778 / 1,842 |
+| Flagship heavy, 16 voices held | 728 / 708 / 696 / 554 / 534 | 757 / 677 / 671 / 522 / 537 |
+| Typical song (8 tracks) | 694 / 690 / 679 / – / – | 673 / 750 / 698 / – / – |
+
+So about 10–12% off the heavy patch at Per copy and 35–37% at Whole stack, the hybrid within 1–4% of ADAA only; the 16-voice and song rows are within this container's noise. **[Assumption]** Arm64 (NEON's three-operand form and 32 registers) gains at least as much; the Bench workflow measures it on the next run.

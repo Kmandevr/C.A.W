@@ -216,7 +216,62 @@ public:
 #endif
     }
 
+    // processApprox() on n floats in place, in float arithmetic four at a time (a four-wide vector on GCC and
+    // Clang: SSE on x86-64, NEON on Arm64; a plain loop of the same steps elsewhere): the same clamp and rational
+    // fit with float coefficients, within about 1e-6 x the level-matching gain of processApprox() (float's
+    // rounding, below -115 dBFS; Flagship's voice drive, #197). A tail of fewer than four runs padded to four,
+    // so a value's result does not depend on where a block splits.
+    void processApproxFloat(float* x, uint32_t n) const noexcept {
+        const float amount = static_cast<float>(amount_), gain = static_cast<float>(gain_);
+        uint32_t i = 0;
+        for (; i + 4 <= n; i += 4) approxFloat4(x + i, amount, gain);
+        if (i < n) {
+            float t[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+            for (uint32_t k = 0; i + k < n; ++k) t[k] = x[i + k];
+            approxFloat4(t, amount, gain);
+            for (uint32_t k = 0; i + k < n; ++k) x[i + k] = t[k];
+        }
+    }
+
 private:
+    // tanhApproxRational's fit in float (x already held to -10..10).
+    template <class T>
+    static T tanhApproxRationalFloat(T x) noexcept {
+        const T s = x * x;
+        T p = s * 3.217632110003212e-11f + 1.0357852250132971e-07f;
+        p = p * s + 4.092017186705684e-05f;
+        p = p * s + 0.0043728758223902315f;
+        p = p * s + 0.14059264090233234f;
+        p = p * s + 0.9999999993415611f;
+        T q = s * 2.6742358055163463e-09f + 2.4792909092118756e-06f;
+        q = q * s + 0.0004906653531677001f;
+        q = q * s + 0.02901487015638532f;
+        q = q * s + 0.4739259712575389f;
+        q = q * s + 1.0f;
+        return x * p / q;
+    }
+    static void approxFloat4(float* x, float amount, float gain) noexcept {
+#if defined(__GNUC__)
+        typedef float F4 __attribute__((vector_size(16)));
+        const F4 zero = {0.0f, 0.0f, 0.0f, 0.0f}, lim = {10.0f, 10.0f, 10.0f, 10.0f};
+        F4 v;
+        __builtin_memcpy(&v, x, sizeof v);
+        v = v - v == zero ? v : zero;  // finiteOr0 (NaN and infinities give 0)
+        v = v * amount;
+        v = v > lim ? lim : (v < -lim ? -lim : v);
+        v = tanhApproxRationalFloat(v) * gain;
+        __builtin_memcpy(x, &v, sizeof v);
+#else
+        for (int k = 0; k < 4; ++k) {
+            float v = x[k];
+            v = v - v == 0.0f ? v : 0.0f;
+            v = v * amount;
+            v = v > 10.0f ? 10.0f : (v < -10.0f ? -10.0f : v);
+            x[k] = tanhApproxRationalFloat(v) * gain;
+        }
+#endif
+    }
+
     double amount_ = 1.0, gain_ = 1.3130352854993312;  // 1 / tanh(1)
 };
 

@@ -113,6 +113,10 @@ NativeComponentInfo flagshipFixture() {
   for (var o = 1; o <= 3; o++) {
     whole('osc${o}_fm_ratio', 'Osc $o FM ratio', 1, 1, 16);
   }
+  // After the FM ratios (#197, 2026-11-13): each oscillator's fold mode (the fold warp only).
+  for (var o = 1; o <= 3; o++) {
+    pick('osc${o}_fold_mode', 'Osc $o fold mode', 0, const ['Per copy', 'Whole stack']);
+  }
   return NativeComponentInfo(id: 'org.caw.synth.flagship', name: 'Flagship', role: 'instrument', builtin: true,
       ports: const [
         ComponentPortInfo(id: 'notes', type: 'event', input: true, layout: 'none', channels: 0),

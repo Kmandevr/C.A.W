@@ -64,17 +64,25 @@ bool sameBits(const std::vector<float>& a, const std::vector<float>& b) {
 
 }  // namespace
 
-TEST(eco_renders_flagships_fold_and_fm_warps_without_oversampling) {
-    // osc 1 bright (one copy, no filter, no reverb) through each warp at full amount.
-    for (const double w : {5.0, 6.0}) {  // FM, Fold
-        const ProjectSpec p = oneTrack("org.caw.synth.flagship", "0 A4 8 1\n",
-                                       {{"osc1_unison", 1}, {"osc1_warp", w}, {"osc1_warp_amt", 1}, {"flt1_on", 0},
+TEST(eco_renders_flagships_fm_warp_and_high_folds_without_oversampling) {
+    // osc 1 bright (one copy, no filter, no reverb) through each warp at full amount: FM at A4, the fold at A4
+    // (below the hybrid fold's crossover: ADAA at every quality) and at A6 (above it: 2x at Normal and High).
+    struct Case {
+        double warp;
+        const char* note;
+        bool ecoDiffers;
+    };
+    for (const Case c : {Case{5.0, "A4", true}, Case{6.0, "A4", false}, Case{6.0, "A6", true}}) {
+        const ProjectSpec p = oneTrack("org.caw.synth.flagship", std::string("0 ") + c.note + " 8 1\n",
+                                       {{"osc1_unison", 1}, {"osc1_warp", c.warp}, {"osc1_warp_amt", 1}, {"flt1_on", 0},
                                         {"fx_reverb_on", 0}});
         const std::vector<float> eco = render(p, 0), normal = render(p, 1), high = render(p, 2);
         CHECK(!eco.empty());
-        // Normal and High oversample alike (2x); Eco renders at the sample rate: a different, aliased signal...
+        // Normal and High oversample alike (2x); Eco renders at the sample rate (FM aliased, the fold with ADAA
+        // at every pitch, #197): a different signal... A low fold is ADAA at every quality: the same bits.
         CHECK(sameBits(normal, high));
-        CHECK(difference(eco, normal) > 1.0);
+        if (c.ecoDiffers) CHECK(difference(eco, normal) > 1.0);
+        else CHECK(sameBits(eco, normal));
         // ...at about the same level, finite.
         for (float v : eco) CHECK(std::isfinite(v));
         CHECK_NEAR(analysis::levels(eco.data(), eco.size()).rmsDb, analysis::levels(normal.data(), normal.size()).rmsDb, 1.5);
@@ -220,11 +228,11 @@ TEST(the_master_chain_sleeps_soon_after_a_tail_and_wakes_sample_exactly) {
 }
 
 TEST(a_quality_change_never_switches_a_held_warped_notes_oversampling) {
-    // A held FM or fold note keeps the path it started on (1x in Eco, 2x decimated otherwise) through a quality
-    // change, so the change makes no click: the same bits as the quality never changing. The next note takes the
-    // new quality.
+    // A held FM note, or a fold high enough for its 2x path (#197), keeps the path it started on (1x in Eco, 2x
+    // decimated otherwise) through a quality change, so the change makes no click: the same bits as the quality
+    // never changing. The next note takes the new quality.
     for (const double w : {5.0, 6.0}) {  // FM, Fold
-        const ProjectSpec p = oneTrack("org.caw.synth.flagship", "0 A3 12 1\n",
+        const ProjectSpec p = oneTrack("org.caw.synth.flagship", w == 5.0 ? "0 A3 12 1\n" : "0 A6 12 1\n",
                                        {{"osc1_unison", 1}, {"osc1_warp", w}, {"osc1_warp_amt", 0.8}, {"flt1_on", 0},
                                         {"fx_reverb_on", 0}});
         for (const int from : {0, 1}) {

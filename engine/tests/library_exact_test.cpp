@@ -133,6 +133,33 @@ TEST(library_audio_rate_approximations_stay_far_below_hearing) {
         CHECK_EQ(out[0], 0.0);
         CHECK_EQ(out[1], 0.0);
     }
+    {
+        // The float form (Flagship's voice drive, #197): within 1e-6 x the gain of processApprox at every drive the
+        // filters offer (1 to 10), for float inputs from -4 to 4; a block's tail (n not a multiple of 4) gives each
+        // value the bits a whole block gives it; NaN and infinities give 0.
+        double worstFloat = 0;
+        for (const double amount : {1.01, 2.0, 3.0, 6.5, 10.0}) {
+            lib::Saturator s;
+            s.set(amount);
+            float x[64], y[64];
+            for (int i = -400000; i < 400000; i += 64) {
+                for (int k = 0; k < 64; ++k) x[k] = y[k] = static_cast<float>((i + k) * 1e-5);
+                s.processApproxFloat(y, 64);
+                for (int k = 0; k < 64; ++k)
+                    worstFloat = std::max(worstFloat, std::fabs(y[k] - s.processApprox(x[k])) * detTanh(amount));
+                float z[7];
+                std::copy(x + 3, x + 10, z);
+                s.processApproxFloat(z, 7);
+                for (int k = 0; k < 7; ++k) CHECK_EQ(z[k], y[3 + k]);
+            }
+        }
+        CHECK(worstFloat < 1e-6);
+        float bad[3] = {std::nanf(""), std::numeric_limits<float>::infinity(), -std::numeric_limits<float>::infinity()};
+        sat.processApproxFloat(bad, 3);
+        CHECK_EQ(bad[0], 0.0f);
+        CHECK_EQ(bad[1], 0.0f);
+        CHECK_EQ(bad[2], 0.0f);
+    }
     lib::Svf a, b;
     lib::MultiLadder la, lb;
     double worstFilter = 0;

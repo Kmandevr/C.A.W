@@ -355,9 +355,10 @@ std::string noteName(int midi) {
     return std::string(names[midi % 12]) + std::to_string(midi / 12 - 1);
 }
 
-// One Flagship patch at its heaviest: Init with all three oscillators at 16 copies (osc 1 through the fold warp,
-// Flagship's 2x oversampled path), both filters on with drive (ladder, then SVF in series), every effect on and
-// three LFO slots. `voices` notes are held for the whole run (64: Flagship's full polyphony).
+// One Flagship patch at its heaviest: Init with all three oscillators at 16 copies (osc 1 through the fold warp at
+// drive 3.8, the hybrid fold of #197: ADAA at the sample rate for most notes, 2x oversampled for the 64 voices'
+// top three, G6 to A6), both filters on with drive (ladder, then SVF in series), every effect on and three LFO
+// slots. `voices` notes are held for the whole run (64: Flagship's full polyphony).
 ProjectSpec flagshipHeavy(int voices) {
     ProjectSpec p;
     p.name = "Flagship heavy";
