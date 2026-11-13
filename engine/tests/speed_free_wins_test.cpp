@@ -64,7 +64,7 @@ bool sameBits(const std::vector<float>& a, const std::vector<float>& b) {
 
 }  // namespace
 
-TEST(eco_renders_flagships_fold_and_fm_warps_without_oversampling) {
+TEST(eco_renders_flagships_fm_warp_without_oversampling_and_the_fold_as_every_quality_does) {
     // osc 1 bright (one copy, no filter, no reverb) through each warp at full amount.
     for (const double w : {5.0, 6.0}) {  // FM, Fold
         const ProjectSpec p = oneTrack("org.caw.synth.flagship", "0 A4 8 1\n",
@@ -72,9 +72,11 @@ TEST(eco_renders_flagships_fold_and_fm_warps_without_oversampling) {
                                         {"fx_reverb_on", 0}});
         const std::vector<float> eco = render(p, 0), normal = render(p, 1), high = render(p, 2);
         CHECK(!eco.empty());
-        // Normal and High oversample alike (2x); Eco renders at the sample rate: a different, aliased signal...
+        // Normal and High oversample FM alike (2x); Eco renders it at the sample rate: a different, aliased
+        // signal... The fold runs at the sample rate with ADAA at every quality (#197): the same bits.
         CHECK(sameBits(normal, high));
-        CHECK(difference(eco, normal) > 1.0);
+        if (w == 6.0) CHECK(sameBits(eco, normal));
+        else CHECK(difference(eco, normal) > 1.0);
         // ...at about the same level, finite.
         for (float v : eco) CHECK(std::isfinite(v));
         CHECK_NEAR(analysis::levels(eco.data(), eco.size()).rmsDb, analysis::levels(normal.data(), normal.size()).rmsDb, 1.5);
@@ -220,9 +222,9 @@ TEST(the_master_chain_sleeps_soon_after_a_tail_and_wakes_sample_exactly) {
 }
 
 TEST(a_quality_change_never_switches_a_held_warped_notes_oversampling) {
-    // A held FM or fold note keeps the path it started on (1x in Eco, 2x decimated otherwise) through a quality
-    // change, so the change makes no click: the same bits as the quality never changing. The next note takes the
-    // new quality.
+    // A held FM note keeps the path it started on (1x in Eco, 2x decimated otherwise) through a quality change, so
+    // the change makes no click: the same bits as the quality never changing. The next note takes the new quality.
+    // (The fold has one path at every quality since #197; it stays here as a check that it does.)
     for (const double w : {5.0, 6.0}) {  // FM, Fold
         const ProjectSpec p = oneTrack("org.caw.synth.flagship", "0 A3 12 1\n",
                                        {{"osc1_unison", 1}, {"osc1_warp", w}, {"osc1_warp_amt", 0.8}, {"flt1_on", 0},

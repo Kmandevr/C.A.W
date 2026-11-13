@@ -123,8 +123,13 @@ constexpr uint32_t viaParam(uint32_t s) { return kViaBase + s; }
 // whole multiple of the note (the FM warp only). Appended for the same reason; not mod destinations.
 constexpr uint32_t kFmRatioBase = kViaBase + kSlots;
 constexpr uint32_t fmRatioParam(uint32_t o) { return kFmRatioBase + o; }
-constexpr uint32_t kParamCount = kFmRatioBase + kOscs;
-static_assert(kParamCount == 212, "the parameter list's size is part of the documented layout");
+// Added after the FM ratios (2026-11-13, #197): each oscillator's fold mode (the fold warp only): Per copy folds
+// each unison copy, Whole stack the stack's sum. Appended for the same reason (a project or preset saved without
+// it loads Per copy, the default); not mod destinations.
+constexpr uint32_t kFoldModeBase = kFmRatioBase + kOscs;
+constexpr uint32_t foldModeParam(uint32_t o) { return kFoldModeBase + o; }
+constexpr uint32_t kParamCount = kFoldModeBase + kOscs;
+static_assert(kParamCount == 215, "the parameter list's size is part of the documented layout");
 
 enum Source : int {
     kSrcNone, kSrcEnv1, kSrcEnv2, kSrcEnv3, kSrcLfo1, kSrcLfo2, kSrcLfo3, kSrcRandom, kSrcVelocity, kSrcNote,
@@ -142,6 +147,7 @@ constexpr std::string_view kTables[] = {"Basic", "Analog", "Vocal", "Harmonic", 
 static_assert(sizeof(kTables) / sizeof(kTables[0]) == kTableChoices);
 constexpr std::string_view kWarps[] = {"None", "Bend", "Sync", "Mirror", "Quantize", "FM", "Fold", "Osc FM"};
 static_assert(sizeof(kWarps) / sizeof(kWarps[0]) == kWarpCount);
+constexpr std::string_view kFoldModes[] = {"Per copy", "Whole stack"};
 constexpr std::string_view kStacks[] = {"Off", "Octave", "2 octaves", "Fifth", "Major chord", "Minor chord", "Harmonics"};
 constexpr std::string_view kDests[] = {"Filter 1", "Filter 2", "Both", "Bypass"};
 constexpr std::string_view kFilterTypes[] = {"Ladder LP", "Ladder HP", "Ladder BP", "SVF LP", "SVF HP",
@@ -273,6 +279,9 @@ public:
                  count(kSources));
         for (uint32_t o = 0; o < kOscs; ++o)
             whole("osc" + std::to_string(o + 1) + "_fm_ratio", "Osc " + std::to_string(o + 1) + " FM ratio", 1.0, 1.0, 16.0);
+        for (uint32_t o = 0; o < kOscs; ++o)
+            pick("osc" + std::to_string(o + 1) + "_fold_mode", "Osc " + std::to_string(o + 1) + " fold mode", 0.0, kFoldModes,
+                 count(kFoldModes));
     }
 
 private:
@@ -636,7 +645,7 @@ const lib::Wavetable& emptyUserTable() {
 inline float whole(float t) noexcept { return static_cast<float>(static_cast<int32_t>(t)); }  // floor, for t >= 0
 
 // sin(2 pi u) for u >= 0 (cycles), within about 0.001 of the true sine: a parabola refined once (no trig, no
-// branch). The FM and fold warps' modulator; at this error it is a slightly different timbre, not noise.
+// branch). The FM warp's modulator; at this error it is a slightly different timbre, not noise.
 inline float sineCycles(float u) noexcept {
     const float x = 2.0f * (u - whole(u)) - 1.0f;  // -1..1: sin(2 pi u) = -sin(pi x)
     const float y = 4.0f * x * (1.0f - std::fabs(x));
@@ -675,12 +684,13 @@ struct OscKey {
     int warp = 0;
     int fmRatio = 1;
     double modRatio = 1.0;  // Osc FM: the modulating oscillator's pitch over this one's (its octave, semitones, fine)
-    bool once = false;      // the FM or fold warp at the sample rate (Eco quality), not at twice it
+    bool once = false;      // the FM warp at the sample rate (Eco quality), not at twice it
+    bool foldWhole = false;  // the fold warp on the stack's sum (Whole stack), not on each copy (Per copy)
     lib::UnisonSettings unison{-1};
     bool operator==(const OscKey&) const = default;
 };
 
-// The fold warp's 2x decimator for one side (the half-band all-pass pair of lib::Oversampler2x's down()): per
+// The FM warp's 2x decimator for one side (the half-band all-pass pair of lib::Oversampler2x's down()): per
 // stage, lane 0 the even branch's all-pass and lane 1 the odd one's, each lane lib::AllpassChain's arithmetic.
 // A block at a time with the state in registers, and a stereo pair's two sides in one loop (four independent
 // all-pass chains): each lane's arithmetic is one chain's, per branch and side, sample by sample (speed A2,
@@ -793,8 +803,19 @@ struct OscVoice {
     bool centred = false;            // every copy plays the same on both sides (no pan, no spread)
     float gainL[kMaxCopies] = {}, gainR[kMaxCopies] = {};
     float monoGain[kMaxCopies] = {};  // a quarter of the copy's pan gains' sum (added twice: the mid), before the level
-    // The FM and fold warps' decimators (left, right, and the copy Osc FM hears), state the render moves on.
+    // The FM warp's decimators (left, right, and the copy Osc FM hears), state the render moves on.
     Decimator2x foldL, foldR, foldM;
+    // The fold's anti-aliasing state (addFold), [0] for the render and [1] for the copy Osc FM hears: per copy, each
+    // copy's last read value; whole stack, each side's last sum.
+    float foldLast[2][kMaxCopies] = {};
+    float foldSide[2][2] = {};
+    float stackL[kMaxCopies] = {}, stackR[kMaxCopies] = {};  // the copies' pan gains before the level (Whole stack)
+    float levelGain = 0.0f;                                   // the oscillator's level, after a whole stack's fold
+    bool stackCentred = true;                                 // every copy's pan gains alike (one fold per sample)
+    void clearFold() noexcept {
+        std::memset(foldLast, 0, sizeof foldLast);
+        std::memset(foldSide, 0, sizeof foldSide);
+    }
     // The layout and pan gains, worked out again only when their settings change.
     lib::UnisonSettings layoutKey{-1};
     double panKey = 2.0;
@@ -885,7 +906,7 @@ void addStack(const OscVoice& o, const float* gL, const float* gR, float* L, flo
             float t = t0 + static_cast<float>(static_cast<int32_t>(first + i)) * dt;
             t -= whole(t);
             float x;
-            if constexpr (W == kWarpFm || W == kWarpFold) t = t < 0.99999994f ? t : 0.99999994f;  // as addTwice
+            if constexpr (W == kWarpFm) t = t < 0.99999994f ? t : 0.99999994f;  // as addTwice
             if constexpr (W == kWarpFmOsc) x = fmOscPhase(t, w1, fm[first + i]) * m;
             else x = warp<W>(t, w1, w2, w3) * m;
             const int32_t k = static_cast<int32_t>(x);
@@ -895,22 +916,19 @@ void addStack(const OscVoice& o, const float* gL, const float* gR, float* L, flo
                 const float u = B[k] + (B[k + 1] - B[k]) * fr;
                 v += (u - v) * mix;
             }
-            if constexpr (W == kWarpFold) {  // Eco: the fold at the sample rate (addTwice's fold, not oversampled)
-                v += w2 * (sineCycles(0.25f * w1 * v + 64.0f) - v);
-            }
             L[i] += v * gl;
             R[i] += v * gr;
         }
     }
 }
 
-// The FM and fold warps at twice the rate: each copy is read (exactly: the table and the warped phase are smooth,
-// so reading between samples needs no interpolation filter), warped (and folded) at t and t + dt / 2, summed with
-// its gains, and the sum comes down through a half-band decimator. What FM's far sidebands and the folder make
-// above the high rate's Nyquist (up to 1.5 times the sample rate) lands in the decimator's stop band instead of
-// on the audible spectrum. R null: mono into L (gL).
+// The FM warp at twice the rate: each copy is read (exactly: the table and the warped phase are smooth, so
+// reading between samples needs no interpolation filter), warped at t and t + dt / 2, summed with its gains, and
+// the sum comes down through a half-band decimator. What FM's far sidebands make above the high rate's Nyquist
+// (up to 1.5 times the sample rate) lands in the decimator's stop band instead of on the audible spectrum. R null:
+// mono into L (gL).
 // Each copy in three passes, as addCopy (speed phase 1, 2026-11-12): the warped phases' indices and fractions,
-// then the table reads (a gather: scalar loads), then the interpolation, the morph, the fold and the sums, so the
+// then the table reads (a gather: scalar loads), then the interpolation, the morph and the sums, so the
 // compiler vectorizes the first and the last. Each sample's arithmetic is the one-pass loop's, in its order, so
 // the bits are the same. Mono (R null) sums into the left only.
 template <int W, bool Morph, uint32_t N>
@@ -947,8 +965,6 @@ void addTwice(OscVoice& o, const float* gL, const float* gR, float* L, float* R,
                 const float u = b[2 * i] + (b[2 * i + 1] - b[2 * i]) * fr[i];
                 v += (u - v) * mix;
             }
-            // A wavefolder on the read value (lib::fold's sin(x drive pi / 2)), drive w1, blended in by w2.
-            if constexpr (W == kWarpFold) v += w2 * (sineCycles(0.25f * w1 * v + 64.0f) - v);
             return v;
         };
         if (dr) {
@@ -993,6 +1009,177 @@ void addTwiceWarp(OscVoice& o, const float* gL, const float* gR, float* L, float
     }
 }
 
+// One unwarped copy's read values over N (or n) frames into v: addCopy's passes and arithmetic, the values kept
+// instead of mixed into L and R (the fold warp shapes them first).
+template <bool Morph, uint32_t N>
+CAW_FORCE_INLINE void readCopy(const float* A, const float* B, uint32_t p, uint32_t step, int sh, float mix, float* v,
+                               uint32_t n) noexcept {
+    const uint32_t count = N ? N : n;
+    const uint32_t mask = (1u << sh) - 1u;
+    const float scale = 1.0f / static_cast<float>(1u << sh);
+    int32_t index[kControlFrames];
+    float fr[kControlFrames], a[2 * kControlFrames], b[2 * kControlFrames];
+    for (uint32_t i = 0; i < count; ++i) {
+        index[i] = static_cast<int32_t>(p >> sh);
+        fr[i] = static_cast<float>(static_cast<int32_t>(p & mask)) * scale;
+        p += step;
+    }
+    for (uint32_t i = 0; i < count; ++i) {
+        const size_t k = static_cast<uint32_t>(index[i]);
+        std::memcpy(a + 2 * i, A + k, 2 * sizeof(float));
+        if constexpr (Morph) std::memcpy(b + 2 * i, B + k, 2 * sizeof(float));
+    }
+    for (uint32_t i = 0; i < count; ++i) {
+        float x = a[2 * i] + (a[2 * i + 1] - a[2 * i]) * fr[i];
+        if constexpr (Morph) {
+            const float u = b[2 * i] + (b[2 * i + 1] - b[2 * i]) * fr[i];
+            x += (u - x) * mix;
+        }
+        v[i] = x;
+    }
+}
+
+// sin(2 pi u) for u in cycles (|u| below 2^31), within about 1e-7 (a sine to its x^11 term on a quarter cycle).
+// No offset is added to u, so a small u keeps its relative accuracy. No branch, so it vectorizes. The fold's sine
+// (#197): sineCycles' 0.001 error, with its kinks, put partials of its own at about -65 dB.
+inline float sinCyclesFine(float u) noexcept {
+    float h = u - static_cast<float>(static_cast<int32_t>(u));  // -1 .. 1
+    h = h > 0.5f ? h - 1.0f : (h < -0.5f ? h + 1.0f : h);         // -0.5 .. 0.5
+    const float r = h > 0.25f ? 0.5f - h : (h < -0.25f ? -0.5f - h : h);  // sin(2 pi h) = sin(2 pi r)
+    const float x = 6.28318531f * r, x2 = x * x;
+    float p = -2.50521084e-8f;
+    p = p * x2 + 2.75573192e-6f;
+    p = p * x2 - 1.98412698e-4f;
+    p = p * x2 + 8.33333333e-3f;
+    p = p * x2 - 0.166666667f;
+    return x + x * x2 * p;
+}
+
+// sin(2 pi u) / (2 pi u) for u >= 0: 1 at 0 (u held at 1e-7, where it is 1 to float's precision).
+inline float sincCycles(float u) noexcept {
+    u = u > 1e-7f ? u : 1e-7f;
+    return sinCyclesFine(u) / (6.28318531f * u);
+}
+
+// The fold warp's shaper: lib::fold's sin(x drive pi / 2), drive w1, blended in by w2, on the value v whose
+// previous value was p, with first-order antiderivative anti-aliasing (ADAA, #197, owner 2026-11-13): the mean of
+// the shaper over the straight line from p to v, (G(v) - G(p)) / (v - p) for G the shaper's antiderivative. For
+// the sine, with m = (v + p) / 2 and d = v - p, (cos(k p) - cos(k v)) / (k d) is exactly sin(k m) sin(k d / 2) /
+// (k d / 2) (k = drive pi / 2): no difference of nearly equal numbers, so v = p (where the quotient is 0 / 0) needs
+// no special case, and there it is the plain fold of v. The blend's straight part averages to m.
+CAW_FORCE_INLINE float foldAdaa(float v, float p, float w1, float w2) noexcept {
+    const float m = 0.5f * (v + p), d = v - p;
+    const float f = sinCyclesFine(0.25f * w1 * m) * sincCycles(0.125f * w1 * (d < 0.0f ? -d : d));
+    return m + w2 * (f - m);
+}
+
+// The fold over the period's values s[1..count] after s[0] (the last period's last), into y.
+template <uint32_t N>
+CAW_FORCE_INLINE void foldRun(const float* s, float* y, uint32_t n, float w1, float w2) noexcept {
+    const uint32_t count = N ? N : n;
+    for (uint32_t i = 0; i < count; ++i) y[i] = foldAdaa(s[i + 1], s[i], w1, w2);
+}
+
+// The fold warp (#197, 2026-11-13): at the sample rate, anti-aliased by ADAA (foldAdaa) in place of the 2x
+// oversampling it had, and at Eco as at Normal. Its phase is unwarped, so each copy is read as addCopy reads one.
+// Per copy (Whole false): each copy folded, then added with its gains, as before. Whole stack: the copies summed
+// first at their pan gains (the level left out, so the level never changes the fold), each side's sum folded once
+// (one fold a sample when every copy is centred), then the level: the fold costs two shapers a voice instead of
+// one a copy, and folds the stack's beating as one waveform (a different, rougher sound). Spread copies fold side
+// by side, as only a side's own copies reach it. Mono (the copy Osc FM hears, into L): per copy, each copy at
+// its mono gain; whole stack, the mean of the two sides' folds, before the level. State: foldLast, foldSide.
+template <bool Morph, bool Whole, bool Mono, uint32_t N>
+void addFold(OscVoice& o, const float* gL, const float* gR, float* L, float* R, uint32_t n, uint32_t first) noexcept {
+    if constexpr (N != 0) n = N;
+    const int slot = Mono ? 1 : 0;
+    const float w1 = o.w1, w2 = o.w2, mix = o.mix;
+    float s[kControlFrames + 1], y[kControlFrames];
+    if constexpr (!Whole) {
+        float* last = o.foldLast[slot];
+        for (int c = 0; c < o.count; ++c) {
+            if (!o.a[c]) continue;
+            const uint32_t step = o.step[c];
+            s[0] = last[c];
+            readCopy<Morph, N>(o.a[c], o.b[c], o.phase[c] + first * step, step, o.shift[c], mix, s + 1, n);
+            last[c] = s[n];
+            foldRun<N>(s, y, n, w1, w2);
+            if constexpr (Mono) {
+                const float g = 2.0f * gL[c];
+                for (uint32_t i = 0; i < n; ++i) L[i] += y[i] * g;
+            } else {
+                const float gl = gL[c], gr = gR[c];
+                for (uint32_t i = 0; i < n; ++i) {
+                    L[i] += y[i] * gl;
+                    R[i] += y[i] * gr;
+                }
+            }
+        }
+        return;
+    }
+    (void)gR;
+    float sl[kControlFrames + 1] = {}, sr[kControlFrames + 1] = {}, v[kControlFrames];
+    const bool centred = o.stackCentred;
+    for (int c = 0; c < o.count; ++c) {
+        if (!o.a[c]) continue;
+        const uint32_t step = o.step[c];
+        readCopy<Morph, N>(o.a[c], o.b[c], o.phase[c] + first * step, step, o.shift[c], mix, v, n);
+        const float pl = o.stackL[c], pr = o.stackR[c];
+        for (uint32_t i = 0; i < n; ++i) sl[i + 1] += v[i] * pl;
+        if (!centred)
+            for (uint32_t i = 0; i < n; ++i) sr[i + 1] += v[i] * pr;
+    }
+    float* side = o.foldSide[slot];
+    sl[0] = side[0];
+    sr[0] = side[1];
+    side[0] = sl[n];
+    side[1] = centred ? sl[n] : sr[n];  // a centred stack's right side is its left (should it spread again)
+    foldRun<N>(sl, y, n, w1, w2);
+    if (centred) {
+        if constexpr (Mono) {
+            for (uint32_t i = 0; i < n; ++i) L[i] += y[i];
+        } else {
+            const float g = o.levelGain;
+            for (uint32_t i = 0; i < n; ++i) {
+                L[i] += y[i] * g;
+                R[i] += y[i] * g;
+            }
+        }
+        return;
+    }
+    float yr[kControlFrames];
+    foldRun<N>(sr, yr, n, w1, w2);
+    if constexpr (Mono) {
+        for (uint32_t i = 0; i < n; ++i) L[i] += 0.5f * (y[i] + yr[i]);
+    } else {
+        const float g = o.levelGain;
+        for (uint32_t i = 0; i < n; ++i) {
+            L[i] += y[i] * g;
+            R[i] += yr[i] * g;
+        }
+    }
+}
+
+template <bool Morph, bool Whole>
+void addFoldIn(OscVoice& o, const float* gL, const float* gR, float* L, float* R, uint32_t n, uint32_t first,
+               bool mono) noexcept {
+    if (mono) addFold<Morph, Whole, true, 0>(o, gL, gR, L, R, n, first);
+    else if (n == kControlFrames) addFold<Morph, Whole, false, kControlFrames>(o, gL, gR, L, R, n, first);
+    else addFold<Morph, Whole, false, 0>(o, gL, gR, L, R, n, first);
+}
+
+void addFoldWarp(OscVoice& o, const float* gL, const float* gR, float* L, float* R, uint32_t n, uint32_t first,
+                 bool mono) noexcept {
+    const bool morph = o.mix != 0.0f;
+    if (o.key.foldWhole) {
+        if (morph) addFoldIn<true, true>(o, gL, gR, L, R, n, first, mono);
+        else addFoldIn<false, true>(o, gL, gR, L, R, n, first, mono);
+    } else if (morph) {
+        addFoldIn<true, false>(o, gL, gR, L, R, n, first, mono);
+    } else {
+        addFoldIn<false, false>(o, gL, gR, L, R, n, first, mono);
+    }
+}
+
 // The oscillator's stack into L and R (its gains, its level), or with `mono` into L alone at its pre-level mono
 // gains (what Osc FM hears of it). `fm`: Osc FM's modulator, period-indexed.
 void addOscillator(OscVoice& o, float* L, float* R, uint32_t n, uint32_t first, const float* fm,
@@ -1013,10 +1200,7 @@ void addOscillator(OscVoice& o, float* L, float* R, uint32_t n, uint32_t first, 
             if (fm) addStackWarp<kWarpFmOsc>(o, gL, gR, L, R, n, first, fm);
             else addStackWarp<kWarpNone>(o, gL, gR, L, R, n, first, fm);
             break;
-        case kWarpFold:
-            if (o.key.once) addStackWarp<kWarpFold>(o, gL, gR, L, R, n, first, fm);  // Eco
-            else addTwiceWarp<kWarpFold>(o, gL, gR, L, R, n, first, mono);
-            break;
+        case kWarpFold: addFoldWarp(o, gL, gR, L, R, n, first, mono); break;
         default: addStackWarp<kWarpNone>(o, gL, gR, L, R, n, first, fm); break;
     }
 }
@@ -1084,18 +1268,8 @@ struct VoiceFilter {
             }
         }
     }
-    // The drive on one side, two samples at a time (Saturator::process2Approx: each lane processApprox()'s steps).
-    void driveMono(float* x, uint32_t n) noexcept {
-        uint32_t i = 0;
-        for (; i + 1 < n; i += 2) {
-            const double in[2] = {static_cast<double>(x[i]), static_cast<double>(x[i + 1])};
-            double out[2];
-            saturator.process2Approx(in, out);
-            x[i] = static_cast<float>(out[0]);
-            x[i + 1] = static_cast<float>(out[1]);
-        }
-        if (i < n) x[i] = static_cast<float>(saturator.processApprox(static_cast<double>(x[i])));
-    }
+    // The drive on one side, in float four samples at a time (Saturator::processApproxFloat, #197).
+    void driveMono(float* x, uint32_t n) noexcept { saturator.processApproxFloat(x, n); }
     template <class F>
     void each(float* x, uint32_t n, F&& f) noexcept {
         for (uint32_t i = 0; i < n; ++i) x[i] = static_cast<float>(f(static_cast<double>(x[i])));
@@ -1216,14 +1390,9 @@ private:
             svf[1] = svf[0];
         }
         if (!(mix >= 1.0f)) std::copy(L, L + n, dryL), std::copy(R, R + n, dryR);
-        if (drive) {  // both sides at once (Saturator::process2Approx: each lane processApprox()'s steps)
-            for (uint32_t i = 0; i < n; ++i) {
-                const double in[2] = {static_cast<double>(L[i]), static_cast<double>(R[i])};
-                double out[2];
-                saturator.process2Approx(in, out);
-                L[i] = static_cast<float>(out[0]);
-                R[i] = static_cast<float>(out[1]);
-            }
+        if (drive) {  // each side in float, four samples at a time (Saturator::processApproxFloat, #197)
+            saturator.processApproxFloat(L, n);
+            saturator.processApproxFloat(R, n);
         }
         if (type <= kLadderBp) ladder[0].flushDenormals(), ladder[1].flushDenormals();
     }
@@ -1253,7 +1422,7 @@ struct Voice {
     uint32_t noteId = 0;
     uint64_t age = 0;
     bool starting = false, fresh = false;  // the next control sets the note's start (and, fresh, its phases)
-    // Eco's FM and fold warps at the sample rate (OscKey::once), latched when the voice starts from silence: a
+    // Eco's FM warp at the sample rate (OscKey::once), latched when the voice starts from silence: a
     // quality change while a note sounds never switches its oscillators between the 1x and the decimated path.
     bool ecoWarps = false;
     uint32_t seed = 0;
@@ -1831,7 +2000,7 @@ private:
         v.random.retrigger();
         std::memset(v.fmBuf, 0, sizeof v.fmBuf);
         if (!v.fresh) return;
-        for (OscVoice& o : v.osc) o.foldL.clear(), o.foldR.clear(), o.foldM.clear();
+        for (OscVoice& o : v.osc) o.foldL.clear(), o.foldR.clear(), o.foldM.clear(), o.clearFold();
         v.shared = true;  // until its filter 1 is set unlike the shared one (then its own, to the note's end)
         for (uint32_t o = 0; o < kOscs; ++o) {
             const double start = base_[oscParam(o, kOscPhase)], randomness = base_[oscParam(o, kOscPhaseRand)];
@@ -1965,9 +2134,10 @@ private:
         key.amount = clampd(at(kOscWarpAmount), 0.0, 1.0);
         key.warp = key.amount > 0.0 ? clampi(at(kOscWarp), 0, kWarpCount - 1) : kWarpNone;
         key.fmRatio = key.warp == kWarpFm ? clampi(P(fmRatioParam(index)), 1, 16) : 1;
-        // Eco quality renders the FM and fold warps at the sample rate (no 2x oversampling): they alias more. The
-        // voice's choice from its start holds while it sounds.
-        key.once = (key.warp == kWarpFm || key.warp == kWarpFold) && v.ecoWarps;
+        // Eco quality renders the FM warp at the sample rate (no 2x oversampling): it aliases more. The voice's
+        // choice from its start holds while it sounds. (The fold runs at the sample rate at every quality: addFold.)
+        key.once = key.warp == kWarpFm && v.ecoWarps;
+        key.foldWhole = key.warp == kWarpFold && P(foldModeParam(index)) >= 0.5;
         if (key.warp == kWarpFmOsc) {  // the modulator's tuning against this one's (both follow the note)
             const uint32_t m = fmSource(index);
             const double offset = 12.0 * clampi(P(oscParam(m, kOscOctave)), -4, 4) + clampi(P(oscParam(m, kOscSemi)), -12, 12) +
@@ -2057,8 +2227,9 @@ private:
             case kWarpFold:
                 o.w1 = static_cast<float>(1.0 + 7.0 * amount);  // drive 1..8
                 o.w2 = static_cast<float>(amount < 0.25 ? 4.0 * amount : 1.0);
-                // Folding spreads the table's harmonics about as far as the drive; rendered at twice the rate, what
-                // goes up to 1.5 times the sample rate is filtered out, so half the drive keeps it there.
+                // Folding spreads the table's harmonics about as far as the drive. The mip level is the one the 2x
+                // oversampled fold read (half the drive: #197 kept the table's brightness; ADAA, not the mip
+                // level, keeps the aliases down).
                 faster = 0.5 * o.w1 > 1.0 ? 0.5 * o.w1 : 1.0;
                 break;
             case kWarpFmOsc:
@@ -2069,12 +2240,15 @@ private:
                 break;
             default: break;
         }
-        const bool twice = (key.warp == kWarpFold || key.warp == kWarpFm) && !key.once;
-        if (twice && (o.warpMode != key.warp || o.key.table < 0 || o.key.once)) {  // into FM or fold: fresh decimators
+        const bool twice = key.warp == kWarpFm && !key.once;
+        if (twice && (o.warpMode != key.warp || o.key.table < 0 || o.key.once)) {  // into FM: fresh decimators
             o.foldL.set(half_);
             o.foldR.set(half_);
             o.foldM.set(half_);
         }
+        // Into the fold, or to its other mode: its anti-aliasing starts from 0, as a voice does.
+        if (key.warp == kWarpFold && (o.warpMode != kWarpFold || o.key.table < 0 || o.key.foldWhole != key.foldWhole))
+            o.clearFold();
         o.warpMode = key.warp;
         o.key = key;
         o.faster = faster;
@@ -2115,9 +2289,16 @@ private:
             o.gainL[c] = static_cast<float>(o.panL[c] * key.level);
             o.gainR[c] = static_cast<float>(o.panR[c] * key.level);
             o.monoGain[c] = static_cast<float>(0.25 * (o.panL[c] + o.panR[c]));
+            o.stackL[c] = static_cast<float>(o.panL[c]);
+            o.stackR[c] = static_cast<float>(o.panR[c]);
         }
+        o.levelGain = static_cast<float>(key.level);
         o.centred = true;
-        for (int c = 0; c < o.count; ++c) o.centred = o.centred && (!o.a[c] || o.gainL[c] == o.gainR[c]);
+        o.stackCentred = true;
+        for (int c = 0; c < o.count; ++c) {
+            o.centred = o.centred && (!o.a[c] || o.gainL[c] == o.gainR[c]);
+            o.stackCentred = o.stackCentred && (!o.a[c] || o.stackL[c] == o.stackR[c]);
+        }
     }
 
     template <class Get>
