@@ -2,6 +2,7 @@
 // images with limits, camera moves, the new transitions and beat presets, saving as version 2 and reading version 1,
 // the render's pipeline, drafts, cancel and profile, the tabbed sheet at 360 dp, and goldens of the layout and of a
 // frame for each transition and overlay.
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:ui' as ui;
@@ -33,6 +34,23 @@ import 'music_video_test_song.dart';
 VideoScene _scene() => buildVideoScene(videoTestSong(), colorOf: (l) => 0xff00ffcc + l.color);
 
 /// A small opaque image drawn here (a gradient square with a ring), PNG-encoded.
+/// [png] with its header's size changed to [w] × [h] (the IHDR chunk's CRC recomputed), its pixels left as they are.
+Uint8List _pngSized(Uint8List png, int w, int h) {
+  final out = Uint8List.fromList(png);
+  final d = ByteData.sublistView(out);
+  d.setUint32(16, w);
+  d.setUint32(20, h);
+  var c = 0xffffffff;
+  for (final b in out.sublist(12, 29)) {
+    c ^= b;
+    for (var k = 0; k < 8; k++) {
+      c = (c & 1) != 0 ? (c >> 1) ^ 0xedb88320 : c >> 1;
+    }
+  }
+  d.setUint32(29, c ^ 0xffffffff);
+  return out;
+}
+
 Future<Uint8List> _png(int w, int h) async {
   final rec = ui.PictureRecorder();
   final c = Canvas(rec);
@@ -169,6 +187,73 @@ void main() {
         store.dispose();
       });
     });
+
+    testWidgets('formats decoded at full size take fewer pixels; JPEG and WebP are known from their bytes',
+        (tester) async {
+      await tester.runAsync(() async {
+        // A PNG whose header says 4500 × 4000 (18 MP): refused before its pixels are decoded.
+        final png = await _png(2, 2);
+        expect(decodesScaled(png), isFalse);
+        await expectLater(decodeVideoImage(_pngSized(png, 4500, 4000)), throwsA(isA<FormatException>()));
+      });
+      expect(decodesScaled(Uint8List.fromList([0xff, 0xd8, 0xff, 0xe0])), isTrue);
+      expect(decodesScaled(Uint8List.fromList([...ascii.encode('RIFF'), 0, 0, 0, 0, ...ascii.encode('WEBPVP8 ')])), isTrue);
+      expect(VideoImageAsset.maxPixelsFullDecode, lessThan(VideoImageAsset.maxPixels));
+    });
+
+    testWidgets('the store decodes only the images in use, within its budget, and lets a late decode go',
+        (tester) async {
+      final tmp = Directory.systemTemp.createTempSync('caw_video_store_');
+      addTearDown(() => tmp.deleteSync(recursive: true));
+      await tester.runAsync(() async {
+        final dir = Directory('${tmp.path}/assets')..createSync();
+        final assets = [
+          for (var i = 1; i <= 3; i++) VideoImageAsset(id: 'img$i', file: 'img$i.png', name: 'img$i.png'),
+        ];
+        for (final a in assets) {
+          File('${dir.path}/${a.file}').writeAsBytesSync(await _png(400, 200));
+        }
+        // A budget of 2 × 300² pixels: two in use get 300 px on the long side, one gets its own 400.
+        final store = VideoImageStore(dir, budgetBytes: 2 * 300 * 300 * 4);
+        await store.load(assets, used: {'img1', 'img2'});
+        expect(store.images.keys.toSet(), {'img1', 'img2'});
+        expect(store.images['img1']!.width, 300);
+        await store.load(assets, used: {'img1'});
+        expect(store.images.keys, ['img1']);
+        expect(store.images['img1']!.width, 400); // re-decoded larger with the whole budget
+        // Disposed while a decode is under way: no image is kept, and nothing throws.
+        final late = store.load(assets);
+        await Future<void>.delayed(const Duration(milliseconds: 1));
+        store.dispose();
+        await late;
+        expect(store.images, isEmpty);
+      });
+      expect(VideoImageStore.sideFor(1, VideoImageStore.defaultBudget), VideoImageAsset.keepSide);
+      expect(VideoImageStore.sideFor(32, VideoImageStore.defaultBudget), lessThan(VideoImageAsset.keepSide));
+    });
+
+    testWidgets('asset ids are never reused, and a removed asset\'s file is swept from its folder only',
+        (tester) async {
+      final tmp = Directory.systemTemp.createTempSync('caw_video_ids_');
+      addTearDown(() => tmp.deleteSync(recursive: true));
+      await tester.runAsync(() async {
+        final dir = Directory('${tmp.path}/assets')..createSync();
+        expect(await nextVideoAssetId([], dir), 'img1');
+        final kept = VideoImageAsset(id: 'img1', file: 'img1.png', name: 'a.png');
+        File('${dir.path}/img1.png').writeAsBytesSync([1]);
+        // img3's asset is gone (undone away), but its file is still there: the next id goes past it.
+        File('${dir.path}/img3.jpg').writeAsBytesSync([1]);
+        File('${dir.path}/notes.txt').writeAsBytesSync([1]);
+        File('${tmp.path}/img9.png').writeAsBytesSync([1]); // outside the folder
+        expect(await nextVideoAssetId([kept], dir), 'img4');
+        await sweepVideoAssets(dir, [kept]);
+        expect(File('${dir.path}/img1.png').existsSync(), isTrue);
+        expect(File('${dir.path}/img3.jpg').existsSync(), isFalse);
+        expect(File('${dir.path}/notes.txt').existsSync(), isTrue);
+        expect(File('${tmp.path}/img9.png').existsSync(), isTrue);
+        expect(await nextVideoAssetId([kept], dir), 'img2');
+      });
+    });
   });
 
   group('camera moves, transitions and beat presets', () {
@@ -252,6 +337,17 @@ void main() {
   });
 
   group('render', () {
+    test('a queued frame that fails before its turn is held and thrown at its turn, in order', () async {
+      final first = Completer<int>();
+      final take1 = heldFuture(first.future);
+      final take2 = heldFuture(Future<int>.error(StateError('frame 2 failed')));
+      // Frame 2 fails while frame 1 is still pending: no unhandled error (the test would fail on one).
+      await Future<void>.delayed(Duration.zero);
+      first.complete(1);
+      expect(await take1(), 1);
+      await expectLater(take2(), throwsA(isA<StateError>()));
+    });
+
     Future<(FrameHashEncoder, MusicVideoRender)> render(WidgetTester tester, Directory dir,
         {MusicVideoOptions? options, int? depth, bool draft = false, MusicVideoDoc? doc}) async {
       final enc = FrameHashEncoder();

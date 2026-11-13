@@ -260,7 +260,10 @@ class VideoImageAsset {
   static const extensions = ['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp'];
 
   /// The largest file read (bytes), the largest side and pixel count decoded, and the long side kept in memory.
-  static const maxBytes = 24 << 20, maxSide = 8192, maxPixels = 40000000, keepSide = 2048;
+  /// [maxPixelsFullDecode] is the pixel count for formats decoded at full size before scaling (PNG, GIF, BMP):
+  /// 16 MP is 64 MB for a moment.
+  static const maxBytes = 24 << 20, maxSide = 8192, maxPixels = 40000000, maxPixelsFullDecode = 16000000,
+      keepSide = 2048;
 
   Map<String, dynamic> toJson() =>
       {'id': id, 'file': file, 'name': name, if (width > 0) 'width': width, if (height > 0) 'height': height};

@@ -948,6 +948,12 @@ class MusicVideoDoc {
 
   VideoImageAsset? asset(String id) => assets.where((a) => a.id == id).firstOrNull;
 
+  /// The assets the whole video's and the shots' image layers use.
+  Set<String> get usedAssetIds => {
+        for (final x in images) x.assetId,
+        for (final c in timeline.cuts) ...[for (final x in c.images) x.assetId],
+      };
+
   /// A new overlay or layer id, not used in the video yet nor given out before (`prefix` t for texts, i for images).
   String newOverlayId(String prefix) {
     final used = {

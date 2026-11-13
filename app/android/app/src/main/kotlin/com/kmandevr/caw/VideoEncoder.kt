@@ -1,14 +1,18 @@
 // The music video's MP4 encoder (`caw/video`): RGBA frames to H.264 with MediaCodec (through its input Surface where it can), a 16-bit WAV to AAC, both muxed by MediaMuxer.
 package com.kmandevr.caw
 
-import android.graphics.Bitmap
 import android.media.MediaCodec
-import android.graphics.Bitmap
 import android.media.MediaCodecInfo
-import android.graphics.Bitmap
 import android.media.MediaCodecList
 import android.media.MediaFormat
 import android.media.MediaMuxer
+import android.opengl.EGL14
+import android.opengl.EGLConfig
+import android.opengl.EGLContext
+import android.opengl.EGLDisplay
+import android.opengl.EGLExt
+import android.opengl.EGLSurface
+import android.opengl.GLES20
 import android.os.Handler
 import android.os.Looper
 import android.view.Surface
@@ -19,6 +23,7 @@ import java.io.File
 import java.io.RandomAccessFile
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import java.nio.FloatBuffer
 import java.util.concurrent.Executors
 
 /**
@@ -31,17 +36,19 @@ import java.util.concurrent.Executors
  *   replies one byte: 0, or 1 and the error's UTF-8 text.
  * - `finish`: ends the stream and closes the file. `cancel`: stops and deletes the file.
  *
- * Frames go in through the codec's input Surface where it has one (COLOR_FormatSurface): the RGBA bytes into a
- * Bitmap, drawn on the Surface's hardware canvas, so the GPU converts them to the codec's YUV. Output timestamps are
- * the frame's index / fps (the Surface stamps frames with the time they were posted; each is matched to its frame
- * by order, so B-frames reordering the output can't confuse it). Where the Surface can't be had, or its first frame
- * fails, the frame is converted to YUV 4:2:0 (BT.601) on the CPU a row at a time into the codec's input Image.
+ * Frames go in through the codec's input Surface where it has one (COLOR_FormatSurface): an EGL context (GLES 2) on
+ * that Surface uploads the RGBA bytes as a texture and draws it, so the GPU converts them to the codec's YUV, and
+ * each frame is stamped explicitly with eglPresentationTimeANDROID at its index × 1e9 / fps: the encoder's rate
+ * control and the file see exact frame times, never when the frame happened to be posted. Where the Surface or its
+ * EGL context can't be had, or its first frame fails, the frame is converted to YUV 4:2:0 (BT.601) on the CPU a row
+ * at a time into the codec's input Image.
  *
- * Platform APIs only, no library (Android Developers, read 2026-11-11 and 2026-11-12): MediaCodec (getInputImage
+ * Platform APIs only, no library (Android Developers, read 2026-11-11 to 2026-11-13): MediaCodec (getInputImage
  * API 21, createInputSurface API 18, signalEndOfInputStream API 18, COLOR_FormatYUV420Flexible and
- * COLOR_FormatSurface API 21/18), Surface.lockHardwareCanvas (API 23), Bitmap.copyPixelsFromBuffer (API 1),
- * MediaMuxer (MPEG-4 output API 18), MediaCodecList (API 21): developer.android.com/reference/android/media/MediaCodec,
- * .../android/view/Surface, .../android/graphics/Bitmap, .../MediaMuxer, .../MediaCodecList.
+ * COLOR_FormatSurface API 21/18), EGL14 (API 17), EGLExt.eglPresentationTimeANDROID (API 18) and
+ * EGLExt.EGL_RECORDABLE_ANDROID (API 26, the app's minSdk), GLES20 (API 8), MediaMuxer (MPEG-4 output API 18),
+ * MediaCodecList (API 21): developer.android.com/reference/android/media/MediaCodec, .../android/opengl/EGLExt,
+ * .../android/opengl/EGL14, .../android/opengl/GLES20, .../MediaMuxer, .../MediaCodecList.
  */
 class VideoEncoder : MethodChannel.MethodCallHandler {
     private val worker = Executors.newSingleThreadExecutor()
@@ -166,11 +173,9 @@ class VideoEncoder : MethodChannel.MethodCallHandler {
         private val info = MediaCodec.BufferInfo()
         private var codecInfo: MediaCodecInfo? = null
 
-        // The Surface path: the codec's input Surface, the Bitmap each frame is copied into, and when each frame
-        // was posted (microseconds, System.nanoTime's clock, which the Surface stamps frames with).
+        // The Surface path: the codec's input Surface and the EGL context drawing frames onto it.
         private var surface: Surface? = null
-        private var bitmap: Bitmap? = null
-        private val posted = ArrayList<Long>()
+        private var egl: EglInput? = null
 
         // The CPU path's rows, reused frame to frame.
         private var rgbaRows: ByteArray? = null
@@ -212,16 +217,15 @@ class VideoEncoder : MethodChannel.MethodCallHandler {
             val codec = MediaCodec.createByCodecName(codecInfo!!.name)
             try {
                 codec.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
-                if (useSurface) {
-                    surface = codec.createInputSurface()
-                    bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
-                }
+                if (useSurface) surface = codec.createInputSurface()
                 codec.start()
+                if (useSurface) egl = EglInput(surface!!, width, height)
             } catch (e: Exception) {
+                egl?.release()
+                egl = null
                 surface?.release()
                 surface = null
-                bitmap?.recycle()
-                bitmap = null
+                try { codec.stop() } catch (x: Exception) {}
                 codec.release()
                 if (useSurface) return false
                 throw e
@@ -250,38 +254,22 @@ class VideoEncoder : MethodChannel.MethodCallHandler {
             try { video?.stop() } catch (e: Exception) {}
             try { video?.release() } catch (e: Exception) {}
             video = null
+            egl?.release()
+            egl = null
             surface?.release()
             surface = null
-            bitmap?.recycle()
-            bitmap = null
-            posted.clear()
         }
 
+        /** One frame onto the Surface at exactly its frame time (the codec gives it back in microseconds, which is
+         * frames × 1e6 / fps, the same time the CPU path queues). */
         private fun surfaceFrame(rgba: ByteBuffer) {
-            val s = surface!!
-            val b = bitmap!!
-            rgba.rewind()
-            b.copyPixelsFromBuffer(rgba)
-            val canvas = s.lockHardwareCanvas()
-            try {
-                canvas.drawBitmap(b, 0f, 0f, null)
-            } finally {
-                s.unlockCanvasAndPost(canvas)
-            }
-            posted.add(System.nanoTime() / 1000)
+            val e = egl ?: throw IllegalStateException("no EGL context")
+            // Take what is ready first, so the codec has room for this frame (not before the first: the muxer must
+            // not start on this codec's format while a failing first frame can still switch to the CPU path).
+            if (frames > 0) drain(false)
+            e.draw(rgba, frames * 1_000_000_000L / fps)
             frames++
             drain(false)
-        }
-
-        /** The frame a Surface-stamped output time belongs to: how many frames were posted before it. */
-        private fun frameOf(pts: Long): Long {
-            var lo = 0
-            var hi = posted.size
-            while (lo < hi) {
-                val mid = (lo + hi) ushr 1
-                if (posted[mid] < pts) lo = mid + 1 else hi = mid
-            }
-            return lo.toLong()
         }
 
         private fun bufferFrame(rgba: ByteBuffer) {
@@ -384,10 +372,10 @@ class VideoEncoder : MethodChannel.MethodCallHandler {
             try { video?.stop() } catch (e: Exception) {}
             try { video?.release() } catch (e: Exception) {}
             try { muxer?.release() } catch (e: Exception) {}
+            egl?.release()
+            egl = null
             surface?.release()
             surface = null
-            bitmap?.recycle()
-            bitmap = null
             video = null
             muxer = null
             audioSamples = null
@@ -411,10 +399,6 @@ class VideoEncoder : MethodChannel.MethodCallHandler {
                         val buffer = codec.getOutputBuffer(out)
                         if (buffer != null && info.size > 0 && (info.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG) == 0) {
                             if (!muxing) throw IllegalStateException("video before its format")
-                            // A Surface frame carries the time it was posted: give it its frame's time instead.
-                            if (surface != null) {
-                                info.presentationTimeUs = frameOf(info.presentationTimeUs) * 1_000_000L / fps
-                            }
                             buffer.position(info.offset)
                             buffer.limit(info.offset + info.size)
                             muxer!!.writeSampleData(videoTrack, buffer, info)
@@ -511,6 +495,179 @@ class VideoEncoder : MethodChannel.MethodCallHandler {
         }
     }
 
+}
+
+/**
+ * An EGL context (GLES 2) on a codec's input Surface, current on the thread that made it (the encoder's one worker,
+ * where every call to it runs). [draw] uploads a width × height RGBA frame (top row first) into a texture, draws it
+ * over the whole surface and posts it with its presentation time.
+ */
+private class EglInput(surface: Surface, private val width: Int, private val height: Int) {
+    private var display: EGLDisplay = EGL14.EGL_NO_DISPLAY
+    private var context: EGLContext = EGL14.EGL_NO_CONTEXT
+    private var eglSurface: EGLSurface = EGL14.EGL_NO_SURFACE
+    private var program = 0
+    private var texture = 0
+    private var position = 0
+    private var texCoord = 0
+
+    // A strip over the whole frame; the texture's first row (the frame's top) at the top (clip y = +1).
+    private val quad: FloatBuffer = floats(-1f, -1f, 1f, -1f, -1f, 1f, 1f, 1f)
+    private val uv: FloatBuffer = floats(0f, 1f, 1f, 1f, 0f, 0f, 1f, 0f)
+
+    init {
+        try {
+            display = EGL14.eglGetDisplay(EGL14.EGL_DEFAULT_DISPLAY)
+            if (display == EGL14.EGL_NO_DISPLAY) throw IllegalStateException("no EGL display")
+            val version = IntArray(2)
+            if (!EGL14.eglInitialize(display, version, 0, version, 1)) eglFail("eglInitialize")
+            val attribs = intArrayOf(
+                EGL14.EGL_RED_SIZE, 8, EGL14.EGL_GREEN_SIZE, 8, EGL14.EGL_BLUE_SIZE, 8,
+                EGL14.EGL_RENDERABLE_TYPE, EGL14.EGL_OPENGL_ES2_BIT,
+                EGLExt.EGL_RECORDABLE_ANDROID, 1,
+                EGL14.EGL_NONE,
+            )
+            val configs = arrayOfNulls<EGLConfig>(1)
+            val count = IntArray(1)
+            if (!EGL14.eglChooseConfig(display, attribs, 0, configs, 0, 1, count, 0) || count[0] < 1) {
+                eglFail("eglChooseConfig")
+            }
+            val config = configs[0]!!
+            context = EGL14.eglCreateContext(display, config, EGL14.EGL_NO_CONTEXT,
+                intArrayOf(EGL14.EGL_CONTEXT_CLIENT_VERSION, 2, EGL14.EGL_NONE), 0)
+            if (context == EGL14.EGL_NO_CONTEXT) eglFail("eglCreateContext")
+            eglSurface = EGL14.eglCreateWindowSurface(display, config, surface, intArrayOf(EGL14.EGL_NONE), 0)
+            if (eglSurface == EGL14.EGL_NO_SURFACE) eglFail("eglCreateWindowSurface")
+            if (!EGL14.eglMakeCurrent(display, eglSurface, eglSurface, context)) eglFail("eglMakeCurrent")
+
+            val max = IntArray(1)
+            GLES20.glGetIntegerv(GLES20.GL_MAX_TEXTURE_SIZE, max, 0)
+            if (max[0] < maxOf(width, height)) throw IllegalStateException("textures here are at most ${max[0]} px")
+            program = link(
+                """
+                attribute vec4 aPosition;
+                attribute vec2 aTexCoord;
+                varying vec2 vTexCoord;
+                void main() { gl_Position = aPosition; vTexCoord = aTexCoord; }
+                """.trimIndent(),
+                """
+                precision mediump float;
+                varying vec2 vTexCoord;
+                uniform sampler2D uFrame;
+                void main() { gl_FragColor = vec4(texture2D(uFrame, vTexCoord).rgb, 1.0); }
+                """.trimIndent(),
+            )
+            position = GLES20.glGetAttribLocation(program, "aPosition")
+            texCoord = GLES20.glGetAttribLocation(program, "aTexCoord")
+            val t = IntArray(1)
+            GLES20.glGenTextures(1, t, 0)
+            texture = t[0]
+            GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, texture)
+            // One texel to one pixel: no filtering or mipmaps (so any size works in GLES 2).
+            GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_NEAREST)
+            GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_NEAREST)
+            GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE)
+            GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE)
+            GLES20.glPixelStorei(GLES20.GL_UNPACK_ALIGNMENT, 4)
+            GLES20.glTexImage2D(GLES20.GL_TEXTURE_2D, 0, GLES20.GL_RGBA, width, height, 0, GLES20.GL_RGBA,
+                GLES20.GL_UNSIGNED_BYTE, null)
+            GLES20.glUseProgram(program)
+            GLES20.glUniform1i(GLES20.glGetUniformLocation(program, "uFrame"), 0)
+            GLES20.glViewport(0, 0, width, height)
+            GLES20.glDisable(GLES20.GL_BLEND)
+            glCheck("setup")
+        } catch (e: Exception) {
+            release()
+            throw e
+        }
+    }
+
+    /** [rgba] (width × height × 4 bytes) onto the surface, presented at [ptsNs] nanoseconds. */
+    fun draw(rgba: ByteBuffer, ptsNs: Long) {
+        rgba.rewind()
+        GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, texture)
+        GLES20.glTexSubImage2D(GLES20.GL_TEXTURE_2D, 0, 0, 0, width, height, GLES20.GL_RGBA,
+            GLES20.GL_UNSIGNED_BYTE, rgba)
+        GLES20.glUseProgram(program)
+        GLES20.glEnableVertexAttribArray(position)
+        GLES20.glVertexAttribPointer(position, 2, GLES20.GL_FLOAT, false, 0, quad)
+        GLES20.glEnableVertexAttribArray(texCoord)
+        GLES20.glVertexAttribPointer(texCoord, 2, GLES20.GL_FLOAT, false, 0, uv)
+        GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
+        glCheck("draw")
+        if (!EGLExt.eglPresentationTimeANDROID(display, eglSurface, ptsNs)) eglFail("eglPresentationTimeANDROID")
+        if (!EGL14.eglSwapBuffers(display, eglSurface)) eglFail("eglSwapBuffers")
+    }
+
+    /** Lets the context and its window surface go. The display is left initialised: it is the process's default
+     * one, which Flutter's own rendering also uses. */
+    fun release() {
+        if (display == EGL14.EGL_NO_DISPLAY) return
+        if (context != EGL14.EGL_NO_CONTEXT && eglSurface != EGL14.EGL_NO_SURFACE &&
+            EGL14.eglMakeCurrent(display, eglSurface, eglSurface, context)) {
+            if (texture != 0) GLES20.glDeleteTextures(1, intArrayOf(texture), 0)
+            if (program != 0) GLES20.glDeleteProgram(program)
+        }
+        texture = 0
+        program = 0
+        EGL14.eglMakeCurrent(display, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_CONTEXT)
+        if (eglSurface != EGL14.EGL_NO_SURFACE) EGL14.eglDestroySurface(display, eglSurface)
+        if (context != EGL14.EGL_NO_CONTEXT) EGL14.eglDestroyContext(display, context)
+        EGL14.eglReleaseThread()
+        eglSurface = EGL14.EGL_NO_SURFACE
+        context = EGL14.EGL_NO_CONTEXT
+        display = EGL14.EGL_NO_DISPLAY
+    }
+
+    private fun link(vertex: String, fragment: String): Int {
+        val vs = compile(GLES20.GL_VERTEX_SHADER, vertex)
+        val fs = compile(GLES20.GL_FRAGMENT_SHADER, fragment)
+        val p = GLES20.glCreateProgram()
+        GLES20.glAttachShader(p, vs)
+        GLES20.glAttachShader(p, fs)
+        GLES20.glLinkProgram(p)
+        GLES20.glDeleteShader(vs)
+        GLES20.glDeleteShader(fs)
+        val ok = IntArray(1)
+        GLES20.glGetProgramiv(p, GLES20.GL_LINK_STATUS, ok, 0)
+        if (ok[0] == 0) {
+            val log = GLES20.glGetProgramInfoLog(p)
+            GLES20.glDeleteProgram(p)
+            throw IllegalStateException("the frame shader didn't link: $log")
+        }
+        return p
+    }
+
+    private fun compile(type: Int, source: String): Int {
+        val sh = GLES20.glCreateShader(type)
+        GLES20.glShaderSource(sh, source)
+        GLES20.glCompileShader(sh)
+        val ok = IntArray(1)
+        GLES20.glGetShaderiv(sh, GLES20.GL_COMPILE_STATUS, ok, 0)
+        if (ok[0] == 0) {
+            val log = GLES20.glGetShaderInfoLog(sh)
+            GLES20.glDeleteShader(sh)
+            throw IllegalStateException("the frame shader didn't compile: $log")
+        }
+        return sh
+    }
+
+    private fun glCheck(what: String) {
+        val e = GLES20.glGetError()
+        if (e != GLES20.GL_NO_ERROR) throw IllegalStateException("GL error 0x${Integer.toHexString(e)} in $what")
+    }
+
+    private fun eglFail(what: String): Nothing =
+        throw IllegalStateException("$what failed (EGL 0x${Integer.toHexString(EGL14.eglGetError())})")
+
+    private companion object {
+        fun floats(vararg v: Float): FloatBuffer =
+            ByteBuffer.allocateDirect(v.size * 4).order(ByteOrder.nativeOrder()).asFloatBuffer().apply {
+                put(v)
+                position(0)
+            }
+    }
 }
 
 /** A 16-bit PCM WAV's rate, channels and where its samples are. */

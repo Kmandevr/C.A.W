@@ -155,6 +155,7 @@ class _MusicVideoPanelState extends State<MusicVideoPanel> {
   VideoTab _tab = _lastTab;
   String? _message;
   bool _messageIsError = false;
+  bool _starting = false;
   MusicVideoJobs get _jobs => MusicVideoJobs.instance;
 
   AppState get s => widget.state;
@@ -168,8 +169,11 @@ class _MusicVideoPanelState extends State<MusicVideoPanel> {
     });
     _jobs.addListener(_onJobs);
     _images.addListener(_onJobs);
-    _images.load(_doc.assets);
+    _loadImages();
   }
+
+  /// Decodes the images the video's layers use (and lets the others go).
+  Future<void> _loadImages() => _images.load(_doc.assets, used: _doc.usedAssetIds);
 
   void _onJobs() {
     if (mounted) setState(() {});
@@ -183,6 +187,9 @@ class _MusicVideoPanelState extends State<MusicVideoPanel> {
     _jobs.removeListener(_onJobs);
     _images.removeListener(_onJobs);
     _images.dispose();
+    // Image files whose asset is gone (removed, or undone away) are deleted once editing ends. Only the panel that
+    // owns the video does it: the full-screen page shares the sheet's video, whose undo can still bring one back.
+    if (widget.doc == null) sweepVideoAssets(_images.dir, [..._doc.assets]);
     _position.dispose();
     for (final c in [_title, _artist, _aw, _ah, _cw, _ch]) {
       c.dispose();
@@ -248,12 +255,23 @@ class _MusicVideoPanelState extends State<MusicVideoPanel> {
       });
       return;
     }
-    if (_jobs.running) return;
+    // A second tap (Draft, then Render) while the work folder is looked up is let go: [_starting] covers the wait,
+    // and the jobs are asked again after it.
+    if (_jobs.running || _starting) return;
+    _starting = true;
+    final Directory base;
+    try {
+      base = await _workDir();
+      // Images just put in use finish decoding first, so the render has them.
+      await _loadImages();
+    } finally {
+      _starting = false;
+    }
+    if (!mounted || _jobs.running) return;
     o
       ..title = _title.text
       ..artist = _artist.text;
     final (a, b) = _span;
-    final base = await _workDir();
     final dir = Directory('${base.path}${Platform.pathSeparator}${draft ? 'draft' : 'full'}');
     _scene = videoSceneFor(s);
     // The render's own handles on the images, so closing the sheet (which lets its own go) can't pull them away.
@@ -266,6 +284,10 @@ class _MusicVideoPanelState extends State<MusicVideoPanel> {
     final File? file;
     try {
       file = await _jobs.start(render, name: p.name);
+    } on StateError catch (e) {
+      // Another render started first (from another sheet): this one is not run.
+      _say('Not started: ${e.message}.');
+      return;
     } finally {
       for (final i in bitmaps.values) {
         i.dispose();
@@ -308,12 +330,9 @@ class _MusicVideoPanelState extends State<MusicVideoPanel> {
       _say('At most $kVideoMaxImageAssets images a video.');
       return null;
     }
-    var n = _doc.assets.length + 1;
-    while (_doc.assets.any((a) => a.id == 'img$n')) {
-      n++;
-    }
     try {
-      final (asset, image) = await importVideoImage(path, _images.dir, 'img$n');
+      final id = await nextVideoAssetId(_doc.assets, _images.dir);
+      final (asset, image) = await importVideoImage(path, _images.dir, id);
       if (!mounted) {
         image.dispose();
         return null;
@@ -341,7 +360,7 @@ class _MusicVideoPanelState extends State<MusicVideoPanel> {
     await openMusicVideoEditorPage(context, state: s, doc: _doc, encoder: _encoder, audio: widget.audio,
         workDir: widget.workDir, runner: widget.runner);
     if (mounted) {
-      _images.load(_doc.assets);
+      _loadImages();
       setState(() {});
     }
   }
@@ -361,7 +380,10 @@ class _MusicVideoPanelState extends State<MusicVideoPanel> {
         doc: _doc, scene: _scene, start: a.toDouble(), end: b.toDouble(), aspect: w / h, 
         playhead: _position,
         onSeek: (st) => _previewKey.currentState?.seek(st),
-        onChanged: () => setState(() {}),
+        onChanged: () {
+          _loadImages();
+          setState(() {});
+        },
         onSave: _store,
         loudness: _loudness(a, b),
         runner: widget.runner,

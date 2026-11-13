@@ -10,6 +10,12 @@ import '../motion.dart';
 import '../theme.dart';
 import '../tokens.dart';
 
+/// Whether the keyboard focus is in a text field (an [EditableText] or inside one), whose keys are its own.
+bool focusIsInTextField() {
+  final ctx = FocusManager.instance.primaryFocus?.context;
+  return ctx != null && (ctx.widget is EditableText || ctx.findAncestorWidgetOfExactType<EditableText>() != null);
+}
+
 /// Runs one of an area's actions; false when it doesn't do that one (the generic moves then try it).
 typedef KeyAreaAction = bool Function(String id, int count, String? arg);
 
@@ -163,10 +169,7 @@ class KeyAreaState extends State<KeyArea> {
   // With no key router above (a screen shown alone), the area's own default keys still work.
   KeyEventResult _alone(KeyEvent e) {
     // Typing in a text field inside the area is the field's (the music video's Text tab), not the area's keys.
-    final ctx = FocusManager.instance.primaryFocus?.context;
-    if (ctx != null && (ctx.widget is EditableText || ctx.findAncestorWidgetOfExactType<EditableText>() != null)) {
-      return KeyEventResult.ignored;
-    }
+    if (focusIsInTextField()) return KeyEventResult.ignored;
     final chord = keyChordFromEvent(e);
     if (chord == null) return KeyEventResult.ignored;
     final km = _defaults ??= Keymap.defaults(_registry);

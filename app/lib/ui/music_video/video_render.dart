@@ -221,37 +221,42 @@ class MusicVideoRender extends ChangeNotifier {
         profile.encodeUs += sw.elapsedMicroseconds;
       }
 
-      final queue = Queue<Future<Uint8List>>();
-      Future<void>? sending;
+      // Rasters run ahead, each held (see [heldFuture]) so one failing before its turn is thrown at its turn, in
+      // frame order, not lost as an unhandled error. Only one addFrame is ever in flight: the Android encoder's
+      // frame channel copies frames into two reused buffers (VideoEncoder.kt's frameHandler), so a second frame
+      // sent before the last one's reply could overwrite a buffer the worker is still reading.
+      final queue = Queue<Future<Uint8List> Function()>();
+      Future<void> Function()? sending;
       var next = 0;
       try {
         for (var n = 0; n < frameCount; n++) {
           if (_cancelled) break;
           // Keep up to [pipelineDepth] frames rasterising ahead (1: one at a time, as before).
           while (queue.length < pipelineDepth && next < frameCount) {
-            queue.add(raster(next++));
+            queue.add(heldFuture(raster(next++)));
           }
-          final rgba = await queue.removeFirst();
+          final rgba = await queue.removeFirst()();
           if (sending != null) {
             final sw = Stopwatch()..start();
-            await sending;
+            await sending();
+            sending = null;
             profile.waitUs += sw.elapsedMicroseconds;
           }
           if (_cancelled) break;
-          sending = encode(rgba);
+          sending = heldFuture(encode(rgba));
           // One at a time: the frame is encoded before the next is drawn.
-          if (pipelineDepth <= 1) await sending;
+          if (pipelineDepth <= 1) {
+            await sending();
+            sending = null;
+          }
           framesDrawn = n + 1;
           profile.frames = framesDrawn;
           if (n % 2 == 0 || n == frameCount - 1) _set(VideoRenderPhase.frames, 0.3 + 0.68 * framesDrawn / frameCount);
         }
-        await sending;
+        await sending?.call();
       } finally {
-        // Frames still rasterising when it stops (a cancel or a failure) are let go.
-        for (final f in queue) {
-          f.ignore();
-        }
-        sending?.ignore();
+        // Frames still rasterising when it stops (a cancel or a failure) are let go: their outcomes are already held.
+        queue.clear();
       }
       if (_cancelled) return await _stop(encoding: true);
       profile.wallUs = wall.elapsedMicroseconds;
@@ -290,6 +295,19 @@ class MusicVideoRender extends ChangeNotifier {
       // Left for the next render, which clears the folder first.
     }
   }
+}
+
+/// [f] with its outcome caught as soon as it settles (so a failure before anyone awaits it is not an unhandled error);
+/// calling the result gives the value, or throws the error with its stack trace, when the caller gets to it.
+@visibleForTesting
+Future<T> Function() heldFuture<T>(Future<T> f) {
+  final settled = f.then<(T?, Object?, StackTrace?)>((v) => (v, null, null),
+      onError: (Object e, StackTrace st) => (null, e, st));
+  return () async {
+    final (v, e, st) = await settled;
+    if (e != null) Error.throwWithStackTrace(e, st ?? StackTrace.empty);
+    return v as T;
+  };
 }
 
 /// Auto-cut's loudness from the rendered audio: the range's mix through the engine's song render (a worker-pool job),

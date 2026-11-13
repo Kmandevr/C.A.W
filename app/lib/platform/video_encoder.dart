@@ -20,7 +20,8 @@ class VideoEncodeConfig {
 }
 
 /// Takes frames one at a time (RGBA, width × height × 4 bytes, top row first) and writes the file on [finish].
-/// Frames are streamed: the caller waits for each [addFrame] before drawing the next, so memory stays bounded.
+/// Frames are streamed: only one [addFrame] is in flight at a time (the caller waits for each before sending the next;
+/// Android copies frames into two reused buffers), so memory stays bounded.
 abstract class VideoEncoder {
   /// The file the encoder writes: its extension and type, for the save picker.
   String get extension;
