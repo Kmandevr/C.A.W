@@ -1,6 +1,7 @@
 # App checks: analysis and tests on every pull request; the Android APK and Windows app on Main or on demand;
 # a GitHub Release (pre-release while in beta) from a version tag or from Run workflow with "release"; and each
-# push to Main that builds replaces the rolling "Every change" pre-release (tag latest-main).
+# push to Main that builds replaces the rolling "Every change" pre-release (tag latest-main). Both publish the
+# small-update manifest and patches (scripts/update-delta.js).
 name: App
 on:
   # Pull requests test the app (analysis, tests); Main also builds the installable APK and Windows app.
@@ -23,6 +24,7 @@ on:
       - "engine/third_party/**"
       - "examples/**"
       - ".github/workflows/app.yml"
+      - "scripts/update-delta*.js"  # the small-update assets the release jobs publish
       - "engine/compiler/**"  # the APK carries the compiler
   pull_request:
     paths:
@@ -37,6 +39,7 @@ on:
       - "engine/third_party/**"
       - "examples/**"
       - ".github/workflows/app.yml"
+      - "scripts/update-delta*.js"
   workflow_dispatch:
     inputs:
       installables:
@@ -158,6 +161,8 @@ jobs:
         run: |
           flutter pub get
           flutter test --concurrency=4
+      - name: Test the small-update builder
+        run: node --test scripts/update-delta.test.js
 
   android:
     name: Android APK
@@ -415,6 +420,19 @@ jobs:
           mv caw-android.apk "caw-$version-android.apk"
           mv caw-windows.zip "caw-$version-windows.zip"
           mv caw-android-symbols.zip "caw-$version-android-symbols.zip"
+          # Small updates: a manifest of every file, and patches from the channel's previous release where they
+          # are smaller (scripts/update-delta.js applies each one and checks it before it is published).
+          sudo apt-get install -y -q bsdiff >/dev/null || echo "::warning::bsdiff did not install: changed Windows files go whole."
+          base=$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=30" | node scripts/update-delta.js pick-base --version "$version" || true)
+          mkdir -p previous
+          if [ -n "$base" ]; then
+            gh release download "$base" -D previous -p "caw-${base#v}-android.apk" -p "caw-${base#v}-windows.zip" || true
+          fi
+          node scripts/update-delta.js --version "$version" --build "${GITHUB_SHA::12}" --prefix "caw-$version" \
+            --apk "caw-$version-android.apk" --zip "caw-$version-windows.zip" \
+            --base-apk "previous/caw-${base#v}-android.apk" --base-zip "previous/caw-${base#v}-windows.zip" \
+            --base-build "$base" --list update-assets.txt
+          mapfile -t update_assets < update-assets.txt
           {
             echo "C.A.W. $version"
             echo
@@ -427,7 +445,7 @@ jobs:
             fi
             echo
             # One line per asset; the app's updater checks a download against it (lib/model/updates/releases.dart).
-            for f in "caw-$version-android.apk" "caw-$version-windows.zip" "caw-$version-android-symbols.zip"; do
+            for f in "caw-$version-android.apk" "caw-$version-windows.zip" "caw-$version-android-symbols.zip" "${update_assets[@]}"; do
               echo "SHA256 $f: $(sha256sum "$f" | cut -d' ' -f1)"
             done
           } > notes.md
@@ -435,7 +453,7 @@ jobs:
           [[ "$version" == *-* ]] && prerelease="--prerelease"
           gh release create "$tag" --target "$GITHUB_SHA" --title "C.A.W. $version" $prerelease \
             --notes-file notes.md --generate-notes \
-            "caw-$version-android.apk" "caw-$version-windows.zip" "caw-$version-android-symbols.zip"
+            "caw-$version-android.apk" "caw-$version-windows.zip" "caw-$version-android-symbols.zip" "${update_assets[@]}"
 
   # "Every change" (owner, 2026-11-12): each push to Main that builds is published as one rolling pre-release,
   # tag latest-main, whose assets and notes are replaced each time. Never the repository's "latest" release, and
@@ -468,6 +486,20 @@ jobs:
           short="${GITHUB_SHA::12}"
           mv caw-android.apk caw-main-android.apk
           mv caw-windows.zip caw-main-windows.zip
+          # Small updates: patches from the build this one replaces (the previous latest-main), checked by applying
+          # them before they are published, and a manifest of every file (scripts/update-delta.js).
+          mkdir -p previous
+          base_build=""
+          if gh release view latest-main >/dev/null 2>&1; then
+            gh release download latest-main -D previous -p caw-main-android.apk -p caw-main-windows.zip || true
+            base_build=$(gh release view latest-main --json body --jq .body | sed -n 's/^Build: *\([0-9a-f]*\).*/\1/p' | head -1)
+          fi
+          sudo apt-get install -y -q bsdiff >/dev/null || echo "::warning::bsdiff did not install: changed Windows files go whole."
+          node scripts/update-delta.js --version "$version" --build "$short" --prefix caw-main \
+            --apk caw-main-android.apk --zip caw-main-windows.zip \
+            --base-apk previous/caw-main-android.apk --base-zip previous/caw-main-windows.zip \
+            --base-build "$base_build" --list update-assets.txt
+          mapfile -t update_assets < update-assets.txt
           {
             echo "Every change: untested builds. Each change to Main, built as it is; it may break."
             echo "For tested builds use the Stable channel (the public alpha) or Beta."
@@ -478,7 +510,7 @@ jobs:
             # The app reads these lines (lib/model/updates/releases.dart).
             echo "Version: $version"
             echo "Build: $short"
-            for f in caw-main-android.apk caw-main-windows.zip; do
+            for f in caw-main-android.apk caw-main-windows.zip "${update_assets[@]}"; do
               echo "SHA256 $f: $(sha256sum "$f" | cut -d' ' -f1)"
             done
           } > notes.md
@@ -486,10 +518,14 @@ jobs:
           git push -f origin refs/tags/latest-main
           if gh release view latest-main >/dev/null 2>&1; then
             # Assets first, notes last: the notes never name a build (or checksums) whose files aren't there yet.
-            gh release upload latest-main caw-main-android.apk caw-main-windows.zip --clobber
+            gh release upload latest-main caw-main-android.apk caw-main-windows.zip "${update_assets[@]}" --clobber
+            # A patch this build has none of (no previous build, or not smaller) must not outlive the build it was for.
+            for stale in caw-main-android.cawpatch caw-main-windows.cawpatch; do
+              if ! grep -qx "$stale" update-assets.txt; then gh release delete-asset latest-main "$stale" -y 2>/dev/null || true; fi
+            done
             gh release edit latest-main --title "Every change (untested): $short" --notes-file notes.md \
               --prerelease --latest=false
           else
             gh release create latest-main --title "Every change (untested): $short" --notes-file notes.md \
-              --prerelease --latest=false caw-main-android.apk caw-main-windows.zip
+              --prerelease --latest=false caw-main-android.apk caw-main-windows.zip "${update_assets[@]}"
           fi

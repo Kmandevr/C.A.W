@@ -24,6 +24,8 @@ import java.security.SecureRandom
  * `openInstallSettings`: Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES for this package (API 26).
  * `silentPossible`: Android 12+ (API 31) and C.A.W is its own installer of record
  *   (PackageManager.getInstallSourceInfo, API 30), so an update may install without the prompt.
+ * `installedApk`: ApplicationInfo.sourceDir, the installed base APK (readable by the app itself), which the Dart side
+ *   rebuilds a small update from; null when splitSourceDirs is set (a split install cannot be rebuilt from one file).
  * `install` {path, silent}: a PackageInstaller session (MODE_FULL_INSTALL) with the APK copied in; on API 31+ it asks
  *   for USER_ACTION_NOT_REQUIRED when [silent], else USER_ACTION_REQUIRED. Only a file directly inside the cache's
  *   updates/ folder ending in .apk is accepted. The session's result comes to [UpdateStatusReceiver], a manifest
@@ -62,9 +64,16 @@ class UpdateInstaller(private val activity: Activity, private val channel: () ->
                     result.error("unavailable", e.message, null)
                 }
             }
+            "installedApk" -> result.success(installedApk())
             "install" -> install(call.argument<String>("path"), call.argument<Boolean>("silent") == true, result)
             else -> result.notImplemented()
         }
+    }
+
+    /** The installed APK a small update is rebuilt from; null when the app is split into several APKs. */
+    private fun installedApk(): String? {
+        val info = activity.applicationInfo
+        return if (info.splitSourceDirs.isNullOrEmpty()) info.sourceDir else null
     }
 
     private fun silentPossible(): Boolean {

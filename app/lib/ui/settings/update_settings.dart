@@ -75,6 +75,12 @@ class UpdateSettings extends StatelessWidget {
                             child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
                               Text(offer.title.isEmpty ? offer.label : offer.title,
                                   style: const TextStyle(fontWeight: FontWeight.w600)),
+                              // "Update 4.7 MB instead of 54.5 MB" once a small update is known to fit.
+                              AnimatedSwitcher(
+                                duration: Motion.fade(Motion.standard, level),
+                                child: Text(s.sizeLine(offer) ?? '',
+                                    key: ValueKey('update-size:${s.sizeLine(offer)}'), style: dim),
+                              ),
                               if (offer.notes.trim().isNotEmpty)
                                 Container(
                                   key: const ValueKey('update-notes'),
