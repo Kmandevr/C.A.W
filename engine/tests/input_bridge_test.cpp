@@ -250,6 +250,48 @@ TEST(input_bridge_follows_clock_drift_with_no_gaps_splices_or_creep) {
     }
 }
 
+// The audio review of the merge (2026-11-13): the output callback pulls the bridge once per 64-frame block it
+// renders, so the fill falls through a callback. The drift loop samples it once a callback (beginCallback), so the
+// input's delay at a callback's start holds at the starting fill, not half a callback above it.
+TEST(input_bridge_samples_its_fill_once_per_output_callback) {
+    constexpr int kCallback = 512, kPull = 64;
+    for (const bool perCallback : {true, false}) {
+        InputBridge bridge;
+        const int prime = 2 * kCapPeriod + kCallback;
+        bridge.open(1, prime, 8 * kCallback, kTestRate / 4, kTestRate);
+        std::vector<float> buf(kCapPeriod);
+        int64_t captured = 0;
+        double delaySum = 0;
+        int delayN = 0, ch = 0;
+        const int callbacks = 60 * kTestRate / kCallback;
+        for (int k = 0; k < callbacks; ++k) {
+            const int64_t due = static_cast<int64_t>(k + 1) * kCallback + 2 * kCapPeriod;
+            while (captured < due) {  // a ramp: each frame's value is its index
+                for (int i = 0; i < kCapPeriod; ++i) buf[static_cast<size_t>(i)] = static_cast<float>(captured + i);
+                bridge.push(buf.data(), kCapPeriod);
+                captured += kCapPeriod;
+            }
+            if (perCallback) bridge.beginCallback(kCallback);
+            for (int b = 0; b < kCallback / kPull; ++b) {
+                const float* in = bridge.pull(kPull, ch);
+                CHECK(in != nullptr);
+                if (b == 0 && k > 20 * kTestRate / kCallback) {  // settled: the delay at the callback's start
+                    delaySum += static_cast<double>(captured) - in[0];
+                    ++delayN;
+                }
+            }
+        }
+        CHECK_EQ(bridge.underruns(), static_cast<int64_t>(0));
+        const double delay = delaySum / delayN;
+        if (perCallback) {
+            if (std::fabs(delay - prime) > kCapPeriod / 2)
+                cawtest::fail(__FILE__, __LINE__, "delay " + std::to_string(delay) + " against " + std::to_string(prime));
+        } else {
+            CHECK(delay > prime + kCapPeriod / 2);  // sampled at every pull, the loop holds it high
+        }
+    }
+}
+
 // A real discontinuity (the output stalled while capture ran on, so the queue overflowed its slack) jumps back to
 // the starting fill through a crossfade, not a hard splice.
 TEST(input_bridge_resync_after_an_output_stall_is_crossfaded) {

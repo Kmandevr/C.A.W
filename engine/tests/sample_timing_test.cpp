@@ -249,6 +249,30 @@ TEST(the_block_fifo_plays_the_same_bits_as_fixed_blocks_for_any_callback_size) {
     }
 }
 
+// The audio review of the merge (2026-11-13): the latency figures that align recordings take the FIFO's mean
+// hold, not its 63-frame most; the most stays for the input bridge's fill.
+TEST(the_device_fifo_reports_its_mean_hold_for_alignment) {
+    for (const int period : {192, 256, 257, 300, 441, 480, 960, 1023, 1920}) {
+        DeviceRender dev;
+        dev.open(period);
+        if (!dev.usesFifo()) continue;
+        Engine e(48000);
+        std::vector<float> out(static_cast<size_t>(period) * 2);
+        double sum = 0;
+        const int calls = 64 * 8;
+        for (int k = 0; k < calls; ++k) {
+            dev.render(e, out.data(), period);
+            sum += dev.held();
+        }
+        const double mean = sum / calls;
+        if (std::fabs(mean - dev.meanHold()) > 0.5)
+            cawtest::fail(__FILE__, __LINE__, std::to_string(period) + ": mean hold " + std::to_string(mean) +
+                                                  " against " + std::to_string(dev.meanHold()));
+        CHECK(dev.meanHold() <= dev.latency());
+        if (period % kBlock == 0) CHECK_EQ(dev.meanHold(), 0);
+    }
+}
+
 TEST(the_block_fifo_holds_less_than_a_block_and_reports_its_latency) {
     CHECK_EQ(BlockFifo<kBlock>::maxLatency(192), 0);  // whole blocks: it adds nothing
     CHECK_EQ(BlockFifo<kBlock>::maxLatency(1024), 0);

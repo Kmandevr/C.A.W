@@ -79,7 +79,8 @@ struct Audio {
     // or without the input open (switching paths while running would drop or repeat the held frames). Fresh at
     // every open; never flushed while running (a Play or Stop keeps the frames it holds: device_render.h).
     caw::DeviceRender render;
-    int fifoLatency = 0;  // frames it can hold back (0 when the period is whole blocks), in the output latency
+    int fifoLatency = 0;   // the most frames it holds back (0 when the period is whole blocks): the bridge's fill covers it
+    int fifoMeanHold = 0;  // the frames it holds back on average: in the latency figures that align recordings
 };
 
 // The larger buffer (Auto while not recording, Battery): 1024 frames, about 21 ms at 48 kHz, so the callback
@@ -200,6 +201,7 @@ void callback(ma_device* dev, void* output, const void* input, ma_uint32 frames)
     const auto start = std::chrono::steady_clock::now();
     auto* out = static_cast<float*>(output);
     (void)input;  // a playback device: the input comes through the bridge
+    a->bridge.beginCallback(static_cast<int>(frames));  // its drift loop samples the fill once a callback
     // Fixed blocks through the FIFO (device_render.h), or straight for a small odd period. The bridge's input is
     // pulled for each block the engine renders, so it follows the frames rendered, not the frames played (they
     // differ by what the FIFO holds); silence where the input is missing, none while it is closed.
@@ -351,6 +353,7 @@ ma_result openDevice(Audio* a, const CawEngine* e, const ma_device_id* id, ma_ui
     a->render.open(static_cast<int>(a->device.playback.intermediaryBufferCap));
     e->engine->requestSheddingReset();  // a fresh device: its first callbacks' stalls and a throttled stretch before don't count
     a->fifoLatency = a->render.latency();
+    a->fifoMeanHold = a->render.meanHold();
     e->engine->resetTestTone();  // a request made while closed is stale (the callback is not running yet)
     try {
         e->engine->startLiveMixPool();  // the mix graph's workers (speed phase 5c), before the callback runs
@@ -439,15 +442,22 @@ ma_device* initCapture(Audio* a, const CaptureRequest& q, std::string& deviceId,
 
 // Under gDeviceLock: an opened capture device becomes the input. The output starts reading once two capture
 // periods and one output callback, plus what the output's FIFO renders ahead, are queued (so neither side's burst
-// runs it dry), follows the clocks' drift, and jumps back (crossfaded) only when they come eight periods apart. Starved for 250 ms, the input counts as stopped
-// (the status says so; the app tries it again). All in the engine's frames: the bridge runs at the engine's rate.
+// runs it dry), follows the clocks' drift, and jumps back (crossfaded) only when they come eight periods apart.
+// Starved for 250 ms, the input counts as stopped (the status says so; the app tries it again). All in the
+// engine's frames: the bridge runs at the engine's rate.
+//
+// The output callback is the larger of the backend's period and miniaudio's fixed callback size (its intermediary
+// buffer, `intermediaryBufferCap`, in the callback's frames: the period asked for, [Fact] miniaudio 0.11.25 source,
+// ma_device_init, read 2026-11-13): on Android 11 and older AAudio ignores the size asked for, so a 96-frame burst
+// can sit under a 512-frame callback, which pulls 512 frames (plus the FIFO's) at once.
 void attachCapture(CawEngine* e, Audio* a, ma_device* d, std::string deviceId) {
     const int rate = static_cast<int>(e->engine->sampleRate());
     const auto& c = d->capture;
     const auto& p = a->device.playback;
     const ma_uint32 channels = std::min<ma_uint32>(c.channels, caw::kMaxInputChannels);
     const int64_t period = std::max<int64_t>(1, toEngineFrames(c.internalPeriodSizeInFrames, c.internalSampleRate, rate));
-    const int64_t outPeriod = std::max<int64_t>(1, toEngineFrames(p.internalPeriodSizeInFrames, p.internalSampleRate, rate));
+    const int64_t outPeriod = std::max<int64_t>({1, toEngineFrames(p.internalPeriodSizeInFrames, p.internalSampleRate, rate),
+                                                 static_cast<int64_t>(p.intermediaryBufferCap)});
     // The FIFO's frames on top: a callback through it renders (and pulls) up to fifoLatency frames more than it plays.
     a->bridge.open(static_cast<int>(channels), static_cast<int>(2 * period + outPeriod + a->fifoLatency),
                    static_cast<int>(8 * std::max(period, outPeriod)), rate / 4, rate);
@@ -463,8 +473,9 @@ void attachCapture(CawEngine* e, Audio* a, ma_device* d, std::string deviceId) {
                                       c.internalSampleRate, rate);
     const int64_t out = toEngineFrames(static_cast<int64_t>(p.internalPeriodSizeInFrames) * std::max<ma_uint32>(1, p.internalPeriods),
                                        p.internalSampleRate, rate);
-    // The FIFO (fifoLatency) renders up to that many frames ahead of what plays, the bridge read with them.
-    e->engine->liveAudio().setDeviceLatency(in + out + a->duplexBufferFrames + a->fifoLatency);
+    // The round trip: the input's buffer and the bridge's fill (the FIFO's most included: queued input, a real
+    // delay) to the engine, then the FIFO's mean hold and the output's buffer to the speaker.
+    e->engine->liveAudio().setDeviceLatency(in + out + a->duplexBufferFrames + a->fifoMeanHold);
 }
 
 // Opens and starts the input beside the running output, all under the caller's locks (caw_audio_start's path;
@@ -763,12 +774,12 @@ std::string latencyJson(CawEngine* e, Audio* a) {
         if (input) in.kind = cached(a->capture->capture.id.wasapi, a->kindInId, a->kindIn);
     }
 #endif
-    // The bridge's fill (see attachCapture) holds the input back before the engine reads it. The fixed-block FIFO
-    // holds rendered frames back before they play: it is on the output side only, since the bridge is read per
-    // block rendered (the app adds the two sides for recording, so counting it on both would count it twice).
-    // Both at the engine's rate already (callback frames are).
+    // Two different delays, each on its own side (the app adds the sides for recording): the input waits in the
+    // bridge for its fill, which includes the FIFO's most frames as headroom (queued input the drift loop holds
+    // there, so a real delay), and the engine's output waits in the FIFO for its mean hold before it plays. Both
+    // at the engine's rate already (callback frames are).
     if (input) in.frames += a->duplexBufferFrames;
-    out.frames += a->fifoLatency;
+    out.frames += a->fifoMeanHold;
     return "{\"running\":true,\"sample_rate\":" + std::to_string(rate) + ",\"output\":" + sideJson(out, rate, true) +
            ",\"input\":" + sideJson(in, rate, input) + "}";
 }
