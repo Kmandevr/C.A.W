@@ -2,7 +2,7 @@
 name: Bench
 on:
   push:
-    branches: [Main, engine-a345]  # TEMPORARY: engine-a345's before/after measurements; revert to [Main]
+    branches: [Main]
     paths:
       - "engine/**"
       - "!engine/compiler/**"
@@ -88,54 +88,6 @@ jobs:
         with:
           name: bench-windows-x64
           path: bench-windows-x64.*
-
-  # TEMPORARY (engine-a345, A5): the same code built for the x86-64 baseline (SSE2) and for x86-64-v3 (AVX2, FMA)
-  # on one runner, run one after the other, to see what a wider instruction set would gain. Remove with the trigger.
-  isa:
-    name: Bench (x86-64 baseline vs v3)
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v7
-      - name: Build both
-        run: |
-          cmake -S engine -B build -DCMAKE_BUILD_TYPE=Release -DCAW_AUDIO=OFF
-          cmake -S engine -B build-v3 -DCMAKE_BUILD_TYPE=Release -DCAW_AUDIO=OFF -DCMAKE_CXX_FLAGS=-march=x86-64-v3
-          cmake --build build --target caw_bench --parallel
-          cmake --build build-v3 --target caw_bench --parallel
-      - name: Machine
-        run: lscpu | grep -E 'Model name|^CPU\(s\)|Flags' | cut -c1-400 || true
-      - name: Run both, alternating
-        run: |
-          for i in 1 2 3; do
-            build/caw_bench "$SECONDS_PER" 500 --runs 1 --label "x64 baseline $i" --json "isa-base-$i.json" --md "isa-base-$i.md"
-            build-v3/caw_bench "$SECONDS_PER" 500 --runs 1 --label "x64 v3 $i" --json "isa-v3-$i.json" --md "isa-v3-$i.md"
-          done
-          cat isa-*.md >> "$GITHUB_STEP_SUMMARY"
-      - uses: actions/upload-artifact@v7
-        with:
-          name: isa-x64
-          path: isa-*
-
-  # TEMPORARY (engine-a345, A5): MSVC's default (SSE2) against /arch:AVX2 on one Windows runner, alternating.
-  isa-windows:
-    name: Bench (MSVC default vs AVX2)
-    runs-on: windows-2025
-    steps:
-      - uses: actions/checkout@v7
-      - name: Build both
-        run: |
-          cmake -S engine -B build -DCAW_AUDIO=OFF
-          cmake -S engine -B build-avx2 -DCAW_AUDIO=OFF "-DCMAKE_CXX_FLAGS=/DWIN32 /D_WINDOWS /GR /EHsc /arch:AVX2"
-          cmake --build build --config Release --target caw_bench --parallel
-          cmake --build build-avx2 --config Release --target caw_bench --parallel
-      - name: Run both, alternating
-        shell: bash
-        run: |
-          for i in 1 2 3; do
-            build/Release/caw_bench.exe "$SECONDS_PER" 500 --runs 1 --label "MSVC default $i" --md "isaw-base-$i.md"
-            build-avx2/Release/caw_bench.exe "$SECONDS_PER" 500 --runs 1 --label "MSVC AVX2 $i" --md "isaw-avx2-$i.md"
-          done
-          cat isaw-*.md >> "$GITHUB_STEP_SUMMARY"
 
   # Android: caw_bench cross-compiled with the APK's NDK for arm64-v8a as a static bionic executable (no
   # /system/bin/linker64 needed), then run on the ubuntu-24.04-arm runner: real Arm64 cores under a Linux kernel,

@@ -1,7 +1,7 @@
 ---
 title: Native engine recovery
 summary: Short resume guide for continuing the native engine refactor without repeating completed work.
-updated: 2026-11-12
+updated: 2026-11-13
 ---
 
 # Native engine recovery
@@ -21,7 +21,7 @@ updated: 2026-11-12
 1. Inspect PR #125's Docs, Engine, App and C++ components checks for the exact head commit; fix every failure and re-run the full required CI.
 2. Keep #119 open until its acceptance criteria include a buildable and registered component, structured diagnostics, target coverage and the required native-code trust boundary.
 3. Continue with app-private project/source storage and the app-to-build-service submission/download path, then implement registration/loading only behind explicit Trusted or genuinely process-isolated Isolated modes. Never silently load native code.
-4. Issue #94 is closed (PR #124 fixed offline exports); its remaining items are #133 (export buffers now held to a project-wide budget; per-callback loop cost and export pointer segments still open). Do not work on Main or revive stale branches.
+4. Issue #94 is closed (PR #124 fixed offline exports); its remaining items went to #133, finished 2026-11-13 (export budget, slot loops over the slots in use, export tables; the exports themselves later removed with the .caw language). Do not work on Main or revive stale branches.
 
 ## Immediate continuation — native C++ integration
 

@@ -2,7 +2,7 @@
 title: Performance
 summary: How C.A.W is measured for low-end devices, the audit's ranked bottlenecks with evidence, fixes with before/after numbers, and what remains.
 covers: [engine/bench/, engine/src/meters.cpp, app/lib/model/poller.dart, app/lib/model/settings.dart, app/lib/ui/motion.dart, app/lib/ui/devices/kit/param_watch.dart, app/lib/ui/devices/kit/repaint.dart, app/test/poller_test.dart, app/test/rebuild_test.dart, app/test/perf_*]
-updated: 2026-11-12
+updated: 2026-11-13
 ---
 
 # Performance
@@ -11,7 +11,7 @@ The owner's requirement (2026-10-28): run as light as possible, down to low-end 
 
 ## How it's measured
 
-**Callback cost at large layer counts (#133, open):** several per-callback loops (`applyCommands`, `planChunk`, `updateSolo`) still run over the whole layer capacity, which never shrinks, so a project that grew to many layers keeps paying for them after it shrinks. Bounding them to the active slots needs callgrind before and after.
+**Callback cost at large layer counts (#133, done 2026-11-13):** the per-chunk loops (planning, solo, previews, overload, routing) visit only the slots in use since 2026-11-11, and Play's and the stopped monitoring scan since 2026-11-13 (A4), so callback cost follows the layers in use, not the capacity; the scans still over the capacity run once per event (Stop's end, a tempo change, clearing overloads), not per callback. Numbers in [engine performance](engine-performance.md#a4-per-callback-loops-over-the-slots-in-use-133).
 
 **Native component measurement still required:** add a `caw_bench` scenario that runs a trusted test component in `ProjectDoc.masterComponents`, then record mean/p99/max callback time, component-chain count scaling, project-state memory and retained memory after clearing/unloading the chain. The two preallocated stereo scratch stages live inside MasterChain and are included in the project-state estimate, so projects without native effects do not pay their baseline memory cost. ABI v1 does not report plugin-private heap/state size, so that portion is currently unknown rather than silently treated as zero.
 
