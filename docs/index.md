@@ -37,7 +37,7 @@ Project memory for C.A.W. Open this docs/ folder as a vault in Obsidian, or read
 - [REAPER's flow and C.A.W's](reaper-flow.md): REAPER's path from a new project to a render, step by step with sources, C.A.W's current flow, the gaps with phone equivalents, and a ranked build plan (proposal)
 - [UI plan](ui-plan.md): the owner's UI direction (2026-11-04: the arrangement is home, docking panels, Unity-like code, Reaper-like mixer), today's findings, the order of work and open questions; not built yet
 - [Beta readiness plan](beta-readiness-plan.md): the owner's 2026-11-12 direction (engine speed A1-A7, 240 fps UI, stress test, startup screen, telemetry, feedback) and the caw-telemetry contract; planned, not built
-- [Play-ahead and run-anywhere plan](play-ahead-plan.md): the owner's 2026-11-12 direction for 1.2.0 (render untouched tracks ahead, switch to real time silently, a hardware ladder down to a calculator stunt), related optimisations and open questions; planned, not built
+- [Play-ahead and run-anywhere plan](play-ahead-plan.md): the owner's 2026-11-12 direction, now for 1.1.0 (render untouched tracks ahead, switch to real time silently, a hardware ladder down to a calculator stunt), related optimisations and open questions; planned, not built
 - [Core development plan](core-and-feature-plan.md): compatibility pointer to the permanent roadmap; not a separate plan
 - [Music workflow implementation gaps](music-workflow-feature-gap-plan.md): factual implemented/partial/missing status, without a competing feature sequence
 - [Lightweight creative audio systems](lightweight-creative-audio-systems.md): supporting technical designs for non-AI sound systems in the roadmap

@@ -6,6 +6,14 @@ updated: 2026-11-13
 
 # Decisions
 
+## 2026-11-13: 1.1.0 also holds play-ahead, AutoStacc and the store releases (owner)
+
+**Decision (owner, 2026-11-13):**
+- **Play-ahead rendering** (#191) moves from 1.2.0 into 1.1.0, built in this repository from the play-ahead plan. 1.2.0's contents are undecided.
+- **AutoStacc** becomes both C.A.W's download and update source and its store page (#221). The details depend on the owner.
+- **Stores:** 1.1.0 is published on Google Play and the iOS App Store (#222). The owner has neither account yet, so everything not tied to an account is prepared first.
+- **iOS:** the full DAW with every built-in instrument and effect, but no on-device C++ building or loading.
+
 ## 2026-11-13: Clips are stored as MIDI; more 1.1.0 requirements; Windows engine on Clang (owner)
 
 **Decision (owner, 2026-11-13):**

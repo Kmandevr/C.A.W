@@ -80,9 +80,17 @@ An overview by area, checked against the repository on 2026-11-03. The stage tab
    - drawn LFO shapes and a Flagship wavetable editor (#219).
 7. **1.0.8:** the foundation for hosting other people's plug-ins (#212): the isolation design (reviewed first), the out-of-process host, the scan and the loader behind Isolated, Trusted or Blocked. Users don't see any of it. The feature itself (CLAP and VST3 on Windows, CLAP on Android) ships in 1.1.0.
 8. **1.0.9:** a notation view (#213), a clip launcher, and S Pen precision (#220).
-9. **iOS and macOS builds** (#214), once the owner has an Apple Developer membership.
+9. **iOS and macOS builds** (#214), once the owner has an Apple Developer membership. On iOS, the app ships every built-in instrument and effect, but no on-device C++ building or loading (owner, 2026-11-13: Apple forbids downloaded native code).
+10. **Play-ahead rendering** (#191, the [play-ahead plan](play-ahead-plan.md)). It moved from 1.2.0 into 1.1.0 (owner, 2026-11-13) and is built in its own batches before 1.1.0.
 
-**After 1.0 (owner, 2026-11-12):** render-ahead is planned for 1.2.0, a major feature but not a full version update (rendering ahead of the playhead, so heavy projects play smoothly). The owner already has it essentially ready, but 1.0 comes first. **[Proposal]** It is planned and not built in this repository yet.
+**In 1.1.0 itself (owner, 2026-11-13):**
+- plug-in hosting goes live (#212) and play-ahead ships;
+- AutoStacc becomes a download, update source and store page (#221);
+- C.A.W is published on Google Play and the iOS App Store (#222).
+
+The owner has neither store account yet. What 1.2.0 holds is undecided.
+
+**Play-ahead (render-ahead):** moved into 1.1.0 (owner, 2026-11-13; it had been planned for 1.2.0). It renders ahead of the playhead so that heavy projects play smoothly. **[Proposal]** It is planned and not built in this repository yet.
 
 **Current order (owner, 2026-11-10):** work goes issue by issue, bottom up (engine first, then the app), one area of the code per branch; UI work only where it is simple. Anything unclear, needing the owner's direction, or seeming to conflict with an earlier decision is not started: the owner gets a notification with the question, and work moves on to the next clear item. C++ replaces the .caw language first ([decisions](decisions.md)), then the owner's three new roles ([vision](vision.md)):
 1. #156 C++ instruments, then #157 C++ built-in instruments and a starter project (with #122, the useful .caw built-ins ported to the Library), #17 and #127 (independent instances, per-note and per-channel processing for instruments).
@@ -165,7 +173,7 @@ Preserve and extend the existing shared text-backed pattern model, piano roll an
 | # | Item | Status | Where | Depends on | What's missing |
 |---|---|---|---|---|---|
 | 1.1 | Kit-row routing | Planned | both | Foundation | Not built |
-| 1.2 | Code-generated procedural patterns and Freeze | Planned | both | — | Not built. [Proposal] Freeze is planned as the saved form of play-ahead's cache ([play-ahead plan](play-ahead-plan.md), release 1.2.0) |
+| 1.2 | Code-generated procedural patterns and Freeze | Planned | both | — | Not built. [Proposal] Freeze is planned as the saved form of play-ahead's cache ([play-ahead plan](play-ahead-plan.md), release 1.1.0) |
 | 1.3 | Expression curves and MIDI-Sketch-style per-note pitch editing: stacked lanes, points/handles, snap and live preview | Partial | app | — | Existing per-note pitch-bend/pressure/timbre curves and point/segment-bend editing are foundations. Make pitch slides/bends directly editable as continuous curves on the note, with the curve matching playback; direct selection must distinguish the curve from the underlying note, which remains visible. Moving, stretching and reshaping must follow touch continuously, with helpful snapping and no abrupt jumps. Separate slide events remain optional where musically useful. Refine stacked lanes, handles, touch targets and live preview |
 | 1.4 | Advanced quantize, groove/swing templates, note chop/glue/strum | Planned | app | — | Not built |
 | 1.5 | Pattern generators: Euclid, random-in-key, arpeggiate, humanize, chord stamp, legato, reverse, inversion | Implemented | app | — | Keep them integrated; don't rebuild |
@@ -277,7 +285,7 @@ The owner's first public release comes after Stage 7 (owner, 2026-11-03). Suppor
 
 These stages ship as updates. Their order still holds.
 
-**Release 1.2.0 (owner, 2026-11-12):** play-ahead rendering and running on any hardware, down to a calculator stunt; plan in the [play-ahead plan](play-ahead-plan.md) (#191), not built.
+**Release 1.1.0 (owner, 2026-11-13; it was 1.2.0):** play-ahead rendering and running on any hardware, down to a calculator stunt; plan in the [play-ahead plan](play-ahead-plan.md) (#191), not built.
 
 ### Stage 8 — Audio transformation and advanced production tools
 

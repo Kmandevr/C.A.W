@@ -1,10 +1,10 @@
 ---
-title: Play-ahead and run-anywhere plan (1.2.0)
-summary: The owner's 2026-11-12 direction for release 1.2.0: render untouched tracks ahead on workers and switch to real time silently, a hardware ladder down to a calculator stunt, the optimisations that go with it, measurements and open questions; planned, not built.
-updated: 2026-11-12
+title: Play-ahead and run-anywhere plan (1.1.0)
+summary: The owner's 2026-11-12 direction, now for release 1.1.0 (moved from 1.2.0 on 2026-11-13): render untouched tracks ahead on workers and switch to real time silently, a hardware ladder down to a calculator stunt, the optimisations that go with it, measurements and open questions; planned, not built.
+updated: 2026-11-13
 ---
 
-# Play-ahead and run-anywhere plan (1.2.0)
+# Play-ahead and run-anywhere plan (1.1.0)
 
 **[Proposal]** Nothing in this note is built. Tracked in issue #191. The owner's direction is fact; the design, estimates and order are Claude's proposals, to be confirmed by the owner where marked. What gets built is recorded in the notes that own each area, not here.
 
@@ -12,7 +12,7 @@ updated: 2026-11-12
 
 - **Dynamic play-ahead:** render things ahead of time and in batches where it makes sense. It must be completely invisible: when the user starts to use something that needs low latency, that part switches to real time "quickly and silently so no one ever notices".
 - **Run anywhere:** the app changes according to the hardware and then runs, so nothing beats C.A.W. The publicity target is a hacked graphing calculator: "it's a stunt, if it works it's fine".
-- **Release:** 1.2.0, after the open alpha (1.0.0-alpha.1, [beta readiness plan](beta-readiness-plan.md)).
+- **Release:** 1.1.0 (owner, 2026-11-13; it was 1.2.0), after the open alpha (1.0.0-alpha.1, [beta readiness plan](beta-readiness-plan.md)).
 - **Unchanged rules it must keep:** a real-time-safe callback (`.claude/rules/engine.md`); output perceptually identical between live playback and export ([decisions](decisions.md), 2026-11-12 "Perceptually identical"); no shared buses, REAPER-style routing ([decisions](decisions.md), 2026-11-12); no audible change without asking the owner; every speed claim measured.
 
 ## What it builds on (facts, checked in the code 2026-11-12)
