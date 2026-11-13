@@ -1,25 +1,16 @@
 # Handoff
 
-Commit: 4239e1f (session branch: all engine work merged, version 1.0.0-alpha.1; PR #196)
+Commit: 8b67c19 (Main after PR #196: v1.0.0-alpha.1)
 Branch: ccr-56285e11-0xrj3h. Main is protected: PRs only; merge yourself when CI is green. The owner wants ONE combined APK at the end.
 
 ## Goal
 v1.0.0-alpha.1 "Open alpha". The plan is in docs/beta-readiness-plan.md (#187), and the owner's answers are in docs/decisions.md.
 
 ## Done and verified
-In Main: startup screen and updates (#194); music video round 2 and smaller updates (#195). The owner chose to keep the APK's native libraries compressed (recorded).
+v1.0.0-alpha.1 is in Main (PRs #194, #195 and #196, all CI green). The APK came from app.yml run 43364762201 (artifact caw-android-apk).
 
 ## Open
-- **origin/benchmark (084eede):** audio-integration dcf7ec9 (audio-resilience, bt-clicks, speed-parallel; C API 28) + the Benchmark (C API 29) + engine-a345 (A3/A4, reviewed clean) + session branch. All checks green.
-- **origin/audio-integration:** review fixes 7e58422, fcde317, f7c0712 (done, green). An agent was building a tail-based Auto fallback (the pool turns off when its tail is worse than serial's). Check the branch for a newer commit.
-
-## Next
-1. Merge origin/audio-integration (the fixes, plus the tail guard if committed) into benchmark. Rebuild, then run ctest, the sanitizer and TSan (mix_pool, shed, overload, stress_), flutter analyze/test and docs-test --strict.
-2. Merge benchmark into the session branch, PR to Main with Closes #133, and merge when green.
-3. Fit-and-finish, the docs pass, the bump to 1.0.0-alpha.1, then dispatch app.yml installables and send the owner the one APK. Tag on the owner's go.
-
-## Owner questions open
-- Governing law for TERMS.md.
-- Windows engine with clang-cl / x86-64-v3 (A5, decisions.md).
-- Whether music video project packages carry their images.
-- Benchmark tuning on the S22+: the 70% "comfortable" line; live mode.
+- The owner creates the tag v1.0.0-alpha.1 on GitHub; this session couldn't push tags. That publishes the GitHub Release.
+- Auto's tail guard: unfinished in .claude/worktrees/audio-integration (local commit 1967852 plus uncommitted test changes). Run the full ASan and TSan suites, then PR.
+- Owner questions: governing law for TERMS.md; the Windows engine with clang-cl/x86-64-v3; music video packages carrying images; Benchmark tuning on the S22+.
+- The owner plans changes after testing the alpha.
