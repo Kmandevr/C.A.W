@@ -51,6 +51,8 @@ import 'package:caw/ui/shell.dart';
 import 'package:caw/ui/startup_screen.dart';
 import 'package:caw/ui/theme.dart';
 import 'package:caw/ui/updates/update_prompt.dart';
+import 'package:caw/ui/whats_new.dart';
+import 'package:caw/model/changelog.dart' show WhatsNewDue;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -368,6 +370,29 @@ void main() {
     final body = c.tester.getRect(find.textContaining('Updating is up to you'));
     expect(body.height, greaterThan(10));
     expect(body.bottom, lessThanOrEqualTo(c.tester.getRect(find.byKey(const ValueKey('update-never'))).top));
+  });
+
+  // What's new: the sheet after an update (the real changelog's 1.0.1 entry, the longest) and the page.
+  Future<String> changelog(String _) async => File('assets/CHANGELOG.md').readAsStringSync();
+  _sweep('whatsnew-sheet', (c) async {
+    await _pump(c, const Scaffold(body: SizedBox.expand()));
+    unawaited(showWhatsNew(_navCtx(c.tester), Settings(), WhatsNewDue.show, version: '1.0.1-alpha.1', load: changelog));
+    await _settle(c.tester);
+    await c.shot('');
+    // Its last button clears the system navigation bar, and the title stays above the buttons.
+    final close = find.byKey(const ValueKey('whats-new-close'));
+    await c.tester.ensureVisible(close);
+    await _settle(c.tester);
+    expect(c.tester.getRect(close).bottom, lessThanOrEqualTo(c.size.size.height - c.size.pad.bottom));
+    expect(c.tester.getRect(find.text("What's new in v1.0.1-alpha.1")).bottom,
+        lessThanOrEqualTo(c.tester.getRect(close).top));
+    await c.end('');
+  });
+  _sweep('whatsnew', (c) async {
+    await _pump(c, WhatsNewPage(load: changelog));
+    await _settle(c.tester);
+    await c.shot('');
+    await c.end('');
   });
 
   // --- Settings ---

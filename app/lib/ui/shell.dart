@@ -51,7 +51,6 @@ import '../model/templates.dart';
 import 'pointer_input.dart';
 import 'music_video/video_setup_sheet.dart';
 import 'privacy/feedback_sheet.dart';
-import 'privacy/privacy_pages.dart';
 import 'startup_screen.dart';
 import 'music_video/video_render_chip.dart';
 
@@ -170,8 +169,9 @@ class _ShellState extends State<Shell> {
   }
 
   // The first-run page and the once-only question after a beta build (docs/app.md "Privacy, telemetry and
-  // feedback"), shown once the project and telemetry have both loaded and the startup screen has gone, before any
-  // update prompt (AppPrompts: one at a time); queued feedback that went out says so.
+  // feedback"), then What's new after an update (ui/whats_new.dart), shown once the project and telemetry have both
+  // loaded and the startup screen has gone, before any update prompt (AppPrompts: one at a time, in that order);
+  // queued feedback that went out says so.
   bool _privacyShown = false, _privacyOpen = false;
   StreamSubscription<FeedbackSent>? _feedbackSent;
 
@@ -182,17 +182,17 @@ class _ShellState extends State<Shell> {
     _feedbackSent ??= t.feedbackSent.listen((_) {
       if (mounted) ScaffoldMessenger.maybeOf(context)?.showSnackBar(const SnackBar(content: Text('Sent, thanks')));
     });
-    if (_privacyShown || !s.ready || !(t.firstRunNeeded || t.askKeepNeeded)) return;
+    if (_privacyShown || !s.ready) return;
     // The startup screen goes first; another prompt already open (an update prompt) closes first.
     if (!AppPrompts.free) return;
+    final prompts = startupPrompts(context, t, s.settings);
     _privacyShown = true;
-    // Held from now, so an update prompt can't open in the frame before this one does.
+    if (prompts.isEmpty) return;
+    // Held from now, so an update prompt can't open in the frame before these do.
     AppPrompts.showing.value = _privacyOpen = true;
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       try {
-        if (!mounted) return;
-        if (t.firstRunNeeded) await showFirstRun(context, t);
-        if (mounted && t.askKeepNeeded) await askKeepTelemetry(context, t);
+        if (mounted) await AppPrompts.runInOrder(prompts);
       } finally {
         _privacyOpen = false;
         AppPrompts.showing.value = false;

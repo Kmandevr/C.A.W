@@ -25,6 +25,8 @@ on:
       - "examples/**"
       - ".github/workflows/app.yml"
       - "scripts/update-delta*.js"  # the small-update assets the release jobs publish
+      - "CHANGELOG.md"  # bundled in the app (What's new) and the top of each release's notes
+      - "scripts/changelog-notes*.js"
       - "engine/compiler/**"  # the APK carries the compiler
   pull_request:
     paths:
@@ -40,6 +42,8 @@ on:
       - "examples/**"
       - ".github/workflows/app.yml"
       - "scripts/update-delta*.js"
+      - "CHANGELOG.md"
+      - "scripts/changelog-notes*.js"
   workflow_dispatch:
     inputs:
       installables:
@@ -161,8 +165,8 @@ jobs:
         run: |
           flutter pub get
           flutter test --concurrency=4
-      - name: Test the small-update builder
-        run: node --test scripts/update-delta.test.js
+      - name: Test the small-update builder and the release-notes extraction
+        run: node --test scripts/update-delta.test.js scripts/changelog-notes.test.js
 
   android:
     name: Android APK
@@ -417,6 +421,11 @@ jobs:
           if gh release view "$tag" >/dev/null 2>&1; then
             echo "::error::Release $tag already exists: raise the version in app/pubspec.yaml and app/lib/version.dart first."; exit 1
           fi
+          # The notes start with this version's CHANGELOG.md entry ("## <version>", its "(…)" suffix ignored); a
+          # release without one fails here (scripts/changelog-notes.js).
+          if ! node scripts/changelog-notes.js --version "$version" > changes.md; then
+            echo "::error::CHANGELOG.md has no entry for $version: add a \"## $version\" section (and app/assets/CHANGELOG.md, its copy) first."; exit 1
+          fi
           mv caw-android.apk "caw-$version-android.apk"
           mv caw-windows.zip "caw-$version-windows.zip"
           mv caw-android-symbols.zip "caw-$version-android-symbols.zip"
@@ -434,6 +443,8 @@ jobs:
             --base-build "$base" --list update-assets.txt
           mapfile -t update_assets < update-assets.txt
           {
+            cat changes.md
+            echo
             echo "C.A.W. $version"
             echo
             echo "- Android (arm64): caw-$version-android.apk"

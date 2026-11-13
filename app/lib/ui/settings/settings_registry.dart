@@ -306,6 +306,8 @@ const List<SettingEntry> settingEntries = [
       ['vim', 'hjkl', 'arrows', 'navigation']),
   _E('keys.keyRow', _k, 'Key row', 'The symbol keys above the phone keyboard', ['symbols', 'toolbar', 'keyboard']),
   _E('about.beta', _ab, 'Version', 'The open alpha\'s version', ['version', 'alpha', 'beta', 'build']),
+  _E('about.whatsNew', _ab, 'What\'s new', 'What changed in each version, from 1.0.0 (the changelog)',
+      ['changelog', 'changes', 'release notes', 'new', 'history', 'version']),
   _E('about.updates', _ab, 'Updates', 'This version, the last check, Check now and Update now',
       ['update', 'upgrade', 'new version', 'release', 'download']),
   _E('about.updates.check', _ab, 'Check for updates automatically', 'Once a day at most, after the app has opened',
