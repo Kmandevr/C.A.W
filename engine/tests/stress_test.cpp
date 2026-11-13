@@ -186,21 +186,30 @@ TEST(stress_ramp_projects_grow_with_the_count) {
     CHECK_EQ(flagshipVoices(200).modules.front().source, flagshipVoices(64).modules.front().source);  // capped
 }
 
-// A real ramp, short steps: it runs to a limit and its numbers are filled.
+// A real ramp, short steps: it ends at a limit consistent with what it saw, whatever the machine's speed (a
+// sanitizer build holds fewer effects), and its numbers are filled.
 TEST(stress_ramp_runs_on_a_real_engine) {
     RunRequest r;
     r.kind = Kind::RampEffects;
     r.seconds = 0.05;
-    r.frames = 8192;  // a large budget: the whole ramp holds on any machine the tests run on
+    r.frames = 8192;  // a large budget, so a release build holds the whole ramp
     Progress p;
     LoadHistory h;
     const RunResult o = run(r, p, &h, nullptr);
     CHECK(o.ok);
-    CHECK_EQ(o.limit, 64);
-    CHECK_EQ(o.stopReason, std::string("done"));
+    CHECK(o.limit >= 1 && o.limit <= 64);
+    CHECK_EQ(p.held.load(), o.limit);
+    if (o.firstFailed < 0) {
+        CHECK_EQ(o.limit, 64);
+        CHECK_EQ(o.stopReason, std::string("done"));
+    } else {
+        CHECK_EQ(o.firstFailed, o.limit + 1);  // the search closed the gap below the first failure
+        CHECK_EQ(o.stopReason, std::string("over_budget"));
+    }
     CHECK(o.meanUs > 0 && o.p99Us >= o.meanUs * 0.5 && o.worstUs >= o.p99Us);
+    CHECK(o.p99Us <= o.budgetUs);  // the numbers are the last step that held
     CHECK_EQ(p.permille.load(), 1000);
-    CHECK_EQ(p.held.load(), 64);
+    CHECK(h.written() > 0);
 }
 
 // Cancel takes effect within one step: the step that sees it stops at its next callback, and no step follows.
