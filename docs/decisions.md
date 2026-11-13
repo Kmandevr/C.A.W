@@ -6,6 +6,10 @@ updated: 2026-11-13
 
 # Decisions
 
+## 2026-11-13: The polish release is 1.0.1-alpha.1; the app stays alpha until the owner says otherwise (owner)
+
+**Decision (owner, 2026-11-13):** the polish pass ships as **1.0.1-alpha.1**. "It'll end up being a full release if it's stable. But again the app is still an alpha … until I say it's going to go back to 1.0 and as an official release not just alpha." So versions keep the `-alpha.N` suffix (the beta telemetry channel, the Open alpha notice) until the owner calls the official release.
+
 ## 2026-11-13: The Benchmark (beta plan C) built; how it measures (Claude, within the owner's look)
 
 **Built:** section C, to the owner's look of 2026-11-12 (below) and the architect's plan: [engine](engine.md#the-benchmark), [app](app.md).
