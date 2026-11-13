@@ -788,6 +788,56 @@ TEST(mix_pool_overload_while_waiting_on_workers_turns_auto_off_before_shedding) 
     CHECK(!e.mixParallelForTest());  // and Auto waits before it tries the pool again
 }
 
+// Auto's tail guard (2026-11-13): a worker the system preempts mid-node now and then makes rare late callbacks
+// while the mean wait stays low. Once late callbacks are clearly more common on the pool than they were serial,
+// Auto goes to one thread for kMixRetrySeconds, before the wait rule would have dropped a worker.
+TEST(mix_pool_auto_goes_serial_when_the_pool_makes_late_callbacks) {
+    for (const bool preempt : {false, true}) {
+        Engine e(48000);
+        CHECK(e.startMixPool(2));
+        e.setMixParallel(Engine::MixParallel::Auto);
+        ProjectSpec p;  // six tracks holding notes: one level of six busy nodes every chunk
+        p.bpm = 120;
+        p.loopBars = 1;
+        p.modules.push_back({"held", "---\nkind: pattern\nlength: 16\n---\n0 C4 16 1\n"});
+        for (int i = 0; i < 6; ++i)
+            p.layers.push_back(cawtest::testSignalNotesLayer("t" + std::to_string(i), Shape::Saw, "held", {{"level", 0.1}}));
+        CHECK(ok(e.setProject(p)));
+        e.play();
+        float l[256], r[256];
+        const double budgetUs = 1e6 * 256 / 48000;
+        // The callback's raw load: 0.6 of its budget (Auto's threshold passed), or what it really took if more.
+        auto one = [&] {
+            const auto t0 = std::chrono::steady_clock::now();
+            e.process(l, r, 256);
+            const double us = std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now() - t0).count();
+            e.reportLoad(std::max(0.6, us / budgetUs), 256, 256);
+        };
+        int k = 0;
+        while (!e.mixParallelForTest() && k++ < 2000) one();  // serial first: its late callbacks, none
+        CHECK(e.mixParallelForTest());
+        if (e.mixParallelLevelsForTest() == 0) continue;  // nothing handed to the workers
+        // One callback in 25 waits 6 ms (more than its 5.3 ms budget) for a worker: 4% late, against none serial.
+        if (preempt) e.mixPoolForTest()->setPreemptForTest(6000, 25);
+        uint32_t workersBefore = 2;
+        for (k = 0; k < 10 * 48000 / 256 && e.mixParallelForTest(); ++k) {
+            workersBefore = e.mixActiveWorkers();
+            one();
+        }
+        if (preempt) {
+            CHECK(!e.mixParallelForTest());
+            CHECK_EQ(e.mixTailFallbacks(), 1u);
+            CHECK_EQ(workersBefore, 2u);  // the wait rule had not dropped a worker: the mean wait stayed low
+            e.mixPoolForTest()->setPreemptForTest(0, 0);
+            for (k = 0; k < 5 * 48000 / 256; ++k) one();
+            CHECK(!e.mixParallelForTest());  // and Auto waits kMixRetrySeconds before it tries the pool again
+        } else {
+            CHECK(e.mixParallelForTest());  // a pool with no late callbacks keeps going
+            CHECK_EQ(e.mixTailFallbacks(), 0u);
+        }
+    }
+}
+
 // The audio review of the merge (2026-11-13): a device reopen keeps the Engine, so Auto starts serial again on the
 // new device instead of carrying the old one's choice with no averages behind it.
 TEST(mix_pool_a_new_live_device_starts_auto_serial_again) {

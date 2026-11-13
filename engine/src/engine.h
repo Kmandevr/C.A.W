@@ -258,6 +258,15 @@ public:
     // don't count toward shedding and it adds no worker (the pool starting, not the song). Longer than one of
     // Auto's worker steps (kMixWaitSeconds), so a pool that costs more than it gives can shrink first.
     static constexpr double kMixSettleSeconds = kMixWaitSeconds + 0.2;
+    // Auto's tail guard (the merge's audio review, 2026-11-13; Claude's choice, for the owner to confirm): the
+    // share of callback time whose raw load passed kMixTailLoad, averaged over kMixTailSeconds separately for
+    // callbacks that used the pool and for those that ran serial (before Auto turned on, its retry waits, levels
+    // with one busy node). Once the pool has kMixTailSeconds of samples, a pooled share above the serial one by more
+    // than kMixTailMargin for kMixTailHoldSeconds turns Auto off for kMixRetrySeconds, as the wait rule does: a
+    // worker the system preempts mid-node makes rare late callbacks that the mean wait doesn't show.
+    static constexpr double kMixTailLoad = 0.85, kMixTailSeconds = 2.0, kMixTailMargin = 0.02, kMixTailHoldSeconds = 1.0;
+    // Any thread (tests, the bench): how many times the tail guard turned Auto off.
+    uint32_t mixTailFallbacks() const noexcept { return tailFallbacks_.load(std::memory_order_relaxed); }
     // Auto's workers now (tests, diagnostics): those taking tasks, at most mixWorkers().
     uint32_t mixActiveWorkers() const noexcept;
     // Audio thread diagnostics (speed phase 5d) as JSON, for caw_audio_threads; reads the callback core's clock
@@ -483,6 +492,10 @@ private:
     // Speed phase 5d (audio thread): Auto's workers and the wait it weighs (shares of the budget, averaged).
     uint32_t mixActive_ = 0;
     double waitAvg_ = 0, workAvg_ = 0, mixLosingSeconds_ = 0, mixGrowSeconds_ = 0, mixRetrySeconds_ = 0;
+    // The tail guard (kMixTail*): bias-corrected averages (value, weight) of pooled and serial late callbacks.
+    double tailPool_ = 0, tailPoolWeight_ = 0, tailSerial_ = 0, tailSerialWeight_ = 0, tailKeep_ = 0;
+    double tailPoolSeconds_ = 0, tailOverSeconds_ = 0;
+    std::atomic<uint32_t> tailFallbacks_{0};  // times the tail guard turned Auto off (mixTailFallbacks)
     std::atomic<float> waitShare_{0};
     int retireStart_ = 0;  // where assignRetireBudgets hands out what is left after the even shares
     bool poolUsed_ = false, poolUsedLast_ = false;  // this callback, the last one handed the pool a level

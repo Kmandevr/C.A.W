@@ -136,6 +136,11 @@ bool MixPool::claimOne(uint32_t lane) noexcept {
                     const int64_t until = nowNs() + int64_t{hold} * 1000;
                     while (nowNs() < until) CAW_POOL_PAUSE();
                 }
+                if (preemptArmed_.load(std::memory_order_relaxed) &&
+                    preemptArmed_.exchange(false, std::memory_order_relaxed)) {  // tests only: preempted mid-level
+                    const int64_t until = nowNs() + int64_t{preemptMicros_.load(std::memory_order_relaxed)} * 1000;
+                    while (nowNs() < until) CAW_POOL_PAUSE();
+                }
                 const int64_t t0 = nowNs();
                 task_(context_, index);
                 workerNs_.fetch_add(nowNs() - t0, std::memory_order_relaxed);
@@ -183,6 +188,8 @@ void MixPool::beginCallback(bool wake) noexcept {
         }
         if (callbacks_++ % kCoreSampleEvery == 0) callbackCpu_.store(tuning::currentCpu(), std::memory_order_relaxed);
     }
+    if (const uint32_t every = preemptEvery_.load(std::memory_order_relaxed); every != 0 && ++preemptCount_ % every == 0)
+        preemptArmed_.store(true, std::memory_order_relaxed);  // tests only (setPreemptForTest)
     if (count_ == 0 || !wake) return;
     spinUntil_.store(std::numeric_limits<int64_t>::max(), std::memory_order_relaxed);
     publishWake();  // sleeping workers wake while the callback plans its first chunk
@@ -222,7 +229,8 @@ void MixPool::finish() noexcept {
         return;
     }
     published_ = false;
-    if (holdMicros_.load(std::memory_order_relaxed) != 0) {  // tests: let a worker claim first (up to 2 ms)
+    if (holdMicros_.load(std::memory_order_relaxed) != 0 || preemptArmed_.load(std::memory_order_relaxed)) {
+        // tests: let a worker claim first (up to 2 ms)
         const int64_t until = nowNs() + 2'000'000;
         while ((claim_.load(std::memory_order_acquire) & kIndexMask) == 0 && nowNs() < until) CAW_POOL_PAUSE();
     }
