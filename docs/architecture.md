@@ -9,7 +9,7 @@ covers: [app/pubspec.yaml, engine/CMakeLists.txt]
 
 The technical plan for the owner's brief in [vision](vision.md). The C++ language, SDK and shared component architecture are specified in [C++ creation platform](cpp-creation-platform.md). Build order: [roadmap](roadmap.md). Why each choice was made: [decisions](decisions.md).
 
-**[Fact, 2026-11-13]** The app's version is set in `app/pubspec.yaml` and mirrored in `app/lib/version.dart` (a test keeps them equal): 1.0.1-alpha.1 now. Versions keep the `-alpha.N` suffix until the owner calls the official release ([decisions](decisions.md)).
+**[Fact, 2026-11-13]** The app's version is set in `app/pubspec.yaml` and mirrored in `app/lib/version.dart` (a test keeps them equal): 1.0.1-alpha.1 now (1.0.2-alpha.1 next). Each release adds its entry to the repository's `CHANGELOG.md` first, bundled in the app as What's new and placed at the top of the release's notes ([README](../README.md)). Versions keep the `-alpha.N` suffix until the owner calls the official release ([decisions](decisions.md)).
 
 Labels used below:
 - **[Fact]** is verified, either in this repo or from a primary source. The date is noted when it matters.

@@ -296,7 +296,7 @@ The instrument alone (callgrind's inclusive count of `processPorts`, so without 
 
 ## Startup screen (2026-11-12, beta readiness D2)
 
-The startup screen ([App](app.md), "Startup screen") adds no wait: the shell shows in the frame `AppState.ready` turns true and the screen fades out over it. What it can cost is UI-isolate time while launch loads, so `perf_startup_bench_test` now lists the 20 saved projects a second time while the reveal's painter records a frame every 8.3 ms (120 Hz). Linux x64 test host, JIT, five runs each (`flutter test test/perf_startup_bench_test.dart`):
+The startup screen ([App](app.md), "Startup screen") adds no wait: the shell shows in the frame `AppState.ready` turns true and the screen fades out over it. What's new adds none either: launch only compares the settings' `last_seen_version` string, and the bundled changelog (about 4 KB) is read and parsed only when its sheet or page opens. What it can cost is UI-isolate time while launch loads, so `perf_startup_bench_test` now lists the 20 saved projects a second time while the reveal's painter records a frame every 8.3 ms (120 Hz). Linux x64 test host, JIT, five runs each (`flutter test test/perf_startup_bench_test.dart`):
 
 | | List 20 projects | UI isolate blocked | Longest stall |
 | --- | --- | --- | --- |

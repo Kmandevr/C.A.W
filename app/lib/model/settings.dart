@@ -422,6 +422,12 @@ class Settings extends ChangeNotifier {
   /// The music video editor has shown its photosensitivity warning (the first time Strobe is added).
   bool strobeWarned = false;
 
+  /// The app version that last ran ('' before What's new existed): a newer one shows its changelog entry once.
+  String lastSeenVersion = '';
+
+  /// Whether settings.json existed when these settings were read (false on a fresh install).
+  bool existedOnLoad = false;
+
   /// Recording (owner, 2026-11-10): when the metronome clicks, and how many bars the count-in has (0: none).
   Metronome metronome = Metronome.recording;
   int countInBars = 1;
@@ -584,6 +590,7 @@ class Settings extends ChangeNotifier {
         'vim_keys': vimKeys,
         if (keyHints != null) 'key_hints': keyHints,
         if (strobeWarned) 'strobe_warned': true,
+        if (lastSeenVersion.isNotEmpty) 'last_seen_version': lastSeenVersion,
         'motion': motion.name,
         'edit_motion_style': editMotionStyle.name,
         'motion_feel': motionFeel.encode(),
@@ -697,6 +704,8 @@ class Settings extends ChangeNotifier {
     vimKeys = (j['vim_keys'] as bool?) ?? vimKeys;
     if (j['key_hints'] is bool) keyHints = j['key_hints'] as bool;
     strobeWarned = j['strobe_warned'] == true;
+    final seen = j['last_seen_version'];
+    if (seen is String && seen.length <= 64) lastSeenVersion = seen.trim();
     motion = pick(MotionLevel.values, j['motion'], motion);
     editMotionStyle = pick(EditMotionStyle.values, j['edit_motion_style'], editMotionStyle);
     motionFeel = MotionFeel.decode(j['motion_feel'] as String?) ?? motionFeel;
@@ -854,7 +863,8 @@ class Settings extends ChangeNotifier {
     }
     try {
       final f = _file;
-      if (f != null && await f.exists()) fromJson(jsonDecode(await f.readAsString()) as Map<String, dynamic>);
+      if (f != null && await f.exists()) existedOnLoad = true;
+      if (existedOnLoad) fromJson(jsonDecode(await f!.readAsString()) as Map<String, dynamic>);
     } catch (_) {
       // Damaged settings fall back to the defaults.
     }
