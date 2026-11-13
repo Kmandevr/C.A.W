@@ -81,6 +81,7 @@ public:
     ScopedFlushDenormals& operator=(const ScopedFlushDenormals&) = delete;
 
 private:
+    friend class ScopedKeepDenormals;
 #if defined(CAW_FP_MODE_SSE)
 #if defined(__GNUC__)
     static unsigned read() noexcept { unsigned v; __asm__ __volatile__("stmxcsr %0" : "=m"(v) : : "memory"); return v; }
@@ -104,6 +105,40 @@ private:
     static uint64_t read() noexcept { uint64_t v; __asm__ __volatile__("mrs %0, fpcr" : "=r"(v) : : "memory"); return v; }
     static void write(uint64_t v) noexcept { __asm__ __volatile__("msr fpcr, %0" : : "r"(v) : "memory"); }
     uint64_t added_ = 0;
+#endif
+};
+
+// The opposite, for the plug-in benchmark's denormal check (component_bench.cpp): while it lives, subnormals are
+// computed as they are (x86 FTZ and DAZ, Arm64 FPCR.FZ cleared), as a host that doesn't flush runs a component;
+// its destructor sets back only what it cleared. Other targets: nothing (they keep their mode).
+class ScopedKeepDenormals {
+public:
+#if defined(CAW_FP_MODE_SSE)
+    ScopedKeepDenormals() noexcept {
+        const unsigned now = ScopedFlushDenormals::read();
+        cleared_ = now & 0x8040u;
+        if (cleared_) ScopedFlushDenormals::write(now & ~cleared_);
+    }
+    ~ScopedKeepDenormals() { if (cleared_) ScopedFlushDenormals::write(ScopedFlushDenormals::read() | cleared_); }
+#elif defined(CAW_FP_MODE_A64)
+    ScopedKeepDenormals() noexcept {
+        constexpr uint64_t kFz = uint64_t{1} << 24;
+        const uint64_t now = ScopedFlushDenormals::read();
+        cleared_ = now & kFz;
+        if (cleared_) ScopedFlushDenormals::write(now & ~cleared_);
+    }
+    ~ScopedKeepDenormals() { if (cleared_) ScopedFlushDenormals::write(ScopedFlushDenormals::read() | cleared_); }
+#else
+    ScopedKeepDenormals() noexcept = default;
+#endif
+    ScopedKeepDenormals(const ScopedKeepDenormals&) = delete;
+    ScopedKeepDenormals& operator=(const ScopedKeepDenormals&) = delete;
+
+private:
+#if defined(CAW_FP_MODE_SSE)
+    unsigned cleared_ = 0;
+#elif defined(CAW_FP_MODE_A64)
+    uint64_t cleared_ = 0;
 #endif
 };
 

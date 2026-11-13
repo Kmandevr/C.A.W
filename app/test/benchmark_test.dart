@@ -317,7 +317,10 @@ void main() {
 
   test('with the engine: a short run through the worker pool (needs CAW_LIB)', () async {
     final scenarios = const EngineStress().scenarios();
-    expect([for (final s in scenarios) s.id], telemetryScenarioIds.toList());
+    // API 30: the ten telemetry knows first, then the feature scenarios (#197).
+    expect([for (final s in scenarios.take(10)) s.id], telemetryScenarioIds.toList());
+    expect(scenarios.length, 30);
+    expect(scenarios.map((s) => s.id), containsAll(['empty', 'folders_deep', 'sends_many', 'worst_all']));
     final job = const EngineStress().start(const StressRequest(scenario: 'three_tracks', seconds: 0.5));
     final r = await job.result;
     expect(r['ok'], isTrue);

@@ -78,6 +78,7 @@ struct ProfileScope {
 
 }  // namespace
 
+uint64_t PartProfile::now() noexcept { return nowNs(); }
 
 ChainProfile::Slot* ChainProfile::slot(const void* processor, const std::string* id) noexcept {
     for (uint32_t k = 0; k < used; ++k)
@@ -287,6 +288,7 @@ std::unique_ptr<ComponentChain> ComponentChain::make(const ModuleRegistry& regis
         }
         auto e = std::make_unique<Entry>();
         e->id = spec.id;
+        e->samplePlayer = spec.id == kAudioTrackId || spec.id == "org.caw.sampler";
         if (keyed) {
             e->key = std::make_unique<KeyInput>();
             for (uint32_t k = 0; k < d->portCount; ++k)
@@ -745,8 +747,15 @@ void ComponentChain::process(float* left, float* right, uint32_t m, double sampl
     for (std::size_t index = 0; index < entries_.size(); ++index) {
         Entry& e = *entries_[index];
         ProfileScope scope(profile, e.processor.get(), &e.id);
+        // The Benchmark's parts: a sample player's time is Samples (the rest stays the caller's part, Devices or
+        // Master), and resolving its values (lanes, ramps, modulation) is Automation.
+        PartProfile* const parts = profile ? &profile->parts : nullptr;
+        const PartScope player(e.samplePlayer ? parts : nullptr, Part::Samples);
         const std::size_t count = e.resolvers.size();
-        resolveEntry(e, index, m, time, playing, newPlay);
+        {
+            const PartScope automation(parts, Part::Automation);
+            resolveEntry(e, index, m, time, playing, newPlay);
+        }
         const double target = e.bypass.load(std::memory_order_relaxed) ? 0.0 : 1.0;
         if (e.mix == 0.0 && target == 0.0) continue;  // bypassed: not run, input passes on untouched
         assert(!clean_ && "a path that runs a processor must clear clean_ first (reset() would skip a needed reset)");
@@ -769,7 +778,10 @@ void ComponentChain::process(float* left, float* right, uint32_t m, double sampl
         block.output = {out, 2, m};
         block.frames = m;
         block.sampleRate = sampleRate;
-        block.parameters = count ? modulated(e, index, m, time) : nullptr;
+        if (count) {
+            const PartScope automation(parts, Part::Automation);
+            block.parameters = modulated(e, index, m, time);
+        }
         block.parameterCount = static_cast<uint32_t>(count);
         block.transport = time ? &transport : nullptr;
         bool processed;

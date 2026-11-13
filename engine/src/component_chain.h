@@ -11,6 +11,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "engine_parts.h"
 #include "module_registry.h"
 #include "note_events.h"
 #include "params.h"
@@ -85,6 +86,7 @@ struct ChainProfile {
     Slot slots[kSlots];
     uint32_t used = 0;
     uint64_t nestedNs = 0;  // the running scope's nested chains' time so far (component_chain.cpp, ProfileScope)
+    PartProfile parts;      // process() time by engine part (engine_parts.h), filled beside the slots
     Slot* slot(const void* processor, const std::string* id) noexcept;
 };
 
@@ -253,6 +255,7 @@ public:
 private:
     struct Entry {
         std::string id;
+        bool samplePlayer = false;  // an audio track's clip player or the sampler: the Benchmark's "samples" part
         std::unique_ptr<ModuleProcessor> processor;
         std::vector<ParameterResolver> resolvers;
         std::unique_ptr<std::atomic<uint64_t>[]> held;    // control-thread values, as double bits

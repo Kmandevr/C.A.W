@@ -17,6 +17,7 @@ struct Job {
     RunRequest request;
     int32_t mode = CAW_STRESS_DSP;
     std::string scenarioId;  // as asked (ramps: "")
+    std::string feature;     // the scenario's (ramps: "")
     Progress progress;
     LoadHistory history;
     std::atomic<int32_t> cancel{0};

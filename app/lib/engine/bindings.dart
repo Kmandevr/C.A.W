@@ -4,7 +4,7 @@ import 'dart:io';
 
 import 'package:ffi/ffi.dart';
 
-const int cawApiVersion = 29;  // must equal CAW_API_VERSION in engine/include/caw.h
+const int cawApiVersion = 30;  // must equal CAW_API_VERSION in engine/include/caw.h
 
 /// CawNoteFxStats (API 22, #127): a layer's per-note FX slots.
 final class CawNoteFxStatsStruct extends Struct {
@@ -60,6 +60,18 @@ final class CawStressRequestStruct extends Struct {
   @Int32()
   external int quality;
   external Pointer<Utf8> workDir;
+}
+
+/// CawComponentBenchRequest (API 30, #197): one plug-in benchmark (caw_worker_pool_submit_component_bench).
+final class CawComponentBenchRequestStruct extends Struct {
+  @Uint32()
+  external int structSize;
+  external Pointer<Utf8> componentId;
+  external Pointer<Utf8> library;
+  @Int32()
+  external int trustLevel;
+  @Double()
+  external double seconds;
 }
 
 /// CawStressProgress (API 29): what a Benchmark run shows while it goes.
@@ -379,6 +391,12 @@ class Bindings {
   late final int Function(Pointer<Void>, int, Pointer<Float>, int, Pointer<Uint32>) stressHistory = _lib.lookupFunction<
       Int32 Function(Pointer<Void>, Uint32, Pointer<Float>, Int32, Pointer<Uint32>),
       int Function(Pointer<Void>, int, Pointer<Float>, int, Pointer<Uint32>)>('caw_stress_history');
+
+  // The plug-in benchmark (API 30, #197; caw.h). Its job's status, cancel, wait, result and release are every job's.
+  late final Pointer<Void> Function(Pointer<Void>, Pointer<CawComponentBenchRequestStruct>) workerPoolSubmitComponentBench =
+      _lib.lookupFunction<Pointer<Void> Function(Pointer<Void>, Pointer<CawComponentBenchRequestStruct>),
+          Pointer<Void> Function(Pointer<Void>, Pointer<CawComponentBenchRequestStruct>)>(
+          'caw_worker_pool_submit_component_bench');
 
   // Project modulation (API 19, #161; caw.h).
   late final int Function(Pointer<Void>, Pointer<Utf8>, Pointer<Utf8>, double) setModulatorParam = _lib.lookupFunction<

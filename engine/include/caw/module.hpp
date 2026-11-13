@@ -378,6 +378,7 @@ private:
 #include <cstddef>
 #include <type_traits>
 #include "../caw_component.h"
+#include "profile.hpp"  // CAW_PROFILE_SCOPE, the plug-in benchmark's named sections
 namespace caw::detail {
 static_assert(static_cast<uint32_t>(PortType::Event) == CAW_PORT_EVENT);
 static_assert(static_cast<uint32_t>(ChannelLayout::Stereo) == CAW_LAYOUT_STEREO);
