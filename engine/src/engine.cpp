@@ -4298,6 +4298,7 @@ void Engine::runBusNode(int slot, const float* inL, const float* inR, float* out
         s.active = false;
         s.bus = false;
         s.removing = false;
+        setShed(s, false);  // a removed bus is no longer one the device shed (as planChunk does for a track)
         s.previewing = false;
         s.insertTail = false;
         routingDirty_ = true;

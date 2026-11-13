@@ -893,6 +893,36 @@ TEST(a_single_late_callback_sheds_nothing) {
     }
 }
 
+TEST(a_shed_folder_bus_that_is_removed_is_no_longer_counted_shed) {
+    // The 2026-11-12 audio review: a shed bus retired through runBusNode without setShed(false), so
+    // CawMeters.overloaded and the shed-now count stayed up after it was gone, and recovery kept trying.
+    ProjectSpec p = project({dc(0.25)});
+    LayerSpec bus;
+    bus.id = bus.name = "bus";
+    bus.folder = true;
+    bus.busEnabled = true;
+    LayerSpec child = cawtest::testSignalLayer("child", Shape::Dc, {{"level", 0.5}});
+    child.parentId = "bus";
+    p.layers.push_back(child);
+    p.layers.push_back(bus);  // the newest layer: the one shed
+    Engine e(48000);
+    e.setMasterBypass(true);
+    CHECK(e.setProject(p).find("\"ok\":true") != std::string::npos);
+    e.play();
+    run(e, 1000);
+    for (int i = 0; i < 40; ++i) e.reportLoad(1.5, 512);
+    run(e, 64);
+    CHECK_EQ(e.meters().overloaded, 1);
+    LayerMeter lm;
+    CHECK(e.layerMeter(2, lm) && lm.overloaded);  // the bus
+    p.layers.pop_back();
+    p.layers.pop_back();
+    CHECK(e.setProject(p).find("\"ok\":true") != std::string::npos);
+    run(e, 9600);  // the bus fades out and retires
+    CHECK_EQ(e.meters().overloaded, 0);
+    CHECK_EQ(e.sheddingStats().mutedNow, 0);
+}
+
 TEST(an_offline_render_never_sheds_and_a_shedding_reset_brings_everything_back) {
     ProjectSpec p = project({dc(0.25), dc(0.5)});
     Engine e(48000);
