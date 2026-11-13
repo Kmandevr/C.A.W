@@ -212,7 +212,7 @@ class _InstallAnotherVersionPageState extends State<InstallAnotherVersionPage> {
   @override
   Widget build(BuildContext context) => Scaffold(
         appBar: AppBar(title: const Text('Install another version')),
-        body: ListenableBuilder(
+        body: SafeArea(top: false, child: ListenableBuilder(
           listenable: widget.service,
           builder: (context, _) {
             final s = widget.service;
@@ -237,7 +237,7 @@ class _InstallAnotherVersionPageState extends State<InstallAnotherVersionPage> {
               for (final r in list) _ReleaseTile(service: s, release: r, state: widget.state),
             ]);
           },
-        ),
+        )),
       );
 }
 

@@ -27,6 +27,8 @@ Future<T?> showDialogOrSheet<T>({required BuildContext context, required WidgetB
               elevation: 0,
               shadowColor: Colors.transparent,
               insetPadding: const EdgeInsets.fromLTRB(4, 0, 4, 8),
+              // Room for three buttons in one row on a 360 dp phone.
+              actionsPadding: const EdgeInsets.fromLTRB(16, 0, 16, 20),
               alignment: Alignment.bottomCenter,
               shape: const RoundedRectangleBorder(),
             ),

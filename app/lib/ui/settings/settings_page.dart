@@ -96,7 +96,7 @@ class _SettingsPageState extends State<SettingsPage> {
           if (!wide) {
             return Scaffold(
               appBar: AppBar(title: const Text('Settings'), backgroundColor: Neon.panel),
-              body: SettingsKeyArea(label: 'Settings categories', autofocus: true, child: list),
+              body: SafeArea(top: false, child: SettingsKeyArea(label: 'Settings categories', autofocus: true, child: list)),
             );
           }
           return Scaffold(
@@ -233,7 +233,7 @@ class SettingsSectionPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Scaffold(
         appBar: AppBar(title: Text(section.title), backgroundColor: Neon.panel),
-        body: SettingsSectionBody(section: section, deps: deps, highlight: highlight, autofocus: true),
+        body: SafeArea(top: false, child: SettingsSectionBody(section: section, deps: deps, highlight: highlight, autofocus: true)),
       );
 }
 

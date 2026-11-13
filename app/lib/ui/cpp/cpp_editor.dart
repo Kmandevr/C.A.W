@@ -744,11 +744,16 @@ class CppEditorState extends State<CppEditor> {
           ),
           child: Text('C++', style: Neon.code(size: 9.5, color: w.isInstrument ? Neon.green : Neon.pink)),
         ),
-        Expanded(child: Align(alignment: Alignment.centerLeft, child: crumb)),
-        ConstrainedBox(
-          constraints: BoxConstraints(maxWidth: math.max(90.0, width * 0.45)),
-          child: _StatusChip(editor: this, wide: wide),
-        ),
+        // The path keeps at least 56 dp (a narrow side panel); the status chip takes up to its share of the rest and
+        // ellipsizes, so the bar's buttons never go off the edge.
+        Expanded(child: LayoutBuilder(builder: (context, box) => Row(children: [
+          Expanded(child: Align(alignment: Alignment.centerLeft, child: crumb)),
+          ConstrainedBox(
+            constraints: BoxConstraints(
+                maxWidth: math.max(0.0, math.min(math.max(90.0, width * 0.45), box.maxWidth - 56))),
+            child: _StatusChip(editor: this, wide: wide),
+          ),
+        ]))),
         if (errors > 0) ...[
           _iconAction('previous error', Icons.keyboard_arrow_up, 'Previous error (Shift+F8)', jumpToPreviousError, height: 28),
           _iconAction('next error', Icons.keyboard_arrow_down, 'Next error (F8)', jumpToNextError, height: 28),

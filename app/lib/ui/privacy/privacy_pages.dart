@@ -51,7 +51,7 @@ class LegalTextPage extends StatelessWidget {
             onPressed: () => copyWithNote(context, which.url, 'Link copied: ${which.url}'),
           ),
         ]),
-        body: FutureBuilder<String>(
+        body: SafeArea(top: false, child: FutureBuilder<String>(
           future: (load ?? rootBundle.loadString)(which.asset),
           builder: (context, snap) => AnimatedSwitcher(
             duration: Motion.fade(Motion.standard, Motion.of(context)),
@@ -64,7 +64,7 @@ class LegalTextPage extends StatelessWidget {
               null => const SizedBox.shrink(key: ValueKey('legal-loading')),
             },
           ),
-        ),
+        )),
       );
 }
 
@@ -217,7 +217,7 @@ class WhatsSentPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Scaffold(
         appBar: AppBar(title: const Text("What's sent"), backgroundColor: Neon.panel),
-        body: FutureBuilder<Map<String, Object?>?>(
+        body: SafeArea(top: false, child: FutureBuilder<Map<String, Object?>?>(
           future: telemetry.previewToday(),
           builder: (context, snap) {
             final queued = telemetry.queued;
@@ -237,7 +237,7 @@ class WhatsSentPage extends StatelessWidget {
               ),
             ]);
           },
-        ),
+        )),
       );
 }
 

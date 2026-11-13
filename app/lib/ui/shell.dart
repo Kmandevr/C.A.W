@@ -330,7 +330,7 @@ class _ShellState extends State<Shell> {
                       final form = formFactorFor(room, mode: _layoutMode);
                       _dock.narrow = formFactorFor(room) != FormFactor.desktop;
                       if (form != _dock.form) _switchForm(form);
-                      SystemBars.apply(fullScreen: _dock.form == FormFactor.phoneLandscape);
+                      SystemBars.apply(fullScreen: _dock.form == FormFactor.phoneLandscape, lightTheme: Neon.isLight);
                       if (!_homeShown) {
                         _homeShown = true;
                         WidgetsBinding.instance.addPostFrameCallback((_) {

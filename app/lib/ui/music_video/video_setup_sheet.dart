@@ -846,6 +846,7 @@ class _TabBar extends StatelessWidget {
               child: Pressable(glow: videoAccent, child: AnimatedContainer(
                 duration: Motion.fade(Motion.standard, level),
                 curve: Curves.easeOutCubic,
+                padding: const EdgeInsets.symmetric(horizontal: 3),
                 decoration: BoxDecoration(
                   borderRadius: BorderRadius.circular(9),
                   color: t == selected ? videoAccent.withValues(alpha: 0.2) : Colors.transparent,
@@ -858,9 +859,10 @@ class _TabBar extends StatelessWidget {
                     Icon(t.icon, size: 15, color: t == selected ? videoAccent : Neon.dim),
                     const SizedBox(width: 4),
                   ],
-                  Flexible(child: Text(t.label.toUpperCase(), maxLines: 1, overflow: TextOverflow.ellipsis,
+                  // The whole word, a little smaller under a large text size, clear of the next tab.
+                  Flexible(child: FittedBox(fit: BoxFit.scaleDown, child: Text(t.label.toUpperCase(), maxLines: 1,
                       style: TextStyle(fontSize: 9.5, letterSpacing: narrow ? 0.1 : 0.4, fontWeight: FontWeight.w800,
-                          color: t == selected ? Neon.text : Neon.dim))),
+                          color: t == selected ? Neon.text : Neon.dim)))),
                   AnimatedOpacity(
                     duration: Motion.fade(Motion.small, level),
                     opacity: selectedShot && (t == VideoTab.look || t == VideoTab.media) ? 1 : 0,

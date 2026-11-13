@@ -302,11 +302,16 @@ class _BandReadout extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    Widget cell(String label, String value) => Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Text(label, style: const TextStyle(fontSize: 9, letterSpacing: 1.1, fontWeight: FontWeight.w800, color: Neon.dim)),
-      Text(value, maxLines: 1, overflow: TextOverflow.ellipsis,
-        style: Neon.code(size: 14, color: band.on ? Neon.text : Neon.dim).copyWith(fontWeight: FontWeight.w700)),
-    ]));
+    // Widths by what each holds ("High cut 48", "10.0 kHz", "+12.0 dB", "Q 0.71"), with a gap so values never touch.
+    Widget cell(String label, String value, int flex) => Expanded(flex: flex, child: Padding(
+      padding: const EdgeInsets.only(right: 6),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text(label, maxLines: 1, overflow: TextOverflow.clip, softWrap: false,
+          style: const TextStyle(fontSize: 9, letterSpacing: 1.1, fontWeight: FontWeight.w800, color: Neon.dim)),
+        Text(value, maxLines: 1, overflow: TextOverflow.ellipsis,
+          style: Neon.code(size: 14, color: band.on ? Neon.text : Neon.dim).copyWith(fontWeight: FontWeight.w700)),
+      ]),
+    ));
     return Container(
       key: const ValueKey('eq-readout'),
       margin: const EdgeInsets.only(bottom: 8),
@@ -314,10 +319,10 @@ class _BandReadout extends StatelessWidget {
       decoration: BoxDecoration(borderRadius: BorderRadius.circular(12), color: band.color.withValues(alpha: 0.08),
         border: Border.all(color: band.color.withValues(alpha: 0.4))),
       child: Row(children: [
-        cell('BAND ${band.n}', band.on ? type : 'Off'),
-        cell('FREQUENCY', _EqPainter._hz(band.freq)),
-        if (eqHasGain(band.shape)) cell('GAIN', '${band.gain >= 0 ? '+' : ''}${band.gain.toStringAsFixed(1)} dB'),
-        cell('WIDTH', 'Q ${band.q.toStringAsFixed(2)}'),
+        cell('BAND ${band.n}', band.on ? type : 'Off', 7),
+        cell('FREQUENCY', _EqPainter._hz(band.freq), 5),
+        if (eqHasGain(band.shape)) cell('GAIN', '${band.gain >= 0 ? '+' : ''}${band.gain.toStringAsFixed(1)} dB', 5),
+        cell('WIDTH', 'Q ${band.q.toStringAsFixed(2)}', 4),
       ]),
     );
   }
@@ -415,8 +420,10 @@ class _TypeGrid extends StatelessWidget {
                   child: Column(children: [
                     Expanded(child: Padding(padding: const EdgeInsets.fromLTRB(6, 5, 6, 1), child: CustomPaint(size: Size.infinite,
                       painter: _ShapeIconPainter(eqShapeOf(p.choices[k]), k == sel ? color : Neon.dim)))),
-                    Text(_shortType(p.choices[k]), maxLines: 1, style: TextStyle(fontSize: 8.5, fontWeight: FontWeight.w700,
-                      color: k == sel ? Neon.text : Neon.dim)),
+                    // The whole name ("Low cut 24"), a little smaller where the tile is narrow.
+                    Padding(padding: const EdgeInsets.symmetric(horizontal: 2), child: FittedBox(fit: BoxFit.scaleDown,
+                      child: Text(_shortType(p.choices[k]), maxLines: 1, style: TextStyle(fontSize: 8.5,
+                        fontWeight: FontWeight.w700, color: k == sel ? Neon.text : Neon.dim)))),
                     const SizedBox(height: 3),
                   ]),
                 ),

@@ -356,25 +356,22 @@ class _PatternScreenState extends State<PatternScreen> {
         ),
       );
       final status = _StatusLine(module: m, info: info, onJump: () => _showError(m, info!));
-      final header = Row(children: [
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-          decoration: BoxDecoration(border: Border.all(color: color), borderRadius: BorderRadius.circular(6)),
-          child: const Text('PATTERN',
-              style: TextStyle(color: color, fontSize: 11, fontWeight: FontWeight.w700, letterSpacing: 1.2)),
-        ),
-        const SizedBox(width: 10),
-        // A pattern's header is fields here, not text (owner, 2026-11-10).
-        Expanded(
-          child: PatternFields(
-            key: ValueKey('fields ${m.id}'),
-            source: () => m.source,
-            name: m.name,
-            stepsPerBar: s.project.stepsPerBar,
-            onSource: (v) => s.editSource(m.id, v),
-            onRename: (v) => s.renameModule(m.id, v),
-          ),
-        ),
+      final badge = Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+        decoration: BoxDecoration(border: Border.all(color: color), borderRadius: BorderRadius.circular(6)),
+        child: const Text('PATTERN',
+            style: TextStyle(color: color, fontSize: 11, fontWeight: FontWeight.w700, letterSpacing: 1.2)),
+      );
+      // A pattern's header is fields here, not text (owner, 2026-11-10).
+      final fields = PatternFields(
+        key: ValueKey('fields ${m.id}'),
+        source: () => m.source,
+        name: m.name,
+        stepsPerBar: s.project.stepsPerBar,
+        onSource: (v) => s.editSource(m.id, v),
+        onRename: (v) => s.renameModule(m.id, v),
+      );
+      final actions = <Widget>[
         if (look.soloButton)
           IconButton(
             tooltip: s.previewOnly ? 'Hearing only this (${PointerInput.tap} for the whole project)' : 'Hear only this',
@@ -397,7 +394,15 @@ class _PatternScreenState extends State<PatternScreen> {
             const PopupMenuItem(value: 'delete', child: Text('Delete')),
           ],
         ),
-      ]);
+      ];
+      // Beside the badge the fields need about 480 dp of panel; narrower (a phone, a side panel) they take a row of
+      // their own under it, so the name stays readable.
+      final header = box.maxWidth >= 480
+          ? Row(children: [badge, const SizedBox(width: 10), Expanded(child: fields), ...actions])
+          : Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+              Row(children: [badge, const Spacer(), ...actions]),
+              fields,
+            ]);
       final scope = s.settings.lightMode || !look.scope || !Neon.showScopes
           ? const SizedBox.shrink()
           : NeonPanel(

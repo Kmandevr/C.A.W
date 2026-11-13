@@ -110,10 +110,11 @@ class VideoTiles<T> extends StatelessWidget {
           ),
           child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
             if (icon != null) Icon(icon!(v), size: 18, color: on ? c : (ok ? Neon.dim : Neon.dim.withValues(alpha: 0.4))),
-            Padding(padding: const EdgeInsets.symmetric(horizontal: 4), child: Text(label(v).toUpperCase(),
-                maxLines: 1, overflow: TextOverflow.ellipsis,
-                style: TextStyle(fontSize: 9.5, letterSpacing: 0.3, fontWeight: FontWeight.w800,
-                    color: on ? Neon.text : (ok ? Neon.dim : Neon.dim.withValues(alpha: 0.4))))),
+            // The whole label ("TRACK COLOURS"), a little smaller where five tiles share a phone's width.
+            Padding(padding: const EdgeInsets.symmetric(horizontal: 4), child: FittedBox(fit: BoxFit.scaleDown,
+                child: Text(label(v).toUpperCase(), maxLines: 1,
+                    style: TextStyle(fontSize: 9.5, letterSpacing: 0.3, fontWeight: FontWeight.w800,
+                        color: on ? Neon.text : (ok ? Neon.dim : Neon.dim.withValues(alpha: 0.4)))))),
           ]),
         )),
       ),

@@ -27,10 +27,13 @@ class PrivacyPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Scaffold(
         appBar: AppBar(title: const Text('Privacy'), backgroundColor: Neon.panel),
-        body: SingleChildScrollView(
-          key: const ValueKey('privacy-page'),
-          padding: const EdgeInsets.fromLTRB(8, 8, 8, 32),
-          child: PrivacySettings(deps: deps, telemetry: telemetry),
+        body: SafeArea(
+          top: false,
+          child: SingleChildScrollView(
+            key: const ValueKey('privacy-page'),
+            padding: const EdgeInsets.fromLTRB(8, 8, 8, 32),
+            child: PrivacySettings(deps: deps, telemetry: telemetry),
+          ),
         ),
       );
 }
