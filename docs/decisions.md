@@ -1,10 +1,26 @@
 ---
 title: Decisions
 summary: Dated record of what was chosen and why, newest first.
-updated: 2026-11-12
+updated: 2026-11-13
 ---
 
 # Decisions
+
+## 2026-11-13: The Benchmark (beta plan C) built; how it measures (Claude, within the owner's look)
+
+**Built:** section C, to the owner's look of 2026-11-12 (below) and the architect's plan: [engine](engine.md#the-benchmark), [app](app.md).
+
+**Choices (Claude; the owner said to do what is best for the app where the plan left it open):**
+- **"Through the native worker pool" (C5) means a `CawWorkerPool` job:** `caw_worker_pool_submit_stress` returns a `CawJob` (`TaskKind::Stress`) with the status, cancel, wait and release every job has, plus `caw_stress_progress`, `caw_stress_history`, `caw_stress_result` and `caw_stress_costs`. C API **27** (Main and the session branch are 25, bt-clicks uses 26, speed-parallel took 24).
+- **Shared code:** caw_bench's builders moved verbatim to `engine/src/stress_scenarios.cpp` in caw_core, so the app's and CI's projects are the same; a hash test of each project and reference renders of 1 s each guard them.
+- **Timed like CI:** 256-frame callbacks at Normal quality on the run's own engine, overload shedding off on it (a single flag, so bt-clicks' shedding rework merges around it).
+- **A ramp step holds** when its p99 callback is within the budget (at most 1 in 100 over); the counts rise to the first step that doesn't hold, then halve the gap below it, never above it, which keeps C4's "stop at the first over-budget step" and gives exact limits.
+- **Tiers:** a tier's worst p99 at most 70 % of the budget is comfortable, at most 100 % tight, else over budget. **[Assumption]** 30 % headroom covers the UI, other apps and heat; worth checking on the S22+.
+- **Dropouts in H2:** a live run's (AAudio's XRun count, else its callbacks over budget) when that scenario ran live, else the timed callbacks over budget.
+- **`topCosts`:** components' shares averaged over the profiled songs, built-in ids only (the host's share and C++ components left out, rather than sent as "other").
+- **The profiler is per Engine** (bound thread-locally for each `process()` call), replacing the global pointer whose `slot()` was unsynchronised.
+- **Memory:** an Extreme scenario whose measured need (peak RSS growth on Linux x64 plus a third) passes the engine's work-memory budget is skipped and says so.
+- **Share** is Android's share sheet with the summary and the JSON (desktop: the clipboard); Save is the save picker.
 
 ## 2026-11-12: No shared buses; work the REAPER way (owner)
 

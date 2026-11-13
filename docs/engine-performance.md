@@ -1,8 +1,8 @@
 ---
 title: Engine performance
 summary: The CI bench suite (caw_bench SECONDS 500, the Bench workflow), its scenarios and targets, the baseline per target, and the speed phases' before/after tables.
-covers: [engine/bench/, .github/workflows/bench.yml]
-updated: 2026-11-12
+covers: [engine/bench/, .github/workflows/bench.yml, engine/src/stress_scenarios.*]
+updated: 2026-11-13
 ---
 
 # Engine performance
@@ -11,7 +11,7 @@ The owner asked for a faster engine, measured first (2026-11-12, [decisions](dec
 
 ## The suite
 
-`caw_bench SECONDS 500 [--frames N] [--runs N] [--only ID,ID] [--label TEXT] [--json PATH] [--md PATH]` (`engine/bench/caw_bench.cpp`, `runSuite`). Defaults: **256-frame callbacks at 48 kHz, a budget of 5,333 µs per callback**, 3 runs. Each run plays every scenario in turn on a fresh `Engine` (set the project, 0.25 s stopped so the project is applied, then Play) and times each `Engine::process` call. A scenario's result: the **median of the runs' means** (and p99s) and the **largest worst case of any run**, with the time after Play the worst case happened; load is time ÷ budget. `--json` writes every number, each run's mean and worst too (`format: 1`); `--md` writes a markdown table. The bench changes no engine code; it builds projects from built-in instruments and effects only.
+`caw_bench SECONDS 500 [--frames N] [--runs N] [--only ID,ID] [--label TEXT] [--json PATH] [--md PATH]` (`engine/bench/caw_bench.cpp`, `runSuite`). Defaults: **256-frame callbacks at 48 kHz, a budget of 5,333 µs per callback**, 3 runs. Each run plays every scenario in turn on a fresh `Engine` (set the project, 0.25 s stopped so the project is applied, then Play) and times each `Engine::process` call. A scenario's result: the **median of the runs' means** (and p99s) and the **largest worst case of any run**, with the time after Play the worst case happened; load is time ÷ budget. `--json` writes every number, each run's mean and worst too (`format: 1`); `--md` writes a markdown table. The bench changes no engine code; it builds projects from built-in instruments and effects only. The projects are `engine/src/stress_scenarios.cpp`'s (moved there from the bench on 2026-11-13 unchanged: the same projects, renders and output), which the app's Benchmark plays too, so its numbers and CI's are of the same projects; `stress_test.cpp` keeps them from changing by accident ([engine](engine.md#the-benchmark)).
 
 | Id | Scenario |
 |---|---|

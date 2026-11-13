@@ -1,7 +1,7 @@
 ---
 title: Beta readiness plan
-summary: The owner's 2026-11-12 direction for engine speed A1-A7, a 240 fps UI, the stress test, the startup screen, telemetry and feedback, and the C.A.W-Telemetry contract (section H, with its 2026-11-12 updates); telemetry and feedback (E, F) are built, the rest planned.
-updated: 2026-11-12
+summary: The owner's 2026-11-12 direction for engine speed A1-A7, a 240 fps UI, the stress test, the startup screen, telemetry and feedback, and the C.A.W-Telemetry contract (section H, with its 2026-11-12 updates); the stress test (C), telemetry and feedback (E, F) are built, the rest planned.
+updated: 2026-11-13
 ---
 
 # Beta readiness plan

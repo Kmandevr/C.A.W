@@ -1,8 +1,8 @@
 ---
 title: How it works
 summary: The path a sound takes from a project edit to the speaker and to a WAV, the file that owns each step, and where to make each kind of change.
-covers: [engine/include/caw/module.hpp, engine/include/caw/component.hpp, engine/include/caw/instrument.hpp, engine/src/note_events.h, engine/CMakeLists.txt, engine/cmake/, examples/cpp/minimal/, scripts/caw-component-build.js, .github/workflows/cpp-components.yml, engine/src/engine.h, engine/src/capi.cpp, engine/src/module.*, engine/src/module_registry.*, engine/src/graph.*, engine/src/dependency.*, engine/src/execution.*, engine/src/hardware.*, engine/src/scheduler.*, engine/src/worker_api.cpp, engine/src/midi2.*, app/lib/engine/engine.dart, app/lib/engine/execution.dart, app/lib/engine/bindings.dart, app/lib/model/app_state.dart]
-updated: 2026-11-12
+covers: [engine/include/caw/module.hpp, engine/include/caw/component.hpp, engine/include/caw/instrument.hpp, engine/src/note_events.h, engine/CMakeLists.txt, engine/cmake/, examples/cpp/minimal/, scripts/caw-component-build.js, .github/workflows/cpp-components.yml, engine/src/engine.h, engine/src/capi.cpp, engine/src/module.*, engine/src/module_registry.*, engine/src/graph.*, engine/src/dependency.*, engine/src/execution.*, engine/src/hardware.*, engine/src/scheduler.*, engine/src/worker_api.cpp, engine/src/midi2.*, app/lib/engine/engine.dart, app/lib/engine/execution.dart, app/lib/engine/bindings.dart, app/lib/model/app_state.dart, engine/src/stress_*, engine/src/capi_stress.*, app/lib/engine/stress.dart]
+updated: 2026-11-13
 ---
 
 # How it works
@@ -66,6 +66,7 @@ The modular foundation is real native C++ code, but it is not yet the active pla
 | Pattern text format | `engine/src/pattern.cpp` and the app's `app/lib/model/pattern_doc.dart`, which must agree | `pattern_test.cpp`, `app/test/pattern_doc_test.dart` |
 | Playback, mixing, notes, chain swaps | `engine/src/engine.cpp` (real-time rules: `.claude/rules/engine.md`) | `engine_test.cpp`; ask `audio-reviewer` |
 | A new C API call | `engine/include/caw.h`, `engine/src/capi.cpp` or `engine/src/worker_api.cpp`, `app/lib/engine/bindings.dart`, `app/lib/engine/engine.dart`, `app/lib/engine/execution.dart`; when a call's meaning changes, bump `CAW_API_VERSION` and the app's `cawApiVersion` together | [engine](engine.md#c-api-engineincludecawh) |
+| A Benchmark scenario, ramp or measurement | the projects in `engine/src/stress_scenarios.cpp` (caw_bench's too: a change moves CI's numbers), the runs in `engine/src/stress_run.cpp`, the C API in `engine/src/capi_stress.cpp` and `worker_api.cpp` (`TaskKind::Stress`), the app's plans in `app/lib/model/stress_runner.dart` | `stress_test.cpp` (a builder's project hash and its `references/stress.cawref` change only on purpose), `stress_rt_test.cpp`, `app/test/benchmark_test.dart`; [engine](engine.md#the-benchmark), [app](app.md) |
 | Something the app keeps (projects, settings) | `app/lib/model/` (projects: `storage.dart`; folders, metadata index and trash: `project_library.dart`) | [app](app.md) |
 | A screen | `app/lib/ui/<screen>.dart`; a new command also gets an action in `app/lib/actions/catalogue.dart` | [app](app.md), [actions](actions.md) |
 | A C++ starter | `examples/cpp/starters/` | `.github/workflows/cpp-components.yml` builds each |

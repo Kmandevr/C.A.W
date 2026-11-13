@@ -1,7 +1,7 @@
 ---
 title: UI design
 summary: Arrangement-first creative UI across three shared-state sections (Build, Files, Arrange), with touch-first phone layouts and keyboard/mouse desktop access.
-updated: 2026-11-12
+updated: 2026-11-13
 covers: [app/lib/ui/, app/lib/actions/]
 ---
 
@@ -292,5 +292,7 @@ The broader UI specification below records design intent as well as current beha
 Clip-following automation, comping across take lanes (a clip's takes are swapped whole, by the take chip), the sampler's per-zone filters and envelopes beyond the zone ADSR, and time selection marquee for audio clips are not part of the current implementation; they are planned in the permanent [roadmap](roadmap.md).
 
 ## Performance profiles
+
+**[Fact]** Settings › Performance also has the **Benchmark** card, which opens the full-screen Benchmark (Quick and Full runs, a live load graph, tier badges, limits, what's holding it back, per-scenario rows, Share and Save JSON; [app](app.md)).
 
 Settings provides Full Experience, Balanced, Lightweight and Minimal. Profiles reduce decorative effects before useful responsiveness: meter polling stays at 30 Hz in every mode, and the separate **Frame rate** setting (Auto or a cap the screen has) sets how often the screen redraws, capped at 60 Hz under Lightweight and 30 Hz under Minimal (owner, 2026-11-12; the lower of the two is in force; [app](app.md), Frame rate). Lightweight/Minimal use the existing reduced voice budget; Minimal hides scope panels and turns motion off (Lightweight turns glass blur and the scopes' blurred glow off and Minimal turns Glass off, which brings back solid panels and controls; the Motion, Haptics and Glow settings and the shared motion rules are in `lib/ui/motion.dart`; see [UI plan](ui-plan.md), "Feel"). See [Performance](performance.md#ui-performance-profiles) for the exact behavior and remaining device measurements.
