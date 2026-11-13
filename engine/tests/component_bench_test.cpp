@@ -228,9 +228,11 @@ TEST(component_bench_sections_are_exclusive) {
         while (std::chrono::steady_clock::now() < until) {
         }
     };
+    uint64_t held = 0;  // the outer sections' whole time, measured around them
     {
         const profile::Recording recording;
         for (int k = 0; k < 3; ++k) {
+            const uint64_t h0 = ext->now_ns();
             const uint32_t outer = ext->begin(ext->host_data, kOuter);
             const uint64_t t0 = ext->now_ns();
             spin(4);
@@ -239,6 +241,7 @@ TEST(component_bench_sections_are_exclusive) {
             spin(8);
             ext->end(ext->host_data, inner, t1);
             ext->end(ext->host_data, outer, t0);
+            held += ext->now_ns() - h0;
         }
     }
     CHECK(ext->begin(ext->host_data, kOuter) == CAW_PROFILE_NO_SECTION);  // stopped: nothing records
@@ -247,9 +250,12 @@ TEST(component_bench_sections_are_exclusive) {
     CHECK(s.count("outer") && s.count("inner"));
     if (s.count("outer") && s.count("inner")) {
         CHECK_EQ(s["outer"].calls, uint64_t{3});
-        // Outer's own time is its 4 ms a call, not the 12 ms it held the inner's.
-        CHECK(s["outer"].ns >= 3 * 3'000'000ull && s["outer"].ns < 3 * 7'000'000ull);
+        // Exclusive: outer's own time plus inner's is the time outer was held, not that plus inner's again. Checked
+        // against the measured hold, not fixed bounds, so a preempted spin on a loaded machine can't fail it.
+        CHECK(s["outer"].ns >= 3 * 3'000'000ull);
         CHECK(s["inner"].ns >= 3 * 7'000'000ull);
+        CHECK(s["outer"].ns + s["inner"].ns <= held + 1'000'000ull);
+        CHECK(s["outer"].ns < held - s["inner"].ns + 1'000'000ull);  // inclusive timing would add inner's time again
     }
     // The fixture's nested "channel" inside "decay": the shares add up to the whole at most.
     const Json j = benchJson(library(CAW_TEST_BENCH_COMPONENT_PATH, "org.caw.tests.bench-bad"));

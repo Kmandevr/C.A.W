@@ -8,6 +8,7 @@
 #include <memory>
 #include <string>
 #include <thread>
+#include <algorithm>
 #include <vector>
 
 #include "audio_clips.h"
@@ -265,6 +266,17 @@ TEST(stress_profile_parts_add_up_and_name_the_feature) {
         Progress p;
         const RunResult o = run(r, p, nullptr, nullptr);
         CHECK(o.ok);
+        // Which part is largest is judged on each part's least mean over three runs: another process on a loaded
+        // machine only ever adds time to a part, so the minimum is the part's own cost.
+        std::vector<double> least(kPartCount);
+        for (size_t k = 0; k < o.parts.size() && k < least.size(); ++k) least[k] = o.parts[k].meanUs;
+        for (int again = 0; again < 2; ++again) {
+            Progress q;
+            const RunResult more = run(r, q, nullptr, nullptr);
+            CHECK(more.ok);
+            for (size_t k = 0; k < more.parts.size() && k < least.size(); ++k)
+                least[k] = std::min(least[k], more.parts[k].meanUs);
+        }
         CHECK_EQ(o.parts.size(), static_cast<size_t>(kPartCount));
         double pct = 0, us = 0;
         Part top = Part::Other;
@@ -273,7 +285,7 @@ TEST(stress_profile_parts_add_up_and_name_the_feature) {
             CHECK(o.parts[k].part == static_cast<Part>(k));
             pct += o.parts[k].pct;
             us += o.parts[k].meanUs;
-            if (o.parts[k].pct > topPct) topPct = o.parts[k].pct, top = o.parts[k].part;
+            if (least[k] > topPct) topPct = least[k], top = o.parts[k].part;
             CHECK(o.parts[k].p99Us >= 0);
         }
         CHECK_NEAR(pct, 100.0, 0.01);
@@ -286,7 +298,7 @@ TEST(stress_profile_parts_add_up_and_name_the_feature) {
         // cost the most there): the feature's part is still among the two largest. Optimized builds, which the
         // Benchmark measures, check the largest above.
         int above = 0;
-        for (const PartRow& x : o.parts) above += x.pct > o.parts[static_cast<int>(dominant)].pct ? 1 : 0;
+        for (size_t k = 0; k < least.size(); ++k) above += least[k] > least[static_cast<int>(dominant)] ? 1 : 0;
         if (above > 1) cawtest::fail(__FILE__, __LINE__, std::string(id) + ": its part is not among the two largest");
         (void)top;
 #endif
