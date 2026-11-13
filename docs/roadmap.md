@@ -62,7 +62,7 @@ An overview by area, checked against the repository on 2026-11-03. The stage tab
 1. **1.0.2:** the full-coverage Benchmark with a per-engine-part breakdown and the plug-in benchmark (#197).
 2. **1.0.3:** a tempo map, time signature changes, and markers and sections (#207).
 3. **1.0.4:** audio stretching with Signalsmith Stretch (licence to confirm): follow tempo, stretch to fit, pitch shift, slice to MIDI, and a sample editor (#208).
-4. **1.0.5:** comping, freeze, bounce in place, consolidate, stem export (#33) and app-wide undo (#209).
+4. **1.0.5:** comping, freeze, bounce in place and consolidate (#209). Stem export is already built (#33). App-wide undo is checked against the existing project-wide history (`lib/model/history.dart`) first.
 5. **1.0.6:** clip automation and VCA groups (#210), MIDI out and MIDI clock (#211).
 6. **1.0.7:** the foundation for hosting other people's plug-ins (#212): the isolation design (reviewed first), the out-of-process host, the scan and the loader behind Isolated, Trusted or Blocked. All of it is hidden from users. The plug-in hosting feature itself (CLAP and VST3 on Windows, CLAP on Android) ships in 1.1.0 (owner, 2026-11-13).
 7. **1.0.8:** a notation view (#213).

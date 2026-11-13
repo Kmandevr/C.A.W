@@ -1,3 +1,4 @@
+// MIDI 2.0 Universal MIDI Packet decoding and conversion to MIDI 1.0 events for device input (#31).
 #include "midi2.h"
 
 #include <algorithm>

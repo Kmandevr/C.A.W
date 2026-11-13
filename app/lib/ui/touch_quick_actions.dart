@@ -1,3 +1,4 @@
+// Touch quick actions (#23): a touch-first strip of direct action buttons, run through the action registry without synthesizing keyboard chords.
 import 'package:flutter/material.dart';
 
 import '../actions/actions.dart';
