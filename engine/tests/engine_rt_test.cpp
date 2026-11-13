@@ -794,3 +794,41 @@ TEST(the_first_callback_after_play_allocates_nothing_and_costs_about_the_mean) {
     std::printf("    first callback after Play: %.2fx the mean (best of 7)\n", best);
     CHECK(best <= 2.0);
 }
+
+TEST(tempo_map_swaps_and_playback_on_the_map_never_allocate) {
+    // A song on a ramped tempo map with 7/8 bars, the metronome on and a looping track: new maps and signatures
+    // (the C API's calls and a project update) are built on the control thread and swapped in and retired by the
+    // audio thread, which never allocates or frees doing it, or playing on them.
+    ProjectSpec p;
+    p.bpm = 120;
+    p.loopBars = 2;
+    p.modules.push_back({"acid", kAcidLine});
+    p.layers = {layer("a", "org.caw.test.osc", "acid", {{"org.caw.delay.pingpong", {}}})};
+    p.layers[0].instrument.params = {{"mode", 1}};
+    p.tempoMap = {{0, 120, false}, {2, 90, false}, {6, 160, true}};
+    p.timeSigs = {{0, 0, 7, 8}};
+    Engine e(48000);
+    e.setMetronome(true);
+    CHECK(e.setProject(p).find("\"ok\":true") != std::string::npos);
+    e.play();
+    std::vector<float> l(192), r(192);
+    for (int k = 0; k < 100; ++k) e.process(l.data(), r.data(), 192);
+    std::size_t operations = 0;
+    float peak = 0.0f;
+    for (int round = 0; round < 3; ++round) {
+        if (round == 0) CHECK(e.setTempoMap({{0, 100, false}, {3, 140, true}}).empty());
+        if (round == 1) CHECK(e.setTimeSignatures({{0, 0, 5, 4}, {1, 5, 3, 8}}).empty());
+        if (round == 2) {
+            p.tempoMap = {{0, 133, false}};
+            CHECK(e.setProject(p).find("\"ok\":true") != std::string::npos);
+        }
+        cawtest::AllocationScope scope;
+        for (int k = 0; k < 250; ++k) {
+            e.process(l.data(), r.data(), 192);
+            for (float v : l) peak = v > peak ? v : peak;
+        }
+        operations += scope.count();
+    }
+    CHECK_EQ(operations, 0u);
+    CHECK(peak > 0.01f);
+}

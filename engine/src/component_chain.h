@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "engine_parts.h"
+#include "tempo_map.h"
 #include "module_registry.h"
 #include "note_events.h"
 #include "params.h"
@@ -67,6 +68,20 @@ struct ChainTime {
     int64_t chunk = -1;     // the Engine's chunk counter: a key written for another chunk is stale (silence)
     const ChainModulation* modulation = nullptr;  // project modulation of this chain's parameters (null: none)
     ChainProfile* profile = nullptr;  // the Engine's component profile (Engine::setProfile; null: none)
+    // The song's tempo map and signatures (1.0.3; null: stepLength, tempo and beatsPerBar hold everywhere). With more
+    // than one tempo, automation steps, the transport's beat and its tempo come from the map at each frame.
+    const SongTime* song = nullptr;
+    double stepAt(int64_t frame) const noexcept {
+        return song && !song->tempo.constant() ? song->tempo.stepAt(static_cast<double>(frame))
+                                               : static_cast<double>(frame) / stepLength;
+    }
+    // What a component sees of the song for a block from `start`.
+    Transport transportAt(bool playing) const noexcept {
+        const double beat = stepAt(start) / 4.0;
+        const double bpm = song && !song->tempo.constant() ? song->tempo.bpmAtFrame(static_cast<double>(start)) : tempo;
+        const uint32_t bar = song ? static_cast<uint32_t>(song->sigs.numAt(beat)) : beatsPerBar;
+        return {bpm, beat, bar, playing};
+    }
 };
 
 // Benchmark-only (caw_bench's profile mode, the app's Benchmark): the time each component spends in a chain, per

@@ -1,6 +1,9 @@
 // Audio input: monitoring frames, the recorder (lock-free ring, background WAV writer, takes), latency ping, recovery.
 #include "audio_input.h"
 
+#include "project.h"
+#include "tempo_map.h"
+
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -138,6 +141,11 @@ struct LiveAudio::Session {
     };
     std::string dir;
     double bpm = 120, stepLen = 1500;
+    TempoMap tempo;       // the request's "tempo_map" (1.0.3), when `mapped`
+    bool mapped = false;
+    double stepOf(int64_t frame) const {
+        return mapped ? tempo.stepAt(static_cast<double>(frame)) : static_cast<double>(frame) / stepLen;
+    }
     bool float32 = true;
     bool punch = false;
     int64_t punchIn = 0, punchOut = 0;
@@ -157,7 +165,7 @@ struct LiveAudio::Session {
     std::string takeJson(const Take& t) const {
         return "{\"layer\":\"" + jsonEscape(t.layer) + "\",\"path\":\"" + jsonEscape(t.path) + "\",\"take\":" +
                std::to_string(t.take) + ",\"start_frame\":" + std::to_string(t.startFrame) + ",\"start_steps\":" +
-               jnum(static_cast<double>(t.startFrame) / stepLen) + ",\"frames\":" + std::to_string(t.frames) +
+               jnum(stepOf(t.startFrame)) + ",\"frames\":" + std::to_string(t.frames) +
                ",\"seconds\":" + jnum(static_cast<double>(t.frames) / rate) + ",\"channels\":" +
                std::to_string(t.channels) + ",\"sample_rate\":" + std::to_string(rate) + ",\"bpm\":" + jnum(bpm) +
                ",\"complete\":" + (t.complete ? "true" : "false") + ",\"error\":\"" + jsonEscape(t.error) + "\"}";
@@ -396,6 +404,13 @@ std::string LiveAudio::startRecording(std::string_view requestJson) {
     if (!(s->bpm >= 20 && s->bpm <= 400)) return failJson("bpm must be 20..400");
     s->rate = static_cast<int>(std::lround(sr_));
     s->stepLen = sampletime::stepFrames(sr_, s->bpm);
+    if (const Json* tm = j.get("tempo_map"); tm && tm->type != Json::Type::Null) {
+        std::vector<TempoPointSpec> pts;
+        if (!readTempoMap(*tm, pts, error)) return failJson(error);
+        s->tempo.build(pts, sr_);
+        s->mapped = !s->tempo.constant();
+        if (!s->mapped) s->stepLen = s->tempo.stepFrames();
+    }
     const double bits = j.number("bits", 32);
     if (bits != 24 && bits != 32) return failJson("bits must be 24 (PCM) or 32 (float)");
     s->float32 = bits == 32;
@@ -405,8 +420,9 @@ std::string LiveAudio::startRecording(std::string_view requestJson) {
         const double a = j.number("punch_in_steps", 0), b = j.number("punch_out_steps", 1e15);
         if (!(a >= 0 && b > a)) return failJson("punch_out_steps must be after punch_in_steps");
         s->punch = true;
-        s->punchIn = static_cast<int64_t>(sampletime::roundFrames(a, s->stepLen));
-        s->punchOut = b >= 1e15 ? INT64_MAX : static_cast<int64_t>(sampletime::roundFrames(b, s->stepLen));
+        s->punchIn = static_cast<int64_t>(s->mapped ? s->tempo.roundFrame(a) : sampletime::roundFrames(a, s->stepLen));
+        s->punchOut = b >= 1e15 ? INT64_MAX
+                                : static_cast<int64_t>(s->mapped ? s->tempo.roundFrame(b) : sampletime::roundFrames(b, s->stepLen));
     }
     if (const Json* mb = j.get("max_file_bytes"); mb && mb->type == Json::Type::Number) {
         if (!(mb->num >= 1024)) return failJson("max_file_bytes must be at least 1024");

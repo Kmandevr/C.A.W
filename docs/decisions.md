@@ -6,6 +6,17 @@ updated: 2026-11-13
 
 # Decisions
 
+## 2026-11-13: The tempo map's engine side: one strict map, single tempo to the bit (Claude, within the owner's 1.0.3 contract, #207)
+
+**Decision (Claude, 2026-11-13, building the owner's decisions of the day for batch 1.0.3):**
+- **One map for every position.** `src/tempo_map.h` (`TempoMap`, `TimeSigMap`, `SongTime`) turns every beat or step into a sample: notes, layer passes, loops, automation, the metronome and count-in, the components' transport, audio clips, renders and recording. Its closed forms (60 / bpm s a beat; a linear-in-BPM ramp `60 / k × log1p(k d / bpm0)` and its `expm1` inverse) are built strict and out of line, as `sample_time.cpp` is, so timing stays exact on every platform.
+- **Single tempo stays bit-identical.** Points that never change the tempo merge into one segment, whose maths is exactly the old `step × 60 × sr / (bpm × 4)`; where the old code used other forms (a layer pass's `roundRepeat`, notes relative to their pass, the metronome's beat offset, an audio clip's tempo check), a single-tempo map keeps the old expression and a map with tempo changes takes the general one. Every golden and reference is unchanged.
+- **Swapped as a whole.** A map and its signatures travel as one `SongTime` through the command queue (built on the control thread, retired off the audio thread). While playing, any change involving a map keeps the beat; a change from one tempo to another keeps the sample, as before.
+- **Metronome ticks are 1/den notes**, accented on each bar (6/8 clicks six eighths), on the first sample at or after the tick; the count-in uses the signature and tempo where playback starts. **[Assumption]** This is the usual DAW behaviour (REAPER's default); the owner can ask for dotted-beat grouping instead.
+- **Audio clips:** a musical clip plays at the tempo where it starts; tempo-following audio stays 1.0.4's, as the contract says. A fixed clip keeps its seconds only if the app sends its `length_steps` worked out on the map (the engine takes steps).
+- **MIDI files have no ramps:** export writes a ramp as a tempo event every 1/16 note, each holding the tempo that keeps its stretch's exact length; import reads every tempo and meter event as stepped points.
+- **C API 31 additions the contract assumed:** there was no `caw_engine_set_bpm` or `caw_engine_position` before; both are new (set_bpm replaces the map with one point; position reports sample, beat, seconds, tempo, bar). The project JSON's map is the main route; the live setters hold until the next project update.
+
 ## 2026-11-13: 1.1.0 also holds play-ahead, AutoStacc and the store releases (owner)
 
 **Decision (owner, 2026-11-13):**

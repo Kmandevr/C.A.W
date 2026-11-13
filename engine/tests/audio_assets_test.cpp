@@ -1221,3 +1221,49 @@ TEST(the_sampler_is_listed_and_the_audio_track_player_is_not) {
     CHECK(list.find("\"org.caw.sampler\"") != std::string::npos);
     CHECK(list.find("org.caw.audio-track") == std::string::npos);
 }
+
+TEST(audio_clips_and_recording_follow_the_tempo_map) {
+    // 120 BPM, then 60 from beat 1 (1.0.3): a clip at step 8 (beat 2) starts 0.5 + 1 s in, at frame 72000, and its 4
+    // steps (a beat at 60) last 48000 frames.
+    const std::string dir = tempDir("clipmap");
+    const std::string p = writeWav(dir + "/n.wav", 48000, 2, 60000, [](int64_t i, int c) { return noiseAt(i, c); });
+    std::string json = clipProject(p, ",\"start_steps\":8,\"length_steps\":4");
+    json.replace(json.find("\"caw_project\":1,"), 16,
+                 "\"caw_project\":1,\"tempo_map\":[{\"beat\":0,\"bpm\":120},{\"beat\":1,\"bpm\":60}],");
+    const auto l = render(json, 144000);
+    CHECK_EQ(l[71999], 0.0f);
+    const double k = l[72000] / noiseAt(0, 0);
+    bool exact = true;
+    for (int64_t i = 0; i < 48000; ++i) exact = exact && std::fabs(l[static_cast<size_t>(72000 + i)] - k * noiseAt(i, 0)) < 1e-6;
+    CHECK(exact);
+    CHECK(k > 0.5 && k <= 1.0001);
+    CHECK_EQ(l[120000], 0.0f);
+
+    // A take started by a play at step 8 on the same map: its start_steps is 8 again.
+    Engine e(48000);
+    e.setMasterBypass(true);
+    e.setProjectJson(inputProject("off", true, ",\"tempo_map\":[{\"beat\":0,\"bpm\":120},{\"beat\":1,\"bpm\":60}]", 2));
+    e.liveAudio().setDeviceChannels(2);
+    e.liveAudio().setLatencyOverride(0);
+    const std::string req = "{\"dir\":\"" + jsonEscape(dir) + "\",\"bpm\":120,\"tempo_map\":[{\"beat\":0,\"bpm\":120},"
+                            "{\"beat\":1,\"bpm\":60}],\"tracks\":[{\"layer\":\"t\",\"channel\":1}]}";
+    CHECK(e.liveAudio().startRecording(req).find("\"ok\":true") != std::string::npos);
+    e.play(8);
+    std::vector<float> in, lb(480), rb(480);
+    for (int k2 = 0; k2 < 20; ++k2) {
+        in.assign(480 * 2, 0.0f);
+        e.liveAudio().beginCallback(in.data(), 2, 480);
+        e.process(lb.data(), rb.data(), 480);
+    }
+    const std::string done = e.liveAudio().stopRecording();
+    Json j;
+    std::string error;
+    CHECK(parseJson(done, j, error));
+    const Json* takes = j.get("takes");
+    CHECK(takes && takes->arr.size() == 1);
+    if (takes && takes->arr.size() == 1) {
+        CHECK_EQ(takes->arr[0].number("start_frame", 0), 72000.0);
+        CHECK_NEAR(takes->arr[0].number("start_steps", 0), 8.0, 1e-9);
+    }
+    std::filesystem::remove_all(utf8Path(dir));
+}

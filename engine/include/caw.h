@@ -105,8 +105,16 @@ extern "C" {
    "feature"; a stress job's JSON gains "feature" and, for a profile (and a live run's device I/O), "parts".
    caw_worker_pool_submit_component_bench runs the plug-in benchmark (a CawComponentBenchRequest) as a CawJob whose
    result is its JSON; components time named sections with CAW_PROFILE_SCOPE (caw/profile.hpp, the host extension
-   CAW_HOST_EXTENSION_PROFILE in caw_component.h). Nothing else changes. */
-#define CAW_API_VERSION 30
+   CAW_HOST_EXTENSION_PROFILE in caw_component.h). Nothing else changes.
+   31 (2026-11-13, batch 1.0.3, #207): the tempo map and time signatures. The project JSON's "tempo_map" ([{"beat",
+   "bpm" 1..999, "ramp"}], at most 4096, the first at beat 0) and "time_signatures" ([{"bar", "beat", "num" 1..32,
+   "den" 1|2|4|8|16|32}], at most 1024, the first at bar 0); caw_engine_set_tempo_map, caw_engine_set_time_signatures,
+   caw_engine_set_bpm and caw_engine_position (beats, seconds, tempo, bar). Every beat-to-sample position (notes,
+   clips, automation, loops, the metronome and count-in, synced effects and modulators, renders) follows the map;
+   a project with one tempo plays to the same sample as before. caw_pattern_from_midi's JSON gains "tempo_map" and
+   "time_signatures"; caw_pattern_export_song writes them as tempo and meter events. A recording request may carry a
+   "tempo_map" (start_steps and punch steps follow it). */
+#define CAW_API_VERSION 31
 /* The component index that names a layer's native instrument rather than one of its "components". */
 #define CAW_INSTRUMENT_INDEX 0xFFFFFFFFu
 /* A component index with this bit (API version 22) names component (index & ~CAW_NOTE_COMPONENT) of the layer's
@@ -312,17 +320,56 @@ CAW_API void caw_engine_play(CawEngine* e);
    on the same beat even if the tempo changed meanwhile; outside the loop (or not finite) it starts at 0. It fades in
    over 10 ms. Notes that began before it are not heard, and a module's trig fires at its next pass, not here. */
 CAW_API void caw_engine_play_at(CawEngine* e, double step);
-/* Clicks `beats` (0..64) beats at the tempo, accented on each bar, then plays from `step` as caw_engine_play_at does,
+/* Clicks `beats` (0..64) beats at the tempo, accented on each bar, then plays from `step` as caw_engine_play_at does
+   (API 31: its beats are the ticks, 1/den notes, of the time signature and tempo where `step` is),
    on the sample after the last beat; previews play during it. While playing, or with 0 beats, it is play_at. A stop
    during the count-in cancels it. */
 CAW_API void caw_engine_play_count_in(CawEngine* e, double step, int32_t beats);
-/* The metronome (on != 0): a short click on every beat while playing, accented on the bar, mixed before the safety
+/* The metronome (on != 0): a short click on every beat (API 31: each tick of the time signatures, a 1/den note, on the
+   tempo map) while playing, accented on the bar, mixed before the safety
    limiter. Off by default; offline renders never click. */
 CAW_API void caw_engine_set_metronome(CawEngine* e, int32_t on);
 /* Ends every knob touch (a parameter set while playing overrides its lane until the next play), so the lanes rule
    again at once: the host's automation Touch mode calls it when a written control is let go. */
 CAW_API void caw_engine_release_touches(CawEngine* e);
 CAW_API void caw_engine_stop(CawEngine* e);
+/* The tempo map and time signatures (API version 31). Positions are in beats (quarter notes) from the song start;
+   tempo is BPM in quarter notes per minute. A point with ramp != 0 makes the tempo go linearly in BPM over beats from
+   the previous point to it; otherwise the tempo steps there. A signature from `beat` (on a bar line of the one before
+   it; the first at beat 0) has num (1..32) beats of 1/den notes (den 1, 2, 4, 8, 16 or 32) a bar. Each call checks
+   its list (sorted here; 1..4096 points, BPM 1..999, the first at beat 0; 1..1024 signatures) and returns 0, or 1 with
+   nothing changed; the engine builds the map off the audio thread and swaps it in through its command queue. They
+   replace the project's until the next project update, which sets "tempo_map" and "time_signatures" again.
+   caw_engine_set_bpm replaces the tempo map with one point. */
+typedef struct CawTempoPoint {
+    double beat;
+    double bpm;
+    int32_t ramp;
+} CawTempoPoint;
+typedef struct CawTimeSig {
+    double beat;
+    int32_t num;
+    int32_t den;
+} CawTimeSig;
+CAW_API int32_t caw_engine_set_tempo_map(CawEngine* e, const CawTempoPoint* points, int32_t count);
+CAW_API int32_t caw_engine_set_time_signatures(CawEngine* e, const CawTimeSig* sigs, int32_t count);
+CAW_API int32_t caw_engine_set_bpm(CawEngine* e, double bpm);
+/* Where the transport is: its sample into the song, and that as beats, seconds, the tempo there, and the 0-based
+   bar, the beat within it (quarter notes) and the signature from the time signatures. Set struct_size to
+   sizeof(CawPosition) first. 0 on success, 1 no engine, 2 struct_size too small. Any thread but the audio thread. */
+typedef struct CawPosition {
+    uint32_t struct_size;
+    int32_t playing;
+    int64_t frame;
+    double beat;
+    double seconds;
+    double bpm;
+    int64_t bar;
+    double beat_in_bar;
+    int32_t num;
+    int32_t den;
+} CawPosition;
+CAW_API int32_t caw_engine_position(CawEngine* e, CawPosition* out);
 CAW_API void caw_engine_clear_overload(CawEngine* e);
 /* Layers shed since the engine was made (the telemetry's dropouts), how many came back on their own, and how many
    are shed now (as CawMeters.overloaded). Any thread; never blocks. API version 26. */
@@ -366,6 +413,15 @@ enum { CAW_MIDI_SMF = 0, CAW_MIDI_CLIP = 1 };
 CAW_API char* caw_pattern_from_midi(const uint8_t* data, int32_t size);
 CAW_API int32_t caw_pattern_export(const char* pattern_source, double bpm, int32_t beats_per_bar, int32_t format,
                                    const char* out_path, char* error, int32_t error_len);
+/* API version 31: caw_pattern_from_midi's JSON also has "tempo_map" ([{"beat", "bpm", "ramp": false}], from the
+   file's tempo events; 120 BPM until the first) and "time_signatures" ([{"bar", "beat", "num", "den"}]; 4/4 until the
+   first; changes off a bar line left out). caw_pattern_export_song writes a pattern with a tempo map and signatures
+   (as caw_engine_set_tempo_map and caw_engine_set_time_signatures take them; NULL and 0 for 120 BPM or 4/4): a tempo
+   and a meter event at each change; a ramp becomes a tempo event every 1/16 note, each keeping that stretch's
+   length (MIDI files have no ramps). The pattern's bars are counted at the first signature. Returns 0 on success. */
+CAW_API int32_t caw_pattern_export_song(const char* pattern_source, const CawTempoPoint* points, int32_t point_count,
+                                        const CawTimeSig* sigs, int32_t sig_count, int32_t format,
+                                        const char* out_path, char* error, int32_t error_len);
 
 
 /* Pure workload policy shared by the app and add-ons. Hosts supply observed capabilities;

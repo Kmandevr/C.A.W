@@ -251,8 +251,11 @@ bool renderRange(const ProjectSpec& base, const SongRenderRequest& req, const st
     }
     // The song must reach past the range and its tail, or playback would go back to the start inside them. Clips and
     // patterns end where they end, so the tail is their notes' releases and the effects ringing out.
-    const int64_t needSteps =
-        range.endSteps + static_cast<int64_t>(std::ceil(static_cast<double>(tailMost) / sampletime::stepFrames(sr, p.bpm)));
+    TempoMap tm;
+    tm.build(tempoPointsOf(p), sr);
+    const int64_t needSteps = tm.constant()
+        ? range.endSteps + static_cast<int64_t>(std::ceil(static_cast<double>(tailMost) / sampletime::stepFrames(sr, p.bpm)))
+        : static_cast<int64_t>(std::ceil(tm.stepAt(static_cast<double>(end + tailMost))));
     if (needSteps > p.loopSteps()) {
         const int64_t bar = static_cast<int64_t>(p.beatsPerBar) * 4;
         p.loopBars = static_cast<int>(std::min<int64_t>(maxLoopBars(p.beatsPerBar), (needSteps + bar - 1) / bar));

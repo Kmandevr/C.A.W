@@ -342,13 +342,53 @@ int32_t caw_render(const char* project_json, const CawRenderOptions* o, const ch
     return 1;
 }
 
+namespace {
+
+std::string jsonNumber(double v) {
+    char b[40];
+    std::snprintf(b, sizeof b, "%.17g", v);
+    return b;
+}
+
+// A tempo map and signatures as JSON arrays (caw_pattern_from_midi; the project JSON's shape).
+std::string songMetaJson(const caw::MidiSongMeta& m) {
+    std::string out = ",\"tempo_map\":[";
+    for (size_t i = 0; i < m.tempo.size(); ++i)
+        out += std::string(i ? "," : "") + "{\"beat\":" + jsonNumber(m.tempo[i].beat) + ",\"bpm\":" +
+               jsonNumber(m.tempo[i].bpm) + ",\"ramp\":" + (m.tempo[i].ramp ? "true" : "false") + "}";
+    out += "],\"time_signatures\":[";
+    for (size_t i = 0; i < m.sigs.size(); ++i)
+        out += std::string(i ? "," : "") + "{\"bar\":" + std::to_string(m.sigs[i].bar) + ",\"beat\":" +
+               jsonNumber(m.sigs[i].beat) + ",\"num\":" + std::to_string(m.sigs[i].num) + ",\"den\":" +
+               std::to_string(m.sigs[i].den) + "}";
+    return out + "]";
+}
+
+// The C API's lists as the engine's, unchecked (the callers check).
+bool tempoFromC(const CawTempoPoint* pts, int32_t n, std::vector<caw::TempoPointSpec>& out) {
+    if (n < 0 || n > caw::kMaxTempoPoints || (n > 0 && !pts)) return false;
+    out.clear();
+    for (int32_t i = 0; i < n; ++i) out.push_back({pts[i].beat, pts[i].bpm, pts[i].ramp != 0});
+    return true;
+}
+
+bool sigsFromC(const CawTimeSig* sigs, int32_t n, std::vector<caw::TimeSigSpec>& out) {
+    if (n < 0 || n > caw::kMaxTimeSigs || (n > 0 && !sigs)) return false;
+    out.clear();
+    for (int32_t i = 0; i < n; ++i) out.push_back({0, sigs[i].beat, sigs[i].num, sigs[i].den});
+    return true;
+}
+
+}  // namespace
+
 char* caw_pattern_from_midi(const uint8_t* data, int32_t size) try {
     if (!data || size <= 0) return dup("{\"ok\":false,\"error\":\"the file is empty\",\"pattern\":\"\"}");
     std::string err;
-    const std::string text = caw::patternFromMidi(data, static_cast<size_t>(size), caw::MidiImportOptions{}, err);
+    caw::MidiSongMeta song;
+    const std::string text = caw::patternFromMidi(data, static_cast<size_t>(size), caw::MidiImportOptions{}, err, &song);
     if (text.empty())
         return dup("{\"ok\":false,\"error\":\"" + caw::jsonEscape(err) + "\",\"pattern\":\"\"}");
-    return dup("{\"ok\":true,\"error\":\"\",\"pattern\":\"" + caw::jsonEscape(text) + "\"}");
+    return dup("{\"ok\":true,\"error\":\"\",\"pattern\":\"" + caw::jsonEscape(text) + "\"" + songMetaJson(song) + "}");
 } catch (const std::bad_alloc&) {
     return dup(std::string("{\"ok\":false,\"error\":\"") + kOutOfMemory + "\",\"pattern\":\"\"}");
 }
@@ -498,4 +538,95 @@ extern "C" char* caw_render_song(const char* project_json, const char* request_j
     return dup(caw::songRenderResultJson(r));
 } catch (const std::bad_alloc&) {
     return dup(std::string("{\"ok\":false,\"error\":\"") + kOutOfMemory + "\",\"files\":[]}");
+}
+
+// ---- the tempo map and time signatures (API version 31) ----
+
+extern "C" int32_t caw_engine_set_tempo_map(CawEngine* e, const CawTempoPoint* points, int32_t count) try {
+    std::vector<caw::TempoPointSpec> pts;
+    if (!e || !tempoFromC(points, count, pts)) return 1;
+    return e->engine->setTempoMap(std::move(pts)).empty() ? 0 : 1;
+} catch (...) {
+    return 1;
+}
+
+extern "C" int32_t caw_engine_set_time_signatures(CawEngine* e, const CawTimeSig* sigs, int32_t count) try {
+    std::vector<caw::TimeSigSpec> list;
+    if (!e || !sigsFromC(sigs, count, list)) return 1;
+    std::string error;
+    if (!caw::timeSigsFromBeats(list, error)) return 1;
+    return e->engine->setTimeSignatures(std::move(list)).empty() ? 0 : 1;
+} catch (...) {
+    return 1;
+}
+
+extern "C" int32_t caw_engine_set_bpm(CawEngine* e, double bpm) try {
+    if (!e) return 1;
+    return e->engine->setTempoMap({{0.0, bpm, false}}).empty() ? 0 : 1;
+} catch (...) {
+    return 1;
+}
+
+extern "C" int32_t caw_engine_position(CawEngine* e, CawPosition* out) try {
+    if (!e || !out) return 1;
+    if (out->struct_size < sizeof(CawPosition)) return 2;
+    const caw::Engine::SongPosition p = e->engine->position();
+    out->playing = p.playing ? 1 : 0;
+    out->frame = p.frame;
+    out->beat = p.beat;
+    out->seconds = p.seconds;
+    out->bpm = p.bpm;
+    out->bar = p.bar;
+    out->beat_in_bar = p.beatInBar;
+    out->num = p.num;
+    out->den = p.den;
+    return 0;
+} catch (...) {
+    return 1;
+}
+
+extern "C" int32_t caw_pattern_export_song(const char* pattern_source, const CawTempoPoint* points, int32_t point_count,
+                                           const CawTimeSig* sigs, int32_t sig_count, int32_t format,
+                                           const char* out_path, char* error, int32_t error_len) try {
+    using namespace caw;
+    if (!pattern_source || !out_path || (format != CAW_MIDI_SMF && format != CAW_MIDI_CLIP)) {
+        copyError("missing argument, or format is not 0 (.mid) or 1 (MIDI 2.0 clip)", error, error_len);
+        return 1;
+    }
+    MidiSongMeta song;
+    std::string err;
+    std::vector<TempoPointSpec> pts;
+    std::vector<TimeSigSpec> list;
+    if (!tempoFromC(points, point_count, pts) || !sigsFromC(sigs, sig_count, list)) {
+        copyError("the tempo map or the time signatures are too long", error, error_len);
+        return 1;
+    }
+    if (!pts.empty()) {
+        if (!checkTempoPoints(pts, err)) {
+            copyError(err, error, error_len);
+            return 1;
+        }
+        song.tempo = std::move(pts);
+    }
+    if (!list.empty()) {
+        if (!timeSigsFromBeats(list, err)) {
+            copyError(err, error, error_len);
+            return 1;
+        }
+        song.sigs = std::move(list);
+    }
+    PatternResult pr = parsePattern(pattern_source);
+    if (!pr.pattern) {
+        copyError(pr.error, error, error_len);
+        return 1;
+    }
+    const std::vector<uint8_t> bytes = format == CAW_MIDI_CLIP ? patternToMidiClip(*pr.pattern, song) : patternToSmf(*pr.pattern, song);
+    if (!writeFile(out_path, bytes, err)) {
+        copyError(err, error, error_len);
+        return 1;
+    }
+    return 0;
+} catch (const std::bad_alloc&) {
+    copyError(kOutOfMemory, error, error_len);
+    return 1;
 }
