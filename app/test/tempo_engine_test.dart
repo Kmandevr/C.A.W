@@ -3,6 +3,8 @@
 import 'dart:io';
 
 import 'package:caw/engine/engine.dart';
+import 'package:caw/model/project.dart';
+import 'package:caw/model/tempo_map.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
@@ -11,11 +13,11 @@ void main() {
 
   test('the engine takes a tempo map and signatures and reports the position', () {
     final e = Engine.create();
-    expect(e.setTempoMap(const [EngineTempoPoint(0, 120), EngineTempoPoint(8, 90, ramp: true)]), isTrue);
-    expect(e.setTempoMap(const [EngineTempoPoint(2, 120)]), isFalse, reason: 'the first point must be at beat 0');
-    expect(e.setTempoMap(const [EngineTempoPoint(0, 1200)]), isFalse, reason: 'BPM 1..999');
-    expect(e.setTimeSignatures(const [EngineTimeSig(0, 6, 8), EngineTimeSig(6, 4, 4)]), isTrue);
-    expect(e.setTimeSignatures(const [EngineTimeSig(0, 6, 8), EngineTimeSig(4, 4, 4)]), isFalse,
+    expect(e.setTempoMap(const [TempoPoint(0, 120), TempoPoint(8, 90, ramp: true)]), isTrue);
+    expect(e.setTempoMap(const [TempoPoint(2, 120)]), isFalse, reason: 'the first point must be at beat 0');
+    expect(e.setTempoMap(const [TempoPoint(0, 1200)]), isFalse, reason: 'BPM 1..999');
+    expect(e.setTimeSignatures(const [TimeSignature(0, 0, 6, 8), TimeSignature(0, 6, 4, 4)]), isTrue);
+    expect(e.setTimeSignatures(const [TimeSignature(0, 0, 6, 8), TimeSignature(0, 4, 4, 4)]), isFalse,
         reason: 'a change lands on a bar line');
     final p = e.position()!;
     expect(p.playing, isFalse);
@@ -29,14 +31,31 @@ void main() {
     e.dispose();
   }, skip: skip);
 
+  test('a project with a tempo map syncs it in its JSON, and the meters read the step on it', () async {
+    final e = Engine.create();
+    final p = ProjectDoc(id: 'p', name: 'T', modules: [], layers: []);
+    p.tempoMap = const [TempoPoint(0, 120), TempoPoint(8, 60, ramp: true)];
+    p.timeSignatures = const [TimeSignature(0, 0, 3, 4), TimeSignature(2, 6, 6, 8)];
+    final json = p.toEngineJson();
+    expect(json, contains('"tempo_map"'));
+    await e.setProject(json);
+    final pos = e.position()!;
+    expect((pos.num, pos.den), (3, 4));
+    expect(pos.bpm, 120);
+    expect(e.meters().step, 0);
+    // A plain project leaves the map out of the JSON, as before.
+    expect(ProjectDoc(id: 'q', name: 'Q', modules: [], layers: []).toEngineJson(), isNot(contains('tempo_map')));
+    e.dispose();
+  }, skip: skip);
+
   test('MIDI export and import keep the tempo map and signatures', () async {
     final dir = await Directory.systemTemp.createTemp('caw_tempo');
     final path = '${dir.path}/song.mid';
     const pattern = '---\nkind: pattern\nlength: 4 bars\n---\n0 C4 1 1\n';
     expect(
         Engine.exportPatternSong(pattern, path,
-            tempoMap: const [EngineTempoPoint(0, 120), EngineTempoPoint(8, 96), EngineTempoPoint(16, 150)],
-            timeSignatures: const [EngineTimeSig(0, 4, 4), EngineTimeSig(8, 3, 4)]),
+            tempoMap: const [TempoPoint(0, 120), TempoPoint(8, 96), TempoPoint(16, 150)],
+            timeSignatures: const [TimeSignature(0, 0, 4, 4), TimeSignature(0, 8, 3, 4)]),
         isNull);
     final m = Engine.midiImport(await File(path).readAsBytes());
     expect(m.pattern, contains('kind: pattern'));

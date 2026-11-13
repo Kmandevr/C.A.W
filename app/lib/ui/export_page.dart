@@ -533,11 +533,13 @@ class _ExportPageState extends State<ExportPage> {
       final name = _fileName();
       file = File('${tmp.path}${Platform.pathSeparator}$name');
       final source = module.source;
-      final bpm = s.project.bpm;
-      final beatsPerBar = s.project.beatsPerBar;
+      // The project's tempo map and signatures as tempo and meter events (C API 31); a ramp is written as a tempo
+      // event every 1/16 note, since MIDI tempos can't ramp.
+      final tempoMap = s.project.tempoMap;
+      final signatures = s.project.timeSignatures;
       final outputPath = file.path;
-      final error = await Isolate.run(() => Engine.exportPattern(source, outputPath,
-        bpm: bpm, beatsPerBar: beatsPerBar));
+      final error = await Isolate.run(() => Engine.exportPatternSong(source, outputPath,
+        tempoMap: tempoMap, timeSignatures: signatures));
       if (error != null) throw StateError(error);
       final saved = await saveCopyOf(file, name: name, mimeType: 'audio/midi', extension: 'mid');
       final historyWarning = saved ? await _recordExport(name) : null;

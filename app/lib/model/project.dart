@@ -934,7 +934,13 @@ class ProjectDoc {
         'caw_project': 1,
         'name': name,
         'bpm': bpm,
-        'beats_per_bar': beatsPerBar.clamp(1, 16),  // the engine's meter range; the signatures go by C API 31
+        'beats_per_bar': beatsPerBar.clamp(1, 16),  // the engine's meter range; the signatures follow
+        // The tempo map and signatures (C API 31): in the JSON too, so every sync, render and export plays on them.
+        // A plain project (one tempo, one n/4) leaves them out and reads as it always did.
+        if (!plainTempo) ...{
+          'tempo_map': [for (final t in tempoMap) t.toJson()],
+          'time_signatures': [for (final t in timeSignatures) t.toJson()],
+        },
         'loop_bars': engineLoopBars,
         if (loopsRange) ...{'loop_range': true, 'loop_start_steps': loopStartSteps, 'loop_end_steps': loopEndSteps},
         'seed': seed,

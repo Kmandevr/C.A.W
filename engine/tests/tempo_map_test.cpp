@@ -551,43 +551,91 @@ struct VectorMap {
 };
 
 const std::vector<VectorMap> kVectorMaps = {
-    {"constant", {{0, 120, false}}},
+    {"constant 120", {{0, 120, false}}},
     {"stepped", {{0, 120, false}, {8, 90, false}, {16, 140, false}, {18.5, 72.5, false}}},
-    {"ramp", {{0, 100, false}, {16, 160, true}}},
+    {"ramp 120 to 96 over 32 beats", {{0, 120, false}, {32, 96, true}}},
+    {"ramp up 100 to 160", {{0, 100, false}, {16, 160, true}}},
     {"mixed", {{0, 60, false}, {4, 180, true}, {10, 75, false}, {20, 50, true}, {24, 50, false}, {28, 200, true}}},
 };
-const double kVectorBeats[] = {0, 0.25, 0.5, 1, 2.25, 3.999, 4, 6, 7.75, 8, 10, 12.5, 16, 18.5, 20, 22, 24, 26, 28, 31.5, 40};
+const double kVectorBeats[] = {0, 0.25, 0.5, 1, 2.25, 3.999, 4, 6, 7.75, 8, 10, 12.5, 16, 18.5, 20, 22, 24, 26, 28, 31.25,
+                               31.5, 32, 33, 40, 48, 100};
+
+struct VectorSigs {
+    const char* name;
+    std::vector<TimeSigSpec> sigs;  // bars; the beats are worked out
+};
+
+const std::vector<VectorSigs> kVectorSigs = {
+    {"4/4", {{0, NAN, 4, 4}}},
+    {"3/4 then 7/8 then 4/4", {{0, NAN, 3, 4}, {2, NAN, 7, 8}, {5, NAN, 4, 4}}},
+    {"6/8 then 5/4 then 2/2 then 7/16", {{0, NAN, 6, 8}, {4, NAN, 5, 4}, {6, NAN, 2, 2}, {9, NAN, 7, 16}}},
+};
+const double kVectorBarBeats[] = {0, 0.5, 1, 2.75, 3, 5.5, 6, 6.5, 9.5, 12.9, 13, 14, 20, 22.5, 23, 26, 31.75, 40, 41.5};
 
 std::string vectorsPath() { return std::string(CAW_ROOT) + "/engine/tests/references/tempo_vectors.json"; }
+
+std::string num17(double v) {
+    char b[40];
+    std::snprintf(b, sizeof b, "%.17g", v);
+    return b;
+}
+
+// The bar (0-based) and the beat in it counted in the signature's own beats (1/den notes), as the app shows them.
+void barBeat(const TimeSigMap& m, double beat, int64_t& bar, double& inBar) {
+    m.barAt(beat, bar, inBar);
+    inBar /= 4.0 / m.sigs()[m.indexAt(beat)].den;
+}
 
 }  // namespace
 
 TEST(tempo_vectors_shared_with_the_app_match_the_engine) {
-    // engine/tests/references/tempo_vectors.json: (beat, seconds) pairs for four maps, which the app's tempo maths
-    // checks itself against. `caw_tests --update-references tempo_vectors_shared_with_the_app_match_the_engine`
+    // engine/tests/references/tempo_vectors.json, which the app's tests read too (app/test/tempo_map_test.dart):
+    // "tempo": maps with [beat, seconds] pairs; "bars": signatures with [beat, bar (0-based), beat in the bar in the
+    // signature's own beats]. `caw_tests --update-references tempo_vectors_shared_with_the_app_match_the_engine`
     // writes it again from the engine.
     if (cawtest::updateGolden) {
-        std::string out = "{\n  \"about\": \"Tempo maps and (beat, seconds) pairs from the engine's TempoMap (engine/src/tempo_map.h): "
-                          "the app's beat<->seconds maths must agree within 1e-9 s.\",\n  \"maps\": [\n";
+        std::string out = "{\n  \"about\": \"From the engine's TempoMap and TimeSigMap (engine/src/tempo_map.h; the #207 contract's "
+                          "closed forms). tempo: [beat, seconds]; bars: [beat, bar (0-based), beat in the bar (0-based, in the "
+                          "signature's own beats)]. The app's maths must agree within 1e-9.\",\n  \"tempo\": [\n";
         for (size_t m = 0; m < kVectorMaps.size(); ++m) {
             TempoMap tm;
             tm.build(kVectorMaps[m].points, 48000);
             out += "    {\"name\": \"" + std::string(kVectorMaps[m].name) + "\", \"tempo_map\": [";
-            char b[160];
             for (size_t i = 0; i < kVectorMaps[m].points.size(); ++i) {
                 const TempoPointSpec& p = kVectorMaps[m].points[i];
-                std::snprintf(b, sizeof b, "%s{\"beat\": %.17g, \"bpm\": %.17g, \"ramp\": %s}", i ? ", " : "", p.beat, p.bpm,
-                              p.ramp ? "true" : "false");
-                out += b;
+                out += std::string(i ? ", " : "") + "{\"beat\": " + num17(p.beat) + ", \"bpm\": " + num17(p.bpm) +
+                       ", \"ramp\": " + (p.ramp ? "true" : "false") + "}";
             }
-            out += "],\n      \"vectors\": [";
+            out += "],\n      \"beat_seconds\": [";
             bool first = true;
             for (const double beat : kVectorBeats) {
-                std::snprintf(b, sizeof b, "%s[%.17g, %.17g]", first ? "" : ", ", beat, tm.secondsAt(beat));
-                out += b;
+                out += std::string(first ? "" : ", ") + "[" + num17(beat) + ", " + num17(tm.secondsAt(beat)) + "]";
                 first = false;
             }
             out += std::string("]}") + (m + 1 < kVectorMaps.size() ? "," : "") + "\n";
+        }
+        out += "  ],\n  \"bars\": [\n";
+        for (size_t m = 0; m < kVectorSigs.size(); ++m) {
+            std::vector<TimeSigSpec> sigs = kVectorSigs[m].sigs;
+            std::string error;
+            CHECK(checkTimeSigs(sigs, error));
+            TimeSigMap sm;
+            sm.build(sigs);
+            out += "    {\"name\": \"" + std::string(kVectorSigs[m].name) + "\", \"time_signatures\": [";
+            for (size_t i = 0; i < sigs.size(); ++i)
+                out += std::string(i ? ", " : "") + "{\"bar\": " + std::to_string(sigs[i].bar) + ", \"beat\": " +
+                       num17(sigs[i].beat) + ", \"num\": " + std::to_string(sigs[i].num) + ", \"den\": " +
+                       std::to_string(sigs[i].den) + "}";
+            out += "],\n      \"bar_beat\": [";
+            bool first = true;
+            for (const double beat : kVectorBarBeats) {
+                int64_t bar = 0;
+                double in = 0;
+                barBeat(sm, beat, bar, in);
+                out += std::string(first ? "" : ", ") + "[" + num17(beat) + ", " + std::to_string(bar) + ", " + num17(in) + "]";
+                first = false;
+            }
+            out += std::string("]}") + (m + 1 < kVectorSigs.size() ? "," : "") + "\n";
         }
         out += "  ]\n}\n";
         std::ofstream(vectorsPath(), std::ios::binary) << out;
@@ -598,16 +646,18 @@ TEST(tempo_vectors_shared_with_the_app_match_the_engine) {
     Json j;
     std::string error;
     CHECK(parseJson(ss.str(), j, error));
-    const Json* maps = j.get("maps");
+    const Json* maps = j.get("tempo");
+    const Json* bars = j.get("bars");
     CHECK(maps && maps->arr.size() == kVectorMaps.size());
-    if (!maps) return;
+    CHECK(bars && bars->arr.size() == kVectorSigs.size());
+    if (!maps || !bars) return;
     int checked = 0;
     for (const Json& m : maps->arr) {
         std::vector<TempoPointSpec> pts;
         CHECK(m.get("tempo_map") && readTempoMap(*m.get("tempo_map"), pts, error));
         TempoMap tm;
         tm.build(pts, 48000);
-        for (const Json& v : m.get("vectors")->arr) {
+        for (const Json& v : m.get("beat_seconds")->arr) {
             const double beat = v.arr[0].num, sec = v.arr[1].num;
             CHECK_NEAR(tm.secondsAt(beat), sec, 1e-12);
             CHECK_NEAR(tm.beatAt(sec), beat, 1e-9);
@@ -616,7 +666,21 @@ TEST(tempo_vectors_shared_with_the_app_match_the_engine) {
             ++checked;
         }
     }
-    CHECK(checked >= 80);
+    for (const Json& m : bars->arr) {
+        std::vector<TimeSigSpec> sigs;
+        CHECK(m.get("time_signatures") && readTimeSigs(*m.get("time_signatures"), sigs, error));
+        TimeSigMap sm;
+        sm.build(sigs);
+        for (const Json& v : m.get("bar_beat")->arr) {
+            int64_t bar = 0;
+            double inBar = 0;
+            barBeat(sm, v.arr[0].num, bar, inBar);
+            CHECK_EQ(static_cast<double>(bar), v.arr[1].num);
+            CHECK_NEAR(inBar, v.arr[2].num, 1e-12);
+            ++checked;
+        }
+    }
+    CHECK(checked >= 180);
 }
 
 TEST(tempo_maps_swap_while_another_thread_plays) {

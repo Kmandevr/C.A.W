@@ -164,7 +164,7 @@ class AppState extends ChangeNotifier implements StressHost {
     final m = meters;
     // The transport's state and overloads are now's; the levels are the heard ones.
     return EngineMeters(cpu: m.cpu, peakL: r.peakL, peakR: r.peakR, playing: m.playing, overloaded: m.overloaded,
-        position: r.position, loopLength: m.loopLength);
+        position: r.position, loopLength: m.loopLength, step: r.step);
   }
 
   /// Each track's meter as heard ([layerMeters] is what was just rendered).
@@ -177,10 +177,14 @@ class AppState extends ChangeNotifier implements StressHost {
   /// The output latency in sixteenth steps at the project's tempo.
   double get outputLatencySteps => latency.outputMs / 1000 * project.bpm / 15;
 
+  /// The song step a meter read stands for: the engine's own, on its tempo map (caw_engine_position, API 31), else
+  /// its position through the loop converted over the project's map.
+  double meterStep(EngineMeters m) => m.step ?? project.stepAtLoopFraction(m.position / m.loopLength);
+
   /// Where the engine renders now, in sixteenth steps (playing; [playheadStep] is where the ear is).
   double get renderStep {
     final m = meters;
-    if (m.playing && m.loopLength > 0) return project.stepAtLoopFraction(m.position / m.loopLength);
+    if (m.playing && m.loopLength > 0) return meterStep(m);
     return pausedStep ?? 0;
   }
 
@@ -1159,7 +1163,7 @@ class AppState extends ChangeNotifier implements StressHost {
       // Read now: the stop's short fade still moves the transport on.
       final m = e.meters();
       // Paused where the ear is, so play resumes on what was last heard.
-      pausedStep = m.loopLength > 0 ? heardStep(project.stepAtLoopFraction(m.position / m.loopLength)) : null;
+      pausedStep = m.loopLength > 0 ? heardStep(meterStep(m)) : null;
       e.stop();
       _transportOn = false;
     } else {
@@ -1244,7 +1248,7 @@ class AppState extends ChangeNotifier implements StressHost {
   /// the sound.
   double get playheadStep {
     final m = meters;
-    if (m.playing && m.loopLength > 0) return heardStep(project.stepAtLoopFraction(m.position / m.loopLength));
+    if (m.playing && m.loopLength > 0) return heardStep(meterStep(m));
     return pausedStep ?? 0;
   }
 
