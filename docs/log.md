@@ -1,11 +1,12 @@
 ---
 title: Log
 summary: Dated history of changes, newest first.
-updated: 2026-11-12
+updated: 2026-11-13
 ---
 
 # Log
 
+- 2026-11-13: the audio review's fixes (branch `bt-clicks`): the device FIFO is no longer flushed on Play or Stop (it dropped 1–63 already-rendered frames: a click), `Engine::transportSends` removed; periods under 4 blocks that are not whole blocks skip the FIFO; `reportLoad` counts the load per frame rendered; a removed shed folder bus stops counting as shed; a shedding reset clears the CPU meter too; merge notes for audio-resilience and speed-parallel in [engine](engine.md#merge-notes-bt-clicks).
 - 2026-11-12: shed layers come back on their own (branch `bt-clicks`; the likely cause of the owner's song thinning out to silence in the background): shedding needs about 0.3 s of mostly over-budget callbacks (one late callback sheds nothing), a shed layer returns after 2 s under 60% load if it fits under 75% (its cost measured when it went), else on trial after 8 s more, a re-shed within 10 s doubles its wait; Unmute, the app going to or from the background and every device open reset it; never offline; `caw_engine_shedding_stats` (C API 26, the app's binding 26)
 - 2026-11-12: the owner's Bluetooth report (pops, a slowdown until audio stops; branch `bt-clicks`, engine side): long fast-forwarded runs (`caw_bench SECONDS 600`, 15–30 min of song8 and First loop, with and without the app's polls) stayed flat, and every track stayed bit-identical to 64-frame callbacks at 441, 960, 1023, 1920 and random sizes, 48 and 44.1 kHz, up to 32 tracks (`caw_bench SECONDS 601`), so no per-callback cost or per-track drift grows in the engine; the one block-size dependence found was the ducker's Tempo mode waking a frame after a beat (the default project's Track 3), fixed; the owner's fixed-block idea built at the device (`BlockFifo`, 64-frame blocks, its hold-back in the output latency, flushed on Play and Stop); `Engine::transportSends()`
 - 2026-11-12: smooth meters at any frame rate (branch `ui-frames`, the owner's bug: meters twitched at 120 Hz): `PeakMeter` rises over 15 ms instead of at once, falls at the Meter fall rate but never below a line between the last two reads, worked out exactly from wall-clock time so 30–240 Hz draw the same; ticks only while moving, timers for the hold and clip light; tests for a steady tone, a step, a tail and four frame rates.
