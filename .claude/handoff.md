@@ -20,6 +20,6 @@ In Main: startup screen and updates (#194); music video round 2 and smaller upda
 
 ## Owner questions open
 - Governing law for TERMS.md.
-- Windows engine with clang-cl / x86-64-v3 (A5, decisions.md).
+- Windows x86-64-v3: a second DLL or the minimum CPU (A5, decisions.md); clang-cl itself is set for 1.0.2 (#199).
 - Whether music video project packages carry their images.
 - Benchmark tuning on the S22+: the 70% "comfortable" line; live mode.
