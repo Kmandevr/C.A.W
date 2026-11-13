@@ -15,7 +15,7 @@ namespace caw {
 
 // The output and the input are two devices (docs/engine.md, "Audio input and recording"): the output's clock runs
 // the engine, and the input only feeds it. The capture callback pushes into this single-producer, single-consumer
-// ring; the output callback pulls one chunk at a time. Whatever is not there when the output asks (the input is
+// ring; the output callback pulls one chunk at a time (one per block it renders), after beginCallback. Whatever is not there when the output asks (the input is
 // closed, starting, starved, silenced or disconnected) is silence, so the output never waits for the input and
 // never changes because of it.
 //
@@ -100,6 +100,16 @@ public:
         w_.store(w + static_cast<uint64_t>(n), std::memory_order_release);
     }
 
+    // Output thread, at the start of each output callback of `frames` frames: the drift loop samples the fill once
+    // here, at the callback's first pull, not at every pull (the fill falls through a callback as its blocks pull,
+    // so an average over the pulls would read about half a callback low and hold the delay that much high). Without
+    // it (a caller that never calls it), every pull samples the fill.
+    void beginCallback(int frames) noexcept {
+        if (frames <= 0 || !open_.load(std::memory_order_relaxed)) return;
+        perCallback_ = true;
+        cbFrames_ += frames;
+    }
+
     // Output thread: the input for the next `frames` (at most kMaxFrames) frames, interleaved, with its channel
     // count in `channels`; nullptr and 0 when the bridge is closed. Missing frames are silence.
     const float* pull(int frames, int& channels) noexcept {
@@ -122,6 +132,7 @@ public:
             delivered_ = true;
             fadeIn_ = kFade;
             avg_ = prime_;
+            cbFrames_ = 0;  // the loop starts with the next callback
         }
         int n = 0;
         if (!priming_) {
@@ -136,8 +147,12 @@ public:
                 frac_ = 0.0;
                 xf_ = kFade;
                 avg_ = prime_;
-            } else {
+                cbFrames_ = 0;
+            } else if (!perCallback_) {
                 steer(fill, frames);
+            } else if (cbFrames_ > 0) {  // the callback's first pull: the fill as the callback starts
+                steer(fill, static_cast<int>(std::min<int64_t>(cbFrames_, rate_)));
+                cbFrames_ = 0;
             }
             const double ratio = ratio_.load(std::memory_order_relaxed);
             for (; n < frames; ++n) {
@@ -246,7 +261,8 @@ private:
     uint64_t idx_ = 1, oIdx_ = 1;
     double frac_ = 0.0, oFrac_ = 0.0, avg_ = 0.0, integ_ = 0.0;
     int xf_ = 0;
-    bool priming_ = true, delivered_ = false;
+    bool priming_ = true, delivered_ = false, perCallback_ = false;
+    int64_t cbFrames_ = 0;  // output frames since the drift loop last sampled the fill (beginCallback)
     int fadeIn_ = 0, tailLeft_ = 0;
     float tail_[kMaxInputChannels] = {}, held_[kMaxInputChannels] = {};
     // counters and readings

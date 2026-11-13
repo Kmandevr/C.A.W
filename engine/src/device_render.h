@@ -29,9 +29,25 @@ public:
         fifo_.flush();
         useFifo_ = suits(period);
         latency_ = useFifo_ ? BlockFifo<kBlock>::maxLatency(period) : 0;
+        meanHold_ = useFifo_ ? meanHold(period) : 0;
     }
     bool usesFifo() const noexcept { return useFifo_; }
-    int latency() const noexcept { return latency_; }  // the most frames held back, for the output latency
+    // The most frames held back (at most kBlock - 1): what the input bridge's fill must cover, since a callback
+    // renders, and pulls the input for, up to that many frames more than it plays.
+    int latency() const noexcept { return latency_; }
+    // The frames held back on average, rounded: how far the engine runs ahead of what plays, for the latency
+    // figures that align recordings (the hold steps through multiples of gcd(period, kBlock) from 0 to
+    // kBlock - gcd, evenly, so the mean is (kBlock - gcd) / 2).
+    int meanHold() const noexcept { return meanHold_; }
+    static constexpr int meanHold(int period) noexcept {
+        int a = period > 0 ? period : kBlock, b = kBlock;
+        while (b) {
+            const int t = a % b;
+            a = b;
+            b = t;
+        }
+        return (kBlock - a + 1) / 2;
+    }
     int held() const noexcept { return fifo_.held(); }
 
     // Fills `frames` interleaved stereo frames of `out` from the engine. Returns the frames the engine rendered
@@ -73,7 +89,7 @@ public:
 private:
     BlockFifo<kBlock> fifo_;
     bool useFifo_ = true;
-    int latency_ = 0;
+    int latency_ = 0, meanHold_ = 0;
     float l_[kChunk] = {}, r_[kChunk] = {};
 };
 
