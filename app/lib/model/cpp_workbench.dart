@@ -114,6 +114,9 @@ extension CppBuilderState on AppState {
       // Per project too: a duplicated or imported project keeps entry ids, and its code is its own.
       (_workbenches[this] ??= {}).putIfAbsent('${project.id}/$entryId', () => CppWorkbench(this, entryId));
 
+  /// The session of a component (by entry id) when one is open, without opening one.
+  CppWorkbench? openCppWorkbench(String entryId) => _workbenches[this]?['${project.id}/$entryId'];
+
   /// Saves every open session's code now (the app going to the background, or quitting).
   Future<void> saveCppWorkbenches() async {
     for (final w in (_workbenches[this] ?? const <String, CppWorkbench>{}).values) {
