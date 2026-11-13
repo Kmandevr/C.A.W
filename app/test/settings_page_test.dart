@@ -33,7 +33,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.byKey(ValueKey('section-page-${section.name}')), findsOneWidget);
       // Every setting the search knows for this section has its row on the page.
-      for (final e in settingEntries.where((e) => e.section == section && e.searchable)) {
+      for (final e in settingEntries.where((e) => e.section == section && e.searchable && settingAvailable(e))) {
         expect(find.byKey(ValueKey('setting-${e.id}'), skipOffstage: false), findsOneWidget, reason: e.id);
       }
       await tester.pageBack();

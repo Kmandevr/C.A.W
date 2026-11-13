@@ -1,5 +1,6 @@
 // Mixer tests: block-size independence, per-layer loop lengths, hot swap, broken code, mute/solo, overload, stop.
 #include <algorithm>
+#include <functional>
 #include <atomic>
 #include <cmath>
 #include <cstdio>
@@ -12,6 +13,7 @@
 
 #include "caw.h"
 #include "detmath.h"
+#include "device_render.h"
 #include "engine.h"
 #include "native_component_test_path.h"
 #include "test.h"
@@ -791,6 +793,270 @@ TEST(overload_shedding_goes_by_time_not_callbacks) {
     for (int i = 0; i < 600; ++i) g.reportLoad(1.5, 64);
     run(g, 64);
     CHECK_EQ(g.meters().overloaded, 2);
+}
+
+namespace {
+// A device's callbacks, simulated: `seconds` of 512-frame callbacks, each reporting the load `load(layersOn)`
+// gives for the layers not shed now. Returns the largest number of layers shed at once.
+int simulateLoad(Engine& e, double seconds, const std::function<double(int)>& load, int layers) {
+    std::vector<float> l(512), r(512);
+    int most = 0;
+    for (int k = 0, calls = static_cast<int>(seconds * 48000 / 512); k < calls; ++k) {
+        e.process(l.data(), r.data(), 512);
+        const int shed = e.meters().overloaded;
+        most = std::max(most, shed);
+        e.reportLoad(load(layers - shed), 512);
+    }
+    return most;
+}
+}  // namespace
+
+TEST(shed_layers_come_back_on_their_own_once_the_load_drops) {
+    // The owner's report (2026-11-12): in the background the song thinned out until it stopped, and shed layers
+    // came back only with Unmute. Overloaded, the engine sheds; once the load is low again they return one by one.
+    ProjectSpec p = project({dc(0.1), dc(0.1), dc(0.1), dc(0.1)});
+    Engine e(48000);
+    e.setMasterBypass(true);
+    e.setProject(p);
+    e.play();
+    run(e, 1000);
+    bool hot = true;
+    // Throttled: every callback over budget for 3 s sheds a layer about every 1.07 s.
+    simulateLoad(e, 3.0, [&](int) { return hot ? 1.3 : 0.3; }, 4);
+    const int shed = e.meters().overloaded;
+    CHECK(shed >= 2);
+    CHECK_EQ(static_cast<int>(e.sheddingStats().shed), shed);
+    // Back in focus: 0.1 of the budget a layer. They come back about every 2 s, the newest shed first.
+    hot = false;
+    simulateLoad(e, 2.0 * shed + 3.0, [](int on) { return 0.1 * on; }, 4);
+    CHECK_EQ(e.meters().overloaded, 0);
+    CHECK_EQ(e.sheddingStats().restored, static_cast<uint64_t>(shed));
+    const std::vector<float> out = run(e, 4800);
+    CHECK_NEAR(out.back(), 0.4 * std::cos(kPi / 4.0), 1e-4);  // all four play again, faded back in
+}
+
+TEST(a_layer_the_device_can_only_just_not_carry_does_not_come_and_go) {
+    // Borderline: two layers cost 0.9 of the budget, one 0.55. Bringing the shed one back would overload again
+    // (its cost was measured when it went), so it does not come back after 2 s quiet; only on trial after 10 s,
+    // and each trial that overloads doubles the wait: a few in a minute, not a shed and return every 2.3 s.
+    ProjectSpec p = project({dc(0.1), dc(0.1)});
+    Engine e(48000);
+    e.setProject(p);
+    e.play();
+    run(e, 1000);
+    simulateLoad(e, 9.0, [](int on) { return 0.2 + 0.35 * on; }, 2);
+    CHECK_EQ(e.sheddingStats().shed, uint64_t{1});
+    CHECK_EQ(e.sheddingStats().restored, uint64_t{0});  // it does not fit: no quick return
+    simulateLoad(e, 51.0, [](int on) { return 0.2 + 0.35 * on; }, 2);
+    CHECK(e.sheddingStats().shed <= uint64_t{4});
+    CHECK_EQ(e.meters().overloaded, 1);
+    // Its cost misread (the load fell only after the meter looked): it comes back and is shed again, but each
+    // re-shed within 10 s doubles its wait (2, 4, 8, 16, 32 s), so a minute holds a few cycles, not one every 3.5 s.
+    Engine f(48000);
+    f.setProject(p);
+    f.play();
+    run(f, 1000);
+    int lastOn = 2, since = 0;
+    simulateLoad(f, 60.0, [&](int on) {
+        since = on == lastOn ? since + 1 : 0;
+        lastOn = on;
+        return on == 2 || since < 120 ? 0.95 : 0.5;  // 1.3 s still hot after a shed
+    }, 2);
+    CHECK(f.sheddingStats().shed >= uint64_t{2});  // it did come back at least once
+    CHECK(f.sheddingStats().shed <= uint64_t{6});
+    // A song shed to silence (the cost of the last layer looked like the whole load) comes back on trial.
+    Engine g(48000);
+    g.setProject(p);
+    g.play();
+    run(g, 1000);
+    simulateLoad(g, 2.0, [](int) { return 1.4; }, 2);  // throttled: both shed
+    CHECK_EQ(g.meters().overloaded, 2);
+    simulateLoad(g, 30.0, [](int on) { return 0.05 + 0.1 * on; }, 2);  // the device recovers
+    CHECK_EQ(g.meters().overloaded, 0);
+}
+
+TEST(a_single_late_callback_sheds_nothing) {
+    // The first callback after Play, a device restart or reroute, a background burst: one stall, however long.
+    ProjectSpec p = project({dc(0.25), dc(0.5)});
+    for (const int frames : {64, 512, 1920}) {
+        Engine e(48000);
+        e.setProject(p);
+        e.play();
+        run(e, 1000);
+        std::vector<float> l(2048), r(2048);
+        for (int k = 0; k < 2000; ++k) {
+            e.process(l.data(), r.data(), frames);
+            const bool burst = k == 0 || k == 500 || (k >= 1000 && k < 1000 + 4800 / frames);  // up to 0.1 s of them
+            e.reportLoad(burst ? 40.0 : 0.3, frames);
+        }
+        CHECK_EQ(e.meters().overloaded, 0);
+        CHECK_EQ(e.sheddingStats().shed, uint64_t{0});
+    }
+}
+
+TEST(odd_callback_sizes_through_the_device_fifo_shed_nothing_under_the_threshold) {
+    // The 2026-11-12 audio review: through the device's FIFO a callback renders more or fewer frames than it
+    // plays (at 120 frames, 128 seven times in eight), so a load measured against the callback's own budget peaks
+    // over 85% while the engine's real load is under it. The load counts per frame rendered (reportLoad's third
+    // argument), and a small period that isn't whole blocks (96, a phone's low-latency burst) skips the FIFO.
+    CHECK(!DeviceRender::suits(96));
+    CHECK(!DeviceRender::suits(240));
+    CHECK(DeviceRender::suits(192));
+    CHECK(DeviceRender::suits(441));
+    CHECK(DeviceRender::suits(257));
+    for (const int period : {96, 120, 200, 300, 441, 1023}) {
+        for (const bool fifo : {true, false}) {
+            for (const double perFrame : {0.7, 0.8}) {
+                Engine e(48000);
+                e.setProject(project({dc(0.25), dc(0.5)}));
+                e.play();
+                DeviceRender dev;
+                if (fifo) dev.open(period);  // as the device does: the FIFO only where the period suits it
+                else dev.open(kBlock * 4);   // the FIFO forced on, at any period
+                CHECK_EQ(dev.usesFifo(), fifo ? DeviceRender::suits(period) : true);
+                std::vector<float> out(static_cast<size_t>(period) * 2);
+                for (int k = 0, calls = 48000 * 5 / period; k < calls; ++k) {
+                    const int rendered = dev.render(e, out.data(), period);
+                    if (!dev.usesFifo()) CHECK_EQ(rendered, period);
+                    // The callback's time: perFrame of real time for each frame rendered, against its own budget.
+                    e.reportLoad(perFrame * rendered / period, period, rendered);
+                }
+                if (e.sheddingStats().shed != 0)
+                    cawtest::fail(__FILE__, __LINE__, std::to_string(period) + "-frame callbacks at " + std::to_string(perFrame) +
+                                                          " a frame rendered shed " + std::to_string(e.sheddingStats().shed));
+                CHECK_NEAR(e.meters().cpu, perFrame, 0.02);  // the meter reads the engine's real load
+            }
+        }
+    }
+    // A real overload still sheds through the FIFO.
+    Engine e(48000);
+    e.setProject(project({dc(0.25), dc(0.5)}));
+    e.play();
+    DeviceRender dev;
+    dev.open(441);
+    std::vector<float> out(441 * 2);
+    for (int k = 0; k < 48000 / 441; ++k) {
+        const int rendered = dev.render(e, out.data(), 441);
+        e.reportLoad(0.95 * rendered / 441, 441, rendered);
+    }
+    CHECK(e.sheddingStats().shed >= 1);
+}
+
+TEST(the_device_fifo_pulls_the_input_for_each_block_it_renders) {
+    // The audio-resilience merge (2026-11-13): the output is always playback-only, so the FIFO stays on with the
+    // input open, and the input bridge is read inside the render, block by block: the frames asked for are exactly
+    // the frames rendered (not the frames played), each pull at most a chunk, and the input reaches the engine.
+    for (const int period : {96, 192, 441, 1023, 1920}) {
+        Engine e(48000);
+        e.setProject(project({dc(0.25)}));
+        e.play();
+        e.liveAudio().setDeviceChannels(2);  // as attachCapture does
+        DeviceRender dev;
+        dev.open(period);
+        std::vector<float> out(static_cast<size_t>(period) * 2);
+        std::vector<float> in(static_cast<size_t>(DeviceRender::kChunk) * 2, 0.5f);
+        int64_t asked = 0, rendered = 0;
+        int most = 0;
+        bool whole = true;
+        for (int k = 0; k < 200; ++k) {
+            rendered += dev.render(e, out.data(), period, [&](int m, int& ch) -> const float* {
+                asked += m;
+                most = std::max(most, m);
+                if (dev.usesFifo() && m % kBlock != 0) whole = false;
+                ch = 2;
+                return in.data();
+            });
+        }
+        CHECK_EQ(asked, rendered);
+        CHECK(most <= DeviceRender::kChunk);
+        CHECK(whole);  // through the FIFO the engine (and the input) only ever moves in whole blocks
+        CHECK(rendered >= int64_t{200} * period - dev.latency());
+        float peaks[2] = {};
+        CHECK_EQ(e.liveAudio().peaks(peaks, 2), 2);
+        CHECK_NEAR(peaks[0], 0.5f, 1e-6f);
+    }
+}
+
+TEST(a_callback_that_misses_its_played_deadline_counts_toward_shedding) {
+    // The audio review of the merge (2026-11-13): through the FIFO a 256-frame callback that renders 320 frames at
+    // its whole budget (a raw load of 1.0: its deadline missed) reads 0.8 a frame rendered, under the 0.85 that
+    // counts a callback as over. It counts anyway: shedding goes by the played frames' deadline too.
+    Engine e(48000);
+    e.setProject(project({dc(0.25), dc(0.5)}));
+    e.play();
+    float l[256], r[256];
+    for (int k = 0; k < 48000 / 256; ++k) {
+        e.process(l, r, 256);
+        e.reportLoad(1.0, 256, 320);
+    }
+    CHECK(e.sheddingStats().shed >= 1);
+    CHECK_NEAR(e.meters().cpu, 0.8, 0.02);  // the meter still reads the load per frame rendered
+    // Under the deadline and under 0.85 a frame: nothing.
+    Engine f(48000);
+    f.setProject(project({dc(0.25), dc(0.5)}));
+    f.play();
+    for (int k = 0; k < 48000 * 3 / 256; ++k) {
+        f.process(l, r, 256);
+        f.reportLoad(0.99, 256, 320);
+    }
+    CHECK_EQ(f.sheddingStats().shed, 0u);
+}
+
+TEST(a_shed_folder_bus_that_is_removed_is_no_longer_counted_shed) {
+    // The 2026-11-12 audio review: a shed bus retired through runBusNode without setShed(false), so
+    // CawMeters.overloaded and the shed-now count stayed up after it was gone, and recovery kept trying.
+    ProjectSpec p = project({dc(0.25)});
+    LayerSpec bus;
+    bus.id = bus.name = "bus";
+    bus.folder = true;
+    bus.busEnabled = true;
+    LayerSpec child = cawtest::testSignalLayer("child", Shape::Dc, {{"level", 0.5}});
+    child.parentId = "bus";
+    p.layers.push_back(child);
+    p.layers.push_back(bus);  // the newest layer: the one shed
+    Engine e(48000);
+    e.setMasterBypass(true);
+    CHECK(e.setProject(p).find("\"ok\":true") != std::string::npos);
+    e.play();
+    run(e, 1000);
+    for (int i = 0; i < 40; ++i) e.reportLoad(1.5, 512);
+    run(e, 64);
+    CHECK_EQ(e.meters().overloaded, 1);
+    LayerMeter lm;
+    CHECK(e.layerMeter(2, lm) && lm.overloaded);  // the bus
+    p.layers.pop_back();
+    p.layers.pop_back();
+    CHECK(e.setProject(p).find("\"ok\":true") != std::string::npos);
+    run(e, 9600);  // the bus fades out and retires
+    CHECK_EQ(e.meters().overloaded, 0);
+    CHECK_EQ(e.sheddingStats().mutedNow, 0);
+}
+
+TEST(an_offline_render_never_sheds_and_a_shedding_reset_brings_everything_back) {
+    ProjectSpec p = project({dc(0.25), dc(0.5)});
+    Engine e(48000);
+    e.setProjectOffline(p);
+    e.play();
+    run(e, 1000);
+    for (int i = 0; i < 400; ++i) e.reportLoad(5.0, 512);  // an export runs flat out: "over budget" means nothing
+    run(e, 64);
+    CHECK_EQ(e.meters().overloaded, 0);
+    CHECK_EQ(e.sheddingStats().shed, uint64_t{0});
+    // Live, shed; then the device reopens (or the app goes to the background): the shed layer comes back at once.
+    Engine f(48000);
+    f.setProject(p);
+    f.play();
+    run(f, 1000);
+    for (int i = 0; i < 40; ++i) f.reportLoad(1.5, 512);
+    run(f, 64);
+    CHECK_EQ(f.meters().overloaded, 1);
+    f.requestSheddingReset();
+    run(f, 64);
+    CHECK_EQ(f.meters().overloaded, 0);
+    CHECK_EQ(f.meters().cpu, 0.0f);  // the per-callback averages went with it
+    for (int i = 0; i < 10; ++i) f.reportLoad(1.5, 512);  // the history went too: 0.1 s more sheds nothing
+    run(f, 64);
+    CHECK_EQ(f.meters().overloaded, 0);
 }
 
 TEST(stop_fades_to_silence_and_layers_can_be_removed) {

@@ -1,5 +1,6 @@
 // Saves a finished file (an export), or several into one folder (stems), where the user picks, copying it in chunks so a long WAV never has to fit in
-// memory (#91): Android through the system's create-document picker, desktop through the file picker's path.
+// memory (#91): Android through the system's create-document picker, desktop through the file picker's path. Text
+// (the Benchmark's result) is shared through Android's share sheet, or copied to the clipboard on desktop.
 import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
@@ -46,4 +47,21 @@ Future<int> saveCopiesToFolder(List<(File, String)> files, {String mimeType = 'a
     copied++;
   }
   return copied;
+}
+
+/// Shares [text] (with [subject] where the target takes one): Android's share sheet; desktop has none, so the text
+/// is copied to the clipboard. True when shared, false when it was copied instead.
+Future<bool> shareText(String text, {String subject = ''}) async {
+  if (Platform.isAndroid) {
+    try {
+      await const MethodChannel('caw/files').invokeMethod<bool>('shareText', {'text': text, 'subject': subject});
+      return true;
+    } on PlatformException {
+      // No share target: fall back to the clipboard.
+    } on MissingPluginException {
+      // Not on a device (tests): the clipboard.
+    }
+  }
+  await Clipboard.setData(ClipboardData(text: text));
+  return false;
 }

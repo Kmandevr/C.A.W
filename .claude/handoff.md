@@ -1,33 +1,25 @@
 # Handoff
 
-Commit: 371b282 (Main after PR #193)
-Branch: ccr-56285e11-0xrj3h. PR #193 (telemetry, frames follow-ups, Flagship tests) is merged. Main is protected, so changes go in by PR. The owner wants ONE combined APK at the end, with no test builds in between.
+Commit: 4239e1f (session branch: all engine work merged, version 1.0.0-alpha.1; PR #196)
+Branch: ccr-56285e11-0xrj3h. Main is protected: PRs only; merge yourself when CI is green. The owner wants ONE combined APK at the end.
 
 ## Goal
-Finish everything for v1.0.0-alpha.1, the "Open alpha".
-- The plan is in docs/beta-readiness-plan.md (#187), and the owner's answers are in docs/decisions.md.
-- Already given: privacy minimum age 16; yes to smaller update downloads; the Benchmark is the top priority.
-- Render-ahead is planned for 1.2.0.
+v1.0.0-alpha.1 "Open alpha". The plan is in docs/beta-readiness-plan.md (#187), and the owner's answers are in docs/decisions.md.
 
 ## Done and verified
-In Main: speed phases 1-4, Flagship A2, frames up to 240 Hz, smooth meters, the music video editor and render fix, editing cues, gestures, project folders.
+In Main: startup screen and updates (#194); music video round 2 and smaller updates (#195). The owner chose to keep the APK's native libraries compressed (recorded).
 
-## Open (branches in .claude/worktrees/<name>; check git log and status in each)
-- **audio-resilience (fa3721c, DONE):** mic split, foreground service, battery row, review fixes; C API 26.
-- **bt-clicks:** overload shed and restore, the block FIFO, the ducker fix, and C API 26. Fixing the FIFO review items. Its merge notes are in docs/engine.md.
-- **speed-parallel:** phase 5a-5d is built and measured (C API 24). Check that the worst case is no worse than serial before merging.
-- **Merge order:** integrate audio-resilience, then bt-clicks, then speed-parallel in one go. Follow the "Merge notes": FIFO always on, bridge input inside the render lambda, pool timing before reportLoad's early returns. Reconcile the C API version.
-- **startup-screen:** the startup screen plus the updates system. An agent is merging the session branch into it after conflicts in about 10 files; merge it afterwards.
-- **Still in progress:**
-  - benchmark: section C, phases P1-P7, C API 27; top priority.
-  - delta-updates: built on startup-screen.
-  - engine-a345: A3 first callback, A4 #133, A5 CPU features.
-  - music-video-v2: tabs, text, images, transitions, camera, render speed.
+## Open
+- **origin/benchmark (084eede):** audio-integration dcf7ec9 (audio-resilience, bt-clicks, speed-parallel; C API 28) + the Benchmark (C API 29) + engine-a345 (A3/A4, reviewed clean) + session branch. All checks green.
+- **origin/audio-integration:** review fixes 7e58422, fcde317, f7c0712 (done, green). An agent was building a tail-based Auto fallback (the pool turns off when its tail is worse than serial's). Check the branch for a newer commit.
 
 ## Next
-1. Merge startup-screen once its merge agent reports. Review music-video-v2 (code review running) and merge it.
-2. Integrate the three audio branches, then benchmark, delta-updates, engine-a345 and music-video-v2.
-3. Fit-and-finish, the docs pass, bump to 1.0.0-alpha.1, then one APK to the owner and the tag once the owner says go.
+1. Merge origin/audio-integration (the fixes, plus the tail guard if committed) into benchmark. Rebuild, then run ctest, the sanitizer and TSan (mix_pool, shed, overload, stress_), flutter analyze/test and docs-test --strict.
+2. Merge benchmark into the session branch, PR to Main with Closes #133, and merge when green.
+3. Fit-and-finish, the docs pass, the bump to 1.0.0-alpha.1, then dispatch app.yml installables and send the owner the one APK. Tag on the owner's go.
 
-## Read first
-- docs/beta-readiness-plan.md, docs/decisions.md (top entries), .claude/rules/engine.md
+## Owner questions open
+- Governing law for TERMS.md.
+- Windows engine with clang-cl / x86-64-v3 (A5, decisions.md).
+- Whether music video project packages carry their images.
+- Benchmark tuning on the S22+: the 70% "comfortable" line; live mode.

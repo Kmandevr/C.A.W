@@ -31,6 +31,7 @@ public:
 struct ComponentAutomation {
     std::shared_ptr<const std::vector<ProjectAutomationLaneSpec>> lanes;  // owns what `byParam` points into
     std::vector<std::vector<const ProjectAutomationLaneSpec*>> byParam;   // [component][parameter], null: none
+    std::vector<uint8_t> anyLane;  // [component]: 1 when a lane drives any of its parameters
 };
 
 // Project modulation for one chain's block (#161, modulation_links.h): for each modulated parameter, its offset in
@@ -52,6 +53,8 @@ struct ChainModulation {
     uint32_t sampleBuffers = 0;
 };
 
+struct ChainProfile;  // below
+
 // Where the transport is for a block, so automation lanes can be read. Null while stopped.
 struct ChainTime {
     int64_t start = 0;      // the block's first sample in the song
@@ -62,11 +65,15 @@ struct ChainTime {
     bool playing = true;    // false: stopped (lanes hold; components still learn the tempo)
     int64_t chunk = -1;     // the Engine's chunk counter: a key written for another chunk is stale (silence)
     const ChainModulation* modulation = nullptr;  // project modulation of this chain's parameters (null: none)
+    ChainProfile* profile = nullptr;  // the Engine's component profile (Engine::setProfile; null: none)
 };
 
-// Benchmark-only (caw_bench's profile mode): the time each component spends in a chain, per processor. Off (null)
-// everywhere else, where it costs one relaxed load per chain per block. Fixed slots, so the audio thread never
-// allocates; processors past kSlots are not counted.
+// Benchmark-only (caw_bench's profile mode, the app's Benchmark): the time each component spends in a chain, per
+// processor. Each Engine has its own (Engine::setProfile); it reaches the chains in their ChainTime (no thread-local
+// storage: Android's emulated TLS can allocate on a thread's first use), so it travels with the work, two engines
+// profiling at once never share one, and slot() is called only while that engine's process() runs, which keeps its
+// mix serial while profiling. Off (null) everywhere else. Fixed slots, so the audio thread never allocates;
+// processors past kSlots are not counted.
 struct ChainProfile {
     static constexpr uint32_t kSlots = 512;
     struct Slot {
@@ -77,9 +84,8 @@ struct ChainProfile {
     };
     Slot slots[kSlots];
     uint32_t used = 0;
+    uint64_t nestedNs = 0;  // the running scope's nested chains' time so far (component_chain.cpp, ProfileScope)
     Slot* slot(const void* processor, const std::string* id) noexcept;
-    static void set(ChainProfile* profile) noexcept;
-    static ChainProfile* current() noexcept;
 };
 
 // Built and configured on the control thread, then handed to the audio thread, which alone calls
@@ -174,6 +180,9 @@ public:
     }
     bool keyed(std::size_t index) const noexcept { return index < entries_.size() && entries_[index]->key != nullptr; }
     bool instrument() const noexcept { return notes_ != nullptr; }
+    // Whether it holds a third-party native component (one loaded from a library, not a built-in): the mixer runs
+    // its node in a serial lane, on the callback thread (speed phase 5c, docs/decisions.md).
+    bool foreign() const noexcept { return foreign_; }
     // Audio thread: an audio track monitoring its input wants to run while the transport is stopped.
     bool monitorsStopped() const noexcept;
     // The instrument's notes and this block's events (null for an effect chain). Audio thread.
@@ -231,7 +240,8 @@ public:
     // not run) until an event or input that is not silent; a declared tail alone never puts one to sleep, so
     // the output doesn't depend on the block size. An instrument's input is its notes: no events, none held.
     void process(float* left, float* right, uint32_t m, double sampleRate, const ChainTime* time) noexcept;
-    // Audio thread: clears every component's running state (tails, delay lines), as after activate.
+    // Audio thread: clears every component's running state (tails, delay lines), as after activate; a no-op when
+    // nothing has run since the last reset (an instrument is reset once when built, A3).
     void reset() noexcept;
     // Audio thread: swaps in a new automation table (or none) and returns the old one to retire.
     ComponentAutomation* swapAutomation(ComponentAutomation* next) noexcept {
@@ -259,6 +269,7 @@ private:
         uint32_t seenGeneration = ~0u;           // audio thread
         const void* seenLanes = nullptr;         // audio thread: the automation the values were resolved with
         bool seenPlaying = false, dynamic = true;  // audio thread: dynamic: a ramp or a lane moved a value
+        bool anyTouched = false;  // audio thread: a resolver may hold a touch (a Play clears them)
         double mix = 1.0;  // audio thread: 1 processing, 0 bypassed, between while crossfading
         // Audio thread: asleep, the component is skipped (its output is silence) until an event or input that
         // is not silent (for an instrument: an event).
@@ -286,9 +297,16 @@ private:
     double sampleRate_ = 0;
     ComponentAutomation* automation_ = nullptr;  // owned; swapped and retired by the Engine
     uint64_t playEpoch_ = ~0ull;
+    // Reset and not run since (reset() is then a no-op): set by reset(), cleared by process() and runModulator().
+    // Any new path that runs a processor must clear it before calling in (debug-asserted at the call sites).
+    // Owned by whichever thread owns the chain: the control thread while it is built, then the audio thread.
+    // Set at build only for chains of built-ins (make()); a chain holding a loaded component is reset on the
+    // audio thread as before.
+    bool clean_ = false;
     bool modulators_ = false;   // built by buildModulators
     bool modNewPlay_ = false;   // audio thread: beginModulators saw a new Play
     bool noteFx_ = false;       // built by buildNoteEffects
+    bool foreign_ = false;      // holds a loaded (third-party) component
     const VoiceBus* voices_ = nullptr;   // audio thread: an instrument's voice bus for the next process()
     const Event* noteEvents_ = nullptr;  // audio thread: per-note FX events for the next process()
     uint32_t noteEventCount_ = 0;

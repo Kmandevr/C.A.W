@@ -9,7 +9,7 @@ on:
   # everything on any branch (an APK to try before merging).
   push:
     branches: [Main]
-    # A version tag (v0.9.0-beta.2) builds both installables and publishes them as a GitHub Release.
+    # A version tag (v1.0.0-alpha.1) builds both installables and publishes them as a GitHub Release.
     # GitHub does not apply the path filter below to tag pushes.
     tags: ["v*"]
     paths:

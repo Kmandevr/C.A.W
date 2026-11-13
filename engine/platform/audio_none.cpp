@@ -25,6 +25,8 @@ std::string quoted(const std::string& s) {
 
 }  // namespace
 
+int32_t cawAudioXruns(CawEngine*) { return -1; }
+
 extern "C" {
 
 int32_t caw_audio_start(CawEngine*, char* error, int32_t error_len) {
@@ -45,6 +47,8 @@ void caw_audio_set_buffer_mode(CawEngine* e, int32_t mode, int32_t recording) {
 }
 
 int32_t caw_audio_buffer_frames(CawEngine*) { return 0; }
+
+int32_t caw_audio_set_background(CawEngine*, int32_t) { return 0; }
 
 char* caw_audio_input_devices(void) { return dup("{\"backend\":\"none\",\"exclusive\":false,\"devices\":[]}"); }
 

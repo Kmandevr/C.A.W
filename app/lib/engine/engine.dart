@@ -379,6 +379,17 @@ class Engine {
     return DeviceLatency.fromJson(j);
   }
 
+  /// The audio callback's core, its clock and kind, the scheduling the platform gave the callback and the mix pool's
+  /// workers, and the pool's size (caw_audio_threads, API 24; docs/engine.md). Reads the core's clock from the
+  /// system: about once a second, not per frame. Empty without an engine.
+  Map<String, dynamic> audioThreads() {
+    final r = _b.audioThreads(_handle);
+    if (r == nullptr) return const {};
+    final j = jsonDecode(r.toDartString()) as Map<String, dynamic>;
+    _b.free(r);
+    return j;
+  }
+
   /// The device's status as the engine wrote it (API 18 adds its "input" object).
   Map<String, dynamic> audioStatusJson() {
     final r = _b.audioStatus(_handle);
@@ -756,6 +767,10 @@ class Engine {
 
   /// The device's callback size in frames while it plays (0 when stopped).
   int get bufferFrames => _b.audioBufferFrames(_handle);
+
+  /// Behind the app with nothing monitoring: a larger output buffer (AAudio, no reopen); false restores it (API 26).
+  /// Returns the buffer size now in frames (0 where there is none).
+  int setAudioBackground(bool background) => _b.audioSetBackground(_handle, background ? 1 : 0);
 
   /// An instrument entry ({"id", "params", "preset"}) as the engine plays it (caw_migrate_instrument): a retired
   /// synth becomes Flagship with its preset and knobs mapped ("migrated": true, "lanes": old knob to new), and an

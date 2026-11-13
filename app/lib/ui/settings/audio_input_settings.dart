@@ -126,10 +126,13 @@ class _AudioInputSettingsState extends State<AudioInputSettings> {
     final source = switch (lat.source) { 'override' => 'typed in', 'measured' => 'measured', _ => 'the device\'s estimate' };
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       settingHeading('Input and recording'),
-      settingSwitch('audio.input', p.enabled && r.inputOpen, _toggle, icon: Icons.mic_none,
-          subtitle: r.inputOpen
-              ? 'On: armed audio tracks record and monitor'
-              : p.enabled ? 'Chosen, but not open (no permission or no microphone)' : 'Off: arming a track turns it on'),
+      settingSwitch('audio.input', p.enabled, _toggle, icon: Icons.mic_none,
+          subtitle: r.micBusy.value
+              ? 'Microphone in use by another app: tried again when it is free'
+              : r.inputOpen
+                  ? 'On: the microphone is open for the armed and monitoring tracks'
+                  : p.enabled ? 'On: the microphone opens only while a track is armed or monitoring'
+                      : 'Off: arming a track turns it on'),
       settingDropdown<String>('audio.inputDevice', current, [
         ('', 'System default'),
         for (final d in list)

@@ -1957,7 +1957,7 @@ class _TimelineHeader extends StatelessWidget {
           padding: const EdgeInsets.only(left: 3, right: 1),
           child: SizedBox(key: ValueKey('upright-meter-${layer.id}'), width: layer.isStereo || armed ? 7 : 4,
             height: box.maxHeight, child: armed
-                ? RotatedBox(quarterTurns: 3, child: AudioInputMeter(layer: layer, height: 7))
+                ? RotatedBox(quarterTurns: 3, child: AudioInputMeter(layer: layer, height: 7, upright: true))
                 : LiveIsland(child: TrackMeter(key: ValueKey('meter-${layer.id}'), state: state, index: index,
                     stereo: layer.isStereo, color: color, vertical: true))));
         // FX: drawn at 18 dp, touched over about 34 dp; a dot tells the track has effects. A very narrow header

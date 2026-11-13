@@ -117,10 +117,11 @@ public:
     // Before the mix graph runs a chunk of m frames (m <= ComponentChain::kMaxFrames): takes a new plan, restarts
     // the modulators at Play, runs every modulator block that is due and works out the chunk's offsets.
     void beginChunk(uint32_t m, int64_t songSample, double stepLength, double tempo, uint32_t beatsPerBar,
-                    bool playing, uint64_t playEpoch, int64_t chunk) noexcept;
+                    bool playing, uint64_t playEpoch, int64_t chunk, ChainProfile* profile = nullptr) noexcept;
     // The modulation of chain `chain` of `slot` (-1 the master) for this chunk, or null. `which` (0 or 1) picks
     // the scratch, so a chain and the one it replaces (crossfading) can both be modulated in one chunk; 2 is the
     // per-note FX's (ModChainKind::NoteFx), whose bindings the NoteFxHost copies (it runs inside the instrument).
+    // Each slot (and the master) has its own output (speed phase 5a): another slot's call never overwrites it.
     const ChainModulation* forChain(int slot, ModChainKind kind, const ComponentChain* chain, int which) noexcept;
     // A layer's volume, pan or send `send` offset per frame this chunk (normalized travel), or null.
     const float* volume(int slot) const noexcept;
@@ -140,6 +141,10 @@ private:
     struct Retire;
     std::unique_ptr<Retire> retire_;
     ModulationPlan* ctl_ = nullptr;          // control thread: the newest plan sent (alive until a newer replaces it)
+    // The values and samples a modulated chain writes while it runs, one block per MixPool lane (speed phase 5c).
+    // Made with the first plan and kept, so a plan never outlives them.
+    std::vector<ParameterValue> laneValues_;
+    std::vector<double> laneSamples_;
     // Audio thread: the grid's clock (frames since the last Play) and the Play it counts from.
     int64_t clockNext_ = 0;
     uint64_t epoch_ = 0;
