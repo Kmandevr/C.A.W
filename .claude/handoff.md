@@ -1,15 +1,15 @@
 # Handoff
 
-Commit: Main c6cf7ee (PR #195 merged) + session branch decision edit.
+Commit: 4239e1f (session branch: all engine work merged, version 1.0.0-alpha.1; PR #196)
 Branch: ccr-56285e11-0xrj3h. Main is protected: PRs only; merge yourself when CI is green. The owner wants ONE combined APK at the end.
 
 ## Goal
 v1.0.0-alpha.1 "Open alpha". The plan is in docs/beta-readiness-plan.md (#187), and the owner's answers are in docs/decisions.md.
 
-## Done
+## Done and verified
 In Main: startup screen and updates (#194); music video round 2 and smaller updates (#195). The owner chose to keep the APK's native libraries compressed (recorded).
 
-## Engine work (all pushed, not yet in Main)
+## Open
 - **origin/benchmark (084eede):** audio-integration dcf7ec9 (audio-resilience, bt-clicks, speed-parallel; C API 28) + the Benchmark (C API 29) + engine-a345 (A3/A4, reviewed clean) + session branch. All checks green.
 - **origin/audio-integration:** review fixes 7e58422, fcde317, f7c0712 (done, green). An agent was building a tail-based Auto fallback (the pool turns off when its tail is worse than serial's). Check the branch for a newer commit.
 
