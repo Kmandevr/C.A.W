@@ -564,6 +564,16 @@ String _boundedProjectText(Object? raw, int maxLength) {
   return value.length > maxLength ? value.substring(0, maxLength) : value;
 }
 
+/// A project saved by a newer C.A.W than this one: [ProjectDoc.fromJson] refuses it rather than read it in part.
+class NewerProjectFormat implements Exception {
+  const NewerProjectFormat(this.format);
+  final int format;
+
+  @override
+  String toString() => 'This project was saved by a newer version of C.A.W (format v$format; this version reads up to '
+      'v${ProjectDoc.fileVersion}). Update C.A.W to open it; the file is left as it is.';
+}
+
 class ProjectDoc {
   ProjectDoc({
     required this.id,
@@ -960,6 +970,10 @@ class ProjectDoc {
   }
 
   static ProjectDoc fromJson(Map<String, dynamic> j) {
+    // A file from a newer C.A.W (after a downgrade) is refused whole: read in part, then saved, it would lose
+    // whatever this version doesn't know.
+    final format = j['caw_app_project'];
+    if (format is num && format > fileVersion) throw NewerProjectFormat(format.toInt());
     final project = ProjectDoc(
       id: j['id'] as String,
       name: (j['name'] as String?) ?? 'Untitled',

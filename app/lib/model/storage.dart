@@ -67,6 +67,8 @@ class ProjectStorage {
       final doc = ProjectDoc.fromJson(decoded as Map<String, dynamic>);
       _written = (id, text);
       return doc;
+    } on NewerProjectFormat {
+      rethrow; // not damaged: the caller says so and leaves the file alone
     } catch (_) {
       return null;
     }
@@ -81,7 +83,9 @@ class ProjectStorage {
     final f = _file(p.id);
     final text = json ?? jsonEncode(p.toJson());
     final last = _written;
-    if (last != null && last.$1 == p.id && last.$2 == text && await f.exists()) return;
+    // The same text may still be on its way to disk (an autosave the caller didn't wait for): a save returns only
+    // once it has landed.
+    if (last != null && last.$1 == p.id && last.$2 == text && await f.exists()) return atomicWritesDone(f);
     _written = (p.id, text);
     await writeFileAtomically(f, text);
   }

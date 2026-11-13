@@ -72,6 +72,7 @@ This note records the current implementation gaps in C.A.W.'s music-production w
 - Keep arrangement-first composition; the retired session/clip-launcher grid is not an alternate view.
 - Maintain phone and desktop parity, touch targets, keyboard/action access and accessible editing gestures.
 - Preserve local/offline operation and low CPU/RAM overhead on weak devices.
+- Keep launch quick: work added to `AppState.init` or `openStorage` reports a step on `AppState.startup` (`app/lib/model/startup_progress.dart`), so the startup screen shows it instead of a silent wait.
 - Keep audio callback work bounded, allocation-free, lock-free and free of I/O, logging, UI calls and unbounded loops.
 - Perform file access, waveform generation, analysis, stretching and export off the audio callback using bounded background work.
 - Verify current code and tests before opening implementation work. A listed gap is not permission to invent a parallel architecture; follow the relevant stage in the [roadmap](roadmap.md).
