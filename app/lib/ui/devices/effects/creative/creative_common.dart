@@ -1,6 +1,7 @@
 // What the Creative and Pitch & Time plugin UIs share: the hold-to-trigger pad, a labelled choice row, and dragging a knob's taper from a hero.
 import 'package:flutter/material.dart';
 
+import '../../kit/param_watch.dart';
 import '../../../feedback.dart';
 import '../../../theme.dart';
 import '../../device_controls.dart';
@@ -34,8 +35,11 @@ class _HoldPadState extends State<HoldPad> {
     t.set(widget.paramId, down ? 1 : 0);
   }
 
+  // Its own values rebuild it alone (param_watch.dart).
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => watchDevice(context, _body);
+
+  Widget _body(BuildContext context) {
     final scope = DeviceScope.of(context);
     final on = _down || scope.target.value(widget.paramId) >= 0.5;
     final c = scope.accent;

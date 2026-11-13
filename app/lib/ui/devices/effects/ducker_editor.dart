@@ -1,5 +1,7 @@
 // The ducker's plugin UI (org.caw.ducker, #175): the duck curve as the hero (drag its handles for attack, hold,
 // release, depth and curve), a playhead riding it and the live gain-reduction trace behind; trigger tiles and shapes.
+import '../kit/param_watch.dart';
+import '../kit/repaint.dart';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -62,7 +64,7 @@ class DuckerPage extends StatelessWidget {
         }),
         child: const _DuckHero(),
       )),
-      const _ShapeChips(),
+      watchDevice(context, (_) => const _ShapeChips()), // its own watch (param_watch.dart)
       const KnobRow(['depth', 'attack', 'hold', 'release', 'tension', 'mix'], size: 48,
         labels: {'tension': 'Curve'}),
       switch (mode) {
@@ -374,5 +376,6 @@ class _DuckPainter extends CustomPainter {
   static String _ms(double v) => v >= 1000 ? '${(v / 1000).toStringAsFixed(2)} s' : '${v.toStringAsFixed(v < 10 ? 1 : 0)} ms';
 
   @override
-  bool shouldRepaint(covariant _DuckPainter o) => true;
+  bool shouldRepaint(covariant _DuckPainter o) =>
+      paintInputsChanged([o.geo, o.attack, o.hold, o.release, o.tension, o.handles, o.grab, o.hist, o.frame, o.period, o.color, o.second], [geo, attack, hold, release, tension, handles, grab, hist, frame, period, color, second]);
 }

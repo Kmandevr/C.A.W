@@ -247,6 +247,45 @@ TEST(an_instrument_can_hold_a_thousand_notes) {
 }
 
 namespace {
+struct ListedVoice {
+    bool active = false, held = false;
+    uint32_t noteId = 0;
+    uint64_t age = 0;
+};
+}  // namespace
+
+TEST(a_voice_pool_s_list_holds_only_sounding_voices_after_a_period) {
+    // Flagship's pattern (audio review of A2, 2026-11-12): forEachActive() queues voices, and the queue's work,
+    // done after it returns, ends some. dropSilent() then leaves the list as activeCount() counts it.
+    VoicePool<ListedVoice, 8> pool;
+    for (uint32_t id = 1; id <= 5; ++id) pool.start(id);
+    CHECK_EQ(pool.listed(), 5u);
+    // f may clear `active` itself: that voice is dropped at once.
+    pool.forEachActive([](ListedVoice& v) noexcept {
+        if (v.noteId == 2) v.active = false;
+    });
+    CHECK_EQ(pool.listed(), 4u);
+    // Ended after forEachActive() has kept them: listed until dropped.
+    ListedVoice* queue[8];
+    uint32_t queued = 0;
+    pool.forEachActive([&](ListedVoice& v) noexcept { queue[queued++] = &v; });
+    CHECK_EQ(queued, 4u);
+    for (uint32_t k = 0; k < queued; ++k)
+        if (queue[k]->noteId == 1 || queue[k]->noteId == 4) queue[k]->active = false;
+    CHECK_EQ(pool.listed(), 4u);
+    pool.dropSilent();
+    CHECK_EQ(pool.listed(), 2u);
+    CHECK_EQ(pool.activeCount(), pool.listed());
+    std::vector<uint32_t> order;
+    pool.forEachActive([&](ListedVoice& v) noexcept { order.push_back(v.noteId); });
+    CHECK(order == (std::vector<uint32_t>{3, 5}));  // in the order they started
+    // A new voice reuses a dropped one's slot and joins the end of the list.
+    pool.start(6);
+    CHECK_EQ(pool.listed(), 3u);
+    CHECK(pool.find(1) == nullptr && pool.find(6) != nullptr);
+}
+
+namespace {
 
 // A note sounds for 100 frames; then the instrument says it is quiet. Counts its render calls.
 constexpr PortDescriptor kSleepyPorts[] = {
@@ -794,7 +833,7 @@ TEST(c_api_plays_and_addresses_a_layers_instrument) {
     CawEngine* engine = caw_engine_create(48000);
     CHECK(engine != nullptr);
     if (!engine) return;
-    CHECK_EQ(caw_api_version(), 23);  // 23: device latency; 22: per-note FX (#127); 21: the .caw language removed (#160; 20 unused); 19: project modulation; 18: audio clips, sampler, input; 17: C++ wavetable, one-shot, audition; 16: song renders; 15: MIDI devices; 14: component state; 13: drums and meters; 10: device choice
+    CHECK_EQ(caw_api_version(), 25);  // 25: every track meter in one call (24: speed-parallel's audio threads); 23: device latency; 22: per-note FX (#127); 21: the .caw language removed (#160; 20 unused); 19: project modulation; 18: audio clips, sampler, input; 17: C++ wavetable, one-shot, audition; 16: song renders; 15: MIDI devices; 14: component state; 13: drums and meters; 10: device choice
     char* result = caw_engine_set_project(engine,
         R"({"caw_project":1,"bpm":120,"modules":[{"id":"p","source":"---\nkind: pattern\nname: P\nlength: 16\n---\n0 C4 4 1\n"}],
             "layers":[{"id":"t","pattern":"p","instrument":{"id":"org.caw.synth.flagship","params":{"flt1_cutoff":900}}}]})");

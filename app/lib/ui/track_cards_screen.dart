@@ -12,6 +12,7 @@ import '../model/cpp_starters.dart';
 import '../model/cpp_workbench.dart';
 import '../model/pattern_doc.dart';
 import '../model/pattern_templates.dart' show PatternTemplate;
+import '../model/drums.dart' show drumsComponentId;
 import '../model/project.dart';
 import 'arrange/audio_waveform.dart';
 import 'arrange/clip_preview.dart';
@@ -535,25 +536,27 @@ class _Lane extends StatelessWidget {
             for (final t in tracks) ...[
               for (final c in t.clips)
                 clipBox(ValueKey('card-clip-${c.id}'), c.startSteps.toDouble(), c.lengthSteps.toDouble(), c.mute || t.mute,
-                    layer.isFolder ? null : _midiNotes(p, c, stepW, notes)),
+                    layer.isFolder ? null : _midiNotes(p, c, stepW, notes, drums: layer.instrument?.id == drumsComponentId)),
               for (final c in t.audioClips)
                 clipBox(ValueKey('card-audio-${c.id}'), c.startSteps, c.lengthAt(p.bpm), c.mute || t.mute,
                     layer.isFolder ? null : _waveform(c, stepW, notes)),
             ],
-            ValueListenableBuilder<int>(
+            // A live island (widgets.dart): the line moves on every read without repainting the clips and
+            // waveforms under it (beta plan B4.1).
+            LiveIsland(child: ValueListenableBuilder<int>(
               valueListenable: state.tick,
               builder: (context, _, _) {
                 final m = index < state.audibleLayerMeters.length ? state.audibleLayerMeters[index] : null;
                 final at = state.meters.playing ? (m?.progress ?? 0) : -1.0;
                 return CustomPaint(painter: _PlayheadPainter(at, color));
               },
-            ),
+            )),
           ]);
         }),
       );
 
-  Widget? _midiNotes(ProjectDoc p, ClipDoc c, double stepW, Color notes) {
-    final preview = MidiClipPreview.of(p, c, stepW: stepW, top: 1, color: notes);
+  Widget? _midiNotes(ProjectDoc p, ClipDoc c, double stepW, Color notes, {bool drums = false}) {
+    final preview = MidiClipPreview.of(p, c, stepW: stepW, top: 1, color: notes, drums: drums);
     return preview == null ? null : RepaintBoundary(child: CustomPaint(
       key: ValueKey('card-notes-${c.id}'),
       painter: ClipPreviewPainter(preview),
@@ -564,7 +567,7 @@ class _Lane extends StatelessWidget {
     final asset = state.project.asset(c.assetId);
     final fileSeconds = asset?.seconds ?? 0;
     final per = c.sourcePerStep(state.project.bpm, asset?.bpm) / stepW;
-    return CustomPaint(
+    return RepaintBoundary(child: CustomPaint(
       key: ValueKey('card-wave-${c.id}'),
       size: Size.infinite,
       painter: AudioClipPainter(
@@ -573,8 +576,9 @@ class _Lane extends StatelessWidget {
             : WaveformCache.instance.peaks(state.audioIo, asset.path, fileSeconds, per.abs()),
         window: ClipWindow(offset: c.offsetSeconds, perPixel: per, fileSeconds: fileSeconds, reverse: c.reverse,
             loop: c.loop, loopStart: c.loopStart, loopEnd: c.loopEnd),
-        color: wave, gain: c.gain, fadeIn: 0, fadeOut: 0, inCurve: c.fadeInCurve, outCurve: c.fadeOutCurve),
-    );
+        color: wave, gain: c.gain, fadeIn: 0, fadeOut: 0, inCurve: c.fadeInCurve, outCurve: c.fadeOutCurve,
+        path: asset?.path),
+    ));
   }
 }
 

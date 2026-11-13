@@ -20,3 +20,7 @@ Future<void> writeFileAtomically(File file, String text, {bool flush = true}) {
   _pending[key] = mine;
   return mine;
 }
+
+/// Completes once every write [writeFileAtomically] has queued for [file] so far has landed (at once when none is).
+Future<void> atomicWritesDone(File file) =>
+    (_pending[file.absolute.path] ?? Future<void>.value()).catchError((Object _) {});

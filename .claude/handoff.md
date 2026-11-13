@@ -1,27 +1,33 @@
 # Handoff
 
-Commit: b8422d8
-Branch: ccr-56285e11-0xrj3h (PR #178 open into Main, watched; Main protected: PRs only, owner said merge yourself when CI is green)
+Commit: 371b282 (Main after PR #193)
+Branch: ccr-56285e11-0xrj3h. PR #193 (telemetry, frames follow-ups, Flagship tests) is merged. Main is protected, so changes go in by PR. The owner wants ONE combined APK at the end, with no test builds in between.
 
 ## Goal
-Owner (2026-11-12, newest): optimise the engine (engine/) for speed. Decision recorded (decisions.md top entry "Perceptually identical, not bit-identical"). Order: tolerance tests replace golden hashes → CI bench baseline (done: `docs/engine-performance.md`, `.github/workflows/bench.yml`) → phases, one PR each: 1 free wins (LTO, quiet/sleep everywhere, Eco lowers oversampling/FFT), 2 floating point (FTZ everywhere incl. offline, FMA/fast-math where tolerance passes, keep NaN/inf guards), 3 maths (detmath out of per-sample paths; keep bit ops for bitcrush/glitch), 4 precision/layout (float signal paths, double for phase/low-cutoff feedback; block-wise stages for NEON), 5 parallel mixer (architect review first; lock-free worker pool, fixed-order sum, big/little, fallback). audio-reviewer after each phase, code-reviewer before each PR. Ask owner if audible or a phase gains <5%. Done when all merged, tests green, before/after table per scenario (target ≈3–4x headroom on a typical song; report real number). No UI changes; C API only if needed (bump + app).
-Then: earlier goal (v1.0.0-beta.1: fit-and-finish, docs pass, version bump, pre-release).
+Finish everything for v1.0.0-alpha.1, the "Open alpha".
+- The plan is in docs/beta-readiness-plan.md (#187), and the owner's answers are in docs/decisions.md.
+- Already given: privacy minimum age 16; yes to smaller update downloads; the Benchmark is the top priority.
+- Render-ahead is planned for 1.2.0.
 
-## Done and verified (pushed)
-- Merged: default-project (owner's mid tempo is default/template), keyboard-a, track-headers (one `RevealStartRequest` back-to-start hook kept), latency-comp (C API 23; UI reads heard playhead/meters), engine-bench (baseline: flagship_heavy 64v ≈103% and song32_heavy ≈100% of budget on Android-arm64 target).
-- Fixed: decisions.md conflict markers (ee40c08 had them), bench MSVC `__VERSION__`.
+## Done and verified
+In Main: speed phases 1-4, Flagship A2, frames up to 240 Hz, smooth meters, the music video editor and render fix, editing cues, gestures, project folders.
 
-## Open (agents in worktrees `.claude/worktrees/<name>`; on restart read `git log ccr-56285e11-0xrj3h..<name>` and finish/merge)
-- `tolerance-tests`: replace goldens with tolerance tests (−120 dBFS residual stable; loudness 0.1 dB + band spectrum chaotic; discrete exact; broken-case tests).
-- `speed-free-wins`: phase 1 (must keep existing goldens passing; new tests in engine/tests/speed_free_wins_test.cpp).
-- Owner questions open: latency badge placement; compensation default off for wired?; keyboard batch B WASD clash; per-note FX look/over-budget; plugin page state in project?; Reset curve meaning; layout-file custom labels/packages/one file.
-- Next waves after speed: keyboard batch B (spec in decisions "The whole app works from the keyboard"), layout file phase 1, phone ⋯ More/search/hints, desktop look batch C, midi_clips learned-CC, platform-modularity plan.
+## Open (branches in .claude/worktrees/<name>; check git log and status in each)
+- **audio-resilience (fa3721c, DONE):** mic split, foreground service, battery row, review fixes; C API 26.
+- **bt-clicks:** overload shed and restore, the block FIFO, the ducker fix, and C API 26. Fixing the FIFO review items. Its merge notes are in docs/engine.md.
+- **speed-parallel:** phase 5a-5d is built and measured (C API 24). Check that the worst case is no worse than serial before merging.
+- **Merge order:** integrate audio-resilience, then bt-clicks, then speed-parallel in one go. Follow the "Merge notes": FIFO always on, bridge input inside the render lambda, pool timing before reportLoad's early returns. Reconcile the C API version.
+- **startup-screen:** the startup screen plus the updates system. An agent is merging the session branch into it after conflicts in about 10 files; merge it afterwards.
+- **Still in progress:**
+  - benchmark: section C, phases P1-P7, C API 27; top priority.
+  - delta-updates: built on startup-screen.
+  - engine-a345: A3 first callback, A4 #133, A5 CPU features.
+  - music-video-v2: tabs, text, images, transitions, camera, render speed.
 
 ## Next
-- #178 green on 3bd5bd7 → merge into Main, dispatch app.yml with installables, send APK link.
-- Merge tolerance-tests, then phase 1 (rebase on it), each its own PR into Main.
+1. Merge startup-screen once its merge agent reports. Review music-video-v2 (code review running) and merge it.
+2. Integrate the three audio branches, then benchmark, delta-updates, engine-a345 and music-video-v2.
+3. Fit-and-finish, the docs pass, bump to 1.0.0-alpha.1, then one APK to the owner and the tag once the owner says go.
 
 ## Read first
-- `docs/decisions.md` (top entry)
-- `docs/engine-performance.md`
-- `.claude/rules/engine.md`
+- docs/beta-readiness-plan.md, docs/decisions.md (top entries), .claude/rules/engine.md

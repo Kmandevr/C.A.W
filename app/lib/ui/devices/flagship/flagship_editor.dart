@@ -6,6 +6,7 @@ import '../../theme.dart';
 import '../device_controls.dart';
 import '../device_registry.dart';
 import '../device_scope.dart';
+import '../kit/param_watch.dart';
 import '../kit/controls.dart';
 import '../visuals/filter_curve.dart';
 import '../visuals/unison_view.dart';
@@ -160,8 +161,11 @@ class OscCard extends StatelessWidget {
   final int n;
   final bool initiallyOpen;
 
+  // Its own watch (param_watch.dart): a knob step in another card doesn't rebuild it.
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => watchDevice(context, _body);
+
+  Widget _body(BuildContext context) {
     final scope = DeviceScope.of(context);
     final t = scope.target;
     final p = 'osc${n}_';
@@ -183,14 +187,15 @@ class OscCard extends StatelessWidget {
         LabeledRow('WAVETABLE', LayoutBuilder(builder: (context, box) =>
             DeviceChoice('${p}table', maxSegments: box.maxWidth >= 440 ? 6 : 0))),
         const SizedBox(height: 4),
-        WavetableView(prefix: p),
+        // The visuals have their own watches: a knob step redraws them and the knob, not the card.
+        watchDevice(context, (_) => WavetableView(prefix: p)),
         ImportWavetableButton(prefix: p),
         LabeledRow('WARP', _roomy((roomy) => DeviceChoice('${p}warp', maxSegments: roomy ? 5 : 0, labels: warpNames))),
         plainKnobs(p, const ['frame', 'warp_amt', 'level', 'pan']),
         const DeviceHeading('PITCH'),
         plainKnobs(p, const ['octave', 'semi', 'fine'], size: 42),
         DeviceHeading('UNISON', trailing: DeviceChoice('${p}stack', maxSegments: 0)),
-        UnisonView(prefix: p),
+        watchDevice(context, (_) => UnisonView(prefix: p)),
         plainKnobs(p, const ['unison', 'detune', 'spread', 'blend', 'detune_power'], size: 42),
         LabeledRow('SENDS TO', DeviceChoice('${p}dest', labels: const ['Filter 1', 'Filter 2', 'Both', 'No filter'])),
         DeviceFold(title: 'PHASE', child: plainKnobs(p, const ['phase', 'phase_rand'], size: 42)),
@@ -206,8 +211,11 @@ Widget _roomy(Widget Function(bool roomy) b) => LayoutBuilder(builder: (context,
 class FilterRoutingCard extends StatelessWidget {
   const FilterRoutingCard({super.key});
 
+  // Its own watch (param_watch.dart): a knob step in another card doesn't rebuild it.
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => watchDevice(context, _body);
+
+  Widget _body(BuildContext context) {
     final scope = DeviceScope.of(context);
     final parallel = scope.target.value('flt_routing') >= 0.5;
     return DeviceExpandCard(
@@ -281,8 +289,11 @@ class FilterCard extends StatelessWidget {
   final int n;
   final bool initiallyOpen;
 
+  // Its own watch (param_watch.dart): a knob step in another card doesn't rebuild it.
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => watchDevice(context, _body);
+
+  Widget _body(BuildContext context) {
     final scope = DeviceScope.of(context);
     final t = scope.target;
     final p = 'flt${n}_';
@@ -303,7 +314,7 @@ class FilterCard extends StatelessWidget {
       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: [
         LabeledRow('TYPE', DeviceChoice('${p}type', maxSegments: 0)),
         const SizedBox(height: 4),
-        FilterCurve(prefix: p),
+        watchDevice(context, (_) => FilterCurve(prefix: p)),
         plainKnobs(p, const ['cutoff', 'resonance', 'drive', 'mix']),
         plainKnobs(p, const ['keytrack', 'morph'], size: 42,
           labels: {'morph': type == 8 ? 'Vowel' : (type == 7 ? 'Damping' : 'Morph')}),
@@ -316,8 +327,11 @@ class FilterCard extends StatelessWidget {
 class VoiceCard extends StatelessWidget {
   const VoiceCard({super.key});
 
+  // Its own watch (param_watch.dart): a knob step in another card doesn't rebuild it.
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => watchDevice(context, _body);
+
+  Widget _body(BuildContext context) {
     final scope = DeviceScope.of(context);
     final t = scope.target;
     return DeviceExpandCard(

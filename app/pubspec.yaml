@@ -71,6 +71,9 @@ flutter:
     - assets/logo/caw_mark.png
     # The default project (owner, 2026-11-12): what a first run and the bundled Mid tempo template open.
     - assets/projects/default.json
+    # Offline copies of the Privacy Policy and Terms (drafts until the owner supplies the final texts).
+    - assets/legal/PRIVACY.md
+    - assets/legal/TERMS.md
 
   # JetBrains Mono 2.304 (SIL Open Font License 1.1, see assets/fonts/OFL.txt): the code and number font.
   fonts:

@@ -1,4 +1,5 @@
 // fx-dynamics: the Dynamics UI (org.caw.dynamics): the transfer curve with two draggable threshold handles and a live dot.
+import '../../kit/repaint.dart';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -173,5 +174,6 @@ class _DynamicsPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant _DynamicsPainter o) => true;
+  bool shouldRepaint(covariant _DynamicsPainter o) =>
+      paintInputsChanged([o.plot, o.pt, o.out, o.lowAt, o.highAt, o.lowRatio, o.highRatio, o.level, o.gain, o.boost, o.cut, o.color, o.second, o.active], [plot, pt, out, lowAt, highAt, lowRatio, highRatio, level, gain, boost, cut, color, second, active]);
 }

@@ -1,5 +1,6 @@
 // Runs the update check after the app has opened and asks about an update found: a small prompt with Update, Not
-// now and Don't ask again, never over the startup screen and never while playing, recording or rendering. Also
+// now and Don't ask again, never over the startup screen, never while another startup prompt (the first-run page,
+// the keep-telemetry question) is open, and never while playing, recording or rendering. Also
 // takes automatic update steps when the app is idle or goes to the background.
 import 'dart:async';
 
@@ -8,6 +9,7 @@ import 'package:flutter/material.dart';
 import '../../model/app_state.dart';
 import '../../model/updates/update_service.dart';
 import '../adaptive_sheet.dart';
+import '../app_prompts.dart';
 import '../motion.dart';
 import '../theme.dart';
 import 'update_flow.dart';
@@ -44,7 +46,15 @@ class _UpdatePromptHostState extends State<UpdatePromptHost> with WidgetsBinding
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     widget.state.addListener(_changed);
+    AppPrompts.changes.addListener(_promptsChanged);
     _changed();
+  }
+
+  // The startup screen gone or another prompt closed: try again after this frame, so a first-run page that opens in
+  // the same change goes first.
+  void _promptsChanged() {
+    if (!AppPrompts.free || !_started || (_settle?.isActive ?? true)) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) => _maybePrompt());
   }
 
   @override
@@ -52,6 +62,8 @@ class _UpdatePromptHostState extends State<UpdatePromptHost> with WidgetsBinding
     _settle?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     widget.state.removeListener(_changed);
+    AppPrompts.changes.removeListener(_promptsChanged);
+    if (_showing) AppPrompts.showing.value = false; // closed with the app (its dialog never answered)
     super.dispose();
   }
 
@@ -92,11 +104,14 @@ class _UpdatePromptHostState extends State<UpdatePromptHost> with WidgetsBinding
   }
 
   void _maybePrompt() {
-    if (_showing || !mounted || !widget.state.ready || widget.busy() || !widget.service.shouldPrompt) return;
+    if (_showing || !mounted || !widget.state.ready || !AppPrompts.free || widget.busy() ||
+        !widget.service.shouldPrompt) {
+      return;
+    }
     final offer = widget.service.offer!;
     _showing = true;
     widget.service.prompted();
-    unawaited(showDialogOrSheet<String>(
+    unawaited(AppPrompts.run(() => showDialogOrSheet<String>(
       context: context,
       builder: (c) => AlertDialog(
         key: const ValueKey('update-prompt'),
@@ -135,7 +150,7 @@ class _UpdatePromptHostState extends State<UpdatePromptHost> with WidgetsBinding
               child: const Text('Update')),
         ],
       ),
-    ).then((choice) {
+    )).then((choice) {
       _showing = false;
       if (!mounted) return;
       switch (choice) {

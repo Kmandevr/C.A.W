@@ -1,4 +1,5 @@
 // The racks' plugin UIs (fx-racks): the multiband rack's spectrum and band strips, the FX rack's modulators, and their chains of inline devices.
+import '../../kit/repaint.dart';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -279,7 +280,8 @@ class _BandsPainter extends CustomPainter {
   static String _hz(double v) => v >= 1000 ? '${(v / 1000).toStringAsFixed(v >= 10000 ? 0 : 1)}k' : v.toStringAsFixed(0);
 
   @override
-  bool shouldRepaint(_BandsPainter o) => true;
+  bool shouldRepaint(covariant _BandsPainter o) =>
+      paintInputsChanged([o.bands, o.selected, o.xovers, o.spectrum, o.out, o.levels, o.active], [bands, selected, xovers, spectrum, out, levels, active]);
 }
 
 /// One band's strip: its name and range, M / S / B, gain and pan.
@@ -529,7 +531,8 @@ class _ShapePainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(_ShapePainter o) => true;
+  bool shouldRepaint(covariant _ShapePainter o) =>
+      paintInputsChanged([o.shape, o.points, o.color, o.phase], [shape, points, color, phase]);
 }
 
 /// Every route of the rack, as the Flagship's mod page lists them.

@@ -60,9 +60,14 @@ class FrameRateRow extends StatelessWidget {
           : settings.frameRate == FrameRateController.auto
               ? 'The highest rate while anything moves, the lowest when still$screen'
               : 'At most ${settings.frameRate} Hz everywhere, playback included$screen';
+      // The profile's cap, when it is lower than the setting's (owner, 2026-11-12).
+      final capped = c != null && c.device.canRequest && settings.profileFrameCap > 0 &&
+          (settings.frameRate == FrameRateController.auto || settings.profileFrameCap < settings.frameRate);
+      final profile = settings.performanceMode == PerformanceMode.minimal ? 'Minimal' : 'Lightweight';
+      final note = capped ? '. $profile caps it at ${settings.profileFrameCap} Hz' : '';
       return settingDropdown<int>('performance.frameRate', settings.frameRate,
           [for (final v in choices) (v, FrameRateController.label(v))], (v) => settings.update((x) => x.frameRate = v),
-          icon: Icons.slow_motion_video, subtitle: subtitle);
+          icon: Icons.slow_motion_video, subtitle: '$subtitle$note');
     }
 
     return c == null ? row() : ListenableBuilder(listenable: c, builder: (_, _) => row());

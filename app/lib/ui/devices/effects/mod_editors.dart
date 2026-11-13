@@ -1,5 +1,6 @@
 // The modulation family's plugin UIs: phaser and flanger (their notch combs sweeping with the LFO, left and right) and chorus
 // (its two voices' delay sweeps on an XY pad of rate and depth).
+import '../kit/repaint.dart';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -54,8 +55,8 @@ class CombPage extends StatelessWidget {
         height: 200,
         caption: flanger ? 'FLANGER ≈' : 'PHASER ≈',
         grid: false,
-        readout: Text(flanger ? '${formatParamValue(t.param('delay'), t.value('delay'))} ms'
-            : '${formatParamValue(t.param('center'), t.value('center'))} Hz'),
+        readout: Builder(builder: (context) => Text(flanger ? '${formatParamValue(t.param('delay'), t.value('delay'))} ms'
+            : '${formatParamValue(t.param('center'), t.value('center'))} Hz')),
         child: _CombHero(flanger: flanger),
       )),
       Row(children: [
@@ -199,7 +200,8 @@ class _CombPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant _CombPainter o) => true;
+  bool shouldRepaint(covariant _CombPainter o) =>
+      paintInputsChanged([o.response, o.left, o.right, o.set, o.fb, o.color, o.second, o.active, o.flanger], [response, left, right, set, fb, color, second, active, flanger]);
 }
 
 /// The chorus: its two voices' delay sweeps (left and right a quarter cycle apart) drawn on an XY pad of rate
@@ -252,5 +254,6 @@ class _ChorusPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant _ChorusPainter o) => true;
+  bool shouldRepaint(covariant _ChorusPainter o) =>
+      paintInputsChanged([o.secs, o.rate, o.depth, o.mix, o.color, o.second], [secs, rate, depth, mix, color, second]);
 }

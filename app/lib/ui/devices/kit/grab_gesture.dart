@@ -57,6 +57,10 @@ class _GrabGestureState extends State<GrabGesture> {
     super.dispose();
   }
 
+  // The gesture binding's sampling clock: the wall clock in the app, the test's fake clock under test, so a busy
+  // machine can't split a double tap (ClickCounter in pointer_input.dart reads the same clock).
+  static DateTime get _now => GestureBinding.instance.samplingClock.now();
+
   void _pointerDown(PointerDownEvent e) {
     if (e.kind == PointerDeviceKind.mouse && e.buttons == kSecondaryMouseButton) {
       _secondary = e.pointer;
@@ -69,7 +73,7 @@ class _GrabGestureState extends State<GrabGesture> {
     }
     _pointer = e.pointer;
     _down = e.localPosition;
-    _downAt = DateTime.now();
+    _downAt = _now;
     _moved = false;
     _press?.cancel();
     if (widget.onLongPress != null) {
@@ -103,7 +107,7 @@ class _GrabGestureState extends State<GrabGesture> {
     if (e.pointer != _pointer) return;
     _pointer = null;
     _press?.cancel();
-    final now = DateTime.now();
+    final now = _now;
     if (_moved || now.difference(_downAt) > const Duration(milliseconds: 300)) {
       _lastTap = null;
       return;

@@ -1,6 +1,7 @@
 // fx-dynamics: the Phase distortion UI (org.caw.phasedist): a sine cycle bent by its own value, the live delay swing of each side.
 import 'package:flutter/material.dart';
 
+import '../../kit/repaint.dart';
 import '../../../theme.dart';
 import '../../device_scope.dart';
 import '../../kit/controls.dart';
@@ -126,5 +127,6 @@ class _PdPainter extends CustomPainter {
   static double _sin(double ph) => phaseDistorted(ph % 1, 0, 0);
 
   @override
-  bool shouldRepaint(covariant _PdPainter o) => true;
+  bool shouldRepaint(covariant _PdPainter o) =>
+      paintInputsChanged([o.drive, o.bias, o.mix, o.delayL, o.delayR, o.color, o.second, o.active], [drive, bias, mix, delayL, delayR, color, second, active]);
 }

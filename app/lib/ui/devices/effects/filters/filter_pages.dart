@@ -22,7 +22,8 @@ class LadderPage extends StatelessWidget {
   Widget build(BuildContext context) {
     final scope = DeviceScope.of(context);
     final t = scope.target;
-    final res = t.value('resonance');
+    // Read where it is drawn (a lazy read: the hero and readout watch it, not the page; param_watch.dart).
+    double res() => t.value('resonance');
     return effectPage('ladder', [
       Padding(padding: const EdgeInsets.only(bottom: 8), child: ModeTiles('mode', height: 50, names: const ['LOW', 'BAND', 'HIGH'],
         icon: (canvas, r, i, c) => iconCurve(canvas, r.deflate(1), c, (x) {
@@ -34,12 +35,12 @@ class LadderPage extends StatelessWidget {
         height: 200,
         caption: 'LADDER ≈',
         grid: false,
-        readout: Text('${formatParamValue(t.param('cutoff'), t.value('cutoff'))} Hz${res >= 0.91 ? '  ● SELF-OSC' : ''}'),
+        readout: Builder(builder: (context) => Text('${formatParamValue(t.param('cutoff'), t.value('cutoff'))} Hz${res() >= 0.91 ? '  ● SELF-OSC' : ''}')),
         child: DragHero(heroKey: 'ladder-hero', xParam: 'cutoff', yParam: 'resonance', paint: (canvas, size, active, f) {
           final mode = t.value('mode').round(), slope = t.value('slope').round();
           final cut = t.value('cutoff'), mix = t.value('mix'), comp = t.value('comp');
           double db(double hz) =>
-              mixDb(ladderResponse(hz, cutoff: cut, resonance: math.min(res, 0.9), mode: mode, slope: slope, comp: comp), mix);
+              mixDb(ladderResponse(hz, cutoff: cut, resonance: math.min(res(), 0.9), mode: mode, slope: slope, comp: comp), mix);
           final h = size.height;
           paintFrequencyGrid(canvas, size, _y(0, h));
           final path = responsePath(size, db, (d) => _y(d, h));
@@ -47,7 +48,7 @@ class LadderPage extends StatelessWidget {
           strokeGlow(canvas, path, scope.accent, width: 2.4);
           final hx = freqToX(cut, size.width);
           paintHandle(canvas, Offset(hx, _y(db(cut), h).clamp(28.0, h - 16)), scope.accent, active: active, r: 8);
-          if (res >= 0.91) {
+          if (res() >= 0.91) {
             // Self-oscillation: a sine rings at the cutoff whatever comes in.
             final x = hx;
             for (var k = 1; k <= 3; k++) {
@@ -102,7 +103,7 @@ class NonlinearPage extends StatelessWidget {
         height: 190,
         caption: 'NONLINEAR ≈',
         grid: false,
-        readout: Text('${formatParamValue(t.param('cutoff'), t.value('cutoff'))} Hz  Q ${t.value('q').toStringAsFixed(1)}'),
+        readout: Builder(builder: (context) => Text('${formatParamValue(t.param('cutoff'), t.value('cutoff'))} Hz  Q ${t.value('q').toStringAsFixed(1)}')),
         child: DragHero(heroKey: 'nlfilter-hero', xParam: 'cutoff', yParam: 'q', paint: (canvas, size, active, f) {
           final type = t.value('type').round(), cut = t.value('cutoff'), q = t.value('q'), mix = t.value('mix');
           final shape = t.value('shape').round(), drive = t.value('drive');

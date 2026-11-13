@@ -2535,8 +2535,26 @@ bool Engine::layerMeter(int index, LayerMeter& out) {
     std::lock_guard<std::mutex> lock(ctl_);
     out = LayerMeter{};
     if (index < 0 || index >= static_cast<int>(order_.size())) return false;
+    readLayerMeter(index, out);
+    return true;
+}
+
+int Engine::layerMeters(int capacity, void (*sink)(void* ctx, int index, const LayerMeter& meter), void* ctx) {
+    std::lock_guard<std::mutex> lock(ctl_);
+    const int count = static_cast<int>(order_.size());
+    const int n = sink ? std::min(count, std::max(capacity, 0)) : 0;
+    for (int i = 0; i < n; ++i) {
+        LayerMeter m;
+        readLayerMeter(i, m);
+        sink(ctx, i, m);
+    }
+    return count;
+}
+
+// One layer's meter, reset as it is read; ctl_ is held and index is a project layer.
+void Engine::readLayerMeter(int index, LayerMeter& out) {
     auto it = layers_.find(order_[index]);
-    if (it == layers_.end() || it->second.slot < 0) return true;
+    if (it == layers_.end() || it->second.slot < 0) return;
     Slot& s = ctlSlot(it->second.slot);
     out.active = true;
     out.peakL = s.peakL.exchange(0, std::memory_order_relaxed);
@@ -2544,7 +2562,6 @@ bool Engine::layerMeter(int index, LayerMeter& out) {
     out.peak = std::max(out.peakL, out.peakR);
     out.progress = s.progress.load(std::memory_order_relaxed);
     out.overloaded = s.overloadFlag.load(std::memory_order_relaxed);
-    return true;
 }
 
 LoudnessMeter::Reading Engine::loudness() {

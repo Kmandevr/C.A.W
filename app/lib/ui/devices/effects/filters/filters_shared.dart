@@ -1,4 +1,5 @@
 // The EQ & Filter group's shared pieces: the browser entries, the analog-prototype responses the heroes draw, and a draggable response hero.
+import '../../kit/repaint.dart';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -245,7 +246,8 @@ class _HeroPainter extends CustomPainter {
   void paint(Canvas canvas, Size size) => draw(canvas, size, active, frame);
 
   @override
-  bool shouldRepaint(covariant _HeroPainter o) => true;
+  bool shouldRepaint(covariant _HeroPainter o) =>
+      paintInputsChanged([o.draw, o.active, o.frame], [draw, active, frame]);
 }
 
 /// A row label for a group of controls ("SLOPE", "MODE").

@@ -1,5 +1,6 @@
 // The drive family's plugin UI (saturator and distortion): the transfer curve with the input riding it, the harmonics it adds,
 // and the modes as drawn-curve tiles (two rows for the saturator's eleven).
+import '../kit/repaint.dart';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -109,7 +110,7 @@ class DrivePage extends StatelessWidget {
         height: 210,
         caption: 'TRANSFER',
         grid: false,
-        readout: Text('${shortParamLabel(t.param('drive'), 'Drive')} ${formatParamValue(t.param('drive'), t.value('drive'))}'),
+        readout: Builder(builder: (context) => Text('${shortParamLabel(t.param('drive'), 'Drive')} ${formatParamValue(t.param('drive'), t.value('drive'))}')),
         child: const _DriveHero(),
       )),
       KnobRow(['drive', 'bias', 'tone', if (shape == DriveShape.crush) ...['bits', 'rate'], if (shape == DriveShape.bitShape) 'bits',
@@ -257,5 +258,6 @@ class _DrivePainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant _DrivePainter o) => true;
+  bool shouldRepaint(covariant _DrivePainter o) =>
+      paintInputsChanged([o.curve, o.engineCurve, o.input, o.harmonics, o.color, o.second, o.active], [curve, engineCurve, input, harmonics, color, second, active]);
 }

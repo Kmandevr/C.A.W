@@ -1,7 +1,7 @@
 ---
 title: Performance
 summary: How C.A.W is measured for low-end devices, the audit's ranked bottlenecks with evidence, fixes with before/after numbers, and what remains.
-covers: [engine/bench/, engine/src/meters.cpp, app/lib/model/poller.dart, app/lib/model/settings.dart, app/lib/ui/motion.dart, app/test/poller_test.dart, app/test/rebuild_test.dart, app/test/perf_*]
+covers: [engine/bench/, engine/src/meters.cpp, app/lib/model/poller.dart, app/lib/model/settings.dart, app/lib/ui/motion.dart, app/lib/ui/devices/kit/param_watch.dart, app/lib/ui/devices/kit/repaint.dart, app/test/poller_test.dart, app/test/rebuild_test.dart, app/test/perf_*]
 updated: 2026-11-12
 ---
 
@@ -105,7 +105,7 @@ The .caw VM, whose costs the 2026-10-28 engine audit measured (integer conversio
 - The Arranger's playhead uses a dedicated overlay painter, redrawn on every frame while playing from the reads' extrapolation (`PlayheadClock`, `PlayheadFrames`; [app](app.md), Frame rate). It does not rebuild the clip grid, headers or track layout for any playhead update.
 - Engine Lab reads a fixed 512-sample window from the existing master scope only on meter ticks; its Hann window, FFT scratch buffers and 128-bin spectrum buffer are retained between ticks. A 512-point radix-2 FFT is performed at the existing 30 Hz meter cadence; the UI does not allocate new sample buffers each frame.
 - Mixer meters and Builder controls listen to the existing state notifiers rather than introducing a second audio-state polling loop.
-- Peak meters (`PeakMeter` in `app/lib/ui/widgets.dart`) read on a dB scale from -60 to 0 dBFS: they rise at once to each sample peak and fall on wall-clock time at the **Meter fall** setting (Settings → Look: Slow 48, Medium 96, Fast 144 or Very fast 192 dB a second; Medium by default, `meter_fall`; owner, 2026-11-10: faster than the old 24, REAPER-like, and the earlier "Very fast" 96 is the right medium), with a peak line held 1.5 s and pink for 3 s at 0 dBFS or over. Given a right channel, a meter is stereo: two thin bars (side by side when upright); the master meters are stereo, a track's or folder's is one bar because the engine reports one peak per track (`caw_layer_meter`). Each meter runs its own ticker only while it shows something: the bar falls on every frame between reads and after them (built again only when it would move a 500th of its height), so it falls the same at any refresh rate or meter cadence, and doesn't freeze when the engine goes quiet. The engine's meters are sample peaks of what each track or folder sends on (after volume and pan, the louder channel) and of the master output. The hold and fall are presentation-only.
+- Peak meters (`PeakMeter` in `app/lib/ui/widgets.dart`) read on a dB scale from -60 to 0 dBFS: they rise over 15 ms to each sample peak and fall on wall-clock time at the **Meter fall** setting, never below a line between the last two reads (so a steady tone holds still at any frame rate; [app](app.md), Meters between reads; the rise at once on each read made a 30 Hz sawtooth at 120 Hz, owner's bug of 2026-11-12) (Settings → Look: Slow 48, Medium 96, Fast 144 or Very fast 192 dB a second; Medium by default, `meter_fall`; owner, 2026-11-10: faster than the old 24, REAPER-like, and the earlier "Very fast" 96 is the right medium), with a peak line held 1.5 s and pink for 3 s at 0 dBFS or over. Given a right channel, a meter is stereo: two thin bars (side by side when upright); the master meters are stereo, a track's or folder's is one bar because the engine reports one peak per track (`caw_layer_meter`). Each meter runs its own ticker only while a bar or its peak line moves (a timer for a hold or clip light to end), built again only when it would move a 500th of its height, so it moves the same at any refresh rate or meter cadence, asks for no frames once settled, and doesn't freeze when the engine goes quiet. The engine's meters are sample peaks of what each track or folder sends on (after volume and pan, the louder channel) and of the master output. The hold and fall are presentation-only.
 - A light/dark Mode switch (or the system's change under Follow system) swaps the palette with one remount of the screens (`Settings.lookRevision`, as a theme change does) and no Material theme remade beyond the one switch: each theme keeps one object per mode (`CawTheme.shown`), and `main.dart` remakes the `ThemeData` only when that object changes (`test/theme_modes_test.dart`).
 - These are architectural reductions in unnecessary rebuild/allocation work; no frame-time, CPU or battery benchmark has yet been captured on physical hardware.
 
@@ -117,8 +117,8 @@ The Settings page now offers four explicit profiles:
 | --- | --- | --- |
 | Full Experience | Full-strength theme glow and available visual feedback | Full voice budget; meter polling remains 30 Hz |
 | Balanced | Decorative glow scaled down to 55% | Full voice budget; meter polling remains 30 Hz |
-| Lightweight | Decorative glow and glass blur disabled; the glass look stays, unblurred (`lib/ui/glass.dart`) | Existing reduced voice budget (4 per pattern layer); meter polling remains 30 Hz |
-| Minimal | Decorative glow and glass disabled; scope panels hidden; motion off (`lib/ui/motion.dart`) | Reduced voice budget; meter polling remains 30 Hz |
+| Lightweight | Decorative glow, glass blur and the scopes' blurred glow disabled; the glass look stays, unblurred (`lib/ui/glass.dart`) | Existing reduced voice budget (4 per pattern layer); meter polling remains 30 Hz; frame rate capped at 60 Hz (owner, 2026-11-12) |
+| Minimal | Decorative glow and glass disabled; scope panels hidden; motion off (`lib/ui/motion.dart`) | Reduced voice budget; meter polling remains 30 Hz; frame rate capped at 30 Hz (owner, 2026-11-12) |
 
 The legacy `light_mode` setting is still read for migration: true maps to Lightweight and false maps to Balanced. New settings persist `performance_mode` by name and also write the legacy boolean for older builds. Editing settings (the roll's look and value grid, the arrangement's track gap, the music video's one-time Strobe warning, `strobe_warned`) are the same in every profile.
 
@@ -326,14 +326,12 @@ The owner's evening round (#174): "optimize everything". Each hot path has a ben
 - **What changed:**
   - `AppState.liveEngineJson` builds the engine JSON once around a marker and splices each step's text in; any save, sync, settings change or value tick (a knob moved live) drops the cache, and a test checks it against a full build after live knob and volume moves.
   - Autosave writes compact JSON and the undo step settled 100 ms later reuses that text; opening a project, a restore point and the project list decode in `Isolate.run` (the decoded map comes back without a copy).
-  - `MotionClock` (device motion) asks for one frame per 33 ms step and reads the frame's time, instead of a Ticker that asked for every refresh; it stops in the background and in sleeping sections (`TickerMode`). Device display polls skip their FFI read in the background.
+  - `MotionClock` (device motion) asked for one frame per 33 ms step (superseded 2026-11-12: it runs on every frame while shown, in a layer of its own, [below](#frames-at-240-hz-2026-11-12)); it stops in the background and in sleeping sections (`TickerMode`). Device display polls skip their FFI read in the background.
   - Repaint boundaries in the arranger (tracks, timeline viewport, lanes, grid, ruler); a zoom rebuilds the lanes and keeps the headers (`_headersRev`).
   - `FileWords` (C++ completion) counts the file's words once and re-reads only an edit's span, widened to whole words; a randomized test checks it against a full scan. List ties sort by name.
   - Memory: undo history holds at most 48 M characters of snapshots (a project with large component states held up to a hundred copies of them).
 - **Measured and left as they are:**
-  - A knob step in a device editor rebuilds the whole editor page (EQ about 450 widgets a step, the flagship about 1,100): every control and visual reads the values. Narrowing it means controls listening to their own values; not done.
-  - The pinch zoom still lays out and paints every clip each frame (about 4,200 render objects). Scaling the painted lanes during the pinch and laying out once at the end would remove most of it.
-  - The ping-pong and phaser editors' motion steps out of phase with display frames while playing (60 frames a second, not 30).
+  - A knob step, the pinch zoom and device motion were taken on in [Frames at 240 Hz](#frames-at-240-hz-2026-11-12).
   - Each native job's wait spawns an `Isolate.run` (about 0.3 ms in the test VM); a project sync or live step pays it once.
 
 ### Release build
@@ -344,6 +342,38 @@ The owner's evening round (#174): "optimize everything". Each hot path has a ben
 - **No `--obfuscate`:** 0.13 MB more, and type names in the app's own error texts (shown to the user and in problem reports) would be garbled.
 - Signing is unchanged. The APK's size after these changes is measured when CI builds this branch.
 
+## Frames at 240 Hz (2026-11-12)
+
+Beta readiness plan B3–B5 (owner, 2026-11-12, [beta readiness plan](beta-readiness-plan.md)): everything that moves at the screen's rate, up to 240 Hz, where a frame is 4.2 ms. The benches (`app/test/perf_arrange_bench_test.dart`, `perf_device_bench_test.dart`, helpers in `perf_util.dart`) count frames, widgets rebuilt and render objects painted, and time each pumped frame's build, layout, paint and compositing (the UI thread's share) and the screen's raster from its layer tree (`OffsetLayer.toImage`, from scratch with no raster cache, the test's software renderer: the GPU thread's share at most). Each asserts ceilings about 10 % over the numbers below, so they can't grow back; the counts are exact in the test VM, the times are noisy on the shared cloud server (runs varied 2× with other jobs) and get wide ceilings. The arranger project is the 16-track one plus an audio track of four 16 s clips; one second at 120 Hz while playing, 30 frames of each gesture. Before is `e5bb3aa`, after is branch `ui-frames`; the before rows ran the same benches on the old code.
+
+| Bench (count over the run; ms is the mean UI-thread time a frame) | Before | After |
+| --- | --- | --- |
+| Arranger playing, 120 frames | 117 frames, 236 builds, 642 painted; raster 4.0–4.6 ms | the same (the playhead's live island); raster 4.5 ms |
+| Arranger sideways scroll, 30 frames | 840 painted | 390 painted (waveforms in their own layers) |
+| Arranger pinch zoom, 30 frames | 87,390 builds, 90,150 painted, 125–298 ms a frame | 5,856 builds, 7,259 painted (two rebases), 35–52 ms a frame; the release lays out once: 2,914 builds |
+| Ping-pong delay editor stopped, one second | 30 frames, 990 painted (33 a motion frame) | 0 frames once idle (the battery rule); with a finger held on it 119 frames, 238 painted (2 a frame: motion on every frame in its own layer) |
+| Phaser editor stopped | 30 frames, 990 painted | 0 frames once idle; a finger held: 119 frames, 238 painted |
+| Flagship editor stopped | 30 frames, 8,040 painted (268 a frame: a modulated knob's ring laid out its whole card) | 0 frames once idle; a finger held: 119 frames, 238 painted |
+| Ping-pong / phaser / Flagship editor playing | 30 frames | 120 / 120 / 119 frames, 1,410 / 1,380 / 238 painted |
+| EQ / compressor editor stopped | 0 frames | 0 frames, a finger held too (no motion) |
+| EQ / compressor editor playing | 30 frames, 750 / 450 painted | the same |
+| Flagship, 20 steps of its first parameter | 30,028 builds, 16,509 painted | 14,627 builds, 11,694 painted (its cards rebuild on their own values) |
+| EQ, 20 steps of its first parameter (`b1_on`: the page shows it) | 10,490 builds | 11,290 builds |
+| Ping-pong `sync`, phaser `stages`, compressor `threshold`, 20 steps (first parameter) | 6,560; 8,460; 7,140 builds | 7,208 (the page picks its knobs by it); 1,860; 1,080 builds |
+| First knob, 20 steps: EQ `b1_freq`, compressor `threshold`, ping-pong `feedback`, phaser `rate`, Flagship `osc1_frame` | 10,260; 7,140; 6,560; 8,460; 30,020 builds | 3,400; 1,080; 1,560; 1,100; 1,120 builds (the knob and the hero; at `bde0faa`, with only the controls watched: 10,420; 7,400; 6,720; 8,760; 31,180) |
+| A knob step, every built-in (`perf_knobs_bench_test.dart`: widgets rebuilt per live step of each of its first six knobs, motion off, the most of any knob) | at `bde0faa`: 211–654 for effects (median 364 a step over all), drums 1,147, Flagship 1,570, racks 577–981 | 45–74 for most, bitcrush 100, ducker 114 (its curve's handles), EQ 173 (the curve, band strip, readout and band controls), drums 68, Flagship 56 (median 52); racks 603–1,013 (a rack's parameters choose its children, so its page rebuilds) |
+| Device editors' raster, playing | 9.4–15 ms | 10–13 ms (the same picture) |
+
+- **What changed** (details in [app](app.md), Frame rate):
+  - Device motion is a Ticker (`MotionClock`) inside its own repaint boundary and build scope (`DevicePhase`, the knob's face as a `LiveIsland`): a motion frame repaints 2 render objects instead of the card or page around it. It asks for every frame (120 at 120 Hz, was 30) only while something moves: the engine sounds (`AppState.sounding`) or a finger is down on the editor (`MotionTouch`); stopped, silent and untouched the engine runs no modulator (`Engine::process`), so the clock holds its time and asks for none, and Auto's idle drop comes (the battery rule, 2026-11-12). Reduced or no motion, Minimal, the background and covered routes stop it.
+  - Device display reads ride the shared meter tick instead of their own 33 ms timers, so they stop when the poller does.
+  - Waveforms: cached 512 px tiles of one `drawRawPoints` batch each per clip, zoom and size (was a `drawLine` per pixel across the whole clip on every repaint), repainted only for their own file's peaks; track cards' playhead is a live island over its own layer.
+  - `AppState._syncNow` notifies only on a real change; scopes read and redraw only on a new tick, as live islands; automation curves are cached in their own layer under a small live painter.
+  - Device painters compare their inputs; controls, the preset chip, Flagship's cards and every editor's hero rebuild on their own values (`ParamWatch`): `HeroCanvas` watches its visual and its readout, a watch also counts what its subtree reads in layout and paint (a `LayoutBuilder`, a painter) and what a widget rebuilt on its own reads (found by its `DeviceScope` lookup), and editors read the values their hero draws inside it, not in the page. A knob step rebuilds the knob and the hero.
+  - The meter poll reads all tracks in one C API call (API 25) into a kept native buffer.
+  - The pinch transforms the laid-out lanes and lays out at its end (or past 0.6×/1.6×), landing exactly where a layout per move would (`arrange_test`, "a pinch scales the lanes").
+- **Not measured here:** frame times on the S22+ and Windows in a release build (the plan's B5 asks the owner to check them and record them here).
+
 ## Remaining bottlenecks and next steps
 
 - **Measure on the phone.** Build a release APK, then:
@@ -351,4 +381,4 @@ The owner's evening round (#174): "optimize everything". Each hot path has a ben
   - record CPU, the audio thread's time per callback (`caw_engine_meters` already reports the load), dropouts, frame times, battery and temperature
 - **Measure native project-job latency on the phone.** Project updates use the shared native worker pool rather than starting a Dart worker isolate per update. Measure queue wait, update duration, UI responsiveness and audio callback impact in a release build.
 - **The shell's `IndexedStack`** retains all eight workspace destinations and may rebuild/layout them on structural project changes. Measure this on device before changing it; preserving editor state is a constraint.
-- **Scopes** read 512 samples over FFI and redraw a path about 30 times a second while playing. That's fine on the server; check the frame time on the phone.
+- **Scopes** read 512 samples over FFI and redraw a path about 30 times a second while playing, in a live island, only on a new read. That's fine on the server; check the frame time on the phone.

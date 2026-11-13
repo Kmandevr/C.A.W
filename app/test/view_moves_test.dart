@@ -239,19 +239,14 @@ void main() {
       await settle(tester);
     });
 
-    testWidgets('on a phone a quick second tap where the first one was opens effects, though the track moved',
+    testWidgets('on a phone a tap selects and a quick second tap where the first one was opens effects',
         (tester) async {
       await pump(tester, const Size(412, 900));
       final at = tester.getCenter(header('c'));
       await tester.tapAt(at);
       await tester.pump();
-      expect(sections.focusedLayer, 'c', reason: 'focused at once');
-      await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const ValueKey('focus-tab-mixer')));
-      await tester.pumpAndSettle();
-      expect(tester.widget<FocusPanel>(find.byType(FocusPanel)).tab, FocusTab.mixer);
-      // Close it, and wait out the double-tap time.
-      await tester.tap(header('c').first);
+      expect(s.selectedLayerId, 'c', reason: 'selected at once');
+      expect(sections.focusedLayer, isNull, reason: 'a tap only selects (owner, 2026-11-12)');
       await tester.pumpAndSettle();
       await tester.pump(kDoubleTapTimeout);
       await tester.tapAt(at);
@@ -282,12 +277,15 @@ void main() {
 
     testWidgets('it draws the playhead in the clip\'s time and pages after it; a finger pauses it', (tester) async {
       await pump(tester);
-      expect(head(tester).step, isNull, reason: 'stopped: no line');
+      // Stopped: the dimmer edit cursor where play starts, in the clip's time (owner, 2026-11-12, as Arrange).
+      expect(head(tester).stopped, isTrue);
+      expect(head(tester).step, closeTo(-clip().startSteps + clip().sourceOffsetSteps, 1e-9));
       play(1);
       await tester.pump();
       play(4);
       await tester.pump();
       expect(head(tester).step, closeTo(4, 0.1));
+      expect(head(tester).stopped, isFalse);
       expect(head(tester).scrollX, 0);
       // Past the right edge: a page step glides.
       play(60);

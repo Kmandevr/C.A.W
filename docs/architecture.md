@@ -52,7 +52,7 @@ The owner may also ship C.A.W as a VST3/CLAP plugin. So the core is plugin-shape
 
 - **Hosts:** miniaudio in the standalone app; a DAW such as Reaper through the plugin; the CLI for checks and offline WAV renders.
 - **Interface:** `prepare(sampleRate, maxBlock)`, `process(block, events)`, automatable parameters, MIDI note input, the host's tempo and transport (so the sequencer follows the DAW), and state save/load (the sound code plus parameter values).
-- **Fully standalone (owner):** every build runs on its own and offline. No server, account or network is needed to make sound; GitHub sync is optional.
+- **Fully standalone (owner):** every build runs on its own and offline. No server, account or network is needed to make sound; GitHub sync is optional. The beta's anonymous telemetry and optional feedback, sent over HTTPS to the C.A.W-Telemetry relay ([app](app.md#privacy-telemetry-and-feedback)); audio processing stays local.
 - **Plugin UI:** later. Flutter doesn't embed in plugin windows, so a plugin starts with the host's generic parameter controls.
 
 ### Ready-made building blocks
@@ -206,7 +206,7 @@ GitHub stores and versions files. It never executes audio code.
 
 **Current owner direction (2026-11-01): no in-app AI integration.** Do not build AI generation, editing, model inference, source separation or cloud audio processing. AI coding assistants may be used externally as development tools; that does not make them a C.A.W. product feature.
 
-The GitHub library-sync/source-picker workflow described in earlier proposals is also not implemented. The app currently works with local project files and operating-system import/export. Any future GitHub integration requires a separate owner decision, security review and implementation plan.
+The GitHub library-sync/source-picker workflow described in earlier proposals is also not implemented. The app currently works with local project files and operating-system import/export; the beta's telemetry and feedback go to the C.A.W-Telemetry relay ([app](app.md#privacy-telemetry-and-feedback)). Any future GitHub integration requires a separate owner decision, security review and implementation plan.
 
 ## 6. Biggest risks and simplest mitigations
 

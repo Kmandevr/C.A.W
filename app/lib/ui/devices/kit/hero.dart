@@ -1,8 +1,8 @@
 // A device's hero visual frame (a tinted canvas with a grid and readouts), live display frames, a running phase for motion, and a level history.
-import 'dart:async';
 import 'dart:math' as math;
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 
@@ -10,6 +10,7 @@ import '../../../model/device_display.dart';
 import '../../motion.dart';
 import '../../theme.dart';
 import '../device_scope.dart';
+import 'param_watch.dart';
 
 final _idle = ValueNotifier<DeviceDisplayFrame?>(null);
 
@@ -25,7 +26,11 @@ class DeviceDisplay extends StatelessWidget {
     // Off screen (an inline device scrolled away, a covered route) nothing listens, so nothing is polled.
     final live = TickerMode.valuesOf(context).enabled;
     return ValueListenableBuilder<DeviceDisplayFrame?>(
-        valueListenable: live ? DeviceDisplaySource.current.frames(t) : _idle, builder: (context, f, _) => builder(context, f));
+        valueListenable: live ? DeviceDisplaySource.current.frames(t) : _idle, builder: (context, f, _) {
+      // A display frame rebuilds this alone: say which part of the editor it is in (ParamWatch) before it reads.
+      DeviceScope.onLookup?.call(context);
+      return builder(context, f);
+    });
   }
 }
 
@@ -57,11 +62,14 @@ class HeroCanvas extends StatelessWidget {
     ),
     child: Stack(fit: StackFit.expand, children: [
       if (grid) CustomPaint(painter: _GridPainter(color)),
-      child,
+      // Its own watch (param_watch.dart): the values the visual draws rebuild it, not the page around it.
+      if (DeviceScope.maybeOf(context) != null) watchDevice(context, (_) => child) else child,
       if (caption != null) Positioned(left: 10, top: 6, child: IgnorePointer(child: Text(caption!,
         style: TextStyle(fontSize: 9, letterSpacing: 1.2, fontWeight: FontWeight.w800, color: color.withValues(alpha: 0.75))))),
       if (readout != null) Positioned(right: 10, top: 6, child: IgnorePointer(child: DefaultTextStyle(
-        style: Neon.code(size: 10, color: Neon.text), child: readout!))),
+        style: Neon.code(size: 10, color: Neon.text),
+        // Its own watch too: a readout built lazily (a Builder) follows its values without the page.
+        child: DeviceScope.maybeOf(context) != null ? watchDevice(context, (_) => readout!) : readout!))),
     ]),
   );
 }
@@ -98,59 +106,129 @@ class _GridPainter extends CustomPainter {
   bool shouldRepaint(covariant _GridPainter o) => o.color != color;
 }
 
-/// Seconds since a visual's motion started, advanced about 30 times a second: the display data's rate. A Ticker
-/// would ask for a frame on every screen refresh (120 a second on the S22+) for motion drawn at 30 (#174); this asks
-/// for one frame per step, reads the frame's time (the clock a Ticker reads, so tests stay deterministic), and makes
-/// no frames at all while stopped ([run] false) or while the app is in the background.
+/// Seconds since a visual's motion started, advanced on every frame the screen draws (beta plan B3: device motion
+/// at the display's rate, up to 240 Hz, not the display data's 30) while something moves: the song plays or the
+/// engine sounds ([sounding], the app's [AppState.sounding]: stopped and silent, the engine runs no component or
+/// modulator, so nothing it shows moves), or a finger or button is down on a device editor ([touching]). Otherwise
+/// it holds its time and asks for no frames, so a still screen gets Auto's idle drop (the battery rule); it goes on
+/// from there when something moves again. It is a Ticker's time, so tests stay deterministic; none come while the
+/// app is in the background. Callers stop it ([run] false) with reduced motion, in sleeping sections and covered
+/// routes ([motionRuns]).
 class MotionClock {
+  /// Holds every device's motion still, as reduced motion does, for tests that wait for the screen to settle
+  /// (`pumpAndSettle` never ends while a clock runs on every frame).
+  @visibleForTesting
+  static bool hold = false;
+
+  /// Fingers and buttons down on a device editor ([MotionTouch]).
+  static final ValueNotifier<int> touching = ValueNotifier(0);
+
   final ValueNotifier<double> seconds = ValueNotifier(0);
-  Timer? _timer;
-  Duration? _start;
-  bool _pending = false, _disposed = false;
+  Ticker? _ticker;
+  bool _on = false, _disposed = false;
+  double _from = 0; // the time held when the ticker last stopped
+  ValueListenable<bool>? _sounding;
 
-  bool get running => _timer != null;
+  /// Whether motion is on (the time is the motion's, not a still one), moving or holding.
+  bool get running => _on;
 
-  /// Starts or stops the clock; stopped, it starts from 0 again next time.
-  void run(bool on) {
-    if (on == running || _disposed) return;
-    if (!on) {
-      _timer!.cancel();
-      _timer = null;
-      _start = null;
-      return;
+  /// Whether it is moving now: asking for every frame.
+  bool get ticking => _ticker != null;
+
+  /// Turns motion on or off; off, it starts from 0 again next time. [sounding] says when the engine runs (null:
+  /// always, as for a visual with no engine behind it).
+  void run(bool on, {ValueListenable<bool>? sounding}) {
+    if (_disposed) return;
+    if (!identical(sounding, _sounding)) {
+      _sounding?.removeListener(_update);
+      _sounding = sounding?..addListener(_update);
     }
-    _timer = Timer.periodic(const Duration(microseconds: 33333), (_) => _step());
-    _step();
+    if (on != _on) {
+      _on = on;
+      if (on) {
+        touching.addListener(_update);
+      } else {
+        touching.removeListener(_update);
+        _from = 0;
+        seconds.value = 0;
+      }
+    }
+    _update();
   }
 
-  void _step() {
-    final b = SchedulerBinding.instance;
-    if (_pending || (b.lifecycleState != null && b.lifecycleState != AppLifecycleState.resumed)) return;
-    _pending = true;
-    b.scheduleFrameCallback((stamp) {
-      _pending = false;
-      if (_disposed || _timer == null) return;
-      final start = _start ??= stamp;
-      seconds.value = (stamp - start).inMicroseconds / 1e6;
-    });
-    b.scheduleFrame();
+  bool get _moving => _on && ((_sounding?.value ?? true) || touching.value > 0);
+
+  void _update() {
+    if (_disposed) return;
+    if (_moving == ticking) return;
+    if (ticking) {
+      _ticker!.dispose();
+      _ticker = null;
+      _from = seconds.value;
+      return;
+    }
+    final from = _from;
+    _ticker = Ticker((elapsed) => seconds.value = from + elapsed.inMicroseconds / 1e6, debugLabel: 'MotionClock')
+      ..start();
   }
 
   void dispose() {
     _disposed = true;
-    _timer?.cancel();
-    _timer = null;
+    _ticker?.dispose();
+    _ticker = null;
+    _sounding?.removeListener(_update);
+    if (_on) touching.removeListener(_update);
     seconds.dispose();
   }
 }
 
+/// Counts the fingers and buttons down on [child] into [MotionClock.touching]: a device editor's motion moves while
+/// the user handles a control, even with the song stopped.
+class MotionTouch extends StatefulWidget {
+  const MotionTouch({super.key, required this.child});
+  final Widget child;
+
+  @override
+  State<MotionTouch> createState() => _MotionTouchState();
+}
+
+class _MotionTouchState extends State<MotionTouch> {
+  final Set<int> _down = {};
+
+  void _up(PointerEvent e) {
+    if (_down.remove(e.pointer)) MotionClock.touching.value--;
+  }
+
+  @override
+  void dispose() {
+    MotionClock.touching.value -= _down.length;
+    _down.clear();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => Listener(
+    onPointerDown: (e) {
+      if (_down.add(e.pointer)) MotionClock.touching.value++;
+    },
+    onPointerUp: _up,
+    onPointerCancel: _up,
+    child: widget.child);
+}
+
+/// What tells a device's motion that the engine is sounding: the app's [AppState.sounding] under [context]'s
+/// device, or null (always) outside one.
+ValueListenable<bool>? deviceSounding(BuildContext context) => DeviceScope.maybeOf(context)?.target.state.sounding;
+
 /// Whether motion may run under [context]: full motion, and the part of the screen shown (not a dormant section or
 /// a covered route, whose tickers are off).
-bool motionRuns(BuildContext context) => Motion.of(context) == MotionLevel.full && TickerMode.valuesOf(context).enabled;
+bool motionRuns(BuildContext context) =>
+    !MotionClock.hold && Motion.of(context) == MotionLevel.full && TickerMode.valuesOf(context).enabled;
 
 /// Seconds since the visual started, for motion that shows state (a ping-pong ball, a sweeping notch, an LFO dot).
-/// It runs only with full motion (so the Minimal profile and reduced motion stop it), and redraws at about 30 Hz,
-/// the display data's rate, to keep the editor light on CPU ([MotionClock]); otherwise [builder] gets a fixed time.
+/// It runs only with full motion (so the Minimal profile and reduced motion stop it), and redraws on every frame
+/// while shown and something moves ([MotionClock]), holding its picture otherwise; with motion off [builder] gets a
+/// fixed time.
 class DevicePhase extends StatefulWidget {
   const DevicePhase({super.key, required this.builder, this.still = 0.35});
   final Widget Function(BuildContext context, double seconds) builder;
@@ -168,7 +246,7 @@ class _DevicePhaseState extends State<DevicePhase> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    _clock.run(motionRuns(context));
+    _clock.run(motionRuns(context), sounding: deviceSounding(context));
   }
 
   @override
@@ -177,10 +255,15 @@ class _DevicePhaseState extends State<DevicePhase> {
     super.dispose();
   }
 
+  // In a layer and a build scope of its own (as a LiveIsland): a motion frame rebuilds, lays out and repaints the
+  // visual alone, not a LayoutBuilder above it or the page around it.
   @override
-  Widget build(BuildContext context) => ValueListenableBuilder<double>(
+  Widget build(BuildContext context) => RepaintBoundary(child: LayoutBuilder(builder: (_, _) => ValueListenableBuilder<double>(
     valueListenable: _clock.seconds,
-    builder: (context, t, _) => widget.builder(context, _clock.running ? t : widget.still));
+    builder: (context, t, _) {
+      DeviceScope.onLookup?.call(context); // a motion frame rebuilds this alone (ParamWatch)
+      return widget.builder(context, _clock.running ? t : widget.still);
+    })));
 }
 
 /// The last [length] values of a few lanes (input level, gain reduction...), newest last: a scrolling history.
