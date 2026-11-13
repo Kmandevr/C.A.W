@@ -342,8 +342,15 @@ class CppEditorState extends State<CppEditor> {
   void openBench() {
     _closeCompletion();
     if (w.artifactPath == null) return;
+    final target = ComponentBenchTarget.of(w);
+    // Only code the user trusts now runs in the bench (a Block or a forgotten choice stops it).
+    if (target.trustedNow?.call() != true) {
+      ScaffoldMessenger.maybeOf(context)
+          ?.showSnackBar(const SnackBar(content: Text('Trust this code first: blocked or undecided code never runs')));
+      return;
+    }
     Haptics.tap();
-    unawaited(showPluginBench(context, ComponentBenchTarget.of(w), host: w.state));
+    unawaited(showPluginBench(context, target, host: w.state));
   }
 
   // ---------- sheets ----------

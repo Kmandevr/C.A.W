@@ -5,7 +5,11 @@ import 'dart:convert';
 enum BenchCheckStatus {
   fail('✗'),
   warn('⚠'),
-  pass('✓');
+  pass('✓'),
+
+  /// The engine couldn't measure it here (`"measured": false`): allocations in the app's build. Neither a pass nor
+  /// a warning.
+  notMeasured('–');
 
   const BenchCheckStatus(this.mark);
   final String mark;
@@ -125,6 +129,15 @@ class ComponentBenchResult {
       final id = x['id'];
       if (status == null || id is! String || id.isEmpty) continue;
       final v = x['value'];
+      // Not measurable in this build (the engine says `"measured": false`; allocations in the app): said plainly,
+      // not as a warning.
+      if (x['measured'] == false) {
+        checks.add(BenchCheck(
+            id: _text(id, 48),
+            status: BenchCheckStatus.notMeasured,
+            detail: id == 'allocations' ? 'Not measured in the app (run the test build)' : 'Not measured in the app'));
+        continue;
+      }
       checks.add(BenchCheck(
           id: _text(id, 48),
           status: status,

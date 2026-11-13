@@ -60,6 +60,8 @@ class NativeComponentManager {
   final File cacheFile;
   final Map<String, String> _loadedFingerprint = {};  // component id -> fingerprint of what the engine has
   final Map<String, String> _loadedArtifact = {};     // component id -> the library file the engine loaded
+  final Map<String, String> _loadedLibraryKey = {};   // component id -> an imported build's trust key ('library:...')
+  final Set<String> _engineHas = {};                  // ids the engine has loaded at some point (the next load reloads)
   Map<String, Map<String, String>>? _cache;
 
   /// Every component id the engine has loaded, for ProjectDoc.toEngineJson(playableComponents:).
@@ -67,6 +69,24 @@ class NativeComponentManager {
 
   /// The library file the engine loaded for component [id] (the Build tools test and render it), or null.
   String? artifactOf(String id) => _loadedArtifact[id];
+
+  /// Whether [component]'s code is Trusted now (its current sources; and, for a packaged build the engine loaded for
+  /// it, that file too). The plug-in benchmark asks this when it lists a plug-in and again when it starts one, so a
+  /// Block or a forgotten choice stops it at once.
+  bool benchTrusted(CppComponentDoc component) {
+    final id = component.componentId;
+    if (id.isEmpty) return false;
+    if (trust.decide(id, NativeTrustStore.sourceFingerprint(component)) != NativeComponentTrust.trusted) return false;
+    final library = _loadedLibraryKey[id];
+    return library == null || trust.decide(id, library) == NativeComponentTrust.trusted;
+  }
+
+  // What the engine has of [id] is no longer playable or benchable here (blocked, or the choice forgotten).
+  void _forgetLoaded(String id) {
+    _loadedFingerprint.remove(id);
+    _loadedArtifact.remove(id);
+    _loadedLibraryKey.remove(id);
+  }
 
   Future<NativeComponentsStatus> prepare(ProjectDoc project) async {
     final status = NativeComponentsStatus();
@@ -77,10 +97,12 @@ class NativeComponentManager {
       final fingerprint = NativeTrustStore.sourceFingerprint(component);
       final choice = trust.decide(id, fingerprint);
       if (choice == null) {
+        _forgetLoaded(id);
         status.needsTrust.add(component);
         continue;
       }
       if (choice == NativeComponentTrust.blocked) {
+        _forgetLoaded(id);
         status.blocked.add(id);
         continue;
       }
@@ -106,11 +128,19 @@ class NativeComponentManager {
         (cache[id] ??= {})[fingerprint] = artifact;
         await _writeCache(cache);
       }
-      final reload = _loadedFingerprint.containsKey(id);
+      final reload = _engineHas.contains(id);
+      final libraryKey =
+          isImportedBuild(artifact) ? importedLibraryKey(await NativeTrustStore.libraryFingerprint(artifact)) : null;
       final loaded = await load(artifactPath: artifact, expectedComponentId: id, trust: choice, reload: reload);
       if (loaded.ok) {
+        _engineHas.add(id);
         _loadedFingerprint[id] = fingerprint;
         _loadedArtifact[id] = artifact;
+        if (libraryKey != null) {
+          _loadedLibraryKey[id] = libraryKey;
+        } else {
+          _loadedLibraryKey.remove(id);
+        }
         status.loaded.add(id);
       } else {
         status.loadFailed[id] = loaded.error;

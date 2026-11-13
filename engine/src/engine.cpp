@@ -4588,13 +4588,13 @@ void Engine::runTrackNode(int slot, float* outL, float* outR, int m) noexcept {
 // A folder bus: its children arrive summed in float on the graph's summing input, and sends into it in its own
 // input (pullRoutes). Then its inserts, volume and pan, its sends, and its latency compensation.
 void Engine::runBusNode(int slot, const float* inL, const float* inR, float* outL, float* outR, int m) noexcept {
+    const NodeMark node(parts());  // the Benchmark's parts: the graph's work after this node is the next node's
     Slot& s = slotAt(slot);
     if (s.mode != Slot::Mode::Bus) {
         std::fill_n(outL, m, 0.0f);
         std::fill_n(outR, m, 0.0f);
         return;
     }
-    const NodeMark node(parts());
     // A folder bus (engine_parts.h), with its children's sum into its input; its effects, sends and meters apart.
     const PartScope routing(parts(), Part::Routing, true);
     const double target = slotTarget(s);
@@ -5091,6 +5091,7 @@ void Engine::process(float* left, float* right, int frames) noexcept {
     poolUsedLast_ = poolUsed_;
     poolUsed_ = false;
     if (PartProfile* p = parts()) p->end();
+    chunkProfile_ = nullptr;  // only this call fills it: nothing after (a stray scope) can reach a profile now unset
 }
 
 // Shedding (the device ran out of time) and its recovery, by time rather than callbacks, so any callback size

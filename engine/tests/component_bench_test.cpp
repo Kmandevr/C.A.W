@@ -1,5 +1,6 @@
 // The plug-in benchmark (#197): its checks, sections, curves and refusals, on the test component, the bad fixture and built-ins.
 #include <atomic>
+#include <chrono>
 #include <cstring>
 #include <map>
 #include <string>
@@ -8,6 +9,7 @@
 #include "builtin_components.h"
 #include "caw.h"
 #include "component_bench.h"
+#include "component_profile.h"
 #include "json.h"
 #include "native_component_test_path.h"
 #include "test.h"
@@ -212,4 +214,117 @@ TEST(component_bench_runs_as_a_job) {
         caw_job_release(slow);
     }
     caw_worker_pool_destroy(pool);
+}
+
+// Sections are exclusive: a nested section's time comes off its parent's, so the shares add up to at most 100.
+TEST(component_bench_sections_are_exclusive) {
+    const auto* ext = static_cast<const CawProfileExtension*>(profile::hostExtension(nullptr, CAW_HOST_EXTENSION_PROFILE));
+    CHECK(ext != nullptr);
+    if (!ext) return;
+    static const char* const kOuter = "outer";
+    static const char* const kInner = "inner";
+    auto spin = [](int ms) {
+        const auto until = std::chrono::steady_clock::now() + std::chrono::milliseconds(ms);
+        while (std::chrono::steady_clock::now() < until) {
+        }
+    };
+    {
+        const profile::Recording recording;
+        for (int k = 0; k < 3; ++k) {
+            const uint32_t outer = ext->begin(ext->host_data, kOuter);
+            const uint64_t t0 = ext->now_ns();
+            spin(4);
+            const uint32_t inner = ext->begin(ext->host_data, kInner);
+            const uint64_t t1 = ext->now_ns();
+            spin(8);
+            ext->end(ext->host_data, inner, t1);
+            ext->end(ext->host_data, outer, t0);
+        }
+    }
+    CHECK(ext->begin(ext->host_data, kOuter) == CAW_PROFILE_NO_SECTION);  // stopped: nothing records
+    std::map<std::string, profile::Section> s;
+    for (const profile::Section& x : profile::sections()) s[x.name] = x;
+    CHECK(s.count("outer") && s.count("inner"));
+    if (s.count("outer") && s.count("inner")) {
+        CHECK_EQ(s["outer"].calls, uint64_t{3});
+        // Outer's own time is its 4 ms a call, not the 12 ms it held the inner's.
+        CHECK(s["outer"].ns >= 3 * 3'000'000ull && s["outer"].ns < 3 * 7'000'000ull);
+        CHECK(s["inner"].ns >= 3 * 7'000'000ull);
+    }
+    // The fixture's nested "channel" inside "decay": the shares add up to the whole at most.
+    const Json j = benchJson(library(CAW_TEST_BENCH_COMPONENT_PATH, "org.caw.tests.bench-bad"));
+    double sum = 0;
+    bool channel = false;
+    for (const Json& x : j.get("sections")->arr) {
+        sum += x.number("pct", 0);
+        channel = channel || x.string("name") == "channel";
+    }
+    CHECK(channel);
+    CHECK(sum > 0 && sum <= 100.5);
+}
+
+// A process() that never returns (audio review, 2026-11-13): the job fails after the block's deadline, the worker
+// and the pool go on, a second bench is refused at once while the first is stuck, and once the component returns
+// the next bench runs.
+TEST(component_bench_gives_up_on_a_component_that_never_returns) {
+    CawWorkerPool* pool = caw_worker_pool_create(1);
+    CawComponentBenchRequest q{};
+    q.struct_size = sizeof q;
+    q.component_id = "org.caw.tests.bench-hang";
+    q.library = CAW_TEST_BENCH_COMPONENT_PATH;
+    q.trust_level = CAW_NATIVE_TRUST_TRUSTED;
+    q.seconds = 0.1;
+    const auto t0 = std::chrono::steady_clock::now();
+    CawJob* job = caw_worker_pool_submit_component_bench(pool, &q);
+    CHECK(job != nullptr);
+    if (job) {
+        CHECK_EQ(caw_job_wait(job, 60000), 0);
+        CawJobStatus st{};
+        st.struct_size = sizeof st;
+        caw_job_get_status(job, &st);
+        CHECK_EQ(st.state, int32_t{3});  // failed
+        char* error = caw_job_error(job);
+        CHECK(error && std::string(error).find("did not return") != std::string::npos);
+        caw_free(error);
+        caw_job_release(job);
+    }
+    const double took = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+    CHECK(took < 10.0);  // a 1 s deadline, not forever
+    // Still stuck: another bench is refused at once, saying why.
+    bench::Request r;
+    r.id = "org.caw.chorus";
+    r.seconds = 0.1;
+    const Json refused = benchJson(r);
+    CHECK(!refused.boolean("ok", true));
+    CHECK(refused.string("error").find("never returned") != std::string::npos);
+    caw_worker_pool_destroy(pool);  // nothing of the stuck bench holds the pool
+    // Released (the same library's release component), the stuck thread returns and stops; the next bench runs.
+    {
+        ModuleRegistry registry;
+        CHECK(registry.loadSharedLibrary(CAW_TEST_BENCH_COMPONENT_PATH, "org.caw.tests.bench-release", NativeModuleTrust::Trusted).success);
+        std::unique_ptr<ModuleProcessor> p = registry.create("org.caw.tests.bench-release");
+        CHECK(p && p->activate(48000, 64));
+        float l[64] = {}, rr[64] = {}, ol[64], orr[64];
+        const float* in[2] = {l, rr};
+        float* out[2] = {ol, orr};
+        const AudioProcessBlock b{{in, 2, 64}, {out, 2, 64}, 64, 48000.0, nullptr, 0, nullptr};
+        if (p) {
+            p->process(b);
+            p->deactivate();
+        }
+    }
+    bool ran = false;
+    for (int k = 0; k < 200 && !ran; ++k) {
+        ran = benchJson(r).boolean("ok", false);
+        if (!ran) std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
+    CHECK(ran);
+}
+
+// A component that fails its blocks: the bench finishes and says so (a fail check), the app goes on.
+TEST(component_bench_reports_failed_blocks) {
+    const Json j = benchJson(library(CAW_TEST_BENCH_COMPONENT_PATH, "org.caw.tests.bench-fail", 0.1));
+    CHECK(j.boolean("ok", false));
+    const auto checks = checksOf(j);
+    CHECK(checks.count("process_failures") == 1 && checks.at("process_failures")->string("status") == "fail");
 }
