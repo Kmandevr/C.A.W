@@ -5,16 +5,22 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/services.dart';
 
-/// One display mode: a resolution and a refresh rate.
+/// One display mode: a resolution, a refresh rate, the platform's id for it (0: unknown) and its seamless
+/// alternative rates (`Display.Mode.getAlternativeRefreshRates()`, API 31: an LTPO/VRR panel may list 120 Hz only
+/// there, on a mode that reports 60).
 class DisplayMode {
-  const DisplayMode(this.width, this.height, this.hz);
-  final int width, height;
+  const DisplayMode(this.width, this.height, this.hz, {this.id = 0, this.alternatives = const []});
+  final int width, height, id;
   final double hz;
+  final List<double> alternatives;
 
   bool sameSize(DisplayMode o) => o.width == width && o.height == height;
 
+  static String _r(double hz) => hz.toStringAsFixed(hz == hz.roundToDouble() ? 0 : 2);
+
   @override
-  String toString() => '${width}x$height@${hz.toStringAsFixed(1)}';
+  String toString() => '${id == 0 ? '' : '#$id '}$width×$height @ ${_r(hz)} Hz'
+      '${alternatives.isEmpty ? '' : ' (alternatives ${alternatives.map(_r).join(', ')} Hz)'}';
 }
 
 /// What the platform says about the screen and what may hold its rate down. Everything is optional: a platform that
@@ -58,14 +64,14 @@ class DisplayInfo {
   bool get samsung => maker.toLowerCase() == 'samsung';
   bool get hot => thermal >= severe;
 
-  /// The rates the app can ask for: every mode at the active mode's resolution (every mode when that is unknown),
-  /// plus its alternatives; ascending, one per 0.1 Hz.
+  /// The rates the app can ask for: every mode at the active mode's resolution (every mode when that is unknown)
+  /// and each one's alternatives, plus the active mode's; ascending, one per 0.1 Hz.
   List<double> get rates {
     final a = active;
     final all = [
       for (final m in modes)
-        if (a == null || m.sameSize(a)) m.hz,
-      if (a != null) a.hz,
+        if (a == null || m.sameSize(a)) ...[m.hz, ...m.alternatives],
+      if (a != null) ...[a.hz, ...a.alternatives],
       ...alternatives,
     ].where((r) => r.isFinite && r > 0).toList()..sort();
     final out = <double>[];
@@ -74,6 +80,30 @@ class DisplayInfo {
     }
     return out;
   }
+
+  /// The mode id to ask for [hz] with: a mode at the active resolution whose own rate it is, else 0, which asks by
+  /// rate alone (`preferredRefreshRate`), as a rate only an alternative lists must be.
+  int modeFor(double hz) {
+    final a = active;
+    for (final m in modes) {
+      if ((a == null || m.sameSize(a)) && m.id != 0 && (m.hz - hz).abs() <= 0.5) return m.id;
+    }
+    return 0;
+  }
+
+  /// The raw read as copyable text, for Engine diagnostics (what the phone reports, nothing worked out).
+  String report({double? requested}) => [
+        'Display modes (${modes.length}):',
+        for (final m in modes) '  $m${m.id != 0 && m.id == active?.id ? '  [active]' : ''}',
+        'Active: ${active ?? 'unknown'}',
+        if (alternatives.isNotEmpty) 'Active alternatives: ${alternatives.map(DisplayMode._r).join(', ')} Hz',
+        'Current rate: ${currentHz > 0 ? '${DisplayMode._r(currentHz)} Hz' : 'unknown'}',
+        if (requested != null) 'Asked for: ${requested > 0 ? '${DisplayMode._r(requested)} Hz' : 'no preference'}',
+        'Rates offered here: ${rates.isEmpty ? 'none' : '${rates.map(DisplayMode._r).join(', ')} Hz'}',
+        'Battery saver: ${powerSave ? 'on' : 'off'}',
+        'Thermal status: $thermal${thermal >= severe ? ' (severe or worse)' : ''}',
+        'Manufacturer: ${maker.isEmpty ? 'unknown' : maker}',
+      ].join('\n');
 
   /// The highest-rate mode at another resolution, when it beats every rate at this one (a screen that offers its
   /// top rate only at some resolutions); null otherwise.
@@ -102,8 +132,9 @@ abstract class DisplayRateDevice {
   Future<void> request(double hz);
 }
 
-/// Android: `caw/display` (MainActivity, DisplayRate.kt) lists `Display.getSupportedModes` at every resolution, the
-/// active mode and what may limit the rate, and sets the window's `preferredDisplayModeId` and `preferredRefreshRate`.
+/// Android: `caw/display` (MainActivity, DisplayRate.kt) lists `Display.getSupportedModes` at every resolution with
+/// ids and alternative rates, the active mode and what may limit the rate. A request names the mode to use
+/// ([DisplayInfo.modeFor]; 0 asks by rate alone, `preferredRefreshRate`) and the rate.
 class AndroidDisplayRate implements DisplayRateDevice {
   AndroidDisplayRate({MethodChannel? channel}) : _channel = channel ?? const MethodChannel('caw/display');
   final MethodChannel _channel;
@@ -114,11 +145,14 @@ class AndroidDisplayRate implements DisplayRateDevice {
   @override
   bool get canRequest => !_failed;
 
+  /// The last read, which picks the mode id each request names ([DisplayInfo.modeFor]).
+  DisplayInfo _last = const DisplayInfo();
+
   @override
   Future<DisplayInfo> read() async {
     try {
       final r = await _channel.invokeMapMethod<String, Object?>('info');
-      return r == null ? const DisplayInfo() : parse(r);
+      return _last = r == null ? const DisplayInfo() : parse(r);
     } catch (_) {
       _failed = true;
       return const DisplayInfo();
@@ -129,9 +163,11 @@ class AndroidDisplayRate implements DisplayRateDevice {
 
   static DisplayMode? _mode(Object? v) {
     if (v is! Map) return null;
-    final w = v['w'], h = v['h'], hz = _hz(v['hz']);
+    final w = v['w'], h = v['h'], hz = _hz(v['hz']), id = v['id'], alt = v['alt'];
     if (w is! int || h is! int || w <= 0 || h <= 0 || hz == 0) return null;
-    return DisplayMode(w, h, hz);
+    return DisplayMode(w, h, hz,
+        id: id is int && id > 0 ? id : 0,
+        alternatives: [if (alt is List) for (final a in alt.take(16)) if (_hz(a) > 0) _hz(a)]);
   }
 
   /// The channel's answer, read with limits (64 modes at most; anything malformed is skipped).
@@ -159,7 +195,7 @@ class AndroidDisplayRate implements DisplayRateDevice {
   Future<void> request(double hz) async {
     if (_failed) return;
     try {
-      await _channel.invokeMethod<Object?>('request', {'hz': hz});
+      await _channel.invokeMethod<Object?>('request', {'hz': hz, 'modeId': hz > 0 ? _last.modeFor(hz) : 0});
     } catch (_) {
       _failed = true;
     }

@@ -1,5 +1,6 @@
 // Settings › About and beta › Engine diagnostics (the Engine Lab workspace, moved here with #139): CPU, peaks,
-// overloads, the master scope and spectrum, and each track's signal path from what the engine reports.
+// overloads, the master scope and spectrum, the screen's display modes, and each track's signal path from what the
+// engine reports.
 // Only capabilities returned by the current engine API are presented; unsupported graph operations are not simulated.
 import 'dart:math' as math;
 import 'dart:typed_data';
@@ -12,6 +13,7 @@ import '../../model/project.dart';
 import '../panel_motion.dart';
 import '../theme.dart';
 import '../widgets.dart';
+import 'display_diagnostics.dart';
 
 /// Opens Engine diagnostics as a page of its own.
 Future<void> showEngineDiagnostics(BuildContext context, AppState state) => Navigator.of(context).push(
@@ -40,6 +42,8 @@ class EngineDiagnostics extends StatelessWidget {
         ]))),
       const SizedBox(height: 14),
       _MasterScope(state: state),
+      const SizedBox(height: 14),
+      const DisplayModesPanel(),
       const SizedBox(height: 14),
       const Text('TRACK SIGNAL PATHS', style: TextStyle(color: Neon.green, fontWeight: FontWeight.w800)),
       const SizedBox(height: 8),

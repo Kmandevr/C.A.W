@@ -10,14 +10,14 @@ import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 
 /**
- * `info`: {modes: every supported mode [{w, h, hz}], active: the mode now {w, h, hz}, alternatives: the active
- * mode's seamless alternative rates (API 31), current: the rate the display runs at now, powerSave, thermal (API 29,
+ * `info`: {modes: every supported mode [{id, w, h, hz, alt}], active: the mode now (same shape), alternatives: the
+ * active mode's seamless alternative rates (API 31; `alt` is each mode's), current: the rate the display runs at now, powerSave, thermal (API 29,
  * PowerManager.THERMAL_STATUS_*), maker: Build.MANUFACTURER}. Dart (`lib/platform/display_rate.dart`) picks the rates
  * at the active resolution, so that choice is tested there with a fake.
- * `request` {hz}: asks for the mode at the current resolution with the highest rate not above [hz] (the lowest
- * mode when none is), through the window's preferredDisplayModeId and preferredRefreshRate; a rate no mode lists
- * (an alternative) is asked through preferredRefreshRate alone; 0 clears the request, so the system chooses again.
- * Answers {modeId, hz} of the mode asked for (0 and 0 when cleared).
+ * `request` {hz, modeId}: Dart picks the mode (`DisplayInfo.modeFor`, tested there): a modeId of a supported mode at
+ * the current resolution sets preferredDisplayModeId and preferredRefreshRate to that mode; modeId 0 (a rate only
+ * an alternative lists, as on a panel whose every mode reports 60 with 120 among its alternatives) sets
+ * preferredRefreshRate to [hz] alone; hz 0 clears the request, so the system chooses again. Answers {modeId, hz}.
  *
  * Only a request: the system still decides (battery saver, Samsung's Motion smoothness, heat, a higher-priority
  * surface can keep another rate), and the app works at whatever rate the display runs.
@@ -56,7 +56,12 @@ class DisplayRate(private val activity: Activity) : MethodChannel.MethodCallHand
         when (call.method) {
             "info" -> {
                 val d = display() ?: return result.success(mapOf("modes" to emptyList<Any>()))
-                fun m(x: Display.Mode) = mapOf("w" to x.physicalWidth, "h" to x.physicalHeight, "hz" to x.refreshRate.toDouble())
+                fun m(x: Display.Mode) = mapOf(
+                    "id" to x.modeId, "w" to x.physicalWidth, "h" to x.physicalHeight, "hz" to x.refreshRate.toDouble(),
+                    "alt" to if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                        x.alternativeRefreshRates.map { it.toDouble() }
+                    } else emptyList(),
+                )
                 val power = activity.getSystemService(Context.POWER_SERVICE) as? PowerManager
                 val alternatives = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                     d.mode.alternativeRefreshRates.map { it.toDouble() }
@@ -83,12 +88,10 @@ class DisplayRate(private val activity: Activity) : MethodChannel.MethodCallHand
                     window.attributes = attrs
                     return result.success(mapOf("modeId" to 0, "hz" to 0.0))
                 }
-                val all = modes(d)
-                val listed = all.lastOrNull { it.refreshRate <= hz + 0.5 } ?: all.firstOrNull()
-                // A rate only the active mode's alternatives list: the rate alone, the system picks the mode.
-                val (id, rate) = if (listed == null || Math.abs(listed.refreshRate - hz) > 0.5 && listed.refreshRate < hz) {
-                    0 to hz.toFloat()
-                } else listed.modeId to listed.refreshRate
+                val wanted = call.argument<Int>("modeId") ?: 0
+                val mode = modes(d).firstOrNull { it.modeId == wanted && wanted != 0 }
+                // No such mode at this resolution (or 0): the rate alone, and the system picks the mode.
+                val (id, rate) = if (mode == null) 0 to hz.toFloat() else mode.modeId to mode.refreshRate
                 // Unchanged: no new layout pass for the window.
                 if (attrs.preferredDisplayModeId != id || attrs.preferredRefreshRate != rate) {
                     attrs.preferredDisplayModeId = id
