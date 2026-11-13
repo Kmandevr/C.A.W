@@ -222,6 +222,10 @@ class ProjectStorage {
   Directory audioDirectory(String projectId) => Directory(
     '${_root.path}${Platform.pathSeparator}audio${Platform.pathSeparator}${_validatedProjectId(projectId)}');
 
+  /// The music video's images (cover art, logos) the user picked, copied here by name (`VideoImageAsset.file`).
+  Directory videoAssetsDirectory(String projectId) => Directory(
+    '${_root.path}${Platform.pathSeparator}video-assets${Platform.pathSeparator}${_validatedProjectId(projectId)}');
+
   /// The drum pads' own WAVs the user picked (`DrumSampleImport`), app-wide beside the projects folder.
   Directory get drumSamplesDirectory => Directory('${_root.parent.path}${Platform.pathSeparator}drum_samples');
 
@@ -240,6 +244,8 @@ class ProjectStorage {
       if (await samples.exists()) await samples.delete(recursive: true);
       final audio = audioDirectory(id);
       if (await audio.exists()) await audio.delete(recursive: true);
+      final video = videoAssetsDirectory(id);
+      if (await video.exists()) await video.delete(recursive: true);
       final builds = nativeImportsDirectory(id);
       if (await builds.exists()) await builds.delete(recursive: true);
     }

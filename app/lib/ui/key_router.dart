@@ -242,15 +242,10 @@ class KeyRouterState extends State<KeyRouter> implements KeyAreaHost {
   /// Whether Vim keys (H J K L as arrows) are on.
   bool get vimKeys => s.settings.vimKeys;
 
-  bool _editingText() {
-    final ctx = FocusManager.instance.primaryFocus?.context;
-    return ctx != null && (ctx.widget is EditableText || ctx.findAncestorWidgetOfExactType<EditableText>() != null);
-  }
-
   /// One key press. [area] is given by an editor that asks first (the piano roll); otherwise the focus decides.
   KeyEventResult handle(KeyEvent e, {Area? area}) {
     // Holding Space (to pan with a mouse) must not play and pause over and over.
-    if (e is KeyRepeatEvent && e.logicalKey == LogicalKeyboardKey.space && !_editingText()) {
+    if (e is KeyRepeatEvent && e.logicalKey == LogicalKeyboardKey.space && !focusIsInTextField()) {
       return KeyEventResult.handled;
     }
     final chord = keyChordFromEvent(e, metaAsCtrl: defaultTargetPlatform == TargetPlatform.macOS);
@@ -261,7 +256,7 @@ class KeyRouterState extends State<KeyRouter> implements KeyAreaHost {
   KeyEventResult _handleChord(KeyChord chord, {Area? area}) {
     final a = area ?? _area;
     if (shouldDeferTextEditingKey(
-      editingText: _editingText(),
+      editingText: focusIsInTextField(),
       commandLineOpen: vim.commandLineOpen,
       area: a,
       mode: vim.mode,

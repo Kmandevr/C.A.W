@@ -1,6 +1,7 @@
 // The music video's shot list (owner, 2026-11-12): each shot's start, length, view and layout, effects and transition,
 // and the chosen shot's editor: split presets with draggable dividers, a view and look per panel, the effect stack
-// (in the FX stack's card style) and how the shot begins.
+// (in the FX stack's card style) with beat presets, how the shot begins (the transition picker) and its keyframed
+// camera.
 import 'dart:math' as math;
 
 import 'package:flutter/gestures.dart' show DragStartBehavior;
@@ -9,6 +10,7 @@ import 'package:flutter/material.dart';
 import '../../model/music_video.dart';
 import '../../model/music_video_director.dart' show VideoTransition;
 import '../../model/music_video_edit.dart';
+import '../../model/music_video_overlay.dart';
 import '../../model/music_video_scene.dart';
 import '../glass.dart';
 import '../haptics.dart';
@@ -31,9 +33,22 @@ abstract class VideoEditHost {
   void delete();
 }
 
+/// The parts of a shot's editor: where it is, its layout and views, its look, its effects, how it begins, its camera,
+/// and the split, duplicate and delete buttons.
+enum ShotPart {
+  span, layout, look, effects, transition, camera, actions;
+
+  static const all = {span, layout, look, effects, transition, camera, actions};
+
+  /// What the tabbed sheet's Shots tab opens in a row (the look and effects have their own tab).
+  static const shots = {span, layout, transition, camera, actions};
+}
+
 class ShotList extends StatelessWidget {
   const ShotList({super.key, required this.timeline, required this.scene, required this.snap, required this.selected,
-      required this.onSelect, required this.host, required this.aspect, required this.start, required this.end});
+      required this.onSelect, required this.host, required this.aspect, required this.start, required this.end,
+      this.parts = ShotPart.all});
+  final Set<ShotPart> parts;
   final VideoTimeline timeline;
   final VideoScene scene;
   final VideoSnap snap;
@@ -62,7 +77,7 @@ class ShotList extends StatelessWidget {
             },
             editor: timeline.cuts[i].id == selected
                 ? ShotEditor(cut: timeline.cuts[i], timeline: timeline, scene: scene, snap: snap, host: host,
-                    aspect: aspect, start: start, end: end)
+                    aspect: aspect, start: start, end: end, parts: parts)
                 : null,
           )),
         ),
@@ -118,7 +133,9 @@ class _ShotRow extends StatelessWidget {
                       videoLength(cut.length, spb),
                       if (cut.effects.isNotEmpty) '${cut.effects.length} FX',
                       if (cut.effects.any((e) => e.flashes)) '⚠ Strobe',
-                      cut.animateLayout ? 'animate' : cut.transition.name,
+                      cut.animateLayout ? 'animate' : cut.transition.label.toLowerCase(),
+                      if (cut.camera != null) 'camera',
+                      if (cut.texts.isNotEmpty) '${cut.texts.length} text',
                       if (cut.reason.isNotEmpty) cut.reason,
                     ].join(' · '),
                     maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 9.5, color: Neon.dim)),
@@ -142,7 +159,8 @@ class _ShotRow extends StatelessWidget {
 /// The chosen shot's editor.
 class ShotEditor extends StatefulWidget {
   const ShotEditor({super.key, required this.cut, required this.timeline, required this.scene, required this.snap,
-      required this.host, required this.aspect, required this.start, required this.end});
+      required this.host, required this.aspect, required this.start, required this.end, this.parts = ShotPart.all});
+  final Set<ShotPart> parts;
   final VideoCut cut;
   final VideoTimeline timeline;
   final VideoScene scene;
@@ -165,80 +183,214 @@ class _ShotEditorState extends State<ShotEditor> {
   Widget build(BuildContext context) {
     final panel = c.layout.panels[_panel.clamp(0, c.layout.panels.length - 1)];
     final g = widget.snap.grid(spb);
+    final parts = widget.parts;
     // A shot wholly outside the range (the song got shorter, or the range is a loop or selection) keeps its place.
     final inRange = c.start < widget.end && c.end > widget.start;
+    final diagram = LayoutDiagram(layout: c.layout, aspect: widget.aspect, selected: _panel, host: h,
+        onPanel: (i) => setState(() => _panel = i));
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-      _label('SPAN'),
-      VideoReveal(inRange ? null : const VideoNote('This shot lies outside the range: the video doesn\'t show it, and its '
-          'span is kept as it is.')),
-      Row(children: [
-        Expanded(child: _Stepper(keyPrefix: 'video-start', label: 'Start', value: videoBarBeat(c.start, spb),
-            onDown: !inRange ? null : () => h.edit(() => widget.timeline.setSpan(c.id, start: c.start - g, snap: widget.snap, stepsPerBar: spb,
-                lo: widget.start, hi: widget.end)),
-            onUp: !inRange ? null : () => h.edit(() => widget.timeline.setSpan(c.id, start: c.start + g, snap: widget.snap, stepsPerBar: spb,
-                lo: widget.start, hi: widget.end)))),
-        const SizedBox(width: 8),
-        Expanded(child: _Stepper(keyPrefix: 'video-length', label: 'Length', value: videoLength(c.length, spb),
-            onDown: !inRange || c.length <= g ? null : () => h.edit(() => widget.timeline.setSpan(c.id, length: c.length - g,
-                snap: widget.snap, stepsPerBar: spb, lo: widget.start, hi: widget.end)),
-            onUp: !inRange ? null : () => h.edit(() => widget.timeline.setSpan(c.id, length: c.length + g, snap: widget.snap,
-                stepsPerBar: spb, lo: widget.start, hi: widget.end)))),
-      ]),
-      _label('LAYOUT'),
-      VideoTiles<VideoLayoutPreset>(keyPrefix: 'video-layout', values: VideoLayoutPreset.values, selected: c.layout.preset,
-          height: 50, label: (v) => v.label, icon: _presetIcon,
-          onPick: (v) => h.edit(() {
-                c.layout = c.layout.withPreset(v);
-                _panel = 0;
-              })),
-      const SizedBox(height: 8),
-      LayoutDiagram(layout: c.layout, aspect: widget.aspect, selected: _panel, host: h,
-          onPanel: (i) => setState(() => _panel = i)),
-      VideoReveal(switchKey: '${c.layout.preset.name}-$_panel', Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        _label(c.layout.panels.length > 1 ? 'PANEL ${_panel + 1} VIEW' : 'VIEW'),
-        VideoTiles<VideoShot>(keyPrefix: 'video-panel-view', values: VideoShot.values, selected: panel.view, height: 50,
-            label: (v) => v.label, icon: videoViewIcon, onPick: (v) => h.edit(() => panel.view = v)),
-        _PanelOptions(panel: panel, scene: widget.scene, host: h),
-        _label('LOOK'),
-        _LookEditor(look: panel.look, host: h),
-      ])),
-      _label('EFFECTS'),
-      EffectStack(effects: c.effects, scene: widget.scene, host: h, panels: c.layout.panels.length),
-      _label('TRANSITION'),
-      VideoTiles<VideoTransition>(keyPrefix: 'video-transition', values: VideoTransition.values, selected: c.transition,
-          height: 40, label: (v) => switch (v) {
-                VideoTransition.cut => 'Cut',
-                VideoTransition.crossfade => 'Crossfade',
-                VideoTransition.push => 'Push',
-              },
-          onPick: (v) => h.edit(() {
-                c.transition = v;
-                if (v != VideoTransition.cut && c.transitionSteps <= 0) c.transitionSteps = 4;
-              })),
+      if (parts.contains(ShotPart.span)) ...[
+        _label('SPAN'),
+        VideoReveal(inRange ? null : const VideoNote('This shot lies outside the range: the video doesn\'t show it, and its '
+            'span is kept as it is.')),
+        Row(children: [
+          Expanded(child: _Stepper(keyPrefix: 'video-start', label: 'Start', value: videoBarBeat(c.start, spb),
+              onDown: !inRange ? null : () => h.edit(() => widget.timeline.setSpan(c.id, start: c.start - g, snap: widget.snap, stepsPerBar: spb,
+                  lo: widget.start, hi: widget.end)),
+              onUp: !inRange ? null : () => h.edit(() => widget.timeline.setSpan(c.id, start: c.start + g, snap: widget.snap, stepsPerBar: spb,
+                  lo: widget.start, hi: widget.end)))),
+          const SizedBox(width: 8),
+          Expanded(child: _Stepper(keyPrefix: 'video-length', label: 'Length', value: videoLength(c.length, spb),
+              onDown: !inRange || c.length <= g ? null : () => h.edit(() => widget.timeline.setSpan(c.id, length: c.length - g,
+                  snap: widget.snap, stepsPerBar: spb, lo: widget.start, hi: widget.end)),
+              onUp: !inRange ? null : () => h.edit(() => widget.timeline.setSpan(c.id, length: c.length + g, snap: widget.snap,
+                  stepsPerBar: spb, lo: widget.start, hi: widget.end)))),
+        ]),
+      ],
+      if (parts.contains(ShotPart.layout)) ...[
+        _label('LAYOUT'),
+        VideoTiles<VideoLayoutPreset>(keyPrefix: 'video-layout', values: VideoLayoutPreset.values, selected: c.layout.preset,
+            height: 50, label: (v) => v.label, icon: _presetIcon,
+            onPick: (v) => h.edit(() {
+                  c.layout = c.layout.withPreset(v);
+                  _panel = 0;
+                })),
+        const SizedBox(height: 8),
+        diagram,
+        VideoReveal(switchKey: '${c.layout.preset.name}-$_panel', Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          _label(c.layout.panels.length > 1 ? 'PANEL ${_panel + 1} VIEW' : 'VIEW'),
+          VideoTiles<VideoShot>(keyPrefix: 'video-panel-view', values: VideoShot.values, selected: panel.view, height: 50,
+              label: (v) => v.label, icon: videoViewIcon, onPick: (v) => h.edit(() => panel.view = v)),
+          _PanelOptions(panel: panel, scene: widget.scene, host: h),
+          if (parts.contains(ShotPart.look)) ...[
+            _label('LOOK'),
+            _LookEditor(look: panel.look, host: h),
+          ],
+        ])),
+      ] else if (parts.contains(ShotPart.look)) ...[
+        // The Look tab: the panel to restyle, then its look.
+        if (c.layout.panels.length > 1) ...[_label('PANEL'), diagram],
+        VideoReveal(switchKey: '${c.layout.preset.name}-$_panel', Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          _label(c.layout.panels.length > 1 ? 'PANEL ${_panel + 1} LOOK · ${panel.view.label.toUpperCase()}'
+              : 'LOOK · ${panel.view.label.toUpperCase()}'),
+          _LookEditor(look: panel.look, host: h),
+        ])),
+      ],
+      if (parts.contains(ShotPart.effects)) ...[
+        _label('EFFECTS'),
+        EffectStack(effects: c.effects, scene: widget.scene, host: h, panels: c.layout.panels.length),
+      ],
+      if (parts.contains(ShotPart.transition)) ...[
+        _label('TRANSITION IN'),
+        TransitionPicker(cut: c, stepsPerBar: spb, host: h),
+        const SizedBox(height: 6),
+        VideoTiles<bool>(keyPrefix: 'video-layout-change', values: const [false, true], selected: c.animateLayout,
+            height: 40, label: (v) => v ? 'Layout animates' : 'Layout cuts',
+            onPick: (v) => h.edit(() {
+                  c.animateLayout = v;
+                  if (v && c.transitionSteps <= 0) c.transitionSteps = 4;
+                })),
+        const VideoNote('Animate slides the panels from the last shot\'s places to these, so views that stay never jump.'),
+      ],
+      if (parts.contains(ShotPart.camera)) ...[
+        _label('CAMERA'),
+        _CameraEditor(cut: c, host: h),
+      ],
+      if (parts.contains(ShotPart.actions)) ...[
+        const SizedBox(height: 4),
+        Wrap(spacing: 4, children: [
+          TextButton.icon(key: const ValueKey('video-shot-split'), onPressed: h.split,
+              icon: const Icon(Icons.content_cut, size: 16), label: const Text('Split at cursor')),
+          TextButton.icon(key: const ValueKey('video-shot-duplicate'), onPressed: h.duplicate,
+              icon: const Icon(Icons.copy_all_outlined, size: 16), label: const Text('Duplicate')),
+          TextButton.icon(key: const ValueKey('video-shot-delete'), onPressed: h.delete,
+              icon: Icon(Icons.delete_outline, size: 16, color: Neon.pink), label: Text('Delete', style: TextStyle(color: Neon.pink))),
+        ]),
+      ],
+    ]);
+  }
+}
+
+IconData videoTransitionIcon(VideoTransition t) => switch (t) {
+      VideoTransition.cut => Icons.content_cut,
+      VideoTransition.crossfade => Icons.gradient,
+      VideoTransition.push => Icons.keyboard_double_arrow_left,
+      VideoTransition.slide => Icons.input,
+      VideoTransition.zoom => Icons.zoom_out_map,
+      VideoTransition.flash => Icons.flash_on,
+      VideoTransition.wipe => Icons.border_left,
+      VideoTransition.glitch => Icons.blur_linear,
+    };
+
+/// A cut's transition (two rows of four) and its length in beats or bars (owner, 2026-11-12), in the shot editor and
+/// in the sheet a cut marker opens.
+class TransitionPicker extends StatelessWidget {
+  const TransitionPicker({super.key, required this.cut, required this.stepsPerBar, required this.host, this.onChanged});
+  final VideoCut cut;
+  final int stepsPerBar;
+  final VideoEditHost host;
+  final VoidCallback? onChanged;
+
+  /// The lengths offered, in steps: half a beat, one, two and three beats, a bar and two bars.
+  List<double> get lengths => {2.0, 4.0, 8.0, 12.0, stepsPerBar.toDouble(), stepsPerBar * 2.0}.toList()..sort();
+
+  void _edit(VoidCallback f) {
+    host.edit(f);
+    onChanged?.call();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final c = cut;
+    const all = VideoTransition.values;
+    final flashes = c.transition == VideoTransition.flash || c.transition == VideoTransition.glitch;
+    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      for (var row = 0; row < 2; row++)
+        Padding(
+          padding: EdgeInsets.only(top: row == 0 ? 0 : 4),
+          child: VideoTiles<VideoTransition>(keyPrefix: 'video-transition', values: all.sublist(row * 4, row * 4 + 4),
+              selected: c.transition, height: 46, label: (v) => v.label, icon: videoTransitionIcon,
+              onPick: (v) => _edit(() {
+                    c.transition = v;
+                    if (v != VideoTransition.cut && c.transitionSteps <= 0) c.transitionSteps = 4;
+                  })),
+        ),
       VideoReveal(c.transition == VideoTransition.cut && !c.animateLayout
           ? null
-          : _SliderRow(keyName: 'video-transition-length', label: 'Over', value: c.transitionSteps <= 0 ? 4 : c.transitionSteps,
-              min: 1, max: 16, divisions: 15, text: (v) => videoLength(v, spb), host: h,
-              onChanged: (v) => c.transitionSteps = v)),
-      const SizedBox(height: 6),
-      VideoTiles<bool>(keyPrefix: 'video-layout-change', values: const [false, true], selected: c.animateLayout,
-          height: 40, label: (v) => v ? 'Layout animates' : 'Layout cuts',
-          onPick: (v) => h.edit(() {
-                c.animateLayout = v;
-                if (v && c.transitionSteps <= 0) c.transitionSteps = 4;
-              })),
-      const VideoNote('Animate slides the panels from the last shot\'s places to these, so views that stay never jump.'),
-      _SliderRow(keyName: 'video-zoom', label: 'Opening zoom', value: c.zoom, min: 0.5, max: 2, divisions: 30,
-          text: (v) => '${v.toStringAsFixed(2)}×', host: h, onChanged: (v) => c.zoom = v),
-      const SizedBox(height: 4),
-      Wrap(spacing: 4, children: [
-        TextButton.icon(key: const ValueKey('video-shot-split'), onPressed: h.split,
-            icon: const Icon(Icons.content_cut, size: 16), label: const Text('Split at cursor')),
-        TextButton.icon(key: const ValueKey('video-shot-duplicate'), onPressed: h.duplicate,
-            icon: const Icon(Icons.copy_all_outlined, size: 16), label: const Text('Duplicate')),
-        TextButton.icon(key: const ValueKey('video-shot-delete'), onPressed: h.delete,
-            icon: Icon(Icons.delete_outline, size: 16, color: Neon.pink), label: Text('Delete', style: TextStyle(color: Neon.pink))),
-      ]),
+          : Padding(padding: const EdgeInsets.only(top: 6), child: Wrap(spacing: 6, runSpacing: 6, children: [
+              for (final l in lengths)
+                ChoiceChip(
+                  key: ValueKey('video-transition-length-${l.round()}'),
+                  label: Text(l == 2 ? '½ beat' : videoLength(l, stepsPerBar), style: const TextStyle(fontSize: 11)),
+                  selected: (c.transitionSteps <= 0 ? 4 : c.transitionSteps) == l,
+                  showCheckmark: false,
+                  selectedColor: videoAccent.withValues(alpha: 0.25),
+                  onSelected: (_) => _edit(() => c.transitionSteps = l),
+                ),
+            ]))),
+      VideoReveal(flashes ? const VideoNote('⚠ A flash or glitch at a cut is one burst of light; keep them apart for '
+          'viewers sensitive to flashing.') : null),
+    ]);
+  }
+}
+
+/// A shot's camera: the auto camera, or a keyframed move from a start framing to an end one, eased (owner,
+/// 2026-11-12).
+class _CameraEditor extends StatefulWidget {
+  const _CameraEditor({required this.cut, required this.host});
+  final VideoCut cut;
+  final VideoEditHost host;
+
+  @override
+  State<_CameraEditor> createState() => _CameraEditorState();
+}
+
+class _CameraEditorState extends State<_CameraEditor> {
+  bool _end = true;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = widget.cut, h = widget.host;
+    final move = c.camera;
+    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      VideoTiles<bool>(keyPrefix: 'video-camera', values: const [false, true], selected: move != null, height: 40,
+          label: (v) => v ? 'Keyframed' : 'Auto',
+          onPick: (v) => h.edit(() => c.camera = v ? VideoCameraMove() : null)),
+      VideoReveal(move == null
+          ? const VideoNote('The auto camera follows the playhead and eases in from the opening zoom.')
+          : Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+              Padding(padding: const EdgeInsets.only(top: 6), child: Wrap(spacing: 6, runSpacing: 6, children: [
+                for (final e in VideoCameraMove.presets.entries)
+                  ActionChip(key: ValueKey('video-camera-preset-${e.key}'), label: Text(e.key, style: const TextStyle(fontSize: 11)),
+                      onPressed: () => h.edit(() => c.camera = e.value()..ease = move.ease)),
+              ])),
+              const SizedBox(height: 6),
+              VideoTiles<bool>(keyPrefix: 'video-camera-key', values: const [false, true], selected: _end, height: 32,
+                  label: (v) => v ? 'End framing' : 'Start framing', onPick: (v) => setState(() => _end = v)),
+              VideoReveal(switchKey: _end, Column(children: [
+                for (final (name, label, lo, hi) in [('zoom', 'Zoom', 1.0, 3.0), ('x', 'Across', -0.33, 0.33),
+                    ('y', 'Up / down', -0.33, 0.33)])
+                  _SliderRow(keyName: 'video-camera-$name', label: label,
+                      value: switch (name) { 'zoom' => (_end ? move.to : move.from).zoom, 'x' => (_end ? move.to : move.from).x,
+                          _ => (_end ? move.to : move.from).y },
+                      min: lo, max: hi, divisions: 40,
+                      text: (v) => name == 'zoom' ? '${v.toStringAsFixed(2)}×' : '${(v * 100).round()}%', host: h,
+                      onChanged: (v) {
+                        final f = _end ? move.to : move.from;
+                        final next = VideoFraming(zoom: name == 'zoom' ? v : f.zoom, x: name == 'x' ? v : f.x,
+                            y: name == 'y' ? v : f.y).clamped;
+                        _end ? move.to = next : move.from = next;
+                      }),
+              ])),
+              VideoTiles<VideoEase>(keyPrefix: 'video-camera-ease', values: VideoEase.values, selected: move.ease, height: 34,
+                  label: (v) => v.label, onPick: (v) => h.edit(() => move.ease = v)),
+              const VideoNote('The move frames the whole shot from its start to its end; the views still follow the '
+                  'song inside it.'),
+            ])),
+      VideoReveal(move == null
+          ? _SliderRow(keyName: 'video-zoom', label: 'Opening zoom', value: c.zoom, min: 0.5, max: 2, divisions: 30,
+              text: (v) => '${v.toStringAsFixed(2)}×', host: h, onChanged: (v) => c.zoom = v)
+          : null),
     ]);
   }
 }
@@ -604,13 +756,29 @@ class _EffectCard extends StatelessWidget {
                   : null),
               _SliderRow(keyName: 'video-fx-amount-$index', label: 'Amount', value: e.amount, min: 0, max: 1, divisions: 20,
                   text: (v) => '${(v * 100).round()}%', host: host, onChanged: (v) => e.amount = v),
-              VideoTiles<VideoDrive>(keyPrefix: 'video-fx-drive-$index', values: VideoDrive.values, selected: e.drive,
-                  height: 34, label: (v) => v.label, onPick: (v) => host.edit(() => e.drive = v)),
+              // The beat presets (owner, 2026-11-12): one tap sets the drive, its pulse and the amount.
+              SizedBox(height: 36, child: ListView(scrollDirection: Axis.horizontal, children: [
+                for (final pr in VideoEffectPreset.values)
+                  Padding(padding: const EdgeInsets.only(right: 6), child: ChoiceChip(
+                    key: ValueKey('video-fx-preset-$index-${pr.name}'),
+                    label: Text(pr.label, style: const TextStyle(fontSize: 10.5)),
+                    selected: VideoEffectPreset.of(e) == pr,
+                    showCheckmark: false,
+                    visualDensity: VisualDensity.compact,
+                    selectedColor: videoAccent.withValues(alpha: 0.25),
+                    onSelected: (_) => host.edit(() => pr.apply(e)),
+                  )),
+              ])),
+              const SizedBox(height: 4),
+              for (var row = 0; row < 2; row++)
+                Padding(padding: EdgeInsets.only(top: row * 4.0), child: VideoTiles<VideoDrive>(
+                    keyPrefix: 'video-fx-drive-$index', values: VideoDrive.values.sublist(row * 3, row * 3 + 3),
+                    selected: e.drive, height: 32, label: (v) => v.label, onPick: (v) => host.edit(() => e.drive = v))),
               VideoReveal(e.drive == VideoDrive.track
                   ? _TrackPicker(keyName: 'video-fx-track-$index', label: 'Track', value: e.trackId, scene: scene,
                       auto: null, onChanged: (t) => host.edit(() => e.trackId = t))
                   : null),
-              VideoReveal(e.drive == VideoDrive.beat || e.drive == VideoDrive.bar
+              VideoReveal(VideoEffectPreset.beats(e.drive)
                   ? _SliderRow(keyName: 'video-fx-decay-$index', label: 'Pulse', value: e.decay, min: 0.05, max: 1,
                       divisions: 19, text: (v) => '${(v * 100).round()}%', host: host, onChanged: (v) => e.decay = v)
                   : null),
