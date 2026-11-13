@@ -64,7 +64,7 @@ Published reports and summaries stay public until deleted as above, and are show
 
 ## Children
 
-[Owner: decide whether C.A.W states a minimum age, and fill this in.]
+You must be at least 16 to use C.A.W's open alpha and beta. C.A.W doesn't knowingly collect anything from anyone younger, and by design it collects nothing about anyone: no name, age or contact details are ever part of a report.
 
 ## Changes
 

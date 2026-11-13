@@ -279,6 +279,28 @@ void main() {
       expect(File('${app.path}/lib/libapp.so.caw-old').existsSync(), isFalse);
     });
 
+    test('the relaunch after a swap passes the command-line arguments on (a file opened with C.A.W)', () async {
+      final app = await installOld();
+      final stage = WindowsStage(app);
+      await stage.begin();
+      final staged = stageFiles(
+          patchPath: fixture('caw-main-windows.cawpatch').path, installDir: app.path, stageDir: stage.files.path, expected: want());
+      await stage.commit('v2', staged);
+      final started = <(String, List<String>)>[];
+      final installer = WindowsUpdateInstaller(appDir: app, start: (exe, args) async => started.add((exe, args)));
+      const args = [r'C:\Users\me\Songs\song.caw', '--flag'];
+      final first = await installer.finishStaged(args);
+      expect(first.relaunch, isTrue);
+      expect(started, hasLength(1));
+      expect(started.single.$1, Platform.resolvedExecutable);
+      expect(started.single.$2, args);
+      // Nothing staged: no relaunch, the note said once.
+      final again = await installer.finishStaged(args);
+      expect(again.relaunch, isFalse);
+      expect(again.note, contains('Updated to v2'));
+      expect(started, hasLength(1));
+    });
+
     test('two files that differ only in case are refused (one file on Windows)', () async {
       final app = await installOld();
       final a = utf8.encode('one'), b = utf8.encode('two');

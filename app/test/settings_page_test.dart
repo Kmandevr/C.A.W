@@ -5,7 +5,9 @@ import 'package:caw/model/settings.dart';
 import 'package:caw/ui/settings/settings_page.dart';
 import 'package:caw/ui/settings/settings_registry.dart';
 import 'package:caw/ui/settings/settings_widgets.dart';
+import 'package:caw/ui/startup_screen.dart' show openAlphaNotice;
 import 'package:caw/ui/theme.dart';
+import 'package:caw/version.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -39,6 +41,15 @@ void main() {
       await tester.pageBack();
       await tester.pumpAndSettle();
     }
+  });
+
+  testWidgets('About shows the version with the owner\'s open-alpha line, as the startup screen does', (tester) async {
+    await _pump(tester, Settings());
+    final tile = find.byKey(const ValueKey('section-about'));
+    await tester.scrollUntilVisible(tile, 100, scrollable: find.byType(Scrollable).first);
+    await tester.tap(tile);
+    await tester.pumpAndSettle();
+    expect(find.textContaining('v$appVersion · $openAlphaNotice'), findsOneWidget);
   });
 
   test('search finds settings by title, description and keyword, grouped by section', () {
