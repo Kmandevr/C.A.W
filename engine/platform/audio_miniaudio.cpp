@@ -12,6 +12,9 @@
 #include <dlfcn.h>
 #include <time.h>
 #endif
+#if defined(__linux__)
+#include <sched.h>  // sched_getcpu (Android too)
+#endif
 #if defined(_WIN32)
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -179,6 +182,17 @@ void readAAudioModes(Audio* a) {
 void readAAudioModes(Audio*) {}
 #endif
 
+// The core this callback runs on, for the Benchmark's live mode (-1 where the platform can't say).
+int32_t callbackCore() {
+#if defined(__linux__)
+    return static_cast<int32_t>(sched_getcpu());
+#elif defined(_WIN32)
+    return static_cast<int32_t>(GetCurrentProcessorNumber());
+#else
+    return -1;
+#endif
+}
+
 void callback(ma_device* dev, void* output, const void* input, ma_uint32 frames) {
     auto* a = static_cast<Audio*>(dev->pUserData);
     const auto start = std::chrono::steady_clock::now();
@@ -192,15 +206,17 @@ void callback(ma_device* dev, void* output, const void* input, ma_uint32 frames)
         live.beginCallback(ch ? in + static_cast<size_t>(done) * ch : nullptr, ch, n);  // monitoring and recording
         a->owner->engine->process(a->l, a->r, n);
         live.afterCallback(a->l, a->r, n);  // the latency ping
+        const float gain = a->owner->muteOutput.load(std::memory_order_relaxed) ? 0.0f : 1.0f;  // the Benchmark: silent
         for (int i = 0; i < n; ++i) {
-            out[(done + i) * 2] = a->l[i];
-            out[(done + i) * 2 + 1] = a->r[i];
+            out[(done + i) * 2] = gain * a->l[i];
+            out[(done + i) * 2 + 1] = gain * a->r[i];
         }
         done += static_cast<ma_uint32>(n);
     }
     const double used = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
     const double budget = static_cast<double>(frames) / static_cast<double>(dev->sampleRate);
     a->owner->engine->reportLoad(budget > 0 ? used / budget : 0.0, static_cast<int>(frames));
+    if (CawStressStats* s = a->owner->stress.load(std::memory_order_acquire)) s->record(used, budget, callbackCore());
 }
 
 void setError(const std::string& msg, char* error, int32_t len) {
@@ -592,6 +608,24 @@ std::string latencyJson(CawEngine* e, Audio* a) {
 }
 
 }  // namespace
+
+int32_t cawAudioXruns(CawEngine* e) {
+#if defined(__ANDROID__)
+    std::lock_guard<std::mutex> lock(gDeviceLock);
+    if (!e || !e->audio) return -1;
+    auto* a = static_cast<Audio*>(e->audio);
+    if (a->context.backend != ma_backend_aaudio || !a->context.aaudio.hAAudio || !a->device.aaudio.pStreamPlayback) return -1;
+    // AAudioStream_getXRunCount (NDK API 26; miniaudio 0.11.25 does not load it): underruns since the stream opened.
+    using Getter = int32_t (*)(void*);
+    auto xruns = reinterpret_cast<Getter>(dlsym(a->context.aaudio.hAAudio, "AAudioStream_getXRunCount"));
+    if (!xruns) return -1;
+    const int32_t n = xruns(a->device.aaudio.pStreamPlayback);
+    return n >= 0 ? n : -1;
+#else
+    (void)e;
+    return -1;  // elsewhere this reads no underrun count (miniaudio passes none on)
+#endif
+}
 
 extern "C" {
 

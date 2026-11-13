@@ -153,6 +153,8 @@ add_library(caw_core STATIC
   src/builtin_fx_filters.cpp src/builtin_fx_filters_comb.cpp src/builtin_fx_filters_formant.cpp src/builtin_fx_filters_eq.cpp src/builtin_fx_filters_presets.cpp
   # fx-filters end
   src/render.cpp src/render_stems.cpp src/wav.cpp)
+# The Benchmark (stress test, beta plan C): its scenarios (shared with caw_bench) and its timed runs.
+target_sources(caw_core PRIVATE src/stress_scenarios.cpp src/stress_run.cpp)
 # fx-racks begin
 target_sources(caw_core PRIVATE src/builtin_fx_racks.cpp src/builtin_fx_racks_fx.cpp src/builtin_fx_racks_multiband.cpp
   src/builtin_fx_racks_presets.cpp)
@@ -183,7 +185,7 @@ target_sources(caw_core PRIVATE src/builtin_fx_dynamics.cpp src/builtin_fx_drive
 
 # The library the app loads through dart:ffi.
 if(CAW_AUDIO)
-  add_library(caw_engine SHARED src/capi.cpp src/capi_audio.cpp src/capi_modulation.cpp src/execution_capi.cpp src/worker_api.cpp platform/audio_miniaudio.cpp platform/miniaudio_impl.c)
+  add_library(caw_engine SHARED src/capi.cpp src/capi_audio.cpp src/capi_modulation.cpp src/execution_capi.cpp src/worker_api.cpp src/capi_stress.cpp platform/audio_miniaudio.cpp platform/miniaudio_impl.c)
   target_include_directories(caw_engine PRIVATE src third_party/miniaudio)
   target_compile_options(caw_engine PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${CAW_FLAGS}>)
   if(ANDROID)
@@ -193,7 +195,7 @@ if(CAW_AUDIO)
     target_link_libraries(caw_engine PRIVATE dl m)
   endif()
 else()
-  add_library(caw_engine SHARED src/capi.cpp src/capi_audio.cpp src/capi_modulation.cpp src/execution_capi.cpp src/worker_api.cpp platform/audio_none.cpp)
+  add_library(caw_engine SHARED src/capi.cpp src/capi_audio.cpp src/capi_modulation.cpp src/execution_capi.cpp src/worker_api.cpp src/capi_stress.cpp platform/audio_none.cpp)
   target_compile_options(caw_engine PRIVATE ${CAW_FLAGS})
   target_include_directories(caw_engine PRIVATE src)
 endif()
@@ -212,7 +214,7 @@ target_include_directories(caw_cli PRIVATE src)
   target_link_libraries(caw_cli PRIVATE caw_core)
   add_executable(caw_tests tests/test_main.cpp tests/engine_test.cpp tests/export_test.cpp tests/pattern_test.cpp
     tests/midifile_test.cpp tests/midi2_test.cpp tests/module_registry_test.cpp tests/native_component_test.cpp tests/execution_test.cpp tests/execution_capi_test.cpp tests/module_test.cpp tests/graph_test.cpp tests/params_test.cpp tests/sdk_header_test.cpp tests/scheduler_test.cpp tests/dependency_test.cpp tests/hardware_test.cpp tests/worker_api_test.cpp tests/mix_reference_test.cpp tests/public_cpp_sdk_test.cpp tests/track_components_test.cpp tests/instrument_test.cpp tests/builtin_instruments_test.cpp
-    src/capi.cpp src/capi_audio.cpp src/capi_modulation.cpp src/execution_capi.cpp src/worker_api.cpp platform/audio_none.cpp)
+    src/capi.cpp src/capi_audio.cpp src/capi_modulation.cpp src/execution_capi.cpp src/worker_api.cpp src/capi_stress.cpp platform/audio_none.cpp)
   target_sources(caw_tests PRIVATE tests/tolerance.cpp tests/tolerance_test.cpp)  # reference renders, their comparators
   target_sources(caw_tests PRIVATE tests/component_test_test.cpp)  # the component testing suite (#163)
   target_sources(caw_tests PRIVATE tests/test_signal_test.cpp)  # org.caw.test.osc, the internal test signal
@@ -244,6 +246,7 @@ target_include_directories(caw_cli PRIVATE src)
   target_sources(caw_tests PRIVATE tests/speed_free_wins_test.cpp)  # speed phase 1: Eco oversampling, silent work skipped, master sleep
   target_sources(caw_tests PRIVATE tests/fp_mode_test.cpp)  # speed phase 2: the flush-to-zero guard, NaN/Inf guards under the build flags
   target_sources(caw_tests PRIVATE tests/sample_timing_test.cpp tests/timing_oracle.cpp)  # note timing exact to the sample
+  target_sources(caw_tests PRIVATE tests/stress_test.cpp)  # the Benchmark (beta plan C): scenarios, ramps, cancel, profiles
   add_library(caw_test_component MODULE tests/native_component_fixture.cpp)
   target_link_libraries(caw_test_component PRIVATE CAW::SDK)
   target_compile_options(caw_test_component PRIVATE ${CAW_FLAGS})
@@ -303,6 +306,7 @@ target_include_directories(caw_cli PRIVATE src)
   target_sources(caw_rt_tests PRIVATE tests/audio_rt_test.cpp)  # audio clips, the sampler, monitoring and recording (WP-J)
   target_sources(caw_rt_tests PRIVATE tests/modulation_rt_test.cpp)  # #161: project modulation
   target_sources(caw_rt_tests PRIVATE tests/note_fx_rt_test.cpp)  # #127: per-note FX
+  target_sources(caw_rt_tests PRIVATE tests/stress_rt_test.cpp)  # the Benchmark: its timed loop
   target_compile_options(caw_rt_tests PRIVATE ${CAW_FLAGS})
   target_include_directories(caw_rt_tests PRIVATE src)
   add_dependencies(caw_rt_tests caw_test_component)

@@ -1,6 +1,7 @@
 // Public C ABI for bounded native jobs used by the app and other hosts.
 #include "caw.h"
 #include "capi_internal.h"
+#include "capi_stress.h"
 #include "hardware.h"
 #include "json.h"
 #include "scheduler.h"
@@ -17,7 +18,7 @@
 #include <string>
 
 namespace {
-enum class TaskKind { Project, Render, Song };
+enum class TaskKind { Project, Render, Song, Stress };
 enum class State : int32_t { Queued = 0, Running = 1, Succeeded = 2, Failed = 3, Cancelled = 4 };
 
 struct JobState {
@@ -31,6 +32,7 @@ struct JobState {
     std::condition_variable waitCv;
     std::string result;
     std::string error;
+    std::shared_ptr<caw::stress::Job> stress;  // Stress: the run's progress, history and result (capi_stress.cpp)
 };
 
 struct WorkItem {
@@ -43,6 +45,7 @@ struct WorkItem {
     std::string request;  // Song: the render request JSON
     CawRenderOptions options{};
     CawEngine* engine = nullptr;
+    std::shared_ptr<caw::stress::Job> stress;
     ~WorkItem() { if (engine) engine->releaseAsync(); }
 };
 
@@ -78,13 +81,26 @@ void finish(const std::shared_ptr<JobState>& state, State result) noexcept {
     state->waitCv.notify_all();
 }
 
+// A stress job that never ran (cancelled while queued): its result says so, so caw_stress_result answers.
+void stressNeverRan(const std::shared_ptr<JobState>& state) noexcept {
+    if (!state->stress) return;
+    try {
+        std::lock_guard<std::mutex> lock(state->stress->mutex);
+        state->stress->finished = true;
+        state->stress->result.stopReason = "cancelled";
+    } catch (...) {
+    }
+}
+
 void execute(void* raw) noexcept {
     std::unique_ptr<WorkItem> item(static_cast<WorkItem*>(raw));
     const auto state = item->state;
     int32_t expected = static_cast<int32_t>(State::Queued);
     if (!state->state.compare_exchange_strong(expected, static_cast<int32_t>(State::Running),
                                               std::memory_order_acq_rel)) return;
-    if ((item->kind == TaskKind::Render || item->kind == TaskKind::Song) && atomicLoad(&state->cancel) != 0) {
+    if ((item->kind == TaskKind::Render || item->kind == TaskKind::Song || item->kind == TaskKind::Stress) &&
+        atomicLoad(&state->cancel) != 0) {
+        stressNeverRan(state);
         finish(state, State::Cancelled);
         return;
     }
@@ -104,6 +120,27 @@ void execute(void* raw) noexcept {
             }
             caw_free(output);
             finish(state, State::Succeeded);
+            return;
+        }
+
+        if (item->kind == TaskKind::Stress) {
+            const std::string text = caw::stress::runJob(*item->stress);
+            bool ok = false, wasCancelled = false;
+            std::string message;
+            {
+                std::lock_guard<std::mutex> jobLock(item->stress->mutex);
+                ok = item->stress->result.ok || item->stress->result.stopReason == "over_budget";
+                wasCancelled = item->stress->result.stopReason == "cancelled";
+                message = item->stress->result.error;
+            }
+            std::lock_guard<std::mutex> lock(state->mutex);
+            state->result = text;
+            if (!ok) {
+                state->error = wasCancelled ? "cancelled" : message.empty() ? "native stress run failed" : message;
+                state->resultCode.store(1, std::memory_order_relaxed);
+            }
+            atomicStore(&state->progress, 1000);
+            finish(state, ok ? State::Succeeded : wasCancelled ? State::Cancelled : State::Failed);
             return;
         }
 
@@ -184,6 +221,7 @@ CawJob* submit(CawWorkerPool* pool, std::unique_ptr<WorkItem> item, int32_t prio
     if (pool->closing || pool->adaptive.currentPlan().maxConcurrentJobs == 0) return nullptr;
     auto state = item->state;
     state->kind = item->kind;
+    state->stress = item->stress;
     auto* context = item.release();
     auto* handle = new (std::nothrow) CawJob(state);
     if (!handle) {
@@ -288,12 +326,28 @@ CawJob* caw_worker_pool_submit_song(CawWorkerPool* pool, const char* project_jso
     return nullptr;
 }
 
+CawJob* caw_worker_pool_submit_stress(CawWorkerPool* pool, const CawStressRequest* request, int32_t priority) try {
+    if (!pool || !request) return nullptr;
+    std::string error;
+    auto job = caw::stress::makeJob(request, error);
+    if (!job) return nullptr;
+    auto item = std::make_unique<WorkItem>();
+    item->state = std::make_shared<JobState>();
+    item->kind = TaskKind::Stress;
+    item->stress = std::move(job);
+    return submit(pool, std::move(item), priority);
+} catch (...) {
+    return nullptr;
+}
+
 int32_t caw_job_get_status(CawJob* job, CawJobStatus* out) try {
     if (!job || !out || !job->state) return 1;
     constexpr size_t minimumSize = offsetof(CawJobStatus, result_code) + sizeof(int32_t);
     if (out->struct_size < minimumSize) return 2;
     out->state = job->state->state.load(std::memory_order_acquire);
-    out->progress = atomicLoad(&job->state->progress);
+    out->progress = job->state->stress && out->state <= static_cast<int32_t>(State::Running)
+                        ? job->state->stress->progress.permille.load(std::memory_order_relaxed)
+                        : atomicLoad(&job->state->progress);
     out->result_code = job->state->resultCode.load(std::memory_order_relaxed);
     return 0;
 } catch (...) {
@@ -350,6 +404,7 @@ void caw_job_cancel(CawJob* job) {
         return;
     }
     if (cancelledWhileQueued) {
+        stressNeverRan(job->state);
         job->state->waitCv.notify_all();
         return;
     }
@@ -358,9 +413,20 @@ void caw_job_cancel(CawJob* job) {
     if (current == static_cast<int32_t>(State::Running) &&
         (job->state->kind == TaskKind::Render || job->state->kind == TaskKind::Song))
         atomicStore(&job->state->cancel, 1);
+    // A stress run checks its own flag at every callback (DSP) or every 100 ms (live).
+    if (current == static_cast<int32_t>(State::Running) && job->state->stress)
+        job->state->stress->cancel.store(1, std::memory_order_relaxed);
 }
 
 void caw_job_release(CawJob* job) { delete job; }
+
+}  // extern "C"
+
+std::shared_ptr<caw::stress::Job> caw::stress::jobOf(CawJob* job) {
+    return job && job->state ? job->state->stress : nullptr;
+}
+
+extern "C" {
 
 void caw_worker_pool_wait_idle(CawWorkerPool* pool) {
     if (!pool) return;

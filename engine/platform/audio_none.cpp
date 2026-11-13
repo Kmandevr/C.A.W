@@ -25,6 +25,8 @@ std::string quoted(const std::string& s) {
 
 }  // namespace
 
+int32_t cawAudioXruns(CawEngine*) { return -1; }
+
 extern "C" {
 
 int32_t caw_audio_start(CawEngine*, char* error, int32_t error_len) {

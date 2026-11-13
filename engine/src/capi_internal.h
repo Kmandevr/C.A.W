@@ -1,16 +1,45 @@
 // What a CawEngine handle holds, shared by the core C API and the platform audio output.
 #pragma once
 
+#include <atomic>
 #include <condition_variable>
+#include <cstdint>
 #include <memory>
 #include <mutex>
 #include <string>
+#include <vector>
 
 #include "engine.h"
+
+// The Benchmark's live mode (capi_stress.cpp, API 27): what the device callback measured while a stress run listens.
+// Preallocated by the run before it is installed; the callback only stores into it (no allocation, no lock).
+struct CawStressStats {
+    explicit CawStressStats(size_t capacity) : loads(capacity), times(capacity) {}
+    std::vector<float> loads;   // per callback: its share of its own budget
+    std::vector<float> times;   // per callback: microseconds
+    std::atomic<int64_t> written{0}, overBudget{0}, usedNs{0}, budgetNs{0};
+    std::atomic<int32_t> core{-1};  // the core the last callback ran on (-1: unknown)
+    void record(double usedSeconds, double budgetSeconds, int32_t cpu) noexcept {
+        const int64_t at = written.load(std::memory_order_relaxed);
+        if (at < static_cast<int64_t>(loads.size())) {
+            loads[static_cast<size_t>(at)] = static_cast<float>(budgetSeconds > 0 ? usedSeconds / budgetSeconds : 0.0);
+            times[static_cast<size_t>(at)] = static_cast<float>(usedSeconds * 1e6);
+        }
+        if (usedSeconds > budgetSeconds) overBudget.fetch_add(1, std::memory_order_relaxed);
+        usedNs.fetch_add(static_cast<int64_t>(usedSeconds * 1e9), std::memory_order_relaxed);
+        budgetNs.fetch_add(static_cast<int64_t>(budgetSeconds * 1e9), std::memory_order_relaxed);
+        core.store(cpu, std::memory_order_relaxed);
+        written.store(at + 1, std::memory_order_release);
+    }
+};
 
 struct CawEngine {
     std::unique_ptr<caw::Engine> engine;
     void* audio = nullptr;  // owned by engine/platform
+    // The Benchmark's live mode: the device callback zeroes its output after process() (the run is silent), and
+    // records into `stress` while it is set. Both are the stress run's own engine's, never the app's.
+    std::atomic<bool> muteOutput{false};
+    std::atomic<CawStressStats*> stress{nullptr};
     // The device buffer (caw_audio_set_buffer_mode): CAW_BUFFER_*, and whether the app is recording. Only the
     // control thread touches them, under engine/platform's device lock.
     int bufferMode = 0;
@@ -51,3 +80,7 @@ private:
     uint32_t asyncJobs = 0;
     bool destroying = false;
 };
+
+// Underruns the running device has reported since it opened (AAudio's XRun count); -1 where the platform reports
+// none or no device runs. engine/platform (audio_miniaudio.cpp, audio_none.cpp).
+int32_t cawAudioXruns(CawEngine* e);

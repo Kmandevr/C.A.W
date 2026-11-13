@@ -4480,6 +4480,12 @@ void Engine::pickOverloadVictim() noexcept {
 
 void Engine::process(float* left, float* right, int frames) noexcept {
     const ScopedFlushDenormals flushDenormals;  // live callbacks, exports and renders alike (fp_mode.h)
+    // This engine's profile (null: none) for this call, on this thread only (setProfile).
+    struct BindProfile {
+        ChainProfile* before;
+        explicit BindProfile(ChainProfile* p) noexcept : before(ChainProfile::bind(p)) {}
+        ~BindProfile() { ChainProfile::bind(before); }
+    } const bindProfile(profile_.load(std::memory_order_acquire));
     // Whether any layer is soloed, worked out once per callback rather than once per layer and block.
     updateSolo();
     applyCommands();
@@ -4489,7 +4495,7 @@ void Engine::process(float* left, float* right, int frames) noexcept {
     if (!playing_ && monitorWanted_.load(std::memory_order_relaxed)) wakeMonitors();
     if (overloadPending_) {
         overloadPending_ = false;
-        pickOverloadVictim();
+        if (shedding_.load(std::memory_order_relaxed)) pickOverloadVictim();  // off: the Benchmark's engine
     }
     int i = 0;
     while (i < frames) {

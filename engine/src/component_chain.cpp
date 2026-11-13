@@ -45,7 +45,7 @@ bool stereoAudio(const PortDescriptor& p) noexcept {
     return p.type == PortType::Audio && p.layout == ChannelLayout::Stereo && portChannelCount(p) == 2;
 }
 
-std::atomic<ChainProfile*> gProfile{nullptr};
+thread_local ChainProfile* tProfile = nullptr;  // the profile of the Engine::process running on this thread
 
 uint64_t nowNs() noexcept {
     return static_cast<uint64_t>(
@@ -53,8 +53,8 @@ uint64_t nowNs() noexcept {
 }
 
 // Times one entry's block into its profile slot (no slot: nothing), less the time of chains nested inside it (a
-// per-note FX slot inside its instrument, a rack's own chain), so each slot holds its own time. Audio thread only.
-uint64_t gNestedNs = 0;
+// per-note FX slot inside its instrument, a rack's own chain), so each slot holds its own time. Per thread.
+thread_local uint64_t gNestedNs = 0;
 struct ProfileScope {
     ChainProfile::Slot* slot;
     uint64_t t0, outer = 0;
@@ -77,8 +77,12 @@ struct ProfileScope {
 
 }  // namespace
 
-void ChainProfile::set(ChainProfile* profile) noexcept { gProfile.store(profile, std::memory_order_release); }
-ChainProfile* ChainProfile::current() noexcept { return gProfile.load(std::memory_order_acquire); }
+ChainProfile* ChainProfile::bind(ChainProfile* profile) noexcept {
+    ChainProfile* const before = tProfile;
+    tProfile = profile;
+    return before;
+}
+ChainProfile* ChainProfile::current() noexcept { return tProfile; }
 
 ChainProfile::Slot* ChainProfile::slot(const void* processor, const std::string* id) noexcept {
     for (uint32_t k = 0; k < used; ++k)
@@ -653,7 +657,7 @@ bool ComponentChain::runModulator(std::size_t index, uint32_t m, double sampleRa
                                   float* const* outs, uint32_t outCount) noexcept {
     if (!modulators_ || index >= entries_.size() || m == 0 || m > kMaxFrames) return false;
     Entry& e = *entries_[index];
-    ProfileScope scope(gProfile.load(std::memory_order_relaxed), e.processor.get(), &e.id);
+    ProfileScope scope(tProfile, e.processor.get(), &e.id);
     if (scope.slot) scope.slot->modulator = true;
     scope.ran = true;
     const bool playing = time && time->playing;
@@ -703,7 +707,7 @@ void ComponentChain::process(float* left, float* right, uint32_t m, double sampl
     Transport transport;  // what each component sees of the song: the tempo always, the position while playing
     if (time) transport = {time->tempo, static_cast<double>(time->start) / time->stepLength / 4.0, time->beatsPerBar, playing};
     const double bypassStep = 1.0 / std::max(1.0, kBypassSeconds * sampleRate);
-    ChainProfile* const profile = gProfile.load(std::memory_order_relaxed);
+    ChainProfile* const profile = tProfile;
     for (std::size_t index = 0; index < entries_.size(); ++index) {
         Entry& e = *entries_[index];
         ProfileScope scope(profile, e.processor.get(), &e.id);

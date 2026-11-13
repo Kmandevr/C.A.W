@@ -64,9 +64,11 @@ struct ChainTime {
     const ChainModulation* modulation = nullptr;  // project modulation of this chain's parameters (null: none)
 };
 
-// Benchmark-only (caw_bench's profile mode): the time each component spends in a chain, per processor. Off (null)
-// everywhere else, where it costs one relaxed load per chain per block. Fixed slots, so the audio thread never
-// allocates; processors past kSlots are not counted.
+// Benchmark-only (caw_bench's profile mode, the app's Benchmark): the time each component spends in a chain, per
+// processor. Each Engine has its own (Engine::setProfile), bound to the thread running its process() for that call
+// only, so two engines profiling at once never share one and slot() is only ever called from that thread. Off
+// (null) everywhere else, where it costs one thread-local load per chain per block. Fixed slots, so the audio thread
+// never allocates; processors past kSlots are not counted.
 struct ChainProfile {
     static constexpr uint32_t kSlots = 512;
     struct Slot {
@@ -78,7 +80,9 @@ struct ChainProfile {
     Slot slots[kSlots];
     uint32_t used = 0;
     Slot* slot(const void* processor, const std::string* id) noexcept;
-    static void set(ChainProfile* profile) noexcept;
+    // The profile chains on this thread record into (null: none); returns the one bound before. Engine::process
+    // binds its own for the call and puts the earlier one back.
+    static ChainProfile* bind(ChainProfile* profile) noexcept;
     static ChainProfile* current() noexcept;
 };
 

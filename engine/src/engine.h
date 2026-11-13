@@ -217,6 +217,14 @@ public:
     // One callback's share of its time budget used, for [frames] frames at the engine's rate. The average, the time
     // over budget before a layer is shed and the rest after it go by time, so any callback size behaves alike.
     void reportLoad(double load, int frames) noexcept;
+    // The Benchmark (stress_run.h): this engine's component profile (null: off; component_chain.h). Set between
+    // process() calls; the profile must outlive them. Each process() binds it to its own thread, so the mix must run
+    // on that one thread while it is set (this branch's mix is serial; a parallel mix leaves profiling engines serial).
+    void setProfile(ChainProfile* profile) noexcept { profile_.store(profile, std::memory_order_release); }
+    bool profiling() const noexcept { return profile_.load(std::memory_order_relaxed) != nullptr; }
+    // Overload shedding (layers muted when the device runs out of time) on (the default) or off: the Benchmark's
+    // engine measures the whole project, so nothing may be shed. The one check is where a layer would be shed.
+    void setShedding(bool on) noexcept { shedding_.store(on, std::memory_order_relaxed); }
 
 private:
     // First, so it outlives every component chain (built-ins keep a pointer to it).
@@ -382,6 +390,8 @@ private:
     std::unique_ptr<Spsc<Cmd, 1024>> cmds_;
     std::unique_ptr<Spsc<Retired, 1024>> retired_;
     std::atomic<float> cpu_{0}, peakL_{0}, peakR_{0};
+    std::atomic<ChainProfile*> profile_{nullptr};  // setProfile
+    std::atomic<bool> shedding_{true};             // setShedding
     std::atomic<bool> playingFlag_{false};
     std::atomic<bool> bypass_{false};
     std::atomic<int64_t> posFlag_{0}, loopLenFlag_{0};
