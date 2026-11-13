@@ -54,8 +54,9 @@ std::string describeProject(const caw::ProjectSpec& p, const std::string& dir) {
     for (const auto& k : p.modulation)
         o += "link " + std::to_string(k.id) + " " + k.source + " " + k.target.type + "/" + k.target.layer + "/" + k.target.param + "/" +
              std::to_string(k.target.index) + " " + std::to_string(k.amount) + (k.bipolar ? " bi" : "") + "\n";
-    // The folder, raw and as JSON escapes it (a Windows path's backslashes in the sampler's zones).
-    for (const std::string& d : {dir, caw::jsonEscape(dir)})
+    // The folder, raw, with forward slashes, and as JSON escapes either (the sampler's zones).
+    const std::string generic = std::filesystem::path(dir).generic_string();
+    for (const std::string& d : {dir, caw::jsonEscape(dir), generic, caw::jsonEscape(generic)})
         if (!d.empty())
             for (size_t at = o.find(d); at != std::string::npos; at = o.find(d, at)) o.replace(at, d.size(), "<dir>");
     return o;

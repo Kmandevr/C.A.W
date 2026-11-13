@@ -1,6 +1,6 @@
 ---
 title: Engine performance
-summary: The CI bench suite (caw_bench SECONDS 500, the Bench workflow), its scenarios and targets, the baseline per target, and the speed phases' before/after tables.
+summary: The CI bench suite (caw_bench SECONDS 500, the Bench workflow), its scenarios and targets, the baseline per target, and the speed phases' before/after tables (phases 1-5, A2-A5).
 covers: [engine/bench/, .github/workflows/bench.yml, engine/src/stress_scenarios.*]
 updated: 2026-11-13
 ---
@@ -35,6 +35,7 @@ Long runs (`caw_bench SECONDS 600`) and per-track callback-size checks (`caw_ben
 
 - **Linux x64:** `ubuntu-24.04`, GCC 13.3 Release.
 - **Linux arm64:** `ubuntu-24.04-arm`, GCC 13.3 Release.
+- **Windows x64 (since 2026-11-13, A5):** `windows-2025` (the runner engine.yml tests Windows on), MSVC Release with its default link-time optimisation and `/fp:precise`: the Windows app's compiler. Its CPU varies between runs (AMD EPYC 7763 and 9V74 seen), so compare its numbers within one run.
 - **Android arm64:** `caw_bench` cross-compiled on `ubuntu-24.04` with **NDK 28.2.13676358**, the NDK the APK's engine is built with (app.yml), for `arm64-v8a`, `android-29`, `c++_static`, linked `-static`; then run on `ubuntu-24.04-arm`. **[Fact, run 43135752152, 2026-11-12]** the static bionic executable runs on the Linux arm64 kernel (`ELF 64-bit LSB executable, ARM aarch64, statically linked`; all scenarios ran).
   - **Why not an emulator:** arm64 Android images on x86 runners are translated, so their timings say little about a phone and vary widely. This target measures the Android compiler, libc++ and bionic on real Arm64 cores.
   - **What it is not:** the runner's cores are Neoverse-N2 server cores, not the S22+'s Cortex-X2/A710/A510, and there is no Android scheduler, thermal limit or audio thread priority. **[Assumption]** relative gains carry over to the phone; absolute numbers do not.
@@ -63,7 +64,7 @@ Long runs (`caw_bench SECONDS 600`) and per-track callback-size checks (`caw_ben
 What it shows (for the phases to act on):
 
 - **Over budget:** the heavy Flagship at full polyphony and the 32-track heavy-FX song use about 90–107% of one core per callback on every target; both would drop out on a single audio thread.
-- **Worst cases come at Play:** in most scenarios the worst callback is the first one after Play (worst at 0.00 s), 2–8 times the mean: the first block's note-ons and first-time work.
+- **Worst cases came at Play:** in most scenarios the worst callback was the first one after Play (worst at 0.00 s), 2–8 times the mean: two resets of every instrument and every parameter resolved for the first time (fixed in [A3](#a3-the-first-callback-after-play)).
 - **Sleep mostly works:** the tail rang out for 13.9 s to −100 dBFS; the silence after it cost 36–40 µs a callback against 26–31 µs for a project that never played, but its p99 (about 100 µs) is three times the floor's (about 35 µs), so something still runs on some callbacks after the tail ends.
 - **Android build:** on the same Arm64 cores the NDK's Clang build is 0–9% faster than the GCC build in most scenarios (3–4% in the heavy ones) and about 2% slower on the tail's notes.
 
@@ -412,3 +413,65 @@ The other scenarios have no Flagship and moved within the runners' noise. The fi
 | Flagship heavy, 16 voices held | 1,603.6 | 1,493.4 | −6.9% |
 
 - **What is left (callgrind, flagship_heavy16 after):** the fold stack (`addTwice` with its table reads, 43%), the unwarped copies (`addStack`, 25%), the filter drive (`VoiceFilter::begin`, 5%) and the ladders (4%). **[Proposal]** the next step for the heavy patch is fewer table reads rather than wider vectors (for example a cheaper fold at the high rate).
+
+### A3. The first callback after Play
+
+**What changed (2026-11-13, branch `engine-a345`, on `d932771`; beta readiness plan A3):** callgrind of the first callback after Play (the bench's way: the project set, 0.25 s stopped, then Play; 256 frames) against the steady mean found two kinds of first-time work, both on the audio thread:
+
+- **Two resets of every instrument:** `startPlay` reset each track's instrument, then its first `runInstrument` reset it again (`instrumentIdle`). For `org.caw.drums` that clears every voice and its room reverb (`DrumsProcessor::reset`, 6.6 M of song8's 12.2 M instructions). Now `ComponentChain::reset` is a no-op when nothing has run since the last one (`clean_`, set by `reset`, cleared by `process` and `runModulator`), and an instrument chain of built-ins is reset once when it is built, on the control thread (`ComponentChain::make`), so the audio thread's resets at Play find it clean. A component's `reset` puts it back as `activate` left it, so nothing heard changes. A chain holding a loaded (Trusted) component is not reset at build: the native ABI says nothing about which thread may call `reset`, and another instance may be running on the audio thread, so its reset stays on the audio thread (audio review, 2026-11-13). Every path that runs a processor clears `clean_` first; a debug assert at the call sites checks it.
+- **Every parameter resolved for the first time:** a chain's first block resolved each component's every parameter (`resolveEntry`: song8's drums alone have thousands; 21,645 resolves, 2.3 M instructions in First loop's first callback). Now each component's values are resolved when the chain is built, and a block where only the play state changed (a Play, or stopped to playing) and no lane drives the component keeps its values, as the full pass would give them; a Play still ends knob overrides (`anyTouched`). `ComponentAutomation::anyLane` says which components a lane drives.
+
+**[Fact, callgrind, 2026-11-13]** instructions in `Engine::process`, x86-64 GCC 13.3 Release, the first callback after Play and the mean of callbacks 40–139:
+
+| Scenario | First callback before | after | Steady mean |
+|---|---:|---:|---:|
+| First loop (6 tracks) | 10.38 M | 1.45 M | 1.23 M |
+| Typical song (8 tracks) | 12.23 M | 3.17 M | 5.26 M |
+
+**[Fact, Bench runs, 10 s × 3 runs]** worst callback µs (worst ÷ mean; when not 0.00 s, the worst is no longer the first callback). Before: [43348511989](https://github.com/Kmandevr/C.A.W/actions/runs/43348511989) (`72724e6`, `d932771`'s engine). After: [43349254446](https://github.com/Kmandevr/C.A.W/actions/runs/43349254446) (`eb2b111`). Means moved within ±1% on the arm64 targets.
+
+| Scenario | Android arm64 before | after | Linux arm64 before | after | Linux x64 before | after |
+|---|---:|---:|---:|---:|---:|---:|
+| First loop (6 tracks) | 996 at 0.00 s (6.8×) | 251 at 0.00 s (1.7×) | 847 at 0.00 s (5.5×) | 272 at 2.67 s (1.8×) | 866 at 0.00 s (6.8×) | 271 at 8.43 s (2.1×) |
+| Three tracks | 559 at 0.00 s (2.6×) | 309 at 0.00 s (1.5×) | 515 at 0.00 s (2.4×) | 379 at 5.34 s (1.7×) | 471 at 0.00 s (2.4×) | 333 at 1.44 s (1.7×) |
+| Typical song (8 tracks) | 1,170 at 0.00 s (1.7×) | 856 at 8.66 s (1.2×) | 1,072 at 0.00 s (1.6×) | 872 at 5.33 s (1.3×) | 1,043 at 0.00 s (1.7×) | 1,421 at 1.09 s (2.3×) |
+| Typical song + extras | 1,544 at 0.00 s (1.6×) | 1,263 at 3.91 s (1.3×) | 1,353 at 0.00 s (1.5×) | 1,398 at 8.86 s (1.5×) | 1,374 at 0.00 s (1.7×) | 1,142 at 9.62 s (1.4×) |
+| Song, 16 tracks | 2,323 at 0.00 s (1.8×) | 1,607 at 8.36 s (1.2×) | 2,020 at 0.00 s (1.5×) | 1,600 at 9.58 s (1.2×) | 2,254 at 0.00 s (2.1×) | 2,117 at 2.86 s (2.0×) |
+| Song, 32 tracks + heavy FX | 5,690 at 0.00 s (1.4×) | 5,850 at 4.81 s (1.4×) | 4,767 at 3.91 s (1.2×) | 4,872 at 5.81 s (1.2×) | 5,493 at 0.00 s (1.7×) | 6,133 at 5.78 s (1.9×) |
+
+- After the change the first callback is the worst only on Android arm64's two smallest projects, at 1.5–1.7× the mean (the first block's note-ons), and nowhere on Linux; the worst cases left come mid-play and move between runs (the shared runners' noise; Linux x64's song8 worst rose with no change in its mean). The Flagship-only scenarios were already at about 1.1× (Flagship's reset is cheap) and are unchanged.
+- **Test:** `the_first_callback_after_play_allocates_nothing_and_costs_about_the_mean` (`caw_rt_tests`, `engine_rt_test.cpp`): drums with glue and room plus a Flagship through a chorus, set and left stopped for 0.25 s, then Play; the first callback allocates nothing and, the best of 7 fresh engines, costs at most 2× the mean of callbacks 20–120. It failed before the change (2.4× and 3.5× in two runs) and passes after (1.3×).
+- Every reference render and golden passes unchanged (Release and Debug with sanitizers, x86-64 GCC 13).
+
+### A4. Per-callback loops over the slots in use (#133)
+
+**What changed (2026-11-13, branch `engine-a345`):** #133's item 2 (`c31b95c`, 2026-11-11) had already moved the per-chunk loops (`planChunk`, `updateSolo`, the preview and overload scans, routing) onto the ascending in-use list (`live_`). What still scanned the whole capacity: `startPlay`'s three loops, with `updateSolo` called once per active slot inside one of them (slots × in-use list), and `wakeMonitors`, which runs every stopped callback while input monitoring is wanted. They now walk `live_` (an active slot is always listed: Install and ConfigureBus list it, and a slot leaves only when inactive), and solo is worked out once per Play; a slot that leaves the list clears its tail flags, which `startPlay` used to clear for every slot. Still over the capacity, once per event and not per callback: `endPlayback` (Stop's fade end), the tempo change's note release, `ClearOverload` (the overload shedding work on branch `bt-clicks`), a device's all-notes-off and the previews' release-all.
+
+**[Fact, callgrind, 2026-11-13]** M Ir per second of audio in `Engine::process`, x86-64 GCC 13.3 Release, `caw_bench 2 500 --runs 1 --only ID` divided by 2, `d932771` against `410f700` (A3 and A4 together; the difference is the first callback's, A3, since these scenarios run at capacity 64 with every per-chunk loop already bounded):
+
+| Scenario | Before | After | Change |
+|---|---:|---:|---:|
+| Typical song (8 tracks) | 1,031.1 | 1,026.0 | −0.5% |
+| Song, 32 tracks + heavy FX | 5,585.7 | 5,564.0 | −0.4% |
+| Tail project, no notes | 24.3 | 24.1 | −0.8% |
+
+### A5. CPU features
+
+**What each build enables (checked 2026-11-13 in `engine/CMakeLists.txt`, `bench.yml`, `engine.yml` and `app/android/app/build.gradle.kts`):** no build passes `-march`, `-mcpu` or `/arch`. Linux x64 (GCC 13) and Windows x64 (MSVC) therefore target the x86-64 baseline: SSE2, no AVX and no FMA (MSVC's default `/arch:SSE2`). Linux arm64 (GCC 13) and Android (NDK 28.2 Clang, `arm64-v8a` only, the app's single ABI) target Armv8-A, where NEON (Advanced SIMD) and fused multiply-add are part of the baseline, so they already have both (phase 2's contraction uses them). The two-wide `Pair` code (`src/stereo_pair.h`) is SSE2 on x86-64 and NEON on Arm64.
+
+**Measured: the whole engine built for x86-64-v3 (AVX2, FMA) against the baseline, on one runner, alternating, 3 runs each.** **[Fact, Bench run [43349254446](https://github.com/Kmandevr/C.A.W/actions/runs/43349254446), temporary jobs since removed; mean µs, the median of 3]**
+
+| Scenario | GCC 13 baseline | `-march=x86-64-v3` | change | MSVC default | `/arch:AVX2` | change |
+|---|---:|---:|---:|---:|---:|---:|
+| Typical song (8 tracks) | 439.1 | 371.3 | −15.4% | 802.2 | 817.2 | +1.9% |
+| Flagship heavy, 64 voices held | 2,013.4 | 1,428.8 | −29.0% | 6,273.2 | 6,194.1 | −1.3% |
+| Drums kit, 16 pads busy | 202.8 | 166.3 | −18.0% | 312.8 | 314.4 | +0.5% |
+| Song, 32 tracks + heavy FX | 2,322.6 | 1,932.7 | −16.8% | 4,344.7 | 4,413.3 | +1.6% |
+
+GCC on AMD EPYC 9V45 (run 43349254446; an earlier run, [43337163191](https://github.com/Kmandevr/C.A.W/actions/runs/43337163191), on another x64 runner, gave −15%, −25%, −17% and −15%); MSVC on AMD EPYC 9V74. Every test, reference renders included, passes with `-march=x86-64-v3` (x86-64 GCC 13 Release, 2026-11-13).
+
+- **GCC gains 15–29%** from AVX2 and FMA together (with `-ffp-contract=fast`, x86-64-v3 brings phase 2's fused multiply-adds to x86-64), spread over the whole engine rather than a few kernels.
+- **MSVC gains nothing** from `/arch:AVX2` (±2%): it keeps `/fp:precise` (no contraction) and its vectoriser leaves the same loops scalar.
+- **MSVC is the slow x86-64 build:** on the same CPU model in one run (EPYC 9V74, 43349254446), Windows x64 took 797 µs for the typical song against GCC's 615, and 6,274 µs for the heavy Flagship against 2,716 (2.3×).
+- **Not built (no gain where it would ship):** runtime dispatch only pays on x86-64, whose shipped build is the Windows app's MSVC, where the wider instruction set measured no gain. GCC/Clang `target_clones` on a few kernels would not reach the engine-wide gain above (callees not inlined stay baseline) and does not exist in MSVC; a second AVX2 copy of the whole engine compiled into one binary breaks the one-definition rule (the linker may give baseline code an AVX2 copy of an inline Library function). Arm64 needs none: NEON and FMA are its baseline. **[Proposal]** for the owner: build the Windows engine DLL with clang-cl and the engine's GCC/Clang flags (contraction, the fast-math subsets), then measure x86-64-v3 for it, shipped either as a second DLL chosen at load by a CPU check or as the minimum Windows CPU (AVX2: Intel Haswell 2013, AMD Excavator 2015 and later); both change the Windows build, so neither is done here.
+

@@ -1,4 +1,4 @@
-# Engine speed: builds Release caw_bench and runs its suite (caw_bench SECONDS 500) on Linux x64, Linux Arm64 and an Android arm64 binary on Arm64 hardware, with the mix graph on one thread, on 3 pool workers and on the machine's own count.
+# Engine speed: builds Release caw_bench and runs its suite (caw_bench SECONDS 500) on Linux x64, Linux Arm64, Windows x64 (MSVC) and an Android arm64 binary on Arm64 hardware, with the mix graph on one thread, on 3 pool workers and on the machine's own count.
 name: Bench
 on:
   push:
@@ -69,6 +69,33 @@ jobs:
           name: bench-${{ matrix.slug }}
           path: bench-${{ matrix.slug }}-t*
 
+  # Windows x64: MSVC (the Flutter Windows app's compiler), Release with its default link-time optimisation and
+  # /fp:precise, on the runner engine.yml tests Windows on.
+  windows:
+    name: Bench (Windows x64)
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build caw_bench (Release, MSVC)
+        run: |
+          cmake -S engine -B build -DCAW_AUDIO=OFF
+          cmake --build build --config Release --target caw_bench --parallel
+      - name: Machine
+        run: |
+          Get-CimInstance Win32_Processor | Format-List Name, NumberOfCores, NumberOfLogicalProcessors, MaxClockSpeed
+      - name: Run the suite
+        shell: bash
+        run: |
+          for t in $MIX_THREADS; do
+            build/Release/caw_bench.exe "$SECONDS_PER" 500 --runs "$RUNS" --threads "$t" --label "Windows x64, $t mix workers" \
+              --json "bench-windows-x64-t$t.json" --md "bench-windows-x64-t$t.md"
+            cat "bench-windows-x64-t$t.md" >> "$GITHUB_STEP_SUMMARY"
+          done
+      - uses: actions/upload-artifact@v7
+        with:
+          name: bench-windows-x64
+          path: bench-windows-x64.*
+
   # Android: caw_bench cross-compiled with the APK's NDK for arm64-v8a as a static bionic executable (no
   # /system/bin/linker64 needed), then run on the ubuntu-24.04-arm runner: real Arm64 cores under a Linux kernel,
   # not an emulator (arm64 emulator images on x86 runners are translated and far too slow and noisy to time).
@@ -125,7 +152,7 @@ jobs:
 
   summary:
     name: Summary
-    needs: [linux, android-run]
+    needs: [linux, windows, android-run]
     if: always()
     runs-on: ubuntu-24.04
     steps:
@@ -137,7 +164,7 @@ jobs:
         run: |
           python3 -I - <<'EOF' >> "$GITHUB_STEP_SUMMARY"
           import json, glob
-          order = [f"{t}-t{n}" for t in ("linux-x64", "linux-arm64", "android-arm64") for n in (0, 3, "auto")]
+          order = [f"{t}-t{n}" for t in ("linux-x64", "linux-arm64", "windows-x64", "android-arm64") for n in (0, 3, "auto")]
           data = {}
           for f in glob.glob("bench-*.json"):
               with open(f) as h:

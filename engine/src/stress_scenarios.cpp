@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <filesystem>
 #include <memory>
 
 #include "audio_clips.h"
@@ -301,8 +302,8 @@ ProjectSpec typicalSong(bool extras, const std::string& dir, std::string* error)
         const double t = static_cast<double>(i) / 48000.0;
         return static_cast<float>(0.4 * std::sin(2 * 3.14159265 * 220 * t) + 0.15 * std::sin(2 * 3.14159265 * 661 * t));
     }, wavError) && error && error->empty()) *error = wavError;
-    // The path escaped for JSON (a Windows folder has backslashes).
-    const std::string zones = "{\"zones\":[{\"path\":\"" + jsonEscape(tone) + "\",\"pitch_keycenter\":57,\"loop_mode\":\"loop_sustain\","
+    // Forward slashes (as caw_bench had them, engine-a345), escaped for JSON all the same.
+    const std::string zones = "{\"zones\":[{\"path\":\"" + jsonEscape(std::filesystem::path(tone).generic_string()) + "\",\"pitch_keycenter\":57,\"loop_mode\":\"loop_sustain\","
                               "\"loop_start\":2000,\"loop_end\":90000,\"loop_crossfade\":0.01}]}";
     std::string samp;
     for (int b = 0; b < 4; ++b)

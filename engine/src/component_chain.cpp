@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <bit>
+#include <cassert>
 #include <chrono>
 #include <cmath>
 #include <cstring>
@@ -242,7 +243,9 @@ std::unique_ptr<ComponentChain> ComponentChain::make(const ModuleRegistry& regis
     chain->sampleRate_ = sampleRate;
     if (instrument) chain->notes_ = std::make_unique<NoteEvents>();
     chain->entries_.reserve(specs.size());
+    bool foreign = false;  // a loaded library's component (Trusted native code), not a built-in
     for (const ComponentSpec& spec : specs) {
+        foreign = foreign || !registry.isBuiltin(spec.id);
         const ModuleDescriptor* d = registry.find(spec.id);
         if (!d) {
             error = "native component " + quoted(spec.id) + " is not loaded; load it with an explicit trust choice first";
@@ -374,8 +377,19 @@ std::unique_ptr<ComponentChain> ComponentChain::make(const ModuleRegistry& regis
             return nullptr;
         }
         applyComponentHostData(*e->processor, spec, sampleRate);  // audio clips, a sampler's zones
+        // Its values resolved once here, on the control thread, as the audio thread's first block would (stopped,
+        // no lanes yet): a Play then only finds the play state changed, which costs nothing for a component no lane
+        // drives (resolveEntry), so the first callback after Play does not resolve every parameter (A3).
+        chain->resolveEntry(*e, chain->entries_.size(), kMaxFrames, nullptr, false, false);
         chain->entries_.push_back(std::move(e));
     }
+    // An instrument is reset before it first plays (Play, or its first run after it was idle). Done here, on
+    // the control thread, the audio thread's reset finds the chain clean and skips it, so the first callback
+    // after Play does not clear every voice and delay line (A3, docs/engine-performance.md). A component's
+    // reset puts it back as activate left it (ModuleProcessor), so this changes nothing heard. Built-ins only:
+    // the native component ABI says nothing about which thread may call reset, and another instance of a loaded
+    // library may be running on the audio thread, so a chain with one keeps clean_ false and is reset there.
+    if (instrument && !foreign) chain->reset();
     return chain;
 }
 
@@ -502,6 +516,7 @@ std::unique_ptr<ComponentAutomation> ComponentChain::automationFor(
     auto table = std::make_unique<ComponentAutomation>();
     table->lanes = lanes;
     table->byParam.resize(entries_.size());
+    table->anyLane.assign(entries_.size(), 0);
     bool any = false;
     const char* targetType = instrument() ? "instrument" : noteFx_ ? "noteComponent" : "component";
     for (std::size_t i = 0; i < entries_.size(); ++i) {
@@ -513,6 +528,7 @@ std::unique_ptr<ComponentAutomation> ComponentChain::automationFor(
                 if (lane.targetType == targetType && lane.moduleId == layer &&
                     lane.component == static_cast<int>(i) && lane.target == d.parameters[k].id && !lane.points.empty()) {
                     table->byParam[i][k] = &lane;
+                    table->anyLane[i] = 1;
                     any = true;
                     break;
                 }
@@ -546,11 +562,17 @@ uint64_t ComponentChain::latencyFrames() const noexcept {
     return latency;
 }
 
+// clean_ lets reset() skip a reset that would change nothing. It is only right while every path that runs a
+// processor (process(), runModulator(), and any added later: a call into processPorts, process, a note or state
+// call made on the audio thread) clears clean_ before it calls in; each does, and a debug assert at the call
+// sites checks it.
 void ComponentChain::reset() noexcept {
+    if (clean_) return;  // nothing has run since the last reset: its state is already the reset state
     for (auto& e : entries_) {
         e->processor->reset();
         e->asleep = false;
     }
+    clean_ = true;
 }
 
 namespace {
@@ -570,13 +592,25 @@ void ComponentChain::resolveEntry(Entry& e, std::size_t index, uint32_t m, const
     // Parameters move on even while bypassed, so a component comes back at its current values. Nothing new
     // since the last block (no value, touch, lane or play change, no ramp): last block's values stand.
     const uint32_t generation = e.generation.load(std::memory_order_acquire);
-    const bool steady = generation == e.seenGeneration && !newPlay && !e.dynamic && playing == e.seenPlaying &&
-                        e.seenLanes == static_cast<const void*>(automation_);
+    const bool unchanged = generation == e.seenGeneration && !e.dynamic && e.seenLanes == static_cast<const void*>(automation_);
+    const bool steady = unchanged && !newPlay && playing == e.seenPlaying;
     e.seenGeneration = generation;
     e.seenPlaying = playing;
     e.seenLanes = automation_;
+    if (steady) return;
+    if (unchanged && !(automation_ && index < automation_->anyLane.size() && automation_->anyLane[index])) {
+        // Only the play state moved, and no lane drives this component: each parameter would resolve to the value
+        // it has (no new value or touch, no ramp, no lane), so the values stand. A Play still ends knob overrides.
+        // The first callback after Play costs no more than the next (A3, docs/engine-performance.md).
+        if (newPlay && e.anyTouched) {
+            for (ParameterResolver& r : e.resolvers) r.clearTouch();
+            e.anyTouched = false;
+        }
+        return;
+    }
     e.dynamic = false;
-    for (std::size_t k = 0; k < count && !steady; ++k) {
+    if (newPlay) e.anyTouched = false;
+    for (std::size_t k = 0; k < count; ++k) {
         if (newPlay) e.resolvers[k].clearTouch();  // a Play ends knob overrides: the lanes rule again
         const uint32_t touch = e.touches[k].load(std::memory_order_acquire);
         const uint64_t bits = e.held[k].load(std::memory_order_relaxed);
@@ -584,11 +618,13 @@ void ComponentChain::resolveEntry(Entry& e, std::size_t index, uint32_t m, const
             e.seenTouch[k] = touch;
             e.seenBits[k] = bits;
             e.resolvers[k].setBase(fromBits(bits));
+            e.anyTouched = true;
         } else if (bits != e.seenBits[k]) {  // a project update: ramps, not a touch
             e.seenBits[k] = bits;
             const bool touched = e.resolvers[k].touched();
             e.resolvers[k].setBase(fromBits(bits));
             if (!touched) e.resolvers[k].clearTouch();
+            e.anyTouched = e.anyTouched || touched;
         }
         const double* automation = nullptr;
         const ProjectAutomationLaneSpec* lane =
@@ -651,6 +687,7 @@ bool ComponentChain::runModulator(std::size_t index, uint32_t m, double sampleRa
                                   const Event* events, uint32_t eventCount, const float* inL, const float* inR,
                                   float* const* outs, uint32_t outCount) noexcept {
     if (!modulators_ || index >= entries_.size() || m == 0 || m > kMaxFrames) return false;
+    clean_ = false;  // a processor runs below (see reset())
     Entry& e = *entries_[index];
     ProfileScope scope(time ? time->profile : nullptr, e.processor.get(), &e.id);
     if (scope.slot) scope.slot->modulator = true;
@@ -681,6 +718,7 @@ bool ComponentChain::runModulator(std::size_t index, uint32_t m, double sampleRa
     ports.parameters = e.values.empty() ? nullptr : modulated(e, index, m, time);
     ports.parameterCount = static_cast<uint32_t>(e.values.size());
     ports.transport = time ? &transport : nullptr;
+    assert(!clean_ && "a path that runs a processor must clear clean_ first (reset() would skip a needed reset)");
     const bool ok = e.processor->processPorts(ports);
     for (uint32_t k = 0; k < outCount; ++k) {
         float* o = outs[k];
@@ -691,6 +729,7 @@ bool ComponentChain::runModulator(std::size_t index, uint32_t m, double sampleRa
 
 void ComponentChain::process(float* left, float* right, uint32_t m, double sampleRate, const ChainTime* time) noexcept {
     if (m == 0 || m > kMaxFrames) return;
+    clean_ = false;  // processors run below (see reset())
     if (notes_) {  // an instrument makes its sound from silence: bypassed, it crossfades to silence
         std::fill_n(left, m, 0.0f);
         std::fill_n(right, m, 0.0f);
@@ -710,6 +749,7 @@ void ComponentChain::process(float* left, float* right, uint32_t m, double sampl
         resolveEntry(e, index, m, time, playing, newPlay);
         const double target = e.bypass.load(std::memory_order_relaxed) ? 0.0 : 1.0;
         if (e.mix == 0.0 && target == 0.0) continue;  // bypassed: not run, input passes on untouched
+        assert(!clean_ && "a path that runs a processor must clear clean_ first (reset() would skip a needed reset)");
         if (e.mix == 0.0) e.processor->reset();  // back from a bypass: no audio from before it
         // Asleep (fallen silent) and still nothing coming in: not run. Its output is silence, which is already
         // in left/right (an instrument's are cleared above; an effect's input is silent and passes on).

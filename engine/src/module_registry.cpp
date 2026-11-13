@@ -563,6 +563,12 @@ bool ModuleRegistry::isLoadedComponent(std::string_view id) const noexcept {
     return false;
 }
 
+bool ModuleRegistry::isBuiltin(std::string_view id) const noexcept {
+    for (const ModuleRegistration& registration : registrations_)
+        if (registration.descriptor && registration.descriptor->id == id) return !registration.component;
+    return false;
+}
+
 std::vector<const ModuleDescriptor*> ModuleRegistry::loadedComponents() const {
     std::vector<const ModuleDescriptor*> out;
     for (const ModuleRegistration& registration : registrations_)
