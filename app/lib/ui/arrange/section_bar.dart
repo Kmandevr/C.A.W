@@ -270,15 +270,18 @@ class _ArrangeSectionBarState extends State<ArrangeSectionBar> {
         onSecondaryTapUp: (d) => _emptyMenu(d.globalPosition, d.localPosition.dx),
         child: DecoratedBox(decoration: BoxDecoration(color: Neon.panel.withValues(alpha: 0.5),
             border: const Border(bottom: BorderSide(color: Neon.line)))))),
-      // Where a held section would land: its outline on the bar line.
+      for (final id in ids) _block(id, _shown[id]!, live[id], slide),
+      // Where a held section would land, over the rest: its outline on the bar line, pink where another section is.
       if (moving != null && moving.isRegion)
         Positioned(left: _landAt * w, top: 1, height: h - 2,
-          width: math.max(16.0, (moving.endSteps! - moving.startSteps) * w), child: IgnorePointer(child: DecoratedBox(
-            key: const ValueKey('section-landing'),
-            decoration: BoxDecoration(borderRadius: BorderRadius.circular(4),
-              border: Border.all(color: (s.sectionFits(_landAt, _landAt + moving.endSteps! - moving.startSteps,
-                  except: moving) ? Neon.text : Neon.pink).withValues(alpha: 0.7)))))),
-      for (final id in ids) _block(id, _shown[id]!, live[id], slide),
+          width: math.max(16.0, (moving.endSteps! - moving.startSteps) * w), child: IgnorePointer(child: Builder(
+            builder: (context) {
+              final ok = s.sectionFits(_landAt, _landAt + moving.endSteps! - moving.startSteps, except: moving);
+              final c = ok ? Neon.text : Neon.pink;
+              return DecoratedBox(key: const ValueKey('section-landing'), decoration: BoxDecoration(
+                color: c.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(4),
+                border: Border.all(color: c.withValues(alpha: 0.85), width: 1.5)));
+            }))),
     ]));
   }
 }

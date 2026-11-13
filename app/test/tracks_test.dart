@@ -89,7 +89,9 @@ void main() {
     await tester.tap(find.byTooltip('Settings'));
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
-    expect(find.text('12/4'), findsOneWidget);
+    // In the settings, and as the ruler's flag at bar 1 (a meter other than 4/4 shows one).
+    expect(find.text('12/4'), findsNWidgets(2));
+    expect(find.descendant(of: find.byKey(const ValueKey('arrange-ruler')), matching: find.text('12/4')), findsOneWidget);
     s.dispose();
   }, skip: skip);
 }
