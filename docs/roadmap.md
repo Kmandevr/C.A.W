@@ -64,7 +64,7 @@ An overview by area, checked against the repository on 2026-11-03. The stage tab
 3. **1.0.4:** audio stretching with Signalsmith Stretch (licence to confirm): follow tempo, stretch to fit, pitch shift, slice to MIDI, and a sample editor (#208).
 4. **1.0.5:** comping, freeze, bounce in place, consolidate, stem export (#33) and app-wide undo (#209).
 5. **1.0.6:** clip automation and VCA groups (#210), MIDI out and MIDI clock (#211).
-6. **1.0.7:** hosting other people's plug-ins: CLAP and VST3 on Windows and CLAP on Android, behind Isolated, Trusted or Blocked (#212).
+6. **1.0.7:** the foundation for hosting other people's plug-ins (#212): the isolation design (reviewed first), the out-of-process host, the scan and the loader behind Isolated, Trusted or Blocked. All of it is hidden from users. The plug-in hosting feature itself (CLAP and VST3 on Windows, CLAP on Android) ships in 1.1.0 (owner, 2026-11-13).
 7. **1.0.8:** a notation view (#213).
 8. **iOS and macOS builds** (#214), once the owner has an Apple Developer membership.
 

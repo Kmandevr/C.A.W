@@ -25,7 +25,7 @@ updated: 2026-11-13
 
   Video sync stays off the roadmap.
 - **Releases:** batches ship as numbered patches, and 1.1.0 is the major update ("more will go into it").
-- **Plug-in hosting:** CLAP and VST3 on Windows and CLAP on Android, always behind the per-item Isolated, Trusted or Blocked choice.
+- **Plug-in hosting:** CLAP and VST3 on Windows and CLAP on Android, always behind the per-item Isolated, Trusted or Blocked choice. The foundation is built first, in the batches, but users don't see it; the feature is released in 1.1.0.
 - **Stretching:** Signalsmith Stretch. **[Assumption]** It is MIT-licensed; to be confirmed from its source before adoption.
 
 The plan is in [roadmap](roadmap.md) and #215.
