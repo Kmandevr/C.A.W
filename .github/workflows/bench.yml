@@ -1,8 +1,8 @@
-# Engine speed: builds Release caw_bench and runs its suite (caw_bench SECONDS 500) on Linux x64, Linux Arm64 and an Android arm64 binary on Arm64 hardware.
+# Engine speed: builds Release caw_bench and runs its suite (caw_bench SECONDS 500) on Linux x64, Linux Arm64, Windows x64 (MSVC) and an Android arm64 binary on Arm64 hardware.
 name: Bench
 on:
   push:
-    branches: [Main]
+    branches: [Main, engine-a345]  # TEMPORARY: engine-a345's before/after measurements; revert to [Main]
     paths:
       - "engine/**"
       - "!engine/compiler/**"
@@ -64,6 +64,58 @@ jobs:
           name: bench-${{ matrix.slug }}
           path: bench-${{ matrix.slug }}.*
 
+  # Windows x64: MSVC (the Flutter Windows app's compiler), Release with its default link-time optimisation and
+  # /fp:precise, on the runner engine.yml tests Windows on.
+  windows:
+    name: Bench (Windows x64)
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build caw_bench (Release, MSVC)
+        run: |
+          cmake -S engine -B build -DCAW_AUDIO=OFF
+          cmake --build build --config Release --target caw_bench --parallel
+      - name: Machine
+        run: |
+          Get-CimInstance Win32_Processor | Format-List Name, NumberOfCores, NumberOfLogicalProcessors, MaxClockSpeed
+      - name: Run the suite
+        shell: bash
+        run: |
+          build/Release/caw_bench.exe "$SECONDS_PER" 500 --runs "$RUNS" --label "Windows x64" \
+            --json bench-windows-x64.json --md bench-windows-x64.md
+          cat bench-windows-x64.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: bench-windows-x64
+          path: bench-windows-x64.*
+
+  # TEMPORARY (engine-a345, A5): the same code built for the x86-64 baseline (SSE2) and for x86-64-v3 (AVX2, FMA)
+  # on one runner, run one after the other, to see what a wider instruction set would gain. Remove with the trigger.
+  isa:
+    name: Bench (x86-64 baseline vs v3)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build both
+        run: |
+          cmake -S engine -B build -DCMAKE_BUILD_TYPE=Release -DCAW_AUDIO=OFF
+          cmake -S engine -B build-v3 -DCMAKE_BUILD_TYPE=Release -DCAW_AUDIO=OFF -DCMAKE_CXX_FLAGS=-march=x86-64-v3
+          cmake --build build --target caw_bench --parallel
+          cmake --build build-v3 --target caw_bench --parallel
+      - name: Machine
+        run: lscpu | grep -E 'Model name|^CPU\(s\)|Flags' | cut -c1-400 || true
+      - name: Run both, alternating
+        run: |
+          for i in 1 2 3; do
+            build/caw_bench "$SECONDS_PER" 500 --runs 1 --label "x64 baseline $i" --json "isa-base-$i.json" --md "isa-base-$i.md"
+            build-v3/caw_bench "$SECONDS_PER" 500 --runs 1 --label "x64 v3 $i" --json "isa-v3-$i.json" --md "isa-v3-$i.md"
+          done
+          cat isa-*.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: isa-x64
+          path: isa-*
+
   # Android: caw_bench cross-compiled with the APK's NDK for arm64-v8a as a static bionic executable (no
   # /system/bin/linker64 needed), then run on the ubuntu-24.04-arm runner: real Arm64 cores under a Linux kernel,
   # not an emulator (arm64 emulator images on x86 runners are translated and far too slow and noisy to time).
@@ -117,7 +169,7 @@ jobs:
 
   summary:
     name: Summary
-    needs: [linux, android-run]
+    needs: [linux, windows, android-run]
     if: always()
     runs-on: ubuntu-24.04
     steps:
@@ -129,7 +181,7 @@ jobs:
         run: |
           python3 -I - <<'EOF' >> "$GITHUB_STEP_SUMMARY"
           import json, glob
-          order = ["linux-x64", "linux-arm64", "android-arm64"]
+          order = ["linux-x64", "linux-arm64", "windows-x64", "android-arm64"]
           data = {}
           for f in glob.glob("bench-*.json"):
               with open(f) as h:
