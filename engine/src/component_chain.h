@@ -31,6 +31,7 @@ public:
 struct ComponentAutomation {
     std::shared_ptr<const std::vector<ProjectAutomationLaneSpec>> lanes;  // owns what `byParam` points into
     std::vector<std::vector<const ProjectAutomationLaneSpec*>> byParam;   // [component][parameter], null: none
+    std::vector<uint8_t> anyLane;  // [component]: 1 when a lane drives any of its parameters
 };
 
 // Project modulation for one chain's block (#161, modulation_links.h): for each modulated parameter, its offset in
@@ -231,7 +232,8 @@ public:
     // not run) until an event or input that is not silent; a declared tail alone never puts one to sleep, so
     // the output doesn't depend on the block size. An instrument's input is its notes: no events, none held.
     void process(float* left, float* right, uint32_t m, double sampleRate, const ChainTime* time) noexcept;
-    // Audio thread: clears every component's running state (tails, delay lines), as after activate.
+    // Audio thread: clears every component's running state (tails, delay lines), as after activate; a no-op when
+    // nothing has run since the last reset (an instrument is reset once when built, A3).
     void reset() noexcept;
     // Audio thread: swaps in a new automation table (or none) and returns the old one to retire.
     ComponentAutomation* swapAutomation(ComponentAutomation* next) noexcept {
@@ -259,6 +261,7 @@ private:
         uint32_t seenGeneration = ~0u;           // audio thread
         const void* seenLanes = nullptr;         // audio thread: the automation the values were resolved with
         bool seenPlaying = false, dynamic = true;  // audio thread: dynamic: a ramp or a lane moved a value
+        bool anyTouched = false;  // audio thread: a resolver may hold a touch (a Play clears them)
         double mix = 1.0;  // audio thread: 1 processing, 0 bypassed, between while crossfading
         // Audio thread: asleep, the component is skipped (its output is silence) until an event or input that
         // is not silent (for an instrument: an event).
@@ -286,6 +289,9 @@ private:
     double sampleRate_ = 0;
     ComponentAutomation* automation_ = nullptr;  // owned; swapped and retired by the Engine
     uint64_t playEpoch_ = ~0ull;
+    // Reset and not run since (reset() is then a no-op): set by reset(), cleared by process() and runModulator().
+    // Owned by whichever thread owns the chain: the control thread while it is built, then the audio thread.
+    bool clean_ = false;
     bool modulators_ = false;   // built by buildModulators
     bool modNewPlay_ = false;   // audio thread: beginModulators saw a new Play
     bool noteFx_ = false;       // built by buildNoteEffects

@@ -1,5 +1,8 @@
 // Real-time checks on the whole Engine and its parameter resolver: the audio path never allocates or frees.
+#include <algorithm>
+#include <chrono>
 #include <cmath>
+#include <cstdio>
 #include <cstdint>
 #include <cstring>
 #include <string>
@@ -695,4 +698,46 @@ TEST(the_flagship_s_user_wavetable_and_twice_rate_warps_never_allocate_on_the_au
     }
     CHECK_EQ(operations, 0u);
     CHECK(peak > 0.01f);
+}
+
+TEST(the_first_callback_after_play_allocates_nothing_and_costs_about_the_mean) {
+    // A3: drums with their room, a Flagship and an effect, set and left stopped as the bench does (0.25 s), then
+    // Play. The first callback used to clear every drum voice and the room twice and resolve every parameter of every
+    // component (2-8x the mean on the CI Bench); both now happen when the chains are built. Timed: the best of 7
+    // fresh engines, the first callback against the mean of callbacks 20-120 of the same run.
+    ProjectSpec p;
+    p.bpm = 120;
+    p.loopBars = 1;
+    p.modules.push_back({"acid", kAcidLine});
+    p.modules.push_back({"beat", "---\nkind: pattern\nname: B\nlength: 16\n---\n0 C2 1 1\n0 F#2 1 0.8\n2 F#2 1 0.5\n"
+                                 "4 D2 1 1\n4 F#2 1 0.8\n6 F#2 1 0.5\n8 C2 1 1\n8 F#2 1 0.8\n12 D2 1 1\n"});
+    LayerSpec drums = layer("d", "org.caw.drums", "beat");
+    drums.instrument.params = {{"glue", 0.5}, {"room", 0.3}};
+    p.layers = {drums, layer("f", "org.caw.synth.flagship", "acid", {{"org.caw.chorus", {}}})};
+    constexpr int kFrames = 256;
+    std::vector<float> L(kFrames), R(kFrames);
+    double best = 1e9;
+    std::size_t operations = 0;
+    for (int trial = 0; trial < 7; ++trial) {
+        Engine e(48000);
+        CHECK(e.setProject(p).find("\"ok\":true") != std::string::npos);
+        for (int k = 0; k < 48000 / 4 / kFrames; ++k) e.process(L.data(), R.data(), kFrames);  // applied, stopped
+        e.play();
+        double first = 0;
+        {
+            cawtest::AllocationScope scope;
+            const auto t0 = std::chrono::steady_clock::now();
+            e.process(L.data(), R.data(), kFrames);
+            first = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+            operations += scope.count();
+        }
+        for (int k = 1; k < 20; ++k) e.process(L.data(), R.data(), kFrames);
+        const auto t0 = std::chrono::steady_clock::now();
+        for (int k = 20; k < 120; ++k) e.process(L.data(), R.data(), kFrames);
+        const double mean = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count() / 100;
+        if (mean > 0) best = std::min(best, first / mean);
+    }
+    CHECK_EQ(operations, 0u);
+    std::printf("    first callback after Play: %.2fx the mean (best of 7)\n", best);
+    CHECK(best <= 2.0);
 }

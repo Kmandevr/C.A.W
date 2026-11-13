@@ -375,8 +375,17 @@ std::unique_ptr<ComponentChain> ComponentChain::make(const ModuleRegistry& regis
             return nullptr;
         }
         applyComponentHostData(*e->processor, spec, sampleRate);  // audio clips, a sampler's zones
+        // Its values resolved once here, on the control thread, as the audio thread's first block would (stopped,
+        // no lanes yet): a Play then only finds the play state changed, which costs nothing for a component no lane
+        // drives (resolveEntry), so the first callback after Play does not resolve every parameter (A3).
+        chain->resolveEntry(*e, chain->entries_.size(), kMaxFrames, nullptr, false, false);
         chain->entries_.push_back(std::move(e));
     }
+    // An instrument is reset before it first plays (Play, or its first run after it was idle). Done here, on
+    // the control thread, the audio thread's reset finds the chain clean and skips it, so the first callback
+    // after Play does not clear every voice and delay line (A3, docs/engine-performance.md). A component's
+    // reset puts it back as activate left it (ModuleProcessor), so this changes nothing heard.
+    if (instrument) chain->reset();
     return chain;
 }
 
@@ -503,6 +512,7 @@ std::unique_ptr<ComponentAutomation> ComponentChain::automationFor(
     auto table = std::make_unique<ComponentAutomation>();
     table->lanes = lanes;
     table->byParam.resize(entries_.size());
+    table->anyLane.assign(entries_.size(), 0);
     bool any = false;
     const char* targetType = instrument() ? "instrument" : noteFx_ ? "noteComponent" : "component";
     for (std::size_t i = 0; i < entries_.size(); ++i) {
@@ -514,6 +524,7 @@ std::unique_ptr<ComponentAutomation> ComponentChain::automationFor(
                 if (lane.targetType == targetType && lane.moduleId == layer &&
                     lane.component == static_cast<int>(i) && lane.target == d.parameters[k].id && !lane.points.empty()) {
                     table->byParam[i][k] = &lane;
+                    table->anyLane[i] = 1;
                     any = true;
                     break;
                 }
@@ -548,10 +559,12 @@ uint64_t ComponentChain::latencyFrames() const noexcept {
 }
 
 void ComponentChain::reset() noexcept {
+    if (clean_) return;  // nothing has run since the last reset: its state is already the reset state
     for (auto& e : entries_) {
         e->processor->reset();
         e->asleep = false;
     }
+    clean_ = true;
 }
 
 namespace {
@@ -571,13 +584,25 @@ void ComponentChain::resolveEntry(Entry& e, std::size_t index, uint32_t m, const
     // Parameters move on even while bypassed, so a component comes back at its current values. Nothing new
     // since the last block (no value, touch, lane or play change, no ramp): last block's values stand.
     const uint32_t generation = e.generation.load(std::memory_order_acquire);
-    const bool steady = generation == e.seenGeneration && !newPlay && !e.dynamic && playing == e.seenPlaying &&
-                        e.seenLanes == static_cast<const void*>(automation_);
+    const bool unchanged = generation == e.seenGeneration && !e.dynamic && e.seenLanes == static_cast<const void*>(automation_);
+    const bool steady = unchanged && !newPlay && playing == e.seenPlaying;
     e.seenGeneration = generation;
     e.seenPlaying = playing;
     e.seenLanes = automation_;
+    if (steady) return;
+    if (unchanged && !(automation_ && index < automation_->anyLane.size() && automation_->anyLane[index])) {
+        // Only the play state moved, and no lane drives this component: each parameter would resolve to the value
+        // it has (no new value or touch, no ramp, no lane), so the values stand. A Play still ends knob overrides.
+        // The first callback after Play costs no more than the next (A3, docs/engine-performance.md).
+        if (newPlay && e.anyTouched) {
+            for (ParameterResolver& r : e.resolvers) r.clearTouch();
+            e.anyTouched = false;
+        }
+        return;
+    }
     e.dynamic = false;
-    for (std::size_t k = 0; k < count && !steady; ++k) {
+    if (newPlay) e.anyTouched = false;
+    for (std::size_t k = 0; k < count; ++k) {
         if (newPlay) e.resolvers[k].clearTouch();  // a Play ends knob overrides: the lanes rule again
         const uint32_t touch = e.touches[k].load(std::memory_order_acquire);
         const uint64_t bits = e.held[k].load(std::memory_order_relaxed);
@@ -585,11 +610,13 @@ void ComponentChain::resolveEntry(Entry& e, std::size_t index, uint32_t m, const
             e.seenTouch[k] = touch;
             e.seenBits[k] = bits;
             e.resolvers[k].setBase(fromBits(bits));
+            e.anyTouched = true;
         } else if (bits != e.seenBits[k]) {  // a project update: ramps, not a touch
             e.seenBits[k] = bits;
             const bool touched = e.resolvers[k].touched();
             e.resolvers[k].setBase(fromBits(bits));
             if (!touched) e.resolvers[k].clearTouch();
+            e.anyTouched = e.anyTouched || touched;
         }
         const double* automation = nullptr;
         const ProjectAutomationLaneSpec* lane =
@@ -652,6 +679,7 @@ bool ComponentChain::runModulator(std::size_t index, uint32_t m, double sampleRa
                                   const Event* events, uint32_t eventCount, const float* inL, const float* inR,
                                   float* const* outs, uint32_t outCount) noexcept {
     if (!modulators_ || index >= entries_.size() || m == 0 || m > kMaxFrames) return false;
+    clean_ = false;
     Entry& e = *entries_[index];
     ProfileScope scope(gProfile.load(std::memory_order_relaxed), e.processor.get(), &e.id);
     if (scope.slot) scope.slot->modulator = true;
@@ -692,6 +720,7 @@ bool ComponentChain::runModulator(std::size_t index, uint32_t m, double sampleRa
 
 void ComponentChain::process(float* left, float* right, uint32_t m, double sampleRate, const ChainTime* time) noexcept {
     if (m == 0 || m > kMaxFrames) return;
+    clean_ = false;
     if (notes_) {  // an instrument makes its sound from silence: bypassed, it crossfades to silence
         std::fill_n(left, m, 0.0f);
         std::fill_n(right, m, 0.0f);
