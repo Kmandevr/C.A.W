@@ -637,6 +637,27 @@ void References::check(const std::string& name, const Audio& render, Class c, co
 
 std::string References::compare(const std::string& name, const Audio& render, Class c) {
     const std::string label = suite_ + "/" + name;
+    // CAW_RENDER_DIGEST=path: each render's raw bits as a 64-bit FNV-1a digest, one line each (written afresh by each
+    // process), so two runs (one thread and the mix pool, speed phase 5c) can be checked for the same bits.
+    if (const char* digestPath = std::getenv("CAW_RENDER_DIGEST"); digestPath && digestPath[0]) {
+        static bool fresh = true;
+        if (FILE* df = std::fopen(digestPath, fresh ? "w" : "a")) {
+            fresh = false;
+            uint64_t h = 1469598103934665603ull;
+            auto mixBits = [&h](float x) {
+                uint32_t b;
+                std::memcpy(&b, &x, 4);
+                for (int i = 0; i < 4; ++i) {
+                    h ^= (b >> (8 * i)) & 0xffu;
+                    h *= 1099511628211ull;
+                }
+            };
+            for (float x : render.l) mixBits(x);
+            for (float x : render.r) mixBits(x);
+            std::fprintf(df, "%s %zu %016llx\n", label.c_str(), render.frames(), static_cast<unsigned long long>(h));
+            std::fclose(df);
+        }
+    }
     if (render.l.size() != render.r.size() || render.frames() == 0 || render.frames() > kMaxFrames) return "no render to compare";
     const uint32_t frames = static_cast<uint32_t>(render.frames());
     if (updating_) {

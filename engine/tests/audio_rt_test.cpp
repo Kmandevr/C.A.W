@@ -6,6 +6,7 @@
 
 #include "alloc_counter.h"
 #include "engine.h"
+#include "input_bridge.h"
 #include "json.h"
 #include "test.h"
 #include "wav.h"
@@ -79,4 +80,23 @@ TEST(audio_clips_sampler_monitoring_and_recording_never_allocate_on_the_audio_th
     CHECK(peak > 0.01f);
     CHECK(e.liveAudio().stopRecording().find("\"ok\":true") != std::string::npos);
     std::filesystem::remove_all(dir);
+}
+
+TEST(the_input_bridge_never_allocates_on_the_capture_or_output_thread) {
+    caw::InputBridge bridge;
+    bridge.open(2, 640, 768, 12000);
+    std::vector<float> in(192 * 2, 0.1f);
+    std::size_t operations = 0;
+    int ch = 0;
+    {
+        cawtest::AllocationScope scope;
+        for (int k = 0; k < 2000; ++k) {  // live, starved, back: priming, fades, underruns, drift skips
+            if (k < 800 || k > 1200) bridge.push(in.data(), 192);
+            if (k % 3 == 0 && k < 800) bridge.push(in.data(), 192);
+            bridge.pull(256, ch);
+        }
+        operations = scope.count();
+    }
+    CHECK_EQ(operations, 0u);
+    CHECK_EQ(ch, 2);
 }

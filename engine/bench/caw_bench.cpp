@@ -6,7 +6,10 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <atomic>
 #include <map>
+#include <random>
+#include <thread>
 #include <functional>
 #include <memory>
 #include <string>
@@ -18,6 +21,7 @@
 #include "component_chain.h"
 #include "engine.h"
 #include "graph.h"
+#include "mix_pool.h"
 #include "project.h"
 #include "render.h"
 #include "stress_scenarios.h"
@@ -437,6 +441,11 @@ void graphPlanarBench(double secs) {
 
 // ---------- The suite (`caw_bench SECONDS 500 [options]`): fixed scenarios at a stated callback, repeated, for CI ----------
 // Options: --frames N (callback size, default 256), --runs N (default 3), --only ID[,ID] (scenario ids), --label TEXT,
+// --threads N (the mix pool's workers, speed phase 5c: 0, the default, runs the mix graph on one thread; N > 0 runs
+// every level of two or more nodes on the pool, whatever the load, as Engine::MixParallel::Always; `auto` takes
+// MixPool::defaultWorkers(), the count a live device gets on this machine, speed phase 5d), --mode auto (with
+// --threads N: the pool on Engine::MixParallel::Auto, as a live device runs it, each callback's measured time
+// reported through Engine::reportLoad so Auto decides when to use it; the default, always, is the above),
 // --json PATH and --md PATH (machine-readable results and a markdown table). Each run plays every scenario in turn
 // (a fresh Engine each: set up, 0.25 s stopped to apply the project, then Play); a scenario's result is the median
 // of its runs' means and p99s and the largest worst case of any run. docs/engine-performance.md has the numbers.
@@ -474,7 +483,8 @@ const char* targetName() {
 }
 
 int runSuite(double secs, int argc, char** argv) {
-    int frames = 256, runs = 3;
+    int frames = 256, runs = 3, threads = 0;
+    bool autoMode = false;
     std::string only, label = targetName(), jsonPath, mdPath;
     for (int a = 3; a < argc; ++a) {
         const std::string k = argv[a];
@@ -482,14 +492,20 @@ int runSuite(double secs, int argc, char** argv) {
         if (!v) { std::fprintf(stderr, "%s needs a value\n", k.c_str()); return 2; }
         if (k == "--frames") frames = std::atoi(v);
         else if (k == "--runs") runs = std::atoi(v);
+        else if (k == "--threads") threads = std::string(v) == "auto" ? static_cast<int>(MixPool::defaultWorkers()) : std::atoi(v);
         else if (k == "--only") only = std::string(",") + v + ",";
+        else if (k == "--mode" && (std::string(v) == "auto" || std::string(v) == "always")) autoMode = std::string(v) == "auto";
         else if (k == "--label") label = v;
         else if (k == "--json") jsonPath = v;
         else if (k == "--md") mdPath = v;
         else { std::fprintf(stderr, "unknown option %s\n", k.c_str()); return 2; }
         ++a;
     }
-    if (frames < 16 || frames > 8192 || runs < 1 || runs > 50 || secs <= 0) { std::fprintf(stderr, "bad --frames, --runs or SECONDS\n"); return 2; }
+    if (frames < 16 || frames > 8192 || runs < 1 || runs > 50 || secs <= 0 || threads < 0 ||
+        threads > static_cast<int>(MixPool::kMaxWorkers)) {
+        std::fprintf(stderr, "bad --frames, --runs, --threads (0..%u) or SECONDS\n", MixPool::kMaxWorkers);
+        return 2;
+    }
     const double budgetUs = 1e6 * frames / kRate;
     const std::string dir = (std::filesystem::temp_directory_path() / "caw_bench_suite").string();
     std::filesystem::create_directories(dir);
@@ -503,13 +519,22 @@ int runSuite(double secs, int argc, char** argv) {
         rows.push_back({id, name, {}, -1});
         return rows.back();
     };
-    std::printf("caw_bench suite: %s, callback %d frames at %d Hz (budget %.1f us), %.0f s per scenario, %d runs\n",
-                label.c_str(), frames, kRate, budgetUs, secs, runs);
+    std::printf("caw_bench suite: %s, callback %d frames at %d Hz (budget %.1f us), %.0f s per scenario, %d runs, "
+                "--threads %d%s\n", label.c_str(), frames, kRate, budgetUs, secs, runs, threads, autoMode ? " --mode auto" : "");
     std::vector<float> l(static_cast<size_t>(frames)), r(static_cast<size_t>(frames));
     for (int run = 0; run < runs; ++run) {
         for (const SuiteScenario& sc : all) {
             if (!only.empty() && only.find(std::string(",") + sc.id + ",") == std::string::npos) continue;
             Engine e(kRate);
+            if (threads > 0) {
+                if (!e.startMixPool(static_cast<uint32_t>(threads))) {
+                    std::fprintf(stderr, "could not start %d mix workers\n", threads);
+                    return 3;
+                }
+                e.setMixParallel(autoMode ? Engine::MixParallel::Auto : Engine::MixParallel::Always);
+            } else {
+                e.setMixParallel(Engine::MixParallel::Never);
+            }
             const std::string warn = e.setProject(sc.make(dir));
             if (warn.find("\"ok\":true") == std::string::npos) {
                 std::fprintf(stderr, "%s: setProject: %s\n", sc.id, warn.c_str());
@@ -524,10 +549,14 @@ int runSuite(double secs, int argc, char** argv) {
                 const auto t0 = Clock::now();
                 e.process(l.data(), r.data(), frames);
                 us[static_cast<size_t>(c)] = std::chrono::duration<double, std::micro>(Clock::now() - t0).count();
+                if (autoMode) e.reportLoad(us[static_cast<size_t>(c)] / budgetUs, frames, frames);  // as a device callback
                 float m = 0;
                 for (int i = 0; i < frames; ++i) m = std::max(m, std::max(std::fabs(l[static_cast<size_t>(i)]), std::fabs(r[static_cast<size_t>(i)])));
                 peak[static_cast<size_t>(c)] = m;
             }
+            if (autoMode && e.sheddingStats().shed > 0)  // the times then lack the layers shed
+                std::fprintf(stderr, "%s: the engine shed %llu layers (the load passed the budget)\n", sc.id,
+                             static_cast<unsigned long long>(e.sheddingStats().shed));
             const size_t n = us.size();
             if (!sc.tail) {
                 row(sc.id, sc.name).runs.push_back(stats(us, 0, n));
@@ -570,7 +599,8 @@ int runSuite(double secs, int argc, char** argv) {
         std::string j = "{\"tool\":\"caw_bench\",\"format\":1,\"label\":\"" + jsonEscape(label) + "\",\"target\":\"" + targetName() +
                         "\",\"compiler\":\"" + jsonEscape(compilerName()) + "\",\"rate\":" + std::to_string(kRate) +
                         ",\"frames\":" + std::to_string(frames) + ",\"budget_us\":" + std::to_string(budgetUs) +
-                        ",\"runs\":" + std::to_string(runs) + ",\"seconds\":" + std::to_string(secs) + ",\"scenarios\":[";
+                        ",\"runs\":" + std::to_string(runs) + ",\"seconds\":" + std::to_string(secs) +
+                        ",\"threads\":" + std::to_string(threads) + ",\"scenarios\":[";
         for (size_t k = 0; k < out.size(); ++k) {
             const Out& o = out[k];
             j += std::string(k ? "," : "") + "{\"id\":\"" + o.row->id + "\",\"name\":\"" + jsonEscape(o.row->name) +
@@ -592,14 +622,207 @@ int runSuite(double secs, int argc, char** argv) {
     if (!mdPath.empty()) {
         std::ofstream md(mdPath);
         char line[512];
-        std::snprintf(line, sizeof line, "### %s: %d frames at %d Hz (budget %.0f us), %.0f s x %d runs\n\n", label.c_str(),
-                      frames, kRate, budgetUs, secs, runs);
+        std::snprintf(line, sizeof line, "### %s: %d frames at %d Hz (budget %.0f us), %.0f s x %d runs, --threads %d%s\n\n",
+                      label.c_str(), frames, kRate, budgetUs, secs, runs, threads, autoMode ? " --mode auto" : "");
         md << line << "| Scenario | Mean us | p99 us | Worst us | Mean load | Worst load | Worst at |\n|---|---:|---:|---:|---:|---:|---:|\n";
         for (const Out& o : out) {
             std::snprintf(line, sizeof line, "| %s | %.1f | %.1f | %.1f | %.2f%% | %.1f%% | %.2f s |\n", o.row->name.c_str(), o.mean,
                           o.p99, o.worst, 100 * o.mean / budgetUs, 100 * o.worst / budgetUs, o.worstAtS);
             md << line;
         }
+    }
+    return 0;
+}
+
+
+// `caw_bench SECONDS 600 [--only ID] [--frames N] [--app] [--random]`: a long run, fast-forwarded. Plays a suite
+// scenario for SECONDS of audio in device-like callbacks (beginCallback, process, afterCallback, reportLoad, as
+// engine/platform/audio_miniaudio.cpp does) and prints each minute's mean, p99 and worst callback time, so a
+// slowdown over time shows as a rising row. --app also runs the app's read-only polls on another thread at their
+// real rates in audio time (meters, layer meters and scopes 30 Hz, a display 60 Hz, modulator outputs 20 Hz, note
+// FX stats 7 Hz); without it nothing calls the engine, as when the app is in the background. --random draws each
+// callback's size from 1-2048 frames.
+int runLong(double secs, int argc, char** argv) {
+    int frames = 256;
+    bool app = false, random = false;
+    std::string only = "song8";
+    for (int a = 3; a < argc; ++a) {
+        const std::string k = argv[a];
+        if (k == "--app") { app = true; continue; }
+        if (k == "--random") { random = true; continue; }
+        const char* v = a + 1 < argc ? argv[a + 1] : nullptr;
+        if (!v) { std::fprintf(stderr, "%s needs a value\n", k.c_str()); return 2; }
+        if (k == "--frames") frames = std::atoi(v);
+        else if (k == "--only") only = v;
+        else { std::fprintf(stderr, "unknown option %s\n", k.c_str()); return 2; }
+        ++a;
+    }
+    const std::string dir = (std::filesystem::temp_directory_path() / "caw_bench_suite").string();
+    std::filesystem::create_directories(dir);
+    ProjectSpec project;
+    bool found = false;
+    for (const SuiteScenario& sc : suiteScenarios())
+        if (only == sc.id) project = sc.make(dir), found = true;
+    if (!found) { std::fprintf(stderr, "no scenario %s\n", only.c_str()); return 2; }
+    Engine e(kRate);
+    e.setProject(project);
+    std::vector<float> l(4096), r(4096);
+    for (int c = 0; c < kRate / 4 / 256; ++c) e.process(l.data(), r.data(), 256);
+    e.play();
+    std::atomic<int64_t> audioFrames{0};
+    std::atomic<bool> done{false};
+    std::thread poller;
+    std::vector<std::string> ids;
+    for (const LayerSpec& layer : project.layers) ids.push_back(layer.id);
+    if (app)
+        poller = std::thread([&] {
+            int64_t next[6] = {0, 0, 0, 0, 0, 0};
+            const int64_t period[6] = {kRate / 30, kRate / 30, kRate / 30, kRate / 60, kRate / 20, kRate / 7};
+            std::vector<float> buf(kScopeSize);
+            NoteFxStats nfx;
+            while (!done.load()) {
+                const int64_t t = audioFrames.load();
+                bool any = false;
+                for (int k = 0; k < 6; ++k) {
+                    if (t < next[k]) continue;
+                    next[k] = t + period[k];
+                    any = true;
+                    switch (k) {
+                        case 0: (void)e.meters(); break;
+                        case 1: e.layerMeters(static_cast<int>(ids.size()), [](void*, int, const LayerMeter&) {}, nullptr); break;
+                        case 2: e.scope(kScopeMaster, buf.data(), 512); for (int i = 0; i < static_cast<int>(ids.size()); ++i) e.scope(i, buf.data(), 256); break;
+                        case 3: for (const std::string& id : ids) e.componentDisplay(id, 0, buf.data(), static_cast<uint32_t>(buf.size())); break;
+                        case 4: e.modulatorOutputs("lfo", buf.data(), 8); break;
+                        case 5: e.noteFxStats(ids.front(), nfx); break;
+                    }
+                }
+                if (!any) std::this_thread::yield();
+            }
+        });
+    std::mt19937 rng(7);
+    std::uniform_int_distribution<int> size(1, 2048);
+    const int64_t total = static_cast<int64_t>(secs * kRate), minute = 60LL * kRate;
+    std::vector<double> us;
+    int64_t played = 0, bad = 0;
+    float peak = 0;
+    std::printf("caw_bench long run: %s, %s callbacks, %s, %.0f s of audio\n", only.c_str(),
+                random ? "random 1-2048 frame" : (std::to_string(frames) + "-frame").c_str(),
+                app ? "app polls on another thread" : "no app calls (backgrounded)", secs);
+    std::printf("%8s %10s %10s %10s %8s %8s\n", "minute", "mean us/ms", "p99 us/ms", "worst us/ms", "peak", "bad");
+    LiveAudio& live = e.liveAudio();
+    while (played < total) {
+        const int n = random ? size(rng) : frames;
+        const auto t0 = Clock::now();
+        int doneFrames = 0;
+        while (doneFrames < n) {  // the device callback's chunking (kChunk 4096 there)
+            const int m = std::min(n - doneFrames, 4096);
+            live.beginCallback(nullptr, 0, m);
+            e.process(l.data(), r.data(), m);
+            live.afterCallback(l.data(), r.data(), m);
+            for (int i = 0; i < m; ++i) {
+                if (!std::isfinite(l[static_cast<size_t>(i)]) || !std::isfinite(r[static_cast<size_t>(i)])) ++bad;
+                peak = std::max(peak, std::max(std::fabs(l[static_cast<size_t>(i)]), std::fabs(r[static_cast<size_t>(i)])));
+            }
+            doneFrames += m;
+        }
+        const double used = std::chrono::duration<double, std::micro>(Clock::now() - t0).count();
+        e.reportLoad(used / (1e6 * n / kRate), n);
+        us.push_back(used * 1000.0 * kRate / 1e6 / n);  // microseconds per millisecond of audio: size independent
+        if (std::getenv("CAW_BENCH_SPIKES") && us.back() > 1000.0)  // a callback over its budget: when in the song
+            std::printf("  spike %.0f us/ms at %.4f s (%d frames)\n", us.back(), static_cast<double>(played) / kRate, n);
+        const int64_t before = played;
+        played += n;
+        audioFrames.store(played);
+        if (played / minute != before / minute || played >= total) {
+            std::vector<double> x = us;
+            double mean = 0;
+            for (double v : x) mean += v;
+            mean /= static_cast<double>(x.size());
+            std::sort(x.begin(), x.end());
+            std::printf("%8.1f %10.1f %10.1f %10.1f %8.3f %8lld\n", static_cast<double>(played) / minute, mean,
+                        x[x.size() * 99 / 100], x.back(), peak, static_cast<long long>(bad));
+            std::fflush(stdout);
+            us.clear();
+            peak = 0;
+        }
+    }
+    done.store(true);
+    if (poller.joinable()) poller.join();
+    return 0;
+}
+
+// `caw_bench SECONDS 601 [--only ID|FILE.json] [--frames N|--random] [--app] [--rate HZ]`: per-track drift. Renders the scenario twice,
+// in 64-frame callbacks (the reference) and in the given callbacks, with every track tapped, and prints per
+// track and per minute the largest difference between the two, so a track sliding out of time shows as a growing
+// number.
+int runDrift(double secs, int argc, char** argv) {
+    int frames = 441, rate = kRate;
+    bool random = false, app = false;
+    std::string only = "song8";
+    for (int a = 3; a < argc; ++a) {
+        const std::string k = argv[a];
+        if (k == "--random") { random = true; continue; }
+        if (k == "--app") { app = true; continue; }
+        const char* v = a + 1 < argc ? argv[a + 1] : nullptr;
+        if (!v) return 2;
+        if (k == "--frames") frames = std::atoi(v);
+        else if (k == "--rate") rate = std::atoi(v);
+        else if (k == "--only") only = v;
+        ++a;
+    }
+    const std::string dir = (std::filesystem::temp_directory_path() / "caw_bench_suite").string();
+    std::filesystem::create_directories(dir);
+    ProjectSpec project;
+    for (const SuiteScenario& sc : suiteScenarios())
+        if (only == sc.id) project = sc.make(dir);
+    if (only.size() > 5 && only.substr(only.size() - 5) == ".json") {  // a project file (the engine's JSON)
+        std::ifstream f(only);
+        const std::string json((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+        std::string error;
+        if (!parseProject(json, project, error)) { std::fprintf(stderr, "%s\n", error.c_str()); return 3; }
+    }
+    const size_t tracks = project.layers.size();
+    const int64_t total = static_cast<int64_t>(secs * rate);
+    auto render = [&](bool ref, std::vector<std::vector<float>>& out) {
+        Engine e(rate);
+        e.setProject(project);
+        std::vector<float> l(4096), r(4096);
+        std::vector<std::vector<float>> tl(tracks, std::vector<float>(4096)), tr(tracks, std::vector<float>(4096));
+        for (size_t t = 0; t < tracks; ++t) e.setOutputTap(project.layers[t].id, tl[t].data(), tr[t].data());
+        e.process(l.data(), r.data(), 64);
+        e.play();
+        out.assign(tracks + 1, std::vector<float>(static_cast<size_t>(total)));
+        std::mt19937 rng(7);
+        std::uniform_int_distribution<int> size(1, 2048);
+        int64_t at = 0;
+        int calls = 0;
+        while (at < total) {
+            int n = ref ? 64 : random ? size(rng) : frames;
+            n = static_cast<int>(std::min<int64_t>(n, total - at));
+            e.process(l.data(), r.data(), n);
+            if (app && !ref && ++calls % 8 == 0) { (void)e.meters(); }
+            for (size_t t = 0; t < tracks; ++t) std::copy_n(tl[t].data(), n, out[t].data() + at);
+            std::copy_n(l.data(), n, out[tracks].data() + at);
+            at += n;
+        }
+    };
+    std::vector<std::vector<float>> a, b;
+    render(true, a);
+    render(false, b);
+    std::printf("drift: %s, %s vs 64-frame callbacks, %.0f s\n", only.c_str(), random ? "random" : std::to_string(frames).c_str(), secs);
+    const int64_t minute = 60LL * rate;
+    for (size_t t = 0; t <= tracks; ++t) {
+        int64_t first = -1, last = -1, count = 0;
+        for (int64_t i = 0; i < total; ++i)
+            if (a[t][static_cast<size_t>(i)] != b[t][static_cast<size_t>(i)]) { if (first < 0) first = i; last = i; ++count; }
+        if (first >= 0) std::printf("  differs from frame %lld (%.3f s) to %lld (%.3f s), %lld frames\n", static_cast<long long>(first), first / double(rate), static_cast<long long>(last), last / double(rate), static_cast<long long>(count));
+        std::printf("%-10s", t < tracks ? project.layers[t].id.c_str() : "master");
+        for (int64_t m0 = 0; m0 < total; m0 += minute) {
+            float d = 0;
+            for (int64_t i = m0; i < std::min(total, m0 + minute); ++i) d = std::max(d, std::fabs(a[t][static_cast<size_t>(i)] - b[t][static_cast<size_t>(i)]));
+            std::printf(" %8.2g", d);
+        }
+        std::printf("\n");
     }
     return 0;
 }
@@ -614,6 +837,8 @@ int main(int argc, char** argv) {
     // times each built-in effect.
     const int only = argc > 2 ? std::atoi(argv[2]) : 0;
     if (only == 500) return runSuite(secs, argc, argv);  // `caw_bench SECONDS 500 [options]`: the CI suite (runSuite)
+    if (only == 600) return runLong(secs, argc, argv);  // `caw_bench SECONDS 600 [options]`: a long run (runLong)
+    if (only == 601) return runDrift(secs, argc, argv);  // `caw_bench SECONDS 601 [options]`: per-track drift (runDrift)  // `caw_bench SECONDS 600 [options]`: a long run (runLong)
     std::printf("callback %d frames at %d Hz (budget %.0f us); %.0f s per scenario\n", kCallback, kRate,
                 1e6 * kCallback / kRate, secs);
     {

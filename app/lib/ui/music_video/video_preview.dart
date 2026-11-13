@@ -1,6 +1,7 @@
 // The music video's quick preview: the plan's shots (the lane's, or the director's) drawn live in a fixed-size frame while the song plays
 // (the engine's playhead and meters), with play/stop and a scrub; nothing is rendered or saved.
 import 'dart:math' as math;
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
@@ -8,6 +9,7 @@ import 'package:flutter/scheduler.dart';
 import '../../model/app_state.dart';
 import '../../model/music_video.dart';
 import '../../model/music_video_director.dart';
+import '../../model/music_video_edit.dart';
 import '../../model/music_video_meters.dart';
 import '../../model/music_video_scene.dart';
 import '../haptics.dart';
@@ -19,7 +21,15 @@ const double kPreviewShortSide = 360;
 
 class MusicVideoPreview extends StatefulWidget {
   const MusicVideoPreview({super.key, required this.state, required this.scene, required this.plan,
-      required this.options, required this.start, required this.end, this.position});
+      required this.options, required this.start, required this.end, this.position, this.doc, this.bitmaps = const {},
+      this.maxHeight = 360});
+
+  /// The video's whole-video texts and images, and the decoded images (null: none).
+  final MusicVideoDoc? doc;
+  final Map<String, ui.Image> bitmaps;
+
+  /// The tallest the frame is drawn (the tabbed sheet keeps it compact on a phone).
+  final double maxHeight;
   final AppState state;
   final VideoScene scene;
   final ShotPlan plan;
@@ -138,7 +148,8 @@ class MusicVideoPreviewState extends State<MusicVideoPreview> with SingleTickerP
   }
 
   VideoFrameInput _input() => VideoFrameInput.forOptions(scene: widget.scene, plan: widget.plan, step: _step,
-      seconds: (_step - widget.start) * 15 / widget.scene.bpm, options: widget.options, levels: _levels);
+      seconds: (_step - widget.start) * 15 / widget.scene.bpm, options: widget.options, levels: _levels,
+      doc: widget.doc, bitmaps: widget.bitmaps, rangeStart: widget.start, rangeEnd: widget.end);
 
   @override
   Widget build(BuildContext context) {
@@ -151,7 +162,7 @@ class MusicVideoPreviewState extends State<MusicVideoPreview> with SingleTickerP
     final label = shot.panelShots.length > 1 ? shot.layout!.preset.label : shot.kind.label;
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       ConstrainedBox(
-        constraints: const BoxConstraints(maxHeight: 360),
+        constraints: BoxConstraints(maxHeight: widget.maxHeight),
         child: Center(child: AspectRatio(
           aspectRatio: ratio,
           child: ClipRRect(

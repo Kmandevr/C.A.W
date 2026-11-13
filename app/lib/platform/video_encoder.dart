@@ -1,5 +1,6 @@
 // The music video's encoder behind one small interface: the platform's H.264 + AAC MP4 encoder over `caw/video`
 // (Android MediaCodec + MediaMuxer, Windows Media Foundation), or a frame-hash list where there is none (Linux, tests).
+import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -19,7 +20,8 @@ class VideoEncodeConfig {
 }
 
 /// Takes frames one at a time (RGBA, width × height × 4 bytes, top row first) and writes the file on [finish].
-/// Frames are streamed: the caller waits for each [addFrame] before drawing the next, so memory stays bounded.
+/// Frames are streamed: only one [addFrame] is in flight at a time (the caller waits for each before sending the next;
+/// Android copies frames into two reused buffers), so memory stays bounded.
 abstract class VideoEncoder {
   /// The file the encoder writes: its extension and type, for the save picker.
   String get extension;
@@ -36,16 +38,25 @@ abstract class VideoEncoder {
 }
 
 /// The platform's encoder: MP4 through `caw/video` on Android and Windows, the frame list elsewhere.
-VideoEncoder platformVideoEncoder() =>
-    Platform.isAndroid || Platform.isWindows ? ChannelVideoEncoder() : FrameHashEncoder();
+VideoEncoder platformVideoEncoder() => Platform.isAndroid || Platform.isWindows
+    ? ChannelVideoEncoder(binaryFrames: Platform.isAndroid)
+    : FrameHashEncoder();
 
 /// Whether this platform writes a real MP4.
 bool get platformWritesMp4 => Platform.isAndroid || Platform.isWindows;
 
 /// The native encoder (VideoEncoder.kt, windows/runner/video_encoder.cpp).
 class ChannelVideoEncoder implements VideoEncoder {
-  ChannelVideoEncoder({MethodChannel? channel}) : _channel = channel ?? const MethodChannel('caw/video');
+  ChannelVideoEncoder({MethodChannel? channel, this.binaryFrames = false, BinaryMessenger? messenger})
+      : _channel = channel ?? const MethodChannel('caw/video'),
+        _messenger = messenger; // ignore: prefer_initializing_formals
   final MethodChannel _channel;
+
+  /// Frames as raw bytes on `caw/video_frame` (Android, VideoEncoder.kt): no codec copy on either side. The reply is
+  /// one byte, 0, or 1 and the error's text.
+  final bool binaryFrames;
+  final BinaryMessenger? _messenger;
+  static const frameChannel = 'caw/video_frame';
 
   @override
   String get extension => 'mp4';
@@ -69,7 +80,17 @@ class ChannelVideoEncoder implements VideoEncoder {
   @override
   Future<void> start(VideoEncodeConfig config) => _channel.invokeMethod<void>('start', config.toMap());
   @override
-  Future<void> addFrame(Uint8List rgba) => _channel.invokeMethod<void>('frame', {'rgba': rgba});
+  Future<void> addFrame(Uint8List rgba) async {
+    if (!binaryFrames) return _channel.invokeMethod<void>('frame', {'rgba': rgba});
+    final messenger = _messenger ?? ServicesBinding.instance.defaultBinaryMessenger;
+    final reply = await messenger.send(frameChannel, ByteData.sublistView(rgba));
+    if (reply == null) throw MissingPluginException('no handler on $frameChannel');
+    if (reply.lengthInBytes >= 1 && reply.getUint8(0) == 0) return;
+    final text = reply.lengthInBytes > 1
+        ? utf8.decode(reply.buffer.asUint8List(reply.offsetInBytes + 1, reply.lengthInBytes - 1), allowMalformed: true)
+        : 'the frame failed';
+    throw PlatformException(code: 'video', message: text);
+  }
   @override
   Future<void> finish() => _channel.invokeMethod<void>('finish');
   @override

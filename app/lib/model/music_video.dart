@@ -119,6 +119,22 @@ String? validateVideoSize(int width, int height, VideoEncoderCaps caps) {
   return null;
 }
 
+/// How much the export spends on picture (owner, 2026-11-12): bits per pixel per frame and the bitrate's bounds.
+/// Balanced is what every video used before the choice existed.
+enum VideoQuality {
+  small('Small', 0.05, 1000000, 40000000),
+  balanced('Balanced', 0.1, 2000000, 80000000),
+  high('High', 0.2, 4000000, 80000000);
+
+  const VideoQuality(this.label, this.bitsPerPixel, this.minBitrate, this.maxBitrate);
+  final String label;
+  final double bitsPerPixel;
+  final int minBitrate, maxBitrate;
+}
+
+/// The AAC track's bitrate on both platform encoders (bits per second).
+const int kVideoAudioBitrate = 160000;
+
 /// The whole setup.
 class MusicVideoOptions {
   MusicVideoOptions({
@@ -135,10 +151,15 @@ class MusicVideoOptions {
     this.artist = '',
     this.seed = 1,
     this.smoothFollow = false,
+    this.quality = VideoQuality.balanced,
   })  : shots = shots ?? {...VideoShot.directorDefaults},
         aspect = aspect ?? VideoAspect.portrait;
 
-  static const frameRates = [30, 60];
+  static const frameRates = [24, 30, 60];
+
+  /// A draft render: this short side and frame rate, small quality (owner, 2026-11-12: a quick look next to the full
+  /// render).
+  static const draftShortSide = 360, draftFps = 15;
 
   Set<VideoShot> shots;
   VideoStyle style;
@@ -158,16 +179,20 @@ class MusicVideoOptions {
   /// Off keeps the spring camera.
   bool smoothFollow;
 
+  /// The picture's quality and so the file's size.
+  VideoQuality quality;
+
   MusicVideoOptions copy() => MusicVideoOptions(
         shots: {...shots}, style: style, range: range, aspect: aspect, resolution: resolution,
         customWidth: customWidth, customHeight: customHeight, fps: fps, titleCard: titleCard, title: title,
-        artist: artist, seed: seed, smoothFollow: smoothFollow);
+        artist: artist, seed: seed, smoothFollow: smoothFollow, quality: quality);
 
   Map<String, dynamic> toJson() => {
         'shots': [for (final s in VideoShot.values) if (shots.contains(s)) s.name],
         'style': style.name, 'range': range.name, 'aspect': [aspect.w, aspect.h], 'resolution': resolution.name,
         'custom_size': [customWidth, customHeight], 'fps': fps, 'title_card': titleCard, 'title': title,
         'artist': artist, 'seed': seed, 'smooth_follow': smoothFollow,
+        if (quality != VideoQuality.balanced) 'quality': quality.name,
       };
 
   /// Reads saved options (untrusted): unknown names fall back to the defaults, numbers are clamped.
@@ -197,6 +222,7 @@ class MusicVideoOptions {
       artist: text(j['artist']),
       seed: whole(j['seed'], 1, 1, 1 << 30),
       smoothFollow: j['smooth_follow'] == true,
+      quality: pick(VideoQuality.values, j['quality'], VideoQuality.balanced),
     );
   }
 
@@ -206,7 +232,7 @@ class MusicVideoOptions {
   /// Why these options can't render, or null when they can.
   String? problem(VideoEncoderCaps caps) {
     if (shots.isEmpty) return 'Switch on at least one shot.';
-    if (!frameRates.contains(fps)) return 'The frame rate must be 30 or 60.';
+    if (!frameRates.contains(fps)) return 'The frame rate must be 24, 30 or 60.';
     if (resolution != VideoResolution.custom && !aspect.valid) {
       return 'The ratio must be whole numbers up to ${VideoAspect.maxTerm}, at most 4:1 either way.';
     }
@@ -214,10 +240,26 @@ class MusicVideoOptions {
     return validateVideoSize(w, h, caps);
   }
 
-  /// A sensible bitrate for the size and frame rate (about 0.1 bit per pixel per frame), in bits per second.
+  /// The picture's bitrate for the size, frame rate and quality (balanced: 0.1 bit per pixel per frame), in bits a
+  /// second.
   int get bitrate {
     final (w, h) = size;
-    return (w * h * fps * 0.1).round().clamp(2000000, 80000000);
+    return (w * h * fps * quality.bitsPerPixel).round().clamp(quality.minBitrate, quality.maxBitrate);
+  }
+
+  /// The file's size for [seconds] of video (picture and sound), in bytes.
+  int estimatedBytes(double seconds) => ((bitrate + kVideoAudioBitrate) / 8 * seconds).round();
+
+  /// The draft of this setup: the same ratio at [draftShortSide] on its short side, [draftFps], small quality.
+  MusicVideoOptions draft() {
+    final (w, h) = size;
+    final k = draftShortSide / math.max(1, math.min(w, h));
+    return copy()
+      ..resolution = VideoResolution.custom
+      ..customWidth = math.max(kVideoMinSide, evenSide(w * k))
+      ..customHeight = math.max(kVideoMinSide, evenSide(h * k))
+      ..fps = draftFps
+      ..quality = VideoQuality.small;
   }
 }
 

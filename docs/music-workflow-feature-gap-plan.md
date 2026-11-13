@@ -43,7 +43,7 @@ This note records the current implementation gaps in C.A.W.'s music-production w
 ### Export and file workflow
 
 - **[Implemented]** Native offline WAV rendering, loop/free-length/one-shot/wavetable export, MIDI pattern export, named export profiles, export history and a sequential in-memory queue (up to 50 jobs).
-- **[Implemented]** The arrangement music video: an offline MP4 render, cut by an auto director or edited as shots on a lane (layouts, looks, effects, auto-cut), saved with the project ([app](app.md)); the platform encoders are not yet run on a device.
+- **[Implemented]** The arrangement music video: an offline MP4 render, cut by an auto director or edited as shots on a lane (layouts, looks, effects, transitions, camera moves, text overlays, images, auto-cut), with drafts and a background render, saved with the project ([app](app.md)); the platform encoders are not yet run on a device.
 - **[Partial]** Queue state is not persisted across restarts; batch/stem rendering and multi-destination automation are incomplete.
 - **[Incomplete]** SFZ multisample workflow, stems export, persistent/recoverable export queue and broader batch delivery.
 
@@ -63,8 +63,10 @@ This note records the current implementation gaps in C.A.W.'s music-production w
 - **[Implemented foundation]** MIDI 2.0 UMP decoding and bounded input-queue primitives, plus MIDI pattern file import/export.
 - **[Implemented, Android and Windows]** MIDI devices: USB, Bluetooth (scanned and connected in the app) and UMP devices on Android, WinMM ports on Windows ([app](app.md)); every Channel Voice message plays the armed or selected track at the frame it was played through the engine's device input (`app/lib/model/live_midi.dart`). Record captures a take while playing and writes it at Stop as a new pattern clip from the bar where recording began. Controller learn maps CCs to knobs.
 - **[Incomplete]** Bluetooth MIDI pairing inside the app, controller learn/mapping, external clock/sync and control-surface support.
+- **[Implemented, not yet run on a device]** Overload recovery (2026-11-12): layers the engine shed come back on their own once the load is low, and going to or from the background unmutes them ([engine](engine.md), "Overload, and coming back").
 - **[Implemented, not yet run on a device]** Output and input latency compensation (Bluetooth, USB, HDMI): MIDI takes at the step that was heard when the note was played, audio takes by output + input latency, the playhead and meters at the heard time, the playhead drawn between reads from the compensated read ([app](app.md)).
 - **[Incomplete]** Take lanes and comping beyond a loop's stacked takes.
+- **[Implemented, not yet run on a device]** Playing and recording behind other apps on Android (a `mediaPlayback` foreground service with a Play/Pause and Stop notification), and a microphone that opens only while a track is armed or monitors, a recording runs or the ping plays ([app](app.md)).
 
 ## Implementation constraints
 
@@ -72,6 +74,7 @@ This note records the current implementation gaps in C.A.W.'s music-production w
 - Keep arrangement-first composition; the retired session/clip-launcher grid is not an alternate view.
 - Maintain phone and desktop parity, touch targets, keyboard/action access and accessible editing gestures.
 - Preserve local/offline operation and low CPU/RAM overhead on weak devices.
+- Keep launch quick: work added to `AppState.init` or `openStorage` reports a step on `AppState.startup` (`app/lib/model/startup_progress.dart`), so the startup screen shows it instead of a silent wait.
 - Keep audio callback work bounded, allocation-free, lock-free and free of I/O, logging, UI calls and unbounded loops.
 - Perform file access, waveform generation, analysis, stretching and export off the audio callback using bounded background work.
 - Verify current code and tests before opening implementation work. A listed gap is not permission to invent a parallel architecture; follow the relevant stage in the [roadmap](roadmap.md).

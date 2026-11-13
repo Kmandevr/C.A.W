@@ -179,6 +179,9 @@ public:
     }
     bool keyed(std::size_t index) const noexcept { return index < entries_.size() && entries_[index]->key != nullptr; }
     bool instrument() const noexcept { return notes_ != nullptr; }
+    // Whether it holds a third-party native component (one loaded from a library, not a built-in): the mixer runs
+    // its node in a serial lane, on the callback thread (speed phase 5c, docs/decisions.md).
+    bool foreign() const noexcept { return foreign_; }
     // Audio thread: an audio track monitoring its input wants to run while the transport is stopped.
     bool monitorsStopped() const noexcept;
     // The instrument's notes and this block's events (null for an effect chain). Audio thread.
@@ -294,6 +297,7 @@ private:
     bool modulators_ = false;   // built by buildModulators
     bool modNewPlay_ = false;   // audio thread: beginModulators saw a new Play
     bool noteFx_ = false;       // built by buildNoteEffects
+    bool foreign_ = false;      // holds a loaded (third-party) component
     const VoiceBus* voices_ = nullptr;   // audio thread: an instrument's voice bus for the next process()
     const Event* noteEvents_ = nullptr;  // audio thread: per-note FX events for the next process()
     uint32_t noteEventCount_ = 0;

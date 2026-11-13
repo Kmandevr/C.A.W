@@ -48,6 +48,8 @@ void caw_audio_set_buffer_mode(CawEngine* e, int32_t mode, int32_t recording) {
 
 int32_t caw_audio_buffer_frames(CawEngine*) { return 0; }
 
+int32_t caw_audio_set_background(CawEngine*, int32_t) { return 0; }
+
 char* caw_audio_input_devices(void) { return dup("{\"backend\":\"none\",\"exclusive\":false,\"devices\":[]}"); }
 
 int32_t caw_audio_configure_input(CawEngine* e, int32_t enabled, const char* device_id, const char* device_name,

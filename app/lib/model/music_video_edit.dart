@@ -5,6 +5,7 @@ import 'dart:math' as math;
 import 'music_video.dart';
 import 'music_video_director.dart' show VideoTransition;
 import 'music_video_meters.dart';
+import 'music_video_overlay.dart';
 
 // ---------------------------------------------------------------------------------------------------------------
 // Snapping
@@ -326,6 +327,7 @@ enum VideoEffectKind {
 enum VideoDrive {
   steady('Steady'),
   beat('Beat'),
+  offbeat('Off-beat'),
   bar('Bar'),
   master('Mix loudness'),
   track('Track loudness');
@@ -336,6 +338,37 @@ enum VideoDrive {
 
 /// The tint and strobe colours: the theme's accents (the painter reads them from the theme).
 enum VideoEffectColor { accent, blue, green, yellow, violet, white }
+
+/// The effects' beat presets (owner, 2026-11-12: "pulse on every beat", "flash on the downbeat"): each sets the
+/// drive, its pulse length and the amount.
+enum VideoEffectPreset {
+  everyBeat('Pulse on every beat', VideoDrive.beat, 0.5, 0.6),
+  downbeat('Flash on the downbeat', VideoDrive.bar, 0.2, 0.8),
+  offbeat('Hit the off-beat', VideoDrive.offbeat, 0.35, 0.6),
+  swell('Swell over the bar', VideoDrive.bar, 1.0, 0.7),
+  mix('Follow the mix', VideoDrive.master, 0.5, 0.8),
+  steady('Steady', VideoDrive.steady, 0.5, 0.5);
+
+  const VideoEffectPreset(this.label, this.drive, this.decay, this.amount);
+  final String label;
+  final VideoDrive drive;
+  final double decay, amount;
+
+  void apply(VideoEffect e) {
+    e
+      ..drive = drive
+      ..decay = decay
+      ..amount = amount;
+  }
+
+  /// The preset [e] matches, or null.
+  static VideoEffectPreset? of(VideoEffect e) => values
+      .where((p) => p.drive == e.drive && (p.decay - e.decay).abs() < 1e-6 && (p.amount - e.amount).abs() < 1e-6)
+      .firstOrNull;
+
+  /// The drives that pulse on the beat grid (the lane marks their hits).
+  static bool beats(VideoDrive d) => d == VideoDrive.beat || d == VideoDrive.offbeat || d == VideoDrive.bar;
+}
 
 /// One effect in a shot's stack (like an audio FX slot: on or bypassed, an amount and its settings).
 class VideoEffect {
@@ -372,14 +405,18 @@ class VideoEffect {
   /// How strongly it acts at [step] with [levels]: [amount] times its drive (0..1).
   double strength(double step, VideoLevels levels, int stepsPerBar) {
     if (!on) return 0;
-    double pulse(double period) {
-      final phase = ((step % period) + period) % period / period;
+    double pulseAt(double at, double period) {
+      final phase = ((at % period) + period) % period / period;
       return phase >= decay ? 0 : math.pow(1 - phase / decay, 2).toDouble();
     }
+
+    double pulse(double period) => pulseAt(step, period);
+    double pulse4(double at) => pulseAt(at, 4);
 
     final d = switch (drive) {
       VideoDrive.steady => 1.0,
       VideoDrive.beat => pulse(4),
+      VideoDrive.offbeat => pulse4(step - 2),
       VideoDrive.bar => pulse(math.max(1, stepsPerBar).toDouble()),
       VideoDrive.master => (levels.rms * 2.5).clamp(0.0, 1.0).toDouble(),
       VideoDrive.track => ((levels.tracks[trackId] ?? 0) * 1.4).clamp(0.0, 1.0).toDouble(),
@@ -422,9 +459,11 @@ class VideoEffect {
 class VideoCut {
   VideoCut({required this.id, required this.start, required this.length, VideoLayout? layout, List<VideoEffect>? effects,
       this.transition = VideoTransition.cut, this.transitionSteps = 0, this.animateLayout = false, this.zoom = 1,
-      this.reason = ''})
+      this.reason = '', this.camera, List<VideoText>? texts, List<VideoImageLayer>? images})
       : layout = layout ?? VideoLayout.single(VideoShot.flythrough),
-        effects = effects ?? [];
+        effects = effects ?? [],
+        texts = texts ?? [],
+        images = images ?? [];
 
   final String id;
   double start, length;
@@ -444,11 +483,19 @@ class VideoCut {
   /// Why auto-cut put the cut here (an interval, a burst, a track, a drop), or empty.
   String reason;
 
+  /// The keyframed camera over the shot (owner, 2026-11-12), or null for the auto camera.
+  VideoCameraMove? camera;
+
+  /// Text overlays and images shown through this shot.
+  List<VideoText> texts;
+  List<VideoImageLayer> images;
+
   double get end => start + length;
 
   VideoCut copy({String? id}) => VideoCut(id: id ?? this.id, start: start, length: length, layout: layout.copy(),
       effects: [for (final e in effects) e.copy()], transition: transition, transitionSteps: transitionSteps,
-      animateLayout: animateLayout, zoom: zoom, reason: reason);
+      animateLayout: animateLayout, zoom: zoom, reason: reason, camera: camera?.copy(),
+      texts: [for (final x in texts) x.copy()], images: [for (final x in images) x.copy()]);
 
   Map<String, dynamic> toJson() => {
         'id': id,
@@ -461,6 +508,9 @@ class VideoCut {
         if (animateLayout) 'animate_layout': true,
         if (zoom != 1) 'zoom': _r(zoom),
         if (reason.isNotEmpty) 'reason': reason,
+        if (camera != null) 'camera': camera!.toJson(),
+        if (texts.isNotEmpty) 'texts': [for (final x in texts) x.toJson()],
+        if (images.isNotEmpty) 'images': [for (final x in images) x.toJson()],
       };
 
   static VideoCut? fromJson(Object? j, double maxStep) {
@@ -479,8 +529,30 @@ class VideoCut {
       animateLayout: j['animate_layout'] == true,
       zoom: (_num(j['zoom']) ?? 1).clamp(0.25, 4.0).toDouble(),
       reason: _str(j['reason']) ?? '',
+      camera: VideoCameraMove.fromJson(j['camera']),
+      texts: _ids([for (final x in _list(j['texts']).take(kVideoMaxTexts)) ?VideoText.fromJson(x)], 't'),
+      images: _ids([for (final x in _list(j['images']).take(kVideoMaxImages)) ?VideoImageLayer.fromJson(x)], 'i'),
     );
   }
+}
+
+/// [items] with every missing or repeated id replaced (`prefix` + a number), for overlays read from a file.
+List<T> _ids<T>(List<T> items, String prefix) {
+  String idOf(Object? x) => x is VideoText ? x.id : (x as VideoImageLayer).id;
+  T withId(T x, String id) => (x is VideoText ? x.copy(id: id) : (x as VideoImageLayer).copy(id: id)) as T;
+  final seen = <String>{};
+  var n = 1;
+  return [
+    for (final x in items)
+      () {
+        var id = idOf(x);
+        if (id.isNotEmpty && seen.add(id)) return x;
+        do {
+          id = '$prefix${n++}';
+        } while (!seen.add(id));
+        return withId(x, id);
+      }(),
+  ];
 }
 
 /// The shortest a shot may be (one step), and the most shots, effects and tracks a saved video holds.
@@ -775,7 +847,7 @@ class VideoTimeline {
 class AutoCutSettings {
   AutoCutSettings({this.interval = true, this.intervalCount = 4, this.intervalBars = true, this.bursts = true,
       double burstSensitivity = 0.5, this.tracks = true, double quietBars = 1, this.loudness = true,
-      double loudnessSensitivity = 0.5, this.fromAudio = false, double minBeats = 2})
+      double loudnessSensitivity = 0.5, this.fromAudio = false, double minBeats = 2, this.styledTransitions = true})
       : burstSensitivity = burstSensitivity.clamp(0.0, 1.0).toDouble(),
         quietBars = quietBars.clamp(0.25, 16.0).toDouble(),
         loudnessSensitivity = loudnessSensitivity.clamp(0.0, 1.0).toDouble(),
@@ -804,6 +876,9 @@ class AutoCutSettings {
   /// Cuts closer than this many beats merge (the stronger trigger keeps its place).
   double minBeats;
 
+  /// Each cut gets a transition matching the style and what made it ([styledTransition]); off, the director's.
+  bool styledTransitions;
+
   bool get any => interval || bursts || tracks || loudness;
 
   /// The note starts in one beat a burst needs: 12 at the least sensitive, 3 at the most.
@@ -819,7 +894,7 @@ class AutoCutSettings {
         'bursts': bursts, 'burst_sensitivity': _r(burstSensitivity),
         'tracks': tracks, 'quiet_bars': _r(quietBars),
         'loudness': loudness, 'loudness_sensitivity': _r(loudnessSensitivity), 'from_audio': fromAudio,
-        'min_beats': _r(minBeats),
+        'min_beats': _r(minBeats), 'styled_transitions': styledTransitions,
       };
 
   static AutoCutSettings fromJson(Object? j) {
@@ -836,6 +911,7 @@ class AutoCutSettings {
       loudnessSensitivity: _num(j['loudness_sensitivity']) ?? 0.5,
       fromAudio: j['from_audio'] == true,
       minBeats: _num(j['min_beats']) ?? 2,
+      styledTransitions: j['styled_transitions'] != false,
     );
   }
 }
@@ -846,22 +922,61 @@ class AutoCutSettings {
 /// Everything the music video saves with its project: the setup, the shots, auto-cut's settings and the lane's snap.
 class MusicVideoDoc {
   MusicVideoDoc({MusicVideoOptions? options, VideoTimeline? timeline, AutoCutSettings? autoCut,
-      this.snap = VideoSnap.beat})
+      this.snap = VideoSnap.beat, List<VideoText>? texts, List<VideoImageAsset>? assets,
+      List<VideoImageLayer>? images})
       : options = options ?? MusicVideoOptions(),
         timeline = timeline ?? VideoTimeline(),
-        autoCut = autoCut ?? AutoCutSettings();
+        autoCut = autoCut ?? AutoCutSettings(),
+        texts = texts ?? [],
+        assets = assets ?? [],
+        images = images ?? [];
 
-  /// The format's version: 1 is the first that saves (2026-11-12). A project without a `music_video` entry (every
-  /// project before it) loads as a new video: the auto director's shots, no edits.
-  static const version = 1;
+  /// The format's version: 1 is the first that saves (2026-11-12); 2 adds text overlays, images, camera moves,
+  /// the new transitions and drives, 24 fps and the quality (2026-11-12). A version 1 entry reads as it was (none of
+  /// those); a project without a `music_video` entry (every project before it) loads as a new video.
+  static const version = 2;
 
   MusicVideoOptions options;
   VideoTimeline timeline;
   AutoCutSettings autoCut;
   VideoSnap snap;
 
-  MusicVideoDoc copy() =>
-      MusicVideoDoc(options: options.copy(), timeline: timeline.copy(), autoCut: autoCut.copy(), snap: snap);
+  /// The whole video's text overlays and image layers, and the images the video's layers use.
+  List<VideoText> texts;
+  List<VideoImageAsset> assets;
+  List<VideoImageLayer> images;
+
+  VideoImageAsset? asset(String id) => assets.where((a) => a.id == id).firstOrNull;
+
+  /// The assets the whole video's and the shots' image layers use.
+  Set<String> get usedAssetIds => {
+        for (final x in images) x.assetId,
+        for (final c in timeline.cuts) ...[for (final x in c.images) x.assetId],
+      };
+
+  /// A new overlay or layer id, not used in the video yet nor given out before (`prefix` t for texts, i for images).
+  String newOverlayId(String prefix) {
+    final used = {
+      ..._issued,
+      for (final x in texts) x.id,
+      for (final x in images) x.id,
+      for (final c in timeline.cuts) ...[for (final x in c.texts) x.id, for (final x in c.images) x.id],
+    };
+    var n = 1;
+    while (used.contains('$prefix$n')) {
+      n++;
+    }
+    _issued.add('$prefix$n');
+    return '$prefix$n';
+  }
+
+  /// Ids given out that may not be in the video yet (a preset makes two before either is added).
+  final Set<String> _issued = {};
+
+  MusicVideoDoc copy() => MusicVideoDoc(options: options.copy(), timeline: timeline.copy(), autoCut: autoCut.copy(),
+      snap: snap, texts: [for (final x in texts) x.copy()],
+      assets: [for (final a in assets) VideoImageAsset.fromJson(a.toJson())!],
+      images: [for (final x in images) x.copy()]);
 
   Map<String, dynamic> toJson() => {
         'version': version,
@@ -869,6 +984,9 @@ class MusicVideoDoc {
         'shots': timeline.toJson(),
         'auto_cut': autoCut.toJson(),
         'snap': snap.name,
+        if (texts.isNotEmpty) 'texts': [for (final x in texts) x.toJson()],
+        if (assets.isNotEmpty) 'assets': [for (final a in assets) a.toJson()],
+        if (images.isNotEmpty) 'images': [for (final x in images) x.toJson()],
       };
 
   /// Reads [j] (the project's `music_video` entry, untrusted). A missing or unreadable entry is a new video; a newer
@@ -880,6 +998,15 @@ class MusicVideoDoc {
       timeline: VideoTimeline.fromJson(j['shots'], maxStep: maxStep),
       autoCut: AutoCutSettings.fromJson(j['auto_cut']),
       snap: _enum(VideoSnap.values, j['snap'], VideoSnap.beat),
+      texts: _ids([for (final x in _list(j['texts']).take(kVideoMaxTexts)) ?VideoText.fromJson(x)], 't'),
+      assets: () {
+        final seen = <String>{};
+        return [
+          for (final a in _list(j['assets']).take(kVideoMaxImageAssets))
+            if (VideoImageAsset.fromJson(a) case final x? when seen.add(x.id)) x,
+        ];
+      }(),
+      images: _ids([for (final x in _list(j['images']).take(kVideoMaxImages)) ?VideoImageLayer.fromJson(x)], 'i'),
     );
   }
 }

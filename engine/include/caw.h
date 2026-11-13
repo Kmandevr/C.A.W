@@ -79,17 +79,28 @@ extern "C" {
    "note.age"; caw_engine_note_fx_stats. The voice bus (caw_component.h) gains CAW_LANE_REST. Nothing else changes.
    23 (2026-11-11): caw_audio_latency, the running device's output and input latency (AAudio's timestamps where it
    has them, else the queued buffers), the routed device's id and, on WASAPI, its kind. Nothing else changes.
-   24: taken by branch speed-parallel (caw_audio_threads), built at the same time.
+   24 (2026-11-12, speed phase 5d, branch speed-parallel): caw_audio_threads, the audio callback's core, its clock
+   and kind, the scheduling the platform gave the callback and the mix pool's workers, and the pool's size. Built
+   beside 25 to 27 and merged after them, so a library has it from 28.
    25 (2026-11-12, beta plan B4.8): caw_engine_layer_meters reads every project layer's stereo meter in one call
    into a caller's array of CawLayerMeterStereo (the app's meter poll made one call per track). Nothing else
    changes.
-   26: taken by branch bt-clicks, built at the same time.
-   27 (2026-11-12, beta plan C): the Benchmark (stress test). caw_stress_scenarios lists its scenarios;
-   caw_worker_pool_submit_stress runs a CawStressRequest (a scenario timed, a ramp, a sustained or a profiled run,
-   on a worker or through the device with the output muted) as a CawJob (status, cancel, wait, result and release
-   as for every job); caw_stress_progress, caw_stress_history, caw_stress_result and caw_stress_costs read it.
-   Nothing else changes. */
-#define CAW_API_VERSION 27
+   26 (2026-11-12, audio-resilience): caw_audio_set_background (a larger AAudio output buffer behind the app, without
+   reopening); the input is a capture device of its own (caw_audio_configure_input no longer reopens the output),
+   and caw_audio_status's "input" gains "state", "underruns", "dropped_frames", "missing_frames" and "drift_ppm"
+   and the top level "stopped_by_system". Nothing else changes.
+   27 (2026-11-13, branch bt-clicks, 26 on its branch): caw_engine_shedding_stats, how many layers the engine shed
+   because the device ran out of time and how many came back on their own. Shed layers now come back by themselves
+   once the load has stayed low (CawMeters.overloaded falls again), and caw_engine_clear_overload also forgets the
+   load history. Nothing else changes.
+   28 (2026-11-13): branch speed-parallel merged: caw_audio_threads (24 above) is in the library beside 25 to 27.
+   Nothing else changes.
+   29 (2026-11-13, beta plan C; 27 on branch benchmark): the Benchmark (stress test). caw_stress_scenarios lists its
+   scenarios; caw_worker_pool_submit_stress runs a CawStressRequest (a scenario timed, a ramp, a sustained or a
+   profiled run, on a worker or through the device with the output muted) as a CawJob (status, cancel, wait, result
+   and release as for every job); caw_stress_progress, caw_stress_history, caw_stress_result and caw_stress_costs
+   read it. Nothing else changes. */
+#define CAW_API_VERSION 29
 /* The component index that names a layer's native instrument rather than one of its "components". */
 #define CAW_INSTRUMENT_INDEX 0xFFFFFFFFu
 /* A component index with this bit (API version 22) names component (index & ~CAW_NOTE_COMPONENT) of the layer's
@@ -307,6 +318,14 @@ CAW_API void caw_engine_set_metronome(CawEngine* e, int32_t on);
 CAW_API void caw_engine_release_touches(CawEngine* e);
 CAW_API void caw_engine_stop(CawEngine* e);
 CAW_API void caw_engine_clear_overload(CawEngine* e);
+/* Layers shed since the engine was made (the telemetry's dropouts), how many came back on their own, and how many
+   are shed now (as CawMeters.overloaded). Any thread; never blocks. API version 26. */
+typedef struct CawSheddingStats {
+    int64_t shed;
+    int64_t restored;
+    int32_t muted_now;
+} CawSheddingStats;
+CAW_API void caw_engine_shedding_stats(CawEngine* e, CawSheddingStats* out);
 CAW_API void caw_engine_meters(CawEngine* e, CawMeters* out);
 CAW_API int32_t caw_engine_layer_meter(CawEngine* e, int32_t layer_index, CawLayerMeter* out);
 /* The same, with each side's sample peak since the last read in *peak_l and *peak_r (either may be NULL); the
@@ -444,6 +463,11 @@ CAW_API int32_t caw_engine_quality(CawEngine* e);
 CAW_API void caw_audio_set_buffer_mode(CawEngine* e, int32_t mode, int32_t recording);
 /* The device's callback size in frames while it runs (0 when stopped or unknown). */
 CAW_API int32_t caw_audio_buffer_frames(CawEngine* e);
+/* API version 26. Behind the app ([background] != 0) the AAudio output's buffer size is raised to the stream's
+   capacity (more latency, fewer dropouts while Android schedules a background app less), and 0 restores the size
+   it had; no reopen. Call it only while nothing monitors the input. Returns the buffer size now in frames (0 where
+   the backend has no such size, or nothing runs); caw_audio_latency reports the new latency. */
+CAW_API int32_t caw_audio_set_background(CawEngine* e, int32_t background);
 
 /* API version 10. The playback devices the platform's audio backend lists, as JSON: {"backend": name,
    "exclusive": whether this backend takes an exclusive-mode request (WASAPI, AAudio), "devices": [{"name",
@@ -483,6 +507,16 @@ CAW_API char* caw_audio_status(CawEngine* e);
    "hdmi", "wired", "builtIn", "remote"; WASAPI's bus and form factor), else "unknown". A Bluetooth or other link may add delay no backend reports: the app keeps a
    per-device offset on top. Takes the device lock: call it off the audio thread. Free with caw_free. */
 CAW_API char* caw_audio_latency(CawEngine* e);
+/* The audio thread and the mix pool (API 24; free with caw_free), JSON: "callback_cpu" (the core the callback ran on,
+   sampled every 32 callbacks; -1 unknown or no device), "core_kind" ("big", "little", "other" when every core is one
+   kind, "unknown"), "clock_khz" and "max_khz" (that core's clock now and its top, -1 where unreadable),
+   "hint" (an Android performance hint session covers the callback and the workers), "mmcss" (the callback is in
+   MMCSS "Pro Audio", Windows), "callback_tuning" and "worker_tuning" (what the platform granted: "priority",
+   "realtime", "fast_cores", "mmcss", "no_power_throttling"), "workers", "active_workers" (those Auto lets take
+   work), "wait_share" (the callback's averaged wait for workers, as a share of its budget), "cores", "fast_cores",
+   "hybrid" and "core_source" ("cpu_capacity", "cpuinfo_max_freq", "EfficiencyClass", "none"). Reads the clock from
+   the system: call it every second or so, not per frame. */
+CAW_API char* caw_audio_threads(CawEngine* e);
 /* The metronome's (and count-in's) click: [volume] 0..1 (1 the default) and its CAW_CLICK_* sound. */
 #define CAW_CLICK_CLASSIC 0
 #define CAW_CLICK_WOOD 1
@@ -604,11 +638,15 @@ CAW_API char* caw_sfz_export(const char* state_json, const char* sfz_path, int32
 /* Audio input. The capture devices, as caw_audio_devices lists playback ones, plus "channels" (the most the
    device offers; 0 unknown). On Android the app needs the RECORD_AUDIO permission before input opens. */
 CAW_API char* caw_audio_input_devices(void);
-/* Opens (enabled != 0) or closes the input: the device then runs duplex, input and output in one callback, so
-   monitoring adds no buffer of its own. [device_id]/[device_name] as caw_audio_configure (both empty: the default
-   input), [channels] 1..32 (0: 2). A running device reopens. Returns as caw_audio_configure. caw_audio_status gains
-   "input": {"enabled", "running", "device", "device_id", "channels", "sample_rate", "period_frames",
-   "latency_frames" (the device's own estimate, input plus output buffers)}. */
+/* Opens (enabled != 0) or closes the input: a capture device of its own beside the output (API 26; never duplex),
+   whose frames reach the output callback through a lock-free bridge that follows the two clocks' drift; a missing
+   input is silence and the output never waits for it. [device_id]/[device_name] as caw_audio_configure (both
+   empty: the default input), [channels] 1..32 (0: 2). Only the input opens or closes (the output plays on), and
+   the device opens outside the lock caw_audio_status takes. Returns as caw_audio_configure. caw_audio_status gains
+   "input": {"enabled", "running", "state" ("off", "open", "stalled", "stopped", "failed"), "device", "device_id",
+   "channels", "sample_rate", "period_frames", "duplex_buffer_frames" (the bridge's fill), "latency_frames" (the
+   device's own estimate, input plus output buffers plus that fill), "underruns", "dropped_frames",
+   "missing_frames" (output frames the input was missing since it first delivered), "drift_ppm", "error"}. */
 CAW_API int32_t caw_audio_configure_input(CawEngine* e, int32_t enabled, const char* device_id,
                                           const char* device_name, int32_t channels);
 /* Each input channel's peak (0..1+) since the last call; returns the channels written (at most max). */
@@ -642,7 +680,7 @@ CAW_API char* caw_engine_input_latency(CawEngine* e);
 CAW_API int32_t caw_latency_ping_start(CawEngine* e);
 CAW_API char* caw_latency_ping_result(CawEngine* e);
 
-/* ---- API version 27 (beta plan C; docs/engine.md "The Benchmark"): the Benchmark (the app's stress test).
+/* ---- API version 29 (beta plan C; docs/engine.md "The Benchmark"): the Benchmark (the app's stress test).
    Every run has its own engine and project (the caller's engine is never touched), sheds no layer, and times
    callbacks as caw_bench's suite does. caw_stress_scenarios: {"version": 1, "scenarios": [{"id", "name", "tier":
    "normal"|"heavy"|"extreme"|"idle", "memory_mib"}], "ramps": [{"kind": "tracks"|"voices"|"effects", "counts":

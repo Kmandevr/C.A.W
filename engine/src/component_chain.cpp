@@ -293,6 +293,7 @@ std::unique_ptr<ComponentChain> ComponentChain::make(const ModuleRegistry& regis
             for (uint32_t k = 0; k < d->portCount; ++k)
                 e->noteEvents = e->noteEvents || (d->ports[k].type == PortType::Event && d->ports[k].input);
         e->processor = registry.create(spec.id);
+        chain->foreign_ = chain->foreign_ || registry.isLoadedComponent(spec.id);
         if (!e->processor) {
             error = "native component " + quoted(spec.id) + " could not create a processor instance";
             return nullptr;

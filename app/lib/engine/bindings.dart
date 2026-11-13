@@ -4,7 +4,7 @@ import 'dart:io';
 
 import 'package:ffi/ffi.dart';
 
-const int cawApiVersion = 27;  // must equal CAW_API_VERSION in engine/include/caw.h
+const int cawApiVersion = 29;  // must equal CAW_API_VERSION in engine/include/caw.h
 
 /// CawNoteFxStats (API 22, #127): a layer's per-note FX slots.
 final class CawNoteFxStatsStruct extends Struct {
@@ -249,6 +249,8 @@ class Bindings {
             void Function(Pointer<Void>, int, int)>('caw_audio_set_buffer_mode'),
         audioBufferFrames = lib.lookupFunction<Int32 Function(Pointer<Void>), int Function(Pointer<Void>)>(
             'caw_audio_buffer_frames'),
+        audioSetBackground = lib.lookupFunction<Int32 Function(Pointer<Void>, Int32), int Function(Pointer<Void>, int)>(
+            'caw_audio_set_background'),
         stop = lib.lookupFunction<Void Function(Pointer<Void>), void Function(Pointer<Void>)>('caw_engine_stop'),
         clearOverload = lib.lookupFunction<Void Function(Pointer<Void>), void Function(Pointer<Void>)>(
             'caw_engine_clear_overload'),
@@ -323,6 +325,9 @@ class Bindings {
         // API 23: the running device's output and input latency.
         audioLatency = lib.lookupFunction<Pointer<Utf8> Function(Pointer<Void>), Pointer<Utf8> Function(Pointer<Void>)>(
             'caw_audio_latency'),
+        // API 24: the audio thread's core, clock and scheduling, and the mix pool (speed phase 5d).
+        audioThreads = lib.lookupFunction<Pointer<Utf8> Function(Pointer<Void>), Pointer<Utf8> Function(Pointer<Void>)>(
+            'caw_audio_threads'),
         setMetronomeSound = lib.lookupFunction<Void Function(Pointer<Void>, Double, Int32),
             void Function(Pointer<Void>, double, int)>('caw_engine_set_metronome_sound'),
         testTone = lib.lookupFunction<Void Function(Pointer<Void>, Double), void Function(Pointer<Void>, double)>(
@@ -431,6 +436,7 @@ class Bindings {
   final void Function(Pointer<Void>, int) setQuality;
   final void Function(Pointer<Void>, int, int) audioSetBufferMode;
   final int Function(Pointer<Void>) audioBufferFrames;
+  final int Function(Pointer<Void>, int) audioSetBackground;
   final void Function(Pointer<Void>) releaseTouches;
   final void Function(Pointer<Void>) stop;
   final void Function(Pointer<Void>) clearOverload;
@@ -466,6 +472,7 @@ class Bindings {
   final int Function(Pointer<Void>, Pointer<Utf8>, Pointer<Utf8>, int, int) audioConfigure;
   final Pointer<Utf8> Function(Pointer<Void>) audioStatus;
   final Pointer<Utf8> Function(Pointer<Void>) audioLatency;
+  final Pointer<Utf8> Function(Pointer<Void>) audioThreads;
   final void Function(Pointer<Void>, double, int) setMetronomeSound;
   final void Function(Pointer<Void>, double) testTone;
   final int Function(Pointer<Void>) testToneSounding;

@@ -6,6 +6,15 @@
     <!-- Audio input (recording, monitoring, the latency ping): asked at run time only when the user turns input on or
          arms a track (MicPermission.kt). -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <!-- Background playback (PlaybackService.kt): a foreground service of type mediaPlayback while playing or recording,
+         plus microphone while recording (Android 14+ needs each type's permission; microphone also needs RECORD_AUDIO
+         granted and the app in front when it starts). POST_NOTIFICATIONS (Android 13+) shows its notification in the
+         drawer; the service runs without it (developer.android.com, foreground service types and notification
+         permission, read 2026-11-12). -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!-- Bluetooth MIDI (BluetoothMidi.kt), asked for only when the user starts a scan in Settings › MIDI. Android 12+:
          the Nearby devices permissions, and the scan never derives location. Android 11 and earlier: the legacy
          permissions and location, which a scan needed there (developer.android.com Bluetooth permissions, 2026-11-11). -->
@@ -15,9 +24,16 @@
     <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
     <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" android:maxSdkVersion="30" />
-    <!-- Anonymous telemetry and feedback (HTTPS to the C.A.W-Telemetry relay). No plugin the app uses adds it, so
-         release builds need it here (debug and profile have their own for development). -->
+    <!-- The update check (GitHub Releases), downloading an update the user chose, and anonymous telemetry and
+         feedback (HTTPS to the C.A.W-Telemetry relay). No plugin the app uses adds it, so release builds need it
+         here (debug and profile have their own for development). -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Handing a downloaded update to the system installer, only when the user presses Update; Android asks the
+         user to allow "install unknown apps" for C.A.W first (UpdateInstaller.kt). -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <!-- Android 12+: lets an automatic update (Settings › About › Updates, off by default) install without the system
+         prompt when C.A.W is its own installer of record (PackageInstaller.SessionParams.setRequireUserAction). -->
+    <uses-permission android:name="android.permission.UPDATE_PACKAGES_WITHOUT_USER_ACTION" />
     <!-- Backups keep projects and settings but never telemetry's state: it holds the delete keys for this device's
          public reports and queued feedback with its email (res/xml/backup_rules.xml, data_extraction_rules.xml). -->
     <application
@@ -53,6 +69,15 @@
             android:name=".CompilerService"
             android:process=":compiler"
             android:exported="false" />
+        <!-- The update install session's status (UpdateInstaller.kt): not exported, so no other app can send to it. -->
+        <receiver
+            android:name=".UpdateStatusReceiver"
+            android:exported="false" />
+        <!-- Background playback: not exported; its notification's buttons are explicit, immutable PendingIntents. -->
+        <service
+            android:name=".PlaybackService"
+            android:exported="false"
+            android:foregroundServiceType="mediaPlayback|microphone" />
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data
@@ -65,6 +90,11 @@
 
          In particular, this is used by the Flutter engine in io.flutter.plugin.text.ProcessTextPlugin. -->
     <queries>
+        <!-- The system's package installer, so the update confirmation it sends can be checked before it opens. -->
+        <intent>
+            <action android:name="android.intent.action.VIEW"/>
+            <data android:mimeType="application/vnd.android.package-archive"/>
+        </intent>
         <intent>
             <action android:name="android.intent.action.PROCESS_TEXT"/>
             <data android:mimeType="text/plain"/>

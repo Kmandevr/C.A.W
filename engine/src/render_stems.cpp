@@ -306,6 +306,7 @@ bool renderRange(const ProjectSpec& base, const SongRenderRequest& req, const st
     }
 
     Engine eng(sr);
+    eng.useOfflineMixPool();  // the mix graph on several threads unless a live device runs (speed phase 5c)
     const std::string installed = eng.setProjectOffline(p);
     if (installed.find("\"ok\":true") == std::string::npos) {
         error = "couldn't install the project for the render: " + installed;

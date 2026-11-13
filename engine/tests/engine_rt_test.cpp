@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "alloc_counter.h"
+#include "block_fifo.h"
 #include "engine.h"
 #include "native_component_test_path.h"
 #include "params.h"
@@ -695,4 +696,56 @@ TEST(the_flagship_s_user_wavetable_and_twice_rate_warps_never_allocate_on_the_au
     }
     CHECK_EQ(operations, 0u);
     CHECK(peak > 0.01f);
+}
+
+TEST(the_block_fifo_never_allocates_on_the_audio_thread) {
+    // The device callback's fixed-block FIFO (block_fifo.h) with odd callback sizes, rendering a playing engine.
+    ProjectSpec p;
+    p.bpm = 120;
+    p.loopBars = 1;
+    p.modules.push_back({"acid", kAcidLine});
+    p.layers = {layer("a", "org.caw.synth.flagship", "acid", {{"org.caw.delay.pingpong", {}}})};
+    Engine e(48000);
+    CHECK(e.setProject(p).find("\"ok\":true") != std::string::npos);
+    e.play();
+    std::vector<float> l(2048), r(2048);
+    BlockFifo<kBlock> fifo;
+    auto render = [&](float* bl, float* br, int m) { e.process(bl, br, m); };
+    for (int k = 0; k < 50; ++k) fifo.pull(l.data(), r.data(), 441, 512, render);  // warm up
+    std::size_t operations = 0;
+    {
+        cawtest::AllocationScope scope;
+        for (const int n : {441, 1, 1023, 960, 1920, 480, 37, 2048, 441, 63, 65})
+            for (int k = 0; k < 20; ++k) fifo.pull(l.data(), r.data(), n, 512, render);
+        operations = scope.count();
+    }
+    CHECK_EQ(operations, std::size_t{0});
+}
+
+TEST(shedding_and_its_recovery_never_allocate_on_the_audio_thread) {
+    // reportLoad sheds a layer under load, brings it back once the load drops, and a reset brings all back.
+    ProjectSpec p;
+    p.bpm = 120;
+    p.loopBars = 1;
+    p.modules.push_back({"acid", kAcidLine});
+    p.layers = {layer("a", "org.caw.test.osc", "acid"), layer("b", "org.caw.test.osc", "acid")};
+    Engine e(48000);
+    CHECK(e.setProject(p).find("\"ok\":true") != std::string::npos);
+    e.play();
+    std::vector<float> l(512), r(512);
+    for (int k = 0; k < 20; ++k) e.process(l.data(), r.data(), 512);
+    std::size_t operations = 0;
+    {
+        cawtest::AllocationScope scope;
+        for (int k = 0; k < 1500; ++k) {  // 16 s: hot for 1.5 s, then cool
+            e.process(l.data(), r.data(), 512);
+            e.reportLoad(k < 140 ? 1.4 : 0.1, 512);
+        }
+        e.requestSheddingReset();
+        e.process(l.data(), r.data(), 512);
+        operations = scope.count();
+    }
+    CHECK_EQ(operations, std::size_t{0});
+    CHECK(e.sheddingStats().shed >= 1);
+    CHECK_EQ(e.sheddingStats().restored, e.sheddingStats().shed);
 }

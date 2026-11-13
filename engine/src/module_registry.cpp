@@ -554,6 +554,15 @@ const ModuleDescriptor* ModuleRegistry::find(std::string_view id) const noexcept
     return nullptr;
 }
 
+bool ModuleRegistry::isLoadedComponent(std::string_view id) const noexcept {
+    for (const ModuleRegistration& registration : registrations_) {  // the registration create(id) uses
+        if (!registration.descriptor || registration.descriptor->id != id) continue;
+        if (registration.component) return true;
+        if (registration.factory) return false;
+    }
+    return false;
+}
+
 std::vector<const ModuleDescriptor*> ModuleRegistry::loadedComponents() const {
     std::vector<const ModuleDescriptor*> out;
     for (const ModuleRegistration& registration : registrations_)

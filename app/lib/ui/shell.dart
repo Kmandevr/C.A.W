@@ -20,6 +20,7 @@ import '../platform/system_bars.dart';
 import 'audio_file_actions.dart' show AudioSource, importAudioSources;
 import 'arranger_screen.dart';
 import 'audio_record_ui.dart';
+import 'background_playback_ui.dart';
 import 'export_page.dart';
 import 'cpp/build_section.dart';
 import 'dock/dock_controller.dart';
@@ -44,12 +45,15 @@ import 'frame/record_tools.dart';
 import 'frame/sections.dart';
 import 'frame/strain.dart';
 import 'adaptive_sheet.dart';
+import 'app_prompts.dart';
 import 'arrange/templates_ui.dart';
 import '../model/templates.dart';
 import 'pointer_input.dart';
 import 'music_video/video_setup_sheet.dart';
 import 'privacy/feedback_sheet.dart';
 import 'privacy/privacy_pages.dart';
+import 'startup_screen.dart';
+import 'music_video/video_render_chip.dart';
 
 /// The panel each view shortcut shows, by the index KeyRouter's `onView` passes.
 const _viewPanels = [Panels.builder, Panels.arrangement, Panels.files];
@@ -166,8 +170,9 @@ class _ShellState extends State<Shell> {
   }
 
   // The first-run page and the once-only question after a beta build (docs/app.md "Privacy, telemetry and
-  // feedback"), shown once the project and telemetry have both loaded; queued feedback that went out says so.
-  bool _privacyShown = false;
+  // feedback"), shown once the project and telemetry have both loaded and the startup screen has gone, before any
+  // update prompt (AppPrompts: one at a time); queued feedback that went out says so.
+  bool _privacyShown = false, _privacyOpen = false;
   StreamSubscription<FeedbackSent>? _feedbackSent;
 
   void _privacyCheck() {
@@ -178,11 +183,20 @@ class _ShellState extends State<Shell> {
       if (mounted) ScaffoldMessenger.maybeOf(context)?.showSnackBar(const SnackBar(content: Text('Sent, thanks')));
     });
     if (_privacyShown || !s.ready || !(t.firstRunNeeded || t.askKeepNeeded)) return;
+    // The startup screen goes first; another prompt already open (an update prompt) closes first.
+    if (!AppPrompts.free) return;
     _privacyShown = true;
+    // Held from now, so an update prompt can't open in the frame before this one does.
+    AppPrompts.showing.value = _privacyOpen = true;
     WidgetsBinding.instance.addPostFrameCallback((_) async {
-      if (!mounted) return;
-      if (t.firstRunNeeded) await showFirstRun(context, t);
-      if (mounted && t.askKeepNeeded) await askKeepTelemetry(context, t);
+      try {
+        if (!mounted) return;
+        if (t.firstRunNeeded) await showFirstRun(context, t);
+        if (mounted && t.askKeepNeeded) await askKeepTelemetry(context, t);
+      } finally {
+        _privacyOpen = false;
+        AppPrompts.showing.value = false;
+      }
     });
   }
 
@@ -191,6 +205,7 @@ class _ShellState extends State<Shell> {
     super.initState();
     s.addListener(_privacyCheck);
     Telemetry.active.addListener(_privacyCheck);
+    AppPrompts.changes.addListener(_privacyCheck);
     _privacyCheck();
     s.addListener(_syncTitle);
     _syncTitle();
@@ -218,6 +233,8 @@ class _ShellState extends State<Shell> {
   void dispose() {
     s.removeListener(_privacyCheck);
     Telemetry.active.removeListener(_privacyCheck);
+    AppPrompts.changes.removeListener(_privacyCheck);
+    if (_privacyOpen) AppPrompts.showing.value = false; // closed with the app before its page was answered
     unawaited(_feedbackSent?.cancel());
     s.removeListener(_syncTitle);
     unawaited(_opened?.cancel());
@@ -290,7 +307,8 @@ class _ShellState extends State<Shell> {
   Widget build(BuildContext context) => ListenableBuilder(
         listenable: s,
         builder: (context, _) {
-          if (!s.ready) return const Scaffold(body: Center(child: CrowLogo(size: 64)));
+          // Until the project is open the startup screen is in front (StartupGate, above the shell).
+          if (!s.ready) return const ColoredBox(color: startupBackground);
           // Build opens on its start page (what it is for, new code, examples) until something is opened.
           // Built once per app-state change; a layout change (a divider drag, a tab) reuses them, so it rebuilds
           // only the dock, not the screens.
@@ -301,7 +319,8 @@ class _ShellState extends State<Shell> {
               controller: _dock,
               child: GlassStrainWatcher(
                 state: s,
-                child: Scaffold(
+                // A music video rendering in the background shows its chip over every section (owner, 2026-11-12).
+                child: VideoRenderOverlay(state: s, child: Scaffold(
                   // Phones draw edge to edge (owner, 2026-11-10): the bars' backgrounds reach under the system bars
                   // and the camera cutout, and each part pads its controls clear of them. Desktop keeps a safe area.
                   body: Builder(builder: (context) {
@@ -334,7 +353,7 @@ class _ShellState extends State<Shell> {
                       );
                     });
                   }),
-                ),
+                )),
               ),
             ),
           );
@@ -415,7 +434,8 @@ class _ShellState extends State<Shell> {
             ),
             // The on-screen keys and pads slide up from the bottom edge here.
             if (LiveMidi.current case final m?)
-              TakeToast(midi: m, child: AudioRecordFeedback(state: s, child: LiveKeysPanel(midi: m, state: s))),
+              TakeToast(midi: m, child: AudioRecordFeedback(state: s,
+                  child: BackgroundHintFeedback(child: LiveKeysPanel(midi: m, state: s)))),
           ]),
         ),
       ]);

@@ -10,6 +10,7 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 option(CAW_AUDIO "Build the shared library with device audio output (miniaudio)" ON)
 option(CAW_TOOLS "Build the caw CLI and the tests" ON)
 option(CAW_SANITIZE "Build with AddressSanitizer and UndefinedBehaviorSanitizer" OFF)
+option(CAW_TSAN "Build with ThreadSanitizer (Clang; the mix pool's stress test, engine.yml)" OFF)
 option(CAW_CLAP "Build the CLAP export tests: example plug-ins and a test host (fetches the CLAP headers)" OFF)
 option(CAW_VST3 "Build the VST3 export tests: example plug-ins and a test host (fetches the VST3 interface headers)" OFF)
 get_filename_component(CAW_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/.." ABSOLUTE)
@@ -122,6 +123,13 @@ if(CAW_SANITIZE AND NOT MSVC)
   add_compile_options(-fsanitize=address,undefined -fno-omit-frame-pointer -fno-sanitize-recover=undefined)
   add_link_options(-fsanitize=address,undefined)
 endif()
+if(CAW_TSAN)
+  if(CAW_SANITIZE OR MSVC OR NOT CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+    message(FATAL_ERROR "CAW_TSAN needs Clang (not MSVC) and can't be combined with CAW_SANITIZE")
+  endif()
+  add_compile_options(-fsanitize=thread -fno-omit-frame-pointer -g)
+  add_link_options(-fsanitize=thread)
+endif()
 # Link-time optimisation (speed phase 1, docs/engine-performance.md): every engine target in an optimised
 # configuration (Release, RelWithDebInfo: Android Gradle's release, MinSizeRel), when the toolchain supports it.
 # Debug and sanitizer builds stay without it. Set here, so it reaches only this directory's targets (the app's
@@ -133,7 +141,7 @@ else()
   set(CAW_LTO_DEFAULT ON)
 endif()
 option(CAW_LTO "Link-time optimisation for optimised (non-Debug) builds" ${CAW_LTO_DEFAULT})
-if(CAW_LTO AND NOT CAW_SANITIZE)
+if(CAW_LTO AND NOT CAW_SANITIZE AND NOT CAW_TSAN)
   include(CheckIPOSupported)
   check_ipo_supported(RESULT CAW_IPO_SUPPORTED OUTPUT CAW_IPO_OUTPUT LANGUAGES C CXX)
   if(CAW_IPO_SUPPORTED)
@@ -163,6 +171,16 @@ target_sources(caw_core PRIVATE src/builtin_fx_racks.cpp src/builtin_fx_racks_fx
 target_sources(caw_core PRIVATE src/modulation_links.cpp src/builtin_modulators.cpp)
 # modulators end
 target_sources(caw_core PRIVATE src/sample_time.cpp)  # sample positions of steps and seconds, built strict (below)
+target_sources(caw_core PRIVATE src/mix_pool.cpp)  # speed phase 5c: the mix graph's real-time worker pool
+# Speed phase 5d: thread priorities, affinity and hints for the pool and the callback, one platform file each.
+if(WIN32)
+  set(CAW_THREAD_TUNING platform/thread_tuning_win.cpp)
+elseif(CMAKE_SYSTEM_NAME MATCHES "Linux|Android")
+  set(CAW_THREAD_TUNING platform/thread_tuning_posix.cpp)
+else()
+  set(CAW_THREAD_TUNING platform/thread_tuning_none.cpp)
+endif()
+target_sources(caw_core PRIVATE src/thread_tuning.cpp ${CAW_THREAD_TUNING})
 target_sources(caw_core PRIVATE src/note_fx_host.cpp)  # per-note FX (#127): slot racks, the voice-bus host, the manager
 target_include_directories(caw_core PRIVATE src)
 target_compile_options(caw_core PRIVATE ${CAW_FLAGS})
@@ -243,10 +261,13 @@ target_include_directories(caw_cli PRIVATE src)
   target_sources(caw_tests PRIVATE tests/graph_layout_test.cpp)  # #120 layout rules: mono to stereo, downmix, dual mono
   target_sources(caw_tests PRIVATE tests/voice_bus_test.cpp)  # #127 the voice bus; #120 built-in declarations, C 3.0/3.1
   target_sources(caw_tests PRIVATE tests/audio_assets_test.cpp)  # assets, audio clips, the sampler, SFZ, input (WP-J)
+  target_sources(caw_tests PRIVATE tests/input_bridge_test.cpp)  # the input bridge: output unchanged when the input dies
   target_sources(caw_tests PRIVATE tests/speed_free_wins_test.cpp)  # speed phase 1: Eco oversampling, silent work skipped, master sleep
   target_sources(caw_tests PRIVATE tests/fp_mode_test.cpp)  # speed phase 2: the flush-to-zero guard, NaN/Inf guards under the build flags
   target_sources(caw_tests PRIVATE tests/sample_timing_test.cpp tests/timing_oracle.cpp)  # note timing exact to the sample
   target_sources(caw_tests PRIVATE tests/stress_test.cpp)  # the Benchmark (beta plan C): scenarios, ramps, cancel, profiles
+  target_sources(caw_tests PRIVATE tests/mix_graph_test.cpp)  # speed phase 5a/5b: pulled routes, per-node scratch, graph levels
+  target_sources(caw_tests PRIVATE tests/mix_pool_test.cpp)  # speed phase 5c: the mix pool, parallel levels, the serial lane
   add_library(caw_test_component MODULE tests/native_component_fixture.cpp)
   target_link_libraries(caw_test_component PRIVATE CAW::SDK)
   target_compile_options(caw_test_component PRIVATE ${CAW_FLAGS})
@@ -289,13 +310,26 @@ target_include_directories(caw_cli PRIVATE src)
   # Split the suite into independent processes so CTest can run shards concurrently.
   # Process isolation avoids sharing test state while keeping every case enabled.
   set(CAW_TEST_SHARDS 4)
+  # Each shard runs the mix graph on one thread and writes every reference render's raw-bit digest; the parallel
+  # shards run the same tests with every Engine's mix graph on 3 workers (speed phase 5c), and
+  # caw_parallel_identity checks that every render has the same bits both ways.
+  set(CAW_DIGEST_DIR "${CMAKE_CURRENT_BINARY_DIR}/render_digests")
   foreach(shard RANGE 0 3)
     add_test(NAME caw_tests_shard_${shard}
       COMMAND ${CMAKE_COMMAND} -E env "CAW_TEST_COMPONENT_PATH=$<TARGET_FILE:caw_test_component>"
-        "$<TARGET_FILE:caw_tests>" --shard-index ${shard} --shard-count ${CAW_TEST_SHARDS})
+        "CAW_RENDER_DIGEST=${CAW_DIGEST_DIR}/serial_${shard}.txt"
+        "$<TARGET_FILE:caw_tests>" --shard-index ${shard} --shard-count ${CAW_TEST_SHARDS} --mix-threads 0)
+    add_test(NAME caw_tests_parallel_shard_${shard}
+      COMMAND ${CMAKE_COMMAND} -E env "CAW_TEST_COMPONENT_PATH=$<TARGET_FILE:caw_test_component>"
+        "CAW_RENDER_DIGEST=${CAW_DIGEST_DIR}/parallel_${shard}.txt"
+        "$<TARGET_FILE:caw_tests>" --shard-index ${shard} --shard-count ${CAW_TEST_SHARDS} --mix-threads 3)
+    set_tests_properties(caw_tests_shard_${shard} caw_tests_parallel_shard_${shard} PROPERTIES
+      PROCESSORS 1 FIXTURES_SETUP caw_render_digests)
   endforeach()
-  set_tests_properties(caw_tests_shard_0 caw_tests_shard_1 caw_tests_shard_2 caw_tests_shard_3
-    PROPERTIES PROCESSORS 1)
+  add_test(NAME caw_parallel_identity
+    COMMAND ${CMAKE_COMMAND} -DDIGEST_DIR=${CAW_DIGEST_DIR} -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/CompareDigests.cmake")
+  set_tests_properties(caw_parallel_identity PROPERTIES FIXTURES_REQUIRED caw_render_digests)
+  file(MAKE_DIRECTORY "${CAW_DIGEST_DIR}")
   # Real-time contract tests in their own binary: it replaces global operator new/delete to count
   # allocations, which would turn off AddressSanitizer's new/delete mismatch checks in caw_tests.
   add_executable(caw_rt_tests tests/test_main.cpp tests/graph_channels_test.cpp tests/engine_rt_test.cpp

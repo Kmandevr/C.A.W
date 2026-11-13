@@ -213,18 +213,40 @@ List<VideoCut> autoCut(VideoScene scene, AutoCutSettings settings, MusicVideoOpt
   final out = <VideoCut>[];
   for (var i = 0; i < shots.length; i++) {
     final s = shots[i];
+    final (transition, tSteps) = i == 0 || !settings.styledTransitions
+        ? (s.transition, s.transitionSteps)
+        : styledTransition(options.style, points[i - 1].trigger, s.end - s.start, scene.stepsPerBar);
     out.add(VideoCut(
       id: 'a$i',
       start: s.start,
       length: s.end - s.start,
       layout: VideoLayout.single(s.kind),
-      transition: s.transition,
-      transitionSteps: s.transitionSteps,
+      transition: transition,
+      transitionSteps: tSteps,
       zoom: s.zoomFrom,
       reason: i == 0 ? 'Start' : points[i - 1].reason,
     ));
   }
   return out;
+}
+
+/// The transition auto-cut gives a cut made by [trigger] in [style] (owner, 2026-11-12: transitions to match the
+/// style), and its length in steps (at most half the shot): Energetic flashes on drops, glitches on note bursts,
+/// wipes at tracks and cuts on the interval; Calm zooms on drops, slides at tracks and crossfades otherwise; Minimal
+/// crossfades slowly, wiping on drops.
+(VideoTransition, double) styledTransition(VideoStyle style, CutTrigger trigger, double shotSteps, int stepsPerBar) {
+  final (t, beats) = switch ((style, trigger)) {
+    (VideoStyle.energetic, CutTrigger.loudness) => (VideoTransition.flash, 1.0),
+    (VideoStyle.energetic, CutTrigger.burst) => (VideoTransition.glitch, 0.5),
+    (VideoStyle.energetic, CutTrigger.track) => (VideoTransition.wipe, 1.0),
+    (VideoStyle.energetic, CutTrigger.interval) => (VideoTransition.cut, 0.0),
+    (VideoStyle.calm, CutTrigger.loudness) => (VideoTransition.zoom, 2.0),
+    (VideoStyle.calm, CutTrigger.track) => (VideoTransition.slide, 2.0),
+    (VideoStyle.calm, _) => (VideoTransition.crossfade, 1.0),
+    (VideoStyle.minimal, CutTrigger.loudness) => (VideoTransition.wipe, 4.0),
+    (VideoStyle.minimal, _) => (VideoTransition.crossfade, 2.0),
+  };
+  return (t, t == VideoTransition.cut ? 0.0 : math.min(beats * 4, shotSteps / 2));
 }
 
 /// [autoCut] in a background isolate (a long song's triggers scan every note).

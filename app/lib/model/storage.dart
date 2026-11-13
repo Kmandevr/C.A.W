@@ -67,6 +67,8 @@ class ProjectStorage {
       final doc = ProjectDoc.fromJson(decoded as Map<String, dynamic>);
       _written = (id, text);
       return doc;
+    } on NewerProjectFormat {
+      rethrow; // not damaged: the caller says so and leaves the file alone
     } catch (_) {
       return null;
     }
@@ -81,7 +83,9 @@ class ProjectStorage {
     final f = _file(p.id);
     final text = json ?? jsonEncode(p.toJson());
     final last = _written;
-    if (last != null && last.$1 == p.id && last.$2 == text && await f.exists()) return;
+    // The same text may still be on its way to disk (an autosave the caller didn't wait for): a save returns only
+    // once it has landed.
+    if (last != null && last.$1 == p.id && last.$2 == text && await f.exists()) return atomicWritesDone(f);
     _written = (p.id, text);
     await writeFileAtomically(f, text);
   }
@@ -218,6 +222,10 @@ class ProjectStorage {
   Directory audioDirectory(String projectId) => Directory(
     '${_root.path}${Platform.pathSeparator}audio${Platform.pathSeparator}${_validatedProjectId(projectId)}');
 
+  /// The music video's images (cover art, logos) the user picked, copied here by name (`VideoImageAsset.file`).
+  Directory videoAssetsDirectory(String projectId) => Directory(
+    '${_root.path}${Platform.pathSeparator}video-assets${Platform.pathSeparator}${_validatedProjectId(projectId)}');
+
   /// The drum pads' own WAVs the user picked (`DrumSampleImport`), app-wide beside the projects folder.
   Directory get drumSamplesDirectory => Directory('${_root.parent.path}${Platform.pathSeparator}drum_samples');
 
@@ -236,6 +244,8 @@ class ProjectStorage {
       if (await samples.exists()) await samples.delete(recursive: true);
       final audio = audioDirectory(id);
       if (await audio.exists()) await audio.delete(recursive: true);
+      final video = videoAssetsDirectory(id);
+      if (await video.exists()) await video.delete(recursive: true);
       final builds = nativeImportsDirectory(id);
       if (await builds.exists()) await builds.delete(recursive: true);
     }

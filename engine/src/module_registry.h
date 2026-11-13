@@ -74,6 +74,8 @@ public:
     bool unload(std::string_view id);
 
     const ModuleDescriptor* find(std::string_view id) const noexcept;
+    // Whether create(id) makes a dynamically loaded (third-party) component, not a built-in.
+    bool isLoadedComponent(std::string_view id) const noexcept;
     // Descriptors of the dynamically loaded components, in load order.
     std::vector<const ModuleDescriptor*> loadedComponents() const;
     // Descriptors of the statically registered (built-in) components, in registration order; internal ones
