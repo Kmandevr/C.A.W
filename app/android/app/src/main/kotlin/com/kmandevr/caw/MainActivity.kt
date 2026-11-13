@@ -41,6 +41,8 @@ class MainActivity : FlutterActivity() {
                     result.success(readResourceSignals())
                 } else if (call.method == "device") {
                     result.success(readDeviceFacts())
+                } else if (call.method == "thermal") {
+                    result.success(readThermal())
                 } else {
                     result.notImplemented()
                 }
@@ -205,6 +207,18 @@ class MainActivity : FlutterActivity() {
         return mapOf(
             "thermalStatus" to thermalStatus,
             "batterySaver" to power?.isPowerSaveMode,
+        )
+    }
+
+    // The Benchmark's heat test: the thermal status and the headroom forecast 10 s ahead (1.0: severe throttling
+    // starts; NaN where unsupported or asked again within about a second, then left out).
+    private fun readThermal(): Map<String, Any?> {
+        val power = getSystemService(Context.POWER_SERVICE) as? PowerManager
+        val status = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) power?.currentThermalStatus else null
+        val headroom = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) power?.getThermalHeadroom(10) else null
+        return mapOf(
+            "thermalStatus" to status,
+            "thermalHeadroom" to headroom?.takeIf { !it.isNaN() }?.toDouble(),
         )
     }
 

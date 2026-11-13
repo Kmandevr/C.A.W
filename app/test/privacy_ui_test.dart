@@ -1,6 +1,7 @@
 // Tests the privacy and feedback screens at 360 dp wide (beta readiness plan E2, E3, E5, F): the first-run page,
 // Settings › About and beta › Privacy, My data and the feedback sheet, with goldens of each new screen.
 import 'dart:convert';
+import 'dart:io';
 import 'dart:math';
 
 import 'package:caw/model/telemetry/device_probe.dart';
@@ -97,6 +98,14 @@ void main() {
     expect(find.textContaining('Draft text'), findsOneWidget);
     expect(LegalText.privacy.url, 'https://github.com/Kmandevr/C.A.W-Telemetry/blob/main/PRIVACY.md');
     expect(LegalText.terms.url, 'https://github.com/Kmandevr/C.A.W-Telemetry/blob/main/TERMS.md');
+  });
+
+  test('the bundled Privacy Policy is the published one: the minimum age (16) is stated, no placeholder left', () {
+    // The copy must match PRIVACY.md in Kmandevr/C.A.W-Telemetry (450e773, 2026-11-12: minimum age 16). TERMS.md's
+    // governing law is still the owner's to choose there, so its placeholder stays as published.
+    final privacy = File('assets/legal/PRIVACY.md').readAsStringSync();
+    expect(privacy, contains('You must be at least 16'));
+    expect(privacy, isNot(contains('[Owner:')));
   });
 
   testWidgets('Privacy: the toggle turns telemetry off and wipes the queue', (tester) async {

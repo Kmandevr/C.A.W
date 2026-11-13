@@ -301,7 +301,7 @@ TEST(the_flagship_lists_its_parameters_grouped_by_section_with_good_descriptors)
     const ModuleDescriptor& d = p->descriptor();
     CHECK_EQ(d.id, std::string_view("org.caw.synth.flagship"));
     CHECK_EQ(d.name, std::string_view("Flagship"));
-    CHECK_EQ(d.parameterCount, 212u);
+    CHECK_EQ(d.parameterCount, 215u);
     const char* prefixes[] = {"osc1_", "osc2_", "osc3_", "flt1_", "flt2_", "flt_", "env1_", "env2_", "env3_", "lfo1_",
                               "lfo2_", "lfo3_", "rnd_", "volume", "velocity", "bend_range", "fx_", "mod", "voice_mode", "glide"};
     for (uint32_t k = 0; k < d.parameterCount; ++k) {

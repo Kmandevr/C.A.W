@@ -239,7 +239,11 @@ Future<T?> showGlassSheet<T>({
     backgroundColor: glass ? Colors.transparent : (backgroundColor ?? Neon.panel),
     elevation: glass ? 0 : null,
     sheetAnimationStyle: sheetAnimation(context), // an edit animation of panels (Subtle, Playful or none)
-    builder: glass ? (c) => _GlassSheet(handle: showDragHandle, child: builder(c)) : builder,
+    // The sheet's surface reaches the screen's edge; its content stays clear of the system navigation bar (the app
+    // draws edge to edge), so a sheet's last row or button is never under it.
+    builder: glass
+        ? (c) => _GlassSheet(handle: showDragHandle, child: SafeArea(top: false, child: builder(c)))
+        : (c) => SafeArea(top: false, child: builder(c)),
   );
 }
 

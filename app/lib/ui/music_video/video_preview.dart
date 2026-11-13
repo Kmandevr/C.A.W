@@ -193,11 +193,13 @@ class MusicVideoPreviewState extends State<MusicVideoPreview> with SingleTickerP
           value: _step.clamp(widget.start, math.max(widget.start + 1, widget.end)).toDouble(),
           onChanged: _scrub,
         )),
-        SizedBox(width: 92, child: Text(
-          '${label.toUpperCase()} · ${widget.plan.indexAt(_step) + 1}/${widget.plan.shots.length}',
-          maxLines: 1, overflow: TextOverflow.ellipsis, textAlign: TextAlign.right,
-          style: const TextStyle(color: Neon.dim, fontSize: 10),
-        )),
+        // The view's name gives way before the shot count, which always shows.
+        SizedBox(width: 112, child: Row(mainAxisAlignment: MainAxisAlignment.end, children: [
+          Flexible(child: Text(label.toUpperCase(), maxLines: 1, overflow: TextOverflow.ellipsis,
+              style: const TextStyle(color: Neon.dim, fontSize: 10))),
+          Text(' · ${widget.plan.indexAt(_step) + 1}/${widget.plan.shots.length}', maxLines: 1,
+              style: const TextStyle(color: Neon.dim, fontSize: 10)),
+        ])),
       ]),
     ]);
   }

@@ -270,7 +270,8 @@ class _DrumPadTileState extends State<DrumPadTile> {
               child: Stack(fit: StackFit.expand, children: [
                 if (frames != null) RepaintBoundary(child: CustomPaint(
                   painter: _PeakGlow(frames, widget.pad, c))),
-                Padding(padding: const EdgeInsets.fromLTRB(7, 5, 6, 4), child: Column(
+                // A pad is a fixed-size tile: its three short lines keep their size under a large system text size.
+                MediaQuery.withNoTextScaling(child: Padding(padding: const EdgeInsets.fromLTRB(7, 5, 6, 4), child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start, children: [
                     Row(children: [
                       Text(padLabel(widget.pad), style: TextStyle(fontSize: 10, fontWeight: FontWeight.w900,
@@ -284,7 +285,7 @@ class _DrumPadTileState extends State<DrumPadTile> {
                       style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: used ? Neon.text : Neon.dim)),
                     if (note != null) Text(widget.learning ? 'LEARN…' : note, maxLines: 1,
                       style: Neon.code(size: 9, color: widget.learning ? Neon.yellow : Neon.dim)),
-                  ])),
+                  ]))),
               ]),
             ),
           )),

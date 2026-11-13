@@ -19,9 +19,15 @@ enum StressPlanKind {
 
 /// One step of a plan: a request and the words the screen shows for it.
 class StressStep {
-  const StressStep(this.request, this.label, {required this.estimateSeconds});
+  const StressStep(this.request, this.label, {required this.estimateSeconds, this.warmUp = false, this.buffer});
   final StressRequest request;
   final String label;
+
+  /// Untimed: played before the plan's first measured step (the device's clocks and caches up), its result dropped.
+  final bool warmUp;
+
+  /// Live: the buffer it asks for (StressBuffer).
+  final String? buffer;
 
   /// About how long it takes, for the overall progress.
   final double estimateSeconds;
@@ -34,29 +40,55 @@ abstract class StressHost {
 }
 
 /// The plans (docs/app.md, "Benchmark"). Every step is DSP (timed on a worker at 256-frame callbacks, as the CI
-/// bench) unless it says live (the device, muted).
+/// bench, with the mix pool on Auto as the app plays) unless it says live (the device, muted). An untimed second
+/// comes first; each DSP run also plays 0.5 s untimed after Play (1.7 s with Auto's decision and settle).
 List<StressStep> stressPlan(StressPlanKind kind, List<StressScenarioInfo> scenarios, {String? workDir}) {
   final full = kind == StressPlanKind.full;
   final plain = full ? 4.0 : 1.5, rampStep = full ? 1.5 : 0.5;
+  const warm = 1.7; // the engine's warm-up after Play (stress_run.h, warmupSeconds)
+  final first = scenarios.any((s) => s.id == 'song8') ? 'song8' : scenarios.isEmpty ? '' : scenarios.first.id;
   return [
+    if (first.isNotEmpty)
+      StressStep(StressRequest(scenario: first, seconds: 1, workDir: workDir), 'Getting ready',
+          estimateSeconds: 1 + warm, warmUp: true),
     for (final s in scenarios)
       StressStep(StressRequest(scenario: s.id, seconds: plain, workDir: workDir), 'Playing ${s.name}',
-          estimateSeconds: plain + 0.5),
+          estimateSeconds: plain + 0.5 + warm),
     StressStep(StressRequest(kind: StressKind.rampTracks, seconds: rampStep, workDir: workDir), 'Adding tracks',
-        estimateSeconds: rampStep * 12),
+        estimateSeconds: (rampStep + warm) * 12),
     StressStep(StressRequest(kind: StressKind.rampVoices, seconds: rampStep, workDir: workDir), 'Adding Flagship voices',
-        estimateSeconds: rampStep * 11),
+        estimateSeconds: (rampStep + warm) * 11),
     StressStep(StressRequest(kind: StressKind.rampEffects, seconds: rampStep, workDir: workDir), 'Adding effects to one track',
-        estimateSeconds: rampStep * 11),
+        estimateSeconds: (rampStep + warm) * 11),
     for (final id in full ? const ['song8', 'song16', 'flagship_heavy16'] : const ['song8'])
       StressStep(StressRequest(scenario: id, kind: StressKind.profile, seconds: full ? 3 : 2, workDir: workDir),
           'Finding what takes the time', estimateSeconds: (full ? 3 : 2) + 1.5),
-    for (final id in full ? const ['song8', 'song16'] : const ['song8'])
+    // Live: at the playing buffer (Auto while not recording), then at Low latency (the device's own burst).
+    for (final id in full ? const ['song8', 'song16'] : const ['song8']) ...[
+      StressStep(
+          StressRequest(
+              scenario: id, mode: StressMode.live, seconds: full ? 10 : 5, frames: StressBuffer.playingFrames, workDir: workDir),
+          'Through the audio device (muted)',
+          estimateSeconds: (full ? 10 : 5) + 0.5 + warm,
+          buffer: StressBuffer.playing),
       StressStep(StressRequest(scenario: id, mode: StressMode.live, seconds: full ? 10 : 5, workDir: workDir),
-          'Through the audio device (muted)', estimateSeconds: (full ? 10 : 5) + 0.5),
+          'Through the audio device at Low latency (muted)',
+          estimateSeconds: (full ? 10 : 5) + 0.5 + warm,
+          buffer: StressBuffer.lowLatency),
+    ],
+    // The heat test: live, in real time, at the playing buffer.
     if (full)
-      StressStep(StressRequest(scenario: 'song16', kind: StressKind.sustained, seconds: 120, workDir: workDir),
-          'Holding a heavy song for 2 minutes', estimateSeconds: 120),
+      StressStep(
+          StressRequest(
+              scenario: 'song16',
+              kind: StressKind.sustained,
+              mode: StressMode.live,
+              seconds: 120,
+              frames: StressBuffer.playingFrames,
+              workDir: workDir),
+          'Holding a heavy song for 2 minutes',
+          estimateSeconds: 120 + 0.5 + warm,
+          buffer: StressBuffer.playing),
   ];
 }
 
@@ -77,6 +109,7 @@ class StressRunner extends ChangeNotifier {
     this.sendTelemetry,
     this.workDir,
     this.device = const {},
+    this.readThermal,
   })  : backend = backend ?? StressBackend.current,
         _pressureChanges = pressure;
 
@@ -94,6 +127,10 @@ class StressRunner extends ChangeNotifier {
   /// Makes (and later removes) the folder runs may write into; null: none (song8_extras is skipped).
   final Future<Directory?> Function()? workDir;
   final Map<String, Object?> device;
+
+  /// The platform's thermal status and headroom now ({'status', 'headroom'}), read at the sustained run's start
+  /// and end; null: not read.
+  final Future<Map<String, Object?>> Function()? readThermal;
 
   bool _running = false;
   bool get running => _running;
@@ -170,7 +207,7 @@ class StressRunner extends ChangeNotifier {
         final r = step.request;
         final info = names[r.scenario];
         // Memory: an Extreme scenario that needs more than the work budget is skipped, not run.
-        if (r.kind == StressKind.plain && r.mode == StressMode.dsp && info != null) {
+        if (r.kind == StressKind.plain && r.mode == StressMode.dsp && info != null && !step.warmUp) {
           final budget = memoryBudgetMiB;
           if (info.tier == 'extreme' && budget != null && info.memoryMiB > budget) {
             result.scenarios.add(ScenarioResult(
@@ -187,10 +224,13 @@ class StressRunner extends ChangeNotifier {
         }
         phase = step.label;
         notifyListeners();
+        final heat = r.kind == StressKind.sustained;
+        final thermalStart = heat ? await _thermal() : const <String, Object?>{};
         final json = await _runStep(step, done / total, step.estimateSeconds / total);
+        final thermalEnd = heat ? await _thermal() : const <String, Object?>{};
         done += step.estimateSeconds;
         fraction = (done / total).clamp(0.0, 1.0);
-        _take(result, step, json, info);
+        if (!step.warmUp) _take(result, step, json, info, thermalStart: thermalStart, thermalEnd: thermalEnd);
         notifyListeners();
       }
       result.stoppedBecause = _safetyStop ?? (_cancelled ? 'You stopped it' : null);
@@ -257,13 +297,23 @@ class StressRunner extends ChangeNotifier {
     }
   }
 
-  void _take(StressResult result, StressStep step, Map<String, dynamic> json, StressScenarioInfo? info) {
+  Future<Map<String, Object?>> _thermal() async {
+    try {
+      return await readThermal?.call() ?? const {};
+    } catch (_) {
+      return const {};
+    }
+  }
+
+  void _take(StressResult result, StressStep step, Map<String, dynamic> json, StressScenarioInfo? info,
+      {Map<String, Object?> thermalStart = const {}, Map<String, Object?> thermalEnd = const {}}) {
     final r = step.request;
     final stop = '${json['stop_reason'] ?? ''}';
     if (stop == 'cancelled') return; // a cut-short step reports nothing
     switch (r.kind) {
       case StressKind.plain:
-        result.scenarios.add(ScenarioResult.fromEngine(json, name: info?.name ?? r.scenario, tier: info?.tier ?? 'normal'));
+        result.scenarios.add(
+            ScenarioResult.fromEngine(json, name: info?.name ?? r.scenario, tier: info?.tier ?? 'normal', buffer: step.buffer));
       case StressKind.rampTracks || StressKind.rampVoices || StressKind.rampEffects:
         final kind = switch (r.kind) { StressKind.rampTracks => 'tracks', StressKind.rampVoices => 'voices', _ => 'effects' };
         final failed = (json['first_failed'] as num?)?.toInt() ?? -1;
@@ -276,42 +326,43 @@ class StressRunner extends ChangeNotifier {
           error: ok ? null : '${json['error'] ?? 'failed'}',
         );
       case StressKind.profile:
-        _addCosts(result, json);
+        _addCosts(result, r.scenario, json);
       case StressKind.sustained:
         final b = (json['budget_us'] as num?)?.toDouble() ?? 0;
         double pct(String k) => b <= 0 ? 0 : 100 * ((json[k] as num?)?.toDouble() ?? 0) / b;
+        int k(String key) => (json[key] as num?)?.toInt() ?? -1;
+        final xr = k('xruns');
         result.sustained = SustainedResult(
           scenario: r.scenario,
           seconds: (json['seconds'] as num?)?.toDouble() ?? 0,
           firstPct: pct('mean_first_us'),
           lastPct: pct('mean_last_us'),
+          slopePctPerMin: (json['slope_pct_per_min'] as num?)?.toDouble(),
+          live: json['mode'] == 'live',
+          xruns: xr >= 0 ? xr : null,
+          coreKhzStart: k('core_khz_start'),
+          coreKhzEnd: k('core_khz_end'),
+          coreMaxKhz: k('core_max_khz'),
+          thermalStart: thermalStart,
+          thermalEnd: thermalEnd,
         );
     }
   }
 
-  // Costs from several profiled scenarios: each id's share averaged over them (so one scenario can't outweigh).
-  int _profiles = 0;
-  final Map<String, (double, double, int)> _costSums = {};
-
-  void _addCosts(StressResult result, Map<String, dynamic> json) {
+  // A profiled scenario's components, as its own: each share is of that song's callback and each instance count
+  // that song's (averaging shares across songs mixed songs of different weights).
+  void _addCosts(StressResult result, String scenario, Map<String, dynamic> json) {
     final rows = (json['costs'] as List? ?? const []).whereType<Map>().toList();
     if (rows.isEmpty) return;
-    if (result.costs.isEmpty) {
-      _profiles = 0;
-      _costSums.clear();
-    }
-    _profiles++;
-    for (final c in rows) {
-      final id = '${c['id']}';
-      final s = _costSums[id] ?? (0.0, 0.0, 0);
-      _costSums[id] = (s.$1 + ((c['pct'] as num?)?.toDouble() ?? 0), s.$2 + ((c['ran_pct'] as num?)?.toDouble() ?? 0), s.$3 + 1);
-    }
-    result.costs
-      ..clear()
-      ..addAll([
-        for (final e in _costSums.entries)
-          StressCost(id: e.key, pct: e.value.$1 / _profiles, ranPct: e.value.$2 / e.value.$3, instances: e.value.$3),
-      ]);
+    result.costsByScenario[scenario] = [
+      for (final c in rows)
+        StressCost(
+          id: '${c['id']}',
+          pct: (c['pct'] as num?)?.toDouble() ?? 0,
+          ranPct: (c['ran_pct'] as num?)?.toDouble() ?? 100,
+          instances: (c['instances'] as num?)?.toInt() ?? 1,
+        ),
+    ];
   }
 
   bool _disposed = false;

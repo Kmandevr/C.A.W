@@ -709,8 +709,10 @@ typedef struct CawStressRequest {
                               engine is refused, and a run whose device stops calling back for a second fails */
     double seconds;        /* audio per run, a ramp's per step: 0.05..600 */
     int32_t frames;        /* DSP: the callback size timed, 16..8192 (0: 256). LIVE: the size asked of the device
-                              (0: its smallest) */
-    int32_t threads;       /* 0: the mix runs on one thread (the only value accepted until a parallel mix lands) */
+                              with the low-latency profile (1024: as Auto while not recording; 0: Low latency, the
+                              device's own callback sizes) */
+    int32_t threads;       /* 0, the only value accepted: PLAIN, SUSTAINED and the ramps run the mix pool on Auto as
+                              a live device does (MixPool::defaultWorkers()); PROFILE runs on one thread */
     int32_t quality;       /* the engine's quality (CAW quality 0 Eco, 1 Normal, 2 High) */
     const char* work_dir;  /* an existing folder the run may write two small WAVs into (song8_extras), or NULL */
 } CawStressRequest;
@@ -719,7 +721,11 @@ typedef struct CawStressRequest {
    "sample_rate", "budget_us", "mean_us", "p99_us", "worst_us", "worst_at_s", "mean_first_us", "mean_last_us",
    "mean_pct", "p99_pct", "worst_pct", "callbacks", "over_budget", "dropouts", "xruns", "limit", "first_failed",
    "steps", "seconds", "stop_reason": "done"|"over_budget"|"cancelled"|"error", "error", "callback_core",
-   "costs": [{"id", "ns", "pct", "ran_pct", "instances", "modulator"}]}. A cancelled job's error is "cancelled".
+   "requested_frames", "warmup_s", "first_callback_us", "slope_pct_per_min", "core_start", "core_end",
+   "core_khz_start", "core_khz_end", "core_max_khz", "mix_workers", "mix_active_workers", "warmup_xruns",
+   "device_sizes", "budget_basis", "costs": [{"id", "ns", "pct", "ran_pct", "instances", "modulator"}]}. After Play an untimed
+   warm-up (0.5 s; 1.7 s with the mix pool, Auto's decision and settle) comes before the timed span; "worst_at_s"
+   counts from Play. A cancelled job's error is "cancelled".
    "dropouts": live, the platform's underrun count where it has one (AAudio), else callbacks over budget; DSP,
    callbacks over budget (what would have been dropouts). */
 CAW_API CawJob* caw_worker_pool_submit_stress(CawWorkerPool* pool, const CawStressRequest* request, int32_t priority);

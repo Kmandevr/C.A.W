@@ -258,6 +258,17 @@ public:
     // don't count toward shedding and it adds no worker (the pool starting, not the song). Longer than one of
     // Auto's worker steps (kMixWaitSeconds), so a pool that costs more than it gives can shrink first.
     static constexpr double kMixSettleSeconds = kMixWaitSeconds + 0.2;
+    // Auto's tail guard (the merge's audio review, 2026-11-13; Claude's choice, for the owner to confirm): the
+    // share of callback time whose raw load reached kMixTailLoad (its played frames' deadline missed), averaged over kMixTailSeconds separately for
+    // callbacks that used the pool and for those that ran serial (before Auto turned on, its retry waits, levels
+    // with one busy node). Once the pool has kMixTailSeconds of samples, a pooled share above the serial one by more
+    // than kMixTailMargin for kMixTailHoldSeconds turns Auto off for kMixRetrySeconds, as the wait rule does: a
+    // worker the system preempts mid-node makes rare late callbacks that the mean wait doesn't show. The deadline,
+    // not shedding's 0.85: a busy pool's p99 can sit near 0.85 with nothing missed, and going serial for that
+    // (a heavy song near the budget on one thread) made it worse in the bench.
+    static constexpr double kMixTailLoad = 1.0, kMixTailSeconds = 2.0, kMixTailMargin = 0.02, kMixTailHoldSeconds = 1.0;
+    // Any thread (tests, the bench): how many times the tail guard turned Auto off.
+    uint32_t mixTailFallbacks() const noexcept { return tailFallbacks_.load(std::memory_order_relaxed); }
     // Auto's workers now (tests, diagnostics): those taking tasks, at most mixWorkers().
     uint32_t mixActiveWorkers() const noexcept;
     // Audio thread diagnostics (speed phase 5d) as JSON, for caw_audio_threads; reads the callback core's clock
@@ -267,6 +278,10 @@ public:
     void setCallbackMmcss(bool mmcss) noexcept;
     // The platform, around a live device (before it starts, after it stops): the pool with
     // MixPool::defaultWorkers(), Auto, and the count of live devices offline renders check.
+    // The Benchmark's timed runs (stress_run.cpp), before they play: the pool with MixPool::defaultWorkers() on
+    // Auto, as a live device has it; a test's pool (setMixThreadsForTest) stays as it is; while a live device runs
+    // the mix stays on one thread (Never), leaving the cores to the live audio. True when the pool is the run's own.
+    bool useBenchmarkMixPool();
     void startLiveMixPool();
     void stopLiveMixPool() noexcept;
     static int liveDevices() noexcept;
@@ -276,6 +291,7 @@ public:
     // Tests only, before Engines are made: every Engine made from now on starts a pool of `workers` and uses it
     // Always (0: Never; -1, the default: no override). Offline renders then keep that.
     static void setMixThreadsForTest(int workers) noexcept;
+    static int mixThreadsForTest() noexcept;  // the override (-1: none; caw_tests --mix-threads N sets it)
     // Tests only, between process() calls: whether the last callback ran the graph with the pool.
     bool mixParallelForTest() const noexcept { return mixParallel_; }
     MixPool* mixPoolForTest() noexcept { return pool_.get(); }
@@ -469,6 +485,12 @@ private:
     double underSeconds_ = 0;                   // how long the meter has stayed under kRestoreLoad
     double loadClock_ = 0;                      // seconds of callbacks reported
     double loadDt_ = 0, loadKeep_ = 0, shareKeep_ = 0;  // the last callback's length and the averages' weights for it
+    // The weights for the last few callback lengths (a device that takes its own sizes, AAudio's, varies them every
+    // callback between a few values): pow and exp only for a length not among them.
+    struct LoadWeights { double dt = -1, load = 0, share = 0, tail = 0; };
+    static constexpr int kLoadWeights = 4;
+    LoadWeights loadWeights_[kLoadWeights];
+    int loadWeightsNext_ = 0;
     double shedLoad_ = 0, measureFrom_ = 0;     // the meter when the last layer was shed
     int measureSlot_ = -1;                      // the slot shed last, its cost not measured yet
     uint64_t shedSeq_ = 0;
@@ -483,6 +505,10 @@ private:
     // Speed phase 5d (audio thread): Auto's workers and the wait it weighs (shares of the budget, averaged).
     uint32_t mixActive_ = 0;
     double waitAvg_ = 0, workAvg_ = 0, mixLosingSeconds_ = 0, mixGrowSeconds_ = 0, mixRetrySeconds_ = 0;
+    // The tail guard (kMixTail*): bias-corrected averages (value, weight) of pooled and serial late callbacks.
+    double tailPool_ = 0, tailPoolWeight_ = 0, tailSerial_ = 0, tailSerialWeight_ = 0, tailKeep_ = 0;
+    double tailPoolSeconds_ = 0, tailOverSeconds_ = 0;
+    std::atomic<uint32_t> tailFallbacks_{0};  // times the tail guard turned Auto off (mixTailFallbacks)
     std::atomic<float> waitShare_{0};
     int retireStart_ = 0;  // where assignRetireBudgets hands out what is left after the even shares
     bool poolUsed_ = false, poolUsedLast_ = false;  // this callback, the last one handed the pool a level

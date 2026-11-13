@@ -20,7 +20,26 @@ class ResourceSignals {
     }
   }
 
-  static Stream<EnginePressure> get changes => _events.receiveBroadcastStream().map((event) {
+  /// The thermal status (PowerManager, Android 10+) and headroom (getThermalHeadroom over 10 s, Android 11+: 1.0
+  /// is where severe throttling starts), for the Benchmark's heat test; missing values are left out.
+  static Future<Map<String, Object?>> readThermal() async {
+    try {
+      final values = await _method.invokeMapMethod<Object?, Object?>('thermal');
+      if (values == null) return const {};
+      final status = values['thermalStatus'];
+      final headroom = values['thermalHeadroom'];
+      return {
+        if (status is int) 'status': status,
+        if (headroom is num && headroom.isFinite) 'headroom': (headroom * 1000).round() / 1000,
+      };
+    } on MissingPluginException {
+      return const {};
+    } on PlatformException {
+      return const {};
+    }
+  }
+
+    static Stream<EnginePressure> get changes => _events.receiveBroadcastStream().map((event) {
         if (event is Map) return decode(Map<Object?, Object?>.from(event));
         return EnginePressure.unknown;
       }).distinct();

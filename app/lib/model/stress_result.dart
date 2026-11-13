@@ -43,6 +43,20 @@ class ScenarioResult {
     this.frames = 0,
     this.skipped,
     this.error,
+    this.buffer,
+    this.requestedFrames = 0,
+    this.firstCallbackUs = 0,
+    this.worstAtS = 0,
+    this.warmupS = 0,
+    this.slopePctPerMin = 0,
+    this.callbackCore = -1,
+    this.coreKhzStart = -1,
+    this.coreKhzEnd = -1,
+    this.coreMaxKhz = -1,
+    this.mixWorkers = 0,
+    this.mixActiveWorkers = 0,
+    this.warmupXruns,
+    this.deviceSizes = false,
   });
 
   final String id, name;
@@ -62,13 +76,31 @@ class ScenarioResult {
   final String? skipped;
   final String? error;
 
+  /// Live: which buffer it asked for, [StressBuffer.playing] or [StressBuffer.lowLatency]; null for DSP.
+  final String? buffer;
+
+  /// Local only (the JSON export; H2 keeps its allow-list): the callback size asked (live: 0 is Low latency), the
+  /// first callback after Play (untimed, kept apart), the slowest's time from Play, the untimed warm-up, the load's
+  /// trend (% of the budget a minute), the callback's core (live) and the timed span's core clock at its start and
+  /// end (kHz, -1 unknown), the mix pool's workers and those Auto had working at the end, and live underruns during
+  /// the warm-up.
+  final int requestedFrames, callbackCore, coreKhzStart, coreKhzEnd, coreMaxKhz, mixWorkers, mixActiveWorkers;
+  final double firstCallbackUs, worstAtS, warmupS, slopePctPerMin;
+  final int? warmupXruns;
+
+  /// Live: the device called back with its own sizes, not the size asked (Low latency; or a playing-buffer run on
+  /// Android 11 and older, where a size never reaches the stream, so it ran at the burst, not 1024 frames).
+  final bool deviceSizes;
+
   bool get ran => skipped == null && error == null && callbacks > 0;
 
-  factory ScenarioResult.fromEngine(Map<String, dynamic> j, {required String name, required String tier}) {
+  factory ScenarioResult.fromEngine(Map<String, dynamic> j, {required String name, required String tier, String? buffer}) {
     double d(String k) => (j[k] as num?)?.toDouble() ?? 0;
     int i(String k) => (j[k] as num?)?.toInt() ?? 0;
     final err = '${j['error'] ?? ''}';
     final xr = i('xruns');
+    final wx = (j['warmup_xruns'] as num?)?.toInt() ?? -1;
+    int k(String key) => (j[key] as num?)?.toInt() ?? -1;
     return ScenarioResult(
       id: '${j['scenario']}',
       name: name,
@@ -87,8 +119,32 @@ class ScenarioResult {
       xruns: xr >= 0 ? xr : null,
       frames: i('frames'),
       error: j['ok'] == true || err.isEmpty ? null : err,
+      buffer: j['mode'] == 'live' ? buffer : null,
+      requestedFrames: i('requested_frames'),
+      firstCallbackUs: d('first_callback_us'),
+      worstAtS: d('worst_at_s'),
+      warmupS: d('warmup_s'),
+      slopePctPerMin: d('slope_pct_per_min'),
+      callbackCore: k('callback_core'),
+      coreKhzStart: k('core_khz_start'),
+      coreKhzEnd: k('core_khz_end'),
+      coreMaxKhz: k('core_max_khz'),
+      mixWorkers: i('mix_workers'),
+      mixActiveWorkers: i('mix_active_workers'),
+      warmupXruns: wx >= 0 ? wx : null,
+      deviceSizes: j['mode'] == 'live' && j['device_sizes'] == true,
     );
   }
+
+  /// The row's key and words: a scenario's DSP row, or its live row at a buffer.
+  String get key => live ? '$id-true${buffer == null ? '' : '-$buffer'}' : '$id-false';
+  String get modeLabel => !live
+      ? ''
+      : buffer == StressBuffer.lowLatency
+          ? ' · live, Low latency'
+          : deviceSizes
+              ? ' · live, device\'s own sizes'
+              : ' · live';
 
   Map<String, Object?> toJson() => {
         'id': id,
@@ -110,8 +166,34 @@ class ScenarioResult {
           'over_budget': overBudget,
           'dropouts': dropouts,
           'xruns': xruns,
+          'worst_at_s': _r2(worstAtS),
+          'first_callback_us': _r1(firstCallbackUs),
+          'warmup_s': _r2(warmupS),
+          'slope_pct_per_min': _r2(slopePctPerMin),
+          'mix_workers': mixWorkers,
+          'mix_active_workers': mixActiveWorkers,
+          'core_khz_start': coreKhzStart,
+          'core_khz_end': coreKhzEnd,
+          'core_max_khz': coreMaxKhz,
+          if (live) ...{
+            'buffer': buffer,
+            'requested_frames': requestedFrames,
+            'callback_core': callbackCore,
+            'warmup_xruns': warmupXruns,
+            'device_sizes': deviceSizes,
+            // Each callback's budget is its own length, not its real deadline (the frames the device has queued):
+            // over_budget overstates; xruns (the platform's underruns) are the dropouts heard.
+            'budget_basis': 'callback_length',
+          },
         },
       };
+}
+
+/// The live runs' buffers: the app's playing buffer (Auto while not recording, 1024 frames: audio_miniaudio.cpp's
+/// kLargeBufferFrames) and Low latency (the device's own burst-sized callbacks).
+abstract final class StressBuffer {
+  static const playing = 'playing', lowLatency = 'low_latency';
+  static const playingFrames = 1024;
 }
 
 /// A ramp's outcome: the last count that held.
@@ -131,11 +213,15 @@ class RampResult {
       {'kind': kind, 'limit': limit, 'first_failed': firstFailed, 'capped': capped, if (error != null) 'error': error};
 }
 
-/// A component's share of the callback, from the profiled runs.
+/// A component's share of one profiled scenario's callback.
 class StressCost {
   const StressCost({required this.id, required this.pct, this.ranPct = 100, this.instances = 1});
   final String id;
+
+  /// Its share of its scenario's callback (%), and of the blocks it was seen in, the share it processed.
   final double pct, ranPct;
+
+  /// How many of it the scenario's project has (the engine's count; 1 for the host).
   final int instances;
 
   /// Its name in plain words.
@@ -151,20 +237,63 @@ class StressCost {
   Map<String, Object?> toJson() => {'id': id, 'pct': _r1(pct), 'ran_pct': _r1(ranPct), 'instances': instances};
 }
 
-/// A sustained run: the load over time; a rise from the first tenth to the last shows heat.
+/// A sustained run (the heat test): live, in real time, at the playing buffer; the load's trend over the run, the
+/// platform's thermal state and the callback core's clock at the start and end.
 class SustainedResult {
-  const SustainedResult({required this.scenario, required this.seconds, required this.firstPct, required this.lastPct, this.points = const []});
+  const SustainedResult({
+    required this.scenario,
+    required this.seconds,
+    required this.firstPct,
+    required this.lastPct,
+    this.slopePctPerMin,
+    this.live = false,
+    this.xruns,
+    this.coreKhzStart = -1,
+    this.coreKhzEnd = -1,
+    this.coreMaxKhz = -1,
+    this.thermalStart = const {},
+    this.thermalEnd = const {},
+    this.points = const [],
+  });
   final String scenario;
   final double seconds, firstPct, lastPct;
+
+  /// The least-squares trend of each callback's load, in % of the budget a minute (null: an engine without it).
+  final double? slopePctPerMin;
+  final bool live;
+  final int? xruns;
+  final int coreKhzStart, coreKhzEnd, coreMaxKhz;
+
+  /// The platform's thermal status and headroom at the start and end ({'status', 'headroom'}; empty: unknown).
+  final Map<String, Object?> thermalStart, thermalEnd;
 
   /// The load every 100 ms (a share of the budget).
   final List<double> points;
 
-  /// How much slower the end ran than the start, in percent (positive: slower).
-  double get driftPct => firstPct <= 0 ? 0 : 100 * (lastPct - firstPct) / firstPct;
+  /// How much slower the end ran than the start, in percent (positive: slower): the trend over the whole run
+  /// against the start's load, or the last tenth against the first where there is no trend.
+  double get driftPct {
+    if (firstPct <= 0) return 0;
+    final s = slopePctPerMin;
+    if (s == null) return 100 * (lastPct - firstPct) / firstPct;
+    return 100 * s * seconds / 60 / firstPct;
+  }
 
-  Map<String, Object?> toJson() =>
-      {'scenario': scenario, 'seconds': _r1(seconds), 'first_pct': _r1(firstPct), 'last_pct': _r1(lastPct), 'drift_pct': _r1(driftPct)};
+  Map<String, Object?> toJson() => {
+        'scenario': scenario,
+        'mode': live ? 'live' : 'dsp',
+        'seconds': _r1(seconds),
+        'first_pct': _r1(firstPct),
+        'last_pct': _r1(lastPct),
+        'slope_pct_per_min': slopePctPerMin == null ? null : _r2(slopePctPerMin!),
+        'drift_pct': _r1(driftPct),
+        'xruns': xruns,
+        'core_khz_start': coreKhzStart,
+        'core_khz_end': coreKhzEnd,
+        'core_max_khz': coreMaxKhz,
+        'thermal_start': thermalStart,
+        'thermal_end': thermalEnd,
+      };
 }
 
 /// A whole Benchmark run.
@@ -176,7 +305,18 @@ class StressResult {
   final DateTime startedAt;
   final List<ScenarioResult> scenarios = [];
   final Map<String, RampResult> ramps = {};
-  final List<StressCost> costs = [];
+
+  /// Each profiled scenario's components (its own shares of that song's callback, its own instance counts).
+  final Map<String, List<StressCost>> costsByScenario = {};
+
+  /// The headline: the typical song's (song8, in both plans), else the first profiled.
+  List<StressCost> get costs {
+    if (costsByScenario.isEmpty) return const [];
+    return costsByScenario['song8'] ?? costsByScenario.values.first;
+  }
+
+  /// The scenario [costs] comes from (null: none profiled).
+  String? get costsScenario => costsByScenario.isEmpty ? null : (costsByScenario.containsKey('song8') ? 'song8' : costsByScenario.keys.first);
   SustainedResult? sustained;
 
   /// Why the run ended early (cancelled, thermal, battery saver), or null when it finished.
@@ -225,7 +365,11 @@ class StressResult {
         'tiers': {for (final t in const ['normal', 'heavy', 'extreme']) t: tier(t)?.wire},
         'limits': {for (final r in ramps.values) r.kind: r.toJson()},
         'scenarios': [for (final s in scenarios) s.toJson()],
+        'costs_scenario': costsScenario,
         'costs': [for (final c in holdingBack) c.toJson()],
+        'costs_by_scenario': {
+          for (final e in costsByScenario.entries) e.key: [for (final c in [...e.value]..sort((a, b) => b.pct.compareTo(a.pct))) c.toJson()],
+        },
         'sustained': sustained?.toJson(),
       };
 
@@ -242,8 +386,10 @@ class StressResult {
     final rows = <String, Map<String, Object?>>{};
     for (final s in _dsp) {
       if (!telemetryScenarioIds.contains(s.id)) continue;
-      // Dropouts: a live run's of the same scenario when there was one, else the DSP callbacks over budget.
-      final live = scenarios.where((x) => x.live && x.ran && x.id == s.id).firstOrNull;
+      // Dropouts: a live run's of the same scenario when there was one (at the playing buffer first), else the DSP
+      // callbacks over budget.
+      final lives = scenarios.where((x) => x.live && x.ran && x.id == s.id);
+      final live = lives.where((x) => x.buffer != StressBuffer.lowLatency).firstOrNull ?? lives.firstOrNull;
       rows[s.id] = {
         'meanPct': s.meanPct.round(),
         'p99Pct': s.p99Pct.round(),
@@ -278,7 +424,7 @@ class StressResult {
     b.writeln();
     for (final s in scenarios) {
       if (s.ran) {
-        b.writeln('${s.name}${s.live ? ' (live)' : ''}: mean ${s.meanPct.round()}%, p99 ${s.p99Pct.round()}%, '
+        b.writeln('${s.name}${s.live ? ' (${s.modeLabel.substring(3)})' : ''}: mean ${s.meanPct.round()}%, p99 ${s.p99Pct.round()}%, '
             'worst ${s.worstPct.round()}% of the budget, ${s.live ? '${s.dropouts} dropouts' : '${s.overBudget} callbacks over'}');
       } else {
         b.writeln('${s.name}: ${s.skipped ?? s.error ?? 'not run'}');
@@ -295,3 +441,4 @@ const telemetryScenarioIds = {
 };
 
 double _r1(double v) => v.isFinite ? (v * 10).roundToDouble() / 10 : 0;
+double _r2(double v) => v.isFinite ? (v * 100).roundToDouble() / 100 : 0;

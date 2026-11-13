@@ -183,7 +183,9 @@ class ShotLaneState extends State<ShotLane> {
           child: ClipRRect(
             borderRadius: BorderRadius.circular(6),
             child: Stack(children: [
-              Padding(
+              // A block on the lane is a fixed height: its two small lines keep their size under a large system text
+              // size.
+              MediaQuery.withNoTextScaling(child: Padding(
                 padding: const EdgeInsets.fromLTRB(5, 4, 5, 3),
                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                   Text.rich(
@@ -204,7 +206,7 @@ class ShotLaneState extends State<ShotLane> {
                     ].join(' · '), maxLines: 1, overflow: TextOverflow.clip,
                         style: const TextStyle(fontSize: 8.5, color: Neon.dim)),
                 ]),
-              ),
+              )),
               // The trim handles, shown on the chosen shot.
               if (on && w > ShotLane.handle * 2.5) ...[
                 Positioned(left: 0, top: 8, bottom: 8, width: 4,

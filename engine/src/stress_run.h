@@ -73,7 +73,15 @@ struct RunResult {
     std::string error;
     std::string stopReason = "done";  // "done", "cancelled", "over_budget" (a ramp's end), "error"
     double budgetUs = 0, meanUs = 0, p99Us = 0, worstUs = 0, worstAtS = 0;
-    double meanFirstUs = 0, meanLastUs = 0;  // sustained: the first and last tenth's means (heat shows as a rise)
+    double meanFirstUs = 0, meanLastUs = 0;  // the first and last tenth's means
+    double slopePctPerMin = 0;  // the load's least-squares trend over the timed span, in % of the budget a minute
+    double firstCallbackUs = 0; // the first callback after Play (untimed: a voice start, a pool waking), apart
+    double warmupS = 0;         // audio played after Play before the timed span (worst_at_s counts from Play)
+    // The timed span's core and its clock at the start and end (DSP: the run's thread; live: the callback's), for
+    // heat (-1: unknown). Read off the timed loop: sysfs or the power API.
+    int32_t coreStart = -1, coreEnd = -1;
+    int64_t khzStart = -1, khzEnd = -1, maxKHz = -1;
+    uint32_t mixWorkers = 0, mixActive = 0;  // the mix pool's workers, and those Auto had taking tasks at the end
     int64_t callbacks = 0, overBudget = 0;   // DSP: over budget is what would have been a dropout
     int32_t limit = -1;      // ramps: the last count that held (0: not even the first)
     int32_t firstFailed = -1;  // ramps: the smallest count seen over budget (-1: none, the cap held)
@@ -87,7 +95,8 @@ constexpr double kHoldP99 = 1.0;
 
 // Times `calls` callbacks of `frames` into us[0, calls) (microseconds), pushing the load every 100 ms of audio into
 // history (may be null) and counting progress; stops early when *cancel is non-zero (checked every callback).
-// Returns the callbacks timed. Allocates nothing (caw_rt_tests): l, r and us are the caller's.
+// Each callback's load goes to Engine::reportLoad as a device callback's would, so the mix pool's Auto decides
+// as it does in the app. Returns the callbacks timed. Allocates nothing (caw_rt_tests): l, r and us are the caller's.
 int64_t timeCallbacks(Engine& e, int frames, int64_t calls, double* us, float* l, float* r, Progress* progress,
                       LoadHistory* history, const std::atomic<int32_t>* cancel) noexcept;
 
@@ -106,7 +115,15 @@ std::vector<int32_t> rampCounts(Kind kind);
 // The project a ramp plays at count n.
 ProjectSpec rampProject(Kind kind, int32_t n);
 
-// Runs one request to the end (or cancel) on the calling thread: its own Engine, shedding off, the profile its own.
+// Untimed after Play: kWarmupSeconds, plus Auto's decision and settle where the mix pool is used (Plain, Sustained
+// and ramps: the app's figure; Profile stays serial).
+constexpr double kWarmupSeconds = 0.5;
+double warmupSeconds(bool pool) noexcept;
+// The least-squares slope of y over x (0 for fewer than two points or no spread in x).
+double slope(const double* x, const double* y, size_t n) noexcept;
+
+// Runs one request to the end (or cancel) on the calling thread: its own Engine, shedding off, the profile its own;
+// Plain, Sustained and ramps with the mix pool (MixPool::defaultWorkers(), Auto), Profile on one thread.
 RunResult run(const RunRequest& request, Progress& progress, LoadHistory* history, const std::atomic<int32_t>* cancel);
 
 // Profile totals of one run: per component id (instances added), the host's share, sorted by time.

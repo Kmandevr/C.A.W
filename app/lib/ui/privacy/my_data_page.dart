@@ -139,7 +139,7 @@ class _MyDataPageState extends State<MyDataPage> {
   @override
   Widget build(BuildContext context) => Scaffold(
         appBar: AppBar(title: const Text('My data'), backgroundColor: Neon.panel),
-        body: ListenableBuilder(
+        body: SafeArea(top: false, child: ListenableBuilder(
           listenable: t,
           builder: (context, _) {
             final reports = t.reports;
@@ -184,7 +184,7 @@ class _MyDataPageState extends State<MyDataPage> {
               for (final r in reports) _reportCard(context, r),
             ]);
           },
-        ),
+        )),
       );
 
   Widget _reportCard(BuildContext context, ReportRecord r) {

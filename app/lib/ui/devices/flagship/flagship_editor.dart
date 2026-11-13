@@ -146,8 +146,10 @@ class LabeledRow extends StatelessWidget {
   Widget build(BuildContext context) => Padding(
     padding: const EdgeInsets.only(top: 6, bottom: 2),
     child: Row(children: [
-      SizedBox(width: 78, child: Text(label, style: const TextStyle(fontSize: 10, letterSpacing: 0.6,
-        fontWeight: FontWeight.w700, color: Neon.dim))),
+      // One line: a long label under a large text size shrinks to fit instead of breaking mid-word.
+      SizedBox(width: 78, child: Align(alignment: Alignment.centerLeft, child: FittedBox(fit: BoxFit.scaleDown,
+        child: Text(label, maxLines: 1, style: const TextStyle(fontSize: 10, letterSpacing: 0.6,
+          fontWeight: FontWeight.w700, color: Neon.dim))))),
       Flexible(child: Align(alignment: Alignment.centerLeft, child: child)),
     ]),
   );
@@ -191,6 +193,10 @@ class OscCard extends StatelessWidget {
         watchDevice(context, (_) => WavetableView(prefix: p)),
         ImportWavetableButton(prefix: p),
         LabeledRow('WARP', _roomy((roomy) => DeviceChoice('${p}warp', maxSegments: roomy ? 5 : 0, labels: warpNames))),
+        // With the fold warp, how it folds (#197): each unison copy, or the stack's sum once (lighter on the CPU).
+        foldSize(context, t.value('${p}warp').round() == _foldWarp && t.param('${p}fold_mode') != null
+            ? LabeledRow('FOLD', DeviceChoice('${p}fold_mode', maxSegments: 2))
+            : const SizedBox(width: double.infinity)),
         plainKnobs(p, const ['frame', 'warp_amt', 'level', 'pan']),
         const DeviceHeading('PITCH'),
         plainKnobs(p, const ['octave', 'semi', 'fine'], size: 42),
@@ -203,6 +209,9 @@ class OscCard extends StatelessWidget {
     );
   }
 }
+
+/// The fold warp's index in [warpNames].
+final int _foldWarp = warpNames.indexOf('Fold');
 
 /// Five long names fit as segments from about 360 dp; narrower, a menu keeps them whole (no "Harmo…").
 Widget _roomy(Widget Function(bool roomy) b) => LayoutBuilder(builder: (context, box) => b(box.maxWidth >= 360));

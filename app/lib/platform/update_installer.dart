@@ -52,8 +52,10 @@ abstract class UpdateInstaller {
   Future<Directory?> installDir() async => null;
 
   /// At the start, before the app is shown: finishes a small update staged by the last run (Windows). [relaunch]
-  /// true means the new build was started and this process should exit; [note] is said once.
-  Future<({bool relaunch, String? note})> finishStaged() async => (relaunch: false, note: null);
+  /// true means the new build was started, with this run's command-line [args] (a file opened with the app), and
+  /// this process should exit; [note] is said once.
+  Future<({bool relaunch, String? note})> finishStaged([List<String> args = const []]) async =>
+      (relaunch: false, note: null);
 }
 
 /// The platform's installer: Android's channel, Windows' shell, or none.
@@ -156,9 +158,19 @@ class AndroidUpdateInstaller extends UpdateInstaller {
 /// Windows: a small update stages the changed files beside the app and swaps them in at the next start
 /// (`WindowsStage`), then starts the new build once; a full update's zip is shown in Explorer to unzip by hand.
 class WindowsUpdateInstaller extends UpdateInstaller {
-  WindowsUpdateInstaller({Future<ProcessResult> Function(String, List<String>)? run, this.appDir})
-      : _run = run ?? Process.run;
+  WindowsUpdateInstaller(
+      {Future<ProcessResult> Function(String, List<String>)? run,
+      Future<void> Function(String exe, List<String> args)? start,
+      this.appDir})
+      : _run = run ?? Process.run,
+        _start = start ?? _startDetached;
   final Future<ProcessResult> Function(String, List<String>) _run;
+
+  /// Starts the new build (tests pass a fake).
+  final Future<void> Function(String exe, List<String> args) _start;
+
+  static Future<void> _startDetached(String exe, List<String> args) =>
+      Process.start(exe, args, mode: ProcessStartMode.detached);
 
   /// The app's folder (tests); the running caw.exe's folder otherwise.
   final Directory? appDir;
@@ -170,15 +182,16 @@ class WindowsUpdateInstaller extends UpdateInstaller {
   Future<Directory?> installDir() async => appDir ?? File(Platform.resolvedExecutable).parent;
 
   @override
-  Future<({bool relaunch, String? note})> finishStaged() async {
+  Future<({bool relaunch, String? note})> finishStaged([List<String> args = const []]) async {
     final dir = await installDir();
     if (dir == null) return (relaunch: false, note: null);
     final stage = WindowsStage(dir);
     try {
       final result = await stage.swapIn();
       if (result == SwapResult.swapped) {
-        // This process still runs the old files (renamed aside); the new build starts in a fresh one.
-        await Process.start(Platform.resolvedExecutable, const [], mode: ProcessStartMode.detached);
+        // This process still runs the old files (renamed aside); the new build starts in a fresh one, given the
+        // same arguments (a file opened with C.A.W still opens).
+        await _start(Platform.resolvedExecutable, List.of(args));
         return (relaunch: true, note: null);
       }
     } catch (_) {

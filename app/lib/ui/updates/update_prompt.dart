@@ -141,13 +141,18 @@ class _UpdatePromptHostState extends State<UpdatePromptHost> with WidgetsBinding
             ]);
           },
         ),
+        // One Wrap, not three actions: a dialog's button bar measures its height as if the buttons fit in one row (a
+        // button's narrowest is its longest word), so on a narrow phone or with large text the sheet came out too
+        // short and squeezed the text away. A Wrap measures the rows it really makes.
         actions: [
-          TextButton(key: const ValueKey('update-never'), onPressed: () => Navigator.pop(c, 'never'),
-              child: const Text('Don\'t ask again')),
-          TextButton(key: const ValueKey('update-later'), onPressed: () => Navigator.pop(c, 'later'),
-              child: const Text('Not now')),
-          FilledButton(key: const ValueKey('update-now'), onPressed: () => Navigator.pop(c, 'update'),
-              child: const Text('Update')),
+          Wrap(alignment: WrapAlignment.end, spacing: 8, runSpacing: 4, children: [
+            TextButton(key: const ValueKey('update-never'), onPressed: () => Navigator.pop(c, 'never'),
+                child: const Text('Don\'t ask again')),
+            TextButton(key: const ValueKey('update-later'), onPressed: () => Navigator.pop(c, 'later'),
+                child: const Text('Not now')),
+            FilledButton(key: const ValueKey('update-now'), onPressed: () => Navigator.pop(c, 'update'),
+                child: const Text('Update')),
+          ]),
         ],
       ),
     )).then((choice) {

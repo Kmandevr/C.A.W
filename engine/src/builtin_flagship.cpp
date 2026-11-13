@@ -59,6 +59,15 @@
 #define CAW_FORCE_INLINE inline __attribute__((always_inline))
 #define CAW_NO_INLINE __attribute__((noinline))
 #endif
+// A loop the compiler keeps as a loop (vectorized, not unrolled further): a long body unrolled four times over
+// spills registers on x86-64's 16.
+#if defined(__clang__)
+#define CAW_NO_UNROLL _Pragma("clang loop unroll(disable)")
+#elif defined(__GNUC__)
+#define CAW_NO_UNROLL _Pragma("GCC unroll 1")
+#else
+#define CAW_NO_UNROLL
+#endif
 
 namespace caw {
 
@@ -123,8 +132,13 @@ constexpr uint32_t viaParam(uint32_t s) { return kViaBase + s; }
 // whole multiple of the note (the FM warp only). Appended for the same reason; not mod destinations.
 constexpr uint32_t kFmRatioBase = kViaBase + kSlots;
 constexpr uint32_t fmRatioParam(uint32_t o) { return kFmRatioBase + o; }
-constexpr uint32_t kParamCount = kFmRatioBase + kOscs;
-static_assert(kParamCount == 212, "the parameter list's size is part of the documented layout");
+// Added after the FM ratios (2026-11-13, #197): each oscillator's fold mode (the fold warp only): Per copy folds
+// each unison copy, Whole stack the stack's sum. Appended for the same reason (a project or preset saved without
+// it loads Per copy, the default); not mod destinations.
+constexpr uint32_t kFoldModeBase = kFmRatioBase + kOscs;
+constexpr uint32_t foldModeParam(uint32_t o) { return kFoldModeBase + o; }
+constexpr uint32_t kParamCount = kFoldModeBase + kOscs;
+static_assert(kParamCount == 215, "the parameter list's size is part of the documented layout");
 
 enum Source : int {
     kSrcNone, kSrcEnv1, kSrcEnv2, kSrcEnv3, kSrcLfo1, kSrcLfo2, kSrcLfo3, kSrcRandom, kSrcVelocity, kSrcNote,
@@ -142,6 +156,7 @@ constexpr std::string_view kTables[] = {"Basic", "Analog", "Vocal", "Harmonic", 
 static_assert(sizeof(kTables) / sizeof(kTables[0]) == kTableChoices);
 constexpr std::string_view kWarps[] = {"None", "Bend", "Sync", "Mirror", "Quantize", "FM", "Fold", "Osc FM"};
 static_assert(sizeof(kWarps) / sizeof(kWarps[0]) == kWarpCount);
+constexpr std::string_view kFoldModes[] = {"Per copy", "Whole stack"};
 constexpr std::string_view kStacks[] = {"Off", "Octave", "2 octaves", "Fifth", "Major chord", "Minor chord", "Harmonics"};
 constexpr std::string_view kDests[] = {"Filter 1", "Filter 2", "Both", "Bypass"};
 constexpr std::string_view kFilterTypes[] = {"Ladder LP", "Ladder HP", "Ladder BP", "SVF LP", "SVF HP",
@@ -273,6 +288,9 @@ public:
                  count(kSources));
         for (uint32_t o = 0; o < kOscs; ++o)
             whole("osc" + std::to_string(o + 1) + "_fm_ratio", "Osc " + std::to_string(o + 1) + " FM ratio", 1.0, 1.0, 16.0);
+        for (uint32_t o = 0; o < kOscs; ++o)
+            pick("osc" + std::to_string(o + 1) + "_fold_mode", "Osc " + std::to_string(o + 1) + " fold mode", 0.0, kFoldModes,
+                 count(kFoldModes));
     }
 
 private:
@@ -636,7 +654,7 @@ const lib::Wavetable& emptyUserTable() {
 inline float whole(float t) noexcept { return static_cast<float>(static_cast<int32_t>(t)); }  // floor, for t >= 0
 
 // sin(2 pi u) for u >= 0 (cycles), within about 0.001 of the true sine: a parabola refined once (no trig, no
-// branch). The FM and fold warps' modulator; at this error it is a slightly different timbre, not noise.
+// branch). The FM warp's modulator; at this error it is a slightly different timbre, not noise.
 inline float sineCycles(float u) noexcept {
     const float x = 2.0f * (u - whole(u)) - 1.0f;  // -1..1: sin(2 pi u) = -sin(pi x)
     const float y = 4.0f * x * (1.0f - std::fabs(x));
@@ -675,12 +693,14 @@ struct OscKey {
     int warp = 0;
     int fmRatio = 1;
     double modRatio = 1.0;  // Osc FM: the modulating oscillator's pitch over this one's (its octave, semitones, fine)
-    bool once = false;      // the FM or fold warp at the sample rate (Eco quality), not at twice it
+    bool once = false;      // the FM warp at the sample rate (Eco quality), not at twice it
+    bool foldWhole = false;  // the fold warp on the stack's sum (Whole stack), not on each copy (Per copy)
+    bool foldTwice = false;  // the fold warp at twice the rate (a high note: Voice::foldTwice), not with ADAA
     lib::UnisonSettings unison{-1};
     bool operator==(const OscKey&) const = default;
 };
 
-// The fold warp's 2x decimator for one side (the half-band all-pass pair of lib::Oversampler2x's down()): per
+// The FM and the high fold's 2x decimator for one side (the half-band all-pass pair of lib::Oversampler2x's down()): per
 // stage, lane 0 the even branch's all-pass and lane 1 the odd one's, each lane lib::AllpassChain's arithmetic.
 // A block at a time with the state in registers, and a stereo pair's two sides in one loop (four independent
 // all-pass chains): each lane's arithmetic is one chain's, per branch and side, sample by sample (speed A2,
@@ -793,8 +813,19 @@ struct OscVoice {
     bool centred = false;            // every copy plays the same on both sides (no pan, no spread)
     float gainL[kMaxCopies] = {}, gainR[kMaxCopies] = {};
     float monoGain[kMaxCopies] = {};  // a quarter of the copy's pan gains' sum (added twice: the mid), before the level
-    // The FM and fold warps' decimators (left, right, and the copy Osc FM hears), state the render moves on.
+    // The FM warp's and the 2x fold's decimators (left, right, and the copy Osc FM hears), state the render moves on.
     Decimator2x foldL, foldR, foldM;
+    // The ADAA fold's anti-aliasing state (addFold), [0] for the render and [1] for the copy Osc FM hears: per copy, each
+    // copy's last read value; whole stack, each side's last sum.
+    float foldLast[2][kMaxCopies] = {};
+    float foldSide[2][2] = {};
+    float stackL[kMaxCopies] = {}, stackR[kMaxCopies] = {};  // the copies' pan gains before the level (Whole stack)
+    float levelGain = 0.0f;                                   // the oscillator's level, after a whole stack's fold
+    bool stackCentred = true;                                 // every copy's pan gains alike (one fold per sample)
+    void clearFold() noexcept {
+        std::memset(foldLast, 0, sizeof foldLast);
+        std::memset(foldSide, 0, sizeof foldSide);
+    }
     // The layout and pan gains, worked out again only when their settings change.
     lib::UnisonSettings layoutKey{-1};
     double panKey = 2.0;
@@ -885,7 +916,7 @@ void addStack(const OscVoice& o, const float* gL, const float* gR, float* L, flo
             float t = t0 + static_cast<float>(static_cast<int32_t>(first + i)) * dt;
             t -= whole(t);
             float x;
-            if constexpr (W == kWarpFm || W == kWarpFold) t = t < 0.99999994f ? t : 0.99999994f;  // as addTwice
+            if constexpr (W == kWarpFm) t = t < 0.99999994f ? t : 0.99999994f;  // as addTwice
             if constexpr (W == kWarpFmOsc) x = fmOscPhase(t, w1, fm[first + i]) * m;
             else x = warp<W>(t, w1, w2, w3) * m;
             const int32_t k = static_cast<int32_t>(x);
@@ -895,22 +926,19 @@ void addStack(const OscVoice& o, const float* gL, const float* gR, float* L, flo
                 const float u = B[k] + (B[k + 1] - B[k]) * fr;
                 v += (u - v) * mix;
             }
-            if constexpr (W == kWarpFold) {  // Eco: the fold at the sample rate (addTwice's fold, not oversampled)
-                v += w2 * (sineCycles(0.25f * w1 * v + 64.0f) - v);
-            }
             L[i] += v * gl;
             R[i] += v * gr;
         }
     }
 }
 
-// The FM and fold warps at twice the rate: each copy is read (exactly: the table and the warped phase are smooth,
-// so reading between samples needs no interpolation filter), warped (and folded) at t and t + dt / 2, summed with
-// its gains, and the sum comes down through a half-band decimator. What FM's far sidebands and the folder make
-// above the high rate's Nyquist (up to 1.5 times the sample rate) lands in the decimator's stop band instead of
-// on the audible spectrum. R null: mono into L (gL).
+// The FM warp at twice the rate: each copy is read (exactly: the table and the warped phase are smooth, so
+// reading between samples needs no interpolation filter), warped at t and t + dt / 2, summed with its gains, and
+// the sum comes down through a half-band decimator. What FM's far sidebands make above the high rate's Nyquist
+// (up to 1.5 times the sample rate) lands in the decimator's stop band instead of on the audible spectrum. R null:
+// mono into L (gL).
 // Each copy in three passes, as addCopy (speed phase 1, 2026-11-12): the warped phases' indices and fractions,
-// then the table reads (a gather: scalar loads), then the interpolation, the morph, the fold and the sums, so the
+// then the table reads (a gather: scalar loads), then the interpolation, the morph and the sums, so the
 // compiler vectorizes the first and the last. Each sample's arithmetic is the one-pass loop's, in its order, so
 // the bits are the same. Mono (R null) sums into the left only.
 template <int W, bool Morph, uint32_t N>
@@ -947,8 +975,6 @@ void addTwice(OscVoice& o, const float* gL, const float* gR, float* L, float* R,
                 const float u = b[2 * i] + (b[2 * i + 1] - b[2 * i]) * fr[i];
                 v += (u - v) * mix;
             }
-            // A wavefolder on the read value (lib::fold's sin(x drive pi / 2)), drive w1, blended in by w2.
-            if constexpr (W == kWarpFold) v += w2 * (sineCycles(0.25f * w1 * v + 64.0f) - v);
             return v;
         };
         if (dr) {
@@ -993,6 +1019,345 @@ void addTwiceWarp(OscVoice& o, const float* gL, const float* gR, float* L, float
     }
 }
 
+// One unwarped copy's read values over N (or n) frames into v: addCopy's passes and arithmetic, the values kept
+// instead of mixed into L and R (the fold warp shapes them first).
+template <bool Morph, uint32_t N>
+CAW_FORCE_INLINE void readCopy(const float* A, const float* B, uint32_t p, uint32_t step, int sh, float mix, float* v,
+                               uint32_t n) noexcept {
+    const uint32_t count = N ? N : n;
+    const uint32_t mask = (1u << sh) - 1u;
+    const float scale = 1.0f / static_cast<float>(1u << sh);
+    int32_t index[kControlFrames];
+    float fr[kControlFrames], a[2 * kControlFrames], b[2 * kControlFrames];
+    CAW_NO_UNROLL
+    for (uint32_t i = 0; i < count; ++i) {
+        index[i] = static_cast<int32_t>(p >> sh);
+        fr[i] = static_cast<float>(static_cast<int32_t>(p & mask)) * scale;
+        p += step;
+    }
+    for (uint32_t i = 0; i < count; ++i) {
+        const size_t k = static_cast<uint32_t>(index[i]);
+        std::memcpy(a + 2 * i, A + k, 2 * sizeof(float));
+        if constexpr (Morph) std::memcpy(b + 2 * i, B + k, 2 * sizeof(float));
+    }
+    CAW_NO_UNROLL
+    for (uint32_t i = 0; i < count; ++i) {
+        float x = a[2 * i] + (a[2 * i + 1] - a[2 * i]) * fr[i];
+        if constexpr (Morph) {
+            const float u = b[2 * i] + (b[2 * i + 1] - b[2 * i]) * fr[i];
+            x += (u - x) * mix;
+        }
+        v[i] = x;
+    }
+}
+
+// sin(2 pi u) for u in cycles (|u| below 2^31), within about 1e-7 (a sine to its x^11 term on a quarter cycle).
+// No offset is added to u, so a small u keeps its relative accuracy. No branch, so it vectorizes. The fold's sine
+// (#197): sineCycles' 0.001 error, with its kinks, put partials of its own at about -65 dB.
+inline float sinCyclesFine(float u) noexcept {
+    float h = u - static_cast<float>(static_cast<int32_t>(u));  // -1 .. 1
+    h = h > 0.5f ? h - 1.0f : (h < -0.5f ? h + 1.0f : h);         // -0.5 .. 0.5
+    const float r = h > 0.25f ? 0.5f - h : (h < -0.25f ? -0.5f - h : h);  // sin(2 pi h) = sin(2 pi r)
+    const float x = 6.28318531f * r, x2 = x * x;
+    float p = -2.50521084e-8f;
+    p = p * x2 + 2.75573192e-6f;
+    p = p * x2 - 1.98412698e-4f;
+    p = p * x2 + 8.33333333e-3f;
+    p = p * x2 - 0.166666667f;
+    return x + x * x2 * p;
+}
+
+// sin(z) / z for z = 2 pi u, u from 0 to 0.5 (up to the first zero), as its series to z^12 (within about 7e-6;
+// exact at 0, where the quotient is 0 / 0): no reduction, no division.
+inline float sincNear(float u) noexcept {
+    const float z = 6.28318531f * u, t = z * z;
+    float p = 1.60590438e-10f;
+    p = p * t - 2.50521084e-8f;
+    p = p * t + 2.75573192e-6f;
+    p = p * t - 1.98412698e-4f;
+    p = p * t + 8.33333333e-3f;
+    p = p * t - 0.166666667f;
+    return 1.0f + t * p;
+}
+
+// sin(2 pi u) / (2 pi u) for u >= 0: sincNear up to u = 0.5, beyond it the sine over the angle.
+inline float sincCycles(float u) noexcept {
+    const float far = sinCyclesFine(u) / (6.28318531f * (u > 0.5f ? u : 0.5f));
+    return u > 0.5f ? far : sincNear(u);
+}
+
+// The fold warp's shaper: lib::fold's sin(x drive pi / 2), drive w1, blended in by w2, on the value v whose
+// previous value was p, with first-order antiderivative anti-aliasing (ADAA, #197, owner 2026-11-13): the mean of
+// the shaper over the straight line from p to v, (G(v) - G(p)) / (v - p) for G the shaper's antiderivative. For
+// the sine, with m = (v + p) / 2 and d = v - p, (cos(k p) - cos(k v)) / (k d) is exactly sin(k m) sin(k d / 2) /
+// (k d / 2) (k = drive pi / 2): no difference of nearly equal numbers, so v = p (where the quotient is 0 / 0) needs
+// no special case, and there it is the plain fold of v. The blend's straight part averages to m.
+// Near: every step d of the run small enough that sincNear covers it (foldRun checks), so sincCycles' far branch,
+// which would give the same bits, is not worked out.
+template <bool Near>
+CAW_FORCE_INLINE float foldAdaa(float v, float p, float w1, float w2) noexcept {
+    const float m = 0.5f * (v + p), d = v - p;
+    const float u = 0.125f * w1 * std::fabs(d);
+    const float f = sinCyclesFine(0.25f * w1 * m) * (Near ? sincNear(u) : sincCycles(u));
+    return m + w2 * (f - m);
+}
+
+// The fold over the period's values v, after `last` (the value before v[0]), into y; `last` becomes v's last.
+template <uint32_t N>
+CAW_FORCE_INLINE void foldRun(const float* v, float& last, float* y, uint32_t n, float w1, float w2) noexcept {
+    const uint32_t count = N ? N : n;
+    if (count == 0) return;
+    alignas(16) float before[kControlFrames];
+    before[0] = last;
+    for (uint32_t i = 1; i < count; ++i) before[i] = v[i - 1];
+    // The largest step, as its bits (a non-negative float's bits order as it does, and an integer maximum
+    // vectorizes): 0.125 w1 |d| is at most 0.5 for every sample when it is for this one.
+    int32_t most = 0;
+    CAW_NO_UNROLL
+    for (uint32_t i = 0; i < count; ++i) {
+        const int32_t d = std::bit_cast<int32_t>(std::fabs(v[i] - before[i]));
+        most = d > most ? d : most;
+    }
+    if (0.125f * w1 * std::bit_cast<float>(most) <= 0.5f) {
+        CAW_NO_UNROLL
+        for (uint32_t i = 0; i < count; ++i) y[i] = foldAdaa<true>(v[i], before[i], w1, w2);
+    } else {
+        CAW_NO_UNROLL
+        for (uint32_t i = 0; i < count; ++i) y[i] = foldAdaa<false>(v[i], before[i], w1, w2);
+    }
+    last = v[count - 1];
+}
+
+// The fold warp's ADAA path (#197, 2026-11-13): at the sample rate, anti-aliased by ADAA (foldAdaa), for every
+// note below the hybrid's crossover (foldTwiceFor; addFoldTwice above it) and every note at Eco. Its phase is unwarped, so each copy is read as addCopy reads one.
+// Per copy (Whole false): each copy folded, then added with its gains, as before. Whole stack: the copies summed
+// first at their pan gains (the level left out, so the level never changes the fold), each side's sum folded once
+// (one fold a sample when every copy is centred), then the level: the fold costs two shapers a voice instead of
+// one a copy, and folds the stack's beating as one waveform (a different, rougher sound). Spread copies fold side
+// by side, as only a side's own copies reach it. Mono (the copy Osc FM hears, into L): per copy, each copy at
+// its mono gain; whole stack, the mean of the two sides' folds, before the level. State: foldLast, foldSide.
+template <bool Morph, bool Whole, bool Mono, uint32_t N>
+void addFold(OscVoice& o, const float* gL, const float* gR, float* L, float* R, uint32_t n, uint32_t first) noexcept {
+    if constexpr (N != 0) n = N;
+    const int slot = Mono ? 1 : 0;
+    const float w1 = o.w1, w2 = o.w2, mix = o.mix;
+    alignas(16) float v[kControlFrames], y[kControlFrames];
+    if constexpr (!Whole) {
+        float* last = o.foldLast[slot];
+        alignas(16) float accL[kControlFrames] = {}, accR[kControlFrames] = {};
+        for (int c = 0; c < o.count; ++c) {
+            if (!o.a[c]) continue;
+            const uint32_t step = o.step[c];
+            readCopy<Morph, N>(o.a[c], o.b[c], o.phase[c] + first * step, step, o.shift[c], mix, v, n);
+            foldRun<N>(v, last[c], y, n, w1, w2);
+            if constexpr (Mono) {
+                const float g = 2.0f * gL[c];
+                CAW_NO_UNROLL
+                for (uint32_t i = 0; i < n; ++i) accL[i] += y[i] * g;
+            } else {
+                const float gl = gL[c], gr = gR[c];
+                CAW_NO_UNROLL
+                for (uint32_t i = 0; i < n; ++i) accL[i] += y[i] * gl;
+                CAW_NO_UNROLL
+                for (uint32_t i = 0; i < n; ++i) accR[i] += y[i] * gr;
+            }
+        }
+        CAW_NO_UNROLL
+        for (uint32_t i = 0; i < n; ++i) L[i] += accL[i];
+        if constexpr (!Mono)
+            CAW_NO_UNROLL
+            for (uint32_t i = 0; i < n; ++i) R[i] += accR[i];
+        return;
+    }
+    (void)gR;
+    alignas(16) float sl[kControlFrames] = {}, sr[kControlFrames] = {};
+    const bool centred = o.stackCentred;
+    for (int c = 0; c < o.count; ++c) {
+        if (!o.a[c]) continue;
+        const uint32_t step = o.step[c];
+        readCopy<Morph, N>(o.a[c], o.b[c], o.phase[c] + first * step, step, o.shift[c], mix, v, n);
+        const float pl = o.stackL[c], pr = o.stackR[c];
+        CAW_NO_UNROLL
+        for (uint32_t i = 0; i < n; ++i) sl[i] += v[i] * pl;
+        if (!centred)
+            CAW_NO_UNROLL
+            for (uint32_t i = 0; i < n; ++i) sr[i] += v[i] * pr;
+    }
+    float* side = o.foldSide[slot];
+    foldRun<N>(sl, side[0], y, n, w1, w2);
+    if (centred) {
+        side[1] = side[0];  // a centred stack's right side is its left (should it spread again)
+        if constexpr (Mono) {
+            CAW_NO_UNROLL
+            for (uint32_t i = 0; i < n; ++i) L[i] += y[i];
+        } else {
+            const float g = o.levelGain;
+            CAW_NO_UNROLL
+            for (uint32_t i = 0; i < n; ++i) {
+                L[i] += y[i] * g;
+                R[i] += y[i] * g;
+            }
+        }
+        return;
+    }
+    alignas(16) float yr[kControlFrames];
+    foldRun<N>(sr, side[1], yr, n, w1, w2);
+    if constexpr (Mono) {
+        CAW_NO_UNROLL
+        for (uint32_t i = 0; i < n; ++i) L[i] += 0.5f * (y[i] + yr[i]);
+    } else {
+        const float g = o.levelGain;
+        CAW_NO_UNROLL
+        for (uint32_t i = 0; i < n; ++i) {
+            L[i] += y[i] * g;
+            R[i] += yr[i] * g;
+        }
+    }
+}
+
+template <bool Morph, bool Whole>
+void addFoldIn(OscVoice& o, const float* gL, const float* gR, float* L, float* R, uint32_t n, uint32_t first,
+               bool mono) noexcept {
+    if (mono) addFold<Morph, Whole, true, 0>(o, gL, gR, L, R, n, first);
+    else if (n == kControlFrames) addFold<Morph, Whole, false, kControlFrames>(o, gL, gR, L, R, n, first);
+    else addFold<Morph, Whole, false, 0>(o, gL, gR, L, R, n, first);
+}
+
+// The fold warp's shaper on its own (foldAdaa where a sample's step is 0): the 2x path folds each sample.
+CAW_FORCE_INLINE float foldPlain(float v, float w1, float w2) noexcept {
+    return v + w2 * (sinCyclesFine(0.25f * w1 * v) - v);
+}
+
+// The two halves of a period at twice the rate, folded: ve (at the period's samples) and vo (half a sample on).
+template <uint32_t N>
+CAW_FORCE_INLINE void foldPlainRun(float* ve, float* vo, uint32_t n, float w1, float w2) noexcept {
+    const uint32_t count = N ? N : n;
+    CAW_NO_UNROLL
+    for (uint32_t i = 0; i < count; ++i) ve[i] = foldPlain(ve[i], w1, w2);
+    CAW_NO_UNROLL
+    for (uint32_t i = 0; i < count; ++i) vo[i] = foldPlain(vo[i], w1, w2);
+}
+
+// The fold warp at twice the rate, for a note high enough that ADAA would let more alias through (the hybrid,
+// #197, owner 2026-11-13: Voice::foldTwice). Each copy is read at its samples and half a sample on (exactly: the
+// table is smooth and the phase unwarped, so reading between samples needs no interpolation filter), folded
+// (foldPlain, the ADAA path's shaper), and the high-rate sum comes down through the half-band decimators: what
+// the fold makes above the high rate's Nyquist, up to 1.5 times the sample rate, lands in their stop band. The
+// path the fold had before #197 (addTwice's), with Whole stack added: there the copies are summed at their pan
+// gains first, each side's sum folded once, then the level, as addFold does. A centred stack (every copy alike
+// on both sides) runs one decimator and copies its state to the right one, which stays ready should the stack
+// spread. Mono (the copy Osc FM hears, into L, through foldM): per copy at the copies' mono gains; whole stack,
+// the mean of the two sides' folds, before the level.
+template <bool Morph, bool Whole, bool Mono, uint32_t N>
+void addFoldTwice(OscVoice& o, const float* gL, const float* gR, float* L, float* R, uint32_t n, uint32_t first) noexcept {
+    if constexpr (N != 0) n = N;
+    const float w1 = o.w1, w2 = o.w2, mix = o.mix;
+    alignas(16) float hl[2 * kControlFrames] = {}, hr[2 * kControlFrames] = {};
+    alignas(16) float ve[kControlFrames], vo[kControlFrames];
+    const bool centred = Whole ? o.stackCentred : o.centred;
+    if constexpr (!Whole) {
+        for (int c = 0; c < o.count; ++c) {
+            if (!o.a[c]) continue;
+            const uint32_t step = o.step[c], p = o.phase[c] + first * step;
+            readCopy<Morph, N>(o.a[c], o.b[c], p, step, o.shift[c], mix, ve, n);
+            readCopy<Morph, N>(o.a[c], o.b[c], p + (step >> 1), step, o.shift[c], mix, vo, n);
+            foldPlainRun<N>(ve, vo, n, w1, w2);
+            const float gl = Mono ? 2.0f * gL[c] : gL[c];
+            for (uint32_t i = 0; i < n; ++i) hl[2 * i] += ve[i] * gl, hl[2 * i + 1] += vo[i] * gl;
+            if (Mono || centred) continue;
+            const float gr = gR[c];
+            for (uint32_t i = 0; i < n; ++i) hr[2 * i] += ve[i] * gr, hr[2 * i + 1] += vo[i] * gr;
+        }
+    } else {
+        (void)gL, (void)gR;
+        alignas(16) float sle[kControlFrames] = {}, slo[kControlFrames] = {}, sre[kControlFrames] = {}, sro[kControlFrames] = {};
+        for (int c = 0; c < o.count; ++c) {
+            if (!o.a[c]) continue;
+            const uint32_t step = o.step[c], p = o.phase[c] + first * step;
+            readCopy<Morph, N>(o.a[c], o.b[c], p, step, o.shift[c], mix, ve, n);
+            readCopy<Morph, N>(o.a[c], o.b[c], p + (step >> 1), step, o.shift[c], mix, vo, n);
+            const float pl = o.stackL[c], pr = o.stackR[c];
+            CAW_NO_UNROLL
+            for (uint32_t i = 0; i < n; ++i) sle[i] += ve[i] * pl, slo[i] += vo[i] * pl;
+            if (centred) continue;
+            CAW_NO_UNROLL
+            for (uint32_t i = 0; i < n; ++i) sre[i] += ve[i] * pr, sro[i] += vo[i] * pr;
+        }
+        foldPlainRun<N>(sle, slo, n, w1, w2);
+        if (!centred) foldPlainRun<N>(sre, sro, n, w1, w2);
+        if constexpr (Mono) {
+            if (centred) {
+                for (uint32_t i = 0; i < n; ++i) hl[2 * i] = sle[i], hl[2 * i + 1] = slo[i];
+            } else {
+                for (uint32_t i = 0; i < n; ++i) hl[2 * i] = 0.5f * (sle[i] + sre[i]), hl[2 * i + 1] = 0.5f * (slo[i] + sro[i]);
+            }
+        } else {
+            const float g = o.levelGain;
+            for (uint32_t i = 0; i < n; ++i) hl[2 * i] = sle[i] * g, hl[2 * i + 1] = slo[i] * g;
+            if (!centred)
+                for (uint32_t i = 0; i < n; ++i) hr[2 * i] = sre[i] * g, hr[2 * i + 1] = sro[i] * g;
+        }
+    }
+    if constexpr (Mono) {
+        Decimator2x::down(o.foldM, hl, L, nullptr, nullptr, nullptr, n);
+    } else if (centred) {  // both sides the same: one decimator, its state copied to the other
+        alignas(16) float y[kControlFrames] = {};
+        Decimator2x::down(o.foldL, hl, y, nullptr, nullptr, nullptr, n);
+        o.foldR = o.foldL;
+        for (uint32_t i = 0; i < n; ++i) L[i] += y[i], R[i] += y[i];
+    } else {
+        Decimator2x::down(o.foldL, hl, L, &o.foldR, hr, R, n);
+    }
+}
+
+template <bool Morph, bool Whole>
+void addFoldTwiceIn(OscVoice& o, const float* gL, const float* gR, float* L, float* R, uint32_t n, uint32_t first,
+                    bool mono) noexcept {
+    if (mono) addFoldTwice<Morph, Whole, true, 0>(o, gL, gR, L, R, n, first);
+    else if (n == kControlFrames) addFoldTwice<Morph, Whole, false, kControlFrames>(o, gL, gR, L, R, n, first);
+    else addFoldTwice<Morph, Whole, false, 0>(o, gL, gR, L, R, n, first);
+}
+
+void addFoldWarp(OscVoice& o, const float* gL, const float* gR, float* L, float* R, uint32_t n, uint32_t first,
+                 bool mono) noexcept {
+    const bool morph = o.mix != 0.0f;
+    if (o.key.foldTwice) {
+        if (o.key.foldWhole) {
+            if (morph) addFoldTwiceIn<true, true>(o, gL, gR, L, R, n, first, mono);
+            else addFoldTwiceIn<false, true>(o, gL, gR, L, R, n, first, mono);
+        } else if (morph) {
+            addFoldTwiceIn<true, false>(o, gL, gR, L, R, n, first, mono);
+        } else {
+            addFoldTwiceIn<false, false>(o, gL, gR, L, R, n, first, mono);
+        }
+        return;
+    }
+    if (o.key.foldWhole) {
+        if (morph) addFoldIn<true, true>(o, gL, gR, L, R, n, first, mono);
+        else addFoldIn<false, true>(o, gL, gR, L, R, n, first, mono);
+    } else if (morph) {
+        addFoldIn<true, false>(o, gL, gR, L, R, n, first, mono);
+    } else {
+        addFoldIn<false, false>(o, gL, gR, L, R, n, first, mono);
+    }
+}
+
+// The hybrid fold's crossover (#197, owner 2026-11-13): whether a note folds at twice the rate rather than with
+// ADAA, from the highest frequency `hz` it may play (scaled to 48 kHz: the caller multiplies by 48000 over the
+// sample rate) and the fold drive (1..8). Measured on a sine, A4 to A7 a semitone apart at five drives, both
+// modes (2026-11-13, docs/engine-performance.md): ADAA keeps the aliases below -60 dB (the 2x path's own worst)
+// while hz (drive + 2) stays under about 14 kHz per copy and 12 kHz for a whole 7-copy stack (whose sum folds
+// harder); above that it gives way fast (-38 dB at A6, full drive). 2x from 10 kHz leaves at least 3.5
+// semitones of margin: at full drive from 1 kHz (about B5), at drive 3.8 (amount 0.4) from 1.7 kHz.
+bool foldTwiceFor(double hz, double drive) noexcept {
+#if defined(CAW_FOLD_FORCE)  // scratch measurement builds only: one path at every pitch
+    (void)hz, (void)drive;
+    return CAW_FOLD_FORCE != 0;
+#else
+    return hz * (drive + 2.0) > 10000.0;
+#endif
+}
+
 // The oscillator's stack into L and R (its gains, its level), or with `mono` into L alone at its pre-level mono
 // gains (what Osc FM hears of it). `fm`: Osc FM's modulator, period-indexed.
 void addOscillator(OscVoice& o, float* L, float* R, uint32_t n, uint32_t first, const float* fm,
@@ -1013,10 +1378,7 @@ void addOscillator(OscVoice& o, float* L, float* R, uint32_t n, uint32_t first, 
             if (fm) addStackWarp<kWarpFmOsc>(o, gL, gR, L, R, n, first, fm);
             else addStackWarp<kWarpNone>(o, gL, gR, L, R, n, first, fm);
             break;
-        case kWarpFold:
-            if (o.key.once) addStackWarp<kWarpFold>(o, gL, gR, L, R, n, first, fm);  // Eco
-            else addTwiceWarp<kWarpFold>(o, gL, gR, L, R, n, first, mono);
-            break;
+        case kWarpFold: addFoldWarp(o, gL, gR, L, R, n, first, mono); break;
         default: addStackWarp<kWarpNone>(o, gL, gR, L, R, n, first, fm); break;
     }
 }
@@ -1084,18 +1446,8 @@ struct VoiceFilter {
             }
         }
     }
-    // The drive on one side, two samples at a time (Saturator::process2Approx: each lane processApprox()'s steps).
-    void driveMono(float* x, uint32_t n) noexcept {
-        uint32_t i = 0;
-        for (; i + 1 < n; i += 2) {
-            const double in[2] = {static_cast<double>(x[i]), static_cast<double>(x[i + 1])};
-            double out[2];
-            saturator.process2Approx(in, out);
-            x[i] = static_cast<float>(out[0]);
-            x[i + 1] = static_cast<float>(out[1]);
-        }
-        if (i < n) x[i] = static_cast<float>(saturator.processApprox(static_cast<double>(x[i])));
-    }
+    // The drive on one side, in float four samples at a time (Saturator::processApproxFloat, #197).
+    void driveMono(float* x, uint32_t n) noexcept { saturator.processApproxFloat(x, n); }
     template <class F>
     void each(float* x, uint32_t n, F&& f) noexcept {
         for (uint32_t i = 0; i < n; ++i) x[i] = static_cast<float>(f(static_cast<double>(x[i])));
@@ -1216,14 +1568,9 @@ private:
             svf[1] = svf[0];
         }
         if (!(mix >= 1.0f)) std::copy(L, L + n, dryL), std::copy(R, R + n, dryR);
-        if (drive) {  // both sides at once (Saturator::process2Approx: each lane processApprox()'s steps)
-            for (uint32_t i = 0; i < n; ++i) {
-                const double in[2] = {static_cast<double>(L[i]), static_cast<double>(R[i])};
-                double out[2];
-                saturator.process2Approx(in, out);
-                L[i] = static_cast<float>(out[0]);
-                R[i] = static_cast<float>(out[1]);
-            }
+        if (drive) {  // each side in float, four samples at a time (Saturator::processApproxFloat, #197)
+            saturator.processApproxFloat(L, n);
+            saturator.processApproxFloat(R, n);
         }
         if (type <= kLadderBp) ladder[0].flushDenormals(), ladder[1].flushDenormals();
     }
@@ -1253,9 +1600,12 @@ struct Voice {
     uint32_t noteId = 0;
     uint64_t age = 0;
     bool starting = false, fresh = false;  // the next control sets the note's start (and, fresh, its phases)
-    // Eco's FM and fold warps at the sample rate (OscKey::once), latched when the voice starts from silence: a
+    // Eco's FM warp at the sample rate (OscKey::once), latched when the voice starts from silence: a
     // quality change while a note sounds never switches its oscillators between the 1x and the decimated path.
     bool ecoWarps = false;
+    // Each oscillator's fold at twice the rate (OscKey::foldTwice), chosen when the voice starts from silence
+    // (foldTwiceFor): a bend, a glide or a knob while the note sounds never switches it between the two paths.
+    bool foldTwice[kOscs] = {};
     uint32_t seed = 0;
     double notePitch = 60.0, pitch = 60.0, velocity = 1.0, pressure = 0.0, timbre = 0.0;
     lib::Adsr env[kEnvs];
@@ -1831,7 +2181,7 @@ private:
         v.random.retrigger();
         std::memset(v.fmBuf, 0, sizeof v.fmBuf);
         if (!v.fresh) return;
-        for (OscVoice& o : v.osc) o.foldL.clear(), o.foldR.clear(), o.foldM.clear();
+        for (OscVoice& o : v.osc) o.foldL.clear(), o.foldR.clear(), o.foldM.clear(), o.clearFold();
         v.shared = true;  // until its filter 1 is set unlike the shared one (then its own, to the note's end)
         for (uint32_t o = 0; o < kOscs; ++o) {
             const double start = base_[oscParam(o, kOscPhase)], randomness = base_[oscParam(o, kOscPhaseRand)];
@@ -1941,10 +2291,29 @@ private:
         o.f1 = f1;
     }
 
+    // Whether a fresh note's oscillator folds at twice the rate (foldTwiceFor), from the highest pitch it may
+    // play: the note, the oscillator's tuning, its unison stack's top copy (its interval and detune), and the
+    // bend range up. The drive is the most it can reach: the knob's, or the full 8 when a slot moves it.
+    template <class Get>
+    bool foldTwiceAtStart(const Voice& v, uint32_t index, const Get& P) const noexcept {
+        const auto at = [&](uint32_t p) noexcept { return P(oscParam(index, p)); };
+        const int copies = clampi(at(kOscUnison), 1, kMaxCopies);
+        const auto stack = static_cast<lib::UnisonStack>(clampi(at(kOscStack), 0, lib::kUnisonStackCount - 1));
+        double top = 0.0;
+        for (int c = 0; c < copies; ++c) top = std::max(top, lib::unisonStackSemitones(stack, c));
+        if (copies > 1) top += clampd(at(kOscDetune), 0.0, 100.0) / 100.0;
+        const double pitch = v.notePitch + 12.0 * clampi(at(kOscOctave), -4, 4) + clampi(at(kOscSemi), -12, 12) +
+                             clampd(at(kOscFine), -100.0, 100.0) / 100.0 + top + clampd(base_[kBendRange], 1.0, 48.0);
+        const bool moved = targetOf_[oscParam(index, kOscWarpAmount)] != 0;
+        const double drive = moved ? 8.0 : 1.0 + 7.0 * clampd(at(kOscWarpAmount), 0.0, 1.0);
+        return foldTwiceFor(440.0 * exp2((pitch - 69.0) / 12.0) * 48000.0 / sr_, drive);
+    }
+
     template <class Get>
     void configureOscillator(Voice& v, uint32_t index, const Get& P) noexcept {
         OscVoice& o = v.osc[index];
         const auto at = [&](uint32_t p) noexcept { return P(oscParam(index, p)); };
+        if (v.starting && v.fresh) v.foldTwice[index] = foldTwiceAtStart(v, index, P);
         o.on = at(kOscOn) >= 0.5;
         if (!o.on) {
             o.count = 0;
@@ -1965,9 +2334,12 @@ private:
         key.amount = clampd(at(kOscWarpAmount), 0.0, 1.0);
         key.warp = key.amount > 0.0 ? clampi(at(kOscWarp), 0, kWarpCount - 1) : kWarpNone;
         key.fmRatio = key.warp == kWarpFm ? clampi(P(fmRatioParam(index)), 1, 16) : 1;
-        // Eco quality renders the FM and fold warps at the sample rate (no 2x oversampling): they alias more. The
-        // voice's choice from its start holds while it sounds.
-        key.once = (key.warp == kWarpFm || key.warp == kWarpFold) && v.ecoWarps;
+        // Eco quality renders the FM warp at the sample rate (no 2x oversampling): it aliases more. The voice's
+        // choice from its start holds while it sounds. (The fold runs at the sample rate at every quality: addFold.)
+        key.once = key.warp == kWarpFm && v.ecoWarps;
+        key.foldWhole = key.warp == kWarpFold && P(foldModeParam(index)) >= 0.5;
+        // A high note's fold at twice the rate (the voice's choice from its start); Eco folds every note with ADAA.
+        key.foldTwice = key.warp == kWarpFold && v.foldTwice[index] && !v.ecoWarps;
         if (key.warp == kWarpFmOsc) {  // the modulator's tuning against this one's (both follow the note)
             const uint32_t m = fmSource(index);
             const double offset = 12.0 * clampi(P(oscParam(m, kOscOctave)), -4, 4) + clampi(P(oscParam(m, kOscSemi)), -12, 12) +
@@ -2057,8 +2429,9 @@ private:
             case kWarpFold:
                 o.w1 = static_cast<float>(1.0 + 7.0 * amount);  // drive 1..8
                 o.w2 = static_cast<float>(amount < 0.25 ? 4.0 * amount : 1.0);
-                // Folding spreads the table's harmonics about as far as the drive; rendered at twice the rate, what
-                // goes up to 1.5 times the sample rate is filtered out, so half the drive keeps it there.
+                // Folding spreads the table's harmonics about as far as the drive. The mip level is the one the 2x
+                // oversampled fold read (half the drive: #197 kept the table's brightness; ADAA, not the mip
+                // level, keeps the aliases down).
                 faster = 0.5 * o.w1 > 1.0 ? 0.5 * o.w1 : 1.0;
                 break;
             case kWarpFmOsc:
@@ -2069,12 +2442,16 @@ private:
                 break;
             default: break;
         }
-        const bool twice = (key.warp == kWarpFold || key.warp == kWarpFm) && !key.once;
-        if (twice && (o.warpMode != key.warp || o.key.table < 0 || o.key.once)) {  // into FM or fold: fresh decimators
+        const bool twice = (key.warp == kWarpFm && !key.once) || key.foldTwice;
+        if (twice && (o.warpMode != key.warp || o.key.table < 0 || o.key.once || o.key.foldTwice != key.foldTwice)) {
+            // into FM or the 2x fold: fresh decimators
             o.foldL.set(half_);
             o.foldR.set(half_);
             o.foldM.set(half_);
         }
+        // Into the fold, or to its other mode: its anti-aliasing starts from 0, as a voice does.
+        if (key.warp == kWarpFold && (o.warpMode != kWarpFold || o.key.table < 0 || o.key.foldWhole != key.foldWhole))
+            o.clearFold();
         o.warpMode = key.warp;
         o.key = key;
         o.faster = faster;
@@ -2115,9 +2492,16 @@ private:
             o.gainL[c] = static_cast<float>(o.panL[c] * key.level);
             o.gainR[c] = static_cast<float>(o.panR[c] * key.level);
             o.monoGain[c] = static_cast<float>(0.25 * (o.panL[c] + o.panR[c]));
+            o.stackL[c] = static_cast<float>(o.panL[c]);
+            o.stackR[c] = static_cast<float>(o.panR[c]);
         }
+        o.levelGain = static_cast<float>(key.level);
         o.centred = true;
-        for (int c = 0; c < o.count; ++c) o.centred = o.centred && (!o.a[c] || o.gainL[c] == o.gainR[c]);
+        o.stackCentred = true;
+        for (int c = 0; c < o.count; ++c) {
+            o.centred = o.centred && (!o.a[c] || o.gainL[c] == o.gainR[c]);
+            o.stackCentred = o.stackCentred && (!o.a[c] || o.stackL[c] == o.stackR[c]);
+        }
     }
 
     template <class Get>
@@ -2584,7 +2968,7 @@ private:
     lib::CombFilter combs_[kVoices][kFilters * 2];
     const lib::Wavetable* table_[kTableChoices] = {};  // the built-in tables, then User
     std::shared_ptr<const UserTable> user_;            // the loaded user table (the state), or none
-    lib::HalfBandDesign half_{2 * Decimator2x::kStages, 0.04};               // the fold warp's decimators
+    lib::HalfBandDesign half_{2 * Decimator2x::kStages, 0.04};               // the FM and 2x fold's decimators
     const std::atomic<int>* quality_ = nullptr;  // the building Engine's (quality.h)
     Clock clock_;
     const Transport* transport_ = nullptr;

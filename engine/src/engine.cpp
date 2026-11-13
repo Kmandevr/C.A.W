@@ -693,6 +693,19 @@ void Engine::useOfflineMixPool() {
     setMixParallel(MixParallel::Always);
 }
 
+bool Engine::useBenchmarkMixPool() {
+    if (gTestMixThreads.load(std::memory_order_relaxed) >= 0) return false;  // a test's pool stays
+    if (liveDevices() != 0) {
+        setMixParallel(MixParallel::Never);
+        return false;
+    }
+    startMixPool(MixPool::defaultWorkers(), false);
+    setMixParallel(MixParallel::Auto);
+    return true;
+}
+
+int Engine::mixThreadsForTest() noexcept { return gTestMixThreads.load(std::memory_order_relaxed); }
+
 void Engine::setMixThreadsForTest(int workers) noexcept {
     gTestMixThreads.store(std::min(workers, static_cast<int>(MixPool::kMaxWorkers)), std::memory_order_relaxed);
 }
@@ -4900,6 +4913,7 @@ void Engine::resetShedding() noexcept {
     // A pool left on runs a settle again: its wait average starts from zero, so without one it would add workers
     // (and count the pool's restart toward shedding) before the average shows what they cost.
     if (mixAuto_) mixSettleSeconds_ = kMixSettleSeconds;
+    tailPool_ = tailPoolWeight_ = tailPoolSeconds_ = tailOverSeconds_ = 0;  // the serial tail is kept: it is not the pool's
     shedLoad_ = measureFrom_ = 0;
     cpu_.store(0.0f, std::memory_order_relaxed);
     measureSlot_ = -1;
@@ -4923,6 +4937,7 @@ void Engine::process(float* left, float* right, int frames) noexcept {
         mixActive_ = pool_ ? pool_->workers() : 0;
         mixOverSeconds_ = mixUnderSeconds_ = mixLosingSeconds_ = mixGrowSeconds_ = mixSettleSeconds_ = 0;
         waitAvg_ = workAvg_ = 0;
+        tailPool_ = tailPoolWeight_ = tailSerial_ = tailSerialWeight_ = tailPoolSeconds_ = tailOverSeconds_ = 0;
     }
     mixParallel_ = wantsMixPool() && !profiling();  // the Benchmark's profile: serial (setProfile)
     if (pool_) {
@@ -5061,10 +5076,23 @@ void Engine::reportLoad(double load, int frames, int rendered) noexcept {
     // frames): the load per frame rendered is the engine's real load, without those alternating peaks.
     if (rendered > 0 && rendered != frames) load *= static_cast<double>(frames) / static_cast<double>(rendered);
     const double dt = static_cast<double>(frames) / sr_;
-    if (dt != loadDt_) {  // the size rarely changes: pow and exp only then
+    if (dt != loadDt_) {  // pow and exp only for a length not among the last few (loadWeights_)
         loadDt_ = dt;
-        loadKeep_ = std::pow(0.9, dt / kTick);
-        shareKeep_ = std::exp(-dt / kShareSeconds);
+        const LoadWeights* w = nullptr;
+        for (const LoadWeights& c : loadWeights_)
+            if (c.dt == dt) w = &c;
+        if (!w) {
+            LoadWeights& n = loadWeights_[loadWeightsNext_];
+            loadWeightsNext_ = (loadWeightsNext_ + 1) % kLoadWeights;
+            n.dt = dt;
+            n.load = std::pow(0.9, dt / kTick);
+            n.share = std::exp(-dt / kShareSeconds);
+            n.tail = std::exp(-dt / kMixTailSeconds);
+            w = &n;
+        }
+        loadKeep_ = w->load;
+        shareKeep_ = w->share;
+        tailKeep_ = w->tail;
     }
     loadClock_ += dt;
     loadAvg_ = loadKeep_ * loadAvg_ + (1.0 - loadKeep_) * load;
@@ -5096,6 +5124,7 @@ void Engine::reportLoad(double load, int frames, int rendered) noexcept {
                 mixSettleSeconds_ = kMixSettleSeconds;
             mixActive_ = pool_ ? pool_->workers() : 0;
             mixLosingSeconds_ = mixGrowSeconds_ = 0;
+            tailPool_ = tailPoolWeight_ = tailPoolSeconds_ = tailOverSeconds_ = 0;  // the pool's tail from now
         }
     } else if (work < kMixSerialLoad) {
         mixOverSeconds_ = 0;
@@ -5104,10 +5133,36 @@ void Engine::reportLoad(double load, int frames, int rendered) noexcept {
     } else {
         mixOverSeconds_ = mixUnderSeconds_ = 0;
     }
+    // The tail guard's samples: this callback used the pool (it handed a level to the workers) or ran serial.
+    const double late = raw >= kMixTailLoad ? 1.0 : 0.0;
+    if (poolUsedLast_ && mixParallel_) {
+        if (!settling) {
+            tailPool_ = tailKeep_ * tailPool_ + (1.0 - tailKeep_) * late;
+            tailPoolWeight_ = tailKeep_ * tailPoolWeight_ + (1.0 - tailKeep_);
+            tailPoolSeconds_ += dt;
+        }
+    } else {
+        tailSerial_ = tailKeep_ * tailSerial_ + (1.0 - tailKeep_) * late;
+        tailSerialWeight_ = tailKeep_ * tailSerialWeight_ + (1.0 - tailKeep_);
+    }
     // Auto's workers: one fewer while the pool costs the callback more than it gives, one more while it waits little.
     const bool autoOn = static_cast<MixParallel>(mixMode_.load(std::memory_order_relaxed)) == MixParallel::Auto;
     if (pool_ && autoOn && mixAuto_ && mixParallel_) {
         const uint32_t all = pool_->workers();
+        // The tail guard: late callbacks more often on the pool than serial, for a while: one thread again.
+        const bool tailWorse = tailPoolSeconds_ >= kMixTailSeconds - kSlackSeconds && tailSerialWeight_ > 0 &&
+                               tailPoolWeight_ > 0 &&
+                               tailPool_ / tailPoolWeight_ > tailSerial_ / tailSerialWeight_ + kMixTailMargin;
+        tailOverSeconds_ = tailWorse ? tailOverSeconds_ + dt : 0.0;
+        if (tailOverSeconds_ >= kMixTailHoldSeconds - kSlackSeconds) {
+            mixAuto_ = false;
+            mixActive_ = all;
+            mixRetrySeconds_ = kMixRetrySeconds;
+            mixLosingSeconds_ = mixGrowSeconds_ = 0;
+            waitAvg_ = workAvg_ = 0;
+            tailPool_ = tailPoolWeight_ = tailPoolSeconds_ = tailOverSeconds_ = 0;
+            tailFallbacks_.fetch_add(1, std::memory_order_relaxed);
+        }
         if (waitAvg_ > kMixWaitShare && waitAvg_ > workAvg_) {
             mixGrowSeconds_ = 0;
             mixLosingSeconds_ += dt;

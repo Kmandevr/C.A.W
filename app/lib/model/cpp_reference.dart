@@ -371,7 +371,7 @@ class CppBuiltin {
 const cppBuiltins = <CppBuiltin>[
   CppBuiltin('org.caw.synth.flagship', 'Flagship', true,
       'Three wavetable oscillators with unison (up to 16 copies), two filters, a 16-slot mod matrix and effects; poly, '
-      'mono or legato with glide. Its 212 knobs are grouped by prefix: osc1_..osc3_, flt1_, flt2_, flt_routing, env1_..env3_, '
+      'mono or legato with glide. Its 215 knobs are grouped by prefix: osc1_..osc3_, flt1_, flt2_, flt_routing, env1_..env3_, '
       'lfo1_..lfo3_, rnd_, mod1_..mod16_ and fx_. Presets: Init, Morph pad, Mono bass, Acid 303, Basic, Pluck and FM bell.',
       ['voice_mode', 'glide', 'flt_routing', 'rnd_rate', 'rnd_mode', 'volume', 'velocity', 'bend_range', 'fx_dist_on', 'fx_dist_type', 'fx_dist_drive',
        'fx_dist_mix', 'fx_eq_on', 'fx_eq_low', 'fx_eq_mid', 'fx_eq_mid_freq', 'fx_eq_high', 'fx_eq_mix', 'fx_chorus_on',
