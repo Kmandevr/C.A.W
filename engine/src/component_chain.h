@@ -290,7 +290,10 @@ private:
     ComponentAutomation* automation_ = nullptr;  // owned; swapped and retired by the Engine
     uint64_t playEpoch_ = ~0ull;
     // Reset and not run since (reset() is then a no-op): set by reset(), cleared by process() and runModulator().
+    // Any new path that runs a processor must clear it before calling in (debug-asserted at the call sites).
     // Owned by whichever thread owns the chain: the control thread while it is built, then the audio thread.
+    // Set at build only for chains of built-ins (make()); a chain holding a loaded component is reset on the
+    // audio thread as before.
     bool clean_ = false;
     bool modulators_ = false;   // built by buildModulators
     bool modNewPlay_ = false;   // audio thread: beginModulators saw a new Play
