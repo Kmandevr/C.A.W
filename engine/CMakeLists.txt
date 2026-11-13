@@ -91,14 +91,21 @@ endif()
 # reference render: fused multiply-adds (-ffp-contract=fast; Arm64 has FMA, the x86-64 baseline has none, so no
 # change there), no errno from maths functions, no trapping, no signed zeros and reassociation (GCC reassociates only
 # with those two). Never -ffinite-math-only: the mix's NaN/Inf guards (route_math.h, finiteOr0) must stay, and
-# fp_mode_test.cpp checks them under these flags. Left out: -freciprocal-math (no gain). MSVC keeps /fp:precise
-# (clang-cl also /clang:-ffp-contract=off): Windows isn't the speed target, and /fp:fast's NaN handling is unchecked.
+# fp_mode_test.cpp checks them under these flags. Left out: -freciprocal-math (no gain).
+# clang-cl (the shipped Windows engine since 2026-11-13, docs/decisions.md) gets the same set and -O3 through /clang:,
+# which clang-cl appends after its own options, so a strict file's /clang: negations still come last. MSVC's cl keeps
+# /fp:precise: /fp:fast's NaN handling is unchecked.
 # _caw_fp_strict is the SDK's strict set: components get it (CAW::SDK above), and so do tests of exact IEEE results.
-if(MSVC)
+if(MSVC AND CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+  # /fp:precise alone does not undo /clang:-fno-signed-zeros or reassociation, so the strict set negates each one.
+  set(_caw_fp_strict /fp:precise /clang:-ffp-contract=off /clang:-fno-fast-math /clang:-fno-trapping-math
+    /clang:-fsigned-zeros /clang:-fno-associative-math)
+  set(_caw_fp_default /clang:-ffp-contract=fast /clang:-fno-math-errno /clang:-fno-trapping-math
+    /clang:-fno-signed-zeros /clang:-fassociative-math)
+  # Linux and Android build Release at -O3; clang-cl's /O2 is -O2.
+  add_compile_options("$<$<CONFIG:Release,RelWithDebInfo,Profile>:/clang:-O3>")
+elseif(MSVC)
   set(_caw_fp_strict /fp:precise)
-  if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
-    list(APPEND _caw_fp_strict /clang:-ffp-contract=off)
-  endif()
   set(_caw_fp_default ${_caw_fp_strict})
 else()
   # -fno-trapping-math changes no result (nothing reads floating-point exception flags; it is Clang's default).

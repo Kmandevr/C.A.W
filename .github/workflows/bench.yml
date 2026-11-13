@@ -1,4 +1,4 @@
-# Engine speed: builds Release caw_bench and runs its suite (caw_bench SECONDS 500) on Linux x64, Linux Arm64, Windows x64 (MSVC) and an Android arm64 binary on Arm64 hardware, with the mix graph on one thread, on 3 pool workers and on the machine's own count.
+# Engine speed: builds Release caw_bench and runs its suite (caw_bench SECONDS 500) on Linux x64, Linux Arm64, Windows x64 (clang-cl) and an Android arm64 binary on Arm64 hardware, with the mix graph on one thread, on 3 pool workers and on the machine's own count.
 name: Bench
 on:
   push:
@@ -69,16 +69,16 @@ jobs:
           name: bench-${{ matrix.slug }}
           path: bench-${{ matrix.slug }}-t*
 
-  # Windows x64: MSVC (the Flutter Windows app's compiler), Release with its default link-time optimisation and
-  # /fp:precise, on the runner engine.yml tests Windows on.
+  # Windows x64: clang-cl (Visual Studio's ClangCL toolset, MSVC ABI; the shipped Windows engine's compiler since
+  # 2026-11-13), Release with the engine's -O3 and fast-math subset, on the runner engine.yml tests Windows on.
   windows:
     name: Bench (Windows x64)
     runs-on: windows-2025
     steps:
       - uses: actions/checkout@v7
-      - name: Build caw_bench (Release, MSVC)
+      - name: Build caw_bench (Release, clang-cl)
         run: |
-          cmake -S engine -B build -DCAW_AUDIO=OFF
+          cmake -S engine -B build -G "Visual Studio 17 2022" -A x64 -T ClangCL -DCAW_AUDIO=OFF
           cmake --build build --config Release --target caw_bench --parallel
       - name: Machine
         run: |
@@ -94,7 +94,7 @@ jobs:
       - uses: actions/upload-artifact@v7
         with:
           name: bench-windows-x64
-          path: bench-windows-x64.*
+          path: bench-windows-x64-t*
 
   # Android: caw_bench cross-compiled with the APK's NDK for arm64-v8a as a static bionic executable (no
   # /system/bin/linker64 needed), then run on the ubuntu-24.04-arm runner: real Arm64 cores under a Linux kernel,

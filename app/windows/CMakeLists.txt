@@ -73,9 +73,38 @@ set(INSTALL_BUNDLE_DATA_DIR "${CMAKE_INSTALL_PREFIX}/data")
 set(INSTALL_BUNDLE_LIB_DIR "${CMAKE_INSTALL_PREFIX}")
 
 # The C.A.W engine (engine/CMakeLists.txt), bundled next to the app so dart:ffi can load it.
-set(CAW_TOOLS OFF CACHE BOOL "" FORCE)
-add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../../engine" caw_engine)
-install(TARGETS caw_engine RUNTIME DESTINATION "${INSTALL_BUNDLE_LIB_DIR}" COMPONENT Runtime)
+# It is built with clang-cl (owner, 2026-11-13, docs/decisions.md): Visual Studio's ClangCL toolset, MSVC ABI, so the
+# DLL's plain C API loads beside this MSVC-built runner. A Visual Studio build has one toolset for all its targets, so
+# the engine is its own CMake build (ExternalProject) with that toolset; the app and plug-ins stay on MSVC.
+# CAW_ENGINE_CLANG_CL=OFF builds it with MSVC as part of this build instead (a Visual Studio without the
+# "C++ Clang tools for Windows" component).
+option(CAW_ENGINE_CLANG_CL "Build the engine DLL with clang-cl (Visual Studio's ClangCL toolset)" ON)
+set(CAW_ENGINE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../engine")
+if(CAW_ENGINE_CLANG_CL)
+  include(ExternalProject)
+  set(CAW_ENGINE_BUILD_DIR "${CMAKE_CURRENT_BINARY_DIR}/caw_engine_clang_cl")
+  # The engine has no Profile configuration; Flutter's Profile build takes its Release engine.
+  set(CAW_ENGINE_CONFIG "$<IF:$<CONFIG:Debug>,Debug,Release>")
+  ExternalProject_Add(caw_engine_clang_cl
+    SOURCE_DIR "${CAW_ENGINE_DIR}"
+    BINARY_DIR "${CAW_ENGINE_BUILD_DIR}"
+    CMAKE_GENERATOR "${CMAKE_GENERATOR}"
+    CMAKE_GENERATOR_PLATFORM "${CMAKE_GENERATOR_PLATFORM}"
+    CMAKE_GENERATOR_TOOLSET ClangCL
+    CMAKE_ARGS -DCAW_TOOLS=OFF -DCAW_INSTALL_SDK=OFF
+    BUILD_COMMAND "${CMAKE_COMMAND}" --build "${CAW_ENGINE_BUILD_DIR}" --config "${CAW_ENGINE_CONFIG}" --target caw_engine
+    BUILD_ALWAYS ON  # its own build decides what changed in engine/
+    INSTALL_COMMAND ""
+    BUILD_BYPRODUCTS "${CAW_ENGINE_BUILD_DIR}/Release/caw.dll" "${CAW_ENGINE_BUILD_DIR}/Debug/caw.dll"
+  )
+  add_dependencies(${BINARY_NAME} caw_engine_clang_cl)
+  install(FILES "${CAW_ENGINE_BUILD_DIR}/${CAW_ENGINE_CONFIG}/caw.dll"
+    DESTINATION "${INSTALL_BUNDLE_LIB_DIR}" COMPONENT Runtime)
+else()
+  set(CAW_TOOLS OFF CACHE BOOL "" FORCE)
+  add_subdirectory("${CAW_ENGINE_DIR}" caw_engine)
+  install(TARGETS caw_engine RUNTIME DESTINATION "${INSTALL_BUNDLE_LIB_DIR}" COMPONENT Runtime)
+endif()
 
 install(TARGETS ${BINARY_NAME} RUNTIME DESTINATION "${CMAKE_INSTALL_PREFIX}"
   COMPONENT Runtime)
