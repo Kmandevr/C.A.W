@@ -294,6 +294,7 @@ void stopLocked(CawEngine* e) {
     closeCapture(e, a);
     drainRerouteJobs(a, &a->device);
     ma_device_uninit(&a->device);  // the callback has stopped once this returns
+    e->engine->stopLiveMixPool();   // so the workers can go
     ma_context_uninit(&a->context);
     e->engine->liveAudio().setDeviceChannels(0);
     delete a;
@@ -327,6 +328,10 @@ ma_result openDevice(Audio* a, const CawEngine* e, const ma_device_id* id, ma_ui
     }
     cfg.dataCallback = callback;
     cfg.pUserData = a;
+    // WASAPI: miniaudio's audio thread joins MMCSS "Pro Audio" (AvSetMmThreadCharacteristicsA in
+    // ma_device_start__wasapi_nolock, on that thread, miniaudio 0.11.25); the default usage joins no MMCSS task.
+    // The mix pool's workers then join the same task (thread_tuning_win.cpp), never above the callback.
+    cfg.wasapi.usage = ma_wasapi_usage_pro_audio;
     a->exclusive = exclusive && takesExclusive(a->context.backend);
     cfg.playback.shareMode = a->exclusive ? ma_share_mode_exclusive : ma_share_mode_shared;
     ma_result r = ma_device_init(&a->context, &cfg, &a->device);
@@ -347,12 +352,22 @@ ma_result openDevice(Audio* a, const CawEngine* e, const ma_device_id* id, ma_ui
     e->engine->requestSheddingReset();  // a fresh device: its first callbacks' stalls and a throttled stretch before don't count
     a->fifoLatency = a->render.latency();
     e->engine->resetTestTone();  // a request made while closed is stale (the callback is not running yet)
+    try {
+        e->engine->startLiveMixPool();  // the mix graph's workers (speed phase 5c), before the callback runs
+    } catch (...) {
+        // No pool: the graph runs on the callback thread alone.
+    }
     r = ma_device_start(&a->device);
     if (r != MA_SUCCESS) {
         why = std::string("can't start the audio device: ") + ma_result_description(r);
         ma_device_uninit(&a->device);
+        e->engine->stopLiveMixPool();
         return r;
     }
+#if defined(_WIN32)
+    // ma_device_start returns once the WASAPI thread has started (and joined MMCSS, or failed to).
+    if (a->context.backend == ma_backend_wasapi) e->engine->setCallbackMmcss(a->device.wasapi.hAvrtHandle != nullptr);
+#endif
     return MA_SUCCESS;
 }
 

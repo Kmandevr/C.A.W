@@ -1,4 +1,5 @@
-// The C API for audio assets, SFZ, input meters, recording and input latency (API version 18, WP-J), and shedding's counts (26).
+// The C API for audio assets, SFZ, input meters, recording, input latency (API 18, WP-J), audio threads (API 24)
+// and shedding's counts (27).
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
@@ -145,6 +146,14 @@ void caw_engine_shedding_stats(CawEngine* e, CawSheddingStats* out) {
     out->shed = static_cast<int64_t>(st.shed);
     out->restored = static_cast<int64_t>(st.restored);
     out->muted_now = st.mutedNow;
+}
+
+// API 24 (speed phase 5d): the audio thread's core, its clock and kind, the scheduling the platform gave, the pool.
+char* caw_audio_threads(CawEngine* e) try {
+    if (!e) return nullptr;
+    return dup(e->engine->audioThreadsJson());
+} catch (...) {
+    return nullptr;
 }
 
 }  // extern "C"

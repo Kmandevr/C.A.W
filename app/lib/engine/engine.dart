@@ -379,6 +379,17 @@ class Engine {
     return DeviceLatency.fromJson(j);
   }
 
+  /// The audio callback's core, its clock and kind, the scheduling the platform gave the callback and the mix pool's
+  /// workers, and the pool's size (caw_audio_threads, API 24; docs/engine.md). Reads the core's clock from the
+  /// system: about once a second, not per frame. Empty without an engine.
+  Map<String, dynamic> audioThreads() {
+    final r = _b.audioThreads(_handle);
+    if (r == nullptr) return const {};
+    final j = jsonDecode(r.toDartString()) as Map<String, dynamic>;
+    _b.free(r);
+    return j;
+  }
+
   /// The device's status as the engine wrote it (API 18 adds its "input" object).
   Map<String, dynamic> audioStatusJson() {
     final r = _b.audioStatus(_handle);

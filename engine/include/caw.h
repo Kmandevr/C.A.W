@@ -79,7 +79,9 @@ extern "C" {
    "note.age"; caw_engine_note_fx_stats. The voice bus (caw_component.h) gains CAW_LANE_REST. Nothing else changes.
    23 (2026-11-11): caw_audio_latency, the running device's output and input latency (AAudio's timestamps where it
    has them, else the queued buffers), the routed device's id and, on WASAPI, its kind. Nothing else changes.
-   24: taken by branch speed-parallel (caw_audio_threads), built at the same time.
+   24 (2026-11-12, speed phase 5d, branch speed-parallel): caw_audio_threads, the audio callback's core, its clock
+   and kind, the scheduling the platform gave the callback and the mix pool's workers, and the pool's size. Built
+   beside 25 to 27 and merged after them, so a library has it from 28.
    25 (2026-11-12, beta plan B4.8): caw_engine_layer_meters reads every project layer's stereo meter in one call
    into a caller's array of CawLayerMeterStereo (the app's meter poll made one call per track). Nothing else
    changes.
@@ -88,10 +90,12 @@ extern "C" {
    and caw_audio_status's "input" gains "state", "underruns", "dropped_frames", "missing_frames" and "drift_ppm"
    and the top level "stopped_by_system". Nothing else changes.
    27 (2026-11-13, branch bt-clicks, 26 on its branch): caw_engine_shedding_stats, how many layers the engine shed
-   because the device ran out of time and how many came back on their own. Shed layers now come back by themselves once the load has
-   stayed low (CawMeters.overloaded falls again), and caw_engine_clear_overload also forgets the load history.
+   because the device ran out of time and how many came back on their own. Shed layers now come back by themselves
+   once the load has stayed low (CawMeters.overloaded falls again), and caw_engine_clear_overload also forgets the
+   load history. Nothing else changes.
+   28 (2026-11-13): branch speed-parallel merged: caw_audio_threads (24 above) is in the library beside 25 to 27.
    Nothing else changes. */
-#define CAW_API_VERSION 27
+#define CAW_API_VERSION 28
 /* The component index that names a layer's native instrument rather than one of its "components". */
 #define CAW_INSTRUMENT_INDEX 0xFFFFFFFFu
 /* A component index with this bit (API version 22) names component (index & ~CAW_NOTE_COMPONENT) of the layer's
@@ -498,6 +502,16 @@ CAW_API char* caw_audio_status(CawEngine* e);
    "hdmi", "wired", "builtIn", "remote"; WASAPI's bus and form factor), else "unknown". A Bluetooth or other link may add delay no backend reports: the app keeps a
    per-device offset on top. Takes the device lock: call it off the audio thread. Free with caw_free. */
 CAW_API char* caw_audio_latency(CawEngine* e);
+/* The audio thread and the mix pool (API 24; free with caw_free), JSON: "callback_cpu" (the core the callback ran on,
+   sampled every 32 callbacks; -1 unknown or no device), "core_kind" ("big", "little", "other" when every core is one
+   kind, "unknown"), "clock_khz" and "max_khz" (that core's clock now and its top, -1 where unreadable),
+   "hint" (an Android performance hint session covers the callback and the workers), "mmcss" (the callback is in
+   MMCSS "Pro Audio", Windows), "callback_tuning" and "worker_tuning" (what the platform granted: "priority",
+   "realtime", "fast_cores", "mmcss", "no_power_throttling"), "workers", "active_workers" (those Auto lets take
+   work), "wait_share" (the callback's averaged wait for workers, as a share of its budget), "cores", "fast_cores",
+   "hybrid" and "core_source" ("cpu_capacity", "cpuinfo_max_freq", "EfficiencyClass", "none"). Reads the clock from
+   the system: call it every second or so, not per frame. */
+CAW_API char* caw_audio_threads(CawEngine* e);
 /* The metronome's (and count-in's) click: [volume] 0..1 (1 the default) and its CAW_CLICK_* sound. */
 #define CAW_CLICK_CLASSIC 0
 #define CAW_CLICK_WOOD 1

@@ -119,6 +119,10 @@ public:
     void reset() noexcept;
     // A chain that the global modulation's bindings can be resolved against (null: no rack).
     const ComponentChain* modChain() const noexcept { return rack_ ? &rack_->slot(0) : nullptr; }
+    // Audio thread: its racks hold a third-party native component (the mixer's serial lane, speed phase 5c).
+    bool foreign() const noexcept {
+        return (rack_ && rack_->slot(0).foreign()) || (fading_ && fading_->slot(0).foreign());
+    }
 
     // Any thread.
     NoteFxStats stats() const noexcept;

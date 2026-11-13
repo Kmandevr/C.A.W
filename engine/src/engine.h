@@ -24,6 +24,8 @@
 
 namespace caw {
 
+class MixPool;  // mix_pool.h
+
 constexpr int kBlock = 64;  // frames the mixer runs at most at once (a chunk); component chains run in these blocks
 constexpr int kScopeSize = 1024;
 // Layer slots a new Engine starts with. It grows past them (setProject) up to maxLayers(), which
@@ -221,8 +223,64 @@ public:
     uint32_t mixGraphNodesRun() const noexcept;
     // Tests only, between process() calls: slots the per-chunk loops (planning, solo, routing) visit.
     int slotsScannedPerChunk() const noexcept;
+    // Tests only: the track gain glide's per-sample factor (set when the Engine is made, speed phase 5a).
+    double trackGainCoefForTest() const noexcept { return trackGainCoef_; }
+    // Tests only, between process() calls: run the mix graph in its plain order instead of level by level (speed
+    // phase 5b), from the next routing update on; the output must be the same bits.
+    void setMixLevelsForTest(bool on) noexcept;
+    // Tests only, between process() calls: the mix graph's levels at the last routing update (0: not routed).
+    uint32_t mixGraphLevelsForTest() const noexcept;
     // Tests only: skip the master DC blocker and limiter so layer output can be checked exactly.
     void setMasterBypass(bool on) { bypass_.store(on, std::memory_order_relaxed); }
+
+    // The mix graph's worker pool (speed phase 5c, mix_pool.h): independent nodes of a graph level (tracks, folder
+    // buses) run on several threads, the output the same bits as on one. Control thread, only while no process()
+    // runs (before a device starts, after it stops, or with no device): start `workers` threads (at most
+    // MixPool::kMaxWorkers; 0 makes a pool that runs everything on the callback thread), or stop them. False if the
+    // threads could not be made (then it runs serially).
+    bool startMixPool(uint32_t workers);
+    bool startMixPool(uint32_t workers, bool live);  // live: workers tuned to the device's callback (thread_tuning.h)
+    void stopMixPool() noexcept;
+    uint32_t mixWorkers() const noexcept;
+    // When the pool is used: Auto (the default) once the callbacks' measured load (reportLoad) has stayed above
+    // kMixParallelLoad for kMixParallelSeconds, back to one thread once the load less the time the callback spent
+    // waiting for workers stays below kMixSerialLoad for kMixSerialSeconds; Always; or Never. Any thread; read at
+    // each callback. Auto also sizes the pool from that wait (speed phase 5d): while the callback waits more than
+    // kMixWaitShare of the budget and longer than the workers ran tasks (the pool costs more than it gives) for
+    // kMixWaitSeconds, one worker fewer takes tasks; at none, one thread, not tried again for kMixRetrySeconds;
+    // while the wait stays under kMixWaitShare / 4 for kMixGrowSeconds, one more.
+    enum class MixParallel : int { Auto = 0, Always = 1, Never = 2 };
+    void setMixParallel(MixParallel mode) noexcept { mixMode_.store(static_cast<int>(mode), std::memory_order_relaxed); }
+    static constexpr double kMixParallelLoad = 0.4, kMixParallelSeconds = 0.5;
+    static constexpr double kMixSerialLoad = 0.08, kMixSerialSeconds = 5.0;
+    static constexpr double kMixWaitShare = 0.1, kMixWaitSeconds = 0.5, kMixGrowSeconds = 2.0, kMixRetrySeconds = 10.0;
+    // Auto turning the pool on: for this long its callbacks don't count toward shedding (the pool starting, not the song).
+    static constexpr double kMixSettleSeconds = 0.25;
+    // Auto's workers now (tests, diagnostics): those taking tasks, at most mixWorkers().
+    uint32_t mixActiveWorkers() const noexcept;
+    // Audio thread diagnostics (speed phase 5d) as JSON, for caw_audio_threads; reads the callback core's clock
+    // from sysfs or the power API, so never on the audio thread.
+    std::string audioThreadsJson() const;
+    // The platform layer, once its device runs: whether the callback thread joined MMCSS "Pro Audio" (Windows).
+    void setCallbackMmcss(bool mmcss) noexcept;
+    // The platform, around a live device (before it starts, after it stops): the pool with
+    // MixPool::defaultWorkers(), Auto, and the count of live devices offline renders check.
+    void startLiveMixPool();
+    void stopLiveMixPool() noexcept;
+    static int liveDevices() noexcept;
+    // An offline render's Engine, before it renders: the pool with MixPool::defaultWorkers(), Always, unless a live
+    // device runs (then it stays on one thread, leaving the cores to the live audio).
+    void useOfflineMixPool();
+    // Tests only, before Engines are made: every Engine made from now on starts a pool of `workers` and uses it
+    // Always (0: Never; -1, the default: no override). Offline renders then keep that.
+    static void setMixThreadsForTest(int workers) noexcept;
+    // Tests only, between process() calls: whether the last callback ran the graph with the pool.
+    bool mixParallelForTest() const noexcept { return mixParallel_; }
+    MixPool* mixPoolForTest() noexcept { return pool_.get(); }
+    // Tests only, between process() calls: whether the layer's node ran in the serial lane at the last parallel
+    // callback, and the levels the last chunk handed to the pool.
+    bool mixLayerSerialForTest(const std::string& layerId) const;
+    uint32_t mixParallelLevelsForTest() const noexcept;
 
     // Audio thread: no allocation, locks or I/O.
     void process(float* left, float* right, int frames) noexcept;
@@ -242,6 +300,7 @@ private:
     struct Slot;
     struct Cmd;
     struct Retired;
+    struct RetireList;  // what one graph node hands back in a chunk (engine.cpp)
     struct AutomationData;
     struct MixGraph;  // the graph that routes slots, folder buses and master (engine.cpp)
     struct SlotTable;  // the slots, their mix graph and order list at one capacity (engine.cpp)
@@ -249,7 +308,11 @@ private:
     struct SendTable;  // where a slot's sends and keys go, with their delays (engine.cpp)
 
     void drainRetired();
-    bool canRetire(size_t count) const noexcept;
+    size_t retireRoom() const noexcept;  // audio thread: entries the retired queue and its overflow can still take
+    bool canRetire(size_t count) const noexcept;  // outside the graph
+    // Inside the graph (speed phase 5c): whether `count` more fit in the node's own list and its share of the room.
+    static bool canRetireNode(const RetireList& list, int count) noexcept;
+    void assignRetireBudgets() noexcept;  // audio thread, before the graph: each node list's share of the room
     bool send(const Cmd& c);
     std::string setProjectImpl(const ProjectSpec& p, bool offline);
     void applyCommands() noexcept;
@@ -257,6 +320,11 @@ private:
                 std::vector<int>* order = nullptr, SlotTable* table = nullptr,
                 ComponentChain* components = nullptr) noexcept;
     void retireEntry(const Retired& r) noexcept;  // audio thread: to the control thread, to be freed
+    // Inside the graph (speed phase 5a): a node's retirements go to its own list, pushed after the graph has run.
+    // False (and an assert) only if it doesn't fit, which canRetireNode rules out: then nothing is retired.
+    bool nodeRetire(RetireList& list, const Retired& r) noexcept;
+    bool nodeRetireChain(RetireList& list, ComponentChain* chain) noexcept;  // null: nothing (true)
+    void flushRetires() noexcept;
     void bindTable() noexcept;  // audio thread: cache the current table's slots, graph and sizes
     void markLive(int slot) noexcept;  // audio thread: the slot joins the in-use list the per-chunk loops visit
     int processChunk(float* l, float* r, int maxFrames) noexcept;  // returns the frames it ran
@@ -272,6 +340,8 @@ private:
     uint32_t keyNotes(const Slot& s, int m, Event* out, uint32_t max) const noexcept;
     void runRoutes(Slot& s, const float* preL, const float* preR, const float* postL, const float* postR, int m,
                    bool silenced, bool bus) noexcept;
+    // A destination's sends and keys when it runs, summed from its sources' route outputs; true if a send arrived.
+    bool pullRoutes(Slot& d, int m) noexcept;
     void runMasterNode(const float* inL, const float* inR, float* outL, float* outR, int m) noexcept;
     void updateRouting() noexcept;
     double slotTarget(const Slot& s) const noexcept;
@@ -305,7 +375,7 @@ private:
     void setShed(Slot& s, bool shed) noexcept;
 
     const double sr_;
-    double trackGainCoef_ = -1.0;  // audio thread: the track gain glide's per-sample factor, worked out on first use
+    const double trackGainCoef_;  // the track and bus gain glide's per-sample factor (set with the Engine)
     const EngineResourceBudget resourceBudget_;
     int maxLayers_ = kInitialLayerCapacity;  // set once in the constructor
     int pendingMax_ = 0;                     // pending_ entries; set once in the constructor
@@ -391,6 +461,19 @@ private:
     int processCount_ = 0;
     int64_t chunkId_ = 0;
     bool routingDirty_ = true;  // re-derive graph routing before the next chunk
+    // Speed phase 5c (audio thread): this callback runs the graph with the pool; Auto's choice and its timers.
+    bool mixParallel_ = false;
+    bool mixAuto_ = false;
+    double mixOverSeconds_ = 0, mixUnderSeconds_ = 0, mixSettleSeconds_ = 0;
+    // Speed phase 5d (audio thread): Auto's workers and the wait it weighs (shares of the budget, averaged).
+    uint32_t mixActive_ = 0;
+    double waitAvg_ = 0, workAvg_ = 0, mixLosingSeconds_ = 0, mixGrowSeconds_ = 0, mixRetrySeconds_ = 0;
+    std::atomic<float> waitShare_{0};
+    int retireStart_ = 0;  // where assignRetireBudgets hands out what is left after the even shares
+    bool poolUsed_ = false, poolUsedLast_ = false;  // this callback, the last one handed the pool a level
+    int64_t processNs_ = 0;  // process() time since the last reportLoad (with a pool), for Auto's shares
+    bool wantsMixPool() const noexcept;
+    bool slotForeign(const Slot& s) noexcept;  // a node in the serial lane: it holds third-party native code
     // Retirements waiting for room in the queue (pendingMax_ entries: two per slot at maxLayers() and
     // some slack; owned, so a throwing constructor cannot leak it).
     std::unique_ptr<Retired[]> pending_;
@@ -400,10 +483,11 @@ private:
     int masterTailFade_ = 0;      // > 0: at its cap and still audible, fading out (frames left); -1: faded
     ComponentChain* masterFading_ = nullptr;  // audio thread: the master chain a newer one replaced, crossfading out
     int masterFadeLeft_ = 0;
-    float insertL_[kBlock], insertR_[kBlock];
-    float fadeL_[kBlock], fadeR_[kBlock];  // audio thread: a replaced chain's output during its crossfade
+    float masterFadeL_[kBlock], masterFadeR_[kBlock];  // audio thread: a replaced master chain's output while it fades
     float masterStageL_[kBlock], masterStageR_[kBlock];  // audio thread: the master chain runs here
-    float routeL_[kBlock], routeR_[kBlock];  // audio thread: a route's signal
+    // Audio thread: what the master node hands back in a chunk (flushRetires pushes it after the graph, with each
+    // slot's list, which is in Slot; assignRetireBudgets shares the room out before the graph).
+    std::unique_ptr<RetireList> masterRetires_;
 
     // ---- shared ----
     std::unique_ptr<Spsc<Cmd, 1024>> cmds_;
@@ -511,6 +595,12 @@ private:
     // Latency compensation for every route (each track's and bus's main output and each send, so all arrive in
     // time where they meet), sending changed delays and route tables.
     bool updateCompensation(std::map<std::string, std::vector<std::string>>& warnings);
+
+    // The mix pool (speed phase 5c). Last, so its threads are joined before anything they could touch goes.
+    std::atomic<int> mixMode_{0};
+    bool liveDevice_ = false;  // control thread: startLiveMixPool counted this Engine in liveDevices()
+    bool offlinePool_ = false; // useOfflineMixPool's: serial while any live device runs (checked each callback)
+    std::unique_ptr<MixPool> pool_;
 };
 
 }  // namespace caw

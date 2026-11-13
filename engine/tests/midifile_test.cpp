@@ -1,4 +1,5 @@
 // MIDI file tests: pattern round trips through .mid and MIDI 2.0 clips, hand-built files, and malformed input.
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
