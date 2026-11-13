@@ -1,7 +1,7 @@
 ---
 title: Performance
 summary: How C.A.W is measured for low-end devices, the audit's ranked bottlenecks with evidence, fixes with before/after numbers, and what remains.
-covers: [engine/bench/, engine/src/meters.cpp, app/lib/model/poller.dart, app/lib/model/settings.dart, app/lib/ui/motion.dart, app/lib/ui/devices/kit/param_watch.dart, app/lib/ui/devices/kit/repaint.dart, app/test/poller_test.dart, app/test/rebuild_test.dart, app/test/perf_*]
+covers: [engine/bench/, engine/src/meters.cpp, app/lib/model/poller.dart, app/lib/model/settings.dart, app/lib/ui/motion.dart, app/lib/ui/devices/kit/param_watch.dart, app/lib/ui/devices/kit/repaint.dart, app/test/poller_test.dart, app/test/rebuild_test.dart, app/test/perf_*, app/test/music_video_profile_test.dart]
 updated: 2026-11-12
 ---
 
@@ -373,6 +373,25 @@ Beta readiness plan B3–B5 (owner, 2026-11-12, [beta readiness plan](beta-readi
   - The meter poll reads all tracks in one C API call (API 25) into a kept native buffer.
   - The pinch transforms the laid-out lanes and lays out at its end (or past 0.6×/1.6×), landing exactly where a layout per move would (`arrange_test`, "a pinch scales the lanes").
 - **Not measured here:** frame times on the S22+ and Windows in a release build (the plan's B5 asks the owner to check them and record them here).
+
+## Music video render (2026-11-12)
+
+The owner (2026-11-12): "really slow to build the video". Profiled first: every render now keeps a profile (`VideoRenderProfile` in `video_render.dart`: the audio render, the meters, and per frame the picture's recording, the raster thread's `toImage`, the read-back `toByteData` and the encoder's `addFrame`), shown when it ends and logged. `app/test/music_video_profile_test.dart` (opt-in: `CAW_VIDEO_PROFILE=1`, with `CAW_LIB` for the engine's real audio) renders two bars (4 s, 120 frames) of the test song at 1080 × 1920 and 30 fps, edited with three shots, a split layout and a beat glow, twice: **before** draws, rasterises and sends each frame one at a time with the StandardMessageCodec copy the method channel made (as the render did until now), **after** is this branch (three frames rasterising ahead, frames sent as raw bytes). Three runs on the 4-core Linux x86-64 cloud container, `flutter_tester` (Skia on the CPU, so rasterising is far slower than a phone's GPU); medians, other jobs share the machine:
+
+| | Before | After |
+| --- | --- | --- |
+| **Seconds per second of video** | **2.84** (2.54–2.86) | **1.86** (1.50–2.13), −35 % |
+| Wall time for 4 s | 11.3 s | 7.4 s |
+| Audio render (engine worker pool) + meters | 0.2–0.5 s + 0.06 s | the same |
+| A frame: recording (UI isolate) | 4.1 ms | 1.8 ms (laid-out text kept) |
+| A frame: rasterising / reading back | 51 ms / 12 ms | overlapped (each stage's time includes waiting its turn: 51 / 125 ms) |
+| A frame: the codec's copy of 8.3 MB | 10–20 ms | none (a binary message) |
+
+- **What the profile shows:** rasterising on the single raster thread is the biggest share here; recording the picture is small; the method channel's codec copy was 10–20 ms a frame on the Dart side alone. The audio render is a fraction of a second for 4 s.
+- **Android's encoder (not measured on a device; Kotlin isn't built here):** reading `VideoEncoder.kt`, every frame (1) arrived as a new 8.3 MB `ByteArray` from the codec, (2) was converted to YUV on the CPU a pixel at a time with an indexed `ByteBuffer.put` for every byte, and (3) waited up to 10 ms in `dequeueOutputBuffer` mid-stream (the H.264 output usually lags a frame or two, so it waited most frames: about 0.3 s of every second of 30 fps video). The same conversion loops on the JVM (HotSpot, this container; ART will differ) take 25 ms a frame with packed chroma and 32 ms with interleaved chroma, plus 4–23 ms for the new array; the row-at-a-time fallback 23–26 ms, so the fallback alone gains little. **Fixed:** frames go through the codec's input Surface (the GPU converts RGBA to YUV: one texture upload and draw through EGL, each frame stamped at its exact time with `eglPresentationTimeANDROID`; the first version drew a Bitmap on the hardware canvas, whose frame times came from when frames were posted), arrive on the `caw/video_frame` binary channel into two reused buffers (no codec copy, no 8.3 MB allocation a frame), and the encoder no longer waits mid-stream. [Assumption] On the S22+ this removes roughly 35–65 ms of CPU a frame at 1080p; the seconds per second there are for the owner's first render to record here.
+- **Also done:** a draft (360 on the short side, 15 fps: about a fifteenth of the pixels of a 1080p 30 fps render) and the render in the background while the user works.
+- **Not done:** more than one raster thread (Flutter rasterises on one, so rendering frames in parallel is bounded by it; the pipeline keeps it busy instead) and caching each shot's still layers as pictures (the views move every frame; recording is 2 ms of a frame).
+- **To record on the phone:** the done notice and the log line (`Music video render: … s per second of video …`) give the device's own numbers; a 1080p 30 fps render of the starter song before and after this branch.
 
 ## Remaining bottlenecks and next steps
 

@@ -1,6 +1,7 @@
 // Draws one music-video frame at any size from the scene, the plan, the song step and the meters: the arrangement
 // flythrough, mixer, piano-roll, device and falling-notes views, split layouts, looks, effects, transitions and the
-// title card, in the theme. The preview and the render both draw through [paintVideoFrame].
+// title card, text overlays, images and keyframed camera moves, in the theme. The preview and the render both draw
+// through [paintVideoFrame].
 import 'dart:math' as math;
 import 'dart:typed_data';
 import 'dart:ui' as ui;
@@ -11,16 +12,20 @@ import '../../model/music_video.dart';
 import '../../model/music_video_director.dart';
 import '../../model/music_video_edit.dart';
 import '../../model/music_video_meters.dart';
+import '../../model/music_video_overlay.dart';
 import '../../model/music_video_scene.dart';
 import '../theme.dart';
 
 part 'video_falling.dart';
 part 'video_effects.dart';
+part 'video_overlays.dart';
 
 /// Everything one frame depends on (no wall clock: the same input draws the same frame).
 class VideoFrameInput {
   const VideoFrameInput({required this.scene, required this.plan, required this.step, required this.seconds,
-      this.levels = VideoLevels.silent, this.titleCard = false, this.title = '', this.artist = ''});
+      this.levels = VideoLevels.silent, this.titleCard = false, this.title = '', this.artist = '',
+      this.texts = const [], this.images = const [], this.bitmaps = const {}, this.rangeStart = 0,
+      this.rangeEnd = double.infinity});
   final VideoScene scene;
   final ShotPlan plan;
 
@@ -30,11 +35,24 @@ class VideoFrameInput {
   final bool titleCard;
   final String title, artist;
 
+  /// The whole video's text overlays and image layers (each shot's own are on its [DirectedShot]).
+  final List<VideoText> texts;
+  final List<VideoImageLayer> images;
+
+  /// The decoded images by asset id (an image not here yet draws nothing).
+  final Map<String, ui.Image> bitmaps;
+
+  /// The video's range (song steps): a whole-video overlay without a span shows over all of it.
+  final double rangeStart, rangeEnd;
+
   static VideoFrameInput forOptions({required VideoScene scene, required ShotPlan plan, required double step,
-          required double seconds, required MusicVideoOptions options, VideoLevels levels = VideoLevels.silent}) =>
+          required double seconds, required MusicVideoOptions options, VideoLevels levels = VideoLevels.silent,
+          MusicVideoDoc? doc, Map<String, ui.Image> bitmaps = const {}, double rangeStart = 0,
+          double rangeEnd = double.infinity}) =>
       VideoFrameInput(scene: scene, plan: plan, step: step, seconds: seconds, levels: levels,
           titleCard: options.titleCard, title: options.title.trim().isEmpty ? scene.name : options.title.trim(),
-          artist: options.artist.trim());
+          artist: options.artist.trim(), texts: doc?.texts ?? const [], images: doc?.images ?? const [],
+          bitmaps: bitmaps, rangeStart: rangeStart, rangeEnd: rangeEnd);
 }
 
 /// The frame as a widget painter (the preview), drawing exactly what [paintVideoFrame] draws for the render.
@@ -65,38 +83,34 @@ void paintVideoFrame(Canvas canvas, Size size, VideoFrameInput f) {
   final shot = plan.shots[i];
   final into = shot.transitionSteps <= 0 ? 1.0 : (f.step - shot.start) / shot.transitionSteps;
   if (i > 0 && into < 1 && shot.transition != VideoTransition.cut) {
-    final prev = plan.shots[i - 1];
-    final p = _ease(into);
-    switch (shot.transition) {
-      case VideoTransition.crossfade:
-        _paintShot(canvas, size, f, prev);
-        canvas.saveLayer(rect, Paint()..color = Color.fromRGBO(0, 0, 0, p));
-        _paintShot(canvas, size, f, shot);
-        canvas.restore();
-      case VideoTransition.push:
-        // The new shot pushes the old one out (sideways on a wide frame, upwards on a tall one).
-        final wide = size.width >= size.height;
-        final d = wide ? Offset(size.width * p, 0) : Offset(0, size.height * p);
-        canvas.save();
-        canvas.translate(-d.dx, -d.dy);
-        _paintShot(canvas, size, f, prev);
-        canvas.restore();
-        canvas.save();
-        canvas.translate(wide ? size.width - d.dx : 0, wide ? 0 : size.height - d.dy);
-        _paintShot(canvas, size, f, shot);
-        canvas.restore();
-      case VideoTransition.cut:
-        break;
-    }
+    _paintTransition(canvas, size, f, plan.shots[i - 1], shot, into);
   } else {
     _paintShot(canvas, size, f, shot);
   }
+  _paintImages(canvas, size, f, shot, VideoImagePlacement.overlay);
   _paintHud(canvas, size, f);
   if (f.titleCard) _paintTitle(canvas, size, f);
+  _paintTexts(canvas, size, f, shot);
   canvas.restore();
 }
 
 void _paintShot(Canvas canvas, Size size, VideoFrameInput f, DirectedShot shot) {
+  final bg = _backgroundImage(f, shot);
+  final camera = shot.camera;
+  if (bg != null || camera != null) {
+    final saved = _bg;
+    _bg = bg;
+    canvas.save();
+    if (camera != null) _frameCamera(canvas, size, camera, shot, f.step);
+    _paintShotBody(canvas, size, f, shot);
+    canvas.restore();
+    _bg = saved;
+    return;
+  }
+  _paintShotBody(canvas, size, f, shot);
+}
+
+void _paintShotBody(Canvas canvas, Size size, VideoFrameInput f, DirectedShot shot) {
   if (!shot.edited) {
     _paintView(canvas, size, f, shot, shot);
     return;
@@ -219,6 +233,10 @@ final VideoLook _defaultLook = VideoLook();
 
 void _paintBackground(Canvas canvas, Size size) {
   final r = Offset.zero & size;
+  if (_bg case final bg?) {
+    _drawBackgroundImage(canvas, size, bg);
+    return;
+  }
   switch (_lk.background) {
     case VideoBackground.theme:
       canvas.drawRect(r, Paint()..color = Neon.bg);
@@ -249,6 +267,29 @@ void _text(Canvas canvas, String text, Offset at, double size, Color color,
     {FontWeight weight = FontWeight.w600, double? maxWidth, TextAlign align = TextAlign.left, bool mono = false,
     double letterSpacing = 0}) {
   if (text.isEmpty || size <= 0) return;
+  final tp = _layoutText(text, size, color, weight: weight, maxWidth: maxWidth, align: align, mono: mono,
+      letterSpacing: letterSpacing);
+  final dx = switch (align) {
+    TextAlign.center => -tp.width / 2,
+    TextAlign.right => -tp.width,
+    _ => 0.0,
+  };
+  tp.paint(canvas, at + Offset(dx, 0));
+}
+
+/// Laid-out text by everything that shapes it: most labels (track names, knob names, the bar.beat) repeat frame
+/// after frame, so a render lays each out once instead of every frame. Bounded; the oldest goes first.
+final Map<(String, double, int, FontWeight, double?, TextAlign, bool, double), TextPainter> _texts = {};
+const int _maxTexts = 512;
+
+TextPainter _layoutText(String text, double size, Color color, {required FontWeight weight, required double? maxWidth,
+    required TextAlign align, required bool mono, required double letterSpacing}) {
+  final key = (text, size, color.toARGB32(), weight, maxWidth, align, mono, letterSpacing);
+  final hit = _texts.remove(key);
+  if (hit != null) {
+    _texts[key] = hit; // most recent last
+    return hit;
+  }
   final tp = TextPainter(
     text: TextSpan(text: text, style: TextStyle(fontSize: size, color: color, fontWeight: weight,
         letterSpacing: letterSpacing, fontFamily: mono ? Neon.mono : null, fontFamilyFallback: mono ? Neon.monoFallback : null)),
@@ -257,13 +298,18 @@ void _text(Canvas canvas, String text, Offset at, double size, Color color,
     maxLines: 1,
     ellipsis: '…',
   )..layout(maxWidth: maxWidth ?? double.infinity);
-  final dx = switch (align) {
-    TextAlign.center => -tp.width / 2,
-    TextAlign.right => -tp.width,
-    _ => 0.0,
-  };
-  tp.paint(canvas, at + Offset(dx, 0));
-  tp.dispose();
+  _texts[key] = tp;
+  if (_texts.length > _maxTexts) _texts.remove(_texts.keys.first)?.dispose();
+  return tp;
+}
+
+/// Forgets the laid-out text (a theme change, or the tests between fonts).
+void clearVideoTextCache() {
+  for (final tp in [..._texts.values, ..._overlayTexts.values]) {
+    tp.dispose();
+  }
+  _texts.clear();
+  _overlayTexts.clear();
 }
 
 Paint _glow(Color c, double sigma, {double alpha = 0.8}) => Paint()
@@ -796,19 +842,31 @@ void _paintTitle(Canvas canvas, Size size, VideoFrameInput f) {
   canvas.restore();
 }
 
-/// Draws the frame at [width] × [height] pixels off screen and returns its RGBA bytes (top row first).
-Future<Uint8List> rasterizeVideoFrame(VideoFrameInput f, int width, int height) async {
+/// Records the frame at [width] × [height] (the part of a render that must run on the UI isolate).
+ui.Picture recordVideoFrame(VideoFrameInput f, int width, int height) {
   final recorder = ui.PictureRecorder();
   final canvas = Canvas(recorder, Rect.fromLTWH(0, 0, width.toDouble(), height.toDouble()));
   paintVideoFrame(canvas, Size(width.toDouble(), height.toDouble()), f);
-  final picture = recorder.endRecording();
+  return recorder.endRecording();
+}
+
+/// [picture] rasterised (on the engine's raster thread) and read back as RGBA bytes, top row first; [timing], when
+/// given, gets the microseconds spent rasterising and reading back.
+Future<Uint8List> pictureToRgba(ui.Picture picture, int width, int height, {void Function(int raster, int read)? timing}) async {
+  final sw = Stopwatch()..start();
   final image = await picture.toImage(width, height);
   picture.dispose();
+  final raster = sw.elapsedMicroseconds;
   try {
     final data = await image.toByteData(format: ui.ImageByteFormat.rawRgba);
     if (data == null) throw StateError('the frame could not be read');
+    timing?.call(raster, sw.elapsedMicroseconds - raster);
     return data.buffer.asUint8List(data.offsetInBytes, data.lengthInBytes);
   } finally {
     image.dispose();
   }
 }
+
+/// Draws the frame at [width] × [height] pixels off screen and returns its RGBA bytes (top row first).
+Future<Uint8List> rasterizeVideoFrame(VideoFrameInput f, int width, int height) =>
+    pictureToRgba(recordVideoFrame(f, width, height), width, height);

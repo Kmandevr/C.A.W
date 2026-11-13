@@ -69,6 +69,7 @@ Future<void> _tapKey(WidgetTester tester, String k) async {
 }
 
 void main() {
+  setUp(resetMusicVideoSheet);
   testWidgets('the lane: tap selects, a drag moves by whole bars, a trim and a cut marker resize, undo and redo',
       (tester) async {
     final (doc, host) = await _pump(tester, cuts: [
@@ -271,7 +272,7 @@ void main() {
           layout: VideoLayout.single(VideoShot.falling))])).toJson();
     await tester.pumpWidget(MaterialApp(home: Scaffold(body: MusicVideoPanel(state: s))));
     await tester.pump();
-    expect(find.text('SHOT LANE'), findsOneWidget);
+    expect(find.byType(ShotLane), findsOneWidget);
     expect(find.textContaining('from the lane'), findsOneWidget);
     final editor = tester.state<MusicVideoEditorState>(find.byType(MusicVideoEditor));
     editor.select('s1');
@@ -487,8 +488,7 @@ void main() {
       addTearDown(s.dispose);
       s.project = _song();
       final doc = MusicVideoDoc(timeline: VideoTimeline([VideoCut(id: 's1', start: 0, length: 64)]));
-      await tester.pumpWidget(MaterialApp(home: Scaffold(body: MusicVideoEditorPage(state: s, doc: doc, scene: _scene(),
-          start: 0, end: 256, onSave: () {}, runner: _here))));
+      await tester.pumpWidget(MaterialApp(home: Scaffold(body: MusicVideoEditorPage(state: s, doc: doc, runner: _here))));
       await tester.pump();
       final lane = tester.getRect(find.byType(ShotLane));
       final row = tester.getRect(_key('video-shot-s1'));

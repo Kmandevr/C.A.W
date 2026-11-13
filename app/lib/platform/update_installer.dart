@@ -1,11 +1,13 @@
 // Installing a downloaded update, one implementation per platform: Android hands the APK to the system installer
-// (caw/updates, UpdateInstaller.kt), Windows opens the installer or shows the downloaded zip, others offer the link.
+// (caw/updates, UpdateInstaller.kt), Windows swaps in staged files at the start or shows the downloaded zip, others
+// offer the link.
 import 'dart:io';
 
 import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 
 import '../model/updates/releases.dart';
+import '../model/updates/windows_stage.dart';
 
 /// What a finished download led to, said in one line.
 class UpdateOutcome {
@@ -41,6 +43,17 @@ abstract class UpdateInstaller {
 
   /// Installs [file]; [silent] asks for no prompt where [silentPossible] (automatic updates only).
   Future<UpdateOutcome> install(File file, AssetKind kind, {bool silent = false});
+
+  /// Android: the installed APK (`ApplicationInfo.sourceDir`), which a small update is rebuilt from; null where
+  /// there is none or it is split into several APKs.
+  Future<String?> installedPackage() async => null;
+
+  /// Windows: the folder caw.exe runs from, where a small update stages and swaps its files; null elsewhere.
+  Future<Directory?> installDir() async => null;
+
+  /// At the start, before the app is shown: finishes a small update staged by the last run (Windows). [relaunch]
+  /// true means the new build was started and this process should exit; [note] is said once.
+  Future<({bool relaunch, String? note})> finishStaged() async => (relaunch: false, note: null);
 }
 
 /// The platform's installer: Android's channel, Windows' shell, or none.
@@ -108,6 +121,17 @@ class AndroidUpdateInstaller extends UpdateInstaller {
   }
 
   @override
+  Future<String?> installedPackage() async {
+    try {
+      return await _channel.invokeMethod<String>('installedApk');
+    } on PlatformException {
+      return null;
+    } on MissingPluginException {
+      return null;
+    }
+  }
+
+  @override
   Future<UpdateOutcome> install(File file, AssetKind kind, {bool silent = false}) async {
     try {
       await _channel.invokeMethod<void>('install', {'path': file.path, 'silent': silent});
@@ -129,14 +153,39 @@ class AndroidUpdateInstaller extends UpdateInstaller {
   }
 }
 
-/// Windows: the downloaded zip of the app's files is shown in Explorer to unzip by hand; nothing is run or
-/// installed for the user.
+/// Windows: a small update stages the changed files beside the app and swaps them in at the next start
+/// (`WindowsStage`), then starts the new build once; a full update's zip is shown in Explorer to unzip by hand.
 class WindowsUpdateInstaller extends UpdateInstaller {
-  WindowsUpdateInstaller({Future<ProcessResult> Function(String, List<String>)? run}) : _run = run ?? Process.run;
+  WindowsUpdateInstaller({Future<ProcessResult> Function(String, List<String>)? run, this.appDir})
+      : _run = run ?? Process.run;
   final Future<ProcessResult> Function(String, List<String>) _run;
+
+  /// The app's folder (tests); the running caw.exe's folder otherwise.
+  final Directory? appDir;
 
   @override
   UpdatePlatform get platform => UpdatePlatform.windows;
+
+  @override
+  Future<Directory?> installDir() async => appDir ?? File(Platform.resolvedExecutable).parent;
+
+  @override
+  Future<({bool relaunch, String? note})> finishStaged() async {
+    final dir = await installDir();
+    if (dir == null) return (relaunch: false, note: null);
+    final stage = WindowsStage(dir);
+    try {
+      final result = await stage.swapIn();
+      if (result == SwapResult.swapped) {
+        // This process still runs the old files (renamed aside); the new build starts in a fresh one.
+        await Process.start(Platform.resolvedExecutable, const [], mode: ProcessStartMode.detached);
+        return (relaunch: true, note: null);
+      }
+    } catch (_) {
+      // Left as it was: the note (if any) says so.
+    }
+    return (relaunch: false, note: await stage.takeNote());
+  }
 
   @override
   Future<UpdateOutcome> install(File file, AssetKind kind, {bool silent = false}) async {
