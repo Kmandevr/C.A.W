@@ -146,8 +146,10 @@ class LabeledRow extends StatelessWidget {
   Widget build(BuildContext context) => Padding(
     padding: const EdgeInsets.only(top: 6, bottom: 2),
     child: Row(children: [
-      SizedBox(width: 78, child: Text(label, style: const TextStyle(fontSize: 10, letterSpacing: 0.6,
-        fontWeight: FontWeight.w700, color: Neon.dim))),
+      // One line: a long label under a large text size shrinks to fit instead of breaking mid-word.
+      SizedBox(width: 78, child: Align(alignment: Alignment.centerLeft, child: FittedBox(fit: BoxFit.scaleDown,
+        child: Text(label, maxLines: 1, style: const TextStyle(fontSize: 10, letterSpacing: 0.6,
+          fontWeight: FontWeight.w700, color: Neon.dim))))),
       Flexible(child: Align(alignment: Alignment.centerLeft, child: child)),
     ]),
   );

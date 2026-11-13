@@ -118,7 +118,7 @@ class _BenchmarkScreenState extends State<BenchmarkScreen> {
         },
         child: Scaffold(
           appBar: AppBar(title: const Text('Benchmark'), backgroundColor: Neon.panel),
-          body: ListenableBuilder(
+          body: SafeArea(top: false, child: ListenableBuilder(
             listenable: r,
             builder: (context, _) {
               final level = Motion.of(context);
@@ -141,7 +141,7 @@ class _BenchmarkScreenState extends State<BenchmarkScreen> {
                 ),
               ]);
             },
-          ),
+          )),
         ),
       );
 

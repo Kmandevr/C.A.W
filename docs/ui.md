@@ -115,7 +115,7 @@ The app has three sections, Build, Files and Arrange, and nothing else (#139 ste
 
 **Select mode (owner, 2026-11-12, "Select mode + folders"):** in Files › Projects a Select button or a long press on a card, and elsewhere in Files the toolbar's ☑ or an item menu's Select, turns on checkboxes that grow in beside each item and a bottom bar that slides up ("N selected", select all / none, the actions); Delete asks once and the message after it offers Undo. Project folders take a held card dragged onto them ([App](app.md), Files).
 
-**Glass (on by default):** a soft ambient background behind see-through panels, cards, track headers and the transport; bottom sheets slide up as frosted glass; sliders, level bars, switches, buttons, M/S toggles and clips have a light fill and a solid outline ([App](app.md), Look).
+**Glass (on by default):** a soft ambient background behind see-through panels, cards, track headers and the transport; bottom sheets slide up as frosted glass, their surface to the screen's edge and their content above the navigation bar; sliders, level bars, switches, buttons, M/S toggles and clips have a light fill and a solid outline ([App](app.md), Look).
 
 **The frame (owner, 2026-11-09):** three sections, Build, Files and Arrange; the other workspaces folded into them (#139 step 4, 2026-11-11), so there is no ⋮ More ([app](app.md), Frame).
 

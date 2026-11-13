@@ -14,3 +14,7 @@ v1.0.0-alpha.1 is in Main (PRs #194, #195 and #196, all CI green). The APK came 
 - Auto's tail guard: unfinished in .claude/worktrees/audio-integration (local commit 1967852 plus uncommitted test changes). Run the full ASan and TSan suites, then PR.
 - Owner questions: governing law for TERMS.md; the Windows engine with clang-cl/x86-64-v3; music video packages carrying images; Benchmark tuning on the S22+.
 - The owner plans changes after testing the alpha.
+
+## Next
+1. Finish 1.0.1-alpha.1: merge the tail guard, bump the version, PR, then the APK.
+2. Then #197 (plug-in benchmark, Flagship speed-up).
