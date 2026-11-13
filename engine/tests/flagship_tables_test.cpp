@@ -1,5 +1,6 @@
 // The flagship synth's warps against aliasing (FM, fold, Osc FM) and its user wavetable, taken in as its component state.
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <complex>
 #include <cstdint>
@@ -13,6 +14,7 @@
 #include "analysis.h"
 #include "engine.h"
 #include "project.h"
+#include "quality.h"
 #include "test.h"
 
 using namespace caw;
@@ -39,8 +41,10 @@ Values plain(Values extra = {}) {
     return v;
 }
 
-// Plays a note on through an activated flagship in 64-frame blocks: the left side.
-std::vector<float> play(ModuleProcessor& p, int note, uint32_t frames, const Values& values, uint32_t block = 64) {
+// Plays a note on through an activated flagship in 64-frame blocks, with `extra` events (at their frames from the
+// start, in order) for it: the left side.
+std::vector<float> play(ModuleProcessor& p, int note, uint32_t frames, const Values& values, uint32_t block = 64,
+                        const std::vector<Event>& extra = {}) {
     const ModuleDescriptor& d = p.descriptor();
     std::vector<ParameterValue> params(d.parameterCount);
     for (uint32_t k = 0; k < d.parameterCount; ++k) params[k].value = d.parameters[k].defaultValue;
@@ -56,6 +60,8 @@ std::vector<float> play(ModuleProcessor& p, int note, uint32_t frames, const Val
         const uint32_t n = std::min(block, frames - start);
         std::vector<Event> in;
         if (start == 0) in.push_back(notes::noteOn(0, 1, static_cast<uint8_t>(note), 1));
+        for (Event x : extra)
+            if (x.frame >= start && x.frame < start + n) x.frame -= start, in.push_back(x);
         const EventInput ev{in.data(), static_cast<uint32_t>(in.size())};
         ProcessBlock b;
         b.frames = n;
@@ -215,10 +221,12 @@ TEST(the_flagship_fm_fold_and_osc_fm_warps_keep_their_aliases_down) {
     CHECK(clean < 1e-6);
     const double fm = measure({{"osc1_table", 4}, {"osc1_warp", 5}, {"osc1_warp_amt", 1.0}, {"osc1_fm_ratio", 2}});
     // The fold at full drive (a sine folded about 8 times reaches far past Nyquist: drawn naively at the base
-    // rate, its aliases come within about 33 dB of the harmonics: the reference below). Since #197 (owner,
-    // 2026-11-13) the fold runs at the base rate with first-order ADAA instead of 2x oversampling: in this, the
-    // worst case, ADAA takes about 6 dB off the naive fold's aliases (2x took 30); an octave lower, or at 0.6 of
-    // the drive, it keeps them below -70 dB (2x: -62 and -73; measured 2026-11-13).
+    // rate, its aliases come within about 33 dB of the harmonics: the reference below). The fold is a hybrid
+    // (#197, owner 2026-11-13): ADAA at the sample rate for most notes, 2x oversampled above a crossover that
+    // falls with the drive. A6 at full drive is above it, and must be at least as clean as the 2x design before
+    // #197 (about -63 dB; ADAA alone gave -39). An octave lower it is below (ADAA, about -67 dB; the old 2x -62).
+    // At 0.6 of the drive the crossover is near D6 (with the bend range), so A6 is 2x there too (about -80 dB;
+    // the old 2x -73, ADAA alone -74). Measured 2026-11-13, docs/engine-performance.md.
     const double fold = measure({{"osc1_table", 4}, {"osc1_warp", 6}, {"osc1_warp_amt", 1.0}});
     const double foldOctaveDown = [&] {
         p->reset();
@@ -226,13 +234,20 @@ TEST(the_flagship_fm_fold_and_osc_fm_warps_keep_their_aliases_down) {
         return inharmonic(spectrum(x, 8000, 16384), 880.0, 16384);
     }();
     const double foldLighter = measure({{"osc1_table", 4}, {"osc1_warp", 6}, {"osc1_warp_amt", 0.6}});
+    // A7 at full drive, the top of the measured range (2x: about -56 dB; the old 2x -55, ADAA alone -7).
+    const double foldTop = [&] {
+        p->reset();
+        const std::vector<float> x = play(*p, 105, 8000 + 16384, plain({{"osc1_table", 4}, {"osc1_warp", 6}, {"osc1_warp_amt", 1.0}}));
+        return inharmonic(spectrum(x, 8000, 16384), 3520.0, 16384);
+    }();
     // Osc FM from osc 3, a sine an octave up, at level 0 (heard only as the modulator).
     const double osc = measure({{"osc1_table", 4}, {"osc1_warp", 7}, {"osc1_warp_amt", 0.6}, {"osc3_on", 1}, {"osc3_table", 4},
                                 {"osc3_frame", 0}, {"osc3_unison", 1}, {"osc3_level", 0}, {"osc3_octave", 1}, {"osc3_phase_rand", 0}});
     CHECK(fm < 1e-6);    // below -60 dB (measured 2026-11-11: about -80 dB)
-    CHECK(fold < 3e-4);            // below -35 dB (about -39 dB)
+    CHECK(fold < 1e-6);            // below -60 dB (about -69 dB)
     CHECK(foldOctaveDown < 3e-7);  // below -65 dB (about -67 dB)
-    CHECK(foldLighter < 1e-7);     // below -70 dB (about -74 dB)
+    CHECK(foldLighter < 1e-7);     // below -70 dB (about -80 dB)
+    CHECK(foldTop < 1e-5);         // below -50 dB (about -56 dB)
     CHECK(osc < 1e-4);   // below -40 dB (about -51 dB)
     // The same fold drawn naively (each sample folded once, no anti-aliasing, the full table), measured here as
     // the reference the anti-aliased warp must beat.
@@ -246,7 +261,7 @@ TEST(the_flagship_fm_fold_and_osc_fm_warps_keep_their_aliases_down) {
         }
         const double reference = inharmonic(spectrum(naive, 8000, 16384), f0, 16384);
         CHECK(reference > 1e-4);
-        CHECK(fold < 0.4 * reference);  // 4 dB better at least (about 6 dB)
+        CHECK(fold < 1e-3 * reference);  // 30 dB better at least (about 36 dB)
     }
     // Osc FM puts sidebands on the harmonics: with the modulator an octave up, the third harmonic (1 +- 2) is there.
     {
@@ -266,6 +281,80 @@ TEST(the_flagship_fm_fold_and_osc_fm_warps_keep_their_aliases_down) {
         const std::vector<float> y = play(*p, 57, 24000, plain({{"osc1_table", 4}, {"osc1_warp", 7}, {"osc1_warp_amt", 0.6}}));
         const std::vector<double> sq = spectrum(y, 8000, 8192);
         CHECK(sq[static_cast<size_t>(660 / (48000.0 / 8192))] < 1e-6 * sq[static_cast<size_t>(220 / (48000.0 / 8192))]);
+    }
+}
+
+TEST(the_flagship_fold_keeps_its_path_through_a_bend_across_the_crossover_without_a_click) {
+    Engine e(48000);
+    std::atomic<int> quality{kQualityNormal};  // read by the flagship while it plays (as an Engine's)
+    std::unique_ptr<ModuleProcessor> p;
+    {
+        const BuildingQuality building(&quality);
+        p = make(e);
+    }
+    if (!p) return;
+    // The hybrid fold (#197) chooses ADAA or 2x for a note when it starts; a bend across the crossover (about A#5 at
+    // full drive with the default bend range) never switches it. F#5 (ADAA) bent up an octave, and F#6 (2x) bent down one, over a quarter of a
+    // second (a pitch every 64 frames), in both fold modes.
+    auto bend = [](double from, double to) {
+        std::vector<Event> pitch;
+        for (uint32_t k = 0; k <= 192; ++k)
+            pitch.push_back(notes::notePitch(4800 + 64 * k, 1, static_cast<uint8_t>(from), from + (to - from) * k / 192.0));
+        return pitch;
+    };
+    for (const double mode : {0.0, 1.0}) {
+        const Values v = plain({{"osc1_table", 4}, {"osc1_warp", 6}, {"osc1_warp_amt", 1.0}, {"osc1_fold_mode", mode}});
+        auto run = [&](int q, int note, const std::vector<Event>& events, double bendRange = 2) {
+            quality.store(q);
+            p->reset();
+            Values w = v;
+            w.push_back({"bend_range", bendRange});
+            return play(*p, note, 24000, w, 64, events);
+        };
+        // Up: the note stays on ADAA, which Eco plays at every pitch: the same bits as Eco's.
+        const std::vector<float> up = run(kQualityNormal, 78, bend(78, 90));
+        CHECK(up == run(kQualityEco, 78, bend(78, 90)));
+        // Down: the note stays on 2x (not Eco's ADAA), as a note does that a 4-octave bend range puts on 2x from
+        // its start (the range moves nothing else here): the same bits.
+        const std::vector<float> down = run(kQualityNormal, 90, bend(90, 78));
+        CHECK(down != run(kQualityEco, 90, bend(90, 78)));
+        CHECK(down == run(kQualityNormal, 90, bend(90, 78), 48));
+        // The bits above are the proof that nothing switches. And no click: no step past the largest of the
+        // steady note at the bend's top (going up the steps grow with the pitch: held after it; going down, held
+        // before it). (A switch mid-note would be a timbre change more than a step: the 2x path keeps more of the
+        // highest partials than ADAA, whose mean over a sample is a gentle low-pass.)
+        auto largestStep = [](const std::vector<float>& x, size_t from, size_t to) {
+            double most = 0;
+            for (size_t i = from; i < to; ++i) most = std::max(most, static_cast<double>(std::fabs(x[i] - x[i - 1])));
+            return most;
+        };
+        CHECK(largestStep(up, 4800, 17200) <= 1.05 * largestStep(up, 17200, 24000));
+        CHECK(largestStep(down, 4800, 24000) <= 1.05 * largestStep(down, 2400, 4800));
+        checkSane(up, 4.0f, "the bend up");
+        checkSane(down, 4.0f, "the bend down");
+    }
+}
+
+TEST(the_flagship_2x_fold_renders_the_same_bits_at_any_block_size_in_both_modes) {
+    Engine e(48000);
+    std::unique_ptr<ModuleProcessor> p = make(e);
+    if (!p) return;
+    // A6 at 0.9 drive (the 2x path): osc 1 a spread 5-copy stack, per copy and whole, played and heard by osc 2's
+    // Osc FM (the mono path); osc 3 a centred whole stack (one decimator for both sides).
+    for (const double mode : {0.0, 1.0}) {
+        const Values v = {{"osc1_warp", 6}, {"osc1_warp_amt", 0.9}, {"osc1_unison", 5}, {"osc1_spread", 1}, {"osc1_fold_mode", mode},
+                          {"osc2_on", 1}, {"osc2_warp", 7}, {"osc2_warp_amt", 0.5}, {"osc2_level", 0.5},
+                          {"osc3_on", 1}, {"osc3_warp", 6}, {"osc3_warp_amt", 0.9}, {"osc3_unison", 3}, {"osc3_spread", 0},
+                          {"osc3_fold_mode", 1}, {"osc3_level", 0.3}, {"osc3_frame", 0.6}};
+        std::vector<float> runs[3];
+        const uint32_t blocks[3] = {64, 37, 1};
+        for (int k = 0; k < 3; ++k) {
+            p->reset();
+            runs[k] = play(*p, 93, 9600, v, blocks[k]);
+        }
+        CHECK(runs[0] == runs[1]);
+        CHECK(runs[0] == runs[2]);
+        checkSane(runs[0], 4.0f, "the 2x fold");
     }
 }
 
