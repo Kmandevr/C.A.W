@@ -44,6 +44,12 @@ TEST(component_bench_counts_allocations_in_the_audio_path) {
     bad.library = CAW_TEST_BENCH_COMPONENT_PATH;
     bad.trust = NativeModuleTrust::Trusted;
     bad.seconds = 0.1;
+#if defined(_WIN32) || defined(__APPLE__)
+    // A loaded library's allocations can't be seen by the host's operator new here (see component_bench.cpp): the
+    // check must say it didn't count them, never pass a library that allocates.
+    CHECK(allocationStatus(bad, measured, value) != std::string("pass"));
+    CHECK(!measured);
+#else
     CHECK_EQ(allocationStatus(bad, measured, value), std::string("fail"));
     CHECK(measured && value >= 2);  // a new and a delete every block
 
@@ -52,6 +58,7 @@ TEST(component_bench_counts_allocations_in_the_audio_path) {
     good.library = caw::test::nativeComponentPath();
     CHECK_EQ(allocationStatus(good, measured, value), std::string("pass"));
     CHECK(measured && value == 0);
+#endif
 
     bench::Request builtin;
     builtin.id = "org.caw.reverb.pro";

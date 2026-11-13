@@ -485,7 +485,14 @@ std::string runLocked(const Request& r, int32_t* progress, const int32_t* cancel
     const double budget = budgetUs(kBlock, kRate);
     const double floorUs = Thresholds::kFloorPct / 100.0 * budget;
     uint64_t allocations = baseRun.allocations, failed = baseRun.failed;
+    // A replaced global operator new reaches a loaded library's own allocations only where symbols interpose across
+    // libraries (ELF: Linux, Android). On Windows a DLL calls its own CRT's new and malloc, and macOS's two-level
+    // namespace binds the library's, so the count would miss them and wrongly pass: not counted there.
+#if defined(_WIN32) || defined(__APPLE__)
+    const bool counted = baseRun.counted && r.library.empty();
+#else
     const bool counted = baseRun.counted;
+#endif
     auto add = [&](const Series& s) {
         allocations += s.allocations;
         failed += s.failed;
@@ -589,7 +596,8 @@ std::string runLocked(const Request& r, int32_t* progress, const int32_t* cancel
         if (!counted) {
             c.status = "warn";
             c.value = -1;
-            c.detail = "Allocations can't be counted in this build (C.A.W's test build counts them)";
+            c.detail = r.library.empty() ? "Allocations can't be counted in this build (C.A.W's test build counts them)"
+                                       : "Allocations can't be counted for this plug-in here (C.A.W's Linux test build counts them)";
         } else if (allocations > 0) {
             c.status = "fail";
             c.detail = std::to_string(allocations) + " allocations or frees in the audio path";
