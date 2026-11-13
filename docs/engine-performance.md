@@ -35,7 +35,7 @@ Long runs (`caw_bench SECONDS 600`) and per-track callback-size checks (`caw_ben
 
 - **Linux x64:** `ubuntu-24.04`, GCC 13.3 Release.
 - **Linux arm64:** `ubuntu-24.04-arm`, GCC 13.3 Release.
-- **Windows x64 (since 2026-11-13, A5):** `windows-2025` (the runner engine.yml tests Windows on), MSVC Release with its default link-time optimisation and `/fp:precise`: the Windows app's compiler. Its CPU varies between runs (AMD EPYC 7763 and 9V74 seen), so compare its numbers within one run.
+- **Windows x64 (since 2026-11-13, A5):** `windows-2025` (the runner engine.yml tests Windows on), clang-cl Release since 2026-11-13 (Visual Studio's ClangCL toolset, Clang 22.1.3; `-O3`, the engine's fast-math subset and link-time optimisation), the Windows app's engine compiler (MSVC with `/fp:precise` before; [A5](#a5-cpu-features) has the change). Its CPU varies between runs (AMD EPYC 7763 and 9V74 seen), so compare its numbers within one run.
 - **Android arm64:** `caw_bench` cross-compiled on `ubuntu-24.04` with **NDK 28.2.13676358**, the NDK the APK's engine is built with (app.yml), for `arm64-v8a`, `android-29`, `c++_static`, linked `-static`; then run on `ubuntu-24.04-arm`. **[Fact, run 43135752152, 2026-11-12]** the static bionic executable runs on the Linux arm64 kernel (`ELF 64-bit LSB executable, ARM aarch64, statically linked`; all scenarios ran).
   - **Why not an emulator:** arm64 Android images on x86 runners are translated, so their timings say little about a phone and vary widely. This target measures the Android compiler, libc++ and bionic on real Arm64 cores.
   - **What it is not:** the runner's cores are Neoverse-N2 server cores, not the S22+'s Cortex-X2/A710/A510, and there is no Android scheduler, thermal limit or audio thread priority. **[Assumption]** relative gains carry over to the phone; absolute numbers do not.
@@ -459,7 +459,7 @@ The other scenarios have no Flagship and moved within the runners' noise. The fi
 
 ### A5. CPU features
 
-**What each build enables (checked 2026-11-13 in `engine/CMakeLists.txt`, `bench.yml`, `engine.yml` and `app/android/app/build.gradle.kts`):** no build passes `-march`, `-mcpu` or `/arch`. Linux x64 (GCC 13) and Windows x64 (MSVC) therefore target the x86-64 baseline: SSE2, no AVX and no FMA (MSVC's default `/arch:SSE2`). Linux arm64 (GCC 13) and Android (NDK 28.2 Clang, `arm64-v8a` only, the app's single ABI) target Armv8-A, where NEON (Advanced SIMD) and fused multiply-add are part of the baseline, so they already have both (phase 2's contraction uses them). The two-wide `Pair` code (`src/stereo_pair.h`) is SSE2 on x86-64 and NEON on Arm64.
+**What each build enables (checked 2026-11-13 in `engine/CMakeLists.txt`, `bench.yml`, `engine.yml` and `app/android/app/build.gradle.kts`):** no build passes `-march`, `-mcpu` or `/arch`. Linux x64 (GCC 13) and Windows x64 (MSVC then; clang-cl since 2026-11-13) therefore target the x86-64 baseline: SSE2, no AVX and no FMA (MSVC's default `/arch:SSE2`, clang-cl's `x86_64-pc-windows-msvc` default). Linux arm64 (GCC 13) and Android (NDK 28.2 Clang, `arm64-v8a` only, the app's single ABI) target Armv8-A, where NEON (Advanced SIMD) and fused multiply-add are part of the baseline, so they already have both (phase 2's contraction uses them). The two-wide `Pair` code (`src/stereo_pair.h`) is SSE2 on x86-64 and NEON on Arm64.
 
 **Measured: the whole engine built for x86-64-v3 (AVX2, FMA) against the baseline, on one runner, alternating, 3 runs each.** **[Fact, Bench run [43349254446](https://github.com/Kmandevr/C.A.W/actions/runs/43349254446), temporary jobs since removed; mean µs, the median of 3]**
 
@@ -475,7 +475,21 @@ GCC on AMD EPYC 9V45 (run 43349254446; an earlier run, [43337163191](https://git
 - **GCC gains 15–29%** from AVX2 and FMA together (with `-ffp-contract=fast`, x86-64-v3 brings phase 2's fused multiply-adds to x86-64), spread over the whole engine rather than a few kernels.
 - **MSVC gains nothing** from `/arch:AVX2` (±2%): it keeps `/fp:precise` (no contraction) and its vectoriser leaves the same loops scalar.
 - **MSVC is the slow x86-64 build:** on the same CPU model in one run (EPYC 9V74, 43349254446), Windows x64 took 797 µs for the typical song against GCC's 615, and 6,274 µs for the heavy Flagship against 2,716 (2.3×).
-- **Not built (no gain where it would ship):** runtime dispatch only pays on x86-64, whose shipped build is the Windows app's MSVC, where the wider instruction set measured no gain. GCC/Clang `target_clones` on a few kernels would not reach the engine-wide gain above (callees not inlined stay baseline) and does not exist in MSVC; a second AVX2 copy of the whole engine compiled into one binary breaks the one-definition rule (the linker may give baseline code an AVX2 copy of an inline Library function). Arm64 needs none: NEON and FMA are its baseline. **[Proposal]** for the owner: build the Windows engine DLL with clang-cl and the engine's GCC/Clang flags (contraction, the fast-math subsets), then measure x86-64-v3 for it, shipped either as a second DLL chosen at load by a CPU check or as the minimum Windows CPU (AVX2: Intel Haswell 2013, AMD Excavator 2015 and later); both change the Windows build, so neither is done here.
+**Windows engine on clang-cl (owner, 2026-11-13, #199; built on branch `b1-extras`):** the same runner, alternating, two rounds of `caw_bench 10 500 --runs 3 --threads 0` each, the means averaged. **[Fact, Bench run [43507245072](https://github.com/Kmandevr/C.A.W/actions/runs/43507245072), AMD EPYC 9V74, a temporary step since removed]** Mean callback (µs):
+
+| Scenario | MSVC 19.51 (`/fp:precise`) | clang-cl 22.1.3 (engine flags) | change |
+|---|---:|---:|---:|
+| First loop (6 tracks) | 158.9 | 132.1 | −16.9% |
+| Three tracks | 246.0 | 211.4 | −14.1% |
+| Typical song (8 tracks) | 796.4 | 663.1 | −16.7% |
+| Flagship heavy, 64 voices held | 5,583.2 | 3,097.5 | −44.5% |
+| Drums kit, 16 pads busy | 313.4 | 277.0 | −11.6% |
+| Song, 16 tracks | 1,420.2 | 1,246.4 | −12.2% |
+| Song, 32 tracks + heavy FX | 4,280.3 | 3,762.4 | −12.1% |
+
+The two rounds of each agree within 5%. Every engine test passes with it on Windows (Engine run [43505893182](https://github.com/Kmandevr/C.A.W/actions/runs/43505893182)); the x86-64 baseline is unchanged (no AVX2), so x86-64-v3 for clang-cl is still to measure. Bench runs before 43505897645 timed MSVC on Windows; compare Windows numbers across that line only with this table.
+
+- **Not built (no gain where it would ship):** runtime dispatch only pays on x86-64, whose shipped build was the Windows app's MSVC, where the wider instruction set measured no gain (clang-cl, shipped since 2026-11-13, is not yet measured at x86-64-v3). GCC/Clang `target_clones` on a few kernels would not reach the engine-wide gain above (callees not inlined stay baseline) and does not exist in MSVC; a second AVX2 copy of the whole engine compiled into one binary breaks the one-definition rule (the linker may give baseline code an AVX2 copy of an inline Library function). Arm64 needs none: NEON and FMA are its baseline. The Windows engine DLL is built with clang-cl and the engine's GCC/Clang flags since 2026-11-13 (above). **[Proposal]** for the owner: measure x86-64-v3 for it, shipped either as a second DLL chosen at load by a CPU check or as the minimum Windows CPU (AVX2: Intel Haswell 2013, AMD Excavator 2015 and later); both change the Windows build, so neither is done here.
 
 
 ### A6. Flagship fold and drive (#197)
