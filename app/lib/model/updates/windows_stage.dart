@@ -5,6 +5,8 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:isolate';
 
+import 'package:path/path.dart' as paths;
+
 import '../sha256.dart';
 import 'patch_format.dart';
 
@@ -97,9 +99,8 @@ class WindowsStage {
     String label;
     try {
       if (await _swapping.exists()) {
-        // The last start stopped mid-swap: put back what it moved.
-        final read = await _read();
-        if (read != null) await _rollBack([for (final f in read.$2) f.path]);
+        // The last start stopped mid-swap: put back only the files its progress lines say it began on.
+        await _rollBack(await _progress());
         await clear();
         await _leaveNote('An update could not be finished, so C.A.W was left as it was. Download the full update.');
         return SwapResult.failed;
@@ -124,30 +125,31 @@ class WindowsStage {
         return SwapResult.failed;
       }
     }
-    final done = <String>[], added = <String>{};
+    final done = <({String path, bool added})>[];
     try {
-      await _swapping.writeAsString(label);
+      await _swapping.writeAsString('${jsonEncode({'label': label})}\n', flush: true);
       for (final f in list) {
         final target = File(_local(f.path));
         final aside = '${target.path}.caw-old';
+        // A set-aside file from an earlier update goes before this file's progress line, so recovery never
+        // mistakes it for this swap's.
         if (await File(aside).exists()) await File(aside).delete();
         await target.parent.create(recursive: true);
-        done.add(f.path);
-        if (await target.exists()) {
-          await _move(target, aside);
-        } else {
-          added.add(f.path);
-        }
+        final step = (path: f.path, added: !await target.exists());
+        await _swapping.writeAsString('${jsonEncode({'path': step.path, 'added': step.added})}\n',
+            mode: FileMode.append, flush: true);
+        done.add(step);
+        if (!step.added) await _move(target, aside);
         await _move(File(_staged(f.path)), target.path);
       }
     } catch (_) {
-      await _rollBack(done, added: added);
+      await _rollBack(done);
       await clear();
       await _leaveNote('The update to $label could not replace C.A.W\'s files, so they were left as they were. '
           'Download the full update.');
       return SwapResult.failed;
     }
-    await _remember([for (final p in done) '${_local(p)}.caw-old']);
+    await _remember([for (final d in done) if (!d.added) '${_local(d.path)}.caw-old']);
     await clear();
     await _leaveNote('Updated to $label (only the changed files were downloaded).');
     return SwapResult.swapped;
@@ -168,13 +170,32 @@ class WindowsStage {
     return (label.length > 80 ? label.substring(0, 80) : label, out);
   }
 
-  /// Puts back each of [paths] that was set aside, and deletes those of them in [added] (new in this update).
-  Future<void> _rollBack(List<String> paths, {Set<String> added = const {}}) async {
-    for (final p in paths.reversed) {
-      final target = File(_local(p));
+  /// The files an interrupted swap began on, from its progress lines (a cut-off last line is skipped).
+  Future<List<({String path, bool added})>> _progress() async {
+    final out = <({String path, bool added})>[];
+    try {
+      for (final line in (await _swapping.readAsLines()).take(PatchLimits.maxFiles + 1)) {
+        try {
+          final j = jsonDecode(line);
+          if (j is Map && j['path'] is String && j['added'] is bool && safeRelativePath(j['path'] as String)) {
+            out.add((path: j['path'] as String, added: j['added'] as bool));
+          }
+        } on FormatException {
+          // A line cut off by the stop: the file it names was not touched yet.
+        }
+      }
+    } catch (_) {}
+    return out;
+  }
+
+  /// Undoes [steps] newest first: a file new in this update is deleted, a replaced one is put back from its
+  /// set-aside copy (when the stop came before it was set aside, the original is still in place).
+  Future<void> _rollBack(List<({String path, bool added})> steps) async {
+    for (final step in steps.reversed) {
+      final target = File(_local(step.path));
       final aside = File('${target.path}.caw-old');
       try {
-        if (added.contains(p)) {
+        if (step.added) {
           if (await target.exists()) await target.delete();
         } else if (await aside.exists()) {
           if (await target.exists()) await target.delete();
@@ -204,9 +225,9 @@ class WindowsStage {
   /// Deletes the files an earlier swap set aside; one still in use (the previous process closing) waits for the next.
   Future<void> _deleteSetAside() async {
     final left = <String>[];
-    final base = installDir.absolute.path;
+    final base = paths.canonicalize(installDir.path);
     for (final p in await _cleanupList()) {
-      if (!File(p).absolute.path.startsWith(base)) continue; // only inside the app's folder
+      if (!paths.isWithin(base, paths.canonicalize(p))) continue; // only inside the app's folder
       try {
         if (await File(p).exists()) await File(p).delete();
       } catch (_) {

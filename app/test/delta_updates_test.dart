@@ -62,6 +62,35 @@ Future<Map<String, String>> treeHashes(Directory dir) async => {
           f.path.substring(dir.path.length + 1).replaceAll('\\', '/'): sha256OfFileSync(f.path),
     };
 
+/// A CAWPATCH v1 of whole files only ([files] path → bytes), for cases the fixtures don't hold.
+List<int> dataPatch(Map<String, List<int>> files) {
+  final body = BytesBuilder();
+  void varint(int n) {
+    do {
+      var b = n & 0x7f;
+      n >>= 7;
+      if (n > 0) b |= 0x80;
+      body.addByte(b);
+    } while (n > 0);
+  }
+
+  List<int> hexBytes(String h) => [for (var i = 0; i < h.length; i += 2) int.parse(h.substring(i, i + 2), radix: 16)];
+  varint(files.length);
+  for (final e in files.entries) {
+    final p = utf8.encode(e.key);
+    varint(p.length);
+    body.add(p);
+    varint(e.value.length);
+    body.add(hexBytes(sha256Hex(e.value)));
+    body.addByte(0); // no base
+    body.addByte(2); // DATA
+    varint(e.value.length);
+    body.add(e.value);
+    body.addByte(0); // END
+  }
+  return [...ascii.encode('CAWPATCH'), 1, ...ZLibEncoder(raw: true).convert(body.takeBytes())];
+}
+
 const tag = 'latest-main';
 const prefix = 'https://github.com/Kmandevr/C.A.W/releases/download/$tag/';
 
@@ -166,6 +195,17 @@ void main() {
       for (final p in ['', '/etc/x', '../x', 'a/../b', 'a\\b', 'C:x', 'a//b', './a', 'a/.', 'a.', 'a\u0001']) {
         expect(safeRelativePath(p), isFalse, reason: p);
       }
+      // Windows device names, with or without an extension, in any case and at any depth.
+      for (final p in ['CON', 'nul', 'Aux.txt', 'prn.dll', 'data/COM1', 'data/com9.dll', 'LPT1', 'x/lpt9.so', 'nul .txt']) {
+        expect(safeRelativePath(p), isFalse, reason: p);
+      }
+      for (final p in ['console.dll', 'com10', 'data/connect.txt', 'nully', 'lpt0']) {
+        expect(safeRelativePath(p), isTrue, reason: p);
+      }
+      // The update's own folder.
+      for (final p in ['.caw-update/stage.json', '.CAW-Update/files/caw.exe']) {
+        expect(safeRelativePath(p), isFalse, reason: p);
+      }
     });
   });
 
@@ -237,6 +277,77 @@ void main() {
       expect(await stage.ready, isFalse);
       expect(await stage.swapIn(), SwapResult.nothing);
       expect(File('${app.path}/lib/libapp.so.caw-old').existsSync(), isFalse);
+    });
+
+    test('two files that differ only in case are refused (one file on Windows)', () async {
+      final app = await installOld();
+      final a = utf8.encode('one'), b = utf8.encode('two');
+      final patch = File('${tmp.path}/case.cawpatch')
+        ..writeAsBytesSync(dataPatch({'data/App.so': a, 'data/app.so': b}));
+      final stage = WindowsStage(app);
+      await stage.begin();
+      expect(
+          () => stageFiles(patchPath: patch.path, installDir: app.path, stageDir: stage.files.path, expected: {
+                'data/App.so': sha256Hex(a),
+                'data/app.so': sha256Hex(b),
+              }),
+          throwsA(isA<PatchError>().having((e) => e.message, 'message', contains('twice'))));
+    });
+
+    test('a start after an interrupted swap undoes only the files it began on', () async {
+      final app = await installOld();
+      final before = await treeHashes(app);
+      final stage = WindowsStage(app);
+      await stage.begin();
+      final staged = stageFiles(
+          patchPath: fixture('caw-main-windows.cawpatch').path, installDir: app.path, stageDir: stage.files.path, expected: want());
+      await stage.commit('v2', staged);
+      // The swap stopped after replacing lib/libapp.so and moving in the new res/new.txt.
+      final swapping = File('${stage.root.path}/swapping');
+      swapping.writeAsStringSync('${jsonEncode({'label': 'v2'})}\n'
+          '${jsonEncode({'path': 'lib/libapp.so', 'added': false})}\n'
+          '${jsonEncode({'path': 'res/new.txt', 'added': true})}\n'
+          '{"path": "cut off');
+      File('${app.path}/lib/libapp.so').renameSync('${app.path}/lib/libapp.so.caw-old');
+      File('${stage.files.path}/lib/libapp.so').renameSync('${app.path}/lib/libapp.so');
+      File('${stage.files.path}/res/new.txt').renameSync('${app.path}/res/new.txt');
+      expect(await stage.swapIn(), SwapResult.failed);
+      expect(await treeHashes(app), before);
+      expect(File('${app.path}/res/new.txt').existsSync(), isFalse);
+      expect(await stage.ready, isFalse);
+    });
+
+    test('recovery leaves alone a listed file the swap never reached, and its stale set-aside copy', () async {
+      final app = await installOld();
+      final stage = WindowsStage(app);
+      await stage.begin();
+      final staged = stageFiles(
+          patchPath: fixture('caw-main-windows.cawpatch').path, installDir: app.path, stageDir: stage.files.path, expected: want());
+      await stage.commit('v2', staged);
+      // An earlier update's set-aside copy of res/new.txt, never deleted; the swap stopped after lib/libapp.so.
+      File('${app.path}/res/new.txt.caw-old').writeAsStringSync('an earlier build');
+      final before = await treeHashes(app);
+      File('${stage.root.path}/swapping').writeAsStringSync('${jsonEncode({'label': 'v2'})}\n'
+          '${jsonEncode({'path': 'lib/libapp.so', 'added': false})}\n');
+      File('${app.path}/lib/libapp.so').renameSync('${app.path}/lib/libapp.so.caw-old');
+      expect(await stage.swapIn(), SwapResult.failed);
+      expect(await treeHashes(app), before);
+      expect(File('${app.path}/res/new.txt').existsSync(), isFalse); // the stale copy did not come back
+    });
+
+    test('only set-aside files inside the app folder are deleted', () async {
+      final app = await installOld();
+      final outside = File('${tmp.path}/app-other/keep.caw-old')..createSync(recursive: true);
+      final up = File('${tmp.path}/keep2.caw-old')..createSync();
+      final inside = File('${app.path}/lib/libapp.so.caw-old')..writeAsStringSync('old');
+      final stage = WindowsStage(app);
+      await stage.root.create(recursive: true);
+      File('${stage.root.path}/cleanup.json')
+          .writeAsStringSync(jsonEncode([outside.path, '${app.path}/../keep2.caw-old', inside.path]));
+      expect(await stage.swapIn(), SwapResult.nothing);
+      expect(outside.existsSync(), isTrue); // shares the folder's name as a prefix, but is not inside it
+      expect(up.existsSync(), isTrue);
+      expect(inside.existsSync(), isFalse);
     });
 
     test('a file here that is not the base build is refused', () async {

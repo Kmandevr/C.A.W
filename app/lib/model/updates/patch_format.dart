@@ -220,15 +220,22 @@ class PatchReader {
   }
 }
 
-/// A relative path from a patch or manifest that is safe to write under a folder: '/'-separated, no `..`, `.`,
-/// empty parts, drive letters, backslashes or control characters.
+/// Windows' reserved device names, which open a device instead of a file whatever the extension (`nul.txt`).
+final _deviceName = RegExp(r'^(con|prn|aux|nul|com[1-9]|lpt[1-9])$', caseSensitive: false);
+
+/// A relative path from a patch or manifest that is safe to write under the app's folder: '/'-separated, no `..`,
+/// `.`, empty parts, drive letters, backslashes, control characters or Windows device names (`CON`, `NUL`, `AUX`,
+/// `PRN`, `COM1`–`9`, `LPT1`–`9`, with or without an extension), and nothing inside the update's own `.caw-update/`.
 bool safeRelativePath(String p) {
   if (p.isEmpty || p.length > PatchLimits.maxPath || p.startsWith('/') || p.contains('\\') || p.contains(':')) {
     return false;
   }
   if (p.codeUnits.any((c) => c < 0x20 || c == 0x7f)) return false;
-  for (final part in p.split('/')) {
+  final parts = p.split('/');
+  if (parts.first.toLowerCase() == '.caw-update') return false;
+  for (final part in parts) {
     if (part.isEmpty || part == '.' || part == '..' || part.endsWith('.') || part.endsWith(' ')) return false;
+    if (_deviceName.hasMatch(part.split('.').first.trimRight())) return false;
   }
   return true;
 }
@@ -275,13 +282,15 @@ Map<String, String> stageFiles(
     {required String patchPath, required String installDir, required String stageDir, required Map<String, String> expected}) {
   final r = PatchReader(patchPath);
   final staged = <String, String>{};
+  final seen = <String>{};
   try {
     final n = r.count();
     for (var i = 0; i < n; i++) {
       final e = r.entry();
       if (!safeRelativePath(e.path)) throw PatchError('unsafe path ${e.path}');
       if (expected[e.path] != e.sha256) throw PatchError('${e.path} is not this build\'s');
-      if (staged.containsKey(e.path)) throw PatchError('${e.path} twice');
+      // Windows' file names ignore case: data/App.so and data/app.so are one file.
+      if (!seen.add(e.path.toLowerCase())) throw PatchError('${e.path} twice');
       RandomAccessFile? base;
       if (e.baseSha256 != null) {
         final local = '$installDir${Platform.pathSeparator}${e.path.replaceAll('/', Platform.pathSeparator)}';
