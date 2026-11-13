@@ -9,6 +9,7 @@
 
 #include "analysis.h"
 #include "engine.h"
+#include "sample_time.h"
 #include "test.h"
 
 using namespace caw;
@@ -71,7 +72,8 @@ struct Duck {
                 e.data[1] = static_cast<uint32_t>(vel * 65535.0 + 0.5) << 16;
                 events.push_back(e);
             }
-            t.beat = startBeat + static_cast<double>(start) * tempo / (60.0 * 48000.0);
+            // As ComponentChain gives it: the block's first frame over a step's frames (sampletime), in beats.
+            t.beat = startBeat + static_cast<double>(start) / sampletime::stepFrames(48000.0, tempo) / 4.0;
             const float* main[2] = {inL.data() + start, inR.data() + start};
             const float* key[2] = {keyL.data() + start, keyR.data() + start};
             float* out[2] = {outL.data() + start, outR.data() + start};
@@ -234,4 +236,25 @@ TEST(the_ducker_look_ahead_and_mode_are_not_automatable) {
         CHECK(!q.modulatable);
     }
     CHECK(d.parameters[paramIndex(d, "depth")].automatable);
+}
+
+TEST(the_ducker_in_tempo_mode_wakes_the_same_whatever_the_block_size) {
+    // Found by the long-run drift check (2026-11-12): the default project's Track 3 (Flagship, then a Trigger-mode
+    // ducker) starts a frame after a beat, as a sine from phase 0 does. The ducker wakes on that first non-zero
+    // frame, and whether it ducked there hung on the last bit of the beat position the block's start gave, so
+    // 441-frame callbacks (Bluetooth) ducked where 64-frame ones did not.
+    std::vector<float> first;
+    for (const uint32_t block : {64u, 441u, 1u, 37u, 480u, 1023u, 160u, 7u, 100u}) {
+        Duck d({{"mode", 2.0}, {"rate", 5.0}, {"depth", 1.0}, {"attack", 1.0}, {"hold", 10.0}, {"release", 100.0}});
+        d.tempo = 90.0;
+        const size_t beat = 32000;  // a beat at 90 bpm and 48 kHz
+        d.sized(beat * 20);
+        for (size_t i = 17 * beat + 1; i < d.inL.size(); ++i) d.inL[i] = d.inR[i] = 0.25f;
+        d.playing = true;
+        d.run(block);
+        if (first.empty()) first = d.outL;
+        size_t differ = 0;
+        for (size_t i = 0; i < first.size(); ++i) differ += first[i] != d.outL[i];
+        CHECK_EQ(differ, size_t{0});
+    }
 }

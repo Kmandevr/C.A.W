@@ -1,4 +1,4 @@
-// The C API for audio assets, SFZ, input meters, recording and input latency (API version 18, WP-J).
+// The C API for audio assets, SFZ, input meters, recording and input latency (API version 18, WP-J), and shedding's counts (26).
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
@@ -135,6 +135,16 @@ char* caw_latency_ping_result(CawEngine* e) try {
     return dup(e->engine->liveAudio().pingResult());
 } catch (...) {
     return nullptr;
+}
+
+void caw_engine_shedding_stats(CawEngine* e, CawSheddingStats* out) {
+    if (!out) return;
+    *out = CawSheddingStats{};
+    if (!e) return;
+    const caw::Engine::SheddingStats st = e->engine->sheddingStats();
+    out->shed = static_cast<int64_t>(st.shed);
+    out->restored = static_cast<int64_t>(st.restored);
+    out->muted_now = st.mutedNow;
 }
 
 }  // extern "C"
