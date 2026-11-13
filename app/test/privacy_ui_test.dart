@@ -114,6 +114,9 @@ void main() {
     // Settings › About and beta › Privacy, the published policy's path.
     await tester.tap(find.text('About and beta'));
     await tester.pumpAndSettle();
+    // Below the Updates rows on a phone.
+    await tester.ensureVisible(find.text('Privacy'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Privacy'));
     await tester.pumpAndSettle();
     expect(find.textContaining('workers.dev/dashboard'), findsOneWidget);

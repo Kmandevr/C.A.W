@@ -25,6 +25,7 @@ import 'playhead_clock.dart';
 import 'settings.dart';
 import 'project_library.dart' show TrashBatch;
 import 'storage.dart';
+import 'startup_progress.dart';
 import 'pattern_templates.dart';
 import 'templates.dart';
 
@@ -349,6 +350,15 @@ class AppState extends ChangeNotifier {
 
   /// True until the first project opens (the last one, or the template on a first run); nothing is saved before.
   bool starting = true;
+
+  /// The loading steps as [init] runs them, for the startup screen.
+  final StartupProgress startup = StartupProgress();
+
+  /// How [init] reads the platform's thermal and power signals and makes the engine (tests replace them).
+  @visibleForTesting
+  Future<EnginePressure> Function() readPressure = ResourceSignals.read;
+  @visibleForTesting
+  Engine Function(int sampleRate) createEngine = (rate) => Engine.create(sampleRate: rate);
   String? lastProjectId;
   List<ProjectSummary> savedProjects = const [];
 
@@ -411,28 +421,39 @@ class AppState extends ChangeNotifier {
   AudioStatus? get audioStatus => engine?.audioStatus();
 
   Future<void> init() async {
-    await latency.load();
-    _resourcePressureSubscription = ResourceSignals.changes.listen(
-      (pressure) => EngineExecutionPolicy.updateRuntimeSignals(pressure: pressure),
-      onError: (Object _) => EngineExecutionPolicy.updateRuntimeSignals(pressure: EnginePressure.unknown),
-    );
-    EngineExecutionPolicy.updateRuntimeSignals(pressure: await ResourceSignals.read());
+    // Everything runs inside the try, so whatever throws, the finally shows the app ([StartupGate] also gives up
+    // waiting after its timeout, for a step that never ends).
     try {
-      engine = Engine.create(sampleRate: settings.sampleRate);
-      applyAudioSettings();  // before the device opens, so it opens on the chosen device at the chosen size
-      hardwareProfile = EngineExecutionPolicy.hardwareProfile;
-      auditionPlan = EngineExecutionPolicy.plan(workload: EngineWorkload.interactiveAudition);
-      await _audioConfigured;  // the choice is in the engine before the device opens (no reopen right after)
-      _openAudio(engine!);
-    } catch (e) {
-      engineError = 'The sound engine did not load: $e';
-    }
-    try {
+      startup.begin(StartupStep.engine);
+      try {
+        await latency.load();
+        _resourcePressureSubscription = ResourceSignals.changes.listen(
+          (pressure) => EngineExecutionPolicy.updateRuntimeSignals(pressure: pressure),
+          onError: (Object _) => EngineExecutionPolicy.updateRuntimeSignals(pressure: EnginePressure.unknown),
+        );
+        EngineExecutionPolicy.updateRuntimeSignals(pressure: await readPressure());
+      } catch (_) {
+        // The signals are optional: the policy stays conservative without them.
+        EngineExecutionPolicy.updateRuntimeSignals(pressure: EnginePressure.unknown);
+      }
+      try {
+        engine = createEngine(settings.sampleRate);
+        applyAudioSettings();  // before the device opens, so it opens on the chosen device at the chosen size
+        hardwareProfile = EngineExecutionPolicy.hardwareProfile;
+        auditionPlan = EngineExecutionPolicy.plan(workload: EngineWorkload.interactiveAudition);
+        await _audioConfigured;  // the choice is in the engine before the device opens (no reopen right after)
+        _openAudio(engine!);
+        startup.finish(StartupStep.engine);
+      } catch (e) {
+        engineError = 'The sound engine did not load: $e';
+        startup.finish(StartupStep.engine, ok: false);
+      }
       await openStorage(await ProjectStorage.open());
     } catch (e) {
       // Never stuck on the logo: show the app with whatever opened, and say why.
       openError = 'Projects could not be opened: $e';
       starting = false;
+      _failUnfinishedSteps();
     } finally {
       ready = true;
       notifyListeners();
@@ -440,36 +461,75 @@ class AppState extends ChangeNotifier {
     }
   }
 
+  void _failUnfinishedSteps() {
+    for (final step in StartupStep.values) {
+      if (startup.begun(step) && !startup.done(step)) startup.finish(step, ok: false);
+    }
+  }
+
+  /// Launch took longer than [StartupGate]'s limit: shows the app now, with the step still running marked failed
+  /// and a line saying why. [init] carries on; if it finishes later, the project it opens replaces this one.
+  void startupTimedOut() {
+    if (ready || _disposed) return;
+    final stuck = [for (final s in StartupStep.values) if (startup.begun(s) && !startup.done(s)) s];
+    _failUnfinishedSteps();
+    openError = stuck.isEmpty
+        ? 'Loading took too long, so the app opened without waiting.'
+        : '"${stuck.first.label}" took too long, so the app opened without waiting for it.';
+    ready = true;
+    notifyListeners();
+    _poller.wake();
+  }
+
   /// Reads the saved projects from [storage] and opens straight into the last one: the arrangement is home (UI
   /// plan U1). On a first run, or when the last project is gone, it opens the default project ([starterProject]). New, Template
   /// and Open are in the project menu.
   Future<void> openStorage(ProjectStorage storage) async {
     _storage = storage;
+    startup.begin(StartupStep.components);
     await loadDefaultProject();
     final e = engine;
+    var componentsOk = true;
     if (e != null) {
       try {
         nativeComponents = await deviceNativeComponentManager(e, storage);
       } catch (_) {
         nativeComponents = null;  // no compiler on this device: projects play without their C++ effects
+        componentsOk = false;
       }
     }
+    startup.finish(StartupStep.components, ok: e != null && componentsOk);
+    startup.begin(StartupStep.projects);
     lastProjectId = await storage.lastOpened();
     savedProjects = await listProjects();
     final id = lastProjectId;
-    final last = id == null ? null : await storage.load(id);
+    ProjectDoc? last;
+    NewerProjectFormat? newer;
+    try {
+      last = id == null ? null : await storage.load(id);
+    } on NewerProjectFormat catch (e) {
+      newer = e;
+    }
     // A damaged file reads as null too; it stays on disk, and the app says so instead of replacing it silently.
-    final damaged = id != null && last == null && await storage.has(id);
+    final damaged = newer == null && id != null && last == null && await storage.has(id);
+    startup.finish(StartupStep.projects);
+    final opening = last ?? starterProject();
+    startup.begin(StartupStep.project, project: opening.name);
     starting = false;
     String? error = damaged ? 'The last project could not be read, so the default project opened instead. '
         'Its file is still in the projects folder.' : null;
+    if (newer != null) {
+      error = 'The last project was saved by a newer version of C.A.W, so the default project opened instead. '
+          'Its file is unchanged; update C.A.W to open it.';
+    }
     try {
-      await _switchTo(last ?? starterProject(), saveCurrent: false);
+      await _switchTo(opening, saveCurrent: false);
     } catch (e) {
       if (last == null) rethrow;
       error = 'The last project, "${last.name}", could not be opened ($e), so the default project opened instead.';
       await _switchTo(starterProject(), saveCurrent: false);
     }
+    startup.finish(StartupStep.project);
     openError = error;
   }
 
@@ -496,6 +556,7 @@ class AppState extends ChangeNotifier {
     masterValueTick.dispose();
     values.dispose();
     tick.dispose();
+    startup.dispose();
     sounding.dispose();
     revealStartRequests.dispose();
     for (final notifier in _moduleValueTicks.values) { notifier.dispose(); }
@@ -982,6 +1043,26 @@ class AppState extends ChangeNotifier {
 
   Future<List<RestorePointSummary>> listRestorePoints() async =>
       await _storage?.listRestorePoints(project.id) ?? const [];
+
+  /// A restore point of every saved project, the open one saved first (before installing an older C.A.W). Returns
+  /// how many were made. They live in the app's own storage: an Android uninstall deletes them too.
+  Future<int> backUpAllProjects() async {
+    final storage = _storage;
+    if (storage == null) return 0;
+    await flush();
+    var made = 0;
+    for (final summary in await listProjects()) {
+      try {
+        final doc = await storage.load(summary.id);
+        if (doc == null) continue;
+        await storage.createRestorePoint(doc, keep: settings.restorePointsKept);
+        made++;
+      } catch (_) {
+        // A project this version can't read (damaged, or from a newer version) is left as it is.
+      }
+    }
+    return made;
+  }
 
   Future<bool> restoreProjectVersion(String restorePointId) async {
     final storage = _storage;
@@ -2097,7 +2178,14 @@ class AppState extends ChangeNotifier {
   Future<void> newProjectFromTemplate(TemplateDoc t) => _switchTo(projectFromTemplate(t));
 
   Future<void> openProject(String id) async {
-    final p = await _storage?.load(id);
+    final ProjectDoc? p;
+    try {
+      p = await _storage?.load(id);
+    } on NewerProjectFormat catch (e) {
+      openError = e.toString();
+      notifyListeners();
+      return;
+    }
     if (p != null) await _switchTo(p);
   }
 
@@ -2122,10 +2210,15 @@ class AppState extends ChangeNotifier {
   }
 
   /// After the open project was deleted: the newest other one opens (or the default project), and the deleted one
-  /// is not saved again on the way out.
+  /// is not saved again on the way out. A newest one in a newer format is left alone; the default opens instead.
   Future<void> _leaveGoneProject() async {
     final rest = await listProjects();
-    final next = rest.isEmpty ? null : await _storage?.load(rest.first.id);
+    ProjectDoc? next;
+    try {
+      next = rest.isEmpty ? null : await _storage?.load(rest.first.id);
+    } on NewerProjectFormat {
+      next = null;
+    }
     await _switchTo(next ?? starterProject(), saveCurrent: false);
   }
 

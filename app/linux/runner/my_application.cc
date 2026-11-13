@@ -60,9 +60,9 @@ static void my_application_activate(GApplication* application) {
 
   FlView* view = fl_view_new(project);
   GdkRGBA background_color;
-  // Background defaults to black, override it here if necessary, e.g. #00000000
-  // for transparent.
-  gdk_rgba_parse(&background_color, "#000000");
+  // The startup screen's background (Neon's dark, lib/ui/startup_screen.dart):
+  // the window shows on Flutter's first frame, and this is behind it.
+  gdk_rgba_parse(&background_color, "#07070B");
   fl_view_set_background_color(view, &background_color);
   gtk_widget_show(GTK_WIDGET(view));
   gtk_container_add(GTK_CONTAINER(window), GTK_WIDGET(view));

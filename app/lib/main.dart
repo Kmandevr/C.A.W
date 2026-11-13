@@ -1,5 +1,6 @@
 // Entry point: loads the settings, starts the app state (engine, audio, startup choice) and shows the shell.
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -7,15 +8,19 @@ import 'package:flutter/services.dart';
 
 import 'model/app_state.dart';
 import 'model/audio_record.dart';
+import 'model/busy_work.dart';
 import 'model/automation_writer.dart';
 import 'model/live_midi.dart';
 import 'model/problem_log.dart';
 import 'model/settings.dart';
 import 'model/telemetry/app_telemetry.dart';
+import 'model/updates/update_fetch.dart';
+import 'model/updates/update_service.dart';
 import 'platform/desktop_window.dart';
 import 'platform/display_rate.dart';
 import 'platform/haptics_device.dart';
 import 'platform/mic_permission.dart';
+import 'platform/update_installer.dart';
 import 'platform/midi_input.dart';
 import 'ui/frame_rate.dart';
 import 'ui/glass.dart';
@@ -23,12 +28,14 @@ import 'ui/haptics.dart';
 import 'ui/keyboard/keyboard_layer.dart';
 import 'ui/page_closer.dart';
 import 'ui/shell.dart';
+import 'ui/startup_screen.dart';
 import 'ui/theme.dart';
+import 'ui/updates/update_prompt.dart';
 
 Future<void> main() async {
   final startup = Stopwatch()..start(); // the telemetry report's startup time (to the first project open)
   WidgetsFlutterBinding.ensureInitialized();
-  // Open beta: errors are kept (on the device only) for "Report a problem", then handled as before.
+  // Open alpha: errors are kept (on the device only) for "Report a problem", then handled as before.
   final flutterError = FlutterError.onError;
   FlutterError.onError = (details) {
     ProblemLog.add(details.exception, details.stack);
@@ -60,8 +67,20 @@ Future<void> main() async {
     ..follow(midi, () => midi.recording)
     ..load();
 
+  // The update check (Settings › About › Updates): its choices load before the first frame, so the startup screen
+  // can say "Update available"; the check itself runs after the app is shown (UpdatePromptHost).
+  final fetcher = UpdateFetcher();
+  final updates = UpdateService(
+    source: GitHubReleasesSource(fetcher),
+    fetcher: fetcher,
+    installer: platformUpdateInstaller(),
+    store: settings.dir == null ? null : File('${settings.dir!.path}${Platform.pathSeparator}updates.json'),
+  );
+  await updates.load();
+  UpdateService.running = updates;
+
   // Anonymous telemetry and feedback (docs/app.md "Privacy, telemetry and feedback"); its first-run page shows over
-  // the shell once it has loaded.
+  // the shell once it has loaded and the startup screen has gone, before any update prompt (ui/app_prompts.dart).
   unawaited(startAppTelemetry(state, startup: startup));
 
   runApp(CawApp(state: state));
@@ -121,6 +140,22 @@ class _CawAppState extends State<CawApp> with WidgetsBindingObserver {
     if (!state.settings.adjusting) setState(() {});
   }
 
+  // The update prompt and automatic updates sit above the shell (no prompt while playing, recording or rendering).
+  Widget _withUpdates(Widget shell) {
+    final updates = UpdateService.running;
+    if (updates == null) return shell;
+    return UpdatePromptHost(
+      state: state,
+      service: updates,
+      busy: () =>
+          state.meters.playing ||
+          (LiveMidi.current?.recording ?? false) ||
+          (AudioRecorder.current?.recording ?? false) ||
+          BusyWork.any,
+      child: shell,
+    );
+  }
+
   @override
   Widget build(BuildContext context) => MaterialApp(
     title: 'C.A.W',
@@ -141,6 +176,10 @@ class _CawAppState extends State<CawApp> with WidgetsBindingObserver {
           data: mq.copyWith(textScaler: TextScaler.linear(mq.textScaler.scale(16) / 16 * scale)), child: body);
     },
     // A new key after a theme or glass change (including a profile that turns glass or blur off) rebuilds every screen, so colours fixed at build time repaint too.
-    home: Shell(key: ValueKey((state.settings.lookRevision, Glass.active, Glass.blurChosen)), state: state),
+    // The startup screen stays in front until the project is open, then fades away over the shell.
+    home: StartupGate(
+        state: state,
+        child: _withUpdates(
+            Shell(key: ValueKey((state.settings.lookRevision, Glass.active, Glass.blurChosen)), state: state))),
   );
 }

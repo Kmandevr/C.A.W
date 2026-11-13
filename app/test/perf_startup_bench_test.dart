@@ -1,12 +1,16 @@
 // Benchmarks the storage work at startup with 20 saved 16-track projects: listing them (every file decoded for its
 // name) and opening one. Reports the wall time and the UI isolate's longest stall (the largest gap between 1 ms
-// timer ticks while the work runs), which is what a user feels as a frozen first frame. Prints BENCH lines.
+// timer ticks while the work runs), which is what a user feels as a frozen first frame, and the listing again while
+// the startup screen's reveal paints at 120 Hz. Prints BENCH lines.
 import 'dart:async';
 import 'dart:io';
+import 'dart:ui' as ui;
 
 import 'package:caw/model/app_state.dart';
 import 'package:caw/model/settings.dart';
 import 'package:caw/model/storage.dart';
+import 'package:caw/ui/startup_screen.dart';
+import 'package:flutter/animation.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'perf_fixture.dart';
@@ -43,7 +47,32 @@ void main() {
     for (var i = 0; i < 3; i++) { await storage.list(); await storage.load(id); } // warm up
     final list = await _measure(() => storage.list());
     final open = await _measure(() => storage.load(id));
+    // The same listing while the startup screen's reveal paints on the UI isolate at 120 Hz (recording its picture,
+    // as a frame does; rasterising is on the raster thread and not counted here).
+    var painted = 0, paintUs = 0, paintMaxUs = 0;
+    final clock = Stopwatch()..start();
+    void frame(double t) {
+      final sw = Stopwatch()..start();
+      final recorder = ui.PictureRecorder();
+      WaveformRevealPainter(AlwaysStoppedAnimation(t), logoSize: 140)
+          .paint(ui.Canvas(recorder), const ui.Size(390, 140));
+      recorder.endRecording().dispose();
+      sw.stop();
+      paintUs += sw.elapsedMicroseconds;
+      if (sw.elapsedMicroseconds > paintMaxUs) paintMaxUs = sw.elapsedMicroseconds;
+      painted++;
+    }
+    for (var i = 0; i < 60; i++) { frame(i / 60); } // warm up (the JIT, the outline's measure)
+    painted = paintUs = paintMaxUs = 0;
+    final frames = Timer.periodic(const Duration(microseconds: 8333),
+        (_) => frame((clock.elapsedMicroseconds / revealDuration.inMicroseconds) % 1));
+    final listDrawing = await _measure(() => storage.list());
+    frames.cancel();
     String ms(int us) => (us / 1000).toStringAsFixed(1);
+    // ignore: avoid_print
+    print('BENCH 20 saved projects with the startup reveal painting at 120 Hz: list ${ms(listDrawing.$1)} ms '
+        '(UI blocked ${ms(listDrawing.$3)} ms, longest ${ms(listDrawing.$2)}; $painted frames painted, '
+        '${painted == 0 ? 0 : (paintUs / painted).round()} us each, longest $paintMaxUs us)');
     // ignore: avoid_print
     print('BENCH 20 saved projects: list ${ms(list.$1)} ms (UI blocked ${ms(list.$3)} ms, longest ${ms(list.$2)}); '
         'open one ${ms(open.$1)} ms (UI blocked ${ms(open.$3)} ms, longest ${ms(open.$2)})');

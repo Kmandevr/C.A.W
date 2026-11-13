@@ -97,7 +97,9 @@ const wchar_t* WindowClassRegistrar::GetWindowClass() {
     window_class.hInstance = GetModuleHandle(nullptr);
     window_class.hIcon =
         LoadIcon(window_class.hInstance, MAKEINTRESOURCE(IDI_APP_ICON));
-    window_class.hbrBackground = 0;
+    // The startup screen's background (Neon's dark #07070B, lib/ui/startup_screen.dart), so a resize before
+    // Flutter repaints never shows white. The window itself shows on Flutter's first frame (flutter_window.cpp).
+    window_class.hbrBackground = CreateSolidBrush(RGB(0x07, 0x07, 0x0B));
     window_class.lpszMenuName = nullptr;
     window_class.lpfnWndProc = Win32Window::WndProc;
     RegisterClass(&window_class);
