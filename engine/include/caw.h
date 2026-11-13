@@ -99,8 +99,14 @@ extern "C" {
    scenarios; caw_worker_pool_submit_stress runs a CawStressRequest (a scenario timed, a ramp, a sustained or a
    profiled run, on a worker or through the device with the output muted) as a CawJob (status, cancel, wait, result
    and release as for every job); caw_stress_progress, caw_stress_history, caw_stress_result and caw_stress_costs
-   read it. Nothing else changes. */
-#define CAW_API_VERSION 29
+   read it. Nothing else changes.
+   30 (2026-11-13, batch 1.0.2, #197): the Benchmark covers every feature and splits the time by engine part.
+   caw_stress_scenarios lists 20 more scenarios (the ten above keep their ids and projects) and gives each a
+   "feature"; a stress job's JSON gains "feature" and, for a profile (and a live run's device I/O), "parts".
+   caw_worker_pool_submit_component_bench runs the plug-in benchmark (a CawComponentBenchRequest) as a CawJob whose
+   result is its JSON; components time named sections with CAW_PROFILE_SCOPE (caw/profile.hpp, the host extension
+   CAW_HOST_EXTENSION_PROFILE in caw_component.h). Nothing else changes. */
+#define CAW_API_VERSION 30
 /* The component index that names a layer's native instrument rather than one of its "components". */
 #define CAW_INSTRUMENT_INDEX 0xFFFFFFFFu
 /* A component index with this bit (API version 22) names component (index & ~CAW_NOTE_COMPONENT) of the layer's
@@ -781,6 +787,28 @@ typedef struct CawStressCost {
 /* A finished PROFILE job's costs, largest first: writes at most `max` and returns how many there are (so a call
    with max 0 sizes the array); -1 if not a stress job or not finished. */
 CAW_API int32_t caw_stress_costs(CawJob* job, CawStressCost* out, int32_t max);
+
+/* The plug-in benchmark (API 30, #197): one component timed offline on a worker at 48 kHz in 64-frame blocks, with
+   automatic checks. It runs a built-in by id (library NULL), or a built library's component only when trust_level is
+   CAW_NATIVE_TRUST_TRUSTED (the user's own build, or one the user chose to trust): any other value is refused before
+   the library is opened. */
+typedef struct CawComponentBenchRequest {
+    uint32_t struct_size;       /* sizeof(CawComponentBenchRequest) */
+    const char* component_id;   /* the component's id (in the library, or a built-in's) */
+    const char* library;        /* the built library's path, or NULL for a built-in */
+    int32_t trust_level;        /* CAW_NATIVE_TRUST_*: the user's own choice for that library (TRUSTED only) */
+    double seconds;             /* audio per measurement, 0.1..10 (0: 1); a whole bench plays about 12 times this */
+} CawComponentBenchRequest;
+/* NULL if the request is refused (struct_size, no id, seconds, a library not TRUSTED) or the pool closes. Runs at
+   foreground priority; one bench at a time (another waits). caw_job_result is the JSON:
+   {"ok", "error", "tool": "caw_component_bench", "format": 1, "component": {"id", "name", "kind": "effect"|
+   "instrument"}, "sample_rate", "block_frames", "seconds", "cost_pct", "mean_us", "p99_us", "budget_us",
+   "checks": [{"id", "status": "pass"|"warn"|"fail", "value", "detail", "measured"}] (allocations, denormals,
+   cost_per_voice (instruments), block_size_scaling, sample_rate_scaling, param_change_cost, silence_cost),
+   "sections": [{"name", "pct", "mean_ns", "calls"}] (CAW_PROFILE_SCOPE), "curves": {"voices", "block_frames",
+   "sample_rate"} ([x, % of a block] pairs), "thresholds"}. Keys, measurements and thresholds: docs/engine.md, "The
+   plug-in benchmark". A failed job's caw_job_error says why ("cancelled" when cancelled); its progress is 0..1000. */
+CAW_API CawJob* caw_worker_pool_submit_component_bench(CawWorkerPool* pool, const CawComponentBenchRequest* request);
 
 #ifdef __cplusplus
 }

@@ -8,6 +8,7 @@
 #include <string>
 #include <vector>
 
+#include "engine_parts.h"
 #include "stress_scenarios.h"
 
 namespace caw {
@@ -68,6 +69,14 @@ struct CostRow {
     bool modulator = false;
 };
 
+// One engine part of a profile run (engine_parts.h): its share of process() time and its time per callback.
+struct PartRow {
+    Part part = Part::Other;
+    double pct = 0;      // of the parts' sum (process() time, and, live, the callback's)
+    double meanUs = 0;   // per callback
+    double p99Us = 0;    // the 99th percentile callback's time in this part
+};
+
 struct RunResult {
     bool ok = false;
     std::string error;
@@ -88,6 +97,7 @@ struct RunResult {
     int32_t steps = 0;
     double seconds = 0;      // audio timed
     std::vector<CostRow> costs;  // profile: sorted by time, the host row among them
+    std::vector<PartRow> parts;  // profile (and live: device_io): every part in Part's order, adding up to 100%
 };
 
 // A step holds when its 99th-percentile callback is within the budget (at most 1 in 100 callbacks over).
@@ -97,8 +107,13 @@ constexpr double kHoldP99 = 1.0;
 // history (may be null) and counting progress; stops early when *cancel is non-zero (checked every callback).
 // Each callback's load goes to Engine::reportLoad as a device callback's would, so the mix pool's Auto decides
 // as it does in the app. Returns the callbacks timed. Allocates nothing (caw_rt_tests): l, r and us are the caller's.
+// With `parts` (the engine's profile's) each callback's time per part goes to partNs[c * kPartCount + part], and
+// parts is cleared after each callback.
 int64_t timeCallbacks(Engine& e, int frames, int64_t calls, double* us, float* l, float* r, Progress* progress,
-                      LoadHistory* history, const std::atomic<int32_t>* cancel) noexcept;
+                      LoadHistory* history, const std::atomic<int32_t>* cancel, PartProfile* parts = nullptr,
+                      uint64_t* partNs = nullptr) noexcept;
+// The parts of `calls` callbacks (partNs as timeCallbacks fills it): each part's share of their sum, mean and p99.
+std::vector<PartRow> partRows(const uint64_t* partNs, int64_t calls);
 
 // The ramp's search, apart from timing so it can be tested: counts go up (counts) until the first that does not
 // hold, then halve the gap between the last that held and it, never above it. `step(n)` plays count n and says

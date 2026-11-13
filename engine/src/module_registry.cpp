@@ -18,6 +18,7 @@
 #endif
 
 #include "caw_component.h"
+#include "component_profile.h"
 #include "json.h"
 
 namespace caw {
@@ -420,8 +421,6 @@ private:
     std::vector<CawParameterValue> parameters_;
 };
 
-const void* noHostExtension(const CawHost*, const char*) { return nullptr; }
-
 }  // namespace
 
 bool ModuleRegistry::add(const ModuleDescriptor& descriptor, ModuleFactory factory, ModuleDestroy destroy) {
@@ -522,7 +521,7 @@ ModuleLoadResult ModuleRegistry::loadSharedLibrary(
                     "A component with this stable ID is already loaded."};
 
         component->table = table;
-        component->host = CawHost{sizeof(CawHost), CAW_COMPONENT_ABI_VERSION, "C.A.W", "1", nullptr, &noHostExtension};
+        component->host = CawHost{sizeof(CawHost), CAW_COMPONENT_ABI_VERSION, "C.A.W", "1", nullptr, &profile::hostExtension};
         component->library = std::move(library);
         const std::string id(component->descriptor.id);
         if (existing) {

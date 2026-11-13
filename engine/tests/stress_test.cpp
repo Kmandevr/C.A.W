@@ -1,4 +1,4 @@
-// The Benchmark (beta plan C): its scenarios unchanged by the move out of caw_bench, ramps, cancel, profiles, shedding.
+// The Benchmark (beta plan C, #197): its scenarios (the ten unchanged by the move out of caw_bench, the feature ones), ramps, cancel, profiles, parts, shedding.
 #include <atomic>
 #include <chrono>
 #include <cmath>
@@ -11,7 +11,9 @@
 #include <vector>
 
 #include "audio_clips.h"
+#include "caw.h"
 #include "capi_internal.h"
+#include "device_render.h"
 #include "component_chain.h"
 #include "engine.h"
 #include "json.h"
@@ -51,6 +53,16 @@ std::string describeProject(const caw::ProjectSpec& p, const std::string& dir) {
             o += "  clip " + c.id + " " + c.pattern + " " + std::to_string(c.startSteps) + " " + std::to_string(c.lengthSteps) + " " +
                  std::to_string(c.sourceOffsetSteps) + (c.loop ? " loop" : "") + "\n";
         for (const auto& s : l.sends) o += "  send " + s.to + " " + std::to_string(s.level) + (s.pre ? " pre" : "") + "\n";
+        for (const auto& a : l.automation) {  // (added with the feature scenarios: none of the ten has a lane)
+            o += "  lane " + a.target;
+            for (const auto& pt : a.points) o += " " + std::to_string(pt.step) + ":" + std::to_string(pt.value);
+            o += "\n";
+        }
+    }
+    for (const auto& a : p.automation) {
+        o += "lane " + a.targetType + "/" + a.moduleId + "/" + std::to_string(a.component) + "/" + a.target;
+        for (const auto& pt : a.points) o += " " + std::to_string(pt.step) + ":" + std::to_string(pt.value);
+        o += "\n";
     }
     for (const auto& m : p.modulators) o += "mod " + m.id + " " + describeComponent(m.component) + "\n";
     for (const auto& k : p.modulation)
@@ -89,6 +101,12 @@ std::vector<std::pair<std::string, ProjectSpec>> builtProjects(const std::string
     all.push_back({"withSpace", withSpace()});
     all.push_back({"busyacid", busy("org.caw.synth.acid", {})});
     all.push_back({"firstLoopBass", firstLoop("Bass")});
+    for (const SuiteScenario& s : featureScenarios()) {
+        ProjectSpec p;
+        std::string error;
+        if (!makeScenario(s, dir, p, error)) cawtest::fail(__FILE__, __LINE__, std::string(s.id) + ": " + error);
+        all.push_back({s.id, p});
+    }
     return all;
 }
 
@@ -113,6 +131,8 @@ cawtest::Audio renderSecond(const ProjectSpec& p) {
 // The builders moved from caw_bench.cpp to stress_scenarios.cpp unchanged: each project's every field hashes as it
 // did from caw_bench's own code (recorded 2026-11-12 from caw_bench.cpp at d932771), and 1 s of each sounds as it did
 // (the "stress" references, recorded from the same code: its renders were bit-identical to the moved code's).
+// The feature scenarios (#197, from "empty" on) were recorded 2026-11-13 from their own builders, appended to the
+// same references (the first fifteen entries' bytes unchanged).
 TEST(stress_scenarios_unchanged_by_the_move) {
     const std::map<std::string, std::string> specHash = {
         {"first_loop", "95af7abe9529a5b7"},
@@ -130,14 +150,35 @@ TEST(stress_scenarios_unchanged_by_the_move) {
         {"withSpace", "51a08ceed5a4ce5f"},
         {"busyacid", "56a05e15c7080b28"},
         {"firstLoopBass", "783b4b03cfd42786"},
+        // The feature scenarios (#197).
+        {"empty", "3bd6649147d1cd83"},
+        {"single_synth", "01a803348e8d8df4"},
+        {"single_sampler", "1240f9b20fa27c38"},
+        {"single_drums", "6a007724565d3f4a"},
+        {"single_audio", "bd797f8a4ce972cd"},
+        {"folders_shallow", "97b1cffe59128192"},
+        {"folders_deep", "34feeac07c4f360c"},
+        {"sends_few", "3c8afb928365ef9d"},
+        {"sends_many", "77a6ff8095467b29"},
+        {"sends_chained", "870762500fd64e2e"},
+        {"automation_light", "ba27a4298478de80"},
+        {"automation_dense", "8d2dfb7c4e9e49d0"},
+        {"modulation_dense", "1f037b7a0a13381a"},
+        {"voice_storm", "c6b85de3f1119515"},
+        {"sample_stream", "cb17fda8f1472dea"},
+        {"resample", "ae1e8b3fbd5f3ad7"},
+        {"every_instrument", "3ab70624484ac6bd"},
+        {"every_effect", "7d5715c05ce87eca"},
+        {"metering_heavy", "010ff6dc9b02b7d9"},
+        {"worst_all", "ab9ee5309dd9a638"},
     };
     const std::string dir = workDir();
     cawtest::References refs("stress");
     for (const auto& [id, p] : builtProjects(dir)) {
         const auto it = specHash.find(id);
-        CHECK(it != specHash.end());
-        if (it != specHash.end() && hex(fnv(describeProject(p, dir).data(), describeProject(p, dir).size())) != it->second)
-            cawtest::fail(__FILE__, __LINE__, id + ": the project differs from caw_bench's");
+        const std::string hash = hex(fnv(describeProject(p, dir).data(), describeProject(p, dir).size()));
+        if (it == specHash.end()) cawtest::fail(__FILE__, __LINE__, id + ": no hash recorded (it is " + hash + ")");
+        else if (hash != it->second) cawtest::fail(__FILE__, __LINE__, id + ": the project differs from its recorded one (" + hash + ")");
         CHECK_REFERENCE(refs, id, renderSecond(p), cawtest::Class::Chaotic);
     }
 }
@@ -146,14 +187,175 @@ TEST(stress_benchmark_has_the_ten_scenarios_section_h_names) {
     const char* const ids[] = {"first_loop", "three_tracks", "song8", "song8_extras", "flagship_heavy",
                                "flagship_heavy16", "drums_kit", "song16", "song32_heavy", "tail_floor"};
     const std::vector<SuiteScenario> b = benchmarkScenarios();
-    CHECK_EQ(b.size(), size_t{10});
-    for (size_t k = 0; k < b.size() && k < 10; ++k) CHECK_EQ(std::string(b[k].id), std::string(ids[k]));
+    CHECK(b.size() >= size_t{10});
+    for (size_t k = 0; k < b.size() && k < 10; ++k) CHECK_EQ(std::string(b[k].id), std::string(ids[k]));  // first, as H2 has them
     CHECK(findScenario(b, "tail") == nullptr);  // caw_bench's tail phases only
     CHECK(findScenario(suiteScenarios(), "tail") != nullptr);
+    CHECK(findScenario(suiteScenarios(), "empty") == nullptr);  // the feature scenarios aren't caw_bench's
     std::map<std::string, Tier> tier;
     for (const SuiteScenario& s : b) tier[s.id] = s.tier;
     CHECK(tier["song8"] == Tier::Normal && tier["song16"] == Tier::Heavy && tier["flagship_heavy"] == Tier::Extreme &&
           tier["song32_heavy"] == Tier::Extreme && tier["tail_floor"] == Tier::Idle && tier["drums_kit"] == Tier::Heavy);
+}
+
+// The feature scenarios (#197, the contract's table): ids, tiers and features in this order, after the ten; the
+// ten's features too.
+TEST(stress_benchmark_covers_every_feature) {
+    struct Want { const char* id; Tier tier; const char* feature; };
+    const Want want[] = {
+        {"empty", Tier::Idle, "baseline"},           {"single_synth", Tier::Normal, "instrument"},
+        {"single_sampler", Tier::Normal, "instrument"}, {"single_drums", Tier::Normal, "instrument"},
+        {"single_audio", Tier::Normal, "audio"},     {"folders_shallow", Tier::Normal, "routing"},
+        {"folders_deep", Tier::Heavy, "routing"},    {"sends_few", Tier::Normal, "sends"},
+        {"sends_many", Tier::Heavy, "sends"},        {"sends_chained", Tier::Heavy, "sends"},
+        {"automation_light", Tier::Normal, "automation"}, {"automation_dense", Tier::Heavy, "automation"},
+        {"modulation_dense", Tier::Heavy, "modulation"}, {"voice_storm", Tier::Extreme, "voices"},
+        {"sample_stream", Tier::Heavy, "samples"},   {"resample", Tier::Heavy, "samples"},
+        {"every_instrument", Tier::Heavy, "instrument"}, {"every_effect", Tier::Heavy, "effect"},
+        {"metering_heavy", Tier::Normal, "metering"}, {"worst_all", Tier::Extreme, "all"},
+    };
+    const std::vector<SuiteScenario> b = benchmarkScenarios();
+    CHECK_EQ(b.size(), size_t{30});
+    for (size_t k = 0; k < 20 && k + 10 < b.size(); ++k) {
+        CHECK_EQ(std::string(b[k + 10].id), std::string(want[k].id));
+        CHECK(b[k + 10].tier == want[k].tier);
+        CHECK_EQ(std::string(b[k + 10].feature), std::string(want[k].feature));
+    }
+    std::map<std::string, std::string> feature;
+    for (const SuiteScenario& s : b) feature[s.id] = s.feature;
+    CHECK(feature["song8"] == "all" && feature["song32_heavy"] == "all" && feature["flagship_heavy"] == "instrument" &&
+          feature["flagship_heavy16"] == "instrument" && feature["drums_kit"] == "instrument" && feature["tail_floor"] == "baseline");
+    // The scenarios that write WAVs need the work folder, and say so without one.
+    for (const char* id : {"single_sampler", "single_audio", "sample_stream", "resample", "every_instrument", "worst_all", "song8_extras"}) {
+        ProjectSpec p;
+        std::string error;
+        CHECK(!makeScenario(*findScenario(b, id), "", p, error));
+        CHECK(error.find("work folder") != std::string::npos);
+    }
+    // The structure each claims: folders 8 deep, 32 sends, voices past Flagship's 64.
+    {
+        const ProjectSpec p = folders(8, 4);
+        int deepest = 0;
+        for (const LayerSpec& l : p.layers) {
+            int depth = 0;
+            for (std::string at = l.parentId; !at.empty(); ++depth)
+                for (const LayerSpec& q : p.layers)
+                    if (q.id == at) { at = q.parentId; break; }
+            deepest = std::max(deepest, depth);
+        }
+        CHECK_EQ(deepest, 8);  // a track under 8 nested folders
+    }
+    {
+        const ProjectSpec p = sends(4, 4, false);
+        size_t n = 0;
+        for (const LayerSpec& l : p.layers) n += l.sends.size();
+        CHECK_EQ(n, size_t{32});
+    }
+}
+
+// The engine parts (#197): a profile's parts add up to its callbacks' time, and each scenario's largest part is the
+// feature it measures (sends_many: sends; folders_deep: routing). Every part is listed, in the contract's order.
+TEST(stress_profile_parts_add_up_and_name_the_feature) {
+    const std::pair<const char*, Part> want[] = {{"sends_many", Part::Sends}, {"folders_deep", Part::Routing}};
+    for (const auto& [id, dominant] : want) {
+        RunRequest r;
+        r.scenario = id;
+        r.kind = Kind::Profile;
+        r.seconds = 1.0;
+        Progress p;
+        const RunResult o = run(r, p, nullptr, nullptr);
+        CHECK(o.ok);
+        CHECK_EQ(o.parts.size(), static_cast<size_t>(kPartCount));
+        double pct = 0, us = 0;
+        Part top = Part::Other;
+        double topPct = -1;
+        for (size_t k = 0; k < o.parts.size(); ++k) {
+            CHECK(o.parts[k].part == static_cast<Part>(k));
+            pct += o.parts[k].pct;
+            us += o.parts[k].meanUs;
+            if (o.parts[k].pct > topPct) topPct = o.parts[k].pct, top = o.parts[k].part;
+            CHECK(o.parts[k].p99Us >= 0);
+        }
+        CHECK_NEAR(pct, 100.0, 0.01);
+        // The parts are process()'s own time; the callback's timer adds only a clock read around it.
+        CHECK(us <= o.meanUs * 1.001 && us >= o.meanUs * 0.97);
+        if (top != dominant) cawtest::fail(__FILE__, __LINE__, std::string(id) + ": the largest part is " + partName(top));
+        CHECK_EQ(o.parts[static_cast<int>(Part::DeviceIo)].pct, 0.0);  // live only
+        CHECK_EQ(o.parts[static_cast<int>(Part::MixPool)].pct < 1.0, true);  // a profile is serial
+    }
+    // A plain run has none (it isn't profiled).
+    RunRequest r;
+    r.scenario = "folders_shallow";
+    r.seconds = 0.1;
+    Progress p;
+    CHECK(run(r, p, nullptr, nullptr).parts.empty());
+}
+
+// The C API's JSON: every scenario's feature, and a profile job's feature and parts.
+TEST(stress_json_has_features_and_parts) {
+    char* list = caw_stress_scenarios();
+    Json j;
+    std::string error;
+    CHECK(list && parseJson(list, j, error));
+    caw_free(list);
+    const Json* scenarios = j.get("scenarios");
+    CHECK(scenarios && scenarios->arr.size() == 30);
+    for (const Json& s : scenarios->arr) CHECK(!s.string("feature").empty());
+    CawWorkerPool* pool = caw_worker_pool_create(1);
+    CawStressRequest q{};
+    q.struct_size = sizeof q;
+    q.scenario = "folders_shallow";
+    q.kind = CAW_STRESS_PROFILE;
+    q.mode = CAW_STRESS_DSP;
+    q.seconds = 0.2;
+    q.quality = 1;
+    CawJob* job = caw_worker_pool_submit_stress(pool, &q, CAW_JOB_FOREGROUND);
+    CHECK(job != nullptr);
+    if (job) {
+        CHECK_EQ(caw_job_wait(job, 120000), 0);
+        char* text = caw_job_result(job);
+        Json r;
+        CHECK(text && parseJson(text, r, error));
+        caw_free(text);
+        CHECK_EQ(r.string("feature"), std::string("routing"));
+        const Json* parts = r.get("parts");
+        CHECK(parts && parts->arr.size() == static_cast<size_t>(kPartCount));
+        if (parts && !parts->arr.empty()) {
+            CHECK_EQ(parts->arr[0].string("id"), std::string("mix"));
+            CHECK_EQ(parts->arr.back().string("id"), std::string("other"));
+            CHECK(parts->arr[0].get("mean_us") && parts->arr[0].get("p99_us") && parts->arr[0].get("pct"));
+        }
+        caw_job_release(job);
+    }
+    caw_worker_pool_destroy(pool);
+}
+
+// Live: the device callback's time outside Engine::process is its device I/O, per callback and summed.
+TEST(stress_live_stats_split_device_io) {
+    CawStressStats s(4);
+    s.record(100e-6, 1e-3, 48, -1, 70000);   // 100 us, 70 in process: 30 device I/O
+    s.record(50e-6, 1e-3, 48, -1, 60000);    // process longer than the callback (clock reads): none, never negative
+    s.record(20e-6, 1e-3, 48, -1);           // not timed apart: none
+    CHECK_NEAR(s.deviceIo[0], 30.0, 0.01);
+    CHECK_EQ(s.deviceIo[1], 0.0f);
+    CHECK_EQ(s.deviceIo[2], 0.0f);
+    CHECK_EQ(s.deviceIoNs.load(), int64_t{30000});
+    // The device's renderer times process() apart only while asked, and hands the time over once.
+    Engine e(48000);
+    e.setProject(firstLoop());
+    e.play();
+    DeviceRender render;
+    render.open(256);
+    std::vector<float> out(512);
+    render.render(e, out.data(), 256);
+    CHECK_EQ(render.takeProcessNs(), int64_t{0});
+    render.timeProcess(true);
+    const auto t0 = std::chrono::steady_clock::now();
+    render.render(e, out.data(), 256);
+    const int64_t wall = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - t0).count();
+    const int64_t ns = render.takeProcessNs();
+    CHECK(ns > 0 && ns <= wall);
+    CHECK_EQ(render.takeProcessNs(), int64_t{0});
 }
 
 // The ramp stops at the first count over budget and searches only below it, reporting the last count that held.

@@ -2,6 +2,7 @@
 #include "caw.h"
 #include "capi_internal.h"
 #include "capi_stress.h"
+#include "component_bench.h"
 #include "hardware.h"
 #include "json.h"
 #include "scheduler.h"
@@ -18,7 +19,7 @@
 #include <string>
 
 namespace {
-enum class TaskKind { Project, Render, Song, Stress };
+enum class TaskKind { Project, Render, Song, Stress, ComponentBench };
 enum class State : int32_t { Queued = 0, Running = 1, Succeeded = 2, Failed = 3, Cancelled = 4 };
 
 struct JobState {
@@ -46,6 +47,7 @@ struct WorkItem {
     CawRenderOptions options{};
     CawEngine* engine = nullptr;
     std::shared_ptr<caw::stress::Job> stress;
+    caw::bench::Request bench;  // ComponentBench
     ~WorkItem() { if (engine) engine->releaseAsync(); }
 };
 
@@ -98,7 +100,8 @@ void execute(void* raw) noexcept {
     int32_t expected = static_cast<int32_t>(State::Queued);
     if (!state->state.compare_exchange_strong(expected, static_cast<int32_t>(State::Running),
                                               std::memory_order_acq_rel)) return;
-    if ((item->kind == TaskKind::Render || item->kind == TaskKind::Song || item->kind == TaskKind::Stress) &&
+    if ((item->kind == TaskKind::Render || item->kind == TaskKind::Song || item->kind == TaskKind::Stress ||
+         item->kind == TaskKind::ComponentBench) &&
         atomicLoad(&state->cancel) != 0) {
         stressNeverRan(state);
         finish(state, State::Cancelled);
@@ -140,6 +143,24 @@ void execute(void* raw) noexcept {
                 state->resultCode.store(1, std::memory_order_relaxed);
             }
             atomicStore(&state->progress, 1000);
+            finish(state, ok ? State::Succeeded : wasCancelled ? State::Cancelled : State::Failed);
+            return;
+        }
+
+        if (item->kind == TaskKind::ComponentBench) {
+            const std::string text = caw::bench::run(item->bench, &state->progress, &state->cancel);
+            caw::Json parsed;
+            std::string parseError;
+            const bool read = caw::parseJson(text, parsed, parseError);
+            const bool ok = read && parsed.boolean("ok", false);
+            std::lock_guard<std::mutex> lock(state->mutex);
+            state->result = text;
+            if (!ok) {
+                state->error = read ? parsed.string("error", "native component bench failed") : "native component bench failed";
+                state->resultCode.store(1, std::memory_order_relaxed);
+            }
+            const bool wasCancelled = atomicLoad(&state->cancel) != 0;
+            if (wasCancelled && !ok) state->error = "cancelled";
             finish(state, ok ? State::Succeeded : wasCancelled ? State::Cancelled : State::Failed);
             return;
         }
@@ -336,6 +357,24 @@ CawJob* caw_worker_pool_submit_stress(CawWorkerPool* pool, const CawStressReques
     item->kind = TaskKind::Stress;
     item->stress = std::move(job);
     return submit(pool, std::move(item), priority);
+} catch (...) {
+    return nullptr;
+}
+
+CawJob* caw_worker_pool_submit_component_bench(CawWorkerPool* pool, const CawComponentBenchRequest* request) try {
+    constexpr size_t minimumSize = offsetof(CawComponentBenchRequest, seconds) + sizeof(double);
+    if (!pool || !request || request->struct_size < minimumSize || !request->component_id) return nullptr;
+    const double seconds = request->seconds == 0 ? 1.0 : request->seconds;
+    if (!(seconds >= 0.1 && seconds <= 10)) return nullptr;
+    if (request->library && request->trust_level != CAW_NATIVE_TRUST_TRUSTED) return nullptr;  // never opened otherwise
+    auto item = std::make_unique<WorkItem>();
+    item->state = std::make_shared<JobState>();
+    item->kind = TaskKind::ComponentBench;
+    item->bench.id = std::string(request->component_id).substr(0, 256);
+    item->bench.library = request->library ? std::string(request->library).substr(0, 4096) : std::string();
+    item->bench.trust = request->library ? caw::NativeModuleTrust::Trusted : caw::NativeModuleTrust::Blocked;
+    item->bench.seconds = seconds;
+    return submit(pool, std::move(item), CAW_JOB_FOREGROUND);
 } catch (...) {
     return nullptr;
 }

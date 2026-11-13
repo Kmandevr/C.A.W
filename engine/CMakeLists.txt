@@ -189,6 +189,7 @@ target_link_libraries(caw_core PUBLIC CAW::SDK Threads::Threads ${CMAKE_DL_LIBS}
 set_target_properties(caw_core PROPERTIES CXX_VISIBILITY_PRESET hidden C_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN ON)
 # The component testing suite (#163): offline measurements of C++ effects.
 target_sources(caw_core PRIVATE src/analysis.cpp src/component_test.cpp)
+target_sources(caw_core PRIVATE src/component_profile.cpp src/component_bench.cpp)  # the plug-in benchmark (#197)
 target_sources(caw_core PRIVATE src/sample_pack.cpp)  # the sample-pack maker (#164)
 target_sources(caw_core PRIVATE src/meters.cpp)  # live loudness, true peak and correlation meters (roadmap 2.6)
 # fx-dynamics begin: the Dynamics and Drive effects
@@ -268,6 +269,7 @@ target_include_directories(caw_cli PRIVATE src)
   target_sources(caw_tests PRIVATE tests/stress_test.cpp)  # the Benchmark (beta plan C): scenarios, ramps, cancel, profiles
   target_sources(caw_tests PRIVATE tests/mix_graph_test.cpp)  # speed phase 5a/5b: pulled routes, per-node scratch, graph levels
   target_sources(caw_tests PRIVATE tests/mix_pool_test.cpp)  # speed phase 5c: the mix pool, parallel levels, the serial lane
+  target_sources(caw_tests PRIVATE tests/component_bench_test.cpp)  # #197: the plug-in benchmark
   add_library(caw_test_component MODULE tests/native_component_fixture.cpp)
   target_link_libraries(caw_test_component PRIVATE CAW::SDK)
   target_compile_options(caw_test_component PRIVATE ${CAW_FLAGS})
@@ -277,6 +279,11 @@ target_include_directories(caw_cli PRIVATE src)
   target_compile_options(caw_test_component_no_entry PRIVATE ${CAW_FLAGS})
   target_compile_definitions(caw_test_component_no_entry PRIVATE CAW_TEST_OMIT_ENTRY)
   set_target_properties(caw_test_component_no_entry PROPERTIES PREFIX "" OUTPUT_NAME "caw_test_component_no_entry")
+  # The plug-in benchmark's bad component (#197): allocates in process() and runs on subnormals at silence.
+  add_library(caw_bench_fixture MODULE tests/bench_fixture_component.cpp)
+  target_link_libraries(caw_bench_fixture PRIVATE CAW::SDK)
+  target_compile_options(caw_bench_fixture PRIVATE ${CAW_FLAGS})
+  set_target_properties(caw_bench_fixture PROPERTIES PREFIX "" OUTPUT_NAME "caw_bench_fixture")
   # A component built against the 3.0 C interface (a descriptor without the 3.1 fields), in plain C.
   add_library(caw_test_component_v30 MODULE tests/native_component_v30_fixture.c)
   target_include_directories(caw_test_component_v30 PRIVATE include)
@@ -292,14 +299,16 @@ target_include_directories(caw_cli PRIVATE src)
   add_library(caw_component_c_check OBJECT tests/component_header_check.c)
   target_include_directories(caw_component_c_check PRIVATE include)
   set_target_properties(caw_component_c_check PROPERTIES C_STANDARD 99 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF)
-  add_dependencies(caw_tests caw_test_component caw_test_component_no_entry caw_test_component_v30 caw_component_c_check)
+  add_dependencies(caw_tests caw_test_component caw_test_component_no_entry caw_test_component_v30 caw_component_c_check
+                   caw_bench_fixture)
   target_compile_options(caw_tests PRIVATE ${CAW_FLAGS})
   target_include_directories(caw_tests PRIVATE src)
   target_compile_definitions(caw_tests PRIVATE CAW_ROOT="${CAW_ROOT}"
     "CAW_TEST_COMPONENT_PATH_DEFAULT=\"$<TARGET_FILE:caw_test_component>\""
     "CAW_TEST_NO_ENTRY_COMPONENT_PATH=\"$<TARGET_FILE:caw_test_component_no_entry>\""
     "CAW_TEST_V30_COMPONENT_PATH=\"$<TARGET_FILE:caw_test_component_v30>\""
-    "CAW_TEST_MODULATOR_PATH=\"$<TARGET_FILE:caw_test_modulator>\"")
+    "CAW_TEST_MODULATOR_PATH=\"$<TARGET_FILE:caw_test_modulator>\""
+    "CAW_TEST_BENCH_COMPONENT_PATH=\"$<TARGET_FILE:caw_bench_fixture>\"")
   target_link_libraries(caw_tests PRIVATE caw_core)
   # Compile the consumer test with only CAW::SDK's public include path; no engine/src access.
   add_library(caw_sdk_public_compile OBJECT tests/public_cpp_sdk_test.cpp)
@@ -341,11 +350,13 @@ target_include_directories(caw_cli PRIVATE src)
   target_sources(caw_rt_tests PRIVATE tests/modulation_rt_test.cpp)  # #161: project modulation
   target_sources(caw_rt_tests PRIVATE tests/note_fx_rt_test.cpp)  # #127: per-note FX
   target_sources(caw_rt_tests PRIVATE tests/stress_rt_test.cpp)  # the Benchmark: its timed loop
+  target_sources(caw_rt_tests PRIVATE tests/component_bench_rt_test.cpp)  # #197: the plug-in benchmark's allocation check
   target_compile_options(caw_rt_tests PRIVATE ${CAW_FLAGS})
   target_include_directories(caw_rt_tests PRIVATE src)
-  add_dependencies(caw_rt_tests caw_test_component)
+  add_dependencies(caw_rt_tests caw_test_component caw_bench_fixture)
   target_compile_definitions(caw_rt_tests PRIVATE CAW_ROOT="${CAW_ROOT}"
-    "CAW_TEST_COMPONENT_PATH_DEFAULT=\"$<TARGET_FILE:caw_test_component>\"")
+    "CAW_TEST_COMPONENT_PATH_DEFAULT=\"$<TARGET_FILE:caw_test_component>\""
+    "CAW_TEST_BENCH_COMPONENT_PATH=\"$<TARGET_FILE:caw_bench_fixture>\"")
   target_link_libraries(caw_rt_tests PRIVATE caw_core)
   add_test(NAME caw_rt_tests COMMAND caw_rt_tests)
   # The Library as components get it: built with CAW::SDK's strict floating point (this target takes no

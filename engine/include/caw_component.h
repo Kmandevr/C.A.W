@@ -347,6 +347,26 @@ typedef struct CawDisplayExtension {
     uint32_t (*read)(void* instance, float* destination, uint32_t capacity);
 } CawDisplayExtension;
 
+/* Host extension CAW_HOST_EXTENSION_PROFILE (CawHost.get_extension, #197): the plug-in benchmark's named sections.
+ * A component asks for it once (the C++ SDK does in create, caw/profile.hpp) and keeps the pointer; the host's
+ * table lives as long as the host. While a benchmark times this component, *active is non-zero (read it with a
+ * relaxed atomic load: it changes on another thread); otherwise a section costs that one read and a branch. Then,
+ * on the audio thread: begin(host_data, name) returns the section's slot for `name` (a string that lives as long as
+ * the library: a literal), or CAW_PROFILE_NO_SECTION (another thread than the benchmark's, or all 32 slots taken);
+ * now_ns() reads the host's clock; end(host_data, slot, start_ns) adds now - start_ns to the slot and counts a call.
+ * None of them allocate, lock or block. Sections may nest; each holds its own whole time (nested ones included). */
+#define CAW_HOST_EXTENSION_PROFILE "caw.profile.v1"
+#define CAW_PROFILE_NO_SECTION 0xFFFFFFFFu
+#define CAW_PROFILE_MAX_SECTIONS 32u
+typedef struct CawProfileExtension {
+    uint32_t struct_size;
+    const int32_t* active;
+    void* host_data;
+    uint32_t (*begin)(void* host_data, const char* name);
+    void (*end)(void* host_data, uint32_t section, uint64_t start_ns);
+    uint64_t (*now_ns)(void);
+} CawProfileExtension;
+
 /* The one symbol a component library exports. A library may hold several components (a bundle):
    index 0, 1, ... returns each, and NULL past the last. Hosts stop at the first NULL. */
 typedef const CawComponentV3* (*CawGetComponentV3Fn)(uint32_t index);

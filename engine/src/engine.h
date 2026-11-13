@@ -536,6 +536,8 @@ private:
     std::atomic<float> cpu_{0}, peakL_{0}, peakR_{0};
     std::atomic<ChainProfile*> profile_{nullptr};  // setProfile
     ChainProfile* chunkProfile_ = nullptr;         // audio thread: profile_ as this process() call read it
+    // The Benchmark's engine parts (engine_parts.h) of this call's profile, or null: one predictable branch a part.
+    PartProfile* parts() const noexcept { return chunkProfile_ ? &chunkProfile_->parts : nullptr; }
     std::atomic<bool> shedding_{true};             // setShedding
     std::atomic<bool> playingFlag_{false};
     std::atomic<bool> bypass_{false};
