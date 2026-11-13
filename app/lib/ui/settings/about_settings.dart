@@ -9,6 +9,7 @@ import '../../model/updates/update_service.dart';
 import '../../version.dart';
 import '../privacy/feedback_sheet.dart';
 import '../privacy/privacy_pages.dart';
+import '../startup_screen.dart' show openAlphaNotice;
 import '../theme.dart';
 import 'engine_diagnostics.dart';
 import 'privacy_settings.dart';
@@ -24,7 +25,7 @@ class AboutSettings extends StatelessWidget {
   Widget build(BuildContext context) => Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
         settingAction('about.beta',
             icon: Icons.science_outlined, iconColor: Neon.yellow,
-            subtitle: 'C.A.W open alpha $appVersion · things may change or break; projects are saved as you go'),
+            subtitle: 'C.A.W v$appVersion · $openAlphaNotice Projects are saved as you go.'),
         // Updates (owner, 2026-11-12); where Settings opens without the app, an inert service that checks nothing.
         UpdateSettings(service: UpdateService.running ?? UpdateService.inert, state: deps.state),
         // Telemetry and feedback exist once the app has started them (not in Settings opened alone).

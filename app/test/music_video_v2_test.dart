@@ -607,6 +607,37 @@ void main() {
       MusicVideoJobs.instance.dismiss();
       await tester.pump(const Duration(seconds: 1));
     });
+
+    testWidgets('Draft then Render in the same moment starts one render, and says nothing went wrong', (tester) async {
+      final tmp = Directory.systemTemp.createTempSync('caw_video_v2_');
+      addTearDown(() => tmp.deleteSync(recursive: true));
+      tester.view.physicalSize = const Size(360 * 3, 780 * 3);
+      tester.view.devicePixelRatio = 3;
+      addTearDown(tester.view.reset);
+      final s = AppState(settings: Settings());
+      addTearDown(s.dispose);
+      s.project = videoTestSong()..loopBars = 2;
+      await tester.pumpWidget(MaterialApp(home: Scaffold(body: MusicVideoPanel(state: s, encoder: FrameHashEncoder(),
+          audio: (p, q) => FakeVideoAudio(q), workDir: tmp))));
+      await tester.pumpAndSettle();
+      await tester.runAsync(() async {
+        // Both presses land before the first one has looked up its work folder (a double tap within one frame).
+        tester.widget<OutlinedButton>(find.byKey(const ValueKey('video-draft'))).onPressed!();
+        tester.widget<FilledButton>(find.byKey(const ValueKey('video-render'))).onPressed!();
+        bool ended(MusicVideoRender? r) => r != null && r.phase.index >= VideoRenderPhase.done.index;
+        for (var i = 0; i < 1500 && !ended(MusicVideoJobs.instance.render); i++) {
+          await Future<void>.delayed(const Duration(milliseconds: 20));
+        }
+      });
+      await tester.pumpAndSettle();
+      final r = MusicVideoJobs.instance.render!;
+      expect((r.draft, r.phase), (true, VideoRenderPhase.done));
+      expect(find.textContaining('Not started'), findsNothing);
+      expect(find.textContaining('Draft: '), findsOneWidget);
+      expect(Directory('${tmp.path}/full').existsSync(), isFalse, reason: 'the second press rendered nothing');
+      MusicVideoJobs.instance.dismiss();
+      await tester.pump(const Duration(seconds: 1));
+    });
   });
 
   group('goldens', () {

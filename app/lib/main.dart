@@ -34,13 +34,13 @@ import 'ui/startup_screen.dart';
 import 'ui/theme.dart';
 import 'ui/updates/update_prompt.dart';
 
-Future<void> main() async {
+Future<void> main(List<String> args) async {
   final startup = Stopwatch()..start(); // the telemetry report's startup time (to the first project open)
   WidgetsFlutterBinding.ensureInitialized();
   // A small Windows update staged by the last run is swapped in first, before the window shows; the new build then
-  // starts in a fresh process and this one ends.
+  // starts in a fresh process, with this run's arguments, and this one ends.
   final updateInstaller = platformUpdateInstaller();
-  final staged = await updateInstaller.finishStaged();
+  final staged = await updateInstaller.finishStaged(args);
   if (staged.relaunch) exit(0);
   // Open alpha: errors are kept (on the device only) for "Report a problem", then handled as before.
   final flutterError = FlutterError.onError;
