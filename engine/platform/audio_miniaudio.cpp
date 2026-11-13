@@ -96,6 +96,11 @@ struct Audio {
     // Set by miniaudio's job thread when an AAudio reroute rebuilt the stream (another burst, buffer and modes); the
     // control thread's next status, latency or size call reads them again (refreshAfterReroute).
     std::atomic<bool> rerouted{false};
+    // Set with it when the output was opened at a fixed size on AAudio: the rebuilt stream is given no size
+    // (miniaudio does not carry allowSetBufferCapacity over), so AAudio calls back with its own sizes under
+    // miniaudio's fixed one, a whole fixed-size render inside one burst's callback. The control thread reopens the
+    // device at its settings (reopenAfterReroute).
+    std::atomic<bool> reopen{false};
     int fifoMeanHold = 0;  // the frames it holds back on average: in the latency figures that align recordings
 };
 
@@ -266,8 +271,11 @@ int32_t aaudioBufferFrames(const Audio*) { return 0; }
 // miniaudio's job thread, after an AAudio reroute rebuilt the stream (ma_device_reinit__aaudio keeps
 // noFixedSizedCallback, so the output still takes the new stream's own sizes): only a flag, read on the control thread.
 void notified(const ma_device_notification* n) {
-    if (n && n->type == ma_device_notification_type_rerouted && n->pDevice && n->pDevice->pUserData)
-        static_cast<Audio*>(n->pDevice->pUserData)->rerouted.store(true, std::memory_order_release);
+    if (!n || n->type != ma_device_notification_type_rerouted || !n->pDevice || !n->pDevice->pUserData) return;
+    auto* a = static_cast<Audio*>(n->pDevice->pUserData);
+    // deviceSizes, frames and the backend are set before the device starts and never change while it runs.
+    if (!a->deviceSizes && a->frames > 0 && a->context.backend == ma_backend_aaudio) a->reopen.store(true, std::memory_order_release);
+    a->rerouted.store(true, std::memory_order_release);
 }
 
 // Under gDeviceLock, before a status, latency or size is reported: after a reroute, the new stream's modes, burst
@@ -718,6 +726,20 @@ int32_t reopenLocked(CawEngine* e) {
     return static_cast<const Audio*>(e->audio)->fallback ? 2 : 0;
 }
 
+// The control thread, at the start of a status, latency or size call: after an AAudio reroute of an output opened
+// at a fixed size (Audio::reopen, set on miniaudio's job thread), the device reopens at its settings as a buffer-mode
+// change does (reopenLocked: the same Engine, so the transport, project and position carry on; the route change
+// was a gap already). Only when no open or reconfigure holds gOpLock (try_lock: a poll never waits for one, and
+// that call opens a fresh device anyway); never on the audio thread or miniaudio's job thread.
+void reopenAfterReroute(CawEngine* e) {
+    std::unique_lock<std::mutex> op(gOpLock, std::try_to_lock);
+    if (!op.owns_lock()) return;
+    std::lock_guard<std::mutex> lock(gDeviceLock);
+    auto* a = static_cast<Audio*>(e->audio);
+    if (!a || !a->reopen.load(std::memory_order_acquire)) return;
+    reopenLocked(e);
+}
+
 // The input's state: "off" (not asked for, or no output running), "open" (delivering), "stalled" (open, but
 // nothing has arrived for 250 ms: another app took the microphone, or the stream died quietly), "stopped" (the
 // system stopped it: a disconnect miniaudio could not reopen) or "failed" (asked for and did not open; "error").
@@ -1031,6 +1053,7 @@ void caw_audio_set_buffer_mode(CawEngine* e, int32_t mode, int32_t recording) {
 
 int32_t caw_audio_buffer_frames(CawEngine* e) {
     if (!e) return 0;
+    reopenAfterReroute(e);
     std::lock_guard<std::mutex> lock(gDeviceLock);
     auto* a = static_cast<Audio*>(e->audio);
     if (a) refreshAfterReroute(a);
@@ -1191,6 +1214,7 @@ int32_t caw_audio_set_background(CawEngine* e, int32_t background) {
 
 char* caw_audio_status(CawEngine* e) {
     if (!e) return dup("{\"running\":false}");
+    reopenAfterReroute(e);
     std::lock_guard<std::mutex> lock(gDeviceLock);
     const std::string request = ",\"requested_device\":" + quoted(e->deviceName.c_str()) +
                                 ",\"requested_device_id\":" + quoted(e->deviceId.c_str()) +
@@ -1218,6 +1242,7 @@ char* caw_audio_status(CawEngine* e) {
 
 char* caw_audio_latency(CawEngine* e) {
     if (!e) return dup("{\"running\":false}");
+    reopenAfterReroute(e);
     std::lock_guard<std::mutex> lock(gDeviceLock);
     return dup(latencyJson(e, static_cast<Audio*>(e->audio)));
 }

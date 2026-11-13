@@ -704,6 +704,8 @@ bool Engine::useBenchmarkMixPool() {
     return true;
 }
 
+int Engine::mixThreadsForTest() noexcept { return gTestMixThreads.load(std::memory_order_relaxed); }
+
 void Engine::setMixThreadsForTest(int workers) noexcept {
     gTestMixThreads.store(std::min(workers, static_cast<int>(MixPool::kMaxWorkers)), std::memory_order_relaxed);
 }

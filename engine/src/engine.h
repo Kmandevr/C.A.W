@@ -291,6 +291,7 @@ public:
     // Tests only, before Engines are made: every Engine made from now on starts a pool of `workers` and uses it
     // Always (0: Never; -1, the default: no override). Offline renders then keep that.
     static void setMixThreadsForTest(int workers) noexcept;
+    static int mixThreadsForTest() noexcept;  // the override (-1: none; caw_tests --mix-threads N sets it)
     // Tests only, between process() calls: whether the last callback ran the graph with the pool.
     bool mixParallelForTest() const noexcept { return mixParallel_; }
     MixPool* mixPoolForTest() noexcept { return pool_.get(); }

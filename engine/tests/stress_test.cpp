@@ -468,7 +468,9 @@ TEST(stress_dsp_runs_use_the_pool_on_auto_after_a_warm_up) {
     CHECK_NEAR(o.warmupS, warmupSeconds(true), 256.0 / 48000);
     CHECK(o.firstCallbackUs > 0);
     CHECK(o.worstAtS >= o.warmupS && o.worstAtS <= o.warmupS + o.seconds);
-    CHECK_EQ(o.mixWorkers, MixPool::defaultWorkers());
+    // The run's own pool, unless a test's pool stays (caw_tests --mix-threads N: N workers, 0 none).
+    const uint32_t want = Engine::mixThreadsForTest() >= 0 ? Engine(48000).mixWorkers() : MixPool::defaultWorkers();
+    CHECK_EQ(o.mixWorkers, want);
     CHECK(o.mixActive <= o.mixWorkers);
     CHECK(std::isfinite(o.slopePctPerMin));
 
@@ -511,7 +513,7 @@ TEST(stress_dsp_runs_stay_serial_while_a_live_device_runs) {
     CHECK(o.ok);
     CHECK_EQ(o.mixWorkers, own);
     Engine e(48000);
-    if (own == 0) {
+    if (Engine::mixThreadsForTest() < 0) {
         CHECK(e.useBenchmarkMixPool());
         CHECK_EQ(e.mixWorkers(), MixPool::defaultWorkers());
     } else {
