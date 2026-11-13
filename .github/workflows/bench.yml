@@ -80,6 +80,19 @@ jobs:
         run: |
           cmake -S engine -B build -T ClangCL -DCAW_AUDIO=OFF
           cmake --build build --config Release --target caw_bench --parallel
+      - name: TEMPORARY A/B, MSVC against clang-cl on this runner
+        shell: bash
+        run: |
+          cmake -S engine -B build-msvc -DCAW_AUDIO=OFF > /dev/null
+          cmake --build build-msvc --config Release --target caw_bench --parallel > /dev/null
+          for round in 1 2; do
+            for c in clang msvc; do
+              dir=build; [ $c = msvc ] && dir=build-msvc
+              $dir/Release/caw_bench.exe 10 500 --runs 3 --threads 0 --label "AB $c round $round" --md "ab-$c-$round.md" > /dev/null
+              echo "### $c, round $round" >> "$GITHUB_STEP_SUMMARY"; cat "ab-$c-$round.md" >> "$GITHUB_STEP_SUMMARY"
+              echo "== $c round $round"; cat "ab-$c-$round.md"
+            done
+          done
       - name: Machine
         run: |
           Get-CimInstance Win32_Processor | Format-List Name, NumberOfCores, NumberOfLogicalProcessors, MaxClockSpeed
