@@ -404,6 +404,22 @@ void main() {
       expect(synth().value('flt1_cutoff'), greaterThan(before));
       expect(synth().value('flt1_resonance'), greaterThan(0.15));
     });
+
+    wtest('the fold warp shows its fold mode beside the warp; Whole stack sets it (#197)', (tester) async {
+      await openSynth(tester);
+      final whole = find.byKey(const ValueKey('dchoice-osc1_fold_mode-1'));
+      expect(whole, findsNothing, reason: 'only with the fold warp');
+      synth().set('osc1_warp', warpNames.indexOf('Fold').toDouble());
+      await tester.pumpAndSettle();
+      await reveal(tester, whole);
+      expect(find.text('Per copy'), findsOneWidget);
+      await tester.tap(whole);
+      await tester.pumpAndSettle();
+      expect(synth().value('osc1_fold_mode'), 1);
+      synth().set('osc1_warp', 0);
+      await tester.pumpAndSettle();
+      expect(whole, findsNothing);
+    });
   });
 
   group('models', () {
@@ -556,7 +572,7 @@ void main() {
   test('the fixture matches the engine\'s flagship descriptor', () async {
     final e = Engine.create();
     final real = (await e.nativeComponents()).firstWhere((c) => c.id == flagshipComponentId);
-    expect(real.parameters.length, 212);
+    expect(real.parameters.length, 215);
     // The engine's presets reach the browser (DevicePresets.engine reads the descriptor's list).
     expect(real.presets.map((p) => p.name), ['Init', 'Morph pad', 'Mono bass', 'Acid 303', 'Basic', 'Pluck', 'FM bell']);
     expect([for (final p in real.parameters) p.id], [for (final p in flagship.parameters) p.id]);

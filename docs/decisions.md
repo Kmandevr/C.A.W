@@ -6,6 +6,15 @@ updated: 2026-11-13
 
 # Decisions
 
+## 2026-11-13: Flagship's fold: a fold mode, ADAA at the sample rate, and a float drive (owner, #197)
+
+**Decision (owner, GitHub issue #197, comment of 2026-11-13):** three changes to speed up the Flagship, all approved:
+- **A fold mode per oscillator** (`oscN_fold_mode`, appended after the FM ratios): Per copy (the default, and what every project and preset saved without it plays) or Whole stack. **Design (Claude):** Whole stack sums the unison copies at their pan gains before the level and folds each side's sum once (once in all when every copy is centred), then applies the level, because a side hears only its own copies; Osc FM hears the mean of the two sides' folds. The level comes after the fold in both modes, so it never changes the fold.
+- **First-order antiderivative anti-aliasing (ADAA) at 1x** replaces the fold's 2x oversampling in both modes and at every quality. The owner accepted the change to the aliasing character. Written as sin(k m) × sinc(k d / 2) (exactly the ADAA quotient for the sine), so the ill-conditioned v ≈ p needs no threshold. **Measured, and for the owner to weigh (2026-11-13):** at A6 with full drive the aliases are 39 dB down instead of 63 dB (ADAA is about 6 dB better than no anti-aliasing there); an octave lower, or at 0.6 of the drive, they are 67 and 74 dB down, better than the 2x path (62 and 73 dB); over A4..A6 at three drives ADAA beat the 2x path in 10 of 15 cases. ADAA also delays the fold half a sample and softens its top octave (about −2 dB at 10 kHz). The aliasing test's limits were rewritten to these measurements ([engine](engine.md)).
+- **A float drive:** the voice filters' drive runs in float four samples at a time (`Saturator::processApproxFloat`, SSE or NEON through GCC/Clang vectors) instead of double pairs; within 1e-6 of the double form (−138 dBFS on the heavy patch), no reference re-recorded for it.
+
+The re-recorded references are `stress.cawref`'s `flagship_heavy` and `flagship_heavy16` only (the fold sound change); the numbers are in [engine performance](engine-performance.md#a6-flagship-fold-and-drive-197).
+
 ## 2026-11-13: The polish release is 1.0.1-alpha.1; the app stays alpha until the owner says otherwise (owner)
 
 **Decision (owner, 2026-11-13):** the polish pass ships as **1.0.1-alpha.1**. "It'll end up being a full release if it's stable. But again the app is still an alpha … until I say it's going to go back to 1.0 and as an official release not just alpha." So versions keep the `-alpha.N` suffix (the beta telemetry channel, the Open alpha notice) until the owner calls the official release.
