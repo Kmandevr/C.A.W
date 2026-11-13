@@ -322,7 +322,8 @@ ProjectSpec typicalSong(bool extras, const std::string& dir = "") {
         const double t = static_cast<double>(i) / 48000.0;
         return static_cast<float>(0.4 * std::sin(2 * 3.14159265 * 220 * t) + 0.15 * std::sin(2 * 3.14159265 * 661 * t));
     });
-    const std::string zones = "{\"zones\":[{\"path\":\"" + tone + "\",\"pitch_keycenter\":57,\"loop_mode\":\"loop_sustain\","
+    // Forward slashes: a Windows temp path's backslashes would be escapes in the JSON.
+    const std::string zones = "{\"zones\":[{\"path\":\"" + std::filesystem::path(tone).generic_string() + "\",\"pitch_keycenter\":57,\"loop_mode\":\"loop_sustain\","
                               "\"loop_start\":2000,\"loop_end\":90000,\"loop_crossfade\":0.01}]}";
     std::string samp;
     for (int b = 0; b < 4; ++b)
