@@ -554,6 +554,8 @@ int runSuite(double secs, int argc, char** argv) {
                 for (int i = 0; i < frames; ++i) m = std::max(m, std::max(std::fabs(l[static_cast<size_t>(i)]), std::fabs(r[static_cast<size_t>(i)])));
                 peak[static_cast<size_t>(c)] = m;
             }
+            if (autoMode && e.mixTailFallbacks() > 0)  // the pool's late callbacks outnumbered serial's
+                std::fprintf(stderr, "%s: Auto's tail guard went serial %u times\n", sc.id, e.mixTailFallbacks());
             if (autoMode && e.sheddingStats().shed > 0)  // the times then lack the layers shed
                 std::fprintf(stderr, "%s: the engine shed %llu layers (the load passed the budget)\n", sc.id,
                              static_cast<unsigned long long>(e.sheddingStats().shed));

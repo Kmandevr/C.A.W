@@ -98,6 +98,13 @@ public:
     // Tests only: each worker waits `micros` after it claims a task and before it runs it, and the caller lets a
     // worker claim first, so the caller waits for the workers (Auto's measure of a pool that costs more than it gives).
     void setHoldForTest(uint32_t micros) noexcept { holdMicros_.store(micros, std::memory_order_relaxed); }
+    // Tests only: a worker preempted mid-level now and then. Every `everyCallbacks` callbacks (beginCallback), the
+    // next task a worker claims waits `micros` first (the caller lets one claim first), so that callback waits for
+    // it while the others don't.
+    void setPreemptForTest(uint32_t micros, uint32_t everyCallbacks) noexcept {
+        preemptEvery_.store(everyCallbacks, std::memory_order_relaxed);
+        preemptMicros_.store(micros, std::memory_order_relaxed);
+    }
     // Tests only: tasks the workers (not the caller) have run since start().
     uint64_t workerTasksForTest() const noexcept { return workerTasks_.load(std::memory_order_relaxed); }
 
@@ -123,6 +130,9 @@ private:
     std::atomic<uint32_t> active_{kMaxWorkers};
     std::atomic<uint32_t> delayMicros_{0};
     std::atomic<uint32_t> holdMicros_{0};
+    std::atomic<uint32_t> preemptMicros_{0}, preemptEvery_{0};
+    std::atomic<bool> preemptArmed_{false};
+    uint32_t preemptCount_ = 0;  // audio thread: callbacks counted for setPreemptForTest
     std::atomic<uint64_t> workerTasks_{0};
     std::atomic<int64_t> workerNs_{0};   // task time on the workers since takeTimes
     int64_t waitNs_ = 0;                 // audio thread: finish()'s wait since takeTimes
