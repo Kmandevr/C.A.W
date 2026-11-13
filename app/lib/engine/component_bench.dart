@@ -41,6 +41,8 @@ class EngineComponentBenchJob implements ComponentBenchJob {
   /// Submits [r]: the library (the user's own build, so Trusted) or a built-in by id. A refused job's result says why.
   static ComponentBenchJob submit(ComponentBenchRequest r, {double seconds = 1.0}) {
     if (r.componentId.isEmpty) return _Refused('the component has no id');
+    // A library runs only as the user's own code or code they chose to trust, checked as the run starts.
+    if (r.libraryPath != null && !r.trusted) return _Refused('Trust this plug-in\'s code first: blocked or undecided code never runs');
     final b = Bindings.instance;
     final req = calloc<CawComponentBenchRequestStruct>();
     final id = r.componentId.toNativeUtf8();
@@ -50,7 +52,7 @@ class EngineComponentBenchJob implements ComponentBenchJob {
         ..structSize = sizeOf<CawComponentBenchRequestStruct>()
         ..componentId = id
         ..library = r.libraryPath == null ? nullptr : library
-        ..trustLevel = r.libraryPath == null ? 0 : _trusted
+        ..trustLevel = r.libraryPath != null && r.trusted ? _trusted : 0
         ..seconds = seconds;
       final handle = NativeEngineWorkPool.shared.submitComponentBenchRaw(req);
       if (handle == nullptr) return _Refused('the engine\'s worker pool did not take the benchmark');

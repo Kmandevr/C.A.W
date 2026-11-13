@@ -1,5 +1,8 @@
-// Shared-library fixture for the plug-in benchmark (#197): an effect that allocates in process() and runs on subnormals at silence.
+// Shared-library fixture for the plug-in benchmark (#197): effects that allocate and run on subnormals, hang, or fail in process().
+#include <atomic>
+#include <chrono>
 #include <new>
+#include <thread>
 
 #include <caw/component.hpp>
 
@@ -42,6 +45,7 @@ public:
         const float gain = b.parameters && b.parameterCount ? static_cast<float>(b.parameters[0].value) : 0.5f;
         CAW_PROFILE_SCOPE("decay");
         for (uint32_t c = 0; c < 2; ++c) {
+            CAW_PROFILE_SCOPE("channel");  // nested in "decay": its time is taken off decay's
             const float* in = b.input.channels[c];
             float* out = b.output.channels[c];
             for (uint32_t i = 0; i < b.frames; ++i) {
@@ -66,6 +70,39 @@ private:
     const float tiny_ = tinyStore_;
 };
 
+// A process() that never returns while held (the watchdog's test): it sleeps until released.
+std::atomic<int> gHold{1};
+const caw::ModuleDescriptor kHangDescriptor{"org.caw.tests.bench-hang", 1, kPorts, 2, nullptr, 0, nullptr, 0, {}};
+
+class HangProcessor final : public caw::ModuleProcessor {
+public:
+    const caw::ModuleDescriptor& descriptor() const noexcept override { return kHangDescriptor; }
+    void process(const caw::StereoProcessBlock&) noexcept override {
+        while (gHold.load()) std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+};
+
+// Releases the hang: its process() lets every HangProcessor return (the test's handle, through a registry of its
+// own: the same library, so no platform loader call is needed).
+const caw::ModuleDescriptor kReleaseDescriptor{"org.caw.tests.bench-release", 1, kPorts, 2, nullptr, 0, nullptr, 0, {}};
+
+class ReleaseProcessor final : public caw::ModuleProcessor {
+public:
+    const caw::ModuleDescriptor& descriptor() const noexcept override { return kReleaseDescriptor; }
+    void process(const caw::StereoProcessBlock&) noexcept override { gHold.store(0); }
+};
+
+// A process() that fails every block (a component's way to report trouble: process is noexcept, and the SDK's export
+// turns anything thrown under it into a failed block).
+const caw::ModuleDescriptor kFailDescriptor{"org.caw.tests.bench-fail", 1, kPorts, 2, nullptr, 0, nullptr, 0, {}};
+
+class FailProcessor final : public caw::ModuleProcessor {
+public:
+    const caw::ModuleDescriptor& descriptor() const noexcept override { return kFailDescriptor; }
+    using caw::ModuleProcessor::process;
+    bool process(const caw::AudioProcessBlock&) noexcept override { return false; }
+};
+
 }  // namespace
 
-CAW_EXPORT_COMPONENT(BadProcessor, kDescriptor)
+CAW_EXPORT_COMPONENTS(BadProcessor, HangProcessor, ReleaseProcessor, FailProcessor)

@@ -86,6 +86,13 @@ class _PluginBenchScreenState extends State<PluginBenchScreen> {
         const SizedBox(height: 8),
         const Text('It plays your plug-in silently on its own, at several voice counts, block sizes and sample rates.',
             style: TextStyle(color: Neon.dim, fontSize: 12)),
+        const SizedBox(height: 4),
+        // Said plainly (audio review, 2026-11-13): the bench runs a Trusted plug-in in C.A.W's own process.
+        const Text(
+            'It runs your trusted plug-in inside C.A.W: if the plug-in crashes, the app closes with it. '
+            'Running it apart (Isolated) comes later.',
+            key: ValueKey('pbench-in-process'),
+            style: TextStyle(color: Neon.dim, fontSize: 12)),
         Align(
           alignment: Alignment.centerRight,
           child: TextButton.icon(
@@ -206,6 +213,7 @@ class _PluginBenchScreenState extends State<PluginBenchScreen> {
       BenchCheckStatus.pass => Neon.green,
       BenchCheckStatus.warn => Neon.yellow,
       BenchCheckStatus.fail => Neon.pink,
+      BenchCheckStatus.notMeasured => Neon.dim,
     };
     return Padding(
       key: ValueKey('pbench-check-${c.id}'),
@@ -219,6 +227,7 @@ class _PluginBenchScreenState extends State<PluginBenchScreen> {
                 BenchCheckStatus.pass => Icons.check,
                 BenchCheckStatus.warn => Icons.warning_amber_rounded,
                 BenchCheckStatus.fail => Icons.close,
+                BenchCheckStatus.notMeasured => Icons.remove,
               },
               size: 18,
               color: color,

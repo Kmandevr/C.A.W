@@ -5,13 +5,19 @@ import 'package:flutter/foundation.dart';
 
 import 'app_state.dart';
 import 'component_bench_result.dart';
+import 'cpp_component.dart';
 import 'cpp_workbench.dart';
 import 'stress_runner.dart';
 
 /// One plug-in benchmark: a built component, by its library file and/or the id the engine loaded it as.
 class ComponentBenchRequest {
-  const ComponentBenchRequest({this.libraryPath, this.componentId = '', required this.instrument, this.name = ''});
+  const ComponentBenchRequest(
+      {this.libraryPath, this.componentId = '', required this.instrument, this.name = '', this.trusted = false});
   final String? libraryPath;
+
+  /// The user's choice for this code is Trusted, checked when the run starts: the engine's binding sends Trusted
+  /// only then, and refuses a library otherwise (it never runs code the user blocked or hasn't decided on).
+  final bool trusted;
   final String componentId;
   final bool instrument;
   final String name;
@@ -52,8 +58,12 @@ class _Refused implements ComponentBenchJob {
 
 /// A built plug-in the Benchmark can time.
 class ComponentBenchTarget {
-  const ComponentBenchTarget({required this.name, required this.componentId, this.libraryPath, required this.instrument});
+  const ComponentBenchTarget(
+      {required this.name, required this.componentId, this.libraryPath, required this.instrument, this.trustedNow});
   final String name, componentId;
+
+  /// Whether the user's choice for this code is Trusted now (asked when a run starts); null: not trusted.
+  final bool Function()? trustedNow;
 
   /// Null: not built (nothing to time).
   final String? libraryPath;
@@ -61,17 +71,29 @@ class ComponentBenchTarget {
   bool get built => libraryPath != null;
   String get kind => instrument ? 'instrument' : 'effect';
 
-  ComponentBenchRequest get request =>
-      ComponentBenchRequest(libraryPath: libraryPath, componentId: componentId, instrument: instrument, name: name);
+  /// The request to start now: its trust read at this moment.
+  ComponentBenchRequest get request => ComponentBenchRequest(
+      libraryPath: libraryPath, componentId: componentId, instrument: instrument, name: name, trusted: trustedNow?.call() ?? false);
 
-  factory ComponentBenchTarget.of(CppWorkbench w) =>
-      ComponentBenchTarget(name: w.name, componentId: w.componentId, libraryPath: w.artifactPath, instrument: w.isInstrument);
+  factory ComponentBenchTarget.of(CppWorkbench w) => ComponentBenchTarget(
+      name: w.name,
+      componentId: w.componentId,
+      libraryPath: w.artifactPath,
+      instrument: w.isInstrument,
+      trustedNow: () => benchTrustedNow(w.state, w.component));
 }
 
-/// The project's built C++ components: an open editor's last build, else the library the engine loaded.
+/// Whether [component]'s code is Trusted now (NativeComponentManager.benchTrusted); false where the app can't build
+/// or load C++ (no manager) or the component is gone.
+bool benchTrustedNow(AppState state, CppComponentDoc? component) =>
+    component != null && (state.nativeComponents?.benchTrusted(component) ?? false);
+
+/// The project's built C++ components whose code is Trusted now: an open editor's last build, else the library the
+/// engine loaded. A blocked or undecided one is not listed.
 List<ComponentBenchTarget> componentBenchTargets(AppState state) {
   final out = <ComponentBenchTarget>[];
   for (final c in state.project.cppComponents) {
+    if (!benchTrustedNow(state, c)) continue;
     final w = state.openCppWorkbench(c.id);
     if (w != null) {
       if (w.artifactPath != null) out.add(ComponentBenchTarget.of(w));
@@ -83,7 +105,8 @@ List<ComponentBenchTarget> componentBenchTargets(AppState state) {
         name: c.name,
         componentId: c.componentId,
         libraryPath: path,
-        instrument: c.files.values.any((s) => s.contains('InstrumentProcessor'))));
+        instrument: c.files.values.any((s) => s.contains('InstrumentProcessor')),
+        trustedNow: () => benchTrustedNow(state, state.project.cppComponents.where((x) => x.id == c.id).firstOrNull)));
   }
   return out;
 }

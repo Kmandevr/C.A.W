@@ -5,9 +5,12 @@
 #include <atomic>
 #include <chrono>
 #include <cmath>
+#include <condition_variable>
 #include <cstdio>
+#include <exception>
 #include <memory>
 #include <mutex>
+#include <thread>
 #include <vector>
 
 #include "builtin_components.h"
@@ -23,7 +26,29 @@ namespace caw::bench {
 namespace {
 
 std::atomic<AllocationCounter> gCounter{nullptr};
-std::mutex gOneAtATime;  // the section table is the process's one
+// One bench at a time (the section table is the process's one): set by the job that starts one, cleared by the
+// bench's own thread when it ends (an atomic, since the two are different threads).
+std::atomic<bool> gBusy{false};
+std::atomic<bool> gAbandoned{false};  // a bench thread was left behind in a process() that never returned
+
+// What the bench's thread shows the job's thread, which watches it (run()): its progress, a cancel, and when the
+// block it is in began (0: not in process()) with that block's deadline.
+struct Watch {
+    alignas(4) int32_t progress = 0;
+    alignas(4) int32_t cancel = 0;
+    std::atomic<int64_t> blockStartNs{0};
+    std::atomic<int64_t> blockDeadlineNs{0};
+    std::mutex mutex;
+    std::condition_variable done;
+    bool finished = false;  // under mutex
+    std::string result;     // under mutex
+};
+
+using Clock = std::chrono::steady_clock;
+
+int64_t steadyNs() noexcept {
+    return std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now().time_since_epoch()).count();
+}
 
 constexpr double kRate = 48000;
 constexpr uint32_t kBlock = 64;  // the Engine's block: what a component gets in C.A.W
@@ -33,9 +58,12 @@ constexpr int kVoiceCounts[] = {1, 2, 4, 8, 16};
 constexpr uint32_t kBlockSizes[] = {32, 64, 128, 256, 512};
 constexpr double kRates[] = {44100, 48000, 96000};
 
-using Clock = std::chrono::steady_clock;
-
 double budgetUs(uint32_t frames, double rate) { return 1e6 * frames / rate; }
+
+// How long one block may take before the component counts as stuck: 100 times its budget, at least a second.
+int64_t deadlineNs(uint32_t frames, double rate) noexcept {
+    return std::max<int64_t>(1000000000, static_cast<int64_t>(100.0 * 1000.0 * budgetUs(frames, rate)));
+}
 
 std::string num(double v) {
     if (!std::isfinite(v)) return "0";
@@ -143,8 +171,9 @@ public:
     std::vector<std::vector<double>>& ramps() noexcept { return ramps_; }
     bool quiet() const noexcept { return p_->quiet(); }
 
-    // One block of m frames. False: the component reported a failure.
-    bool process(uint32_t m) noexcept {
+    // One block of m frames. False: the component reported a failure. Not noexcept: a C++ exception that leaves
+    // the component reaches the bench's catch (the job fails) rather than ending the app.
+    bool process(uint32_t m) {
         for (size_t k = 0; k < outPtr_.size(); ++k)
             for (float* o : outPtr_[k]) std::fill_n(o, m, 0.0f);
         const ParameterValue* params = values_.empty() ? nullptr : values_.data();
@@ -290,7 +319,7 @@ bool cancelled(const int32_t* cancel) noexcept {
 
 // Plays `plan` through the rig and times each timed block. Nothing in the loop allocates (the rig's buffers and
 // `us` are set aside first), so an allocation counted is the component's.
-Series measure(Rig& rig, const Plan& plan, const int32_t* cancel) {
+Series measure(Rig& rig, const Plan& plan, const int32_t* cancel, Watch* watch) {
     Series s;
     const double rate = rig.rate();
     const uint64_t untimed = static_cast<uint64_t>(plan.untimedSeconds * rate / plan.block);
@@ -328,7 +357,12 @@ Series measure(Rig& rig, const Plan& plan, const int32_t* cancel) {
         } else {
             const uint64_t a0 = counter ? counter() : 0;
             const auto t0 = Clock::now();
+            // The job's thread watches this: a block past its deadline means the component never returned.
+            watch->blockDeadlineNs.store(deadlineNs(m, rate), std::memory_order_relaxed);
+            watch->blockStartNs.store(std::chrono::duration_cast<std::chrono::nanoseconds>(t0.time_since_epoch()).count(),
+                                      std::memory_order_release);
             const bool ok = rig.process(m);
+            watch->blockStartNs.store(0, std::memory_order_release);
             took = std::chrono::duration<double, std::micro>(Clock::now() - t0).count();
             s.totalUs += took;
             if (counter) s.allocations += counter() - a0;
@@ -387,7 +421,7 @@ std::string failure(const std::string& error) {
     return "{\"ok\":false,\"tool\":\"caw_component_bench\",\"format\":1,\"error\":" + str(error) + "}";
 }
 
-std::string runLocked(const Request& r, int32_t* progress, const int32_t* cancel) {
+std::string runLocked(const Request& r, int32_t* progress, const int32_t* cancel, Watch* watch) {
     auto step = [&](int permille) {
         if (progress) std::atomic_ref<int32_t>(*progress).store(permille, std::memory_order_relaxed);
     };
@@ -420,10 +454,13 @@ std::string runLocked(const Request& r, int32_t* progress, const int32_t* cancel
     step(20);
     Plan plan;
     plan.seconds = S;
-    profile::start();
-    const Series baseRun = measure(*base, plan, cancel);
-    profile::stop();
-    const std::vector<profile::Section> sections = profile::sections();
+    std::vector<profile::Section> sections;
+    Series baseRun;
+    {
+        const profile::Recording recording;  // stops on any way out, so the table never stays active
+        baseRun = measure(*base, plan, cancel, watch);
+    }
+    sections = profile::sections();
     base.reset();
     if (cancelled(cancel)) return failure("cancelled");
     step(150);
@@ -444,7 +481,7 @@ std::string runLocked(const Request& r, int32_t* progress, const int32_t* cancel
     silencePlan.untimedFeed = Feed::Silence;
     silencePlan.feed = Feed::Silence;
     silencePlan.sleep = true;
-    const Series silent = measure(*quiet, silencePlan, cancel);
+    const Series silent = measure(*quiet, silencePlan, cancel, watch);
     add(silent);
     quiet.reset();
     step(250);
@@ -454,7 +491,7 @@ std::string runLocked(const Request& r, int32_t* progress, const int32_t* cancel
     if (!moving) return failure(error);
     Plan paramPlan = plan;
     paramPlan.automate = true;
-    const Series automated = measure(*moving, paramPlan, cancel);
+    const Series automated = measure(*moving, paramPlan, cancel, watch);
     add(automated);
     moving.reset();
     step(350);
@@ -467,12 +504,12 @@ std::string runLocked(const Request& r, int32_t* progress, const int32_t* cancel
     tail.feed = Feed::Silence;
     auto flushed = rig(kRate, kBlock);
     if (!flushed) return failure(error);
-    const Series tailFlushed = measure(*flushed, tail, cancel);
+    const Series tailFlushed = measure(*flushed, tail, cancel, watch);
     flushed.reset();
     auto raw = rig(kRate, kBlock);
     if (!raw) return failure(error);
     tail.keepDenormals = true;
-    const Series tailRaw = measure(*raw, tail, cancel);
+    const Series tailRaw = measure(*raw, tail, cancel, watch);
     raw.reset();
     add(tailFlushed);
     add(tailRaw);
@@ -488,7 +525,7 @@ std::string runLocked(const Request& r, int32_t* progress, const int32_t* cancel
             Plan vp;
             vp.seconds = S / 2;
             vp.heldVoices = n;
-            const Series sv = measure(*v, vp, cancel);
+            const Series sv = measure(*v, vp, cancel, watch);
             add(sv);
             voiceCurve.push_back({static_cast<double>(n), 100.0 * sv.mean / budget});
         }
@@ -504,7 +541,7 @@ std::string runLocked(const Request& r, int32_t* progress, const int32_t* cancel
         Plan bp;
         bp.block = frames;
         bp.seconds = S / 2;
-        const Series sb = measure(*v, bp, cancel);
+        const Series sb = measure(*v, bp, cancel, watch);
         add(sb);
         blockCurve.push_back({static_cast<double>(frames), 100.0 * sb.mean / budgetUs(frames, kRate)});
         perFrameNs.push_back(1000.0 * sb.mean / frames);
@@ -519,7 +556,7 @@ std::string runLocked(const Request& r, int32_t* progress, const int32_t* cancel
         if (!v) return failure(error);
         Plan rp;
         rp.seconds = S / 2;
-        const Series sr = measure(*v, rp, cancel);
+        const Series sr = measure(*v, rp, cancel, watch);
         add(sr);
         rateCurve.push_back({rate, 100.0 * sr.mean / budgetUs(kBlock, rate)});
         rateMean.push_back(sr.mean);
@@ -643,8 +680,63 @@ void setAllocationCounter(AllocationCounter counter) noexcept { gCounter.store(c
 
 std::string run(const Request& request, int32_t* progress, const int32_t* cancel) {
     try {
-        const std::lock_guard<std::mutex> lock(gOneAtATime);
-        return runLocked(request, progress, cancel);
+        bool idle = false;
+        if (!gBusy.compare_exchange_strong(idle, true))
+            return failure(gAbandoned.load() ? "a plug-in in an earlier benchmark never returned from process(); restart the app to "
+                                               "run another"
+                                             : "a benchmark is running");
+        gAbandoned.store(false);
+        // The measurements run on a thread of their own, which this one watches: a component whose process() never
+        // returns is left behind there (the job fails, the worker and the pool go on), never waited for.
+        auto watch = std::make_shared<Watch>();
+        std::thread bench;
+        try {
+            bench = std::thread([watch, request]() {
+                std::string text;
+                try {
+                    text = runLocked(request, &watch->progress, &watch->cancel, watch.get());
+                } catch (const std::exception& e) {
+                    text = failure(std::string("the component threw: ") + e.what());
+                } catch (...) {
+                    text = failure("the component threw an exception");
+                }
+                gBusy.store(false);
+                {
+                    const std::lock_guard<std::mutex> g(watch->mutex);
+                    watch->result = std::move(text);
+                    watch->finished = true;
+                }
+                watch->done.notify_all();
+            });
+        } catch (...) {
+            gBusy.store(false);
+            throw;
+        }
+        std::unique_lock<std::mutex> g(watch->mutex);
+        for (;;) {
+            if (watch->done.wait_for(g, std::chrono::milliseconds(20), [&] { return watch->finished; })) {
+                std::string text = std::move(watch->result);
+                g.unlock();
+                bench.join();
+                if (progress) std::atomic_ref<int32_t>(*progress).store(std::atomic_ref<int32_t>(watch->progress).load());
+                return text;
+            }
+            if (progress) std::atomic_ref<int32_t>(*progress).store(std::atomic_ref<int32_t>(watch->progress).load(std::memory_order_relaxed),
+                                                                     std::memory_order_relaxed);
+            if (cancelled(cancel)) std::atomic_ref<int32_t>(watch->cancel).store(1, std::memory_order_relaxed);
+            const int64_t start = watch->blockStartNs.load(std::memory_order_acquire);
+            const int64_t deadline = watch->blockDeadlineNs.load(std::memory_order_relaxed);
+            if (start != 0 && steadyNs() - start > deadline) {
+                // Stuck in the component: stop waiting. Its thread keeps the bench's lock until (if ever) it returns,
+                // then stops at its next check (cancel) and lets the next benchmark run.
+                std::atomic_ref<int32_t>(watch->cancel).store(1, std::memory_order_relaxed);
+                gAbandoned.store(true);
+                g.unlock();
+                bench.detach();
+                return failure("the component did not return from process() within " + fixed(1e-9 * static_cast<double>(deadline), 1) +
+                               " s; it was left running and its benchmark failed");
+            }
+        }
     } catch (const std::exception& e) {
         return failure(std::string("the benchmark failed: ") + e.what());
     } catch (...) {

@@ -17,10 +17,19 @@ struct Section {
     uint64_t ns = 0, calls = 0;
 };
 
-// One benchmark at a time records (component_bench.cpp holds a lock around it). start() clears the table and
+// One benchmark at a time records (component_bench.cpp allows one at a time). start() clears the table and
 // records the sections the calling thread enters until stop(); sections entered on any other thread are ignored.
+// Each section's time is its own (exclusive): a nested section's time is taken off its parent's, so the shares
+// add up to at most the whole.
 void start() noexcept;
 void stop() noexcept;
+// start() for its life: stop() on any way out (a throw too), so the table never stays active.
+struct Recording {
+    Recording() noexcept { start(); }
+    ~Recording() { stop(); }
+    Recording(const Recording&) = delete;
+    Recording& operator=(const Recording&) = delete;
+};
 // The sections recorded since start(), in first-entered order. Call after stop().
 std::vector<Section> sections();
 

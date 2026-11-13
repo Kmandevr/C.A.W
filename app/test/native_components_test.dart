@@ -1,11 +1,15 @@
 // A project's C++ components: own code builds and loads, other code waits for a choice, builds are reused.
 import 'dart:io';
 
+import 'package:caw/engine/component_bench.dart';
 import 'package:caw/engine/engine.dart';
+import 'package:caw/model/app_state.dart';
+import 'package:caw/model/component_bench.dart';
 import 'package:caw/model/cpp_component.dart';
 import 'package:caw/model/native_components.dart';
 import 'package:caw/model/native_trust.dart';
 import 'package:caw/model/project.dart';
+import 'package:caw/model/settings.dart';
 import 'package:caw/platform/cpp_build.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -63,6 +67,49 @@ void main() {
     final again = await manager.prepare(project);
     expect(again.loaded, containsAll(['org.me.delay', 'org.me.fuzz']));
     expect(builds, ['org.me.delay', 'org.me.fuzz']);  // the loaded one wasn't rebuilt
+  });
+
+  // Security review (2026-11-13): revoking trust stops the plug-in benchmark at once.
+  test('a trusted component loads and is benchable; blocked or forgotten, it is neither listed nor run', () async {
+    final theirs = component('fuzz', 'int b;');
+    final fp = NativeTrustStore.sourceFingerprint(theirs);
+    trust.remember('org.me.fuzz', fp, NativeComponentTrust.trusted);
+    final project = ProjectDoc(id: 'p', name: 'P', bpm: 120, cppComponents: [theirs]);
+    expect((await manager.prepare(project)).loaded, ['org.me.fuzz']);
+    final state = AppState(settings: Settings());
+    addTearDown(state.dispose);
+    state.project = project;
+    state.nativeComponents = manager;
+    final listed = componentBenchTargets(state);
+    expect(listed.single.componentId, 'org.me.fuzz');
+    expect(listed.single.request.trusted, isTrue);
+
+    // Blocked after the target was listed: starting it sends no trust, and the engine's binding refuses it unrun.
+    trust.remember('org.me.fuzz', fp, NativeComponentTrust.blocked);
+    expect(listed.single.request.trusted, isFalse);
+    final refused = await const EngineComponentBench().start(listed.single.request).result;
+    expect(refused['ok'], isFalse);
+    expect('${refused['error']}', contains('Trust'));
+    expect(componentBenchTargets(state), isEmpty);
+    // The next pass drops what the engine had of it: no artifact for the Build tools or the bench.
+    final status = await manager.prepare(project);
+    expect(status.blocked, ['org.me.fuzz']);
+    expect(manager.artifactOf('org.me.fuzz'), isNull);
+    expect(manager.loaded, isEmpty);
+    expect(componentBenchTargets(state), isEmpty);
+
+    // Forgotten (asks again): the same.
+    trust.remember('org.me.fuzz', fp, NativeComponentTrust.trusted);
+    await manager.prepare(project);
+    expect(componentBenchTargets(state), hasLength(1));
+    trust.forget('org.me.fuzz');
+    expect(componentBenchTargets(state), isEmpty);
+    expect((await manager.prepare(project)).needsTrust.single.componentId, 'org.me.fuzz');
+    expect(manager.artifactOf('org.me.fuzz'), isNull);
+    // Trusted again, it reloads (the engine still has the old load).
+    trust.remember('org.me.fuzz', fp, NativeComponentTrust.trusted);
+    await manager.prepare(project);
+    expect(loads.last.reload, isTrue);
   });
 
   test('an unchanged component reuses its build; an edit rebuilds and reloads', () async {

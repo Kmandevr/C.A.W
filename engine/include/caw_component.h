@@ -354,7 +354,8 @@ typedef struct CawDisplayExtension {
  * on the audio thread: begin(host_data, name) returns the section's slot for `name` (a string that lives as long as
  * the library: a literal), or CAW_PROFILE_NO_SECTION (another thread than the benchmark's, or all 32 slots taken);
  * now_ns() reads the host's clock; end(host_data, slot, start_ns) adds now - start_ns to the slot and counts a call.
- * None of them allocate, lock or block. Sections may nest; each holds its own whole time (nested ones included). */
+ * None of them allocate, lock or block. Sections may nest (up to 32 deep), ending innermost first; each holds only its own time (a nested section's is
+ * taken off its parent's), so their shares add up to at most the whole. */
 #define CAW_HOST_EXTENSION_PROFILE "caw.profile.v1"
 #define CAW_PROFILE_NO_SECTION 0xFFFFFFFFu
 #define CAW_PROFILE_MAX_SECTIONS 32u

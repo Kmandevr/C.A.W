@@ -8,6 +8,8 @@ import 'package:caw/model/component_bench.dart';
 import 'package:caw/model/component_bench_result.dart';
 import 'package:caw/model/cpp_component.dart';
 import 'package:caw/model/cpp_workbench.dart';
+import 'package:caw/model/native_components.dart';
+import 'package:caw/model/native_trust.dart';
 import 'package:caw/model/settings.dart';
 import 'package:caw/model/stress_result.dart';
 import 'package:caw/model/stress_runner.dart';
@@ -145,6 +147,16 @@ void main() {
       expect(r.checks.first.id, 'sample_rate_scaling');
       expect([for (final s in r.sections) s.name], ['resonance', 'oscillators', 'envelope']);
       expect([for (final c in r.curves) c.id], ['voices', 'block_frames', 'sample_rate']);
+    });
+
+    test('an allocation check the app could not measure is said plainly, not as a warning', () {
+      final json = benchFixture('effect');
+      (json['checks'] as List)[0] = {'id': 'allocations', 'status': 'warn', 'value': -1, 'detail': 'x', 'measured': false};
+      final r = ComponentBenchResult.parse(json);
+      final a = r.checks.firstWhere((c) => c.id == 'allocations');
+      expect(a.status, BenchCheckStatus.notMeasured);
+      expect(a.detail, 'Not measured in the app (run the test build)');
+      expect(r.checks.last.id, 'allocations');  // after the passes
     });
 
     test('an effect: no cost per voice, no sections, no voices curve', () {
@@ -359,6 +371,7 @@ void main() {
       expect(find.text('This engine has no plug-in benchmark yet'), findsOneWidget);
       await open(tester, _effect, hold: true);
       expect(find.byKey(const ValueKey('pbench-running')), findsOneWidget);
+      expect(find.byKey(const ValueKey('pbench-in-process')), findsOneWidget);  // says it runs in the app's process
       await tester.tap(find.byKey(const ValueKey('pbench-stop')));
       await tester.pumpAndSettle();
       expect(find.text('You stopped it'), findsOneWidget);
@@ -396,6 +409,14 @@ void main() {
       state.cppServices = CppBuilderServices(compiler: null, workDirectory: () async => dir);
       final doc = CppComponentDoc.blankEffect(id: 'cpp1', name: 'Fuzz');
       state.project.cppComponents.add(doc);
+      // The user's own code: Trusted (only trusted code is listed or run).
+      final trust = NativeTrustStore(File('${dir.path}/trust.json'))..markAuthored(doc);
+      state.nativeComponents = NativeComponentManager(
+          trust: trust,
+          cacheFile: File('${dir.path}/builds.json'),
+          build: (_, _) => throw UnimplementedError(),
+          load: ({required artifactPath, required expectedComponentId, required trust, bool reload = false}) =>
+              throw UnimplementedError());
       final sections = SectionController()..openBuild(BuildTab(BuildTabKind.cpp, doc.componentId));
       await tester.pumpWidget(app(Scaffold(body: SectionScope(controller: sections, child: BuildSection(state: state)))));
       await tester.pump();
@@ -414,6 +435,7 @@ void main() {
       expect(find.byType(PluginBenchScreen), findsOneWidget);
       expect(fake.started.single.libraryPath, '${dir.path}/fuzz.so');
       expect(fake.started.single.instrument, isFalse);
+      expect(fake.started.single.trusted, isTrue);
       await tester.pumpWidget(const SizedBox());
       await tester.pump(const Duration(seconds: 2));
       state.dispose(); // the run woke its poller
