@@ -65,9 +65,15 @@ TEST(component_bench_measures_an_effect) {
     }
     // caw_tests counts no allocations (caw_rt_tests does): the check says so instead of passing.
     CHECK(checks.at("allocations")->string("status") == "warn" && !checks.at("allocations")->boolean("measured", true));
-    // A gain is too cheap for any ratio to matter, and it makes no subnormals.
+    // A gain makes no subnormals, in any build.
+    CHECK(checks.at("denormals")->string("detail").find("subnormal") == std::string::npos);
+#ifdef NDEBUG
+    // Optimized (what the app runs), a gain is too cheap for any ratio to matter. An unoptimized sanitizer build on a
+    // slow runner lifts it over the cost floor, where timing ratios are noise (the CI sanitizer job graded it fail), so
+    // there only the shape above is checked, as stress_test.cpp does for its parts.
     CHECK_EQ(checks.at("denormals")->string("status"), std::string("pass"));
     CHECK_EQ(checks.at("block_size_scaling")->string("status"), std::string("pass"));
+#endif
     const Json* curves = j.get("curves");
     CHECK(curves && curves->get("voices")->arr.empty() && curves->get("block_frames")->arr.size() == 5 &&
           curves->get("sample_rate")->arr.size() == 3);
