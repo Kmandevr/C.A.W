@@ -1,4 +1,6 @@
 // Every setting's id, section, title, description and search words, so Settings' search finds any of them.
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 
 import '../../model/settings.dart';
@@ -149,6 +151,8 @@ const List<SettingEntry> settingEntries = [
       ['latency', 'mmap', 'wasapi', 'aaudio', 'low latency', 'exclusive']),
   _E('audio.quality', _a, 'Sound quality', 'Eco, Normal or High: oversampling, unison copies and reverb density',
       ['eco', 'battery', 'oversampling', 'cpu']),
+  _E('audio.background', _a, 'Background playback', 'Whether Android restricts C.A.W\'s battery behind other apps (Android)',
+      ['battery', 'unrestricted', 'background', 'optimization', 'samsung', 'sleep']),
   _E('audio.test', _a, 'Test tone', 'Plays 440 Hz for a moment to check the output', ['beep', 'sine', 'check', 'a4']),
   _E('audio.input', _a, 'Audio input', 'Record and monitor audio tracks: asks for the microphone the first time',
       ['microphone', 'mic', 'record', 'input', 'interface', 'permission']),
@@ -334,11 +338,17 @@ const List<SettingEntry> settingEntries = [
   _E('about.licences', _ab, 'Licences', 'Open-source licences, JetBrains Mono included', ['license', 'licence', 'open source']),
 ];
 
+/// Settings that exist only on Android (their rows hide elsewhere, so search leaves them out there).
+const androidOnlySettings = {'audio.background'};
+
+/// Whether [e]'s row is on its page on this platform.
+bool settingAvailable(SettingEntry e) => !androidOnlySettings.contains(e.id) || Platform.isAndroid;
+
 /// The entries matching [query], grouped by section in page order.
 Map<SettingsSection, List<SettingEntry>> searchSettings(String query) {
   final out = <SettingsSection, List<SettingEntry>>{};
   for (final e in settingEntries) {
-    if (e.searchable && e.matches(query)) (out[e.section] ??= []).add(e);
+    if (e.searchable && settingAvailable(e) && e.matches(query)) (out[e.section] ??= []).add(e);
   }
   return out;
 }

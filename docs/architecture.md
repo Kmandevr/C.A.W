@@ -103,7 +103,7 @@ JUCE (9: AGPLv3/commercial) and Tracktion Engine (GPL-3.0-or-later/commercial, d
 - **Repeatable output** (see [Bits and determinism](#bits-and-determinism)).
 - **Sample rates:** components run at the device rate. WAV export runs at 8 to 192 kHz (44.1 or 48 kHz in the app).
 - **Offline render = same Engine.** WAV export runs the same mix graph on a worker thread, faster than real time, so the export matches what you heard.
-- **Background playback:** each platform has its own rule. Android needs a foreground service with the `mediaPlayback` type (required on Android 14+), and iOS needs the audio background mode. Desktop has no restriction. Device changes such as headphones being unplugged trigger a stream restart.
+- **Background playback:** each platform has its own rule. Android needs a foreground service with the `mediaPlayback` type (required on Android 14+); **[Fact, built 2026-11-12]** C.A.W runs one while playing or recording ([app](app.md)). iOS needs the audio background mode (not built). Desktop has no restriction. Device changes such as headphones being unplugged trigger a stream restart.
 
 ### Bits and determinism
 

@@ -241,6 +241,7 @@ target_include_directories(caw_cli PRIVATE src)
   target_sources(caw_tests PRIVATE tests/graph_layout_test.cpp)  # #120 layout rules: mono to stereo, downmix, dual mono
   target_sources(caw_tests PRIVATE tests/voice_bus_test.cpp)  # #127 the voice bus; #120 built-in declarations, C 3.0/3.1
   target_sources(caw_tests PRIVATE tests/audio_assets_test.cpp)  # assets, audio clips, the sampler, SFZ, input (WP-J)
+  target_sources(caw_tests PRIVATE tests/input_bridge_test.cpp)  # the input bridge: output unchanged when the input dies
   target_sources(caw_tests PRIVATE tests/speed_free_wins_test.cpp)  # speed phase 1: Eco oversampling, silent work skipped, master sleep
   target_sources(caw_tests PRIVATE tests/fp_mode_test.cpp)  # speed phase 2: the flush-to-zero guard, NaN/Inf guards under the build flags
   target_sources(caw_tests PRIVATE tests/sample_timing_test.cpp tests/timing_oracle.cpp)  # note timing exact to the sample

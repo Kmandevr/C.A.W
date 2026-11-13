@@ -10,6 +10,7 @@ import 'model/app_state.dart';
 import 'model/audio_record.dart';
 import 'model/busy_work.dart';
 import 'model/automation_writer.dart';
+import 'model/background_playback.dart';
 import 'model/live_midi.dart';
 import 'model/problem_log.dart';
 import 'model/settings.dart';
@@ -21,6 +22,7 @@ import 'platform/display_rate.dart';
 import 'platform/haptics_device.dart';
 import 'platform/mic_permission.dart';
 import 'platform/update_installer.dart';
+import 'platform/playback_service.dart';
 import 'platform/midi_input.dart';
 import 'ui/frame_rate.dart';
 import 'ui/glass.dart';
@@ -82,6 +84,9 @@ Future<void> main() async {
   // Anonymous telemetry and feedback (docs/app.md "Privacy, telemetry and feedback"); its first-run page shows over
   // the shell once it has loaded and the startup screen has gone, before any update prompt (ui/app_prompts.dart).
   unawaited(startAppTelemetry(state, startup: startup));
+  // Background playback: Android's foreground service while playing or recording, its notification driving the
+  // transport (background_playback.dart).
+  BackgroundPlayback.current = BackgroundPlayback(state, platformPlaybackService());
 
   runApp(CawApp(state: state));
   state.init();

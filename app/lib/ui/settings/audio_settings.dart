@@ -1,5 +1,5 @@
 // Settings › Audio: the output device, sample rate, buffer size and mode, exclusive mode, sound quality, a test tone,
-// then audio input and recording (audio_input_settings.dart).
+// background playback's battery row, then audio input and recording (audio_input_settings.dart).
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -8,6 +8,7 @@ import '../../engine/engine.dart';
 import '../../model/audio_record.dart';
 import '../../model/settings.dart';
 import '../theme.dart';
+import '../background_playback_ui.dart';
 import 'audio_input_settings.dart';
 import 'latency_settings.dart';
 import 'settings_deps.dart';
@@ -204,6 +205,7 @@ class _AudioSettingsState extends State<AudioSettings> {
           child: const Text('Play'),
         ),
       ),
+      BackgroundPlaybackRow(state: widget.deps.state),
       LatencySettingsRow(state: widget.deps.state),
       if (AudioRecorder.current case final rec?) AudioInputSettings(recorder: rec) else const AudioInputSettingsOff(),
     ]);
