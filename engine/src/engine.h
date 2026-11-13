@@ -259,12 +259,14 @@ public:
     // Auto's worker steps (kMixWaitSeconds), so a pool that costs more than it gives can shrink first.
     static constexpr double kMixSettleSeconds = kMixWaitSeconds + 0.2;
     // Auto's tail guard (the merge's audio review, 2026-11-13; Claude's choice, for the owner to confirm): the
-    // share of callback time whose raw load passed kMixTailLoad, averaged over kMixTailSeconds separately for
+    // share of callback time whose raw load reached kMixTailLoad (its played frames' deadline missed), averaged over kMixTailSeconds separately for
     // callbacks that used the pool and for those that ran serial (before Auto turned on, its retry waits, levels
     // with one busy node). Once the pool has kMixTailSeconds of samples, a pooled share above the serial one by more
     // than kMixTailMargin for kMixTailHoldSeconds turns Auto off for kMixRetrySeconds, as the wait rule does: a
-    // worker the system preempts mid-node makes rare late callbacks that the mean wait doesn't show.
-    static constexpr double kMixTailLoad = 0.85, kMixTailSeconds = 2.0, kMixTailMargin = 0.02, kMixTailHoldSeconds = 1.0;
+    // worker the system preempts mid-node makes rare late callbacks that the mean wait doesn't show. The deadline,
+    // not shedding's 0.85: a busy pool's p99 can sit near 0.85 with nothing missed, and going serial for that
+    // (a heavy song near the budget on one thread) made it worse in the bench.
+    static constexpr double kMixTailLoad = 1.0, kMixTailSeconds = 2.0, kMixTailMargin = 0.02, kMixTailHoldSeconds = 1.0;
     // Any thread (tests, the bench): how many times the tail guard turned Auto off.
     uint32_t mixTailFallbacks() const noexcept { return tailFallbacks_.load(std::memory_order_relaxed); }
     // Auto's workers now (tests, diagnostics): those taking tasks, at most mixWorkers().

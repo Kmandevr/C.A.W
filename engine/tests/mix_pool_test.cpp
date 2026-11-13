@@ -805,30 +805,38 @@ TEST(mix_pool_auto_goes_serial_when_the_pool_makes_late_callbacks) {
         CHECK(ok(e.setProject(p)));
         e.play();
         float l[256], r[256];
-        const double budgetUs = 1e6 * 256 / 48000;
-        // The callback's raw load: 0.6 of its budget (Auto's threshold passed), or what it really took if more.
+        // The callback's raw load is reported, not timed, so a slow or loaded machine (a sanitizer build) changes
+        // nothing: 0.6 of its budget (Auto's threshold passed), and with the preemption on, 1.2 (late) for one
+        // callback in 20 on the pool, the callbacks a worker is held in. The hold itself is real, so the callback
+        // really waits and the wait rule sees what it would.
+        int late = 0;  // callbacks since the preemption went on
+        bool preempting = false;
         auto one = [&] {
-            const auto t0 = std::chrono::steady_clock::now();
             e.process(l, r, 256);
-            const double us = std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now() - t0).count();
-            e.reportLoad(std::max(0.6, us / budgetUs), 256, 256);
+            const bool hit = preempting && ++late % 20 == 0;
+            e.reportLoad(hit ? 1.2 : 0.6, 256, 256);
         };
         int k = 0;
         while (!e.mixParallelForTest() && k++ < 2000) one();  // serial first: its late callbacks, none
         CHECK(e.mixParallelForTest());
         if (e.mixParallelLevelsForTest() == 0) continue;  // nothing handed to the workers
-        // One callback in 25 waits 6 ms (more than its 5.3 ms budget) for a worker: 4% late, against none serial.
-        if (preempt) e.mixPoolForTest()->setPreemptForTest(6000, 25);
+        // One callback in 20 waits 6 ms (more than its 5.3 ms budget) for a worker: 5% late, against none serial.
+        if (preempt) {
+            e.mixPoolForTest()->setPreemptForTest(6000, 20);
+            preempting = true;
+        }
         uint32_t workersBefore = 2;
-        for (k = 0; k < 10 * 48000 / 256 && e.mixParallelForTest(); ++k) {
+        for (k = 0; k < 20 * 48000 / 256 && e.mixParallelForTest(); ++k) {
             workersBefore = e.mixActiveWorkers();
             one();
         }
         if (preempt) {
-            CHECK(!e.mixParallelForTest());
+            if (e.mixParallelForTest())
+                cawtest::fail(__FILE__, __LINE__, "still on the pool after " + std::to_string(k) + " callbacks");
             CHECK_EQ(e.mixTailFallbacks(), 1u);
             CHECK_EQ(workersBefore, 2u);  // the wait rule had not dropped a worker: the mean wait stayed low
             e.mixPoolForTest()->setPreemptForTest(0, 0);
+            preempting = false;
             for (k = 0; k < 5 * 48000 / 256; ++k) one();
             CHECK(!e.mixParallelForTest());  // and Auto waits kMixRetrySeconds before it tries the pool again
         } else {

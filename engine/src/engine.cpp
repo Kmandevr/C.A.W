@@ -5109,7 +5109,7 @@ void Engine::reportLoad(double load, int frames, int rendered) noexcept {
         mixOverSeconds_ = mixUnderSeconds_ = 0;
     }
     // The tail guard's samples: this callback used the pool (it handed a level to the workers) or ran serial.
-    const double late = raw > kMixTailLoad ? 1.0 : 0.0;
+    const double late = raw >= kMixTailLoad ? 1.0 : 0.0;
     if (poolUsedLast_ && mixParallel_) {
         if (!settling) {
             tailPool_ = tailKeep_ * tailPool_ + (1.0 - tailKeep_) * late;
