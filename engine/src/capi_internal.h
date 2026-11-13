@@ -14,21 +14,27 @@
 // The Benchmark's live mode (capi_stress.cpp, API 27): what the device callback measured while a stress run listens.
 // Preallocated by the run before it is installed; the callback only stores into it (no allocation, no lock).
 struct CawStressStats {
-    explicit CawStressStats(size_t capacity) : loads(capacity), times(capacity) {}
-    std::vector<float> loads;   // per callback: its share of its own budget
-    std::vector<float> times;   // per callback: microseconds
-    std::atomic<int64_t> written{0}, overBudget{0}, usedNs{0}, budgetNs{0};
-    std::atomic<int32_t> core{-1};  // the core the last callback ran on (-1: unknown)
-    void record(double usedSeconds, double budgetSeconds, int32_t cpu) noexcept {
+    static constexpr int64_t kCoreEvery = 64;  // callbacks between reads of the callback's core
+    explicit CawStressStats(size_t capacity) : loads(capacity), times(capacity), frames(capacity) {}
+    std::vector<float> loads;    // per callback: its share of its own budget
+    std::vector<float> times;    // per callback: microseconds
+    std::vector<int32_t> frames; // per callback: its size (devices may vary it)
+    std::atomic<int64_t> written{0}, overBudget{0}, usedNs{0}, budgetNs{0}, framesSum{0};
+    std::atomic<int32_t> core{-1};  // the core the callback last ran on when read (-1: unknown)
+    // Whether this callback should read its core: the first, then every kCoreEvery-th.
+    bool coreDue() const noexcept { return written.load(std::memory_order_relaxed) % kCoreEvery == 0; }
+    void record(double usedSeconds, double budgetSeconds, int32_t callbackFrames, int32_t cpu) noexcept {
         const int64_t at = written.load(std::memory_order_relaxed);
         if (at < static_cast<int64_t>(loads.size())) {
             loads[static_cast<size_t>(at)] = static_cast<float>(budgetSeconds > 0 ? usedSeconds / budgetSeconds : 0.0);
             times[static_cast<size_t>(at)] = static_cast<float>(usedSeconds * 1e6);
+            frames[static_cast<size_t>(at)] = callbackFrames;
         }
         if (usedSeconds > budgetSeconds) overBudget.fetch_add(1, std::memory_order_relaxed);
         usedNs.fetch_add(static_cast<int64_t>(usedSeconds * 1e9), std::memory_order_relaxed);
         budgetNs.fetch_add(static_cast<int64_t>(budgetSeconds * 1e9), std::memory_order_relaxed);
-        core.store(cpu, std::memory_order_relaxed);
+        framesSum.fetch_add(callbackFrames, std::memory_order_relaxed);
+        if (cpu >= 0) core.store(cpu, std::memory_order_relaxed);
         written.store(at + 1, std::memory_order_release);
     }
 };

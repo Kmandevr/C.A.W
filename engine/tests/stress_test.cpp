@@ -4,11 +4,14 @@
 #include <cstdio>
 #include <filesystem>
 #include <map>
+#include <memory>
 #include <string>
 #include <thread>
 #include <vector>
 
 #include "audio_clips.h"
+#include "capi_internal.h"
+#include "component_chain.h"
 #include "engine.h"
 #include "json.h"
 #include "stress_run.h"
@@ -321,7 +324,33 @@ TEST(stress_profiles_are_per_engine) {
     CHECK(ma.count("org.caw.reverb.pro") == 1);   // the song's
     CHECK(mb.count("org.caw.reverb.pro") == 0);   // the kit has none: nothing of the song's leaked into its rows
     CHECK(mb.count("org.caw.drums") == 1);
-    CHECK(ChainProfile::current() == nullptr);    // unbound once process() returns
+    CHECK(ma.count("org.caw.mod.lfo") == 1);      // the song's LFOs: modulators get the profile too
+}
+
+// The profile travels in each chain's ChainTime, not in thread state: an engine without one, run on the same
+// thread between a profiling engine's callbacks, adds nothing to it.
+TEST(stress_profile_travels_with_its_engine_only) {
+    Engine a(48000), b(48000);
+    a.setProject(drumsBusy());
+    b.setProject(typicalSong(false));
+    auto profile = std::make_unique<ChainProfile>();
+    a.setProfile(profile.get());
+    a.play();
+    b.play();
+    std::vector<float> l(256), r(256);
+    for (int c = 0; c < 100; ++c) {
+        a.process(l.data(), r.data(), 256);
+        b.process(l.data(), r.data(), 256);
+    }
+    a.setProfile(nullptr);
+    bool drums = false, reverb = false;
+    for (uint32_t k = 0; k < profile->used; ++k) {
+        const std::string id = profile->slots[k].id ? *profile->slots[k].id : "";
+        drums = drums || id == "org.caw.drums";
+        reverb = reverb || id == "org.caw.reverb.pro";
+    }
+    CHECK(drums);
+    CHECK(!reverb);
 }
 
 // The Benchmark's engine sheds nothing; any other sheds a layer when the device runs out of time.
@@ -339,4 +368,27 @@ TEST(stress_shedding_can_be_switched_off) {
         }
         CHECK_EQ(e.meters().overloaded > 0, on);
     }
+}
+
+// Live mode's callback record: each callback's size kept (devices may vary it), the core read only on the first
+// callback and every kCoreEvery-th, never a stale -1 over a known core.
+TEST(stress_live_stats_sum_frames_and_sample_the_core) {
+    CawStressStats s(8);
+    int reads = 0;
+    for (int c = 0; c < 130; ++c) {
+        const int32_t frames = c % 2 ? 96 : 192;
+        int32_t cpu = -1;
+        if (s.coreDue()) {
+            cpu = 3;
+            ++reads;
+        }
+        s.record(frames / 48000.0 * (c == 5 ? 2.0 : 0.5), frames / 48000.0, frames, cpu);
+    }
+    CHECK_EQ(reads, 3);  // callbacks 0, 64 and 128
+    CHECK_EQ(s.core.load(), 3);
+    CHECK_EQ(s.framesSum.load(), int64_t{65 * 192 + 65 * 96});
+    CHECK_EQ(s.written.load(), int64_t{130});
+    CHECK_EQ(s.overBudget.load(), int64_t{1});
+    CHECK_EQ(s.frames[1], 96);  // kept per callback while there is room
+    CHECK_NEAR(s.loads[5], 2.0, 1e-6);
 }

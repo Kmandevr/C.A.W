@@ -667,7 +667,8 @@ typedef struct CawStressRequest {
     int32_t mode;          /* CAW_STRESS_DSP: timed on the worker, repeatable. CAW_STRESS_LIVE (PLAIN and SUSTAINED
                               only): through the default output device, muted, its real callbacks timed; the
                               caller stops its own engine's audio first, since starting this device closes any
-                              other engine's (one output per process) */
+                              other engine's (one output per process); while it runs, caw_audio_start on another
+                              engine is refused, and a run whose device stops calling back for a second fails */
     double seconds;        /* audio per run, a ramp's per step: 0.05..600 */
     int32_t frames;        /* DSP: the callback size timed, 16..8192 (0: 256). LIVE: the size asked of the device
                               (0: its smallest) */

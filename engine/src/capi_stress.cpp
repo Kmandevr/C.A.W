@@ -69,7 +69,7 @@ std::string resultJson(const Job& j) {
 }
 
 // Live: the scenario through the default output device, muted, its real callbacks timed. The device's callback
-// stores each callback's time and load into preallocated stats; this thread reads them every 100 ms.
+// stores each callback's time, load and size into preallocated stats; this thread reads them every 100 ms.
 RunResult runLive(Job& j) {
     const RunRequest& r = j.request;
     RunResult out;
@@ -93,28 +93,30 @@ RunResult runLive(Job& j) {
             p = s->make(r.workDir);
         }
     }
+    // Room for every callback of the run at 16 frames or more; past that only the counts go on. Made before the
+    // engine, so it outlives it: the guard below stops the device and unhooks it first, whatever happens.
+    const size_t capacity = static_cast<size_t>(std::min(4.0e6, r.seconds * r.rate / 16.0 + 64));
+    auto meter = std::make_unique<CawStressStats>(capacity);
     CawEngine* e = caw_engine_create(r.rate);
     if (!e) return failed("could not make the engine");
-    struct Destroy {
+    struct Guard {
         CawEngine* e;
-        ~Destroy() { caw_engine_destroy(e); }
-    } destroy{e};
+        ~Guard() {
+            caw_audio_stop(e);  // the callback has stopped once this returns
+            e->stress.store(nullptr, std::memory_order_release);
+            caw_engine_destroy(e);
+        }
+    } guard{e};
     e->engine->setQuality(r.quality);
     e->engine->setShedding(false);
     const std::string warn = e->engine->setProject(p);
     if (warn.find("\"ok\":true") == std::string::npos) return failed("the project did not load: " + warn.substr(0, 300));
     e->bufferMode = CAW_BUFFER_LOW_LATENCY;
     e->periodFrames = r.frames;  // 0: the device's smallest
-    // Room for every callback of the run at 16 frames or more; past that only the counts go on.
-    const size_t capacity = static_cast<size_t>(std::min(4.0e6, r.seconds * r.rate / 16.0 + 64));
-    auto meter = std::make_unique<CawStressStats>(capacity);
     e->muteOutput.store(true, std::memory_order_relaxed);
     e->stress.store(meter.get(), std::memory_order_release);
     char error[256] = {};
-    if (caw_audio_start(e, error, sizeof error) != 0) {
-        e->stress.store(nullptr, std::memory_order_release);
-        return failed(std::string("the audio device did not start: ") + error);
-    }
+    if (caw_audio_start(e, error, sizeof error) != 0) return failed(std::string("the audio device did not start: ") + error);
     using Clock = std::chrono::steady_clock;
     auto cancelled = [&] { return j.cancel.load(std::memory_order_relaxed) != 0; };
     std::this_thread::sleep_for(std::chrono::milliseconds(250));  // the project applied, as the DSP runs give it
@@ -122,19 +124,31 @@ RunResult runLive(Job& j) {
     const int64_t from = meter->written.load(std::memory_order_acquire);
     int64_t usedFrom = meter->usedNs.load(std::memory_order_relaxed), budgetFrom = meter->budgetNs.load(std::memory_order_relaxed);
     const int64_t overFrom = meter->overBudget.load(std::memory_order_relaxed);
+    const int64_t budgetStart = budgetFrom, framesStart = meter->framesSum.load(std::memory_order_relaxed);
     e->engine->play();
     const auto t0 = Clock::now();
-    bool stopped = false;
+    auto lastCallback = t0;
+    int64_t seen = from;
+    bool stopped = false, stalled = false;
     for (;;) {
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
-        const double elapsed = std::chrono::duration<double>(Clock::now() - t0).count();
+        const auto now = Clock::now();
+        const double elapsed = std::chrono::duration<double>(now - t0).count();
+        const int64_t written = meter->written.load(std::memory_order_relaxed);
+        if (written != seen) {
+            seen = written;
+            lastCallback = now;
+        } else if (std::chrono::duration<double>(now - lastCallback).count() > 1.0) {
+            stalled = true;  // no callback for a second: the device stopped or was taken away
+            break;
+        }
         const int64_t used = meter->usedNs.load(std::memory_order_relaxed), budget = meter->budgetNs.load(std::memory_order_relaxed);
         const float load = budget > budgetFrom ? static_cast<float>(static_cast<double>(used - usedFrom) / static_cast<double>(budget - budgetFrom)) : 0.0f;
         usedFrom = used;
         budgetFrom = budget;
         j.history.push(load);
         j.progress.load.store(load, std::memory_order_relaxed);
-        j.progress.callbacks.store(meter->written.load(std::memory_order_relaxed) - from, std::memory_order_relaxed);
+        j.progress.callbacks.store(written - from, std::memory_order_relaxed);
         j.progress.overBudget.store(meter->overBudget.load(std::memory_order_relaxed) - overFrom, std::memory_order_relaxed);
         j.progress.permille.store(static_cast<int32_t>(std::min(999.0, 1000.0 * elapsed / r.seconds)), std::memory_order_relaxed);
         if (cancelled()) {
@@ -144,36 +158,47 @@ RunResult runLive(Job& j) {
         if (elapsed >= r.seconds) break;
     }
     const int32_t xrunsTo = cawAudioXruns(e);
-    const int32_t frames = caw_audio_buffer_frames(e);
+    const int32_t deviceFrames = caw_audio_buffer_frames(e);
     caw_audio_stop(e);  // the callback has stopped once this returns
     e->stress.store(nullptr, std::memory_order_release);
-    const int64_t to = std::min<int64_t>(meter->written.load(std::memory_order_acquire), static_cast<int64_t>(capacity));
+    const int64_t total = meter->written.load(std::memory_order_acquire);
+    const int64_t to = std::min<int64_t>(total, static_cast<int64_t>(capacity));
     std::vector<double> us;
+    std::vector<int64_t> startFrame;  // each timed callback's first frame, counted from Play
     us.reserve(static_cast<size_t>(std::max<int64_t>(0, to - from)));
-    for (int64_t c = from; c < to; ++c) us.push_back(meter->times[static_cast<size_t>(c)]);
+    startFrame.reserve(us.capacity());
+    int64_t at = 0;
+    for (int64_t c = from; c < to; ++c) {
+        us.push_back(meter->times[static_cast<size_t>(c)]);
+        startFrame.push_back(at);
+        at += meter->frames[static_cast<size_t>(c)];
+    }
     {
         std::lock_guard<std::mutex> lock(j.mutex);
-        j.deviceFrames = frames;
+        j.deviceFrames = deviceFrames;
         j.deviceRate = r.rate;
         j.xruns = xrunsFrom >= 0 && xrunsTo >= xrunsFrom ? xrunsTo - xrunsFrom : -1;
         j.callbackCore = meter->core.load(std::memory_order_relaxed);
     }
-    out.budgetUs = frames > 0 ? 1e6 * frames / r.rate : 0;
+    out.callbacks = total - from;
+    out.overBudget = meter->overBudget.load(std::memory_order_relaxed) - overFrom;
+    // Callback sizes may vary: the budget is the mean of the callbacks' own, the audio the sum of their frames.
+    const int64_t budgetNs = meter->budgetNs.load(std::memory_order_relaxed) - budgetStart;
+    out.budgetUs = out.callbacks > 0 ? 1e-3 * static_cast<double>(budgetNs) / static_cast<double>(out.callbacks) : 0;
+    out.seconds = static_cast<double>(meter->framesSum.load(std::memory_order_relaxed) - framesStart) / r.rate;
     if (!us.empty()) {
         const SuiteStats st = stats(us, 0, us.size());
         out.meanUs = st.meanUs;
         out.p99Us = st.p99Us;
         out.worstUs = st.maxUs;
-        out.worstAtS = static_cast<double>(st.maxAt) * frames / r.rate;
+        out.worstAtS = static_cast<double>(startFrame[st.maxAt]) / r.rate;
         if (us.size() >= 20) {
             const size_t tenth = us.size() / 10;
             out.meanFirstUs = caw::stress::stats(us, 0, tenth).meanUs;
             out.meanLastUs = caw::stress::stats(us, us.size() - tenth, us.size()).meanUs;
         }
     }
-    out.callbacks = meter->written.load(std::memory_order_relaxed) - from;
-    out.overBudget = meter->overBudget.load(std::memory_order_relaxed) - overFrom;
-    out.seconds = static_cast<double>(out.callbacks) * frames / r.rate;
+    if (stalled) return failed("the audio device stopped calling back (another app or a route change took it)");
     out.ok = !stopped && out.callbacks > 0;
     out.stopReason = stopped ? "cancelled" : out.callbacks > 0 ? "done" : "error";
     if (!stopped && out.callbacks == 0) out.error = "the audio device ran no callback";

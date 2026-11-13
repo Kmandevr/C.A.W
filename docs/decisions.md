@@ -18,7 +18,8 @@ updated: 2026-11-13
 - **Tiers:** a tier's worst p99 at most 70 % of the budget is comfortable, at most 100 % tight, else over budget. **[Assumption]** 30 % headroom covers the UI, other apps and heat; worth checking on the S22+.
 - **Dropouts in H2:** a live run's (AAudio's XRun count, else its callbacks over budget) when that scenario ran live, else the timed callbacks over budget.
 - **`topCosts`:** components' shares averaged over the profiled songs, built-in ids only (the host's share and C++ components left out, rather than sent as "other").
-- **The profiler is per Engine** (bound thread-locally for each `process()` call), replacing the global pointer whose `slot()` was unsynchronised.
+- **The profiler is per Engine**, carried to the chains in their `ChainTime` (no thread-local storage on the audio path: Android's emulated TLS can allocate; audio review, 2026-11-13), replacing the global pointer whose `slot()` was unsynchronised. A parallel mix uses its pool only when `wantsMixPool() && !profiling()`.
+- **The live run keeps the device** (audio review, 2026-11-13): while its meter is installed, another engine's `caw_audio_start` is refused (safer than noticing too late), and a run whose callbacks stop for a second fails.
 - **Memory:** an Extreme scenario whose measured need (peak RSS growth on Linux x64 plus a third) passes the engine's work-memory budget is skipped and says so.
 - **Share** is Android's share sheet with the summary and the JSON (desktop: the clipboard); Save is the save picker.
 

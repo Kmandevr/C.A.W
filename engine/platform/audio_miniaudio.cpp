@@ -206,17 +206,23 @@ void callback(ma_device* dev, void* output, const void* input, ma_uint32 frames)
         live.beginCallback(ch ? in + static_cast<size_t>(done) * ch : nullptr, ch, n);  // monitoring and recording
         a->owner->engine->process(a->l, a->r, n);
         live.afterCallback(a->l, a->r, n);  // the latency ping
-        const float gain = a->owner->muteOutput.load(std::memory_order_relaxed) ? 0.0f : 1.0f;  // the Benchmark: silent
-        for (int i = 0; i < n; ++i) {
-            out[(done + i) * 2] = gain * a->l[i];
-            out[(done + i) * 2 + 1] = gain * a->r[i];
+        if (a->owner->muteOutput.load(std::memory_order_relaxed)) {  // the Benchmark: silent, whatever it made
+            std::fill(out + static_cast<size_t>(done) * 2, out + static_cast<size_t>(done + n) * 2, 0.0f);
+        } else {
+            for (int i = 0; i < n; ++i) {
+                out[(done + i) * 2] = a->l[i];
+                out[(done + i) * 2 + 1] = a->r[i];
+            }
         }
         done += static_cast<ma_uint32>(n);
     }
     const double used = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
     const double budget = static_cast<double>(frames) / static_cast<double>(dev->sampleRate);
     a->owner->engine->reportLoad(budget > 0 ? used / budget : 0.0, static_cast<int>(frames));
-    if (CawStressStats* s = a->owner->stress.load(std::memory_order_acquire)) s->record(used, budget, callbackCore());
+    // The Benchmark's live mode, after the timed span: the core is read on the first callback and every
+    // kCoreEvery-th (sched_getcpu can be a system call), -1 meaning "not read this time".
+    if (CawStressStats* s = a->owner->stress.load(std::memory_order_acquire))
+        s->record(used, budget, static_cast<int32_t>(frames), s->coreDue() ? callbackCore() : -1);
 }
 
 void setError(const std::string& msg, char* error, int32_t len) {
@@ -632,6 +638,11 @@ extern "C" {
 int32_t caw_audio_start(CawEngine* e, char* error, int32_t error_len) {
     if (!e) return 1;
     std::lock_guard<std::mutex> lock(gDeviceLock);
+    // A Benchmark live run has the device: another engine may not take it over (that would end the run).
+    if (gActive && gActive != e && gActive->stress.load(std::memory_order_acquire)) {
+        setError("the Benchmark is using the audio device", error, error_len);
+        return 1;
+    }
     return startLocked(e, error, error_len);
 }
 

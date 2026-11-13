@@ -737,7 +737,7 @@ bool ModulationHost::linkOffset(uint32_t linkId, float& out) const {
 // ---- audio thread ----
 
 void ModulationHost::beginChunk(uint32_t m, int64_t songSample, double stepLength, double tempo, uint32_t beatsPerBar,
-                                bool playing, uint64_t playEpoch, int64_t chunk) noexcept {
+                                bool playing, uint64_t playEpoch, int64_t chunk, ChainProfile* profile) noexcept {
     if (m == 0 || m > ComponentChain::kMaxFrames) return;
     // A new plan: the old one goes back to the control thread (or, the queue full, the swap waits a chunk).
     ModulationPlan* incoming = retire_->waiting ? retire_->waiting : next_.exchange(nullptr, std::memory_order_acq_rel);
@@ -779,6 +779,7 @@ void ModulationHost::beginChunk(uint32_t m, int64_t songSample, double stepLengt
             ct.beatsPerBar = beatsPerBar;
             ct.playing = playing;
             ct.chunk = chunk;
+            ct.profile = profile;
             r.chain->beginModulators(&ct);
             const uint32_t at = ringAt(tA, kRing);
             for (size_t j = 0; j < r.ids.size(); ++j) {

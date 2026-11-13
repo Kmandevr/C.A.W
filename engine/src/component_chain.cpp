@@ -45,7 +45,6 @@ bool stereoAudio(const PortDescriptor& p) noexcept {
     return p.type == PortType::Audio && p.layout == ChannelLayout::Stereo && portChannelCount(p) == 2;
 }
 
-thread_local ChainProfile* tProfile = nullptr;  // the profile of the Engine::process running on this thread
 
 uint64_t nowNs() noexcept {
     return static_cast<uint64_t>(
@@ -53,36 +52,31 @@ uint64_t nowNs() noexcept {
 }
 
 // Times one entry's block into its profile slot (no slot: nothing), less the time of chains nested inside it (a
-// per-note FX slot inside its instrument, a rack's own chain), so each slot holds its own time. Per thread.
-thread_local uint64_t gNestedNs = 0;
+// per-note FX slot inside its instrument, a rack's own chain), so each slot holds its own time. The profile keeps
+// the running nested total (a profiling engine's mix is serial).
 struct ProfileScope {
+    ChainProfile* profile;
     ChainProfile::Slot* slot;
     uint64_t t0, outer = 0;
     bool ran = false;
     ProfileScope(ChainProfile* p, const void* processor, const std::string* id) noexcept
-        : slot(p ? p->slot(processor, id) : nullptr), t0(slot ? nowNs() : 0) {
+        : profile(p), slot(p ? p->slot(processor, id) : nullptr), t0(slot ? nowNs() : 0) {
         if (!slot) return;
-        outer = gNestedNs;
-        gNestedNs = 0;
+        outer = profile->nestedNs;
+        profile->nestedNs = 0;
     }
     ~ProfileScope() {
         if (!slot) return;
         const uint64_t took = nowNs() - t0;
-        slot->ns += took - std::min(took, gNestedNs);
+        slot->ns += took - std::min(took, profile->nestedNs);
         ++slot->calls;
         slot->ran += ran ? 1 : 0;
-        gNestedNs = outer + took;
+        profile->nestedNs = outer + took;
     }
 };
 
 }  // namespace
 
-ChainProfile* ChainProfile::bind(ChainProfile* profile) noexcept {
-    ChainProfile* const before = tProfile;
-    tProfile = profile;
-    return before;
-}
-ChainProfile* ChainProfile::current() noexcept { return tProfile; }
 
 ChainProfile::Slot* ChainProfile::slot(const void* processor, const std::string* id) noexcept {
     for (uint32_t k = 0; k < used; ++k)
@@ -657,7 +651,7 @@ bool ComponentChain::runModulator(std::size_t index, uint32_t m, double sampleRa
                                   float* const* outs, uint32_t outCount) noexcept {
     if (!modulators_ || index >= entries_.size() || m == 0 || m > kMaxFrames) return false;
     Entry& e = *entries_[index];
-    ProfileScope scope(tProfile, e.processor.get(), &e.id);
+    ProfileScope scope(time ? time->profile : nullptr, e.processor.get(), &e.id);
     if (scope.slot) scope.slot->modulator = true;
     scope.ran = true;
     const bool playing = time && time->playing;
@@ -707,7 +701,7 @@ void ComponentChain::process(float* left, float* right, uint32_t m, double sampl
     Transport transport;  // what each component sees of the song: the tempo always, the position while playing
     if (time) transport = {time->tempo, static_cast<double>(time->start) / time->stepLength / 4.0, time->beatsPerBar, playing};
     const double bypassStep = 1.0 / std::max(1.0, kBypassSeconds * sampleRate);
-    ChainProfile* const profile = tProfile;
+    ChainProfile* const profile = time ? time->profile : nullptr;
     for (std::size_t index = 0; index < entries_.size(); ++index) {
         Entry& e = *entries_[index];
         ProfileScope scope(profile, e.processor.get(), &e.id);

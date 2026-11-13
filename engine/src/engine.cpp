@@ -3439,7 +3439,8 @@ bool Engine::ringsAtPlay(const Slot& s) const noexcept {
 // chunks of the new pass.
 void Engine::playTail(Slot& s, int most) noexcept {
     const int len = std::min({Slot::kPlayTailMax, std::max(1, most), std::max(1, static_cast<int>(sampletime::roundFrames(kPlayTailSeconds, sr_)))});
-    const ChainTime time{g_, stepLen_, touchEpoch_, bpm_, static_cast<uint32_t>(beatsPerBar_), false};
+    ChainTime time{g_, stepLen_, touchEpoch_, bpm_, static_cast<uint32_t>(beatsPerBar_), false};
+    time.profile = chunkProfile_;
     for (int done = 0; done < len;) {
         const int n = std::min(kBlock, len - done);
         s.instrument->process(s.playTailL + done, s.playTailR + done, static_cast<uint32_t>(n), sr_, &time);
@@ -3457,6 +3458,7 @@ void Engine::playTail(Slot& s, int most) noexcept {
 void Engine::runInstrument(Slot& s, int m) noexcept {
     ChainTime time{g_, stepLen_, touchEpoch_, bpm_, static_cast<uint32_t>(beatsPerBar_), playing_ && !previewChunk_};
     time.modulation = modulation_->forChain(s.index, ModChainKind::Instrument, s.instrument, 0);  // #161
+    time.profile = chunkProfile_;  // the Benchmark (setProfile)
     if (s.instrumentIdle) {
         // It stopped running while silent: what it held is stale, so it starts from silence.
         for (ComponentChain* c : {s.instrument, s.instrumentFading})
@@ -3668,7 +3670,7 @@ int Engine::processChunk(float* l, float* r, int maxFrames) noexcept {
     ++chunkId_;
     // Project modulation (#161): due modulator blocks and every target's offsets, before any target runs.
     modulation_->beginChunk(static_cast<uint32_t>(m), g_, stepLen_, bpm_, static_cast<uint32_t>(beatsPerBar_),
-                            playing_ && !previewChunk_, modPlays_, chunkId_);
+                            playing_ && !previewChunk_, modPlays_, chunkId_, chunkProfile_);
     noteFx_->beginChunk();  // per-note FX (#127): a new plan
     // One graph runs the mix: each track's node, each folder bus after its children (and after every send and
     // key into it), then the master stage. Routing changes only between chunks.
@@ -3856,6 +3858,7 @@ void Engine::runInserts(Slot& s, float* L, float* R, int m) noexcept {
     ChainTime time{g_, stepLen_, touchEpoch_, bpm_, static_cast<uint32_t>(beatsPerBar_), playing_ && !previewChunk_,
                    chunkId_};
     time.modulation = modulation_->forChain(s.index, ModChainKind::Inserts, inserts, 0);  // #161
+    time.profile = chunkProfile_;  // the Benchmark (setProfile)
     const ChainTime* t = &time;
     if (fading) {
         std::copy_n(L, m, fadeL_);
@@ -4414,6 +4417,7 @@ void Engine::runMasterNode(const float* inL, const float* inR, float* outL, floa
         }
         ChainTime time{g_, stepLen_, touchEpoch_, bpm_, static_cast<uint32_t>(beatsPerBar_), playing_ && !previewChunk_};
         time.modulation = modulation_->forChain(-1, ModChainKind::Master, masterChain_, 0);  // #161
+        time.profile = chunkProfile_;  // the Benchmark (setProfile)
         const ChainTime* t = &time;
         const bool fading = masterFadeLeft_ > 0;
         if (fading) {
@@ -4480,12 +4484,8 @@ void Engine::pickOverloadVictim() noexcept {
 
 void Engine::process(float* left, float* right, int frames) noexcept {
     const ScopedFlushDenormals flushDenormals;  // live callbacks, exports and renders alike (fp_mode.h)
-    // This engine's profile (null: none) for this call, on this thread only (setProfile).
-    struct BindProfile {
-        ChainProfile* before;
-        explicit BindProfile(ChainProfile* p) noexcept : before(ChainProfile::bind(p)) {}
-        ~BindProfile() { ChainProfile::bind(before); }
-    } const bindProfile(profile_.load(std::memory_order_acquire));
+    // This engine's profile (null: none) for this call; every chain gets it in its ChainTime (setProfile).
+    chunkProfile_ = profile_.load(std::memory_order_acquire);
     // Whether any layer is soloed, worked out once per callback rather than once per layer and block.
     updateSolo();
     applyCommands();

@@ -52,6 +52,8 @@ struct ChainModulation {
     uint32_t sampleBuffers = 0;
 };
 
+struct ChainProfile;  // below
+
 // Where the transport is for a block, so automation lanes can be read. Null while stopped.
 struct ChainTime {
     int64_t start = 0;      // the block's first sample in the song
@@ -62,13 +64,15 @@ struct ChainTime {
     bool playing = true;    // false: stopped (lanes hold; components still learn the tempo)
     int64_t chunk = -1;     // the Engine's chunk counter: a key written for another chunk is stale (silence)
     const ChainModulation* modulation = nullptr;  // project modulation of this chain's parameters (null: none)
+    ChainProfile* profile = nullptr;  // the Engine's component profile (Engine::setProfile; null: none)
 };
 
 // Benchmark-only (caw_bench's profile mode, the app's Benchmark): the time each component spends in a chain, per
-// processor. Each Engine has its own (Engine::setProfile), bound to the thread running its process() for that call
-// only, so two engines profiling at once never share one and slot() is only ever called from that thread. Off
-// (null) everywhere else, where it costs one thread-local load per chain per block. Fixed slots, so the audio thread
-// never allocates; processors past kSlots are not counted.
+// processor. Each Engine has its own (Engine::setProfile); it reaches the chains in their ChainTime (no thread-local
+// storage: Android's emulated TLS can allocate on a thread's first use), so it travels with the work, two engines
+// profiling at once never share one, and slot() is called only while that engine's process() runs, which keeps its
+// mix serial while profiling. Off (null) everywhere else. Fixed slots, so the audio thread never allocates;
+// processors past kSlots are not counted.
 struct ChainProfile {
     static constexpr uint32_t kSlots = 512;
     struct Slot {
@@ -79,11 +83,8 @@ struct ChainProfile {
     };
     Slot slots[kSlots];
     uint32_t used = 0;
+    uint64_t nestedNs = 0;  // the running scope's nested chains' time so far (component_chain.cpp, ProfileScope)
     Slot* slot(const void* processor, const std::string* id) noexcept;
-    // The profile chains on this thread record into (null: none); returns the one bound before. Engine::process
-    // binds its own for the call and puts the earlier one back.
-    static ChainProfile* bind(ChainProfile* profile) noexcept;
-    static ChainProfile* current() noexcept;
 };
 
 // Built and configured on the control thread, then handed to the audio thread, which alone calls
