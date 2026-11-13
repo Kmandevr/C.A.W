@@ -59,6 +59,15 @@
 #define CAW_FORCE_INLINE inline __attribute__((always_inline))
 #define CAW_NO_INLINE __attribute__((noinline))
 #endif
+// A loop the compiler keeps as a loop (vectorized, not unrolled further): a long body unrolled four times over
+// spills registers on x86-64's 16.
+#if defined(__clang__)
+#define CAW_NO_UNROLL _Pragma("clang loop unroll(disable)")
+#elif defined(__GNUC__)
+#define CAW_NO_UNROLL _Pragma("GCC unroll 1")
+#else
+#define CAW_NO_UNROLL
+#endif
 
 namespace caw {
 
@@ -1019,6 +1028,7 @@ CAW_FORCE_INLINE void readCopy(const float* A, const float* B, uint32_t p, uint3
     const float scale = 1.0f / static_cast<float>(1u << sh);
     int32_t index[kControlFrames];
     float fr[kControlFrames], a[2 * kControlFrames], b[2 * kControlFrames];
+    CAW_NO_UNROLL
     for (uint32_t i = 0; i < count; ++i) {
         index[i] = static_cast<int32_t>(p >> sh);
         fr[i] = static_cast<float>(static_cast<int32_t>(p & mask)) * scale;
@@ -1029,6 +1039,7 @@ CAW_FORCE_INLINE void readCopy(const float* A, const float* B, uint32_t p, uint3
         std::memcpy(a + 2 * i, A + k, 2 * sizeof(float));
         if constexpr (Morph) std::memcpy(b + 2 * i, B + k, 2 * sizeof(float));
     }
+    CAW_NO_UNROLL
     for (uint32_t i = 0; i < count; ++i) {
         float x = a[2 * i] + (a[2 * i + 1] - a[2 * i]) * fr[i];
         if constexpr (Morph) {
@@ -1055,10 +1066,23 @@ inline float sinCyclesFine(float u) noexcept {
     return x + x * x2 * p;
 }
 
-// sin(2 pi u) / (2 pi u) for u >= 0: 1 at 0 (u held at 1e-7, where it is 1 to float's precision).
+// sin(z) / z for z = 2 pi u, u from 0 to 0.5 (up to the first zero), as its series to z^12 (within about 7e-6;
+// exact at 0, where the quotient is 0 / 0): no reduction, no division.
+inline float sincNear(float u) noexcept {
+    const float z = 6.28318531f * u, t = z * z;
+    float p = 1.60590438e-10f;
+    p = p * t - 2.50521084e-8f;
+    p = p * t + 2.75573192e-6f;
+    p = p * t - 1.98412698e-4f;
+    p = p * t + 8.33333333e-3f;
+    p = p * t - 0.166666667f;
+    return 1.0f + t * p;
+}
+
+// sin(2 pi u) / (2 pi u) for u >= 0: sincNear up to u = 0.5, beyond it the sine over the angle.
 inline float sincCycles(float u) noexcept {
-    u = u > 1e-7f ? u : 1e-7f;
-    return sinCyclesFine(u) / (6.28318531f * u);
+    const float far = sinCyclesFine(u) / (6.28318531f * (u > 0.5f ? u : 0.5f));
+    return u > 0.5f ? far : sincNear(u);
 }
 
 // The fold warp's shaper: lib::fold's sin(x drive pi / 2), drive w1, blended in by w2, on the value v whose
@@ -1067,17 +1091,40 @@ inline float sincCycles(float u) noexcept {
 // the sine, with m = (v + p) / 2 and d = v - p, (cos(k p) - cos(k v)) / (k d) is exactly sin(k m) sin(k d / 2) /
 // (k d / 2) (k = drive pi / 2): no difference of nearly equal numbers, so v = p (where the quotient is 0 / 0) needs
 // no special case, and there it is the plain fold of v. The blend's straight part averages to m.
+// Near: every step d of the run small enough that sincNear covers it (foldRun checks), so sincCycles' far branch,
+// which would give the same bits, is not worked out.
+template <bool Near>
 CAW_FORCE_INLINE float foldAdaa(float v, float p, float w1, float w2) noexcept {
     const float m = 0.5f * (v + p), d = v - p;
-    const float f = sinCyclesFine(0.25f * w1 * m) * sincCycles(0.125f * w1 * (d < 0.0f ? -d : d));
+    const float u = 0.125f * w1 * std::fabs(d);
+    const float f = sinCyclesFine(0.25f * w1 * m) * (Near ? sincNear(u) : sincCycles(u));
     return m + w2 * (f - m);
 }
 
-// The fold over the period's values s[1..count] after s[0] (the last period's last), into y.
+// The fold over the period's values v, after `last` (the value before v[0]), into y; `last` becomes v's last.
 template <uint32_t N>
-CAW_FORCE_INLINE void foldRun(const float* s, float* y, uint32_t n, float w1, float w2) noexcept {
+CAW_FORCE_INLINE void foldRun(const float* v, float& last, float* y, uint32_t n, float w1, float w2) noexcept {
     const uint32_t count = N ? N : n;
-    for (uint32_t i = 0; i < count; ++i) y[i] = foldAdaa(s[i + 1], s[i], w1, w2);
+    if (count == 0) return;
+    alignas(16) float before[kControlFrames];
+    before[0] = last;
+    for (uint32_t i = 1; i < count; ++i) before[i] = v[i - 1];
+    // The largest step, as its bits (a non-negative float's bits order as it does, and an integer maximum
+    // vectorizes): 0.125 w1 |d| is at most 0.5 for every sample when it is for this one.
+    int32_t most = 0;
+    CAW_NO_UNROLL
+    for (uint32_t i = 0; i < count; ++i) {
+        const int32_t d = std::bit_cast<int32_t>(std::fabs(v[i] - before[i]));
+        most = d > most ? d : most;
+    }
+    if (0.125f * w1 * std::bit_cast<float>(most) <= 0.5f) {
+        CAW_NO_UNROLL
+        for (uint32_t i = 0; i < count; ++i) y[i] = foldAdaa<true>(v[i], before[i], w1, w2);
+    } else {
+        CAW_NO_UNROLL
+        for (uint32_t i = 0; i < count; ++i) y[i] = foldAdaa<false>(v[i], before[i], w1, w2);
+    }
+    last = v[count - 1];
 }
 
 // The fold warp (#197, 2026-11-13): at the sample rate, anti-aliased by ADAA (foldAdaa) in place of the 2x
@@ -1093,52 +1140,58 @@ void addFold(OscVoice& o, const float* gL, const float* gR, float* L, float* R, 
     if constexpr (N != 0) n = N;
     const int slot = Mono ? 1 : 0;
     const float w1 = o.w1, w2 = o.w2, mix = o.mix;
-    float s[kControlFrames + 1], y[kControlFrames];
+    alignas(16) float v[kControlFrames], y[kControlFrames];
     if constexpr (!Whole) {
         float* last = o.foldLast[slot];
+        alignas(16) float accL[kControlFrames] = {}, accR[kControlFrames] = {};
         for (int c = 0; c < o.count; ++c) {
             if (!o.a[c]) continue;
             const uint32_t step = o.step[c];
-            s[0] = last[c];
-            readCopy<Morph, N>(o.a[c], o.b[c], o.phase[c] + first * step, step, o.shift[c], mix, s + 1, n);
-            last[c] = s[n];
-            foldRun<N>(s, y, n, w1, w2);
+            readCopy<Morph, N>(o.a[c], o.b[c], o.phase[c] + first * step, step, o.shift[c], mix, v, n);
+            foldRun<N>(v, last[c], y, n, w1, w2);
             if constexpr (Mono) {
                 const float g = 2.0f * gL[c];
-                for (uint32_t i = 0; i < n; ++i) L[i] += y[i] * g;
+                CAW_NO_UNROLL
+                for (uint32_t i = 0; i < n; ++i) accL[i] += y[i] * g;
             } else {
                 const float gl = gL[c], gr = gR[c];
-                for (uint32_t i = 0; i < n; ++i) {
-                    L[i] += y[i] * gl;
-                    R[i] += y[i] * gr;
-                }
+                CAW_NO_UNROLL
+                for (uint32_t i = 0; i < n; ++i) accL[i] += y[i] * gl;
+                CAW_NO_UNROLL
+                for (uint32_t i = 0; i < n; ++i) accR[i] += y[i] * gr;
             }
         }
+        CAW_NO_UNROLL
+        for (uint32_t i = 0; i < n; ++i) L[i] += accL[i];
+        if constexpr (!Mono)
+            CAW_NO_UNROLL
+            for (uint32_t i = 0; i < n; ++i) R[i] += accR[i];
         return;
     }
     (void)gR;
-    float sl[kControlFrames + 1] = {}, sr[kControlFrames + 1] = {}, v[kControlFrames];
+    alignas(16) float sl[kControlFrames] = {}, sr[kControlFrames] = {};
     const bool centred = o.stackCentred;
     for (int c = 0; c < o.count; ++c) {
         if (!o.a[c]) continue;
         const uint32_t step = o.step[c];
         readCopy<Morph, N>(o.a[c], o.b[c], o.phase[c] + first * step, step, o.shift[c], mix, v, n);
         const float pl = o.stackL[c], pr = o.stackR[c];
-        for (uint32_t i = 0; i < n; ++i) sl[i + 1] += v[i] * pl;
+        CAW_NO_UNROLL
+        for (uint32_t i = 0; i < n; ++i) sl[i] += v[i] * pl;
         if (!centred)
-            for (uint32_t i = 0; i < n; ++i) sr[i + 1] += v[i] * pr;
+            CAW_NO_UNROLL
+            for (uint32_t i = 0; i < n; ++i) sr[i] += v[i] * pr;
     }
     float* side = o.foldSide[slot];
-    sl[0] = side[0];
-    sr[0] = side[1];
-    side[0] = sl[n];
-    side[1] = centred ? sl[n] : sr[n];  // a centred stack's right side is its left (should it spread again)
-    foldRun<N>(sl, y, n, w1, w2);
+    foldRun<N>(sl, side[0], y, n, w1, w2);
     if (centred) {
+        side[1] = side[0];  // a centred stack's right side is its left (should it spread again)
         if constexpr (Mono) {
+            CAW_NO_UNROLL
             for (uint32_t i = 0; i < n; ++i) L[i] += y[i];
         } else {
             const float g = o.levelGain;
+            CAW_NO_UNROLL
             for (uint32_t i = 0; i < n; ++i) {
                 L[i] += y[i] * g;
                 R[i] += y[i] * g;
@@ -1146,12 +1199,14 @@ void addFold(OscVoice& o, const float* gL, const float* gR, float* L, float* R, 
         }
         return;
     }
-    float yr[kControlFrames];
-    foldRun<N>(sr, yr, n, w1, w2);
+    alignas(16) float yr[kControlFrames];
+    foldRun<N>(sr, side[1], yr, n, w1, w2);
     if constexpr (Mono) {
+        CAW_NO_UNROLL
         for (uint32_t i = 0; i < n; ++i) L[i] += 0.5f * (y[i] + yr[i]);
     } else {
         const float g = o.levelGain;
+        CAW_NO_UNROLL
         for (uint32_t i = 0; i < n; ++i) {
             L[i] += y[i] * g;
             R[i] += yr[i] * g;
