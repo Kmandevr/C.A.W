@@ -282,6 +282,10 @@ class Settings extends ChangeNotifier {
   set lightMode(bool value) => performanceMode = value ? PerformanceMode.lightweight : PerformanceMode.balanced;
   bool lightAuto = true;
 
+  /// True while the profile is Lightweight because an audio overload turned it on ([lightAuto]); choosing a profile
+  /// clears it. The Frame rate row names it as the reason for its 60 Hz cap.
+  bool lightBySelf = false;
+
   /// The frame rate (owner, 2026-11-12): [FrameRateController.auto] (0: the screen's highest rate while anything
   /// moves, its lowest when still) or a cap in Hz from [FrameRateController.caps]. Auto by default, and for a file
   /// from before the setting or with a value it doesn't know.
@@ -585,6 +589,7 @@ class Settings extends ChangeNotifier {
         'performance_mode': performanceMode.name,
         'light_mode': lightMode, // retained for older builds that read settings.json
         'light_auto': lightAuto,
+        'light_by_self': lightBySelf,
         'frame_rate': frameRate,
         'vim_code': vimCode,
         'vim_keys': vimKeys,
@@ -698,6 +703,7 @@ class Settings extends ChangeNotifier {
       performanceMode = j['light_mode'] == true ? PerformanceMode.lightweight : PerformanceMode.balanced;
     }
     lightAuto = (j['light_auto'] as bool?) ?? lightAuto;
+    lightBySelf = j['light_by_self'] == true && performanceMode == PerformanceMode.lightweight;
     final fr = j['frame_rate'];
     frameRate = fr is num && FrameRateController.caps.contains(fr.toInt()) ? fr.toInt() : FrameRateController.auto;
     vimCode = (j['vim_code'] as bool?) ?? vimCode;

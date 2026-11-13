@@ -4,10 +4,11 @@ import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/scheduler.dart';
+import 'package:flutter/widgets.dart' show AppLifecycleListener;
 
 import '../platform/display_rate.dart';
 
-export '../platform/display_rate.dart' show DisplayRateDevice, FixedDisplayRate;
+export '../platform/display_rate.dart' show DisplayInfo, DisplayMode, DisplayRateDevice, FixedDisplayRate;
 
 /// Makes a one-shot timer (tests pass a fake).
 typedef IdleTimerFactory = Timer Function(Duration after, void Function() fire);
@@ -54,9 +55,13 @@ class FrameRateController extends ChangeNotifier {
   static final _stopwatch = Stopwatch()..start();
   static Duration _realNow() => _stopwatch.elapsed;
 
-  /// The screen's rates, ascending, once [start] has read them.
+  /// The screen's rates at its current resolution, ascending, once [start] has read them ([DisplayInfo.rates]).
   List<double> get rates => _rates;
   List<double> _rates = const [];
+
+  /// What the platform said on the last read: the modes and what may hold the rate down.
+  DisplayInfo get info => _info;
+  DisplayInfo _info = const DisplayInfo();
 
   /// The setting: [auto] or a cap in Hz.
   int get cap => _cap;
@@ -106,11 +111,43 @@ class FrameRateController extends ChangeNotifier {
   /// A choice's label.
   static String label(int cap) => cap == auto ? 'Auto' : '$cap Hz';
 
-  /// Reads the screen's rates and asks for the setting's rate; [attach] hooks the frame callback first.
+  /// The rate asked for while anything moves (0: none asked, or nothing known).
+  double get movingRate {
+    if (!device.canRequest || _rates.isEmpty) return 0;
+    return _cap != auto ? rateFor(effectiveCap, _rates) : _top;
+  }
+
+  /// What the Frame rate row says: the rate in force and, whenever it is below what the screen can do, why
+  /// ([FrameRateStatus]). [profile] names the performance profile; [profileBySelf] says an overload turned it on.
+  FrameRateStatus status({required String profile, bool profileBySelf = false}) => FrameRateStatus.of(
+    info: _info,
+    rates: _rates,
+    canRequest: device.canRequest,
+    cap: _cap,
+    profileCap: _profileCap,
+    profile: profile,
+    profileBySelf: profileBySelf,
+    moving: movingRate,
+    requested: _requested,
+    idle: _idle,
+  );
+
+  /// Reads the screen's modes and asks for the setting's rate; [attach] hooks the frame callback (and a re-read on
+  /// each return to the app) first.
   Future<void> start({bool attach = true}) async {
     if (attach) _attach();
-    _rates = List.unmodifiable(await device.supportedRates());
-    _apply();
+    await refresh();
+  }
+
+  /// Reads the screen's modes again (the app comes back, Settings shows the row): Motion smoothness, battery saver
+  /// or the resolution may have changed meanwhile. Asks again only when the rates changed.
+  Future<void> refresh() async {
+    final i = await device.read();
+    final r = List<double>.unmodifiable(i.rates);
+    final changed = !listEquals(r, _rates);
+    _info = i;
+    _rates = r;
+    if (changed || _requested == null) _apply();
     notifyListeners();
   }
 
@@ -119,7 +156,10 @@ class FrameRateController extends ChangeNotifier {
     _attached = true;
     // Persistent callbacks run for every frame drawn and can't be removed: [onFrame] returns at once unless Auto.
     SchedulerBinding.instance.addPersistentFrameCallback((_) => onFrame());
+    _lifecycle = AppLifecycleListener(onResume: () => unawaited(refresh()));
   }
+
+  AppLifecycleListener? _lifecycle;
 
   /// Sets the setting (Settings calls it whenever it applies itself, so an unchanged value does nothing).
   void setCap(int value) {
@@ -195,6 +235,120 @@ class FrameRateController extends ChangeNotifier {
   void dispose() {
     _idleTimer?.cancel();
     _idleTimer = null;
+    _lifecycle?.dispose();
     super.dispose();
+  }
+}
+
+/// The Frame rate row's words (owner's bug, 2026-11-13: "it says it's capped at 60" on a 120 Hz Galaxy S22+): the
+/// rate in force and the one reason it is below the screen's best, from the app (a profile, the setting) or from the
+/// phone (battery saver, Samsung's Motion smoothness, heat, a resolution without the top rate).
+class FrameRateStatus {
+  const FrameRateStatus({required this.autoLabel, required this.subtitle, this.limit});
+
+  /// The Auto choice's label: "Auto", or "Auto · 60 Hz" when something holds it below the screen's best (the
+  /// subtitle says what; the dropdown has a phone's width for no more).
+  final String autoLabel;
+
+  /// The row's subtitle.
+  final String subtitle;
+
+  /// The short reason, when the rate is held below the screen's best ("Lightweight", "battery saver", ...).
+  final String? limit;
+
+  static String _hz(double r) => '${r.round()} Hz';
+
+  static FrameRateStatus of({
+    required DisplayInfo info,
+    required List<double> rates,
+    required bool canRequest,
+    required int cap,
+    required int profileCap,
+    required String profile,
+    bool profileBySelf = false,
+    required double moving,
+    double? requested,
+    bool idle = false,
+  }) {
+    const tol = FrameRateController.tolerance;
+    final screen = rates.isEmpty ? '' : ' (this screen: ${{for (final r in rates) r.round()}.join(', ')} Hz)';
+    if (!canRequest) {
+      return FrameRateStatus(
+        autoLabel: 'Auto',
+        subtitle: 'Follows the screen\'s own rate$screen; a cap isn\'t available here',
+      );
+    }
+    if (rates.isEmpty) {
+      return const FrameRateStatus(
+        autoLabel: 'Auto',
+        subtitle: 'The screen\'s rates aren\'t known here; the system chooses',
+      );
+    }
+    final top = rates.last;
+    final parts = <String>[];
+    String? limit;
+
+    // The app's own cap: the profile's or the setting's.
+    final profileHolds = profileCap > 0 && (cap == FrameRateController.auto || profileCap < cap) && moving < top - tol;
+    final who = profileBySelf ? '$profile, turned on by itself after an audio overload' : profile;
+    final without = cap == FrameRateController.auto ? top : FrameRateController.rateFor(cap, rates);
+    final others = 'Balanced or Full Experience allow ${_hz(without)}';
+    if (cap == FrameRateController.auto) {
+      parts.add(
+        profileHolds
+            ? '${_hz(moving)} ($who) while anything moves; $others'
+            : rates.length < 2
+            ? 'The screen\'s one rate, ${_hz(top)}'
+            : 'Up to ${_hz(moving)} while anything moves, ${_hz(rates.first)} when still',
+      );
+    } else {
+      parts.add(
+        profileHolds
+            ? 'At most ${_hz(moving)} ($who) everywhere, playback included; $others'
+            : 'At most $cap Hz everywhere, playback included',
+      );
+    }
+    if (profileHolds) limit = profile;
+
+    // The phone's: what it offers now, and what it runs at.
+    final elsewhere = info.fasterElsewhere;
+    if (elsewhere != null) {
+      parts.add(
+        '${_hz(elsewhere.hz)} is offered only at ${elsewhere.width}×${elsewhere.height}, not at the '
+        'current resolution (Settings › Display › Screen resolution)',
+      );
+      limit ??= 'resolution';
+    } else if (top <= 60 + tol && info.powerSave) {
+      parts.add(
+        '${_hz(top)}: battery saver is on and the phone offers no more'
+        '${info.samsung ? ' (Samsung sets Motion smoothness to Standard in Power saving)' : ''}',
+      );
+      limit ??= 'battery saver';
+    } else if (top <= 60 + tol && info.samsung) {
+      parts.add(
+        '${_hz(top)}: the phone offers no more. On a 120 Hz Samsung, Settings › Display › Motion smoothness '
+        'is probably Standard; Adaptive allows 120 Hz',
+      );
+      limit ??= 'Motion smoothness';
+    }
+    final asked = requested ?? 0;
+    final now = info.currentHz;
+    final held = !idle && now > 0 && asked > now + tol && asked >= moving - tol;
+    if (held) {
+      final why = info.powerSave
+          ? 'battery saver'
+          : info.hot
+          ? 'the phone is hot'
+          : info.samsung
+          ? 'check Samsung\'s Motion smoothness'
+          : 'the system holds it';
+      parts.add('Asked for ${_hz(asked)}, the screen runs at ${_hz(now)}: $why');
+      limit ??= why;
+    }
+    return FrameRateStatus(
+      autoLabel: limit == null ? 'Auto' : 'Auto · ${_hz(held ? now : moving)}',
+      subtitle: '${parts.join('. ')}$screen',
+      limit: limit,
+    );
   }
 }

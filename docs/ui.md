@@ -272,7 +272,7 @@ The broader UI specification below records design intent as well as current beha
 - **[Assumption]** For testing, a "potato" means:
   - an Android 8 phone (the app's minimum, `minSdk` 26) with 2 GB of RAM and an old 4-core ARM CPU
   - an old dual-core Windows laptop
-- **[Fact]** Performance profiles are Full Experience, Balanced, Lightweight and Minimal. All retain 30 Hz meter cadence; Lightweight caps the frame rate at 60 Hz and Minimal at 30 Hz; Lightweight/Minimal use the reduced voice budget, and Minimal hides scope panels. Overload auto-response selects Lightweight once when enabled ([app](app.md)).
+- **[Fact]** Performance profiles are Full Experience, Balanced, Lightweight and Minimal. All retain 30 Hz meter cadence; Lightweight caps the frame rate at 60 Hz and Minimal at 30 Hz; Lightweight/Minimal use the reduced voice budget, and Minimal hides scope panels. Overload auto-response selects Lightweight once when enabled, and with it the 60 Hz frame cap, which the Frame rate row then names as its reason ([app](app.md), Frame rate).
 - **Editors:**
   - The piano roll and grid repaint only when something changes, plus the playhead's small region while playing.
   - The pattern model stays the source of truth while editing. It's turned into text only when saving or sending to the engine, not on every touch.
