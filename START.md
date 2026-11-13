@@ -1,12 +1,12 @@
 # C.A.W start file for chat agents
 
-Generated from `371b2820fad161e32e9a429fc2cecc387f33e580` on the default branch at 2026-11-12T21:11:48Z by `scripts/agent-context.js`. Don't edit it; edit the files it bundles.
+Generated from `8b67c190394341f7b5afd0081c871a0448dac23f` on the default branch at 2026-11-13T04:18:42Z by `scripts/agent-context.js`. Don't edit it; edit the files it bundles.
 
 Read this whole file before doing anything else. It replaces separately reading `AGENTS.md`, `CLAUDE.md`, `docs/vision.md` and `.claude/rules/*.md`.
 
 ## Before you start: confirm in your first reply
 
-1. The commit this file was generated from (`371b282`).
+1. The commit this file was generated from (`8b67c19`).
 2. The task issue number and your branch (`gpt/<issue>-<short-name>`).
 3. The progress comment's next action, or "new task" if there is none yet.
 4. Which area rules below apply to the files you will touch.
@@ -362,7 +362,7 @@ paths:
 - Compile and render off the UI isolate. Long renders show progress and can be cancelled.
 - One codebase: platform differences live behind small Dart interfaces with one implementation per platform, never `if (Platform.isX)` scattered through screens.
 - Files: app-private storage for projects; the system file picker for import and WAV export. Ask only for permissions a feature needs now.
-- Current behavior: when stopped and backgrounded, the app closes the audio device and reopens it on return. Background playback is not implemented; do not add or document Android foreground-service or iOS background-audio support as if it already exists without a separately approved implementation.
+- Current behavior: when stopped and backgrounded, the app closes the audio device and reopens it on return. While playing or recording, Android runs a `mediaPlayback` foreground service (owner-approved 2026-11-12, `lib/model/background_playback.dart`); it must start while the app is in front. iOS background audio is not implemented; do not document it as if it exists.
 - No secrets in any build. GitHub tokens come from the device-flow sign-in and live in the platform's secure storage.
 - Phone screens first: compact panels, sensible defaults, the symbol key row for code entry, errors on one line next to the code. Desktop gets keyboard shortcuts on top, not a different app.
 - Start each file with a one-line `//` comment saying what it is for (the repo map reads it).
