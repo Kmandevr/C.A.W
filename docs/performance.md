@@ -118,7 +118,7 @@ The Settings page now offers four explicit profiles:
 | --- | --- | --- |
 | Full Experience | Full-strength theme glow and available visual feedback | Full voice budget; meter polling remains 30 Hz |
 | Balanced | Decorative glow scaled down to 55% | Full voice budget; meter polling remains 30 Hz |
-| Lightweight | Decorative glow, glass blur and the scopes' blurred glow disabled; the glass look stays, unblurred (`lib/ui/glass.dart`) | Existing reduced voice budget (4 per pattern layer); meter polling remains 30 Hz; frame rate capped at 60 Hz (owner, 2026-11-12) |
+| Lightweight | Decorative glow, glass blur and the scopes' blurred glow disabled; the glass look stays, unblurred (`lib/ui/glass.dart`) | Existing reduced voice budget (4 per pattern layer); meter polling remains 30 Hz; frame rate capped at 60 Hz (owner, 2026-11-12), also when an overload turned it on, and the Frame rate row says so |
 | Minimal | Decorative glow and glass disabled; scope panels hidden; motion off (`lib/ui/motion.dart`) | Reduced voice budget; meter polling remains 30 Hz; frame rate capped at 30 Hz (owner, 2026-11-12) |
 
 The legacy `light_mode` setting is still read for migration: true maps to Lightweight and false maps to Balanced. New settings persist `performance_mode` by name and also write the legacy boolean for older builds. Editing settings (the roll's look and value grid, the arrangement's track gap, the music video's one-time Strobe warning, `strobe_warned`) are the same in every profile.
