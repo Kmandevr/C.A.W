@@ -28,6 +28,12 @@ class DayStats {
   final Map<String, int> builtins = {};
   int maxTracks = -1, maxClips = -1;
 
+  /// The audio callback's core kind ("big", "little", "other", "unknown") at each audio-threads sample while playing
+  /// (caw_audio_threads, [threads]), and the platform's scheduling hint ("on", "off", "unsupported"): "on" once it
+  /// was on, else "off" once a platform that has one ran without it; null before any sample.
+  final Map<String, int> coreKinds = {};
+  String? schedHint;
+
   /// (type, where) → count, as H2's `errors`.
   final Map<String, int> errors = {};
 
@@ -45,6 +51,25 @@ class DayStats {
     cpuBuckets[(cpu * 10).floor().clamp(0, 9)]++;
     worstCpu = math.max(worstCpu, cpu);
     playingSeconds += secondsSinceLast.clamp(0, 1);
+  }
+
+  /// One audio-threads sample while playing: [coreKind] the callback's core kind, [hint] "on", "off" or
+  /// "unsupported". Values outside H2's sets read as "unknown" and "unsupported".
+  void threads({required String coreKind, required String hint}) {
+    final kind = const {'big', 'little', 'other'}.contains(coreKind) ? coreKind : 'unknown';
+    coreKinds[kind] = (coreKinds[kind] ?? 0) + 1;
+    final h = const {'on', 'off'}.contains(hint) ? hint : 'unsupported';
+    if (schedHint != 'on' && (h != 'unsupported' || schedHint == null)) schedHint = h;
+  }
+
+  /// The core kind the callback ran on most often today; "unknown" when no sample knew it.
+  String get callbackCoreType {
+    String? best;
+    for (final k in const ['big', 'little', 'other']) {
+      final n = coreKinds[k] ?? 0;
+      if (n > 0 && (best == null || n > coreKinds[best]!)) best = k;
+    }
+    return best ?? 'unknown';
   }
 
   void frame(double totalMs, double budgetMs) {
@@ -72,10 +97,9 @@ class DayStats {
     return 101;
   }
 
-  /// H2's `perf`. [schedHint] and [callbackCoreType] wait for A1's diagnostics.
-  /// H2's `perf`; a figure nothing measured is null (owner, 2026-11-12). [schedHint] and [callbackCoreType] wait
-  /// for A1's diagnostics.
-  Map<String, Object?> perf({String schedHint = 'off', String callbackCoreType = 'unknown'}) {
+  /// H2's `perf`; a figure nothing measured is null (owner, 2026-11-12). `schedHint` and `callbackCoreType` come
+  /// from the day's audio-threads samples ([threads]); with none, H2 has no null for them, so "off" and "unknown".
+  Map<String, Object?> perf() {
     final played = cpuBuckets.any((c) => c > 0);
     return {
       'cpuLoadHistogram': played ? histogramShares(cpuBuckets) : null,
@@ -89,7 +113,7 @@ class DayStats {
       'startupMs': startupMs == null ? null : startupMs50(startupMs!),
       'thermalEvents': thermalEvents,
       'batterySaverMinutes': minutes5(batterySaverSeconds),
-      'schedHint': schedHint,
+      'schedHint': schedHint ?? 'off',
       'callbackCoreType': callbackCoreType,
     };
   }
@@ -118,7 +142,7 @@ class DayStats {
         'day': day, 'cpu': cpuBuckets, 'dropouts': dropouts, 'worstCpu': worstCpu, 'frames': frameBins,
         'slow': slowFrames, 'startupMs': startupMs, 'thermal': thermalEvents, 'saver': batterySaverSeconds,
         'open': openSeconds, 'playing': playingSeconds, 'screens': screenSeconds, 'builtins': builtins,
-        'tracks': maxTracks, 'clips': maxClips, 'errors': errors,
+        'tracks': maxTracks, 'clips': maxClips, 'errors': errors, 'coreKinds': coreKinds, 'hint': schedHint,
       };
 
   /// Null when [j] has no day; a wrong-typed field reads as empty, so one bad value never loses the rest.
@@ -146,7 +170,8 @@ class DayStats {
       ..openSeconds = d(j['open'])
       ..playingSeconds = d(j['playing'])
       ..maxTracks = n(j['tracks'], -1)
-      ..maxClips = n(j['clips'], -1);
+      ..maxClips = n(j['clips'], -1)
+      ..schedHint = const {'on', 'off', 'unsupported'}.contains(j['hint']) ? j['hint'] as String : null;
     for (final (key, into) in [('screens', s.screenSeconds)]) {
       if (j[key] case final Map m) {
         for (final e in m.entries) {
@@ -154,7 +179,7 @@ class DayStats {
         }
       }
     }
-    for (final (key, into) in [('builtins', s.builtins), ('errors', s.errors)]) {
+    for (final (key, into) in [('builtins', s.builtins), ('errors', s.errors), ('coreKinds', s.coreKinds)]) {
       if (j[key] case final Map m) {
         for (final e in m.entries) {
           if (e.key is String && e.value is num) into[e.key as String] = n(e.value);

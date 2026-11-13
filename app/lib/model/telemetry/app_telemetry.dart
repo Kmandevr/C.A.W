@@ -1,5 +1,6 @@
 // Connects telemetry to the running app (main.dart): the meter reads AppState already makes, Play, frame timings,
-// thermal and power signals, errors, startup time and what the engine reports, with no FFI call of its own.
+// thermal and power signals, errors, startup time and what the engine reports; its one FFI read of its own is the
+// audio threads (caw_audio_threads) every 5 s while playing.
 import 'dart:async';
 import 'dart:io';
 
@@ -85,9 +86,19 @@ Future<Telemetry> startAppTelemetry(AppState state, {required Stopwatch startup,
 
   // The 30 Hz meter reads AppState already makes, and Play.
   var playing = false;
+  // The callback's core kind and the scheduling hint (H2 perf.callbackCoreType, perf.schedHint), read every 5 s while
+  // playing: caw_audio_threads reads a clock from the system, so not at 30 Hz. Only Android has a hint (ADPF).
+  final threadsClock = Stopwatch();
   state.tick.addListener(() {
     final m = state.meters;
     t.onMeters(cpu: m.cpu, playing: m.playing, overloaded: m.overloaded);
+    final e = state.engine;
+    if (m.playing && t.enabled && e != null && (!threadsClock.isRunning || threadsClock.elapsed.inSeconds >= 5)) {
+      threadsClock
+        ..reset()
+        ..start();
+      t.onAudioThreads(e.audioThreads(), hintSupported: Platform.isAndroid);
+    }
     if (m.playing && !playing) {
       final p = state.project;
       final own = {for (final c in p.cppComponents) c.componentId};
