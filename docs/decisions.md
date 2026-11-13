@@ -1,10 +1,22 @@
 ---
 title: Decisions
 summary: Dated record of what was chosen and why, newest first.
-updated: 2026-11-12
+updated: 2026-11-13
 ---
 
 # Decisions
+
+## 2026-11-13: Small updates (owner, 2026-11-12: "yes on small updates")
+
+**Decision (owner):** build smaller update downloads, rebuilt on the device into the full APK (Android still installs a whole, signed APK) and only the changed files on Windows.
+
+**Claude's choices (details and measured sizes in [app](app.md), "Updates"):**
+- **APK: rebuilt from the installed APK's exact bytes, per zip entry.** Unchanged entries (and their local headers) are copied from the old APK, changed entries' stored bytes, the signing block and the central directory are data, so the result is byte-identical by construction and checked against the published SHA-256 before it installs. **[Fact]** (2026-11-12) the rebuilt 57 MB APK of 641fe41 equals the published one byte for byte (Dart's applier, from 9f92e8f).
+- **No binary diff inside the APK's compressed entries.** The APK stores native libraries deflated (`useLegacyPackaging = true`, decided earlier for download size), and a diff of the uncompressed libapp.so (1.57 MB by bsdiff instead of 4.9 MB) would need the device to re-deflate it to the identical bytes. **[Fact]** (2026-11-12) Python's zlib 1.3 at level 6 reproduces the CI entry exactly, but Dart's bundled zlib does not (5,010,662 bytes instead of 4,889,573), and Android's own zlib is not guaranteed to either, so this is not cheap or reliable. **Open question for the owner:** storing libapp.so uncompressed would make that 1.6 MB possible but grows every full download; not changed.
+- **bsdiff for Windows files (and any stored APK entry).** CI runs Colin Percival's bsdiff 4.3 from Ubuntu's package (`apt-get install bsdiff`): **[Fact]** BSD-2-Clause (Debian's copyright file for bsdiff 4.3-23, read 2026-11-12; one Debian patch to `bspatch`, which CI does not use, has LGPL-2+ gnulib macros). It is a CI tool only, never shipped; its bzip2 blocks are decompressed with the runner's `bzip2` and re-packed with deflate, and the app has its own bspatch-format reader in Dart (`patch_format.dart`), so no new app dependency. **Refused:** the Python `bsdiff4` package, whose core is under the "BSD Protection License" (not a standard permissive licence; read 2026-11-12).
+- **The CI builder is plain Node** (`scripts/update-delta.js`, no npm packages, as `scripts/` requires) and applies every patch before publishing it; a patch that does not rebuild its target, or is not smaller, is not published (WARN), and the release still goes out.
+- **Trust chain:** the release notes (and GitHub's asset digests) give the manifest's SHA-256; the manifest gives the patch's and the target's; the rebuilt APK must equal the release's published SHA-256. Secret-free: the jobs keep their own `contents: write` and `github.token`; assets go up before the notes are rewritten, and `latest-main` deletes a patch asset its new build has none of.
+- **Windows swap at the next start, then a relaunch:** the app can't replace files it is running from, so the stage waits beside the app (same drive, so moves are renames) and is swapped in first thing at the next start, before the window shows; the new build then starts in a fresh process. Files the new build no longer has are left in place (harmless).
 
 ## 2026-11-12: Updates: the check, the prompt, channels, other versions and automatic updates (owner)
 
@@ -23,7 +35,7 @@ updated: 2026-11-12
 - **Allowed hosts:** github.com, objects.githubusercontent.com and also **release-assets.githubusercontent.com**: on 2026-11-12 github.com's release download URLs answered 302 to that host, so without it no download would work. Every redirect hop is checked; the first URL is pinned to `https://github.com/Kmandevr/C.A.W/releases/download/`.
 - **After the security review (2026-11-12):** the Android install status goes to a non-exported manifest receiver through an explicit PendingIntent with a random token (the dynamic receiver was exported below API 33), and the installer's confirmation opens only when it resolves to a system app holding INSTALL_PACKAGES; Windows offers only the zip (no `.msi`/`-setup.exe` kind: an installer path needs a signed installer first); downloads stop after 30 s idle or 30 min; every download is checked against its SHA-256 (GitHub's asset `digest`, else CI's `SHA256 <asset>: <hex>` notes line; unverified older releases: allowed on Android, which checks the signature, and said plainly on Windows); CI uploads `latest-main`'s assets before it rewrites the notes.
 - **Android:** `INTERNET`, `REQUEST_INSTALL_PACKAGES` and `UPDATE_PACKAGES_WITHOUT_USER_ACTION` in the manifest. A silent install waits until the app is in the background (Android stops the app it replaces and does not restart it); the APK's own signature and versionCode checks are Android's. Not yet run on a device: CI builds it.
-- **Windows:** the releases ship a zip, so "Update" downloads it and shows it in Explorer with "Downloaded to <folder>"; there is no installer to run yet. Auto-updates download in the background and say so at the next start.
+- **Windows:** a small update stages the changed files and swaps them in at the next start (decision of 2026-11-13 above); otherwise the release's zip is downloaded and shown in Explorer with "Downloaded to <folder>"; there is no installer to run. Auto-updates download in the background and say so at the next start.
 - **Every change in CI:** app.yml's `every-change` job, after the Android and Windows builds of a push to Main, moves the `latest-main` tag and replaces the release's assets (`caw-main-android.apk`, `caw-main-windows.zip`) and notes (with `Version:` and `Build:` lines), as a pre-release with `--latest=false`, one run at a time (concurrency group `every-change-release`), with the job's own `contents: write` and no secret. Every build gets `--dart-define=CAW_BUILD=<short commit>`.
 - **Newer project files:** `ProjectDoc.fromJson` refuses a `caw_app_project` above `fileVersion` (`NewerProjectFormat`); `ProjectStorage.load` passes it on instead of calling the file damaged, and the app opens the default project with a line saying why, leaving the file as it is.
 - **No new Dart package:** dart:io's HttpClient and the platform channel; no url_launcher (Copy download link instead).
