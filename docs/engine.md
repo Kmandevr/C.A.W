@@ -733,7 +733,7 @@ The app's built-in stress test (beta plan C; the app calls it **Benchmark**). `s
 
 ## Tests
 
-`engine/build/caw_tests` runs 667 tests, `engine/build/caw_rt_tests` 95 more and `engine/build/caw_exact_tests` 29 (CTest runs all three; counted 2026-11-13):
+`engine/build/caw_tests` runs 671 tests, `engine/build/caw_rt_tests` 95 more and `engine/build/caw_exact_tests` 31 (CTest runs all three; counted 2026-11-13):
 - **MIDI files:** round trips of the example patterns through `.mid` and `.midi2`, chords, fractions, microtones, exact clip and SMF bytes, hand-built files with running status and tempo changes, and thousands of truncated or corrupted files that must give errors without crashing.
 - **Patterns:** the note format and its errors, sample-exact note starts and ends on the test signal, chords, repeatable probability, pattern length, notes released by seed and tempo changes, packed patterns, late-note warnings, pattern edits carrying sounding notes onto their new curve (or ending deleted ones) and the note matcher, and exports checking patterns.
 - **Mixer:** (runs through the Engine's mix graph since F4.3) on the test signal (`engine/tests/test_signal.h`): block-size independence, a track removed from inside a folder fading out (issue #76), layer lengths, an instrument swap's crossfade, a value change keeping the instrument playing, a broken pattern keeping the old notes, mute, solo and pan, overload, stop and removal, effects, one graph node per track and the limiter.

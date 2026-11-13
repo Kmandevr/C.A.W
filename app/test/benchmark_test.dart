@@ -148,6 +148,19 @@ void main() {
     await pressure.close();
   });
 
+  test('closing the screen mid-run cancels it, and the run still ends and is sent', () async {
+    final sent = <Map<String, Object?>>[];
+    late StressRunner runner;
+    runner = StressRunner(
+        backend: FakeStress(onStart: (r) {
+          if (r.scenario == 'song8') runner.dispose();
+        }),
+        sendTelemetry: (s) async => sent.add(s));
+    final res = await runner.run(StressPlanKind.quick);
+    expect(res.stoppedBecause, 'You stopped it');
+    expect(sent, hasLength(1));
+  });
+
   test('battery saver at the start: nothing runs, and it says why', () async {
     final fake = FakeStress();
     final host = FakeHost();

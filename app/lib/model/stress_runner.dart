@@ -314,8 +314,18 @@ class StressRunner extends ChangeNotifier {
       ]);
   }
 
+  bool _disposed = false;
+
+  // The screen may close mid-run: the run still ends (and is still sent), but tells no one.
+  @override
+  void notifyListeners() {
+    if (!_disposed) super.notifyListeners();
+  }
+
   @override
   void dispose() {
+    _disposed = true;
+    _cancelled = true;
     _poll?.cancel();
     _pressureSub?.cancel();
     _job?.cancel();
