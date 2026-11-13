@@ -79,7 +79,13 @@ void end(void*, uint32_t section, uint64_t startNs) noexcept {
 
 const CawProfileExtension kExtension{sizeof(CawProfileExtension), &gTable.active, nullptr, &begin, &end, &nowNs};
 
-void setActive(int32_t v) noexcept { std::atomic_ref<int32_t>(gTable.active).store(v, std::memory_order_relaxed); }
+void setActive(int32_t v) noexcept {
+#if defined(__cpp_lib_atomic_ref)
+    std::atomic_ref<int32_t>(gTable.active).store(v, std::memory_order_relaxed);
+#else
+    __atomic_store_n(&gTable.active, v, __ATOMIC_RELAXED);  // the Android NDK's libc++ lacks std::atomic_ref
+#endif
+}
 
 // The engine's own components (built-ins) were made without a CawHost: point this library's copy at the table.
 const bool gAttached = [] {

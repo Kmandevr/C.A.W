@@ -25,6 +25,24 @@ namespace caw::bench {
 
 namespace {
 
+// Plain ints shared with another thread. std::atomic_ref is missing from the Android NDK's libc++, so those builds
+// use the compiler's atomic built-ins instead (as render.cpp does).
+[[maybe_unused]] inline int32_t relaxedLoad(const int32_t* p) noexcept {
+#if defined(__cpp_lib_atomic_ref)
+    return std::atomic_ref<int32_t>(*const_cast<int32_t*>(p)).load(std::memory_order_relaxed);
+#else
+    return __atomic_load_n(p, __ATOMIC_RELAXED);
+#endif
+}
+[[maybe_unused]] inline void relaxedStore(int32_t* p, int32_t v) noexcept {
+#if defined(__cpp_lib_atomic_ref)
+    std::atomic_ref<int32_t>(*p).store(v, std::memory_order_relaxed);
+#else
+    __atomic_store_n(p, v, __ATOMIC_RELAXED);
+#endif
+}
+
+
 std::atomic<AllocationCounter> gCounter{nullptr};
 // One bench at a time (the section table is the process's one): set by the job that starts one, cleared by the
 // bench's own thread when it ends (an atomic, since the two are different threads).
@@ -314,7 +332,7 @@ void automateBlock(Rig& rig, uint32_t m, uint64_t blockIndex) noexcept {
 }
 
 bool cancelled(const int32_t* cancel) noexcept {
-    return cancel && std::atomic_ref<int32_t>(*const_cast<int32_t*>(cancel)).load(std::memory_order_relaxed) != 0;
+    return cancel && relaxedLoad(cancel) != 0;
 }
 
 // Plays `plan` through the rig and times each timed block. Nothing in the loop allocates (the rig's buffers and
@@ -423,7 +441,7 @@ std::string failure(const std::string& error) {
 
 std::string runLocked(const Request& r, int32_t* progress, const int32_t* cancel, Watch* watch) {
     auto step = [&](int permille) {
-        if (progress) std::atomic_ref<int32_t>(*progress).store(permille, std::memory_order_relaxed);
+        if (progress) relaxedStore(progress, permille);
     };
     if (r.id.empty() || r.id.size() > 256) return failure("a component id is required");
     if (!(r.seconds >= 0.1 && r.seconds <= 10)) return failure("seconds must be 0.1..10");
@@ -718,18 +736,17 @@ std::string run(const Request& request, int32_t* progress, const int32_t* cancel
                 std::string text = std::move(watch->result);
                 g.unlock();
                 bench.join();
-                if (progress) std::atomic_ref<int32_t>(*progress).store(std::atomic_ref<int32_t>(watch->progress).load());
+                if (progress) relaxedStore(progress, relaxedLoad(&watch->progress));
                 return text;
             }
-            if (progress) std::atomic_ref<int32_t>(*progress).store(std::atomic_ref<int32_t>(watch->progress).load(std::memory_order_relaxed),
-                                                                     std::memory_order_relaxed);
-            if (cancelled(cancel)) std::atomic_ref<int32_t>(watch->cancel).store(1, std::memory_order_relaxed);
+            if (progress) relaxedStore(progress, relaxedLoad(&watch->progress));
+            if (cancelled(cancel)) relaxedStore(&watch->cancel, 1);
             const int64_t start = watch->blockStartNs.load(std::memory_order_acquire);
             const int64_t deadline = watch->blockDeadlineNs.load(std::memory_order_relaxed);
             if (start != 0 && steadyNs() - start > deadline) {
                 // Stuck in the component: stop waiting. Its thread keeps the bench's lock until (if ever) it returns,
                 // then stops at its next check (cancel) and lets the next benchmark run.
-                std::atomic_ref<int32_t>(watch->cancel).store(1, std::memory_order_relaxed);
+                relaxedStore(&watch->cancel, 1);
                 gAbandoned.store(true);
                 g.unlock();
                 bench.detach();

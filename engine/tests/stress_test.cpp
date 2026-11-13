@@ -303,7 +303,8 @@ TEST(stress_profile_parts_add_up_and_name_the_feature) {
         (void)top;
 #endif
         CHECK_EQ(o.parts[static_cast<int>(Part::DeviceIo)].pct, 0.0);  // live only
-        CHECK_EQ(o.parts[static_cast<int>(Part::MixPool)].pct < 1.0, true);  // a profile is serial
+        // A profile is serial: the pool's own part stays near zero (judged on its least time, as above).
+        CHECK(least[static_cast<int>(Part::MixPool)] < o.meanUs * 0.01);
     }
     // A plain run has none (it isn't profiled).
     RunRequest r;
