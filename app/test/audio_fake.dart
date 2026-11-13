@@ -120,7 +120,10 @@ class FakeAudioIo implements AudioIo {
   }
 
   @override
-  Map<String, dynamic> inputStatus() => const {'enabled': true, 'running': true, 'channels': 2};
+  Map<String, dynamic> inputStatus() => inputStatusNow;
+
+  /// What [inputStatus] answers: the engine's input JSON ("state": open, stalled, stopped, failed).
+  Map<String, dynamic> inputStatusNow = {'enabled': true, 'running': true, 'state': 'open', 'channels': 2};
 }
 
 /// A 16-bit PCM WAV: [seconds] of a 440 Hz sine at half scale, [channels] wide.

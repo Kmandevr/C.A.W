@@ -75,6 +75,7 @@ template <class Sink>
 bool recordTo(const ProjectSpec& p, int sr, int64_t keepFrom, int64_t total, Sink&& sink, std::string& error,
               int32_t* progress, int32_t* cancel) {
     Engine eng(sr);
+    eng.useOfflineMixPool();  // the mix graph on several threads unless a live device runs (speed phase 5c)
     const std::string projectResult = eng.setProjectOffline(p);
     if (projectResult.find("\"ok\":true") == std::string::npos) {
         error = "couldn't install project for offline export: " + projectResult;

@@ -29,6 +29,11 @@ class FakeMic implements MicPermission {
     asked++;
     return allow;
   }
+
+  /// What Android would say about our capture (another app has the microphone).
+  bool silenced = false;
+  @override
+  Future<bool> inputSilenced() async => silenced;
 }
 
 ProjectDoc project() => ProjectDoc(id: 'rec', name: 'Rec', bpm: 120, loopBars: 4, layers: [
@@ -192,7 +197,10 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('switch-audio.input')));
     await tester.pumpAndSettle();
-    expect(rec.inputOpen, isTrue);
+    // On, but the microphone stays closed until a track is armed or monitors (owner, 2026-11-12).
+    expect(rec.prefs.enabled, isTrue);
+    expect(rec.inputOpen, isFalse);
+    expect(io.inputConfigs, isEmpty);
     await tester.tap(find.byKey(const ValueKey('latency-measure')));
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('latency-warning')), findsOneWidget);

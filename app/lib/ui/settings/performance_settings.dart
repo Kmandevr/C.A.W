@@ -1,8 +1,9 @@
-// Settings › Performance: the performance profile, Lightweight on overload, the frame rate, and the engine's hardware
-// profile and plan.
+// Settings › Performance: the performance profile, Lightweight on overload, the frame rate, the Benchmark, and the
+// engine's hardware profile and plan.
 import 'package:flutter/material.dart';
 
 import '../../model/settings.dart';
+import '../benchmark/benchmark_screen.dart';
 import '../frame_rate.dart';
 import '../theme.dart';
 import 'settings_deps.dart';
@@ -23,6 +24,9 @@ class PerformanceSettings extends StatelessWidget {
       settingSwitch('performance.lightAuto', s.lightAuto, (v) => s.update((x) => x.lightAuto = v),
           icon: Icons.auto_mode, subtitle: 'Keeps the interface responsive while reducing the voice budget'),
       FrameRateRow(settings: s, controller: FrameRateController.current),
+      Builder(
+          builder: (context) => settingAction('performance.benchmark',
+              icon: Icons.insights, iconColor: Neon.violet, onTap: () => showBenchmark(context, host: deps.state))),
       settingAction('performance.hardware',
           icon: Icons.memory, iconColor: Neon.green,
           subtitle: hw == null

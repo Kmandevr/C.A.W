@@ -19,6 +19,9 @@ std::vector<Case>& cases();
 void fail(const char* file, int line, const std::string& msg);
 int failureCount();  // failures so far in this run
 extern bool updateGolden;  // --update-references: re-record the reference renders (tolerance.h)
+// --mix-threads N: every Engine the tests make runs its mix graph with a pool of N workers (0: on one thread).
+// Set by the binary that links the engine (mix_pool_test.cpp); null in the others, which then refuse the flag.
+extern void (*mixThreadsHook)(int workers);
 
 struct Reg {
     Reg(const char* n, std::function<void()> f) { cases().push_back({n, std::move(f)}); }

@@ -184,7 +184,7 @@ TEST(the_master_chain_sleeps_soon_after_a_tail_and_wakes_sample_exactly) {
     Engine e(48000);
     CHECK(ok(e.setProjectOffline(p)));
     ChainProfile profile{};
-    ChainProfile::set(&profile);
+    e.setProfile(&profile);
     e.play();
     constexpr int kFrames = 256, kBar = 96000;  // 2 s a bar at 120 BPM
     std::vector<float> a(kFrames), b(kFrames), out;
@@ -206,7 +206,7 @@ TEST(the_master_chain_sleeps_soon_after_a_tail_and_wakes_sample_exactly) {
         }
         ran = now;
     }
-    ChainProfile::set(nullptr);
+    e.setProfile(nullptr);
     CHECK(lastLoud > 0);
     CHECK(lastRan >= lastLoud);
     CHECK(lastRan - lastLoud < 48000);  // asleep within a second of falling below -100 dBFS

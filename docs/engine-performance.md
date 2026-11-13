@@ -1,8 +1,8 @@
 ---
 title: Engine performance
-summary: The CI bench suite (caw_bench SECONDS 500, the Bench workflow), its scenarios and targets, the baseline per target, and the speed phases' before/after tables.
-covers: [engine/bench/, .github/workflows/bench.yml]
-updated: 2026-11-12
+summary: The CI bench suite (caw_bench SECONDS 500, the Bench workflow), its scenarios and targets, the baseline per target, and the speed phases' before/after tables (phases 1-5, A2-A5).
+covers: [engine/bench/, .github/workflows/bench.yml, engine/src/stress_scenarios.*]
+updated: 2026-11-13
 ---
 
 # Engine performance
@@ -11,7 +11,9 @@ The owner asked for a faster engine, measured first (2026-11-12, [decisions](dec
 
 ## The suite
 
-`caw_bench SECONDS 500 [--frames N] [--runs N] [--only ID,ID] [--label TEXT] [--json PATH] [--md PATH]` (`engine/bench/caw_bench.cpp`, `runSuite`). Defaults: **256-frame callbacks at 48 kHz, a budget of 5,333 µs per callback**, 3 runs. Each run plays every scenario in turn on a fresh `Engine` (set the project, 0.25 s stopped so the project is applied, then Play) and times each `Engine::process` call. A scenario's result: the **median of the runs' means** (and p99s) and the **largest worst case of any run**, with the time after Play the worst case happened; load is time ÷ budget. `--json` writes every number, each run's mean and worst too (`format: 1`); `--md` writes a markdown table. The bench changes no engine code; it builds projects from built-in instruments and effects only.
+Long runs (`caw_bench SECONDS 600`) and per-track callback-size checks (`caw_bench SECONDS 601`) are in [engine](engine.md) ("Long runs and callback sizes").
+
+`caw_bench SECONDS 500 [--frames N] [--runs N] [--only ID,ID] [--threads N|auto] [--mode always|auto] [--label TEXT] [--json PATH] [--md PATH]` (`engine/bench/caw_bench.cpp`, `runSuite`). Defaults: **256-frame callbacks at 48 kHz, a budget of 5,333 µs per callback**, 3 runs. Each run plays every scenario in turn on a fresh `Engine` (set the project, 0.25 s stopped so the project is applied, then Play) and times each `Engine::process` call. A scenario's result: the **median of the runs' means** (and p99s) and the **largest worst case of any run**, with the time after Play the worst case happened; load is time ÷ budget. `--json` writes every number, each run's mean and worst too (`format: 1`); `--md` writes a markdown table. The bench changes no engine code; it builds projects from built-in instruments and effects only. `--threads N` gives the mix graph N pool workers (0, the default: one thread; `auto`: `MixPool::defaultWorkers()`); with them `--mode always` (the default) hands the pool every level of two or more busy nodes, and `--mode auto` runs it as a live device does, `MixParallel::Auto` deciding from each callback's measured time (`Engine::reportLoad`), and says if the engine shed a layer. The projects are `engine/src/stress_scenarios.cpp`'s (moved there from the bench on 2026-11-13 unchanged: the same projects, renders and output), which the app's Benchmark plays too, so its numbers and CI's are of the same projects; `stress_test.cpp` keeps them from changing by accident ([engine](engine.md#the-benchmark)).
 
 | Id | Scenario |
 |---|---|
@@ -33,6 +35,7 @@ The owner asked for a faster engine, measured first (2026-11-12, [decisions](dec
 
 - **Linux x64:** `ubuntu-24.04`, GCC 13.3 Release.
 - **Linux arm64:** `ubuntu-24.04-arm`, GCC 13.3 Release.
+- **Windows x64 (since 2026-11-13, A5):** `windows-2025` (the runner engine.yml tests Windows on), MSVC Release with its default link-time optimisation and `/fp:precise`: the Windows app's compiler. Its CPU varies between runs (AMD EPYC 7763 and 9V74 seen), so compare its numbers within one run.
 - **Android arm64:** `caw_bench` cross-compiled on `ubuntu-24.04` with **NDK 28.2.13676358**, the NDK the APK's engine is built with (app.yml), for `arm64-v8a`, `android-29`, `c++_static`, linked `-static`; then run on `ubuntu-24.04-arm`. **[Fact, run 43135752152, 2026-11-12]** the static bionic executable runs on the Linux arm64 kernel (`ELF 64-bit LSB executable, ARM aarch64, statically linked`; all scenarios ran).
   - **Why not an emulator:** arm64 Android images on x86 runners are translated, so their timings say little about a phone and vary widely. This target measures the Android compiler, libc++ and bionic on real Arm64 cores.
   - **What it is not:** the runner's cores are Neoverse-N2 server cores, not the S22+'s Cortex-X2/A710/A510, and there is no Android scheduler, thermal limit or audio thread priority. **[Assumption]** relative gains carry over to the phone; absolute numbers do not.
@@ -61,7 +64,7 @@ The owner asked for a faster engine, measured first (2026-11-12, [decisions](dec
 What it shows (for the phases to act on):
 
 - **Over budget:** the heavy Flagship at full polyphony and the 32-track heavy-FX song use about 90–107% of one core per callback on every target; both would drop out on a single audio thread.
-- **Worst cases come at Play:** in most scenarios the worst callback is the first one after Play (worst at 0.00 s), 2–8 times the mean: the first block's note-ons and first-time work.
+- **Worst cases came at Play:** in most scenarios the worst callback was the first one after Play (worst at 0.00 s), 2–8 times the mean: two resets of every instrument and every parameter resolved for the first time (fixed in [A3](#a3-the-first-callback-after-play)).
 - **Sleep mostly works:** the tail rang out for 13.9 s to −100 dBFS; the silence after it cost 36–40 µs a callback against 26–31 µs for a project that never played, but its p99 (about 100 µs) is three times the floor's (about 35 µs), so something still runs on some callbacks after the tail ends.
 - **Android build:** on the same Arm64 cores the NDK's Clang build is 0–9% faster than the GCC build in most scenarios (3–4% in the heavy ones) and about 2% slower on the tail's notes.
 
@@ -253,12 +256,129 @@ The 64-voice Flagship and the 32-track song, over budget in the baseline (about 
 
 ### 5. Parallel mixer
 
+The architect's plan (2026-11-12; 5a to 5d built, 5e still **[Proposal]**): run the mix graph's independent nodes on several cores, summing in a fixed order so the output keeps its bits.
+
+- **5a, per-task scratch and pull routes (built, serial, bit-identical):** every slot node has its own scratch (the signal through its inserts, a crossfade's old output) instead of the Engine's shared buffers; the track gain glide's factor is set when the Engine is made, not on first use; sends and sidechain keys are pulled: a source writes each route into a buffer of its own route table (`SendTable::Route::outL/outR`, its key notes in the table), and the destination sums its routes when it runs (`Engine::pullRoutes`) in the old push order (its sources in the order they run, each one's routes by index; the float sums of phase 4), so no node writes another's state; `ModulationHost::forChain` has an output per slot and the master's (the values and samples scratch it points to is still the plan's, used by one chain at a time: per-worker in 5c); what a node retires waits in its own list (at most 8 a chunk) and the callback thread pushes the lists after the graph has run (`flushRetires`), `canRetire` counting what the lists hold.
+- **5b, levels (built, still serial):** `GraphExecutor::setRouting` takes order-only dependencies (each send and key) and sorts the order into dependency levels, a stable counting sort, with the output node (the master) alone and last; `processValidated` runs level by level. No node of a level reads another of the same level.
+- **5c, `mix_pool` (built, same bits):** `engine/src/mix_pool.{h,cpp}`, portable (`std::thread`, `std::atomic`). Worker threads are made and joined on the control thread (`Engine::startMixPool`; the platform's `startLiveMixPool` before the device starts, `stopLiveMixPool` after it stops). For a level with two or more nodes that may run in parallel, `GraphExecutor` hands them to `MixPool::run`: it publishes the level through an epoch in one 64-bit claim word (epoch, task count, next index, so a late claim can't take an index of the next level), claims tasks itself and spins until the level's done count is reached; it never waits on a sleeping worker and makes no system call unless one sleeps. Workers spin about 50 µs (a pause or yield instruction), then sleep in `std::atomic<uint32_t>::wait` on the epoch; `notify_all` only while the sleepers count is set; parked (no spin) while nothing plays. Each worker holds `ScopedFlushDenormals`. Every node writes only its own buffers and every sum happens at its destination in the fixed order, so the output is the same bits as on one thread. Hardened first (the 5a/5b audio review): each node's retire list gets its share of the queue's room before the graph runs (`assignRetireBudgets`, `canRetireNode`; no shared count, no push mid-graph), the pull tables are staged and swapped in only when `setRouting` accepts, a freed bus flags its own slot (ORed into `routingDirty_` after the graph), the modulation values and samples scratch is per lane (`MixPool::lane()`), and `feedDeviceMidi` reads only its own slot's flags. **Only nodes without parameters and typed ports run in parallel** (their parameter resolution shares the executor's automation scratch and merge counter; the mixer's nodes have none). A node whose chains hold a third-party native component, or that is silent or idle this chunk, runs on the callback thread first. When: `MixParallel::Auto` (live) once the measured load stays above 0.4 for 0.5 s, back to one thread once it stays below 0.08 for 5 s; offline renders `Always` unless a live device runs; never while the bench profiles components. Workers: `MixPool::defaultWorkers()` = min(hardware threads − 1, 3); `caw_bench --threads N`.
+  - **[Fact, 2026-11-12, local test]** Android NDK r30's libc++ (Clang 21) defines `__cpp_lib_atomic_wait` (201907) and a static arm64 executable using `std::atomic<unsigned>::wait`/`notify_all` links (`__libcpp_atomic_wait`, `__cxx_atomic_notify_all` from libc++_static) and runs under qemu. **[Fact, Bench run [43258432456](https://github.com/Kmandevr/C.A.W/actions/runs/43258432456), 2026-11-12]** NDK 28.2.13676358 (the APK's) builds `mix_pool.cpp` into the static `android-29` arm64 `caw_bench`, and its `--threads 3` run uses the pool on the Arm64 runner. No futex or WaitOnAddress wrapper was needed.
+  - **Checked** (2026-11-12): all 164 reference renders' raw-bit digests the same on 0, 1, 2, 3 and 4 workers (x86-64 GCC 13 Release; Arm64 fast flags under qemu, 0 against 3 workers), and CTest checks it on every CI target (`caw_parallel_identity`: each shard again with `--mix-threads 3`); 200 random routed mixes the same bits as 5a/5b on 0, 1, 2, 3 and 4 workers; `engine/tests/mix_pool_test.cpp`; ThreadSanitizer (Clang 18, `CAW_TSAN`) clean on the pool tests with a 10,000-callback stress run (CI's ThreadSanitizer job, which since the audio merge also runs the input bridge's and the device FIFO's tests) and on the whole `caw_tests` suite with `--mix-threads 3`.
+- **5d, platform thread tuning and the 5c audio review (built):** `engine/src/thread_tuning.{h,cpp}` with the platform parts in `engine/platform/thread_tuning_{posix,win,none}.cpp`, as the architect planned (details and dated facts in [engine](engine.md), "Audio threads"; choices in [decisions](decisions.md)). The pool (`Kind::Live` for a device) wakes its workers at the callback's start, before the first chunk's planning, when the last callback used the pool (else the first level published wakes them), and they spin through the callback (levels and chunks) and 50 µs after it, yielding the core every 64 pauses and at most 3 ms without work, then sleep; a level's parallel nodes are published first and longest first (each node's time in the last chunk), its serial nodes run on the callback while the workers start, then the callback claims what is left; each worker touches 64 KB of stack before it serves; the wake word and the run epoch are separate (a restarted pool's workers sat out its first run); a failing node has one rule with and without the pool (its level runs, then the graph stops); the retire room is shared evenly with the remainder going round; an offline render's pool steps aside each callback while a live device runs; Auto measures the callback's wait for workers (`MixPool::takeTimes`) and drops workers, or goes serial for 10 s, while the pool costs more than it gives; workers tune themselves to the callback (never above its priority), keep to the fast cores of a hybrid CPU, and an Android performance hint covers them all; `caw_audio_threads` (C API 24 on its branch, in the library from 28) reports it. Pool size: `MixPool::defaultWorkers()` = the fast cores less one, at most cores − 2 on 4 or fewer cores, at most 4 (2 on the 4-vCPU runners, 3 on an S22+-like 4 big + 4 little phone). `caw_bench --threads auto` uses it.
+- **5e, load and battery policy:** how many workers to use for a project's load, and when one core is enough (5d's Auto already drops workers the callback waits on; a battery-aware count is still to do).
+- **Native components:** third-party native components run in a serial lane until the module format can declare a component parallel-safe ([decisions](decisions.md)).
+
+**5a and 5b, measured** (2026-11-12, x86-64 GCC 13 Release, the engine's fast flags; callgrind instructions inside `Engine::process` for `caw_bench 2 500 --runs 1 --only ID`; before = `speed-layout` 05f5065, after = this branch merged with it):
+
 | Scenario | Before | After | Change |
 |---|---:|---:|---:|
-| Song, 16 tracks | | | |
-| Song, 32 tracks + heavy FX | | | |
-| Typical song + extras | | | |
-| Worst case, 32 tracks + heavy FX | | | |
+| Typical song (`song8`) | 2,030.2 M | 2,026.4 M | −0.19% |
+| 32 tracks + heavy FX (`song32_heavy`) | 11,043.7 M | 11,024.0 M | −0.18% |
+
+The same bits: every reference render's raw float digest (164 renders across the four `caw_tests` shards) and 200 random routed mixes (buses nested, sends, keys into duckers, notes and audio keys, latency compensation, a live send change, a mute, a bus removed and a stop and play) match the old code bit for bit. `engine/tests/mix_graph_test.cpp` checks the levels over random graphs and that level-by-level output is the same bits as the old order.
+
+**5c, measured** **[Fact, Bench run [43258432456](https://github.com/Kmandevr/C.A.W/actions/runs/43258432456), commit `dd50ac7`, 10 s × 3 runs, 256 frames at 48 kHz, budget 5,333 µs, Neoverse-N2 (4 vCPU) for both]** mean µs / worst µs, the mix graph on one thread (`--threads 0`) against 3 pool workers (`--threads 3`, `Always`: every level of two or more busy nodes on the pool, whatever the load). An earlier run on `44f7382` (run [43254413064](https://github.com/Kmandevr/C.A.W/actions/runs/43254413064)) gave means within 3%.
+
+| Scenario | Android arm64, 1 thread | Android arm64, 3 workers | Linux arm64, 1 thread | Linux arm64, 3 workers |
+|---|---:|---:|---:|---:|
+| First loop (6 tracks) | 146 / 1,038 | 82 / 813 | 154 / 901 | 84 / 1,190 |
+| Three tracks | 222 / 550 | 127 / 700 | 227 / 523 | 127 / 794 |
+| Typical song (8 tracks) | 719 / 1,147 | 292 / 1,936 | 726 / 1,029 | 291 / 1,399 |
+| Typical song + extras | 978 / 1,496 | 414 / 3,010 | 964 / 1,374 | 410 / 3,501 |
+| Flagship heavy, 64 voices held | 3,964 / 4,219 | 3,967 / 4,210 | 3,946 / 4,302 | 3,957 / 4,230 |
+| Flagship heavy, 16 voices held | 1,029 / 1,127 | 1,029 / 1,129 | 1,021 / 1,144 | 1,020 / 1,119 |
+| Drums kit, 16 pads busy | 284 / 446 | 284 / 418 | 312 / 459 | 312 / 463 |
+| Song, 16 tracks | 1,369 / 2,345 | 453 / 3,606 | 1,374 / 2,096 | 457 / 4,582 |
+| Song, 32 tracks + heavy FX | 4,208 / 5,321 | 1,251 / 3,977 | 4,234 / 4,919 | 1,268 / 4,891 |
+| Tail: notes (2 s) | 189 / 223 | 150 / 224 | 184 / 235 | 145 / 222 |
+| Tail: ringing out | 116 / 236 | 104 / 252 | 112 / 213 | 100 / 267 |
+| Tail: silence after | 17 / 108 | 21 / 234 | 18 / 94 | 22 / 154 |
+| Tail project, no notes | 10 / 52 | 15 / 79 | 11 / 71 | 16 / 75 |
+
+What it shows:
+
+- **Means:** the multi-track songs run 2.5–3.4 times faster (the 32-track heavy song from 79% of the budget to 23%); one-track scenarios (Flagship, Drums) are unchanged, as their levels have one busy node.
+- **Typical song headroom:** on Android arm64 the baseline's 859 µs (6.2 times the budget) is now 292 µs: **18.3 times the budget**, 2.9 times the baseline's headroom (the owner's target was about 3–4 times). On one thread, with phases 1 to 5b, it is 719 µs (7.4 times).
+- **The light scenarios cost a little more on the pool** (the tail's silence and the empty project: +4–5 µs, the claim and wake-up per level): the Auto mode keeps them on one thread (their load is far under 0.4).
+- **Worst cases are higher on the pool** in several songs (the 16-track song's 2,345 → 3,606 µs on Android, 2,096 → 4,582 µs on Linux arm64), while the means and p99s fall: a worker preempted in the middle of a node makes the callback spin until it resumes. The runner's 4 vCPUs are fully taken by the callback and 3 workers, with no thread priorities. 5d (below) answers with the 5c review's fixes, 2 workers on 4 cores and the platform tuning; on the runners the worst case where Auto uses the pool is now under the serial one, below Auto's threshold it can still exceed it.
+- **[Assumption]** the runner's Neoverse-N2 cores are all the same kind; the S22+'s Cortex-X2/A710/A510 are not, so a worker on a little core can hold a level back. The relative gains are an upper bound for the phone.
+- Linux x64 (Xeon 8573C, 4 vCPU, likely two cores with two hyperthreads each): typical song 819 → 466 µs, 32-track song 4,292 → 1,842 µs (run 43254413064).
+
+**5d, measured** **[Fact, Bench runs [43258432456](https://github.com/Kmandevr/C.A.W/actions/runs/43258432456) (5c, `dd50ac7`) and [43279565610](https://github.com/Kmandevr/C.A.W/actions/runs/43279565610) (5d, `156fcf1`), 2026-11-12, 10 s × 3 runs, 256 frames at 48 kHz, budget 5,333 µs, 4-vCPU runners (Neoverse-N2 for the arm64 ones)]** mean / p99 / worst µs; `--threads auto` is `MixPool::defaultWorkers()`, 2 on these 4-core runners (the count a live device gets there). The pool runs `Always` in the bench (every level of two or more busy nodes), and the bench's pool is offline: no thread priority, affinity or hint (an unprivileged runner can't raise priorities anyway), so these numbers measure the 5c review's fixes and the size rule, not 5d's platform tuning.
+
+Android arm64 (static bionic `caw_bench` on the Arm64 runner):
+
+| Scenario | 5c, 1 thread | 5c, 3 workers | 5d, 1 thread | 5d, 2 workers (auto) | 5d, 3 workers |
+|---|---:|---:|---:|---:|---:|
+| First loop (6 tracks) | 146 / 192 / 1,038 | 82 / 122 / 813 | 146 / 192 / 972 | 73 / 92 / 611 | 68 / 91 / 608 |
+| Three tracks | 222 / 278 / 550 | 127 / 155 / 700 | 222 / 278 / 542 | 123 / 152 / 430 | 124 / 153 / 454 |
+| Typical song (8 tracks) | 719 / 834 / 1,147 | 292 / 342 / 1,936 | 719 / 831 / 1,164 | 329 / 386 / 1,178 | 293 / 338 / 2,941 |
+| Typical song + extras | 978 / 1,154 / 1,496 | 414 / 506 / 3,010 | 976 / 1,151 / 1,517 | 430 / 515 / 974 | 410 / 473 / 2,825 |
+| Flagship heavy, 64 voices held | 3,964 / 4,005 / 4,219 | 3,966 / 4,019 / 4,210 | 3,969 / 4,018 / 4,236 | 3,963 / 3,999 / 4,244 | 3,960 / 3,999 / 4,229 |
+| Flagship heavy, 16 voices held | 1,029 / 1,040 / 1,127 | 1,029 / 1,043 / 1,129 | 1,029 / 1,041 / 1,151 | 1,029 / 1,040 / 1,258 | 1,032 / 1,043 / 1,147 |
+| Drums kit, 16 pads busy | 284 / 374 / 446 | 284 / 375 / 418 | 284 / 376 / 423 | 285 / 377 / 429 | 284 / 377 / 429 |
+| Song, 16 tracks | 1,369 / 1,592 / 2,345 | 453 / 530 / 3,606 | 1,360 / 1,580 / 2,411 | 568 / 660 / 1,340 | 471 / 584 / 3,526 |
+| Song, 32 tracks + heavy FX | 4,208 / 4,742 / 5,321 | 1,251 / 1,502 / 3,977 | 4,176 / 4,711 / 6,957 | 1,625 / 1,941 / 2,745 | 1,247 / 1,470 / 5,375 |
+| Tail: notes (2 s) | 188 / 215 / 223 | 150 / 173 / 224 | 189 / 217 / 286 | 150 / 176 / 197 | 150 / 174 / 269 |
+| Tail: ringing out | 116 / 188 / 236 | 104 / 158 / 252 | 115 / 188 / 247 | 105 / 159 / 239 | 105 / 158 / 187 |
+| Tail: silence after | 17 / 90 / 108 | 21 / 92 / 234 | 17 / 90 / 96 | 23 / 92 / 105 | 24 / 92 / 124 |
+| Tail project, no notes | 10 / 12 / 52 | 15 / 17 / 79 | 10 / 12 / 49 | 16 / 19 / 66 | 16 / 18 / 88 |
+
+Linux arm64:
+
+| Scenario | 5c, 1 thread | 5c, 3 workers | 5d, 1 thread | 5d, 2 workers (auto) | 5d, 3 workers |
+|---|---:|---:|---:|---:|---:|
+| First loop (6 tracks) | 154 / 204 / 901 | 84 / 126 / 1,190 | 155 / 207 / 846 | 77 / 97 / 483 | 70 / 96 / 4,139 |
+| Three tracks | 227 / 290 / 523 | 127 / 162 / 794 | 228 / 291 / 574 | 124 / 159 / 431 | 124 / 159 / 435 |
+| Typical song (8 tracks) | 726 / 843 / 1,029 | 291 / 349 / 1,399 | 726 / 843 / 1,080 | 328 / 391 / 616 | 295 / 348 / 1,011 |
+| Typical song + extras | 964 / 1,139 / 1,374 | 410 / 519 / 3,500 | 965 / 1,141 / 1,348 | 418 / 511 / 829 | 394 / 467 / 1,162 |
+| Flagship heavy, 64 voices held | 3,946 / 3,984 / 4,302 | 3,957 / 3,993 / 4,230 | 3,941 / 3,984 / 4,264 | 3,942 / 3,982 / 4,195 | 3,955 / 3,997 / 4,323 |
+| Flagship heavy, 16 voices held | 1,020 / 1,033 / 1,144 | 1,020 / 1,032 / 1,119 | 1,020 / 1,035 / 1,117 | 1,019 / 1,037 / 1,124 | 1,020 / 1,036 / 1,115 |
+| Drums kit, 16 pads busy | 312 / 410 / 459 | 312 / 411 / 463 | 313 / 414 / 463 | 314 / 412 / 462 | 313 / 412 / 467 |
+| Song, 16 tracks | 1,374 / 1,598 / 2,096 | 457 / 559 / 4,582 | 1,378 / 1,616 / 2,128 | 584 / 689 / 1,364 | 478 / 576 / 3,505 |
+| Song, 32 tracks + heavy FX | 4,234 / 4,785 / 4,919 | 1,268 / 1,546 / 4,891 | 4,261 / 4,842 / 5,589 | 1,643 / 1,885 / 2,300 | 1,276 / 1,445 / 5,194 |
+| Tail: notes (2 s) | 184 / 213 / 235 | 145 / 172 / 222 | 185 / 218 / 288 | 146 / 170 / 209 | 146 / 170 / 206 |
+| Tail: ringing out | 112 / 184 / 213 | 100 / 154 / 267 | 112 / 185 / 215 | 101 / 155 / 173 | 101 / 155 / 183 |
+| Tail: silence after | 18 / 87 / 94 | 22 / 88 / 154 | 18 / 87 / 100 | 24 / 88 / 131 | 24 / 89 / 147 |
+| Tail project, no notes | 11 / 13 / 71 | 16 / 18 / 75 | 11 / 14 / 46 | 17 / 21 / 93 | 17 / 21 / 70 |
+
+Linux x64 (4 vCPU, two cores with two hyperthreads each **[Assumption]**):
+
+| Scenario | 5c, 1 thread | 5c, 3 workers | 5d, 1 thread | 5d, 2 workers (auto) | 5d, 3 workers |
+|---|---:|---:|---:|---:|---:|
+| First loop (6 tracks) | 133 / 177 / 1,015 | 101 / 145 / 727 | 90 / 118 / 520 | 57 / 78 / 332 | 55 / 82 / 342 |
+| Three tracks | 226 / 296 / 588 | 170 / 214 / 765 | 152 / 193 / 369 | 105 / 132 / 297 | 107 / 135 / 1,019 |
+| Typical song (8 tracks) | 693 / 824 / 1,176 | 398 / 462 / 1,465 | 476 / 551 / 1,566 | 265 / 304 / 518 | 251 / 283 / 3,334 |
+| Typical song + extras | 900 / 1,077 / 1,673 | 568 / 654 / 1,674 | 602 / 702 / 883 | 354 / 399 / 569 | 352 / 393 / 3,297 |
+| Flagship heavy, 64 voices held | 3,426 / 3,932 / 6,202 | 3,424 / 3,648 / 6,288 | 2,465 / 2,588 / 4,795 | 2,464 / 2,506 / 3,254 | 2,468 / 2,512 / 3,086 |
+| Flagship heavy, 16 voices held | 867 / 928 / 1,167 | 872 / 941 / 1,158 | 624 / 650 / 994 | 623 / 638 / 738 | 622 / 639 / 729 |
+| Drums kit, 16 pads busy | 289 / 372 / 461 | 298 / 395 / 576 | 200 / 259 / 312 | 201 / 258 / 298 | 200 / 258 / 298 |
+| Song, 16 tracks | 1,256 / 1,500 / 2,644 | 615 / 720 / 3,789 | 844 / 974 / 1,516 | 423 / 485 / 882 | 380 / 444 / 1,100 |
+| Song, 32 tracks + heavy FX | 3,859 / 4,561 / 6,898 | 1,650 / 2,130 / 5,574 | 2,436 / 2,752 / 3,671 | 1,144 / 1,291 / 1,984 | 1,025 / 1,163 / 5,049 |
+| Tail: notes (2 s) | 190 / 229 / 273 | 199 / 236 / 267 | 130 / 148 / 156 | 129 / 148 / 154 | 132 / 150 / 154 |
+| Tail: ringing out | 115 / 189 / 226 | 135 / 213 / 1,152 | 76 / 128 / 144 | 87 / 135 / 145 | 89 / 138 / 514 |
+| Tail: silence after | 17 / 89 / 117 | 28 / 118 / 143 | 12 / 58 / 67 | 16 / 76 / 94 | 17 / 77 / 87 |
+| Tail project, no notes | 10 / 15 / 58 | 19 / 27 / 80 | 7 / 10 / 28 | 10 / 17 / 39 | 11 / 18 / 62 |
+
+What it shows:
+
+- **The worst case where Auto turns the pool on** (a serial mean above 0.4 of the budget, 2,133 µs: the 32-track heavy song and the 64-voice Flagship): on 2 workers the 32-track song's worst is 2,745 µs on Android (serial 6,957), 2,300 on Linux arm64 (serial 5,589) and 1,984 on Linux x64 (serial 3,671), and it stayed far under the serial worst in all five 5d runs (also [43267636589](https://github.com/Kmandevr/C.A.W/actions/runs/43267636589), [43270636251](https://github.com/Kmandevr/C.A.W/actions/runs/43270636251), [43271679940](https://github.com/Kmandevr/C.A.W/actions/runs/43271679940) and [43273127862](https://github.com/Kmandevr/C.A.W/actions/runs/43273127862), each a step of the code above). The 64-voice Flagship never hands the pool a level (one busy node per level) and its workers stay asleep, so it runs the serial path: here 4,244 against 4,236 µs on Android, 4,195 against 4,264 on Linux arm64, 3,254 against 4,795 on x64; across the runs the two differ by −7% to +5% on arm64, where the 1-thread worst alone ranged 4,172–4,522 µs, and once by +63% on a noisy x64 runner (run 43273127862). **So the rule holds on these runners where Auto would use the pool, and Auto stays on.**
+- **Below Auto's threshold**, in this run the multi-track songs' 2-worker worst cases are under the 1-thread ones (the 16-track song 1,340 against 2,411 µs on Android, 1,364 against 2,128 on Linux arm64) but Android's typical song (1,178 against 1,164); the rest above serial are scenarios that hand the pool nothing or little (the 16-voice Flagship and Drums, within 10%) and the near-silent tail (+9 to +47 µs, far under the budget). Earlier runs had spikes above serial there (Linux arm64 16 tracks 2,492 against 2,371 and the typical song 1,783 against 1,087 in run 43273127862; 4,578 against 2,443 in run 43270636251, before the yield): a worker the system preempts in the middle of a node still holds its level back, and these runners give no thread priority. Auto does not use the pool for these (their load is 14–26%); on a slower phone the same projects could pass 0.4. **[Assumption]** the phone's urgent-audio workers, its big cores and the ADPF hint keep such spikes down; the owner checks on the S22+.
+- **3 workers on 4 vCPUs** (`--threads 3`, no longer the default on 4 cores): with the workers spinning through the callback, every vCPU was busy and the worst cases rose (Android 32 tracks 7,395 µs, run 43271679940); since a spinning worker yields its core every 64 pauses the system's threads run there instead of preempting a node (Android 32 tracks 5,375 here, 16 tracks 3,526), still above serial in places: the cores − 2 rule is why the default is 2 there.
+- **Means:** on arm64, 2 workers are 2.6 times faster than one thread on the 32-track song and 2.4 times on 16 tracks (3 workers 3.3 and 2.9); on Linux x64 2.1 and 2.0. 5d's 3-worker means match 5c's within 5%. The light scenarios cost 6–7 µs more on the pool (the wake and claim per level), which Auto keeps on one thread. The wake fix (run 43270636251) took back a 20% mean loss on Linux x64's Flagship that idle workers spinning on hyperthread siblings caused in the first 5d run.
+
+**After the audio merge, measured** (2026-11-13, the device FIFO, shedding's recovery and the capture bridge merged with 5a–5d, C API 28). **[Fact, this container: Xeon 2.1 GHz, 4 vCPU, shared with other work, Linux x64 GCC Release, `caw_bench 10 500 --runs 1`, five runs interleaved serial / Auto / Always, 2 workers (`--threads auto`)]** median mean / median p99 / median worst µs, and the worst's range over the runs:
+
+| Scenario | 1 thread | Auto (`--mode auto`) | Always |
+|---|---:|---:|---:|
+| Typical song (8 tracks) | 677 / 942 / 2,555 (1,777–13,303) | 675 / 1,040 / 2,593 (1,585–3,894) | 349 / 489 / 1,292 (1,061–6,443) |
+| Typical song + extras | 901 / 1,158 / 2,458 (1,879–3,595) | 892 / 1,136 / 1,966 (1,867–4,043) | 468 / 804 / 1,660 (1,276–4,487) |
+| Flagship heavy, 64 voices held | 2,956 / 4,778 / 6,673 (5,526–10,218) | 2,919 / 4,637 / 6,285 (5,108–12,796) | 2,922 / 4,042 / 6,079 (4,838–17,134) |
+| Song, 16 tracks | 1,200 / 2,003 / 3,012 (2,518–3,502) | 1,226 / 2,150 / 3,277 (2,705–6,715) | 603 / 1,006 / 4,757 (1,540–20,622) |
+| Song, 32 tracks + heavy FX | 3,903 / 6,342 / 7,282 (6,765–9,300) | 1,722 / 3,853 / 6,757 (6,128–7,373) | 1,569 / 2,257 / 4,409 (3,328–7,768) |
+
+- **Where Auto uses the pool** (a serial load above 0.4: here the 32-track song) the worst case is under the serial one in the median and the range (6,757 against 7,282 µs; at most 7,373 against 9,300), and the mean falls 56%. Its p99 and three of its five worst cases are the serial half-second before Auto turns on (the worst at the first callback after Play).
+- **Where Auto stays serial** (the songs under 0.4 here) or the pool gets no level (the 64-voice Flagship: one busy node per level, so its workers sleep; `user` time equals real time), Auto runs the one-thread path: in callgrind, `Engine::process` for 2 s of the 64-voice Flagship is 11,338.1 M instructions on one thread and 11,338.3 M with the pool started (+0.002%). Its worst cases differ from serial both ways by this container's noise: in six more interleaved pairs, Flagship 5,929 against 6,665 µs (serial up to 9,942, Auto up to 15,746, which a 0.002% difference in work can't make) and the 16-track song 3,786 against 2,984. So the rule holds: Auto is never worse than serial, it uses the pool only where its worst case is lower, and it falls back to one thread below 0.08 of load or while the pool costs more than it gives (5d).
+- **Always below Auto's threshold** still spikes over serial in places (the 16-track song up to 20,622 µs): why Auto, the default, does not use it there. No layer was shed in the Auto runs (the bench says so when one is).
 
 ### A2. Flagship voices side by side
 
@@ -293,3 +413,65 @@ The other scenarios have no Flagship and moved within the runners' noise. The fi
 | Flagship heavy, 16 voices held | 1,603.6 | 1,493.4 | −6.9% |
 
 - **What is left (callgrind, flagship_heavy16 after):** the fold stack (`addTwice` with its table reads, 43%), the unwarped copies (`addStack`, 25%), the filter drive (`VoiceFilter::begin`, 5%) and the ladders (4%). **[Proposal]** the next step for the heavy patch is fewer table reads rather than wider vectors (for example a cheaper fold at the high rate).
+
+### A3. The first callback after Play
+
+**What changed (2026-11-13, branch `engine-a345`, on `d932771`; beta readiness plan A3):** callgrind of the first callback after Play (the bench's way: the project set, 0.25 s stopped, then Play; 256 frames) against the steady mean found two kinds of first-time work, both on the audio thread:
+
+- **Two resets of every instrument:** `startPlay` reset each track's instrument, then its first `runInstrument` reset it again (`instrumentIdle`). For `org.caw.drums` that clears every voice and its room reverb (`DrumsProcessor::reset`, 6.6 M of song8's 12.2 M instructions). Now `ComponentChain::reset` is a no-op when nothing has run since the last one (`clean_`, set by `reset`, cleared by `process` and `runModulator`), and an instrument chain of built-ins is reset once when it is built, on the control thread (`ComponentChain::make`), so the audio thread's resets at Play find it clean. A component's `reset` puts it back as `activate` left it, so nothing heard changes. A chain holding a loaded (Trusted) component is not reset at build: the native ABI says nothing about which thread may call `reset`, and another instance may be running on the audio thread, so its reset stays on the audio thread (audio review, 2026-11-13). Every path that runs a processor clears `clean_` first; a debug assert at the call sites checks it.
+- **Every parameter resolved for the first time:** a chain's first block resolved each component's every parameter (`resolveEntry`: song8's drums alone have thousands; 21,645 resolves, 2.3 M instructions in First loop's first callback). Now each component's values are resolved when the chain is built, and a block where only the play state changed (a Play, or stopped to playing) and no lane drives the component keeps its values, as the full pass would give them; a Play still ends knob overrides (`anyTouched`). `ComponentAutomation::anyLane` says which components a lane drives.
+
+**[Fact, callgrind, 2026-11-13]** instructions in `Engine::process`, x86-64 GCC 13.3 Release, the first callback after Play and the mean of callbacks 40–139:
+
+| Scenario | First callback before | after | Steady mean |
+|---|---:|---:|---:|
+| First loop (6 tracks) | 10.38 M | 1.45 M | 1.23 M |
+| Typical song (8 tracks) | 12.23 M | 3.17 M | 5.26 M |
+
+**[Fact, Bench runs, 10 s × 3 runs]** worst callback µs (worst ÷ mean; when not 0.00 s, the worst is no longer the first callback). Before: [43348511989](https://github.com/Kmandevr/C.A.W/actions/runs/43348511989) (`72724e6`, `d932771`'s engine). After: [43349254446](https://github.com/Kmandevr/C.A.W/actions/runs/43349254446) (`eb2b111`). Means moved within ±1% on the arm64 targets.
+
+| Scenario | Android arm64 before | after | Linux arm64 before | after | Linux x64 before | after |
+|---|---:|---:|---:|---:|---:|---:|
+| First loop (6 tracks) | 996 at 0.00 s (6.8×) | 251 at 0.00 s (1.7×) | 847 at 0.00 s (5.5×) | 272 at 2.67 s (1.8×) | 866 at 0.00 s (6.8×) | 271 at 8.43 s (2.1×) |
+| Three tracks | 559 at 0.00 s (2.6×) | 309 at 0.00 s (1.5×) | 515 at 0.00 s (2.4×) | 379 at 5.34 s (1.7×) | 471 at 0.00 s (2.4×) | 333 at 1.44 s (1.7×) |
+| Typical song (8 tracks) | 1,170 at 0.00 s (1.7×) | 856 at 8.66 s (1.2×) | 1,072 at 0.00 s (1.6×) | 872 at 5.33 s (1.3×) | 1,043 at 0.00 s (1.7×) | 1,421 at 1.09 s (2.3×) |
+| Typical song + extras | 1,544 at 0.00 s (1.6×) | 1,263 at 3.91 s (1.3×) | 1,353 at 0.00 s (1.5×) | 1,398 at 8.86 s (1.5×) | 1,374 at 0.00 s (1.7×) | 1,142 at 9.62 s (1.4×) |
+| Song, 16 tracks | 2,323 at 0.00 s (1.8×) | 1,607 at 8.36 s (1.2×) | 2,020 at 0.00 s (1.5×) | 1,600 at 9.58 s (1.2×) | 2,254 at 0.00 s (2.1×) | 2,117 at 2.86 s (2.0×) |
+| Song, 32 tracks + heavy FX | 5,690 at 0.00 s (1.4×) | 5,850 at 4.81 s (1.4×) | 4,767 at 3.91 s (1.2×) | 4,872 at 5.81 s (1.2×) | 5,493 at 0.00 s (1.7×) | 6,133 at 5.78 s (1.9×) |
+
+- After the change the first callback is the worst only on Android arm64's two smallest projects, at 1.5–1.7× the mean (the first block's note-ons), and nowhere on Linux; the worst cases left come mid-play and move between runs (the shared runners' noise; Linux x64's song8 worst rose with no change in its mean). The Flagship-only scenarios were already at about 1.1× (Flagship's reset is cheap) and are unchanged.
+- **Test:** `the_first_callback_after_play_allocates_nothing_and_costs_about_the_mean` (`caw_rt_tests`, `engine_rt_test.cpp`): drums with glue and room plus a Flagship through a chorus, set and left stopped for 0.25 s, then Play; the first callback allocates nothing and, the best of 7 fresh engines, costs at most 2× the mean of callbacks 20–120. It failed before the change (2.4× and 3.5× in two runs) and passes after (1.3×).
+- Every reference render and golden passes unchanged (Release and Debug with sanitizers, x86-64 GCC 13).
+
+### A4. Per-callback loops over the slots in use (#133)
+
+**What changed (2026-11-13, branch `engine-a345`):** #133's item 2 (`c31b95c`, 2026-11-11) had already moved the per-chunk loops (`planChunk`, `updateSolo`, the preview and overload scans, routing) onto the ascending in-use list (`live_`). What still scanned the whole capacity: `startPlay`'s three loops, with `updateSolo` called once per active slot inside one of them (slots × in-use list), and `wakeMonitors`, which runs every stopped callback while input monitoring is wanted. They now walk `live_` (an active slot is always listed: Install and ConfigureBus list it, and a slot leaves only when inactive), and solo is worked out once per Play; a slot that leaves the list clears its tail flags, which `startPlay` used to clear for every slot. Still over the capacity, once per event and not per callback: `endPlayback` (Stop's fade end), the tempo change's note release, `ClearOverload` (the overload shedding work on branch `bt-clicks`), a device's all-notes-off and the previews' release-all.
+
+**[Fact, callgrind, 2026-11-13]** M Ir per second of audio in `Engine::process`, x86-64 GCC 13.3 Release, `caw_bench 2 500 --runs 1 --only ID` divided by 2, `d932771` against `410f700` (A3 and A4 together; the difference is the first callback's, A3, since these scenarios run at capacity 64 with every per-chunk loop already bounded):
+
+| Scenario | Before | After | Change |
+|---|---:|---:|---:|
+| Typical song (8 tracks) | 1,031.1 | 1,026.0 | −0.5% |
+| Song, 32 tracks + heavy FX | 5,585.7 | 5,564.0 | −0.4% |
+| Tail project, no notes | 24.3 | 24.1 | −0.8% |
+
+### A5. CPU features
+
+**What each build enables (checked 2026-11-13 in `engine/CMakeLists.txt`, `bench.yml`, `engine.yml` and `app/android/app/build.gradle.kts`):** no build passes `-march`, `-mcpu` or `/arch`. Linux x64 (GCC 13) and Windows x64 (MSVC) therefore target the x86-64 baseline: SSE2, no AVX and no FMA (MSVC's default `/arch:SSE2`). Linux arm64 (GCC 13) and Android (NDK 28.2 Clang, `arm64-v8a` only, the app's single ABI) target Armv8-A, where NEON (Advanced SIMD) and fused multiply-add are part of the baseline, so they already have both (phase 2's contraction uses them). The two-wide `Pair` code (`src/stereo_pair.h`) is SSE2 on x86-64 and NEON on Arm64.
+
+**Measured: the whole engine built for x86-64-v3 (AVX2, FMA) against the baseline, on one runner, alternating, 3 runs each.** **[Fact, Bench run [43349254446](https://github.com/Kmandevr/C.A.W/actions/runs/43349254446), temporary jobs since removed; mean µs, the median of 3]**
+
+| Scenario | GCC 13 baseline | `-march=x86-64-v3` | change | MSVC default | `/arch:AVX2` | change |
+|---|---:|---:|---:|---:|---:|---:|
+| Typical song (8 tracks) | 439.1 | 371.3 | −15.4% | 802.2 | 817.2 | +1.9% |
+| Flagship heavy, 64 voices held | 2,013.4 | 1,428.8 | −29.0% | 6,273.2 | 6,194.1 | −1.3% |
+| Drums kit, 16 pads busy | 202.8 | 166.3 | −18.0% | 312.8 | 314.4 | +0.5% |
+| Song, 32 tracks + heavy FX | 2,322.6 | 1,932.7 | −16.8% | 4,344.7 | 4,413.3 | +1.6% |
+
+GCC on AMD EPYC 9V45 (run 43349254446; an earlier run, [43337163191](https://github.com/Kmandevr/C.A.W/actions/runs/43337163191), on another x64 runner, gave −15%, −25%, −17% and −15%); MSVC on AMD EPYC 9V74. Every test, reference renders included, passes with `-march=x86-64-v3` (x86-64 GCC 13 Release, 2026-11-13).
+
+- **GCC gains 15–29%** from AVX2 and FMA together (with `-ffp-contract=fast`, x86-64-v3 brings phase 2's fused multiply-adds to x86-64), spread over the whole engine rather than a few kernels.
+- **MSVC gains nothing** from `/arch:AVX2` (±2%): it keeps `/fp:precise` (no contraction) and its vectoriser leaves the same loops scalar.
+- **MSVC is the slow x86-64 build:** on the same CPU model in one run (EPYC 9V74, 43349254446), Windows x64 took 797 µs for the typical song against GCC's 615, and 6,274 µs for the heavy Flagship against 2,716 (2.3×).
+- **Not built (no gain where it would ship):** runtime dispatch only pays on x86-64, whose shipped build is the Windows app's MSVC, where the wider instruction set measured no gain. GCC/Clang `target_clones` on a few kernels would not reach the engine-wide gain above (callees not inlined stay baseline) and does not exist in MSVC; a second AVX2 copy of the whole engine compiled into one binary breaks the one-definition rule (the linker may give baseline code an AVX2 copy of an inline Library function). Arm64 needs none: NEON and FMA are its baseline. **[Proposal]** for the owner: build the Windows engine DLL with clang-cl and the engine's GCC/Clang flags (contraction, the fast-math subsets), then measure x86-64-v3 for it, shipped either as a second DLL chosen at load by a CPU check or as the minimum Windows CPU (AVX2: Intel Haswell 2013, AMD Excavator 2015 and later); both change the Windows build, so neither is done here.
+

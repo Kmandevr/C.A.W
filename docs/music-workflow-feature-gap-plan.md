@@ -2,7 +2,7 @@
 title: Music workflow implementation gaps
 summary: Factual snapshot of implemented and incomplete music-workflow capabilities; sequencing belongs to the permanent roadmap.
 covers: [app/lib/model/app_state.dart, app/lib/model/lane_curve.dart, app/lib/model/pattern_doc.dart, app/lib/model/poller.dart, app/lib/model/project.dart, app/lib/model/storage.dart]
-updated: 2026-11-12
+updated: 2026-11-13
 ---
 
 # Music workflow implementation gaps
@@ -63,8 +63,10 @@ This note records the current implementation gaps in C.A.W.'s music-production w
 - **[Implemented foundation]** MIDI 2.0 UMP decoding and bounded input-queue primitives, plus MIDI pattern file import/export.
 - **[Implemented, Android and Windows]** MIDI devices: USB, Bluetooth (scanned and connected in the app) and UMP devices on Android, WinMM ports on Windows ([app](app.md)); every Channel Voice message plays the armed or selected track at the frame it was played through the engine's device input (`app/lib/model/live_midi.dart`). Record captures a take while playing and writes it at Stop as a new pattern clip from the bar where recording began. Controller learn maps CCs to knobs.
 - **[Incomplete]** Bluetooth MIDI pairing inside the app, controller learn/mapping, external clock/sync and control-surface support.
+- **[Implemented, not yet run on a device]** Overload recovery (2026-11-12): layers the engine shed come back on their own once the load is low, and going to or from the background unmutes them ([engine](engine.md), "Overload, and coming back").
 - **[Implemented, not yet run on a device]** Output and input latency compensation (Bluetooth, USB, HDMI): MIDI takes at the step that was heard when the note was played, audio takes by output + input latency, the playhead and meters at the heard time, the playhead drawn between reads from the compensated read ([app](app.md)).
 - **[Incomplete]** Take lanes and comping beyond a loop's stacked takes.
+- **[Implemented, not yet run on a device]** Playing and recording behind other apps on Android (a `mediaPlayback` foreground service with a Play/Pause and Stop notification), and a microphone that opens only while a track is armed or monitors, a recording runs or the ping plays ([app](app.md)).
 
 ## Implementation constraints
 

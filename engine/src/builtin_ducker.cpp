@@ -248,10 +248,13 @@ protected:
                     if (period != lastPeriod_) {
                         // The first frame after Play (or a wake): it ducks only on the grid, within a frame of a
                         // division's start; from half a beat in, the next division is the first duck.
+                        // "Within a frame" stops a millionth of a frame short of one: the beat position carries
+                        // the rounding of the block's start, and a wake exactly a frame after a division (a sine
+                        // from phase 0 is 0 on the beat) must give the same answer for every block size.
                         const double oneFrame = tempo() / (60.0 * rate() * periodBeats_);
                         const bool started = lastPeriod_ == INT64_MIN;
                         lastPeriod_ = period;
-                        if (!started || phase - static_cast<double>(period) < oneFrame) trigger(1.0);
+                        if (!started || phase - static_cast<double>(period) < oneFrame * (1.0 - 1e-6)) trigger(1.0);
                     }
                     phase_ = phase - std::floor(phase);
                 } else {

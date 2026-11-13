@@ -13,6 +13,7 @@ std::vector<Case>& cases() {
 }
 
 bool updateGolden = false;
+void (*mixThreadsHook)(int workers) = nullptr;
 static int failures = 0;
 static const char* current = "";
 
@@ -53,6 +54,12 @@ int main(int argc, char** argv) {
             shardIndex = static_cast<unsigned int>(std::strtoul(argv[++i], nullptr, 10));
         } else if (std::strcmp(argv[i], "--shard-count") == 0 && i + 1 < argc) {
             shardCount = static_cast<unsigned int>(std::strtoul(argv[++i], nullptr, 10));
+        } else if (std::strcmp(argv[i], "--mix-threads") == 0 && i + 1 < argc) {
+            if (!cawtest::mixThreadsHook) {
+                std::fprintf(stderr, "--mix-threads: this test binary has no engine\n");
+                return 2;
+            }
+            cawtest::mixThreadsHook(static_cast<int>(std::strtol(argv[++i], nullptr, 10)));
         } else {
             only = argv[i];
         }

@@ -26,6 +26,7 @@ import 'settings.dart';
 import 'project_library.dart' show TrashBatch;
 import 'storage.dart';
 import 'startup_progress.dart';
+import 'stress_runner.dart' show StressHost;
 import 'pattern_templates.dart';
 import 'templates.dart';
 
@@ -69,7 +70,7 @@ class RevealStartRequest {
   final int serial;
 }
 
-class AppState extends ChangeNotifier {
+class AppState extends ChangeNotifier implements StressHost {
   AppState({Settings? settings, AudioRoute? audioRoute, int Function()? clockUs})
       : settings = settings ?? Settings(),
         _clockUs = clockUs ?? _monotonicUs {
@@ -582,6 +583,7 @@ class AppState extends ChangeNotifier {
       // The platform's figure and the route, now and then (a Bluetooth link can settle after it opens).
       _latencyReadUs = now;
       unawaited(latency.refresh());
+      checkAudioDevice();
     }
     tick.value++;
     if (meters.overloaded > before.overloaded && settings.lightAuto && !settings.lightMode) {
@@ -1242,29 +1244,89 @@ class AppState extends ChangeNotifier {
         to: to);
   }
 
+  /// True while the Benchmark runs: the transport is stopped and the device closed, and nothing reopens it (the
+  /// Benchmark's own engine has the device for its live steps; one output per process).
+  bool get stressSuspended => _stressSuspended;
+  bool _stressSuspended = false;
+  double? _stressPosition;
+
+  /// The Benchmark starts: stops the transport (keeping where it was) and closes the audio device.
+  @override
+  void suspendForStress() {
+    if (_stressSuspended) return;
+    final e = engine;
+    if (_transportOn) togglePlay(); // a pause: pausedStep keeps where it was heard
+    _stressPosition = pausedStep;
+    _stressSuspended = true;
+    e?.notesOff();
+    e?.stopAudio();
+    notifyListeners();
+  }
+
+  /// The Benchmark ended: the position comes back with the transport stopped; Play reopens the device.
+  @override
+  void resumeAfterStress() {
+    if (!_stressSuspended) return;
+    _stressSuspended = false;
+    pausedStep = _stressPosition;
+    _stressPosition = null;
+    _transportOn = false;
+    _poller.wake();
+    notifyListeners();
+  }
+
   void clearOverload() {
     engine?.clearOverload();
     _poller.wake();
     notifyListeners();
   }
 
-  /// Called when the app goes to the background or returns.
+  /// Whether the app is in front (the lifecycle's last word): the microphone is released behind it unless a
+  /// recording runs (`AudioRecorder`).
+  final foreground = ValueNotifier<bool>(true);
+
+  /// Called when the app goes to the background or returns. Playing, the output keeps running behind (nothing on
+  /// this path waits on the audio thread); stopped, the device closes and reopens on return. On return a device the
+  /// system stopped while away (a disconnect that could not be reopened) opens again too.
   void lifecycle({required bool foreground}) {
     _poller.setVisible(foreground);
+    this.foreground.value = foreground;
     final e = engine;
     if (e == null) return;
+    // A throttled stretch in the background must not thin the song for good: layers the engine shed come back
+    // and its load history is forgotten, going away and coming back (the engine sheds again if it must).
+    e.clearOverload();
     if (!foreground) {
       flush();
       if (!meters.playing) e.stopAudio();
-    } else if (!e.audioOn) {
+    } else if (!e.audioOn || !e.audioStatus().running) {
       _openAudio(e);
       notifyListeners();
     }
   }
 
+  /// A device the system stopped while the transport plays (miniaudio gives up on an AAudio stream it could not
+  /// reopen after a disconnect, and the status then says not running) opens again; true when it had to. Called by
+  /// the meter poll now and then, and by the background playback's slow check while the app is behind.
+  bool checkAudioDevice() {
+    final e = engine;
+    if (e == null || !useAudioDevice || !e.audioOn || !_transportOn) return false;
+    if (e.audioStatus().running) return false;
+    _openAudio(e);
+    notifyListeners();
+    return true;
+  }
+
+  /// Behind the app with the transport stopped (the notification's Stop): the device closes as it does when the
+  /// app goes behind stopped, and reopens on return.
+  void releaseAudioBehind() {
+    if (!foreground.value && !meters.playing && !_transportOn) engine?.stopAudio();
+  }
+
   /// Opens the device: null when it runs, else why not ([audioError] either way). It may run on the system default
   /// because the chosen device didn't open: it plays, and [audioError] says so.
   String? _openAudio(Engine e) {
+    if (_stressSuspended) return 'The Benchmark is running'; // its own engine has the device
     final error = e.startAudio();
     if (error != null) return audioError = error;
     latency.readDevice = e.audioLatency;
