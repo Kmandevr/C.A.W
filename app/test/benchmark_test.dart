@@ -21,8 +21,9 @@ const _scenarios = [
 
 /// A fake engine: each plain scenario takes [pct] of the budget; ramps hold up to [limits].
 class FakeStress implements StressBackend {
-  FakeStress({this.onStart});
+  FakeStress({this.onStart, this.extra = const {}});
   final void Function(StressRequest r)? onStart;
+  final Map<String, Object?> extra;
   final List<StressRequest> started = [];
   final pct = {'first_loop': 20.0, 'song8': 40.0, 'song16': 85.0, 'song32_heavy': 160.0, 'tail_floor': 2.0};
   final limits = {StressKind.rampTracks: 23, StressKind.rampVoices: 41, StressKind.rampEffects: 64};
@@ -46,6 +47,7 @@ class FakeStress implements StressBackend {
       'mean_pct': p * 0.8, 'p99_pct': p, 'worst_pct': p * 1.3, 'callbacks': 280,
       'over_budget': p > 100 ? 30 : 0, 'dropouts': p > 100 ? 30 : 0, 'xruns': r.mode == StressMode.live ? 0 : -1,
       'limit': -1, 'first_failed': -1, 'costs': <Object>[], 'mean_first_us': 2000.0, 'mean_last_us': 2300.0, 'seconds': r.seconds,
+      ...extra,
     };
     if (limits.containsKey(r.kind)) {
       final l = limits[r.kind]!;
@@ -95,8 +97,15 @@ void main() {
     final res = await runner.run(StressPlanKind.quick);
     expect(host.suspended, 1);
     expect(host.resumed, 1);
-    expect(fake.started.where((r) => r.kind == StressKind.plain && r.mode == StressMode.dsp).length, _scenarios.length);
-    expect(fake.started.where((r) => r.mode == StressMode.live).length, 1);
+    // An untimed second first (its result dropped), then every scenario.
+    expect(fake.started.first.seconds, 1);
+    expect(fake.started.where((r) => r.kind == StressKind.plain && r.mode == StressMode.dsp).length, _scenarios.length + 1);
+    expect(res.scenarios.where((s) => !s.live).length, _scenarios.length);
+    // Live: at the playing buffer (Auto while not recording: 1024 frames), then at Low latency (0: the burst).
+    final live = fake.started.where((r) => r.mode == StressMode.live).toList();
+    expect([for (final r in live) r.frames], [StressBuffer.playingFrames, 0]);
+    expect([for (final s in res.scenarios.where((s) => s.live)) s.buffer], [StressBuffer.playing, StressBuffer.lowLatency]);
+    expect(res.scenarios.where((s) => s.live).map((s) => s.key).toSet(), hasLength(2));
     expect(fake.started.any((r) => r.kind == StressKind.sustained), isFalse); // Full only
     expect(res.tier('normal'), StressTier.comfortable);
     expect(res.tier('heavy'), StressTier.tight);
@@ -129,14 +138,65 @@ void main() {
     final res = await StressRunner(backend: fake).run(StressPlanKind.full);
     expect(fake.started.where((r) => r.kind == StressKind.profile).length, 3);
     expect(fake.started.where((r) => r.kind == StressKind.sustained).single.seconds, 120);
-    expect(res.sustained!.driftPct, closeTo(15, 0.01));
+    expect(res.sustained!.driftPct, closeTo(15, 0.01)); // no trend in the result: the last tenth against the first
+    // Costs are each profiled scenario's own, not averaged across them; the headline is the typical song's.
+    expect(res.costsByScenario.keys.toSet(), {'song8', 'song16', 'flagship_heavy16'});
+    expect(res.costsScenario, 'song8');
+    expect(res.costs.firstWhere((c) => c.id == 'org.caw.synth.flagship').instances, 6); // the project's, not profiles
+    expect((res.toJson()['costs_by_scenario'] as Map).keys, hasLength(3));
+  });
+
+  test('the sustained run is live at the playing buffer: its trend, core clock and thermal state', () async {
+    final fake = FakeStress(extra: {'slope_pct_per_min': 3.0, 'core_khz_start': 2995200, 'core_khz_end': 2400000});
+    final thermal = [
+      {'status': 0, 'headroom': 0.42},
+      {'status': 2, 'headroom': 0.91},
+    ];
+    var reads = 0;
+    final res = await StressRunner(backend: fake, readThermal: () async => thermal[reads++]).run(StressPlanKind.full);
+    final r = fake.started.singleWhere((r) => r.kind == StressKind.sustained);
+    expect(r.mode, StressMode.live);
+    expect(r.frames, StressBuffer.playingFrames);
+    final s = res.sustained!;
+    expect(reads, 2);
+    expect(s.thermalStart['headroom'], 0.42);
+    expect(s.thermalEnd['status'], 2);
+    expect(s.coreKhzEnd, 2400000);
+    // 3% of the budget a minute for two minutes, against a start at 37.5%: 16% slower.
+    expect(s.driftPct, closeTo(100 * 3.0 * 2 / (100 * 2000 / 5333.3), 0.01));
+    final j = s.toJson();
+    expect(j['thermal_end'], {'status': 2, 'headroom': 0.91});
+    expect(j['slope_pct_per_min'], 3.0);
+  });
+
+  test('a run keeps its local numbers in the JSON export and out of H2', () async {
+    final fake = FakeStress(extra: {
+      'first_callback_us': 812.0, 'worst_at_s': 1.93, 'callback_core': 7, 'core_khz_start': 2995200, 'mix_workers': 3,
+      'warmup_s': 1.7,
+    });
+    final sent = <Map<String, Object?>>[];
+    final res = await StressRunner(backend: fake, sendTelemetry: (s) async => sent.add(s)).run(StressPlanKind.quick);
+    final row = res.scenarios.firstWhere((s) => s.id == 'song8' && !s.live);
+    expect(row.firstCallbackUs, 812.0);
+    expect(row.worstAtS, 1.93);
+    expect(row.mixWorkers, 3);
+    final live = res.scenarios.firstWhere((s) => s.live && s.buffer == StressBuffer.playing);
+    expect(live.callbackCore, 7);
+    final j = live.toJson();
+    expect(j['first_callback_us'], 812.0);
+    expect(j['worst_at_s'], 1.93);
+    expect(j['budget_basis'], 'callback_length');
+    final allow = TelemetryAllowList(isBuiltin: (id) => id.startsWith('org.caw.'));
+    expect(allow.stress(sent.single), sent.single); // H2 unchanged: no new field
+    expect('${sent.single}', isNot(contains('first_callback')));
   });
 
   test('unknowns are null: a run stopped before the ramps sends no limits', () async {
     final pressure = StreamController<EnginePressure>();
     late StressRunner runner;
+    var song8 = 0;
     final fake = FakeStress(onStart: (r) {
-      if (r.scenario == 'song8') pressure.add(EnginePressure.thermalHot);
+      if (r.scenario == 'song8' && ++song8 == 2) pressure.add(EnginePressure.thermalHot); // after the warm-up
     });
     final sent = <Map<String, Object?>>[];
     runner = StressRunner(backend: fake, pressure: pressure.stream, sendTelemetry: (s) async => sent.add(s));
@@ -151,9 +211,10 @@ void main() {
   test('closing the screen mid-run cancels it, and the run still ends and is sent', () async {
     final sent = <Map<String, Object?>>[];
     late StressRunner runner;
+    var song8 = 0;
     runner = StressRunner(
         backend: FakeStress(onStart: (r) {
-          if (r.scenario == 'song8') runner.dispose();
+          if (r.scenario == 'song8' && ++song8 == 2) runner.dispose(); // after the warm-up
         }),
         sendTelemetry: (s) async => sent.add(s));
     final res = await runner.run(StressPlanKind.quick);
@@ -243,7 +304,10 @@ void main() {
     expect(extras['ok'], isTrue);
     expect((extras['costs'] as List).any((c) => (c as Map)['id'] == 'host'), isTrue);
     final cancelled = const EngineStress().start(const StressRequest(scenario: 'song16', seconds: 600));
-    await Future<void>.delayed(const Duration(milliseconds: 200));
+    // The timed span starts after the untimed warm-up (1.7 s of audio with the mix pool on Auto).
+    for (var i = 0; i < 100 && cancelled.progress().callbacks == 0; i++) {
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+    }
     expect(cancelled.progress().callbacks, greaterThan(0));
     cancelled.cancel();
     expect((await cancelled.result)['stop_reason'], 'cancelled');

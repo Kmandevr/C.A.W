@@ -1,6 +1,7 @@
 // The Benchmark (beta plan C): its scenarios unchanged by the move out of caw_bench, ramps, cancel, profiles, shedding.
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <cstdio>
 #include <filesystem>
 #include <map>
@@ -14,6 +15,7 @@
 #include "component_chain.h"
 #include "engine.h"
 #include "json.h"
+#include "mix_pool.h"
 #include "stress_run.h"
 #include "stress_scenarios.h"
 #include "test.h"
@@ -441,4 +443,54 @@ TEST(stress_profiling_keeps_the_mix_serial) {
     e.process(l.data(), r.data(), 256);
     CHECK(e.mixParallelForTest());
     e.stopMixPool();
+}
+
+// The S22+ Benchmark review (2026-11-13): Plain, Sustained and ramp runs measure the app's figure (the mix pool on
+// Auto, each callback's load reported as a device's), after an untimed warm-up that covers Auto's decision and
+// settle; the first callback after Play is kept apart, the worst's time counts from Play, and the trend is a
+// least-squares slope. Profile stays on one thread.
+TEST(stress_dsp_runs_use_the_pool_on_auto_after_a_warm_up) {
+    CHECK_NEAR(warmupSeconds(false), kWarmupSeconds, 1e-12);
+    CHECK_NEAR(warmupSeconds(true), kWarmupSeconds + Engine::kMixParallelSeconds + Engine::kMixSettleSeconds, 1e-12);
+    const double x[] = {0, 1, 2, 3}, y[] = {1, 3, 5, 7}, flat[] = {2, 2, 2, 2};
+    CHECK_NEAR(slope(x, y, 4), 2.0, 1e-12);
+    CHECK_NEAR(slope(x, flat, 4), 0.0, 1e-12);
+    CHECK_NEAR(slope(x, y, 1), 0.0, 1e-12);
+
+    RunRequest r;
+    r.scenario = "three_tracks";
+    r.seconds = 0.5;
+    Progress p;
+    const RunResult o = run(r, p, nullptr, nullptr);
+    CHECK(o.ok);
+    CHECK_EQ(o.callbacks, int64_t{48000 / 2 / 256});  // the warm-up is not timed
+    CHECK_EQ(p.callbacks.load(), o.callbacks);
+    CHECK_NEAR(o.warmupS, warmupSeconds(true), 256.0 / 48000);
+    CHECK(o.firstCallbackUs > 0);
+    CHECK(o.worstAtS >= o.warmupS && o.worstAtS <= o.warmupS + o.seconds);
+    CHECK_EQ(o.mixWorkers, MixPool::defaultWorkers());
+    CHECK(o.mixActive <= o.mixWorkers);
+    CHECK(std::isfinite(o.slopePctPerMin));
+
+    RunRequest prof = r;
+    prof.kind = Kind::Profile;
+    Progress q;
+    const RunResult po = run(prof, q, nullptr, nullptr);
+    CHECK(po.ok);
+    const uint32_t own = Engine(48000).mixWorkers();  // 0, or a parallel shard's test pool (setMixThreadsForTest)
+    CHECK_EQ(po.mixWorkers, own);           // no pool of the run's own: a profile is filled by one thread
+    CHECK_NEAR(po.warmupS, 1.0, 256.0 / 48000);  // 1 s before the profile, as before
+    CHECK(!po.costs.empty());
+
+    // A ramp's numbers are its last held step's, warm-up included.
+    RunRequest ramp;
+    ramp.kind = Kind::RampVoices;
+    ramp.seconds = 0.05;
+    ramp.frames = 8192;
+    Progress s;
+    const RunResult ro = run(ramp, s, nullptr, nullptr);
+    CHECK(ro.ok);
+    CHECK(ro.limit >= 1);
+    CHECK(ro.warmupS >= warmupSeconds(true) - 8192.0 / 48000);
+    CHECK(ro.firstCallbackUs > 0);
 }

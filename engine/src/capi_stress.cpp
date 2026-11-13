@@ -12,6 +12,7 @@
 #include "capi_internal.h"
 #include "engine.h"
 #include "json.h"
+#include "thread_tuning.h"
 
 namespace caw::stress {
 
@@ -58,7 +59,19 @@ std::string resultJson(const Job& j) {
                     ",\"limit\":" + std::to_string(r.limit) + ",\"first_failed\":" + std::to_string(r.firstFailed) +
                     ",\"steps\":" + std::to_string(r.steps) + ",\"seconds\":" + num(r.seconds) +
                     ",\"stop_reason\":" + str(r.stopReason) + ",\"error\":" + str(r.error) +
-                    ",\"callback_core\":" + std::to_string(j.callbackCore) + ",\"costs\":[";
+                    ",\"callback_core\":" + std::to_string(j.callbackCore) +
+                    // Local only (not in H2): the warm-up, the first callback after Play, the trend, the core's
+                    // clock at the timed span's start and end, the mix pool, what was asked, and what the budget is.
+                    ",\"requested_frames\":" + std::to_string(j.request.frames) + ",\"warmup_s\":" + num(r.warmupS) +
+                    ",\"first_callback_us\":" + num(r.firstCallbackUs) + ",\"slope_pct_per_min\":" + num(r.slopePctPerMin) +
+                    ",\"core_start\":" + std::to_string(r.coreStart) + ",\"core_end\":" + std::to_string(r.coreEnd) +
+                    ",\"core_khz_start\":" + std::to_string(r.khzStart) + ",\"core_khz_end\":" + std::to_string(r.khzEnd) +
+                    ",\"core_max_khz\":" + std::to_string(r.maxKHz) + ",\"mix_workers\":" + std::to_string(r.mixWorkers) +
+                    ",\"mix_active_workers\":" + std::to_string(r.mixActive) +
+                    ",\"warmup_xruns\":" + std::to_string(live ? j.warmupXruns : -1) +
+                    // Live: each callback's budget is its own length, not its real deadline (the frames the device
+                    // has queued), so over_budget overstates; the platform's xruns are the dropouts heard.
+                    ",\"budget_basis\":" + str(live ? "callback_length" : "callback") + ",\"costs\":[";
     for (size_t k = 0; k < r.costs.size(); ++k) {
         const CostRow& c = r.costs[k];
         o += std::string(k ? "," : "") + "{\"id\":" + str(c.id) + ",\"ns\":" + std::to_string(c.ns) + ",\"pct\":" + num(c.pct) +
@@ -111,8 +124,10 @@ RunResult runLive(Job& j) {
     e->engine->setShedding(false);
     const std::string warn = e->engine->setProject(p);
     if (warn.find("\"ok\":true") == std::string::npos) return failed("the project did not load: " + warn.substr(0, 300));
+    // The low-latency profile at the size asked: 1024 frames is Auto while not recording (the app's playing buffer,
+    // audio_miniaudio.cpp's kLargeBufferFrames), 0 Low latency (AAudio's own burst-sized callbacks).
     e->bufferMode = CAW_BUFFER_LOW_LATENCY;
-    e->periodFrames = r.frames;  // 0: the device's smallest
+    e->periodFrames = r.frames;
     e->muteOutput.store(true, std::memory_order_relaxed);
     e->stress.store(meter.get(), std::memory_order_release);
     char error[256] = {};
@@ -120,12 +135,30 @@ RunResult runLive(Job& j) {
     using Clock = std::chrono::steady_clock;
     auto cancelled = [&] { return j.cancel.load(std::memory_order_relaxed) != 0; };
     std::this_thread::sleep_for(std::chrono::milliseconds(250));  // the project applied, as the DSP runs give it
+    const int32_t xrunsPlay = cawAudioXruns(e);
+    const int64_t atPlay = meter->written.load(std::memory_order_acquire);
+    e->engine->play();
+    // The warm-up, untimed: as the DSP runs', with Auto's decision and settle (the device's mix pool is on Auto).
+    const auto played = Clock::now();
+    const double warmup = warmupSeconds(true);
+    while (!cancelled() && std::chrono::duration<double>(Clock::now() - played).count() < warmup)
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
     const int32_t xrunsFrom = cawAudioXruns(e);
     const int64_t from = meter->written.load(std::memory_order_acquire);
     int64_t usedFrom = meter->usedNs.load(std::memory_order_relaxed), budgetFrom = meter->budgetNs.load(std::memory_order_relaxed);
     const int64_t overFrom = meter->overBudget.load(std::memory_order_relaxed);
     const int64_t budgetStart = budgetFrom, framesStart = meter->framesSum.load(std::memory_order_relaxed);
-    e->engine->play();
+    int64_t framesWarm = 0;  // the frames played after Play before the timed span
+    for (int64_t c = atPlay; c < std::min<int64_t>(from, static_cast<int64_t>(capacity)); ++c) framesWarm += meter->frames[static_cast<size_t>(c)];
+    out.warmupS = static_cast<double>(framesWarm) / r.rate;
+    if (atPlay < from && atPlay < static_cast<int64_t>(capacity)) out.firstCallbackUs = meter->times[static_cast<size_t>(atPlay)];
+    {
+        const int32_t core = meter->core.load(std::memory_order_relaxed);
+        const tuning::CoreClock c = tuning::coreClock(core);
+        out.coreStart = core;
+        out.khzStart = c.currentKHz;
+        out.maxKHz = c.maxKHz;
+    }
     const auto t0 = Clock::now();
     auto lastCallback = t0;
     int64_t seen = from;
@@ -159,6 +192,15 @@ RunResult runLive(Job& j) {
     }
     const int32_t xrunsTo = cawAudioXruns(e);
     const int32_t deviceFrames = caw_audio_buffer_frames(e);
+    {
+        const int32_t core = meter->core.load(std::memory_order_relaxed);
+        const tuning::CoreClock c = tuning::coreClock(core);
+        out.coreEnd = core;
+        out.khzEnd = c.currentKHz;
+        out.maxKHz = std::max(out.maxKHz, c.maxKHz);
+    }
+    out.mixWorkers = e->engine->mixWorkers();
+    out.mixActive = e->engine->mixActiveWorkers();
     caw_audio_stop(e);  // the callback has stopped once this returns
     e->stress.store(nullptr, std::memory_order_release);
     const int64_t total = meter->written.load(std::memory_order_acquire);
@@ -178,6 +220,7 @@ RunResult runLive(Job& j) {
         j.deviceFrames = deviceFrames;
         j.deviceRate = r.rate;
         j.xruns = xrunsFrom >= 0 && xrunsTo >= xrunsFrom ? xrunsTo - xrunsFrom : -1;
+        j.warmupXruns = xrunsPlay >= 0 && xrunsFrom >= xrunsPlay ? xrunsFrom - xrunsPlay : -1;
         j.callbackCore = meter->core.load(std::memory_order_relaxed);
     }
     out.callbacks = total - from;
@@ -191,12 +234,20 @@ RunResult runLive(Job& j) {
         out.meanUs = st.meanUs;
         out.p99Us = st.p99Us;
         out.worstUs = st.maxUs;
-        out.worstAtS = static_cast<double>(startFrame[st.maxAt]) / r.rate;
+        out.worstAtS = out.warmupS + static_cast<double>(startFrame[st.maxAt]) / r.rate;  // from Play
         if (us.size() >= 20) {
             const size_t tenth = us.size() / 10;
             out.meanFirstUs = caw::stress::stats(us, 0, tenth).meanUs;
             out.meanLastUs = caw::stress::stats(us, us.size() - tenth, us.size()).meanUs;
         }
+        // The trend: each callback's share of its own budget (%) against its time (minutes).
+        std::vector<double> x(us.size()), y(us.size());
+        for (size_t c = 0; c < us.size(); ++c) {
+            const int32_t f = meter->frames[static_cast<size_t>(from) + c];
+            x[c] = static_cast<double>(startFrame[c]) / r.rate / 60.0;
+            y[c] = f > 0 ? 100.0 * us[c] / (1e6 * f / r.rate) : 0.0;
+        }
+        out.slopePctPerMin = slope(x.data(), y.data(), x.size());
     }
     if (stalled) return failed("the audio device stopped calling back (another app or a route change took it)");
     out.ok = !stopped && out.callbacks > 0;

@@ -24,7 +24,8 @@ struct Job {
     bool finished = false;
     RunResult result;
     int32_t deviceFrames = 0, deviceRate = 0;  // live: the callback size and rate the device ran at
-    int32_t xruns = -1;                        // live: underruns the platform reported during the run (-1: none)
+    int32_t xruns = -1;                        // live: underruns the platform reported during the timed span (-1: none)
+    int32_t warmupXruns = -1;                  // live: those during the warm-up after Play (-1: none)
     int32_t callbackCore = -1;                 // live: the core the last callback ran on (-1: unknown)
 };
 

@@ -6,6 +6,10 @@ updated: 2026-11-13
 
 # Decisions
 
+## 2026-11-13: Low latency takes AAudio's own callback sizes; the Benchmark measures the app's figure (Claude, from the owner's S22+ run)
+
+**Decision:** where AAudio is given no callback size (Low latency, Auto while recording, any size on Android 11 and older), the output takes the stream's own sizes (miniaudio's `noFixedSizedCallback`) instead of asking for the burst and reopening. **Why:** miniaudio's fixed size fell back to the stream's whole capacity (about 1950 frames on the S22+) rendered inside one burst's callback, so Low latency dropped out under 100 % load; AAudio's documentation recommends its own sizes for the lowest latency, a reopen costs a gap and on Android 11 would not reach the stream at all, and `DeviceRender` renders any size (tested). The Benchmark's timed runs now run the mix pool on Auto after an untimed warm-up, and the live runs ask for the playing buffer and Low latency, so its numbers are what the app gets ([engine](engine.md#the-benchmark)). H2 and the C API (29) are unchanged; the new numbers stay in the local JSON.
+
 ## 2026-11-13: The polish release is 1.0.1-alpha.1; the app stays alpha until the owner says otherwise (owner)
 
 **Decision (owner, 2026-11-13):** the polish pass ships as **1.0.1-alpha.1**. "It'll end up being a full release if it's stable. But again the app is still an alpha … until I say it's going to go back to 1.0 and as an official release not just alpha." So versions keep the `-alpha.N` suffix (the beta telemetry channel, the Open alpha notice) until the owner calls the official release.

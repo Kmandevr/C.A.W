@@ -977,6 +977,48 @@ TEST(the_device_fifo_pulls_the_input_for_each_block_it_renders) {
     }
 }
 
+TEST(the_device_render_takes_the_devices_own_varying_callback_sizes) {
+    // The Benchmark on a Galaxy S22+ (2026-11-13): at Low latency AAudio was given no size, and miniaudio's fixed
+    // callback fell back to the stream's whole capacity (about 1950 frames) inside one burst's callback. The output
+    // now takes AAudio's own sizes (audio_miniaudio.cpp, takesDeviceSizes): DeviceRender opened at the burst, then
+    // called with whatever the stream asks, mostly the burst and sometimes not. The sound is the same frames in the
+    // same order as a plain render (whole blocks through the FIFO, so the same bits), no callback renders more than
+    // a block past what it plays, and every frame asked is played.
+    for (const int burst : {96, 192, 240, 256}) {
+        const ProjectSpec p = project({sine(440.0, 0.5), sine(97.0, 0.25)});
+        Engine ref(48000), dev(48000);
+        ref.setProject(p);
+        dev.setProject(p);
+        ref.play();
+        dev.play();
+        DeviceRender render;
+        render.open(burst);
+        const int sizes[] = {burst, burst, burst / 2, burst + burst / 2, 1, burst, 700, burst, 63, 65};
+        std::vector<float> played;
+        std::vector<float> out(static_cast<size_t>(700) * 2);
+        int64_t asked = 0, rendered = 0;
+        bool bounded = true;
+        for (int k = 0; k < 400; ++k) {
+            const int n = sizes[k % 10];
+            const int got = render.render(dev, out.data(), n);
+            rendered += got;
+            asked += n;
+            if (render.usesFifo() && (got > n + kBlock - 1 || render.held() > kBlock - 1)) bounded = false;
+            if (!render.usesFifo() && got != n) bounded = false;
+            for (int i = 0; i < n; ++i) played.push_back(out[static_cast<size_t>(i) * 2]);
+        }
+        CHECK(bounded);
+        CHECK_EQ(static_cast<int64_t>(played.size()), asked);
+        CHECK(rendered >= asked && rendered < asked + kBlock);
+        const std::vector<float> want = run(ref, asked);
+        double most = 0;
+        for (size_t i = 0; i < played.size(); ++i) most = std::max(most, static_cast<double>(std::fabs(played[i] - want[i])));
+        if (most > 1e-6)
+            cawtest::fail(__FILE__, __LINE__, "a " + std::to_string(burst) + "-frame burst's varying callbacks differ by " +
+                                                  std::to_string(most) + " from a plain render");
+    }
+}
+
 TEST(a_callback_that_misses_its_played_deadline_counts_toward_shedding) {
     // The audio review of the merge (2026-11-13): through the FIFO a 256-frame callback that renders 320 frames at
     // its whole budget (a raw load of 1.0: its deadline missed) reads 0.8 a frame rendered, under the 0.85 that

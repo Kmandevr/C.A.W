@@ -1,4 +1,4 @@
-// The Benchmark's timed runs: each on its own Engine (shedding off, its own profile), timed like caw_bench's suite.
+// The Benchmark's timed runs: each on its own Engine (shedding off, its own profile, the mix pool on Auto as the app's), timed like caw_bench's suite.
 #include "stress_run.h"
 
 #include <algorithm>
@@ -8,6 +8,8 @@
 
 #include "component_chain.h"
 #include "engine.h"
+#include "mix_pool.h"
+#include "thread_tuning.h"
 
 namespace caw::stress {
 
@@ -39,12 +41,19 @@ bool scenarioProject(const std::string& id, const std::string& dir, ProjectSpec&
     return true;
 }
 
-// A fresh engine set up as the Benchmark measures: the quality asked, nothing shed, the project applied (0.25 s
-// stopped, as caw_bench's suite does), then playing.
-bool prepare(Engine& e, const ProjectSpec& p, const RunRequest& r, std::vector<float>& l, std::vector<float>& rr,
-             std::string& error) {
+// A fresh engine set up as the Benchmark measures: the quality asked, nothing shed, the mix pool as the app's live
+// device has it (MixPool::defaultWorkers(), Auto) unless `serial` (Profile), the project applied (0.25 s stopped,
+// as caw_bench's suite does), then playing, and the warm-up played untimed (warmUp below).
+bool prepare(Engine& e, const ProjectSpec& p, const RunRequest& r, bool serial, std::vector<float>& l,
+             std::vector<float>& rr, std::string& error) {
     e.setQuality(r.quality);
     e.setShedding(false);
+    if (serial) {
+        e.setMixParallel(Engine::MixParallel::Never);
+    } else {
+        e.startMixPool(MixPool::defaultWorkers(), false);  // offline workers (none on a machine of 1 or 2 cores: serial)
+        e.setMixParallel(Engine::MixParallel::Auto);
+    }
     const std::string warn = e.setProject(p);
     if (warn.find("\"ok\":true") == std::string::npos) {
         error = "the project did not load: " + warn.substr(0, 300);
@@ -55,12 +64,38 @@ bool prepare(Engine& e, const ProjectSpec& p, const RunRequest& r, std::vector<f
     return true;
 }
 
+// After Play, untimed: the warm-up's callbacks, each reported as a device callback's load (so Auto decides and
+// settles before the timed span), the first one's time kept apart. Returns false when cancelled.
+bool warmUp(Engine& e, const RunRequest& r, bool pool, std::vector<float>& l, std::vector<float>& rr, RunResult& out,
+            const std::atomic<int32_t>* cancel) {
+    const double budgetUs = 1e6 * r.frames / r.rate;
+    const int64_t calls = std::max<int64_t>(1, static_cast<int64_t>(warmupSeconds(pool) * r.rate / r.frames));
+    for (int64_t c = 0; c < calls; ++c) {
+        if (cancelled(cancel)) return false;
+        const auto t0 = Clock::now();
+        e.process(l.data(), rr.data(), r.frames);
+        const double took = std::chrono::duration<double, std::micro>(Clock::now() - t0).count();
+        if (c == 0) out.firstCallbackUs = took;
+        e.reportLoad(took / budgetUs, r.frames, r.frames);
+    }
+    out.warmupS = static_cast<double>(calls) * r.frames / r.rate;
+    return true;
+}
+
+// The calling thread's core and its clock, before or after the timed span.
+void readCore(int32_t& core, int64_t& khz, int64_t& maxKHz) {
+    core = tuning::currentCpu();
+    const tuning::CoreClock c = tuning::coreClock(core);
+    khz = c.currentKHz;
+    if (c.maxKHz > maxKHz) maxKHz = c.maxKHz;
+}
+
 void fill(RunResult& out, const std::vector<double>& us, int64_t n, const RunRequest& r) {
     const SuiteStats s = stats(us, 0, static_cast<size_t>(n));
     out.meanUs = s.meanUs;
     out.p99Us = s.p99Us;
     out.worstUs = s.maxUs;
-    out.worstAtS = static_cast<double>(s.maxAt) * r.frames / r.rate;
+    out.worstAtS = out.warmupS + static_cast<double>(s.maxAt) * r.frames / r.rate;  // from Play
     out.callbacks = n;
     out.overBudget = 0;
     for (int64_t c = 0; c < n; ++c)
@@ -71,6 +106,13 @@ void fill(RunResult& out, const std::vector<double>& us, int64_t n, const RunReq
         out.meanFirstUs = stats(us, 0, tenth).meanUs;
         out.meanLastUs = stats(us, static_cast<size_t>(n) - tenth, static_cast<size_t>(n)).meanUs;
     }
+    // The trend: each callback's share of the budget (%) against its time (minutes).
+    std::vector<double> x(static_cast<size_t>(n)), y(static_cast<size_t>(n));
+    for (int64_t c = 0; c < n; ++c) {
+        x[static_cast<size_t>(c)] = static_cast<double>(c) * r.frames / r.rate / 60.0;
+        y[static_cast<size_t>(c)] = out.budgetUs > 0 ? 100.0 * us[static_cast<size_t>(c)] / out.budgetUs : 0.0;
+    }
+    out.slopePctPerMin = slope(x.data(), y.data(), x.size());
 }
 
 int64_t callsFor(double seconds, const RunRequest& r) {
@@ -84,6 +126,24 @@ void setSpan(Progress& p, int32_t from, int32_t to) {
 }
 
 }  // namespace
+
+double warmupSeconds(bool pool) noexcept {
+    return kWarmupSeconds + (pool ? Engine::kMixParallelSeconds + Engine::kMixSettleSeconds : 0.0);
+}
+
+double slope(const double* x, const double* y, size_t n) noexcept {
+    if (n < 2) return 0;
+    double mx = 0, my = 0;
+    for (size_t i = 0; i < n; ++i) mx += x[i], my += y[i];
+    mx /= static_cast<double>(n);
+    my /= static_cast<double>(n);
+    double sxy = 0, sxx = 0;
+    for (size_t i = 0; i < n; ++i) {
+        sxy += (x[i] - mx) * (y[i] - my);
+        sxx += (x[i] - mx) * (x[i] - mx);
+    }
+    return sxx > 0 && std::isfinite(sxy / sxx) ? sxy / sxx : 0.0;
+}
 
 void LoadHistory::push(float load) noexcept {
     const uint32_t at = written_.load(std::memory_order_relaxed);
@@ -114,6 +174,7 @@ int64_t timeCallbacks(Engine& e, int frames, int64_t calls, double* us, float* l
         e.process(l, r, frames);
         const double took = std::chrono::duration<double, std::micro>(Clock::now() - t0).count();
         us[c] = took;
+        e.reportLoad(took / budgetUs, frames, frames);  // as a device callback (caw_bench --mode auto)
         framesInPoint += frames;
         usInPoint += took;
         if (progress) {
@@ -228,6 +289,7 @@ RunResult run(const RunRequest& r, Progress& progress, LoadHistory* history, con
         const int64_t calls = callsFor(r.seconds, r);
         std::vector<double> us(static_cast<size_t>(calls)), heldUs;
         int64_t heldN = 0;
+        RunResult heldStep;  // the last step that held: its warm-up, first callback, core and pool
         const int32_t expected = static_cast<int32_t>(counts.size()) + 4;
         std::string error;
         const RampOutcome o = rampSearch(counts, [&](int32_t n) -> int {
@@ -236,8 +298,14 @@ RunResult run(const RunRequest& r, Progress& progress, LoadHistory* history, con
             setSpan(progress, std::min(990, 1000 * s / expected), std::min(990, 1000 * (s + 1) / expected));
             progress.count.store(n, std::memory_order_relaxed);
             Engine e(r.rate);
-            if (!prepare(e, rampProject(r.kind, n), r, l, rr, error)) return -1;
+            if (!prepare(e, rampProject(r.kind, n), r, false, l, rr, error)) return -1;
+            RunResult step;
+            if (!warmUp(e, r, true, l, rr, step, cancel)) return -1;
+            readCore(step.coreStart, step.khzStart, step.maxKHz);
             const int64_t done = timeCallbacks(e, r.frames, calls, us.data(), l.data(), rr.data(), &progress, history, cancel);
+            readCore(step.coreEnd, step.khzEnd, step.maxKHz);
+            step.mixWorkers = e.mixWorkers();
+            step.mixActive = e.mixActiveWorkers();
             progress.step.fetch_add(1, std::memory_order_relaxed);
             if (done < calls) return -1;  // cancelled mid-step
             const SuiteStats st = stats(us, 0, static_cast<size_t>(done));
@@ -245,6 +313,7 @@ RunResult run(const RunRequest& r, Progress& progress, LoadHistory* history, con
             if (held) {
                 heldUs = us;
                 heldN = done;
+                heldStep = step;
                 progress.held.store(std::max(progress.held.load(std::memory_order_relaxed), n), std::memory_order_relaxed);
             }
             return held ? 1 : 0;
@@ -253,7 +322,14 @@ RunResult run(const RunRequest& r, Progress& progress, LoadHistory* history, con
         out.limit = o.limit;
         out.firstFailed = o.firstFailed;
         out.steps = o.steps;
-        if (heldN > 0) fill(out, heldUs, heldN, r);
+        if (heldN > 0) {
+            out.firstCallbackUs = heldStep.firstCallbackUs;
+            out.warmupS = heldStep.warmupS;
+            out.coreStart = heldStep.coreStart, out.coreEnd = heldStep.coreEnd;
+            out.khzStart = heldStep.khzStart, out.khzEnd = heldStep.khzEnd, out.maxKHz = heldStep.maxKHz;
+            out.mixWorkers = heldStep.mixWorkers, out.mixActive = heldStep.mixActive;
+            fill(out, heldUs, heldN, r);
+        }
         out.ok = !o.stopped;
         out.stopReason = o.stopped ? "cancelled" : o.firstFailed > 0 ? "over_budget" : "done";
         progress.permille.store(1000, std::memory_order_relaxed);
@@ -264,17 +340,29 @@ RunResult run(const RunRequest& r, Progress& progress, LoadHistory* history, con
     std::string error;
     if (!scenarioProject(r.scenario, r.workDir, p, error)) return failed(error);
     Engine e(r.rate);
-    if (!prepare(e, p, r, l, rr, error)) return failed(error);
+    const bool serial = r.kind == Kind::Profile;
+    if (!prepare(e, p, r, serial, l, rr, error)) return failed(error);
     const int64_t calls = callsFor(r.seconds, r);
     std::vector<double> us(static_cast<size_t>(calls));
     std::unique_ptr<ChainProfile> profile;
+    setSpan(progress, 0, 1000);
+    if (!warmUp(e, r, !serial, l, rr, out, cancel)) {
+        out.stopReason = "cancelled";
+        return out;
+    }
     if (r.kind == Kind::Profile) {
-        for (int c = 0; c < r.rate / r.frames && !cancelled(cancel); ++c) e.process(l.data(), rr.data(), r.frames);  // warm up 1 s
+        // 1 s in all before the profile starts, as before the warm-up was every run's.
+        const int extra = static_cast<int>((1.0 - out.warmupS) * r.rate / r.frames);
+        for (int c = 0; c < extra && !cancelled(cancel); ++c) e.process(l.data(), rr.data(), r.frames);
+        out.warmupS += std::max(0, extra) * static_cast<double>(r.frames) / r.rate;
         profile = std::make_unique<ChainProfile>();
         e.setProfile(profile.get());
     }
-    setSpan(progress, 0, 1000);
+    readCore(out.coreStart, out.khzStart, out.maxKHz);
     const int64_t n = timeCallbacks(e, r.frames, calls, us.data(), l.data(), rr.data(), &progress, history, cancel);
+    readCore(out.coreEnd, out.khzEnd, out.maxKHz);
+    out.mixWorkers = e.mixWorkers();
+    out.mixActive = e.mixActiveWorkers();
     e.setProfile(nullptr);
     if (n > 0) fill(out, us, n, r);
     if (profile && n > 0) {

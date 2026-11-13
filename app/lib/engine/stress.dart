@@ -31,7 +31,8 @@ class StressRequest {
   final StressMode mode;
   final double seconds;
 
-  /// DSP: the callback size timed (0: 256, as the CI bench). Live: asked of the device (0: its smallest).
+  /// DSP: the callback size timed (0: 256, as the CI bench). Live: asked of the device with the low-latency profile
+  /// (1024: as Auto while not recording, the playing buffer; 0: Low latency, the device's own burst).
   final int frames;
   final int quality;
 

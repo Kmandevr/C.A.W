@@ -36,6 +36,7 @@ StressRunner defaultStressRunner(StressHost? host) {
     memoryBudgetMiB: budget,
     pressure: ResourceSignals.changes.handleError((Object _) {}),
     readPressure: ResourceSignals.read,
+    readThermal: ResourceSignals.readThermal,
     sendTelemetry: (stress) async => Telemetry.current?.sendStressReport(stress),
     workDir: () async {
       try {
@@ -306,7 +307,7 @@ class _BenchmarkScreenState extends State<BenchmarkScreen> {
   }
 
   Widget _scenarioRow(ScenarioResult s, MotionLevel level) {
-    final key = '${s.id}-${s.live}';
+    final key = s.key;
     final open = _open == key;
     final t = s.ran ? StressTier.of(s.p99Pct) : null;
     return Card(
@@ -322,7 +323,7 @@ class _BenchmarkScreenState extends State<BenchmarkScreen> {
           padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
           child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
             Row(children: [
-              Expanded(child: Text('${s.name}${s.live ? ' · live' : ''}', overflow: TextOverflow.ellipsis)),
+              Expanded(child: Text('${s.name}${s.modeLabel}', overflow: TextOverflow.ellipsis)),
               Text(s.ran ? '${s.p99Pct.round()}%' : '—', style: Neon.code(size: 13, color: tierColor(t))),
               AnimatedRotation(
                 turns: open ? 0.5 : 0,

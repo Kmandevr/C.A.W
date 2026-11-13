@@ -10,6 +10,7 @@
 
 #if defined(__ANDROID__)
 #include <dlfcn.h>
+#include <sys/system_properties.h>
 #include <time.h>
 #endif
 #if defined(__linux__)
@@ -83,6 +84,11 @@ struct Audio {
     // every open; never flushed while running (a Play or Stop keeps the frames it holds: device_render.h).
     caw::DeviceRender render;
     int fifoLatency = 0;   // the most frames it holds back (0 when the period is whole blocks): the bridge's fill covers it
+    // The size the callback is called with: miniaudio's fixed size (its intermediary buffer), or, where the output
+    // takes AAudio's own sizes (deviceSizes, takesDeviceSizes), the stream's burst, which a low-latency stream
+    // calls back with. The status reports it as period_frames.
+    int callbackFrames = 0;
+    bool deviceSizes = false;
     int fifoMeanHold = 0;  // the frames it holds back on average: in the latency figures that align recordings
 };
 
@@ -119,6 +125,35 @@ char* dup(const std::string& s) {
 // (AAUDIO_SHARING_MODE_EXCLUSIVE) (miniaudio 0.11.25: ma_device_init__wasapi, ma_create_and_configure_
 // AAudioStreamBuilder__aaudio); other backends here are left in shared mode.
 bool takesExclusive(ma_backend b) { return b == ma_backend_wasapi || b == ma_backend_aaudio; }
+
+#if defined(__ANDROID__)
+int androidSdk() {
+    char v[PROP_VALUE_MAX] = {};
+    return __system_property_get("ro.build.version.sdk", v) > 0 ? std::atoi(v) : 0;
+}
+#endif
+
+// Whether the output takes the device's own callback sizes (miniaudio's noFixedSizedCallback) instead of miniaudio's
+// fixed size. On AAudio, when the size is not given to the stream (no size asked, or Android 11 and older, where
+// miniaudio's compatibility workarounds keep it from the stream), miniaudio's fixed size falls back to the
+// stream's whole buffer capacity in one period ([Fact] miniaudio 0.11.25 source, read 2026-11-13:
+// ma_device_init_by_type__aaudio sets periodSizeInFrames = bufferCapacityInFrames, periodCount 1, when
+// getFramesPerDataCallback is unspecified; ma_device_init sizes the intermediary buffer from it): about 1950
+// frames (40 ms) where AAudio calls back a burst (96 to 192 frames) at a time, so one burst's callback rendered
+// the whole capacity and missed its deadline at a fraction of the load. AAudio's own sizes are what its
+// documentation recommends for the lowest latency (AAudioStreamBuilder_setFramesPerDataCallback: "do not call
+// this function", read 2026-11-13). DeviceRender takes any size (whole blocks through its FIFO, or straight).
+// Elsewhere miniaudio's period is the backend's own (WASAPI, Core Audio, ALSA and PulseAudio derive it from the
+// asked size or miniaudio's 10 ms default and call back with it), so the fixed size matches what the device asks.
+bool takesDeviceSizes(ma_backend b, ma_uint32 frames) {
+#if defined(__ANDROID__)
+    return b == ma_backend_aaudio && (frames == 0 || androidSdk() <= 30);
+#else
+    (void)b;
+    (void)frames;
+    return false;
+#endif
+}
 
 std::string bounded(const char* s, size_t n) {
     size_t len = 0;
@@ -195,9 +230,30 @@ void readAAudioModes(Audio* a) {
     a->lowLatency = performance(a->device.aaudio.pStreamPlayback) == 12;   // AAUDIO_PERFORMANCE_MODE_LOW_LATENCY
     a->modesReadBack = true;
 }
+
+// The stream's burst (AAudioStream_getFramesPerBurst, NDK API 26, which miniaudio loads), 0 if unknown.
+int32_t aaudioBurst(const Audio* a) {
+    if (a->context.backend != ma_backend_aaudio || !a->device.aaudio.pStreamPlayback || !a->context.aaudio.AAudioStream_getFramesPerBurst)
+        return 0;
+    using Getter = int32_t (*)(void*);
+    const int32_t n = reinterpret_cast<Getter>(a->context.aaudio.AAudioStream_getFramesPerBurst)(a->device.aaudio.pStreamPlayback);
+    return n > 0 && n <= 8192 ? n : 0;
+}
 #else
 void readAAudioModes(Audio*) {}
+int32_t aaudioBurst(const Audio*) { return 0; }
 #endif
+
+// The output's callback size as reported (period_frames) and the periods that make up its buffer with it.
+int32_t reportedPeriod(const Audio* a) {
+    return a->callbackFrames > 0 ? a->callbackFrames : static_cast<int32_t>(a->device.playback.internalPeriodSizeInFrames);
+}
+int32_t reportedPeriods(const Audio* a) {
+    const auto& p = a->device.playback;
+    if (!a->deviceSizes || a->callbackFrames <= 0) return static_cast<int32_t>(p.internalPeriods);
+    const int64_t buffer = static_cast<int64_t>(p.internalPeriodSizeInFrames) * std::max<ma_uint32>(1, p.internalPeriods);
+    return static_cast<int32_t>(std::max<int64_t>(1, buffer / a->callbackFrames));
+}
 
 // The core this callback runs on, for the Benchmark's live mode (-1 where the platform can't say).
 int32_t callbackCore() {
@@ -348,6 +404,9 @@ ma_result openDevice(Audio* a, const CawEngine* e, const ma_device_id* id, ma_ui
         cfg.periodSizeInFrames = frames;
         cfg.aaudio.allowSetBufferCapacity = MA_TRUE;
     }
+    // Where AAudio is not given the size, the callback takes AAudio's own sizes (takesDeviceSizes).
+    a->deviceSizes = takesDeviceSizes(a->context.backend, frames);
+    cfg.noFixedSizedCallback = a->deviceSizes ? MA_TRUE : MA_FALSE;
     cfg.dataCallback = callback;
     cfg.pUserData = a;
     // WASAPI: miniaudio's audio thread joins MMCSS "Pro Audio" (AvSetMmThreadCharacteristicsA in
@@ -368,9 +427,16 @@ ma_result openDevice(Audio* a, const CawEngine* e, const ma_device_id* id, ma_ui
         return r;
     }
     readAAudioModes(a);
-    // miniaudio calls back with a fixed size (its intermediary buffer, noFixedSizedCallback off): what it holds
-    // back on top is at most a block short of one, unless that size is whole blocks.
-    a->render.open(static_cast<int>(a->device.playback.intermediaryBufferCap));
+    // miniaudio calls back with a fixed size (its intermediary buffer, noFixedSizedCallback off), or with AAudio's
+    // own sizes (its burst on a low-latency stream; any other size still renders right through DeviceRender).
+    // What the FIFO holds back on top is at most a block short of one, unless that size is whole blocks.
+    if (a->deviceSizes) {
+        const int32_t burst = aaudioBurst(a);
+        a->callbackFrames = burst > 0 ? burst : static_cast<int>(a->device.playback.internalPeriodSizeInFrames);
+    } else {
+        a->callbackFrames = static_cast<int>(a->device.playback.intermediaryBufferCap);
+    }
+    a->render.open(a->callbackFrames);
     e->engine->requestSheddingReset();  // a fresh device: its first callbacks' stalls and a throttled stretch before don't count
     a->fifoLatency = a->render.latency();
     a->fifoMeanHold = a->render.meanHold();
@@ -468,16 +534,20 @@ ma_device* initCapture(Audio* a, const CaptureRequest& q, std::string& deviceId,
 //
 // The output callback is the larger of the backend's period and miniaudio's fixed callback size (its intermediary
 // buffer, `intermediaryBufferCap`, in the callback's frames: the period asked for, [Fact] miniaudio 0.11.25 source,
-// ma_device_init, read 2026-11-13): on Android 11 and older AAudio ignores the size asked for, so a 96-frame burst
-// can sit under a 512-frame callback, which pulls 512 frames (plus the FIFO's) at once.
+// ma_device_init, read 2026-11-13). Where the output takes AAudio's own sizes (takesDeviceSizes) on a stream AAudio
+// reports as low latency, it is twice the burst: [Assumption] such a stream calls back a burst at a time, and the
+// margin covers an odd larger callback; on any other stream, the backend's period (AAudio's buffer capacity).
 void attachCapture(CawEngine* e, Audio* a, ma_device* d, std::string deviceId) {
     const int rate = static_cast<int>(e->engine->sampleRate());
     const auto& c = d->capture;
     const auto& p = a->device.playback;
     const ma_uint32 channels = std::min<ma_uint32>(c.channels, caw::kMaxInputChannels);
     const int64_t period = std::max<int64_t>(1, toEngineFrames(c.internalPeriodSizeInFrames, c.internalSampleRate, rate));
-    const int64_t outPeriod = std::max<int64_t>({1, toEngineFrames(p.internalPeriodSizeInFrames, p.internalSampleRate, rate),
-                                                 static_cast<int64_t>(p.intermediaryBufferCap)});
+    const int64_t outPeriod =
+        a->deviceSizes && a->lowLatency && a->modesReadBack && a->callbackFrames > 0
+            ? 2 * toEngineFrames(a->callbackFrames, p.internalSampleRate, rate)
+            : std::max<int64_t>({1, toEngineFrames(p.internalPeriodSizeInFrames, p.internalSampleRate, rate),
+                                 static_cast<int64_t>(p.intermediaryBufferCap)});
     // The FIFO's frames on top: a callback through it renders (and pulls) up to fifoLatency frames more than it plays.
     a->bridge.open(static_cast<int>(channels), static_cast<int>(2 * period + outPeriod + a->fifoLatency),
                    static_cast<int>(8 * std::max(period, outPeriod)), rate / 4, rate);
@@ -905,7 +975,7 @@ int32_t caw_audio_buffer_frames(CawEngine* e) {
     if (!e) return 0;
     std::lock_guard<std::mutex> lock(gDeviceLock);
     const auto* a = static_cast<const Audio*>(e->audio);
-    return a ? static_cast<int32_t>(a->device.playback.internalPeriodSizeInFrames) : 0;
+    return a ? reportedPeriod(a) : 0;
 }
 
 char* caw_audio_devices(void) {
@@ -1076,8 +1146,9 @@ char* caw_audio_status(CawEngine* e) {
                (started ? "false" : "true") + ",\"backend\":" + quoted(ma_get_backend_name(a->context.backend)) +
                ",\"device\":" + quoted(p.name) + ",\"device_id\":" + quoted(a->deviceId.c_str()) +
                ",\"sample_rate\":" + std::to_string(p.internalSampleRate) +
-               ",\"period_frames\":" + std::to_string(p.internalPeriodSizeInFrames) +
-               ",\"periods\":" + std::to_string(p.internalPeriods) +
+               ",\"period_frames\":" + std::to_string(reportedPeriod(a)) +
+               ",\"periods\":" + std::to_string(reportedPeriods(a)) +
+               ",\"device_sizes\":" + (a->deviceSizes ? "true" : "false") +
                ",\"exclusive\":" + (a->exclusive ? "true" : "false") +
                ",\"low_latency\":" + (a->lowLatency ? "true" : "false") +
                ",\"modes_read_back\":" + (a->modesReadBack ? "true" : "false") +
