@@ -1,0 +1,12 @@
+{"tool":"caw_component_bench","format":1,"component":{"id":"com.me.fuzz","name":"Fuzz","kind":"effect"},
+ "cost_pct":2.1,"mean_us":112.0,"p99_us":140.5,"budget_us":5333.3,
+ "checks":[
+  {"id":"allocations","status":"pass","value":0,"detail":"No allocations in the audio path"},
+  {"id":"denormals","status":"pass","value":2.0,"detail":"2% slower at silence"},
+  {"id":"block_size_scaling","status":"pass","value":1.0,"detail":"Scales with the block size"},
+  {"id":"sample_rate_scaling","status":"pass","value":2.0,"detail":"2x at 96 kHz, as expected"},
+  {"id":"param_change_cost","status":"warn","value":4.0,"detail":"4x slower while a knob moves"},
+  {"id":"silence_cost","status":"pass","value":5.0,"detail":"5% at silence"}],
+ "sections":[],
+ "curves":{"block_frames":[[64,2.4],[128,2.2],[256,2.1],[512,2.1]],
+           "sample_rate":[[44100,2.0],[48000,2.1],[96000,4.2]]}}

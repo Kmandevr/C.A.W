@@ -12,6 +12,7 @@ import 'package:caw/engine/stress.dart';
 import 'package:caw/model/app_state.dart';
 import 'package:caw/model/arrange_fx.dart';
 import 'package:caw/model/background_playback.dart';
+import 'package:caw/model/component_bench.dart';
 import 'package:caw/model/cpp_component.dart';
 import 'package:caw/model/music_video.dart';
 import 'package:caw/model/music_video_edit.dart';
@@ -32,6 +33,7 @@ import 'package:caw/model/updates/update_fetch.dart';
 import 'package:caw/model/updates/update_service.dart';
 import 'package:caw/ui/arrange/mixer_card.dart';
 import 'package:caw/ui/benchmark/benchmark_screen.dart';
+import 'package:caw/ui/benchmark/plugin_bench_screen.dart';
 import 'package:caw/ui/background_playback_ui.dart';
 import 'package:caw/ui/export_page.dart';
 import 'package:caw/ui/file_manager_screen.dart';
@@ -60,6 +62,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'background_playback_test.dart' show FakePlaybackService;
 import 'audio_fake.dart';
 import 'benchmark_test.dart' show FakeStress;
+import 'component_bench_fake.dart';
 import 'device_ui_fixture.dart';
 import 'golden_util.dart';
 import 'music_video_test_song.dart';
@@ -239,6 +242,9 @@ void _sweep(String name, Future<void> Function(_Ctx c) body, {bool engine = fals
 }
 
 // --- fixtures ---
+
+const _lead = ComponentBenchTarget(name: 'Lead', componentId: 'com.me.lead', libraryPath: '/b/lead.so', instrument: true);
+const _fuzz = ComponentBenchTarget(name: 'Fuzz', componentId: 'com.me.fuzz', libraryPath: '/b/fuzz.so', instrument: false);
 
 class _Relay implements RelayHttp {
   @override
@@ -433,15 +439,55 @@ void main() {
 
   // --- Benchmark ---
   _sweep('bench', (c) async {
-    await _pump(c, BenchmarkScreen(runner: StressRunner(backend: FakeStress()), saveJson: (_) async => true,
-        share: (_) async => true));
+    await _pump(c, BenchmarkScreen(runner: StressRunner(backend: FakeStress(), readDeviceName: () async => 'Samsung SM-S906B'),
+        saveJson: (_) async => true, share: (_) async => true, plugins: const [_lead, _fuzz]));
     await _settle(c.tester);
     await c.shot('idle');
     await c.tester.tap(find.byKey(const ValueKey('bench-quick')));
     await _settle(c.tester);
     await c.shot('results');
+    // A scenario row and the raw numbers open.
+    final raw = find.byKey(const ValueKey('bench-raw-toggle'));
+    await Scrollable.ensureVisible(raw.evaluate().single, alignment: 0.5);
+    await _settle(c.tester);
+    await c.tester.tap(raw);
+    await _settle(c.tester);
+    final row = find.byKey(const ValueKey('bench-scn-song32_heavy-false'));
+    await Scrollable.ensureVisible(row.evaluate().single, alignment: 0.5);
+    await _settle(c.tester);
+    await c.tester.tap(row);
+    await _settle(c.tester);
+    await c.shot('open');
     await c.end('results');
   });
+  for (final part in const ['devices', 'sends']) {
+    _sweep('bench-part-$part', (c) async {
+      await _pump(c, BenchmarkScreen(runner: StressRunner(backend: FakeStress()), saveJson: (_) async => true,
+          share: (_) async => true));
+      await c.tester.tap(find.byKey(const ValueKey('bench-quick')));
+      await _settle(c.tester);
+      final bar = find.byKey(ValueKey('bench-part-$part'));
+      await Scrollable.ensureVisible(bar.evaluate().single, alignment: 0.5);
+      await _settle(c.tester);
+      await c.tester.tap(bar);
+      await _settle(c.tester);
+      await c.shot('');
+      await c.end('');
+    });
+  }
+  for (final t in const [_lead, _fuzz]) {
+    _sweep('bench-plugin-${t.kind}', (c) async {
+      await _pump(c, PluginBenchScreen(target: t, runner: ComponentBenchRunner(backend: FakeComponentBench())));
+      await _settle(c.tester);
+      await c.shot('');
+      final curves = find.byKey(const ValueKey('pbench-curves-toggle'));
+      await Scrollable.ensureVisible(curves.evaluate().single, alignment: 0.5);
+      await _settle(c.tester);
+      await c.tester.tap(curves);
+      await _settle(c.tester);
+      await c.end('curves');
+    });
+  }
   _sweep('bench-running', (c) async {
     await _pump(c, BenchmarkScreen(runner: StressRunner(backend: _HangStress()), saveJson: (_) async => true,
         share: (_) async => true));

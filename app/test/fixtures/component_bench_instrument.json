@@ -1,0 +1,16 @@
+{"tool":"caw_component_bench","format":1,"component":{"id":"com.me.lead","name":"Lead","kind":"instrument"},
+ "cost_pct":12.4,"mean_us":661.3,"p99_us":902.0,"budget_us":5333.3,
+ "checks":[
+  {"id":"allocations","status":"pass","value":0,"detail":"No allocations in the audio path"},
+  {"id":"denormals","status":"warn","value":38.0,"detail":"38% slower at silence"},
+  {"id":"cost_per_voice","status":"pass","value":0.3,"detail":"0.3% of a block per voice"},
+  {"id":"block_size_scaling","status":"pass","value":1.02,"detail":"Scales with the block size"},
+  {"id":"sample_rate_scaling","status":"fail","value":3.1,"detail":"3.1x slower at 96 kHz than 48 kHz (2x expected)"},
+  {"id":"param_change_cost","status":"pass","value":1.0,"detail":"Parameter changes cost nothing extra"},
+  {"id":"silence_cost","status":"warn","value":80.0,"detail":"Still costs 80% with no notes playing"}],
+ "sections":[{"name":"oscillators","pct":24.0,"mean_ns":158000,"calls":1200},
+             {"name":"resonance","pct":61.0,"mean_ns":402000,"calls":1200},
+             {"name":"envelope","pct":9.5,"mean_ns":62000,"calls":1200}],
+ "curves":{"voices":[[1,0.6],[2,1.0],[4,1.9],[8,3.4],[16,6.6],[32,12.4]],
+           "block_frames":[[64,14.1],[128,13.0],[256,12.4],[512,12.1]],
+           "sample_rate":[[44100,11.6],[48000,12.4],[96000,38.4]]}}
