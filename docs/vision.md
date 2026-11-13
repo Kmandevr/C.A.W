@@ -1,7 +1,7 @@
 ---
 title: Vision and principles
 summary: Owner-approved product direction, actual platform support, current product boundaries and unresolved owner decisions.
-updated: 2026-11-12
+updated: 2026-11-13
 ---
 
 # Vision and principles
@@ -15,6 +15,21 @@ This note records product direction, not a list of shipped features. The permane
 C.A.W. is a code-driven sound-design and music-production workspace for creating, shaping, auditioning, arranging, recording, editing, mixing and exporting sounds, instruments, patterns and reusable musical content.
 
 **Goal (owner, 2026-11-03):** C.A.W. is not trying to be a conventional DAW, and it doesn't have to work the way one does. It must be able to do everything a good DAW can do, because there is no good DAW for mobile. Its own way of working (code, patterns, one shared project and engine model, phone-first touch) is the means; full production capability is the requirement. It keeps a lightweight architecture so weak phones stay first-class, rather than copying a heavyweight DAW's design. **Owner (2026-11-09):** it should *feel* like a full DAW, closest to REAPER, "but better and more specialized": the familiar workflow (tracks, mixer, FX stacks, automation, a browser) with C.A.W.'s own strengths built in, such as writing, building and hearing your own effects inside the song. The layout is in [decisions](decisions.md) ("The app's layout").
+
+**Run on anything (owner, 2026-11-12):** the app changes according to the hardware it runs on and then runs, "so nothing beats C.A.W". The same project opens everywhere; the hardware decides how much is computed live and how much is rendered ahead (**dynamic play-ahead**: untouched tracks rendered ahead in batches, switching to real time "quickly and silently so no one ever notices" when the user needs low latency). Exports never change to save CPU. The publicity target is a hacked graphing calculator ("it's a stunt, if it works it's fine"). Target release 1.2.0. [Proposal] The design and order are in the [play-ahead plan](play-ahead-plan.md) (#191); nothing of it is built.
+
+**What play-ahead should give the user** ([Assumption]: estimated from the engine's structure, not measured; the Benchmark turns each into a fact or drops it; figures in the plan's "Expected gains"):
+
+- **Bigger songs on the same phone:** untouched tracks render on several cores, budgeted for the average block instead of the worst, so a dense song holds about 2–4× more tracks before dropouts on the S22+ and 2–6× on a low-end phone.
+- **Fewer pops and dropouts:** half a second to two seconds already rendered absorbs short scheduling hiccups that break playback today; the real-time path carries only what is being played or touched.
+- **Play starts at once:** the first half-second from the cursor stays rendered while stopped, so the first callback after Play is no longer the slowest.
+- **Lower latency when playing live:** the callback renders only the live tracks and the master, so it can run a smaller device buffer whenever someone plays, not only while recording (on the S22+ perhaps 1024 → 256 frames; depends on the device).
+- **Full sound on weak phones:** ahead tracks could keep their voices instead of Lightweight's 4-voice cap (the owner's choice, since it changes how songs sound there).
+- **Loops that repeat cost almost nothing:** a pass that provably repeats is replayed from the cache, and Freeze becomes the saved form of the same cache.
+- **Quicker exports:** when nothing changed and preview ran at the export's quality (desktop and flagship), an export, stems or the music video reuse the cached audio.
+- **The same project everywhere,** from a PC to a calculator, each device choosing how much is live.
+
+What it does not promise: less total work, battery or heat (the same audio is still computed; heat stays the ceiling, and longer bursts saving battery is only an assumption), or any change to exports.
 
 **Owner decision (2026-11-05):** ordinary C++ is C.A.W.'s programming language. It is general-purpose, not a music-only DSL; users can write anything ordinary C++ allows. The C.A.W. Library/SDK supplies reusable audio, music, math, bit-manipulation, data and general-purpose building blocks. One shared component model makes each component available to the C++ editor, visual composition, generated/custom performance UI, mixer and later plugin/standalone adapters. These are coordinated views of one project and runtime, not parallel implementations. See [C++ creation platform](cpp-creation-platform.md).
 
@@ -112,4 +127,5 @@ Only the owner can settle these questions. Do not silently convert them into imp
 | Whether effect tails should carry across a layer loop restart in every case | Open; see [engine playback](engine.md#playback) |
 | Music video editor (2026-11-12, #182): the editor's look, to check in the APK. The other questions were answered the same day (full screen, empty stretches, effect targets, the Strobe warning, Falling notes for new videos, keys in the catalogue; [decisions](decisions.md#2026-11-12-the-music-video-editors-open-questions-answered-owner)) | Open (look only) |
 | Piano roll (WP-K2, 2026-11-11): the look of the Quantize… sheet and the step bar (in the APK); whether Ctrl+U should use the sheet's last settings; whether the slide-up on-screen keys should also step; the MIDI CC numbers for automation lanes (CC7 volume, CC10 pan, others from CC20, as proposed in #11), the volume curve (127·√gain) and how parameter lanes scale ([app](app.md)) | Open |
+| Play-ahead and run anywhere (1.2.0, #191): which calculator for the stunt; what counts as intent to switch a track to real time, and whether an edit without intent may be heard up to the ring's depth late; whether ahead tracks on weak phones keep their full voices; a 16-bit preview cache on the lowest tier; the look of the two-part CPU meter and of "what's ready to play"; whether Freeze is a user action, automatic, or both; first of all, the fallback when an ahead track's worker falls behind (a warm spare instance or an audible fade) and whether a module format bump for runtime-state calls is acceptable ([play-ahead plan](play-ahead-plan.md#open-questions-for-the-owner)) | Open |
 | Matching REAPER's flow ([REAPER's flow](reaper-flow.md)): the phone look of the new screens (Export sheet, send knob). S splits, Touch automation from a transport button and on-screen keys with pads (owner, 2026-11-10). The clip bar, the ruler with the loop range, markers and regions, the recording flow and automation writing are built; their look and the choices made for them are to confirm ([decisions](decisions.md)) | Open |

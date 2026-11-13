@@ -141,7 +141,7 @@ Preserve and extend the existing shared text-backed pattern model, piano roll an
 | # | Item | Status | Where | Depends on | What's missing |
 |---|---|---|---|---|---|
 | 1.1 | Kit-row routing | Planned | both | Foundation | Not built |
-| 1.2 | Code-generated procedural patterns and Freeze | Planned | both | — | Not built |
+| 1.2 | Code-generated procedural patterns and Freeze | Planned | both | — | Not built. [Proposal] Freeze is planned as the saved form of play-ahead's cache ([play-ahead plan](play-ahead-plan.md), release 1.2.0) |
 | 1.3 | Expression curves and MIDI-Sketch-style per-note pitch editing: stacked lanes, points/handles, snap and live preview | Partial | app | — | Existing per-note pitch-bend/pressure/timbre curves and point/segment-bend editing are foundations. Make pitch slides/bends directly editable as continuous curves on the note, with the curve matching playback; direct selection must distinguish the curve from the underlying note, which remains visible. Moving, stretching and reshaping must follow touch continuously, with helpful snapping and no abrupt jumps. Separate slide events remain optional where musically useful. Refine stacked lanes, handles, touch targets and live preview |
 | 1.4 | Advanced quantize, groove/swing templates, note chop/glue/strum | Planned | app | — | Not built |
 | 1.5 | Pattern generators: Euclid, random-in-key, arpeggiate, humanize, chord stamp, legato, reverse, inversion | Implemented | app | — | Keep them integrated; don't rebuild |
@@ -252,6 +252,8 @@ The owner's first public release comes after Stage 7 (owner, 2026-11-03). Suppor
 ### After Release 1
 
 These stages ship as updates. Their order still holds.
+
+**Release 1.2.0 (owner, 2026-11-12):** play-ahead rendering and running on any hardware, down to a calculator stunt; plan in the [play-ahead plan](play-ahead-plan.md) (#191), not built.
 
 ### Stage 8 — Audio transformation and advanced production tools
 
