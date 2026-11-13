@@ -4529,7 +4529,11 @@ void Engine::resetShedding() noexcept {
     overloadedFlag_.store(0, std::memory_order_relaxed);
     overShare_ = 0;
     coolSeconds_ = underSeconds_ = 0;
+    // Every per-callback average and the time since a shed or restore (on merging, add any other per-callback
+    // load average here, such as the mix pool's).
     loadAvg_ = 0;
+    shedLoad_ = measureFrom_ = 0;
+    cpu_.store(0.0f, std::memory_order_relaxed);
     measureSlot_ = -1;
     overloadPending_ = restorePending_ = false;
 }

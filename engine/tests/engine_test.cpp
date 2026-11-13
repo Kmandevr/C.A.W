@@ -993,6 +993,7 @@ TEST(an_offline_render_never_sheds_and_a_shedding_reset_brings_everything_back) 
     f.requestSheddingReset();
     run(f, 64);
     CHECK_EQ(f.meters().overloaded, 0);
+    CHECK_EQ(f.meters().cpu, 0.0f);  // the per-callback averages went with it
     for (int i = 0; i < 10; ++i) f.reportLoad(1.5, 512);  // the history went too: 0.1 s more sheds nothing
     run(f, 64);
     CHECK_EQ(f.meters().overloaded, 0);
