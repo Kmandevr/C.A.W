@@ -6,6 +6,18 @@ updated: 2026-11-13
 
 # Decisions
 
+## 2026-11-13: Clips are stored as MIDI; more 1.1.0 requirements; Windows engine on Clang (owner)
+
+**Decision (owner, 2026-11-13):**
+- **MIDI storage:** "It should store the MIDI. The text is only for creating MIDI through a text editor… MIDI is a lot better format than just the text." Projects will store MIDI clips as MIDI, with pattern text as an authoring view only (#216). This replaces the choice made on the owner's behalf in #158 (pattern text as storage).
+- **Also before 1.1.0:**
+  - routing extras: receives, parallel paths, drum multi-out (#217);
+  - safety and onboarding: format migrations, crash recovery, device loss, a tour and help (#218);
+  - sound design: drawn LFO shapes and a wavetable editor (#219);
+  - a clip launcher and S Pen precision (#220).
+- **Windows engine:** built with Clang (clang-cl) instead of MSVC (#199).
+- **Changelog:** a changelog from 1.0.0, in the app and on GitHub, starting with 1.0.2.
+
 ## 2026-11-13: The 1.1.0 requirements, built in batches (owner)
 
 **Decision (owner, 2026-11-13):**

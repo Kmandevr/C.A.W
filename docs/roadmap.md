@@ -58,15 +58,29 @@ An overview by area, checked against the repository on 2026-11-03. The stage tab
 
 ## Roadmap sequence
 
-**Before 1.1.0 (owner, 2026-11-13; tracked in #215):** the gaps a normal DAW doesn't have, built in batches. Each finished batch ships as the next patch (1.0.2-alpha.1, 1.0.3-alpha.1, …), and 1.1.0 is the big update once all of them are in, plus more the owner adds. **[Proposal]** None of this is built yet. In planned order:
-1. **1.0.2:** the full-coverage Benchmark with a per-engine-part breakdown and the plug-in benchmark (#197).
+**Before 1.1.0 (owner, 2026-11-13; tracked in #215):** the gaps a normal DAW doesn't have, built in batches. Each finished batch ships as the next patch (1.0.2-alpha.1, 1.0.3-alpha.1, …) with a changelog entry, and 1.1.0 is the big update. **[Proposal]** Nothing below is built until its batch merges. In planned order:
+1. **1.0.2:**
+   - the full-coverage Benchmark with the engine-part breakdown, and the plug-in benchmark (#197);
+   - the changelog in the app and on GitHub;
+   - the telemetry perf fields (#187);
+   - the Windows engine built with clang-cl (#199).
 2. **1.0.3:** a tempo map, time signature changes, and markers and sections (#207).
-3. **1.0.4:** audio stretching with Signalsmith Stretch (licence to confirm): follow tempo, stretch to fit, pitch shift, slice to MIDI, and a sample editor (#208).
-4. **1.0.5:** comping, freeze, bounce in place and consolidate (#209). Stem export is already built (#33). App-wide undo is checked against the existing project-wide history (`lib/model/history.dart`) first.
-5. **1.0.6:** clip automation and VCA groups (#210), MIDI out and MIDI clock (#211).
-6. **1.0.7:** the foundation for hosting other people's plug-ins (#212): the isolation design (reviewed first), the out-of-process host, the scan and the loader behind Isolated, Trusted or Blocked. All of it is hidden from users. The plug-in hosting feature itself (CLAP and VST3 on Windows, CLAP on Android) ships in 1.1.0 (owner, 2026-11-13).
-7. **1.0.8:** a notation view (#213).
-8. **iOS and macOS builds** (#214), once the owner has an Apple Developer membership.
+3. **1.0.4:** audio stretching with Signalsmith Stretch (licence to confirm): follow tempo, stretch to fit, pitch shift. Also slice to MIDI, a sample editor, and long-song clip precision (#90) (#208).
+4. **1.0.5:**
+   - clips stored as MIDI, with pattern text only as an editor (#216); this format change comes first;
+   - then comping, freeze, bounce in place and consolidate (#209).
+
+   Stem export is already built (#33). App-wide undo is checked against the existing project-wide history (`lib/model/history.dart`) first.
+5. **1.0.6:**
+   - clip automation and VCA groups (#210);
+   - receives, parallel paths and drum multi-out (#217);
+   - MIDI out and MIDI clock (#211).
+6. **1.0.7:**
+   - format migrations, crash recovery, device loss, and a first-run tour and help (#218);
+   - drawn LFO shapes and a Flagship wavetable editor (#219).
+7. **1.0.8:** the foundation for hosting other people's plug-ins (#212): the isolation design (reviewed first), the out-of-process host, the scan and the loader behind Isolated, Trusted or Blocked. Users don't see any of it. The feature itself (CLAP and VST3 on Windows, CLAP on Android) ships in 1.1.0.
+8. **1.0.9:** a notation view (#213), a clip launcher, and S Pen precision (#220).
+9. **iOS and macOS builds** (#214), once the owner has an Apple Developer membership.
 
 **After 1.0 (owner, 2026-11-12):** render-ahead is planned for 1.2.0, a major feature but not a full version update (rendering ahead of the playhead, so heavy projects play smoothly). The owner already has it essentially ready, but 1.0 comes first. **[Proposal]** It is planned and not built in this repository yet.
 
