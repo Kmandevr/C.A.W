@@ -1,4 +1,4 @@
-// The Benchmark (beta plan C, owner's look 2026-11-12): Quick or Full run, a live load graph, tiers, limits, what's holding it back, per-scenario rows, Share/Save JSON.
+// The Benchmark (beta plan C; owner's looks 2026-11-12 and 2026-11-13): Quick or Full run, a live load graph, then the summary (verdict, parts, scenarios by feature) and the raw numbers, Share/Save JSON, and the user's built plug-ins to time.
 import 'dart:io';
 import 'dart:math' as math;
 
@@ -6,8 +6,11 @@ import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 
 import '../../engine/execution.dart';
+import '../../model/app_state.dart';
+import '../../model/component_bench.dart';
 import '../../model/stress_result.dart';
 import '../../model/stress_runner.dart';
+import '../../model/telemetry/device_probe.dart';
 import '../../model/telemetry/telemetry.dart';
 import '../../platform/resource_signals.dart';
 import '../../platform/save_copy.dart';
@@ -15,10 +18,18 @@ import '../haptics.dart';
 import '../motion.dart';
 import '../panel_motion.dart';
 import '../theme.dart';
+import 'benchmark_summary.dart';
+import 'part_detail_page.dart';
+import 'plugin_bench_screen.dart';
 
-/// Opens the Benchmark full screen. [host] is the app's state (its transport and device are set aside while it runs).
-Future<void> showBenchmark(BuildContext context, {StressHost? host}) =>
-    Navigator.of(context).push(panelRoute<void>(context, (_) => BenchmarkScreen(runner: defaultStressRunner(host))));
+/// Opens the Benchmark full screen. [host] is the app's state (its transport and device are set aside while it runs,
+/// and its built C++ components are listed to time).
+Future<void> showBenchmark(BuildContext context, {StressHost? host}) => Navigator.of(context).push(panelRoute<void>(
+    context,
+    (_) => BenchmarkScreen(
+        runner: defaultStressRunner(host),
+        plugins: host is AppState ? componentBenchTargets(host) : null,
+        pluginHost: host)));
 
 /// The runner the app uses: the engine, the platform's heat and battery signals, the work budget, telemetry.
 StressRunner defaultStressRunner(StressHost? host) {
@@ -46,19 +57,28 @@ StressRunner defaultStressRunner(StressHost? host) {
       }
     },
     device: device,
+    readDeviceName: () async {
+      final f = await IoDeviceProbe().read();
+      final words = [f.manufacturer, f.model].whereType<String>().where((s) => s.isNotEmpty).toList();
+      // "samsung SM-S906B": the maker's own capitals where it has them.
+      return words.isEmpty ? null : words.map((w) => w[0].toUpperCase() + w.substring(1)).join(' ');
+    },
   );
 }
 
-Color tierColor(StressTier? t) => switch (t) {
-      StressTier.comfortable => Neon.green,
-      StressTier.tight => Neon.yellow,
-      StressTier.over => Neon.pink,
-      null => Neon.dim,
-    };
+Color tierColor(StressTier? t) => benchTierColor(t);
 
 class BenchmarkScreen extends StatefulWidget {
-  const BenchmarkScreen({super.key, required this.runner, this.saveJson, this.share});
+  const BenchmarkScreen(
+      {super.key, required this.runner, this.saveJson, this.share, this.plugins, this.pluginHost, this.pluginBackend});
   final StressRunner runner;
+
+  /// The user's built plug-ins, each with a Benchmark button (null: the list is hidden, as without the app).
+  final List<ComponentBenchTarget>? plugins;
+  final StressHost? pluginHost;
+
+  /// Where plug-in benchmarks go (tests pass a fake); the engine's by default.
+  final ComponentBenchBackend? pluginBackend;
 
   /// Saves the JSON (tests pass their own); the system's save picker by default.
   final Future<bool> Function(String json)? saveJson;
@@ -73,6 +93,7 @@ class BenchmarkScreen extends StatefulWidget {
 class _BenchmarkScreenState extends State<BenchmarkScreen> {
   StressRunner get r => widget.runner;
   String? _open; // the expanded scenario row
+  bool _raw = false; // Raw numbers shown
 
   @override
   void dispose() {
@@ -133,13 +154,15 @@ class _BenchmarkScreenState extends State<BenchmarkScreen> {
                   duration: Motion.fade(Motion.panel, level),
                   child: r.running ? _runningCard(context, level) : _startButtons(),
                 ),
-                AnimatedSize(
-                  duration: Motion.move(Motion.panel, level),
-                  alignment: Alignment.topCenter,
+                BenchGrow(
                   child: res == null || (r.running && res.scenarios.isEmpty)
                       ? const SizedBox(width: double.infinity)
                       : _results(context, res, level),
                 ),
+                if (widget.plugins != null)
+                  BenchGrow(
+                    child: r.running ? const SizedBox(width: double.infinity) : _plugins(widget.plugins!),
+                  ),
               ]);
             },
           )),
@@ -160,6 +183,42 @@ class _BenchmarkScreenState extends State<BenchmarkScreen> {
         const Text('Sound stays off while it runs. Plug in or keep the screen on for the steadiest numbers.',
             style: TextStyle(color: Neon.dim, fontSize: 12)),
       ]);
+
+  Widget _plugins(List<ComponentBenchTarget> list) => Column(
+          key: const ValueKey('bench-plugins'), crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        const SizedBox(height: 20),
+        const Text('Your plug-ins', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 15)),
+        const SizedBox(height: 2),
+        if (list.isEmpty)
+          const Text('Build a C++ effect or instrument in Build to time it here.',
+              key: ValueKey('bench-plugins-none'), style: TextStyle(color: Neon.dim, fontSize: 12))
+        else ...[
+          const Text('How much of a block each takes, with checks for common audio-code problems. Never sent.',
+              style: TextStyle(color: Neon.dim, fontSize: 12)),
+          for (final p in list)
+            Padding(
+              padding: const EdgeInsets.only(top: 6),
+              child: Row(children: [
+                Icon(p.instrument ? Icons.piano_outlined : Icons.graphic_eq, size: 18, color: Neon.violet),
+                const SizedBox(width: 8),
+                Expanded(child: Text('${p.name} · ${p.kind}', overflow: TextOverflow.ellipsis)),
+                OutlinedButton(
+                  key: ValueKey('bench-plugin-${p.componentId}'),
+                  onPressed: () {
+                    Haptics.tap();
+                    showPluginBench(context, p, host: widget.pluginHost, backend: widget.pluginBackend);
+                  },
+                  child: const Text('Benchmark'),
+                ),
+              ]),
+            ),
+        ],
+      ]);
+
+  void _openPart(StressResult res, String id) {
+    Haptics.tap();
+    Navigator.of(context).push(panelRoute<void>(context, (_) => PartDetailPage(result: res, partId: id)));
+  }
 
   Widget _runningCard(BuildContext context, MotionLevel level) => Card(
         key: const ValueKey('bench-running'),
@@ -215,15 +274,70 @@ class _BenchmarkScreenState extends State<BenchmarkScreen> {
       );
 
   Widget _results(BuildContext context, StressResult res, MotionLevel level) {
-    final costs = res.holdingBack.take(8).toList();
-    final top = costs.isEmpty ? 1.0 : math.max(1.0, costs.first.pct);
+    final done = !r.running;
     return Column(key: const ValueKey('bench-results'), crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       const SizedBox(height: 16),
-      if (res.stoppedBecause != null && !r.running)
+      if (res.stoppedBecause != null && done)
         Padding(
           padding: const EdgeInsets.only(bottom: 8),
           child: Text(res.stoppedBecause!, key: const ValueKey('bench-stopped'), style: const TextStyle(color: Neon.yellow)),
         ),
+      BenchVerdictCard(result: res),
+      const SizedBox(height: 16),
+      BenchPartBars(result: res, onOpen: (id) => _openPart(res, id)),
+      const SizedBox(height: 16),
+      BenchScenarioGroups(result: res),
+      const SizedBox(height: 12),
+      InkWell(
+        key: const ValueKey('bench-raw-toggle'),
+        onTap: () {
+          Haptics.tap();
+          setState(() => _raw = !_raw);
+        },
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 12),
+          child: Row(children: [
+            const Expanded(child: Text('Raw numbers', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 15))),
+            AnimatedRotation(
+              turns: _raw ? 0.5 : 0,
+              duration: Motion.move(Motion.standard, level),
+              child: const Icon(Icons.expand_more, size: 20, color: Neon.dim),
+            ),
+          ]),
+        ),
+      ),
+      BenchGrow(
+        child: AnimatedSwitcher(
+          duration: Motion.fade(Motion.standard, level),
+          child: _raw ? _rawNumbers(res, level) : const SizedBox(width: double.infinity),
+        ),
+      ),
+      if (done) ...[
+        const SizedBox(height: 12),
+        Wrap(spacing: 8, runSpacing: 8, children: [
+          OutlinedButton.icon(
+              key: const ValueKey('bench-share'),
+              onPressed: () => _share(res),
+              icon: const Icon(Icons.share, size: 18),
+              label: const Text('Share')),
+          OutlinedButton.icon(
+              key: const ValueKey('bench-save'),
+              onPressed: () => _save(res),
+              icon: const Icon(Icons.file_download_outlined, size: 18),
+              label: const Text('Save JSON')),
+        ]),
+        const SizedBox(height: 8),
+        const Text('With telemetry on (Settings › Privacy), each run\'s numbers are sent anonymously to help make '
+            'C.A.W faster. The breakdown by part stays in the JSON on this device.', style: TextStyle(color: Neon.dim, fontSize: 12)),
+      ],
+    ]);
+  }
+
+  /// The detailed view (the 1.0.1 results): tiers, limits, what's holding it back, the heat test, each run.
+  Widget _rawNumbers(StressResult res, MotionLevel level) {
+    final costs = res.holdingBack.take(8).toList();
+    final top = costs.isEmpty ? 1.0 : math.max(1.0, costs.first.pct);
+    return Column(key: const ValueKey('bench-raw'), crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       Wrap(spacing: 8, runSpacing: 8, children: [
         for (final t in const ['normal', 'heavy', 'extreme']) _tierBadge(t, res.tier(t), level),
       ]),
@@ -265,26 +379,8 @@ class _BenchmarkScreenState extends State<BenchmarkScreen> {
             style: const TextStyle(color: Neon.dim)),
       ],
       const SizedBox(height: 16),
-      const Text('Each song', style: TextStyle(fontWeight: FontWeight.w600)),
+      const Text('Each run', style: TextStyle(fontWeight: FontWeight.w600)),
       for (final s in res.scenarios) _scenarioRow(s, level),
-      if (!r.running) ...[
-        const SizedBox(height: 12),
-        Wrap(spacing: 8, runSpacing: 8, children: [
-          OutlinedButton.icon(
-              key: const ValueKey('bench-share'),
-              onPressed: () => _share(res),
-              icon: const Icon(Icons.share, size: 18),
-              label: const Text('Share')),
-          OutlinedButton.icon(
-              key: const ValueKey('bench-save'),
-              onPressed: () => _save(res),
-              icon: const Icon(Icons.file_download_outlined, size: 18),
-              label: const Text('Save JSON')),
-        ]),
-        const SizedBox(height: 8),
-        const Text('With telemetry on (Settings › Privacy), each run\'s numbers are sent anonymously to help make '
-            'C.A.W faster.', style: TextStyle(color: Neon.dim, fontSize: 12)),
-      ],
     ]);
   }
 
@@ -320,7 +416,7 @@ class _BenchmarkScreenState extends State<BenchmarkScreen> {
           setState(() => _open = open ? null : key);
         },
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
+          padding: const EdgeInsets.fromLTRB(10, 11, 10, 11),
           child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
             Row(children: [
               Expanded(child: Text('${s.name}${s.modeLabel}', overflow: TextOverflow.ellipsis)),
@@ -331,22 +427,13 @@ class _BenchmarkScreenState extends State<BenchmarkScreen> {
                 child: const Icon(Icons.expand_more, size: 18, color: Neon.dim),
               ),
             ]),
-            AnimatedSize(
-              duration: Motion.move(Motion.panel, level),
-              alignment: Alignment.topCenter,
+            BenchGrow(
               child: !open
                   ? const SizedBox(width: double.infinity)
                   : Padding(
                       padding: const EdgeInsets.only(top: 6),
                       child: Text(
-                        s.ran
-                            ? 'Average ${s.meanPct.round()}% of the time it has, 99% of callbacks within ${s.p99Pct.round()}%, '
-                                'the slowest ${s.worstPct.round()}%.\n'
-                                '${s.live ? '${s.dropouts} dropouts' : '${s.overBudget} callbacks ran out of time'} in '
-                                '${s.callbacks} callbacks of ${s.frames} frames '
-                                '(${(s.meanUs / 1000).toStringAsFixed(2)} ms mean, '
-                                '${(s.budgetUs / 1000).toStringAsFixed(2)} ms budget).'
-                            : (s.skipped ?? s.error ?? 'Not run'),
+                        scenarioNumbers(s),
                         style: const TextStyle(color: Neon.dim, fontSize: 12),
                       ),
                     ),
