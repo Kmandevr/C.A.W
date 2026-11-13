@@ -68,7 +68,7 @@ struct SuiteScenario {
     bool tail = false;  // played for kTailSeconds and reported as three phases (notes, ringing, silence)
     Tier tier = Tier::Normal;
     bool benchOnly = false;  // caw_bench's only (the tail phases): not one of the Benchmark's ten
-    int memoryMiB = 64;      // [Assumption] a generous estimate of what setting it up takes, for the app's budget check
+    int memoryMiB = 64;      // about what setting it up and playing it takes (measured; stress_scenarios.cpp), for the app's budget check
 };
 
 constexpr double kTailSeconds = 30.0;

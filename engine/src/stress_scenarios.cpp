@@ -553,20 +553,21 @@ const char* tierName(Tier t) {
 }
 
 std::vector<SuiteScenario> suiteScenarios() {
-    // Tiers: docs/beta-readiness-plan.md C1. memoryMiB: what each measured on Linux x64 (peak RSS growth while set
-    // up and played, 2026-11-12) rounded up generously; see docs/engine-performance.md.
+    // Tiers: docs/beta-readiness-plan.md C1. memoryMiB: the peak RSS growth of setting each up and playing 2 s on
+    // Linux x64 (2026-11-13: 54, 34, 73, 82, 15, 15, 19, 132, 287 and 24 MiB in this order), with about a third more
+    // on top; [Assumption] a phone's use is alike (docs/engine-performance.md).
     return {
-        {"first_loop", "First loop (6 tracks)", [](const std::string&) { return firstLoop(); }, false, Tier::Normal, false, 32},
-        {"three_tracks", "Three tracks", [](const std::string&) { return threeTracks(); }, false, Tier::Normal, false, 32},
-        {"song8", "Typical song (8 tracks)", [](const std::string&) { return typicalSong(false); }, false, Tier::Normal, false, 64},
-        {"song8_extras", "Typical song + extras", [](const std::string& d) { return typicalSong(true, d); }, false, Tier::Normal, false, 96},
-        {"flagship_heavy", "Flagship heavy, 64 voices held", [](const std::string&) { return flagshipHeavy(64); }, false, Tier::Extreme, false, 64},
+        {"first_loop", "First loop (6 tracks)", [](const std::string&) { return firstLoop(); }, false, Tier::Normal, false, 64},
+        {"three_tracks", "Three tracks", [](const std::string&) { return threeTracks(); }, false, Tier::Normal, false, 48},
+        {"song8", "Typical song (8 tracks)", [](const std::string&) { return typicalSong(false); }, false, Tier::Normal, false, 96},
+        {"song8_extras", "Typical song + extras", [](const std::string& d) { return typicalSong(true, d); }, false, Tier::Normal, false, 112},
+        {"flagship_heavy", "Flagship heavy, 64 voices held", [](const std::string&) { return flagshipHeavy(64); }, false, Tier::Extreme, false, 32},
         {"flagship_heavy16", "Flagship heavy, 16 voices held", [](const std::string&) { return flagshipHeavy(16); }, false, Tier::Heavy, false, 32},
         {"drums_kit", "Drums kit, 16 pads busy", [](const std::string&) { return drumsBusy(); }, false, Tier::Heavy, false, 32},
-        {"song16", "Song, 16 tracks", [](const std::string&) { return bigSong(16, false); }, false, Tier::Heavy, false, 128},
-        {"song32_heavy", "Song, 32 tracks + heavy FX", [](const std::string&) { return bigSong(32, true); }, false, Tier::Extreme, false, 256},
+        {"song16", "Song, 16 tracks", [](const std::string&) { return bigSong(16, false); }, false, Tier::Heavy, false, 176},
+        {"song32_heavy", "Song, 32 tracks + heavy FX", [](const std::string&) { return bigSong(32, true); }, false, Tier::Extreme, false, 384},
         {"tail", "Tail", [](const std::string&) { return tailSong(true); }, true, Tier::Idle, true, 64},
-        {"tail_floor", "Tail project, no notes", [](const std::string&) { return tailSong(false); }, false, Tier::Idle, false, 64},
+        {"tail_floor", "Tail project, no notes", [](const std::string&) { return tailSong(false); }, false, Tier::Idle, false, 32},
     };
 }
 
