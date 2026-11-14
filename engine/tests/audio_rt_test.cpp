@@ -100,3 +100,74 @@ TEST(the_input_bridge_never_allocates_on_the_capture_or_output_thread) {
     CHECK_EQ(operations, 0u);
     CHECK_EQ(ch, 2);
 }
+
+TEST(signalsmith_clip_voices_never_allocate_on_the_audio_thread) {
+    // API 32: Signalsmith Stretch voices pre-rolled before their clip, joined mid-clip (the WSOLA bridge and its
+    // crossfade), following a ramped tempo map chunk by chunk, pitched, reversed and looped, through a seek and a loop
+    // wrap. Every stretcher is prepared on the control thread (setProjectJson); the audio thread only processes.
+    const auto dir = std::filesystem::temp_directory_path() / "caw_stretch_rt";
+    std::filesystem::remove_all(dir);
+    std::filesystem::create_directories(dir);
+    const std::string p = noiseWav((dir / "n.wav").generic_string(), 96000);
+    const std::string json =
+        "{\"caw_project\":1,\"bpm\":120,\"loop_bars\":2,\"master\":0.5,\"tempo_map\":[{\"beat\":0,\"bpm\":120},"
+        "{\"beat\":6,\"bpm\":90,\"ramp\":true}],\"assets\":[{\"id\":\"a\",\"path\":\"" + jsonEscape(p) + "\",\"bpm\":100}],"
+        "\"layers\":[{\"id\":\"d\",\"name\":\"D\",\"audio_clips\":["
+        "{\"id\":\"1\",\"asset\":\"a\",\"start_steps\":4,\"length_steps\":8,\"stretch\":\"signalsmith\",\"stretch_ratio\":1.3,"
+        "\"pitch_cents\":300,\"fade_in_seconds\":0.01},"
+        "{\"id\":\"2\",\"asset\":\"a\",\"start_steps\":0,\"length_steps\":32,\"stretch\":\"signalsmith\",\"follows_tempo\":true,"
+        "\"pitch\":-2},"
+        "{\"id\":\"3\",\"asset\":\"a\",\"start_steps\":10,\"length_steps\":12,\"stretch\":\"signalsmith\",\"stretch_ratio\":0.7,"
+        "\"reverse\":true,\"loop\":true,\"loop_start_frames\":1000,\"loop_end_frames\":20000}]}]}";
+    Engine e(48000);
+    CHECK(e.setProjectJson(json).find("\"ok\":true") != std::string::npos);
+    std::vector<float> l(192), r(192);
+    e.play();
+    for (int k = 0; k < 20; ++k) e.process(l.data(), r.data(), 192);
+    std::size_t operations = 0;
+    float peak = 0;
+    for (int part = 0; part < 2; ++part) {  // 1.2 s, then a seek mid-clip (play() is the control thread's) and 3.6 s
+        if (part == 1) e.play(6.5);
+        cawtest::AllocationScope scope;
+        for (int k = 0; k < (part ? 900 : 300); ++k) {  // through two loop wraps of the 4 s loop
+            e.process(l.data(), r.data(), 192);
+            for (float v : l) peak = std::fabs(v) > peak ? std::fabs(v) : peak;
+        }
+        operations += scope.count();
+    }
+    CHECK_EQ(operations, 0u);
+    CHECK(peak > 0.01f);
+    std::filesystem::remove_all(dir);
+}
+
+TEST(a_smaller_stretcher_pool_is_freed_off_the_audio_thread) {
+    // A project update that needs fewer Signalsmith stretchers: the audio thread takes the new timeline and hands
+    // the old one (and the stretchers only it held) back without freeing anything; the control thread frees them.
+    const auto dir = std::filesystem::temp_directory_path() / "caw_stretch_pool_rt";
+    std::filesystem::remove_all(dir);
+    std::filesystem::create_directories(dir);
+    const std::string p = noiseWav((dir / "n.wav").generic_string(), 96000);
+    auto project = [&](int clips) {
+        std::string c;
+        for (int k = 0; k < clips; ++k)
+            c += std::string(k ? "," : "") + "{\"id\":\"c" + std::to_string(k) + "\",\"asset\":\"a\",\"start_steps\":" +
+                 std::to_string(k) + ",\"length_steps\":16,\"stretch\":\"signalsmith\",\"stretch_ratio\":1.3}";
+        return "{\"caw_project\":1,\"bpm\":120,\"loop_bars\":2,\"master\":0.5,\"assets\":[{\"id\":\"a\",\"path\":\"" +
+               jsonEscape(p) + "\"}],\"layers\":[{\"id\":\"d\",\"name\":\"D\",\"audio_clips\":[" + c + "]}]}";
+    };
+    Engine e(48000);
+    CHECK(e.setProjectJson(project(6)).find("\"ok\":true") != std::string::npos);
+    std::vector<float> l(192), r(192);
+    e.play();
+    for (int k = 0; k < 100; ++k) e.process(l.data(), r.data(), 192);
+    CHECK(e.setProjectJson(project(1)).find("\"ok\":true") != std::string::npos);
+    std::size_t operations = 0;
+    {
+        cawtest::AllocationScope scope;
+        for (int k = 0; k < 200; ++k) e.process(l.data(), r.data(), 192);
+        operations = scope.count();
+    }
+    CHECK_EQ(operations, 0u);
+    CHECK(e.setProjectJson(project(2)).find("\"ok\":true") != std::string::npos);  // frees the retired timeline here
+    std::filesystem::remove_all(dir);
+}

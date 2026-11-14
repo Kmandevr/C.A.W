@@ -1,6 +1,7 @@
 // An audio clip in the arranger, REAPER-style: its waveform; drag the body to move it (onto another track too), the
 // edges to trim (the right one past the file's end loops it), the top corners for fades (their dot bends the curve)
-// and the top-middle handle for gain. As a MIDI clip (owner, 2026-11-12): a tap selects, a double tap opens its
+// the top-middle handle for gain and, on a clip that doesn't follow the tempo, the stretch notch in its top-right
+// corner (batch 1.0.4, owner 2026-11-14: drag it to time-stretch, with the new length shown). As a MIDI clip (owner, 2026-11-12): a tap selects, a double tap opens its
 // editor (the Clip tab), a hold or right-click opens its menu, and a hold that moves picks it up whole.
 import 'dart:async';
 import 'dart:math' as math;
@@ -21,13 +22,14 @@ import '../pointer_input.dart';
 import '../theme.dart';
 import 'arrange_drag.dart';
 import 'audio_waveform.dart';
+import '../../model/sample_edit.dart';
 import 'edit_cues.dart';
 import 'long_press_menu.dart';
 import 'take_chip.dart';
 import 'track_color.dart';
 
 /// What an in-progress gesture on the clip changes; the clip draws it at once and the project takes it on release.
-enum _Grab { none, move, trimStart, trimEnd, fadeIn, fadeOut, curveIn, curveOut, gain }
+enum _Grab { none, move, trimStart, trimEnd, fadeIn, fadeOut, curveIn, curveOut, gain, stretch }
 
 class AudioClipView extends StatefulWidget {
   const AudioClipView({super.key, required this.state, required this.layer, required this.clip, required this.stepW,
@@ -71,7 +73,20 @@ class AudioClipViewState extends State<AudioClipView> {
   AppState get s => widget.state;
   AudioClipDoc get c => widget.clip;
   double get bpm => s.project.bpm;
-  double get _secPerPx => 15 / bpm / widget.stepW;
+  double get _secPerPx => 15 / bpm / widget.stepW * _k;
+
+  /// The steps the clip spans as drawn: its true width on the tempo map (#208).
+  double get _span => c.spanSteps(s.project.tempo);
+
+  /// Steps at the first tempo ([AudioClipDoc.lengthAt]) per drawn step: 1 without tempo changes.
+  double get _k {
+    final span = _span;
+    return c.fixed && span > 0 ? c.lengthAt(bpm) / span : 1;
+  }
+
+  /// Seconds of output from song step [from] to [to], on the tempo map.
+  double _secondsBetween(double from, double to) =>
+      s.project.tempo.secondsAt(to / 4) - s.project.tempo.secondsAt(from / 4);
   bool get _free => HardwareKeyboard.instance.isShiftPressed || (_lifted && (widget.drag?.free.value ?? false));
   int get _snap => s.arrangementSnapSteps;
   AudioAssetDoc? get _asset => s.project.asset(c.assetId);
@@ -93,20 +108,41 @@ class AudioClipViewState extends State<AudioClipView> {
       };
 
   double get _shownLength => switch (_grab) {
-        _Grab.trimStart => c.endAt(bpm) - _trimTarget(),
+        _Grab.trimStart => c.startSteps + _span - _trimTarget(),
         _Grab.trimEnd => _resizeTarget(),
-        _ => c.lengthAt(bpm),
+        _Grab.stretch => _stretchTarget(),
+        _ => _span,
       };
 
   double _trimTarget() {
     final per = c.sourcePerStep(bpm, _asset?.bpm);
     var t = _snapped(c.startSteps + _delta.dx / widget.stepW);
     if (!c.loop && per > 0) t = math.max(t, c.startSteps - c.offsetSeconds / per);
-    return t.clamp(0.0, c.endAt(bpm) - AudioClipDoc.minLengthSteps).toDouble();
+    return t.clamp(0.0, c.startSteps + _span - AudioClipDoc.minLengthSteps).toDouble();
   }
 
   double _resizeTarget() => math.max(AudioClipDoc.minLengthSteps,
-      _snapped(c.endAt(bpm) + _delta.dx / widget.stepW) - c.startSteps);
+      _snapped(c.startSteps + _span + _delta.dx / widget.stepW) - c.startSteps);
+
+  /// The notch's length in drawn steps: the end snapped, the stretch held to a quarter..four times the file part.
+  double _stretchTarget() {
+    final (lo, hi) = stretchLimits(c);
+    var len = math.max(AudioClipDoc.minLengthSteps, _snapped(c.startSteps + _span + _delta.dx / widget.stepW) - c.startSteps);
+    final secs = _secondsBetween(c.startSteps, c.startSteps + len);
+    if (secs < lo || secs > hi) {
+      final want = secs.clamp(lo, hi).toDouble();
+      final t = s.project.tempo;
+      len = t.beatAt(t.secondsAt(c.startSteps / 4) + want) * 4 - c.startSteps;
+    }
+    return len;
+  }
+
+  /// The notch's readout: the new length and the stretch.
+  String _stretchLabel() {
+    final secs = _secondsBetween(c.startSteps, c.startSteps + _stretchTarget());
+    final ratio = c.stretchRatio * secs / math.max(1e-9, c.lengthSeconds);
+    return '${secs.toStringAsFixed(2)} s · ×${ratio.toStringAsFixed(2)}';
+  }
 
   // ---------- gestures ----------
 
@@ -143,7 +179,7 @@ class AudioClipViewState extends State<AudioClipView> {
   void _guide() {
     final g = widget.guides;
     if (g == null) return;
-    final shows = _grab == _Grab.move || _grab == _Grab.trimStart || _grab == _Grab.trimEnd;
+    final shows = _grab == _Grab.move || _grab == _Grab.trimStart || _grab == _Grab.trimEnd || _grab == _Grab.stretch;
     g.value = shows ? ClipGuide(_shownStart, _shownStart + _shownLength, widget.color) : null;
   }
 
@@ -197,6 +233,8 @@ class AudioClipViewState extends State<AudioClipView> {
           _tick(_trimTarget());
         case _Grab.trimEnd:
           _tick(_resizeTarget());
+        case _Grab.stretch:
+          _tick(_stretchTarget());
         case _Grab.fadeIn:
           _value = math.max(0.0, (_value ?? 0) + step.dx * _secPerPx);
         case _Grab.fadeOut:
@@ -239,7 +277,9 @@ class AudioClipViewState extends State<AudioClipView> {
       case _Grab.trimStart:
         s.trimAudioClipStart(l, c, _trimTarget());
       case _Grab.trimEnd:
-        s.resizeAudioClipTo(l, c, _resizeTarget());
+        s.resizeAudioClipTo(l, c, _resizeTarget() * _k);
+      case _Grab.stretch:
+        s.stretchAudioClipTo(l, c, _secondsBetween(c.startSteps, c.startSteps + _stretchTarget()));
       case _Grab.fadeIn:
         s.setAudioFades(l, c, fadeIn: _value);
       case _Grab.fadeOut:
@@ -316,7 +356,9 @@ class AudioClipViewState extends State<AudioClipView> {
     final h = widget.height;
     final asset = _asset;
     final fileSeconds = asset?.seconds ?? 0;
-    final per = c.sourcePerStep(bpm, asset?.bpm) / widget.stepW;
+    final k = _k;
+    // Seconds of the file a pixel shows: while the notch stretches, the same part of the file fills the new width.
+    final per = c.sourcePerStep(bpm, asset?.bpm) * k / widget.stepW * (_grab == _Grab.stretch ? _span / length : 1);
     var offset = c.offsetSeconds;
     if (_grab == _Grab.trimStart) offset = math.max(0, offset + (start - c.startSteps) * c.sourcePerStep(bpm, asset?.bpm));
     final fadeIn = _grab == _Grab.fadeIn ? _value! : c.fadeIn;
@@ -324,13 +366,16 @@ class AudioClipViewState extends State<AudioClipView> {
     final gain = _grab == _Grab.gain ? _value! : c.gain;
     final inCurve = _grab == _Grab.curveIn ? _curve! : c.fadeInCurve;
     final outCurve = _grab == _Grab.curveOut ? _curve! : c.fadeOutCurve;
-    final pxPerSec = widget.stepW * bpm / 15;
+    final pxPerSec = widget.stepW * bpm / 15 / k;
     final fadeInPx = math.min(width, fadeIn * pxPerSec), fadeOutPx = math.min(width, fadeOut * pxPerSec);
     final top = h >= 34 ? 14.0 : 0.0;
     final wave = Color.lerp(color, Neon.ink, 0.35)!.withValues(alpha: 0.9);
     final dragShift = _grab == _Grab.move && widget.drag != null ? _delta.dy : 0.0;
     final name = s.audioClipName(c);
     final showHandles = widget.selected && !c.lock && width >= 40 && h >= 26;
+    // The stretch notch (owner, 2026-11-14): on every clip that plays at its own speed, wide enough to hold it.
+    final showNotch = c.fixed && !c.lock && width >= 40 && h >= 20;
+    const notch = 16.0;
     final body = Container(
       key: ValueKey('audio-clip-box-${c.id}'),
       width: width,
@@ -366,6 +411,10 @@ class AudioClipViewState extends State<AudioClipView> {
         if (_grab == _Grab.fadeIn || _grab == _Grab.fadeOut)
           Positioned(left: 0, right: 0, bottom: 2, child: Center(child: Text(
               '${((_grab == _Grab.fadeIn ? fadeIn : fadeOut) * 1000).round()} ms',
+              style: const TextStyle(color: Neon.ink, fontSize: 9, fontWeight: FontWeight.w700)))),
+        if (_grab == _Grab.stretch)
+          Positioned(left: 0, right: 0, bottom: 2, child: Center(child: Text(_stretchLabel(),
+              key: ValueKey('audio-stretch-readout-${c.id}'),
               style: const TextStyle(color: Neon.ink, fontSize: 9, fontWeight: FontWeight.w700)))),
         if (_curve != null)
           Positioned(left: 0, right: 0, bottom: 2, child: Center(child: Text(_curve!.label,
@@ -414,7 +463,10 @@ class AudioClipViewState extends State<AudioClipView> {
           if (showHandles) ...[
             _handle(_Grab.fadeIn, key: 'audio-fade-in', left: (fadeInPx - 9).clamp(0.0, math.max(0.0, width - 18)), top: 0, width: 18, height: 18,
                 child: _corner(color, left: true)),
-            _handle(_Grab.fadeOut, key: 'audio-fade-out', left: (width - fadeOutPx - 9).clamp(0.0, math.max(0.0, width - 18)), top: 0, width: 18, height: 18,
+            // Left of the notch, so the corner stays the notch's.
+            _handle(_Grab.fadeOut, key: 'audio-fade-out',
+                left: (width - fadeOutPx - 9).clamp(0.0, math.max(0.0, width - 18 - (showNotch ? notch : 0))), top: 0,
+                width: 18, height: 18,
                 child: _corner(color, left: false)),
             if (fadeInPx >= 14)
               _handle(_Grab.curveIn, key: 'audio-curve-in', left: fadeInPx / 2 - 9,
@@ -430,6 +482,11 @@ class AudioClipViewState extends State<AudioClipView> {
                 child: Center(child: Container(width: 22, height: 3, decoration: BoxDecoration(
                     color: Neon.ink.withValues(alpha: 0.85), borderRadius: BorderRadius.circular(2))))),
           ],
+          // The stretch notch, last so it wins its corner over the edge.
+          if (showNotch)
+            _handle(_Grab.stretch, key: 'audio-stretch', right: 0, top: 0, width: notch, height: math.min(notch, h / 2),
+                cursor: SystemMouseCursors.resizeLeftRight,
+                child: CustomPaint(painter: _NotchPainter(color, active: _grab == _Grab.stretch || c.stretchRatio != 1))),
         ])),
       ),
     ));
@@ -452,6 +509,31 @@ class AudioClipViewState extends State<AudioClipView> {
       color: color, shape: BoxShape.circle, border: Border.all(color: Colors.white, width: 1.2))));
 }
 
+/// The stretch notch: a small triangle in the clip's top-right corner, filled once the clip is stretched or while
+/// it is dragged.
+class _NotchPainter extends CustomPainter {
+  _NotchPainter(this.color, {required this.active});
+  final Color color;
+  final bool active;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final path = Path()
+      ..moveTo(size.width - 11, 0)
+      ..lineTo(size.width, 0)
+      ..lineTo(size.width, 11)
+      ..close();
+    canvas.drawPath(path, Paint()..color = active ? Colors.white : color);
+    canvas.drawPath(path, Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1
+      ..color = active ? color : Colors.white.withValues(alpha: 0.8));
+  }
+
+  @override
+  bool shouldRepaint(_NotchPainter old) => old.color != color || old.active != active;
+}
+
 /// An audio clip's menu: split, duplicate, reverse, loop, mute, lock, mode and stretch, takes, the inspector, delete.
 Future<void> showAudioClipMenu(BuildContext context, AppState s, LayerDoc layer, AudioClipDoc clip, Offset at,
     {VoidCallback? onOpen}) async {
@@ -464,8 +546,7 @@ Future<void> showAudioClipMenu(BuildContext context, AppState s, LayerDoc layer,
         const MenuAction('duplicate', 'Duplicate', Icons.copy),
         MenuAction('reverse', 'Reverse', Icons.swap_horiz, checked: clip.reverse),
         MenuAction('loop', 'Loop the file', Icons.loop, checked: clip.loop),
-        MenuAction('mode', clip.fixed ? 'Follow the tempo (musical)' : 'Keep its time (fixed)',
-            clip.fixed ? Icons.music_note : Icons.timer_outlined),
+        MenuAction('mode', 'Follows tempo', Icons.music_note, checked: clip.followsTempo),
         MenuAction('mute', clip.mute ? 'Unmute' : 'Mute', Icons.volume_off, checked: clip.mute),
         MenuAction('lock', clip.lock ? 'Unlock' : 'Lock', Icons.lock, checked: clip.lock),
         if (clip.takes.length > 1) MenuAction('takes', 'Next take (${clip.takes.length})', Icons.layers_outlined),
@@ -486,7 +567,12 @@ Future<void> showAudioClipMenu(BuildContext context, AppState s, LayerDoc layer,
     case 'loop':
       s.setAudioLoop(layer, clip, !clip.loop);
     case 'mode':
-      s.setAudioMode(layer, clip, clip.fixed ? AudioClipMode.musical : AudioClipMode.fixed);
+      // Off until the clip's tempo is known (its Clip tab says so and sets it).
+      if (!s.setAudioFollowsTempo(layer, clip, !clip.followsTempo)) {
+        Haptics.error();
+        onOpen?.call();
+        return;
+      }
     case 'mute':
       s.toggleAudioMute(layer, clip);
     case 'lock':

@@ -114,8 +114,14 @@ extern "C" {
    clips, automation, loops, the metronome and count-in, synced effects and modulators, renders) follows the map;
    a project with one tempo plays to the same sample as before. caw_pattern_from_midi's JSON gains "tempo_map" and
    "time_signatures"; caw_pattern_export_song writes them as tempo and meter events. A recording request may carry a
-   "tempo_map" (start_steps and punch steps follow it). */
-#define CAW_API_VERSION 31
+   "tempo_map" (start_steps and punch steps follow it).
+   32 (2026-11-14, batch 1.0.4, #208): audio stretching and editing. An audio clip's "stretch" may be "signalsmith"
+   (Signalsmith Stretch: time and pitch at high quality); new clip fields "follows_tempo" (as "mode": "musical"; such
+   a clip now follows a tempo map of more than one tempo, its rate worked out per chunk), "stretch_ratio" 0.25..4,
+   "pitch_cents" -2400..2400, "gain_db" -96..36, "loop_start_frames" and "loop_end_frames" (the file's own frames).
+   A clip at ratio 1 with no pitch plays as before, to the bit. caw_asset_tempo (onset-based tempo detection) and
+   caw_asset_slices (transients for Slice to MIDI). Nothing else changes. */
+#define CAW_API_VERSION 32
 /* The component index that names a layer's native instrument rather than one of its "components". */
 #define CAW_INSTRUMENT_INDEX 0xFFFFFFFFu
 /* A component index with this bit (API version 22) names component (index & ~CAW_NOTE_COMPONENT) of the layer's
@@ -689,6 +695,18 @@ CAW_API char* caw_asset_load(CawEngine* e, const char* path);
    it isn't loaded. Returns the buckets written, or -1 when the file can't be loaded. */
 CAW_API int32_t caw_asset_peaks(CawEngine* e, const char* path, double start_seconds, double end_seconds,
                                 int32_t buckets, int32_t channel, float* out_min_max);
+/* API 32 (docs/engine.md "Tempo detection and slices"). Both load the file as caw_asset_load does (a worker
+   isolate) and take an options JSON (NULL for the defaults; at most 4096 bytes; a value out of range fails with an
+   error naming it). Free the result with caw_free.
+   caw_asset_tempo: options {"min_bpm" 30..300 (70), "max_bpm" (180; above min_bpm, at most 4 times it),
+   "start_seconds", "end_seconds" (0: the file's end; at most 600 s are read)}. Result {"ok", "error", "bpm" (null
+   when unsure: ask the user), "confidence" 0..1, "onsets", "candidates": [{"bpm", "score"}] (best first)}. */
+CAW_API char* caw_asset_tempo(CawEngine* e, const char* path, const char* options_json);
+/* caw_asset_slices: options {"sensitivity" 0..1 (0.5; higher finds more), "start_seconds", "end_seconds" (0: the
+   file's end; the range at most 600 s), "min_gap_seconds" 0.005..2 (0.05), "max_slices" 1..256 (64)}. Result {"ok",
+   "error", "seconds" (the range's length), "slices": [{"seconds" (from the file's start), "frame" (at the file's own
+   rate), "strength" 0..1}]}: transient starts in time order, the strongest max_slices kept; none within 5 ms of the range's start. */
+CAW_API char* caw_asset_slices(CawEngine* e, const char* path, const char* options_json);
 /* The store: {"bytes", "budget", "count", "assets": [{"path", "rate", "bytes", "in_use"}]}. Free with caw_free. */
 CAW_API char* caw_asset_store_status(void);
 CAW_API void caw_asset_store_set_budget(int64_t bytes);

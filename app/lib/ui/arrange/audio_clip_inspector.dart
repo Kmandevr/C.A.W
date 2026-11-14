@@ -1,6 +1,6 @@
-// The focus view's Clip tab on an audio track: the selected audio clip's settings (gain, pitch, fades and their
-// curves, fixed or musical, the stretch, reverse, loop, mute, lock, takes) over the whole file's waveform, or the
-// track's input and an import button when it has no clip.
+// The focus view's Clip tab on an audio track: the sample editor over the selected audio clip's settings (gain,
+// fades and their curves, Follows tempo, its tempo, stretch, pitch in semitones and cents, reverse, loop, mute, lock,
+// takes), or the track's input and an import button when it has no clip.
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -9,11 +9,13 @@ import '../../model/app_state.dart';
 import '../../model/audio_clips.dart';
 import '../../model/audio_edit.dart';
 import '../../model/project.dart';
+import '../../model/sample_edit.dart';
 import '../audio_file_actions.dart';
 import '../haptics.dart';
+import '../motion.dart';
 import '../theme.dart';
 import 'audio_input_ui.dart';
-import 'audio_waveform.dart';
+import 'sample_editor.dart';
 import 'take_chip.dart';
 import 'track_color.dart';
 
@@ -81,26 +83,9 @@ class _Inspector extends StatelessWidget {
         '${seconds.toStringAsFixed(2)} s clip',
       ].join(' · '), style: const TextStyle(color: Neon.dim, fontSize: 11)),
       const SizedBox(height: 8),
-      // The whole file, the part this clip plays lit.
-      if (asset != null && asset.seconds > 0)
-        SizedBox(height: 56, child: LayoutBuilder(builder: (context, box) {
-          final per = asset.seconds / math.max(1, box.maxWidth);
-          final used = clip.sourceSeconds(p.bpm, asset.bpm);
-          final from = clip.reverse ? asset.seconds - clip.offsetSeconds - used : clip.offsetSeconds;
-          return Stack(children: [
-            Positioned.fill(child: DecoratedBox(decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.25),
-                borderRadius: BorderRadius.circular(4)))),
-            Positioned.fill(child: CustomPaint(key: const ValueKey('audio-inspector-wave'), painter: AudioClipPainter(
-              peaks: () => WaveformCache.instance.peaks(state.audioIo, asset.path, asset.seconds, per),
-              window: ClipWindow(offset: 0, perPixel: per, fileSeconds: asset.seconds),
-              color: Neon.dim, gain: 1, fadeIn: 0, fadeOut: 0, inCurve: FadeCurve.linear, outCurve: FadeCurve.linear,
-              path: asset.path))),
-            Positioned(left: (from / per).clamp(0, box.maxWidth), top: 0, bottom: 0,
-              width: math.max(2.0, math.min(used, asset.seconds) / per),
-              child: IgnorePointer(child: DecoratedBox(decoration: BoxDecoration(
-                  color: color.withValues(alpha: 0.22), border: Border.all(color: color))))),
-          ]);
-        })),
+      // The sample editor (batch 1.0.4): the whole file, big, with the clip's edges, fades and loop points, and
+      // the tool row.
+      SampleEditor(key: ValueKey('sample-editor-box-${clip.id}'), state: state, layer: layer, clip: clip, color: color),
       label('LEVEL'),
       row('Gain', Slider(key: const ValueKey('audio-gain-slider'), min: -60, max: 12,
           value: gainToDb(clip.gain).clamp(-60.0, 12.0),
@@ -119,41 +104,7 @@ class _Inspector extends StatelessWidget {
       Align(alignment: Alignment.centerRight, child: curve(clip.fadeOutCurve,
           (c) => state.setAudioFades(layer, clip, outCurve: c), 'audio-fade-out-curve')),
       label('TIME AND PITCH'),
-      SegmentedButton<AudioClipMode>(
-        key: const ValueKey('audio-mode'),
-        segments: const [
-          ButtonSegment(value: AudioClipMode.fixed, label: Text('Fixed'), icon: Icon(Icons.timer_outlined, size: 16),
-              tooltip: 'Plays at the file\'s speed: a tempo change moves it, never stretches it'),
-          ButtonSegment(value: AudioClipMode.musical, label: Text('Musical'), icon: Icon(Icons.music_note, size: 16),
-              tooltip: 'Follows the tempo, locked to the bars'),
-        ],
-        selected: {clip.mode},
-        onSelectionChanged: (v) { Haptics.tick(); state.setAudioMode(layer, clip, v.first); }),
-      const SizedBox(height: 6),
-      SegmentedButton<AudioStretch>(
-        key: const ValueKey('audio-stretch'),
-        segments: const [
-          ButtonSegment(value: AudioStretch.wsola, label: Text('Keep pitch'), tooltip: 'Time-stretch (WSOLA)'),
-          ButtonSegment(value: AudioStretch.varispeed, label: Text('Varispeed'), tooltip: 'Pitch moves with speed'),
-        ],
-        selected: {clip.stretch},
-        onSelectionChanged: (v) { Haptics.tick(); state.setAudioStretch(layer, clip, v.first); }),
-      row('Pitch', Row(children: [
-        IconButton(key: const ValueKey('audio-pitch-down'), iconSize: 18, icon: const Icon(Icons.remove),
-            onPressed: () { Haptics.tick(); state.setAudioPitch(layer, clip, clip.pitch - 1); }),
-        Expanded(child: Slider(key: const ValueKey('audio-pitch-slider'), min: -24, max: 24, divisions: 48,
-            value: clip.pitch.clamp(-24.0, 24.0),
-            onChanged: (v) => state.editLayer(layer, (_) => setAudioClipPitch(clip, v)),
-            onChangeEnd: (_) => state.endUndoStep())),
-        IconButton(key: const ValueKey('audio-pitch-up'), iconSize: 18, icon: const Icon(Icons.add),
-            onPressed: () { Haptics.tick(); state.setAudioPitch(layer, clip, clip.pitch + 1); }),
-      ]), value: '${clip.pitch > 0 ? '+' : ''}${clip.pitch.round()} st'),
-      if (!clip.fixed)
-        row('Source', Slider(key: const ValueKey('audio-source-bpm'), min: 40, max: 240, divisions: 200,
-            value: clip.sourceTempo(p.bpm, asset?.bpm).clamp(40.0, 240.0),
-            onChanged: (v) => state.editLayer(layer, (_) => clip.sourceBpm = v.roundToDouble()),
-            onChangeEnd: (_) => state.endUndoStep()),
-            value: '${clip.sourceTempo(p.bpm, asset?.bpm).round()} BPM'),
+      _TimeAndPitch(state: state, layer: layer, clip: clip),
       label('CLIP'),
       Wrap(spacing: 6, runSpacing: 6, children: [
         FilterChip(key: const ValueKey('audio-reverse'), label: const Text('Reverse'), selected: clip.reverse,
@@ -178,6 +129,133 @@ class _Inspector extends StatelessWidget {
                 selected: c.id == clip.id, onSelected: (_) => state.selectAudioClip(layer, c)),
         ]),
       ],
+    ]);
+  }
+}
+
+/// The clip tab's time and pitch (owner, 2026-11-14): the Follows tempo switch (off, with the reason, until the
+/// clip's tempo is known), the clip's tempo (detected or typed), the stretch, Keep pitch or Varispeed, and pitch in
+/// semitones and cents.
+class _TimeAndPitch extends StatefulWidget {
+  const _TimeAndPitch({required this.state, required this.layer, required this.clip});
+  final AppState state;
+  final LayerDoc layer;
+  final AudioClipDoc clip;
+
+  @override
+  State<_TimeAndPitch> createState() => _TimeAndPitchState();
+}
+
+class _TimeAndPitchState extends State<_TimeAndPitch> {
+  bool _detecting = false;
+  String? _detectNote;
+
+  AppState get s => widget.state;
+  AudioClipDoc get c => widget.clip;
+
+  Future<void> _detect() async {
+    Haptics.tap();
+    setState(() => _detecting = true);
+    final est = await s.detectClipTempo(widget.layer, c);
+    if (!mounted) return;
+    setState(() {
+      _detecting = false;
+      _detectNote = est == null ? 'Not sure of its tempo: type it in.'
+          : 'Detected ${est.bpm.toStringAsFixed(1)} BPM (${(est.confidence * 100).round()}% sure).';
+    });
+  }
+
+  Future<void> _type() async {
+    final known = s.knownSourceBpm(c);
+    var text = known == null ? '' : _bpmText(known);
+    final v = await showDialog<double?>(context: context, builder: (context) => AlertDialog(
+      title: const Text('Clip tempo'),
+      content: TextFormField(key: const ValueKey('audio-tempo-field'), initialValue: text, autofocus: true,
+          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          decoration: const InputDecoration(suffixText: 'BPM', helperText: '20–999; empty: not known'),
+          onChanged: (t) => text = t),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+        FilledButton(key: const ValueKey('audio-tempo-ok'), onPressed: () {
+          final t = text.trim();
+          Navigator.pop(context, t.isEmpty ? -1.0 : double.tryParse(t));
+        }, child: const Text('OK')),
+      ]));
+    if (v == null || !mounted) return;
+    s.setClipSourceBpm(widget.layer, c, v < 0 ? null : v);
+  }
+
+  static String _bpmText(double v) => v == v.roundToDouble() ? v.toStringAsFixed(0) : v.toStringAsFixed(2);
+
+  @override
+  Widget build(BuildContext context) {
+    final p = s.project;
+    final blocked = s.followsTempoBlocked(c);
+    final known = s.knownSourceBpm(c);
+    final semis = c.pitch.round(), cents = c.pitchCents - semis * 100;
+    final seconds = c.lengthAt(p.bpm) * 15 / p.bpm;
+    Widget row(String name, Widget child, {String? value}) => SizedBox(height: 40, child: Row(children: [
+          SizedBox(width: 74, child: Text(name, style: const TextStyle(fontSize: 12))),
+          Expanded(child: child),
+          if (value != null) SizedBox(width: 64, child: Text(value, textAlign: TextAlign.right,
+              style: Neon.code(size: 11, color: Neon.text))),
+        ]));
+    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      SwitchListTile(key: const ValueKey('audio-follows-tempo'), dense: true, contentPadding: EdgeInsets.zero,
+        title: const Text('Follows tempo', style: TextStyle(fontSize: 13)),
+        subtitle: Text(blocked ?? (c.followsTempo ? 'Locked to the bars from its tempo'
+            : 'Plays at its own speed${c.stretchRatio != 1 ? ', stretched' : ''}'),
+            key: const ValueKey('audio-follows-reason'), style: TextStyle(fontSize: 11,
+                color: blocked != null ? Neon.yellow : Neon.dim)),
+        value: c.followsTempo,
+        onChanged: blocked != null && !c.followsTempo ? null : (v) {
+          Haptics.tick();
+          s.setAudioFollowsTempo(widget.layer, c, v);
+        }),
+      row('Tempo', Row(children: [
+        TextButton(key: const ValueKey('audio-tempo'), onPressed: c.lock ? null : _type,
+            child: Text(known == null ? 'Not known: set it' : '${_bpmText(known)} BPM${c.sourceBpm == null ? ' (file)' : ''}')),
+        const Spacer(),
+        IconButton(key: const ValueKey('audio-tempo-detect'), tooltip: 'Detect from its hits', iconSize: 18,
+            onPressed: _detecting || c.lock ? null : _detect,
+            icon: _detecting ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2))
+                : const Icon(Icons.auto_awesome_outlined)),
+      ])),
+      AnimatedSwitcher(duration: EditMotion.of(context, EditMotionKind.panels) ?? Duration.zero,
+        child: _detectNote == null ? const SizedBox(key: ValueKey('tempo-note-none'))
+            : Text(_detectNote!, key: ValueKey('tempo-note-$_detectNote'),
+                style: const TextStyle(color: Neon.dim, fontSize: 11))),
+      if (c.fixed)
+        row('Stretch', Text('×${c.stretchRatio.toStringAsFixed(2)} · drag the clip\'s corner notch',
+            key: const ValueKey('audio-stretch-ratio'), style: const TextStyle(color: Neon.dim, fontSize: 11)),
+            value: '${seconds.toStringAsFixed(2)} s'),
+      const SizedBox(height: 4),
+      // Keep pitch is the clip's own keep-pitch algorithm (a WSOLA clip keeps its sound), else the new one.
+      SegmentedButton<bool>(
+        key: const ValueKey('audio-stretch'),
+        segments: const [
+          ButtonSegment(value: true, label: Text('Keep pitch'), tooltip: 'Time-stretch'),
+          ButtonSegment(value: false, label: Text('Varispeed'), tooltip: 'Pitch moves with speed'),
+        ],
+        selected: {c.stretch.keepsPitch},
+        onSelectionChanged: (v) {
+          Haptics.tick();
+          s.setAudioStretch(widget.layer, c, v.first ? AudioStretch.keepPitch : AudioStretch.varispeed);
+        }),
+      row('Pitch', Row(children: [
+        IconButton(key: const ValueKey('audio-pitch-down'), iconSize: 18, icon: const Icon(Icons.remove),
+            onPressed: () { Haptics.tick(); s.setAudioPitchCents(widget.layer, c, c.pitchCents - 100); }),
+        Expanded(child: Slider(key: const ValueKey('audio-pitch-slider'), min: -24, max: 24, divisions: 48,
+            value: semis.clamp(-24, 24).toDouble(),
+            onChanged: (v) => s.editLayer(widget.layer, (_) => setAudioClipPitch(c, v.round() + cents / 100)),
+            onChangeEnd: (_) => s.endUndoStep())),
+        IconButton(key: const ValueKey('audio-pitch-up'), iconSize: 18, icon: const Icon(Icons.add),
+            onPressed: () { Haptics.tick(); s.setAudioPitchCents(widget.layer, c, c.pitchCents + 100); }),
+      ]), value: '${semis > 0 ? '+' : ''}$semis st'),
+      row('Cents', Slider(key: const ValueKey('audio-cents-slider'), min: -50, max: 50, divisions: 100,
+          value: cents.clamp(-50, 50).toDouble(),
+          onChanged: (v) => s.editLayer(widget.layer, (_) => setAudioClipPitch(c, semis + v.round() / 100)),
+          onChangeEnd: (_) => s.endUndoStep()), value: '${cents > 0 ? '+' : ''}$cents ct'),
     ]);
   }
 }

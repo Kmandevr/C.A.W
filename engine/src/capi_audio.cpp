@@ -7,6 +7,7 @@
 #include <string>
 
 #include "asset_store.h"
+#include "audio_analysis.h"
 #include "audio_input.h"
 #include "builtin_sampler.h"
 #include "caw.h"
@@ -59,6 +60,45 @@ int32_t caw_asset_peaks(CawEngine* e, const char* path, double start_seconds, do
     return caw::readPeaks(*a, s, z, buckets, channel < 0 ? 0u : static_cast<uint32_t>(channel), out);
 } catch (...) {
     return -1;
+}
+
+char* caw_asset_tempo(CawEngine* e, const char* path, const char* options_json) try {
+    if (!e || !path) return dup(fail("no engine or path"));
+    caw::TempoOptions o;
+    std::string error;
+    if (!caw::parseTempoOptions(options_json, o, error)) return dup(fail(error));
+    auto a = caw::AssetStore::global().load(path, e->engine->sampleRate(), error);
+    if (!a) return dup(fail(error));
+    const caw::TempoResult r = caw::detectTempo(*a, o);
+    std::string s = "{\"ok\":true,\"error\":\"\",\"bpm\":" + (r.sure ? num(r.bpm) : std::string("null")) +
+                    ",\"confidence\":" + num(r.confidence) + ",\"onsets\":" + std::to_string(r.onsets) +
+                    ",\"candidates\":[";
+    for (size_t i = 0; i < r.candidates.size(); ++i)
+        s += (i ? ",{\"bpm\":" : "{\"bpm\":") + num(r.candidates[i].bpm) + ",\"score\":" + num(r.candidates[i].score) + "}";
+    return dup(s + "]}");
+} catch (...) {
+    return dup(fail("out of memory"));
+}
+
+char* caw_asset_slices(CawEngine* e, const char* path, const char* options_json) try {
+    if (!e || !path) return dup(fail("no engine or path"));
+    caw::SliceOptions o;
+    std::string error;
+    if (!caw::parseSliceOptions(options_json, o, error)) return dup(fail(error));
+    auto a = caw::AssetStore::global().load(path, e->engine->sampleRate(), error);
+    if (!a) return dup(fail(error));
+    const double end = o.endSeconds > 0 ? std::min(o.endSeconds, a->seconds()) : a->seconds();
+    if (end - o.startSeconds > caw::kMaxAnalysisSeconds)
+        return dup(fail("the range is longer than 600 seconds: give start_seconds and end_seconds"));
+    const std::vector<caw::Slice> slices = caw::detectSlices(*a, o);
+    std::string s = "{\"ok\":true,\"error\":\"\",\"seconds\":" + num(std::max(0.0, end - o.startSeconds)) +
+                    ",\"slices\":[";
+    for (size_t i = 0; i < slices.size(); ++i)
+        s += (i ? ",{\"seconds\":" : "{\"seconds\":") + num(slices[i].seconds) + ",\"frame\":" +
+             std::to_string(slices[i].frame) + ",\"strength\":" + num(slices[i].strength) + "}";
+    return dup(s + "]}");
+} catch (...) {
+    return dup(fail("out of memory"));
 }
 
 char* caw_asset_store_status(void) try { return dup(caw::AssetStore::global().statusJson()); } catch (...) {

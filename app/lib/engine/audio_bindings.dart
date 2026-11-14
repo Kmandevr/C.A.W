@@ -1,4 +1,4 @@
-// Raw dart:ffi bindings to the engine's API 18 audio functions (engine/include/caw.h: assets, SFZ, input, recording).
+// Raw dart:ffi bindings to the engine's audio functions (engine/include/caw.h: assets, analysis, SFZ, input, recording).
 import 'dart:ffi';
 
 import 'package:ffi/ffi.dart';
@@ -19,6 +19,10 @@ class AudioBindings {
         assetStoreStatus = lib.lookupFunction<CStr Function(), CStr Function()>('caw_asset_store_status'),
         assetStoreSetBudget = lib.lookupFunction<Void Function(Int64), void Function(int)>('caw_asset_store_set_budget'),
         assetStorePurge = lib.lookupFunction<Void Function(), void Function()>('caw_asset_store_purge'),
+        assetTempo = lib.lookupFunction<CStr Function(CEngine, CStr, CStr), CStr Function(CEngine, CStr, CStr)>(
+            'caw_asset_tempo'),
+        assetSlices = lib.lookupFunction<CStr Function(CEngine, CStr, CStr), CStr Function(CEngine, CStr, CStr)>(
+            'caw_asset_slices'),
         sfzImport = lib.lookupFunction<CStr Function(CStr), CStr Function(CStr)>('caw_sfz_import'),
         sfzExport = lib.lookupFunction<CStr Function(CStr, CStr, Int32), CStr Function(CStr, CStr, int)>('caw_sfz_export'),
         inputDevices = lib.lookupFunction<CStr Function(), CStr Function()>('caw_audio_input_devices'),
@@ -47,6 +51,9 @@ class AudioBindings {
   final CStr Function() assetStoreStatus;
   final void Function(int) assetStoreSetBudget;
   final void Function() assetStorePurge;
+  // API 32: tempo detection and transients (options JSON, result JSON).
+  final CStr Function(CEngine, CStr, CStr) assetTempo;
+  final CStr Function(CEngine, CStr, CStr) assetSlices;
   final CStr Function(CStr) sfzImport;
   final CStr Function(CStr, CStr, int) sfzExport;
   final CStr Function() inputDevices;

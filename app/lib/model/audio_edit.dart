@@ -8,6 +8,7 @@ import '../engine/audio_engine.dart';
 import 'app_state.dart';
 import 'audio_clips.dart';
 import 'project.dart';
+import 'sample_edit.dart';
 
 final Expando<AudioIo> _io = Expando('audio io');
 final Expando<Set<String>> _unsized = Expando('clips waiting for their file length');
@@ -75,7 +76,11 @@ extension AudioEdit on AppState {
       if (await out.exists()) await out.delete();
       throw FormatException(info.error.isEmpty ? 'The engine could not read this file.' : info.error);
     }
-    return addAssetFor(out.path, name: name.replaceFirst(RegExp(r'\.[^.]*$'), ''), info: info, bpm: bpm ?? guessBpm(name));
+    final asset = addAssetFor(out.path, name: name.replaceFirst(RegExp(r'\.[^.]*$'), ''), info: info,
+        bpm: bpm ?? guessBpm(name));
+    // Batch 1.0.4: a file whose name gave no tempo has it estimated from its onsets (kept only when sure).
+    if (asset.bpm == null) unawaited(detectAssetTempo(asset).catchError((_) => null));
+    return asset;
   }
 
   /// Copies the file at [path] in ([importAudio]).
@@ -161,7 +166,7 @@ extension AudioEdit on AppState {
     final end = track.audioClips.fold<double>(0, (v, c) => math.max(v, c.endAt(project.bpm)));
     final at = (atStep ?? end).clamp(0.0, project.maxArrangementSteps - 1.0).toDouble();
     final known = asset.seconds > 0;
-    final clip = AudioClipDoc(id: newId('ac'), assetId: asset.id, startSteps: at,
+    final clip = AudioClipDoc(id: newId('ac'), assetId: asset.id, startSteps: at, stretch: AudioStretch.keepPitch,
         lengthSeconds: known ? asset.seconds : project.stepsPerBar * 15 / project.bpm);
     if (!known) (_unsized[this] ??= {}).add(clip.id);
     editLayer(track, (l) {

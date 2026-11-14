@@ -28,7 +28,9 @@ import 'package:caw/model/telemetry/relay_client.dart';
 import 'package:caw/model/telemetry/telemetry.dart';
 import 'package:caw/model/telemetry/telemetry_config.dart';
 import 'package:caw/model/updates/releases.dart' hide AssetKind;
+import 'package:caw/model/audio_clips.dart';
 import 'package:caw/model/audio_edit.dart';
+import 'package:caw/model/sample_edit.dart';
 import 'package:caw/model/updates/update_fetch.dart';
 import 'package:caw/model/updates/update_service.dart';
 import 'package:caw/ui/arrange/mixer_card.dart';
@@ -606,6 +608,42 @@ void main() {
     await _pump(c, Scaffold(body: ListenableBuilder(listenable: s, builder: (_, _) => ArrangerScreen(state: s))));
     await _settle(c.tester);
     await c.shot('');
+  });
+
+  // The sample editor (batch 1.0.4) in the focus view's Clip tab, with Slice to MIDI's panel open.
+  _sweep('arrange-sample-editor', (c) async {
+    final s = AppState(settings: Settings());
+    addTearDown(s.dispose);
+    s.project = ProjectDoc(id: 'p', name: 'Audio', bpm: 120, assets: [
+      AudioAssetDoc(id: 'a1', path: '/abs/beat.wav', name: 'A drum loop with a long file name', seconds: 4,
+          channels: 2, sourceRate: 44100),
+    ], layers: [
+      LayerDoc(id: 't1', name: 'Beat', color: 2, input: AudioInputDoc(), audioClips: [
+        AudioClipDoc(id: 'c1', assetId: 'a1', startSteps: 4, lengthSeconds: 3, offsetSeconds: 0.5, fadeIn: 0.3,
+            fadeOut: 0.6, loop: true, loopStart: 1, loopEnd: 2.5, stretchRatio: 1.25),
+      ]),
+    ]);
+    s.audioIo = FakeAudioIo();
+    s.audioAnalysis = FakeAudioAnalysis();
+    final sections = SectionController();
+    addTearDown(sections.dispose);
+    await _pump(c, SectionScope(controller: sections, child: Scaffold(body: ListenableBuilder(listenable: s,
+        builder: (_, _) => ArrangerScreen(state: s)))));
+    s.selectAudioClip(s.project.layers.first, s.project.layers.first.audioClips.first);
+    sections.focusClip('t1');
+    await _settle(c.tester);
+    await c.shot('');
+    final slice = find.byKey(const ValueKey('sample-tool-slice'));
+    if (slice.evaluate().isNotEmpty) {
+      await c.tester.ensureVisible(slice);
+      await _settle(c.tester);
+      await c.tester.tap(slice);
+      await _settle(c.tester);
+      await c.shot('slice');
+    } else {
+      c.errors.add('the sample editor\'s tool row isn\'t there');
+      c.all.add(c.errors.last);
+    }
   });
 
   // --- engine screens: Shell sections, mixer, export ---

@@ -98,3 +98,4 @@ jobs:
           engine/build-tsan/caw_tests fifo
           engine/build-tsan/caw_tests stress_  # the Benchmark: two engines profiling at once, cancel, ramps
           engine/build-tsan/caw_tests component_bench  # the plug-in benchmark: sections on other threads, jobs
+          engine/build-tsan/caw_tests stretchers_arrive  # 1.0.4: Signalsmith stretchers published to a playing track

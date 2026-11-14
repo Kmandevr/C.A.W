@@ -135,7 +135,7 @@ void main() {
   });
 
   group('the project format', () {
-    test('goes up to v3 and round-trips the map, signatures, sections and markers', () {
+    test('goes up to v4 and round-trips the map, signatures, sections and markers', () {
       final p = ProjectDoc(id: 'p', name: 'Song', bpm: 120,
           tempoMap: const [TempoPoint(0, 120), TempoPoint(32, 96, ramp: true)],
           timeSignatures: const [TimeSignature(0, 0, 4, 4), TimeSignature(8, 0, 3, 4)],
@@ -144,7 +144,7 @@ void main() {
             MarkerDoc(id: 'm1', name: 'Drop', startSteps: 256),
           ]);
       final j = p.toJson();
-      expect(j['caw_app_project'], 3);
+      expect(j['caw_app_project'], 4);
       expect(j['bpm'], 120, reason: 'older readers still find the starting tempo');
       expect(j['tempo_map'], [
         {'beat': 0.0, 'bpm': 120.0, 'ramp': false},
@@ -181,7 +181,7 @@ void main() {
     });
 
     test('a newer format is refused', () {
-      expect(() => ProjectDoc.fromJson({'caw_app_project': 4, 'id': 'x'}), throwsA(isA<NewerProjectFormat>()));
+      expect(() => ProjectDoc.fromJson({'caw_app_project': 5, 'id': 'x'}), throwsA(isA<NewerProjectFormat>()));
     });
 
     test('bpm and beatsPerBar are the first tempo point and signature', () {

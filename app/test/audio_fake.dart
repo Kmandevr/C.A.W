@@ -5,6 +5,7 @@ import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:caw/engine/audio_engine.dart';
+import 'package:caw/model/audio_analysis.dart';
 
 class FakeAudioIo implements AudioIo {
   /// Seconds each loaded path reports (unknown paths: 2 s, or a failure when [failUnknown]).
@@ -159,4 +160,33 @@ File writeTestWav(String path, {double seconds = 1, int rate = 44100, int channe
   final f = File(path)..createSync(recursive: true);
   f.writeAsBytesSync([...h.buffer.asUint8List(), ...data.buffer.asUint8List()]);
   return f;
+}
+
+/// A fake of the analysis calls (AudioAnalysis): a set tempo, cuts and peak, and what was asked.
+class FakeAudioAnalysis implements AudioAnalysis {
+  TempoEstimate? tempo = const TempoEstimate(120, 0.8);
+
+  /// The cuts at sensitivity s: the first `1 + round(s × (cuts.length − 1))` of [cuts] inside the span.
+  List<double> cuts = [0.5, 1.0, 1.5];
+  double? peakLevel = 0.5;
+
+  /// The peak of a part of the file, when set (else [peakLevel] everywhere).
+  double? Function(double start, double end)? peakAt;
+  final List<double> sensitivities = [];
+
+  @override
+  Future<TempoEstimate?> detectTempo(String path, {required double seconds}) async => tempo;
+
+  @override
+  Future<List<double>?> slicePoints(String path,
+      {required double start, required double end, required double sensitivity, int maxSlices = kMaxSlices}) async {
+    sensitivities.add(sensitivity);
+    final inside = [for (final c in cuts) if (c > start && c < end) c];
+    if (inside.isEmpty) return inside;
+    return inside.take(1 + (sensitivity * (inside.length - 1)).round()).take(maxSlices - 1).toList();
+  }
+
+  @override
+  Future<double?> peak(String path, {required double start, required double end, int channels = 2}) async =>
+      peakAt == null ? peakLevel : peakAt!(start, end);
 }

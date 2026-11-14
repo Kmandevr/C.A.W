@@ -6,6 +6,7 @@ import 'package:caw/model/app_state.dart';
 import 'package:caw/model/audio_clips.dart';
 import 'package:caw/model/audio_edit.dart';
 import 'package:caw/model/project.dart';
+import 'package:caw/model/sample_edit.dart';
 import 'package:caw/model/settings.dart';
 import 'package:caw/ui/arrange/audio_clip_inspector.dart';
 import 'package:caw/ui/arrange/audio_waveform.dart';
@@ -230,19 +231,32 @@ void main() {
     await settle(tester);
   });
 
-  testWidgets('the inspector edits the clip: mode, reverse, pitch', (tester) async {
+  testWidgets('the inspector edits the clip: Follows tempo once its tempo is known, reverse, pitch', (tester) async {
     tester.view.physicalSize = const Size(412, 900);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
-    await tester.pumpWidget(MaterialApp(home: Scaffold(body: AudioClipInspector(state: s, layer: s.project.layers.first))));
+    await tester.pumpWidget(MaterialApp(home: Scaffold(body: ListenableBuilder(listenable: s,
+        builder: (_, _) => AudioClipInspector(state: s, layer: s.project.layers.first)))));
     await tester.pump();
-    await tester.tap(find.text('Musical'));
+    final follows = find.byKey(const ValueKey('audio-follows-tempo'));
+    await tester.ensureVisible(follows);
+    await tester.pump();
+    await tester.tap(follows);
+    await tester.pump();
+    expect(clip().mode, AudioClipMode.fixed, reason: 'off with a reason until the tempo is known');
+    expect(find.textContaining('Set the clip\'s tempo first'), findsOneWidget);
+    s.setClipSourceBpm(s.project.layers.first, clip(), 96);
+    await tester.pump();
+    await tester.tap(follows);
     await tester.pump();
     expect(clip().mode, AudioClipMode.musical);
+    await tester.ensureVisible(find.byKey(const ValueKey('audio-pitch-up')));
+    await tester.pump();
     await tester.tap(find.byKey(const ValueKey('audio-pitch-up')));
     await tester.pump();
     expect(clip().pitch, 1);
-    await tester.scrollUntilVisible(find.byKey(const ValueKey('audio-reverse')), 100);
+    await tester.ensureVisible(find.byKey(const ValueKey('audio-reverse')));
+    await tester.pump();
     await tester.tap(find.byKey(const ValueKey('audio-reverse')));
     await tester.pump();
     expect(clip().reverse, isTrue);

@@ -51,6 +51,7 @@ import 'haptics.dart';
 import 'motion.dart';
 import 'theme.dart';
 import 'arrange/track_color.dart';
+import 'arrange/timeline_window.dart';
 import 'arrange/track_lanes.dart';
 import 'file_manager_screen.dart';
 import 'frame/frame_widgets.dart';
@@ -1273,6 +1274,8 @@ class _ArrangerScreenState extends State<ArrangerScreen> with TickerProviderStat
       }
       _shownFocus = null;
     }
+    // Files opened an audio file's sample editor: the Clip tab.
+    if (_sections?.takeClipTab() ?? false) _tab = FocusTab.clip;
     // The panel's track: the focused one, or the one whose panel is leaving.
     final shownTrack = focused ?? _closing;
     final layout = focusLayoutFor(MediaQuery.sizeOf(context));
@@ -2302,6 +2305,44 @@ class _TimelineLane extends StatefulWidget {
 }
 
 class _TimelineLaneState extends State<_TimelineLane> {
+  // #90: the clips are built in a window around the view, placed relative to its origin.
+  ScrollPosition? _pos;
+  TimelineWindow _shownWindow = TimelineWindow.all;
+
+  double _windowStepW = 0;
+
+  /// The window to build: the one shown while it still covers the view at the same zoom, else a new one around it.
+  TimelineWindow _window() {
+    final p = _pos;
+    if (p == null || !p.hasPixels || !p.hasViewportDimension) return TimelineWindow.all;
+    final w = widget.stepW;
+    if (w == _windowStepW && !_shownWindow.isAll &&
+        _shownWindow.covers(p.pixels / w, (p.pixels + p.viewportDimension) / w)) {
+      return _shownWindow;
+    }
+    return TimelineWindow.around(p.pixels, p.viewportDimension, w);
+  }
+
+  void _onScroll() {
+    if (!mounted) return;
+    if (_window() != _shownWindow) setState(() {});
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final p = Scrollable.maybeOf(context, axis: Axis.horizontal)?.position;
+    if (p == _pos) return;
+    _pos?.removeListener(_onScroll);
+    _pos = p?..addListener(_onScroll);
+  }
+
+  @override
+  void dispose() {
+    _pos?.removeListener(_onScroll);
+    super.dispose();
+  }
+
   /// A Ctrl+drag with the mouse in empty space draws a new empty clip (REAPER): from, to, in steps.
   (int, int)? _drawing;
   final _clicks = ClickCounter();
@@ -2420,6 +2461,13 @@ class _TimelineLaneState extends State<_TimelineLane> {
     final color = trackColor(state, layer);
     final leaving = EditMotion.of(context, EditMotionKind.clips);
     final appearing = _clipChanges(leaving);
+    final win = _shownWindow = _window();
+    _windowStepW = stepW;
+    // The first layout has no viewport yet: the window settles right after it, not on the first scroll.
+    if (win.isAll && _pos != null) WidgetsBinding.instance.addPostFrameCallback((_) => _onScroll());
+    // A clip outside the window isn't built, unless it is selected or a drag is on (it may be the one carried).
+    bool keep(String id, double start, double end) =>
+        win.shows(start, end) || widget.selectedIds.contains(id) || (widget.drag?.active ?? false);
     // A dropped effect or instrument goes on this track (an instrument asks before replacing one); a dropped
     // pattern or MIDI file becomes clips where it lands. On a folder, its first track inside takes it.
     final lane = DragTarget<AssetDrag>(
@@ -2487,7 +2535,7 @@ class _TimelineLaneState extends State<_TimelineLane> {
             for (final clip in layer.clips) (clip.startSteps.toDouble(), clip.lengthSteps.toDouble(),
                 (clip.color == null ? color : Neon.layer(clip.color!))
                     .withValues(alpha: clip.mute ? 0.3 : thin ? 0.8 : 0.32)),
-            for (final clip in layer.audioClips) (clip.startSteps.toDouble(), clip.lengthAt(state.project.bpm),
+            for (final clip in layer.audioClips) (clip.startSteps.toDouble(), clip.spanSteps(state.project.tempo),
                 audioClipColor(state, layer, clip).withValues(alpha: clip.mute ? 0.3 : 0.8)),
           ], stepW, inset: thin ? 1 : _clipInset(trackHeight), notes: thin ? const [] : [
             for (final clip in layer.clips)
@@ -2499,32 +2547,39 @@ class _TimelineLaneState extends State<_TimelineLane> {
           ]))))),
         if (thin) for (final clip in layer.clips) Positioned(left: clip.startSteps * stepW, top: 0, width: 1, height: 1,
             child: SizedBox(key: ValueKey('thin-clip-${clip.id}'))),
-      ] else ...[
-      for (final clip in layer.clips) () {
-        final rect = Rect.fromLTWH(clip.startSteps * stepW, _clipInset(trackHeight),
+      ] else Positioned(left: win.originStep * stepW, top: 0, width: win.width(stepW, widget.width), height: height,
+        child: Stack(key: ValueKey('lane-window-${layer.id}'), clipBehavior: Clip.none, children: [
+      for (final clip in layer.clips)
+        if (keep(clip.id, clip.startSteps.toDouble(), (clip.startSteps + clip.lengthSteps).toDouble())) () {
+        final rect = Rect.fromLTWH(win.x(clip.startSteps.toDouble(), stepW), _clipInset(trackHeight),
             math.max(12.0, clip.lengthSteps * stepW), trackHeight - 2 * _clipInset(trackHeight));
         final clipColor = clip.color == null ? color : Neon.layer(clip.color!);
-        _seen[clip.id] = (rect, clipColor, state.clipName(clip));
-        return ClipSlot(key: ValueKey('clip-slot-${clip.id}'), id: clip.id, rect: rect, scale: (stepW, trackHeight),
+        _seen[clip.id] = (rect.shift(Offset(win.originStep * stepW, 0)), clipColor, state.clipName(clip));
+        // The window's origin is in the scale: a new origin places the clips again without a glide.
+        return ClipSlot(key: ValueKey('clip-slot-${clip.id}'), id: clip.id, rect: rect,
+          scale: (stepW, trackHeight, win.originStep),
           appear: appearing.contains(clip.id),
           child: _TimelineClip(state: state, layer: layer, clip: clip, stepW: stepW, drag: widget.drag,
             height: rect.height, color: clipColor,
             selected: widget.selectedIds.contains(clip.id), callbacks: widget.callbacks));
       }(),
       for (final MapEntry(key: id, value: (rect, leftColor, name)) in _leaving.entries)
-        LeavingClip(key: ValueKey('clip-leaving-$id'), rect: rect, color: leftColor, name: name,
+        LeavingClip(key: ValueKey('clip-leaving-$id'), rect: rect.shift(Offset(-win.originStep * stepW, 0)),
+          color: leftColor, name: name,
           duration: leaving!, onDone: () { if (mounted) setState(() => _leaving.remove(id)); }),
       // Audio clips (API 18): an audio track's clips, with their own handles (audio_clip_view.dart).
+      // A fixed clip is as wide as its seconds on the tempo map (#208).
       for (final clip in layer.audioClips)
-        Positioned(left: clip.startSteps * stepW, top: _clipInset(trackHeight),
-          width: math.max(12.0, clip.lengthAt(state.project.bpm) * stepW),
+        if (keep(clip.id, clip.startSteps, clip.startSteps + clip.spanSteps(state.project.tempo)))
+        Positioned(left: win.x(clip.startSteps, stepW), top: _clipInset(trackHeight),
+          width: math.max(12.0, clip.spanSteps(state.project.tempo) * stepW),
           height: trackHeight - 2 * _clipInset(trackHeight),
           child: AudioClipView(key: ValueKey('audio-view-${clip.id}'), state: state, layer: layer, clip: clip,
             stepW: stepW, drag: widget.drag, height: trackHeight - 2 * _clipInset(trackHeight),
             color: audioClipColor(state, layer, clip), selected: widget.selectedIds.contains(clip.id),
             selectMode: widget.callbacks.selectMode, guides: widget.callbacks.guides,
             onOpen: () => widget.callbacks.onAudioOpen?.call(layer))),
-      ],
+      ])),
       if (_drawing case (final from, final to))
         Positioned(left: from * stepW, top: _clipInset(trackHeight), width: (to - from) * stepW,
           height: trackHeight - 2 * _clipInset(trackHeight), child: IgnorePointer(child: DecoratedBox(

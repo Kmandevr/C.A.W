@@ -205,6 +205,7 @@ class EngineAudioIo implements AudioIo {
   Future<Float32List?> peaks(String path, double start, double end, int buckets, {int channel = 0}) =>
       _off((a) => _peaks(a, path, start, end, buckets, channel)).then((v) => v);
 
+
   @override
   Future<List<InputDeviceInfo>> inputDevices() => Isolate.run(() {
         final b = AudioBindings.instance;
