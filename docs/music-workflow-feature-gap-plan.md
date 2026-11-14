@@ -2,7 +2,7 @@
 title: Music workflow implementation gaps
 summary: Factual snapshot of implemented and incomplete music-workflow capabilities; sequencing belongs to the permanent roadmap.
 covers: [app/lib/model/app_state.dart, app/lib/model/lane_curve.dart, app/lib/model/pattern_doc.dart, app/lib/model/poller.dart, app/lib/model/project.dart, app/lib/model/storage.dart]
-updated: 2026-11-13
+updated: 2026-11-14
 ---
 
 # Music workflow implementation gaps
@@ -20,7 +20,7 @@ This note records the current implementation gaps in C.A.W.'s music-production w
 - **[Implemented]** Opening straight into the last project; New, New from template and Open are in the project menu.
 - **[Implemented]** Pause and resume (Space) on the same beat, and Stop (Shift+Space) back to the start (2026-11-05, `caw_engine_play_at`).
 - **[Implemented]** Project-wide undo and redo in the transport (whole-project snapshots, one per burst of edits, 100 steps). Saves write the project through a temporary file, one write at a time, so a burst of saves always leaves the newest whole project on disk. Files › Projects lists projects with their metadata (created, last edited, saved-with version, tracks, length, tempo) in folders, with select mode and an undoable mass delete. The piano roll, library and automation keep their own histories too.
-- **[Implemented]** MIDI pattern import/export (.mid, .midi2) through the pattern editor. Imported MIDI tempo is not applied to project tempo.
+- **[Implemented]** MIDI pattern import/export (.mid, .midi2) through the pattern editor. A file imported as clips while no track has a clip brings its tempo map and time signatures (#207); otherwise its tempo is left out.
 - **[Implemented]** Curve tool for velocity and chance lane curves; per-note expression editors support pitch bend, pressure/volume, timbre and vibrato, including editable points and segment bends.
 - **[Implemented]** Pattern actions include Euclidean, random-in-key, arpeggiate, humanize, chord stamp, legato, reverse and pitch inversion.
 - **[Incomplete]** Kit-row routing, code-generated procedural patterns/Freeze, advanced quantization and groove/swing utilities remain future work.
@@ -32,7 +32,8 @@ This note records the current implementation gaps in C.A.W.'s music-production w
 - **[Implemented]** Arrangement-first horizontal timeline, track lanes, reusable MIDI clip sources, linked and independent duplicates, move/resize/split, source-offset shift, time selection, multi-selection/reference notes, nested folders and optional stereo folder buses. An adjustable gap between tracks and app-only spacer rows separate tracks on screen; each track has its own row height and a normal, compact or thin collapse state (app-only, saved; [app](app.md), Arranger).
 - **[Implemented]** Track and folder-bus volume/pan automation is serialized and played by the native engine.
 - **[Implemented]** Project/timeline automation lanes target module parameters by module ID or named project globals; the app edits song-time points and the native VM evaluates them per sample. Track volume/pan lanes remain separate.
-- **[Incomplete]** Audio clips, clip-following automation, tempo/time-signature maps, song markers/sections and consolidation/bounce.
+- **[Implemented]** Audio clips; a tempo map (stepped and ramped changes, a tempo lane), time signatures, sections and markers (batch 1.0.3, #207, C API 31): the engine plays every position on the map, sections move, copy and delete with their contents, and the recording count-in counts bars ([app](app.md), Arranger).
+- **[Incomplete]** Clip-following automation and consolidation/bounce.
 
 ### Mixer and signal flow
 
