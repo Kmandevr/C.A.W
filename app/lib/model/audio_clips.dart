@@ -2,6 +2,9 @@
 // clips, their engine JSON, and the pure edits (split, trim, fades, takes placed with latency compensation).
 import 'dart:math' as math;
 
+import '../engine/bindings.dart' show cawApiVersion;
+import 'tempo_map.dart';
+
 /// A fade's shape, as the engine names it.
 enum FadeCurve {
   slow('slow', 'Slow'),
@@ -135,6 +138,7 @@ class AudioClipDoc {
     this.pitch = 0,
     this.mode = AudioClipMode.fixed,
     this.stretch = AudioStretch.wsola,
+    this.stretchRatio = 1,
     this.sourceBpm,
     this.mute = false,
     this.lock = false,
@@ -160,10 +164,17 @@ class AudioClipDoc {
   bool reverse, loop;
   double loopStart, loopEnd;
 
-  /// Semitones −48..48.
+  /// Semitones −24..24 with a cents fraction (format v4 stores `pitch_cents`, −2400..2400); it never changes a
+  /// clip's length unless it plays [AudioStretch.varispeed].
   double pitch;
   AudioClipMode mode;
   AudioStretch stretch;
+
+  /// How much longer than the source a clip that doesn't follow the tempo plays (batch 1.0.4: the stretch notch),
+  /// [minStretch]..[maxStretch]; 1 plays the file as it is.
+  double stretchRatio;
+
+  /// The file's own tempo (detected on import or typed in); null until known, and Follows tempo needs it.
   double? sourceBpm;
   bool mute, lock;
   String? name;
@@ -174,8 +185,16 @@ class AudioClipDoc {
 
   static const double maxGain = 3.9810717055349722; // +12 dB
   static const double minLengthSteps = 1 / 16;
+  static const double minStretch = 0.25, maxStretch = 4;
+  static const int maxPitchCents = 2400;
 
   bool get fixed => mode == AudioClipMode.fixed;
+
+  /// The clip tab's Follows tempo switch: a musical clip, locked to the bars (format v4's `follows_tempo`).
+  bool get followsTempo => !fixed;
+
+  /// The pitch in whole cents (format v4's `pitch_cents`).
+  int get pitchCents => (pitch * 100).round();
 
   /// The clip's length in steps at [bpm]: a fixed clip's seconds at that tempo, a musical one's own steps.
   double lengthAt(double bpm) => fixed ? lengthSeconds * bpm / 15 : _lengthSteps;
@@ -199,21 +218,28 @@ class AudioClipDoc {
 
   /// Seconds of the file one step of the clip reads at [bpm].
   double sourcePerStep(double bpm, double? assetBpm) =>
-      (fixed ? 15 / bpm : 15 / sourceTempo(bpm, assetBpm)) * pitchRate;
+      (fixed ? 15 / bpm / stretchRatio : 15 / sourceTempo(bpm, assetBpm)) * pitchRate;
 
   /// How much of the file the clip reads, in seconds.
   double sourceSeconds(double bpm, double? assetBpm) => lengthAt(bpm) * sourcePerStep(bpm, assetBpm);
 
   String get gainLabel => gainDb(gain);
 
-  Map<String, dynamic> toJson() => {
+  /// The project file's clip (format v4, batch 1.0.4): `gain_db`, `fade_in`/`fade_out` as {seconds, curve},
+  /// `pitch_cents`, `follows_tempo`, `stretch` (the ratio) and `stretch_mode`, and the loop points in frames of the
+  /// file at its own rate ([rate], the asset's `source_rate`; 0 unknown: in seconds, as v3 kept them).
+  Map<String, dynamic> toJson({int rate = 0}) => {
         'id': id, 'asset': assetId, 'start_steps': startSteps, 'length_steps': _lengthSteps,
         if (fixed) 'length_seconds': lengthSeconds,
-        'offset_seconds': offsetSeconds, 'gain': gain,
-        'fade_in_seconds': fadeIn, 'fade_in_curve': fadeInCurve.json,
-        'fade_out_seconds': fadeOut, 'fade_out_curve': fadeOutCurve.json,
-        'reverse': reverse, 'loop': loop, 'loop_start_seconds': loopStart, 'loop_end_seconds': loopEnd,
-        'pitch': pitch, 'mode': mode.name, 'stretch': stretch.name,
+        // `gain_db` is the contract's; the linear `gain` beside it keeps the value exact through a save (a dB value
+        // doesn't come back bit for bit) and is used only while it agrees with `gain_db`.
+        'offset_seconds': offsetSeconds, 'gain_db': gainToDb(gain), 'gain': gain,
+        'fade_in': {'seconds': fadeIn, 'curve': fadeInCurve.json},
+        'fade_out': {'seconds': fadeOut, 'curve': fadeOutCurve.json},
+        'reverse': reverse, 'loop': loop,
+        if (rate > 0) ...{'loop_start': (loopStart * rate).round(), 'loop_end': (loopEnd * rate).round()}
+        else ...{'loop_start_seconds': loopStart, 'loop_end_seconds': loopEnd},
+        'pitch_cents': pitchCents, 'follows_tempo': followsTempo, 'stretch': stretchRatio, 'stretch_mode': stretch.name,
         if (sourceBpm != null) 'source_bpm': sourceBpm,
         'mute': mute,
         if (lock) 'lock': true,
@@ -222,25 +248,64 @@ class AudioClipDoc {
         if (takes.isNotEmpty) 'takes': takes,
       };
 
-  /// The engine's clip at [bpm] (docs/engine.md "Audio clips"); a fixed clip's length in steps comes from its
-  /// seconds at that tempo, so a tempo change never changes how long it plays.
-  Map<String, dynamic> toEngineJson(double bpm) => {
-        'id': id, 'asset': assetId, 'start_steps': startSteps, 'length_steps': lengthAt(bpm),
-        'offset_seconds': offsetSeconds, 'gain': gain,
-        'fade_in_seconds': fadeIn, 'fade_in_curve': fadeInCurve.json,
-        'fade_out_seconds': fadeOut, 'fade_out_curve': fadeOutCurve.json,
-        'reverse': reverse, 'loop': loop, 'loop_start_seconds': loopStart, 'loop_end_seconds': loopEnd,
-        'pitch': pitch, 'mode': mode.name, 'stretch': stretch.name,
-        if (sourceBpm != null) 'source_bpm': sourceBpm,
-        'mute': mute,
-      };
+  /// How many steps the clip spans on [tempo] (the project's map): a fixed clip's seconds from where it starts, so
+  /// under tempo changes it is drawn and sent at its true width; a musical clip its own steps.
+  double spanSteps(TempoMath tempo) {
+    if (!fixed) return _lengthSteps;
+    if (tempo.points.length == 1) return lengthSeconds * tempo.points.first.bpm / 15;
+    final from = startSteps / 4;
+    return math.max(minLengthSteps, (tempo.beatAt(tempo.secondsAt(from) + lengthSeconds) - from) * 4);
+  }
 
-  static AudioClipDoc? fromJson(Object? j) {
+  /// The engine's clip at [bpm] (docs/engine.md "Audio clips"); a fixed clip's length in steps comes from its
+  /// seconds at that tempo ([span]: its true width on the tempo map), so a tempo change never changes how long it
+  /// plays. [api] is the engine's C API: from 32 the batch 1.0.4 fields go as the contract names them; before it a
+  /// stretched fixed clip plays as a musical one whose source tempo is [bpm] × its ratio (the same speed on one tempo).
+  Map<String, dynamic> toEngineJson(double bpm, {double? span, int api = cawApiVersion}) {
+    final stretched = fixed && (stretchRatio - 1).abs() > 1e-9;
+    final emulate = stretched && api < 32;
+    return {
+      'id': id, 'asset': assetId, 'start_steps': startSteps, 'length_steps': span ?? lengthAt(bpm),
+      'offset_seconds': offsetSeconds, 'gain': gain,
+      'fade_in_seconds': fadeIn, 'fade_in_curve': fadeInCurve.json,
+      'fade_out_seconds': fadeOut, 'fade_out_curve': fadeOutCurve.json,
+      'reverse': reverse, 'loop': loop, 'loop_start_seconds': loopStart, 'loop_end_seconds': loopEnd,
+      'pitch': pitch, 'mode': emulate ? 'musical' : mode.name, 'stretch': stretch.name,
+      if (emulate) 'source_bpm': bpm * stretchRatio else if (sourceBpm != null) 'source_bpm': sourceBpm,
+      if (api >= 32) ...{
+        'follows_tempo': followsTempo, 'stretch_ratio': stretchRatio, 'pitch_cents': pitchCents,
+        'gain_db': _round(gainToDb(gain), 4),
+      },
+      'mute': mute,
+    };
+  }
+
+  /// A clip read from untrusted [j]: format v4's fields, or v3's (`gain`, `fade_in_seconds`, `pitch` in semitones,
+  /// `mode`, `stretch` as the algorithm), every number bounded. Loop points in frames need the file's [rate]
+  /// (0: unknown, and they are dropped).
+  static AudioClipDoc? fromJson(Object? j, {int rate = 0}) {
     if (j is! Map) return null;
     final id = _text(j['id'], 64), asset = _text(j['asset'], 64);
     if (id.isEmpty || asset.isEmpty) return null;
     final bpm = j['source_bpm'];
-    final mode = j['mode'] == 'musical' ? AudioClipMode.musical : AudioClipMode.fixed;
+    final follows = j['follows_tempo'];
+    final mode = (follows is bool ? follows : j['mode'] == 'musical') ? AudioClipMode.musical : AudioClipMode.fixed;
+    final rawStretch = j['stretch'];
+    final algorithm = rawStretch is String ? rawStretch : j['stretch_mode'];
+    final gainDbRaw = j['gain_db'];
+    (double, FadeCurve) fade(String key) {
+      final v4 = j[key];
+      if (v4 is Map) return (_num(v4['seconds'], 0, 0, 3600), FadeCurve.parse(v4['curve']));
+      return (_num(j['${key}_seconds'], 0, 0, 3600), FadeCurve.parse(j['${key}_curve']));
+    }
+    final (fadeIn, inCurve) = fade('fade_in');
+    final (fadeOut, outCurve) = fade('fade_out');
+    double loopPoint(String key) {
+      final frames = j[key];
+      if (frames is num && frames.isFinite) return rate > 0 ? (frames.toDouble() / rate).clamp(0.0, 3 * 3600.0) : 0;
+      return _num(j['${key}_seconds'], 0, 0, 3 * 3600);
+    }
+    final cents = j['pitch_cents'];
     return AudioClipDoc(
       id: id,
       assetId: asset,
@@ -248,18 +313,21 @@ class AudioClipDoc {
       lengthSteps: _num(j['length_steps'], 16, minLengthSteps, 2147483647),
       lengthSeconds: _num(j['length_seconds'], 0, 0, 3 * 3600 * 4),
       offsetSeconds: _num(j['offset_seconds'], 0, 0, 3 * 3600),
-      gain: _num(j['gain'], 1, 0, maxGain),
-      fadeIn: _num(j['fade_in_seconds'], 0, 0, 3600),
-      fadeInCurve: FadeCurve.parse(j['fade_in_curve']),
-      fadeOut: _num(j['fade_out_seconds'], 0, 0, 3600),
-      fadeOutCurve: FadeCurve.parse(j['fade_out_curve']),
+      gain: _gainOf(gainDbRaw, j['gain']),
+      fadeIn: fadeIn,
+      fadeInCurve: inCurve,
+      fadeOut: fadeOut,
+      fadeOutCurve: outCurve,
       reverse: j['reverse'] == true,
       loop: j['loop'] == true,
-      loopStart: _num(j['loop_start_seconds'], 0, 0, 3 * 3600),
-      loopEnd: _num(j['loop_end_seconds'], 0, 0, 3 * 3600),
-      pitch: _num(j['pitch'], 0, -48, 48),
+      loopStart: loopPoint('loop_start'),
+      loopEnd: loopPoint('loop_end'),
+      pitch: cents is num
+          ? _num(cents, 0, -maxPitchCents.toDouble(), maxPitchCents.toDouble()).roundToDouble() / 100
+          : _num(j['pitch'], 0, -24, 24),
       mode: mode,
-      stretch: j['stretch'] == 'varispeed' ? AudioStretch.varispeed : AudioStretch.wsola,
+      stretch: algorithm == 'varispeed' ? AudioStretch.varispeed : AudioStretch.wsola,
+      stretchRatio: rawStretch is num ? _num(rawStretch, 1, minStretch, maxStretch) : 1,
       sourceBpm: bpm is num && bpm.isFinite && bpm > 0 ? bpm.toDouble().clamp(20.0, 999.0) : null,
       mute: j['mute'] == true,
       lock: j['lock'] == true,
@@ -390,7 +458,7 @@ void setAudioClipMode(AudioClipDoc clip, AudioClipMode mode, {required double bp
 /// Changes [clip]'s pitch. A fixed varispeed clip reads faster or slower, so its length follows (engine docs).
 void setAudioClipPitch(AudioClipDoc clip, double semitones) {
   final before = clip.pitchRate;
-  clip.pitch = semitones.clamp(-48.0, 48.0).toDouble();
+  clip.pitch = ((semitones * 100).round() / 100).clamp(-24.0, 24.0).toDouble();
   if (clip.fixed && clip.stretch == AudioStretch.varispeed) clip.lengthSeconds *= before / clip.pitchRate;
 }
 
@@ -411,6 +479,19 @@ String _text(Object? raw, int max) {
   if (raw is! String) return '';
   final v = raw.trim();
   return v.length > max ? v.substring(0, max) : v;
+}
+
+/// A clip's gain from `gain_db` (v4) and `gain` (v3, and v4's exact copy): the linear one while it agrees.
+double _gainOf(Object? db, Object? linear) {
+  final exact = _num(linear, 1, 0, AudioClipDoc.maxGain);
+  if (db is! num || !db.isFinite) return exact;
+  final fromDb = dbToGain(_num(db, 0, -60, 12));
+  return linear is num && (gainToDb(exact) - db).abs() < 1e-6 ? exact : fromDb;
+}
+
+double _round(double v, int places) {
+  final k = math.pow(10, places);
+  return (v * k).round() / k;
 }
 
 double _num(Object? v, double or, double lo, double hi) =>
