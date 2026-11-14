@@ -52,7 +52,9 @@ TEST(component_bench_measures_an_effect) {
     CHECK_EQ(j.number("format", 0), 1.0);
     const Json* component = j.get("component");
     CHECK(component && component->string("kind") == "effect" && component->string("id") == "org.caw.tests.native-loader");
-    CHECK(j.number("mean_us", -1) >= 0 && j.number("p99_us", -1) >= j.number("mean_us", -1) * 0.5);
+    // Both measured and positive. No order between them is checked: the mean includes rare preemptions on a shared
+    // runner (CI's Linux x64 once had a mean over twice its p99), which the 99th percentile leaves out.
+    CHECK(j.number("mean_us", -1) > 0 && j.number("p99_us", -1) > 0);
     CHECK_NEAR(j.number("budget_us", 0), 1e6 * 64 / 48000, 1e-3);
     const auto checks = checksOf(j);
     for (const char* id : {"allocations", "denormals", "block_size_scaling", "sample_rate_scaling", "param_change_cost", "silence_cost"})

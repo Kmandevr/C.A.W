@@ -1,6 +1,6 @@
 # Handoff
 
-Commit: session branch with 1.0.4-alpha.1 ready for its PR (Main has v1.0.3-alpha.1, published)
+Commit: 941fd77 (session branch: 1.0.4-alpha.1 in PR #225; Main has v1.0.3-alpha.1, published)
 Branch: ccr-56285e11-0xrj3h. Main is protected: PRs only; merge yourself when CI is green. Publish a release with app.yml's workflow_dispatch (installables + release) on Main, which creates the tag. Each release needs a CHANGELOG.md entry (copied to app/assets/CHANGELOG.md).
 
 ## Goal
