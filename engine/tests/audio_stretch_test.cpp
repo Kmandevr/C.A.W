@@ -5,12 +5,18 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
+#include <functional>
+#include <random>
 #include <filesystem>
 #include <string>
 #include <thread>
 #include <vector>
 
 #include "asset_store.h"
+#include "audio_clips.h"
+#include "builtin_components.h"
+#include "module_registry.h"
 #include "audio_analysis.h"
 #include "caw.h"
 #include "clip_stretch.h"
@@ -21,6 +27,7 @@
 #include "tolerance.h"
 #include "utf8_path.h"
 #include "wav.h"
+#include "signalsmith-stretch/signalsmith-stretch.h"
 
 using namespace caw;
 
@@ -145,6 +152,59 @@ AudioAsset assetOf(const std::vector<float>& l) {
     a.frames = a.sourceFrames = static_cast<int64_t>(l.size());
     a.data[0] = l;
     return a;
+}
+
+// A player driven directly (no Engine), for its voice counts: blocks of 64 at a steady tempo.
+struct Player {
+    ModuleRegistry reg;
+    std::unique_ptr<ModuleProcessor> p;
+    double beat = 0, tempo = 120;
+    std::vector<float> out;
+    explicit Player(double rate = 48000) {
+        registerBuiltinComponents(reg);
+        p = reg.create(kAudioTrackId);
+        CHECK(p != nullptr);
+        if (p) CHECK(p->activate(rate, 64));
+    }
+    void set(const std::vector<AudioClipSpec>& clips, double rate = 48000) {
+        ComponentSpec cs;
+        cs.id = kAudioTrackId;
+        auto t = std::make_shared<AudioTrackSpec>();
+        t->clips = clips;
+        cs.audioTrack = t;
+        applyAudioTrack(*p, cs, rate);
+    }
+    void run(int frames) {
+        float l[64], r[64];
+        float* ch[2] = {l, r};
+        ChannelBufferView view{ch, 2, 64};
+        Transport tr;
+        tr.tempo = tempo;
+        tr.playing = true;
+        ProcessBlock b;
+        b.frames = 64;
+        b.audioOut = &view;
+        b.audioOutCount = 1;
+        b.transport = &tr;
+        for (int i = 0; i < frames; i += 64) {
+            tr.beat = beat;
+            p->processPorts(b);
+            out.insert(out.end(), l, l + 64);
+            beat += 64.0 * tempo / 60.0 / 48000.0;
+        }
+    }
+    AudioTrackStats stats() const { return audioTrackStats(*p); }
+};
+
+AudioClipSpec hqClip(const std::string& id, const std::string& path, double start, double length, double ratio = 1.2) {
+    AudioClipSpec c;
+    c.id = id;
+    c.path = path;
+    c.startSteps = start;
+    c.lengthSteps = length;
+    c.hq = true;
+    c.stretchRatio = ratio;
+    return c;
 }
 
 std::string cjson(char* p) {
@@ -553,5 +613,224 @@ TEST(stretchers_arrive_while_the_audio_thread_plays) {
     audio.join();
     CHECK_EQ(ok, 8);
     CHECK(peak.load() > 0.01f);
+    std::filesystem::remove_all(utf8Path(dir));
+}
+
+// ---------------------------------------------------------------- the audio review's findings (2026-11-14)
+
+TEST(the_bridge_into_signalsmith_keeps_its_level_through_the_crossfade) {
+    // A voice joining mid-clip (play from step 9 inside a clip from step 4) plays WSOLA, then crossfades into
+    // Signalsmith (good at 4320, the crossfade from 4576 to 5088), moved to WSOLA's phase, its gains keeping the sum's
+    // power for the two signals' correlation. For steady sines every 128 frames from 4096 to 5632 stays within 1 dB
+    // of the same song time played by Signalsmith alone (the clip reached from ahead, pre-rolled, at the lag); for a
+    // tonal loop the level stays within 1 dB of the level on either side.
+    const std::string dir = tempDir("bridge");
+    struct Src {
+        const char* name;
+        std::function<float(int64_t, int)> f;
+    };
+    const Src srcs[] = {
+        {"sine 440", [](int64_t i, int) { return 0.5f * static_cast<float>(std::sin(2 * kPi * 440.0 * static_cast<double>(i) / 48000)); }},
+        {"sine 110", [](int64_t i, int) { return 0.5f * static_cast<float>(std::sin(2 * kPi * 110.0 * static_cast<double>(i) / 48000)); }},
+        {"sine 3000", [](int64_t i, int) { return 0.5f * static_cast<float>(std::sin(2 * kPi * 3000.0 * static_cast<double>(i) / 48000)); }},
+        {"tonal loop", tonalAt},
+    };
+    const std::string clip = ",\"start_steps\":4,\"length_steps\":12,\"stretch\":\"signalsmith\",\"stretch_ratio\":1.2";
+    for (const Src& src : srcs) {
+        const std::string p = writeWav(dir + "/" + std::string(src.name).substr(0, 4) + std::to_string(std::strlen(src.name)) + ".wav",
+                                       48000, 96000, src.f);
+        const Render mid = render(clipProject(p, clip), 12000, 512, 9);   // song time 54000 + t
+        const Render ref = render(clipProject(p, clip), 54000 + 13000);  // pre-rolled: no bridge
+        // The bridge moves Signalsmith by a lag to WSOLA's phase (taken back out later): find it after the crossfade.
+        int lag = 0;
+        double best = -1e300;
+        for (int d = -300; d <= 300; ++d) {
+            double c = 0;
+            for (size_t i = 6000; i < 8000; ++i) c += static_cast<double>(mid.l[i]) * ref.l[static_cast<size_t>(54000 + static_cast<int>(i) + d)];
+            if (c > best) best = c, lag = d;
+        }
+        auto db = [&](size_t a) {
+            const size_t b = static_cast<size_t>(54000 + static_cast<int>(a) + lag);
+            return 20 * std::log10(rms(mid.l, a, a + 128) / rms(ref.l, b, b + 128));
+        };
+        double worst = 0;
+        const bool chord = std::string(src.name) == "tonal loop";
+        if (!chord) {
+            for (size_t a = 4096; a + 128 <= 5632; a += 128) worst = std::max(worst, std::fabs(db(a)));
+        } else {
+            // A chord: a phase vocoder's partials keep no common phase with WSOLA's, so no one lag lines them all up,
+            // nor do two Signalsmith runs started apart agree on how the partials beat (here about 1.2 dB louder
+            // throughout). So: 2048-frame windows (the partials beat over about 24 ms), against Signalsmith alone, less
+            // that steady difference measured after the crossfade, within 1.5 dB (the dip before was 5 to 8 dB).
+            auto db2 = [&](size_t a) {
+                const size_t b = static_cast<size_t>(54000 + static_cast<int>(a) + lag);
+                return 20 * std::log10(rms(mid.l, a, a + 2048) / rms(ref.l, b, b + 2048));
+            };
+            double base = 0;
+            int n = 0;
+            for (size_t a = 6400; a + 2048 <= 10000; a += 128, ++n) base += db2(a);
+            base /= n;
+            for (size_t a = 3584; a + 2048 <= 6656; a += 128) worst = std::max(worst, std::fabs(db2(a) - base));
+        }
+        const double limit = chord ? 1.5 : 1.0;
+        if (worst > limit) {
+            std::printf("  %s: %.2f dB off around the crossfade (lag %d):", src.name, worst, lag);
+            for (size_t a = 3584; a + 128 <= 6144; a += 128) std::printf(" %.1f", db(a));
+            std::printf("\n");
+        }
+        CHECK(worst <= limit);
+    }
+    std::filesystem::remove_all(utf8Path(dir));
+}
+
+TEST(a_loop_wrap_starts_signalsmith_from_a_preroll_not_a_bridge) {
+    // The clip at the loop's start gets a spare voice a pre-roll before each wrap, so its second pass plays exactly
+    // as a clip reached from ahead of the playhead does (the same bits), not through the WSOLA bridge.
+    const std::string dir = tempDir("wrap");
+    const std::string p = writeWav(dir + "/t.wav", 48000, 192000, tonalAt);
+    const std::string clip = ",\"length_steps\":32,\"stretch\":\"signalsmith\",\"stretch_ratio\":1.2";
+    const Render looped = render(clipProject(p, ",\"start_steps\":0" + clip, 2), 192000 + 48000);  // a 4 s loop
+    const Render ahead = render(clipProject(p, ",\"start_steps\":32" + clip, 4), 192000 + 48000);
+    bool same = true;
+    for (size_t i = 192000; i < 240000; ++i) same = same && looped.l[i] == ahead.l[i] && looped.r[i] == ahead.r[i];
+    CHECK(same);
+    CHECK(rms(looped.l, 192000, 192480) > 0.05);
+    std::filesystem::remove_all(utf8Path(dir));
+}
+
+TEST(signalsmith_replays_bit_identical_past_a_2x_stretch) {
+    // reset() reseeds the library's random phases (a local change to the vendored header), so a replay at ratio 3,
+    // where it draws them, gives the same bits.
+    const std::string dir = tempDir("replay");
+    const std::string p = writeWav(dir + "/t.wav", 48000, 96000, tonalAt);
+    for (const char* f : {",\"length_steps\":16,\"stretch\":\"signalsmith\",\"stretch_ratio\":3",
+                          ",\"start_steps\":4,\"length_steps\":12,\"stretch\":\"signalsmith\",\"stretch_ratio\":3"}) {
+        Engine e(48000);
+        e.setMasterBypass(true);
+        CHECK(e.setProjectJson(clipProject(p, f, 4)).find("\"ok\":true") != std::string::npos);
+        std::vector<float> a(48000), b(48000), r(48000);
+        e.play(0);
+        for (int i = 0; i < 48000; i += 512) e.process(a.data() + i, r.data() + i, std::min(512, 48000 - i));
+        e.stop();
+        for (int i = 0; i < 4800; i += 512) e.process(r.data(), r.data() + 512, 512);  // the stop's fade
+        e.play(0);
+        for (int i = 0; i < 48000; i += 512) e.process(b.data() + i, r.data() + i, std::min(512, 48000 - i));
+        CHECK(a == b);
+        CHECK(rms(a, 24000, 48000) > 0.05);
+    }
+    // The draws themselves: raw minstd output mapped by fixed arithmetic, the same on every standard library.
+    std::minstd_rand engine(0x00c0ffee);
+    const signalsmith::stretch::_impl::FixedUniform<float> u{-1.0f, 3.0f};
+    uint32_t bits[5];
+    for (uint32_t& b : bits) {
+        const float v = u(engine);
+        std::memcpy(&b, &v, 4);
+    }
+    const uint32_t pinned[5] = {0x3e7837e0u, 0x403b1077u, 0x3eab5dccu, 0x401346b4u, 0x4030809fu};
+    for (int i = 0; i < 5; ++i) {
+        if (bits[i] != pinned[i]) std::printf("  draw %d: 0x%08x\n", i, bits[i]);
+        CHECK_EQ(bits[i], pinned[i]);
+    }
+    std::filesystem::remove_all(utf8Path(dir));
+}
+
+TEST(a_track_plays_at_most_eight_signalsmith_voices_and_upgrades_when_one_frees) {
+    const std::string dir = tempDir("cap");
+    const std::string p = writeWav(dir + "/t.wav", 48000, 96000, tonalAt);
+    Player pl;
+    std::vector<AudioClipSpec> clips;
+    for (int k = 0; k < 10; ++k) clips.push_back(hqClip("c" + std::to_string(k), p, 0, k < 3 ? 4 : 16, 1.1 + 0.05 * k));
+    pl.set(clips);
+    pl.run(64 * 20);
+    AudioTrackStats st = pl.stats();
+    CHECK_EQ(st.stretchers, 10);  // the cap (8) plus a fading voice and a spare
+    CHECK_EQ(st.hqVoices, 8);
+    CHECK_EQ(st.wsolaVoices, 2);
+    pl.run(48000 * 2 / 3);  // past step 4 (0.5 s): three clips ended
+    st = pl.stats();
+    CHECK_EQ(st.hqVoices, 7);  // the two on WSOLA took the stretchers the ended clips let go
+    CHECK_EQ(st.wsolaVoices, 0);
+    std::filesystem::remove_all(utf8Path(dir));
+}
+
+TEST(the_stretcher_pool_follows_the_overlap_and_the_sample_rate) {
+    const std::string dir = tempDir("pool");
+    const std::string p = writeWav(dir + "/t.wav", 48000, 96000, tonalAt);
+    Player pl;
+    // Four clips one after another: neighbours overlap only by a pre-roll, so two at once, plus two.
+    std::vector<AudioClipSpec> clips;
+    for (int k = 0; k < 4; ++k) clips.push_back(hqClip("c" + std::to_string(k), p, 4.0 * k, 4));
+    pl.set(clips);
+    pl.run(64 * 4);
+    CHECK_EQ(pl.stats().stretchers, 4);
+    // One clip: the pool shrinks (the rest are freed with the old timeline, on the control thread).
+    pl.set({hqClip("c0", p, 0, 4)});
+    pl.run(64 * 4);
+    CHECK_EQ(pl.stats().stretchers, 3);
+    // None: no stretchers.
+    AudioClipSpec plain = hqClip("w", p, 0, 4);
+    plain.hq = false;
+    pl.set({plain});
+    pl.run(64 * 4);
+    CHECK_EQ(pl.stats().stretchers, 0);
+    // A new rate: stretchers prepared again at it.
+    Player pl2(44100);
+    pl2.set({hqClip("c0", p, 0, 4)}, 48000);
+    pl2.run(64);
+    CHECK_EQ(pl2.stats().stretcherRate, 48000.0);
+    pl2.set({hqClip("c0", p, 0, 4), hqClip("c1", p, 8, 4)}, 44100);
+    pl2.run(64);
+    CHECK_EQ(pl2.stats().stretcherRate, 44100.0);
+    std::filesystem::remove_all(utf8Path(dir));
+}
+
+TEST(a_clip_following_a_ramp_renders_the_same_at_every_block_size) {
+    // Each 64-frame chunk's feed is worked out from the tempo map at its own frame, so the host's blocks don't matter.
+    const std::string dir = tempDir("rampblocks");
+    const std::string p = writeWav(dir + "/t.wav", 48000, 48000 * 8, tonalAt);
+    const std::string top = "\"tempo_map\":[{\"beat\":0,\"bpm\":120},{\"beat\":1,\"bpm\":120},{\"beat\":12,\"bpm\":70,\"ramp\":true}],";
+    for (const char* algo : {"signalsmith", "wsola", "varispeed"}) {
+        const std::string f = std::string(",\"length_steps\":48,\"stretch\":\"") + algo +
+                              "\",\"follows_tempo\":true,\"source_bpm\":120";
+        const Render a = render(clipProject(p, f, 4, 120, top), 150000, 512);
+        for (int b : {37, 441}) {
+            const bool equal = same(render(clipProject(p, f, 4, 120, top), 150000, b), a);
+            if (!equal) std::printf("  %s: block %d differs from 512\n", algo, b);
+            CHECK(equal);
+        }
+    }
+    std::filesystem::remove_all(utf8Path(dir));
+}
+
+TEST(slices_read_the_asset_in_place_at_any_offset) {
+    // The analysis reads the asset where it lies (no copy of the range, so 600 s take about 2-3 MB: docs/engine.md):
+    // the same hits 100 s into a file are found as at its start, moved by 100 s.
+    const std::string dir = tempDir("inplace");
+    const double times[] = {0.2, 0.55, 0.9, 1.4};
+    auto hits = [&](double t0) {
+        return [&, t0](int64_t i, int c) {
+            double v = 0;
+            for (double h : times) {
+                const double t = static_cast<double>(i) / 48000.0 - t0 - h;
+                if (t >= 0 && t < 0.1) v += 0.7 * noiseAt(i, c) * std::exp(-t / 0.02);
+            }
+            return static_cast<float>(v);
+        };
+    };
+    const std::string early = writeWav(dir + "/a.wav", 48000, 48000 * 2, hits(0));
+    const std::string late = writeWav(dir + "/b.wav", 48000, 48000 * 102, hits(100));
+    std::string error;
+    const auto a = AssetStore::global().load(early, 48000, error);
+    const auto b = AssetStore::global().load(late, 48000, error);
+    CHECK(a && b);
+    if (!a || !b) return;
+    SliceOptions o;
+    const std::vector<Slice> sa = detectSlices(*a, o);
+    o.startSeconds = 100;
+    o.endSeconds = 102;
+    const std::vector<Slice> sb = detectSlices(*b, o);
+    CHECK_EQ(sa.size(), static_cast<size_t>(4));
+    CHECK_EQ(sb.size(), sa.size());
+    for (size_t k = 0; k < sa.size() && k < sb.size(); ++k) CHECK_NEAR(sb[k].seconds - 100.0, sa[k].seconds, 0.001);
     std::filesystem::remove_all(utf8Path(dir));
 }

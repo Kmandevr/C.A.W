@@ -279,7 +279,15 @@ struct Timeline {
     uint64_t serial = 0, baseSerial = 0;
     std::vector<int> prevIndex;  // for each clip, its index in timeline baseSerial (-1: new)
     double maxLength = 0;        // the longest clip, in steps
+    // Signalsmith stretchers for this timeline's clips (made or kept on the control thread; the audio thread only uses
+    // them). Those a newer timeline doesn't keep are freed with this one, on the control thread.
+    std::vector<std::shared_ptr<HqStretcher>> pool;
+    int hqLatency = 0;           // the stretchers' output latency (the pre-roll), 0 with none
 };
+
+// Signalsmith voices one track plays at once; more play WSOLA (each costs about 1.1% of a desktop core; the phone's
+// figure is to measure). [Assumption] 8 covers a track's overlapping loops and one-shots.
+constexpr int kMaxHqVoices = 8;
 
 double curve(FadeCurve c, double u) noexcept {
     u = u < 0 ? 0 : (u > 1 ? 1 : u);
@@ -337,7 +345,6 @@ public:
         t->input = spec.input;
         t->serial = ++serial_;
         t->baseSerial = lastSerial_;
-        int hqClips = 0;
         for (const AudioClipSpec& c : spec.clips) {
             CompiledClip cc;
             cc.spec = c;
@@ -367,7 +374,6 @@ public:
             }
             cc.offsetFrames = sampletime::roundFrames(c.offsetSeconds, rate);
             cc.pitchRatio = detPow(2.0, (c.pitch + c.pitchCents / 100.0) / 12.0);
-            if (c.hq) ++hqClips;
             cc.fadeIn = static_cast<int64_t>(std::llround(c.fadeInSeconds * rate));
             cc.fadeOut = static_cast<int64_t>(std::llround(c.fadeOutSeconds * rate));
             t->maxLength = std::max(t->maxLength, c.lengthSteps);
@@ -383,7 +389,7 @@ public:
                 }
         lastClips_.clear();
         for (const CompiledClip& c : t->clips) lastClips_.push_back({c.spec.id, c.asset.get()});
-        growStretchers(std::min(2 * hqClips, kMaxStretchers), rate);
+        buildPool(*t, rate);
         lastSerial_ = t->serial;
         signature_ = std::move(sig);
         compiledRate_ = rate;
@@ -446,12 +452,28 @@ public:
         const uint64_t serial = tm ? song->serial : 0;
         const bool retimed = tm || lastMapped_ ? serial != lastSongSerial_ : tempo != lastTempo_;
         if (pos != expected_) {
-            for (Voice& v : voices_) fadeOut(v);  // a seek or a loop wrap: every voice starts again
+            // A seek or a loop wrap: every voice starts again, except the spares pre-rolled for exactly this wrap,
+            // which take over (their clips need no bridge).
+            const bool wrapped = expected_ >= 0 && spareLands_ >= 0 && std::llabs(pos - spareLands_) <= 1;
+            for (Voice& v : voices_) {
+                if (v.spare && v.active && wrapped) {
+                    v.spare = false;
+                    v.inAt = 0;
+                    v.inLen = v.spareMidClip ? declick_ : 0;
+                    continue;
+                }
+                if (v.spare) v.active = false;
+                else fadeOut(v);
+            }
         } else if (retimed) {
             // A tempo change: musical clips follow the new grid (they start again, declicked); fixed clips keep
             // the source position they are at (their voice's mapping moves by what the clip's start moved).
             for (Voice& v : voices_) {
                 if (!v.active || v.clip < 0) continue;
+                if (v.spare) {
+                    v.active = false;
+                    continue;
+                }
                 const CompiledClip& c = tl->clips[static_cast<size_t>(v.clip)];
                 if (c.spec.musical) {
                     fadeOut(v);
@@ -462,6 +484,7 @@ public:
                 v.drift = here - (c.offsetFrames + v.slope * static_cast<double>(pos - cs));
             }
         }
+        spareLands_ = -1;
         if (expected_ < 0 && !anyActive()) clock_ = pos;  // a fresh start: the player's time is the song's
         const int64_t shift = clock_ - pos;
         expected_ = pos + m;
@@ -469,15 +492,12 @@ public:
         lastSongSerial_ = serial;
         lastMapped_ = tm != nullptr;
         const int64_t end = pos + m;
+        Ctx ctx{tl, tm, tempo, stepLen};
         // Clips are sorted by start, and none is longer than maxLength: the first that can reach pos.
-        const double from = (tm ? tm->stepAt(static_cast<double>(pos)) : static_cast<double>(pos) / stepLen) - tl->maxLength - 1.0;
-        const size_t first = static_cast<size_t>(
-            std::partition_point(tl->clips.begin(), tl->clips.end(),
-                                 [&](const CompiledClip& c) { return c.spec.startSteps < from; }) - tl->clips.begin());
+        const size_t first = firstClip(ctx, pos);
         for (Voice& v : voices_) v.seen = false;
-        // Signalsmith voices start this many frames before their clip, silent, so their output is valid when heard.
-        const int ready = hqReady_.load(std::memory_order_acquire);
-        const int64_t preroll = ready > 0 ? hq_[0]->outputLatency() : 0;
+        // Signalsmith voices start this many frames before their clip, silent, so their output is good when heard.
+        const int64_t preroll = tl->hqLatency;
         for (size_t ci = first; ci < tl->clips.size(); ++ci) {
             const CompiledClip& c = tl->clips[ci];
             const int64_t cs = frameOf(c.spec.startSteps);
@@ -493,35 +513,11 @@ public:
                 if (v) fadeOut(*v);
                 continue;
             }
-            // How fast the source moves: anchorT (a song frame), anchorS and slope give s(t) = anchorS + slope *
-            // (t - anchorT). A clip following the tempo under a map of more than one tempo (API 32) is placed by song
-            // step (offset + (step - start) source frames per step at source_bpm), its rate the tempo here / source_bpm,
-            // worked out again each chunk; otherwise as before the map (fixed: the file's speed over stretch_ratio).
-            const bool follows = c.spec.musical && tm;
-            double anchorT = static_cast<double>(cs), anchorS = c.offsetFrames, slope;
-            if (follows) {
-                const double fps = 15.0 * sr_ / c.spec.sourceBpm;  // source frames per step
-                anchorT = static_cast<double>(pos);
-                anchorS = c.offsetFrames + (tm->stepAt(static_cast<double>(pos)) - c.spec.startSteps) * fps;
-                slope = tm->bpmAtFrame(static_cast<double>(pos)) / c.spec.sourceBpm;
-            } else if (c.spec.musical) {
-                slope = tempo / c.spec.sourceBpm;
-            } else {
-                slope = (c.spec.varispeed ? c.pitchRatio : 1.0) / c.spec.stretchRatio;
-            }
-            ReadMode mode;
-            double pitch = 1;
-            if (c.spec.varispeed) {
-                mode = slope == 1.0 && !follows ? ReadMode::Direct : ReadMode::Varispeed;
-            } else {
-                pitch = c.pitchRatio;
-                const bool direct = slope == 1.0 && pitch == 1.0 && !follows;
-                mode = direct ? ReadMode::Direct : (c.spec.hq ? ReadMode::Hq : ReadMode::Stretch);
-            }
-            const int64_t lead = mode == ReadMode::Hq ? as : cs;
+            const Plan pl = plan(ctx, c, pos);
+            const int64_t lead = pl.mode == ReadMode::Hq ? as : cs;
             const int64_t a = std::max(pos, lead), z = std::min(end, ce);
             if (a >= z) continue;  // a Direct clip not reached yet
-            if (v && (v->want != mode || v->reader.pitch() != pitch)) {
+            if (v && (v->want != pl.mode || v->reader.pitch() != pl.pitch)) {
                 fadeOut(*v);
                 v = nullptr;
             }
@@ -529,23 +525,10 @@ public:
                 if (playingVoices() >= kAudioClipVoices) continue;  // more clips at once than that: this one is skipped
                 v = freeVoice();
                 if (!v) continue;
-                v->active = v->seen = true;
-                v->clip = static_cast<int>(ci);
-                v->drift = 0;
-                v->fadeLeft = 0;
-                v->inAt = 0;
+                startVoice(*v, ctx, static_cast<int>(ci), pl, a, shift, std::max(a, cs));
                 v->inLen = a > cs ? declick_ : 0;  // started mid-clip: faded in
-                v->want = mode;
-                v->hq = -1;
-                HqStretcher* h = mode == ReadMode::Hq ? claimStretcher(*v, ready) : nullptr;
-                v->reader.start(c.src, mode, pitch, a + shift, anchorS + slope * (static_cast<double>(a) - anchorT), slope,
-                                h, static_cast<int64_t>(c.offsetFrames), std::max(a, cs) + shift);
             }
-            v->anchorT = static_cast<int64_t>(anchorT) + shift;
-            v->anchorS = anchorS + (follows ? 0.0 : v->drift);
-            v->slope = slope;
-            v->reader.setSource(c.src);
-            v->reader.setMapping(v->anchorT, v->anchorS, v->slope);
+            follow(*v, ctx, c, pl, shift, a + shift);
             const float g = static_cast<float>(c.spec.gain);
             for (int64_t t = a; t < z; ++t) {
                 if (t < cs) {  // a Signalsmith voice's pre-roll: silent
@@ -567,14 +550,31 @@ public:
             v->reader.render(a + shift, static_cast<int>(z - a), gain_ + (a - pos), L + (a - pos), R + (a - pos));
             if (z >= ce) v->active = false;  // the clip ended in this block (its own fade-out shapes that)
         }
+        prerollWrap(ctx, pos, end, shift, preroll);
         // Voices whose clip is gone from under the playhead.
         for (Voice& v : voices_)
-            if (!v.seen && v.clip >= 0) fadeOut(v);
+            if (!v.seen && v.clip >= 0 && !v.spare) fadeOut(v);
         finish(t0, m, L, R);
         return true;
     }
 
     ~AudioTrackPlayer() override { delete held_; }
+
+    AudioTrackStats stats() const noexcept {
+        AudioTrackStats st;
+        for (const Voice& v : voices_) {
+            if (!v.active) continue;
+            ++st.voices;
+            st.spares += v.spare;
+            if (v.reader.mode() == ReadMode::Hq) ++st.hqVoices;
+            else if (v.reader.mode() == ReadMode::Stretch) ++st.wsolaVoices;
+        }
+        if (const Timeline* t = timeline_.current()) {
+            st.stretchers = static_cast<int>(t->pool.size());
+            st.stretcherRate = t->pool.empty() ? 0 : t->pool.front()->sampleRate();
+        }
+        return st;
+    }
 
 private:
     struct Voice {
@@ -588,7 +588,8 @@ private:
         double anchorS = 0, slope = 1;
         double drift = 0;            // source frames added to a fixed clip's mapping since a tempo change
         ReadMode want = ReadMode::Direct;  // the mode the clip asked for (Hq may play as Stretch without a stretcher)
-        int hq = -1;                 // the stretcher it holds (index into hq_), -1 none
+        bool spare = false;          // pre-rolled, silent, for its clip at the loop's start after a wrap
+        bool spareMidClip = false;   // that clip is already sounding where the loop lands (fade in when adopted)
         ClipReader reader;
     };
     // Fades a sounding voice out over the declick (it keeps reading where it was) instead of cutting it.
@@ -633,7 +634,7 @@ private:
     }
     Voice* voiceFor(int clip) noexcept {
         for (Voice& v : voices_)
-            if (v.active && v.clip == clip) return &v;
+            if (v.active && !v.spare && v.clip == clip) return &v;
         return nullptr;
     }
     // A free voice, else the fading one closest to silence (cut).
@@ -646,26 +647,199 @@ private:
         if (best) best->active = false;
         return best;
     }
-    // A stretcher no other active voice holds (audio thread; the first `ready` are published).
-    HqStretcher* claimStretcher(Voice& self, int ready) noexcept {
-        for (int i = 0; i < ready; ++i) {
-            bool used = false;
-            for (const Voice& v : voices_) used |= &v != &self && v.active && v.hq == i;
-            if (!used && hq_[i]->sampleRate() == sr_) {
-                self.hq = i;
-                return hq_[i].get();
+    // ---- the voices' plans (audio thread)
+    struct Ctx {
+        const Timeline* tl;
+        const TempoMap* tm;  // a map of more than one tempo, else null
+        double tempo, stepLen;
+        int64_t frameOfStep(double step) const noexcept {
+            return static_cast<int64_t>(tm ? tm->roundFrame(step) : sampletime::roundFrames(step, stepLen));
+        }
+    };
+    struct Plan {
+        ReadMode mode = ReadMode::Direct;
+        double pitch = 1, anchorT = 0, anchorS = 0, slope = 1;
+        bool follows = false;
+        double fps = 0;  // source frames per step (following a map)
+    };
+    size_t firstClip(const Ctx& x, int64_t at) const noexcept {
+        const double from = (x.tm ? x.tm->stepAt(static_cast<double>(at)) : static_cast<double>(at) / x.stepLen) -
+                            x.tl->maxLength - 1.0;
+        return static_cast<size_t>(std::partition_point(x.tl->clips.begin(), x.tl->clips.end(),
+                                                        [&](const CompiledClip& c) { return c.spec.startSteps < from; }) -
+                                   x.tl->clips.begin());
+    }
+    // How fast the source moves at song frame `at`: s(f) = anchorS + slope * (f - anchorT). A clip following the
+    // tempo under a map of more than one tempo (API 32) is placed by song step (offset + (step - start) source frames
+    // per step at source_bpm), read through the map at each frame (ClipReader::SongMap); otherwise as before the map
+    // (fixed: the file's speed over stretch_ratio).
+    Plan plan(const Ctx& x, const CompiledClip& c, int64_t at) const noexcept {
+        Plan p;
+        p.follows = c.spec.musical && x.tm;
+        p.anchorT = static_cast<double>(x.frameOfStep(c.spec.startSteps));
+        p.anchorS = c.offsetFrames;
+        if (p.follows) {
+            p.fps = 15.0 * sr_ / c.spec.sourceBpm;
+            p.anchorT = static_cast<double>(at);
+            p.anchorS = c.offsetFrames + (x.tm->stepAt(static_cast<double>(at)) - c.spec.startSteps) * p.fps;
+            p.slope = x.tm->bpmAtFrame(static_cast<double>(at)) / c.spec.sourceBpm;
+        } else if (c.spec.musical) {
+            p.slope = x.tempo / c.spec.sourceBpm;
+        } else {
+            p.slope = (c.spec.varispeed ? c.pitchRatio : 1.0) / c.spec.stretchRatio;
+        }
+        if (c.spec.varispeed) {
+            p.mode = p.slope == 1.0 && !p.follows ? ReadMode::Direct : ReadMode::Varispeed;
+        } else {
+            p.pitch = c.pitchRatio;
+            const bool direct = p.slope == 1.0 && p.pitch == 1.0 && !p.follows;
+            p.mode = direct ? ReadMode::Direct : (c.spec.hq ? ReadMode::Hq : ReadMode::Stretch);
+        }
+        return p;
+    }
+    void songMap(Voice& v, const Ctx& x, const CompiledClip& c, const Plan& p, int64_t shift) noexcept {
+        ClipReader::SongMap sm;
+        if (p.follows) {
+            sm.map = x.tm;
+            sm.shift = shift;
+            sm.offset = c.offsetFrames;
+            sm.start = c.spec.startSteps;
+            sm.framesPerStep = p.fps;
+        }
+        v.reader.setSongMap(sm);
+    }
+    // A voice for clip `ci` from song frame a (player time a + shift), heard from `heard`.
+    void startVoice(Voice& v, const Ctx& x, int ci, const Plan& p, int64_t a, int64_t shift, int64_t heard) noexcept {
+        const CompiledClip& c = x.tl->clips[static_cast<size_t>(ci)];
+        v.active = v.seen = true;
+        v.spare = v.spareMidClip = false;
+        v.clip = ci;
+        v.drift = 0;
+        v.fadeLeft = 0;
+        v.inAt = v.inLen = 0;
+        v.lastGain = 0;
+        v.want = p.mode;
+        songMap(v, x, c, p, shift);
+        HqStretcher* h = p.mode == ReadMode::Hq ? claimStretcher(v) : nullptr;
+        v.reader.start(c.src, p.mode, p.pitch, a + shift, p.anchorS + p.slope * (static_cast<double>(a) - p.anchorT),
+                       p.slope, h, static_cast<int64_t>(c.offsetFrames), heard + shift);
+    }
+    // Each block: the voice's mapping, and a stretcher for one that wanted Signalsmith and had to start on WSOLA
+    // (from player time `at`, bridged by the WSOLA it plays).
+    void follow(Voice& v, const Ctx& x, const CompiledClip& c, const Plan& p, int64_t shift, int64_t at) noexcept {
+        v.anchorT = static_cast<int64_t>(p.anchorT) + shift;
+        v.anchorS = p.anchorS + (p.follows ? 0.0 : v.drift);
+        v.slope = p.slope;
+        v.reader.setSource(c.src);
+        v.reader.setMapping(v.anchorT, v.anchorS, v.slope);
+        songMap(v, x, c, p, shift);
+        if (v.want == ReadMode::Hq && v.reader.mode() == ReadMode::Stretch)
+            if (HqStretcher* h = claimStretcher(v)) v.reader.upgrade(h, at, static_cast<int64_t>(c.offsetFrames));
+    }
+    // Before a wrap, the clips that sound where the loop lands get silent Signalsmith voices started a pre-roll ahead
+    // of it (in the time they will have after the wrap), so the wrap needs no WSOLA bridge for them.
+    void prerollWrap(const Ctx& x, int64_t pos, int64_t end, int64_t shift, int64_t preroll) noexcept {
+        if (!live_ || preroll <= 0) return;
+        const int64_t wrap = live_->loopWrapAt(), lands = live_->loopLandsAt();
+        // From a pre-roll and a block before the wrap, so each spare starts a whole pre-roll ahead of the loop's start.
+        if (wrap <= lands || wrap - lands < 2 * preroll || end > wrap || end + preroll + 64 < wrap) {
+            for (Voice& v : voices_)
+                if (v.spare) v.active = false;  // no longer before this wrap
+            return;
+        }
+        spareLands_ = lands;
+        const int64_t after = shift + (wrap - lands);  // player time minus song frame, after the wrap
+        const int64_t va = lands - (wrap - pos), vz = lands - (wrap - end);  // this block, in song frames after the wrap
+        const size_t first = firstClip(x, lands);
+        for (size_t ci = first; ci < x.tl->clips.size(); ++ci) {
+            const CompiledClip& c = x.tl->clips[ci];
+            const int64_t cs = x.frameOfStep(c.spec.startSteps);
+            if (cs >= lands + preroll) break;
+            const int64_t ce = x.frameOfStep(c.spec.startSteps + c.spec.lengthSteps);
+            // Clips sounding in the loop's first pre-roll and starting at or before its start (later ones pre-roll
+            // as usual after the wrap).
+            if (!c.spec.hq || c.spec.mute || !c.asset || ce <= lands || cs > lands) continue;
+            const Plan p = plan(x, c, lands);
+            if (p.mode != ReadMode::Hq) continue;
+            Voice* v = spareFor(static_cast<int>(ci));
+            int64_t from = va;
+            if (!v) {
+                // Started exactly a pre-roll ahead (as a clip ahead of the playhead is), so it plays as that would.
+                const int64_t vs = lands - preroll;
+                if (vs >= vz) continue;
+                from = std::max(va, vs);
+                if (hqVoices() >= kMaxHqVoices || playingVoices() >= kAudioClipVoices) continue;
+                v = freeVoice();
+                if (!v) continue;
+                startVoice(*v, x, static_cast<int>(ci), p, from, after, lands);
+                if (v->reader.mode() != ReadMode::Hq) {  // no stretcher free: the wrap bridges as before
+                    v->active = false;
+                    continue;
+                }
+                v->spare = true;
+                v->spareMidClip = lands > cs;
             }
+            v->seen = true;
+            follow(*v, x, c, p, after, from + after);
+            for (int64_t i = 0; i < vz - from; ++i) gain_[i] = 0.0f;
+            v->reader.render(from + after, static_cast<int>(vz - from), gain_, scratchL_, scratchR_);
+        }
+    }
+    Voice* spareFor(int clip) noexcept {
+        for (Voice& v : voices_)
+            if (v.active && v.spare && v.clip == clip) return &v;
+        return nullptr;
+    }
+    int hqVoices() const noexcept {
+        int n = 0;
+        for (const Voice& v : voices_) n += v.active && v.reader.mode() == ReadMode::Hq && v.reader.stretcher();
+        return n;
+    }
+    // A stretcher of the current timeline no other active voice holds, within the cap (audio thread).
+    HqStretcher* claimStretcher(Voice& self) noexcept {
+        const Timeline* tl = timeline_.current();
+        if (!tl) return nullptr;
+        int busy = 0;
+        for (const Voice& v : voices_)
+            busy += &v != &self && v.active && v.clip >= 0 && v.reader.mode() == ReadMode::Hq && v.reader.stretcher();
+        if (busy >= kMaxHqVoices) return nullptr;
+        for (const std::shared_ptr<HqStretcher>& sp : tl->pool) {
+            HqStretcher* h = sp.get();
+            bool used = false;
+            for (const Voice& v : voices_)
+                used |= &v != &self && v.active && v.reader.mode() == ReadMode::Hq && v.reader.stretcher() == h;
+            if (!used && h->sampleRate() == sr_) return h;
         }
         return nullptr;
     }
-    // Control thread: prepares stretchers up to `want` (never fewer), each published once ready.
-    void growStretchers(int want, double rate) {
-        for (int have = hqReady_.load(std::memory_order_relaxed); have < want; ++have) {
-            auto h = std::make_unique<HqStretcher>();
-            if (!h->prepare(rate)) return;
-            hq_[have] = std::move(h);
-            hqReady_.store(have + 1, std::memory_order_release);
+    // Control thread: the new timeline's stretchers, as many as its Signalsmith clips can play at once (their most
+    // overlapping, a step of pre-roll each, at most the cap) plus two (a voice fading out, a spare for the loop's
+    // start), kept from the last timeline where they are at this rate and made where not.
+    void buildPool(Timeline& t, double rate) {
+        std::vector<std::pair<double, int>> edges;
+        for (const CompiledClip& c : t.clips)
+            if (c.spec.hq && !c.spec.mute) {
+                edges.push_back({c.spec.startSteps - 1.0, 1});
+                edges.push_back({c.spec.startSteps + c.spec.lengthSteps, -1});
+            }
+        std::sort(edges.begin(), edges.end());
+        int now = 0, most = 0;
+        for (const auto& e : edges) most = std::max(most, now += e.second);
+        const int want = most > 0 ? std::min(most, kMaxHqVoices) + 2 : 0;
+        for (const std::shared_ptr<HqStretcher>& h : pool_)
+            if (static_cast<int>(t.pool.size()) < want && h->sampleRate() == rate) t.pool.push_back(h);
+        while (static_cast<int>(t.pool.size()) < want) {
+            auto h = std::make_shared<HqStretcher>();
+            if (!h->prepare(rate)) break;
+            t.pool.push_back(std::move(h));
         }
+        t.hqLatency = t.pool.empty() ? 0 : t.pool.front()->outputLatency();
+        pool_ = t.pool;  // the stretchers a timeline drops are freed with it, here on the control thread
+    }
+    static bool inPool(const Timeline& t, const HqStretcher* h) noexcept {
+        for (const std::shared_ptr<HqStretcher>& sp : t.pool)
+            if (sp.get() == h) return true;
+        return false;
     }
     void remap(uint64_t was) noexcept {
         const Timeline* t = timeline_.current();
@@ -678,17 +852,20 @@ private:
             int found = -1;
             for (size_t i = 0; i < t->prevIndex.size() && found < 0; ++i)
                 if (t->prevIndex[i] == v.clip) found = static_cast<int>(i);
-            if (found < 0) fadeOut(v);
-            else v.clip = found;
+            if (found < 0 || (v.reader.stretcher() && !inPool(*t, v.reader.stretcher()))) {
+                if (v.spare) v.active = false;
+                else fadeOut(v);
+            } else {
+                v.clip = found;
+            }
         }
     }
 
     double sr_ = 48000;
     LiveAudio* live_ = nullptr;
     Voice voices_[2 * kAudioClipVoices];  // the playing ones, and room for as many fading out
-    static constexpr int kMaxStretchers = 2 * kAudioClipVoices;
-    std::unique_ptr<HqStretcher> hq_[kMaxStretchers];  // Signalsmith Stretch, made on the control thread as clips need
-    std::atomic<int> hqReady_{0};                       // how many of hq_ the audio thread may use
+    float scratchL_[64] = {}, scratchR_[64] = {};  // a spare's silent output
+    int64_t spareLands_ = -1;  // the song frame the spares were pre-rolled for (-1: none)
     float gain_[64] = {};
     int64_t expected_ = -1;
     int64_t clock_ = 0;      // the player's own time: one frame per frame rendered, whatever the transport does
@@ -704,6 +881,7 @@ private:
     double compiledRate_ = 0;
     uint64_t serial_ = 0, lastSerial_ = 0;
     std::vector<std::pair<std::string, const AudioAsset*>> lastClips_;
+    std::vector<std::shared_ptr<HqStretcher>> pool_;  // the last timeline's stretchers
 };
 
 ModuleProcessor* makePlayer() noexcept { return new (std::nothrow) AudioTrackPlayer(); }
@@ -723,6 +901,11 @@ void applyComponentHostData(ModuleProcessor& processor, const ComponentSpec& spe
         applySamplerProjectState(processor, spec);
     } catch (...) {  // out of memory: the component keeps what it had
     }
+}
+
+AudioTrackStats audioTrackStats(const ModuleProcessor& processor) noexcept {
+    const auto* p = dynamic_cast<const AudioTrackPlayer*>(&processor);
+    return p ? p->stats() : AudioTrackStats{};
 }
 
 bool monitorsStopped(const ModuleProcessor& processor) noexcept {

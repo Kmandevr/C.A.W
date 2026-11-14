@@ -139,3 +139,35 @@ TEST(signalsmith_clip_voices_never_allocate_on_the_audio_thread) {
     CHECK(peak > 0.01f);
     std::filesystem::remove_all(dir);
 }
+
+TEST(a_smaller_stretcher_pool_is_freed_off_the_audio_thread) {
+    // A project update that needs fewer Signalsmith stretchers: the audio thread takes the new timeline and hands
+    // the old one (and the stretchers only it held) back without freeing anything; the control thread frees them.
+    const auto dir = std::filesystem::temp_directory_path() / "caw_stretch_pool_rt";
+    std::filesystem::remove_all(dir);
+    std::filesystem::create_directories(dir);
+    const std::string p = noiseWav((dir / "n.wav").generic_string(), 96000);
+    auto project = [&](int clips) {
+        std::string c;
+        for (int k = 0; k < clips; ++k)
+            c += std::string(k ? "," : "") + "{\"id\":\"c" + std::to_string(k) + "\",\"asset\":\"a\",\"start_steps\":" +
+                 std::to_string(k) + ",\"length_steps\":16,\"stretch\":\"signalsmith\",\"stretch_ratio\":1.3}";
+        return "{\"caw_project\":1,\"bpm\":120,\"loop_bars\":2,\"master\":0.5,\"assets\":[{\"id\":\"a\",\"path\":\"" +
+               jsonEscape(p) + "\"}],\"layers\":[{\"id\":\"d\",\"name\":\"D\",\"audio_clips\":[" + c + "]}]}";
+    };
+    Engine e(48000);
+    CHECK(e.setProjectJson(project(6)).find("\"ok\":true") != std::string::npos);
+    std::vector<float> l(192), r(192);
+    e.play();
+    for (int k = 0; k < 100; ++k) e.process(l.data(), r.data(), 192);
+    CHECK(e.setProjectJson(project(1)).find("\"ok\":true") != std::string::npos);
+    std::size_t operations = 0;
+    {
+        cawtest::AllocationScope scope;
+        for (int k = 0; k < 200; ++k) e.process(l.data(), r.data(), 192);
+        operations = scope.count();
+    }
+    CHECK_EQ(operations, 0u);
+    CHECK(e.setProjectJson(project(2)).find("\"ok\":true") != std::string::npos);  // frees the retired timeline here
+    std::filesystem::remove_all(dir);
+}

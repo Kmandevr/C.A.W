@@ -7,6 +7,7 @@
 
 #include "asset_store.h"
 #include "clip_stretch.h"
+#include "tempo_map.h"
 
 namespace caw {
 
@@ -89,43 +90,70 @@ enum class ReadMode : uint8_t {
 //
 // Hq feeds an HqStretcher (Signalsmith Stretch) the source ahead of the output: by output frame t it has been given the
 // source up to s(t + L) + I (L its output latency, I its input latency), so its output at t is the source at s(t),
-// rate changes (a tempo ramp) included. It renders in 64-frame chunks aligned to the voice's start, so the result does
-// not depend on the host's block size. Source frames before `floor` (the clip's offset) read as silence. Its output is
-// valid L frames after start(): the player starts a voice that early when it can (a clip start ahead of the
-// playhead); otherwise (a seek, a loop wrap, a voice joining mid-clip) WSOLA plays those L frames and then crossfades
-// into it over kHqCrossfade frames. Without a stretcher Hq falls back to WSOLA (Stretch).
+// rate changes (a tempo ramp) included. It renders 64-frame chunks aligned to the voice's start into a ring, each
+// chunk's feed worked out from the mapping at that chunk's own frame, so the result does not depend on the host's
+// block size. Source frames before `floor` (the clip's offset) read as silence. Its output is good L frames after
+// start(): the player starts a voice that early when it can (a clip ahead of the playhead, the loop's start before a
+// wrap); otherwise (a seek, a voice joining mid-clip, a stretcher freed later) WSOLA plays meanwhile (the bridge).
+// At the bridge's end the Signalsmith output is moved by up to kHqAlign frames to the lag that best matches WSOLA's
+// next kHqAlignWindow frames, the two crossfade over kHqCrossfade frames keeping their sum's power for their measured
+// correlation (linear gains scaled by 1 / sqrt(a^2 + b^2 + 2 rho a b)), and that lag is then taken
+// back out of its feed over kHqUnshift frames (a 1% rate change at most), so the voice ends exactly on the mapping.
+// Without a stretcher Hq plays as Stretch (WSOLA) until upgrade() gives it one.
 class ClipReader {
 public:
-    static constexpr int kHqCrossfade = 512;
+    static constexpr int kHqCrossfade = 512, kHqAlign = 256, kHqAlignWindow = 256, kHqUnshift = 24000;
+    static constexpr int kHqRing = 2048;  // Signalsmith output kept, a power of two above the alignment's reach
+    // A clip following a tempo map: the source at song frame f is offset + (stepAt(f) - start) * framesPerStep,
+    // evaluated at each frame (player time t is song frame t - shift). Set each block (the map may be replaced).
+    struct SongMap {
+        const TempoMap* map = nullptr;
+        int64_t shift = 0;
+        double offset = 0, start = 0, framesPerStep = 0;
+    };
     bool prepare(double sampleRate);  // control thread
     // Starts the voice at output frame t (seek, a clip start, a mode change). Hq takes a stretcher (else it plays as
-    // Stretch), the source floor, and the first output frame that is heard (from then on its output must be valid).
+    // Stretch), the source floor, and the first output frame that is heard (from then on its output must be good).
     void start(const ClipSource& src, ReadMode mode, double pitch, int64_t t, double anchorSource, double slope,
                HqStretcher* hq = nullptr, int64_t floor = 0, int64_t heardFrom = 0) noexcept;
+    // A voice playing WSOLA because no stretcher was free takes one from output frame t: WSOLA bridges to it.
+    void upgrade(HqStretcher* hq, int64_t t, int64_t floor) noexcept;
     void setMapping(int64_t anchorTime, double anchorSource, double slope) noexcept {
         anchorT_ = anchorTime;
         anchorS_ = anchorSource;
         slope_ = slope;
     }
+    void setSongMap(const SongMap& m) noexcept { map_ = m; }
     void setSource(const ClipSource& src) noexcept { src_ = src; }
     // Adds gain[i] * the next n frames (from output frame `t`) into l and r.
     void render(int64_t t, int n, const float* gain, float* l, float* r) noexcept;
     ReadMode mode() const noexcept { return mode_; }
     double pitch() const noexcept { return pitch_; }
+    HqStretcher* stretcher() const noexcept { return hq_; }
+    // The output frame offset the bridge chose (tests).
+    int hqLag() const noexcept { return hqShift_; }
 
 private:
-    double sourceAt(double t) const noexcept { return anchorS_ + slope_ * (t - static_cast<double>(anchorT_)); }
+    double sourceAt(double t) const noexcept {
+        if (map_.map)
+            return map_.offset +
+                   (map_.map->stepAt(t - static_cast<double>(map_.shift)) - map_.start) * map_.framesPerStep;
+        return anchorS_ + slope_ * (t - static_cast<double>(anchorT_));
+    }
     void hop() noexcept;  // one WSOLA frame into the y ring
     void hermite(double pos, float& l, float& r) const noexcept;
     void startWsola(int64_t t) noexcept;
     void renderWsola(int n, const float* gain, float* l, float* r) noexcept;
-    void hqChunk() noexcept;  // the next 64 output frames into hqL_/hqR_
+    void hqBegin(int64_t t) noexcept;  // the stretcher's start at output frame t
+    void hqChunk() noexcept;           // the next 64 frames of Signalsmith output into the ring
+    void hqAlign(int64_t t) noexcept;  // the lag at the bridge's end
 
     ClipSource src_;
     ReadMode mode_ = ReadMode::Direct;
     double pitch_ = 1;
     int64_t anchorT_ = 0;
     double anchorS_ = 0, slope_ = 1;
+    SongMap map_;
     // WSOLA
     int hs_ = 0, n_ = 0, delta_ = 0;
     std::unique_ptr<float[]> window_, accL_, accR_, scratch_, natural_, yl_, yr_;
@@ -138,10 +166,15 @@ private:
     // Hq
     HqStretcher* hq_ = nullptr;
     int64_t floor_ = 0;
-    int64_t fed_ = 0;         // the next source frame to feed
-    int64_t chunkAt_ = 0;     // output frame of hqL_[0]
-    int64_t bridgeEnd_ = 0;   // WSOLA alone before this, crossfading into Signalsmith over kHqCrossfade after it
-    float hqL_[HqStretcher::kChunk] = {}, hqR_[HqStretcher::kChunk] = {};
+    int64_t fed_ = 0;          // the next source frame to feed
+    int64_t produced_ = 0;     // Signalsmith output complete up to this frame (its own time)
+    int64_t bridgeEnd_ = 0;    // WSOLA alone before this; the crossfade after it
+    bool aligned_ = true;      // the bridge's lag is chosen
+    int hqShift_ = 0;          // output frame t plays Signalsmith frame t + hqShift_
+    double hqRho_ = 0;         // the two signals' correlation at that lag (-1..1), for the crossfade's shape
+    double unshift_ = 0;       // source frames taken out of the feed in all, ramped in from unshiftFrom_
+    int64_t unshiftFrom_ = 0;
+    std::unique_ptr<float[]> ringL_, ringR_;
 };
 
 }  // namespace caw

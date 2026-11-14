@@ -29,7 +29,9 @@ bool ClipReader::prepare(double sampleRate) {
     yl_.reset(new (std::nothrow) float[static_cast<size_t>(ring)]());
     yr_.reset(new (std::nothrow) float[static_cast<size_t>(ring)]());
     yMask_ = ring - 1;
-    if (!window_ || !accL_ || !accR_ || !scratch_ || !natural_ || !yl_ || !yr_) return false;
+    ringL_.reset(new (std::nothrow) float[kHqRing]());
+    ringR_.reset(new (std::nothrow) float[kHqRing]());
+    if (!window_ || !accL_ || !accR_ || !scratch_ || !natural_ || !yl_ || !yr_ || !ringL_ || !ringR_) return false;
     for (int i = 0; i < n_; ++i)  // periodic Hann: shifted by a hop, two sum to 1
         window_[static_cast<size_t>(i)] =
             static_cast<float>(0.5 - 0.5 * detCos(2.0 * 3.14159265358979323846 * i / n_));
@@ -44,32 +46,54 @@ void ClipReader::start(const ClipSource& src, ReadMode mode, double pitch, int64
     setMapping(t, anchorSource, slope);
     hq_ = nullptr;
     if (mode_ == ReadMode::Hq) {
-        if (!hq || !window_) {
+        if (!hq || !window_ || !ringL_) {
             mode_ = ReadMode::Stretch;
         } else {
             hq_ = hq;
             floor_ = floor;
-            hq_->reset(pitch_);
-            const int lat = hq_->outputLatency(), sl = hq_->seekLength();
-            const int64_t p = static_cast<int64_t>(
-                std::floor(sourceAt(static_cast<double>(t + lat)) + static_cast<double>(hq_->inputLatency())));
-            float* l = hq_->inputL();
-            float* r = hq_->inputR();
-            for (int i = 0; i < sl; ++i) {
-                const int64_t at = p - sl + i;
-                if (at < floor_) l[i] = r[i] = 0.0f;
-                else src_.frame(at, l[i], r[i]);
+            hqBegin(t);
+            if (bridgeEnd_ - kHqAlign <= heardFrom) {  // pre-rolled: good before it is heard, no bridge
+                bridgeEnd_ = INT64_MIN / 2;
+                aligned_ = true;
+            } else {
+                startWsola(t);
             }
-            hq_->seek(sl, slope > 0 && std::isfinite(slope) ? slope : 1.0);
-            fed_ = p;
-            chunkAt_ = t - HqStretcher::kChunk;
-            bridgeEnd_ = t + lat;
-            if (bridgeEnd_ <= heardFrom) bridgeEnd_ = INT64_MIN / 2;  // pre-rolled: valid before it is heard
-            else startWsola(t);
             return;
         }
     }
     if (mode_ == ReadMode::Stretch) startWsola(t);
+}
+
+void ClipReader::upgrade(HqStretcher* hq, int64_t t, int64_t floor) noexcept {
+    if (mode_ != ReadMode::Stretch || !hq || !ringL_) return;
+    hq_ = hq;
+    floor_ = floor;
+    mode_ = ReadMode::Hq;
+    hqBegin(t);  // WSOLA plays on, as the bridge
+}
+
+void ClipReader::hqBegin(int64_t t) noexcept {
+    hq_->reset(pitch_);
+    const int lat = hq_->outputLatency(), sl = hq_->seekLength();
+    const int64_t p = static_cast<int64_t>(
+        std::floor(sourceAt(static_cast<double>(t + lat)) + static_cast<double>(hq_->inputLatency())));
+    float* l = hq_->inputL();
+    float* r = hq_->inputR();
+    for (int i = 0; i < sl; ++i) {
+        const int64_t at = p - sl + i;
+        if (at < floor_) l[i] = r[i] = 0.0f;
+        else src_.frame(at, l[i], r[i]);
+    }
+    hq_->seek(sl, slope_ > 0 && std::isfinite(slope_) ? slope_ : 1.0);
+    fed_ = p;
+    produced_ = t;
+    hqShift_ = 0;
+    hqRho_ = 0;
+    unshift_ = 0;
+    unshiftFrom_ = 0;
+    aligned_ = false;
+    // Good from t + lat; the lag may read up to kHqAlign earlier, so the crossfade starts that much later.
+    bridgeEnd_ = t + lat + kHqAlign;
 }
 
 void ClipReader::startWsola(int64_t t) noexcept {
@@ -84,10 +108,16 @@ void ClipReader::startWsola(int64_t t) noexcept {
 }
 
 void ClipReader::hqChunk() noexcept {
-    chunkAt_ += HqStretcher::kChunk;
-    const int64_t target = static_cast<int64_t>(
-        std::floor(sourceAt(static_cast<double>(chunkAt_ + HqStretcher::kChunk + hq_->outputLatency())) +
-                   static_cast<double>(hq_->inputLatency())));
+    const int64_t from = produced_, to = from + HqStretcher::kChunk;
+    // The source this chunk's end is fed up to: the mapping at that frame, less the lag being taken out.
+    const double at = static_cast<double>(to + hq_->outputLatency());
+    double back = 0;
+    if (unshift_ != 0) {
+        const double k = (at - static_cast<double>(unshiftFrom_)) / kHqUnshift;
+        back = unshift_ * (k <= 0 ? 0.0 : (k >= 1 ? 1.0 : k));
+    }
+    const int64_t target =
+        static_cast<int64_t>(std::floor(sourceAt(at) - back + static_cast<double>(hq_->inputLatency())));
     int64_t n = target - fed_;
     if (n < 0) n = 0;  // the source can't run backwards: hold
     if (n > HqStretcher::kMaxFeed) {  // faster than kMaxFeed / kChunk times real time: the rest is skipped
@@ -97,12 +127,64 @@ void ClipReader::hqChunk() noexcept {
     float* l = hq_->inputL();
     float* r = hq_->inputR();
     for (int64_t i = 0; i < n; ++i) {
-        const int64_t at = fed_ + i;
-        if (at < floor_) l[i] = r[i] = 0.0f;
-        else src_.frame(at, l[i], r[i]);
+        const int64_t f = fed_ + i;
+        if (f < floor_) l[i] = r[i] = 0.0f;
+        else src_.frame(f, l[i], r[i]);
     }
     fed_ += n;
-    hq_->process(static_cast<int>(n), hqL_, hqR_);
+    float ol[HqStretcher::kChunk], orr[HqStretcher::kChunk];
+    hq_->process(static_cast<int>(n), ol, orr);
+    for (int i = 0; i < HqStretcher::kChunk; ++i) {
+        ringL_[static_cast<size_t>((from + i) & (kHqRing - 1))] = ol[i];
+        ringR_[static_cast<size_t>((from + i) & (kHqRing - 1))] = orr[i];
+    }
+    produced_ = to;
+}
+
+void ClipReader::hqAlign(int64_t t) noexcept {
+    aligned_ = true;
+    // Signalsmith's output far enough ahead, and WSOLA's next frames (read without moving it).
+    int guard = 0;
+    while (produced_ < t + kHqAlignWindow + kHqAlign && guard++ < 64) hqChunk();
+    const int window = std::max(16, std::min(kHqAlignWindow, static_cast<int>(2048.0 / pitch_)));
+    guard = 0;
+    while (yWritten_ <= static_cast<int64_t>(std::floor(u_ + window * pitch_)) + 3 && guard++ < 64) hop();
+    float w[kHqAlignWindow];
+    for (int i = 0; i < window; ++i) {
+        const double pos = u_ + i * pitch_;
+        const double f = std::floor(pos);
+        const int64_t k = static_cast<int64_t>(f);
+        auto at = [&](const std::unique_ptr<float[]>& y, int64_t j) {
+            return y[static_cast<size_t>((j < 0 ? 0 : j) & yMask_)];
+        };
+        const float fr = static_cast<float>(pos - f);
+        w[i] = cubic(at(yl_, k - 1), at(yl_, k), at(yl_, k + 1), at(yl_, k + 2), fr) +
+               cubic(at(yr_, k - 1), at(yr_, k), at(yr_, k + 1), at(yr_, k + 2), fr);
+    }
+    double best = -1e300, energyH = 0, energyW = 0;
+    int lag = 0;
+    for (int i = 0; i < window; ++i) energyW += static_cast<double>(w[i]) * w[i];
+    for (int d = -kHqAlign; d <= kHqAlign; ++d) {
+        double c = 0;
+        for (int i = 0; i < window; ++i) {
+            const size_t j = static_cast<size_t>((t + i + d) & (kHqRing - 1));
+            c += static_cast<double>(w[i]) * (ringL_[j] + ringR_[j]);
+        }
+        if (c > best || (c == best && std::abs(d) < std::abs(lag))) {
+            best = c;
+            lag = d;
+        }
+    }
+    for (int i = 0; i < window; ++i) {
+        const size_t j = static_cast<size_t>((t + i + lag) & (kHqRing - 1));
+        const double h = static_cast<double>(ringL_[j]) + ringR_[j];
+        energyH += h * h;
+    }
+    hqRho_ = energyW > 0 && energyH > 0 ? std::clamp(best / std::sqrt(energyW * energyH), -1.0, 1.0) : 0.0;
+    hqShift_ = lag;
+    // Take the lag back out of the feed from the next chunk fed on, over kHqUnshift frames.
+    unshift_ = sourceAt(static_cast<double>(t + lag)) - sourceAt(static_cast<double>(t));
+    unshiftFrom_ = produced_ + hq_->outputLatency();
 }
 
 void ClipReader::hermite(double pos, float& l, float& r) const noexcept {
@@ -226,36 +308,45 @@ void ClipReader::render(int64_t t, int n, const float* gain, float* l, float* r)
             return;
         case ReadMode::Hq: {
             constexpr int kSub = HqStretcher::kChunk;
-            for (int done = 0; done < n;) {  // in pieces of at most 64 (the local arrays)
-                const int m = std::min(kSub, n - done);
+            for (int done = 0; done < n;) {  // in pieces of at most 64 (the local arrays), split at the bridge's end
+                int m = std::min(kSub, n - done);
                 const int64_t t1 = t + done;
-                float w[kSub];
+                if (!aligned_ && t1 < bridgeEnd_) m = static_cast<int>(std::min<int64_t>(m, bridgeEnd_ - t1));
+                if (!aligned_ && t1 >= bridgeEnd_) hqAlign(t1);
+                float wh[kSub], ww[kSub];
                 bool bridging = false;
                 for (int i = 0; i < m; ++i) {
-                    const int64_t ft = t1 + i;
-                    const int64_t d = ft - bridgeEnd_;
-                    w[i] = d < 0 ? 0.0f
-                                 : (d >= kHqCrossfade ? 1.0f
-                                                      : static_cast<float>(static_cast<double>(d) / kHqCrossfade));
-                    bridging |= w[i] < 1.0f;
+                    const int64_t d = t1 + i - bridgeEnd_;
+                    if (d < 0) {
+                        wh[i] = 0.0f;
+                        ww[i] = 1.0f;
+                    } else if (d >= kHqCrossfade) {
+                        wh[i] = 1.0f;
+                        ww[i] = 0.0f;
+                    } else {  // the sum's power kept for the two signals' correlation (linear when equal)
+                        const double b = (static_cast<double>(d) + 0.5) / kHqCrossfade, a = 1.0 - b;
+                        const double k = 1.0 / std::sqrt(std::max(1e-6, a * a + b * b + 2.0 * hqRho_ * a * b));
+                        wh[i] = static_cast<float>(b * k);
+                        ww[i] = static_cast<float>(a * k);
+                    }
+                    bridging |= ww[i] > 0.0f;
                 }
                 if (bridging) {
                     float g[kSub];
-                    for (int i = 0; i < m; ++i) g[i] = gain[done + i] * (1.0f - w[i]);
+                    for (int i = 0; i < m; ++i) g[i] = gain[done + i] * ww[i];
                     renderWsola(m, g, l + done, r + done);
                 }
                 for (int i = 0; i < m; ++i) {
-                    const int64_t ft = t1 + i;
+                    const int64_t ft = t1 + i + hqShift_;  // Signalsmith's own frame
+                    if (ft - produced_ >= 8 * kSub)  // far behind (frames not rendered): skip ahead, aligned
+                        produced_ += ((ft - produced_) / kSub - 1) * kSub;
                     int guard = 0;
-                    while (ft >= chunkAt_ + kSub && guard++ < 8) {
-                        if (ft - chunkAt_ >= 8 * kSub) chunkAt_ += ((ft - chunkAt_) / kSub - 1) * kSub;
-                        hqChunk();
-                    }
-                    const int64_t k = ft - chunkAt_;
-                    if (k < 0 || k >= kSub || w[i] == 0.0f) continue;
-                    const float g = gain[done + i] * w[i];
-                    l[done + i] += hqL_[k] * g;
-                    r[done + i] += hqR_[k] * g;
+                    while (ft >= produced_ && guard++ < 8) hqChunk();
+                    if (wh[i] == 0.0f || ft < produced_ - kHqRing || ft >= produced_) continue;
+                    const float g = gain[done + i] * wh[i];
+                    const size_t j = static_cast<size_t>(ft & (kHqRing - 1));
+                    l[done + i] += ringL_[j] * g;
+                    r[done + i] += ringR_[j] * g;
                 }
                 done += m;
             }

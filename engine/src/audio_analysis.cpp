@@ -59,17 +59,25 @@ bool rangeOf(const AudioAsset& a, double startSeconds, double endSeconds, int64_
     return s1 > s0;
 }
 
-std::vector<float> monoOf(const AudioAsset& a, int64_t s0, int64_t s1) {
-    std::vector<float> m(static_cast<size_t>(s1 - s0));
-    const float* l = a.channel(0);
-    const float* r = a.channel(a.channels > 1 ? 1 : 0);
-    for (int64_t i = s0; i < s1; ++i) m[static_cast<size_t>(i - s0)] = 0.5f * (l[i] + r[i]);
-    return m;
+// The mono sum of an asset's frames [s0, s1), read in place (no copy of the range): index i is frame s0 + i.
+struct Mono {
+    const float* l;
+    const float* r;
+    int64_t s0, len;
+    float operator[](int64_t i) const noexcept {
+        const size_t f = static_cast<size_t>(s0 + i);
+        return 0.5f * (l[f] + r[f]);
+    }
+    int64_t size() const noexcept { return len; }
+};
+Mono monoOf(const AudioAsset& a, int64_t s0, int64_t s1) {
+    return Mono{a.channel(0), a.channel(a.channels > 1 ? 1 : 0), s0, s1 - s0};
 }
 
-// Spectral flux of log-compressed magnitudes (N-point Hann frames every `hop`), frame k centred on sample k * hop.
-std::vector<double> novelty(const std::vector<float>& x, size_t n, size_t hop) {
-    const size_t frames = x.size() / hop + 1;
+// Spectral flux of log-compressed magnitudes (N-point Hann frames every `hop`), frame k centred on sample k * hop,
+// in one streaming pass over the signal: its only memory is a frame, the last magnitudes and the curve itself.
+std::vector<double> novelty(const Mono& x, size_t n, size_t hop) {
+    const size_t frames = static_cast<size_t>(x.size()) / hop + 1;
     std::vector<double> out(frames, 0.0), prev(n / 2 + 1, 0.0), window(n);
     for (size_t i = 0; i < n; ++i) window[i] = 0.5 - 0.5 * std::cos(2.0 * 3.14159265358979323846 * static_cast<double>(i) / static_cast<double>(n));
     std::vector<std::complex<double>> buf(n);
@@ -77,7 +85,7 @@ std::vector<double> novelty(const std::vector<float>& x, size_t n, size_t hop) {
         const int64_t c = static_cast<int64_t>(k * hop) - static_cast<int64_t>(n / 2);
         for (size_t i = 0; i < n; ++i) {
             const int64_t at = c + static_cast<int64_t>(i);
-            const double v = at >= 0 && at < static_cast<int64_t>(x.size()) ? x[static_cast<size_t>(at)] : 0.0;
+            const double v = at >= 0 && at < x.size() ? x[at] : 0.0;
             buf[i] = {v * window[i], 0.0};
         }
         analysis::fft(buf, false);
@@ -148,7 +156,7 @@ TempoResult detectTempo(const AudioAsset& a, const TempoOptions& o) {
     TempoResult res;
     int64_t s0, s1;
     if (a.rate <= 0 || !rangeOf(a, o.startSeconds, o.endSeconds, s0, s1)) return res;
-    const std::vector<float> x = monoOf(a, s0, s1);
+    const Mono x = monoOf(a, s0, s1);
     const size_t n = pow2Near(a.rate * 0.0213), hop = n / 4;  // 1024 and 256 at 48 kHz
     const double hopSec = static_cast<double>(hop) / a.rate;
     std::vector<double> nov = novelty(x, n, hop);
@@ -259,10 +267,9 @@ std::vector<Slice> detectSlices(const AudioAsset& a, const SliceOptions& o) {
     // already playing at the range's start is no onset; at the file's start, the silence before it is the reference.
     const int64_t lead = std::min<int64_t>(s0 / static_cast<int64_t>(hop), static_cast<int64_t>(n / hop) + 1) *
                          static_cast<int64_t>(hop);
-    const std::vector<float> xl = monoOf(a, s0 - lead, s1);
-    std::vector<double> nov = novelty(xl, n, hop);
+    std::vector<double> nov = novelty(monoOf(a, s0 - lead, s1), n, hop);
     nov.erase(nov.begin(), nov.begin() + static_cast<std::ptrdiff_t>(std::min<size_t>(nov.size(), static_cast<size_t>(lead) / hop)));
-    const std::vector<float> x(xl.begin() + lead, xl.end());
+    const Mono x = monoOf(a, s0, s1);
     const size_t frames = nov.size();
     if (frames < 3) return out;
     const double peak = *std::max_element(nov.begin(), nov.end());
@@ -303,11 +310,11 @@ std::vector<Slice> detectSlices(const AudioAsset& a, const SliceOptions& o) {
     }
     // Each onset to the start of its attack: the loudest sample near the frame, then back while the signal stays
     // above a tenth of it.
-    const int64_t len = static_cast<int64_t>(x.size());
+    const int64_t len = x.size();
     constexpr int64_t kEnv = 16;
     auto env = [&](int64_t i) {
         float m = 0;
-        for (int64_t j = std::max<int64_t>(0, i); j < std::min(len, i + kEnv); ++j) m = std::max(m, std::fabs(x[static_cast<size_t>(j)]));
+        for (int64_t j = std::max<int64_t>(0, i); j < std::min(len, i + kEnv); ++j) m = std::max(m, std::fabs(x[j]));
         return m;
     };
     int64_t prevAt = -1;
@@ -319,13 +326,13 @@ std::vector<Slice> detectSlices(const AudioAsset& a, const SliceOptions& o) {
         int64_t ip = lo;
         float pk = 0;
         for (int64_t i = lo; i < hi; ++i)
-            if (std::fabs(x[static_cast<size_t>(i)]) > pk) {
-                pk = std::fabs(x[static_cast<size_t>(i)]);
+            if (std::fabs(x[i]) > pk) {
+                pk = std::fabs(x[i]);
                 ip = i;
             }
         int64_t j = ip;
         while (j - kEnv >= lo && env(j - kEnv) >= 0.1f * pk) j -= kEnv;
-        while (j - 1 >= lo && std::fabs(x[static_cast<size_t>(j - 1)]) >= 0.1f * pk) --j;
+        while (j - 1 >= lo && std::fabs(x[j - 1]) >= 0.1f * pk) --j;
         prevAt = j;
         if (static_cast<double>(j) < 0.005 * a.rate) continue;  // at the range's start: that is the first cut already
         Slice sl;

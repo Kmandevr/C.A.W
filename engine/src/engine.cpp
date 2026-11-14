@@ -4151,6 +4151,7 @@ int Engine::processChunk(float* l, float* r, int maxFrames) noexcept {
         chunkStepsLen_ = m;
     }
     audioIn_->chunk(tapAt_, m, g_, playing_ && !previewChunk_);  // monitoring frames and the recorder's input
+    audioIn_->setLoopWrap(wrapAt(), loopRange_ ? loopFrom_ : 0);  // audio tracks pre-roll the loop's start
     ++chunkId_;
     // Project modulation (#161): due modulator blocks and every target's offsets, before any target runs.
     {

@@ -70,6 +70,14 @@ public:
     // tracks read it while they play. Null outside an Engine (a track then times its clips by the transport alone).
     void setSongTime(const SongTime* song) noexcept { song_.store(song, std::memory_order_release); }
     const SongTime* songTime() const noexcept { return song_.load(std::memory_order_acquire); }
+    // Where the transport wraps and where it lands (song frames), set by the Engine's audio thread each chunk before
+    // the mix graph runs: audio tracks pre-roll Signalsmith voices for the loop's start before a wrap. 0, 0: none.
+    void setLoopWrap(int64_t wrapAt, int64_t landsAt) noexcept {
+        wrapAt_.store(wrapAt, std::memory_order_relaxed);
+        landsAt_.store(landsAt, std::memory_order_relaxed);
+    }
+    int64_t loopWrapAt() const noexcept { return wrapAt_.load(std::memory_order_relaxed); }
+    int64_t loopLandsAt() const noexcept { return landsAt_.load(std::memory_order_relaxed); }
     // The Engine's tempo map on the control side (each project update and tempo-map call sets it): a recording
     // request without its own "tempo_map" times its takes by it.
     void setTempoPoints(std::vector<TempoPointSpec> points);
@@ -108,6 +116,7 @@ public:
 
 private:
     std::atomic<const SongTime*> song_{nullptr};
+    std::atomic<int64_t> wrapAt_{0}, landsAt_{0};
     struct Header {
         int64_t songPos = 0;
         int32_t frames = 0;

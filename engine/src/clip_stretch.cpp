@@ -68,6 +68,7 @@ bool HqStretcher::prepare(double sampleRate) {
 void HqStretcher::reset(double pitchRatio) noexcept {
     if (!impl_) return;
     impl_->s.reset();
+    impl_->s.reseed(kSeed);  // the same random phases on every start (a local change to the vendored header)
     impl_->s.setTransposeFactor(static_cast<float>(pitchRatio), static_cast<float>(8000.0 / rate_));
 }
 

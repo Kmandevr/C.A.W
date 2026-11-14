@@ -14,6 +14,20 @@
 namespace signalsmith { namespace stretch {
 
 namespace _impl {
+	// C.A.W local change (2026-11-14, not upstream): a uniform draw in [lo, hi) mapped from the raw engine output by
+	// fixed arithmetic, in place of std::uniform_real_distribution (whose algorithm each standard library chooses), so
+	// libstdc++, libc++ and MSVC give the same values from the same engine.
+	template<typename Sample>
+	struct FixedUniform {
+		Sample lo, hi;
+		template<class Engine>
+		Sample operator()(Engine &engine) const {
+			const double span = double(Engine::max()) - double(Engine::min()) + 1.0;
+			const double u = (double(engine()) - double(Engine::min()))/span;
+			return lo + Sample((double(hi) - double(lo))*u);
+		}
+	};
+
 	template<bool conjugateSecond=false, typename V>
 	static std::complex<V> mul(const std::complex<V> &a, const std::complex<V> &b) {
 		return conjugateSecond ? std::complex<V>{
@@ -37,6 +51,12 @@ struct SignalsmithStretch {
 
 	SignalsmithStretch() : randomEngine(std::random_device{}()) {}
 	SignalsmithStretch(long seed) : randomEngine(seed) {}
+
+	// C.A.W local change (2026-11-14, not upstream): restarts the random sequence, so a reset() plus reseed() replays
+	// exactly (engine/src/clip_stretch.cpp calls it on every start).
+	void reseed(long seed) {
+		randomEngine.seed(static_cast<typename RandomEngineImpl::result_type>(seed));
+	}
 		
 	// The difference between the internal position (centre of a block) and the input samples you're supplying
 	int inputLatency() const {
@@ -637,7 +657,7 @@ private:
 		int longVerticalStep = static_cast<int>(std::round(smoothingBins));
 		timeFactor = std::max<Sample>(timeFactor, 1/maxCleanStretch);
 		bool randomTimeFactor = (timeFactor > maxCleanStretch);
-		std::uniform_real_distribution<Sample> timeFactorDist(maxCleanStretch*2*randomTimeFactor - timeFactor, timeFactor);
+		_impl::FixedUniform<Sample> timeFactorDist{maxCleanStretch*2*randomTimeFactor - timeFactor, timeFactor}; // C.A.W local change
 
 		if (blockProcess.newSpectrum) {
 			if (step < size_t(channels)) {

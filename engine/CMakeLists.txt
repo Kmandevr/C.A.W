@@ -211,6 +211,9 @@ set_source_files_properties(platform/decode_miniaudio.c PROPERTIES COMPILE_OPTIO
 target_sources(caw_core PRIVATE src/clip_stretch.cpp src/audio_analysis.cpp)
 set_source_files_properties(src/clip_stretch.cpp PROPERTIES
   INCLUDE_DIRECTORIES "${CMAKE_CURRENT_SOURCE_DIR}/third_party")
+# The stretch tests pin the vendored library's random draws (a source property: caw_tests is defined below).
+set_source_files_properties(tests/audio_stretch_test.cpp PROPERTIES
+  INCLUDE_DIRECTORIES "${CMAKE_CURRENT_SOURCE_DIR}/third_party")
 target_sources(caw_core PRIVATE src/builtin_fx_dynamics.cpp src/builtin_fx_drive.cpp src/builtin_fx_dynamics_presets.cpp)
 # fx-dynamics end
 

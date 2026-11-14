@@ -80,6 +80,17 @@ void applyComponentHostData(ModuleProcessor& processor, const ComponentSpec& spe
 // Engine-internal: whether a processor is the player and wants to keep running stopped (monitoring).
 bool monitorsStopped(const ModuleProcessor& processor) noexcept;
 
+// What a player is doing, for tests (read between blocks on the thread that processes it).
+struct AudioTrackStats {
+    int voices = 0;       // sounding or fading
+    int hqVoices = 0;     // playing through Signalsmith Stretch (spares included)
+    int wsolaVoices = 0;  // playing WSOLA (a Signalsmith clip over the cap or with no stretcher free, or a WSOLA clip)
+    int spares = 0;       // pre-rolled for the loop's start
+    int stretchers = 0;   // in the current timeline's pool
+    double stretcherRate = 0;  // their sample rate (0: none)
+};
+AudioTrackStats audioTrackStats(const ModuleProcessor& processor) noexcept;
+
 void registerAudioTrack(ModuleRegistry& registry);
 
 }  // namespace caw
