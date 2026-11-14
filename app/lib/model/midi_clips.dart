@@ -12,6 +12,7 @@ import 'app_state.dart';
 import 'midi_file.dart';
 import 'pattern_doc.dart';
 import 'project.dart';
+import 'tempo_map.dart';
 
 /// One clip's worth of notes read from a file, as pattern text.
 class MidiClipSource {
@@ -23,12 +24,18 @@ class MidiClipSource {
 
 /// What [midiImport] read from a file.
 class MidiImport {
-  const MidiImport({required this.clips, this.bpm, this.beatsPerBar, this.tempoChanges = false, this.name = 'MIDI'});
+  const MidiImport({required this.clips, this.bpm, this.beatsPerBar, this.tempoChanges = false, this.name = 'MIDI',
+      this.tempoMap, this.signatures});
   final List<MidiClipSource> clips; // in file order; empty when the file has no notes
   final String name; // the file's name without its extension
   final double? bpm; // the file's first tempo
   final int? beatsPerBar; // the file's first meter in quarter notes per bar, when it is a whole number 1..16
-  final bool tempoChanges; // the file changes tempo (only the first one can apply)
+  final bool tempoChanges; // the file changes tempo
+
+  /// The file's tempo events as a tempo map (beats from its ticks; MIDI tempos step, never ramp), and its time
+  /// signature events as signatures (each on the nearest bar line); null when it has none.
+  final List<TempoPoint>? tempoMap;
+  final List<TimeSignature>? signatures;
 
   int get noteCount => clips.fold(0, (n, c) => n + c.notes);
 }
@@ -72,7 +79,23 @@ MidiImport midiImport(Uint8List bytes, {required int beatsPerBar, bool adoptMete
     beatsPerBar: meter,
     tempoChanges: f.tempoChanges,
     name: name,
+    tempoMap: midiTempoMap(f),
+    signatures: midiSignatures(f),
   );
+}
+
+/// [f]'s tempo events as a tempo map (1–999 BPM, one a beat); null when it has none.
+List<TempoPoint>? midiTempoMap(MidiFile f) {
+  if (f.tempos.isEmpty || f.ppq <= 0) return null;
+  return normalizeTempoMap([for (final t in f.tempos.take(kMaxTempoPoints)) TempoPoint(t.tick / f.ppq,
+      t.bpm.clamp(kMinMapBpm, kMaxMapBpm).toDouble())], fallbackBpm: f.tempos.first.bpm.clamp(kMinMapBpm, kMaxMapBpm));
+}
+
+/// [f]'s time signature events as signatures; null when it has none.
+List<TimeSignature>? midiSignatures(MidiFile f) {
+  if (f.meters.isEmpty || f.ppq <= 0) return null;
+  return signaturesFromBeats([for (final m in f.meters) (beat: m.tick / f.ppq, num: m.numerator, den: m.denominator)],
+      f.meters.first.numerator.clamp(1, 32));
 }
 
 double _round(double v, int places) {
@@ -277,18 +300,29 @@ String placeMidiImport(AppState s, MidiImport m, {LayerDoc? layer, bool adoptTem
   final p = s.project;
   final notes = <String>[];
   if (adoptTempo) {
-    final bpm = m.bpm, beats = m.beatsPerBar;
-    if (bpm != null || beats != null) {
+    // The file's tempo map and signatures become the project's (#207): its tempo and meter changes included.
+    final bpm = m.bpm, beats = m.beatsPerBar, map = m.tempoMap, sigs = m.signatures;
+    if (bpm != null || beats != null || sigs != null) {
       s.editProject((p) {
-        if (bpm != null) p.bpm = _round(bpm.clamp(20.0, 400.0), 1);
-        if (beats != null) p.beatsPerBar = beats;
+        if (map != null) {
+          p.tempoMap = [for (final t in map) t.copyWith(bpm: _round(t.bpm, 3))];
+        } else if (bpm != null) {
+          p.bpm = _round(bpm.clamp(20.0, 400.0), 1);
+        }
+        if (sigs != null) {
+          p.timeSignatures = sigs;
+        } else if (beats != null) {
+          p.beatsPerBar = beats;
+        }
       });
-      if (bpm != null) notes.add('tempo ${formatNumber(p.bpm)} BPM');
+      if (bpm != null) notes.add('tempo ${formatNumber(_round(p.bpm, 1))} BPM${m.tempoChanges ? ' with its changes' : ''}');
     }
-  } else if (m.bpm != null && (m.bpm! - p.bpm).abs() >= 0.05) {
-    notes.add('kept the project\'s tempo, not the file\'s ${formatNumber(_round(m.bpm!, 1))} BPM');
+  } else {
+    if (m.bpm != null && (m.bpm! - p.bpm).abs() >= 0.05) {
+      notes.add('kept the project\'s tempo, not the file\'s ${formatNumber(_round(m.bpm!, 1))} BPM');
+    }
+    if (m.tempoChanges) notes.add('tempo changes ignored');
   }
-  if (m.tempoChanges) notes.add('tempo changes ignored');
   final target = layer != null && !layer.isFolder && p.layers.contains(layer) ? layer : null;
   final modules = [for (final c in m.clips) ModuleDoc(id: newId('m'), name: _freeName(p, c.name), source: c.source)];
   // The file is listed in Files (Audio & MIDI) with its parts, so it can be dragged onto a track again.

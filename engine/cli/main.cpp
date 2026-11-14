@@ -227,6 +227,16 @@ int midi(int argc, char** argv) {
         return 1;
     }
     clip = clip || endsWith(out, ".midi2");
+    {
+        caw::MidiSongMeta one;
+        one.tempo = {{0.0, bpm, false}};
+        one.sigs = {{0, 0.0, beats, 4}};
+        std::string err;
+        if (!caw::checkMidiExport(*pr.pattern, one, clip, err)) {
+            std::fprintf(stderr, "%s\n", err.c_str());
+            return 1;
+        }
+    }
     const std::vector<uint8_t> bytes =
         clip ? caw::patternToMidiClip(*pr.pattern, bpm, beats) : caw::patternToSmf(*pr.pattern, bpm, beats);
     if (!caw::writeFile(out, bytes, err)) {

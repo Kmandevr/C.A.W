@@ -10,9 +10,12 @@
 #include <thread>
 #include <vector>
 
+#include "tempo_map.h"
+
 #include "spsc.h"
 
 namespace caw {
+
 
 inline constexpr int kMaxInputChannels = 32;
 
@@ -62,6 +65,14 @@ public:
         return in_[static_cast<size_t>(f) * static_cast<size_t>(inStride_) + static_cast<size_t>(channel)];
     }
     bool recordingNow() const noexcept { return armed_.load(std::memory_order_relaxed); }
+    // The song's tempo map (1.0.3) for audio tracks, which keep a pointer to this LiveAudio: the Engine's audio thread
+    // sets it when it swaps a map in (before the mix graph runs, so tracks on pool workers read it after that), and
+    // tracks read it while they play. Null outside an Engine (a track then times its clips by the transport alone).
+    void setSongTime(const SongTime* song) noexcept { song_.store(song, std::memory_order_release); }
+    const SongTime* songTime() const noexcept { return song_.load(std::memory_order_acquire); }
+    // The Engine's tempo map on the control side (each project update and tempo-map call sets it): a recording
+    // request without its own "tempo_map" times its takes by it.
+    void setTempoPoints(std::vector<TempoPointSpec> points);
     // After process(): the latency ping's burst is added to the output here, and the input is captured. The
     // callback's input is let go here: a process() outside a device callback hears none (the buffer is the
     // device's and goes when it closes).
@@ -96,6 +107,7 @@ public:
     std::string pingResult();
 
 private:
+    std::atomic<const SongTime*> song_{nullptr};
     struct Header {
         int64_t songPos = 0;
         int32_t frames = 0;
@@ -126,6 +138,7 @@ private:
     void waitForChunk() const noexcept;  // control thread, once disarmed: until no chunk() can still use the ring
     std::atomic<bool> stopWriter_{false};
     std::atomic<bool> holdWriter_{false};
+    std::vector<TempoPointSpec> tempoPoints_;  // setTempoPoints (under ctl_)
     std::mutex ctl_;
     // ping (0 idle, 1 asked, 2 playing and capturing, 3 captured, 4 being worked out)
     std::atomic<int> pingState_{0};

@@ -4,7 +4,7 @@ import 'dart:io';
 
 import 'package:ffi/ffi.dart';
 
-const int cawApiVersion = 30;  // must equal CAW_API_VERSION in engine/include/caw.h
+const int cawApiVersion = 31;  // must equal CAW_API_VERSION in engine/include/caw.h
 
 /// CawNoteFxStats (API 22, #127): a layer's per-note FX slots.
 final class CawNoteFxStatsStruct extends Struct {
@@ -24,6 +24,50 @@ final class CawNoteFxStatsStruct extends Struct {
   external int overflowed;
   @Uint32()
   external int stolen;
+}
+
+/// CawTempoPoint (API 31, #207): a tempo map point (beats, BPM, ramp from the point before).
+final class CawTempoPointStruct extends Struct {
+  @Double()
+  external double beat;
+  @Double()
+  external double bpm;
+  @Int32()
+  external int ramp;
+}
+
+/// CawTimeSig (API 31): a time signature from a beat on a bar line.
+final class CawTimeSigStruct extends Struct {
+  @Double()
+  external double beat;
+  @Int32()
+  external int num;
+  @Int32()
+  external int den;
+}
+
+/// CawPosition (API 31): where the transport is in samples, beats, seconds and bars.
+final class CawPositionStruct extends Struct {
+  @Uint32()
+  external int structSize;
+  @Int32()
+  external int playing;
+  @Int64()
+  external int frame;
+  @Double()
+  external double beat;
+  @Double()
+  external double seconds;
+  @Double()
+  external double bpm;
+  @Int64()
+  external int bar;
+  @Double()
+  external double beatInBar;
+  @Int32()
+  external int num;
+  @Int32()
+  external int den;
 }
 
 /// CawLayerMeterStereo (API 25): one layer's meter with each side's peak, as caw_engine_layer_meters fills them.
@@ -419,6 +463,27 @@ class Bindings {
   late final int Function(Pointer<Void>, Pointer<Utf8>, Pointer<CawNoteFxStatsStruct>) noteFxStats = _lib.lookupFunction<
       Int32 Function(Pointer<Void>, Pointer<Utf8>, Pointer<CawNoteFxStatsStruct>),
       int Function(Pointer<Void>, Pointer<Utf8>, Pointer<CawNoteFxStatsStruct>)>('caw_engine_note_fx_stats');
+
+  // The tempo map and time signatures (API 31, #207; caw.h).
+  late final int Function(Pointer<Void>, Pointer<CawTempoPointStruct>, int) setTempoMap = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Pointer<CawTempoPointStruct>, Int32),
+      int Function(Pointer<Void>, Pointer<CawTempoPointStruct>, int)>('caw_engine_set_tempo_map');
+  late final int Function(Pointer<Void>, Pointer<CawTimeSigStruct>, int) setTimeSignatures = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Pointer<CawTimeSigStruct>, Int32),
+      int Function(Pointer<Void>, Pointer<CawTimeSigStruct>, int)>('caw_engine_set_time_signatures');
+  late final void Function(Pointer<Void>, double, int) playCountInBars = _lib.lookupFunction<
+      Void Function(Pointer<Void>, Double, Int32), void Function(Pointer<Void>, double, int)>('caw_engine_play_count_in_bars');
+  late final int Function(Pointer<Void>, double) setBpm = _lib.lookupFunction<Int32 Function(Pointer<Void>, Double),
+      int Function(Pointer<Void>, double)>('caw_engine_set_bpm');
+  late final int Function(Pointer<Void>, Pointer<CawPositionStruct>) position = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Pointer<CawPositionStruct>), int Function(Pointer<Void>, Pointer<CawPositionStruct>)>(
+      'caw_engine_position');
+  late final int Function(Pointer<Utf8>, Pointer<CawTempoPointStruct>, int, Pointer<CawTimeSigStruct>, int, int,
+      Pointer<Utf8>, Pointer<Utf8>, int) patternExportSong = _lib.lookupFunction<
+      Int32 Function(Pointer<Utf8>, Pointer<CawTempoPointStruct>, Int32, Pointer<CawTimeSigStruct>, Int32, Int32,
+          Pointer<Utf8>, Pointer<Utf8>, Int32),
+      int Function(Pointer<Utf8>, Pointer<CawTempoPointStruct>, int, Pointer<CawTimeSigStruct>, int, int, Pointer<Utf8>,
+          Pointer<Utf8>, int)>('caw_pattern_export_song');
 
   static Bindings get instance => _instance ??= Bindings._(DynamicLibrary.open(engineLibraryPath()));
 

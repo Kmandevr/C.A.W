@@ -1,6 +1,7 @@
 // App shell: the frame (Build, Files, Arrange; bottom transport on phones, a rail and docking panels when wide) and
 // the project menu.
 import 'dart:async';
+import 'dart:math' as math;
 import 'dart:io';
 import 'dart:ui' show AppExitResponse;
 
@@ -12,6 +13,8 @@ import '../model/cpp_workbench.dart';
 import '../model/automation_writer.dart';
 import '../model/live_midi.dart';
 import '../model/app_state.dart';
+import '../model/arrange_tempo.dart';
+import '../model/project.dart';
 import '../model/settings.dart';
 import '../model/telemetry/telemetry.dart';
 import '../model/audio_edit.dart' show audioExtensions;
@@ -700,9 +703,9 @@ class _TransportBar extends StatelessWidget {
                 final cpu = (m.cpu * 100).clamp(0, 999).toStringAsFixed(0);
                 // Paused, it shows where play will resume.
                 return Align(alignment: Alignment.centerRight, child: Text(maxLines: 1, softWrap: false, m.playing
-                    ? '${transportPosition(state.playheadStep, p.engineLoopSteps, p.engineLoopSteps, p.stepsPerBar)} · CPU $cpu%'
+                    ? '${transportBarBeat(p, state.playheadStep)} · CPU $cpu%'
                     : state.pausedStep != null
-                        ? '${transportPosition(state.pausedStep!, p.engineLoopSteps, p.engineLoopSteps, p.stepsPerBar)} paused'
+                        ? '${transportBarBeat(p, state.pausedStep!)} paused'
                           ' · CPU $cpu%'
                     : 'CPU $cpu%',
                     style: Neon.code(size: 11, color: m.cpu > 0.85 ? Neon.pink : Neon.dim)));
@@ -809,6 +812,13 @@ String transportPosition(num position, num loopLength, int loopSteps, int stepsP
   return '${step ~/ stepsPerBar + 1}.${(step % stepsPerBar) ~/ 4 + 1}';
 }
 
+/// The playhead at sixteenth step [step] as bar.beat ("2.3", from 1), from the time signatures (#207): a 6/8 bar
+/// counts six eighths. A read on the loop's wrap is still its last step.
+String transportBarBeat(ProjectDoc p, double step) {
+  final last = math.max(0, p.engineLoopSteps - 1).toDouble();
+  return p.bars.label(step.clamp(0.0, last).floorToDouble() / 4);
+}
+
 /// A typed tempo: a finite number, clamped to the engine's 20 to 400 BPM and rounded to 0.1; null if not.
 double? parseBpm(String text) {
   final v = double.tryParse(text.trim().replaceAll(',', '.'));
@@ -826,14 +836,26 @@ class _BpmButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final bpm = state.project.bpm;
+    final p = state.project;
+    // With a tempo map (#207) it shows the tempo at the playhead, live while playing; typing sets the tempo of the
+    // change in effect there.
+    final mapped = p.tempoMap.length > 1;
+    double here() => mapped ? p.tempo.bpmAt(state.playheadStep / 4) : p.bpm;
+    final bpm = here();
     void type() => typeValue(context,
         title: 'Tempo (20 to 400 BPM)',
-        initial: _bpmText(bpm),
+        initial: _bpmText(double.parse(bpm.toStringAsFixed(1))),
         parse: parseBpm,
         keyboardType: const TextInputType.numberWithOptions(decimal: true),
-        apply: (v) => state.editProject((p) => p.bpm = v));
+        apply: (v) {
+          if (!mapped) return state.editProject((p) => p.bpm = v);
+          state.endUndoStep();
+          state.moveTempoPoint(p.tempo.indexAt(state.playheadStep / 4), bpm: v);
+          state.endUndoStep();
+        });
     void pad() => showDialogOrSheet<void>(context: context, builder: (_) => _TapTempoPad(state: state));
+    Widget text(double v) => Text('${_bpmText(double.parse(v.toStringAsFixed(1)))} BPM',
+        key: const ValueKey('transport-bpm-text'), style: Neon.code(size: 14, color: Neon.blue));
     // A screen reader gets both actions: double-tap types, a long-press opens the pad.
     return Semantics(
       button: true,
@@ -852,7 +874,11 @@ class _BpmButton extends StatelessWidget {
           onSecondaryTap: pad,
           child: Padding(
             padding: const EdgeInsets.symmetric(vertical: 2),
-            child: Text('${_bpmText(bpm)} BPM', style: Neon.code(size: 14, color: Neon.blue)),
+            // The tempo at the playhead moves while playing: a live island (widgets.dart).
+            child: mapped
+                ? LiveIsland(child: ValueListenableBuilder<int>(valueListenable: state.tick,
+                    builder: (context, _, _) => text(here())))
+                : text(bpm),
           ),
         ),
       ),

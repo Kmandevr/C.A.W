@@ -178,6 +178,7 @@ target_sources(caw_core PRIVATE src/builtin_fx_racks.cpp src/builtin_fx_racks_fx
 target_sources(caw_core PRIVATE src/modulation_links.cpp src/builtin_modulators.cpp)
 # modulators end
 target_sources(caw_core PRIVATE src/sample_time.cpp)  # sample positions of steps and seconds, built strict (below)
+target_sources(caw_core PRIVATE src/tempo_map.cpp)  # the tempo map and time signatures (1.0.3), built strict (below)
 target_sources(caw_core PRIVATE src/mix_pool.cpp)  # speed phase 5c: the mix graph's real-time worker pool
 # Speed phase 5d: thread priorities, affinity and hints for the pool and the callback, one platform file each.
 if(WIN32)
@@ -273,6 +274,7 @@ target_include_directories(caw_cli PRIVATE src)
   target_sources(caw_tests PRIVATE tests/speed_free_wins_test.cpp)  # speed phase 1: Eco oversampling, silent work skipped, master sleep
   target_sources(caw_tests PRIVATE tests/fp_mode_test.cpp)  # speed phase 2: the flush-to-zero guard, NaN/Inf guards under the build flags
   target_sources(caw_tests PRIVATE tests/sample_timing_test.cpp tests/timing_oracle.cpp)  # note timing exact to the sample
+  target_sources(caw_tests PRIVATE tests/tempo_map_test.cpp)  # the tempo map and time signatures (1.0.3, #207)
   target_sources(caw_tests PRIVATE tests/stress_test.cpp)  # the Benchmark (beta plan C): scenarios, ramps, cancel, profiles
   target_sources(caw_tests PRIVATE tests/mix_graph_test.cpp)  # speed phase 5a/5b: pulled routes, per-node scratch, graph levels
   target_sources(caw_tests PRIVATE tests/mix_pool_test.cpp)  # speed phase 5c: the mix pool, parallel levels, the serial lane
@@ -395,6 +397,8 @@ endif()
 # Sample positions (src/sample_time.h): note, clip, loop and automation timing is exact to the sample on every
 # platform, so this file is strict in every build, the app's included: no fused multiply-add, no reassociation.
 set_source_files_properties(src/sample_time.cpp PROPERTIES COMPILE_OPTIONS "${_caw_fp_strict}")
+# The tempo map (src/tempo_map.h) feeds the same positions, so it is strict too.
+set_source_files_properties(src/tempo_map.cpp PROPERTIES COMPILE_OPTIONS "${_caw_fp_strict}")
 
 # CLAP export (docs/native-module-sdk.md): plug-ins of the example and a test bundle, and a host test.
 if(CAW_CLAP AND CAW_TOOLS)

@@ -612,6 +612,19 @@ void ComponentChain::resolveEntry(Entry& e, std::size_t index, uint32_t m, const
     }
     e.dynamic = false;
     if (newPlay) e.anyTouched = false;
+    // A lane's song step at each frame: with a tempo map, worked out once for the block (one segment lookup), not
+    // per parameter and sample.
+    double steps[kMaxFrames];
+    bool stepsReady = false;
+    auto stepAt = [&](uint32_t i) noexcept {
+        if (!time->song || time->song->tempo.constant()) return time->stepAt(time->start + i);
+        if (time->steps) return time->steps[i];
+        if (!stepsReady) {
+            time->song->tempo.stepsAt(time->start, static_cast<int>(m), steps);
+            stepsReady = true;
+        }
+        return steps[i];
+    };
     for (std::size_t k = 0; k < count; ++k) {
         if (newPlay) e.resolvers[k].clearTouch();  // a Play ends knob overrides: the lanes rule again
         const uint32_t touch = e.touches[k].load(std::memory_order_acquire);
@@ -635,7 +648,7 @@ void ComponentChain::resolveEntry(Entry& e, std::size_t index, uint32_t m, const
         if (lane) {
             for (uint32_t i = 0; i < m; ++i)
                 lane_[i] = automationLaneValue(lane->points.data(), lane->points.size(),
-                                               static_cast<double>(time->start + i) / time->stepLength,
+                                               stepAt(i),
                                                lane->points.front().value);
             automation = lane_.data();
         }
@@ -699,7 +712,7 @@ bool ComponentChain::runModulator(std::size_t index, uint32_t m, double sampleRa
     for (uint32_t k = 0; k < outCount; ++k) std::fill_n(outs[k], m, 0.0f);
     if (e.bypass.load(std::memory_order_relaxed)) return true;  // bypassed: its outputs hold 0
     Transport transport;
-    if (time) transport = {time->tempo, static_cast<double>(time->start) / time->stepLength / 4.0, time->beatsPerBar, playing};
+    if (time) transport = time->transportAt(playing);
     static const float silence[kMaxFrames] = {};
     const float* ch[2] = {inL ? inL : silence, inR ? inR : (inL ? inL : silence)};
     const ModuleDescriptor& d = e.processor->descriptor();
@@ -741,7 +754,7 @@ void ComponentChain::process(float* left, float* right, uint32_t m, double sampl
     const bool newPlay = playing && time->playEpoch != playEpoch_;
     if (playing) playEpoch_ = time->playEpoch;
     Transport transport;  // what each component sees of the song: the tempo always, the position while playing
-    if (time) transport = {time->tempo, static_cast<double>(time->start) / time->stepLength / 4.0, time->beatsPerBar, playing};
+    if (time) transport = time->transportAt(playing);
     const double bypassStep = 1.0 / std::max(1.0, kBypassSeconds * sampleRate);
     ChainProfile* const profile = time ? time->profile : nullptr;
     for (std::size_t index = 0; index < entries_.size(); ++index) {

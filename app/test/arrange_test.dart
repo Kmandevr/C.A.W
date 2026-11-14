@@ -630,8 +630,9 @@ void main() {
       final menu = find.byKey(const ValueKey('long-press-menu'));
       expect(menu, findsOneWidget);
       expect(haptics, contains('HapticFeedbackType.selectionClick'));
-      // Near the finger: its top within a header's reach of the header.
-      expect((tester.getRect(menu).top - tester.getCenter(header).dy).abs(), lessThan(120));
+      // Near the finger: its top within a header's reach of the header (the section bar and ruler above the tracks
+      // push the header down, and the menu stays on screen).
+      expect((tester.getRect(menu).top - tester.getCenter(header).dy).abs(), lessThan(130));
       expect(find.text('Record arm'), findsOneWidget);
       await tester.tap(find.text('Record arm'));
       await tester.pumpAndSettle();

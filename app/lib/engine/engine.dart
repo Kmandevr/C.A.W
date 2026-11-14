@@ -8,6 +8,7 @@ import 'dart:typed_data';
 
 import 'package:ffi/ffi.dart';
 
+import '../model/tempo_map.dart' show TempoEngine, TempoPoint, TimeSignature;
 import 'bindings.dart';
 import 'component_info.dart';
 import 'execution.dart';
@@ -49,6 +50,24 @@ class NoteFxStats {
       required this.overflowing, required this.overflowed, required this.stolen});
   final int voices, budget, active, activeMask, overflowed, stolen;
   final bool overflowing;
+}
+
+/// Where the transport is (caw_engine_position): its sample, beats, seconds, the tempo there, and the 0-based bar,
+/// the beat within it (quarter notes) and the signature.
+class EnginePosition {
+  const EnginePosition({required this.playing, required this.frame, required this.beat, required this.seconds,
+      required this.bpm, required this.bar, required this.beatInBar, required this.num, required this.den});
+  final bool playing;
+  final int frame, bar, num, den;
+  final double beat, seconds, bpm, beatInBar;
+}
+
+/// A MIDI file read as a pattern with its tempo map and time signatures (caw_pattern_from_midi, API 31).
+class EngineMidiImport {
+  const EngineMidiImport(this.pattern, this.tempoMap, this.timeSignatures);
+  final String pattern;
+  final List<TempoPoint> tempoMap;
+  final List<TimeSignature> timeSignatures;
 }
 
 /// What the engine said about one module (a pattern) after parsing it: the project result's entry.
@@ -109,10 +128,14 @@ class EngineMeters {
     this.overloaded = 0,
     this.position = 0,
     this.loopLength = 1,
+    this.step,
   });
   final double cpu, peakL, peakR;
   final bool playing;
   final int overloaded, position, loopLength;
+
+  /// The transport's song step on the engine's tempo map (caw_engine_position, API 31; null without it).
+  final double? step;
 }
 
 class LayerMeterValue {
@@ -281,7 +304,7 @@ class AudioStatus {
 enum AudioConfigured { ok, fallback, closed }
 
 /// Live engine plus its audio device. One per app.
-class Engine {
+class Engine implements TempoEngine {
   Engine._(this._b, this._handle, this.sampleRate);
 
   /// The rate the engine runs at unless Settings › Audio chose another (it is fixed when the engine is made).
@@ -296,6 +319,7 @@ class Engine {
   Future<void> _queue = Future.value();
   Future<void> _audioQueue = Future.value();  // device reopens, in order
   final Pointer<CawMetersStruct> _meters = calloc<CawMetersStruct>();
+  final Pointer<CawPositionStruct> _position = calloc<CawPositionStruct>();
   final Pointer<CawLayerMeterStruct> _layer = calloc<CawLayerMeterStruct>();
   final Pointer<Float> _layerSides = calloc<Float>(2);
   Pointer<CawLayerMeterStereoStruct> _layers = calloc<CawLayerMeterStereoStruct>(16);
@@ -743,6 +767,60 @@ class Engine {
   /// The MIDI clock (monotonic ns; Android's System.nanoTime) that device timestamps are on.
   int get midiClockNs => _b.midiClockNs();
 
+  /// [TempoEngine]: replaces the tempo map (API 31) until the next project update sets the project's "tempo_map" again. False when
+  /// the engine refuses it (1..4096 points, BPM 1..999, the first at beat 0); nothing changes then.
+  @override
+  bool setTempoMap(List<TempoPoint> points) {
+    final p = calloc<CawTempoPointStruct>(points.isEmpty ? 1 : points.length);
+    try {
+      for (var i = 0; i < points.length; i++) {
+        p[i]
+          ..beat = points[i].beat
+          ..bpm = points[i].bpm
+          ..ramp = points[i].ramp ? 1 : 0;
+      }
+      return _b.setTempoMap(_handle, p, points.length) == 0;
+    } finally {
+      calloc.free(p);
+    }
+  }
+
+  /// [TempoEngine]: replaces the time signatures (by beat, each on a bar line of the one before; the first at beat 0;
+  /// the engine works out the bars); false if refused.
+  @override
+  bool setTimeSignatures(List<TimeSignature> sigs) {
+    final p = calloc<CawTimeSigStruct>(sigs.isEmpty ? 1 : sigs.length);
+    try {
+      for (var i = 0; i < sigs.length; i++) {
+        p[i]
+          ..beat = sigs[i].beat
+          ..num = sigs[i].num
+          ..den = sigs[i].den;
+      }
+      return _b.setTimeSignatures(_handle, p, sigs.length) == 0;
+    } finally {
+      calloc.free(p);
+    }
+  }
+
+  /// One tempo for the whole song (the map becomes one point); false if refused (1..999 BPM).
+  bool setBpm(double bpm) => _b.setBpm(_handle, bpm) == 0;
+
+  /// Where the transport is, in samples, beats, seconds and bars (null once the engine is gone).
+  EnginePosition? position() {
+    if (_nativeDestroyed) return null;
+    final out = calloc<CawPositionStruct>();
+    try {
+      out.ref.structSize = sizeOf<CawPositionStruct>();
+      if (_b.position(_handle, out) != 0) return null;
+      final r = out.ref;
+      return EnginePosition(playing: r.playing != 0, frame: r.frame, beat: r.beat, seconds: r.seconds, bpm: r.bpm,
+          bar: r.bar, beatInBar: r.beatInBar, num: r.num, den: r.den);
+    } finally {
+      calloc.free(out);
+    }
+  }
+
   void play() => _b.play(_handle);
 
   /// Plays from [step] sixteenth steps into the project loop (fractions allowed); outside it, from 0.
@@ -750,6 +828,10 @@ class Engine {
 
   /// Clicks [beats] beats at the tempo, then plays from [step] (the recording count-in); a stop cancels it.
   void playCountIn(double step, int beats) => _b.playCountIn(_handle, step, beats);
+
+  /// Clicks [bars] (0..16) whole bars of the time signature where [step] is (its ticks, 1/den notes, at the tempo
+  /// there; API 31), so the count-in starts on an accent, then plays from [step].
+  void playCountInBars(double step, int bars) => _b.playCountInBars(_handle, step, bars);
 
   /// The engine's built-in metronome click on every beat while playing.
   void setMetronome(bool on) => _b.setMetronome(_handle, on ? 1 : 0);
@@ -843,7 +925,10 @@ class Engine {
   EngineMeters meters() {
     _b.meters(_handle, _meters);
     final m = _meters.ref;
+    _position.ref.structSize = sizeOf<CawPositionStruct>();
+    final step = _b.position(_handle, _position) == 0 ? _position.ref.beat * 4 : null;
     return EngineMeters(
+      step: step,
       cpu: m.cpu,
       peakL: m.peakL,
       peakR: m.peakR,
@@ -950,6 +1035,7 @@ class Engine {
     _nativeDestroyed = true;
     _b.destroy(_handle);
     calloc.free(_meters);
+    calloc.free(_position);
     calloc.free(_layer);
     calloc.free(_layerSides);
     calloc.free(_layers);
@@ -972,6 +1058,63 @@ class Engine {
     b.free(r);
     if (j['ok'] != true) throw FormatException((j['error'] as String?) ?? 'not a MIDI file');
     return j['pattern'] as String;
+  }
+
+  /// Reads a MIDI file as pattern text with its tempo map and time signatures (API 31); throws a [FormatException]
+  /// if it can't.
+  static EngineMidiImport midiImport(Uint8List bytes) {
+    final b = Bindings.instance;
+    final data = calloc<Uint8>(bytes.isEmpty ? 1 : bytes.length);
+    data.asTypedList(bytes.length).setAll(0, bytes);
+    final r = b.patternFromMidi(data, bytes.length);
+    calloc.free(data);
+    final j = jsonDecode(r.toDartString()) as Map<String, dynamic>;
+    b.free(r);
+    if (j['ok'] != true) throw FormatException((j['error'] as String?) ?? 'not a MIDI file');
+    return EngineMidiImport(
+      j['pattern'] as String,
+      [
+        for (final p in (j['tempo_map'] as List? ?? const []).cast<Map<String, dynamic>>())
+          TempoPoint((p['beat'] as num).toDouble(), (p['bpm'] as num).toDouble(), ramp: p['ramp'] == true),
+      ],
+      [
+        for (final s in (j['time_signatures'] as List? ?? const []).cast<Map<String, dynamic>>())
+          TimeSignature(s['bar'] as int, (s['beat'] as num).toDouble(), s['num'] as int, s['den'] as int),
+      ],
+    );
+  }
+
+  /// Writes pattern module text to [path] with a tempo map and time signatures as tempo and meter events (API 31;
+  /// empty lists: 120 BPM, 4/4); a ramp becomes a tempo event every 1/16 note. Returns an error or null.
+  static String? exportPatternSong(String source, String path,
+      {List<TempoPoint> tempoMap = const [], List<TimeSignature> timeSignatures = const [], bool clip = false}) {
+    final b = Bindings.instance;
+    final src = source.toNativeUtf8(), out = path.toNativeUtf8();
+    final err = calloc<Uint8>(512).cast<Utf8>();
+    final pts = calloc<CawTempoPointStruct>(tempoMap.isEmpty ? 1 : tempoMap.length);
+    final sigs = calloc<CawTimeSigStruct>(timeSignatures.isEmpty ? 1 : timeSignatures.length);
+    try {
+      for (var i = 0; i < tempoMap.length; i++) {
+        pts[i]
+          ..beat = tempoMap[i].beat
+          ..bpm = tempoMap[i].bpm
+          ..ramp = tempoMap[i].ramp ? 1 : 0;
+      }
+      for (var i = 0; i < timeSignatures.length; i++) {
+        sigs[i]
+          ..beat = timeSignatures[i].beat
+          ..num = timeSignatures[i].num
+          ..den = timeSignatures[i].den;
+      }
+      final rc = b.patternExportSong(src, pts, tempoMap.length, sigs, timeSignatures.length, clip ? 1 : 0, out, err, 512);
+      return rc == 0 ? null : err.toDartString();
+    } finally {
+      calloc.free(src);
+      calloc.free(out);
+      calloc.free(err);
+      calloc.free(pts);
+      calloc.free(sigs);
+    }
   }
 
   /// Writes pattern module text to [path] as a .mid ([clip] false) or a MIDI 2.0 Clip File; returns an error or null.

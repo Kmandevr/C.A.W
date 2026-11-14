@@ -13,6 +13,7 @@
 #include "json.h"
 #include "project.h"
 #include "sample_time.h"
+#include "tempo_map.h"
 #include "time_stretch.h"
 #include "caw/instrument.hpp"
 
@@ -378,10 +379,20 @@ public:
         }
         const double tempo = b.transport->tempo > 0 ? b.transport->tempo : 120.0;
         const double stepLen = sampletime::stepFrames(sr_, tempo);
-        const int64_t pos = std::llround(b.transport->beat * 4.0 * stepLen);
+        // With a tempo map of more than one tempo (1.0.3), clip positions come from the map; with one tempo, from the
+        // transport's tempo, as before the map. A musical clip plays at the tempo where it starts (tempo-following
+        // audio is planned for 1.0.4); a fixed one at the file's speed.
+        const SongTime* song = live_ ? live_->songTime() : nullptr;
+        const TempoMap* tm = song && !song->tempo.constant() ? &song->tempo : nullptr;
+        auto frameOf = [&](double step) {
+            return static_cast<int64_t>(tm ? tm->roundFrame(step) : sampletime::roundFrames(step, stepLen));
+        };
+        const int64_t pos = tm ? std::llround(tm->frameAt(b.transport->beat * 4.0)) : std::llround(b.transport->beat * 4.0 * stepLen);
+        const uint64_t serial = tm ? song->serial : 0;
+        const bool retimed = tm || lastMapped_ ? serial != lastSongSerial_ : tempo != lastTempo_;
         if (pos != expected_) {
             for (Voice& v : voices_) fadeOut(v);  // a seek or a loop wrap: every voice starts again
-        } else if (tempo != lastTempo_) {
+        } else if (retimed) {
             // A tempo change: musical clips follow the new grid (they start again, declicked); fixed clips keep
             // the source position they are at (their voice's mapping moves by what the clip's start moved).
             for (Voice& v : voices_) {
@@ -391,7 +402,7 @@ public:
                     fadeOut(v);
                     continue;
                 }
-                const int64_t cs = static_cast<int64_t>(sampletime::roundFrames(c.spec.startSteps, stepLen));
+                const int64_t cs = frameOf(c.spec.startSteps);
                 const double here = v.anchorS + v.slope * static_cast<double>(t0 - v.anchorT);
                 v.drift = here - (c.offsetFrames + v.slope * static_cast<double>(pos - cs));
             }
@@ -400,18 +411,20 @@ public:
         const int64_t shift = clock_ - pos;
         expected_ = pos + m;
         lastTempo_ = tempo;
+        lastSongSerial_ = serial;
+        lastMapped_ = tm != nullptr;
         const int64_t end = pos + m;
         // Clips are sorted by start, and none is longer than maxLength: the first that can reach pos.
-        const double from = static_cast<double>(pos) / stepLen - tl->maxLength - 1.0;
+        const double from = (tm ? tm->stepAt(static_cast<double>(pos)) : static_cast<double>(pos) / stepLen) - tl->maxLength - 1.0;
         const size_t first = static_cast<size_t>(
             std::partition_point(tl->clips.begin(), tl->clips.end(),
                                  [&](const CompiledClip& c) { return c.spec.startSteps < from; }) - tl->clips.begin());
         for (Voice& v : voices_) v.seen = false;
         for (size_t ci = first; ci < tl->clips.size(); ++ci) {
             const CompiledClip& c = tl->clips[ci];
-            const int64_t cs = static_cast<int64_t>(sampletime::roundFrames(c.spec.startSteps, stepLen));
+            const int64_t cs = frameOf(c.spec.startSteps);
             if (cs >= end) break;  // sorted by start
-            const int64_t ce = static_cast<int64_t>(sampletime::roundFrames(c.spec.startSteps + c.spec.lengthSteps, stepLen));
+            const int64_t ce = frameOf(c.spec.startSteps + c.spec.lengthSteps);
             if (ce <= pos) continue;
             Voice* v = voiceFor(static_cast<int>(ci));
             if (v) v->seen = true;
@@ -420,7 +433,8 @@ public:
                 continue;
             }
             // How fast the source moves and which reader plays it.
-            const double slope = c.spec.musical ? tempo / c.spec.sourceBpm : (c.spec.varispeed ? c.pitchRatio : 1.0);
+            const double clipTempo = tm ? tm->bpmAtStep(c.spec.startSteps) : tempo;
+            const double slope = c.spec.musical ? clipTempo / c.spec.sourceBpm : (c.spec.varispeed ? c.pitchRatio : 1.0);
             ReadMode mode;
             double pitch = 1;
             if (c.spec.varispeed) {
@@ -569,6 +583,8 @@ private:
     int64_t clock_ = 0;      // the player's own time: one frame per frame rendered, whatever the transport does
     int64_t declick_ = 192;  // frames
     double lastTempo_ = 0;
+    uint64_t lastSongSerial_ = 0;  // the tempo map last played by (its SongTime::serial; 0: one tempo)
+    bool lastMapped_ = false;
     Handover<Timeline> timeline_;
     Timeline* held_ = nullptr;  // a replaced timeline whose assets fading voices still read
     std::atomic<bool> monitorStopped_{false};

@@ -6,6 +6,28 @@ updated: 2026-11-13
 
 # Decisions
 
+## 2026-11-13: The tempo map's engine side: one strict map, single tempo to the bit (Claude, within the owner's 1.0.3 contract, #207)
+
+**Decision (Claude, 2026-11-13, building the owner's decisions of the day for batch 1.0.3):**
+- **One map for every position.** `src/tempo_map.h` (`TempoMap`, `TimeSigMap`, `SongTime`) turns every beat or step into a sample: notes, layer passes, loops, automation, the metronome and count-in, the components' transport, audio clips, renders and recording. Its closed forms (60 / bpm s a beat; a linear-in-BPM ramp `60 / k × log1p(k d / bpm0)` and its `expm1` inverse) are built strict and out of line, as `sample_time.cpp` is, so timing stays exact on every platform.
+- **Single tempo stays bit-identical.** Points that never change the tempo merge into one segment, whose maths is exactly the old `step × 60 × sr / (bpm × 4)`; where the old code used other forms (a layer pass's `roundRepeat`, notes relative to their pass, the metronome's beat offset, an audio clip's tempo check), a single-tempo map keeps the old expression and a map with tempo changes takes the general one. Every golden and reference is unchanged.
+- **Swapped as a whole.** A map and its signatures travel as one `SongTime` through the command queue (built on the control thread, retired off the audio thread). While playing, any change involving a map keeps the beat; a change from one tempo to another keeps the sample, as before.
+- **Metronome ticks are 1/den notes**, accented on each bar (6/8 clicks six eighths), on the first sample at or after the tick; the count-in uses the signature and tempo where playback starts. **[Assumption]** This is the usual DAW behaviour (REAPER's default); the owner can ask for dotted-beat grouping instead.
+- **Audio clips:** a musical clip plays at the tempo where it starts; tempo-following audio stays 1.0.4's, as the contract says. A fixed clip keeps its seconds only if the app sends its `length_steps` worked out on the map (the engine takes steps).
+- **MIDI files have no ramps:** export writes a ramp as a tempo event every 1/16 note, each holding the tempo that keeps its stretch's exact length; import reads every tempo and meter event as stepped points.
+- **The audio review's fixes (2026-11-14):** the ramp maths uses the engine's own `log1p`/`expm1` (bit-identical everywhere, not libm); a live map change keeps a playhead inside the loop range; a note's expression spans its real length on the map; per-sample lanes read the chunk's steps (one segment lookup a chunk); the position is the audio thread's (a sequence lock); recording takes the Engine's map and the map holds while it records; MIDI export refuses tempos and lengths the format can't hold and leaves out changes after the pattern's end; the count-in counts whole bars of the signature (`caw_engine_play_count_in_bars`, which the app sends). The plug-in benchmark keeps the cheapest of three runs per curve point.
+- **C API 31 additions the contract assumed:** there was no `caw_engine_set_bpm` or `caw_engine_position` before; both are new (set_bpm replaces the map with one point; position reports sample, beat, seconds, tempo, bar). The project JSON's map is the main route; the live setters hold until the next project update.
+
+## 2026-11-13: Tempo lane, signature flags and the section bar: the app side's choices (Claude, within the owner's #207 looks)
+
+**Decision (Claude, 2026-11-13, for the owner to confirm; the looks themselves are the owner's):**
+- **Sections are the old regions.** A region (`MarkerDoc` with an end) is a section: one list in memory, saved apart as v3's `sections` and `markers`. Overlapping v2 regions are kept apart on load (a later one starts where the one before ends; with no room it becomes a marker), so nothing is lost.
+- **Heights:** section bar 24 / 22 px (phone / other), ruler 28 / 24, tempo lane 40 / 32. Section names are white on the section's colour; markers are a pole and a small name flag; signature flags are yellow n/d tags in the ruler's lower half; the tempo is green (line, fill and labels). A section's name starts after the flags of markers at its start.
+- **Gestures beyond the owner's list:** a tempo point drags up and down at once with a finger (one axis, so it wins over scrolling) and moves in time by hold and move; a tap on the lane adds a point, a double tap deletes one (the automation lanes' rules). A section drop snaps to the nearest bar line (Shift: any step) and is refused onto another section. Copy puts the copy in the first free place after the section.
+- **Contents of a section** are the clips and audio clips that start inside it, the automation points inside it, and its tempo and signature changes; where it lands, its tempo and signature apply from its start and what follows keeps its own, and automation points already there give way. Delete clears that span without closing the gap.
+- **The section menu** is exactly the owner's four (rename, colour, copy, delete); the old region menu's Loop this region, Select its clips and Duplicate with clips went (double tap loops; Copy is the duplicate).
+- **MIDI import** with Adopt takes the file's whole tempo map and signatures; MIDI tempos are steps, so a map exported from a ramp needs steps too (the engine side's choice).
+
 ## 2026-11-13: 1.1.0 also holds play-ahead, AutoStacc and the store releases (owner)
 
 **Decision (owner, 2026-11-13):**

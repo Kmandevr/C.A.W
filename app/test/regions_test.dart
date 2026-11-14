@@ -7,6 +7,7 @@ import 'package:caw/model/project.dart';
 import 'package:caw/model/settings.dart';
 import 'package:caw/ui/arranger_screen.dart';
 import 'package:caw/ui/key_router.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -109,36 +110,36 @@ void main() {
       await tester.pump(const Duration(seconds: 1));
     });
 
-    testWidgets('a region dragged with Alt takes its clips; with a second finger it copies them', (tester) async {
+    testWidgets('a section held and moved takes its clips; a mouse drags it straight away', (tester) async {
       await pump(tester);
-      final r = find.byKey(const ValueKey('ruler-marker-r'));
-      await tester.sendKeyDownEvent(LogicalKeyboardKey.altLeft);
-      await tester.drag(r, const Offset(16 * 18.0, 0));
-      await tester.sendKeyUpEvent(LogicalKeyboardKey.altLeft);
-      await tester.pumpAndSettle();
-      expect(region().startSteps, 32);
-      expect(clip('in1').startSteps, 32);
-      // A second finger during the drag: a copy with clips.
+      final r = find.byKey(const ValueKey('section-r'));
+      // A finger: hold, then move (the menu opens on the hold and closes as the move starts).
       final g = await tester.startGesture(tester.getCenter(r));
-      await g.moveBy(const Offset(40, 0));
+      await tester.pump(const Duration(milliseconds: 600));
+      await g.moveBy(const Offset(20, 0));
       await tester.pump();
-      final second = await tester.startGesture(tester.getCenter(r) + const Offset(0, 0), pointer: 9);
+      await g.moveBy(const Offset(18.0 * 16 - 20, 0));
       await tester.pump();
-      expect(find.textContaining('copy with clips'), findsOneWidget);
-      await g.moveBy(const Offset(18.0 * 16 * 4 - 40, 0));
-      await second.up();
+      expect(find.byKey(const ValueKey('section-landing')), findsOneWidget);
       await g.up();
       await tester.pumpAndSettle();
-      expect(s.project.markers.where((m) => m.isRegion), hasLength(2));
-      expect(region().startSteps, 32);
+      expect(region().startSteps, 32, reason: 'a bar later, snapped to the bar line');
+      expect(clip('in1').startSteps, 32);
+      // A mouse drags it back.
+      final m = await tester.startGesture(tester.getCenter(r), kind: PointerDeviceKind.mouse);
+      await m.moveBy(const Offset(-18.0 * 16, 0));
+      await tester.pump();
+      await m.up();
+      await tester.pumpAndSettle();
+      expect(region().startSteps, 16);
       await tester.pump(const Duration(seconds: 1));
     });
 
-    testWidgets('the list shows markers with their keys and regions with their clips; a tap jumps', (tester) async {
+    testWidgets('the list shows markers with their keys and sections with their clips; a tap jumps', (tester) async {
       await pump(tester);
       await tester.longPressAt(tester.getRect(find.byKey(const ValueKey('arrange-ruler'))).topLeft + const Offset(400, 6));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Markers and regions…'));
+      await tester.tap(find.text('Markers and sections…'));
       await tester.pumpAndSettle();
       expect(find.text('Intro'), findsWidgets);
       expect(find.textContaining('2 clips'), findsOneWidget);
