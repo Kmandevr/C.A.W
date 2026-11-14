@@ -3,6 +3,26 @@
 What changed in each C.A.W release, newest first. C.A.W is in open alpha: expect rough edges and unexpected issues.
 Versions keep the `-alpha.N` suffix until the official release.
 
+## 1.0.3-alpha.1 (2026-11-14)
+
+Song timing: tempo changes, time signatures, sections and markers.
+
+### New
+- **Tempo lane:** a lane under the ruler for tempo changes, stepped or ramped. Drag a point up or down; hold it for Stepped, Ramped, Set tempo… or Delete. It appears once a song has a tempo change.
+- **Time signature changes:** set from the ruler's hold menu, shown as flags in the ruler (3/4, 6/8…). Bar numbers, the grid, the piano roll and the transport's bar.beat follow them.
+- **Sections:** coloured, named blocks above the ruler (Intro, Verse, Chorus…). Tap to jump, double tap to loop, hold for Rename, Colour, Copy or Delete, hold and move to move. Moving, copying or deleting a section takes its clips, automation and tempo changes with it, as one undo step.
+- **Markers:** named flags in the section bar.
+- **Count-in:** counts whole bars of the time signature where playback starts.
+
+### Improved
+- **Everything time-based follows tempo changes:** notes, loops, automation, the metronome (it clicks each note of the signature, accenting the first of the bar), tempo-synced delays, choruses and LFOs, audio clips, recording, export and stems.
+- **MIDI import and export** carry tempo changes and time signatures. MIDI can't store a ramp, so ramps are written as small steps.
+- **Same sound everywhere:** tempo ramps compute identically on Android, Windows and Linux.
+- **Old projects** open unchanged, as one tempo and time signature. Their loop regions become sections.
+
+### Known limits
+- **Audio clips** are drawn at the song's starting tempo until audio stretching arrives in 1.0.4.
+
 ## 1.0.2-alpha.1 (2026-11-13)
 
 Benchmark and diagnostics.
