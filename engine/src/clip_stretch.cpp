@@ -2,8 +2,22 @@
 #include "clip_stretch.h"
 
 #include <algorithm>
+#include <complex>
 #include <new>
 #include <random>
+
+#include "caw/detmath.hpp"
+
+namespace caw::stretchmath {
+// r e^(i theta) from the engine's deterministic sine (caw/detmath.hpp), in place of std::polar: libm's sin and cos
+// differ between platforms, and these feed every FFT twiddle and the stretch's per-block rotations.
+template <class R, class T>
+std::complex<R> polar(R r, T theta) noexcept {
+    const double a = static_cast<double>(theta);
+    return {static_cast<R>(static_cast<double>(r) * detCos(a)), static_cast<R>(static_cast<double>(r) * detSin(a))};
+}
+}  // namespace caw::stretchmath
+#define SIGNALSMITH_POLAR(r, theta) ::caw::stretchmath::polar(r, theta)
 
 #include "signalsmith-stretch/signalsmith-stretch.h"
 

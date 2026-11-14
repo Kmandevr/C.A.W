@@ -408,6 +408,11 @@ endif()
 set_source_files_properties(src/sample_time.cpp PROPERTIES COMPILE_OPTIONS "${_caw_fp_strict}")
 # The tempo map (src/tempo_map.h) feeds the same positions, so it is strict too.
 set_source_files_properties(src/tempo_map.cpp PROPERTIES COMPILE_OPTIONS "${_caw_fp_strict}")
+# Clip stretching (1.0.4): Signalsmith Stretch (clip_stretch.cpp, the only file that includes the library) and the clip
+# readers (time_stretch.cpp: WSOLA, the bridge's lag) are strict too, so a stretched clip renders the same bits on
+# x86-64, Arm64 (where the fast flags fuse multiply-adds) and with clang-cl; their complex exponentials come from the
+# engine's deterministic sine, not libm.
+set_source_files_properties(src/clip_stretch.cpp src/time_stretch.cpp PROPERTIES COMPILE_OPTIONS "${_caw_fp_strict}")
 
 # CLAP export (docs/native-module-sdk.md): plug-ins of the example and a test bundle, and a host test.
 if(CAW_CLAP AND CAW_TOOLS)

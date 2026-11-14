@@ -664,9 +664,9 @@ private:
 				int channel = int(step);
 				auto bins = bandsForChannel(channel);
 
-				Complex rot = std::polar(Sample(1), bandToFreq(0)*stft.defaultInterval()*Sample(2*M_PI));
+				Complex rot = SIGNALSMITH_POLAR(Sample(1), bandToFreq(0)*stft.defaultInterval()*Sample(2*M_PI)); // C.A.W local change: was std::polar
 				Sample freqStep = bandToFreq(1) - bandToFreq(0);
-				Complex rotStep = std::polar(Sample(1), freqStep*stft.defaultInterval()*Sample(2*M_PI));
+				Complex rotStep = SIGNALSMITH_POLAR(Sample(1), freqStep*stft.defaultInterval()*Sample(2*M_PI)); // C.A.W local change: was std::polar
 				 
 				for (int b = 0; b < bands; ++b) {
 					auto &bin = bins[b];

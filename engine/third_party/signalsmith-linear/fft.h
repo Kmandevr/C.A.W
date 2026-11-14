@@ -14,6 +14,13 @@
 #	define M_PI 3.14159265358979323846
 #endif
 
+// C.A.W local change (2026-11-14, not upstream): every complex exponential (the FFT twiddles, the stretch's per-block
+// rotations) goes through this macro, so an includer can give the same bits on every platform (libm's sin and cos
+// differ between glibc, bionic and MSVC). Default: std::polar, as upstream.
+#ifndef SIGNALSMITH_POLAR
+#	define SIGNALSMITH_POLAR(r, theta) std::polar(r, theta)
+#endif
+
 namespace signalsmith { namespace linear {
 
 namespace _impl {
@@ -113,7 +120,7 @@ struct SimpleFFT {
 		twiddles.resize(size*3/4);
 		for (size_t i = 0; i < size*3/4; ++i) {
 			Sample twiddlePhase = -2*M_PI*i/size;
-			twiddles[i] = std::polar(Sample(1), twiddlePhase);
+			twiddles[i] = SIGNALSMITH_POLAR(Sample(1), twiddlePhase);
 		}
 		working.resize(size);
 	}
@@ -366,7 +373,7 @@ struct SplitFFT {
 		for (size_t i = 0; i < innerSize; ++i) {
 			for (size_t s = 1; s < outerSize; ++s) {
 				Sample twiddlePhase = Sample(-2*M_PI*i/innerSize*s/outerSize);
-				outerTwiddles[i + (s - 1)*innerSize] = std::polar(Sample(1), twiddlePhase);
+				outerTwiddles[i + (s - 1)*innerSize] = SIGNALSMITH_POLAR(Sample(1), twiddlePhase);
 			}
 		}
 		for (size_t i = 0; i < outerTwiddles.size(); ++i) {
@@ -409,7 +416,7 @@ struct SplitFFT {
 				dftTwists.resize(outerSize);
 				for (size_t s = 0; s < outerSize; ++s) {
 					Sample dftPhase = Sample(-2*M_PI*s/outerSize);
-					dftTwists[s] = std::polar(Sample(1), dftPhase);
+					dftTwists[s] = SIGNALSMITH_POLAR(Sample(1), dftPhase);
 				}
 			}
 		}
@@ -978,18 +985,18 @@ struct RealFFT {
 		if (!halfBinShift) {
 			for (size_t i = 0; i < twiddles.size(); ++i) {
 				Sample rotPhase = i*(-2*M_PI/size) - M_PI/2; // bake rotation by (-i) into twiddles
-				twiddles[i] = std::polar(Sample(1), rotPhase);
+				twiddles[i] = SIGNALSMITH_POLAR(Sample(1), rotPhase);
 			}
 		} else {
 			for (size_t i = 0; i < twiddles.size(); ++i) {
 				Sample rotPhase = (i + 0.5)*(-2*M_PI/size) - M_PI/2;
-				twiddles[i] = std::polar(Sample(1), rotPhase);
+				twiddles[i] = SIGNALSMITH_POLAR(Sample(1), rotPhase);
 			}
 	
 			halfBinTwists.resize(hSize);
 			for (size_t i = 0; i < hSize; ++i) {
 				Sample twistPhase = -2*M_PI*i/size;
-				halfBinTwists[i] = std::polar(Sample(1), twistPhase);
+				halfBinTwists[i] = SIGNALSMITH_POLAR(Sample(1), twistPhase);
 			}
 		}
 	}
