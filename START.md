@@ -1,12 +1,12 @@
 # C.A.W start file for chat agents
 
-Generated from `7c7d347ffb643c4e4e36f093dda39ba0ae61e58b` on the default branch at 2026-11-13T06:42:36Z by `scripts/agent-context.js`. Don't edit it; edit the files it bundles.
+Generated from `232189adc99fe9f32ab85a69614dd44ae16854bb` on the default branch at 2026-11-14T00:31:49Z by `scripts/agent-context.js`. Don't edit it; edit the files it bundles.
 
 Read this whole file before doing anything else. It replaces separately reading `AGENTS.md`, `CLAUDE.md`, `docs/vision.md` and `.claude/rules/*.md`.
 
 ## Before you start: confirm in your first reply
 
-1. The commit this file was generated from (`7c7d347`).
+1. The commit this file was generated from (`232189a`).
 2. The task issue number and your branch (`gpt/<issue>-<short-name>`).
 3. The progress comment's next action, or "new task" if there is none yet.
 4. Which area rules below apply to the files you will touch.
@@ -249,7 +249,7 @@ C.A.W. is a code-driven sound-design and music-production workspace for creating
 
 **Goal (owner, 2026-11-03):** C.A.W. is not trying to be a conventional DAW, and it doesn't have to work the way one does. It must be able to do everything a good DAW can do, because there is no good DAW for mobile. Its own way of working (code, patterns, one shared project and engine model, phone-first touch) is the means; full production capability is the requirement. It keeps a lightweight architecture so weak phones stay first-class, rather than copying a heavyweight DAW's design. **Owner (2026-11-09):** it should *feel* like a full DAW, closest to REAPER, "but better and more specialized": the familiar workflow (tracks, mixer, FX stacks, automation, a browser) with C.A.W.'s own strengths built in, such as writing, building and hearing your own effects inside the song. The layout is in [decisions](decisions.md) ("The app's layout").
 
-**Run on anything (owner, 2026-11-12):** the app changes according to the hardware it runs on and then runs, "so nothing beats C.A.W". The same project opens everywhere; the hardware decides how much is computed live and how much is rendered ahead (**dynamic play-ahead**: untouched tracks rendered ahead in batches, switching to real time "quickly and silently so no one ever notices" when the user needs low latency). Exports never change to save CPU. The publicity target is a hacked graphing calculator ("it's a stunt, if it works it's fine"). Target release 1.2.0. [Proposal] The design and order are in the [play-ahead plan](play-ahead-plan.md) (#191); nothing of it is built.
+**Run on anything (owner, 2026-11-12):** the app changes according to the hardware it runs on and then runs, "so nothing beats C.A.W". The same project opens everywhere; the hardware decides how much is computed live and how much is rendered ahead (**dynamic play-ahead**: untouched tracks rendered ahead in batches, switching to real time "quickly and silently so no one ever notices" when the user needs low latency). Exports never change to save CPU. The publicity target is a hacked graphing calculator ("it's a stunt, if it works it's fine"). Target release 1.1.0 (owner, 2026-11-13; it was 1.2.0). [Proposal] The design and order are in the [play-ahead plan](play-ahead-plan.md) (#191); nothing of it is built.
 
 **What play-ahead should give the user** ([Assumption]: estimated from the engine's structure, not measured; the Benchmark turns each into a fact or drops it; figures in the plan's "Expected gains"):
 
@@ -360,7 +360,7 @@ Only the owner can settle these questions. Do not silently convert them into imp
 | Whether effect tails should carry across a layer loop restart in every case | Open; see [engine playback](engine.md#playback) |
 | Music video editor (2026-11-12, #182): the editor's look, to check in the APK. The other questions were answered the same day (full screen, empty stretches, effect targets, the Strobe warning, Falling notes for new videos, keys in the catalogue; [decisions](decisions.md#2026-11-12-the-music-video-editors-open-questions-answered-owner)) | Open (look only) |
 | Piano roll (WP-K2, 2026-11-11): the look of the Quantize… sheet and the step bar (in the APK); whether Ctrl+U should use the sheet's last settings; whether the slide-up on-screen keys should also step; the MIDI CC numbers for automation lanes (CC7 volume, CC10 pan, others from CC20, as proposed in #11), the volume curve (127·√gain) and how parameter lanes scale ([app](app.md)) | Open |
-| Play-ahead and run anywhere (1.2.0, #191): which calculator for the stunt; what counts as intent to switch a track to real time, and whether an edit without intent may be heard up to the ring's depth late; whether ahead tracks on weak phones keep their full voices; a 16-bit preview cache on the lowest tier; the look of the two-part CPU meter and of "what's ready to play"; whether Freeze is a user action, automatic, or both; first of all, the fallback when an ahead track's worker falls behind (a warm spare instance or an audible fade) and whether a module format bump for runtime-state calls is acceptable ([play-ahead plan](play-ahead-plan.md#open-questions-for-the-owner)) | Open |
+| Play-ahead and run anywhere (1.1.0, #191): which calculator for the stunt; what counts as intent to switch a track to real time, and whether an edit without intent may be heard up to the ring's depth late; whether ahead tracks on weak phones keep their full voices; a 16-bit preview cache on the lowest tier; the look of the two-part CPU meter and of "what's ready to play"; whether Freeze is a user action, automatic, or both; first of all, the fallback when an ahead track's worker falls behind (a warm spare instance or an audible fade) and whether a module format bump for runtime-state calls is acceptable ([play-ahead plan](play-ahead-plan.md#open-questions-for-the-owner)) | Open |
 | Matching REAPER's flow ([REAPER's flow](reaper-flow.md)): the phone look of the new screens (Export sheet, send knob). S splits, Touch automation from a transport button and on-screen keys with pads (owner, 2026-11-10). The clip bar, the ruler with the loop range, markers and regions, the recording flow and automation writing are built; their look and the choices made for them are to confirm ([decisions](decisions.md)) | Open |
 
 ---
