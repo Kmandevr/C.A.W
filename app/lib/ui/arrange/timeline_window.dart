@@ -23,6 +23,9 @@ class TimelineWindow {
   /// Whether anything of [start]..[end] (steps) is in the window.
   bool shows(double start, double end) => end >= originStep && start <= endStep;
 
+  /// Whether the view from step [from] to [to] is all inside the window (it then needn't move).
+  bool covers(double from, double to) => from >= originStep && to <= endStep;
+
   /// The window's width in pixels, within a lane [laneWidth] wide.
   double width(double stepW, double laneWidth) =>
       math.max(0.0, math.min(laneWidth, isAll ? laneWidth : endStep * stepW) - originStep * stepW);

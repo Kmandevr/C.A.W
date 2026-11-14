@@ -313,7 +313,9 @@ void main() {
       ]),
     ]);
     await arranger(tester);
-    final w = stepW(tester);
+    await tester.pump();
+    expect(find.byKey(const ValueKey('audio-clip-box-c1')), findsNothing, reason: 'out of view: not built');
+    final w = tester.getSize(find.byKey(const ValueKey('audio-clip-box-early'))).width / 8;
     // The lanes' scroll view: the horizontal one with the most to scroll.
     final lanes = tester.stateList<ScrollableState>(find.byType(Scrollable))
         .where((st) => st.position.axis == Axis.horizontal)
@@ -332,8 +334,14 @@ void main() {
         matching: find.byType(Positioned)).first);
     expect(slot.left!.abs(), lessThan(5000));
     final win = TimelineWindow.around(lanes.position.pixels, lanes.position.viewportDimension, w);
-    expect(win.x(far, w), closeTo(slot.left!, 1e-9));
+    expect(win.x(far, w), closeTo(slot.left!, 1e-9), reason: 'a fresh window after the jump');
     expect(win.shows(far, far + 8), isTrue);
     expect(win.shows(0, 8), isFalse);
+    // A small scroll inside the window doesn't move it (no lane rebuilds).
+    lanes.position.jumpTo(lanes.position.pixels + 40);
+    await tester.pump();
+    final again = tester.widget<Positioned>(find.ancestor(of: find.byKey(const ValueKey('audio-view-c1')),
+        matching: find.byType(Positioned)).first);
+    expect(again.left, slot.left);
   });
 }

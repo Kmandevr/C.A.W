@@ -2309,10 +2309,18 @@ class _TimelineLaneState extends State<_TimelineLane> {
   ScrollPosition? _pos;
   TimelineWindow _shownWindow = TimelineWindow.all;
 
+  double _windowStepW = 0;
+
+  /// The window to build: the one shown while it still covers the view at the same zoom, else a new one around it.
   TimelineWindow _window() {
     final p = _pos;
     if (p == null || !p.hasPixels || !p.hasViewportDimension) return TimelineWindow.all;
-    return TimelineWindow.around(p.pixels, p.viewportDimension, widget.stepW);
+    final w = widget.stepW;
+    if (w == _windowStepW && !_shownWindow.isAll &&
+        _shownWindow.covers(p.pixels / w, (p.pixels + p.viewportDimension) / w)) {
+      return _shownWindow;
+    }
+    return TimelineWindow.around(p.pixels, p.viewportDimension, w);
   }
 
   void _onScroll() {
@@ -2454,6 +2462,9 @@ class _TimelineLaneState extends State<_TimelineLane> {
     final leaving = EditMotion.of(context, EditMotionKind.clips);
     final appearing = _clipChanges(leaving);
     final win = _shownWindow = _window();
+    _windowStepW = stepW;
+    // The first layout has no viewport yet: the window settles right after it, not on the first scroll.
+    if (win.isAll && _pos != null) WidgetsBinding.instance.addPostFrameCallback((_) => _onScroll());
     // A clip outside the window isn't built, unless it is selected or a drag is on (it may be the one carried).
     bool keep(String id, double start, double end) =>
         win.shows(start, end) || widget.selectedIds.contains(id) || (widget.drag?.active ?? false);
