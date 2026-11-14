@@ -1,10 +1,26 @@
 ---
 title: Decisions
 summary: Dated record of what was chosen and why, newest first.
-updated: 2026-11-13
+updated: 2026-11-14
 ---
 
 # Decisions
+
+## 2026-11-14: Clip stretching runs Signalsmith Stretch live in the callback; two new dependencies (Claude, within the owner's 1.0.4 contract, #208)
+
+**Dependencies (new, vendored header-only in `engine/third_party/`, each with its LICENSE file):**
+- **Signalsmith Stretch** 1.3.2 (`signalsmith-stretch/signalsmith-stretch.h`), **MIT** ([Fact] its `LICENSE.txt`, "Copyright (c) 2022 Geraint Luff / Signalsmith Audio Ltd.", read 2026-11-14), github.com/Signalsmith-Audio/signalsmith-stretch commit 88061fd4eda56a2353c5d65c74aa3f4ccf76f9da (2026-10-22).
+- **Signalsmith Linear** (only `stft.h` and `fft.h`, which is all the stretch needs: no `linear.h`, no platform backends), **MIT** ([Fact] its `LICENSE.txt`, "Copyright (c) 2025 Signalsmith Audio", read 2026-11-14), github.com/Signalsmith-Audio/linear commit 7bb1c8f36794d6980080ce817c91f8da8fe56a66 (2026-10-21). The optional `arm_math`, `xsimd`, Accelerate, IPP and PFFFT backends are left off (none is defined, so the plain C++ FFT is used).
+- Read before vendoring: pure DSP (STFT, FFT, phase-vocoder maths); no I/O, threads, system calls or logging (the library's one `std::cerr` is in `linear.h`, not vendored). Its default constructor seeds from `std::random_device`; C.A.W uses the seeded one with `std::minstd_rand` (fully specified by the standard), so the random phases it uses past a 2x stretch are the same sequence on every platform. Only `src/clip_stretch.cpp` includes it.
+
+**Decision: stretch live, not render ahead.** Measured (Linux x64 VM, GCC 13 -O3, 2026-11-14): once `presetDefault` has run, `process()` and `seek()` made **0 allocations** through 4,000 64-frame calls at a 0.8 rate with pitch (a counting `operator new`; `outputSeek()` too), and the code takes no lock (read: buffers are `std::vector`s sized in `configure()` and only `resize`d within their capacity or `assign`ed equal sizes; its peak list is reserved for half the bins, and C.A.W's preparation runs it once on noise with a pitch shift so anything grown on first use has grown). `signalsmith_clip_voices_never_allocate_on_the_audio_thread` (caw_rt_tests) checks the engine's whole path: pre-rolled starts, a mid-clip join, a ramped map, pitch, reverse, loop, a seek and loop wraps. So the contract's preferred design holds and there is no render cache: no memory for rendered copies (a 4-minute stereo clip would be 92 MB), and a tempo or pitch change is heard at once.
+- **Costs that shaped it:** a voice costs about 1.1% of this container's core (five times plain playback; numbers in [engine](engine.md#performance)); a whole spectrum at once took up to 423 µs of a 64-frame block, so the split computation is on (worst about 110 µs, one interval more latency, which the feed covers). `outputSeek()`, the library's way to start with valid output, took 1.2 ms per voice: too much for a callback when several clips start together, so it is not used.
+- **Starting without a spike:** the stretcher's output is good 90 ms (its output latency at 48 kHz) after a start. A clip ahead of the playhead gets its voice 90 ms early, silent (its source before the clip's offset reads as silence); a voice joining mid-clip (play from inside it, a seek, a loop wrap) plays WSOLA for those 90 ms and crossfades over 512 frames. **[Assumption]** the WSOLA bridge is short enough not to be heard as a different sound; the owner may prefer a gap.
+- **Memory:** about 0.9 MB a stretcher at 48 kHz; a track makes two per Signalsmith clip (a fading voice and its replacement), at most 32, made on the control thread when a project update brings them and kept while the track lives.
+- **Bypass:** ratio 1 with no pitch takes the old direct copy whatever the algorithm, so every API 31 project sounds the same to the bit (every existing reference and golden unchanged); `"stretch": "wsola"` stays the default and old clips keep WSOLA. The app writes `"signalsmith"` for new clips (its choice).
+- **Following the tempo:** a clip that follows the tempo is placed by song step (`offset + (step − start) × 15 / source_bpm` seconds of source), its rate worked out per 64-frame chunk, so it stays on the bars through a ramp (1.0.3's musical clips played at the tempo where they started). With one tempo, the old formula, to the bit.
+- **Tempo detection and slices:** onset-based, built here (spectral flux, autocorrelation for tempo, peak picking for transients; no new dependency); described in [engine](engine.md#tempo-detection-and-slices).
+- **C API 32**, the JSON keys and the calls: in the contract's "Engine notes" and `caw.h`. The project JSON keeps API 31's `stretch` (the algorithm's name), so the contract's `stretch` ratio is the key `stretch_ratio`; `follows_tempo` is the same as `"mode": "musical"`; loop points in source frames are `loop_start_frames`/`loop_end_frames` beside the seconds.
 
 ## 2026-11-13: The tempo map's engine side: one strict map, single tempo to the bit (Claude, within the owner's 1.0.3 contract, #207)
 

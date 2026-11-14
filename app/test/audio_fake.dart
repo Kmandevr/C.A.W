@@ -33,8 +33,31 @@ class FakeAudioIo implements AudioIo {
     InputDeviceInfo(name: 'USB interface', id: 'usb', channels: 4),
   ];
 
+  // Tempo detection and slices (API 32): what they return, and the calls made.
+  TempoEstimate tempo = const TempoEstimate(ok: true, bpm: 120, confidence: 0.8, onsets: 16);
+  SliceResult sliceResult = const SliceResult(ok: true, seconds: 2, slices: [
+    AudioSlice(seconds: 0, frame: 0, strength: 1),
+    AudioSlice(seconds: 0.5, frame: 24000, strength: 0.8),
+  ]);
+  final List<String> analysed = [];
+
   SfzImportResult? sfz;
   final List<(String, String, bool)> sfzExports = [];
+
+  @override
+  Future<TempoEstimate> detectTempo(String path,
+      {double minBpm = 70, double maxBpm = 180, double startSeconds = 0, double endSeconds = 0}) async {
+    analysed.add('tempo $path');
+    return tempo;
+  }
+
+  @override
+  Future<SliceResult> slices(String path,
+      {double sensitivity = 0.5, double startSeconds = 0, double endSeconds = 0, double minGapSeconds = 0.05,
+      int maxSlices = 64}) async {
+    analysed.add('slices $path $sensitivity');
+    return sliceResult;
+  }
 
   @override
   Future<AssetInfo> loadAsset(String path) async {

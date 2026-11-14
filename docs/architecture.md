@@ -1,7 +1,7 @@
 ---
 title: Architecture
 summary: Technical architecture, verified engine/app boundaries and clearly labelled future design proposals.
-updated: 2026-11-13
+updated: 2026-11-14
 covers: [app/pubspec.yaml, engine/CMakeLists.txt]
 ---
 
@@ -38,6 +38,7 @@ The current app and native implementation are documented in [App](app.md), [Engi
 | --- | --- | --- |
 | Sound engine | **Custom C++20 core** (owner, 2026-10-28), platform separation under engine/platform/ | Portable core; currently CI-verified on Linux x64, Linux Arm64 and Windows x64, and built into the Android app. iOS/macOS/WASM builds are not currently CI-verified |
 | Audio I/O | **miniaudio**, behind `engine/platform/` | Current host backends are selected in the platform layer; upstream miniaudio supports AAudio/OpenSL ES, Core Audio, WASAPI and ALSA/PulseAudio. Do not infer every backend is currently built or tested by this repository |
+| Clip time-stretch and pitch | **Signalsmith Stretch** with Signalsmith Linear's FFT (MIT, header-only, vendored in `engine/third_party/`; 2026-11-14, [decisions](decisions.md)) | High-quality phase-vocoder stretch and pitch that runs allocation-free in the callback once prepared; WSOLA and varispeed stay as the engine's own readers |
 | UI | **Flutter** (owner, 2026-10-28) | One UI codebase; current CI builds Android and Windows app artifacts. Linux analysis/tests run, but Linux is not a shipped artifact; iOS/macOS app builds are not configured |
 | Bridge | Thin C API over the engine, called through `dart:ffi` | Only control messages cross it (play, stop, swap program, set parameter, note previews, read meters). No audio data, no per-sample calls |
 | Build | CMake for the engine, Flutter for the app, GitHub Actions CI | The engine target also builds the offline component testing suite (`caw test-component`) and the plug-in benchmark (`caw_worker_pool_submit_component_bench`, its test fixture `caw_bench_fixture`). Each engine test file is registered in `engine/CMakeLists.txt` and `ctest` runs them in shards, then again with the mix graph on three pool workers, checking every reference render's bits against the first pass (`caw_parallel_identity`; `CAW_TSAN` builds with ThreadSanitizer for the pool's CI job); optimised engine builds are link-time optimised with Clang and MSVC, and the Windows app's engine DLL is built with clang-cl (Visual Studio's ClangCL toolset, MSVC ABI) as its own CMake build inside the Flutter Windows build (owner, 2026-11-13, #199). CI currently produces Android and Windows app artifacts and verifies Linux/Windows engine targets; it does not produce every target's installable |

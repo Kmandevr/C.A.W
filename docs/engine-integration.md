@@ -2,7 +2,7 @@
 title: Engine integration contract
 summary: How CAW's shared native engine is consumed by projects, add-ons, the app, the library and external build targets.
 covers: [engine/include/caw.h]
-updated: 2026-11-13
+updated: 2026-11-14
 ---
 
 # Engine integration contract
@@ -19,11 +19,13 @@ The portable C++ core is the single source of processing behavior. Hosts must no
 
 - **CAW app:** authors projects, browses the library, edits module parameters, previews (modules and single notes) and exports.
 - **Project runtime:** resolves dependencies, instantiates modules and stores user-visible state.
-- **Add-ons:** call the versioned C ABI (`caw.h`, `CAW_API_VERSION` 31; compiled components use the component interface v3 in `caw_component.h`) and use the same module, parameter, render and capability contracts as the app. Add-ons do not reach into private C++ classes.
+- **Add-ons:** call the versioned C ABI (`caw.h`, `CAW_API_VERSION` 32; compiled components use the component interface v3 in `caw_component.h`) and use the same module, parameter, render and capability contracts as the app. Add-ons do not reach into private C++ classes.
 - **CLI and CI:** validate, render, package and test the same project/module formats without launching the UI; `caw test-component` (and `caw_component_test` for add-ons) measures a C++ effect offline ([engine](engine.md#component-testing)).
 - **Future plugin wrappers:** adapt host audio/MIDI buffers to the engine's documented processing contract. They are generated/packaged products, not a requirement to run CAW itself.
 
 **Song time (API 31, #207, built):** a host gives the engine positions in beats (quarter notes) and a tempo map with time signatures, in the project JSON (`tempo_map`, `time_signatures`) or live (`caw_engine_set_tempo_map`, `caw_engine_set_time_signatures`, `caw_engine_set_bpm`), and reads the transport back with `caw_engine_position` (sample, beats, seconds, tempo, bar). The engine owns the beat↔time maths (`src/tempo_map.h`; [engine](engine.md#playback)); a host that shows times works them out with the same closed forms and checks itself against `engine/tests/references/tempo_vectors.json`. Compiled components see the tempo and song position at each block's first frame through `CawTransport`, unchanged in shape.
+
+**Audio stretching and analysis (API 32, #208, built):** an audio clip names its stretch algorithm (`"stretch": "signalsmith"` for Signalsmith Stretch), its `stretch_ratio`, `pitch_cents`, `gain_db`, `follows_tempo` (the clip follows the tempo map) and loop points in the file's own frames, all in the project JSON; a clip at ratio 1 with no pitch plays its file's samples exactly. `caw_asset_tempo` estimates a file's tempo from its onsets (null when unsure) and `caw_asset_slices` returns its transients for Slice to MIDI; both take an options JSON and run on the caller's worker. The host builds the tracks, zones and MIDI clips from the slices ([engine](engine.md#tempo-detection-and-slices)).
 
 Every public capability needs a stable identifier, documented input/output contract, versioning behavior, error reporting and a test. The C ABI remains the compatibility boundary; additive functions and structs must be size/version guarded before any future ABI-breaking redesign.
 

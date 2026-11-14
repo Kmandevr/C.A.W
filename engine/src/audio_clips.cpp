@@ -9,6 +9,7 @@
 #include "asset_store.h"
 #include "audio_input.h"
 #include "builtin_sampler.h"
+#include "clip_stretch.h"
 #include "handover.h"
 #include "json.h"
 #include "project.h"
@@ -60,7 +61,12 @@ std::string AudioTrackSpec::signature() const {
              std::to_string(static_cast<int>(c.fadeInCurve)) + std::to_string(static_cast<int>(c.fadeOutCurve)) +
              std::to_string(c.reverse) + std::to_string(c.loop) + "," + num(c.loopStartSeconds) + "," +
              num(c.loopEndSeconds) + "," + num(c.pitch) + std::to_string(c.musical) + std::to_string(c.varispeed) +
-             "," + num(c.sourceBpm) + std::to_string(c.mute) + "\x1e";
+             "," + num(c.sourceBpm) + std::to_string(c.mute);
+        // API 32's fields, only when set (a clip without them describes itself as before).
+        if (c.loopStartFrames >= 0 || c.loopEndFrames >= 0 || c.pitchCents != 0 || c.stretchRatio != 1 || c.hq)
+            s += "," + std::to_string(c.loopStartFrames) + "," + std::to_string(c.loopEndFrames) + "," +
+                 num(c.pitchCents) + "," + num(c.stretchRatio) + std::to_string(c.hq);
+        s += "\x1e";
     }
     return s;
 }
@@ -131,17 +137,32 @@ bool parseAudioTrack(const Json& l, const std::map<std::string, AssetRef>& asset
                 error = name + " needs an \"asset\" or a \"path\"";
                 return false;
             }
+            const Json* modeJ = j.get("mode");
+            const Json* stretchJ = j.get("stretch");
+            const Json* followsJ = j.get("follows_tempo");
+            if ((modeJ && modeJ->type != Json::Type::Null && modeJ->type != Json::Type::String) ||
+                (stretchJ && stretchJ->type != Json::Type::Null && stretchJ->type != Json::Type::String) ||
+                (followsJ && followsJ->type != Json::Type::Null && followsJ->type != Json::Type::Bool)) {
+                error = name + ": mode and stretch are names, follows_tempo true or false";
+                return false;
+            }
             std::string mode = j.string("mode", "fixed"), stretch = j.string("stretch", "wsola");
             if (mode != "fixed" && mode != "musical") {
                 error = name + ": mode must be \"fixed\" or \"musical\"";
                 return false;
             }
-            if (stretch != "wsola" && stretch != "varispeed") {
-                error = name + ": stretch must be \"wsola\" or \"varispeed\"";
+            if (stretch != "wsola" && stretch != "varispeed" && stretch != "signalsmith") {
+                error = name + ": stretch must be \"wsola\", \"varispeed\" or \"signalsmith\"";
                 return false;
             }
-            c.musical = mode == "musical";
+            const bool follows = followsJ && followsJ->type == Json::Type::Bool && followsJ->b;
+            if (follows && modeJ && modeJ->type == Json::Type::String && mode == "fixed") {
+                error = name + ": follows_tempo and mode \"fixed\" disagree (give one)";
+                return false;
+            }
+            c.musical = mode == "musical" || follows;
             c.varispeed = stretch == "varispeed";
+            c.hq = stretch == "signalsmith";
             const double hour = 24 * 3600.0;
             if (!finiteIn(j, "start_steps", 0, 0, maxSteps, c.startSteps) ||
                 !finiteIn(j, "length_steps", 16, 1e-6, maxSteps, c.lengthSteps) || c.startSteps + c.lengthSteps > maxSteps) {
@@ -159,6 +180,28 @@ bool parseAudioTrack(const Json& l, const std::map<std::string, AssetRef>& asset
                 !finiteIn(j, "source_bpm", assetBpm, 0, 1000, c.sourceBpm)) {
                 error = name + ": offset, fades and loop points are seconds (0 or more), gain 0..3.98, pitch -48..48 "
                                "semitones, source_bpm 0..1000";
+                return false;
+            }
+            double gainDb = 0;
+            if (!finiteIn(j, "stretch_ratio", 1, 0.25, 4, c.stretchRatio) ||
+                !finiteIn(j, "pitch_cents", 0, -2400, 2400, c.pitchCents) ||
+                !finiteIn(j, "gain_db", 0, -96, 36, gainDb) || std::fabs(c.pitch + c.pitchCents / 100.0) > 48) {
+                error = name + ": stretch_ratio is 0.25..4, pitch_cents -2400..2400 (pitch plus cents within 48 "
+                               "semitones), gain_db -96..36";
+                return false;
+            }
+            if (gainDb != 0) c.gain *= detPow(10.0, gainDb / 20.0);
+            for (auto [key, out] : {std::pair<const char*, int64_t*>{"loop_start_frames", &c.loopStartFrames},
+                                    std::pair<const char*, int64_t*>{"loop_end_frames", &c.loopEndFrames}}) {
+                double v = -1;
+                if (!finiteIn(j, key, -1, 0, 1099511627776.0, v) || (v >= 0 && v != std::floor(v))) {
+                    error = name + ": " + key + " is a whole frame count 0..2^40";
+                    return false;
+                }
+                *out = static_cast<int64_t>(v);
+            }
+            if (c.loopEndFrames > 0 && c.loopStartFrames >= 0 && c.loopEndFrames <= c.loopStartFrames) {
+                error = name + ": loop_end_frames must be after loop_start_frames";
                 return false;
             }
             if (!curveOf(j.string("fade_in_curve"), c.fadeInCurve) || !curveOf(j.string("fade_out_curve"), c.fadeOutCurve)) {
@@ -294,6 +337,7 @@ public:
         t->input = spec.input;
         t->serial = ++serial_;
         t->baseSerial = lastSerial_;
+        int hqClips = 0;
         for (const AudioClipSpec& c : spec.clips) {
             CompiledClip cc;
             cc.spec = c;
@@ -309,11 +353,21 @@ public:
                 cc.src.loopEnd = c.loopEndSeconds > 0
                     ? static_cast<int64_t>(std::llround(std::min(frames, c.loopEndSeconds * rate)))
                     : static_cast<int64_t>(frames);
+                // Loop points in the file's own frames (API 32), at the engine's rate.
+                const double toRate = cc.asset->sourceRate > 0 ? rate / cc.asset->sourceRate : 1.0;
+                if (c.loopStartFrames >= 0)
+                    cc.src.loopStart = static_cast<int64_t>(
+                        std::llround(std::min(frames, static_cast<double>(c.loopStartFrames) * toRate)));
+                if (c.loopEndFrames >= 0)
+                    cc.src.loopEnd = c.loopEndFrames > 0
+                        ? static_cast<int64_t>(std::llround(std::min(frames, static_cast<double>(c.loopEndFrames) * toRate)))
+                        : static_cast<int64_t>(frames);
                 if (cc.src.loopEnd <= cc.src.loopStart) cc.src.loop = false;
                 cc.src.seam = std::llround(kClipDeclickSeconds * rate);
             }
             cc.offsetFrames = sampletime::roundFrames(c.offsetSeconds, rate);
-            cc.pitchRatio = detPow(2.0, c.pitch / 12.0);
+            cc.pitchRatio = detPow(2.0, (c.pitch + c.pitchCents / 100.0) / 12.0);
+            if (c.hq) ++hqClips;
             cc.fadeIn = static_cast<int64_t>(std::llround(c.fadeInSeconds * rate));
             cc.fadeOut = static_cast<int64_t>(std::llround(c.fadeOutSeconds * rate));
             t->maxLength = std::max(t->maxLength, c.lengthSteps);
@@ -329,6 +383,7 @@ public:
                 }
         lastClips_.clear();
         for (const CompiledClip& c : t->clips) lastClips_.push_back({c.spec.id, c.asset.get()});
+        growStretchers(std::min(2 * hqClips, kMaxStretchers), rate);
         lastSerial_ = t->serial;
         signature_ = std::move(sig);
         compiledRate_ = rate;
@@ -380,8 +435,8 @@ public:
         const double tempo = b.transport->tempo > 0 ? b.transport->tempo : 120.0;
         const double stepLen = sampletime::stepFrames(sr_, tempo);
         // With a tempo map of more than one tempo (1.0.3), clip positions come from the map; with one tempo, from the
-        // transport's tempo, as before the map. A musical clip plays at the tempo where it starts (tempo-following
-        // audio is planned for 1.0.4); a fixed one at the file's speed.
+        // transport's tempo, as before the map. A musical clip follows the map chunk by chunk (API 32, below); a
+        // fixed one plays at the file's speed (over its stretch_ratio).
         const SongTime* song = live_ ? live_->songTime() : nullptr;
         const TempoMap* tm = song && !song->tempo.constant() ? &song->tempo : nullptr;
         auto frameOf = [&](double step) {
@@ -420,10 +475,16 @@ public:
             std::partition_point(tl->clips.begin(), tl->clips.end(),
                                  [&](const CompiledClip& c) { return c.spec.startSteps < from; }) - tl->clips.begin());
         for (Voice& v : voices_) v.seen = false;
+        // Signalsmith voices start this many frames before their clip, silent, so their output is valid when heard.
+        const int ready = hqReady_.load(std::memory_order_acquire);
+        const int64_t preroll = ready > 0 ? hq_[0]->outputLatency() : 0;
         for (size_t ci = first; ci < tl->clips.size(); ++ci) {
             const CompiledClip& c = tl->clips[ci];
             const int64_t cs = frameOf(c.spec.startSteps);
-            if (cs >= end) break;  // sorted by start
+            if (cs >= end + preroll) break;  // sorted by start
+            const bool hqClip = c.spec.hq && preroll > 0;
+            const int64_t as = hqClip ? cs - preroll : cs;  // where its voice starts
+            if (as >= end) continue;
             const int64_t ce = frameOf(c.spec.startSteps + c.spec.lengthSteps);
             if (ce <= pos) continue;
             Voice* v = voiceFor(static_cast<int>(ci));
@@ -432,19 +493,35 @@ public:
                 if (v) fadeOut(*v);
                 continue;
             }
-            // How fast the source moves and which reader plays it.
-            const double clipTempo = tm ? tm->bpmAtStep(c.spec.startSteps) : tempo;
-            const double slope = c.spec.musical ? clipTempo / c.spec.sourceBpm : (c.spec.varispeed ? c.pitchRatio : 1.0);
+            // How fast the source moves: anchorT (a song frame), anchorS and slope give s(t) = anchorS + slope *
+            // (t - anchorT). A clip following the tempo under a map of more than one tempo (API 32) is placed by song
+            // step (offset + (step - start) source frames per step at source_bpm), its rate the tempo here / source_bpm,
+            // worked out again each chunk; otherwise as before the map (fixed: the file's speed over stretch_ratio).
+            const bool follows = c.spec.musical && tm;
+            double anchorT = static_cast<double>(cs), anchorS = c.offsetFrames, slope;
+            if (follows) {
+                const double fps = 15.0 * sr_ / c.spec.sourceBpm;  // source frames per step
+                anchorT = static_cast<double>(pos);
+                anchorS = c.offsetFrames + (tm->stepAt(static_cast<double>(pos)) - c.spec.startSteps) * fps;
+                slope = tm->bpmAtFrame(static_cast<double>(pos)) / c.spec.sourceBpm;
+            } else if (c.spec.musical) {
+                slope = tempo / c.spec.sourceBpm;
+            } else {
+                slope = (c.spec.varispeed ? c.pitchRatio : 1.0) / c.spec.stretchRatio;
+            }
             ReadMode mode;
             double pitch = 1;
             if (c.spec.varispeed) {
-                mode = slope == 1.0 ? ReadMode::Direct : ReadMode::Varispeed;
+                mode = slope == 1.0 && !follows ? ReadMode::Direct : ReadMode::Varispeed;
             } else {
                 pitch = c.pitchRatio;
-                mode = slope == 1.0 && pitch == 1.0 ? ReadMode::Direct : ReadMode::Stretch;
+                const bool direct = slope == 1.0 && pitch == 1.0 && !follows;
+                mode = direct ? ReadMode::Direct : (c.spec.hq ? ReadMode::Hq : ReadMode::Stretch);
             }
-            const int64_t a = std::max(pos, cs), z = std::min(end, ce);
-            if (v && (v->reader.mode() != mode || v->reader.pitch() != pitch)) {
+            const int64_t lead = mode == ReadMode::Hq ? as : cs;
+            const int64_t a = std::max(pos, lead), z = std::min(end, ce);
+            if (a >= z) continue;  // a Direct clip not reached yet
+            if (v && (v->want != mode || v->reader.pitch() != pitch)) {
                 fadeOut(*v);
                 v = nullptr;
             }
@@ -458,15 +535,23 @@ public:
                 v->fadeLeft = 0;
                 v->inAt = 0;
                 v->inLen = a > cs ? declick_ : 0;  // started mid-clip: faded in
-                v->reader.start(c.src, mode, pitch, a + shift, c.offsetFrames + slope * static_cast<double>(a - cs), slope);
+                v->want = mode;
+                v->hq = -1;
+                HqStretcher* h = mode == ReadMode::Hq ? claimStretcher(*v, ready) : nullptr;
+                v->reader.start(c.src, mode, pitch, a + shift, anchorS + slope * (static_cast<double>(a) - anchorT), slope,
+                                h, static_cast<int64_t>(c.offsetFrames), std::max(a, cs) + shift);
             }
-            v->anchorT = cs + shift;
-            v->anchorS = c.offsetFrames + v->drift;
+            v->anchorT = static_cast<int64_t>(anchorT) + shift;
+            v->anchorS = anchorS + (follows ? 0.0 : v->drift);
             v->slope = slope;
             v->reader.setSource(c.src);
             v->reader.setMapping(v->anchorT, v->anchorS, v->slope);
             const float g = static_cast<float>(c.spec.gain);
             for (int64_t t = a; t < z; ++t) {
+                if (t < cs) {  // a Signalsmith voice's pre-roll: silent
+                    gain_[t - pos] = 0.0f;
+                    continue;
+                }
                 double w = g;
                 if (c.fadeIn > 0 && t - cs < c.fadeIn)
                     w *= curve(c.spec.fadeInCurve, static_cast<double>(t - cs) / static_cast<double>(c.fadeIn));
@@ -478,7 +563,7 @@ public:
                 }
                 gain_[t - pos] = static_cast<float>(w);
             }
-            if (z > a) v->lastGain = gain_[z - 1 - pos];
+            v->lastGain = gain_[z - 1 - pos];
             v->reader.render(a + shift, static_cast<int>(z - a), gain_ + (a - pos), L + (a - pos), R + (a - pos));
             if (z >= ce) v->active = false;  // the clip ended in this block (its own fade-out shapes that)
         }
@@ -502,6 +587,8 @@ private:
         int64_t anchorT = 0;         // the reader's mapping, in the player's time
         double anchorS = 0, slope = 1;
         double drift = 0;            // source frames added to a fixed clip's mapping since a tempo change
+        ReadMode want = ReadMode::Direct;  // the mode the clip asked for (Hq may play as Stretch without a stretcher)
+        int hq = -1;                 // the stretcher it holds (index into hq_), -1 none
         ClipReader reader;
     };
     // Fades a sounding voice out over the declick (it keeps reading where it was) instead of cutting it.
@@ -559,6 +646,27 @@ private:
         if (best) best->active = false;
         return best;
     }
+    // A stretcher no other active voice holds (audio thread; the first `ready` are published).
+    HqStretcher* claimStretcher(Voice& self, int ready) noexcept {
+        for (int i = 0; i < ready; ++i) {
+            bool used = false;
+            for (const Voice& v : voices_) used |= &v != &self && v.active && v.hq == i;
+            if (!used && hq_[i]->sampleRate() == sr_) {
+                self.hq = i;
+                return hq_[i].get();
+            }
+        }
+        return nullptr;
+    }
+    // Control thread: prepares stretchers up to `want` (never fewer), each published once ready.
+    void growStretchers(int want, double rate) {
+        for (int have = hqReady_.load(std::memory_order_relaxed); have < want; ++have) {
+            auto h = std::make_unique<HqStretcher>();
+            if (!h->prepare(rate)) return;
+            hq_[have] = std::move(h);
+            hqReady_.store(have + 1, std::memory_order_release);
+        }
+    }
     void remap(uint64_t was) noexcept {
         const Timeline* t = timeline_.current();
         if (!t || t->baseSerial != was) {
@@ -578,6 +686,9 @@ private:
     double sr_ = 48000;
     LiveAudio* live_ = nullptr;
     Voice voices_[2 * kAudioClipVoices];  // the playing ones, and room for as many fading out
+    static constexpr int kMaxStretchers = 2 * kAudioClipVoices;
+    std::unique_ptr<HqStretcher> hq_[kMaxStretchers];  // Signalsmith Stretch, made on the control thread as clips need
+    std::atomic<int> hqReady_{0};                       // how many of hq_ the audio thread may use
     float gain_[64] = {};
     int64_t expected_ = -1;
     int64_t clock_ = 0;      // the player's own time: one frame per frame rendered, whatever the transport does

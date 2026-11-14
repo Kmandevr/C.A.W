@@ -1,4 +1,4 @@
-// The app's view of the engine's audio side (API 18): assets and peaks, SFZ, input, recording, latency. AudioIo is the
+// The app's view of the engine's audio side (API 18, 32): assets, peaks, tempo and slices, SFZ, input, recording, latency. AudioIo is the
 // interface the model talks to; EngineAudioIo calls the C API, long calls on a worker isolate.
 import 'dart:convert';
 import 'dart:ffi';
@@ -148,6 +148,60 @@ class SfzExportResult {
       files: [for (final f in (j['files'] as List? ?? const [])) if (f is String) f]);
 }
 
+/// `caw_asset_tempo` (API 32): the file's tempo from its onsets. [bpm] is null when the engine is unsure: ask the user.
+class TempoEstimate {
+  const TempoEstimate({required this.ok, this.error = '', this.bpm, this.confidence = 0, this.onsets = 0,
+      this.candidates = const []});
+  final bool ok;
+  final String error;
+  final double? bpm;
+  final double confidence;
+  final int onsets;
+  final List<({double bpm, double score})> candidates;
+
+  static TempoEstimate fromJson(Map<String, dynamic> j) {
+    final bpm = j['bpm'];
+    return TempoEstimate(
+        ok: j['ok'] == true,
+        error: _s(j['error']),
+        bpm: bpm is num && bpm.isFinite && bpm > 0 ? bpm.toDouble() : null,
+        confidence: _d(j['confidence']),
+        onsets: _i(j['onsets']),
+        candidates: [
+          for (final c in (j['candidates'] as List? ?? const []))
+            if (c is Map) (bpm: _d(c['bpm']), score: _d(c['score'])),
+        ]);
+  }
+}
+
+/// One transient from `caw_asset_slices`: seconds from the file's start (its own speed), the frame at its own rate.
+class AudioSlice {
+  const AudioSlice({required this.seconds, required this.frame, this.strength = 0});
+  final double seconds;
+  final int frame;
+  final double strength;
+}
+
+/// `caw_asset_slices` (API 32): transient starts in time order, for Slice to MIDI.
+class SliceResult {
+  const SliceResult({required this.ok, this.error = '', this.seconds = 0, this.slices = const []});
+  final bool ok;
+  final String error;
+
+  /// The analysed range's length.
+  final double seconds;
+  final List<AudioSlice> slices;
+
+  static SliceResult fromJson(Map<String, dynamic> j) => SliceResult(
+      ok: j['ok'] == true,
+      error: _s(j['error']),
+      seconds: _d(j['seconds']),
+      slices: [
+        for (final s in (j['slices'] as List? ?? const []))
+          if (s is Map) AudioSlice(seconds: _d(s['seconds']), frame: _i(s['frame']), strength: _d(s['strength'])),
+      ]);
+}
+
 /// The engine's audio side as the model uses it. Tests give a fake.
 abstract class AudioIo {
   /// Decodes [path] into the asset store (slow for a long file: a worker isolate).
@@ -155,6 +209,15 @@ abstract class AudioIo {
 
   /// Min/max pairs of [buckets] equal parts of [start]..[end] seconds of [channel]; null when the file won't load.
   Future<Float32List?> peaks(String path, double start, double end, int buckets, {int channel = 0});
+
+  /// The tempo of [path] from its onsets, searched in [minBpm]..[maxBpm] (a worker isolate).
+  Future<TempoEstimate> detectTempo(String path,
+      {double minBpm = 70, double maxBpm = 180, double startSeconds = 0, double endSeconds = 0});
+
+  /// Transients of [path] in [startSeconds]..[endSeconds] (0: the file's end); higher [sensitivity] finds more.
+  Future<SliceResult> slices(String path,
+      {double sensitivity = 0.5, double startSeconds = 0, double endSeconds = 0, double minGapSeconds = 0.05,
+      int maxSlices = 64});
 
   Future<List<InputDeviceInfo>> inputDevices();
 
@@ -204,6 +267,24 @@ class EngineAudioIo implements AudioIo {
   @override
   Future<Float32List?> peaks(String path, double start, double end, int buckets, {int channel = 0}) =>
       _off((a) => _peaks(a, path, start, end, buckets, channel)).then((v) => v);
+
+  @override
+  Future<TempoEstimate> detectTempo(String path,
+          {double minBpm = 70, double maxBpm = 180, double startSeconds = 0, double endSeconds = 0}) async =>
+      TempoEstimate.fromJson(await _off((a) => _analyse(a, path, false, jsonEncode({
+                'min_bpm': minBpm, 'max_bpm': maxBpm, 'start_seconds': startSeconds, 'end_seconds': endSeconds,
+              }))) ??
+          const {'ok': false, 'error': 'no engine'});
+
+  @override
+  Future<SliceResult> slices(String path,
+          {double sensitivity = 0.5, double startSeconds = 0, double endSeconds = 0, double minGapSeconds = 0.05,
+          int maxSlices = 64}) async =>
+      SliceResult.fromJson(await _off((a) => _analyse(a, path, true, jsonEncode({
+                'sensitivity': sensitivity, 'start_seconds': startSeconds, 'end_seconds': endSeconds,
+                'min_gap_seconds': minGapSeconds, 'max_slices': maxSlices,
+              }))) ??
+          const {'ok': false, 'error': 'no engine'});
 
   @override
   Future<List<InputDeviceInfo>> inputDevices() => Isolate.run(() {
@@ -340,6 +421,19 @@ Future<AssetInfo> _loadAsset(int address, String path) => Isolate.run(() {
         return AssetInfo.fromJson(_map(b.take(b.assetLoad(Pointer<Void>.fromAddress(address), p))));
       } finally {
         calloc.free(p);
+      }
+    });
+
+Future<Map<String, dynamic>> _analyse(int address, String path, bool slices, String options) => Isolate.run(() {
+      final b = AudioBindings.instance;
+      final p = path.toNativeUtf8();
+      final o = options.toNativeUtf8();
+      try {
+        final e = Pointer<Void>.fromAddress(address);
+        return _map(b.take(slices ? b.assetSlices(e, p, o) : b.assetTempo(e, p, o)));
+      } finally {
+        calloc.free(p);
+        calloc.free(o);
       }
     });
 

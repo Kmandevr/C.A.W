@@ -1,6 +1,7 @@
 // Audio clips on tracks: their project JSON, and the built-in player (org.caw.audio-track) that plays them and the input.
 #pragma once
 
+#include <cstdint>
 #include <map>
 #include <memory>
 #include <string>
@@ -32,9 +33,13 @@ struct AudioClipSpec {
     bool reverse = false;
     bool loop = false;
     double loopStartSeconds = 0, loopEndSeconds = 0;  // 0 end: the source's end
-    double pitch = 0;            // semitones, -48..48
-    bool musical = false;        // false: "fixed" (file speed); true: "musical" (stretched to the tempo)
+    int64_t loopStartFrames = -1, loopEndFrames = -1;  // API 32: at the file's own rate; when >= 0 they replace the seconds
+    double pitch = 0;            // semitones, -48..48 (with pitchCents / 100 added: the sum within +-48)
+    double pitchCents = 0;       // API 32: -2400..2400
+    double stretchRatio = 1;     // API 32: a fixed clip's output length / source length, 0.25..4
+    bool musical = false;        // false: "fixed" (file speed); true: "musical" / follows_tempo (follows the tempo map)
     bool varispeed = false;      // the stretch: false WSOLA (pitch kept), true resampling (pitch moves with speed)
+    bool hq = false;             // API 32: "signalsmith": Signalsmith Stretch instead of WSOLA
     double sourceBpm = 0;        // the source's tempo (musical clips need one)
     bool mute = false;
 };

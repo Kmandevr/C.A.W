@@ -4,6 +4,7 @@
 #include <algorithm>
 #include "caw/detmath.hpp"
 #include <cmath>
+#include <cstdint>
 
 namespace caw {
 
@@ -36,12 +37,43 @@ bool ClipReader::prepare(double sampleRate) {
 }
 
 void ClipReader::start(const ClipSource& src, ReadMode mode, double pitch, int64_t t, double anchorSource,
-                       double slope) noexcept {
+                       double slope, HqStretcher* hq, int64_t floor, int64_t heardFrom) noexcept {
     src_ = src;
     mode_ = mode;
     pitch_ = pitch > 0 && std::isfinite(pitch) ? pitch : 1.0;
     setMapping(t, anchorSource, slope);
-    if (mode_ != ReadMode::Stretch || !window_) return;
+    hq_ = nullptr;
+    if (mode_ == ReadMode::Hq) {
+        if (!hq || !window_) {
+            mode_ = ReadMode::Stretch;
+        } else {
+            hq_ = hq;
+            floor_ = floor;
+            hq_->reset(pitch_);
+            const int lat = hq_->outputLatency(), sl = hq_->seekLength();
+            const int64_t p = static_cast<int64_t>(
+                std::floor(sourceAt(static_cast<double>(t + lat)) + static_cast<double>(hq_->inputLatency())));
+            float* l = hq_->inputL();
+            float* r = hq_->inputR();
+            for (int i = 0; i < sl; ++i) {
+                const int64_t at = p - sl + i;
+                if (at < floor_) l[i] = r[i] = 0.0f;
+                else src_.frame(at, l[i], r[i]);
+            }
+            hq_->seek(sl, slope > 0 && std::isfinite(slope) ? slope : 1.0);
+            fed_ = p;
+            chunkAt_ = t - HqStretcher::kChunk;
+            bridgeEnd_ = t + lat;
+            if (bridgeEnd_ <= heardFrom) bridgeEnd_ = INT64_MIN / 2;  // pre-rolled: valid before it is heard
+            else startWsola(t);
+            return;
+        }
+    }
+    if (mode_ == ReadMode::Stretch) startWsola(t);
+}
+
+void ClipReader::startWsola(int64_t t) noexcept {
+    if (!window_) return;
     t0_ = t;
     frameIndex_ = 0;
     yWritten_ = 0;
@@ -49,6 +81,28 @@ void ClipReader::start(const ClipSource& src, ReadMode mode, double pitch, int64
     std::fill_n(accL_.get(), n_, 0.0f);
     std::fill_n(accR_.get(), n_, 0.0f);
     hop();  // frame 0 (y-time -hs.. hs): its first half is never heard
+}
+
+void ClipReader::hqChunk() noexcept {
+    chunkAt_ += HqStretcher::kChunk;
+    const int64_t target = static_cast<int64_t>(
+        std::floor(sourceAt(static_cast<double>(chunkAt_ + HqStretcher::kChunk + hq_->outputLatency())) +
+                   static_cast<double>(hq_->inputLatency())));
+    int64_t n = target - fed_;
+    if (n < 0) n = 0;  // the source can't run backwards: hold
+    if (n > HqStretcher::kMaxFeed) {  // faster than kMaxFeed / kChunk times real time: the rest is skipped
+        fed_ = target - HqStretcher::kMaxFeed;
+        n = HqStretcher::kMaxFeed;
+    }
+    float* l = hq_->inputL();
+    float* r = hq_->inputR();
+    for (int64_t i = 0; i < n; ++i) {
+        const int64_t at = fed_ + i;
+        if (at < floor_) l[i] = r[i] = 0.0f;
+        else src_.frame(at, l[i], r[i]);
+    }
+    fed_ += n;
+    hq_->process(static_cast<int>(n), hqL_, hqR_);
 }
 
 void ClipReader::hermite(double pos, float& l, float& r) const noexcept {
@@ -130,6 +184,25 @@ void ClipReader::hop() noexcept {
     std::fill(accR_.get() + hs_, accR_.get() + n_, 0.0f);
 }
 
+void ClipReader::renderWsola(int n, const float* gain, float* l, float* r) noexcept {
+    if (!window_) return;
+    for (int i = 0; i < n; ++i) {
+        const double f = std::floor(u_);
+        const int64_t k = static_cast<int64_t>(f);
+        int guard = 0;
+        while (yWritten_ <= k + 2 && guard++ < 64) hop();
+        auto at = [&](const std::unique_ptr<float[]>& y, int64_t j) {
+            return y[static_cast<size_t>((j < 0 ? 0 : j) & yMask_)];
+        };
+        const float frac = static_cast<float>(u_ - f);
+        const float a = cubic(at(yl_, k - 1), at(yl_, k), at(yl_, k + 1), at(yl_, k + 2), frac);
+        const float b = cubic(at(yr_, k - 1), at(yr_, k), at(yr_, k + 1), at(yr_, k + 2), frac);
+        l[i] += a * gain[i];
+        r[i] += b * gain[i];
+        u_ += pitch_;
+    }
+}
+
 void ClipReader::render(int64_t t, int n, const float* gain, float* l, float* r) noexcept {
     switch (mode_) {
         case ReadMode::Direct:
@@ -149,23 +222,45 @@ void ClipReader::render(int64_t t, int n, const float* gain, float* l, float* r)
             }
             return;
         case ReadMode::Stretch:
-            if (!window_) return;
-            for (int i = 0; i < n; ++i) {
-                const double f = std::floor(u_);
-                const int64_t k = static_cast<int64_t>(f);
-                int guard = 0;
-                while (yWritten_ <= k + 2 && guard++ < 64) hop();
-                auto at = [&](const std::unique_ptr<float[]>& y, int64_t j) {
-                    return y[static_cast<size_t>((j < 0 ? 0 : j) & yMask_)];
-                };
-                const float frac = static_cast<float>(u_ - f);
-                const float a = cubic(at(yl_, k - 1), at(yl_, k), at(yl_, k + 1), at(yl_, k + 2), frac);
-                const float b = cubic(at(yr_, k - 1), at(yr_, k), at(yr_, k + 1), at(yr_, k + 2), frac);
-                l[i] += a * gain[i];
-                r[i] += b * gain[i];
-                u_ += pitch_;
+            renderWsola(n, gain, l, r);
+            return;
+        case ReadMode::Hq: {
+            constexpr int kSub = HqStretcher::kChunk;
+            for (int done = 0; done < n;) {  // in pieces of at most 64 (the local arrays)
+                const int m = std::min(kSub, n - done);
+                const int64_t t1 = t + done;
+                float w[kSub];
+                bool bridging = false;
+                for (int i = 0; i < m; ++i) {
+                    const int64_t ft = t1 + i;
+                    const int64_t d = ft - bridgeEnd_;
+                    w[i] = d < 0 ? 0.0f
+                                 : (d >= kHqCrossfade ? 1.0f
+                                                      : static_cast<float>(static_cast<double>(d) / kHqCrossfade));
+                    bridging |= w[i] < 1.0f;
+                }
+                if (bridging) {
+                    float g[kSub];
+                    for (int i = 0; i < m; ++i) g[i] = gain[done + i] * (1.0f - w[i]);
+                    renderWsola(m, g, l + done, r + done);
+                }
+                for (int i = 0; i < m; ++i) {
+                    const int64_t ft = t1 + i;
+                    int guard = 0;
+                    while (ft >= chunkAt_ + kSub && guard++ < 8) {
+                        if (ft - chunkAt_ >= 8 * kSub) chunkAt_ += ((ft - chunkAt_) / kSub - 1) * kSub;
+                        hqChunk();
+                    }
+                    const int64_t k = ft - chunkAt_;
+                    if (k < 0 || k >= kSub || w[i] == 0.0f) continue;
+                    const float g = gain[done + i] * w[i];
+                    l[done + i] += hqL_[k] * g;
+                    r[done + i] += hqR_[k] * g;
+                }
+                done += m;
             }
             return;
+        }
     }
 }
 

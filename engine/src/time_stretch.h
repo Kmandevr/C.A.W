@@ -1,4 +1,4 @@
-// Reading an audio asset for a clip voice: direct, varispeed (cubic Hermite) or time-stretched with WSOLA plus a pitch stage.
+// Reading an audio asset for a clip voice: direct, varispeed (cubic Hermite), WSOLA plus a pitch stage, or Signalsmith Stretch.
 #pragma once
 
 #include <algorithm>
@@ -6,6 +6,7 @@
 #include <memory>
 
 #include "asset_store.h"
+#include "clip_stretch.h"
 
 namespace caw {
 
@@ -71,6 +72,7 @@ enum class ReadMode : uint8_t {
     Direct,     // the source position moves one frame per output frame: samples copied exactly
     Varispeed,  // resampled (cubic Hermite): pitch moves with speed
     Stretch,    // WSOLA time-scale modification, then a pitch stage resampling by `pitch`
+    Hq,         // Signalsmith Stretch (clip_stretch.h): time and pitch in one phase-vocoder pass
 };
 
 // One voice's reader. prepare() allocates on the control thread; everything else is real-time safe.
@@ -84,11 +86,22 @@ enum class ReadMode : uint8_t {
 // positions follow s(t), each moved by up to half a hop to best continue the previous frame (the cross-correlation
 // of the mono sum, searched every 4th lag on every 4th sample, then refined to the sample). The result is read
 // `pitch` times faster (cubic Hermite), so pitch moves by `pitch` and duration still follows s(t).
+//
+// Hq feeds an HqStretcher (Signalsmith Stretch) the source ahead of the output: by output frame t it has been given the
+// source up to s(t + L) + I (L its output latency, I its input latency), so its output at t is the source at s(t),
+// rate changes (a tempo ramp) included. It renders in 64-frame chunks aligned to the voice's start, so the result does
+// not depend on the host's block size. Source frames before `floor` (the clip's offset) read as silence. Its output is
+// valid L frames after start(): the player starts a voice that early when it can (a clip start ahead of the
+// playhead); otherwise (a seek, a loop wrap, a voice joining mid-clip) WSOLA plays those L frames and then crossfades
+// into it over kHqCrossfade frames. Without a stretcher Hq falls back to WSOLA (Stretch).
 class ClipReader {
 public:
+    static constexpr int kHqCrossfade = 512;
     bool prepare(double sampleRate);  // control thread
-    // Starts the voice at output frame t (seek, a clip start, a mode change).
-    void start(const ClipSource& src, ReadMode mode, double pitch, int64_t t, double anchorSource, double slope) noexcept;
+    // Starts the voice at output frame t (seek, a clip start, a mode change). Hq takes a stretcher (else it plays as
+    // Stretch), the source floor, and the first output frame that is heard (from then on its output must be valid).
+    void start(const ClipSource& src, ReadMode mode, double pitch, int64_t t, double anchorSource, double slope,
+               HqStretcher* hq = nullptr, int64_t floor = 0, int64_t heardFrom = 0) noexcept;
     void setMapping(int64_t anchorTime, double anchorSource, double slope) noexcept {
         anchorT_ = anchorTime;
         anchorS_ = anchorSource;
@@ -104,6 +117,9 @@ private:
     double sourceAt(double t) const noexcept { return anchorS_ + slope_ * (t - static_cast<double>(anchorT_)); }
     void hop() noexcept;  // one WSOLA frame into the y ring
     void hermite(double pos, float& l, float& r) const noexcept;
+    void startWsola(int64_t t) noexcept;
+    void renderWsola(int n, const float* gain, float* l, float* r) noexcept;
+    void hqChunk() noexcept;  // the next 64 output frames into hqL_/hqR_
 
     ClipSource src_;
     ReadMode mode_ = ReadMode::Direct;
@@ -119,6 +135,13 @@ private:
     int64_t prevStart_ = 0;   // the last frame's analysis start
     int64_t yWritten_ = 0;    // y samples complete
     double u_ = 0;            // where the next output frame reads y (pitch stage)
+    // Hq
+    HqStretcher* hq_ = nullptr;
+    int64_t floor_ = 0;
+    int64_t fed_ = 0;         // the next source frame to feed
+    int64_t chunkAt_ = 0;     // output frame of hqL_[0]
+    int64_t bridgeEnd_ = 0;   // WSOLA alone before this, crossfading into Signalsmith over kHqCrossfade after it
+    float hqL_[HqStretcher::kChunk] = {}, hqR_[HqStretcher::kChunk] = {};
 };
 
 }  // namespace caw

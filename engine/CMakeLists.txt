@@ -206,6 +206,11 @@ target_sources(caw_core PRIVATE src/asset_store.cpp src/time_stretch.cpp src/aud
   src/builtin_sampler.cpp src/builtin_sampler_sfz.cpp platform/decode_miniaudio.c)
 set_source_files_properties(platform/decode_miniaudio.c PROPERTIES COMPILE_OPTIONS "-w"
   INCLUDE_DIRECTORIES "${CMAKE_CURRENT_SOURCE_DIR}/third_party/miniaudio")
+# Clip stretching (1.0.4, #208): Signalsmith Stretch and Signalsmith Linear, header-only, MIT (third_party/, decisions.md);
+# only clip_stretch.cpp includes them. Tempo detection and transients for Slice to MIDI.
+target_sources(caw_core PRIVATE src/clip_stretch.cpp src/audio_analysis.cpp)
+set_source_files_properties(src/clip_stretch.cpp PROPERTIES
+  INCLUDE_DIRECTORIES "${CMAKE_CURRENT_SOURCE_DIR}/third_party")
 target_sources(caw_core PRIVATE src/builtin_fx_dynamics.cpp src/builtin_fx_drive.cpp src/builtin_fx_dynamics_presets.cpp)
 # fx-dynamics end
 
@@ -270,6 +275,7 @@ target_include_directories(caw_cli PRIVATE src)
   target_sources(caw_tests PRIVATE tests/graph_layout_test.cpp)  # #120 layout rules: mono to stereo, downmix, dual mono
   target_sources(caw_tests PRIVATE tests/voice_bus_test.cpp)  # #127 the voice bus; #120 built-in declarations, C 3.0/3.1
   target_sources(caw_tests PRIVATE tests/audio_assets_test.cpp)  # assets, audio clips, the sampler, SFZ, input (WP-J)
+  target_sources(caw_tests PRIVATE tests/audio_stretch_test.cpp)  # 1.0.4: stretch, pitch, clip fields, tempo, slices
   target_sources(caw_tests PRIVATE tests/input_bridge_test.cpp)  # the input bridge: output unchanged when the input dies
   target_sources(caw_tests PRIVATE tests/speed_free_wins_test.cpp)  # speed phase 1: Eco oversampling, silent work skipped, master sleep
   target_sources(caw_tests PRIVATE tests/fp_mode_test.cpp)  # speed phase 2: the flush-to-zero guard, NaN/Inf guards under the build flags
