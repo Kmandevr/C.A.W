@@ -3,6 +3,26 @@
 What changed in each C.A.W release, newest first. C.A.W is in open alpha: expect rough edges and unexpected issues.
 Versions keep the `-alpha.N` suffix until the official release.
 
+## 1.0.4-alpha.1 (2026-11-14)
+
+Audio editing: stretching, pitch, the sample editor and slicing.
+
+### New
+- **Stretch audio clips:** drag the small notch in an audio clip's top corner to stretch it, from ¼× to 4×. The length and ratio show while you drag. Dragging the edges still trims.
+- **Follows tempo:** an audio clip can follow the song's tempo, including tempo changes and ramps. Its own tempo is detected when you import it; type it in or tap **Detect** to change it.
+- **Pitch** in semitones and cents, without changing the clip's length.
+- **High-quality stretching** with Signalsmith Stretch (MIT-licensed), live while the song plays. Up to 8 clips per track use it at once; any others use the lighter stretcher.
+- **Sample editor** at the top of an audio clip's tab. Double tap a clip, or tap an audio file in Files.
+  - The waveform has handles for trimming, fades (with a curve shape) and loop points.
+  - The tool row has Normalise, Reverse, Gain and Trim (cuts the silence off both ends).
+  - Edits never change the original file, and each is one undo step.
+- **Slice to MIDI:** set the sensitivity and watch the cut lines move. **Make MIDI track** puts the slices on drum pads (up to 16) or the sampler, with a MIDI clip that plays them at their original times.
+
+### Improved
+- **Long songs:** clips far into a long song are drawn in exactly the right place.
+- **Tempo changes:** audio clips are drawn at their true width when the tempo changes.
+- **Repeatable stretching:** stretched audio sounds the same every time it plays, and on every device.
+
 ## 1.0.3-alpha.1 (2026-11-14)
 
 Song timing: tempo changes, time signatures, sections and markers.
