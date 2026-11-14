@@ -8,13 +8,16 @@ namespace {
 thread_local bool gCounting = false;
 thread_local std::size_t gAllocations = 0;
 thread_local std::size_t gDeallocations = 0;
+thread_local unsigned long long gTotal = 0;  // every call, counting or not
 
 void release(void* p) noexcept {
+    if (p) ++gTotal;
     if (p && gCounting) ++gDeallocations;
     std::free(p);
 }
 
 void* allocate(std::size_t size) {
+    ++gTotal;
     if (gCounting) ++gAllocations;
     if (size == 0) size = 1;
     for (;;) {
@@ -26,6 +29,7 @@ void* allocate(std::size_t size) {
 }
 
 void* allocateAligned(std::size_t size, std::size_t alignment) {
+    ++gTotal;
     if (gCounting) ++gAllocations;
     if (size == 0) size = 1;
     // Round up so aligned_alloc's size-multiple rule holds on every libc.
@@ -40,6 +44,7 @@ void* allocateAligned(std::size_t size, std::size_t alignment) {
 }
 
 void releaseAligned(void* p) noexcept {
+    if (p) ++gTotal;
     if (p && gCounting) ++gDeallocations;
 #if defined(_MSC_VER)
     _aligned_free(p);
@@ -55,6 +60,7 @@ AllocationScope::~AllocationScope() { gCounting = false; }
 std::size_t AllocationScope::count() const noexcept { return gAllocations + gDeallocations; }
 std::size_t AllocationScope::allocations() const noexcept { return gAllocations; }
 std::size_t AllocationScope::deallocations() const noexcept { return gDeallocations; }
+unsigned long long threadAllocationsAndFrees() noexcept { return gTotal; }
 }  // namespace cawtest
 
 void* operator new(std::size_t size) { return allocate(size); }

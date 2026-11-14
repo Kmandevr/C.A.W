@@ -1,6 +1,9 @@
 // The output device callback's rendering: whole engine blocks through a BlockFifo (or straight, for a small odd period), interleaved out, the input pulled per block.
 #pragma once
 
+#include <chrono>
+#include <cstdint>
+
 #include "audio_input.h"
 #include "block_fifo.h"
 #include "engine.h"
@@ -62,6 +65,14 @@ public:
         return (kBlock - a + 1) / 2;
     }
     int held() const noexcept { return fifo_.held(); }
+    // The Benchmark's live run: time Engine::process apart (the rest of a callback is the FIFO and the input
+    // bridge: its "device_io" part). takeProcessNs returns the time since the last take and starts again.
+    void timeProcess(bool on) noexcept { timeProcess_ = on; }
+    int64_t takeProcessNs() noexcept {
+        const int64_t v = processNs_;
+        processNs_ = 0;
+        return v;
+    }
 
     // Fills `frames` interleaved stereo frames of `out` from the engine. Returns the frames the engine rendered
     // (more or fewer than `frames` through the FIFO), for Engine::reportLoad. `input(m, channels)` gives the
@@ -75,7 +86,13 @@ public:
             int ch = 0;
             const float* in = input(m, ch);
             live.beginCallback(in, in ? ch : 0, m);  // monitoring and recording
-            e.process(l, r, m);
+            if (timeProcess_) [[unlikely]] {  // the Benchmark's live run: process() apart from the device I/O
+                const auto t0 = std::chrono::steady_clock::now();
+                e.process(l, r, m);
+                processNs_ += std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - t0).count();
+            } else {
+                e.process(l, r, m);
+            }
             live.afterCallback(l, r, m);  // the latency ping
             rendered += m;
         };
@@ -102,7 +119,8 @@ public:
 
 private:
     BlockFifo<kBlock> fifo_;
-    bool useFifo_ = true, varying_ = false;
+    bool useFifo_ = true, varying_ = false, timeProcess_ = false;
+    int64_t processNs_ = 0;
     int latency_ = 0, meanHold_ = 0;
     float l_[kChunk] = {}, r_[kChunk] = {};
 };

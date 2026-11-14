@@ -834,7 +834,7 @@ TEST(c_api_plays_and_addresses_a_layers_instrument) {
     CawEngine* engine = caw_engine_create(48000);
     CHECK(engine != nullptr);
     if (!engine) return;
-    CHECK_EQ(caw_api_version(), 29);  // 29: the Benchmark (27 on its branch); 28: speed-parallel merged (its audio threads, 24 on its branch); 27: shedding comes back and its stats; 26: a separate input device, caw_audio_set_background; 25: every track meter in one call; 23: device latency; 22: per-note FX (#127); 21: the .caw language removed (#160; 20 unused); 19: project modulation; 18: audio clips, sampler, input; 17: C++ wavetable, one-shot, audition; 16: song renders; 15: MIDI devices; 14: component state; 13: drums and meters; 10: device choice
+    CHECK_EQ(caw_api_version(), 30);  // 30: every feature, engine parts, the plug-in benchmark (#197); 29: the Benchmark (27 on its branch); 28: speed-parallel merged (its audio threads, 24 on its branch); 27: shedding comes back and its stats; 26: a separate input device, caw_audio_set_background; 25: every track meter in one call; 23: device latency; 22: per-note FX (#127); 21: the .caw language removed (#160; 20 unused); 19: project modulation; 18: audio clips, sampler, input; 17: C++ wavetable, one-shot, audition; 16: song renders; 15: MIDI devices; 14: component state; 13: drums and meters; 10: device choice
     char* result = caw_engine_set_project(engine,
         R"({"caw_project":1,"bpm":120,"modules":[{"id":"p","source":"---\nkind: pattern\nname: P\nlength: 16\n---\n0 C4 4 1\n"}],
             "layers":[{"id":"t","pattern":"p","instrument":{"id":"org.caw.synth.flagship","params":{"flt1_cutoff":900}}}]})");

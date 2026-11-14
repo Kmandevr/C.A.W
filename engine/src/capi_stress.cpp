@@ -1,4 +1,4 @@
-// The Benchmark's C API (API 27): its scenarios, its jobs' runs (DSP on the worker, live through a muted device).
+// The Benchmark's C API (API 27, 30): its scenarios, its jobs' runs (DSP on the worker, live through a muted device).
 #include "capi_stress.h"
 
 #include <algorithm>
@@ -74,14 +74,26 @@ std::string resultJson(const Job& j) {
                     ",\"device_sizes\":" + (live && j.deviceSizes ? "true" : "false") +
                     // Live: each callback's budget is its own length, not its real deadline (the frames the device
                     // has queued), so over_budget overstates; the platform's xruns are the dropouts heard.
-                    ",\"budget_basis\":" + str(live ? "callback_length" : "callback") + ",\"costs\":[";
+                    ",\"budget_basis\":" + str(live ? "callback_length" : "callback") +
+                    ",\"feature\":" + str(j.feature) + ",\"costs\":[";
     for (size_t k = 0; k < r.costs.size(); ++k) {
         const CostRow& c = r.costs[k];
         o += std::string(k ? "," : "") + "{\"id\":" + str(c.id) + ",\"ns\":" + std::to_string(c.ns) + ",\"pct\":" + num(c.pct) +
              ",\"ran_pct\":" + num(c.ranPct) + ",\"instances\":" + std::to_string(c.instances) +
              ",\"modulator\":" + (c.modulator ? "true" : "false") + "}";
     }
-    return o + "]}";
+    o += "]";
+    // The engine parts (engine_parts.h): a profile's, or a live run's device I/O and the rest; none otherwise.
+    if (!r.parts.empty()) {
+        o += ",\"parts\":[";
+        for (size_t k = 0; k < r.parts.size(); ++k) {
+            const PartRow& p = r.parts[k];
+            o += std::string(k ? "," : "") + "{\"id\":" + str(partName(p.part)) + ",\"pct\":" + num(p.pct) +
+                 ",\"mean_us\":" + num(p.meanUs) + ",\"p99_us\":" + num(p.p99Us) + "}";
+        }
+        o += "]";
+    }
+    return o + "}";
 }
 
 // Live: the scenario through the default output device, muted, its real callbacks timed. The device's callback
@@ -101,13 +113,7 @@ RunResult runLive(Job& j) {
         const SuiteScenario* s = findScenario(all, r.scenario);
         if (!s) return failed("no scenario '" + r.scenario + "'");
         std::string error;
-        if (r.scenario == "song8_extras") {
-            if (r.workDir.empty()) return failed("song8_extras needs a work folder");
-            p = typicalSong(true, r.workDir, &error);
-            if (!error.empty()) return failed(error);
-        } else {
-            p = s->make(r.workDir);
-        }
+        if (!makeScenario(*s, r.workDir, p, error)) return failed(error);
     }
     // Room for every callback of the run at 16 frames or more; past that only the counts go on. Made before the
     // engine, so it outlives it: the guard below stops the device and unhooks it first, whatever happens.
@@ -223,6 +229,17 @@ RunResult runLive(Job& j) {
         startFrame.push_back(at);
         at += meter->frames[static_cast<size_t>(c)];
     }
+    // The parts a live run has: the callback's device I/O (the FIFO, the input bridge) and the rest, Engine::process
+    // (a live run is not profiled, so that stays whole, as "other").
+    if (!us.empty()) {
+        std::vector<uint64_t> partNs(us.size() * kPartCount, 0);
+        for (size_t c = 0; c < us.size(); ++c) {
+            const double io = std::min<double>(us[c], meter->deviceIo[static_cast<size_t>(from) + c]);
+            partNs[c * kPartCount + static_cast<int>(Part::DeviceIo)] = static_cast<uint64_t>(io * 1000.0);
+            partNs[c * kPartCount + static_cast<int>(Part::Other)] = static_cast<uint64_t>((us[c] - io) * 1000.0);
+        }
+        out.parts = partRows(partNs.data(), static_cast<int64_t>(us.size()));
+    }
     {
         std::lock_guard<std::mutex> lock(j.mutex);
         j.deviceFrames = deviceFrames;
@@ -290,6 +307,10 @@ std::shared_ptr<Job> makeJob(const CawStressRequest* q, std::string& error) {
     auto j = std::make_shared<Job>();
     j->request.scenario = scenario;
     j->scenarioId = ramp ? std::string() : scenario;
+    if (!ramp) {
+        const std::vector<SuiteScenario> all = benchmarkScenarios();  // alive while its entry is read
+        if (const SuiteScenario* s = findScenario(all, scenario)) j->feature = s->feature;
+    }
     j->request.kind = static_cast<Kind>(q->kind);
     j->request.seconds = q->seconds;
     j->request.frames = q->mode == CAW_STRESS_DSP ? (q->frames ? q->frames : 256) : q->frames;
@@ -327,7 +348,8 @@ char* caw_stress_scenarios(void) try {
     const std::vector<caw::stress::SuiteScenario> all = caw::stress::benchmarkScenarios();
     for (size_t k = 0; k < all.size(); ++k)
         o += std::string(k ? "," : "") + "{\"id\":\"" + all[k].id + "\",\"name\":\"" + caw::jsonEscape(all[k].name) +
-             "\",\"tier\":\"" + caw::stress::tierName(all[k].tier) + "\",\"memory_mib\":" + std::to_string(all[k].memoryMiB) + "}";
+             "\",\"tier\":\"" + caw::stress::tierName(all[k].tier) + "\",\"feature\":\"" + all[k].feature +
+             "\",\"memory_mib\":" + std::to_string(all[k].memoryMiB) + "}";
     o += "],\"ramps\":[";
     const std::pair<const char*, caw::stress::Kind> ramps[] = {{"tracks", caw::stress::Kind::RampTracks},
                                                               {"voices", caw::stress::Kind::RampVoices},

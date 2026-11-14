@@ -9,6 +9,7 @@
 
 #include "audio_clips.h"
 #include "builtin_flagship.h"
+#include "caw/detmath.hpp"
 #include "json.h"
 #include "wav.h"
 
@@ -544,6 +545,415 @@ ProjectSpec effectsChain(int effects) {
     return p;
 }
 
+// ---------- The feature scenarios (batch 1.0.2, #197): each feature from its best case to its worst ----------
+
+namespace {
+
+// A track whose instrument costs next to nothing (the engine's internal test signal, a free-running saw at
+// `level`), so what is measured is the feature around it. An empty pattern clip makes it a playing track.
+void addToneTrack(ProjectSpec& p, const std::string& id, const std::string& parent, double level = 0.1,
+                  std::vector<ComponentSpec> effects = {}) {
+    if (std::none_of(p.modules.begin(), p.modules.end(), [](const ModuleSpec& m) { return m.id == "none"; }))
+        p.modules.push_back({"none", patternSource("None", "16", "")});
+    addInstrumentLayer(p, id, "org.caw.test.osc", {{"shape", 1}, {"freq", 110 + 7.0 * static_cast<double>(p.layers.size())}, {"level", level}},
+                       "none", 0.7, std::move(effects));
+    p.layers.back().parentId = parent;
+}
+
+LayerSpec folderLayer(const std::string& id, const std::string& parent) {
+    LayerSpec f;
+    f.id = f.name = id;
+    f.folder = true;
+    f.parentId = parent;
+    f.volume = 0.9;
+    return f;
+}
+
+// Four chords a bar, each four notes held a beat (the busy() pattern).
+std::string chordBar() {
+    const char* chords[] = {"A3,C4,E4,G4", "F3,A3,C4,E4", "C3,E3,G3,B3", "G3,B3,D4,F4"};
+    std::string notes;
+    for (int at = 0; at < 4; ++at) notes += std::to_string(at * 4) + " " + chords[at] + " 4 0.8\n";
+    return notes;
+}
+
+std::string wavPath(const std::string& dir, const std::string& name) {
+    return std::filesystem::path(dir).generic_string() + "/" + name;
+}
+
+// A clip-ish loop: a decaying noise hit every `hit` seconds over a low sine, stereo.
+float loopSample(int64_t i, int c, int rate, double hit) {
+    const double t = std::fmod(static_cast<double>(i) / rate, hit);
+    uint32_t x = static_cast<uint32_t>(i * 2654435761u + c * 40503u + 1u);
+    x ^= x << 13; x ^= x >> 17; x ^= x << 5;
+    return static_cast<float>(0.4 * std::exp(-t * 25) * ((x >> 8) / 8388608.0 - 1.0) +
+                              0.25 * std::sin(2 * 3.14159265 * 65 * static_cast<double>(i) / rate));
+}
+
+// An audio-clip track of one WAV (written into dir), the clip `lengthSteps` long from `startSteps`, looped.
+bool addClipTrack(ProjectSpec& p, const std::string& dir, const std::string& id, const std::string& file, int rate,
+                  double seconds, double startSteps, double lengthSteps, bool musical, double pitch, std::string* error) {
+    std::string wavError;
+    const std::string path = wavPath(dir, file);
+    const bool wrote = writeBenchWav(path, rate, 2, static_cast<int64_t>(seconds * rate),
+                                     [rate](int64_t i, int c) { return loopSample(i, c, rate, 0.5); }, wavError);
+    if (!wrote && error && error->empty()) *error = wavError;
+    auto track = std::make_shared<AudioTrackSpec>();
+    AudioClipSpec clip;
+    clip.id = id + "-clip";
+    clip.path = path;
+    clip.startSteps = startSteps;
+    clip.lengthSteps = lengthSteps;
+    clip.loop = true;
+    clip.musical = musical;
+    clip.sourceBpm = musical ? 100 : 0;
+    clip.pitch = pitch;
+    clip.varispeed = pitch != 0;
+    track->clips.push_back(clip);
+    LayerSpec audio;
+    audio.id = audio.name = id;
+    audio.hasInstrument = true;
+    audio.instrument.id = kAudioTrackId;
+    audio.instrument.audioTrack = track;
+    audio.volume = 0.5;
+    p.layers.push_back(audio);
+    return wrote;
+}
+
+// The sampler's one looped zone over the keyboard (tone.wav in dir) as its state.
+void samplerState(ComponentSpec& c, const std::string& dir, std::string* error) {
+    std::string wavError;
+    const std::string tone = wavPath(dir, "sampler_tone.wav");
+    if (!writeBenchWav(tone, 48000, 1, 96000, [](int64_t i, int) {
+            const double t = static_cast<double>(i) / 48000.0;
+            return static_cast<float>(0.4 * std::sin(2 * 3.14159265 * 220 * t) + 0.15 * std::sin(2 * 3.14159265 * 661 * t));
+        }, wavError) && error && error->empty())
+        *error = wavError;
+    const std::string zones = "{\"zones\":[{\"path\":\"" + jsonEscape(tone) + "\",\"pitch_keycenter\":57,\"loop_mode\":\"loop_sustain\","
+                              "\"loop_start\":2000,\"loop_end\":90000,\"loop_crossfade\":0.01}]}";
+    c.hasState = true;
+    c.state.assign(zones.begin(), zones.end());
+}
+
+// Every id in `from` prefixed (layers, parents, sends, keys, patterns, modulators, links, lanes), then added to `into`.
+void mergeProject(ProjectSpec& into, ProjectSpec from, const std::string& prefix) {
+    auto id = [&](const std::string& v) { return v.empty() ? v : prefix + v; };
+    for (ModuleSpec& m : from.modules) into.modules.push_back({id(m.id), m.source});
+    auto keyed = [&](std::vector<ComponentSpec>& cs) {
+        for (ComponentSpec& c : cs)
+            if (c.hasKey) c.key.layer = id(c.key.layer);
+    };
+    for (LayerSpec& l : from.layers) {
+        l.id = id(l.id);
+        l.name = l.id;
+        l.parentId = id(l.parentId);
+        l.pattern = id(l.pattern);
+        for (ClipSpec& c : l.clips) c.id = id(c.id), c.pattern = id(c.pattern);
+        for (SendSpec& sd : l.sends) sd.to = id(sd.to);
+        keyed(l.components);
+        into.layers.push_back(std::move(l));
+    }
+    for (ProjectAutomationLaneSpec& a : from.automation) {
+        a.moduleId = id(a.moduleId);
+        into.automation.push_back(std::move(a));
+    }
+    uint32_t nextLink = 1;
+    for (const ModLinkSpec& k : into.modulation) nextLink = std::max(nextLink, k.id + 1);
+    for (ModulatorSpec& m : from.modulators) {
+        m.id = id(m.id);
+        m.name = m.id;
+        m.layer = id(m.layer);
+        m.input = id(m.input);
+        into.modulators.push_back(std::move(m));
+    }
+    for (ModLinkSpec& k : from.modulation) {
+        k.id = nextLink++;
+        k.source = id(k.source);
+        if (k.target.type == "modulator" || !k.target.layer.empty()) k.target.layer = id(k.target.layer);
+        into.modulation.push_back(std::move(k));
+    }
+}
+
+}  // namespace
+
+ProjectSpec emptyProject() {
+    ProjectSpec p;
+    p.name = "Empty";
+    p.bpm = 120;
+    p.loopBars = 1;
+    return p;
+}
+
+ProjectSpec singleSynth() { return busy("org.caw.synth.flagship", {}); }
+
+ProjectSpec singleSampler(const std::string& dir, std::string* error) {
+    ProjectSpec p = busy("org.caw.sampler", {{"release", 0.3}});
+    p.name = "One sampler";
+    samplerState(p.layers.back().instrument, dir, error);
+    return p;
+}
+
+ProjectSpec singleDrums() {
+    ProjectSpec p = busy("org.caw.drums", {});
+    p.name = "One drum kit";
+    return p;
+}
+
+ProjectSpec singleAudio(const std::string& dir, std::string* error) {
+    ProjectSpec p;
+    p.name = "One audio clip";
+    p.bpm = 120;
+    p.loopBars = 4;
+    addClipTrack(p, dir, "Audio", "single_audio.wav", 48000, 4.0, 0, 64, false, 0, error);
+    return p;
+}
+
+ProjectSpec folders(int levels, int width) {
+    ProjectSpec p;
+    p.name = std::to_string(levels) + "-level folders";
+    p.bpm = 120;
+    p.loopBars = 1;
+    for (int w = 0; w < width; ++w) {
+        std::string parent;
+        for (int k = 1; k <= levels; ++k) {
+            const std::string f = "F" + std::to_string(w + 1) + "." + std::to_string(k);
+            p.layers.push_back(folderLayer(f, parent));
+            parent = f;
+        }
+        addToneTrack(p, "T" + std::to_string(w + 1), parent);  // at the bottom: every folder above it carries it
+    }
+    return p;
+}
+
+ProjectSpec sends(int tracks, int buses, bool chained) {
+    ProjectSpec p;
+    p.name = chained ? "Chained sends" : std::to_string(tracks * buses) + " sends";
+    p.bpm = 120;
+    p.loopBars = 1;
+    for (int b = 0; b < buses; ++b) {
+        LayerSpec bus = folderLayer("Bus" + std::to_string(b + 1), "");
+        bus.volume = 0.3;
+        // Chained: each bus sends on to the next, pre and post in turn.
+        if (chained && b + 1 < buses) bus.sends.push_back({"Bus" + std::to_string(b + 2), 0.7, b % 2 == 0, false});
+        p.layers.push_back(bus);
+    }
+    for (int t = 0; t < tracks; ++t) {
+        addToneTrack(p, "Src" + std::to_string(t + 1), "");
+        LayerSpec& l = p.layers.back();
+        if (chained) {
+            l.sends.push_back({"Bus1", 0.5, t % 2 == 0, false});
+        } else {
+            // Every bus twice, pre and post fader, up to the 8 sends a track has.
+            for (int k = 0; k < 2 * buses && k < kMaxSends; ++k)
+                l.sends.push_back({"Bus" + std::to_string(k % buses + 1), 0.2 + 0.05 * k, k >= buses, false});
+        }
+    }
+    return p;
+}
+
+ProjectSpec automation(int tracks, int lanes, int points) {
+    ProjectSpec p;
+    p.name = std::to_string(tracks * lanes) + " automation lanes";
+    p.bpm = 120;
+    p.loopBars = 2;
+    const int steps = p.loopSteps();
+    // The component lanes' targets: the filter's cutoff and resonance, the EQ's two gains.
+    const std::pair<int, const char*> params[] = {{0, "cutoff"}, {0, "resonance"}, {1, "b2_gain"}, {1, "b6_gain"}};
+    const double lo[] = {300, 0.1, -6, -6}, hi[] = {6000, 0.6, 6, 6};
+    for (int t = 0; t < tracks; ++t) {
+        const std::string id = "Lane" + std::to_string(t + 1);
+        addToneTrack(p, id, "", 0.1, {component("org.caw.filter", {{"cutoff", 2000}}), component("org.caw.eq")});
+        LayerSpec& l = p.layers.back();
+        const int n = std::max(2, points * p.loopBars);
+        for (int lane = 0; lane < lanes; ++lane) {
+            std::vector<AutomationPointSpec> pts;
+            for (int k = 0; k < n; ++k) {
+                // detSin: the same bits on every platform, so the project (and its pinned hash) is too.
+                const double u = 0.5 + 0.5 * detSin(6.2831853 * (k + lane + t) / n * 3);
+                pts.push_back({static_cast<double>(steps) * k / n, u});
+            }
+            if (lane < 2) {  // the fader's lanes: volume (a gain) and pan
+                for (AutomationPointSpec& x : pts) x.value = lane == 0 ? 0.3 + 0.6 * x.value : 2 * x.value - 1;
+                l.automation.push_back({lane == 0 ? "volume" : "pan", pts});
+                continue;
+            }
+            const auto& [index, name] = params[(lane - 2) % 4];
+            for (AutomationPointSpec& x : pts) x.value = lo[(lane - 2) % 4] + (hi[(lane - 2) % 4] - lo[(lane - 2) % 4]) * x.value;
+            p.automation.push_back({"component", id, index, name, pts});
+        }
+    }
+    return p;
+}
+
+ProjectSpec modulationDense(int tracks, int modulators) {
+    ProjectSpec p;
+    p.name = "Dense modulation";
+    p.bpm = 120;
+    p.loopBars = 1;
+    for (int t = 0; t < tracks; ++t)
+        addToneTrack(p, "Mod" + std::to_string(t + 1), "", 0.1, {component("org.caw.filter", {{"cutoff", 2000}}), component("org.caw.eq")});
+    const char* kinds[] = {"org.caw.mod.lfo", "org.caw.mod.steps", "org.caw.mod.random"};
+    uint32_t link = 1;
+    for (int m = 0; m < modulators; ++m) {
+        ModulatorSpec mod;
+        mod.id = mod.name = "m" + std::to_string(m + 1);
+        mod.component = component(kinds[m % 3], {{"rate", 0.5 + 0.75 * m}});
+        p.modulators.push_back(mod);
+        for (int t = 0; t < tracks; ++t) {
+            const std::string layer = "Mod" + std::to_string(t + 1);
+            ModLinkSpec cut;
+            cut.id = link++;
+            cut.source = mod.id;
+            cut.target = {"component", layer, "cutoff", 0};
+            cut.amount = 0.05;
+            cut.bipolar = true;
+            p.modulation.push_back(cut);
+            ModLinkSpec vol = cut;
+            vol.id = link++;
+            vol.target = {"volume", layer, "", -1};
+            vol.amount = 0.02;
+            p.modulation.push_back(vol);
+        }
+    }
+    return p;
+}
+
+ProjectSpec voiceStorm() {
+    ProjectSpec p;
+    p.name = "Voice storm";
+    p.bpm = 140;
+    p.loopBars = 1;
+    // A 12-note chord on every 16th, each held two beats: 96 notes would sound, past Flagship's 64, so voices are
+    // started, stolen and released on every step.
+    std::string notes;
+    for (int at = 0; at < 16; ++at) {
+        std::string chord;
+        for (int k = 0; k < 12; ++k) chord += (k ? "," : "") + noteName(40 + (at * 5 + k * 3) % 36);
+        notes += std::to_string(at) + " " + chord + " 8 " + (at % 2 ? "0.6" : "0.9") + "\n";
+    }
+    p.modules = {{"storm", patternSource("Storm", "16", notes)}};
+    addInstrumentLayer(p, "Storm", "org.caw.synth.flagship",
+                       {{"osc1_unison", 2}, {"env1_attack", 0.002}, {"env1_release", 0.4}, {"volume", 0.2}}, "storm", 0.5);
+    return p;
+}
+
+ProjectSpec sampleStream(const std::string& dir, int tracks, bool mixedRates, std::string* error) {
+    ProjectSpec p;
+    p.name = mixedRates ? "Mixed-rate audio" : "Long audio clips";
+    p.bpm = 120;
+    p.loopBars = 8;  // 16 s
+    const int rates[] = {22050, 44100, 88200, 96000};
+    for (int t = 0; t < tracks; ++t) {
+        const int rate = mixedRates ? rates[t % 4] : 48000;
+        const std::string id = (mixedRates ? "Rate" : "Stream") + std::to_string(t + 1);
+        // Long clips (12 s, so the loop never repeats the start within a run), staggered; musical (stretched) on
+        // every other one; mixed rates: fixed speed, resampled, the odd ones also re-pitched (varispeed).
+        addClipTrack(p, dir, id, id + ".wav", rate, mixedRates ? 6.0 : 12.0, 2.0 * t, 128 - 2.0 * t,
+                     !mixedRates && t % 2 == 1, mixedRates && t % 2 == 1 ? 3.0 : 0.0, error);
+    }
+    return p;
+}
+
+ProjectSpec everyInstrument(const std::string& dir, std::string* error) {
+    ProjectSpec p;
+    p.name = "Every instrument";
+    p.bpm = 120;
+    p.loopBars = 1;
+    std::string drums;
+    for (int at = 0; at < 16; ++at) drums += std::to_string(at) + (at % 4 == 0 ? " C2,F#2" : at % 4 == 2 ? " D2,A#2" : " F#2") + " 1 1\n";
+    std::string line;
+    const char* keys[] = {"A1", "A2", "C2", "E2"};
+    for (int at = 0; at < 16; ++at) line += std::to_string(at) + " " + keys[at % 4] + " 1/2 1\n";
+    p.modules = {{"chords", patternSource("Chords", "16", chordBar())}, {"drums", patternSource("Drums", "16", drums)},
+                 {"line", patternSource("Line", "16", line)}};
+    // The built-ins, then the retired synths' ids (Flagship patches now) and drum voices.
+    addInstrumentLayer(p, "Flagship", "org.caw.synth.flagship", {}, "chords", 0.4);
+    addInstrumentLayer(p, "Drums", "org.caw.drums", {}, "drums", 0.5);
+    addInstrumentLayer(p, "Sampler", "org.caw.sampler", {{"release", 0.3}}, "chords", 0.4);
+    samplerState(p.layers.back().instrument, dir, error);
+    addInstrumentLayer(p, "Morph", "org.caw.synth.morph", {}, "chords", 0.3);
+    addInstrumentLayer(p, "Basic", "org.caw.synth.basic", {}, "chords", 0.3);
+    addInstrumentLayer(p, "Bass", "org.caw.bass", {}, "line", 0.4);
+    addInstrumentLayer(p, "Acid", "org.caw.synth.acid", {}, "line", 0.3);
+    addInstrumentLayer(p, "Kick", "org.caw.drum.kick", {}, "drums", 0.4);
+    addInstrumentLayer(p, "Snare", "org.caw.drum.snare", {}, "drums", 0.3);
+    addInstrumentLayer(p, "Hats", "org.caw.drum.hats", {}, "drums", 0.3);
+    addClipTrack(p, dir, "Audio", "every_audio.wav", 44100, 4.0, 0, 16, false, 0, error);
+    return p;
+}
+
+ProjectSpec everyEffect() {
+    // Every built-in effect (as registered on 2026-11-13, keyed ones keyed by the first track), a dozen or so on
+    // each of five Flagship chord tracks, in registration order.
+    const char* const ids[] = {
+        "org.caw.stereo.balance", "org.caw.stereo.width", "org.caw.distortion", "org.caw.delay.pingpong", "org.caw.chorus",
+        "org.caw.autopan", "org.caw.bitcrush", "org.caw.channelmixer", "org.caw.clipper", "org.caw.comb",
+        "org.caw.convolver", "org.caw.deesser", "org.caw.delay.pro", "org.caw.disperser", "org.caw.doubler",
+        "org.caw.dynamics", "org.caw.ensemble", "org.caw.eq", "org.caw.eq.dj", "org.caw.filter", "org.caw.flanger",
+        "org.caw.formant", "org.caw.freqshift", "org.caw.geq", "org.caw.haas", "org.caw.imager", "org.caw.ladder",
+        "org.caw.limiter", "org.caw.multiband", "org.caw.nlfilter", "org.caw.phasedist", "org.caw.phaser",
+        "org.caw.pitchshift", "org.caw.rack.multiband", "org.caw.resonator", "org.caw.reverb.pro", "org.caw.reverser",
+        "org.caw.rotary", "org.caw.saturator", "org.caw.shimmer", "org.caw.stutter", "org.caw.tapestop", "org.caw.tilt",
+        "org.caw.trancegate", "org.caw.transient", "org.caw.tremolo", "org.caw.utility", "org.caw.vibrato",
+        "org.caw.compressor", "org.caw.ducker", "org.caw.gate", "org.caw.rack.fx", "org.caw.ringmod"};
+    const char* const keyedIds[] = {"org.caw.compressor", "org.caw.ducker", "org.caw.gate", "org.caw.ringmod"};
+    constexpr int kTracks = 5;
+    ProjectSpec p;
+    p.name = "Every effect";
+    p.bpm = 120;
+    p.loopBars = 1;
+    p.modules = {{"chords", patternSource("Chords", "16", chordBar())}};
+    std::vector<std::vector<ComponentSpec>> chains(kTracks);
+    int k = 0;
+    for (const char* id : ids) {
+        const bool key = std::find_if(std::begin(keyedIds), std::end(keyedIds), [&](const char* x) { return std::string(x) == id; }) != std::end(keyedIds);
+        const int t = k++ % kTracks;
+        chains[static_cast<size_t>(t)].push_back(key && t != 0 ? keyed(id, {}, "FX1") : component(id));
+    }
+    for (int t = 0; t < kTracks; ++t)
+        addInstrumentLayer(p, "FX" + std::to_string(t + 1), "org.caw.synth.flagship", {{"osc1_unison", 2}}, "chords", 0.3,
+                           std::move(chains[static_cast<size_t>(t)]));
+    return p;
+}
+
+ProjectSpec meteringHeavy() {
+    ProjectSpec p;
+    p.name = "Many meters";
+    p.bpm = 120;
+    p.loopBars = 1;
+    for (int b = 0; b < 8; ++b) p.layers.push_back(folderLayer("Group" + std::to_string(b + 1), ""));
+    for (int t = 0; t < 48; ++t) addToneTrack(p, "Meter" + std::to_string(t + 1), "Group" + std::to_string(t % 8 + 1), 0.05);
+    return p;
+}
+
+ProjectSpec worstAll(const std::string& dir, std::string* error) {
+    ProjectSpec p = bigSong(20, true);  // with the rest, about 230 components (at most 256 run)
+    p.name = "Worst case, everything";
+    mergeProject(p, folders(8, 2), "f.");
+    mergeProject(p, sends(4, 8, false), "s.");
+    mergeProject(p, automation(8, 6, 32), "a.");
+    mergeProject(p, modulationDense(4, 8), "m.");
+    mergeProject(p, voiceStorm(), "v.");
+    mergeProject(p, sampleStream(dir, 4, true, error), "r.");
+    for (LayerSpec& l : p.layers)
+        for (ClipSpec& c : l.clips) c.lengthSteps = p.loopSteps();  // every pattern track plays the whole song
+    return p;
+}
+
+bool makeScenario(const SuiteScenario& s, const std::string& dir, ProjectSpec& out, std::string& error) {
+    if (!s.makeChecked) {
+        out = s.make(dir);
+        return true;
+    }
+    if (dir.empty()) {
+        error = std::string(s.id) + " needs a work folder";
+        return false;
+    }
+    error.clear();
+    out = s.makeChecked(dir, &error);
+    return error.empty();
+}
+
 const char* tierName(Tier t) {
     switch (t) {
         case Tier::Normal: return "normal";
@@ -559,17 +969,53 @@ std::vector<SuiteScenario> suiteScenarios() {
     // Linux x64 (2026-11-13: 54, 34, 73, 82, 15, 15, 19, 132, 287 and 24 MiB in this order), with about a third more
     // on top; [Assumption] a phone's use is alike (docs/engine-performance.md).
     return {
-        {"first_loop", "First loop (6 tracks)", [](const std::string&) { return firstLoop(); }, false, Tier::Normal, false, 64},
-        {"three_tracks", "Three tracks", [](const std::string&) { return threeTracks(); }, false, Tier::Normal, false, 48},
-        {"song8", "Typical song (8 tracks)", [](const std::string&) { return typicalSong(false); }, false, Tier::Normal, false, 96},
-        {"song8_extras", "Typical song + extras", [](const std::string& d) { return typicalSong(true, d); }, false, Tier::Normal, false, 112},
-        {"flagship_heavy", "Flagship heavy, 64 voices held", [](const std::string&) { return flagshipHeavy(64); }, false, Tier::Extreme, false, 32},
-        {"flagship_heavy16", "Flagship heavy, 16 voices held", [](const std::string&) { return flagshipHeavy(16); }, false, Tier::Heavy, false, 32},
-        {"drums_kit", "Drums kit, 16 pads busy", [](const std::string&) { return drumsBusy(); }, false, Tier::Heavy, false, 32},
-        {"song16", "Song, 16 tracks", [](const std::string&) { return bigSong(16, false); }, false, Tier::Heavy, false, 176},
-        {"song32_heavy", "Song, 32 tracks + heavy FX", [](const std::string&) { return bigSong(32, true); }, false, Tier::Extreme, false, 384},
-        {"tail", "Tail", [](const std::string&) { return tailSong(true); }, true, Tier::Idle, true, 64},
-        {"tail_floor", "Tail project, no notes", [](const std::string&) { return tailSong(false); }, false, Tier::Idle, false, 32},
+        {"first_loop", "First loop (6 tracks)", [](const std::string&) { return firstLoop(); }, false, Tier::Normal, false, 64, "all"},
+        {"three_tracks", "Three tracks", [](const std::string&) { return threeTracks(); }, false, Tier::Normal, false, 48, "all"},
+        {"song8", "Typical song (8 tracks)", [](const std::string&) { return typicalSong(false); }, false, Tier::Normal, false, 96, "all"},
+        {"song8_extras", "Typical song + extras", [](const std::string& d) { return typicalSong(true, d); }, false, Tier::Normal, false, 112, "all",
+         [](const std::string& d, std::string* e) { return typicalSong(true, d, e); }},
+        {"flagship_heavy", "Flagship heavy, 64 voices held", [](const std::string&) { return flagshipHeavy(64); }, false, Tier::Extreme, false, 32, "instrument"},
+        {"flagship_heavy16", "Flagship heavy, 16 voices held", [](const std::string&) { return flagshipHeavy(16); }, false, Tier::Heavy, false, 32, "instrument"},
+        {"drums_kit", "Drums kit, 16 pads busy", [](const std::string&) { return drumsBusy(); }, false, Tier::Heavy, false, 32, "instrument"},
+        {"song16", "Song, 16 tracks", [](const std::string&) { return bigSong(16, false); }, false, Tier::Heavy, false, 176, "all"},
+        {"song32_heavy", "Song, 32 tracks + heavy FX", [](const std::string&) { return bigSong(32, true); }, false, Tier::Extreme, false, 384, "all"},
+        {"tail", "Tail", [](const std::string&) { return tailSong(true); }, true, Tier::Idle, true, 64, "baseline"},
+        {"tail_floor", "Tail project, no notes", [](const std::string&) { return tailSong(false); }, false, Tier::Idle, false, 32, "baseline"},
+    };
+}
+
+std::vector<SuiteScenario> featureScenarios() {
+    // memoryMiB: as suiteScenarios' (peak RSS growth set up and playing 2 s on Linux x64, 2026-11-13, a third on
+    // top). The WAV-writing ones need the work folder (makeChecked).
+    using D = const std::string&;
+    using E = std::string*;
+    return {
+        {"empty", "Empty project", [](D) { return emptyProject(); }, false, Tier::Idle, false, 8, "baseline"},
+        {"single_synth", "One Flagship", [](D) { return singleSynth(); }, false, Tier::Normal, false, 24, "instrument"},
+        {"single_sampler", "One sampler", [](D d) { return singleSampler(d, nullptr); }, false, Tier::Normal, false, 24, "instrument",
+         [](D d, E e) { return singleSampler(d, e); }},
+        {"single_drums", "One drum kit", [](D) { return singleDrums(); }, false, Tier::Normal, false, 32, "instrument"},
+        {"single_audio", "One audio clip", [](D d) { return singleAudio(d, nullptr); }, false, Tier::Normal, false, 24, "audio",
+         [](D d, E e) { return singleAudio(d, e); }},
+        {"folders_shallow", "Folders, one level", [](D) { return folders(1, 4); }, false, Tier::Normal, false, 16, "routing"},
+        {"folders_deep", "Folders, 8 levels deep", [](D) { return folders(8, 4); }, false, Tier::Heavy, false, 24, "routing"},
+        {"sends_few", "4 sends", [](D) { return sends(1, 2, false); }, false, Tier::Normal, false, 16, "sends"},
+        {"sends_many", "32 sends", [](D) { return sends(4, 4, false); }, false, Tier::Heavy, false, 24, "sends"},
+        {"sends_chained", "Sends chained through 16 buses", [](D) { return sends(8, 16, true); }, false, Tier::Heavy, false, 24, "sends"},
+        {"automation_light", "Light automation", [](D) { return automation(4, 2, 4); }, false, Tier::Normal, false, 24, "automation"},
+        {"automation_dense", "Dense automation", [](D) { return automation(16, 6, 64); }, false, Tier::Heavy, false, 48, "automation"},
+        {"modulation_dense", "Dense modulation", [](D) { return modulationDense(8, 16); }, false, Tier::Heavy, false, 32, "modulation"},
+        {"voice_storm", "Voice storm (chords, stealing)", [](D) { return voiceStorm(); }, false, Tier::Extreme, false, 24, "voices"},
+        {"sample_stream", "Long audio clips", [](D d) { return sampleStream(d, 8, false, nullptr); }, false, Tier::Heavy, false, 128, "samples",
+         [](D d, E e) { return sampleStream(d, 8, false, e); }},
+        {"resample", "Mixed-rate audio", [](D d) { return sampleStream(d, 8, true, nullptr); }, false, Tier::Heavy, false, 64, "samples",
+         [](D d, E e) { return sampleStream(d, 8, true, e); }},
+        {"every_instrument", "Every instrument", [](D d) { return everyInstrument(d, nullptr); }, false, Tier::Heavy, false, 96, "instrument",
+         [](D d, E e) { return everyInstrument(d, e); }},
+        {"every_effect", "Every effect", [](D) { return everyEffect(); }, false, Tier::Heavy, false, 160, "effect"},
+        {"metering_heavy", "Many meters", [](D) { return meteringHeavy(); }, false, Tier::Normal, false, 32, "metering"},
+        {"worst_all", "Worst case, everything", [](D d) { return worstAll(d, nullptr); }, false, Tier::Extreme, false, 512, "all",
+         [](D d, E e) { return worstAll(d, e); }},
     };
 }
 
@@ -577,6 +1023,7 @@ std::vector<SuiteScenario> benchmarkScenarios() {
     std::vector<SuiteScenario> out;
     for (SuiteScenario& s : suiteScenarios())
         if (!s.benchOnly) out.push_back(std::move(s));
+    for (SuiteScenario& s : featureScenarios()) out.push_back(std::move(s));
     return out;
 }
 

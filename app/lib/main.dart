@@ -6,11 +6,13 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import 'engine/component_bench.dart';
 import 'model/app_state.dart';
 import 'model/audio_record.dart';
 import 'model/busy_work.dart';
 import 'model/automation_writer.dart';
 import 'model/background_playback.dart';
+import 'model/component_bench.dart';
 import 'model/live_midi.dart';
 import 'model/problem_log.dart';
 import 'model/settings.dart';
@@ -56,6 +58,7 @@ Future<void> main(List<String> args) async {
     yield LicenseEntryWithLineBreaks(['JetBrains Mono'], await rootBundle.loadString('assets/fonts/OFL.txt'));
   });
   Haptics.device = platformHapticsDevice(); // the vibrator's fine primitives on Android
+  ComponentBenchBackend.current = const EngineComponentBench(); // the plug-in benchmark (engine API 30)
   DesktopWindow.current = platformDesktopWindow(); // the window's title and files opened with or dropped on it
   final settings = await Settings.open();
   // The frame-rate setting: the screen's rates, then Auto's idle drop or the cap (Settings keeps its cap up to date).

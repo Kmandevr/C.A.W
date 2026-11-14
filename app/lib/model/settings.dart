@@ -282,6 +282,10 @@ class Settings extends ChangeNotifier {
   set lightMode(bool value) => performanceMode = value ? PerformanceMode.lightweight : PerformanceMode.balanced;
   bool lightAuto = true;
 
+  /// True while the profile is Lightweight because an audio overload turned it on ([lightAuto]); choosing a profile
+  /// clears it. The Frame rate row names it as the reason for its 60 Hz cap.
+  bool lightBySelf = false;
+
   /// The frame rate (owner, 2026-11-12): [FrameRateController.auto] (0: the screen's highest rate while anything
   /// moves, its lowest when still) or a cap in Hz from [FrameRateController.caps]. Auto by default, and for a file
   /// from before the setting or with a value it doesn't know.
@@ -421,6 +425,12 @@ class Settings extends ChangeNotifier {
 
   /// The music video editor has shown its photosensitivity warning (the first time Strobe is added).
   bool strobeWarned = false;
+
+  /// The app version that last ran ('' before What's new existed): a newer one shows its changelog entry once.
+  String lastSeenVersion = '';
+
+  /// Whether settings.json existed when these settings were read (false on a fresh install).
+  bool existedOnLoad = false;
 
   /// Recording (owner, 2026-11-10): when the metronome clicks, and how many bars the count-in has (0: none).
   Metronome metronome = Metronome.recording;
@@ -579,11 +589,13 @@ class Settings extends ChangeNotifier {
         'performance_mode': performanceMode.name,
         'light_mode': lightMode, // retained for older builds that read settings.json
         'light_auto': lightAuto,
+        'light_by_self': lightBySelf,
         'frame_rate': frameRate,
         'vim_code': vimCode,
         'vim_keys': vimKeys,
         if (keyHints != null) 'key_hints': keyHints,
         if (strobeWarned) 'strobe_warned': true,
+        if (lastSeenVersion.isNotEmpty) 'last_seen_version': lastSeenVersion,
         'motion': motion.name,
         'edit_motion_style': editMotionStyle.name,
         'motion_feel': motionFeel.encode(),
@@ -691,12 +703,15 @@ class Settings extends ChangeNotifier {
       performanceMode = j['light_mode'] == true ? PerformanceMode.lightweight : PerformanceMode.balanced;
     }
     lightAuto = (j['light_auto'] as bool?) ?? lightAuto;
+    lightBySelf = j['light_by_self'] == true && performanceMode == PerformanceMode.lightweight;
     final fr = j['frame_rate'];
     frameRate = fr is num && FrameRateController.caps.contains(fr.toInt()) ? fr.toInt() : FrameRateController.auto;
     vimCode = (j['vim_code'] as bool?) ?? vimCode;
     vimKeys = (j['vim_keys'] as bool?) ?? vimKeys;
     if (j['key_hints'] is bool) keyHints = j['key_hints'] as bool;
     strobeWarned = j['strobe_warned'] == true;
+    final seen = j['last_seen_version'];
+    if (seen is String && seen.length <= 64) lastSeenVersion = seen.trim();
     motion = pick(MotionLevel.values, j['motion'], motion);
     editMotionStyle = pick(EditMotionStyle.values, j['edit_motion_style'], editMotionStyle);
     motionFeel = MotionFeel.decode(j['motion_feel'] as String?) ?? motionFeel;
@@ -854,7 +869,8 @@ class Settings extends ChangeNotifier {
     }
     try {
       final f = _file;
-      if (f != null && await f.exists()) fromJson(jsonDecode(await f.readAsString()) as Map<String, dynamic>);
+      if (f != null && await f.exists()) existedOnLoad = true;
+      if (existedOnLoad) fromJson(jsonDecode(await f!.readAsString()) as Map<String, dynamic>);
     } catch (_) {
       // Damaged settings fall back to the defaults.
     }

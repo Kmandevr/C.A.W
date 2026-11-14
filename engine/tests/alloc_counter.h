@@ -20,4 +20,8 @@ public:
     std::size_t deallocations() const noexcept;
 };
 
+// Every global operator new and delete on the calling thread since it started, scope or not (the plug-in
+// benchmark's allocation counter, caw::bench::setAllocationCounter).
+unsigned long long threadAllocationsAndFrees() noexcept;
+
 }  // namespace cawtest

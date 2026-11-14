@@ -327,6 +327,9 @@ void callback(ma_device* dev, void* output, const void* input, ma_uint32 frames)
     const auto start = std::chrono::steady_clock::now();
     auto* out = static_cast<float*>(output);
     (void)input;  // a playback device: the input comes through the bridge
+    // The Benchmark's live mode: process() timed apart, so the rest of the callback is its device I/O part.
+    CawStressStats* const stress = a->owner->stress.load(std::memory_order_acquire);
+    a->render.timeProcess(stress != nullptr);
     a->bridge.beginCallback(static_cast<int>(frames));  // its drift loop samples the fill once a callback
     // Fixed blocks through the FIFO (device_render.h), or straight for a small odd period. The bridge's input is
     // pulled for each block the engine renders, so it follows the frames rendered, not the frames played (they
@@ -341,8 +344,9 @@ void callback(ma_device* dev, void* output, const void* input, ma_uint32 frames)
     // NaN), and the callback recorded; its core is read on the first callback and every kCoreEvery-th
     // (sched_getcpu can be a system call), -1 meaning "not read this time".
     if (a->owner->muteOutput.load(std::memory_order_relaxed)) std::fill(out, out + static_cast<size_t>(frames) * 2, 0.0f);
-    if (CawStressStats* s = a->owner->stress.load(std::memory_order_acquire))
-        s->record(used, budget, static_cast<int32_t>(frames), s->coreDue() ? callbackCore() : -1);
+    if (stress)
+        stress->record(used, budget, static_cast<int32_t>(frames), stress->coreDue() ? callbackCore() : -1,
+                       a->render.takeProcessNs());
 }
 
 // The capture device's callback: its frames into the bridge, nothing else.

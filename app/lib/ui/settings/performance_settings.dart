@@ -1,5 +1,7 @@
 // Settings › Performance: the performance profile, Lightweight on overload, the frame rate, the Benchmark, and the
 // engine's hardware profile and plan.
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../model/settings.dart';
@@ -19,7 +21,9 @@ class PerformanceSettings extends StatelessWidget {
     final hw = deps.engineProfile, plan = deps.executionPlan;
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       settingDropdown<PerformanceMode>('performance.profile', s.performanceMode,
-          [for (final m in PerformanceMode.values) (m, m.label)], (v) => s.update((x) => x.performanceMode = v),
+          [for (final m in PerformanceMode.values) (m, m.label)], (v) => s.update((x) => x
+            ..performanceMode = v
+            ..lightBySelf = false),
           icon: Icons.speed, subtitle: s.performanceMode.description),
       settingSwitch('performance.lightAuto', s.lightAuto, (v) => s.update((x) => x.lightAuto = v),
           icon: Icons.auto_mode, subtitle: 'Keeps the interface responsive while reducing the voice budget'),
@@ -46,32 +50,62 @@ class PerformanceSettings extends StatelessWidget {
 }
 
 /// Frame rate: Auto and the caps the screen has ([FrameRateController.choices]); it follows the screen's rates once
-/// [controller] has read them. Without a controller, or where the platform can't ask (Windows), Auto alone.
-class FrameRateRow extends StatelessWidget {
-  const FrameRateRow({super.key, required this.settings, this.controller});
+/// [controller] has read them. Without a controller, or where the platform can't ask (Windows), Auto alone. It says
+/// the rate in force and why it is below the screen's best ([FrameRateStatus]), and reads the screen again shortly
+/// after it shows, so what it says is the phone's state now (battery saver, Motion smoothness).
+class FrameRateRow extends StatefulWidget {
+  const FrameRateRow({
+    super.key,
+    required this.settings,
+    this.controller,
+    this.refreshAfter = const Duration(milliseconds: 700),
+  });
   final Settings settings;
   final FrameRateController? controller;
 
+  /// How long after showing it reads the screen again: past the page's own transition, whose frames ask for the
+  /// top rate, so the rate read is the one the system settled on.
+  final Duration refreshAfter;
+
+  @override
+  State<FrameRateRow> createState() => _FrameRateRowState();
+}
+
+class _FrameRateRowState extends State<FrameRateRow> {
+  Timer? _refresh;
+
+  @override
+  void initState() {
+    super.initState();
+    final c = widget.controller;
+    if (c != null && c.device.canRequest) _refresh = Timer(widget.refreshAfter, () => unawaited(c.refresh()));
+  }
+
+  @override
+  void dispose() {
+    _refresh?.cancel();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
-    final c = controller;
+    final c = widget.controller, settings = widget.settings;
     Widget row() {
       final choices = c?.choices ?? const [FrameRateController.auto];
-      final rates = c?.rates ?? const <double>[];
-      final screen = rates.isEmpty ? '' : ' (this screen: ${{for (final r in rates) r.round()}.join(', ')} Hz)';
-      final subtitle = c == null || !c.device.canRequest
-          ? 'Follows the screen\'s own rate$screen; a cap isn\'t available here'
-          : settings.frameRate == FrameRateController.auto
-              ? 'The highest rate while anything moves, the lowest when still$screen'
-              : 'At most ${settings.frameRate} Hz everywhere, playback included$screen';
-      // The profile's cap, when it is lower than the setting's (owner, 2026-11-12).
-      final capped = c != null && c.device.canRequest && settings.profileFrameCap > 0 &&
-          (settings.frameRate == FrameRateController.auto || settings.profileFrameCap < settings.frameRate);
-      final profile = settings.performanceMode == PerformanceMode.minimal ? 'Minimal' : 'Lightweight';
-      final note = capped ? '. $profile caps it at ${settings.profileFrameCap} Hz' : '';
-      return settingDropdown<int>('performance.frameRate', settings.frameRate,
-          [for (final v in choices) (v, FrameRateController.label(v))], (v) => settings.update((x) => x.frameRate = v),
-          icon: Icons.slow_motion_video, subtitle: '$subtitle$note');
+      final status =
+          c?.status(profile: settings.performanceMode.label, profileBySelf: settings.lightBySelf) ??
+          const FrameRateStatus(
+            autoLabel: 'Auto',
+            subtitle: 'Follows the screen\'s own rate; a cap isn\'t available here',
+          );
+      return settingDropdown<int>(
+        'performance.frameRate',
+        settings.frameRate,
+        [for (final v in choices) (v, v == FrameRateController.auto ? status.autoLabel : FrameRateController.label(v))],
+        (v) => settings.update((x) => x.frameRate = v),
+        icon: Icons.slow_motion_video,
+        subtitle: status.subtitle,
+      );
     }
 
     return c == null ? row() : ListenableBuilder(listenable: c, builder: (_, _) => row());

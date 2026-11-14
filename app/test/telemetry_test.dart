@@ -187,6 +187,46 @@ void main() {
     });
   });
 
+  group('audio threads (perf.schedHint, perf.callbackCoreType)', () {
+    test('the day\'s samples fill both fields, through the allow-list and a restart', () async {
+      final rig = Rig();
+      await rig.ready();
+      await rig.use();
+      var perf = (await rig.t.previewToday())!['perf'] as Map;
+      expect(perf['schedHint'], 'off'); // no sample yet: H2 has no null for these
+      expect(perf['callbackCoreType'], 'unknown');
+
+      Map<String, Object?> sample(String kind, bool hint) =>
+          {'callback_cpu': 4, 'core_kind': kind, 'clock_khz': 2400000, 'max_khz': 2800000, 'hint': hint};
+      rig.t.onAudioThreads(sample('little', false), hintSupported: true);
+      rig.t.onAudioThreads(sample('big', true), hintSupported: true);
+      rig.t.onAudioThreads(sample('big', false), hintSupported: true);
+      rig.t.onAudioThreads(sample('unknown', false), hintSupported: true);
+      rig.t.onAudioThreads(const {}, hintSupported: true); // no engine: ignored
+      perf = (await rig.t.previewToday())!['perf'] as Map;
+      expect(perf['callbackCoreType'], 'big'); // the kind seen most often
+      expect(perf['schedHint'], 'on'); // on at least once today
+
+      // Saved with the day and read back.
+      final again = DayStats.fromJson(jsonDecode(jsonEncode(DayStats('2026-11-12')
+        ..threads(coreKind: 'little', hint: 'off')
+        ..threads(coreKind: 'galaxy', hint: 'maybe'))))!;
+      expect(again.coreKinds, {'little': 1, 'unknown': 1});
+      expect(again.perf()['schedHint'], 'off');
+      expect(again.perf()['callbackCoreType'], 'little');
+    });
+
+    test('a platform without a hint reports unsupported', () async {
+      final rig = Rig();
+      await rig.ready();
+      await rig.use();
+      rig.t.onAudioThreads({'core_kind': 'other', 'hint': false, 'mmcss': true}, hintSupported: false);
+      final perf = (await rig.t.previewToday())!['perf'] as Map;
+      expect(perf['schedHint'], 'unsupported');
+      expect(perf['callbackCoreType'], 'other');
+    });
+  });
+
   group('the allow-list (E6)', () {
     final allow = TelemetryAllowList(isBuiltin: const {'org.caw.reverb'}.contains);
 

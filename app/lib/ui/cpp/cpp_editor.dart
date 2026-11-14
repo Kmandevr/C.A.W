@@ -7,6 +7,7 @@ import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import 'package:re_editor/re_editor.dart';
 
+import '../../model/component_bench.dart';
 import '../../model/cpp_completion.dart';
 import '../../model/cpp_diagnostics.dart';
 import '../../model/cpp_versions.dart';
@@ -25,6 +26,7 @@ import 'key_row.dart';
 import 'panels.dart';
 import 'plugin_screen.dart';
 import '../adaptive_sheet.dart';
+import '../benchmark/plugin_bench_screen.dart';
 import '../panel_motion.dart';
 
 /// One file's editor state, kept with its session so undo survives switching tabs and files.
@@ -334,6 +336,21 @@ class CppEditorState extends State<CppEditor> {
     unawaited(openPluginPage(context, w, onOpenCode: (d) {
       if (d != null && mounted) jumpTo(d);
     }));
+  }
+
+  /// The plug-in benchmark of the last build (owner's look 2026-11-13: beside Build).
+  void openBench() {
+    _closeCompletion();
+    if (w.artifactPath == null) return;
+    final target = ComponentBenchTarget.of(w);
+    // Only code the user trusts now runs in the bench (a Block or a forgotten choice stops it).
+    if (target.trustedNow?.call() != true) {
+      ScaffoldMessenger.maybeOf(context)
+          ?.showSnackBar(const SnackBar(content: Text('Trust this code first: blocked or undecided code never runs')));
+      return;
+    }
+    Haptics.tap();
+    unawaited(showPluginBench(context, target, host: w.state));
   }
 
   // ---------- sheets ----------
@@ -667,7 +684,9 @@ class CppEditorState extends State<CppEditor> {
           _iconAction('side panel', side ? Icons.vertical_split : Icons.vertical_split_outlined,
               side ? 'Hide Problems and Library' : 'Show Problems and Library', () => setState(() => _side = !side),
               color: side ? Neon.blue : null),
-        _PluginButton(workbench: w, labelled: width >= 360, onOpen: openPlugin),
+        _PluginButton(workbench: w, labelled: width >= 440, onOpen: openPlugin),
+        // A narrow pane (a tablet's dock) keeps it in ⋯ only, so the tabs keep their room.
+        if (width >= 320) _BenchButton(workbench: w, labelled: width >= 1000, onBench: openBench),
         Padding(padding: const EdgeInsets.only(left: 2, right: 4), child: _BuildButton(phase: w.phase, onBuild: runBuild)),
       ]),
     );
@@ -785,6 +804,9 @@ class CppEditorState extends State<CppEditor> {
               const PopupMenuDivider(),
               PopupMenuItem(key: const ValueKey('bar plugin'), height: 34, value: openPlugin,
                   child: const Text('Plug-in: build, test, export…', style: TextStyle(fontSize: 13))),
+              PopupMenuItem(key: const ValueKey('bar bench'), height: 34, value: openBench, enabled: w.artifactPath != null,
+                  child: Text(w.artifactPath != null ? 'Benchmark the build' : 'Benchmark (build it first)',
+                      style: const TextStyle(fontSize: 13))),
             ],
           ),
         ),
@@ -1113,6 +1135,55 @@ class _PluginButton extends StatelessWidget {
                 icon: icon,
                 label: Text('Plug-in', style: Neon.code(size: 12, color: Neon.violet)))
             : IconButton(key: const ValueKey('plugin-page'), onPressed: onOpen, icon: icon, padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(minWidth: 34, minHeight: 30)),
+      ),
+    );
+  }
+}
+
+/// Benchmark, beside ▶ Build: times the last build (an effect or instrument); disabled, with the reason as its
+/// tooltip, while nothing is built or a build runs.
+class _BenchButton extends StatelessWidget {
+  const _BenchButton({required this.workbench, required this.labelled, required this.onBench});
+  final CppWorkbench workbench;
+  final bool labelled;
+  final VoidCallback onBench;
+
+  @override
+  Widget build(BuildContext context) {
+    final building = workbench.phase == CppBuildPhase.building;
+    final built = workbench.artifactPath != null;
+    final reason = building
+        ? 'Building: benchmark it when the build is done'
+        : !built
+            ? 'Build it first: there is nothing to benchmark yet'
+            : 'Benchmark ${workbench.name}: its cost, checks and sections';
+    final on = built && !building;
+    final color = on ? Neon.blue : Neon.dim;
+    const icon = Icon(Icons.speed, size: 17);
+    return Tooltip(
+      message: reason,
+      triggerMode: on ? TooltipTriggerMode.longPress : TooltipTriggerMode.tap,
+      child: SizedBox(
+        height: 30,
+        child: labelled
+            ? TextButton.icon(
+                key: const ValueKey('bench-plugin'),
+                style: TextButton.styleFrom(
+                    foregroundColor: color,
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    minimumSize: const Size(0, 30),
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap),
+                onPressed: on ? onBench : null,
+                icon: icon,
+                label: Text('Benchmark', style: Neon.code(size: 12, color: color)))
+            : IconButton(
+                key: const ValueKey('bench-plugin'),
+                onPressed: on ? onBench : null,
+                icon: icon,
+                color: color,
+                disabledColor: Neon.dim.withValues(alpha: 0.5),
+                padding: EdgeInsets.zero,
                 constraints: const BoxConstraints(minWidth: 34, minHeight: 30)),
       ),
     );

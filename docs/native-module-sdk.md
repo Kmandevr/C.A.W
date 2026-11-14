@@ -2,14 +2,14 @@
 title: Native module SDK
 summary: C ABI host contract and C++ component SDK, validation, real-time rules, state and packaging.
 updated: 2026-11-13
-covers: [engine/include/caw_component.h, engine/include/caw/display.hpp, engine/include/caw/modulator.hpp, examples/cpp/modulator/, engine/include/caw/library/, engine/src/sample_pack.*, engine/plugin/clap/, engine/cmake/CAWClap.cmake, engine/plugin/vst3/, engine/cmake/CAWVst3.cmake, engine/include/caw/module.hpp, engine/include/caw/component.hpp, engine/include/caw/instrument.hpp, engine/CMakeLists.txt, engine/cmake/, examples/cpp/minimal/, examples/cpp/poly-synth/, scripts/caw-component-build.js, .github/workflows/cpp-components.yml, engine/src/module.*, engine/src/module_registry.*, engine/src/graph.*, engine/src/component_test.*, engine/src/analysis.*]
+covers: [engine/include/caw_component.h, engine/include/caw/display.hpp, engine/include/caw/modulator.hpp, examples/cpp/modulator/, engine/include/caw/library/, engine/src/sample_pack.*, engine/plugin/clap/, engine/cmake/CAWClap.cmake, engine/plugin/vst3/, engine/cmake/CAWVst3.cmake, engine/include/caw/module.hpp, engine/include/caw/component.hpp, engine/include/caw/profile.hpp, engine/src/component_bench.*, engine/src/component_profile.*, engine/include/caw/instrument.hpp, engine/CMakeLists.txt, engine/cmake/, examples/cpp/minimal/, examples/cpp/poly-synth/, scripts/caw-component-build.js, .github/workflows/cpp-components.yml, engine/src/module.*, engine/src/module_registry.*, engine/src/graph.*, engine/src/component_test.*, engine/src/analysis.*]
 ---
 
 # Native module SDK v1
 
 **Status [Fact, checked 2026-11-09]:**
 - **Interface and SDK:** the plain-C component interface v3 and the installable C++ SDK (`CAW::SDK`) exist.
-- **Desktop build:** a manifest-driven CMake build, and CI for Linux, Windows and Android. The engine's link-time optimisation (`CAW_LTO`, [engine](engine.md)) is set for the engine's own targets only; a component built against `CAW::SDK` keeps its own build settings. So are the engine's fast-math subsets (`CAW_FP_FLAGS`, speed phase 2): `CAW::SDK` still gives a component the strict flags (`-ffp-contract=off -fno-fast-math -fno-trapping-math`, MSVC `/fp:precise`), so the Library gives the same bits in a component everywhere. Inside the engine a component runs with subnormals flushed to zero (`Engine::process` sets it); an exported CLAP or VST3 plug-in gets the host's mode, so keep the Library's denormal guards.
+- **Desktop build:** a manifest-driven CMake build, and CI for Linux, Windows and Android. The engine's link-time optimisation (`CAW_LTO`, [engine](engine.md)) is set for the engine's own targets only; a component built against `CAW::SDK` keeps its own build settings. So are the engine's fast-math subsets (`CAW_FP_FLAGS`, speed phase 2): `CAW::SDK` still gives a component the strict flags (`-ffp-contract=off -fno-fast-math -fno-trapping-math`, MSVC `/fp:precise`, clang-cl `/fp:precise /clang:-ffp-contract=off`), so the Library gives the same bits in a component everywhere. Inside the engine a component runs with subnormals flushed to zero (`Engine::process` sets it); an exported CLAP or VST3 plug-in gets the host's mode, so keep the Library's denormal guards. The shipped Windows engine is built with clang-cl since 2026-11-13 (MSVC ABI); a component's C interface does not depend on the compiler, so one built with MSVC still loads.
 - **In-app compiler:** `engine/compiler/` is built for Android by CI, and in CI it compiles real components to arm64 libraries; its first run on a phone is still to come.
 - **Loading:** explicit trust (Blocked / Trusted; Isolated is refused, since there is no sandbox), and rebuilds that switch in while playing.
 - **Playback:** stereo effects with parameters, automation, bypass, state, tails and latency compensation, on tracks and the master; instruments (an event input, a stereo output) playing a track's notes, with the same (2026-11-10, #156).
@@ -111,6 +111,29 @@ A library is in-process code, so it loads only with an explicit `--trust trusted
 - **Cost:** median and worst time per block, in µs and as a share of the block's real time on the machine that runs the test (a desktop CPU is not a phone's).
 
 Run it at the block sizes and sample rates the app uses (`--block`, `--rate`); a result without `cpu` is the same byte for byte on every run, so it can be checked into a test. `--strict` exits 1 on any warning, for CI.
+
+## Benchmark your component
+
+The plug-in benchmark (the **Benchmark** button beside Build; hosts call `caw_worker_pool_submit_component_bench`, API 30) times your built effect or instrument offline on a worker and runs automatic checks, each pass, warn or fail with a one-line reason: allocations in `process()`, the slowdown from denormals at silence without flush-to-zero (and any subnormal output), the cost per voice (instruments), how the cost scales with the block size and the sample rate, the cost of every parameter moving, and the cost while silent (sleeping through `quiet()` passes). The measurements and thresholds are in the [engine reference](engine.md#the-plug-in-benchmark). It runs only your own builds and components you chose to trust (Trusted), checked when it lists them and again as it starts, so blocking a plug-in or forgetting its choice stops it; nothing of it leaves the device. It runs your plug-in inside C.A.W's own process: a crash in it closes the app (a C++ exception can't escape `process()`, which is `noexcept`; the SDK's export turns one into a failed block). A `process()` that doesn't return within a second (or 100 blocks' time) fails the benchmark and is left running until it returns; no other benchmark runs until then. Running it apart, in the Isolated runner, comes later (#212).
+
+### Time sections of your component
+
+`CAW_PROFILE_SCOPE("name")` (`caw/profile.hpp`, included by `caw/module.hpp`) times the rest of the enclosing block as a named section, and the benchmark lists each section's share of your `process()` time, its mean per call and its calls:
+
+```cpp
+void process(const caw::StereoProcessBlock& b) noexcept override {
+    {
+        CAW_PROFILE_SCOPE("filter");
+        runFilter(b);
+    }
+    CAW_PROFILE_SCOPE("saturation");
+    runSaturation(b);
+}
+```
+
+- Name each section with a string literal; at most 32 names are kept (47 characters shown). Sections may nest (up to 32 deep); each keeps only its own time (a nested section's comes off its parent's), so the shares add up to at most the whole.
+- Outside a benchmark a section costs a relaxed load and a predictable branch on entry and a branch on exit: leave it in your shipped code. It never allocates, locks or blocks, and records only on the benchmark's own thread, so the same plug-in playing in your project meanwhile adds nothing.
+- The SDK's `create` asks the host for the extension `caw.profile.v1` (`CAW_HOST_EXTENSION_PROFILE` in `caw_component.h`); a component written against the C interface alone can ask for it the same way (`CawProfileExtension`: `active`, `begin`, `end`, `now_ns`). A host without it (another host, a CLAP export) makes every section a no-op.
 
 ## Writing an instrument
 

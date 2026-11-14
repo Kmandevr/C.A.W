@@ -1,4 +1,4 @@
-// A Benchmark result: per-scenario rows, tiers, limits and costs, its JSON export, H2 `stress` and a plain-words summary.
+// A Benchmark result: per-scenario rows and features, tiers, limits, engine parts and costs, the verdict, tips, its JSON export, H2 `stress` and a plain-words summary.
 import 'dart:convert';
 
 import 'cpp_reference.dart';
@@ -57,9 +57,17 @@ class ScenarioResult {
     this.mixActiveWorkers = 0,
     this.warmupXruns,
     this.deviceSizes = false,
-  });
+    String feature = '',
+    this.parts = const [],
+  }) : feature = stressFeatures.containsKey(feature) ? feature : scenarioFeature(id);
 
   final String id, name;
+
+  /// What it tests ([stressFeatures]): the engine's own, else the contract's for the ids it predates.
+  final String feature;
+
+  /// Its engine parts, when the engine profiled it (local only, like the costs).
+  final List<EnginePart> parts;
 
   /// normal, heavy, extreme or idle.
   final String tier;
@@ -133,6 +141,8 @@ class ScenarioResult {
       mixActiveWorkers: i('mix_active_workers'),
       warmupXruns: wx >= 0 ? wx : null,
       deviceSizes: j['mode'] == 'live' && j['device_sizes'] == true,
+      feature: j['feature'] is String ? j['feature'] as String : '',
+      parts: EnginePart.parseList(j['parts']),
     );
   }
 
@@ -150,6 +160,7 @@ class ScenarioResult {
         'id': id,
         'name': name,
         'tier': tier,
+        'feature': feature,
         'mode': live ? 'live' : 'dsp',
         if (skipped != null) 'skipped': skipped,
         if (error != null) 'error': error,
@@ -175,6 +186,7 @@ class ScenarioResult {
           'core_khz_start': coreKhzStart,
           'core_khz_end': coreKhzEnd,
           'core_max_khz': coreMaxKhz,
+          if (parts.isNotEmpty) 'parts': [for (final p in parts) p.toJson()],
           if (live) ...{
             'buffer': buffer,
             'requested_frames': requestedFrames,
@@ -317,6 +329,77 @@ class StressResult {
 
   /// The scenario [costs] comes from (null: none profiled).
   String? get costsScenario => costsByScenario.isEmpty ? null : (costsByScenario.containsKey('song8') ? 'song8' : costsByScenario.keys.first);
+
+  /// Each profiled scenario's engine parts (API 30; empty from an older engine), local only.
+  final Map<String, List<EnginePart>> partsByScenario = {};
+
+  /// The scenario [parts] comes from: song8, else the first profiled (null: none).
+  String? get partsScenario =>
+      partsByScenario.isEmpty ? null : (partsByScenario.containsKey('song8') ? 'song8' : partsByScenario.keys.first);
+
+  /// The headline parts, costliest first.
+  List<EnginePart> get parts {
+    final k = partsScenario;
+    return k == null ? const [] : ([...partsByScenario[k]!]..sort((a, b) => b.pct.compareTo(a.pct)));
+  }
+
+  /// A scenario's name as it ran (its id when it didn't).
+  String scenarioName(String id) => scenarios.where((s) => s.id == id).firstOrNull?.name ?? id;
+
+  /// Part [id] in each profiled scenario, where it cost the most first.
+  List<({String scenario, EnginePart part})> partAcross(String id) => [
+        for (final e in partsByScenario.entries)
+          for (final p in e.value)
+            if (p.id == id) (scenario: e.key, part: p),
+      ]..sort((a, b) => b.part.pct.compareTo(a.part.pct));
+
+  /// The verdict: the worst of the normal and heavy tiers (Extreme is meant to overload a phone, so it doesn't
+  /// count), else Extreme's when only it ran; null when nothing ran. [Assumption] the owner's "overall tier".
+  StressTier? get overall {
+    final ts = [tier('normal'), tier('heavy')].whereType<StressTier>().toList();
+    if (ts.isEmpty) return tier('extreme');
+    return ts.reduce((a, b) => a.index >= b.index ? a : b);
+  }
+
+  /// The verdict in plain words: which kinds of project fit.
+  String get verdictText {
+    final n = tier('normal'), h = tier('heavy');
+    if (n == null && h == null) return overall == null ? 'Nothing finished, so there is no verdict yet.' : 'Only the extreme tests ran.';
+    String words(StressTier t) => switch (t) {
+          StressTier.comfortable => 'comfortable',
+          StressTier.tight => 'tight',
+          StressTier.over => 'over budget',
+        };
+    if (n != null && h != null && n == h) return 'Normal and heavy projects: ${words(n)}.';
+    if (n == null) return 'Heavy projects: ${words(h!)}.';
+    if (h == null) return 'Normal projects: ${words(n)}.';
+    return 'Normal projects: ${words(n)}; heavy projects: ${words(h)}.';
+  }
+
+  /// "~54 tracks · 64 voices · 64 effects": ~ where a count failed (the limit is about there), none where every
+  /// count held.
+  String get limitsShort {
+    String part(String kind, String unit) {
+      final r = ramps[kind];
+      if (r == null || r.error != null) return '';
+      return '${r.capped ? '' : '~'}${r.limit} $unit${r.limit == 1 ? '' : 's'}';
+    }
+
+    return [part('tracks', 'track'), part('voices', 'voice'), part('effects', 'effect')].where((p) => p.isNotEmpty).join(' · ');
+  }
+
+  /// "Biggest cost: instruments and effects (62%), mostly Flagship", from the parts, else the costliest component.
+  String? get biggestCost {
+    final ps = parts;
+    if (ps.isNotEmpty) {
+      final top = ps.first;
+      final costly = holdingBack.where((c) => c.id != 'host').firstOrNull;
+      final mostly = top.id == 'devices' && costly != null ? ', mostly ${costly.name}' : '';
+      return 'Biggest cost: ${top.name.toLowerCase()} (${top.pct.round()}%)$mostly';
+    }
+    final c = holdingBack.firstOrNull;
+    return c == null ? null : 'Biggest cost: ${c.name} (${c.pct.round()}%)';
+  }
   SustainedResult? sustained;
 
   /// Why the run ended early (cancelled, thermal, battery saver), or null when it finished.
@@ -367,6 +450,11 @@ class StressResult {
         'scenarios': [for (final s in scenarios) s.toJson()],
         'costs_scenario': costsScenario,
         'costs': [for (final c in holdingBack) c.toJson()],
+        'parts_scenario': partsScenario,
+        'parts': [for (final p in parts) p.toJson()],
+        'parts_by_scenario': {
+          for (final e in partsByScenario.entries) e.key: [for (final p in e.value) p.toJson()],
+        },
         'costs_by_scenario': {
           for (final e in costsByScenario.entries) e.key: [for (final c in [...e.value]..sort((a, b) => b.pct.compareTo(a.pct))) c.toJson()],
         },
@@ -432,6 +520,116 @@ class StressResult {
     }
     return b.toString();
   }
+}
+
+/// The scenario features (contract API 30), in the order the results group them, with their plain names.
+const stressFeatures = {
+  'baseline': 'Baseline',
+  'instrument': 'Instruments',
+  'effect': 'Effects',
+  'routing': 'Folder routing',
+  'sends': 'Sends',
+  'automation': 'Automation',
+  'modulation': 'Modulation',
+  'voices': 'Voices',
+  'samples': 'Samples',
+  'audio': 'Audio tracks',
+  'metering': 'Meters',
+  'mix_pool': 'Mix pool',
+  'all': 'Whole songs',
+};
+
+/// A scenario's feature when the engine doesn't say (an API 29 engine): the contract's for the ids it had.
+String scenarioFeature(String id) {
+  const known = {
+    'empty': 'baseline', 'tail_floor': 'baseline', 'drums_kit': 'instrument', 'single_synth': 'instrument',
+    'single_sampler': 'instrument', 'single_drums': 'instrument', 'every_instrument': 'instrument',
+    'single_audio': 'audio', 'folders_shallow': 'routing', 'folders_deep': 'routing', 'sends_few': 'sends',
+    'sends_many': 'sends', 'sends_chained': 'sends', 'automation_light': 'automation', 'automation_dense': 'automation',
+    'modulation_dense': 'modulation', 'voice_storm': 'voices', 'sample_stream': 'samples', 'resample': 'samples',
+    'every_effect': 'effect', 'metering_heavy': 'metering', 'worst_all': 'all',
+  };
+  final k = known[id];
+  if (k != null) return k;
+  if (id.startsWith('flagship')) return 'instrument';
+  return 'all'; // song*, first_loop, three_tracks: whole songs
+}
+
+/// One engine part's share of a profiled scenario's process() time (contract API 30, section 2).
+class EnginePart {
+  const EnginePart({required this.id, required this.pct, this.meanUs = 0, this.p99Us = 0});
+  final String id;
+  final double pct, meanUs, p99Us;
+
+  /// The parts the engine reports, with their plain names and what each covers.
+  static const info = {
+    'mix': ('Mixing', 'Summing the tracks, gain and pan'),
+    'routing': ('Folder routing', 'Folder tracks and their buses'),
+    'sends': ('Sends', 'Send buses and what they feed'),
+    'automation': ('Automation and modulation', 'Reading automation lanes and modulation'),
+    'voices': ('Voice handling', 'Starting, stealing and releasing notes'),
+    'samples': ('Sample streaming', 'Reading audio clips and samples, and resampling them'),
+    'metering': ('Meters', 'Level meters and their peaks'),
+    'device_io': ('Audio device', 'Handing audio to and from the device (live runs only)'),
+    'mix_pool': ('Mix threads', 'Waiting for and handing out work to the mix threads'),
+    'master': ('Master chain', 'The master effects and the limiter'),
+    'devices': ('Instruments and effects', 'Every instrument\'s and effect\'s own processing'),
+    'other': ('Other', 'Everything else in a callback'),
+  };
+
+  String get name => info[id]?.$1 ?? (id.isEmpty ? 'Other' : '${id[0].toUpperCase()}${id.substring(1).replaceAll('_', ' ')}');
+  String get about => info[id]?.$2 ?? 'An engine part this version of the app doesn\'t know yet';
+
+  /// At most this many parts are read from one scenario (the contract has 12).
+  static const maxParts = 24;
+
+  /// The parts in [raw] (engine JSON): non-numbers read as 0, negatives and non-finite values as 0, shares capped
+  /// at 100%, ids at 32 characters, at most [maxParts], a repeated id once.
+  static List<EnginePart> parseList(Object? raw) {
+    if (raw is! List) return const [];
+    final out = <EnginePart>[];
+    final seen = <String>{};
+    for (final p in raw.whereType<Map>()) {
+      if (out.length >= maxParts) break;
+      final id = p['id'];
+      if (id is! String || id.isEmpty) continue;
+      final key = id.length > 32 ? id.substring(0, 32) : id;
+      if (!seen.add(key)) continue;
+      double n(String k, double max) {
+        final v = p[k];
+        final d = v is num ? v.toDouble() : 0.0;
+        return d.isFinite && d > 0 ? (d > max ? max : d) : 0;
+      }
+
+      out.add(EnginePart(id: key, pct: n('pct', 100), meanUs: n('mean_us', 1e7), p99Us: n('p99_us', 1e7)));
+    }
+    return out;
+  }
+
+  Map<String, Object?> toJson() => {'id': id, 'pct': _r1(pct), 'mean_us': _r1(meanUs), 'p99_us': _r1(p99Us)};
+}
+
+/// Plain tips for part [id] at a share of [pct] percent (the drill-down). Each is about the project, not settings.
+List<String> partTips(String id, double pct) {
+  final p = '${pct.round()}%';
+  if (pct < 5) return ['${EnginePart(id: id, pct: pct).name} costs $p: small, not worth changing a project for.'];
+  return switch (id) {
+    'mix' => ['Mixing costs $p; it grows with the number of tracks, so fewer tracks (or bounced ones) cost less.'],
+    'routing' => ['Folder routing costs $p; flatter folders (fewer levels inside each other) cost less.'],
+    'sends' => ['Sends cost $p; fewer sends, or folder tracks instead, cost less.'],
+    'automation' => ['Automation and modulation cost $p; fewer dense lanes, or slower modulation, cost less.'],
+    'voices' => ['Voice handling costs $p; fewer notes at once and shorter releases mean fewer voices to start and steal.'],
+    'samples' => ['Sample streaming costs $p; audio files at the project\'s sample rate skip resampling.'],
+    'metering' => ['Meters cost $p; that is the engine\'s own work, so there is little to change in a project.'],
+    'device_io' => ['The audio device costs $p; a larger buffer gives each callback more time.'],
+    'mix_pool' => ['The mix threads\' handoff costs $p; it pays off on big projects and can cost more than it saves on small ones.'],
+    'master' => ['The master chain costs $p; fewer master effects cost less.'],
+    'devices' => [
+        'Instruments and effects cost $p; the list below shows which.',
+        'Fewer copies of the costliest one, or a lighter setting of it, helps most.',
+      ],
+    _ => ['${EnginePart(id: id, pct: pct).name} costs $p.'],
+  };
 }
 
 /// The ten scenario ids section H2 and the relay know.

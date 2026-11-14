@@ -1,4 +1,4 @@
-# Engine tests on every push and pull request: Linux x64 and Arm64, Windows, a sanitizer build and a ThreadSanitizer run of the mix pool. The same reference renders, within their tolerances, everywhere; on one thread and on the mix pool, the same bits.
+# Engine tests on every push and pull request: Linux x64 and Arm64, Windows (clang-cl), a sanitizer build and a ThreadSanitizer run of the mix pool. The same reference renders, within their tolerances, everywhere; on one thread and on the mix pool, the same bits.
 name: Engine
 on:
   # Main and pull requests; a branch's own pushes run only through its pull request, so nothing runs twice
@@ -34,7 +34,8 @@ jobs:
         include:
           - { name: Linux x64, os: ubuntu-24.04, flags: "" }
           - { name: Linux Arm64, os: ubuntu-24.04-arm, flags: "" }
-          - { name: Windows x64, os: windows-2025, flags: "" }
+          # clang-cl (Visual Studio's ClangCL toolset, MSVC ABI): the shipped Windows engine's compiler (2026-11-13).
+          - { name: Windows x64 clang-cl, os: windows-2025, flags: "-T ClangCL" }
           - { name: Linux sanitizers, os: ubuntu-24.04, flags: "-DCAW_SANITIZE=ON -DCMAKE_BUILD_TYPE=Debug" }
     runs-on: ${{ matrix.os }}
     steps:
@@ -60,7 +61,9 @@ jobs:
         run: cmake -S engine -B engine/build -DCMAKE_BUILD_TYPE=Release ${{ matrix.flags }} -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
       - name: Configure (Windows)
         if: runner.os == 'Windows'
-        run: cmake -S engine -B engine/build -DCMAKE_BUILD_TYPE=Release ${{ matrix.flags }}
+        run: |
+          cmake --version
+          cmake -S engine -B engine/build ${{ matrix.flags }}
       - name: Build
         run: cmake --build engine/build --config Release --parallel
       - name: Test
@@ -94,3 +97,4 @@ jobs:
           engine/build-tsan/caw_tests input_
           engine/build-tsan/caw_tests fifo
           engine/build-tsan/caw_tests stress_  # the Benchmark: two engines profiling at once, cancel, ramps
+          engine/build-tsan/caw_tests component_bench  # the plug-in benchmark: sections on other threads, jobs

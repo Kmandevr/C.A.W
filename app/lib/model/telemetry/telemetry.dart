@@ -544,6 +544,17 @@ class Telemetry extends ChangeNotifier {
     s.maxClips = max(s.maxClips, clips);
   }
 
+  /// An audio-threads read while playing (caw_audio_threads, [Engine.audioThreads]): the callback's `core_kind` and
+  /// its `hint`; [hintSupported] says whether the platform has a scheduling hint at all (Android's ADPF).
+  void onAudioThreads(Map<String, Object?> threads, {required bool hintSupported}) {
+    final s = _collecting;
+    if (s == null || threads.isEmpty) return;
+    final kind = threads['core_kind'];
+    s.threads(
+        coreKind: kind is String ? kind : 'unknown',
+        hint: !hintSupported ? 'unsupported' : (threads['hint'] == true ? 'on' : 'off'));
+  }
+
   void onFrame(double totalMs) {
     final hz = app.refreshHz?.call() ?? 60;
     _collecting?.frame(totalMs, 1000 / (hz <= 0 ? 60 : hz));

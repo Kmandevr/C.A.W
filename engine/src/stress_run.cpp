@@ -28,16 +28,7 @@ bool scenarioProject(const std::string& id, const std::string& dir, ProjectSpec&
         error = "no scenario '" + id + "'";
         return false;
     }
-    if (id == "song8_extras") {  // writes two WAVs into the work folder
-        if (dir.empty()) {
-            error = "song8_extras needs a work folder";
-            return false;
-        }
-        out = typicalSong(true, dir, &error);
-        return error.empty();
-    }
-    out = s->make(dir);
-    return true;
+    return makeScenario(*s, dir, out, error);  // the WAV-writing ones need the work folder
 }
 
 // A fresh engine set up as the Benchmark measures: the quality asked, nothing shed, the mix pool as the app's live
@@ -157,7 +148,8 @@ int32_t LoadHistory::read(uint32_t from, float* out, int32_t max, uint32_t* next
 }
 
 int64_t timeCallbacks(Engine& e, int frames, int64_t calls, double* us, float* l, float* r, Progress* progress,
-                      LoadHistory* history, const std::atomic<int32_t>* cancel) noexcept {
+                      LoadHistory* history, const std::atomic<int32_t>* cancel, PartProfile* parts,
+                      uint64_t* partNs) noexcept {
     const double budgetUs = 1e6 * frames / e.sampleRate();
     const int64_t pointFrames = std::max<int64_t>(1, static_cast<int64_t>(e.sampleRate() / 10));  // a history point per 100 ms of audio
     int64_t framesInPoint = 0;
@@ -169,6 +161,12 @@ int64_t timeCallbacks(Engine& e, int frames, int64_t calls, double* us, float* l
         e.process(l, r, frames);
         const double took = std::chrono::duration<double, std::micro>(Clock::now() - t0).count();
         us[c] = took;
+        if (parts && partNs) {
+            for (int k = 0; k < kPartCount; ++k) {
+                partNs[c * kPartCount + k] = parts->ns[k];
+                parts->ns[k] = 0;
+            }
+        }
         e.reportLoad(took / budgetUs, frames, frames);  // as a device callback (caw_bench --mode auto)
         framesInPoint += frames;
         usInPoint += took;
@@ -234,6 +232,29 @@ ProjectSpec rampProject(Kind kind, int32_t n) {
     if (kind == Kind::RampTracks) return bigSong(n, false);  // the typical song's tracks, buses, master and LFOs
     if (kind == Kind::RampVoices) return flagshipVoices(n);
     return effectsChain(n);
+}
+
+std::vector<PartRow> partRows(const uint64_t* partNs, int64_t calls) {
+    std::vector<PartRow> rows;
+    if (!partNs || calls <= 0) return rows;
+    uint64_t all = 0;
+    for (int64_t i = 0; i < calls * kPartCount; ++i) all += partNs[i];
+    std::vector<double> us(static_cast<size_t>(calls));
+    for (int k = 0; k < kPartCount; ++k) {
+        uint64_t sum = 0;
+        for (int64_t c = 0; c < calls; ++c) {
+            const uint64_t v = partNs[c * kPartCount + k];
+            sum += v;
+            us[static_cast<size_t>(c)] = 1e-3 * static_cast<double>(v);
+        }
+        PartRow r;
+        r.part = static_cast<Part>(k);
+        r.pct = all > 0 ? 100.0 * static_cast<double>(sum) / static_cast<double>(all) : 0.0;
+        r.meanUs = 1e-3 * static_cast<double>(sum) / static_cast<double>(calls);
+        r.p99Us = stats(us, 0, us.size()).p99Us;
+        rows.push_back(r);
+    }
+    return rows;
 }
 
 std::vector<CostRow> profileCosts(const ChainProfile& profile, uint64_t totalNs, int64_t callbacks) {
@@ -353,8 +374,11 @@ RunResult run(const RunRequest& r, Progress& progress, LoadHistory* history, con
         profile = std::make_unique<ChainProfile>();
         e.setProfile(profile.get());
     }
+    std::vector<uint64_t> partNs(profile ? static_cast<size_t>(calls) * kPartCount : 0);
+    if (profile) profile->parts = PartProfile{};  // the warm-up's are not the timed span's
     readCore(out.coreStart, out.khzStart, out.maxKHz);
-    const int64_t n = timeCallbacks(e, r.frames, calls, us.data(), l.data(), rr.data(), &progress, history, cancel);
+    const int64_t n = timeCallbacks(e, r.frames, calls, us.data(), l.data(), rr.data(), &progress, history, cancel,
+                                    profile ? &profile->parts : nullptr, profile ? partNs.data() : nullptr);
     readCore(out.coreEnd, out.khzEnd, out.maxKHz);
     out.mixWorkers = e.mixWorkers();
     out.mixActive = e.mixActiveWorkers();
@@ -364,6 +388,7 @@ RunResult run(const RunRequest& r, Progress& progress, LoadHistory* history, con
         uint64_t totalNs = 0;
         for (int64_t c = 0; c < n; ++c) totalNs += static_cast<uint64_t>(us[static_cast<size_t>(c)] * 1000.0);
         out.costs = profileCosts(*profile, totalNs, n);
+        out.parts = partRows(partNs.data(), n);
     }
     out.ok = n == calls;
     out.stopReason = n == calls ? "done" : "cancelled";

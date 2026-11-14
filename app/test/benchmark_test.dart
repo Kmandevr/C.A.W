@@ -62,10 +62,24 @@ class FakeStress implements StressBackend {
           {'id': 'org.caw.reverb.pro', 'pct': 18.6, 'ran_pct': 100.0, 'instances': 2},
           {'id': 'com.example.mine', 'pct': 3.0, 'ran_pct': 100.0, 'instances': 1},
         ],
+        'parts': extra.containsKey('parts') ? extra['parts'] : fakeParts(r.scenario),
       };
     }
     return base;
   }
+}
+
+/// A profiled scenario's engine parts (API 30): song8's add up to 100%, others lean on sends or devices.
+List<Map<String, Object>> fakeParts(String scenario) {
+  final sends = scenario == 'song16' ? 31.0 : 8.0;
+  final devices = scenario == 'song16' ? 34.0 : 57.0;
+  final rows = {
+    'devices': devices, 'mix': 12.0, 'sends': sends, 'routing': 5.0, 'automation': 4.0, 'voices': 3.5, 'samples': 3.0,
+    'metering': 2.5, 'mix_pool': 2.0, 'master': 1.5, 'device_io': 0.0, 'other': 1.0,
+  };
+  return [
+    for (final e in rows.entries) {'id': e.key, 'pct': e.value, 'mean_us': 21.3 * e.value, 'p99_us': 30.1 * e.value},
+  ];
 }
 
 class _FakeJob implements StressJob {
@@ -275,6 +289,11 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('bench-quick')));
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
+    expect(find.byKey(const ValueKey('bench-verdict')), findsOneWidget);
+    await tester.ensureVisible(find.byKey(const ValueKey('bench-raw-toggle')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('bench-raw-toggle')));
+    await tester.pumpAndSettle();
     expect(find.text('Comfortable'), findsOneWidget);
     expect(find.text('Over budget'), findsOneWidget);
     expect(find.byKey(const ValueKey('bench-limits')), findsOneWidget);
@@ -298,7 +317,10 @@ void main() {
 
   test('with the engine: a short run through the worker pool (needs CAW_LIB)', () async {
     final scenarios = const EngineStress().scenarios();
-    expect([for (final s in scenarios) s.id], telemetryScenarioIds.toList());
+    // API 30: the ten telemetry knows first, then the feature scenarios (#197).
+    expect([for (final s in scenarios.take(10)) s.id], telemetryScenarioIds.toList());
+    expect(scenarios.length, 30);
+    expect(scenarios.map((s) => s.id), containsAll(['empty', 'folders_deep', 'sends_many', 'worst_all']));
     final job = const EngineStress().start(const StressRequest(scenario: 'three_tracks', seconds: 0.5));
     final r = await job.result;
     expect(r['ok'], isTrue);

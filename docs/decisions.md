@@ -6,6 +6,63 @@ updated: 2026-11-13
 
 # Decisions
 
+## 2026-11-13: 1.1.0 also holds play-ahead, AutoStacc and the store releases (owner)
+
+**Decision (owner, 2026-11-13):**
+- **Play-ahead rendering** (#191) moves from 1.2.0 into 1.1.0, built in this repository from the play-ahead plan. 1.2.0's contents are undecided.
+- **AutoStacc** becomes both C.A.W's download and update source and its store page (#221). The details depend on the owner.
+- **Stores:** 1.1.0 is published on Google Play and the iOS App Store (#222). The owner has neither account yet, so everything not tied to an account is prepared first.
+- **iOS:** the full DAW with every built-in instrument and effect, but no on-device C++ building or loading.
+
+## 2026-11-13: Clips are stored as MIDI; more 1.1.0 requirements; Windows engine on Clang (owner)
+
+**Decision (owner, 2026-11-13):**
+- **MIDI storage:** "It should store the MIDI. The text is only for creating MIDI through a text editor… MIDI is a lot better format than just the text." Projects will store MIDI clips as MIDI, with pattern text as an authoring view only (#216). This replaces the choice made on the owner's behalf in #158 (pattern text as storage).
+- **Also before 1.1.0:**
+  - routing extras: receives, parallel paths, drum multi-out (#217);
+  - safety and onboarding: format migrations, crash recovery, device loss, a tour and help (#218);
+  - sound design: drawn LFO shapes and a wavetable editor (#219);
+  - a clip launcher and S Pen precision (#220).
+- **Windows engine:** built with Clang (clang-cl) instead of MSVC (#199). **Built (2026-11-13, branch `b1-extras`, Claude's choices):** Visual Studio's ClangCL toolset (MSVC ABI, so the DLL loads beside the MSVC-built Flutter runner); the app builds the engine as its own CMake build (`ExternalProject` in `app/windows/CMakeLists.txt`, since a Visual Studio build has one toolset; the runner and plug-ins stay MSVC; `CAW_ENGINE_CLANG_CL=OFF` goes back to MSVC). The engine takes the Linux/Android flags through `/clang:` (`-O3`, `-ffp-contract=fast -fno-math-errno -fno-trapping-math -fno-signed-zeros -fassociative-math`); strict files negate each one, since `/fp:precise` alone does not. x86-64 baseline kept (no AVX2). **[Fact, CI logs 2026-11-13]** the `windows-2025` runner has Visual Studio 18 2026 with Clang 22.1.3 for ClangCL (CMake 4.4.5), not the Visual Studio 2022 its published image readme listed. Every engine test passes with it (Engine run [43505893182](https://github.com/Kmandevr/C.A.W/actions/runs/43505893182)); on one runner it is 12–17% faster than MSVC for songs and 44% for the heavy Flagship ([engine performance](engine-performance.md#a5-cpu-features)).
+- **Changelog:** a changelog from 1.0.0, in the app and on GitHub, starting with 1.0.2.
+
+## 2026-11-13: Benchmark 2, engine side: features, engine parts, the plug-in benchmark's checks (Claude, within the owner's #197)
+
+**Built:** C API 30 to the contract of #197 (the app builds against it): [engine](engine.md#the-benchmark), [SDK](native-module-sdk.md#benchmark-your-component).
+
+**Choices (Claude; the owner set what to cover, its look and "Checks + sections", the rest was left to what is best for the app):**
+- **Feature scenarios beside the ten**, not in caw_bench's suite (its CI tables stay comparable) and not in H2 (the relay knows ten ids). Their cheap sources are the engine's internal test tone, so a feature's own cost shows rather than an instrument's. `sends_many` sends each of 4 buses twice (pre and post) from 4 tracks: 32 sends with few buses, since a track has at most 8 sends and empty buses alone would make routing, not sends, the largest part.
+- **Parts are exclusive and add up**, one current at a time, switched by scopes (a null check each when not profiling). A folder bus claims the mix graph's sum of its children into its input (routing: that is what a folder does); summing into the master and each track's gain stay mix. The audio-clip player and the sampler are `samples` whole, the master chain `master`: so `devices` is instruments and effects on tracks and buses. Resolving a component's values (lanes, ramps, project modulation) is `automation`. A live run, not profiled, gives `device_io` and the rest as `other`.
+- **The plug-in benchmark's request** names a built-in id, or a library with the user's trust, and only Trusted opens one (refused before loading otherwise). It times a fresh instance per measurement at 48 kHz in 64-frame blocks, flush-to-zero on as the Engine runs it.
+- **Thresholds** (all on the device that runs it; a check whose costs stay under 0.5 % of a block passes as too cheap to matter, except allocations and subnormal output): allocations fail at any; denormals warn over 15 % slower unflushed or any subnormal output, fail over 50 %; cost per voice warn over 1.5 % of a block, fail over 6 % (16 voices fill the block); block size warn when a frame costs over 50 % more at 32 than at 512 frames, fail over 150 %; sample rate warn over 2.4 times the 48 kHz cost at 96 kHz (2 is linear), fail over 3.2; parameter changes graded by the extra as a share of a block (warn over 2 %, fail over 10 %), so many parameters aren't failed for their number; silence warns over 25 % of the working cost unless it sleeps. **[Assumption]** these suit a phone's budget; to check against the owner's first plug-ins.
+- **Allocations are counted only where the host can count them** (the test build's global `operator new`): a loaded library's own allocator and `malloc` can't be hooked portably in the app, so there the check warns as not measured instead of passing.
+- **Sections** come through a host extension (`caw.profile.v1`) the SDK's `create` asks for, recorded only on the bench's thread into 32 fixed slots, so a section left in shipped code costs a load and a branch. They are exclusive (a nested section's time comes off its parent's: the shares add up), after the audio review.
+- **After the security and audio reviews (2026-11-13):** trust is read when a plug-in is listed and again when its run starts (`NativeComponentManager.benchTrusted`: the current sources' choice, and a packaged build's own), and the binding sends Trusted only then; blocking or forgetting drops what the manager had loaded for it. The bench runs on its own thread, watched: a block past max(1 s, 100 times its budget) fails the job and that thread is abandoned, never joined, and a second bench fails fast instead of waiting. It still runs Trusted plug-ins in-process (a crash in one closes the app), said in the app and the docs, until the Isolated runner (#212).
+
+## 2026-11-13: The 1.1.0 requirements, built in batches (owner)
+
+**Decision (owner, 2026-11-13):**
+- **What goes in before 1.1.0:** every normal-DAW gap goes into the 1.1.0 requirements:
+  - plug-in hosting;
+  - audio stretching and editing;
+  - a tempo map, markers and sections;
+  - comping;
+  - freeze, bounce and consolidate;
+  - stem export;
+  - MIDI out and clock;
+  - app-wide undo;
+  - clip automation and VCA groups;
+  - a sample editor;
+  - a notation view;
+  - iOS and macOS builds.
+
+  Video sync stays off the roadmap.
+- **Releases:** batches ship as numbered patches, and 1.1.0 is the major update ("more will go into it").
+- **Plug-in hosting:** CLAP and VST3 on Windows and CLAP on Android, always behind the per-item Isolated, Trusted or Blocked choice. The foundation is built first, in the batches, but users don't see it; the feature is released in 1.1.0.
+- **Stretching:** Signalsmith Stretch. **[Assumption]** It is MIT-licensed; to be confirmed from its source before adoption.
+
+The plan is in [roadmap](roadmap.md) and #215.
+
 ## 2026-11-13: Low latency takes AAudio's own callback sizes; the Benchmark measures the app's figure (Claude, from the owner's S22+ run)
 
 **Decision:** where AAudio is given no callback size (Low latency, Auto while recording, any size on Android 11 and older), the output takes the stream's own sizes (miniaudio's `noFixedSizedCallback`) instead of asking for the burst and reopening. **Why:** miniaudio's fixed size fell back to the stream's whole capacity (about 1950 frames on the S22+) rendered inside one burst's callback, so Low latency dropped out under 100 % load; AAudio's documentation recommends its own sizes for the lowest latency, a reopen costs a gap and on Android 11 would not reach the stream at all, and `DeviceRender` renders any size (tested). The Benchmark's timed runs now run the mix pool on Auto after an untimed warm-up, and the live runs ask for the playing buffer and Low latency, so its numbers are what the app gets ([engine](engine.md#the-benchmark)). H2 and the C API (29) are unchanged; the new numbers stay in the local JSON.
@@ -35,7 +92,7 @@ The re-recorded references are `stress.cawref`'s `flagship_heavy` and `flagship_
 - **Tiers:** a tier's worst p99 at most 70 % of the budget is comfortable, at most 100 % tight, else over budget. **[Assumption]** 30 % headroom covers the UI, other apps and heat; worth checking on the S22+.
 - **Dropouts in H2:** a live run's (AAudio's XRun count, else its callbacks over budget) when that scenario ran live, else the timed callbacks over budget.
 - **`topCosts`:** components' shares averaged over the profiled songs, built-in ids only (the host's share and C++ components left out, rather than sent as "other").
-- **The profiler is per Engine**, carried to the chains in their `ChainTime` (no thread-local storage on the audio path: Android's emulated TLS can allocate; audio review, 2026-11-13), replacing the global pointer whose `slot()` was unsynchronised. A parallel mix uses its pool only when `wantsMixPool() && !profiling()`.
+- **The profiler is per Engine**, carried to the chains in their `ChainTime` (no thread-local storage on the audio path: Android's emulated TLS can allocate; audio review, 2026-11-13), replacing the global pointer whose `slot()` was unsynchronised. A parallel mix uses its pool only when `wantsMixPool()` and the call has no profile (the one it read at its start, so a change mid-callback never reaches workers).
 - **The live run keeps the device** (audio review, 2026-11-13): while its meter is installed, another engine's `caw_audio_start` is refused (safer than noticing too late), and a run whose callbacks stop for a second fails.
 - **Memory:** an Extreme scenario whose measured need (peak RSS growth on Linux x64 plus a third) passes the engine's work-memory budget is skipped and says so.
 - **Share** is Android's share sheet with the summary and the JSON (desktop: the clipboard); Save is the save picker.
@@ -276,7 +333,7 @@ The owner heard audio break on the Galaxy S22+ when another app used the microph
 - **Built, speed phase 5d "audio-thread scheduling and core-aware pool sizing" (2026-11-12; the owner's plan A1 and A6 in `docs/beta-readiness-plan.md`, Claude's choices within it; facts in [engine](engine.md), "Audio threads", numbers in [engine performance](engine-performance.md#5-parallel-mixer)):** all platform code behind `engine/src/thread_tuning.h` with one file per platform in `engine/platform/` (the architect's 5d plan), loaded at run time with a silent fallback. Choices: **(1)** a worker's priority is never above the callback's (a spinning worker above it could starve it on a shared core), so Linux gets `SCHED_FIFO` workers only under a real-time callback (one step lower) and otherwise none; Android workers get nice −19 (`THREAD_PRIORITY_URGENT_AUDIO`) under AAudio's `SCHED_FIFO` callback; Windows workers join MMCSS "Pro Audio" only when the callback did, and C.A.W now asks miniaudio to put its WASAPI thread there (`wasapi.usage`). **(2)** Workers keep to the fast cores (a mask) on a hybrid CPU; the callback is never pinned. **(3)** ADPF's calls run on the hint's own thread, the callback only stores its duration (the NDK reference does not say `reportActualWorkDuration` is safe on a real-time thread). **(4)** Pool size: the fast cores less the callback's, at most cores − 2 on 4 or fewer cores, at most 4; cores within 15% of the slowest count as little. **(5)** Auto weighs the callback's wait for workers against the workers' task time: one worker fewer while the wait is over 10% of the budget and longer than the workers worked (0.5 s), none means one thread for 10 s, one more back after 2 s of little wait; the serial switch leaves the wait out of the load. **(6)** rtkit (D-Bus) is not used on Linux: it needs libdbus, a new dependency (**[Proposal]**). No new dependency; C API 24.
 - **Built, speed A3 "the first callback after Play" (2026-11-13; Claude's choices; numbers in [engine performance](engine-performance.md#a3-the-first-callback-after-play)):** an instrument of built-ins is reset once when its chain is built (control thread; one with a loaded component is not, as the native ABI does not say reset may run off the audio thread) and `ComponentChain::reset` with nothing run since is a no-op; each component's values are resolved when built, and a block where only the play state changed keeps the values of a component no lane drives (a Play still clears knob overrides). The first callback after Play went from 2–8× the mean to 1.2–2.1× on the Bench, with no change to what is heard (every reference passes). Relies on the component contract that `reset` returns a component to the state `activate` left it in.
 - **Built, speed A4 (#133 item 2 finished, 2026-11-13):** `startPlay` and the stopped monitoring scan walk the in-use slot list, and solo is worked out once per Play instead of once per slot. Scans left over the capacity run once per event (Stop's end, a tempo change, ClearOverload, a device's all-notes-off, the previews' release-all), not per callback.
-- **Measured, not built: speed A5 "CPU features" (2026-11-13; numbers in [engine performance](engine-performance.md#a5-cpu-features)):** x86-64 builds target SSE2 and Arm64 builds NEON with FMA (their baseline). The whole engine at x86-64-v3 is 15–29% faster with GCC but no faster with MSVC `/arch:AVX2` (±2%), and MSVC, the shipped x86-64 compiler, is up to 2.3× slower than GCC on the same CPU. No runtime dispatch is built: where it would ship it gains nothing, `target_clones` would miss the engine-wide gain and MSVC lacks it, and a second AVX2 copy in one binary risks the one-definition rule. **[Open question for the owner]** build the Windows engine with clang-cl and the engine's flags, and then whether to ship x86-64-v3 as a second DLL chosen at load or as the minimum Windows CPU. A Windows x64 (MSVC) target joins the Bench workflow.
+- **Measured, not built: speed A5 "CPU features" (2026-11-13; numbers in [engine performance](engine-performance.md#a5-cpu-features)):** x86-64 builds target SSE2 and Arm64 builds NEON with FMA (their baseline). The whole engine at x86-64-v3 is 15–29% faster with GCC but no faster with MSVC `/arch:AVX2` (±2%), and MSVC, the shipped x86-64 compiler, is up to 2.3× slower than GCC on the same CPU. No runtime dispatch is built: where it would ship it gains nothing, `target_clones` would miss the engine-wide gain and MSVC lacks it, and a second AVX2 copy in one binary risks the one-definition rule. The Windows engine is built with clang-cl and the engine's flags since 2026-11-13 (owner, #199, above). **[Open question for the owner]** whether to ship x86-64-v3 as a second DLL chosen at load or as the minimum Windows CPU. A Windows x64 target (clang-cl since 2026-11-13) is in the Bench workflow.
 - **Process:** measure first (a CI bench on Linux and Android arm64 with a baseline in [engine performance](engine-performance.md)), then one pull request per phase (free wins, floating point, maths, precision and layout, parallel mixer), each with before/after numbers. Claude asks the owner before any audible change. Every measured gain is kept, however small, even under 1% in a rarely used path: the engine should run fast enough for the weakest device. The only reason to turn a gain down is that it makes the engine unstable (owner, 2026-11-12, replacing the earlier "ask when a phase gains less than 5%").
 
 ## 2026-11-12: Third-party native components in a serial lane (Claude, [Assumption])

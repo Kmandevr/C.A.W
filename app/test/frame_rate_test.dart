@@ -7,23 +7,52 @@ import 'dart:io';
 import 'package:caw/model/settings.dart';
 import 'package:caw/platform/display_rate.dart';
 import 'package:caw/ui/frame_rate.dart';
+import 'package:caw/ui/settings/display_diagnostics.dart';
 import 'package:caw/ui/settings/settings_page.dart';
 import 'package:caw/ui/theme.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+/// A screen: [rates] at one resolution (the active mode the lowest), or any [DisplayInfo].
 class _FakeDisplay implements DisplayRateDevice {
-  _FakeDisplay(this.rates, {this.canRequest = true});
-  final List<double> rates;
+  _FakeDisplay(List<double> rates, {this.canRequest = true})
+    : info = DisplayInfo(
+        modes: [for (final r in rates) DisplayMode(1080, 2340, r)],
+        active: rates.isEmpty ? null : DisplayMode(1080, 2340, rates.first),
+      );
+  _FakeDisplay.info(this.info) : canRequest = true;
+  DisplayInfo info;
   @override
   final bool canRequest;
   final asked = <double>[];
   @override
-  Future<List<double>> supportedRates() async => rates;
+  Future<DisplayInfo> read() async => info;
   @override
   Future<void> request(double hz) async => asked.add(hz);
 }
+
+// The Galaxy S22+'s panel (Samsung: FHD+ 2340×1080, up to 120 Hz) as One UI may list it. Which modes it lists in each
+// Motion smoothness setting is not checked on a device, so each plausible list is a case of its own.
+const _fhd = DisplayMode(1080, 2340, 60), _fhd120 = DisplayMode(1080, 2340, 120);
+const _qhd = DisplayMode(1440, 3120, 60), _qhd120 = DisplayMode(1440, 3120, 120);
+
+DisplayInfo _s22({
+  List<DisplayMode> modes = const [_fhd, _fhd120],
+  DisplayMode active = _fhd120,
+  List<double> alternatives = const [],
+  double current = 0,
+  bool powerSave = false,
+  int thermal = 0,
+}) => DisplayInfo(
+  modes: modes,
+  active: active,
+  alternatives: alternatives,
+  currentHz: current,
+  powerSave: powerSave,
+  thermal: thermal,
+  maker: 'samsung',
+);
 
 /// One-shot timers fired by hand: [fireDue] runs those due by [now].
 class _FakeTimers {
@@ -247,11 +276,20 @@ void main() {
     final row = find.byKey(const ValueKey('setting-performance.frameRate'));
     await tester.ensureVisible(row);
     await tester.pumpAndSettle();
-    expect(find.descendant(of: row, matching: find.textContaining('Lightweight caps it at 60 Hz')), findsOneWidget);
+    expect(
+      find.descendant(
+        of: row,
+        matching: find.textContaining(
+          '60 Hz (Lightweight) while anything moves; Balanced or Full Experience allow 120 Hz',
+        ),
+      ),
+      findsOneWidget,
+    );
+    expect(find.descendant(of: row, matching: find.text('Auto · 60 Hz')), findsOneWidget);
     expect(display.asked.last, 60);
     await s.update((x) => x.performanceMode = PerformanceMode.balanced);
     await tester.pumpAndSettle();
-    expect(find.descendant(of: row, matching: find.textContaining('caps it at')), findsNothing);
+    expect(find.descendant(of: row, matching: find.textContaining('Lightweight')), findsNothing);
     expect(display.asked.last, 120);
   });
 
@@ -270,23 +308,46 @@ void main() {
     expect(timers.pending, isEmpty);
   });
 
-  test('Android: the channel lists rates and passes requests; a failing channel stops asking', () async {
+  test('Android: the channel lists modes and passes requests; a failing channel stops asking', () async {
     const channel = MethodChannel('caw/display');
     final calls = <MethodCall>[];
     final messenger = TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
     messenger.setMockMethodCallHandler(channel, (call) async {
       calls.add(call);
-      return call.method == 'rates' ? {'rates': [120.0, 60.0, double.nan], 'current': 120.0} : {'modeId': 2, 'hz': 60.0};
+      return call.method == 'info'
+          ? {
+              'modes': [
+                {'w': 1080, 'h': 2340, 'hz': 120.0},
+                {'w': 1080, 'h': 2340, 'hz': 60.0},
+                {'w': 1440, 'h': 3120, 'hz': 60.0},
+                {'w': 1080, 'h': 2340, 'hz': double.nan},
+                'junk',
+                {'w': -1, 'h': 2, 'hz': 90.0},
+              ],
+              'active': {'w': 1080, 'h': 2340, 'hz': 60.0},
+              'alternatives': [120.0],
+              'current': 60.0,
+              'powerSave': true,
+              'thermal': 3,
+              'maker': 'samsung',
+            }
+          : {'modeId': 2, 'hz': 60.0};
     });
     addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
     final d = AndroidDisplayRate();
-    expect(await d.supportedRates(), [60.0, 120.0]);
+    final info = await d.read();
+    expect(info.rates, [60.0, 120.0], reason: 'the active resolution only, NaN and junk skipped');
+    expect(info.modes, hasLength(3));
+    expect(info.currentHz, 60);
+    expect(info.powerSave, isTrue);
+    expect(info.hot, isTrue);
+    expect(info.samsung, isTrue);
     await d.request(60);
-    expect(calls.last.arguments, {'hz': 60.0});
+    expect(calls.last.arguments, {'hz': 60.0, 'modeId': 0}, reason: 'no mode ids in this answer');
 
     messenger.setMockMethodCallHandler(channel, (call) async => throw PlatformException(code: 'x'));
     final broken = AndroidDisplayRate();
-    expect(await broken.supportedRates(), isEmpty);
+    expect((await broken.read()).rates, isEmpty);
     expect(broken.canRequest, isFalse);
   });
 
@@ -323,5 +384,271 @@ void main() {
     expect(c.cap, 120);
     expect(display.asked.last, 120);
     expect(find.descendant(of: row, matching: find.textContaining('At most 120 Hz')), findsOneWidget);
+  });
+
+  group('Galaxy S22+ (owner\'s bug, 2026-11-13: "this phone supports 120 but it says it\'s capped at 60")', () {
+    late _FakeTimers timers;
+    FrameRateController make(DisplayInfo info, {int profileCap = 0}) {
+      timers = _FakeTimers();
+      return FrameRateController(device: _FakeDisplay.info(info), now: () => timers.now, timer: timers.make)
+        ..setProfileCap(profileCap);
+    }
+
+    FrameRateStatus status(
+      FrameRateController c, [
+      PerformanceMode m = PerformanceMode.balanced,
+      bool bySelf = false,
+    ]) => c.status(profile: m.label, profileBySelf: bySelf);
+
+    test('Adaptive, 60 and 120 at FHD+: Auto asks for 120 and says nothing holds it', () async {
+      for (final active in [_fhd, _fhd120]) {
+        final c = make(_s22(active: active));
+        await c.start(attach: false);
+        expect(c.rates, [60, 120]);
+        expect((c.device as _FakeDisplay).asked.first, 120, reason: 'active $active');
+        expect(status(c).autoLabel, 'Auto');
+        expect(status(c).subtitle, contains('Up to 120 Hz while anything moves, 60 Hz when still'));
+        c.dispose();
+      }
+    });
+
+    test('60 and 120 at each resolution: the current one\'s rates, 120 either way', () async {
+      for (final active in [_fhd, _qhd, _qhd120]) {
+        final c = make(_s22(modes: const [_fhd, _fhd120, _qhd, _qhd120], active: active));
+        await c.start(attach: false);
+        expect(c.rates, [60, 120], reason: 'active $active');
+        expect(c.info.fasterElsewhere, isNull);
+        expect((c.device as _FakeDisplay).asked.first, 120);
+        c.dispose();
+      }
+    });
+
+    test('120 only at another resolution: 60 here, and the row says where 120 is', () async {
+      final c = make(_s22(modes: const [_fhd, _fhd120, _qhd], active: _qhd));
+      await c.start(attach: false);
+      expect(c.rates, [60]);
+      final s = status(c);
+      expect(s.subtitle, contains('120 Hz is offered only at 1080×2340'));
+      expect(s.autoLabel, 'Auto · 60 Hz');
+      expect(s.limit, 'resolution');
+      c.dispose();
+    });
+
+    test('Adaptive listing only the active mode: its alternatives still give 120', () async {
+      final c = make(_s22(modes: const [_fhd], active: _fhd, alternatives: const [120]));
+      await c.start(attach: false);
+      expect(c.rates, [60, 120]);
+      expect((c.device as _FakeDisplay).asked.first, 120);
+      c.dispose();
+    });
+
+    test('read while idle at 60: the current rate never limits the rates', () async {
+      final c = make(_s22(active: _fhd, current: 60));
+      await c.start(attach: false);
+      expect(c.rates, [60, 120]);
+      timers.advance(const Duration(seconds: 2));
+      expect(c.idle, isTrue);
+      expect(status(c).autoLabel, 'Auto', reason: 'idle: 60 is the app\'s own drop');
+      c.dispose();
+    });
+
+    test('Standard: only 60 listed, and the row names Motion smoothness', () async {
+      final c = make(_s22(modes: const [_fhd], active: _fhd));
+      await c.start(attach: false);
+      final s = status(c);
+      expect(s.autoLabel, 'Auto · 60 Hz');
+      expect(s.limit, 'Motion smoothness');
+      expect(s.subtitle, contains('Motion smoothness is probably Standard; Adaptive allows 120 Hz'));
+      c.dispose();
+    });
+
+    test('battery saver: named as the reason', () async {
+      final c = make(_s22(modes: const [_fhd], active: _fhd, powerSave: true));
+      await c.start(attach: false);
+      expect(status(c).limit, 'battery saver');
+      expect(status(c).subtitle, contains('60 Hz: battery saver is on and the phone offers no more'));
+      c.dispose();
+    });
+
+    test('120 listed but the screen held at 60 while moving: says so, with the likely reason', () async {
+      for (final (info, why) in [
+        (_s22(current: 60), 'check Samsung\'s Motion smoothness'),
+        (_s22(current: 60, powerSave: true), 'battery saver'),
+        (_s22(current: 60, thermal: DisplayInfo.severe), 'the phone is hot'),
+      ]) {
+        final c = make(info);
+        await c.start(attach: false);
+        final s = status(c);
+        expect(s.subtitle, contains('Asked for 120 Hz, the screen runs at 60 Hz: $why'));
+        expect(s.autoLabel, 'Auto · 60 Hz');
+        expect(s.limit, why);
+        c.dispose();
+      }
+      final ok = make(_s22(current: 120));
+      await ok.start(attach: false);
+      expect(status(ok).autoLabel, 'Auto');
+      ok.dispose();
+    });
+
+    test(
+      'each profile: Full and Balanced 120, Lightweight 60 and says so, Minimal the lowest the screen has',
+      () async {
+        final s = Settings();
+        final c = make(_s22());
+        FrameRateController.current = c;
+        addTearDown(() => FrameRateController.current = null);
+        await c.start(attach: false);
+        final got = <PerformanceMode, (double, String)>{};
+        for (final m in PerformanceMode.values) {
+          await s.update((x) => x.performanceMode = m);
+          got[m] = (c.movingRate, status(c, m).limit ?? '');
+        }
+        expect(got, {
+          PerformanceMode.fullExperience: (120.0, ''),
+          PerformanceMode.balanced: (120.0, ''),
+          PerformanceMode.lightweight: (60.0, 'Lightweight'),
+          PerformanceMode.minimal: (60.0, 'Minimal'),
+        });
+        expect(status(c, PerformanceMode.minimal).subtitle, contains('Balanced or Full Experience allow 120 Hz'));
+        c.dispose();
+      },
+    );
+
+    test('Lightweight turned on by an overload says so; choosing a profile clears it, and it is saved', () async {
+      final c = make(_s22(), profileCap: 60);
+      await c.start(attach: false);
+      expect(
+        status(c, PerformanceMode.lightweight, true).subtitle,
+        startsWith('60 Hz (Lightweight, turned on by itself after an audio overload) while anything moves'),
+      );
+      final s = Settings()
+        ..performanceMode = PerformanceMode.lightweight
+        ..lightBySelf = true;
+      final back = Settings()..fromJson(s.toJson());
+      expect(back.lightBySelf, isTrue);
+      expect((Settings()..fromJson({...s.toJson(), 'performance_mode': 'balanced'})).lightBySelf, isFalse);
+      c.dispose();
+    });
+
+    test('a fixed 120 cap on the S22+: 120, and 60 under Lightweight with the reason', () async {
+      final c = make(_s22());
+      await c.start(attach: false);
+      c.setCap(120);
+      expect(status(c).subtitle, startsWith('At most 120 Hz everywhere'));
+      c.setProfileCap(60);
+      expect(
+        status(c, PerformanceMode.lightweight).subtitle,
+        startsWith(
+          'At most 60 Hz (Lightweight) everywhere, playback included; Balanced or Full Experience allow 120 Hz',
+        ),
+      );
+      c.dispose();
+    });
+
+    test('Standard turned to Adaptive: a refresh picks 120 up', () async {
+      final c = make(_s22(modes: const [_fhd], active: _fhd));
+      final d = c.device as _FakeDisplay;
+      await c.start(attach: false);
+      expect(c.rates, [60]);
+      d.info = _s22();
+      await c.refresh();
+      expect(c.rates, [60, 120]);
+      expect(d.asked.last, 120);
+      c.dispose();
+    });
+  });
+
+  group('LTPO/VRR: every mode reports 60, 120 only among its alternatives (owner, 2026-11-13)', () {
+    for (final (name, alts, idle) in [
+      ('alternatives [120]', const [120.0], 60.0),
+      ('alternatives [48, 96, 120]', const [48.0, 96.0, 120.0], 48.0),
+    ]) {
+      test('one mode at 1080×2340@60, $name: Auto asks for 120 by rate and the row says so', () async {
+        final m = DisplayMode(1080, 2340, 60, id: 1, alternatives: alts);
+        final info = DisplayInfo(modes: [m], active: m, currentHz: 120, maker: 'samsung');
+        final timers = _FakeTimers();
+        final d = _FakeDisplay.info(info);
+        final c = FrameRateController(device: d, now: () => timers.now, timer: timers.make);
+        await c.start(attach: false);
+        expect(c.rates.last, 120);
+        expect(c.choices, contains(120));
+        expect(d.asked.first, 120);
+        expect(info.modeFor(120), 0, reason: 'no mode has 120 of its own: preferredRefreshRate alone');
+        expect(info.modeFor(60), 1);
+        final s = c.status(profile: 'Balanced');
+        expect(s.autoLabel, 'Auto');
+        expect(s.subtitle, startsWith('Up to 120 Hz while anything moves, ${idle.round()} Hz when still'));
+        expect(s.subtitle, isNot(contains('offers no more')));
+        timers.advance(const Duration(seconds: 2));
+        expect(d.asked.last, idle);
+        c.dispose();
+      });
+    }
+
+    test('Android: the request names mode 0 for an alternative-only rate, the mode\'s id otherwise', () async {
+      const channel = MethodChannel('caw/display');
+      final calls = <MethodCall>[];
+      final messenger = TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+      messenger.setMockMethodCallHandler(channel, (call) async {
+        calls.add(call);
+        return call.method == 'info'
+            ? {
+                'modes': [
+                  {'id': 1, 'w': 1080, 'h': 2340, 'hz': 60.0, 'alt': [48.0, 96.0, 120.0]},
+                ],
+                'active': {'id': 1, 'w': 1080, 'h': 2340, 'hz': 60.0, 'alt': [48.0, 96.0, 120.0]},
+                'current': 60.0,
+                'maker': 'samsung',
+              }
+            : {'modeId': 0, 'hz': 120.0};
+      });
+      addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
+      final d = AndroidDisplayRate();
+      final c = FrameRateController(device: d, timer: _FakeTimers().make);
+      await c.start(attach: false);
+      expect(c.rates, [48, 60, 96, 120]);
+      expect(calls.last.arguments, {'hz': 120.0, 'modeId': 0});
+      await d.request(60);
+      expect(calls.last.arguments, {'hz': 60.0, 'modeId': 1});
+      await d.request(0);
+      expect(calls.last.arguments, {'hz': 0.0, 'modeId': 0});
+      c.dispose();
+    });
+
+    testWidgets('Engine diagnostics\' Display modes block shows the raw read and copies it', (tester) async {
+      const m = DisplayMode(1080, 2340, 60, id: 1, alternatives: [48, 96, 120]);
+      final d = _FakeDisplay.info(const DisplayInfo(
+          modes: [m, DisplayMode(1440, 3088, 60, id: 2)], active: m, currentHz: 60, powerSave: true, thermal: 1,
+          maker: 'samsung'));
+      final c = FrameRateController(device: d, timer: _FakeTimers().make);
+      addTearDown(c.dispose);
+      await c.start(attach: false);
+      String? copied;
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(SystemChannels.platform, (call) async {
+        if (call.method == 'Clipboard.setData') copied = (call.arguments as Map)['text'] as String;
+        return null;
+      });
+      addTearDown(() => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(SystemChannels.platform, null));
+      await tester.pumpWidget(MaterialApp(theme: Neon.theme(), home: Scaffold(body: DisplayModesPanel(controller: c))));
+      await tester.pumpAndSettle();
+      final text = (tester.widget<SelectableText>(find.byKey(const ValueKey('display-modes-text')))).data!;
+      for (final line in [
+        'Display modes (2):',
+        '#1 1080×2340 @ 60 Hz (alternatives 48, 96, 120 Hz)  [active]',
+        '#2 1440×3088 @ 60 Hz',
+        'Current rate: 60 Hz',
+        'Asked for: 120 Hz',
+        'Rates offered here: 48, 60, 96, 120 Hz',
+        'Battery saver: on',
+        'Thermal status: 1',
+        'Manufacturer: samsung',
+      ]) {
+        expect(text, contains(line));
+      }
+      await tester.tap(find.byKey(const ValueKey('display-modes-copy')));
+      await tester.pumpAndSettle();
+      expect(copied, text);
+      await tester.pump(const Duration(seconds: 5)); // the snack bar's own timer
+    });
   });
 }

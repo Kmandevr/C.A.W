@@ -711,7 +711,7 @@ void Engine::setMixThreadsForTest(int workers) noexcept {
 }
 
 // Audio thread, once per callback: whether this callback's chunks run the graph with the pool. The caller also
-// leaves a profiling engine serial (process(): `wantsMixPool() && !profiling()`): a ChainProfile's slots are filled by
+// leaves a profiling engine serial (process(): `wantsMixPool() && !chunkProfile_`): a ChainProfile's slots are filled by
 // one thread at a time.
 bool Engine::wantsMixPool() const noexcept {
     if (!pool_) return false;
@@ -3755,20 +3755,27 @@ void Engine::runInstrument(Slot& s, int m) noexcept {
     }
     if (s.instrument) {
         NoteEvents& notes = *s.instrument->notes();
-        if (!previewChunk_) instrumentNotes(s, notes, m);
-        if (midiPendingCount_ > 0) feedDeviceMidi(s, notes, m);
-        instrumentMotion(notes, m);
-        if (modulation_->listens(s.index)) modulation_->tapNotes(s.index, notes.events(), notes.count());  // #161
-        // Per-note FX (#127, note_fx_host.cpp): the host places this block's notes in slots and hands the
-        // instrument its voice bus; each lane runs through its slot inside the instrument's block.
         NoteFxHost* noteFx = noteFx_->forSlot(s.index);
-        if (noteFx) {
-            notes.sort();
-            s.instrument->setVoices(noteFx->begin(notes.events(), notes.count(), static_cast<uint32_t>(m), &time,
-                modulation_->forChain(s.index, ModChainKind::NoteFx, noteFx->modChain(), 2), quality()));
+        {
+            const PartScope voices(parts(), Part::Voices);  // the Benchmark's parts (engine_parts.h)
+            if (!previewChunk_) instrumentNotes(s, notes, m);
+            if (midiPendingCount_ > 0) feedDeviceMidi(s, notes, m);
+            instrumentMotion(notes, m);
+            if (modulation_->listens(s.index)) modulation_->tapNotes(s.index, notes.events(), notes.count());  // #161
+            // Per-note FX (#127, note_fx_host.cpp): the host places this block's notes in slots and hands the
+            // instrument its voice bus; each lane runs through its slot inside the instrument's block.
+            if (noteFx) {
+                notes.sort();
+                s.instrument->setVoices(noteFx->begin(notes.events(), notes.count(), static_cast<uint32_t>(m), &time,
+                    modulation_->forChain(s.index, ModChainKind::NoteFx, noteFx->modChain(), 2), quality()));
+            }
         }
-        s.instrument->process(s.instL, s.instR, static_cast<uint32_t>(m), sr_, &time);
+        {
+            const PartScope devices(parts(), Part::Devices);
+            s.instrument->process(s.instL, s.instR, static_cast<uint32_t>(m), sr_, &time);
+        }
         if (noteFx) {
+            const PartScope voices(parts(), Part::Voices);
             s.instrument->setVoices(nullptr);
             noteFx->end(static_cast<uint32_t>(m));
         }
@@ -3785,6 +3792,7 @@ void Engine::runInstrument(Slot& s, int m) noexcept {
     if (s.instrumentFading) {
         ChainTime fadeTime = time;
         fadeTime.modulation = modulation_->forChain(s.index, ModChainKind::Instrument, s.instrumentFading, 1);
+        const PartScope devices(parts(), Part::Devices);
         s.instrumentFading->process(s.fadeL, s.fadeR, static_cast<uint32_t>(m), sr_, &fadeTime);
     } else {
         std::fill_n(s.fadeL, m, 0.0f);
@@ -3954,12 +3962,19 @@ int Engine::processChunk(float* l, float* r, int maxFrames) noexcept {
     audioIn_->chunk(tapAt_, m, g_, playing_ && !previewChunk_);  // monitoring frames and the recorder's input
     ++chunkId_;
     // Project modulation (#161): due modulator blocks and every target's offsets, before any target runs.
-    modulation_->beginChunk(static_cast<uint32_t>(m), g_, stepLen_, bpm_, static_cast<uint32_t>(beatsPerBar_),
-                            playing_ && !previewChunk_, modPlays_, chunkId_, chunkProfile_);
-    noteFx_->beginChunk();  // per-note FX (#127): a new plan
+    {
+        const PartScope automation(parts(), Part::Automation);
+        modulation_->beginChunk(static_cast<uint32_t>(m), g_, stepLen_, bpm_, static_cast<uint32_t>(beatsPerBar_),
+                                playing_ && !previewChunk_, modPlays_, chunkId_, chunkProfile_);
+    }
+    {
+        const PartScope voices(parts(), Part::Voices);
+        noteFx_->beginChunk();  // per-note FX (#127): a new plan
+    }
     // One graph runs the mix: each track's node, each folder bus after its children (and after every send and
     // key into it), then the master stage. Routing changes only between chunks.
     if (routingDirty_) {
+        const PartScope routing(parts(), Part::Routing);
         routingDirty_ = false;
         updateRouting();
     }
@@ -3969,6 +3984,7 @@ int Engine::processChunk(float* l, float* r, int maxFrames) noexcept {
     // one with nothing to run this chunk (silent or idle: it only writes zeros), so a level with one busy node isn't
     // handed to the pool for nothing.
     if (mixParallel_) {
+        const PartScope pool(parts(), Part::MixPool);
         MixGraph& g = *mixGraph_;
         for (int k = 0; k < liveCount_; ++k) {
             const int i = live_[k];
@@ -3982,8 +3998,13 @@ int Engine::processChunk(float* l, float* r, int maxFrames) noexcept {
         mixGraph_->executor.setParallelRunner(nullptr);
     }
     float* outputs[2] = {l, r};
-    const bool ran = mixGraph_->executor.process(ConstChannelBufferView{}, ChannelBufferView{outputs, 2, static_cast<uint32_t>(m)},
-                                                 static_cast<uint32_t>(m));
+    bool ran;
+    {
+        const PartScope mix(parts(), Part::Mix);  // the graph's sums; each node claims its own parts
+        if (PartProfile* p = parts()) p->mark = p->last;  // a folder bus first in the graph claims from here
+        ran = mixGraph_->executor.process(ConstChannelBufferView{}, ChannelBufferView{outputs, 2, static_cast<uint32_t>(m)},
+                                          static_cast<uint32_t>(m));
+    }
     if (mixGraph_->executor.parallelLevelsRun() != 0) poolUsed_ = true;
     flushRetires();  // what the nodes handed back, now that nothing in the graph reads it
     if (!ran) {
@@ -4154,6 +4175,7 @@ void Engine::updateRouting() noexcept {
 
 // A track's latency compensation, with the crossfade of a delay change.
 void Engine::runDelay(Slot& s, float* outL, float* outR, int m) noexcept {
+    const PartScope routing(parts(), Part::Routing);  // latency compensation (engine_parts.h)
     if (s.delayStale) {  // it held the song's last frames from before a stop or a silence
         if (s.delay) s.delay->clear();
         Retired r;
@@ -4195,6 +4217,7 @@ void Engine::runDelay(Slot& s, float* outL, float* outR, int m) noexcept {
 
 // A slot's native inserts in place, crossfading from a replaced chain (or the dry signal) over 20 ms.
 void Engine::runInserts(Slot& s, float* L, float* R, int m) noexcept {
+    const PartScope devices(parts(), Part::Devices);
     ComponentChain* const inserts = s.inserts;
     const bool fading = s.insertsFadeLeft > 0;
     // A tail frozen while the slot was silent must not play on when it sounds again.
@@ -4242,6 +4265,7 @@ void Engine::runInserts(Slot& s, float* L, float* R, int m) noexcept {
 // the destination's input for this chunk. `bus`: the slot is a folder bus (its pan is a balance).
 void Engine::runRoutes(Slot& s, const float* preL, const float* preR, const float* postL, const float* postR, int m,
                        bool silenced, bool bus) noexcept {
+    const PartScope sends(parts(), Part::Sends);
     SendTable& t = *s.sends;
     // The fader's volume and pan per frame, for post keys (worked out only when some route needs them).
     double faderL[kBlock], faderR[kBlock];
@@ -4354,6 +4378,8 @@ void Engine::runRoutes(Slot& s, const float* preL, const float* preR, const floa
 // arrives; a key into its component's key, with the source's notes merged by frame. Returns whether a send arrived.
 bool Engine::pullRoutes(Slot& d, int m) noexcept {
     const MixGraph& g = *mixGraph_;
+    if (g.inCount[d.index] == 0) return false;  // nothing routed in (the usual case)
+    const PartScope sends(parts(), Part::Sends);
     bool received = false;
     for (int j = g.inFirst[d.index], end = j + g.inCount[d.index]; j < end; ++j) {
         const SendTable& t = *g.inRoutes[j].table;
@@ -4428,6 +4454,7 @@ uint32_t Engine::keyNotes(const Slot& s, int m, Event* out, uint32_t max) const 
 
 // A playing track's output: the seam and swap crossfades of its lanes, then gain and pan.
 void Engine::runTrackNode(int slot, float* outL, float* outR, int m) noexcept {
+    const NodeMark node(parts());  // the Benchmark's parts: the graph's work after this node is the next node's
     Slot& s = slotAt(slot);
     if (s.mode != Slot::Mode::Play) {
         std::fill_n(outL, m, 0.0f);
@@ -4465,6 +4492,7 @@ void Engine::runTrackNode(int slot, float* outL, float* outR, int m) noexcept {
         // (+0 times gains that are not negative), without its sums.
         std::fill_n(outL, m, 0.0f);
         std::fill_n(outR, m, 0.0f);
+        const PartScope metering(parts(), Part::Metering);  // the scope
         for (int i = 0; i < m;) {
             const int run = std::min(m - i, kScopeSize - sp);
             for (int k = 0; k < run; ++k) s.scope[sp + k].store(0.0f, std::memory_order_relaxed);
@@ -4487,6 +4515,7 @@ void Engine::runTrackNode(int slot, float* outL, float* outR, int m) noexcept {
             level[i] = static_cast<float>(al < ar ? ar : al);
             mid[i] = static_cast<float>(0.5 * (vl + vr));
         }
+        const PartScope metering(parts(), Part::Metering);  // the meter's peaks and the scope
         peakL = peakAbs(outL, m);
         peakR = peakAbs(outR, m);
         sig = peakAbs(level, m);
@@ -4530,11 +4559,17 @@ void Engine::runTrackNode(int slot, float* outL, float* outR, int m) noexcept {
         sp = (sp + 1) % kScopeSize;
     }
     s.scopePos.store(sp, std::memory_order_release);
-    storeMax(s.peakL, peakL);
-    storeMax(s.peakR, peakR);
-    s.correlation.process(outL, outR, m);
+    {
+        const PartScope metering(parts(), Part::Metering);
+        storeMax(s.peakL, peakL);
+        storeMax(s.peakR, peakR);
+        s.correlation.process(outL, outR, m);
+    }
     // A modulator hears this track (#161): after its effects, and after the fader.
-    if (modulation_->listens(slot)) modulation_->tapAudio(slot, s.insL, s.insR, outL, outR, static_cast<uint32_t>(m));
+    if (modulation_->listens(slot)) {
+        const PartScope automation(parts(), Part::Automation);
+        modulation_->tapAudio(slot, s.insL, s.insR, outL, outR, static_cast<uint32_t>(m));
+    }
     if (s.sends && s.sends->count > 0) runRoutes(s, s.insL, s.insR, outL, outR, m, !(target > 0.0), false);
     if (s.delay || s.delayFadeLeft > 0) runDelay(s, outL, outR, m);  // in time where it meets the others
     if (s.tapL) {  // an offline stem: what the track sends on, as it meets the others
@@ -4553,12 +4588,15 @@ void Engine::runTrackNode(int slot, float* outL, float* outR, int m) noexcept {
 // A folder bus: its children arrive summed in float on the graph's summing input, and sends into it in its own
 // input (pullRoutes). Then its inserts, volume and pan, its sends, and its latency compensation.
 void Engine::runBusNode(int slot, const float* inL, const float* inR, float* outL, float* outR, int m) noexcept {
+    const NodeMark node(parts());  // the Benchmark's parts: the graph's work after this node is the next node's
     Slot& s = slotAt(slot);
     if (s.mode != Slot::Mode::Bus) {
         std::fill_n(outL, m, 0.0f);
         std::fill_n(outR, m, 0.0f);
         return;
     }
+    // A folder bus (engine_parts.h), with its children's sum into its input; its effects, sends and meters apart.
+    const PartScope routing(parts(), Part::Routing, true);
     const double target = slotTarget(s);
     const bool received = pullRoutes(s, m);  // sends into its input, keys into its inserts
     const bool inserts = s.inserts || s.insertsFadeLeft > 0;
@@ -4635,12 +4673,17 @@ void Engine::runBusNode(int slot, const float* inL, const float* inR, float* out
             outR[i] *= g;
         }
     }
-    if (modulation_->listens(slot))  // a modulator hears this bus (#161)
+    if (modulation_->listens(slot)) {  // a modulator hears this bus (#161)
+        const PartScope automation(parts(), Part::Automation);
         modulation_->tapAudio(slot, received || inserts || routes ? s.insL : inL, received || inserts || routes ? s.insR : inR,
                               outL, outR, static_cast<uint32_t>(m));
-    storeMax(s.peakL, peakL);  // a folder's meter: its mix after volume and pan
-    storeMax(s.peakR, peakR);
-    s.correlation.process(outL, outR, m);
+    }
+    {
+        const PartScope metering(parts(), Part::Metering);
+        storeMax(s.peakL, peakL);  // a folder's meter: its mix after volume and pan
+        storeMax(s.peakR, peakR);
+        s.correlation.process(outL, outR, m);
+    }
     s.previewQuiet = std::max(peakL, peakR) > kPreviewQuiet ? 0 : s.previewQuiet + m;
     if (routes) runRoutes(s, s.insL, s.insR, outL, outR, m, !(target > 0.0), true);
     if (s.delay || s.delayFadeLeft > 0) runDelay(s, outL, outR, m);  // in time where it meets the others
@@ -4684,6 +4727,7 @@ void Engine::runBusNode(int slot, const float* inL, const float* inR, float* out
 static inline double settleDc(double x, double y) noexcept { return x == 0.0 && std::fabs(y) < 1e-12 ? 0.0 : y; }
 
 void Engine::runMasterNode(const float* inL, const float* inR, float* outL, float* outR, int m) noexcept {
+    const PartScope master(parts(), Part::Master);  // the master stage (engine_parts.h); its meters apart
     // Master order: gain/DC block, trusted native stereo effects, safety limiter last.
     const double R = 1.0 - kTwoPi * 5.0 / sr_;
     const double rel = detExp(-1.0 / (0.1 * sr_));
@@ -4834,6 +4878,7 @@ void Engine::runMasterNode(const float* inL, const float* inR, float* outL, floa
 
     masterQuiet_ = std::max(pl, pr) > kPreviewQuiet ? 0 : masterQuiet_ + m;  // for the master chain's tail
     masterScopePos_.store(sp, std::memory_order_release);
+    const PartScope metering(parts(), Part::Metering);
     storeMax(peakL_, pl);
     storeMax(peakR_, pr);
     masterCorrelation_.process(outL, outR, m);
@@ -4924,6 +4969,7 @@ void Engine::process(float* left, float* right, int frames) noexcept {
     const ScopedFlushDenormals flushDenormals;  // live callbacks, exports and renders alike (fp_mode.h)
     // This engine's profile (null: none) for this call; every chain gets it in its ChainTime (setProfile).
     chunkProfile_ = profile_.load(std::memory_order_acquire);
+    if (PartProfile* p = parts()) p->begin();  // the Benchmark's parts: from here to the end of this call
     // Speed phase 5d: this call's own time, which Auto splits into the wait for workers and the rest (reportLoad).
     const auto processStart = pool_ ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
     // Whether any layer is soloed, worked out once per callback rather than once per layer and block.
@@ -4939,8 +4985,11 @@ void Engine::process(float* left, float* right, int frames) noexcept {
         waitAvg_ = workAvg_ = 0;
         tailPool_ = tailPoolWeight_ = tailSerial_ = tailSerialWeight_ = tailPoolSeconds_ = tailOverSeconds_ = 0;
     }
-    mixParallel_ = wantsMixPool() && !profiling();  // the Benchmark's profile: serial (setProfile)
+    // The Benchmark's profile: serial (setProfile), by the profile this call read, so a profile set or cleared
+    // meanwhile never has workers filling it.
+    mixParallel_ = wantsMixPool() && !chunkProfile_;
     if (pool_) {
+        const PartScope pool(parts(), Part::MixPool);
         const bool idle = !mixParallel_ || (!playing_ && !previewing_ && countInLeft_ == 0);
         pool_->park(idle);
         // Only when the last callback handed the pool a level: a project whose levels have one busy node each
@@ -5033,11 +5082,16 @@ void Engine::process(float* left, float* right, int frames) noexcept {
     playingFlag_.store(playing_, std::memory_order_relaxed);
     posFlag_.store(g_, std::memory_order_relaxed);
     if (pool_) {
-        pool_->endCallback();  // the workers spin a little longer, then sleep until the next callback
+        {
+            const PartScope pool(parts(), Part::MixPool);
+            pool_->endCallback();  // the workers spin a little longer, then sleep until the next callback
+        }
         processNs_ += std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - processStart).count();
     }
     poolUsedLast_ = poolUsed_;
     poolUsed_ = false;
+    if (PartProfile* p = parts()) p->end();
+    chunkProfile_ = nullptr;  // only this call fills it: nothing after (a stray scope) can reach a profile now unset
 }
 
 // Shedding (the device ran out of time) and its recovery, by time rather than callbacks, so any callback size

@@ -47,6 +47,7 @@ List<StressStep> stressPlan(StressPlanKind kind, List<StressScenarioInfo> scenar
   final plain = full ? 4.0 : 1.5, rampStep = full ? 1.5 : 0.5;
   const warm = 1.7; // the engine's warm-up after Play (stress_run.h, warmupSeconds)
   final first = scenarios.any((s) => s.id == 'song8') ? 'song8' : scenarios.isEmpty ? '' : scenarios.first.id;
+  final listed = {for (final s in scenarios) s.id};
   return [
     if (first.isNotEmpty)
       StressStep(StressRequest(scenario: first, seconds: 1, workDir: workDir), 'Getting ready',
@@ -60,7 +61,11 @@ List<StressStep> stressPlan(StressPlanKind kind, List<StressScenarioInfo> scenar
         estimateSeconds: (rampStep + warm) * 11),
     StressStep(StressRequest(kind: StressKind.rampEffects, seconds: rampStep, workDir: workDir), 'Adding effects to one track',
         estimateSeconds: (rampStep + warm) * 11),
-    for (final id in full ? const ['song8', 'song16', 'flagship_heavy16'] : const ['song8'])
+    for (final id in [
+      'song8',
+      if (full) ...['song16', 'flagship_heavy16', ...profiledFeatureScenarios.where(listed.contains)] else
+        if (listed.contains('worst_all')) 'worst_all',
+    ])
       StressStep(StressRequest(scenario: id, kind: StressKind.profile, seconds: full ? 3 : 2, workDir: workDir),
           'Finding what takes the time', estimateSeconds: (full ? 3 : 2) + 1.5),
     // Live: at the playing buffer (Auto while not recording), then at Low latency (the device's own burst).
@@ -92,6 +97,12 @@ List<StressStep> stressPlan(StressPlanKind kind, List<StressScenarioInfo> scenar
   ];
 }
 
+/// The scenarios a Full run also profiles when the engine lists them (API 30), so the parts' drill-down shows where
+/// each part mattered most: one per feature that has a part of its own.
+const profiledFeatureScenarios = [
+  'folders_deep', 'sends_many', 'automation_dense', 'voice_storm', 'sample_stream', 'every_effect', 'worst_all',
+];
+
 /// Pressures that stop a run: severe heat or battery saver (beta plan C4).
 String? stressStopReason(EnginePressure p) => switch (p) {
       EnginePressure.thermalHot || EnginePressure.thermalCritical => 'The device got too hot, so the Benchmark stopped to let it cool',
@@ -110,6 +121,7 @@ class StressRunner extends ChangeNotifier {
     this.workDir,
     this.device = const {},
     this.readThermal,
+    this.readDeviceName,
   })  : backend = backend ?? StressBackend.current,
         _pressureChanges = pressure;
 
@@ -131,6 +143,9 @@ class StressRunner extends ChangeNotifier {
   /// The platform's thermal status and headroom now ({'status', 'headroom'}), read at the sustained run's start
   /// and end; null: not read.
   final Future<Map<String, Object?>> Function()? readThermal;
+
+  /// The device's maker and model in words, for the verdict ("Samsung SM-S906B"); null: not read.
+  final Future<String?> Function()? readDeviceName;
 
   bool _running = false;
   bool get running => _running;
@@ -195,6 +210,12 @@ class StressRunner extends ChangeNotifier {
         final why = stressStopReason(p);
         if (why != null) _stopFor(why);
       });
+      try {
+        final name = await readDeviceName?.call();
+        if (name != null && name.trim().isNotEmpty) result.device = {...result.device, 'name': name.trim()};
+      } catch (_) {
+        // The verdict says "This device".
+      }
       host?.suspendForStress();
       dir = await workDir?.call();
       final scenarios = backend.scenarios();
@@ -352,6 +373,8 @@ class StressRunner extends ChangeNotifier {
   // A profiled scenario's components, as its own: each share is of that song's callback and each instance count
   // that song's (averaging shares across songs mixed songs of different weights).
   void _addCosts(StressResult result, String scenario, Map<String, dynamic> json) {
+    final parts = EnginePart.parseList(json['parts']);
+    if (parts.isNotEmpty) result.partsByScenario[scenario] = parts;
     final rows = (json['costs'] as List? ?? const []).whereType<Map>().toList();
     if (rows.isEmpty) return;
     result.costsByScenario[scenario] = [

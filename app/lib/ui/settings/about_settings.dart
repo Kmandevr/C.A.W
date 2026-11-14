@@ -1,4 +1,4 @@
-// Settings › About and beta: the version, Updates, Privacy (telemetry, what's sent, My data), Send feedback, Report a
+// Settings › About and beta: the version, What's new, Updates, Privacy (telemetry, what's sent, My data), Send feedback, Report a
 // problem (a report copied to paste into an issue), Engine diagnostics, the Privacy Policy and Terms, and licences.
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -11,6 +11,7 @@ import '../privacy/feedback_sheet.dart';
 import '../privacy/privacy_pages.dart';
 import '../startup_screen.dart' show openAlphaNotice;
 import '../theme.dart';
+import '../whats_new.dart';
 import 'engine_diagnostics.dart';
 import 'privacy_settings.dart';
 import 'settings_deps.dart';
@@ -26,6 +27,9 @@ class AboutSettings extends StatelessWidget {
         settingAction('about.beta',
             icon: Icons.science_outlined, iconColor: Neon.yellow,
             subtitle: 'C.A.W v$appVersion · $openAlphaNotice Projects are saved as you go.'),
+        // The changelog, bundled (the sheet after an update shows this version's entry).
+        settingAction('about.whatsNew',
+            icon: Icons.new_releases_outlined, iconColor: Neon.violet, onTap: () => showWhatsNewPage(context)),
         // Updates (owner, 2026-11-12); where Settings opens without the app, an inert service that checks nothing.
         UpdateSettings(service: UpdateService.running ?? UpdateService.inert, state: deps.state),
         // Telemetry and feedback exist once the app has started them (not in Settings opened alone).

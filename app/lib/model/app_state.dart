@@ -592,6 +592,7 @@ class AppState extends ChangeNotifier implements StressHost {
       settings.update((s) {
         s.lightMode = true;
         s.lightAuto = false;
+        s.lightBySelf = true;
       });
     }
     if (before.playing != meters.playing || before.overloaded != meters.overloaded) notifyListeners();

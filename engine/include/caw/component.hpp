@@ -79,7 +79,8 @@ template <class Type>
 Instance<Type>* instance(void* p) noexcept { return static_cast<Instance<Type>*>(p); }
 
 template <class Type>
-void* create(const CawHost*) noexcept {
+void* create(const CawHost* host) noexcept {
+    profile_detail::attach(host);  // the plug-in benchmark's sections (CAW_PROFILE_SCOPE), when the host has them
     try {
         auto* made = new Instance<Type>();
         const ModuleDescriptor& d = made->processor.descriptor();
