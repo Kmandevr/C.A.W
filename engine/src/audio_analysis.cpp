@@ -327,6 +327,7 @@ std::vector<Slice> detectSlices(const AudioAsset& a, const SliceOptions& o) {
         while (j - kEnv >= lo && env(j - kEnv) >= 0.1f * pk) j -= kEnv;
         while (j - 1 >= lo && std::fabs(x[static_cast<size_t>(j - 1)]) >= 0.1f * pk) --j;
         prevAt = j;
+        if (static_cast<double>(j) < 0.005 * a.rate) continue;  // at the range's start: that is the first cut already
         Slice sl;
         sl.seconds = static_cast<double>(s0 + j) / a.rate;
         sl.frame = static_cast<int64_t>(std::llround(sl.seconds * (a.sourceRate > 0 ? a.sourceRate : a.rate)));

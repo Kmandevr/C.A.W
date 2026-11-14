@@ -61,7 +61,7 @@ This is the implementation ledger for the unified modular engine. A documented c
 
 ## Not yet implemented
 
-- Audio's leftovers: the app's UI for all of the above; audition of an asset outside a project; anti-aliased varispeed; recording measured on real devices (latency estimate, AAudio duplex on the S22+).
+- Audio's leftovers: audition of an asset outside a project; anti-aliased varispeed; recording measured on real devices (latency estimate, AAudio duplex on the S22+).
 
 - A project graph of components: the mix graph runs each track as one node (its instrument and inserts run inside it as component chains); components are not graph nodes of their own yet. GraphResourceBudget is implemented at the lower-level API but is not yet connected to hardware-aware Engine policy.
 - Universal state transfer, graph hot-swap integration and dependency-aware retirement for native module instances; the graph helper currently provides only prepared-graph pointer publication and deferred reclamation.

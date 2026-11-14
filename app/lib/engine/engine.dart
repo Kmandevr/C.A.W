@@ -9,6 +9,7 @@ import 'dart:typed_data';
 import 'package:ffi/ffi.dart';
 
 import '../model/tempo_map.dart' show TempoEngine, TempoPoint, TimeSignature;
+import 'audio_bindings.dart';
 import 'bindings.dart';
 import 'component_info.dart';
 import 'execution.dart';
@@ -1022,6 +1023,26 @@ class Engine implements TempoEngine {
     }
   }
 
+  /// `caw_asset_tempo` (C API 32) on a worker isolate: the file's tempo from its onsets, as the engine's JSON
+  /// (`{"ok", "error", "bpm" (null when unsure), "confidence", "onsets", "candidates"}`); null once disposed. Matches
+  /// `AssetTempoCall` (`lib/model/audio_analysis.dart`).
+  Future<Map<String, dynamic>?> assetTempo(String path,
+          {double startSeconds = 0, double endSeconds = 0, double minBpm = 70, double maxBpm = 180}) =>
+      withNative((a) => _assetAnalysis(a, path, false, jsonEncode({
+            'min_bpm': minBpm, 'max_bpm': maxBpm, 'start_seconds': startSeconds, 'end_seconds': endSeconds,
+          })));
+
+  /// `caw_asset_slices` (C API 32) on a worker isolate: the transients in [startSeconds]..[endSeconds] (0: the
+  /// file's end), as the engine's JSON (`{"ok", "error", "seconds", "slices": [{"seconds", "frame", "strength"}]}`);
+  /// null once disposed. Matches `AssetSlicesCall`.
+  Future<Map<String, dynamic>?> assetSlices(String path,
+          {double sensitivity = 0.5, double startSeconds = 0, double endSeconds = 0, int maxSlices = 64,
+          double minGapSeconds = 0.05}) =>
+      withNative((a) => _assetAnalysis(a, path, true, jsonEncode({
+            'sensitivity': sensitivity, 'start_seconds': startSeconds, 'end_seconds': endSeconds,
+            'max_slices': maxSlices, 'min_gap_seconds': minGapSeconds,
+          })));
+
   void dispose() {
     if (_disposed) return;
     _disposed = true;
@@ -1224,5 +1245,24 @@ Future<int> _configureAudioOffThread(int engineAddress, String deviceId, String 
       } finally {
         calloc.free(id);
         calloc.free(name);
+      }
+    });
+
+// Top-level, so the isolate's closure carries only sendable values.
+Future<Map<String, dynamic>> _assetAnalysis(int address, String path, bool slices, String options) =>
+    Isolate.run(() {
+      final b = AudioBindings.instance;
+      final p = path.toNativeUtf8();
+      final o = options.toNativeUtf8();
+      try {
+        final e = Pointer<Void>.fromAddress(address);
+        final text = b.take(slices ? b.assetSlices(e, p, o) : b.assetTempo(e, p, o));
+        final j = jsonDecode(text);
+        return j is Map<String, dynamic> ? j : <String, dynamic>{'ok': false, 'error': 'bad answer'};
+      } catch (_) {
+        return <String, dynamic>{'ok': false, 'error': 'bad answer'};
+      } finally {
+        calloc.free(p);
+        calloc.free(o);
       }
     });

@@ -22,6 +22,7 @@ import 'files/selection_bar.dart';
 import 'frame/sections.dart' show SectionController;
 import 'glass.dart';
 import 'panel_motion.dart';
+import 'arrange/sample_editor.dart';
 import 'audio_file_actions.dart';
 import 'midi_file_actions.dart';
 import 'theme.dart';
@@ -472,6 +473,8 @@ class _FileManagerScreenState extends State<FileManagerScreen> {
             return;
           }
           setState(() => _selected = a.key);
+          // An audio file opens in the sample editor (owner, 2026-11-14: a tap in Files).
+          if (a.type == FileAssetType.audioFile && a.audio != null) return openSampleEditor(context, state, a.audio!);
           if (widget.explorer) (widget.onOpenAsset ?? actions.open)(a);
         },
         onOpen: () => widget.explorer || _selecting ? null : actions.open(a),

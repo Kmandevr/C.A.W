@@ -193,9 +193,12 @@ TEST(signalsmith_pitch_changes_pitch_not_length_and_stretch_ratio_changes_length
     const Render st = render(clipProject(clicks, ",\"length_steps\":32,\"stretch\":\"signalsmith\",\"stretch_ratio\":2", 3), 200000);
     SliceOptions so;
     so.minGapSeconds = 0.2;
-    const std::vector<Slice> found = detectSlices(assetOf(st.l), so);
+    std::vector<Slice> found = detectSlices(assetOf(st.l), so);
+    // The click at 0 starts the clip as playback starts: no pre-roll is possible, so the WSOLA bridge plays it,
+    // faded in from the clip's start (a few ms late, if found at all). The rest come from Signalsmith.
+    found.erase(std::remove_if(found.begin(), found.end(), [](const Slice& f) { return f.seconds < 0.25; }), found.end());
     CHECK(found.size() >= 6);
-    for (size_t k = 0; k < found.size() && k < 7; ++k) CHECK_NEAR(found[k].seconds, 0.5 * static_cast<double>(k), 0.010);
+    for (size_t k = 0; k < found.size() && k < 7; ++k) CHECK_NEAR(found[k].seconds, 0.5 * static_cast<double>(k + 1), 0.010);
     std::filesystem::remove_all(utf8Path(dir));
 }
 
@@ -262,7 +265,7 @@ TEST(a_clip_following_the_tempo_tracks_a_ramp_chunk_by_chunk) {
         const double tol = exact ? 0.0005 : 0.012;  // the detector places an onset to a fraction of a millisecond
         // Each click found near where the map puts it, and nothing else.
         size_t matched = 0;
-        for (size_t k = 0; k < 11; ++k) {
+        for (size_t k = 1; k < 11; ++k) {  // (click 0 is at the start: the range's start, never a slice)
             const double want = tm.frameAt(4.0 * static_cast<double>(k)) / 48000.0;
             double best = 1e9;
             for (const Slice& f : found) best = std::min(best, std::fabs(f.seconds - want));

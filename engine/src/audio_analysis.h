@@ -51,7 +51,7 @@ TempoResult detectTempo(const AudioAsset& asset, const TempoOptions& options);
 
 // Transients: peaks of a finer spectral-flux curve (2.7 ms hops) above a moving median plus a threshold set by the
 // sensitivity, at least minGapSeconds apart, each moved to the start of its attack in the samples. In time order; the
-// strongest maxSlices kept.
+// strongest maxSlices kept; one within 5 ms of the range's start is left out (the range's start is a cut already).
 std::vector<Slice> detectSlices(const AudioAsset& asset, const SliceOptions& options);
 
 }  // namespace caw

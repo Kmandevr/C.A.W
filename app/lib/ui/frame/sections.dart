@@ -99,6 +99,24 @@ class SectionController extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Set by [focusClip]: Arrange opens the focus view's Clip tab, where the sample editor is ([takeClipTab]).
+  bool _clipTab = false;
+
+  /// Focuses Arrange on [layerId] with its Clip tab open (the sample editor, from a tap on an audio file in Files).
+  void focusClip(String layerId) {
+    _clipTab = true;
+    _focusedLayer = layerId;
+    _current = Section.arrange;
+    notifyListeners();
+  }
+
+  /// Whether a [focusClip] asked for the Clip tab; asking clears it.
+  bool takeClipTab() {
+    final v = _clipTab;
+    _clipTab = false;
+    return v;
+  }
+
   static SectionController of(BuildContext context) => maybeOf(context)!;
 
   static SectionController? maybeOf(BuildContext context) =>

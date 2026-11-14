@@ -4,9 +4,12 @@ import 'dart:io';
 import 'dart:math' as math;
 import 'dart:typed_data';
 
-import 'package:caw/engine/audio_engine.dart';
 import 'package:caw/engine/bindings.dart';
 import 'package:caw/engine/engine.dart';
+import 'package:caw/model/app_state.dart';
+import 'package:caw/model/audio_analysis.dart';
+import 'package:caw/model/sample_edit.dart';
+import 'package:caw/model/settings.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 /// A 16-bit mono WAV of [seconds] with a 2 ms, 2 kHz click every 60 / [bpm] seconds.
@@ -50,30 +53,52 @@ void main() {
 
   test('a click track at 128 BPM is detected, and its clicks are the slices', () async {
     final e = Engine.create();
-    final io = EngineAudioIo(() => e);
     try {
       final wav = clickWav('${tmp.path}/c.wav', bpm: 128);
-      final t = await io.detectTempo(wav.path);
-      expect(t.ok, isTrue, reason: t.error);
-      expect(t.bpm, closeTo(128, 0.5));
-      expect(t.confidence, greaterThan(0.2));
-      expect(t.candidates, isNotEmpty);
+      final t = (await e.assetTempo(wav.path))!;
+      expect(t['ok'], isTrue, reason: '${t['error']}');
+      expect(t['bpm'], closeTo(128, 0.5));
+      expect(t['confidence'], greaterThan(0.2));
+      expect(t['candidates'], isNotEmpty);
+      expect(tempoFromJson(t)!.bpm, closeTo(128, 0.5));
 
-      final s = await io.slices(wav.path, startSeconds: 0, endSeconds: 4, minGapSeconds: 0.2);
-      expect(s.ok, isTrue, reason: s.error);
-      expect(s.seconds, closeTo(4, 1e-6));
+      final s = (await e.assetSlices(wav.path, startSeconds: 0, endSeconds: 4, minGapSeconds: 0.2))!;
+      expect(s['ok'], isTrue, reason: '${s['error']}');
+      expect(s['seconds'], closeTo(4, 1e-6));
       final period = 60 / 128;
-      expect(s.slices.length, (4 / period).ceil());
-      for (var k = 0; k < s.slices.length; k++) {
-        expect(s.slices[k].seconds, closeTo(k * period, 0.002));
-        expect(s.slices[k].frame, closeTo(s.slices[k].seconds * 48000, 1));
+      final slices = s['slices'] as List;
+      expect(slices.length, (4 / period).ceil() - 1, reason: 'the click at 0 is the range start, not a slice');
+      for (var k = 0; k < slices.length; k++) {
+        final sl = slices[k] as Map;
+        expect(sl['seconds'], closeTo((k + 1) * period, 0.002));
+        expect(sl['frame'], closeTo((sl['seconds'] as num) * 48000, 1));
       }
+      // The app's adapter reads the same answer as its cut points.
+      expect(slicesFromJson(s, start: 0, end: 4)!.length, slices.length);
 
-      final bad = await io.slices(wav.path, sensitivity: 2);
-      expect(bad.ok, isFalse);
-      expect(bad.error, contains('sensitivity'));
-      expect((await io.detectTempo('${tmp.path}/missing.wav')).ok, isFalse);
+      final bad = (await e.assetSlices(wav.path, sensitivity: 2))!;
+      expect(bad['ok'], isFalse);
+      expect(bad['error'], contains('sensitivity'));
+      expect((await e.assetTempo('${tmp.path}/missing.wav'))!['ok'], isFalse);
     } finally {
+      e.dispose();
+    }
+  }, skip: skip);
+
+  test('the sample editor asks the running engine (and the waveform peaks without one)', () async {
+    final e = Engine.create();
+    final s = AppState(settings: Settings())..engine = e;
+    try {
+      final wav = clickWav('${tmp.path}/c.wav', bpm: 140, seconds: 8);
+      final t = await s.audioAnalysis.detectTempo(wav.path, seconds: 8);
+      expect(t!.bpm, closeTo(140, 0.5));
+      final cuts = await s.audioAnalysis.slicePoints(wav.path, start: 0, end: 2, sensitivity: 0.5);
+      expect(cuts!.length, (2 * 140 / 60).ceil() - 1);
+      expect(cuts.first, closeTo(60 / 140, 0.002));
+      expect(await s.audioAnalysis.peak(wav.path, start: 0, end: 2), closeTo(0.8, 0.01));
+    } finally {
+      s.engine = null;
+      s.dispose();
       e.dispose();
     }
   }, skip: skip);

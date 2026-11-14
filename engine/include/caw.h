@@ -705,7 +705,7 @@ CAW_API char* caw_asset_tempo(CawEngine* e, const char* path, const char* option
 /* caw_asset_slices: options {"sensitivity" 0..1 (0.5; higher finds more), "start_seconds", "end_seconds" (0: the
    file's end; the range at most 600 s), "min_gap_seconds" 0.005..2 (0.05), "max_slices" 1..256 (64)}. Result {"ok",
    "error", "seconds" (the range's length), "slices": [{"seconds" (from the file's start), "frame" (at the file's own
-   rate), "strength" 0..1}]}: transient starts in time order, the strongest max_slices kept. */
+   rate), "strength" 0..1}]}: transient starts in time order, the strongest max_slices kept; none within 5 ms of the range's start. */
 CAW_API char* caw_asset_slices(CawEngine* e, const char* path, const char* options_json);
 /* The store: {"bytes", "budget", "count", "assets": [{"path", "rate", "bytes", "in_use"}]}. Free with caw_free. */
 CAW_API char* caw_asset_store_status(void);

@@ -21,6 +21,18 @@ updated: 2026-11-14
 - **Following the tempo:** a clip that follows the tempo is placed by song step (`offset + (step − start) × 15 / source_bpm` seconds of source), its rate worked out per 64-frame chunk, so it stays on the bars through a ramp (1.0.3's musical clips played at the tempo where they started). With one tempo, the old formula, to the bit.
 - **Tempo detection and slices:** onset-based, built here (spectral flux, autocorrelation for tempo, peak picking for transients; no new dependency); described in [engine](engine.md#tempo-detection-and-slices).
 - **C API 32**, the JSON keys and the calls: in the contract's "Engine notes" and `caw.h`. The project JSON keeps API 31's `stretch` (the algorithm's name), so the contract's `stretch` ratio is the key `stretch_ratio`; `follows_tempo` is the same as `"mode": "musical"`; loop points in source frames are `loop_start_frames`/`loop_end_frames` beside the seconds.
+## 2026-11-14: Stretch, the sample editor and Slice to MIDI: the app side's choices (Claude, within the owner's 1.0.4 looks, #208, #90)
+
+**Decision (Claude, 2026-11-14, building the owner's decisions of the day; the owner can change any of these):**
+- **The notch** is a small triangle in the top-right corner, shown on every clip that plays at its own speed (not one that follows the tempo: its length is in bars, and the contract uses the ratio only when not following). It is filled once the clip is stretched. The fade-out square moves left of it so the corner is the notch's; the edges still trim.
+- **The sample editor is the top of the Clip tab**, one scroll with the settings under it, rather than a tab or page of its own: a double tap already opened the Clip tab, and on a phone the waveform and the tools are what the panel shows first.
+- **Trim** is "trim the silence off both ends" (−48 dB of the clip's peak), since the editor's edges already trim by hand. **Normalise** aims at a 0 dB peak (the clip's gain stops at +12 dB).
+- **A tap on an audio file no clip plays** puts it on a new audio track at the song's start (one undo step) and opens that clip, so the editor always edits a clip ("the clip refers to the file plus its edits").
+- **Slice to MIDI** puts up to 16 slices on bank A of a new drums track in Kit mode from C2 (each pad's Sample layer on its slice, the other layers off), more on the sampler (one-shot zones a key apart from C2, at most 64), on a new track right under the audio one. Reversed clips can't be sliced (the cuts would play forwards).
+- **Pitch** is semitones −24..24 plus cents −50..50, the contract's ±2400 cents; a v3 clip beyond ±24 semitones (the inspector's buttons reached ±48) is held at ±24.
+- **`gain_db` and `gain`:** the file keeps the contract's `gain_db` and, beside it, the exact linear gain, used while the two agree, because a dB value doesn't come back bit for bit and every undo would move a gain.
+- **Keep pitch** means the clip's own keep-pitch algorithm: a WSOLA clip keeps WSOLA, new clips get Signalsmith Stretch from C API 32 (the engine notes: old clips keep their sound).
+- **#90:** the lanes keep their scroll view; each lane builds the clips in a window around the view and places them relative to its origin, rather than a new viewport widget, so every gesture, drop and drag keeps working unchanged.
 
 ## 2026-11-13: The tempo map's engine side: one strict map, single tempo to the bit (Claude, within the owner's 1.0.3 contract, #207)
 

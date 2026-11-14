@@ -543,7 +543,8 @@ class LayerDoc {
     if (instrument?.id != componentId) instrument = ComponentUseDoc(componentId);
   }
 
-  Map<String, dynamic> toJson() => {
+  /// [rateOf] gives an asset's `source_rate`, so a clip's loop points are saved in frames (format v4).
+  Map<String, dynamic> toJson({int Function(String assetId)? rateOf}) => {
         'id': id,
         'name': name,
         'color': color,
@@ -566,11 +567,11 @@ class LayerDoc {
         if (showLanes) 'show_lanes': true,
         if (collapse != TrackCollapse.normal) 'collapse': collapse.name,
         if (height != null) 'height': height,
-        if (audioClips.isNotEmpty) 'audio_clips': [for (final c in audioClips) c.toJson()],
+        if (audioClips.isNotEmpty) 'audio_clips': [for (final c in audioClips) c.toJson(rate: rateOf?.call(c.assetId) ?? 0)],
         if (input != null) 'input': input!.toJson(),
       };
 
-  static LayerDoc fromJson(Map<String, dynamic> j) => LayerDoc(
+  static LayerDoc fromJson(Map<String, dynamic> j, {int Function(String assetId)? rateOf}) => LayerDoc(
         id: j['id'] as String,
         name: (j['name'] as String?) ?? 'Layer',
         color: (j['color'] as num?)?.toInt() ?? 0,
@@ -604,7 +605,7 @@ class LayerDoc {
           _ => null,
         },
         audioClips: j['folder'] == true ? null
-            : [for (final c in ((j['audio_clips'] as List?) ?? const []).take(4096)) ?AudioClipDoc.fromJson(c)],
+            : [for (final c in ((j['audio_clips'] as List?) ?? const []).take(4096)) ?AudioClipDoc.fromJson(c, rate: c is Map ? rateOf?.call('${c['asset']}') ?? 0 : 0)],
         input: j['folder'] == true ? null : AudioInputDoc.fromJson(j['input']),
       );
 }
@@ -689,7 +690,7 @@ class ProjectDoc {
 
   /// v3 (batch 1.0.3): the tempo map, time signatures, sections and markers in beats. A v2 file reads as one tempo
   /// (`bpm`) in its `beats_per_bar`/4, its regions as sections.
-  static const int fileVersion = 3;
+  static const int fileVersion = 4;
 
   final String id;
   String name;
@@ -976,7 +977,7 @@ class ProjectDoc {
               if (l.isAudio) ...{
                 'audio_clips': [
                   for (final c in l.audioClips)
-                    if (asset(c.assetId) != null) c.toEngineJson(bpm),
+                    if (asset(c.assetId) != null) c.toEngineJson(bpm, span: c.spanSteps(tempo)),
                 ],
                 if (l.input != null) 'input': l.input!.toJson(),
               },
@@ -1040,7 +1041,7 @@ class ProjectDoc {
         'seam_crossfade': seamCrossfade,
         'automation': [for (final lane in automation) lane.toJson()],
         'modules': [for (final m in modules) m.toJson()],
-        'layers': [for (final l in layers) l.toJson()],
+        'layers': [for (final l in layers) l.toJson(rateOf: (id) => asset(id)?.sourceRate ?? 0)],
         'library_folders': libraryFolders,
         'saved_library_searches': savedLibrarySearches,
         'cpp_components': [for (final component in cppComponents) component.toJson()],
@@ -1100,6 +1101,8 @@ class ProjectDoc {
     // whatever this version doesn't know.
     final format = j['caw_app_project'];
     if (format is num && format > fileVersion) throw NewerProjectFormat(format.toInt());
+    final assets = [for (final raw in ((j['assets'] as List?) ?? const []).take(16384)) ?AudioAssetDoc.fromJson(raw)];
+    final rates = {for (final a in assets) a.id: a.sourceRate};
     final project = ProjectDoc(
       id: j['id'] as String,
       name: (j['name'] as String?) ?? 'Untitled',
@@ -1128,12 +1131,12 @@ class ProjectDoc {
         for (final raw in ((j['midi_files'] as List?) ?? const []).take(512))
           if (raw is Map<String, dynamic>) ?MidiFileDoc.fromJson(raw),
       ],
-      assets: [for (final raw in ((j['assets'] as List?) ?? const []).take(16384)) ?AudioAssetDoc.fromJson(raw)],
+      assets: assets,
       loopRange: j['loop_range'] == true,
       loopStartSteps: (j['loop_start_steps'] as num?)?.toInt() ?? 0,
       loopEndSteps: (j['loop_end_steps'] as num?)?.toInt() ?? 0,
       layers: ((j['layers'] as List?) ?? const []).map((raw) {
-        final layer = LayerDoc.fromJson(raw as Map<String, dynamic>);
+        final layer = LayerDoc.fromJson(raw as Map<String, dynamic>, rateOf: (id) => rates[id] ?? 0);
         // Clips are authoritative once present; the old single-pattern pointer is only a migration source.
         if (layer.clips.isNotEmpty) layer.patternId = null;
         if (layer.clips.isEmpty && layer.patternId != null) {
