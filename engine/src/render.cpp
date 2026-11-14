@@ -272,9 +272,11 @@ bool renderInstrumentNote(ProjectSpec& p, LayerSpec only, const ExportOptions& o
     const int sr = o.sampleRate;
     const int64_t most = static_cast<int64_t>(30) * sr;
     const double held = std::clamp(o.noteSeconds, 0.001, 29.0);
-    const double steps = held * p.bpm * 4.0 / 60.0;
+    TempoMap tm;
+    tm.build(tempoPointsOf(p), sr);
+    const double steps = tm.constant() ? held * p.bpm * 4.0 / 60.0 : tm.stepAt(held * sr);
     const int stepsPerBar = p.beatsPerBar * 4;
-    const int64_t mostSteps = static_cast<int64_t>(std::ceil(30.0 * p.bpm * 4.0 / 60.0));
+    const int64_t mostSteps = static_cast<int64_t>(std::ceil(tm.constant() ? 30.0 * p.bpm * 4.0 / 60.0 : tm.stepAt(30.0 * sr)));
     char line[96];
     std::snprintf(line, sizeof line, "0 %.17g %.17g %.17g\n", std::clamp(o.note, 0.0, 127.0), steps,
                   std::clamp(o.velocity, 0.0, 1.0));
@@ -402,7 +404,10 @@ bool renderExportToWav(const ProjectSpec& in, const ExportOptions& o, const std:
 }
 
 int64_t stepFrame(const ProjectSpec& p, int sr, int64_t steps) {
-    return static_cast<int64_t>(sampletime::roundFrames(static_cast<double>(steps), sampletime::stepFrames(sr, p.bpm)));
+    // Through the project's tempo map (roundFrames(steps, stepFrames(sr, bpm)) with one tempo).
+    TempoMap tm;
+    tm.build(tempoPointsOf(p), sr);
+    return static_cast<int64_t>(tm.roundFrame(static_cast<double>(steps)));
 }
 
 }  // namespace caw

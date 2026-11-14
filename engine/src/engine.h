@@ -21,6 +21,7 @@
 #include "pattern.h"
 #include "project.h"
 #include "spsc.h"
+#include "tempo_map.h"
 
 namespace caw {
 
@@ -159,8 +160,9 @@ public:
     void setMaster(double volume);
     void play(double fromStep = 0);  // fromStep: sixteenth steps into the project loop (out of range starts at 0)
     // Count-in: clicks [beats] beats at the tempo (previews still play), then plays from [fromStep] on the
-    // sample after the last beat. 0 beats is play().
-    void playCountIn(double fromStep, int beats);
+    // sample after the last beat. 0 beats is play(). Its beats are the ticks (1/den notes) of the signature where
+    // playback starts; with [bars], [beats] is bars (0..16) of that signature's ticks, so it starts on an accent.
+    void playCountIn(double fromStep, int beats, bool bars = false);
     // The metronome: a short built-in click on every beat while playing (accented on the bar), mixed before the
     // safety limiter. Off by default; renders and exports never click.
     void setMetronome(bool on);
@@ -217,6 +219,24 @@ public:
     bool setOutputTap(const std::string& layerId, float* left, float* right);
     void clearOutputTaps();
     int64_t loopLength();                     // samples in the project loop
+    // The tempo map and time signatures (1.0.3, C API 31; tempo_map.h). Each replaces the project's until the next
+    // project update, which sets them again from its "tempo_map" and "time_signatures". Checked (an error, nothing
+    // changes); built here and swapped in on the audio thread through the command queue. "" on success.
+    std::string setTempoMap(std::vector<TempoPointSpec> points);
+    std::string setTimeSignatures(std::vector<TimeSigSpec> sigs);
+    // Where the transport is (any thread but the audio thread): its sample, beat, seconds, the tempo there, and the
+    // bar, beat in the bar (quarter notes) and signature from the signatures.
+    struct SongPosition {
+        int64_t frame = 0;
+        double beat = 0, seconds = 0, bpm = 120;
+        int64_t bar = 0;
+        double beatInBar = 0;
+        int num = 4, den = 4;
+        bool playing = false;
+    };
+    SongPosition position();
+    // The control side's copy of the map and signatures the engine plays by (tests, the C API).
+    SongTime songTime();
     // Mix-graph routing updates the graph refused; always 0 unless the routing derivation is wrong.
     uint32_t routingRejections() const noexcept { return routingRejections_.load(std::memory_order_relaxed); }
     // Tests only, between process() calls: graph nodes the last chunk ran.
@@ -394,8 +414,16 @@ private:
     int deviceSlot(const std::string& layerId);
     void updatePreviewing(int frames) noexcept;
     void endPlayback() noexcept;
-    bool noteSpan(const PatternNote& n, uint32_t sub, int64_t& start, int64_t& stop) const noexcept;
-    void rebindNote(NoteEvents& notes, NoteEvents::Held& h, const Pattern* pat, int64_t n0) noexcept;
+    bool noteSpan(const Slot& s, const PatternNote& n, uint32_t sub, int64_t& start, int64_t& stop) const noexcept;
+    void rebindNote(const Slot& s, NoteEvents& notes, NoteEvents::Held& h, const Pattern* pat, int64_t n0) noexcept;
+    // The tempo map (audio thread): a new one swapped in, the song step at a sample, and a step of the slot's pass
+    // as a sample into the pass (sampletime::roundFrames(step, stepLen_) with one tempo) and samples per step there.
+    void takeSong(SongTime* next) noexcept;
+    void keepInRange() noexcept;     // after takeSong and updateTiming: a kept beat inside the loop range stays inside
+    void publishSongPos() noexcept;  // callback end: the position on the playing map, for position()
+    double songStep(int64_t frame) const noexcept;
+    int64_t passFrame(const Slot& s, double step) const noexcept;
+    double passStepLen(const Slot& s, double step) const noexcept;
     int64_t loopStart(const Slot& s, int64_t k) const noexcept;
     void updateTiming() noexcept;
     // Where playback from g_ goes back: the loop range's end while it is on and ahead, else the song end.
@@ -442,6 +470,7 @@ private:
     bool metronome_ = false;
     int64_t countInLeft_ = 0, countInAt_ = 0, countInBeat_ = 0;  // samples left, samples into it, its beat length
     double countInFrom_ = 0;
+    int countInBar_ = 4;  // count-in ticks per bar (the signature where the playback starts)
     uint64_t countInPlayCount_ = 0;
     uint32_t countInTouchStamp_ = 0;
     int clickLeft_ = 0, clickLen_ = 0;
@@ -472,7 +501,22 @@ private:
     int masterRamp_ = 0;
     bool anySolo_ = false;  // some layer is soloed (refreshed each callback)
     bool auditionOnly_ = false;
-    double stepLen_ = 0;  // samples per 16th note
+    double stepLen_ = 0;  // samples per 16th note (the tempo map's first tempo; everywhere when timeConstant_)
+    SongTime* song_ = nullptr;   // the tempo map and signatures (owned; swapped by Transport and SetSong)
+    bool timeConstant_ = true;   // one tempo: every position is step * stepLen_, as before the map
+    bool simpleClicks_ = true;   // ... and one signature of beatsPerBar_/4: the metronome ticks every beat
+    bool keptInRange_ = false;   // takeSong kept the beat of a playhead inside the loop range
+    double chunkSteps_[kBlock] = {};  // with a tempo map: the song step at each frame of the chunk (songStep)
+    int64_t chunkStepsAt_ = 0;
+    int chunkStepsLen_ = 0;
+    // The position on the playing map (publishSongPos; a sequence lock, even when stable).
+    struct PublishedPos {
+        std::atomic<int64_t> frame{0}, bar{0};
+        std::atomic<double> beat{0}, bpm{120}, inBar{0};
+        std::atomic<int> sig{4 * 64 + 4};
+    };
+    PublishedPos pos_;
+    std::atomic<uint32_t> posSeq_{0};
     int64_t loopLen_ = 0; // samples per project loop
     double dcL_[2] = {0, 0}, dcR_[2] = {0, 0}, limEnv_ = 0;
     // Shedding and recovery (reportLoad; audio thread).
@@ -634,6 +678,10 @@ private:
     std::string grow(int capacity);  // a larger slot table, sent to the audio thread; "" or an error
     double ctlSr_ = 0;
     int64_t ctlLoopLen_ = 0;
+    int ctlLoopSteps_ = 64;
+    SongTime ctlSong_;          // what the last Transport or SetSong sent (control thread, under ctl_)
+    uint64_t songSerial_ = 0;
+    std::string sendSong(SongTime next);
 
     void writeMix(int slot, double vol, double pan, bool mute, bool solo);
     int freeSlot();

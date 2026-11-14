@@ -14,6 +14,7 @@ import 'latency_comp.dart';
 import 'poller.dart';
 import 'native_components.dart';
 import 'project.dart';
+import 'tempo_map.dart';
 import 'project_dependencies.dart';
 import 'automation_writer.dart' show AutomationTarget;
 import 'clip_automation.dart';
@@ -163,7 +164,7 @@ class AppState extends ChangeNotifier implements StressHost {
     final m = meters;
     // The transport's state and overloads are now's; the levels are the heard ones.
     return EngineMeters(cpu: m.cpu, peakL: r.peakL, peakR: r.peakR, playing: m.playing, overloaded: m.overloaded,
-        position: r.position, loopLength: m.loopLength);
+        position: r.position, loopLength: m.loopLength, step: r.step);
   }
 
   /// Each track's meter as heard ([layerMeters] is what was just rendered).
@@ -176,10 +177,14 @@ class AppState extends ChangeNotifier implements StressHost {
   /// The output latency in sixteenth steps at the project's tempo.
   double get outputLatencySteps => latency.outputMs / 1000 * project.bpm / 15;
 
+  /// The song step a meter read stands for: the engine's own, on its tempo map (caw_engine_position, API 31), else
+  /// its position through the loop converted over the project's map.
+  double meterStep(EngineMeters m) => m.step ?? project.stepAtLoopFraction(m.position / m.loopLength);
+
   /// Where the engine renders now, in sixteenth steps (playing; [playheadStep] is where the ear is).
   double get renderStep {
     final m = meters;
-    if (m.playing && m.loopLength > 0) return m.position * project.engineLoopSteps / m.loopLength;
+    if (m.playing && m.loopLength > 0) return meterStep(m);
     return pausedStep ?? 0;
   }
 
@@ -268,6 +273,30 @@ class AppState extends ChangeNotifier implements StressHost {
   }
 
   Engine? engine;
+
+  /// The engine's tempo map and signatures (C API 31): the engine itself once its binding implements [TempoEngine],
+  /// or a fake a test sets here. Null: the engine has only the project JSON's `bpm` and `beats_per_bar`.
+  TempoEngine? tempoEngine;
+  TempoEngine? get _tempoTarget => tempoEngine ?? switch (engine) { final TempoEngine t => t, _ => null };
+
+  /// What [pushTempo] last sent, so an unchanged map isn't sent again.
+  (List<TempoPoint>, List<TimeSignature>)? _tempoSent;
+
+  /// Hands the tempo map and signatures to the engine after each project sync (the project JSON's `bpm` may have
+  /// replaced its map with one point). A plain project (one tempo, one n/4) needs nothing past the JSON, but is
+  /// sent once after a map was, so the engine drops the old one.
+  void pushTempo() {
+    final t = _tempoTarget;
+    final p = project;
+    if (t == null) return;
+    final sent = _tempoSent;
+    if (p.plainTempo && (sent == null || (listEquals(sent.$1, p.tempoMap) && listEquals(sent.$2, p.timeSignatures)))) {
+      return;
+    }
+    t.setTempoMap(p.tempoMap);
+    t.setTimeSignatures(p.timeSignatures);
+    _tempoSent = (p.tempoMap, p.timeSignatures);
+  }
   /// The project's C++ effects: the in-app build and trust rules (null without an in-app compiler).
   NativeComponentManager? nativeComponents;
   NativeComponentsStatus? nativeStatus;
@@ -740,7 +769,7 @@ class AppState extends ChangeNotifier implements StressHost {
     final pos = e.positionAt(timeNs);
     // What was heard then: the render position less the output latency (a take lands where it was played against
     // what you heard).
-    return pos < 0 ? null : heardStep(pos * project.engineLoopSteps / m.loopLength);
+    return pos < 0 ? null : heardStep(project.stepAtLoopFraction(pos / m.loopLength));
   }
 
   /// Where the engine rendered at [timeNs] on the MIDI clock, in steps (not moved back to what was heard): the
@@ -750,7 +779,7 @@ class AppState extends ChangeNotifier implements StressHost {
     final m = meters;
     if (e == null || timeNs <= 0 || m.loopLength <= 0) return null;
     final pos = e.positionAt(timeNs);
-    return pos < 0 ? null : pos * project.engineLoopSteps / m.loopLength;
+    return pos < 0 ? null : project.stepAtLoopFraction(pos / m.loopLength);
   }
 
   /// The tip the latency badge shows while the output adds more than 50 ms; null otherwise.
@@ -817,6 +846,7 @@ class AppState extends ChangeNotifier implements StressHost {
       info = await e.setProject(json);
       engineError = null;
       _engineProjectId = id;
+      pushTempo();
     } catch (err) {
       engineError = 'Engine error: $err';
       // The engine keeps what it had when a project is refused. That is right for an edit of this project (its last
@@ -1125,15 +1155,15 @@ class AppState extends ChangeNotifier implements StressHost {
   bool useAudioDevice = true;
 
   /// Play and pause (Space, the transport's play button): a pause keeps the position and the next play resumes there.
-  /// [countInBeats] (recording): starting from a stop, the engine clicks that many beats first.
-  void togglePlay({int countInBeats = 0}) {
+  /// [countInBars] (recording): starting from a stop, the engine clicks that many bars of the signature first.
+  void togglePlay({int countInBars = 0}) {
     final e = engine;
     if (e == null) return;
     if (_transportOn) {
       // Read now: the stop's short fade still moves the transport on.
       final m = e.meters();
       // Paused where the ear is, so play resumes on what was last heard.
-      pausedStep = m.loopLength > 0 ? heardStep(m.position * project.engineLoopSteps / m.loopLength) : null;
+      pausedStep = m.loopLength > 0 ? heardStep(meterStep(m)) : null;
       e.stop();
       _transportOn = false;
     } else {
@@ -1142,8 +1172,8 @@ class AppState extends ChangeNotifier implements StressHost {
       }
       final from = pausedStep;
       _markPlayStart(from ?? 0);
-      if (countInBeats > 0) {
-        e.playCountIn(from ?? 0, countInBeats);
+      if (countInBars > 0) {
+        e.playCountInBars(from ?? 0, countInBars);
       } else {
         from == null ? e.play() : e.playAt(from);
       }
@@ -1218,7 +1248,7 @@ class AppState extends ChangeNotifier implements StressHost {
   /// the sound.
   double get playheadStep {
     final m = meters;
-    if (m.playing && m.loopLength > 0) return heardStep(m.position * project.engineLoopSteps / m.loopLength);
+    if (m.playing && m.loopLength > 0) return heardStep(meterStep(m));
     return pausedStep ?? 0;
   }
 

@@ -75,11 +75,11 @@ void main() {
     test('are saved with their names, colours and spans; next and previous jump the playhead', () {
       final m = s.addMarker(32);
       final r = s.addMarker(0, end: 16);
-      expect((m.name, m.isRegion, r.name, r.isRegion), ('Marker 1', false, 'Region 1', true));
+      expect((m.name, m.isRegion, r.name, r.isRegion), ('Marker 1', false, 'Section 1', true));
       s.editMarker(m, name: 'Chorus', color: 6);
       final back = roundTrip(s.project);
       expect([for (final k in back.markers) (k.name, k.startSteps, k.endSteps, k.color)],
-          [('Chorus', 32, null, 6), ('Region 1', 0, 16, r.color)]);
+          [('Section 1', 0, 16, r.color), ('Chorus', 32, null, 6)], reason: 'sections, then markers');
       expect(engineJson(s).containsKey('markers'), isFalse, reason: 'the engine never sees them');
       s.seekTo(4);
       expect(s.jumpToMarker(next: true), isTrue);
@@ -145,7 +145,8 @@ void main() {
       await tester.pump(const Duration(seconds: 1));
     });
 
-    testWidgets('a long press on the ruler adds a marker; a tap on it jumps there; a drag moves it', (tester) async {
+    testWidgets('a hold on the ruler adds a marker to the section bar; a tap on it jumps; hold and move moves it',
+        (tester) async {
       await pump(tester);
       await tester.longPressAt(at(tester, 16, bottom: true));
       await tester.pumpAndSettle();
@@ -154,24 +155,31 @@ void main() {
       final m = s.project.markers.single;
       expect(m.startSteps, 16);
       s.seekTo(0);
-      await tester.tap(find.byKey(ValueKey('ruler-marker-${m.id}')));
+      final flag = find.byKey(ValueKey('marker-${m.id}'));
+      await tester.tap(flag);
       await tester.pumpAndSettle();
       expect(s.playheadStep, 16);
-      await tester.drag(find.byKey(ValueKey('ruler-marker-${m.id}')), const Offset(8 * 18.0, 0));
+      final g = await tester.startGesture(tester.getTopLeft(flag) + const Offset(4, 4));
+      await tester.pump(const Duration(milliseconds: 600));
+      await g.moveBy(const Offset(8 * 18.0, 0));
+      await tester.pump();
+      await g.up();
       await tester.pumpAndSettle();
       expect(m.startSteps, 24);
       await tester.longPressAt(at(tester, 40, bottom: true));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Add region'));
+      await tester.tap(find.text('Add section'));
       await tester.pumpAndSettle();
       final r = s.project.markers.firstWhere((k) => k.isRegion);
       expect((r.startSteps, r.endSteps), (32, 96), reason: 'four bars from the bar pressed');
+      expect(find.byKey(ValueKey('section-${r.id}')), findsOneWidget);
       await tester.pump(const Duration(seconds: 1));
     });
 
-    testWidgets('on a phone the ruler is taller, for a finger', (tester) async {
+    testWidgets('on a phone the section bar and the ruler are taller, for a finger', (tester) async {
       await pump(tester, size: const Size(412, 900));
-      expect(tester.getSize(find.byKey(const ValueKey('arrange-ruler'))).height, greaterThanOrEqualTo(44));
+      expect(tester.getSize(find.byKey(const ValueKey('arrange-ruler'))).height, greaterThanOrEqualTo(24));
+      expect(tester.getSize(find.byKey(const ValueKey('arrange-sections'))).height, greaterThanOrEqualTo(24));
     });
   });
 }

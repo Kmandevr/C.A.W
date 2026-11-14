@@ -1,0 +1,934 @@
+// The tempo map and time signatures (1.0.3, #207): exact beat <-> time maths, note timing across stepped and ramped
+// changes and loops, the metronome's signatures, MIDI tempo and meter round trips, synced effects, the C API, and
+// single-tempo projects to the bit.
+#include <algorithm>
+#include <cmath>
+#include <cstdint>
+#include <cstdio>
+#include <cstring>
+#include <fstream>
+#include <sstream>
+#include <atomic>
+#include <chrono>
+#include <string>
+#include <thread>
+#include <vector>
+
+#include "caw.h"
+#include "engine.h"
+#include "json.h"
+#include "midifile.h"
+#include "pattern.h"
+#include "project.h"
+#include "render.h"
+#include "sample_time.h"
+#include "tempo_map.h"
+#include "test.h"
+#include "test_signal.h"
+#include "timing_oracle.h"
+
+using namespace caw;
+
+namespace {
+
+std::vector<cawtest::OraclePoint> oracle(const std::vector<TempoPointSpec>& pts) {
+    std::vector<cawtest::OraclePoint> out;
+    for (const TempoPointSpec& p : pts) out.push_back({p.beat, p.bpm, p.ramp});
+    return out;
+}
+
+int64_t expectedFrame(const std::vector<TempoPointSpec>& pts, double rate, double step) {
+    return static_cast<int64_t>(std::floor(cawtest::strictTempoFrame(oracle(pts), rate, step) + 0.5));
+}
+
+// Seconds at a beat by numeric integration of 60 / bpm(b) (Simpson's rule on each stretch between points), for
+// checking the closed forms.
+double integratedSeconds(const std::vector<TempoPointSpec>& pts, double beat) {
+    double t = 0;
+    for (size_t i = 0; i < pts.size() && pts[i].beat < beat; ++i) {
+        const double a = pts[i].beat, b = i + 1 < pts.size() ? std::min(beat, pts[i + 1].beat) : beat;
+        const bool ramp = i + 1 < pts.size() && pts[i + 1].ramp;
+        auto f = [&](double x) {
+            const double bpm = ramp ? pts[i].bpm + (pts[i + 1].bpm - pts[i].bpm) * (x - a) / (pts[i + 1].beat - a) : pts[i].bpm;
+            return 60.0 / bpm;
+        };
+        const int n = 2000;
+        const double h = (b - a) / n;
+        double sum = f(a) + f(b);
+        for (int k = 1; k < n; ++k) sum += f(a + k * h) * (k % 2 ? 4.0 : 2.0);
+        t += sum * h / 3.0;
+    }
+    return t;
+}
+
+// Frames where the test signal's impulses (one on each note-on) sound, playing for `frames`.
+std::vector<int64_t> onsets(Engine& e, int64_t frames, int block = 256) {
+    std::vector<int64_t> at;
+    std::vector<float> l(static_cast<size_t>(block)), r(static_cast<size_t>(block));
+    for (int64_t i = 0; i < frames; i += block) {
+        e.process(l.data(), r.data(), block);
+        for (int k = 0; k < block; ++k)
+            if (std::fabs(l[static_cast<size_t>(k)]) > 0.1f) at.push_back(i + k);
+    }
+    return at;
+}
+
+ProjectSpec impulseProject(const std::string& notes, int lengthSteps, int bars) {
+    ProjectSpec p = cawtest::testSignalProject({}, 120, bars);
+    p.modules.push_back({"pat", "---\nkind: pattern\nlength: " + std::to_string(lengthSteps) + "\n---\n" + notes});
+    p.layers.push_back(cawtest::testSignalNotesLayer("l0", cawtest::Shape::Impulse, "pat"));
+    return p;
+}
+
+std::string noteLines(const std::vector<double>& steps) {
+    std::string s;
+    char line[64];
+    for (double st : steps) {
+        std::snprintf(line, sizeof line, "%.17g C4 0.5 1\n", st);
+        s += line;
+    }
+    return s;
+}
+
+const std::vector<TempoPointSpec> kStepped = {{0, 120, false}, {8, 90, false}, {12, 150, false}};
+const std::vector<TempoPointSpec> kRamped = {{0, 120, false}, {4, 120, false}, {12, 175, true}, {14, 70, false}, {20, 50, true}};
+
+}  // namespace
+
+TEST(tempo_map_one_tempo_is_the_old_maths_to_the_bit) {
+    // One tempo (and points that never change it) is one segment: frames are roundFrames(step, stepFrames).
+    for (const double rate : {22050.0, 44100.0, 48000.0})
+        for (const double bpm : {60.0, 77.0, 133.0, 174.0}) {
+            TempoMap a = TempoMap::single(bpm, rate), b;
+            b.build({{0, bpm, false}, {16, bpm, false}, {20, bpm, true}}, rate);
+            CHECK(a.constant() && b.constant());
+            const double L = sampletime::stepFrames(rate, bpm);
+            for (int s4 = 0; s4 < 4000; ++s4) {
+                const double step = s4 / 3.0;
+                CHECK(a.roundFrame(step) == sampletime::roundFrames(step, L));
+                CHECK(b.frameAt(step) == step * L);
+                CHECK(b.stepAt(static_cast<double>(s4)) == static_cast<double>(s4) / L);
+            }
+        }
+}
+
+TEST(tempo_map_closed_forms_match_integration_and_invert) {
+    TempoMap m;
+    m.build(kRamped, 48000);
+    CHECK(!m.constant());
+    for (const double beat : {0.0, 2.0, 4.0, 6.5, 8.0, 11.99, 12.0, 13.0, 14.0, 17.0, 20.0, 25.0}) {
+        CHECK_NEAR(m.secondsAt(beat), integratedSeconds(kRamped, beat), 1e-9);
+        CHECK_NEAR(m.beatAt(m.secondsAt(beat)), beat, 1e-9);
+        CHECK_NEAR(m.frameAt(beat * 4) / 48000.0, m.secondsAt(beat), 1e-9);
+        CHECK_NEAR(m.stepAt(m.frameAt(beat * 4)), beat * 4, 1e-7);
+    }
+    // The tempo along the ramp, and the stepped tempo after the last point.
+    CHECK_NEAR(m.bpmAtStep(8 * 4), 120 + 55 * 0.5, 1e-9);
+    CHECK_EQ(m.bpmAtStep(14 * 4), 70.0);
+    CHECK_NEAR(m.bpmAtStep(17 * 4), 60.0, 1e-9);
+    CHECK_EQ(m.bpmAtStep(30 * 4), 50.0);
+}
+
+TEST(tempo_map_and_signatures_are_checked) {
+    std::string error;
+    std::vector<TempoPointSpec> pts = {{4, 100, false}, {0, 120, false}};
+    CHECK(checkTempoPoints(pts, error) && pts[0].beat == 0);  // sorted
+    std::vector<TempoPointSpec> bad[] = {{}, {{2, 120, false}}, {{0, 0.5, false}}, {{0, 1000, false}},
+                                         {{0, 120, false}, {4, 100, false}, {4, 90, false}}, {{0, NAN, false}}};
+    for (auto& b : bad) {
+        CHECK(!checkTempoPoints(b, error));
+        CHECK(!error.empty());
+    }
+    std::vector<TempoPointSpec> many(static_cast<size_t>(kMaxTempoPoints) + 1);
+    for (size_t i = 0; i < many.size(); ++i) many[i] = {static_cast<double>(i), 120, false};
+    CHECK(!checkTempoPoints(many, error));
+
+    std::vector<TimeSigSpec> sigs = {{0, NAN, 3, 4}, {2, NAN, 7, 8}, {5, NAN, 4, 4}};
+    CHECK(checkTimeSigs(sigs, error));
+    CHECK_EQ(sigs[1].beat, 6.0);
+    CHECK_EQ(sigs[2].beat, 6.0 + 3 * 3.5);
+    std::vector<TimeSigSpec> mismatch = {{0, 0, 4, 4}, {2, 7, 3, 4}};
+    CHECK(!checkTimeSigs(mismatch, error) && error.find("bars put it at beat 8") != std::string::npos);
+    std::vector<TimeSigSpec> badDen = {{0, 0, 4, 3}};
+    CHECK(!checkTimeSigs(badDen, error));
+    std::vector<TimeSigSpec> byBeat = {{0, 0, 4, 4}, {0, 8, 3, 4}, {0, 9.5, 5, 8}};
+    CHECK(!timeSigsFromBeats(byBeat, error) && error.find("bar line") != std::string::npos);
+    std::vector<TimeSigSpec> onBars = {{0, 0, 4, 4}, {0, 8, 3, 4}, {0, 11, 5, 8}};
+    CHECK(timeSigsFromBeats(onBars, error) && onBars[1].bar == 2 && onBars[2].bar == 3);
+
+    // The project JSON: limits fail closed with a message that names the problem.
+    ProjectSpec p;
+    CHECK(!parseProject(R"({"caw_project":1,"tempo_map":[{"beat":0,"bpm":0}]})", p, error) &&
+          error.find("bpm") != std::string::npos);
+    CHECK(!parseProject(R"({"caw_project":1,"tempo_map":[{"beat":1,"bpm":90}]})", p, error));
+    CHECK(!parseProject(R"({"caw_project":1,"time_signatures":[{"bar":0,"num":4,"den":4},{"bar":1,"beat":3,"num":3,"den":4}]})",
+                        p, error));
+    CHECK(parseProject(R"({"caw_project":1,"bpm":100,"tempo_map":[{"beat":0,"bpm":90},{"beat":8,"bpm":140,"ramp":true}],
+                        "time_signatures":[{"bar":0,"beat":0,"num":6,"den":8},{"bar":4,"beat":12,"num":4,"den":4}]})",
+                       p, error));
+    CHECK_EQ(p.bpm, 90.0);  // the map's first point
+    CHECK(p.tempoMap.size() == 2 && p.tempoMap[1].ramp);
+    CHECK(p.timeSigs.size() == 2 && p.timeSigs[1].beat == 12.0);
+}
+
+TEST(notes_land_on_their_exact_sample_across_stepped_and_ramped_changes) {
+    // Notes before, on and after each change and inside the ramps, at a rate where no step is a whole sample.
+    const double rate = 44100;
+    const std::vector<double> steps = {0, 5, 13.5, 31, 32, 33.25, 47, 48, 50, 53.75, 55, 56, 59.5, 63};
+    for (const auto* map : {&kStepped, &kRamped}) {
+        ProjectSpec p = impulseProject(noteLines(steps), 64, 4);
+        p.tempoMap = *map;
+        Engine e(rate);
+        e.setMasterBypass(true);
+        CHECK(e.setProject(p).find("\"ok\":true") != std::string::npos);
+        e.play();
+        const int64_t end = expectedFrame(*map, rate, 63) + 1000;
+        const std::vector<int64_t> got = onsets(e, end);
+        CHECK_EQ(got.size(), steps.size());
+        for (size_t i = 0; i < got.size() && i < steps.size(); ++i) CHECK_EQ(got[i], expectedFrame(*map, rate, steps[i]));
+        CHECK_EQ(e.loopLength(), expectedFrame(*map, rate, 64));
+    }
+}
+
+TEST(a_layers_own_loop_repeats_on_the_map_across_a_change) {
+    // A 16-step pattern repeating over a song whose tempo changes mid-pass: each pass starts at its song step.
+    const double rate = 44100;
+    const std::vector<TempoPointSpec> map = {{0, 128, false}, {6, 97, false}, {10, 140, true}};
+    ProjectSpec p = impulseProject(noteLines({0, 4.5, 11}), 16, 4);
+    p.tempoMap = map;
+    Engine e(rate);
+    e.setMasterBypass(true);
+    CHECK(e.setProject(p).find("\"ok\":true") != std::string::npos);
+    e.play();
+    std::vector<int64_t> want;
+    for (int k = 0; k < 4; ++k)
+        for (double s : {0.0, 4.5, 11.0}) want.push_back(expectedFrame(map, rate, 16 * k + s));
+    const std::vector<int64_t> got = onsets(e, want.back() + 500, 100);
+    CHECK_EQ(got.size(), want.size());
+    for (size_t i = 0; i < got.size() && i < want.size(); ++i) CHECK_EQ(got[i], want[i]);
+}
+
+TEST(a_loop_range_spanning_a_tempo_change_repeats_exactly) {
+    // The loop range runs from step 16 to 48 over a change at step 32 (and a ramp after it): every pass plays the
+    // same notes on the same samples, at any callback size.
+    const double rate = 44100;
+    const std::vector<TempoPointSpec> map = {{0, 120, false}, {8, 80, false}, {11, 130, true}};
+    std::vector<double> steps;
+    for (int s = 0; s < 64; s += 3) steps.push_back(s + 0.25);
+    ProjectSpec p = impulseProject(noteLines(steps), 64, 4);
+    p.tempoMap = map;
+    p.loopRange = true;
+    p.loopStartSteps = 16;
+    p.loopEndSteps = 48;
+    const int64_t from = expectedFrame(map, rate, 16), to = expectedFrame(map, rate, 48);
+    std::vector<int64_t> want;
+    for (double s : steps)
+        if (expectedFrame(map, rate, s) < to) want.push_back(expectedFrame(map, rate, s));
+    for (int pass = 0; pass < 2; ++pass)
+        for (double s : steps) {
+            const int64_t f = expectedFrame(map, rate, s);
+            if (f >= from && f < to) want.push_back(to + pass * (to - from) + (f - from));
+        }
+    for (const int block : {64, 100, 333}) {
+        Engine e(rate);
+        e.setMasterBypass(true);
+        CHECK(e.setProject(p).find("\"ok\":true") != std::string::npos);
+        e.play();
+        const std::vector<int64_t> got = onsets(e, to + 2 * (to - from) - 1, block);
+        CHECK_EQ(got.size(), want.size());
+        for (size_t i = 0; i < got.size() && i < want.size(); ++i) CHECK_EQ(got[i], want[i]);
+    }
+}
+
+TEST(play_at_a_step_starts_on_the_map) {
+    const double rate = 48000;
+    ProjectSpec p = impulseProject(noteLines({40}), 64, 4);
+    p.tempoMap = kRamped;
+    Engine e(rate);
+    e.setMasterBypass(true);
+    CHECK(e.setProject(p).find("\"ok\":true") != std::string::npos);
+    e.play(36.0);
+    const std::vector<int64_t> got = onsets(e, 48000);
+    CHECK_EQ(got.size(), 1u);
+    if (!got.empty()) CHECK_EQ(got[0], expectedFrame(kRamped, rate, 40) - expectedFrame(kRamped, rate, 36));
+    // The position reports beats, seconds and the tempo there.
+    const Engine::SongPosition pos = e.position();
+    TempoMap m;
+    m.build(kRamped, rate);
+    CHECK_NEAR(pos.beat, m.stepAt(static_cast<double>(pos.frame)) / 4.0, 1e-12);
+    CHECK_NEAR(pos.seconds, static_cast<double>(pos.frame) / rate, 1e-12);
+    CHECK_NEAR(pos.bpm, m.bpmAtStep(pos.beat * 4), 1e-9);
+}
+
+namespace {
+
+struct Click {
+    int64_t frame;
+    bool accent;
+};
+
+// The metronome's clicks (and accents) over `frames`, the project otherwise silent. A click's first sample is
+// sin(0) = 0, so the first non-zero sample after a silence is the click's frame + 1.
+std::vector<Click> clicks(Engine& e, int64_t frames) {
+    std::vector<Click> out;
+    std::vector<float> l(256), r(256);
+    std::vector<float> all;
+    for (int64_t i = 0; i < frames; i += 256) {
+        e.process(l.data(), r.data(), 256);
+        all.insert(all.end(), l.begin(), l.end());
+    }
+    int64_t quiet = 1 << 20;
+    for (size_t i = 0; i < all.size(); ++i) {
+        if (std::fabs(all[i]) > 1e-6f) {
+            if (quiet > 200) {
+                float peak = 0;
+                for (size_t k = i; k < std::min(all.size(), i + 200); ++k) peak = std::max(peak, std::fabs(all[k]));
+                out.push_back({static_cast<int64_t>(i) - 1, peak > 0.4f});
+            }
+            quiet = 0;
+        } else {
+            ++quiet;
+        }
+    }
+    return out;
+}
+
+}  // namespace
+
+TEST(the_metronome_follows_the_signatures_and_the_tempo_map) {
+    // 3/4 for two bars, then 7/8 (an eighth-note tick, the accent every 7), at 120 BPM; then the same over a ramp.
+    const double rate = 48000;
+    const std::vector<TimeSigSpec> sigs = {{0, 0, 3, 4}, {2, 6, 7, 8}};
+    for (const bool ramp : {false, true}) {
+        const std::vector<TempoPointSpec> map =
+            ramp ? std::vector<TempoPointSpec>{{0, 120, false}, {12, 180, true}} : std::vector<TempoPointSpec>{{0, 120, false}};
+        ProjectSpec p = cawtest::testSignalProject({}, 120, 8);
+        p.tempoMap = map;
+        p.timeSigs = sigs;
+        Engine e(rate);
+        e.setMasterBypass(true);
+        e.setMetronome(true);
+        CHECK(e.setProject(p).find("\"ok\":true") != std::string::npos);
+        e.play();
+        std::vector<Click> want;
+        for (int b = 0; b < 6; ++b) want.push_back({0, b % 3 == 0});
+        for (int k = 0; k < 14; ++k) want.push_back({0, k % 7 == 0});
+        std::vector<double> beats;
+        for (int b = 0; b < 6; ++b) beats.push_back(b);
+        for (int k = 0; k < 14; ++k) beats.push_back(6 + k * 0.5);
+        for (size_t i = 0; i < want.size(); ++i)
+            want[i].frame = static_cast<int64_t>(std::ceil(cawtest::strictTempoFrame(oracle(map), rate, beats[i] * 4)));
+        const std::vector<Click> got = clicks(e, want.back().frame + 2000);
+        CHECK_EQ(got.size(), want.size());
+        for (size_t i = 0; i < got.size() && i < want.size(); ++i) {
+            CHECK_EQ(got[i].frame, want[i].frame);
+            CHECK_EQ(got[i].accent, want[i].accent);
+        }
+    }
+}
+
+TEST(the_metronome_with_one_tempo_and_signature_clicks_as_before) {
+    // 4/4 at 100 BPM, 44.1 kHz (a beat is 26460 samples): every beat, the accent each bar.
+    ProjectSpec p = cawtest::testSignalProject({}, 100, 4);
+    Engine e(44100);
+    e.setMasterBypass(true);
+    e.setMetronome(true);
+    CHECK(e.setProject(p).find("\"ok\":true") != std::string::npos);
+    e.play();
+    const std::vector<Click> got = clicks(e, 26460 * 9 - 300);
+    CHECK_EQ(got.size(), 9u);
+    for (size_t i = 0; i < got.size(); ++i) {
+        CHECK_EQ(got[i].frame, static_cast<int64_t>(i) * 26460);
+        CHECK_EQ(got[i].accent, i % 4 == 0);
+    }
+}
+
+TEST(the_count_in_ticks_at_the_signature_and_tempo_where_playback_starts) {
+    // Playing from beat 8 (a 6/8 bar at 90 BPM): six eighth-note clicks of 16000 samples, the accent on the first.
+    ProjectSpec p = cawtest::testSignalProject({}, 120, 8);
+    p.tempoMap = {{0, 120, false}, {8, 90, false}};
+    p.timeSigs = {{0, 0, 4, 4}, {2, 8, 6, 8}};
+    Engine e(48000);
+    e.setMasterBypass(true);
+    CHECK(e.setProject(p).find("\"ok\":true") != std::string::npos);
+    e.playCountIn(32, 6);
+    const std::vector<Click> got = clicks(e, 6 * 16000 - 1000);
+    CHECK_EQ(got.size(), 6u);
+    for (size_t i = 0; i < got.size(); ++i) {
+        CHECK_EQ(got[i].frame, static_cast<int64_t>(i) * 16000);
+        CHECK_EQ(got[i].accent, i == 0);
+    }
+}
+
+TEST(midi_files_round_trip_the_tempo_map_and_signatures) {
+    PatternResult pr = parsePattern("---\nkind: pattern\nlength: 6 bars\n---\n0 C4 1 1\n17 E4 2 0.5\n");  // past every change
+    CHECK(pr.pattern != nullptr);
+    if (!pr.pattern) return;
+    MidiSongMeta song;
+    song.tempo = {{0, 120, false}, {8, 96, false}, {16, 150, false}, {20.5, 125, false}};
+    song.sigs = {{0, 0, 4, 4}, {2, 8, 3, 4}, {4, 14, 7, 8}};
+    for (const bool clip : {false, true}) {
+        const std::vector<uint8_t> bytes = clip ? patternToMidiClip(*pr.pattern, song) : patternToSmf(*pr.pattern, song);
+        std::string error;
+        MidiSongMeta back;
+        const std::string text = patternFromMidi(bytes.data(), bytes.size(), MidiImportOptions{}, error, &back);
+        CHECK(!text.empty());
+        CHECK_EQ(back.tempo.size(), song.tempo.size());
+        for (size_t i = 0; i < back.tempo.size() && i < song.tempo.size(); ++i) {
+            CHECK_EQ(back.tempo[i].beat, song.tempo[i].beat);
+            CHECK_EQ(back.tempo[i].bpm, song.tempo[i].bpm);
+            CHECK(!back.tempo[i].ramp);
+        }
+        CHECK_EQ(back.sigs.size(), song.sigs.size());
+        for (size_t i = 0; i < back.sigs.size() && i < song.sigs.size(); ++i) {
+            CHECK_EQ(back.sigs[i].bar, song.sigs[i].bar);
+            CHECK_EQ(back.sigs[i].beat, song.sigs[i].beat);
+            CHECK_EQ(back.sigs[i].num, song.sigs[i].num);
+            CHECK_EQ(back.sigs[i].den, song.sigs[i].den);
+        }
+    }
+    // The old export (one tempo, one meter) is unchanged by the map's writer.
+    const std::vector<uint8_t> a = patternToSmf(*pr.pattern, 133, 3);
+    MidiSongMeta one;
+    one.tempo = {{0, 133, false}};
+    one.sigs = {{0, 0, 3, 4}};
+    CHECK(a == patternToSmf(*pr.pattern, one));
+    // A ramp becomes stepped tempo events whose stretches keep the ramp's time.
+    MidiSongMeta ramp;
+    ramp.tempo = {{0, 120, false}, {8, 60, true}};
+    TempoMap exact;
+    exact.build(ramp.tempo, 48000);
+    for (const bool clip : {false, true}) {
+        const std::vector<uint8_t> bytes = clip ? patternToMidiClip(*pr.pattern, ramp) : patternToSmf(*pr.pattern, ramp);
+        std::string error;
+        MidiSongMeta back;
+        CHECK(!patternFromMidi(bytes.data(), bytes.size(), MidiImportOptions{}, error, &back).empty());
+        CHECK_EQ(back.tempo.size(), 33u);  // 32 sixteenth stretches and the end
+        TempoMap stepped;
+        stepped.build(back.tempo, 48000);
+        for (const double beat : {1.0, 4.0, 8.0, 10.0}) CHECK_NEAR(stepped.secondsAt(beat), exact.secondsAt(beat), 2e-5);
+    }
+    // The C API returns them as JSON.
+    const std::vector<uint8_t> bytes = patternToSmf(*pr.pattern, song);
+    char* json = caw_pattern_from_midi(bytes.data(), static_cast<int32_t>(bytes.size()));
+    Json j;
+    std::string error;
+    CHECK(json && parseJson(json, j, error));
+    caw_free(json);
+    std::vector<TempoPointSpec> pts;
+    std::vector<TimeSigSpec> sigs;
+    CHECK(j.get("tempo_map") && readTempoMap(*j.get("tempo_map"), pts, error) && pts.size() == 4);
+    CHECK(j.get("time_signatures") && readTimeSigs(*j.get("time_signatures"), sigs, error) && sigs.size() == 3);
+}
+
+TEST(a_tempo_synced_delay_follows_the_tempo_at_the_playhead) {
+    // A ping-pong delay synced to a quarter note: an impulse at beat 0 (120 BPM) echoes 0.5 s later, one at beat 12,
+    // after the tempo stepped to 60 at beat 8, echoes 1 s later.
+    const int rate = 16000;
+    ProjectSpec p = impulseProject(noteLines({0, 48}), 64, 4);
+    ComponentSpec delay;
+    delay.id = "org.caw.delay.pingpong";
+    delay.params = {{"sync", 4}, {"feedback", 0}, {"mix", 0.5}};
+    p.layers[0].components = {delay};
+    p.tempoMap = {{0, 120, false}, {8, 60, false}};
+    Engine e(rate);
+    e.setMasterBypass(true);
+    CHECK(e.setProject(p).find("\"ok\":true") != std::string::npos);
+    e.play();
+    std::vector<float> l(256), r(256), sum;
+    for (int64_t i = 0; i < rate * 10; i += 256) {
+        e.process(l.data(), r.data(), 256);
+        for (int k = 0; k < 256; ++k) sum.push_back(std::fabs(l[static_cast<size_t>(k)]) + std::fabs(r[static_cast<size_t>(k)]));
+    }
+    std::vector<int64_t> peaks;
+    for (size_t i = 0; i < sum.size(); ++i)
+        if (sum[i] > 0.05f && (peaks.empty() || static_cast<int64_t>(i) - peaks.back() > rate / 10)) peaks.push_back(static_cast<int64_t>(i));
+    CHECK_EQ(peaks.size(), 4u);
+    if (peaks.size() == 4) {
+        CHECK_EQ(peaks[0], 0);
+        CHECK(std::llabs(peaks[1] - rate / 2) <= 2);
+        CHECK_EQ(peaks[2], 8 * rate);
+        CHECK(std::llabs(peaks[3] - 9 * rate) <= 2);
+    }
+    // What a component sees: the tempo and beat at its block's first frame.
+    SongTime song = songTimeOf(p, rate);
+    ChainTime t;
+    t.song = &song;
+    t.start = 9 * rate;
+    const Transport tr = t.transportAt(true);
+    CHECK_EQ(tr.tempo, 60.0);
+    CHECK_NEAR(tr.beat, 13.0, 1e-12);
+}
+
+TEST(one_tempo_projects_render_the_same_bits_with_or_without_a_map) {
+    // A project with automation, a looping layer and a loop range, played as before (no map), and with a map whose
+    // points never change the tempo and the signature its beats per bar make: the same output to the bit.
+    ProjectSpec p = impulseProject(noteLines({0, 3.5, 7, 13.25}), 16, 2);
+    p.bpm = 133;
+    p.layers[0].instrument.params.push_back({"shape", static_cast<double>(cawtest::Shape::Saw)});
+    ProjectAutomationLaneSpec lane;
+    lane.targetType = "instrument";
+    lane.moduleId = "l0";
+    lane.target = "level";
+    lane.points = {{0, 0.2}, {20, 1.0}, {32, 0.5}};
+    p.automation.push_back(lane);
+    p.loopRange = true;
+    p.loopStartSteps = 4;
+    p.loopEndSteps = 28;
+    ProjectSpec q = p;
+    q.tempoMap = {{0, 133, false}, {3, 133, false}, {6, 133, true}};
+    q.timeSigs = {{0, 0, 4, 4}};
+    std::vector<float> a, b;
+    for (auto* out : {&a, &b}) {
+        Engine e(44100);
+        e.setMetronome(true);
+        CHECK(e.setProject(out == &a ? p : q).find("\"ok\":true") != std::string::npos);
+        e.play();
+        std::vector<float> l(173), r(173);
+        for (int k = 0; k < 2000; ++k) {
+            e.process(l.data(), r.data(), 173);
+            out->insert(out->end(), l.begin(), l.end());
+            out->insert(out->end(), r.begin(), r.end());
+        }
+    }
+    CHECK(a == b);
+    CHECK(*std::max_element(a.begin(), a.end()) > 0.01f);
+    CHECK_EQ(stepFrame(q, 44100, 37), static_cast<int64_t>(sampletime::roundFrames(37, sampletime::stepFrames(44100, 133))));
+}
+
+TEST(renders_follow_the_tempo_map) {
+    ProjectSpec p = impulseProject(noteLines({0}), 64, 4);
+    p.tempoMap = kRamped;
+    for (const int64_t steps : {0, 17, 48, 64, 200}) CHECK_EQ(stepFrame(p, 48000, steps), expectedFrame(kRamped, 48000, steps));
+}
+
+TEST(the_c_api_sets_the_tempo_map_and_reports_the_position) {
+    CawEngine* e = caw_engine_create(48000);
+    CHECK(e != nullptr);
+    if (!e) return;
+    const char* project = R"({"caw_project":1,"bpm":120,"loop_bars":8,"layers":[]})";
+    char* r = caw_engine_set_project(e, project);
+    caw_free(r);
+    const CawTempoPoint pts[] = {{8, 60, 0}, {0, 120, 0}, {12, 90, 1}};  // unsorted: sorted here
+    CHECK_EQ(caw_engine_set_tempo_map(e, pts, 3), 0);
+    const CawTempoPoint badPts[] = {{0, 2000, 0}};
+    CHECK_EQ(caw_engine_set_tempo_map(e, badPts, 1), 1);
+    CHECK_EQ(caw_engine_set_tempo_map(e, nullptr, 1), 1);
+    const CawTimeSig sigs[] = {{0, 3, 4}, {6, 6, 8}};
+    CHECK_EQ(caw_engine_set_time_signatures(e, sigs, 2), 0);
+    const CawTimeSig offBar[] = {{0, 3, 4}, {4, 6, 8}};
+    CHECK_EQ(caw_engine_set_time_signatures(e, offBar, 2), 1);
+    caw_engine_play_at(e, 40);  // beat 10: 60 BPM, then the ramp toward 90
+    std::vector<float> l(480), rr(480);
+    for (int k = 0; k < 100; ++k) caw_engine_process(e, l.data(), rr.data(), 480);  // one second
+    CawPosition pos{};
+    CHECK_EQ(caw_engine_position(e, &pos), 2);
+    pos.struct_size = sizeof(CawPosition);
+    CHECK_EQ(caw_engine_position(e, &pos), 0);
+    CHECK_EQ(pos.playing, 1);
+    // The ramp from 60 BPM at beat 8 toward 90 at beat 12: beat 10 is at 4 + 8 ln 1.25 s; one second on from there.
+    TempoMap m;
+    m.build({{0, 120, false}, {8, 60, false}, {12, 90, true}}, 48000);
+    CHECK_NEAR(m.secondsAt(10), 4 + 8 * std::log(1.25), 1e-12);
+    CHECK_EQ(pos.frame, static_cast<int64_t>(m.roundFrame(40)) + 48000);
+    CHECK_NEAR(pos.seconds, static_cast<double>(pos.frame) / 48000, 1e-12);
+    CHECK_NEAR(pos.beat, m.stepAt(static_cast<double>(pos.frame)) / 4, 1e-12);
+    CHECK(pos.beat > 11 && pos.beat < 11.5);
+    CHECK_NEAR(pos.bpm, 60 + 7.5 * (pos.beat - 8), 1e-9);
+    // 3/4 for two bars (6 beats), then 6/8 bars of 3 beats: bar 3 (0-based) starts at beat 9.
+    CHECK_EQ(pos.bar, 3);
+    CHECK_NEAR(pos.beat_in_bar, pos.beat - 9, 1e-12);
+    CHECK(pos.num == 6 && pos.den == 8);
+    CHECK_EQ(caw_engine_set_bpm(e, 90), 0);
+    CHECK_EQ(caw_engine_set_bpm(e, 0), 1);
+    caw_engine_destroy(e);
+}
+
+namespace {
+
+struct VectorMap {
+    const char* name;
+    std::vector<TempoPointSpec> points;
+};
+
+const std::vector<VectorMap> kVectorMaps = {
+    {"constant 120", {{0, 120, false}}},
+    {"stepped", {{0, 120, false}, {8, 90, false}, {16, 140, false}, {18.5, 72.5, false}}},
+    {"ramp 120 to 96 over 32 beats", {{0, 120, false}, {32, 96, true}}},
+    {"ramp up 100 to 160", {{0, 100, false}, {16, 160, true}}},
+    {"mixed", {{0, 60, false}, {4, 180, true}, {10, 75, false}, {20, 50, true}, {24, 50, false}, {28, 200, true}}},
+};
+const double kVectorBeats[] = {0, 0.25, 0.5, 1, 2.25, 3.999, 4, 6, 7.75, 8, 10, 12.5, 16, 18.5, 20, 22, 24, 26, 28, 31.25,
+                               31.5, 32, 33, 40, 48, 100};
+
+struct VectorSigs {
+    const char* name;
+    std::vector<TimeSigSpec> sigs;  // bars; the beats are worked out
+};
+
+const std::vector<VectorSigs> kVectorSigs = {
+    {"4/4", {{0, NAN, 4, 4}}},
+    {"3/4 then 7/8 then 4/4", {{0, NAN, 3, 4}, {2, NAN, 7, 8}, {5, NAN, 4, 4}}},
+    {"6/8 then 5/4 then 2/2 then 7/16", {{0, NAN, 6, 8}, {4, NAN, 5, 4}, {6, NAN, 2, 2}, {9, NAN, 7, 16}}},
+};
+const double kVectorBarBeats[] = {0, 0.5, 1, 2.75, 3, 5.5, 6, 6.5, 9.5, 12.9, 13, 14, 20, 22.5, 23, 26, 31.75, 40, 41.5};
+
+std::string vectorsPath() { return std::string(CAW_ROOT) + "/engine/tests/references/tempo_vectors.json"; }
+
+std::string num17(double v) {
+    char b[40];
+    std::snprintf(b, sizeof b, "%.17g", v);
+    return b;
+}
+
+// The bar (0-based) and the beat in it counted in the signature's own beats (1/den notes), as the app shows them.
+void barBeat(const TimeSigMap& m, double beat, int64_t& bar, double& inBar) {
+    m.barAt(beat, bar, inBar);
+    inBar /= 4.0 / m.sigs()[m.indexAt(beat)].den;
+}
+
+}  // namespace
+
+TEST(tempo_vectors_shared_with_the_app_match_the_engine) {
+    // engine/tests/references/tempo_vectors.json, which the app's tests read too (app/test/tempo_map_test.dart):
+    // "tempo": maps with [beat, seconds] pairs; "bars": signatures with [beat, bar (0-based), beat in the bar in the
+    // signature's own beats]. `caw_tests --update-references tempo_vectors_shared_with_the_app_match_the_engine`
+    // writes it again from the engine.
+    if (cawtest::updateGolden) {
+        std::string out = "{\n  \"about\": \"From the engine's TempoMap and TimeSigMap (engine/src/tempo_map.h; the #207 contract's "
+                          "closed forms). tempo: [beat, seconds]; bars: [beat, bar (0-based), beat in the bar (0-based, in the "
+                          "signature's own beats)]. The app's maths must agree within 1e-9.\",\n  \"tempo\": [\n";
+        for (size_t m = 0; m < kVectorMaps.size(); ++m) {
+            TempoMap tm;
+            tm.build(kVectorMaps[m].points, 48000);
+            out += "    {\"name\": \"" + std::string(kVectorMaps[m].name) + "\", \"tempo_map\": [";
+            for (size_t i = 0; i < kVectorMaps[m].points.size(); ++i) {
+                const TempoPointSpec& p = kVectorMaps[m].points[i];
+                out += std::string(i ? ", " : "") + "{\"beat\": " + num17(p.beat) + ", \"bpm\": " + num17(p.bpm) +
+                       ", \"ramp\": " + (p.ramp ? "true" : "false") + "}";
+            }
+            out += "],\n      \"beat_seconds\": [";
+            bool first = true;
+            for (const double beat : kVectorBeats) {
+                out += std::string(first ? "" : ", ") + "[" + num17(beat) + ", " + num17(tm.secondsAt(beat)) + "]";
+                first = false;
+            }
+            out += std::string("]}") + (m + 1 < kVectorMaps.size() ? "," : "") + "\n";
+        }
+        out += "  ],\n  \"bars\": [\n";
+        for (size_t m = 0; m < kVectorSigs.size(); ++m) {
+            std::vector<TimeSigSpec> sigs = kVectorSigs[m].sigs;
+            std::string error;
+            CHECK(checkTimeSigs(sigs, error));
+            TimeSigMap sm;
+            sm.build(sigs);
+            out += "    {\"name\": \"" + std::string(kVectorSigs[m].name) + "\", \"time_signatures\": [";
+            for (size_t i = 0; i < sigs.size(); ++i)
+                out += std::string(i ? ", " : "") + "{\"bar\": " + std::to_string(sigs[i].bar) + ", \"beat\": " +
+                       num17(sigs[i].beat) + ", \"num\": " + std::to_string(sigs[i].num) + ", \"den\": " +
+                       std::to_string(sigs[i].den) + "}";
+            out += "],\n      \"bar_beat\": [";
+            bool first = true;
+            for (const double beat : kVectorBarBeats) {
+                int64_t bar = 0;
+                double in = 0;
+                barBeat(sm, beat, bar, in);
+                out += std::string(first ? "" : ", ") + "[" + num17(beat) + ", " + std::to_string(bar) + ", " + num17(in) + "]";
+                first = false;
+            }
+            out += std::string("]}") + (m + 1 < kVectorSigs.size() ? "," : "") + "\n";
+        }
+        out += "  ]\n}\n";
+        std::ofstream(vectorsPath(), std::ios::binary) << out;
+    }
+    std::ifstream in(vectorsPath(), std::ios::binary);
+    std::stringstream ss;
+    ss << in.rdbuf();
+    Json j;
+    std::string error;
+    CHECK(parseJson(ss.str(), j, error));
+    const Json* maps = j.get("tempo");
+    const Json* bars = j.get("bars");
+    CHECK(maps && maps->arr.size() == kVectorMaps.size());
+    CHECK(bars && bars->arr.size() == kVectorSigs.size());
+    if (!maps || !bars) return;
+    int checked = 0;
+    for (const Json& m : maps->arr) {
+        std::vector<TempoPointSpec> pts;
+        CHECK(m.get("tempo_map") && readTempoMap(*m.get("tempo_map"), pts, error));
+        TempoMap tm;
+        tm.build(pts, 48000);
+        for (const Json& v : m.get("beat_seconds")->arr) {
+            const double beat = v.arr[0].num, sec = v.arr[1].num;
+            CHECK_NEAR(tm.secondsAt(beat), sec, 1e-12);
+            CHECK_NEAR(tm.beatAt(sec), beat, 1e-9);
+            CHECK_NEAR(cawtest::strictTempoFrame(oracle(pts), 48000, beat * 4) / 48000.0, sec, 1e-9);
+            CHECK_NEAR(integratedSeconds(pts, beat), sec, 1e-9);
+            ++checked;
+        }
+    }
+    for (const Json& m : bars->arr) {
+        std::vector<TimeSigSpec> sigs;
+        CHECK(m.get("time_signatures") && readTimeSigs(*m.get("time_signatures"), sigs, error));
+        TimeSigMap sm;
+        sm.build(sigs);
+        for (const Json& v : m.get("bar_beat")->arr) {
+            int64_t bar = 0;
+            double inBar = 0;
+            barBeat(sm, v.arr[0].num, bar, inBar);
+            CHECK_EQ(static_cast<double>(bar), v.arr[1].num);
+            CHECK_NEAR(inBar, v.arr[2].num, 1e-12);
+            ++checked;
+        }
+    }
+    CHECK(checked >= 180);
+}
+
+TEST(tempo_maps_swap_while_another_thread_plays) {
+    // The control thread sets maps, signatures and projects and reads the position while the audio thread plays a
+    // song: a looping track, a synced delay and the metronome.
+    ProjectSpec p = impulseProject(noteLines({0, 3, 7.5}), 16, 2);
+    ComponentSpec delay;
+    delay.id = "org.caw.delay.pingpong";
+    delay.params = {{"sync", 3}};
+    p.layers[0].components = {delay};
+    p.tempoMap = kRamped;
+    Engine e(48000);
+    e.setMetronome(true);
+    CHECK(e.setProject(p).find("\"ok\":true") != std::string::npos);
+    e.play();
+    std::atomic<bool> stop{false};
+    std::atomic<float> peak{0};
+    std::thread audio([&] {
+        std::vector<float> l(128), r(128);
+        while (!stop.load()) {
+            e.process(l.data(), r.data(), 128);
+            for (float v : l) if (std::fabs(v) > peak.load(std::memory_order_relaxed)) peak.store(std::fabs(v), std::memory_order_relaxed);
+        }
+    });
+    for (int k = 0; k < 60; ++k) {
+        if (k % 3 == 0) CHECK(e.setTempoMap({{0, 90.0 + k, false}, {2, 140, true}}).empty());
+        if (k % 3 == 1) CHECK(e.setTimeSignatures({{0, 0, 3 + k % 5, 8}}).empty());
+        if (k % 3 == 2) {
+            p.tempoMap = k % 2 ? kStepped : std::vector<TempoPointSpec>{};
+            CHECK(e.setProject(p).find("\"ok\":true") != std::string::npos);
+        }
+        const Engine::SongPosition pos = e.position();
+        CHECK(pos.beat >= 0 && std::isfinite(pos.seconds));
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+    stop.store(true);
+    audio.join();
+    CHECK(peak.load() > 0.01f);
+}
+
+// ---- the audio review's findings (2026-11-14) ----
+
+TEST(a_live_map_change_at_a_loop_ranges_end_stays_in_the_range) {
+    // The playhead one sample before the range's end, then maps whose kept beat lands at or past the new end: playback
+    // must still wrap to the range's start, never run on to the song's end.
+    const double rate = 44100;
+    int checked = 0;
+    for (int k = 0; k < 24; ++k) {
+        ProjectSpec p = impulseProject(noteLines({0}), 64, 4);
+        p.tempoMap = kStepped;
+        p.loopRange = true;
+        p.loopStartSteps = 16;
+        p.loopEndSteps = 48;
+        Engine e(rate);
+        e.setMasterBypass(true);
+        CHECK(e.setProject(p).find("\"ok\":true") != std::string::npos);
+        e.play(16);
+        const int64_t from = expectedFrame(kStepped, rate, 16), to = expectedFrame(kStepped, rate, 48);
+        std::vector<float> l(4096), r(4096);
+        for (int64_t left = to - from - 1; left > 0;) {
+            const int n = static_cast<int>(std::min<int64_t>(left, 4096));
+            e.process(l.data(), r.data(), n);
+            left -= n;
+        }
+        CHECK_EQ(e.position().frame, to - 1);
+        const std::vector<TempoPointSpec> next = {{0, 120, false}, {8, 90.0 + 0.37 * k, false}, {11.5, 150, k % 2 == 1}};
+        CHECK(e.setTempoMap(next).empty());
+        const int64_t nFrom = expectedFrame(next, rate, 16), nTo = expectedFrame(next, rate, 48);
+        for (int i = 0; i < 3000; ++i) {
+            e.process(l.data(), r.data(), 7);
+            const int64_t at = e.position().frame;
+            CHECK(at >= nFrom && at < nTo);
+            ++checked;
+        }
+    }
+    CHECK(checked > 0);
+}
+
+TEST(a_notes_expression_spans_its_real_length_across_a_tempo_change) {
+    // A note 8 beats long, its bend reaching an octave halfway: 4 beats at 120 then 4 at 60 make it 6 s, so the octave
+    // is reached at 3 s (taken from the tempo where it starts it would be at 2 s).
+    const int rate = 16000;
+    ProjectSpec p = cawtest::testSignalProject({}, 120, 4);
+    p.modules.push_back({"pat", "---\nkind: pattern\nlength: 64\n---\n0 C4 32 1 bend 0:0 0.5:12 1:12\n"});
+    p.layers.push_back(cawtest::testSignalNotesLayer("l0", cawtest::Shape::Sine, "pat"));
+    p.tempoMap = {{0, 120, false}, {4, 60, false}};
+    Engine e(rate);
+    e.setMasterBypass(true);
+    CHECK(e.setProject(p).find("\"ok\":true") != std::string::npos);
+    e.play();
+    std::vector<float> out, l(256), r(256);
+    for (int i = 0; i < rate * 5; i += 256) {
+        e.process(l.data(), r.data(), 256);
+        out.insert(out.end(), l.begin(), l.end());
+    }
+    auto hz = [&](double at) {
+        const size_t a = static_cast<size_t>(at * rate), b = a + rate / 20;
+        int n = 0;
+        for (size_t i = a + 1; i < b; ++i) n += out[i - 1] < 0 && out[i] >= 0;
+        return n * 20.0;
+    };
+    const double octave = hz(4.5);
+    CHECK(octave > 450 && octave < 600);
+    CHECK(hz(2.4) < 0.9 * octave);   // still bending at 2.4 s
+    CHECK(hz(3.3) > 0.95 * octave);  // there by 3.3 s
+}
+
+TEST(the_ramp_maths_gives_the_same_bits_on_every_platform) {
+    // tempomath's log1p and expm1 (no libm), pinned to their bits, and within an ulp or so of the C library's.
+    struct Pin {
+        double x;
+        uint64_t bits;
+    };
+    const Pin logs[] = {{1e-9, 0x3e112e0be801f1d9ull}, {-0.1, 0xbfbaf8e8210a415dull}, {0.25, 0x3fcc8ff7c79a9a21ull},
+                        {0.5, 0x3fd9f323ecbf984cull}, {-0.5, 0xbfe62e42fefa39efull}, {2.0, 0x3ff193ea7aad030aull},
+                        {7.5, 0x40011edb023bf0feull}, {-0.999, 0xc01ba18a998fff9full}, {998.0, 0x401ba084531f2627ull}};
+    const Pin exps[] = {{1e-9, 0x3e112e0be84bbb51ull}, {-0.2, 0xbfc733d4a7a67a9bull}, {0.3, 0x3fd6641632306a56ull},
+                        {0.36, 0x3fdbbbab4bfb9d80ull}, {-0.7, 0xbfe01bf92311555full}, {1.5, 0x400bda7fcc9f8a82ull},
+                        {6.9, 0x408efa329e185a4full}, {-12.0, 0xbfeffff31d59e25eull}, {40.0, 0x438a220d397972ebull}};
+    auto bits = [](double v) {
+        uint64_t b;
+        std::memcpy(&b, &v, 8);
+        return b;
+    };
+    for (const Pin& p : logs) {
+        CHECK_EQ(bits(tempomath::log1p(p.x)), p.bits);
+        CHECK_NEAR(tempomath::log1p(p.x), std::log1p(p.x), 4e-16 * std::fabs(std::log1p(p.x)));
+    }
+    for (const Pin& p : exps) {
+        CHECK_EQ(bits(tempomath::expm1(p.x)), p.bits);
+        CHECK_NEAR(tempomath::expm1(p.x), std::expm1(p.x), 4e-16 * std::fabs(std::expm1(p.x)));
+    }
+    // A sweep: within a few ulp of the C library's (about 4 at worst, where log1p's 1 + x is near 0.7).
+    int far = 0;
+    for (int k = -999; k < 3000; ++k) {
+        const double x = k * 0.0123457;
+        if (x > -1) far += std::fabs(tempomath::log1p(x) - std::log1p(x)) > 8e-16 * std::fabs(std::log1p(x)) + 1e-300;
+        if (x < 30) far += std::fabs(tempomath::expm1(x) - std::expm1(x)) > 8e-16 * std::fabs(std::expm1(x)) + 1e-300;
+    }
+    CHECK_EQ(far, 0);
+}
+
+TEST(per_sample_lanes_on_a_ramp_give_the_same_bits_at_any_block_size) {
+    // Volume, pan and an instrument lane on a ramped map, read from the chunk's steps: the same output whatever the
+    // callback size.
+    ProjectSpec p = impulseProject(noteLines({0, 4, 8, 12}), 16, 2);
+    p.layers[0].instrument.params = {{"mode", 1}, {"shape", static_cast<double>(cawtest::Shape::Saw)}};
+    p.layers[0].automation.push_back({"volume", {{0, 0.1}, {12, 1.0}, {31, 0.3}}});
+    p.layers[0].automation.push_back({"pan", {{0, -1}, {32, 1}}});
+    ProjectAutomationLaneSpec lane;
+    lane.targetType = "instrument";
+    lane.moduleId = "l0";
+    lane.target = "level";
+    lane.points = {{0, 0.2}, {20, 1.0}, {32, 0.5}};
+    p.automation.push_back(lane);
+    p.tempoMap = {{0, 70, false}, {6, 190, true}};
+    std::vector<float> a, b;
+    for (const int block : {64, 173}) {
+        std::vector<float>& out = block == 64 ? a : b;
+        Engine e(44100);
+        e.setMasterBypass(true);
+        CHECK(e.setProject(p).find("\"ok\":true") != std::string::npos);
+        e.play();
+        std::vector<float> l(static_cast<size_t>(block)), r(static_cast<size_t>(block));
+        for (int i = 0; i < 44100 * 3; i += block) {
+            e.process(l.data(), r.data(), block);
+            out.insert(out.end(), l.begin(), l.end());
+            out.insert(out.end(), r.begin(), r.end());
+        }
+    }
+    const size_t n = std::min(a.size(), b.size()) / 2;
+    // Interleaved per block, so compare the left and right halves of each block's frames by frame index.
+    auto frameOf = [](const std::vector<float>& v, int block, size_t f, int side) {
+        const size_t blk = f / static_cast<size_t>(block), in = f % static_cast<size_t>(block);
+        return v[blk * 2 * static_cast<size_t>(block) + static_cast<size_t>(side) * static_cast<size_t>(block) + in];
+    };
+    int differ = 0;
+    for (size_t f = 0; f + 200 < n; ++f)
+        for (int side = 0; side < 2; ++side) differ += frameOf(a, 64, f, side) != frameOf(b, 173, f, side);
+    CHECK_EQ(differ, 0);
+}
+
+TEST(the_position_is_on_the_map_the_audio_thread_plays) {
+    ProjectSpec p = impulseProject(noteLines({0}), 64, 4);
+    Engine e(48000);
+    CHECK(e.setProject(p).find("\"ok\":true") != std::string::npos);
+    std::vector<float> l(256), r(256);
+    e.process(l.data(), r.data(), 256);
+    CHECK_EQ(e.position().bpm, 120.0);
+    CHECK(e.setTempoMap({{0, 90, false}}).empty());
+    CHECK_EQ(e.position().bpm, 120.0);  // sent, not yet played
+    e.process(l.data(), r.data(), 256);
+    CHECK_EQ(e.position().bpm, 90.0);
+    CHECK(e.setTimeSignatures({{0, 0, 7, 8}}).empty());
+    e.process(l.data(), r.data(), 256);
+    CHECK(e.position().num == 7 && e.position().den == 8);
+}
+
+TEST(the_count_in_in_bars_clicks_whole_bars_of_the_signature) {
+    // 2 bars from beat 8 (6/8 at 90 BPM): twelve eighth-note clicks of 16000 samples, accented on the first of each bar.
+    ProjectSpec p = cawtest::testSignalProject({}, 120, 8);
+    p.tempoMap = {{0, 120, false}, {8, 90, false}};
+    p.timeSigs = {{0, 0, 4, 4}, {2, 8, 6, 8}};
+    Engine e(48000);
+    e.setMasterBypass(true);
+    CHECK(e.setProject(p).find("\"ok\":true") != std::string::npos);
+    e.playCountIn(32, 2, true);
+    const std::vector<Click> got = clicks(e, 12 * 16000 - 1000);
+    CHECK_EQ(got.size(), 12u);
+    for (size_t i = 0; i < got.size(); ++i) {
+        CHECK_EQ(got[i].frame, static_cast<int64_t>(i) * 16000);
+        CHECK_EQ(got[i].accent, i % 6 == 0);
+    }
+}
+
+TEST(midi_export_refuses_tempos_and_lengths_the_format_cannot_hold) {
+    PatternResult pr = parsePattern("---\nkind: pattern\nlength: 1 bars\n---\n0 C4 1 1\n");
+    CHECK(pr.pattern != nullptr);
+    if (!pr.pattern) return;
+    std::string error;
+    MidiSongMeta slow;
+    slow.tempo = {{0, 120, false}, {2, 3.0, false}};
+    CHECK(!checkMidiExport(*pr.pattern, slow, false, error) && error.find("3.576") != std::string::npos);
+    CHECK(checkMidiExport(*pr.pattern, slow, true, error));  // a clip file holds 3 BPM
+    MidiSongMeta slower;
+    slower.tempo = {{0, 1.2, false}};
+    CHECK(!checkMidiExport(*pr.pattern, slower, true, error) && error.find("1.397") != std::string::npos);
+    // The writers keep what they do write in range: a 3.6 BPM tempo round trips.
+    MidiSongMeta ok;
+    ok.tempo = {{0, 3.6, false}};
+    CHECK(checkMidiExport(*pr.pattern, ok, false, error));
+    const std::vector<uint8_t> bytes = patternToSmf(*pr.pattern, ok);
+    MidiSongMeta back;
+    CHECK(!patternFromMidi(bytes.data(), bytes.size(), MidiImportOptions{}, error, &back).empty());
+    CHECK_NEAR(back.tempo[0].bpm, 3.6, 1e-5);
+    // A .mid delta is at most 28 bits: a pattern longer than 0x0FFFFFFF ticks (1,118,481 steps) is refused.
+    PatternResult longOne = parsePattern("---\nkind: pattern\nlength: 1200000\n---\n0 C4 1 1\n");
+    CHECK(longOne.pattern != nullptr);
+    if (longOne.pattern) {
+        CHECK(!checkMidiExport(*longOne.pattern, ok, false, error) && error.find("too long") != std::string::npos);
+        CHECK(checkMidiExport(*longOne.pattern, ok, true, error));  // a clip file splits long gaps
+    }
+    // Tempo changes after the pattern's end are left out, so no delta runs past it.
+    MidiSongMeta late;
+    late.tempo = {{0, 120, false}, {1e6, 90, false}};
+    const std::vector<uint8_t> b2 = patternToSmf(*pr.pattern, late);
+    MidiSongMeta back2;
+    CHECK(!patternFromMidi(b2.data(), b2.size(), MidiImportOptions{}, error, &back2).empty());
+    CHECK_EQ(back2.tempo.size(), 1u);
+}

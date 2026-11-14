@@ -282,6 +282,13 @@ bool parseProject(std::string_view text, ProjectSpec& out, std::string& error) {
     out.name = root.string("name");
     out.bpm = clampd(root.number("bpm", 120), 20, 400);
     out.beatsPerBar = clampi(root.number("beats_per_bar", 4), 1, 16);
+    if (const Json* tm = root.get("tempo_map"); tm && tm->type != Json::Type::Null) {
+        if (!readTempoMap(*tm, out.tempoMap, error)) return false;
+        out.bpm = out.tempoMap.front().bpm;
+    }
+    if (const Json* ts = root.get("time_signatures"); ts && ts->type != Json::Type::Null) {
+        if (!readTimeSigs(*ts, out.timeSigs, error)) return false;
+    }
     const int maxBars = maxLoopBars(out.beatsPerBar);
     const int maxSteps = maxArrangementSteps(out.beatsPerBar);
     if (!wholeIn(root.number("loop_bars", 4), 1, maxBars, out.loopBars)) {
@@ -585,6 +592,70 @@ bool parseProject(std::string_view text, ProjectSpec& out, std::string& error) {
     }
     out.auditionOnly = root.boolean("audition_only", false) && out.hasAuditionInstrument;
     return true;
+}
+
+bool readTempoMap(const Json& a, std::vector<TempoPointSpec>& out, std::string& error) {
+    if (a.type != Json::Type::Array || a.arr.empty() || a.arr.size() > static_cast<size_t>(kMaxTempoPoints)) {
+        error = "tempo_map must be a list of 1 to " + std::to_string(kMaxTempoPoints) + " {\"beat\", \"bpm\", \"ramp\"}";
+        return false;
+    }
+    std::vector<TempoPointSpec> pts;
+    pts.reserve(a.arr.size());
+    for (const Json& j : a.arr) {
+        const Json* beat = j.type == Json::Type::Object ? j.get("beat") : nullptr;
+        const Json* bpm = j.type == Json::Type::Object ? j.get("bpm") : nullptr;
+        if (!beat || !bpm || beat->type != Json::Type::Number || bpm->type != Json::Type::Number) {
+            error = "each tempo_map point needs a numeric \"beat\" and \"bpm\"";
+            return false;
+        }
+        pts.push_back({beat->num, bpm->num, j.boolean("ramp", false)});
+    }
+    if (!checkTempoPoints(pts, error)) return false;
+    out = std::move(pts);
+    return true;
+}
+
+bool readTimeSigs(const Json& a, std::vector<TimeSigSpec>& out, std::string& error) {
+    if (a.type != Json::Type::Array || a.arr.empty() || a.arr.size() > static_cast<size_t>(kMaxTimeSigs)) {
+        error = "time_signatures must be a list of 1 to " + std::to_string(kMaxTimeSigs) +
+                " {\"bar\", \"beat\", \"num\", \"den\"}";
+        return false;
+    }
+    std::vector<TimeSigSpec> sigs;
+    sigs.reserve(a.arr.size());
+    for (const Json& j : a.arr) {
+        const Json* bar = j.type == Json::Type::Object ? j.get("bar") : nullptr;
+        const double n = j.type == Json::Type::Object ? j.number("num", -1) : -1;
+        const double d = j.type == Json::Type::Object ? j.number("den", -1) : -1;
+        if (!bar || bar->type != Json::Type::Number || bar->num != std::floor(bar->num) || !(bar->num >= 0 && bar->num <= 1e9) ||
+            n != std::floor(n) || d != std::floor(d) || !(n >= 1 && n <= 32) || !(d >= 1 && d <= 32)) {
+            error = "each time signature needs a whole \"bar\" (0 or more), \"num\" 1..32 and \"den\" 1..32";
+            return false;
+        }
+        const Json* beat = j.get("beat");
+        sigs.push_back({static_cast<int64_t>(bar->num), beat && beat->type == Json::Type::Number ? beat->num : std::nan(""),
+                        static_cast<int>(n), static_cast<int>(d)});
+    }
+    if (!checkTimeSigs(sigs, error)) return false;
+    out = std::move(sigs);
+    return true;
+}
+
+std::vector<TempoPointSpec> tempoPointsOf(const ProjectSpec& p) {
+    if (p.tempoMap.empty()) return {{0.0, p.bpm, false}};
+    return p.tempoMap;
+}
+
+std::vector<TimeSigSpec> timeSigsOf(const ProjectSpec& p) {
+    if (p.timeSigs.empty()) return {{0, 0.0, p.beatsPerBar, 4}};
+    return p.timeSigs;
+}
+
+SongTime songTimeOf(const ProjectSpec& p, double sampleRate) {
+    SongTime t;
+    t.tempo.build(tempoPointsOf(p), sampleRate);
+    t.sigs.build(timeSigsOf(p));
+    return t;
 }
 
 }  // namespace caw

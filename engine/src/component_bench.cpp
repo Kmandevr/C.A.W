@@ -497,6 +497,19 @@ std::string runLocked(const Request& r, int32_t* progress, const int32_t* cancel
         allocations += s.allocations;
         failed += s.failed;
     };
+    // A curve's point: the plan measured kCurveRuns times on fresh instances, keeping the cheapest run, so another
+    // process taking the core for a while can't flip a grade (each run's allocations and failures still count).
+    constexpr int kCurveRuns = 3;
+    auto leastOf = [&](double rate, uint32_t maxFrames, const Plan& plan, Series& out) -> bool {
+        for (int k = 0; k < kCurveRuns; ++k) {
+            auto v = rig(rate, maxFrames);
+            if (!v) return false;
+            Series sk = measure(*v, plan, cancel, watch);
+            add(sk);
+            if (k == 0 || sk.mean < out.mean) out = std::move(sk);
+        }
+        return true;
+    };
 
     // Silence: a fresh instance hearing nothing (no notes), sleeping when it says quiet as the Engine lets it.
     auto quiet = rig(kRate, kBlock);
@@ -545,13 +558,11 @@ std::string runLocked(const Request& r, int32_t* progress, const int32_t* cancel
     std::vector<std::pair<double, double>> voiceCurve;  // (voices, % of a block)
     if (instrument) {
         for (int n : kVoiceCounts) {
-            auto v = rig(kRate, kBlock);
-            if (!v) return failure(error);
             Plan vp;
             vp.seconds = S / 2;
             vp.heldVoices = n;
-            const Series sv = measure(*v, vp, cancel, watch);
-            add(sv);
+            Series sv;
+            if (!leastOf(kRate, kBlock, vp, sv)) return failure(error);
             voiceCurve.push_back({static_cast<double>(n), 100.0 * sv.mean / budget});
         }
     }
@@ -561,13 +572,11 @@ std::string runLocked(const Request& r, int32_t* progress, const int32_t* cancel
     std::vector<std::pair<double, double>> blockCurve;  // (frames, % of that block's budget)
     std::vector<double> perFrameNs;
     for (uint32_t frames : kBlockSizes) {
-        auto v = rig(kRate, kMaxBlock);
-        if (!v) return failure(error);
         Plan bp;
         bp.block = frames;
         bp.seconds = S / 2;
-        const Series sb = measure(*v, bp, cancel, watch);
-        add(sb);
+        Series sb;
+        if (!leastOf(kRate, kMaxBlock, bp, sb)) return failure(error);
         blockCurve.push_back({static_cast<double>(frames), 100.0 * sb.mean / budgetUs(frames, kRate)});
         perFrameNs.push_back(1000.0 * sb.mean / frames);
     }
@@ -577,12 +586,10 @@ std::string runLocked(const Request& r, int32_t* progress, const int32_t* cancel
     std::vector<std::pair<double, double>> rateCurve;  // (rate, % of a 64-frame block's budget at that rate)
     std::vector<double> rateMean;
     for (double rate : kRates) {
-        auto v = rig(rate, kBlock);
-        if (!v) return failure(error);
         Plan rp;
         rp.seconds = S / 2;
-        const Series sr = measure(*v, rp, cancel, watch);
-        add(sr);
+        Series sr;
+        if (!leastOf(rate, kBlock, rp, sr)) return failure(error);
         rateCurve.push_back({rate, 100.0 * sr.mean / budgetUs(kBlock, rate)});
         rateMean.push_back(sr.mean);
     }

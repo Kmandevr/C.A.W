@@ -10,6 +10,7 @@
 #include "component_samples.h"
 
 #include "dependency.h"
+#include "tempo_map.h"
 
 namespace caw {
 
@@ -143,8 +144,12 @@ constexpr int maxArrangementSteps(int beatsPerBar) noexcept { return maxLoopBars
 
 struct ProjectSpec {
     std::string name;
-    double bpm = 120.0;
+    double bpm = 120.0;  // the tempo at beat 0 (tempoMap's first point)
     int beatsPerBar = 4;
+    // The tempo map and time signatures (1.0.3, tempo_map.h): "tempo_map" and "time_signatures", checked. Without
+    // them (empty), one point at `bpm` and one signature of beatsPerBar/4, so an older project plays as it did.
+    std::vector<TempoPointSpec> tempoMap;
+    std::vector<TimeSigSpec> timeSigs;
     int loopBars = 4;
     // A loop range inside the song (REAPER's loop points): while on, playback that reaches loopEndSteps goes back to
     // loopStartSteps, and the song end goes back there too. Off (the default), the whole song loops.
@@ -179,5 +184,16 @@ std::string routeTarget(const ProjectSpec& p, const LayerSpec& layer);
 // buses, sends and keys: false and a message naming the loop otherwise. parseProject calls it.
 bool validateRouting(const ProjectSpec& p, std::string& error);
 bool parseProject(std::string_view json, ProjectSpec& out, std::string& error);
+
+struct Json;
+// A "tempo_map" array ([{"beat", "bpm", "ramp"}]) or "time_signatures" array ([{"bar", "beat", "num", "den"}]) from
+// untrusted JSON, checked (checkTempoPoints, checkTimeSigs). False with an error naming the problem.
+bool readTempoMap(const Json& array, std::vector<TempoPointSpec>& out, std::string& error);
+bool readTimeSigs(const Json& array, std::vector<TimeSigSpec>& out, std::string& error);
+// The project's tempo map and signatures at a sample rate (allocates: control thread); empty lists: `bpm` and
+// beatsPerBar/4.
+std::vector<TempoPointSpec> tempoPointsOf(const ProjectSpec& p);
+std::vector<TimeSigSpec> timeSigsOf(const ProjectSpec& p);
+SongTime songTimeOf(const ProjectSpec& p, double sampleRate);
 
 }  // namespace caw

@@ -117,7 +117,8 @@ public:
     // Before the mix graph runs a chunk of m frames (m <= ComponentChain::kMaxFrames): takes a new plan, restarts
     // the modulators at Play, runs every modulator block that is due and works out the chunk's offsets.
     void beginChunk(uint32_t m, int64_t songSample, double stepLength, double tempo, uint32_t beatsPerBar,
-                    bool playing, uint64_t playEpoch, int64_t chunk, ChainProfile* profile = nullptr) noexcept;
+                    bool playing, uint64_t playEpoch, int64_t chunk, ChainProfile* profile = nullptr,
+                    const SongTime* song = nullptr) noexcept;
     // The modulation of chain `chain` of `slot` (-1 the master) for this chunk, or null. `which` (0 or 1) picks
     // the scratch, so a chain and the one it replaces (crossfading) can both be modulated in one chunk; 2 is the
     // per-note FX's (ModChainKind::NoteFx), whose bindings the NoteFxHost copies (it runs inside the instrument).

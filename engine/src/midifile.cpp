@@ -33,7 +33,20 @@ struct Collected {
     int tsNum = 4, tsDenPow = 2;  // 4/4
     int64_t tsTick = -1;          // where the first time signature was found (-1 = none)
     std::string name;
+    // Every tempo (tick, BPM) and signature (tick, num, den) in the file, for the tempo map (1.0.3).
+    std::vector<std::pair<int64_t, double>> tempos;
+    std::vector<TimeSigSpec> meters;  // bar unused; beat holds the tick
 };
+
+void noteTempo(Collected& c, int64_t tick, double bpm) {
+    if (!(bpm > 0) || !std::isfinite(bpm)) return;
+    c.tempos.emplace_back(tick, std::clamp(bpm, kMinTempoBpm, kMaxTempoBpm));
+}
+
+void noteMeter(Collected& c, int64_t tick, int num, int denPow) {
+    if (num < 1 || num > 32 || denPow < 0 || denPow > 5) return;  // n/1 .. n/32: what the tempo map takes
+    c.meters.push_back({0, static_cast<double>(tick), num, 1 << denPow});
+}
 
 struct Fail {
     std::string msg;
@@ -144,7 +157,14 @@ void readSmf(const uint8_t* data, size_t size, const MidiImportOptions& o, Colle
                 if (mlen > end - t.i) throw Fail{"a meta event is longer than its track"};
                 const uint8_t* m = data + t.i;
                 if (type == 0x03 && name.empty()) name.assign(reinterpret_cast<const char*>(m), mlen);
-                if (type == 0x58 && mlen >= 2) noteTimeSignature(c, tick, m[0], m[1]);
+                if (type == 0x58 && mlen >= 2) {
+                    noteTimeSignature(c, tick, m[0], m[1]);
+                    noteMeter(c, tick, m[0], m[1]);
+                }
+                if (type == 0x51 && mlen >= 3) {
+                    const uint32_t us = (uint32_t(m[0]) << 16) | (uint32_t(m[1]) << 8) | m[2];
+                    if (us > 0) noteTempo(c, tick, 60000000.0 / us);
+                }
                 t.i += mlen;
                 status = 0;
                 if (type == 0x2F) break;
@@ -256,7 +276,11 @@ void readClip(const uint8_t* data, size_t size, const MidiImportOptions& o, Coll
             }
         } else if (mt == 0xD) {
             const int form = (w0 >> 22) & 3, bank = (w0 >> 8) & 0xFF, st = w0 & 0xFF;
-            if (bank == 0x00 && st == 0x01) noteTimeSignature(c, tick, static_cast<int>(w1 >> 24), static_cast<int>((w1 >> 16) & 0xFF));
+            if (bank == 0x00 && st == 0x01) {
+                noteTimeSignature(c, tick, static_cast<int>(w1 >> 24), static_cast<int>((w1 >> 16) & 0xFF));
+                noteMeter(c, tick, static_cast<int>(w1 >> 24), static_cast<int>((w1 >> 16) & 0xFF));
+            }
+            if (bank == 0x00 && st == 0x00 && w1 > 0) noteTempo(c, tick, 6.0e9 / w1);  // Set Tempo: 10 ns a quarter
             if (bank == 0x01 && st == 0x03) {  // MIDI Clip Name, 12 UTF-8 bytes per UMP
                 if (form == 0 || form == 1) name.clear();
                 for (size_t q = 1; q < 4; ++q) {
@@ -486,7 +510,42 @@ std::string exportName(const Pattern& p) {
 
 }  // namespace
 
-std::string patternFromMidi(const uint8_t* data, size_t size, const MidiImportOptions& options, std::string& error) {
+namespace {
+
+// The file's tempo changes and meters as a tempo map and signatures (MidiSongMeta), in beats from its ticks.
+void songMeta(Collected& c, MidiSongMeta& out) {
+    const double ppq = static_cast<double>(c.ppq);
+    std::stable_sort(c.tempos.begin(), c.tempos.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
+    std::vector<TempoPointSpec> tempo;
+    for (const auto& [tick, bpm] : c.tempos) {
+        const double beat = static_cast<double>(tick) / ppq;
+        if (!tempo.empty() && tempo.back().beat == beat) tempo.back().bpm = bpm;  // the last at a tick holds
+        else tempo.push_back({beat, bpm, false});
+    }
+    if (tempo.empty() || tempo.front().beat > 0) tempo.insert(tempo.begin(), {0.0, 120.0, false});
+    if (tempo.size() > static_cast<size_t>(kMaxTempoPoints))
+        throw Fail{"the file has more than " + std::to_string(kMaxTempoPoints) + " tempo changes"};
+    std::string error;
+    if (!checkTempoPoints(tempo, error)) throw Fail{error};
+    std::stable_sort(c.meters.begin(), c.meters.end(), [](const TimeSigSpec& a, const TimeSigSpec& b) { return a.beat < b.beat; });
+    std::vector<TimeSigSpec> sigs;
+    for (TimeSigSpec m : c.meters) {
+        m.beat /= ppq;
+        if (!sigs.empty() && sigs.back().beat == m.beat) sigs.back() = m;
+        else sigs.push_back(m);
+    }
+    if (sigs.empty() || sigs.front().beat > 0) sigs.insert(sigs.begin(), {0, 0.0, 4, 4});
+    if (sigs.size() > static_cast<size_t>(kMaxTimeSigs))
+        throw Fail{"the file has more than " + std::to_string(kMaxTimeSigs) + " time signatures"};
+    if (!timeSigsFromBeats(sigs, error, true)) throw Fail{error};
+    out.tempo = std::move(tempo);
+    out.sigs = std::move(sigs);
+}
+
+}  // namespace
+
+std::string patternFromMidi(const uint8_t* data, size_t size, const MidiImportOptions& options, std::string& error,
+                            MidiSongMeta* song) {
     error.clear();
     try {
         if (!data || size == 0) throw Fail{"the file is empty"};
@@ -502,6 +561,7 @@ std::string patternFromMidi(const uint8_t* data, size_t size, const MidiImportOp
         std::string text = writePattern(c, o);
         PatternResult check = parsePattern(text);
         if (!check.pattern) throw Fail{"the imported notes don't make a valid pattern: " + check.error};
+        if (song) songMeta(c, *song);
         return text;
     } catch (const Fail& f) {
         error = f.msg;
@@ -511,7 +571,7 @@ std::string patternFromMidi(const uint8_t* data, size_t size, const MidiImportOp
 
 // MPE (MIDI Polyphonic Expression, lower zone): channel 1 manages, channels 2-16 each carry one note at a time with its
 // own pitch bend, channel pressure and CC74 (timbre). Used when any note has a bend, vibrato, press or timbre.
-std::vector<MidiEvent> mpeEvents(const Pattern& p, const std::vector<Segment>& segs, double bpm) {
+std::vector<MidiEvent> mpeEvents(const Pattern& p, const std::vector<Segment>& segs, const TempoMap& tempo) {
     std::vector<MidiEvent> ev;
     // The bend range covers the widest bend in the pattern: 12 semitones, else 48 (MPE's own default).
     double widest = 0;
@@ -535,7 +595,6 @@ std::vector<MidiEvent> mpeEvents(const Pattern& p, const std::vector<Segment>& s
         const uint8_t rpn[][2] = {{101, 0}, {100, 0}, {6, static_cast<uint8_t>(range)}, {38, 0}, {101, 127}, {100, 127}};
         for (const auto& m : rpn) ev.push_back({0, 0, {cc, m[0], m[1]}, 3});
     }
-    const double ticksPerSecond = kMidiExportPpq * bpm / 60.0;
     const int64_t every = kStepTicks / 8;  // a 1/32 note: smooth enough for bends and vibrato up to ~8 Hz at 120 BPM
     int64_t busyUntil[16] = {};
     int next = 1;
@@ -556,6 +615,8 @@ std::vector<MidiEvent> mpeEvents(const Pattern& p, const std::vector<Segment>& s
         const int key = static_cast<int>(std::lround(s.pitch));
         const NoteExpression* x = s.extra >= 0 && static_cast<size_t>(s.extra) < p.expressions.size()
                                       ? &p.expressions[static_cast<size_t>(s.extra)] : nullptr;
+        // Vibrato runs in seconds: at the tempo where the note starts.
+        const double ticksPerSecond = kMidiExportPpq * tempo.bpmAtStep(static_cast<double>(s.on) / kStepTicks) / 60.0;
         // The note's offset from its key at a tick inside it: microtonal pitch + bend curve + vibrato.
         auto bendAt = [&](int64_t tick) {
             const double into = static_cast<double>(tick - s.on);
@@ -603,23 +664,120 @@ std::vector<MidiEvent> mpeEvents(const Pattern& p, const std::vector<Segment>& s
     return ev;
 }
 
+namespace {
+
+// The tempo and meter events of a song, in ticks: a tempo (BPM) or a signature (num, den) at each.
+struct MetaEvent {
+    int64_t tick;
+    bool tempo;
+    double bpm;
+    int num, den;
+};
+
+std::vector<MetaEvent> metaEvents(const MidiSongMeta& song, int64_t lengthTicks) {
+    TempoMap tm;
+    tm.build(song.tempo, 48000.0);
+    const std::vector<TempoPointSpec>& pts = tm.points();
+    std::vector<MetaEvent> out;
+    auto tickOf = [](double beat) { return static_cast<int64_t>(std::llround(beat * kMidiExportPpq)); };
+    for (size_t i = 0; i < pts.size(); ++i) {
+        const bool rampNext = i + 1 < pts.size() && pts[i + 1].ramp;
+        if (!rampNext) {  // a step (or a ramp's end): this point's tempo from here
+            out.push_back({tickOf(pts[i].beat), true, pts[i].bpm, 0, 0});
+            continue;
+        }
+        // A ramp to the next point: a stretch every 1/16 note (at most 1024), each at the tempo that keeps its length.
+        const double a = pts[i].beat, b = pts[i + 1].beat;
+        const int n = static_cast<int>(std::clamp(std::ceil((b - a) * 4.0), 1.0, 1024.0));
+        for (int k = 0; k < n; ++k) {
+            const double x = a + (b - a) * k / n, y = k + 1 == n ? b : a + (b - a) * (k + 1) / n;
+            const double sec = tm.secondsAt(y) - tm.secondsAt(x);
+            out.push_back({tickOf(x), true, sec > 0 ? 60.0 * (y - x) / sec : pts[i].bpm, 0, 0});
+        }
+    }
+    for (const TimeSigSpec& sig : song.sigs) out.push_back({tickOf(sig.beat), false, 0, sig.num, sig.den});
+    // Changes from the pattern's end on are left out (they change nothing it plays, and keep every delta in range).
+    out.erase(std::remove_if(out.begin(), out.end(), [&](const MetaEvent& e) { return e.tick > 0 && e.tick >= lengthTicks; }),
+              out.end());
+    // By tick, tempo before meter; at one tick the last tempo holds.
+    std::stable_sort(out.begin(), out.end(), [](const MetaEvent& x, const MetaEvent& y) {
+        return x.tick != y.tick ? x.tick < y.tick : x.tempo > y.tempo;
+    });
+    std::vector<MetaEvent> kept;
+    for (const MetaEvent& e : out) {
+        if (!kept.empty() && kept.back().tick == e.tick && kept.back().tempo == e.tempo) kept.back() = e;
+        else kept.push_back(e);
+    }
+    return kept;
+}
+
+int denPower(int den) {
+    int k = 0;
+    while ((1 << k) < den && k < 5) ++k;
+    return k;
+}
+
+int songBeatsPerBar(const MidiSongMeta& song) {
+    const TimeSigSpec& s = song.sigs.front();
+    return safeBeats(static_cast<int>(std::lround(s.num * 4.0 / s.den)));
+}
+
+}  // namespace
+
+
+bool checkMidiExport(const Pattern& p, const MidiSongMeta& song, bool clip, std::string& error) {
+    // A .mid tempo is 24-bit microseconds a quarter; a clip's Set Tempo 32-bit tens of nanoseconds.
+    const double slowest = clip ? 6.0e9 / 4294967295.0 : 60000000.0 / 16777215.0;
+    for (const TempoPointSpec& t : song.tempo)
+        if (!(t.bpm >= slowest)) {
+            char b[160];
+            std::snprintf(b, sizeof b, "a %s holds tempos from %.4g BPM; the tempo map has %.4g BPM",
+                          clip ? "MIDI 2.0 clip file" : ".mid file", slowest, t.bpm);
+            error = b;
+            return false;
+        }
+    // A .mid delta time is a variable-length number of at most 28 bits; the longest delta is the pattern's length.
+    if (!clip && static_cast<int64_t>(p.steps(songBeatsPerBar(song))) * kStepTicks > 0x0FFFFFFF) {
+        error = "the pattern is too long for a .mid file (at most " + std::to_string(0x0FFFFFFF / kStepTicks) + " steps)";
+        return false;
+    }
+    return true;
+}
+
 std::vector<uint8_t> patternToSmf(const Pattern& p, double bpm, int beatsPerBar) {
-    bpm = safeBpm(bpm);
-    beatsPerBar = safeBeats(beatsPerBar);
+    MidiSongMeta song;
+    song.tempo = {{0.0, safeBpm(bpm), false}};
+    song.sigs = {{0, 0.0, safeBeats(beatsPerBar), 4}};
+    return patternToSmf(p, song);
+}
+
+std::vector<uint8_t> patternToSmf(const Pattern& p, const MidiSongMeta& song) {
+    const int beatsPerBar = songBeatsPerBar(song);
+    TempoMap tempo;
+    tempo.build(song.tempo, 48000.0);
     int64_t lengthTicks = 0;
     const std::vector<Segment> segs = segments(p, beatsPerBar, lengthTicks);
     const std::string name = exportName(p);
 
-    // Conductor track: tempo and meter.
+    // Conductor track: tempo and meter, each change at its tick.
     std::vector<uint8_t> head;
-    const uint32_t usPerQuarter = static_cast<uint32_t>(std::llround(60000000.0 / bpm));
-    head.insert(head.end(), {0x00, 0xFF, 0x51, 0x03, static_cast<uint8_t>(usPerQuarter >> 16),
-                             static_cast<uint8_t>(usPerQuarter >> 8), static_cast<uint8_t>(usPerQuarter)});
-    head.insert(head.end(), {0x00, 0xFF, 0x58, 0x04, static_cast<uint8_t>(beatsPerBar), 0x02, 24, 8});
-    std::vector<uint8_t> conductor = trackChunk(name, {}, head, lengthTicks);
+    int64_t last = 0;
+    for (const MetaEvent& e : metaEvents(song, lengthTicks)) {
+        putVlq(head, static_cast<uint32_t>(e.tick - last));
+        last = e.tick;
+        if (e.tempo) {
+            const uint32_t usPerQuarter =
+                static_cast<uint32_t>(std::clamp<long long>(std::llround(60000000.0 / e.bpm), 1, 0xFFFFFF));
+            head.insert(head.end(), {0xFF, 0x51, 0x03, static_cast<uint8_t>(usPerQuarter >> 16),
+                                     static_cast<uint8_t>(usPerQuarter >> 8), static_cast<uint8_t>(usPerQuarter)});
+        } else {
+            head.insert(head.end(), {0xFF, 0x58, 0x04, static_cast<uint8_t>(e.num), static_cast<uint8_t>(denPower(e.den)), 24, 8});
+        }
+    }
+    std::vector<uint8_t> conductor = trackChunk(name, {}, head, lengthTicks - last);
 
     if (!p.expressions.empty()) {
-        std::vector<uint8_t> notes = trackChunk(name, mpeEvents(p, segs, bpm), {}, lengthTicks);
+        std::vector<uint8_t> notes = trackChunk(name, mpeEvents(p, segs, tempo), {}, lengthTicks);
         std::vector<uint8_t> out = {'M', 'T', 'h', 'd', 0, 0, 0, 6, 0, 1, 0, 2};
         put16(out, kMidiExportPpq);
         out.insert(out.end(), conductor.begin(), conductor.end());
@@ -681,8 +839,14 @@ std::vector<uint8_t> patternToSmf(const Pattern& p, double bpm, int beatsPerBar)
 }
 
 std::vector<uint8_t> patternToMidiClip(const Pattern& p, double bpm, int beatsPerBar) {
-    bpm = safeBpm(bpm);
-    beatsPerBar = safeBeats(beatsPerBar);
+    MidiSongMeta song;
+    song.tempo = {{0.0, safeBpm(bpm), false}};
+    song.sigs = {{0, 0.0, safeBeats(beatsPerBar), 4}};
+    return patternToMidiClip(p, song);
+}
+
+std::vector<uint8_t> patternToMidiClip(const Pattern& p, const MidiSongMeta& song) {
+    const int beatsPerBar = songBeatsPerBar(song);
     int64_t lengthTicks = 0;
     const std::vector<Segment> segs = segments(p, beatsPerBar, lengthTicks);
     std::vector<uint32_t> w;
@@ -704,9 +868,14 @@ std::vector<uint8_t> patternToMidiClip(const Pattern& p, double bpm, int beatsPe
     // Clip Sequence Data: Start of Clip (MT F, status 0x20) with tempo, meter and name sharing its clockstamp.
     w.push_back(0x00400000u);
     w.insert(w.end(), {0xF0200000u, 0, 0, 0});
-    const uint32_t tenNs = static_cast<uint32_t>(std::llround(6.0e9 / bpm));
-    w.insert(w.end(), {0xD0100000u, tenNs, 0, 0});                                          // Set Tempo
-    w.insert(w.end(), {0xD0100001u, (uint32_t(beatsPerBar) << 24) | (2u << 16) | (8u << 8), 0, 0});  // 4ths, 8 32nds
+    // Set Tempo (10 ns a quarter) and Set Time Signature (num, den as a power of 2, 8 32nds a quarter).
+    const std::vector<MetaEvent> metas = metaEvents(song, lengthTicks);
+    auto putMeta = [&](const MetaEvent& e) {
+        if (e.tempo) w.insert(w.end(), {0xD0100000u, static_cast<uint32_t>(std::llround(6.0e9 / e.bpm)), 0, 0});
+        else w.insert(w.end(), {0xD0100001u, (uint32_t(e.num) << 24) | (uint32_t(denPower(e.den)) << 16) | (8u << 8), 0, 0});
+    };
+    size_t meta = 0;
+    for (; meta < metas.size() && metas[meta].tick == 0; ++meta) putMeta(metas[meta]);
     const std::string name = exportName(p);
     for (size_t at = 0; at < name.size(); at += 12) {  // MIDI Clip Name (Flex Data bank 1, status 3)
         const bool first = at == 0, last = at + 12 >= name.size();
@@ -752,11 +921,19 @@ std::vector<uint8_t> patternToMidiClip(const Pattern& p, double bpm, int beatsPe
         return a.tick != b.tick ? a.tick < b.tick : a.order < b.order;
     });
     for (const Ev& e : ev) {
+        for (; meta < metas.size() && metas[meta].tick <= e.tick; ++meta) {  // later tempo and meter changes
+            if (metas[meta].tick != now) clock(metas[meta].tick);
+            putMeta(metas[meta]);
+        }
         if (e.tick != now) clock(e.tick);
         w.push_back(e.w0);
         w.push_back(e.w1);
     }
-    clock(lengthTicks);
+    for (; meta < metas.size(); ++meta) {
+        if (metas[meta].tick != now) clock(metas[meta].tick);
+        putMeta(metas[meta]);
+    }
+    clock(std::max(lengthTicks, now));
     w.insert(w.end(), {0xF0210000u, 0, 0, 0});  // End of Clip
     std::vector<uint8_t> out = {'S', 'M', 'F', '2', 'C', 'L', 'I', 'P'};
     out.reserve(8 + w.size() * 4);

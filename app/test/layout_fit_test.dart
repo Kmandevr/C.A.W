@@ -32,6 +32,7 @@ import 'package:caw/model/audio_edit.dart';
 import 'package:caw/model/updates/update_fetch.dart';
 import 'package:caw/model/updates/update_service.dart';
 import 'package:caw/ui/arrange/mixer_card.dart';
+import 'package:caw/ui/arranger_screen.dart';
 import 'package:caw/ui/benchmark/benchmark_screen.dart';
 import 'package:caw/ui/benchmark/plugin_bench_screen.dart';
 import 'package:caw/ui/background_playback_ui.dart';
@@ -58,6 +59,8 @@ import 'package:caw/model/changelog.dart' show WhatsNewDue;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
+
+import 'tempo_golden_test.dart' show tempoSong;
 
 import 'background_playback_test.dart' show FakePlaybackService;
 import 'audio_fake.dart';
@@ -593,6 +596,16 @@ void main() {
       await _settle(c.tester);
       await c.shot('select');
     }
+  });
+
+  // --- Arrange with a tempo map, signature changes, sections and a marker (#207; no engine) ---
+  _sweep('arrange-tempo', (c) async {
+    final s = AppState(settings: Settings());
+    addTearDown(s.dispose);
+    s.project = tempoSong();
+    await _pump(c, Scaffold(body: ListenableBuilder(listenable: s, builder: (_, _) => ArrangerScreen(state: s))));
+    await _settle(c.tester);
+    await c.shot('');
   });
 
   // --- engine screens: Shell sections, mixer, export ---
