@@ -471,6 +471,8 @@ class Bindings {
   late final int Function(Pointer<Void>, Pointer<CawTimeSigStruct>, int) setTimeSignatures = _lib.lookupFunction<
       Int32 Function(Pointer<Void>, Pointer<CawTimeSigStruct>, Int32),
       int Function(Pointer<Void>, Pointer<CawTimeSigStruct>, int)>('caw_engine_set_time_signatures');
+  late final void Function(Pointer<Void>, double, int) playCountInBars = _lib.lookupFunction<
+      Void Function(Pointer<Void>, Double, Int32), void Function(Pointer<Void>, double, int)>('caw_engine_play_count_in_bars');
   late final int Function(Pointer<Void>, double) setBpm = _lib.lookupFunction<Int32 Function(Pointer<Void>, Double),
       int Function(Pointer<Void>, double)>('caw_engine_set_bpm');
   late final int Function(Pointer<Void>, Pointer<CawPositionStruct>) position = _lib.lookupFunction<

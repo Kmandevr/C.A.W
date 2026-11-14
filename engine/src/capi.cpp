@@ -208,6 +208,10 @@ void caw_engine_play_count_in(CawEngine* e, double step, int32_t beats) {
     if (e) e->engine->playCountIn(step, beats);
 }
 
+void caw_engine_play_count_in_bars(CawEngine* e, double step, int32_t bars) {
+    if (e) e->engine->playCountIn(step, bars, true);
+}
+
 void caw_engine_set_metronome(CawEngine* e, int32_t on) {
     if (e) e->engine->setMetronome(on != 0);
 }
@@ -410,6 +414,16 @@ int32_t caw_pattern_export(const char* pattern_source, double bpm, int32_t beats
     if (!pr.pattern) {
         copyError(pr.error, error, error_len);
         return 1;
+    }
+    {
+        MidiSongMeta one;
+        one.tempo = {{0.0, bpm, false}};
+        one.sigs = {{0, 0.0, beats_per_bar, 4}};
+        std::string err;
+        if (!checkMidiExport(*pr.pattern, one, format == CAW_MIDI_CLIP, err)) {
+            copyError(err, error, error_len);
+            return 1;
+        }
     }
     const std::vector<uint8_t> bytes = format == CAW_MIDI_CLIP ? patternToMidiClip(*pr.pattern, bpm, beats_per_bar)
                                                                : patternToSmf(*pr.pattern, bpm, beats_per_bar);
@@ -618,6 +632,10 @@ extern "C" int32_t caw_pattern_export_song(const char* pattern_source, const Caw
     PatternResult pr = parsePattern(pattern_source);
     if (!pr.pattern) {
         copyError(pr.error, error, error_len);
+        return 1;
+    }
+    if (!checkMidiExport(*pr.pattern, song, format == CAW_MIDI_CLIP, err)) {
+        copyError(err, error, error_len);
         return 1;
     }
     const std::vector<uint8_t> bytes = format == CAW_MIDI_CLIP ? patternToMidiClip(*pr.pattern, song) : patternToSmf(*pr.pattern, song);

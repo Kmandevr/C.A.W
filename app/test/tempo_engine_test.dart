@@ -19,6 +19,7 @@ void main() {
     expect(e.setTimeSignatures(const [TimeSignature(0, 0, 6, 8), TimeSignature(0, 6, 4, 4)]), isTrue);
     expect(e.setTimeSignatures(const [TimeSignature(0, 0, 6, 8), TimeSignature(0, 4, 4, 4)]), isFalse,
         reason: 'a change lands on a bar line');
+    e.pullForTest(256);  // the audio thread takes them: the position is on the map it plays
     final p = e.position()!;
     expect(p.playing, isFalse);
     expect(p.frame, 0);
@@ -27,6 +28,8 @@ void main() {
     expect(p.bar, 0);
     expect((p.num, p.den), (6, 8));
     expect(e.setBpm(140), isTrue);
+    expect(e.position()!.bpm, 120, reason: 'not yet played by the audio thread');
+    e.pullForTest(256);
     expect(e.position()!.bpm, 140);
     e.dispose();
   }, skip: skip);
@@ -39,6 +42,7 @@ void main() {
     final json = p.toEngineJson();
     expect(json, contains('"tempo_map"'));
     await e.setProject(json);
+    e.pullForTest(256);
     final pos = e.position()!;
     expect((pos.num, pos.den), (3, 4));
     expect(pos.bpm, 120);
@@ -48,10 +52,24 @@ void main() {
     e.dispose();
   }, skip: skip);
 
+  test('the count-in is whole bars of the signature: a 6/8 bar is six eighths', () async {
+    final e = Engine.create();
+    final p = ProjectDoc(id: 'p', name: 'T', modules: [], layers: []);
+    p.bpm = 120;
+    p.timeSignatures = const [TimeSignature(0, 0, 6, 8)];
+    await e.setProject(p.toEngineJson());
+    e.playCountInBars(0, 1);  // six clicks of an eighth at 120 BPM: 6 × 12000 samples at 48 kHz
+    e.pullForTest(70000);
+    expect(e.meters().playing, isFalse, reason: 'still counting in');
+    e.pullForTest(4000);
+    expect(e.meters().playing, isTrue);
+    e.dispose();
+  }, skip: skip);
+
   test('MIDI export and import keep the tempo map and signatures', () async {
     final dir = await Directory.systemTemp.createTemp('caw_tempo');
     final path = '${dir.path}/song.mid';
-    const pattern = '---\nkind: pattern\nlength: 4 bars\n---\n0 C4 1 1\n';
+    const pattern = '---\nkind: pattern\nlength: 6 bars\n---\n0 C4 1 1\n';
     expect(
         Engine.exportPatternSong(pattern, path,
             tempoMap: const [TempoPoint(0, 120), TempoPoint(8, 96), TempoPoint(16, 150)],

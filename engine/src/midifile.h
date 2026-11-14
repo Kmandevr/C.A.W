@@ -52,6 +52,10 @@ std::vector<uint8_t> patternToMidiClip(const Pattern& pattern, double bpm, int b
 // tempo event every 1/16 note (at most 1024 a ramp), each holding the tempo that keeps that stretch's exact length,
 // and a Standard MIDI File's tempo holds 0xFFFFFF us a quarter at most (about 3.6 BPM). The pattern's length in bars
 // is taken at the first signature's beats per bar (1..16).
+// Whether a pattern and its tempo map fit the format: every tempo a .mid holds (from about 3.58 BPM: 0xFFFFFF us a
+// quarter) or a clip file holds (from about 1.4 BPM: 2^32 - 1 tens of ns), and a .mid's longest delta time (the
+// pattern's length) within its 28-bit variable-length numbers. False with an error; the writers assume it holds.
+bool checkMidiExport(const Pattern& pattern, const MidiSongMeta& song, bool clip, std::string& error);
 std::vector<uint8_t> patternToSmf(const Pattern& pattern, const MidiSongMeta& song);
 std::vector<uint8_t> patternToMidiClip(const Pattern& pattern, const MidiSongMeta& song);
 

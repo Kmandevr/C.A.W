@@ -181,15 +181,17 @@ class LiveMidi extends ChangeNotifier {
 
   /// When the count-in ends (wall clock, for the transport's countdown), or null when none runs.
   DateTime? countInEnds;
+
+  /// The count-in's clicks: the ticks (1/den notes) of [countInBars] bars of the signature where it plays from.
   int countInBeats = 0;
+  double _countInTickMs = 500;
 
   /// The count-in's beats still to come (0 when none runs).
   int get countInLeft {
     final end = countInEnds;
     if (end == null || !recording || state.meters.playing) return 0;
     final ms = end.difference(DateTime.now()).inMilliseconds;
-    final beatMs = 60000 / state.project.bpm;
-    return ms <= 0 ? 0 : (ms / beatMs).ceil().clamp(0, countInBeats);
+    return ms <= 0 ? 0 : (ms / _countInTickMs).ceil().clamp(0, countInBeats);
   }
 
   /// A key or pad on screen pressed: a note on at [velocity] (0..1), as a USB keyboard's.
@@ -302,12 +304,17 @@ class LiveMidi extends ChangeNotifier {
         start = math.max(0.0, from - preRoll);
         state.pausedStep = start; // not seekTo: its notification would end this recording as a Stop does
       }
-      countInBeats = state.settings.countInBars * state.project.beatsPerBar;
-      state.togglePlay(countInBeats: countInBeats);
+      // The engine counts in whole bars of the signature where playback starts (C API 31): its ticks at the tempo there.
+      final bars = state.settings.countInBars;
+      final at = (state.pausedStep ?? 0) / 4;
+      final sig = state.project.bars.signatureAt(at);
+      countInBeats = bars * sig.num;
+      _countInTickMs = sig.unitBeats * 60000 / state.project.tempo.bpmAt(at);
+      state.togglePlay(countInBars: bars);
       countInEnds = countInBeats > 0 && state.transportOn
           // The clicks are heard an output latency after they render (Settings › Audio › Latency).
           ? DateTime.now().add(Duration(
-              microseconds: (countInBeats * 60e6 / state.project.bpm).round() + state.outputLatencyUs))
+              microseconds: (countInBeats * _countInTickMs * 1000).round() + state.outputLatencyUs))
           : null;
     }
     _wraps = 0;

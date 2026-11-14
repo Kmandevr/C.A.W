@@ -829,6 +829,10 @@ class Engine implements TempoEngine {
   /// Clicks [beats] beats at the tempo, then plays from [step] (the recording count-in); a stop cancels it.
   void playCountIn(double step, int beats) => _b.playCountIn(_handle, step, beats);
 
+  /// Clicks [bars] (0..16) whole bars of the time signature where [step] is (its ticks, 1/den notes, at the tempo
+  /// there; API 31), so the count-in starts on an accent, then plays from [step].
+  void playCountInBars(double step, int bars) => _b.playCountInBars(_handle, step, bars);
+
   /// The engine's built-in metronome click on every beat while playing.
   void setMetronome(bool on) => _b.setMetronome(_handle, on ? 1 : 0);
 

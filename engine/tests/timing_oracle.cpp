@@ -1,6 +1,12 @@
 // Strict IEEE reference for sample timing (CMakeLists builds this file with the strict floating-point flags).
 #include "timing_oracle.h"
 
+// The deterministic log1p the engine's tempo map uses (std::log1p differs by platform; tempo_map.h), declared here so
+// this file includes no engine header.
+namespace caw::tempomath {
+double log1p(double x) noexcept;
+}
+
 #include <cmath>
 
 namespace cawtest {
@@ -42,7 +48,7 @@ double strictTempoFrame(const std::vector<OraclePoint>& in, double rate, double 
             frame = frame + d * strictStepFrames(rate, pts[i].bpm);
         } else {
             const double k = (pts[i + 1].bpm - pts[i].bpm) / (pts[i + 1].beat - pts[i].beat);
-            frame = frame + 60.0 / k * std::log1p(k * (d / 4.0) / pts[i].bpm) * rate;
+            frame = frame + 60.0 / k * caw::tempomath::log1p(k * (d / 4.0) / pts[i].bpm) * rate;
         }
         if (last || step < s1) break;
     }

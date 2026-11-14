@@ -1155,8 +1155,8 @@ class AppState extends ChangeNotifier implements StressHost {
   bool useAudioDevice = true;
 
   /// Play and pause (Space, the transport's play button): a pause keeps the position and the next play resumes there.
-  /// [countInBeats] (recording): starting from a stop, the engine clicks that many beats first.
-  void togglePlay({int countInBeats = 0}) {
+  /// [countInBars] (recording): starting from a stop, the engine clicks that many bars of the signature first.
+  void togglePlay({int countInBars = 0}) {
     final e = engine;
     if (e == null) return;
     if (_transportOn) {
@@ -1172,8 +1172,8 @@ class AppState extends ChangeNotifier implements StressHost {
       }
       final from = pausedStep;
       _markPlayStart(from ?? 0);
-      if (countInBeats > 0) {
-        e.playCountIn(from ?? 0, countInBeats);
+      if (countInBars > 0) {
+        e.playCountInBars(from ?? 0, countInBars);
       } else {
         from == null ? e.play() : e.playAt(from);
       }

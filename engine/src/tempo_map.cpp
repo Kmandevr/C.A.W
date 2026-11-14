@@ -20,6 +20,62 @@ std::string num(double v) {
 
 }  // namespace
 
+namespace tempomath {
+
+namespace {
+
+constexpr double kLn2Hi = 6.93147180369123816490e-01;  // ln 2 split for Cody-Waite (fdlibm's constants)
+constexpr double kLn2Lo = 1.90821492927058770002e-10;
+constexpr double kLn2 = 0.693147180559945309417232121458176568;
+constexpr double kInvLn2 = 1.44269504088896338700e+00;
+
+// 1 / (2k + 1) for k = 0..12 and 1 / n! for n = 0..15, as literals (no division at run time).
+constexpr double kOdd[13] = {1.0, 1.0 / 3, 1.0 / 5, 1.0 / 7, 1.0 / 9, 1.0 / 11, 1.0 / 13, 1.0 / 15, 1.0 / 17, 1.0 / 19,
+                             1.0 / 21, 1.0 / 23, 1.0 / 25};
+constexpr double kFact[16] = {1.0, 1.0, 1.0 / 2, 1.0 / 6, 1.0 / 24, 1.0 / 120, 1.0 / 720, 1.0 / 5040, 1.0 / 40320,
+                              1.0 / 362880, 1.0 / 3628800, 1.0 / 39916800, 1.0 / 479001600, 1.0 / 6227020800.0,
+                              1.0 / 87178291200.0, 1.0 / 1307674368000.0};
+
+// 2 atanh(s) = ln((1 + s) / (1 - s)), |s| <= 0.1716: the odd series to s^25.
+double logSeries(double s) {
+    const double s2 = s * s;
+    double p = kOdd[12];
+    for (int k = 11; k >= 0; --k) p = p * s2 + kOdd[k];
+    return 2.0 * s * p;
+}
+
+// e^r - 1 for |r| <= 0.35: Taylor to r^15 / 15!, Horner from the top.
+double expm1Series(double r) {
+    double p = kFact[15];
+    for (int n = 14; n >= 1; --n) p = p * r + kFact[n];
+    return r * p;
+}
+
+}  // namespace
+
+double log1p(double x) noexcept {
+    if (!(x > -1.0)) return -1e300;
+    if (x > -0.2928932188134524 && x < 0.41421356237309515) return logSeries(x / (2.0 + x));  // 1 + x in [1/sqrt2, sqrt2]
+    int e = 0;
+    double m = std::frexp(1.0 + x, &e);  // [0.5, 1)
+    if (m < 0.70710678118654752440) {
+        m *= 2.0;
+        e -= 1;
+    }
+    return static_cast<double>(e) * kLn2 + logSeries((m - 1.0) / (m + 1.0));
+}
+
+double expm1(double x) noexcept {
+    if (!(x < 700.0)) return 1e300;
+    if (x < -40.0) return -1.0;
+    if (x > -0.35 && x < 0.35) return expm1Series(x);
+    const double n = std::floor(x * kInvLn2 + 0.5);
+    const double r = (x - n * kLn2Hi) - n * kLn2Lo;  // |r| <= ln2 / 2 + a little
+    return std::ldexp(1.0 + expm1Series(r), static_cast<int>(n)) - 1.0;
+}
+
+}  // namespace tempomath
+
 bool checkTempoPoints(std::vector<TempoPointSpec>& points, std::string& error) {
     if (points.empty() || points.size() > static_cast<size_t>(kMaxTempoPoints)) {
         error = "tempo_map must hold 1 to " + std::to_string(kMaxTempoPoints) + " points";
@@ -162,7 +218,7 @@ void TempoMap::build(const std::vector<TempoPointSpec>& in, double sampleRate) {
                 s.frame0 = p.frame0 + d * p.stepFrames;
                 s.sec0 = p.sec0 + (d / 4.0) * 60.0 / p.bpm0;
             } else {
-                const double t = 60.0 / p.slope * std::log1p(p.slope * (d / 4.0) / p.bpm0);
+                const double t = 60.0 / p.slope * tempomath::log1p(p.slope * (d / 4.0) / p.bpm0);
                 s.frame0 = p.frame0 + t * sr_;
                 s.sec0 = p.sec0 + t;
             }
@@ -192,14 +248,27 @@ double TempoMap::frameAt(double step) const noexcept {
     const Seg& s = segs_[segAtStep(step)];
     const double d = step - s.step0;
     if (s.slope == 0.0 || d < 0.0) return s.frame0 + d * s.stepFrames;
-    return s.frame0 + 60.0 / s.slope * std::log1p(s.slope * (d / 4.0) / s.bpm0) * sr_;
+    return s.frame0 + 60.0 / s.slope * tempomath::log1p(s.slope * (d / 4.0) / s.bpm0) * sr_;
 }
 
 double TempoMap::stepAt(double frame) const noexcept {
     const Seg& s = segs_[segAtFrame(frame)];
     const double d = frame - s.frame0;
     if (s.slope == 0.0 || d < 0.0) return s.step0 + d / s.stepFrames;
-    return s.step0 + 4.0 * (s.bpm0 / s.slope * std::expm1(s.slope * (d / sr_) / 60.0));
+    return s.step0 + 4.0 * (s.bpm0 / s.slope * tempomath::expm1(s.slope * (d / sr_) / 60.0));
+}
+
+void TempoMap::stepsAt(int64_t frame, int n, double* out) const noexcept {
+    if (n <= 0) return;
+    size_t i = segAtFrame(static_cast<double>(frame));
+    for (int k = 0; k < n; ++k) {
+        const double f = static_cast<double>(frame + k);
+        while (i + 1 < segs_.size() && f >= segs_[i + 1].frame0) ++i;  // the next segment from its first frame
+        const Seg& s = segs_[i];
+        const double d = f - s.frame0;
+        out[k] = s.slope == 0.0 || d < 0.0 ? s.step0 + d / s.stepFrames
+                                           : s.step0 + 4.0 * (s.bpm0 / s.slope * tempomath::expm1(s.slope * (d / sr_) / 60.0));
+    }
 }
 
 double TempoMap::roundFrame(double step) const noexcept { return std::floor(frameAt(step) + 0.5); }
@@ -226,14 +295,14 @@ double TempoMap::secondsAt(double beat) const noexcept {
     const Seg& s = segs_[segAtStep(beat * 4.0)];
     const double d = beat - s.step0 / 4.0;
     if (s.slope == 0.0 || d < 0.0) return s.sec0 + d * 60.0 / s.bpm0;
-    return s.sec0 + 60.0 / s.slope * std::log1p(s.slope * d / s.bpm0);
+    return s.sec0 + 60.0 / s.slope * tempomath::log1p(s.slope * d / s.bpm0);
 }
 
 double TempoMap::beatAt(double seconds) const noexcept {
     const Seg& s = segs_[segAtSecond(seconds)];
     const double t = seconds - s.sec0;
     if (s.slope == 0.0 || t < 0.0) return s.step0 / 4.0 + t * s.bpm0 / 60.0;
-    return s.step0 / 4.0 + s.bpm0 / s.slope * std::expm1(s.slope * t / 60.0);
+    return s.step0 / 4.0 + s.bpm0 / s.slope * tempomath::expm1(s.slope * t / 60.0);
 }
 
 // ---------------------------------------------------------------------------------------------------------------

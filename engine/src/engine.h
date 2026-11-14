@@ -160,8 +160,9 @@ public:
     void setMaster(double volume);
     void play(double fromStep = 0);  // fromStep: sixteenth steps into the project loop (out of range starts at 0)
     // Count-in: clicks [beats] beats at the tempo (previews still play), then plays from [fromStep] on the
-    // sample after the last beat. 0 beats is play().
-    void playCountIn(double fromStep, int beats);
+    // sample after the last beat. 0 beats is play(). Its beats are the ticks (1/den notes) of the signature where
+    // playback starts; with [bars], [beats] is bars (0..16) of that signature's ticks, so it starts on an accent.
+    void playCountIn(double fromStep, int beats, bool bars = false);
     // The metronome: a short built-in click on every beat while playing (accented on the bar), mixed before the
     // safety limiter. Off by default; renders and exports never click.
     void setMetronome(bool on);
@@ -418,6 +419,8 @@ private:
     // The tempo map (audio thread): a new one swapped in, the song step at a sample, and a step of the slot's pass
     // as a sample into the pass (sampletime::roundFrames(step, stepLen_) with one tempo) and samples per step there.
     void takeSong(SongTime* next) noexcept;
+    void keepInRange() noexcept;     // after takeSong and updateTiming: a kept beat inside the loop range stays inside
+    void publishSongPos() noexcept;  // callback end: the position on the playing map, for position()
     double songStep(int64_t frame) const noexcept;
     int64_t passFrame(const Slot& s, double step) const noexcept;
     double passStepLen(const Slot& s, double step) const noexcept;
@@ -502,6 +505,18 @@ private:
     SongTime* song_ = nullptr;   // the tempo map and signatures (owned; swapped by Transport and SetSong)
     bool timeConstant_ = true;   // one tempo: every position is step * stepLen_, as before the map
     bool simpleClicks_ = true;   // ... and one signature of beatsPerBar_/4: the metronome ticks every beat
+    bool keptInRange_ = false;   // takeSong kept the beat of a playhead inside the loop range
+    double chunkSteps_[kBlock] = {};  // with a tempo map: the song step at each frame of the chunk (songStep)
+    int64_t chunkStepsAt_ = 0;
+    int chunkStepsLen_ = 0;
+    // The position on the playing map (publishSongPos; a sequence lock, even when stable).
+    struct PublishedPos {
+        std::atomic<int64_t> frame{0}, bar{0};
+        std::atomic<double> beat{0}, bpm{120}, inBar{0};
+        std::atomic<int> sig{4 * 64 + 4};
+    };
+    PublishedPos pos_;
+    std::atomic<uint32_t> posSeq_{0};
     int64_t loopLen_ = 0; // samples per project loop
     double dcL_[2] = {0, 0}, dcR_[2] = {0, 0}, limEnv_ = 0;
     // Shedding and recovery (reportLoad; audio thread).

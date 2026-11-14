@@ -674,7 +674,7 @@ struct MetaEvent {
     int num, den;
 };
 
-std::vector<MetaEvent> metaEvents(const MidiSongMeta& song) {
+std::vector<MetaEvent> metaEvents(const MidiSongMeta& song, int64_t lengthTicks) {
     TempoMap tm;
     tm.build(song.tempo, 48000.0);
     const std::vector<TempoPointSpec>& pts = tm.points();
@@ -696,6 +696,9 @@ std::vector<MetaEvent> metaEvents(const MidiSongMeta& song) {
         }
     }
     for (const TimeSigSpec& sig : song.sigs) out.push_back({tickOf(sig.beat), false, 0, sig.num, sig.den});
+    // Changes from the pattern's end on are left out (they change nothing it plays, and keep every delta in range).
+    out.erase(std::remove_if(out.begin(), out.end(), [&](const MetaEvent& e) { return e.tick > 0 && e.tick >= lengthTicks; }),
+              out.end());
     // By tick, tempo before meter; at one tick the last tempo holds.
     std::stable_sort(out.begin(), out.end(), [](const MetaEvent& x, const MetaEvent& y) {
         return x.tick != y.tick ? x.tick < y.tick : x.tempo > y.tempo;
@@ -722,6 +725,25 @@ int songBeatsPerBar(const MidiSongMeta& song) {
 }  // namespace
 
 
+bool checkMidiExport(const Pattern& p, const MidiSongMeta& song, bool clip, std::string& error) {
+    // A .mid tempo is 24-bit microseconds a quarter; a clip's Set Tempo 32-bit tens of nanoseconds.
+    const double slowest = clip ? 6.0e9 / 4294967295.0 : 60000000.0 / 16777215.0;
+    for (const TempoPointSpec& t : song.tempo)
+        if (!(t.bpm >= slowest)) {
+            char b[160];
+            std::snprintf(b, sizeof b, "a %s holds tempos from %.4g BPM; the tempo map has %.4g BPM",
+                          clip ? "MIDI 2.0 clip file" : ".mid file", slowest, t.bpm);
+            error = b;
+            return false;
+        }
+    // A .mid delta time is a variable-length number of at most 28 bits; the longest delta is the pattern's length.
+    if (!clip && static_cast<int64_t>(p.steps(songBeatsPerBar(song))) * kStepTicks > 0x0FFFFFFF) {
+        error = "the pattern is too long for a .mid file (at most " + std::to_string(0x0FFFFFFF / kStepTicks) + " steps)";
+        return false;
+    }
+    return true;
+}
+
 std::vector<uint8_t> patternToSmf(const Pattern& p, double bpm, int beatsPerBar) {
     MidiSongMeta song;
     song.tempo = {{0.0, safeBpm(bpm), false}};
@@ -740,7 +762,7 @@ std::vector<uint8_t> patternToSmf(const Pattern& p, const MidiSongMeta& song) {
     // Conductor track: tempo and meter, each change at its tick.
     std::vector<uint8_t> head;
     int64_t last = 0;
-    for (const MetaEvent& e : metaEvents(song)) {
+    for (const MetaEvent& e : metaEvents(song, lengthTicks)) {
         putVlq(head, static_cast<uint32_t>(e.tick - last));
         last = e.tick;
         if (e.tempo) {
@@ -847,7 +869,7 @@ std::vector<uint8_t> patternToMidiClip(const Pattern& p, const MidiSongMeta& son
     w.push_back(0x00400000u);
     w.insert(w.end(), {0xF0200000u, 0, 0, 0});
     // Set Tempo (10 ns a quarter) and Set Time Signature (num, den as a power of 2, 8 32nds a quarter).
-    const std::vector<MetaEvent> metas = metaEvents(song);
+    const std::vector<MetaEvent> metas = metaEvents(song, lengthTicks);
     auto putMeta = [&](const MetaEvent& e) {
         if (e.tempo) w.insert(w.end(), {0xD0100000u, static_cast<uint32_t>(std::llround(6.0e9 / e.bpm)), 0, 0});
         else w.insert(w.end(), {0xD0100001u, (uint32_t(e.num) << 24) | (uint32_t(denPower(e.den)) << 16) | (8u << 8), 0, 0});

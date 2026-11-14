@@ -109,7 +109,8 @@ extern "C" {
    31 (2026-11-13, batch 1.0.3, #207): the tempo map and time signatures. The project JSON's "tempo_map" ([{"beat",
    "bpm" 1..999, "ramp"}], at most 4096, the first at beat 0) and "time_signatures" ([{"bar", "beat", "num" 1..32,
    "den" 1|2|4|8|16|32}], at most 1024, the first at bar 0); caw_engine_set_tempo_map, caw_engine_set_time_signatures,
-   caw_engine_set_bpm and caw_engine_position (beats, seconds, tempo, bar). Every beat-to-sample position (notes,
+   caw_engine_set_bpm, caw_engine_position (beats, seconds, tempo, bar, on the map the audio thread plays) and
+   caw_engine_play_count_in_bars (the count-in in bars of the signature's ticks). Every beat-to-sample position (notes,
    clips, automation, loops, the metronome and count-in, synced effects and modulators, renders) follows the map;
    a project with one tempo plays to the same sample as before. caw_pattern_from_midi's JSON gains "tempo_map" and
    "time_signatures"; caw_pattern_export_song writes them as tempo and meter events. A recording request may carry a
@@ -325,6 +326,9 @@ CAW_API void caw_engine_play_at(CawEngine* e, double step);
    on the sample after the last beat; previews play during it. While playing, or with 0 beats, it is play_at. A stop
    during the count-in cancels it. */
 CAW_API void caw_engine_play_count_in(CawEngine* e, double step, int32_t beats);
+/* API 31: the count-in in bars (0..16): `bars` whole bars of the signature where `step` is, each its `num` ticks (1/den
+   notes) at the tempo there, so it starts on an accent (a 6/8 bar is six eighth-note clicks); then as play_at. */
+CAW_API void caw_engine_play_count_in_bars(CawEngine* e, double step, int32_t bars);
 /* The metronome (on != 0): a short click on every beat (API 31: each tick of the time signatures, a 1/den note, on the
    tempo map) while playing, accented on the bar, mixed before the safety
    limiter. Off by default; offline renders never click. */

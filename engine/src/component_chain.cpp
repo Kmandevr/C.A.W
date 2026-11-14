@@ -612,6 +612,19 @@ void ComponentChain::resolveEntry(Entry& e, std::size_t index, uint32_t m, const
     }
     e.dynamic = false;
     if (newPlay) e.anyTouched = false;
+    // A lane's song step at each frame: with a tempo map, worked out once for the block (one segment lookup), not
+    // per parameter and sample.
+    double steps[kMaxFrames];
+    bool stepsReady = false;
+    auto stepAt = [&](uint32_t i) noexcept {
+        if (!time->song || time->song->tempo.constant()) return time->stepAt(time->start + i);
+        if (time->steps) return time->steps[i];
+        if (!stepsReady) {
+            time->song->tempo.stepsAt(time->start, static_cast<int>(m), steps);
+            stepsReady = true;
+        }
+        return steps[i];
+    };
     for (std::size_t k = 0; k < count; ++k) {
         if (newPlay) e.resolvers[k].clearTouch();  // a Play ends knob overrides: the lanes rule again
         const uint32_t touch = e.touches[k].load(std::memory_order_acquire);
@@ -635,7 +648,7 @@ void ComponentChain::resolveEntry(Entry& e, std::size_t index, uint32_t m, const
         if (lane) {
             for (uint32_t i = 0; i < m; ++i)
                 lane_[i] = automationLaneValue(lane->points.data(), lane->points.size(),
-                                               time->stepAt(time->start + i),
+                                               stepAt(i),
                                                lane->points.front().value);
             automation = lane_.data();
         }

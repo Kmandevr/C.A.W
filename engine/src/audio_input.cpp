@@ -390,6 +390,11 @@ namespace {
 std::string failJson(const std::string& e) { return "{\"ok\":false,\"error\":\"" + jsonEscape(e) + "\"}"; }
 }
 
+void LiveAudio::setTempoPoints(std::vector<TempoPointSpec> points) {
+    std::lock_guard<std::mutex> g(ctl_);
+    tempoPoints_ = std::move(points);
+}
+
 std::string LiveAudio::startRecording(std::string_view requestJson) {
     std::lock_guard<std::mutex> g(ctl_);
     if (writer_.joinable()) return failJson("already recording");
@@ -404,9 +409,15 @@ std::string LiveAudio::startRecording(std::string_view requestJson) {
     if (!(s->bpm >= 20 && s->bpm <= 400)) return failJson("bpm must be 20..400");
     s->rate = static_cast<int>(std::lround(sr_));
     s->stepLen = sampletime::stepFrames(sr_, s->bpm);
+    // The request's own tempo map, else the Engine's when it changes tempo (a constant one keeps the request's bpm,
+    // as before the map).
+    std::vector<TempoPointSpec> pts;
     if (const Json* tm = j.get("tempo_map"); tm && tm->type != Json::Type::Null) {
-        std::vector<TempoPointSpec> pts;
         if (!readTempoMap(*tm, pts, error)) return failJson(error);
+    } else if (tempoPoints_.size() > 1) {
+        pts = tempoPoints_;
+    }
+    if (!pts.empty()) {
         s->tempo.build(pts, sr_);
         s->mapped = !s->tempo.constant();
         if (!s->mapped) s->stepLen = s->tempo.stepFrames();

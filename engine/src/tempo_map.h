@@ -30,6 +30,15 @@ constexpr int kMaxTempoPoints = 4096;
 constexpr int kMaxTimeSigs = 1024;
 constexpr double kMinTempoBpm = 1.0, kMaxTempoBpm = 999.0;
 
+// ln(1 + x) and e^x - 1 for the ramps, the same bits on every platform: the C libraries' log1p and expm1 are not
+// correctly rounded and differ between glibc, bionic and MSVC. Only +, -, *, / (correctly rounded under the strict
+// flags tempo_map.cpp is built with) and the exact frexp / ldexp; within a few ulp of the true value. log1p takes
+// x > -1; expm1 any x below 700.
+namespace tempomath {
+CAW_STRICT_FN double log1p(double x) noexcept;
+CAW_STRICT_FN double expm1(double x) noexcept;
+}  // namespace tempomath
+
 // Checks a tempo map from untrusted input and puts it in order: 1..kMaxTempoPoints points, finite, BPM 1..999, beats
 // >= 0 and distinct, the first at beat 0. Sorts by beat. False with an error that names the problem.
 bool checkTempoPoints(std::vector<TempoPointSpec>& points, std::string& error);
@@ -75,6 +84,9 @@ public:
     // Song steps <-> frames (not rounded). Monotonic; negative inputs extend the first segment.
     CAW_STRICT_FN double frameAt(double step) const noexcept;
     CAW_STRICT_FN double stepAt(double frame) const noexcept;
+    // stepAt for the n frames from `frame` into out (one segment lookup, then the segments in order): the same bits
+    // as n calls, for the audio thread's per-sample automation.
+    CAW_STRICT_FN void stepsAt(int64_t frame, int n, double* out) const noexcept;
     // floor(frameAt(step) + 0.5): the sample a step lands on (sampletime::roundFrames when constant()).
     CAW_STRICT_FN double roundFrame(double step) const noexcept;
     // The tempo at a step or a frame, and samples per step there (60 * rate / (bpm * 4)).

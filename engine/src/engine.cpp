@@ -261,7 +261,8 @@ struct Engine::Cmd {
     uint64_t playCount = 0;    // Play: the control thread's play count, which ends touches
     double fromStep = 0;       // Play: where in the project loop to start, in sixteenth steps
     uint32_t touchStamp = 0;   // Play: the last touch stamp before it (later stamps are touches after it)
-    int countInBeats = 0;      // Play: beats of count-in clicks before it starts
+    int countInBeats = 0;      // Play: beats of count-in clicks before it starts (bars when countInBars)
+    bool countInBars = false;
     // Preview: what to do with preview [previewId] on [slot]: 0 note on, 1 glide to [pitch], 2 note off, 3 all off.
     int previewOp = 0;
     int32_t previewId = 0;
@@ -1367,11 +1368,15 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
     t.seed = p.seed;
     t.master = p.master;
     SongTime song = songTimeOf(p, ctlSr_);
+    // While recording, the tempo map stays: a take's steps are worked out on the map it was played against.
+    const bool keepTempo = audioIn_->recordingNow() && song.tempo.points() != ctlSong_.tempo.points();
+    if (keepTempo) song.tempo = ctlSong_.tempo;
     song.serial = ++songSerial_;
     t.song = new SongTime(song);
     if (!send(t))
         return "{\"ok\":false,\"error\":\"audio command queue is not accepting project updates\",\"modules\":{}}";
     ctlSong_ = std::move(song);
+    audioIn_->setTempoPoints(ctlSong_.tempo.points());
     ctlLoopSteps_ = p.loopSteps();
     ctlLoopLen_ = static_cast<int64_t>(ctlSong_.tempo.roundFrame(p.loopSteps()));
 
@@ -1443,6 +1448,8 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
     std::vector<Planned> plan;
     std::map<std::string, LayerState> nextLayers;
     std::map<std::string, std::vector<std::string>> warnings;
+    if (keepTempo)
+        warnings["project"].push_back("the tempo map can't change while recording: it stays until the recording stops");
     // A native component chain's automation lanes: a chain about to be sent takes its table now (the
     // audio thread doesn't have it yet); a kept chain gets a new table only when its lanes changed.
     auto attachAutomation = [&](ComponentChain& chain, const std::string& layer) {
@@ -2543,13 +2550,14 @@ void Engine::play(double fromStep) {
     loudness_->requestReset();  // the integrated loudness measures this play
 }
 
-void Engine::playCountIn(double fromStep, int beats) {
+void Engine::playCountIn(double fromStep, int beats, bool bars) {
     std::lock_guard<std::mutex> lock(ctl_);
     drainRetired();
     Cmd c;
     c.type = Cmd::Play;
     c.fromStep = fromStep;
-    c.countInBeats = std::clamp(beats, 0, 64);
+    c.countInBeats = std::clamp(beats, 0, bars ? 16 : 64);
+    c.countInBars = bars;
     c.playCount = playCount_ + 1;
     c.touchStamp = touchCounter_;
     if (!send(c)) return;
@@ -2755,6 +2763,7 @@ std::string Engine::sendSong(SongTime next) {
     c.song = new SongTime(next);
     if (!send(c)) return "audio command queue is not accepting updates";
     ctlSong_ = std::move(next);
+    audioIn_->setTempoPoints(ctlSong_.tempo.points());
     ctlLoopLen_ = std::max<int64_t>(1, static_cast<int64_t>(ctlSong_.tempo.roundFrame(ctlLoopSteps_)));
     return "";
 }
@@ -2762,6 +2771,7 @@ std::string Engine::sendSong(SongTime next) {
 std::string Engine::setTempoMap(std::vector<TempoPointSpec> points) {
     std::string error;
     if (!checkTempoPoints(points, error)) return error;
+    if (audioIn_->recordingNow()) return "the tempo map can't change while recording";
     std::lock_guard<std::mutex> lock(ctl_);
     SongTime next = ctlSong_;
     next.tempo.build(points, ctlSr_);
@@ -2777,20 +2787,45 @@ std::string Engine::setTimeSignatures(std::vector<TimeSigSpec> sigs) {
     return sendSong(std::move(next));
 }
 
+// Audio thread, at the end of each callback: where the transport is on the map it plays by, for position() (a
+// sequence lock: the reader retries while a write is under way; never blocks the audio thread).
+void Engine::publishSongPos() noexcept {
+    const double step = songStep(g_);
+    const double beat = step / 4.0;
+    int64_t bar = 0;
+    double inBar = 0;
+    song_->sigs.barAt(beat, bar, inBar);
+    const TimeSigSpec& sig = song_->sigs.sigs()[song_->sigs.indexAt(beat)];
+    const uint32_t seq = posSeq_.load(std::memory_order_relaxed);
+    posSeq_.store(seq + 1, std::memory_order_relaxed);
+    std::atomic_thread_fence(std::memory_order_release);
+    pos_.frame.store(g_, std::memory_order_relaxed);
+    pos_.beat.store(beat, std::memory_order_relaxed);
+    pos_.bpm.store(song_->tempo.bpmAtStep(step), std::memory_order_relaxed);
+    pos_.bar.store(bar, std::memory_order_relaxed);
+    pos_.inBar.store(inBar, std::memory_order_relaxed);
+    pos_.sig.store(sig.num * 64 + sig.den, std::memory_order_relaxed);
+    posSeq_.store(seq + 2, std::memory_order_release);
+}
+
 Engine::SongPosition Engine::position() {
-    std::lock_guard<std::mutex> lock(ctl_);
     SongPosition p;
-    p.frame = posFlag_.load(std::memory_order_relaxed);
     p.playing = playingFlag_.load(std::memory_order_relaxed);
-    const TempoMap& tm = ctlSong_.tempo;
-    const double step = tm.stepAt(static_cast<double>(p.frame));
-    p.beat = step / 4.0;
+    for (int tries = 0;; ++tries) {
+        const uint32_t a = posSeq_.load(std::memory_order_acquire);
+        p.frame = pos_.frame.load(std::memory_order_relaxed);
+        p.beat = pos_.beat.load(std::memory_order_relaxed);
+        p.bpm = pos_.bpm.load(std::memory_order_relaxed);
+        p.bar = pos_.bar.load(std::memory_order_relaxed);
+        p.beatInBar = pos_.inBar.load(std::memory_order_relaxed);
+        const int sig = pos_.sig.load(std::memory_order_relaxed);
+        p.num = sig / 64;
+        p.den = sig % 64;
+        std::atomic_thread_fence(std::memory_order_acquire);
+        if ((a & 1) == 0 && posSeq_.load(std::memory_order_relaxed) == a) break;
+        if (tries > 1000) std::this_thread::yield();
+    }
     p.seconds = static_cast<double>(p.frame) / ctlSr_;
-    p.bpm = tm.bpmAtStep(step);
-    ctlSong_.sigs.barAt(p.beat, p.bar, p.beatInBar);
-    const TimeSigSpec& sig = ctlSong_.sigs.sigs()[ctlSong_.sigs.indexAt(p.beat)];
-    p.num = sig.num;
-    p.den = sig.den;
     return p;
 }
 
@@ -2928,17 +2963,28 @@ void Engine::takeSong(SongTime* next) noexcept {
             if (slotAt(i).instrument) slotAt(i).instrument->notes()->releaseAll(0, true);
     const bool keepBeat = changed && !(old->tempo.constant() && next->tempo.constant());
     const double beat = keepBeat ? old->tempo.stepAt(static_cast<double>(g_)) : 0.0;
+    // Inside the loop range, playback stays inside it (keepInRange, after the new timing is worked out): the kept
+    // beat rounded could land on the new range's end, where wrapAt() would no longer wrap.
+    keptInRange_ = keepBeat && loopRange_ && g_ >= loopFrom_ && g_ < loopTo_;
     song_ = next;
     bpm_ = next->tempo.points().front().bpm;
     audioIn_->setSongTime(next);
-    if (keepBeat) g_ = std::max<int64_t>(0, static_cast<int64_t>(next->tempo.roundFrame(beat)));
+    if (keepBeat) g_ = std::max<int64_t>(0, static_cast<int64_t>(std::floor(next->tempo.frameAt(beat))));
     Retired r;
     r.song = old;
     retireEntry(r);
 }
 
+void Engine::keepInRange() noexcept {
+    if (keptInRange_ && loopRange_) g_ = std::clamp<int64_t>(g_, loopFrom_, loopTo_ - 1);
+    keptInRange_ = false;
+}
+
 double Engine::songStep(int64_t frame) const noexcept {
-    return timeConstant_ ? static_cast<double>(frame) / stepLen_ : song_->tempo.stepAt(static_cast<double>(frame));
+    // The chunk's frames come from chunkSteps_ (worked out once a chunk; per-sample lanes read them).
+    if (timeConstant_) return static_cast<double>(frame) / stepLen_;
+    const int64_t k = frame - chunkStepsAt_;
+    return k >= 0 && k < chunkStepsLen_ ? chunkSteps_[k] : song_->tempo.stepAt(static_cast<double>(frame));
 }
 
 int64_t Engine::passFrame(const Slot& s, double step) const noexcept {
@@ -3069,9 +3115,9 @@ void Engine::applyCommands() noexcept {
             case Cmd::SetInserts:
             case Cmd::SetInstrument:
             case Cmd::SetDelay: retirementNeed = 2; break;
-            case Cmd::SetSends: retirementNeed = 1; break;
+            case Cmd::SetSends: retirementNeed = 1; break;  // the one still crossfading, and the one replaced  // a chain still crossfading, and the one replaced
             case Cmd::Transport:
-            case Cmd::SetSong: retirementNeed = c.song ? 1 : 0; break;  // the tempo map replaced  // the one still crossfading, and the one replaced  // a chain still crossfading, and the one replaced
+            case Cmd::SetSong: retirementNeed = c.song ? 1 : 0; break;  // the tempo map replaced
             case Cmd::SetAutomation:
             case Cmd::SetComponentAutomation:
             case Cmd::SetPattern:
@@ -3215,6 +3261,7 @@ void Engine::applyCommands() noexcept {
             case Cmd::SetSong:
                 takeSong(c.song);
                 updateTiming();
+                keepInRange();
                 if (g_ >= loopLen_) g_ = 0;
                 loopLenFlag_.store(loopLen_, std::memory_order_relaxed);
                 break;
@@ -3231,6 +3278,7 @@ void Engine::applyCommands() noexcept {
                 masterStep_ = 0.0;
                 masterRamp_ = 0;
                 updateTiming();
+                keepInRange();
                 if (g_ >= loopLen_) g_ = 0;
                 loopLenFlag_.store(loopLen_, std::memory_order_relaxed);
                 break;
@@ -3370,7 +3418,7 @@ void Engine::applyCommands() noexcept {
                     const double unit = 4.0 / sig.den;
                     countInBar_ = sig.num;
                     countInBeat_ = std::max<int64_t>(1, static_cast<int64_t>(std::llround(unit * 4.0 * song_->tempo.stepFramesAt(from))));
-                    countInLeft_ = countInBeat_ * c.countInBeats;
+                    countInLeft_ = countInBeat_ * (c.countInBars ? c.countInBeats * sig.num : c.countInBeats);
                     countInAt_ = 0;
                     countInFrom_ = c.fromStep;
                     countInPlayCount_ = c.playCount;
@@ -3715,7 +3763,10 @@ void Engine::rebindNote(const Slot& s, NoteEvents& notes, NoteEvents::Held& h, c
     }
     const bool expressive = n->extra >= 0 && static_cast<size_t>(n->extra) < pat->expressions.size();
     h.ex = expressive ? &pat->expressions[static_cast<size_t>(n->extra)] : nullptr;
-    h.exLen = std::max(1.0, n->len / std::max(1, n->ratchet) * passStepLen(s, n->at));
+    // Its sub-note's length in samples (one tempo: len / ratchet steps at that tempo, as before the map; on a map,
+    // the span the tempo map gives it, so a note across a tempo change takes its real length).
+    h.exLen = timeConstant_ ? std::max(1.0, n->len / std::max(1, n->ratchet) * stepLen_)
+                            : std::max(1.0, static_cast<double>(stop - start));
     h.since = n0 + static_cast<int64_t>(h.motionFrom) + h.motionWait - start;  // at its next control point
     double bend = 0, press = 1, timbre = 0;
     if (h.ex) expressionAt(*h.ex, static_cast<double>(h.since), h.exLen, sr_, bend, press, timbre);
@@ -3745,10 +3796,13 @@ void Engine::instrumentNotes(Slot& s, NoteEvents& notes, int m) noexcept {
     const size_t ne = pat->events.size();
     size_t e = static_cast<size_t>(
         std::partition_point(ev, ev + ne, [&](const PatternEvent& x) { return sampleOf(x.step) < n0; }) - ev);
-    auto express = [&](NoteEvents::Held& h, const PatternNote& n, uint32_t frame) noexcept {
+    auto express = [&](NoteEvents::Held& h, const PatternNote& n, uint32_t frame, uint32_t sub) noexcept {
         const bool expressive = n.extra >= 0 && static_cast<size_t>(n.extra) < pat->expressions.size();
         h.ex = expressive ? &pat->expressions[static_cast<size_t>(n.extra)] : nullptr;
-        h.exLen = std::max(1.0, n.len / std::max(1, n.ratchet) * passStepLen(s, n.at));
+        int64_t start = 0, stop = 0;
+        h.exLen = timeConstant_ || !noteSpan(s, n, sub, start, stop)
+                      ? std::max(1.0, n.len / std::max(1, n.ratchet) * stepLen_)
+                      : std::max(1.0, static_cast<double>(stop - start));
         h.since = 0;
         h.motionFrom = frame;
         h.motionWait = 0;
@@ -3775,7 +3829,7 @@ void Engine::instrumentNotes(Slot& s, NoteEvents& notes, int m) noexcept {
                 h->target = n.pitch;
                 h->glideLeft = std::max(1, static_cast<int>(sampletime::roundFrames(passStepLen(s, n.at), 0.5)));
                 h->glideStep = (h->target - h->pitch) / h->glideLeft;
-                express(*h, n, frame);
+                express(*h, n, frame, 0);
                 continue;
             }
         }
@@ -3786,7 +3840,7 @@ void Engine::instrumentNotes(Slot& s, NoteEvents& notes, int m) noexcept {
             notes.off(frame, *same);
         }
         NoteEvents::Held& h = notes.on(frame, NoteEvents::Source::Pattern, pe.note, pe.sub, -1, n.pitch, n.vel);
-        express(h, n, frame);
+        express(h, n, frame, pe.sub);
     }
 }
 
@@ -3861,6 +3915,7 @@ void Engine::playTail(Slot& s, int most) noexcept {
 void Engine::runInstrument(Slot& s, int m) noexcept {
     ChainTime time{g_, stepLen_, touchEpoch_, bpm_, static_cast<uint32_t>(beatsPerBar_), playing_ && !previewChunk_};
     time.song = song_;  // the tempo map at the playhead (1.0.3)
+    time.steps = timeConstant_ ? nullptr : chunkSteps_;  // the chunk's song steps (from g_)
     time.modulation = modulation_->forChain(s.index, ModChainKind::Instrument, s.instrument, 0);  // #161
     time.profile = chunkProfile_;  // the Benchmark (setProfile)
     if (s.instrumentIdle) {
@@ -4090,6 +4145,11 @@ int Engine::processChunk(float* l, float* r, int maxFrames) noexcept {
     }
     liveCount_ = kept;
     const int m = planChunk(maxFrames);
+    if (!timeConstant_) {  // the song step at each of the chunk's frames, for per-sample lanes (songStep)
+        song_->tempo.stepsAt(g_, m, chunkSteps_);
+        chunkStepsAt_ = g_;
+        chunkStepsLen_ = m;
+    }
     audioIn_->chunk(tapAt_, m, g_, playing_ && !previewChunk_);  // monitoring frames and the recorder's input
     ++chunkId_;
     // Project modulation (#161): due modulator blocks and every target's offsets, before any target runs.
@@ -4360,6 +4420,7 @@ void Engine::runInserts(Slot& s, float* L, float* R, int m) noexcept {
     ChainTime time{g_, stepLen_, touchEpoch_, bpm_, static_cast<uint32_t>(beatsPerBar_), playing_ && !previewChunk_,
                    chunkId_};
     time.song = song_;  // the tempo map at the playhead (1.0.3)
+    time.steps = timeConstant_ ? nullptr : chunkSteps_;  // the chunk's song steps (from g_)
     time.modulation = modulation_->forChain(s.index, ModChainKind::Inserts, inserts, 0);  // #161
     time.profile = chunkProfile_;  // the Benchmark (setProfile)
     const ChainTime* t = &time;
@@ -4991,6 +5052,7 @@ void Engine::runMasterNode(const float* inL, const float* inR, float* outL, floa
         }
         ChainTime time{g_, stepLen_, touchEpoch_, bpm_, static_cast<uint32_t>(beatsPerBar_), playing_ && !previewChunk_};
         time.song = song_;  // the tempo map at the playhead (1.0.3)
+        time.steps = timeConstant_ ? nullptr : chunkSteps_;  // the chunk's song steps (from g_)
         time.modulation = modulation_->forChain(-1, ModChainKind::Master, masterChain_, 0);  // #161
         time.profile = chunkProfile_;  // the Benchmark (setProfile)
         const ChainTime* t = &time;
@@ -5238,6 +5300,7 @@ void Engine::process(float* left, float* right, int frames) noexcept {
     toneActive_.store(toneLeft_ > 0, std::memory_order_release);
     playingFlag_.store(playing_, std::memory_order_relaxed);
     posFlag_.store(g_, std::memory_order_relaxed);
+    publishSongPos();
     if (pool_) {
         {
             const PartScope pool(parts(), Part::MixPool);

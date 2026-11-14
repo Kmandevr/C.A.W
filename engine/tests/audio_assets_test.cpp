@@ -1267,3 +1267,45 @@ TEST(audio_clips_and_recording_follow_the_tempo_map) {
     }
     std::filesystem::remove_all(utf8Path(dir));
 }
+
+TEST(recording_takes_the_engines_tempo_map_and_holds_it_while_recording) {
+    // No "tempo_map" in the request: the take is timed by the Engine's map. While recording, the map can't change:
+    // the live setter refuses, and a project update keeps the map with a warning.
+    const std::string dir = tempDir("recmap");
+    const std::string mapJson = ",\"tempo_map\":[{\"beat\":0,\"bpm\":120},{\"beat\":1,\"bpm\":60}]";
+    Engine e(48000);
+    e.setMasterBypass(true);
+    e.setProjectJson(inputProject("off", true, mapJson, 2));
+    e.liveAudio().setDeviceChannels(2);
+    e.liveAudio().setLatencyOverride(0);
+    const std::string req = "{\"dir\":\"" + jsonEscape(dir) + "\",\"bpm\":120,\"tracks\":[{\"layer\":\"t\",\"channel\":1}]}";
+    CHECK(e.liveAudio().startRecording(req).find("\"ok\":true") != std::string::npos);
+    e.play(8);
+    std::vector<float> in, lb(480), rb(480);
+    auto run = [&](int callbacks) {
+        for (int k = 0; k < callbacks; ++k) {
+            in.assign(480 * 2, 0.0f);
+            e.liveAudio().beginCallback(in.data(), 2, 480);
+            e.process(lb.data(), rb.data(), 480);
+        }
+    };
+    run(10);
+    CHECK(e.setTempoMap({{0, 100, false}}).find("recording") != std::string::npos);
+    const std::string r = e.setProjectJson(inputProject("off", true, ",\"tempo_map\":[{\"beat\":0,\"bpm\":100}]", 2));
+    CHECK(r.find("can't change while recording") != std::string::npos);
+    run(10);
+    CHECK_EQ(e.position().bpm, 60.0);  // the map it recorded against
+    const std::string done = e.liveAudio().stopRecording();
+    Json j;
+    std::string error;
+    CHECK(parseJson(done, j, error));
+    const Json* takes = j.get("takes");
+    CHECK(takes && takes->arr.size() == 1);
+    if (takes && takes->arr.size() == 1) {
+        CHECK_EQ(takes->arr[0].number("start_frame", 0), 72000.0);
+        CHECK_NEAR(takes->arr[0].number("start_steps", 0), 8.0, 1e-9);
+    }
+    // Stopped, the next update takes the new map.
+    CHECK(e.setTempoMap({{0, 100, false}}).empty());
+    std::filesystem::remove_all(utf8Path(dir));
+}

@@ -71,6 +71,8 @@ struct ChainTime {
     // The song's tempo map and signatures (1.0.3; null: stepLength, tempo and beatsPerBar hold everywhere). With more
     // than one tempo, automation steps, the transport's beat and its tempo come from the map at each frame.
     const SongTime* song = nullptr;
+    // With a tempo map, the song step at each frame of the block from `start` (the Engine's chunk; null: worked out).
+    const double* steps = nullptr;
     double stepAt(int64_t frame) const noexcept {
         return song && !song->tempo.constant() ? song->tempo.stepAt(static_cast<double>(frame))
                                                : static_cast<double>(frame) / stepLength;

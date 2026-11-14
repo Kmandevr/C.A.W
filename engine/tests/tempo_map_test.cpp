@@ -5,6 +5,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
 #include <fstream>
 #include <sstream>
 #include <atomic>
@@ -360,7 +361,7 @@ TEST(the_count_in_ticks_at_the_signature_and_tempo_where_playback_starts) {
 }
 
 TEST(midi_files_round_trip_the_tempo_map_and_signatures) {
-    PatternResult pr = parsePattern("---\nkind: pattern\nlength: 4 bars\n---\n0 C4 1 1\n17 E4 2 0.5\n");
+    PatternResult pr = parsePattern("---\nkind: pattern\nlength: 6 bars\n---\n0 C4 1 1\n17 E4 2 0.5\n");  // past every change
     CHECK(pr.pattern != nullptr);
     if (!pr.pattern) return;
     MidiSongMeta song;
@@ -719,4 +720,215 @@ TEST(tempo_maps_swap_while_another_thread_plays) {
     stop.store(true);
     audio.join();
     CHECK(peak.load() > 0.01f);
+}
+
+// ---- the audio review's findings (2026-11-14) ----
+
+TEST(a_live_map_change_at_a_loop_ranges_end_stays_in_the_range) {
+    // The playhead one sample before the range's end, then maps whose kept beat lands at or past the new end: playback
+    // must still wrap to the range's start, never run on to the song's end.
+    const double rate = 44100;
+    int checked = 0;
+    for (int k = 0; k < 24; ++k) {
+        ProjectSpec p = impulseProject(noteLines({0}), 64, 4);
+        p.tempoMap = kStepped;
+        p.loopRange = true;
+        p.loopStartSteps = 16;
+        p.loopEndSteps = 48;
+        Engine e(rate);
+        e.setMasterBypass(true);
+        CHECK(e.setProject(p).find("\"ok\":true") != std::string::npos);
+        e.play(16);
+        const int64_t from = expectedFrame(kStepped, rate, 16), to = expectedFrame(kStepped, rate, 48);
+        std::vector<float> l(4096), r(4096);
+        for (int64_t left = to - from - 1; left > 0;) {
+            const int n = static_cast<int>(std::min<int64_t>(left, 4096));
+            e.process(l.data(), r.data(), n);
+            left -= n;
+        }
+        CHECK_EQ(e.position().frame, to - 1);
+        const std::vector<TempoPointSpec> next = {{0, 120, false}, {8, 90.0 + 0.37 * k, false}, {11.5, 150, k % 2 == 1}};
+        CHECK(e.setTempoMap(next).empty());
+        const int64_t nFrom = expectedFrame(next, rate, 16), nTo = expectedFrame(next, rate, 48);
+        for (int i = 0; i < 3000; ++i) {
+            e.process(l.data(), r.data(), 7);
+            const int64_t at = e.position().frame;
+            CHECK(at >= nFrom && at < nTo);
+            ++checked;
+        }
+    }
+    CHECK(checked > 0);
+}
+
+TEST(a_notes_expression_spans_its_real_length_across_a_tempo_change) {
+    // A note 8 beats long, its bend reaching an octave halfway: 4 beats at 120 then 4 at 60 make it 6 s, so the octave
+    // is reached at 3 s (taken from the tempo where it starts it would be at 2 s).
+    const int rate = 16000;
+    ProjectSpec p = cawtest::testSignalProject({}, 120, 4);
+    p.modules.push_back({"pat", "---\nkind: pattern\nlength: 64\n---\n0 C4 32 1 bend 0:0 0.5:12 1:12\n"});
+    p.layers.push_back(cawtest::testSignalNotesLayer("l0", cawtest::Shape::Sine, "pat"));
+    p.tempoMap = {{0, 120, false}, {4, 60, false}};
+    Engine e(rate);
+    e.setMasterBypass(true);
+    CHECK(e.setProject(p).find("\"ok\":true") != std::string::npos);
+    e.play();
+    std::vector<float> out, l(256), r(256);
+    for (int i = 0; i < rate * 5; i += 256) {
+        e.process(l.data(), r.data(), 256);
+        out.insert(out.end(), l.begin(), l.end());
+    }
+    auto hz = [&](double at) {
+        const size_t a = static_cast<size_t>(at * rate), b = a + rate / 20;
+        int n = 0;
+        for (size_t i = a + 1; i < b; ++i) n += out[i - 1] < 0 && out[i] >= 0;
+        return n * 20.0;
+    };
+    const double octave = hz(4.5);
+    CHECK(octave > 450 && octave < 600);
+    CHECK(hz(2.4) < 0.9 * octave);   // still bending at 2.4 s
+    CHECK(hz(3.3) > 0.95 * octave);  // there by 3.3 s
+}
+
+TEST(the_ramp_maths_gives_the_same_bits_on_every_platform) {
+    // tempomath's log1p and expm1 (no libm), pinned to their bits, and within an ulp or so of the C library's.
+    struct Pin {
+        double x;
+        uint64_t bits;
+    };
+    const Pin logs[] = {{1e-9, 0x3e112e0be801f1d9ull}, {-0.1, 0xbfbaf8e8210a415dull}, {0.25, 0x3fcc8ff7c79a9a21ull},
+                        {0.5, 0x3fd9f323ecbf984cull}, {-0.5, 0xbfe62e42fefa39efull}, {2.0, 0x3ff193ea7aad030aull},
+                        {7.5, 0x40011edb023bf0feull}, {-0.999, 0xc01ba18a998fff9full}, {998.0, 0x401ba084531f2627ull}};
+    const Pin exps[] = {{1e-9, 0x3e112e0be84bbb51ull}, {-0.2, 0xbfc733d4a7a67a9bull}, {0.3, 0x3fd6641632306a56ull},
+                        {0.36, 0x3fdbbbab4bfb9d80ull}, {-0.7, 0xbfe01bf92311555full}, {1.5, 0x400bda7fcc9f8a82ull},
+                        {6.9, 0x408efa329e185a4full}, {-12.0, 0xbfeffff31d59e25eull}, {40.0, 0x438a220d397972ebull}};
+    auto bits = [](double v) {
+        uint64_t b;
+        std::memcpy(&b, &v, 8);
+        return b;
+    };
+    for (const Pin& p : logs) {
+        CHECK_EQ(bits(tempomath::log1p(p.x)), p.bits);
+        CHECK_NEAR(tempomath::log1p(p.x), std::log1p(p.x), 4e-16 * std::fabs(std::log1p(p.x)));
+    }
+    for (const Pin& p : exps) {
+        CHECK_EQ(bits(tempomath::expm1(p.x)), p.bits);
+        CHECK_NEAR(tempomath::expm1(p.x), std::expm1(p.x), 4e-16 * std::fabs(std::expm1(p.x)));
+    }
+    // A sweep: within a few ulp of the C library's (about 4 at worst, where log1p's 1 + x is near 0.7).
+    int far = 0;
+    for (int k = -999; k < 3000; ++k) {
+        const double x = k * 0.0123457;
+        if (x > -1) far += std::fabs(tempomath::log1p(x) - std::log1p(x)) > 8e-16 * std::fabs(std::log1p(x)) + 1e-300;
+        if (x < 30) far += std::fabs(tempomath::expm1(x) - std::expm1(x)) > 8e-16 * std::fabs(std::expm1(x)) + 1e-300;
+    }
+    CHECK_EQ(far, 0);
+}
+
+TEST(per_sample_lanes_on_a_ramp_give_the_same_bits_at_any_block_size) {
+    // Volume, pan and an instrument lane on a ramped map, read from the chunk's steps: the same output whatever the
+    // callback size.
+    ProjectSpec p = impulseProject(noteLines({0, 4, 8, 12}), 16, 2);
+    p.layers[0].instrument.params = {{"mode", 1}, {"shape", static_cast<double>(cawtest::Shape::Saw)}};
+    p.layers[0].automation.push_back({"volume", {{0, 0.1}, {12, 1.0}, {31, 0.3}}});
+    p.layers[0].automation.push_back({"pan", {{0, -1}, {32, 1}}});
+    ProjectAutomationLaneSpec lane;
+    lane.targetType = "instrument";
+    lane.moduleId = "l0";
+    lane.target = "level";
+    lane.points = {{0, 0.2}, {20, 1.0}, {32, 0.5}};
+    p.automation.push_back(lane);
+    p.tempoMap = {{0, 70, false}, {6, 190, true}};
+    std::vector<float> a, b;
+    for (const int block : {64, 173}) {
+        std::vector<float>& out = block == 64 ? a : b;
+        Engine e(44100);
+        e.setMasterBypass(true);
+        CHECK(e.setProject(p).find("\"ok\":true") != std::string::npos);
+        e.play();
+        std::vector<float> l(static_cast<size_t>(block)), r(static_cast<size_t>(block));
+        for (int i = 0; i < 44100 * 3; i += block) {
+            e.process(l.data(), r.data(), block);
+            out.insert(out.end(), l.begin(), l.end());
+            out.insert(out.end(), r.begin(), r.end());
+        }
+    }
+    const size_t n = std::min(a.size(), b.size()) / 2;
+    // Interleaved per block, so compare the left and right halves of each block's frames by frame index.
+    auto frameOf = [](const std::vector<float>& v, int block, size_t f, int side) {
+        const size_t blk = f / static_cast<size_t>(block), in = f % static_cast<size_t>(block);
+        return v[blk * 2 * static_cast<size_t>(block) + static_cast<size_t>(side) * static_cast<size_t>(block) + in];
+    };
+    int differ = 0;
+    for (size_t f = 0; f + 200 < n; ++f)
+        for (int side = 0; side < 2; ++side) differ += frameOf(a, 64, f, side) != frameOf(b, 173, f, side);
+    CHECK_EQ(differ, 0);
+}
+
+TEST(the_position_is_on_the_map_the_audio_thread_plays) {
+    ProjectSpec p = impulseProject(noteLines({0}), 64, 4);
+    Engine e(48000);
+    CHECK(e.setProject(p).find("\"ok\":true") != std::string::npos);
+    std::vector<float> l(256), r(256);
+    e.process(l.data(), r.data(), 256);
+    CHECK_EQ(e.position().bpm, 120.0);
+    CHECK(e.setTempoMap({{0, 90, false}}).empty());
+    CHECK_EQ(e.position().bpm, 120.0);  // sent, not yet played
+    e.process(l.data(), r.data(), 256);
+    CHECK_EQ(e.position().bpm, 90.0);
+    CHECK(e.setTimeSignatures({{0, 0, 7, 8}}).empty());
+    e.process(l.data(), r.data(), 256);
+    CHECK(e.position().num == 7 && e.position().den == 8);
+}
+
+TEST(the_count_in_in_bars_clicks_whole_bars_of_the_signature) {
+    // 2 bars from beat 8 (6/8 at 90 BPM): twelve eighth-note clicks of 16000 samples, accented on the first of each bar.
+    ProjectSpec p = cawtest::testSignalProject({}, 120, 8);
+    p.tempoMap = {{0, 120, false}, {8, 90, false}};
+    p.timeSigs = {{0, 0, 4, 4}, {2, 8, 6, 8}};
+    Engine e(48000);
+    e.setMasterBypass(true);
+    CHECK(e.setProject(p).find("\"ok\":true") != std::string::npos);
+    e.playCountIn(32, 2, true);
+    const std::vector<Click> got = clicks(e, 12 * 16000 - 1000);
+    CHECK_EQ(got.size(), 12u);
+    for (size_t i = 0; i < got.size(); ++i) {
+        CHECK_EQ(got[i].frame, static_cast<int64_t>(i) * 16000);
+        CHECK_EQ(got[i].accent, i % 6 == 0);
+    }
+}
+
+TEST(midi_export_refuses_tempos_and_lengths_the_format_cannot_hold) {
+    PatternResult pr = parsePattern("---\nkind: pattern\nlength: 1 bars\n---\n0 C4 1 1\n");
+    CHECK(pr.pattern != nullptr);
+    if (!pr.pattern) return;
+    std::string error;
+    MidiSongMeta slow;
+    slow.tempo = {{0, 120, false}, {2, 3.0, false}};
+    CHECK(!checkMidiExport(*pr.pattern, slow, false, error) && error.find("3.576") != std::string::npos);
+    CHECK(checkMidiExport(*pr.pattern, slow, true, error));  // a clip file holds 3 BPM
+    MidiSongMeta slower;
+    slower.tempo = {{0, 1.2, false}};
+    CHECK(!checkMidiExport(*pr.pattern, slower, true, error) && error.find("1.397") != std::string::npos);
+    // The writers keep what they do write in range: a 3.6 BPM tempo round trips.
+    MidiSongMeta ok;
+    ok.tempo = {{0, 3.6, false}};
+    CHECK(checkMidiExport(*pr.pattern, ok, false, error));
+    const std::vector<uint8_t> bytes = patternToSmf(*pr.pattern, ok);
+    MidiSongMeta back;
+    CHECK(!patternFromMidi(bytes.data(), bytes.size(), MidiImportOptions{}, error, &back).empty());
+    CHECK_NEAR(back.tempo[0].bpm, 3.6, 1e-5);
+    // A .mid delta is at most 28 bits: a pattern longer than 0x0FFFFFFF ticks (1,118,481 steps) is refused.
+    PatternResult longOne = parsePattern("---\nkind: pattern\nlength: 1200000\n---\n0 C4 1 1\n");
+    CHECK(longOne.pattern != nullptr);
+    if (longOne.pattern) {
+        CHECK(!checkMidiExport(*longOne.pattern, ok, false, error) && error.find("too long") != std::string::npos);
+        CHECK(checkMidiExport(*longOne.pattern, ok, true, error));  // a clip file splits long gaps
+    }
+    // Tempo changes after the pattern's end are left out, so no delta runs past it.
+    MidiSongMeta late;
+    late.tempo = {{0, 120, false}, {1e6, 90, false}};
+    const std::vector<uint8_t> b2 = patternToSmf(*pr.pattern, late);
+    MidiSongMeta back2;
+    CHECK(!patternFromMidi(b2.data(), b2.size(), MidiImportOptions{}, error, &back2).empty());
+    CHECK_EQ(back2.tempo.size(), 1u);
 }
