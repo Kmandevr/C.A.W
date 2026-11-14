@@ -5,6 +5,7 @@
 import 'dart:async';
 import 'dart:math' as math;
 
+import 'package:flutter/gestures.dart' show DragStartBehavior;
 import 'package:flutter/material.dart';
 
 import '../../model/app_state.dart';
@@ -269,8 +270,8 @@ class SampleEditorState extends State<SampleEditor> {
         _tool('trim', Icons.vertical_align_center, 'Trim', _busy || c.lock ? null : _trim,
             tip: 'Trim the silence off both ends'),
       ])),
-      AnimatedSize(duration: panelMotion, curve: EditMotion.curve, alignment: Alignment.topCenter,
-        child: AnimatedSwitcher(duration: panelMotion, switchInCurve: EditMotion.curve,
+      // The tool's panel grows in and out (a size animation only when motion is on: at zero it would relayout itself).
+      _grow(panelMotion, AnimatedSwitcher(duration: panelMotion, switchInCurve: EditMotion.curve,
           switchOutCurve: EditMotion.exitCurve,
           child: switch (_panel) {
             _Panel.none => const SizedBox(key: ValueKey('sample-panel-none'), width: double.infinity),
@@ -284,6 +285,10 @@ class SampleEditorState extends State<SampleEditor> {
                   style: const TextStyle(color: Neon.dim, fontSize: 11)))),
     ]);
   }
+
+  Widget _grow(Duration d, Widget child) => d == Duration.zero || EditMotion.fadeOnly(context)
+      ? child
+      : AnimatedSize(duration: d, curve: EditMotion.curve, alignment: Alignment.topCenter, child: child);
 
   Widget _tool(String key, IconData icon, String label, VoidCallback? onTap, {bool on = false, String? tip}) => Padding(
       padding: const EdgeInsets.only(right: 6),
@@ -355,9 +360,13 @@ class SampleEditorState extends State<SampleEditor> {
     const top = 16.0;
     Widget handle(_Grab g, {required double left, required double topAt, required double w, required double hh,
         required Widget child, VoidCallback? onTap, bool vertical = false, MouseCursor cursor = SystemMouseCursors.resizeColumn}) =>
-        Positioned(left: left, top: topAt, width: w, height: hh, child: MouseRegion(cursor: cursor, child: GestureDetector(
+        // Kept inside the waveform, so a handle at the file's very end can still be grabbed.
+        Positioned(left: left.clamp(0.0, math.max(0.0, width - w)).toDouble(), top: topAt, width: w, height: hh,
+            child: MouseRegion(cursor: cursor, child: GestureDetector(
           key: ValueKey('sample-${g.name}-${c.id}'),
           behavior: HitTestBehavior.opaque,
+          // From where the finger went down, so the handle follows it with no lag.
+          dragStartBehavior: DragStartBehavior.down,
           onTap: onTap,
           onHorizontalDragStart: vertical ? null : (_) => _begin(g),
           onHorizontalDragUpdate: vertical ? null : (d) => _move(d.delta, secPerPx),

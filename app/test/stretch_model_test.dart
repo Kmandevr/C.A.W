@@ -198,10 +198,17 @@ void main() {
       expect(old['mode'], 'musical');
       expect(old['source_bpm'], 240);
       expect(old.containsKey('stretch_ratio'), isFalse);
+      c.pitch = 3.5;
       final now = c.toEngineJson(120, api: 32);
-      expect(now['mode'], 'fixed');
+      expect(now.containsKey('mode'), isFalse, reason: 'follows_tempo or mode, not both');
       expect(now['stretch_ratio'], 2);
       expect(now['follows_tempo'], isFalse);
+      expect((now['pitch'], now['pitch_cents']), (0, 350), reason: 'the engine adds them');
+      expect(now.containsKey('gain_db'), isFalse, reason: 'it would multiply the linear gain');
+      c.stretch = AudioStretch.signalsmith;
+      expect(c.toEngineJson(120, api: 32)['stretch'], 'signalsmith');
+      expect(c.toEngineJson(120, api: 31)['stretch'], 'wsola', reason: 'API 31 has no Signalsmith');
+      c.pitch = 0;
       c.stretchRatio = 1;
       expect(c.toEngineJson(120, api: 31)['mode'], 'fixed', reason: 'ratio 1 is the plain clip');
     });
@@ -226,6 +233,27 @@ void main() {
       expect(high.length, greaterThan(low.length));
       expect(onsetBuckets(env, 1, 0.005, maxOnsets: 2).length, 2);
       expect(onsetBuckets(List.filled(100, 0.0), 1, 0.005), isEmpty);
+    });
+
+    test('the C API 32 adapter reads caw_asset_tempo and caw_asset_slices with limits', () async {
+      final asked = <String>[];
+      final a = EngineAudioAnalysis(
+        tempo: (path, {startSeconds = 0, endSeconds = 0}) async => {'ok': true, 'bpm': 127.5, 'confidence': 4},
+        slices: (path, {sensitivity = 0.5, startSeconds = 0, endSeconds = 0, maxSlices = 64}) async {
+          asked.add('$sensitivity $startSeconds $endSeconds $maxSlices');
+          return {'ok': true, 'slices': [
+            {'seconds': 1.5}, {'seconds': 0.2}, {'seconds': 1.0}, {'seconds': 1.0}, {'seconds': 9}, {'seconds': 'x'}, 7,
+          ]};
+        },
+        peaks: FakeAudioAnalysis());
+      final t = await a.detectTempo('/x.wav', seconds: 4);
+      expect((t!.bpm, t.confidence), (127.5, 1));
+      expect(await a.slicePoints('/x.wav', start: 0.5, end: 2, sensitivity: 3), [1.0, 1.5]);
+      expect(asked.single, '1.0 0.5 2.0 64');
+      expect(tempoFromJson({'ok': true, 'bpm': null}), isNull, reason: 'unsure');
+      expect(tempoFromJson({'ok': false, 'bpm': 120}), isNull);
+      expect(slicesFromJson({'ok': true, 'slices': [for (var i = 1; i < 100; i++) {'seconds': i / 100}]},
+          start: 0, end: 1, maxSlices: 8)!.length, 7);
     });
 
     test('the tempo of a steady beat; none from a few hits', () {

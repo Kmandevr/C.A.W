@@ -230,14 +230,18 @@ class _TimeAndPitchState extends State<_TimeAndPitch> {
             key: const ValueKey('audio-stretch-ratio'), style: const TextStyle(color: Neon.dim, fontSize: 11)),
             value: '${seconds.toStringAsFixed(2)} s'),
       const SizedBox(height: 4),
-      SegmentedButton<AudioStretch>(
+      // Keep pitch is the clip's own keep-pitch algorithm (a WSOLA clip keeps its sound), else the new one.
+      SegmentedButton<bool>(
         key: const ValueKey('audio-stretch'),
         segments: const [
-          ButtonSegment(value: AudioStretch.wsola, label: Text('Keep pitch'), tooltip: 'Time-stretch'),
-          ButtonSegment(value: AudioStretch.varispeed, label: Text('Varispeed'), tooltip: 'Pitch moves with speed'),
+          ButtonSegment(value: true, label: Text('Keep pitch'), tooltip: 'Time-stretch'),
+          ButtonSegment(value: false, label: Text('Varispeed'), tooltip: 'Pitch moves with speed'),
         ],
-        selected: {c.stretch},
-        onSelectionChanged: (v) { Haptics.tick(); s.setAudioStretch(widget.layer, c, v.first); }),
+        selected: {c.stretch.keepsPitch},
+        onSelectionChanged: (v) {
+          Haptics.tick();
+          s.setAudioStretch(widget.layer, c, v.first ? AudioStretch.keepPitch : AudioStretch.varispeed);
+        }),
       row('Pitch', Row(children: [
         IconButton(key: const ValueKey('audio-pitch-down'), iconSize: 18, icon: const Icon(Icons.remove),
             onPressed: () { Haptics.tick(); s.setAudioPitchCents(widget.layer, c, c.pitchCents - 100); }),

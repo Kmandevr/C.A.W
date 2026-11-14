@@ -32,7 +32,7 @@ This note records the current implementation gaps in C.A.W.'s music-production w
 - **[Implemented]** Arrangement-first horizontal timeline, track lanes, reusable MIDI clip sources, linked and independent duplicates, move/resize/split, source-offset shift, time selection, multi-selection/reference notes, nested folders and optional stereo folder buses. An adjustable gap between tracks and app-only spacer rows separate tracks on screen; each track has its own row height and a normal, compact or thin collapse state (app-only, saved; [app](app.md), Arranger).
 - **[Implemented]** Track and folder-bus volume/pan automation is serialized and played by the native engine.
 - **[Implemented]** Project/timeline automation lanes target module parameters by module ID or named project globals; the app edits song-time points and the native VM evaluates them per sample. Track volume/pan lanes remain separate.
-- **[Implemented]** Audio clips; a tempo map (stepped and ramped changes, a tempo lane), time signatures, sections and markers (batch 1.0.3, #207, C API 31): the engine plays every position on the map, sections move, copy and delete with their contents, and the recording count-in counts bars ([app](app.md), Arranger).
+- **[Implemented]** Audio import and clips with non-destructive editing, the sample editor, the stretch notch, Follows tempo and Slice to MIDI (batch 1.0.4, #208); a tempo map (stepped and ramped changes, a tempo lane), time signatures, sections and markers (batch 1.0.3, #207, C API 31): the engine plays every position on the map, sections move, copy and delete with their contents, and the recording count-in counts bars ([app](app.md), Arranger).
 - **[Incomplete]** Clip-following automation and consolidation/bounce.
 
 ### Mixer and signal flow
@@ -56,7 +56,7 @@ This note records the current implementation gaps in C.A.W.'s music-production w
 
 ### Audio assets and sampling
 
-- **[Incomplete]** Audio-file import, local asset preview, waveform-backed audio clips, non-destructive clip editing, sample editor, sampler zones, velocity layers, round-robin and complete WAV/SFZ multisample authoring.
+- **[Incomplete]** Local asset preview, velocity layers and complete WAV/SFZ multisample authoring.
 - The current engine can generate audio and process it through module/effect chains; that does not constitute an audio-file editing or sampling workflow.
 
 ### MIDI hardware and recording

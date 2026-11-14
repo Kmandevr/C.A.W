@@ -166,7 +166,7 @@ extension AudioEdit on AppState {
     final end = track.audioClips.fold<double>(0, (v, c) => math.max(v, c.endAt(project.bpm)));
     final at = (atStep ?? end).clamp(0.0, project.maxArrangementSteps - 1.0).toDouble();
     final known = asset.seconds > 0;
-    final clip = AudioClipDoc(id: newId('ac'), assetId: asset.id, startSteps: at,
+    final clip = AudioClipDoc(id: newId('ac'), assetId: asset.id, startSteps: at, stretch: AudioStretch.keepPitch,
         lengthSeconds: known ? asset.seconds : project.stepsPerBar * 15 / project.bpm);
     if (!known) (_unsized[this] ??= {}).add(clip.id);
     editLayer(track, (l) {

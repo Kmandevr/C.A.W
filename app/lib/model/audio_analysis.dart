@@ -32,6 +32,57 @@ abstract interface class AudioAnalysis {
   Future<double?> peak(String path, {required double start, required double end, int channels = 2});
 }
 
+/// `caw_asset_tempo`'s options in, its JSON out (C API 32; the contract's Engine notes), off the UI isolate.
+typedef AssetTempoCall = Future<Map<String, dynamic>?> Function(String path, {double startSeconds, double endSeconds});
+
+/// `caw_asset_slices`'s options in, its JSON out (C API 32), off the UI isolate.
+typedef AssetSlicesCall = Future<Map<String, dynamic>?> Function(String path,
+    {double sensitivity, double startSeconds, double endSeconds, int maxSlices});
+
+/// [AudioAnalysis] over the engine's C API 32 calls ([tempo], [slices]); the peak (Normalise, Trim) comes from
+/// [peaks], which reads `caw_asset_peaks`. The binding hands its two calls in:
+/// `EngineAudioAnalysis(tempo: engine.assetTempo, slices: engine.assetSlices, peaks: PeaksAudioAnalysis(io))`.
+class EngineAudioAnalysis implements AudioAnalysis {
+  EngineAudioAnalysis({required this.tempo, required this.slices, required this.peaks});
+  final AssetTempoCall tempo;
+  final AssetSlicesCall slices;
+  final AudioAnalysis peaks;
+
+  @override
+  Future<TempoEstimate?> detectTempo(String path, {required double seconds}) async =>
+      tempoFromJson(await tempo(path, startSeconds: 0, endSeconds: 0));
+
+  @override
+  Future<List<double>?> slicePoints(String path,
+      {required double start, required double end, required double sensitivity, int maxSlices = kMaxSlices}) async =>
+      slicesFromJson(await slices(path, sensitivity: sensitivity.clamp(0.0, 1.0), startSeconds: start, endSeconds: end,
+          maxSlices: maxSlices.clamp(1, 256)), start: start, end: end, maxSlices: maxSlices);
+
+  @override
+  Future<double?> peak(String path, {required double start, required double end, int channels = 2}) =>
+      peaks.peak(path, start: start, end: end, channels: channels);
+}
+
+/// `caw_asset_tempo`'s answer as an estimate: null unless ok with a finite `bpm` (null there means unsure).
+TempoEstimate? tempoFromJson(Map<String, dynamic>? j) {
+  if (j == null || j['ok'] != true) return null;
+  final bpm = j['bpm'], conf = j['confidence'];
+  if (bpm is! num || !bpm.isFinite || bpm <= 0) return null;
+  return TempoEstimate(bpm.toDouble().clamp(20.0, 999.0), conf is num && conf.isFinite ? conf.toDouble().clamp(0.0, 1.0) : 0);
+}
+
+/// `caw_asset_slices`'s answer as cut points (seconds of the file): finite, inside [start]..[end], sorted, no repeats,
+/// at most [maxSlices] − 1 (an untrusted list is read only that far); null unless ok.
+List<double>? slicesFromJson(Map<String, dynamic>? j, {required double start, required double end, int maxSlices = kMaxSlices}) {
+  if (j == null || j['ok'] != true || j['slices'] is! List) return null;
+  final out = <double>{};
+  for (final e in (j['slices'] as List).take(4096)) {
+    final t = e is Map ? e['seconds'] : null;
+    if (t is num && t.isFinite && t > start && t < end) out.add(t.toDouble());
+  }
+  return (out.toList()..sort()).take(math.max(0, maxSlices - 1)).toList();
+}
+
 /// [AudioAnalysis] from `caw_asset_peaks` min/max buckets: an envelope at [resolution] seconds a bucket.
 class PeaksAudioAnalysis implements AudioAnalysis {
   PeaksAudioAnalysis(this.io, {this.resolution = 0.005});

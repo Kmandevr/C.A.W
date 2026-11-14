@@ -43,8 +43,18 @@ enum FadeCurve {
 /// How a clip follows the tempo: [fixed] plays at the file's speed (seconds), [musical] stays locked to the bars.
 enum AudioClipMode { fixed, musical }
 
-/// How a clip changes speed: [wsola] keeps pitch, [varispeed] resamples (pitch moves with speed).
-enum AudioStretch { wsola, varispeed }
+/// How a clip changes speed: [wsola] and [signalsmith] keep pitch, [varispeed] resamples (pitch moves with speed).
+/// [signalsmith] is Signalsmith Stretch (C API 32, batch 1.0.4), what new clips use; a [wsola] clip keeps its sound.
+enum AudioStretch {
+  wsola,
+  varispeed,
+  signalsmith;
+
+  bool get keepsPitch => this != varispeed;
+
+  /// The keep-pitch algorithm new clips get: Signalsmith Stretch once the engine has it.
+  static AudioStretch get keepPitch => cawApiVersion >= 32 ? signalsmith : wsola;
+}
 
 /// One audio file the project uses: copied into the project's storage on import, referenced by absolute path.
 class AudioAssetDoc {
@@ -270,12 +280,16 @@ class AudioClipDoc {
       'fade_in_seconds': fadeIn, 'fade_in_curve': fadeInCurve.json,
       'fade_out_seconds': fadeOut, 'fade_out_curve': fadeOutCurve.json,
       'reverse': reverse, 'loop': loop, 'loop_start_seconds': loopStart, 'loop_end_seconds': loopEnd,
-      'pitch': pitch, 'mode': emulate ? 'musical' : mode.name, 'stretch': stretch.name,
-      if (emulate) 'source_bpm': bpm * stretchRatio else if (sourceBpm != null) 'source_bpm': sourceBpm,
+      // C API 32 (the contract's Engine notes): `follows_tempo` instead of `mode`, the ratio, and the pitch whole in
+      // `pitch_cents` (the engine adds it to `pitch`). The gain stays linear (`gain_db` would multiply it again).
       if (api >= 32) ...{
-        'follows_tempo': followsTempo, 'stretch_ratio': stretchRatio, 'pitch_cents': pitchCents,
-        'gain_db': _round(gainToDb(gain), 4),
+        'pitch': 0, 'pitch_cents': pitchCents, 'follows_tempo': followsTempo, 'stretch': stretch.name,
+        'stretch_ratio': stretchRatio,
+      } else ...{
+        'pitch': pitch, 'mode': emulate ? 'musical' : mode.name,
+        'stretch': stretch == AudioStretch.signalsmith ? AudioStretch.wsola.name : stretch.name,
       },
+      if (emulate) 'source_bpm': bpm * stretchRatio else if (sourceBpm != null) 'source_bpm': sourceBpm,
       'mute': mute,
     };
   }
@@ -326,7 +340,7 @@ class AudioClipDoc {
           ? _num(cents, 0, -maxPitchCents.toDouble(), maxPitchCents.toDouble()).roundToDouble() / 100
           : _num(j['pitch'], 0, -24, 24),
       mode: mode,
-      stretch: algorithm == 'varispeed' ? AudioStretch.varispeed : AudioStretch.wsola,
+      stretch: AudioStretch.values.where((a) => a.name == algorithm).firstOrNull ?? AudioStretch.wsola,
       stretchRatio: rawStretch is num ? _num(rawStretch, 1, minStretch, maxStretch) : 1,
       sourceBpm: bpm is num && bpm.isFinite && bpm > 0 ? bpm.toDouble().clamp(20.0, 999.0) : null,
       mute: j['mute'] == true,
@@ -471,7 +485,7 @@ AudioClipDoc clipForTake({required String id, required String assetId, required 
     offset = -start * 15 / bpm;
     start = 0;
   }
-  return AudioClipDoc(id: id, assetId: assetId, startSteps: start,
+  return AudioClipDoc(id: id, assetId: assetId, startSteps: start, stretch: AudioStretch.keepPitch,
       lengthSeconds: math.max(0.001, seconds - offset), offsetSeconds: math.min(offset, math.max(0, seconds)));
 }
 
@@ -487,11 +501,6 @@ double _gainOf(Object? db, Object? linear) {
   if (db is! num || !db.isFinite) return exact;
   final fromDb = dbToGain(_num(db, 0, -60, 12));
   return linear is num && (gainToDb(exact) - db).abs() < 1e-6 ? exact : fromDb;
-}
-
-double _round(double v, int places) {
-  final k = math.pow(10, places);
-  return (v * k).round() / k;
 }
 
 double _num(Object? v, double or, double lo, double hi) =>

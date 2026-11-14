@@ -2,7 +2,7 @@
 title: Modular engine implementation status
 summary: Evidence-based status of the unified engine build, what is implemented, what is only a contract, and the next engineering stages.
 covers: [engine/, app/lib/engine/, app/lib/model/app_state.dart, app/lib/model/lane_curve.dart, app/lib/model/pattern_doc.dart, app/lib/model/poller.dart, app/lib/model/project.dart, examples/cpp/minimal/, scripts/caw-component-build.js, scripts/caw-component-build.test.js, .github/workflows/cpp-components.yml]
-updated: 2026-11-13
+updated: 2026-11-14
 ---
 
 # Modular engine implementation status
@@ -60,7 +60,7 @@ This is the implementation ledger for the unified modular engine. A documented c
 
 ## Not yet implemented
 
-- Audio's leftovers: the app's UI for all of the above; audition of an asset outside a project; per-clip loop-seam crossfades and anti-aliased varispeed; a higher-quality stretch than WSOLA (phase vocoder) for tonal material; tempo maps (clips follow one project tempo); recording measured on real devices (latency estimate, AAudio duplex on the S22+).
+- Audio's leftovers: audition of an asset outside a project; per-clip loop-seam crossfades and anti-aliased varispeed; a higher-quality stretch than WSOLA (phase vocoder) for tonal material; tempo maps (clips follow one project tempo); recording measured on real devices (latency estimate, AAudio duplex on the S22+).
 
 - A project graph of components: the mix graph runs each track as one node (its instrument and inserts run inside it as component chains); components are not graph nodes of their own yet. GraphResourceBudget is implemented at the lower-level API but is not yet connected to hardware-aware Engine policy.
 - Universal state transfer, graph hot-swap integration and dependency-aware retirement for native module instances; the graph helper currently provides only prepared-graph pointer publication and deferred reclamation.
