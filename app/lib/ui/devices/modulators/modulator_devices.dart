@@ -170,7 +170,9 @@ Future<void> pickModTarget(BuildContext context, AppState s, ModSourceRef source
 }
 
 /// A link's sheet: a big amount slider, polarity, curve and remove (long-press a knob's ring, or a link chip).
-Future<void> showModLinkSheet(BuildContext context, AppState s, ModTarget target, {VoidCallback? onTypeValue}) =>
+/// [extra]: more of the knob's own actions under the links (its Automate button, #230).
+Future<void> showModLinkSheet(BuildContext context, AppState s, ModTarget target, {VoidCallback? onTypeValue,
+        Widget? extra}) =>
     showGlassSheet<void>(
       context: context,
       isScrollControlled: true,
@@ -193,6 +195,7 @@ Future<void> showModLinkSheet(BuildContext context, AppState s, ModTarget target
                   onTypeValue();
                 },
                 icon: const Icon(Icons.keyboard, size: 16), label: const Text('Type a value'))),
+              if (extra != null) Align(alignment: Alignment.centerLeft, child: extra),
             ])));
         },
       ),

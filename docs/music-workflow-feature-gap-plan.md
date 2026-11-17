@@ -2,7 +2,7 @@
 title: Music workflow implementation gaps
 summary: Factual snapshot of implemented and incomplete music-workflow capabilities; sequencing belongs to the permanent roadmap.
 covers: [app/lib/model/app_state.dart, app/lib/model/lane_curve.dart, app/lib/model/pattern_doc.dart, app/lib/model/poller.dart, app/lib/model/project.dart, app/lib/model/storage.dart]
-updated: 2026-11-14
+updated: 2026-11-17
 ---
 
 # Music workflow implementation gaps
@@ -31,7 +31,7 @@ This note records the current implementation gaps in C.A.W.'s music-production w
 - **[Implemented in the engine]** More than 64 layers, bounded by the memory budget (F7.3), with their export buffers held to a project-wide share (#133); the app's add buttons still stop at 64 until F7.3 part C.
 - **[Implemented]** Arrangement-first horizontal timeline, track lanes, reusable MIDI clip sources, linked and independent duplicates, move/resize/split, source-offset shift, time selection, multi-selection/reference notes, nested folders and optional stereo folder buses. An adjustable gap between tracks and app-only spacer rows separate tracks on screen; each track has its own row height and a normal, compact or thin collapse state (app-only, saved; [app](app.md), Arranger).
 - **[Implemented]** Track and folder-bus volume/pan automation is serialized and played by the native engine.
-- **[Implemented]** Project/timeline automation lanes target module parameters by module ID or named project globals; the app edits song-time points and the native VM evaluates them per sample. Track volume/pan lanes remain separate.
+- **[Implemented]** Project/timeline automation lanes target module parameters by module ID or named project globals; the app edits song-time points with curved segments (#230) and the native VM evaluates them per sample. Track volume/pan lanes remain separate.
 - **[Implemented]** Audio import and clips with non-destructive editing, the sample editor, the stretch notch, Follows tempo and Slice to MIDI (batch 1.0.4, #208); a tempo map (stepped and ramped changes, a tempo lane), time signatures, sections and markers (batch 1.0.3, #207, C API 31): the engine plays every position on the map, sections move, copy and delete with their contents, and the recording count-in counts bars ([app](app.md), Arranger).
 - **[Incomplete]** Clip-following automation and consolidation/bounce.
 

@@ -506,7 +506,8 @@ std::string ComponentChain::automationKey(const std::vector<ProjectAutomationLan
         key += std::to_string(lane.component) + "|" + lane.target + "|";
         for (const AutomationPointSpec& p : lane.points) {
             // Exact: the bits, so the smallest edit gives a new key.
-            key += std::to_string(std::bit_cast<uint64_t>(p.step)) + ":" + std::to_string(std::bit_cast<uint64_t>(p.value)) + ";";
+            key += std::to_string(std::bit_cast<uint64_t>(p.step)) + ":" + std::to_string(std::bit_cast<uint64_t>(p.value)) + ":" +
+                   std::to_string(p.curve) + ":" + std::to_string(std::bit_cast<uint64_t>(p.tension)) + ";";
         }
     }
     return key;

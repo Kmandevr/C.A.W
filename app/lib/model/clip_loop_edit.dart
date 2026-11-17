@@ -164,15 +164,15 @@ extension ClipLoopEdit on AppState {
     pieces.add((t0, t0 + first, u0));
     if (span > first) pieces.add((t0 + first, t0 + span, 0));
     final local = <AutomationPointDoc>[];
-    void add(double u, double v) {
+    void add(double u, double v, [AutomationPointDoc? from]) {
       if (local.any((p) => (p.step - u).abs() < 0.01)) return;
-      local.add(AutomationPointDoc(step: u, value: v));
+      local.add(from?.copy(step: u, value: v) ?? AutomationPointDoc(step: u, value: v));
     }
 
     for (final (a, b, u) in pieces) {
       add(u, pointsValueAt(base, a));
       for (final p in base) {
-        if (p.step > a && p.step < b) add(u + p.step - a, p.value);
+        if (p.step > a && p.step < b) add(u + p.step - a, p.value, p);
       }
       add(u + b - a, pointsValueAt(base, b, left: true));
     }

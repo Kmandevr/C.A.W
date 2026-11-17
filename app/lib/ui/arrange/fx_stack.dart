@@ -26,6 +26,7 @@ import '../theme.dart';
 import '../volume_fader.dart';
 import 'arrange_drag.dart';
 import 'track_color.dart';
+import 'automate_control.dart';
 import 'knob.dart';
 import 'long_press_menu.dart';
 import 'note_fx_section.dart';
@@ -562,6 +563,8 @@ class _NativeEffectCard extends StatelessWidget {
                   min: p.min, max: p.max, step: p.step, defaultValue: p.defaultValue, label: p.label,
                   exponential: p.exponential,
                   enabled: !use.bypass,
+                  automation: ControlAutomation.of(
+                      DeviceTarget(state, layer.id, instrument ? DeviceTarget.instrumentSlot : index), p.id),
                   color: isBuiltinComponent(use.id) ? Neon.blue : Neon.green,
                   valueText: (v) => '${v.toStringAsFixed(p.max - p.min > 20 ? 0 : 2)}${p.unit.isEmpty ? '' : ' ${p.unit}'}',
                   onChanged: (v) => _param(p.id, v),

@@ -4,6 +4,7 @@
 #include "params.h"
 
 #include <algorithm>
+#include <bit>
 #include <cmath>
 #include <limits>
 
@@ -273,4 +274,52 @@ TEST(automation_lane_value_interpolates_holds_and_jumps) {
     CHECK_EQ(automationLaneValue(points, 4, 3.0, 9.0), 5.0);  // a jump takes the later value
     CHECK_EQ(automationLaneValue(points, 4, 3.5, 9.0), 5.5);
     CHECK_EQ(automationLaneValue(points, 4, 10.0, 9.0), 6.0);  // after the last
+}
+
+// Curved segments (#230): every shape is a closed form of + - * /, so these are exact on every platform.
+TEST(automation_curve_shapes_hit_exact_references) {
+    const auto shape = [](AutomationCurve c, double tension, double t) {
+        return automationCurveShape(static_cast<uint8_t>(c), tension, t);
+    };
+    // Tension 0 (b = 7/16), 1 (b = 7/8) and -1 (b = 0, straight): dyadic, so the midpoints are exact.
+    CHECK_EQ(shape(AutomationCurve::Slow, 0.0, 0.5), 0.28125);
+    CHECK_EQ(shape(AutomationCurve::Fast, 0.0, 0.5), 0.71875);
+    CHECK_EQ(shape(AutomationCurve::Slow, 1.0, 0.5), 0.0625);
+    CHECK_EQ(shape(AutomationCurve::Fast, 1.0, 0.5), 0.9375);
+    CHECK_EQ(shape(AutomationCurve::Slow, -1.0, 0.5), 0.5);
+    CHECK_EQ(shape(AutomationCurve::Fast, -1.0, 0.25), 0.25);
+    CHECK_EQ(shape(AutomationCurve::SCurve, 0.0, 0.25), 0.140625);
+    CHECK_EQ(shape(AutomationCurve::SCurve, 0.0, 0.5), 0.5);
+    CHECK_EQ(shape(AutomationCurve::SCurve, 0.0, 0.75), 0.859375);
+    CHECK_EQ(shape(AutomationCurve::Step, 0.0, 0.999), 0.0);
+    for (AutomationCurve c : {AutomationCurve::Slow, AutomationCurve::Fast, AutomationCurve::SCurve}) {
+        CHECK_EQ(shape(c, 0.3, 0.0), 0.0);
+        CHECK_EQ(shape(c, 0.3, 1.0), 1.0);
+    }
+    // Off the dyadic points: the bits (IEEE-754 double, no fused multiply-add) recorded once.
+    CHECK_EQ(std::bit_cast<uint64_t>(shape(AutomationCurve::Slow, 0.25, 0.3)), uint64_t{0x3fbc8dc8dc8dc8dc});
+    CHECK_EQ(std::bit_cast<uint64_t>(shape(AutomationCurve::Fast, -0.5, 0.7)), uint64_t{0x3fe91a7b9611a7b9});
+    // A tension outside -1..1 reads as its end.
+    CHECK_EQ(shape(AutomationCurve::Slow, 5.0, 0.5), 0.0625);
+    CHECK_EQ(shape(AutomationCurve::Slow, std::numeric_limits<double>::quiet_NaN(), 0.5), 0.5);
+}
+
+TEST(automation_lane_curves_follow_the_earlier_point_and_linear_stays_bit_identical) {
+    AutomationPoint points[] = {{0.0, 0.0}, {4.0, 8.0}, {8.0, 0.0}, {12.0, 4.0}};
+    // Linear (curve 0): the original expression, value + (next - value) * t, bit for bit.
+    for (double at : {0.3, 1.7, 2.0, 5.1, 9.99}) {
+        std::size_t lo = at < 4 ? 0 : at < 8 ? 1 : 2;
+        const double t = (at - points[lo].step) / (points[lo + 1].step - points[lo].step);
+        CHECK_EQ(std::bit_cast<uint64_t>(automationLaneValue(points, 4, at, 0.0)),
+                 std::bit_cast<uint64_t>(points[lo].value + (points[lo + 1].value - points[lo].value) * t));
+    }
+    points[0].curve = static_cast<uint8_t>(AutomationCurve::Slow);
+    points[1].curve = static_cast<uint8_t>(AutomationCurve::Step);
+    points[2].curve = static_cast<uint8_t>(AutomationCurve::Fast);
+    points[2].tension = 1.0;
+    CHECK_EQ(automationLaneValue(points, 4, 2.0, 0.0), 2.25);   // 8 * 0.28125
+    CHECK_EQ(automationLaneValue(points, 4, 7.99, 0.0), 8.0);   // a step holds until the next point
+    CHECK_EQ(automationLaneValue(points, 4, 8.0, 0.0), 0.0);    // and takes it there
+    CHECK_EQ(automationLaneValue(points, 4, 10.0, 0.0), 3.75);  // 4 * 0.9375
+    CHECK_EQ(automationLaneValue(points, 4, 13.0, 0.0), 4.0);   // after the last
 }

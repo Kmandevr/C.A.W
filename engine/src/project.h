@@ -60,7 +60,8 @@ struct ClipSpec {
     int loopSteps = 0;  // where the clip's own loop repeats (REAPER-like loop point); 0: at its pattern's length
 };
 
-struct AutomationPointSpec { double step = 0, value = 0; };
+// curve: the AutomationCurve (params.h) to the next point, tension -1..1 (JSON "curve" and "tension", #230).
+struct AutomationPointSpec { double step = 0, value = 0; uint8_t curve = 0; double tension = 0; };
 struct AutomationLaneSpec { std::string target; std::vector<AutomationPointSpec> points; };
 
 struct ProjectAutomationLaneSpec {

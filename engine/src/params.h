@@ -22,10 +22,45 @@ double constrainParameter(const ParameterDescriptor& parameter, double plain) no
 void denormalizeOffsets(const ParameterDescriptor& parameter, double n0, const float* offset, uint32_t count,
                         double* out) noexcept;
 
+// A segment's curve, from a point to the next (owner, 2026-11-17, #230). Stored on the earlier point, with a
+// tension of -1..1 that bends Slow, Fast and S-curve (0 is the default bend; Linear and Step ignore it).
+enum class AutomationCurve : uint8_t { Linear = 0, Slow = 1, Fast = 2, SCurve = 3, Step = 4 };
+inline constexpr uint8_t kAutomationCurveCount = 5;
+
+// The curve's shape at t (0..1 through the segment), 0 at its start and 1 at its end. A closed form of +, -, *
+// and / only (no pow or exp), so with the engine's strict floating point every platform gives the same bits:
+//   b = 0.4375 * (1 + tension)              (0 .. 0.875, dyadic: tension -1 is a straight line, 0 and 1 are exact)
+//   Slow(t)   = t(1-b) / (t(1-b) + (1-t)(1+b))   (eases in: at t = 1/2 it is (1-b)/2)
+//   Fast(t)   = t(1+b) / (t(1+b) + (1-t)(1-b))   (eases out: at t = 1/2 it is (1+b)/2)
+//   SCurve(t) = Slow(2t)/2 below t = 1/2, 1/2 + Fast(2t-1)/2 from it
+//   Step(t)   = 0 (the start's value holds until the next point)
+// Linear never comes here: automationLaneValue keeps its original expression so linear lanes stay bit-identical.
+inline double automationCurveShape(uint8_t curve, double tension, double t) noexcept {
+    if (!(tension >= -1.0)) tension = -1.0;  // below the range, or NaN (never from a parsed project): the gentlest
+    if (tension > 1.0) tension = 1.0;
+    const double b = 0.4375 * (1.0 + tension);
+    const auto slow = [b](double x) noexcept {
+        const double a = x * (1.0 - b);
+        return a / (a + (1.0 - x) * (1.0 + b));
+    };
+    const auto fast = [b](double x) noexcept {
+        const double a = x * (1.0 + b);
+        return a / (a + (1.0 - x) * (1.0 - b));
+    };
+    switch (static_cast<AutomationCurve>(curve)) {
+        case AutomationCurve::Slow: return slow(t);
+        case AutomationCurve::Fast: return fast(t);
+        case AutomationCurve::SCurve: return t < 0.5 ? 0.5 * slow(2.0 * t) : 0.5 + 0.5 * fast(2.0 * t - 1.0);
+        case AutomationCurve::Step: return 0.0;
+        default: return t;
+    }
+}
+
 // An automation lane's value at `at` (in steps): the first point's value before it, the last
-// point's after it, linear between neighbours, and the later point's value at a jump (two points
-// at one step). `fallback` for an empty lane. Points need `step` and `value` and must be sorted by
-// step. The Engine's automation and the graph's lanes share this, so they match bit for bit.
+// point's after it, along each segment's curve between neighbours (linear unless the earlier point says
+// otherwise), and the later point's value at a jump (two points at one step). `fallback` for an empty lane.
+// Points need `step`, `value`, `curve` and `tension` and must be sorted by step. The Engine's automation and
+// the graph's lanes share this, so they match bit for bit.
 template <class Point>
 double automationLaneValue(const Point* points, std::size_t count, double at, double fallback) noexcept {
     if (count == 0) return fallback;
@@ -39,11 +74,15 @@ double automationLaneValue(const Point* points, std::size_t count, double at, do
     const double span = points[hi].step - points[lo].step;
     if (span <= 0.0) return points[hi].value;
     const double t = (at - points[lo].step) / span;
-    return points[lo].value + (points[hi].value - points[lo].value) * t;
+    if (points[lo].curve == 0) return points[lo].value + (points[hi].value - points[lo].value) * t;
+    return points[lo].value + (points[hi].value - points[lo].value) *
+                                  automationCurveShape(points[lo].curve, points[lo].tension, t);
 }
 struct AutomationPoint {
     double step = 0.0;   // song position in steps
     double value = 0.0;  // plain parameter value (constrained like any base)
+    uint8_t curve = 0;   // AutomationCurve of the segment to the next point
+    double tension = 0.0;  // -1..1, bends Slow, Fast and S-curve
 };
 
 // How a modulation link changes the normalized value n, given its source value m (one float per
