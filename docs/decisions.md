@@ -16,6 +16,12 @@ updated: 2026-11-17
 
 The goal is "everything works with everything natively", like Kilohearts' Snap Heap but built into everything that can use it. The batch 1.0.6 devices are built to become nodes later.
 
+The owner added (2026-11-17):
+- Everything can be placed freely: an oscillator wired into a distortion, then a filter, and so on. Sound sources are nodes too.
+- Free-standing LFOs, envelopes and other modulators can be wired into any plug-in or parameter, for movement where it's normally hard to get.
+
+**[Fact]** Project-level modulators already exist and can target any parameter (docs/engine.md, "Modulation"). 1.1.0 adds the visual wiring, generator nodes and free audio paths.
+
 ## 2026-11-17: Device UI redesign and a step-by-step music video (owner, #231, #232)
 
 **Decision (owner, 2026-11-17).** Both ship in batch 1.0.6, with the FX consolidation.
