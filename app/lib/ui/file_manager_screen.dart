@@ -8,6 +8,7 @@ import '../actions/actions.dart';
 import '../model/app_state.dart';
 import '../model/files_catalog.dart';
 import '../model/sample_packs.dart';
+import '../model/sample_use.dart' show SampleUse;
 import '../model/user_presets.dart';
 import 'frame/frame_widgets.dart' show AwakeListenableBuilder, ScrollFade;
 import 'keyboard/key_area.dart';
@@ -18,6 +19,7 @@ import 'files/files_tree.dart';
 import 'files/library_manager.dart';
 import 'files/project_file_actions.dart';
 import 'files/project_library_view.dart';
+import 'files/sample_browser.dart';
 import 'files/selection_bar.dart';
 import 'frame/sections.dart' show SectionController;
 import 'glass.dart';
@@ -275,7 +277,9 @@ class _FileManagerScreenState extends State<FileManagerScreen> {
 
   Widget _toolbar(List<FilesFolder> trail, bool wide, bool searching, {bool canSelect = false}) {
     final folder = trail.last;
-    final projects = folder.kind == FilesFolderKind.projects;
+    // Projects and Samples have their own search and tools.
+    final projects = folder.kind == FilesFolderKind.projects || folder.kind == FilesFolderKind.samples ||
+        folder.kind == FilesFolderKind.sampleFolder;
     return SizedBox(
       height: 40,
       child: Row(children: [
@@ -567,7 +571,7 @@ class _FileManagerScreenState extends State<FileManagerScreen> {
   @override
   // Asleep while Files is behind another section (frame_widgets.dart).
   Widget build(BuildContext context) => AwakeListenableBuilder(
-        listenable: Listenable.merge([state, state.userPresets, state.samplePacksTick]),
+        listenable: Listenable.merge([state, state.userPresets, state.samplePacksTick, state.sampleLibrary.foldersTick]),
         builder: (context, _) => LayoutBuilder(builder: (context, c) {
           // A small docked panel in a landscape window still uses the drawer: the tree needs room beside the grid.
           final wide = !widget.explorer && (c.maxWidth > c.maxHeight || c.maxWidth >= 900) && c.maxWidth >= 560;
@@ -607,6 +611,12 @@ class _FileManagerScreenState extends State<FileManagerScreen> {
             main = Column(children: [
               _toolbar(trail, wide, false),
               Expanded(child: ProjectLibraryView(state: state)),
+            ]);
+          } else if (folder.kind == FilesFolderKind.samples || folder.kind == FilesFolderKind.sampleFolder) {
+            main = Column(children: [
+              _toolbar(trail, wide, false),
+              Expanded(child: SampleBrowserView(state: state,
+                  folderId: folder.kind == FilesFolderKind.sampleFolder ? folder.path.substring('samples/'.length) : null)),
             ]);
           } else {
           main = Column(children: [

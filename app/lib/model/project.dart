@@ -816,7 +816,8 @@ class ProjectDoc {
   /// (`bpm`) in its `beats_per_bar`/4, its regions as sections. v5 (batch 1.0.5, #216): clips stored as MIDI
   /// (`midi`, base64), not pattern text; a v4 file's text converts on load. v5 also holds batch 1.0.5's other fields:
   /// freeze's `frozen`, `frozen_asset` and `frozen_context` (#209) and automation's point `curve` and `tension`, lane
-  /// `height`, `recent_automation` and `automation_follows_clips` (#230). An older C.A.W refuses a v5 file whole.
+  /// `height`, `recent_automation` and `automation_follows_clips` (#230), and a linked sample asset's `link` (#229).
+  /// An older C.A.W refuses a v5 file whole.
   static const int fileVersion = 5;
 
   final String id;

@@ -26,6 +26,8 @@
 
 namespace caw {
 
+class SamplePreview;  // sample_preview.h: the sample browser's preview voice (API 33)
+
 class MixPool;  // mix_pool.h
 
 constexpr int kBlock = 64;  // frames the mixer runs at most at once (a chunk); component chains run in these blocks
@@ -179,6 +181,11 @@ public:
     }
     // Drops any request and the tone in progress. Only while no process() runs (the device is closed).
     void resetTestTone() noexcept;
+    // The sample browser's preview voice (sample_preview.h): mixed with the test tone, after the master's gain and
+    // the transport's fades and before the safety limiter, playing or not.
+    SamplePreview& samplePreview() noexcept { return *samplePreview_; }
+    // A layer's slot for the preview's "layer" option (-1: none). Briefly under the control lock.
+    int previewSlot(const std::string& layerId) { return deviceSlot(layerId); }
     // Sound quality (caw.h CAW_QUALITY_*): the built-ins read it while they play (quality.h). Normal by default.
     void setQuality(int quality) noexcept;
     int quality() const noexcept { return quality_.load(std::memory_order_relaxed); }
@@ -499,7 +506,11 @@ private:
     double tonePhase_ = 0;
     void takeToneRequest() noexcept;                       // once per callback, before any sample
     double nextTone() noexcept;                            // the tone's next sample (only while toneLeft_ > 0)
-    void mixToneOnly(float* left, float* right, int frames) noexcept;  // frames the master stage did not run
+    // Frames the master stage did not run; previewTaken: a track node played the sample preview this chunk.
+    void mixToneOnly(float* left, float* right, int frames, bool previewTaken = false) noexcept;
+    std::unique_ptr<SamplePreview> samplePreview_;
+    void takePreview() noexcept;  // once per callback, after takeToneRequest
+    std::atomic<bool> previewTaken_{false};  // a track node played the sample preview this chunk (any mix thread)
     void startPlay(double fromStep, uint64_t playCount, uint32_t touchStamp) noexcept;
     void startClick(bool accent) noexcept;
     double nextClick() noexcept;  // the click's next sample (0 when none sounds)
