@@ -2,7 +2,8 @@
 // a clip's notes, with their per-note bend, pressure and timbre, become a .mid (lib/model/midi_file.dart writes it),
 // with its track's automation lanes over the clip as controller changes (CC7 volume, CC10 pan, CC20 up for others).
 //
-// Clips stay stored as C.A.W.'s pattern text (docs/decisions.md "MIDI files are an import and export format").
+// Projects store clips as MIDI too (lib/model/clip_midi.dart, #216); its notes without C.A.W's own data are read by
+// [patternNoteOfMidi], the rule an imported file's notes follow, and written by [midiNoteOfPattern].
 // Times convert by ticks per quarter note (one 16th step is a quarter of a quarter note), so a file's notes keep their
 // beats whatever the tempo; the file's first tempo and meter are applied only to a project with no clips yet.
 import 'dart:math' as math;
@@ -103,28 +104,32 @@ double _round(double v, int places) {
   return (v * s).round() / s;
 }
 
-String _patternText(List<MidiNote> notes, int ppq, int bar, String name) {
+/// A MIDI note as a pattern note, [ppq] ticks a quarter note: its start, length, key (plus the bend sounding at its
+/// start, as a microtone), velocity, and its bend, pressure and timbre while it sounds as curves. The one rule for a
+/// note MIDI alone describes, in an imported file or a stored clip.
+PatternNote patternNoteOfMidi(MidiNote n, int ppq, {int id = 0}) {
   Steps steps(int tick) => Steps(tick * 4, ppq);
-  final out = <PatternNote>[];
-  for (final (i, n) in notes.indexed) {
-    final at = steps(n.on), end = steps(n.off);
-    if (end > Steps(kPatternMaxSteps)) throw const MidiFileException('the notes run past the longest pattern C.A.W. holds');
-    final start = n.bend.isNotEmpty && n.bend.first.tick <= n.on ? n.bend.first.value : 0.0;
-    final span = math.max(1, n.off - n.on), gap = math.max(1, ppq ~/ 16);
-    final bend = n.bend.length > 1 ? _curve(n.bend, n.on, span, gap, start, 0.01, -NoteExpression.maxBend, NoteExpression.maxBend) : const <NotePoint>[];
-    out.add(PatternNote(
-      id: i,
-      at: at,
-      len: Steps.max(end - at, kMinNoteLength),
-      pitch: _round((n.key + start).clamp(0, 127).toDouble(), 3),
-      vel: _round(n.velocity / 127, 3),
-      expr: NoteExpression(
-        bend: bend.every((p) => p.v == 0) ? const [] : bend,
-        press: _curve(n.pressure, n.on, span, gap, 0, 0.005, 0, 1),
-        timbre: _curve(n.timbre, n.on, span, gap, 0, 0.005, 0, 1),
-      ),
-    ));
-  }
+  final at = steps(n.on), end = steps(n.off);
+  if (end > Steps(kPatternMaxSteps)) throw const MidiFileException('the notes run past the longest pattern C.A.W. holds');
+  final start = n.bend.isNotEmpty && n.bend.first.tick <= n.on ? n.bend.first.value : 0.0;
+  final span = math.max(1, n.off - n.on), gap = math.max(1, ppq ~/ 16);
+  final bend = n.bend.length > 1 ? _curve(n.bend, n.on, span, gap, start, 0.01, -NoteExpression.maxBend, NoteExpression.maxBend) : const <NotePoint>[];
+  return PatternNote(
+    id: id,
+    at: at,
+    len: Steps.max(end - at, kMinNoteLength),
+    pitch: _round((n.key + start).clamp(0, 127).toDouble(), 3),
+    vel: _round(n.velocity / 127, 3),
+    expr: NoteExpression(
+      bend: bend.every((p) => p.v == 0) ? const [] : bend,
+      press: _curve(n.pressure, n.on, span, gap, 0, 0.005, 0, 1),
+      timbre: _curve(n.timbre, n.on, span, gap, 0, 0.005, 0, 1),
+    ),
+  );
+}
+
+String _patternText(List<MidiNote> notes, int ppq, int bar, String name) {
+  final out = [for (final (i, n) in notes.indexed) patternNoteOfMidi(n, ppq, id: i)];
   out.sort((a, b) => a.at != b.at ? a.at.compareTo(b.at) : a.pitch.compareTo(b.pitch));
   final last = out.fold(Steps.zero, (m, n) => Steps.max(m, n.end));
   final bars = math.max(1, (last / Steps(bar)).ceil()).clamp(1, kPatternMaxBars);
@@ -191,9 +196,12 @@ typedef _Window = ({Steps from, Steps to, Steps at});
 /// length and looping, as the engine arranges it), else one loop of the pattern. Each ratchet hit is its own note;
 /// chance and slide have no MIDI form and are left out. Notes with expression (bend, vibrato, pressure, timbre or a
 /// microtonal pitch) make the file MPE.
-/// [controls] (a clip's automation lanes as CCs, [automationControls]) go in the same track.
+/// [controls] (a clip's automation lanes as CCs, [automationControls]) go in the same track. With a [tempoMap] and
+/// [signatures] (a song's), the file gets a tempo and a meter event at each change before its end ([midiTempos]),
+/// and [bpm] and [beatsPerBar] are its first.
 Uint8List patternToMidi(PatternDoc doc,
-    {required double bpm, required int beatsPerBar, ClipDoc? clip, String? name, List<MidiControl> controls = const []}) {
+    {required double bpm, required int beatsPerBar, ClipDoc? clip, String? name, List<MidiControl> controls = const [],
+    List<TempoPoint>? tempoMap, List<TimeSignature>? signatures}) {
   final source = Steps(clip?.loopLength(doc.lengthSteps(beatsPerBar)) ?? math.max(1, doc.lengthSteps(beatsPerBar)));
   final windows = <_Window>[];
   if (clip == null) {
@@ -229,26 +237,75 @@ Uint8List patternToMidi(PatternDoc doc,
         if (hitEnd <= w.from || hit >= w.to) continue;
         final a = Steps.max(hit, w.from), b = Steps.min(hitEnd, w.to);
         final on = tick(a - w.from + w.at), off = math.max(on + 1, tick(b - w.from + w.at));
-        notes.add(_note(n, hit, part, a, on, off, w, tps, tempo));
+        notes.add(midiNoteOfPattern(n, part, on, off, startTick: (hit - w.from + w.at).toDouble() * tps, tps: tps, bpm: tempo));
         if (notes.length > kMaxMidiNotes) throw const MidiFileException('the clip would write more than $kMaxMidiNotes notes');
       }
     }
   }
   final end = clip == null ? tick(source) : tick(windows.isEmpty ? Steps(clip.lengthSteps) : windows.last.at + windows.last.to - windows.last.from);
+  final length = math.max(1, end);
   return writeMidiFile(MidiFile(
-    tempos: [MidiTempo(0, tempo)],
+    tempos: tempoMap == null ? [MidiTempo(0, tempo)] : midiTempos(tempoMap, length),
     meterNumerator: beatsPerBar.clamp(1, 16),
     meterDenominator: 4,
+    meters: [
+      for (final t in signatures ?? const <TimeSignature>[])
+        if (t.beat == 0 || (t.beat * kMidiExportPpq).round() < length) MidiMeter((t.beat * kMidiExportPpq).round(), t.num, t.den),
+    ],
     tracks: [MidiTrack(name: name ?? doc.name, notes: notes, endTick: math.max(end, controls.fold(0, (e, c) => math.max(e, c.tick))), controls: controls)],
   ));
 }
 
-MidiNote _note(PatternNote n, Steps hit, Steps part, Steps from, int on, int off, _Window w, int tps, double bpm) {
+/// A hit of pattern note [n] ([part] steps long, a ratchet's repeat or the whole note) sounding from tick [on] to
+/// [off] as a MIDI note: its key (a microtone as a bend), velocity, and its curves and vibrato sampled into bend,
+/// pressure and timbre changes. [startTick] is where the hit starts (before [on] when a window cuts it), [tps] ticks
+/// a step, [bpm] the tempo vibrato is timed at. [lead]: meta events written just before its note-on.
+/// The slowest tempo a .mid holds: 0xFFFFFF microseconds a quarter note.
+const double kMidiSlowestBpm = 60000000 / 0xFFFFFF;
+
+/// A tempo map as .mid tempo events before [lengthTicks] (at [kMidiExportPpq]): a step at each point; MIDI tempos
+/// can't ramp, so a ramp is a tempo every 1/16 note (at most 1024 a ramp), each holding the tempo that keeps that
+/// stretch's exact length (as the engine's writer, engine/src/midifile.cpp). Throws a [MidiFileException] for a
+/// tempo slower than [kMidiSlowestBpm].
+List<MidiTempo> midiTempos(List<TempoPoint> map, int lengthTicks) {
+  final pts = map.isEmpty ? const [TempoPoint(0, 120)] : map;
+  for (final t in pts) {
+    if (!(t.bpm >= kMidiSlowestBpm)) {
+      throw MidiFileException('a .mid file holds tempos from ${kMidiSlowestBpm.toStringAsFixed(2)} BPM; the tempo map has ${t.bpm} BPM');
+    }
+  }
+  final tm = TempoMath(pts);
+  int tickOf(double beat) => (beat * kMidiExportPpq).round();
+  final out = <MidiTempo>[];
+  for (var i = 0; i < pts.length; i++) {
+    if (i + 1 >= pts.length || !pts[i + 1].ramp) {
+      out.add(MidiTempo(tickOf(pts[i].beat), pts[i].bpm));
+      continue;
+    }
+    final a = pts[i].beat, b = pts[i + 1].beat;
+    final n = ((b - a) * 4).ceil().clamp(1, 1024);
+    for (var k = 0; k < n; k++) {
+      final x = a + (b - a) * k / n, y = k + 1 == n ? b : a + (b - a) * (k + 1) / n;
+      final sec = tm.secondsAt(y) - tm.secondsAt(x);
+      out.add(MidiTempo(tickOf(x), sec > 0 ? 60 * (y - x) / sec : pts[i].bpm));
+    }
+  }
+  // Changes from the end on are left out; at one tick the last tempo holds.
+  final kept = <MidiTempo>[];
+  for (final t in out) {
+    if (t.tick > 0 && t.tick >= lengthTicks) continue;
+    if (kept.isNotEmpty && kept.last.tick == t.tick) kept.removeLast();
+    kept.add(t);
+  }
+  return kept;
+}
+
+MidiNote midiNoteOfPattern(PatternNote n, Steps part, int on, int off,
+    {required double startTick, required int tps, required double bpm, List<List<int>> lead = const []}) {
   final key = n.pitch.round().clamp(0, 127);
   final frac = n.pitch - key;
   final x = n.expr;
   final hitTicks = part.toDouble() * tps;
-  final startTick = (hit - w.from + w.at).toDouble() * tps; // where the hit would start, inside or before the window
   double u(int t) => hitTicks > 0 ? ((t - startTick) / hitTicks).clamp(0.0, 1.0) : 0;
   // Ticks to sample a curve at: its points' times, a 1/128 note grid (smooth enough for bends and vibrato), the end.
   List<int> ticks(List<NotePoint> c) {
@@ -279,6 +336,7 @@ MidiNote _note(PatternNote n, Steps hit, Steps part, Steps from, int on, int off
     velocity: (n.vel * 127).round().clamp(1, 127),
     on: on,
     off: off,
+    lead: lead,
     bend: bends,
     pressure: x.press.isEmpty ? null : sample(x.press, (t) => NoteExpression.valueAt(x.press, u(t))),
     timbre: x.timbre.isEmpty ? null : sample(x.timbre, (t) => NoteExpression.valueAt(x.timbre, u(t))),

@@ -228,7 +228,7 @@ void main() {
     addTearDown(s.dispose);
     s.project = ProjectDoc(id: 'files', name: 'Files', modules: [
       ModuleDoc(id: 'riff', name: 'Riff', source: '---\nkind: pattern\n---\n0 A2 1 1'),
-      ModuleDoc(id: 'beat', name: 'Beat', source: '---\nkind: pattern\n---\nc4'),
+      ModuleDoc(id: 'beat', name: 'Beat', source: '---\nkind: pattern\n---\n0 C4 1 1'),
     ]);
     s.info['riff'] = const ModuleInfo(ok: true, kind: 'pattern');
     s.info['beat'] = const ModuleInfo(ok: true, kind: 'pattern');

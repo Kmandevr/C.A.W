@@ -164,14 +164,15 @@ class Steps implements Comparable<Steps> {
   static Steps min(Steps a, Steps b) => a <= b ? a : b;
 
   /// Integers plainly (`4`); short exact decimals (`4.5`, `0.125`); other fractions up to /64 as `13/3`; exact
-  /// decimals up to 9 places; anything else rounded to 1/1000.
+  /// decimals up to 9 places; anything else as its exact fraction (`1/97`), so text written from a stored clip reads
+  /// back to the same time (#216; it was rounded to 1/1000 before).
   @override
   String toString() {
     if (denominator == 1) return '$numerator';
     if (1000 % denominator == 0) return _decimalString(3);
     if (denominator <= 64) return '$numerator/$denominator';
     if (1000000000 % denominator == 0) return _decimalString(9);
-    return _trimZeros(toDouble().toStringAsFixed(3));
+    return '$numerator/$denominator';
   }
 
   String _decimalString(int places) {
@@ -372,8 +373,9 @@ class NoteExpression {
 
   String format() => [
         if (bend.isNotEmpty) 'bend ${bend.map((p) => p.format()).join(' ')}',
-        if (vibDepth > 0)
-          'vib ${formatNumber(vibDepth)} ${formatNumber(vibRate)}${vibFade > 0 ? ' ${formatNumber(vibFade)}' : ''}',
+        // A rate or fade-in without depth is kept too (a stored clip holds it; it reads back the same).
+        if (vibDepth > 0 || vibRate != 5 || vibFade != 0)
+          'vib ${formatNumber(vibDepth)} ${formatNumber(vibRate)}${vibFade != 0 ? ' ${formatNumber(vibFade)}' : ''}',
         if (press.isNotEmpty) 'press ${press.map((p) => p.format()).join(' ')}',
         if (timbre.isNotEmpty) 'timbre ${timbre.map((p) => p.format()).join(' ')}',
       ].join('  ');
@@ -624,6 +626,76 @@ class PatternDoc {
 
   final int _nextId;
   final _Source _src;
+
+  /// A pattern from its parts (a stored clip's, lib/model/clip_midi.dart): the [header] lines, [notes] in written
+  /// order, the comment and blank lines at the [top] of the body, those [before] each note (one list a note), and
+  /// those at the end ([tail]). Each note gets a line of its own, so serialize() writes them as an edit would (chords
+  /// joined). Throws an [ArgumentError] for a line that would change the text's shape (a line break, a header's
+  /// `---`, a "comment" that holds a note); the caller checks the result parses.
+  static PatternDoc assemble({
+    required List<String> header,
+    required List<PatternNote> notes,
+    List<String> top = const [],
+    List<List<String>>? before,
+    List<String> tail = const [],
+    bool endsWithNewline = true,
+  }) {
+    if (before != null && before.length != notes.length) throw ArgumentError('one list of comments a note');
+    for (final h in header) {
+      if (h.contains('\n') || _trim(h) == '---') throw ArgumentError('a header line holds a line break or ---');
+    }
+    void comment(String c) {
+      final cut = c.indexOf('//');
+      if (c.contains('\n') || _words(cut >= 0 ? c.substring(0, cut) : c).isNotEmpty) {
+        throw ArgumentError('a comment line holds more than a comment');
+      }
+    }
+    top.forEach(comment);
+    tail.forEach(comment);
+    final src = _Source()
+      ..top.addAll(top)
+      ..tail.addAll(tail)
+      ..endsWithNewline = endsWithNewline;
+    final out = <PatternNote>[];
+    for (final (i, n) in notes.indexed) {
+      final c = n.trailingComment;
+      if (c != null && c.contains('\n')) throw ArgumentError('a comment holds a line break');
+      final line = i + 1;
+      final b = before?[i] ?? const <String>[];
+      b.forEach(comment);
+      if (b.isNotEmpty) src.anchored[line] = List.of(b);
+      src.order.add(line);
+      out.add(n.copyWith(id: line, line: line));
+    }
+    return PatternDoc._(List.unmodifiable(header), List.unmodifiable(out), notes.length + 1, src);
+  }
+
+  /// Whether the text ends with a line break.
+  bool get endsWithNewline => _src.endsWithNewline;
+
+  /// Where serialize() writes the comment and blank lines: those at the top of the body, those just before each of
+  /// [sortedNotes] (a line's go before its first note), and those at the end.
+  ({List<String> top, List<List<String>> before, List<String> tail}) commentLayout() {
+    // Comments anchored to a line with no notes left fall through to the next surviving line.
+    final alive = {
+      for (final n in notes)
+        if (n.line != null) n.line!
+    };
+    final byLine = <int, List<String>>{};
+    var carry = <String>[];
+    for (final l in _src.order) {
+      carry.addAll(_src.anchored[l] ?? const []);
+      if (alive.contains(l)) {
+        byLine[l] = carry;
+        carry = <String>[];
+      }
+    }
+    final before = [for (final n in sortedNotes) (n.line == null ? null : byLine.remove(n.line)) ?? const <String>[]];
+    // Those above the first note are at the top either way (the text reads them back as the top's).
+    final top = [..._src.top, if (before.isNotEmpty) ...before.first];
+    if (before.isNotEmpty) before[0] = const [];
+    return (top: List<String>.unmodifiable(top), before: before, tail: List<String>.unmodifiable([...carry, ..._src.tail]));
+  }
 
   /// A new pattern with no notes.
   static PatternDoc blank({String name = 'Pattern', int? steps, int? bars}) {
@@ -934,9 +1006,12 @@ class PatternDoc {
   /// The pattern as text: header and comments kept, unchanged note lines as written, others rewritten.
   String serialize() {
     // Group notes into lines: consecutive notes (by time) with the same shape and at most one trailing comment.
+    final sorted = sortedNotes;
+    final layout = commentLayout();
+    final before = {for (final (i, n) in sorted.indexed) n.id: layout.before[i]};
     final groups = <List<PatternNote>>[];
     String? groupComment;
-    for (final n in sortedNotes) {
+    for (final n in sorted) {
       final g = groups.isEmpty ? null : groups.last;
       if (g != null &&
           g.first.sameShape(n) &&
@@ -948,33 +1023,16 @@ class PatternDoc {
         groupComment = n.trailingComment;
       }
     }
-    // Comments anchored to a line with no notes left fall through to the next surviving line.
-    final alive = {
-      for (final n in notes)
-        if (n.line != null) n.line!
-    };
-    final before = <int, List<String>>{};
-    var carry = <String>[];
-    for (final l in _src.order) {
-      carry.addAll(_src.anchored[l] ?? const []);
-      if (alive.contains(l)) {
-        before[l] = carry;
-        carry = <String>[];
-      }
-    }
-    final out = <String>[_src.open, ...header, _src.close, ..._src.top];
+    final out = <String>[_src.open, ...header, _src.close, ...layout.top];
     for (final g in groups) {
       for (final n in g) {
-        final c = n.line == null ? null : before.remove(n.line);
-        if (c != null) out.addAll(c);
+        out.addAll(before[n.id]!);
       }
       final l = g.first.line;
       final verbatim = l != null && g.every((n) => n.line == l) && _src.lineSig[l] == _sig(g);
       out.add(verbatim ? _src.lineText[l]! : _format(g));
     }
-    out
-      ..addAll(carry)
-      ..addAll(_src.tail);
+    out.addAll(layout.tail);
     final text = out.join('\n');
     return _src.endsWithNewline ? '$text\n' : text;
   }
@@ -991,7 +1049,7 @@ class PatternDoc {
       if (a.ratchet != 1) 'ratchet ${a.ratchet}',
       if (a.prob != 1) 'prob ${formatNumber(a.prob)}',
       if (a.slide) 'slide',
-      if (!a.expr.isEmpty) a.expr.format(),
+      if (a.expr.format().isNotEmpty) a.expr.format(),
     ];
     final comment = g.map((n) => n.trailingComment).firstWhere((c) => c != null, orElse: () => null);
     final b = StringBuffer(' ' * _src.indent);

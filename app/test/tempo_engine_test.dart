@@ -65,20 +65,4 @@ void main() {
     expect(e.meters().playing, isTrue);
     e.dispose();
   }, skip: skip);
-
-  test('MIDI export and import keep the tempo map and signatures', () async {
-    final dir = await Directory.systemTemp.createTemp('caw_tempo');
-    final path = '${dir.path}/song.mid';
-    const pattern = '---\nkind: pattern\nlength: 6 bars\n---\n0 C4 1 1\n';
-    expect(
-        Engine.exportPatternSong(pattern, path,
-            tempoMap: const [TempoPoint(0, 120), TempoPoint(8, 96), TempoPoint(16, 150)],
-            timeSignatures: const [TimeSignature(0, 0, 4, 4), TimeSignature(0, 8, 3, 4)]),
-        isNull);
-    final m = Engine.midiImport(await File(path).readAsBytes());
-    expect(m.pattern, contains('kind: pattern'));
-    expect([for (final t in m.tempoMap) (t.beat, t.bpm, t.ramp)], [(0.0, 120.0, false), (8.0, 96.0, false), (16.0, 150.0, false)]);
-    expect([for (final s in m.timeSignatures) (s.bar, s.beat, s.num, s.den)], [(0, 0.0, 4, 4), (2, 8.0, 3, 4)]);
-    await dir.delete(recursive: true);
-  }, skip: skip);
 }

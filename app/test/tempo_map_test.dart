@@ -144,7 +144,7 @@ void main() {
             MarkerDoc(id: 'm1', name: 'Drop', startSteps: 256),
           ]);
       final j = p.toJson();
-      expect(j['caw_app_project'], 4);
+      expect(j['caw_app_project'], 5);
       expect(j['bpm'], 120, reason: 'older readers still find the starting tempo');
       expect(j['tempo_map'], [
         {'beat': 0.0, 'bpm': 120.0, 'ramp': false},
@@ -181,7 +181,7 @@ void main() {
     });
 
     test('a newer format is refused', () {
-      expect(() => ProjectDoc.fromJson({'caw_app_project': 5, 'id': 'x'}), throwsA(isA<NewerProjectFormat>()));
+      expect(() => ProjectDoc.fromJson({'caw_app_project': 6, 'id': 'x'}), throwsA(isA<NewerProjectFormat>()));
     });
 
     test('bpm and beatsPerBar are the first tempo point and signature', () {

@@ -226,7 +226,7 @@ extension Templates on AppState {
     final used = {for (final l in tracks) ...[?l.instrument?.id, for (final c in l.components) c.id]};
     final json = {
       'layers': layers,
-      'modules': [for (final m in project.modules) if (modules.contains(m.id)) m.toJson()],
+      'modules': [for (final m in project.modules) if (modules.contains(m.id)) ?m.toJson()],
       'automation': [for (final a in project.automation) if (a.layerId != null && ids.contains(a.layerId)) a.toJson()],
       'cpp_components': [for (final c in project.cppComponents) if (used.contains(c.componentId)) c.toJson()],
     };
@@ -249,7 +249,7 @@ extension Templates on AppState {
     final modules = <ModuleDoc>[];
     for (final m in (body['modules'] as List? ?? const [])) {
       if (m is! Map<String, dynamic> || m['id'] is! String) continue;
-      if (!isPatternSource('${m['run_source'] ?? m['source'] ?? ''}')) continue;
+      if (!ModuleDoc.jsonIsPattern(m)) continue;
       final id = newId('m');
       moduleIds[m['id'] as String] = id;
       modules.add(ModuleDoc.fromJson({...m, 'id': id}));

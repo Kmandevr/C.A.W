@@ -59,7 +59,7 @@ void main() {
         ..fadeOut = 0.2
         ..sourceBpm = 100;
       final j = jsonDecode(jsonEncode(s.project.toJson())) as Map<String, dynamic>;
-      expect(j['caw_app_project'], 4);
+      expect(j['caw_app_project'], 5);
       final raw = (j['layers'] as List).first['audio_clips'][1] as Map<String, dynamic>;
       expect(raw['pitch_cents'], 325);
       expect(raw['gain_db'], closeTo(-6, 1e-3));
@@ -124,8 +124,8 @@ void main() {
       expect(AudioClipDoc.fromJson({'id': 'c', 'asset': 'a', 'stretch': double.nan})!.stretchRatio, 1);
     });
 
-    test('a v5 file is refused whole', () {
-      expect(() => ProjectDoc.fromJson({'caw_app_project': 5, 'id': 'x'}), throwsA(isA<NewerProjectFormat>()));
+    test('a v6 file is refused whole', () {
+      expect(() => ProjectDoc.fromJson({'caw_app_project': 6, 'id': 'x'}), throwsA(isA<NewerProjectFormat>()));
     });
   });
 

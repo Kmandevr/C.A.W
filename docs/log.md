@@ -1,11 +1,12 @@
 ---
 title: Log
 summary: Dated history of changes, newest first.
-updated: 2026-11-14
+updated: 2026-11-17
 ---
 
 # Log
 
+- 2026-11-17: clips stored as MIDI (branch `midi-store`, batch 1.0.5 #216): project format v5 saves each pattern as a format 0 .mid with C.A.W sequencer-specific events for what MIDI 1.0 can't hold (`lib/model/clip_midi.dart`), no pattern text; v4 text converts on load; Dart owns MIDI conversion (the Export page's .mid now from the app's writer with the tempo map), the engine keeps its converter for the CLI and .midi2; engine and C API (32) unchanged; per-note bends to ±96 semitones held (#226); tests `clip_midi_test.dart`, `clip_migration_test.dart` (bit-identical renders before and after).
 - 2026-11-14: the stretch audio review fixes (branch `stretch-engine`): spares pre-rolled for the loop's start, the bridge aligned to WSOLA by lag with a correlation-kept crossfade, reseed and fixed random draws (two marked local changes to Signalsmith Stretch), at most 8 Signalsmith voices a track, pools sized by overlap and freed with their timeline, chunks fed from the tempo map at their own frame, stretchers re-made at a new rate and claimed when one frees, the analysis streamed (2–3 MB for 600 s)
 - 2026-11-14: audio stretching, engine side (branch `stretch-engine`, batch 1.0.4 #208, C API 32): Signalsmith Stretch and Linear vendored (MIT), live in the clip player (pre-roll, WSOLA bridge, measured allocation-free), clips following the tempo map per chunk, `stretch_ratio`, `pitch_cents`, `gain_db`, loop frames; `caw_asset_tempo` and `caw_asset_slices`; Dart `Engine.assetTempo`/`assetSlices`, wired into the sample editor (merged with `stretch-app`)
 - 2026-11-14: stretch, sample editor and Slice to MIDI, app side (branch `stretch-app`, batch 1.0.4 #208 and #90, the owner's looks): project format v4 (the contract's audio clip fields, bounded; v3 loads as before), the stretch notch with a live readout, Follows tempo off until the clip's tempo is known, tempo detected on import or typed in, pitch in semitones and cents, the sample editor at the top of the Clip tab (trim edges, fades with curves, loop flags; Normalise, Reverse, Gain, Slice to MIDI, Trim, each one undo step), Slice to MIDI onto drum pads or the sampler with a MIDI clip, fixed clips at their true width on the tempo map, lanes built in a window around the view and laid out from its origin (a test at bar 9999); `AudioAnalysis` with a peaks-based default and the C API 32 adapter.

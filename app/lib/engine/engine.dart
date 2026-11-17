@@ -63,13 +63,6 @@ class EnginePosition {
   final double beat, seconds, bpm, beatInBar;
 }
 
-/// A MIDI file read as a pattern with its tempo map and time signatures (caw_pattern_from_midi, API 31).
-class EngineMidiImport {
-  const EngineMidiImport(this.pattern, this.tempoMap, this.timeSignatures);
-  final String pattern;
-  final List<TempoPoint> tempoMap;
-  final List<TimeSignature> timeSignatures;
-}
 
 /// What the engine said about one module (a pattern) after parsing it: the project result's entry.
 class ModuleInfo {
@@ -1079,63 +1072,6 @@ class Engine implements TempoEngine {
     b.free(r);
     if (j['ok'] != true) throw FormatException((j['error'] as String?) ?? 'not a MIDI file');
     return j['pattern'] as String;
-  }
-
-  /// Reads a MIDI file as pattern text with its tempo map and time signatures (API 31); throws a [FormatException]
-  /// if it can't.
-  static EngineMidiImport midiImport(Uint8List bytes) {
-    final b = Bindings.instance;
-    final data = calloc<Uint8>(bytes.isEmpty ? 1 : bytes.length);
-    data.asTypedList(bytes.length).setAll(0, bytes);
-    final r = b.patternFromMidi(data, bytes.length);
-    calloc.free(data);
-    final j = jsonDecode(r.toDartString()) as Map<String, dynamic>;
-    b.free(r);
-    if (j['ok'] != true) throw FormatException((j['error'] as String?) ?? 'not a MIDI file');
-    return EngineMidiImport(
-      j['pattern'] as String,
-      [
-        for (final p in (j['tempo_map'] as List? ?? const []).cast<Map<String, dynamic>>())
-          TempoPoint((p['beat'] as num).toDouble(), (p['bpm'] as num).toDouble(), ramp: p['ramp'] == true),
-      ],
-      [
-        for (final s in (j['time_signatures'] as List? ?? const []).cast<Map<String, dynamic>>())
-          TimeSignature(s['bar'] as int, (s['beat'] as num).toDouble(), s['num'] as int, s['den'] as int),
-      ],
-    );
-  }
-
-  /// Writes pattern module text to [path] with a tempo map and time signatures as tempo and meter events (API 31;
-  /// empty lists: 120 BPM, 4/4); a ramp becomes a tempo event every 1/16 note. Returns an error or null.
-  static String? exportPatternSong(String source, String path,
-      {List<TempoPoint> tempoMap = const [], List<TimeSignature> timeSignatures = const [], bool clip = false}) {
-    final b = Bindings.instance;
-    final src = source.toNativeUtf8(), out = path.toNativeUtf8();
-    final err = calloc<Uint8>(512).cast<Utf8>();
-    final pts = calloc<CawTempoPointStruct>(tempoMap.isEmpty ? 1 : tempoMap.length);
-    final sigs = calloc<CawTimeSigStruct>(timeSignatures.isEmpty ? 1 : timeSignatures.length);
-    try {
-      for (var i = 0; i < tempoMap.length; i++) {
-        pts[i]
-          ..beat = tempoMap[i].beat
-          ..bpm = tempoMap[i].bpm
-          ..ramp = tempoMap[i].ramp ? 1 : 0;
-      }
-      for (var i = 0; i < timeSignatures.length; i++) {
-        sigs[i]
-          ..beat = timeSignatures[i].beat
-          ..num = timeSignatures[i].num
-          ..den = timeSignatures[i].den;
-      }
-      final rc = b.patternExportSong(src, pts, tempoMap.length, sigs, timeSignatures.length, clip ? 1 : 0, out, err, 512);
-      return rc == 0 ? null : err.toDartString();
-    } finally {
-      calloc.free(src);
-      calloc.free(out);
-      calloc.free(err);
-      calloc.free(pts);
-      calloc.free(sigs);
-    }
   }
 
   /// Writes pattern module text to [path] as a .mid ([clip] false) or a MIDI 2.0 Clip File; returns an error or null.

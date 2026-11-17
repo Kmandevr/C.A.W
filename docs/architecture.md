@@ -1,7 +1,7 @@
 ---
 title: Architecture
 summary: Technical architecture, verified engine/app boundaries and clearly labelled future design proposals.
-updated: 2026-11-14
+updated: 2026-11-17
 covers: [app/pubspec.yaml, engine/CMakeLists.txt]
 ---
 
@@ -139,7 +139,7 @@ The existing built-ins and algorithms are migration candidates for the C.A.W. C+
 
 ### Patterns and parameters
 
-**[Fact, 2026-11-11]** A project's modules are note patterns (the note-clip text the piano roll edits, #158): notes with velocity, chance, ratchets, slides and per-note expression curves, MIDI file import and export. They play a track's instrument as frame-accurate note events. Parameters are components' (and automation lanes target them); the shared parameter resolver is in [Engine implementation status](engine-build-status.md).
+**[Fact, 2026-11-11]** A project's modules are note patterns, stored as MIDI with pattern text as their editing view (#216, [app](app.md)): notes with velocity, chance, ratchets, slides and per-note expression curves, MIDI file import and export. They play a track's instrument as frame-accurate note events. Parameters are components' (and automation lanes target them); the shared parameter resolver is in [Engine implementation status](engine-build-status.md).
 
 ### Live editing while playing
 

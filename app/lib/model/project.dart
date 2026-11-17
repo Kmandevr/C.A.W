@@ -2,9 +2,13 @@
 import 'dart:convert';
 import 'dart:math';
 
+import 'dart:typed_data';
+
 import 'audio_clips.dart';
+import 'clip_midi.dart';
 import 'clip_automation.dart';
 import 'cpp_component.dart';
+import 'midi_file.dart' show kMaxMidiFileBytes;
 import 'midi_mapping.dart';
 import 'modulation.dart';
 import 'pattern_doc.dart';
@@ -17,8 +21,11 @@ String newId(String prefix) {
   return '$prefix${List.generate(8, (_) => r.nextInt(36).toRadixString(36)).join()}';
 }
 
-/// A pattern (a note clip's notes as text, #158): its text in the editor, and the text last sent to the engine with
-/// Run. The .caw sound modules that shared this type are gone (#160): a project loads with them dropped.
+/// A pattern: a note clip's notes. Projects store it as MIDI (format v5, #216, lib/model/clip_midi.dart); its text is
+/// the view the editors and the engine read. [source] is the editor's text and [runSource] the text last sent to
+/// the engine with Run; each is saved as the MIDI it makes. Text that doesn't parse (a half-typed line) stays in
+/// memory only: the file keeps the last version that parsed. The .caw sound modules that shared this type are gone
+/// (#160): a project loads with them dropped.
 class ModuleDoc {
   ModuleDoc({
     required this.id,
@@ -39,20 +46,83 @@ class ModuleDoc {
 
   bool get edited => source != runSource;
 
-  Map<String, dynamic> toJson() => {
-    'id': id, 'name': name, 'source': source, 'run_source': runSource,
-    'folder_path': folderPath, 'tags': tags,
-  };
+  /// The MIDI the file stores for [source] (else for [runSource] when the editor's text doesn't parse, else an empty
+  /// pattern of this name when either is a pattern that doesn't parse); null when neither is a pattern.
+  Uint8List? get midi =>
+      clipMidiFromText(source) ??
+      clipMidiFromText(runSource) ??
+      (isPatternSource(source) || isPatternSource(runSource) ? clipMidiFromDoc(PatternDoc.blank(name: name)) : null);
 
-  static ModuleDoc fromJson(Map<String, dynamic> j) => ModuleDoc(
-    id: j['id'] as String,
-    name: (j['name'] as String?) ?? 'Module',
-    source: (j['source'] as String?) ?? '',
-    runSource: j['run_source'] as String?,
-    folderPath: (j['folder_path'] as String?) ?? '',
-    tags: ((j['tags'] as List?) ?? const []).whereType<String>().take(16)
-        .map((tag) => _boundedProjectText(tag, 48)).where((tag) => tag.isNotEmpty).toList(),
-  );
+  /// The MIDI the file stores for [runSource] when it differs from [midi]'s.
+  Uint8List? get runMidi {
+    if (!edited || clipMidiFromText(source) == null) return null;
+    return clipMidiFromText(runSource);
+  }
+
+  /// The project file's entry; null for a module with no pattern to store.
+  Map<String, dynamic>? toJson() {
+    final m = midi;
+    if (m == null) return null;
+    final r = runMidi;
+    return {
+      'id': id, 'name': name, 'midi': base64.encode(m), if (r != null) 'run_midi': base64.encode(r),
+      'folder_path': folderPath, 'tags': tags,
+    };
+  }
+
+  /// A module from a project file: v5 MIDI, or a v4 file's pattern text, converted on load (the text shown is then
+  /// the MIDI's, as a v5 file would read). Throws a FormatException for stored MIDI it can't read.
+  static ModuleDoc fromJson(Map<String, dynamic> j) {
+    final id = j['id'] as String;
+    final name = (j['name'] as String?) ?? 'Module';
+    final folder = (j['folder_path'] as String?) ?? '';
+    final tags = ((j['tags'] as List?) ?? const []).whereType<String>().take(16)
+        .map((tag) => _boundedProjectText(tag, 48)).where((tag) => tag.isNotEmpty).toList();
+    final midi = j['midi'];
+    if (midi is String) {
+      final run = j['run_midi'];
+      try {
+        final source = clipTextFromMidi(_midiField(midi), key: midi);
+        return ModuleDoc(id: id, name: name, source: source,
+            runSource: run is String ? clipTextFromMidi(_midiField(run), key: run) : null, folderPath: folder, tags: tags);
+      } on FormatException catch (e) {
+        throw FormatException('The clip "$name" can\'t be read: ${e.message}');
+      }
+    }
+    String migrate(String text) {
+      final m = clipMidiFromText(text);
+      return m == null ? text : clipTextFromMidi(m);
+    }
+
+    final source = (j['source'] as String?) ?? '';
+    final run = j['run_source'] as String?;
+    return ModuleDoc(id: id, name: name, source: migrate(source), runSource: run == null ? null : migrate(run),
+        folderPath: folder, tags: tags);
+  }
+
+  /// Whether a project file's module entry (v5 MIDI or v4 text) holds a pattern, without reading it.
+  static bool jsonIsPattern(Map<dynamic, dynamic> j) =>
+      j['midi'] is String || isPatternSource('${j['run_source'] ?? j['source'] ?? ''}');
+
+  /// A module entry's pattern text (its MIDI's for v5), for a quick look; null when it has none that reads.
+  static String? jsonText(Map<dynamic, dynamic> j) {
+    final m = j['midi'];
+    if (m is String) {
+      try {
+        return clipTextFromMidi(_midiField(m));
+      } on FormatException {
+        return null;
+      }
+    }
+    final t = j['run_source'] ?? j['source'];
+    return t is String ? t : null;
+  }
+}
+
+/// A base64 MIDI field from untrusted JSON: at most a 16 MB file.
+Uint8List _midiField(String b64) {
+  if (b64.length > (kMaxMidiFileBytes ~/ 3 + 1) * 4) throw const FormatException('a stored clip is bigger than 16 MB');
+  return base64.decode(b64);
 }
 
 class ClipDoc {
@@ -689,8 +759,9 @@ class ProjectDoc {
   }
 
   /// v3 (batch 1.0.3): the tempo map, time signatures, sections and markers in beats. A v2 file reads as one tempo
-  /// (`bpm`) in its `beats_per_bar`/4, its regions as sections.
-  static const int fileVersion = 4;
+  /// (`bpm`) in its `beats_per_bar`/4, its regions as sections. v5 (batch 1.0.5, #216): clips stored as MIDI
+  /// (`midi`, base64), not pattern text; a v4 file's text converts on load. An older C.A.W refuses a v5 file whole.
+  static const int fileVersion = 5;
 
   final String id;
   String name;
@@ -1040,7 +1111,7 @@ class ProjectDoc {
         'master': master,
         'seam_crossfade': seamCrossfade,
         'automation': [for (final lane in automation) lane.toJson()],
-        'modules': [for (final m in modules) m.toJson()],
+        'modules': [for (final m in modules) ?m.toJson()],
         'layers': [for (final l in layers) l.toJson(rateOf: (id) => asset(id)?.sourceRate ?? 0)],
         'library_folders': libraryFolders,
         'saved_library_searches': savedLibrarySearches,
@@ -1115,8 +1186,8 @@ class ProjectDoc {
       seamCrossfade: j['seam_crossfade'] != false,
       automation: ((j['automation'] as List?) ?? const []).map((lane) => ProjectAutomationLaneDoc.fromJson(lane as Map<String, dynamic>)).toList(),
       modules: [
-        for (final m in ((j['modules'] as List?) ?? const []).map((m) => ModuleDoc.fromJson(m as Map<String, dynamic>)))
-          if (isPatternSource(m.source) || isPatternSource(m.runSource)) m,
+        for (final raw in ((j['modules'] as List?) ?? const []).whereType<Map<String, dynamic>>())
+          if (ModuleDoc.jsonIsPattern(raw)) ModuleDoc.fromJson(raw),
       ],
       libraryFolders: ((j['library_folders'] as List?) ?? const []).whereType<String>().take(512).toList(),
       savedLibrarySearches: {
@@ -1143,8 +1214,8 @@ class ProjectDoc {
           final legacyPatternId = layer.patternId!;
           final module = ((j['modules'] as List?) ?? const [])
               .whereType<Map>().where((m) => m['id'] == legacyPatternId).firstOrNull;
-          final parsed = module == null ? null
-              : PatternDoc.parse((module['run_source'] ?? module['source'] ?? '').toString()).doc;
+          final text = module == null ? null : ModuleDoc.jsonText(module);
+          final parsed = text == null ? null : PatternDoc.parse(text).doc;
           final length = parsed?.lengthSteps((j['beats_per_bar'] as num?)?.toInt() ?? 4) ?? layer.lengthSteps;
           layer.clips.add(ClipDoc(id: newId('c'), patternId: legacyPatternId,
               startSteps: 0, lengthSteps: length > 0 ? length : 64));
