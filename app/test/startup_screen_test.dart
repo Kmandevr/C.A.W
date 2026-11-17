@@ -84,22 +84,52 @@ void main() {
     expect(tester.binding.hasScheduledFrame, isFalse); // done: no frames while loading waits
   });
 
-  testWidgets('the screen leaves the moment loading is done, without waiting for the reveal', (tester) async {
+  testWidgets('by default the reveal plays to its end before the screen leaves', (tester) async {
     final s = AppState(settings: Settings());
+    addTearDown(s.dispose);
+    await _pump(tester, StartupGate(state: s, child: const Scaffold(body: Text('the app'))), const Size(390, 844));
+    await tester.pump(const Duration(milliseconds: 200)); // mid-reveal
+
+    s.ready = true;
+    s.clipSelectionChanged(); // any notification
+    await tester.pump();
+    // Still in front and taking the touches until the reveal has ended.
+    IgnorePointer gate() => tester.widget<IgnorePointer>(
+        find.ancestor(of: find.byType(StartupScreen), matching: find.byType(IgnorePointer)).first);
+    expect(gate().ignoring, isFalse);
+    await tester.pump(revealDuration - const Duration(milliseconds: 300));
+    expect(find.byType(StartupScreen), findsOneWidget);
+    expect(gate().ignoring, isFalse);
+
+    await tester.pump(const Duration(milliseconds: 200)); // the reveal ends
+    await tester.pump(); // the post-frame callback starts the fade
+    expect(gate().ignoring, isTrue);
+    await tester.pump(Motion.standard + const Duration(milliseconds: 20));
+    expect(find.byType(StartupScreen), findsNothing);
+    expect(find.text('the app'), findsOneWidget);
+  });
+
+  testWidgets('with Full startup animation off the screen leaves the moment loading is done', (tester) async {
+    final s = AppState(settings: Settings()..fullStartupAnimation = false);
     addTearDown(s.dispose);
     await _pump(tester, StartupGate(state: s, child: const Scaffold(body: Text('the app'))), const Size(390, 844));
     expect(find.byType(StartupScreen), findsOneWidget);
     await tester.pump(const Duration(milliseconds: 200)); // mid-reveal
 
     s.ready = true;
-    s.clipSelectionChanged(); // any notification
+    s.clipSelectionChanged();
     await tester.pump();
     // The app takes input at once; the screen fades out over it in the standard fade.
     expect(tester.widget<IgnorePointer>(
         find.ancestor(of: find.byType(StartupScreen), matching: find.byType(IgnorePointer)).first).ignoring, isTrue);
     await tester.pump(Motion.standard + const Duration(milliseconds: 20));
     expect(find.byType(StartupScreen), findsNothing);
-    expect(find.text('the app'), findsOneWidget);
+  });
+
+  test('the full startup animation setting is saved', () {
+    final j = (Settings()..fullStartupAnimation = false).toJson();
+    expect((Settings()..fromJson(j)).fullStartupAnimation, isFalse);
+    expect(Settings().fullStartupAnimation, isTrue);
   });
 
   testWidgets('with motion off the screen goes at once', (tester) async {

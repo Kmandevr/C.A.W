@@ -26,16 +26,17 @@ const Color _cyan = Color(0xFF1FD8FF);
 const Color _violet = Color(0xFFB46CFF);
 const Color _pink = Color(0xFFFF2BD6);
 
-/// How long the reveal takes when loading is slower than it: the wave runs in, the crow's outline traces, the
-/// logo fades in. Loading that ends sooner cuts it short ([StartupGate]).
+/// How long the reveal takes: the wave runs in, the crow's outline traces, the logo fades in. It plays to its end
+/// unless Settings › Feel › Full startup animation is off, when loading that ends sooner cuts it short ([StartupGate]).
 const Duration revealDuration = Duration(milliseconds: 1300);
 
 /// The open-alpha notice and the copyright under the version (owner, 2026-11-12).
 const String openAlphaNotice = 'Open alpha: expect rough edges and unexpected issues.';
 const String copyrightLine = '© 2026 AutoStacc';
 
-/// Shows [child] (the app) with the startup screen in front until [state] is ready, then fades the screen out at
-/// once over the app, which takes input from the first frame it shows (it never waits for the reveal to finish).
+/// Shows [child] (the app) with the startup screen in front until [state] is ready and, with
+/// [Settings.fullStartupAnimation] on (the default), the reveal has played to its end; then fades the screen out over
+/// the app, which takes input from the moment the fade starts.
 /// A launch still loading after [timeout] shows the app anyway ([AppState.startupTimedOut] says which step stuck).
 class StartupGate extends StatefulWidget {
   const StartupGate({super.key, required this.state, required this.child, this.timeout = const Duration(seconds: 10)});
@@ -50,6 +51,8 @@ class StartupGate extends StatefulWidget {
 class _StartupGateState extends State<StartupGate> with SingleTickerProviderStateMixin {
   late bool _ready = widget.state.ready;
   late bool _shown = !_ready;
+  bool _revealDone = false;
+  bool _leaving = false;
   late final AnimationController _fade = AnimationController(vsync: this, value: 1)
     ..addStatusListener((status) {
       if (status == AnimationStatus.dismissed && mounted) _hide();
@@ -83,7 +86,19 @@ class _StartupGateState extends State<StartupGate> with SingleTickerProviderStat
     if (_ready == widget.state.ready || !mounted) return;
     setState(() => _ready = widget.state.ready);
     if (_ready) _limit?.cancel();
-    if (!_ready || !_shown) return;
+    _maybeLeave();
+  }
+
+  void _revealEnded() {
+    _revealDone = true;
+    if (mounted) _maybeLeave();
+  }
+
+  // Leaves once loading is done and, when the full animation is asked for, the reveal has ended too.
+  void _maybeLeave() {
+    if (!_ready || !_shown || _leaving) return;
+    if (widget.state.settings.fullStartupAnimation && !_revealDone) return;
+    setState(() => _leaving = true);
     final d = Motion.fade(Motion.standard, Motion.of(context));
     if (d == Duration.zero) {
       _hide();
@@ -100,12 +115,13 @@ class _StartupGateState extends State<StartupGate> with SingleTickerProviderStat
         if (_shown)
           Positioned.fill(
             child: IgnorePointer(
-              ignoring: _ready,
+              ignoring: _leaving,
               child: FadeTransition(
                   opacity: _fade,
                   child: StartupScreen(
                       progress: widget.state.startup,
                       version: appVersion,
+                      onRevealDone: _revealEnded,
                       updateLine: UpdateService.running?.startupLine)),
             ),
           ),
@@ -115,9 +131,12 @@ class _StartupGateState extends State<StartupGate> with SingleTickerProviderStat
 /// The startup screen itself: the logo (revealed from a waveform at Full motion, still otherwise), the loading
 /// steps as [progress] reports them, and [version].
 class StartupScreen extends StatefulWidget {
-  const StartupScreen({super.key, required this.progress, required this.version, this.updateLine});
+  const StartupScreen({super.key, required this.progress, required this.version, this.updateLine, this.onRevealDone});
   final StartupProgress progress;
   final String version;
+
+  /// Called once the reveal has ended (at once when motion shows the still logo).
+  final VoidCallback? onRevealDone;
 
   /// "Update available: vX" when an earlier launch's check found one (startup never waits on the network).
   final String? updateLine;
@@ -128,7 +147,18 @@ class StartupScreen extends StatefulWidget {
 
 class _StartupScreenState extends State<StartupScreen> with SingleTickerProviderStateMixin {
   // A Ticker, so the reveal runs at the display's real rate; it stops when the reveal ends.
-  late final AnimationController _reveal = AnimationController(vsync: this, duration: revealDuration);
+  late final AnimationController _reveal = AnimationController(vsync: this, duration: revealDuration)
+    ..addStatusListener((status) {
+      if (status == AnimationStatus.completed) _done();
+    });
+  bool _told = false;
+
+  void _done() {
+    if (_told) return;
+    _told = true;
+    // After this frame: the gate's setState must not run inside this widget's build or layout.
+    WidgetsBinding.instance.addPostFrameCallback((_) => widget.onRevealDone?.call());
+  }
   late final Animation<double> _logo = CurvedAnimation(parent: _reveal, curve: const Interval(0.7, 1, curve: Curves.easeOut));
   bool? _moving;
 
@@ -143,6 +173,7 @@ class _StartupScreenState extends State<StartupScreen> with SingleTickerProvider
       _reveal.forward(from: 0);
     } else {
       _reveal.value = 1;
+      _done();
     }
   }
 

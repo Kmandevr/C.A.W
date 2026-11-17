@@ -364,6 +364,10 @@ class Settings extends ChangeNotifier {
   /// Haptics on every touch, step and drag; on by default (owner).
   bool haptics = true;
 
+  /// The startup animation plays to its end even when loading finishes first (owner, 2026-11-17: "so it doesn't feel
+  /// like it's there for no reason"); off, it shows only while the app loads. On by default.
+  bool fullStartupAnimation = true;
+
   /// How strong the haptics are, 0 to 1 (owner, 2026-11-10: "a little bit more, just barely"; 0.5 is the base).
   double hapticStrength = 0.5;
 
@@ -609,6 +613,7 @@ class Settings extends ChangeNotifier {
         'glow_strength': glowStrength,
         if (baseProfile != null) 'base_profile': baseProfile,
         'haptics': haptics,
+        'full_startup_animation': fullStartupAnimation,
         'haptic_strength': hapticStrength,
         'layout_mode': layoutMode.name,
         'focus_panel_share': focusPanelShare,
@@ -736,6 +741,7 @@ class Settings extends ChangeNotifier {
       };
     }
     if (j['haptics'] is bool) haptics = j['haptics'] as bool;
+    if (j['full_startup_animation'] is bool) fullStartupAnimation = j['full_startup_animation'] as bool;
     final hs = j['haptic_strength'];
     if (hs is num && hs.isFinite) hapticStrength = hs.toDouble().clamp(0.0, 1.0);
     layoutMode = pick(LayoutMode.values, j['layout_mode'], layoutMode);
