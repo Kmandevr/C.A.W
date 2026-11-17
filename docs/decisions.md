@@ -6,6 +6,13 @@ updated: 2026-11-17
 
 # Decisions
 
+## 2026-11-17: Plans go private at 1.1.0; the code stays public (owner)
+
+**Decision (owner, 2026-11-17):** "Eventually have all of the roadmap and changes hidden, so I can surprise people with updates, while the project stays open source."
+- **At 1.1.0,** issues, the roadmap, plans and decisions move to a private repository. The code stays public as it is written (Apache-2.0), with neutral commit messages.
+- **[Fact]** Hidden features stay readable in the public code. The surprise rests on the plans and the announcements, not on secret code. The owner chose this over private development with releases pushed public.
+- **Until 1.1.0,** work continues publicly as now.
+
 ## 2026-11-17: Groundwork for 1.1.0 is laid silently during the 1.0.x batches (owner)
 
 **Decision (owner, 2026-11-17):** "We should 100% be laying the groundwork for the 1.1.0 update, so we don't have a ton of work for ourselves, but make the changes silent."
