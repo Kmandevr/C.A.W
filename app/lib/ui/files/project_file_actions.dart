@@ -140,8 +140,8 @@ class _PackageChecklistState extends State<PackageChecklist> {
         : d.kind == DependencyKind.plugin
             ? 'licence unknown: listed as needed'
             : d.found
-                ? 'found'
-                : 'missing';
+                ? (d.linked ? 'in a linked folder' : 'found')
+                : (d.linked ? 'missing from a linked folder' : 'missing');
     final users = d.usedBy.isEmpty ? '' : 'used by ${d.usedBy.take(3).join(', ')}${d.usedBy.length > 3 ? '…' : ''} · ';
     final missing = !d.found && !always && !d.outside;
     return CheckboxListTile(

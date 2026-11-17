@@ -251,6 +251,9 @@ void main() {
       q.descending = true;
       expect(names(q).take(3), ['c.wav', 'a.wav', 'b.wav']);
       expect(names(q).last, isNot('a.wav'));
+      // Every field sorts: one-shots before loops, instruments in the filter's order, unknown last.
+      expect(names(SampleQuery()..sort = SampleSort.type).take(2).toSet(), {'kick.wav', 'snare.wav'});
+      expect(names(SampleQuery()..sort = SampleSort.instrument).first, 'kick.wav');
       final choices = filterChoices(all);
       expect(choices.minBpm, 62);
       expect(choices.maxBpm, 128);

@@ -62,6 +62,11 @@ class _SampleBrowserViewState extends State<SampleBrowserView> with SingleTicker
   int _playingSeq = -1;
   bool _sync = true;
   static double _volume = 0.8;
+
+  /// Preview through the selected track's effects (owner, 2026-11-17: optional, off by default).
+  static bool _throughTrack = false;
+  Timer? _changeSoon;
+  DateTime _changedAt = DateTime(0);
   String? _message;
   Timer? _saveSoon;
 
@@ -93,6 +98,7 @@ class _SampleBrowserViewState extends State<SampleBrowserView> with SingleTicker
     if (_playingSeq > 0) _stop();
     _ticker.dispose();
     _saveSoon?.cancel();
+    _changeSoon?.cancel();
     _search.dispose();
     _focus.dispose();
     _scroll.dispose();
@@ -100,8 +106,29 @@ class _SampleBrowserViewState extends State<SampleBrowserView> with SingleTicker
     super.dispose();
   }
 
+  /// Indexing a big folder reports every batch: the list is filtered and sorted again at most every 300 ms (the
+  /// first change at once, the last one always).
   void _libraryChanged() {
-    if (mounted) setState(_recompute);
+    if (!mounted) return;
+    const gap = Duration(milliseconds: 300);
+    final now = DateTime.now();
+    if (_changeSoon == null && now.difference(_changedAt) >= gap) {
+      _changedAt = now;
+      setState(_recompute);
+      return;
+    }
+    _changeSoon ??= Timer(gap, () {
+      _changeSoon = null;
+      _changedAt = DateTime.now();
+      if (mounted) setState(_recompute);
+    });
+  }
+
+  /// The track the preview goes through when [_throughTrack] is on: the selected one, unless it is a folder.
+  String? get _throughLayer {
+    if (!_throughTrack) return null;
+    final l = state.project.layers.where((l) => l.id == state.selectedLayerId).firstOrNull;
+    return l == null || l.isFolder ? null : l.id;
   }
 
   Iterable<SampleEntry> get _all => widget.folderId == null ? lib.allEntries : lib.entries(widget.folderId!);
@@ -146,7 +173,7 @@ class _SampleBrowserViewState extends State<SampleBrowserView> with SingleTicker
     final sync = _sync && state.transportOn ? (e.kind == SampleKind.loop ? 'bar' : 'beat') : 'now';
     state.samplePreviewing = true;
     final r = await state.samplePreview.play(path, startSeconds: start, ratio: ratio, sync: sync,
-        loop: e.kind == SampleKind.loop, volume: _volume);
+        loop: e.kind == SampleKind.loop, volume: _volume, layer: _throughLayer);
     if (!mounted) return;
     if (r['ok'] != true) {
       state.samplePreviewing = false;
@@ -158,7 +185,9 @@ class _SampleBrowserViewState extends State<SampleBrowserView> with SingleTicker
       e.secondsApprox = false;
       if (e.kind == null) inferKindFromLength(e);
     }
-    _playingSeq = state.samplePreview.state().seq + 1;
+    // The engine numbers each start; the ticker stops once that start has finished playing.
+    final seq = r['seq'];
+    _playingSeq = seq is int && seq > 0 ? seq : state.samplePreview.state().seq + 1;
     if (!_ticker.isActive) unawaited(_ticker.start());
     setState(() {});
     // What the names and metadata didn't give, estimated from the audio now that it is loaded.
@@ -384,6 +413,8 @@ class _SampleBrowserViewState extends State<SampleBrowserView> with SingleTicker
         SampleSort.name => 'Name',
         SampleSort.bpm => 'Tempo',
         SampleSort.key => 'Key',
+        SampleSort.type => 'Type',
+        SampleSort.instrument => 'Instrument',
         SampleSort.length => 'Length',
         SampleSort.folder => 'Folder',
         SampleSort.recent => 'Newest',
@@ -685,7 +716,10 @@ class _SampleBrowserViewState extends State<SampleBrowserView> with SingleTicker
           _step(v < 0 ? 1 : -1);
         },
         child: GlassPanel(
-          child: SizedBox(
+          child: LayoutBuilder(builder: (context, c) {
+            // A phone's width: the volume without its icon and a shorter slider, so the name keeps some room.
+            final narrow = c.maxWidth < 420;
+            return SizedBox(
             height: 48,
             child: Row(children: [
               IconButton(key: const ValueKey('samples-prev'), tooltip: 'Previous', icon: const Icon(Icons.skip_previous, size: 20),
@@ -715,9 +749,21 @@ class _SampleBrowserViewState extends State<SampleBrowserView> with SingleTicker
                   onSelected: (v) => setState(() => _sync = v),
                 ),
               ),
-              const Icon(Icons.volume_down, size: 16, color: Neon.dim),
+              Tooltip(
+                message: 'Preview through the selected track\'s effects',
+                child: FilterChip(
+                  key: const ValueKey('samples-through'),
+                  label: const Text('FX', style: TextStyle(fontSize: TypeScale.caption)),
+                  selected: _throughTrack,
+                  showCheckmark: false,
+                  visualDensity: VisualDensity.compact,
+                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  onSelected: (v) => setState(() => _throughTrack = v),
+                ),
+              ),
+              if (!narrow) const Icon(Icons.volume_down, size: 16, color: Neon.dim),
               SizedBox(
-                width: 88,
+                width: narrow ? 72 : 88,
                 child: Slider(
                   key: const ValueKey('samples-volume'),
                   value: _volume,
@@ -728,7 +774,8 @@ class _SampleBrowserViewState extends State<SampleBrowserView> with SingleTicker
                 ),
               ),
             ]),
-          ),
+          );
+          }),
         ),
       ),
     );

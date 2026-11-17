@@ -197,7 +197,8 @@ NameGuess guessFromName(String name, {bool allowBareTempo = true}) {
     kind = SampleKind.oneShot;
     tags.add('one shot');
   }
-  final bare = allowBareTempo && !(instrument?.isHit ?? false) || kind == SampleKind.loop;
+  // A drum hit's bare number is a sample number unless the name says loop; a folder's is never a tempo.
+  final bare = allowBareTempo && (!(instrument?.isHit ?? false) || kind == SampleKind.loop);
   return NameGuess(bpm: tempoInName(name, allowBare: bare), key: keyInWords(words), kind: kind,
       instrument: instrument, rootNote: root, tags: tags);
 }

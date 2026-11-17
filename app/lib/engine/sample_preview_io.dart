@@ -14,6 +14,8 @@ final class CawSamplePreviewState extends Struct {
   external int playing;
   @Int32()
   external int waiting;
+  @Int32()
+  external int through;
   @Double()
   external double seconds;
   @Double()
@@ -49,18 +51,22 @@ class SampleBindings {
 
 /// What the preview plays, as of the audio thread's last callback.
 class PreviewState {
-  const PreviewState({this.playing = false, this.waiting = false, this.seconds = 0, this.length = 0, this.seq = 0});
-  final bool playing, waiting;
+  const PreviewState(
+      {this.playing = false, this.waiting = false, this.through = false, this.seconds = 0, this.length = 0, this.seq = 0});
+
+  /// [through]: it went through a track's effects in the last callback (the track runs: not muted or soloed out).
+  final bool playing, waiting, through;
   final double seconds, length;
   final int seq;
 }
 
 /// The preview voice and the key estimate as the sample browser uses them.
 abstract class SamplePreviewIo {
-  /// Loads [path] (and stretches it by [ratio]) off the UI isolate and starts it. The engine's JSON comes back
-  /// (`{"ok", "error", "seconds", "stretch_ratio"}`).
+  /// Loads [path] (and stretches it by [ratio]) off the UI isolate and starts it, through the effects of track
+  /// [layer] when given. The engine's JSON comes back (`{"ok", "error", "seconds", "stretch_ratio", "layer", "seq"}`; [PreviewState.seq] reads that
+  /// `seq` once it plays).
   Future<Map<String, dynamic>> play(String path,
-      {double startSeconds = 0, double ratio = 1, String sync = 'now', bool loop = false, double? volume});
+      {double startSeconds = 0, double ratio = 1, String sync = 'now', bool loop = false, double? volume, String? layer});
   void stop();
   void seek(double seconds);
   void setVolume(double volume);
@@ -87,12 +93,13 @@ class EngineSamplePreviewIo implements SamplePreviewIo {
 
   @override
   Future<Map<String, dynamic>> play(String path,
-      {double startSeconds = 0, double ratio = 1, String sync = 'now', bool loop = false, double? volume}) async {
+      {double startSeconds = 0, double ratio = 1, String sync = 'now', bool loop = false, double? volume,
+      String? layer}) async {
     final e = engine();
     if (e == null) return {'ok': false, 'error': 'no engine'};
     final options = jsonEncode({
       'start_seconds': startSeconds < 0 ? 0 : startSeconds, 'stretch_ratio': ratio.clamp(0.25, 4.0), 'sync': sync,
-      'loop': loop, if (volume != null) 'volume': volume.clamp(0.0, 1.0),
+      'loop': loop, if (volume != null) 'volume': volume.clamp(0.0, 1.0), 'layer': ?layer,
     });
     return await e.withNative((a) => _call(a, path, options, false)) ?? {'ok': false, 'error': 'no engine'};
   }
@@ -128,7 +135,8 @@ class EngineSamplePreviewIo implements SamplePreviewIo {
     final s = _state ??= calloc<CawSamplePreviewState>();
     if (SampleBindings.instance.state(e, s) != 0) return const PreviewState();
     final r = s.ref;
-    return PreviewState(playing: r.playing != 0, waiting: r.waiting != 0, seconds: r.seconds, length: r.length, seq: r.seq);
+    return PreviewState(playing: r.playing != 0, waiting: r.waiting != 0, through: r.through != 0, seconds: r.seconds,
+        length: r.length, seq: r.seq);
   }
 }
 

@@ -15,6 +15,7 @@ import 'package:caw/model/sample_names.dart';
 import 'package:caw/model/sample_use.dart';
 import 'package:caw/model/sampler.dart';
 import 'package:caw/model/settings.dart';
+import 'package:caw/model/zip_archive.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'audio_fake.dart';
@@ -180,6 +181,17 @@ void main() {
       expect(d.packageable, isTrue);
       expect(d.name, 'Kick 01.wav');
       expect(d.size, greaterThan(44));
+      // Packaged: the file goes in the .caw by its own name; no device path travels with it.
+      final out = await Directory('${tmp.path}/out').create();
+      final caw = await s.writeProjectFile(deps, {d.key}, into: out);
+      final zip = ZipReader.open(caw.path);
+      try {
+        expect(zip['assets/Kick 01.wav'], isNotNull);
+        final packed = utf8.decode(zip.readBytes(zip['project.json']!));
+        expect(packed, isNot(contains(tmp.path)));
+      } finally {
+        zip.close();
+      }
     });
     test('a session handle is saved as its link and never trusted when read back', () {
       const link = LinkedRef('lf1', 'Pads/Warm.wav');

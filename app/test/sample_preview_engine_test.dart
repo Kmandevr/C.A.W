@@ -57,6 +57,11 @@ void main() {
       expect(r['ok'], isTrue, reason: '${r['error']}');
       expect(r['seconds'], closeTo(3, 1e-6));
       expect(r['stretch_ratio'], 1.5);
+      expect(r['seq'], 1);
+      // Through a track's effects: an id the engine doesn't know plays straight, and says so.
+      final through = await io.play(wav.path, layer: 'no-such-track');
+      expect(through['ok'], isTrue, reason: '${through['error']}');
+      expect(through['layer'], isFalse);
       io.seek(1);
       io.setVolume(0.3);
       io.stop();

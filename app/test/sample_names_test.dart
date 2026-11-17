@@ -76,6 +76,8 @@ void main() {
       expect(p.tags, containsAll(['loop', 'pad']));
       // A folder's bare number is never a tempo; the file's own name wins over its folders.
       expect(guessFromPath('Hit.wav', ['Pack 2024', 'Vol 120']).bpm, isNull);
+      expect(guessFromPath('Pad.wav', ['Loops Vol 120']).bpm, isNull);  // a loops folder's bare number either
+      expect(guessFromPath('Groove 96.wav', ['Loops']).bpm, 96);  // but a loop's own bare number counts
       expect(guessFromPath('Loop 90bpm.wav', ['130 bpm']).bpm, 90);
     });
     test('names are bounded', () {

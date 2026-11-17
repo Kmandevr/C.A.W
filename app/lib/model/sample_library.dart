@@ -72,7 +72,10 @@ class SampleEntry {
   /// Detection already tried (1: tempo, 2: key), so a file is not analysed again until it changes.
   int tried = 0;
 
-  String get name => rel.split('/').last;
+  late final String name = rel.split('/').last;
+
+  /// Lower case, once (sorting tens of thousands of entries would make it again on every comparison).
+  late final String nameLower = name.toLowerCase(), relLower = rel.toLowerCase(), folderLower = folder.toLowerCase();
   String get baseName => name.replaceFirst(RegExp(r'\.[A-Za-z0-9]{1,5}$'), '');
 
   /// The folder inside the linked folder ('' at its top).
@@ -242,7 +245,9 @@ class SampleIndexStore {
     final f = _file(id);
     if (f == null) return;
     await f.parent.create(recursive: true);
-    final text = jsonEncode({'version': 1, 'root': id, 'entries': [for (final e in entries.take(LibraryLimits.entries)) e.toJson()]});
+    // Encoded on a worker: tens of thousands of entries are megabytes of JSON.
+    final list = entries.take(LibraryLimits.entries).toList();
+    final text = await Isolate.run(() => jsonEncode({'version': 1, 'root': id, 'entries': [for (final e in list) e.toJson()]}));
     await writeFileAtomically(f, text);
   }
 
@@ -295,7 +300,7 @@ List<SampleEntry> readIndexFileSync(String path, String id) {
 /// How a key filter matches.
 enum KeyMatch { exact, relative, compatible }
 
-enum SampleSort { name, bpm, key, length, folder, recent }
+enum SampleSort { name, bpm, key, type, instrument, length, folder, recent }
 
 /// The browser's filters. Every one left empty passes everything.
 class SampleQuery {
@@ -372,16 +377,18 @@ class SampleQuery {
     // Unknown values sort last either way.
     int nulls(num? x, num? y) => x == null ? (y == null ? 0 : (descending ? -1 : 1)) : y == null ? (descending ? 1 : -1) : x.compareTo(y);
     final c = switch (sort) {
-      SampleSort.name => a.name.toLowerCase().compareTo(b.name.toLowerCase()),
+      SampleSort.name => a.nameLower.compareTo(b.nameLower),
       SampleSort.bpm => nulls(a.bpm, b.bpm),
       SampleSort.key => nulls(a.key == null ? null : (a.key!.minor ? 12 : 0) + a.key!.tonic,
           b.key == null ? null : (b.key!.minor ? 12 : 0) + b.key!.tonic),
+      SampleSort.type => nulls(a.kind?.index, b.kind?.index),
+      SampleSort.instrument => nulls(a.instrument?.index, b.instrument?.index),
       SampleSort.length => nulls(a.seconds, b.seconds),
-      SampleSort.folder => a.folder.toLowerCase().compareTo(b.folder.toLowerCase()),
+      SampleSort.folder => a.folderLower.compareTo(b.folderLower),
       SampleSort.recent => b.modified.compareTo(a.modified),
     };
     if (c != 0) return descending ? -c : c;
-    return a.rel.toLowerCase().compareTo(b.rel.toLowerCase());
+    return a.relLower.compareTo(b.relLower);
   }
 
   List<SampleEntry> apply(Iterable<SampleEntry> all) => all.where(passes).toList()..sort(_compare);

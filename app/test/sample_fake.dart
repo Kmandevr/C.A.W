@@ -46,10 +46,12 @@ class FakePreview implements SamplePreviewIo {
 
   @override
   Future<Map<String, dynamic>> play(String path,
-      {double startSeconds = 0, double ratio = 1, String sync = 'now', bool loop = false, double? volume}) async {
-    plays.add({'path': path, 'start': startSeconds, 'ratio': ratio, 'sync': sync, 'loop': loop, 'volume': volume});
+      {double startSeconds = 0, double ratio = 1, String sync = 'now', bool loop = false, double? volume,
+      String? layer}) async {
+    plays.add({'path': path, 'start': startSeconds, 'ratio': ratio, 'sync': sync, 'loop': loop, 'volume': volume,
+      'layer': layer});
     now = PreviewState(playing: true, seconds: startSeconds, length: 2, seq: plays.length);
-    return {'ok': true, 'seconds': 2.0, 'stretch_ratio': ratio};
+    return {'ok': true, 'seconds': 2.0, 'stretch_ratio': ratio, 'layer': layer != null, 'seq': plays.length};
   }
 
   @override

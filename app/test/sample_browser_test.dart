@@ -121,6 +121,32 @@ void main() {
     await tester.pump(const Duration(seconds: 3));
   });
 
+  testWidgets('the FX toggle, off by default, previews through the selected track', (tester) async {
+    lib.debugSet(LinkedFolder(id: lf, name: 'Lib', location: '/lib'), [e('Hits/Kick.wav', kind: SampleKind.oneShot)]);
+    final track = s.addAudioTrack(name: 'Vox');
+    s.selectedLayerId = track.id;
+    await pump(tester, folder: 'samples/$lf');
+    await tester.tap(row('Hits/Kick.wav'));
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(preview.plays.last['layer'], isNull);  // off: straight to the master
+    await tester.tap(find.byKey(const ValueKey('samples-through')));
+    await tester.pump();
+    await tester.tap(row('Hits/Kick.wav'));  // stops
+    await tester.pump(const Duration(milliseconds: 500));
+    await tester.tap(row('Hits/Kick.wav'));
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(preview.plays.last['layer'], track.id);
+    // Nothing selected: straight again.
+    s.selectedLayerId = null;
+    await tester.tap(row('Hits/Kick.wav'));
+    await tester.pump(const Duration(milliseconds: 500));
+    await tester.tap(row('Hits/Kick.wav'));
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(preview.plays.last['layer'], isNull);
+    await tester.tap(find.byKey(const ValueKey('samples-through')));  // back off for the other tests (it's per session)
+    await tester.pump(const Duration(seconds: 3));
+  });
+
   testWidgets('filters narrow the list and Clear brings it back', (tester) async {
     lib.debugSet(LinkedFolder(id: lf, name: 'Lib', location: '/lib'), [
       e('Loops/Groove.wav', bpm: 90, kind: SampleKind.loop),
