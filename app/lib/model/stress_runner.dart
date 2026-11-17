@@ -434,6 +434,7 @@ class StressRunner extends ChangeNotifier {
           limit: (json['limit'] as num?)?.toInt() ?? 0,
           firstFailed: failed >= 0 ? failed : null,
           capped: ok && failed < 0,
+          cappedBy: ok && failed < 0 && '${json['capped_by'] ?? ''}'.isNotEmpty ? '${json['capped_by']}' : null,
           error: ok ? null : '${json['error'] ?? 'failed'}',
         );
       case StressKind.profile:
@@ -456,6 +457,7 @@ class StressRunner extends ChangeNotifier {
           coreMaxKhz: k('core_max_khz'),
           thermalStart: thermalStart,
           thermalEnd: thermalEnd,
+          backgrounded: backgrounded,
         );
     }
   }

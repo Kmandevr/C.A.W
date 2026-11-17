@@ -656,6 +656,10 @@ std::string Engine::audioThreadsJson() const {
     j += ",\"hint\":" + std::string(pool_ && pool_->hintActive() ? "true" : "false");
     j += ",\"hint_state\":\"" + std::string(tuning::hintStateName(pool_ ? pool_->hintState() : tuning::HintState::None)) + "\"";
     j += ",\"mmcss\":" + std::string(pool_ && pool_->callbackMmcss() ? "true" : "false");
+    // The callback's scheduling policy (POSIX SCHED_*: 0 time-sharing, 1 FIFO, 2 RR) and nice, as it last described
+    // itself: a shared or Bluetooth AAudio stream's is time-sharing, a low-latency (MMAP) one's FIFO (#234).
+    j += ",\"callback_policy\":" + std::to_string(pool_ ? pool_->callbackPolicy() : 0) +
+         ",\"callback_nice\":" + std::to_string(pool_ ? pool_->callbackNice() : 0);
     j += ",\"callback_tuning\":" + flags(cbTuned) + ",\"worker_tuning\":" + flags(tuned);
     j += ",\"workers\":" + std::to_string(mixWorkers()) + ",\"active_workers\":" + std::to_string(mixActiveWorkers());
     j += ",\"wait_share\":" + std::to_string(waitShare_.load(std::memory_order_relaxed));

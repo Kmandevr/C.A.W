@@ -6,6 +6,13 @@ updated: 2026-11-17
 
 # Decisions
 
+## 2026-11-17: A new device's first callbacks stay out of the load meter; the performance hint for every stream mode (#234)
+
+**Decision (Claude's, for the owner to confirm; the hint part is the owner's 1.0.5 call: "the ADPF performance hint only", no game category):**
+- **Warm-up:** the callbacks of a device's first 0.5 s of frames after an open or an AAudio reroute enter no load average (the CPU meter, shedding's over-budget share, the mix pool's Auto). **Why:** the meter, which telemetry's `perf.worstCallbackPct` reads, moves about 9.9 × a stall's seconds, and a shared or Bluetooth stream starts by filling its buffer back to back on a core whose clock hasn't risen; the app closes an idle device and Play reopens it, so this landed while playing (600 and 800% on the owner's Bluetooth days, nothing shed). **[Assumption]** that first fill is the main source; the meter after the warm-up, and shedding, are unchanged.
+- **The hint:** asked for the callback and the workers whatever the callback's policy, as before, but a refused session is asked again (1 s doubling to 30 s), the callback alone if the group is refused, every callback's own duration is reported (not the longest since the last report), and `hint_state` says why there is none. **Why:** the NDK and the system service ask only that the threads be the app's (sources in [engine](engine.md)); telemetry showed no session on the S22+. **Not claimed:** the 1.0.4 Benchmark's low clocks and 13,448 sustained xruns came while the app was behind another app (owner), so this change is not shown to fix them.
+- **Benchmark:** a step the app leaves the foreground during runs again (`backgrounded`); a ramp the engine's own budget stops is capped, not an error; live parts say they are unprofiled (a short profiled pass would run the mix on one thread, unlike what plays). The local JSON grows additively; H2 is unchanged.
+
 ## 2026-11-17: Two Android builds; Isolated with an optional no-delay mode; feedback and Flagship routing (owner, #212, #222, #233)
 
 **Decision (owner, 2026-11-17):**

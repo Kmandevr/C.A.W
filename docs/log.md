@@ -6,6 +6,7 @@ updated: 2026-11-17
 
 # Log
 
+- 2026-11-17: audio threads and the Benchmark (#234, branch `audio-threads`): a new device's first 0.5 s of frames stay out of the CPU meter and shedding (`requestDeviceWarmUp`: the stream's first fill on a cold core had read up to 800% while playing, telemetry's `worstCallbackPct`); the Android performance hint is asked for again after a refusal (1 s doubling to 30 s), for the callback alone if the group is refused, gets every callback's own duration, and says why it is or isn't open (`hint_state`, with the callback's policy and nice, in `caw_audio_threads` and the Benchmark's live rows); the Benchmark redoes a step the app left the foreground during (`backgrounded`, `backgrounded_steps`), ends a ramp the engine's component cap or memory stops as capped (`capped_by`), and labels live parts unprofiled. H2 unchanged.
 - 2026-11-17: plans go private at 1.1.0 while the code stays public (owner); the plug-in hosting plan and routing plan notes (architect reviews: isolation design, Play policy conflict; nodes and wires on the existing GraphExecutor, silent steps).
 - 2026-11-17: the owner's rule for silent 1.1.0 groundwork in every 1.0.x batch.
 - 2026-11-17: the FX batch is split (1.0.6 and 1.0.7); one bit distortion device; the beta pack stays free for beta users; monitoring, live preset preview, project templates and early routing groundwork adopted.

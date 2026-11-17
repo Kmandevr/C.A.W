@@ -198,6 +198,10 @@ RampOutcome rampSearch(const std::vector<int32_t>& counts, const std::function<i
             o.stopped = true;
             return o;
         }
+        if (held == kRampCapped) {
+            o.cappedAt = n;
+            return o;  // the engine's own limit: nothing above it can run
+        }
         if (!held) {
             o.firstFailed = n;
             break;
@@ -213,8 +217,8 @@ RampOutcome rampSearch(const std::vector<int32_t>& counts, const std::function<i
             o.stopped = true;
             return o;
         }
-        if (held) o.limit = n;
-        else o.firstFailed = n;
+        if (held == 1) o.limit = n;
+        else o.firstFailed = n;  // over budget, or (rarely, between two counts) refused: it doesn't run either way
     }
     return o;
 }
@@ -314,7 +318,16 @@ RunResult run(const RunRequest& r, Progress& progress, LoadHistory* history, con
             setSpan(progress, std::min(990, 1000 * s / expected), std::min(990, 1000 * (s + 1) / expected));
             progress.count.store(n, std::memory_order_relaxed);
             Engine e(r.rate);
-            if (!prepare(e, rampProject(r.kind, n), r, false, l, rr, error)) return -1;
+            std::string refused;
+            if (!prepare(e, rampProject(r.kind, n), r, false, l, rr, refused)) {
+                // Past the engine's budget (its component cap, its memory) after a count that ran: the ramp's end.
+                if (heldN > 0 || n > counts.front()) {
+                    out.cappedBy = refused;
+                    return kRampCapped;
+                }
+                error = refused;
+                return -1;
+            }
             RunResult step;
             if (!warmUp(e, r, true, l, rr, step, cancel)) return -1;
             readCore(step.coreStart, step.khzStart, step.maxKHz);
@@ -347,7 +360,8 @@ RunResult run(const RunRequest& r, Progress& progress, LoadHistory* history, con
             fill(out, heldUs, heldN, r);
         }
         out.ok = !o.stopped;
-        out.stopReason = o.stopped ? "cancelled" : o.firstFailed > 0 ? "over_budget" : "done";
+        out.stopReason = o.stopped ? "cancelled" : o.firstFailed > 0 ? "over_budget" : o.cappedAt > 0 ? "capped" : "done";
+        if (o.cappedAt <= 0) out.cappedBy.clear();
         progress.permille.store(1000, std::memory_order_relaxed);
         return out;
     }

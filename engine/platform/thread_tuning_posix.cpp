@@ -230,7 +230,13 @@ struct Hint {
     std::atomic<int32_t> tids[kMaxThreads] = {};
     std::atomic<uint32_t> tidCount{0};
     std::atomic<uint32_t> tidGen{0};       // bumped after each hintThreads (odd while one writes)
-    std::atomic<int64_t> actualMax{0};     // the longest callback since the hint's thread last reported
+    // Each callback's duration, in order (the callback writes, the hint's thread reports every one: the system
+    // compares each cycle with its target, so the longest of several would overstate the work, and a mean hide a
+    // late one). Only the newest kRing are kept when the hint's thread falls behind.
+    static constexpr uint32_t kRing = 64;
+    std::atomic<int64_t> ring[kRing] = {};
+    std::atomic<uint64_t> written{0};
+    uint64_t reported = 0;                 // the hint's thread's own
     std::atomic<int64_t> target{0};
     std::atomic<bool> active{false};
     std::atomic<uint8_t> state{static_cast<uint8_t>(HintState::Waiting)};
@@ -288,6 +294,9 @@ struct Hint {
                     }
                     if (!session) {
                         session = api.createSession(manager, ids, used, want);
+                        // The callback alone (it is first) if the system refused the group: a worker it won't take
+                        // must not cost the callback its hint.
+                        if (!session && used > 1) session = api.createSession(manager, ids, 1, want);
                         sessionTarget = want;
                         if (session) {
                             failures = 0;
@@ -304,8 +313,14 @@ struct Hint {
             }
             if (session) {
                 if (want > 0 && want != sessionTarget && api.updateTarget(session, want) == 0) sessionTarget = want;
-                const int64_t a = actualMax.exchange(0, std::memory_order_relaxed);
-                if (a > 0) api.reportActual(session, a);
+                const uint64_t w = written.load(std::memory_order_acquire);
+                if (w - reported > kRing) reported = w - kRing;
+                for (; reported < w; ++reported) {
+                    const int64_t a = ring[reported % kRing].load(std::memory_order_relaxed);
+                    if (a > 0) api.reportActual(session, a);
+                }
+            } else {
+                reported = written.load(std::memory_order_acquire);  // none kept for a session not yet open
             }
             hold.lock();
         }
@@ -353,9 +368,10 @@ void hintThreads(Hint* h, const int32_t* tids, size_t count) noexcept {
 void hintReport(Hint* h, int64_t actualNs, int64_t targetNs) noexcept {
     if (!h) return;
     h->target.store(targetNs, std::memory_order_relaxed);
-    int64_t cur = h->actualMax.load(std::memory_order_relaxed);
-    while (actualNs > cur && !h->actualMax.compare_exchange_weak(cur, actualNs, std::memory_order_relaxed)) {
-    }
+    // One writer, the callback (Engine::reportLoad): a plain store and a release of the count.
+    const uint64_t w = h->written.load(std::memory_order_relaxed);
+    h->ring[w % Hint::kRing].store(actualNs, std::memory_order_relaxed);
+    h->written.store(w + 1, std::memory_order_release);
 }
 
 bool hintActive(const Hint* h) noexcept { return h && h->active.load(std::memory_order_relaxed); }

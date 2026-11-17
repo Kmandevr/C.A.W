@@ -85,7 +85,9 @@ int32_t currentThreadId() noexcept;  // the kernel's id of the calling thread (L
 
 // A performance hint session (Android 13+: ADPF APerformanceHint) for the callback and the workers, with the
 // callback period as its target. The system calls (create, set threads, report) run on the hint's own thread,
-// never on the callback or a worker: the callback only stores numbers (hintReport). Null where there is none.
+// never on the callback or a worker: the callback only stores numbers (hintReport: each callback's own duration,
+// all of them reported in order, at most the newest 64 between two of the hint thread's turns). Where the system
+// refuses the group, the callback alone is asked for. Null where there is none.
 struct Hint;
 Hint* hintOpen() noexcept;                    // control thread: starts the hint's thread (the session comes later)
 void hintClose(Hint* hint) noexcept;          // control thread: closes the session and joins its thread
