@@ -24,6 +24,8 @@ struct PreviewOptions {
     int sync = 0;             // 0 now, 1 the song's next beat, 2 its next bar (only while the song plays)
     bool loop = false;        // play again from the start at the end
     double volume = -1;       // 0..1; negative keeps the current preview volume
+    std::string layer;        // "layer": play through this track's effects and mix (empty: straight to the master)
+    int slot = -1;            // the layer's engine slot, resolved by the caller (-1: the master)
 };
 bool parsePreviewOptions(const char* json, PreviewOptions& out, std::string& error);
 
@@ -62,13 +64,14 @@ public:
     // Control threads. start() stretches (when asked) on the calling thread, which can take a while for a long loop
     // (call it from a worker); false with an error when the queue is full or memory runs out.
     bool start(std::shared_ptr<const AudioAsset> asset, const PreviewOptions& options, std::string& error,
-               double* effectiveRatio = nullptr);
+               double* effectiveRatio = nullptr, uint64_t* startSeq = nullptr);  // startSeq: State::seq once it plays
     void stop();
     void seek(double sourceSeconds);
     void setVolume(double volume) noexcept;
     struct State {
         bool playing = false;     // a voice sounds or waits for its beat
         bool waiting = false;     // waiting for the song's next beat or bar
+        bool through = false;     // it went through a track's effects in the last callback
         double seconds = 0;       // where it plays, in source seconds
         double length = 0;        // the file's length in source seconds
         uint64_t seq = 0;         // the start it plays (each start counts one up)
@@ -81,7 +84,11 @@ public:
     };
     void take(const SongClock& clock) noexcept;
     bool active() const noexcept { return cur_.sound != nullptr || old_.sound != nullptr; }
+    // The slot whose effects it plays through while it sounds (-1: none, it goes to the master).
+    int route() const noexcept { return active() ? route_ : -1; }
     void next(double& left, double& right) noexcept;  // adds the voice's next frame
+    // Adds m frames to a track's instrument output (its effects follow); marks this callback as routed.
+    void render(float* left, float* right, int m) noexcept;
     void publish() noexcept;                          // once per callback, after the last frame
 
     static constexpr int kFade = 256;
@@ -93,6 +100,7 @@ private:
         int64_t frame = 0;
         int64_t wait = -1;  // sync: 1 beat, 2 bar (resolved by take)
         uint64_t seq = 0;
+        int slot = -1;      // Start: the track it plays through (-1: the master)
     };
     struct Voice {
         const PreviewSound* sound = nullptr;
@@ -114,12 +122,14 @@ private:
     // Audio thread.
     Voice cur_, old_;
     double gain_ = 0.8, gainTarget_ = 0.8;
+    int route_ = -1;        // the slot of the last start (a fading voice follows it too)
+    bool routed_ = false;   // render() ran this callback
     // Published by the audio thread.
     std::atomic<const PreviewSound*> inUse_[2] = {nullptr, nullptr};
     std::atomic<uint64_t> consumed_{0};
     std::atomic<double> posSeconds_{0}, lengthSeconds_{0};
     std::atomic<uint64_t> playingSeq_{0};
-    std::atomic<int> flags_{0};  // 1 playing, 2 waiting
+    std::atomic<int> flags_{0};  // 1 playing, 2 waiting, 4 through a track
 };
 
 }  // namespace caw

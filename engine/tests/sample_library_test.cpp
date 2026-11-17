@@ -184,6 +184,7 @@ TEST(preview_plays_a_file_stopped_seeks_and_fades_out_on_stop) {
     CHECK(j.boolean("ok", false));
     CHECK_NEAR(j.number("seconds", 0), 1.0, 1e-9);
     CHECK_NEAR(j.number("stretch_ratio", 0), 1.0, 1e-12);
+    CHECK_EQ(static_cast<int>(j.number("seq", 0)), 1);
     caw_engine_process(ce, l.data(), r.data(), 4800);
     // After the 256-sample fade in, the file at the preview's volume (0.8), the same on both sides.
     double worst = 0;
@@ -303,4 +304,58 @@ TEST(preview_stretches_to_a_tempo_and_starts_on_the_next_beat_while_playing) {
         e.process(l.data(), r.data(), 4800);
         CHECK(rmsOf(l, 0, l.size()) > 0.05);
     }
+}
+
+TEST(preview_plays_through_a_tracks_effects_when_asked) {
+    // The browser's "through the track" toggle: the preview joins the track after its instrument, so its volume and
+    // pan (and inserts) shape it, stopped or playing; muted, or for an unknown id, it goes to the master as before.
+    const std::string dir = tempDir("through");
+    const std::string p = writeWav(dir + "/s.wav", 48000, 48000, [](int64_t i, int) {
+        return static_cast<float>(0.25 * std::sin(2 * kPi * 500.0 * static_cast<double>(i) / 48000.0));
+    });
+    const char* project = R"({"caw_project":1,"bpm":120,"master":1,
+        "layers":[{"id":"t","volume":0.5,"pan":-1,"input":{"channel":0,"channels":1,"monitor":"off"}},
+                  {"id":"m","volume":1,"mute":true,"input":{"channel":0,"channels":1,"monitor":"off"}}]})";
+    CawEngine* ce = caw_engine_create(48000);
+    CHECK(ce != nullptr);
+    if (!ce) return;
+    const std::string set = cjson(caw_engine_set_project(ce, project));
+    CHECK(set.find("\"ok\":true") != std::string::npos);
+    std::vector<float> l(4800), r(4800);
+    caw_engine_process(ce, l.data(), r.data(), 4800);
+    auto play = [&](const char* options) { return cjson(caw_engine_preview_sample(ce, p.c_str(), options)); };
+    auto settle = [&] {
+        for (int k = 0; k < 3; ++k) caw_engine_process(ce, l.data(), r.data(), 4800);
+    };
+    // Stopped, through "t": hard left at half volume, nothing on the right.
+    CHECK(play(R"({"layer":"t","loop":true})").find("\"layer\":true") != std::string::npos);
+    settle();
+    CawSamplePreviewState st{};
+    CHECK_EQ(caw_engine_preview_sample_state(ce, &st), 0);
+    CHECK_EQ(st.through, 1);
+    CHECK_NEAR(rmsOf(l, 2400, 4800), 0.5 * 0.8 * 0.25 / std::sqrt(2.0), 3e-3);
+    CHECK(rmsOf(r, 2400, 4800) < 1e-6);
+    // Playing, the same.
+    caw_engine_play(ce);
+    settle();
+    CHECK_NEAR(rmsOf(l, 2400, 4800), 0.5 * 0.8 * 0.25 / std::sqrt(2.0), 3e-3);
+    CHECK(rmsOf(r, 2400, 4800) < 1e-6);
+    caw_engine_stop(ce);
+    settle();
+    // A muted track doesn't run: the preview plays straight, on both sides.
+    CHECK(play(R"({"layer":"m","loop":true})").find("\"layer\":true") != std::string::npos);
+    settle();
+    CHECK_EQ(caw_engine_preview_sample_state(ce, &st), 0);
+    CHECK_EQ(st.through, 0);
+    CHECK_NEAR(rmsOf(r, 2400, 4800), 0.8 * 0.25 / std::sqrt(2.0), 3e-3);
+    // An unknown track: straight too, and the answer says so.
+    CHECK(play(R"({"layer":"nope","loop":true})").find("\"layer\":false") != std::string::npos);
+    settle();
+    CHECK_NEAR(rmsOf(r, 2400, 4800), 0.8 * 0.25 / std::sqrt(2.0), 3e-3);
+    // Without a layer, as before.
+    play(R"({"loop":true})");
+    settle();
+    CHECK_NEAR(rmsOf(l, 2400, 4800), 0.8 * 0.25 / std::sqrt(2.0), 3e-3);
+    CHECK(cjson(caw_engine_preview_sample(ce, p.c_str(), R"({"layer":7})")).find("layer must be") != std::string::npos);
+    caw_engine_destroy(ce);
 }

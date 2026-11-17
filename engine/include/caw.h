@@ -123,8 +123,8 @@ extern "C" {
    caw_asset_slices (transients for Slice to MIDI). Nothing else changes.
    33 (2026-11-17, batch 1.0.5, #229): the sample browser. caw_asset_key (the key estimate from a chromagram and
    key profiles) and the preview voice: caw_engine_preview_sample (a file auditioned beside the song, optionally
-   stretched to a tempo and started on the song's next beat or bar), caw_engine_preview_sample_stop, _seek, _volume
-   and _state. Nothing else changes. */
+   stretched to a tempo, started on the song's next beat or bar, optionally through a track's effects),
+   caw_engine_preview_sample_stop, _seek, _volume and _state. Nothing else changes. */
 #define CAW_API_VERSION 33
 /* The component index that names a layer's native instrument rather than one of its "components". */
 #define CAW_INSTRUMENT_INDEX 0xFFFFFFFFu
@@ -722,14 +722,18 @@ CAW_API char* caw_asset_key(CawEngine* e, const char* path, const char* options_
    "stretch_ratio" other than 1 (0.25..4: output length over the file's; a file over 60 s plays at its own speed),
    renders it stretched with the clips' Signalsmith path on the calling thread (a worker isolate), then starts it:
    options {"start_seconds" (in the file), "stretch_ratio", "sync" ("now", "beat" or "bar": while the song plays it
-   starts on the next beat or bar; stopped, at once), "loop" (bool), "volume" 0..1}; a start, stop or seek crossfades
-   over 256 samples. Result {"ok", "error", "seconds" (the file's), "stretch_ratio" (what plays), "channels"}; free
-   with caw_free. _stop fades it out; _seek moves it to [seconds] of the file (a scrub); _volume 0..1 (0.8 at first)
+   starts on the next beat or bar; stopped, at once), "loop" (bool), "volume" 0..1, "layer" (a track's id: the preview
+   joins that track after its instrument, so its inserts, volume and pan shape it; stopped, the track is woken as a
+   monitoring one; while the track is muted or soloed out, or for an unknown id, it goes to the master as without)};
+   a start, stop or seek crossfades over 256 samples. Result {"ok", "error", "seconds" (the file's), "stretch_ratio"
+   (what plays), "channels", "layer" (true: the id named a track), "seq" (this start's number, as _state's seq reads
+   once it plays)}; free with caw_free. _stop fades it out; _seek moves it to [seconds] of the file (a scrub); _volume 0..1 (0.8 at first)
    is read by the audio thread. _state fills a CawSamplePreviewState as of the last callback (0; -1 for NULL). Any
    thread but the audio thread; never blocks on it. */
 typedef struct CawSamplePreviewState {
     int32_t playing;  /* a preview sounds or waits for its beat */
     int32_t waiting;  /* waits for the song's next beat or bar */
+    int32_t through;  /* it went through a track's effects in the last callback */
     double seconds;   /* where it plays, in seconds of the file */
     double length;    /* the file's length in seconds */
     int64_t seq;      /* which start plays: each caw_engine_preview_sample counts one up */

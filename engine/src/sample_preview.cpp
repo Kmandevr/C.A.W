@@ -58,6 +58,13 @@ bool parsePreviewOptions(const char* json, PreviewOptions& o, std::string& error
         }
         o.sync = s->str == "beat" ? 1 : s->str == "bar" ? 2 : 0;
     }
+    if (const Json* t = j.get("layer"); t && t->type != Json::Type::Null) {
+        if (t->type != Json::Type::String || t->str.size() > 256) {
+            error = "layer must be a track's id (at most 256 bytes)";
+            return false;
+        }
+        o.layer = t->str;
+    }
     if (const Json* l = j.get("loop"); l && l->type != Json::Type::Null) {
         if (l->type != Json::Type::Bool) {
             error = "loop must be true or false";
@@ -86,7 +93,7 @@ void SamplePreview::prune() {
 bool SamplePreview::post(const Cmd& c) { return queue_.push(c); }
 
 bool SamplePreview::start(std::shared_ptr<const AudioAsset> asset, const PreviewOptions& o, std::string& error,
-                          double* effectiveRatio) {
+                          double* effectiveRatio, uint64_t* startSeq) {
     if (!asset || asset->frames <= 0) {
         error = "the file has no audio";
         return false;
@@ -137,6 +144,7 @@ bool SamplePreview::start(std::shared_ptr<const AudioAsset> asset, const Preview
     c.sound = sound.get();
     c.seq = sound->seq;
     c.wait = o.sync;
+    c.slot = o.slot;
     c.frame = static_cast<int64_t>(std::floor(std::clamp(o.startSeconds * asset->rate * ratio, 0.0,
                                                          static_cast<double>(sound->frames))));
     held_.push_back(sound);
@@ -147,6 +155,7 @@ bool SamplePreview::start(std::shared_ptr<const AudioAsset> asset, const Preview
         return false;
     }
     ++starts_;
+    if (startSeq) *startSeq = starts_;
     lastPosted_ = sound.get();
     lastLength_ = asset->seconds();
     lastRatio_ = ratio;
@@ -184,6 +193,7 @@ SamplePreview::State SamplePreview::state() const noexcept {
     const int f = flags_.load(std::memory_order_acquire);
     s.playing = (f & 1) != 0;
     s.waiting = (f & 2) != 0;
+    s.through = (f & 4) != 0;
     s.seconds = posSeconds_.load(std::memory_order_relaxed);
     s.length = lengthSeconds_.load(std::memory_order_relaxed);
     s.seq = playingSeq_.load(std::memory_order_relaxed);
@@ -203,6 +213,7 @@ void SamplePreview::take(const SongClock& clock) noexcept {
                 if (cur_.sound && cur_.wait == 0) old_ = {cur_.sound, cur_.pos, 0, kFade};
                 const int64_t wait = c.wait == 1 ? clock.toBeat : c.wait == 2 ? clock.toBar : 0;
                 cur_ = {c.sound, std::min(c.frame, c.sound->frames), wait > 0 ? wait : 0, 0};
+                route_ = c.slot;
                 break;
             }
             case Cmd::Stop:
@@ -256,9 +267,20 @@ void SamplePreview::next(double& left, double& right) noexcept {
     }
 }
 
+void SamplePreview::render(float* left, float* right, int m) noexcept {
+    routed_ = true;
+    for (int i = 0; i < m && active(); ++i) {
+        double l = left[i], r = right[i];
+        next(l, r);
+        left[i] = static_cast<float>(l);
+        right[i] = static_cast<float>(r);
+    }
+}
+
 void SamplePreview::publish() noexcept {
     const PreviewSound* s = cur_.sound;
-    flags_.store(s ? (cur_.wait > 0 ? 3 : 1) : 0, std::memory_order_release);
+    flags_.store((s ? (cur_.wait > 0 ? 3 : 1) : 0) | (routed_ ? 4 : 0), std::memory_order_release);
+    routed_ = false;
     if (s) {
         const double perSecond = sr_ * s->ratio;
         posSeconds_.store(static_cast<double>(cur_.pos) / perSecond, std::memory_order_relaxed);

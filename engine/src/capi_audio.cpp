@@ -132,10 +132,13 @@ char* caw_engine_preview_sample(CawEngine* e, const char* path, const char* opti
     if (!caw::parsePreviewOptions(options_json, o, error)) return dup(fail(error));
     auto a = caw::AssetStore::global().load(path, e->engine->sampleRate(), error);
     if (!a) return dup(fail(error));
+    // Through a track's effects: its slot now (an unknown id plays straight to the master; "layer" says which).
+    if (!o.layer.empty()) o.slot = e->engine->previewSlot(o.layer);
     double ratio = 1;
-    if (!e->engine->samplePreview().start(a, o, error, &ratio)) return dup(fail(error));
+    uint64_t seq = 0;
+    if (!e->engine->samplePreview().start(a, o, error, &ratio, &seq)) return dup(fail(error));
     return dup("{\"ok\":true,\"error\":\"\",\"seconds\":" + num(a->seconds()) + ",\"stretch_ratio\":" + num(ratio) +
-               ",\"channels\":" + std::to_string(a->channels) + "}");
+               ",\"channels\":" + std::to_string(a->channels) + ",\"layer\":" + (o.slot >= 0 ? "true" : "false") + ",\"seq\":" + std::to_string(seq) + "}");
 } catch (...) {
     return dup(fail("out of memory"));
 }
@@ -159,6 +162,7 @@ int32_t caw_engine_preview_sample_state(CawEngine* e, CawSamplePreviewState* out
     const caw::SamplePreview::State st = e->engine->samplePreview().state();
     out->playing = st.playing ? 1 : 0;
     out->waiting = st.waiting ? 1 : 0;
+    out->through = st.through ? 1 : 0;
     out->seconds = st.seconds;
     out->length = st.length;
     out->seq = static_cast<int64_t>(st.seq);

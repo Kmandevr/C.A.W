@@ -2592,9 +2592,6 @@ void Engine::resetTestTone() noexcept {
     toneActive_.store(false, std::memory_order_release);
 }
 
-// The test tone: 0.25 (-12 dBFS) of 440 Hz with 10 ms fades, added before the safety limiter (finishSample in
-// runMasterNode, or mixToneOnly where the master stage does not run). A request to end it early fades it out over
-// those 10 ms.
 // The preview's commands, with the frames to the song's next beat and bar for a start in time with it (while the
 // song plays past any count-in; a loop's wrap before the beat is not looked at: the start then lands off the beat).
 void Engine::takePreview() noexcept {
@@ -2613,7 +2610,30 @@ void Engine::takePreview() noexcept {
         clock.toBar = static_cast<int64_t>(std::max(0.0, std::ceil(song_->tempo.frameAt((beat + toNext) * 4.0) - static_cast<double>(g_))));
     }
     samplePreview_->take(clock);
+    // Through a track's effects (the browser's toggle): stopped, its slot is woken as a monitoring track is, so
+    // the preview runs through its inserts and mix; a muted or soloed-out track doesn't run and the preview goes
+    // to the master as usual (runMasterNode, mixToneOnly).
+    const int rs = samplePreview_->route();
+    if (rs >= 0 && rs < slotCount_ && !playing_) {
+        Slot& s = slotAt(rs);
+        if (s.active && s.track && !s.previewing) {
+            if (s.instrument && s.instrumentIdle) {
+                s.instrument->reset();
+                s.instrument->notes()->forget(false);
+                s.instrument->notes()->clearEvents();
+                s.instrumentIdle = false;
+            }
+            s.previewing = true;
+            s.previewQuiet = s.previewTail = 0;
+            previewing_ = true;
+            markLive(rs);
+        }
+    }
 }
+
+// The test tone: 0.25 (-12 dBFS) of 440 Hz with 10 ms fades, added before the safety limiter (finishSample in
+// runMasterNode, or mixToneOnly where the master stage does not run). A request to end it early fades it out over
+// those 10 ms.
 
 void Engine::takeToneRequest() noexcept {
     // A start is published as sounding before its request is cleared, so testToneSounding() never reads false in
@@ -2644,15 +2664,16 @@ double Engine::nextTone() noexcept {
     return v;
 }
 
-void Engine::mixToneOnly(float* left, float* right, int frames) noexcept {
+void Engine::mixToneOnly(float* left, float* right, int frames, bool previewTaken) noexcept {
     SamplePreview& pv = *samplePreview_;
-    if (toneLeft_ <= 0 && !pv.active()) return;
+    const bool preview = pv.active() && !previewTaken;  // a track that took it already played it
+    if (toneLeft_ <= 0 && !preview) return;
     const double rel = detExp(-1.0 / (0.1 * sr_));
     const bool bypass = bypass_.load(std::memory_order_relaxed);
-    for (int j = 0; j < frames && (toneLeft_ > 0 || pv.active()); ++j) {
+    for (int j = 0; j < frames && (toneLeft_ > 0 || (preview && pv.active())); ++j) {
         const double t = toneLeft_ > 0 ? nextTone() : 0.0;
         double yl = static_cast<double>(left[j]) + t, yr = static_cast<double>(right[j]) + t;
-        if (pv.active()) pv.next(yl, yr);
+        if (preview && pv.active()) pv.next(yl, yr);
         const double env = std::max(std::fabs(yl), std::fabs(yr));
         limEnv_ = env > limEnv_ ? env : env + (limEnv_ - env) * rel;
         const double gain = bypass ? 1.0 : (limEnv_ > kLimitCeiling ? kLimitCeiling / limEnv_ : 1.0);
@@ -3668,6 +3689,7 @@ void Engine::updatePreviewing(int frames) noexcept {
         if (!s.previewing) continue;
         const bool silent = !s.active || (slotTarget(s) == 0.0 && s.gain == 0.0);
         bool voices = false;  // a preview note is held
+        if (!silent && samplePreview_->route() == live_[k]) voices = true;  // the sample preview plays through it
         if (s.instrument && (s.instrument->notes()->holdsPreview() || s.instrument->monitorsStopped())) {
             if (silent) {
                 s.instrument->notes()->releasePreviews(0);
@@ -4168,6 +4190,7 @@ int Engine::processChunk(float* l, float* r, int maxFrames) noexcept {
         live_[kept++] = i;
     }
     liveCount_ = kept;
+    previewTaken_.store(false, std::memory_order_relaxed);  // a track node that plays the sample preview sets it
     const int m = planChunk(maxFrames);
     if (!timeConstant_) {  // the song step at each of the chunk's frames, for per-sample lanes (songStep)
         song_->tempo.stepsAt(g_, m, chunkSteps_);
@@ -4226,7 +4249,7 @@ int Engine::processChunk(float* l, float* r, int maxFrames) noexcept {
     if (!ran) {
         std::fill_n(l, m, 0.0f);
         std::fill_n(r, m, 0.0f);
-        mixToneOnly(l, r, m);  // the master stage, last in the graph, did not run
+        mixToneOnly(l, r, m, previewTaken_.load(std::memory_order_relaxed));  // the master stage did not run
     }
     return m;
 }
@@ -4692,6 +4715,10 @@ void Engine::runTrackNode(int slot, float* outL, float* outR, int m) noexcept {
     // The instrument (#17) into the native inserts, stereo through volume and pan (the pan law then works per side,
     // as balance).
     runInstrument(s, m);
+    if (samplePreview_->route() == slot) {  // the sample preview through this track's effects (API 33)
+        samplePreview_->render(s.instL, s.instR, m);
+        previewTaken_.store(true, std::memory_order_relaxed);
+    }
     std::copy_n(s.instL, m, s.insL);
     std::copy_n(s.instR, m, s.insR);
     runInserts(s, s.insL, s.insR, m);
@@ -4953,6 +4980,8 @@ void Engine::runMasterNode(const float* inL, const float* inR, float* outL, floa
     float pl = 0, pr = 0;
     const bool bypass = bypass_.load(std::memory_order_relaxed);
     int sp = masterScopePos_.load(std::memory_order_relaxed);
+    // The sample preview joins here unless a track's node played it through its effects this chunk.
+    const bool previewHere = !previewTaken_.load(std::memory_order_relaxed);
 
     // The metronome, while the song plays: a click as the playhead crosses each beat.
     const bool clicks = metronome_ && playing_ && !previewChunk_ && stepLen_ > 0;
@@ -5010,13 +5039,13 @@ void Engine::runMasterNode(const float* inL, const float* inR, float* outL, floa
             fade = 1.0;  // a fade in that ended earlier in this chunk is done: the rest is at full level
         }
         float ol, orr;
-        if (toneLeft_ > 0 || samplePreview_->active()) {
+        if (toneLeft_ > 0 || (previewHere && samplePreview_->active())) {
             // The test tone and the sample preview join after the transport's fades (they sound stopped too) and
             // before the limiter, which follows the louder of the song's own level and the sum, so the sum stays
             // under the ceiling.
             const double t = toneLeft_ > 0 ? nextTone() : 0.0;
             double sl = yl * fade + t, sr = yr * fade + t;
-            if (samplePreview_->active()) samplePreview_->next(sl, sr);
+            if (previewHere && samplePreview_->active()) samplePreview_->next(sl, sr);
             const double env = std::max({std::fabs(yl), std::fabs(yr), std::fabs(sl), std::fabs(sr)});
             limEnv_ = env > limEnv_ ? env : env + (limEnv_ - env) * rel;
             limEnv_ = limEnv_ < 1e-30 ? 0.0 : limEnv_;  // far below the ceiling (gain 1 either way): no subnormals

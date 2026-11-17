@@ -1,4 +1,4 @@
-// The sample preview on the audio thread (API 33, #229): starts, seeks, stops and volume changes never allocate there.
+// The sample preview on the audio thread (API 33, #229): starts, seeks, stops, volume changes and a track's route never allocate there.
 #include <cmath>
 #include <memory>
 #include <string>
@@ -22,6 +22,8 @@ TEST(the_sample_preview_never_allocates_on_the_audio_thread) {
         for (int i = 0; i < 24000; ++i) a->data[c][static_cast<size_t>(i)] = static_cast<float>(0.3 * std::sin(0.05 * i));
     }
     Engine e(48000);
+    CHECK(e.setProjectJson(R"({"caw_project":1,"bpm":120,"master":1,"layers":[{"id":"t","volume":0.7,
+        "input":{"channel":0,"channels":1,"monitor":"off"}}]})").find("\"ok\":true") != std::string::npos);
     std::vector<float> l(192), r(192);
     std::string error;
     PreviewOptions loop;
@@ -31,7 +33,10 @@ TEST(the_sample_preview_never_allocates_on_the_audio_thread) {
     stretched.sync = 1;
     std::size_t operations = 0;
     float peak = 0;
-    for (int round = 0; round < 6; ++round) {
+    PreviewOptions through = loop;
+    through.slot = e.previewSlot("t");
+    CHECK(through.slot >= 0);
+    for (int round = 0; round < 8; ++round) {
         // Commands come from the control side between callbacks; only the callbacks are counted.
         if (round == 0) CHECK(e.samplePreview().start(a, loop, error));
         if (round == 1) e.samplePreview().seek(0.2);
@@ -41,6 +46,11 @@ TEST(the_sample_preview_never_allocates_on_the_audio_thread) {
         if (round == 5) {
             CHECK(e.samplePreview().start(a, loop, error));
             e.play();
+        }
+        if (round == 6) CHECK(e.samplePreview().start(a, through, error));  // through the track, playing
+        if (round == 7) {
+            e.stop();
+            CHECK(e.samplePreview().start(a, through, error));  // and stopped (the track is woken)
         }
         cawtest::AllocationScope scope;
         for (int k = 0; k < 100; ++k) {
