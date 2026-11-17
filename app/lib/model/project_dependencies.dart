@@ -5,6 +5,7 @@ import 'dart:io';
 
 import '../ui/theme.dart';
 import 'cpp_component.dart';
+import 'audio_clips.dart' show isSessionPath;
 import 'project.dart';
 import 'sampler.dart';
 import 'user_presets.dart';
@@ -49,6 +50,9 @@ class ProjectDependency {
   /// project names): never read, hashed or packaged.
   final bool outside;
 
+  /// A file of a linked sample folder the project uses in place (#229): packaged like the project's own.
+  bool linked = false;
+
   /// Whether the export can put it in the package: a file found here. Plug-ins have an unknown licence, so they
   /// are listed as needed and never packaged (no plug-in hosting is built either).
   bool get packageable => found && !embedded && !outside && kind != DependencyKind.plugin;
@@ -82,17 +86,19 @@ bool isSafeLocalPath(String path) {
 /// shows as missing (Locate… finds it by name) and nothing ever looks at the original. [moved] hears each change.
 /// Returns how many paths moved.
 int quarantineUnsafePaths(ProjectDoc p, String missingDir, {void Function(String from, String to)? moved}) {
+  // A process or device path (/proc, /dev) is a session handle or a device, never a project's file.
+  bool bad(String path) => !isSafeLocalPath(path) || isSessionPath(path) || path.replaceAll('\\', '/').startsWith('/dev/');
   final unsafe = <String>{};
   for (final a in p.assets) {
-    if (!isSafeLocalPath(a.path)) unsafe.add(a.path);
+    if (bad(a.path)) unsafe.add(a.path);
   }
   for (final (_, use) in projectComponentUses(p)) {
     for (final s in use.samples) {
-      if (s.path case final path? when !isSafeLocalPath(path)) unsafe.add(path);
+      if (s.path case final path? when bad(path)) unsafe.add(path);
     }
     if (use.id == samplerComponentId) {
       for (final z in SamplerState.fromBase64(use.state).zones) {
-        if (!isSafeLocalPath(z.path)) unsafe.add(z.path);
+        if (bad(z.path)) unsafe.add(z.path);
       }
     }
   }
@@ -208,7 +214,8 @@ List<ProjectDependency> scanProjectDependencies(
       for (final l in p.layers)
         if (l.audioClips.any((c) => c.assetId == a.id || c.takes.contains(a.id))) l.name,
     ];
-    final dep = file(DependencyKind.audio, a.path, '', name: _baseName(a.path));
+    final dep = file(DependencyKind.audio, a.path, '', name: a.link == null ? _baseName(a.path) : _baseName(a.link!.rel));
+    if (a.link != null) dep.linked = true;
     for (final u in users) {
       if (!dep.usedBy.contains(u)) dep.usedBy.add(u);
     }

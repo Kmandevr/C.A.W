@@ -120,8 +120,12 @@ extern "C" {
    a clip now follows a tempo map of more than one tempo, its rate worked out per chunk), "stretch_ratio" 0.25..4,
    "pitch_cents" -2400..2400, "gain_db" -96..36, "loop_start_frames" and "loop_end_frames" (the file's own frames).
    A clip at ratio 1 with no pitch plays as before, to the bit. caw_asset_tempo (onset-based tempo detection) and
-   caw_asset_slices (transients for Slice to MIDI). Nothing else changes. */
-#define CAW_API_VERSION 32
+   caw_asset_slices (transients for Slice to MIDI). Nothing else changes.
+   33 (2026-11-17, batch 1.0.5, #229): the sample browser. caw_asset_key (the key estimate from a chromagram and
+   key profiles) and the preview voice: caw_engine_preview_sample (a file auditioned beside the song, optionally
+   stretched to a tempo and started on the song's next beat or bar), caw_engine_preview_sample_stop, _seek, _volume
+   and _state. Nothing else changes. */
+#define CAW_API_VERSION 33
 /* The component index that names a layer's native instrument rather than one of its "components". */
 #define CAW_INSTRUMENT_INDEX 0xFFFFFFFFu
 /* A component index with this bit (API version 22) names component (index & ~CAW_NOTE_COMPONENT) of the layer's
@@ -707,6 +711,34 @@ CAW_API char* caw_asset_tempo(CawEngine* e, const char* path, const char* option
    "error", "seconds" (the range's length), "slices": [{"seconds" (from the file's start), "frame" (at the file's own
    rate), "strength" 0..1}]}: transient starts in time order, the strongest max_slices kept; none within 5 ms of the range's start. */
 CAW_API char* caw_asset_slices(CawEngine* e, const char* path, const char* options_json);
+/* API 33 (docs/engine.md "The sample preview and key estimate"). caw_asset_key loads the file as caw_asset_load does
+   (a worker isolate) and takes options {"start_seconds", "end_seconds"} (NULL for the whole file; at most 600 s are
+   read). Result {"ok", "error", "sure" (false: no clear key; show none), "tonic" 0..11 (0 = C), "mode" ("major" or
+   "minor"), "name" ("A minor"), "confidence" 0..1, "chroma": [12 values, the largest 1], "candidates": [{"tonic",
+   "mode", "score"}] (the best five)}: an estimate, never metadata. Free with caw_free. */
+CAW_API char* caw_asset_key(CawEngine* e, const char* path, const char* options_json);
+/* The preview voice: one file at a time, mixed after the master's volume and the transport's fades and before the
+   safety limiter, playing or stopped (as the test tone). caw_engine_preview_sample loads the file and, for a
+   "stretch_ratio" other than 1 (0.25..4: output length over the file's; a file over 60 s plays at its own speed),
+   renders it stretched with the clips' Signalsmith path on the calling thread (a worker isolate), then starts it:
+   options {"start_seconds" (in the file), "stretch_ratio", "sync" ("now", "beat" or "bar": while the song plays it
+   starts on the next beat or bar; stopped, at once), "loop" (bool), "volume" 0..1}; a start, stop or seek crossfades
+   over 256 samples. Result {"ok", "error", "seconds" (the file's), "stretch_ratio" (what plays), "channels"}; free
+   with caw_free. _stop fades it out; _seek moves it to [seconds] of the file (a scrub); _volume 0..1 (0.8 at first)
+   is read by the audio thread. _state fills a CawSamplePreviewState as of the last callback (0; -1 for NULL). Any
+   thread but the audio thread; never blocks on it. */
+typedef struct CawSamplePreviewState {
+    int32_t playing;  /* a preview sounds or waits for its beat */
+    int32_t waiting;  /* waits for the song's next beat or bar */
+    double seconds;   /* where it plays, in seconds of the file */
+    double length;    /* the file's length in seconds */
+    int64_t seq;      /* which start plays: each caw_engine_preview_sample counts one up */
+} CawSamplePreviewState;
+CAW_API char* caw_engine_preview_sample(CawEngine* e, const char* path, const char* options_json);
+CAW_API void caw_engine_preview_sample_stop(CawEngine* e);
+CAW_API void caw_engine_preview_sample_seek(CawEngine* e, double seconds);
+CAW_API void caw_engine_preview_sample_volume(CawEngine* e, double volume);
+CAW_API int32_t caw_engine_preview_sample_state(CawEngine* e, CawSamplePreviewState* out);
 /* The store: {"bytes", "budget", "count", "assets": [{"path", "rate", "bytes", "in_use"}]}. Free with caw_free. */
 CAW_API char* caw_asset_store_status(void);
 CAW_API void caw_asset_store_set_budget(int64_t bytes);

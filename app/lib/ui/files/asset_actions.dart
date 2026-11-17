@@ -1,5 +1,6 @@
 // What Files does with an asset or folder: open it in Build, audition it, its long-press menu, rename, duplicate,
 // delete, new C++ effects and instruments (blank or from a starter) and new patterns.
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -9,6 +10,7 @@ import '../../model/app_state.dart';
 import '../../model/cpp_starters.dart';
 import '../../model/cpp_workbench.dart';
 import '../../model/files_catalog.dart';
+import '../../model/sample_use.dart' show SampleUse;
 import '../../model/pattern_doc.dart';
 import '../../model/user_presets.dart';
 import '../../platform/save_copy.dart';
@@ -273,6 +275,11 @@ class FilesActions {
         const MenuEntry('import-preset', Icons.file_open_outlined, 'Import preset file…'),
       if (f.kind == FilesFolderKind.samplePacks || f.kind == FilesFolderKind.audio)
         const MenuEntry('sample-pack', Icons.library_music_outlined, 'Make sample pack…'),
+      if (f.kind == FilesFolderKind.samples) const MenuEntry('link-folder', Icons.create_new_folder_outlined, 'Link folder…'),
+      if (f.kind == FilesFolderKind.sampleFolder) ...const [
+        MenuEntry('refresh-folder', Icons.refresh, 'Read again'),
+        MenuEntry('unlink-folder', Icons.link_off, 'Unlink', danger: true, dividerBefore: true),
+      ],
     ];
     if (entries.isEmpty) return null;
     final action = await showCompactMenu<String>(context, at, entries);
@@ -291,6 +298,15 @@ class FilesActions {
       case 'sample-pack':
         await openSamplePackMaker(context, state);
         return 'audio/samples';
+      case 'link-folder':
+        final (lf, _) = await state.sampleLibrary.linkPicked();
+        return lf == null ? null : 'samples/${lf.id}';
+      case 'refresh-folder':
+        unawaited(state.sampleLibrary.refresh(f.path.substring('samples/'.length)));
+      case 'unlink-folder':
+        // Nothing in the folder is touched; projects that use its files show them missing until found again.
+        await state.sampleLibrary.unlink(f.path.substring('samples/'.length));
+        return 'samples';
     }
     return null;
   }

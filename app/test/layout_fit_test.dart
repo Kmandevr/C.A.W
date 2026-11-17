@@ -31,6 +31,10 @@ import 'package:caw/model/updates/releases.dart' hide AssetKind;
 import 'package:caw/model/audio_clips.dart';
 import 'package:caw/model/audio_edit.dart';
 import 'package:caw/model/sample_edit.dart';
+import 'package:caw/model/music_key.dart';
+import 'package:caw/model/sample_library.dart';
+import 'package:caw/model/sample_names.dart';
+import 'package:caw/model/sample_use.dart';
 import 'package:caw/model/updates/update_fetch.dart';
 import 'package:caw/model/updates/update_service.dart';
 import 'package:caw/ui/arrange/mixer_card.dart';
@@ -66,6 +70,7 @@ import 'tempo_golden_test.dart' show tempoSong;
 
 import 'background_playback_test.dart' show FakePlaybackService;
 import 'audio_fake.dart';
+import 'sample_fake.dart';
 import 'benchmark_test.dart' show FakeStress;
 import 'component_bench_fake.dart';
 import 'device_ui_fixture.dart';
@@ -598,6 +603,37 @@ void main() {
       await _settle(c.tester);
       await c.shot('select');
     }
+  });
+
+  // --- Files › Samples (#229): linked folders' samples with filters and the preview strip (no engine) ---
+  _sweep('samples', (c) async {
+    final s = AppState(settings: Settings());
+    addTearDown(s.dispose);
+    s.audioIo = FakeAudioIo();
+    s.samplePreview = FakePreview();
+    final lib = SampleLibrary(access: FakeFolderAccess());
+    s.sampleLibrary = lib;
+    SampleEntry e(String rel, {double? bpm, MusicalKey? key, SampleKind? kind, SampleInstrument? inst, double secs = 2,
+            ValueSource from = ValueSource.name}) =>
+        SampleEntry(root: 'lf1', rel: rel)
+          ..bpm = bpm
+          ..bpmFrom = bpm == null ? null : from
+          ..key = key
+          ..keyFrom = key == null ? null : from
+          ..kind = kind
+          ..instrument = inst
+          ..seconds = secs;
+    lib.debugSet(LinkedFolder(id: 'lf1', name: 'My sample library with a long name', location: '/lib'), [
+      e('Loops/Drums/Amen break chopped and resampled 174bpm.wav', bpm: 174, kind: SampleKind.loop, inst: SampleInstrument.drums, secs: 5.52),
+      e('Loops/Keys/Rhodes chords Am 92bpm.wav', bpm: 92, key: const MusicalKey(9, minor: true), kind: SampleKind.loop, secs: 10.4),
+      e('Loops/Pads/Warm.wav', bpm: 120, key: const MusicalKey(6, minor: true), kind: SampleKind.loop, from: ValueSource.detected, secs: 64),
+      e('One shots/Kick 01.wav', kind: SampleKind.oneShot, inst: SampleInstrument.kick, secs: 0.42),
+      e('One shots/Snare Tight.wav', kind: SampleKind.oneShot, inst: SampleInstrument.snare, secs: 0.3),
+    ]);
+    await _pump(c, SectionScope(controller: SectionController(),
+        child: Scaffold(body: FileManagerScreen(state: s, folder: 'samples'))));
+    await _settle(c.tester);
+    await c.shot('');
   });
 
   // --- Arrange with a tempo map, signature changes, sections and a marker (#207; no engine) ---

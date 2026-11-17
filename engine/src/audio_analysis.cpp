@@ -1,4 +1,5 @@
-// Onsets, tempo detection and transients of an audio asset, for the app's tempo field and Slice to MIDI (API 32).
+// Onsets, tempo detection, transients and the key of an audio asset: the app's tempo field, Slice to MIDI (API 32) and the
+// sample browser's key estimate (API 33).
 #include "audio_analysis.h"
 
 #include <algorithm>
@@ -342,6 +343,108 @@ std::vector<Slice> detectSlices(const AudioAsset& a, const SliceOptions& o) {
         out.push_back(sl);
     }
     return out;
+}
+
+bool parseKeyOptions(const char* json, KeyOptions& o, std::string& error) {
+    Json j;
+    if (!readOptions(json, j, error)) return false;
+    if (!numberIn(j, "start_seconds", 0, 1e7, o.startSeconds, error) ||
+        !numberIn(j, "end_seconds", 0, 1e7, o.endSeconds, error))
+        return false;
+    if (o.endSeconds > 0 && o.endSeconds <= o.startSeconds) {
+        error = "end_seconds must be after start_seconds (or 0: the file's end)";
+        return false;
+    }
+    return true;
+}
+
+KeyResult detectKey(const AudioAsset& a, const KeyOptions& o) {
+    KeyResult result;
+    int64_t s0 = 0, s1 = 0;
+    if (!rangeOf(a, o.startSeconds, o.endSeconds, s0, s1)) return result;
+    const Mono x = monoOf(a, s0, s1);
+    // A quarter of the rate (a 4-sample box filter first: enough below 2 kHz at 44.1 kHz and up).
+    constexpr int kDecimate = 4;
+    const double rate = a.rate / kDecimate;
+    std::vector<double> y(static_cast<size_t>(x.size() / kDecimate));
+    for (size_t i = 0; i < y.size(); ++i) {
+        double v = 0;
+        for (int k = 0; k < kDecimate; ++k) v += x[static_cast<int64_t>(i) * kDecimate + k];
+        y[i] = v / kDecimate;
+    }
+    constexpr size_t n = 8192, hop = 4096;
+    if (y.size() < n / 4) return result;  // under ~0.2 s: nothing to go on
+    // Each bin's pitch class and weight, once.
+    const size_t lo = static_cast<size_t>(std::ceil(55.0 * n / rate)), hi = std::min(n / 2, static_cast<size_t>(2000.0 * n / rate));
+    std::vector<int> pc(n / 2 + 1, -1);
+    std::vector<double> w(n / 2 + 1, 0.0);
+    for (size_t b = std::max<size_t>(lo, 1); b <= hi; ++b) {
+        const double midi = 69.0 + 12.0 * std::log2((static_cast<double>(b) * rate / n) / 440.0);
+        const double near = std::round(midi), d = std::fabs(midi - near);
+        pc[b] = static_cast<int>((static_cast<int64_t>(near) % 12 + 12) % 12);
+        const double c = std::cos(3.14159265358979323846 * d);
+        w[b] = c * c;
+    }
+    std::vector<double> window(n);
+    for (size_t i = 0; i < n; ++i) window[i] = 0.5 - 0.5 * std::cos(2.0 * 3.14159265358979323846 * static_cast<double>(i) / static_cast<double>(n));
+    std::vector<std::complex<double>> buf(n);
+    double chroma[12] = {};
+    double energy = 0;
+    for (size_t start = 0; start + n / 4 <= y.size(); start += hop) {
+        for (size_t i = 0; i < n; ++i) {
+            const size_t at = start + i;
+            buf[i] = {at < y.size() ? y[at] * window[i] : 0.0, 0.0};
+        }
+        analysis::fft(buf, false);
+        double frame[12] = {};
+        for (size_t b = lo; b <= hi; ++b) {
+            if (pc[b] < 0) continue;
+            const double m = std::abs(buf[b]) / static_cast<double>(n);
+            frame[pc[b]] += w[b] * std::log1p(1000.0 * m);
+            energy += m * m;
+        }
+        for (int k = 0; k < 12; ++k) chroma[k] += frame[k];
+    }
+    double peak = 0;
+    for (double c : chroma) peak = std::max(peak, c);
+    if (!(peak > 0)) return result;
+    for (int k = 0; k < 12; ++k) result.chroma[k] = chroma[k] / peak;
+    // The Krumhansl-Kessler profiles, tonic first.
+    static const double kMajor[12] = {6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88};
+    static const double kMinor[12] = {6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17};
+    auto pearson = [&](const double* profile, int tonic) {
+        double mx = 0, my = 0;
+        for (int k = 0; k < 12; ++k) {
+            mx += result.chroma[k];
+            my += profile[k];
+        }
+        mx /= 12;
+        my /= 12;
+        double sxy = 0, sxx = 0, syy = 0;
+        for (int k = 0; k < 12; ++k) {
+            const double dx = result.chroma[(k + tonic) % 12] - mx, dy = profile[k] - my;
+            sxy += dx * dy;
+            sxx += dx * dx;
+            syy += dy * dy;
+        }
+        return sxx > 0 && syy > 0 ? sxy / std::sqrt(sxx * syy) : 0.0;
+    };
+    std::vector<KeyCandidate> all;
+    for (int t = 0; t < 12; ++t) {
+        all.push_back({t, false, pearson(kMajor, t)});
+        all.push_back({t, true, pearson(kMinor, t)});
+    }
+    std::stable_sort(all.begin(), all.end(), [](const KeyCandidate& p, const KeyCandidate& q) { return p.score > q.score; });
+    const double best = all[0].score, second = all[1].score;
+    result.tonic = all[0].tonic;
+    result.minor = all[0].minor;
+    // The lead over the runner-up (a relative or neighbouring key is often close) and how well the winner fits.
+    result.confidence = std::clamp((best - second) * 5.0, 0.0, 1.0) * std::clamp(best, 0.0, 1.0);
+    const double rms = std::sqrt(energy / std::max<double>(1, static_cast<double>(y.size()) / hop));
+    result.sure = best >= 0.5 && best - second >= 0.03 && rms > 1e-5;
+    all.resize(5);
+    result.candidates = std::move(all);
+    return result;
 }
 
 }  // namespace caw

@@ -8,6 +8,7 @@ import 'package:path_provider/path_provider.dart';
 import 'cpp_component.dart';
 import 'project.dart';
 import 'atomic_file.dart';
+import 'audio_clips.dart' show saveSessionPaths;
 import 'project_library.dart';
 
 class ProjectSummary {
@@ -81,7 +82,7 @@ class ProjectStorage {
   /// is when its content last changed: Files › Projects shows it as last edited (opening a project doesn't touch it).
   Future<void> save(ProjectDoc p, {String? json}) async {
     final f = _file(p.id);
-    final text = json ?? jsonEncode(p.toJson());
+    final text = saveSessionPaths(json ?? jsonEncode(p.toJson()));
     final last = _written;
     // The same text may still be on its way to disk (an autosave the caller didn't wait for): a save returns only
     // once it has landed.

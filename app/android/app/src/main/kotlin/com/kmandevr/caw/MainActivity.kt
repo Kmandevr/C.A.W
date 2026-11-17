@@ -21,6 +21,7 @@ class MainActivity : FlutterActivity() {
     private var thermalListener: PowerManager.OnThermalStatusChangedListener? = null
     private var powerSaveReceiver: BroadcastReceiver? = null
     private var pendingSave: Pair<String, MethodChannel.Result>? = null
+    private var linkedFolders: LinkedFolders? = null
     private var bluetoothMidi: BluetoothMidi? = null
     private var pendingFolder: FolderSave? = null
     private var micPermission: MicPermission? = null
@@ -144,6 +145,11 @@ class MainActivity : FlutterActivity() {
 
         // The screen's refresh rates and the frame-rate setting's request (DisplayRate.kt).
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, DISPLAY_METHOD_CHANNEL).setMethodCallHandler(DisplayRate(this))
+
+        // Linked sample folders: the folder picker, listing and file descriptors (LinkedFolders.kt, #229).
+        val folders = LinkedFolders(this)
+        linkedFolders = folders
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "caw/linked_folders").setMethodCallHandler(folders)
 
         // RECORD_AUDIO, asked only when audio input is turned on or a track is armed (MicPermission.kt).
         val mic = MicPermission(this)
@@ -273,6 +279,7 @@ class MainActivity : FlutterActivity() {
 
     @Deprecated("startActivityForResult keeps this simple; the app has one save at a time")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        if (linkedFolders?.onActivityResult(requestCode, resultCode, data) == true) return
         if (requestCode == SAVE_FOLDER_REQUEST) return saveIntoFolder(resultCode, data)
         if (requestCode != SAVE_REQUEST) return super.onActivityResult(requestCode, resultCode, data)
         val (path, result) = pendingSave ?: return

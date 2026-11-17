@@ -8,8 +8,11 @@ import 'package:flutter/material.dart';
 
 import '../../engine/engine.dart';
 import '../../model/app_state.dart';
+import '../../model/audio_clips.dart' show AudioAssetDoc;
 import '../../model/audio_edit.dart';
 import '../../model/project_dependencies.dart';
+import '../../model/sample_use.dart' show SampleUse;
+import '../../platform/linked_folders.dart' show LinkedFolderAccess, PickedFolder;
 import '../../model/project_package.dart';
 import '../../model/storage.dart';
 import '../../platform/save_copy.dart';
@@ -308,6 +311,10 @@ class MissingFilesBanner extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 8),
       child: Row(children: [
         Expanded(child: Text(text, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Neon.yellow))),
+        // A file of a linked sample folder is used in place: Find it relinks it (or its whole folder), never copies.
+        if (state.missingLinkedAssets().isNotEmpty)
+          TextButton(key: const ValueKey('missing-find'), onPressed: () => findLinkedSample(context, state),
+              child: const Text('Find it')),
         TextButton(key: const ValueKey('missing-locate'), onPressed: () => locateMissingFiles(context, state),
             child: const Text('Locate…')),
         TextButton(key: const ValueKey('missing-replace'), onPressed: () => replaceMissingFile(context, state),
@@ -318,6 +325,58 @@ class MissingFilesBanner extends StatelessWidget {
 }
 
 String _base(String path) => path.split(RegExp(r'[/\\]')).last.toLowerCase();
+
+/// Picks the folder Find it relinks (tests replace it).
+class LinkedFolderPicker {
+  LinkedFolderPicker._();
+  static Future<PickedFolder?> Function() pick = () => LinkedFolderAccess.instance.pick();
+}
+
+/// Find it, for a missing file of a linked sample folder: choose the file itself (used in place), or relink the whole
+/// folder, matched by the files' paths inside it (every project's links to that folder follow).
+Future<void> findLinkedSample(BuildContext context, AppState state) async {
+  final missing = state.missingLinkedAssets();
+  if (missing.isEmpty) return;
+  final asset = missing.length == 1
+      ? missing.first
+      : await showDialog<AudioAssetDoc>(
+          context: context, animationStyle: dialogAnimation(context),
+          builder: (context) => SimpleDialog(title: const Text('Find which file?'), children: [
+            for (final a in missing)
+              SimpleDialogOption(
+                onPressed: () => Navigator.pop(context, a),
+                child: Text(a.link!.rel, maxLines: 1, overflow: TextOverflow.ellipsis),
+              ),
+          ]),
+        );
+  if (asset == null || !context.mounted) return;
+  final link = asset.link!;
+  final others = missing.where((a) => a.link!.root == link.root).length;
+  final how = await showDialog<String>(
+    context: context, animationStyle: dialogAnimation(context),
+    builder: (context) => SimpleDialog(title: Text('Find ${link.rel.split('/').last}'), children: [
+      SimpleDialogOption(key: const ValueKey('find-file'), onPressed: () => Navigator.pop(context, 'file'),
+          child: const Text('Choose the file…')),
+      SimpleDialogOption(key: const ValueKey('find-folder'), onPressed: () => Navigator.pop(context, 'folder'),
+          child: Text(others > 1 ? 'Relink its folder… ($others missing files are in it)' : 'Relink its folder…')),
+    ]),
+  );
+  if (how == null || !context.mounted) return;
+  if (how == 'file') {
+    final picked = await ProjectFilePicker.pickAudio(many: false);
+    if (picked.isEmpty || !context.mounted) return;
+    await state.findLinkedFile(asset, picked.first);
+    if (context.mounted) _snack(context, 'Found ${link.rel.split('/').last}.');
+    return;
+  }
+  final folder = await LinkedFolderPicker.pick();
+  if (folder == null || !context.mounted) return;
+  final found = await state.relinkLinkedFolder(link.root, folder.location, folder.name);
+  if (!context.mounted) return;
+  _snack(context, found == 0
+      ? 'None of the missing files are in ${folder.name} at the same place.'
+      : 'Relinked ${folder.name}: found $found file${found == 1 ? '' : 's'}.');
+}
 
 /// Locate…: the picked files re-link the missing ones of the same name.
 Future<void> locateMissingFiles(BuildContext context, AppState state) async {

@@ -16,6 +16,7 @@ import 'native_components.dart';
 import 'project.dart';
 import 'tempo_map.dart';
 import 'project_dependencies.dart';
+import 'sample_use.dart' show SampleUse;
 import 'automation_writer.dart' show AutomationTarget;
 import 'clip_automation.dart';
 import 'default_project.dart';
@@ -425,10 +426,26 @@ class AppState extends ChangeNotifier implements StressHost {
       poll: _poll,
       interval: const Duration(milliseconds: 33),
       onIdle: () {
-    if (!meters.playing && _heldPreviews.isEmpty && deviceNotesHeld == 0 && !(engine?.testToneSounding ?? false)) {
+    if (!meters.playing && _heldPreviews.isEmpty && deviceNotesHeld == 0 && !(engine?.testToneSounding ?? false) &&
+        !samplePreviewing) {
       engine?.stopAudio();
     }
   });
+
+  /// The sample browser's preview sounds (sample_use.dart): the audio device stays open meanwhile.
+  bool samplePreviewing = false;
+
+  /// Opens the audio device for the sample preview when it was closed while idle; an error message when it can't.
+  String? openAudioForPreview() {
+    final e = engine;
+    if (e == null) return engineError ?? 'The sound engine did not load';
+    if (useAudioDevice && !e.audioOn) {
+      final error = _openAudio(e);
+      if (error != null) return error;
+    }
+    _poller.wake();
+    return null;
+  }
 
   /// Settings › Audio's test tone: opens the device if it is closed and plays 440 Hz for [seconds]; returns an error
   /// message when the device can't open.
@@ -2237,7 +2254,8 @@ class AppState extends ChangeNotifier implements StressHost {
     notifyListeners();
     await _syncNow();
     unawaited(prepareNativeComponents());
-    unawaited(checkMissingFiles());
+    // Linked sample files first (their paths on this device), then what is still missing (sample_use.dart).
+    unawaited(resolveLinkedSamples().catchError((_) {}).then((_) => checkMissingFiles()));
   }
 
   /// Looks for the open project's files on this device again ([missingFiles]).

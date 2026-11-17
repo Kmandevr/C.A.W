@@ -45,11 +45,14 @@ IconData folderIcon(FilesFolderKind k) => switch (k) {
       FilesFolderKind.presets => Icons.bookmarks_outlined,
       FilesFolderKind.packs || FilesFolderKind.samplePack => Icons.inventory_outlined,
       FilesFolderKind.samplePacks => Icons.library_music_outlined,
+      FilesFolderKind.samples => Icons.folder_special_outlined,
+      FilesFolderKind.sampleFolder => Icons.folder_open_outlined,
     };
 
 Color folderColor(FilesFolderKind k) => switch (k) {
       FilesFolderKind.favourites => Neon.yellow,
       FilesFolderKind.projects => Neon.green,
+      FilesFolderKind.samples || FilesFolderKind.sampleFolder => Neon.violet,
       _ => Neon.blue,
     };
 

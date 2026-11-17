@@ -1,5 +1,5 @@
 // The C API for audio assets, SFZ, input meters, recording, input latency (API 18, WP-J), audio threads (API 24)
-// and shedding's counts (27).
+// and shedding's counts (27), the key estimate and the sample browser's preview (33).
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
@@ -13,6 +13,7 @@
 #include "caw.h"
 #include "capi_internal.h"
 #include "json.h"
+#include "sample_preview.h"
 
 namespace {
 char* dup(const std::string& s) {
@@ -99,6 +100,69 @@ char* caw_asset_slices(CawEngine* e, const char* path, const char* options_json)
     return dup(s + "]}");
 } catch (...) {
     return dup(fail("out of memory"));
+}
+
+char* caw_asset_key(CawEngine* e, const char* path, const char* options_json) try {
+    if (!e || !path) return dup(fail("no engine or path"));
+    caw::KeyOptions o;
+    std::string error;
+    if (!caw::parseKeyOptions(options_json, o, error)) return dup(fail(error));
+    auto a = caw::AssetStore::global().load(path, e->engine->sampleRate(), error);
+    if (!a) return dup(fail(error));
+    const caw::KeyResult r = caw::detectKey(*a, o);
+    static const char* kNames[12] = {"C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"};
+    std::string s = "{\"ok\":true,\"error\":\"\",\"sure\":" + std::string(r.sure ? "true" : "false") + ",\"tonic\":" +
+                    std::to_string(r.tonic) + ",\"mode\":\"" + (r.minor ? "minor" : "major") + "\",\"name\":\"" +
+                    kNames[r.tonic] + (r.minor ? " minor" : " major") + "\",\"confidence\":" + num(r.confidence) +
+                    ",\"chroma\":[";
+    for (int k = 0; k < 12; ++k) s += (k ? "," : "") + num(r.chroma[k]);
+    s += "],\"candidates\":[";
+    for (size_t i = 0; i < r.candidates.size(); ++i)
+        s += std::string(i ? "," : "") + "{\"tonic\":" + std::to_string(r.candidates[i].tonic) + ",\"mode\":\"" +
+             (r.candidates[i].minor ? "minor" : "major") + "\",\"score\":" + num(r.candidates[i].score) + "}";
+    return dup(s + "]}");
+} catch (...) {
+    return dup(fail("out of memory"));
+}
+
+char* caw_engine_preview_sample(CawEngine* e, const char* path, const char* options_json) try {
+    if (!e || !path) return dup(fail("no engine or path"));
+    caw::PreviewOptions o;
+    std::string error;
+    if (!caw::parsePreviewOptions(options_json, o, error)) return dup(fail(error));
+    auto a = caw::AssetStore::global().load(path, e->engine->sampleRate(), error);
+    if (!a) return dup(fail(error));
+    double ratio = 1;
+    if (!e->engine->samplePreview().start(a, o, error, &ratio)) return dup(fail(error));
+    return dup("{\"ok\":true,\"error\":\"\",\"seconds\":" + num(a->seconds()) + ",\"stretch_ratio\":" + num(ratio) +
+               ",\"channels\":" + std::to_string(a->channels) + "}");
+} catch (...) {
+    return dup(fail("out of memory"));
+}
+
+void caw_engine_preview_sample_stop(CawEngine* e) try {
+    if (e) e->engine->samplePreview().stop();
+} catch (...) {
+}
+
+void caw_engine_preview_sample_seek(CawEngine* e, double seconds) try {
+    if (e) e->engine->samplePreview().seek(seconds);
+} catch (...) {
+}
+
+void caw_engine_preview_sample_volume(CawEngine* e, double volume) {
+    if (e) e->engine->samplePreview().setVolume(volume);
+}
+
+int32_t caw_engine_preview_sample_state(CawEngine* e, CawSamplePreviewState* out) {
+    if (!e || !out) return -1;
+    const caw::SamplePreview::State st = e->engine->samplePreview().state();
+    out->playing = st.playing ? 1 : 0;
+    out->waiting = st.waiting ? 1 : 0;
+    out->seconds = st.seconds;
+    out->length = st.length;
+    out->seq = static_cast<int64_t>(st.seq);
+    return 0;
 }
 
 char* caw_asset_store_status(void) try { return dup(caw::AssetStore::global().statusJson()); } catch (...) {

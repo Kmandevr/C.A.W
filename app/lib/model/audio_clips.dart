@@ -1,5 +1,6 @@
 // Audio on tracks (API 18, docs/engine.md "Audio clips"): the project's audio files, a track's input and its audio
 // clips, their engine JSON, and the pure edits (split, trim, fades, takes placed with latency compensation).
+import 'dart:convert';
 import 'dart:math' as math;
 
 import '../engine/bindings.dart' show cawApiVersion;
@@ -56,12 +57,45 @@ enum AudioStretch {
   static AudioStretch get keepPitch => cawApiVersion >= 32 ? signalsmith : wsola;
 }
 
-/// One audio file the project uses: copied into the project's storage on import, referenced by absolute path.
+/// Where a file in a linked sample folder is (`sample_library.dart`): the folder's id and the file's path inside it,
+/// with `/` between folders. Files there are used in place, never copied.
+class LinkedRef {
+  const LinkedRef(this.root, this.rel);
+  final String root, rel;
+
+  /// What `path` is saved as while the file is only reachable through a session handle (an Android document): a
+  /// path that names it and is never there, so the project shows it missing until it is found again.
+  String get placeholder => '/caw-linked/$root/$rel';
+
+  Map<String, dynamic> toJson() => {'root': root, 'rel': rel};
+
+  /// A plain relative path (no `..`, `.`, empty parts, backslashes, drive or control characters), at most 1024.
+  static bool safeRel(String rel) {
+    if (rel.isEmpty || rel.length > 1024 || rel.startsWith('/') || rel.contains('\\') || rel.contains(':')) return false;
+    for (final c in rel.codeUnits) {
+      if (c < 0x20 || c == 0x7f) return false;
+    }
+    return rel.split('/').every((p) => p.isNotEmpty && p != '.' && p != '..');
+  }
+
+  static LinkedRef? fromJson(Object? j) {
+    if (j is! Map) return null;
+    final root = j['root'], rel = j['rel'];
+    if (root is! String || rel is! String || !RegExp(r'^[A-Za-z0-9_-]{1,40}$').hasMatch(root) || !safeRel(rel)) return null;
+    return LinkedRef(root, rel);
+  }
+}
+
+/// One audio file the project uses: copied into the project's storage on import, or a file in a linked sample folder
+/// used in place ([link]); referenced by absolute path.
 class AudioAssetDoc {
   AudioAssetDoc({required this.id, required this.path, required this.name, this.bpm, this.seconds = 0,
-      this.channels = 0, this.sourceRate = 0, this.recorded = false});
+      this.channels = 0, this.sourceRate = 0, this.recorded = false, this.link});
   final String id;
   String path, name;
+
+  /// Set for a file in a linked sample folder: [path] is where it is on this device this session.
+  LinkedRef? link;
 
   /// The source tempo musical clips default to (null: none known).
   double? bpm;
@@ -74,7 +108,9 @@ class AudioAssetDoc {
   bool recorded;
 
   Map<String, dynamic> toJson() => {
-        'id': id, 'path': path, 'name': name,
+        // A session handle (an Android document's /proc/self/fd path) is never saved: the link finds it again.
+        'id': id, 'path': link != null && isSessionPath(path) ? link!.placeholder : path, 'name': name,
+        if (link != null) 'link': link!.toJson(),
         if (bpm != null) 'bpm': bpm,
         if (seconds > 0) 'seconds': seconds,
         if (channels > 0) 'channels': channels,
@@ -89,11 +125,29 @@ class AudioAssetDoc {
     final id = _text(j['id'], 64), path = _text(j['path'], 4096);
     if (id.isEmpty || path.isEmpty) return null;
     final bpm = j['bpm'];
-    return AudioAssetDoc(id: id, path: path, name: _text(j['name'], 128).isEmpty ? _baseName(path) : _text(j['name'], 128),
+    return AudioAssetDoc(id: id, path: path, link: LinkedRef.fromJson(j['link']), name: _text(j['name'], 128).isEmpty ? _baseName(path) : _text(j['name'], 128),
         bpm: bpm is num && bpm.isFinite && bpm > 0 ? bpm.toDouble().clamp(20.0, 999.0) : null,
         seconds: _num(j['seconds'], 0, 0, 3 * 3600), channels: _num(j['channels'], 0, 0, 2).round(),
         sourceRate: _num(j['source_rate'], 0, 0, 768000).round(), recorded: j['recorded'] == true);
   }
+}
+
+/// A path that is only good for this run of the app: an open file handle through /proc (an Android document).
+/// A project as read never names one (or a /dev file): `quarantineUnsafePaths` moves such paths to missing files.
+bool isSessionPath(String path) => path.replaceAll('\\', '/').startsWith('/proc/');
+
+/// What each session path stands for when the project is saved: the linked file's placeholder (`LinkedRef`).
+final Map<String, String> sessionPathNames = {};
+
+/// [json] (a project as saved) with every session path in it replaced by what it stands for, so a drum pad or a
+/// sampler zone on a linked Android document is saved by its link, never by a handle that means nothing next run.
+String saveSessionPaths(String json) {
+  if (!json.contains('/proc/')) return json;
+  var out = json;
+  sessionPathNames.forEach((session, name) {
+    out = out.replaceAll(jsonEncode(session), jsonEncode(name));
+  });
+  return out;
 }
 
 /// A track's audio input: which device channels it records and hears, and whether it is armed.
