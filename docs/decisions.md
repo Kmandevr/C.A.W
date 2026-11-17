@@ -1,10 +1,17 @@
 ---
 title: Decisions
 summary: Dated record of what was chosen and why, newest first.
-updated: 2026-11-14
+updated: 2026-11-17
 ---
 
 # Decisions
+
+## 2026-11-17: MIDI clip playback and the piano roll: chasing, eight-octave bends, the sampler's chase (Claude, owner bugs for 1.0.5, #226, #228)
+
+- **Bends reach ±96 semitones** (owner: "I would like to be able to bend as much as I want to"). Eight octaves either way, bend plus vibrato depth, in the pattern text (`kMaxBend`), the app's model (`NoteExpression.maxBend`), the roll's Curve tool and the note extras' curve, and MIDI import. Why 96 and not more: MIDI's bend range (RPN 0's data entry, 0..127) holds it, MPE's default member range is 48 and 96 is the next common step, and past eight octaves a note from the middle of the keyboard leaves hearing at both ends anyway. The engine holds what it sends an instrument to MIDI −60..Nyquist (`Engine::safePitch`), so no oscillator runs past half the rate whatever the bend; the instruments' own code is unchanged. MPE export picks the narrowest of 12, 48 and 96 semitones that holds the pattern's bends.
+- **Chased notes start their voice; a sampler retriggers from the sample's start.** A note the playhead lands inside starts at that point with its expression as it is there; the instrument's own attack is its anti-click ramp (Flagship, Drums and the sampler start a voice as for any note-on). The sampler plays its sample from the beginning rather than from the elapsed time into it, as DAWs that chase notes usually do [Assumption, not surveyed]: an offset start needs a new note-event field through the component interface for one instrument, would start a recorded attack's middle with a click the attack can't hide, and a long pad sample starting fresh is rarely wrong. An offset start can come later as a sampler option.
+- **A cut note keeps its curves where they were** (the repeat-at-the-clip's-end bug): the arrangement's copy of a cut note's expression carries the share of the written note it plays (`NoteExpression::from`, `span`), so no stored format changes; the playback structs only. Tell the MIDI-storage work (#216, format v5) that a clip still cuts notes at play time and the window is computed there, not stored.
+- **Taps land in the drawn cell; no stacked notes** (#228): the tap cell is the grid between the lines drawn at the zoom, not a finger-sized coarser one; a note at the same start and pitch as one already there is never added (draw takes the existing one, a drop or a paste replaces it). [Assumption] stacking an exact duplicate is never wanted; a chord on other pitches is untouched.
 
 ## 2026-11-14: Clip stretching runs Signalsmith Stretch live in the callback; two new dependencies (Claude, within the owner's 1.0.4 contract, #208)
 

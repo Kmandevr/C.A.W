@@ -2,6 +2,7 @@
 // chain changes, folder buses, sends, mute/solo, limiter and meters.
 #pragma once
 
+#include <algorithm>
 #include <atomic>
 #include <cstdint>
 #include <map>
@@ -401,6 +402,10 @@ private:
     // the instrument (and one it replaced, crossfading out) into the slot's instL/instR.
     void runInstrument(Slot& s, int m) noexcept;
     void instrumentNotes(Slot& s, NoteEvents& notes, int m) noexcept;
+    void chaseNotes(Slot& s, NoteEvents& notes, const Pattern* pat, size_t e, int64_t n0) noexcept;
+    // A pattern note's pitch as the instruments get it (#226): bends reach 96 semitones, so it stays within
+    // kMinNotePitch and the pitch of half the sample rate, where no oscillator aliases or runs away.
+    double safePitch(double pitch) const noexcept { return std::clamp(pitch, kMinNotePitch, nyquistPitch_); }
     void instrumentMotion(NoteEvents& notes, int m) noexcept;
     void noteMotion(NoteEvents& notes, NoteEvents::Held& h, int end) noexcept;
     bool ringsAtPlay(const Slot& s) const noexcept;
@@ -434,7 +439,11 @@ private:
     void setShed(Slot& s, bool shed) noexcept;
 
     const double sr_;
-    const double trackGainCoef_;  // the track and bus gain glide's per-sample factor (set with the Engine)
+    const double trackGainCoef_;
+    // The highest pitch a pattern note reaches an instrument at (#226): half the sample rate as a MIDI note (135.08
+    // at 48 kHz). The lowest: kMinNotePitch, MIDI -60 (about 0.25 Hz).
+    static constexpr double kMinNotePitch = -60.0;
+    const double nyquistPitch_;  // the track and bus gain glide's per-sample factor (set with the Engine)
     const EngineResourceBudget resourceBudget_;
     int maxLayers_ = kInitialLayerCapacity;  // set once in the constructor
     int pendingMax_ = 0;                     // pending_ entries; set once in the constructor

@@ -647,7 +647,7 @@ void main() {
       // The text keeps it.
       expect(doc(c.serialize()).notes.map((n) => n.expr), c.notes.map((n) => n.expr));
       // A leap past the bend range only lengthens.
-      final far = body('0 C1 1\n1 C7 1\n').connect({}, glide: 0.5);
+      final far = body('0 C0 1\n1 C9 1\n').connect({}, glide: 0.5); // 108 semitones, past 96
       expect(far.notes.first.len, Steps.one);
       expect(far.notes.first.expr.isEmpty, isTrue);
     });

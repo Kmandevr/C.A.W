@@ -252,7 +252,7 @@ TEST(notes_carry_their_own_bend_vibrato_press_and_timbre) {
     CHECK(patternError("0 C3 1 bend\n").find("needs points") != std::string::npos);
     CHECK(patternError("0 C3 1 bend 0.5:1 0.2:0\n").find("rising") != std::string::npos);
     CHECK(patternError("0 C3 1 press 0:2\n").find("press values must be 0 to 1") != std::string::npos);
-    CHECK(patternError("0 C3 1 bend 0:60\n").find("bend values must be -48 to 48") != std::string::npos);
+    CHECK(patternError("0 C3 1 bend 0:100\n").find("bend values must be -96 to 96") != std::string::npos);
     CHECK(patternError("0 C3 1 vib 0.3\n").find("vib needs depth and rate") != std::string::npos);
 }
 
