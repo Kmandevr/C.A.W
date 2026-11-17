@@ -1,12 +1,12 @@
 # C.A.W start file for chat agents
 
-Generated from `232189adc99fe9f32ab85a69614dd44ae16854bb` on the default branch at 2026-11-14T00:31:49Z by `scripts/agent-context.js`. Don't edit it; edit the files it bundles.
+Generated from `9c8f7a6d086bcdffebec72cc45396b53db6383c7` on the default branch at 2026-11-17T21:52:42Z by `scripts/agent-context.js`. Don't edit it; edit the files it bundles.
 
 Read this whole file before doing anything else. It replaces separately reading `AGENTS.md`, `CLAUDE.md`, `docs/vision.md` and `.claude/rules/*.md`.
 
 ## Before you start: confirm in your first reply
 
-1. The commit this file was generated from (`232189a`).
+1. The commit this file was generated from (`9c8f7a6`).
 2. The task issue number and your branch (`gpt/<issue>-<short-name>`).
 3. The progress comment's next action, or "new task" if there is none yet.
 4. Which area rules below apply to the files you will touch.
@@ -234,7 +234,7 @@ Develop on the branch the session names. Put `Closes #N` in pull requests that f
 ---
 title: Vision and principles
 summary: Owner-approved product direction, actual platform support, current product boundaries and unresolved owner decisions.
-updated: 2026-11-13
+updated: 2026-11-17
 ---
 
 # Vision and principles
@@ -304,7 +304,7 @@ Important boundaries:
 - Audio-file import, audio clips, sample editing and WAV/SFZ multisample authoring are not implemented.
 - Sends to bus folders, sidechain keys (the ducker, compressor and gate) and bus effects are built (2026-11-11, #175); receives, parallel paths inside a track and a routing matrix are not. Native effect chains on tracks, buses and the master are built (engine).
 - Instrument and effect knob automation is built; stems export is in the Export song sheet.
-- Audio/MIDI recording, input monitoring, recording latency compensation, take lanes and comping are not implemented; they are planned later in the permanent roadmap. (Plugin delay compensation for native effects is built.)
+- Audio/MIDI recording, input monitoring, recording latency compensation, take lanes and comping are built ([app](app.md)); plugin delay compensation for native effects is built too.
 - The modular graph executor and native module registry are foundations, not the active playback/mixer path. External CLAP/VST3 binary hosting is not implemented. Dynamic loading of C.A.W. native components, under the user's explicit trust choice, is built in the engine; no screen uses it yet.
 - Video synchronization is not planned at this time.
 - See [engine implementation status](engine-build-status.md) for the complete native boundary and paused work.
@@ -361,6 +361,8 @@ Only the owner can settle these questions. Do not silently convert them into imp
 | Music video editor (2026-11-12, #182): the editor's look, to check in the APK. The other questions were answered the same day (full screen, empty stretches, effect targets, the Strobe warning, Falling notes for new videos, keys in the catalogue; [decisions](decisions.md#2026-11-12-the-music-video-editors-open-questions-answered-owner)) | Open (look only) |
 | Piano roll (WP-K2, 2026-11-11): the look of the Quantize… sheet and the step bar (in the APK); whether Ctrl+U should use the sheet's last settings; whether the slide-up on-screen keys should also step; the MIDI CC numbers for automation lanes (CC7 volume, CC10 pan, others from CC20, as proposed in #11), the volume curve (127·√gain) and how parameter lanes scale ([app](app.md)) | Open |
 | Play-ahead and run anywhere (1.1.0, #191): which calculator for the stunt; what counts as intent to switch a track to real time, and whether an edit without intent may be heard up to the ring's depth late; whether ahead tracks on weak phones keep their full voices; a 16-bit preview cache on the lowest tier; the look of the two-part CPU meter and of "what's ready to play"; whether Freeze is a user action, automatic, or both; first of all, the fallback when an ahead track's worker falls behind (a warm spare instance or an audible fade) and whether a module format bump for runtime-state calls is acceptable ([play-ahead plan](play-ahead-plan.md#open-questions-for-the-owner)) | Open |
+| Non-linear routing (1.1.0, #233): the graph view's look, and how the per-block routing selectors look | Open |
+| AutoStacc beta pack (1.0.7, #227): which fourth device replaces bit-shift distortion, now that the bitwise operations are in the built-in Bit distortion | Open |
 | Matching REAPER's flow ([REAPER's flow](reaper-flow.md)): the phone look of the new screens (Export sheet, send knob). S splits, Touch automation from a transport button and on-screen keys with pads (owner, 2026-11-10). The clip bar, the ruler with the loop range, markers and regions, the recording flow and automation writing are built; their look and the choices made for them are to confirm ([decisions](decisions.md)) | Open |
 
 ---
