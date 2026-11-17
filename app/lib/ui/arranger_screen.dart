@@ -10,6 +10,7 @@ import '../actions/actions.dart';
 import '../model/drums.dart' show drumsComponentId;
 import '../model/app_state.dart';
 import '../model/arrange_edit.dart';
+import '../model/comping.dart';
 import '../model/audio_edit.dart';
 import '../model/arrange_fx.dart';
 import '../model/arrange_markers.dart';
@@ -54,6 +55,7 @@ import 'motion.dart';
 import 'theme.dart';
 import 'arrange/track_color.dart';
 import 'arrange/timeline_window.dart';
+import 'arrange/take_lanes.dart';
 import 'arrange/track_lanes.dart';
 import 'file_manager_screen.dart';
 import 'frame/frame_widgets.dart';
@@ -935,6 +937,8 @@ class _ArrangerScreenState extends State<ArrangerScreen> with TickerProviderStat
           Icons.account_tree_outlined, section: move),
       MenuAction('spacer', layer.spaceBelow > 0 ? 'Remove spacer below' : 'Add spacer below', Icons.space_bar,
           section: move),
+      if (takeLaneCount(layer) > 0) MenuAction('takes', layer.showTakes ? 'Hide take lanes' : 'Show take lanes',
+          Icons.layers_outlined, checked: layer.showTakes, section: lanes),
       if (canAutomate) MenuAction('lanes', layer.showLanes ? 'Hide automation lanes' : 'Show automation lanes',
           Icons.show_chart, checked: layer.showLanes, section: lanes),
       if (canAutomate && !hasVolume) const MenuAction('automation-volume', 'Add volume automation', Icons.show_chart,
@@ -1019,6 +1023,7 @@ class _ArrangerScreenState extends State<ArrangerScreen> with TickerProviderStat
     }
     if (v == 'default-height') s.resetTrackHeight(layer);
     if (v == 'lanes') s.setLanesShown(layer, !layer.showLanes);
+    if (v == 'takes') toggleTakeLanes(s, layer);
     if (v == 'automation-volume') s.addAutomationLane(layer, 'volume');
     if (v == 'automation-pan') s.addAutomationLane(layer, 'pan');
     if (v == 'remove-automation-volume') s.removeAutomationLane(layer, layer.automation.firstWhere((a) => a.target == 'volume'));
@@ -1170,6 +1175,8 @@ class _ArrangerScreenState extends State<ArrangerScreen> with TickerProviderStat
     // Reset goes back to the pattern's own length.
     final doc = PatternDoc.parse(s.project.module(clip.patternId)?.source ?? '').doc;
     final patternBars = doc == null ? null : math.max(1, doc.lengthSteps(s.project.beatsPerBar)) / bar;
+    final consolidate = s.selectedClipIds.contains(clip.id)
+        ? [for (final c in layer.clips) if (s.selectedClipIds.contains(c.id) && !c.lock) c] : const <ClipDoc>[];
     final v = await showLongPressMenu<String>(context, at: at, title: s.clipName(clip),
       style: s.settings.longPressMenu, actions: [
         const MenuAction('notes', 'Edit notes', Icons.piano, section: clipSection),
@@ -1182,6 +1189,9 @@ class _ArrangerScreenState extends State<ArrangerScreen> with TickerProviderStat
         // Loop-recorded takes (lib/model/live_midi.dart): pick the one the clip plays.
         if (clip.takes.length > 1) MenuAction('takes', 'Takes (${clip.takes.length})…', Icons.layers_outlined,
             section: clipSection),
+        // Comping (#209): the takes as lanes under the track.
+        if (clip.takes.length > 1) MenuAction('take-lanes', layer.showTakes ? 'Hide take lanes' : 'Take lanes',
+            Icons.view_agenda_outlined, checked: layer.showTakes, section: clipSection),
         if (widget.onOpenPattern != null) const MenuAction('edit', 'Open in Build', Icons.open_in_new,
             section: clipSection),
         const MenuAction('copy', 'Duplicate independently', Icons.copy, section: edit),
@@ -1214,6 +1224,9 @@ class _ArrangerScreenState extends State<ArrangerScreen> with TickerProviderStat
         // Freeze and bounce (owner, 2026-11-14): the selection's clips on this track, or this clip.
         if (s.canRenderTrack(layer)) const MenuAction('bounce', 'Bounce to audio', Icons.graphic_eq_rounded,
             section: more),
+        // Consolidate (#209): the selection's clips on this track joined into one clip.
+        if (consolidate.length >= 2) MenuAction('consolidate', 'Consolidate ${consolidate.length} clips',
+            Icons.join_full, section: more),
         if (!clip.lock) const MenuAction('delete', 'Delete', Icons.delete_outline, danger: true, section: more),
       ]);
     if (v == null || !mounted) return;
@@ -1245,6 +1258,8 @@ class _ArrangerScreenState extends State<ArrangerScreen> with TickerProviderStat
       _focus(layer.id, tab: FocusTab.clip);
     }
     if (v == 'takes') return showTakePicker(context, s, layer, clip, at);
+    if (v == 'take-lanes') toggleTakeLanes(s, layer);
+    if (v == 'consolidate' && !s.consolidateMidiClips(layer, consolidate)) Haptics.error();
     if (v == 'edit') { s.activateClip(layer, clip); widget.onOpenPattern?.call(); }
     if (v == 'copy') s.duplicateClip(layer, clip);
     if (v == 'linked') s.duplicateClip(layer, clip, linked: true);
@@ -1705,9 +1720,18 @@ class _ArrangerScreenState extends State<ArrangerScreen> with TickerProviderStat
             child: FadeTransition(opacity: a, child: child)),
         child: lanes ?? const SizedBox(width: double.infinity));
     }
+    // The take lanes open and close the same way.
+    Widget takesReveal(LayerDoc l, Widget? lanes) => AnimatedSwitcher(duration: lanesD ?? Duration.zero,
+        switchInCurve: EditMotion.curve, switchOutCurve: EditMotion.exitCurve,
+        transitionBuilder: (child, a) => SizeTransition(sizeFactor: a, alignment: Alignment.topCenter,
+            child: FadeTransition(opacity: a, child: child)),
+        child: lanes ?? const SizedBox(width: double.infinity));
     // A thin row keeps its automation lanes closed.
     bool lanesOpen(LayerDoc l) => !pinned && l.showLanes && canHaveLanes(l) && _rowCollapse(l) != TrackCollapse.thin;
-    final rows = layers.fold<double>(0, (h, l) => h + rowH(l) + (pinned ? 0 : (lanesOpen(l) ? lanesHeight(s, l) : 0) + l.spaceBelow) + gap);
+    // A thin row keeps its take lanes closed too (#209, comping).
+    bool takesOpen(LayerDoc l) => !pinned && takeLanesHeight(l) > 0 && _rowCollapse(l) != TrackCollapse.thin;
+    final rows = layers.fold<double>(0, (h, l) => h + rowH(l) + (pinned ? 0 : (lanesOpen(l) ? lanesHeight(s, l) : 0) +
+        (takesOpen(l) ? takeLanesHeight(l) : 0) + l.spaceBelow) + gap);
     // Edit animations (owner, 2026-11-11): rows glide when tracks are added, deleted, reordered or nested, and a
     // track an edit added grows in. The first build, and the pinned track, just show what is there.
     final appearing = pinned || _knownTracks == null ? const <String>{}
@@ -1794,7 +1818,9 @@ class _ArrangerScreenState extends State<ArrangerScreen> with TickerProviderStat
             onMenu: (at) => callbacks.onMenu(layer, at),
             onResize: pinned ? null : (dy) => _rowResize(layer, dy),
             onResizeEnd: _rowResizeEnd)),
-          // The track's automation lanes, open under it (REAPER's envelope lanes, UG 18.16).
+          // The track's take lanes (#209, comping), then its automation lanes (REAPER's envelope lanes, UG 18.16).
+          if (!pinned) takesReveal(layer, takesOpen(layer) ? TakeLaneHeaders(key: ValueKey('take-headers-${layer.id}'),
+              state: s, layer: layer, indent: folderIndent(s.folderDepth(layer))) : null),
           if (!pinned) lanesReveal(layer, lanesOpen(layer) ? TrackLaneHeaders(key: ValueKey('lane-headers-${layer.id}'),
               state: s, layer: layer, indent: folderIndent(s.folderDepth(layer))) : null),
           if (layer.spaceBelow > 0 && !pinned) _SpacerHeader(state: s, layer: layer),
@@ -1850,6 +1876,8 @@ class _ArrangerScreenState extends State<ArrangerScreen> with TickerProviderStat
               glideRow(layer, (h) => _TimelineLane(key: drag?.laneKey(layer.id), state: s, layer: layer, width: width,
                 stepW: stepW, trackHeight: h, selectedIds: s.selectedClipIds, callbacks: callbacks, drag: drag,
                 thin: !pinned && _rowCollapse(layer) == TrackCollapse.thin)),
+              if (!pinned) takesReveal(layer, takesOpen(layer)
+                  ? TakeLaneRows(state: s, layer: layer, stepW: stepW, width: width) : null),
               if (!pinned) lanesReveal(layer, lanesOpen(layer)
                   ? TrackLaneRows(state: s, layer: layer, stepW: stepW, width: width) : null),
               // A spacer and the gap leave the timeline empty too, so lanes stay level with their headers.
@@ -3300,6 +3328,11 @@ class _TimelineClipState extends State<_TimelineClip> {
         // The clip's notes as a mini piano roll (REAPER), from a cached picture of its pattern; under the edges.
         if (preview != null) Positioned.fill(child: IgnorePointer(child: RepaintBoundary(
           child: CustomPaint(key: ValueKey('clip-preview-${c.id}'), painter: ClipPreviewPainter(preview))))),
+        // A comp (#209): its joins marked where the parts meet (every pass of the loop).
+        if (c.comp.isNotEmpty) Positioned.fill(child: IgnorePointer(child: CustomPaint(
+          key: ValueKey('clip-comp-joins-${c.id}'),
+          painter: CompJoinsPainter([for (final j in TakeClip.midi(c).joins(widget.state.project))
+            (j - c.startSteps) * widget.stepW], widget.color)))),
         // Loop-recorded takes: ‹ n/N › steps through them, a swipe across it too, a tap on the count lists them.
         if (c.takes.length > 1 && c.lengthSteps * widget.stepW >= 86 && widget.height >= 26)
           Positioned(top: 2, right: 14, child: TakeChip(state: widget.state, layer: widget.layer, clip: c,

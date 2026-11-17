@@ -30,6 +30,7 @@ import 'package:caw/model/telemetry/telemetry_config.dart';
 import 'package:caw/model/updates/releases.dart' hide AssetKind;
 import 'package:caw/model/audio_clips.dart';
 import 'package:caw/model/automation_curve.dart';
+import 'package:caw/model/comping.dart';
 import 'package:caw/engine/component_info.dart';
 import 'package:caw/model/audio_edit.dart';
 import 'package:caw/model/sample_edit.dart';
@@ -707,6 +708,42 @@ void main() {
       await c.tester.tap(add.first);
       await _settle(c.tester);
       await c.shot('picker');
+    }
+  });
+
+  // Take lanes open under two tracks (#209, comping): a MIDI clip's three takes with a comp, an audio clip's two
+  // with a comp and its crossfade, and a lane's hold menu.
+  _sweep('arrange-take-lanes', (c) async {
+    final s = AppState(settings: Settings());
+    addTearDown(s.dispose);
+    const take = '---\nkind: pattern\nlength: 16\n---\n0 C4 2 1\n4 E4 2 0.8\n8 G4 2 0.7\n12 C5 2 0.9\n';
+    s.project = ProjectDoc(id: 'p', name: 'Takes', bpm: 120, modules: [
+      for (final id in ['t1', 't2', 't3', 'comp']) ModuleDoc(id: id, name: id == 'comp' ? 'Comp' : 'Take with a long name $id', source: take),
+    ], assets: [
+      for (final id in ['a1', 'a2']) AudioAssetDoc(id: id, path: '/abs/$id.wav', name: 'Vocal take $id', seconds: 4,
+          channels: 1, sourceRate: 48000, recorded: true),
+    ], layers: [
+      LayerDoc(id: 'm', name: 'Keys with a long name', color: 0, showTakes: true, clips: [
+        ClipDoc(id: 'c1', patternId: 'comp', startSteps: 0, lengthSteps: 16, takes: ['t1', 't2', 't3'],
+            comp: [const CompPartDoc('t1', 0), const CompPartDoc('t3', 6)]),
+      ]),
+      LayerDoc(id: 'v', name: 'Vocal', color: 2, showTakes: true, input: AudioInputDoc(), audioClips: [
+        AudioClipDoc(id: 'ac1', assetId: 'a1', startSteps: 4, lengthSeconds: 3, takes: ['a1', 'a2'],
+            comp: [const CompPartDoc('a1', 0), const CompPartDoc('a2', 1.5)]),
+      ]),
+    ]);
+    s.audioIo = FakeAudioIo();
+    await _pump(c, Scaffold(body: ListenableBuilder(listenable: s, builder: (_, _) => ArrangerScreen(state: s))));
+    await _settle(c.tester);
+    await c.shot('');
+    final name = find.byKey(const ValueKey('take-name-m-1'));
+    if (name.evaluate().isNotEmpty) {
+      await c.tester.longPress(name.first);
+      await _settle(c.tester);
+      await c.shot('menu');
+    } else {
+      c.errors.add('the take lanes\' headers aren\'t there');
+      c.all.add(c.errors.last);
     }
   });
 

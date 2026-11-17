@@ -16,7 +16,9 @@ import '../actions/macro.dart';
 import '../actions/vim.dart';
 import '../model/app_state.dart';
 import '../model/automation_writer.dart';
+import '../model/audio_record.dart';
 import '../model/live_midi.dart';
+import '../model/record_start.dart';
 import '../model/settings.dart';
 import 'glass.dart';
 import 'keyboard/key_area.dart';
@@ -342,7 +344,8 @@ class KeyRouterState extends State<KeyRouter> implements KeyAreaHost {
       case 'transport.tap':
         s.tapTempo();
       case 'transport.record':
-        LiveMidi.current?.toggleRecord();
+        // "Record just works" (owner, 2026-11-17): with nothing armed it arms or makes a track.
+        if (LiveMidi.current case final m?) unawaited(s.pressRecord(m, audio: AudioRecorder.current));
       case 'transport.automate':
         final w = AutomationWriter.current;
         w?.setArmed(!w.armed);

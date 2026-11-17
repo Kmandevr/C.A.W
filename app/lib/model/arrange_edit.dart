@@ -194,6 +194,19 @@ extension ArrangeEdit on AppState {
     for (final c in selectedClips) {
       if (!c.clip.lock) byTrack.putIfAbsent(c.layer, () => []).add(c.clip);
     }
+    return _glue(byTrack);
+  }
+
+  /// Consolidate (#209) of MIDI clips: [clips] on [layer] (two or more, unlocked) become one clip holding their notes
+  /// as they play, as Glue makes it. One undo step; false when nothing was joined.
+  bool consolidateMidiClips(LayerDoc layer, List<ClipDoc> clips) {
+    if (guardFrozen(layer)) return false;
+    final chosen = [for (final c in clips) if (!c.lock && layer.clips.contains(c)) c]
+      ..sort((a, b) => a.startSteps.compareTo(b.startSteps));
+    return _glue({layer: chosen});
+  }
+
+  bool _glue(Map<LayerDoc, List<ClipDoc>> byTrack) {
     final glued = <PlacedClip>[];
     final plans = <(LayerDoc, List<ClipDoc>, ModuleDoc, ClipDoc)>[];
     for (final MapEntry(key: layer, value: clips) in byTrack.entries) {

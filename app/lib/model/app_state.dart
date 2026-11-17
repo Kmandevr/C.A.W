@@ -1766,6 +1766,13 @@ class AppState extends ChangeNotifier implements StressHost {
     _changed(engine: false);
   }
 
+  /// Opens or closes [layer]'s take lanes under it (#209, comping). Only the screen changes.
+  void setTakesShown(LayerDoc layer, bool shown) {
+    if (layer.showTakes == shown) return;
+    layer.showTakes = shown;
+    _changed(engine: false);
+  }
+
   /// Sets how much of each of [layers]' rows shows (the track menu's Collapse, a header's bottom-edge drag or pinch):
   /// one undo step. With [height] (a normal row), that track's own height is set too. Only the screen changes.
   void setTrackCollapse(Iterable<LayerDoc> layers, TrackCollapse collapse, {double? height}) {

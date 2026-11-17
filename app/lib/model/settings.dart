@@ -430,6 +430,9 @@ class Settings extends ChangeNotifier {
   /// The music video editor has shown its photosensitivity warning (the first time Strobe is added).
   bool strobeWarned = false;
 
+  /// Record has shown its tip on the arm button once ("Record just works", owner 2026-11-17).
+  bool recordTipShown = false;
+
   /// The app version that last ran ('' before What's new existed): a newer one shows its changelog entry once.
   String lastSeenVersion = '';
 
@@ -599,6 +602,7 @@ class Settings extends ChangeNotifier {
         'vim_keys': vimKeys,
         if (keyHints != null) 'key_hints': keyHints,
         if (strobeWarned) 'strobe_warned': true,
+        if (recordTipShown) 'record_tip_shown': true,
         if (lastSeenVersion.isNotEmpty) 'last_seen_version': lastSeenVersion,
         'motion': motion.name,
         'edit_motion_style': editMotionStyle.name,
@@ -715,6 +719,7 @@ class Settings extends ChangeNotifier {
     vimKeys = (j['vim_keys'] as bool?) ?? vimKeys;
     if (j['key_hints'] is bool) keyHints = j['key_hints'] as bool;
     strobeWarned = j['strobe_warned'] == true;
+    recordTipShown = j['record_tip_shown'] == true;
     final seen = j['last_seen_version'];
     if (seen is String && seen.length <= 64) lastSeenVersion = seen.trim();
     motion = pick(MotionLevel.values, j['motion'], motion);

@@ -614,9 +614,12 @@ class LiveMidi extends ChangeNotifier {
       // A note held past the loop's end stops there; the next pass starts fresh.
       (passes[n.pass] ??= []).add(TakenNote(at, math.max(0.125, math.min(n.len, loopTo - at)), n.pitch, n.vel));
     }
-    final order = passes.keys.toList()..sort();
+    // A loop recording makes a take of every pass (owner, 2026-11-17), one where nothing was played too, but not a
+    // last pass that had only just begun when recording stopped with nothing in it.
+    final last = passes.containsKey(_pass) ? _pass : _pass - 1;
+    final order = _pass > 0 ? [for (var i = 0; i <= last; i++) i] : (passes.keys.toList()..sort());
     // Overdub and replace write into the clips already there (record_modes.dart); a loop recording covers the loop.
-    final merged = mergeRecording(state, layer, [for (final k in order) ...passes[k]!], mode: state.settings.midiRecordMode,
+    final merged = mergeRecording(state, layer, [for (final k in order) ...?passes[k]], mode: state.settings.midiRecordMode,
         from: _pass > 0 ? loopFrom : from, to: _pass > 0 ? loopTo : stoppedAt);
     if (merged != null) {
       lastTake.value = RecordedTake(layer.id, merged.clipIds, merged.moduleIds, merged.before);
@@ -625,7 +628,7 @@ class LiveMidi extends ChangeNotifier {
     int floorBar(double v) => (v / bar).floor() * bar;
     final firstStart = order.first == 0 ? floorBar(from) : floorBar(loopFrom);
     if (order.length == 1) {
-      final m = takeModule(passes[order.first]!, start: firstStart, stepsPerBar: bar, name: _takeName());
+      final m = takeModule(passes[order.first] ?? const [], start: firstStart, stepsPerBar: bar, name: _takeName());
       state.editProject((p) => p.modules.add(m));
       state.addClip(layer, m.id, startSteps: firstStart);
       final clip = layer.clips.lastOrNull;
@@ -638,7 +641,7 @@ class LiveMidi extends ChangeNotifier {
     final end = passes.values.expand((n) => n).map((n) => n.at + n.len).fold<double>(loopTo, math.max);
     final bars = math.max(1, ((end - start) / bar).ceil());
     final modules = [
-      for (final pass in order) takeModule(passes[pass]!, start: start, stepsPerBar: bar, name: _takeName(order.indexOf(pass)), bars: bars),
+      for (final pass in order) takeModule(passes[pass] ?? const [], start: start, stepsPerBar: bar, name: _takeName(order.indexOf(pass)), bars: bars),
     ];
     state.editProject((p) => p.modules.addAll(modules));
     state.addClip(layer, modules.last.id, startSteps: start);
@@ -678,7 +681,8 @@ class LiveMidi extends ChangeNotifier {
     final end = notes.map((n) => n.at - start + n.len).fold<double>(0, math.max);
     final length = math.max(bars, (end / stepsPerBar).ceil());
     final span = rel.map((n) => n.end).fold<Steps>(Steps.zero, Steps.max);
-    final doc = PatternDoc.blank(name: name, bars: length).paste(PatternClip(rel, span), Steps.zero).doc;
+    final blank = PatternDoc.blank(name: name, bars: length);
+    final doc = rel.isEmpty ? blank : blank.paste(PatternClip(rel, span), Steps.zero).doc;
     return ModuleDoc(id: newId('m'), name: name, source: doc.serialize());
   }
 

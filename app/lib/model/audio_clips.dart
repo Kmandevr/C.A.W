@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'dart:math' as math;
 
 import '../engine/bindings.dart' show cawApiVersion;
+import 'comping.dart' show CompPartDoc, compFromJson, normalizeComp;
 import 'tempo_map.dart';
 
 /// A fade's shape, as the engine names it.
@@ -209,8 +210,10 @@ class AudioClipDoc {
     this.name,
     this.color,
     List<String>? takes,
+    List<CompPartDoc>? comp,
   })  : _lengthSteps = lengthSteps, // ignore: prefer_initializing_formals
-        takes = takes ?? [];
+        takes = takes ?? [],
+        comp = comp ?? [];
 
   final String id;
   String assetId;
@@ -246,6 +249,10 @@ class AudioClipDoc {
 
   /// Loop-recorded takes (asset ids, oldest first): the clip plays [assetId], one of them.
   List<String> takes;
+
+  /// The comp across [takes] (#209, lib/model/comping.dart): the parts of them the clip plays, in seconds of the
+  /// file as the clip reads it (unwrapped); empty plays [assetId] whole.
+  List<CompPartDoc> comp;
 
   static const double maxGain = 3.9810717055349722; // +12 dB
   static const double minLengthSteps = 1 / 16;
@@ -310,6 +317,7 @@ class AudioClipDoc {
         if (name != null) 'name': name,
         if (color != null) 'color': color,
         if (takes.isNotEmpty) 'takes': takes,
+        if (comp.isNotEmpty) 'comp': [for (final p in comp) p.toJson()],
       };
 
   /// How many steps the clip spans on [tempo] (the project's map): a fixed clip's seconds from where it starts, so
@@ -374,6 +382,7 @@ class AudioClipDoc {
       return _num(j['${key}_seconds'], 0, 0, 3 * 3600);
     }
     final cents = j['pitch_cents'];
+    final takes = [for (final t in (j['takes'] as List?) ?? const []) if (t is String && t.isNotEmpty) t].take(64).toList();
     return AudioClipDoc(
       id: id,
       assetId: asset,
@@ -401,7 +410,8 @@ class AudioClipDoc {
       lock: j['lock'] == true,
       name: switch (_text(j['name'], 128)) { '' => null, final n => n },
       color: switch (j['color']) { final int c when c >= 0 && c < 8 => c, _ => null },
-      takes: [for (final t in (j['takes'] as List?) ?? const []) if (t is String && t.isNotEmpty) t].take(64).toList(),
+      takes: takes,
+      comp: compFromJson(j['comp'], takes),
     );
   }
 
@@ -436,7 +446,12 @@ AudioClipDoc? splitAudioClip(AudioClipDoc clip, double at, String newId,
   final left = at - clip.startSteps;
   if (left <= AudioClipDoc.minLengthSteps / 2 || len - left <= AudioClipDoc.minLengthSteps / 2) return null;
   final right = clip.copyWith(id: newId, startSteps: at);
-  right.offsetSeconds = wrapOffset(clip, clip.offsetSeconds + left * clip.sourcePerStep(bpm, assetBpm), assetSeconds);
+  final unwrapped = clip.offsetSeconds + left * clip.sourcePerStep(bpm, assetBpm);
+  right.offsetSeconds = wrapOffset(clip, unwrapped, assetSeconds);
+  // A comp counts the file's seconds from where the clip reads: a wrapped offset moves its parts with it.
+  if (right.offsetSeconds != unwrapped) {
+    right.comp = normalizeComp([for (final p in clip.comp) CompPartDoc(p.take, p.from + right.offsetSeconds - unwrapped)]);
+  }
   right.setLength(len - left, bpm);
   right.fadeIn = 0;
   right.takes = List.of(clip.takes);
@@ -495,9 +510,18 @@ void resizeAudioClip(AudioClipDoc clip, double newLength, double assetSeconds, {
 
 /// Turns [clip] around: it reads the file backwards over the same part of it (offsets then count from the end).
 void reverseAudioClip(AudioClipDoc clip, double assetSeconds, {required double bpm, double? assetBpm}) {
+  final before = clip.offsetSeconds, used = clip.sourceSeconds(bpm, assetBpm);
   if (!clip.loop && assetSeconds > 0) {
-    final used = clip.sourceSeconds(bpm, assetBpm);
     clip.offsetSeconds = math.max(0, assetSeconds - (clip.offsetSeconds + used));
+  }
+  // A comp's parts turn round with the audio: what played at the clip's end now plays at its start.
+  if (clip.comp.length >= 2) {
+    final mirror = clip.offsetSeconds + used + before;
+    final parts = clip.comp;
+    clip.comp = normalizeComp([
+      for (var i = parts.length - 1; i >= 0; i--)
+        CompPartDoc(parts[i].take, i + 1 < parts.length ? mirror - parts[i + 1].from : 0),
+    ]);
   }
   clip.reverse = !clip.reverse;
   final (a, ac, b, bc) = (clip.fadeIn, clip.fadeInCurve, clip.fadeOut, clip.fadeOutCurve);

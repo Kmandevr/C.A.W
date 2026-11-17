@@ -5,6 +5,7 @@ import 'dart:math';
 import 'dart:typed_data';
 
 import 'audio_clips.dart';
+import 'comping.dart';
 import 'automation_curve.dart';
 import 'clip_automation.dart';
 import 'clip_midi.dart';
@@ -129,14 +130,18 @@ Uint8List _midiField(String b64) {
 class ClipDoc {
   ClipDoc({required this.id, required this.patternId, this.startSteps = 0, this.lengthSteps = 64, this.sourceOffsetSteps = 0,
     this.loop = true, this.linked = false, this.name, this.color, this.mute = false, this.lock = false, List<String>? takes,
-    this.loopSteps, List<ClipAutomationLaneDoc>? automation})
-      : takes = takes ?? [], automation = automation ?? [];
+    this.loopSteps, List<ClipAutomationLaneDoc>? automation, List<CompPartDoc>? comp})
+      : takes = takes ?? [], automation = automation ?? [], comp = comp ?? [];
   final String id;
   String patternId;
 
   /// Loop-recorded takes (pattern ids, oldest first; empty for an ordinary clip): the clip plays one of them,
   /// [patternId], and the clip's Takes picker switches between them (lib/model/live_midi.dart).
   List<String> takes;
+
+  /// The comp across [takes] (#209, lib/model/comping.dart): the parts of them the clip plays, in steps of the
+  /// pattern; empty plays [patternId] whole. With a comp, [patternId] is the comp pattern built from the parts.
+  List<CompPartDoc> comp;
   int startSteps;
   int lengthSteps;
   int sourceOffsetSteps;
@@ -174,13 +179,19 @@ class ClipDoc {
         if (mute) 'mute': true,
         if (lock) 'lock': true,
         if (takes.isNotEmpty) 'takes': takes,
+        if (comp.isNotEmpty) 'comp': [for (final p in comp) p.toJson()],
         if ((loopSteps ?? 0) > 0) 'loop_steps': loopSteps,
         if (automation.isNotEmpty) 'automation': [for (final a in automation) a.toJson()],
       };
 
-  static ClipDoc fromJson(Map<String, dynamic> j) => ClipDoc(
+  static ClipDoc fromJson(Map<String, dynamic> j) {
+    final takes = [for (final t in (j['takes'] as List?) ?? const []) if (t is String) t].take(64).toList();
+    final pattern = j['pattern'] as String;
+    // A comp plays a pattern of its own, never one of the takes: one that names a take is read as none.
+    final comp = takes.contains(pattern) ? <CompPartDoc>[] : compFromJson(j['comp'], takes, whole: true);
+    return ClipDoc(
         id: j['id'] as String,
-        patternId: j['pattern'] as String,
+        patternId: pattern,
         startSteps: (j['start_steps'] as num?)?.toInt() ?? 0,
         lengthSteps: (j['length_steps'] as num?)?.toInt() ?? 64,
         sourceOffsetSteps: (j['source_offset_steps'] as num?)?.toInt() ?? 0,
@@ -190,13 +201,15 @@ class ClipDoc {
         color: switch (j['color']) { final int c when c >= 0 && c < LayerDoc.trackColors => c, _ => null },
         mute: j['mute'] == true,
         lock: j['lock'] == true,
-        takes: [for (final t in (j['takes'] as List?) ?? const []) if (t is String) t].take(64).toList(),
+        takes: takes,
+        comp: comp,
         loopSteps: switch (j['loop_steps']) { final num n when n >= 1 => n.toInt(), _ => null },
         automation: [
           for (final a in (j['automation'] as List?) ?? const [])
             if (a is Map<String, dynamic>) ?ClipAutomationLaneDoc.fromJson(a),
         ],
       );
+  }
 }
 
 /// The one name of an automation lane's target, for track lanes (`track`) and project lanes alike: the automation
@@ -555,6 +568,7 @@ class LayerDoc {
     this.spaceBelow = 0,
     this.ownColor = false,
     this.showLanes = false,
+    this.showTakes = false,
     this.collapse = TrackCollapse.normal,
     this.height,
     List<AudioClipDoc>? audioClips,
@@ -584,6 +598,10 @@ class LayerDoc {
   /// The track's automation lanes are open under it in the arrangement (its envelope button; hidden by default).
   /// Saved with the project, never sent to the engine.
   bool showLanes;
+
+  /// The track's take lanes are open under it (#209, comping: a row per take of its clips with takes). Saved with
+  /// the project, never sent to the engine.
+  bool showTakes;
 
   /// How much of the track's row shows in the arrangement (owner, 2026-11-11, after REAPER): its full [height],
   /// [compactHeight] (the name, M and S in one row) or a [thinHeight] sliver. Saved, never sent to the engine.
@@ -682,6 +700,7 @@ class LayerDoc {
         if (spaceBelow > 0) 'space_below': spaceBelow,
         if (ownColor) 'own_color': true,
         if (showLanes) 'show_lanes': true,
+        if (showTakes) 'show_takes': true,
         if (collapse != TrackCollapse.normal) 'collapse': collapse.name,
         if (height != null) 'height': height,
         if (audioClips.isNotEmpty) 'audio_clips': [for (final c in audioClips) c.toJson(rate: rateOf?.call(c.assetId) ?? 0)],
@@ -720,6 +739,7 @@ class LayerDoc {
         },
         ownColor: j['own_color'] == true,
         showLanes: j['show_lanes'] == true,
+        showTakes: j['show_takes'] == true,
         collapse: TrackCollapse.values.where((c) => c.name == j['collapse']).firstOrNull ?? TrackCollapse.normal,
         height: switch (j['height']) {
           final num v when v.isFinite => v.toDouble().clamp(minHeight, maxHeight),
@@ -1147,8 +1167,10 @@ class ProjectDoc {
               // An audio track (API 18): its clips (those whose file the project lists) and its input.
               else if (l.isAudio) ...{
                 'audio_clips': [
+                  // A comp (#209) goes as its parts, each a clip of its take with crossfades at the joins.
                   for (final c in l.audioClips)
-                    if (asset(c.assetId) != null) c.toEngineJson(bpm, span: c.spanSteps(tempo)),
+                    for (final part in compAudioParts(this, c))
+                      if (asset(part.assetId) != null) part.toEngineJson(bpm, span: part.spanSteps(tempo)),
                 ],
                 if (l.input != null) 'input': l.input!.toJson(),
               },

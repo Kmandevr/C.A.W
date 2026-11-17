@@ -1,11 +1,15 @@
 // The frame's pieces: the section bar (phone portrait), the rail (landscape, tablet, desktop), the bottom transport
 // (play, stop, record, undo; drag to scrub) and the slim top status row.
+import 'dart:async';
+
 import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
 
 import '../../model/app_state.dart';
 import '../../model/automation_writer.dart';
+import '../../model/audio_record.dart';
 import '../../model/live_midi.dart';
+import '../../model/record_start.dart';
 import '../audio_record_ui.dart';
 import '../background_playback_ui.dart';
 import '../feedback.dart';
@@ -448,6 +452,20 @@ class _BackToStartButtonState extends State<BackToStartButton> {
   }
 }
 
+/// Record pressed ("Record just works", owner 2026-11-17): with nothing armed it arms the selected track or makes one
+/// ([RecordStart.pressRecord]); the first time it does, a tip says what the arm button is for. A microphone that
+/// won't open says why in one line.
+Future<void> pressRecordButton(BuildContext context, AppState state, LiveMidi midi) async {
+  final messenger = ScaffoldMessenger.maybeOf(context);
+  final plan = await state.pressRecord(midi, audio: AudioRecorder.current,
+      say: (m) => messenger?.showSnackBar(SnackBar(content: Text(m))));
+  if (plan == null || state.settings.recordTipShown) return;
+  messenger?.showSnackBar(SnackBar(key: const ValueKey('record-tip'), duration: const Duration(seconds: 6),
+    content: Text('${plan.created ? 'Recording on a new ${plan.audio ? 'audio' : 'MIDI'} track. ' : ''}'
+        'Tip: the ● on a track\'s header arms it, and Record records the armed tracks.')));
+  await state.settings.update((s) => s.recordTipShown = true);
+}
+
 /// Records into the armed (else selected) track from a USB keyboard or the on-screen keys, which open when no
 /// keyboard is connected; a long-press sets the metronome and the count-in.
 class RecordButton extends StatelessWidget {
@@ -477,7 +495,8 @@ class RecordButton extends StatelessWidget {
                 ? null
                 : () {
                     Haptics.tap();
-                    m.toggleRecord();
+                    if (state == null) return m.toggleRecord();
+                    unawaited(pressRecordButton(context, state!, m));
                   },
           )),
         );

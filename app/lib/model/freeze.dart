@@ -21,7 +21,7 @@ const double freezeMaxTailSeconds = 30;
 const double freezeSilenceDb = -120;
 
 /// What a freeze or bounce render is called on disk: the engine writes `<name>.wav` into the project's audio folder.
-const String frozenFilePrefix = 'frozen_', bounceFilePrefix = 'bounce_';
+const String frozenFilePrefix = 'frozen_', bounceFilePrefix = 'bounce_', consolidateFilePrefix = 'consolidated_';
 
 /// A running freeze or bounce: its progress (0..1), a way to stop it, and its end ([done]: null when it was applied,
 /// else why not: 'cancelled' or the engine's error).
@@ -101,9 +101,50 @@ extension Freeze on AppState {
     final span = _clipSpan(l, clips);
     if (span == null) return TrackRenderJob._(null, Future.value('no clips to bounce'));
     return _render(l, prefix: bounceFilePrefix, start: span.$1, end: span.$2,
-        only: (copy) => copy.clips.removeWhere((c) => !ids.contains(c.id)),
+        only: (copy, _) => copy.clips.removeWhere((c) => !ids.contains(c.id)),
         apply: (path, seconds, rate, layer) => _addBounce(layer, path, seconds, rate, span.$1,
             muteClips: ids));
+  }
+
+  /// Consolidate (#209) of audio clips: [clips] on [l] (two or more, unlocked) rendered as they play, through none
+  /// of the track's devices and before its fader, over their span in whole steps (no tail), into one file that
+  /// replaces them as one fixed clip at the span's start. One undo step, when the render lands.
+  TrackRenderJob consolidateAudioClips(LayerDoc l, List<AudioClipDoc> clips) {
+    final chosen = [for (final c in clips) if (!c.lock && l.audioClips.contains(c)) c];
+    if (chosen.length < 2) return TrackRenderJob._(null, Future.value('select two or more clips on the track'));
+    if (guardFrozen(l)) return TrackRenderJob._(null, Future.value('cancelled'));
+    final ids = {for (final c in chosen) c.id};
+    final lo = chosen.map((c) => c.startSteps.floor()).reduce(math.min).clamp(0, project.maxArrangementSteps - 1);
+    final hi = chosen.map((c) => (c.startSteps + c.spanSteps(project.tempo)).ceil()).reduce(math.max)
+        .clamp(lo + 1, project.maxArrangementSteps);
+    final first = ([...chosen]..sort((a, b) => a.startSteps.compareTo(b.startSteps))).first;
+    return _render(l, prefix: consolidateFilePrefix, start: lo, end: hi, tail: false,
+        only: (copy, p) {
+          copy.audioClips.removeWhere((c) => !ids.contains(c.id));
+          copy.clips.clear();
+          copy.components.clear();
+          copy.noteComponents.clear();
+          copy.instrument = null;
+          copy.input = null;
+          // Nothing aims at the devices it no longer has: their lanes and modulation links go too.
+          p.automation.removeWhere((a) => a.layerId == copy.id && a.targetType != 'track');
+          p.modLinks.removeWhere((m) => m.target.layerId == copy.id && (m.target.type == 'component' ||
+              m.target.type == 'instrument'));
+        },
+        apply: (path, seconds, rate, layer) {
+          final asset = AudioAssetDoc(id: newId('a'), path: path, name: '${audioClipName(first)} (consolidated)',
+              seconds: seconds, channels: 2, sourceRate: rate);
+          final clip = AudioClipDoc(id: newId('ac'), assetId: asset.id, startSteps: lo.toDouble(), lengthSeconds: seconds,
+              stretch: AudioStretch.keepPitch, color: first.color);
+          editProject((p) {
+            p.assets.add(asset);
+            final at = layer.audioClips.indexWhere((c) => ids.contains(c.id));
+            layer.audioClips.removeWhere((c) => ids.contains(c.id));
+            layer.audioClips.insert(at < 0 ? layer.audioClips.length : math.min(at, layer.audioClips.length), clip);
+          });
+          endUndoStep();
+          selectAudioClip(layer, clip);
+        });
   }
 
   /// [clips]' span in whole steps (audio clips with the MIDI ones when [clips] is the track's); null for none.
@@ -142,7 +183,8 @@ extension Freeze on AppState {
   /// Renders [l] before its fader over [start]..[end] (the song when null) plus its tail, from a copy of the project
   /// where [l] plays live, unmuted and nothing is soloed; [only] trims [l]'s copy (a clip bounce). On success, and
   /// when [l] is still there as it was, [apply] gets the file; otherwise the file is deleted.
-  TrackRenderJob _render(LayerDoc l, {required String prefix, int? start, int? end, void Function(LayerDoc copy)? only,
+  TrackRenderJob _render(LayerDoc l, {required String prefix, int? start, int? end, bool tail = true,
+      void Function(LayerDoc copy, ProjectDoc project)? only,
       required void Function(String path, double seconds, int rate, LayerDoc layer) apply}) {
     final opened = project;
     final before = jsonEncode(l.toJson());
@@ -154,7 +196,7 @@ extension Freeze on AppState {
         ..mute = false
         ..frozenAsset = null
         ..frozenContext = null;
-      only?.call(x);
+      only?.call(x, copy);
     }
     final rate = settings.sampleRate;
     final dir = audioDirectory;
@@ -164,7 +206,8 @@ extension Freeze on AppState {
       'stem_tap': 'pre', 'stems_through_master': false, 'bit_depth': 32, 'sample_rate': rate,
       if (start != null && end != null) ...{'bounds': 'selection', 'start_steps': start, 'end_steps': end}
       else 'bounds': 'song',
-      'tail': 'silence', 'tail_seconds': freezeMaxTailSeconds, 'silence_db': freezeSilenceDb,
+      if (tail) ...{'tail': 'silence', 'tail_seconds': freezeMaxTailSeconds, 'silence_db': freezeSilenceDb}
+      else 'tail': 'none',
     };
     SongRenderHandle? handle;
     try {
@@ -222,7 +265,7 @@ extension Freeze on AppState {
       await for (final f in dir.list()) {
         if (!identical(project, opened)) return;
         final base = f.path.split(RegExp(r'[/\\]')).last;
-        if (f is! File || !(base.startsWith(frozenFilePrefix) || base.startsWith(bounceFilePrefix))) continue;
+        if (f is! File || ![frozenFilePrefix, bounceFilePrefix, consolidateFilePrefix].any(base.startsWith)) continue;
         if (!named.contains(f.path)) await f.delete();
       }
     } catch (_) {

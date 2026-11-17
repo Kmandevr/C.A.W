@@ -4,6 +4,7 @@
 import 'dart:math' as math;
 
 import 'app_state.dart';
+import 'comping.dart';
 import 'live_midi.dart';
 import 'pattern_doc.dart';
 import 'project.dart';
@@ -119,6 +120,11 @@ extension ClipTakes on AppState {
     if (clip.takes.length < 2) return;
     final id = clip.takes[index % clip.takes.length];
     if (id == clip.patternId || project.module(id) == null) return;
+    // A comp (#209) gives way to the whole take; its own pattern leaves with it.
+    if (clip.comp.isNotEmpty) {
+      setComp(layer, TakeClip.midi(clip), [CompPartDoc(id, 0)]);
+      return;
+    }
     endUndoStep();
     editLayer(layer, (_) => clip.patternId = id);
     endUndoStep();

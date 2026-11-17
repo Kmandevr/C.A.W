@@ -425,8 +425,10 @@ extension AudioEdit on AppState {
   void selectAudioTake(LayerDoc layer, AudioClipDoc clip, int index) {
     if (clip.takes.length < 2) return;
     final id = clip.takes[index % clip.takes.length];
-    if (id == clip.assetId || project.asset(id) == null) return;
-    editAudioClip(layer, clip, (c) => c.assetId = id);
+    if ((id == clip.assetId && clip.comp.isEmpty) || project.asset(id) == null) return;
+    editAudioClip(layer, clip, (c) => c
+      ..assetId = id
+      ..comp = []);
   }
 
   void stepAudioTake(LayerDoc layer, AudioClipDoc clip, int delta) {
