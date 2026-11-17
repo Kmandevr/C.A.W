@@ -37,6 +37,22 @@ class AudioEndpoint {
 
   String get key => kind == AudioDeviceKind.builtIn ? 'builtIn' : '${kind.name}:${name.trim()}';
 
+  /// The Bluetooth link an Android device type names (#237), for the latency UI: 'le_audio' (TYPE_BLE_HEADSET 26,
+  /// TYPE_BLE_SPEAKER 27, API 31; TYPE_BLE_BROADCAST 30, API 33; TYPE_BLE_HEARING_AID 33, API 37), 'a2dp'
+  /// (TYPE_BLUETOOTH_A2DP 8), 'sco' (TYPE_BLUETOOTH_SCO 7, calls), 'asha' (TYPE_HEARING_AID 23, the older hearing
+  /// aid protocol), else '' (not Bluetooth, or not Android). [Fact, developer.android.com AudioDeviceInfo, read
+  /// 2026-11-17] for the values and levels; the BLE audio overview names TYPE_BLE_HEADSET as "a LEA device". The
+  /// app can't choose LE Audio over A2DP: the system routes a dual-mode headset ([Assumption] by its own policy).
+  String get bluetoothProfile => switch (platformType) {
+        26 || 27 || 30 || 33 => 'le_audio',
+        8 => 'a2dp',
+        7 => 'sco',
+        23 => 'asha',
+        _ => '',
+      };
+
+  bool get isLeAudio => bluetoothProfile == 'le_audio';
+
   String get label => name.trim().isEmpty ? kind.label : '${name.trim()} (${kind.label})';
 
   @override
@@ -77,7 +93,7 @@ AudioDeviceKind androidDeviceKind(int type) => switch (type) {
       1 || 2 || 15 || 24 => AudioDeviceKind.builtIn,         // earpiece, speaker, mic, speaker safe
       3 || 4 || 5 || 6 || 13 || 19 || 31 => AudioDeviceKind.wired, // headset, headphones, line analog/digital, dock, aux, dock analog
       7 || 8 => AudioDeviceKind.bluetooth,                     // SCO, A2DP
-      23 || 26 || 27 || 30 || 33 => AudioDeviceKind.bluetoothLe, // hearing aid, BLE headset, speaker, broadcast, hearing aid
+      23 || 26 || 27 || 30 || 33 => AudioDeviceKind.bluetoothLe, // hearing aid (ASHA), BLE headset, speaker, broadcast, BLE hearing aid
       11 || 12 || 22 => AudioDeviceKind.usb,                   // USB device, accessory, headset
       9 || 10 || 29 => AudioDeviceKind.hdmi,                   // HDMI, ARC, eARC
       20 || 25 || 32 => AudioDeviceKind.remote,                // IP, remote submix, multichannel speaker group
@@ -173,3 +189,48 @@ class NamedAudioRoute implements AudioRoute {
 }
 
 AudioRoute platformAudioRoute() => Platform.isAndroid ? AndroidAudioRoute() : const NamedAudioRoute();
+
+/// The system's Bluetooth settings page, where LE Audio or a device's low-latency mode is turned on (#236). C.A.W
+/// does not choose the Bluetooth codec: the owner's brief (2026-11-17) says that is a privileged system API since
+/// Android 14 (not checked here against a primary source), so it only opens the page.
+abstract class BluetoothSettings {
+  /// Whether this platform has a page to open (the button shows only then).
+  bool get canOpen;
+
+  /// Opens it; false when it could not.
+  Future<bool> open();
+
+  /// The app's (tests swap it).
+  static BluetoothSettings current = Platform.isAndroid ? AndroidBluetoothSettings() : const NoBluetoothSettings();
+}
+
+/// Android: `Settings.ACTION_BLUETOOTH_SETTINGS` through "caw/audio_route" (AudioRoute.kt).
+class AndroidBluetoothSettings implements BluetoothSettings {
+  AndroidBluetoothSettings({MethodChannel? channel}) : _channel = channel ?? const MethodChannel('caw/audio_route');
+  final MethodChannel _channel;
+
+  @override
+  bool get canOpen => true;
+
+  @override
+  Future<bool> open() async {
+    try {
+      return await _channel.invokeMethod<bool>('openBluetoothSettings') ?? false;
+    } on PlatformException {
+      return false;
+    } on MissingPluginException {
+      return false;
+    }
+  }
+}
+
+/// Windows and the desktop builds: no page is opened from the app.
+class NoBluetoothSettings implements BluetoothSettings {
+  const NoBluetoothSettings();
+
+  @override
+  bool get canOpen => false;
+
+  @override
+  Future<bool> open() async => false;
+}

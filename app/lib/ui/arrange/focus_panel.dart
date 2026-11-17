@@ -9,6 +9,7 @@ import '../../model/pattern_doc.dart';
 import '../../model/project.dart';
 import '../../model/settings.dart';
 import 'audio_clip_inspector.dart';
+import 'automate_control.dart';
 import 'automation_panel.dart';
 import '../feedback.dart';
 import '../frame/frame_widgets.dart' show SlideIn;
@@ -22,6 +23,8 @@ import '../pattern_editor.dart';
 import '../theme.dart';
 import '../volume_fader.dart';
 import 'track_color.dart';
+import 'freeze_ui.dart';
+import 'track_lanes.dart' show canHaveLanes;
 import 'fx_stack.dart';
 import 'knob.dart';
 
@@ -183,7 +186,9 @@ class _FocusPanelState extends State<FocusPanel> {
         Expanded(child: switch (widget.tab) {
           FocusTab.fx => FxStack(key: ValueKey('fx-${widget.layer.id}'), state: widget.state, layer: widget.layer),
           FocusTab.mixer => _MixerTab(state: widget.state, layer: widget.layer),
-          FocusTab.clip => _ClipTab(state: widget.state, layer: widget.layer),
+          // A frozen track's notes dim and ask to unfreeze when touched (freeze, 1.0.5).
+          FocusTab.clip => FrozenDevices(state: widget.state, layer: widget.layer,
+              child: _ClipTab(state: widget.state, layer: widget.layer)),
           FocusTab.automation => TrackAutomationPanel(state: widget.state, layer: widget.layer),
         }),
       ]),
@@ -263,10 +268,12 @@ class _MixerTab extends StatelessWidget {
             // On the fader's dB taper: the knob turns through fader positions; double-tap is 0 dB.
             Knob(key: const ValueKey('mix-volume'), value: VolumeTaper.position(layer.volume), min: 0, max: 1,
               defaultValue: VolumeTaper.position(1), label: 'Volume', color: Neon.green, size: 44,
+              automation: canHaveLanes(layer) ? ControlAutomation.track(state, layer.id, 'volume') : null,
               valueText: (p) => VolumeTaper.label(VolumeTaper.gain(p)),
               onChanged: (p) => state.mixLayer(layer, volume: VolumeTaper.gain(p))),
             Knob(key: const ValueKey('mix-pan'), value: layer.pan, min: -1, max: 1, defaultValue: 0,
               label: 'Pan', color: Neon.blue, size: 44,
+              automation: canHaveLanes(layer) ? ControlAutomation.track(state, layer.id, 'pan') : null,
               valueText: (v) => v.abs() < .01 ? 'C' : '${(v.abs() * 100).round()}${v < 0 ? 'L' : 'R'}',
               onChanged: (v) => state.mixLayer(layer, pan: v)),
             // Sends: a knob per bus (long-press for options), "Send to…" for a new reverb or delay bus or another.

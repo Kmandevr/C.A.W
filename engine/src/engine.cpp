@@ -12,6 +12,7 @@
 #include "route_math.h"
 #include "caw/library/stereo.hpp"
 #include "hardware.h"
+#include "sample_preview.h"
 
 #include <algorithm>
 #include <bit>
@@ -74,6 +75,7 @@ struct Engine::Slot {
     bool removing = false;
     bool track = false;      // installed as a track: its instrument plays the notes, through its inserts
     bool fresh = true;       // the track has not played yet since it was installed or play started
+    bool chase = false;      // its next chunk picks up the pattern notes already sounding there (#226, chaseNotes)
     bool overloaded = false;  // shed: the device ran out of time (setShed keeps Engine::overloadedFlag_ counting these)
     uint64_t shedSeq = 0;       // audio thread: when it was shed, in shed order (the newest shed comes back first)
     double shedCost = 0;        // audio thread: what it is taken to cost: the meter's drop after it was shed, at most
@@ -139,6 +141,7 @@ struct Engine::Slot {
     // current process() call; null when it isn't tapped.
     float* tapL = nullptr;
     float* tapR = nullptr;
+    bool tapPre = false;  // the tap takes the signal before the fader (setOutputTap's preFader)
 
     // This chunk's plan (planChunk), read by the slot's graph nodes. Chunks end at every loop
     // boundary of a playing track, so one plan covers the whole chunk.
@@ -370,7 +373,13 @@ std::shared_ptr<const Pattern> compileArrangement(
                 // source's list, so it is copied into the arrangement's and pointed there.
                 if (original.extra >= 0 && static_cast<size_t>(original.extra) < src.expressions.size()) {
                     note.extra = static_cast<int>(out->expressions.size());
-                    out->expressions.push_back(src.expressions[static_cast<size_t>(original.extra)]);
+                    NoteExpression x = src.expressions[static_cast<size_t>(original.extra)];
+                    // A cut note plays its own part of the curves (#226), not all of them squeezed into it.
+                    if ((trimmedAtStart || trimmedAtEnd) && original.len > 0 && note.len > 0) {
+                        x.from += x.span * (clippedStart - original.at) / original.len;
+                        x.span *= note.len / original.len;
+                    }
+                    out->expressions.push_back(std::move(x));
                 } else {
                     note.extra = -1;
                 }
@@ -654,7 +663,12 @@ std::string Engine::audioThreadsJson() const {
     j += ",\"core_kind\":\"" + std::string(tuning::coreKindName(tuning::coreKind(cpu))) + "\"";
     j += ",\"clock_khz\":" + std::to_string(clock.currentKHz) + ",\"max_khz\":" + std::to_string(clock.maxKHz);
     j += ",\"hint\":" + std::string(pool_ && pool_->hintActive() ? "true" : "false");
+    j += ",\"hint_state\":\"" + std::string(tuning::hintStateName(pool_ ? pool_->hintState() : tuning::HintState::None)) + "\"";
     j += ",\"mmcss\":" + std::string(pool_ && pool_->callbackMmcss() ? "true" : "false");
+    // The callback's scheduling policy (POSIX SCHED_*: 0 time-sharing, 1 FIFO, 2 RR) and nice, as it last described
+    // itself: a shared or Bluetooth AAudio stream's is time-sharing, a low-latency (MMAP) one's FIFO (#234).
+    j += ",\"callback_policy\":" + std::to_string(pool_ ? pool_->callbackPolicy() : 0) +
+         ",\"callback_nice\":" + std::to_string(pool_ ? pool_->callbackNice() : 0);
     j += ",\"callback_tuning\":" + flags(cbTuned) + ",\"worker_tuning\":" + flags(tuned);
     j += ",\"workers\":" + std::to_string(mixWorkers()) + ",\"active_workers\":" + std::to_string(mixActiveWorkers());
     j += ",\"wait_share\":" + std::to_string(waitShare_.load(std::memory_order_relaxed));
@@ -797,11 +811,13 @@ Engine::Engine(double sampleRate)
 Engine::Engine(double sampleRate, EngineResourceBudget resourceBudget)
     : sr_(sampleRate),
       trackGainCoef_(1.0 - detExp(-1.0 / (kGainSeconds * sampleRate))),
+      nyquistPitch_(69.0 + 12.0 * detLog(std::max(1.0, sampleRate) / 880.0) / detLog(2.0)),
       resourceBudget_(resourceBudget),
       cmds_(new Spsc<Cmd, 1024>()),
       retired_(new Spsc<Retired, 1024>()),
       masterScope_(new std::atomic<float>[kScopeSize]),
       loudness_(std::make_unique<LoudnessMeter>()) {
+    samplePreview_ = std::make_unique<SamplePreview>(sampleRate);
     for (int i = 0; i < kScopeSize; ++i) masterScope_[i].store(0);
     midiPending_.reset(new PendingMidi[Midi2InputQueue::kCapacity]);
     masterRetires_ = std::make_unique<RetireList>();
@@ -1658,7 +1674,8 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
         for (const AutomationLaneSpec& lane : w.automation) {
             pl.automationSig += lane.target + "|";
             for (const AutomationPointSpec& point : lane.points)
-                pl.automationSig += std::to_string(point.step) + ":" + std::to_string(point.value) + ";";
+                pl.automationSig += std::to_string(point.step) + ":" + std::to_string(point.value) + ":" +
+                                    std::to_string(point.curve) + ":" + std::to_string(doubleToBits(point.tension)) + ";";
         }
         if (w.vol != ls.volume || w.pan != ls.pan || w.mute != ls.mute || w.solo != ls.solo) {
             writeMix(ls.slot, w.vol, w.pan, w.mute, w.solo);
@@ -2590,9 +2607,49 @@ void Engine::resetTestTone() noexcept {
     toneActive_.store(false, std::memory_order_release);
 }
 
+// The preview's commands, with the frames to the song's next beat and bar for a start in time with it (while the
+// song plays past any count-in; a loop's wrap before the beat is not looked at: the start then lands off the beat).
+void Engine::takePreview() noexcept {
+    SamplePreview::SongClock clock;
+    if (playing_ && countInLeft_ == 0 && stopFade_ == 0) {
+        const double step = songStep(g_);
+        const double beat = step / 4.0;
+        const double nextBeat = std::ceil(beat - 1e-9);
+        clock.toBeat = static_cast<int64_t>(std::max(0.0, std::ceil(song_->tempo.frameAt(nextBeat * 4.0) - static_cast<double>(g_))));
+        int64_t bar = 0;
+        double inBar = 0;
+        song_->sigs.barAt(beat, bar, inBar);
+        const TimeSigSpec& sig = song_->sigs.sigs()[song_->sigs.indexAt(beat)];
+        const double barBeats = sig.num * 4.0 / std::max(1, sig.den);
+        const double toNext = inBar < 1e-9 ? 0.0 : barBeats - inBar;
+        clock.toBar = static_cast<int64_t>(std::max(0.0, std::ceil(song_->tempo.frameAt((beat + toNext) * 4.0) - static_cast<double>(g_))));
+    }
+    samplePreview_->take(clock);
+    // Through a track's effects (the browser's toggle): stopped, its slot is woken as a monitoring track is, so
+    // the preview runs through its inserts and mix; a muted or soloed-out track doesn't run and the preview goes
+    // to the master as usual (runMasterNode, mixToneOnly).
+    const int rs = samplePreview_->route();
+    if (rs >= 0 && rs < slotCount_ && !playing_) {
+        Slot& s = slotAt(rs);
+        if (s.active && s.track && !s.previewing) {
+            if (s.instrument && s.instrumentIdle) {
+                s.instrument->reset();
+                s.instrument->notes()->forget(false);
+                s.instrument->notes()->clearEvents();
+                s.instrumentIdle = false;
+            }
+            s.previewing = true;
+            s.previewQuiet = s.previewTail = 0;
+            previewing_ = true;
+            markLive(rs);
+        }
+    }
+}
+
 // The test tone: 0.25 (-12 dBFS) of 440 Hz with 10 ms fades, added before the safety limiter (finishSample in
 // runMasterNode, or mixToneOnly where the master stage does not run). A request to end it early fades it out over
 // those 10 ms.
+
 void Engine::takeToneRequest() noexcept {
     // A start is published as sounding before its request is cleared, so testToneSounding() never reads false in
     // between. A request that lands after the load is left for the next callback.
@@ -2622,13 +2679,16 @@ double Engine::nextTone() noexcept {
     return v;
 }
 
-void Engine::mixToneOnly(float* left, float* right, int frames) noexcept {
-    if (toneLeft_ <= 0) return;
+void Engine::mixToneOnly(float* left, float* right, int frames, bool previewTaken) noexcept {
+    SamplePreview& pv = *samplePreview_;
+    const bool preview = pv.active() && !previewTaken;  // a track that took it already played it
+    if (toneLeft_ <= 0 && !preview) return;
     const double rel = detExp(-1.0 / (0.1 * sr_));
     const bool bypass = bypass_.load(std::memory_order_relaxed);
-    for (int j = 0; j < frames && toneLeft_ > 0; ++j) {
-        const double t = nextTone();
-        const double yl = static_cast<double>(left[j]) + t, yr = static_cast<double>(right[j]) + t;
+    for (int j = 0; j < frames && (toneLeft_ > 0 || (preview && pv.active())); ++j) {
+        const double t = toneLeft_ > 0 ? nextTone() : 0.0;
+        double yl = static_cast<double>(left[j]) + t, yr = static_cast<double>(right[j]) + t;
+        if (preview && pv.active()) pv.next(yl, yr);
         const double env = std::max(std::fabs(yl), std::fabs(yr));
         limEnv_ = env > limEnv_ ? env : env + (limEnv_ - env) * rel;
         const double gain = bypass ? 1.0 : (limEnv_ > kLimitCeiling ? kLimitCeiling / limEnv_ : 1.0);
@@ -2898,19 +2958,34 @@ bool Engine::layerCorrelation(int index, float& out) {
     return true;
 }
 
-bool Engine::setOutputTap(const std::string& layerId, float* left, float* right) {
+bool Engine::setOutputTap(const std::string& layerId, float* left, float* right, bool preFader) {
     std::lock_guard<std::mutex> lock(ctl_);
     auto it = layers_.find(layerId);
     if (!left || !right || it == layers_.end() || it->second.slot < 0) return false;
     Slot& s = ctlSlot(it->second.slot);
     s.tapL = left;
     s.tapR = right;
+    s.tapPre = preFader;
     return true;
 }
 
 void Engine::clearOutputTaps() {
     std::lock_guard<std::mutex> lock(ctl_);
-    for (int i = 0; i < ctlTable_->capacity; ++i) ctlSlot(i).tapL = ctlSlot(i).tapR = nullptr;
+    for (int i = 0; i < ctlTable_->capacity; ++i) {
+        ctlSlot(i).tapL = ctlSlot(i).tapR = nullptr;
+        ctlSlot(i).tapPre = false;
+    }
+}
+
+int64_t Engine::layerLatency(const std::string& layerId) {
+    std::lock_guard<std::mutex> lock(ctl_);
+    auto it = layers_.find(layerId);
+    if (it == layers_.end() || it->second.slot < 0) return 0;
+    const LayerState& ls = it->second;
+    uint64_t frames = 0;  // as updateCompensation counts a slot's own
+    if (ls.inserts) frames += ls.inserts->latencyFrames();
+    if (ls.instrument && !ls.bus) frames += ls.instrument->latencyFrames() + noteFx_->latencyFrames(layerId);
+    return static_cast<int64_t>(std::min<uint64_t>(frames, 1u << 30));
 }
 
 int Engine::scope(int index, float* out, int n) {
@@ -3500,12 +3575,16 @@ int64_t Engine::loopStart(const Slot& s, int64_t k) const noexcept {
 }
 
 // The note's expression `into` samples after it took the voice: bend (curve + vibrato), press and timbre.
+// A cut note (#226: a clip's end, loop point or source offset) plays its part [from, from + span] of the written
+// note's curves and vibrato, as the written note had them there.
 static void expressionAt(const NoteExpression& x, double into, double len, double sr, double& bend, double& press, double& timbre) {
-    const double u = std::clamp(into / len, 0.0, 1.0);
+    const bool whole = x.from == 0 && x.span == 1;
+    const double u = whole ? std::clamp(into / len, 0.0, 1.0) : std::clamp(x.from + x.span * std::clamp(into / len, 0.0, 1.0), 0.0, 1.0);
     bend = !x.bend.points.empty() ? x.bend.at(u) : 0.0;
     if (x.vibDepth > 0) {
         const double fade = x.vibDelay > 0 ? std::clamp(u / x.vibDelay, 0.0, 1.0) : 1.0;
-        bend += x.vibDepth * fade * detSin(kTwoPi * x.vibRate * into / sr);
+        const double t = whole ? into : into + x.from * len / x.span;  // samples since the written note's start
+        bend += x.vibDepth * fade * detSin(kTwoPi * x.vibRate * t / sr);
     }
     press = !x.press.points.empty() ? x.press.at(u) : 1.0;
     timbre = !x.timbre.points.empty() ? x.timbre.at(u) : 0.0;
@@ -3644,6 +3723,7 @@ void Engine::updatePreviewing(int frames) noexcept {
         if (!s.previewing) continue;
         const bool silent = !s.active || (slotTarget(s) == 0.0 && s.gain == 0.0);
         bool voices = false;  // a preview note is held
+        if (!silent && samplePreview_->route() == live_[k]) voices = true;  // the sample preview plays through it
         if (s.instrument && (s.instrument->notes()->holdsPreview() || s.instrument->monitorsStopped())) {
             if (silent) {
                 s.instrument->notes()->releasePreviews(0);
@@ -3782,6 +3862,77 @@ void Engine::rebindNote(const Slot& s, NoteEvents& notes, NoteEvents::Held& h, c
     h.glideStep = (h.target - h.pitch) / h.glideLeft;
 }
 
+// Chasing (#226): play, a loop back, a layer's new pass or an unmute that lands inside pattern notes starts them at
+// frame 0, as if they had been playing: each pattern note whose on is before n0 (events [0, e)) and whose off is
+// after it, unless it already sounds. Its expression (bend, vibrato, pressure, timbre) and glide-free pitch are the
+// note's own at n0, and its motion grid carries on from the note's start, so a chased note sounds as the same note
+// played through would from there, at any block size, live and in export. The instrument starts its voice there with
+// its own attack (a sampler from the sample's start: docs/decisions.md). One pass over the events before n0 with
+// a fixed list of the notes still open (kChaseMost; past it the oldest are dropped): no allocation, bounded by the
+// pattern, and only at those moments.
+void Engine::chaseNotes(Slot& s, NoteEvents& notes, const Pattern* pat, size_t e, int64_t n0) noexcept {
+    constexpr int kChaseMost = 128;
+    struct Open { uint32_t note; uint16_t sub; int64_t start; };
+    Open open[kChaseMost];
+    int count = 0;
+    const PatternEvent* ev = pat->events.data();
+    for (size_t i = 0; i < e; ++i) {
+        const PatternEvent& pe = ev[i];
+        if (pe.on) {
+            if (count == kChaseMost) {
+                std::move(open + 1, open + count, open);
+                --count;
+            }
+            open[count++] = {pe.note, pe.sub, passFrame(s, pe.step)};
+            continue;
+        }
+        for (int k = count - 1; k >= 0; --k)
+            if (open[k].note == pe.note && open[k].sub == pe.sub) {
+                std::move(open + k + 1, open + count, open + k);
+                --count;
+                break;
+            }
+    }
+    // A note ending exactly at n0 does not sound.
+    const size_t ne = pat->events.size();
+    for (size_t i = e; i < ne && count > 0 && passFrame(s, ev[i].step) <= n0; ++i) {
+        if (ev[i].on) continue;
+        for (int k = count - 1; k >= 0; --k)
+            if (open[k].note == ev[i].note && open[k].sub == ev[i].sub) {
+                std::move(open + k + 1, open + count, open + k);
+                --count;
+                break;
+            }
+    }
+    for (int k = 0; k < count; ++k) {
+        const Open& o = open[k];
+        if (o.note >= pat->notes.size() || notes.findPattern(o.note, o.sub)) continue;
+        const PatternNote& n = pat->notes[o.note];
+        if (!notePlays(n, o.note, s.repeat, seed_)) continue;
+        const bool expressive = n.extra >= 0 && static_cast<size_t>(n.extra) < pat->expressions.size();
+        const NoteExpression* x = expressive ? &pat->expressions[static_cast<size_t>(n.extra)] : nullptr;
+        int64_t start = 0, stop = 0;
+        const double exLen = timeConstant_ || !noteSpan(s, n, o.sub, start, stop)
+                                 ? std::max(1.0, n.len / std::max(1, n.ratchet) * stepLen_)
+                                 : std::max(1.0, static_cast<double>(stop - start));
+        const int64_t since = std::max<int64_t>(0, n0 - o.start);
+        double bend = 0, press = 1, timbre = 0;
+        if (x) expressionAt(*x, static_cast<double>(since), exLen, sr_, bend, press, timbre);
+        NoteEvents::Held& h = notes.on(0, NoteEvents::Source::Pattern, o.note, o.sub, -1, safePitch(n.pitch + bend), n.vel);
+        if (!h.active) continue;
+        h.pitch = h.target = n.pitch;
+        h.ex = x;
+        h.exLen = exLen;
+        if (x && !x->press.points.empty()) notes.pressure(0, h, std::clamp(press, 0.0, 1.0));
+        if (x && !x->timbre.points.empty()) notes.timbre(0, h, std::clamp(timbre, 0.0, 1.0));
+        // The note's control grid runs on from its start: its next point is this many frames on.
+        const int64_t wait = (kExpressionStep - since % kExpressionStep) % kExpressionStep;
+        h.since = since + wait;
+        h.motionFrom = 0;
+        h.motionWait = static_cast<int>(wait);
+    }
+}
+
 // The pattern's notes in this chunk as the instrument's events, on their exact frames: chance per repeat, ratchets,
 // slides (the held note glides on, no new attack), the note's expression, and held notes carried across a pattern
 // edit following their new note.
@@ -3791,11 +3942,18 @@ void Engine::instrumentNotes(Slot& s, NoteEvents& notes, int m) noexcept {
     auto sampleOf = [this, &s](double step) { return passFrame(s, step); };
     for (NoteEvents::Held& h : notes.held())
         if (h.active && h.rebind) rebindNote(s, notes, h, pat, n0);
-    if (!pat) return;
+    if (!pat) {
+        s.chase = false;
+        return;
+    }
     const PatternEvent* ev = pat->events.data();
     const size_t ne = pat->events.size();
     size_t e = static_cast<size_t>(
         std::partition_point(ev, ev + ne, [&](const PatternEvent& x) { return sampleOf(x.step) < n0; }) - ev);
+    if (s.chase) {
+        s.chase = false;
+        if (e > 0) chaseNotes(s, notes, pat, e, n0);
+    }
     auto express = [&](NoteEvents::Held& h, const PatternNote& n, uint32_t frame, uint32_t sub) noexcept {
         const bool expressive = n.extra >= 0 && static_cast<size_t>(n.extra) < pat->expressions.size();
         h.ex = expressive ? &pat->expressions[static_cast<size_t>(n.extra)] : nullptr;
@@ -3859,7 +4017,7 @@ void Engine::noteMotion(NoteEvents& notes, NoteEvents::Held& h, int end) noexcep
         double bend = 0, press = 1, timbre = 0;
         if (h.ex) expressionAt(*h.ex, static_cast<double>(h.since), h.exLen, sr_, bend, press, timbre);
         const uint32_t frame = static_cast<uint32_t>(f);
-        notes.pitch(frame, h, h.pitch + bend);
+        notes.pitch(frame, h, safePitch(h.pitch + bend));
         if (h.ex) {
             if (!h.ex->press.points.empty()) notes.pressure(frame, h, std::clamp(press, 0.0, 1.0));
             if (!h.ex->timbre.points.empty()) notes.timbre(frame, h, std::clamp(timbre, 0.0, 1.0));
@@ -3928,6 +4086,7 @@ void Engine::runInstrument(Slot& s, int m) noexcept {
             }
         if (NoteFxHost* fx = noteFx_->forSlot(s.index)) fx->reset();  // per-note FX (#127)
         s.instrumentIdle = false;
+        s.chase = true;  // unmuted (or back from silence) inside a note: it sounds from here (#226)
     }
     if (s.instrument) {
         NoteEvents& notes = *s.instrument->notes();
@@ -4017,6 +4176,7 @@ void Engine::planTrack(Slot& s, int& m) noexcept {
         // The layer restarts its pattern: held notes ring out, the instrument and its effects carry on.
         if (!s.fresh && s.instrument && !s.instrumentIdle) s.instrument->notes()->releaseAll(0, true);
         s.fresh = false;
+        s.chase = true;  // play, a loop back or a new pass may start inside notes: they sound from here (#226)
         s.k = k;
         s.epoch = epoch_;
     }
@@ -4144,6 +4304,7 @@ int Engine::processChunk(float* l, float* r, int maxFrames) noexcept {
         live_[kept++] = i;
     }
     liveCount_ = kept;
+    previewTaken_.store(false, std::memory_order_relaxed);  // a track node that plays the sample preview sets it
     const int m = planChunk(maxFrames);
     if (!timeConstant_) {  // the song step at each of the chunk's frames, for per-sample lanes (songStep)
         song_->tempo.stepsAt(g_, m, chunkSteps_);
@@ -4202,7 +4363,7 @@ int Engine::processChunk(float* l, float* r, int maxFrames) noexcept {
     if (!ran) {
         std::fill_n(l, m, 0.0f);
         std::fill_n(r, m, 0.0f);
-        mixToneOnly(l, r, m);  // the master stage, last in the graph, did not run
+        mixToneOnly(l, r, m, previewTaken_.load(std::memory_order_relaxed));  // the master stage did not run
     }
     return m;
 }
@@ -4668,6 +4829,10 @@ void Engine::runTrackNode(int slot, float* outL, float* outR, int m) noexcept {
     // The instrument (#17) into the native inserts, stereo through volume and pan (the pan law then works per side,
     // as balance).
     runInstrument(s, m);
+    if (samplePreview_->route() == slot) {  // the sample preview through this track's effects (API 33)
+        samplePreview_->render(s.instL, s.instR, m);
+        previewTaken_.store(true, std::memory_order_relaxed);
+    }
     std::copy_n(s.instL, m, s.insL);
     std::copy_n(s.instR, m, s.insR);
     runInserts(s, s.insL, s.insR, m);
@@ -4766,9 +4931,9 @@ void Engine::runTrackNode(int slot, float* outL, float* outR, int m) noexcept {
     }
     if (s.sends && s.sends->count > 0) runRoutes(s, s.insL, s.insR, outL, outR, m, !(target > 0.0), false);
     if (s.delay || s.delayFadeLeft > 0) runDelay(s, outL, outR, m);  // in time where it meets the others
-    if (s.tapL) {  // an offline stem: what the track sends on, as it meets the others
-        std::copy_n(outL, m, s.tapL + tapAt_);
-        std::copy_n(outR, m, s.tapR + tapAt_);
+    if (s.tapL) {  // an offline stem: what the track sends on, as it meets the others (or before its fader)
+        std::copy_n(s.tapPre ? s.insL : outL, m, s.tapL + tapAt_);
+        std::copy_n(s.tapPre ? s.insR : outR, m, s.tapR + tapAt_);
     }
     s.previewQuiet = sig > kPreviewQuiet ? 0 : s.previewQuiet + m;
     if (previewChunk_) {
@@ -4881,9 +5046,10 @@ void Engine::runBusNode(int slot, const float* inL, const float* inR, float* out
     s.previewQuiet = std::max(peakL, peakR) > kPreviewQuiet ? 0 : s.previewQuiet + m;
     if (routes) runRoutes(s, s.insL, s.insR, outL, outR, m, !(target > 0.0), true);
     if (s.delay || s.delayFadeLeft > 0) runDelay(s, outL, outR, m);  // in time where it meets the others
-    if (s.tapL) {  // an offline stem: the bus's output, as it meets the others
-        std::copy_n(outL, m, s.tapL + tapAt_);
-        std::copy_n(outR, m, s.tapR + tapAt_);
+    if (s.tapL) {  // an offline stem: the bus's output, as it meets the others (or after its effects, pre-fader)
+        const bool inIns = received || inserts || routes;
+        std::copy_n(!s.tapPre ? outL : inIns ? s.insL : inL, m, s.tapL + tapAt_);
+        std::copy_n(!s.tapPre ? outR : inIns ? s.insR : inR, m, s.tapR + tapAt_);
     }
     if (s.removing && s.gain == 0.0 && canRetireNode(s.retires, 3)) {
         // Faded out: the slot is free again, with its inserts, delay and routes.
@@ -4929,6 +5095,8 @@ void Engine::runMasterNode(const float* inL, const float* inR, float* outL, floa
     float pl = 0, pr = 0;
     const bool bypass = bypass_.load(std::memory_order_relaxed);
     int sp = masterScopePos_.load(std::memory_order_relaxed);
+    // The sample preview joins here unless a track's node played it through its effects this chunk.
+    const bool previewHere = !previewTaken_.load(std::memory_order_relaxed);
 
     // The metronome, while the song plays: a click as the playhead crosses each beat.
     const bool clicks = metronome_ && playing_ && !previewChunk_ && stepLen_ > 0;
@@ -4986,11 +5154,13 @@ void Engine::runMasterNode(const float* inL, const float* inR, float* outL, floa
             fade = 1.0;  // a fade in that ended earlier in this chunk is done: the rest is at full level
         }
         float ol, orr;
-        if (toneLeft_ > 0) {
-            // The test tone joins after the transport's fades (it sounds stopped too) and before the limiter, which
-            // follows the louder of the song's own level and the sum, so the sum stays under the ceiling.
-            const double t = nextTone();
-            const double sl = yl * fade + t, sr = yr * fade + t;
+        if (toneLeft_ > 0 || (previewHere && samplePreview_->active())) {
+            // The test tone and the sample preview join after the transport's fades (they sound stopped too) and
+            // before the limiter, which follows the louder of the song's own level and the sum, so the sum stays
+            // under the ceiling.
+            const double t = toneLeft_ > 0 ? nextTone() : 0.0;
+            double sl = yl * fade + t, sr = yr * fade + t;
+            if (previewHere && samplePreview_->active()) samplePreview_->next(sl, sr);
             const double env = std::max({std::fabs(yl), std::fabs(yr), std::fabs(sl), std::fabs(sr)});
             limEnv_ = env > limEnv_ ? env : env + (limEnv_ - env) * rel;
             limEnv_ = limEnv_ < 1e-30 ? 0.0 : limEnv_;  // far below the ceiling (gain 1 either way): no subnormals
@@ -5219,6 +5389,7 @@ void Engine::process(float* left, float* right, int frames) noexcept {
     }
     takeDeviceMidi(frames);
     takeToneRequest();
+    takePreview();
     if (!playing_ && monitorWanted_.load(std::memory_order_relaxed)) wakeMonitors();
     // A device (re)start or the app going to the background: a throttled stretch must not thin the song for good.
     if (sheddingReset_.exchange(false, std::memory_order_acq_rel)) resetShedding();
@@ -5299,6 +5470,7 @@ void Engine::process(float* left, float* right, int frames) noexcept {
     if (midiPendingCount_ > 0) endDeviceMidi(frames);
     if (previewing_) updatePreviewing(frames);
     toneActive_.store(toneLeft_ > 0, std::memory_order_release);
+    samplePreview_->publish();
     playingFlag_.store(playing_, std::memory_order_relaxed);
     posFlag_.store(g_, std::memory_order_relaxed);
     publishSongPos();
@@ -5344,6 +5516,13 @@ void Engine::reportLoad(double load, int frames, int rendered) noexcept {
         pool_->reportWork(static_cast<int64_t>(used * 1e9), static_cast<int64_t>(played * 1e9));
     }
     if (frames <= 0) return;
+    // A new device's first callbacks (requestDeviceWarmUp): the stream starting, left out of every average here.
+    if (deviceWarmUp_.load(std::memory_order_relaxed) && deviceWarmUp_.exchange(false, std::memory_order_acq_rel))
+        warmSeconds_ = kDeviceWarmSeconds;
+    if (warmSeconds_ > kSlackSeconds) {
+        warmSeconds_ -= static_cast<double>(frames) / sr_;
+        return;
+    }
     if (!std::isfinite(load)) load = 0.0;
     // The callback's time against the frames it played: their deadline, which a callback over 1 missed.
     const double raw = std::max(0.0, load);

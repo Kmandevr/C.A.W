@@ -4,7 +4,7 @@ import 'dart:io';
 
 import 'package:ffi/ffi.dart';
 
-const int cawApiVersion = 32;  // must equal CAW_API_VERSION in engine/include/caw.h
+const int cawApiVersion = 34;  // must equal CAW_API_VERSION in engine/include/caw.h
 
 /// CawNoteFxStats (API 22, #127): a layer's per-note FX slots.
 final class CawNoteFxStatsStruct extends Struct {
@@ -307,6 +307,8 @@ class Bindings {
             'caw_audio_buffer_frames'),
         audioSetBackground = lib.lookupFunction<Int32 Function(Pointer<Void>, Int32), int Function(Pointer<Void>, int)>(
             'caw_audio_set_background'),
+        audioTuneBuffer = lib.lookupFunction<Int32 Function(Pointer<Void>, Int32), int Function(Pointer<Void>, int)>(
+            'caw_audio_tune_buffer'),
         stop = lib.lookupFunction<Void Function(Pointer<Void>), void Function(Pointer<Void>)>('caw_engine_stop'),
         clearOverload = lib.lookupFunction<Void Function(Pointer<Void>), void Function(Pointer<Void>)>(
             'caw_engine_clear_overload'),
@@ -520,6 +522,7 @@ class Bindings {
   final void Function(Pointer<Void>, int, int) audioSetBufferMode;
   final int Function(Pointer<Void>) audioBufferFrames;
   final int Function(Pointer<Void>, int) audioSetBackground;
+  final int Function(Pointer<Void>, int) audioTuneBuffer;
   final void Function(Pointer<Void>) releaseTouches;
   final void Function(Pointer<Void>) stop;
   final void Function(Pointer<Void>) clearOverload;

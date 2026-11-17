@@ -11,6 +11,7 @@ import 'package:flutter/gestures.dart';
 import '../engine/component_info.dart';
 import 'app_state.dart';
 import 'arrange_fx.dart';
+import 'automation_curve.dart';
 import 'project.dart';
 
 /// REAPER's write modes (UG 18.8): Touch writes while a control is held and goes back to the lane when it is let
@@ -412,34 +413,22 @@ class AutomationWriter extends ChangeNotifier {
     return [for (var i = 0; i < pts.length; i++) if (keep[i]) pts[i]];
   }
 
-  /// The lane's value at [at]: straight lines between points, held before the first and after the last (the
-  /// engine's rule, `automationLaneValue`).
-  static double valueAt(List<AutomationPointDoc> points, double at, double fallback) {
-    if (points.isEmpty) return fallback;
-    if (at <= points.first.step) return points.first.value;
-    if (at >= points.last.step) return points.last.value;
-    for (var i = 1; i < points.length; i++) {
-      final a = points[i - 1], b = points[i];
-      if (at <= b.step) {
-        final span = b.step - a.step;
-        return span <= 0 ? b.value : a.value + (b.value - a.value) * (at - a.step) / span;
-      }
-    }
-    return points.last.value;
-  }
+  /// The lane's value at [at]: each point's curve to the next, held before the first and after the last (the
+  /// engine's rule, `automationLaneValue`; [laneValueAt]).
+  static double valueAt(List<AutomationPointDoc> points, double at, double fallback) => laneValueAt(points, at, fallback);
 
   /// [old] with [written] in place of what it had over the written span: a point just before keeps the lane (or,
   /// for a new lane, [original]) up to there; with [returns], a point [returnSteps] after the span goes back to
   /// what the lane had there (a new lane: [original]), and the old points after it stay.
   static List<AutomationPointDoc> merge(List<AutomationPointDoc> old, List<(double, double)> written,
       {required double original, required bool returns}) {
-    if (written.isEmpty) return [for (final p in old) AutomationPointDoc(step: p.step, value: p.value)];
+    if (written.isEmpty) return [for (final p in old) p.copy()];
     final sorted = [...old]..sort((a, b) => a.step.compareTo(b.step));
     final a = written.first.$1, b = written.last.$1;
     double prior(double t) => valueAt(sorted, t, original);
     final out = <AutomationPointDoc>[
       for (final p in sorted)
-        if (p.step < a - 0.01) AutomationPointDoc(step: p.step, value: p.value),
+        if (p.step < a - 0.01) p.copy(),
     ];
     if (a >= 0.01 && (sorted.isNotEmpty || (written.first.$2 - original).abs() > 1e-9)) {
       out.add(AutomationPointDoc(step: a - 0.01, value: prior(a - 0.01)));
@@ -451,11 +440,11 @@ class AutomationWriter extends ChangeNotifier {
       final r = b + returnSteps;
       out.add(AutomationPointDoc(step: r, value: prior(r)));
       for (final p in sorted) {
-        if (p.step > r + 0.01) out.add(AutomationPointDoc(step: p.step, value: p.value));
+        if (p.step > r + 0.01) out.add(p.copy());
       }
     } else {
       for (final p in sorted) {
-        if (p.step > b + 0.01) out.add(AutomationPointDoc(step: p.step, value: p.value));
+        if (p.step > b + 0.01) out.add(p.copy());
       }
     }
     return out;

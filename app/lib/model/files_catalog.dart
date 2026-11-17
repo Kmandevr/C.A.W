@@ -15,6 +15,7 @@ import 'cpp_component.dart';
 import 'native_trust.dart';
 import 'project.dart';
 import 'sample_packs.dart';
+import 'sample_use.dart' show SampleUse;
 import 'user_presets.dart';
 
 /// What an asset is. It decides the icon, the type badge, what a drag carries and what double-tap opens.
@@ -132,9 +133,10 @@ class FileAsset {
 
 /// What a folder holds. Folders are paths: `projects` (the saved projects, their own folders inside it), `fav`, `fx`, `fx/builtin`, `fx/cpp`, `code`, `code/cpp`,
 /// `code/cpp/<component entry id>`, `audio`, `audio/patterns`,
-/// `audio/midi`, `audio/samples` (sample packs), `audio/samples/<pack>`, `presets` (the user's presets, app-wide), `packs`.
+/// `audio/midi`, `audio/samples` (sample packs), `audio/samples/<pack>`, `presets` (the user's presets, app-wide), `packs`,
+/// `samples` (the linked sample folders, app-wide; `sample_browser.dart`) and `samples/<linked folder id>`.
 enum FilesFolderKind { projects, favourites, effects, builtin, cppEffects, code, cppList, cppComponent, audio, patterns, midiFiles,
-  presets, packs, samplePacks, samplePack, audioFiles }
+  presets, packs, samplePacks, samplePack, audioFiles, samples, sampleFolder }
 
 class FilesFolder {
   const FilesFolder(this.path, this.label, this.kind, [this.children = const []]);
@@ -295,7 +297,7 @@ extension FilesCatalog on AppState {
 
   // ---------- folders ----------
 
-  /// The tree: Projects (the project library, `project_library_view.dart`), Favourites, Effects & instruments, Code, Audio & MIDI (Packs only when the app has any: none yet).
+  /// The tree: Projects (the project library, `project_library_view.dart`), Favourites, Effects & instruments, Code, Audio & MIDI (Packs only when the app has any: none yet), Presets, Samples (the linked folders).
   List<FilesFolder> get filesTree {
     return [
       const FilesFolder('projects', 'Projects', FilesFolderKind.projects),
@@ -319,6 +321,9 @@ extension FilesCatalog on AppState {
         ]),
       ]),
       const FilesFolder('presets', 'Presets', FilesFolderKind.presets),
+      FilesFolder('samples', 'Samples', FilesFolderKind.samples, [
+        for (final f in sampleLibrary.folders) FilesFolder('samples/${f.id}', f.name, FilesFolderKind.sampleFolder),
+      ]),
     ];
   }
 

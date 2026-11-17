@@ -573,7 +573,8 @@ std::string patternFromMidi(const uint8_t* data, size_t size, const MidiImportOp
 // own pitch bend, channel pressure and CC74 (timbre). Used when any note has a bend, vibrato, press or timbre.
 std::vector<MidiEvent> mpeEvents(const Pattern& p, const std::vector<Segment>& segs, const TempoMap& tempo) {
     std::vector<MidiEvent> ev;
-    // The bend range covers the widest bend in the pattern: 12 semitones, else 48 (MPE's own default).
+    // The bend range covers the widest bend in the pattern: 12 semitones, else 48 (MPE's own default), else 96 (bends
+    // reach 96 semitones since #226; RPN 0's data entry holds up to 127).
     double widest = 0;
     for (const Segment& sg : segs) {
         double w = std::fabs(sg.pitch - std::lround(sg.pitch));  // a microtonal pitch bends from its nearest key
@@ -585,7 +586,7 @@ std::vector<MidiEvent> mpeEvents(const Pattern& p, const std::vector<Segment>& s
         }
         widest = std::max(widest, w);
     }
-    const int range = widest <= 12.0 + 1e-9 ? 12 : 48;
+    const int range = widest <= 12.0 + 1e-9 ? 12 : widest <= 48.0 + 1e-9 ? 48 : 96;
     // MPE Configuration Message on the manager channel: RPN 6 = 15 member channels.
     const uint8_t mcm[][2] = {{101, 0}, {100, 6}, {6, 15}, {101, 127}, {100, 127}};
     for (const auto& m : mcm) ev.push_back({0, 0, {0xB0, m[0], m[1]}, 3});

@@ -12,6 +12,7 @@ import '../feedback.dart';
 import '../haptics.dart';
 import '../theme.dart';
 import '../pointer_input.dart';
+import '../settings/latency_settings.dart' show openLatencySheet;
 
 const _modeNames = {
   AutomationMode.touch: ('Touch', 'T', 'Writes while you hold a control, then back to the lane'),
@@ -122,7 +123,8 @@ class KeysButton extends StatelessWidget {
       );
 }
 
-/// Record's long-press: the metronome, the count-in, the MIDI record mode and the keys.
+/// Record's long-press: the metronome, the count-in, the MIDI record mode, the keys and the latency sheet (its
+/// slider, used while the song plays; #236).
 Future<void> showRecordOptions(BuildContext context, AppState state, LiveMidi midi, Offset at) async {
   final s = state.settings;
   final v = await showLongPressMenu<String>(context, at: at, title: 'Recording', style: s.longPressMenu, actions: [
@@ -140,9 +142,12 @@ Future<void> showRecordOptions(BuildContext context, AppState state, LiveMidi mi
         MidiRecordMode.replace => Icons.find_replace,
       }, checked: s.midiRecordMode == mode),
     MenuAction('keys', midi.keysOpen ? 'Hide the keys' : 'Show the keys and pads', Icons.piano),
+    MenuAction('latency', 'Latency: ${state.latency.outputTotalMs.round()} ms…', Icons.linear_scale),
   ]);
   if (v == null) return;
-  if (v == 'keys') {
+  if (v == 'latency') {
+    if (context.mounted) await openLatencySheet(context, state);
+  } else if (v == 'keys') {
     midi.keysOpen = !midi.keysOpen;
   } else if (v.startsWith('r:')) {
     await s.setRecording(mode: MidiRecordMode.values.byName(v.substring(2)));

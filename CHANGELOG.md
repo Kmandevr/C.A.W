@@ -3,6 +3,60 @@
 What changed in each C.A.W release, newest first. C.A.W is in open alpha: expect rough edges and unexpected issues.
 Versions keep the `-alpha.N` suffix until the official release.
 
+## 1.0.5-alpha.1 (2026-11-17)
+
+Recording, editing and timing: comping, freeze and bounce, better automation, a sample library, and snappier playback.
+
+### New
+- **Comping:** recorded takes open as lanes under the track. Swipe across a lane to use that part, double tap to hear a take, and **Flatten** to turn the comp into ordinary clips. Audio joins get a short crossfade.
+- **A take per loop pass:** each pass of a loop recording becomes its own take, MIDI and audio.
+- **Record just works:** with nothing armed, Record picks or makes the right track (a MIDI track when a keyboard is connected, otherwise an audio track for the microphone), counts in and records.
+- **Freeze and bounce:**
+  - **Freeze** a track to save CPU. It shows a snowflake, and editing it asks to unfreeze first.
+  - **Bounce to audio** works on a track or a clip selection.
+- **Consolidate:** join selected clips into one, from the clip selection's hold menu.
+- **Automation:**
+  - Lanes can be resized.
+  - Draw with Select, Pencil, Line, Shape (sine, triangle, saw, square, random) or Eraser.
+  - Curved segments (slow, fast, S-curve, step).
+  - Box-select points to move, scale and tilt them, and copy and paste them.
+- **Automate from any knob:** hold a knob, fader or slider and choose **Automate**.
+- **An easier way to add a lane:** a searchable picker with your recent parameters at the top.
+- **Linked sample folders:** link your sample folders once in Files › Samples. Files stay where they are, nothing is copied, and a moved file can be found again.
+- **Sample browser:**
+  - tap previews; double tap adds the sample where it fits;
+  - waveforms with scrubbing;
+  - previews in time with the song;
+  - auto-play of the next sample;
+  - preview through the track's effects.
+- **Automatic BPM, key and type** from the file's tags, its name or the audio itself, as filters you can sort by.
+- **Latency slider:** hold Record, then **Latency…**, and drag the slider while the song plays until the playback lines up. It's saved for each device.
+- **Projects:** the project menu shows your 3 most recent projects and **All projects…**.
+- **Startup:** the startup animation plays to its end. Turn that off in Settings › Feel.
+
+### Improved
+- **Clips are stored as MIDI,** which is more precise and holds bends up to ±96 semitones. A project saved by 1.0.5 can't be opened by older versions.
+- **Playback looks on time:** the playhead, meters and highlights now match what you hear, leaning slightly early rather than late.
+- **Automatic latency:**
+  - it is remembered per device and re-checked when the device changes;
+  - the loopback test runs 5 times and refuses an unreliable result;
+  - after a few late or early MIDI takes, it suggests a correction.
+- **Bluetooth:**
+  - C.A.W asks Android for its low-latency treatment of the audio;
+  - the latency screen explains how to get the lowest delay, with a shortcut to Bluetooth settings.
+- **The performance hint** that asks Android to keep the CPU fast for audio retries if Android refuses it at first.
+- **Benchmark:**
+  - a test you leave the app during is run again when you come back;
+  - the track test stops cleanly at the engine's limit.
+
+### Fixed
+- **Notes started mid-way now play,** including their bends, when playback starts inside them.
+- **Bends past an octave:** the old limit is gone.
+- **Piano roll:** the shading starts at the clip's real end.
+- **Repeats:** a repeat that runs past a clip's end is cut at the end.
+- **Piano roll taps:** notes land where you tap, the tools respond every time, and a tap no longer stacks a duplicate note.
+- **The CPU meter** no longer spikes when playback starts on Bluetooth.
+
 ## 1.0.4-alpha.1 (2026-11-14)
 
 Audio editing: stretching, pitch, the sample editor and slicing.

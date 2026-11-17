@@ -95,6 +95,8 @@ struct RunResult {
     int32_t limit = -1;      // ramps: the last count that held (0: not even the first)
     int32_t firstFailed = -1;  // ramps: the smallest count seen over budget (-1: none, the cap held)
     int32_t steps = 0;
+    std::string cappedBy;    // ramps: why the engine refused the next count (its component cap or memory), "" none
+    std::string audioThreads;  // live: caw_audio_threads' JSON at the timed span's end (the hint, the callback's policy)
     double seconds = 0;      // audio timed
     std::vector<CostRow> costs;  // profile: sorted by time, the host row among them
     std::vector<PartRow> parts;  // profile (and live: device_io): every part in Part's order, adding up to 100%
@@ -117,12 +119,19 @@ std::vector<PartRow> partRows(const uint64_t* partNs, int64_t calls);
 
 // The ramp's search, apart from timing so it can be tested: counts go up (counts) until the first that does not
 // hold, then halve the gap between the last that held and it, never above it. `step(n)` plays count n and says
-// whether it held, or returns -1 to stop (cancelled, failed). Returns the last count that held (0: none).
+// whether it held, or returns -1 to stop (cancelled, failed), or kRampCapped when the engine won't take that count
+// (its budget: at most 256 native components, its project-state memory; #234): the ramp ends there, capped, at the
+// last count that held, not an error and not over budget. Returns the last count that held (0: none).
+constexpr int kRampCapped = 2;
+// Whether a project the ramp's step could not load was refused by the engine's own budget (its native component
+// cap or a memory budget), which caps the ramp; any other refusal is an error (#234, the audio review).
+bool rampCapRefusal(const std::string& why);
 struct RampOutcome {
     int32_t limit = 0;
     int32_t firstFailed = -1;
     int32_t steps = 0;
     bool stopped = false;  // step returned -1
+    int32_t cappedAt = -1;  // the count the engine refused (kRampCapped), -1: none
 };
 RampOutcome rampSearch(const std::vector<int32_t>& counts, const std::function<int(int32_t)>& step);
 // The counts each ramp tries (tracks up to 128, voices to 64, effects to 64).

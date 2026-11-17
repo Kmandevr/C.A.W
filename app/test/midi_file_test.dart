@@ -14,6 +14,7 @@ import 'package:caw/model/midi_file.dart';
 import 'package:caw/model/midi_mapping.dart';
 import 'package:caw/model/pattern_doc.dart';
 import 'package:caw/model/project.dart';
+import 'package:caw/model/tempo_map.dart';
 import 'package:caw/ui/frame/sections.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -494,5 +495,29 @@ void main() {
         expect(MidiCcMapping.ccFor(cutoff, MidiCcMapping.valueFor(cutoff, v)), v, reason: 'CC $v round trips');
       }
     });
+  });
+
+  test('a .mid export keeps the song\'s tempo map and signatures (the app writes it, #216)', () {
+    final doc = PatternDoc.parse('---\nkind: pattern\nlength: 6 bars\n---\n0 C4 1 1\n').doc!;
+    final bytes = patternToMidi(doc, bpm: 120, beatsPerBar: 4,
+        tempoMap: const [TempoPoint(0, 120), TempoPoint(8, 96), TempoPoint(16, 150)],
+        signatures: const [TimeSignature(0, 0, 4, 4), TimeSignature(2, 8, 3, 4)]);
+    final f = readMidiFile(bytes);
+    expect([for (final t in midiTempoMap(f)!) (t.beat, t.bpm.toStringAsFixed(3), t.ramp)],
+        [(0.0, '120.000', false), (8.0, '96.000', false), (16.0, '150.000', false)]);
+    expect([for (final s in midiSignatures(f)!) (s.bar, s.beat, s.num, s.den)], [(0, 0.0, 4, 4), (2, 8.0, 3, 4)]);
+    // A ramp becomes a tempo every 1/16 note, each keeping its stretch's length: the file lasts as long as the map.
+    final ramp = [const TempoPoint(0, 100), const TempoPoint(4, 200, ramp: true)];
+    final r = readMidiFile(patternToMidi(doc, bpm: 100, beatsPerBar: 4, tempoMap: ramp));
+    var seconds = 0.0;
+    for (var i = 0; i < r.tempos.length; i++) {
+      final to = i + 1 < r.tempos.length ? r.tempos[i + 1].tick : 4 * r.ppq;
+      if (r.tempos[i].tick >= 4 * r.ppq) break;
+      seconds += (to - r.tempos[i].tick) / r.ppq * 60 / r.tempos[i].bpm;
+    }
+    expect(r.tempos.length, 17);
+    expect(seconds, closeTo(TempoMath(ramp).secondsAt(4), 1e-4));
+    expect(() => patternToMidi(doc, bpm: 120, beatsPerBar: 4, tempoMap: const [TempoPoint(0, 2)]),
+        throwsA(isA<MidiFileException>()));
   });
 }

@@ -1,7 +1,7 @@
 ---
 title: Task 1 UI implementation handoff
 summary: Current UI implementation pointer and verified outstanding workflow gaps; no stale branch or CI snapshot.
-updated: 2026-11-14
+updated: 2026-11-17
 covers: [app/lib/ui/, app/lib/model/cpp_component.dart, app/lib/model/project.dart, app/test/project_test.dart]
 ---
 
@@ -21,6 +21,7 @@ Implemented UI/workflow foundations include:
 - Arrangement timeline (no 64-bar limit since F7.2; the engine takes more than 64 layers since F7.3, within its layer and export-buffer budgets, but the add buttons still stop at 64: F7.3 part C) with reusable MIDI and audio clips, clip editing, nested folders and stereo folder buses; taps answer on the same frame. Clips and track headers share one gesture rule (owner, 2026-11-12): tap selects, double tap opens the editor, hold opens the menu, hold and move moves; a dragged clip shows guide lines and its bar.beat, and the piano roll's ruler moves the song's cursor and draws its loop. Over the lanes (batch 1.0.3, #207): the section bar (sections, which move, copy and delete with their contents, and markers; the old regions load as sections), the ruler with bars and signature flags from the time signatures, and a tempo lane once the song has a tempo change; the piano roll's bars follow the signatures ([app](app.md)).
 - Mixer controls for tracks and master output; engine diagnostics (with a copyable Display modes block: [app](app.md), Frame rate), What's new (the bundled changelog, also shown once after an update), Privacy (telemetry, My data) and Send feedback in Settings › About and beta, whose version row carries the startup screen's open-alpha line.
 - Track/folder volume-pan automation.
+- Freeze, Unfreeze and Bounce to audio from the track and clip hold menus (1.0.5, [app](app.md)).
 - Export of WAV loop/free-length/one-shot/wavetable outputs and MIDI patterns, with profiles, history and an in-memory queue; saving copies the finished file to the picked place in chunks. The Music video sheet (Export page and project menu) renders the arrangement as an MP4, cut by an auto director or edited as shots on a lane with layouts, looks, effects, transitions, camera moves, text and images, in Shots, Look, Text & media and Export tabs with a pinned export bar ([app](app.md)).
 - Files: Projects first (cards with metadata, nested folders, search, sort, select mode with Move, Export and undoable Delete; [app](app.md)), then a Unity-style tree, grid and inspector over built-in effects, C++ components, patterns, audio and MIDI files, with drag and the effect picker; project (.caw) import and export, library folders, tags, saved searches and restore points stay in its ⋯ menu.
 - Settings › Performance: the profile, Lightweight on overload, and the Frame rate row, which names the rate in force and why it is below the screen's best ([app](app.md), Frame rate).

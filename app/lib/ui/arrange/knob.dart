@@ -9,6 +9,7 @@ import '../haptics.dart';
 import '../motion.dart';
 import '../pointer_input.dart';
 import '../theme.dart';
+import 'automate_control.dart';
 
 /// Where a value sits along a control's travel (0..1) and back. Linear by default; an exponential parameter
 /// (`curve: exponential` in a component's descriptor: times, frequencies, rates) moves little at the start of the
@@ -57,7 +58,12 @@ class Knob extends StatefulWidget {
     this.enabled = true,
     this.size = 34,
     this.exponential = false,
+    this.automation,
   });
+
+  /// The parameter it turns, as the arranger's lanes name it: a hold (or a right-click) opens its menu with
+  /// Automate (#230). Null: no menu.
+  final ControlAutomation? automation;
 
   /// Turn on an exponential taper ([Taper]): the parameter descriptor's `curve: exponential`.
   final bool exponential;
@@ -184,6 +190,8 @@ class _KnobState extends State<Knob> {
           onVerticalDragCancel: () {
             if (_held) setState(() => _held = false);
           },
+          onLongPressStart: widget.automation == null ? null : (d) => widget.automation!.menu(context, d.globalPosition),
+          onSecondaryTapUp: widget.automation == null ? null : (d) => widget.automation!.menu(context, d.globalPosition),
           onDoubleTap: widget.enabled && widget.defaultValue != null
               ? () { _set(widget.defaultValue!); _dragValue = null; widget.onChangeEnd?.call(); }
               : null,

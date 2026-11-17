@@ -9,6 +9,8 @@ import 'package:path_provider/path_provider.dart';
 
 import '../engine/engine.dart';
 import '../model/app_state.dart';
+import '../model/midi_clips.dart';
+import '../model/pattern_doc.dart';
 import '../model/project.dart';
 import '../platform/save_copy.dart';
 import '../model/settings.dart';
@@ -284,9 +286,13 @@ class _ExportPageState extends State<ExportPage> {
         final source = item.patternSource;
         final bpm = item.bpm;
         final beatsPerBar = item.beatsPerBar;
-        final error = await Isolate.run(() => Engine.exportPattern(source, path,
-          bpm: bpm, beatsPerBar: beatsPerBar));
-        if (error != null) throw StateError(error);
+        // The app's own MIDI writer (lib/model/midi_clips.dart), off the UI isolate.
+        final bytes = await Isolate.run(() {
+          final doc = PatternDoc.parse(source).doc;
+          if (doc == null) throw StateError('the pattern has an error');
+          return patternToMidi(doc, bpm: bpm, beatsPerBar: beatsPerBar);
+        });
+        await outputFile.writeAsBytes(bytes, flush: true);
         if (_cancelQueueRequested) return false;
       } else {
         final job = RenderJob.start(RenderRequest(
@@ -533,14 +539,17 @@ class _ExportPageState extends State<ExportPage> {
       final name = _fileName();
       file = File('${tmp.path}${Platform.pathSeparator}$name');
       final source = module.source;
-      // The project's tempo map and signatures as tempo and meter events (C API 31); a ramp is written as a tempo
-      // event every 1/16 note, since MIDI tempos can't ramp.
+      // The project's tempo map and signatures as tempo and meter events; a ramp is written as a tempo event every
+      // 1/16 note, since MIDI tempos can't ramp (midiTempos).
       final tempoMap = s.project.tempoMap;
       final signatures = s.project.timeSignatures;
-      final outputPath = file.path;
-      final error = await Isolate.run(() => Engine.exportPatternSong(source, outputPath,
-        tempoMap: tempoMap, timeSignatures: signatures));
-      if (error != null) throw StateError(error);
+      final bpm = s.project.bpm, beats = s.project.beatsPerBar;
+      final bytes = await Isolate.run(() {
+        final doc = PatternDoc.parse(source).doc;
+        if (doc == null) throw StateError('the pattern has an error');
+        return patternToMidi(doc, bpm: bpm, beatsPerBar: beats, tempoMap: tempoMap, signatures: signatures);
+      });
+      await file.writeAsBytes(bytes, flush: true);
       final saved = await saveCopyOf(file, name: name, mimeType: 'audio/midi', extension: 'mid');
       final historyWarning = saved ? await _recordExport(name) : null;
       if (!mounted) return;

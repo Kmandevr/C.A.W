@@ -163,12 +163,12 @@ void main() {
     s.dispose();
   }, skip: skip);
 
-  test('a pattern exported as .mid and as a MIDI 2.0 clip imports back with the same notes', () {
+  test('a pattern exported as a MIDI 2.0 clip (the engine writes those) imports back with the same notes', () {
     if (skip) return;
     const src = '---\nkind: pattern\n---\n0 C3 1\n2 E3,G3 2 0.5\n';
     final dir = Directory.systemTemp.createTempSync('caw_midi');
-    for (final clip in [false, true]) {
-      final path = '${dir.path}/p${clip ? 2 : 1}';
+    for (final clip in [true]) {
+      final path = '${dir.path}/p2';
       expect(Engine.exportPattern(src, path, clip: clip), isNull);
       final back = PatternDoc.parse(Engine.patternFromMidi(File(path).readAsBytesSync())).doc!;
       expect(back.notes.map((n) => (n.at, n.pitch)).toList(), [(Steps(0), 48.0), (Steps(2), 52.0), (Steps(2), 55.0)]);

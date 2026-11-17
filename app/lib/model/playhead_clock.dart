@@ -17,8 +17,9 @@ class PlayheadClock {
   /// The time constant a smaller error fades out with (longer than [snapUs], so the playhead never runs backwards).
   static const settleUs = 80000;
 
-  /// How far past the last read the playhead runs on, if reads stop coming (a stalled poller holds the line).
-  static const maxAheadUs = 100000;
+  /// How far past the last read the playhead runs on, if reads stop coming (a stalled poller holds the line). Room
+  /// for Lightweight's 66 ms reads plus the screen's lead (AppState.visualLeadUs, up to about 40 ms at 60 Hz).
+  static const maxAheadUs = 150000;
 
   bool _playing = false;
   double _base = 0, _err = 0, _rate = 0; // steps at [_baseUs], shown minus engine then, steps per µs

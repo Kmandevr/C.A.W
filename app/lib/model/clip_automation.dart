@@ -2,13 +2,14 @@
 // onto the song timeline for the engine (ProjectDoc.toEngineJson), merged with the track's own lane on the same target.
 import 'dart:math' as math;
 
+import 'automation_curve.dart';
 import 'pattern_doc.dart';
 import 'project.dart';
 
 /// One automation lane on a clip: the track's volume or pan (`track`), its instrument's parameter (`instrument`) or
 /// one of its effects' (`component`, [component] its index in the track's chain). Points are in the clip's own time:
-/// steps from its pattern's start, within its loop ([ClipDoc.loopLength]), joined as track lanes are (straight,
-/// holding before the first and after the last).
+/// steps from its pattern's start, within its loop ([ClipDoc.loopLength]), joined as track lanes are (each point's
+/// curve to the next, holding before the first and after the last).
 class ClipAutomationLaneDoc {
   ClipAutomationLaneDoc({required this.targetType, required this.target, this.component, List<AutomationPointDoc>? points})
       : points = points ?? [];
@@ -51,39 +52,96 @@ class ClipAutomationLaneDoc {
 /// later repeats hold the last value (a 1-step loop over a whole song would otherwise be millions of points).
 const int kMaxClipLanePoints = 1 << 16;
 
-typedef _P = ({double step, double value});
+typedef _P = ({double step, double value, AutomationCurve curve, double tension});
+
+_P _of(AutomationPointDoc p) => (step: p.step, value: p.value, curve: p.curve, tension: p.tension);
+_P _flat(double step, double value) => (step: step, value: value, curve: AutomationCurve.linear, tension: 0.0);
+
+/// The value along [a]'s segment to [b] at [x], through [a]'s curve (lib/model/automation_curve.dart).
+double _seg(_P a, _P b, double x) {
+  final span = b.step - a.step;
+  if (span <= 0) return b.value;
+  final t = (x - a.step) / span;
+  if (a.curve == AutomationCurve.linear) return a.value + (b.value - a.value) * t;
+  return a.value + (b.value - a.value) * curveShape(a.curve, a.tension, t);
+}
+
+/// The last point at or before [x] (-1: none).
+int _at(List<_P> pts, double x) {
+  var lo = 0, hi = pts.length;
+  while (lo < hi) {
+    final mid = (lo + hi) >> 1;
+    if (pts[mid].step <= x) {
+      lo = mid + 1;
+    } else {
+      hi = mid;
+    }
+  }
+  return lo - 1;
+}
 
 /// The value of a point list (time order, equal steps allowed) at [x], as the engine reads a lane
 /// (`automationLaneValue`): where two points share a step, the later one holds from there.
 double _right(List<_P> pts, double x) {
   if (x <= pts.first.step) return pts.first.value;
   if (x >= pts.last.step) return pts.last.value;
-  var lo = 0, hi = pts.length - 1;
-  while (lo + 1 < hi) {
-    final mid = (lo + hi) >> 1;
-    if (pts[mid].step <= x) {
-      lo = mid;
-    } else {
-      hi = mid;
-    }
-  }
-  final a = pts[lo], b = pts[hi];
-  return a.value + (b.value - a.value) * (x - a.step) / (b.step - a.step);
+  final i = _at(pts, x);
+  return _seg(pts[i], pts[i + 1], x);
 }
 
 /// The value just before [x] (where two points share a step, the earlier one).
 double _left(List<_P> pts, double x) {
   if (x <= pts.first.step) return pts.first.value;
   if (x > pts.last.step) return pts.last.value;
-  var j = pts.indexWhere((p) => p.step >= x);
-  final a = pts[j - 1], b = pts[j];
-  return a.value + (b.value - a.value) * (x - a.step) / (b.step - a.step);
+  final j = pts.indexWhere((p) => p.step >= x);
+  return _seg(pts[j - 1], pts[j], x);
+}
+
+/// How many straight pieces stand in for a bent segment cut by a clip's edge: a part of a curve isn't the same curve.
+const int _cutPieces = 16;
+
+/// [src]'s points from [x] to [y] (null: from its start, to its end) through [add], shifted by [shift]: the value at
+/// each end, the points between with their curves, and where an end cuts a bent segment, the cut part as straight
+/// pieces along the curve (a step's or a line's part is a step or a line).
+void _range(List<_P> src, double? x, double? y, void Function(_P) add, {double shift = 0}) {
+  void pieces(int i, double from, double to) {
+    for (var k = 1; k < _cutPieces; k++) {
+      final at = from + (to - from) * k / _cutPieces;
+      add(_flat(at + shift, _seg(src[i], src[i + 1], at)));
+    }
+  }
+
+  if (x != null) {
+    final i = _at(src, x);
+    final inside = i >= 0 && i + 1 < src.length;
+    final v = _right(src, x);
+    final cut = inside && src[i].curve.bends && (src[i].step != x || (y != null && src[i + 1].step > y));
+    if (cut) {
+      add(_flat(x + shift, v));
+      pieces(i, x, y == null ? src[i + 1].step : math.min(y, src[i + 1].step));
+    } else if (inside && src[i].step == x) {
+      add((step: x + shift, value: v, curve: src[i].curve, tension: src[i].tension));
+    } else {
+      add((step: x + shift, value: v, curve: inside ? src[i].curve : AutomationCurve.linear, tension: 0.0));
+    }
+  }
+  for (var j = 0; j < src.length; j++) {
+    final p = src[j];
+    if ((x != null && p.step <= x) || (y != null && p.step >= y)) continue;
+    if (y != null && p.curve.bends && j + 1 < src.length && src[j + 1].step > y) {
+      add(_flat(p.step + shift, p.value));
+      pieces(j, p.step, y);
+    } else {
+      add((step: p.step + shift, value: p.value, curve: p.curve, tension: p.tension));
+    }
+  }
+  if (y != null) add(_flat(y + shift, _left(src, y)));
 }
 
 /// The value of a lane's [points] (time order) at [at], as the engine plays it; with [left], just before [at].
 double pointsValueAt(List<AutomationPointDoc> points, double at, {bool left = false}) {
   if (points.isEmpty) return 0;
-  final pts = [for (final p in points) (step: p.step, value: p.value)];
+  final pts = [for (final p in points) _of(p)];
   return left ? _left(pts, at) : _right(pts, at);
 }
 
@@ -93,9 +151,10 @@ typedef ClipLaneSpan = ({double start, double end, List<_P> points});
 /// [clip]'s lane [points] (clip time) on the song timeline: one pass of the loop from the clip's source offset, then
 /// a pass every [loop] steps while the clip loops, to the clip's end. Each pass starts at the lane's value there, so a
 /// repeat jumps back to the loop's first value as the notes do. A clip that doesn't loop plays one pass and then holds.
+/// Curves go with their points; a bent segment cut by a pass's ends is drawn in straight pieces along it.
 ClipLaneSpan clipLaneSpan(ClipDoc clip, List<AutomationPointDoc> points, int loop, {int budget = kMaxClipLanePoints}) {
   final start = clip.startSteps.toDouble(), end = (clip.startSteps + clip.lengthSteps).toDouble();
-  final local = [for (final p in points) (step: p.step, value: p.value)]..sort((a, b) => a.step.compareTo(b.step));
+  final local = [for (final p in points) _of(p)]..sort((a, b) => a.step.compareTo(b.step));
   final out = <_P>[];
   if (local.isEmpty) return (start: start, end: end, points: out);
   final length = math.max(1, loop).toDouble();
@@ -104,11 +163,7 @@ ClipLaneSpan clipLaneSpan(ClipDoc clip, List<AutomationPointDoc> points, int loo
   while (t < end && out.length < budget) {
     final dt = clip.loop ? math.min(end - t, length - u) : end - t;
     if (dt <= 0) break;
-    out.add((step: t, value: _right(local, u)));
-    for (final p in local) {
-      if (p.step > u && p.step < u + dt) out.add((step: t + p.step - u, value: p.value));
-    }
-    out.add((step: t + dt, value: _left(local, u + dt)));
+    _range(local, u, u + dt, out.add, shift: t - u);
     t += dt;
     u = 0;
     if (!clip.loop) break;
@@ -122,41 +177,38 @@ ClipLaneSpan clipLaneSpan(ClipDoc clip, List<AutomationPointDoc> points, int loo
 /// one in [spans] on a tie); after it ends, the one under it plays again.
 List<AutomationPointDoc> mergeClipLanes(List<AutomationPointDoc> base, double baseValue, List<ClipLaneSpan> spans) {
   final baseP = base.isEmpty
-      ? <_P>[(step: 0, value: baseValue)]
-      : [for (final p in base) (step: p.step, value: p.value)]..sort((a, b) => a.step.compareTo(b.step));
+      ? <_P>[_flat(0, baseValue)]
+      : [for (final p in base) _of(p)]..sort((a, b) => a.step.compareTo(b.step));
   final live = [for (final s in spans) if (s.points.isNotEmpty && s.end > s.start) s];
-  if (live.isEmpty) return [for (final p in base) AutomationPointDoc(step: p.step, value: p.value)]..sort((a, b) => a.step.compareTo(b.step));
+  if (live.isEmpty) return [for (final p in base) p.copy()]..sort((a, b) => a.step.compareTo(b.step));
   // Priority: later start wins; a stable sort keeps list order for equal starts.
   final ranked = [...live.indexed]..sort((a, b) => a.$2.start != b.$2.start ? a.$2.start.compareTo(b.$2.start) : a.$1.compareTo(b.$1));
   final bounds = {for (final s in live) ...[s.start, s.end]}.toList()..sort();
   final out = <_P>[];
-  void add(double step, double value) {
-    if (out.length >= 2 && out[out.length - 1].step == step && out[out.length - 2].step == step) {
-      out[out.length - 1] = (step: step, value: value); // three at one step: the middle one never plays
-    } else if (out.isEmpty || out.last.step != step || out.last.value != value) {
-      out.add((step: step, value: value));
+  void add(_P q) {
+    if (out.length >= 2 && out[out.length - 1].step == q.step && out[out.length - 2].step == q.step) {
+      out[out.length - 1] = q; // three at one step: the middle one never plays
+    } else if (out.isEmpty || out.last.step != q.step || out.last.value != q.value) {
+      out.add(q);
+    } else {
+      out[out.length - 1] = q; // the same point again: the later one's curve goes on from it
     }
   }
 
-  void interval(List<_P> src, double? x, double? y) {
-    if (x != null) add(x, _right(src, x));
-    for (final p in src) {
-      if ((x == null || p.step > x) && (y == null || p.step < y)) add(p.step, p.value);
-    }
-    if (y != null) add(y, _left(src, y));
-  }
-
-  interval(baseP, null, bounds.first);
+  _range(baseP, null, bounds.first, add);
   for (var i = 0; i + 1 < bounds.length; i++) {
     final x = bounds[i], y = bounds[i + 1];
     ClipLaneSpan? winner;
     for (final (_, s) in ranked) {
       if (s.start <= x && s.end >= y) winner = s;
     }
-    interval(winner?.points ?? baseP, x, y);
+    _range(winner?.points ?? baseP, x, y, add);
   }
-  interval(baseP, bounds.last, null);
-  return [for (final p in out.take(kMaxClipLanePoints * 2)) AutomationPointDoc(step: p.step, value: p.value)];
+  _range(baseP, bounds.last, null, add);
+  return [
+    for (final p in out.take(kMaxClipLanePoints * 2))
+      AutomationPointDoc(step: p.step, value: p.value, curve: p.curve, tension: p.tension),
+  ];
 }
 
 /// One target's lane on a track as the engine gets it, the clips' lanes merged in ([unrollClipAutomation]).

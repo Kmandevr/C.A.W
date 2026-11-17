@@ -99,6 +99,7 @@ struct Output {
     std::string kind, layer, stemName, finalName, finalPath, rawPath;
     bool write = true;  // the mix is always measured (stems take its gain) but written only when asked for
     std::FILE* raw = nullptr;
+    int64_t skip = 0;  // a pre-fader stem: its layer's own latency, the frames dropped from its start
     std::vector<float> l, r;
     MasterStage master;
     double peak = 0;
@@ -316,7 +317,12 @@ bool renderRange(const ProjectSpec& base, const SongRenderRequest& req, const st
         cleanup();
         return false;
     }
-    for (size_t i = 1; i < outs.size(); ++i) eng.setOutputTap(outs[i].layer, outs[i].l.data(), outs[i].r.data());
+    int64_t maxSkip = 0;
+    for (size_t i = 1; i < outs.size(); ++i) {
+        eng.setOutputTap(outs[i].layer, outs[i].l.data(), outs[i].r.data(), req.stemsPreFader);
+        if (req.stemsPreFader) outs[i].skip = eng.layerLatency(outs[i].layer);
+        maxSkip = std::max(maxSkip, outs[i].skip);
+    }
     eng.play(static_cast<double>(range.startSteps));
     const bool rampIn = start > 0 && start < eng.loopLength();
     for (size_t i = 1; i < outs.size(); ++i) outs[i].master.start(p.master, sr, rampIn);
@@ -328,13 +334,16 @@ bool renderRange(const ProjectSpec& base, const SongRenderRequest& req, const st
     const double share = 1.0 / static_cast<double>(rangeCount);
     // Engine::process holds its own; this one covers the stems' master chains and the loudness meters run after it.
     const ScopedFlushDenormals flushDenormals;
-    while (done < total) {
+    // A pre-fader stem's frame f is the engine's frame f + skip: the pass runs maxSkip frames longer, and each output
+    // writes the frames of its own [0, total) (`done` counts the engine's frames).
+    const int64_t passFrames = total + maxSkip;
+    while (done < passFrames) {
         if (cancelled(cancel)) {
             error = "cancelled";
             cleanup();
             return false;
         }
-        const int n = static_cast<int>(std::min<int64_t>(kChunk, total - done));
+        const int n = static_cast<int>(std::min<int64_t>(kChunk, passFrames - done));
         for (size_t i = 1; i < outs.size(); ++i) {
             std::fill_n(outs[i].l.data(), n, 0.0f);
             std::fill_n(outs[i].r.data(), n, 0.0f);
@@ -342,22 +351,28 @@ bool renderRange(const ProjectSpec& base, const SongRenderRequest& req, const st
         eng.process(mixL, mixR, n);
         for (size_t i = 0; i < outs.size(); ++i) {
             Output& o = outs[i];
-            float* l = i == 0 ? mixL : o.l.data();
-            float* r = i == 0 ? mixR : o.r.data();
-            if (i > 0 && req.stemsThroughMaster) o.master.run(l, r, n);
-            for (int k = 0; k < n; ++k) {
+            const int k0 = static_cast<int>(std::clamp<int64_t>(o.skip - done, 0, n));
+            const int k1 = static_cast<int>(std::clamp<int64_t>(total + o.skip - done, k0, n));
+            if (k1 <= k0) continue;
+            const int len = k1 - k0;
+            float* l = (i == 0 ? mixL : o.l.data()) + k0;
+            float* r = (i == 0 ? mixR : o.r.data()) + k0;
+            const int64_t at = done + k0 - o.skip;  // the output's own frame of l[0]
+            if (i > 0 && req.stemsThroughMaster) o.master.run(l, r, len);
+            const bool judged = !req.stemsPreFader || i > 0 || req.mix;
+            for (int k = 0; k < len; ++k) {
                 const float a = std::fabs(l[k]), b = std::fabs(r[k]);
                 const float m = a > b ? a : b;
                 if (m > o.peak) o.peak = m;
-                if (m > silence) lastLoud = std::max(lastLoud, done + k);
+                if (judged && m > silence) lastLoud = std::max(lastLoud, at + k);
             }
-            if (o.meter) o.meter->process(l, r, n);
+            if (o.meter) o.meter->process(l, r, len);
             if (o.raw) {
-                for (int k = 0; k < n; ++k) {
+                for (int k = 0; k < len; ++k) {
                     lr[2 * k] = l[k];
                     lr[2 * k + 1] = r[k];
                 }
-                if (std::fwrite(lr, sizeof(float), static_cast<size_t>(n) * 2, o.raw) != static_cast<size_t>(n) * 2) {
+                if (std::fwrite(lr, sizeof(float), static_cast<size_t>(len) * 2, o.raw) != static_cast<size_t>(len) * 2) {
                     error = "couldn't write " + o.rawPath + " (is the storage full?)";
                     cleanup();
                     return false;
@@ -365,15 +380,16 @@ bool renderRange(const ProjectSpec& base, const SongRenderRequest& req, const st
             }
         }
         done += n;
-        if (req.tail == SongTail::Silence && done >= length && done - (lastLoud + 1) >= hold) break;
+        const int64_t outDone = std::max<int64_t>(0, done - maxSkip);  // frames every output has
+        if (req.tail == SongTail::Silence && outDone >= length && outDone - (lastLoud + 1) >= hold) break;
         if ((done & 0x3FFF) < kChunk)
-            setProgress(progress, share * (static_cast<double>(rangeIndex) + 0.9 * static_cast<double>(done) / total));
+            setProgress(progress, share * (static_cast<double>(rangeIndex) + 0.9 * static_cast<double>(done) / passFrames));
     }
     eng.clearOutputTaps();
 
-    int64_t frames = done;
+    int64_t frames = std::min<int64_t>(total, done - maxSkip);
     if (req.tail == SongTail::Silence)
-        frames = std::min(done, std::max(length, lastLoud + 1 + static_cast<int64_t>(kSilencePadSeconds * sr)));
+        frames = std::min(frames, std::max(length, lastLoud + 1 + static_cast<int64_t>(kSilencePadSeconds * sr)));
     for (Output& o : outs) {
         if (o.raw && std::fclose(o.raw) != 0) {
             o.raw = nullptr;
@@ -465,7 +481,7 @@ bool renderRange(const ProjectSpec& base, const SongRenderRequest& req, const st
 const char* kRequestKeys[] = {"out_dir", "project", "pattern", "mix", "tracks", "buses", "layers", "bounds",
                               "start_steps", "end_steps", "regions", "sample_rate", "bit_depth", "dither",
                               "normalize", "target", "ceiling", "normalize_each", "tail", "tail_seconds",
-                              "silence_db", "stems_through_master"};
+                              "silence_db", "stems_through_master", "stem_tap"};
 
 }  // namespace
 
@@ -581,6 +597,12 @@ bool parseSongRenderRequest(std::string_view json, SongRenderRequest& r, std::st
         return false;
     }
     r.stemsThroughMaster = j.boolean("stems_through_master", r.stemsThroughMaster);
+    const std::string tap = j.string("stem_tap", "post");
+    if (tap != "post" && tap != "pre") {
+        error = "'stem_tap' must be post or pre";
+        return false;
+    }
+    r.stemsPreFader = tap == "pre";
     return true;
 }
 

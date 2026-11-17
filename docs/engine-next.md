@@ -1,7 +1,7 @@
 ---
 title: Modular adaptive engine blueprint
 summary: Complete native-engine architecture and implementation requirements; actual progress and recovery are tracked separately.
-updated: 2026-11-12
+updated: 2026-11-17
 ---
 
 # Modular adaptive engine blueprint
@@ -103,7 +103,7 @@ The synth is the C++ Flagship (`org.caw.synth.flagship`, [engine](engine.md)); t
 
 MIDI is a native event and asset model. Preserve and extend the existing pattern engine, while supporting practical arranging and editing without requiring a traditional-DAW workflow:
 - Independent polyphonic voices and per-note expression.
-- Pitch bend (editor default ±12 semitones; file range up to ±48), pressure/volume, timbre and vibrato curves.
+- Pitch bend (up to ±96 semitones in the editor and the file), pressure/volume, timbre and vibrato curves.
 - Multiple editable expression lanes, bounded by explicit resource budgets.
 - Shared curve representation for note expression, LFOs, envelopes and parameter modulation.
 - MPE-compatible export and MIDI 2.0-oriented internal precision, including fractional pitches.

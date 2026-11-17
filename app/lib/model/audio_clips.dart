@@ -1,8 +1,10 @@
 // Audio on tracks (API 18, docs/engine.md "Audio clips"): the project's audio files, a track's input and its audio
 // clips, their engine JSON, and the pure edits (split, trim, fades, takes placed with latency compensation).
+import 'dart:convert';
 import 'dart:math' as math;
 
 import '../engine/bindings.dart' show cawApiVersion;
+import 'comping.dart' show CompPartDoc, compFromJson, normalizeComp;
 import 'tempo_map.dart';
 
 /// A fade's shape, as the engine names it.
@@ -56,12 +58,45 @@ enum AudioStretch {
   static AudioStretch get keepPitch => cawApiVersion >= 32 ? signalsmith : wsola;
 }
 
-/// One audio file the project uses: copied into the project's storage on import, referenced by absolute path.
+/// Where a file in a linked sample folder is (`sample_library.dart`): the folder's id and the file's path inside it,
+/// with `/` between folders. Files there are used in place, never copied.
+class LinkedRef {
+  const LinkedRef(this.root, this.rel);
+  final String root, rel;
+
+  /// What `path` is saved as while the file is only reachable through a session handle (an Android document): a
+  /// path that names it and is never there, so the project shows it missing until it is found again.
+  String get placeholder => '/caw-linked/$root/$rel';
+
+  Map<String, dynamic> toJson() => {'root': root, 'rel': rel};
+
+  /// A plain relative path (no `..`, `.`, empty parts, backslashes, drive or control characters), at most 1024.
+  static bool safeRel(String rel) {
+    if (rel.isEmpty || rel.length > 1024 || rel.startsWith('/') || rel.contains('\\') || rel.contains(':')) return false;
+    for (final c in rel.codeUnits) {
+      if (c < 0x20 || c == 0x7f) return false;
+    }
+    return rel.split('/').every((p) => p.isNotEmpty && p != '.' && p != '..');
+  }
+
+  static LinkedRef? fromJson(Object? j) {
+    if (j is! Map) return null;
+    final root = j['root'], rel = j['rel'];
+    if (root is! String || rel is! String || !RegExp(r'^[A-Za-z0-9_-]{1,40}$').hasMatch(root) || !safeRel(rel)) return null;
+    return LinkedRef(root, rel);
+  }
+}
+
+/// One audio file the project uses: copied into the project's storage on import, or a file in a linked sample folder
+/// used in place ([link]); referenced by absolute path.
 class AudioAssetDoc {
   AudioAssetDoc({required this.id, required this.path, required this.name, this.bpm, this.seconds = 0,
-      this.channels = 0, this.sourceRate = 0, this.recorded = false});
+      this.channels = 0, this.sourceRate = 0, this.recorded = false, this.link});
   final String id;
   String path, name;
+
+  /// Set for a file in a linked sample folder: [path] is where it is on this device this session.
+  LinkedRef? link;
 
   /// The source tempo musical clips default to (null: none known).
   double? bpm;
@@ -74,7 +109,9 @@ class AudioAssetDoc {
   bool recorded;
 
   Map<String, dynamic> toJson() => {
-        'id': id, 'path': path, 'name': name,
+        // A session handle (an Android document's /proc/self/fd path) is never saved: the link finds it again.
+        'id': id, 'path': link != null && isSessionPath(path) ? link!.placeholder : path, 'name': name,
+        if (link != null) 'link': link!.toJson(),
         if (bpm != null) 'bpm': bpm,
         if (seconds > 0) 'seconds': seconds,
         if (channels > 0) 'channels': channels,
@@ -89,11 +126,29 @@ class AudioAssetDoc {
     final id = _text(j['id'], 64), path = _text(j['path'], 4096);
     if (id.isEmpty || path.isEmpty) return null;
     final bpm = j['bpm'];
-    return AudioAssetDoc(id: id, path: path, name: _text(j['name'], 128).isEmpty ? _baseName(path) : _text(j['name'], 128),
+    return AudioAssetDoc(id: id, path: path, link: LinkedRef.fromJson(j['link']), name: _text(j['name'], 128).isEmpty ? _baseName(path) : _text(j['name'], 128),
         bpm: bpm is num && bpm.isFinite && bpm > 0 ? bpm.toDouble().clamp(20.0, 999.0) : null,
         seconds: _num(j['seconds'], 0, 0, 3 * 3600), channels: _num(j['channels'], 0, 0, 2).round(),
         sourceRate: _num(j['source_rate'], 0, 0, 768000).round(), recorded: j['recorded'] == true);
   }
+}
+
+/// A path that is only good for this run of the app: an open file handle through /proc (an Android document).
+/// A project as read never names one (or a /dev file): `quarantineUnsafePaths` moves such paths to missing files.
+bool isSessionPath(String path) => path.replaceAll('\\', '/').startsWith('/proc/');
+
+/// What each session path stands for when the project is saved: the linked file's placeholder (`LinkedRef`).
+final Map<String, String> sessionPathNames = {};
+
+/// [json] (a project as saved) with every session path in it replaced by what it stands for, so a drum pad or a
+/// sampler zone on a linked Android document is saved by its link, never by a handle that means nothing next run.
+String saveSessionPaths(String json) {
+  if (!json.contains('/proc/')) return json;
+  var out = json;
+  sessionPathNames.forEach((session, name) {
+    out = out.replaceAll(jsonEncode(session), jsonEncode(name));
+  });
+  return out;
 }
 
 /// A track's audio input: which device channels it records and hears, and whether it is armed.
@@ -155,8 +210,10 @@ class AudioClipDoc {
     this.name,
     this.color,
     List<String>? takes,
+    List<CompPartDoc>? comp,
   })  : _lengthSteps = lengthSteps, // ignore: prefer_initializing_formals
-        takes = takes ?? [];
+        takes = takes ?? [],
+        comp = comp ?? [];
 
   final String id;
   String assetId;
@@ -192,6 +249,10 @@ class AudioClipDoc {
 
   /// Loop-recorded takes (asset ids, oldest first): the clip plays [assetId], one of them.
   List<String> takes;
+
+  /// The comp across [takes] (#209, lib/model/comping.dart): the parts of them the clip plays, in seconds of the
+  /// file as the clip reads it (unwrapped); empty plays [assetId] whole.
+  List<CompPartDoc> comp;
 
   static const double maxGain = 3.9810717055349722; // +12 dB
   static const double minLengthSteps = 1 / 16;
@@ -256,6 +317,7 @@ class AudioClipDoc {
         if (name != null) 'name': name,
         if (color != null) 'color': color,
         if (takes.isNotEmpty) 'takes': takes,
+        if (comp.isNotEmpty) 'comp': [for (final p in comp) p.toJson()],
       };
 
   /// How many steps the clip spans on [tempo] (the project's map): a fixed clip's seconds from where it starts, so
@@ -320,6 +382,7 @@ class AudioClipDoc {
       return _num(j['${key}_seconds'], 0, 0, 3 * 3600);
     }
     final cents = j['pitch_cents'];
+    final takes = [for (final t in (j['takes'] as List?) ?? const []) if (t is String && t.isNotEmpty) t].take(64).toList();
     return AudioClipDoc(
       id: id,
       assetId: asset,
@@ -347,7 +410,8 @@ class AudioClipDoc {
       lock: j['lock'] == true,
       name: switch (_text(j['name'], 128)) { '' => null, final n => n },
       color: switch (j['color']) { final int c when c >= 0 && c < 8 => c, _ => null },
-      takes: [for (final t in (j['takes'] as List?) ?? const []) if (t is String && t.isNotEmpty) t].take(64).toList(),
+      takes: takes,
+      comp: compFromJson(j['comp'], takes),
     );
   }
 
@@ -382,7 +446,12 @@ AudioClipDoc? splitAudioClip(AudioClipDoc clip, double at, String newId,
   final left = at - clip.startSteps;
   if (left <= AudioClipDoc.minLengthSteps / 2 || len - left <= AudioClipDoc.minLengthSteps / 2) return null;
   final right = clip.copyWith(id: newId, startSteps: at);
-  right.offsetSeconds = wrapOffset(clip, clip.offsetSeconds + left * clip.sourcePerStep(bpm, assetBpm), assetSeconds);
+  final unwrapped = clip.offsetSeconds + left * clip.sourcePerStep(bpm, assetBpm);
+  right.offsetSeconds = wrapOffset(clip, unwrapped, assetSeconds);
+  // A comp counts the file's seconds from where the clip reads: a wrapped offset moves its parts with it.
+  if (right.offsetSeconds != unwrapped) {
+    right.comp = normalizeComp([for (final p in clip.comp) CompPartDoc(p.take, p.from + right.offsetSeconds - unwrapped)]);
+  }
   right.setLength(len - left, bpm);
   right.fadeIn = 0;
   right.takes = List.of(clip.takes);
@@ -441,9 +510,18 @@ void resizeAudioClip(AudioClipDoc clip, double newLength, double assetSeconds, {
 
 /// Turns [clip] around: it reads the file backwards over the same part of it (offsets then count from the end).
 void reverseAudioClip(AudioClipDoc clip, double assetSeconds, {required double bpm, double? assetBpm}) {
+  final before = clip.offsetSeconds, used = clip.sourceSeconds(bpm, assetBpm);
   if (!clip.loop && assetSeconds > 0) {
-    final used = clip.sourceSeconds(bpm, assetBpm);
     clip.offsetSeconds = math.max(0, assetSeconds - (clip.offsetSeconds + used));
+  }
+  // A comp's parts turn round with the audio: what played at the clip's end now plays at its start.
+  if (clip.comp.length >= 2) {
+    final mirror = clip.offsetSeconds + used + before;
+    final parts = clip.comp;
+    clip.comp = normalizeComp([
+      for (var i = parts.length - 1; i >= 0; i--)
+        CompPartDoc(parts[i].take, i + 1 < parts.length ? mirror - parts[i + 1].from : 0),
+    ]);
   }
   clip.reverse = !clip.reverse;
   final (a, ac, b, bc) = (clip.fadeIn, clip.fadeInCurve, clip.fadeOut, clip.fadeOutCurve);

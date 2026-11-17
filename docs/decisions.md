@@ -1,10 +1,266 @@
 ---
 title: Decisions
 summary: Dated record of what was chosen and why, newest first.
-updated: 2026-11-14
+updated: 2026-11-17
 ---
 
 # Decisions
+
+## 2026-11-17: Each platform's low-latency path; ASIO and rtkit stay out (owner's request, #237)
+
+**Decision:** Low latency on Windows asks the endpoint's smallest period through `IAudioClient3` (shared) or the device's minimum (exclusive), never under 128 frames, falling back to miniaudio's 10 ms when that does not open; Auto, Battery and a chosen size are unchanged, so the default path is as before (Claude's choice: Low latency is the user's explicit request for the least delay). Exclusive mode stays off by default on Windows and Android (the earlier decision). `CAW_AUDIO_BACKEND` puts one miniaudio backend first for the CLI and tests (unset by default). On Android the stream already suits LE Audio (48 kHz, stereo, usage GAME); the route model reports LE Audio or A2DP and its label in the Latency page waits for the owner's look. BLE MIDI needs nothing: Android's own MIDI service asks for high connection priority. **No new dependency:** ASIO is proprietary or GPLv3, libdbus (for rtkit) AFL-2.1 or GPL-2.0+, neither clearly permissive; both are left to the owner. Facts and sources in [engine](engine.md) ("Each platform's low-latency path").
+
+## 2026-11-17: Latency: lean early, an instant UI on Bluetooth, a slider while listening, learned compensation (owner, #236)
+
+**Owner (2026-11-17, final):** what follows the audio (playhead, meters, clip highlights, the piano-roll cursor, the music video preview) errs slightly early rather than late, 0 to 10 ms; everything else responds at once, even on Bluetooth; an offset slider in ms with ±1 ms buttons, reachable without opening Settings, used while the song plays, saved per output device; type-in, tap-along and the loopback stay; offsets per device by route kind and a stable non-identifying key, re-checked on a device change; the ping runs several times and an unreliable result is reported, not saved; takes measured against the beat **suggest** a correction, never applied silently; when Bluetooth is the output the UI says plainly that it adds a delay no app can remove, with a help card (LE Audio, game or low-latency modes) and a button to the system's Bluetooth settings. C.A.W does not try to choose the codec (owner's brief: a privileged system API since Android 14).
+
+**Why playback looked late (found 2026-11-17, before this change):** the output latency was already subtracted (`heardStep`); what was late was the rest. (1) Meters, clip and track highlights showed the newest meter read taken at or before *now − output latency*; a read stands for the ~33 ms rendered before it, so they were on average a whole read interval late (0 to 66 ms), plus the bar's 15 ms rise. (2) Nothing allowed for the display: a frame built for *now* lights up about two refreshes later (**[Assumption]**: 17 ms at 120 Hz, 33 ms at 60 Hz). (3) The music video preview drew the last read's playhead each frame (held up to 33 ms, about 16 ms late on average, stepping at 30 Hz), as did the piano roll under Smooth follow. (4) On-screen keys were recorded at the last read (up to 33 ms early).
+
+**Chosen (Claude):**
+- **Early bias 5 ms** (`earlyBiasUs`), on top of the display latency: it covers what stays uncertain after the compensation (the output latency is read at a random point of the callback's cycle, half a burst either way; the display latency is whole refreshes, half a 120 Hz frame is 4.2 ms), and a picture ahead of its sound is the side people forgive (**[Fact]** ITU-R BT.1359-1: detectable at about 45 ms of sound ahead of the picture but 125 ms behind; secondary sources, read 2026-11-17). The lead is 21.7 ms at 120 Hz.
+- **Meters by span:** the read whose span holds the heard moment (`MeterTimeline.covering`), not the newest before it; the playhead clock evaluated at now plus the lead (its run-on limit raised from 100 to 150 ms for Lightweight's 66 ms reads); what moves only on reads drawn half an interval on.
+- **Ping series:** 5 runs, at least 4 heard, all within 3 ms or 3 % of the median (**[Assumption]**); the median places takes (the engine's own measurement is only its last run).
+- **Learning:** MIDI takes only (note starts within 60 ms of a quarter-note beat); a suggestion after 3 takes and 24 notes with a median shift of at least 8 ms and 70 % agreement (**[Assumption]**); it changes the output's total, because a note played on what is heard lands late by exactly the output latency's error. Audio takes would need onset analysis of the take: not built.
+- **Per device:** the existing key (route kind and product name, local only; telemetry has only the kind), now with the system's figure at the time an offset was set: a move of more than 15 ms since shows a re-check card; the route is read again 2 s after a change. Offsets may go below the system's figure (to −500 ms) where it over-reports.
+- **Look choices for the owner to confirm:** the sheet is the app's glass sheet with a drag handle; the total in large monospace figures, yellow past 50 ms; outlined −/+ buttons either side of the slider (filled tonal ones came out loud magenta); Play/Pause and a Click chip under it; one dim line of instructions; cards with a faint tint and a coloured outline (green: suggestion, yellow: re-check, blue: Bluetooth); *Type in, tap along or measure* at the bottom. The entry is *Latency: N ms…* in Record's long-press menu (the transport has no other hold menu) and the latency badge's tap.
+
+**Audit (instant UI):** nothing but the playhead, meters and highlights, the count-in countdown and the place a take lands reads the output latency; buttons, selection, edits and knob drags never did. On-screen keys and pads already play on the finger's down (`Listener`).
+
+## 2026-11-17: Comping in take lanes, Consolidate, a take per loop pass and Record that just works (owner's decisions; Claude's build, #209)
+
+**Owner (2026-11-17, final):** a track's takes show as lanes under it, like the automation lanes (header, height, hold menu); a swipe across a take lane picks that part into the comp, which plays with short crossfades at the joins; Flatten turns the comp into ordinary clips and removes the unused takes, one undo step; MIDI and audio; the gesture rules of [UI](ui.md) (tap selects, double tap the quick action, hold the menu, hold-and-move moves); the comp plays exactly what is shown. Consolidate as #209 says ("merge selected clips on a track into one clip"), in the clip-selection hold menu next to Bounce to audio, one undo step. Frozen tracks ask "Unfreeze to edit?". Every loop pass, MIDI or audio, is a take. Record with nothing armed arms the selected track if it can take the input, else makes an audio track (the microphone) or a MIDI track (a keyboard connected), then counts in and records; a tip shown once explains the arm button; the microphone permission flow stays.
+
+**Built ([app](app.md): take lanes and comping, Consolidate, Record):**
+- **The comp is parts, not cut clips:** `[{take, from}]` on the clip, each part playing its take until the next. A MIDI comp counts in whole steps of the pattern (so it loops with the clip) and is played as a pattern of its own built from the parts (notes that start in a part, cut at its end), so the engine, the piano roll, export, bounce and freeze need nothing new. An audio comp counts in seconds of the file as the clip reads it (unwrapped past a loop), so a trim, a stretch or a tempo change keeps each part on its audio; a split and a reverse move it with the audio.
+- **Exactly what is shown, with no engine change:** the app sends an audio comp as a clip per part, each overlapping its neighbours by a 10 ms equal-power crossfade centred on the join (at most half the shorter part), through the existing clip player (fades, offsets, up to 16 overlapping voices; nothing new in the audio callback, nothing allocated there). A render test with the engine (`test/comping_test.dart`) checks the comp is each take bit for bit outside the crossfades and their equal-power sum inside, and that Flatten (the same parts as clips) renders identically. No C API change (33); no engine change, so no golden hash changed.
+- **Consolidate:** MIDI clips are joined as Glue joins them (their notes as they play, in one new pattern); audio clips go through the bounce path (`caw_render_song`, `stem_tap: "pre"`) from a copy of the project where the track plays only those clips with no instrument, effects or their lanes and links, over their span in whole steps with no tail, into one fixed clip; with the engine it renders as the clips did within 1e-6.
+- **Record:** `RecordStart.planRecord` and `pressRecord` (`lib/model/record_start.dart`); the new MIDI track plays the Flagship (the default synth). A MIDI loop recording now makes a take of every pass, an empty one included, but not a last pass recording stopped in before anything was played; audio already did (the engine ends a take at each loop wrap).
+- **Project format:** `comp` (MIDI and audio clips) and `show_takes` (a layer) are part of format v5 (no further bump; an older C.A.W refuses the file whole); settings.json gains `record_tip_shown`.
+- **Claude's choices for the owner to confirm (looks and feel):** take lanes sit above the automation lanes, 56 px rows (not resizable yet), headers *Take n* in the track's colour with a dot while some comp plays part of that take; lane n shows take n of every clip with takes; the comp's parts lit (the track colour at 30 %) and the rest dimmed (black at 42 %); joins as thin lines, with a small cross on an audio clip's crossfade; the take chip reads **C** for a comp; hold-and-move moves the nearest join (the lanes have nothing else to move); double tap plays the take whole; the lane menu has Use this take, Flatten, Hide take lanes, the header's Use take n everywhere, Flatten all takes, Hide take lanes; the crossfade is 10 ms equal power; Record with no keyboard on an instrument track makes a new audio track (the on-screen keys open only for a MIDI track armed from its menu); the tip is a snack bar for 6 s.
+- **Open:** take lane heights are fixed at 56 px (the automation lanes drag theirs); a comp can't be moved to a new clip or saved as a named comp (REAPER's Save as new comp); Overdub and Replace record modes still merge a loop recording's passes, as those modes mean; Flatten of an audio comp keeps the take files on disk until the project is deleted.
+
+## 2026-11-17: Better track automation: tools, curves, transforms, Automate from any control (owner's decisions; Claude's build, #230)
+
+**Owner (2026-11-17, final):** editing stays in the lanes under the track, made bigger, with a tool row (select, pencil, line, shapes at the grid rate, eraser); Automate from any automatable control's hold menu; curved segments (linear, slow, fast, S-curve, step) chosen in the segment's menu and bent by a sideways drag; box select with move, scale and tilt, copy and paste at the playhead, grid snap, "Automation follows clips" per project; one searchable picker grouped by device with recent parameters first; every edit one automation undo step.
+
+**Built ([app](app.md), automation lanes under tracks; [engine](engine.md), Curved segments):**
+- **Curve maths:** b = 0.4375 (1 + tension); Slow and Fast are the rational ease t(1∓b) / (t(1∓b) + (1−t)(1±b)), S-curve joins them at the middle, Step holds. Only `+ − × ÷`, dyadic constants, so every platform gives the same bits under the engine's strict floating point (no `pow`; nothing to allocate). Tension −1 is straight, so a sideways bend grows from a line without a jump. Linear keeps the original expression, so existing projects are bit-identical (no reference renders changed). Stored as `curve` (a name) and `tension` on the earlier point, omitted for linear, so a project without curves saves as before.
+- **No C API change** (curves are project JSON only; the batch's version comes from the sample library, 33, and the buffer tuner, 34). The new saved fields (point `curve` and `tension`, lane `height`, `recent_automation`, `automation_follows_clips`) are part of project format v5 (merged with the MIDI storage change in batch 1.0.5), which an older C.A.W refuses whole.
+- **Claude's choices for the owner to confirm (looks and feel):** lanes 56 px by default (32–240 by dragging the header's bottom edge); the tool row under the lanes (where + Lane was), with "+ Automate" first; at header widths under 236 px the tools fold into one button with a ▾ (a phone's headers can't hold five); drawn tool glyphs in the lanes' stroke style, the chosen tool in a blue glow; the selection box and its handles in yellow (the selected points' colour), edge handles as bars and corner handles as dots; previews in the text colour, the eraser's sweep in pink; a curved segment's handle a little wider and brighter; sideways right bends toward Fast, left toward Slow (80 px for a full bend; Alt or Ctrl with an up or down drag bends up or down); a sine drawn with four curved points a cycle (Fast to each peak, Slow back), squares and random as steps; random seeded by the project seed, the lane and the start; one cycle per grid step (the arranger's 1/16 by default gives fast shapes; a coarser grid slows them); the pencil unsnapped, the other tools snapped (Shift free); a drawn span replaces the points under it; points moved onto others make them give way, as sections do; copy holds heights so it pastes into any lane; the picker a glass sheet with Recent (the project's last 8) first; Automate adds a point at the playhead on a new lane and only reveals an existing one; on a device editor knob Automate is a button on the knob's hold sheet and value dialog beside Learn MIDI CC (the hold already opens those), elsewhere a one-item hold menu; "Automation follows clips" moves points only for moves along the same track.
+- **Open:** on a phone the device editor is a full-screen page, so Automate there opens the lane behind it (close the page to see it); the master's chain and modulators have no lanes under a track and don't offer Automate; the focus view's Automation tab keeps its own + for volume and pan.
+
+## 2026-11-17: MIDI clip playback and the piano roll: chasing, eight-octave bends, the sampler's chase (Claude, owner bugs for 1.0.5, #226, #228)
+
+- **Bends reach ±96 semitones** (owner: "I would like to be able to bend as much as I want to"). Eight octaves either way, bend plus vibrato depth, in the pattern text (`kMaxBend`), the app's model (`NoteExpression.maxBend`), the roll's Curve tool and the note extras' curve, and MIDI import. Why 96 and not more: MIDI's bend range (RPN 0's data entry, 0..127) holds it, MPE's default member range is 48 and 96 is the next common step, and past eight octaves a note from the middle of the keyboard leaves hearing at both ends anyway. The engine holds what it sends an instrument to MIDI −60..Nyquist (`Engine::safePitch`), so no oscillator runs past half the rate whatever the bend; the instruments' own code is unchanged. MPE export picks the narrowest of 12, 48 and 96 semitones that holds the pattern's bends.
+- **Chased notes start their voice; a sampler retriggers from the sample's start.** A note the playhead lands inside starts at that point with its expression as it is there; the instrument's own attack is its anti-click ramp (Flagship, Drums and the sampler start a voice as for any note-on). The sampler plays its sample from the beginning rather than from the elapsed time into it, as DAWs that chase notes usually do [Assumption, not surveyed]: an offset start needs a new note-event field through the component interface for one instrument, would start a recorded attack's middle with a click the attack can't hide, and a long pad sample starting fresh is rarely wrong. An offset start can come later as a sampler option.
+- **A cut note keeps its curves where they were** (the repeat-at-the-clip's-end bug): the arrangement's copy of a cut note's expression carries the share of the written note it plays (`NoteExpression::from`, `span`), so no stored format changes; the playback structs only. With clips stored as MIDI (format v5, below) a clip still cuts notes at play time: the window is computed there, never stored.
+- **Taps land in the drawn cell; no stacked notes** (#228): the tap cell is the grid between the lines drawn at the zoom, not a finger-sized coarser one; a note at the same start and pitch as one already there is never added (draw takes the existing one, a drop or a paste replaces it). [Assumption] stacking an exact duplicate is never wanted; a chord on other pitches is untouched.
+
+## 2026-11-17: Clips stored as MIDI: the format, one converter, the migration (Claude, carrying out the owner's #216)
+
+The owner's decision (2026-11-13, below) built on branch `midi-store`; the details in [app](app.md) ("Clips are stored as MIDI").
+- **Format: a Standard MIDI File (format 0, 960 PPQ) with C.A.W events, not MIDI 2.0 UMP clip data.** Neither standard holds what pattern text does exactly: exact rational step times (13/3, 1/97), decimal velocities as written (0.8 is not k/127 nor k/65535), chance, a ratchet as one note, curve point shapes, vibrato settings, comments. Both would need an extension, so the base was chosen for reach: every DAW reads a .mid and MPE carries per-note bend, pressure and timbre; MIDI 2.0 clip files are rarely read, and the app already had a bounded SMF reader and writer. The extension is sequencer-specific meta events (FF 7F, the SMF's place for a sequencer's own data) and Text events (FF 01, the SMF's comments). Plain notes (on a 1/240-step grid, whole pitch, velocity k/127, no extras) need no C.A.W event at all: the MIDI is the clip. **Per-note bends up to ±96 semitones** (owner, #226): the record keeps the curve values as written, with no range of its own (pattern_doc's `maxBend` is the only limit), and the MPE layer picks the member bend range the widest bend needs (2, 12, 24, 48 or 96); a ±36 round trip and a ±96 MIDI-layer read are tested.
+- **Manufacturer ID 7D:** [Fact, midi.org/sysexidtable, read 2026-11-17] the one-byte IDs 60H–7FH are "[Reserved for Other Uses]". [Assumption, from the MIDI 1.0 specification as known, not re-read] 7DH is the non-commercial (educational/research) ID, which products released to the public are not meant to use. C.A.W has no registered ID; its events are only ever inside its own clip files (never sent as SysEx), and other programs skip sequencer-specific events they don't know. **Open question for the owner:** register a manufacturer ID with the MIDI Association, or keep 7D.
+- **One converter: Dart owns MIDI ↔ clip conversion** (`lib/model/clip_midi.dart` for storage; `midi_clips.dart`'s `patternNoteOfMidi`/`midiNoteOfPattern`, the same per-note rules for storage, .mid import and .mid export). Why: the exact model (rational steps, comments, note ids for undo) is the app's `PatternDoc`; the engine's `Pattern` holds doubles and no comments, so it can't own a lossless codec; the editors convert synchronously on the UI isolate and in plain Dart tests without the native library. The app's .mid exports (Export page, single and queued, now with the song's tempo map and signatures, `midiTempos`, ported from the engine's writer: a ramp as a tempo every 1/16 note) use it; the app's engine wrappers for .mid import and song export are deleted. **The engine keeps its converter** (`engine/src/midifile.cpp`) only for the `caw` CLI (headless tools have no Dart) and the MIDI 2.0 Clip File export, which the piano roll reaches by one call (`Engine.exportPattern(clip: true)`) with the clip's text. **The engine's project JSON still takes pattern text** (the app writes it from the MIDI): it is the live wire format, not storage, and keeping it needs no binding or C API version change.
+- **Migration v4 → v5:** a v4 module's text converts on load. Proof: `test/clip_midi_test.dart` (every expression feature and 60 random patterns: old text → MIDI → text gives the same notes, header and comments, and the text from MIDI is a fixed point; corrupt and truncated input fails closed) and `test/clip_migration_test.dart` (the engine tests' patterns, the examples, templates and default project: same notes after migration, and with `CAW_LIB` bit-identical renders before and after). `Steps.toString` now writes an exact fraction where it rounded to 1/1000 (only times with denominators over 64 that no 10^9 divides), and a vibrato rate or fade-in without depth is written, so text written from a stored clip reads back the same. **Not exact:** a time written with more than 15 significant digits was already kept as the nearest fraction with a denominator up to 2^20 by the app's parser; it is stored as that.
+- **Kept in memory only:** text that doesn't parse. The file holds the last version that parsed (else an empty pattern of the module's name). Undo restores clips from their MIDI, so the text view after an undo is the stored form (layout and chord lines as the editor writes them).
+- **Size:** the bundled default project (4 patterns, 87 lines) is 16 904 bytes at v4 and 19 303 at v5 (its modules 4 965 → 7 205 bytes; base64 and the MPE curves of bent notes); the code-built demo project's modules go from 4 515 to 3 913 bytes (v4 saved each text twice, `source` and `run_source`).
+
+## 2026-11-17: AAudio output usage GAME; automatic buffer size off by default (owner's request, #236)
+
+**Decision:** every AAudio output opens with `AAUDIO_USAGE_GAME`, Android's low-latency guide's advice for Bluetooth, on every route (the engine can't tell the route before the stream opens; the volume stays media). The automatic buffer size (`caw_audio_tune_buffer`, Oboe's LatencyTuner way plus a shrink after a quiet minute) is built but off by default (`Settings.bufferTuning`, no Settings row) until it has run on a phone: Claude's choice, to keep 1.0.5 low-risk; turning it on, and its Settings row, are for the owner. The Bluetooth codec is not chosen (a privileged API). Facts and sources in [engine](engine.md).
+
+## 2026-11-17: A new device's first callbacks stay out of the load meter; the performance hint for every stream mode (#234)
+
+**Decision (Claude's, for the owner to confirm; the hint part is the owner's 1.0.5 call: "the ADPF performance hint only", no game category):**
+- **Warm-up:** the callbacks of a device's first 0.5 s of frames after an open or an AAudio reroute enter no load average (the CPU meter, shedding's over-budget share, the mix pool's Auto). **Why:** the meter, which telemetry's `perf.worstCallbackPct` reads, moves about 9.9 × a stall's seconds, and a shared or Bluetooth stream starts by filling its buffer back to back on a core whose clock hasn't risen; the app closes an idle device and Play reopens it, so this landed while playing (600 and 800% on the owner's Bluetooth days, nothing shed). **[Assumption]** that first fill is the main source; the meter after the warm-up, and shedding, are unchanged.
+- **The hint:** asked for the callback and the workers whatever the callback's policy, as before, but a refused session is asked again (1 s doubling to 30 s), the callback alone if the group is refused, every callback's own duration is reported (not the longest since the last report), and `hint_state` says why there is none. **Why:** the NDK and the system service ask only that the threads be the app's (sources in [engine](engine.md)); telemetry showed no session on the S22+. **Not claimed:** the 1.0.4 Benchmark's low clocks and 13,448 sustained xruns came while the app was behind another app (owner), so this change is not shown to fix them.
+- **Benchmark:** a step the app leaves the foreground during runs again (`backgrounded`); a ramp the engine's own budget stops is capped, not an error; live parts say they are unprofiled (a short profiled pass would run the mix on one thread, unlike what plays). The local JSON grows additively; H2 is unchanged.
+
+## 2026-11-17: Two Android builds; Isolated with an optional no-delay mode; feedback and Flagship routing (owner, #212, #222, #233)
+
+**Decision (owner, 2026-11-17):**
+- **Two Android builds:**
+  - **The GitHub build** has everything: third-party plug-ins and the self-updater.
+  - **The Play Store build** follows Play's rule on downloaded code ([plug-in hosting plan](plugin-hosting-plan.md)).
+
+  The owner asked whether the engine could count as an interpreter, as a workaround; that is an open question in the plug-in hosting plan. The owner also asked to do the same for iOS where possible. **[Assumption]** That needs checking: which alternative distribution iOS allows is not verified here.
+- **Isolated plug-ins** add one block of compensated latency. There is also an optional **no-delay mode**, which runs the plug-in in the callback with a timeout. It is riskier, because a slow plug-in causes dropouts.
+- **Feedback,** as proposed:
+  - 16 frames inside a patch and 64 between tracks;
+  - a limiter on each feedback wire, on by default and switchable per wire.
+- **Flagship's routing graph:** per voice is optional per patch. By default, effects are shared and the oscillator/filter path runs per voice.
+
+## 2026-11-17: Plans go private at 1.1.0; the code stays public (owner)
+
+**Decision (owner, 2026-11-17):** "Eventually have all of the roadmap and changes hidden, so I can surprise people with updates, while the project stays open source."
+- **At 1.1.0,** issues, the roadmap, plans and decisions move to a private repository. The code stays public as it is written (Apache-2.0), with neutral commit messages.
+- **[Fact]** Hidden features stay readable in the public code. The surprise rests on the plans and the announcements, not on secret code. The owner chose this over private development with releases pushed public.
+- **Until 1.1.0,** work continues publicly as now.
+
+## 2026-11-17: Groundwork for 1.1.0 is laid silently during the 1.0.x batches (owner)
+
+**Decision (owner, 2026-11-17):** "We should 100% be laying the groundwork for the 1.1.0 update, so we don't have a ton of work for ourselves, but make the changes silent."
+- Each 1.0.x batch may carry hidden groundwork for 1.1.0:
+  - the routing engine (#233);
+  - plug-in hosting (#212);
+  - play-ahead (#191);
+  - the AutoStacc download and update source (#221);
+  - store builds (#222).
+- **Silent** means:
+  - users see no change;
+  - the work sits behind off-by-default internal flags, or is engine-only code with no UI;
+  - the project format only gains fields when they are needed, and old versions are unaffected;
+  - the changelog doesn't announce it.
+- Each step has its own tests and a Benchmark check, so it costs nothing while it's off.
+
+## 2026-11-17: The FX batch splits in two; one bit distortion; the beta pack stays free for beta users (owner)
+
+**Decision (owner, 2026-11-17):**
+- **Bit distortion:** one built-in device has the classic crush and the bitwise operations (shift, XOR, AND masks). The AutoStacc beta pack drops its bit-shift device and gets a different one instead, to be chosen.
+- **The AutoStacc beta pack:** it stays free for everyone who used the beta, even after the pack becomes paid.
+- **The FX batch splits in two:**
+  - **1.0.6:** consolidation, the device kit and FX chain, Flagship, React to… and live preset preview;
+  - **1.0.7:** the new effects, the recording tools, guitar, presets and templates, low-latency monitoring, the pack and the music video.
+
+  The later batches move up one: hosting foundation 1.0.10, notation 1.0.11.
+- **Suggestions adopted:**
+  - low-latency monitoring through effects, with a latency readout, checked on the S22+;
+  - live preset preview;
+  - project templates by purpose;
+  - the 1.1.0 routing engine built in hidden steps during the 1.0.x batches.
+
+## 2026-11-17: Visual, non-linear routing is in 1.1.0 (owner, #233)
+
+**Decision (owner, 2026-11-17):** 1.1.0 adds visual, non-linear routing. The node graphs work:
+- inside device chains;
+- between tracks;
+- for modulation;
+- inside Flagship.
+
+The goal is "everything works with everything natively", like Kilohearts' Snap Heap but built into everything that can use it. The batch 1.0.6 devices are built to become nodes later.
+
+The owner added (2026-11-17):
+- Everything can be placed freely: an oscillator wired into a distortion, then a filter, and so on. Sound sources are nodes too.
+- Free-standing LFOs, envelopes and other modulators can be wired into any plug-in or parameter, for movement where it's normally hard to get.
+
+**[Fact]** Project-level modulators already exist and can target any parameter (docs/engine.md, "Modulation"). 1.1.0 adds the visual wiring, generator nodes and free audio paths.
+
+**Odin 2 as the owner's reference** (2026-11-17), "but more built into the app, more fine-grained and intuitive, and it works for everything". Odin 2 has:
+- oscillators that can feed both filters at once;
+- a routing selector on each filter;
+- a modulation matrix with a Scale row (one modulator controlling another link's depth).
+
+These are **[Fact]** from reviews checked 2026-11-17 (MusicRadar, Bedroom Producers Blog, KVR). C.A.W gives every block such selectors, kept in step with the graph view, and adds a scale-by source to each modulation link.
+
+**Everything non-linear** (owner, 2026-11-17): every block has inputs and outputs, and any output can be wired to any input. That includes feedback back up the chain, splitting one output into several routes, and blocks with several outputs (a filter splitting low and high, mid/side, transient/sustain, dry/wet).
+
+**[Fact]** A feedback cycle needs at least one sample of delay. **[Proposal]** The delay is kept short: cycles run in 16-frame sub-blocks inside a patch, the delay shows on the wire, and small patches can use a per-sample mode. Each feedback wire gets a safety limiter. These are to be confirmed by the owner (#233).
+
+The owner added (2026-11-17):
+- every device that can use a sidechain has a sidechain input in the router;
+- effects can stand on their own, with several tracks wired into one;
+- secondary inputs appear wherever they make sense: the vocoder, ring mod and frequency shift carriers, a live convolver impulse, a C++ second input;
+- a very easy way for one track's notes or loudness to change another track's effect.
+
+That last one is **React to…** in every knob's hold menu (track, then Loudness or Notes). It uses the existing project modulators, so it ships early, with the 1.0.6 device kit.
+
+## 2026-11-17: Device UI redesign and a step-by-step music video (owner, #231, #232)
+
+**Decision (owner, 2026-11-17).** The device UI ships in batch 1.0.6, with the FX consolidation; the music video in 1.0.7 (the FX batch's split, above).
+- **FX chain:** collapsed rows, any number open at once, and every control usable in place.
+- **Editing:** visual first, controlled mainly by knobs.
+- **Flagship:** one Vital-like screen; on a phone, three panels (Oscillators, Filters, Modulation) with a mod strip that is always shown.
+- **QoL kit on every device:**
+  - presets and A/B;
+  - precise control;
+  - auto gain, never changing the work's intent and possible to turn off;
+  - randomize and undo.
+- **Look:** cohesive, but each device has its own design.
+- **Music video:** becomes a step-by-step flow, with manual shots and dragging in the lane, and never loses edits.
+
+The plan: [device UI plan](device-ui-plan.md).
+
+## 2026-11-17: Linked sample folders, the sample browser and automatic metadata (owner, #229)
+
+**Decision (owner, 2026-11-17, final):**
+- **Linked folders** apply to the whole app, set in Files › Samples with **Link folder…**. Files are used in place, never copied. A missing file shows **Find it** (pick the file, or relink a folder by relative paths). The `.caw` export checklist lists linked files so they can be packaged.
+- **A tap previews; a double tap adds** to a smart target, in this order: the selected audio track, at the playhead, snapped; else the selected drum pad or sampler; else a new audio track at the playhead. Dragging onto a track still works.
+- **Preview:** a waveform on each row with scrubbing on the playing one; sync to tempo (loops stretched to the project tempo, starting in time with the song while it plays); auto-play next by arrow keys or a swipe; a preview volume; key and BPM on each row; an optional toggle, off by default, to preview through the selected track's effects. The audio callback rules hold.
+- **Metadata,** in order of trust: (1) embedded tags (WAV LIST/INFO, acid, smpl, bext, ID3v2 TBPM/TKEY, FLAC Vorbis comments); (2) the file and folder names (BPM, key, type and instrument words, avoiding false hits such as "808"); (3) detection (`caw_asset_tempo` for BPM and a new key estimate, labelled as an estimate with a confidence). Every field becomes a sortable filter (BPM range, key with optional compatible keys, type, instrument, length, folder, tags, search), and where each value came from is stored.
+- **Indexing** runs in the background, off the UI isolate, with a cache on disk; bounded and incremental, so a folder of tens of thousands of files doesn't freeze the UI.
+- **Security:** linked files are untrusted: parsed with hard limits, no link followed out of the linked root, malformed headers fuzz-tested. On Android, `ACTION_OPEN_DOCUMENT_TREE` with a persisted permission; no `MANAGE_EXTERNAL_STORAGE` or other broad storage permission. No new dependency (none was needed).
+- **C API 33** (`caw_asset_key`, `caw_engine_preview_sample*`); batch 1.0.5's buffer tuner (#236) follows as 34.
+- **When:** batch 1.0.5.
+
+**How it is built** ([app](app.md), [engine](engine.md#the-sample-preview-and-key-estimate)):
+- **Look (agent's choices within "follow the Files browser and the glass style"):** a list (not the grid): 56 dp rows with an 84 dp waveform, name over instrument · type · folder, then right-aligned tempo, key and length columns; estimates in italics with a "~" and their source and confidence in a tooltip; the selected row tinted blue, the playing name green; scrolling filter chips under the search box (each opening a glass bottom sheet); a glass preview strip at the bottom with previous, play, next, Sync, FX and a volume slider. Checked by `layout_fit_test` ("samples").
+- **Android, `content://` to the engine:** the engine reads files by path, and a document tree gives URIs, not paths. Each file is opened read-only with `ContentResolver.openFileDescriptor(uri, "r")`, the descriptor detached (`ParcelFileDescriptor.detachFd`, "you are now responsible for closing the fd in native code") and handed to Dart, and Dart and the engine read it as `/proc/self/fd/<n>`; Dart closes it through `ParcelFileDescriptor.adoptFd(fd).close()`. Files the open project uses stay open for the session (at most 512 descriptors, the least recently used unpinned closed first); the indexer opens 64 at a time and closes them after reading the headers. Such a path is never saved: the project keeps the link and a placeholder path. **[Fact, developer.android.com "Access documents and other files from shared storage", read 2026-11-17]** the Storage Access Framework needs no system permission; `ACTION_OPEN_DOCUMENT_TREE` (API 21+) grants access to the chosen directory and its subdirectories only; `takePersistableUriPermission` keeps the grant across restarts but not when the document is moved or deleted; on Android 11+ the picker refuses the internal storage root, an SD card's root and the Download folder. **[Fact, developer.android.com `ParcelFileDescriptor` reference, read 2026-11-17]** `detachFd` (API 12) and `adoptFd` (API 13) as quoted. **[Assumption]** reopening `/proc/self/fd/<n>` reads a document from a local provider (the device's storage or an SD card) as a file; a cloud provider that hands out a pipe is not seekable and may fail to load; to verify on the S22+.
+- **Not built:** watching folders for changes (the issue mentions it; a refresh runs on open, on Read again and on pull-to-refresh, and only reads what changed); AIFF, OGG and other formats (WAV, FLAC and MP3 are listed, as the engine decodes them).
+
+## 2026-11-17: Fewer, better built-in effects; new standard effects; the AutoStacc beta pack (owner, #227)
+
+**Decision (owner, 2026-11-17):**
+- **Consolidation:** "one really good one rather than five okay ones." The overlapping built-ins merge into one device each, with modes:
+  - dynamics into Compressor, Limiter and Transient;
+  - Drive and Bit distortion;
+  - EQ (with dynamic and M/S) and Filter (with auto-filter and wah);
+  - Utility/Stereo;
+  - Chorus/Flanger, Phaser and Tremolo/Pan;
+  - one Delay (with tape echo);
+  - one Reverb (with plate and spring);
+  - Pitch/Shift.
+
+  Old projects convert to the merged device and mode, as the retired synths became Flagship. The full table is in #227.
+- **Cost:** merged devices must stay as cheap to run as what they replace ("as cheap as possible to run"). Each mode runs only its own path.
+- **New standard effects:**
+  - exciter and bass enhancer;
+  - pitch correction;
+  - vocoder;
+  - analyzer, tuner and loudness meter;
+  - expander and upward compression;
+  - Compactor-style ducking in the Compressor.
+
+  **[Fact]** Kilohearts Compactor is a free ducker/leveller released in August 2025, with threshold, amount, attack, hold, release, an optional sidechain, and RMS/Peak/ISP detection (kilohearts.com/products/compactor, checked 2026-11-17). C.A.W's device is an original design.
+- **AutoStacc beta pack:** free during the beta, paid later:
+  - warp;
+  - spectral FX;
+  - a glitch mangler.
+
+  It is built into C.A.W for now, marked as the pack, and moves to an AutoStacc download in 1.1.0 (#221).
+- **Recording tools** (owner, later the same day):
+  - noise reduction, both as a live effect (learning a noise profile) and as a non-destructive clip pass in the sample editor;
+  - a pedal-style noise gate: fast, zero latency, smart release tracking with hysteresis, key from the clean input and gate after the distortion, and a downward expand mode;
+  - de-hum (50/60 Hz, auto-detected);
+  - de-click and de-plosive;
+  - de-reverb and breath control.
+- **Guitar effects** (owner, the same day), built into the existing effects:
+  - Drive gets amp modes (Clean, Crunch, Lead, High gain) with a bass, mid, treble and presence tone stack, and pedal modes (Overdrive, Distortion, Fuzz);
+  - the convolver gets a Cab mode with C.A.W's own cabinets and the user's IRs.
+- **Purpose-friendly helpers:**
+  - purpose tags with a filter in the effect browser;
+  - chain templates (Guitar clean, crunch and lead; Vocal; Podcast voice; Drum bus; Master);
+  - presets named for the job;
+  - a one-tap chain suggestion when a guitar or mic track is armed.
+- **A Bands mode in Drive** (owner, the same day; the owner loves Fire's band-split distortion):
+  - 1–4 bands with Linkwitz-Riley crossovers, each with its own drive type, amount, tone and mix;
+  - a Clean band option, for a distorted kick with a clean low end.
+
+  **[Fact]** Fire is AGPL-3.0 (its GitHub listing, checked 2026-11-17), so none of its code is used; C.A.W's version is its own.
+- **More presets:** every built-in effect ships at least 8 presets, named for the job and tagged by purpose, where that makes sense.
+- **When:** after 1.0.5, split over 1.0.6 and 1.0.7 (the FX batch's split, above). The later batches move up.
+
+## 2026-11-14: Freeze and bounce: pre-fader, the frozen track sent as an audio clip, no C API bump (Claude, within the owner's 1.0.5 decisions, #209)
+
+The owner's (2026-11-14): Freeze / Unfreeze and Bounce to audio in the track's hold menu, Bounce to audio in a clip selection's hold menu; a snowflake on a frozen track's header and its devices dimmed; editing a frozen track first asks "Unfreeze to edit?"; no header button. Claude's choices within them:
+- **Pre-fader.** A freeze renders the instrument, per-note FX and effects (with their automation and modulation) before the fader, so volume, pan, sends, folder routing and mute/solo stay live, as asked; a bounce too, and the new audio track copies the fader, pan, sends and their lanes, so it sounds as the track did.
+- **The frozen track is an audio clip, sent by the app.** `ProjectDoc.toEngineJson` sends a frozen layer as one fixed audio clip of its file from step 0 and leaves its instrument, per-note FX, effects and the lanes and links aimed at them out of the engine JSON. The engine never builds them, so they cost nothing, and it plays the file through the existing clip player: bit for bit the live track's sound (tests in [engine](engine.md#song-renders) and `app/test/freeze_test.dart`). Its pattern clips still go, for keys and modulators that hear its notes. The alternative, an engine-side `frozen` key that swaps the chain itself, would have duplicated the app's lane and link filtering in C++.
+- **Engine additions without a C API bump:** the song render's `stem_tap: "pre"` (a new request key, refused by name by an engine without it) and an audio clip's `"lengthens_song": false` (a frozen file's tail past the song's end doesn't make the song longer; it plays when the song reaches there and in a render's tail). No C API change (the batch's 33 and 34 come from the sample library and the buffer tuner); nothing new crosses the FFI (the app uses `caw_render_song` through the worker pool as Export does).
+- **Tail:** "the track's tail length" is measured, not declared: the render runs on until the track has been below −120 dBFS for half a second, at most 30 s (declared tails are often infinite, a reverb's or a delay's).
+- **Project format:** `frozen`, `frozen_asset` and `frozen_context` on a layer, part of format v5 (merged with the MIDI storage change in batch 1.0.5, so no further bump; an older C.A.W refuses the file whole). `frozen_context` (the tempo map, signatures, seed and key) makes a freeze that no longer fits play live instead of out of time.
+- **Unfreeze and undo:** the frozen file leaves the project at once but is deleted from disk only when the project next opens and nothing names it, so undo and redo work within the session.
+- **Loops:** the frozen audio is the song played from its start, so at a loop range's or the song's wrap it restarts as the live track's first pass does; what a live instrument carries over a wrap (a held note, a reverb ringing into the loop's start) is not in it. **[Assumption]** close enough for a freeze, as in other DAWs; the owner may want otherwise.
+- **Not built:** a Benchmark scenario for a frozen track (the scenarios are pinned by hash and reference render; the CPU check is in `render_stems_test.cpp` instead); bouncing audio clips from an audio clip's own menu. Comping and Consolidate came after the MIDI storage change (the entry above).
 
 ## 2026-11-14: Clip stretching runs Signalsmith Stretch live in the callback; two new dependencies (Claude, within the owner's 1.0.4 contract, #208)
 
@@ -868,7 +1124,7 @@ Carries out the first two bullets of the owner's decision below ([App](app.md)).
 - **Audio in the beta:** audio clips on tracks, audio recording, and a sampler instrument all ship in v1.0.0-beta.1. Before this, the roadmap put Stages 3, 4 and 7 after Release 1.
 - **Per-note effects:** built for the beta (#127). Instruments expose per-voice audio, and effects can run per note.
 - **New screens:** the modulator routing canvas, the testing suite, the sample-pack maker, CLAP export, the export sheet with stems, templates, and master FX slots. Each is designed in the existing device-kit style, and the owner reviews it in the APK; changes come after.
-- **MIDI storage (#158), locked in:** clips are stored as pattern text in the project; standard MIDI files (.mid, including MPE) are used for import and export.
+- **MIDI storage (#158):** clips were stored as pattern text, with .mid (including MPE) for import and export. Superseded by the owner on 2026-11-13 (#216): clips are stored as MIDI, built 2026-11-17 (format v5).
 
 **Also decided today:**
 - **Effects:** every Kilohearts-style effect is built in. That includes the multiband rack and the FX rack with modulators, and a browser with category tabs, search, favourites and recently used.
@@ -1105,7 +1361,7 @@ REAPER's behaviour is taken from its user guide ([UI design](ui.md#reaper-refere
 
 ## 2026-11-10: MIDI files are an import and export format (on the owner's behalf, to confirm)
 
-**Decision (made on the owner's behalf during autonomous work on #158; the owner has not confirmed it):** note clips keep being stored as C.A.W.'s own text note form (pattern text, `app/lib/model/pattern_doc.dart`) inside the project; project storage does not change. C.A.W. imports and exports Standard MIDI Files (SMF format 0 and 1, MIDI 1.0; format 2 reads as format 1) so clips move to and from other DAWs. Per-note pitch bend and expression export as MIDI 1.0 pitch bend, channel pressure and CC74 on per-note channels (MPE lower zone: channel 1 manages, channels 2–16 carry one note each, with an MPE Configuration Message and each channel's bend range by RPN) when a clip has any; otherwise plain notes on channel 1. MIDI 2.0 clip files for clips are later.
+**Superseded on 2026-11-13 by the owner (#216; built 2026-11-17, format v5): clips are stored as MIDI.** The storage part below no longer holds; the import and export notes do. **Decision (made on the owner's behalf during autonomous work on #158):** note clips keep being stored as C.A.W.'s own text note form (pattern text, `app/lib/model/pattern_doc.dart`) inside the project; project storage does not change. C.A.W. imports and exports Standard MIDI Files (SMF format 0 and 1, MIDI 1.0; format 2 reads as format 1) so clips move to and from other DAWs. Per-note pitch bend and expression export as MIDI 1.0 pitch bend, channel pressure and CC74 on per-note channels (MPE lower zone: channel 1 manages, channels 2–16 carry one note each, with an MPE Configuration Message and each channel's bend range by RPN) when a clip has any; otherwise plain notes on channel 1. MIDI 2.0 clip files for clips are later.
 - **Why:** the text form already maps notes, microtones and per-note curves one to one and is what the piano roll edits; a binary store would need a second editable form anyway. SMF is what other DAWs exchange, and MPE carries per-note bends in MIDI 1.0.
 - **Where:** a Dart reader/writer (`app/lib/model/midi_file.dart`) and clip conversion (`app/lib/model/midi_clips.dart`), so files convert off the UI isolate and without engine changes. The engine's own converter (`engine/src/midifile.cpp`) stays for MIDI 2.0 clips (`.midi2`) only; the piano roll's `.mid` import and export moved to the Dart converter (2026-11-10, #168). Imported files are listed in Files by name with the patterns their parts became (`midi_files` in the project JSON, additive); the notes still live only in the patterns. [Assumption] A dropped multi-part file puts its first part on the target track and the others on new tracks under it. [Proposal] Whether to keep one converter (and which) is open in [vision](vision.md#open-owner-decisions).
 - **Files are untrusted:** reading caps the file at 16 MB, 2 097 152 events, 1 048 576 notes and 4 194 304 expression changes, checks every length, and fails with a message instead of guessing.

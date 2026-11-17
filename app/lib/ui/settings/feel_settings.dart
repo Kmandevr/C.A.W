@@ -27,6 +27,8 @@ class FeelSettings extends StatelessWidget {
                   MotionLevel.reduced => 'Fades only: nothing slides, grows or springs',
                   MotionLevel.off => 'Only what helps: drag ghosts, snapping and press feedback',
                 }),
+      settingSwitch('feel.startupAnimation', s.fullStartupAnimation, (v) => s.update((x) => x.fullStartupAnimation = v),
+          icon: Icons.play_circle_outline),
       settingChoice<EditMotionStyle>('feel.editStyle', s.editMotionStyle,
           [for (final v in EditMotionStyle.values) (v, v.label)],
           s.motion == MotionLevel.off ? null : (v) => s.update((x) => x.editMotionStyle = v),

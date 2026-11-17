@@ -1,5 +1,7 @@
 // The FX tab: a track's FX chain like REAPER's (its instrument first, then its native C++ effects), built-ins as their
 // plugin UIs inline and the rest as knob cards, and a Routing view.
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 
 import '../../engine/component_info.dart';
@@ -25,7 +27,9 @@ import '../motion.dart';
 import '../theme.dart';
 import '../volume_fader.dart';
 import 'arrange_drag.dart';
+import 'freeze_ui.dart';
 import 'track_color.dart';
+import 'automate_control.dart';
 import 'knob.dart';
 import 'long_press_menu.dart';
 import 'note_fx_section.dart';
@@ -182,7 +186,8 @@ class _FxStackState extends State<FxStack> {
         'This folder only groups its tracks. Turn its bus on (Mixer) to give it effects of its own.',
         textAlign: TextAlign.center, style: TextStyle(color: Neon.dim))));
     }
-    return DragTarget<AssetDrag>(
+    // A frozen track's devices dim and ask to unfreeze when touched (freeze, 1.0.5).
+    return FrozenDevices(state: s, layer: layer, child: DragTarget<AssetDrag>(
       onWillAcceptWithDetails: (d) => d.data.kind != AssetKind.pattern && d.data.kind != AssetKind.midiFile && d.data.kind != AssetKind.audioFile,
       onAcceptWithDetails: (d) => dropOnTrack(context, s, layer, d.data),
       builder: (context, hovering, _) => DecoratedBox(
@@ -203,7 +208,7 @@ class _FxStackState extends State<FxStack> {
           ),
         ),
       ),
-    );
+    ));
   }
 
   Widget _toolbar(BuildContext context) => SizedBox(height: 40, child: Row(children: [
@@ -342,7 +347,8 @@ class _FxCard extends StatelessWidget {
           child: GlassPanel(radius: 10, tint: color, child: Padding(
             padding: const EdgeInsets.fromLTRB(2, 2, 4, 6),
             child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-              SizedBox(height: 36, child: Row(children: [
+              // 36 high, taller only when large text needs it (the title and its subtitle).
+              SizedBox(height: math.max(36.0, MediaQuery.textScalerOf(context).scale(30)), child: Row(children: [
                 // A negative index: a card outside the reorderable lists (the track's instrument).
                 if (index < 0)
                   const SizedBox(width: 36, height: 36, child: Icon(Icons.piano, size: 18, color: Neon.dim))
@@ -562,6 +568,8 @@ class _NativeEffectCard extends StatelessWidget {
                   min: p.min, max: p.max, step: p.step, defaultValue: p.defaultValue, label: p.label,
                   exponential: p.exponential,
                   enabled: !use.bypass,
+                  automation: ControlAutomation.of(
+                      DeviceTarget(state, layer.id, instrument ? DeviceTarget.instrumentSlot : index), p.id),
                   color: isBuiltinComponent(use.id) ? Neon.blue : Neon.green,
                   valueText: (v) => '${v.toStringAsFixed(p.max - p.min > 20 ? 0 : 2)}${p.unit.isEmpty ? '' : ' ${p.unit}'}',
                   onChanged: (v) => _param(p.id, v),

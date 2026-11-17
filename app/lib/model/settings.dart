@@ -364,6 +364,10 @@ class Settings extends ChangeNotifier {
   /// Haptics on every touch, step and drag; on by default (owner).
   bool haptics = true;
 
+  /// The startup animation plays to its end even when loading finishes first (owner, 2026-11-17: "so it doesn't feel
+  /// like it's there for no reason"); off, it shows only while the app loads. On by default.
+  bool fullStartupAnimation = true;
+
   /// How strong the haptics are, 0 to 1 (owner, 2026-11-10: "a little bit more, just barely"; 0.5 is the base).
   double hapticStrength = 0.5;
 
@@ -426,6 +430,9 @@ class Settings extends ChangeNotifier {
   /// The music video editor has shown its photosensitivity warning (the first time Strobe is added).
   bool strobeWarned = false;
 
+  /// Record has shown its tip on the arm button once ("Record just works", owner 2026-11-17).
+  bool recordTipShown = false;
+
   /// The app version that last ran ('' before What's new existed): a newer one shows its changelog entry once.
   String lastSeenVersion = '';
 
@@ -452,6 +459,12 @@ class Settings extends ChangeNotifier {
   int sampleRate = 48000;
   static const sampleRates = [44100, 48000, 88200, 96000];
   int bufferFrames = 0;
+
+  /// The AAudio output's buffer sized automatically (#236, caw_audio_tune_buffer): off by default until it has run on
+  /// phones (no Settings row yet), and the size it settled on per kind of output (AudioDeviceKind's name → frames),
+  /// where the next stream on that kind starts.
+  bool bufferTuning = false;
+  final Map<String, int> tunedBufferFrames = {};
   static const bufferSizes = [0, 16, 32, 48, 64, 96, 128, 192, 256, 384, 512, 768, 1024, 2048, 4096, 8192];
   bool exclusiveAudio = false;
 
@@ -589,12 +602,15 @@ class Settings extends ChangeNotifier {
         'performance_mode': performanceMode.name,
         'light_mode': lightMode, // retained for older builds that read settings.json
         'light_auto': lightAuto,
+        'buffer_tuning': bufferTuning,
+        'tuned_buffer_frames': tunedBufferFrames,
         'light_by_self': lightBySelf,
         'frame_rate': frameRate,
         'vim_code': vimCode,
         'vim_keys': vimKeys,
         if (keyHints != null) 'key_hints': keyHints,
         if (strobeWarned) 'strobe_warned': true,
+        if (recordTipShown) 'record_tip_shown': true,
         if (lastSeenVersion.isNotEmpty) 'last_seen_version': lastSeenVersion,
         'motion': motion.name,
         'edit_motion_style': editMotionStyle.name,
@@ -609,6 +625,7 @@ class Settings extends ChangeNotifier {
         'glow_strength': glowStrength,
         if (baseProfile != null) 'base_profile': baseProfile,
         'haptics': haptics,
+        'full_startup_animation': fullStartupAnimation,
         'haptic_strength': hapticStrength,
         'layout_mode': layoutMode.name,
         'focus_panel_share': focusPanelShare,
@@ -703,6 +720,15 @@ class Settings extends ChangeNotifier {
       performanceMode = j['light_mode'] == true ? PerformanceMode.lightweight : PerformanceMode.balanced;
     }
     lightAuto = (j['light_auto'] as bool?) ?? lightAuto;
+    bufferTuning = j['buffer_tuning'] == true;
+    if (j['tuned_buffer_frames'] case final Map m) {
+      tunedBufferFrames.clear();
+      for (final e in m.entries.take(16)) {
+        if (e.key is String && (e.key as String).length <= 32 && e.value is int && e.value > 0 && e.value <= 65536) {
+          tunedBufferFrames[e.key as String] = e.value as int;
+        }
+      }
+    }
     lightBySelf = j['light_by_self'] == true && performanceMode == PerformanceMode.lightweight;
     final fr = j['frame_rate'];
     frameRate = fr is num && FrameRateController.caps.contains(fr.toInt()) ? fr.toInt() : FrameRateController.auto;
@@ -710,6 +736,7 @@ class Settings extends ChangeNotifier {
     vimKeys = (j['vim_keys'] as bool?) ?? vimKeys;
     if (j['key_hints'] is bool) keyHints = j['key_hints'] as bool;
     strobeWarned = j['strobe_warned'] == true;
+    recordTipShown = j['record_tip_shown'] == true;
     final seen = j['last_seen_version'];
     if (seen is String && seen.length <= 64) lastSeenVersion = seen.trim();
     motion = pick(MotionLevel.values, j['motion'], motion);
@@ -736,6 +763,7 @@ class Settings extends ChangeNotifier {
       };
     }
     if (j['haptics'] is bool) haptics = j['haptics'] as bool;
+    if (j['full_startup_animation'] is bool) fullStartupAnimation = j['full_startup_animation'] as bool;
     final hs = j['haptic_strength'];
     if (hs is num && hs.isFinite) hapticStrength = hs.toDouble().clamp(0.0, 1.0);
     layoutMode = pick(LayoutMode.values, j['layout_mode'], layoutMode);

@@ -35,6 +35,13 @@ import java.util.UUID
  * BLUETOOTH_SCAN and BLUETOOTH_CONNECT are runtime permissions ("Nearby devices"); the scan is declared
  * neverForLocation, so no location permission is needed there. On Android 11 and earlier a scan needs
  * ACCESS_FINE_LOCATION at run time (Bluetooth permissions page), declared with maxSdkVersion 30.
+ *
+ * Latency (#237): the GATT connection is the system's, not the app's. [Fact, AOSP frameworks/base main
+ * BluetoothMidiService BluetoothMidiDevice.java, read 2026-11-17] openBluetoothDevice hands the device to the
+ * BluetoothMidiService, which calls connectGatt itself and, once the MIDI characteristic is found, asks
+ * requestConnectionPriority(CONNECTION_PRIORITY_HIGH) ("a lower Connection Interval for better latency") and
+ * requestMtu(517). The app holds no BluetoothGatt to ask anything more of, and a second GATT client of its own
+ * would add nothing, so nothing here changes the link.
  */
 class BluetoothMidi(private val activity: Activity) : EventChannel.StreamHandler, MethodChannel.MethodCallHandler {
     private val main = Handler(Looper.getMainLooper())

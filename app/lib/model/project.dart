@@ -2,9 +2,15 @@
 import 'dart:convert';
 import 'dart:math';
 
+import 'dart:typed_data';
+
 import 'audio_clips.dart';
+import 'comping.dart';
+import 'automation_curve.dart';
 import 'clip_automation.dart';
+import 'clip_midi.dart';
 import 'cpp_component.dart';
+import 'midi_file.dart' show kMaxMidiFileBytes;
 import 'midi_mapping.dart';
 import 'modulation.dart';
 import 'pattern_doc.dart';
@@ -17,8 +23,11 @@ String newId(String prefix) {
   return '$prefix${List.generate(8, (_) => r.nextInt(36).toRadixString(36)).join()}';
 }
 
-/// A pattern (a note clip's notes as text, #158): its text in the editor, and the text last sent to the engine with
-/// Run. The .caw sound modules that shared this type are gone (#160): a project loads with them dropped.
+/// A pattern: a note clip's notes. Projects store it as MIDI (format v5, #216, lib/model/clip_midi.dart); its text is
+/// the view the editors and the engine read. [source] is the editor's text and [runSource] the text last sent to
+/// the engine with Run; each is saved as the MIDI it makes. Text that doesn't parse (a half-typed line) stays in
+/// memory only: the file keeps the last version that parsed. The .caw sound modules that shared this type are gone
+/// (#160): a project loads with them dropped.
 class ModuleDoc {
   ModuleDoc({
     required this.id,
@@ -39,33 +48,100 @@ class ModuleDoc {
 
   bool get edited => source != runSource;
 
-  Map<String, dynamic> toJson() => {
-    'id': id, 'name': name, 'source': source, 'run_source': runSource,
-    'folder_path': folderPath, 'tags': tags,
-  };
+  /// The MIDI the file stores for [source] (else for [runSource] when the editor's text doesn't parse, else an empty
+  /// pattern of this name when either is a pattern that doesn't parse); null when neither is a pattern.
+  Uint8List? get midi =>
+      clipMidiFromText(source) ??
+      clipMidiFromText(runSource) ??
+      (isPatternSource(source) || isPatternSource(runSource) ? clipMidiFromDoc(PatternDoc.blank(name: name)) : null);
 
-  static ModuleDoc fromJson(Map<String, dynamic> j) => ModuleDoc(
-    id: j['id'] as String,
-    name: (j['name'] as String?) ?? 'Module',
-    source: (j['source'] as String?) ?? '',
-    runSource: j['run_source'] as String?,
-    folderPath: (j['folder_path'] as String?) ?? '',
-    tags: ((j['tags'] as List?) ?? const []).whereType<String>().take(16)
-        .map((tag) => _boundedProjectText(tag, 48)).where((tag) => tag.isNotEmpty).toList(),
-  );
+  /// The MIDI the file stores for [runSource] when it differs from [midi]'s.
+  Uint8List? get runMidi {
+    if (!edited || clipMidiFromText(source) == null) return null;
+    return clipMidiFromText(runSource);
+  }
+
+  /// The project file's entry; null for a module with no pattern to store.
+  Map<String, dynamic>? toJson() {
+    final m = midi;
+    if (m == null) return null;
+    final r = runMidi;
+    return {
+      'id': id, 'name': name, 'midi': base64.encode(m), if (r != null) 'run_midi': base64.encode(r),
+      'folder_path': folderPath, 'tags': tags,
+    };
+  }
+
+  /// A module from a project file: v5 MIDI, or a v4 file's pattern text, converted on load (the text shown is then
+  /// the MIDI's, as a v5 file would read). Throws a FormatException for stored MIDI it can't read.
+  static ModuleDoc fromJson(Map<String, dynamic> j) {
+    final id = j['id'] as String;
+    final name = (j['name'] as String?) ?? 'Module';
+    final folder = (j['folder_path'] as String?) ?? '';
+    final tags = ((j['tags'] as List?) ?? const []).whereType<String>().take(16)
+        .map((tag) => _boundedProjectText(tag, 48)).where((tag) => tag.isNotEmpty).toList();
+    final midi = j['midi'];
+    if (midi is String) {
+      final run = j['run_midi'];
+      try {
+        final source = clipTextFromMidi(_midiField(midi), key: midi);
+        return ModuleDoc(id: id, name: name, source: source,
+            runSource: run is String ? clipTextFromMidi(_midiField(run), key: run) : null, folderPath: folder, tags: tags);
+      } on FormatException catch (e) {
+        throw FormatException('The clip "$name" can\'t be read: ${e.message}');
+      }
+    }
+    String migrate(String text) {
+      final m = clipMidiFromText(text);
+      return m == null ? text : clipTextFromMidi(m);
+    }
+
+    final source = (j['source'] as String?) ?? '';
+    final run = j['run_source'] as String?;
+    return ModuleDoc(id: id, name: name, source: migrate(source), runSource: run == null ? null : migrate(run),
+        folderPath: folder, tags: tags);
+  }
+
+  /// Whether a project file's module entry (v5 MIDI or v4 text) holds a pattern, without reading it.
+  static bool jsonIsPattern(Map<dynamic, dynamic> j) =>
+      j['midi'] is String || isPatternSource('${j['run_source'] ?? j['source'] ?? ''}');
+
+  /// A module entry's pattern text (its MIDI's for v5), for a quick look; null when it has none that reads.
+  static String? jsonText(Map<dynamic, dynamic> j) {
+    final m = j['midi'];
+    if (m is String) {
+      try {
+        return clipTextFromMidi(_midiField(m));
+      } on FormatException {
+        return null;
+      }
+    }
+    final t = j['run_source'] ?? j['source'];
+    return t is String ? t : null;
+  }
+}
+
+/// A base64 MIDI field from untrusted JSON: at most a 16 MB file.
+Uint8List _midiField(String b64) {
+  if (b64.length > (kMaxMidiFileBytes ~/ 3 + 1) * 4) throw const FormatException('a stored clip is bigger than 16 MB');
+  return base64.decode(b64);
 }
 
 class ClipDoc {
   ClipDoc({required this.id, required this.patternId, this.startSteps = 0, this.lengthSteps = 64, this.sourceOffsetSteps = 0,
     this.loop = true, this.linked = false, this.name, this.color, this.mute = false, this.lock = false, List<String>? takes,
-    this.loopSteps, List<ClipAutomationLaneDoc>? automation})
-      : takes = takes ?? [], automation = automation ?? [];
+    this.loopSteps, List<ClipAutomationLaneDoc>? automation, List<CompPartDoc>? comp})
+      : takes = takes ?? [], automation = automation ?? [], comp = comp ?? [];
   final String id;
   String patternId;
 
   /// Loop-recorded takes (pattern ids, oldest first; empty for an ordinary clip): the clip plays one of them,
   /// [patternId], and the clip's Takes picker switches between them (lib/model/live_midi.dart).
   List<String> takes;
+
+  /// The comp across [takes] (#209, lib/model/comping.dart): the parts of them the clip plays, in steps of the
+  /// pattern; empty plays [patternId] whole. With a comp, [patternId] is the comp pattern built from the parts.
+  List<CompPartDoc> comp;
   int startSteps;
   int lengthSteps;
   int sourceOffsetSteps;
@@ -103,13 +179,19 @@ class ClipDoc {
         if (mute) 'mute': true,
         if (lock) 'lock': true,
         if (takes.isNotEmpty) 'takes': takes,
+        if (comp.isNotEmpty) 'comp': [for (final p in comp) p.toJson()],
         if ((loopSteps ?? 0) > 0) 'loop_steps': loopSteps,
         if (automation.isNotEmpty) 'automation': [for (final a in automation) a.toJson()],
       };
 
-  static ClipDoc fromJson(Map<String, dynamic> j) => ClipDoc(
+  static ClipDoc fromJson(Map<String, dynamic> j) {
+    final takes = [for (final t in (j['takes'] as List?) ?? const []) if (t is String) t].take(64).toList();
+    final pattern = j['pattern'] as String;
+    // A comp plays a pattern of its own, never one of the takes: one that names a take is read as none.
+    final comp = takes.contains(pattern) ? <CompPartDoc>[] : compFromJson(j['comp'], takes, whole: true);
+    return ClipDoc(
         id: j['id'] as String,
-        patternId: j['pattern'] as String,
+        patternId: pattern,
         startSteps: (j['start_steps'] as num?)?.toInt() ?? 0,
         lengthSteps: (j['length_steps'] as num?)?.toInt() ?? 64,
         sourceOffsetSteps: (j['source_offset_steps'] as num?)?.toInt() ?? 0,
@@ -119,13 +201,15 @@ class ClipDoc {
         color: switch (j['color']) { final int c when c >= 0 && c < LayerDoc.trackColors => c, _ => null },
         mute: j['mute'] == true,
         lock: j['lock'] == true,
-        takes: [for (final t in (j['takes'] as List?) ?? const []) if (t is String) t].take(64).toList(),
+        takes: takes,
+        comp: comp,
         loopSteps: switch (j['loop_steps']) { final num n when n >= 1 => n.toInt(), _ => null },
         automation: [
           for (final a in (j['automation'] as List?) ?? const [])
             if (a is Map<String, dynamic>) ?ClipAutomationLaneDoc.fromJson(a),
         ],
       );
+  }
 }
 
 /// The one name of an automation lane's target, for track lanes (`track`) and project lanes alike: the automation
@@ -134,23 +218,51 @@ String automationKey(String type, String target, {String? layerId, String? modul
     '$type|${layerId ?? ''}|${moduleId ?? ''}|${component ?? ''}|$target';
 
 class AutomationPointDoc {
-  AutomationPointDoc({required this.step, required this.value});
+  AutomationPointDoc({required this.step, required this.value, this.curve = AutomationCurve.linear, this.tension = 0});
   double step, value;
-  Map<String, dynamic> toJson() => {'step': step, 'value': value};
-  static AutomationPointDoc fromJson(Map<String, dynamic> j) => AutomationPointDoc(
-    step: (j['step'] as num?)?.toDouble() ?? 0, value: (j['value'] as num?)?.toDouble() ?? 0);
+
+  /// The segment's curve from this point to the next (#230; lib/model/automation_curve.dart), and its bend, -1..1.
+  AutomationCurve curve;
+  double tension;
+
+  Map<String, dynamic> toJson() => {
+        'step': step,
+        'value': value,
+        if (curve != AutomationCurve.linear) 'curve': curve.json,
+        if (curve.bends && tension != 0) 'tension': tension,
+      };
+  static AutomationPointDoc fromJson(Map<String, dynamic> j) {
+    final curve = AutomationCurve.parse(j['curve']);
+    return AutomationPointDoc(step: (j['step'] as num?)?.toDouble() ?? 0, value: (j['value'] as num?)?.toDouble() ?? 0,
+        curve: curve, tension: boundTension(curve, j['tension']));
+  }
+
+  /// A copy, curve and all; [step] and [value] put it elsewhere.
+  AutomationPointDoc copy({double? step, double? value}) =>
+      AutomationPointDoc(step: step ?? this.step, value: value ?? this.value, curve: curve, tension: tension);
 }
 
+/// The most a lane row can be dragged to and the least (#230; screen only, [AutomationLaneDoc.height]).
+const double kMinLaneHeight = 32, kMaxLaneHeight = 240;
+double? _laneHeight(Object? raw) =>
+    raw is num && raw.isFinite ? raw.toDouble().clamp(kMinLaneHeight, kMaxLaneHeight).toDouble() : null;
+
 class AutomationLaneDoc {
-  AutomationLaneDoc({required this.target, List<AutomationPointDoc>? points, this.armed = true}) : points = points ?? [];
+  AutomationLaneDoc({required this.target, List<AutomationPointDoc>? points, this.armed = true, this.height})
+      : points = points ?? [];
   String target;
   List<AutomationPointDoc> points;
 
   /// Written by the Automate button (REAPER's envelope arm, UG 18.5); a disarmed lane only plays.
   bool armed;
-  Map<String, dynamic> toJson() => {'target': target, 'points': [for (final p in points) p.toJson()], if (!armed) 'armed': false};
+
+  /// Its row's height under the track as dragged (#230; null: the default). Screen only.
+  double? height;
+  Map<String, dynamic> toJson() => {'target': target, 'points': [for (final p in points) p.toJson()], if (!armed) 'armed': false,
+        if (height != null) 'height': height};
   static AutomationLaneDoc fromJson(Map<String, dynamic> j) => AutomationLaneDoc(
-    target: j['target'] as String, armed: j['armed'] != false, points: ((j['points'] as List?) ?? const [])
+    target: j['target'] as String, armed: j['armed'] != false, height: _laneHeight(j['height']),
+    points: ((j['points'] as List?) ?? const [])
       .map((p) => AutomationPointDoc.fromJson(p as Map<String, dynamic>)).toList());
 }
 
@@ -159,8 +271,11 @@ class AutomationLaneDoc {
 class ProjectAutomationLaneDoc {
   ProjectAutomationLaneDoc(
       {required this.targetType, required this.target, this.moduleId, this.layerId, this.component, List<AutomationPointDoc>? points,
-      this.armed = true})
+      this.armed = true, this.height})
       : points = points ?? [];
+
+  /// Its row's height under the track as dragged (#230; null: the default). Screen only.
+  double? height;
   String targetType;
   String target;
   String? moduleId;
@@ -181,6 +296,7 @@ class ProjectAutomationLaneDoc {
         if (component != null) 'component': component,
         'points': [for (final p in points) p.toJson()],
         if (!armed) 'armed': false,
+        if (height != null) 'height': height,
       };
 
   static ProjectAutomationLaneDoc fromJson(Map<String, dynamic> j) => ProjectAutomationLaneDoc(
@@ -190,6 +306,7 @@ class ProjectAutomationLaneDoc {
         layerId: j['layer'] as String?,
         component: (j['component'] as num?)?.toInt(),
         armed: j['armed'] != false,
+        height: _laneHeight(j['height']),
         points: ((j['points'] as List?) ?? const []).map((p) => AutomationPointDoc.fromJson(p as Map<String, dynamic>)).toList(),
       );
 }
@@ -451,10 +568,13 @@ class LayerDoc {
     this.spaceBelow = 0,
     this.ownColor = false,
     this.showLanes = false,
+    this.showTakes = false,
     this.collapse = TrackCollapse.normal,
     this.height,
     List<AudioClipDoc>? audioClips,
     this.input,
+    this.frozenAsset,
+    this.frozenContext,
   }) : clips = clips ?? [], automation = automation ?? [], components = components ?? [],
         noteComponents = noteComponents ?? [], sends = sends ?? [], audioClips = audioClips ?? [];
 
@@ -478,6 +598,10 @@ class LayerDoc {
   /// The track's automation lanes are open under it in the arrangement (its envelope button; hidden by default).
   /// Saved with the project, never sent to the engine.
   bool showLanes;
+
+  /// The track's take lanes are open under it (#209, comping: a row per take of its clips with takes). Saved with
+  /// the project, never sent to the engine.
+  bool showTakes;
 
   /// How much of the track's row shows in the arrangement (owner, 2026-11-11, after REAPER): its full [height],
   /// [compactHeight] (the name, M and S in one row) or a [thinHeight] sliver. Saved, never sent to the engine.
@@ -519,6 +643,17 @@ class LayerDoc {
 
   /// What the track records and hears from the device's input; null for none.
   AudioInputDoc? input;
+
+  /// Freeze (1.0.5, #209): the asset holding the track's instrument and effects rendered before its fader, which
+  /// the engine plays in their place ([ProjectDoc.playsFrozen]); null while the track isn't frozen. Saved as
+  /// `frozen` and `frozen_asset` (part of format v5, [ProjectDoc.fileVersion]).
+  String? frozenAsset;
+
+  /// The tempo the freeze was rendered on ([ProjectDoc.freezeContext], saved as `frozen_context`): when the
+  /// project's differs, the frozen audio no longer fits and the track plays live until it is frozen again.
+  String? frozenContext;
+
+  bool get frozen => frozenAsset != null;
 
   /// An audio track: the engine plays its clips and input instead of an instrument (it can't have both).
   bool get isAudio => !isFolder && (audioClips.isNotEmpty || input != null);
@@ -565,10 +700,15 @@ class LayerDoc {
         if (spaceBelow > 0) 'space_below': spaceBelow,
         if (ownColor) 'own_color': true,
         if (showLanes) 'show_lanes': true,
+        if (showTakes) 'show_takes': true,
         if (collapse != TrackCollapse.normal) 'collapse': collapse.name,
         if (height != null) 'height': height,
         if (audioClips.isNotEmpty) 'audio_clips': [for (final c in audioClips) c.toJson(rate: rateOf?.call(c.assetId) ?? 0)],
         if (input != null) 'input': input!.toJson(),
+        if (frozenAsset != null) ...{
+          'frozen': true, 'frozen_asset': frozenAsset,
+          if (frozenContext != null) 'frozen_context': frozenContext,
+        },
       };
 
   static LayerDoc fromJson(Map<String, dynamic> j, {int Function(String assetId)? rateOf}) => LayerDoc(
@@ -599,6 +739,7 @@ class LayerDoc {
         },
         ownColor: j['own_color'] == true,
         showLanes: j['show_lanes'] == true,
+        showTakes: j['show_takes'] == true,
         collapse: TrackCollapse.values.where((c) => c.name == j['collapse']).firstOrNull ?? TrackCollapse.normal,
         height: switch (j['height']) {
           final num v when v.isFinite => v.toDouble().clamp(minHeight, maxHeight),
@@ -607,6 +748,9 @@ class LayerDoc {
         audioClips: j['folder'] == true ? null
             : [for (final c in ((j['audio_clips'] as List?) ?? const []).take(4096)) ?AudioClipDoc.fromJson(c, rate: c is Map ? rateOf?.call('${c['asset']}') ?? 0 : 0)],
         input: j['folder'] == true ? null : AudioInputDoc.fromJson(j['input']),
+        frozenAsset: j['folder'] != true && j['frozen'] == true
+            ? switch (_boundedProjectText(j['frozen_asset'], 64)) { '' => null, final id => id } : null,
+        frozenContext: switch (j['frozen_context']) { final String c when c.length <= 4096 => c, _ => null },
       );
 }
 
@@ -689,8 +833,12 @@ class ProjectDoc {
   }
 
   /// v3 (batch 1.0.3): the tempo map, time signatures, sections and markers in beats. A v2 file reads as one tempo
-  /// (`bpm`) in its `beats_per_bar`/4, its regions as sections.
-  static const int fileVersion = 4;
+  /// (`bpm`) in its `beats_per_bar`/4, its regions as sections. v5 (batch 1.0.5, #216): clips stored as MIDI
+  /// (`midi`, base64), not pattern text; a v4 file's text converts on load. v5 also holds batch 1.0.5's other fields:
+  /// freeze's `frozen`, `frozen_asset` and `frozen_context` (#209) and automation's point `curve` and `tension`, lane
+  /// `height`, `recent_automation` and `automation_follows_clips` (#230), and a linked sample asset's `link` (#229).
+  /// An older C.A.W refuses a v5 file whole.
+  static const int fileVersion = 5;
 
   final String id;
   String name;
@@ -756,6 +904,15 @@ class ProjectDoc {
   int seed;
   double master;
   bool seamCrossfade;
+
+  /// "Automation follows clips" (#230, the arranger's options): a clip moved along its track takes the points of
+  /// the track's lanes over it with it. Off by default.
+  bool automationFollowsClips = false;
+
+  /// The parameters automated last ([automationKey]s, the newest first; at most [kRecentAutomation]), for the
+  /// automation picker's Recent group (#230). Screen only.
+  List<String> recentAutomation = [];
+  static const kRecentAutomation = 8;
   List<ModuleDoc> modules; // the patterns
 
   /// The names of the .caw sound modules dropped when this project was read ([fromJson]; never saved): the app
@@ -833,6 +990,27 @@ class ProjectDoc {
   /// The component index the engine gives a layer's native instrument (CAW_INSTRUMENT_INDEX in caw.h).
   static const instrumentIndex = 0xFFFFFFFF;
 
+  /// What a freeze was rendered on beyond the track itself (freeze, 1.0.5): the tempo map, the signatures, the
+  /// seed and the key. A frozen track whose [LayerDoc.frozenContext] differs plays live ([playsFrozen]).
+  String get freezeContext => jsonEncode({
+        'bpm': bpm, 'beats_per_bar': beatsPerBar, 'seed': seed, 'key': key,
+        'tempo_map': [for (final t in tempoMap) t.toJson()],
+        'time_signatures': [for (final t in timeSignatures) t.toJson()],
+      });
+
+  /// The engine plays [l]'s frozen audio in place of its instrument and effects: it is frozen, its asset is in
+  /// the project and the tempo it was rendered on is the project's.
+  bool playsFrozen(LayerDoc l) =>
+      !l.isFolder && l.frozenAsset != null && asset(l.frozenAsset) != null && l.frozenContext == freezeContext;
+
+  /// The engine's clip for frozen track [l] ([playsFrozen]): its asset from step 0 at the file's speed, as long as
+  /// the file (its seconds on the tempo map), marked not to lengthen the song (C++ `lengthens_song`).
+  Map<String, dynamic> frozenClipJson(LayerDoc l) {
+    final a = asset(l.frozenAsset)!;
+    final clip = AudioClipDoc(id: 'frozen-${l.id}', assetId: a.id, lengthSeconds: a.seconds > 0 ? a.seconds : songSeconds);
+    return clip.toEngineJson(bpm, span: clip.spanSteps(tempo))..['lengthens_song'] = false;
+  }
+
   /// Stores what [states] reports (Engine.componentStates, per layer id; null for the master) into the
   /// component entries, so the saved project carries each effect's state. Entries it doesn't name keep theirs.
   void storeComponentStates(Map<int, ({String state, int version})> Function(String? layerId) states) {
@@ -849,7 +1027,8 @@ class ProjectDoc {
 
     store(masterComponents, null);
     for (final l in layers) {
-      if (!l.isFolder) store(l.components, l.id, l.instrument);
+      // A frozen track's chain isn't in the engine (its clip player is): its entries keep what they had.
+      if (!l.isFolder && !playsFrozen(l)) store(l.components, l.id, l.instrument);
     }
   }
 
@@ -904,8 +1083,14 @@ class ProjectDoc {
     }
     List<ComponentUseDoc> chainOf(String? layerId) =>
         layerId == null ? masterComponents : layers.where((l) => l.id == layerId).firstOrNull?.components ?? const [];
+    // A frozen track (freeze, 1.0.5) plays its frozen audio instead: its instrument, per-note FX and effects, and the
+    // lanes and links aimed at them, stay out of the engine, so none of them runs.
+    final frozenIds = {for (final l in layers) if (playsFrozen(l)) l.id};
     bool instrumentPlays(LayerDoc l) =>
-        !l.isFolder && l.instrument != null && (playableComponents == null || playableComponents.contains(l.instrument!.id));
+        !l.isFolder && l.instrument != null && !frozenIds.contains(l.id) &&
+        (playableComponents == null || playableComponents.contains(l.instrument!.id));
+    int? engineIndex(String? layerId, int index) =>
+        layerId != null && frozenIds.contains(layerId) ? null : playableIndex(chainOf(layerId), index);
     // Clip automation (owner, 2026-11-11) is unrolled onto the timeline: inside a clip its lane plays, elsewhere the
     // track's or project's lane on the same target (lib/model/clip_automation.dart).
     final unrolled = unrollClipAutomation();
@@ -923,13 +1108,15 @@ class ProjectDoc {
     // Lanes being written (automation Write and Touch, [automationKey]) are left out: the control's live value plays.
     final engineAutomation = [
       for (final lane in projectLanes)
-        if (suspendLanes.contains(lane.key)) ...[]
+        if (suspendLanes.contains(lane.key) ||
+            (lane.targetType == 'noteComponent' && frozenIds.contains(lane.layerId))) ...[]
         else if (lane.targetType == 'instrument') ...[
-          if (layers.where((l) => l.id == lane.layerId).firstOrNull case final LayerDoc l when instrumentPlays(l)) lane.toJson(),
+          if (layers.where((l) => l.id == lane.layerId).firstOrNull case final LayerDoc l when instrumentPlays(l))
+            lane.toJson()..remove('height'),
         ] else if (lane.targetType != 'component')
-          lane.toJson()
-        else if (playableIndex(chainOf(lane.layerId), lane.component ?? -1) case final int index)
-          lane.toJson()..['component'] = index,
+          lane.toJson()..remove('height')
+        else if (engineIndex(lane.layerId, lane.component ?? -1) case final int index)
+          lane.toJson()..['component'] = index..remove('height'),
     ];
     final result = jsonEncode({
         'caw_project': 1,
@@ -963,7 +1150,7 @@ class ProjectDoc {
               'id': l.id,
               'name': l.name,
               // A bus folder runs its own effects (a reverb bus); a folder without a bus has none.
-              if (playable(l.components).isNotEmpty && (!l.isFolder || l.busEnabled))
+              if (playable(l.components).isNotEmpty && (!l.isFolder || l.busEnabled) && !frozenIds.contains(l.id))
                 'components': [for (final c in playable(l.components)) c.toJson(withKey: routing.keyPlays(l, c))],
               if (routing.sendsOf(l) case final sends when sends.isNotEmpty) 'sends': [for (final s in sends) s.toJson()],
               // A C++ instrument not loaded yet (awaiting trust, building) is left out: the track is silent until it is.
@@ -973,11 +1160,17 @@ class ProjectDoc {
                 'noteComponents': [for (final c in playable(l.noteComponents)) c.toJson()],
                 'noteVoices': l.noteVoices,
               },
+              // A frozen track: its frozen audio from the song's start at the file's own speed, the whole file (the
+              // tail past the song's end too, which doesn't lengthen the song). Its notes still go, for keys and
+              // modulators that hear them (the clip player ignores them).
+              if (frozenIds.contains(l.id)) 'audio_clips': [frozenClipJson(l)]
               // An audio track (API 18): its clips (those whose file the project lists) and its input.
-              if (l.isAudio) ...{
+              else if (l.isAudio) ...{
                 'audio_clips': [
+                  // A comp (#209) goes as its parts, each a clip of its take with crossfades at the joins.
                   for (final c in l.audioClips)
-                    if (asset(c.assetId) != null) c.toEngineJson(bpm, span: c.spanSteps(tempo)),
+                    for (final part in compAudioParts(this, c))
+                      if (asset(part.assetId) != null) part.toEngineJson(bpm, span: part.spanSteps(tempo)),
                 ],
                 if (l.input != null) 'input': l.input!.toJson(),
               },
@@ -988,7 +1181,7 @@ class ProjectDoc {
                     if (unrolled[automationKey('track', a.target, layerId: l.id)] case final u?)
                       (AutomationLaneDoc(target: a.target, points: u.points, armed: a.armed)).toJson()
                     else
-                      a.toJson(),
+                      a.toJson()..remove('height'),
                 for (final target in const ['volume', 'pan'])
                   if (l.automation.every((a) => a.target != target))
                     if (unrolled[automationKey('track', target, layerId: l.id)] case final u?)
@@ -1021,7 +1214,7 @@ class ProjectDoc {
         'audition_only': auditionOnly && auditionInstrument != null,
         // Project modulation (#161): what can play of it (modulation.dart).
         ...engineModulationFields(routing, playableComponents: playableComponents,
-            engineIndex: (layerId, index) => playableIndex(chainOf(layerId), index), instrumentPlays: instrumentPlays),
+            engineIndex: engineIndex, instrumentPlays: instrumentPlays),
       });
     return result;
   }
@@ -1040,7 +1233,7 @@ class ProjectDoc {
         'master': master,
         'seam_crossfade': seamCrossfade,
         'automation': [for (final lane in automation) lane.toJson()],
-        'modules': [for (final m in modules) m.toJson()],
+        'modules': [for (final m in modules) ?m.toJson()],
         'layers': [for (final l in layers) l.toJson(rateOf: (id) => asset(id)?.sourceRate ?? 0)],
         'library_folders': libraryFolders,
         'saved_library_searches': savedLibrarySearches,
@@ -1055,6 +1248,8 @@ class ProjectDoc {
         if (modLinks.isNotEmpty) 'modulation': [for (final l in modLinks) l.toJson()],
         if (assets.isNotEmpty) 'assets': [for (final a in assets) a.toJson()],
         if (musicVideo != null) 'music_video': musicVideo,
+        if (automationFollowsClips) 'automation_follows_clips': true,
+        if (recentAutomation.isNotEmpty) 'recent_automation': recentAutomation,
         if (created != null) 'created': created!.toUtc().toIso8601String(),
         'saved_with': {'version': appVersion, 'build': appBuild},
       };
@@ -1115,8 +1310,8 @@ class ProjectDoc {
       seamCrossfade: j['seam_crossfade'] != false,
       automation: ((j['automation'] as List?) ?? const []).map((lane) => ProjectAutomationLaneDoc.fromJson(lane as Map<String, dynamic>)).toList(),
       modules: [
-        for (final m in ((j['modules'] as List?) ?? const []).map((m) => ModuleDoc.fromJson(m as Map<String, dynamic>)))
-          if (isPatternSource(m.source) || isPatternSource(m.runSource)) m,
+        for (final raw in ((j['modules'] as List?) ?? const []).whereType<Map<String, dynamic>>())
+          if (ModuleDoc.jsonIsPattern(raw)) ModuleDoc.fromJson(raw),
       ],
       libraryFolders: ((j['library_folders'] as List?) ?? const []).whereType<String>().take(512).toList(),
       savedLibrarySearches: {
@@ -1143,8 +1338,8 @@ class ProjectDoc {
           final legacyPatternId = layer.patternId!;
           final module = ((j['modules'] as List?) ?? const [])
               .whereType<Map>().where((m) => m['id'] == legacyPatternId).firstOrNull;
-          final parsed = module == null ? null
-              : PatternDoc.parse((module['run_source'] ?? module['source'] ?? '').toString()).doc;
+          final text = module == null ? null : ModuleDoc.jsonText(module);
+          final parsed = text == null ? null : PatternDoc.parse(text).doc;
           final length = parsed?.lengthSteps((j['beats_per_bar'] as num?)?.toInt() ?? 4) ?? layer.lengthSteps;
           layer.clips.add(ClipDoc(id: newId('c'), patternId: legacyPatternId,
               startSteps: 0, lengthSteps: length > 0 ? length : 64));
@@ -1155,6 +1350,11 @@ class ProjectDoc {
     );
 
     project
+      ..automationFollowsClips = j['automation_follows_clips'] == true
+      ..recentAutomation = [
+        for (final k in ((j['recent_automation'] as List?) ?? const []).take(ProjectDoc.kRecentAutomation))
+          if (k is String && k.length <= 512) k,
+      ]
       ..created = projectCreatedFromJson(j['created'])
       ..savedWithVersion = savedWithFromJson(j['saved_with']).version
       ..savedWithBuild = savedWithFromJson(j['saved_with']).build;

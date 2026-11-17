@@ -2,7 +2,7 @@
 title: Music workflow implementation gaps
 summary: Factual snapshot of implemented and incomplete music-workflow capabilities; sequencing belongs to the permanent roadmap.
 covers: [app/lib/model/app_state.dart, app/lib/model/lane_curve.dart, app/lib/model/pattern_doc.dart, app/lib/model/poller.dart, app/lib/model/project.dart, app/lib/model/storage.dart]
-updated: 2026-11-14
+updated: 2026-11-17
 ---
 
 # Music workflow implementation gaps
@@ -20,7 +20,7 @@ This note records the current implementation gaps in C.A.W.'s music-production w
 - **[Implemented]** Opening straight into the last project; New, New from template and Open are in the project menu.
 - **[Implemented]** Pause and resume (Space) on the same beat, and Stop (Shift+Space) back to the start (2026-11-05, `caw_engine_play_at`).
 - **[Implemented]** Project-wide undo and redo in the transport (whole-project snapshots, one per burst of edits, 100 steps). Saves write the project through a temporary file, one write at a time, so a burst of saves always leaves the newest whole project on disk. Files › Projects lists projects with their metadata (created, last edited, saved-with version, tracks, length, tempo) in folders, with select mode and an undoable mass delete. The piano roll, library and automation keep their own histories too.
-- **[Implemented]** MIDI pattern import/export (.mid, .midi2) through the pattern editor. A file imported as clips while no track has a clip brings its tempo map and time signatures (#207); otherwise its tempo is left out.
+- **[Implemented]** Clips stored as MIDI in the project (format v5, #216; pattern text is their editing view). MIDI pattern import/export (.mid, .midi2) through the pattern editor. A file imported as clips while no track has a clip brings its tempo map and time signatures (#207); otherwise its tempo is left out.
 - **[Implemented]** Curve tool for velocity and chance lane curves; per-note expression editors support pitch bend, pressure/volume, timbre and vibrato, including editable points and segment bends.
 - **[Implemented]** Pattern actions include Euclidean, random-in-key, arpeggiate, humanize, chord stamp, legato, reverse and pitch inversion.
 - **[Incomplete]** Kit-row routing, code-generated procedural patterns/Freeze, advanced quantization and groove/swing utilities remain future work.
@@ -31,9 +31,9 @@ This note records the current implementation gaps in C.A.W.'s music-production w
 - **[Implemented in the engine]** More than 64 layers, bounded by the memory budget (F7.3), with their export buffers held to a project-wide share (#133); the app's add buttons still stop at 64 until F7.3 part C.
 - **[Implemented]** Arrangement-first horizontal timeline, track lanes, reusable MIDI clip sources, linked and independent duplicates, move/resize/split, source-offset shift, time selection, multi-selection/reference notes, nested folders and optional stereo folder buses. An adjustable gap between tracks and app-only spacer rows separate tracks on screen; each track has its own row height and a normal, compact or thin collapse state (app-only, saved; [app](app.md), Arranger).
 - **[Implemented]** Track and folder-bus volume/pan automation is serialized and played by the native engine.
-- **[Implemented]** Project/timeline automation lanes target module parameters by module ID or named project globals; the app edits song-time points and the native VM evaluates them per sample. Track volume/pan lanes remain separate.
+- **[Implemented]** Project/timeline automation lanes target module parameters by module ID or named project globals; the app edits song-time points with curved segments (#230) and the native VM evaluates them per sample. Track volume/pan lanes remain separate.
 - **[Implemented]** Audio import and clips with non-destructive editing, the sample editor, the stretch notch, Follows tempo and Slice to MIDI (batch 1.0.4, #208); a tempo map (stepped and ramped changes, a tempo lane), time signatures, sections and markers (batch 1.0.3, #207, C API 31): the engine plays every position on the map, sections move, copy and delete with their contents, and the recording count-in counts bars ([app](app.md), Arranger).
-- **[Incomplete]** Clip-following automation and consolidation/bounce.
+- **[Incomplete]** Clip-following automation and consolidation. Bounce to audio of a track or clips, and freeze, are built (1.0.5, [app](app.md)).
 
 ### Mixer and signal flow
 
@@ -66,7 +66,7 @@ This note records the current implementation gaps in C.A.W.'s music-production w
 - **[Incomplete]** Bluetooth MIDI pairing inside the app, controller learn/mapping, external clock/sync and control-surface support.
 - **[Implemented, not yet run on a device]** Overload recovery (2026-11-12): layers the engine shed come back on their own once the load is low, and going to or from the background unmutes them ([engine](engine.md), "Overload, and coming back"). An overload also turns the Lightweight profile on once while Lightweight on overload is on (`light_by_self` remembers it; [app](app.md), Frame rate).
 - **[Implemented, not yet run on a device]** Output and input latency compensation (Bluetooth, USB, HDMI): MIDI takes at the step that was heard when the note was played, audio takes by output + input latency, the playhead and meters at the heard time, the playhead drawn between reads from the compensated read ([app](app.md)).
-- **[Incomplete]** Take lanes and comping beyond a loop's stacked takes.
+- **[Built 1.0.5, #209]** Take lanes and comping: a swipe across a take picks that part, crossfaded joins, Flatten ([app](app.md)).
 - **[Implemented, not yet run on a device]** Playing and recording behind other apps on Android (a `mediaPlayback` foreground service with a Play/Pause and Stop notification), and a microphone that opens only while a track is armed or monitors, a recording runs or the ping plays ([app](app.md)).
 
 ## Implementation constraints

@@ -265,6 +265,8 @@ const List<SettingEntry> settingEntries = [
   _E('feel.edit.tracks', _f, 'Animate tracks', 'Tracks added, deleted and reordered', ['animation', 'arrange']),
   _E('feel.edit.lengths', _f, 'Animate lengths and sizes', 'Lengths and sizes changing', ['animation', 'resize']),
   _E('feel.edit.panels', _f, 'Animate panels', 'Panels, menus, sheets and pages opening', ['animation', 'sheet', 'page']),
+  _E('feel.startupAnimation', _f, 'Full startup animation',
+      'Plays the crow animation to its end; off, it shows only while loading', ['intro', 'splash', 'launch', 'logo']),
   _E('feel.haptics', _f, 'Haptics', 'A light touch on presses, steps, snaps, grabs and drops', ['vibration', 'feedback']),
   _E('feel.hapticStrength', _f, 'Haptic strength', 'How strong the haptics are', ['vibration', 'intensity']),
   _E('feel.quickActions', _f, 'Quick actions bar', 'A floating row of shortcut buttons on a phone', ['shortcuts', 'buttons']),

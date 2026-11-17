@@ -10,11 +10,13 @@ import '../actions/actions.dart';
 import '../model/drums.dart' show drumsComponentId;
 import '../model/app_state.dart';
 import '../model/arrange_edit.dart';
+import '../model/comping.dart';
 import '../model/audio_edit.dart';
 import '../model/arrange_fx.dart';
 import '../model/arrange_markers.dart';
 import '../model/clip_automation.dart';
 import '../model/clip_loop_edit.dart';
+import '../model/freeze.dart';
 import '../model/live_midi.dart';
 import '../model/pattern_doc.dart';
 import '../model/project.dart';
@@ -38,6 +40,7 @@ import 'arrange/tempo_lane.dart';
 import 'arrange/focus_panel.dart';
 import 'arrange/edit_cues.dart';
 import 'arrange/edit_motion.dart';
+import 'arrange/freeze_ui.dart';
 import 'arrange/fx_stack.dart';
 import 'arrange/long_press_menu.dart';
 import 'arrange/mixer_card.dart';
@@ -52,6 +55,7 @@ import 'motion.dart';
 import 'theme.dart';
 import 'arrange/track_color.dart';
 import 'arrange/timeline_window.dart';
+import 'arrange/take_lanes.dart';
 import 'arrange/track_lanes.dart';
 import 'file_manager_screen.dart';
 import 'frame/frame_widgets.dart';
@@ -437,6 +441,20 @@ class _ArrangerScreenState extends State<ArrangerScreen> with TickerProviderStat
     widget.state.tick.addListener(_followPlayhead);
     widget.state.revealStartRequests.addListener(_revealStart);
     _hScroll.addListener(_onHScroll);
+    widget.state.onFrozenEdit = _frozenEdit;
+  }
+
+  bool _asking = false;
+
+  /// An edit reached a frozen track (freeze, 1.0.5): one "Unfreeze to edit?" at a time; the edit itself was not made.
+  Future<void> _frozenEdit(LayerDoc layer) async {
+    if (_asking || !mounted) return;
+    _asking = true;
+    try {
+      await askUnfreeze(context, widget.state, layer);
+    } finally {
+      _asking = false;
+    }
   }
 
   /// Settings › Editing › Follow the playhead: while playing, the view keeps the playhead in sight, paging on when it
@@ -606,6 +624,7 @@ class _ArrangerScreenState extends State<ArrangerScreen> with TickerProviderStat
 
   @override
   void dispose() {
+    if (widget.state.onFrozenEdit == _frozenEdit) widget.state.onFrozenEdit = null;
     widget.state.tick.removeListener(_followPlayhead);
     widget.state.revealStartRequests.removeListener(_revealStart);
     _router?.unregister(Area.arranger, _keys);
@@ -843,7 +862,7 @@ class _ArrangerScreenState extends State<ArrangerScreen> with TickerProviderStat
     final midi = LiveMidi.current;
     // Sections, the most used first (owner, 2026-11-11); volume and pan edit in place.
     const track = 'Track', mix = 'Mix', record = 'Record', clips = 'Clips', move = 'Move', lanes = 'Automation',
-        collapse = 'Collapse', more = 'More';
+        collapse = 'Collapse', render = 'Render', more = 'More';
     final shown = s.shownCollapse(layer);
     final v = await showLongPressMenu<String>(context, at: at, title: layer.name, style: s.settings.longPressMenu, actions: [
       if (!layer.isFolder) ...[
@@ -918,6 +937,8 @@ class _ArrangerScreenState extends State<ArrangerScreen> with TickerProviderStat
           Icons.account_tree_outlined, section: move),
       MenuAction('spacer', layer.spaceBelow > 0 ? 'Remove spacer below' : 'Add spacer below', Icons.space_bar,
           section: move),
+      if (takeLaneCount(layer) > 0) MenuAction('takes', layer.showTakes ? 'Hide take lanes' : 'Show take lanes',
+          Icons.layers_outlined, checked: layer.showTakes, section: lanes),
       if (canAutomate) MenuAction('lanes', layer.showLanes ? 'Hide automation lanes' : 'Show automation lanes',
           Icons.show_chart, checked: layer.showLanes, section: lanes),
       if (canAutomate && !hasVolume) const MenuAction('automation-volume', 'Add volume automation', Icons.show_chart,
@@ -933,12 +954,34 @@ class _ArrangerScreenState extends State<ArrangerScreen> with TickerProviderStat
           (TrackCollapse.compact, 'Compact', Icons.view_headline), (TrackCollapse.thin, 'Thin', Icons.horizontal_rule)])
         MenuAction('collapse:${c.name}', label, icon, checked: shown == c, section: collapse),
       if (layer.height != null) const MenuAction('default-height', 'Default height', Icons.height, section: collapse),
+      // Freeze and bounce (owner, 2026-11-14: in the hold menu, no header button).
+      if (s.canRenderTrack(layer) || layer.frozen) ...[
+        MenuAction('freeze', layer.frozen ? 'Unfreeze' : 'Freeze', Icons.ac_unit, checked: layer.frozen,
+            section: render),
+        if (layer.frozen && !s.project.playsFrozen(layer))
+          const MenuAction('refreeze', 'Freeze again (the tempo changed)', Icons.ac_unit, section: render),
+        if (s.canRenderTrack(layer))
+          const MenuAction('bounce', 'Bounce to audio', Icons.graphic_eq_rounded, section: render),
+      ],
       MenuAction('template', layer.isFolder ? 'Save folder as track template…' : 'Save as track template…',
           Icons.bookmark_add_outlined, section: more),
       const MenuAction('delete', 'Delete', Icons.delete_outline, danger: true, section: more),
     ]);
     if (v == null || !mounted) return;
     if (v == 'fx') _openTrack(layer, tab: FocusTab.fx);
+    if (v == 'freeze' && layer.frozen) {
+      s.unfreezeTrack(layer);
+      return;
+    }
+    if (v == 'freeze' || v == 'refreeze') {
+      if (v == 'refreeze') s.unfreezeTrack(layer);
+      await runTrackRender(context, 'Freeze ${layer.name}', () => s.freezeTrack(layer));
+      return;
+    }
+    if (v == 'bounce') {
+      await runTrackRender(context, 'Bounce ${layer.name}', () => s.bounceTrack(layer));
+      return;
+    }
     if (v == 'arm') midi?.toggleRecord(layer.id);
     if (v == 'audio-arm') {
       await toggleAudioArm(context, s, layer);
@@ -980,6 +1023,7 @@ class _ArrangerScreenState extends State<ArrangerScreen> with TickerProviderStat
     }
     if (v == 'default-height') s.resetTrackHeight(layer);
     if (v == 'lanes') s.setLanesShown(layer, !layer.showLanes);
+    if (v == 'takes') toggleTakeLanes(s, layer);
     if (v == 'automation-volume') s.addAutomationLane(layer, 'volume');
     if (v == 'automation-pan') s.addAutomationLane(layer, 'pan');
     if (v == 'remove-automation-volume') s.removeAutomationLane(layer, layer.automation.firstWhere((a) => a.target == 'volume'));
@@ -1131,6 +1175,8 @@ class _ArrangerScreenState extends State<ArrangerScreen> with TickerProviderStat
     // Reset goes back to the pattern's own length.
     final doc = PatternDoc.parse(s.project.module(clip.patternId)?.source ?? '').doc;
     final patternBars = doc == null ? null : math.max(1, doc.lengthSteps(s.project.beatsPerBar)) / bar;
+    final consolidate = s.selectedClipIds.contains(clip.id)
+        ? [for (final c in layer.clips) if (s.selectedClipIds.contains(c.id) && !c.lock) c] : const <ClipDoc>[];
     final v = await showLongPressMenu<String>(context, at: at, title: s.clipName(clip),
       style: s.settings.longPressMenu, actions: [
         const MenuAction('notes', 'Edit notes', Icons.piano, section: clipSection),
@@ -1143,6 +1189,9 @@ class _ArrangerScreenState extends State<ArrangerScreen> with TickerProviderStat
         // Loop-recorded takes (lib/model/live_midi.dart): pick the one the clip plays.
         if (clip.takes.length > 1) MenuAction('takes', 'Takes (${clip.takes.length})…', Icons.layers_outlined,
             section: clipSection),
+        // Comping (#209): the takes as lanes under the track.
+        if (clip.takes.length > 1) MenuAction('take-lanes', layer.showTakes ? 'Hide take lanes' : 'Take lanes',
+            Icons.view_agenda_outlined, checked: layer.showTakes, section: clipSection),
         if (widget.onOpenPattern != null) const MenuAction('edit', 'Open in Build', Icons.open_in_new,
             section: clipSection),
         const MenuAction('copy', 'Duplicate independently', Icons.copy, section: edit),
@@ -1172,6 +1221,12 @@ class _ArrangerScreenState extends State<ArrangerScreen> with TickerProviderStat
         if (clip.loopSteps != null)
           const MenuAction('loop-reset', 'Reset loop to pattern length', Icons.restart_alt, section: size),
         const MenuAction('midi', 'Export as MIDI file', Icons.file_upload_outlined, section: more),
+        // Freeze and bounce (owner, 2026-11-14): the selection's clips on this track, or this clip.
+        if (s.canRenderTrack(layer)) const MenuAction('bounce', 'Bounce to audio', Icons.graphic_eq_rounded,
+            section: more),
+        // Consolidate (#209): the selection's clips on this track joined into one clip.
+        if (consolidate.length >= 2) MenuAction('consolidate', 'Consolidate ${consolidate.length} clips',
+            Icons.join_full, section: more),
         if (!clip.lock) const MenuAction('delete', 'Delete', Icons.delete_outline, danger: true, section: more),
       ]);
     if (v == null || !mounted) return;
@@ -1190,8 +1245,21 @@ class _ArrangerScreenState extends State<ArrangerScreen> with TickerProviderStat
       s.selectClip(layer, clip);
       s.splitClips(at: v == 'split' ? splitAt : playhead);
     }
-    if (v == 'notes') { s.activateClip(layer, clip); _focus(layer.id, tab: FocusTab.clip); }
+    if (v == 'bounce') {
+      final chosen = s.selectedClipIds.contains(clip.id)
+          ? [for (final c in layer.clips) if (s.selectedClipIds.contains(c.id)) c] : [clip];
+      await runTrackRender(context, 'Bounce ${chosen.length == 1 ? s.clipName(clip) : '${chosen.length} clips'}',
+          () => s.bounceClips(layer, chosen));
+      return;
+    }
+    if (v == 'notes') {
+      if (!await editableOrUnfreeze(context, s, layer) || !mounted) return;
+      s.activateClip(layer, clip);
+      _focus(layer.id, tab: FocusTab.clip);
+    }
     if (v == 'takes') return showTakePicker(context, s, layer, clip, at);
+    if (v == 'take-lanes') toggleTakeLanes(s, layer);
+    if (v == 'consolidate' && !s.consolidateMidiClips(layer, consolidate)) Haptics.error();
     if (v == 'edit') { s.activateClip(layer, clip); widget.onOpenPattern?.call(); }
     if (v == 'copy') s.duplicateClip(layer, clip);
     if (v == 'linked') s.duplicateClip(layer, clip, linked: true);
@@ -1211,7 +1279,8 @@ class _ArrangerScreenState extends State<ArrangerScreen> with TickerProviderStat
     onMenu: (l, at) => _trackMenu(l, at, patterns),
     onClipMenu: _clipMenu,
     // A mouse's double-click on a MIDI clip opens its notes, as the menu's Edit notes does.
-    onClipOpen: (l, c) {
+    onClipOpen: (l, c) async {
+      if (!await editableOrUnfreeze(context, widget.state, l) || !mounted) return;
       widget.state.activateClip(l, c);
       _focus(l.id, tab: FocusTab.clip);
     },
@@ -1555,6 +1624,17 @@ class _ArrangerScreenState extends State<ArrangerScreen> with TickerProviderStat
       constraints: BoxConstraints(maxHeight: MediaQuery.sizeOf(context).height * 0.5),
       child: SingleChildScrollView(padding: const EdgeInsets.fromLTRB(10, 0, 10, 8), child: Column(children: [
         _ProjectSettings(state: s),
+        // This project's: a moved clip takes the points of its track's lanes over it along (#230).
+        Padding(padding: const EdgeInsets.only(top: 6), child: Row(children: [
+          const Expanded(child: Text('Automation follows clips', style: TextStyle(color: Neon.dim))),
+          Switch(key: const ValueKey('automation-follows-clips'), value: s.project.automationFollowsClips,
+            onChanged: (v) {
+              s.endUndoStep();
+              s.editProject((p) => p.automationFollowsClips = v);
+              s.endUndoStep();
+              setState(() {});
+            }),
+        ])),
         // App-wide: how long-press menus open (owner: a list near the finger by default, a ring as a setting).
         Padding(padding: const EdgeInsets.only(top: 6), child: Row(children: [
           const Expanded(child: Text('Long-press menus', style: TextStyle(color: Neon.dim))),
@@ -1640,9 +1720,18 @@ class _ArrangerScreenState extends State<ArrangerScreen> with TickerProviderStat
             child: FadeTransition(opacity: a, child: child)),
         child: lanes ?? const SizedBox(width: double.infinity));
     }
+    // The take lanes open and close the same way.
+    Widget takesReveal(LayerDoc l, Widget? lanes) => AnimatedSwitcher(duration: lanesD ?? Duration.zero,
+        switchInCurve: EditMotion.curve, switchOutCurve: EditMotion.exitCurve,
+        transitionBuilder: (child, a) => SizeTransition(sizeFactor: a, alignment: Alignment.topCenter,
+            child: FadeTransition(opacity: a, child: child)),
+        child: lanes ?? const SizedBox(width: double.infinity));
     // A thin row keeps its automation lanes closed.
     bool lanesOpen(LayerDoc l) => !pinned && l.showLanes && canHaveLanes(l) && _rowCollapse(l) != TrackCollapse.thin;
-    final rows = layers.fold<double>(0, (h, l) => h + rowH(l) + (pinned ? 0 : (lanesOpen(l) ? lanesHeight(s, l) : 0) + l.spaceBelow) + gap);
+    // A thin row keeps its take lanes closed too (#209, comping).
+    bool takesOpen(LayerDoc l) => !pinned && takeLanesHeight(l) > 0 && _rowCollapse(l) != TrackCollapse.thin;
+    final rows = layers.fold<double>(0, (h, l) => h + rowH(l) + (pinned ? 0 : (lanesOpen(l) ? lanesHeight(s, l) : 0) +
+        (takesOpen(l) ? takeLanesHeight(l) : 0) + l.spaceBelow) + gap);
     // Edit animations (owner, 2026-11-11): rows glide when tracks are added, deleted, reordered or nested, and a
     // track an edit added grows in. The first build, and the pinned track, just show what is there.
     final appearing = pinned || _knownTracks == null ? const <String>{}
@@ -1729,7 +1818,9 @@ class _ArrangerScreenState extends State<ArrangerScreen> with TickerProviderStat
             onMenu: (at) => callbacks.onMenu(layer, at),
             onResize: pinned ? null : (dy) => _rowResize(layer, dy),
             onResizeEnd: _rowResizeEnd)),
-          // The track's automation lanes, open under it (REAPER's envelope lanes, UG 18.16).
+          // The track's take lanes (#209, comping), then its automation lanes (REAPER's envelope lanes, UG 18.16).
+          if (!pinned) takesReveal(layer, takesOpen(layer) ? TakeLaneHeaders(key: ValueKey('take-headers-${layer.id}'),
+              state: s, layer: layer, indent: folderIndent(s.folderDepth(layer))) : null),
           if (!pinned) lanesReveal(layer, lanesOpen(layer) ? TrackLaneHeaders(key: ValueKey('lane-headers-${layer.id}'),
               state: s, layer: layer, indent: folderIndent(s.folderDepth(layer))) : null),
           if (layer.spaceBelow > 0 && !pinned) _SpacerHeader(state: s, layer: layer),
@@ -1785,6 +1876,8 @@ class _ArrangerScreenState extends State<ArrangerScreen> with TickerProviderStat
               glideRow(layer, (h) => _TimelineLane(key: drag?.laneKey(layer.id), state: s, layer: layer, width: width,
                 stepW: stepW, trackHeight: h, selectedIds: s.selectedClipIds, callbacks: callbacks, drag: drag,
                 thin: !pinned && _rowCollapse(layer) == TrackCollapse.thin)),
+              if (!pinned) takesReveal(layer, takesOpen(layer)
+                  ? TakeLaneRows(state: s, layer: layer, stepW: stepW, width: width) : null),
               if (!pinned) lanesReveal(layer, lanesOpen(layer)
                   ? TrackLaneRows(state: s, layer: layer, stepW: stepW, width: width) : null),
               // A spacer and the gap leave the timeline empty too, so lanes stay level with their headers.
@@ -2056,6 +2149,7 @@ class _TimelineHeader extends StatelessWidget {
           return withMeter(SizedBox(height: box.maxHeight, child: Row(children: [
             ?chevron,
             const SizedBox(width: 3),
+            pop('frozen', layer.frozen, FrozenBadge(state: state, layer: layer, size: 12)),
             name,
             pop('ms', ms && w >= msRoom, Row(mainAxisSize: MainAxisSize.min, children: [mute, const SizedBox(width: 2), solo])),
           ])));
@@ -2063,6 +2157,8 @@ class _TimelineHeader extends StatelessWidget {
         final top = SizedBox(height: low ? 24 : 28, child: Row(children: [
           ?chevron,
           const SizedBox(width: 3),
+          // A frozen track's snowflake (freeze, 1.0.5), fading and scaling in and out like the header's controls.
+          pop('frozen', layer.frozen, FrozenBadge(state: state, layer: layer)),
           name,
           // A deep folder's header can get narrow: M and S move to their own row's place, the icons go first.
           if (oneRow) pop('ms', w >= msRoom, Row(mainAxisSize: MainAxisSize.min, children: [mute, const SizedBox(width: 2), solo])),
@@ -3232,6 +3328,11 @@ class _TimelineClipState extends State<_TimelineClip> {
         // The clip's notes as a mini piano roll (REAPER), from a cached picture of its pattern; under the edges.
         if (preview != null) Positioned.fill(child: IgnorePointer(child: RepaintBoundary(
           child: CustomPaint(key: ValueKey('clip-preview-${c.id}'), painter: ClipPreviewPainter(preview))))),
+        // A comp (#209): its joins marked where the parts meet (every pass of the loop).
+        if (c.comp.isNotEmpty) Positioned.fill(child: IgnorePointer(child: CustomPaint(
+          key: ValueKey('clip-comp-joins-${c.id}'),
+          painter: CompJoinsPainter([for (final j in TakeClip.midi(c).joins(widget.state.project))
+            (j - c.startSteps) * widget.stepW], widget.color)))),
         // Loop-recorded takes: ‹ n/N › steps through them, a swipe across it too, a tap on the count lists them.
         if (c.takes.length > 1 && c.lengthSteps * widget.stepW >= 86 && widget.height >= 26)
           Positioned(top: 2, right: 14, child: TakeChip(state: widget.state, layer: widget.layer, clip: c,

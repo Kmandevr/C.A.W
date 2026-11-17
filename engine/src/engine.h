@@ -2,6 +2,7 @@
 // chain changes, folder buses, sends, mute/solo, limiter and meters.
 #pragma once
 
+#include <algorithm>
 #include <atomic>
 #include <cstdint>
 #include <map>
@@ -24,6 +25,8 @@
 #include "tempo_map.h"
 
 namespace caw {
+
+class SamplePreview;  // sample_preview.h: the sample browser's preview voice (API 33)
 
 class MixPool;  // mix_pool.h
 
@@ -163,6 +166,9 @@ public:
     // sample after the last beat. 0 beats is play(). Its beats are the ticks (1/den notes) of the signature where
     // playback starts; with [bars], [beats] is bars (0..16) of that signature's ticks, so it starts on an accent.
     void playCountIn(double fromStep, int beats, bool bars = false);
+    // How many Play commands (play, a count-in) have been sent (control thread): caw_audio_tune_buffer tells a new
+    // playback from a long quiet one by it.
+    uint64_t playsSent() const noexcept { return playCount_; }
     // The metronome: a short built-in click on every beat while playing (accented on the bar), mixed before the
     // safety limiter. Off by default; renders and exports never click.
     void setMetronome(bool on);
@@ -178,6 +184,11 @@ public:
     }
     // Drops any request and the tone in progress. Only while no process() runs (the device is closed).
     void resetTestTone() noexcept;
+    // The sample browser's preview voice (sample_preview.h): mixed with the test tone, after the master's gain and
+    // the transport's fades and before the safety limiter, playing or not.
+    SamplePreview& samplePreview() noexcept { return *samplePreview_; }
+    // A layer's slot for the preview's "layer" option (-1: none). Briefly under the control lock.
+    int previewSlot(const std::string& layerId) { return deviceSlot(layerId); }
     // Sound quality (caw.h CAW_QUALITY_*): the built-ins read it while they play (quality.h). Normal by default.
     void setQuality(int quality) noexcept;
     int quality() const noexcept { return quality_.load(std::memory_order_relaxed); }
@@ -188,6 +199,12 @@ public:
     // Any thread, never blocks (a device opening, the app going to the background): every shed layer comes back and
     // the load history is forgotten at the next callback, so a throttled stretch doesn't thin the song for good.
     void requestSheddingReset() noexcept { sheddingReset_.store(true, std::memory_order_release); }
+    // Any thread, never blocks (a device opening or rerouted, before its first callback): the callbacks of the
+    // device's first kDeviceWarmSeconds of frames don't enter the load history (the CPU meter, the over-budget
+    // share, Auto's averages). They are the stream starting, not the song: a shared or Bluetooth stream fills its
+    // buffer back to back at first, on a core whose clock hasn't risen (#234). The performance hint still sees them.
+    void requestDeviceWarmUp() noexcept { deviceWarmUp_.store(true, std::memory_order_release); }
+    static constexpr double kDeviceWarmSeconds = 0.5;
     // Any thread: layers shed since the engine was made, and how many came back on their own (reportLoad).
     struct SheddingStats {
         uint64_t shed = 0, restored = 0;
@@ -216,8 +233,13 @@ public:
     // effects, volume, pan and latency compensation, as it meets the others) is also copied into left and right at
     // the frames it plays in each process() call. The buffers must hold as many frames as every later call; frames
     // the layer doesn't play are left as they are (the caller clears them). False if the layer has no slot.
-    bool setOutputTap(const std::string& layerId, float* left, float* right);
+    // `preFader` (freeze and bounce, 1.0.5): the layer's signal after its instrument and effects, before its volume,
+    // pan, sends and latency compensation (still late by the layer's own latency: layerLatency).
+    bool setOutputTap(const std::string& layerId, float* left, float* right, bool preFader = false);
     void clearOutputTaps();
+    // Control thread: frames a layer's own instrument, per-note FX and effects delay its signal (what latency
+    // compensation adds up for it); 0 for a layer with no slot.
+    int64_t layerLatency(const std::string& layerId);
     int64_t loopLength();                     // samples in the project loop
     // The tempo map and time signatures (1.0.3, C API 31; tempo_map.h). Each replaces the project's until the next
     // project update, which sets them again from its "tempo_map" and "time_signatures". Checked (an error, nothing
@@ -401,6 +423,10 @@ private:
     // the instrument (and one it replaced, crossfading out) into the slot's instL/instR.
     void runInstrument(Slot& s, int m) noexcept;
     void instrumentNotes(Slot& s, NoteEvents& notes, int m) noexcept;
+    void chaseNotes(Slot& s, NoteEvents& notes, const Pattern* pat, size_t e, int64_t n0) noexcept;
+    // A pattern note's pitch as the instruments get it (#226): bends reach 96 semitones, so it stays within
+    // kMinNotePitch and the pitch of half the sample rate, where no oscillator aliases or runs away.
+    double safePitch(double pitch) const noexcept { return std::clamp(pitch, kMinNotePitch, nyquistPitch_); }
     void instrumentMotion(NoteEvents& notes, int m) noexcept;
     void noteMotion(NoteEvents& notes, NoteEvents::Held& h, int end) noexcept;
     bool ringsAtPlay(const Slot& s) const noexcept;
@@ -434,7 +460,11 @@ private:
     void setShed(Slot& s, bool shed) noexcept;
 
     const double sr_;
-    const double trackGainCoef_;  // the track and bus gain glide's per-sample factor (set with the Engine)
+    const double trackGainCoef_;
+    // The highest pitch a pattern note reaches an instrument at (#226): half the sample rate as a MIDI note (135.08
+    // at 48 kHz). The lowest: kMinNotePitch, MIDI -60 (about 0.25 Hz).
+    static constexpr double kMinNotePitch = -60.0;
+    const double nyquistPitch_;  // the track and bus gain glide's per-sample factor (set with the Engine)
     const EngineResourceBudget resourceBudget_;
     int maxLayers_ = kInitialLayerCapacity;  // set once in the constructor
     int pendingMax_ = 0;                     // pending_ entries; set once in the constructor
@@ -485,7 +515,11 @@ private:
     double tonePhase_ = 0;
     void takeToneRequest() noexcept;                       // once per callback, before any sample
     double nextTone() noexcept;                            // the tone's next sample (only while toneLeft_ > 0)
-    void mixToneOnly(float* left, float* right, int frames) noexcept;  // frames the master stage did not run
+    // Frames the master stage did not run; previewTaken: a track node played the sample preview this chunk.
+    void mixToneOnly(float* left, float* right, int frames, bool previewTaken = false) noexcept;
+    std::unique_ptr<SamplePreview> samplePreview_;
+    void takePreview() noexcept;  // once per callback, after takeToneRequest
+    std::atomic<bool> previewTaken_{false};  // a track node played the sample preview this chunk (any mix thread)
     void startPlay(double fromStep, uint64_t playCount, uint32_t touchStamp) noexcept;
     void startClick(bool accent) noexcept;
     double nextClick() noexcept;  // the click's next sample (0 when none sounds)
@@ -524,6 +558,7 @@ private:
     static constexpr double kRestoreMaxSeconds = 32.0, kReshedSeconds = 10.0, kTrialSeconds = 8.0;
     static constexpr double kSlackSeconds = 1e-9;  // summed callback lengths land a hair under the product
     double loadAvg_ = 0;
+    double warmSeconds_ = 0;                    // a new device's frames left before its load counts (kDeviceWarmSeconds)
     double coolSeconds_ = 0;                    // time left before another layer is shed
     double overShare_ = 0;                      // share of the last ~0.25 s spent in callbacks over 0.85
     double underSeconds_ = 0;                   // how long the meter has stayed under kRestoreLoad
@@ -589,6 +624,7 @@ private:
     std::atomic<int> overloadedFlag_{0};  // layers shed now
     std::atomic<uint64_t> shedTotal_{0}, restoredTotal_{0};
     std::atomic<bool> sheddingReset_{false};  // requestSheddingReset()
+    std::atomic<bool> deviceWarmUp_{false};   // requestDeviceWarmUp()
     std::atomic<bool> mixRestart_{false};      // startLiveMixPool: Auto decides afresh on the new device
     std::atomic<bool> offline_{false};        // set by setProjectOffline: reportLoad never sheds
     std::atomic<uint32_t> routingRejections_{0};  // mix-graph routes the executor refused (never expected)

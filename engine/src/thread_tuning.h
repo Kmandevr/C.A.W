@@ -85,12 +85,29 @@ int32_t currentThreadId() noexcept;  // the kernel's id of the calling thread (L
 
 // A performance hint session (Android 13+: ADPF APerformanceHint) for the callback and the workers, with the
 // callback period as its target. The system calls (create, set threads, report) run on the hint's own thread,
-// never on the callback or a worker: the callback only stores numbers (hintReport). Null where there is none.
+// never on the callback or a worker: the callback only stores numbers (hintReport: each callback's own duration,
+// all of them reported in order, at most the newest 64 between two of the hint thread's turns). Where the system
+// refuses the group, the callback alone is asked for. Null where there is none.
 struct Hint;
 Hint* hintOpen() noexcept;                    // control thread: starts the hint's thread (the session comes later)
 void hintClose(Hint* hint) noexcept;          // control thread: closes the session and joins its thread
 void hintThreads(Hint* hint, const int32_t* tids, size_t count) noexcept;  // any thread, no allocation
 void hintReport(Hint* hint, int64_t actualNs, int64_t targetNs) noexcept;  // callback-safe: atomics only
 bool hintActive(const Hint* hint) noexcept;   // a session is open on the threads last given
+
+// Why a hint is or isn't open, for caw_audio_threads' "hint_state": None (no hint API: not Android, or older than
+// Android 13), Waiting (no callback seen yet, or a retry is due), On, Failed (the system refused the session; tried
+// again after hintRetryNs), Unsupported (the system refused it and says it has no hint sessions).
+// A session is asked for whatever the callback's scheduling policy: a shared or Bluetooth AAudio stream's callback
+// is not real-time and gets one too (#234; the NDK and the system service ask only that the threads be the app's).
+enum class HintState : uint8_t { None = 0, Waiting = 1, On = 2, Failed = 3, Unsupported = 4 };
+const char* hintStateName(HintState state) noexcept;
+HintState hintState(const Hint* hint) noexcept;
+// Portable, for the platform part and tests. Whether the system says it has no hint sessions: Android 16's
+// APerformanceHint_isFeatureSupported(APERF_HINT_SESSIONS) when there is one (`feature`: 1 yes, 0 no, -1 unknown),
+// else a preferred update rate of 0 or less (the platform reports -1 when its power HAL has none).
+bool hintUnsupported(int feature, int64_t preferredRateNs) noexcept;
+// After `failures` refused sessions in a row (1 or more): the wait before the next try, 1 s doubling to 30 s.
+int64_t hintRetryNs(uint32_t failures) noexcept;
 
 }  // namespace caw::tuning

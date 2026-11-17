@@ -29,10 +29,18 @@ import 'package:caw/model/telemetry/telemetry.dart';
 import 'package:caw/model/telemetry/telemetry_config.dart';
 import 'package:caw/model/updates/releases.dart' hide AssetKind;
 import 'package:caw/model/audio_clips.dart';
+import 'package:caw/model/automation_curve.dart';
+import 'package:caw/model/comping.dart';
+import 'package:caw/engine/component_info.dart';
 import 'package:caw/model/audio_edit.dart';
 import 'package:caw/model/sample_edit.dart';
+import 'package:caw/model/music_key.dart';
+import 'package:caw/model/sample_library.dart';
+import 'package:caw/model/sample_names.dart';
+import 'package:caw/model/sample_use.dart';
 import 'package:caw/model/updates/update_fetch.dart';
 import 'package:caw/model/updates/update_service.dart';
+import 'package:caw/platform/audio_route.dart';
 import 'package:caw/ui/arrange/mixer_card.dart';
 import 'package:caw/ui/arranger_screen.dart';
 import 'package:caw/ui/benchmark/benchmark_screen.dart';
@@ -48,6 +56,8 @@ import 'package:caw/ui/music_video/video_setup_sheet.dart';
 import 'package:caw/ui/music_video/video_painter.dart';
 import 'package:caw/ui/privacy/feedback_sheet.dart';
 import 'package:caw/ui/privacy/privacy_pages.dart';
+import 'package:caw/ui/settings/latency_settings.dart';
+import 'package:caw/ui/settings/latency_sheet.dart';
 import 'package:caw/ui/settings/settings_page.dart';
 import 'package:caw/ui/settings/settings_registry.dart';
 import 'package:caw/ui/settings/settings_deps.dart';
@@ -66,6 +76,9 @@ import 'tempo_golden_test.dart' show tempoSong;
 
 import 'background_playback_test.dart' show FakePlaybackService;
 import 'audio_fake.dart';
+import 'latency_comp_test.dart' show FakeRoute, buds, mic;
+import 'latency_comp_test.dart' as lat show device;
+import 'sample_fake.dart';
 import 'benchmark_test.dart' show FakeStress;
 import 'component_bench_fake.dart';
 import 'device_ui_fixture.dart';
@@ -250,6 +263,13 @@ void _sweep(String name, Future<void> Function(_Ctx c) body, {bool engine = fals
 
 const _lead = ComponentBenchTarget(name: 'Lead', componentId: 'com.me.lead', libraryPath: '/b/lead.so', instrument: true);
 const _fuzz = ComponentBenchTarget(name: 'Fuzz', componentId: 'com.me.fuzz', libraryPath: '/b/fuzz.so', instrument: false);
+
+class _FitBluetooth implements BluetoothSettings {
+  @override
+  bool get canOpen => true;
+  @override
+  Future<bool> open() async => true;
+}
 
 class _Relay implements RelayHttp {
   @override
@@ -517,6 +537,46 @@ void main() {
     await c.end('');
   });
 
+  // The latency sheet (#236) on Bluetooth with a learned suggestion and a re-check: every card at once; and the page.
+  Future<AppState> latencyState(WidgetTester tester) async {
+    var outMs = 20.0;
+    final s = AppState(settings: Settings(), audioRoute: FakeRoute(const AudioRouteInfo(output: buds, input: mic)));
+    s.latency.readDevice = () => lat.device(outMs: outMs);
+    await tester.runAsync(() => s.latency.refresh());
+    s.latency.setOutputTotalMs(212);
+    outMs = 60;
+    await tester.runAsync(() => s.latency.refresh());
+    for (var i = 0; i < 3; i++) {
+      s.latency.learnFromTake(List.filled(10, 18.0));
+    }
+    addTearDown(s.dispose);
+    return s;
+  }
+
+  _sweep('latency-sheet', (c) async {
+    final s = await latencyState(c.tester);
+    BluetoothSettings.current = _FitBluetooth();
+    addTearDown(() => BluetoothSettings.current = const NoBluetoothSettings());
+    await _pump(c, const Scaffold(body: SizedBox.expand()));
+    unawaited(showLatencySheet(_navCtx(c.tester), s, settings: () {}));
+    await _settle(c.tester);
+    expect(find.byKey(const ValueKey('latency-suggestion')), findsOneWidget);
+    expect(find.byKey(const ValueKey('latency-recheck')), findsOneWidget);
+    await c.shot('');
+    final last = find.byKey(const ValueKey('latency-sheet-settings'));
+    await c.tester.ensureVisible(last);
+    await _settle(c.tester);
+    expect(c.tester.getRect(last).bottom, lessThanOrEqualTo(c.size.size.height - c.size.pad.bottom));
+    await c.end('');
+  });
+  _sweep('latency-page', (c) async {
+    final s = await latencyState(c.tester);
+    await _pump(c, LatencyPage(state: s));
+    await _settle(c.tester);
+    await c.shot('');
+    await c.end('');
+  });
+
   // --- music video (no engine) ---
   for (final tab in VideoTab.values) {
     _sweep('video-${tab.name}', (c) async {
@@ -600,6 +660,37 @@ void main() {
     }
   });
 
+  // --- Files › Samples (#229): linked folders' samples with filters and the preview strip (no engine) ---
+  _sweep('samples', (c) async {
+    final s = AppState(settings: Settings());
+    addTearDown(s.dispose);
+    s.audioIo = FakeAudioIo();
+    s.samplePreview = FakePreview();
+    final lib = SampleLibrary(access: FakeFolderAccess());
+    s.sampleLibrary = lib;
+    SampleEntry e(String rel, {double? bpm, MusicalKey? key, SampleKind? kind, SampleInstrument? inst, double secs = 2,
+            ValueSource from = ValueSource.name}) =>
+        SampleEntry(root: 'lf1', rel: rel)
+          ..bpm = bpm
+          ..bpmFrom = bpm == null ? null : from
+          ..key = key
+          ..keyFrom = key == null ? null : from
+          ..kind = kind
+          ..instrument = inst
+          ..seconds = secs;
+    lib.debugSet(LinkedFolder(id: 'lf1', name: 'My sample library with a long name', location: '/lib'), [
+      e('Loops/Drums/Amen break chopped and resampled 174bpm.wav', bpm: 174, kind: SampleKind.loop, inst: SampleInstrument.drums, secs: 5.52),
+      e('Loops/Keys/Rhodes chords Am 92bpm.wav', bpm: 92, key: const MusicalKey(9, minor: true), kind: SampleKind.loop, secs: 10.4),
+      e('Loops/Pads/Warm.wav', bpm: 120, key: const MusicalKey(6, minor: true), kind: SampleKind.loop, from: ValueSource.detected, secs: 64),
+      e('One shots/Kick 01.wav', kind: SampleKind.oneShot, inst: SampleInstrument.kick, secs: 0.42),
+      e('One shots/Snare Tight.wav', kind: SampleKind.oneShot, inst: SampleInstrument.snare, secs: 0.3),
+    ]);
+    await _pump(c, SectionScope(controller: SectionController(),
+        child: Scaffold(body: FileManagerScreen(state: s, folder: 'samples'))));
+    await _settle(c.tester);
+    await c.shot('');
+  });
+
   // --- Arrange with a tempo map, signature changes, sections and a marker (#207; no engine) ---
   _sweep('arrange-tempo', (c) async {
     final s = AppState(settings: Settings());
@@ -608,6 +699,104 @@ void main() {
     await _pump(c, Scaffold(body: ListenableBuilder(listenable: s, builder: (_, _) => ArrangerScreen(state: s))));
     await _settle(c.tester);
     await c.shot('');
+  });
+
+  // Freeze (1.0.5, #209): a frozen track's snowflake on its header, then its dimmed devices in the focus view.
+  _sweep('arrange-frozen', (c) async {
+    final s = AppState(settings: Settings());
+    addTearDown(s.dispose);
+    final p = ProjectDoc(id: 'p', name: 'Frozen', bpm: 120, assets: [
+      AudioAssetDoc(id: 'fz', path: '/abs/frozen_a.wav', name: 'Frozen · Lead', seconds: 8, channels: 2,
+          sourceRate: 48000),
+    ], layers: [
+      LayerDoc(id: 'a', name: 'A frozen lead with a long name', color: 1,
+          instrument: ComponentUseDoc('org.caw.synth.flagship'), components: [ComponentUseDoc('org.caw.delay.pro')]),
+      LayerDoc(id: 'b', name: 'Bass', color: 2, instrument: ComponentUseDoc('org.caw.synth.flagship')),
+    ]);
+    p.layers.first
+      ..frozenAsset = 'fz'
+      ..frozenContext = p.freezeContext;
+    s.project = p;
+    final sections = SectionController();
+    addTearDown(sections.dispose);
+    await _pump(c, SectionScope(controller: sections, child: Scaffold(body: ListenableBuilder(listenable: s,
+        builder: (_, _) => ArrangerScreen(state: s)))));
+    await _settle(c.tester);
+    await c.shot('');
+    sections.focusLayer('a');
+    await _settle(c.tester);
+    await c.shot('devices');
+  });
+
+  // Automation lanes open under a track (#230): curves, the tool row, a selection box, and the Automate picker.
+  _sweep('arrange-automation', (c) async {
+    final s = AppState(settings: Settings());
+    addTearDown(s.dispose);
+    s.componentCatalog.set(const [NativeComponentInfo(id: 'org.caw.chorus', name: 'Chorus with a long name',
+        role: 'effect', builtin: true, parameters: [
+          ComponentParameterInfo(id: 'mix', name: 'Mix', defaultValue: 0.5, min: 0, max: 1),
+          ComponentParameterInfo(id: 'rate', name: 'Rate of the modulation', defaultValue: 1, min: 0.1, max: 8),
+        ])]);
+    s.project = ProjectDoc(id: 'p', name: 'Lanes', layers: [
+      LayerDoc(id: 'a', name: 'Keys with a long name', color: 0, components: [ComponentUseDoc('org.caw.chorus')],
+          showLanes: true, automation: [
+        AutomationLaneDoc(target: 'volume', points: [
+          AutomationPointDoc(step: 0, value: 0.2, curve: AutomationCurve.slow),
+          AutomationPointDoc(step: 16, value: 1, curve: AutomationCurve.sCurve, tension: 0.5),
+          AutomationPointDoc(step: 32, value: 0.5, curve: AutomationCurve.step),
+          AutomationPointDoc(step: 48, value: 0.9),
+        ]),
+        AutomationLaneDoc(target: 'pan', height: 90, points: [AutomationPointDoc(step: 0, value: 0)]),
+      ]),
+    ]);
+    s.project.automation.add(ProjectAutomationLaneDoc(targetType: 'component', target: 'rate', layerId: 'a',
+        component: 0, points: [AutomationPointDoc(step: 0, value: 1), AutomationPointDoc(step: 64, value: 6)]));
+    s.project.recentAutomation.add(automationKey('component', 'rate', layerId: 'a', component: 0));
+    await _pump(c, Scaffold(body: ListenableBuilder(listenable: s, builder: (_, _) => ArrangerScreen(state: s))));
+    await _settle(c.tester);
+    await c.shot('');
+    final add = find.byKey(const ValueKey('lane-add-a'));
+    if (add.evaluate().isNotEmpty) {
+      await c.tester.tap(add.first);
+      await _settle(c.tester);
+      await c.shot('picker');
+    }
+  });
+
+  // Take lanes open under two tracks (#209, comping): a MIDI clip's three takes with a comp, an audio clip's two
+  // with a comp and its crossfade, and a lane's hold menu.
+  _sweep('arrange-take-lanes', (c) async {
+    final s = AppState(settings: Settings());
+    addTearDown(s.dispose);
+    const take = '---\nkind: pattern\nlength: 16\n---\n0 C4 2 1\n4 E4 2 0.8\n8 G4 2 0.7\n12 C5 2 0.9\n';
+    s.project = ProjectDoc(id: 'p', name: 'Takes', bpm: 120, modules: [
+      for (final id in ['t1', 't2', 't3', 'comp']) ModuleDoc(id: id, name: id == 'comp' ? 'Comp' : 'Take with a long name $id', source: take),
+    ], assets: [
+      for (final id in ['a1', 'a2']) AudioAssetDoc(id: id, path: '/abs/$id.wav', name: 'Vocal take $id', seconds: 4,
+          channels: 1, sourceRate: 48000, recorded: true),
+    ], layers: [
+      LayerDoc(id: 'm', name: 'Keys with a long name', color: 0, showTakes: true, clips: [
+        ClipDoc(id: 'c1', patternId: 'comp', startSteps: 0, lengthSteps: 16, takes: ['t1', 't2', 't3'],
+            comp: [const CompPartDoc('t1', 0), const CompPartDoc('t3', 6)]),
+      ]),
+      LayerDoc(id: 'v', name: 'Vocal', color: 2, showTakes: true, input: AudioInputDoc(), audioClips: [
+        AudioClipDoc(id: 'ac1', assetId: 'a1', startSteps: 4, lengthSeconds: 3, takes: ['a1', 'a2'],
+            comp: [const CompPartDoc('a1', 0), const CompPartDoc('a2', 1.5)]),
+      ]),
+    ]);
+    s.audioIo = FakeAudioIo();
+    await _pump(c, Scaffold(body: ListenableBuilder(listenable: s, builder: (_, _) => ArrangerScreen(state: s))));
+    await _settle(c.tester);
+    await c.shot('');
+    final name = find.byKey(const ValueKey('take-name-m-1'));
+    if (name.evaluate().isNotEmpty) {
+      await c.tester.longPress(name.first);
+      await _settle(c.tester);
+      await c.shot('menu');
+    } else {
+      c.errors.add('the take lanes\' headers aren\'t there');
+      c.all.add(c.errors.last);
+    }
   });
 
   // The sample editor (batch 1.0.4) in the focus view's Clip tab, with Slice to MIDI's panel open.

@@ -10,15 +10,19 @@ import '../engine/engine.dart';
 import '../engine/execution.dart';
 import '../platform/audio_route.dart';
 import '../platform/resource_signals.dart';
+import 'av_sync.dart';
 import 'latency_comp.dart';
 import 'poller.dart';
 import 'native_components.dart';
 import 'project.dart';
 import 'tempo_map.dart';
 import 'project_dependencies.dart';
+import 'automation_edit.dart' show AutomationEdits;
+import 'sample_use.dart' show SampleUse;
 import 'automation_writer.dart' show AutomationTarget;
 import 'clip_automation.dart';
 import 'default_project.dart';
+import 'freeze.dart';
 import 'history.dart';
 import 'mixer_fx.dart' show masterLayerId;
 import 'pattern_doc.dart';
@@ -132,6 +136,18 @@ class AppState extends ChangeNotifier implements StressHost {
   /// The last few seconds of meter reads, each at the time it was read, so meters show what is heard.
   final MeterTimeline meterTimeline = MeterTimeline();
   int _latencyReadUs = -1 << 62;
+  int _tuneReadUs = -1 << 62;
+
+  // The output buffer's automatic size (#236; Settings.bufferTuning, off by default): once a second while playing,
+  // and the size it settles on kept per kind of output, where the next stream on that kind starts.
+  void _tuneBuffer(Engine e, int now) {
+    _tuneReadUs = now;
+    final kind = latency.routeInfo.output.kind.name;
+    final frames = e.tuneAudioBuffer(settings.tunedBufferFrames[kind] ?? 0);
+    if (frames > 0 && settings.tunedBufferFrames[kind] != frames) {
+      settings.update((s) => s.tunedBufferFrames[kind] = frames);
+    }
+  }
   int _playStartUs = 0;
   double _playStartStep = 0;
 
@@ -143,18 +159,25 @@ class AppState extends ChangeNotifier implements StressHost {
   /// How long after rendering a sample is heard, in microseconds (0 with compensation off).
   int get outputLatencyUs => (latency.outputMs * 1000).round();
 
-  /// The meter read being heard now: the one taken an output latency ago (the newest with compensation off or
-  /// nothing older kept). Peaks, playing and position all come from it.
-  MeterReading get audibleReading =>
-      meterAt(nowUs - outputLatencyUs) ?? MeterReading(nowUs, const EngineMeters(), const []);
+  /// The screen's lead over the sound (av_sync.dart, #236 "lean early"): the frame's display latency plus a small
+  /// early bias. The app hands in the rate it draws at (main.dart).
+  final AvSync avSync = AvSync();
 
-  /// The meter read taken at or before [us] on [nowUs]'s clock; while compensation holds the first reads back,
-  /// a silent one (nothing of them is heard yet). Null only when nothing was read at all.
+  /// How far ahead what follows the audio is drawn, in µs (0 with compensation off: it shows what was rendered).
+  int get visualLeadUs => latency.enabled ? avSync.leadUs : 0;
+
+  /// The meter read being heard when this frame lights up: the one whose span holds that moment less the output
+  /// latency (the newest with compensation off). Peaks, playing and position all come from it.
+  MeterReading get audibleReading =>
+      meterAt(meterRenderUs(nowUs: nowUs, leadUs: visualLeadUs, outputLatencyUs: outputLatencyUs)) ??
+      MeterReading(nowUs, const EngineMeters(), const []);
+
+  /// The meter read whose span (since the read before it) holds [us] on [nowUs]'s clock; while compensation holds
+  /// the first reads back, a silent one (nothing of them is heard yet). Null only when nothing was read at all.
   MeterReading? meterAt(int us) {
     final newest = meterTimeline.newest;
     if (newest == null) return null;
-    if (us >= newest.us) return newest;
-    return meterTimeline.at(us) ??
+    return meterTimeline.covering(us, spanUs: _poller.interval.inMicroseconds) ??
         MeterReading(us, EngineMeters(playing: false, loopLength: newest.meters.loopLength), const []);
   }
 
@@ -425,10 +448,26 @@ class AppState extends ChangeNotifier implements StressHost {
       poll: _poll,
       interval: const Duration(milliseconds: 33),
       onIdle: () {
-    if (!meters.playing && _heldPreviews.isEmpty && deviceNotesHeld == 0 && !(engine?.testToneSounding ?? false)) {
+    if (!meters.playing && _heldPreviews.isEmpty && deviceNotesHeld == 0 && !(engine?.testToneSounding ?? false) &&
+        !samplePreviewing) {
       engine?.stopAudio();
     }
   });
+
+  /// The sample browser's preview sounds (sample_use.dart): the audio device stays open meanwhile.
+  bool samplePreviewing = false;
+
+  /// Opens the audio device for the sample preview when it was closed while idle; an error message when it can't.
+  String? openAudioForPreview() {
+    final e = engine;
+    if (e == null) return engineError ?? 'The sound engine did not load';
+    if (useAudioDevice && !e.audioOn) {
+      final error = _openAudio(e);
+      if (error != null) return error;
+    }
+    _poller.wake();
+    return null;
+  }
 
   /// Settings › Audio's test tone: opens the device if it is closed and plays 440 Hz for [seconds]; returns an error
   /// message when the device can't open.
@@ -608,6 +647,7 @@ class AppState extends ChangeNotifier implements StressHost {
     layerMeters = e.layerMeters(project.layers.length); // one C API call for every track (beta plan B4.8)
     final now = nowUs;
     meterTimeline.push(MeterReading(now, meters, layerMeters));
+    if (settings.bufferTuning && e.audioOn && meters.playing && now - _tuneReadUs > 1000000) _tuneBuffer(e, now);
     if (e.audioOn && now - _latencyReadUs > 3000000) {
       // The platform's figure and the route, now and then (a Bluetooth link can settle after it opens).
       _latencyReadUs = now;
@@ -809,13 +849,21 @@ class AppState extends ChangeNotifier implements StressHost {
     return (pattern: m.id, instrument: layer.instrument!, components: layer.components);
   }
 
-  String _engineJson({Map<String, String>? sourceOverrides}) {
-    final pv = previewOnly ? preview : null;
+  /// [p]'s engine JSON as the project sync sends it, without the preview: a track render (freeze and bounce,
+  /// lib/model/freeze.dart) plays a copy of the project through it.
+  String engineJsonOf(ProjectDoc p) => _engineJson(of: p, preview: false);
+
+  /// Freeze (1.0.5): called when an edit reaches a frozen track ([guardFrozen]); the screens ask "Unfreeze to edit?".
+  void Function(LayerDoc layer)? onFrozenEdit;
+
+  String _engineJson({Map<String, String>? sourceOverrides, ProjectDoc? of, bool preview = true}) {
+    final pv = previewOnly && preview ? this.preview : null;
+    final project = of ?? this.project;
     return project.toEngineJson(
         auditionPattern: pv?.pattern,
         auditionInstrument: pv?.instrument,
         auditionComponents: pv?.components ?? const [],
-        auditionOnly: previewOnly,
+        auditionOnly: previewOnly && preview,
         voices: settings.lightMode ? 4 : 32, // global cap; each generator chooses its own voice count
         swap: settings.swapTiming.name,
         suspendLanes: suspendedLanes,
@@ -1256,9 +1304,15 @@ class AppState extends ChangeNotifier implements StressHost {
   /// settled onto each new read, for drawing it at the screen's rate. Stopped or paused it is [playheadStep] exactly.
   final PlayheadClock playheadClock = PlayheadClock();
 
-  /// [playheadClock] now: where to draw the playhead in this frame.
+  /// [playheadClock] now: where to draw the playhead in this frame (for the moment it lights up, [visualLeadUs]).
   double get smoothPlayheadStep =>
-      meters.playing && playheadClock.playing ? playheadClock.at(nowUs) : playheadStep;
+      meters.playing && playheadClock.playing ? playheadClock.at(nowUs + visualLeadUs) : playheadStep;
+
+  /// The playhead for something drawn only on the engine's reads (the piano roll under Smooth follow): where the
+  /// line is half a read interval on, plus the lead, so it is as early as late between reads.
+  double get heldPlayheadStep => meters.playing && playheadClock.playing
+      ? playheadClock.at(heldDrawUs(nowUs: nowUs, leadUs: visualLeadUs, readIntervalUs: _poller.interval.inMicroseconds))
+      : playheadStep;
 
   // Hands the read just taken to [playheadClock], over the range [heardStep] wraps in.
   void _readPlayhead() {
@@ -1739,6 +1793,13 @@ class AppState extends ChangeNotifier implements StressHost {
     _changed(engine: false);
   }
 
+  /// Opens or closes [layer]'s take lanes under it (#209, comping). Only the screen changes.
+  void setTakesShown(LayerDoc layer, bool shown) {
+    if (layer.showTakes == shown) return;
+    layer.showTakes = shown;
+    _changed(engine: false);
+  }
+
   /// Sets how much of each of [layers]' rows shows (the track menu's Collapse, a header's bottom-edge drag or pinch):
   /// one undo step. With [height] (a normal row), that track's own height is set too. Only the screen changes.
   void setTrackCollapse(Iterable<LayerDoc> layers, TrackCollapse collapse, {double? height}) {
@@ -1834,6 +1895,7 @@ class AppState extends ChangeNotifier implements StressHost {
   }
 
   void updateProjectAutomationPoint(ProjectAutomationLaneDoc lane, int index, double step, double value) {
+    if (lane.targetType != 'track' && guardFrozen(project.layers.where((l) => l.id == lane.layerId).firstOrNull)) return;
     if (index < 0 || index >= lane.points.length) return;
     _pushAutomationUndo();
     final point = lane.points[index];
@@ -1848,6 +1910,7 @@ class AppState extends ChangeNotifier implements StressHost {
   }
 
   void addProjectAutomationPoint(ProjectAutomationLaneDoc lane, double step, double value) {
+    if (lane.targetType != 'track' && guardFrozen(project.layers.where((l) => l.id == lane.layerId).firstOrNull)) return;
     _pushAutomationUndo();
     final at = step.clamp(0.0, project.maxArrangementSteps.toDouble()).toDouble();
     if (lane.points.any((point) => (point.step - at).abs() < 0.01)) return;
@@ -1857,6 +1920,7 @@ class AppState extends ChangeNotifier implements StressHost {
   }
 
   void removeProjectAutomationPoint(ProjectAutomationLaneDoc lane, int index) {
+    if (lane.targetType != 'track' && guardFrozen(project.layers.where((l) => l.id == lane.layerId).firstOrNull)) return;
     if (index < 0 || index >= lane.points.length) return;
     _pushAutomationUndo();
     lane.points.removeAt(index);
@@ -2100,6 +2164,7 @@ class AppState extends ChangeNotifier implements StressHost {
   }
 
   void addClip(LayerDoc layer, String patternId, {int? startSteps}) {
+    if (guardFrozen(layer)) return;
     final module = project.module(patternId);
     if (module == null || !isPattern(patternId)) return;
     final doc = PatternDoc.parse(module.runSource).doc;
@@ -2115,6 +2180,7 @@ class AppState extends ChangeNotifier implements StressHost {
   }
 
   void duplicateClip(LayerDoc layer, ClipDoc clip, {bool linked = false}) {
+    if (guardFrozen(layer)) return;
     final start = clip.startSteps + clip.lengthSteps;
     if (start >= project.maxArrangementSteps) return;
     var patternId = clip.patternId;
@@ -2135,18 +2201,28 @@ class AppState extends ChangeNotifier implements StressHost {
   }
 
   void moveClip(LayerDoc layer, ClipDoc clip, int startSteps) {
-    editLayer(layer, (l) => clip.startSteps = startSteps.clamp(0, project.maxArrangementSteps - clip.lengthSteps).toInt());
+    if (guardFrozen(layer)) return;
+    editLayer(layer, (l) {
+      final to = startSteps.clamp(0, project.maxArrangementSteps - clip.lengthSteps).toInt();
+      // "Automation follows clips" (#230): the track's points over the clip go along.
+      followClipAutomation(l, [(clip.startSteps.toDouble(), (clip.startSteps + clip.lengthSteps).toDouble())],
+          (to - clip.startSteps).toDouble());
+      clip.startSteps = to;
+    });
   }
 
   void resizeClip(LayerDoc layer, ClipDoc clip, int lengthSteps) {
+    if (guardFrozen(layer)) return;
     editLayer(layer, (l) => clip.lengthSteps = lengthSteps.clamp(1, project.maxArrangementSteps - clip.startSteps).toInt());
   }
 
   void shiftClipSource(LayerDoc layer, ClipDoc clip, int deltaSteps) {
+    if (guardFrozen(layer)) return;
     editLayer(layer, (l) => clip.sourceOffsetSteps = (clip.sourceOffsetSteps + deltaSteps).clamp(0, project.maxArrangementSteps).toInt());
   }
 
   void removeClip(LayerDoc layer, ClipDoc clip) {
+    if (guardFrozen(layer)) return;
     editLayer(layer, (l) => l.clips.remove(clip));
     selectedClipIds.remove(clip.id);
     _pruneClipSelection();
@@ -2214,6 +2290,7 @@ class AppState extends ChangeNotifier implements StressHost {
     }
     // A project with no file yet is being made now: it records when (an old one without the field stays unknown).
     if (p.created == null && !(await _storage?.has(p.id) ?? true)) p.created = DateTime.now().toUtc();
+    dropMissingFreezes(p);
     project = p;
     openError = null;
     openNotice = switch (p.droppedModules) {
@@ -2237,7 +2314,9 @@ class AppState extends ChangeNotifier implements StressHost {
     notifyListeners();
     await _syncNow();
     unawaited(prepareNativeComponents());
-    unawaited(checkMissingFiles());
+    // Linked sample files first (their paths on this device), then what is still missing (sample_use.dart).
+    unawaited(resolveLinkedSamples().catchError((_) {}).then((_) => checkMissingFiles()));
+    unawaited(purgeFrozenAudio());
   }
 
   /// Looks for the open project's files on this device again ([missingFiles]).

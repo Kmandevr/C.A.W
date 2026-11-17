@@ -11,7 +11,9 @@ import '../../model/routing_edit.dart';
 import '../routing_view.dart';
 import '../theme.dart';
 import '../volume_fader.dart';
+import 'automate_control.dart';
 import 'fx_stack.dart' show FxStack, addEffectTo;
+import 'track_lanes.dart' show canHaveLanes;
 import 'track_color.dart';
 import '../devices/device_editor.dart' show openDeviceEditor;
 import '../glass.dart';
@@ -241,6 +243,9 @@ class ChannelStrip extends StatelessWidget {
   final LayerDoc layer;
   final int index;
 
+  /// Whether its fader and pan can have lanes (not a folder without a bus).
+  bool get _lanes => canHaveLanes(layer);
+
   String? get _instrumentName {
     final id = layer.instrument?.id;
     return id == null ? null : state.componentLabel(id);
@@ -337,7 +342,9 @@ class ChannelStrip extends StatelessWidget {
               constraints: const BoxConstraints(maxHeight: 100),
               child: SingleChildScrollView(child: SendKnobs(state: state, layer: layer, compact: true, size: 26,
                 showAdd: false)))),
-          SizedBox(height: 40, child: ResetOnDoubleTap(onReset: () => state.mixLayer(layer, pan: 0), child: WheelSteps(
+          // A hold on the pan slider or the fader: Automate (#230).
+          SizedBox(height: 40, child: AutomateHold(automation: _lanes ? ControlAutomation.track(state, layer.id, 'pan') : null,
+              child: ResetOnDoubleTap(onReset: () => state.mixLayer(layer, pan: 0), child: WheelSteps(
             onStep: (dir, fine) => state.mixLayer(layer, pan: panWheelStep(layer.pan, dir, fine)),
             child: Slider(
             key: ValueKey('pan-${layer.id}'),
@@ -346,13 +353,14 @@ class ChannelStrip extends StatelessWidget {
             semanticFormatterCallback: (v) => v.abs() < .01 ? '${layer.name} pan centre'
               : '${layer.name} pan ${(v.abs() * 100).round()}% ${v < 0 ? 'left' : 'right'}',
             onChanged: (v) => state.mixLayer(layer, pan: v),
-          )))),
+          ))))),
           _TypedValue(key: ValueKey('pan-value-${layer.id}'), text: _panText(layer.pan), tooltip: 'Type ${layer.name} pan',
             color: Neon.blue, onTap: () => typeValue(context, title: 'Pan (C, 30L, 30R or -30)',
               initial: _panText(layer.pan), parse: _parsePan, apply: (v) => state.mixLayer(layer, pan: v))),
           Expanded(child: Row(children: [
-            Expanded(child: _Fader(key: ValueKey('fader-${layer.id}'), value: layer.volume, color: Neon.green,
-              label: '${layer.name} level', onChanged: (v) => state.mixLayer(layer, volume: v))),
+            Expanded(child: AutomateHold(automation: _lanes ? ControlAutomation.track(state, layer.id, 'volume') : null,
+              child: _Fader(key: ValueKey('fader-${layer.id}'), value: layer.volume, color: Neon.green,
+              label: '${layer.name} level', onChanged: (v) => state.mixLayer(layer, volume: v)))),
             SizedBox(width: 10, child: TrackMeter(key: ValueKey(layer.id), state: state, index: index,
               stereo: layer.isStereo, color: Neon.green, vertical: true)),
             const SizedBox(width: 4),

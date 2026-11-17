@@ -1336,7 +1336,8 @@ GraphError GraphExecutor::setAutomationLanes(const ParameterLane* lanes, uint32_
             return GraphError::ParameterNotAutomatable;
         for (uint32_t i = 0; i < lane.pointCount; ++i) {
             const AutomationPoint& point = lane.points[i];
-            if (!std::isfinite(point.step) || !std::isfinite(point.value) || (i && point.step < lane.points[i - 1].step))
+            if (!std::isfinite(point.step) || !std::isfinite(point.value) || point.curve >= kAutomationCurveCount ||
+                !(point.tension >= -1.0 && point.tension <= 1.0) || (i && point.step < lane.points[i - 1].step))
                 return GraphError::InvalidAutomationLane;
         }
         uint8_t& once = seen[blocks_[lane.node].paramBase + lane.parameter];

@@ -348,6 +348,21 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
     return (shown - c.startSteps).toDouble();
   }
 
+  /// Where the roll's shade starts (#226, the owner: "it should stay dark for the actual length of the clip"): opened
+  /// for a clip, where that clip stops playing in the roll's time (a looping clip's repeats run on past its loop bar,
+  /// dimmed by [ClipLoopPainter]; a clip that doesn't loop stops at its end or its loop point); in Build, the loop of
+  /// the pattern's first clip in the song (the roll's time wraps there); a pattern in no clip, its own length.
+  double _shadeFrom(PatternDoc d, int length) {
+    final c = _anchor;
+    if (c == null) return length.toDouble();
+    final loop = widget.clip != null && widget.layer != null
+        ? (_loopSteps(d) ?? length)
+        : c.loopLength(d.lengthSteps(s.project.beatsPerBar));
+    final opened = widget.clip != null && widget.layer != null;
+    if (c.loop) return opened ? (c.sourceOffsetSteps % loop + c.lengthSteps).toDouble() : loop.toDouble();
+    return math.min(c.sourceOffsetSteps + c.lengthSteps, loop).toDouble();
+  }
+
   /// A song step in the roll's time; in Build, inside a looping clip it wraps to the loop, as the playhead does.
   double _songToRoll(PatternDoc d, double song) {
     final roll = song + _rollShift(d);
@@ -499,11 +514,12 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
 
   /// Where the song's playhead is in the roll's time, while it plays this pattern; null otherwise. Opened for a clip,
   /// that clip's repeats run on along the roll as it draws them; in Build, the first clip of the pattern under the
-  /// playhead, wrapped to its loop. [smooth]: between reads too ([AppState.smoothPlayheadStep]), for drawing.
+  /// playhead, wrapped to its loop. [smooth]: between reads too ([AppState.smoothPlayheadStep]), for drawing; else
+  /// as drawn on the reads ([AppState.heldPlayheadStep], Smooth follow's scroll and line).
   double? _playStep({bool smooth = false}) {
     final d = _doc;
     if (d == null || !s.meters.playing) return null;
-    final ph = smooth ? s.smoothPlayheadStep : s.playheadStep;
+    final ph = smooth ? s.smoothPlayheadStep : s.heldPlayheadStep;
     final own = widget.clip;
     if (own != null && widget.layer != null) {
       if (ph < own.startSteps || ph >= own.startSteps + own.lengthSteps) return null;
@@ -699,7 +715,23 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
   }
 
   Steps get _lineLevel => _levelFor(10);
-  // Finger-sized taps on a phone: the device's screen decides, not the panel's size (a docked panel is smaller).
+  /// Picks a tool (#228: a pick always applies): a gesture the last tool had armed (a pending tap, its ghost, a double
+  /// tap waiting on a note) is dropped, so the next touch is the new tool's.
+  void _setTool(PatternTool t) {
+    _pending = null;
+    _tapNote = null;
+    _tapCandidate = null;
+    _boxTimer?.cancel();
+    _ghost = null;
+    setState(() => _tool = t);
+  }
+
+  /// The grid cell a tap lands in (#228, the owner: "it doesn't always place notes where you tap them"): the cell
+  /// between the grid lines drawn at this zoom, so a note starts at the line left of the finger, never a coarser one.
+  Steps get _cellLevel => _lineLevel;
+
+  // Finger-sized taps on a phone: the device's screen decides, not the panel's size (a docked panel is smaller). The
+  // length a tapped note gets (until a stretch sets another), not where it starts.
   Steps get _tapLevel {
     final view = View.of(context);
     final screen = view.physicalSize / view.devicePixelRatio;
@@ -708,7 +740,12 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
 
   void _apply(PatternDoc next, {Set<int>? select}) {
     final d = _doc;
-    if (d == null || identical(next, d)) return;
+    if (d == null) return;
+    if (identical(next, d)) {
+      // Nothing changed (a note drawn onto one already there, #228): it still becomes the selection.
+      if (select != null && !setEquals(select, _sel)) setState(() => _sel = select);
+      return;
+    }
     _mirrorSelectedSources(d, next);
     _pushUndo(_Undo(d));
     _animateEdit(d, next);
@@ -1047,15 +1084,15 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
         if (r == null || !_resolutions.contains(r)) return true;
         setState(() => _res = r);
       case 'roll.tool.draw':
-        setState(() => _tool = PatternTool.draw);
+        _setTool(PatternTool.draw);
       case 'roll.tool.select':
-        setState(() => _tool = PatternTool.select);
+        _setTool(PatternTool.select);
       case 'roll.tool.curve':
-        setState(() => _tool = PatternTool.curve);
+        _setTool(PatternTool.curve);
       case 'roll.tool.erase':
-        setState(() => _tool = PatternTool.erase);
+        _setTool(PatternTool.erase);
       case 'roll.tool.ratchet':
-        setState(() => _tool = PatternTool.ratchet);
+        _setTool(PatternTool.ratchet);
       case 'roll.view.switch':
         setState(() => _grid = !_grid);
       case 'roll.view.zoomIn':
@@ -1224,11 +1261,11 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
       case LogicalKeyboardKey.keyN:
         setState(() => _snap = !_snap);
       case LogicalKeyboardKey.keyB:
-        setState(() => _tool = PatternTool.draw);
+        _setTool(PatternTool.draw);
       case LogicalKeyboardKey.keyV:
-        setState(() => _tool = PatternTool.select);
+        _setTool(PatternTool.select);
       case LogicalKeyboardKey.keyX:
-        setState(() => _tool = PatternTool.erase);
+        _setTool(PatternTool.erase);
       case LogicalKeyboardKey.keyG:
         setState(() => _grid = !_grid);
       case LogicalKeyboardKey.enter:
@@ -1382,7 +1419,6 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
   // under the touch, else the nearest line, else the note itself. While a drag is under way its points live in
   // [_curveView] and only the overlay repaints, once a frame; the model and undo get them when the finger lifts.
 
-  static const _bendRange = 12.0; // the owner's default: +-12 semitones on screen (the file allows +-48)
 
   double _noteX(PatternNote n) => n.at.toDouble() * _pxPerStep - _scrollX;
   double _noteW(PatternNote n) => math.max(3.0, n.len.toDouble() * _pxPerStep - 1);
@@ -1451,7 +1487,7 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
   double _bendValue(double y, PatternNote n, {double? prev}) {
     var v = (_noteMid(n) - y) / _rowH;
     if (!_free) v = _sticky(v, prev, 1);
-    return v.clamp(-_bendRange, _bendRange).toDouble();
+    return v.clamp(-NoteExpression.maxBend, NoteExpression.maxBend).toDouble();  // eight octaves (#226)
   }
 
   /// A point's place along [n] (0..1) under the finger at [x], on the time grid (sticky, as above) while snapping.
@@ -2008,7 +2044,7 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
     final hit = _noteAt(p);
     setState(() {
       _cursorPitch = _pitchAt(p.dy).clamp(0, 127);
-      _cursorAt = _snapTime(_stepAt(p.dx), _tapLevel);
+      _cursorAt = _snapTime(_stepAt(p.dx), _cellLevel);
       if (hit != null && !_sel.contains(hit)) _sel = {hit};
     });
     PopupMenuItem<String> item(String id, String label, {bool enabled = true}) {
@@ -2269,6 +2305,13 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
       if (!_panning && (p - pending).distance > (_mouse ? _mouseDragSlop : kTouchSlop)) {
         _boxTimer?.cancel();
         _clearGhost();
+        // The Erase tool swipes from anywhere: from empty grid too, not only from a note (#228).
+        if (_tool == PatternTool.erase) {
+          _pending = null;
+          _down(pending);
+          _dragTo(p);
+          return;
+        }
         // A drag from just outside a selected note's end stretches it (a tap there still draws).
         if (_tool != PatternTool.curve && _edgeAt(pending) != null) {
           _pending = null;
@@ -2429,7 +2472,7 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
 
   void _showGhost(Offset p) {
     final len = _lastLen ?? _tapLevel;
-    setState(() => _ghost = (at: _snapTime(_stepAt(p.dx), _tapLevel), pitch: _pitchAt(p.dy).clamp(0, 127), len: len));
+    setState(() => _ghost = (at: _snapTime(_stepAt(p.dx), _cellLevel), pitch: _pitchAt(p.dy).clamp(0, 127), len: len));
   }
 
   void _clearGhost() {
@@ -2483,7 +2526,7 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
     }
     // A short note is easier to grab: a touch beside it, within the grab zone, counts as on it, but only inside the
     // tap cell the note starts in, so a tap in the next cell still draws there.
-    final cell = _tapLevel.toDouble(), touchCell = (t / cell).floor();
+    final cell = _cellLevel.toDouble(), touchCell = (t / cell).floor();
     for (final n in d.notes.reversed) {
       if ((n.at.toDouble() / cell).floor() != touchCell || !_onNote(n, p)) continue;
       final w = n.len.toDouble() * _pxPerStep, pad = math.max(0.0, _look.grab * 2 - w) / 2 / _pxPerStep;
@@ -2545,8 +2588,14 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
       if (e != null) (hit, edge) = (e.id, e.edge);
     }
     _cursorPitch = _pitchAt(p.dy).clamp(0, 127);
-    _cursorAt = _snapTime(_stepAt(p.dx), _tapLevel);
+    _cursorAt = _snapTime(_stepAt(p.dx), _cellLevel);
     _tapCandidate = null;
+    // Drawing where a note already starts on this pitch takes that note (selects it, a drag moves it) instead of
+    // stacking a second one on it (#228).
+    if (hit == null && _tool == PatternTool.draw && !_rectSelect) {
+      final same = d.noteStartingAt(_cursorAt, _cursorPitch);
+      if (same != null) (hit, edge) = (same.id, 0);
+    }
     final tapAt = _tapAt;
     if (hit != null && !outside && hit == _tapNote && tapAt != null &&
         _gestureNow().difference(tapAt) < const Duration(milliseconds: 350)) {
@@ -2712,6 +2761,11 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
       }
     }
     _boxAdd = _rectMoved = false;
+    // A moved note dropped where another starts on its pitch replaces it: no stacked duplicates (#228).
+    if (_dragNote != null && _edge == 0 && _dragBase != null && _doc != null && !identical(_dragBase, _doc)) {
+      final merged = _doc!.mergeStacked(_sel.isEmpty ? {_dragNote!} : _sel);
+      if (!identical(merged, _doc)) setState(() => _doc = merged);
+    }
     final live = _liveEnd();
     _scroller.stop();
     _edge = 0;
@@ -3153,6 +3207,7 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
                 ? 0.0
                 : (clip.loop ? clip.sourceOffsetSteps % loop : clip.sourceOffsetSteps) + clip.lengthSteps.toDouble();
             final reach = math.max(length.toDouble(), math.max(loop?.toDouble() ?? 0, math.min(extent, length * 8.0 + 64)));
+            final shade = _shadeFrom(d, length);
             _maxScrollX = math.max(0.0, reach * _pxPerStep + 200 - w);
             _maxScrollY = math.max(0.0, 128 * _rowH - h);
             _scrollX = _scrollX.clamp(0, _maxScrollX);
@@ -3215,7 +3270,7 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
                         doc: d,
                         references: references,
                         sel: _sel,
-                        length: length,
+                        length: shade,
                         beatsPerBar: s.project.beatsPerBar,
                         bars: s.project.bars,
                         origin: widget.clip == null ? 0 : widget.clip!.startSteps - widget.clip!.sourceOffsetSteps,
@@ -4239,7 +4294,11 @@ class _RollPainter extends CustomPainter {
   final PatternDoc doc;
   final List<PatternDoc> references;
   final Set<int> sel;
-  final int length, beatsPerBar;
+  final int beatsPerBar;
+
+  /// Where the shade starts, in roll steps: past the clip's real end (its repeats included) when the roll is opened
+  /// for a clip, past its loop in Build, else past the pattern's length (#226).
+  final double length;
 
   /// The song's bars (#207) and the song step the roll's step 0 sits on (its clip's start less its source offset):
   /// with signature changes the bar lines and numbers follow them, numbered from the clip's first bar.
@@ -4301,7 +4360,7 @@ class _RollPainter extends CustomPainter {
       final c = isBar ? Neon.dim : Neon.line, a = isBar || isBeat ? 1.0 : 0.45;
       canvas.drawLine(Offset(x, 0), Offset(x, h), Paint()..color = c.withValues(alpha: (c.a * a * gridStrength).clamp(0.0, 1.0)));
     }
-    // Past the pattern's end is shaded.
+    // Past where the clip (or pattern) ends is shaded.
     final endX = length * pxPerStep - scrollX;
     if (endX < w) canvas.drawRect(Rect.fromLTWH(endX, 0, w - endX, h), Paint()..color = const Color(0x88000000));
     // Other selected clips are faint references; the active source remains the only editable owner.
@@ -4525,6 +4584,7 @@ class _RollPainter extends CustomPainter {
   @override
   bool shouldRepaint(_RollPainter o) =>
       !identical(o.doc, doc) ||
+      o.length != length ||
       o.bars != bars ||
       o.origin != origin ||
       o.references != references ||

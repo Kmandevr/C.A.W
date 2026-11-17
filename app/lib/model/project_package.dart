@@ -18,6 +18,7 @@ import 'native_components.dart';
 import 'native_trust.dart';
 import 'project.dart';
 import 'project_dependencies.dart';
+import 'sample_use.dart' show SampleUse;
 import 'sha256.dart';
 import 'user_presets.dart';
 import 'zip_archive.dart';
@@ -321,6 +322,8 @@ extension ProjectPackaging on AppState {
   bool isProjectFile(String path) {
     if (!isSafeLocalPath(path)) return false;
     if (userPickedFiles.contains(path)) return true;
+    // A file in a linked sample folder the project uses in place (#229): listed and packaged like its own.
+    if (isLinkedSampleFile(path)) return true;
     final s = storage;
     return isInsideFolders(path, [
       audioDirectory.path,

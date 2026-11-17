@@ -6,8 +6,10 @@ import 'dart:io';
 
 import 'package:caw/model/app_state.dart';
 import 'package:caw/model/history.dart';
+import 'package:caw/model/clip_midi.dart';
 import 'package:caw/model/project.dart';
 import 'package:caw/model/storage.dart';
+import 'package:caw/ui/pattern_fields.dart';
 import 'package:caw/ui/pattern_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -141,17 +143,19 @@ void main() {
     await tester.enterText(code, '0 C3 2');
     await tester.pump(const Duration(milliseconds: 700));
     expect(s.project.module('m')!.source, '${_head}0 C3 2');
+    // Undo restores the stored clip (MIDI, #216): the text view shows it as the editor writes notes.
+    String stored(String body) => splitPatternHeader(clipTextFromMidi(clipMidiFromText('$_head$body')!)).$2;
     expect(s.undo(), isTrue);
     await tester.pump();
-    expect(shown(), '0 C3 1');
+    expect(shown(), stored('0 C3 1'));
     await tester.enterText(code, '0 C3 13');
     expect(s.project.module('m')!.source, '${_head}0 C3 13');
     expect(s.undo(), isTrue);
     await tester.pump();
-    expect(shown(), '0 C3 1');
+    expect(shown(), stored('0 C3 1'));
     expect(s.redo(), isTrue);
     await tester.pump();
-    expect(shown(), '0 C3 13');
+    expect(shown(), stored('0 C3 13'));
     await tester.pump(const Duration(seconds: 2));
     s.dispose();
   });

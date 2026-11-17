@@ -14,6 +14,8 @@
 #include "caw.h"
 #include "detmath.h"
 #include "device_render.h"
+#include "buffer_tuner.h"
+#include "device_period.h"
 #include "engine.h"
 #include "native_component_test_path.h"
 #include "test.h"
@@ -525,6 +527,46 @@ TEST(project_parser_reads_folder_and_automation_metadata) {
     CHECK(!parseProject(cycle, invalid, error));
 }
 
+TEST(project_parser_reads_point_curves_bounded) {
+    const std::string json = R"({"caw_project":1,"layers":[
+      {"id":"t","automation":[{"target":"volume","points":[
+        {"step":0,"value":0,"curve":"slow","tension":0.5},{"step":4,"value":1,"curve":"fast","tension":9},
+        {"step":8,"value":0,"curve":"s"},{"step":12,"value":1,"curve":"step","tension":0.7},
+        {"step":16,"value":0,"curve":"spiral","tension":-0.2},{"step":20,"value":1}]}]}
+    ],"automation":[{"target_type":"instrument","layer":"t","target":"cutoff",
+        "points":[{"step":0,"value":0,"curve":"fast","tension":-3},{"step":4,"value":1}]}]})";
+    ProjectSpec p;
+    std::string error;
+    CHECK(parseProject(json, p, error));
+    const auto& pts = p.layers[0].automation[0].points;
+    CHECK_EQ(int{pts[0].curve}, 1);
+    CHECK_EQ(pts[0].tension, 0.5);
+    CHECK_EQ(int{pts[1].curve}, 2);
+    CHECK_EQ(pts[1].tension, 1.0);  // clamped
+    CHECK_EQ(int{pts[2].curve}, 3);
+    CHECK_EQ(int{pts[3].curve}, 4);
+    CHECK_EQ(pts[3].tension, 0.0);  // a step has no bend
+    CHECK_EQ(int{pts[4].curve}, 0);  // an unknown name reads linear
+    CHECK_EQ(pts[4].tension, 0.0);
+    CHECK_EQ(int{pts[5].curve}, 0);
+    CHECK_EQ(int{p.automation[0].points[0].curve}, 2);
+    CHECK_EQ(p.automation[0].points[0].tension, -1.0);
+}
+
+TEST(track_volume_automation_follows_curved_segments) {
+    ProjectSpec p = project({dc(1)}, 4);  // four bars: the song doesn't loop before the lane ends
+    p.layers[0].automation.push_back({"volume", {{0, 0, 1, 0.0}, {16, 1, 4, 0.0}, {32, 0}}});  // slow, then a step
+    Engine e(48000);
+    e.setMasterBypass(true);
+    e.setProject(p);
+    e.play();
+    const auto left = run(e, 32 * 6000 + 256);
+    const double pan = std::cos(kPi / 4.0);
+    CHECK_NEAR(left[8 * 6000], 0.28125 * pan, 2e-3);  // slow, tension 0: 9/32 at half way
+    CHECK_NEAR(left[24 * 6000], 1.0 * pan, 2e-3);   // a step holds
+    CHECK_NEAR(left[31 * 6000], 1.0 * pan, 2e-3);
+}
+
 TEST(output_does_not_depend_on_block_size) {
     // Noise free-running, and a saw played by a pattern (notes off the block grid) through a filter.
     ProjectSpec p = project({{Shape::Noise, {{"level", 0.3}}}});
@@ -892,6 +934,120 @@ TEST(a_single_late_callback_sheds_nothing) {
         CHECK_EQ(e.meters().overloaded, 0);
         CHECK_EQ(e.sheddingStats().shed, uint64_t{0});
     }
+}
+
+TEST(a_new_devices_first_callbacks_stay_out_of_the_cpu_meter) {
+    // #234: on the owner's S22+ through Bluetooth (a shared AAudio stream, its callback not real-time, on a little
+    // core) the day's worst meter read was 600 and 800%, with nothing shed. A stream that starts fills its buffer
+    // back to back, on a core whose clock hasn't risen: 0.2 s of frames at 9 times their budget reads 7.8 on the
+    // meter. Play reopens the device closed while idle, so those callbacks fall while playing. A device open asks
+    // for a warm-up (requestDeviceWarmUp), and its first kDeviceWarmSeconds of frames stay out of the meter.
+    ProjectSpec p = project({dc(0.25), dc(0.5)});
+    for (const int frames : {64, 256, 1920}) {
+        for (const bool warm : {false, true}) {
+            Engine e(48000);
+            e.setProject(p);
+            e.play();
+            run(e, 1000);
+            e.requestSheddingReset();  // as a device open does
+            if (warm) e.requestDeviceWarmUp();
+            std::vector<float> l(2048), r(2048);
+            float worst = 0, worstAfter = 0;
+            double played = 0;
+            for (int k = 0; played < 3.0; ++k) {
+                e.process(l.data(), r.data(), frames);
+                const bool filling = played < 0.2;
+                e.reportLoad(filling ? 9.0 : 0.3, frames);
+                played += static_cast<double>(frames) / 48000.0;
+                worst = std::max(worst, e.meters().cpu);
+                if (played > Engine::kDeviceWarmSeconds + 0.5) worstAfter = std::max(worstAfter, e.meters().cpu);
+            }
+            CHECK_EQ(e.sheddingStats().shed, uint64_t{0});
+            if (warm) {
+                CHECK(worst < 0.35f);  // the steady 0.3 only
+                CHECK(worstAfter > 0.25f);  // and the meter still reads it after the warm-up
+            } else {
+                CHECK(worst > 5.0f);  // without the warm-up the stream's start reads as 500% and more
+            }
+        }
+    }
+    // After the warm-up a real overload still sheds.
+    Engine e(48000);
+    e.setProject(p);
+    e.play();
+    run(e, 1000);
+    e.requestSheddingReset();
+    e.requestDeviceWarmUp();
+    std::vector<float> l(256), r(256);
+    for (int k = 0; k < 48000 * 2 / 256; ++k) {
+        e.process(l.data(), r.data(), 256);
+        e.reportLoad(1.5, 256);
+    }
+    CHECK(e.sheddingStats().shed > uint64_t{0});
+}
+
+// #237: Low latency's smallest WASAPI period (device_period.h): a multiple of the shared engine's fundamental from
+// its min to its max, never under the 128-frame floor; an exclusive minimum device period rounded up to frames.
+TEST(the_smallest_device_period_is_a_legal_one_above_the_floor) {
+    using caw::smallestSharedPeriod;
+    CHECK_EQ(smallestSharedPeriod(4, 48, 448), uint32_t{128});    // Microsoft Learn's 44.1 kHz example: 128 is legal
+    CHECK_EQ(smallestSharedPeriod(48, 144, 480), uint32_t{144});   // min above the floor
+    CHECK_EQ(smallestSharedPeriod(48, 96, 480), uint32_t{144});    // floor rounded up to the fundamental
+    CHECK_EQ(smallestSharedPeriod(480, 480, 480), uint32_t{480});  // no small buffers: the default
+    CHECK_EQ(smallestSharedPeriod(32, 32, 100), uint32_t{96});     // floor above max: the largest legal under it
+    CHECK_EQ(smallestSharedPeriod(0, 48, 480), uint32_t{0});       // unusable numbers ask nothing
+    CHECK_EQ(smallestSharedPeriod(48, 480, 96), uint32_t{0});
+    CHECK_EQ(smallestSharedPeriod(64, 100, 120), uint32_t{0});     // no multiple of 64 in 100..120
+    using caw::exclusivePeriodFrames;
+    CHECK_EQ(exclusivePeriodFrames(30000, 48000), uint32_t{144});  // 3 ms
+    CHECK_EQ(exclusivePeriodFrames(26667, 48000), uint32_t{129});  // rounded up, never under the device's
+    CHECK_EQ(exclusivePeriodFrames(10000, 48000), uint32_t{128});  // 1 ms: the floor
+    CHECK_EQ(exclusivePeriodFrames(0, 48000), uint32_t{0});
+    CHECK_EQ(exclusivePeriodFrames(30000, 0), uint32_t{0});
+}
+
+// #236: the output buffer's automatic size (Oboe's LatencyTuner way, buffer_tuner.h): whole bursts from two bursts
+// to the capacity, a burst more on each underrun, a burst less after a minute without one, never back to a size that
+// underran on this stream, started from the size remembered for this kind of output.
+TEST(the_buffer_tuner_grows_on_underruns_and_shrinks_only_to_sizes_that_held) {
+    BufferTuner t;
+    CHECK(!t.started());
+    CHECK_EQ(t.update(5, 1.0), 0);  // not started: nothing
+    CHECK_EQ(t.start(96, BufferTuner::kFloorBursts * 96, 3000, 0, 0), 192);  // two bursts
+    CHECK_EQ(t.update(0, 1.0), 0);
+    CHECK_EQ(t.update(-1, 1.0), 0);  // unknown count: nothing
+    CHECK_EQ(t.update(2, 1.0), 288);  // underruns: a burst more
+    CHECK_EQ(t.update(2, 1.0), 0);
+    CHECK_EQ(t.update(3, 1.0), 384);
+    // A quiet minute takes a burst off, but never back to a size that underran (288 and 192 did).
+    int32_t shrunk = 0;
+    for (int s = 0; s < 200; ++s)
+        if (const int32_t n = t.update(3, 1.0)) shrunk = n;
+    CHECK_EQ(shrunk, 0);
+    CHECK_EQ(t.size(), 384);
+    // From a remembered size: rounded up to a burst, kept within the floor and the capacity (whole bursts).
+    CHECK_EQ(t.start(96, 192, 3000, 500, 7), 576);
+    for (int s = 0; s < 59; ++s) CHECK_EQ(t.update(7, 1.0), 0);
+    CHECK_EQ(t.update(7, 1.0), 480);  // 60 s quiet
+    CHECK_EQ(t.update(8, 1.0), 576);  // it underran at 480: back up, and 480 is not tried again
+    for (int s = 0; s < 300; ++s) CHECK_EQ(t.update(8, 1.0), 0);
+    CHECK_EQ(t.start(96, 192, 3000, 100000, 0), 2976);  // the capacity in whole bursts
+    CHECK_EQ(t.update(1, 1.0), 0);  // at the ceiling: nothing more to give
+    CHECK_EQ(t.start(96, 192, 3000, 10, 0), 192);  // never under the floor
+    CHECK_EQ(t.update(4, 1.0), 288);
+    CHECK_EQ(t.update(1, 1.0), 0);  // a counter that went back (a new stream's) is taken as the new start
+    CHECK_EQ(t.update(2, 1.0), 384);
+}
+
+// The review of #236: the tuner runs only where the output has no size of its own (Low latency, or Auto while
+// recording); Auto while not recording and Battery keep their fixed 1024 frames, and caw_audio_tune_buffer returns 0.
+TEST(the_buffer_tuner_runs_only_in_low_latency_or_while_recording) {
+    CHECK(tunesBuffer(true, false, false));   // Low latency
+    CHECK(tunesBuffer(true, false, true));    // Low latency, recording
+    CHECK(tunesBuffer(false, true, true));    // Auto while recording: no size asked
+    CHECK(!tunesBuffer(false, true, false));  // Auto, not recording: 1024 frames
+    CHECK(!tunesBuffer(false, false, false)); // Battery: 1024 frames
+    CHECK(!tunesBuffer(false, false, true));  // Battery while recording: still 1024 frames
 }
 
 TEST(odd_callback_sizes_through_the_device_fifo_shed_nothing_under_the_threshold) {
@@ -1489,8 +1645,9 @@ TEST(play_from_a_position_resumes_mid_loop) {
     e.setProject(p);
     e.play(80000.0 / 6000.0);  // step 13.33 (6000 samples a step): 1.33 steps into the layer's second pass
     std::vector<float> out = run(e, 20000);
-    // The note under the playhead began before it, so the first heard is the next one, at layer step 2 (4000 on).
-    CHECK_NEAR(out[1000], 0.0, 1e-7);
+    // The note under the playhead began before it and sounds from the playhead (chased, #226), then the next one, at
+    // layer step 2 (4000 on).
+    CHECK_NEAR(out[1000], 2.0 / 12.0 * g, 1e-4);
     CHECK_NEAR(out[5000], 3.0 / 12.0 * g, 1e-4);
     CHECK_NEAR(out[15999], 4.0 / 12.0 * g, 1e-4);
     CHECK_NEAR(out[16000], 1.0 / 12.0 * g, 1e-4);  // the project loop wraps as usual

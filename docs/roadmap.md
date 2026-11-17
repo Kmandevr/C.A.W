@@ -1,7 +1,7 @@
 ---
 title: C.A.W. roadmap
 summary: Permanent product roadmap: verified current state, ordered implementation stages, future production capabilities, performance gates and explicit scope boundaries.
-updated: 2026-11-12
+updated: 2026-11-17
 ---
 
 # C.A.W. roadmap
@@ -46,13 +46,13 @@ An overview by area, checked against the repository on 2026-11-03. The stage tab
 | App/platforms | Eight Flutter workspaces; Android and Windows app CI artifacts; autosave; per-editor undo/redo; project format version check | App-wide undo, crash recovery, project migrations, onboarding/help; iOS/macOS builds; Linux app is not a shipped CI artifact |
 | Engine | Portable C++20 engine, built-in C++ instruments and effects, stereo playback/mixer, offline renderer, worker pool and adaptive workload policy | The C++ authoring toolchain, shared component SDK and Library are not built; the typed graph and N-channel contract have integration gaps (Foundation, issue #28) |
 | Patterns | Piano roll, drum grid, note expressions, lane curves, generators, MIDI file import/export | Kit-row routing, code-generated procedural patterns/Freeze and advanced groove/quantize extensions |
-| Arrangement | MIDI clip timeline, linked/independent clips, nested folders, stereo folder buses, track/folder volume-pan automation, module-parameter and project-global automation; audio clips (2026-11-11) | Clip automation, tempo map, markers/sections and consolidation |
+| Arrangement | MIDI clip timeline, linked/independent clips, nested folders, stereo folder buses, track/folder volume-pan automation, module-parameter and project-global automation; MIDI clip automation lanes and audio clips (2026-11-11) | Clip automation's add-to-track option (#210), tempo map, markers/sections and consolidation |
 | Mixer | Track volume/pan/mute/solo, generator/effect chains, folder buses and master output | Sends, general sidechain routing, parallel paths, master effect chain and integrated visual track/routing inspector |
 | Sound/synth | Code generators/effects, house synth patch compiler/playback, built-in wavetable morph/phase warp, LFOs and modulation matrix | Custom/imported wavetable authoring, drawn LFO curves and additional warp modes |
 | MIDI | MIDI pattern import/export; USB, Bluetooth, UMP (Android) and WinMM (Windows) devices into instruments at their frame; controller learn | MIDI clock, MIDI-CI, MIDI output |
 | Export | WAV loop/free-length/one-shot/wavetable, MIDI, profiles/history and bounded in-memory queue | Stems, persistent queue and broader batch delivery |
 | Audio assets | Audio import into the project, non-destructive audio clips, the sampler with zone mapping and SFZ (2026-11-11) | Sample editor, generated audio as assets |
-| Recording | MIDI and audio recording, monitoring, latency compensation, punch, loop takes, crash recovery (2026-11-11) | Comping, device-loss handling, hardware timing checks |
+| Recording | MIDI and audio recording, monitoring, latency compensation, punch, loop takes, crash recovery (2026-11-11); take lanes and comping, Record with nothing armed (1.0.5) | Device-loss handling, hardware timing checks |
 | Plugins | C++ components export as CLAP and VST3 plug-ins (`engine/plugin/`); native SDK/graph foundations exist | Dynamic native loading/isolation and external CLAP/VST3/AU hosting |
 | AI/video | No in-app AI; video sync is not planned | AI remains excluded; video sync remains off-roadmap |
 
@@ -68,23 +68,38 @@ An overview by area, checked against the repository on 2026-11-03. The stage tab
 3. **1.0.4:** audio stretching with Signalsmith Stretch (licence to confirm): follow tempo, stretch to fit, pitch shift. Also slice to MIDI, a sample editor, and long-song clip precision (#90) (#208).
 4. **1.0.5:**
    - clips stored as MIDI, with pattern text only as an editor (#216); this format change comes first;
-   - then comping, freeze, bounce in place and consolidate (#209).
+   - then comping, freeze, bounce in place and consolidate (#209);
+   - MIDI playback and piano roll fixes (#226, #228).
 
    Stem export is already built (#33). App-wide undo is checked against the existing project-wide history (`lib/model/history.dart`) first.
-5. **1.0.6:**
-   - clip automation and VCA groups (#210);
+5. **1.0.6** (owner, 2026-11-17: the FX batch split in two): fewer, better built-in effects (#227). The overlapping effects merge into one device each, no more costly to run than the ones they replace. This batch also has:
+   - the device UI kit, the collapsible FX chain and the Vital-like Flagship (#231);
+   - **React to…** (#233);
+   - live preset preview: tap through presets while a loop plays.
+6. **1.0.7:** the rest of the FX work (#227):
+   - **New standard effects:** exciter, pitch correction, vocoder, analyzer, tuner, loudness meter, dynamic and M/S EQ, tape echo, plate and spring.
+   - **Recording tools:** noise reduction (live and on clips), a pedal-style noise gate, de-hum, de-click and de-plosive, de-reverb and breath.
+   - **Guitar:** amp, pedal and cabinet modes in Drive and the convolver, and Drive's Bands mode.
+   - **Purpose tags,** chain templates, project templates (Guitar recording, Podcast, Beat, Sound design) and purpose-named presets.
+   - **Low-latency monitoring** through effects while recording, with a latency readout.
+   - **The free AutoStacc beta pack:** warp, spectral FX, glitch, and one more to choose.
+   - **The step-by-step music video** (#232).
+7. **1.0.8:**
+   - clip automation's override-or-add choice and VCA groups (#210; MIDI clip lanes that override the track lane are built);
    - receives, parallel paths and drum multi-out (#217);
    - MIDI out and MIDI clock (#211).
-6. **1.0.7:**
+8. **1.0.9:**
    - format migrations, crash recovery, device loss, and a first-run tour and help (#218);
    - drawn LFO shapes and a Flagship wavetable editor (#219).
-7. **1.0.8:** the foundation for hosting other people's plug-ins (#212): the isolation design (reviewed first), the out-of-process host, the scan and the loader behind Isolated, Trusted or Blocked. Users don't see any of it. The feature itself (CLAP and VST3 on Windows, CLAP on Android) ships in 1.1.0.
-8. **1.0.9:** a notation view (#213), a clip launcher, and S Pen precision (#220).
-9. **iOS and macOS builds** (#214), once the owner has an Apple Developer membership. On iOS, the app ships every built-in instrument and effect, but no on-device C++ building or loading (owner, 2026-11-13: Apple forbids downloaded native code).
-10. **Play-ahead rendering** (#191, the [play-ahead plan](play-ahead-plan.md)). It moved from 1.2.0 into 1.1.0 (owner, 2026-11-13) and is built in its own batches before 1.1.0.
+9. **1.0.10:** the foundation for hosting other people's plug-ins (#212): the isolation design (reviewed first), the out-of-process host, the scan and the loader behind Isolated, Trusted or Blocked. Users don't see any of it. The feature itself (CLAP and VST3 on Windows, CLAP on Android) ships in 1.1.0.
+10. **1.0.11:** a notation view (#213), a clip launcher, and S Pen precision (#220).
+- **Silent 1.1.0 groundwork** (owner, 2026-11-17): the routing engine (#233), plug-in hosting (#212), play-ahead (#191), the AutoStacc download and update source (#221) and the store builds (#222) are built in hidden steps alongside these batches, behind off-by-default flags or as engine-only code. Users see none of it until 1.1.0, and the changelog doesn't announce it.
+11. **iOS and macOS builds** (#214), once the owner has an Apple Developer membership. On iOS, the app ships every built-in instrument and effect, but no on-device C++ building or loading (owner, 2026-11-13: Apple forbids downloaded native code).
+12. **Play-ahead rendering** (#191, the [play-ahead plan](play-ahead-plan.md)). It moved from 1.2.0 into 1.1.0 (owner, 2026-11-13) and is built in its own batches before 1.1.0.
 
 **In 1.1.0 itself (owner, 2026-11-13):**
 - plug-in hosting goes live (#212) and play-ahead ships;
+- visual, non-linear routing (#233, owner 2026-11-17): node graphs inside device chains, between tracks, for modulation and inside Flagship, so that everything works with everything natively, as Kilohearts' Snap Heap does but built in everywhere;
 - AutoStacc becomes a download, update source and store page (#221);
 - C.A.W is published on Google Play and the iOS App Store (#222).
 
@@ -241,8 +256,8 @@ Built on the graph from the Foundation stage. Do not keep a second mixer or crea
 |---|---|---|---|---|---|
 | 6.1 | Song markers, named sections and navigation | Planned | app | — | Not built |
 | 6.2 | Tempo maps and time-signature changes | Planned | both | F4 | One tempo and meter per project today |
-| 6.3 | Clip-following automation and complete parameter/modulation automation | Partial | both | F6 | Track and project automation lanes exist, drawn by hand or written from the controls (Automate: Touch, Latch, Write, Read); clip automation does not |
-| 6.4 | Consolidate/bounce and render selected tracks, folders and groups | Planned | both | 0.3 | Not built |
+| 6.3 | Clip-following automation and complete parameter/modulation automation | Partial | both | F6 | Track and project automation lanes exist, drawn by hand or with tools, with curved segments, or written from the controls (Automate: Touch, Latch, Write, Read), and the option Automation follows clips moves their points with a moved clip (#230). MIDI clips have their own lanes, in clip time, that move and copy with the clip and play in place of the track's lane inside it (Move to clip / Move to track; [app](app.md), clip loops and clip automation); a clip's choice to add to the track lane instead (#210) and lanes on audio clips are not built |
+| 6.4 | Consolidate/bounce and render selected tracks, folders and groups | Partly built | both | 0.3 | Bounce to audio of a track or its clips built in 1.0.5 (#209, [app](app.md)); consolidate, folders and groups not built |
 | 6.5 | Batch export, persistent/recoverable export queue, delivery presets | Partial | both | 0.3 | Export profiles, history and a bounded in-memory queue exist; the queue isn't persistent and there's no batch delivery |
 | 6.6 | MIDI and audio quantize/alignment across the arrangement | Planned | both | 1.4, 3.2 | Not built |
 | 6.7 | Export progress, cancellation, errors, cleanup and output location | Partial | both | — | Native jobs report progress and support cancellation; full cleanup and output-location handling need verification |
@@ -259,7 +274,7 @@ Recording is part of the product direction and the last stage before Release 1. 
 | 7.2 | Audio input selection, channel configuration and input monitoring | Built, untested on hardware | both | 5.6 | Settings › Audio's input device and channels, the RECORD_AUDIO request when input is turned on or a track armed, each track's channel, mono or stereo and monitoring ([app](app.md), Audio); untested on the S22+ |
 | 7.3 | Multitrack audio recording to arrangement tracks | Built, untested on hardware | both | 3.2, 7.2 | Record records every armed audio track; takes become clips where they were played ([app](app.md), Audio) |
 | 7.4 | Input latency measurement and compensation | Partial | both | 7.2 | Takes are placed by the round-trip latency; Settings › Audio measures it with the ping (after a warning) or takes a typed offset. Not yet measured on a phone |
-| 7.5 | Punch in/out and loop recording; take lanes and comping | Partial | both | 7.3 | Punch over the loop range or the time selection; a loop recording's passes stack as one clip's takes, swapped whole by the take chip. Comping parts of takes is not built |
+| 7.5 | Punch in/out and loop recording; take lanes and comping | Partial | both | 7.3 | Punch over the loop range or the time selection; a loop recording makes a take per pass (MIDI and audio), comped in take lanes under the track with crossfaded joins and flattened in one step (1.0.5, #209, [app](app.md)) |
 | 7.6 | Count-in, metronome options and monitoring controls | Partial | app | 5.5 | Metronome off, while recording or always, and a 0–2 bar count-in on Record's long-press; no click sound choice or monitoring controls |
 | 7.7 | Recording recovery after interruption, device loss or low storage | Partial | both | 1.7, 7.3 | Takes a crash left are offered back when the project opens; a failed write ends the take keeping what was written, a full ring is filled with silence and reported. Device-loss handling in the app is not built |
 

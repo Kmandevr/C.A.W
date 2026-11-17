@@ -8,6 +8,7 @@ import 'package:caw/engine/engine.dart';
 import 'package:caw/model/app_state.dart';
 import 'package:caw/model/audio_edit.dart';
 import 'package:caw/model/audio_record.dart';
+import 'package:caw/model/av_sync.dart';
 import 'package:caw/model/latency_comp.dart';
 import 'package:caw/model/project.dart';
 import 'package:caw/model/settings.dart';
@@ -180,6 +181,7 @@ void main() {
       s.latency.readDevice = () => device(outMs: 0);
       await s.latency.refresh();
       s.latency.setOutputTotalMs(250); // 2 steps at 120 bpm
+      await pumpEventQueue();
     });
     tearDown(() => s.dispose());
 
@@ -196,22 +198,56 @@ void main() {
       expect(s.playheadStep, closeTo(0.5, 1e-9));
     });
 
-    test('a meter reading appears exactly one output latency later', () {
+    test('a meter read shows when the sound it stands for is heard, the screen\'s lead early', () {
+      s.avSync.refreshHz = () => 120;
+      final lead = s.visualLeadUs;
+      expect(lead, 16667 + earlyBiasUs, reason: 'two 120 Hz frames plus the early bias');
+      final quiet = MeterReading(clock - 33000, const EngineMeters(playing: true), const [LayerMeterValue()]);
+      // The read at [clock] stands for what was rendered over the 33 ms before it.
       final rendered = MeterReading(clock, const EngineMeters(peakL: 0.8, peakR: 0.6, playing: true), const [
         LayerMeterValue(peak: 0.7),
       ]);
-      s.meterTimeline.push(MeterReading(clock - 1000, const EngineMeters(playing: true), const [LayerMeterValue()]));
+      s.meterTimeline.push(quiet);
       s.meterTimeline.push(rendered);
       s.layerMeters = const [LayerMeterValue(peak: 0.7)];
       expect(s.outputLatencyUs, 250000);
-      clock += 249999;
+      final start = clock;
+      // Its first sound is heard 250 ms after its span began; the screen shows it [lead] before that.
+      clock = start - 33000 + 250000 - lead;
       expect(s.audibleMeters.peakL, 0, reason: 'not heard yet');
       expect(s.audibleLayerMeters.single.peak, 0);
       clock += 1;
       expect(s.audibleMeters.peakL, 0.8);
       expect(s.audibleMeters.peakR, 0.6);
       expect(s.audibleLayerMeters.single.peak, 0.7);
-      expect(s.meterAt(clock - 250000), same(rendered));
+      expect(s.meterAt(start - 1), same(rendered));
+      expect(s.meterAt(start - 33000), same(quiet));
+      expect(s.meterAt(start + 5), same(rendered), reason: 'past the newest: the newest');
+      // Before the first kept read's span: nothing heard yet (a silent read).
+      expect(s.meterAt(start - 70000)!.meters.peakL, 0);
+      // Compensation off: no lead, the newest read.
+      s.latency.enabled = false;
+      expect(s.visualLeadUs, 0);
+      expect(s.audibleMeters.peakL, 0.8);
+    });
+
+    test('the playhead is drawn for when its frame lights up: ahead of the read by the lead', () {
+      s.avSync.refreshHz = () => 60;
+      final lead = s.visualLeadUs;
+      expect(lead, 33333 + earlyBiasUs);
+      final loopSteps = s.project.engineLoopSteps;
+      // Two moving reads (8 steps a second at 120 BPM), well after the compensated start.
+      clock += 1000000;
+      s.meters = EngineMeters(playing: true, position: 10 * 1000, loopLength: loopSteps * 1000);
+      s.playheadClock.read(step: s.playheadStep, atUs: clock, playing: true, stepsPerSecond: 8, to: loopSteps.toDouble());
+      clock += 33000;
+      s.meters = EngineMeters(playing: true, position: 10264, loopLength: loopSteps * 1000);
+      s.playheadClock.read(step: s.playheadStep, atUs: clock, playing: true, stepsPerSecond: 8, to: loopSteps.toDouble());
+      final heard = s.playheadStep;
+      expect(heard, closeTo(8.264, 1e-9));
+      expect(s.smoothPlayheadStep, closeTo(heard + lead * 8e-6, 1e-9));
+      // Drawn only on the reads: half a read interval on as well.
+      expect(s.heldPlayheadStep, closeTo(heard + (lead + 16500) * 8e-6, 1e-9));
     });
 
     test('the badge tip shows while the output adds more than 50 ms', () {
@@ -252,15 +288,11 @@ void main() {
       expect(io.latencyOverride, 600);
       rec.setLatencyMs(null);
       expect(io.latencyOverride, 210 * 48);
-      // A ping through this output heard the whole trip: the engine uses it, and the input gets the rest.
+      // A ping series through this output heard the whole trip: its median (the fake's 10 ms) is the round trip,
+      // and the input gets what the output does not explain (nothing here: the output alone is 200 ms).
       final r = await rec.ping(poll: Duration.zero);
-      expect(r!.ok, isTrue);
-      expect(io.latencyOverride, -1);
-      expect(rec.latency.source, 'measured');
-      // Back on the speaker the ping (made through the buds) no longer holds.
-      route.move(const AudioRouteInfo(output: speaker, input: mic));
-      await pumpEventQueue();
-      expect(io.latencyOverride, greaterThan(0));
+      expect(r!.reliable, isTrue);
+      expect(s.latency.inputOffset.source, OffsetSource.loopback);
     });
   });
 
@@ -272,6 +304,24 @@ void main() {
       expect(androidDeviceKind(9), AudioDeviceKind.hdmi);
       expect(androidDeviceKind(2), AudioDeviceKind.builtIn);
       expect(androidDeviceKind(99), AudioDeviceKind.unknown);
+    });
+
+    test('the routed output says whether it is LE Audio or classic A2DP (#237)', () {
+      AudioEndpoint routed(int type) => pickAndroidRoute({
+            'routed': [
+              {'id': 7, 'type': type, 'name': 'Buds'}
+            ]
+          }, const AudioRouteHint()).output;
+      for (final t in [26, 27, 30, 33]) {
+        expect(routed(t).bluetoothProfile, 'le_audio', reason: 'type $t');
+        expect(routed(t).isLeAudio, isTrue);
+      }
+      expect(routed(8).bluetoothProfile, 'a2dp');
+      expect(routed(8).isLeAudio, isFalse);
+      expect(routed(23).bluetoothProfile, 'asha');
+      expect(routed(23).kind, AudioDeviceKind.bluetoothLe);
+      expect(routed(2).bluetoothProfile, '');
+      expect(const AudioEndpoint(kind: AudioDeviceKind.bluetooth).bluetoothProfile, ''); // Windows: no type
     });
 
     test('the engine\'s device id wins, then Android 13\'s routed device, then the usual priority', () {

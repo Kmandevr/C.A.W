@@ -59,6 +59,8 @@ class _TakeChipState extends State<TakeChip> {
     final id = widget.audio?.id ?? widget.clip!.id;
     final takes = widget.audio?.takes ?? widget.clip!.takes;
     final i = takes.indexOf(widget.audio?.assetId ?? widget.clip!.patternId);
+    // A comp (#209) plays parts of several: "C" for it.
+    final comped = (widget.audio?.comp ?? widget.clip!.comp).isNotEmpty;
     return GestureDetector(
       key: ValueKey('take-chip-$id'),
       // A swipe of 24 px steps one take, as the finger goes.
@@ -78,7 +80,7 @@ class _TakeChipState extends State<TakeChip> {
           _arrow(Icons.chevron_left, -1, 'Previous take'),
           GestureDetector(
             onTapUp: (d) => _pick(d.globalPosition),
-            child: Text('${i < 0 ? '–' : i + 1}/${takes.length}', key: ValueKey('take-count-$id'),
+            child: Text('${comped ? 'C' : i < 0 ? '–' : i + 1}/${takes.length}', key: ValueKey('take-count-$id'),
               style: TextStyle(color: widget.color, fontSize: 10, fontWeight: FontWeight.w800))),
           _arrow(Icons.chevron_right, 1, 'Next take'),
         ]),

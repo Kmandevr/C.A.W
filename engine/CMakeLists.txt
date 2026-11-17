@@ -208,7 +208,7 @@ set_source_files_properties(platform/decode_miniaudio.c PROPERTIES COMPILE_OPTIO
   INCLUDE_DIRECTORIES "${CMAKE_CURRENT_SOURCE_DIR}/third_party/miniaudio")
 # Clip stretching (1.0.4, #208): Signalsmith Stretch and Signalsmith Linear, header-only, MIT (third_party/, decisions.md);
 # only clip_stretch.cpp includes them. Tempo detection and transients for Slice to MIDI.
-target_sources(caw_core PRIVATE src/clip_stretch.cpp src/audio_analysis.cpp)
+target_sources(caw_core PRIVATE src/clip_stretch.cpp src/audio_analysis.cpp src/sample_preview.cpp)  # + the sample preview (API 33)
 set_source_files_properties(src/clip_stretch.cpp PROPERTIES
   INCLUDE_DIRECTORIES "${CMAKE_CURRENT_SOURCE_DIR}/third_party")
 # The stretch tests pin the vendored library's random draws (a source property: caw_tests is defined below).
@@ -247,7 +247,7 @@ if(CAW_TOOLS)
   target_compile_options(caw_cli PRIVATE ${CAW_FLAGS})
 target_include_directories(caw_cli PRIVATE src)
   target_link_libraries(caw_cli PRIVATE caw_core)
-  add_executable(caw_tests tests/test_main.cpp tests/engine_test.cpp tests/export_test.cpp tests/pattern_test.cpp
+  add_executable(caw_tests tests/test_main.cpp tests/engine_test.cpp tests/clip_playback_test.cpp tests/export_test.cpp tests/pattern_test.cpp
     tests/midifile_test.cpp tests/midi2_test.cpp tests/module_registry_test.cpp tests/native_component_test.cpp tests/execution_test.cpp tests/execution_capi_test.cpp tests/module_test.cpp tests/graph_test.cpp tests/params_test.cpp tests/sdk_header_test.cpp tests/scheduler_test.cpp tests/dependency_test.cpp tests/hardware_test.cpp tests/worker_api_test.cpp tests/mix_reference_test.cpp tests/public_cpp_sdk_test.cpp tests/track_components_test.cpp tests/instrument_test.cpp tests/builtin_instruments_test.cpp
     src/capi.cpp src/capi_audio.cpp src/capi_modulation.cpp src/execution_capi.cpp src/worker_api.cpp src/capi_stress.cpp platform/audio_none.cpp)
   target_sources(caw_tests PRIVATE tests/tolerance.cpp tests/tolerance_test.cpp)  # reference renders, their comparators
@@ -264,6 +264,7 @@ target_include_directories(caw_cli PRIVATE src)
   target_sources(caw_tests PRIVATE tests/ducker_test.cpp)  # the ducker driven directly (#175 audio review)
   target_sources(caw_tests PRIVATE tests/stereo_path_test.cpp)  # stereo end to end: buses and WAV export (#17, #121)
   target_sources(caw_tests PRIVATE tests/meters_test.cpp)  # loudness (BS.1770-5, EBU Tech 3341), true peak, correlation
+  target_sources(caw_tests PRIVATE tests/sample_library_test.cpp)  # the sample browser: key estimate, preview (#229)
   target_sources(caw_tests PRIVATE tests/render_stems_test.cpp)  # song renders: stems, bounds, tail, normalise, dither, parity
   target_sources(caw_tests PRIVATE tests/fx_dynamics_test.cpp)  # fx-dynamics: the Dynamics and Drive effects
   target_sources(caw_tests PRIVATE tests/fx_creative_test.cpp)  # fx-creative: the Creative and Pitch & Time effects
@@ -367,6 +368,7 @@ target_include_directories(caw_cli PRIVATE src)
   target_sources(caw_rt_tests PRIVATE tests/audio_rt_test.cpp)  # audio clips, the sampler, monitoring and recording (WP-J)
   target_sources(caw_rt_tests PRIVATE tests/modulation_rt_test.cpp)  # #161: project modulation
   target_sources(caw_rt_tests PRIVATE tests/note_fx_rt_test.cpp)  # #127: per-note FX
+  target_sources(caw_rt_tests PRIVATE tests/sample_preview_rt_test.cpp)  # #229: the sample preview
   target_sources(caw_rt_tests PRIVATE tests/stress_rt_test.cpp)  # the Benchmark: its timed loop
   target_sources(caw_rt_tests PRIVATE tests/component_bench_rt_test.cpp)  # #197: the plug-in benchmark's allocation check
   target_compile_options(caw_rt_tests PRIVATE ${CAW_FLAGS})

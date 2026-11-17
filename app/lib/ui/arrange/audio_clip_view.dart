@@ -21,6 +21,10 @@ import '../motion.dart';
 import '../pointer_input.dart';
 import '../theme.dart';
 import 'arrange_drag.dart';
+import '../../model/comping.dart';
+import '../../model/freeze.dart';
+import 'freeze_ui.dart';
+import 'take_lanes.dart';
 import 'audio_waveform.dart';
 import '../../model/sample_edit.dart';
 import 'edit_cues.dart';
@@ -346,6 +350,21 @@ class AudioClipViewState extends State<AudioClipView> {
           onVerticalDragCancel: _vertical(g) ? _cancel : null,
           child: child)));
 
+  /// The comp's parts in the clip's box: x from and to, the take, and the file second at the part's left.
+  List<({double x0, double x1, String take, double from})> _compParts() {
+    final p = s.project;
+    final take = TakeClip.audio(c);
+    final joins = take.joins(p);
+    final edges = [c.startSteps, ...joins, c.startSteps + _span];
+    final out = <({double x0, double x1, String take, double from})>[];
+    for (var i = 0; i + 1 < edges.length; i++) {
+      final at = audioSourceAt(p, c, edges[i]);
+      out.add((x0: (edges[i] - c.startSteps) * widget.stepW, x1: (edges[i + 1] - c.startSteps) * widget.stepW,
+          take: compTakeAt(c.comp, (at + audioSourceAt(p, c, edges[i + 1])) / 2), from: at));
+    }
+    return out;
+  }
+
   static bool _vertical(_Grab g) => g == _Grab.gain || g == _Grab.curveIn || g == _Grab.curveOut;
 
   @override
@@ -372,6 +391,9 @@ class AudioClipViewState extends State<AudioClipView> {
     final wave = Color.lerp(color, Neon.ink, 0.35)!.withValues(alpha: 0.9);
     final dragShift = _grab == _Grab.move && widget.drag != null ? _delta.dy : 0.0;
     final name = s.audioClipName(c);
+    // A comp's parts as drawn (#209): each from the join before it to the one after, in the clip's box, with the
+    // file second it starts on. While the clip is trimmed or stretched it draws plain until let go.
+    final comp = audioComped(c) && (_grab == _Grab.none || _grab == _Grab.move) ? _compParts() : null;
     final showHandles = widget.selected && !c.lock && width >= 40 && h >= 26;
     // The stretch notch (owner, 2026-11-14): on every clip that plays at its own speed, wide enough to hold it.
     final showNotch = c.fixed && !c.lock && width >= 40 && h >= 20;
@@ -386,7 +408,7 @@ class AudioClipViewState extends State<AudioClipView> {
         boxShadow: widget.selected ? [BoxShadow(color: color.withValues(alpha: .35), blurRadius: 8)] : null,
         border: Border.all(color: widget.selected ? color : color.withValues(alpha: .7), width: widget.selected ? 1.6 : 1)),
       child: ClipRRect(borderRadius: BorderRadius.circular(5), child: Stack(children: [
-        Positioned.fill(child: RepaintBoundary(child: CustomPaint(
+        if (comp == null) Positioned.fill(child: RepaintBoundary(child: CustomPaint(
           key: ValueKey('audio-wave-${c.id}'),
           painter: AudioClipPainter(
             peaks: () => asset == null ? null
@@ -394,7 +416,24 @@ class AudioClipViewState extends State<AudioClipView> {
             window: ClipWindow(offset: offset, perPixel: per, fileSeconds: fileSeconds, reverse: c.reverse,
                 loop: c.loop, loopStart: c.loopStart, loopEnd: c.loopEnd),
             color: wave, gain: gain, fadeIn: fadeInPx, fadeOut: fadeOutPx, inCurve: inCurve, outCurve: outCurve,
-            top: top, path: asset?.path)))),
+            top: top, path: asset?.path))))
+        // A comp (#209): each part's take where it plays, between the joins, and the joins' crossfades marked.
+        else ...[
+          for (final (i, part) in comp.indexed)
+            if (s.project.asset(part.take) case final a?)
+              Positioned(left: part.x0, width: math.max(0.0, part.x1 - part.x0), top: 0, bottom: 0,
+                child: RepaintBoundary(child: CustomPaint(key: ValueKey('audio-comp-wave-${c.id}-$i'),
+                  painter: AudioClipPainter(
+                    peaks: () => WaveformCache.instance.peaks(s.audioIo, a.path, a.seconds, per.abs()),
+                    window: ClipWindow(offset: part.from, perPixel: per, fileSeconds: a.seconds, reverse: c.reverse,
+                        loop: c.loop, loopStart: c.loopStart, loopEnd: c.loopEnd),
+                    color: wave, gain: gain, fadeIn: i == 0 ? fadeInPx : 0,
+                    fadeOut: i == comp.length - 1 ? fadeOutPx : 0, inCurve: inCurve, outCurve: outCurve,
+                    top: top, path: a.path)))),
+          Positioned.fill(child: IgnorePointer(child: CustomPaint(key: ValueKey('audio-comp-joins-${c.id}'),
+              painter: CompJoinsPainter([for (final part in comp.skip(1)) part.x0], Neon.ink,
+                  crossfade: kCompCrossfadeSeconds / 2 * pxPerSec)))),
+        ],
         if (top > 0) Positioned(left: 12, right: 12, top: 1, height: 13, child: Row(children: [
           if (c.lock) Icon(Icons.lock, key: ValueKey('audio-locked-${c.id}'), size: 9, color: color),
           if (c.mute) Icon(Icons.volume_off, key: ValueKey('audio-muted-${c.id}'), size: 9, color: color),
@@ -539,6 +578,8 @@ Future<void> showAudioClipMenu(BuildContext context, AppState s, LayerDoc layer,
     {VoidCallback? onOpen}) async {
   final step = s.editStep.toDouble();
   final canSplit = !clip.lock && step > clip.startSteps && step < clip.endAt(s.project.bpm);
+  final consolidate = s.selectedClipIds.contains(clip.id)
+      ? [for (final c in layer.audioClips) if (s.selectedClipIds.contains(c.id) && !c.lock) c] : const <AudioClipDoc>[];
   final v = await showLongPressMenu<String>(context, at: at, title: s.audioClipName(clip), style: s.settings.longPressMenu,
       actions: [
         if (onOpen != null) const MenuAction('open', 'Clip settings…', Icons.tune),
@@ -550,6 +591,12 @@ Future<void> showAudioClipMenu(BuildContext context, AppState s, LayerDoc layer,
         MenuAction('mute', clip.mute ? 'Unmute' : 'Mute', Icons.volume_off, checked: clip.mute),
         MenuAction('lock', clip.lock ? 'Unlock' : 'Lock', Icons.lock, checked: clip.lock),
         if (clip.takes.length > 1) MenuAction('takes', 'Next take (${clip.takes.length})', Icons.layers_outlined),
+        // Comping (#209): the takes as lanes under the track.
+        if (clip.takes.length > 1) MenuAction('take-lanes', layer.showTakes ? 'Hide take lanes' : 'Take lanes',
+            Icons.view_agenda_outlined, checked: layer.showTakes),
+        // Consolidate (#209): the selection's clips on this track rendered into one clip.
+        if (consolidate.length >= 2) MenuAction('consolidate', 'Consolidate ${consolidate.length} clips',
+            Icons.join_full),
         if (!clip.lock) const MenuAction('delete', 'Delete', Icons.delete_outline, danger: true),
       ]);
   if (v == null) return;
@@ -579,6 +626,13 @@ Future<void> showAudioClipMenu(BuildContext context, AppState s, LayerDoc layer,
       s.toggleAudioLock(layer, clip);
     case 'takes':
       s.stepAudioTake(layer, clip, 1);
+    case 'take-lanes':
+      toggleTakeLanes(s, layer);
+    case 'consolidate':
+      if (!context.mounted) return;
+      await runTrackRender(context, 'Consolidate ${consolidate.length} clips',
+          () => s.consolidateAudioClips(layer, consolidate));
+      return;
     case 'delete':
       s.removeAudioClip(layer, clip);
   }

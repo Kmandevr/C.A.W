@@ -6,9 +6,11 @@ import 'dart:math' as math;
 
 import '../engine/audio_engine.dart';
 import 'app_state.dart';
+import 'freeze.dart';
 import 'audio_clips.dart';
 import 'project.dart';
 import 'sample_edit.dart';
+import 'sample_names.dart';
 
 final Expando<AudioIo> _io = Expando('audio io');
 final Expando<Set<String>> _unsized = Expando('clips waiting for their file length');
@@ -26,6 +28,10 @@ String safeAudioName(String name) {
   final clean = name.replaceAll(RegExp(r'[^A-Za-z0-9 ._-]'), '_').trim();
   return clean.isEmpty || clean.startsWith('.') ? 'audio$clean' : (clean.length > 96 ? clean.substring(clean.length - 96) : clean);
 }
+
+/// Paths a drag from the sample browser carries, with the link they stand for (the folder's id, the path inside it):
+/// a drop adds the asset with its link, so the file is used in place (#229). The newest 64 are kept.
+final Map<String, (String, String)> linkedPathHint = {};
 
 /// A clip on a track.
 typedef PlacedAudioClip = ({LayerDoc layer, AudioClipDoc clip});
@@ -99,6 +105,14 @@ extension AudioEdit on AppState {
         name: name ?? path.split(RegExp(r'[/\\]')).last.replaceFirst(RegExp(r'\.[^.]*$'), ''),
         bpm: bpm, recorded: recorded, seconds: seconds);
     if (info != null && info.ok) _fill(asset, info);
+    final hint = linkedPathHint.remove(path);
+    if (hint != null) {
+      asset.link = LinkedRef(hint.$1, hint.$2);
+      if (isSessionPath(path)) sessionPathNames[path] = asset.link!.placeholder;
+    }
+    while (linkedPathHint.length > 64) {
+      linkedPathHint.remove(linkedPathHint.keys.first);
+    }
     editProject((p) => p.assets.add(asset));
     return asset;
   }
@@ -109,12 +123,9 @@ extension AudioEdit on AppState {
     a.sourceRate = info.sourceRate;
   }
 
-  /// A tempo in a file's name ("loop 120bpm.wav", "drums_95_bpm"), or null.
-  static double? guessBpm(String name) {
-    final m = RegExp(r'(\d{2,3}(?:\.\d+)?)\s*_?\s*bpm', caseSensitive: false).firstMatch(name);
-    final v = m == null ? null : double.tryParse(m.group(1)!);
-    return v != null && v >= 40 && v <= 300 ? v : null;
-  }
+  /// A tempo in a file's name ("loop 120bpm.wav", "drums_95_bpm", "Loop_120_Am"), or null: the sample browser's name
+  /// reader (`sample_names.dart`).
+  static double? guessBpm(String name) => guessFromPath(name, const []).bpm;
 
   /// Reads an asset whose length isn't known yet (off the UI isolate), then sizes the clips made before it was.
   Future<void> measureAsset(AudioAssetDoc asset) async {
@@ -236,6 +247,7 @@ extension AudioEdit on AppState {
 
   /// One undo step of its own for an edit of [clip] (the inspector's and the clip's own controls).
   void editAudioClip(LayerDoc layer, AudioClipDoc clip, void Function(AudioClipDoc c) change) {
+    if (guardFrozen(layer)) return;
     endUndoStep();
     editLayer(layer, (_) => change(clip));
     endUndoStep();
@@ -413,8 +425,10 @@ extension AudioEdit on AppState {
   void selectAudioTake(LayerDoc layer, AudioClipDoc clip, int index) {
     if (clip.takes.length < 2) return;
     final id = clip.takes[index % clip.takes.length];
-    if (id == clip.assetId || project.asset(id) == null) return;
-    editAudioClip(layer, clip, (c) => c.assetId = id);
+    if ((id == clip.assetId && clip.comp.isEmpty) || project.asset(id) == null) return;
+    editAudioClip(layer, clip, (c) => c
+      ..assetId = id
+      ..comp = []);
   }
 
   void stepAudioTake(LayerDoc layer, AudioClipDoc clip, int delta) {

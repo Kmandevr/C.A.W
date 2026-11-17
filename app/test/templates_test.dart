@@ -4,6 +4,7 @@ import 'dart:io';
 
 import 'package:caw/model/app_state.dart';
 import 'package:caw/model/default_project.dart';
+import 'package:caw/model/pattern_doc.dart';
 import 'package:caw/model/project.dart';
 import 'package:caw/model/routing.dart';
 import 'package:caw/model/settings.dart';
@@ -99,7 +100,7 @@ void main() {
     final clip = added.clips.single;
     expect(clip.id, isNot('c1'));
     expect(clip.patternId, isNot('pat'));
-    expect(s.project.module(clip.patternId)!.source, contains('0 C2 1 1'));
+    expect(PatternDoc.parse(s.project.module(clip.patternId)!.source).doc!.notes.single.pitch, 36);
   });
 
   test('a bundled track template inserts', () {

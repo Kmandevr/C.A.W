@@ -1,7 +1,7 @@
 ---
 title: C.A.W vault
 summary: Vault home: links to every note.
-updated: 2026-11-12
+updated: 2026-11-17
 ---
 
 # C.A.W vault
@@ -37,6 +37,9 @@ Project memory for C.A.W. Open this docs/ folder as a vault in Obsidian, or read
 - [REAPER's flow and C.A.W's](reaper-flow.md): REAPER's path from a new project to a render, step by step with sources, C.A.W's current flow, the gaps with phone equivalents, and a ranked build plan (proposal)
 - [UI plan](ui-plan.md): the owner's UI direction (2026-11-04: the arrangement is home, docking panels, Unity-like code, Reaper-like mixer), today's findings, the order of work and open questions; not built yet
 - [Beta readiness plan](beta-readiness-plan.md): the owner's 2026-11-12 direction (engine speed A1-A7, 240 fps UI, stress test, startup screen, telemetry, feedback) and the caw-telemetry contract; planned, not built
+- [Plug-in hosting plan](plugin-hosting-plan.md): the isolation design and silent steps for hosting CLAP/VST3 (#212, live in 1.1.0), the Play policy conflict, the owner's open questions; planned, not built
+- [Routing plan](routing-plan.md): the target model and silent steps for 1.1.0's visual, non-linear routing (#233): nodes and wires, patches, feedback in sub-blocks, the owner's open questions; planned, not built
+- [Device UI plan](device-ui-plan.md): the owner's 2026-11-17 direction for every device's UI (collapsible FX chain, Vital-like Flagship, visual-first with knobs, the QoL kit) and a plan per device; planned for 1.0.6, not built
 - [Play-ahead and run-anywhere plan](play-ahead-plan.md): the owner's 2026-11-12 direction, now for 1.1.0 (render untouched tracks ahead, switch to real time silently, a hardware ladder down to a calculator stunt), related optimisations and open questions; planned, not built
 - [Core development plan](core-and-feature-plan.md): compatibility pointer to the permanent roadmap; not a separate plan
 - [Music workflow implementation gaps](music-workflow-feature-gap-plan.md): factual implemented/partial/missing status, without a competing feature sequence

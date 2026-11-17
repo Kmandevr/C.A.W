@@ -293,7 +293,7 @@ public:
     // one per parameter). While the transport plays, a lane is the parameter's base each frame
     // unless the parameter is touched (F6.1 rules). On an error nothing changes. Errors:
     // NodeIndexOutOfRange, PortIndexOutOfRange (parameter), InvalidAutomationLane (no or
-    // unsorted or non-finite points, or a second lane on one parameter), ParameterNotAutomatable
+    // unsorted or non-finite points, a curve past Step or a tension outside -1..1, or a second lane on one parameter), ParameterNotAutomatable
     // (automatable = false), InvalidOutputNode.
     GraphError setAutomationLanes(const ParameterLane* lanes, uint32_t count);
     // Audio thread, before process(): the song position of the next block's first frame, in

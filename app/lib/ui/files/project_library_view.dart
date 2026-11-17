@@ -61,8 +61,11 @@ String exportFileName(String name, Set<String> taken) {
 }
 
 class ProjectLibraryView extends StatefulWidget {
-  const ProjectLibraryView({super.key, required this.state});
+  const ProjectLibraryView({super.key, required this.state, this.onOpened});
   final AppState state;
+
+  /// Called after a tap opens a project (the project menu's All projects page closes itself with it).
+  final VoidCallback? onOpened;
 
   @override
   State<ProjectLibraryView> createState() => _ProjectLibraryViewState();
@@ -499,7 +502,11 @@ class _ProjectLibraryViewState extends State<ProjectLibraryView> {
                     checked: _selecting ? _selected.contains(p.id) : null,
                     folderPath: searching ? l.pathOf(p.folder) : null,
                     drag: ProjectDrag(_selected.contains(p.id) ? _selected.toList() : [p.id]),
-                    onTap: () => _selecting ? _toggle(p.id) : state.openProject(p.id),
+                    onTap: () async {
+                      if (_selecting) return _toggle(p.id);
+                      await state.openProject(p.id);
+                      widget.onOpened?.call();
+                    },
                     onHold: () => _selecting ? _toggle(p.id) : _startSelect(p.id),
                   ),
               ],
