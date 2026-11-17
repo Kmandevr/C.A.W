@@ -6,6 +6,22 @@ updated: 2026-11-17
 
 # Decisions
 
+## 2026-11-17: Groundwork for 1.1.0 is laid silently during the 1.0.x batches (owner)
+
+**Decision (owner, 2026-11-17):** "We should 100% be laying the groundwork for the 1.1.0 update, so we don't have a ton of work for ourselves, but make the changes silent."
+- Each 1.0.x batch may carry hidden groundwork for 1.1.0:
+  - the routing engine (#233);
+  - plug-in hosting (#212);
+  - play-ahead (#191);
+  - the AutoStacc download and update source (#221);
+  - store builds (#222).
+- **Silent** means:
+  - users see no change;
+  - the work sits behind off-by-default internal flags, or is engine-only code with no UI;
+  - the project format only gains fields when they are needed, and old versions are unaffected;
+  - the changelog doesn't announce it.
+- Each step has its own tests and a Benchmark check, so it costs nothing while it's off.
+
 ## 2026-11-17: The FX batch splits in two; one bit distortion; the beta pack stays free for beta users (owner)
 
 **Decision (owner, 2026-11-17):**

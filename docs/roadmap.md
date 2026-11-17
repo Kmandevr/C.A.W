@@ -93,7 +93,7 @@ An overview by area, checked against the repository on 2026-11-03. The stage tab
    - drawn LFO shapes and a Flagship wavetable editor (#219).
 9. **1.0.10:** the foundation for hosting other people's plug-ins (#212): the isolation design (reviewed first), the out-of-process host, the scan and the loader behind Isolated, Trusted or Blocked. Users don't see any of it. The feature itself (CLAP and VST3 on Windows, CLAP on Android) ships in 1.1.0.
 10. **1.0.11:** a notation view (#213), a clip launcher, and S Pen precision (#220).
-- **Routing groundwork** (owner, 2026-11-17): the 1.1.0 routing engine (#233) is built in hidden steps alongside these batches, as plug-in hosting is. Users see none of it until 1.1.0.
+- **Silent 1.1.0 groundwork** (owner, 2026-11-17): the routing engine (#233), plug-in hosting (#212), play-ahead (#191), the AutoStacc download and update source (#221) and the store builds (#222) are built in hidden steps alongside these batches, behind off-by-default flags or as engine-only code. Users see none of it until 1.1.0, and the changelog doesn't announce it.
 11. **iOS and macOS builds** (#214), once the owner has an Apple Developer membership. On iOS, the app ships every built-in instrument and effect, but no on-device C++ building or loading (owner, 2026-11-13: Apple forbids downloaded native code).
 12. **Play-ahead rendering** (#191, the [play-ahead plan](play-ahead-plan.md)). It moved from 1.2.0 into 1.1.0 (owner, 2026-11-13) and is built in its own batches before 1.1.0.
 
