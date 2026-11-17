@@ -29,6 +29,10 @@ The owner added (2026-11-17):
 
 These are **[Fact]** from reviews checked 2026-11-17 (MusicRadar, Bedroom Producers Blog, KVR). C.A.W gives every block such selectors, kept in step with the graph view, and adds a scale-by source to each modulation link.
 
+**Everything non-linear** (owner, 2026-11-17): every block has inputs and outputs, and any output can be wired to any input. That includes feedback back up the chain, splitting one output into several routes, and blocks with several outputs (a filter splitting low and high, mid/side, transient/sustain, dry/wet).
+
+**[Fact]** A feedback cycle needs at least one sample of delay. **[Proposal]** The delay is kept short: cycles run in 16-frame sub-blocks inside a patch, the delay shows on the wire, and small patches can use a per-sample mode. Each feedback wire gets a safety limiter. These are to be confirmed by the owner (#233).
+
 ## 2026-11-17: Device UI redesign and a step-by-step music video (owner, #231, #232)
 
 **Decision (owner, 2026-11-17).** Both ship in batch 1.0.6, with the FX consolidation.
