@@ -1,10 +1,43 @@
 ---
 title: Decisions
 summary: Dated record of what was chosen and why, newest first.
-updated: 2026-11-14
+updated: 2026-11-17
 ---
 
 # Decisions
+
+## 2026-11-17: Fewer, better built-in effects; new standard effects; the AutoStacc beta pack (owner, #227)
+
+**Decision (owner, 2026-11-17):**
+- **Consolidation:** "one really good one rather than five okay ones." The overlapping built-ins merge into one device each, with modes:
+  - dynamics into Compressor, Limiter and Transient;
+  - Drive and Bit distortion;
+  - EQ (with dynamic and M/S) and Filter (with auto-filter and wah);
+  - Utility/Stereo;
+  - Chorus/Flanger, Phaser and Tremolo/Pan;
+  - one Delay (with tape echo);
+  - one Reverb (with plate and spring);
+  - Pitch/Shift.
+
+  Old projects convert to the merged device and mode, as the retired synths became Flagship. The full table is in #227.
+- **Cost:** merged devices must stay as cheap to run as what they replace ("as cheap as possible to run"). Each mode runs only its own path.
+- **New standard effects:**
+  - exciter and bass enhancer;
+  - pitch correction;
+  - vocoder;
+  - analyzer, tuner and loudness meter;
+  - expander and upward compression;
+  - Compactor-style ducking in the Compressor.
+
+  **[Fact]** Kilohearts Compactor is a free ducker/leveller released in August 2025, with threshold, amount, attack, hold, release, an optional sidechain, and RMS/Peak/ISP detection (kilohearts.com/products/compactor, checked 2026-11-17). C.A.W's device is an original design.
+- **AutoStacc beta pack:** free during the beta, paid later:
+  - bit-shift distortion;
+  - warp;
+  - spectral FX;
+  - a glitch mangler.
+
+  It is built into C.A.W for now, marked as the pack, and moves to an AutoStacc download in 1.1.0 (#221).
+- **When:** its own batch, 1.0.6, after 1.0.5. The later batches move up by one.
 
 ## 2026-11-14: Clip stretching runs Signalsmith Stretch live in the callback; two new dependencies (Claude, within the owner's 1.0.4 contract, #208)
 

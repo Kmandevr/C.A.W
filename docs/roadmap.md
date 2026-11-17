@@ -1,7 +1,7 @@
 ---
 title: C.A.W. roadmap
 summary: Permanent product roadmap: verified current state, ordered implementation stages, future production capabilities, performance gates and explicit scope boundaries.
-updated: 2026-11-12
+updated: 2026-11-17
 ---
 
 # C.A.W. roadmap
@@ -68,20 +68,22 @@ An overview by area, checked against the repository on 2026-11-03. The stage tab
 3. **1.0.4:** audio stretching with Signalsmith Stretch (licence to confirm): follow tempo, stretch to fit, pitch shift. Also slice to MIDI, a sample editor, and long-song clip precision (#90) (#208).
 4. **1.0.5:**
    - clips stored as MIDI, with pattern text only as an editor (#216); this format change comes first;
-   - then comping, freeze, bounce in place and consolidate (#209).
+   - then comping, freeze, bounce in place and consolidate (#209);
+   - MIDI playback and piano roll fixes (#226, #228).
 
    Stem export is already built (#33). App-wide undo is checked against the existing project-wide history (`lib/model/history.dart`) first.
-5. **1.0.6:**
+5. **1.0.6:** fewer, better built-in effects (#227, owner 2026-11-17). The overlapping effects merge into one device each, no more costly to run than the ones they replace. New standard effects: exciter, pitch correction, vocoder, analyzer, tuner, loudness meter, dynamic and M/S EQ, tape echo, plate and spring. Also the free AutoStacc beta pack: bit-shift distortion, warp, spectral FX and glitch.
+6. **1.0.7:**
    - clip automation and VCA groups (#210);
    - receives, parallel paths and drum multi-out (#217);
    - MIDI out and MIDI clock (#211).
-6. **1.0.7:**
+7. **1.0.8:**
    - format migrations, crash recovery, device loss, and a first-run tour and help (#218);
    - drawn LFO shapes and a Flagship wavetable editor (#219).
-7. **1.0.8:** the foundation for hosting other people's plug-ins (#212): the isolation design (reviewed first), the out-of-process host, the scan and the loader behind Isolated, Trusted or Blocked. Users don't see any of it. The feature itself (CLAP and VST3 on Windows, CLAP on Android) ships in 1.1.0.
-8. **1.0.9:** a notation view (#213), a clip launcher, and S Pen precision (#220).
-9. **iOS and macOS builds** (#214), once the owner has an Apple Developer membership. On iOS, the app ships every built-in instrument and effect, but no on-device C++ building or loading (owner, 2026-11-13: Apple forbids downloaded native code).
-10. **Play-ahead rendering** (#191, the [play-ahead plan](play-ahead-plan.md)). It moved from 1.2.0 into 1.1.0 (owner, 2026-11-13) and is built in its own batches before 1.1.0.
+8. **1.0.9:** the foundation for hosting other people's plug-ins (#212): the isolation design (reviewed first), the out-of-process host, the scan and the loader behind Isolated, Trusted or Blocked. Users don't see any of it. The feature itself (CLAP and VST3 on Windows, CLAP on Android) ships in 1.1.0.
+9. **1.0.10:** a notation view (#213), a clip launcher, and S Pen precision (#220).
+10. **iOS and macOS builds** (#214), once the owner has an Apple Developer membership. On iOS, the app ships every built-in instrument and effect, but no on-device C++ building or loading (owner, 2026-11-13: Apple forbids downloaded native code).
+11. **Play-ahead rendering** (#191, the [play-ahead plan](play-ahead-plan.md)). It moved from 1.2.0 into 1.1.0 (owner, 2026-11-13) and is built in its own batches before 1.1.0.
 
 **In 1.1.0 itself (owner, 2026-11-13):**
 - plug-in hosting goes live (#212) and play-ahead ships;
