@@ -46,7 +46,7 @@ An overview by area, checked against the repository on 2026-11-03. The stage tab
 | App/platforms | Eight Flutter workspaces; Android and Windows app CI artifacts; autosave; per-editor undo/redo; project format version check | App-wide undo, crash recovery, project migrations, onboarding/help; iOS/macOS builds; Linux app is not a shipped CI artifact |
 | Engine | Portable C++20 engine, built-in C++ instruments and effects, stereo playback/mixer, offline renderer, worker pool and adaptive workload policy | The C++ authoring toolchain, shared component SDK and Library are not built; the typed graph and N-channel contract have integration gaps (Foundation, issue #28) |
 | Patterns | Piano roll, drum grid, note expressions, lane curves, generators, MIDI file import/export | Kit-row routing, code-generated procedural patterns/Freeze and advanced groove/quantize extensions |
-| Arrangement | MIDI clip timeline, linked/independent clips, nested folders, stereo folder buses, track/folder volume-pan automation, module-parameter and project-global automation; audio clips (2026-11-11) | Clip automation, tempo map, markers/sections and consolidation |
+| Arrangement | MIDI clip timeline, linked/independent clips, nested folders, stereo folder buses, track/folder volume-pan automation, module-parameter and project-global automation; MIDI clip automation lanes and audio clips (2026-11-11) | Clip automation's add-to-track option (#210), tempo map, markers/sections and consolidation |
 | Mixer | Track volume/pan/mute/solo, generator/effect chains, folder buses and master output | Sends, general sidechain routing, parallel paths, master effect chain and integrated visual track/routing inspector |
 | Sound/synth | Code generators/effects, house synth patch compiler/playback, built-in wavetable morph/phase warp, LFOs and modulation matrix | Custom/imported wavetable authoring, drawn LFO curves and additional warp modes |
 | MIDI | MIDI pattern import/export; USB, Bluetooth, UMP (Android) and WinMM (Windows) devices into instruments at their frame; controller learn | MIDI clock, MIDI-CI, MIDI output |
@@ -74,7 +74,7 @@ An overview by area, checked against the repository on 2026-11-03. The stage tab
    Stem export is already built (#33). App-wide undo is checked against the existing project-wide history (`lib/model/history.dart`) first.
 5. **1.0.6:** fewer, better built-in effects (#227, owner 2026-11-17). The overlapping effects merge into one device each, no more costly to run than the ones they replace. New standard effects: exciter, pitch correction, vocoder, analyzer, tuner, loudness meter, dynamic and M/S EQ, tape echo, plate and spring. Recording tools: noise reduction (live and on clips), a pedal-style noise gate, de-hum, de-click and de-plosive, de-reverb and breath. Guitar amp, pedal and cabinet modes in Drive and the convolver. Purpose tags, chain templates and purpose-named presets. Also the free AutoStacc beta pack: bit-shift distortion, warp, spectral FX and glitch.
 6. **1.0.7:**
-   - clip automation and VCA groups (#210);
+   - clip automation's override-or-add choice and VCA groups (#210; MIDI clip lanes that override the track lane are built);
    - receives, parallel paths and drum multi-out (#217);
    - MIDI out and MIDI clock (#211).
 7. **1.0.8:**
@@ -244,7 +244,7 @@ Built on the graph from the Foundation stage. Do not keep a second mixer or crea
 |---|---|---|---|---|---|
 | 6.1 | Song markers, named sections and navigation | Planned | app | — | Not built |
 | 6.2 | Tempo maps and time-signature changes | Planned | both | F4 | One tempo and meter per project today |
-| 6.3 | Clip-following automation and complete parameter/modulation automation | Partial | both | F6 | Track and project automation lanes exist, drawn by hand or written from the controls (Automate: Touch, Latch, Write, Read); clip automation does not |
+| 6.3 | Clip-following automation and complete parameter/modulation automation | Partial | both | F6 | Track and project automation lanes exist, drawn by hand or with tools, with curved segments, or written from the controls (Automate: Touch, Latch, Write, Read), and the option Automation follows clips moves their points with a moved clip (#230). MIDI clips have their own lanes, in clip time, that move and copy with the clip and play in place of the track's lane inside it (Move to clip / Move to track; [app](app.md), clip loops and clip automation); a clip's choice to add to the track lane instead (#210) and lanes on audio clips are not built |
 | 6.4 | Consolidate/bounce and render selected tracks, folders and groups | Partly built | both | 0.3 | Bounce to audio of a track or its clips built in 1.0.5 (#209, [app](app.md)); consolidate, folders and groups not built |
 | 6.5 | Batch export, persistent/recoverable export queue, delivery presets | Partial | both | 0.3 | Export profiles, history and a bounded in-memory queue exist; the queue isn't persistent and there's no batch delivery |
 | 6.6 | MIDI and audio quantize/alignment across the arrangement | Planned | both | 1.4, 3.2 | Not built |

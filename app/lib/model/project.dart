@@ -5,8 +5,9 @@ import 'dart:math';
 import 'dart:typed_data';
 
 import 'audio_clips.dart';
-import 'clip_midi.dart';
+import 'automation_curve.dart';
 import 'clip_automation.dart';
+import 'clip_midi.dart';
 import 'cpp_component.dart';
 import 'midi_file.dart' show kMaxMidiFileBytes;
 import 'midi_mapping.dart';
@@ -204,23 +205,51 @@ String automationKey(String type, String target, {String? layerId, String? modul
     '$type|${layerId ?? ''}|${moduleId ?? ''}|${component ?? ''}|$target';
 
 class AutomationPointDoc {
-  AutomationPointDoc({required this.step, required this.value});
+  AutomationPointDoc({required this.step, required this.value, this.curve = AutomationCurve.linear, this.tension = 0});
   double step, value;
-  Map<String, dynamic> toJson() => {'step': step, 'value': value};
-  static AutomationPointDoc fromJson(Map<String, dynamic> j) => AutomationPointDoc(
-    step: (j['step'] as num?)?.toDouble() ?? 0, value: (j['value'] as num?)?.toDouble() ?? 0);
+
+  /// The segment's curve from this point to the next (#230; lib/model/automation_curve.dart), and its bend, -1..1.
+  AutomationCurve curve;
+  double tension;
+
+  Map<String, dynamic> toJson() => {
+        'step': step,
+        'value': value,
+        if (curve != AutomationCurve.linear) 'curve': curve.json,
+        if (curve.bends && tension != 0) 'tension': tension,
+      };
+  static AutomationPointDoc fromJson(Map<String, dynamic> j) {
+    final curve = AutomationCurve.parse(j['curve']);
+    return AutomationPointDoc(step: (j['step'] as num?)?.toDouble() ?? 0, value: (j['value'] as num?)?.toDouble() ?? 0,
+        curve: curve, tension: boundTension(curve, j['tension']));
+  }
+
+  /// A copy, curve and all; [step] and [value] put it elsewhere.
+  AutomationPointDoc copy({double? step, double? value}) =>
+      AutomationPointDoc(step: step ?? this.step, value: value ?? this.value, curve: curve, tension: tension);
 }
 
+/// The most a lane row can be dragged to and the least (#230; screen only, [AutomationLaneDoc.height]).
+const double kMinLaneHeight = 32, kMaxLaneHeight = 240;
+double? _laneHeight(Object? raw) =>
+    raw is num && raw.isFinite ? raw.toDouble().clamp(kMinLaneHeight, kMaxLaneHeight).toDouble() : null;
+
 class AutomationLaneDoc {
-  AutomationLaneDoc({required this.target, List<AutomationPointDoc>? points, this.armed = true}) : points = points ?? [];
+  AutomationLaneDoc({required this.target, List<AutomationPointDoc>? points, this.armed = true, this.height})
+      : points = points ?? [];
   String target;
   List<AutomationPointDoc> points;
 
   /// Written by the Automate button (REAPER's envelope arm, UG 18.5); a disarmed lane only plays.
   bool armed;
-  Map<String, dynamic> toJson() => {'target': target, 'points': [for (final p in points) p.toJson()], if (!armed) 'armed': false};
+
+  /// Its row's height under the track as dragged (#230; null: the default). Screen only.
+  double? height;
+  Map<String, dynamic> toJson() => {'target': target, 'points': [for (final p in points) p.toJson()], if (!armed) 'armed': false,
+        if (height != null) 'height': height};
   static AutomationLaneDoc fromJson(Map<String, dynamic> j) => AutomationLaneDoc(
-    target: j['target'] as String, armed: j['armed'] != false, points: ((j['points'] as List?) ?? const [])
+    target: j['target'] as String, armed: j['armed'] != false, height: _laneHeight(j['height']),
+    points: ((j['points'] as List?) ?? const [])
       .map((p) => AutomationPointDoc.fromJson(p as Map<String, dynamic>)).toList());
 }
 
@@ -229,8 +258,11 @@ class AutomationLaneDoc {
 class ProjectAutomationLaneDoc {
   ProjectAutomationLaneDoc(
       {required this.targetType, required this.target, this.moduleId, this.layerId, this.component, List<AutomationPointDoc>? points,
-      this.armed = true})
+      this.armed = true, this.height})
       : points = points ?? [];
+
+  /// Its row's height under the track as dragged (#230; null: the default). Screen only.
+  double? height;
   String targetType;
   String target;
   String? moduleId;
@@ -251,6 +283,7 @@ class ProjectAutomationLaneDoc {
         if (component != null) 'component': component,
         'points': [for (final p in points) p.toJson()],
         if (!armed) 'armed': false,
+        if (height != null) 'height': height,
       };
 
   static ProjectAutomationLaneDoc fromJson(Map<String, dynamic> j) => ProjectAutomationLaneDoc(
@@ -260,6 +293,7 @@ class ProjectAutomationLaneDoc {
         layerId: j['layer'] as String?,
         component: (j['component'] as num?)?.toInt(),
         armed: j['armed'] != false,
+        height: _laneHeight(j['height']),
         points: ((j['points'] as List?) ?? const []).map((p) => AutomationPointDoc.fromJson(p as Map<String, dynamic>)).toList(),
       );
 }
@@ -780,7 +814,9 @@ class ProjectDoc {
 
   /// v3 (batch 1.0.3): the tempo map, time signatures, sections and markers in beats. A v2 file reads as one tempo
   /// (`bpm`) in its `beats_per_bar`/4, its regions as sections. v5 (batch 1.0.5, #216): clips stored as MIDI
-  /// (`midi`, base64), not pattern text; a v4 file's text converts on load. An older C.A.W refuses a v5 file whole.
+  /// (`midi`, base64), not pattern text; a v4 file's text converts on load. v5 also holds batch 1.0.5's other fields:
+  /// freeze's `frozen`, `frozen_asset` and `frozen_context` (#209) and automation's point `curve` and `tension`, lane
+  /// `height`, `recent_automation` and `automation_follows_clips` (#230). An older C.A.W refuses a v5 file whole.
   static const int fileVersion = 5;
 
   final String id;
@@ -847,6 +883,15 @@ class ProjectDoc {
   int seed;
   double master;
   bool seamCrossfade;
+
+  /// "Automation follows clips" (#230, the arranger's options): a clip moved along its track takes the points of
+  /// the track's lanes over it with it. Off by default.
+  bool automationFollowsClips = false;
+
+  /// The parameters automated last ([automationKey]s, the newest first; at most [kRecentAutomation]), for the
+  /// automation picker's Recent group (#230). Screen only.
+  List<String> recentAutomation = [];
+  static const kRecentAutomation = 8;
   List<ModuleDoc> modules; // the patterns
 
   /// The names of the .caw sound modules dropped when this project was read ([fromJson]; never saved): the app
@@ -1045,11 +1090,12 @@ class ProjectDoc {
         if (suspendLanes.contains(lane.key) ||
             (lane.targetType == 'noteComponent' && frozenIds.contains(lane.layerId))) ...[]
         else if (lane.targetType == 'instrument') ...[
-          if (layers.where((l) => l.id == lane.layerId).firstOrNull case final LayerDoc l when instrumentPlays(l)) lane.toJson(),
+          if (layers.where((l) => l.id == lane.layerId).firstOrNull case final LayerDoc l when instrumentPlays(l))
+            lane.toJson()..remove('height'),
         ] else if (lane.targetType != 'component')
-          lane.toJson()
+          lane.toJson()..remove('height')
         else if (engineIndex(lane.layerId, lane.component ?? -1) case final int index)
-          lane.toJson()..['component'] = index,
+          lane.toJson()..['component'] = index..remove('height'),
     ];
     final result = jsonEncode({
         'caw_project': 1,
@@ -1112,7 +1158,7 @@ class ProjectDoc {
                     if (unrolled[automationKey('track', a.target, layerId: l.id)] case final u?)
                       (AutomationLaneDoc(target: a.target, points: u.points, armed: a.armed)).toJson()
                     else
-                      a.toJson(),
+                      a.toJson()..remove('height'),
                 for (final target in const ['volume', 'pan'])
                   if (l.automation.every((a) => a.target != target))
                     if (unrolled[automationKey('track', target, layerId: l.id)] case final u?)
@@ -1179,6 +1225,8 @@ class ProjectDoc {
         if (modLinks.isNotEmpty) 'modulation': [for (final l in modLinks) l.toJson()],
         if (assets.isNotEmpty) 'assets': [for (final a in assets) a.toJson()],
         if (musicVideo != null) 'music_video': musicVideo,
+        if (automationFollowsClips) 'automation_follows_clips': true,
+        if (recentAutomation.isNotEmpty) 'recent_automation': recentAutomation,
         if (created != null) 'created': created!.toUtc().toIso8601String(),
         'saved_with': {'version': appVersion, 'build': appBuild},
       };
@@ -1279,6 +1327,11 @@ class ProjectDoc {
     );
 
     project
+      ..automationFollowsClips = j['automation_follows_clips'] == true
+      ..recentAutomation = [
+        for (final k in ((j['recent_automation'] as List?) ?? const []).take(ProjectDoc.kRecentAutomation))
+          if (k is String && k.length <= 512) k,
+      ]
       ..created = projectCreatedFromJson(j['created'])
       ..savedWithVersion = savedWithFromJson(j['saved_with']).version
       ..savedWithBuild = savedWithFromJson(j['saved_with']).build;

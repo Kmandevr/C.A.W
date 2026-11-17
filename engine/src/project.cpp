@@ -21,6 +21,14 @@ double clampd(double v, double lo, double hi) {
     return std::min(hi, std::max(lo, v));
 }
 
+// A point's curve to the next point (#230): "curve" names it ("linear" or absent, "slow", "fast", "s", "step";
+// anything else reads linear) and "tension" bends it, clamped to -1..1 (not finite: 0).
+void readPointCurve(const Json& point, AutomationPointSpec& p) {
+    const std::string c = point.string("curve");
+    p.curve = c == "slow" ? 1 : c == "fast" ? 2 : c == "s" ? 3 : c == "step" ? 4 : 0;
+    const double t = point.number("tension", 0);
+    p.tension = p.curve == 0 || p.curve == 4 || !std::isfinite(t) ? 0.0 : clampd(t, -1, 1);
+}
 int clampi(double v, int lo, int hi) { return static_cast<int>(std::floor(clampd(v, lo, hi))); }
 
 // A whole number in lo..hi, or false: song positions are refused with a message, never moved or shortened.
@@ -485,6 +493,7 @@ bool parseProject(std::string_view text, ProjectSpec& out, std::string& error) {
                             lane.points.push_back({point.number("step", 0),
                                 clampd(point.number("value", lane.target == "volume" ? 0.8 : 0), lane.target == "volume" ? 0 : -1,
                                        lane.target == "volume" ? kMaxMixGain : 1)});  // volume: a gain to +12 dB, as the faders
+                            readPointCurve(point, lane.points.back());
                         }
                     }
                     std::stable_sort(lane.points.begin(), lane.points.end(), [](const auto& a, const auto& b) { return a.step < b.step; });
@@ -526,6 +535,7 @@ bool parseProject(std::string_view text, ProjectSpec& out, std::string& error) {
                     if (point.type != Json::Type::Object) continue;
                     lane.points.push_back({point.number("step", 0),
                                            clampd(point.number("value", 0), -1000000, 1000000)});
+                    readPointCurve(point, lane.points.back());
                 }
             }
             std::stable_sort(lane.points.begin(), lane.points.end(),

@@ -525,6 +525,46 @@ TEST(project_parser_reads_folder_and_automation_metadata) {
     CHECK(!parseProject(cycle, invalid, error));
 }
 
+TEST(project_parser_reads_point_curves_bounded) {
+    const std::string json = R"({"caw_project":1,"layers":[
+      {"id":"t","automation":[{"target":"volume","points":[
+        {"step":0,"value":0,"curve":"slow","tension":0.5},{"step":4,"value":1,"curve":"fast","tension":9},
+        {"step":8,"value":0,"curve":"s"},{"step":12,"value":1,"curve":"step","tension":0.7},
+        {"step":16,"value":0,"curve":"spiral","tension":-0.2},{"step":20,"value":1}]}]}
+    ],"automation":[{"target_type":"instrument","layer":"t","target":"cutoff",
+        "points":[{"step":0,"value":0,"curve":"fast","tension":-3},{"step":4,"value":1}]}]})";
+    ProjectSpec p;
+    std::string error;
+    CHECK(parseProject(json, p, error));
+    const auto& pts = p.layers[0].automation[0].points;
+    CHECK_EQ(int{pts[0].curve}, 1);
+    CHECK_EQ(pts[0].tension, 0.5);
+    CHECK_EQ(int{pts[1].curve}, 2);
+    CHECK_EQ(pts[1].tension, 1.0);  // clamped
+    CHECK_EQ(int{pts[2].curve}, 3);
+    CHECK_EQ(int{pts[3].curve}, 4);
+    CHECK_EQ(pts[3].tension, 0.0);  // a step has no bend
+    CHECK_EQ(int{pts[4].curve}, 0);  // an unknown name reads linear
+    CHECK_EQ(pts[4].tension, 0.0);
+    CHECK_EQ(int{pts[5].curve}, 0);
+    CHECK_EQ(int{p.automation[0].points[0].curve}, 2);
+    CHECK_EQ(p.automation[0].points[0].tension, -1.0);
+}
+
+TEST(track_volume_automation_follows_curved_segments) {
+    ProjectSpec p = project({dc(1)}, 4);  // four bars: the song doesn't loop before the lane ends
+    p.layers[0].automation.push_back({"volume", {{0, 0, 1, 0.0}, {16, 1, 4, 0.0}, {32, 0}}});  // slow, then a step
+    Engine e(48000);
+    e.setMasterBypass(true);
+    e.setProject(p);
+    e.play();
+    const auto left = run(e, 32 * 6000 + 256);
+    const double pan = std::cos(kPi / 4.0);
+    CHECK_NEAR(left[8 * 6000], 0.28125 * pan, 2e-3);  // slow, tension 0: 9/32 at half way
+    CHECK_NEAR(left[24 * 6000], 1.0 * pan, 2e-3);   // a step holds
+    CHECK_NEAR(left[31 * 6000], 1.0 * pan, 2e-3);
+}
+
 TEST(output_does_not_depend_on_block_size) {
     // Noise free-running, and a saw played by a pattern (notes off the block grid) through a filter.
     ProjectSpec p = project({{Shape::Noise, {{"level", 0.3}}}});

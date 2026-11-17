@@ -226,7 +226,7 @@ extension ArrangeMarkers on AppState {
       if (shift == null || !copy) points.removeWhere(inside.contains);
       if (shift != null) {
         points.removeWhere((q) => q.step >= a + shift && q.step < b + shift);
-        points.addAll([for (final q in inside) AutomationPointDoc(step: q.step + shift, value: q.value)]);
+        points.addAll([for (final q in inside) q.copy(step: q.step + shift)]);
       }
       points.sort((x, y) => x.step.compareTo(y.step));
     }

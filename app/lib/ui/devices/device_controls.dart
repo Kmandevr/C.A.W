@@ -17,6 +17,7 @@ import 'device_scope.dart';
 import 'kit/param_watch.dart';
 import 'kit/key_param.dart';
 import 'midi_learn.dart';
+import '../arrange/automate_control.dart';
 import 'modulators/modulator_devices.dart' show modulatorColor, showModLinkSheet;
 import 'kit/feel.dart';
 import 'kit/hero.dart' show MotionClock, motionRuns;
@@ -212,7 +213,8 @@ class _DeviceKnobState extends State<DeviceKnob> {
 
     void longPress() {
       if (modTarget != null && links.isNotEmpty && routes.isEmpty) {
-        showModLinkSheet(context, app, modTarget, onTypeValue: p.isChoice ? null : () => _typeValue(context, p, t.value(p.id)));
+        showModLinkSheet(context, app, modTarget, onTypeValue: p.isChoice ? null : () => _typeValue(context, p, t.value(p.id)),
+            extra: AutomateButton(target: t, paramId: p.id));
       } else if (canMod) {
         showModulationSheet(context, p.id, onTypeValue: () => _typeValue(context, p, t.value(p.id)));
       } else if (!p.isChoice) {
@@ -474,6 +476,7 @@ class _DeviceKnobState extends State<DeviceKnob> {
         onSubmitted: (s) => Navigator.of(c).pop(double.tryParse(s.trim())),
       ),
       actions: [
+        AutomateButton(target: t, paramId: p.id),
         MidiLearnButton(target: t, paramId: p.id),
         TextButton(onPressed: () => Navigator.of(c).pop(), child: const Text('Cancel')),
         TextButton(onPressed: () => Navigator.of(c).pop(double.tryParse(field.text.trim())), child: const Text('Set')),
@@ -811,7 +814,8 @@ class DeviceSlider extends StatelessWidget {
                 : taper.value(taper.position(now) + dir * (fine ? 0.002 : 0.01)));
           },
           onEnd: t.commit,
-          child: GestureDetector(
+          // A hold or a right-click: its menu, with Automate (#230).
+          child: AutomateHold(automation: ControlAutomation.of(t, p.id), child: GestureDetector(
           key: ValueKey('dslider-${p.id}'),
           behavior: HitTestBehavior.opaque,
           onHorizontalDragStart: (d) {
@@ -830,7 +834,7 @@ class DeviceSlider extends StatelessWidget {
               const Spacer(),
               Text(formatParamValue(p, v), style: Neon.code(size: 10, color: c)),
             ])),
-          )),
+          ))),
         ));
       }),
     )));

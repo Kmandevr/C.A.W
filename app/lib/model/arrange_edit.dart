@@ -6,6 +6,7 @@ import 'dart:math' as math;
 import 'app_state.dart';
 import 'audio_clips.dart';
 import 'audio_edit.dart';
+import 'automation_edit.dart';
 import 'freeze.dart';
 import 'pattern_doc.dart';
 import 'project.dart';
@@ -393,6 +394,15 @@ extension ArrangeEdit on AppState {
     final placed = <PlacedClip>[];
     endUndoStep();
     editProject((p) {
+      // "Automation follows clips" (#230): clips that stay on their track take the points over them along.
+      if (!copy && down == 0) {
+        for (final layer in {for (final c in chosen) c.layer}) {
+          followClipAutomation(layer, [
+            for (final c in chosen)
+              if (identical(c.layer, layer)) (c.clip.startSteps.toDouble(), (c.clip.startSteps + c.clip.lengthSteps).toDouble()),
+          ], shift.toDouble());
+        }
+      }
       for (final c in chosen) {
         final target = down == 0 ? c.layer : tracks[tracks.indexOf(c.layer) + down];
         final start = c.clip.startSteps + shift;

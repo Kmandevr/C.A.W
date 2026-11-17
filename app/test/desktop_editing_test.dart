@@ -435,7 +435,7 @@ void main() {
       await tester.tap(find.byKey(ValueKey('lane-point-$key-1')), kind: PointerDeviceKind.mouse,
           buttons: kSecondaryButton);
       await tester.pumpAndSettle();
-      expect(find.text('Reset curve'), findsOneWidget);
+      expect(find.text('S-curve'), findsOneWidget, reason: 'a point with a segment after it offers its curve');
       await tester.tap(find.text('Delete point'));
       await tester.pumpAndSettle();
       expect([for (final p in points()) p.step], [0, 8]);

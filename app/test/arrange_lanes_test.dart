@@ -226,10 +226,10 @@ void main() {
       final head = tester.getRect(find.byKey(ValueKey('lane-header-$key')));
       expect(row.top, closeTo(lane.bottom, 0.5), reason: 'the lane sits right under its track');
       expect(head.top, closeTo(row.top, 0.5), reason: 'its name is level with it');
-      expect(row.height, kLaneRowHeight);
+      expect(row.height, kArrangeLaneHeight);
       // The next track moved down by the lanes.
       expect(tester.getRect(find.byKey(const ValueKey('track-header-b'))).top,
-          greaterThanOrEqualTo(row.bottom + kLaneAddRowHeight - 0.5));
+          greaterThanOrEqualTo(row.bottom + kLaneToolRowHeight - 0.5));
       await tester.tap(find.byKey(const ValueKey('lanes-button-a')));
       await tester.pump();
       expect(find.byKey(ValueKey('lane-row-$key')), findsOneWidget, reason: 'they shrink away');

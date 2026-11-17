@@ -1667,7 +1667,8 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
         for (const AutomationLaneSpec& lane : w.automation) {
             pl.automationSig += lane.target + "|";
             for (const AutomationPointSpec& point : lane.points)
-                pl.automationSig += std::to_string(point.step) + ":" + std::to_string(point.value) + ";";
+                pl.automationSig += std::to_string(point.step) + ":" + std::to_string(point.value) + ":" +
+                                    std::to_string(point.curve) + ":" + std::to_string(doubleToBits(point.tension)) + ";";
         }
         if (w.vol != ls.volume || w.pan != ls.pan || w.mute != ls.mute || w.solo != ls.solo) {
             writeMix(ls.slot, w.vol, w.pan, w.mute, w.solo);

@@ -1609,6 +1609,17 @@ class _ArrangerScreenState extends State<ArrangerScreen> with TickerProviderStat
       constraints: BoxConstraints(maxHeight: MediaQuery.sizeOf(context).height * 0.5),
       child: SingleChildScrollView(padding: const EdgeInsets.fromLTRB(10, 0, 10, 8), child: Column(children: [
         _ProjectSettings(state: s),
+        // This project's: a moved clip takes the points of its track's lanes over it along (#230).
+        Padding(padding: const EdgeInsets.only(top: 6), child: Row(children: [
+          const Expanded(child: Text('Automation follows clips', style: TextStyle(color: Neon.dim))),
+          Switch(key: const ValueKey('automation-follows-clips'), value: s.project.automationFollowsClips,
+            onChanged: (v) {
+              s.endUndoStep();
+              s.editProject((p) => p.automationFollowsClips = v);
+              s.endUndoStep();
+              setState(() {});
+            }),
+        ])),
         // App-wide: how long-press menus open (owner: a list near the finger by default, a ring as a setting).
         Padding(padding: const EdgeInsets.only(top: 6), child: Row(children: [
           const Expanded(child: Text('Long-press menus', style: TextStyle(color: Neon.dim))),

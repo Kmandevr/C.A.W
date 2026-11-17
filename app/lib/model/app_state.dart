@@ -16,6 +16,7 @@ import 'native_components.dart';
 import 'project.dart';
 import 'tempo_map.dart';
 import 'project_dependencies.dart';
+import 'automation_edit.dart' show AutomationEdits;
 import 'automation_writer.dart' show AutomationTarget;
 import 'clip_automation.dart';
 import 'default_project.dart';
@@ -2150,7 +2151,13 @@ class AppState extends ChangeNotifier implements StressHost {
 
   void moveClip(LayerDoc layer, ClipDoc clip, int startSteps) {
     if (guardFrozen(layer)) return;
-    editLayer(layer, (l) => clip.startSteps = startSteps.clamp(0, project.maxArrangementSteps - clip.lengthSteps).toInt());
+    editLayer(layer, (l) {
+      final to = startSteps.clamp(0, project.maxArrangementSteps - clip.lengthSteps).toInt();
+      // "Automation follows clips" (#230): the track's points over the clip go along.
+      followClipAutomation(l, [(clip.startSteps.toDouble(), (clip.startSteps + clip.lengthSteps).toDouble())],
+          (to - clip.startSteps).toDouble());
+      clip.startSteps = to;
+    });
   }
 
   void resizeClip(LayerDoc layer, ClipDoc clip, int lengthSteps) {

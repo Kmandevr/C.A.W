@@ -29,6 +29,8 @@ import 'package:caw/model/telemetry/telemetry.dart';
 import 'package:caw/model/telemetry/telemetry_config.dart';
 import 'package:caw/model/updates/releases.dart' hide AssetKind;
 import 'package:caw/model/audio_clips.dart';
+import 'package:caw/model/automation_curve.dart';
+import 'package:caw/engine/component_info.dart';
 import 'package:caw/model/audio_edit.dart';
 import 'package:caw/model/sample_edit.dart';
 import 'package:caw/model/updates/update_fetch.dart';
@@ -635,6 +637,41 @@ void main() {
     sections.focusLayer('a');
     await _settle(c.tester);
     await c.shot('devices');
+  });
+
+  // Automation lanes open under a track (#230): curves, the tool row, a selection box, and the Automate picker.
+  _sweep('arrange-automation', (c) async {
+    final s = AppState(settings: Settings());
+    addTearDown(s.dispose);
+    s.componentCatalog.set(const [NativeComponentInfo(id: 'org.caw.chorus', name: 'Chorus with a long name',
+        role: 'effect', builtin: true, parameters: [
+          ComponentParameterInfo(id: 'mix', name: 'Mix', defaultValue: 0.5, min: 0, max: 1),
+          ComponentParameterInfo(id: 'rate', name: 'Rate of the modulation', defaultValue: 1, min: 0.1, max: 8),
+        ])]);
+    s.project = ProjectDoc(id: 'p', name: 'Lanes', layers: [
+      LayerDoc(id: 'a', name: 'Keys with a long name', color: 0, components: [ComponentUseDoc('org.caw.chorus')],
+          showLanes: true, automation: [
+        AutomationLaneDoc(target: 'volume', points: [
+          AutomationPointDoc(step: 0, value: 0.2, curve: AutomationCurve.slow),
+          AutomationPointDoc(step: 16, value: 1, curve: AutomationCurve.sCurve, tension: 0.5),
+          AutomationPointDoc(step: 32, value: 0.5, curve: AutomationCurve.step),
+          AutomationPointDoc(step: 48, value: 0.9),
+        ]),
+        AutomationLaneDoc(target: 'pan', height: 90, points: [AutomationPointDoc(step: 0, value: 0)]),
+      ]),
+    ]);
+    s.project.automation.add(ProjectAutomationLaneDoc(targetType: 'component', target: 'rate', layerId: 'a',
+        component: 0, points: [AutomationPointDoc(step: 0, value: 1), AutomationPointDoc(step: 64, value: 6)]));
+    s.project.recentAutomation.add(automationKey('component', 'rate', layerId: 'a', component: 0));
+    await _pump(c, Scaffold(body: ListenableBuilder(listenable: s, builder: (_, _) => ArrangerScreen(state: s))));
+    await _settle(c.tester);
+    await c.shot('');
+    final add = find.byKey(const ValueKey('lane-add-a'));
+    if (add.evaluate().isNotEmpty) {
+      await c.tester.tap(add.first);
+      await _settle(c.tester);
+      await c.shot('picker');
+    }
   });
 
   // The sample editor (batch 1.0.4) in the focus view's Clip tab, with Slice to MIDI's panel open.
