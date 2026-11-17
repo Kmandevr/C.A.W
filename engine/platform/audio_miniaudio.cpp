@@ -276,6 +276,8 @@ void notified(const ma_device_notification* n) {
     // deviceSizes, frames and the backend are set before the device starts and never change while it runs.
     if (!a->deviceSizes && a->frames > 0 && a->context.backend == ma_backend_aaudio) a->reopen.store(true, std::memory_order_release);
     a->rerouted.store(true, std::memory_order_release);
+    // The new stream fills its buffer as a fresh device's does (an atomic store; the engine outlives its device).
+    a->owner->engine->requestDeviceWarmUp();
 }
 
 // Under gDeviceLock, before a status, latency or size is reported: after a reroute, the new stream's modes, burst
@@ -502,7 +504,8 @@ ma_result openDevice(Audio* a, const CawEngine* e, const ma_device_id* id, ma_ui
         a->callbackFrames = static_cast<int>(a->device.playback.intermediaryBufferCap);
         a->render.open(a->callbackFrames);
     }
-    e->engine->requestSheddingReset();  // a fresh device: its first callbacks' stalls and a throttled stretch before don't count
+    e->engine->requestSheddingReset();  // a fresh device: a throttled stretch before doesn't count
+    e->engine->requestDeviceWarmUp();   // nor its own first callbacks: the stream filling its buffer (#234)
     a->fifoLatency = a->render.latency();
     a->fifoMeanHold = a->render.meanHold();
     e->engine->resetTestTone();  // a request made while closed is stale (the callback is not running yet)

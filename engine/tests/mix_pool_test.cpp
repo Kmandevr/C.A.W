@@ -13,6 +13,7 @@
 #include <memory>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 #include "engine.h"
@@ -217,6 +218,34 @@ TEST(mix_pool_sizes_from_core_kinds) {
 }
 
 // Speed phase 5d: a live pool notes the callback thread (its core, its tuning for the workers) and runs as before.
+// #234: the hint's decisions. A session is asked for a callback of any policy; a refused one is asked again
+// after a wait that doubles to 30 s; "unsupported" only when the system says it has no hint sessions.
+TEST(mix_pool_hint_retries_a_refused_session_and_tells_unsupported_apart) {
+    using tuning::HintState;
+    CHECK_EQ(tuning::hintRetryNs(1), int64_t{1'000'000'000});
+    CHECK_EQ(tuning::hintRetryNs(2), int64_t{2'000'000'000});
+    CHECK_EQ(tuning::hintRetryNs(4), int64_t{8'000'000'000});
+    CHECK_EQ(tuning::hintRetryNs(5), int64_t{16'000'000'000});
+    CHECK_EQ(tuning::hintRetryNs(6), int64_t{30'000'000'000});
+    CHECK_EQ(tuning::hintRetryNs(1000), int64_t{30'000'000'000});
+    CHECK_EQ(tuning::hintRetryNs(0), int64_t{1'000'000'000});
+    // Android 16's feature check decides when there is one; else the preferred rate (-1: the HAL has none).
+    CHECK(tuning::hintUnsupported(0, 16'000'000));
+    CHECK(!tuning::hintUnsupported(1, -1));
+    CHECK(tuning::hintUnsupported(-1, -1));
+    CHECK(tuning::hintUnsupported(-1, 0));
+    CHECK(!tuning::hintUnsupported(-1, 16'666'666));
+    for (const auto& [state, name] : {std::pair{HintState::None, "none"}, std::pair{HintState::Waiting, "waiting"},
+                                      std::pair{HintState::On, "on"}, std::pair{HintState::Failed, "failed"},
+                                      std::pair{HintState::Unsupported, "unsupported"}})
+        CHECK(std::string(tuning::hintStateName(state)) == name);
+    // Off Android there is no hint API at all.
+#if !defined(__ANDROID__)
+    CHECK(tuning::hintOpen() == nullptr);
+    CHECK(tuning::hintState(nullptr) == HintState::None);
+#endif
+}
+
 TEST(mix_pool_live_pool_notes_the_callback_and_runs) {
     MixPool pool;
     CHECK(pool.start(2, MixPool::Kind::Live));
@@ -955,7 +984,7 @@ TEST(mix_pool_engine_reports_its_audio_threads) {
     float l[256], r[256];
     for (int k = 0; k < 40; ++k) e.process(l, r, 256);
     const std::string j = e.audioThreadsJson();
-    for (const char* key : {"\"callback_cpu\":", "\"core_kind\":", "\"clock_khz\":", "\"max_khz\":", "\"hint\":",
+    for (const char* key : {"\"callback_cpu\":", "\"core_kind\":", "\"clock_khz\":", "\"max_khz\":", "\"hint\":", "\"hint_state\":",
                             "\"mmcss\":", "\"worker_tuning\":", "\"workers\":2", "\"active_workers\":2", "\"wait_share\":",
                             "\"cores\":", "\"fast_cores\":", "\"hybrid\":", "\"core_source\":"})
         CHECK(j.find(key) != std::string::npos);

@@ -894,6 +894,56 @@ TEST(a_single_late_callback_sheds_nothing) {
     }
 }
 
+TEST(a_new_devices_first_callbacks_stay_out_of_the_cpu_meter) {
+    // #234: on the owner's S22+ through Bluetooth (a shared AAudio stream, its callback not real-time, on a little
+    // core) the day's worst meter read was 600 and 800%, with nothing shed. A stream that starts fills its buffer
+    // back to back, on a core whose clock hasn't risen: 0.2 s of frames at 9 times their budget reads 7.8 on the
+    // meter. Play reopens the device closed while idle, so those callbacks fall while playing. A device open asks
+    // for a warm-up (requestDeviceWarmUp), and its first kDeviceWarmSeconds of frames stay out of the meter.
+    ProjectSpec p = project({dc(0.25), dc(0.5)});
+    for (const int frames : {64, 256, 1920}) {
+        for (const bool warm : {false, true}) {
+            Engine e(48000);
+            e.setProject(p);
+            e.play();
+            run(e, 1000);
+            e.requestSheddingReset();  // as a device open does
+            if (warm) e.requestDeviceWarmUp();
+            std::vector<float> l(2048), r(2048);
+            float worst = 0, worstAfter = 0;
+            double played = 0;
+            for (int k = 0; played < 3.0; ++k) {
+                e.process(l.data(), r.data(), frames);
+                const bool filling = played < 0.2;
+                e.reportLoad(filling ? 9.0 : 0.3, frames);
+                played += static_cast<double>(frames) / 48000.0;
+                worst = std::max(worst, e.meters().cpu);
+                if (played > Engine::kDeviceWarmSeconds + 0.5) worstAfter = std::max(worstAfter, e.meters().cpu);
+            }
+            CHECK_EQ(e.sheddingStats().shed, uint64_t{0});
+            if (warm) {
+                CHECK(worst < 0.35f);  // the steady 0.3 only
+                CHECK(worstAfter > 0.25f);  // and the meter still reads it after the warm-up
+            } else {
+                CHECK(worst > 5.0f);  // without the warm-up the stream's start reads as 500% and more
+            }
+        }
+    }
+    // After the warm-up a real overload still sheds.
+    Engine e(48000);
+    e.setProject(p);
+    e.play();
+    run(e, 1000);
+    e.requestSheddingReset();
+    e.requestDeviceWarmUp();
+    std::vector<float> l(256), r(256);
+    for (int k = 0; k < 48000 * 2 / 256; ++k) {
+        e.process(l.data(), r.data(), 256);
+        e.reportLoad(1.5, 256);
+    }
+    CHECK(e.sheddingStats().shed > uint64_t{0});
+}
+
 TEST(odd_callback_sizes_through_the_device_fifo_shed_nothing_under_the_threshold) {
     // The 2026-11-12 audio review: through the device's FIFO a callback renders more or fewer frames than it
     // plays (at 120 frames, 128 seven times in eight), so a load measured against the callback's own budget peaks

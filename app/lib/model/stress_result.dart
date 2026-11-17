@@ -44,6 +44,7 @@ class ScenarioResult {
     this.skipped,
     this.error,
     this.buffer,
+    this.backgrounded = false,
     this.requestedFrames = 0,
     this.firstCallbackUs = 0,
     this.worstAtS = 0,
@@ -80,8 +81,12 @@ class ScenarioResult {
   /// Live: the platform's underruns (null where it reports none).
   final int? xruns;
 
-  /// Why it didn't run (memory, a safety stop); null when it ran.
+  /// Why it didn't run (memory, a safety stop, the app kept leaving the foreground); null when it ran.
   final String? skipped;
+
+  /// The app left the foreground while it ran (#234): its samples were thrown away and it ran again from the start
+  /// once the app was back, or, after [StressRunner.maxBackgroundRedos] tries, it is [skipped]. Local JSON only.
+  final bool backgrounded;
   final String? error;
 
   /// Live: which buffer it asked for, [StressBuffer.playing] or [StressBuffer.lowLatency]; null for DSP.
@@ -102,7 +107,8 @@ class ScenarioResult {
 
   bool get ran => skipped == null && error == null && callbacks > 0;
 
-  factory ScenarioResult.fromEngine(Map<String, dynamic> j, {required String name, required String tier, String? buffer}) {
+  factory ScenarioResult.fromEngine(Map<String, dynamic> j,
+      {required String name, required String tier, String? buffer, bool backgrounded = false}) {
     double d(String k) => (j[k] as num?)?.toDouble() ?? 0;
     int i(String k) => (j[k] as num?)?.toInt() ?? 0;
     final err = '${j['error'] ?? ''}';
@@ -128,6 +134,7 @@ class ScenarioResult {
       frames: i('frames'),
       error: j['ok'] == true || err.isEmpty ? null : err,
       buffer: j['mode'] == 'live' ? buffer : null,
+      backgrounded: backgrounded,
       requestedFrames: i('requested_frames'),
       firstCallbackUs: d('first_callback_us'),
       worstAtS: d('worst_at_s'),
@@ -164,6 +171,7 @@ class ScenarioResult {
         'mode': live ? 'live' : 'dsp',
         if (skipped != null) 'skipped': skipped,
         if (error != null) 'error': error,
+        if (backgrounded) 'backgrounded': true,
         if (ran) ...{
           'mean_pct': _r1(meanPct),
           'p99_pct': _r1(p99Pct),
@@ -404,6 +412,9 @@ class StressResult {
 
   /// Why the run ended early (cancelled, thermal, battery saver), or null when it finished.
   String? stoppedBecause;
+
+  /// Steps run again because the app left the foreground while they ran (#234); their samples never count.
+  int backgroundedSteps = 0;
   Duration took = Duration.zero;
 
   /// Device facts for the export (cores, memory budget, platform), as the app knows them.
@@ -444,6 +455,7 @@ class StressResult {
         'started': startedAt.toUtc().toIso8601String(),
         'seconds': took.inMilliseconds / 1000,
         'stopped_because': stoppedBecause,
+        'backgrounded_steps': backgroundedSteps,
         'device': device,
         'tiers': {for (final t in const ['normal', 'heavy', 'extreme']) t: tier(t)?.wire},
         'limits': {for (final r in ramps.values) r.kind: r.toJson()},

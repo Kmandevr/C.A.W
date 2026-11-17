@@ -654,6 +654,7 @@ std::string Engine::audioThreadsJson() const {
     j += ",\"core_kind\":\"" + std::string(tuning::coreKindName(tuning::coreKind(cpu))) + "\"";
     j += ",\"clock_khz\":" + std::to_string(clock.currentKHz) + ",\"max_khz\":" + std::to_string(clock.maxKHz);
     j += ",\"hint\":" + std::string(pool_ && pool_->hintActive() ? "true" : "false");
+    j += ",\"hint_state\":\"" + std::string(tuning::hintStateName(pool_ ? pool_->hintState() : tuning::HintState::None)) + "\"";
     j += ",\"mmcss\":" + std::string(pool_ && pool_->callbackMmcss() ? "true" : "false");
     j += ",\"callback_tuning\":" + flags(cbTuned) + ",\"worker_tuning\":" + flags(tuned);
     j += ",\"workers\":" + std::to_string(mixWorkers()) + ",\"active_workers\":" + std::to_string(mixActiveWorkers());
@@ -5344,6 +5345,13 @@ void Engine::reportLoad(double load, int frames, int rendered) noexcept {
         pool_->reportWork(static_cast<int64_t>(used * 1e9), static_cast<int64_t>(played * 1e9));
     }
     if (frames <= 0) return;
+    // A new device's first callbacks (requestDeviceWarmUp): the stream starting, left out of every average here.
+    if (deviceWarmUp_.load(std::memory_order_relaxed) && deviceWarmUp_.exchange(false, std::memory_order_acq_rel))
+        warmSeconds_ = kDeviceWarmSeconds;
+    if (warmSeconds_ > kSlackSeconds) {
+        warmSeconds_ -= static_cast<double>(frames) / sr_;
+        return;
+    }
     if (!std::isfinite(load)) load = 0.0;
     // The callback's time against the frames it played: their deadline, which a callback over 1 missed.
     const double raw = std::max(0.0, load);

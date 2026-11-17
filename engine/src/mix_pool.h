@@ -91,6 +91,7 @@ public:
     uint32_t callbackTuning() const noexcept { return callbackApplied_.load(std::memory_order_relaxed); }
     bool callbackMmcss() const noexcept { return mmcss_.load(std::memory_order_relaxed); }
     bool hintActive() const noexcept { return tuning::hintActive(hint_); }
+    tuning::HintState hintState() const noexcept { return tuning::hintState(hint_); }
 
     // Tests only: each worker waits a pseudo-random 0..maxMicros microseconds before each task it claims (and
     // before claiming), so the order and overlap of tasks vary from run to run.

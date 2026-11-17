@@ -188,6 +188,12 @@ public:
     // Any thread, never blocks (a device opening, the app going to the background): every shed layer comes back and
     // the load history is forgotten at the next callback, so a throttled stretch doesn't thin the song for good.
     void requestSheddingReset() noexcept { sheddingReset_.store(true, std::memory_order_release); }
+    // Any thread, never blocks (a device opening or rerouted, before its first callback): the callbacks of the
+    // device's first kDeviceWarmSeconds of frames don't enter the load history (the CPU meter, the over-budget
+    // share, Auto's averages). They are the stream starting, not the song: a shared or Bluetooth stream fills its
+    // buffer back to back at first, on a core whose clock hasn't risen (#234). The performance hint still sees them.
+    void requestDeviceWarmUp() noexcept { deviceWarmUp_.store(true, std::memory_order_release); }
+    static constexpr double kDeviceWarmSeconds = 0.5;
     // Any thread: layers shed since the engine was made, and how many came back on their own (reportLoad).
     struct SheddingStats {
         uint64_t shed = 0, restored = 0;
@@ -524,6 +530,7 @@ private:
     static constexpr double kRestoreMaxSeconds = 32.0, kReshedSeconds = 10.0, kTrialSeconds = 8.0;
     static constexpr double kSlackSeconds = 1e-9;  // summed callback lengths land a hair under the product
     double loadAvg_ = 0;
+    double warmSeconds_ = 0;                    // a new device's frames left before its load counts (kDeviceWarmSeconds)
     double coolSeconds_ = 0;                    // time left before another layer is shed
     double overShare_ = 0;                      // share of the last ~0.25 s spent in callbacks over 0.85
     double underSeconds_ = 0;                   // how long the meter has stayed under kRestoreLoad
@@ -589,6 +596,7 @@ private:
     std::atomic<int> overloadedFlag_{0};  // layers shed now
     std::atomic<uint64_t> shedTotal_{0}, restoredTotal_{0};
     std::atomic<bool> sheddingReset_{false};  // requestSheddingReset()
+    std::atomic<bool> deviceWarmUp_{false};   // requestDeviceWarmUp()
     std::atomic<bool> mixRestart_{false};      // startLiveMixPool: Auto decides afresh on the new device
     std::atomic<bool> offline_{false};        // set by setProjectOffline: reportLoad never sheds
     std::atomic<uint32_t> routingRejections_{0};  // mix-graph routes the executor refused (never expected)
