@@ -22,6 +22,13 @@ The owner added (2026-11-17):
 
 **[Fact]** Project-level modulators already exist and can target any parameter (docs/engine.md, "Modulation"). 1.1.0 adds the visual wiring, generator nodes and free audio paths.
 
+**Odin 2 as the owner's reference** (2026-11-17), "but more built into the app, more fine-grained and intuitive, and it works for everything". Odin 2 has:
+- oscillators that can feed both filters at once;
+- a routing selector on each filter;
+- a modulation matrix with a Scale row (one modulator controlling another link's depth).
+
+These are **[Fact]** from reviews checked 2026-11-17 (MusicRadar, Bedroom Producers Blog, KVR). C.A.W gives every block such selectors, kept in step with the graph view, and adds a scale-by source to each modulation link.
+
 ## 2026-11-17: Device UI redesign and a step-by-step music video (owner, #231, #232)
 
 **Decision (owner, 2026-11-17).** Both ship in batch 1.0.6, with the FX consolidation.
