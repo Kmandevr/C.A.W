@@ -11,7 +11,7 @@ updated: 2026-11-17
 **Decision (owner, 2026-11-17).** Both ship in batch 1.0.6, with the FX consolidation.
 - **FX chain:** collapsed rows, any number open at once, and every control usable in place.
 - **Editing:** visual first, controlled mainly by knobs.
-- **Flagship:** one Vital-like screen; on a phone, three panels with a mod strip that is always shown.
+- **Flagship:** one Vital-like screen; on a phone, three panels (Oscillators, Filters, Modulation) with a mod strip that is always shown.
 - **QoL kit on every device:**
   - presets and A/B;
   - precise control;

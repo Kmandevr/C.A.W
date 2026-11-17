@@ -52,10 +52,10 @@ updated: 2026-11-17
   - Bottom: the mod sources as tabs: Env 1–3, LFO 1–4, Random, Macros. The open source is drawn big.
   - Drag any source's ⊕ handle onto any knob to modulate it. The knob grows a ring, and dragging the ring sets the amount.
 - **Phone portrait:** three swipeable panels.
-  - **Sound** (oscillators), **Shape** (filters and FX) and **Motion** (envelopes, LFOs, the matrix).
+  - **Oscillators**, **Filters** (filters and FX) and **Modulation** (envelopes, LFOs, the matrix); names chosen by the owner, 2026-11-17.
   - A mod-source strip stays pinned at the bottom of all three, so drag-to-modulate works across panels: drag a source onto the edge to flip panels.
   - A small dot row shows the panel.
-- **Matrix:** a compact list on the Motion panel, not a separate tab.
+- **Matrix:** a compact list on the Modulation panel, not a separate tab.
 - **QoL:**
   - the keyboard strip can be shown or hidden, to play while editing;
   - Init and a Random patch with an amount;
@@ -103,4 +103,3 @@ updated: 2026-11-17
 
 ## Open questions (owner)
 - Any device above whose centrepiece should be different.
-- Whether the Flagship phone panels should be Sound, Shape and Motion, or Oscillators, Filters and Mod.
