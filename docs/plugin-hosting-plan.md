@@ -35,7 +35,7 @@ updated: 2026-11-17
   The Benchmark measures all of this.
 
 ## Silent steps
-1. **1.0.6:** the shared-memory ring, `engine/src/isolation/`, with tests across two processes on Linux and Windows CI. Nothing calls it.
+1. **1.0.6:** the shared-memory ring (a new isolation folder in the engine sources), with tests across two processes on Linux and Windows CI. Nothing calls it.
 2. **1.0.7:** the host executable and an `IsolatedProcessor` proxy. These load a C.A.W component first (not CLAP), and are compiled only with the `CAW_ISOLATED_HOST` CMake option (OFF).
    - Tests: render parity against in-process at one block of offset; `kill -9` mid-render, which bypasses and restarts; a stalled host never makes the callback wait.
    - CI checks the binary size, so it is shown to cost nothing while off.
