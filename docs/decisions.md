@@ -6,6 +6,22 @@ updated: 2026-11-17
 
 # Decisions
 
+## 2026-11-17: Linked sample folders, the browser's preview and automatic metadata (owner, #229)
+
+**Decision (owner, 2026-11-17):** samples are no longer imported by hand.
+- **Linked folders:** app-wide sample folders are linked once, in Files › Samples.
+- **Files stay in place:** a project uses a file where it is and records it. A missing file shows **Find it**. A `.caw` export can package the files.
+- **Tap and double tap:** a tap previews. A double tap adds to the smart target: the selected audio track at the playhead, the selected drum pad or sampler, or else a new audio track.
+- **Preview:**
+  - a waveform with scrub;
+  - sync to tempo;
+  - auto-play next;
+  - a preview volume;
+  - key and BPM on each row.
+- **Metadata:** read automatically from the file's metadata, then its name, then detection from the audio, for BPM and key. Each field becomes a sortable filter.
+
+The batch is 1.0.5 if it is ready, else 1.0.6.
+
 ## 2026-11-17: Fewer, better built-in effects; new standard effects; the AutoStacc beta pack (owner, #227)
 
 **Decision (owner, 2026-11-17):**

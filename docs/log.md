@@ -6,6 +6,7 @@ updated: 2026-11-17
 
 # Log
 
+- 2026-11-17: the owner's sample library decisions (linked app-wide folders used in place, tap to preview, double tap to add, automatic metadata, BPM and key filters; #229)
 - 2026-11-17: the owner's FX decisions: consolidate the overlapping built-ins, add new standard effects, and a free AutoStacc beta pack, as batch 1.0.6 (#227); later batches move up by one. Piano roll glitches tracked as #228. The project menu shows 3 recent projects and All projects….
 - 2026-11-14: the stretch audio review fixes (branch `stretch-engine`): spares pre-rolled for the loop's start, the bridge aligned to WSOLA by lag with a correlation-kept crossfade, reseed and fixed random draws (two marked local changes to Signalsmith Stretch), at most 8 Signalsmith voices a track, pools sized by overlap and freed with their timeline, chunks fed from the tempo map at their own frame, stretchers re-made at a new rate and claimed when one frees, the analysis streamed (2–3 MB for 600 s)
 - 2026-11-14: audio stretching, engine side (branch `stretch-engine`, batch 1.0.4 #208, C API 32): Signalsmith Stretch and Linear vendored (MIT), live in the clip player (pre-roll, WSOLA bridge, measured allocation-free), clips following the tempo map per chunk, `stretch_ratio`, `pitch_cents`, `gain_db`, loop frames; `caw_asset_tempo` and `caw_asset_slices`; Dart `Engine.assetTempo`/`assetSlices`, wired into the sample editor (merged with `stretch-app`)
