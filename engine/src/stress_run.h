@@ -123,6 +123,9 @@ std::vector<PartRow> partRows(const uint64_t* partNs, int64_t calls);
 // (its budget: at most 256 native components, its project-state memory; #234): the ramp ends there, capped, at the
 // last count that held, not an error and not over budget. Returns the last count that held (0: none).
 constexpr int kRampCapped = 2;
+// Whether a project the ramp's step could not load was refused by the engine's own budget (its native component
+// cap or a memory budget), which caps the ramp; any other refusal is an error (#234, the audio review).
+bool rampCapRefusal(const std::string& why);
 struct RampOutcome {
     int32_t limit = 0;
     int32_t firstFailed = -1;

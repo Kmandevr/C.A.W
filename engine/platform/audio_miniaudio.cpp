@@ -76,10 +76,14 @@ struct Audio {
     // size to restore on return.
     bool background = false;
     int32_t savedBufferFrames = 0;
-    // The buffer's automatic size (caw_audio_tune_buffer, #236; control thread, under gDeviceLock): the stream it
-    // tunes (a reroute's new stream starts it again) and when it last looked.
+    // The buffer's automatic size (caw_audio_tune_buffer, #236; control thread, under gDeviceLock): which stream it
+    // tunes, by `streams` (each open and each reroute counts one, so a new stream starts it again even where the
+    // allocator hands back the old stream's address), when it last looked and in which playback (the engine's Play
+    // count: the time between two playbacks is not quiet time).
     caw::BufferTuner tuner;
-    void* tunedStream = nullptr;
+    std::atomic<uint32_t> streams{0};
+    uint32_t tunedStreams = 0;
+    uint64_t tunedPlays = 0;
     std::chrono::steady_clock::time_point tunedAt{};
 #if defined(_WIN32)
     // The last WASAPI endpoint ids read for their kind, so caw_audio_latency's polls skip COM until the device moves.
@@ -189,12 +193,16 @@ bool takesDeviceSizes(ma_backend b, ma_uint32 frames) {
 // real-time thread at the server's period ([Fact, miniaudio 0.11.25 source] ma_device_init__jack takes
 // jack_get_buffer_size; the default order tries PulseAudio and ALSA first, so JACK is otherwise never reached while
 // either opens). A name miniaudio does not know (ma_get_backend_from_name) or a backend that does not open falls
-// back to the default order. Read on the control thread at each open.
-ma_result initContext(ma_context* context) {
+// back to the default order. Read on the control thread at each open. [overridden] (optional) says whether the
+// named backend is the one that opened, so a caller whose device then fails on it can retry on the default order.
+ma_result initContext(ma_context* context, bool* overridden = nullptr) {
+    if (overridden) *overridden = false;
     if (const char* name = std::getenv("CAW_AUDIO_BACKEND"); name && name[0]) {
         ma_backend b;
-        if (ma_get_backend_from_name(name, &b) == MA_SUCCESS && ma_context_init(&b, 1, nullptr, context) == MA_SUCCESS)
+        if (ma_get_backend_from_name(name, &b) == MA_SUCCESS && ma_context_init(&b, 1, nullptr, context) == MA_SUCCESS) {
+            if (overridden) *overridden = true;
             return MA_SUCCESS;
+        }
     }
     return ma_context_init(nullptr, 0, nullptr, context);
 }
@@ -307,6 +315,13 @@ void notified(const ma_device_notification* n) {
     auto* a = static_cast<Audio*>(n->pDevice->pUserData);
     // deviceSizes, frames and the backend are set before the device starts and never change while it runs.
     if (!a->deviceSizes && a->frames > 0 && a->context.backend == ma_backend_aaudio) a->reopen.store(true, std::memory_order_release);
+    // WASAPI (#237): the rebuilt stream asks the period found for the old endpoint; if the new one did not give it
+    // (miniaudio's quiet IAudioClient fallback, a 3-period buffer), the control thread reopens the device at its
+    // settings, which looks at the new endpoint's periods and checks what opens (openDevice).
+    if (a->context.backend == ma_backend_wasapi && a->smallestFrames > 0 &&
+        n->pDevice->playback.internalPeriodSizeInFrames != a->smallestFrames)
+        a->reopen.store(true, std::memory_order_release);
+    a->streams.fetch_add(1, std::memory_order_release);
     a->rerouted.store(true, std::memory_order_release);
     // The new stream fills its buffer as a fresh device's does (an atomic store; the engine outlives its device).
     a->owner->engine->requestDeviceWarmUp();
@@ -556,14 +571,20 @@ void wasapiPeriods(Audio* a, const wchar_t* id) {
 // with the asked period times its 3 periods, which Windows raises to the engine's minimum buffer ([Fact, Microsoft
 // Learn IAudioClient::Initialize]). So a mismatched rate leaves Low latency at 10 ms (the status's "mix_rate" says
 // so) and the size asked is only ever a legal one.
-ma_uint32 smallestPeriod(Audio* a, const CawEngine* e, const ma_device_id* id, bool exclusive) {
+// What smallestPeriod found, cleared at every open (and before each look), so a status never reports an earlier
+// open's periods.
+void clearPeriods(Audio* a) {
     a->smallestFrames = 0;
     a->periodSource = "none";
-#if defined(_WIN32)
-    if (a->context.backend != ma_backend_wasapi || e->bufferMode != CAW_BUFFER_LOW_LATENCY) return 0;
     a->mixRate = 0;
     a->devicePeriodHns = 0;
     for (auto& p : a->enginePeriods) p = 0;
+}
+
+ma_uint32 smallestPeriod(Audio* a, const CawEngine* e, const ma_device_id* id, bool exclusive) {
+    clearPeriods(a);
+#if defined(_WIN32)
+    if (a->context.backend != ma_backend_wasapi || e->bufferMode != CAW_BUFFER_LOW_LATENCY) return 0;
     wasapiPeriods(a, id ? reinterpret_cast<const wchar_t*>(id->wasapi) : nullptr);
     const auto rate = static_cast<uint32_t>(e->engine->sampleRate());
     if (exclusive) {
@@ -626,13 +647,20 @@ ma_result openDevice(Audio* a, const CawEngine* e, const ma_device_id* id, ma_ui
     cfg.playback.shareMode = a->exclusive ? ma_share_mode_exclusive : ma_share_mode_shared;
     // Low latency with no size chosen: the smallest period the endpoint allows where the backend's default is not
     // it (WASAPI, smallestPeriod); a size that does not open falls back to the default before anything else does.
+    // miniaudio may also open without the asked period: shared mode falls back from IAudioClient3 to
+    // IAudioClient::Initialize quietly (a rate WASAPI must convert, a refusal), which leaves about 3 × the asked
+    // period of buffer (some 9 ms at 144 frames) instead of the engine period. So a device whose period is not the
+    // one asked is closed and opened again at the default, and the status says so ("refused", frames 0).
+    clearPeriods(a);
     const auto init = [&] {
         const ma_uint32 at = frames == 0 ? smallestPeriod(a, e, id, a->exclusive) : 0;
         if (frames == 0) cfg.periodSizeInFrames = at;
         ma_result res = ma_device_init(&a->context, &cfg, &a->device);
-        if (res != MA_SUCCESS && at > 0) {
+        const bool refused = res == MA_SUCCESS && at > 0 && a->device.playback.internalPeriodSizeInFrames != at;
+        if (refused) ma_device_uninit(&a->device);
+        if (at > 0 && (res != MA_SUCCESS || refused)) {
             a->smallestFrames = 0;
-            a->periodSource = "none";
+            a->periodSource = refused ? "refused" : "none";
             cfg.periodSizeInFrames = 0;
             res = ma_device_init(&a->context, &cfg, &a->device);
         }
@@ -650,6 +678,7 @@ ma_result openDevice(Audio* a, const CawEngine* e, const ma_device_id* id, ma_ui
         return r;
     }
     readAAudioModes(a);
+    a->streams.fetch_add(1, std::memory_order_release);  // a new stream for the buffer tuner
     // miniaudio calls back with a fixed size (its intermediary buffer, noFixedSizedCallback off), or with AAudio's
     // own sizes (its burst on a low-latency stream; any other size still renders right through DeviceRender).
     // What the FIFO holds back on top is at most a block short of one, unless that size is whole blocks.
@@ -816,22 +845,9 @@ void openCapture(CawEngine* e, Audio* a) {
     }
 }
 
-int32_t startLocked(CawEngine* e, char* error, int32_t error_len) {
-    if (e->audio) {
-        // Open and playing: nothing to do. Stopped behind our back (miniaudio stops a device whose AAudio stream
-        // could not be reopened after a disconnect): closed, so it opens again below.
-        if (ma_device_get_state(&static_cast<Audio*>(e->audio)->device) == ma_device_state_started) return 0;
-        stopLocked(e);
-    }
-    if (gActive && gActive != e) stopLocked(gActive);  // an orphaned engine from an earlier copy of the app
-    auto* a = new Audio();
-    a->owner = e;
-    ma_result r = initContext(&a->context);
-    if (r != MA_SUCCESS) {
-        setError(std::string("can't open the audio system: ") + ma_result_description(r), error, error_len);
-        delete a;
-        return 1;
-    }
+// The output on [a]'s context: the chosen device, else the system default (fallback). MA_SUCCESS or why not; the
+// caller owns the context either way.
+ma_result openOnContext(CawEngine* e, Audio* a, std::string& why) {
     // A device chosen by id (two identical interfaces share a name), else by name, found in the backend's list;
     // else the default (it was unplugged, say). No list for the default, nor on AAudio, which lists only the
     // default (miniaudio 0.11.25, ma_context_enumerate_devices__aaudio) and where Android routes the output.
@@ -857,8 +873,7 @@ int32_t startLocked(CawEngine* e, char* error, int32_t error_len) {
     }
     const ma_uint32 frames = wantedFrames(e);
     const bool exclusive = (e->audioFlags & CAW_AUDIO_EXCLUSIVE) != 0;
-    std::string why;
-    r = openDevice(a, e, found ? &chosen : nullptr, frames, exclusive, why);
+    ma_result r = openDevice(a, e, found ? &chosen : nullptr, frames, exclusive, why);
     if (r != MA_SUCCESS && (found || frames > 0 || exclusive)) {
         // The choice did not open (the interface is busy or refuses the size): the system default, shared, at its
         // own size, so Play is never silent; the status says so (fallback) and why.
@@ -871,9 +886,46 @@ int32_t startLocked(CawEngine* e, char* error, int32_t error_len) {
     } else if (r == MA_SUCCESS && found) {
         a->deviceId = deviceIdText(a->context.backend, chosen);
     }
+    return r;
+}
+
+int32_t startLocked(CawEngine* e, char* error, int32_t error_len) {
+    if (e->audio) {
+        // Open and playing: nothing to do. Stopped behind our back (miniaudio stops a device whose AAudio stream
+        // could not be reopened after a disconnect): closed, so it opens again below.
+        if (ma_device_get_state(&static_cast<Audio*>(e->audio)->device) == ma_device_state_started) return 0;
+        stopLocked(e);
+    }
+    if (gActive && gActive != e) stopLocked(gActive);  // an orphaned engine from an earlier copy of the app
+    auto* a = new Audio();
+    a->owner = e;
+    bool overridden = false;
+    ma_result r = initContext(&a->context, &overridden);
+    if (r != MA_SUCCESS) {
+        setError(std::string("can't open the audio system: ") + ma_result_description(r), error, error_len);
+        delete a;
+        return 1;
+    }
+    std::string why;
+    r = openOnContext(e, a, why);
+    if (r != MA_SUCCESS && overridden) {
+        // CAW_AUDIO_BACKEND's backend opened but its device did not (#237): the default order instead.
+        ma_context_uninit(&a->context);
+        r = ma_context_init(nullptr, 0, nullptr, &a->context);
+        if (r == MA_SUCCESS) {
+            a->fallback = false;
+            a->fallbackReason.clear();
+            a->deviceId.clear();
+            r = openOnContext(e, a, why);
+            if (r != MA_SUCCESS) ma_context_uninit(&a->context);
+        } else {
+            why = std::string("can't open the audio system: ") + ma_result_description(r);
+        }
+    } else if (r != MA_SUCCESS) {
+        ma_context_uninit(&a->context);
+    }
     if (r != MA_SUCCESS) {
         setError(why, error, error_len);
-        ma_context_uninit(&a->context);
         delete a;
         return 1;
     }
@@ -882,6 +934,7 @@ int32_t startLocked(CawEngine* e, char* error, int32_t error_len) {
     if (e->inputEnabled) openCapture(e, a);  // after the output, which plays whether or not this opens
     return 0;
 }
+
 
 // Reopens a running device after its choice changed: 0 when it runs again as chosen (or was not running), 2 when
 // it runs on the system default because the choice did not open, 1 when nothing opened (the device is closed).
@@ -1379,6 +1432,9 @@ int32_t caw_audio_tune_buffer(CawEngine* e, int32_t start_frames) {
     auto* a = static_cast<Audio*>(e->audio);
     if (!a || a->context.backend != ma_backend_aaudio || !a->context.aaudio.hAAudio) return 0;
     if (a->background) return a->bufferFrames;  // behind the app the buffer is at its capacity (setBackground)
+    // Only where the output has no size of its own (Low latency, or Auto while recording): a fixed 1024-frame
+    // buffer is left as it is, and 0 says nothing was tuned, so the app keeps no size for the output.
+    if (!caw::tunesBuffer(e->bufferMode == CAW_BUFFER_LOW_LATENCY, e->bufferMode == CAW_BUFFER_AUTO, e->recording)) return 0;
     using SetSize = int32_t (*)(void*, int32_t);
     using Int = int32_t (*)(void*);
     auto setSize = reinterpret_cast<SetSize>(dlsym(a->context.aaudio.hAAudio, "AAudioStream_setBufferSizeInFrames"));
@@ -1393,13 +1449,18 @@ int32_t caw_audio_tune_buffer(CawEngine* e, int32_t start_frames) {
         const auto t = std::chrono::steady_clock::now();
         const int32_t x = xruns(stream);
         int32_t want = 0;
-        if (stream != a->tunedStream || !a->tuner.started()) {  // a new stream (an open or a reroute): start again
+        const uint32_t streams = a->streams.load(std::memory_order_acquire);
+        const uint64_t plays = e->engine->playsSent();
+        if (streams != a->tunedStreams || !a->tuner.started()) {  // a new stream (an open or a reroute): start again
             const int32_t b = burst(stream);
             if (b > 0) want = a->tuner.start(b, caw::BufferTuner::kFloorBursts * b, capacity(stream), start_frames, x);
-            a->tunedStream = stream;
+            a->tunedStreams = streams;
         } else {
-            want = a->tuner.update(x, std::chrono::duration<double>(t - a->tunedAt).count());
+            // A new playback starts the quiet time again from now: a pause is not time without underruns.
+            const double quiet = plays != a->tunedPlays ? 0.0 : std::chrono::duration<double>(t - a->tunedAt).count();
+            want = a->tuner.update(x, quiet);
         }
+        a->tunedPlays = plays;
         a->tunedAt = t;
         if (want > 0) setSize(stream, want);
         now = getSize(stream);

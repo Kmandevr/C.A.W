@@ -1039,6 +1039,17 @@ TEST(the_buffer_tuner_grows_on_underruns_and_shrinks_only_to_sizes_that_held) {
     CHECK_EQ(t.update(2, 1.0), 384);
 }
 
+// The review of #236: the tuner runs only where the output has no size of its own (Low latency, or Auto while
+// recording); Auto while not recording and Battery keep their fixed 1024 frames, and caw_audio_tune_buffer returns 0.
+TEST(the_buffer_tuner_runs_only_in_low_latency_or_while_recording) {
+    CHECK(tunesBuffer(true, false, false));   // Low latency
+    CHECK(tunesBuffer(true, false, true));    // Low latency, recording
+    CHECK(tunesBuffer(false, true, true));    // Auto while recording: no size asked
+    CHECK(!tunesBuffer(false, true, false));  // Auto, not recording: 1024 frames
+    CHECK(!tunesBuffer(false, false, false)); // Battery: 1024 frames
+    CHECK(!tunesBuffer(false, false, true));  // Battery while recording: still 1024 frames
+}
+
 TEST(odd_callback_sizes_through_the_device_fifo_shed_nothing_under_the_threshold) {
     // The 2026-11-12 audio review: through the device's FIFO a callback renders more or fewer frames than it
     // plays (at 120 frames, 128 seven times in eight), so a load measured against the callback's own budget peaks

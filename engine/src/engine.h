@@ -166,6 +166,9 @@ public:
     // sample after the last beat. 0 beats is play(). Its beats are the ticks (1/den notes) of the signature where
     // playback starts; with [bars], [beats] is bars (0..16) of that signature's ticks, so it starts on an accent.
     void playCountIn(double fromStep, int beats, bool bars = false);
+    // How many Play commands (play, a count-in) have been sent (control thread): caw_audio_tune_buffer tells a new
+    // playback from a long quiet one by it.
+    uint64_t playsSent() const noexcept { return playCount_; }
     // The metronome: a short built-in click on every beat while playing (accented on the bar), mixed before the
     // safety limiter. Off by default; renders and exports never click.
     void setMetronome(bool on);

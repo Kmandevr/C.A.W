@@ -556,8 +556,9 @@ CAW_API int32_t caw_audio_set_background(CawEngine* e, int32_t background);
    [start_frames] (the size remembered for this kind of output; 0: two bursts), rounded to whole bursts between two
    bursts and the stream's capacity; each rise of the stream's underrun count adds a burst; 60 s without one takes a
    burst off, never back to a size that underran on this stream. Behind the app (caw_audio_set_background) it waits.
-   Returns the buffer size now in frames (0 where the backend has no such size, or nothing runs). Never calls into
-   the audio thread; AAudioStream_setBufferSizeInFrames needs no reopen. */
+   Only in Low latency or while recording in Auto (else it returns 0 and leaves the fixed buffer alone). Returns the
+   buffer size now in frames (0 where the backend has no such size, or nothing runs). Never calls into the audio
+   thread; AAudioStream_setBufferSizeInFrames needs no reopen. */
 CAW_API int32_t caw_audio_tune_buffer(CawEngine* e, int32_t start_frames);
 
 /* API version 10. The playback devices the platform's audio backend lists, as JSON: {"backend": name,

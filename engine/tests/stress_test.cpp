@@ -399,6 +399,13 @@ TEST(stress_ramp_stops_capped_at_the_engines_component_cap) {
     Engine e(48000);
     const std::string warn = e.setProject(rampProject(Kind::RampTracks, rampCounts(Kind::RampTracks).back()));
     CHECK(warn.find("native components; at most") != std::string::npos);
+    // Only the engine's own budget caps a ramp (the audio review): its component cap and memory budgets do; any other
+    // refusal (a project that does not parse, a missing file) is an error, not a cap.
+    CHECK(rampCapRefusal("the project did not load: " + warn.substr(0, 300)));
+    CHECK(rampCapRefusal("the project needs 300 layer slots; this device's memory budget allows at most 256"));
+    CHECK(rampCapRefusal("native component chains exceed this Engine's project-state memory budget"));
+    CHECK(!rampCapRefusal("the project did not load: {\"ok\":false,\"error\":\"line 3, col 1: unknown note\"}"));
+    CHECK(!rampCapRefusal(""));
 }
 
 // The ramp stops at the first count over budget and searches only below it, reporting the last count that held.

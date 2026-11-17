@@ -69,4 +69,11 @@ private:
     bool started_ = false;
 };
 
+// Whether caw_audio_tune_buffer tunes at all: only where the output is opened without a size of its own, in Low
+// latency or while recording in Auto (the review of #236). Auto while not recording and Battery open a fixed
+// 1024-frame buffer, which the tuner must leave alone (and whose size must not be kept as the output's).
+inline bool tunesBuffer(bool lowLatency, bool autoMode, bool recording) noexcept {
+    return lowLatency || (autoMode && recording);
+}
+
 }  // namespace caw

@@ -189,6 +189,12 @@ int64_t timeCallbacks(Engine& e, int frames, int64_t calls, double* us, float* l
     return c;
 }
 
+bool rampCapRefusal(const std::string& why) {
+    // The engine's words (engine.cpp): "native components; at most 256 can run", and its memory budgets ("this
+    // device's memory budget allows at most", "budget is", "project-state memory budget", "budget of").
+    return why.find("native components; at most") != std::string::npos || why.find("budget") != std::string::npos;
+}
+
 RampOutcome rampSearch(const std::vector<int32_t>& counts, const std::function<int(int32_t)>& step) {
     RampOutcome o;
     for (const int32_t n : counts) {
@@ -321,7 +327,7 @@ RunResult run(const RunRequest& r, Progress& progress, LoadHistory* history, con
             std::string refused;
             if (!prepare(e, rampProject(r.kind, n), r, false, l, rr, refused)) {
                 // Past the engine's budget (its component cap, its memory) after a count that ran: the ramp's end.
-                if (heldN > 0 || n > counts.front()) {
+                if ((heldN > 0 || n > counts.front()) && rampCapRefusal(refused)) {
                     out.cappedBy = refused;
                     return kRampCapped;
                 }
