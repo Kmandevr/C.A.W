@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 
 import '../../engine/audio_engine.dart';
 import '../../model/audio_record.dart';
+import '../../model/latency_comp.dart' show PingSeries, pingSeriesProblem;
 import '../haptics.dart';
 import '../theme.dart';
 import 'settings_widgets.dart';
@@ -22,7 +23,7 @@ class AudioInputSettings extends StatefulWidget {
 class _AudioInputSettingsState extends State<AudioInputSettings> {
   List<InputDeviceInfo>? _devices;
   bool _pinging = false;
-  PingResult? _ping;
+  PingSeries? _ping;
 
   AudioRecorder get r => widget.recorder;
 
@@ -85,12 +86,12 @@ class _AudioInputSettingsState extends State<AudioInputSettings> {
     if (result == null) {
       Haptics.error();
       _say(r.message.value ?? 'The ping could not start: turn audio input on first.');
-    } else if (result.ok) {
+    } else if (result.reliable) {
       Haptics.drop();
-      _say('Round trip ${result.ms.toStringAsFixed(1)} ms: takes are placed by it');
+      _say('Round trip ${result.ms!.toStringAsFixed(1)} ms (${result.heard} pings agree): takes are placed by it');
     } else {
       Haptics.error();
-      _say('The ping was not heard clearly: try again, louder, or type the offset in.');
+      _say(pingSeriesProblem(result));
     }
   }
 
@@ -149,7 +150,7 @@ class _AudioInputSettingsState extends State<AudioInputSettings> {
       settingAction('audio.latency', icon: Icons.av_timer,
           subtitle: _pinging ? 'Listening…'
               : 'Now ${lat.ms.toStringAsFixed(1)} ms ($source)'
-                  '${_ping != null && !_ping!.ok ? ' · the last ping was not heard' : ''}',
+                  '${_ping != null && !_ping!.reliable ? ' · the last measurement was unreliable' : ''}',
           trailing: FilledButton.tonal(key: const ValueKey('latency-measure'), onPressed: _pinging ? null : _measure,
               child: _pinging
                   ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))

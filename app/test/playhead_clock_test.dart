@@ -36,8 +36,8 @@ void main() {
     expect(at, closeTo(10.264, 1e-9));
     expect(c.at(now + 8 * ms), closeTo(10.264 + 0.064, 1e-9), reason: 'a 120 Hz frame later');
     expect(c.at(now + 25 * ms), closeTo(10.264 + 0.2, 1e-9));
-    // Reads that stop coming: it runs on at most 100 ms, then holds.
-    expect(c.at(now + 500 * ms), closeTo(10.264 + 0.8, 1e-9));
+    // Reads that stop coming: it runs on at most 150 ms, then holds.
+    expect(c.at(now + 500 * ms), closeTo(10.264 + 1.2, 1e-9));
   });
 
   test('the first read holds; it runs once the reads move (a count-in or a compensated start)', () {
@@ -160,7 +160,9 @@ void main() {
       await tester.pump(const Duration(milliseconds: 8));
     }
     expect(drawn, hasLength(3), reason: 'one build per frame, between reads');
-    expect(drawn.last, closeTo(0.264 + 0.192, 1e-9));
+    // Drawn for when the frame lights up: the screen's lead on (av_sync.dart).
+    expect(drawn.last, closeTo(0.264 + 0.192 + s.visualLeadUs * 8e-6, 1e-9));
+    expect(s.visualLeadUs, greaterThan(0));
     // Stopped: the ticker stops, so no more frames are asked for (Auto's idle drop can come).
     s.meters = const EngineMeters();
     s.tick.value++;

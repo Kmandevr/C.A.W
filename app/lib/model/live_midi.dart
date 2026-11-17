@@ -11,6 +11,7 @@ import 'package:flutter/foundation.dart';
 import '../platform/midi_input.dart';
 import 'app_state.dart';
 import 'device_target.dart';
+import 'latency_comp.dart' show beatDeviationsMs;
 import 'midi_mapping.dart';
 import 'pattern_doc.dart';
 import 'project.dart';
@@ -260,7 +261,7 @@ class LiveMidi extends ChangeNotifier {
     if (recording && state.transportOn && !state.meters.playing && state.engine != null) {
       return _lastNow = _recordFrom ?? _lastNow;
     }
-    final step = state.transportOn ? state.playheadStep : state.pausedStep;
+    final step = state.transportOn ? (_heardNow() ?? state.playheadStep) : state.pausedStep;
     if (step == null) return _lastNow;
     if (recording && step + 1 < _lastStep) {
       final (from, to) = loopSpan;
@@ -269,6 +270,25 @@ class LiveMidi extends ChangeNotifier {
     }
     _lastStep = step;
     return _lastNow = step + _wraps;
+  }
+
+  /// Where the ear is at this very moment (#236): the engine's position on the MIDI clock now, less the output
+  /// latency, wrapped into the loop. [AppState.playheadStep] is the last meter read, up to a read interval old, so a
+  /// key tapped late in that interval would land early. Null when the engine can't tell.
+  double? _heardNow() {
+    final e = state.engine;
+    if (e == null) return null;
+    final step = state.stepAt(e.midiClockNs);
+    if (step == null) return null;
+    final (from, to) = loopSpan;
+    final span = to - from;
+    var s = step;
+    if (span > 0) {
+      while (s >= to && s - span >= from) {
+        s -= span;
+      }
+    }
+    return s;
   }
 
   /// The track the keyboard plays: the armed one, else the selected one, else the first track that isn't a folder.
@@ -615,6 +635,10 @@ class LiveMidi extends ChangeNotifier {
       (passes[n.pass] ??= []).add(TakenNote(at, math.max(0.125, math.min(n.len, loopTo - at)), n.pitch, n.vel));
     }
     final order = passes.keys.toList()..sort();
+    // Learning from recordings (#236): how far the notes landed from the beat, kept for the output in use; a
+    // correction is only suggested (the latency sheet), never applied by itself.
+    state.latency.learnFromTake(beatDeviationsMs([for (final p in passes.values) for (final n in p) n.at],
+        bpmAt: (st) => state.project.tempo.bpmAt(st / 4)));
     // Overdub and replace write into the clips already there (record_modes.dart); a loop recording covers the loop.
     final merged = mergeRecording(state, layer, [for (final k in order) ...passes[k]!], mode: state.settings.midiRecordMode,
         from: _pass > 0 ? loopFrom : from, to: _pass > 0 ? loopTo : stoppedAt);

@@ -1,6 +1,6 @@
 // Settings › Audio › Latency: how late the output (Bluetooth, USB, HDMI) and the input are, each device's offset
-// (preset by its kind, typed in, tapped along to the click, or found by the loopback ping), the switch that
-// compensates them, and the badge the transport row shows while the output adds more than 50 ms.
+// (preset by its kind, typed in, slid while listening, tapped along to the click, or found by the loopback ping
+// series), the switch that compensates them, and the badge the transport row shows while the output adds 50 ms.
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -14,16 +14,28 @@ import '../haptics.dart';
 import '../motion.dart';
 import '../theme.dart';
 import '../widgets.dart' show typeValue;
+import 'latency_sheet.dart';
 import 'settings_widgets.dart';
+
+/// The latency sheet (latency_sheet.dart) with its way on to this page.
+Future<void> openLatencySheet(BuildContext context, AppState state) {
+  final nav = Navigator.of(context);
+  return showLatencySheet(context, state,
+      settings: () => nav.push(MaterialPageRoute<void>(builder: (_) => LatencyPage(state: state))));
+}
 
 String _ms(double v) => '${v.toStringAsFixed(v < 10 ? 1 : 0)} ms';
 
 String _sourceLabel(OffsetSource s) => switch (s) {
       OffsetSource.preset => 'preset',
       OffsetSource.typed => 'typed in',
+      OffsetSource.slider => 'set while listening',
       OffsetSource.tapped => 'tapped along',
       OffsetSource.loopback => 'loopback ping',
+      OffsetSource.learned => 'learned from takes',
     };
+
+String _signed(double v) => '${v < 0 ? '−' : '+'}${_ms(v.abs())}';
 
 String _platformLabel(String source) => switch (source) {
       'timestamp' => 'the system\'s timestamps',
@@ -83,6 +95,7 @@ class LatencyPage extends StatefulWidget {
 
 class _LatencyPageState extends State<LatencyPage> {
   bool _pinging = false;
+  int _pingDone = 0;
 
   LatencyComp get l => widget.state.latency;
 
@@ -122,7 +135,8 @@ class _LatencyPageState extends State<LatencyPage> {
       title: const Text('Loopback measurement'),
       content: const Text('C.A.W plays a short burst of noise (−12 dBFS) and listens for it. Turn the volume down; '
           'hold the speaker near the microphone in a quiet room, or connect the output to the input with a cable. '
-          'What the output\'s latency does not explain is the input\'s.'),
+          'It plays $pingRuns times; the results must agree, or nothing is saved. What the output\'s latency does '
+          'not explain is the input\'s.'),
       actions: [
         TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Cancel')),
         FilledButton(key: const ValueKey('latency-loopback-go'), onPressed: () => Navigator.of(context).pop(true),
@@ -130,17 +144,22 @@ class _LatencyPageState extends State<LatencyPage> {
       ],
     ));
     if (ok != true || !mounted) return;
-    setState(() => _pinging = true);
-    final r = await rec.ping();
+    setState(() {
+      _pinging = true;
+      _pingDone = 0;
+    });
+    final r = await rec.ping(progress: (done, _) {
+      if (mounted) setState(() => _pingDone = done);
+    });
     if (!mounted) return;
     setState(() => _pinging = false);
-    if (r == null || !r.ok) {
+    if (r == null || !r.reliable) {
       Haptics.error();
       _say(r == null ? (rec.message.value ?? 'The ping could not start: turn audio input on first.')
-          : 'The ping was not heard clearly: try again, louder.');
+          : pingSeriesProblem(r));
     } else {
       Haptics.drop();
-      _say('Round trip ${_ms(r.ms)}: input ${_ms(l.inputMs)}');
+      _say('Round trip ${_ms(r.ms!)} (${r.heard} of ${r.runs} agree within ${_ms(r.spreadMs)}): input ${_ms(l.inputMs)}');
     }
   }
 
@@ -164,11 +183,15 @@ class _LatencyPageState extends State<LatencyPage> {
           )),
       _action(output ? 'audio.latencyOutputOffset' : 'audio.latencyInputOffset', output ? 'Output offset' : 'Input offset',
           icon: Icons.tune,
-          subtitle: '+${_ms(off.extraMs)} for this device (${_sourceLabel(off.source)}); tap to type the total',
+          subtitle: '${_signed(off.extraMs)} for this device (${_sourceLabel(off.source)}); tap to type the total',
           onTap: () => _type(output: output),
           trailing: off.source == OffsetSource.preset ? null : TextButton(
               key: ValueKey(output ? 'latency-output-reset' : 'latency-input-reset'),
               onPressed: () => output ? l.resetOutput() : l.resetInput(), child: const Text('Preset'))),
+      if (output)
+        _action('audio.latencyListen', 'Adjust while listening', icon: Icons.linear_scale,
+            subtitle: 'A slider with ±1 ms to line the playhead up with the click as the song plays',
+            onTap: () => showLatencySheet(context, widget.state)),
       if (output)
         _action('audio.latencyTap', 'Tap along', icon: Icons.touch_app_outlined,
             subtitle: 'Plays the click; tap on every click you hear (8 taps)',
@@ -179,9 +202,13 @@ class _LatencyPageState extends State<LatencyPage> {
                 : 'Turn audio input on (below in Audio) to measure',
             trailing: FilledButton.tonal(key: const ValueKey('latency-loopback'),
                 onPressed: hasInput && !_pinging ? _ping : null,
-                child: _pinging
-                    ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
-                    : const Text('Measure'))),
+                child: AnimatedSwitcher(
+                  duration: Motion.fade(Motion.small, level),
+                  child: _pinging
+                      ? Text('$_pingDone / $pingRuns', key: const ValueKey('pinging'))
+                      : const Text('Measure', key: ValueKey('measure')),
+                ))),
+      if (output) Padding(padding: const EdgeInsets.symmetric(horizontal: 8), child: LatencyCards(state: widget.state)),
     ]);
   }
 
@@ -285,8 +312,8 @@ class _TapAlongDialogState extends State<TapAlongDialog> {
       );
 }
 
-/// The transport row's badge while the output adds more than 50 ms (Bluetooth, say): a small chip whose tap says
-/// that live playing and monitoring will feel late. Fades in and out with the route.
+/// The transport row's badge while the output adds more than 50 ms (Bluetooth, say): a small chip whose tip says
+/// that live playing and monitoring will feel late; a tap opens the latency sheet. Fades in and out with the route.
 class LatencyBadge extends StatelessWidget {
   const LatencyBadge({super.key, required this.state});
   final AppState state;
@@ -304,7 +331,10 @@ class LatencyBadge extends StatelessWidget {
               message: tip,
               child: InkWell(
                 borderRadius: BorderRadius.circular(8),
-                onTap: () => ScaffoldMessenger.maybeOf(context)?.showSnackBar(SnackBar(content: Text(tip))),
+                onTap: () {
+                  Haptics.tap();
+                  openLatencySheet(context, state);
+                },
                 child: Container(
                   padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                   decoration: BoxDecoration(borderRadius: BorderRadius.circular(8),

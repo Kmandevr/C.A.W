@@ -514,11 +514,12 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
 
   /// Where the song's playhead is in the roll's time, while it plays this pattern; null otherwise. Opened for a clip,
   /// that clip's repeats run on along the roll as it draws them; in Build, the first clip of the pattern under the
-  /// playhead, wrapped to its loop. [smooth]: between reads too ([AppState.smoothPlayheadStep]), for drawing.
+  /// playhead, wrapped to its loop. [smooth]: between reads too ([AppState.smoothPlayheadStep]), for drawing; else
+  /// as drawn on the reads ([AppState.heldPlayheadStep], Smooth follow's scroll and line).
   double? _playStep({bool smooth = false}) {
     final d = _doc;
     if (d == null || !s.meters.playing) return null;
-    final ph = smooth ? s.smoothPlayheadStep : s.playheadStep;
+    final ph = smooth ? s.smoothPlayheadStep : s.heldPlayheadStep;
     final own = widget.clip;
     if (own != null && widget.layer != null) {
       if (ph < own.startSteps || ph >= own.startSteps + own.lengthSteps) return null;

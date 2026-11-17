@@ -11,6 +11,7 @@ import 'model/app_state.dart';
 import 'model/audio_record.dart';
 import 'model/busy_work.dart';
 import 'model/automation_writer.dart';
+import 'model/av_sync.dart';
 import 'model/background_playback.dart';
 import 'model/component_bench.dart';
 import 'model/live_midi.dart';
@@ -68,6 +69,8 @@ Future<void> main(List<String> args) async {
   FrameRateController.current = frameRate;
   unawaited(frameRate.start());
   final state = AppState(settings: settings);
+  // What follows the audio is drawn for when its frame lights up, at the rate the app draws at while things move.
+  state.avSync.refreshHz = () => frameRate.movingRate > 0 ? frameRate.movingRate : AvSync.screenHz();
   // One MIDI listener for the app's life, above the shell (which a theme change rebuilds).
   LiveMidi.current = LiveMidi(state, platformMidiInput(clock: () => state.engine?.midiClockNs ?? 0));
   AutomationWriter.current = AutomationWriter(state); // the transport's Automate button
