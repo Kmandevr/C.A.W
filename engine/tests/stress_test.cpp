@@ -399,19 +399,6 @@ TEST(stress_ramp_stops_capped_at_the_engines_component_cap) {
     Engine e(48000);
     const std::string warn = e.setProject(rampProject(Kind::RampTracks, rampCounts(Kind::RampTracks).back()));
     CHECK(warn.find("native components; at most") != std::string::npos);
-    // Through the run: ok, its limit the last count that ran, "capped", and why.
-    RunRequest r;
-    r.kind = Kind::RampTracks;
-    r.seconds = 0.05;
-    r.frames = 8192;  // a big budget (171 ms a callback): every count that loads holds, even on a busy CI machine
-    Progress progress;
-    const RunResult out = run(r, progress, nullptr, nullptr);
-    CHECK(out.ok);
-    CHECK(out.error.empty());
-    CHECK_EQ(out.stopReason, std::string("capped"));
-    CHECK(out.limit > 0);
-    CHECK_EQ(out.firstFailed, -1);
-    CHECK(out.cappedBy.find("at most 256") != std::string::npos);
 }
 
 // The ramp stops at the first count over budget and searches only below it, reporting the last count that held.

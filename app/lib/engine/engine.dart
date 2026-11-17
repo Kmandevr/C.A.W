@@ -855,6 +855,10 @@ class Engine implements TempoEngine {
   /// Returns the buffer size now in frames (0 where there is none).
   int setAudioBackground(bool background) => _b.audioSetBackground(_handle, background ? 1 : 0);
 
+  /// The AAudio output's buffer sized automatically (API 33, #236): call about once a second while the device runs;
+  /// a new stream starts at [startFrames] (0: two bursts). Returns the buffer size now in frames (0: none).
+  int tuneAudioBuffer(int startFrames) => _b.audioTuneBuffer(_handle, startFrames);
+
   /// An instrument entry ({"id", "params", "preset"}) as the engine plays it (caw_migrate_instrument): a retired
   /// synth becomes Flagship with its preset and knobs mapped ("migrated": true, "lanes": old knob to new), and an
   /// entry naming a preset gets the preset's values under its own. Null when the engine refuses it.

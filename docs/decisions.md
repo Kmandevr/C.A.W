@@ -6,6 +6,10 @@ updated: 2026-11-17
 
 # Decisions
 
+## 2026-11-17: AAudio output usage GAME; automatic buffer size off by default (owner's request, #236)
+
+**Decision:** every AAudio output opens with `AAUDIO_USAGE_GAME`, Android's low-latency guide's advice for Bluetooth, on every route (the engine can't tell the route before the stream opens; the volume stays media). The automatic buffer size (`caw_audio_tune_buffer`, Oboe's LatencyTuner way plus a shrink after a quiet minute) is built but off by default (`Settings.bufferTuning`, no Settings row) until it has run on a phone: Claude's choice, to keep 1.0.5 low-risk; turning it on, and its Settings row, are for the owner. The Bluetooth codec is not chosen (a privileged API). Facts and sources in [engine](engine.md).
+
 ## 2026-11-17: A new device's first callbacks stay out of the load meter; the performance hint for every stream mode (#234)
 
 **Decision (Claude's, for the owner to confirm; the hint part is the owner's 1.0.5 call: "the ADPF performance hint only", no game category):**

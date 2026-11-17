@@ -456,6 +456,12 @@ class Settings extends ChangeNotifier {
   int sampleRate = 48000;
   static const sampleRates = [44100, 48000, 88200, 96000];
   int bufferFrames = 0;
+
+  /// The AAudio output's buffer sized automatically (#236, caw_audio_tune_buffer): off by default until it has run on
+  /// phones (no Settings row yet), and the size it settled on per kind of output (AudioDeviceKind's name → frames),
+  /// where the next stream on that kind starts.
+  bool bufferTuning = false;
+  final Map<String, int> tunedBufferFrames = {};
   static const bufferSizes = [0, 16, 32, 48, 64, 96, 128, 192, 256, 384, 512, 768, 1024, 2048, 4096, 8192];
   bool exclusiveAudio = false;
 
@@ -593,6 +599,8 @@ class Settings extends ChangeNotifier {
         'performance_mode': performanceMode.name,
         'light_mode': lightMode, // retained for older builds that read settings.json
         'light_auto': lightAuto,
+        'buffer_tuning': bufferTuning,
+        'tuned_buffer_frames': tunedBufferFrames,
         'light_by_self': lightBySelf,
         'frame_rate': frameRate,
         'vim_code': vimCode,
@@ -708,6 +716,15 @@ class Settings extends ChangeNotifier {
       performanceMode = j['light_mode'] == true ? PerformanceMode.lightweight : PerformanceMode.balanced;
     }
     lightAuto = (j['light_auto'] as bool?) ?? lightAuto;
+    bufferTuning = j['buffer_tuning'] == true;
+    if (j['tuned_buffer_frames'] case final Map m) {
+      tunedBufferFrames.clear();
+      for (final e in m.entries.take(16)) {
+        if (e.key is String && (e.key as String).length <= 32 && e.value is int && e.value > 0 && e.value <= 65536) {
+          tunedBufferFrames[e.key as String] = e.value as int;
+        }
+      }
+    }
     lightBySelf = j['light_by_self'] == true && performanceMode == PerformanceMode.lightweight;
     final fr = j['frame_rate'];
     frameRate = fr is num && FrameRateController.caps.contains(fr.toInt()) ? fr.toInt() : FrameRateController.auto;

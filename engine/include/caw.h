@@ -120,8 +120,12 @@ extern "C" {
    a clip now follows a tempo map of more than one tempo, its rate worked out per chunk), "stretch_ratio" 0.25..4,
    "pitch_cents" -2400..2400, "gain_db" -96..36, "loop_start_frames" and "loop_end_frames" (the file's own frames).
    A clip at ratio 1 with no pitch plays as before, to the bit. caw_asset_tempo (onset-based tempo detection) and
-   caw_asset_slices (transients for Slice to MIDI). Nothing else changes. */
-#define CAW_API_VERSION 32
+   caw_asset_slices (transients for Slice to MIDI). Nothing else changes.
+   33 (2026-11-17, batch 1.0.5, #234, #236): caw_audio_tune_buffer (the AAudio output's buffer sized automatically,
+   off unless the app calls it); AAudio outputs open with usage AAUDIO_USAGE_GAME; caw_audio_threads gains
+   "hint_state", "callback_policy" and "callback_nice"; a Benchmark job's JSON gains "capped_by" (and a ramp's
+   "stop_reason" "capped"), "parts_basis" and, live, "audio_threads". Nothing else changes. */
+#define CAW_API_VERSION 33
 /* The component index that names a layer's native instrument rather than one of its "components". */
 #define CAW_INSTRUMENT_INDEX 0xFFFFFFFFu
 /* A component index with this bit (API version 22) names component (index & ~CAW_NOTE_COMPONENT) of the layer's
@@ -540,6 +544,14 @@ CAW_API int32_t caw_audio_buffer_frames(CawEngine* e);
    it had; no reopen. Call it only while nothing monitors the input. Returns the buffer size now in frames (0 where
    the backend has no such size, or nothing runs); caw_audio_latency reports the new latency. */
 CAW_API int32_t caw_audio_set_background(CawEngine* e, int32_t background);
+/* API version 33 (#236). The AAudio output's buffer sized automatically, as Oboe's LatencyTuner does: call it from
+   the control side about once a second while the device runs. A new stream (an open, a reroute) starts at
+   [start_frames] (the size remembered for this kind of output; 0: two bursts), rounded to whole bursts between two
+   bursts and the stream's capacity; each rise of the stream's underrun count adds a burst; 60 s without one takes a
+   burst off, never back to a size that underran on this stream. Behind the app (caw_audio_set_background) it waits.
+   Returns the buffer size now in frames (0 where the backend has no such size, or nothing runs). Never calls into
+   the audio thread; AAudioStream_setBufferSizeInFrames needs no reopen. */
+CAW_API int32_t caw_audio_tune_buffer(CawEngine* e, int32_t start_frames);
 
 /* API version 10. The playback devices the platform's audio backend lists, as JSON: {"backend": name,
    "exclusive": whether this backend takes an exclusive-mode request (WASAPI, AAudio), "devices": [{"name",

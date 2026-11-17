@@ -27,6 +27,7 @@
 
 #include "caw.h"
 #include "capi_internal.h"
+#include "buffer_tuner.h"
 #include "device_render.h"
 #include "input_bridge.h"
 #include "miniaudio.h"
@@ -73,6 +74,11 @@ struct Audio {
     // size to restore on return.
     bool background = false;
     int32_t savedBufferFrames = 0;
+    // The buffer's automatic size (caw_audio_tune_buffer, #236; control thread, under gDeviceLock): the stream it
+    // tunes (a reroute's new stream starts it again) and when it last looked.
+    caw::BufferTuner tuner;
+    void* tunedStream = nullptr;
+    std::chrono::steady_clock::time_point tunedAt{};
 #if defined(_WIN32)
     // The last WASAPI endpoint ids read for their kind, so caw_audio_latency's polls skip COM until the device moves.
     std::wstring kindOutId, kindInId;
@@ -460,6 +466,14 @@ ma_result openDevice(Audio* a, const CawEngine* e, const ma_device_id* id, ma_ui
     // Android 12 and later (`ma_android_sdk_version() > 30`, ma_create_and_configure_AAudioStreamBuilder__aaudio):
     // on Android 11 and older the chosen size is ignored and the device picks its own; the status shows what it gave.
     a->lowLatency = e->bufferMode != CAW_BUFFER_BATTERY;
+    // AAUDIO_USAGE_GAME (#236): [Fact, developer.android.com/games/sdk/oboe/low-latency-audio, read 2026-11-17] the
+    // low-latency guide asks for it "to take full advantage of latency optimizations, especially when connected to
+    // Bluetooth headsets". [Fact, AOSP AudioAttributes.java main, read 2026-11-17] USAGE_GAME's volume stream is
+    // STREAM_MUSIC (toVolumeStreamType), the media volume, as USAGE_MEDIA's (AAudio's default); [Fact, NDK r30
+    // aaudio/AAudio.h] API 28 (miniaudio skips it where setUsage is missing) and MEDIA and GAME are the two usages
+    // other apps' playback capture may take. Kept over a reroute (miniaudio 0.11.25 ma_device_reinit__aaudio copies
+    // aaudio.usage). Every AAudio route: the app can't tell the route before the stream opens.
+    cfg.aaudio.usage = ma_aaudio_usage_game;
     cfg.performanceProfile = a->lowLatency ? ma_performance_profile_low_latency : ma_performance_profile_conservative;
     a->frames = frames;
     if (frames > 0) {
@@ -1208,6 +1222,50 @@ int32_t caw_audio_configure_input(CawEngine* e, int32_t enabled, const char* dev
         destroyCapture(running, failed);
     }
     return running->fallback ? 2 : 0;
+}
+
+int32_t caw_audio_tune_buffer(CawEngine* e, int32_t start_frames) {
+#if defined(__ANDROID__)
+    if (!e) return 0;
+    reopenAfterReroute(e);
+    std::lock_guard<std::mutex> op(gOpLock);  // the context lives while it is held
+    std::lock_guard<std::mutex> lock(gDeviceLock);
+    auto* a = static_cast<Audio*>(e->audio);
+    if (!a || a->context.backend != ma_backend_aaudio || !a->context.aaudio.hAAudio) return 0;
+    if (a->background) return a->bufferFrames;  // behind the app the buffer is at its capacity (setBackground)
+    using SetSize = int32_t (*)(void*, int32_t);
+    using Int = int32_t (*)(void*);
+    auto setSize = reinterpret_cast<SetSize>(dlsym(a->context.aaudio.hAAudio, "AAudioStream_setBufferSizeInFrames"));
+    auto getSize = reinterpret_cast<Int>(dlsym(a->context.aaudio.hAAudio, "AAudioStream_getBufferSizeInFrames"));
+    auto capacity = reinterpret_cast<Int>(dlsym(a->context.aaudio.hAAudio, "AAudioStream_getBufferCapacityInFrames"));
+    auto xruns = reinterpret_cast<Int>(dlsym(a->context.aaudio.hAAudio, "AAudioStream_getXRunCount"));
+    auto burst = reinterpret_cast<Int>(a->context.aaudio.AAudioStream_getFramesPerBurst);
+    if (!setSize || !getSize || !capacity || !xruns || !burst) return 0;
+    int32_t now = 0;
+    ma_mutex_lock(&a->device.aaudio.rerouteLock);
+    if (void* stream = a->device.aaudio.pStreamPlayback) {
+        const auto t = std::chrono::steady_clock::now();
+        const int32_t x = xruns(stream);
+        int32_t want = 0;
+        if (stream != a->tunedStream || !a->tuner.started()) {  // a new stream (an open or a reroute): start again
+            const int32_t b = burst(stream);
+            if (b > 0) want = a->tuner.start(b, caw::BufferTuner::kFloorBursts * b, capacity(stream), start_frames, x);
+            a->tunedStream = stream;
+        } else {
+            want = a->tuner.update(x, std::chrono::duration<double>(t - a->tunedAt).count());
+        }
+        a->tunedAt = t;
+        if (want > 0) setSize(stream, want);
+        now = getSize(stream);
+        if (now > 0) a->bufferFrames = now;
+    }
+    ma_mutex_unlock(&a->device.aaudio.rerouteLock);
+    return now > 0 ? now : 0;
+#else
+    (void)e;
+    (void)start_frames;
+    return 0;
+#endif
 }
 
 int32_t caw_audio_set_background(CawEngine* e, int32_t background) {
