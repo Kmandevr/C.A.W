@@ -139,6 +139,7 @@ struct Engine::Slot {
     // current process() call; null when it isn't tapped.
     float* tapL = nullptr;
     float* tapR = nullptr;
+    bool tapPre = false;  // the tap takes the signal before the fader (setOutputTap's preFader)
 
     // This chunk's plan (planChunk), read by the slot's graph nodes. Chunks end at every loop
     // boundary of a playing track, so one plan covers the whole chunk.
@@ -2898,19 +2899,34 @@ bool Engine::layerCorrelation(int index, float& out) {
     return true;
 }
 
-bool Engine::setOutputTap(const std::string& layerId, float* left, float* right) {
+bool Engine::setOutputTap(const std::string& layerId, float* left, float* right, bool preFader) {
     std::lock_guard<std::mutex> lock(ctl_);
     auto it = layers_.find(layerId);
     if (!left || !right || it == layers_.end() || it->second.slot < 0) return false;
     Slot& s = ctlSlot(it->second.slot);
     s.tapL = left;
     s.tapR = right;
+    s.tapPre = preFader;
     return true;
 }
 
 void Engine::clearOutputTaps() {
     std::lock_guard<std::mutex> lock(ctl_);
-    for (int i = 0; i < ctlTable_->capacity; ++i) ctlSlot(i).tapL = ctlSlot(i).tapR = nullptr;
+    for (int i = 0; i < ctlTable_->capacity; ++i) {
+        ctlSlot(i).tapL = ctlSlot(i).tapR = nullptr;
+        ctlSlot(i).tapPre = false;
+    }
+}
+
+int64_t Engine::layerLatency(const std::string& layerId) {
+    std::lock_guard<std::mutex> lock(ctl_);
+    auto it = layers_.find(layerId);
+    if (it == layers_.end() || it->second.slot < 0) return 0;
+    const LayerState& ls = it->second;
+    uint64_t frames = 0;  // as updateCompensation counts a slot's own
+    if (ls.inserts) frames += ls.inserts->latencyFrames();
+    if (ls.instrument && !ls.bus) frames += ls.instrument->latencyFrames() + noteFx_->latencyFrames(layerId);
+    return static_cast<int64_t>(std::min<uint64_t>(frames, 1u << 30));
 }
 
 int Engine::scope(int index, float* out, int n) {
@@ -4766,9 +4782,9 @@ void Engine::runTrackNode(int slot, float* outL, float* outR, int m) noexcept {
     }
     if (s.sends && s.sends->count > 0) runRoutes(s, s.insL, s.insR, outL, outR, m, !(target > 0.0), false);
     if (s.delay || s.delayFadeLeft > 0) runDelay(s, outL, outR, m);  // in time where it meets the others
-    if (s.tapL) {  // an offline stem: what the track sends on, as it meets the others
-        std::copy_n(outL, m, s.tapL + tapAt_);
-        std::copy_n(outR, m, s.tapR + tapAt_);
+    if (s.tapL) {  // an offline stem: what the track sends on, as it meets the others (or before its fader)
+        std::copy_n(s.tapPre ? s.insL : outL, m, s.tapL + tapAt_);
+        std::copy_n(s.tapPre ? s.insR : outR, m, s.tapR + tapAt_);
     }
     s.previewQuiet = sig > kPreviewQuiet ? 0 : s.previewQuiet + m;
     if (previewChunk_) {
@@ -4881,9 +4897,10 @@ void Engine::runBusNode(int slot, const float* inL, const float* inR, float* out
     s.previewQuiet = std::max(peakL, peakR) > kPreviewQuiet ? 0 : s.previewQuiet + m;
     if (routes) runRoutes(s, s.insL, s.insR, outL, outR, m, !(target > 0.0), true);
     if (s.delay || s.delayFadeLeft > 0) runDelay(s, outL, outR, m);  // in time where it meets the others
-    if (s.tapL) {  // an offline stem: the bus's output, as it meets the others
-        std::copy_n(outL, m, s.tapL + tapAt_);
-        std::copy_n(outR, m, s.tapR + tapAt_);
+    if (s.tapL) {  // an offline stem: the bus's output, as it meets the others (or after its effects, pre-fader)
+        const bool inIns = received || inserts || routes;
+        std::copy_n(!s.tapPre ? outL : inIns ? s.insL : inL, m, s.tapL + tapAt_);
+        std::copy_n(!s.tapPre ? outR : inIns ? s.insR : inR, m, s.tapR + tapAt_);
     }
     if (s.removing && s.gain == 0.0 && canRetireNode(s.retires, 3)) {
         // Faded out: the slot is free again, with its inserts, delay and routes.

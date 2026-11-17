@@ -15,6 +15,7 @@ import '../model/arrange_fx.dart';
 import '../model/arrange_markers.dart';
 import '../model/clip_automation.dart';
 import '../model/clip_loop_edit.dart';
+import '../model/freeze.dart';
 import '../model/live_midi.dart';
 import '../model/pattern_doc.dart';
 import '../model/project.dart';
@@ -38,6 +39,7 @@ import 'arrange/tempo_lane.dart';
 import 'arrange/focus_panel.dart';
 import 'arrange/edit_cues.dart';
 import 'arrange/edit_motion.dart';
+import 'arrange/freeze_ui.dart';
 import 'arrange/fx_stack.dart';
 import 'arrange/long_press_menu.dart';
 import 'arrange/mixer_card.dart';
@@ -437,6 +439,20 @@ class _ArrangerScreenState extends State<ArrangerScreen> with TickerProviderStat
     widget.state.tick.addListener(_followPlayhead);
     widget.state.revealStartRequests.addListener(_revealStart);
     _hScroll.addListener(_onHScroll);
+    widget.state.onFrozenEdit = _frozenEdit;
+  }
+
+  bool _asking = false;
+
+  /// An edit reached a frozen track (freeze, 1.0.5): one "Unfreeze to edit?" at a time; the edit itself was not made.
+  Future<void> _frozenEdit(LayerDoc layer) async {
+    if (_asking || !mounted) return;
+    _asking = true;
+    try {
+      await askUnfreeze(context, widget.state, layer);
+    } finally {
+      _asking = false;
+    }
   }
 
   /// Settings › Editing › Follow the playhead: while playing, the view keeps the playhead in sight, paging on when it
@@ -606,6 +622,7 @@ class _ArrangerScreenState extends State<ArrangerScreen> with TickerProviderStat
 
   @override
   void dispose() {
+    if (widget.state.onFrozenEdit == _frozenEdit) widget.state.onFrozenEdit = null;
     widget.state.tick.removeListener(_followPlayhead);
     widget.state.revealStartRequests.removeListener(_revealStart);
     _router?.unregister(Area.arranger, _keys);
@@ -843,7 +860,7 @@ class _ArrangerScreenState extends State<ArrangerScreen> with TickerProviderStat
     final midi = LiveMidi.current;
     // Sections, the most used first (owner, 2026-11-11); volume and pan edit in place.
     const track = 'Track', mix = 'Mix', record = 'Record', clips = 'Clips', move = 'Move', lanes = 'Automation',
-        collapse = 'Collapse', more = 'More';
+        collapse = 'Collapse', render = 'Render', more = 'More';
     final shown = s.shownCollapse(layer);
     final v = await showLongPressMenu<String>(context, at: at, title: layer.name, style: s.settings.longPressMenu, actions: [
       if (!layer.isFolder) ...[
@@ -933,12 +950,34 @@ class _ArrangerScreenState extends State<ArrangerScreen> with TickerProviderStat
           (TrackCollapse.compact, 'Compact', Icons.view_headline), (TrackCollapse.thin, 'Thin', Icons.horizontal_rule)])
         MenuAction('collapse:${c.name}', label, icon, checked: shown == c, section: collapse),
       if (layer.height != null) const MenuAction('default-height', 'Default height', Icons.height, section: collapse),
+      // Freeze and bounce (owner, 2026-11-14: in the hold menu, no header button).
+      if (s.canRenderTrack(layer) || layer.frozen) ...[
+        MenuAction('freeze', layer.frozen ? 'Unfreeze' : 'Freeze', Icons.ac_unit, checked: layer.frozen,
+            section: render),
+        if (layer.frozen && !s.project.playsFrozen(layer))
+          const MenuAction('refreeze', 'Freeze again (the tempo changed)', Icons.ac_unit, section: render),
+        if (s.canRenderTrack(layer))
+          const MenuAction('bounce', 'Bounce to audio', Icons.graphic_eq_rounded, section: render),
+      ],
       MenuAction('template', layer.isFolder ? 'Save folder as track template…' : 'Save as track template…',
           Icons.bookmark_add_outlined, section: more),
       const MenuAction('delete', 'Delete', Icons.delete_outline, danger: true, section: more),
     ]);
     if (v == null || !mounted) return;
     if (v == 'fx') _openTrack(layer, tab: FocusTab.fx);
+    if (v == 'freeze' && layer.frozen) {
+      s.unfreezeTrack(layer);
+      return;
+    }
+    if (v == 'freeze' || v == 'refreeze') {
+      if (v == 'refreeze') s.unfreezeTrack(layer);
+      await runTrackRender(context, 'Freeze ${layer.name}', () => s.freezeTrack(layer));
+      return;
+    }
+    if (v == 'bounce') {
+      await runTrackRender(context, 'Bounce ${layer.name}', () => s.bounceTrack(layer));
+      return;
+    }
     if (v == 'arm') midi?.toggleRecord(layer.id);
     if (v == 'audio-arm') {
       await toggleAudioArm(context, s, layer);
@@ -1172,6 +1211,9 @@ class _ArrangerScreenState extends State<ArrangerScreen> with TickerProviderStat
         if (clip.loopSteps != null)
           const MenuAction('loop-reset', 'Reset loop to pattern length', Icons.restart_alt, section: size),
         const MenuAction('midi', 'Export as MIDI file', Icons.file_upload_outlined, section: more),
+        // Freeze and bounce (owner, 2026-11-14): the selection's clips on this track, or this clip.
+        if (s.canRenderTrack(layer)) const MenuAction('bounce', 'Bounce to audio', Icons.graphic_eq_rounded,
+            section: more),
         if (!clip.lock) const MenuAction('delete', 'Delete', Icons.delete_outline, danger: true, section: more),
       ]);
     if (v == null || !mounted) return;
@@ -1190,7 +1232,18 @@ class _ArrangerScreenState extends State<ArrangerScreen> with TickerProviderStat
       s.selectClip(layer, clip);
       s.splitClips(at: v == 'split' ? splitAt : playhead);
     }
-    if (v == 'notes') { s.activateClip(layer, clip); _focus(layer.id, tab: FocusTab.clip); }
+    if (v == 'bounce') {
+      final chosen = s.selectedClipIds.contains(clip.id)
+          ? [for (final c in layer.clips) if (s.selectedClipIds.contains(c.id)) c] : [clip];
+      await runTrackRender(context, 'Bounce ${chosen.length == 1 ? s.clipName(clip) : '${chosen.length} clips'}',
+          () => s.bounceClips(layer, chosen));
+      return;
+    }
+    if (v == 'notes') {
+      if (!await editableOrUnfreeze(context, s, layer) || !mounted) return;
+      s.activateClip(layer, clip);
+      _focus(layer.id, tab: FocusTab.clip);
+    }
     if (v == 'takes') return showTakePicker(context, s, layer, clip, at);
     if (v == 'edit') { s.activateClip(layer, clip); widget.onOpenPattern?.call(); }
     if (v == 'copy') s.duplicateClip(layer, clip);
@@ -1211,7 +1264,8 @@ class _ArrangerScreenState extends State<ArrangerScreen> with TickerProviderStat
     onMenu: (l, at) => _trackMenu(l, at, patterns),
     onClipMenu: _clipMenu,
     // A mouse's double-click on a MIDI clip opens its notes, as the menu's Edit notes does.
-    onClipOpen: (l, c) {
+    onClipOpen: (l, c) async {
+      if (!await editableOrUnfreeze(context, widget.state, l) || !mounted) return;
       widget.state.activateClip(l, c);
       _focus(l.id, tab: FocusTab.clip);
     },
@@ -2056,6 +2110,7 @@ class _TimelineHeader extends StatelessWidget {
           return withMeter(SizedBox(height: box.maxHeight, child: Row(children: [
             ?chevron,
             const SizedBox(width: 3),
+            pop('frozen', layer.frozen, FrozenBadge(state: state, layer: layer, size: 12)),
             name,
             pop('ms', ms && w >= msRoom, Row(mainAxisSize: MainAxisSize.min, children: [mute, const SizedBox(width: 2), solo])),
           ])));
@@ -2063,6 +2118,8 @@ class _TimelineHeader extends StatelessWidget {
         final top = SizedBox(height: low ? 24 : 28, child: Row(children: [
           ?chevron,
           const SizedBox(width: 3),
+          // A frozen track's snowflake (freeze, 1.0.5), fading and scaling in and out like the header's controls.
+          pop('frozen', layer.frozen, FrozenBadge(state: state, layer: layer)),
           name,
           // A deep folder's header can get narrow: M and S move to their own row's place, the icons go first.
           if (oneRow) pop('ms', w >= msRoom, Row(mainAxisSize: MainAxisSize.min, children: [mute, const SizedBox(width: 2), solo])),

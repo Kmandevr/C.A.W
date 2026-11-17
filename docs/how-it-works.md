@@ -53,7 +53,7 @@ The modular foundation is real native C++ code, but it is not yet the active pla
 
 ## Export
 
-`caw_render` (`engine/src/render.cpp`) drives the same `Engine` offline, so a file sounds the same as what was heard (timing exact, sound within the perceptual tolerance of `docs/decisions.md`, 2026-11-12), and writes it with `engine/src/wav.cpp`. The app submits it as an offline-priority native job with progress and cancellation (the Export area). The CLI (`engine/cli/main.cpp`) uses the same native render call.
+`caw_render` (`engine/src/render.cpp`) drives the same `Engine` offline, so a file sounds the same as what was heard (timing exact, sound within the perceptual tolerance of `docs/decisions.md`, 2026-11-12), and writes it with `engine/src/wav.cpp`. The app submits it as an offline-priority native job with progress and cancellation (the Export area). Freeze and bounce (`app/lib/model/freeze.dart`) submit a song render of one track's pre-fader stem the same way, then put the file in the project as an audio clip. The CLI (`engine/cli/main.cpp`) uses the same native render call.
 
 ## Where to change what
 

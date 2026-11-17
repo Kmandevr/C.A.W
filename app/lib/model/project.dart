@@ -455,6 +455,8 @@ class LayerDoc {
     this.height,
     List<AudioClipDoc>? audioClips,
     this.input,
+    this.frozenAsset,
+    this.frozenContext,
   }) : clips = clips ?? [], automation = automation ?? [], components = components ?? [],
         noteComponents = noteComponents ?? [], sends = sends ?? [], audioClips = audioClips ?? [];
 
@@ -520,6 +522,17 @@ class LayerDoc {
   /// What the track records and hears from the device's input; null for none.
   AudioInputDoc? input;
 
+  /// Freeze (1.0.5, #209): the asset holding the track's instrument and effects rendered before its fader, which
+  /// the engine plays in their place ([ProjectDoc.playsFrozen]); null while the track isn't frozen. Saved as
+  /// `frozen` and `frozen_asset` (fields an older C.A.W ignores: it plays the track live).
+  String? frozenAsset;
+
+  /// The tempo the freeze was rendered on ([ProjectDoc.freezeContext], saved as `frozen_context`): when the
+  /// project's differs, the frozen audio no longer fits and the track plays live until it is frozen again.
+  String? frozenContext;
+
+  bool get frozen => frozenAsset != null;
+
   /// An audio track: the engine plays its clips and input instead of an instrument (it can't have both).
   bool get isAudio => !isFolder && (audioClips.isNotEmpty || input != null);
   String? parentId;
@@ -569,6 +582,10 @@ class LayerDoc {
         if (height != null) 'height': height,
         if (audioClips.isNotEmpty) 'audio_clips': [for (final c in audioClips) c.toJson(rate: rateOf?.call(c.assetId) ?? 0)],
         if (input != null) 'input': input!.toJson(),
+        if (frozenAsset != null) ...{
+          'frozen': true, 'frozen_asset': frozenAsset,
+          if (frozenContext != null) 'frozen_context': frozenContext,
+        },
       };
 
   static LayerDoc fromJson(Map<String, dynamic> j, {int Function(String assetId)? rateOf}) => LayerDoc(
@@ -607,6 +624,9 @@ class LayerDoc {
         audioClips: j['folder'] == true ? null
             : [for (final c in ((j['audio_clips'] as List?) ?? const []).take(4096)) ?AudioClipDoc.fromJson(c, rate: c is Map ? rateOf?.call('${c['asset']}') ?? 0 : 0)],
         input: j['folder'] == true ? null : AudioInputDoc.fromJson(j['input']),
+        frozenAsset: j['folder'] != true && j['frozen'] == true
+            ? switch (_boundedProjectText(j['frozen_asset'], 64)) { '' => null, final id => id } : null,
+        frozenContext: switch (j['frozen_context']) { final String c when c.length <= 4096 => c, _ => null },
       );
 }
 
@@ -833,6 +853,27 @@ class ProjectDoc {
   /// The component index the engine gives a layer's native instrument (CAW_INSTRUMENT_INDEX in caw.h).
   static const instrumentIndex = 0xFFFFFFFF;
 
+  /// What a freeze was rendered on beyond the track itself (freeze, 1.0.5): the tempo map, the signatures, the
+  /// seed and the key. A frozen track whose [LayerDoc.frozenContext] differs plays live ([playsFrozen]).
+  String get freezeContext => jsonEncode({
+        'bpm': bpm, 'beats_per_bar': beatsPerBar, 'seed': seed, 'key': key,
+        'tempo_map': [for (final t in tempoMap) t.toJson()],
+        'time_signatures': [for (final t in timeSignatures) t.toJson()],
+      });
+
+  /// The engine plays [l]'s frozen audio in place of its instrument and effects: it is frozen, its asset is in
+  /// the project and the tempo it was rendered on is the project's.
+  bool playsFrozen(LayerDoc l) =>
+      !l.isFolder && l.frozenAsset != null && asset(l.frozenAsset) != null && l.frozenContext == freezeContext;
+
+  /// The engine's clip for frozen track [l] ([playsFrozen]): its asset from step 0 at the file's speed, as long as
+  /// the file (its seconds on the tempo map), marked not to lengthen the song (C++ `lengthens_song`).
+  Map<String, dynamic> frozenClipJson(LayerDoc l) {
+    final a = asset(l.frozenAsset)!;
+    final clip = AudioClipDoc(id: 'frozen-${l.id}', assetId: a.id, lengthSeconds: a.seconds > 0 ? a.seconds : songSeconds);
+    return clip.toEngineJson(bpm, span: clip.spanSteps(tempo))..['lengthens_song'] = false;
+  }
+
   /// Stores what [states] reports (Engine.componentStates, per layer id; null for the master) into the
   /// component entries, so the saved project carries each effect's state. Entries it doesn't name keep theirs.
   void storeComponentStates(Map<int, ({String state, int version})> Function(String? layerId) states) {
@@ -849,7 +890,8 @@ class ProjectDoc {
 
     store(masterComponents, null);
     for (final l in layers) {
-      if (!l.isFolder) store(l.components, l.id, l.instrument);
+      // A frozen track's chain isn't in the engine (its clip player is): its entries keep what they had.
+      if (!l.isFolder && !playsFrozen(l)) store(l.components, l.id, l.instrument);
     }
   }
 
@@ -904,8 +946,14 @@ class ProjectDoc {
     }
     List<ComponentUseDoc> chainOf(String? layerId) =>
         layerId == null ? masterComponents : layers.where((l) => l.id == layerId).firstOrNull?.components ?? const [];
+    // A frozen track (freeze, 1.0.5) plays its frozen audio instead: its instrument, per-note FX and effects, and the
+    // lanes and links aimed at them, stay out of the engine, so none of them runs.
+    final frozenIds = {for (final l in layers) if (playsFrozen(l)) l.id};
     bool instrumentPlays(LayerDoc l) =>
-        !l.isFolder && l.instrument != null && (playableComponents == null || playableComponents.contains(l.instrument!.id));
+        !l.isFolder && l.instrument != null && !frozenIds.contains(l.id) &&
+        (playableComponents == null || playableComponents.contains(l.instrument!.id));
+    int? engineIndex(String? layerId, int index) =>
+        layerId != null && frozenIds.contains(layerId) ? null : playableIndex(chainOf(layerId), index);
     // Clip automation (owner, 2026-11-11) is unrolled onto the timeline: inside a clip its lane plays, elsewhere the
     // track's or project's lane on the same target (lib/model/clip_automation.dart).
     final unrolled = unrollClipAutomation();
@@ -923,12 +971,13 @@ class ProjectDoc {
     // Lanes being written (automation Write and Touch, [automationKey]) are left out: the control's live value plays.
     final engineAutomation = [
       for (final lane in projectLanes)
-        if (suspendLanes.contains(lane.key)) ...[]
+        if (suspendLanes.contains(lane.key) ||
+            (lane.targetType == 'noteComponent' && frozenIds.contains(lane.layerId))) ...[]
         else if (lane.targetType == 'instrument') ...[
           if (layers.where((l) => l.id == lane.layerId).firstOrNull case final LayerDoc l when instrumentPlays(l)) lane.toJson(),
         ] else if (lane.targetType != 'component')
           lane.toJson()
-        else if (playableIndex(chainOf(lane.layerId), lane.component ?? -1) case final int index)
+        else if (engineIndex(lane.layerId, lane.component ?? -1) case final int index)
           lane.toJson()..['component'] = index,
     ];
     final result = jsonEncode({
@@ -963,7 +1012,7 @@ class ProjectDoc {
               'id': l.id,
               'name': l.name,
               // A bus folder runs its own effects (a reverb bus); a folder without a bus has none.
-              if (playable(l.components).isNotEmpty && (!l.isFolder || l.busEnabled))
+              if (playable(l.components).isNotEmpty && (!l.isFolder || l.busEnabled) && !frozenIds.contains(l.id))
                 'components': [for (final c in playable(l.components)) c.toJson(withKey: routing.keyPlays(l, c))],
               if (routing.sendsOf(l) case final sends when sends.isNotEmpty) 'sends': [for (final s in sends) s.toJson()],
               // A C++ instrument not loaded yet (awaiting trust, building) is left out: the track is silent until it is.
@@ -973,8 +1022,12 @@ class ProjectDoc {
                 'noteComponents': [for (final c in playable(l.noteComponents)) c.toJson()],
                 'noteVoices': l.noteVoices,
               },
+              // A frozen track: its frozen audio from the song's start at the file's own speed, the whole file (the
+              // tail past the song's end too, which doesn't lengthen the song). Its notes still go, for keys and
+              // modulators that hear them (the clip player ignores them).
+              if (frozenIds.contains(l.id)) 'audio_clips': [frozenClipJson(l)]
               // An audio track (API 18): its clips (those whose file the project lists) and its input.
-              if (l.isAudio) ...{
+              else if (l.isAudio) ...{
                 'audio_clips': [
                   for (final c in l.audioClips)
                     if (asset(c.assetId) != null) c.toEngineJson(bpm, span: c.spanSteps(tempo)),
@@ -1021,7 +1074,7 @@ class ProjectDoc {
         'audition_only': auditionOnly && auditionInstrument != null,
         // Project modulation (#161): what can play of it (modulation.dart).
         ...engineModulationFields(routing, playableComponents: playableComponents,
-            engineIndex: (layerId, index) => playableIndex(chainOf(layerId), index), instrumentPlays: instrumentPlays),
+            engineIndex: engineIndex, instrumentPlays: instrumentPlays),
       });
     return result;
   }

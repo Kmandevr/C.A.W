@@ -610,6 +610,33 @@ void main() {
     await c.shot('');
   });
 
+  // Freeze (1.0.5, #209): a frozen track's snowflake on its header, then its dimmed devices in the focus view.
+  _sweep('arrange-frozen', (c) async {
+    final s = AppState(settings: Settings());
+    addTearDown(s.dispose);
+    final p = ProjectDoc(id: 'p', name: 'Frozen', bpm: 120, assets: [
+      AudioAssetDoc(id: 'fz', path: '/abs/frozen_a.wav', name: 'Frozen · Lead', seconds: 8, channels: 2,
+          sourceRate: 48000),
+    ], layers: [
+      LayerDoc(id: 'a', name: 'A frozen lead with a long name', color: 1,
+          instrument: ComponentUseDoc('org.caw.synth.flagship'), components: [ComponentUseDoc('org.caw.delay.pro')]),
+      LayerDoc(id: 'b', name: 'Bass', color: 2, instrument: ComponentUseDoc('org.caw.synth.flagship')),
+    ]);
+    p.layers.first
+      ..frozenAsset = 'fz'
+      ..frozenContext = p.freezeContext;
+    s.project = p;
+    final sections = SectionController();
+    addTearDown(sections.dispose);
+    await _pump(c, SectionScope(controller: sections, child: Scaffold(body: ListenableBuilder(listenable: s,
+        builder: (_, _) => ArrangerScreen(state: s)))));
+    await _settle(c.tester);
+    await c.shot('');
+    sections.focusLayer('a');
+    await _settle(c.tester);
+    await c.shot('devices');
+  });
+
   // The sample editor (batch 1.0.4) in the focus view's Clip tab, with Slice to MIDI's panel open.
   _sweep('arrange-sample-editor', (c) async {
     final s = AppState(settings: Settings());

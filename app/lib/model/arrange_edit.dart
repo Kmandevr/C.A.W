@@ -6,6 +6,7 @@ import 'dart:math' as math;
 import 'app_state.dart';
 import 'audio_clips.dart';
 import 'audio_edit.dart';
+import 'freeze.dart';
 import 'pattern_doc.dart';
 import 'project.dart';
 
@@ -134,6 +135,7 @@ extension ArrangeEdit on AppState {
   /// items when splitting" adds a note-off at the split, UG 22.9.1) and the right part doesn't play them again; it
   /// gets its own pattern (REAPER never pools the parts of a split, UG 13.35). True when something was split.
   bool splitClips({int? at}) {
+    if (selectedClips.any((c) => guardFrozen(c.layer))) return false;
     final step = at ?? editStep;
     // Audio clips split by their own rules (audio_edit.dart): a selection of only audio clips splits those; with
     // nothing selected every clip under the cut splits, audio too. A mixed selection splits its MIDI clips.
@@ -186,6 +188,7 @@ extension ArrangeEdit on AppState {
   /// in a new pattern holding the notes as they played, in place (muted clips add none). The originals' patterns
   /// stay in the project. True when something was glued.
   bool glueSelected() {
+    if (selectedClips.any((c) => guardFrozen(c.layer))) return false;
     final byTrack = <LayerDoc, List<ClipDoc>>{};
     for (final c in selectedClips) {
       if (!c.clip.lock) byTrack.putIfAbsent(c.layer, () => []).add(c.clip);
@@ -235,6 +238,7 @@ extension ArrangeEdit on AppState {
   /// Duplicate (REAPER's Ctrl+D): copies of the selected clips, each with its own notes, right after the selection
   /// as a block, so the copies keep their spacing. The copies become the selection.
   bool duplicateSelected() {
+    if (selectedClips.any((c) => guardFrozen(c.layer))) return false;
     final chosen = selectedClips;
     if (chosen.isEmpty) return duplicateSelectedAudio();
     final lo = chosen.map((c) => c.clip.startSteps).reduce(math.min);
@@ -259,6 +263,7 @@ extension ArrangeEdit on AppState {
 
   /// Delete (REAPER: Delete removes the selected items). Locked clips stay. True when something was deleted.
   bool deleteSelected() {
+    if (selectedClips.any((c) => guardFrozen(c.layer))) return false;
     final audio = deleteSelectedAudio();
     final chosen = [for (final c in selectedClips) if (!c.clip.lock) c];
     if (chosen.isEmpty) return audio;
@@ -321,6 +326,7 @@ extension ArrangeEdit on AppState {
   /// (audio on a MIDI track or the reverse), lands on [track] if it fits there, else is left out. The pasted clips
   /// become the selection. One undo step; false when nothing was pasted.
   bool pasteClips(LayerDoc track, int at) {
+    if (guardFrozen(track)) return false;
     final items = ClipClipboard.items;
     final tracks = [for (final l in visibleLayers) if (!l.isFolder) l];
     final base = tracks.indexOf(track);
@@ -368,6 +374,7 @@ extension ArrangeEdit on AppState {
   /// copies, every selected clip by the same time and the same number of tracks (REAPER moves a selection together).
   /// When some clip would leave the tracks, they all stay on their own tracks. Locked clips stay. One undo step.
   void moveSelectedClips(LayerDoc from, ClipDoc grabbed, LayerDoc? to, int startSteps, {bool copy = false}) {
+    if (guardFrozen(to) || selectedClips.any((c) => guardFrozen(c.layer))) return;
     final chosen = [for (final c in selectedClips) if (!c.clip.lock) c];
     if (chosen.isEmpty) return;
     final tracks = [for (final l in visibleLayers) if (!l.isFolder) l];
@@ -412,6 +419,7 @@ extension ArrangeEdit on AppState {
   /// track's colour. Each call is one undo step.
   void setClipProperties(LayerDoc layer, ClipDoc clip,
       {String? name, int? color, int? lengthSteps, bool? loop, int? sourceOffsetSteps, bool? mute, bool? lock}) {
+    if ((lengthSteps != null || loop != null || sourceOffsetSteps != null || mute != null) && guardFrozen(layer)) return;
     endUndoStep();
     editLayer(layer, (_) {
       if (name != null) clip.name = name.trim().isEmpty ? null : name.trim().substring(0, math.min(128, name.trim().length));

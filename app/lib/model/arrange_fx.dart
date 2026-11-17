@@ -14,6 +14,7 @@ import 'midi_clips.dart';
 import 'modulation.dart';
 import 'mixer_fx.dart';
 import 'cpp_component.dart';
+import 'freeze.dart';
 import 'automation_writer.dart' show AutomationTarget;
 import 'native_trust.dart';
 import 'pattern_doc.dart';
@@ -137,6 +138,7 @@ extension ArrangeFx on AppState {
 
   /// Puts [use] (a new effect, or a copy of one: the FX chain's Ctrl+D) into [layer]'s inserts at [at], or the end.
   ComponentUseDoc? insertNativeEffect(LayerDoc layer, ComponentUseDoc use, {int? at}) {
+    if (guardFrozen(layer)) return null;
     if ((layer.isFolder && !layer.busEnabled) || layer.components.length >= 64 || use.id.isEmpty) return null;
     final before = List.of(layer.components);
     editProject((p) {
@@ -147,6 +149,7 @@ extension ArrangeFx on AppState {
   }
 
   void removeNativeEffect(LayerDoc layer, int index) {
+    if (guardFrozen(layer)) return;
     if (index < 0 || index >= layer.components.length) return;
     final before = List.of(layer.components);
     editProject((p) {
@@ -157,6 +160,7 @@ extension ArrangeFx on AppState {
 
   /// Moves native effect [from] so it ends up at index [to] of the new order.
   void moveNativeEffect(LayerDoc layer, int from, int to) {
+    if (guardFrozen(layer)) return;
     final n = layer.components.length;
     if (from < 0 || from >= n || to < 0 || to >= n || from == to) return;
     final before = List.of(layer.components);
@@ -168,6 +172,7 @@ extension ArrangeFx on AppState {
 
   /// Bypasses (or brings back) native effect [index]: live in the engine, and stored in the project.
   void setNativeBypass(LayerDoc layer, int index, bool bypass) {
+    if (guardFrozen(layer)) return;
     if (index < 0 || index >= layer.components.length) return;
     final engineIndex = engineComponentIndex(layer, index);
     if (engineIndex != null) engine?.setComponentBypass(engineLayerId(layer), engineIndex, bypass);
@@ -177,6 +182,7 @@ extension ArrangeFx on AppState {
   /// A knob move on native effect [index]: live in the engine at once, and kept in the project. Call
   /// [commitNativeParams] when the gesture ends to save it (an update with the same chain keeps the running state).
   void setNativeParamLive(LayerDoc layer, int index, String param, double value) {
+    if (guardFrozen(layer)) return;
     if (index < 0 || index >= layer.components.length) return;
     onParamMove?.call(AutomationTarget('component', param, layerId: engineLayerId(layer), component: index), value);
     layer.components[index].params[param] = value;
@@ -215,6 +221,7 @@ extension ArrangeFx on AppState {
   /// Makes native component [componentId] [layer]'s instrument (null: none). Lanes of a replaced instrument go with
   /// it.
   void setNativeInstrument(LayerDoc layer, String? componentId) {
+    if (guardFrozen(layer)) return;
     if (layer.isFolder || layer.instrument?.id == componentId) return;
     editProject((p) {
       if (layer.instrument?.id != componentId) {
@@ -226,6 +233,7 @@ extension ArrangeFx on AppState {
 
   /// Bypasses (or brings back) [layer]'s native instrument: live in the engine, and stored in the project.
   void setInstrumentBypass(LayerDoc layer, bool bypass) {
+    if (guardFrozen(layer)) return;
     final use = layer.instrument;
     if (use == null) return;
     if (componentPlayable(use.id)) engine?.setComponentBypass(layer.id, ProjectDoc.instrumentIndex, bypass);
@@ -234,6 +242,7 @@ extension ArrangeFx on AppState {
 
   /// A knob move on [layer]'s native instrument: live at once, kept in the project ([commitNativeParams] saves it).
   void setInstrumentParamLive(LayerDoc layer, String param, double value) {
+    if (guardFrozen(layer)) return;
     final use = layer.instrument;
     if (use == null) return;
     onParamMove?.call(AutomationTarget('instrument', param, layerId: layer.id), value);
