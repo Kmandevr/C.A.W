@@ -219,7 +219,9 @@ bool parseAudioTrack(const Json& l, const std::map<std::string, AssetRef>& asset
             c.reverse = j.boolean("reverse", false);
             c.loop = j.boolean("loop", false);
             c.mute = j.boolean("mute", false);
-            endSteps = std::max(endSteps, c.startSteps + c.lengthSteps);
+            // A frozen track's clip (1.0.5) holds its tail past the song's end without making the song longer: the
+            // tail plays once the song reaches past it, and in a render's tail.
+            if (j.boolean("lengthens_song", true)) endSteps = std::max(endSteps, c.startSteps + c.lengthSteps);
             track->clips.push_back(std::move(c));
         }
         std::stable_sort(track->clips.begin(), track->clips.end(),

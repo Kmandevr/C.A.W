@@ -19,6 +19,7 @@ import 'project_dependencies.dart';
 import 'automation_writer.dart' show AutomationTarget;
 import 'clip_automation.dart';
 import 'default_project.dart';
+import 'freeze.dart';
 import 'history.dart';
 import 'mixer_fx.dart' show masterLayerId;
 import 'pattern_doc.dart';
@@ -809,13 +810,21 @@ class AppState extends ChangeNotifier implements StressHost {
     return (pattern: m.id, instrument: layer.instrument!, components: layer.components);
   }
 
-  String _engineJson({Map<String, String>? sourceOverrides}) {
-    final pv = previewOnly ? preview : null;
+  /// [p]'s engine JSON as the project sync sends it, without the preview: a track render (freeze and bounce,
+  /// lib/model/freeze.dart) plays a copy of the project through it.
+  String engineJsonOf(ProjectDoc p) => _engineJson(of: p, preview: false);
+
+  /// Freeze (1.0.5): called when an edit reaches a frozen track ([guardFrozen]); the screens ask "Unfreeze to edit?".
+  void Function(LayerDoc layer)? onFrozenEdit;
+
+  String _engineJson({Map<String, String>? sourceOverrides, ProjectDoc? of, bool preview = true}) {
+    final pv = previewOnly && preview ? this.preview : null;
+    final project = of ?? this.project;
     return project.toEngineJson(
         auditionPattern: pv?.pattern,
         auditionInstrument: pv?.instrument,
         auditionComponents: pv?.components ?? const [],
-        auditionOnly: previewOnly,
+        auditionOnly: previewOnly && preview,
         voices: settings.lightMode ? 4 : 32, // global cap; each generator chooses its own voice count
         swap: settings.swapTiming.name,
         suspendLanes: suspendedLanes,
@@ -1834,6 +1843,7 @@ class AppState extends ChangeNotifier implements StressHost {
   }
 
   void updateProjectAutomationPoint(ProjectAutomationLaneDoc lane, int index, double step, double value) {
+    if (lane.targetType != 'track' && guardFrozen(project.layers.where((l) => l.id == lane.layerId).firstOrNull)) return;
     if (index < 0 || index >= lane.points.length) return;
     _pushAutomationUndo();
     final point = lane.points[index];
@@ -1848,6 +1858,7 @@ class AppState extends ChangeNotifier implements StressHost {
   }
 
   void addProjectAutomationPoint(ProjectAutomationLaneDoc lane, double step, double value) {
+    if (lane.targetType != 'track' && guardFrozen(project.layers.where((l) => l.id == lane.layerId).firstOrNull)) return;
     _pushAutomationUndo();
     final at = step.clamp(0.0, project.maxArrangementSteps.toDouble()).toDouble();
     if (lane.points.any((point) => (point.step - at).abs() < 0.01)) return;
@@ -1857,6 +1868,7 @@ class AppState extends ChangeNotifier implements StressHost {
   }
 
   void removeProjectAutomationPoint(ProjectAutomationLaneDoc lane, int index) {
+    if (lane.targetType != 'track' && guardFrozen(project.layers.where((l) => l.id == lane.layerId).firstOrNull)) return;
     if (index < 0 || index >= lane.points.length) return;
     _pushAutomationUndo();
     lane.points.removeAt(index);
@@ -2100,6 +2112,7 @@ class AppState extends ChangeNotifier implements StressHost {
   }
 
   void addClip(LayerDoc layer, String patternId, {int? startSteps}) {
+    if (guardFrozen(layer)) return;
     final module = project.module(patternId);
     if (module == null || !isPattern(patternId)) return;
     final doc = PatternDoc.parse(module.runSource).doc;
@@ -2115,6 +2128,7 @@ class AppState extends ChangeNotifier implements StressHost {
   }
 
   void duplicateClip(LayerDoc layer, ClipDoc clip, {bool linked = false}) {
+    if (guardFrozen(layer)) return;
     final start = clip.startSteps + clip.lengthSteps;
     if (start >= project.maxArrangementSteps) return;
     var patternId = clip.patternId;
@@ -2135,18 +2149,22 @@ class AppState extends ChangeNotifier implements StressHost {
   }
 
   void moveClip(LayerDoc layer, ClipDoc clip, int startSteps) {
+    if (guardFrozen(layer)) return;
     editLayer(layer, (l) => clip.startSteps = startSteps.clamp(0, project.maxArrangementSteps - clip.lengthSteps).toInt());
   }
 
   void resizeClip(LayerDoc layer, ClipDoc clip, int lengthSteps) {
+    if (guardFrozen(layer)) return;
     editLayer(layer, (l) => clip.lengthSteps = lengthSteps.clamp(1, project.maxArrangementSteps - clip.startSteps).toInt());
   }
 
   void shiftClipSource(LayerDoc layer, ClipDoc clip, int deltaSteps) {
+    if (guardFrozen(layer)) return;
     editLayer(layer, (l) => clip.sourceOffsetSteps = (clip.sourceOffsetSteps + deltaSteps).clamp(0, project.maxArrangementSteps).toInt());
   }
 
   void removeClip(LayerDoc layer, ClipDoc clip) {
+    if (guardFrozen(layer)) return;
     editLayer(layer, (l) => l.clips.remove(clip));
     selectedClipIds.remove(clip.id);
     _pruneClipSelection();
@@ -2214,6 +2232,7 @@ class AppState extends ChangeNotifier implements StressHost {
     }
     // A project with no file yet is being made now: it records when (an old one without the field stays unknown).
     if (p.created == null && !(await _storage?.has(p.id) ?? true)) p.created = DateTime.now().toUtc();
+    dropMissingFreezes(p);
     project = p;
     openError = null;
     openNotice = switch (p.droppedModules) {
@@ -2238,6 +2257,7 @@ class AppState extends ChangeNotifier implements StressHost {
     await _syncNow();
     unawaited(prepareNativeComponents());
     unawaited(checkMissingFiles());
+    unawaited(purgeFrozenAudio());
   }
 
   /// Looks for the open project's files on this device again ([missingFiles]).

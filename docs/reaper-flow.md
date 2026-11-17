@@ -1,7 +1,7 @@
 ---
 title: REAPER's flow and C.A.W's
 summary: REAPER's path from a new project to a finished render, step by step with sources, beside C.A.W's current flow, the gaps, phone equivalents and a build plan ranked by what makes a song easier to finish.
-updated: 2026-11-12
+updated: 2026-11-14
 ---
 
 # REAPER's flow and C.A.W's
@@ -137,7 +137,7 @@ All **[Fact]** from [App](app.md) unless linked elsewhere.
 | Markers, regions, grid, tempo | One tempo and meter per project, typed or tapped; adjustable snap with Shift to bypass; long-press-drag makes a time selection; tap sets the edit cursor; 1–0 jump to markers, a region drags with its clips (Alt) or copies them (Ctrl or a second finger), and Markers and regions… lists them (2026-11-11). A drag along the ruler draws a loop range (handles adjust it; ⟳ or R toggles it; off, the song loops at its end); a long press on the ruler adds a named, coloured marker or region that a tap jumps to and a drag moves; Shift+M, Shift+R, Ctrl+] and Ctrl+[ ([App](app.md), Loop range, markers and regions). No tempo map (roadmap 6.2). |
 | Actions, keys, layouts | ? opens the action list (search, see keys, run); a key bindings editor (Settings › Key bindings); macros; editable piano-roll toolbar; Vim mode ([Actions](actions.md)). Arrange has few actions (track select, volume, pan, mute, solo, add, delete, move). Docking presets Arrange, Mix and Code; each screen shape saves its own layout ([UI design](ui.md#layout)). |
 | Render | Export song: the mix and aligned stems (tracks, buses) over the song, the loop, the selection or each region, a tail (none, seconds, until silent), peak or LUFS normalising, 16/24-bit PCM (TPDF dither at 16) or 32-bit float WAV at 44.1/48/96 kHz, names from a pattern, and a queue that survives restarts. Exporter keeps Quick Export (the loop), free-length, one-shot, wavetable and MIDI exports, profiles and history. No other formats than WAV. |
-| Freeze | Not built (roadmap 1.2, 6.4). |
+| Freeze | Built 1.0.5 (#209): the track hold menu's Freeze / Unfreeze and Bounce to audio, a clip's Bounce to audio; pre-fader, a snowflake on the header, dimmed devices, "Unfreeze to edit?" ([App](app.md)). |
 | Media explorer, project bay | Files: a Unity-style browser (tree, grid, inspector; a drawer on a phone), openable beside the tracks in Arrange so items are dragged onto tracks or the FX stack; imported MIDI files are listed with their patterns. No audio files to preview (no audio clips yet) and no "replace everywhere" view. |
 
 ## 3. Gaps
@@ -177,7 +177,7 @@ All **[Fact]** from [App](app.md) unless linked elsewhere.
 | Actions list | ?, search, run, assign keys, custom actions (1.11) | Built: list, keys editor, macros | Arrange actions (split, glue, marker, region, record, loop) are missing; no phone entry point | S | A search button in ⋮ More opens the action list on a phone; every new step above is an action |
 | Screensets | Saved window layouts (1.11) | Arrange/Mix/Code presets, saved per screen shape | Save and name your own layouts | S | Desktop and tablets; phones keep their fixed sections |
 | Render | Source, bounds, normalize, dither, formats, queue (1.12) | Export song: mix and stems, song/loop/selection/region bounds, tail, peak or LUFS normalize, 16-bit dither, a queue that persists (built 2026-11-11) | More formats (FLAC, MP3); selected items, razor areas; results as new tracks | S (formats) | The **Export song** sheet: Source, Range and Tail on top, Format, Loudness and Names in folds; Render queues |
-| Freeze | Render/freeze tracks, unfreeze (1.12) | None | Freeze a track to audio | L (needs audio clips and per-track render) | Track menu › Freeze; a snowflake on the header; tap it to unfreeze |
+| Freeze | Render/freeze tracks, unfreeze (1.12) | Built 1.0.5: Freeze / Unfreeze, Bounce to audio (track and clips), stereo, pre-fader | Mono and multichannel freezes; freezing several tracks at once | S | Track hold menu › Freeze; a snowflake on the header; touching its devices asks to unfreeze |
 | Media explorer, project bay | Insert at cursor/new track, preview, replace everywhere (1.13) | Files browser with drag onto tracks | Preview of audio (after audio clips); "Used in project" with replace everywhere | S–M | Files gets a Used in project filter; long-press › Replace everywhere |
 
 ## 4. Build plan, ranked by "makes a song easier to finish"

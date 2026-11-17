@@ -22,6 +22,7 @@ import '../pattern_editor.dart';
 import '../theme.dart';
 import '../volume_fader.dart';
 import 'track_color.dart';
+import 'freeze_ui.dart';
 import 'fx_stack.dart';
 import 'knob.dart';
 
@@ -183,7 +184,9 @@ class _FocusPanelState extends State<FocusPanel> {
         Expanded(child: switch (widget.tab) {
           FocusTab.fx => FxStack(key: ValueKey('fx-${widget.layer.id}'), state: widget.state, layer: widget.layer),
           FocusTab.mixer => _MixerTab(state: widget.state, layer: widget.layer),
-          FocusTab.clip => _ClipTab(state: widget.state, layer: widget.layer),
+          // A frozen track's notes dim and ask to unfreeze when touched (freeze, 1.0.5).
+          FocusTab.clip => FrozenDevices(state: widget.state, layer: widget.layer,
+              child: _ClipTab(state: widget.state, layer: widget.layer)),
           FocusTab.automation => TrackAutomationPanel(state: widget.state, layer: widget.layer),
         }),
       ]),

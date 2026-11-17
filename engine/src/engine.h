@@ -217,8 +217,13 @@ public:
     // effects, volume, pan and latency compensation, as it meets the others) is also copied into left and right at
     // the frames it plays in each process() call. The buffers must hold as many frames as every later call; frames
     // the layer doesn't play are left as they are (the caller clears them). False if the layer has no slot.
-    bool setOutputTap(const std::string& layerId, float* left, float* right);
+    // `preFader` (freeze and bounce, 1.0.5): the layer's signal after its instrument and effects, before its volume,
+    // pan, sends and latency compensation (still late by the layer's own latency: layerLatency).
+    bool setOutputTap(const std::string& layerId, float* left, float* right, bool preFader = false);
     void clearOutputTaps();
+    // Control thread: frames a layer's own instrument, per-note FX and effects delay its signal (what latency
+    // compensation adds up for it); 0 for a layer with no slot.
+    int64_t layerLatency(const std::string& layerId);
     int64_t loopLength();                     // samples in the project loop
     // The tempo map and time signatures (1.0.3, C API 31; tempo_map.h). Each replaces the project's until the next
     // project update, which sets them again from its "tempo_map" and "time_signatures". Checked (an error, nothing

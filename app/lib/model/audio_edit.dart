@@ -6,6 +6,7 @@ import 'dart:math' as math;
 
 import '../engine/audio_engine.dart';
 import 'app_state.dart';
+import 'freeze.dart';
 import 'audio_clips.dart';
 import 'project.dart';
 import 'sample_edit.dart';
@@ -236,6 +237,7 @@ extension AudioEdit on AppState {
 
   /// One undo step of its own for an edit of [clip] (the inspector's and the clip's own controls).
   void editAudioClip(LayerDoc layer, AudioClipDoc clip, void Function(AudioClipDoc c) change) {
+    if (guardFrozen(layer)) return;
     endUndoStep();
     editLayer(layer, (_) => change(clip));
     endUndoStep();

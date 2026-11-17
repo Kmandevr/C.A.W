@@ -245,7 +245,7 @@ Built on the graph from the Foundation stage. Do not keep a second mixer or crea
 | 6.1 | Song markers, named sections and navigation | Planned | app | — | Not built |
 | 6.2 | Tempo maps and time-signature changes | Planned | both | F4 | One tempo and meter per project today |
 | 6.3 | Clip-following automation and complete parameter/modulation automation | Partial | both | F6 | Track and project automation lanes exist, drawn by hand or written from the controls (Automate: Touch, Latch, Write, Read); clip automation does not |
-| 6.4 | Consolidate/bounce and render selected tracks, folders and groups | Planned | both | 0.3 | Not built |
+| 6.4 | Consolidate/bounce and render selected tracks, folders and groups | Partly built | both | 0.3 | Bounce to audio of a track or its clips built in 1.0.5 (#209, [app](app.md)); consolidate, folders and groups not built |
 | 6.5 | Batch export, persistent/recoverable export queue, delivery presets | Partial | both | 0.3 | Export profiles, history and a bounded in-memory queue exist; the queue isn't persistent and there's no batch delivery |
 | 6.6 | MIDI and audio quantize/alignment across the arrangement | Planned | both | 1.4, 3.2 | Not built |
 | 6.7 | Export progress, cancellation, errors, cleanup and output location | Partial | both | — | Native jobs report progress and support cancellation; full cleanup and output-location handling need verification |

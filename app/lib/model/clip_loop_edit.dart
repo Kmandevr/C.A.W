@@ -2,6 +2,7 @@
 import 'dart:math' as math;
 
 import 'app_state.dart';
+import 'freeze.dart';
 import 'arrange_fx.dart';
 import 'clip_automation.dart';
 import 'project.dart';
@@ -9,6 +10,7 @@ import 'project.dart';
 extension ClipLoopEdit on AppState {
   /// Sets [clip]'s loop point to [steps] (null or 0: back to its pattern's length). One undo step.
   void setClipLoop(LayerDoc layer, ClipDoc clip, int? steps) {
+    if (guardFrozen(layer)) return;
     final next = steps == null || steps <= 0 ? null : steps.clamp(1, project.maxArrangementSteps).toInt();
     if (next == clip.loopSteps) return;
     endUndoStep();
@@ -70,6 +72,7 @@ extension ClipLoopEdit on AppState {
   }
 
   void removeClipLane(LayerDoc layer, ClipDoc clip, ClipAutomationLaneDoc lane) {
+    if (guardFrozen(layer)) return;
     endUndoStep();
     beginAutomationGesture();
     editLayer(layer, (_) => clip.automation.remove(lane));
@@ -82,6 +85,7 @@ extension ClipLoopEdit on AppState {
       : value.clamp(-1000000.0, 1000000.0).toDouble();
 
   void addClipLanePoint(LayerDoc layer, ClipDoc clip, ClipAutomationLaneDoc lane, double step, double value) {
+    if (guardFrozen(layer)) return;
     final at = step.clamp(0.0, project.clipLoopSteps(clip).toDouble()).toDouble();
     if (lane.points.any((p) => (p.step - at).abs() < 0.01)) return;
     beginAutomationGesture();
@@ -94,6 +98,7 @@ extension ClipLoopEdit on AppState {
 
   /// Moves point [index], kept between its neighbours and inside the loop (call inside an automation gesture).
   void updateClipLanePoint(LayerDoc layer, ClipDoc clip, ClipAutomationLaneDoc lane, int index, double step, double value) {
+    if (guardFrozen(layer)) return;
     if (index < 0 || index >= lane.points.length) return;
     editLayer(layer, (_) {
       final p = lane.points[index];
@@ -105,6 +110,7 @@ extension ClipLoopEdit on AppState {
   }
 
   void removeClipLanePoint(LayerDoc layer, ClipDoc clip, ClipAutomationLaneDoc lane, int index) {
+    if (guardFrozen(layer)) return;
     if (index < 0 || index >= lane.points.length) return;
     beginAutomationGesture();
     editLayer(layer, (_) => lane.points.removeAt(index));

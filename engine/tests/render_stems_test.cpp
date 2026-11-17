@@ -1,17 +1,23 @@
-// Song renders: the mix equals playback, aligned stems add up to the mix, bounds, tails, normalise, dither, names.
+// Song renders: the mix equals playback, aligned stems add up to the mix, bounds, tails, normalise, dither, names;
+// freeze and bounce (1.0.5, #209): pre-fader stems, latency-aligned, and a frozen track (its stem played as an audio
+// clip in place of its instrument and effects) sounding as the live track does, tails and a tempo ramp included.
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <memory>
 #include <string>
 #include <vector>
 
+#include "audio_clips.h"
 #include "caw.h"
 #include "engine.h"
 #include "meters.h"
 #include "render_stems.h"
+#include "stress_scenarios.h"
 #include "test.h"
 #include "test_signal.h"
 #include "wav.h"
@@ -515,4 +521,281 @@ TEST(sixteen_bit_wav_encoding_rounds_and_clips) {
     CHECK_EQ(at(3), int16_t{16384});
     CHECK_EQ(at(4), int16_t{32767});
     CHECK_EQ(b[34], uint8_t{16});  // bits per sample
+}
+
+// ---------- freeze and bounce (1.0.5, #209) ----------
+
+namespace freeze {
+
+// A 32-bit float stereo WAV's samples, interleaved.
+std::vector<float> readFloatWav(const std::string& path) {
+    std::ifstream in(path, std::ios::binary);
+    const std::vector<uint8_t> b((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    auto u32 = [&](size_t at) {
+        return static_cast<uint32_t>(b[at] | (b[at + 1] << 8) | (b[at + 2] << 16) | (static_cast<uint32_t>(b[at + 3]) << 24));
+    };
+    std::vector<float> out;
+    for (size_t at = 12; at + 8 <= b.size();) {
+        const std::string tag(b.begin() + static_cast<long>(at), b.begin() + static_cast<long>(at) + 4);
+        const uint32_t size = u32(at + 4);
+        if (tag == "data")
+            for (size_t i = at + 8; i + 4 <= at + 8 + size; i += 4) {
+                float v;
+                std::memcpy(&v, &b[i], 4);
+                out.push_back(v);
+            }
+        at += 8 + size + (size & 1);
+    }
+    return out;
+}
+
+ComponentSpec effect(const std::string& id, std::vector<std::pair<std::string, double>> params = {}) {
+    ComponentSpec c;
+    c.id = id;
+    c.params = std::move(params);
+    return c;
+}
+
+// A synth-like track (the test signal's saw under notes) through a delay that rings past its last note, with a
+// fader, pan and a post-fader send into a reverb bus that stay live; a second track and the bus beside it.
+ProjectSpec song(bool ramp) {
+    ProjectSpec p;
+    p.name = "Freeze";
+    p.bpm = 120;
+    p.loopBars = 2;
+    p.master = 0.7;
+    if (ramp) p.tempoMap = {{0, 120, true}, {4, 90, false}};  // 120 down to 90 over the first bar, then 90
+    p.modules.push_back({"riff", "---\nkind: pattern\nlength: 8\n---\n0 A2 2 1\n4 C3 1 0.8\n6 E3 2 0.6\n"});
+    LayerSpec a = cawtest::testSignalNotesLayer("a", cawtest::Shape::Saw, "", {{"level", 0.3}},
+                                                {effect("org.caw.delay.pro")});
+    a.name = "Synth";
+    a.clips.push_back({"ca", "riff", 0, 24, 0, true});  // ends at step 24 of 32: the delay rings on
+    a.volume = 0.6;
+    a.pan = 0.35;
+    a.sends = {{"verb", 0.4, false, false}};
+    LayerSpec b = cawtest::testSignalNotesLayer("b", cawtest::Shape::Sine, "riff", {{"level", 0.2}});
+    b.name = "Other";
+    LayerSpec v;
+    v.id = v.name = "verb";
+    v.folder = true;
+    v.busEnabled = true;
+    v.components = {effect("org.caw.reverb.pro")};
+    p.layers = {a, b, v};
+    return p;
+}
+
+SongRenderRequest request(const std::string& dir) {
+    SongRenderRequest r;
+    r.outDir = dir;
+    r.project = "Freeze";
+    r.bitDepth = 32;
+    return r;
+}
+
+// Freeze's render of layer `id`: its pre-fader stem over the song, with a tail until it is quiet.
+std::string freezeRender(const ProjectSpec& p, const std::string& id, const std::string& dir, int64_t* frames = nullptr) {
+    SongRenderRequest q = request(dir);
+    q.mix = false;
+    q.layers = {id};
+    q.stemsPreFader = true;
+    q.stemsThroughMaster = false;
+    q.pattern = "frozen_{stem}";
+    q.tail = SongTail::Silence;
+    q.tailSeconds = 30;
+    q.silenceDb = -150;
+    SongRenderResult r;
+    CHECK(renderSong(p, q, r));
+    CHECK_EQ(r.files.size(), size_t{1});
+    if (frames) *frames = r.files.empty() ? 0 : r.files[0].frames;
+    return r.files.empty() ? std::string() : r.files[0].path;
+}
+
+// The project with layer `id` frozen as the app sends it: an audio track playing `path` from step 0 at the file's
+// speed in place of its instrument and effects; its notes, fader, pan and sends stay.
+ProjectSpec frozen(ProjectSpec p, const std::string& id, const std::string& path) {
+    for (LayerSpec& l : p.layers) {
+        if (l.id != id) continue;
+        auto track = std::make_shared<AudioTrackSpec>();
+        AudioClipSpec c;
+        c.id = "frozen";
+        c.path = path;
+        c.startSteps = 0;
+        c.lengthSteps = 4096;  // past the file's end: the clip ends with it
+        track->clips.push_back(c);
+        l.instrument = ComponentSpec{};
+        l.instrument.id = kAudioTrackId;
+        l.instrument.audioTrack = std::move(track);
+        l.components.clear();
+        l.noteComponents.clear();
+    }
+    return p;
+}
+
+std::vector<float> mixRender(const ProjectSpec& p, const std::string& dir, double tailSeconds) {
+    SongRenderRequest q = request(dir);
+    q.pattern = "mix_{index}";
+    q.tail = SongTail::Seconds;
+    q.tailSeconds = tailSeconds;
+    SongRenderResult r;
+    CHECK(renderSong(p, q, r));
+    return r.files.empty() ? std::vector<float>{} : readFloatWav(r.files[0].path);
+}
+
+// The largest difference between two renders, in dBFS (-400 for identical ones).
+double residualDb(const std::vector<float>& a, const std::vector<float>& b) {
+    double worst = 0;
+    for (size_t i = 0; i < std::max(a.size(), b.size()); ++i) {
+        const double x = i < a.size() ? a[i] : 0.0, y = i < b.size() ? b[i] : 0.0;
+        worst = std::max(worst, std::fabs(x - y));
+    }
+    return worst > 0 ? 20.0 * std::log10(worst) : -400.0;
+}
+
+double energy(const std::vector<float>& x, size_t from = 0) {
+    double e = 0;
+    for (size_t i = from; i < x.size(); ++i) e += static_cast<double>(x[i]) * x[i];
+    return e;
+}
+
+}  // namespace freeze
+
+using namespace freeze;
+
+TEST(a_frozen_track_renders_the_same_as_the_live_track_with_its_tail) {
+    const ProjectSpec p = song(false);
+    const std::string dir = tempDir("same");
+    int64_t frames = 0;
+    const std::string path = freezeRender(p, "a", dir, &frames);
+    CHECK(frames > 2 * 16 * 6000);  // past the song's end: the delay's tail
+    const std::vector<float> live = mixRender(p, dir, 4.0);
+    const std::vector<float> ice = mixRender(frozen(p, "a", path), dir, 4.0);
+    CHECK_EQ(live.size(), ice.size());
+    CHECK(energy(live, 2 * 2 * 16 * 6000) > 1e-4);  // the tail sounds past the song's end
+    // Bit for bit: the stem is float, the clip plays it at the file's own speed and rate, and the fader, pan and
+    // send then do the same arithmetic on the same samples.
+    const double db = residualDb(live, ice);
+    if (db > -400) std::printf("  frozen vs live residual %.1f dBFS\n", db);
+    CHECK(live == ice);
+    std::filesystem::remove_all(dir);
+}
+
+TEST(a_frozen_track_follows_a_tempo_ramp) {
+    const ProjectSpec p = song(true);
+    const std::string dir = tempDir("ramp");
+    const std::string path = freezeRender(p, "a", dir);
+    const std::vector<float> live = mixRender(p, dir, 3.0);
+    const std::vector<float> ice = mixRender(frozen(p, "a", path), dir, 3.0);
+    CHECK_EQ(live.size(), ice.size());
+    CHECK(energy(live) > 1.0);
+    const double db = residualDb(live, ice);
+    if (db > -400) std::printf("  frozen vs live on a ramp: residual %.1f dBFS\n", db);
+    CHECK(live == ice);
+    std::filesystem::remove_all(dir);
+}
+
+TEST(a_pre_fader_stem_skips_the_fader_pan_and_the_track_s_own_latency) {
+    // The same notes through a transparent compressor (240 frames of declared latency) and without it: the pre-fader
+    // stems line up, and neither has the fader's or the pan's gain.
+    ProjectSpec p = song(false);
+    p.layers[0].components = {effect("org.caw.compressor", {{"ratio", 1.0}, {"auto_makeup", 0.0}, {"makeup", 0.0},
+                                                            {"threshold", 0.0}})};
+    p.layers[0].volume = 0.25;
+    p.layers[0].pan = -0.8;
+    ProjectSpec plain = p;
+    plain.layers[0].components.clear();
+    const std::string dir = tempDir("latency");
+    SongRenderRequest q = request(dir);
+    q.mix = false;
+    q.layers = {"a"};
+    q.stemsPreFader = true;
+    q.stemsThroughMaster = false;
+    SongRenderResult withComp, without;
+    q.pattern = "comp_{stem}";
+    CHECK(renderSong(p, q, withComp));
+    q.pattern = "plain_{stem}";
+    CHECK(renderSong(plain, q, without));
+    const std::vector<float> a = readFloatWav(withComp.files.at(0).path), b = readFloatWav(without.files.at(0).path);
+    CHECK_EQ(a.size(), b.size());
+    CHECK_EQ(withComp.files[0].frames, int64_t{2 * 16 * 6000});
+    CHECK(residualDb(a, b) < -90.0);
+    // The saw at level 0.3, before the fader: its peak is the instrument's, not 0.25 times it.
+    double peak = 0;
+    for (float v : b) peak = std::max(peak, static_cast<double>(std::fabs(v)));
+    CHECK(peak > 0.2);
+    CHECK(peak < 0.31);
+    std::filesystem::remove_all(dir);
+}
+
+TEST(the_stem_tap_request_key_is_checked) {
+    SongRenderRequest r;
+    std::string error;
+    CHECK(parseSongRenderRequest("{\"out_dir\":\"x\",\"stem_tap\":\"pre\"}", r, error));
+    CHECK(r.stemsPreFader);
+    CHECK(parseSongRenderRequest("{\"out_dir\":\"x\"}", r, error));
+    CHECK(!r.stemsPreFader);
+    CHECK(!parseSongRenderRequest("{\"out_dir\":\"x\",\"stem_tap\":\"middle\"}", r, error));
+    CHECK(error.find("stem_tap") != std::string::npos);
+}
+
+TEST(a_bounce_of_a_clip_range_renders_just_that_range) {
+    // Bounce to audio of a selection: the range's frames, from its first step, and nothing of the track before it.
+    const ProjectSpec p = song(false);
+    const std::string dir = tempDir("bounce");
+    SongRenderRequest q = request(dir);
+    q.mix = false;
+    q.layers = {"a"};
+    q.stemsPreFader = true;
+    q.stemsThroughMaster = false;
+    q.bounds = SongBounds::Selection;
+    q.startSteps = 8;
+    q.endSteps = 16;
+    SongRenderResult r;
+    CHECK(renderSong(p, q, r));
+    CHECK_EQ(r.files.at(0).frames, int64_t{8 * 6000});
+    CHECK(energy(readFloatWav(r.files[0].path)) > 1e-3);
+    std::filesystem::remove_all(dir);
+}
+
+TEST(a_frozen_track_runs_no_instrument_or_effects_and_costs_about_an_audio_clip) {
+    // The Benchmark's one busy Flagship with a reverb after it, live and frozen: frozen, the engine holds no insert of
+    // the track (only the clip player as its instrument), and a second of audio costs a fraction of the live one's.
+    ProjectSpec p = stress::singleSynth();
+    p.layers.back().components = {effect("org.caw.reverb.pro")};
+    const std::string id = p.layers.back().id;
+    const std::string dir = tempDir("cpu");
+    const std::string path = freezeRender(p, id, dir);
+    const ProjectSpec ice = frozen(p, id, path);
+    auto seconds = [](const ProjectSpec& q, std::string* states) {
+        Engine e(48000);
+        CHECK(e.setProject(q).find("\"ok\":true") != std::string::npos);
+        if (states) *states = e.componentStatesJson(q.layers.back().id);
+        e.play();
+        std::vector<float> l(256), r(256);
+        for (int k = 0; k < 188; ++k) e.process(l.data(), r.data(), 256);  // warm up: one second
+        double best = 1e9;
+        for (int run = 0; run < 3; ++run) {
+            const auto t0 = std::chrono::steady_clock::now();
+            for (int k = 0; k < 375; ++k) e.process(l.data(), r.data(), 256);  // two seconds of audio
+            best = std::min(best, std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count());
+        }
+        return best / 2.0;  // per second of audio
+    };
+    std::string liveStates, frozenStates;
+    const double live = seconds(p, &liveStates), cold = seconds(ice, &frozenStates);
+    std::printf("  CPU per second of audio: live %.2f ms, frozen %.2f ms\n", live * 1e3, cold * 1e3);
+    CHECK(liveStates.find("\"index\":0,") != std::string::npos);    // live: the reverb at insert 0
+    CHECK(frozenStates.find("\"index\":0,") == std::string::npos);  // frozen: no insert runs
+    std::filesystem::remove_all(dir);
+}
+
+TEST(a_frozen_clip_with_lengthens_song_false_keeps_the_song_s_length) {
+    // The app sends a frozen track's clip with its tail past the song's end and "lengthens_song": false.
+    ProjectSpec spec;
+    std::string error;
+    CHECK(parseProject("{\"loop_bars\":1,\"layers\":[{\"id\":\"t\",\"audio_clips\":[{\"id\":\"c\",\"path\":\"x.wav\","
+                       "\"length_steps\":40,\"lengthens_song\":false}]}]}", spec, error));
+    CHECK_EQ(spec.loopBars, 1);
+    CHECK(parseProject("{\"loop_bars\":1,\"layers\":[{\"id\":\"t\",\"audio_clips\":[{\"id\":\"c\",\"path\":\"x.wav\","
+                       "\"length_steps\":40}]}]}", spec, error));
+    CHECK_EQ(spec.loopBars, 3);
 }

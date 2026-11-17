@@ -41,6 +41,11 @@ struct SongRenderRequest {
     double tailSeconds = 2.0;      // Seconds: exactly this; Silence: at most this
     double silenceDb = -90.0;      // Silence: below this on every output for half a second ends the tail
     bool stemsThroughMaster = true;  // stems get the master's volume, DC filter and start fade (not its effects)
+    // "stem_tap" (freeze and bounce, 1.0.5): false ("post") a stem is what its layer sends on, as it meets the others;
+    // true ("pre") what its instrument and effects give, before its volume, pan and sends, moved earlier by the
+    // layer's own latency so frame 0 is the range's first frame. A pre-fader render's silent tail is judged on its
+    // stems alone (the mix, when it isn't written, never keeps it going).
+    bool stemsPreFader = false;
 };
 
 struct RenderedFile {
