@@ -32,6 +32,7 @@ import 'dock/floating_window.dart';
 import 'dock/layout.dart';
 import 'file_manager_screen.dart';
 import 'files/project_file_actions.dart';
+import 'files/project_library_view.dart';
 import 'midi_file_actions.dart';
 import 'key_router.dart';
 import 'panel_motion.dart';
@@ -1040,39 +1041,37 @@ Future<void> showProjectMenu(BuildContext context, AppState s) async {
               s.settings.commitLook();
             },
           ),
-          const Heading('Open'),
-          for (final p in projects)
+          // The three most recent projects for a quick switch; All projects… opens the Projects page (folders,
+          // search, select mode, delete with undo), the same one as Files › Projects (owner, 2026-11-14).
+          const Heading('Recent'),
+          for (final p in ([...projects]..sort((a, b) => b.modified.compareTo(a.modified))).take(3))
             ListTile(
+              key: ValueKey('recent-project:${p.id}'),
               selected: p.id == s.project.id,
               title: Text(p.name),
-              subtitle: Text(p.modified.toLocal().toString().substring(0, 16), style: const TextStyle(color: Neon.dim)),
+              subtitle: Text(p.id == s.project.id ? 'Open' : p.modified.toLocal().toString().substring(0, 16),
+                  style: const TextStyle(color: Neon.dim)),
               onTap: () {
                 Navigator.pop(context);
-                s.openProject(p.id);
+                if (p.id != s.project.id) s.openProject(p.id);
               },
-              trailing: IconButton(
-                icon: const Icon(Icons.delete_outline, color: Neon.pink),
-                tooltip: 'Delete',
-                onPressed: () async {
-                  final ok = await showDialog<bool>(
-                    context: context, animationStyle: dialogAnimation(context),
-                    builder: (context) => AlertDialog(
-                      title: Text('Delete ${p.name}?'),
-                      actions: [
-                        TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-                        TextButton(
-                            onPressed: () => Navigator.pop(context, true),
-                            child: const Text('Delete', style: TextStyle(color: Neon.pink))),
-                      ],
-                    ),
-                  );
-                  if (ok == true && context.mounted) {
-                    Navigator.pop(context);
-                    await s.deleteProject(p.id);
-                  }
-                },
-              ),
             ),
+          ListTile(
+            key: const ValueKey('project-all'),
+            leading: const Icon(Icons.folder_open_outlined, color: Neon.yellow),
+            title: const Text('All projects…'),
+            subtitle: const Text('Folders, search, select and delete', style: TextStyle(color: Neon.dim)),
+            trailing: const Icon(Icons.chevron_right, color: Neon.dim),
+            onTap: () {
+              final nav = Navigator.of(context);
+              nav.pop();
+              nav.push(panelRoute<void>(nav.context, (page) => GlassPage(child: Scaffold(
+                    backgroundColor: Colors.transparent,
+                    appBar: AppBar(title: const Text('Projects'), backgroundColor: Colors.transparent),
+                    body: SafeArea(top: false, child: ProjectLibraryView(state: s, onOpened: () => Navigator.of(page).maybePop())),
+                  ))));
+            },
+          ),
           // The menu's last item (the app names in C.A.W-Telemetry's PLAN.md).
           if (Telemetry.current case final t?)
             ListTile(
