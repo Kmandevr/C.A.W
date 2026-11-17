@@ -125,7 +125,7 @@ class MusicVideoPreviewState extends State<MusicVideoPreview> with SingleTickerP
 
   void _tick(Duration _) {
     if (!_playing) return;
-    final st = _live ? s.playheadStep : _silentFrom + _silent.elapsedMicroseconds / 1e6 * widget.scene.bpm / 15;
+    final st = _live ? s.smoothPlayheadStep : _silentFrom + _silent.elapsedMicroseconds / 1e6 * widget.scene.bpm / 15;
     // Live meters, held and falling as the render's are.
     if (_live) {
       final m = s.audibleMeters;

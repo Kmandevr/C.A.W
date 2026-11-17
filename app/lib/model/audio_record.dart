@@ -13,6 +13,7 @@ import '../platform/mic_permission.dart';
 import 'app_state.dart';
 import 'audio_clips.dart';
 import 'audio_edit.dart';
+import 'latency_comp.dart';
 import 'project.dart';
 import 'atomic_file.dart';
 
@@ -542,11 +543,29 @@ class AudioRecorder extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Plays the ping and waits for its answer (about a second). Null when it couldn't start.
-  Future<PingResult?> ping({Duration poll = const Duration(milliseconds: 150), int tries = 20}) async {
+  /// Measures the round trip: plays the ping [runs] times (about a second each) and judges them together
+  /// ([judgePings]: enough of them heard, all within the tolerance of their median). A reliable series becomes the
+  /// latency in use unless one is typed in, and what the output's latency does not explain of it is the input's
+  /// (Settings › Audio › Latency); an unreliable one is reported and not saved. Null when it couldn't start.
+  Future<PingSeries?> ping({Duration poll = const Duration(milliseconds: 150), int tries = 20, int runs = pingRuns,
+      void Function(int done, int runs)? progress}) async {
     _pinging = true;
     try {
-      return await _ping(poll, tries);
+      final results = <double?>[];
+      for (var i = 0; i < runs; i++) {
+        final r = await _ping(poll, tries);
+        if (r == null) {
+          if (i == 0) return null;
+          break;
+        }
+        results.add(r.ok ? r.ms : null);
+        progress?.call(i + 1, runs);
+      }
+      final series = judgePings(results, minHeard: math.min(pingMinHeard, runs));
+      state.latency.applyPingSeries(series);
+      _applyLatency();
+      notifyListeners();
+      return series;
     } finally {
       _pinging = false;
       _onState();  // nothing else uses it: the microphone closes again
@@ -559,16 +578,7 @@ class AudioRecorder extends ChangeNotifier {
     for (var i = 0; i < tries; i++) {
       await Future<void>.delayed(poll);
       final r = io.pingResult();
-      if (r.done) {
-        // A good ping becomes the latency in use unless one is typed in; what the output's latency does not explain
-        // of it is the input's (Settings › Audio › Latency).
-        if (r.ok) {
-          state.latency.splitPing(r.ms);
-          _applyLatency();
-        }
-        notifyListeners();
-        return r;
-      }
+      if (r.done) return r;
     }
     return const PingResult(state: 'done', ok: false);
   }

@@ -1,6 +1,6 @@
-// Output and input latency compensation (owner, 2026-11-11): the platform's figure plus a saved offset per device
-// (preset by its kind, typed in, tapped along or found by the loopback ping), the tap-along median, and a short
-// timeline of meter readings so what the screen shows can be read at the time it is heard.
+// Output and input latency compensation (owner, 2026-11-11; #236): the platform's figure plus a saved offset per
+// device (preset by its kind, typed in, slid while listening, tapped along, found by the loopback ping series or
+// learned from takes and accepted), the tap-along median, and a timeline of meter reads shown when they are heard.
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -34,20 +34,56 @@ double presetInputMs(AudioDeviceKind kind) => switch (kind) {
     };
 
 /// How a saved offset was set.
-enum OffsetSource { preset, typed, tapped, loopback }
+enum OffsetSource { preset, typed, slider, tapped, loopback, learned }
 
-/// One device's offset: the ms it adds on top of what the platform reports.
+/// The least an offset may be: below what the platform reports (a platform figure that counts too much), to
+/// [maxOffsetMs] above it.
+const minOffsetMs = -500.0, maxOffsetMs = 2000.0;
+
+/// One device's offset: the ms it adds on top of what the platform reports, and that figure when it was set
+/// ([platformMs]; null for an older file), so a platform figure that moves a lot since asks for a check.
 class DeviceOffset {
-  const DeviceOffset(this.extraMs, this.source);
+  const DeviceOffset(this.extraMs, this.source, {this.platformMs});
   final double extraMs;
   final OffsetSource source;
+  final double? platformMs;
 
-  Map<String, dynamic> toJson() => {'extra_ms': extraMs, 'source': source.name};
+  Map<String, dynamic> toJson() =>
+      {'extra_ms': extraMs, 'source': source.name, if (platformMs != null) 'platform_ms': platformMs};
 
   static DeviceOffset? fromJson(Object? o) {
-    if (o is! Map || o['extra_ms'] is! num) return null;
-    return DeviceOffset((o['extra_ms'] as num).toDouble().clamp(0, 2000).toDouble(),
-        OffsetSource.values.where((s) => s.name == o['source']).firstOrNull ?? OffsetSource.typed);
+    if (o is! Map || o['extra_ms'] is! num || !(o['extra_ms'] as num).isFinite) return null;
+    final p = o['platform_ms'];
+    return DeviceOffset((o['extra_ms'] as num).toDouble().clamp(minOffsetMs, maxOffsetMs).toDouble(),
+        OffsetSource.values.where((s) => s.name == o['source']).firstOrNull ?? OffsetSource.typed,
+        platformMs: p is num && p.isFinite ? p.toDouble().clamp(0, maxOffsetMs).toDouble() : null);
+  }
+}
+
+/// How far a device's recorded notes landed from the beat, in ms (positive: late), over its takes: the evidence
+/// a suggested correction rests on. At most [cap] deviations are kept, the newest.
+class TimingEvidence {
+  TimingEvidence();
+  static const cap = 256;
+  int takes = 0;
+  final List<double> ms = [];
+
+  void add(List<double> deviations) {
+    if (deviations.isEmpty) return;
+    takes++;
+    ms.addAll(deviations.where((d) => d.isFinite));
+    if (ms.length > cap) ms.removeRange(0, ms.length - cap);
+  }
+
+  Map<String, dynamic> toJson() => {'takes': takes, 'ms': ms};
+
+  static TimingEvidence? fromJson(Object? o) {
+    if (o is! Map || o['takes'] is! num || o['ms'] is! List) return null;
+    final e = TimingEvidence()..takes = (o['takes'] as num).toInt().clamp(0, 1 << 20);
+    for (final v in (o['ms'] as List).take(cap)) {
+      if (v is num && v.isFinite) e.ms.add(v.toDouble().clamp(-1000, 1000).toDouble());
+    }
+    return e;
   }
 }
 
@@ -60,11 +96,15 @@ class LatencyStore {
   bool enabled = true;
   final Map<String, DeviceOffset> outputs = {}, inputs = {};
 
+  /// Per output device: how its takes landed against the beat (learning from recordings).
+  final Map<String, TimingEvidence> evidence = {};
+
   Map<String, dynamic> toJson() => {
         'version': 1,
         'enabled': enabled,
         'outputs': {for (final e in outputs.entries) e.key: e.value.toJson()},
         'inputs': {for (final e in inputs.entries) e.key: e.value.toJson()},
+        'evidence': {for (final e in evidence.entries) e.key: e.value.toJson()},
       };
 
   void fromJson(Map<String, dynamic> j) {
@@ -80,6 +120,14 @@ class LatencyStore {
 
     read(j['outputs'], outputs);
     read(j['inputs'], inputs);
+    evidence.clear();
+    final ev = j['evidence'];
+    if (ev is Map) {
+      for (final e in ev.entries) {
+        final v = TimingEvidence.fromJson(e.value);
+        if (e.key is String && v != null && evidence.length < 64) evidence[e.key as String] = v;
+      }
+    }
   }
 
   Future<void> load() async {
@@ -134,6 +182,87 @@ double? tapAlongMs(List<double> tapSteps, {required double bpm, double stepsPerB
   return median(lead);
 }
 
+/// The loopback ping series' verdict: reliable when at least [minHeard] of the runs were heard and every heard one
+/// lies within the tolerance of their median ([toleranceMs], or [toleranceShare] of the median when that is more).
+class PingSeries {
+  const PingSeries({required this.runs, required this.heard, this.ms, this.spreadMs = 0, this.reliable = false,
+      this.toleranceMs = 0});
+  final int runs, heard;
+
+  /// The median round trip of the heard runs (null: none heard).
+  final double? ms;
+
+  /// The farthest a heard run lay from the median, and how far it was allowed to.
+  final double spreadMs, toleranceMs;
+  final bool reliable;
+}
+
+/// How many pings a measurement plays, and the agreement asked of them (#236: several runs that must agree).
+/// **[Assumption]** a cable or a quiet room repeats within a couple of ms; Bluetooth's link wanders more, which the
+/// share allows for (9 ms at 300 ms).
+const pingRuns = 5, pingMinHeard = 4, pingToleranceMs = 3.0, pingToleranceShare = 0.03;
+
+/// Judges a series of ping results in ms (null: that run was not heard clearly).
+PingSeries judgePings(List<double?> results,
+    {int minHeard = pingMinHeard, double toleranceMs = pingToleranceMs, double toleranceShare = pingToleranceShare}) {
+  final heard = [for (final r in results) if (r != null && r.isFinite && r >= 0) r];
+  final m = median(heard);
+  if (m == null) return PingSeries(runs: results.length, heard: 0);
+  final spread = heard.map((v) => (v - m).abs()).reduce(math.max);
+  final tol = math.max(toleranceMs, m * toleranceShare);
+  return PingSeries(runs: results.length, heard: heard.length, ms: m, spreadMs: spread, toleranceMs: tol,
+      reliable: heard.length >= minHeard && spread <= tol);
+}
+
+/// What went wrong with an unreliable series, in one line for the user.
+String pingSeriesProblem(PingSeries p) => p.heard < math.min(pingMinHeard, p.runs)
+    ? 'Unreliable: only ${p.heard} of ${p.runs} pings were heard clearly. Nothing was saved; try again, louder, '
+        'or with a cable.'
+    : 'Unreliable: the pings disagreed by up to ${p.spreadMs.toStringAsFixed(1)} ms (allowed '
+        '${p.toleranceMs.toStringAsFixed(1)}). Nothing was saved; try a quieter room or a cable.';
+
+/// How far each recorded note start in [onsetSteps] (sixteenth steps on the song) lies from its nearest beat (a
+/// quarter note, where the click sounds), in ms at the tempo there ([bpmAt] of the step); only notes within
+/// [windowMs] of a beat count (off-beat notes say nothing about the beat). Positive: late.
+List<double> beatDeviationsMs(Iterable<double> onsetSteps, {required double Function(double step) bpmAt,
+    double windowMs = 60}) {
+  final out = <double>[];
+  for (final s in onsetSteps) {
+    if (!s.isFinite) continue;
+    final bpm = bpmAt(s);
+    if (!(bpm > 0)) continue;
+    final ms = (s - (s / 4).round() * 4) * 15000 / bpm;
+    if (ms.abs() <= windowMs) out.add(ms);
+  }
+  return out;
+}
+
+/// A correction the takes suggest for the routed output: its total output latency would become [totalMs] (now
+/// [fromMs]), from [onsets] notes over [takes] takes landing a median [shiftMs] off the beat.
+class LatencySuggestion {
+  const LatencySuggestion({required this.fromMs, required this.totalMs, required this.shiftMs, required this.onsets,
+      required this.takes});
+  final double fromMs, totalMs, shiftMs;
+  final int onsets, takes;
+}
+
+/// What counts as enough evidence (#236: suggest after enough evidence, never apply silently). **[Assumption]**
+/// a player's own spread is 10 to 30 ms; a median shift of 8 ms or more over 24 notes from 3 takes, with at least
+/// 70 % of them on the same side, is more than playing style.
+const learnMinTakes = 3, learnMinOnsets = 24, learnMinShiftMs = 8.0, learnAgreeShare = 0.7;
+
+/// The suggestion [e] supports for an output at [currentMs] in all, or null when the evidence is not enough.
+LatencySuggestion? suggestFrom(TimingEvidence? e, double currentMs) {
+  if (e == null || e.takes < learnMinTakes || e.ms.length < learnMinOnsets) return null;
+  final m = median(e.ms)!;
+  if (m.abs() < learnMinShiftMs) return null;
+  final agree = e.ms.where((v) => v.sign == m.sign).length / e.ms.length;
+  if (agree < learnAgreeShare) return null;
+  final shift = m.roundToDouble();
+  return LatencySuggestion(fromMs: currentMs, totalMs: math.max(0, currentMs + shift), shiftMs: shift,
+      onsets: e.ms.length, takes: e.takes);
+}
+
 /// One meter read, at [us] on the app's clock.
 class MeterReading {
   const MeterReading(this.us, this.meters, this.layers);
@@ -165,14 +294,44 @@ class MeterTimeline {
     }
     return null;
   }
+
+  /// The reading whose span holds [us]: a read stands for what was rendered since the read before it, so this is
+  /// the first one taken at or after [us] (the newest when [us] is past it). Null when [us] lies before the first
+  /// kept read's span (taken as [spanUs] long): nothing of it is heard yet.
+  MeterReading? covering(int us, {int spanUs = 33000}) {
+    if (_r.isEmpty) return null;
+    if (us >= _r.last.us) return _r.last;
+    var lo = 0, hi = _r.length - 1;
+    while (lo < hi) {
+      final mid = (lo + hi) >> 1;
+      if (_r[mid].us >= us) {
+        hi = mid;
+      } else {
+        lo = mid + 1;
+      }
+    }
+    if (lo == 0 && us <= _r.first.us - spanUs) return null;
+    return _r[lo];
+  }
 }
 
 /// The compensation in force: the routed devices, the platform's figure for each side and each device's offset.
 class LatencyComp extends ChangeNotifier {
-  LatencyComp({LatencyStore? store, AudioRoute? route, this.readDevice})
+  LatencyComp({LatencyStore? store, AudioRoute? route, this.readDevice, this.recheckDelay = const Duration(seconds: 2)})
       : store = store ?? LatencyStore(),
         route = route ?? const NamedAudioRoute() {
-    _sub = this.route.changes.listen((_) => unawaited(refresh()));
+    _sub = this.route.changes.listen((_) => unawaited(_routeMoved()));
+  }
+
+  /// After a device change, how long until the platform's figure is read again (a Bluetooth link settles after it
+  /// connects).
+  final Duration recheckDelay;
+  Timer? _recheck;
+
+  Future<void> _routeMoved() async {
+    await refresh();
+    _recheck?.cancel();
+    _recheck = Timer(recheckDelay, () => unawaited(refresh()));
   }
 
   final LatencyStore store;
@@ -191,6 +350,9 @@ class LatencyComp extends ChangeNotifier {
   /// The output device the last loopback ping was made through (the ping's split holds for it).
   String? pingOutputKey;
 
+  /// The output before the last device change while sound ran (the slider sheet says what changed); null at first.
+  AudioEndpoint? previousOutput;
+
   Future<void> load() async {
     await store.load();
     notifyListeners();
@@ -203,6 +365,7 @@ class LatencyComp extends ChangeNotifier {
     final info = await route.current(AudioRouteHint(outputId: d.output.deviceId, inputId: d.input.deviceId,
         outputName: outputName?.call() ?? '', inputName: inputName?.call() ?? '', outputKind: d.output.kind,
         inputKind: d.input.kind));
+    if (info.output.key != routeInfo.output.key && device.running) previousOutput = routeInfo.output;
     final changed = info.output != routeInfo.output || info.input != routeInfo.input ||
         (d.output.frames - device.output.frames).abs() > 48 || (d.input.frames - device.input.frames).abs() > 48 ||
         d.running != device.running;
@@ -228,28 +391,59 @@ class LatencyComp extends ChangeNotifier {
   DeviceOffset get inputOffset => store.inputs[routeInfo.input.key] ??
       DeviceOffset(math.max(0, presetInputMs(routeInfo.input.kind) - platformInputMs), OffsetSource.preset);
 
+  /// What the routed output adds in all, compensation on or off (the slider's value).
+  double get outputTotalMs => math.max(0, platformOutputMs + outputOffset.extraMs);
+
   /// From a sample leaving the engine to the ear, in ms (0 with compensation off).
-  double get outputMs => enabled ? platformOutputMs + outputOffset.extraMs : 0;
+  double get outputMs => enabled ? outputTotalMs : 0;
 
   /// From the microphone to the engine reading it, in ms (0 with compensation off or no input).
-  double get inputMs => enabled ? platformInputMs + inputOffset.extraMs : 0;
+  double get inputMs => enabled ? math.max(0, platformInputMs + inputOffset.extraMs) : 0;
+
+  /// The routed output is Bluetooth: it adds a delay of its own that no app can remove.
+  bool get outputIsBluetooth => routeInfo.output.kind.isBluetooth;
+
+  /// How far the platform's figure for the routed output may move from what it was when its offset was set before
+  /// the offset asks for a check (a new codec or link mode changes the delay). **[Assumption]** 15 ms.
+  static const recheckMs = 15.0;
+
+  /// The routed output's saved offset was set while the platform reported a figure more than [recheckMs] away
+  /// from today's: its total may be off now.
+  bool get outputNeedsCheck {
+    final o = store.outputs[routeInfo.output.key];
+    final then = o?.platformMs;
+    return o != null && then != null && device.output.running && (platformOutputMs - then).abs() > recheckMs;
+  }
 
   int framesOf(double ms, int sampleRate) => (ms * sampleRate / 1000).round();
 
   /// The badge: the output adds more than 50 ms, so playing live and monitoring will feel late.
   bool get outputIsLate => enabled && outputMs > 50;
 
-  /// Sets what the routed output adds in all (ms heard after the engine renders), keeping the platform's part.
-  void setOutputTotalMs(double totalMs, {OffsetSource source = OffsetSource.typed}) {
+  static double _extra(double totalMs, double platformMs) =>
+      (totalMs.clamp(0, maxOffsetMs) - platformMs).clamp(minOffsetMs, maxOffsetMs).toDouble();
+
+  /// Sets what the routed output adds in all (ms heard after the engine renders), keeping the platform's part;
+  /// [save] false keeps it in memory (a slider drag saves once it ends, [saveNow]).
+  void setOutputTotalMs(double totalMs, {OffsetSource source = OffsetSource.typed, bool save = true}) {
+    if (!totalMs.isFinite) return;
     store.outputs[routeInfo.output.key] =
-        DeviceOffset(math.max(0, totalMs - platformOutputMs).clamp(0, 2000).toDouble(), source);
-    unawaited(store.save());
+        DeviceOffset(_extra(totalMs, platformOutputMs), source, platformMs: platformOutputMs);
+    if (save) unawaited(store.save());
     notifyListeners();
   }
 
+  /// Moves the routed output's total by [deltaMs] (the slider sheet's ±1 ms).
+  void nudgeOutput(double deltaMs) =>
+      setOutputTotalMs((outputTotalMs + deltaMs).roundToDouble(), source: OffsetSource.slider);
+
+  /// Saves the offsets now (after a slider drag).
+  Future<void> saveNow() => store.save();
+
   void setInputTotalMs(double totalMs, {OffsetSource source = OffsetSource.typed}) {
+    if (!totalMs.isFinite) return;
     store.inputs[routeInfo.input.key] =
-        DeviceOffset(math.max(0, totalMs - platformInputMs).clamp(0, 2000).toDouble(), source);
+        DeviceOffset(_extra(totalMs, platformInputMs), source, platformMs: platformInputMs);
     unawaited(store.save());
     notifyListeners();
   }
@@ -269,8 +463,46 @@ class LatencyComp extends ChangeNotifier {
   /// does not explain is the input's.
   void splitPing(double roundTripMs) {
     pingOutputKey = routeInfo.output.key;
-    final out = enabled ? outputMs : platformOutputMs + outputOffset.extraMs;
-    setInputTotalMs(math.max(0, roundTripMs - out), source: OffsetSource.loopback);
+    setInputTotalMs(math.max(0, roundTripMs - outputTotalMs), source: OffsetSource.loopback);
+  }
+
+  /// A finished ping series: a reliable one is split as [splitPing] does, from its median (the engine's own
+  /// measurement is its last run, so the app's round trip, the median, is what recordings use: [pingOutputKey]
+  /// stays clear); an unreliable one is not saved, and an earlier ping through this output no longer stands.
+  void applyPingSeries(PingSeries p) {
+    pingOutputKey = null;
+    if (p.reliable && p.ms != null) {
+      setInputTotalMs(math.max(0, p.ms! - outputTotalMs), source: OffsetSource.loopback);
+    } else {
+      notifyListeners();
+    }
+  }
+
+  /// Learning from recordings: the deviations of one take's notes from the beat ([beatDeviationsMs]), kept for
+  /// the routed output. Nothing changes until the user accepts [outputSuggestion].
+  void learnFromTake(List<double> deviationsMs) {
+    if (deviationsMs.isEmpty) return;
+    (store.evidence[routeInfo.output.key] ??= TimingEvidence()).add(deviationsMs);
+    unawaited(store.save());
+    notifyListeners();
+  }
+
+  /// The correction the routed output's takes suggest, once there is enough evidence (with compensation on).
+  LatencySuggestion? get outputSuggestion => enabled ? suggestFrom(store.evidence[routeInfo.output.key], outputTotalMs) : null;
+
+  /// Takes the suggestion: the output's total moves by its shift, and the evidence starts again.
+  void acceptSuggestion() {
+    final s = outputSuggestion;
+    if (s == null) return;
+    store.evidence.remove(routeInfo.output.key);
+    setOutputTotalMs(s.totalMs, source: OffsetSource.learned);
+  }
+
+  /// Not now: the evidence starts again (a suggestion comes back only if new takes show it again).
+  void dismissSuggestion() {
+    if (store.evidence.remove(routeInfo.output.key) == null) return;
+    unawaited(store.save());
+    notifyListeners();
   }
 
   /// The round trip a recording is placed by: what you heard plus how late the microphone is.
@@ -278,6 +510,7 @@ class LatencyComp extends ChangeNotifier {
 
   @override
   void dispose() {
+    _recheck?.cancel();
     unawaited(_sub?.cancel());
     super.dispose();
   }

@@ -10,6 +10,7 @@ import '../engine/engine.dart';
 import '../engine/execution.dart';
 import '../platform/audio_route.dart';
 import '../platform/resource_signals.dart';
+import 'av_sync.dart';
 import 'latency_comp.dart';
 import 'poller.dart';
 import 'native_components.dart';
@@ -158,18 +159,25 @@ class AppState extends ChangeNotifier implements StressHost {
   /// How long after rendering a sample is heard, in microseconds (0 with compensation off).
   int get outputLatencyUs => (latency.outputMs * 1000).round();
 
-  /// The meter read being heard now: the one taken an output latency ago (the newest with compensation off or
-  /// nothing older kept). Peaks, playing and position all come from it.
-  MeterReading get audibleReading =>
-      meterAt(nowUs - outputLatencyUs) ?? MeterReading(nowUs, const EngineMeters(), const []);
+  /// The screen's lead over the sound (av_sync.dart, #236 "lean early"): the frame's display latency plus a small
+  /// early bias. The app hands in the rate it draws at (main.dart).
+  final AvSync avSync = AvSync();
 
-  /// The meter read taken at or before [us] on [nowUs]'s clock; while compensation holds the first reads back,
-  /// a silent one (nothing of them is heard yet). Null only when nothing was read at all.
+  /// How far ahead what follows the audio is drawn, in µs (0 with compensation off: it shows what was rendered).
+  int get visualLeadUs => latency.enabled ? avSync.leadUs : 0;
+
+  /// The meter read being heard when this frame lights up: the one whose span holds that moment less the output
+  /// latency (the newest with compensation off). Peaks, playing and position all come from it.
+  MeterReading get audibleReading =>
+      meterAt(meterRenderUs(nowUs: nowUs, leadUs: visualLeadUs, outputLatencyUs: outputLatencyUs)) ??
+      MeterReading(nowUs, const EngineMeters(), const []);
+
+  /// The meter read whose span (since the read before it) holds [us] on [nowUs]'s clock; while compensation holds
+  /// the first reads back, a silent one (nothing of them is heard yet). Null only when nothing was read at all.
   MeterReading? meterAt(int us) {
     final newest = meterTimeline.newest;
     if (newest == null) return null;
-    if (us >= newest.us) return newest;
-    return meterTimeline.at(us) ??
+    return meterTimeline.covering(us, spanUs: _poller.interval.inMicroseconds) ??
         MeterReading(us, EngineMeters(playing: false, loopLength: newest.meters.loopLength), const []);
   }
 
@@ -1296,9 +1304,15 @@ class AppState extends ChangeNotifier implements StressHost {
   /// settled onto each new read, for drawing it at the screen's rate. Stopped or paused it is [playheadStep] exactly.
   final PlayheadClock playheadClock = PlayheadClock();
 
-  /// [playheadClock] now: where to draw the playhead in this frame.
+  /// [playheadClock] now: where to draw the playhead in this frame (for the moment it lights up, [visualLeadUs]).
   double get smoothPlayheadStep =>
-      meters.playing && playheadClock.playing ? playheadClock.at(nowUs) : playheadStep;
+      meters.playing && playheadClock.playing ? playheadClock.at(nowUs + visualLeadUs) : playheadStep;
+
+  /// The playhead for something drawn only on the engine's reads (the piano roll under Smooth follow): where the
+  /// line is half a read interval on, plus the lead, so it is as early as late between reads.
+  double get heldPlayheadStep => meters.playing && playheadClock.playing
+      ? playheadClock.at(heldDrawUs(nowUs: nowUs, leadUs: visualLeadUs, readIntervalUs: _poller.interval.inMicroseconds))
+      : playheadStep;
 
   // Hands the read just taken to [playheadClock], over the range [heardStep] wraps in.
   void _readPlayhead() {

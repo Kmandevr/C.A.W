@@ -40,6 +40,7 @@ import 'package:caw/model/sample_names.dart';
 import 'package:caw/model/sample_use.dart';
 import 'package:caw/model/updates/update_fetch.dart';
 import 'package:caw/model/updates/update_service.dart';
+import 'package:caw/platform/audio_route.dart';
 import 'package:caw/ui/arrange/mixer_card.dart';
 import 'package:caw/ui/arranger_screen.dart';
 import 'package:caw/ui/benchmark/benchmark_screen.dart';
@@ -55,6 +56,8 @@ import 'package:caw/ui/music_video/video_setup_sheet.dart';
 import 'package:caw/ui/music_video/video_painter.dart';
 import 'package:caw/ui/privacy/feedback_sheet.dart';
 import 'package:caw/ui/privacy/privacy_pages.dart';
+import 'package:caw/ui/settings/latency_settings.dart';
+import 'package:caw/ui/settings/latency_sheet.dart';
 import 'package:caw/ui/settings/settings_page.dart';
 import 'package:caw/ui/settings/settings_registry.dart';
 import 'package:caw/ui/settings/settings_deps.dart';
@@ -73,6 +76,8 @@ import 'tempo_golden_test.dart' show tempoSong;
 
 import 'background_playback_test.dart' show FakePlaybackService;
 import 'audio_fake.dart';
+import 'latency_comp_test.dart' show FakeRoute, buds, mic;
+import 'latency_comp_test.dart' as lat show device;
 import 'sample_fake.dart';
 import 'benchmark_test.dart' show FakeStress;
 import 'component_bench_fake.dart';
@@ -258,6 +263,13 @@ void _sweep(String name, Future<void> Function(_Ctx c) body, {bool engine = fals
 
 const _lead = ComponentBenchTarget(name: 'Lead', componentId: 'com.me.lead', libraryPath: '/b/lead.so', instrument: true);
 const _fuzz = ComponentBenchTarget(name: 'Fuzz', componentId: 'com.me.fuzz', libraryPath: '/b/fuzz.so', instrument: false);
+
+class _FitBluetooth implements BluetoothSettings {
+  @override
+  bool get canOpen => true;
+  @override
+  Future<bool> open() async => true;
+}
 
 class _Relay implements RelayHttp {
   @override
@@ -522,6 +534,46 @@ void main() {
     await c.tester.ensureVisible(send);
     await _settle(c.tester);
     expect(c.tester.getRect(send).bottom, lessThanOrEqualTo(c.size.size.height - c.size.pad.bottom));
+    await c.end('');
+  });
+
+  // The latency sheet (#236) on Bluetooth with a learned suggestion and a re-check: every card at once; and the page.
+  Future<AppState> latencyState(WidgetTester tester) async {
+    var outMs = 20.0;
+    final s = AppState(settings: Settings(), audioRoute: FakeRoute(const AudioRouteInfo(output: buds, input: mic)));
+    s.latency.readDevice = () => lat.device(outMs: outMs);
+    await tester.runAsync(() => s.latency.refresh());
+    s.latency.setOutputTotalMs(212);
+    outMs = 60;
+    await tester.runAsync(() => s.latency.refresh());
+    for (var i = 0; i < 3; i++) {
+      s.latency.learnFromTake(List.filled(10, 18.0));
+    }
+    addTearDown(s.dispose);
+    return s;
+  }
+
+  _sweep('latency-sheet', (c) async {
+    final s = await latencyState(c.tester);
+    BluetoothSettings.current = _FitBluetooth();
+    addTearDown(() => BluetoothSettings.current = const NoBluetoothSettings());
+    await _pump(c, const Scaffold(body: SizedBox.expand()));
+    unawaited(showLatencySheet(_navCtx(c.tester), s, settings: () {}));
+    await _settle(c.tester);
+    expect(find.byKey(const ValueKey('latency-suggestion')), findsOneWidget);
+    expect(find.byKey(const ValueKey('latency-recheck')), findsOneWidget);
+    await c.shot('');
+    final last = find.byKey(const ValueKey('latency-sheet-settings'));
+    await c.tester.ensureVisible(last);
+    await _settle(c.tester);
+    expect(c.tester.getRect(last).bottom, lessThanOrEqualTo(c.size.size.height - c.size.pad.bottom));
+    await c.end('');
+  });
+  _sweep('latency-page', (c) async {
+    final s = await latencyState(c.tester);
+    await _pump(c, LatencyPage(state: s));
+    await _settle(c.tester);
+    await c.shot('');
     await c.end('');
   });
 

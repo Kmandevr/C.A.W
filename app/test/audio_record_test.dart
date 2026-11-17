@@ -171,9 +171,11 @@ void main() {
     expect(rec.latency.source, 'override');
     rec.setLatencyMs(null);
     expect(io.latencyOverride, -1);
+    // Five pings that agree: their median (10 ms) is the round trip recordings are placed by.
     final r = await rec.ping(poll: Duration.zero);
-    expect(r!.ok, isTrue);
-    expect(rec.latency.source, 'measured');
+    expect(r!.reliable, isTrue);
+    expect(r.heard, 5);
+    expect(r.ms, 10);
     expect(rec.latency.frames, 480);
   });
 

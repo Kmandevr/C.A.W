@@ -173,3 +173,48 @@ class NamedAudioRoute implements AudioRoute {
 }
 
 AudioRoute platformAudioRoute() => Platform.isAndroid ? AndroidAudioRoute() : const NamedAudioRoute();
+
+/// The system's Bluetooth settings page, where LE Audio or a device's low-latency mode is turned on (#236). C.A.W
+/// does not choose the Bluetooth codec: the owner's brief (2026-11-17) says that is a privileged system API since
+/// Android 14 (not checked here against a primary source), so it only opens the page.
+abstract class BluetoothSettings {
+  /// Whether this platform has a page to open (the button shows only then).
+  bool get canOpen;
+
+  /// Opens it; false when it could not.
+  Future<bool> open();
+
+  /// The app's (tests swap it).
+  static BluetoothSettings current = Platform.isAndroid ? AndroidBluetoothSettings() : const NoBluetoothSettings();
+}
+
+/// Android: `Settings.ACTION_BLUETOOTH_SETTINGS` through "caw/audio_route" (AudioRoute.kt).
+class AndroidBluetoothSettings implements BluetoothSettings {
+  AndroidBluetoothSettings({MethodChannel? channel}) : _channel = channel ?? const MethodChannel('caw/audio_route');
+  final MethodChannel _channel;
+
+  @override
+  bool get canOpen => true;
+
+  @override
+  Future<bool> open() async {
+    try {
+      return await _channel.invokeMethod<bool>('openBluetoothSettings') ?? false;
+    } on PlatformException {
+      return false;
+    } on MissingPluginException {
+      return false;
+    }
+  }
+}
+
+/// Windows and the desktop builds: no page is opened from the app.
+class NoBluetoothSettings implements BluetoothSettings {
+  const NoBluetoothSettings();
+
+  @override
+  bool get canOpen => false;
+
+  @override
+  Future<bool> open() async => false;
+}
