@@ -1,6 +1,6 @@
 # Handoff
 
-Commit: a7525d6 (session branch = 1.0.5-alpha.1, in PR #238; Main has v1.0.4-alpha.1)
+Commit: 9c8f7a6 (Main = v1.0.5-alpha.1, published 2026-11-17 via PR #238)
 Branch: ccr-56285e11-0xrj3h. Main is protected: PRs only; merge yourself when CI is green. Publish with app.yml's workflow_dispatch (installables + release) on Main. Each release needs a CHANGELOG.md entry, copied to app/assets/CHANGELOG.md.
 
 ## Goal
@@ -19,7 +19,6 @@ Ship 1.0.5-alpha.1 (#215). Then 1.0.6: FX consolidation and the device UI (#227,
   - no golden change apart from the version goldens.
 
 ## Open
-- **PR #238:** wait for CI, merge, then run app.yml release for v1.0.5-alpha.1.
 - **Owner questions:**
   - the AutoStacc pack's 4th device;
   - routing plan questions 3, 6 and 7;
@@ -33,5 +32,4 @@ Ship 1.0.5-alpha.1 (#215). Then 1.0.6: FX consolidation and the device UI (#227,
 - **#235:** UI frames at 120 Hz (not started). The rest of #237 (Linux rtkit, exclusive tests) waits for the next batch.
 
 ## Next
-1. Merge #238 and release.
-2. Start 1.0.6: #227 consolidation plus #231 kit, Flagship, FX chain, React to… and live preset preview. Ask the owner for each device's look first.
+1. Start 1.0.6: #227 consolidation plus #231 kit, Flagship, FX chain, React to… and live preset preview. Ask the owner for each device's look first.
