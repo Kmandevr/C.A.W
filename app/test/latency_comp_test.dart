@@ -306,6 +306,24 @@ void main() {
       expect(androidDeviceKind(99), AudioDeviceKind.unknown);
     });
 
+    test('the routed output says whether it is LE Audio or classic A2DP (#237)', () {
+      AudioEndpoint routed(int type) => pickAndroidRoute({
+            'routed': [
+              {'id': 7, 'type': type, 'name': 'Buds'}
+            ]
+          }, const AudioRouteHint()).output;
+      for (final t in [26, 27, 30, 33]) {
+        expect(routed(t).bluetoothProfile, 'le_audio', reason: 'type $t');
+        expect(routed(t).isLeAudio, isTrue);
+      }
+      expect(routed(8).bluetoothProfile, 'a2dp');
+      expect(routed(8).isLeAudio, isFalse);
+      expect(routed(23).bluetoothProfile, 'asha');
+      expect(routed(23).kind, AudioDeviceKind.bluetoothLe);
+      expect(routed(2).bluetoothProfile, '');
+      expect(const AudioEndpoint(kind: AudioDeviceKind.bluetooth).bluetoothProfile, ''); // Windows: no type
+    });
+
     test('the engine\'s device id wins, then Android 13\'s routed device, then the usual priority', () {
       final snap = <Object?, Object?>{
         'outputs': [

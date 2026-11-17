@@ -37,6 +37,22 @@ class AudioEndpoint {
 
   String get key => kind == AudioDeviceKind.builtIn ? 'builtIn' : '${kind.name}:${name.trim()}';
 
+  /// The Bluetooth link an Android device type names (#237), for the latency UI: 'le_audio' (TYPE_BLE_HEADSET 26,
+  /// TYPE_BLE_SPEAKER 27, API 31; TYPE_BLE_BROADCAST 30, API 33; TYPE_BLE_HEARING_AID 33, API 37), 'a2dp'
+  /// (TYPE_BLUETOOTH_A2DP 8), 'sco' (TYPE_BLUETOOTH_SCO 7, calls), 'asha' (TYPE_HEARING_AID 23, the older hearing
+  /// aid protocol), else '' (not Bluetooth, or not Android). [Fact, developer.android.com AudioDeviceInfo, read
+  /// 2026-11-17] for the values and levels; the BLE audio overview names TYPE_BLE_HEADSET as "a LEA device". The
+  /// app can't choose LE Audio over A2DP: the system routes a dual-mode headset ([Assumption] by its own policy).
+  String get bluetoothProfile => switch (platformType) {
+        26 || 27 || 30 || 33 => 'le_audio',
+        8 => 'a2dp',
+        7 => 'sco',
+        23 => 'asha',
+        _ => '',
+      };
+
+  bool get isLeAudio => bluetoothProfile == 'le_audio';
+
   String get label => name.trim().isEmpty ? kind.label : '${name.trim()} (${kind.label})';
 
   @override
@@ -77,7 +93,7 @@ AudioDeviceKind androidDeviceKind(int type) => switch (type) {
       1 || 2 || 15 || 24 => AudioDeviceKind.builtIn,         // earpiece, speaker, mic, speaker safe
       3 || 4 || 5 || 6 || 13 || 19 || 31 => AudioDeviceKind.wired, // headset, headphones, line analog/digital, dock, aux, dock analog
       7 || 8 => AudioDeviceKind.bluetooth,                     // SCO, A2DP
-      23 || 26 || 27 || 30 || 33 => AudioDeviceKind.bluetoothLe, // hearing aid, BLE headset, speaker, broadcast, hearing aid
+      23 || 26 || 27 || 30 || 33 => AudioDeviceKind.bluetoothLe, // hearing aid (ASHA), BLE headset, speaker, broadcast, BLE hearing aid
       11 || 12 || 22 => AudioDeviceKind.usb,                   // USB device, accessory, headset
       9 || 10 || 29 => AudioDeviceKind.hdmi,                   // HDMI, ARC, eARC
       20 || 25 || 32 => AudioDeviceKind.remote,                // IP, remote submix, multichannel speaker group
