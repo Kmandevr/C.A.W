@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import '../../engine/component_info.dart';
 import '../../model/arrange_fx.dart' show isBuiltinComponent;
 import '../../model/device_target.dart';
+import '../arrange/automate_control.dart';
 import '../arrange/knob.dart';
 import '../feedback.dart';
 import '../theme.dart';
@@ -57,6 +58,7 @@ class GenericDevicePage extends StatelessWidget {
               min: p.min, max: p.max, step: p.step, defaultValue: p.defaultValue, label: p.label,
               exponential: p.exponential,
               enabled: !use.bypass,
+              automation: ControlAutomation.of(t, p.id),
               color: color,
               valueText: (v) => '${v.toStringAsFixed(p.max - p.min > 20 ? 0 : 2)}${p.unit.isEmpty ? '' : ' ${p.unit}'}',
               onChanged: (v) => t.setLive(p.id, v),
