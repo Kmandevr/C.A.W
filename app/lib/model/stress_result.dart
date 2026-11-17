@@ -44,6 +44,9 @@ class ScenarioResult {
     this.skipped,
     this.error,
     this.buffer,
+    this.backgrounded = false,
+    this.partsBasis,
+    this.audioThreads = const {},
     this.requestedFrames = 0,
     this.firstCallbackUs = 0,
     this.worstAtS = 0,
@@ -80,8 +83,20 @@ class ScenarioResult {
   /// Live: the platform's underruns (null where it reports none).
   final int? xruns;
 
-  /// Why it didn't run (memory, a safety stop); null when it ran.
+  /// Why it didn't run (memory, a safety stop, the app kept leaving the foreground); null when it ran.
   final String? skipped;
+
+  /// The app left the foreground while it ran (#234): its samples were thrown away and it ran again from the start
+  /// once the app was back, or, after [StressRunner.maxBackgroundRedos] tries, it is [skipped]. Local JSON only.
+  final bool backgrounded;
+
+  /// What [parts] measured: "profile", or "unprofiled" for a live run (only the device's I/O apart from the rest,
+  /// which is all "other": a profile would run the mix on one thread). Null from an older engine.
+  final String? partsBasis;
+
+  /// Live: the engine's audio threads at the run's end (caw_audio_threads: the performance hint's state, the
+  /// callback's policy and core; #234). Local JSON only.
+  final Map<String, Object?> audioThreads;
   final String? error;
 
   /// Live: which buffer it asked for, [StressBuffer.playing] or [StressBuffer.lowLatency]; null for DSP.
@@ -102,7 +117,8 @@ class ScenarioResult {
 
   bool get ran => skipped == null && error == null && callbacks > 0;
 
-  factory ScenarioResult.fromEngine(Map<String, dynamic> j, {required String name, required String tier, String? buffer}) {
+  factory ScenarioResult.fromEngine(Map<String, dynamic> j,
+      {required String name, required String tier, String? buffer, bool backgrounded = false}) {
     double d(String k) => (j[k] as num?)?.toDouble() ?? 0;
     int i(String k) => (j[k] as num?)?.toInt() ?? 0;
     final err = '${j['error'] ?? ''}';
@@ -128,6 +144,9 @@ class ScenarioResult {
       frames: i('frames'),
       error: j['ok'] == true || err.isEmpty ? null : err,
       buffer: j['mode'] == 'live' ? buffer : null,
+      backgrounded: backgrounded,
+      partsBasis: j['parts_basis'] is String ? j['parts_basis'] as String : null,
+      audioThreads: j['audio_threads'] is Map ? Map<String, Object?>.from(j['audio_threads'] as Map) : const {},
       requestedFrames: i('requested_frames'),
       firstCallbackUs: d('first_callback_us'),
       worstAtS: d('worst_at_s'),
@@ -164,6 +183,7 @@ class ScenarioResult {
         'mode': live ? 'live' : 'dsp',
         if (skipped != null) 'skipped': skipped,
         if (error != null) 'error': error,
+        'backgrounded': backgrounded,
         if (ran) ...{
           'mean_pct': _r1(meanPct),
           'p99_pct': _r1(p99Pct),
@@ -187,6 +207,8 @@ class ScenarioResult {
           'core_khz_end': coreKhzEnd,
           'core_max_khz': coreMaxKhz,
           if (parts.isNotEmpty) 'parts': [for (final p in parts) p.toJson()],
+          if (partsBasis != null) 'parts_basis': partsBasis,
+          if (audioThreads.isNotEmpty) 'audio_threads': audioThreads,
           if (live) ...{
             'buffer': buffer,
             'requested_frames': requestedFrames,
@@ -210,19 +232,29 @@ abstract final class StressBuffer {
 
 /// A ramp's outcome: the last count that held.
 class RampResult {
-  const RampResult({required this.kind, required this.limit, this.firstFailed, this.capped = false, this.error});
+  const RampResult(
+      {required this.kind, required this.limit, this.firstFailed, this.capped = false, this.cappedBy, this.error});
 
   /// tracks, voices or effects.
   final String kind;
   final int limit;
   final int? firstFailed;
 
-  /// Every count held up to the ramp's cap.
+  /// Every count held up to the ramp's cap, or up to the engine's own limit ([cappedBy]).
   final bool capped;
+
+  /// Why the engine refused the next count (its 256 native components, its memory; #234); null: the ramp's own end.
+  final String? cappedBy;
   final String? error;
 
-  Map<String, Object?> toJson() =>
-      {'kind': kind, 'limit': limit, 'first_failed': firstFailed, 'capped': capped, if (error != null) 'error': error};
+  Map<String, Object?> toJson() => {
+        'kind': kind,
+        'limit': limit,
+        'first_failed': firstFailed,
+        'capped': capped,
+        if (cappedBy != null) 'capped_by': cappedBy,
+        if (error != null) 'error': error,
+      };
 }
 
 /// A component's share of one profiled scenario's callback.
@@ -266,7 +298,11 @@ class SustainedResult {
     this.thermalStart = const {},
     this.thermalEnd = const {},
     this.points = const [],
+    this.backgrounded = false,
   });
+
+  /// The app left the foreground during an earlier try (#234): that try was thrown away and this one ran in front.
+  final bool backgrounded;
   final String scenario;
   final double seconds, firstPct, lastPct;
 
@@ -305,6 +341,7 @@ class SustainedResult {
         'core_max_khz': coreMaxKhz,
         'thermal_start': thermalStart,
         'thermal_end': thermalEnd,
+        'backgrounded': backgrounded,
       };
 }
 
@@ -404,6 +441,9 @@ class StressResult {
 
   /// Why the run ended early (cancelled, thermal, battery saver), or null when it finished.
   String? stoppedBecause;
+
+  /// Steps run again because the app left the foreground while they ran (#234); their samples never count.
+  int backgroundedSteps = 0;
   Duration took = Duration.zero;
 
   /// Device facts for the export (cores, memory budget, platform), as the app knows them.
@@ -444,6 +484,7 @@ class StressResult {
         'started': startedAt.toUtc().toIso8601String(),
         'seconds': took.inMilliseconds / 1000,
         'stopped_because': stoppedBecause,
+        'backgrounded_steps': backgroundedSteps,
         'device': device,
         'tiers': {for (final t in const ['normal', 'heavy', 'extreme']) t: tier(t)?.wire},
         'limits': {for (final r in ramps.values) r.kind: r.toJson()},

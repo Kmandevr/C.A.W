@@ -94,6 +94,45 @@ class _FakeJob implements StressJob {
   void cancel() {}
 }
 
+/// [FakeStress]'s numbers, but each job runs until it ends 10 ms later or is cancelled (then 'cancelled').
+class _HidingStress extends FakeStress {
+  _HidingStress({this.onJob});
+  final void Function(StressRequest r, _SlowJob job)? onJob;
+  int cancelled = 0;
+
+  @override
+  StressJob start(StressRequest r) {
+    started.add(r);
+    final job = _SlowJob(_json(r), () => cancelled++);
+    onJob?.call(r, job);
+    return job;
+  }
+}
+
+class _SlowJob implements StressJob {
+  _SlowJob(Map<String, dynamic> json, this._onCancel) {
+    _timer = Timer(const Duration(milliseconds: 10), () {
+      if (!_done.isCompleted) _done.complete(json);
+    });
+  }
+  final void Function() _onCancel;
+  final _done = Completer<Map<String, dynamic>>();
+  late final Timer _timer;
+  @override
+  Future<Map<String, dynamic>> get result => _done.future;
+  @override
+  StressProgress progress() => const StressProgress(fraction: 0.5, load: 0.4);
+  @override
+  List<double> takeHistory() => const [];
+  @override
+  void cancel() {
+    if (_done.isCompleted) return;
+    _timer.cancel();
+    _onCancel();
+    _done.complete({'ok': true, 'stop_reason': 'cancelled', 'error': ''});
+  }
+}
+
 class FakeHost implements StressHost {
   int suspended = 0, resumed = 0;
   @override
@@ -245,6 +284,108 @@ void main() {
     final res = await runner.run(StressPlanKind.quick);
     expect(res.stoppedBecause, 'You stopped it');
     expect(sent, hasLength(1));
+  });
+
+  group('the app leaving the foreground (#234)', () {
+    test('a step it leaves during is thrown away and run again once it is back, flagged in the JSON', () async {
+      final front = StreamController<bool>();
+      var song8 = 0;
+      final fake = _HidingStress(onJob: (r, job) {
+        // song8's timed run (after the warm-up), once: the app goes behind, then comes back.
+        if (r.scenario == 'song8' && r.mode == StressMode.dsp && r.kind == StressKind.plain && ++song8 == 2) {
+          front.add(false);
+          Future<void>.delayed(const Duration(milliseconds: 20), () => front.add(true));
+        }
+      });
+      final sent = <Map<String, Object?>>[];
+      final res = await StressRunner(backend: fake, foreground: front.stream, sendTelemetry: (s) async => sent.add(s))
+          .run(StressPlanKind.quick);
+      expect(res.stoppedBecause, isNull);
+      expect(res.backgroundedSteps, 1);
+      final rows = res.scenarios.where((s) => s.id == 'song8' && !s.live).toList();
+      expect(rows, hasLength(1)); // the cut-short run left nothing behind
+      expect(rows.single.ran, isTrue);
+      expect(rows.single.backgrounded, isTrue);
+      expect(rows.single.toJson()['backgrounded'], isTrue);
+      expect(res.toJson()['backgrounded_steps'], 1);
+      expect(fake.cancelled, 1);
+      expect(fake.started.where((r) => r.scenario == 'song8' && r.mode == StressMode.dsp && r.kind == StressKind.plain),
+          hasLength(3)); // the warm-up, the run it left, the run again
+      expect(res.scenarios.where((s) => s.id == 'first_loop').single.toJson()['backgrounded'], isFalse); // per scenario
+      expect(TelemetryAllowList(isBuiltin: (id) => id.startsWith('org.caw.')).stress(sent.single), sent.single); // H2 unchanged
+      await front.close();
+    });
+
+    test('a step it keeps leaving is skipped, never measured in the background', () async {
+      final front = StreamController<bool>();
+      final fake = _HidingStress(onJob: (r, job) {
+        if (r.scenario == 'song16' && r.mode == StressMode.dsp && r.kind == StressKind.plain) {
+          front.add(false);
+          Future<void>.delayed(const Duration(milliseconds: 5), () => front.add(true));
+        }
+      });
+      final res = await StressRunner(backend: fake, foreground: front.stream).run(StressPlanKind.quick);
+      final row = res.scenarios.where((s) => s.id == 'song16' && !s.live).single;
+      expect(row.ran, isFalse);
+      expect(row.backgrounded, isTrue);
+      expect(row.skipped, contains('foreground'));
+      expect(res.backgroundedSteps, StressRunner.maxBackgroundRedos + 1);
+      expect(res.stoppedBecause, isNull);
+      await front.close();
+    });
+
+    test('the sustained run left for another app runs again in front and says so', () async {
+      final front = StreamController<bool>();
+      var once = false;
+      final fake = _HidingStress(onJob: (r, job) {
+        if (r.kind == StressKind.sustained && !once) {
+          once = true;
+          front.add(false);
+          Future<void>.delayed(const Duration(milliseconds: 20), () => front.add(true));
+        }
+      });
+      final res = await StressRunner(backend: fake, foreground: front.stream).run(StressPlanKind.full);
+      expect(res.sustained, isNotNull);
+      expect(res.sustained!.backgrounded, isTrue);
+      expect(res.sustained!.toJson()['backgrounded'], isTrue);
+      expect(fake.started.where((r) => r.kind == StressKind.sustained), hasLength(2));
+      expect(res.backgroundedSteps, 1);
+      await front.close();
+    });
+
+    test('a capped ramp (the engine refused the next count) keeps its limit and why', () async {
+      final fake = FakeStress(extra: {'capped_by': 'the project uses 355 native components; at most 256 can run'});
+      final res = await StressRunner(backend: fake).run(StressPlanKind.quick);
+      final effects = res.ramps['effects']!; // the fake's effects ramp holds to its end
+      expect(effects.capped, isTrue);
+      expect(effects.toJson()['capped_by'], contains('at most 256'));
+      expect(res.ramps['tracks']!.cappedBy, isNull); // over budget: not capped
+    });
+
+    test('behind at the start, it waits; Stop while it waits ends the run', () async {
+      final fake = _HidingStress();
+      late StressRunner runner;
+      runner = StressRunner(backend: fake, foreground: const Stream<bool>.empty(), inForeground: () => false);
+      final done = runner.run(StressPlanKind.quick);
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      expect(fake.started, isEmpty);
+      expect(runner.phase, contains('background'));
+      runner.cancel();
+      final res = await done;
+      expect(res.stoppedBecause, 'You stopped it');
+      expect(res.scenarios, isEmpty);
+    });
+  });
+
+  test('a live row keeps the engine\'s audio threads and says its parts are unprofiled (#234)', () async {
+    final fake = FakeStress(extra: {
+      'parts_basis': 'unprofiled',
+      'audio_threads': {'hint': false, 'hint_state': 'failed', 'callback_policy': 0, 'core_kind': 'little'},
+    });
+    final res = await StressRunner(backend: fake).run(StressPlanKind.quick);
+    final live = res.scenarios.firstWhere((s) => s.live).toJson();
+    expect(live['parts_basis'], 'unprofiled');
+    expect((live['audio_threads'] as Map)['hint_state'], 'failed');
   });
 
   test('battery saver at the start: nothing runs, and it says why', () async {

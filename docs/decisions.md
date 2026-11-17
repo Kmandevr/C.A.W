@@ -25,7 +25,7 @@ updated: 2026-11-17
 
 **Built ([app](app.md), automation lanes under tracks; [engine](engine.md), Curved segments):**
 - **Curve maths:** b = 0.4375 (1 + tension); Slow and Fast are the rational ease t(1∓b) / (t(1∓b) + (1−t)(1±b)), S-curve joins them at the middle, Step holds. Only `+ − × ÷`, dyadic constants, so every platform gives the same bits under the engine's strict floating point (no `pow`; nothing to allocate). Tension −1 is straight, so a sideways bend grows from a line without a jump. Linear keeps the original expression, so existing projects are bit-identical (no reference renders changed). Stored as `curve` (a name) and `tension` on the earlier point, omitted for linear, so a project without curves saves as before.
-- **No C API change** (curves are project JSON only; the version is 33 from the sample library's preview in the same batch). The new saved fields (point `curve` and `tension`, lane `height`, `recent_automation`, `automation_follows_clips`) are part of project format v5 (merged with the MIDI storage change in batch 1.0.5), which an older C.A.W refuses whole.
+- **No C API change** (curves are project JSON only; the batch's version comes from the sample library, 33, and the buffer tuner, 34). The new saved fields (point `curve` and `tension`, lane `height`, `recent_automation`, `automation_follows_clips`) are part of project format v5 (merged with the MIDI storage change in batch 1.0.5), which an older C.A.W refuses whole.
 - **Claude's choices for the owner to confirm (looks and feel):** lanes 56 px by default (32–240 by dragging the header's bottom edge); the tool row under the lanes (where + Lane was), with "+ Automate" first; at header widths under 236 px the tools fold into one button with a ▾ (a phone's headers can't hold five); drawn tool glyphs in the lanes' stroke style, the chosen tool in a blue glow; the selection box and its handles in yellow (the selected points' colour), edge handles as bars and corner handles as dots; previews in the text colour, the eraser's sweep in pink; a curved segment's handle a little wider and brighter; sideways right bends toward Fast, left toward Slow (80 px for a full bend; Alt or Ctrl with an up or down drag bends up or down); a sine drawn with four curved points a cycle (Fast to each peak, Slow back), squares and random as steps; random seeded by the project seed, the lane and the start; one cycle per grid step (the arranger's 1/16 by default gives fast shapes; a coarser grid slows them); the pencil unsnapped, the other tools snapped (Shift free); a drawn span replaces the points under it; points moved onto others make them give way, as sections do; copy holds heights so it pastes into any lane; the picker a glass sheet with Recent (the project's last 8) first; Automate adds a point at the playhead on a new lane and only reveals an existing one; on a device editor knob Automate is a button on the knob's hold sheet and value dialog beside Learn MIDI CC (the hold already opens those), elsewhere a one-item hold menu; "Automation follows clips" moves points only for moves along the same track.
 - **Open:** on a phone the device editor is a full-screen page, so Automate there opens the lane behind it (close the page to see it); the master's chain and modulators have no lanes under a track and don't offer Automate; the focus view's Automation tab keeps its own + for volume and pan.
 
@@ -45,6 +45,70 @@ The owner's decision (2026-11-13, below) built on branch `midi-store`; the detai
 - **Migration v4 → v5:** a v4 module's text converts on load. Proof: `test/clip_midi_test.dart` (every expression feature and 60 random patterns: old text → MIDI → text gives the same notes, header and comments, and the text from MIDI is a fixed point; corrupt and truncated input fails closed) and `test/clip_migration_test.dart` (the engine tests' patterns, the examples, templates and default project: same notes after migration, and with `CAW_LIB` bit-identical renders before and after). `Steps.toString` now writes an exact fraction where it rounded to 1/1000 (only times with denominators over 64 that no 10^9 divides), and a vibrato rate or fade-in without depth is written, so text written from a stored clip reads back the same. **Not exact:** a time written with more than 15 significant digits was already kept as the nearest fraction with a denominator up to 2^20 by the app's parser; it is stored as that.
 - **Kept in memory only:** text that doesn't parse. The file holds the last version that parsed (else an empty pattern of the module's name). Undo restores clips from their MIDI, so the text view after an undo is the stored form (layout and chord lines as the editor writes them).
 - **Size:** the bundled default project (4 patterns, 87 lines) is 16 904 bytes at v4 and 19 303 at v5 (its modules 4 965 → 7 205 bytes; base64 and the MPE curves of bent notes); the code-built demo project's modules go from 4 515 to 3 913 bytes (v4 saved each text twice, `source` and `run_source`).
+
+## 2026-11-17: AAudio output usage GAME; automatic buffer size off by default (owner's request, #236)
+
+**Decision:** every AAudio output opens with `AAUDIO_USAGE_GAME`, Android's low-latency guide's advice for Bluetooth, on every route (the engine can't tell the route before the stream opens; the volume stays media). The automatic buffer size (`caw_audio_tune_buffer`, Oboe's LatencyTuner way plus a shrink after a quiet minute) is built but off by default (`Settings.bufferTuning`, no Settings row) until it has run on a phone: Claude's choice, to keep 1.0.5 low-risk; turning it on, and its Settings row, are for the owner. The Bluetooth codec is not chosen (a privileged API). Facts and sources in [engine](engine.md).
+
+## 2026-11-17: A new device's first callbacks stay out of the load meter; the performance hint for every stream mode (#234)
+
+**Decision (Claude's, for the owner to confirm; the hint part is the owner's 1.0.5 call: "the ADPF performance hint only", no game category):**
+- **Warm-up:** the callbacks of a device's first 0.5 s of frames after an open or an AAudio reroute enter no load average (the CPU meter, shedding's over-budget share, the mix pool's Auto). **Why:** the meter, which telemetry's `perf.worstCallbackPct` reads, moves about 9.9 × a stall's seconds, and a shared or Bluetooth stream starts by filling its buffer back to back on a core whose clock hasn't risen; the app closes an idle device and Play reopens it, so this landed while playing (600 and 800% on the owner's Bluetooth days, nothing shed). **[Assumption]** that first fill is the main source; the meter after the warm-up, and shedding, are unchanged.
+- **The hint:** asked for the callback and the workers whatever the callback's policy, as before, but a refused session is asked again (1 s doubling to 30 s), the callback alone if the group is refused, every callback's own duration is reported (not the longest since the last report), and `hint_state` says why there is none. **Why:** the NDK and the system service ask only that the threads be the app's (sources in [engine](engine.md)); telemetry showed no session on the S22+. **Not claimed:** the 1.0.4 Benchmark's low clocks and 13,448 sustained xruns came while the app was behind another app (owner), so this change is not shown to fix them.
+- **Benchmark:** a step the app leaves the foreground during runs again (`backgrounded`); a ramp the engine's own budget stops is capped, not an error; live parts say they are unprofiled (a short profiled pass would run the mix on one thread, unlike what plays). The local JSON grows additively; H2 is unchanged.
+
+## 2026-11-17: Two Android builds; Isolated with an optional no-delay mode; feedback and Flagship routing (owner, #212, #222, #233)
+
+**Decision (owner, 2026-11-17):**
+- **Two Android builds:**
+  - **The GitHub build** has everything: third-party plug-ins and the self-updater.
+  - **The Play Store build** follows Play's rule on downloaded code ([plug-in hosting plan](plugin-hosting-plan.md)).
+
+  The owner asked whether the engine could count as an interpreter, as a workaround; that is an open question in the plug-in hosting plan. The owner also asked to do the same for iOS where possible. **[Assumption]** That needs checking: which alternative distribution iOS allows is not verified here.
+- **Isolated plug-ins** add one block of compensated latency. There is also an optional **no-delay mode**, which runs the plug-in in the callback with a timeout. It is riskier, because a slow plug-in causes dropouts.
+- **Feedback,** as proposed:
+  - 16 frames inside a patch and 64 between tracks;
+  - a limiter on each feedback wire, on by default and switchable per wire.
+- **Flagship's routing graph:** per voice is optional per patch. By default, effects are shared and the oscillator/filter path runs per voice.
+
+## 2026-11-17: Plans go private at 1.1.0; the code stays public (owner)
+
+**Decision (owner, 2026-11-17):** "Eventually have all of the roadmap and changes hidden, so I can surprise people with updates, while the project stays open source."
+- **At 1.1.0,** issues, the roadmap, plans and decisions move to a private repository. The code stays public as it is written (Apache-2.0), with neutral commit messages.
+- **[Fact]** Hidden features stay readable in the public code. The surprise rests on the plans and the announcements, not on secret code. The owner chose this over private development with releases pushed public.
+- **Until 1.1.0,** work continues publicly as now.
+
+## 2026-11-17: Groundwork for 1.1.0 is laid silently during the 1.0.x batches (owner)
+
+**Decision (owner, 2026-11-17):** "We should 100% be laying the groundwork for the 1.1.0 update, so we don't have a ton of work for ourselves, but make the changes silent."
+- Each 1.0.x batch may carry hidden groundwork for 1.1.0:
+  - the routing engine (#233);
+  - plug-in hosting (#212);
+  - play-ahead (#191);
+  - the AutoStacc download and update source (#221);
+  - store builds (#222).
+- **Silent** means:
+  - users see no change;
+  - the work sits behind off-by-default internal flags, or is engine-only code with no UI;
+  - the project format only gains fields when they are needed, and old versions are unaffected;
+  - the changelog doesn't announce it.
+- Each step has its own tests and a Benchmark check, so it costs nothing while it's off.
+
+## 2026-11-17: The FX batch splits in two; one bit distortion; the beta pack stays free for beta users (owner)
+
+**Decision (owner, 2026-11-17):**
+- **Bit distortion:** one built-in device has the classic crush and the bitwise operations (shift, XOR, AND masks). The AutoStacc beta pack drops its bit-shift device and gets a different one instead, to be chosen.
+- **The AutoStacc beta pack:** it stays free for everyone who used the beta, even after the pack becomes paid.
+- **The FX batch splits in two:**
+  - **1.0.6:** consolidation, the device kit and FX chain, Flagship, React to… and live preset preview;
+  - **1.0.7:** the new effects, the recording tools, guitar, presets and templates, low-latency monitoring, the pack and the music video.
+
+  The later batches move up one: hosting foundation 1.0.10, notation 1.0.11.
+- **Suggestions adopted:**
+  - low-latency monitoring through effects, with a latency readout, checked on the S22+;
+  - live preset preview;
+  - project templates by purpose;
+  - the 1.1.0 routing engine built in hidden steps during the 1.0.x batches.
 
 ## 2026-11-17: Visual, non-linear routing is in 1.1.0 (owner, #233)
 
@@ -83,7 +147,7 @@ That last one is **React to…** in every knob's hold menu (track, then Loudness
 
 ## 2026-11-17: Device UI redesign and a step-by-step music video (owner, #231, #232)
 
-**Decision (owner, 2026-11-17).** Both ship in batch 1.0.6, with the FX consolidation.
+**Decision (owner, 2026-11-17).** The device UI ships in batch 1.0.6, with the FX consolidation; the music video in 1.0.7 (the FX batch's split, above).
 - **FX chain:** collapsed rows, any number open at once, and every control usable in place.
 - **Editing:** visual first, controlled mainly by knobs.
 - **Flagship:** one Vital-like screen; on a phone, three panels (Oscillators, Filters, Modulation) with a mod strip that is always shown.
@@ -106,7 +170,7 @@ The plan: [device UI plan](device-ui-plan.md).
 - **Metadata,** in order of trust: (1) embedded tags (WAV LIST/INFO, acid, smpl, bext, ID3v2 TBPM/TKEY, FLAC Vorbis comments); (2) the file and folder names (BPM, key, type and instrument words, avoiding false hits such as "808"); (3) detection (`caw_asset_tempo` for BPM and a new key estimate, labelled as an estimate with a confidence). Every field becomes a sortable filter (BPM range, key with optional compatible keys, type, instrument, length, folder, tags, search), and where each value came from is stored.
 - **Indexing** runs in the background, off the UI isolate, with a cache on disk; bounded and incremental, so a folder of tens of thousands of files doesn't freeze the UI.
 - **Security:** linked files are untrusted: parsed with hard limits, no link followed out of the linked root, malformed headers fuzz-tested. On Android, `ACTION_OPEN_DOCUMENT_TREE` with a persisted permission; no `MANAGE_EXTERNAL_STORAGE` or other broad storage permission. No new dependency (none was needed).
-- **C API 33** (`caw_asset_key`, `caw_engine_preview_sample*`): the only batch 1.0.5 branch that bumps it, so 33 stands after the merge.
+- **C API 33** (`caw_asset_key`, `caw_engine_preview_sample*`); batch 1.0.5's buffer tuner (#236) follows as 34.
 - **When:** batch 1.0.5.
 
 **How it is built** ([app](app.md), [engine](engine.md#the-sample-preview-and-key-estimate)):
@@ -139,7 +203,6 @@ The plan: [device UI plan](device-ui-plan.md).
 
   **[Fact]** Kilohearts Compactor is a free ducker/leveller released in August 2025, with threshold, amount, attack, hold, release, an optional sidechain, and RMS/Peak/ISP detection (kilohearts.com/products/compactor, checked 2026-11-17). C.A.W's device is an original design.
 - **AutoStacc beta pack:** free during the beta, paid later:
-  - bit-shift distortion;
   - warp;
   - spectral FX;
   - a glitch mangler.
@@ -165,14 +228,14 @@ The plan: [device UI plan](device-ui-plan.md).
 
   **[Fact]** Fire is AGPL-3.0 (its GitHub listing, checked 2026-11-17), so none of its code is used; C.A.W's version is its own.
 - **More presets:** every built-in effect ships at least 8 presets, named for the job and tagged by purpose, where that makes sense.
-- **When:** its own batch, 1.0.6, after 1.0.5. The later batches move up by one.
+- **When:** after 1.0.5, split over 1.0.6 and 1.0.7 (the FX batch's split, above). The later batches move up.
 
 ## 2026-11-14: Freeze and bounce: pre-fader, the frozen track sent as an audio clip, no C API bump (Claude, within the owner's 1.0.5 decisions, #209)
 
 The owner's (2026-11-14): Freeze / Unfreeze and Bounce to audio in the track's hold menu, Bounce to audio in a clip selection's hold menu; a snowflake on a frozen track's header and its devices dimmed; editing a frozen track first asks "Unfreeze to edit?"; no header button. Claude's choices within them:
 - **Pre-fader.** A freeze renders the instrument, per-note FX and effects (with their automation and modulation) before the fader, so volume, pan, sends, folder routing and mute/solo stay live, as asked; a bounce too, and the new audio track copies the fader, pan, sends and their lanes, so it sounds as the track did.
 - **The frozen track is an audio clip, sent by the app.** `ProjectDoc.toEngineJson` sends a frozen layer as one fixed audio clip of its file from step 0 and leaves its instrument, per-note FX, effects and the lanes and links aimed at them out of the engine JSON. The engine never builds them, so they cost nothing, and it plays the file through the existing clip player: bit for bit the live track's sound (tests in [engine](engine.md#song-renders) and `app/test/freeze_test.dart`). Its pattern clips still go, for keys and modulators that hear its notes. The alternative, an engine-side `frozen` key that swaps the chain itself, would have duplicated the app's lane and link filtering in C++.
-- **Engine additions without a C API bump:** the song render's `stem_tap: "pre"` (a new request key, refused by name by an engine without it) and an audio clip's `"lengthens_song": false` (a frozen file's tail past the song's end doesn't make the song longer; it plays when the song reaches there and in a render's tail). No C API change (33 after the merge, from the sample library); nothing new crosses the FFI (the app uses `caw_render_song` through the worker pool as Export does).
+- **Engine additions without a C API bump:** the song render's `stem_tap: "pre"` (a new request key, refused by name by an engine without it) and an audio clip's `"lengthens_song": false` (a frozen file's tail past the song's end doesn't make the song longer; it plays when the song reaches there and in a render's tail). No C API change (the batch's 33 and 34 come from the sample library and the buffer tuner); nothing new crosses the FFI (the app uses `caw_render_song` through the worker pool as Export does).
 - **Tail:** "the track's tail length" is measured, not declared: the render runs on until the track has been below −120 dBFS for half a second, at most 30 s (declared tails are often infinite, a reverb's or a delay's).
 - **Project format:** `frozen`, `frozen_asset` and `frozen_context` on a layer, part of format v5 (merged with the MIDI storage change in batch 1.0.5, so no further bump; an older C.A.W refuses the file whole). `frozen_context` (the tempo map, signatures, seed and key) makes a freeze that no longer fits play live instead of out of time.
 - **Unfreeze and undo:** the frozen file leaves the project at once but is deleted from disk only when the project next opens and nothing names it, so undo and redo work within the session.

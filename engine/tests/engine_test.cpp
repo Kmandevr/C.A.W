@@ -14,6 +14,7 @@
 #include "caw.h"
 #include "detmath.h"
 #include "device_render.h"
+#include "buffer_tuner.h"
 #include "engine.h"
 #include "native_component_test_path.h"
 #include "test.h"
@@ -932,6 +933,89 @@ TEST(a_single_late_callback_sheds_nothing) {
         CHECK_EQ(e.meters().overloaded, 0);
         CHECK_EQ(e.sheddingStats().shed, uint64_t{0});
     }
+}
+
+TEST(a_new_devices_first_callbacks_stay_out_of_the_cpu_meter) {
+    // #234: on the owner's S22+ through Bluetooth (a shared AAudio stream, its callback not real-time, on a little
+    // core) the day's worst meter read was 600 and 800%, with nothing shed. A stream that starts fills its buffer
+    // back to back, on a core whose clock hasn't risen: 0.2 s of frames at 9 times their budget reads 7.8 on the
+    // meter. Play reopens the device closed while idle, so those callbacks fall while playing. A device open asks
+    // for a warm-up (requestDeviceWarmUp), and its first kDeviceWarmSeconds of frames stay out of the meter.
+    ProjectSpec p = project({dc(0.25), dc(0.5)});
+    for (const int frames : {64, 256, 1920}) {
+        for (const bool warm : {false, true}) {
+            Engine e(48000);
+            e.setProject(p);
+            e.play();
+            run(e, 1000);
+            e.requestSheddingReset();  // as a device open does
+            if (warm) e.requestDeviceWarmUp();
+            std::vector<float> l(2048), r(2048);
+            float worst = 0, worstAfter = 0;
+            double played = 0;
+            for (int k = 0; played < 3.0; ++k) {
+                e.process(l.data(), r.data(), frames);
+                const bool filling = played < 0.2;
+                e.reportLoad(filling ? 9.0 : 0.3, frames);
+                played += static_cast<double>(frames) / 48000.0;
+                worst = std::max(worst, e.meters().cpu);
+                if (played > Engine::kDeviceWarmSeconds + 0.5) worstAfter = std::max(worstAfter, e.meters().cpu);
+            }
+            CHECK_EQ(e.sheddingStats().shed, uint64_t{0});
+            if (warm) {
+                CHECK(worst < 0.35f);  // the steady 0.3 only
+                CHECK(worstAfter > 0.25f);  // and the meter still reads it after the warm-up
+            } else {
+                CHECK(worst > 5.0f);  // without the warm-up the stream's start reads as 500% and more
+            }
+        }
+    }
+    // After the warm-up a real overload still sheds.
+    Engine e(48000);
+    e.setProject(p);
+    e.play();
+    run(e, 1000);
+    e.requestSheddingReset();
+    e.requestDeviceWarmUp();
+    std::vector<float> l(256), r(256);
+    for (int k = 0; k < 48000 * 2 / 256; ++k) {
+        e.process(l.data(), r.data(), 256);
+        e.reportLoad(1.5, 256);
+    }
+    CHECK(e.sheddingStats().shed > uint64_t{0});
+}
+
+// #236: the output buffer's automatic size (Oboe's LatencyTuner way, buffer_tuner.h): whole bursts from two bursts
+// to the capacity, a burst more on each underrun, a burst less after a minute without one, never back to a size that
+// underran on this stream, started from the size remembered for this kind of output.
+TEST(the_buffer_tuner_grows_on_underruns_and_shrinks_only_to_sizes_that_held) {
+    BufferTuner t;
+    CHECK(!t.started());
+    CHECK_EQ(t.update(5, 1.0), 0);  // not started: nothing
+    CHECK_EQ(t.start(96, BufferTuner::kFloorBursts * 96, 3000, 0, 0), 192);  // two bursts
+    CHECK_EQ(t.update(0, 1.0), 0);
+    CHECK_EQ(t.update(-1, 1.0), 0);  // unknown count: nothing
+    CHECK_EQ(t.update(2, 1.0), 288);  // underruns: a burst more
+    CHECK_EQ(t.update(2, 1.0), 0);
+    CHECK_EQ(t.update(3, 1.0), 384);
+    // A quiet minute takes a burst off, but never back to a size that underran (288 and 192 did).
+    int32_t shrunk = 0;
+    for (int s = 0; s < 200; ++s)
+        if (const int32_t n = t.update(3, 1.0)) shrunk = n;
+    CHECK_EQ(shrunk, 0);
+    CHECK_EQ(t.size(), 384);
+    // From a remembered size: rounded up to a burst, kept within the floor and the capacity (whole bursts).
+    CHECK_EQ(t.start(96, 192, 3000, 500, 7), 576);
+    for (int s = 0; s < 59; ++s) CHECK_EQ(t.update(7, 1.0), 0);
+    CHECK_EQ(t.update(7, 1.0), 480);  // 60 s quiet
+    CHECK_EQ(t.update(8, 1.0), 576);  // it underran at 480: back up, and 480 is not tried again
+    for (int s = 0; s < 300; ++s) CHECK_EQ(t.update(8, 1.0), 0);
+    CHECK_EQ(t.start(96, 192, 3000, 100000, 0), 2976);  // the capacity in whole bursts
+    CHECK_EQ(t.update(1, 1.0), 0);  // at the ceiling: nothing more to give
+    CHECK_EQ(t.start(96, 192, 3000, 10, 0), 192);  // never under the floor
+    CHECK_EQ(t.update(4, 1.0), 288);
+    CHECK_EQ(t.update(1, 1.0), 0);  // a counter that went back (a new stream's) is taken as the new start
+    CHECK_EQ(t.update(2, 1.0), 384);
 }
 
 TEST(odd_callback_sizes_through_the_device_fifo_shed_nothing_under_the_threshold) {

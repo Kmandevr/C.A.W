@@ -135,6 +135,18 @@ class AppState extends ChangeNotifier implements StressHost {
   /// The last few seconds of meter reads, each at the time it was read, so meters show what is heard.
   final MeterTimeline meterTimeline = MeterTimeline();
   int _latencyReadUs = -1 << 62;
+  int _tuneReadUs = -1 << 62;
+
+  // The output buffer's automatic size (#236; Settings.bufferTuning, off by default): once a second while playing,
+  // and the size it settles on kept per kind of output, where the next stream on that kind starts.
+  void _tuneBuffer(Engine e, int now) {
+    _tuneReadUs = now;
+    final kind = latency.routeInfo.output.kind.name;
+    final frames = e.tuneAudioBuffer(settings.tunedBufferFrames[kind] ?? 0);
+    if (frames > 0 && settings.tunedBufferFrames[kind] != frames) {
+      settings.update((s) => s.tunedBufferFrames[kind] = frames);
+    }
+  }
   int _playStartUs = 0;
   double _playStartStep = 0;
 
@@ -627,6 +639,7 @@ class AppState extends ChangeNotifier implements StressHost {
     layerMeters = e.layerMeters(project.layers.length); // one C API call for every track (beta plan B4.8)
     final now = nowUs;
     meterTimeline.push(MeterReading(now, meters, layerMeters));
+    if (settings.bufferTuning && e.audioOn && meters.playing && now - _tuneReadUs > 1000000) _tuneBuffer(e, now);
     if (e.audioOn && now - _latencyReadUs > 3000000) {
       // The platform's figure and the route, now and then (a Bluetooth link can settle after it opens).
       _latencyReadUs = now;

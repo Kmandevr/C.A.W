@@ -45,6 +45,30 @@ Topology classifyCores(const int* cpus, const int64_t* values, size_t count, con
     return t;
 }
 
+const char* hintStateName(HintState state) noexcept {
+    switch (state) {
+        case HintState::Waiting: return "waiting";
+        case HintState::On: return "on";
+        case HintState::Failed: return "failed";
+        case HintState::Unsupported: return "unsupported";
+        case HintState::None: break;
+    }
+    return "none";
+}
+
+bool hintUnsupported(int feature, int64_t preferredRateNs) noexcept {
+    if (feature >= 0) return feature == 0;
+    return preferredRateNs <= 0;
+}
+
+int64_t hintRetryNs(uint32_t failures) noexcept {
+    constexpr int64_t kFirst = 1'000'000'000, kMost = 30'000'000'000;
+    if (failures <= 1) return kFirst;
+    int64_t wait = kFirst;
+    for (uint32_t i = 1; i < failures && wait < kMost; ++i) wait *= 2;
+    return std::min(wait, kMost);
+}
+
 uint32_t poolWorkers(const Topology& t, uint32_t cap) noexcept {
     if (t.cores <= 1) return 0;
     uint32_t fast = t.fast == 0 ? t.cores : t.fast;

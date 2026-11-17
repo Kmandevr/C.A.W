@@ -122,8 +122,22 @@ class StressRunner extends ChangeNotifier {
     this.device = const {},
     this.readThermal,
     this.readDeviceName,
+    Stream<bool>? foreground,
+    this.inForeground,
   })  : backend = backend ?? StressBackend.current,
-        _pressureChanges = pressure;
+        _pressureChanges = pressure,
+        _foregroundChanges = foreground;
+
+  /// The app in front (true) or not (false), as it changes (#234): a step the app leaves the foreground during is
+  /// stopped, its samples thrown away, and run again from the start once the app is back, at most
+  /// [maxBackgroundRedos] times; then it is skipped. Null: not watched (tests, the desktop).
+  final Stream<bool>? _foregroundChanges;
+
+  /// Whether the app is in front now; null: assumed in front.
+  final bool Function()? inForeground;
+
+  /// The redos a step gets when the app leaves the foreground while it runs.
+  static const int maxBackgroundRedos = 2;
 
   final StressBackend backend;
   final StressHost? host;
@@ -168,19 +182,56 @@ class StressRunner extends ChangeNotifier {
   bool _cancelled = false;
   String? _safetyStop;
   StreamSubscription<EnginePressure>? _pressureSub;
+  StreamSubscription<bool>? _foregroundSub;
   Timer? _poll;
+  bool _inFront = true;
+  bool _stepBackgrounded = false;
+  Completer<void>? _backInFront;
 
   /// Stops the run (it ends within a step); the result keeps what finished.
   void cancel() {
     if (!_running) return;
     _cancelled = true;
     _job?.cancel();
+    _wakeFromWait();
   }
 
   void _stopFor(String reason) {
     if (!_running || _safetyStop != null) return;
     _safetyStop = reason;
     _job?.cancel();
+    _wakeFromWait();
+  }
+
+  void _wakeFromWait() {
+    final c = _backInFront;
+    _backInFront = null;
+    if (c != null && !c.isCompleted) c.complete();
+  }
+
+  void _foregroundChanged(bool front) {
+    _inFront = front;
+    if (!front) {
+      // Time behind another app is not the engine's load: the step stops now and runs again later.
+      if (_job != null) {
+        _stepBackgrounded = true;
+        _job?.cancel();
+      }
+    } else {
+      _wakeFromWait();
+    }
+  }
+
+  /// Waits until the app is in front again (or the run is cancelled or stopped).
+  Future<void> _waitForFront() async {
+    while (!_inFront && !_cancelled && _safetyStop == null) {
+      final c = _backInFront = Completer<void>();
+      final prev = phase;
+      phase = 'Paused while the app is in the background';
+      notifyListeners();
+      await c.future;
+      phase = prev;
+    }
   }
 
   Future<StressResult> run(StressPlanKind kind) async {
@@ -210,6 +261,8 @@ class StressRunner extends ChangeNotifier {
         final why = stressStopReason(p);
         if (why != null) _stopFor(why);
       });
+      _inFront = inForeground?.call() ?? true;
+      _foregroundSub = _foregroundChanges?.listen(_foregroundChanged);
       try {
         final name = await readDeviceName?.call();
         if (name != null && name.trim().isNotEmpty) result.device = {...result.device, 'name': name.trim()};
@@ -246,12 +299,43 @@ class StressRunner extends ChangeNotifier {
         phase = step.label;
         notifyListeners();
         final heat = r.kind == StressKind.sustained;
-        final thermalStart = heat ? await _thermal() : const <String, Object?>{};
-        final json = await _runStep(step, done / total, step.estimateSeconds / total);
-        final thermalEnd = heat ? await _thermal() : const <String, Object?>{};
+        // A step the app leaves the foreground during runs again once it is back (#234), so background time never
+        // counts as engine load; after maxBackgroundRedos redos it is skipped.
+        var redos = 0;
+        var gaveUp = false, ran = false;
+        Map<String, dynamic> json = const {};
+        var thermalStart = const <String, Object?>{}, thermalEnd = const <String, Object?>{};
+        for (;;) {
+          await _waitForFront();
+          if (_cancelled || _safetyStop != null) break;
+          _stepBackgrounded = false;
+          thermalStart = heat ? await _thermal() : const <String, Object?>{};
+          json = await _runStep(step, done / total, step.estimateSeconds / total);
+          ran = true;
+          thermalEnd = heat ? await _thermal() : const <String, Object?>{};
+          if (!_stepBackgrounded || _cancelled || _safetyStop != null) break;
+          result.backgroundedSteps++;
+          if (redos++ >= maxBackgroundRedos) {
+            gaveUp = true;
+            break;
+          }
+        }
         done += step.estimateSeconds;
         fraction = (done / total).clamp(0.0, 1.0);
-        if (!step.warmUp) _take(result, step, json, info, thermalStart: thermalStart, thermalEnd: thermalEnd);
+        if (gaveUp) {
+          if (r.kind == StressKind.plain && info != null && !step.warmUp) {
+            result.scenarios.add(ScenarioResult(
+                id: info.id,
+                name: info.name,
+                tier: info.tier,
+                live: r.mode == StressMode.live,
+                buffer: r.mode == StressMode.live ? step.buffer : null,
+                backgrounded: true,
+                skipped: 'Skipped: the app kept leaving the foreground'));
+          }
+        } else if (ran && !step.warmUp && !_stepBackgrounded) {
+          _take(result, step, json, info, thermalStart: thermalStart, thermalEnd: thermalEnd, backgrounded: redos > 0);
+        }
         notifyListeners();
       }
       result.stoppedBecause = _safetyStop ?? (_cancelled ? 'You stopped it' : null);
@@ -262,6 +346,9 @@ class StressRunner extends ChangeNotifier {
       _poll?.cancel();
       await _pressureSub?.cancel();
       _pressureSub = null;
+      await _foregroundSub?.cancel();
+      _foregroundSub = null;
+      _backInFront = null;
       _job = null;
       host?.resumeAfterStress();
       if (dir != null) {
@@ -311,6 +398,7 @@ class StressRunner extends ChangeNotifier {
     } finally {
       _poll?.cancel();
       _poll = null;
+      if (identical(_job, job)) _job = null;
       final rest = job.takeHistory();
       pointsSeen += rest.length;
       loadPoints.addAll(rest);
@@ -327,14 +415,16 @@ class StressRunner extends ChangeNotifier {
   }
 
   void _take(StressResult result, StressStep step, Map<String, dynamic> json, StressScenarioInfo? info,
-      {Map<String, Object?> thermalStart = const {}, Map<String, Object?> thermalEnd = const {}}) {
+      {Map<String, Object?> thermalStart = const {},
+      Map<String, Object?> thermalEnd = const {},
+      bool backgrounded = false}) {
     final r = step.request;
     final stop = '${json['stop_reason'] ?? ''}';
     if (stop == 'cancelled') return; // a cut-short step reports nothing
     switch (r.kind) {
       case StressKind.plain:
-        result.scenarios.add(
-            ScenarioResult.fromEngine(json, name: info?.name ?? r.scenario, tier: info?.tier ?? 'normal', buffer: step.buffer));
+        result.scenarios.add(ScenarioResult.fromEngine(json,
+            name: info?.name ?? r.scenario, tier: info?.tier ?? 'normal', buffer: step.buffer, backgrounded: backgrounded));
       case StressKind.rampTracks || StressKind.rampVoices || StressKind.rampEffects:
         final kind = switch (r.kind) { StressKind.rampTracks => 'tracks', StressKind.rampVoices => 'voices', _ => 'effects' };
         final failed = (json['first_failed'] as num?)?.toInt() ?? -1;
@@ -344,6 +434,7 @@ class StressRunner extends ChangeNotifier {
           limit: (json['limit'] as num?)?.toInt() ?? 0,
           firstFailed: failed >= 0 ? failed : null,
           capped: ok && failed < 0,
+          cappedBy: ok && failed < 0 && '${json['capped_by'] ?? ''}'.isNotEmpty ? '${json['capped_by']}' : null,
           error: ok ? null : '${json['error'] ?? 'failed'}',
         );
       case StressKind.profile:
@@ -366,6 +457,7 @@ class StressRunner extends ChangeNotifier {
           coreMaxKhz: k('core_max_khz'),
           thermalStart: thermalStart,
           thermalEnd: thermalEnd,
+          backgrounded: backgrounded,
         );
     }
   }
@@ -402,7 +494,9 @@ class StressRunner extends ChangeNotifier {
     _cancelled = true;
     _poll?.cancel();
     _pressureSub?.cancel();
+    _foregroundSub?.cancel();
     _job?.cancel();
+    _wakeFromWait();
     super.dispose();
   }
 }

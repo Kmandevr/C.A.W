@@ -381,6 +381,26 @@ TEST(stress_live_stats_split_device_io) {
     CHECK_EQ(render.takeProcessNs(), int64_t{0});
 }
 
+// #234: on the owner's S22+ the track ramp reached a count the engine refuses ("the project uses 355 native
+// components; at most 256 can run") and reported an error with limit 0. A count past the engine's own budget ends
+// the ramp, capped at the last count that held: no failure, nothing above it tried.
+TEST(stress_ramp_stops_capped_at_the_engines_component_cap) {
+    std::vector<int32_t> tried;
+    const RampOutcome o = rampSearch(rampCounts(Kind::RampTracks), [&](int32_t n) {
+        tried.push_back(n);
+        return n >= 24 ? kRampCapped : 1;
+    });
+    CHECK_EQ(o.limit, 16);
+    CHECK_EQ(o.firstFailed, -1);
+    CHECK_EQ(o.cappedAt, 24);
+    CHECK(!o.stopped);
+    CHECK_EQ(tried.back(), 24);
+    // The track ramp's own projects do reach the cap within its counts.
+    Engine e(48000);
+    const std::string warn = e.setProject(rampProject(Kind::RampTracks, rampCounts(Kind::RampTracks).back()));
+    CHECK(warn.find("native components; at most") != std::string::npos);
+}
+
 // The ramp stops at the first count over budget and searches only below it, reporting the last count that held.
 TEST(stress_ramp_stops_at_the_first_step_over_budget) {
     std::vector<int32_t> tried;

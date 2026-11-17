@@ -59,6 +59,7 @@ std::string resultJson(const Job& j) {
                     ",\"limit\":" + std::to_string(r.limit) + ",\"first_failed\":" + std::to_string(r.firstFailed) +
                     ",\"steps\":" + std::to_string(r.steps) + ",\"seconds\":" + num(r.seconds) +
                     ",\"stop_reason\":" + str(r.stopReason) + ",\"error\":" + str(r.error) +
+                    ",\"capped_by\":" + str(r.cappedBy) +
                     ",\"callback_core\":" + std::to_string(j.callbackCore) +
                     // Local only (not in H2): the warm-up, the first callback after Play, the trend, the core's
                     // clock at the timed span's start and end, the mix pool, what was asked, and what the budget is.
@@ -75,7 +76,12 @@ std::string resultJson(const Job& j) {
                     // Live: each callback's budget is its own length, not its real deadline (the frames the device
                     // has queued), so over_budget overstates; the platform's xruns are the dropouts heard.
                     ",\"budget_basis\":" + str(live ? "callback_length" : "callback") +
-                    ",\"feature\":" + str(j.feature) + ",\"costs\":[";
+                    ",\"feature\":" + str(j.feature) +
+                    // Live runs aren't profiled (a profile would run the mix on one thread): their parts are the
+                    // device's I/O and the rest, Engine::process whole, as "other".
+                    ",\"parts_basis\":" + str(live ? "unprofiled" : r.parts.empty() ? "none" : "profile") +
+                    (live && !r.audioThreads.empty() ? ",\"audio_threads\":" + r.audioThreads : std::string()) +
+                    ",\"costs\":[";
     for (size_t k = 0; k < r.costs.size(); ++k) {
         const CostRow& c = r.costs[k];
         o += std::string(k ? "," : "") + "{\"id\":" + str(c.id) + ",\"ns\":" + std::to_string(c.ns) + ",\"pct\":" + num(c.pct) +
@@ -215,6 +221,8 @@ RunResult runLive(Job& j) {
     }
     out.mixWorkers = e->engine->mixWorkers();
     out.mixActive = e->engine->mixActiveWorkers();
+    // Live: the callback's scheduling and the performance hint as they were at the timed span's end (#234).
+    out.audioThreads = e->engine->audioThreadsJson();
     caw_audio_stop(e);  // the callback has stopped once this returns
     e->stress.store(nullptr, std::memory_order_release);
     const int64_t total = meter->written.load(std::memory_order_acquire);

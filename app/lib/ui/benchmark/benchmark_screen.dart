@@ -1,4 +1,5 @@
 // The Benchmark (beta plan C; owner's looks 2026-11-12 and 2026-11-13): Quick or Full run, a live load graph, then the summary (verdict, parts, scenarios by feature) and the raw numbers, Share/Save JSON, and the user's built plug-ins to time.
+import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
 
@@ -57,6 +58,8 @@ StressRunner defaultStressRunner(StressHost? host) {
       }
     },
     device: device,
+    foreground: appForegroundChanges(),
+    inForeground: appInForeground,
     readDeviceName: () async {
       final f = await IoDeviceProbe().read();
       final words = [f.manufacturer, f.model].whereType<String>().where((s) => s.isNotEmpty).toList();
@@ -64,6 +67,27 @@ StressRunner defaultStressRunner(StressHost? host) {
       return words.isEmpty ? null : words.map((w) => w[0].toUpperCase() + w.substring(1)).join(' ');
     },
   );
+}
+
+/// Whether the app is in front now: resumed or inactive (a dialog or the shade over it), not hidden or paused.
+bool appInForeground() {
+  final s = WidgetsBinding.instance.lifecycleState;
+  return s == null || s == AppLifecycleState.resumed || s == AppLifecycleState.inactive;
+}
+
+/// The app going behind another app (false) and coming back (true), for the Benchmark (#234). The lifecycle
+/// listener lives only while the run listens.
+Stream<bool> appForegroundChanges() {
+  AppLifecycleListener? listener;
+  late final StreamController<bool> c;
+  c = StreamController<bool>(
+    onListen: () => listener = AppLifecycleListener(onHide: () => c.add(false), onShow: () => c.add(true)),
+    onCancel: () {
+      listener?.dispose();
+      listener = null;
+    },
+  );
+  return c.stream;
 }
 
 Color tierColor(StressTier? t) => benchTierColor(t);

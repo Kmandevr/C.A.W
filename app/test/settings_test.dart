@@ -1,4 +1,5 @@
 // Tests saving and loading the settings and custom themes.
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:caw/model/settings.dart';
@@ -65,6 +66,19 @@ void main() {
     expect(Neon.showScopes, isTrue);
     expect(Neon.light, isTrue);
     expect(Neon.glow(Neon.green), isEmpty);
+
+    // #236: buffer tuning is off by default; the sizes it settled on per kind of output come back, bounded.
+    final tuned = Settings();
+    expect(tuned.bufferTuning, isFalse);
+    tuned.fromJson({
+      'buffer_tuning': true,
+      'tuned_buffer_frames': {'bluetooth': 960, 'builtIn': 192, 'bad': -1, 'huge': 1 << 20, 'text': 'x'},
+    });
+    expect(tuned.bufferTuning, isTrue);
+    expect(tuned.tunedBufferFrames, {'bluetooth': 960, 'builtIn': 192});
+    final again = Settings()..fromJson(jsonDecode(jsonEncode(tuned.toJson())) as Map<String, dynamic>);
+    expect(again.tunedBufferFrames, {'bluetooth': 960, 'builtIn': 192});
+    expect(again.bufferTuning, isTrue);
 
     final legacy = Settings();
     legacy.fromJson({'light_mode': true});
