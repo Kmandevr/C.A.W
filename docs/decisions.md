@@ -102,6 +102,14 @@ The batch is 1.0.5 if it is ready, else 1.0.6.
   - de-hum (50/60 Hz, auto-detected);
   - de-click and de-plosive;
   - de-reverb and breath control.
+- **Guitar effects** (owner, the same day), built into the existing effects:
+  - Drive gets amp modes (Clean, Crunch, Lead, High gain) with a bass, mid, treble and presence tone stack, and pedal modes (Overdrive, Distortion, Fuzz);
+  - the convolver gets a Cab mode with C.A.W's own cabinets and the user's IRs.
+- **Purpose-friendly helpers:**
+  - purpose tags with a filter in the effect browser;
+  - chain templates (Guitar clean, crunch and lead; Vocal; Podcast voice; Drum bus; Master);
+  - presets named for the job;
+  - a one-tap chain suggestion when a guitar or mic track is armed.
 - **When:** its own batch, 1.0.6, after 1.0.5. The later batches move up by one.
 
 ## 2026-11-14: Clip stretching runs Signalsmith Stretch live in the callback; two new dependencies (Claude, within the owner's 1.0.4 contract, #208)

@@ -83,6 +83,9 @@ updated: 2026-11-17
   - a harmonics bar shows the even and odd balance;
   - modes are cards (Tape, Tube, Fold, Clip, Phase), each with its own curve colour;
   - pre and post tone knobs, plus Mix.
+- **Drive's amp and pedal modes:** the amp modes show an amp face (tone stack knobs in a row, as on an amp). The pedal modes show a pedal face, with a footswitch for bypass. Both keep Drive's transfer curve as the visual.
+- **Convolver Cab mode:** a picker of cabinet cards with the speaker's response curve, mic position (centre to edge) and distance.
+- **The effect browser:** purpose chips on top (Guitar, Vocals, Drums, Bass, Mixing, Mastering, Sound design, Lo-fi), then the chain templates of that purpose, then the devices and presets.
 - **Bit distortion:** a staircase waveform view (bits and rate drawn), plus bitwise mode chips.
 - **Utility and stereo:** a goniometer and correlation meter; width, balance, Haas, mono-below and channel swap.
 - **Chorus and Flanger:** the voices drawn as moving dots in stereo, with modes as chips.

@@ -72,7 +72,7 @@ An overview by area, checked against the repository on 2026-11-03. The stage tab
    - MIDI playback and piano roll fixes (#226, #228).
 
    Stem export is already built (#33). App-wide undo is checked against the existing project-wide history (`lib/model/history.dart`) first.
-5. **1.0.6:** fewer, better built-in effects (#227, owner 2026-11-17). The overlapping effects merge into one device each, no more costly to run than the ones they replace. New standard effects: exciter, pitch correction, vocoder, analyzer, tuner, loudness meter, dynamic and M/S EQ, tape echo, plate and spring. Recording tools: noise reduction (live and on clips), a pedal-style noise gate, de-hum, de-click and de-plosive, de-reverb and breath. Also the free AutoStacc beta pack: bit-shift distortion, warp, spectral FX and glitch.
+5. **1.0.6:** fewer, better built-in effects (#227, owner 2026-11-17). The overlapping effects merge into one device each, no more costly to run than the ones they replace. New standard effects: exciter, pitch correction, vocoder, analyzer, tuner, loudness meter, dynamic and M/S EQ, tape echo, plate and spring. Recording tools: noise reduction (live and on clips), a pedal-style noise gate, de-hum, de-click and de-plosive, de-reverb and breath. Guitar amp, pedal and cabinet modes in Drive and the convolver. Purpose tags, chain templates and purpose-named presets. Also the free AutoStacc beta pack: bit-shift distortion, warp, spectral FX and glitch.
 6. **1.0.7:**
    - clip automation and VCA groups (#210);
    - receives, parallel paths and drum multi-out (#217);
