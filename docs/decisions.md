@@ -6,6 +6,16 @@ updated: 2026-11-17
 
 # Decisions
 
+## 2026-11-17: Visual, non-linear routing is in 1.1.0 (owner, #233)
+
+**Decision (owner, 2026-11-17):** 1.1.0 adds visual, non-linear routing. The node graphs work:
+- inside device chains;
+- between tracks;
+- for modulation;
+- inside Flagship.
+
+The goal is "everything works with everything natively", like Kilohearts' Snap Heap but built into everything that can use it. The batch 1.0.6 devices are built to become nodes later.
+
 ## 2026-11-17: Device UI redesign and a step-by-step music video (owner, #231, #232)
 
 **Decision (owner, 2026-11-17).** Both ship in batch 1.0.6, with the FX consolidation.

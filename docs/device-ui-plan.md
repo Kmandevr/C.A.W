@@ -17,6 +17,8 @@ updated: 2026-11-17
 - **Identity:** cohesive, yet each device has its own design and feel, so none is boring. Devices that go together share things.
 - **Auto gain** never changes the intent of the work, and it can be turned off.
 
+- **Ready for routing (1.1.0, #233):** every device is built so it can later be a node in the visual routing graph: one parameter and modulation model, no device-specific routing.
+
 ## The shared kit (every device)
 - **Header:**
   - power, the name in the family's colour, and the preset bar (‹ name ›, a tap to search, ★ favourite);

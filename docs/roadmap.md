@@ -87,6 +87,7 @@ An overview by area, checked against the repository on 2026-11-03. The stage tab
 
 **In 1.1.0 itself (owner, 2026-11-13):**
 - plug-in hosting goes live (#212) and play-ahead ships;
+- visual, non-linear routing (#233, owner 2026-11-17): node graphs inside device chains, between tracks, for modulation and inside Flagship, so that everything works with everything natively, as Kilohearts' Snap Heap does but built in everywhere;
 - AutoStacc becomes a download, update source and store page (#221);
 - C.A.W is published on Google Play and the iOS App Store (#222).
 
