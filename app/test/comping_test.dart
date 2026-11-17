@@ -22,7 +22,6 @@ import 'package:caw/ui/arranger_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import 'audio_fake.dart';
 
 const _names = {60: 'C4', 64: 'E4', 67: 'G4'};
 String _take(int pitch) => '---\nkind: pattern\nlength: 16\n---\n'
