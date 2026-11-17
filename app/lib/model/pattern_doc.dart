@@ -810,6 +810,10 @@ class PatternDoc {
               lineNo, x.col, "unknown extra '${x.text}' (try prob 0.5, ratchet 3, slide, bend, vib, press or timbre)");
         }
       }
+      // As the engine's parser (kMaxBend): a bend plus its vibrato depth stays within maxBend either way.
+      if (expr.bend.fold<double>(0, (m, p) => math.max(m, p.v.abs())) + expr.vibDepth > NoteExpression.maxBend) {
+        throw _PatternError(lineNo, w[0].col, "a note's bend plus its vibrato depth can be at most 96 semitones");
+      }
       final comment = cut >= 0 ? _trim(raw.substring(cut + 2)) : null;
       final group = <PatternNote>[];
       for (final pitch in chord) {

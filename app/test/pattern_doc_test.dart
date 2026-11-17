@@ -737,6 +737,9 @@ void main() {
       expect(PatternDoc.parse('${head}0 C3 1 bend 0.5:1 0.2:0\n').error, contains('rising'));
       expect(PatternDoc.parse('${head}0 C3 1 press 0:2\n').error, contains('press values must be 0 to 1'));
       expect(PatternDoc.parse('${head}0 C3 1 vib 0.3\n').error, contains('vib needs depth and rate'));
+      // Bend plus vibrato depth within maxBend (96, #226), as kMaxBend in the engine.
+      expect(PatternDoc.parse('${head}0 C4 4 1 bend 0:0 1:96\n').ok, isTrue);
+      expect(PatternDoc.parse('${head}0 C4 4 1 bend 0:0 1:90 vib 7 5\n').error, contains('at most 96 semitones'));
     });
 
     test('a chord line shares its expression; different expressions split the line', () {
