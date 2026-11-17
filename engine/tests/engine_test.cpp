@@ -1489,8 +1489,9 @@ TEST(play_from_a_position_resumes_mid_loop) {
     e.setProject(p);
     e.play(80000.0 / 6000.0);  // step 13.33 (6000 samples a step): 1.33 steps into the layer's second pass
     std::vector<float> out = run(e, 20000);
-    // The note under the playhead began before it, so the first heard is the next one, at layer step 2 (4000 on).
-    CHECK_NEAR(out[1000], 0.0, 1e-7);
+    // The note under the playhead began before it and sounds from the playhead (chased, #226), then the next one, at
+    // layer step 2 (4000 on).
+    CHECK_NEAR(out[1000], 2.0 / 12.0 * g, 1e-4);
     CHECK_NEAR(out[5000], 3.0 / 12.0 * g, 1e-4);
     CHECK_NEAR(out[15999], 4.0 / 12.0 * g, 1e-4);
     CHECK_NEAR(out[16000], 1.0 / 12.0 * g, 1e-4);  // the project loop wraps as usual

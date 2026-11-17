@@ -14,7 +14,7 @@ bool noteNumber(const std::string& s, double& out);
 
 constexpr int kMaxRatchet = 8;
 
-constexpr double kMaxBend = 48.0;  // semitones either way (the app draws within +-12 by default)
+constexpr double kMaxBend = 96.0;  // semitones either way, bend plus vibrato (#226: eight octaves; docs/decisions.md)
 
 // A curve over one note: points at times 0..1 through the note, each with a value and a bend for the segment after
 // it (0 straight, + eases in, - eases out; the shape is u^(4^bend)). Point storage is dynamic;
@@ -33,6 +33,10 @@ struct NoteCurve {
 struct NoteExpression {
     NoteCurve bend, press, timbre;
     double vibDepth = 0, vibRate = 5, vibDelay = 0;  // semitones, Hz, and how much of the note it takes to fade in
+    // Played, not written (#226): the part of the written note a cut note plays, as shares of the written note: a
+    // clip that cuts a note (its end, its loop point or its source offset) plays the curves over [from, from + span]
+    // of it, not squeezed into what is left. The text never sets them; a parsed note plays all of it.
+    double from = 0, span = 1;
 };
 
 // One note. Times are in steps (16ths) from the pattern start and may be fractions (off the grid, triplets).

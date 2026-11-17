@@ -286,7 +286,7 @@ PatternResult parsePattern(std::string_view src) {
                 double most = 0;
                 for (const CurvePoint& point : ex.bend.points) most = std::max(most, std::fabs(static_cast<double>(point.v)));
                 if (most + ex.vibDepth > kMaxBend)
-                    throw PatternError(lineNo, w[0].col, "a note's bend plus its vibrato depth can be at most 48 semitones");
+                    throw PatternError(lineNo, w[0].col, "a note's bend plus its vibrato depth can be at most 96 semitones");
                 n.extra = static_cast<int>(p->expressions.size());
                 p->expressions.push_back(ex);
             }

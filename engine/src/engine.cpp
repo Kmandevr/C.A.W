@@ -74,6 +74,7 @@ struct Engine::Slot {
     bool removing = false;
     bool track = false;      // installed as a track: its instrument plays the notes, through its inserts
     bool fresh = true;       // the track has not played yet since it was installed or play started
+    bool chase = false;      // its next chunk picks up the pattern notes already sounding there (#226, chaseNotes)
     bool overloaded = false;  // shed: the device ran out of time (setShed keeps Engine::overloadedFlag_ counting these)
     uint64_t shedSeq = 0;       // audio thread: when it was shed, in shed order (the newest shed comes back first)
     double shedCost = 0;        // audio thread: what it is taken to cost: the meter's drop after it was shed, at most
@@ -370,7 +371,13 @@ std::shared_ptr<const Pattern> compileArrangement(
                 // source's list, so it is copied into the arrangement's and pointed there.
                 if (original.extra >= 0 && static_cast<size_t>(original.extra) < src.expressions.size()) {
                     note.extra = static_cast<int>(out->expressions.size());
-                    out->expressions.push_back(src.expressions[static_cast<size_t>(original.extra)]);
+                    NoteExpression x = src.expressions[static_cast<size_t>(original.extra)];
+                    // A cut note plays its own part of the curves (#226), not all of them squeezed into it.
+                    if ((trimmedAtStart || trimmedAtEnd) && original.len > 0 && note.len > 0) {
+                        x.from += x.span * (clippedStart - original.at) / original.len;
+                        x.span *= note.len / original.len;
+                    }
+                    out->expressions.push_back(std::move(x));
                 } else {
                     note.extra = -1;
                 }
@@ -797,6 +804,7 @@ Engine::Engine(double sampleRate)
 Engine::Engine(double sampleRate, EngineResourceBudget resourceBudget)
     : sr_(sampleRate),
       trackGainCoef_(1.0 - detExp(-1.0 / (kGainSeconds * sampleRate))),
+      nyquistPitch_(69.0 + 12.0 * detLog(std::max(1.0, sampleRate) / 880.0) / detLog(2.0)),
       resourceBudget_(resourceBudget),
       cmds_(new Spsc<Cmd, 1024>()),
       retired_(new Spsc<Retired, 1024>()),
@@ -3500,12 +3508,16 @@ int64_t Engine::loopStart(const Slot& s, int64_t k) const noexcept {
 }
 
 // The note's expression `into` samples after it took the voice: bend (curve + vibrato), press and timbre.
+// A cut note (#226: a clip's end, loop point or source offset) plays its part [from, from + span] of the written
+// note's curves and vibrato, as the written note had them there.
 static void expressionAt(const NoteExpression& x, double into, double len, double sr, double& bend, double& press, double& timbre) {
-    const double u = std::clamp(into / len, 0.0, 1.0);
+    const bool whole = x.from == 0 && x.span == 1;
+    const double u = whole ? std::clamp(into / len, 0.0, 1.0) : std::clamp(x.from + x.span * std::clamp(into / len, 0.0, 1.0), 0.0, 1.0);
     bend = !x.bend.points.empty() ? x.bend.at(u) : 0.0;
     if (x.vibDepth > 0) {
         const double fade = x.vibDelay > 0 ? std::clamp(u / x.vibDelay, 0.0, 1.0) : 1.0;
-        bend += x.vibDepth * fade * detSin(kTwoPi * x.vibRate * into / sr);
+        const double t = whole ? into : into + x.from * len / x.span;  // samples since the written note's start
+        bend += x.vibDepth * fade * detSin(kTwoPi * x.vibRate * t / sr);
     }
     press = !x.press.points.empty() ? x.press.at(u) : 1.0;
     timbre = !x.timbre.points.empty() ? x.timbre.at(u) : 0.0;
@@ -3782,6 +3794,77 @@ void Engine::rebindNote(const Slot& s, NoteEvents& notes, NoteEvents::Held& h, c
     h.glideStep = (h.target - h.pitch) / h.glideLeft;
 }
 
+// Chasing (#226): play, a loop back, a layer's new pass or an unmute that lands inside pattern notes starts them at
+// frame 0, as if they had been playing: each pattern note whose on is before n0 (events [0, e)) and whose off is
+// after it, unless it already sounds. Its expression (bend, vibrato, pressure, timbre) and glide-free pitch are the
+// note's own at n0, and its motion grid carries on from the note's start, so a chased note sounds as the same note
+// played through would from there, at any block size, live and in export. The instrument starts its voice there with
+// its own attack (a sampler from the sample's start: docs/decisions.md). One pass over the events before n0 with
+// a fixed list of the notes still open (kChaseMost; past it the oldest are dropped): no allocation, bounded by the
+// pattern, and only at those moments.
+void Engine::chaseNotes(Slot& s, NoteEvents& notes, const Pattern* pat, size_t e, int64_t n0) noexcept {
+    constexpr int kChaseMost = 128;
+    struct Open { uint32_t note; uint16_t sub; int64_t start; };
+    Open open[kChaseMost];
+    int count = 0;
+    const PatternEvent* ev = pat->events.data();
+    for (size_t i = 0; i < e; ++i) {
+        const PatternEvent& pe = ev[i];
+        if (pe.on) {
+            if (count == kChaseMost) {
+                std::move(open + 1, open + count, open);
+                --count;
+            }
+            open[count++] = {pe.note, pe.sub, passFrame(s, pe.step)};
+            continue;
+        }
+        for (int k = count - 1; k >= 0; --k)
+            if (open[k].note == pe.note && open[k].sub == pe.sub) {
+                std::move(open + k + 1, open + count, open + k);
+                --count;
+                break;
+            }
+    }
+    // A note ending exactly at n0 does not sound.
+    const size_t ne = pat->events.size();
+    for (size_t i = e; i < ne && count > 0 && passFrame(s, ev[i].step) <= n0; ++i) {
+        if (ev[i].on) continue;
+        for (int k = count - 1; k >= 0; --k)
+            if (open[k].note == ev[i].note && open[k].sub == ev[i].sub) {
+                std::move(open + k + 1, open + count, open + k);
+                --count;
+                break;
+            }
+    }
+    for (int k = 0; k < count; ++k) {
+        const Open& o = open[k];
+        if (o.note >= pat->notes.size() || notes.findPattern(o.note, o.sub)) continue;
+        const PatternNote& n = pat->notes[o.note];
+        if (!notePlays(n, o.note, s.repeat, seed_)) continue;
+        const bool expressive = n.extra >= 0 && static_cast<size_t>(n.extra) < pat->expressions.size();
+        const NoteExpression* x = expressive ? &pat->expressions[static_cast<size_t>(n.extra)] : nullptr;
+        int64_t start = 0, stop = 0;
+        const double exLen = timeConstant_ || !noteSpan(s, n, o.sub, start, stop)
+                                 ? std::max(1.0, n.len / std::max(1, n.ratchet) * stepLen_)
+                                 : std::max(1.0, static_cast<double>(stop - start));
+        const int64_t since = std::max<int64_t>(0, n0 - o.start);
+        double bend = 0, press = 1, timbre = 0;
+        if (x) expressionAt(*x, static_cast<double>(since), exLen, sr_, bend, press, timbre);
+        NoteEvents::Held& h = notes.on(0, NoteEvents::Source::Pattern, o.note, o.sub, -1, safePitch(n.pitch + bend), n.vel);
+        if (!h.active) continue;
+        h.pitch = h.target = n.pitch;
+        h.ex = x;
+        h.exLen = exLen;
+        if (x && !x->press.points.empty()) notes.pressure(0, h, std::clamp(press, 0.0, 1.0));
+        if (x && !x->timbre.points.empty()) notes.timbre(0, h, std::clamp(timbre, 0.0, 1.0));
+        // The note's control grid runs on from its start: its next point is this many frames on.
+        const int64_t wait = (kExpressionStep - since % kExpressionStep) % kExpressionStep;
+        h.since = since + wait;
+        h.motionFrom = 0;
+        h.motionWait = static_cast<int>(wait);
+    }
+}
+
 // The pattern's notes in this chunk as the instrument's events, on their exact frames: chance per repeat, ratchets,
 // slides (the held note glides on, no new attack), the note's expression, and held notes carried across a pattern
 // edit following their new note.
@@ -3791,11 +3874,18 @@ void Engine::instrumentNotes(Slot& s, NoteEvents& notes, int m) noexcept {
     auto sampleOf = [this, &s](double step) { return passFrame(s, step); };
     for (NoteEvents::Held& h : notes.held())
         if (h.active && h.rebind) rebindNote(s, notes, h, pat, n0);
-    if (!pat) return;
+    if (!pat) {
+        s.chase = false;
+        return;
+    }
     const PatternEvent* ev = pat->events.data();
     const size_t ne = pat->events.size();
     size_t e = static_cast<size_t>(
         std::partition_point(ev, ev + ne, [&](const PatternEvent& x) { return sampleOf(x.step) < n0; }) - ev);
+    if (s.chase) {
+        s.chase = false;
+        if (e > 0) chaseNotes(s, notes, pat, e, n0);
+    }
     auto express = [&](NoteEvents::Held& h, const PatternNote& n, uint32_t frame, uint32_t sub) noexcept {
         const bool expressive = n.extra >= 0 && static_cast<size_t>(n.extra) < pat->expressions.size();
         h.ex = expressive ? &pat->expressions[static_cast<size_t>(n.extra)] : nullptr;
@@ -3859,7 +3949,7 @@ void Engine::noteMotion(NoteEvents& notes, NoteEvents::Held& h, int end) noexcep
         double bend = 0, press = 1, timbre = 0;
         if (h.ex) expressionAt(*h.ex, static_cast<double>(h.since), h.exLen, sr_, bend, press, timbre);
         const uint32_t frame = static_cast<uint32_t>(f);
-        notes.pitch(frame, h, h.pitch + bend);
+        notes.pitch(frame, h, safePitch(h.pitch + bend));
         if (h.ex) {
             if (!h.ex->press.points.empty()) notes.pressure(frame, h, std::clamp(press, 0.0, 1.0));
             if (!h.ex->timbre.points.empty()) notes.timbre(frame, h, std::clamp(timbre, 0.0, 1.0));
@@ -3928,6 +4018,7 @@ void Engine::runInstrument(Slot& s, int m) noexcept {
             }
         if (NoteFxHost* fx = noteFx_->forSlot(s.index)) fx->reset();  // per-note FX (#127)
         s.instrumentIdle = false;
+        s.chase = true;  // unmuted (or back from silence) inside a note: it sounds from here (#226)
     }
     if (s.instrument) {
         NoteEvents& notes = *s.instrument->notes();
@@ -4017,6 +4108,7 @@ void Engine::planTrack(Slot& s, int& m) noexcept {
         // The layer restarts its pattern: held notes ring out, the instrument and its effects carry on.
         if (!s.fresh && s.instrument && !s.instrumentIdle) s.instrument->notes()->releaseAll(0, true);
         s.fresh = false;
+        s.chase = true;  // play, a loop back or a new pass may start inside notes: they sound from here (#226)
         s.k = k;
         s.epoch = epoch_;
     }

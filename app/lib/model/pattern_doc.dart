@@ -279,7 +279,15 @@ class NoteExpression {
   final double vibDepth, vibRate, vibFade;
 
   static const none = NoteExpression();
-  static const maxBend = 48.0;
+  /// How far a bend (plus its vibrato) goes either way, in semitones: eight octaves (#226, the engine's kMaxBend).
+  static const maxBend = 96.0;
+
+  /// The pitch range a curve editor shows for [bend]: +-12 semitones, widened by an octave whenever a point reaches
+  /// its edge, up to [maxBend] (#226).
+  static double bendView(List<NotePoint> bend) {
+    final most = bend.fold<double>(0, (m, p) => math.max(m, p.v.abs()));
+    return math.min(maxBend, math.max(12.0, ((most + 1) / 12).ceil() * 12.0));
+  }
 
   bool get isEmpty => bend.isEmpty && press.isEmpty && timbre.isEmpty && vibDepth == 0;
 
@@ -1084,11 +1092,24 @@ class PatternDoc {
 
   static double _round3(double v) => (v * 1000).round() / 1000;
 
-  /// Adds a note (start, pitch and length clamped to the engine's ranges).
+  /// A note already starting at [at] on [pitch] (its pitch rounds to it), or null.
+  PatternNote? noteStartingAt(Steps at, double pitch) {
+    final p = pitch.round();
+    for (final n in notes) {
+      if (n.at == at && n.pitch.round() == p) return n;
+    }
+    return null;
+  }
+
+  /// Adds a note (start, pitch and length clamped to the engine's ranges). A note already starting there on that
+  /// pitch is never stacked on (#228, the owner: "it makes it incredibly easy to accidentally stack MIDI notes"):
+  /// the document comes back unchanged with that note's id.
   ({PatternDoc doc, int? id}) insert(Steps at, double pitch, Steps len, {double vel = 1}) {
+    final clamped = at.clamp(Steps.zero, Steps(kPatternMaxSteps));
+    if (noteStartingAt(clamped, pitch.clamp(0, 127).toDouble()) case final same?) return (doc: this, id: same.id);
     final n = PatternNote(
       id: _nextId,
-      at: at.clamp(Steps.zero, Steps(kPatternMaxSteps)),
+      at: clamped,
       len: len.clamp(kMinNoteLength, Steps(kPatternMaxSteps)),
       pitch: pitch.clamp(0, 127).toDouble(),
       vel: _round3(vel.clamp(0, 1).toDouble()),
@@ -1166,10 +1187,21 @@ class PatternDoc {
     for (final c in clip.notes) {
       final t = at + c.at;
       if (t > Steps(kPatternMaxSteps) || t < Steps.zero) continue;
+      // An exact duplicate (same start and pitch) replaces the note there instead of stacking on it (#228).
+      out.removeWhere((n) => !ids.contains(n.id) && n.at == t && n.pitch.round() == c.pitch.round());
       out.add(c.copyWith(id: id, at: t, trailingComment: null, line: null));
       ids.add(id++);
     }
     return (doc: _withNotes(out, id), ids: ids);
+  }
+
+  /// [kept] (notes just moved, pasted or drawn) merge with any other note that starts where one of them does on the
+  /// same pitch: the other one goes, so a drop never leaves two notes stacked (#228).
+  PatternDoc mergeStacked(Set<int> kept) {
+    final at = {for (final n in notes) if (kept.contains(n.id)) (n.at, n.pitch.round())};
+    if (at.isEmpty) return this;
+    final out = [for (final n in notes) if (kept.contains(n.id) || !at.contains((n.at, n.pitch.round()))) n];
+    return out.length == notes.length ? this : _withNotes(out, _nextId);
   }
 
   /// Copies the selection [offset] later.

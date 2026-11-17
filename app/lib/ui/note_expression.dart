@@ -90,7 +90,7 @@ class ExpressionPanel extends StatelessWidget {
       Text('Pitch (semitones): tap to add a point, drag it, drag a line to bend it, hold to delete',
           style: TextStyle(color: Neon.dim, fontSize: 12)),
       NoteCurveEditor(
-          points: e.bend, min: -12, max: 12, zero: 0, snap: 1, timeSnap: timeSnap, color: color, onChanged: (p) => onChanged(e.copyWith(bend: p))),
+          points: e.bend, min: -NoteExpression.bendView(e.bend), max: NoteExpression.bendView(e.bend), zero: 0, snap: 1, timeSnap: timeSnap, color: color, onChanged: (p) => onChanged(e.copyWith(bend: p))),
       // Vibrato: big sliders with a type-in and a reset (none, 5 Hz, no fade-in).
       ValueSlider(label: 'Vibrato depth', value: e.vibDepth, min: 0, max: 2, reset: 0, scale: 100, unit: ' cents',
           onChanged: (v) => onChanged(e.copyWith(vibDepth: v))),
