@@ -66,7 +66,7 @@ This note records the current implementation gaps in C.A.W.'s music-production w
 - **[Incomplete]** Bluetooth MIDI pairing inside the app, controller learn/mapping, external clock/sync and control-surface support.
 - **[Implemented, not yet run on a device]** Overload recovery (2026-11-12): layers the engine shed come back on their own once the load is low, and going to or from the background unmutes them ([engine](engine.md), "Overload, and coming back"). An overload also turns the Lightweight profile on once while Lightweight on overload is on (`light_by_self` remembers it; [app](app.md), Frame rate).
 - **[Implemented, not yet run on a device]** Output and input latency compensation (Bluetooth, USB, HDMI): MIDI takes at the step that was heard when the note was played, audio takes by output + input latency, the playhead and meters at the heard time, the playhead drawn between reads from the compensated read ([app](app.md)).
-- **[Incomplete]** Take lanes and comping beyond a loop's stacked takes.
+- **[Built 1.0.5, #209]** Take lanes and comping: a swipe across a take picks that part, crossfaded joins, Flatten ([app](app.md)).
 - **[Implemented, not yet run on a device]** Playing and recording behind other apps on Android (a `mediaPlayback` foreground service with a Play/Pause and Stop notification), and a microphone that opens only while a track is armed or monitors, a recording runs or the ping plays ([app](app.md)).
 
 ## Implementation constraints

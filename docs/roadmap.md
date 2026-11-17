@@ -52,7 +52,7 @@ An overview by area, checked against the repository on 2026-11-03. The stage tab
 | MIDI | MIDI pattern import/export; USB, Bluetooth, UMP (Android) and WinMM (Windows) devices into instruments at their frame; controller learn | MIDI clock, MIDI-CI, MIDI output |
 | Export | WAV loop/free-length/one-shot/wavetable, MIDI, profiles/history and bounded in-memory queue | Stems, persistent queue and broader batch delivery |
 | Audio assets | Audio import into the project, non-destructive audio clips, the sampler with zone mapping and SFZ (2026-11-11) | Sample editor, generated audio as assets |
-| Recording | MIDI and audio recording, monitoring, latency compensation, punch, loop takes, crash recovery (2026-11-11) | Comping, device-loss handling, hardware timing checks |
+| Recording | MIDI and audio recording, monitoring, latency compensation, punch, loop takes, crash recovery (2026-11-11); take lanes and comping, Record with nothing armed (1.0.5) | Device-loss handling, hardware timing checks |
 | Plugins | C++ components export as CLAP and VST3 plug-ins (`engine/plugin/`); native SDK/graph foundations exist | Dynamic native loading/isolation and external CLAP/VST3/AU hosting |
 | AI/video | No in-app AI; video sync is not planned | AI remains excluded; video sync remains off-roadmap |
 
@@ -262,7 +262,7 @@ Recording is part of the product direction and the last stage before Release 1. 
 | 7.2 | Audio input selection, channel configuration and input monitoring | Built, untested on hardware | both | 5.6 | Settings › Audio's input device and channels, the RECORD_AUDIO request when input is turned on or a track armed, each track's channel, mono or stereo and monitoring ([app](app.md), Audio); untested on the S22+ |
 | 7.3 | Multitrack audio recording to arrangement tracks | Built, untested on hardware | both | 3.2, 7.2 | Record records every armed audio track; takes become clips where they were played ([app](app.md), Audio) |
 | 7.4 | Input latency measurement and compensation | Partial | both | 7.2 | Takes are placed by the round-trip latency; Settings › Audio measures it with the ping (after a warning) or takes a typed offset. Not yet measured on a phone |
-| 7.5 | Punch in/out and loop recording; take lanes and comping | Partial | both | 7.3 | Punch over the loop range or the time selection; a loop recording's passes stack as one clip's takes, swapped whole by the take chip. Comping parts of takes is not built |
+| 7.5 | Punch in/out and loop recording; take lanes and comping | Partial | both | 7.3 | Punch over the loop range or the time selection; a loop recording makes a take per pass (MIDI and audio), comped in take lanes under the track with crossfaded joins and flattened in one step (1.0.5, #209, [app](app.md)) |
 | 7.6 | Count-in, metronome options and monitoring controls | Partial | app | 5.5 | Metronome off, while recording or always, and a 0–2 bar count-in on Record's long-press; no click sound choice or monitoring controls |
 | 7.7 | Recording recovery after interruption, device loss or low storage | Partial | both | 1.7, 7.3 | Takes a crash left are offered back when the project opens; a failed write ends the take keeping what was written, a full ring is filled with silence and reported. Device-loss handling in the app is not built |
 

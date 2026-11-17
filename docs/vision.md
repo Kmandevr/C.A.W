@@ -71,7 +71,7 @@ Important boundaries:
 - Audio-file import, audio clips, sample editing and WAV/SFZ multisample authoring are not implemented.
 - Sends to bus folders, sidechain keys (the ducker, compressor and gate) and bus effects are built (2026-11-11, #175); receives, parallel paths inside a track and a routing matrix are not. Native effect chains on tracks, buses and the master are built (engine).
 - Instrument and effect knob automation is built; stems export is in the Export song sheet.
-- Audio/MIDI recording, input monitoring, recording latency compensation, take lanes and comping are not implemented; they are planned later in the permanent roadmap. (Plugin delay compensation for native effects is built.)
+- Audio/MIDI recording, input monitoring, recording latency compensation, take lanes and comping are built ([app](app.md)); plugin delay compensation for native effects is built too.
 - The modular graph executor and native module registry are foundations, not the active playback/mixer path. External CLAP/VST3 binary hosting is not implemented. Dynamic loading of C.A.W. native components, under the user's explicit trust choice, is built in the engine; no screen uses it yet.
 - Video synchronization is not planned at this time.
 - See [engine implementation status](engine-build-status.md) for the complete native boundary and paused work.
