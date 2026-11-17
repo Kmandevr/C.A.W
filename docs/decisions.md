@@ -6,6 +6,22 @@ updated: 2026-11-17
 
 # Decisions
 
+## 2026-11-17: Device UI redesign and a step-by-step music video (owner, #231, #232)
+
+**Decision (owner, 2026-11-17).** Both ship in batch 1.0.6, with the FX consolidation.
+- **FX chain:** collapsed rows, any number open at once, and every control usable in place.
+- **Editing:** visual first, controlled mainly by knobs.
+- **Flagship:** one Vital-like screen; on a phone, three panels with a mod strip that is always shown.
+- **QoL kit on every device:**
+  - presets and A/B;
+  - precise control;
+  - auto gain, never changing the work's intent and possible to turn off;
+  - randomize and undo.
+- **Look:** cohesive, but each device has its own design.
+- **Music video:** becomes a step-by-step flow, with manual shots and dragging in the lane, and never loses edits.
+
+The plan: [device UI plan](device-ui-plan.md).
+
 ## 2026-11-17: Linked sample folders, the browser's preview and automatic metadata (owner, #229)
 
 **Decision (owner, 2026-11-17):** samples are no longer imported by hand.
