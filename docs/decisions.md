@@ -6,6 +6,20 @@ updated: 2026-11-17
 
 # Decisions
 
+## 2026-11-17: Two Android builds; Isolated with an optional no-delay mode; feedback and Flagship routing (owner, #212, #222, #233)
+
+**Decision (owner, 2026-11-17):**
+- **Two Android builds:**
+  - **The GitHub build** has everything: third-party plug-ins and the self-updater.
+  - **The Play Store build** follows Play's rule on downloaded code ([plug-in hosting plan](plugin-hosting-plan.md)).
+
+  The owner asked whether the engine could count as an interpreter, as a workaround; that is an open question in the plug-in hosting plan. The owner also asked to do the same for iOS where possible. **[Assumption]** That needs checking: which alternative distribution iOS allows is not verified here.
+- **Isolated plug-ins** add one block of compensated latency. There is also an optional **no-delay mode**, which runs the plug-in in the callback with a timeout. It is riskier, because a slow plug-in causes dropouts.
+- **Feedback,** as proposed:
+  - 16 frames inside a patch and 64 between tracks;
+  - a limiter on each feedback wire, on by default and switchable per wire.
+- **Flagship's routing graph:** per voice is optional per patch. By default, effects are shared and the oscillator/filter path runs per voice.
+
 ## 2026-11-17: Plans go private at 1.1.0; the code stays public (owner)
 
 **Decision (owner, 2026-11-17):** "Eventually have all of the roadmap and changes hidden, so I can surprise people with updates, while the project stays open source."

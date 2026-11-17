@@ -59,9 +59,9 @@ updated: 2026-11-17
 - **iOS:** built-ins only. Isolated and Trusted compile out.
 
 ## Open questions for the owner
-1. Should a Play build load third-party plug-ins at all, or only the GitHub (sideload) build? The same question applies to the self-updater.
+1. **Settled** (owner, 2026-11-17): two Android builds. The GitHub build has everything; the Play build follows Play's rules. Open: whether an interpreted plug-in format (a bytecode or WebAssembly interpreter in the engine) could bring third-party plug-ins to the Play build at a CPU cost, and whether iOS can do the same.
 2. One host process per plug-in instance (more memory, a crash takes down one instance) or one per plug-in?
-3. Is one block of added latency acceptable for Isolated?
+3. **Settled** (owner, 2026-11-17): one block is fine, plus an optional no-delay mode that runs in the callback with a timeout.
 4. What users see on a crash: bypass, mute, or a notice?
 5. Are plug-in GUIs (VST3 editors, CLAP GUI embedding) in scope for 1.1.0?
 6. Which trust a plug-in gets the first time it is seen (already open in [vision](vision.md)).

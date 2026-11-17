@@ -70,10 +70,9 @@ updated: 2026-11-17
 - **Docs:** `architecture.md` and `engine-progress.md` still say "a node per module". Fix that when step 4 lands.
 
 ## Open questions for the owner
-1. The feedback delay inside a patch: 16 frames, a per-sample mode for small patches, or both.
-2. Is a 64-frame delay acceptable for feedback between tracks?
+1. **Settled** (owner, 2026-11-17): 16 frames inside a patch, 64 between tracks.
 3. Is a shared effect node a new kind of track, or a generalised bus?
-4. Is the feedback limiter on by default?
-5. Does Flagship's graph run per voice? That costs CPU on every voice.
+4. **Settled** (owner, 2026-11-17): the feedback limiter is on by default and can be switched off per wire.
+5. **Settled** (owner, 2026-11-17): per voice is optional per patch; by default effects are shared and the oscillator/filter path runs per voice.
 6. May third-party plug-ins (#212) sit inside patches?
 7. When an old project is saved again, does it keep today's fields or write a patch?
