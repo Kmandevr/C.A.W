@@ -33,6 +33,14 @@ These are **[Fact]** from reviews checked 2026-11-17 (MusicRadar, Bedroom Produc
 
 **[Fact]** A feedback cycle needs at least one sample of delay. **[Proposal]** The delay is kept short: cycles run in 16-frame sub-blocks inside a patch, the delay shows on the wire, and small patches can use a per-sample mode. Each feedback wire gets a safety limiter. These are to be confirmed by the owner (#233).
 
+The owner added (2026-11-17):
+- every device that can use a sidechain has a sidechain input in the router;
+- effects can stand on their own, with several tracks wired into one;
+- secondary inputs appear wherever they make sense: the vocoder, ring mod and frequency shift carriers, a live convolver impulse, a C++ second input;
+- a very easy way for one track's notes or loudness to change another track's effect.
+
+That last one is **React to…** in every knob's hold menu (track, then Loudness or Notes). It uses the existing project modulators, so it ships early, with the 1.0.6 device kit.
+
 ## 2026-11-17: Device UI redesign and a step-by-step music video (owner, #231, #232)
 
 **Decision (owner, 2026-11-17).** Both ship in batch 1.0.6, with the FX consolidation.

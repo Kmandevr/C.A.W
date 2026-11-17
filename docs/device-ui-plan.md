@@ -27,7 +27,7 @@ updated: 2026-11-17
 - **Knob:** the same everywhere.
   - Drag up or down, and the value shows while dragging.
   - A second finger, or Shift, gives fine moves (a tenth).
-  - Double tap resets; hold opens the menu: type a value, Automate (#230), MIDI learn, reset.
+  - Double tap resets; hold opens the menu: type a value, Automate (#230), **React to…** (another track's Loudness or Notes moves this knob, through the project modulators; #233), MIDI learn, reset.
   - A modulation ring shows its range live.
 - **Footer:** an output meter with a clip light, Mix where the device has one, and Output.
 - **Auto gain:** an ear icon in the header.
