@@ -86,6 +86,10 @@ updated: 2026-11-17
 - **Drive's amp and pedal modes:** the amp modes show an amp face (tone stack knobs in a row, as on an amp). The pedal modes show a pedal face, with a footswitch for bypass. Both keep Drive's transfer curve as the visual.
 - **Convolver Cab mode:** a picker of cabinet cards with the speaker's response curve, mic position (centre to edge) and distance.
 - **The effect browser:** purpose chips on top (Guitar, Vocals, Drums, Bass, Mixing, Mastering, Sound design, Lo-fi), then the chain templates of that purpose, then the devices and presets.
+- **Drive's Bands mode:**
+  - the live spectrum with 1–3 crossover handles;
+  - each band a coloured strip under it, holding its drive type (a chip), amount and mix, plus solo, mute and Clean;
+  - a tap on a band selects it, and the transfer curve shows that band.
 - **Bit distortion:** a staircase waveform view (bits and rate drawn), plus bitwise mode chips.
 - **Utility and stereo:** a goniometer and correlation meter; width, balance, Haas, mono-below and channel swap.
 - **Chorus and Flanger:** the voices drawn as moving dots in stereo, with modes as chips.

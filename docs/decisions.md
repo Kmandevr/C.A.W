@@ -110,6 +110,12 @@ The batch is 1.0.5 if it is ready, else 1.0.6.
   - chain templates (Guitar clean, crunch and lead; Vocal; Podcast voice; Drum bus; Master);
   - presets named for the job;
   - a one-tap chain suggestion when a guitar or mic track is armed.
+- **A Bands mode in Drive** (owner, the same day; the owner loves Fire's band-split distortion):
+  - 1–4 bands with Linkwitz-Riley crossovers, each with its own drive type, amount, tone and mix;
+  - a Clean band option, for a distorted kick with a clean low end.
+
+  **[Fact]** Fire is AGPL-3.0 (its GitHub listing, checked 2026-11-17), so none of its code is used; C.A.W's version is its own.
+- **More presets:** every built-in effect ships at least 8 presets, named for the job and tagged by purpose, where that makes sense.
 - **When:** its own batch, 1.0.6, after 1.0.5. The later batches move up by one.
 
 ## 2026-11-14: Clip stretching runs Signalsmith Stretch live in the callback; two new dependencies (Claude, within the owner's 1.0.4 contract, #208)
