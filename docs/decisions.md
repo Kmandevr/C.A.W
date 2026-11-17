@@ -6,6 +6,10 @@ updated: 2026-11-17
 
 # Decisions
 
+## 2026-11-17: Each platform's low-latency path; ASIO and rtkit stay out (owner's request, #237)
+
+**Decision:** Low latency on Windows asks the endpoint's smallest period through `IAudioClient3` (shared) or the device's minimum (exclusive), never under 128 frames, falling back to miniaudio's 10 ms when that does not open; Auto, Battery and a chosen size are unchanged, so the default path is as before (Claude's choice: Low latency is the user's explicit request for the least delay). Exclusive mode stays off by default on Windows and Android (the earlier decision). `CAW_AUDIO_BACKEND` puts one miniaudio backend first for the CLI and tests (unset by default). On Android the stream already suits LE Audio (48 kHz, stereo, usage GAME); the route model reports LE Audio or A2DP and its label in the Latency page waits for the owner's look. BLE MIDI needs nothing: Android's own MIDI service asks for high connection priority. **No new dependency:** ASIO is proprietary or GPLv3, libdbus (for rtkit) AFL-2.1 or GPL-2.0+, neither clearly permissive; both are left to the owner. Facts and sources in [engine](engine.md) ("Each platform's low-latency path").
+
 ## 2026-11-17: AAudio output usage GAME; automatic buffer size off by default (owner's request, #236)
 
 **Decision:** every AAudio output opens with `AAUDIO_USAGE_GAME`, Android's low-latency guide's advice for Bluetooth, on every route (the engine can't tell the route before the stream opens; the volume stays media). The automatic buffer size (`caw_audio_tune_buffer`, Oboe's LatencyTuner way plus a shrink after a quiet minute) is built but off by default (`Settings.bufferTuning`, no Settings row) until it has run on a phone: Claude's choice, to keep 1.0.5 low-risk; turning it on, and its Settings row, are for the owner. The Bluetooth codec is not chosen (a privileged API). Facts and sources in [engine](engine.md).

@@ -15,6 +15,7 @@
 #include "detmath.h"
 #include "device_render.h"
 #include "buffer_tuner.h"
+#include "device_period.h"
 #include "engine.h"
 #include "native_component_test_path.h"
 #include "test.h"
@@ -943,6 +944,26 @@ TEST(a_new_devices_first_callbacks_stay_out_of_the_cpu_meter) {
         e.reportLoad(1.5, 256);
     }
     CHECK(e.sheddingStats().shed > uint64_t{0});
+}
+
+// #237: Low latency's smallest WASAPI period (device_period.h): a multiple of the shared engine's fundamental from
+// its min to its max, never under the 128-frame floor; an exclusive minimum device period rounded up to frames.
+TEST(the_smallest_device_period_is_a_legal_one_above_the_floor) {
+    using caw::smallestSharedPeriod;
+    CHECK_EQ(smallestSharedPeriod(4, 48, 448), uint32_t{128});    // Microsoft Learn's 44.1 kHz example: 128 is legal
+    CHECK_EQ(smallestSharedPeriod(48, 144, 480), uint32_t{144});   // min above the floor
+    CHECK_EQ(smallestSharedPeriod(48, 96, 480), uint32_t{144});    // floor rounded up to the fundamental
+    CHECK_EQ(smallestSharedPeriod(480, 480, 480), uint32_t{480});  // no small buffers: the default
+    CHECK_EQ(smallestSharedPeriod(32, 32, 100), uint32_t{96});     // floor above max: the largest legal under it
+    CHECK_EQ(smallestSharedPeriod(0, 48, 480), uint32_t{0});       // unusable numbers ask nothing
+    CHECK_EQ(smallestSharedPeriod(48, 480, 96), uint32_t{0});
+    CHECK_EQ(smallestSharedPeriod(64, 100, 120), uint32_t{0});     // no multiple of 64 in 100..120
+    using caw::exclusivePeriodFrames;
+    CHECK_EQ(exclusivePeriodFrames(30000, 48000), uint32_t{144});  // 3 ms
+    CHECK_EQ(exclusivePeriodFrames(26667, 48000), uint32_t{129});  // rounded up, never under the device's
+    CHECK_EQ(exclusivePeriodFrames(10000, 48000), uint32_t{128});  // 1 ms: the floor
+    CHECK_EQ(exclusivePeriodFrames(0, 48000), uint32_t{0});
+    CHECK_EQ(exclusivePeriodFrames(30000, 0), uint32_t{0});
 }
 
 // #236: the output buffer's automatic size (Oboe's LatencyTuner way, buffer_tuner.h): whole bursts from two bursts

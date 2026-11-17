@@ -124,7 +124,10 @@ extern "C" {
    33 (2026-11-17, batch 1.0.5, #234, #236): caw_audio_tune_buffer (the AAudio output's buffer sized automatically,
    off unless the app calls it); AAudio outputs open with usage AAUDIO_USAGE_GAME; caw_audio_threads gains
    "hint_state", "callback_policy" and "callback_nice"; a Benchmark job's JSON gains "capped_by" (and a ramp's
-   "stop_reason" "capped"), "parts_basis" and, live, "audio_threads". Nothing else changes. */
+   "stop_reason" "capped"), "parts_basis" and, live, "audio_threads". #237 (same version, branch platform-audio):
+   caw_audio_status gains "smallest_period" (the period Low latency asked on WASAPI and the endpoint's periods), and
+   Low latency on WASAPI asks the endpoint's smallest legal period of at least 128 frames instead of 10 ms. Nothing
+   else changes. */
 #define CAW_API_VERSION 33
 /* The component index that names a layer's native instrument rather than one of its "components". */
 #define CAW_INSTRUMENT_INDEX 0xFFFFFFFFu

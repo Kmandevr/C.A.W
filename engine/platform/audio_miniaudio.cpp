@@ -23,11 +23,13 @@
 #endif
 #include <windows.h>
 #include <mmdeviceapi.h>
+#include <audioclient.h>
 #endif
 
 #include "caw.h"
 #include "capi_internal.h"
 #include "buffer_tuner.h"
+#include "device_period.h"
 #include "device_render.h"
 #include "input_bridge.h"
 #include "miniaudio.h"
@@ -108,6 +110,14 @@ struct Audio {
     // device at its settings (reopenAfterReroute).
     std::atomic<bool> reopen{false};
     int fifoMeanHold = 0;  // the frames it holds back on average: in the latency figures that align recordings
+    // Low latency on WASAPI (#237): the engine's periods read before the open (wasapiPeriods) and the smallest
+    // period asked from them (0: none asked, miniaudio's 10 ms default), with where it came from ("shared_engine":
+    // IAudioClient3's shared-mode engine period, "device_period": the exclusive minimum, "none").
+    uint32_t smallestFrames = 0;
+    const char* periodSource = "none";
+    uint32_t enginePeriods[4] = {};  // shared-mode default, fundamental, min, max (frames; 0 unread)
+    uint32_t mixRate = 0;            // the engine's mix rate the shared periods are for
+    int64_t devicePeriodHns = 0;     // the exclusive-mode minimum device period (100 ns)
 };
 
 // The larger buffer (Auto while not recording, Battery): 1024 frames, about 21 ms at 48 kHz, so the callback
@@ -162,7 +172,8 @@ int androidSdk() {
 // documentation recommends for the lowest latency (AAudioStreamBuilder_setFramesPerDataCallback: "do not call
 // this function", read 2026-11-13). DeviceRender takes any size (whole blocks through its FIFO, or straight).
 // Elsewhere miniaudio's period is the backend's own (WASAPI, Core Audio, ALSA and PulseAudio derive it from the
-// asked size or miniaudio's 10 ms default and call back with it), so the fixed size matches what the device asks.
+// asked size or miniaudio's default, 10 ms, 25 ms on PulseAudio, and call back with it), so the fixed size matches
+// what the device asks.
 bool takesDeviceSizes(ma_backend b, ma_uint32 frames) {
 #if defined(__ANDROID__)
     return b == ma_backend_aaudio && (frames == 0 || androidSdk() <= 30);
@@ -171,6 +182,21 @@ bool takesDeviceSizes(ma_backend b, ma_uint32 frames) {
     (void)frames;
     return false;
 #endif
+}
+
+// A miniaudio context on its default backend order, or first on the one CAW_AUDIO_BACKEND names (#237; unset by
+// default): a desktop override for the CLI and test runs, such as "jack", whose callback runs on the JACK server's
+// real-time thread at the server's period ([Fact, miniaudio 0.11.25 source] ma_device_init__jack takes
+// jack_get_buffer_size; the default order tries PulseAudio and ALSA first, so JACK is otherwise never reached while
+// either opens). A name miniaudio does not know (ma_get_backend_from_name) or a backend that does not open falls
+// back to the default order. Read on the control thread at each open.
+ma_result initContext(ma_context* context) {
+    if (const char* name = std::getenv("CAW_AUDIO_BACKEND"); name && name[0]) {
+        ma_backend b;
+        if (ma_get_backend_from_name(name, &b) == MA_SUCCESS && ma_context_init(&b, 1, nullptr, context) == MA_SUCCESS)
+            return MA_SUCCESS;
+    }
+    return ma_context_init(nullptr, 0, nullptr, context);
 }
 
 std::string bounded(const char* s, size_t n) {
@@ -449,6 +475,112 @@ void stopLocked(CawEngine* e) {
     if (gActive == e) gActive = nullptr;
 }
 
+#if defined(_WIN32)
+// IAudioClient3's vtable, declared here as miniaudio 0.11.25 does (ma_IAudioClient3Vtbl), so no SDK's guard on the
+// interface matters: IUnknown's 3 slots, IAudioClient's 12, IAudioClient2's 3, then GetSharedModeEnginePeriod.
+struct AudioClient3Vtbl {
+    void* unknown[2];
+    ULONG(STDMETHODCALLTYPE* Release)(void*);
+    void* audioClient[12];
+    void* audioClient2[3];
+    HRESULT(STDMETHODCALLTYPE* GetSharedModeEnginePeriod)(void*, const WAVEFORMATEX*, UINT32*, UINT32*, UINT32*, UINT32*);
+};
+struct AudioClient3 {
+    AudioClient3Vtbl* v;
+};
+
+// The endpoint's periods for Low latency (#237), read before the open on a client of its own that is never
+// initialised: the mix format's rate, the shared engine's periods (IAudioClient3::GetSharedModeEnginePeriod for that
+// format, Windows 10+) and the exclusive minimum (IAudioClient::GetDevicePeriod). [Fact, Microsoft Learn
+// IAudioClient::Initialize, read 2026-11-17] GetDevicePeriod and GetMixFormat "do not require that Initialize be
+// called first". [id] null: the default render endpoint for the console role, as miniaudio opens it
+// (ma_context_get_MMDevice__wasapi). ole32 at run time, COM initialised for the call, as wasapiKind does. Control
+// thread only, never the audio thread.
+void wasapiPeriods(Audio* a, const wchar_t* id) {
+    HMODULE ole = LoadLibraryW(L"ole32.dll");
+    if (!ole) return;
+    using CoInit = HRESULT(WINAPI*)(LPVOID, DWORD);
+    using CoUninit = void(WINAPI*)();
+    using CoCreate = HRESULT(WINAPI*)(REFCLSID, LPUNKNOWN, DWORD, REFIID, LPVOID*);
+    using CoFree = void(WINAPI*)(LPVOID);
+    auto coInit = reinterpret_cast<CoInit>(reinterpret_cast<void*>(GetProcAddress(ole, "CoInitializeEx")));
+    auto coUninit = reinterpret_cast<CoUninit>(reinterpret_cast<void*>(GetProcAddress(ole, "CoUninitialize")));
+    auto coCreate = reinterpret_cast<CoCreate>(reinterpret_cast<void*>(GetProcAddress(ole, "CoCreateInstance")));
+    auto coFree = reinterpret_cast<CoFree>(reinterpret_cast<void*>(GetProcAddress(ole, "CoTaskMemFree")));
+    if (coInit && coUninit && coCreate && coFree) {
+        const HRESULT init = coInit(nullptr, COINIT_MULTITHREADED);
+        static const CLSID kEnumerator = {0xBCDE0395, 0xE52F, 0x467C, {0x8E, 0x3D, 0xC4, 0x57, 0x92, 0x91, 0x69, 0x2E}};
+        static const IID kIEnumerator = {0xA95664D2, 0x9614, 0x4F35, {0xA7, 0x46, 0xDE, 0x8D, 0xB6, 0x36, 0x17, 0xE6}};
+        static const IID kIAudioClient = {0x1CB9AD4C, 0xDBFA, 0x4C32, {0xB1, 0x78, 0xC2, 0xF5, 0x68, 0xA7, 0x03, 0xB2}};
+        static const IID kIAudioClient3 = {0x7ED4EE07, 0x8E67, 0x4CD4, {0x8C, 0x1A, 0x2B, 0x7A, 0x59, 0x87, 0xAD, 0x42}};
+        IMMDeviceEnumerator* en = nullptr;
+        if (SUCCEEDED(coCreate(kEnumerator, nullptr, CLSCTX_ALL, kIEnumerator, reinterpret_cast<void**>(&en))) && en) {
+            IMMDevice* dev = nullptr;
+            const HRESULT got = id && id[0] ? en->GetDevice(id, &dev) : en->GetDefaultAudioEndpoint(eRender, eConsole, &dev);
+            if (SUCCEEDED(got) && dev) {
+                IAudioClient* client = nullptr;
+                if (SUCCEEDED(dev->Activate(kIAudioClient, CLSCTX_ALL, nullptr, reinterpret_cast<void**>(&client))) && client) {
+                    REFERENCE_TIME def = 0, min = 0;
+                    if (SUCCEEDED(client->GetDevicePeriod(&def, &min))) a->devicePeriodHns = min;
+                    WAVEFORMATEX* mix = nullptr;
+                    if (SUCCEEDED(client->GetMixFormat(&mix)) && mix) {
+                        a->mixRate = mix->nSamplesPerSec;
+                        AudioClient3* c3 = nullptr;
+                        if (SUCCEEDED(client->QueryInterface(kIAudioClient3, reinterpret_cast<void**>(&c3))) && c3) {
+                            UINT32 p[4] = {};
+                            if (SUCCEEDED(c3->v->GetSharedModeEnginePeriod(c3, mix, &p[0], &p[1], &p[2], &p[3])))
+                                for (int i = 0; i < 4; ++i) a->enginePeriods[i] = p[i];
+                            c3->v->Release(c3);
+                        }
+                        coFree(mix);
+                    }
+                    client->Release();
+                }
+                dev->Release();
+            }
+            en->Release();
+        }
+        if (init == S_OK || init == S_FALSE) coUninit();
+    }
+    FreeLibrary(ole);
+}
+#endif
+
+// The period Low latency asks for where the backend's default is not its smallest (#237): on WASAPI, the smallest
+// shared engine period of at least kSmallestPeriodFloor, or for exclusive mode the device's minimum period. 0
+// elsewhere and whenever it is unknown: miniaudio's default then (10 ms on WASAPI, its own per backend).
+// [Fact, miniaudio 0.11.25 source, ma_device_init_internal__wasapi, read 2026-11-17] shared mode tries
+// IAudioClient3::InitializeSharedAudioStream with the asked period rounded down to the fundamental and clamped to
+// min..max, only when WASAPI need not convert the rate (the engine's rate is the mix format's: else
+// AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM is set, which that call refuses), and falls back to IAudioClient::Initialize
+// with the asked period times its 3 periods, which Windows raises to the engine's minimum buffer ([Fact, Microsoft
+// Learn IAudioClient::Initialize]). So a mismatched rate leaves Low latency at 10 ms (the status's "mix_rate" says
+// so) and the size asked is only ever a legal one.
+ma_uint32 smallestPeriod(Audio* a, const CawEngine* e, const ma_device_id* id, bool exclusive) {
+    a->smallestFrames = 0;
+    a->periodSource = "none";
+#if defined(_WIN32)
+    if (a->context.backend != ma_backend_wasapi || e->bufferMode != CAW_BUFFER_LOW_LATENCY) return 0;
+    a->mixRate = 0;
+    a->devicePeriodHns = 0;
+    for (auto& p : a->enginePeriods) p = 0;
+    wasapiPeriods(a, id ? reinterpret_cast<const wchar_t*>(id->wasapi) : nullptr);
+    const auto rate = static_cast<uint32_t>(e->engine->sampleRate());
+    if (exclusive) {
+        a->smallestFrames = caw::exclusivePeriodFrames(a->devicePeriodHns, rate);
+        if (a->smallestFrames > 0) a->periodSource = "device_period";
+    } else if (a->mixRate == rate) {
+        a->smallestFrames = caw::smallestSharedPeriod(a->enginePeriods[1], a->enginePeriods[2], a->enginePeriods[3]);
+        if (a->smallestFrames > 0) a->periodSource = "shared_engine";
+    }
+#else
+    (void)e;
+    (void)id;
+    (void)exclusive;
+#endif
+    return a->smallestFrames;
+}
+
 // Opens and starts the device on [a]'s context: [id] (null: the default), [frames] a callback (0: the device's
 // own), exclusive mode when asked and the backend takes it (shared if refused). MA_SUCCESS or why not.
 ma_result openDevice(Audio* a, const CawEngine* e, const ma_device_id* id, ma_uint32 frames, bool exclusive,
@@ -492,12 +624,26 @@ ma_result openDevice(Audio* a, const CawEngine* e, const ma_device_id* id, ma_ui
     cfg.wasapi.usage = ma_wasapi_usage_pro_audio;
     a->exclusive = exclusive && takesExclusive(a->context.backend);
     cfg.playback.shareMode = a->exclusive ? ma_share_mode_exclusive : ma_share_mode_shared;
-    ma_result r = ma_device_init(&a->context, &cfg, &a->device);
+    // Low latency with no size chosen: the smallest period the endpoint allows where the backend's default is not
+    // it (WASAPI, smallestPeriod); a size that does not open falls back to the default before anything else does.
+    const auto init = [&] {
+        const ma_uint32 at = frames == 0 ? smallestPeriod(a, e, id, a->exclusive) : 0;
+        if (frames == 0) cfg.periodSizeInFrames = at;
+        ma_result res = ma_device_init(&a->context, &cfg, &a->device);
+        if (res != MA_SUCCESS && at > 0) {
+            a->smallestFrames = 0;
+            a->periodSource = "none";
+            cfg.periodSizeInFrames = 0;
+            res = ma_device_init(&a->context, &cfg, &a->device);
+        }
+        return res;
+    };
+    ma_result r = init();
     if (r != MA_SUCCESS && a->exclusive) {
         // The device refused exclusive mode (another app holds it, or no native format fits): shared instead.
         a->exclusive = false;
         cfg.playback.shareMode = ma_share_mode_shared;
-        r = ma_device_init(&a->context, &cfg, &a->device);
+        r = init();
     }
     if (r != MA_SUCCESS) {
         why = std::string("can't open the audio device: ") + ma_result_description(r);
@@ -680,7 +826,7 @@ int32_t startLocked(CawEngine* e, char* error, int32_t error_len) {
     if (gActive && gActive != e) stopLocked(gActive);  // an orphaned engine from an earlier copy of the app
     auto* a = new Audio();
     a->owner = e;
-    ma_result r = ma_context_init(nullptr, 0, nullptr, &a->context);
+    ma_result r = initContext(&a->context);
     if (r != MA_SUCCESS) {
         setError(std::string("can't open the audio system: ") + ma_result_description(r), error, error_len);
         delete a;
@@ -1083,7 +1229,7 @@ int32_t caw_audio_buffer_frames(CawEngine* e) {
 
 char* caw_audio_devices(void) {
     ma_context context;
-    if (ma_context_init(nullptr, 0, nullptr, &context) != MA_SUCCESS) {
+    if (initContext(&context) != MA_SUCCESS) {
         return dup("{\"backend\":\"none\",\"exclusive\":false,\"devices\":[]}");
     }
     std::string out = "{\"backend\":" + quoted(ma_get_backend_name(context.backend)) +
@@ -1139,7 +1285,7 @@ int32_t caw_audio_configure(CawEngine* e, const char* device_id, const char* dev
 
 char* caw_audio_input_devices(void) {
     ma_context context;
-    if (ma_context_init(nullptr, 0, nullptr, &context) != MA_SUCCESS)
+    if (initContext(&context) != MA_SUCCESS)
         return dup("{\"backend\":\"none\",\"exclusive\":false,\"devices\":[]}");
     std::string out = "{\"backend\":" + quoted(ma_get_backend_name(context.backend)) + ",\"exclusive\":false,\"devices\":[";
     ma_device_info* capture = nullptr;
@@ -1301,6 +1447,12 @@ char* caw_audio_status(CawEngine* e) {
                ",\"exclusive\":" + (a->exclusive ? "true" : "false") +
                ",\"low_latency\":" + (a->lowLatency ? "true" : "false") +
                ",\"modes_read_back\":" + (a->modesReadBack ? "true" : "false") +
+               ",\"smallest_period\":{\"frames\":" + std::to_string(a->smallestFrames) +
+               ",\"source\":" + quoted(a->periodSource) + ",\"engine_default\":" + std::to_string(a->enginePeriods[0]) +
+               ",\"engine_fundamental\":" + std::to_string(a->enginePeriods[1]) +
+               ",\"engine_min\":" + std::to_string(a->enginePeriods[2]) +
+               ",\"engine_max\":" + std::to_string(a->enginePeriods[3]) + ",\"mix_rate\":" + std::to_string(a->mixRate) +
+               ",\"device_period_hns\":" + std::to_string(a->devicePeriodHns) + "}" +
                ",\"fallback\":" + (a->fallback ? "true" : "false") +
                ",\"fallback_reason\":" + quoted(a->fallbackReason.c_str()) + request + ",\"input\":" + inputStatus(e, a) + "}");
 }
