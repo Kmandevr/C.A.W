@@ -96,6 +96,12 @@ The batch is 1.0.5 if it is ready, else 1.0.6.
   - a glitch mangler.
 
   It is built into C.A.W for now, marked as the pack, and moves to an AutoStacc download in 1.1.0 (#221).
+- **Recording tools** (owner, later the same day):
+  - noise reduction, both as a live effect (learning a noise profile) and as a non-destructive clip pass in the sample editor;
+  - a pedal-style noise gate: fast, zero latency, smart release tracking with hysteresis, key from the clean input and gate after the distortion, and a downward expand mode;
+  - de-hum (50/60 Hz, auto-detected);
+  - de-click and de-plosive;
+  - de-reverb and breath control.
 - **When:** its own batch, 1.0.6, after 1.0.5. The later batches move up by one.
 
 ## 2026-11-14: Clip stretching runs Signalsmith Stretch live in the callback; two new dependencies (Claude, within the owner's 1.0.4 contract, #208)

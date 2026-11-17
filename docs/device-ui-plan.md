@@ -99,6 +99,11 @@ updated: 2026-11-17
   - Pitch correction: the note line with snapping.
   - Vocoder: band bars.
   - Analyzer, tuner and loudness meter: meters.
+- **Recording tools:**
+  - **Noise reduction:** the spectrum with the learned noise floor drawn under it, and **Learn** as a big button. Reduction and smoothing knobs.
+  - **Pedal gate:** a big, pedal-like open or closed light, a threshold knob with the input level moving across it, and a decay knob; a scrolling trace shows where it cut.
+  - **De-hum:** the harmonics as spikes that dip when removed.
+  - **De-click, de-plosive, de-reverb and breath:** before-and-after waveforms.
 - **AutoStacc pack:**
   - each pack device has its own "toy-like" centrepiece (bit-shift shows the bit lanes flipping, warp a bending grid, spectral a frozen spectrum you can paint, glitch a slice grid lighting up);
   - each has the AutoStacc badge in the header.
