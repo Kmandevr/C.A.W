@@ -108,14 +108,15 @@ void main() {
       expect(Steps.fromDouble(1 / 3), Steps(1, 3));
     });
 
-    test('writes integers, short decimals, small fractions, then decimals', () {
+    test('writes integers, short decimals, small fractions, decimals, then exact fractions', () {
       expect('${Steps(4)}', '4');
       expect('${Steps(9, 2)}', '4.5');
       expect('${Steps(1, 8)}', '0.125');
       expect('${Steps(13, 3)}', '13/3');
       expect('${Steps(1, 16)}', '1/16');
       expect('${Steps(1, 10000)}', '0.0001');
-      expect('${Steps(1, 67)}', '0.015');
+      // Exact, so a clip's text reads back to the same time (#216; it was 0.015).
+      expect('${Steps(1, 67)}', '1/67');
       expect('${Steps(-1, 2)}', '-0.5');
     });
   });

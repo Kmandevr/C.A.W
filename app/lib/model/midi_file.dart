@@ -9,9 +9,12 @@
 //   (RPN 6, which makes member channels' default range 48 semitones)
 // - controller changes other than those the reader uses itself (bank and data entry 0/6/32/38, CC74, NRPN/RPN
 //   98-101, channel mode 120-127) are kept per track as [MidiControl]s
-// - sysex and meta events other than tempo, time signature and track name are skipped
+// - sysex and meta events other than tempo, time signature and track name are skipped, except Text events and
+//   C.A.W's own sequencer-specific events ([kCawMeta]), which are kept in order as [MidiMark]s (clip storage reads
+//   them: lib/model/clip_midi.dart)
 // - SMPTE time division: ticks are read as if the file ran at 120 BPM (its tempo events don't time it)
-// Writing: a format 1 file, a conductor track (tempo and meter) and one track per [MidiTrack]. Notes with any bend,
+// Writing: a format 1 file, a conductor track (tempo and meter) and one track per [MidiTrack] (or, for a clip, a
+// format 0 file of its one track). Notes with any bend,
 // pressure or timbre make the whole track MPE (lower zone: channel 1 manages, 2-16 each carry one note at a time with
 // its own bend, channel pressure and CC74); otherwise notes are plain, on their own channels. A track's controller
 // changes ([MidiTrack.controls], such as automation lanes as CCs) go out on their own channels (MPE's manager channel
@@ -34,6 +37,16 @@ const int kMaxMidiCurvePoints = 1 << 22;
 
 /// Ticks per quarter note in written files.
 const int kMidiExportPpq = 960;
+
+/// The start of C.A.W's sequencer-specific meta events (FF 7F): the MMA's non-commercial manufacturer ID 7D, then
+/// "CAW". The byte after it is the event's type ([kCawGap] here; clip_midi.dart defines the others).
+const List<int> kCawMeta = [0x7D, 0x43, 0x41, 0x57];
+
+/// A C.A.W event that only carries time: written where a delta would pass the format's 28-bit limit.
+const int kCawGap = 0;
+
+/// The longest delta time a variable-length number holds.
+const int kMaxMidiDelta = 0x0FFFFFFF;
 
 /// Why a MIDI file couldn't be read.
 class MidiFileException extends FormatException {
@@ -65,6 +78,8 @@ class MidiNote {
     List<MidiPoint>? bend,
     List<MidiPoint>? pressure,
     List<MidiPoint>? timbre,
+    this.lead = const [],
+    this.seq = -1,
   })  : bend = bend ?? [],
         pressure = pressure ?? [],
         timbre = timbre ?? [];
@@ -74,6 +89,12 @@ class MidiNote {
   final int velocity; // 1..127
   int on, off; // ticks, off >= on
   final List<MidiPoint> bend, pressure, timbre;
+
+  /// Writing: whole meta events (from 0xFF) to write just before the note's note-on, in order.
+  final List<List<int>> lead;
+
+  /// Reading: the note's place among its track's note-ons (0 first).
+  final int seq;
 
   bool get expressive => bend.any((p) => p.value != 0) || pressure.isNotEmpty || timbre.isNotEmpty;
 
@@ -116,10 +137,25 @@ class MidiMeter {
   final int tick, numerator, denominator;
 }
 
+/// A Text event (FF 01, [type] 1) or a C.A.W event (FF 7F after [kCawMeta], [type] 0x7F) as read: its bytes (a C.A.W
+/// event's from its type byte on) and how many of the track's note-ons came before it.
+class MidiMark {
+  const MidiMark(this.tick, this.type, this.data, this.notesBefore);
+  final int tick, type, notesBefore;
+  final Uint8List data;
+}
+
 class MidiTrack {
-  MidiTrack({this.name = '', required this.notes, this.endTick, this.controls = const []});
+  MidiTrack({this.name = '', required this.notes, this.endTick, this.controls = const [], this.marks = const [],
+      this.head = const [], this.tail = const []});
   final String name;
   final List<MidiNote> notes;
+
+  /// Reading: the track's Text and C.A.W events, in file order.
+  final List<MidiMark> marks;
+
+  /// Writing: whole meta events at the track's start (after its name) and at its end (before End of Track).
+  final List<List<int>> head, tail;
 
   /// Controller changes in time order (automation lanes as CCs when written; a file's other CCs when read).
   final List<MidiControl> controls;
@@ -283,8 +319,9 @@ class _Reader {
     final ch = List.generate(16, (_) => _Channel());
     final done = <MidiNote>[];
     final controls = <MidiControl>[];
+    final marks = <MidiMark>[];
     var name = '';
-    var tick = 0;
+    var tick = 0, ons = 0;
     int? running;
 
     void close(_Channel c, MidiNote n) {
@@ -332,6 +369,10 @@ class _Reader {
             if (d[at] > 0 && d[at + 1] <= 6) meters[tick] = MidiMeter(tick, d[at], 1 << d[at + 1]);
           case 0x03 when name.isEmpty:
             name = _text(d.sublist(at, at + length));
+          case 0x01:
+            marks.add(MidiMark(tick, 0x01, Uint8List.sublistView(d, at, at + length), ons));
+          case 0x7F when length > kCawMeta.length && _isCaw(d, at):
+            marks.add(MidiMark(tick, 0x7F, Uint8List.sublistView(d, at + kCawMeta.length, at + length), ons));
         }
         continue;
       }
@@ -350,7 +391,7 @@ class _Reader {
         case 0x9 when b > 0:
           if (++notes > kMaxMidiNotes) throw const MidiFileException('the file has more than $kMaxMidiNotes notes');
           final bend = c.bendSemitones;
-          final n = MidiNote(channel: status & 0x0F, key: a, velocity: b, on: tick, off: tick, bend: [
+          final n = MidiNote(channel: status & 0x0F, key: a, velocity: b, on: tick, off: tick, seq: ons++, bend: [
             if (bend != 0) MidiPoint(tick, bend),
           ], pressure: [
             if (c.pressureTick == tick) MidiPoint(tick, c.pressure),
@@ -407,7 +448,7 @@ class _Reader {
       }
     }
     done.sort((x, y) => x.on != y.on ? x.on.compareTo(y.on) : x.key.compareTo(y.key));
-    return MidiTrack(name: name, notes: done, endTick: tick, controls: controls);
+    return MidiTrack(name: name, notes: done, endTick: tick, controls: controls, marks: marks);
   }
 
   void _controller(_Channel c, List<_Channel> all, int channel, int cc, int v, void Function(double) timbre,
@@ -440,6 +481,13 @@ class _Reader {
   }
 }
 
+bool _isCaw(Uint8List d, int at) {
+  for (var i = 0; i < kCawMeta.length; i++) {
+    if (d[at + i] != kCawMeta[i]) return false;
+  }
+  return true;
+}
+
 String _text(List<int> bytes) {
   final s = utf8.decode(bytes, allowMalformed: true).replaceAll(RegExp(r'[\x00-\x1F\x7F#]'), ' ').trim();
   return s.length > 64 ? s.substring(0, 64).trim() : s;
@@ -450,17 +498,20 @@ String _text(List<int> bytes) {
 
 /// Writes [file] as a format 1 Standard MIDI File at its [MidiFile.ppq]: a conductor track with its tempos (120 BPM
 /// when there are none) and meter, then one track per [MidiFile.tracks]. Notes are clamped to the MIDI ranges.
-Uint8List writeMidiFile(MidiFile file) {
+/// With [conductor] false, a format 0 file of the one track alone (no tempo or meter: MIDI's 120 BPM and 4/4). A
+/// delta past [kMaxMidiDelta] ticks is split by [kCawGap] events.
+Uint8List writeMidiFile(MidiFile file, {bool conductor = true}) {
+  if (!conductor && file.tracks.length != 1) throw ArgumentError('a format 0 file holds one track');
   final out = BytesBuilder(copy: false);
   void u16(int v) => out.add([v >> 8 & 0xFF, v & 0xFF]);
   void u32(int v) => out.add([v >> 24 & 0xFF, v >> 16 & 0xFF, v >> 8 & 0xFF, v & 0xFF]);
   out.add(ascii.encode('MThd'));
   u32(6);
-  u16(1);
-  u16(file.tracks.length + 1);
+  u16(conductor ? 1 : 0);
+  u16(file.tracks.length + (conductor ? 1 : 0));
   u16(file.ppq.clamp(1, 0x7FFF));
 
-  void chunk(List<_Event> events, String name, int? endTick) {
+  void chunk(List<_Event> events, String name, int? endTick, {List<List<int>> head = const [], List<List<int>> tail = const []}) {
     // List.sort isn't stable: ties keep the order they were made in (an RPN's controllers must stay in sequence).
     final seq = {for (final (i, e) in events.indexed) e: i};
     events.sort((a, b) => a.tick != b.tick
@@ -474,12 +525,30 @@ Uint8List writeMidiFile(MidiFile file) {
       body.add([0x00, 0xFF, 0x03, ..._vlqBytes(n.length), ...n]);
     }
     var last = 0;
-    for (final e in events) {
-      body.add(_vlqBytes(e.tick - last));
-      body.add(e.bytes);
-      last = e.tick;
+    void delta(int tick) {
+      // A gap longer than a variable-length number holds is crossed by C.A.W events that carry only time.
+      while (tick - last > kMaxMidiDelta) {
+        body.add([..._vlqBytes(kMaxMidiDelta), 0xFF, 0x7F, kCawMeta.length + 1, ...kCawMeta, kCawGap]);
+        last += kMaxMidiDelta;
+      }
+      body.add(_vlqBytes(tick - last));
+      last = tick;
     }
-    body.add([..._vlqBytes(math.max(0, (endTick ?? last) - last)), 0xFF, 0x2F, 0x00]);
+
+    for (final h in head) {
+      body.add([0x00, ...h]);
+    }
+    for (final e in events) {
+      delta(e.tick);
+      body.add(e.bytes);
+    }
+    final end = math.max(last, endTick ?? last);
+    for (final t in tail) {
+      delta(end);
+      body.add(t);
+    }
+    delta(end);
+    body.add([0xFF, 0x2F, 0x00]);
     out.add(ascii.encode('MTrk'));
     u32(body.length);
     out.add(body.takeBytes());
@@ -490,20 +559,22 @@ Uint8List writeMidiFile(MidiFile file) {
   final denPower = math.max(0, math.min(6, (math.log(den) / math.ln2).round()));
   final end = file.tracks.fold<int>(0, (m, t) => math.max(m, t.endTick ?? _lastTick(t)));
   int power(int den) => math.max(0, math.min(6, (math.log(den) / math.ln2).round()));
-  chunk([
-    if (file.meters.isEmpty) _Event(0, 0, [0xFF, 0x58, 0x04, num, denPower, 24, 8]),
-    for (final m in file.meters)
-      _Event(math.max(0, m.tick), 0, [0xFF, 0x58, 0x04, m.numerator.clamp(1, 255), power(m.denominator), 24, 8]),
-    for (final t in tempos)
-      if (t.bpm.isFinite && t.bpm > 0)
-        _Event(math.max(0, t.tick), 0, [0xFF, 0x51, 0x03, ..._u24((60000000 / t.bpm).round().clamp(1, 0xFFFFFF))]),
-  ], '', end);
+  if (conductor) {
+    chunk([
+      if (file.meters.isEmpty) _Event(0, 0, [0xFF, 0x58, 0x04, num, denPower, 24, 8]),
+      for (final m in file.meters)
+        _Event(math.max(0, m.tick), 0, [0xFF, 0x58, 0x04, m.numerator.clamp(1, 255), power(m.denominator), 24, 8]),
+      for (final t in tempos)
+        if (t.bpm.isFinite && t.bpm > 0)
+          _Event(math.max(0, t.tick), 0, [0xFF, 0x51, 0x03, ..._u24((60000000 / t.bpm).round().clamp(1, 0xFFFFFF))]),
+    ], '', end);
+  }
   for (final t in file.tracks) {
     chunk([
       ...t.notes.any((n) => n.expressive) ? _mpeEvents(t.notes) : _plainEvents(t.notes),
       for (final c in t.controls)
         _Event(math.max(0, c.tick), 2, [0xB0 | c.channel & 0x0F, c.controller.clamp(0, 127), c.value.clamp(0, 127)]),
-    ], t.name, t.endTick);
+    ], t.name, t.endTick, head: t.head, tail: t.tail);
   }
   return out.takeBytes();
 }
@@ -514,7 +585,7 @@ int _lastTick(MidiTrack t) => t.controls.fold(t.notes.fold(0, (e, n) => math.max
 List<int> _u24(int v) => [v >> 16 & 0xFF, v >> 8 & 0xFF, v & 0xFF];
 
 List<int> _vlqBytes(int v) {
-  v = v.clamp(0, 0x0FFFFFFF);
+  v = v.clamp(0, kMaxMidiDelta);
   final b = <int>[v & 0x7F];
   while ((v >>= 7) > 0) {
     b.insert(0, 0x80 | (v & 0x7F));
@@ -536,6 +607,7 @@ int _seven(double v) => (v * 127).round().clamp(0, 127);
 
 List<_Event> _plainEvents(List<MidiNote> notes) => [
       for (final n in notes) ...[
+        for (final m in n.lead) _Event(n.on, 3, m),
         _Event(n.on, 3, [0x90 | n.channel & 0x0F, _key(n.key), _vel(n.velocity)]),
         _Event(_off(n).$2, 1, [0x80 | n.channel & 0x0F, _key(n.key), 0x40]),
       ],
@@ -559,7 +631,9 @@ List<_Event> _mpeEvents(List<MidiNote> notes) {
   ];
   int bend14(double semis) => (8192 + semis / range * 8192).round().clamp(0, 16383);
   final busy = List.filled(16, -1); // when each member channel's last note ends
-  final sorted = [...notes]..sort((a, b) => a.on.compareTo(b.on));
+  // Stable: notes that start together keep their order (a clip's notes are read back in it).
+  final order = {for (final (i, n) in notes.indexed) n: i};
+  final sorted = [...notes]..sort((a, b) => a.on != b.on ? a.on.compareTo(b.on) : order[a]!.compareTo(order[b]!));
   for (final n in sorted) {
     final (on, off) = _off(n);
     // A free channel, the one free longest (its release tail has faded most); else the one that frees soonest.
@@ -578,6 +652,9 @@ List<_Event> _mpeEvents(List<MidiNote> notes) {
     if (n.timbre.isNotEmpty && n.timbre.first.tick <= on) {
       lastTimbre = _seven(n.timbre.first.value);
       ev.add(_Event(on, 2, [0xB0 | c, 74, lastTimbre]));
+    }
+    for (final m in n.lead) {
+      ev.add(_Event(on, 3, m));
     }
     ev.add(_Event(on, 3, [0x90 | c, _key(n.key), _vel(n.velocity)]));
     for (final p in n.bend) {

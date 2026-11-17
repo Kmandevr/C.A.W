@@ -6,6 +6,7 @@ updated: 2026-11-17
 
 # Log
 
+- 2026-11-17: clips stored as MIDI (branch `midi-store`, batch 1.0.5 #216): project format v5 saves each pattern as a format 0 .mid with C.A.W sequencer-specific events for what MIDI 1.0 can't hold (`lib/model/clip_midi.dart`), no pattern text; v4 text converts on load; Dart owns MIDI conversion (the Export page's .mid now from the app's writer with the tempo map), the engine keeps its converter for the CLI and .midi2; engine and C API (32) unchanged; per-note bends to ±96 semitones held (#226); tests `clip_midi_test.dart`, `clip_migration_test.dart` (bit-identical renders before and after).
 - 2026-11-17: visual, non-linear routing added to 1.1.0 (owner, #233).
 - 2026-11-17: the owner's device UI and music video directions (#231, #232); the device UI plan note.
 - 2026-11-17: the startup animation plays to its end by default; Settings › Feel › Full startup animation off shows it only while loading (owner). Track automation's owner decisions filed as #230.
