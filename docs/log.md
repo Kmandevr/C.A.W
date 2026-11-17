@@ -6,6 +6,7 @@ updated: 2026-11-17
 
 # Log
 
+- 2026-11-17: the FX batch is split (1.0.6 and 1.0.7); one bit distortion device; the beta pack stays free for beta users; monitoring, live preset preview, project templates and early routing groundwork adopted.
 - 2026-11-17: visual, non-linear routing added to 1.1.0 (owner, #233).
 - 2026-11-17: the owner's device UI and music video directions (#231, #232); the device UI plan note.
 - 2026-11-17: the startup animation plays to its end by default; Settings › Feel › Full startup animation off shows it only while loading (owner). Track automation's owner decisions filed as #230.

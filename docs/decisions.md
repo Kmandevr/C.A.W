@@ -6,6 +6,22 @@ updated: 2026-11-17
 
 # Decisions
 
+## 2026-11-17: The FX batch splits in two; one bit distortion; the beta pack stays free for beta users (owner)
+
+**Decision (owner, 2026-11-17):**
+- **Bit distortion:** one built-in device has the classic crush and the bitwise operations (shift, XOR, AND masks). The AutoStacc beta pack drops its bit-shift device and gets a different one instead, to be chosen.
+- **The AutoStacc beta pack:** it stays free for everyone who used the beta, even after the pack becomes paid.
+- **The FX batch splits in two:**
+  - **1.0.6:** consolidation, the device kit and FX chain, Flagship, React to… and live preset preview;
+  - **1.0.7:** the new effects, the recording tools, guitar, presets and templates, low-latency monitoring, the pack and the music video.
+
+  The later batches move up one: hosting foundation 1.0.10, notation 1.0.11.
+- **Suggestions adopted:**
+  - low-latency monitoring through effects, with a latency readout, checked on the S22+;
+  - live preset preview;
+  - project templates by purpose;
+  - the 1.1.0 routing engine built in hidden steps during the 1.0.x batches.
+
 ## 2026-11-17: Visual, non-linear routing is in 1.1.0 (owner, #233)
 
 **Decision (owner, 2026-11-17):** 1.1.0 adds visual, non-linear routing. The node graphs work:
@@ -98,7 +114,6 @@ The batch is 1.0.5 if it is ready, else 1.0.6.
 
   **[Fact]** Kilohearts Compactor is a free ducker/leveller released in August 2025, with threshold, amount, attack, hold, release, an optional sidechain, and RMS/Peak/ISP detection (kilohearts.com/products/compactor, checked 2026-11-17). C.A.W's device is an original design.
 - **AutoStacc beta pack:** free during the beta, paid later:
-  - bit-shift distortion;
   - warp;
   - spectral FX;
   - a glitch mangler.

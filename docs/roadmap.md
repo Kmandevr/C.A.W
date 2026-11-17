@@ -72,18 +72,30 @@ An overview by area, checked against the repository on 2026-11-03. The stage tab
    - MIDI playback and piano roll fixes (#226, #228).
 
    Stem export is already built (#33). App-wide undo is checked against the existing project-wide history (`lib/model/history.dart`) first.
-5. **1.0.6:** fewer, better built-in effects (#227, owner 2026-11-17). The overlapping effects merge into one device each, no more costly to run than the ones they replace. New standard effects: exciter, pitch correction, vocoder, analyzer, tuner, loudness meter, dynamic and M/S EQ, tape echo, plate and spring. Recording tools: noise reduction (live and on clips), a pedal-style noise gate, de-hum, de-click and de-plosive, de-reverb and breath. Guitar amp, pedal and cabinet modes in Drive and the convolver. Purpose tags, chain templates and purpose-named presets. Also the free AutoStacc beta pack: bit-shift distortion, warp, spectral FX and glitch.
-6. **1.0.7:**
+5. **1.0.6** (owner, 2026-11-17: the FX batch split in two): fewer, better built-in effects (#227). The overlapping effects merge into one device each, no more costly to run than the ones they replace. This batch also has:
+   - the device UI kit, the collapsible FX chain and the Vital-like Flagship (#231);
+   - **React to…** (#233);
+   - live preset preview: tap through presets while a loop plays.
+6. **1.0.7:** the rest of the FX work (#227):
+   - **New standard effects:** exciter, pitch correction, vocoder, analyzer, tuner, loudness meter, dynamic and M/S EQ, tape echo, plate and spring.
+   - **Recording tools:** noise reduction (live and on clips), a pedal-style noise gate, de-hum, de-click and de-plosive, de-reverb and breath.
+   - **Guitar:** amp, pedal and cabinet modes in Drive and the convolver, and Drive's Bands mode.
+   - **Purpose tags,** chain templates, project templates (Guitar recording, Podcast, Beat, Sound design) and purpose-named presets.
+   - **Low-latency monitoring** through effects while recording, with a latency readout.
+   - **The free AutoStacc beta pack:** warp, spectral FX, glitch, and one more to choose.
+   - **The step-by-step music video** (#232).
+7. **1.0.8:**
    - clip automation and VCA groups (#210);
    - receives, parallel paths and drum multi-out (#217);
    - MIDI out and MIDI clock (#211).
-7. **1.0.8:**
+8. **1.0.9:**
    - format migrations, crash recovery, device loss, and a first-run tour and help (#218);
    - drawn LFO shapes and a Flagship wavetable editor (#219).
-8. **1.0.9:** the foundation for hosting other people's plug-ins (#212): the isolation design (reviewed first), the out-of-process host, the scan and the loader behind Isolated, Trusted or Blocked. Users don't see any of it. The feature itself (CLAP and VST3 on Windows, CLAP on Android) ships in 1.1.0.
-9. **1.0.10:** a notation view (#213), a clip launcher, and S Pen precision (#220).
-10. **iOS and macOS builds** (#214), once the owner has an Apple Developer membership. On iOS, the app ships every built-in instrument and effect, but no on-device C++ building or loading (owner, 2026-11-13: Apple forbids downloaded native code).
-11. **Play-ahead rendering** (#191, the [play-ahead plan](play-ahead-plan.md)). It moved from 1.2.0 into 1.1.0 (owner, 2026-11-13) and is built in its own batches before 1.1.0.
+9. **1.0.10:** the foundation for hosting other people's plug-ins (#212): the isolation design (reviewed first), the out-of-process host, the scan and the loader behind Isolated, Trusted or Blocked. Users don't see any of it. The feature itself (CLAP and VST3 on Windows, CLAP on Android) ships in 1.1.0.
+10. **1.0.11:** a notation view (#213), a clip launcher, and S Pen precision (#220).
+- **Routing groundwork** (owner, 2026-11-17): the 1.1.0 routing engine (#233) is built in hidden steps alongside these batches, as plug-in hosting is. Users see none of it until 1.1.0.
+11. **iOS and macOS builds** (#214), once the owner has an Apple Developer membership. On iOS, the app ships every built-in instrument and effect, but no on-device C++ building or loading (owner, 2026-11-13: Apple forbids downloaded native code).
+12. **Play-ahead rendering** (#191, the [play-ahead plan](play-ahead-plan.md)). It moved from 1.2.0 into 1.1.0 (owner, 2026-11-13) and is built in its own batches before 1.1.0.
 
 **In 1.1.0 itself (owner, 2026-11-13):**
 - plug-in hosting goes live (#212) and play-ahead ships;

@@ -6,7 +6,7 @@ updated: 2026-11-17
 
 # Device UI plan
 
-**[Proposal]** None of this is built. It ships with the FX batch 1.0.6 (#227, #231). The owner gives a yes on each device's plan before it is built.
+**[Proposal]** None of this is built. The device kit, FX chain and Flagship ship in 1.0.6; the new devices in 1.0.7 (#227, #231). The owner gives a yes on each device's plan before it is built.
 
 ## The owner's direction (2026-11-17)
 - **FX chain:** each effect is a collapsed row with power, name, a tiny live visual and Mix.
@@ -90,7 +90,7 @@ updated: 2026-11-17
   - the live spectrum with 1–3 crossover handles;
   - each band a coloured strip under it, holding its drive type (a chip), amount and mix, plus solo, mute and Clean;
   - a tap on a band selects it, and the transfer curve shows that band.
-- **Bit distortion:** a staircase waveform view (bits and rate drawn), plus bitwise mode chips.
+- **Bit distortion:** a staircase waveform view (bits and rate drawn), plus the bitwise modes (shift, XOR, AND masks) as chips, with the bits drawn as lanes that flip (owner, 2026-11-17: one built-in device; the bitwise ops are not in the pack).
 - **Utility and stereo:** a goniometer and correlation meter; width, balance, Haas, mono-below and channel swap.
 - **Chorus and Flanger:** the voices drawn as moving dots in stereo, with modes as chips.
 - **Phaser:** the notches drawn sweeping.
@@ -112,7 +112,7 @@ updated: 2026-11-17
   - **De-hum:** the harmonics as spikes that dip when removed.
   - **De-click, de-plosive, de-reverb and breath:** before-and-after waveforms.
 - **AutoStacc pack:**
-  - each pack device has its own "toy-like" centrepiece (bit-shift shows the bit lanes flipping, warp a bending grid, spectral a frozen spectrum you can paint, glitch a slice grid lighting up);
+  - each pack device has its own "toy-like" centrepiece (warp a bending grid, spectral a frozen spectrum you can paint, glitch a slice grid lighting up);
   - each has the AutoStacc badge in the header.
 
 ## Open questions (owner)
