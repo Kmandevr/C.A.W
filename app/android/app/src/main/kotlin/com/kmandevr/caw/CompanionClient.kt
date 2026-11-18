@@ -152,7 +152,11 @@ class CompanionClient(private val context: Context) {
         connection = c
         val intent = Intent().setComponent(ComponentName(CompanionCallerCheck.COMPANION_PACKAGE, CompanionCallerCheck.COMPANION_SERVICE))
         val ok = try {
-            context.bindService(intent, c, Context.BIND_AUTO_CREATE)
+            // Android 14+ lets the Hub open the system's install confirmation from this binding only with this flag.
+            val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                Context.BIND_AUTO_CREATE or Context.BIND_ALLOW_ACTIVITY_STARTS
+            } else Context.BIND_AUTO_CREATE
+            context.bindService(intent, c, flags)
         } catch (_: SecurityException) {
             false // the service asks for a permission this build doesn't hold
         }
