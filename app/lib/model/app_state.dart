@@ -1872,6 +1872,17 @@ class AppState extends ChangeNotifier implements StressHost {
     _changed(engine: false);
   }
 
+  /// Sets the row height of each of [layer]'s take lanes (null: the default; clamped to the lanes' range), as a
+  /// drag on a take lane header's bottom edge leaves it: one undo step. Only the screen changes.
+  void setTakeHeight(LayerDoc layer, double? height) {
+    final h = height == null || !height.isFinite ? null : height.clamp(kMinLaneHeight, kMaxLaneHeight).toDouble();
+    if (layer.takeHeight == h) return;
+    endUndoStep();
+    layer.takeHeight = h;
+    _changed(engine: false);
+    endUndoStep();
+  }
+
   /// Sets how much of each of [layers]' rows shows (the track menu's Collapse, a header's bottom-edge drag or pinch):
   /// one undo step. With [height] (a normal row), that track's own height is set too. Only the screen changes.
   void setTrackCollapse(Iterable<LayerDoc> layers, TrackCollapse collapse, {double? height}) {

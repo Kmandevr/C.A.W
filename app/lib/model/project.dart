@@ -569,6 +569,7 @@ class LayerDoc {
     this.ownColor = false,
     this.showLanes = false,
     this.showTakes = false,
+    this.takeHeight,
     this.collapse = TrackCollapse.normal,
     this.height,
     List<AudioClipDoc>? audioClips,
@@ -602,6 +603,10 @@ class LayerDoc {
   /// The track's take lanes are open under it (#209, comping: a row per take of its clips with takes). Saved with
   /// the project, never sent to the engine.
   bool showTakes;
+
+  /// Each of the track's take lanes' row height as dragged (null: the default), the same range as an automation
+  /// lane's [AutomationLaneDoc.height]. Saved as `take_height` (format v5), never sent to the engine.
+  double? takeHeight;
 
   /// How much of the track's row shows in the arrangement (owner, 2026-11-11, after REAPER): its full [height],
   /// [compactHeight] (the name, M and S in one row) or a [thinHeight] sliver. Saved, never sent to the engine.
@@ -701,6 +706,7 @@ class LayerDoc {
         if (ownColor) 'own_color': true,
         if (showLanes) 'show_lanes': true,
         if (showTakes) 'show_takes': true,
+        if (takeHeight != null) 'take_height': takeHeight,
         if (collapse != TrackCollapse.normal) 'collapse': collapse.name,
         if (height != null) 'height': height,
         if (audioClips.isNotEmpty) 'audio_clips': [for (final c in audioClips) c.toJson(rate: rateOf?.call(c.assetId) ?? 0)],
@@ -740,6 +746,7 @@ class LayerDoc {
         ownColor: j['own_color'] == true,
         showLanes: j['show_lanes'] == true,
         showTakes: j['show_takes'] == true,
+        takeHeight: _laneHeight(j['take_height']),
         collapse: TrackCollapse.values.where((c) => c.name == j['collapse']).firstOrNull ?? TrackCollapse.normal,
         height: switch (j['height']) {
           final num v when v.isFinite => v.toDouble().clamp(minHeight, maxHeight),

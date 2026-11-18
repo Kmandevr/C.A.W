@@ -1,5 +1,6 @@
 // "Automate" on any automatable control's hold menu (#230): the one item every knob, fader and slider offers, which
-// opens the parameter's lane under its track, armed and scrolled into view, with a point at the playhead.
+// opens the parameter's lane under its track, armed and scrolled into view, with a point at the playhead. From a
+// phone's full-screen device page it closes the page first, so the lane shows.
 import 'package:flutter/material.dart';
 
 import '../../model/app_state.dart';
@@ -7,6 +8,7 @@ import '../../model/automation_edit.dart';
 import '../../model/automation_writer.dart' show AutomationTarget;
 import '../../model/device_target.dart';
 import '../../model/mixer_fx.dart' show masterLayerId;
+import '../devices/device_editor.dart' show closeDevicePage;
 import '../haptics.dart';
 import 'long_press_menu.dart';
 
@@ -34,11 +36,12 @@ class ControlAutomation {
   /// The menu entry.
   static const action = MenuAction<String>('automate', 'Automate', Icons.timeline, section: 'Automation');
 
-  /// Opens (or reveals) the lane; says so when there is nothing to show.
+  /// Opens (or reveals) the lane, closing a phone's full-screen device page first so it shows; says so when there
+  /// is nothing to show (the page stays then).
   void automate(BuildContext context) {
-    final key = state.automate(target);
-    if (key == null) {
-      ScaffoldMessenger.maybeOf(context)?.showSnackBar(const SnackBar(duration: Duration(seconds: 2),
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    if (!automateFromDevice(state, target)) {
+      messenger?.showSnackBar(const SnackBar(duration: Duration(seconds: 2),
           content: Text('This control has no lane under a track')));
       return;
     }
@@ -86,9 +89,8 @@ class AutomateButton extends StatelessWidget {
       style: color == null ? null : TextButton.styleFrom(foregroundColor: color),
       onPressed: () {
         final messenger = ScaffoldMessenger.maybeOf(context);
-        Navigator.of(context).maybePop();
-        final key = a.state.automate(a.target);
-        if (key == null) {
+        final made = automateFromDevice(a.state, a.target, closeSheet: () => Navigator.of(context).maybePop());
+        if (!made) {
           messenger?.showSnackBar(const SnackBar(duration: Duration(seconds: 2),
               content: Text('This control has no lane under a track')));
         } else {
@@ -98,4 +100,14 @@ class AutomateButton extends StatelessWidget {
       icon: const Icon(Icons.timeline, size: 16),
       label: const Text('Automate'));
   }
+}
+
+/// Automate [t] from a control: when it has a lane, the lane opens under its track, armed and scrolled into view,
+/// and a phone's full-screen device page closes (with the sheet over it) so the arrangement behind shows it; on a
+/// wide screen, away from a device page, or with no lane to show, only [closeSheet] runs (the sheet the control's
+/// Automate was in). Whether there was a lane to show.
+bool automateFromDevice(AppState state, AutomationTarget t, {VoidCallback? closeSheet}) {
+  final made = state.automate(t) != null;
+  if (!made || !closeDevicePage()) closeSheet?.call();
+  return made;
 }

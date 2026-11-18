@@ -94,14 +94,19 @@ extension Freeze on AppState {
         apply: (path, seconds, rate, layer) => _addBounce(layer, path, seconds, rate, span?.$1 ?? 0, muteTrack: true));
   }
 
-  /// Bounce to audio of [clips] (on track [l]): just those clips through the track over their span, tail included,
-  /// onto a new audio track under it at the same position; the clips are muted. One undo step.
-  TrackRenderJob bounceClips(LayerDoc l, List<ClipDoc> clips) {
-    final ids = {for (final c in clips) c.id};
-    final span = _clipSpan(l, clips);
+  /// Bounce to audio of [clips] and [audio] clips (on track [l]): just those clips through the track over their
+  /// span, tail included, onto a new audio track under it at the same position; the clips are muted. One undo step.
+  /// Bouncing audio clips mutes them on [l], an edit: a frozen track asks "Unfreeze to edit?" and nothing renders.
+  TrackRenderJob bounceClips(LayerDoc l, List<ClipDoc> clips, {List<AudioClipDoc> audio = const []}) {
+    if (audio.isNotEmpty && guardFrozen(l)) return TrackRenderJob._(null, Future.value('cancelled'));
+    final ids = {for (final c in clips) c.id, for (final a in audio) a.id};
+    final span = _clipSpan(l, clips, audio: audio);
     if (span == null) return TrackRenderJob._(null, Future.value('no clips to bounce'));
     return _render(l, prefix: bounceFilePrefix, start: span.$1, end: span.$2,
-        only: (copy, _) => copy.clips.removeWhere((c) => !ids.contains(c.id)),
+        only: (copy, _) {
+          copy.clips.removeWhere((c) => !ids.contains(c.id));
+          copy.audioClips.removeWhere((c) => !ids.contains(c.id));
+        },
         apply: (path, seconds, rate, layer) => _addBounce(layer, path, seconds, rate, span.$1,
             muteClips: ids));
   }
@@ -147,12 +152,12 @@ extension Freeze on AppState {
         });
   }
 
-  /// [clips]' span in whole steps (audio clips with the MIDI ones when [clips] is the track's); null for none.
-  (int, int)? _clipSpan(LayerDoc l, List<ClipDoc> clips) {
-    final starts = [for (final c in clips) c.startSteps,
-      if (identical(clips, l.clips)) for (final a in l.audioClips) a.startSteps.floor()];
-    final ends = [for (final c in clips) c.startSteps + c.lengthSteps,
-      if (identical(clips, l.clips)) for (final a in l.audioClips) a.endAt(project.bpm).ceil()];
+  /// [clips]' and [audio]'s span in whole steps (the track's audio clips with the MIDI ones when [clips] is the
+  /// track's); null for none.
+  (int, int)? _clipSpan(LayerDoc l, List<ClipDoc> clips, {List<AudioClipDoc> audio = const []}) {
+    final sound = identical(clips, l.clips) ? l.audioClips : audio;
+    final starts = [for (final c in clips) c.startSteps, for (final a in sound) a.startSteps.floor()];
+    final ends = [for (final c in clips) c.startSteps + c.lengthSteps, for (final a in sound) a.endAt(project.bpm).ceil()];
     if (starts.isEmpty) return null;
     return (starts.reduce(math.min).clamp(0, project.maxArrangementSteps - 1),
         ends.reduce(math.max).clamp(1, project.maxArrangementSteps));
@@ -174,6 +179,9 @@ extension Freeze on AppState {
       p.layers.insert(p.layers.indexOf(source) + 1, track);
       if (muteTrack) source.mute = true;
       for (final c in source.clips) {
+        if (muteClips.contains(c.id)) c.mute = true;
+      }
+      for (final c in source.audioClips) {
         if (muteClips.contains(c.id)) c.mute = true;
       }
     });
