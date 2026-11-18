@@ -1,12 +1,12 @@
 # C.A.W start file for chat agents
 
-Generated from `8dd1956e9a635aef969f27671afba150d67bd9e0` on the default branch at 2026-11-18T14:43:58Z by `scripts/agent-context.js`. Don't edit it; edit the files it bundles.
+Generated from `fd9131b3f0df2e8dfae2d9b1cf2b10c77ae311a2` on the default branch at 2026-11-18T14:49:26Z by `scripts/agent-context.js`. Don't edit it; edit the files it bundles.
 
-Read this whole file before doing anything else. It replaces separately reading `AGENTS.md`, `CLAUDE.md`, `docs/vision.md` and `.claude/rules/*.md`.
+Read this whole file before doing anything else. It replaces separately reading `AGENTS.md`, `CLAUDE.md`, `docs/roadmap.md` and `.claude/rules/*.md`.
 
 ## Before you start: confirm in your first reply
 
-1. The commit this file was generated from (`8dd1956`).
+1. The commit this file was generated from (`fd9131b`).
 2. The task issue number and your branch (`gpt/<issue>-<short-name>`).
 3. The progress comment's next action, or "new task" if there is none yet.
 4. Which area rules below apply to the files you will touch.
@@ -42,7 +42,7 @@ At the start of every task/chat, read:
 
 1. [`AGENTS.md`](AGENTS.md) (this file)
 2. [`CLAUDE.md`](CLAUDE.md) for project-wide rules and workflow
-3. [`docs/vision.md`](docs/vision.md) for the owner's product direction and principles (plans and open questions are tracked privately)
+3. [`docs/roadmap.md`](docs/roadmap.md) for what is promised publicly (the vision, plans and open questions are tracked privately)
 4. The applicable rule file(s) below before changing files in that area
 
 Do not read the whole repository by default. Follow the layered reading guidance in `CLAUDE.md`; open only the files needed for the task. The code is the source of truth for what is built. Keep facts, proposals, assumptions and open questions distinct. Ask the owner before settling an open question.
@@ -74,7 +74,7 @@ The skills contain the detailed procedures. Read the linked `SKILL.md` when the 
 | Navigate project/file relationships or Dart/C++ symbols | [`.claude/skills/code-nav/SKILL.md`](.claude/skills/code-nav/SKILL.md) |
 | Leave a durable resume note at a multi-step task boundary | [`.claude/skills/handoff/SKILL.md`](.claude/skills/handoff/SKILL.md) |
 
-Use GitHub Issues as the task/bug tracker; do not create a separate task list. A PR that finishes an issue must include `Closes #N`. Before each push, test the changed area and run the docs check; follow the release-check skill before calling the work ready. Never merge or approve your own PR.
+Use GitHub Issues as the tracker (this repository's for bugs that are fine to show the public; features and plans are tracked privately); do not create a separate task list. A PR that finishes an issue must include `Closes #N`. Before each push, test the changed area and run the docs check; follow the release-check skill before calling the work ready. Never merge or approve your own PR.
 
 ## Working habits
 
@@ -150,7 +150,7 @@ Commands run without a shell, so arguments are taken literally. Paths must be re
 
 ### The loop
 
-1. **Start or resume.** Fetch `START.md` from the `agent-results` branch (https://raw.githubusercontent.com/Kmandevr/C.A.W/agent-results/START.md). CI regenerates it from `Main` whenever this file, `CLAUDE.md`, `docs/vision.md` or a rule changes, and it bundles all of them, so this one fetch replaces reading them separately. Answer its confirmation list, then read the progress comment and the report if they exist and resume at the next action. Don't re-read files or re-review steps the comment marks done.
+1. **Start or resume.** Fetch `START.md` from the `agent-results` branch (https://raw.githubusercontent.com/Kmandevr/C.A.W/agent-results/START.md). CI regenerates it from `Main` whenever this file, `CLAUDE.md`, `docs/roadmap.md` or a rule changes, and it bundles all of them, so this one fetch replaces reading them separately. Answer its confirmation list, then read the progress comment and the report if they exist and resume at the next action. Don't re-read files or re-review steps the comment marks done.
 2. **Branch.** New tasks work on `gpt/<issue>-<short-name>`, created from `Main`. Pushes there run only the Quick check, never the full CI matrix or the app builds, and need no pull request.
 3. **Plan.** Write at most five small steps into the progress comment. A step is one logical change that can pass the Quick check by itself.
 4. **One step at a time.** Open only the files the step needs; prefer search and line ranges to whole files. Use `grep`, `refs`, `def`, `graph` and `tree` (above) to find what to open. Write the change, then fetch each written file again to check for connector mangling. A newer push cancels the older run, so commit the step's files one after another and put the `run:` lines (the narrowest tests that prove the step, such as `test <name>`) in the last commit.
@@ -174,17 +174,17 @@ The owner's decisions and repository documentation take precedence over an agent
 
 # C.A.W
 
-**C.A.W** (Code Auditioning Workspace; crow logo) is an experimental code-driven sound-design and music workspace. The Flutter app ships Android and Windows builds; Linux/Windows CI also builds and tests the C++20 engine. The app has three sections: Build, Files and Arrange. [docs/app.md](docs/app.md) is shipped app behaviour, [docs/engine-build-status.md](docs/engine-build-status.md) the native side and its boundaries; planned work lives in the private Kmandevr/AutoStacc-Hub (docs/caw/). The beta sends anonymous telemetry and optional feedback through a relay; audio stays local, and there is no in-app AI or cloud audio. AI coding assistants are development tools, not a feature. The owner's product direction is in [docs/vision.md](docs/vision.md).
+**C.A.W** (Code Auditioning Workspace; crow logo) is an experimental code-driven sound-design and music workspace. The Flutter app ships Android and Windows builds; Linux/Windows CI also builds and tests the C++20 engine. The app has three sections: Build, Files and Arrange. [docs/app.md](docs/app.md) is shipped app behaviour, [docs/engine-build-status.md](docs/engine-build-status.md) the native side and its boundaries; the vision and plans are private (docs/caw/ in Kmandevr/AutoStacc-Hub); [docs/roadmap.md](docs/roadmap.md) is what is promised. The beta sends anonymous telemetry and optional feedback through a relay; audio stays local, and there is no in-app AI or cloud audio. AI coding assistants are development tools, not a feature.
 
-**Data and services:** Kmandevr/C.A.W-Telemetry holds what C.A.W collects (telemetry, feedback Issues, privacy policy, terms) and the beta relay; its PLAN.md is the contract's other copy. The private Kmandevr/AutoStacc-Hub holds the companion and C.A.W's plans and owner questions (docs/caw/). Work cross-repo changes in one session (add_repo).
+**Data and services:** Kmandevr/C.A.W-Telemetry holds what C.A.W collects (telemetry, feedback Issues, privacy policy, terms) and the beta relay; its PLAN.md is the contract's other copy. The private Kmandevr/AutoStacc-Hub holds the companion and C.A.W's vision, plans and owner questions (docs/caw/). Work cross-repo changes in one session (add_repo).
 
 ## Start of every session
 
-Tasks and bugs live in GitHub Issues: use the `tasks` skill to find, claim and finish work, and don't keep a task list anywhere else. The `docs/` folder holds permanent project knowledge (an Obsidian vault); its notes list is [docs/index.md](docs/index.md).
+Public bugs live in this repository's Issues, every other task in the private AutoStacc-Hub's: use the `tasks` skill, and keep no other task list. The `docs/` folder holds permanent project knowledge (an Obsidian vault); its notes list is [docs/index.md](docs/index.md).
 
 ## Rules
 
-- Keep facts, proposals, assumptions and open questions apart, as `docs/vision.md` and `docs/architecture.md` label them. Never present a proposal as built, and never build an open question as settled: ask the owner.
+- Keep facts, proposals, assumptions and open questions apart, as `docs/architecture.md` labels them. Never present a proposal as built, and never build an open question as settled: ask the owner.
 - Never invent facts about libraries, versions, licences, platform behaviour or devices. Check a primary source and date it, or label it an assumption.
 - The audio callback never allocates, locks, logs, does I/O or calls into the UI layer (details: `.claude/rules/engine.md`).
 - Downloaded projects and modules are untrusted: parse them with limits. Native components are in-process code, not sandboxed: third-party binaries load only under the user's per-item choice of Isolated, Trusted or Blocked (`docs/decisions.md`), never silently. Never ship a GitHub token or other secret.
@@ -229,123 +229,24 @@ Develop on the branch the session names. Put `Closes #N` in pull requests that f
 
 ---
 
-## File: `docs/vision.md`
+## File: `docs/roadmap.md`
 
 ---
-title: Vision and principles
-summary: Owner-approved product direction, actual platform support and current product boundaries; unresolved owner decisions are tracked privately.
+title: Roadmap
+summary: The work C.A.W has promised to build and hasn't built yet: hosting VST3 and CLAP plug-ins, and iOS releases. Only promised work is listed, with no dates.
 updated: 2026-11-18
 ---
 
-# Vision and principles
+# Roadmap
 
-This note records product direction, not a list of shipped features. The roadmap and feature plans are tracked privately. For implementation truth, use [App](app.md), [Engine](engine.md) and [Engine implementation status](engine-build-status.md). Code and tests take precedence over this vision when describing what exists.
+This is C.A.W's public roadmap: the work it has promised and hasn't built yet. It lists only what is promised, not every plan, and gives no dates. What is built is in [App](app.md) and [Engine](engine.md).
 
-## Product identity and direction
-
-**Name:** C.A.W. means **Code Auditioning Workspace**. The logo is a crow.
-
-C.A.W. is a code-driven sound-design and music-production workspace for creating, shaping, auditioning, arranging, recording, editing, mixing and exporting sounds, instruments, patterns and reusable musical content.
-
-**Goal (owner, 2026-11-03):** C.A.W. is not trying to be a conventional DAW, and it doesn't have to work the way one does. It must be able to do everything a good DAW can do, because there is no good DAW for mobile. Its own way of working (code, patterns, one shared project and engine model, phone-first touch) is the means; full production capability is the requirement. It keeps a lightweight architecture so weak phones stay first-class, rather than copying a heavyweight DAW's design. **Owner (2026-11-09):** it should *feel* like a full DAW, closest to REAPER, "but better and more specialized": the familiar workflow (tracks, mixer, FX stacks, automation, a browser) with C.A.W.'s own strengths built in, such as writing, building and hearing your own effects inside the song. The layout is in [decisions](decisions.md) ("The app's layout").
-
-**Run on anything (owner, 2026-11-12):** the app changes according to the hardware it runs on and then runs, "so nothing beats C.A.W". The same project opens everywhere; the hardware decides how much is computed live and how much is rendered ahead (**dynamic play-ahead**: untouched tracks rendered ahead in batches, switching to real time "quickly and silently so no one ever notices" when the user needs low latency). Exports never change to save CPU. The publicity target is a hacked graphing calculator ("it's a stunt, if it works it's fine"). Target release 1.1.0 (owner, 2026-11-13; it was 1.2.0). Nothing of it is built; the design is planned privately (#191).
-
-**What play-ahead should give the user** ([Assumption]: estimated from the engine's structure, not measured; the Benchmark turns each into a fact or drops it; figures in the plan's "Expected gains"):
-
-- **Bigger songs on the same phone:** untouched tracks render on several cores, budgeted for the average block instead of the worst, so a dense song holds about 2–4× more tracks before dropouts on the S22+ and 2–6× on a low-end phone.
-- **Fewer pops and dropouts:** half a second to two seconds already rendered absorbs short scheduling hiccups that break playback today; the real-time path carries only what is being played or touched.
-- **Play starts at once:** the first half-second from the cursor stays rendered while stopped, so the first callback after Play is no longer the slowest.
-- **Lower latency when playing live:** the callback renders only the live tracks and the master, so it can run a smaller device buffer whenever someone plays, not only while recording (on the S22+ perhaps 1024 → 256 frames; depends on the device).
-- **Full sound on weak phones:** ahead tracks could keep their voices instead of Lightweight's 4-voice cap (the owner's choice, since it changes how songs sound there).
-- **Loops that repeat cost almost nothing:** a pass that provably repeats is replayed from the cache, and Freeze becomes the saved form of the same cache.
-- **Quicker exports:** when nothing changed and preview ran at the export's quality (desktop and flagship), an export, stems or the music video reuse the cached audio.
-- **The same project everywhere,** from a PC to a calculator, each device choosing how much is live.
-
-What it does not promise: less total work, battery or heat (the same audio is still computed; heat stays the ceiling, and longer bursts saving battery is only an assumption), or any change to exports.
-
-**Owner decision (2026-11-05):** ordinary C++ is C.A.W.'s programming language. It is general-purpose, not a music-only DSL; users can write anything ordinary C++ allows. The C.A.W. Library/SDK supplies reusable audio, music, math, bit-manipulation, data and general-purpose building blocks. One shared component model makes each component available to the C++ editor, visual composition, generated/custom performance UI, mixer and later plugin/standalone adapters. These are coordinated views of one project and runtime, not parallel implementations. See [C++ creation platform](cpp-creation-platform.md).
-
-**C++ rules the app (owner, 2026-11-10):** C++ is "the supreme ruler" of C.A.W. and replaces the .caw language entirely ([decisions](decisions.md), "C++ replaces the .caw language"). In C++ you build synths and effects, write custom LFOs and other modulators, and route anything to anywhere. Notes can be written as text-based MIDI, in C.A.W.'s own text form where standard MIDI has none. The mindset, in the owner's words not to be taken verbatim: you could port an entire game into the app and it would just turn into music. The vision is for C.A.W. to do "literally anything you could imagine". Most DAWs restrict you to the way their engine works. C.A.W. instead gives native engine support for "weird shenanigans", so you can make sounds you can't make anywhere else. That makes it at once a plug-in builder, a DAW, a testing suite and a sample-pack maker: "the jack of all trades while still being specialized". Built so far (2026-11-10): C++ effects and instruments on tracks (#156), an engine-side testing suite for effects (#163), and CLAP export of a component library (#162). [Proposal] Modulators, routing anything anywhere and text MIDI are planned (#155), and so are the sample-pack maker (#164), VST3 export and the app's use of the testing suite.
-
-**Current delivery priority (owner, 2026-11-06):** create a working prototype before building out the full architecture. Deliver a narrow, useful end-to-end slice and expand it through working product behavior. Plan for future compatibility and extensibility where they affect today's interfaces, but do not build comprehensive migration systems, marketplace plumbing or speculative frameworks ahead of demonstrated need.
-
-The .caw language and VM were removed on 2026-11-11 (#160), once C++ built-ins and the app made the same music; the owner waived compatibility with old .caw sources and pre-release projects.
-
-## Platforms and actual support
-
-**Product targets:** Android, iOS, Windows, macOS and Linux, with Android first.
-
-**Current repository support (checked 2026-11-01):**
-- The Flutter app has CI build artifacts for Android and Windows.
-- Linux is used for app analysis/tests and has a local Flutter runner, but is not currently a shipped app artifact.
-- The portable C++ engine is built/tested by CI on Linux x64, Linux Arm64 and Windows x64, plus Linux sanitizers.
-- iOS and macOS app builds are not currently part of the app CI workflow. They remain portability targets, not verified shipped builds.
-
-Do not describe a platform as supported for release solely because Flutter or the C++ engine could theoretically target it.
-
-## Current product capabilities — summary
-
-The app has three sections: Build (C++ components and patterns), Files and Arrange (tracks and clips, with the mixer, the automation lanes and the FX stack). Export is a page from the project menu and Engine diagnostics are in Settings.
-
-The repository currently includes:
-- A portable C++20 engine with built-in C++ instruments and effects and the project's own C++ components, written and built in Build.
-- Pattern editing with a piano roll and drum grid, note expressions, velocity/chance curves and pattern generators.
-- Arrangement clips, nested folders, stereo folder buses and track/folder volume-pan automation.
-- Track mixer controls, master output level and stereo peak meters.
-- Engine diagnostics (Settings › App › About): scope/spectrum inspection and meters.
-- MIDI pattern import/export, including Standard MIDI Files and MIDI 2.0 Clip Files, plus a native MIDI 2.0 UMP decoder/input-queue primitive.
-- Native offline WAV rendering, loop/free-length/one-shot/wavetable export, named profiles, export history and a bounded in-memory queue.
-- Portable .caw project import/export (packages with their dependencies; old .cawproj files import), project-local folders, tags, saved searches and restore points.
-- CLAP plug-in project export of a C++ component (Build › Export as plug-in).
-
-Important boundaries:
-- USB, Bluetooth and UMP MIDI devices (Android) and WinMM ports (Windows) play instruments at the frame they were played; not yet tested on the owner's hardware. MIDI clock and output are not implemented.
-- Audio-file import, audio clips, sample editing and WAV/SFZ multisample authoring are not implemented.
-- Sends to bus folders, sidechain keys (the ducker, compressor and gate) and bus effects are built (2026-11-11, #175); receives, parallel paths inside a track and a routing matrix are not. Native effect chains on tracks, buses and the master are built (engine).
-- Instrument and effect knob automation is built; stems export is in the Export song sheet.
-- Audio/MIDI recording, input monitoring, recording latency compensation, take lanes and comping are built ([app](app.md)); plugin delay compensation for native effects is built too.
-- The modular graph executor and native module registry are foundations, not the active playback/mixer path. External CLAP/VST3 binary hosting is not implemented. Dynamic loading of C.A.W. native components, under the user's explicit trust choice, is built in the engine; no screen uses it yet.
-- Video synchronization is not planned at this time.
-- See [engine implementation status](engine-build-status.md) for the complete native boundary and paused work.
-
-## Product principles
-
-1. **Code and visual editing share one source of truth.** A visual control must update the same project/module data that code and playback use.
-2. **Fast experimentation.** Make a sound, audition it, adjust it and export it without unnecessary setup.
-3. **Local and offline first.** No app capability requires internet access. Editing, compiling and linking C++, resolving already-installed dependencies, playback, project/library management, saving, packaging and rendering work locally. Internet access is optional and may only improve the experience by obtaining or updating dependencies/toolchain packages that are then cached for offline use; it is never a remote execution dependency.
-4. **Modular and reusable.** Generators, effects, functions, patterns, recordings and project assets should be reusable without duplicating incompatible systems.
-5. **Phone-first, desktop-capable.** Touch workflows must be practical on a phone; desktop must support keyboard and mouse without becoming a separate product.
-6. **Transparent resource controls.** Show CPU, memory, audio and build load. Make budgets and recommendations configurable and allow users to override advisory limits; do not impose arbitrary hidden ceilings. Keep genuine format and real-time safety constraints explicit.
-7. **Safe real-time audio.** The callback stays bounded and avoids allocation, locks, I/O, logging and UI calls.
-8. **Evidence over claims.** Performance, platform support and feature completion require tests or device measurements.
-9. **Extensible without rewrites.** New components, algorithms, ports, parameters, UI controls, MIDI capabilities, formats and platform adapters must plug into defined contracts without requiring unrelated systems to be rewritten.
-
-## Sound-design direction
-
-The creative direction includes bytebeat and mathematical audio, procedural synthesis, raw bit-level sound design, reusable effects, modulation, waveform/wavetable work, resonant and physical-model-inspired sounds, and controlled sound variation.
-
-These are not all implemented. The private lightweight creative audio systems design separates existing primitives from proposed additions and estimates impact, effort and runtime cost.
-
-Audio import, sample editing, multisampling, non-destructive audio transformations and recording are desired workflow extensions, but remain future work until they appear in the app and engine implementation.
-
-## AI and external services
-
-**No in-app AI integration is in the current product scope.** Do not add AI generation, AI editing, source separation, model inference, cloud audio processing or AI-dependent sound features.
-
-AI coding assistants may be used by the owner and contributors as development tools. That is separate from the shipped C.A.W. product and does not imply an AI feature, provider integration or network dependency in the app.
-
-GitHub-based library synchronization and source selection are also not implemented as an app workflow. Keep the app fully useful offline; optional project collaboration/synchronization is a later roadmap capability and must not be required for core operation.
-
-## Commercial and licensing direction
-
-**Owner direction (2026-11-09):** C.A.W. is intended to be free and open source. It is licensed under [Apache-2.0](../LICENSE). AutoStacc distributes the free app and the optional support bundles. Core functionality is not paywalled. Optional support/donation bundles may provide prebuilt libraries of FX, instruments, presets, samples and sounds; they use the same component/content formats as free and creator-made content. Do not claim AutoStacc distribution or bundle delivery is implemented.
-
-New dependencies require exact version, transitive dependency and licence review and an entry in [decisions](decisions.md). Dependencies must be permissive (no GPL/AGPL); no paid licence is assumed.
-
-## Open owner decisions
-
-Questions only the owner can settle are tracked privately.
+## Promised
+- **Plug-in hosting: VST3 and CLAP.**
+  - Load other people's VST3 and CLAP plug-ins in C.A.W.
+  - A plug-in made by someone else loads only under your own choice for it: Isolated, Trusted or Blocked. It never loads silently.
+  - C.A.W can already build its own C++ components as CLAP and VST3 plug-ins for other hosts ([Engine](engine.md)); hosting is the other direction.
+- **iOS releases.** C.A.W on iPhone and iPad. Today it ships for Android and Windows.
 
 ---
 
@@ -425,7 +326,7 @@ Docs stay clean and current: a note says what is true now, not how it got there.
 - **Frontmatter** on every note: `title`, `summary` (one line, shown in the repo map), `covers` (when the note describes code: a one-line list of files, `dir/` folders or `*` globs, e.g. `[engine/vm/, scripts/docs-test.js]`), `updated` (YYYY-MM-DD).
 - When code a note covers changes, re-check that note in the same change and bump `updated`. New code areas get a `covers:` entry. `node scripts/docs-test.js` checks all of this; the Stop hook reminds you, and CI fails a stale note on pull requests (`--strict`).
 - `README.md` is the front door: it must name every top-level folder, workflow and npm script (the check fails otherwise), and its `covers:` list is the HTML comment on its first line.
-- Relative markdown links (`[text](other.md)`), not `[[wikilinks]]`. Tasks live in GitHub Issues, not here.
+- Relative markdown links (`[text](other.md)`), not `[[wikilinks]]`. Tasks live in GitHub Issues (the `tasks` skill), not here.
 
 ---
 
