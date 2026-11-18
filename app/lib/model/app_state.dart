@@ -10,6 +10,7 @@ import '../engine/engine.dart';
 import '../engine/execution.dart';
 import '../platform/audio_route.dart';
 import '../platform/resource_signals.dart';
+import 'audio_devices.dart';
 import 'av_sync.dart';
 import 'latency_comp.dart';
 import 'poller.dart';
@@ -263,24 +264,7 @@ class AppState extends ChangeNotifier implements StressHost {
         '${settings.audioDeviceId}|${settings.audioDevice}|${settings.bufferFrames}|${settings.exclusiveAudio}';
     if (_deviceChoice != device) {
       _deviceChoice = device;
-      final name = settings.audioDevice;
-      _audioConfigured = e
-          .configureAudio(
-              deviceId: settings.audioDeviceId,
-              device: name,
-              periodFrames: settings.bufferFrames,
-              exclusive: settings.exclusiveAudio)
-          .then((result) {
-        if (_disposed || _deviceChoice != device) return;  // a newer choice will report for itself
-        final before = audioError;
-        audioError = switch (result) {
-          AudioConfigured.ok => audioError == _fallbackNote ? null : audioError,
-          AudioConfigured.fallback => _fallbackNote = 'Couldn\'t open ${name.isEmpty ? 'the chosen size or mode' : name}; '
-              'using the default',
-          AudioConfigured.closed => 'The audio device did not reopen with the new settings',
-        };
-        if (audioError != before) notifyListeners();
-      }, onError: (Object _) {});
+      _configureDevice(e, device);
     }
     final click = '${settings.clickVolume}|${settings.clickSound.index}';
     if (_clickChoice != click) {
@@ -293,6 +277,51 @@ class AppState extends ChangeNotifier implements StressHost {
       _bufferRecording = rec;
       e.setBufferMode(settings.audioBuffer.index, recording: rec);
     }
+  }
+
+  /// The engine id the last device choice opened ([engineDeviceId]: a platform choice by its id now).
+  String? _openedDeviceId;
+  StreamSubscription<void>? _routeSub;
+
+  // The device choice to the engine. A choice from the platform's own list (#242: Android's devices by type and
+  // name) opens by the id that device has now, '' (the default) while it is not connected; any other saved id goes
+  // as it is (WASAPI's endpoint id). A name only is still looked up by the engine.
+  void _configureDevice(Engine e, String device) {
+    final key = settings.audioDeviceId;
+    final name = settings.audioDevice;
+    final platform = key.startsWith(platformChoicePrefix);
+    _routeSub ??= latency.route.changes.listen((_) => _deviceListChanged());
+    _audioConfigured = _audioConfigured.then((_) async {
+      if (_disposed || _deviceChoice != device) return;
+      final choices = platform ? platformChoices((await latency.route.devices()).outputs, input: false) : const <AudioChoice>[];
+      final id = engineDeviceId(key, choices);
+      final missing = platform && id.isEmpty;
+      _openedDeviceId = id;
+      final result = await e.configureAudio(
+          deviceId: id, device: platform ? '' : name, periodFrames: settings.bufferFrames, exclusive: settings.exclusiveAudio);
+      if (_disposed || _deviceChoice != device) return;  // a newer choice will report for itself
+      final before = audioError;
+      audioError = switch (result) {
+        AudioConfigured.ok when missing => _fallbackNote = '${name.isEmpty ? 'The chosen output' : name} is not connected; '
+            'using the default',
+        AudioConfigured.ok => audioError == _fallbackNote ? null : audioError,
+        AudioConfigured.fallback => _fallbackNote = 'Couldn\'t open ${name.isEmpty ? 'the chosen size or mode' : name}; '
+            'using the default',
+        AudioConfigured.closed => 'The audio device did not reopen with the new settings',
+      };
+      if (audioError != before) notifyListeners();
+    }).catchError((Object _) {});
+  }
+
+  // A device connected or went away: a platform choice opens again where its id changed (it reconnected with a new
+  // one, or it is back after the default played meanwhile), and nothing reopens otherwise.
+  Future<void> _deviceListChanged() async {
+    final e = engine;
+    final key = settings.audioDeviceId;
+    if (e == null || _disposed || !key.startsWith(platformChoicePrefix) || _deviceChoice == null) return;
+    final id = engineDeviceId(key, platformChoices((await latency.route.devices()).outputs, input: false));
+    if (_disposed || id == _openedDeviceId) return;
+    _configureDevice(e, _deviceChoice!);
   }
 
   Engine? engine;
@@ -617,6 +646,7 @@ class AppState extends ChangeNotifier implements StressHost {
     if (pressureSubscription != null) unawaited(pressureSubscription.cancel());
     _poller.dispose();
     latency.removeListener(_latencyChanged);
+    unawaited(_routeSub?.cancel());
     latency.dispose();
     _liveTimer?.cancel();
     _saveTimer?.cancel();

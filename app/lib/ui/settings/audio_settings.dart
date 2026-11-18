@@ -5,6 +5,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../../engine/engine.dart';
+import '../../model/audio_devices.dart';
 import '../../model/audio_record.dart';
 import '../../model/settings.dart';
 import '../theme.dart';
@@ -28,6 +29,17 @@ class _AudioSettingsState extends State<AudioSettings> {
   AudioStatus? _status;
   Timer? _poll;
 
+  /// The platform's own outputs (#242: Android's, by type and name); empty where the backend lists them.
+  List<AudioChoice> _outputs = const [];
+  StreamSubscription<void>? _routeSub;
+
+  Future<void> _readOutputs() async {
+    final route = widget.deps.state?.latency.route;
+    if (route == null) return;
+    final lists = await route.devices();
+    if (mounted) setState(() => _outputs = platformChoices(lists.outputs, input: false));
+  }
+
   Settings get s => widget.deps.settings;
 
   @override
@@ -35,12 +47,14 @@ class _AudioSettingsState extends State<AudioSettings> {
     super.initState();
     final state = widget.deps.state;
     if (state?.engine == null) return;
+    unawaited(_readOutputs().catchError((Object _) {}));
+    _routeSub = state!.latency.route.changes.listen((_) => unawaited(_readOutputs().catchError((Object _) {})));
     // The list opens the backend, off the UI isolate; the status is re-read while the page shows (a reopen, a route
     // change by the system).
     Engine.audioDevices().then((d) {
       if (mounted) setState(() => _devices = d);
     }).catchError((Object _) {});
-    _status = state!.audioStatus;
+    _status = state.audioStatus;
     _poll = Timer.periodic(const Duration(seconds: 1), (_) {
       if (mounted) setState(() => _status = widget.deps.state?.audioStatus);
     });
@@ -49,6 +63,7 @@ class _AudioSettingsState extends State<AudioSettings> {
   @override
   void dispose() {
     _poll?.cancel();
+    unawaited(_routeSub?.cancel());
     super.dispose();
   }
 
@@ -58,6 +73,38 @@ class _AudioSettingsState extends State<AudioSettings> {
   String _rateLabel(int r) => r % 1000 == 0 ? '${r ~/ 1000}' : (r / 1000).toStringAsFixed(1);
 
   String _ms(int frames, int rate) => (frames * 1000 / rate).toStringAsFixed(frames * 1000 / rate < 10 ? 1 : 0);
+
+  // The output from the platform's own list (#242): each device by type (and product name), the saved one kept while
+  // it is not connected, and the subtitle saying which one plays now.
+  Widget _platformOutput(AudioStatus? st) {
+    final saved = s.audioDeviceId.startsWith(platformChoicePrefix) ? s.audioDeviceId : '';
+    final present = choiceFor(saved, _outputs) != null;
+    final playing = st == null || !st.running ? null : choiceRouted(st.routedDeviceId, _outputs);
+    return settingDropdown<String>(
+      'audio.device',
+      saved,
+      [
+        ('', 'System default'),
+        for (final c in _outputs) (c.key, c.label),
+        if (saved.isNotEmpty && !present) (saved, '${s.audioDevice.isEmpty ? 'The saved device' : s.audioDevice} (not connected)'),
+      ],
+      (v) {
+        final c = choiceFor(v, _outputs);
+        if (v.isNotEmpty && c == null) return;  // the saved one, not connected: stays chosen
+        s.update((x) {
+          x.audioDeviceId = c?.key ?? '';
+          x.audioDevice = c?.label ?? '';
+        });
+      },
+      icon: Icons.speaker,
+      subtitle: [
+        if (playing != null) 'Playing on ${playing.label}' else 'Where the sound plays',
+        if (saved.isEmpty) 'the system default follows Android\'s route',
+        if (saved.isNotEmpty && !present) 'not connected: the default plays until it is back',
+        if (saved.isNotEmpty && present && playing != null && playing.key != saved) 'Android plays elsewhere for now',
+      ].join('; '),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -91,7 +138,7 @@ class _AudioSettingsState extends State<AudioSettings> {
                       '${st.exclusive ? ' · exclusive' : ''}${st.lowLatency ? ' · low-latency path' : ''}'
                       '${st.exclusive || st.lowLatency ? (st.modesReadBack ? '' : ' (asked)') : ''}'
                       '${st.fallback ? ' · the choice did not open, so the default plays' : ''}'),
-      settingDropdown<String>(
+      if (_outputs.isNotEmpty) _platformOutput(st) else settingDropdown<String>(
         'audio.device',
         current,
         [

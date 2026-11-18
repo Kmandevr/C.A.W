@@ -5,6 +5,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../../engine/audio_engine.dart';
+import '../../model/audio_devices.dart';
 import '../../model/audio_record.dart';
 import '../../model/latency_comp.dart' show PingSeries, pingSeriesProblem;
 import '../haptics.dart';
@@ -27,9 +28,51 @@ class _AudioInputSettingsState extends State<AudioInputSettings> {
 
   AudioRecorder get r => widget.recorder;
 
+  /// The platform's own inputs (#242: Android's, by type and name); empty where the backend lists them.
+  List<AudioChoice> _inputs = const [];
+  StreamSubscription<void>? _routeSub;
+
+  Future<void> _readInputs() async {
+    final lists = await r.state.latency.route.devices();
+    if (mounted) setState(() => _inputs = platformChoices(lists.inputs, input: true));
+  }
+
+  @override
+  void dispose() {
+    unawaited(_routeSub?.cancel());
+    super.dispose();
+  }
+
+  // The input from the platform's own list (#242), the saved one kept while it is not connected, and the subtitle
+  // saying which one records now (the engine's input status) and that a Bluetooth headset's mic is call quality.
+  Widget _platformInput() {
+    final p = r.prefs;
+    final saved = p.deviceId.startsWith(platformChoicePrefix) ? p.deviceId : '';
+    final chosen = choiceFor(saved, _inputs);
+    final status = r.io.inputStatus();
+    final routedId = (status['routed_device_id'] as num?)?.toInt() ?? 0;
+    final recording = status['running'] == true ? choiceRouted(routedId, _inputs) : null;
+    return settingDropdown<String>('audio.inputDevice', saved, [
+      ('', 'System default'),
+      for (final c in _inputs) (c.key, c.label),
+      if (saved.isNotEmpty && chosen == null) (saved, '${p.deviceName.isEmpty ? 'The saved input' : p.deviceName} (not connected)'),
+    ], (v) {
+      final c = choiceFor(v, _inputs);
+      if (v.isNotEmpty && c == null) return;
+      r.chooseInput(deviceId: c?.key ?? '', deviceName: c?.label ?? '');
+    }, icon: Icons.settings_input_component, subtitle: [
+      if (recording != null) 'Recording from ${recording.label}' else 'Where audio tracks record from',
+      if (saved.isEmpty) 'the system default follows Android\'s route',
+      if (saved.isNotEmpty && chosen == null) 'not connected: the default records until it is back',
+      if (chosen?.callQuality == true) 'a Bluetooth headset\'s mic is narrowband, as on a call',
+    ].join('; '));
+  }
+
   @override
   void initState() {
     super.initState();
+    unawaited(_readInputs().catchError((Object _) {}));
+    _routeSub = r.state.latency.route.changes.listen((_) => unawaited(_readInputs().catchError((Object _) {})));
     // The list opens the backend: off the UI isolate.
     r.io.inputDevices().then((d) {
       if (mounted) setState(() => _devices = d);
@@ -134,7 +177,7 @@ class _AudioInputSettingsState extends State<AudioInputSettings> {
                   ? 'On: the microphone is open for the armed and monitoring tracks'
                   : p.enabled ? 'On: the microphone opens only while a track is armed or monitoring'
                       : 'Off: arming a track turns it on'),
-      settingDropdown<String>('audio.inputDevice', current, [
+      if (_inputs.isNotEmpty) _platformInput() else settingDropdown<String>('audio.inputDevice', current, [
         ('', 'System default'),
         for (final d in list)
           if (d.name.isNotEmpty) (key(d), '${d.name.length > 25 ? '${d.name.substring(0, 24)}…' : d.name}'

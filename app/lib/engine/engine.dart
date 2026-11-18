@@ -255,8 +255,12 @@ class AudioStatus {
     this.requestedDevice = '',
     this.requestedFrames = 0,
     this.exclusiveRequested = false,
+    this.routedDeviceId = 0,
   });
   final bool running, exclusive, lowLatency, modesReadBack;
+
+  /// AAudio: the device the stream runs on (AudioDeviceInfo.getId()); 0 elsewhere or unknown (#242).
+  final int routedDeviceId;
   final String backend, device, deviceId;
   final int sampleRate, periodFrames, periods;
 
@@ -290,6 +294,7 @@ class AudioStatus {
         requestedDevice: j['requested_device'] as String? ?? '',
         requestedFrames: (j['requested_frames'] as num?)?.toInt() ?? 0,
         exclusiveRequested: j['exclusive_requested'] == true,
+        routedDeviceId: (j['routed_device_id'] as num?)?.toInt() ?? 0,
       );
 }
 

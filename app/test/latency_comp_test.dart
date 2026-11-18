@@ -36,6 +36,17 @@ class FakeRoute implements AudioRoute {
     return info;
   }
 
+  AudioDeviceLists lists = const AudioDeviceLists();
+
+  @override
+  Future<AudioDeviceLists> devices() async => lists;
+
+  /// The platform's devices change (a headset connects): the route may move too.
+  void connect(AudioDeviceLists to) {
+    lists = to;
+    _changes.add(null);
+  }
+
   @override
   Stream<void> get changes => _changes.stream;
 }

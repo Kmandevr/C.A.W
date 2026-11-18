@@ -81,8 +81,18 @@ AudioDeviceKind hintedKind(String engineKind, String name) {
   return k != null && k != AudioDeviceKind.unknown ? k : kindFromName(name);
 }
 
+/// The devices the platform lists itself, to choose from (#242): Android's outputs and inputs; empty where the
+/// engine's backend lists them instead (Windows, the desktop builds).
+class AudioDeviceLists {
+  const AudioDeviceLists({this.outputs = const [], this.inputs = const []});
+  final List<AudioEndpoint> outputs, inputs;
+}
+
 abstract class AudioRoute {
   Future<AudioRouteInfo> current(AudioRouteHint hint);
+
+  /// Every output and input the platform has now (none where it does not list them).
+  Future<AudioDeviceLists> devices();
 
   /// Fires when a device is plugged in, connected or removed (the route may have moved).
   Stream<void> get changes;
@@ -120,8 +130,8 @@ AudioDeviceKind kindFromName(String name) {
 /// speaker; [Assumption] the platform's ordinary media routing). An input is the built-in microphone unless the
 /// engine names another or a USB or wired headset is in: Android does not route media capture to a Bluetooth
 /// headset's microphone on its own.
-AudioRouteInfo pickAndroidRoute(Map<Object?, Object?> snap, AudioRouteHint hint) {
-  List<AudioEndpoint> list(Object? o) => [
+/// An Android snapshot's device list ({"id", "type", "name"} maps) as endpoints.
+List<AudioEndpoint> androidEndpoints(Object? o) => [
         if (o is List)
           for (final d in o)
             if (d is Map)
@@ -131,6 +141,9 @@ AudioRouteInfo pickAndroidRoute(Map<Object?, Object?> snap, AudioRouteHint hint)
                   platformType: (d['type'] as num?)?.toInt() ?? -1,
                   kind: androidDeviceKind((d['type'] as num?)?.toInt() ?? -1)),
       ];
+
+AudioRouteInfo pickAndroidRoute(Map<Object?, Object?> snap, AudioRouteHint hint) {
+  final list = androidEndpoints;
   final outputs = list(snap['outputs']), inputs = list(snap['inputs']), routed = list(snap['routed']);
   AudioEndpoint? byId(List<AudioEndpoint> l, int id) => id > 0 ? l.where((d) => d.id == id).firstOrNull : null;
   AudioEndpoint? firstOf(List<AudioEndpoint> l, List<AudioDeviceKind> order) {
@@ -170,6 +183,18 @@ class AndroidAudioRoute implements AudioRoute {
   }
 
   @override
+  Future<AudioDeviceLists> devices() async {
+    try {
+      final snap = await _channel.invokeMethod<Map<Object?, Object?>>('snapshot') ?? const {};
+      return AudioDeviceLists(outputs: androidEndpoints(snap['outputs']), inputs: androidEndpoints(snap['inputs']));
+    } on PlatformException {
+      return const AudioDeviceLists();
+    } on MissingPluginException {
+      return const AudioDeviceLists();
+    }
+  }
+
+  @override
   Stream<void> get changes => _events.receiveBroadcastStream().map((_) {}).handleError((Object _) {});
 }
 
@@ -183,6 +208,9 @@ class NamedAudioRoute implements AudioRoute {
   Future<AudioRouteInfo> current(AudioRouteHint hint) async => AudioRouteInfo(
       output: AudioEndpoint(name: hint.outputName, kind: hintedKind(hint.outputKind, hint.outputName)),
       input: AudioEndpoint(name: hint.inputName, kind: hintedKind(hint.inputKind, hint.inputName)));
+
+  @override
+  Future<AudioDeviceLists> devices() async => const AudioDeviceLists();
 
   @override
   Stream<void> get changes => const Stream.empty();

@@ -12,6 +12,7 @@ import '../engine/audio_engine.dart';
 import '../platform/mic_permission.dart';
 import 'app_state.dart';
 import 'audio_clips.dart';
+import 'audio_devices.dart';
 import 'audio_edit.dart';
 import 'latency_comp.dart';
 import 'project.dart';
@@ -98,6 +99,30 @@ class AudioRecorder extends ChangeNotifier {
     state.addListener(_onState);
     state.foreground.addListener(_onState);
     micBusy.addListener(notifyListeners);
+    _routeSub = state.latency.route.changes.listen((_) => unawaited(_deviceListChanged()));
+  }
+
+  StreamSubscription<void>? _routeSub;
+  String? _openedInputId;
+
+  /// The id the engine opens the chosen input by: a choice from the platform's own list (#242) by the id that
+  /// device has now ('' while it is not connected: the default records), any other saved id as it is.
+  Future<String> _inputDeviceId() async {
+    final key = prefs.deviceId;
+    if (!key.startsWith(platformChoicePrefix)) return key;
+    return engineDeviceId(key, platformChoices((await state.latency.route.devices()).inputs, input: true));
+  }
+
+  /// The name the engine looks a device up by, where the backend lists its own (a platform choice opens by its id).
+  String get _inputDeviceName => prefs.deviceId.startsWith(platformChoicePrefix) ? '' : prefs.deviceName;
+
+  // A device connected or went away while the input is open: a platform choice opens again where its id changed.
+  Future<void> _deviceListChanged() async {
+    if (_disposed || !inputOpen || !prefs.deviceId.startsWith(platformChoicePrefix) || _recording) return;
+    final id = await _inputDeviceId();
+    if (_disposed || id == _openedInputId || !inputOpen) return;
+    await _open();
+    notifyListeners();
   }
 
   static AudioRecorder? current;
@@ -180,8 +205,9 @@ class AudioRecorder extends ChangeNotifier {
   // Opens the engine's input (the permission is granted). True when it opened, or when only the microphone is busy
   // (it is tried again quietly); false, with [message], otherwise.
   Future<bool> _open() async {
-    final r = await io.configureInput(enabled: true, deviceId: prefs.deviceId, deviceName: prefs.deviceName,
-        channels: prefs.channels);
+    final id = await _inputDeviceId();
+    _openedInputId = id;
+    final r = await io.configureInput(enabled: true, deviceId: id, deviceName: _inputDeviceName, channels: prefs.channels);
     if (prefs.latencyOverride >= 0) io.setInputLatency(prefs.latencyOverride);
     _compensated = -1; // a reopened input: the round trip is worked out again
     unawaited(state.latency.refresh().then((_) => _applyLatency()));
@@ -263,8 +289,9 @@ class AudioRecorder extends ChangeNotifier {
       final silenced = state.foreground.value && await permission.inputSilenced();
       if (_disposed) return;
       if (engineBusy && retry && state.foreground.value && !_recording && !_starting) {
-        await io.configureInput(enabled: true, deviceId: prefs.deviceId, deviceName: prefs.deviceName,
-            channels: prefs.channels);
+        final id = await _inputDeviceId();
+        _openedInputId = id;
+        await io.configureInput(enabled: true, deviceId: id, deviceName: _inputDeviceName, channels: prefs.channels);
         if (_disposed) return;
         final again = io.inputStatus()['state'];
         micBusy.value = again != 'open' || silenced;
@@ -585,6 +612,7 @@ class AudioRecorder extends ChangeNotifier {
 
   @override
   void dispose() {
+    unawaited(_routeSub?.cancel());
     state.tick.removeListener(_poll);
     state.latency.removeListener(_applyLatency);
     state.removeListener(_onState);
