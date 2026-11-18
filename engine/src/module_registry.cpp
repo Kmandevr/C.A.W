@@ -551,6 +551,19 @@ bool ModuleRegistry::addInternal(const ModuleDescriptor& descriptor, ModuleFacto
     return true;
 }
 
+bool ModuleRegistry::replaceBuiltin(const ModuleDescriptor& descriptor, ModuleFactory factory) {
+    if (!factory || validateModuleDescriptor(descriptor) != ModuleValidation::Ok) return false;
+    for (ModuleRegistration& registration : registrations_)
+        if (registration.descriptor && registration.descriptor->id == descriptor.id) {
+            if (registration.component || registration.internal) return false;
+            registration.descriptor = &descriptor;
+            registration.factory = factory;
+            registration.destroy = &destroyWithDelete;
+            return true;
+        }
+    return add(descriptor, factory);
+}
+
 ModuleLoadResult ModuleRegistry::loadSharedLibrary(
     const std::string& path, std::string_view expectedId, NativeModuleTrust trust, bool replace,
     std::string_view legacySha256) {

@@ -304,11 +304,21 @@ const std::vector<BuiltinPreset>* mergedPresets(std::string_view id) {
     static const std::map<std::string, std::vector<BuiltinPreset>, std::less<>> all = [] {
         static std::deque<std::string> strings;  // the presets' ids, for the program's life
         std::map<std::string, std::vector<BuiltinPreset>, std::less<>> m;
-        for (const MergedDevice* d : mergedDevices()) m[std::string(d->id)];
+        // A reused id's own presets first (variant 0 is the old effect), then each old effect's, migrated.
+        for (const MergedDevice* d : mergedDevices()) {
+            std::vector<BuiltinPreset>& list = m[std::string(d->id)];
+            for (const BuiltinPreset& p : ownBuiltinPresets(d->id)) {
+                BuiltinPreset out = p;
+                bool named = false;
+                for (const auto& [k, v] : out.values) named = named || k == kVariantParam;
+                if (!named) out.values.emplace_back(kVariantParam, 0.0);
+                list.push_back(std::move(out));
+            }
+        }
         for (const LegacyEffect* e : legacyEffects()) {
             auto it = m.find(e->to);
             if (it == m.end()) continue;
-            for (const BuiltinPreset& p : builtinPresets(e->from)) {
+            for (const BuiltinPreset& p : ownBuiltinPresets(e->from)) {
                 ComponentSpec c;
                 c.id = std::string(e->from);
                 for (const auto& [k, v] : p.values) c.params.emplace_back(std::string(k), v);
