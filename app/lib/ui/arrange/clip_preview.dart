@@ -116,6 +116,13 @@ class ClipPictureCache {
     return _parsed[patternId] = p;
   }
 
+  /// The zoom level a preview at [stepW] pixels a step is recorded at: the nearest of eight levels an octave
+  /// (powers of 2^(1/8)), so the picture is stretched by at most 2^(1/16) (4.4%) to fit.
+  static double levelOf(double stepW) {
+    if (stepW <= 0 || !stepW.isFinite) return stepW;
+    return math.pow(2, (math.log(stepW) / math.ln2 * 8).round() / 8).toDouble();
+  }
+
   /// The picture of one cycle of the pattern, [stepW] px per step and [height] high: recorded once per key.
   ui.Picture picture(String patternId, ParsedPattern p, {required double stepW, required double height, required Color color,
       bool drums = false}) {
@@ -220,7 +227,10 @@ class MidiClipPreview extends ClipPreview {
     if (p.doc == null || p.doc!.notes.isEmpty || size.width <= 0) return;
     final h = size.height - top - 2;
     if (h <= 2) return;
-    final picture = cache.picture(patternId, p, stepW: stepW, height: h, color: color, drums: drums);
+    // Recorded at the nearest zoom level and stretched the rest of the way (at most 4.4%), so a zoom replays a few
+    // cached pictures instead of recording one per pattern every frame (owner, 2026-11-18: zooming smooth).
+    final level = ClipPictureCache.levelOf(stepW);
+    final picture = cache.picture(patternId, p, stepW: level, height: h, color: color, drums: drums);
     final loopLength = (loopSteps ?? 0) > 0 ? loopSteps! : p.lengthSteps;
     final cycle = loopLength * stepW;
     // A loop narrower than a pixel or so shows nothing a line could: its repeats aren't drawn one by one.
@@ -235,6 +245,7 @@ class MidiClipPreview extends ClipPreview {
         canvas.save();
         canvas.translate(x, top);
         if (cut) canvas.clipRect(Rect.fromLTWH(0, -top, cycle, size.height));
+        if (level != stepW) canvas.scale(stepW / level, 1);
         canvas.drawPicture(picture);
         canvas.restore();
         if (!first && x > 0 && cycle >= 8) canvas.drawLine(Offset(x, top), Offset(x, size.height - 2), edge);

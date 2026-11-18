@@ -82,7 +82,7 @@ void main() {
     final zoomRaster = await rasterMs(tester);
     await a.up();
     await b.up();
-    // The frame the pinch ends in: the lanes laid out once at the new zoom.
+    // The frames the pinch ends in: nothing to lay out again (it was laid out at its zoom all along).
     final release = await countFrames(tester, 2);
     await tester.pump(const Duration(seconds: 2));
     String ms(double v) => v.toStringAsFixed(2);
@@ -110,8 +110,9 @@ const _ceil = (
   playPainted: 720,
   scrollPainted: 450,
   verticalPainted: 0,
-  zoomBuilds: 6500,
-  zoomPainted: 8000,
+  // A zoom lays out at its zoom every frame (2026-11-18): every clip repaints at its new width.
+  zoomBuilds: 9000,
+  zoomPainted: 34000,
   playMs: 40.0,
   zoomMs: 200.0,
 );

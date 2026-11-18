@@ -6,6 +6,7 @@ updated: 2026-11-18
 
 # Log
 
+- 2026-11-18: smooth zoom (branch `smooth-zoom`, the owner on 1.0.5-alpha.2: "stretching and then jumping"): the cause was the time pinch drawing the lanes through a sideways `Transform` (text stretched) and laying them out at its end or past 0.6×/1.6× (the jump), and glides scrolling a frame after their zoom; every zoom now lays out at its zoom each frame and scrolls in that frame, with only the zoom's listeners building again (262 widgets a pinch frame on the bench project, was 1,096 for a layout per move), fading grid and ruler levels, and level-cached note previews (`test/smooth_zoom_test.dart`; [app](app.md), Arrange zoom; [performance](performance.md#frames-at-240-hz-2026-11-12)).
 - 2026-11-18: v1.0.5-alpha.2 published (PR #243, the #241 hotfix).
 - 2026-11-18: hotfix 1.0.5-alpha.2 prepared (#241): version, changelog; companion app decisions recorded (#239).
 - 2026-11-18: automation points drag on touch again (#241): the 28 px point target was a plain pan, which on touch needs 36 px (`kPanSlop`) while the timeline's scroll takes the finger at 18 px, so the scroll always won; it now takes its drag at the first touch (`EagerPan`, as the segment handles do), with a tap, double tap and hold told apart by movement. The focus view's Automation tab showed only a track's own volume and pan lanes (never its device lanes) in an editor of its own; it now lists the same lanes as under the track, edited with the Arrange lane row and the #230 picker. Widget tests drive real finger drags in the full arranger, zoomed and scrolled.

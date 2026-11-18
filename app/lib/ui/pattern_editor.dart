@@ -37,7 +37,7 @@ import 'motion.dart';
 import 'theme.dart';
 import 'widgets.dart';
 import 'arrange/edit_cues.dart';
-import 'arrange/ruler.dart' show LoopBand;
+import 'arrange/ruler.dart' show LoopBand, zoomFade;
 import 'arrange/track_color.dart';
 import 'clip_roll_parts.dart';
 import 'glass.dart';
@@ -4353,11 +4353,16 @@ class _RollPainter extends CustomPainter {
     final bar = beatsPerBar * 4.0;
     final t0 = scrollX / pxPerStep, t1 = (scrollX + w) / pxPerStep;
     final songBars = _songBars == null ? null : {for (final (at, _) in _barsIn(t0 - 1, t1 + 1)) (at * 1e6).round()};
+    // The finest lines (between the next coarser ones) fade in from 10 px apart, where the level changes, to 18 px
+    // (zoomFade), so a zoom never pops a level of lines; they keep a little strength so the cells a tap lands in
+    // stay visible (#228).
+    final fine = 0.3 + 0.7 * zoomFade(lineSteps * pxPerStep, 10 / 0.55);
     for (var t = (t0 / lineSteps).floor() * lineSteps; t <= t1; t += lineSteps) {
       final x = t * pxPerStep - scrollX;
       final isBar = songBars != null ? songBars.contains((t * 1e6).round()) : (t % bar).abs() < 1e-9;
       final isBeat = (t % 4).abs() < 1e-9;
-      final c = isBar ? Neon.dim : Neon.line, a = isBar || isBeat ? 1.0 : 0.45;
+      final coarse = ((t / (lineSteps * 2)).round() * lineSteps * 2 - t).abs() < 1e-9;
+      final c = isBar ? Neon.dim : Neon.line, a = isBar || isBeat ? 1.0 : 0.45 * (coarse ? 1 : fine);
       canvas.drawLine(Offset(x, 0), Offset(x, h), Paint()..color = c.withValues(alpha: (c.a * a * gridStrength).clamp(0.0, 1.0)));
     }
     // Past where the clip (or pattern) ends is shaded.
@@ -4515,20 +4520,27 @@ class _RollPainter extends CustomPainter {
     while (every * narrowest * pxPerStep < 28 && every < 1 << 20) {
       every *= 4;
     }
+    // The next finer labels fade in as they get room, as Arrange's ruler's do (zoomFade), so a zoom never pops them.
+    final finer = every ~/ 4;
+    final fade = finer >= 1 ? zoomFade(finer * narrowest * pxPerStep, 28) : 0.0;
+    final labelEvery = fade > 0 ? finer : every;
+    TextStyle labelStyle(bool major) =>
+        TextStyle(color: Neon.dim.withValues(alpha: Neon.dim.a * (major ? 1 : fade)), fontSize: 11);
     if (_songBars != null) {
       // Bars from the song's signatures (#207), numbered from the clip's first bar.
-      for (final (at, n) in _barsIn(t0, t1, every: every)) {
+      final majors = {for (final (at, _) in _barsIn(t0, t1, every: every)) at};
+      for (final (at, n) in _barsIn(t0, t1, every: labelEvery)) {
         final x = keyW + at * pxPerStep - scrollX;
         if (x < keyW || n < 1) continue;
-        ts.text = TextSpan(text: '$n', style: const TextStyle(color: Neon.dim, fontSize: 11));
+        ts.text = TextSpan(text: '$n', style: labelStyle(majors.contains(at)));
         ts.layout();
         ts.paint(canvas, Offset(x + 3, 3));
       }
     }
-    for (var b = (t0 / bar / every).floor() * every; _songBars == null && b * bar <= t1; b += every) {
+    for (var b = (t0 / bar / labelEvery).floor() * labelEvery; _songBars == null && b * bar <= t1; b += labelEvery) {
       final x = keyW + b * bar * pxPerStep - scrollX;
       if (x < keyW) continue;
-      ts.text = TextSpan(text: '${b + 1}', style: const TextStyle(color: Neon.dim, fontSize: 11));
+      ts.text = TextSpan(text: '${b + 1}', style: labelStyle(b % every == 0));
       ts.layout();
       ts.paint(canvas, Offset(x + 3, 3));
     }
