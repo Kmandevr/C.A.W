@@ -471,6 +471,150 @@ void main() {
       await tester.pump(const Duration(seconds: 2));
     });
 
+    /// The arranger's sideways scroll (the timeline) and its up-and-down one (the tracks).
+    ScrollPosition hScroll(WidgetTester tester) => tester.state<ScrollableState>(find.ancestor(
+        of: find.byKey(ValueKey('lane-row-$pan')),
+        matching: find.byWidgetPredicate((w) => w is Scrollable && w.axisDirection == AxisDirection.right)).first).position;
+
+    /// Zoomed in once and scrolled 90 px along, then where step [step] at height [f] of the pan lane is on screen now.
+    Future<Offset Function(double step, double f)> zoomedAndScrolled(WidgetTester tester) async {
+      await tester.tap(find.byKey(const ValueKey('arrange-zoom')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('Zoom in'));
+      await tester.pumpAndSettle();
+      hScroll(tester).jumpTo(90);
+      await tester.pumpAndSettle();
+      final row = tester.getRect(find.byKey(ValueKey('lane-row-$pan')));
+      final stepW = tester.widget<LaneRow>(find.byKey(ValueKey('lane-row-$pan'))).stepW;
+      expect(stepW, greaterThan(18), reason: 'zoomed in');
+      return (step, f) => Offset(row.left + step * stepW, row.top + 5 + (1 - f) * (row.height - 10));
+    }
+
+    /// A finger's drag as a phone sends it: down, then many small moves (each under the scroll's slop), then up.
+    Future<void> fingerDrag(WidgetTester tester, Offset from, Offset to, {int moves = 30}) async {
+      final g = await tester.startGesture(from, kind: PointerDeviceKind.touch);
+      await tester.pump(const Duration(milliseconds: 16));
+      for (var i = 1; i <= moves; i++) {
+        await g.moveTo(Offset.lerp(from, to, i / moves)!);
+        await tester.pump(const Duration(milliseconds: 16));
+      }
+      await g.up();
+      await tester.pump();
+    }
+
+    testWidgets('a finger drags a point in time and value, zoomed in and scrolled, without scrolling the view (#241)',
+        (tester) async {
+      await panLane(tester, [_p(0, 0), _p(12, 0), _p(64, 0)]);
+      s.arrangementSnapSteps = 4;
+      final at = await zoomedAndScrolled(tester);
+      final x0 = hScroll(tester).pixels;
+      expect(x0, 90);
+      // Right two bars' worth of steps less a bit, and up: snaps to the grid of 4.
+      await fingerDrag(tester, at(12, 0.5), at(19.2, 0.9));
+      expect(hScroll(tester).pixels, x0, reason: 'the point took the drag, not the timeline');
+      expect(pts()[1].step, 20, reason: 'it moved right, onto the arranger\'s snap (4 steps)');
+      expect(pts()[1].value, closeTo(0.8, 0.02), reason: 'and up, following the finger');
+      expect(s.undoAutomation(), isTrue);
+      expect((pts()[1].step, pts()[1].value), (12.0, 0.0), reason: 'the drag was one undo step');
+      await tester.pump(kDoubleTapTimeout);
+      // Straight down and left, each on its own: the up-and-down scroll doesn't take it either.
+      await fingerDrag(tester, at(12, 0.5), at(12, 0.1));
+      expect(pts()[1].value, closeTo(-0.8, 0.02));
+      expect(pts()[1].step, 12);
+      await tester.pump(kDoubleTapTimeout);
+      final b = at(12, 0.1);
+      await fingerDrag(tester, b, b - Offset(at(4, 0).dx - at(0, 0).dx, 0));
+      expect(pts()[1].step, 8);
+      expect(pts()[1].value, closeTo(-0.8, 0.02));
+      expect(hScroll(tester).pixels, x0);
+      await tester.pump(const Duration(seconds: 2));
+    });
+
+    testWidgets('Shift moves a dragged point a fifth as far, off the grid; a tap still selects it (#241)',
+        (tester) async {
+      await panLane(tester, [_p(0, 0), _p(12, 0), _p(64, 0)]);
+      s.arrangementSnapSteps = 4;
+      final at = await zoomedAndScrolled(tester);
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+      await fingerDrag(tester, at(12, 0.5), at(17, 0.5));
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+      expect(pts()[1].step, closeTo(13, 0.05), reason: 'five steps of finger, one of point, unsnapped');
+      await tester.pump(kDoubleTapTimeout);
+      // A tap (no move) changes nothing and leaves no undo step behind it: one undo still takes back the drag.
+      final before = pts()[1].step;
+      await tester.tapAt(at(before, 0.5));
+      await tester.pump(kDoubleTapTimeout);
+      expect(pts()[1].step, before);
+      expect(s.undoAutomation(), isTrue);
+      expect(pts()[1].step, 12);
+      await tester.pump(const Duration(seconds: 2));
+    });
+
+    testWidgets('a finger\'s drag off any point still scrolls the timeline (#241)', (tester) async {
+      await panLane(tester, [_p(0, 0), _p(12, 0), _p(64, 0)]);
+      final at = await zoomedAndScrolled(tester);
+      final x0 = hScroll(tester).pixels;
+      await fingerDrag(tester, at(30, 0.5), at(22, 0.5));
+      expect(hScroll(tester).pixels, greaterThan(x0 + 40), reason: 'empty lane: the view scrolls');
+      expect(pts().map((p) => (p.step, p.value)), [(0.0, 0.0), (12.0, 0.0), (64.0, 0.0)]);
+      await tester.pump(const Duration(seconds: 2));
+    });
+
+    testWidgets('the focus view\'s Automation tab shows and edits the lanes under the track, both ways (#241)',
+        (tester) async {
+      final mix = AutomationTarget('component', 'mix', layerId: 'a', component: 0);
+      s.addAutomationLane(keys(), 'pan');
+      keys().automation.single.points = [_p(0, 0), _p(400, 0), _p(800, 0)];
+      s.addLaneFor(keys(), mix);
+      s.setLanesShown(keys(), true);
+      await pumpArranger(tester);
+      sections.focusLayer('a');
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('focus-tab-automation')));
+      await tester.pumpAndSettle();
+      final tab = find.byKey(const ValueKey('automation-tab-a'));
+      // Every lane under the track, the device's parameter too, in the same order.
+      for (final key in [pan, mix.key]) {
+        expect(find.descendant(of: tab, matching: find.byKey(ValueKey('automation-tab-lane-$key'))), findsOneWidget);
+        expect(find.byKey(ValueKey('lane-row-$key')), findsOneWidget, reason: 'and under the track');
+      }
+      expect(find.descendant(of: tab, matching: find.text('CHORUS · MIX')), findsOneWidget);
+      // A finger drags the pan lane's middle point up in the tab (the whole song fits its width): the lane under the track has it.
+      final row = find.byKey(ValueKey('automation-tab-row-$pan'));
+      await tester.ensureVisible(row);
+      await tester.pumpAndSettle();
+      final r = tester.getRect(row);
+      final stepW = tester.widget<LaneRow>(row).stepW;
+      Offset at(double step, double f) => Offset(r.left + step * stepW, r.top + 5 + (1 - f) * (r.height - 10));
+      await fingerDrag(tester, at(400, 0.5), at(400, 0.9));
+      expect(pts()[1].value, closeTo(0.8, 0.03));
+      expect(identical(s.project.layers.first.automation.single.points, pts()), isTrue);
+      final arranged = tester.widget<LaneRow>(find.byKey(ValueKey('lane-row-$pan'))).lane;
+      expect(arranged.points[1].value, pts()[1].value, reason: 'the arranger\'s lane draws the same point');
+      // An edit under the track (a point added to the device's lane) shows in the tab's sliders.
+      final mixLane = s.project.automation.single;
+      final before = mixLane.points.length;
+      arranged.state.addProjectAutomationPoint(mixLane, 16, 0.9);
+      await tester.pumpAndSettle();
+      expect(mixLane.points.length, before + 1);
+      expect(tester.widget<LaneRow>(find.byKey(ValueKey('automation-tab-row-${mix.key}'))).lane.points.length,
+          before + 1);
+      // The tab's Automate is the arranger's picker: it adds a lane under the track.
+      final add = find.descendant(of: tab, matching: find.byKey(const ValueKey('lane-add-a')));
+      await tester.ensureVisible(add);
+      await tester.pumpAndSettle();
+      await tester.tap(add);
+      await tester.pumpAndSettle();
+      expect(find.text('CHORUS · 1'), findsOneWidget, reason: 'the #230 picker, grouped by device');
+      await tester.tap(find.text('Rate'));
+      await tester.pumpAndSettle();
+      final rate = AutomationTarget('component', 'rate', layerId: 'a', component: 0).key;
+      expect(find.byKey(ValueKey('lane-row-$rate')), findsOneWidget);
+      expect(find.descendant(of: tab, matching: find.byKey(ValueKey('automation-tab-lane-$rate'))), findsOneWidget);
+      expect(tester.takeException(), isNull);
+      await tester.pump(const Duration(seconds: 2));
+    });
+
     testWidgets('Delete, Ctrl+A and Ctrl+C work on the lane\'s focus', (tester) async {
       final at = await panLane(tester, [_p(0, 0), _p(8, 0.5), _p(64, 0)]);
       await tester.tapAt(at(8, 0.75), kind: PointerDeviceKind.mouse);

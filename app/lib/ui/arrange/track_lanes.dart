@@ -417,7 +417,8 @@ enum _Xform { move, scaleTop, scaleBottom, tiltLeft, tiltRight }
 
 /// One lane, edited where it is drawn (REAPER, UG 18.14–18.15, pp. 367–368: a click adds a point, a drag moves a
 /// point or a segment, Alt+click deletes a point). With the select tool (the default) a tap adds a point, a tap on a
-/// point selects it, a drag on a point moves it (the whole selection when it is in one), a double-tap on a point
+/// point selects it, a drag on a point moves it from the first touch (the whole selection when it is in one; the
+/// timeline's scroll never takes it, #241), a double-tap on a point
 /// deletes it, a hold on a point or a segment's handle opens its menu, and the handle in the middle of a segment
 /// drags the segment up or down, or bends it when dragged sideways (or with Alt or Ctrl). A long-press drag on empty
 /// space (a mouse: a drag) draws a selection box; its body moves the points, its top and bottom edges scale them
@@ -426,9 +427,14 @@ enum _Xform { move, scaleTop, scaleBottom, tiltLeft, tiltRight }
 /// one), a double-click adds a point or removes the one under it, a right-click opens a menu, Shift drags finely,
 /// and Delete, Ctrl+C, Ctrl+V and Ctrl+A work on the selection.
 class LaneRow extends StatefulWidget {
-  const LaneRow({super.key, required this.lane, required this.stepW, required this.width, this.tools = false});
+  const LaneRow({super.key, required this.lane, required this.stepW, required this.width, this.tools = false,
+      this.reveal = true});
   final ArrangeLane lane;
   final double stepW, width;
+
+  /// Whether Automate's request to show this lane scrolls this row into view (the arranger's; the focus view's
+  /// Automation tab draws the same lane again and leaves the request to it).
+  final bool reveal;
 
   /// Whether the tool row's tools apply (the arranger's lanes; the roll's clip lanes keep the select tool).
   final bool tools;
@@ -469,10 +475,13 @@ class _LaneRowState extends State<LaneRow> {
   double _bend0 = 0;
   Offset _segMoved = Offset.zero;
 
-  // A hold on a point: whether it has moved (then it drags the point; where the finger was), else its menu opens on
-  // release.
-  bool _held = false;
-  Offset _holdLast = Offset.zero;
+  // A press on a point: how far it has moved, whether that made it a drag (past [_pressSlop]: a finger's tap jitters),
+  // whether it was held still long enough for the point's menu (opened on release), and where it went down.
+  Offset _pressMoved = Offset.zero;
+  bool _pressDragging = false, _pressHeld = false;
+  double _pressSlop = 6;
+  Offset _pressAt = Offset.zero;
+  Timer? _pressHold;
 
   // A hold on a segment's handle (its menu, after a still half second) while its eager drag waits.
   Timer? _segHold;
@@ -496,6 +505,7 @@ class _LaneRowState extends State<LaneRow> {
     if (widget.tools) laneToolOf(lane.state).removeListener(_toolChanged);
     lane.state.automationReveal.removeListener(_reveal);
     _segHold?.cancel();
+    _pressHold?.cancel();
     _keys.dispose();
     super.dispose();
   }
@@ -508,7 +518,7 @@ class _LaneRowState extends State<LaneRow> {
 
   /// Automate asked for this lane: once it is laid out, the view scrolls it into the middle (vertically).
   void _reveal() {
-    if (lane.state.automationReveal.value != lane.key || lane.clip != null) return;
+    if (!widget.reveal || lane.state.automationReveal.value != lane.key || lane.clip != null) return;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || lane.state.automationReveal.value != lane.key) return;
       lane.state.automationReveal.value = null;
@@ -668,6 +678,44 @@ class _LaneRowState extends State<LaneRow> {
     if (index >= lane.points.length) return;
     _grab += delta * _rate;
     lane.move(index, lane.snap(_step(_grab.dx)), _value(_grab.dy));
+  }
+
+  void _pressDown(Offset global) {
+    _pressMoved = Offset.zero;
+    _pressDragging = _pressHeld = false;
+    _pressAt = global;
+    _pressHold?.cancel();
+    _pressHold = Timer(kLongPressTimeout, () {
+      if (!mounted || _pressDragging) return;
+      _pressHeld = true;
+      Haptics.tap();
+    });
+  }
+
+  /// The press moved: past the slop it drags the point, caught up to the finger at once (no lag, no jump later).
+  void _pressMove(int index, Offset delta) {
+    if (_pressDragging) return _pointMove(index, delta);
+    _pressMoved += delta;
+    if (_pressMoved.distance < _pressSlop || index >= lane.points.length) return;
+    _pressDragging = true;
+    _pressHold?.cancel();
+    _pointDrag(index);
+    _pointMove(index, _pressMoved);
+  }
+
+  void _pressUp(int index, {bool cancelled = false}) {
+    _pressHold?.cancel();
+    if (_pressDragging) {
+      _pressDragging = false;
+      return _end();
+    }
+    if (cancelled || index >= lane.points.length) return;
+    if (_pressHeld) {
+      _pressHeld = false;
+      _menu(_pressAt, point: index);
+    } else {
+      _clickPoint(index);
+    }
   }
 
   void _end() {
@@ -1039,45 +1087,25 @@ class _LaneRowState extends State<LaneRow> {
             color: Neon.yellow.withValues(alpha: 0.06),
             border: Border.all(color: Neon.yellow.withValues(alpha: 0.7)),
             borderRadius: BorderRadius.circular(3)))))),
-      // Each point: a 28 px target around its 8 px dot.
+      // Each point: a 28 px target around its 8 px dot. Its drag is taken at the first touch ([EagerPan]), so the
+      // timeline's scroll can't win it (#241); a press that doesn't move is a tap, or, held, the point's menu.
       if (select)
         for (var i = 0; i < points.length; i++)
           Positioned(left: _x(points[i].step) - 14, top: _y(points[i].value) - 14, width: 28, height: 28,
-            child: Listener(onPointerDown: (e) => _clicks.down(e, target: i), onPointerUp: _clicks.up,
-              child: GestureDetector(key: ValueKey('lane-point-${lane.key}-$i'), behavior: HitTestBehavior.opaque,
-              dragStartBehavior: DragStartBehavior.down,
-              onTap: () => _clickPoint(i),
-              onSecondaryTapUp: (d) => _menu(d.globalPosition, point: i),
-              onPanStart: (_) => _pointDrag(i),
-              onPanUpdate: (d) => _pointMove(i, d.delta),
-              onPanEnd: (_) => _end(),
-              onPanCancel: _end,
-              // Held: its menu when let go where it was; held and moved, it moves.
-              onLongPressStart: (_) {
-                _held = false;
-                _holdLast = Offset.zero;
-                Haptics.tap();
-              },
-              onLongPressMoveUpdate: (d) {
-                if (!_held) {
-                  if (d.offsetFromOrigin.distance < 6) return;
-                  _held = true;
-                  _pointDrag(i);
-                }
-                _pointMove(i, d.offsetFromOrigin - _holdLast);
-                _holdLast = d.offsetFromOrigin;
-              },
-              onLongPressEnd: (d) {
-                if (_held) {
-                  _held = false;
-                  _holdLast = Offset.zero;
-                  _end();
-                } else {
-                  _menu(d.globalPosition, point: i);
-                }
-              },
-              child: MouseRegion(cursor: SystemMouseCursors.move,
-                  child: Tooltip(message: lane.label(points[i].value), child: const SizedBox.expand()))))),
+            child: GestureDetector(onSecondaryTapUp: (d) => _menu(d.globalPosition, point: i),
+              child: Listener(onPointerDown: (e) => _clicks.down(e, target: i), onPointerUp: _clicks.up,
+              child: RawGestureDetector(key: ValueKey('lane-point-${lane.key}-$i'), behavior: HitTestBehavior.opaque,
+                gestures: {
+                  EagerPan: GestureRecognizerFactoryWithHandlers<EagerPan>(EagerPan.new, (r) => r
+                    ..dragStartBehavior = DragStartBehavior.down
+                    ..onDown = ((d) => _pressDown(d.globalPosition))
+                    ..onStart = ((d) => _pressSlop = d.kind == null || isMousePointer(d.kind!) ? 1 : 6)
+                    ..onUpdate = ((d) => _pressMove(i, d.delta))
+                    ..onEnd = ((_) => _pressUp(i))
+                    ..onCancel = (() => _pressUp(i, cancelled: true))),
+                },
+                child: MouseRegion(cursor: SystemMouseCursors.move,
+                    child: Tooltip(message: lane.label(points[i].value), child: const SizedBox.expand())))))),
       // The box's handles: the top and bottom edges scale the points' values, the corners tilt them.
       if (sel != null) ...[
         for (final (kind, dx, dy) in [

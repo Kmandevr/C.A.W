@@ -1,4 +1,4 @@
-// The smallest device period a backend allows (#237), worked out from the numbers it reports, for Low latency on WASAPI.
+// Device periods from the numbers a backend reports: the smallest WASAPI allows (#237, Low latency) and the frames an output really queues (#241).
 #pragma once
 
 #include <cstdint>
@@ -34,6 +34,24 @@ inline uint32_t exclusivePeriodFrames(int64_t hns, uint32_t rate, uint32_t floor
     const uint64_t frames = (static_cast<uint64_t>(hns) * rate + 9'999'999) / 10'000'000;
     if (frames > 1u << 20) return 0;
     return frames < floor ? floor : static_cast<uint32_t>(frames);
+}
+
+// The frames the output queues ahead of the speaker, for the latency figures where no timestamp is known and the
+// periods the status reports: AAudio's buffer size (AAudioStream_getBufferSizeInFrames, what is queued) where it is
+// known (> 0), else every period the backend reports. On AAudio miniaudio's periods are the stream's whole buffer
+// capacity ([Fact] miniaudio 0.11.25 source, ma_device_init_by_type__aaudio: periodCount = capacity / frames per
+// callback, or one period of the capacity), of which a stream queues only its buffer size, so counting the
+// capacity overstated the delay at the fixed 1024-frame size (#241).
+inline int64_t queuedOutputFrames(int32_t aaudioBufferFrames, uint32_t period, uint32_t periods) noexcept {
+    if (aaudioBufferFrames > 0) return aaudioBufferFrames;
+    return static_cast<int64_t>(period) * (periods > 0 ? periods : 1);
+}
+
+// The queue in whole callbacks of [callbackFrames] (at least 1), rounded; [periods] when the callback is unknown.
+inline int32_t queuedPeriods(int64_t queued, int32_t callbackFrames, uint32_t periods) noexcept {
+    if (callbackFrames <= 0 || queued <= 0) return static_cast<int32_t>(periods);
+    const int64_t n = (queued + callbackFrames / 2) / callbackFrames;
+    return static_cast<int32_t>(n > 1 ? n : 1);
 }
 
 }  // namespace caw

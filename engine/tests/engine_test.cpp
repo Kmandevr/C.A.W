@@ -986,6 +986,22 @@ TEST(a_new_devices_first_callbacks_stay_out_of_the_cpu_meter) {
     CHECK(e.sheddingStats().shed > uint64_t{0});
 }
 
+// #241: the output's latency without a timestamp counts what AAudio queues, its buffer size, not miniaudio's periods,
+// which on AAudio are the stream's whole capacity: at the fixed 1024-frame size a 4096-frame capacity read as 4
+// periods (85 ms at 48 kHz) where the stream queued 2048 (43 ms). Elsewhere (no AAudio buffer size) every period.
+TEST(the_output_latency_counts_the_frames_queued_not_the_buffer_capacity) {
+    using caw::queuedOutputFrames;
+    using caw::queuedPeriods;
+    CHECK_EQ(queuedOutputFrames(2048, 1024, 4), int64_t{2048});  // fixed 1024, capacity 4096: the queue, not 4096
+    CHECK_EQ(queuedOutputFrames(384, 1952, 1), int64_t{384});    // AAudio's own sizes: one capacity-long period
+    CHECK_EQ(queuedOutputFrames(0, 480, 3), int64_t{1440});      // WASAPI, ALSA: every period
+    CHECK_EQ(queuedOutputFrames(0, 480, 0), int64_t{480});
+    CHECK_EQ(queuedPeriods(2048, 1024, 4), 2);                   // the status's periods follow the queue
+    CHECK_EQ(queuedPeriods(384, 192, 1), 2);
+    CHECK_EQ(queuedPeriods(300, 1024, 4), 1);                    // never below one callback
+    CHECK_EQ(queuedPeriods(2048, 0, 4), 4);                      // no callback size: the backend's periods
+}
+
 // #237: Low latency's smallest WASAPI period (device_period.h): a multiple of the shared engine's fundamental from
 // its min to its max, never under the 128-frame floor; an exclusive minimum device period rounded up to frames.
 TEST(the_smallest_device_period_is_a_legal_one_above_the_floor) {

@@ -69,6 +69,30 @@ void main() {
     expect(builds, ['org.me.delay', 'org.me.fuzz']);  // the loaded one wasn't rebuilt
   });
 
+  test('at launch only builds made already load, and the count goes up as each is done', () async {
+    final built = component('delay', 'int a;'), unbuilt = component('verb', 'int v;'), theirs = component('fuzz', 'int b;');
+    for (final c in [built, unbuilt]) {
+      trust.markAuthored(c);
+    }
+    // A build of the delay from an earlier run.
+    await manager.prepare(ProjectDoc(id: 'p0', name: 'P0', bpm: 120, cppComponents: [built]));
+    final cached = NativeComponentManager(trust: trust, cacheFile: manager.cacheFile, build: manager.build,
+        load: manager.load);
+    builds.clear();
+    loads.clear();
+    final counts = <int>[];
+    final project = ProjectDoc(id: 'p', name: 'P', bpm: 120, cppComponents: [built, unbuilt, theirs]);
+    final status = await cached.prepare(project, buildMissing: false, onProgress: counts.add);
+    expect(builds, isEmpty); // the verb is built once the app is open
+    expect(loads.map((l) => l.id), ['org.me.delay']);
+    expect(status.loaded, ['org.me.delay']);
+    expect(counts, [1, 2, 3]);
+    // Afterwards the usual pass builds what was left and doesn't load the delay again.
+    await cached.prepare(project);
+    expect(builds, ['org.me.verb']);
+    expect(loads.map((l) => l.id), ['org.me.delay', 'org.me.verb']);
+  });
+
   // Security review (2026-11-13): revoking trust stops the plug-in benchmark at once.
   test('a trusted component loads and is benchable; blocked or forgotten, it is neither listed nor run', () async {
     final theirs = component('fuzz', 'int b;');

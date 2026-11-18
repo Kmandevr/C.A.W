@@ -88,12 +88,18 @@ class NativeComponentManager {
     _loadedLibraryKey.remove(id);
   }
 
-  Future<NativeComponentsStatus> prepare(ProjectDoc project) async {
+  /// Gets [project]'s components playable. [buildMissing] false loads only builds made already (launch: a build
+  /// waits until the app is open); [onProgress] hears how many of the components with an id are done so far.
+  Future<NativeComponentsStatus> prepare(ProjectDoc project,
+      {bool buildMissing = true, void Function(int done)? onProgress}) async {
     final status = NativeComponentsStatus();
     final cache = await _readCache();
+    var done = 0;
     for (final component in project.cppComponents) {
       final id = component.componentId;
       if (id.isEmpty) continue;
+      if (done > 0) onProgress?.call(done);
+      done++;
       final fingerprint = NativeTrustStore.sourceFingerprint(component);
       final choice = trust.decide(id, fingerprint);
       if (choice == null) {
@@ -119,6 +125,7 @@ class NativeComponentManager {
         artifact = null;
       }
       if (artifact == null || !await File(artifact).exists()) {
+        if (!buildMissing) continue;
         final result = await build(project, component);
         if (!result.success || result.artifactPath == null) {
           status.buildFailed[id] = result;
@@ -146,6 +153,7 @@ class NativeComponentManager {
         status.loadFailed[id] = loaded.error;
       }
     }
+    if (done > 0) onProgress?.call(done);
     return status;
   }
 

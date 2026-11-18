@@ -3,6 +3,27 @@
 What changed in each C.A.W release, newest first. C.A.W is in open alpha: expect rough edges and unexpected issues.
 Versions keep the `-alpha.N` suffix until the official release.
 
+## 1.0.5-alpha.2 (2026-11-18)
+
+A hotfix: smoother scrolling, the playhead in time with the sound, a smoother start, and fixes that made the app hard to use.
+
+### Fixed
+- **Scrolling in Arrange:**
+  - no more hitch every couple of screens;
+  - no slowdown near the end of the song.
+- **The playhead and meters** move evenly and match what you hear. They no longer step every few seconds or lag a frame behind.
+- **Automatic latency** no longer over-estimates on Bluetooth headphones. A saved offset was being counted twice, and the engine counted its whole buffer rather than what was queued. The Latency page now shows the breakdown: system, buffer and your offset.
+- **Automation points can be dragged** with a finger, in time and value, instead of the timeline scrolling.
+- **The Automation tab** shows and edits the same lanes as the ones under the track, including effect and instrument parameters.
+- **Settings:** a long choice such as an audio device's name no longer squeezes its title into one letter per line.
+- **The startup animation** runs smoothly. The app now loads in the background and builds only when the animation is done.
+- **The loading steps** tick only when their work is done, with real counts ("Loading C++ components 2/5").
+
+### Improved
+- **Latency slider:** a dot sweeps to a line and flashes on each click, so you can line the flash up with the sound. With the song stopped, it plays its own click loop.
+- **Bluetooth:** **Best quality** explains how the phone and headphones choose their codec and sample rate, and opens Developer options for you.
+- **Engine diagnostics** shows the audio clock while playing (the real rate, late callbacks, dropouts and the microphone's stream), with a Copy button.
+
 ## 1.0.5-alpha.1 (2026-11-17)
 
 Recording, editing and timing: comping, freeze and bounce, better automation, a sample library, and snappier playback.

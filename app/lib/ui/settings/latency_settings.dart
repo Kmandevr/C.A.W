@@ -175,7 +175,8 @@ class _LatencyPageState extends State<LatencyPage> {
       settingHeading(output ? 'Output' : 'Input'),
       _action(output ? 'audio.latencyOutputDevice' : 'audio.latencyInputDevice', output ? 'Output now' : 'Input now',
           icon: dev.kind.isBluetooth ? Icons.bluetooth : output ? Icons.speaker_outlined : Icons.mic_none,
-          subtitle: '${dev.label} · system ${_ms(platform)} (${_platformLabel(source)})',
+          subtitle: output ? '${dev.label} · ${latencyBreakdown(widget.state)}'
+              : '${dev.label} · system ${_ms(platform)} (${_platformLabel(source)})',
           trailing: AnimatedSwitcher(
             duration: Motion.fade(Motion.standard, level),
             child: Text(_ms(total), key: ValueKey(total.round()),

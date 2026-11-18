@@ -1,6 +1,7 @@
 // What follows the audio on screen (playhead, meters, clip highlights, the piano-roll cursor, the video preview) is
 // drawn for the moment its frame lights up, a little early (owner, 2026-11-17, #236: "lean early"): the frame's
 // display latency plus a small early bias, on top of the output latency the playhead already subtracts.
+import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 /// The early bias in µs: what the screen shows leads what is heard by this much (owner, 2026-11-17: 0 to 10 ms,
@@ -53,3 +54,36 @@ int meterRenderUs({required int nowUs, required int leadUs, required int outputL
 /// an interval on, so the error between reads is as early as it is late, plus the lead.
 int heldDrawUs({required int nowUs, required int leadUs, required int readIntervalUs}) =>
     nowUs + leadUs + readIntervalUs ~/ 2;
+
+/// A frame's start on the app's clock: the vsync that began it, not whenever its build got to run (#241). A playhead
+/// worked out from the build's own time moves on by however late the UI thread started the frame, so at 120 Hz a
+/// late frame jumps it ahead and the next lags; from the vsync it moves an even step a frame, and the display
+/// latency ([displayFrames]) is counted from there.
+///
+/// The vsync time is on the engine's clock, not the app's: the offset between them is the smallest gap seen (a
+/// build never starts before its vsync), allowed to creep up by [creepUs] a frame so a slow drift between the clocks
+/// is followed.
+class FrameTime {
+  /// How far the offset may rise each frame.
+  static const creepUs = 20;
+
+  /// A vsync further back than this is not this frame's (a call between frames): now is used.
+  static const staleUs = 50000;
+
+  int? _offset; // app clock minus vsync clock
+  int? _vsync, _start; // the last frame's vsync and its start, for every call in that frame
+
+  /// The frame's start for a call at [nowUs] (the app's clock) in a frame whose vsync came at [vsyncUs] (its own
+  /// clock; null outside a frame). Every call in one frame gets the same answer.
+  int at({required int nowUs, required int? vsyncUs}) {
+    if (vsyncUs == null) return nowUs;
+    if (vsyncUs == _vsync) return _start!;
+    final gap = nowUs - vsyncUs;
+    final o = _offset;
+    final next = o == null ? gap : math.min(o + creepUs, gap);
+    _offset = next;
+    final t = vsyncUs + next;
+    _vsync = vsyncUs;
+    return _start = nowUs - t > staleUs || t > nowUs ? nowUs : t;
+  }
+}

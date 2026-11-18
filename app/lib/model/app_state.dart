@@ -5,6 +5,7 @@ import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/scheduler.dart';
 
 import '../engine/engine.dart';
 import '../engine/execution.dart';
@@ -84,6 +85,7 @@ class AppState extends ChangeNotifier implements StressHost {
             ? null : File('${this.settings.dir!.path}${Platform.pathSeparator}latency.json')),
         route: audioRoute ?? platformAudioRoute())
       ..outputName = (() => engine?.audioStatus().device ?? '')
+      ..callbackFrames = (() => engine?.audioStatus().periodFrames ?? 0)
       ..inputName = (() => (engine?.audioStatusJson()['input'] as Map?)?['device'] as String? ?? '')
       ..addListener(_latencyChanged);
     _light = this.settings.lightMode;
@@ -407,11 +409,12 @@ class AppState extends ChangeNotifier implements StressHost {
   /// The loading steps as [init] runs them, for the startup screen.
   final StartupProgress startup = StartupProgress();
 
-  /// How [init] reads the platform's thermal and power signals and makes the engine (tests replace them).
+  /// How [init] reads the platform's thermal and power signals and makes the engine (tests replace them). The engine
+  /// is made on a background isolate (loading the library and building the engine take tens of milliseconds).
   @visibleForTesting
   Future<EnginePressure> Function() readPressure = ResourceSignals.read;
   @visibleForTesting
-  Engine Function(int sampleRate) createEngine = (rate) => Engine.create(sampleRate: rate);
+  Future<Engine> Function(int sampleRate) createEngine = (rate) => Engine.createOffThread(sampleRate: rate);
   String? lastProjectId;
   List<ProjectSummary> savedProjects = const [];
 
@@ -506,12 +509,12 @@ class AppState extends ChangeNotifier implements StressHost {
         EngineExecutionPolicy.updateRuntimeSignals(pressure: EnginePressure.unknown);
       }
       try {
-        engine = createEngine(settings.sampleRate);
+        engine = await createEngine(settings.sampleRate);
         applyAudioSettings();  // before the device opens, so it opens on the chosen device at the chosen size
         hardwareProfile = EngineExecutionPolicy.hardwareProfile;
         auditionPlan = EngineExecutionPolicy.plan(workload: EngineWorkload.interactiveAudition);
         await _audioConfigured;  // the choice is in the engine before the device opens (no reopen right after)
-        _openAudio(engine!);
+        await _openAudioOffThread(engine!);  // opening the device can take tens of milliseconds
         startup.finish(StartupStep.engine);
       } catch (e) {
         engineError = 'The sound engine did not load: $e';
@@ -555,22 +558,11 @@ class AppState extends ChangeNotifier implements StressHost {
   /// and Open are in the project menu.
   Future<void> openStorage(ProjectStorage storage) async {
     _storage = storage;
-    startup.begin(StartupStep.components);
-    await loadDefaultProject();
-    final e = engine;
-    var componentsOk = true;
-    if (e != null) {
-      try {
-        nativeComponents = await deviceNativeComponentManager(e, storage);
-      } catch (_) {
-        nativeComponents = null;  // no compiler on this device: projects play without their C++ effects
-        componentsOk = false;
-      }
-    }
-    startup.finish(StartupStep.components, ok: e != null && componentsOk);
+    // Each step begins when its work begins and ends when that work has ended (the startup screen shows them).
     startup.begin(StartupStep.projects);
     lastProjectId = await storage.lastOpened();
     savedProjects = await listProjects();
+    if (savedProjects.isNotEmpty) startup.count(StartupStep.projects, savedProjects.length);
     final id = lastProjectId;
     ProjectDoc? last;
     NewerProjectFormat? newer;
@@ -581,8 +573,37 @@ class AppState extends ChangeNotifier implements StressHost {
     }
     // A damaged file reads as null too; it stays on disk, and the app says so instead of replacing it silently.
     final damaged = newer == null && id != null && last == null && await storage.has(id);
-    startup.finish(StartupStep.projects);
+    await loadDefaultProject(); // the bundled default: what opens without a last project, and the fallback
+    await _yieldToFrames();
     final opening = last ?? starterProject();
+    startup.finish(StartupStep.projects);
+    await _yieldToFrames();
+    // The C++ components the opening project uses that are built already, loaded one by one off the UI isolate
+    // ("3/7"). One that needs building, or a Trust choice, waits until the app is open (prepareNativeComponents).
+    startup.begin(StartupStep.components);
+    final e = engine;
+    var componentsOk = true;
+    if (e != null) {
+      try {
+        nativeComponents = await deviceNativeComponentManager(e, storage);
+      } catch (_) {
+        nativeComponents = null;  // no compiler on this device: projects play without their C++ effects
+        componentsOk = false;
+      }
+      final manager = nativeComponents;
+      final total = opening.cppComponents.where((c) => c.componentId.isNotEmpty).length;
+      if (manager != null && total > 0) {
+        startup.count(StartupStep.components, 0, total);
+        try {
+          final status = await manager.prepare(opening,
+              buildMissing: false, onProgress: (done) => startup.count(StartupStep.components, done, total));
+          componentsOk = status.loadFailed.isEmpty;
+        } catch (_) {
+          componentsOk = false; // the project still opens; prepareNativeComponents tries again and says why
+        }
+      }
+    }
+    startup.finish(StartupStep.components, ok: e != null && componentsOk);
     startup.begin(StartupStep.project, project: opening.name);
     starting = false;
     String? error = damaged ? 'The last project could not be read, so the default project opened instead. '
@@ -1306,13 +1327,26 @@ class AppState extends ChangeNotifier implements StressHost {
 
   /// [playheadClock] now: where to draw the playhead in this frame (for the moment it lights up, [visualLeadUs]).
   double get smoothPlayheadStep =>
-      meters.playing && playheadClock.playing ? playheadClock.at(nowUs + visualLeadUs) : playheadStep;
+      meters.playing && playheadClock.playing ? playheadClock.at(drawUs + visualLeadUs) : playheadStep;
 
   /// The playhead for something drawn only on the engine's reads (the piano roll under Smooth follow): where the
   /// line is half a read interval on, plus the lead, so it is as early as late between reads.
   double get heldPlayheadStep => meters.playing && playheadClock.playing
-      ? playheadClock.at(heldDrawUs(nowUs: nowUs, leadUs: visualLeadUs, readIntervalUs: _poller.interval.inMicroseconds))
+      ? playheadClock.at(heldDrawUs(nowUs: drawUs, leadUs: visualLeadUs, readIntervalUs: _poller.interval.inMicroseconds))
       : playheadStep;
+
+  final FrameTime _frameTime = FrameTime();
+
+  /// The moment this frame is drawn for ([FrameTime]): its vsync on [nowUs]'s clock inside a frame, else now. Tests
+  /// with their own clock get their clock (their frames' times are not on it).
+  int get drawUs {
+    final now = nowUs;
+    if (!identical(_clockUs, _monotonicUs)) return now;
+    final b = SchedulerBinding.instance;
+    final inFrame = b.schedulerPhase == SchedulerPhase.transientCallbacks ||
+        b.schedulerPhase == SchedulerPhase.midFrameMicrotasks || b.schedulerPhase == SchedulerPhase.persistentCallbacks;
+    return _frameTime.at(nowUs: now, vsyncUs: inFrame ? b.currentSystemFrameTimeStamp.inMicroseconds : null);
+  }
 
   // Hands the read just taken to [playheadClock], over the range [heardStep] wraps in.
   void _readPlayhead() {
@@ -1320,8 +1354,25 @@ class AppState extends ChangeNotifier implements StressHost {
     final (from, to) = p.loopsRange
         ? (p.loopStartSteps.toDouble(), p.loopEndSteps.toDouble())
         : (0.0, p.engineLoopSteps.toDouble());
+    // The step rendered at this very moment (caw_engine_position_at on the MIDI clock, worked out from the last
+    // callback's start) rather than at the last callback's end: a read then lags by however long ago that callback
+    // ran, up to a whole callback (21 ms at 1024 frames), a jitter the line would show (#241).
+    var step = playheadStep;
+    final e = engine;
+    final m = meters;
+    final rate = latency.device.sampleRate;
+    if (e != null && m.playing && m.loopLength > 0 && rate > 0) {
+      final at = e.positionAt(e.midiClockNs);
+      if (at >= 0) {
+        // How far now lies from the read's own position (its callback's end), wrapped to the nearest; a loop
+        // range's wrap between them reads far off and is left as it was.
+        var d = (at - m.position) % m.loopLength;
+        if (d > m.loopLength / 2) d -= m.loopLength;
+        if (d.abs() < rate / 10) step = heardStep(meterStep(m) + d / rate * project.bpm / 15);
+      }
+    }
     playheadClock.read(
-        step: playheadStep,
+        step: step,
         atUs: nowUs,
         playing: meters.playing && meters.loopLength > 0,
         stepsPerSecond: p.bpm / 15,
@@ -1414,6 +1465,21 @@ class AppState extends ChangeNotifier implements StressHost {
     if (_stressSuspended) return 'The Benchmark is running'; // its own engine has the device
     final error = e.startAudio();
     if (error != null) return audioError = error;
+    _audioOpened(e);
+    return null;
+  }
+
+  /// [_openAudio] with the device opened on a background isolate (launch: the UI keeps drawing meanwhile).
+  Future<String?> _openAudioOffThread(Engine e) async {
+    if (_stressSuspended) return 'The Benchmark is running';
+    final error = await e.startAudioOffThread();
+    if (error != null) return audioError = error;
+    _audioOpened(e);
+    return null;
+  }
+
+  // The device has opened: its latency and whether it fell back to the default.
+  void _audioOpened(Engine e) {
     latency.readDevice = e.audioLatency;
     _latencyReadUs = nowUs;
     unawaited(latency.refresh());
@@ -1425,8 +1491,10 @@ class AppState extends ChangeNotifier implements StressHost {
     } else {
       audioError = null;
     }
-    return null;
   }
+
+  /// Lets the frames waiting to be drawn go first (launch work runs between the startup reveal's frames).
+  static Future<void> _yieldToFrames() => Future<void>.delayed(Duration.zero);
 
   // ---------- patterns (Build) ----------
 

@@ -200,11 +200,18 @@ abstract class BluetoothSettings {
   /// Opens it; false when it could not.
   Future<bool> open();
 
+  /// Opens Developer options (where the user picks the Bluetooth codec and its rate; no app can).
+  Future<DeveloperOptions> openDeveloperOptions();
+
   /// The app's (tests swap it).
   static BluetoothSettings current = Platform.isAndroid ? AndroidBluetoothSettings() : const NoBluetoothSettings();
 }
 
-/// Android: `Settings.ACTION_BLUETOOTH_SETTINGS` through "caw/audio_route" (AudioRoute.kt).
+/// What opening Developer options did: opened, not turned on on this phone (nothing opened), or failed.
+enum DeveloperOptions { opened, off, failed }
+
+/// Android: `Settings.ACTION_BLUETOOTH_SETTINGS` and `ACTION_APPLICATION_DEVELOPMENT_SETTINGS` through
+/// "caw/audio_route" (AudioRoute.kt).
 class AndroidBluetoothSettings implements BluetoothSettings {
   AndroidBluetoothSettings({MethodChannel? channel}) : _channel = channel ?? const MethodChannel('caw/audio_route');
   final MethodChannel _channel;
@@ -222,6 +229,18 @@ class AndroidBluetoothSettings implements BluetoothSettings {
       return false;
     }
   }
+
+  @override
+  Future<DeveloperOptions> openDeveloperOptions() async {
+    try {
+      final r = await _channel.invokeMethod<String>('openDeveloperOptions');
+      return DeveloperOptions.values.where((d) => d.name == r).firstOrNull ?? DeveloperOptions.failed;
+    } on PlatformException {
+      return DeveloperOptions.failed;
+    } on MissingPluginException {
+      return DeveloperOptions.failed;
+    }
+  }
 }
 
 /// Windows and the desktop builds: no page is opened from the app.
@@ -233,4 +252,7 @@ class NoBluetoothSettings implements BluetoothSettings {
 
   @override
   Future<bool> open() async => false;
+
+  @override
+  Future<DeveloperOptions> openDeveloperOptions() async => DeveloperOptions.failed;
 }

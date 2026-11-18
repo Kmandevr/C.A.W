@@ -1,7 +1,8 @@
 // Where Android routes audio (AudioManager.getDevices and, from Android 13, getAudioDevicesForAttributes) and when
 // that changes (AudioDeviceCallback), over "caw/audio_route" and "caw/audio_route/events", so output latency
 // compensation can pick the right per-device offset. Device types go out as AudioDeviceInfo's raw TYPE_* ints.
-// "openBluetoothSettings" opens the system's Bluetooth page (LE Audio, low-latency modes; an app can't pick a codec).
+// "openBluetoothSettings" opens the system's Bluetooth page (LE Audio, low-latency modes; an app can't pick a codec);
+// "openDeveloperOptions" opens Developer options, where the user picks the Bluetooth codec and rate, or says they are off.
 package com.kmandevr.caw
 
 import android.content.ActivityNotFoundException
@@ -54,6 +55,7 @@ class AudioRoute(private val context: Context) : EventChannel.StreamHandler, Met
         when (call.method) {
             "snapshot" -> result.success(snapshot())
             "openBluetoothSettings" -> result.success(openBluetoothSettings())
+            "openDeveloperOptions" -> result.success(openDeveloperOptions())
             else -> result.notImplemented()
         }
     }
@@ -64,6 +66,22 @@ class AudioRoute(private val context: Context) : EventChannel.StreamHandler, Met
         true
     } catch (e: ActivityNotFoundException) {
         false
+    }
+
+    // "opened"; "off" when Developer options are not turned on (the page would not open: the app shows how); "failed".
+    private fun openDeveloperOptions(): String {
+        val on = try {
+            Settings.Global.getInt(context.contentResolver, Settings.Global.DEVELOPMENT_SETTINGS_ENABLED, 0) != 0
+        } catch (e: Exception) {
+            false
+        }
+        if (!on) return "off"
+        return try {
+            context.startActivity(Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            "opened"
+        } catch (e: ActivityNotFoundException) {
+            "failed"
+        }
     }
 
     override fun onListen(arguments: Any?, events: EventChannel.EventSink) {
