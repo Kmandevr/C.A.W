@@ -6,8 +6,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../model/app_state.dart';
-import '../../model/updates/releases.dart';
-import '../../model/updates/update_fetch.dart';
+import 'package:caw_services/updates/releases.dart';
+import 'package:caw_services/updates/update_fetch.dart';
 import '../../model/updates/update_service.dart';
 import '../adaptive_sheet.dart';
 import '../theme.dart';

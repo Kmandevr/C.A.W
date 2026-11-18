@@ -2,7 +2,7 @@
 // frame timings and a once-a-minute tick, and turned into an H2 report. No names, paths or content are ever kept.
 import 'dart:math' as math;
 
-import 'report_schema.dart';
+import 'package:caw_services/telemetry/report_schema.dart';
 
 /// The day's counts. Kept in the telemetry file so a restart the same day carries on.
 class DayStats {

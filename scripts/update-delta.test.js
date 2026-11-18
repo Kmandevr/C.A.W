@@ -1,4 +1,4 @@
-// Tests the small-update builder: APK and Windows patches rebuild their targets byte for byte, the manifest lists every file, and the previous release of a channel is chosen right.
+// Tests the small-update builder: APK and Windows patches rebuild their targets byte for byte, the manifest lists every file, assets are listed by name (a second APK later), and the previous release of a channel is chosen right.
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -6,7 +6,7 @@ const os = require('node:os');
 const path = require('node:path');
 const zlib = require('node:zlib');
 const crypto = require('node:crypto');
-const { applyPatch, encodePatch, apkOps, build, pickBase, readZip } = require('./update-delta');
+const { applyPatch, encodePatch, apkOps, build, assetList, parseAssets, pickBase, readZip, validPrefix } = require('./update-delta');
 
 function crc32(buf) {
   let c = ~0;
@@ -153,6 +153,46 @@ test('no previous build: a manifest without patches', () => {
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test('assets are listed by name: the shorthand is android and windows, and a second APK is one more entry', () => {
+  const { old, next } = builds();
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'caw-delta-test-'));
+  try {
+    for (const [n, b] of [['old.apk', old], ['a.apk', next], ['b.apk', next], ['old.zip', old], ['w.zip', next]]) fs.writeFileSync(path.join(dir, n), b);
+    const f = (n) => path.join(dir, n);
+    // The shorthand and the same list written out give the same files, byte for byte.
+    const short = path.join(dir, 'short'), long = path.join(dir, 'long');
+    fs.mkdirSync(short);
+    fs.mkdirSync(long);
+    const a = build({ version: '1.0.7', build: 'abc', prefix: 'caw-1.0.7', out: short, bsdiffMin: 0, log: () => {},
+      apk: f('a.apk'), baseApk: f('old.apk'), zip: f('w.zip'), baseZip: f('old.zip') });
+    const b = build({ version: '1.0.7', build: 'abc', prefix: 'caw-1.0.7', out: long, bsdiffMin: 0, log: () => {},
+      assets: parseAssets([`android:apk:${f('a.apk')}:${f('old.apk')}`, `windows:files:${f('w.zip')}:${f('old.zip')}`]) });
+    assert.deepEqual(a.written, b.written);
+    for (const n of a.written) assert.ok(fs.readFileSync(path.join(short, n)).equals(fs.readFileSync(path.join(long, n))), n);
+    // A second APK, keyed by its own name.
+    const c = build({ version: '1.0.7', prefix: 'caw-1.0.7', out: dir, bsdiffMin: 0, log: () => {}, assets: [
+      { name: 'android', kind: 'apk', file: f('a.apk'), base: f('old.apk') },
+      { name: 'companion', kind: 'apk', file: f('b.apk'), base: f('old.apk') },
+    ] });
+    assert.deepEqual(c.written, ['caw-1.0.7-update.json', 'caw-1.0.7-android.cawpatch', 'caw-1.0.7-companion.cawpatch']);
+    assert.deepEqual(c.manifest.patches.map((p) => p.target), ['a.apk', 'b.apk']);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+  assert.throws(() => assetList({ assets: [{ name: 'Bad Name', kind: 'apk' }] }), /lower-case/);
+  assert.throws(() => assetList({ assets: [{ name: 'x', kind: 'exe' }] }), /kind/);
+  assert.throws(() => assetList({ assets: [{ name: 'x', kind: 'apk' }, { name: 'x', kind: 'files' }] }), /twice/);
+  assert.throws(() => parseAssets(['android:apk']), /NAME:KIND:FILE/);
+});
+
+test('the prefix is checked: CI\'s release and Every change prefixes pass, nothing path-like does', () => {
+  for (const p of ['caw-main', 'caw-1.0.6-alpha.1', 'caw-1.0.0', 'caw-1.0.7-beta.2']) assert.ok(validPrefix(p), p);
+  for (const p of ['', '../caw', 'caw/main', 'caw..1', 'Caw-main', '-caw', 'caw main', 'caw.', `caw-${'x'.repeat(70)}`, true]) {
+    assert.ok(!validPrefix(p), String(p));
+  }
+  assert.throws(() => build({ version: '1', prefix: '../evil', out: '.', apk: 'x.apk', log: () => {} }), /prefix/);
 });
 
 test('the previous release of the same channel is the base', () => {

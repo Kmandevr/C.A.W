@@ -3,7 +3,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 
-// Lines the app's update check reads from release notes (app/lib/model/updates/releases.dart): an entry must not
+// Lines the app's update check reads from release notes (app/packages/caw_services/lib/updates/releases.dart): an entry must not
 // contain one, or it would be read as the release's own.
 const reserved = [
   /^\s*Build:\s*[0-9a-f]{7,40}\s*$/i,

@@ -2,7 +2,7 @@
 title: Architecture
 summary: Technical architecture, verified engine/app boundaries and clearly labelled future design proposals.
 updated: 2026-11-18
-covers: [app/pubspec.yaml, engine/CMakeLists.txt]
+covers: [app/pubspec.yaml, app/packages/caw_services/pubspec.yaml, engine/CMakeLists.txt]
 ---
 
 # Architecture
@@ -184,6 +184,10 @@ C++ itself remains general-purpose. Only code scheduled in the audio callback mu
 ### This repository (C.A.W.)
 
 The current repository contains the portable C++20 engine and CLI, platform audio layer, Flutter app (whose bundled assets are the code font, the crow logo and the default project), tests, documentation and bundled examples.
+
+**[Fact, checked 2026-11-18]** Inside the app:
+- **`app/packages/caw_services/`** is a pure-Dart package (no Flutter; Apache-2.0, a path dependency of the app) holding the platform-free services: the update check and small updates (`updates/`), the telemetry relay's client, config and report schema (`telemetry/`), SHA-256, and the companion protocol's constants (`companion/`). The companion app, when it is built, can share it.
+- **The platform seam:** each platform difference is one small Dart interface in `app/lib/platform/` with one implementation per platform, chosen once in `main.dart`. The companion link follows it (`CompanionLink`: Android's bound service, or none), and the adapters in `app/lib/model/companion/` sit behind the interfaces the app already had (`UpdateSource`, `UpdateInstaller`, `RelayClient`), so nothing above them knows whether a companion is installed ([companion protocol](companion-protocol.md)). The build's distribution (the Android `github` or `play` flavour) is read the same way, from `lib/platform/distribution.dart`.
 
 ### C++ component source
 

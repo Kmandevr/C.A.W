@@ -1,4 +1,4 @@
-// Builds the small-update assets for a release: a manifest (every file in the APK and the Windows zip, with sizes and SHA-256) and patches from the previous build, each checked by applying it before it is published.
+// Builds the small-update assets for a release: a manifest (every file in each listed asset, the APK and the Windows zip today, with sizes and SHA-256) and patches from the previous build, each checked by applying it before it is published.
 'use strict';
 const fs = require('node:fs');
 const os = require('node:os');
@@ -7,7 +7,7 @@ const zlib = require('node:zlib');
 const crypto = require('node:crypto');
 const { spawnSync } = require('node:child_process');
 
-// ---- The patch format (CAWPATCH v1; read on the device by app/lib/model/updates/patch_format.dart) ----
+// ---- The patch format (CAWPATCH v1; read on the device by app/packages/caw_services/lib/updates/patch_format.dart) ----
 //
 // "CAWPATCH", a version byte (1), then one raw DEFLATE stream holding:
 //   varint fileCount
@@ -450,20 +450,56 @@ function pickBase(releases, version) {
 // ---- The command ----
 
 /**
- * Writes `<prefix>-update.json` and, when they come out smaller than the full download, `<prefix>-android.cawpatch`
- * and `<prefix>-windows.cawpatch`. Each patch is applied here and must rebuild its target exactly, or it is dropped.
+ * The assets a build covers, in order: [o.assets] ({ name, kind: 'apk' | 'files', file, base }), or the shorthand
+ * `apk`/`baseApk` (named `android`) and `zip`/`baseZip` (named `windows`). An asset without a file is skipped.
+ */
+function assetList(o) {
+  const list = o.assets ? o.assets.slice() : [
+    { name: 'android', kind: 'apk', file: o.apk, base: o.baseApk },
+    { name: 'windows', kind: 'files', file: o.zip, base: o.baseZip },
+  ];
+  const seen = new Set();
+  for (const a of list) {
+    if (!/^[a-z0-9][a-z0-9-]{0,31}$/.test(a.name || '')) throw new Error(`asset name "${a.name}" must be lower-case letters, digits and dashes`);
+    if (a.kind !== 'apk' && a.kind !== 'files') throw new Error(`asset ${a.name}: kind must be apk or files`);
+    if (seen.has(a.name)) throw new Error(`asset ${a.name} is listed twice`);
+    seen.add(a.name);
+  }
+  return list;
+}
+
+/**
+ * Whether [prefix] may start every published file's name: the asset-name pattern, plus single dots for a version
+ * (`caw-1.0.6-alpha.1`, `caw-main`), so it can never hold a path separator, `..` or a space.
+ */
+function validPrefix(prefix) {
+  return typeof prefix === 'string' && /^[a-z0-9][a-z0-9.-]{0,63}$/.test(prefix) && !prefix.includes('..') && !prefix.endsWith('.');
+}
+
+/** `--asset NAME:KIND:FILE[:BASE]` values (a file path must not hold a colon) as [assetList]'s entries. */
+function parseAssets(values) {
+  return values.map((v) => {
+    const [name, kind, file, base] = v.split(':');
+    if (!file) throw new Error(`--asset ${v}: expected NAME:KIND:FILE[:BASE]`);
+    return { name, kind, file, base };
+  });
+}
+
+/**
+ * Writes `<prefix>-update.json` and, for each asset when it comes out smaller than the full download,
+ * `<prefix>-<name>.cawpatch` (today `-android` and `-windows`). Each patch is applied here and must rebuild its
+ * target exactly, or it is dropped.
  */
 function build(o) {
   const log = o.log || ((l) => console.log(l));
+  // Checked before anything is made.
+  if (!validPrefix(o.prefix)) throw new Error(`prefix "${o.prefix}" must be lower-case letters, digits, dashes and single dots`);
+  const kinds = assetList(o).map((a) => ({ kind: a.kind, file: a.file, base: a.base, name: `${o.prefix}-${a.name}.cawpatch` }));
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'caw-delta-'));
   const opts = { bsdiff: o.bsdiff !== false && haveTool('bsdiff') && haveTool('bzip2'), bsdiffMin: o.bsdiffMin ?? 64 * 1024, tmp, log };
   if (!opts.bsdiff) log('WARN bsdiff - bsdiff or bzip2 not found: changed files go whole');
   const manifest = { caw_update_manifest: 1, version: o.version, build: o.build || '', artifacts: [], patches: [] };
   const written = [];
-  const kinds = [
-    { kind: 'apk', file: o.apk, base: o.baseApk, name: `${o.prefix}-android.cawpatch` },
-    { kind: 'files', file: o.zip, base: o.baseZip, name: `${o.prefix}-windows.cawpatch` },
-  ];
   try {
     for (const k of kinds) {
       if (!k.file) continue;
@@ -529,7 +565,10 @@ function args(argv) {
     const a = argv[i];
     if (!a.startsWith('--')) continue;
     const key = a.slice(2).replace(/-([a-z])/g, (_, c) => c.toUpperCase());
-    o[key] = argv[i + 1] && !argv[i + 1].startsWith('--') ? argv[++i] : true;
+    const value = argv[i + 1] && !argv[i + 1].startsWith('--') ? argv[++i] : true;
+    // --asset repeats: one per asset.
+    if (key === 'asset') (o.asset = o.asset || []).push(value);
+    else o[key] = value;
   }
   return o;
 }
@@ -543,12 +582,13 @@ function main(argv) {
     return 0;
   }
   const o = args(argv);
-  if (!o.version || !o.prefix || (!o.apk && !o.zip)) {
-    console.log('FAIL usage - update-delta.js --version V --prefix caw-main [--build B] --apk A --zip Z [--base-apk A0 --base-zip Z0 --base-build B0] [--out DIR] (scripts/update-delta.js)');
+  if (!o.version || !o.prefix || (!o.apk && !o.zip && !o.asset) || (o.asset && (o.apk || o.zip))) {
+    console.log('FAIL usage - update-delta.js --version V --prefix caw-main [--build B] (--apk A --zip Z [--base-apk A0 --base-zip Z0] | --asset NAME:apk|files:FILE[:BASE] ...) [--base-build B0] [--out DIR] (scripts/update-delta.js)');
     return 1;
   }
   try {
-    const { written } = build({ ...o, out: o.out || '.', bsdiffMin: o.bsdiffMin ? Number(o.bsdiffMin) : undefined, bsdiff: o.noBsdiff ? false : undefined });
+    const assets = o.asset ? parseAssets(o.asset.filter((v) => typeof v === 'string')) : undefined;
+    const { written } = build({ ...o, assets, out: o.out || '.', bsdiffMin: o.bsdiffMin ? Number(o.bsdiffMin) : undefined, bsdiff: o.noBsdiff ? false : undefined });
     if (o.list) fs.writeFileSync(o.list, `${written.join('\n')}\n`);
     return 0;
   } catch (e) {
@@ -557,6 +597,6 @@ function main(argv) {
   }
 }
 
-module.exports = { encodePatch, applyPatch, readZip, listFiles, apkOps, filesPatchEntries, pickBase, build, Writer };
+module.exports = { encodePatch, applyPatch, readZip, listFiles, apkOps, filesPatchEntries, pickBase, build, assetList, parseAssets, validPrefix, Writer };
 
 if (require.main === module) process.exitCode = main(process.argv.slice(2));

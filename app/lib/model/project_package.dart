@@ -19,7 +19,7 @@ import 'native_trust.dart';
 import 'project.dart';
 import 'project_dependencies.dart';
 import 'sample_use.dart' show SampleUse;
-import 'sha256.dart';
+import 'package:caw_services/sha256.dart';
 import 'user_presets.dart';
 import 'zip_archive.dart';
 

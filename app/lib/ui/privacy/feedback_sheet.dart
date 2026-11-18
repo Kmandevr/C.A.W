@@ -6,7 +6,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 
 import '../../model/problem_log.dart';
-import '../../model/telemetry/report_schema.dart';
+import 'package:caw_services/telemetry/report_schema.dart';
 import '../../model/telemetry/telemetry.dart';
 import '../glass.dart';
 import '../haptics.dart';

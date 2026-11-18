@@ -15,7 +15,7 @@ import 'package:caw/model/project.dart';
 import 'package:caw/model/project_dependencies.dart';
 import 'package:caw/model/project_package.dart';
 import 'package:caw/model/sampler.dart';
-import 'package:caw/model/sha256.dart';
+import 'package:caw_services/sha256.dart';
 import 'package:caw/model/user_presets.dart';
 import 'package:caw/model/zip_archive.dart';
 import 'package:caw/platform/cpp_build.dart';

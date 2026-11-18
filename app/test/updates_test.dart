@@ -7,12 +7,12 @@ import 'dart:io';
 
 import 'package:caw/model/app_state.dart';
 import 'package:caw/model/project.dart';
-import 'package:caw/model/sha256.dart';
+import 'package:caw_services/sha256.dart';
 import 'package:caw/model/settings.dart';
 import 'package:caw/model/storage.dart';
-import 'package:caw/model/updates/release_version.dart';
-import 'package:caw/model/updates/releases.dart';
-import 'package:caw/model/updates/update_fetch.dart';
+import 'package:caw_services/updates/release_version.dart';
+import 'package:caw_services/updates/releases.dart';
+import 'package:caw_services/updates/update_fetch.dart';
 import 'package:caw/model/updates/update_service.dart';
 import 'package:caw/platform/update_installer.dart';
 import 'package:caw/ui/settings/update_settings.dart';

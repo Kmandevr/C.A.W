@@ -6,7 +6,7 @@ import 'package:caw/engine/execution.dart';
 import 'package:caw/engine/stress.dart';
 import 'package:caw/model/stress_result.dart';
 import 'package:caw/model/stress_runner.dart';
-import 'package:caw/model/telemetry/report_schema.dart';
+import 'package:caw_services/telemetry/report_schema.dart';
 import 'package:caw/ui/benchmark/benchmark_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';

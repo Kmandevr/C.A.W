@@ -305,11 +305,13 @@ jobs:
           # No --obfuscate: it saves only 0.13 MB more and would garble type names in the app's own error texts.
           # CAW_BUILD: the first 12 characters of the commit, for the update check (the "Every change" notes' Build:
           # line) and telemetry's app.build.
-          flutter build apk --release --target-platform android-arm64 --split-debug-info=build/symbols \
+          # --flavor github: the build with the self-updater (the play flavour is checked by the next job). Flutter
+          # names a flavoured APK app-<flavor>-<mode>.apk (flutter_tools 3.47.7, gradle.dart _apkFilesFor).
+          flutter build apk --flavor github --release --target-platform android-arm64 --split-debug-info=build/symbols \
             --dart-define=CAW_CHANNEL="$CAW_CHANNEL" --dart-define=CAW_RELAY_URL="$CAW_RELAY_URL" \
             --dart-define=CAW_APP_KEY="$CAW_APP_KEY" --dart-define=CAW_BUILD="${GITHUB_SHA::12}"
           ccache --show-stats || true
-          mv build/app/outputs/flutter-apk/app-release.apk "$GITHUB_WORKSPACE/caw-android.apk"
+          mv build/app/outputs/flutter-apk/app-github-release.apk "$GITHUB_WORKSPACE/caw-android.apk"
           (cd build/symbols && zip -q "$GITHUB_WORKSPACE/caw-android-symbols.zip" ./*.symbols)
       - uses: actions/upload-artifact@v7
         with:
@@ -321,6 +323,74 @@ jobs:
           name: caw-android-symbols
           path: caw-android-symbols.zip
           retention-days: 90
+
+  # The Play build (docs/companion-protocol.md): built only to check it builds and that its APK carries neither
+  # install permission (its caw/updates channel answers notImplemented). Not uploaded or released; the release
+  # assets stay the github build's.
+  android-play:
+    name: Android Play build check
+    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.installables)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: 17
+          cache: gradle
+      - name: Restore Flutter SDK
+        id: flutter-cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/flutter
+          key: flutter-linux-${{ env.FLUTTER_VERSION }}-${{ env.FLUTTER_SHA_LINUX }}
+      - name: Install Flutter
+        if: steps.flutter-cache.outputs.cache-hit != 'true'
+        run: |
+          curl -sSfL -o flutter.tar.xz "https://storage.googleapis.com/flutter_infra_release/releases/stable/linux/flutter_linux_${FLUTTER_VERSION}-stable.tar.xz"
+          echo "${FLUTTER_SHA_LINUX}  flutter.tar.xz" | sha256sum -c -
+          tar xf flutter.tar.xz -C "$RUNNER_TEMP" && rm flutter.tar.xz
+      - name: Add Flutter to PATH
+        run: echo "$RUNNER_TEMP/flutter/bin" >> "$GITHUB_PATH"
+      - name: Restore Dart packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.pub-cache
+          key: pub-linux-${{ hashFiles('app/pubspec.lock') }}
+          restore-keys: pub-linux-
+      - name: Restore Android SDK packages
+        uses: actions/cache@v4
+        with:
+          path: |
+            /usr/local/lib/android/sdk/cmake/3.22.1
+            /usr/local/lib/android/sdk/ndk/28.2.13676358
+          key: android-sdk-cmake-3.22.1-ndk-28.2.13676358
+      - name: Install ccache
+        run: |
+          if ! command -v ccache >/dev/null 2>&1; then sudo apt-get update -q && sudo apt-get install -y -q ccache; fi
+          ccache --max-size=500M
+          echo "CAW_CCACHE=1" >> "$GITHUB_ENV"
+      - name: Restore the native compiler cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.cache/ccache
+          key: ccache-android-${{ hashFiles('engine/CMakeLists.txt', 'engine/src/**', 'engine/include/**', 'engine/platform/**') }}
+          restore-keys: ccache-android-
+      - name: Build the play flavour
+        working-directory: app
+        run: |
+          flutter --disable-analytics
+          # Signed with the debug key (no secrets here): this APK is never published.
+          flutter build apk --flavor play --release --target-platform android-arm64
+      - name: Check the play APK has no install permissions
+        run: |
+          apk=app/build/app/outputs/flutter-apk/app-play-release.apk
+          aapt2=$(ls -d "$ANDROID_HOME"/build-tools/*/ | sort -V | tail -1)aapt2
+          "$aapt2" dump permissions "$apk" | tee permissions.txt
+          if grep -E 'REQUEST_INSTALL_PACKAGES|UPDATE_PACKAGES_WITHOUT_USER_ACTION' permissions.txt; then
+            echo "::error::The play APK still asks for an install permission (app/android/app/src/play/AndroidManifest.xml)."; exit 1
+          fi
+          echo "The play APK carries neither install permission."
 
   windows:
     name: Windows app
@@ -389,7 +459,8 @@ jobs:
 
   release:
     name: GitHub Release
-    needs: [android, windows]
+    # Publishes only after analysis and the Dart tests pass, not just the builds.
+    needs: [analyze, tests, android, windows]
     if: >-
       startsWith(github.ref, 'refs/tags/v') ||
       (github.event_name == 'workflow_dispatch' && inputs.installables && inputs.release)
@@ -455,7 +526,7 @@ jobs:
               echo "This APK is signed with a throwaway key: uninstall the previous C.A.W. before installing it."
             fi
             echo
-            # One line per asset; the app's updater checks a download against it (lib/model/updates/releases.dart).
+            # One line per asset; the app's updater checks a download against it (app/packages/caw_services/lib/updates/releases.dart).
             for f in "caw-$version-android.apk" "caw-$version-windows.zip" "caw-$version-android-symbols.zip" "${update_assets[@]}"; do
               echo "SHA256 $f: $(sha256sum "$f" | cut -d' ' -f1)"
             done
@@ -518,7 +589,7 @@ jobs:
             echo "- Android (arm64): caw-main-android.apk"
             echo "- Windows (x64): caw-main-windows.zip, unzip and run caw.exe"
             echo
-            # The app reads these lines (lib/model/updates/releases.dart).
+            # The app reads these lines (app/packages/caw_services/lib/updates/releases.dart).
             echo "Version: $version"
             echo "Build: $short"
             for f in caw-main-android.apk caw-main-windows.zip "${update_assets[@]}"; do

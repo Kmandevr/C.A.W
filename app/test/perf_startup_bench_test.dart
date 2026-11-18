@@ -95,13 +95,15 @@ void main() {
       await storage.setLastOpened(p.id);
     }
     maker.dispose();
-    var longest = 0, wall = 0;
-    for (var round = 0; round < 4; round++) { // the first rounds warm up the JIT (a release build is compiled ahead)
+    // The first two rounds warm up the JIT (a release build is compiled ahead). Of the warmed rounds the quietest
+    // counts: a step done in one go stalls every round, while a busy CI runner pre-empting the VM stalls only one.
+    var longest = 1 << 62, wall = 0;
+    for (var round = 0; round < 5; round++) {
       final s = AppState(settings: Settings());
       final r = await _measure(() => s.openStorage(ProjectStorage(root)));
       expect(s.project.name, 'Song 11');
       s.dispose();
-      (wall, longest) = (r.$1, r.$2);
+      if (round >= 2 && r.$2 < longest) (wall, longest) = (r.$1, r.$2);
     }
     String ms(int us) => (us / 1000).toStringAsFixed(1);
     // ignore: avoid_print

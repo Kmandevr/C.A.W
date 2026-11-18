@@ -6,14 +6,14 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
-import 'package:caw/model/sha256.dart';
-import 'package:caw/model/updates/delta_update.dart';
-import 'package:caw/model/updates/patch_format.dart';
-import 'package:caw/model/updates/releases.dart';
-import 'package:caw/model/updates/update_fetch.dart';
-import 'package:caw/model/updates/update_manifest.dart';
+import 'package:caw_services/sha256.dart';
+import 'package:caw_services/updates/delta_update.dart';
+import 'package:caw_services/updates/patch_format.dart';
+import 'package:caw_services/updates/releases.dart';
+import 'package:caw_services/updates/update_fetch.dart';
+import 'package:caw_services/updates/update_manifest.dart';
 import 'package:caw/model/updates/update_service.dart';
-import 'package:caw/model/updates/windows_stage.dart';
+import 'package:caw_services/updates/windows_stage.dart';
 import 'package:caw/platform/update_installer.dart';
 import 'package:flutter_test/flutter_test.dart';
 

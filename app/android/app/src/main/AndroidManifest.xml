@@ -90,6 +90,9 @@
 
          In particular, this is used by the Flutter engine in io.flutter.plugin.text.ProcessTextPlugin. -->
     <queries>
+        <!-- The companion app (Android 11+ filters other packages; binding its service needs it visible). The name is an
+             [Assumption] until the owner settles it (CompanionCallerCheck.COMPANION_PACKAGE). -->
+        <package android:name="com.kmandevr.caw.companion" />
         <!-- The system's package installer, so the update confirmation it sends can be checked before it opens. -->
         <intent>
             <action android:name="android.intent.action.VIEW"/>
