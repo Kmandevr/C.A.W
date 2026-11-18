@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import '../../model/problem_log.dart';
 import '../../model/telemetry/telemetry.dart';
 import '../../model/updates/update_service.dart';
+import '../../platform/distribution.dart';
 import '../../version.dart';
 import '../privacy/feedback_sheet.dart';
 import '../startup_screen.dart' show openAlphaNotice;
@@ -46,8 +47,9 @@ class AboutSettings extends StatelessWidget {
             subtitle: 'Including JetBrains Mono (SIL Open Font License 1.1)',
             onTap: () => showLicensePage(context: context, applicationName: 'C.A.W')),
         ]),
-        // Updates (owner, 2026-11-12); where Settings opens without the app, an inert service that checks nothing.
-        UpdateSettings(service: UpdateService.running ?? UpdateService.inert, state: deps.state),
+        // Updates (owner, 2026-11-12); where Settings opens without the app, an inert service that checks nothing. The
+        // Play build has none: the store updates it.
+        if (selfUpdates) UpdateSettings(service: UpdateService.running ?? UpdateService.inert, state: deps.state),
         SettingsCardView(card: SettingsCard.privacy, rows: [
         // Telemetry and feedback exist once the app has started them (not in Settings opened alone).
         settingAction('about.privacy',

@@ -23,6 +23,7 @@ import 'package:caw_services/updates/update_fetch.dart';
 import 'model/updates/update_service.dart';
 import 'platform/companion_link.dart';
 import 'platform/desktop_window.dart';
+import 'platform/distribution.dart';
 import 'platform/display_rate.dart';
 import 'platform/haptics_device.dart';
 import 'platform/mic_permission.dart';
@@ -90,16 +91,19 @@ Future<void> main(List<String> args) async {
 
   // The update check (Settings › App › Updates): its choices load before the first frame, so the startup screen
   // can say "Update available"; the check itself runs after the app is shown (UpdatePromptHost).
-  final fetcher = UpdateFetcher();
-  final updates = UpdateService(
-    source: CompanionUpdateSource(companion, GitHubReleasesSource(fetcher)),
-    fetcher: fetcher,
-    installer: updateInstaller,
-    store: settings.dir == null ? null : File('${settings.dir!.path}${Platform.pathSeparator}updates.json'),
-  );
-  await updates.load();
-  if (staged.note != null) updates.downloadedNote = staged.note; // "Updated to …", said once after the start
-  UpdateService.running = updates;
+  // The Play build has no updater of its own: Google Play updates it (platform/distribution.dart).
+  if (selfUpdates) {
+    final fetcher = UpdateFetcher();
+    final updates = UpdateService(
+      source: CompanionUpdateSource(companion, GitHubReleasesSource(fetcher)),
+      fetcher: fetcher,
+      installer: updateInstaller,
+      store: settings.dir == null ? null : File('${settings.dir!.path}${Platform.pathSeparator}updates.json'),
+    );
+    await updates.load();
+    if (staged.note != null) updates.downloadedNote = staged.note; // "Updated to …", said once after the start
+    UpdateService.running = updates;
+  }
 
   // Anonymous telemetry and feedback (docs/app.md "Privacy, telemetry and feedback"); its first-run page shows over
   // the shell once it has loaded and the startup screen has gone, before any update prompt (ui/app_prompts.dart).

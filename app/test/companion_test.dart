@@ -1,5 +1,5 @@
 // The companion app's link and adapters (docs/companion-protocol.md) against fake links: absent, a timeout, another
-// protocol version, the known-bad override and a relay round trip; and the Android link's checks of its channel.
+// protocol version, the known-bad override and a relay round trip; the Android link's checks; the build flavours.
 import 'dart:convert';
 import 'dart:io';
 
@@ -10,6 +10,7 @@ import 'package:caw/model/companion/trust_source.dart';
 import 'package:caw/model/native_trust.dart';
 import 'package:caw/model/updates/update_service.dart';
 import 'package:caw/platform/companion_link.dart';
+import 'package:caw/platform/distribution.dart';
 import 'package:caw/platform/update_installer.dart';
 import 'package:caw_services/companion/companion_protocol.dart';
 import 'package:caw_services/telemetry/relay_client.dart';
@@ -77,6 +78,13 @@ const _fp = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+
+  test('only the play flavour hides the self-updater; tests and other builds have it', () {
+    expect(distributionFor('play'), Distribution.play);
+    expect(distributionFor('github'), Distribution.github);
+    expect(distributionFor(null), Distribution.github);
+    expect(selfUpdates, isTrue);
+  });
 
   group('protocol', () {
     test('kinds have their wire numbers and timeouts', () {
