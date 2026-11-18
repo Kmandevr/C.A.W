@@ -75,27 +75,37 @@ struct ProjectAutomationLaneSpec {
 // The most a track or the master fader gains: +12 dB (owner, 2026-11-10: faders like REAPER's), 10^(12/20).
 constexpr double kMaxMixGain = 3.9810717055349722;
 
-// A send: a copy of a layer's signal into a bus folder's input, beside its normal route to its parent bus or
-// the master. Pre-fader sends tap after the layer's effects, before volume and pan; post-fader sends after them.
-// A muted or soloed-out layer sends nothing either way.
+// A send: a copy of a layer's signal into a bus folder's input or a track's (summed after its instrument, before
+// its inserts), beside its normal route to its output. Pre-fader sends tap after the layer's effects, before volume
+// and pan; post-fader sends after them. A muted or soloed-out layer sends nothing either way. A "return" is just a
+// bus (or a track) fed by sends. Only a feedback send may close a routing loop: it hears its source one chunk
+// (kBlock frames) late, through a soft clip and DC block unless `limiter` is off.
 struct SendSpec {
-    std::string to;      // a bus folder's layer id
+    std::string to;      // an enabled bus folder's or a track's layer id
     double level = 1.0;  // linear gain, 0..kMaxMixGain
     bool pre = false;
     bool mute = false;
+    bool feedback = false;  // "feedback": the source's output from kBlock frames before (may close a loop)
+    bool limiter = true;    // "limiter": a feedback send's soft clip and DC block on the return
 };
 constexpr int kMaxSends = 8;  // sends per layer
+
+// A layer's "output" straight to the master (layer ids never start with '@').
+inline constexpr const char* kMasterOutput = "@master";
 
 struct LayerSpec {
     std::string id, name;
     int lengthSteps = 0;             // 16th notes per loop; 0 loops with the project (a pattern sets its own)
     std::string pattern;             // the pattern module a layer without clips loops
     std::vector<ClipSpec> clips;      // arrangement instances, compiled before playback
-    std::string parentId;
+    std::string parentId;            // the folder it shows in (and, without `outputId`, the bus it plays into)
+    // "output": the enabled bus folder its audio goes to; kMasterOutput: the master, even inside a bus folder; "":
+    // parentId's bus, or the master.
+    std::string outputId;
     bool folder = false, busEnabled = true;
     std::vector<AutomationLaneSpec> automation;
     std::vector<ComponentSpec> components;  // native stereo effects after the instrument, before volume and pan
-    std::vector<SendSpec> sends;            // at most kMaxSends; each to a bus folder
+    std::vector<SendSpec> sends;            // at most kMaxSends; each to a bus folder or a track
     // The native instrument (one event input, one stereo output) that plays the layer's notes; `components`
     // follow it. A track without one plays nothing and takes no slot.
     bool hasInstrument = false;
@@ -179,10 +189,12 @@ struct ProjectSpec {
 };
 
 // Parses the project JSON format (docs/architecture.md, "Project file").
-// The bus folder a layer's audio goes to: its nearest ancestor folder with a bus ("" for the master).
+// The bus folder a layer's audio goes to: its "output" if it names one, else its nearest ancestor folder with a bus
+// ("" for the master).
 std::string routeTarget(const ProjectSpec& p, const LayerSpec& layer);
-// Sends go to bus folders, keys come from playing layers, and nothing hears itself through any mix of folder
-// buses, sends and keys: false and a message naming the loop otherwise. parseProject calls it.
+// Outputs name enabled bus folders, sends go to bus folders or tracks, keys come from playing layers, and nothing
+// hears itself through any mix of outputs, folder buses, sends and keys except through a feedback send: false and a
+// message naming the problem or the loop otherwise. parseProject calls it.
 bool validateRouting(const ProjectSpec& p, std::string& error);
 bool parseProject(std::string_view json, ProjectSpec& out, std::string& error);
 

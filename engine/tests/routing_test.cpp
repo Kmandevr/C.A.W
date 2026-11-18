@@ -218,9 +218,10 @@ TEST(routing_loops_are_refused_with_the_layers_named) {
         {"id":"f","folder":true,"bus":true},
         {"id":"t","parent":"f","components":[{"id":"org.caw.ducker","key":{"layer":"f"}}]}]})", p, error));
     CHECK(error.find("loop") != std::string::npos);
-    // Sends go to bus folders only, and to ones that exist.
-    CHECK(!parseProject(R"({"caw_project":1,"layers":[{"id":"t","sends":[{"to":"u"}]},{"id":"u"}]})", p, error));
-    CHECK(error.find("not a bus") != std::string::npos);
+    // Sends go to bus folders or tracks (mixer_routing_test.cpp), never an organization-only folder, and to ones
+    // that exist.
+    CHECK(!parseProject(R"({"caw_project":1,"layers":[{"id":"t","sends":[{"to":"u"}]},{"id":"u","folder":true,"bus":false}]})", p, error));
+    CHECK(error.find("no bus") != std::string::npos);
     CHECK(!parseProject(R"({"caw_project":1,"layers":[{"id":"t","sends":[{"to":"nowhere"}]}]})", p, error));
     CHECK(error.find("not in the project") != std::string::npos);
     // A send to the track's own folder is fine (it hears the track twice), and the fields read back.
