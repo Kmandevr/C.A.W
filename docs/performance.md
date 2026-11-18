@@ -2,7 +2,7 @@
 title: Performance
 summary: How C.A.W is measured for low-end devices, the audit's ranked bottlenecks with evidence, fixes with before/after numbers, and what remains.
 covers: [engine/bench/, engine/src/meters.cpp, app/lib/model/poller.dart, app/lib/model/settings.dart, app/lib/ui/motion.dart, app/lib/ui/devices/kit/param_watch.dart, app/lib/ui/devices/kit/repaint.dart, app/test/poller_test.dart, app/test/rebuild_test.dart, app/test/perf_*, app/test/music_video_profile_test.dart]
-updated: 2026-11-17
+updated: 2026-11-18
 ---
 
 # Performance
@@ -294,18 +294,13 @@ The instrument alone (callgrind's inclusive count of `processPorts`, so without 
 - **The phone's hardware:** the device is opened with miniaudio's low-latency profile, which asks AAudio for its low-latency (MMAP) path ([engine](engine.md), the device buffer); the new buffer setting's Auto mode opens a 1024-frame buffer while not recording (about 47 callbacks a second instead of 250–500), and Battery also leaves the fast path. Flush-to-zero is on for every `Engine::process` call since speed phase 2 (2026-11-12, [engine](engine.md), "Determinism"); the kernels keep their own denormal guards.
 - **Quality:** Eco caps unison at 4 copies, turns the saturator's oversampling off and thins the reverbs: the Pad −14 %, the First loop −5 % (the Lead has 3 copies, below the cap).
 
-## Startup screen (2026-11-12, beta readiness D2)
+## Startup screen (2026-11-18, #241)
 
-The startup screen ([App](app.md), "Startup screen") adds no wait: the shell shows in the frame `AppState.ready` turns true and the screen fades out over it. What's new adds none either: launch only compares the settings' `last_seen_version` string, and the bundled changelog (about 4 KB) is read and parsed only when its sheet or page opens. What it can cost is UI-isolate time while launch loads, so `perf_startup_bench_test` now lists the 20 saved projects a second time while the reveal's painter records a frame every 8.3 ms (120 Hz). Linux x64 test host, JIT, five runs each (`flutter test test/perf_startup_bench_test.dart`):
+The startup screen ([App](app.md), "Startup screen") adds no wait, and launch keeps the UI isolate free for the reveal's frames. What's new adds none either: launch only compares the settings' `last_seen_version` string, and the bundled changelog (about 4 KB) is read and parsed only when its sheet or page opens.
 
-| | List 20 projects | UI isolate blocked | Longest stall |
-| --- | --- | --- | --- |
-| Before (base 06186b5, one run) | 85.6 ms | 15.3 ms | 5.6 ms |
-| After, the same listing (unchanged code; five runs) | 72.7–106.8 ms | 6.3–30.9 ms | 3.6–14.3 ms |
-| After, while the reveal paints at 120 Hz | 77.1–114.0 ms | 9.2–46.3 ms | 6.0–34.9 ms |
-
-- **Each reveal frame** records in 138–193 µs on average (longest 243 µs) once warm, so painting adds at most a few ms over a typical launch; the listing's spread run to run (about 35 ms) is larger than the difference, within the 50 ms budget.
-- **[Assumption]** Rasterising (the raster thread) and the phone's own launch time are not measured here; check on the S22 in the APK.
+- **What blocked the reveal (code reading and `flutter test`, 2026-11-18):** the whole shell was built under the screen from its first frame and rebuilt on every launch notification, its glass and backdrop composited under the screen each frame; `Engine.create` (loading the library and `caw_engine_create`) and `startAudio` (opening the device) ran on the UI isolate; the frame rate was asked for after the first frame; the painter built a new outline path from path metrics each frame, with new paints and gradients.
+- **[Fact]** `perf_startup_bench_test` (Linux x64 container, JIT, warmed, 2026-11-18): making the engine stalls the UI isolate 15.4–23.7 ms on it and 1.5–2.0 ms off it; opening the device off it 1.3–4.5 ms; `openStorage` with 12 saved projects of about 0.3 MB stalls it at most 3.3–4.7 ms in one chunk, and with the engine opening a 0.3 MB project at most 6.0 ms. `startup_reveal_test`: a reveal frame records in about 30 µs (longest about 130 µs) and makes no path.
+- **[Assumption]** Rasterising (the raster thread) and the phone's own launch time are not measured here; check on the S22+ in the APK. The largest remaining chunk is one JSON encode of the opening project (history, save, the engine's copy), so a very large project can still take a frame on a phone.
 
 ## App performance pass (2026-11-10)
 
