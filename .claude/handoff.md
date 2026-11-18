@@ -28,7 +28,10 @@ Finish and release 1.0.6-alpha.1, the usability release (owner, 2026-11-18). The
 - **Release:** merge all, full checks, bump to 1.0.6-alpha.1+10 (pubspec, version.dart, docs/app.md and architecture.md, 4 version goldens), then PR, CI, merge, release.
 - **1.0.7 groundwork:** docs/plugin-hosting-plan.md ("Least privilege and the companion app"), decisions 2026-11-18, and #239.
   - Owner answers: updater and trust first; the full AutoStacc look (brand assets still needed from the owner).
+- **Audit (2026-11-18):** 10 issues closed; #245 collects the performance leftovers. CI build jobs are capped (f8805d3).
+- **Owner phone checks with 1.0.6:** #20 (keyboard Backspace), #31 (one USB and one BLE MIDI keyboard), #204 (power, heat and frames baseline).
 - **Owner questions:**
+  - Windows x86-64-v3: a second DLL, or the minimum CPU;
   - the AutoStacc brand;
   - the pack's 4th device;
   - routing and hosting plan questions;
