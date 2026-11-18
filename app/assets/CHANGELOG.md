@@ -21,6 +21,9 @@ Choose the real speaker, headphones and microphone on Android, and latency you s
   - **a typed latency**, for the output or the input, stays what you typed.
 <!-- zoom -->
 
+### Improved
+- **Latency learns from audio takes too:** when you record audio with the click on, C.A.W finds where your notes start and how far they land from the beat. After a few takes that agree, the latency card suggests a correction. It never changes anything until you tap **Apply**.
+
 ## 1.0.5-alpha.2 (2026-11-18)
 
 A hotfix: smoother scrolling, the playhead in time with the sound, a smoother start, and fixes that made the app hard to use.

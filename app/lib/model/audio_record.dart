@@ -1,6 +1,7 @@
 // Recording audio (API 18): the input choice and latency kept app-wide, opening the input after the microphone
 // permission, recording the armed tracks with the transport's Record, takes placed as clips (a loop's passes stacked
-// as takes), punch in/out, input meters, the latency ping and crash recovery.
+// as takes), punch in/out, input meters, the latency ping, learning the latency from takes against the click and
+// crash recovery.
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -17,6 +18,8 @@ import 'audio_edit.dart';
 import 'latency_comp.dart';
 import 'project.dart';
 import 'atomic_file.dart';
+import 'sample_edit.dart';
+import 'settings.dart';
 
 /// Where punch in/out comes from: none, the loop range, or the time selection.
 enum PunchMode { off, loop, selection }
@@ -404,9 +407,41 @@ class AudioRecorder extends ChangeNotifier {
       return false;
     }
     _recording = true;
+    _clickAtStart = _clickOn;
     _missingAtStart = _missingFrames();
     notifyListeners();
     return true;
+  }
+
+  // The metronome sounds while recording (Settings' Metronome: While recording or Always), at the start and the stop.
+  bool _clickAtStart = false;
+  bool get _clickOn => state.settings.metronome != Metronome.off;
+
+  /// Learning from audio takes (owner, #241 follow-up): the transients in each take ([AudioAnalysis.slicePoints],
+  /// the engine's `caw_asset_slices` on a worker isolate) placed on the song where the take landed, then how far
+  /// each lies from its beat ([beatDeviationsMs], the click's quarter notes), as one take of evidence for the output
+  /// in use ([LatencyComp.learnFromTake]: the same thresholds as MIDI takes, and only ever a suggestion). Called when
+  /// recording stops with the click on; returns how many onsets counted.
+  Future<int> learnFromTakes(List<RecordedAudioTake> takes) async {
+    final tempo = state.project.tempo;
+    final steps = <double>[];
+    for (final t in takes) {
+      if (!t.complete || t.recovered || t.path.isEmpty) continue;
+      final seconds = t.seconds > 0 ? t.seconds : (t.sampleRate > 0 ? t.frames / t.sampleRate : 0.0);
+      if (!(seconds > 0)) continue;
+      final onsets = await state.audioAnalysis
+          .slicePoints(t.path, start: 0, end: math.min(seconds, 600), sensitivity: 0.5, maxSlices: 256);
+      if (_disposed || onsets == null) continue;
+      final zero = tempo.secondsAt(t.startSteps / 4); // where the take's first frame lies on the song, in seconds
+      for (final o in onsets) {
+        final step = tempo.beatAt(zero + o) * 4;
+        if (step >= 0) steps.add(step);
+      }
+    }
+    if (_disposed) return 0;
+    final deviations = beatDeviationsMs(steps, bpmAt: (st) => tempo.bpmAt(st / 4));
+    state.latency.learnFromTake(deviations);
+    return deviations.length;
   }
 
   // Output frames the input was missing since it opened (the engine's bridge), to mark a take's gaps.
@@ -421,6 +456,8 @@ class AudioRecorder extends ChangeNotifier {
     final r = await io.recordStop();
     final placed = placeTakes(r.takes, droppedFrames: r.droppedFrames, error: r.error);
     lastRecording.value = placed;
+    // Learning from recordings: only a take played against the click says where the beat was heard.
+    if (_clickAtStart && _clickOn) unawaited(learnFromTakes(r.takes));
     final missing = _missingFrames() - _missingAtStart;
     if (r.droppedFrames > 0) {
       message.value = '${r.droppedFrames} frames were dropped while recording (filled with silence; the device was busy).';
