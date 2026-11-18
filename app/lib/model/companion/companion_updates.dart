@@ -67,13 +67,25 @@ class CompanionUpdateInstaller implements UpdateInstaller {
   @override
   Future<bool> silentPossible() async => !_present && await fallback.silentPossible();
 
+  // The companion downloads and checks the APK itself, so C.A.W hands an Android update over before downloading it.
+  @override
+  Future<UpdateOutcome?> handOff(AssetKind kind) async {
+    if (kind != AssetKind.apk || await link.probe() != CompanionStatus.present) return null;
+    return _open(null);
+  }
+
   @override
   Future<UpdateOutcome> install(File file, AssetKind kind, {bool silent = false}) async {
     if (await link.probe() != CompanionStatus.present) return fallback.install(file, kind, silent: silent);
+    return await _open(file) ?? await fallback.install(file, kind, silent: silent);
+  }
+
+  /// Asks the companion to install; null when it says to fall back to the in-app path.
+  Future<UpdateOutcome?> _open(File? file) async {
     final channel = _channel();
     final r = await link.request(CompanionKind.updateOpen, updateOpenBody(channel, build: _build()));
     if (r.ok) return _outcome(readUpdateOpenReply(r.body), channel, file);
-    if (r.fallBack) return fallback.install(file, kind, silent: silent);
+    if (r.fallBack) return null;
     // A companion from before channels refuses a channel's name: it can install only Stable.
     if (r.outcome == CompanionOutcome.badRequest && channel != UpdateChannel.stable) {
       return UpdateOutcome('The companion app is too old to install from ${channel.label}: update it first.', file: file);
@@ -82,7 +94,7 @@ class CompanionUpdateInstaller implements UpdateInstaller {
     return UpdateOutcome('The companion app did not open (${r.detail ?? r.outcome.name}).', file: file);
   }
 
-  static UpdateOutcome _outcome(({bool started, String? release, UpdateOpenSkip? skip}) reply, UpdateChannel channel, File file) {
+  static UpdateOutcome _outcome(({bool started, String? release, UpdateOpenSkip? skip}) reply, UpdateChannel channel, File? file) {
     if (reply.started) return UpdateOutcome('Finish the update in the C.A.W companion app.', started: true, file: file);
     final name = reply.release ?? 'its newest release';
     final message = switch (reply.skip) {

@@ -217,6 +217,18 @@ void main() {
       expect(await CompanionUpdateInstaller(link, installer).canInstall(), isTrue);
     });
 
+    test('an Android update is handed to the companion before anything is downloaded; not a zip, not when absent', () async {
+      final link = _FakeLink(answers: {CompanionKind.updateOpen: const CompanionReply(CompanionOutcome.ok)});
+      final installer = _Installer();
+      final handed = await CompanionUpdateInstaller(link, installer).handOff(AssetKind.apk);
+      expect(handed?.started, isTrue);
+      expect(handed?.file, isNull);
+      expect(link.sent.map((s) => s.$1), [CompanionKind.updateOpen]);
+      expect(await CompanionUpdateInstaller(link, installer).handOff(AssetKind.zip), isNull);
+      expect(await CompanionUpdateInstaller(_FakeLink(present: false), installer).handOff(AssetKind.apk), isNull);
+      expect(installer.installs, 0);
+    });
+
     test('update.open carries the channel: {} on Stable, the name otherwise, the build on Every change only', () {
       expect(updateOpenBody(UpdateChannel.stable, build: 'abcdef123456'), isEmpty);
       expect(updateOpenBody(UpdateChannel.beta, build: 'abcdef123456'), {'channel': 'beta'});
