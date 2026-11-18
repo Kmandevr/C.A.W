@@ -151,6 +151,8 @@ bool componentList(const Json* arr, const std::string& where, std::vector<Compon
 }  // namespace
 
 std::string routeTarget(const ProjectSpec& p, const LayerSpec& layer) {
+    if (layer.outputId == kMasterOutput) return {};
+    if (!layer.outputId.empty()) return layer.outputId;  // validateRouting checked it names an enabled bus folder
     std::string parent = layer.parentId;
     for (size_t depth = 0; !parent.empty() && depth < p.layers.size(); ++depth) {
         const LayerSpec* found = nullptr;
@@ -171,12 +173,41 @@ bool validateRouting(const ProjectSpec& p, std::string& error) {
         const LayerSpec& l = p.layers[i];
         return "'" + (l.name.empty() ? l.id : l.name) + "'";
     };
-    // Edges run from what is heard to what hears it: a layer to its bus (or nothing: the master), to the buses
-    // it sends to, and a key's source to the layer whose component it keys.
+    // Edges run from what is heard to what hears it: a layer to its output bus (or nothing: the master), to the
+    // buses and tracks it sends to (but a feedback send, which hears the chunk before, closes no loop), and a key's
+    // source to the layer whose component it keys.
     std::vector<std::vector<size_t>> edges(n);
     for (size_t i = 0; i < n; ++i) {
         const LayerSpec& l = p.layers[i];
         const bool plays = !(l.folder && !l.busEnabled);  // an organization-only folder carries no audio
+        if (l.id == kMasterOutput) {
+            error = "layer id '" + l.id + "' is reserved (an output's name for the master)";
+            return false;
+        }
+        if (l.outputId == kMasterOutput && !plays) {
+            error = "folder " + label(i) + " has no bus, so it has no output to route";
+            return false;
+        }
+        if (!l.outputId.empty() && l.outputId != kMasterOutput) {
+            auto it = index.find(l.outputId);
+            if (it == index.end()) {
+                error = "layer " + label(i) + " has its output on '" + l.outputId + "', which is not in the project";
+                return false;
+            }
+            const LayerSpec& to = p.layers[it->second];
+            if (!to.folder || !to.busEnabled) {
+                error = "layer " + label(i) + " has its output on " + label(it->second) + ", which is not a bus";
+                return false;
+            }
+            if (it->second == i) {
+                error = "layer " + label(i) + " has its output on itself";
+                return false;
+            }
+            if (!plays) {
+                error = "folder " + label(i) + " has no bus, so it has no output to route";
+                return false;
+            }
+        }
         if (plays) {
             const std::string to = routeTarget(p, l);
             if (!to.empty()) edges[i].push_back(index.at(to));
@@ -188,19 +219,19 @@ bool validateRouting(const ProjectSpec& p, std::string& error) {
                 return false;
             }
             const LayerSpec& to = p.layers[it->second];
-            if (!to.folder || !to.busEnabled) {
-                error = "layer " + label(i) + " sends to " + label(it->second) + ", which is not a bus";
+            if (to.folder && !to.busEnabled) {
+                error = "layer " + label(i) + " sends to folder " + label(it->second) + ", which has no bus (a send goes to a bus or a track)";
                 return false;
             }
-            if (it->second == i) {
-                error = "layer " + label(i) + " sends to itself";
+            if (it->second == i && !s.feedback) {
+                error = "layer " + label(i) + " sends to itself (only a \"feedback\" send may)";
                 return false;
             }
             if (!plays) {
                 error = "folder " + label(i) + " has no bus, so it has nothing to send";
                 return false;
             }
-            edges[i].push_back(it->second);
+            if (!s.feedback) edges[i].push_back(it->second);
         }
         for (const ComponentSpec& c : l.components) {
             if (!c.hasKey) continue;
@@ -248,7 +279,8 @@ bool validateRouting(const ProjectSpec& p, std::string& error) {
                     on = on || k == y;
                     if (on) loop += label(k) + " -> ";
                 }
-                error = "routing makes a loop: " + loop + label(y) + " (a layer can't hear itself)";
+                error = "routing makes a loop: " + loop + label(y) +
+                        " (a layer can't hear itself, except through a send marked \"feedback\"; keys never feed back)";
                 return false;
             }
             if (state[y] == 0) {
@@ -420,12 +452,19 @@ bool parseProject(std::string_view text, ProjectSpec& out, std::string& error) {
             }
             spec.pattern = l.string("pattern");
             spec.parentId = l.string("parent");
+            if (const Json* output = l.get("output"); output && output->type != Json::Type::Null) {
+                if (output->type != Json::Type::String) {
+                    error = layerName + ": output must be a bus folder's id, \"@master\", or \"\" for its folder's bus (or the master)";
+                    return false;
+                }
+                spec.outputId = output->str;
+            }
             spec.folder = l.boolean("folder", false);
             spec.busEnabled = l.boolean("bus", true);
             if (!parseAudioTrack(l, assets, layerName, static_cast<double>(maxSteps), spec, audioEndSteps, error)) return false;
             if (const Json* sends = l.get("sends"); sends && sends->type != Json::Type::Null) {
                 if (sends->type != Json::Type::Array) {
-                    error = layerName + ": sends must be a list of {\"to\": bus id, \"level\", \"pre\", \"mute\"}";
+                    error = layerName + ": sends must be a list of {\"to\": bus or track id, \"level\", \"pre\", \"mute\", \"feedback\", \"limiter\"}";
                     return false;
                 }
                 if (sends->arr.size() > static_cast<size_t>(kMaxSends)) {
@@ -439,9 +478,11 @@ bool parseProject(std::string_view text, ProjectSpec& out, std::string& error) {
                         send.level = clampd(sj.number("level", 1.0), 0.0, kMaxMixGain);
                         send.pre = sj.boolean("pre", false);
                         send.mute = sj.boolean("mute", false);
+                        send.feedback = sj.boolean("feedback", false);
+                        send.limiter = sj.boolean("limiter", true);
                     }
                     if (send.to.empty()) {
-                        error = layerName + ": every send needs a \"to\" bus";
+                        error = layerName + ": every send needs a \"to\" bus or track";
                         return false;
                     }
                     spec.sends.push_back(std::move(send));
