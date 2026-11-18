@@ -1,5 +1,6 @@
 // The fx-space stereo effects: Haas widener with a mono check, a 3-band stereo imager with vectorscope, and a channel mixer.
 #include "builtin_fx_space.h"
+#include "builtin_fx_merged_stereomod.h"
 
 #include <algorithm>
 #include <cmath>
@@ -73,7 +74,7 @@ const ModuleDescriptor& haasDescriptor() {
 // below `guard` the delayed side is left undelayed (a complementary split, flat when summed: the bass stays
 // centred and mono-safe), the delayed side's level can be trimmed to re-centre it, Mono check sums the output to
 // listen as a phone speaker would, and the display meters the correlation and the level lost in mono.
-class Haas final : public EffectBase {
+class Haas : public EffectBase {
 public:
     const ModuleDescriptor& descriptor() const noexcept override { return haasDescriptor(); }
 
@@ -169,7 +170,7 @@ const ModuleDescriptor& imagerDescriptor() {
 // three line up in phase; each band's side scaled by its width (0: mono, 1: as is, 2: twice the side), then the
 // mid and side gains and the output. The display meters the correlation per band and overall, the balance, and a
 // vectorscope: the last 128 points (mid, side) of the output, one every 4 frames.
-class Imager final : public EffectBase {
+class Imager : public EffectBase {
 public:
     const ModuleDescriptor& descriptor() const noexcept override { return imagerDescriptor(); }
 
@@ -295,7 +296,7 @@ const ModuleDescriptor& mixerDescriptor() {
 
 // A 2 x 2 matrix: each output side is the two inputs scaled by -1 (inverted) .. 0 (none) .. 1 (as is). Swaps,
 // mono folds, single-side copies and polarity flips are all corners of it.
-class ChannelMixer final : public EffectBase {
+class ChannelMixer : public EffectBase {
 public:
     const ModuleDescriptor& descriptor() const noexcept override { return mixerDescriptor(); }
 
@@ -333,6 +334,15 @@ private:
 };
 
 }  // namespace
+
+// FX consolidation (fx_merged.h): the descriptors and classes the merged devices wrap as variants
+// (builtin_fx_merged_stereomod.cpp), the classes unchanged.
+const ModuleDescriptor& legacyImagerDescriptor() { return imagerDescriptor(); }
+ModuleProcessor* makeImagerAs(const ModuleDescriptor& variant) noexcept { return new (std::nothrow) AsVariant<Imager>(variant); }
+const ModuleDescriptor& legacyHaasDescriptor() { return haasDescriptor(); }
+ModuleProcessor* makeHaasAs(const ModuleDescriptor& variant) noexcept { return new (std::nothrow) AsVariant<Haas>(variant); }
+const ModuleDescriptor& legacyChannelMixerDescriptor() { return mixerDescriptor(); }
+ModuleProcessor* makeChannelMixerAs(const ModuleDescriptor& variant) noexcept { return new (std::nothrow) AsVariant<ChannelMixer>(variant); }
 
 void registerFxSpaceStereo(ModuleRegistry& registry) {
     registry.add(haasDescriptor(), &make<Haas>);
