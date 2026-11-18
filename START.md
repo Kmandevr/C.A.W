@@ -1,12 +1,12 @@
 # C.A.W start file for chat agents
 
-Generated from `c1155d61f623787fa1796677bd04216ef0b4ed15` on the default branch at 2026-11-18T09:26:30Z by `scripts/agent-context.js`. Don't edit it; edit the files it bundles.
+Generated from `8dd1956e9a635aef969f27671afba150d67bd9e0` on the default branch at 2026-11-18T14:43:58Z by `scripts/agent-context.js`. Don't edit it; edit the files it bundles.
 
 Read this whole file before doing anything else. It replaces separately reading `AGENTS.md`, `CLAUDE.md`, `docs/vision.md` and `.claude/rules/*.md`.
 
 ## Before you start: confirm in your first reply
 
-1. The commit this file was generated from (`c1155d6`).
+1. The commit this file was generated from (`8dd1956`).
 2. The task issue number and your branch (`gpt/<issue>-<short-name>`).
 3. The progress comment's next action, or "new task" if there is none yet.
 4. Which area rules below apply to the files you will touch.
@@ -42,7 +42,7 @@ At the start of every task/chat, read:
 
 1. [`AGENTS.md`](AGENTS.md) (this file)
 2. [`CLAUDE.md`](CLAUDE.md) for project-wide rules and workflow
-3. [`docs/vision.md`](docs/vision.md) for owner decisions, principles and open questions
+3. [`docs/vision.md`](docs/vision.md) for the owner's product direction and principles (plans and open questions are tracked privately)
 4. The applicable rule file(s) below before changing files in that area
 
 Do not read the whole repository by default. Follow the layered reading guidance in `CLAUDE.md`; open only the files needed for the task. The code is the source of truth for what is built. Keep facts, proposals, assumptions and open questions distinct. Ask the owner before settling an open question.
@@ -174,9 +174,9 @@ The owner's decisions and repository documentation take precedence over an agent
 
 # C.A.W
 
-**C.A.W** (Code Auditioning Workspace; crow logo) is an experimental, code-driven sound-design and music workspace. The current Flutter app ships Android and Windows builds; the portable C++20 engine is also built and tested by Linux/Windows CI. The app has three sections: Build, Files and Arrange. Not every roadmap feature is built: [docs/app.md](docs/app.md) is shipped app behaviour, [docs/engine-build-status.md](docs/engine-build-status.md) the native side and its boundaries, [docs/core-and-feature-plan.md](docs/core-and-feature-plan.md) planned work. The beta sends anonymous telemetry and optional feedback through a relay; audio processing stays local, and there is no in-app AI or cloud audio. AI coding assistants are development tools, not a product feature. The owner's product direction is in [docs/vision.md](docs/vision.md).
+**C.A.W** (Code Auditioning Workspace; crow logo) is an experimental code-driven sound-design and music workspace. The Flutter app ships Android and Windows builds; Linux/Windows CI also builds and tests the C++20 engine. The app has three sections: Build, Files and Arrange. [docs/app.md](docs/app.md) is shipped app behaviour, [docs/engine-build-status.md](docs/engine-build-status.md) the native side and its boundaries; planned work lives in the private Kmandevr/AutoStacc-Hub (docs/caw/). The beta sends anonymous telemetry and optional feedback through a relay; audio stays local, and there is no in-app AI or cloud audio. AI coding assistants are development tools, not a feature. The owner's product direction is in [docs/vision.md](docs/vision.md).
 
-**Data and services:** Kmandevr/C.A.W-Telemetry holds what C.A.W collects (telemetry, feedback Issues, privacy policy, terms) and the beta relay; its PLAN.md is the contract's other copy. Work cross-repo changes in one session (add_repo).
+**Data and services:** Kmandevr/C.A.W-Telemetry holds what C.A.W collects (telemetry, feedback Issues, privacy policy, terms) and the beta relay; its PLAN.md is the contract's other copy. The private Kmandevr/AutoStacc-Hub holds the companion and C.A.W's plans and owner questions (docs/caw/). Work cross-repo changes in one session (add_repo).
 
 ## Start of every session
 
@@ -217,7 +217,7 @@ One-file changes: just do them. Every file (code, notes, Claude config) has one 
 
 ## Context
 
-Keep context while it helps; clean up only at a task boundary (task done, PR opened or merged, before `/clear`) or when context is crowded. Drop the superseded (stale file reads, re-run check outputs, finished subtasks). Carry into any compaction or summary: the owner's requirements and decisions, security constraints, unresolved issues, verified results (with the command that showed them), branch and next step. Multi-step task at a boundary: the `handoff` skill. A handoff is never the only copy of a requirement or decision (those go in `docs/` or Issues first).
+Keep context while it helps; clean up only at a task boundary (task done, PR opened or merged, before `/clear`) or when crowded. Drop the superseded (stale reads, re-run outputs, finished subtasks). Carry into any compaction or summary: the owner's requirements and decisions, security constraints, unresolved issues, verified results (with the command that showed them), branch and next step. Multi-step task at a boundary: the `handoff` skill. A handoff is never the only copy of a requirement or decision (those go in `docs/` or Issues first).
 
 ## Checking changes
 
@@ -233,13 +233,13 @@ Develop on the branch the session names. Put `Closes #N` in pull requests that f
 
 ---
 title: Vision and principles
-summary: Owner-approved product direction, actual platform support, current product boundaries and unresolved owner decisions.
+summary: Owner-approved product direction, actual platform support and current product boundaries; unresolved owner decisions are tracked privately.
 updated: 2026-11-18
 ---
 
 # Vision and principles
 
-This note records product direction, not a list of shipped features. The permanent [roadmap](roadmap.md) is the canonical plan and sequencing source. For implementation truth, use [App](app.md), [Engine](engine.md) and [Engine implementation status](engine-build-status.md). Code and tests take precedence over this vision when describing what exists.
+This note records product direction, not a list of shipped features. The roadmap and feature plans are tracked privately. For implementation truth, use [App](app.md), [Engine](engine.md) and [Engine implementation status](engine-build-status.md). Code and tests take precedence over this vision when describing what exists.
 
 ## Product identity and direction
 
@@ -249,7 +249,7 @@ C.A.W. is a code-driven sound-design and music-production workspace for creating
 
 **Goal (owner, 2026-11-03):** C.A.W. is not trying to be a conventional DAW, and it doesn't have to work the way one does. It must be able to do everything a good DAW can do, because there is no good DAW for mobile. Its own way of working (code, patterns, one shared project and engine model, phone-first touch) is the means; full production capability is the requirement. It keeps a lightweight architecture so weak phones stay first-class, rather than copying a heavyweight DAW's design. **Owner (2026-11-09):** it should *feel* like a full DAW, closest to REAPER, "but better and more specialized": the familiar workflow (tracks, mixer, FX stacks, automation, a browser) with C.A.W.'s own strengths built in, such as writing, building and hearing your own effects inside the song. The layout is in [decisions](decisions.md) ("The app's layout").
 
-**Run on anything (owner, 2026-11-12):** the app changes according to the hardware it runs on and then runs, "so nothing beats C.A.W". The same project opens everywhere; the hardware decides how much is computed live and how much is rendered ahead (**dynamic play-ahead**: untouched tracks rendered ahead in batches, switching to real time "quickly and silently so no one ever notices" when the user needs low latency). Exports never change to save CPU. The publicity target is a hacked graphing calculator ("it's a stunt, if it works it's fine"). Target release 1.1.0 (owner, 2026-11-13; it was 1.2.0). [Proposal] The design and order are in the [play-ahead plan](play-ahead-plan.md) (#191); nothing of it is built.
+**Run on anything (owner, 2026-11-12):** the app changes according to the hardware it runs on and then runs, "so nothing beats C.A.W". The same project opens everywhere; the hardware decides how much is computed live and how much is rendered ahead (**dynamic play-ahead**: untouched tracks rendered ahead in batches, switching to real time "quickly and silently so no one ever notices" when the user needs low latency). Exports never change to save CPU. The publicity target is a hacked graphing calculator ("it's a stunt, if it works it's fine"). Target release 1.1.0 (owner, 2026-11-13; it was 1.2.0). Nothing of it is built; the design is planned privately (#191).
 
 **What play-ahead should give the user** ([Assumption]: estimated from the engine's structure, not measured; the Benchmark turns each into a fact or drops it; figures in the plan's "Expected gains"):
 
@@ -325,7 +325,7 @@ Important boundaries:
 
 The creative direction includes bytebeat and mathematical audio, procedural synthesis, raw bit-level sound design, reusable effects, modulation, waveform/wavetable work, resonant and physical-model-inspired sounds, and controlled sound variation.
 
-These are not all implemented. The [lightweight creative audio systems design](lightweight-creative-audio-systems.md) separates existing primitives from proposed additions and estimates impact, effort and runtime cost.
+These are not all implemented. The private lightweight creative audio systems design separates existing primitives from proposed additions and estimates impact, effort and runtime cost.
 
 Audio import, sample editing, multisampling, non-destructive audio transformations and recording are desired workflow extensions, but remain future work until they appear in the app and engine implementation.
 
@@ -341,30 +341,11 @@ GitHub-based library synchronization and source selection are also not implement
 
 **Owner direction (2026-11-09):** C.A.W. is intended to be free and open source. It is licensed under [Apache-2.0](../LICENSE). AutoStacc distributes the free app and the optional support bundles. Core functionality is not paywalled. Optional support/donation bundles may provide prebuilt libraries of FX, instruments, presets, samples and sounds; they use the same component/content formats as free and creator-made content. Do not claim AutoStacc distribution or bundle delivery is implemented.
 
-New dependencies require exact version, transitive dependency and licence review and an entry in [decisions](decisions.md). Dependencies must be permissive (no GPL/AGPL); no paid licence is assumed. See [visual creation and signal routing](visual-routing-and-library-integration.md) for the current candidate evaluation.
+New dependencies require exact version, transitive dependency and licence review and an entry in [decisions](decisions.md). Dependencies must be permissive (no GPL/AGPL); no paid licence is assumed.
 
 ## Open owner decisions
 
-Only the owner can settle these questions. Do not silently convert them into implementation requirements.
-
-| Question | Current status |
-|---|---|
-| iOS distribution | Decided 2026-11-09: iOS ships through the App Store without C++ authoring ([decisions](decisions.md)) |
-| Licence for user-created/shared sound modules | Open |
-| How AutoStacc delivers the free app and the support bundles | Open |
-| Initial trust state for a newly encountered native component | Open; each component's trust level must be explicitly chosen by the user; no silent trust assignment ([decisions](decisions.md), 2026-11-06) |
-| How the optional AutoStacc cloud library syncs with project folders and the global library | Open; compatibility is required ([decisions](decisions.md), 2026-11-03) |
-| What "100% private" means for the companion app and AutoStacc hub | Decided 2026-11-18: both its code (a closed-source, private repository) and its data ([decisions](decisions.md)) |
-| Note clips stored as pattern text with .mid import/export, instead of stored as MIDI (#158) | Decided on the owner's behalf 2026-11-10, to confirm; also whether the app keeps one MIDI converter, the Dart one or the engine's ([decisions](decisions.md)) |
-| Android developer verification for the sideloaded APK | Open. **[Fact, checked 2026-11-10]** Google requires apps on certified Android devices to come from registered developers, from 2026-09-30 in Brazil, Indonesia, Singapore and Thailand and globally in 2027 (no US or EU date yet); a free limited-distribution account reaches only 20 devices, and ADB installs and an advanced sideloading flow remain ([Android Developers Blog](https://android-developers.googleblog.com/2026/03/android-developer-verification-rolling-out-to-all-developers.html)). The owner decides whether and when to register `com.kmandevr.caw` with its signing key; it is not needed for `v1.0.0-beta.1` |
-| Audio (2026-11-11, branch `audio-ui`): the look of the audio clips, the input sheet, Settings › Audio's input part and the sampler editor (in the APK); a default edge fade; recordings kept with the project or in a shared library; loop takes as stacked lanes for comping; imports copied (now) or referenced in place ([decisions](decisions.md#2026-11-11-audio-assets-clips-sampler-and-input-wp-j-choices-to-confirm)) | Open |
-| Whether effect tails should carry across a layer loop restart in every case | Open; see [engine playback](engine.md#playback) |
-| Music video editor (2026-11-12, #182): the editor's look, to check in the APK. The other questions were answered the same day (full screen, empty stretches, effect targets, the Strobe warning, Falling notes for new videos, keys in the catalogue; [decisions](decisions.md#2026-11-12-the-music-video-editors-open-questions-answered-owner)) | Open (look only) |
-| Piano roll (WP-K2, 2026-11-11): the look of the Quantize… sheet and the step bar (in the APK); whether Ctrl+U should use the sheet's last settings; whether the slide-up on-screen keys should also step; the MIDI CC numbers for automation lanes (CC7 volume, CC10 pan, others from CC20, as proposed in #11), the volume curve (127·√gain) and how parameter lanes scale ([app](app.md)) | Open |
-| Play-ahead and run anywhere (1.1.0, #191): which calculator for the stunt; what counts as intent to switch a track to real time, and whether an edit without intent may be heard up to the ring's depth late; whether ahead tracks on weak phones keep their full voices; a 16-bit preview cache on the lowest tier; the look of the two-part CPU meter and of "what's ready to play"; whether Freeze is a user action, automatic, or both; first of all, the fallback when an ahead track's worker falls behind (a warm spare instance or an audible fade) and whether a module format bump for runtime-state calls is acceptable ([play-ahead plan](play-ahead-plan.md#open-questions-for-the-owner)) | Open |
-| Non-linear routing (1.1.0, #233): the graph view's look, and how the per-block routing selectors look | Open |
-| AutoStacc beta pack (1.0.8, #227): which fourth device replaces bit-shift distortion, now that the bitwise operations are in the built-in Bit distortion | Open |
-| Matching REAPER's flow ([REAPER's flow](reaper-flow.md)): the phone look of the new screens (Export sheet, send knob). S splits, Touch automation from a transport button and on-screen keys with pads (owner, 2026-11-10). The clip bar, the ruler with the loop range, markers and regions, the recording flow and automation writing are built; their look and the choices made for them are to confirm ([decisions](decisions.md)) | Open |
+Questions only the owner can settle are tracked privately.
 
 ---
 
@@ -439,7 +420,7 @@ Docs stay clean and current: a note says what is true now, not how it got there.
 
 - **One home per fact.** Before writing, Grep `docs/` for the topic and edit the note that owns it; link instead of repeating. A new note earns its place only for a new topic, and goes in `docs/index.md`.
 - **Rewrite, don't append.** When a fact, plan or decision changes, replace the old text where it stands. History goes only to `log.md` (one dated line per session's changes) and `decisions.md` (what was chosen and why, newest first). Delete notes, sections and examples that no longer apply; never leave "old"/"deprecated" text in place.
-- **Label certainty.** Mark claims **[Fact]** (verified, with source and date when it can change), **[Proposal]** or **[Assumption]**. Owner questions go in the open-questions register in `vision.md`. Never describe planned code as built.
+- **Label certainty.** Mark claims **[Fact]** (verified, with source and date when it can change), **[Proposal]** or **[Assumption]**. Owner questions go in the private open-questions register (Kmandevr/AutoStacc-Hub, docs/caw/open-questions.md); plans for unbuilt work go there too, not in this repository. Never describe planned code as built.
 - **Check before writing.** Notes describe what the repository actually does: check the code or config first, and keep notes short.
 - **Frontmatter** on every note: `title`, `summary` (one line, shown in the repo map), `covers` (when the note describes code: a one-line list of files, `dir/` folders or `*` globs, e.g. `[engine/vm/, scripts/docs-test.js]`), `updated` (YYYY-MM-DD).
 - When code a note covers changes, re-check that note in the same change and bump `updated`. New code areas get a `covers:` entry. `node scripts/docs-test.js` checks all of this; the Stop hook reminds you, and CI fails a stale note on pull requests (`--strict`).
