@@ -6,7 +6,7 @@ const os = require('node:os');
 const path = require('node:path');
 const zlib = require('node:zlib');
 const crypto = require('node:crypto');
-const { applyPatch, encodePatch, apkOps, build, assetList, parseAssets, pickBase, readZip } = require('./update-delta');
+const { applyPatch, encodePatch, apkOps, build, assetList, parseAssets, pickBase, readZip, validPrefix } = require('./update-delta');
 
 function crc32(buf) {
   let c = ~0;
@@ -185,6 +185,14 @@ test('assets are listed by name: the shorthand is android and windows, and a sec
   assert.throws(() => assetList({ assets: [{ name: 'x', kind: 'exe' }] }), /kind/);
   assert.throws(() => assetList({ assets: [{ name: 'x', kind: 'apk' }, { name: 'x', kind: 'files' }] }), /twice/);
   assert.throws(() => parseAssets(['android:apk']), /NAME:KIND:FILE/);
+});
+
+test('the prefix is checked: CI\'s release and Every change prefixes pass, nothing path-like does', () => {
+  for (const p of ['caw-main', 'caw-1.0.6-alpha.1', 'caw-1.0.0', 'caw-1.0.7-beta.2']) assert.ok(validPrefix(p), p);
+  for (const p of ['', '../caw', 'caw/main', 'caw..1', 'Caw-main', '-caw', 'caw main', 'caw.', `caw-${'x'.repeat(70)}`, true]) {
+    assert.ok(!validPrefix(p), String(p));
+  }
+  assert.throws(() => build({ version: '1', prefix: '../evil', out: '.', apk: 'x.apk', log: () => {} }), /prefix/);
 });
 
 test('the previous release of the same channel is the base', () => {

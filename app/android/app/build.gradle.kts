@@ -53,10 +53,16 @@ android {
     productFlavors {
         create("github") {
             dimension = "store"
+            buildConfigField("boolean", "SELF_UPDATES", "true")
         }
         create("play") {
             dimension = "store"
+            // MainActivity answers caw/updates with notImplemented: no PackageInstaller code is reachable.
+            buildConfigField("boolean", "SELF_UPDATES", "false")
         }
+    }
+    buildFeatures {
+        buildConfig = true
     }
 
     externalNativeBuild {

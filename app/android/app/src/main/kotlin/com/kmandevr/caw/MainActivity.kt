@@ -33,9 +33,14 @@ class MainActivity : FlutterActivity() {
         super.configureFlutterEngine(flutterEngine)
 
         val updatesChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, UPDATES_METHOD_CHANNEL)
-        val updates = UpdateInstaller(this) { updatesChannel }
-        updateInstaller = updates
-        updatesChannel.setMethodCallHandler { call, result -> updates.handle(call, result) }
+        if (BuildConfig.SELF_UPDATES) {
+            val updates = UpdateInstaller(this) { updatesChannel }
+            updateInstaller = updates
+            updatesChannel.setMethodCallHandler { call, result -> updates.handle(call, result) }
+        } else {
+            // The play flavour: Google Play updates the app, so the installer is never built or reached.
+            updatesChannel.setMethodCallHandler { _, result -> result.notImplemented() }
+        }
 
         // The companion app's service (CompanionClient.kt, docs/companion-protocol.md): "absent" until one is installed.
         val companionClient = CompanionClient(this)

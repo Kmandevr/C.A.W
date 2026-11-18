@@ -1,5 +1,6 @@
 // The companion protocol's caller check (docs/companion-protocol.md), as pure Kotlin with no Android types, so the
-// companion app reuses it and a JVM test can run it: one package for the sender's uid, the permission, the signer.
+// companion app reuses it and a JVM test can run it: one package for the sender's uid, then its signer (and a
+// permission, only when one is asked for).
 package com.kmandevr.caw
 
 /** What the check reads from the system; `AndroidPackageFacts` (CompanionClient.kt) answers from PackageManager. */
@@ -18,7 +19,10 @@ interface PackageFacts {
 }
 
 object CompanionCallerCheck {
-    /** Declared with protectionLevel="signature" and asked for in both apps' manifests. */
+    /**
+     * The signature permission the design names. Not declared by the main app (a hostile app declaring it first would
+     * make C.A.W's own install fail): whether the companion declares and enforces it is open (docs/companion-protocol.md).
+     */
     const val PERMISSION = "com.kmandevr.caw.permission.COMPANION"
     const val MAIN_PACKAGE = "com.kmandevr.caw"
 
@@ -35,7 +39,8 @@ object CompanionCallerCheck {
      * Whether a message whose `Message.sendingUid` is [sendingUid] comes from [expectedPackage], signed with this
      * app's own key. [ownCertSha256] is the SHA-256 of each of this app's current signing certificates, read at run
      * time (no digest is written in the source); every one must be the sender's. Below API 28 the signatures of
-     * [myUid] and the sender are compared instead.
+     * [myUid] and the sender are compared instead. [requiredPermission], when given, must be held too; the main app
+     * passes none, since the signer is the boundary.
      */
     fun check(
         sendingUid: Int,
@@ -44,6 +49,7 @@ object CompanionCallerCheck {
         myUid: Int,
         ownCertSha256: List<ByteArray>,
         facts: PackageFacts,
+        requiredPermission: String? = null,
     ): Verdict {
         // -1: not posted through a Messenger.
         if (sendingUid < 0) return Verdict.NO_SENDER
@@ -51,7 +57,9 @@ object CompanionCallerCheck {
         // A shared uid could hold another app's code: exactly one package, the expected one.
         if (packages.size != 1) return Verdict.NOT_ONE_PACKAGE
         if (packages[0] != expectedPackage) return Verdict.WRONG_PACKAGE
-        if (!facts.holdsPermission(expectedPackage, PERMISSION)) return Verdict.NO_PERMISSION
+        if (requiredPermission != null && !facts.holdsPermission(expectedPackage, requiredPermission)) {
+            return Verdict.NO_PERMISSION
+        }
         val signed = if (sdkInt >= API_SIGNING_CERTIFICATE) {
             ownCertSha256.isNotEmpty() && ownCertSha256.all { it.size == 32 && facts.hasCertificateSha256(sendingUid, it) }
         } else {

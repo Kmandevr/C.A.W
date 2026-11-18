@@ -1,6 +1,7 @@
 // The main app's side of the companion protocol (docs/companion-protocol.md): binds the companion's service (3 s),
-// sends one Message per request, checks each reply's sender (CompanionCallerCheck.kt), times requests out and
-// unbinds when idle. Answers the caw/companion channel; with no companion installed every answer is "absent".
+// checks the companion again when bound and before each send, checks each reply's sender before reading it
+// (CompanionCallerCheck.kt), times requests out and unbinds when idle. Answers the caw/companion channel; with no
+// companion installed every answer is "absent".
 package com.kmandevr.caw
 
 import android.content.ComponentName
@@ -104,7 +105,11 @@ class CompanionClient(private val context: Context) {
             override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
                 bindTimeout?.let { main.removeCallbacks(it) }
                 bindTimeout = null
-                if (binder == null) return dropAll("absent")
+                // What answered must still be the companion signed with this app's key (it may have been replaced).
+                if (binder == null || !companionLooksRight()) {
+                    unbind()
+                    return dropAll("absent")
+                }
                 val m = Messenger(binder)
                 service = m
                 for (id in pending.keys.toList()) send(m, id)
@@ -148,6 +153,10 @@ class CompanionClient(private val context: Context) {
 
     private fun send(to: Messenger, id: Int) {
         val p = pending[id] ?: return
+        if (!companionLooksRight()) {
+            unbind()
+            return dropAll("absent")
+        }
         main.postDelayed(p.timeout, CompanionCallerCheck.clampTimeoutMs(p.timeoutMs))
         try {
             to.send(p.message)
@@ -157,7 +166,12 @@ class CompanionClient(private val context: Context) {
     }
 
     private fun onReply(msg: Message) {
-        // A Bundle from another process may hold classes this app can't read: such a reply is dropped (it times out).
+        // The sender first, before anything of the message is read: a reply from anyone but the companion is dropped
+        // unread (its request times out).
+        val sender = CompanionCallerCheck.check(msg.sendingUid, CompanionCallerCheck.COMPANION_PACKAGE, Build.VERSION.SDK_INT,
+            Process.myUid(), ownCerts, facts)
+        if (sender != CompanionCallerCheck.Verdict.ALLOWED) return
+        // A Bundle may still hold classes this app can't read: such a reply is dropped too.
         val data = try {
             msg.data.also { it.getInt(KEY_ID, -1) }
         } catch (_: RuntimeException) {
@@ -165,9 +179,6 @@ class CompanionClient(private val context: Context) {
         }
         val id = data.getInt(KEY_ID, -1)
         val p = pending[id] ?: return
-        val sender = CompanionCallerCheck.check(msg.sendingUid, CompanionCallerCheck.COMPANION_PACKAGE, Build.VERSION.SDK_INT,
-            Process.myUid(), ownCerts, facts)
-        if (sender != CompanionCallerCheck.Verdict.ALLOWED) return finish(id, mapOf("outcome" to "refused"))
         if (msg.what != p.what) return finish(id, mapOf("outcome" to "refused"))
         val body = data.getString(KEY_BODY)
         finish(id, mapOf(

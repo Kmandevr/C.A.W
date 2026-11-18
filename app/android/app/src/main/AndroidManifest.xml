@@ -34,14 +34,6 @@
     <!-- Android 12+: lets an automatic update (Settings › About › Updates, off by default) install without the system
          prompt when C.A.W is its own installer of record (PackageInstaller.SessionParams.setRequireUserAction). -->
     <uses-permission android:name="android.permission.UPDATE_PACKAGES_WITHOUT_USER_ACTION" />
-    <!-- The companion app (docs/companion-protocol.md): a permission only apps signed with C.A.W's own key get, declared
-         and asked for here and in the companion, so it exists whichever installs first. The companion's service
-         requires it, and each side also checks the other's uid, permission and signer per message
-         (CompanionCallerCheck.kt). -->
-    <permission
-        android:name="com.kmandevr.caw.permission.COMPANION"
-        android:protectionLevel="signature" />
-    <uses-permission android:name="com.kmandevr.caw.permission.COMPANION" />
     <!-- Backups keep projects and settings but never telemetry's state: it holds the delete keys for this device's
          public reports and queued feedback with its email (res/xml/backup_rules.xml, data_extraction_rules.xml). -->
     <application

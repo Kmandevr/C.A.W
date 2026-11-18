@@ -468,6 +468,14 @@ function assetList(o) {
   return list;
 }
 
+/**
+ * Whether [prefix] may start every published file's name: the asset-name pattern, plus single dots for a version
+ * (`caw-1.0.6-alpha.1`, `caw-main`), so it can never hold a path separator, `..` or a space.
+ */
+function validPrefix(prefix) {
+  return typeof prefix === 'string' && /^[a-z0-9][a-z0-9.-]{0,63}$/.test(prefix) && !prefix.includes('..') && !prefix.endsWith('.');
+}
+
 /** `--asset NAME:KIND:FILE[:BASE]` values (a file path must not hold a colon) as [assetList]'s entries. */
 function parseAssets(values) {
   return values.map((v) => {
@@ -485,6 +493,7 @@ function parseAssets(values) {
 function build(o) {
   const log = o.log || ((l) => console.log(l));
   // Checked before anything is made.
+  if (!validPrefix(o.prefix)) throw new Error(`prefix "${o.prefix}" must be lower-case letters, digits, dashes and single dots`);
   const kinds = assetList(o).map((a) => ({ kind: a.kind, file: a.file, base: a.base, name: `${o.prefix}-${a.name}.cawpatch` }));
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'caw-delta-'));
   const opts = { bsdiff: o.bsdiff !== false && haveTool('bsdiff') && haveTool('bzip2'), bsdiffMin: o.bsdiffMin ?? 64 * 1024, tmp, log };
@@ -588,6 +597,6 @@ function main(argv) {
   }
 }
 
-module.exports = { encodePatch, applyPatch, readZip, listFiles, apkOps, filesPatchEntries, pickBase, build, assetList, parseAssets, Writer };
+module.exports = { encodePatch, applyPatch, readZip, listFiles, apkOps, filesPatchEntries, pickBase, build, assetList, parseAssets, validPrefix, Writer };
 
 if (require.main === module) process.exitCode = main(process.argv.slice(2));

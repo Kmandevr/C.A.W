@@ -325,7 +325,8 @@ jobs:
           retention-days: 90
 
   # The Play build (docs/companion-protocol.md): built only to check it builds and that its APK carries neither
-  # install permission. Not uploaded or released; the release assets stay the github build's.
+  # install permission (its caw/updates channel answers notImplemented). Not uploaded or released; the release
+  # assets stay the github build's.
   android-play:
     name: Android Play build check
     if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.installables)
@@ -389,7 +390,6 @@ jobs:
           if grep -E 'REQUEST_INSTALL_PACKAGES|UPDATE_PACKAGES_WITHOUT_USER_ACTION' permissions.txt; then
             echo "::error::The play APK still asks for an install permission (app/android/app/src/play/AndroidManifest.xml)."; exit 1
           fi
-          grep -q 'com.kmandevr.caw.permission.COMPANION' permissions.txt || { echo "::error::The play APK lost the companion permission."; exit 1; }
           echo "The play APK carries neither install permission."
 
   windows:
