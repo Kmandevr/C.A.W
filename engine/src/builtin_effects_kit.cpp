@@ -12,6 +12,7 @@
 #include "caw/library/filter.hpp"
 #include "caw/library/lfo.hpp"
 #include "caw/library/stereo.hpp"
+#include "fx_merged.h"
 
 // Original code (C.A.W. is Apache-2.0), on the Library's filters and LFO.
 
@@ -95,7 +96,7 @@ const ModuleDescriptor& filterDescriptor() {
     return d;
 }
 
-class FilterEffect final : public EffectBase {
+class FilterEffect : public EffectBase {
 public:
     const ModuleDescriptor& descriptor() const noexcept override { return filterDescriptor(); }
 
@@ -222,6 +223,15 @@ private:
     int type_ = kLp24;
     double resonance_ = 0.2, cutoff_[2] = {1200, 1200};
 };
+
+}  // namespace
+
+// The old effect as a variant of a merged device (builtin_fx_merged_eqfilter.cpp, fx_merged.h AsVariant): its own
+// (legacy) descriptor, and an instance of the same class under a variant's descriptor.
+const ModuleDescriptor& legacyFilterDescriptor() { return filterDescriptor(); }
+ModuleProcessor* makeFilterAs(const ModuleDescriptor& variant) noexcept { return new (std::nothrow) AsVariant<FilterEffect>(variant); }
+
+namespace {
 
 // ---------- Phaser ----------
 

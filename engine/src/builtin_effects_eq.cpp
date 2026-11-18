@@ -7,6 +7,7 @@
 
 #include "caw/library/eq.hpp"
 #include "caw/library/spectrum.hpp"
+#include "fx_merged.h"
 #include "stereo_pair.h"
 
 // Original code (C.A.W. is Apache-2.0). Every band is one to eight trapezoidal state-variable filter stages
@@ -66,7 +67,7 @@ const ModuleDescriptor& eqDescriptor() {
     return d;
 }
 
-class Eq final : public EffectBase {
+class Eq : public EffectBase {
 public:
     const ModuleDescriptor& descriptor() const noexcept override { return eqDescriptor(); }
 
@@ -295,6 +296,11 @@ private:
 ModuleProcessor* makeEq() noexcept { return new (std::nothrow) Eq(); }
 
 }  // namespace
+
+// The old effect as a variant of a merged device (builtin_fx_merged_eqfilter.cpp, fx_merged.h AsVariant): its own
+// (legacy) descriptor, and an instance of the same class under a variant's descriptor.
+const ModuleDescriptor& legacyEqDescriptor() { return eqDescriptor(); }
+ModuleProcessor* makeEqAs(const ModuleDescriptor& variant) noexcept { return new (std::nothrow) AsVariant<Eq>(variant); }
 
 void registerEq(ModuleRegistry& registry) { registry.add(eqDescriptor(), &makeEq); }
 
