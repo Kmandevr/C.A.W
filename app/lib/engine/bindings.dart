@@ -263,8 +263,9 @@ class Bindings {
             Pointer<Utf8> Function(Pointer<Void>, Pointer<Utf8>, Pointer<Utf8>, Int32),
             Pointer<Utf8> Function(Pointer<Void>, Pointer<Utf8>, Pointer<Utf8>, int)>('caw_engine_reload_component'),
         loadComponentEx = lib.lookupFunction<
-            Pointer<Utf8> Function(Pointer<Void>, Pointer<Utf8>, Pointer<Utf8>, Int32, Uint32),
-            Pointer<Utf8> Function(Pointer<Void>, Pointer<Utf8>, Pointer<Utf8>, int, int)>('caw_engine_load_component_ex'),
+            Pointer<Utf8> Function(Pointer<Void>, Pointer<Utf8>, Pointer<Utf8>, Int32, Uint32, Pointer<Utf8>),
+            Pointer<Utf8> Function(Pointer<Void>, Pointer<Utf8>, Pointer<Utf8>, int, int, Pointer<Utf8>)>(
+            'caw_engine_load_component_ex'),
         scanComponent = lib.lookupFunction<
             Pointer<Utf8> Function(Pointer<Void>, Pointer<Utf8>, Pointer<Utf8>, Uint32),
             Pointer<Utf8> Function(Pointer<Void>, Pointer<Utf8>, Pointer<Utf8>, int)>('caw_engine_scan_component'),
@@ -512,8 +513,9 @@ class Bindings {
   final Pointer<Utf8> Function(Pointer<Void>, Pointer<Utf8>) setProject;
   final Pointer<Utf8> Function(Pointer<Void>, Pointer<Utf8>, Pointer<Utf8>, int) loadComponent;
   final Pointer<Utf8> Function(Pointer<Void>, Pointer<Utf8>, Pointer<Utf8>, int) reloadComponent;
-  /// caw_engine_load_component_ex (API 37): a load with flags ([cawLoadLegacyGrace]).
-  final Pointer<Utf8> Function(Pointer<Void>, Pointer<Utf8>, Pointer<Utf8>, int, int) loadComponentEx;
+  /// caw_engine_load_component_ex (API 37): a load with flags ([cawLoadLegacyGrace], which needs the trusted file's
+  /// SHA-256 as the last argument; the engine refuses grace when the file's hash differs).
+  final Pointer<Utf8> Function(Pointer<Void>, Pointer<Utf8>, Pointer<Utf8>, int, int, Pointer<Utf8>) loadComponentEx;
   /// caw_engine_scan_component (API 37): the pre-load scan as JSON, nothing loaded (the engine may be null).
   final Pointer<Utf8> Function(Pointer<Void>, Pointer<Utf8>, Pointer<Utf8>, int) scanComponent;
   final int Function(Pointer<Void>, Pointer<Utf8>) unloadComponent;

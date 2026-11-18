@@ -1220,7 +1220,16 @@ Future<String> _loadComponentOffThread(
 // mismatch: the call changes here only.
 Pointer<Utf8> _loadWithLegacyGrace(
         Bindings b, Pointer<Void> engine, Pointer<Utf8> path, Pointer<Utf8> id, int trust, String sha256) =>
-    b.loadComponentEx(engine, path, id, trust, cawLoadLegacyGrace);
+    _withUtf8(sha256, (hash) => b.loadComponentEx(engine, path, id, trust, cawLoadLegacyGrace, hash));
+
+T _withUtf8<T>(String s, T Function(Pointer<Utf8>) use) {
+  final p = s.toNativeUtf8();
+  try {
+    return use(p);
+  } finally {
+    calloc.free(p);
+  }
+}
 
 /// The pre-load scan of a file as the engine's loader would see it, nothing loaded (no engine needed), on a
 /// background isolate. Needs the engine library (API 37).
