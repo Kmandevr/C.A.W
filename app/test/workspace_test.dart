@@ -515,7 +515,10 @@ void main() {
     await tester.scrollUntilVisible(find.text('SPECTRUM · 0–24 kHz'), 200, scrollable: scrollable);
     expect(find.text('512-POINT HANN / FFT'), findsOneWidget);
     expect(tester.widgetList<CustomPaint>(find.byType(CustomPaint)).length, greaterThanOrEqualTo(3));
+    await tester.scrollUntilVisible(find.text('AUDIO CLOCK'), 200, scrollable: scrollable);
+    expect(find.textContaining('Output: not running'), findsOneWidget);  // no engine here
     await tester.scrollUntilVisible(find.text('TRACK SIGNAL PATHS'), 200, scrollable: scrollable);
+    await tester.scrollUntilVisible(find.text('MIDI'), 200, scrollable: scrollable);
     expect(find.text('MIDI'), findsOneWidget);
     expect(find.text('Beat pattern'), findsOneWidget);
     expect(find.text('Chorus'), findsOneWidget);
