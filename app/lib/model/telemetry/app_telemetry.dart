@@ -18,7 +18,7 @@ import '../settings.dart';
 import 'peripherals.dart';
 import 'device_probe.dart';
 import 'telemetry.dart';
-import 'telemetry_config.dart';
+import 'package:caw_services/telemetry/telemetry_config.dart';
 
 /// Starts telemetry for [state]: loads its file next to the settings, then follows the app. [startup] runs from
 /// main()'s first line.

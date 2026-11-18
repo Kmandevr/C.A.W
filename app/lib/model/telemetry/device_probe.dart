@@ -8,7 +8,7 @@ import 'dart:io';
 
 import 'package:flutter/services.dart';
 
-import 'report_schema.dart';
+import 'package:caw_services/telemetry/report_schema.dart';
 
 /// The probed part of `device` (the app adds screen, audio, peripherals, profile, eco and refresh rate).
 class DeviceFacts {

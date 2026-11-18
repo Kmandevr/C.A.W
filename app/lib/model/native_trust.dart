@@ -4,7 +4,7 @@ import 'dart:io';
 
 import '../engine/engine.dart';
 import 'cpp_component.dart';
-import 'sha256.dart';
+import 'package:caw_services/sha256.dart';
 import 'atomic_file.dart';
 
 /// The owner's rules: an effect the user wrote on this device loads as Trusted without asking. Anything else (a

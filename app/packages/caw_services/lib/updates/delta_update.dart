@@ -5,13 +5,21 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:isolate';
 
-import '../../platform/update_installer.dart';
 import '../sha256.dart';
 import 'patch_format.dart';
 import 'releases.dart';
 import 'update_fetch.dart';
 import 'update_manifest.dart';
 import 'windows_stage.dart';
+
+/// What a small update reads from this install. The app's `UpdateInstaller` (one per platform) provides it.
+abstract interface class InstalledBuild {
+  /// Android: the installed APK (`ApplicationInfo.sourceDir`); null where there is none or it is split.
+  Future<String?> installedPackage();
+
+  /// Windows: the folder caw.exe runs from; null elsewhere.
+  Future<Directory?> installDir();
+}
 
 /// A patch that fits this install: what it downloads instead of [full].
 class DeltaPlan {
@@ -85,7 +93,7 @@ class DeltaUpdater {
   /// install: no manifest or patch, no checksums to verify the result, the patch no smaller, or (Android) the
   /// installed APK's SHA-256 is not the build the patch starts from. On Windows the app's files are checked when the
   /// patch is applied ([stageWindows]), not here.
-  Future<DeltaPlan?> plan(ReleaseInfo r, ReleaseAsset full, AssetKind kind, UpdateInstaller installer, Directory dir) async {
+  Future<DeltaPlan?> plan(ReleaseInfo r, ReleaseAsset full, AssetKind kind, InstalledBuild installer, Directory dir) async {
     if (full.sha256 == null || full.checksumConflict) return null;
     final m = await manifest(r, dir);
     if (m == null) return null;
@@ -122,7 +130,7 @@ class DeltaUpdater {
 
   /// Android: downloads the patch and rebuilds the release's APK at [out] from the installed one; the result must
   /// hash to the release's published SHA-256 (checked as it is written) before anything installs it.
-  Future<File> rebuildApk(DeltaPlan plan, UpdateInstaller installer, Directory dir, File out,
+  Future<File> rebuildApk(DeltaPlan plan, InstalledBuild installer, Directory dir, File out,
       {void Function(int, int)? progress, DownloadCancel? cancel}) async {
     final apk = await installer.installedPackage();
     if (apk == null) throw const PatchError('the installed package is not readable');
@@ -138,7 +146,7 @@ class DeltaUpdater {
 
   /// Windows: downloads the patch and stages the changed files beside the app for the next start. Every file of the
   /// new build must then be either already here (same SHA-256) or staged.
-  Future<int> stageWindows(DeltaPlan plan, UpdateInstaller installer, Directory dir,
+  Future<int> stageWindows(DeltaPlan plan, InstalledBuild installer, Directory dir,
       {void Function(int, int)? progress, DownloadCancel? cancel}) async {
     final install = await installer.installDir();
     if (install == null) throw const PatchError('the app folder is unknown');

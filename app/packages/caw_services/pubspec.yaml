@@ -1,0 +1,13 @@
+# C.A.W's platform-free services (Apache-2.0, as C.A.W): the update check, small updates, the telemetry relay's
+# client and schema, SHA-256 and the companion protocol. Pure Dart, no Flutter, so the companion app can share it.
+name: caw_services
+description: "C.A.W's platform-free services: updates, the telemetry relay client and schema, SHA-256, the companion protocol."
+publish_to: 'none'
+version: 1.0.0
+
+environment:
+  sdk: ^3.13.5
+
+dependencies:
+  # Path checks for a Windows small update (BSD-3-Clause, the Dart team; docs/decisions.md "Small updates").
+  path: 1.9.1

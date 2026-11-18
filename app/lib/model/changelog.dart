@@ -1,6 +1,6 @@
 // Reads the bundled CHANGELOG.md (the subset it uses: "## version" entries, "###" groups, "-" bullets nested by two
 // spaces, **bold** and `code`) for Settings' What's new, and decides when the sheet shown once after an update is due.
-import 'updates/release_version.dart';
+import 'package:caw_services/updates/release_version.dart';
 
 /// A run of text, bold or code or plain.
 class ChangelogSpan {

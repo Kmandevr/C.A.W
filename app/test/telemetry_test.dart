@@ -7,16 +7,16 @@ import 'dart:ffi' show Abi;
 import 'dart:math';
 
 import 'package:caw/model/problem_log.dart';
-import 'package:caw/model/sha256.dart';
+import 'package:caw_services/sha256.dart';
 import 'package:caw/model/telemetry/day_stats.dart';
 import 'package:caw/model/telemetry/device_probe.dart';
 import 'package:caw/model/telemetry/peripherals.dart';
 import 'package:caw/platform/audio_route.dart';
 import 'package:caw/platform/midi_input.dart';
-import 'package:caw/model/telemetry/relay_client.dart';
-import 'package:caw/model/telemetry/report_schema.dart';
+import 'package:caw_services/telemetry/relay_client.dart';
+import 'package:caw_services/telemetry/report_schema.dart';
 import 'package:caw/model/telemetry/telemetry.dart';
-import 'package:caw/model/telemetry/telemetry_config.dart';
+import 'package:caw_services/telemetry/telemetry_config.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 class FakeRelay implements RelayHttp {

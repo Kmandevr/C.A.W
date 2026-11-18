@@ -455,7 +455,7 @@ jobs:
               echo "This APK is signed with a throwaway key: uninstall the previous C.A.W. before installing it."
             fi
             echo
-            # One line per asset; the app's updater checks a download against it (lib/model/updates/releases.dart).
+            # One line per asset; the app's updater checks a download against it (app/packages/caw_services/lib/updates/releases.dart).
             for f in "caw-$version-android.apk" "caw-$version-windows.zip" "caw-$version-android-symbols.zip" "${update_assets[@]}"; do
               echo "SHA256 $f: $(sha256sum "$f" | cut -d' ' -f1)"
             done
@@ -518,7 +518,7 @@ jobs:
             echo "- Android (arm64): caw-main-android.apk"
             echo "- Windows (x64): caw-main-windows.zip, unzip and run caw.exe"
             echo
-            # The app reads these lines (lib/model/updates/releases.dart).
+            # The app reads these lines (app/packages/caw_services/lib/updates/releases.dart).
             echo "Version: $version"
             echo "Build: $short"
             for f in caw-main-android.apk caw-main-windows.zip "${update_assets[@]}"; do

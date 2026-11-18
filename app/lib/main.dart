@@ -18,7 +18,7 @@ import 'model/live_midi.dart';
 import 'model/problem_log.dart';
 import 'model/settings.dart';
 import 'model/telemetry/app_telemetry.dart';
-import 'model/updates/update_fetch.dart';
+import 'package:caw_services/updates/update_fetch.dart';
 import 'model/updates/update_service.dart';
 import 'platform/desktop_window.dart';
 import 'platform/display_rate.dart';

@@ -10,12 +10,12 @@ import 'dart:math';
 import 'package:flutter/foundation.dart';
 
 import '../atomic_file.dart';
-import '../sha256.dart';
+import 'package:caw_services/sha256.dart';
 import 'day_stats.dart';
 import 'device_probe.dart';
-import 'relay_client.dart';
-import 'report_schema.dart';
-import 'telemetry_config.dart';
+import 'package:caw_services/telemetry/relay_client.dart';
+import 'package:caw_services/telemetry/report_schema.dart';
+import 'package:caw_services/telemetry/telemetry_config.dart';
 
 /// Where the telemetry state is kept (one JSON file in app-private storage; memory in tests).
 abstract class TelemetryStore {

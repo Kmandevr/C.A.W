@@ -7,7 +7,7 @@ const zlib = require('node:zlib');
 const crypto = require('node:crypto');
 const { spawnSync } = require('node:child_process');
 
-// ---- The patch format (CAWPATCH v1; read on the device by app/lib/model/updates/patch_format.dart) ----
+// ---- The patch format (CAWPATCH v1; read on the device by app/packages/caw_services/lib/updates/patch_format.dart) ----
 //
 // "CAWPATCH", a version byte (1), then one raw DEFLATE stream holding:
 //   varint fileCount

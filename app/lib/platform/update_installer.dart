@@ -6,8 +6,9 @@ import 'dart:io';
 import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 
-import '../model/updates/releases.dart';
-import '../model/updates/windows_stage.dart';
+import 'package:caw_services/updates/delta_update.dart' show InstalledBuild;
+import 'package:caw_services/updates/releases.dart';
+import 'package:caw_services/updates/windows_stage.dart';
 
 /// What a finished download led to, said in one line.
 class UpdateOutcome {
@@ -22,7 +23,7 @@ class UpdateOutcome {
   final File? file;
 }
 
-abstract class UpdateInstaller {
+abstract class UpdateInstaller implements InstalledBuild {
   UpdatePlatform get platform;
 
   /// Whether this platform's installer refuses an older version over a newer one (Android's versionCode check).
@@ -46,9 +47,11 @@ abstract class UpdateInstaller {
 
   /// Android: the installed APK (`ApplicationInfo.sourceDir`), which a small update is rebuilt from; null where
   /// there is none or it is split into several APKs.
+  @override
   Future<String?> installedPackage() async => null;
 
   /// Windows: the folder caw.exe runs from, where a small update stages and swaps its files; null elsewhere.
+  @override
   Future<Directory?> installDir() async => null;
 
   /// At the start, before the app is shown: finishes a small update staged by the last run (Windows). [relaunch]
