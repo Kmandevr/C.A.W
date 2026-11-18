@@ -224,7 +224,7 @@ class _CapabilityRowState extends State<_CapabilityRow> {
                 duration: Motion.fade(Motion.standard, level),
                 transitionBuilder: (child, a) => FadeTransition(
                   opacity: a,
-                  child: level == MotionLevel.full ? SizeTransition(sizeFactor: a, axisAlignment: -1, child: child) : child,
+                  child: level == MotionLevel.full ? SizeTransition(sizeFactor: a, alignment: Alignment.topLeft, child: child) : child,
                 ),
                 child: _open
                     ? Padding(
