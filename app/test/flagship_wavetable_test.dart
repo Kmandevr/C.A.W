@@ -104,7 +104,7 @@ void main() {
       await openSynth(tester);
       final button = find.byKey(const ValueKey('flagship-import-osc1_'));
       expect(button, findsOneWidget);
-      expect(find.text('Import wavetable…'), findsWidgets);
+      expect(find.byTooltip('Import wavetable…'), findsWidgets);
       await tester.ensureVisible(button);
       await tester.tap(button);
       await tester.pumpAndSettle();

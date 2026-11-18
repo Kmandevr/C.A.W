@@ -88,8 +88,15 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  Finder synthScroll() =>
-      find.descendant(of: find.byKey(const ValueKey('flagship-synth')), matching: find.byType(Scrollable)).first;
+  /// The phone's panel shown now (Oscillators, Filters, Modulation): its scroll.
+  Finder synthScroll() => find.byWidgetPredicate((w) => w is Scrollable && w.axisDirection == AxisDirection.down &&
+      w.key == null).hitTestable().first;
+
+  /// Shows the phone's panel [i] (0 Oscillators, 1 Filters, 2 Modulation).
+  Future<void> panel(WidgetTester tester, int i) async {
+    await tester.tap(find.byKey(ValueKey('flagship-dot-$i')));
+    await tester.pumpAndSettle();
+  }
 
   /// Scrolls [scrollable] (by its position: its heroes take drags) until [target] is built and on screen.
   Future<void> reveal(WidgetTester tester, Finder target, [Finder? scrollable]) async {
@@ -109,14 +116,6 @@ void main() {
         of: find.byKey(const ValueKey('mod-source-strip')), matching: find.byType(Scrollable)).first);
     await tester.pumpAndSettle();
     return tester.getCenter(f);
-  }
-
-  /// Scrolls the SYNTH page to section [id] and opens it.
-  Future<void> openSection(WidgetTester tester, String id) async {
-    final header = find.byKey(ValueKey('expand-$id'));
-    await reveal(tester, header);
-    await tester.tap(header);
-    await tester.pumpAndSettle();
   }
 
   group('framework', () {
@@ -145,12 +144,14 @@ void main() {
       expect(tester.takeException(), isNull);
     });
 
-    wtest('three tabs, as Vital: SYNTH, EFFECTS and MATRIX', (tester) async {
+    wtest('one page, no tabs: the phone\'s three panels hold the effects and the matrix', (tester) async {
       await openSynth(tester);
-      for (final (tab, page) in [('fx', 'flagship-fx'), ('matrix', 'flagship-matrix'), ('synth', 'flagship-synth')]) {
-        await tester.tap(find.byKey(ValueKey('device-tab-$tab')));
-        await tester.pumpAndSettle();
-        expect(find.byKey(ValueKey(page)), findsOneWidget, reason: tab);
+      expect(find.byWidgetPredicate((w) => w.key is ValueKey<String> &&
+          (w.key! as ValueKey<String>).value.startsWith('device-tab-')), findsNothing);
+      for (final (i, page) in [(1, 'flagship-fx'), (2, 'flagship-matrix'), (0, 'osc-1')]) {
+        await panel(tester, i);
+        await reveal(tester, find.byKey(ValueKey(page)));
+        expect(find.byKey(ValueKey(page)), findsOneWidget, reason: page);
       }
       expect(tester.takeException(), isNull);
     });
@@ -205,7 +206,7 @@ void main() {
   group('flagship', () {
     wtest('dragging the attack handle changes env 1\'s attack', (tester) async {
       await openSynth(tester);
-      await openSection(tester, 'flagship-envelopes');
+      await panel(tester, 2);
       final view = find.byKey(const ValueKey('env-env1_'));
       await reveal(tester, view);
       expect(view, findsOneWidget);
@@ -257,12 +258,10 @@ void main() {
       await tester.pumpAndSettle();
       expect(synth().value('mod${slot}_amt'), greaterThan(0.25));
       expect(synth().value('osc1_level'), level);
-      // The MATRIX page lists it and removes it.
-      await tester.tap(find.byKey(const ValueKey('device-tab-matrix')));
-      await tester.pumpAndSettle();
-      await tester.scrollUntilVisible(find.byKey(ValueKey('modroute-remove-$slot')), 100,
-          scrollable: find.descendant(of: find.byKey(const ValueKey('flagship-matrix')), matching: find.byType(Scrollable)).first);
-      await tester.tap(find.byKey(ValueKey('modroute-remove-$slot')));
+      // The Modulation panel's matrix list shows it and removes it.
+      await panel(tester, 2);
+      await reveal(tester, find.byKey(ValueKey('fmatrix-remove-$slot')));
+      await tester.tap(find.byKey(ValueKey('fmatrix-remove-$slot')));
       await tester.pumpAndSettle();
       expect(ModMatrix(synth()).routesTo('osc1_level'), isEmpty);
       expect(synth().value('mod${slot}_src'), 0);
@@ -296,7 +295,7 @@ void main() {
       expect(ModMatrix(synth()).routeOf(ModSource.lfo2, 'osc1_level'), isNull, reason: 'out of assign mode a tap does nothing');
     });
 
-    wtest('assign mode\'s Edit opens the source\'s section in place', (tester) async {
+    wtest('assign mode\'s Edit opens the source on the Modulation panel', (tester) async {
       await openSynth(tester);
       await tester.tapAt(await chip(tester, 'lfo1'));
       await tester.pumpAndSettle();
@@ -379,23 +378,24 @@ void main() {
       await openSynth(tester);
       final m = ModMatrix(synth());
       for (final src in [ModSource.lfo1, ModSource.env2, ModSource.random]) {
-        m.add(src, 'osc1_frame');
+        m.add(src, 'osc1_pan');
       }
       await tester.pump();
-      final knob = find.byKey(const ValueKey('dknob-osc1_frame'));
+      final knob = find.byKey(const ValueKey('dknob-osc1_pan'));
       final paint = tester.widgetList<CustomPaint>(find.descendant(of: knob, matching: find.byType(CustomPaint)))
           .map((c) => c.painter).whereType<DeviceKnobPainter>().single;
       expect(paint.rings, hasLength(3));
-      expect(find.descendant(of: find.byKey(const ValueKey('dknob-badge-osc1_frame')), matching: find.text('3')), findsOneWidget);
+      expect(find.descendant(of: find.byKey(const ValueKey('dknob-badge-osc1_pan')), matching: find.text('3')), findsOneWidget);
     });
 
-    wtest('an oscillator\'s section opens in place; the filter curve edits its parameters', (tester) async {
+    wtest('an oscillator\'s panel turns on; the filter curve edits its parameters', (tester) async {
       await openSynth(tester);
-      await openSection(tester, 'flagship-osc-2');
+      await reveal(tester, find.byKey(const ValueKey('dpower-osc2_on')));
       expect(find.byKey(const ValueKey('wt-osc2_')), findsWidgets);
       await tester.tap(find.byKey(const ValueKey('dpower-osc2_on')));
       await tester.pumpAndSettle();
       expect(synth().value('osc2_on'), 1);
+      await panel(tester, 1);
       final curve = find.byKey(const ValueKey('filter-flt1_'));
       await reveal(tester, curve);
       final before = synth().value('flt1_cutoff');
@@ -405,8 +405,10 @@ void main() {
       expect(synth().value('flt1_resonance'), greaterThan(0.15));
     });
 
-    wtest('the fold warp shows its fold mode beside the warp; Whole stack sets it (#197)', (tester) async {
+    wtest('the fold warp shows its fold mode with the oscillator\'s other knobs; Whole stack sets it (#197)', (tester) async {
       await openSynth(tester);
+      await tester.tap(find.byKey(const ValueKey('osc1-toggle')));
+      await tester.pumpAndSettle();
       final whole = find.byKey(const ValueKey('dchoice-osc1_fold_mode-1'));
       expect(whole, findsNothing, reason: 'only with the fold warp');
       synth().set('osc1_warp', warpNames.indexOf('Fold').toDouble());
@@ -539,7 +541,7 @@ void main() {
       });
     }
 
-    wtest('the flagship editor\'s MATRIX page with routes, phone', (tester) async {
+    wtest('the flagship editor\'s Modulation panel with routes, phone', (tester) async {
       ModMatrix(synth()).add(ModSource.env3, 'flt1_cutoff');
       ModMatrix(synth()).add(ModSource.lfo1, 'flt1_cutoff');
       late BuildContext ctx;
@@ -549,12 +551,12 @@ void main() {
       })), goldenSizes['phone']!);
       openDeviceEditor(ctx, s, s.project.layers.first, DeviceTarget.instrumentSlot);
       await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const ValueKey('device-tab-matrix')));
+      await tester.tap(find.byKey(const ValueKey('flagship-dot-2')));
       await tester.pumpAndSettle();
       await expectLater(goldenScreen, matchesGoldenFile('goldens/device_flagship_matrix_phone.png'));
     });
 
-    wtest('the flagship editor\'s FILTER and FX pages, desktop', (tester) async {
+    wtest('the flagship editor\'s lower half (mod sources, matrix, voice), desktop', (tester) async {
       late BuildContext ctx;
       await pumpGolden(tester, Scaffold(body: Builder(builder: (c) {
         ctx = c;
@@ -562,7 +564,9 @@ void main() {
       })), goldenSizes['desktop']!);
       openDeviceEditor(ctx, s, s.project.layers.first, DeviceTarget.instrumentSlot);
       await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const ValueKey('device-tab-fx')));
+      final wide = tester.state<ScrollableState>(find.descendant(of: find.byKey(const ValueKey('flagship-wide')),
+          matching: find.byType(Scrollable)).first);
+      wide.position.jumpTo(wide.position.maxScrollExtent);
       await tester.pumpAndSettle();
       await expectLater(goldenScreen, matchesGoldenFile('goldens/device_flagship_fx_desktop.png'));
     });

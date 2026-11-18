@@ -197,12 +197,12 @@ void main() {
     await tester.tap(inInst('flagship-inline-src-env3'));
     await tester.pumpAndSettle();
     expect(inInst('modroute-${r.slot}'), findsOneWidget);
-    // The full editor's MATRIX shows the same route.
+    // The full editor's matrix list (its Modulation panel) shows the same route.
     await tester.tap(find.byKey(const ValueKey('fx-instrument-open')));
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('device-tab-matrix')));
+    await tester.tap(find.byKey(const ValueKey('flagship-dot-2')));
     await tester.pumpAndSettle();
-    expect(find.byKey(ValueKey('modroute-${r.slot}')), findsOneWidget);
+    expect(find.byKey(ValueKey('fmatrix-${r.slot}')), findsOneWidget);
     expect(tester.takeException(), isNull);
     await done(tester);
   });

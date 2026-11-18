@@ -96,5 +96,6 @@ const _ceilings = <String, ({bool motion, int stoppedPainted, int playingPainted
   'org.caw.compressor': (motion: false, stoppedPainted: 10, playingPainted: 500, firstBuilds: 1200, knobBuilds: 1200),
   'org.caw.delay.pingpong': (motion: true, stoppedPainted: 10, playingPainted: 1560, firstBuilds: 7950, knobBuilds: 1720),
   'org.caw.phaser': (motion: true, stoppedPainted: 10, playingPainted: 1520, firstBuilds: 2050, knobBuilds: 1220),
-  'org.caw.synth.flagship': (motion: true, stoppedPainted: 10, playingPainted: 270, firstBuilds: 16100, knobBuilds: 1240),
+  // The flagship opens on its Oscillators panel (a phone): no modulated knob or moving drawing there, so no motion.
+  'org.caw.synth.flagship': (motion: false, stoppedPainted: 10, playingPainted: 270, firstBuilds: 16100, knobBuilds: 1240),
 };

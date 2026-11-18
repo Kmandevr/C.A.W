@@ -120,7 +120,10 @@ const _flagshipId = 'org.caw.synth.flagship';
 
 /// Import wavetable…: a WAV file into the instrument's User table, and this oscillator plays it.
 class ImportWavetableButton extends StatefulWidget {
-  const ImportWavetableButton({super.key, required this.prefix});
+  const ImportWavetableButton({super.key, required this.prefix, this.compact = false});
+
+  /// An icon alone (an oscillator panel's title row), its name in the tooltip.
+  final bool compact;
 
   /// The oscillator's parameter prefix (`osc1_`): its table moves to User once the import is taken.
   final String prefix;
@@ -170,7 +173,19 @@ class _ImportWavetableButtonState extends State<ImportWavetableButton> {
   }
 
   @override
-  Widget build(BuildContext context) => Align(
+  Widget build(BuildContext context) => widget.compact
+      ? IconButton(
+          key: ValueKey('flagship-import-${widget.prefix}'),
+          tooltip: 'Import wavetable…',
+          iconSize: 17,
+          padding: EdgeInsets.zero,
+          constraints: const BoxConstraints(minWidth: 34, minHeight: 36),
+          color: Neon.dim,
+          onPressed: _busy ? null : _import,
+          icon: _busy
+              ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2))
+              : const Icon(Icons.file_open))
+      : Align(
         alignment: Alignment.centerLeft,
         child: TextButton.icon(
           key: ValueKey('flagship-import-${widget.prefix}'),
