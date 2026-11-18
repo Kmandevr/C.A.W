@@ -1,7 +1,7 @@
 ---
 title: C.A.W. roadmap
 summary: Permanent product roadmap: verified current state, ordered implementation stages, future production capabilities, performance gates and explicit scope boundaries.
-updated: 2026-11-17
+updated: 2026-11-18
 ---
 
 # C.A.W. roadmap
@@ -104,6 +104,8 @@ An overview by area, checked against the repository on 2026-11-03. The stage tab
 - C.A.W is published on Google Play and the iOS App Store (#222).
 
 The owner has neither store account yet. What 1.2.0 holds is undecided.
+
+**Release 1.6.0 (owner, 2026-11-18):** given over to plug-in security and the companion app: least privilege for the main app, the companion app as updater, network and trust holder and later AutoStacc's secondary hub with the cloud library, and the telemetry admin view ([plug-in hosting plan](plugin-hosting-plan.md#least-privilege-and-the-companion-app), #239). Not built.
 
 **Play-ahead (render-ahead):** moved into 1.1.0 (owner, 2026-11-13; it had been planned for 1.2.0). It renders ahead of the playhead so that heavy projects play smoothly. **[Proposal]** It is planned and not built in this repository yet.
 

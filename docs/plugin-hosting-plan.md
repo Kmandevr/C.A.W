@@ -1,12 +1,12 @@
 ---
 title: Plug-in hosting plan
-summary: Least privilege and the companion app first, the optional isolation design, the silent staged plan for hosting CLAP/VST3 plug-ins (#212, live in 1.1.0), the verified facts and the owner's open questions; planned, not built.
+summary: Least privilege and the companion app (1.6.0) first, the optional isolation design, the silent staged plan for hosting CLAP/VST3 plug-ins (#212, live in 1.1.0), the verified facts and the owner's open questions; planned, not built.
 updated: 2026-11-18
 ---
 
 # Plug-in hosting plan
 
-**[Proposal]** None of this is built. It is an architect review from 2026-11-17, laid down silently in steps (the owner's groundwork rule, [decisions](decisions.md)). It goes live in 1.1.0. The owner reviews the isolation design before step 1.
+**[Proposal]** None of this is built. It is an architect review from 2026-11-17, laid down silently in steps (the owner's groundwork rule, [decisions](decisions.md)). Hosting goes live in 1.1.0, and least privilege and the companion app in 1.6.0 (owner, 2026-11-18). The owner reviews the isolation design before step 1.
 
 **Owner direction (2026-11-18):** least privilege comes first and Isolated is an option the user can choose, not the default ([decisions](decisions.md)). The design for that is [Least privilege and the companion app](#least-privilege-and-the-companion-app).
 
@@ -45,21 +45,40 @@ updated: 2026-11-18
 - location is declared only up to Android 11 (`maxSdkVersion="30"`), and Bluetooth scanning is `neverForLocation`;
 - linked sample folders are granted read-only.
 
-**The companion app** has its own package, so its own permissions:
-- It holds `REQUEST_INSTALL_PACKAGES`, `UPDATE_PACKAGES_WITHOUT_USER_ACTION` and `INTERNET`: the self-updater, the update check, telemetry and feedback. Later it becomes the AutoStacc hub (owner, 2026-11-18): every download, the user's whole library, files and the account, so account tokens never live in the process that loads plug-ins.
-- **Private (owner, 2026-11-18):** the companion app and its data are 100% private: a closed-source, private repository, unlike C.A.W itself (Apache-2.0, [vision](vision.md)). Nothing in it is shared or exposed. Long term it is AutoStacc's secondary hub; the two work as one.
-- **Admin view (owner):** the telemetry and feedback that C.A.W-Telemetry collects are shown in an admin view inside the companion app, for the owner and the people they trust, to see how the app is used and to find vulnerabilities. This changes where collected data is shown, so the C.A.W-Telemetry repository's PLAN.md, privacy policy and access rules are updated in the same change when it is built.
-- **Review and takedown (owner, 2026-11-18),** stated in a clear disclaimer that users accept:
-  - anything **sold** on AutoStacc (plug-ins, effects, samples, anything) may be reviewed at any time, without notifying the creator;
-  - anything only **hosted** on AutoStacc or the companion app is private, and is reviewed only after a notice that it is causing a problem;
-  - either way, malicious code or intent can be taken down.
-  - **The automatic malware check is not a review (owner, 2026-11-18):** it runs on each upload, sends no file or data to the owner or the team, and only refuses malicious content. Where it applies, it can report that an upload was refused and why.
-  
-  **[Assumption]** to check with a lawyer before launch: hosting laws may require more. For example, the EU's Digital Services Act requires a hosting service to give the uploader a statement of reasons when it removes their content.
-- The main app talks to it only in fixed, structured messages (an update check, a telemetry report in the existing schema), never arbitrary payloads, so a plug-in can't use it to send data out.
-- It accepts only callers signed with C.A.W's own key: a custom permission with `protectionLevel="signature"`. Never `sharedUserId`, which would merge the two apps' permissions again. The main app needs a `<queries>` entry to find it.
-- **Play builds:** the Play companion carries no install permissions either, since Play does the updating.
+**The companion app** (owner, 2026-11-18: release **1.6.0** is given over to it and to this security work). It has its own package, so its own permissions.
+- **What it holds:** `REQUEST_INSTALL_PACKAGES`, `UPDATE_PACKAGES_WITHOUT_USER_ACTION` and `INTERNET`, for the self-updater, the update check, telemetry and feedback. Plug-in trust is kept here too (below).
+- **What it grows into:** AutoStacc's secondary hub; the two work as one. It holds every download, the user's whole library and the account, and stores the user's data, sounds and one-shots in the cloud for C.A.W to use. C.A.W reads them through the companion, so the main app still needs no network, and account tokens never live in the process that loads plug-ins.
+- **Private (owner):** its code (a closed-source, private repository, unlike C.A.W's Apache-2.0, [vision](vision.md)) and its data. Nothing in it is shared or exposed.
+- **Admin view (owner):** the telemetry and feedback that C.A.W-Telemetry collects are shown in an admin view inside the companion app, for the owner and the people they trust, to see how the app is used and to find vulnerabilities. When it is built, the C.A.W-Telemetry repository's PLAN.md, privacy policy and access rules change in the same piece of work.
+- **Talking to it:** the main app sends only fixed, structured messages (an update check, a telemetry report in the existing schema, a request for a library file), never arbitrary payloads, so a plug-in can't use it to send data out. It accepts only callers signed with C.A.W's own key, through a custom permission with `protectionLevel="signature"`. It never uses `sharedUserId`, which would merge the two apps' permissions again. The main app needs a `<queries>` entry to find it.
+- **Play builds:** the Play companion carries no install permissions, since Play does the updating.
 - **Windows:** the same split, as a helper process. It only helps if the main process is itself restricted (MSIX with an AppContainer). **[Assumption]** that the Flutter app and local CMake builds work in an AppContainer; to test.
+
+**Review, notice and takedown (owner, 2026-11-18),** stated in a clear disclaimer that users accept:
+- **Sold** on AutoStacc (plug-ins, effects, samples, anything): AutoStacc may review it at any time, with no notice or update to the creator.
+- **Stored, not sold:** private. If it is reviewed, the owner of it is told it is being reviewed, and that this doesn't necessarily mean there is a problem.
+- **Taken down,** sold or stored: always with a notice and a way to appeal.
+- **Hosting malicious plug-ins** gets the account banned. An appeal goes through an entirely manual process.
+- **Already downloaded and then found malicious:** the plug-in is disabled at once on every device that has it, and the user can see why.
+- **The automatic malware check is not a review:** it runs on each upload, sends no file or data to the owner or the team, and only refuses malicious content. Where it applies, it tells the uploader the upload was refused and why.
+
+**[Assumption]** a lawyer checks this before launch against the laws where AutoStacc operates. For example, the EU's Digital Services Act requires a statement of reasons when hosted content is removed; the notice above is meant to be that.
+
+### The rest of the design
+
+**[Proposal]** The owner accepted these on 2026-11-18 ("all of the suggestions are good, use some reasoning"). The choices inside each are Claude's, to confirm.
+1. **Trust lives in the companion.** The companion keeps the trust choices, the scan results and the known-bad and known-good lists. A plug-in in the main app can't edit them. The main app asks once per load, so playback pays nothing. Without the companion, choices are kept locally as today.
+2. **The companion doesn't trust the main app.** A signature only proves the caller is C.A.W, not that no plug-in has taken it over. So every message is validated against its schema, each kind is rate-limited, and nothing that installs, uploads or deletes happens without the user's tap in the companion itself.
+3. **Disabling a malicious plug-in.** The companion fetches the known-bad list. A listed plug-in is refused at its next load, and one already playing is unloaded at the next block boundary (its track goes silent, never a crash). The user sees which plug-in it was, why, and what it could have reached: its declared capabilities and the main app's permissions.
+4. **Internet for plug-ins goes through the companion.** A plug-in that declares `network` also names its sites. The companion makes those requests for it, to those sites only, and the user sees them. The main app keeps no `INTERNET` of its own.
+5. **No admin credentials on devices.** The admin view signs in to the relay with a personal account and a second sign-in step. It never holds a GitHub token. There are two roles: viewing, and taking content down or banning. The owner adds and removes people, and every admin read and action is logged.
+6. **C.A.W without the companion** works fully offline (no updates, telemetry, feedback, cloud library or hub). It suggests the companion once, where one of those is asked for. Two Play listings, and Google's developer registration (global from 2027), cover both apps.
+7. **Moving existing users.** First, one update installs the companion through the existing updater. Once it is installed, a later version drops the install permissions. The old path is kept until the companion is confirmed present, so nobody is stranded without updates.
+8. **Signing keys.** Authors register a key through their AutoStacc account. A lost or stolen key is revoked from the account, and what it signed returns to "unsigned" or, if malicious, onto the known-bad list. Builds made on the device are signed with a non-exportable device key, which marks them as the user's own.
+9. **Scanner rules are versioned.** Each verdict records the rules version. Rules update through the companion, and a plug-in is rescanned before its next load when the version changes. False positives are reported through feedback, and the owner (or a trusted person) triages them.
+10. **Shared projects.** Opening a project that needs a plug-in shows each one's state: available, needs a trust choice, missing (with a way to get it from AutoStacc) or blocked. The project still opens, and those tracks stay silent until resolved.
+11. **Windows** gets its own pass: an AppContainer test, code-signing the app (SmartScreen), and update checks that verify a signature, since Windows has no equivalent of Android's same-key rule.
+12. **Keeping and deleting data.** Hosted files and the cloud library are kept until the user deletes them or the account closes. Deleting is the user's own action, as telemetry's delete keys already are. Retention periods go in the privacy policy.
 
 **Free limits in the main app:**
 - third-party code loads only while a project that uses it is open, and unloads when it closes;
@@ -144,4 +163,5 @@ updated: 2026-11-18
 5. Are plug-in GUIs (VST3 editors, CLAP GUI embedding) in scope for 1.1.0?
 6. Which trust a plug-in gets the first time it is seen (already open in [vision](vision.md)).
 7. Which flagging and signing parts to build ([least privilege](#least-privilege-and-the-companion-app)), whether unsigned code may load at all, which findings block for CLAP/VST3, the capability list, and how a warning looks.
-8. Which release the companion app comes in, and whether it starts as the updater alone or as the AutoStacc hub.
+8. **Settled** (owner, 2026-11-18): the companion app is 1.6.0. Open: what protects users between hosting in 1.1.0 and the companion in 1.6.0. **[Proposal]** In 1.1.0 ship the pre-load scan, declared capabilities, plain-language warnings and Blocked for never-seen code, all inside the main app; third-party binaries are in the GitHub build only.
+9. Which trust a never-seen plug-in gets (6): **[Proposal]** Blocked until the user chooses.
