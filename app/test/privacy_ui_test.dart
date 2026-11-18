@@ -1,5 +1,5 @@
 // Tests the privacy and feedback screens at 360 dp wide (beta readiness plan E2, E3, E5, F): the first-run page,
-// Settings › About and beta › Privacy, My data and the feedback sheet, with goldens of each new screen.
+// Settings › App › Privacy and feedback › Privacy, My data and the feedback sheet, with goldens of each new screen.
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
@@ -87,7 +87,7 @@ void main() {
     expect(find.text('What is never sent'), findsOneWidget);
     await tester.scrollUntilVisible(find.text('Turning it off'), 200, scrollable: find.byType(Scrollable).first);
     expect(find.text('All of it is public'), findsOneWidget);
-    expect(find.textContaining('Settings › About and beta › Privacy'), findsWidgets);
+    expect(find.textContaining('Settings › App › Privacy and feedback › Privacy'), findsWidgets);
     await tester.tap(find.byKey(const ValueKey('first-run-continue')));
     expect(continued, isTrue);
     expect(tester.takeException(), isNull);
@@ -120,18 +120,18 @@ void main() {
     Telemetry.current = t;
     addTearDown(() => Telemetry.current = null);
     await _pump(tester, SettingsPage(settings: Settings()));
-    // Settings › About and beta › Privacy, the published policy's path.
-    await tester.tap(find.text('About and beta'));
+    // Settings › App › Privacy and feedback › Privacy (#244).
+    await tester.tap(find.text('App'));
     await tester.pumpAndSettle();
-    // Below the Updates rows on a phone.
-    await tester.ensureVisible(find.text('Privacy'));
+    // Below the Performance, Code editor, Keys, About and Updates cards on a phone.
+    await tester.ensureVisible(find.byKey(const ValueKey('action-about.privacy')));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Privacy'));
+    await tester.tap(find.byKey(const ValueKey('action-about.privacy')));
     await tester.pumpAndSettle();
     expect(find.textContaining('workers.dev/dashboard'), findsOneWidget);
     expect(find.text('Send anonymous telemetry'), findsOneWidget);
     expect(find.textContaining('1 waiting'), findsOneWidget);
-    expect(find.text('Send feedback'), findsOneWidget);
+    expect(find.text('Send feedback'), findsNothing, reason: 'it lives beside the Privacy row (#244)');
     await tester.tap(find.byKey(const ValueKey('switch-privacy.telemetry')));
     await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 10)));
     await tester.pumpAndSettle();

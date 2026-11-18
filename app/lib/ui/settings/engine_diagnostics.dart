@@ -1,4 +1,4 @@
-// Settings › About and beta › Engine diagnostics (the Engine Lab workspace, moved here with #139): CPU, peaks,
+// Settings › App › About › Engine diagnostics (the Engine Lab workspace, moved here with #139): CPU, peaks,
 // overloads, the master scope and spectrum, the screen's display modes, the audio streams' clock, and each track's
 // signal path from what the engine reports.
 // Only capabilities returned by the current engine API are presented; unsupported graph operations are not simulated.

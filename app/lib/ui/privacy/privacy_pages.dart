@@ -197,7 +197,7 @@ Future<void> askKeepTelemetry(BuildContext context, Telemetry t) async {
       title: const Text('Keep sending anonymous data?'),
       content: const Text('This is a release build, so telemetry is now off. The beta build sent anonymous performance and '
           'device data, published openly. Turn it back on to keep helping? You can change this in Settings › '
-          'About and beta › Privacy.'),
+          'App › Privacy and feedback › Privacy.'),
       actions: [
         TextButton(key: const ValueKey('keep-off'), onPressed: () => Navigator.pop(c, false), child: const Text('Leave it off')),
         FilledButton(key: const ValueKey('keep-on'), onPressed: () => Navigator.pop(c, true), child: const Text('Turn it on')),

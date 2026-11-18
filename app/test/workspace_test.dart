@@ -501,7 +501,7 @@ void main() {
     await tester.pump(const Duration(milliseconds: 600));
   });
 
-  testWidgets('Engine diagnostics (Settings › About and beta) report the meters, the scope and track signal paths',
+  testWidgets('Engine diagnostics (Settings › App › About) report the meters, the scope and track signal paths',
       (tester) async {
     final pattern = ModuleDoc(id: 'pat-1', name: 'Beat pattern', source: '---\\nkind: pattern\\n---\\n0 C3 1');
     final layer = LayerDoc(id: 'layer-1', name: 'Noise', color: 0, instrument: ComponentUseDoc('org.caw.synth.flagship'),

@@ -18,7 +18,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 /// An app state whose transport can be on without an engine.
 class _Playing extends AppState {
-  _Playing({super.settings});
+  _Playing();
   bool on = false;
   int toggles = 0;
 
