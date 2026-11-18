@@ -253,6 +253,11 @@ std::unique_ptr<ComponentChain> ComponentChain::make(const ModuleRegistry& regis
             error = "native component " + quoted(spec.id) + " is not loaded; load it with an explicit trust choice first";
             return nullptr;
         }
+        // A merged device's port shape is its chosen variant's (a ducker's key notes, a plain variant's lack of a
+        // sidechain, per-note use), as a rack slot's is its child's own: not the first variant's the registry lists.
+        if (const fx::MergedDevice* m = registry.isBuiltin(spec.id) ? fx::findMergedDevice(spec.id) : nullptr;
+            m && !m->variants.empty())
+            d = &m->variants[fx::variantIndex(*m, spec.params)].descriptor();
         if (instrument && !isInstrument(*d)) {
             error = "native component " + quoted(spec.id) +
                     " can't be an instrument: an instrument has one event input and one stereo audio output";
