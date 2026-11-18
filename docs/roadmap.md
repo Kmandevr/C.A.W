@@ -1,7 +1,7 @@
 ---
 title: C.A.W. roadmap
 summary: Permanent product roadmap: verified current state, ordered implementation stages, future production capabilities, performance gates and explicit scope boundaries.
-updated: 2026-11-17
+updated: 2026-11-18
 ---
 
 # C.A.W. roadmap
@@ -72,11 +72,12 @@ An overview by area, checked against the repository on 2026-11-03. The stage tab
    - MIDI playback and piano roll fixes (#226, #228).
 
    Stem export is already built (#33). App-wide undo is checked against the existing project-wide history (`lib/model/history.dart`) first.
-5. **1.0.6** (owner, 2026-11-17: the FX batch split in two): fewer, better built-in effects (#227). The overlapping effects merge into one device each, no more costly to run than the ones they replace. This batch also has:
+5. **1.0.6** (owner, 2026-11-18; the later batches moved up by one): plug-in security and the companion app (#239). Least privilege for the main app, and the companion app as updater, network and trust holder, later AutoStacc's secondary hub with the cloud library and the telemetry admin view. Also the pre-load scan, declared capabilities and plain-language warnings ([plug-in hosting plan](plugin-hosting-plan.md#least-privilege-and-the-companion-app)).
+6. **1.0.7** (owner, 2026-11-17: the FX batch split in two): fewer, better built-in effects (#227). The overlapping effects merge into one device each, no more costly to run than the ones they replace. This batch also has:
    - the device UI kit, the collapsible FX chain and the Vital-like Flagship (#231);
    - **React to…** (#233);
    - live preset preview: tap through presets while a loop plays.
-6. **1.0.7:** the rest of the FX work (#227):
+7. **1.0.8:** the rest of the FX work (#227):
    - **New standard effects:** exciter, pitch correction, vocoder, analyzer, tuner, loudness meter, dynamic and M/S EQ, tape echo, plate and spring.
    - **Recording tools:** noise reduction (live and on clips), a pedal-style noise gate, de-hum, de-click and de-plosive, de-reverb and breath.
    - **Guitar:** amp, pedal and cabinet modes in Drive and the convolver, and Drive's Bands mode.
@@ -84,18 +85,18 @@ An overview by area, checked against the repository on 2026-11-03. The stage tab
    - **Low-latency monitoring** through effects while recording, with a latency readout.
    - **The free AutoStacc beta pack:** warp, spectral FX, glitch, and one more to choose.
    - **The step-by-step music video** (#232).
-7. **1.0.8:**
+8. **1.0.9:**
    - clip automation's override-or-add choice and VCA groups (#210; MIDI clip lanes that override the track lane are built);
    - receives, parallel paths and drum multi-out (#217);
    - MIDI out and MIDI clock (#211).
-8. **1.0.9:**
+9. **1.0.10:**
    - format migrations, crash recovery, device loss, and a first-run tour and help (#218);
    - drawn LFO shapes and a Flagship wavetable editor (#219).
-9. **1.0.10:** the foundation for hosting other people's plug-ins (#212): the isolation design (reviewed first), the out-of-process host, the scan and the loader behind Isolated, Trusted or Blocked. Users don't see any of it. The feature itself (CLAP and VST3 on Windows, CLAP on Android) ships in 1.1.0.
-10. **1.0.11:** a notation view (#213), a clip launcher, and S Pen precision (#220).
+10. **1.0.11:** the foundation for hosting other people's plug-ins (#212): the isolation design (reviewed first), the out-of-process host, the scan and the loader behind Isolated, Trusted or Blocked. Users don't see any of it. The feature itself (CLAP and VST3 on Windows, CLAP on Android) ships in 1.1.0.
+11. **1.0.12:** a notation view (#213), a clip launcher, and S Pen precision (#220).
 - **Silent 1.1.0 groundwork** (owner, 2026-11-17): the routing engine (#233), plug-in hosting (#212), play-ahead (#191), the AutoStacc download and update source (#221) and the store builds (#222) are built in hidden steps alongside these batches, behind off-by-default flags or as engine-only code. Users see none of it until 1.1.0, and the changelog doesn't announce it.
-11. **iOS and macOS builds** (#214), once the owner has an Apple Developer membership. On iOS, the app ships every built-in instrument and effect, but no on-device C++ building or loading (owner, 2026-11-13: Apple forbids downloaded native code).
-12. **Play-ahead rendering** (#191, the [play-ahead plan](play-ahead-plan.md)). It moved from 1.2.0 into 1.1.0 (owner, 2026-11-13) and is built in its own batches before 1.1.0.
+12. **iOS and macOS builds** (#214), once the owner has an Apple Developer membership. On iOS, the app ships every built-in instrument and effect, but no on-device C++ building or loading (owner, 2026-11-13: Apple forbids downloaded native code).
+13. **Play-ahead rendering** (#191, the [play-ahead plan](play-ahead-plan.md)). It moved from 1.2.0 into 1.1.0 (owner, 2026-11-13) and is built in its own batches before 1.1.0.
 
 **In 1.1.0 itself (owner, 2026-11-13):**
 - plug-in hosting goes live (#212) and play-ahead ships;
@@ -108,11 +109,11 @@ The owner has neither store account yet. What 1.2.0 holds is undecided.
 **Play-ahead (render-ahead):** moved into 1.1.0 (owner, 2026-11-13; it had been planned for 1.2.0). It renders ahead of the playhead so that heavy projects play smoothly. **[Proposal]** It is planned and not built in this repository yet.
 
 **Current order (owner, 2026-11-10):** work goes issue by issue, bottom up (engine first, then the app), one area of the code per branch; UI work only where it is simple. Anything unclear, needing the owner's direction, or seeming to conflict with an earlier decision is not started: the owner gets a notification with the question, and work moves on to the next clear item. C++ replaces the .caw language first ([decisions](decisions.md)), then the owner's three new roles ([vision](vision.md)):
-1. #156 C++ instruments, then #157 C++ built-in instruments and a starter project (with #122, the useful .caw built-ins ported to the Library), #17 and #127 (independent instances, per-note and per-channel processing for instruments).
-2. #158 note clips as standard MIDI with a text form; #161 C++ modulators and routing anything anywhere (with #32).
-3. #160 remove the .caw language (done 2026-11-11), then #159 `.caw` project files.
-4. #163 testing suite, #164 sample-pack maker, #162 plug-in builder (CLAP first).
-5. Then the stages below, in order, skipping what the .caw removal makes obsolete.
+2. #156 C++ instruments, then #157 C++ built-in instruments and a starter project (with #122, the useful .caw built-ins ported to the Library), #17 and #127 (independent instances, per-note and per-channel processing for instruments).
+3. #158 note clips as standard MIDI with a text form; #161 C++ modulators and routing anything anywhere (with #32).
+4. #160 remove the .caw language (done 2026-11-11), then #159 `.caw` project files.
+5. #163 testing suite, #164 sample-pack maker, #162 plug-in builder (CLAP first).
+6. Then the stages below, in order, skipping what the .caw removal makes obsolete.
 
 The stages are ordered by dependency and product value: first the **C++ creation-platform foundation**, then the existing **Engine graph/N-channel Foundation**, then the **unified authoring interfaces**, then Stages 0–7 and **Release 1**. Stages 8–10 ship as updates after Release 1. Work may be split into smaller issues and pull requests, but keep the stage dependencies and exit gates. The owner can reprioritize explicitly.
 

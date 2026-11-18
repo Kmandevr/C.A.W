@@ -1,7 +1,7 @@
 ---
 title: Routing plan
 summary: The target model and silent staged plan for 1.1.0's visual, non-linear routing (#233): nodes and wires everywhere, patches, feedback in sub-blocks, the steps per batch and the owner's open questions; planned, not built.
-updated: 2026-11-17
+updated: 2026-11-18
 ---
 
 # Routing plan
@@ -39,25 +39,25 @@ updated: 2026-11-17
 - **Limits per patch:** 64 nodes, 256 wires, 16 feedback wires and 8 ports per node.
 
 ## Silent steps
-1. **1.0.6, part of the FX consolidation (#227): node-ready devices.**
+1. **1.0.7, part of the FX consolidation (#227): node-ready devices.**
    - The merged devices declare optional extra outputs: Filter low/high, Utility mid/side, Transient transient/sustain, dry/wet.
    - They also declare sidechain inputs (compressor, gates, Drive's key, the filter's envelope) and carrier inputs (ring mod, frequency shift).
    - Unconnected, they cost nothing and render the same.
    - This must be designed into #227 itself, since a later pass over the same files would conflict.
-2. **1.0.6 or 1.0.7:** a `scale` source on modulation links, with Flagship's `via` meaning. The app doesn't write it yet.
-3. **1.0.7: the patch model, engine-only.**
+2. **1.0.7 or 1.0.8:** a `scale` source on modulation links, with Flagship's `via` meaning. The app doesn't write it yet.
+3. **1.0.8: the patch model, engine-only.**
    - A new patch module and its tests. Nothing in the engine calls it yet.
    - A linear patch must null against today's chain.
    - A render must be identical at any block size.
    - A swap must allocate nothing on the audio thread.
    - A linear patch must cost within 5% of the chain.
-4. **1.0.8, with #217:**
+4. **1.0.9, with #217:**
    - the mixer's routes become general edges, so receives, parallel paths and drum multi-out are built as edges;
    - this sits behind an off-by-default engine flag;
    - it waits for the automation branch to merge, since both change the same code.
-5. **1.0.9:** a patch inside a track, and shared effect nodes, behind the flag. The app never writes them.
-6. **1.0.9 or 1.0.10:** generator nodes: an oscillator and noise.
-7. **1.0.10 or 1.0.11:** Flagship's filter and FX routing becomes a data table, with bit-identical renders.
+5. **1.0.10:** a patch inside a track, and shared effect nodes, behind the flag. The app never writes them.
+6. **1.0.10 or 1.0.11:** generator nodes: an oscillator and noise.
+7. **1.0.11 or 1.0.12:** Flagship's filter and FX routing becomes a data table, with bit-identical renders.
 8. **1.1.0:** the C API and the app, after the owner reviews the look.
 
 ## Risks
