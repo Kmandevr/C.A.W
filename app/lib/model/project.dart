@@ -562,6 +562,7 @@ class LayerDoc {
     List<SendDoc>? sends,
     this.instrument,
     this.parentId,
+    this.output,
     this.isFolder = false,
     this.busEnabled = true,
     this.collapsed = false,
@@ -636,8 +637,8 @@ class LayerDoc {
   /// How many notes get their own per-note slot (1..16, default 8); more share one overflow chain.
   int noteVoices;
 
-  /// Copies of the track's sound into bus folders (a reverb bus, a delay bus), beside its route to its folder's bus
-  /// or the master; at most [SendDoc.maxSends].
+  /// Copies of the track's sound into bus folders (a reverb bus, a delay bus) or other tracks' inputs, beside its
+  /// route to its [output]; at most [SendDoc.maxSends].
   List<SendDoc> sends;
 
   /// The native C++ instrument (a built-in or one of the project's) playing the track's notes ([setInstrument]).
@@ -651,7 +652,7 @@ class LayerDoc {
 
   /// Freeze (1.0.5, #209): the asset holding the track's instrument and effects rendered before its fader, which
   /// the engine plays in their place ([ProjectDoc.playsFrozen]); null while the track isn't frozen. Saved as
-  /// `frozen` and `frozen_asset` (part of format v5, [ProjectDoc.fileVersion]).
+  /// `frozen` and `frozen_asset` (part of format v5, [ProjectDoc.baseFileVersion]).
   String? frozenAsset;
 
   /// The tempo the freeze was rendered on ([ProjectDoc.freezeContext], saved as `frozen_context`): when the
@@ -662,7 +663,17 @@ class LayerDoc {
 
   /// An audio track: the engine plays its clips and input instead of an instrument (it can't have both).
   bool get isAudio => !isFolder && (audioClips.isNotEmpty || input != null);
+  /// The folder the track sits in on screen (and, without an [output], the bus it plays into).
   String? parentId;
+
+  /// The bus folder the track's own sound goes to instead of its parent folder's bus or the master, or [toMaster]
+  /// for straight to the master even inside a bus folder (format v6, [ProjectDoc.fileVersion]); null for that
+  /// default. One that names no enabled bus, or would make a loop, is left out of the engine and the default plays
+  /// ([RoutingPlan.outputOf]).
+  String? output;
+
+  /// The [output] that means the master. Layer ids never start with `@`, so it can't name a layer.
+  static const toMaster = '@master';
   bool isFolder, busEnabled, collapsed;
 
   /// A spacer drawn under the track in the arrangement, in logical pixels (0: none). It only separates tracks on
@@ -702,6 +713,7 @@ class LayerDoc {
         if (sends.isNotEmpty) 'sends': [for (final s in sends) s.toJson()],
         if (instrument != null) 'instrument': instrument!.toJson(),
         'parent': parentId, 'folder': isFolder, 'bus': busEnabled, 'collapsed': collapsed,
+        if (output != null) 'output': output,
         if (spaceBelow > 0) 'space_below': spaceBelow,
         if (ownColor) 'own_color': true,
         if (showLanes) 'show_lanes': true,
@@ -738,6 +750,7 @@ class LayerDoc {
         sends: SendDoc.listFromJson(j['sends']),
         instrument: j['folder'] == true ? null : ComponentUseDoc.fromJson(j['instrument']),
         parentId: j['parent'] as String?, isFolder: j['folder'] == true,
+        output: switch (j['output']) { final String o when o.isNotEmpty && o.length <= 256 => o, _ => null },
         busEnabled: j['bus'] != false, collapsed: j['collapsed'] == true,
         spaceBelow: switch (j['space_below']) {
           final num v when v.isFinite => v.toDouble().clamp(0.0, maxSpaceBelow),
@@ -844,8 +857,25 @@ class ProjectDoc {
   /// (`midi`, base64), not pattern text; a v4 file's text converts on load. v5 also holds batch 1.0.5's other fields:
   /// freeze's `frozen`, `frozen_asset` and `frozen_context` (#209) and automation's point `curve` and `tension`, lane
   /// `height`, `recent_automation` and `automation_follows_clips` (#230), and a linked sample asset's `link` (#229).
-  /// An older C.A.W refuses a v5 file whole.
-  static const int fileVersion = 5;
+  /// An older C.A.W refuses a v5 file whole. v6 (mixer routing, 2026-11-18): a track's `output` override and a
+  /// send's `feedback` and `limiter`, and sends into tracks. A project using none of them is still written as v5
+  /// ([baseFileVersion], [savedFileVersion]) so builds before v6 open it; this build reads both and refuses newer.
+  static const int fileVersion = 6;
+
+  /// The format a project without v6's routing is written as.
+  static const int baseFileVersion = 5;
+
+  /// Whether the project uses anything v6 added: an output override (to a bus or [LayerDoc.toMaster]), a send into a track (not a folder), a feedback
+  /// send or a send's limiter turned off.
+  bool get usesRoutingV6 {
+    final folders = {for (final l in layers) if (l.isFolder) l.id};
+    final ids = {for (final l in layers) l.id};
+    return layers.any((l) => l.output != null || l.sends.any((s) =>
+        s.feedback || !s.limiter || (ids.contains(s.to) && !folders.contains(s.to))));
+  }
+
+  /// The `caw_app_project` [toJson] writes: [fileVersion] when [usesRoutingV6], else [baseFileVersion].
+  int get savedFileVersion => usesRoutingV6 ? fileVersion : baseFileVersion;
 
   final String id;
   String name;
@@ -1182,6 +1212,8 @@ class ProjectDoc {
                 if (l.input != null) 'input': l.input!.toJson(),
               },
               'parent': l.parentId, 'folder': l.isFolder, 'bus': l.busEnabled,
+              // An output override goes only when it plays (an enabled bus, no loop); else the engine's default does.
+              if (routing.outputPlays(l)) 'output': l.output,
               'automation': [
                 for (final a in l.automation)
                   if (!suspendLanes.contains(automationKey('track', a.target, layerId: l.id)))
@@ -1227,7 +1259,7 @@ class ProjectDoc {
   }
 
   Map<String, dynamic> toJson() => {
-        'caw_app_project': fileVersion,
+        'caw_app_project': savedFileVersion,
         'id': id,
         'name': name,
         'bpm': bpm,

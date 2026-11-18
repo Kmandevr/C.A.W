@@ -6,6 +6,7 @@ updated: 2026-11-18
 
 # Log
 
+- 2026-11-18: general mixer routing (engine and model, silent for 1.0.7) and the Hub's package and pinned certificate decided ([decisions](decisions.md)); #251 filed (the music video's switches erase manual work).
 - 2026-11-18: the public [roadmap](roadmap.md) adds macOS, Google Play and the AutoStacc store and cloud library (owner).
 - 2026-11-18: Issues are bug-only here (owner): feature and plan issues copied to the private tracker and closed with a note, the task template removed, the `tasks` skill covers both trackers ([decisions](decisions.md)).
 - 2026-11-18: the vision moved to the private Kmandevr/AutoStacc-Hub too (owner); a curated public [roadmap](roadmap.md) lists only the promised work (VST3 and CLAP hosting, iOS releases); `scripts/agent-context.js` bundles the roadmap in its place ([decisions](decisions.md)).

@@ -10,6 +10,7 @@
 #include "mix_pool.h"
 #include "thread_tuning.h"
 #include "route_math.h"
+#include "caw/library/fastmath.hpp"
 #include "caw/library/stereo.hpp"
 #include "hardware.h"
 #include "sample_preview.h"
@@ -201,12 +202,47 @@ struct Engine::DelayLine {
     }
 };
 
-// A slot's routes: its sends (into bus inputs) then the sidechain keys it feeds, each with its own latency
+// A feedback send's ring (built on the control thread with its route table): the source writes each chunk's route
+// signal at its frames on the engine's route clock (Engine::routeFrame_, which counts every frame the mixer runs),
+// and the destination reads the frames kBlock before, so the route is exactly kBlock frames late whatever the
+// device's buffer and chunk sizes, and whichever of the two runs first (or at once, on the mix pool: a chunk is at
+// most kBlock frames, so the two never touch the same frames). The reader zeroes what it read, so a source that
+// stops writing goes quiet a chunk later. The soft clip and DC block on the return are the reader's.
+struct FeedbackRing {
+    static constexpr int kSize = 2 * kBlock;
+    static_assert((kSize & (kSize - 1)) == 0, "the ring's frames are masked: its size must be a power of two");
+    static constexpr double kUnlimited = 16.0;  // without its limiter, a return is held to +/-16 (+24 dBFS)
+    float l[kSize] = {}, r[kSize] = {};
+    bool limiter = true;
+    double pole = 0.9987;              // the DC block's (about 10 Hz)
+    double xl = 0, yl = 0, xr = 0, yr = 0;  // the DC block's last input and output, per side (the reader's)
+    void clear() noexcept {
+        std::fill_n(l, kSize, 0.0f);
+        std::fill_n(r, kSize, 0.0f);
+        xl = yl = xr = yr = 0;
+    }
+    // A rebuilt route table's ring carries on from the one it replaces (audio thread, between chunks).
+    void takeHistory(const FeedbackRing& was) noexcept {
+        std::copy_n(was.l, kSize, l);
+        std::copy_n(was.r, kSize, r);
+        xl = was.xl; yl = was.yl; xr = was.xr; yr = was.yr;
+    }
+};
+
+// A feedback return's soft clip: unity below 0.5, then a tanh knee that never reaches 1 (0 dBFS).
+inline double feedbackClip(double x) noexcept {
+    const double a = std::fabs(x);
+    if (!(a > 0.5)) return a == a ? x : 0.0;  // NaN: silence
+    const double y = 0.5 + 0.5 * lib::tanhApprox((a - 0.5) * 2.0);
+    return x < 0 ? -y : y;
+}
+
+// A slot's routes: its sends (into bus or track inputs) then the sidechain keys it feeds, each with its own latency
 // compensation. Built on the control thread; the audio thread swaps it in (SetSends) and retires the old one.
 struct Engine::SendTable {
     struct Route {
         int dest = -1;     // destination slot
-        int key = -1;      // -1: a bus's input; else the component index on dest's inserts it keys
+        int key = -1;      // -1: a bus's or track's input; else the component index on dest's inserts it keys
         double level = 1;
         // pre: the tap asked for; tapPre: the tap in use (audio thread). A switch fades the route out, changes
         // tap at 0 and fades back in, so it never jumps.
@@ -219,6 +255,10 @@ struct Engine::SendTable {
         float outL[kBlock] = {}, outR[kBlock] = {};
         int64_t chunk = -1;
         bool audio = false;
+        // A feedback send: its destination reads `ring` (kBlock frames late), never outL/outR, chunk or audio, so it
+        // may close a loop and runs in no order with its source.
+        bool feedback = false;
+        FeedbackRing* ring = nullptr;  // owned; feedback only
     };
     Route routes[kMaxRoutes];
     int count = 0;
@@ -231,7 +271,10 @@ struct Engine::SendTable {
     SendTable(const SendTable&) = delete;
     SendTable& operator=(const SendTable&) = delete;
     ~SendTable() {
-        for (Route& r : routes) delete r.delay;
+        for (Route& r : routes) {
+            delete r.delay;
+            delete r.ring;
+        }
     }
 };
 
@@ -1438,18 +1481,19 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
         bool bus = false;
         const std::vector<ComponentSpec>* components = nullptr;  // the layer's native inserts
         const ComponentSpec* instrument = nullptr;  // the layer's native instrument, if any
+        std::string outputId;  // "output": the bus its audio goes to instead of its folder's ("": that)
     };
     std::vector<Want> wants;
     int order = 0;
     if (p.auditionOnly) {
         wants.push_back({"\1audition", p.auditionPattern, p.auditionSteps, 0.8, 0.0, false, false, 100000, {}, {}, "", false,
-                         &p.auditionComponents, p.hasAuditionInstrument ? &p.auditionInstrument : nullptr});
+                         &p.auditionComponents, p.hasAuditionInstrument ? &p.auditionInstrument : nullptr, ""});
     }
     order_.clear();
     for (const LayerSpec& l : p.layers) {
         order_.push_back(l.id);
         wants.push_back({l.id, l.pattern, l.lengthSteps, l.volume, l.pan, l.mute, l.solo, ++order, l.clips, l.automation, l.parentId, l.folder && l.busEnabled, &l.components,
-                         l.hasInstrument && !l.folder ? &l.instrument : nullptr});
+                         l.hasInstrument && !l.folder ? &l.instrument : nullptr, l.outputId});
     }
 
     // Pass 1: whether each layer plays (a track needs an instrument), its notes, and its slot.
@@ -1607,7 +1651,9 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
     for (Planned& pl : plan) {
         // Recompute routing from the new project, not the previous snapshot.
         pl.ls.parentSlot = -1;
-        std::string parent = pl.w.parentId;
+        // An "output" names the bus the audio goes to (validateRouting: an enabled bus folder); the folder it shows
+        // in (parent) then only organizes it.
+        std::string parent = pl.w.outputId.empty() ? pl.w.parentId : pl.w.outputId == kMasterOutput ? "" : pl.w.outputId;
         for (int depth = 0; !parent.empty() && depth < maxDepth; ++depth) {
             auto spec = specByLayer.find(parent);
             if (spec == specByLayer.end()) break;
@@ -1887,11 +1933,17 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
         for (const SendSpec& send : l.sends) {
             LayerState::Route r;
             auto to = layers_.find(send.to);
-            if (to != layers_.end() && to->second.slot >= 0 && to->second.bus) r.dest = to->second.slot;
-            else warnings["project"].push_back("layer '" + l.id + "': send to '" + send.to + "': that bus isn't playing, so the send is silent");
+            // Into a bus's input, or a track's (after its instrument, before its inserts); a feedback send may
+            // come back to its own layer.
+            if (to != layers_.end() && to->second.slot >= 0 && (to->second.bus || to->second.track) &&
+                (to->second.slot != ls.slot || send.feedback))
+                r.dest = to->second.slot;
+            else warnings["project"].push_back("layer '" + l.id + "': send to '" + send.to + "': that bus or track isn't playing, so the send is silent");
             r.level = send.level;
             r.pre = send.pre;
             r.mute = send.mute;
+            r.feedback = send.feedback;
+            r.limiter = send.limiter;
             ls.routes.push_back(r);
         }
         ls.userSends = static_cast<int>(ls.routes.size());
@@ -2063,15 +2115,19 @@ ComponentChain* Engine::ctlComponentChain(const std::string& layerId, uint32_t& 
 bool Engine::updateCompensation(std::map<std::string, std::vector<std::string>>& warnings) {
     bool ok = true;
     // Plugin delay compensation over the whole routing: a slot's own latency is its instrument's and inserts';
-    // a bus's input arrives at the latest of what feeds it (children and sends), and every route into a bus
-    // (or the master) is delayed by how much earlier it arrives, so everything that meets is in time. Keys
-    // are not delayed: they arrive as early as they can (a ducker's look-ahead covers a late one).
+    // a bus's input arrives at the latest of what feeds it (children, outputs routed to it and sends), and every
+    // route into a bus (or the master) is delayed by how much earlier it arrives, so everything that meets is in
+    // time. A send into a track meets that track's instrument: it is delayed to the instrument's latency when it
+    // is earlier, and stays late (with a warning) when it is later. Keys and feedback sends are not delayed: keys
+    // arrive as early as they can (a ducker's look-ahead covers a late one), and a feedback send is a chunk late
+    // by design.
     struct Node {
         LayerState* ls = nullptr;
         const std::string* id = nullptr;
         int64_t own = 0, in = 0, raw = 0;
+        int64_t inst = 0;  // a track's instrument latency: where sends into it meet it
         int indegree = 0;
-        std::vector<int> out;  // slots it feeds (its bus, its sends' buses)
+        std::vector<int> out;  // slots it feeds (its output bus, its sends' buses)
     };
     std::map<int, Node> nodes;
     for (auto& [id, ls] : layers_) {
@@ -2080,10 +2136,15 @@ bool Engine::updateCompensation(std::map<std::string, std::vector<std::string>>&
         n.ls = &ls;
         n.id = &id;
         uint64_t frames = 0;
-        if (ls.inserts) frames += ls.inserts->latencyFrames();
         if (ls.instrument && !ls.bus) frames += ls.instrument->latencyFrames() + noteFx_->latencyFrames(id);
+        n.inst = static_cast<int64_t>(std::min<uint64_t>(frames, 1u << 30));
+        if (ls.inserts) frames += ls.inserts->latencyFrames();
         n.own = static_cast<int64_t>(std::min<uint64_t>(frames, 1u << 30));
     }
+    auto trackAt = [&](int slot) -> Node* {
+        auto it = nodes.find(slot);
+        return it != nodes.end() && !it->second.ls->bus ? &it->second : nullptr;
+    };
     auto busAt = [&](int slot) -> Node* {
         auto it = nodes.find(slot);
         return it != nodes.end() && it->second.ls->bus ? &it->second : nullptr;
@@ -2091,7 +2152,7 @@ bool Engine::updateCompensation(std::map<std::string, std::vector<std::string>>&
     for (auto& [slot, n] : nodes) {
         if (Node* parent = busAt(n.ls->parentSlot); parent && n.ls->parentSlot != slot) n.out.push_back(n.ls->parentSlot);
         for (const LayerState::Route& r : n.ls->routes)
-            if (r.key < 0 && busAt(r.dest) && r.dest != slot) n.out.push_back(r.dest);
+            if (r.key < 0 && !r.feedback && busAt(r.dest) && r.dest != slot) n.out.push_back(r.dest);
         for (int to : n.out) ++nodes[to].indegree;
     }
     // Kahn's order (routing loops are refused before here; any left over go last).
@@ -2150,9 +2211,16 @@ bool Engine::updateCompensation(std::map<std::string, std::vector<std::string>>&
         std::vector<int64_t> delays;
         std::string sig;
         for (const LayerState::Route& r : ls.routes) {
-            const Node* to = r.key < 0 ? busAt(r.dest) : nullptr;
-            delays.push_back(to ? delayTo(n, to->in) : 0);
-            sig += std::to_string(r.dest) + ":" + std::to_string(r.key) + ":" + std::to_string(delays.back()) + ";";
+            const Node* to = r.key < 0 && !r.feedback ? busAt(r.dest) : nullptr;
+            const Node* track = r.key < 0 && !r.feedback && r.dest != x ? trackAt(r.dest) : nullptr;
+            delays.push_back(to ? delayTo(n, to->in) : track ? delayTo(n, track->inst) : 0);
+            if (track && n.raw > track->inst)
+                warnings["project"].push_back("layer '" + *n.id + "': its send into track '" + *track->id + "' arrives " +
+                                              std::to_string(n.raw - track->inst) +
+                                              " frames after that track's instrument (its latency isn't compensated there)");
+            // A feedback send's DC block is tuned to the rate: a new rate rebuilds its table.
+            sig += std::to_string(r.dest) + ":" + std::to_string(r.key) + ":" + std::to_string(delays.back()) +
+                   (r.feedback ? (r.limiter ? ":f" : ":F") + std::to_string(ctlSr_) : "") + ";";
         }
         if (sig != ls.routesSig) {
             Cmd c;
@@ -2169,6 +2237,13 @@ bool Engine::updateCompensation(std::map<std::string, std::vector<std::string>>&
                     t.pre = t.tapPre = r.pre;
                     t.mute = r.mute;
                     t.delay = makeDelay(delays[k]);
+                    if (r.feedback && r.key < 0) {
+                        t.feedback = true;
+                        t.ring = new FeedbackRing();
+                        t.ring->limiter = r.limiter;
+                        // The DC block's pole: about 10 Hz at this rate.
+                        t.ring->pole = std::exp(-2.0 * 3.14159265358979323846 * 10.0 / (ctlSr_ > 0 ? ctlSr_ : 48000.0));
+                    }
                     c.sends->keys = c.sends->keys || (r.key >= 0 && r.dest >= 0);
                 }
                 c.sends->count = static_cast<int>(ls.routes.size());
@@ -2725,6 +2800,11 @@ void Engine::startPlay(double fromStep, uint64_t playCount, uint32_t touchStamp)
         slotAt(live_[k]).insertTail = false;
         slotAt(live_[k]).tailFade = 0;
     }
+    // Feedback sends start from silence at each Play, as an export does (between chunks: no node reads them now).
+    for (int k = 0; k < liveCount_; ++k)
+        if (SendTable* t = slotAt(live_[k]).sends)
+            for (int j = 0; j < t->count; ++j)
+                if (t->routes[j].ring) t->routes[j].ring->clear();
     touchEpoch_ = playCount;  // chains from before this Play drop their touches at their next chunk
     touchPlayStamp_ = touchStamp;
     ++modPlays_;  // project modulators restart at the next chunk (#161)
@@ -3409,10 +3489,11 @@ void Engine::applyCommands() noexcept {
                         // A route that stays keeps its gain, its tap (a change of tap then fades as SetSendLevel's
                         // does) and, unless stale, its delay's recent input. A route that now goes elsewhere starts
                         // from silence: its old line holds the old destination's audio.
-                        const bool stays = was && was->dest == r.dest && was->key == r.key;
+                        const bool stays = was && was->dest == r.dest && was->key == r.key && was->feedback == r.feedback;
                         if (!stays) s.routeGain[k] = 0.0;
                         if (stays && s.routeGain[k] > 0.0) r.tapPre = was->tapPre;
                         if (r.delay && stays && !s.routesStale) r.delay->takeHistory(was->delay);
+                        if (r.ring && stays && was->ring) r.ring->takeHistory(*was->ring);  // a feedback send carries on
                     }
                 }
                 Retired r;
@@ -3789,6 +3870,10 @@ void Engine::endPlayback() noexcept {
     }
     for (int i = 0; i < slotCount_; ++i) {
         Slot& s = slotAt(i);
+        // Feedback sends stop with the song (a stopped preview never brings back a loop held since the stop).
+        if (s.sends)
+            for (int j = 0; j < s.sends->count; ++j)
+                if (s.sends->routes[j].ring) s.sends->routes[j].ring->clear();
         s.delayStale = true;  // the next play starts from silence, as an export does, not the song's last frames
         s.routesStale = true;
         if (s.inserts) {
@@ -4359,6 +4444,7 @@ int Engine::processChunk(float* l, float* r, int maxFrames) noexcept {
                                           static_cast<uint32_t>(m));
     }
     if (mixGraph_->executor.parallelLevelsRun() != 0) poolUsed_ = true;
+    routeFrame_ += m;  // the route clock: feedback sends' rings move on by the frames just run
     flushRetires();  // what the nodes handed back, now that nothing in the graph reads it
     if (!ran) {
         std::fill_n(l, m, 0.0f);
@@ -4368,11 +4454,12 @@ int Engine::processChunk(float* l, float* r, int maxFrames) noexcept {
     return m;
 }
 
-// Routing as graph edges: a routable slot (active, and a bus or a track) goes to its parent when
-// that parent is an active folder bus, is dropped when its parent is anything else, and goes to master at the
-// root. Sends and sidechain keys add order but no edges (the source writes the route's own buffer, runRoutes, and the
+// Routing as graph edges: a routable slot (active, and a bus or a track) goes to its output bus (parentSlot: the
+// project's "output", else its folder's bus) when that is an active folder bus, is dropped when it is anything
+// else, and goes to master at the root. Sends (into buses or tracks) and sidechain keys add order but no edges (the source writes the route's own buffer, runRoutes, and the
 // destination sums its routes when it runs, pullRoutes; each is a dependency for the executor's levels): a slot runs
-// after every slot that feeds it, whether as a child, a send or a key. The order is the old pass order
+// after every slot that feeds it, whether as a child, a send or a key; a feedback send orders nothing (its
+// destination reads the chunk before from the route's ring), so it may close a loop. The order is the old pass order
 // (processOrder_, then the remaining slots by index) with each slot held back until what feeds it has run, so a
 // track always reaches its bus in the same chunk (issue #76). A track is one node (its instrument, inserts and
 // mix). Edges into buses follow that order, which is the old accumulation order. Idle slots are left out of the
@@ -4398,14 +4485,17 @@ void Engine::updateRouting() noexcept {
         g.routable[i] = routable;
         g.target[i] = to;
     }
-    // A route counts when both ends run: into a bus's input, or a key into a slot with inserts.
+    // A route counts when both ends run: into a bus's or a track's input, or a key into a slot with inserts. Only a
+    // feedback send may come back to its own slot.
     auto routeDest = [&](const Slot& s, int k) noexcept {
         const SendTable::Route& r = s.sends->routes[k];
-        if (r.dest < 0 || r.dest >= slotCount_ || r.dest == s.index || !g.routable[r.dest]) return -1;
-        const Slot& d = slotAt(r.dest);
-        if (r.key < 0 ? !d.bus : !d.inserts) return -1;
+        if (r.dest < 0 || r.dest >= slotCount_ || (r.dest == s.index && !r.feedback) || !g.routable[r.dest]) return -1;
+        if (r.key >= 0 && !slotAt(r.dest).inserts) return -1;
         return r.dest;
     };
+    // What a route orders: its destination after its source; a feedback send orders nothing (it reads the chunk
+    // before, from its ring), so it may close a loop.
+    auto orderDest = [&](const Slot& s, int k) noexcept { return s.sends->routes[k].feedback ? -1 : routeDest(s, k); };
     for (int k = 0; k < liveCount_; ++k) {
         const int n = live_[k];
         g.pending[n] = 0; g.deferred[n] = false; g.emitted[n] = false;
@@ -4418,7 +4508,7 @@ void Engine::updateRouting() noexcept {
         const Slot& s = slotAt(i);
         if (s.sends)
             for (int k = 0; k < s.sends->count; ++k)
-                if (const int d = routeDest(s, k); d >= 0) ++g.pending[d];
+                if (const int d = orderDest(s, k); d >= 0) ++g.pending[d];
     }
     int count = 0;
     auto release = [&](int to, int& top) noexcept {
@@ -4436,7 +4526,7 @@ void Engine::updateRouting() noexcept {
             g.slotOrder[count++] = x;
             const Slot& s = slotAt(x);
             if (s.sends)
-                for (int k = s.sends->count - 1; k >= 0; --k) release(routeDest(s, k), top);
+                for (int k = s.sends->count - 1; k >= 0; --k) release(orderDest(s, k), top);
             release(g.target[x], top);  // last pushed, first ordered: the parent bus as before
         }
     };
@@ -4461,7 +4551,7 @@ void Engine::updateRouting() noexcept {
         if (!s.sends) continue;
         for (int k = 0; k < s.sends->count; ++k) {
             const int d = g.routable[i] ? routeDest(s, k) : -1;
-            s.routeOk[k] = d >= 0 && g.position[i] < g.position[d];
+            s.routeOk[k] = d >= 0 && (s.sends->routes[k].feedback || g.position[i] < g.position[d]);
         }
     }
     // Each destination's routes (pullRoutes), in the order the sources used to add into it: the sources in the
@@ -4493,7 +4583,7 @@ void Engine::updateRouting() noexcept {
             if (!s.routeOk[j]) continue;
             const int d = s.sends->routes[j].dest;
             g.inRoutesNext[static_cast<size_t>(g.inFirstNext[d] + g.inCountNext[d]++)] = MixGraph::InRoute{s.sends, j};
-            g.dependencies[dependencyCount++] = GraphDependency{nodeOf(x), nodeOf(d)};
+            if (!s.sends->routes[j].feedback) g.dependencies[dependencyCount++] = GraphDependency{nodeOf(x), nodeOf(d)};
         }
     }
     uint32_t nodeCount = 0, edgeCount = 0;
@@ -4660,9 +4750,22 @@ void Engine::runRoutes(Slot& s, const float* preL, const float* preR, const floa
             if (t.routes[k].delay) t.routes[k].delay->clear();
         s.routesStale = false;
     }
+    // A feedback send's frames on the route clock in its ring: written every chunk the slot runs (zeros unless it
+    // sounds), and read kBlock frames later by its destination, which never reads these frames this chunk.
+    assert(m <= kBlock);  // a ring holds two chunks: the source's and the reader's frames never meet
+    const int64_t ringAt = routeFrame_;
+    auto ringWrite = [&](const SendTable::Route& r, bool sound) noexcept {
+        FeedbackRing& f = *r.ring;
+        for (int i = 0; i < m; ++i) {
+            const int p = static_cast<int>((ringAt + i) & (FeedbackRing::kSize - 1));
+            f.l[p] = sound ? r.outL[i] : 0.0f;
+            f.r[p] = sound ? r.outR[i] : 0.0f;
+        }
+    };
     for (int k = 0; k < t.count; ++k) {
         SendTable::Route& r = t.routes[k];
         const bool key = r.key >= 0;
+        if (r.ring) ringWrite(r, false);  // silence, unless it sounds below
         const float* levelMod = key ? nullptr : modulation_->send(s.index, k);  // project modulation (#161)
         const double level = levelMod ? faderGain(faderPosition(r.level) + levelMod[m - 1]) : r.level;
         const double want = r.mute || (!key && silenced) ? 0.0 : level;
@@ -4724,6 +4827,7 @@ void Engine::runRoutes(Slot& s, const float* preL, const float* preR, const floa
         s.routeGain[k] = g;
         if (r.delay) r.delay->run(r.outL, r.outR, m);
         r.audio = true;
+        if (r.ring) ringWrite(r, true);
     }
 }
 
@@ -4739,6 +4843,39 @@ bool Engine::pullRoutes(Slot& d, int m) noexcept {
     for (int j = g.inFirst[d.index], end = j + g.inCount[d.index]; j < end; ++j) {
         const SendTable& t = *g.inRoutes[j].table;
         const SendTable::Route& r = t.routes[g.inRoutes[j].k];
+        if (r.feedback) {
+            // A feedback send (its source may run after this, or at once on the mix pool): only its ring's frames
+            // from kBlock before on the route clock (-kBlock is +kBlock in a ring of 2 kBlock), zeroed once read,
+            // then its DC block and soft clip.
+            FeedbackRing& f = *r.ring;
+            assert(m <= kBlock);
+            if (!received) {
+                std::fill_n(d.recvL, m, 0.0f);
+                std::fill_n(d.recvR, m, 0.0f);
+                received = true;
+            }
+            for (int i = 0; i < m; ++i) {
+                const int p = static_cast<int>((routeFrame_ + kBlock + i) & (FeedbackRing::kSize - 1));
+                double xl = f.l[p], xr = f.r[p];
+                f.l[p] = f.r[p] = 0.0f;
+                if (f.limiter) {
+                    double yl = xl - f.xl + f.pole * f.yl, yr = xr - f.xr + f.pole * f.yr;
+                    yl = yl == yl ? yl : 0.0;  // never: its input is finite (routeSample)
+                    yr = yr == yr ? yr : 0.0;
+                    if (std::fabs(yl) < 1e-20) yl = 0.0;  // its decay on silence never sits on subnormals
+                    if (std::fabs(yr) < 1e-20) yr = 0.0;
+                    f.xl = xl; f.yl = yl; f.xr = xr; f.yr = yr;
+                    xl = feedbackClip(yl);
+                    xr = feedbackClip(yr);
+                } else {  // no limiter: a loop above unity still stops at +/-kUnlimited, never near FLT_MAX
+                    xl = std::clamp(xl, -FeedbackRing::kUnlimited, FeedbackRing::kUnlimited);
+                    xr = std::clamp(xr, -FeedbackRing::kUnlimited, FeedbackRing::kUnlimited);
+                }
+                d.recvL[i] = routeAdd(d.recvL[i], routeSample(xl));
+                d.recvR[i] = routeAdd(d.recvR[i], routeSample(xr));
+            }
+            continue;
+        }
         if (r.chunk != chunkId_) continue;  // it didn't reach here this chunk (its source was silent or didn't run)
         float* dl = nullptr;
         float* dr = nullptr;
@@ -4818,7 +4955,7 @@ void Engine::runTrackNode(int slot, float* outL, float* outR, int m) noexcept {
     }
     const double target = s.target;
     const double gainCoef = trackGainCoef_;
-    pullRoutes(s, m);  // keys into its inserts (a track takes no sends)
+    const bool received = pullRoutes(s, m);  // sends into its input (after its instrument), keys into its inserts
     const double pan = bitsToDouble(s.pan.load(std::memory_order_relaxed));
     if ((!s.automation || s.automation->pan.empty()) && pan != s.panCache) {
         s.panCache = pan;
@@ -4833,8 +4970,15 @@ void Engine::runTrackNode(int slot, float* outL, float* outR, int m) noexcept {
         samplePreview_->render(s.instL, s.instR, m);
         previewTaken_.store(true, std::memory_order_relaxed);
     }
-    std::copy_n(s.instL, m, s.insL);
-    std::copy_n(s.instR, m, s.insR);
+    if (received) {  // sends into the track sum with its instrument, before its inserts
+        for (int i = 0; i < m; ++i) {
+            s.insL[i] = routeSample(static_cast<double>(s.instL[i]) + s.recvL[i]);
+            s.insR[i] = routeSample(static_cast<double>(s.instR[i]) + s.recvR[i]);
+        }
+    } else {
+        std::copy_n(s.instL, m, s.insL);
+        std::copy_n(s.instR, m, s.insR);
+    }
     runInserts(s, s.insL, s.insR, m);
     float peakL = 0, peakR = 0, sig = 0;
     int sp = s.scopePos.load(std::memory_order_relaxed);

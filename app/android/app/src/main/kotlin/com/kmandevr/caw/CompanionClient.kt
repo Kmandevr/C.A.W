@@ -1,7 +1,7 @@
 // The main app's side of the companion protocol (docs/companion-protocol.md): binds the companion's service (3 s),
-// checks the companion again when bound and before each send, checks each reply's sender before reading it
-// (CompanionCallerCheck.kt), times requests out and unbinds when idle. Answers the caw/companion channel; with no
-// companion installed every answer is "absent".
+// checks the companion against the pinned certificate digest (BuildConfig.HUB_CERT_SHA256) again when bound and before
+// each send, checks each reply's sender before reading it (CompanionCallerCheck.kt), times requests out and unbinds
+// when idle. Answers the caw/companion channel; with no companion installed, or no pin, every answer is "absent".
 package com.kmandevr.caw
 
 import android.content.ComponentName
@@ -16,7 +16,6 @@ import android.os.IBinder
 import android.os.Looper
 import android.os.Message
 import android.os.Messenger
-import android.os.Process
 import android.os.RemoteException
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
@@ -29,17 +28,34 @@ class AndroidPackageFacts(private val pm: PackageManager) : PackageFacts {
     override fun holdsPermission(pkg: String, permission: String): Boolean =
         pm.checkPermission(permission, pkg) == PackageManager.PERMISSION_GRANTED
 
+    override fun uidOf(pkg: String): Int? = try {
+        pm.getPackageUid(pkg, 0)
+    } catch (_: PackageManager.NameNotFoundException) {
+        null
+    }
+
     override fun hasCertificateSha256(uid: Int, sha256: ByteArray): Boolean =
         Build.VERSION.SDK_INT >= Build.VERSION_CODES.P &&
             pm.hasSigningCertificate(uid, sha256, PackageManager.CERT_INPUT_SHA256)
 
-    override fun signaturesMatch(uid1: Int, uid2: Int): Boolean = pm.checkSignatures(uid1, uid2) >= PackageManager.SIGNATURE_MATCH
+    override fun currentSignerSha256(pkg: String): List<ByteArray>? = try {
+        val certs = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            pm.getPackageInfo(pkg, PackageManager.GET_SIGNING_CERTIFICATES).signingInfo?.apkContentsSigners
+        } else {
+            @Suppress("DEPRECATION")
+            pm.getPackageInfo(pkg, PackageManager.GET_SIGNATURES).signatures
+        }
+        certs?.map { MessageDigest.getInstance("SHA-256").digest(it.toByteArray()) }
+    } catch (_: PackageManager.NameNotFoundException) {
+        null
+    }
 }
 
 class CompanionClient(private val context: Context) {
     private val main = Handler(Looper.getMainLooper())
     private val facts = AndroidPackageFacts(context.packageManager)
-    private val ownCerts: List<ByteArray> by lazy { readOwnCertificates() }
+    /** The Hub's pinned signing-certificate digest; null (empty in the build) means no companion is ever accepted. */
+    private val pin: ByteArray? = CompanionCallerCheck.parsePin(BuildConfig.HUB_CERT_SHA256)
 
     private class Pending(
         val what: Int, val timeoutMs: Int, val done: (Map<String, Any?>) -> Unit, val timeout: Runnable, val message: Message,
@@ -88,15 +104,16 @@ class CompanionClient(private val context: Context) {
         if (bound != null) send(bound, id) else bind()
     }
 
-    /** Whether the companion is installed, visible (<queries>) and signed with this app's key: no bind otherwise. */
+    /** Whether the companion is installed, visible (<queries>) and signed with the pinned key: no bind otherwise. */
     private fun companionLooksRight(): Boolean {
+        if (pin == null) return false
         val uid = try {
             context.packageManager.getPackageUid(CompanionCallerCheck.COMPANION_PACKAGE, 0)
         } catch (_: PackageManager.NameNotFoundException) {
             return false
         }
-        return CompanionCallerCheck.check(uid, CompanionCallerCheck.COMPANION_PACKAGE, Build.VERSION.SDK_INT,
-            Process.myUid(), ownCerts, facts) == CompanionCallerCheck.Verdict.ALLOWED
+        return CompanionCallerCheck.check(uid, CompanionCallerCheck.COMPANION_PACKAGE, pin, Build.VERSION.SDK_INT,
+            facts) == CompanionCallerCheck.Verdict.ALLOWED
     }
 
     private fun bind() {
@@ -105,7 +122,7 @@ class CompanionClient(private val context: Context) {
             override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
                 bindTimeout?.let { main.removeCallbacks(it) }
                 bindTimeout = null
-                // What answered must still be the companion signed with this app's key (it may have been replaced).
+                // What answered must still be the companion signed with the pinned key (it may have been replaced).
                 if (binder == null || !companionLooksRight()) {
                     unbind()
                     return dropAll("absent")
@@ -135,7 +152,11 @@ class CompanionClient(private val context: Context) {
         connection = c
         val intent = Intent().setComponent(ComponentName(CompanionCallerCheck.COMPANION_PACKAGE, CompanionCallerCheck.COMPANION_SERVICE))
         val ok = try {
-            context.bindService(intent, c, Context.BIND_AUTO_CREATE)
+            // Android 14+ lets the Hub open the system's install confirmation from this binding only with this flag.
+            val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                Context.BIND_AUTO_CREATE or Context.BIND_ALLOW_ACTIVITY_STARTS
+            } else Context.BIND_AUTO_CREATE
+            context.bindService(intent, c, flags)
         } catch (_: SecurityException) {
             false // the service asks for a permission this build doesn't hold
         }
@@ -168,8 +189,8 @@ class CompanionClient(private val context: Context) {
     private fun onReply(msg: Message) {
         // The sender first, before anything of the message is read: a reply from anyone but the companion is dropped
         // unread (its request times out).
-        val sender = CompanionCallerCheck.check(msg.sendingUid, CompanionCallerCheck.COMPANION_PACKAGE, Build.VERSION.SDK_INT,
-            Process.myUid(), ownCerts, facts)
+        val sender = CompanionCallerCheck.check(msg.sendingUid, CompanionCallerCheck.COMPANION_PACKAGE, pin,
+            Build.VERSION.SDK_INT, facts)
         if (sender != CompanionCallerCheck.Verdict.ALLOWED) return
         // A Bundle may still hold classes this app can't read: such a reply is dropped too.
         val data = try {
@@ -218,18 +239,6 @@ class CompanionClient(private val context: Context) {
         dropAll("absent")
         main.removeCallbacks(idleUnbind)
         unbind()
-    }
-
-    /** SHA-256 of each of this app's current signing certificates (API 28+); empty below, where checkSignatures runs. */
-    private fun readOwnCertificates(): List<ByteArray> {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) return emptyList()
-        return try {
-            val info = context.packageManager.getPackageInfo(context.packageName, PackageManager.GET_SIGNING_CERTIFICATES)
-            val signers = info.signingInfo?.apkContentsSigners ?: return emptyList()
-            signers.map { MessageDigest.getInstance("SHA-256").digest(it.toByteArray()) }
-        } catch (_: PackageManager.NameNotFoundException) {
-            emptyList()
-        }
     }
 
     companion object {

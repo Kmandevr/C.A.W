@@ -261,6 +261,7 @@ target_include_directories(caw_cli PRIVATE src)
   target_sources(caw_tests PRIVATE tests/display_test.cpp)  # live display data, engine to UI (#173)
   target_sources(caw_tests PRIVATE tests/effects_test.cpp)  # the built-in effects suite (#173)
   target_sources(caw_tests PRIVATE tests/routing_test.cpp)  # sends, buses, keys and routing loops (#175)
+  target_sources(caw_tests PRIVATE tests/mixer_routing_test.cpp)  # outputs, sends into tracks, returns, feedback sends
   target_sources(caw_tests PRIVATE tests/drums_test.cpp)  # org.caw.drums: 64 pads, layers, presets, samples, migration
   target_sources(caw_tests PRIVATE tests/ducker_test.cpp)  # the ducker driven directly (#175 audio review)
   target_sources(caw_tests PRIVATE tests/stereo_path_test.cpp)  # stereo end to end: buses and WAV export (#17, #121)
@@ -374,6 +375,7 @@ target_include_directories(caw_cli PRIVATE src)
   target_sources(caw_rt_tests PRIVATE tests/stress_rt_test.cpp)  # the Benchmark: its timed loop
   target_sources(caw_rt_tests PRIVATE tests/component_bench_rt_test.cpp)  # #197: the plug-in benchmark's allocation check
   target_sources(caw_rt_tests PRIVATE tests/output_safety_rt_test.cpp)  # #244: the live output's mono check and safety limiter
+  target_sources(caw_rt_tests PRIVATE tests/mixer_routing_rt_test.cpp)  # outputs, sends into tracks, feedback sends
   target_compile_options(caw_rt_tests PRIVATE ${CAW_FLAGS})
   target_include_directories(caw_rt_tests PRIVATE src)
   add_dependencies(caw_rt_tests caw_test_component caw_bench_fixture)

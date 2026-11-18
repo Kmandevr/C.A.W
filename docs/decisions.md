@@ -6,6 +6,19 @@ updated: 2026-11-18
 
 # Decisions
 
+## 2026-11-18: General mixer routing in the engine and the model, silent in 1.0.7; renders need only be repeatable (owner)
+
+**Decision (owner):** the mixer's routes become general (a track's output to any bus or straight to the master, sends to any bus or track, feedback sends, sidechain keys from any track), built in the engine and the app's model and shipped silently in 1.0.7: no screens until the 1.1.0 visual router's look is designed ("Engine only for now"). Claude's choices within it, following the architect's review:
+- **Extend the mixer, not a second graph:** `Engine::MixGraph` already runs on `GraphExecutor`; its pulled route tables (with their fixed summing order) become general routes. Stereo only for now: multichannel buses and multi-out need the component format extended.
+- **A send into a track** is summed into its input before its effects, and the track keeps its instrument. A return is a bus or track fed by sends; no new kind of track.
+- **Feedback** only on a send marked `feedback`: it reads the previous 64-frame chunk, with the limiter on unless switched off (the owner's settled choices).
+- **Format:** new fields are optional and written only when used; an app project that uses them is saved as file version 6, otherwise 5, so older builds refuse what they can't play instead of dropping routes.
+- **Renders (owner):** existing renders need not stay bit-identical, as long as every render is repeatable (the same bits on every run, at any buffer size, with or without the mix pool) and sounds the same; a changed reference is re-recorded with the reason.
+
+## 2026-11-18: The Hub's package is com.autostacc.hub; its pinned certificate (owner)
+
+**Decision (owner):** the companion's package is `com.autostacc.hub` (not the assumed `com.kmandevr.caw.companion`). C.A.W accepts a companion only when its signing certificate's SHA-256 digest matches a pinned value from the build (`HUB_CERT_SHA256`, a repository variable, since a digest is public); while it is empty, no companion is accepted. The Hub's first build is the service C.A.W calls and the site window (autostacc.com).
+
 ## 2026-11-18: Plans and the vision move to the private AutoStacc-Hub now; a curated public roadmap; the code stays public (owner)
 
 **Decision (owner, 2026-11-18):** C.A.W's vision, roadmap, feature plans, proposals for unbuilt work, owner questions and decisions about unbuilt features move now, not at 1.1.0, into the private repository `Kmandevr/AutoStacc-Hub` (docs/caw/), "the private repository that holds everything we don't want people to know, like feature plans".

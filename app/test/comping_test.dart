@@ -186,7 +186,7 @@ void main() {
       final l = LayerDoc(id: 'l', name: 'L', color: 0, showTakes: true);
       expect(LayerDoc.fromJson(jsonDecode(jsonEncode(l.toJson())) as Map<String, dynamic>).showTakes, isTrue);
       expect(LayerDoc(id: 'l', name: 'L', color: 0).toJson().containsKey('show_takes'), isFalse);
-      expect(ProjectDoc.fileVersion, 5);
+      expect(ProjectDoc.baseFileVersion, 5);
     });
   });
 

@@ -135,8 +135,13 @@ extern "C" {
    35 (2026-11-18, 1.0.6, #244): caw_engine_set_output_safety and caw_engine_output_safety: the live output's
    mono check (CAW_OUTPUT_MONO) and safety limiter (CAW_OUTPUT_LIMITER, on by default), applied in the device
    callback after the mix and never in a render or export; a live Benchmark run's "parts" put that stage's time
-   in "master". Nothing else changes. */
-#define CAW_API_VERSION 35
+   in "master". Nothing else changes.
+   36 (2026-11-18): general mixer routing, all in the project JSON (docs/engine.md, project format): a layer's
+   "output" (an enabled bus folder, "@master", or "" for its folder's bus), sends "to" a track as well as a bus
+   (summed after its instrument, before its inserts), and "feedback" sends (one 64-frame chunk late, the only route
+   that may close a loop, with a "limiter" on the return unless false). caw_engine_set_send also moves sends into
+   tracks and feedback sends. No new function; an older project plays as before. */
+#define CAW_API_VERSION 36
 /* The component index that names a layer's native instrument rather than one of its "components". */
 #define CAW_INSTRUMENT_INDEX 0xFFFFFFFFu
 /* A component index with this bit (API version 22) names component (index & ~CAW_NOTE_COMPONENT) of the layer's
@@ -291,7 +296,8 @@ CAW_API char* caw_engine_component_states(CawEngine* e, const char* layer_id);
    the state in the project's entry as well ("state", base64, and "state_version") so a reload starts from it. */
 CAW_API int32_t caw_engine_set_component_state(CawEngine* e, const char* layer_id, uint32_t index, const uint8_t* data,
                                                int32_t size, uint32_t version);
-/* A send while it plays (API version 9): send `index` (0-based) of the layer's project "sends" gets `level`
+/* A send while it plays (API version 9; API 36: into a track or a feedback send as well): send `index` (0-based)
+   of the layer's project "sends" gets `level`
    (linear gain 0..3.981, +12 dB), pre-fader (pre != 0: after the layer's effects, before its volume and pan) or
    post-fader, and mute; the level glides over 5 ms. 1 on success, 0 if the layer has no such send. A later
    project update sets the values it names again, so write the new values into the project too. */

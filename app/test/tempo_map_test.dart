@@ -181,7 +181,7 @@ void main() {
     });
 
     test('a newer format is refused', () {
-      expect(() => ProjectDoc.fromJson({'caw_app_project': 6, 'id': 'x'}), throwsA(isA<NewerProjectFormat>()));
+      expect(() => ProjectDoc.fromJson({'caw_app_project': 7, 'id': 'x'}), throwsA(isA<NewerProjectFormat>()));
     });
 
     test('bpm and beatsPerBar are the first tempo point and signature', () {
