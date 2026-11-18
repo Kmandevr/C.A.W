@@ -6,6 +6,31 @@ updated: 2026-11-18
 
 # Decisions
 
+## 2026-11-18: The AutoStacc Hub: AutoStacc's site as the app, a native core for the powers, its own key (owner)
+
+**Decision (owner):** the companion is the **AutoStacc Hub**, in the private repository `Kmandevr/AutoStacc-Hub`.
+- **What it is:**
+  - the AutoStacc site (store, library, account, community) as the app;
+  - direct access to your downloads and library on the device;
+  - the updater for your AutoStacc programs, C.A.W first;
+  - later, a cloud library: C.A.W connects, you upload your sounds and projects, and anything stored there drags into C.A.W and just works.
+- **How it is built** (the owner chose Claude's option A):
+  - The powers C.A.W gives up live in a small native core:
+    - on Android, Kotlin: the bound service C.A.W talks to, the installer, the network, the known-bad list and the local library;
+    - on Windows, a small helper process.
+  - The screens are the AutoStacc site's own pages: in a locked-down WebView on Android, and WebView2 on Windows. So the store, the account and the community are built once, for the site and the app.
+  - Flutter isn't used. Answering C.A.W from the background would mean starting a Flutter engine with no screen, and the screens would duplicate the site's.
+- **Published** on C.A.W's public GitHub Releases: a user can't download from a private repository. The Hub's CI attaches its APK there, using one fine-grained token, limited to C.A.W's releases, stored as a secret in the Hub repository.
+- **Its own signing key.** Each app pins the other's certificate (its SHA-256 digest, public, in the source).
+  - C.A.W accepts only the Hub's certificate, and the Hub only C.A.W's.
+  - This replaces "the companion must be signed with C.A.W's own key" ([companion protocol](companion-protocol.md#where-the-code-is)).
+  - The main app's check changes when the first signed Hub build gives the digest. Until then it still wants C.A.W's own key, so no companion is ever accepted.
+- **Why:**
+  - A small native core keeps the process that holds the install and network powers small enough to audit, and quick to answer C.A.W's 3 s bind.
+  - The site is the product's front end anyway.
+  - A key of its own means a leaked C.A.W key doesn't also sign a Hub, and the other way round.
+- **[Assumption], to check before the cloud library is built:** cross-app drag and drop. Android has it between apps side by side in multi-window, from Android 7.0 (`View.DRAG_FLAG_GLOBAL` with a content URI granted for reading); Windows has it between processes through OLE. On a phone used full screen, the same files should also be listed inside C.A.W (Files), read through the companion's library request.
+
 ## 2026-11-18: The companion's groundwork in the main app: a services package, one link, two flavours (#239, for 1.0.7)
 
 **Decision (Claude, following the architect's design and the owner's groundwork rule):** what needs no owner input is built, with no change for anyone without a companion.

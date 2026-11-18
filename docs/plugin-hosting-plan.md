@@ -48,7 +48,11 @@ updated: 2026-11-18
 **The companion app** (owner, 2026-11-18: release **1.0.7** is given over to it and to this security work, after the 1.0.6 usability release; the later batches moved up by one). It has its own package, so its own permissions.
 - **What it holds:** `REQUEST_INSTALL_PACKAGES`, `UPDATE_PACKAGES_WITHOUT_USER_ACTION` and `INTERNET`, for the self-updater, the update check, telemetry and feedback. Plug-in trust is kept here too (below).
 - **What it grows into:** AutoStacc's secondary hub; the two work as one. It holds every download, the user's whole library and the account, and stores the user's data, sounds and one-shots in the cloud for C.A.W to use. C.A.W reads them through the companion, so the main app still needs no network, and account tokens never live in the process that loads plug-ins.
-- **Private (owner):** its code (a closed-source, private repository, unlike C.A.W's Apache-2.0, [vision](vision.md)) and its data. Nothing in it is shared or exposed.
+- **Private (owner):** its code and its data. Nothing in it is shared or exposed.
+  - The code is in the private repository `Kmandevr/AutoStacc-Hub`, unlike C.A.W's Apache-2.0 ([vision](vision.md)).
+  - It is built as the AutoStacc site in a locked-down WebView over a small native core: Kotlin on Android, a helper process on Windows ([decisions](decisions.md), 2026-11-18).
+  - It has its own signing key; the two apps pin each other's certificate.
+  - Its APK is published on C.A.W's public releases.
 - **Admin view (owner):** the telemetry and feedback that C.A.W-Telemetry collects are shown in an admin view inside the companion app, for the owner and the people they trust, to see how the app is used and to find vulnerabilities. When it is built, the C.A.W-Telemetry repository's PLAN.md, privacy policy and access rules change in the same piece of work.
 - **Talking to it** ([companion protocol](companion-protocol.md)): the main app sends only fixed, structured messages (an update check, a telemetry report in the existing schema, a request for a library file), never arbitrary payloads, so a plug-in can't use it to send data out. It accepts only callers signed with C.A.W's own key, checked on every message by uid and signer; whether a custom permission with `protectionLevel="signature"` guards it as well is open (open question 10). It never uses `sharedUserId`, which would merge the two apps' permissions again. The main app needs a `<queries>` entry to find it.
 - **Play builds:** the Play companion carries no install permissions, since Play does the updating.
@@ -166,8 +170,8 @@ updated: 2026-11-18
 8. **Settled** (owner, 2026-11-18): the companion app and this security work are release 1.0.7, after the 1.0.6 usability release and before hosting goes live in 1.1.0; the later batches moved up by one.
 9. Which trust a never-seen plug-in gets (6): **[Proposal]** Blocked until the user chooses.
 10. **Waiting for the owner before the companion app is built** (the main app's groundwork is in, [companion protocol](companion-protocol.md)):
-    - where the companion's code lives: the owner called it private and closed-source, against this Apache-2.0 repository; also its package and service names (assumed `com.kmandevr.caw.companion` and `.CompanionService`);
-    - its screens, which need the AutoStacc brand (logo, colours, name);
+    - its package and service names (assumed `com.kmandevr.caw.companion` and `.CompanionService`); where its code lives is settled (`Kmandevr/AutoStacc-Hub`, [decisions](decisions.md), 2026-11-18);
+    - its own native screens (updates, plug-in trust), which need the AutoStacc brand (logo, colours, name); the rest are the site's pages;
     - the known-bad list's source and its signing key;
     - the two Play listings;
     - whether the companion declares and enforces the signature permission `com.kmandevr.caw.permission.COMPANION`: it stops binds from other keys before a message arrives, but an app that declares the name first blocks the companion's install. The main app no longer declares it, and the per-message signer check is the boundary ([companion protocol](companion-protocol.md#transport));

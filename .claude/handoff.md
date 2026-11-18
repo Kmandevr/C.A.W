@@ -1,6 +1,6 @@
 # Handoff
 
-Commit: 58ee152 (Main = 1.0.6-alpha.1 via PR #246; the session branch adds the 1.0.7 groundwork, PR #247)
+Commit: bc98be7+ (Main = v1.0.6-alpha.1 published + the 1.0.7 groundwork, PR #247 merged)
 Branch: ccr-56285e11-0xrj3h. Main is protected: PRs only; merge yourself when CI is green. Publish with app.yml's workflow_dispatch (installables + release) on Main. Each release needs a CHANGELOG.md entry, copied to app/assets/CHANGELOG.md.
 
 ## Goal
@@ -17,7 +17,7 @@ Finish and release 1.0.6-alpha.1, the usability release (owner, 2026-11-18). The
   - smooth zoom and the #235 pass;
   - the quick wins.
   - Checks: ctest 11/11; CAW_LIB flutter test 2328 + 8 goldens re-recorded (the zoom note-preview levels); docs --strict.
-  - Release run 44275912556 failed once on the launch-stall bench (21 ms under CI load); failed jobs re-run once. The bench now counts the quietest warmed round (58ee152, in PR #247).
+  - v1.0.6-alpha.1 published with all six assets; the release job now also needs analysis and the Dart tests.
 - **1.0.7 groundwork:** docs/plugin-hosting-plan.md ("Least privilege and the companion app"), decisions 2026-11-18, and #239.
   - Owner answers: updater and trust first; the full AutoStacc look (brand assets still needed from the owner).
 - **Audit (2026-11-18):** 10 issues closed; #245 collects the performance leftovers. CI build jobs are capped (f8805d3).
@@ -25,5 +25,5 @@ Finish and release 1.0.6-alpha.1, the usability release (owner, 2026-11-18). The
 - **Owner questions:** where the companion's code lives (you called it private and closed-source, but C.A.W is open source, and its APK can't come from a private repo without a token); Windows x86-64-v3 (a second DLL, or the minimum CPU); the AutoStacc brand; the pack's 4th device; routing and hosting plan questions; TERMS governing law; store accounts.
 
 ## Next
-1. Confirm the v1.0.6-alpha.1 release and its assets; if the re-run fails, merge #247 and dispatch the release again.
-2. PR #247 (companion protocol, caw_services, link and adapters, github/play flavours): merge when green. The companion app itself waits for the owner (private repo?).
+1. The AutoStacc Hub (owner, 2026-11-18, decisions): private `Kmandevr/AutoStacc-Hub` (cloned to /home/user/autostacc-hub; PLAN.md, CLAUDE.md), option A: the site in a WebView over a Kotlin core and a Windows helper; own key, certificates pinned both ways; APK on C.A.W's releases via a fine-grained token (the owner adds it).
+2. Next build step, the owner to confirm: the Hub's Kotlin core (the service answering C.A.W's protocol, reusing CompanionCallerCheck's logic), then C.A.W's signer check switched to the Hub's pinned digest.
