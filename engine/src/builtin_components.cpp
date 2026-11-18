@@ -5,6 +5,7 @@
 #include "builtin_effects.h"
 #include "builtin_instruments.h"
 #include "builtin_test_signal.h"
+#include "fx_merged.h"
 
 #include <algorithm>
 #include <cmath>
@@ -246,7 +247,7 @@ ModuleDescriptor delayDescriptor() {
 }
 const ModuleDescriptor kDelay = delayDescriptor();
 
-class PingPong final : public ModuleProcessor {
+class PingPong : public ModuleProcessor {
 public:
     const ModuleDescriptor& descriptor() const noexcept override { return kDelay; }
     bool activate(double sampleRate, uint32_t) noexcept override {
@@ -299,6 +300,19 @@ private:
     double seconds_ = -1.0;  // the delay time now (gliding to the target); -1 before the first block
     double glide_ = 0.0;
 };
+
+}  // namespace
+
+// The ping-pong delay as a variant of Delay (builtin_fx_merged_space.cpp): its own (legacy) descriptor, and an
+// instance of the same class under a variant's descriptor (fx_merged.h, AsVariant).
+namespace fx {
+const ModuleDescriptor& pingPongDelayDescriptor() { return kDelay; }
+ModuleProcessor* makePingPongDelayAs(const ModuleDescriptor& variant) noexcept {
+    return new (std::nothrow) AsVariant<PingPong>(variant);
+}
+}  // namespace fx
+
+namespace {
 
 // Stereo chorus: rate, depth and mix; the two sides sweep a quarter cycle apart.
 const ParameterDescriptor kChorusParams[] = {
