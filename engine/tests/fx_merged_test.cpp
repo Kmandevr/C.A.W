@@ -229,7 +229,7 @@ TEST(a_merged_device_reusing_an_old_id_replaces_its_registration_in_place) {
         CHECK(listed && listed->parameterCount > 0 && listed->parameters[listed->parameterCount - 1].id == fx::kVariantParam);
     }
     // A merged id's presets are its own (a reused id's, variant 0) and its old effects'; any other id's are its own.
-    CHECK(&builtinPresets("org.caw.eq") == &ownBuiltinPresets("org.caw.eq"));
+    CHECK(&builtinPresets("org.caw.convolver") == &ownBuiltinPresets("org.caw.convolver"));  // stays its own device
     CHECK(ownBuiltinPresets(kShift).empty() && builtinPresets(kShift).size() >= 10u);
 }
 
