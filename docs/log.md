@@ -1,11 +1,12 @@
 ---
 title: Log
 summary: Dated history of changes, newest first.
-updated: 2026-11-17
+updated: 2026-11-18
 ---
 
 # Log
 
+- 2026-11-18: hotfix 1.0.5-alpha.2, the UI side (#241, #235; branch `drift-ui`): Arrange's lanes window keeps a fixed origin between 32,768 px marks and reuses its clip widgets when only the window moves, each clip its own layer (a move built every lane's clips again, 633 to 789 widgets in one frame), and the timeline grows ahead six screens at a time (near its end every scroll frame rebuilt the whole arrangement, 3,226 widgets); the playhead read moved on to now by `caw_engine_position_at` (a read lagged its callback by up to 21 ms) and drawn for the frame's vsync (`FrameTime`); the system's output figure the median of 9 timestamp reads less half a callback; an offset set over the buffers' estimate keeps its total once timestamps come (it had counted the delay twice: 200 + 100 = 300 ms); the latency sheet's visual beat and a click loop of its own while stopped; the Latency readout's breakdown; Bluetooth's best quality section with Open Developer options; tests `arrange_scroll_test.dart`, `av_timing_test.dart`, `latency_sync_test.dart`.
 - 2026-11-17: v1.0.5-alpha.1 published (PR #238; CI green after one re-run of the sanitizer job, whose runner died mid-build; the same sanitizer suite passed locally).
 - 2026-11-17: the audio review's fixes on batch-105 (#236, #237): a WASAPI Low latency open, or reroute, that comes up at another period than asked (miniaudio's quiet `IAudioClient` fallback, a 3-period buffer) opens again at the default and the status says `refused`; the period findings cleared at every open; `caw_audio_tune_buffer` only in Low latency or Auto while recording, new streams told by an open and reroute count, a new playback not counted as quiet time; `CAW_AUDIO_BACKEND` falls back to the default order when its device fails; a ramp is capped only by the engine's component cap or memory budget, any other refusal is an error.
 - 2026-11-17: each platform's low-latency path (#237, branch `platform-audio`): Low latency on WASAPI asks the endpoint's smallest period (`IAudioClient3`, `src/device_period.h`, floor 128 frames; `caw_audio_status` "smallest_period"); `CAW_AUDIO_BACKEND` for the CLI (JACK's real-time callback); the route model's `bluetoothProfile` (LE Audio, A2DP, SCO, ASHA); research recorded: LE Audio and MMAP conditions, BLE MIDI's system-held high connection priority, PulseAudio's 25 ms default and PipeWire's floors, ASIO (proprietary or GPLv3) and libdbus (AFL-2.1 or GPL) not added.

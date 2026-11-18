@@ -1,7 +1,7 @@
 ---
 title: UI design
 summary: Arrangement-first creative UI across three shared-state sections (Build, Files, Arrange), with touch-first phone layouts and keyboard/mouse desktop access.
-updated: 2026-11-17
+updated: 2026-11-18
 covers: [app/lib/ui/, app/lib/actions/]
 ---
 

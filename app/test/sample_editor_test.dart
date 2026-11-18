@@ -329,10 +329,11 @@ void main() {
     final b = tester.getTopLeft(find.byKey(const ValueKey('audio-clip-box-c2'))).dx;
     expect(a, closeTo(before + 100, 1e-6), reason: 'bar 9999 lands where the scroll puts it');
     expect(b - a, closeTo(16 * w, 1e-6));
-    // Laid out relative to the window's origin: small numbers.
+    // Laid out relative to the window's origin, a fixed mark at most TimelineWindow.anchorPx before it (#241):
+    // small numbers.
     final slot = tester.widget<Positioned>(find.ancestor(of: find.byKey(const ValueKey('audio-view-c1')),
         matching: find.byType(Positioned)).first);
-    expect(slot.left!.abs(), lessThan(5000));
+    expect(slot.left!.abs(), lessThan(TimelineWindow.anchorPx + 4 * lanes.position.viewportDimension));
     final win = TimelineWindow.around(lanes.position.pixels, lanes.position.viewportDimension, w);
     expect(win.x(far, w), closeTo(slot.left!, 1e-9), reason: 'a fresh window after the jump');
     expect(win.shows(far, far + 8), isTrue);

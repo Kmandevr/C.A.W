@@ -5,6 +5,7 @@ import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/scheduler.dart';
 
 import '../engine/engine.dart';
 import '../engine/execution.dart';
@@ -84,6 +85,7 @@ class AppState extends ChangeNotifier implements StressHost {
             ? null : File('${this.settings.dir!.path}${Platform.pathSeparator}latency.json')),
         route: audioRoute ?? platformAudioRoute())
       ..outputName = (() => engine?.audioStatus().device ?? '')
+      ..callbackFrames = (() => engine?.audioStatus().periodFrames ?? 0)
       ..inputName = (() => (engine?.audioStatusJson()['input'] as Map?)?['device'] as String? ?? '')
       ..addListener(_latencyChanged);
     _light = this.settings.lightMode;
@@ -1306,13 +1308,26 @@ class AppState extends ChangeNotifier implements StressHost {
 
   /// [playheadClock] now: where to draw the playhead in this frame (for the moment it lights up, [visualLeadUs]).
   double get smoothPlayheadStep =>
-      meters.playing && playheadClock.playing ? playheadClock.at(nowUs + visualLeadUs) : playheadStep;
+      meters.playing && playheadClock.playing ? playheadClock.at(drawUs + visualLeadUs) : playheadStep;
 
   /// The playhead for something drawn only on the engine's reads (the piano roll under Smooth follow): where the
   /// line is half a read interval on, plus the lead, so it is as early as late between reads.
   double get heldPlayheadStep => meters.playing && playheadClock.playing
-      ? playheadClock.at(heldDrawUs(nowUs: nowUs, leadUs: visualLeadUs, readIntervalUs: _poller.interval.inMicroseconds))
+      ? playheadClock.at(heldDrawUs(nowUs: drawUs, leadUs: visualLeadUs, readIntervalUs: _poller.interval.inMicroseconds))
       : playheadStep;
+
+  final FrameTime _frameTime = FrameTime();
+
+  /// The moment this frame is drawn for ([FrameTime]): its vsync on [nowUs]'s clock inside a frame, else now. Tests
+  /// with their own clock get their clock (their frames' times are not on it).
+  int get drawUs {
+    final now = nowUs;
+    if (!identical(_clockUs, _monotonicUs)) return now;
+    final b = SchedulerBinding.instance;
+    final inFrame = b.schedulerPhase == SchedulerPhase.transientCallbacks ||
+        b.schedulerPhase == SchedulerPhase.midFrameMicrotasks || b.schedulerPhase == SchedulerPhase.persistentCallbacks;
+    return _frameTime.at(nowUs: now, vsyncUs: inFrame ? b.currentSystemFrameTimeStamp.inMicroseconds : null);
+  }
 
   // Hands the read just taken to [playheadClock], over the range [heardStep] wraps in.
   void _readPlayhead() {
@@ -1320,8 +1335,25 @@ class AppState extends ChangeNotifier implements StressHost {
     final (from, to) = p.loopsRange
         ? (p.loopStartSteps.toDouble(), p.loopEndSteps.toDouble())
         : (0.0, p.engineLoopSteps.toDouble());
+    // The step rendered at this very moment (caw_engine_position_at on the MIDI clock, worked out from the last
+    // callback's start) rather than at the last callback's end: a read then lags by however long ago that callback
+    // ran, up to a whole callback (21 ms at 1024 frames), a jitter the line would show (#241).
+    var step = playheadStep;
+    final e = engine;
+    final m = meters;
+    final rate = latency.device.sampleRate;
+    if (e != null && m.playing && m.loopLength > 0 && rate > 0) {
+      final at = e.positionAt(e.midiClockNs);
+      if (at >= 0) {
+        // How far now lies from the read's own position (its callback's end), wrapped to the nearest; a loop
+        // range's wrap between them reads far off and is left as it was.
+        var d = (at - m.position) % m.loopLength;
+        if (d > m.loopLength / 2) d -= m.loopLength;
+        if (d.abs() < rate / 10) step = heardStep(meterStep(m) + d / rate * project.bpm / 15);
+      }
+    }
     playheadClock.read(
-        step: playheadStep,
+        step: step,
         atUs: nowUs,
         playing: meters.playing && meters.loopLength > 0,
         stepsPerSecond: p.bpm / 15,
