@@ -6,6 +6,7 @@
 #include "builtin_instruments.h"
 #include "builtin_test_signal.h"
 #include "fx_merged.h"
+#include "builtin_fx_merged_stereomod.h"
 
 #include <algorithm>
 #include <cmath>
@@ -71,7 +72,7 @@ double valueAt(const AudioProcessBlock& b, uint32_t i, double fallback) noexcept
 
 bool stereo(const AudioProcessBlock& b) noexcept { return b.input.channelCount == 2 && b.output.channelCount == 2; }
 
-class Balance final : public ModuleProcessor {
+class Balance : public ModuleProcessor {
 public:
     const ModuleDescriptor& descriptor() const noexcept override { return kBalance; }
     // No state: silence in gives silence out, so the host may skip it while its input is silent.
@@ -88,7 +89,7 @@ public:
     }
 };
 
-class Width final : public ModuleProcessor {
+class Width : public ModuleProcessor {
 public:
     const ModuleDescriptor& descriptor() const noexcept override { return kWidth; }
     // No state: silence in gives silence out, so the host may skip it while its input is silent.
@@ -330,7 +331,7 @@ ModuleDescriptor chorusDescriptor() {
 }
 const ModuleDescriptor kChorus = chorusDescriptor();
 
-class ChorusEffect final : public ModuleProcessor {
+class ChorusEffect : public ModuleProcessor {
 public:
     const ModuleDescriptor& descriptor() const noexcept override { return kChorus; }
     bool activate(double sampleRate, uint32_t) noexcept override {
@@ -392,6 +393,19 @@ ModuleProcessor* make() noexcept {
 }
 
 }  // namespace
+
+namespace fx {
+
+// FX consolidation (fx_merged.h): the descriptors and classes the merged devices wrap as variants
+// (builtin_fx_merged_stereomod.cpp), the classes unchanged.
+const ModuleDescriptor& legacyWidthDescriptor() { return kWidth; }
+ModuleProcessor* makeWidthAs(const ModuleDescriptor& variant) noexcept { return new (std::nothrow) AsVariant<Width>(variant); }
+const ModuleDescriptor& legacyBalanceDescriptor() { return kBalance; }
+ModuleProcessor* makeBalanceAs(const ModuleDescriptor& variant) noexcept { return new (std::nothrow) AsVariant<Balance>(variant); }
+const ModuleDescriptor& legacyChorusDescriptor() { return kChorus; }
+ModuleProcessor* makeChorusAs(const ModuleDescriptor& variant) noexcept { return new (std::nothrow) AsVariant<ChorusEffect>(variant); }
+
+}  // namespace fx
 
 void registerBuiltinComponents(ModuleRegistry& registry) {
     registry.add(kBalance, &make<Balance>);

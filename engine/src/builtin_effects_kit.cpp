@@ -1,5 +1,6 @@
 // The built-in kit effects (#173): a multimode filter with LFO and envelope, phaser, flanger and a utility.
 #include "builtin_effects.h"
+#include "builtin_fx_merged_stereomod.h"
 
 #include <algorithm>
 #include <cmath>
@@ -262,7 +263,7 @@ const ModuleDescriptor& phaserDescriptor() {
 // A chain of first-order all-passes per side, their corner swept by an LFO over +-3 octaves x depth around the
 // centre; the chain's output fed back to its input; half mixed with the dry it notches. The all-pass coefficient
 // is worked out at control points (a tan) and glides in a straight line between them.
-class Phaser final : public EffectBase {
+class Phaser : public EffectBase {
 public:
     const ModuleDescriptor& descriptor() const noexcept override { return phaserDescriptor(); }
 
@@ -357,7 +358,7 @@ const ModuleDescriptor& flangerDescriptor() {
 
 // A short delay per side swept by an LFO (from 5 % to 195 % of `delay` at full depth), read between samples
 // (4-point Hermite), fed back; mixed with the dry it combs, and the comb sweeps.
-class Flanger final : public EffectBase {
+class Flanger : public EffectBase {
 public:
     const ModuleDescriptor& descriptor() const noexcept override { return flangerDescriptor(); }
 
@@ -462,7 +463,7 @@ const ModuleDescriptor& utilityDescriptor() {
     return d;
 }
 
-class Utility final : public EffectBase {
+class Utility : public EffectBase {
 public:
     const ModuleDescriptor& descriptor() const noexcept override { return utilityDescriptor(); }
 
@@ -537,6 +538,26 @@ private:
     bool bassMono_ = false, dcBlock_ = false;
 };
 
+// Utility as the merged Utility/Stereo device's first variant (FX consolidation): the same DSP, plus two optional
+// outputs, mid (M on both sides) and side (S on the left, -S on the right), of what it outputs, so the two summed
+// give the output back. Unconnected (the default) they cost one compare a run and change nothing.
+class UtilityMidSide : public Utility {
+public:
+    std::span<const OptionalPort> optionalPorts() const noexcept override {
+        static const OptionalPort ports[] = {{"mid", "Mid", false}, {"side", "Side", false}};
+        return ports;
+    }
+
+protected:
+    void run(const float* inL, const float* inR, float* outL, float* outR, uint32_t n) noexcept override {
+        Utility::run(inL, inR, outL, outR, n);
+        if (float *ml = optionalOutLeft(0), *mr = optionalOutRight(0); ml)
+            for (uint32_t i = 0; i < n; ++i) ml[i] = mr[i] = 0.5f * (outL[i] + outR[i]);
+        if (float *sl = optionalOutLeft(1), *sr = optionalOutRight(1); sl)
+            for (uint32_t i = 0; i < n; ++i) sl[i] = 0.5f * (outL[i] - outR[i]), sr[i] = -sl[i];
+    }
+};
+
 // ---------- Downmix (#120 layout rules) ----------
 
 // The explicit stereo-to-mono step a graph needs before a mono input (it never downmixes on its own): (L+R)/2,
@@ -588,6 +609,15 @@ ModuleProcessor* make() noexcept {
 }
 
 }  // namespace
+
+// FX consolidation (fx_merged.h): the descriptors and classes the merged devices wrap as variants
+// (builtin_fx_merged_stereomod.cpp), the classes unchanged.
+const ModuleDescriptor& legacyPhaserDescriptor() { return phaserDescriptor(); }
+ModuleProcessor* makePhaserAs(const ModuleDescriptor& variant) noexcept { return new (std::nothrow) AsVariant<Phaser>(variant); }
+const ModuleDescriptor& legacyFlangerDescriptor() { return flangerDescriptor(); }
+ModuleProcessor* makeFlangerAs(const ModuleDescriptor& variant) noexcept { return new (std::nothrow) AsVariant<Flanger>(variant); }
+const ModuleDescriptor& legacyUtilityDescriptor() { return utilityDescriptor(); }
+ModuleProcessor* makeUtilityAs(const ModuleDescriptor& variant) noexcept { return new (std::nothrow) AsVariant<UtilityMidSide>(variant); }
 
 void registerKit(ModuleRegistry& registry) {
     registry.add(filterDescriptor(), &make<FilterEffect>);

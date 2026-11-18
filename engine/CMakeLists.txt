@@ -296,6 +296,7 @@ target_include_directories(caw_cli PRIVATE src)
   target_sources(caw_tests PRIVATE tests/fx_merged_space_test.cpp)  # FX consolidation part E: Delay and Reverb
   target_sources(caw_tests PRIVATE tests/fx_merged_eqfilter_test.cpp)  # FX consolidation part C: EQ, Filter
   target_sources(caw_tests PRIVATE tests/fx_merged_dynamics_test.cpp)  # FX consolidation part A: Compressor, Limiter, Transient
+  target_sources(caw_tests PRIVATE tests/fx_merged_stereomod_test.cpp)  # FX consolidation D: Utility/Stereo, Chorus/Flanger, Phaser, Tremolo/Pan
   target_sources(caw_tests PRIVATE tests/modulation_test.cpp)  # #161: project modulators and links
   target_sources(caw_tests PRIVATE tests/midi_device_test.cpp)  # MIDI from devices (API 15): edge conversion, timing, notes
   target_sources(caw_tests PRIVATE tests/graph_layout_test.cpp)  # #120 layout rules: mono to stereo, downmix, dual mono
@@ -402,6 +403,7 @@ target_include_directories(caw_cli PRIVATE src)
   target_sources(caw_rt_tests PRIVATE tests/fx_merged_space_rt_test.cpp)  # part E: Delay and Reverb variant changes
   target_sources(caw_rt_tests PRIVATE tests/fx_merged_eqfilter_rt_test.cpp)  # FX consolidation part C: EQ, Filter
   target_sources(caw_rt_tests PRIVATE tests/fx_merged_dynamics_rt_test.cpp)  # FX consolidation part A: Compressor variants while playing
+  target_sources(caw_rt_tests PRIVATE tests/fx_merged_stereomod_rt_test.cpp)  # FX consolidation D: variant changes while playing
   target_sources(caw_rt_tests PRIVATE tests/voice_bus_rt_test.cpp)  # #127: instruments rendering into voice-bus lanes
   target_sources(caw_rt_tests PRIVATE tests/audio_rt_test.cpp)  # audio clips, the sampler, monitoring and recording (WP-J)
   target_sources(caw_rt_tests PRIVATE tests/modulation_rt_test.cpp)  # #161: project modulation
