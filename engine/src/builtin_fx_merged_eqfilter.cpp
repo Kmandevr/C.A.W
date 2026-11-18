@@ -1,7 +1,7 @@
 // Merged devices, part C (EQ, Filter): their variants, each an old effect's class unchanged (FX consolidation, 1.0.8).
 #include "fx_merged.h"
 
-// The ids this part replaces (the old ones stay registered until part F retires them):
+// The ids this part replaces (retired: no longer registered, migrated to these):
 // EQ ("org.caw.eq", the old parametric EQ's id reused) replaces org.caw.eq (variant 0 "Bands",
 //   builtin_effects_eq.cpp), org.caw.geq (1 "Graphic"), org.caw.eq.dj (2 "DJ") and org.caw.tilt (3 "Tilt")
 //   (builtin_fx_filters_eq.cpp). Dynamic EQ and M/S are new DSP, for a later part.

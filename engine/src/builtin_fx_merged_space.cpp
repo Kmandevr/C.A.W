@@ -2,7 +2,7 @@
 #include "builtin_fx_creative.h"
 #include "fx_merged.h"
 
-// The ids this part replaces (the old ones stay registered until part F retires them):
+// The ids this part replaces (retired: no longer registered, migrated to these):
 // Pitch/Shift ("org.caw.shift", built): org.caw.pitchshift (variant 0 "Pitch", builtin_fx_creative_pitchshift.cpp)
 //   and org.caw.freqshift (variant 1 "Frequency", builtin_fx_creative_freqshift.cpp).
 // Delay ("org.caw.delay", built): org.caw.delay.pro (variant 0 "Digital", builtin_effects_space.cpp) and

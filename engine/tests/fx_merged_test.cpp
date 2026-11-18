@@ -32,10 +32,13 @@ constexpr const char* kShift = "org.caw.shift";
 // The old ids Pitch/Shift replaces, by variant.
 const char* const kOld[] = {"org.caw.pitchshift", "org.caw.freqshift"};
 
+// The built-ins with the retired old ids registered again beside them (restoreRetired), so a variant can be
+// compared with the old effect as it ran.
 const ModuleRegistry& registry() {
     static const ModuleRegistry r = [] {
         ModuleRegistry x;
         registerBuiltinComponents(x);
+        x.restoreRetired();
         return x;
     }();
     return r;
@@ -231,6 +234,50 @@ TEST(a_merged_device_reusing_an_old_id_replaces_its_registration_in_place) {
     // A merged id's presets are its own (a reused id's, variant 0) and its old effects'; any other id's are its own.
     CHECK(&builtinPresets("org.caw.convolver") == &ownBuiltinPresets("org.caw.convolver"));  // stays its own device
     CHECK(ownBuiltinPresets(kShift).empty() && builtinPresets(kShift).size() >= 10u);
+}
+
+TEST(the_old_ids_are_retired_but_still_play_as_their_merged_devices) {
+    // Part F: no old id is registered, listed or made as a top-level device; each one names its merged device's
+    // variant wherever a caller still names it (a project, caw_migrate_component, createNativeComponent).
+    ModuleRegistry plain;
+    registerBuiltinComponents(plain);
+    Engine e(48000);
+    const std::string json = e.nativeComponentsJson();
+    CHECK(fx::legacyEffects().size() == 30u);
+    for (const fx::LegacyEffect* old : fx::legacyEffects()) {
+        const std::string id(old->from);
+        CHECK(plain.find(id) == nullptr);
+        CHECK(plain.create(id) == nullptr);
+        for (const ModuleDescriptor* d : plain.builtinComponents()) CHECK(d->id != old->from);
+        if (json.find("\"id\":\"" + id + "\"") != std::string::npos) cawtest::fail(__FILE__, __LINE__, id + " is still listed");
+        // Engine::createNativeComponent makes the variant the old id became: the merged descriptor, `variant` set.
+        std::unique_ptr<ModuleProcessor> p = e.createNativeComponent(id);
+        CHECK(p != nullptr);
+        if (p) {
+            const fx::MergedDevice* m = fx::findMergedDevice(old->to);
+            CHECK(m && &p->descriptor() == &m->variants[old->variant].descriptor());
+        }
+        // The old class's own descriptor is kept (for a rack's routes and caw_migrate_component).
+        CHECK(old->legacy != nullptr && old->legacy().id == old->from);
+        // The old presets still resolve under the old id, and under the merged id with the variant.
+        for (const BuiltinPreset& preset : ownBuiltinPresets(id)) {
+            const BuiltinPreset* merged = findBuiltinPreset(old->to, preset.name);
+            CHECK(merged != nullptr);
+            const Json j = migrateJson(("{\"id\":\"" + id + "\",\"preset\":\"" + std::string(preset.name) + "\"}").c_str());
+            CHECK(j.boolean("ok", false) && j.string("id") == std::string(old->to));
+        }
+    }
+    // No shipped preset of any listed device needs migration: each merged device's names its variant.
+    for (const ModuleDescriptor* d : plain.builtinComponents())
+        for (const BuiltinPreset& preset : builtinPresets(d->id)) {
+            ComponentSpec c;
+            c.id = std::string(d->id);
+            for (const auto& [k, v] : preset.values) c.params.emplace_back(std::string(k), v);
+            if (fx::migrateLegacyEffect(c)) cawtest::fail(__FILE__, __LINE__, c.id + " preset " + std::string(preset.name) + " needs migration");
+            if (fx::findMergedDevice(d->id) && !std::any_of(preset.values.begin(), preset.values.end(),
+                                                            [](const auto& v) { return v.first == fx::kVariantParam; }))
+                cawtest::fail(__FILE__, __LINE__, c.id + " preset " + std::string(preset.name) + " names no variant");
+        }
 }
 
 TEST(merged_pitch_shift_renders_the_old_ids_bits_over_their_presets_and_random_values) {
@@ -431,7 +478,7 @@ TEST(a_rack_older_than_the_merged_devices_gets_its_routes_re_pointed_and_its_lay
     const ModuleDescriptor* rack = registry().find(kFxRackId);
     CHECK(rack && rack->parameters[rack->parameterCount - 1].id == kRackLayoutParam &&
           !rack->parameters[rack->parameterCount - 1].automatable);
-    // caw_migrate_component marks an older empty rack, and every rack preset settles after one migration.
+    // caw_migrate_component marks an older empty rack; every rack preset needs no migration, and settles after one.
     const Json j = migrateJson(R"({"id":"org.caw.rack.multiband","params":{"bands":2}})");
     CHECK(j.boolean("migrated", false) && j.get("params") && j.get("params")->number(std::string(kRackLayoutParam), 0) == kRackLayoutCurrent);
     for (const char* id : {kFxRackId.data(), "org.caw.rack.multiband"})
@@ -439,9 +486,13 @@ TEST(a_rack_older_than_the_merged_devices_gets_its_routes_re_pointed_and_its_lay
             ComponentSpec c;
             c.id = id;
             for (const auto& [k, v] : p.values) c.params.emplace_back(std::string(k), v);
-            // A preset still naming an old id migrates (part F rewrites the presets); once is enough.
-            fx::migrateLegacyEffect(c);
+            // Every rack preset names the merged ids with their variants and today's layout: it needs no migration.
             CHECK(!fx::migrateLegacyEffect(c));
+            // And a rack that did need one (an older layout) settles after one migration.
+            ComponentSpec older = c;
+            std::erase_if(older.params, [](const auto& v) { return v.first == kRackLayoutParam; });
+            CHECK(fx::migrateLegacyEffect(older));
+            CHECK(!fx::migrateLegacyEffect(older));
         }
 }
 

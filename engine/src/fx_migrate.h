@@ -55,6 +55,9 @@ std::span<const LegacyEffect> legacyEqFilterEffects();   // fx_migrate_eqfilter.
 std::span<const LegacyEffect> legacyStereoModEffects();  // fx_migrate_stereomod.cpp
 std::span<const LegacyEffect> legacySpaceEffects();      // fx_migrate_space.cpp
 
+// Every family's old ids, in family order.
+const std::vector<const LegacyEffect*>& legacyEffects();
+
 // The table entry for an old id, or null (an id no merged device replaces).
 const LegacyEffect* findLegacyEffect(std::string_view id) noexcept;
 
@@ -70,6 +73,11 @@ using ParamRenames = std::vector<std::pair<std::string, std::string>>;
 // reused, as org.caw.utility) gets `<slot>.variant` 0, the routes are re-pointed past its new `variant`, and the
 // version is added. False, with nothing changed, when there was nothing to migrate (a current rack: never twice).
 bool migrateLegacyEffect(ComponentSpec& spec, ParamRenames* renames = nullptr);
+
+// An old id and its values as the merged device's (id, `variant` and values moved), for a call that names one
+// alone (Engine::createNativeComponent, the component testing suite, the plug-in benchmark). False, nothing
+// changed, for any other id.
+bool migrateLegacyId(std::string& id, std::vector<std::pair<std::string, double>>& params);
 
 // Whether any component list of the project (master, layers' components and noteComponents, the audition's)
 // holds an old id, directly or in a rack.

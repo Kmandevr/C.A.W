@@ -1,7 +1,7 @@
 // Merged devices, part D (Utility/Stereo, Chorus/Flanger, Phaser, Tremolo/Pan): their variants, each an old effect's class unchanged.
 #include "builtin_fx_merged_stereomod.h"
 
-// The ids this part replaces (the old ones stay registered until part F retires them; fx_migrate_stereomod.cpp):
+// The ids this part replaces (retired: no longer registered, migrated to these; fx_migrate_stereomod.cpp):
 // Utility/Stereo ("org.caw.utility", the Utility's id reused): Utility (variant 0, builtin_effects_kit.cpp, with
 //   optional mid and side outputs), Width (org.caw.stereo.width) and Balance (org.caw.stereo.balance,
 //   builtin_components.cpp), Imager, Haas and Mixer (org.caw.imager, org.caw.haas, org.caw.channelmixer,

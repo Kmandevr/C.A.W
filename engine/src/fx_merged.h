@@ -50,7 +50,9 @@ const std::vector<const MergedDevice*>& mergedDevices();
 const MergedDevice* findMergedDevice(std::string_view id) noexcept;
 
 // Registers every merged id (with its first variant's descriptor and class), replacing the old effect's
-// registration where a merged device reuses its id (org.caw.utility...). registerBuiltinEffects calls it.
+// registration where a merged device reuses its id (org.caw.utility...), and retires every other old id
+// (fx_migrate.h: its registration goes, so it is no longer listed, found or made; a project, preset, rack or C API
+// call naming one is migrated first). registerBuiltinEffects calls it last.
 void registerMergedDevices(ModuleRegistry& registry);
 
 // The variant `params` choose for `device` (its `variant` value rounded and held to the list; 0 when absent).
@@ -85,6 +87,11 @@ private:
 // `params` choose; any other id is registry.create(id). Null when the id is unknown or the instance can't be made.
 std::unique_ptr<ModuleProcessor> createComponent(const ModuleRegistry& registry, std::string_view id,
                                                  const std::vector<std::pair<std::string, double>>& params) noexcept;
+
+// A component's descriptor as its `params` choose it: a merged device's variant's (its ports, latency and tail),
+// else registry.find(id). Null for an unknown id.
+const ModuleDescriptor* findComponentDescriptor(const ModuleRegistry& registry, std::string_view id,
+                                                const std::vector<std::pair<std::string, double>>& params) noexcept;
 
 // What a component's structure is, from its spec ("" for one with none): a rack's children (rackStructure) or a
 // merged device's variant. Two specs with the same structure keep the running instance; another rebuilds it.

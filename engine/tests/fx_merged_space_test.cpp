@@ -35,10 +35,13 @@ constexpr Device kDelay = {"org.caw.delay", {"org.caw.delay.pro", "org.caw.delay
 constexpr Device kReverb = {"org.caw.reverb", {"org.caw.reverb.pro", "org.caw.shimmer"}};
 constexpr const Device* kDevices[] = {&kDelay, &kReverb};
 
+// The built-ins with the retired old ids registered again beside them (restoreRetired), so a variant can be
+// compared with the old effect as it ran.
 const ModuleRegistry& registry() {
     static const ModuleRegistry r = [] {
         ModuleRegistry x;
         registerBuiltinComponents(x);
+        x.restoreRetired();
         return x;
     }();
     return r;
@@ -386,20 +389,26 @@ TEST(a_racks_old_delays_and_reverbs_migrate_with_their_routes_and_sound_the_same
     const Stereo a = renderChain({old}, in);
     CHECK(sameBits(a, renderChain({merged}, in)));
     CHECK(!sameBits(a, in));
-    // The rack presets that hold the old delay and reverb migrate and sound the same.
-    size_t migrated = 0;
+    // The rack presets that held the old delay and reverb (part F) name Delay and Reverb with their variants:
+    // nothing to migrate, and they sound.
+    size_t named = 0;
+    const double delayHash = rackChildHash(kDelay.id), reverbHash = rackChildHash(kReverb.id);
     for (const char* rackId : {"org.caw.rack.fx", "org.caw.rack.multiband"})
         for (const BuiltinPreset& p : builtinPresets(rackId)) {
             ComponentSpec o;
             o.id = rackId;
-            for (const auto& [k, x] : p.values) o.params.emplace_back(std::string(k), x);
-            ComponentSpec m = o;
-            if (!fx::migrateLegacyEffect(m)) continue;
-            ++migrated;
-            if (!sameBits(renderChain({o}, in), renderChain({m}, in)))
-                cawtest::fail(__FILE__, __LINE__, std::string(rackId) + " preset " + std::string(p.name) + " sounds different");
+            bool space = false;
+            for (const auto& [k, x] : p.values) {
+                o.params.emplace_back(std::string(k), x);
+                space = space || (k.size() > 3 && k.substr(k.size() - 3) == "_fx" && (x == delayHash || x == reverbHash));
+            }
+            if (!space) continue;
+            ++named;
+            CHECK(!fx::migrateLegacyEffect(o));
+            const Stereo out = renderChain({o}, in);
+            if (sameBits(out, in)) cawtest::fail(__FILE__, __LINE__, std::string(rackId) + " preset " + std::string(p.name) + " is silent or dry");
         }
-    CHECK(migrated >= 3u);
+    CHECK(named >= 3u);
 }
 
 TEST(a_delay_or_reverb_variant_change_rebuilds_and_a_parameter_call_cant_change_it) {

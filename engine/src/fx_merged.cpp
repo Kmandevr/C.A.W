@@ -6,6 +6,7 @@
 #include <mutex>
 
 #include "builtin_fx_racks.h"
+#include "fx_migrate.h"
 
 namespace caw {
 namespace fx {
@@ -30,6 +31,7 @@ const MergedDevice* findMergedDevice(std::string_view id) noexcept {
 void registerMergedDevices(ModuleRegistry& registry) {
     for (const MergedDevice* d : mergedDevices())
         if (!d->variants.empty()) registry.replaceBuiltin(d->variants[0].descriptor(), d->variants[0].create);
+    for (const LegacyEffect* e : legacyEffects()) registry.retireBuiltin(e->from);  // retired: migrated, never made
 }
 
 uint32_t variantIndex(const MergedDevice& device, const std::vector<std::pair<std::string, double>>& params) noexcept {
@@ -86,6 +88,13 @@ std::unique_ptr<ModuleProcessor> createComponent(const ModuleRegistry& registry,
     const fx::MergedDevice* d = registry.isBuiltin(id) ? fx::findMergedDevice(id) : nullptr;
     if (!d || d->variants.empty()) return registry.create(id);
     return std::unique_ptr<ModuleProcessor>(d->variants[fx::variantIndex(*d, params)].create());
+}
+
+const ModuleDescriptor* findComponentDescriptor(const ModuleRegistry& registry, std::string_view id,
+                                                const std::vector<std::pair<std::string, double>>& params) noexcept {
+    const fx::MergedDevice* d = registry.isBuiltin(id) ? fx::findMergedDevice(id) : nullptr;
+    if (!d || d->variants.empty()) return registry.find(id);
+    return &d->variants[fx::variantIndex(*d, params)].descriptor();
 }
 
 std::string componentStructure(const ComponentSpec& spec) {

@@ -20,17 +20,6 @@ namespace {
 
 using Values = std::vector<std::pair<std::string, double>>;
 
-const std::vector<const LegacyEffect*>& legacyEffects() {
-    static const std::vector<const LegacyEffect*> all = [] {
-        std::vector<const LegacyEffect*> v;
-        for (std::span<const LegacyEffect> family : {legacyDynamicsEffects(), legacyDriveEffects(), legacyEqFilterEffects(),
-                                                     legacyStereoModEffects(), legacySpaceEffects()})
-            for (const LegacyEffect& e : family) v.push_back(&e);
-        return v;
-    }();
-    return all;
-}
-
 const ModuleRegistry& builtins() {
     static const ModuleRegistry registry = [] {
         ModuleRegistry r;
@@ -261,6 +250,17 @@ std::string number(double v) {
 
 }  // namespace
 
+const std::vector<const LegacyEffect*>& legacyEffects() {
+    static const std::vector<const LegacyEffect*> all = [] {
+        std::vector<const LegacyEffect*> v;
+        for (std::span<const LegacyEffect> family : {legacyDynamicsEffects(), legacyDriveEffects(), legacyEqFilterEffects(),
+                                                     legacyStereoModEffects(), legacySpaceEffects()})
+            for (const LegacyEffect& e : family) v.push_back(&e);
+        return v;
+    }();
+    return all;
+}
+
 const LegacyEffect* findLegacyEffect(std::string_view id) noexcept {
     for (const LegacyEffect* e : legacyEffects())
         if (e->from == id) return e;
@@ -276,6 +276,17 @@ bool migrateLegacyEffect(ComponentSpec& spec, ParamRenames* renames) {
     spec.id = std::string(e->to);
     moveParams(*e, spec.params, std::string(), out);
     if (!e->keepsState) spec.hasState = false, spec.state.clear();
+    return true;
+}
+
+bool migrateLegacyId(std::string& id, std::vector<std::pair<std::string, double>>& params) {
+    if (!findLegacyEffect(id)) return false;
+    ComponentSpec c;
+    c.id = id;
+    c.params = std::move(params);
+    migrateLegacyEffect(c);
+    id = std::move(c.id);
+    params = std::move(c.params);
     return true;
 }
 

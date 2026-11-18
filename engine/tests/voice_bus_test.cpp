@@ -10,6 +10,7 @@
 #include "builtin_test_signal.h"
 #include "caw/instrument.hpp"
 #include "engine.h"
+#include "fx_merged.h"
 #include "test.h"
 
 using namespace caw;
@@ -337,23 +338,26 @@ TEST(builtin_descriptors_declare_domains_capabilities_and_cost) {
     ModuleRegistry r;
     registerBuiltinComponents(r);
     Engine e(48000);
-    auto domains = [&](std::string_view id) {
-        const ModuleDescriptor* d = r.find(id);
+    // A merged device's variant (FX consolidation) declares its own domains: its old effect's.
+    auto domains = [&](std::string_view id, double variant = 0) {
+        const ModuleDescriptor* d = findComponentDescriptor(r, id, {{"variant", variant}});
         CHECK(d != nullptr);
         return d ? d->domains : 0u;
     };
     const uint32_t perNote = kDomainWhole | kDomainPerNote;
-    for (const char* id : {"org.caw.eq", "org.caw.reverb.pro", "org.caw.utility", "org.caw.stereo.width", "org.caw.delay.pingpong",
-                           "org.caw.filter", "org.caw.chorus", "org.caw.bitcrush"})
+    for (const char* id : {"org.caw.eq", "org.caw.reverb", "org.caw.utility", "org.caw.filter", "org.caw.chorus", "org.caw.bits"})
         CHECK_EQ(domains(id), perNote);
-    for (const char* id : {"org.caw.limiter", "org.caw.compressor", "org.caw.gate", "org.caw.ducker", "org.caw.ringmod",
-                           "org.caw.downmix"})
+    CHECK_EQ(domains("org.caw.utility", 1), perNote);  // Width (was org.caw.stereo.width)
+    CHECK_EQ(domains("org.caw.delay", 1), perNote);    // Ping-pong (was org.caw.delay.pingpong)
+    for (const char* id : {"org.caw.limiter", "org.caw.compressor", "org.caw.ringmod", "org.caw.downmix"})
         CHECK_EQ(domains(id), kDomainWhole);
+    CHECK_EQ(domains("org.caw.compressor", 2), kDomainWhole);  // Gate (was org.caw.gate)
+    CHECK_EQ(domains("org.caw.compressor", 3), kDomainWhole);  // Shape (was org.caw.ducker)
     for (std::string_view id : {std::string_view("org.caw.synth.flagship"), std::string_view("org.caw.drums"), kTestSignalId}) {
         CHECK_EQ(domains(id), perNote);
         CHECK((r.find(id)->capabilities & kCapabilityNotesIn) != 0);
     }
-    CHECK(r.find("org.caw.reverb.pro")->cpuClass == CpuClass::Heavy);
+    CHECK(r.find("org.caw.reverb")->cpuClass == CpuClass::Heavy);
     CHECK(r.find("org.caw.utility")->cpuClass == CpuClass::Light);
     // Every built-in is valid with its declarations (the registry refuses one that is not), and the listing names them.
     for (const ModuleDescriptor* d : r.builtinComponents()) CHECK(validateModuleDescriptor(*d) == ModuleValidation::Ok);

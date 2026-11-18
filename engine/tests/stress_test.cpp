@@ -169,7 +169,7 @@ TEST(stress_scenarios_unchanged_by_the_move) {
         {"sample_stream", "cb17fda8f1472dea"},
         {"resample", "ae1e8b3fbd5f3ad7"},
         {"every_instrument", "3ab70624484ac6bd"},
-        {"every_effect", "7d5715c05ce87eca"},
+        {"every_effect", "872fde1013543d13"},  // 1.0.8: the merged ids with each variant (was 7d5715c05ce87eca; same sound)
         {"metering_heavy", "010ff6dc9b02b7d9"},
         {"worst_all", "ab9ee5309dd9a638"},
     };

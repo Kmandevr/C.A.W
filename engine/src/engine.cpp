@@ -1232,7 +1232,11 @@ std::string Engine::nativeComponentsJson() {
 
 std::unique_ptr<ModuleProcessor> Engine::createNativeComponent(const std::string& id) {
     std::lock_guard<std::mutex> lock(ctl_);
-    return nativeModules_.create(id);
+    // A retired id makes its merged device's variant (fx_migrate.h), as a project naming it plays.
+    std::string own = id;
+    std::vector<std::pair<std::string, double>> params;
+    if (nativeModules_.find(id) || !fx::migrateLegacyId(own, params)) return nativeModules_.create(id);
+    return createComponent(nativeModules_, own, params);
 }
 
 void Engine::setQuality(int quality) noexcept {

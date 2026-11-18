@@ -11,6 +11,7 @@
 #include "caw.h"
 #include "caw/instrument.hpp"
 #include "engine.h"
+#include "fx_merged.h"
 #include "note_fx_host.h"
 #include "project.h"
 #include "quality.h"
@@ -187,7 +188,7 @@ TEST(per_note_fx_each_slot_equals_a_solo_render_of_its_note) {
 }
 
 TEST(per_note_fx_overflow_and_steals_are_deterministic) {
-    ProjectSpec p = perNote({component("org.caw.delay.pro", {{"mix", 0.4}})}, 2);
+    ProjectSpec p = perNote({component("org.caw.delay", {{"mix", 0.4}})}, 2);
     // Three held notes for two voices: the third goes to overflow (held notes are never stolen). Then note 1 ends
     // (its slot rings on: a delay), and note 4 steals that ringing slot: it fades out while note 4 takes a spare.
     const std::vector<Event> ev = {notes::noteOn(0, 1, 60, 1), notes::noteOn(10, 2, 64, 1), notes::noteOn(20, 3, 67, 1),
@@ -230,7 +231,7 @@ TEST(per_note_fx_a_released_note_crossfades_into_overflow_when_stolen) {
 }
 
 TEST(per_note_fx_slots_ring_out_their_tails_then_free) {
-    ProjectSpec p = perNote({component("org.caw.delay.pro")}, 4);
+    ProjectSpec p = perNote({component("org.caw.delay")}, 4);
     Harness h(p);
     const std::vector<Event> ev = {notes::noteOn(0, 1, 60, 1), notes::noteOff(480, 1, 60)};
     Harness::Out out = h.render(ev, 4800);
@@ -278,7 +279,7 @@ TEST(per_note_fx_refuses_an_instrument_without_a_voice_bus_and_effects_that_cant
     ModuleRegistry reg;
     registerBuiltinComponents(reg);
     std::string why;
-    CHECK(!ComponentChain::runsPerNote(*reg.find("org.caw.ducker"), &why));
+    CHECK(!ComponentChain::runsPerNote(*findComponentDescriptor(reg, "org.caw.compressor", {{"variant", 3}}), &why));  // Shape
     CHECK(!why.empty());
     CHECK(ComponentChain::runsPerNote(*reg.find("org.caw.filter")));
     CHECK(ok(e.setProject(perNote({component("org.caw.filter")}))));
@@ -324,7 +325,7 @@ std::vector<float> renderEngine(Engine& e, int64_t frames, bool uneven) {
 
 ProjectSpec expressiveProject(bool perNoteOn) {
     ProjectSpec p = perNote({component("org.caw.filter", {{"cutoff", 300.0}, {"resonance", 0.6}}),
-                             component("org.caw.delay.pro", {{"mix", 0.3}})},
+                             component("org.caw.delay", {{"mix", 0.3}})},
                             2, Shape::Saw, "pat");
     p.modules.push_back({"pat", "---\nkind: pattern\n---\n0 C3 3 1 bend 0:0 1:2\n1 G3 2 0.7 press 0:0 1:1\n"
                                 "2 E4 2 0.8\n4 C4 4 0.6 bend 0:0 0.5:-1 1:1\n"});
@@ -394,7 +395,7 @@ TEST(per_note_fx_knobs_fan_out_and_the_stats_and_latency_report) {
 TEST(per_note_fx_host_gives_the_same_bits_at_any_block_split) {
     // Notes over budget, ends, a steal and an overflowed note, in 64-frame blocks and in uneven ones.
     ProjectSpec p = perNote({component("org.caw.filter", {{"cutoff", 300.0}, {"resonance", 0.6}}),
-                             component("org.caw.delay.pro", {{"mix", 0.3}})}, 2);
+                             component("org.caw.delay", {{"mix", 0.3}})}, 2);
     p.modulation = {noteLink(1, "note.age", "t", 0, "cutoff", 0.4)};
     const std::vector<Event> ev = {notes::noteOn(0, 1, 48, 1), notes::noteOn(6000, 2, 55, 0.7), notes::noteOn(12000, 3, 64, 0.8),
         notes::noteOff(18000, 1, 48), notes::noteOff(18000, 2, 55), notes::noteOn(24000, 4, 60, 0.6), notes::noteOff(24000, 3, 64),

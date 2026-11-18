@@ -62,10 +62,13 @@ const Old kOld[] = {
 
 bool reused(const Old& o) { return std::string(o.id) == o.device; }
 
+// The built-ins with the retired old ids registered again beside them (restoreRetired), so a variant can be
+// compared with the old effect as it ran.
 const ModuleRegistry& registry() {
     static const ModuleRegistry r = [] {
         ModuleRegistry x;
         registerBuiltinComponents(x);
+        x.restoreRetired();
         return x;
     }();
     return r;

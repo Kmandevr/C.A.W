@@ -1,7 +1,7 @@
 // Merged devices, part B (Drive, Bit distortion): their variants, each an old class unchanged under the merged id (FX consolidation, 1.0.8).
 #include "fx_merged.h"
 
-// The ids this part replaces (the old ones stay registered until part F retires them):
+// The ids this part replaces (retired: no longer registered, migrated to these):
 // Drive ("org.caw.drive"): org.caw.distortion (variant 0 "Distortion", builtin_components.cpp), org.caw.saturator
 //   (1 "Saturate", builtin_effects_saturator.cpp; its own "mode" stays a parameter of that variant),
 //   org.caw.clipper (2 "Clip") and org.caw.phasedist (3 "Phase", both builtin_fx_drive.cpp).

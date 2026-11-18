@@ -1,7 +1,7 @@
 // Merged devices, part A (Compressor, Limiter, Transient): their variants, each an old dynamics class unchanged (FX consolidation, 1.0.8).
 #include "fx_merged.h"
 
-// The ids this part replaces (the old ones stay registered until part F retires them):
+// The ids this part replaces (retired: no longer registered, migrated to these):
 // Compressor (variants: the old compressor; dynamics; gate; the ducker as "Shape", today's drawn-shape ducker,
 //   where old projects open unchanged; later, new DSP: "Duck" (Compactor-style, following a sidechain level), the
 //   expander and upward compression) replaces:

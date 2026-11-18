@@ -66,10 +66,13 @@ const Case kCases[] = {
     {kTransient, 0, "org.caw.transient", true, &fx::legacyTransientDescriptor, &fx::makeTransientAs},
 };
 
+// The built-ins with the retired old ids registered again beside them (restoreRetired), so a variant can be
+// compared with the old effect as it ran.
 const ModuleRegistry& registry() {
     static const ModuleRegistry r = [] {
         ModuleRegistry x;
         registerBuiltinComponents(x);
+        x.restoreRetired();
         return x;
     }();
     return r;

@@ -5,7 +5,7 @@
 
 namespace caw::fx {
 
-// Per old effect: its own descriptor (the old id's, as registered until part F retires it) and its class, unchanged,
+// Per old effect: its own descriptor (the old id's, as it was registered before it was retired) and its class, unchanged,
 // under a variant's descriptor (fx::AsVariant). Defined beside each class.
 // builtin_components.cpp: org.caw.stereo.width, org.caw.stereo.balance, org.caw.chorus.
 const ModuleDescriptor& legacyWidthDescriptor();

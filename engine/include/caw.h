@@ -153,10 +153,12 @@ extern "C" {
    variant with its own parameters, latency and tail; a changed "variant" rebuilds the chain, crossfaded, and
    caw_engine_set_component_param refuses one (send it in the project). caw_engine_components lists a merged
    device with its first variant's descriptor plus "variants" (every variant's descriptor, in order) and its old
-   effects' presets, migrated. The first is org.caw.shift (Pitch/Shift: "Pitch" was org.caw.pitchshift,
-   "Frequency" org.caw.freqshift). A project naming an old id plays the merged device (its lanes and links
-   follow), and caw_migrate_component turns an entry into its merged form for the app's document. The old ids
-   still load. */
+   effects' presets, migrated (under their old names). Pitch/Shift (org.caw.shift: "Pitch" was
+   org.caw.pitchshift, "Frequency" org.caw.freqshift) and the other families (docs/engine.md, "Merged devices").
+   The old ids are retired: no longer listed, and not made as a device of their own; a project, preset, rack or
+   call naming one (the component testing suite, the plug-in benchmark, the sample-pack maker) plays the merged
+   device's variant (its lanes and links follow), and caw_migrate_component turns an entry into its merged form
+   for the app's document. */
 #define CAW_API_VERSION 38
 /* The component index that names a layer's native instrument rather than one of its "components". */
 #define CAW_INSTRUMENT_INDEX 0xFFFFFFFFu
@@ -541,7 +543,7 @@ CAW_API void caw_worker_pool_wait_idle(CawWorkerPool* pool);
 
 /* Component testing suite (#163): renders one C++ effect offline (never on the audio thread, no
    device) with a test signal and returns its measurements as JSON. The request is JSON, e.g.
-   {"component":{"id":"org.caw.distortion","params":{"drive":8}},"signal":{"type":"sine","frequency":1000}};
+   {"component":{"id":"org.caw.drive","params":{"drive":8}},"signal":{"type":"sine","frequency":1000}};
    a built library needs "library"; its trust is [trust_level] (CAW_NATIVE_TRUST_*: the user's own choice for that
    library), and a request naming a "trust" is refused. "write_wav"/"write_input_wav" are plain file names written
    inside [output_dir] (NULL: no files) and a WAV test signal's "path" a plain name inside [input_dir] (NULL: none).
