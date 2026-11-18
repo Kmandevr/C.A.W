@@ -3,6 +3,19 @@
 What changed in each C.A.W release, newest first. C.A.W is in open alpha: expect rough edges and unexpected issues.
 Versions keep the `-alpha.N` suffix until the official release.
 
+## 1.0.7-alpha.1 (2026-11-18)
+
+The safety release: C.A.W now checks every plug-in before it runs and tells you, in plain words, what it can do.
+
+### New
+- **A safety check before any plug-in runs:** every native plug-in is scanned before it is loaded, so nothing in it runs until the check is done. It looks for what the plug-in could do: use the internet, read or write files, start other programs, load more code, run background threads and more.
+- **Plug-ins declare what they need:** a C.A.W plug-in that does more than make sound must say so, with a reason in plain words. One that does something it didn't declare is blocked, and C.A.W tells you why.
+- **See what a plug-in can do before you trust it:** the trust sheet lists each thing the plug-in can do, the risk, and why an honest plug-in might need it. A blocked plug-in can't be trusted by mistake.
+- **Needs, on the Plug-in page:** declare what your own plug-in needs (internet, files, threads…) with a reason, and for the internet the sites it talks to. C.A.W writes it into the plug-in for you.
+
+### Changed
+- **Plug-ins built before this version** keep working, with a warning, until you rebuild or update them. Rebuild them with their needs declared to clear it.
+
 ## 1.0.6-alpha.1 (2026-11-18)
 
 The usability release: smooth zooming, a tidier Settings, choosing your real speaker, headphones and microphone, and latency that stays where you set it.

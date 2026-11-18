@@ -6,6 +6,10 @@ updated: 2026-11-18
 
 # Decisions
 
+## 2026-11-18: The Hub goes into use with 1.1.0; APKs are installed by hand until then (owner)
+
+**Decision (owner):** 1.0.7 lays the Hub's groundwork only: C.A.W's side of the link, the Hub's first build and its update channels and notifications, all inert while no Hub certificate is pinned. Using the Hub (signing it, pinning each app's certificate, installing updates through it) comes with 1.1.0. Until then the owner installs APKs by hand.
+
 ## 2026-11-18: Declared capabilities: strict default, embedded in the binary, older components warned until rebuilt (owner, architect)
 
 **Decision:**
