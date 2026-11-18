@@ -7,7 +7,7 @@ covers: [app/lib/ui/, app/lib/actions/]
 
 # UI design
 
-The owner's goal (2026-10-28) is a capable, lightweight music-production workspace that is easy to understand and use on a phone and a PC. The original early UI slice left recording and other hard features for later; the permanent [roadmap](roadmap.md) now includes recording and the wider production workflow as later stages. This document describes current UI behavior and interaction design, not a separate feature roadmap. The app reference ([app](app.md)) is authoritative for shipped behavior.
+The owner's goal (2026-10-28) is a capable, lightweight music-production workspace that is easy to understand and use on a phone and a PC. The original early UI slice left recording and other hard features for later; the private roadmap now includes recording and the wider production workflow as later stages. This document describes current UI behavior and interaction design, not a separate feature roadmap. The app reference ([app](app.md)) is authoritative for shipped behavior.
 
 ## Owner's choices (2026-10-28)
 
@@ -16,7 +16,7 @@ The owner's goal (2026-10-28) is a capable, lightweight music-production workspa
 - **Look:** neon but calm. The colours stay, glow is used sparingly, and transitions are short and simple.
 - **New files and startup** (owner, 2026-10-28):
   - **New files:** a new pattern or C++ component starts from a blank one. A faint hint (not part of the file) shows an example header and first line until you start typing. Templates stay one choice away in the same New menu.
-  - **Startup (owner, 2026-11-04, replacing the 2026-10-28 startup screen):** the app opens straight into the last project, or the default project (the owner's "mid tempo", 2026-11-12) on a first run. New, New from template and Open are in the project menu ([UI plan](ui-plan.md)).
+  - **Startup (owner, 2026-11-04, replacing the 2026-10-28 startup screen):** the app opens straight into the last project, or the default project (the owner's "mid tempo", 2026-11-12) on a first run. New, New from template and Open are in the project menu.
   - **Startup screen (owner, 2026-11-12, beta readiness D: the "waveform reveal"):** while launch loads, the crow draws itself from a moving waveform line, the real loading steps tick off under it with their counts, and the version shows; it goes once the project is open and the reveal has played (Full startup animation). Still logo with Reduced or Off motion and the Minimal profile. Built as described in [App](app.md) ("Opening").
 - **Look details** (owner, 2026-10-28):
   - **Neon** (was Calm neon) stays the default: near-black, thin neon lines, and glow only on what's active (playhead, selected notes, meters).
@@ -294,10 +294,10 @@ The broader UI specification below records design intent as well as current beha
 
 ## Not yet implemented
 
-Clip-following automation, the sampler's per-zone filters and envelopes beyond the zone ADSR, and time selection marquee for audio clips are not part of the current implementation; they are planned in the permanent [roadmap](roadmap.md).
+Clip-following automation, the sampler's per-zone filters and envelopes beyond the zone ADSR, and time selection marquee for audio clips are not part of the current implementation.
 
 ## Performance profiles
 
 **[Fact]** Settings › App › Performance also has the **Benchmark** card, which opens the full-screen Benchmark (Quick and Full runs, a live load graph, then "Summary, then drill down" (owner, 2026-11-13): a verdict card, a bar per engine part that opens its own page, scenarios grouped by feature in tier colours, collapsed Raw numbers; Share and Save JSON; and the project's built plug-ins, each with Benchmark; [app](app.md)). The plug-in benchmark ("Checks + sections", owner 2026-11-13) opens from there or from **Benchmark** beside ▶ Build: the cost of a block, ✓ / ⚠ / ✗ check rows, the code's own sections as bars and collapsible curves.
 
-Settings provides Full Experience, Balanced, Lightweight and Minimal. Profiles reduce decorative effects before useful responsiveness: meter polling stays at 30 Hz in every mode, and the separate **Frame rate** setting (Auto or a cap the screen has) sets how often the screen redraws, capped at 60 Hz under Lightweight and 30 Hz under Minimal (owner, 2026-11-12; the lower of the two is in force; [app](app.md), Frame rate). Lightweight/Minimal use the existing reduced voice budget; Minimal hides scope panels and turns motion off (Lightweight turns glass blur and the scopes' blurred glow off and Minimal turns Glass off, which brings back solid panels and controls; the Motion, Haptics and Glow settings and the shared motion rules are in `lib/ui/motion.dart`; see [UI plan](ui-plan.md), "Feel"). See [Performance](performance.md#ui-performance-profiles) for the exact behavior and remaining device measurements.
+Settings provides Full Experience, Balanced, Lightweight and Minimal. Profiles reduce decorative effects before useful responsiveness: meter polling stays at 30 Hz in every mode, and the separate **Frame rate** setting (Auto or a cap the screen has) sets how often the screen redraws, capped at 60 Hz under Lightweight and 30 Hz under Minimal (owner, 2026-11-12; the lower of the two is in force; [app](app.md), Frame rate). Lightweight/Minimal use the existing reduced voice budget; Minimal hides scope panels and turns motion off (Lightweight turns glass blur and the scopes' blurred glow off and Minimal turns Glass off, which brings back solid panels and controls; the Motion, Haptics and Glow settings and the shared motion rules are in `lib/ui/motion.dart`; the private UI plan, "Feel"). See [Performance](performance.md#ui-performance-profiles) for the exact behavior and remaining device measurements.

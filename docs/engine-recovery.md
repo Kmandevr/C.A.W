@@ -1,7 +1,7 @@
 ---
 title: Native engine recovery
 summary: Short resume guide for continuing the native engine refactor without repeating completed work.
-updated: 2026-11-13
+updated: 2026-11-18
 ---
 
 # Native engine recovery
@@ -74,8 +74,8 @@ Regression coverage added across these slices includes 8,195 graph nodes/8,194 c
 1. `AGENTS.md`, `CLAUDE.md`, applicable `.claude/rules/*.md` and skills.
 2. `docs/engine-progress.md` — exact status, evidence, fixed-limit audit and next actions.
 3. `docs/engine-build-status.md` — existing code versus missing integration.
-4. `docs/engine-next.md` — full owner requirements.
-5. `docs/decisions.md`, `docs/log.md`, `docs/roadmap.md`, `docs/how-it-works.md`.
+4. The private engine blueprint — full owner requirements.
+5. `docs/decisions.md`, `docs/log.md`, `docs/how-it-works.md`.
 
 ## Resume protocol
 

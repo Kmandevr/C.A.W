@@ -1,6 +1,6 @@
 ---
 title: Performance
-summary: How C.A.W is measured for low-end devices, the audit's ranked bottlenecks with evidence, fixes with before/after numbers, and what remains.
+summary: How C.A.W is measured for low-end devices, the audit's ranked bottlenecks with evidence, and fixes with before/after numbers; what remains is kept privately.
 covers: [engine/bench/, engine/src/meters.cpp, app/lib/model/poller.dart, app/lib/model/settings.dart, app/lib/ui/motion.dart, app/lib/ui/devices/kit/param_watch.dart, app/lib/ui/devices/kit/repaint.dart, app/test/poller_test.dart, app/test/rebuild_test.dart, app/test/perf_*, app/test/music_video_profile_test.dart]
 updated: 2026-11-18
 ---
@@ -101,7 +101,6 @@ The .caw VM, whose costs the 2026-10-28 engine audit measured (integer conversio
 
 ## UI update isolation
 - Mixer master gain now uses a dedicated native command (`caw_engine_set_master`) with a 5 ms audio-thread ramp. Dragging the master slider no longer serializes and recompiles the entire project; the UI updates through the scoped `values` notifier. This removes project-compilation work from the master-gain gesture, but device-level latency and CPU savings have not yet been benchmarked.
-
 
 - The Arranger's playhead uses a dedicated overlay painter, redrawn on every frame while playing from the reads' extrapolation (`PlayheadClock`, `PlayheadFrames`; [app](app.md), Frame rate). It does not rebuild the clip grid, headers or track layout for any playhead update.
 - Engine Lab reads a fixed 512-sample window from the existing master scope only on meter ticks; its Hann window, FFT scratch buffers and 128-bin spectrum buffer are retained between ticks. A 512-point radix-2 FFT is performed at the existing 30 Hz meter cadence; the UI does not allocate new sample buffers each frame.
@@ -416,11 +415,4 @@ What C.A.W asks of each platform for the audio callback and the mix pool's worke
 | Linux | `SCHED_FIFO` workers one step below a real-time callback, else no better than the callback's nice; fast-core affinity on a hybrid CPU | The Bench on the 4-vCPU runners (x64, arm64): the pool's size rule (2 workers) and the 5c review's fixes; no real-time priority there (unprivileged) | **[Proposal]** rtkit over D-Bus (needs libdbus); miniaudio's Linux thread is not real-time, so the workers stay time-sharing |
 | macOS, iOS | Nothing (`thread_tuning_none.cpp`: every core one kind) | Not built in CI | Future work |
 
-## Remaining bottlenecks and next steps
-
-- **Measure on the phone.** Build a release APK, then:
-  - play the starter project and 16 layers for 5 minutes each, with the screen on and off
-  - record CPU, the audio thread's time per callback (`caw_engine_meters` already reports the load), dropouts, frame times, battery and temperature
-- **Measure native project-job latency on the phone.** Project updates use the shared native worker pool rather than starting a Dart worker isolate per update. Measure queue wait, update duration, UI responsiveness and audio callback impact in a release build.
-- **The shell's `IndexedStack`** retains all eight workspace destinations and may rebuild/layout them on structural project changes. Measure this on device before changing it; preserving editor state is a constraint.
-- **Scopes** read 512 samples over FFI and redraw a path about 30 times a second while playing, in a live island, only on a new read. That's fine on the server; check the frame time on the phone.
+What remains to measure and change is kept privately.

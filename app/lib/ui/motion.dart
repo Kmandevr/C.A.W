@@ -16,7 +16,7 @@ enum MotionLevel {
   final String label;
 }
 
-/// The shared motion rules ([UI plan](docs/ui-plan.md), "Feel"). Settings sets the statics, like `Neon`.
+/// The shared motion rules (the private UI plan, "Feel"). Settings sets the statics, like `Neon`.
 class Motion {
   Motion._();
 

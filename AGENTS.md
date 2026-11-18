@@ -10,7 +10,7 @@ At the start of every task/chat, read:
 
 1. [`AGENTS.md`](AGENTS.md) (this file)
 2. [`CLAUDE.md`](CLAUDE.md) for project-wide rules and workflow
-3. [`docs/vision.md`](docs/vision.md) for owner decisions, principles and open questions
+3. [`docs/vision.md`](docs/vision.md) for the owner's product direction and principles (plans and open questions are tracked privately)
 4. The applicable rule file(s) below before changing files in that area
 
 Do not read the whole repository by default. Follow the layered reading guidance in `CLAUDE.md`; open only the files needed for the task. The code is the source of truth for what is built. Keep facts, proposals, assumptions and open questions distinct. Ask the owner before settling an open question.

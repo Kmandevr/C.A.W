@@ -1,12 +1,12 @@
 ---
 title: Vision and principles
-summary: Owner-approved product direction, actual platform support, current product boundaries and unresolved owner decisions.
+summary: Owner-approved product direction, actual platform support and current product boundaries; unresolved owner decisions are tracked privately.
 updated: 2026-11-18
 ---
 
 # Vision and principles
 
-This note records product direction, not a list of shipped features. The permanent [roadmap](roadmap.md) is the canonical plan and sequencing source. For implementation truth, use [App](app.md), [Engine](engine.md) and [Engine implementation status](engine-build-status.md). Code and tests take precedence over this vision when describing what exists.
+This note records product direction, not a list of shipped features. The roadmap and feature plans are tracked privately. For implementation truth, use [App](app.md), [Engine](engine.md) and [Engine implementation status](engine-build-status.md). Code and tests take precedence over this vision when describing what exists.
 
 ## Product identity and direction
 
@@ -16,7 +16,7 @@ C.A.W. is a code-driven sound-design and music-production workspace for creating
 
 **Goal (owner, 2026-11-03):** C.A.W. is not trying to be a conventional DAW, and it doesn't have to work the way one does. It must be able to do everything a good DAW can do, because there is no good DAW for mobile. Its own way of working (code, patterns, one shared project and engine model, phone-first touch) is the means; full production capability is the requirement. It keeps a lightweight architecture so weak phones stay first-class, rather than copying a heavyweight DAW's design. **Owner (2026-11-09):** it should *feel* like a full DAW, closest to REAPER, "but better and more specialized": the familiar workflow (tracks, mixer, FX stacks, automation, a browser) with C.A.W.'s own strengths built in, such as writing, building and hearing your own effects inside the song. The layout is in [decisions](decisions.md) ("The app's layout").
 
-**Run on anything (owner, 2026-11-12):** the app changes according to the hardware it runs on and then runs, "so nothing beats C.A.W". The same project opens everywhere; the hardware decides how much is computed live and how much is rendered ahead (**dynamic play-ahead**: untouched tracks rendered ahead in batches, switching to real time "quickly and silently so no one ever notices" when the user needs low latency). Exports never change to save CPU. The publicity target is a hacked graphing calculator ("it's a stunt, if it works it's fine"). Target release 1.1.0 (owner, 2026-11-13; it was 1.2.0). [Proposal] The design and order are in the [play-ahead plan](play-ahead-plan.md) (#191); nothing of it is built.
+**Run on anything (owner, 2026-11-12):** the app changes according to the hardware it runs on and then runs, "so nothing beats C.A.W". The same project opens everywhere; the hardware decides how much is computed live and how much is rendered ahead (**dynamic play-ahead**: untouched tracks rendered ahead in batches, switching to real time "quickly and silently so no one ever notices" when the user needs low latency). Exports never change to save CPU. The publicity target is a hacked graphing calculator ("it's a stunt, if it works it's fine"). Target release 1.1.0 (owner, 2026-11-13; it was 1.2.0). Nothing of it is built; the design is planned privately (#191).
 
 **What play-ahead should give the user** ([Assumption]: estimated from the engine's structure, not measured; the Benchmark turns each into a fact or drops it; figures in the plan's "Expected gains"):
 
@@ -92,7 +92,7 @@ Important boundaries:
 
 The creative direction includes bytebeat and mathematical audio, procedural synthesis, raw bit-level sound design, reusable effects, modulation, waveform/wavetable work, resonant and physical-model-inspired sounds, and controlled sound variation.
 
-These are not all implemented. The [lightweight creative audio systems design](lightweight-creative-audio-systems.md) separates existing primitives from proposed additions and estimates impact, effort and runtime cost.
+These are not all implemented. The private lightweight creative audio systems design separates existing primitives from proposed additions and estimates impact, effort and runtime cost.
 
 Audio import, sample editing, multisampling, non-destructive audio transformations and recording are desired workflow extensions, but remain future work until they appear in the app and engine implementation.
 
@@ -108,27 +108,8 @@ GitHub-based library synchronization and source selection are also not implement
 
 **Owner direction (2026-11-09):** C.A.W. is intended to be free and open source. It is licensed under [Apache-2.0](../LICENSE). AutoStacc distributes the free app and the optional support bundles. Core functionality is not paywalled. Optional support/donation bundles may provide prebuilt libraries of FX, instruments, presets, samples and sounds; they use the same component/content formats as free and creator-made content. Do not claim AutoStacc distribution or bundle delivery is implemented.
 
-New dependencies require exact version, transitive dependency and licence review and an entry in [decisions](decisions.md). Dependencies must be permissive (no GPL/AGPL); no paid licence is assumed. See [visual creation and signal routing](visual-routing-and-library-integration.md) for the current candidate evaluation.
+New dependencies require exact version, transitive dependency and licence review and an entry in [decisions](decisions.md). Dependencies must be permissive (no GPL/AGPL); no paid licence is assumed.
 
 ## Open owner decisions
 
-Only the owner can settle these questions. Do not silently convert them into implementation requirements.
-
-| Question | Current status |
-|---|---|
-| iOS distribution | Decided 2026-11-09: iOS ships through the App Store without C++ authoring ([decisions](decisions.md)) |
-| Licence for user-created/shared sound modules | Open |
-| How AutoStacc delivers the free app and the support bundles | Open |
-| Initial trust state for a newly encountered native component | Open; each component's trust level must be explicitly chosen by the user; no silent trust assignment ([decisions](decisions.md), 2026-11-06) |
-| How the optional AutoStacc cloud library syncs with project folders and the global library | Direction 2026-11-18: the AutoStacc Hub holds it, and anything stored there drags into C.A.W and just works ([decisions](decisions.md)). How it syncs is open; compatibility is required (2026-11-03) |
-| What "100% private" means for the companion app and AutoStacc hub | Decided 2026-11-18: both its code (a closed-source, private repository) and its data ([decisions](decisions.md)) |
-| Note clips stored as pattern text with .mid import/export, instead of stored as MIDI (#158) | Decided on the owner's behalf 2026-11-10, to confirm; also whether the app keeps one MIDI converter, the Dart one or the engine's ([decisions](decisions.md)) |
-| Android developer verification for the sideloaded APK | Open. **[Fact, checked 2026-11-10]** Google requires apps on certified Android devices to come from registered developers, from 2026-09-30 in Brazil, Indonesia, Singapore and Thailand and globally in 2027 (no US or EU date yet); a free limited-distribution account reaches only 20 devices, and ADB installs and an advanced sideloading flow remain ([Android Developers Blog](https://android-developers.googleblog.com/2026/03/android-developer-verification-rolling-out-to-all-developers.html)). The owner decides whether and when to register `com.kmandevr.caw` with its signing key; it is not needed for `v1.0.0-beta.1` |
-| Audio (2026-11-11, branch `audio-ui`): the look of the audio clips, the input sheet, Settings › Audio's input part and the sampler editor (in the APK); a default edge fade; recordings kept with the project or in a shared library; loop takes as stacked lanes for comping; imports copied (now) or referenced in place ([decisions](decisions.md#2026-11-11-audio-assets-clips-sampler-and-input-wp-j-choices-to-confirm)) | Open |
-| Whether effect tails should carry across a layer loop restart in every case | Open; see [engine playback](engine.md#playback) |
-| Music video editor (2026-11-12, #182): the editor's look, to check in the APK. The other questions were answered the same day (full screen, empty stretches, effect targets, the Strobe warning, Falling notes for new videos, keys in the catalogue; [decisions](decisions.md#2026-11-12-the-music-video-editors-open-questions-answered-owner)) | Open (look only) |
-| Piano roll (WP-K2, 2026-11-11): the look of the Quantize… sheet and the step bar (in the APK); whether Ctrl+U should use the sheet's last settings; whether the slide-up on-screen keys should also step; the MIDI CC numbers for automation lanes (CC7 volume, CC10 pan, others from CC20, as proposed in #11), the volume curve (127·√gain) and how parameter lanes scale ([app](app.md)) | Open |
-| Play-ahead and run anywhere (1.1.0, #191): which calculator for the stunt; what counts as intent to switch a track to real time, and whether an edit without intent may be heard up to the ring's depth late; whether ahead tracks on weak phones keep their full voices; a 16-bit preview cache on the lowest tier; the look of the two-part CPU meter and of "what's ready to play"; whether Freeze is a user action, automatic, or both; first of all, the fallback when an ahead track's worker falls behind (a warm spare instance or an audible fade) and whether a module format bump for runtime-state calls is acceptable ([play-ahead plan](play-ahead-plan.md#open-questions-for-the-owner)) | Open |
-| Non-linear routing (1.1.0, #233): the graph view's look, and how the per-block routing selectors look | Open |
-| AutoStacc beta pack (1.0.8, #227): which fourth device replaces bit-shift distortion, now that the bitwise operations are in the built-in Bit distortion | Open |
-| Matching REAPER's flow ([REAPER's flow](reaper-flow.md)): the phone look of the new screens (Export sheet, send knob). S splits, Touch automation from a transport button and on-screen keys with pads (owner, 2026-11-10). The clip bar, the ruler with the loop range, markers and regions, the recording flow and automation writing are built; their look and the choices made for them are to confirm ([decisions](decisions.md)) | Open |
+Questions only the owner can settle are tracked privately.

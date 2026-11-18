@@ -6,30 +6,12 @@ updated: 2026-11-18
 
 # Decisions
 
-## 2026-11-18: The AutoStacc Hub: AutoStacc's site as the app, a native core for the powers, its own key (owner)
+## 2026-11-18: Plans move to the private AutoStacc-Hub now; the code stays public (owner)
 
-**Decision (owner):** the companion is the **AutoStacc Hub**, in the private repository `Kmandevr/AutoStacc-Hub`.
-- **What it is:**
-  - the AutoStacc site (store, library, account, community) as the app;
-  - direct access to your downloads and library on the device;
-  - the updater for your AutoStacc programs, C.A.W first;
-  - later, a cloud library: C.A.W connects, you upload your sounds and projects, and anything stored there drags into C.A.W and just works.
-- **How it is built** (the owner chose Claude's option A):
-  - The powers C.A.W gives up live in a small native core:
-    - on Android, Kotlin: the bound service C.A.W talks to, the installer, the network, the known-bad list and the local library;
-    - on Windows, a small helper process.
-  - The screens are the AutoStacc site's own pages: in a locked-down WebView on Android, and WebView2 on Windows. So the store, the account and the community are built once, for the site and the app.
-  - Flutter isn't used. Answering C.A.W from the background would mean starting a Flutter engine with no screen, and the screens would duplicate the site's.
-- **Published** on C.A.W's public GitHub Releases: a user can't download from a private repository. The Hub's CI attaches its APK there, using one fine-grained token, limited to C.A.W's releases, stored as a secret in the Hub repository.
-- **Its own signing key.** Each app pins the other's certificate (its SHA-256 digest, public, in the source).
-  - C.A.W accepts only the Hub's certificate, and the Hub only C.A.W's.
-  - This replaces "the companion must be signed with C.A.W's own key" ([companion protocol](companion-protocol.md#where-the-code-is)).
-  - The main app's check changes when the first signed Hub build gives the digest. Until then it still wants C.A.W's own key, so no companion is ever accepted.
-- **Why:**
-  - A small native core keeps the process that holds the install and network powers small enough to audit, and quick to answer C.A.W's 3 s bind.
-  - The site is the product's front end anyway.
-  - A key of its own means a leaked C.A.W key doesn't also sign a Hub, and the other way round.
-- **[Assumption], to check before the cloud library is built:** cross-app drag and drop. Android has it between apps side by side in multi-window, from Android 7.0 (`View.DRAG_FLAG_GLOBAL` with a content URI granted for reading); Windows has it between processes through OLE. On a phone used full screen, the same files should also be listed inside C.A.W (Files), read through the companion's library request.
+**Decision (owner, 2026-11-18):** C.A.W's roadmap, feature plans, proposals for unbuilt work, owner questions and decisions about unbuilt features move now, not at 1.1.0, into the private repository `Kmandevr/AutoStacc-Hub` (docs/caw/), "the private repository that holds everything we don't want people to know, like feature plans".
+- **Public (this repository):** what is shipped and how the code works, the contracts the shipped code implements (the companion protocol, the C.A.W-Telemetry contract), security rules, licences and process, with short pointers such as "planned work is tracked privately".
+- **[Fact]** Git history still shows the old plans; only future changes are hidden. Hidden features stay readable in the public code (Apache-2.0, neutral commit messages): the surprise rests on the plans and the announcements, not on secret code.
+- **Replaces** the 2026-11-17 decision that plans would go private at 1.1.0.
 
 ## 2026-11-18: The companion's groundwork in the main app: a services package, one link, two flavours (#239, for 1.0.7)
 
@@ -37,7 +19,7 @@ updated: 2026-11-18
 - **`caw_services`:** the platform-free update, relay, schema and SHA-256 code moved, unchanged, into a pure-Dart package in the app (`app/packages/caw_services/`, Apache-2.0), so the companion can share it. Small updates read the install through a narrow `InstalledBuild` interface instead of the Flutter-bound `UpdateInstaller`. Not a new third-party dependency: its only dependency is `path` 1.9.1, already recorded.
 - **One link, chosen at startup:** `CompanionLink` with an Android implementation and none, and adapters at the existing interfaces (`UpdateSource`, `UpdateInstaller`, `RelayClient`, a new `TrustSource`). Absent or older companion: the in-app path. A timeout on a read falls back too; a timeout on a send never repeats it in-app, since the companion may have sent it. The relay adapter sits at `RelayClient`, not `RelayHttp`, because `RelayHttp` takes any URL.
 - **Protocol** ([companion protocol](companion-protocol.md)): a bound Messenger service, ten kinds, version 1, 64 KiB JSON bodies, no URL or method from the caller, and the caller check by `Message.sendingUid` on every message both ways, before the message is read. The pinned certificate is read from the app's own signature at run time, so no digest sits in the source. The known-bad list isn't enforced: the trust source isn't consulted by the loader yet, until the list has a source.
-- **No custom permission in the main app (security review, the same day):** a hostile app declaring `com.kmandevr.caw.permission.COMPANION` first would block C.A.W's own install or update (Android lets only the first declarer's key declare a name), so the main app declares and asks for none, and the per-message uid and signer check is the boundary. Whether the companion declares one is open ([plan](plugin-hosting-plan.md#open-questions-for-the-owner), question 10). The play flavour's `caw/updates` answers `notImplemented`, and `update-delta.js` checks `--prefix`.
+- **No custom permission in the main app (security review, the same day):** a hostile app declaring `com.kmandevr.caw.permission.COMPANION` first would block C.A.W's own install or update (Android lets only the first declarer's key declare a name), so the main app declares and asks for none, and the per-message uid and signer check is the boundary. Whether the companion declares one is open (plan (private), question 10). The play flavour's `caw/updates` answers `notImplemented`, and `update-delta.js` checks `--prefix`.
 - **Flavours:** `github` (today's APK, still what CI publishes as `caw-android.apk`) and `play`, with the same `applicationId`, minus both install permissions and the self-updater. CI checks that the play APK carries neither permission.
 - **Why:** the owner's 1.0.7 direction (least privilege, the companion holding updates, the network and trust) needs these seams first. Building them now, behind today's behaviour, leaves the companion itself, its look and the permission drop to the owner's choices.
 - **Not checked here:** no Android SDK in the session, so the Kotlin, the Gradle flavours and the merged manifests are first built by CI.
@@ -59,38 +41,6 @@ updated: 2026-11-18
 **Decision:** on Android the Audio page's output and input drop-downs offer the devices `AudioManager.getDevices` lists, named by type plus the product name for display. The settings keep `android:<type>:<product name>[#n]`, because an `AudioDeviceInfo` id is given per connection ([Assumption] from the API's description of ids as identifying a device while it is connected; not checked on a primary page). The app sends the engine `aaudio:<id>` with the id the device has now, and AAudio's `setDeviceId` opens it (miniaudio 0.11.25 passes `ma_device_id.aaudio`). A chosen device that is not connected plays or records on the default, the page says so, and the app opens it again when it reconnects. A stream that runs on another device than the one chosen, because Android routed it elsewhere or miniaudio reopened the default after a disconnect, shows in the status as a fallback.
 **Why:** the owner wants a DAW's device choice: the speaker while Bluetooth is connected, a chosen microphone. miniaudio lists only the default on AAudio, and the platform's list was already read for latency.
 **Open, for a phone run:** whether Android honours a chosen speaker while Bluetooth is connected. The status's `routed_device_id` and fallback will show it either way.
-## 2026-11-18: 1.0.6 is the usability release; security moves to 1.0.7 (owner)
-
-**Decision (owner, 2026-11-18):** 1.0.6-alpha.1 contains:
-- real device selection (#242);
-- the tap-along and loopback latency fix;
-- smooth continuous zoom;
-- the settings reorganisation with its new settings (#244).
-
-Plug-in security and the companion app (#239) move to 1.0.7, and every later batch moves up by one: FX consolidation 1.0.8, the rest of the FX 1.0.9, and so on to notation in 1.0.13.
-
-## 2026-11-18: The companion app ships updater and trust first, in the AutoStacc look (owner, #239)
-
-**Decision (owner, 2026-11-18):** in 1.0.7, the companion app takes:
-- updates and the update check;
-- telemetry and feedback;
-- plug-in trust and the known-bad list.
-
-The AutoStacc hub (files, account, cloud library) grows into it later. Its look is AutoStacc's own branding and layout, ready to become the hub. The owner supplies the brand (logo, colours, name) before the screens are built.
-
-## 2026-11-18: Least privilege first, a companion app, sandboxing optional (owner)
-
-**Decision (owner, 2026-11-18, "probably the route"):** the main defence against bad third-party code is giving the main app as few powers as it can do with, not a sandbox by default. The design is in the [plug-in hosting plan](plugin-hosting-plan.md#least-privilege-and-the-companion-app).
-- **Why:** a sandbox costs latency (Isolated: one block) or CPU (an interpreted or WASM format), and most DAWs run plug-ins in-process too. Least privilege costs no CPU or memory on the audio path: it lowers the worst case from "everything C.A.W can do" to what the main app must hold.
-- **A companion app.** Updates, installs and the network move into a second app with its own package, so its own permissions. The main app, where plug-ins load, drops `REQUEST_INSTALL_PACKAGES`, `UPDATE_PACKAGES_WITHOUT_USER_ACTION` and, if every network use moves, `INTERNET`. The owner expects it to grow into the AutoStacc hub (files, the account and more), which keeps account tokens out of the process that loads plug-ins.
-- **Sandboxing is offered, not the default.** Isolated (and any interpreted format) stays available for users who want it. The default trust for never-seen code is still open ([vision](vision.md)).
-- **Flagging and a handshake:** the owner wants bad code flagged (antivirus or similar) and something plug-ins must pass before they load. The proposals (AMSI scans on Windows, signed plug-ins, a revocation list from the hub) are in the plan, for the owner to choose.
-- **A silent built-in scanner (owner):** every plug-in gets a quick look before it is ever loaded, for obvious back doors or malicious intent. It is quiet when nothing is found. It catches the easy cases and is not a substitute for least privilege. The design is in the plan ([the pre-load scan](plugin-hosting-plan.md#the-pre-load-scan)).
-- **Declared capabilities (owner, later the same day):** plug-ins in C.A.W's own format state what they need beyond the basics, and why. Anything used but not declared is blocked outright. CLAP/VST3 findings only warn. Warnings explain, for people who don't know how software works, what each capability allows, the risk, and why an honest plug-in might need it.
-- **The hub (owner):** the companion app grows into AutoStacc's secondary hub: every download, the user's whole library, and cloud storage of their data, sounds and one-shots for C.A.W to use. Its code and data are 100% private (a closed-source, private repository). The C.A.W-Telemetry data is shown in an admin view inside it for the owner and the people they trust, to see how the app works and find vulnerabilities.
-- **Release 1.0.7 (owner, later the same day):** a release of its own is given over to the companion app and this security work, 1.0.7 after the 1.0.6 usability release, and every later 1.0.x batch moves up by one (the FX batch is now 1.0.8). The owner accepted the remaining design points (trust kept in the companion, the companion not trusting the main app, disabling a malicious plug-in, plug-in internet through the companion, admin accounts without tokens, working without the companion, moving users, signing keys, versioned scanner rules, shared projects, Windows, keeping data) and left the details to Claude's reasoning ([plan](plugin-hosting-plan.md#the-rest-of-the-design)).
-- **Notice (owner):** anything sold on AutoStacc may be reviewed with no notice. Something stored but not sold gets a notice when it is reviewed, saying this doesn't necessarily mean a problem. Every takedown gives a notice and a way to appeal. Hosting malicious plug-ins bans the account, with an entirely manual appeal. A downloaded plug-in later found malicious is disabled at once, and the user can see why. The automatic malware check on uploads is not a review: it sends no data to the team, only refuses malicious content, and tells the uploader.
-
 ## 2026-11-17: Each platform's low-latency path; ASIO and rtkit stay out (owner's request, #237)
 
 **Decision:** Low latency on Windows asks the endpoint's smallest period through `IAudioClient3` (shared) or the device's minimum (exclusive), never under 128 frames, falling back to miniaudio's 10 ms when that does not open; Auto, Battery and a chosen size are unchanged, so the default path is as before (Claude's choice: Low latency is the user's explicit request for the least delay). Exclusive mode stays off by default on Windows and Android (the earlier decision). `CAW_AUDIO_BACKEND` puts one miniaudio backend first for the CLI and tests (unset by default). On Android the stream already suits LE Audio (48 kHz, stereo, usage GAME); the route model reports LE Audio or A2DP and its label in the Latency page waits for the owner's look. BLE MIDI needs nothing: Android's own MIDI service asks for high connection priority. **No new dependency:** ASIO is proprietary or GPLv3, libdbus (for rtkit) AFL-2.1 or GPL-2.0+, neither clearly permissive; both are left to the owner. Facts and sources in [engine](engine.md) ("Each platform's low-latency path").
@@ -162,109 +112,23 @@ The owner's decision (2026-11-13, below) built on branch `midi-store`; the detai
 - **The hint:** asked for the callback and the workers whatever the callback's policy, as before, but a refused session is asked again (1 s doubling to 30 s), the callback alone if the group is refused, every callback's own duration is reported (not the longest since the last report), and `hint_state` says why there is none. **Why:** the NDK and the system service ask only that the threads be the app's (sources in [engine](engine.md)); telemetry showed no session on the S22+. **Not claimed:** the 1.0.4 Benchmark's low clocks and 13,448 sustained xruns came while the app was behind another app (owner), so this change is not shown to fix them.
 - **Benchmark:** a step the app leaves the foreground during runs again (`backgrounded`); a ramp the engine's own budget stops is capped, not an error; live parts say they are unprofiled (a short profiled pass would run the mix on one thread, unlike what plays). The local JSON grows additively; H2 is unchanged.
 
-## 2026-11-17: Two Android builds; Isolated with an optional no-delay mode; feedback and Flagship routing (owner, #212, #222, #233)
+## 2026-11-17: Two Android builds (owner, #222)
 
 **Decision (owner, 2026-11-17):**
 - **Two Android builds:**
   - **The GitHub build** has everything: third-party plug-ins and the self-updater.
-  - **The Play Store build** follows Play's rule on downloaded code ([plug-in hosting plan](plugin-hosting-plan.md)).
+  - **The Play Store build** follows Play's rule on downloaded code.
 
-  The owner asked whether the engine could count as an interpreter, as a workaround; that is an open question in the plug-in hosting plan. The owner also asked to do the same for iOS where possible. **[Assumption]** That needs checking: which alternative distribution iOS allows is not verified here.
-- **Isolated plug-ins** add one block of compensated latency. There is also an optional **no-delay mode**, which runs the plug-in in the callback with a timeout. It is riskier, because a slow plug-in causes dropouts.
-- **Feedback,** as proposed:
-  - 16 frames inside a patch and 64 between tracks;
-  - a limiter on each feedback wire, on by default and switchable per wire.
-- **Flagship's routing graph:** per voice is optional per patch. By default, effects are shared and the oscillator/filter path runs per voice.
-
-## 2026-11-17: Plans go private at 1.1.0; the code stays public (owner)
-
-**Decision (owner, 2026-11-17):** "Eventually have all of the roadmap and changes hidden, so I can surprise people with updates, while the project stays open source."
-- **At 1.1.0,** issues, the roadmap, plans and decisions move to a private repository. The code stays public as it is written (Apache-2.0), with neutral commit messages.
-- **[Fact]** Hidden features stay readable in the public code. The surprise rests on the plans and the announcements, not on secret code. The owner chose this over private development with releases pushed public.
-- **Until 1.1.0,** work continues publicly as now.
-
-## 2026-11-17: Groundwork for 1.1.0 is laid silently during the 1.0.x batches (owner)
+## 2026-11-17: Groundwork for the next minor release is laid silently during the 1.0.x batches (owner)
 
 **Decision (owner, 2026-11-17):** "We should 100% be laying the groundwork for the 1.1.0 update, so we don't have a ton of work for ourselves, but make the changes silent."
-- Each 1.0.x batch may carry hidden groundwork for 1.1.0:
-  - the routing engine (#233);
-  - plug-in hosting (#212);
-  - play-ahead (#191);
-  - the AutoStacc download and update source (#221);
-  - store builds (#222).
+- Each 1.0.x batch may carry hidden groundwork for the next minor release (which parts: the private plans).
 - **Silent** means:
   - users see no change;
   - the work sits behind off-by-default internal flags, or is engine-only code with no UI;
   - the project format only gains fields when they are needed, and old versions are unaffected;
   - the changelog doesn't announce it.
 - Each step has its own tests and a Benchmark check, so it costs nothing while it's off.
-
-## 2026-11-17: The FX batch splits in two; one bit distortion; the beta pack stays free for beta users (owner)
-
-**Decision (owner, 2026-11-17):**
-- **Bit distortion:** one built-in device has the classic crush and the bitwise operations (shift, XOR, AND masks). The AutoStacc beta pack drops its bit-shift device and gets a different one instead, to be chosen.
-- **The AutoStacc beta pack:** it stays free for everyone who used the beta, even after the pack becomes paid.
-- **The FX batch splits in two:**
-  - **1.0.7:** consolidation, the device kit and FX chain, Flagship, React to… and live preset preview;
-  - **1.0.8:** the new effects, the recording tools, guitar, presets and templates, low-latency monitoring, the pack and the music video.
-
-  The later batches move up one: hosting foundation 1.0.11, notation 1.0.12.
-- **Suggestions adopted:**
-  - low-latency monitoring through effects, with a latency readout, checked on the S22+;
-  - live preset preview;
-  - project templates by purpose;
-  - the 1.1.0 routing engine built in hidden steps during the 1.0.x batches.
-
-## 2026-11-17: Visual, non-linear routing is in 1.1.0 (owner, #233)
-
-**Decision (owner, 2026-11-17):** 1.1.0 adds visual, non-linear routing. The node graphs work:
-- inside device chains;
-- between tracks;
-- for modulation;
-- inside Flagship.
-
-The goal is "everything works with everything natively", like Kilohearts' Snap Heap but built into everything that can use it. The batch 1.0.7 devices are built to become nodes later.
-
-The owner added (2026-11-17):
-- Everything can be placed freely: an oscillator wired into a distortion, then a filter, and so on. Sound sources are nodes too.
-- Free-standing LFOs, envelopes and other modulators can be wired into any plug-in or parameter, for movement where it's normally hard to get.
-
-**[Fact]** Project-level modulators already exist and can target any parameter (docs/engine.md, "Modulation"). 1.1.0 adds the visual wiring, generator nodes and free audio paths.
-
-**Odin 2 as the owner's reference** (2026-11-17), "but more built into the app, more fine-grained and intuitive, and it works for everything". Odin 2 has:
-- oscillators that can feed both filters at once;
-- a routing selector on each filter;
-- a modulation matrix with a Scale row (one modulator controlling another link's depth).
-
-These are **[Fact]** from reviews checked 2026-11-17 (MusicRadar, Bedroom Producers Blog, KVR). C.A.W gives every block such selectors, kept in step with the graph view, and adds a scale-by source to each modulation link.
-
-**Everything non-linear** (owner, 2026-11-17): every block has inputs and outputs, and any output can be wired to any input. That includes feedback back up the chain, splitting one output into several routes, and blocks with several outputs (a filter splitting low and high, mid/side, transient/sustain, dry/wet).
-
-**[Fact]** A feedback cycle needs at least one sample of delay. **[Proposal]** The delay is kept short: cycles run in 16-frame sub-blocks inside a patch, the delay shows on the wire, and small patches can use a per-sample mode. Each feedback wire gets a safety limiter. These are to be confirmed by the owner (#233).
-
-The owner added (2026-11-17):
-- every device that can use a sidechain has a sidechain input in the router;
-- effects can stand on their own, with several tracks wired into one;
-- secondary inputs appear wherever they make sense: the vocoder, ring mod and frequency shift carriers, a live convolver impulse, a C++ second input;
-- a very easy way for one track's notes or loudness to change another track's effect.
-
-That last one is **React to…** in every knob's hold menu (track, then Loudness or Notes). It uses the existing project modulators, so it ships early, with the 1.0.7 device kit.
-
-## 2026-11-17: Device UI redesign and a step-by-step music video (owner, #231, #232)
-
-**Decision (owner, 2026-11-17).** The device UI ships in batch 1.0.7, with the FX consolidation; the music video in 1.0.8 (the FX batch's split, above).
-- **FX chain:** collapsed rows, any number open at once, and every control usable in place.
-- **Editing:** visual first, controlled mainly by knobs.
-- **Flagship:** one Vital-like screen; on a phone, three panels (Oscillators, Filters, Modulation) with a mod strip that is always shown.
-- **QoL kit on every device:**
-  - presets and A/B;
-  - precise control;
-  - auto gain, never changing the work's intent and possible to turn off;
-  - randomize and undo.
-- **Look:** cohesive, but each device has its own design.
-- **Music video:** becomes a step-by-step flow, with manual shots and dragging in the lane, and never loses edits.
-
-The plan: [device UI plan](device-ui-plan.md).
 
 ## 2026-11-17: Linked sample folders, the sample browser and automatic metadata (owner, #229)
 
@@ -282,58 +146,6 @@ The plan: [device UI plan](device-ui-plan.md).
 - **Look (agent's choices within "follow the Files browser and the glass style"):** a list (not the grid): 56 dp rows with an 84 dp waveform, name over instrument · type · folder, then right-aligned tempo, key and length columns; estimates in italics with a "~" and their source and confidence in a tooltip; the selected row tinted blue, the playing name green; scrolling filter chips under the search box (each opening a glass bottom sheet); a glass preview strip at the bottom with previous, play, next, Sync, FX and a volume slider. Checked by `layout_fit_test` ("samples").
 - **Android, `content://` to the engine:** the engine reads files by path, and a document tree gives URIs, not paths. Each file is opened read-only with `ContentResolver.openFileDescriptor(uri, "r")`, the descriptor detached (`ParcelFileDescriptor.detachFd`, "you are now responsible for closing the fd in native code") and handed to Dart, and Dart and the engine read it as `/proc/self/fd/<n>`; Dart closes it through `ParcelFileDescriptor.adoptFd(fd).close()`. Files the open project uses stay open for the session (at most 512 descriptors, the least recently used unpinned closed first); the indexer opens 64 at a time and closes them after reading the headers. Such a path is never saved: the project keeps the link and a placeholder path. **[Fact, developer.android.com "Access documents and other files from shared storage", read 2026-11-17]** the Storage Access Framework needs no system permission; `ACTION_OPEN_DOCUMENT_TREE` (API 21+) grants access to the chosen directory and its subdirectories only; `takePersistableUriPermission` keeps the grant across restarts but not when the document is moved or deleted; on Android 11+ the picker refuses the internal storage root, an SD card's root and the Download folder. **[Fact, developer.android.com `ParcelFileDescriptor` reference, read 2026-11-17]** `detachFd` (API 12) and `adoptFd` (API 13) as quoted. **[Assumption]** reopening `/proc/self/fd/<n>` reads a document from a local provider (the device's storage or an SD card) as a file; a cloud provider that hands out a pipe is not seekable and may fail to load; to verify on the S22+.
 - **Not built:** watching folders for changes (the issue mentions it; a refresh runs on open, on Read again and on pull-to-refresh, and only reads what changed); AIFF, OGG and other formats (WAV, FLAC and MP3 are listed, as the engine decodes them).
-
-## 2026-11-17: Fewer, better built-in effects; new standard effects; the AutoStacc beta pack (owner, #227)
-
-**Decision (owner, 2026-11-17):**
-- **Consolidation:** "one really good one rather than five okay ones." The overlapping built-ins merge into one device each, with modes:
-  - dynamics into Compressor, Limiter and Transient;
-  - Drive and Bit distortion;
-  - EQ (with dynamic and M/S) and Filter (with auto-filter and wah);
-  - Utility/Stereo;
-  - Chorus/Flanger, Phaser and Tremolo/Pan;
-  - one Delay (with tape echo);
-  - one Reverb (with plate and spring);
-  - Pitch/Shift.
-
-  Old projects convert to the merged device and mode, as the retired synths became Flagship. The full table is in #227.
-- **Cost:** merged devices must stay as cheap to run as what they replace ("as cheap as possible to run"). Each mode runs only its own path.
-- **New standard effects:**
-  - exciter and bass enhancer;
-  - pitch correction;
-  - vocoder;
-  - analyzer, tuner and loudness meter;
-  - expander and upward compression;
-  - Compactor-style ducking in the Compressor.
-
-  **[Fact]** Kilohearts Compactor is a free ducker/leveller released in August 2025, with threshold, amount, attack, hold, release, an optional sidechain, and RMS/Peak/ISP detection (kilohearts.com/products/compactor, checked 2026-11-17). C.A.W's device is an original design.
-- **AutoStacc beta pack:** free during the beta, paid later:
-  - warp;
-  - spectral FX;
-  - a glitch mangler.
-
-  It is built into C.A.W for now, marked as the pack, and moves to an AutoStacc download in 1.1.0 (#221).
-- **Recording tools** (owner, later the same day):
-  - noise reduction, both as a live effect (learning a noise profile) and as a non-destructive clip pass in the sample editor;
-  - a pedal-style noise gate: fast, zero latency, smart release tracking with hysteresis, key from the clean input and gate after the distortion, and a downward expand mode;
-  - de-hum (50/60 Hz, auto-detected);
-  - de-click and de-plosive;
-  - de-reverb and breath control.
-- **Guitar effects** (owner, the same day), built into the existing effects:
-  - Drive gets amp modes (Clean, Crunch, Lead, High gain) with a bass, mid, treble and presence tone stack, and pedal modes (Overdrive, Distortion, Fuzz);
-  - the convolver gets a Cab mode with C.A.W's own cabinets and the user's IRs.
-- **Purpose-friendly helpers:**
-  - purpose tags with a filter in the effect browser;
-  - chain templates (Guitar clean, crunch and lead; Vocal; Podcast voice; Drum bus; Master);
-  - presets named for the job;
-  - a one-tap chain suggestion when a guitar or mic track is armed.
-- **A Bands mode in Drive** (owner, the same day; the owner loves Fire's band-split distortion):
-  - 1–4 bands with Linkwitz-Riley crossovers, each with its own drive type, amount, tone and mix;
-  - a Clean band option, for a distorted kick with a clean low end.
-
-  **[Fact]** Fire is AGPL-3.0 (its GitHub listing, checked 2026-11-17), so none of its code is used; C.A.W's version is its own.
-- **More presets:** every built-in effect ships at least 8 presets, named for the job and tagged by purpose, where that makes sense.
-- **When:** after 1.0.5, split over 1.0.7 and 1.0.8 (the FX batch's split, above). The later batches move up.
 
 ## 2026-11-14: Freeze and bounce: pre-fader, the frozen track sent as an audio clip, no C API bump (Claude, within the owner's 1.0.5 decisions, #209)
 
@@ -398,23 +210,10 @@ The owner's (2026-11-14): Freeze / Unfreeze and Bounce to audio in the track's h
 - **The section menu** is exactly the owner's four (rename, colour, copy, delete); the old region menu's Loop this region, Select its clips and Duplicate with clips went (double tap loops; Copy is the duplicate).
 - **MIDI import** with Adopt takes the file's whole tempo map and signatures; MIDI tempos are steps, so a map exported from a ramp needs steps too (the engine side's choice).
 
-## 2026-11-13: 1.1.0 also holds play-ahead, AutoStacc and the store releases (owner)
-
-**Decision (owner, 2026-11-13):**
-- **Play-ahead rendering** (#191) moves from 1.2.0 into 1.1.0, built in this repository from the play-ahead plan. 1.2.0's contents are undecided.
-- **AutoStacc** becomes both C.A.W's download and update source and its store page (#221). The details depend on the owner.
-- **Stores:** 1.1.0 is published on Google Play and the iOS App Store (#222). The owner has neither account yet, so everything not tied to an account is prepared first.
-- **iOS:** the full DAW with every built-in instrument and effect, but no on-device C++ building or loading.
-
-## 2026-11-13: Clips are stored as MIDI; more 1.1.0 requirements; Windows engine on Clang (owner)
+## 2026-11-13: Clips are stored as MIDI; Windows engine on Clang (owner)
 
 **Decision (owner, 2026-11-13):**
 - **MIDI storage:** "It should store the MIDI. The text is only for creating MIDI through a text editor… MIDI is a lot better format than just the text." Projects will store MIDI clips as MIDI, with pattern text as an authoring view only (#216). This replaces the choice made on the owner's behalf in #158 (pattern text as storage).
-- **Also before 1.1.0:**
-  - routing extras: receives, parallel paths, drum multi-out (#217);
-  - safety and onboarding: format migrations, crash recovery, device loss, a tour and help (#218);
-  - sound design: drawn LFO shapes and a wavetable editor (#219);
-  - a clip launcher and S Pen precision (#220).
 - **Windows engine:** built with Clang (clang-cl) instead of MSVC (#199). **Built (2026-11-13, branch `b1-extras`, Claude's choices):** Visual Studio's ClangCL toolset (MSVC ABI, so the DLL loads beside the MSVC-built Flutter runner); the app builds the engine as its own CMake build (`ExternalProject` in `app/windows/CMakeLists.txt`, since a Visual Studio build has one toolset; the runner and plug-ins stay MSVC; `CAW_ENGINE_CLANG_CL=OFF` goes back to MSVC). The engine takes the Linux/Android flags through `/clang:` (`-O3`, `-ffp-contract=fast -fno-math-errno -fno-trapping-math -fno-signed-zeros -fassociative-math`); strict files negate each one, since `/fp:precise` alone does not. x86-64 baseline kept (no AVX2). **[Fact, CI logs 2026-11-13]** the `windows-2025` runner has Visual Studio 18 2026 with Clang 22.1.3 for ClangCL (CMake 4.4.5), not the Visual Studio 2022 its published image readme listed. Every engine test passes with it (Engine run [43505893182](https://github.com/Kmandevr/C.A.W/actions/runs/43505893182)); on one runner it is 12–17% faster than MSVC for songs and 44% for the heavy Flagship ([engine performance](engine-performance.md#a5-cpu-features)).
 - **Changelog:** a changelog from 1.0.0, in the app and on GitHub, starting with 1.0.2.
 
@@ -430,30 +229,6 @@ The owner's (2026-11-14): Freeze / Unfreeze and Bounce to audio in the track's h
 - **Allocations are counted only where the host can count them** (the test build's global `operator new`): a loaded library's own allocator and `malloc` can't be hooked portably in the app, so there the check warns as not measured instead of passing.
 - **Sections** come through a host extension (`caw.profile.v1`) the SDK's `create` asks for, recorded only on the bench's thread into 32 fixed slots, so a section left in shipped code costs a load and a branch. They are exclusive (a nested section's time comes off its parent's: the shares add up), after the audio review.
 - **After the security and audio reviews (2026-11-13):** trust is read when a plug-in is listed and again when its run starts (`NativeComponentManager.benchTrusted`: the current sources' choice, and a packaged build's own), and the binding sends Trusted only then; blocking or forgetting drops what the manager had loaded for it. The bench runs on its own thread, watched: a block past max(1 s, 100 times its budget) fails the job and that thread is abandoned, never joined, and a second bench fails fast instead of waiting. It still runs Trusted plug-ins in-process (a crash in one closes the app), said in the app and the docs, until the Isolated runner (#212).
-
-## 2026-11-13: The 1.1.0 requirements, built in batches (owner)
-
-**Decision (owner, 2026-11-13):**
-- **What goes in before 1.1.0:** every normal-DAW gap goes into the 1.1.0 requirements:
-  - plug-in hosting;
-  - audio stretching and editing;
-  - a tempo map, markers and sections;
-  - comping;
-  - freeze, bounce and consolidate;
-  - stem export;
-  - MIDI out and clock;
-  - app-wide undo;
-  - clip automation and VCA groups;
-  - a sample editor;
-  - a notation view;
-  - iOS and macOS builds.
-
-  Video sync stays off the roadmap.
-- **Releases:** batches ship as numbered patches, and 1.1.0 is the major update ("more will go into it").
-- **Plug-in hosting:** CLAP and VST3 on Windows and CLAP on Android, always behind the per-item Isolated, Trusted or Blocked choice. The foundation is built first, in the batches, but users don't see it; the feature is released in 1.1.0.
-- **Stretching:** Signalsmith Stretch. **[Assumption]** It is MIT-licensed; to be confirmed from its source before adoption.
-
-The plan is in [roadmap](roadmap.md) and #215.
 
 ## 2026-11-13: Low latency takes AAudio's own callback sizes; the Benchmark measures the app's figure (Claude, from the owner's S22+ run)
 
@@ -582,13 +357,6 @@ The owner heard audio break on the Galaxy S22+ when another app used the microph
 ## 2026-11-12: The engine renders in fixed blocks at the device (owner's idea)
 
 **Decision (owner's idea, with the engine lead's agreement):** the engine always renders in fixed-size blocks, whatever size the device's callback is. The callback takes frames from a small FIFO preallocated at device open, which renders whole engine blocks when it runs short, so Bluetooth and background callbacks of 441, 960, 1920 or random frames never reach the engine and its behaviour is the same on every route and in export. **Built** (`engine/src/block_fifo.h`, the playback callback in `engine/platform/audio_miniaudio.cpp`): 64-frame blocks (`kBlock`, the engine's own chunk); a callback that is whole blocks passes straight through; otherwise at most 63 frames wait, and the reported output latency adds them; the FIFO is new at each open and keeps what it holds across a Play, count-in or Stop (the engine has already rendered those frames; dropping them clicked, found in the audio review); a small period that isn't whole blocks (under 256 frames) bypasses it. With the separate capture device (audio-resilience, merged 2026-11-13) the output is always playback-only, so the FIFO is used with the input open too, the input bridge read for each block rendered. The engine itself stays correct for any size (offline renders and other hosts call it with any size): a second line of defence, not a replacement. Details: [engine](engine.md) ("Fixed engine blocks at the device").
-
-## 2026-11-12: Play-ahead and run on any hardware, for 1.2.0 (owner)
-
-**Decision (owner):** C.A.W adapts to the hardware it runs on, so the same project runs everywhere, from a desktop to a low-end phone and, as a publicity stunt, a hacked graphing calculator ("it's a stunt, if it works it's fine"). The means is dynamic play-ahead: things are rendered ahead of time and in batches where it makes sense, and the switch to real time when a user needs low latency must be completely invisible. Release 1.2.0, after the open alpha.
-
-- **Kept:** the real-time-safe callback, live and export perceptually identical, exports never changed to save CPU, REAPER-style routing without shared buses, no audible change without asking.
-- **[Proposal] (Claude):** the design (a live set and an ahead set per chunk, pre-fader worker rings with adaptive depth in its own module, Drain and spare-instance handovers, intent signals from the app), the hardware ladder, twelve related optimisations, checked calculator facts (the TI-84 CE toolchain is LGPL, so not usable as is; NumWorks' external-apps SDK is BSD-3), the calculator renderer and the order are in the [play-ahead plan](play-ahead-plan.md) (#191). A1 is measured first, since it may close much of the S22+'s gap alone. The owner's open questions are in the [vision register](vision.md#open-owner-decisions).
 
 ## 2026-11-12: No shared buses; work the REAPER way (owner)
 
@@ -889,35 +657,6 @@ The owner added (2026-11-11): inputs too (Bluetooth headsets' and USB microphone
 - **Encoders: the platforms' own, no new package.** [Fact] Android MediaCodec, MediaMuxer and MediaCodecList are Android SDK APIs (developer.android.com reference pages, read 2026-11-11); Windows' H.264 encoder (Mfh264enc.dll, input I420, IYUV, NV12, YUY2 or YV12) and AAC encoder (Mfaacenc.dll, 16-bit PCM at 44.1 or 48 kHz, 1, 2 or 6 channels, 12,000 to 24,000 bytes a second) are Media Foundation transforms that ship with Windows 7 and later (Microsoft Learn "H.264 Video Encoder" and "AAC Encoder", read 2026-11-11). Both are called through the SDKs the app already builds with; C.A.W adds and redistributes no codec library, so no licence enters the project. [Assumption] the largest Windows frame is 4096 × 2304 until an encoder reports less; the Android limit is the first H.264 encoder's reported widths and heights, and the encoder chosen must take the exact size. Open (owner): codec patent terms for distributing the videos are the platform vendors' and the user's, not checked here.
 - **Linux and tests** write a list of frame hashes instead of a video; no MP4 encoder there yet.
 
-## 2026-11-11: A REAPER-style layout file (owner; design, questions open)
-
-**Request (owner, 2026-11-11).** As REAPER's theme files and WALTER layouts do ([Fact] reaper.fm/sdk/walter/walter.php, read 2026-11-11), a code-only file should be able to change the app's look completely: where panels and menus are, which menus show, how menus open and how they animate.
-
-**[Proposal]** The architect's design:
-- a declarative, versioned text file (`caw-layout 1`) with bounded conditions (`when screen == desktop`, `width < 160dp`, read-only UI state) and no loops or code;
-- per element, flow layouts: ordered slots with priorities, not WALTER's pixel coordinates;
-- dock presets, toolbars, and menus by id (items from the action catalogue, how they open, style, motion token);
-- declared params that become a "theme adjuster" in the theme editor;
-- the built-in layout shipped in the same format;
-- a broken or unknown file falls back to the built-in layout with a banner, and the file can never hide Settings, Reset layout or the section switch;
-- edited in Build with live reload, completion and diagnostics.
-
-The phases:
-1. the parser, the evaluator, dock presets, toolbars and menu style;
-2. menus as data;
-3. element layouts;
-4. params;
-5. motion;
-6. completion and sharing.
-
-**Owner's answers (2026-11-11):**
-- **Both:** the layout is part of the theme file, which is the whole theme. The theme editor can still change everything a theme supports, in any theme, not only your own.
-- **One home:** toolbars and menus move from the key bindings into the layout. Key bindings keep only keys and macros.
-- **No hiding:** a layout may reorder and collapse things (into ⋯ or overflow) but never hide features.
-- **Flow and priorities,** not coordinates.
-
-Still open: custom labels, layouts inside project packages, and one file for every screen shape or one per shape. Until answered: no custom labels, a packaged layout is offered and never applied silently, and one file uses conditions.
-
 ## 2026-11-11: A theme editor that builds the theme for you (owner)
 
 **Decision (owner, 2026-11-11).** Today's theme editor is detailed but hard to use.
@@ -1192,15 +931,6 @@ Carries out the first two bullets of the owner's decision below ([App](app.md)).
    - a room send.
 4. **Quality checked numerically** against research targets (spectrum, pitch curve, decay, crest factor), with genre-accurate factory presets ("Dubstep kick", "808 kick" long and short, "Acoustic kick", "Acoustic snare", "Ride", "Crash", …).
 
-## 2026-11-11: Finish the whole roadmap, then optimize, then a fit-and-finish pass (owner)
-
-**Owner's words:** "Don't stop until everything in the roadmap is completely done. I want you continuously working… once everything in the roadmap is done, go and optimize everything so it's fast, it's quick and that it runs extremely well. Then make sure everything is user friendly. Don't change the layout or things in the app, just make sure it fits well in the UI."
-
-**The order:**
-1. Every roadmap item (beta scope above).
-2. A performance pass across the engine and the app.
-3. A user-friendliness pass that keeps the layout and features as they are and only fixes fit, spacing, overflow, labels and feedback.
-
 ## 2026-11-11: The beta's scope: the whole roadmap, plus drums, effects and audio (owner)
 
 **The owner's words:** "Make sure everything in the roadmap is done. Including the routing and the hard stuff too."
@@ -1219,8 +949,6 @@ Carries out the first two bullets of the owner's decision below ([App](app.md)).
   - pitch tracking per sound, switchable, with glide;
   - each pad on its own MIDI note, with an "explode to tracks" workflow;
   - hardware MIDI pads supported.
-
-**Still the roadmap's call:** Stages 8–10 stay after Release 1: Faust, plug-in hosting, and iOS/macOS/Linux builds.
 
 ## 2026-11-11: Racks and the effect browser (fx-racks, choices to confirm)
 
@@ -1379,7 +1107,7 @@ Carries out the first two bullets of the owner's decision below ([App](app.md)).
 
 ## 2026-11-10: Match REAPER's whole flow, made easy (owner)
 
-**Decision (owner):** "look at the flow of REAPER and match that as well", after the arranger (#172), and "The goal is to make it really easy to use." REAPER's flow is followed where it is simple and direct; where it is powerful but fiddly (deep dialogs, modifier gestures, the routing matrix) C.A.W. offers one obvious easy path with sensible defaults and keeps REAPER's depth behind it. The study, the gaps and the plan ranked by "makes a song easier to finish" are in [REAPER's flow and C.A.W's](reaper-flow.md); nothing in it is built, and the phone look of each new screen waits for the owner ([vision](vision.md#open-owner-decisions)).
+**Decision (owner):** "look at the flow of REAPER and match that as well", after the arranger (#172), and "The goal is to make it really easy to use." REAPER's flow is followed where it is simple and direct; where it is powerful but fiddly (deep dialogs, modifier gestures, the routing matrix) C.A.W. offers one obvious easy path with sensible defaults and keeps REAPER's depth behind it. The study, the gaps and the plan ranked by "makes a song easier to finish" are in [REAPER's flow and C.A.W's](reaper-flow.md); nothing in it is built, and the phone look of each new screen waits for the owner (the private open-questions register).
 
 ## 2026-11-10: The effects suite's engine choices (on the owner's behalf, to confirm)
 
@@ -1448,7 +1176,7 @@ REAPER's behaviour is taken from its user guide ([UI design](ui.md#reaper-refere
 
 **Superseded on 2026-11-13 by the owner (#216; built 2026-11-17, format v5): clips are stored as MIDI.** The storage part below no longer holds; the import and export notes do. **Decision (made on the owner's behalf during autonomous work on #158):** note clips keep being stored as C.A.W.'s own text note form (pattern text, `app/lib/model/pattern_doc.dart`) inside the project; project storage does not change. C.A.W. imports and exports Standard MIDI Files (SMF format 0 and 1, MIDI 1.0; format 2 reads as format 1) so clips move to and from other DAWs. Per-note pitch bend and expression export as MIDI 1.0 pitch bend, channel pressure and CC74 on per-note channels (MPE lower zone: channel 1 manages, channels 2–16 carry one note each, with an MPE Configuration Message and each channel's bend range by RPN) when a clip has any; otherwise plain notes on channel 1. MIDI 2.0 clip files for clips are later.
 - **Why:** the text form already maps notes, microtones and per-note curves one to one and is what the piano roll edits; a binary store would need a second editable form anyway. SMF is what other DAWs exchange, and MPE carries per-note bends in MIDI 1.0.
-- **Where:** a Dart reader/writer (`app/lib/model/midi_file.dart`) and clip conversion (`app/lib/model/midi_clips.dart`), so files convert off the UI isolate and without engine changes. The engine's own converter (`engine/src/midifile.cpp`) stays for MIDI 2.0 clips (`.midi2`) only; the piano roll's `.mid` import and export moved to the Dart converter (2026-11-10, #168). Imported files are listed in Files by name with the patterns their parts became (`midi_files` in the project JSON, additive); the notes still live only in the patterns. [Assumption] A dropped multi-part file puts its first part on the target track and the others on new tracks under it. [Proposal] Whether to keep one converter (and which) is open in [vision](vision.md#open-owner-decisions).
+- **Where:** a Dart reader/writer (`app/lib/model/midi_file.dart`) and clip conversion (`app/lib/model/midi_clips.dart`), so files convert off the UI isolate and without engine changes. The engine's own converter (`engine/src/midifile.cpp`) stays for MIDI 2.0 clips (`.midi2`) only; the piano roll's `.mid` import and export moved to the Dart converter (2026-11-10, #168). Imported files are listed in Files by name with the patterns their parts became (`midi_files` in the project JSON, additive); the notes still live only in the patterns. [Assumption] A dropped multi-part file puts its first part on the target track and the others on new tracks under it. [Proposal] Whether to keep one converter (and which) is open in the private open-questions register.
 - **Files are untrusted:** reading caps the file at 16 MB, 2 097 152 events, 1 048 576 notes and 4 194 304 expression changes, checks every length, and fails with a message instead of guessing.
 
 ## 2026-11-10: The logo is the faceted crow head, "C5" (owner)
@@ -1591,7 +1319,7 @@ Built (engine pass, 2026-11-10):
 - **Focus view (phone):** tapping a track moves it to the top of the screen and the lower ~80% becomes its panel, with tabs: FX, Mixer, Clip and Automation. Swipe sideways on the pinned track for the next or previous track; swipe the panel down, tap the pinned track or press Back to return to all tracks. In landscape the panel is a right side panel (about 40% wide) so the tracks keep their full height; on desktop it is docked.
 - **Clip editing:** a clip's notes open in the Clip tab of the focus view.
 - **Mixer (phone):** a card over the tracks with narrow strips you swipe through; tap a strip to widen it.
-- **FX tab:** opens on a plain **FX stack**, a normal top-to-bottom insert list: cards with knobs, drag to reorder, "+ effect" and bypass. A **Routing** toggle switches to the free canvas, the project/track workspace of the visual plan (`docs/visual-routing-and-library-integration.md`). Both views edit the same chain.
+- **FX tab:** opens on a plain **FX stack**, a normal top-to-bottom insert list: cards with knobs, drag to reorder, "+ effect" and bypass. A **Routing** toggle switches to the free canvas, the project/track workspace of the visual plan (private). Both views edit the same chain.
 - Export is in the project menu. Automation is edited as lanes under each track, REAPER-style: volume, pan and any effect knob, aligned with the clips. A long-press on a knob offers "Automate".
 - **Song length:** no cap; the song ends at its last clip or automation point and playback loops back there, as in REAPER (built, `docs/ui.md`).
 
@@ -1658,29 +1386,6 @@ Built (engine pass, 2026-11-10):
 - **Owner decision:** Claude builds the engine for now (replacing the 2026-10-31 split where GPT built features and Claude reviewed). GPT's merged work is the baseline where it applies; Claude asks the owner about open questions instead of deciding them.
 - **Owner decisions (same day):** GPT is paused on the engine (Claude only). Work order stays #120 → #17 → #121 → #122 (issue #123), with the stable C interface built as part of #120. Claude merges its own engine PRs once CI is green and its independent audio review finds nothing blocking. The stereo-only C interface v1 (`caw_module_sdk.h`) is replaced by a full v2 with no v1 compatibility.
 
-## 2026-11-09: Two visual workspaces and conditional signal/event routing
-
-- **Owner decision — song workflow:** keep the ordinary arrangement, piano roll, clips and conventional mixer workflow for making songs. Visual routing is an additional workspace, not a replacement for arranging or note editing.
-- **Owner decision — two visual workspaces:** use one reusable visual framework for two distinct editors: a component workspace to build/edit instruments, effects and processors (C++, Faust and visual DSP composition), and a project/track workspace to edit track controls, effect chains, sends/destinations, buses, sidechains and routing. The latter should let users adjust track parameters and send destinations while viewing the effect chain and routes together.
-- **Owner decision — universal conditional routing:** add a native typed signal/event/control routing and workflow capability. Sources include audio analysis, MIDI/events, parameters, modulation, track/clip/region/note/transport state and explicit UI state such as highlight. Rules support conditions, branches and actions that can affect routes, sends, effects and component parameters across tracks. Regional FX/path activation should not require traditional automation lanes.
-- **Architecture distinction:** component/DSP graphs, project routing graphs and condition/workflow graphs are separate domain models, connected through shared typed ports, events, parameters and component descriptors. They must not become three incompatible execution engines or a UI-only graph.
-- **Safety and behavior:** prepare routes/effects off the audio callback; runtime rules must be bounded, deterministic, observable and safe for live/offline parity. Define cycle/feedback, hysteresis, debounce, retrigger and resource-budget behavior. Preserve channel and per-note identity unless explicitly converted/combined.
-- **Owner decision — reuse scope:** evaluate existing open-source projects at every scale, including complete subsystems and applications, not only small libraries. Prefer adoption/adaptation when feature quality, workflow fit, architecture, performance, platforms, maintenance and licence obligations beat a rebuild. LMMS is source reference only; VCV Rack is interaction inspiration, not the target workflow.
-- **Owner decision — DSP language:** C++ remains the primary general-purpose language. Faust is approved for evaluation as an optional specialist DSP authoring/compiler backend, preferably generated C++ through the local C++ build pipeline first. Not built (owner, 2026-11-09): an embedded Faust JIT (libfaust/LLVM) and a Pure Data/libpd runtime. Tracktion Engine and JUCE are engineering references only: C.A.W. studies them but copies no code (see the licence decision below).
-- **Owner decision — order (2026-11-09):** conditional rules come after the routing basics (sends, sidechains, parallel paths: roadmap 2.1–2.3), still in Stage 2. The first rule to build is a MIDI note on one track (kick) triggering a ducking envelope on another (bass).
-- **Owner decision — UI state as a trigger (2026-11-09):** a highlighted/selected track can only change what is heard while working (audition/monitor); it never changes an export.
-- **Owner decision — workspaces (2026-11-09):** on the phone the track/routing workspace is both a slide-up panel for the selected track over the arrangement and a full page for the whole project. The component workspace is an ordinary, always-visible workspace for everyone.
-- **Owner decision — component binary boundary (2026-11-09):** compiled components talk to the host through a small, versioned C interface, with the SDK's C++ classes on top, so components survive app, compiler and C++ library updates ([C++ creation platform](cpp-creation-platform.md) §2).
-- **Owner decision — safe sharing (2026-11-09):** once .caw is removed, visual-graph components made only of built-in nodes are the safe share format; anything containing C++ needs the user's trust choice.
-- **Owner decision — iOS (2026-11-09):** iOS ships without C++ authoring/compilation (play, arrange, build visually). The App Store rule behind this is an assumption to verify.
-- **Owner decision — nothing external required (2026-11-09):** the app needs no set-up step, PC, charger, network or other connection to work; optional ones may improve things but are never required. The C++ compiler ships inside the one app (no separate edition), with the SDK and C++ standard library; set-up optionally offers Faust libraries and starter instruments/effects ([C++ creation platform](cpp-creation-platform.md) §6).
-- **Owner decision — Android compiler process (2026-11-09):** on Android the bundled Clang/LLD run as a native library hosted in a dedicated `:compiler` process, so a compiler crash cannot take down the app or its audio.
-- **Owner decision — overrun protection (2026-11-09):** a component that repeatedly misses its audio time budget is bypassed with a warning and can be re-enabled.
-- **Owner direction — remote compiling (2026-11-09, future):** besides required on-device offline compiling, allow optional remote compiling through a free service (the user's own GitHub Actions first; research others) or the user's own computer, reachable on the same network or over the internet. Remote-built components go through the trust choice ([C++ creation platform](cpp-creation-platform.md) §6).
-- **Owner decision — Faust timing (2026-11-09):** Faust work starts only after on-device C++ building works; it then uses that same local build step. No CI-only Faust path.
-- **Licensing direction:** C.A.W. is intended to be free/open source, with optional support/donation bundles of prebuilt FX, instruments, presets, samples and sounds; core capabilities are not paywalled. No paid dependency or commercial licence is assumed. **Owner decision (2026-11-09):** C.A.W. is licensed under Apache-2.0, switched from all-rights-reserved on 2026-11-09 (chosen over MIT for its explicit patent grant and because it grants no use of the C.A.W. name). AutoStacc distributes the free app and the optional support bundles. Dependencies stay permissive: no GPL/AGPL code (so no Tracktion Engine or JUCE code). This keeps the iOS App Store, closed-source SDK components and later relicensing possible. Faust's compiler (LGPL) is a build tool, not shipped code, so generated components remain eligible subject to the audit. Verify exact versions and transitive/architecture-file licences before adoption.
-- **Plan ownership:** the canonical [roadmap](roadmap.md) owns sequence and status. Technical detail lives in [visual creation and signal routing](visual-routing-and-library-integration.md), [C++ creation platform](cpp-creation-platform.md) and [architecture](architecture.md). This decision is not an implementation claim.
-
 ## 2026-11-08: Native note, voice and channel processing; direct pitch-expression editing
 
 - **Owner decision — one native processing model:** per-note, per-voice and per-channel processing are first-class capabilities across the C++ SDK, component model, instruments, synthesis, effects, routing, automation, mixer and runtime. They are not separate feature islands and must not require users to duplicate signals or build manual workarounds.
@@ -1693,7 +1398,7 @@ Built (engine pass, 2026-11-10):
 - **Touch editing must be direct and smooth:** users can select the pitch curve/slide they intend to edit without accidentally selecting the underlying note; move, stretch and reshape it with continuous feedback; keep the underlying note visible; and use accessible handles and helpful snapping without abrupt jumps. Visual editing, note preview and playback use the same expression data.
 - **Simple by default, deep when requested:** compatible components connect and work with sensible defaults. Ordinary stereo, unison, effects, panning and pitch expression must not require obscure routing, duplicated signals or manual channel plumbing. Advanced channel maps and per-note/per-voice controls remain available without burdening basic workflows.
 - **Safety remains mandatory:** richer note/voice/channel processing stays within the resource budget and real-time callback rules; preparation and allocation happen off the audio thread.
-- Detailed SDK contracts and tests: [C++ creation platform](cpp-creation-platform.md). Piano-roll interaction and sequencing: [roadmap](roadmap.md#stage-1-pattern-workflow-and-editing-safety), with current UI design in [UI plan](ui-plan.md#piano-roll).
+- Detailed SDK contracts and tests: [C++ creation platform](cpp-creation-platform.md). Piano-roll interaction and sequencing: roadmap (private), with current UI design in UI plan (private).
 
 ## 2026-11-06: Offline-first C++ prototype and delivery requirements
 
@@ -1724,7 +1429,7 @@ Built (engine pass, 2026-11-10):
 - **Real-time and trust boundaries remain explicit.** C++ is unrestricted in general-purpose code, but audio-callback code must be bounded and avoid allocation, blocking, I/O, logging and UI calls. Native C++ is not sandboxed by the SDK; use explicit Isolated/Trusted/Blocked policy for native code.
 - **Plugin/standalone reuse:** components are C.A.W. components first; CLAP, VST3 and standalone support are host adapters around the same processor and metadata, planned after the SDK and authoring interfaces.
 - **No backwards compatibility for the old .caw language or pre-release projects (owner).** The current .caw parser/compiler/bytecode VM is transitional. Migrate useful existing capabilities to C++/Library components and verify their workflows first, then remove the old language/VM. The owner is the only user and explicitly waives old-source and pre-release-project compatibility.
-- Detailed technical requirements and migration gates: [C++ creation platform](cpp-creation-platform.md). Canonical sequencing remains in [roadmap](roadmap.md).
+- Detailed technical requirements and migration gates: [C++ creation platform](cpp-creation-platform.md). Canonical sequencing remains in roadmap (private).
 
 ## 2026-11-04: UI direction, the arrangement is home
 
@@ -1742,7 +1447,7 @@ Built (engine pass, 2026-11-10):
   - **Motion setting:** Full, Reduced or Off.
   - **Quick actions bar (owner, 2026-11-04):** off by default, because it isn't very useful yet; a Settings switch turns it on.
   - **Glass (owner, 2026-11-04):** a glassy look. Real frosted blur only on floating surfaces (toolbars, menus, sheets, drag previews, the transport), because blur is costly on a phone when many panels redraw. Docked panels get a cheap glass look with no blur: a translucent tint, a soft top highlight and a thin bright edge. A Glass switch in Settings, on by default; the Lightweight and Minimal profiles turn it off. Then (owner, same day): an ambient background instead of a flat two-tone look, glass track headers and clips, sheets that slide in as frosted glass, and sliders, bars and toggles with a light see-through fill and a solid outline. Later the same day (owner): glass must look good without blur, so a Frosted blur switch turns the blur off and keeps the glass look, and the Lightweight profile keeps glass without blur (only Minimal turns glass off). Thin outlines; slider knobs fake their transparency (opaque, mixed into the panel colour) so the track never shows through. The arrangement gets an adjustable gap between tracks and spacer rows that only separate tracks on screen.
-  - **Detail:** [UI plan](ui-plan.md#piano-roll).
+  - **Detail:** UI plan (private).
 - **Arrangement (owner, 2026-11-04):**
   - **Layout:** the same context-aware toolbar row as the roll, with Select, Draw, Split and Erase. Compact track headers that widen to show volume, pan and the chain.
   - **Nesting:** by dragging onto a track, or Group. Any track can be a parent and still play, which needs engine work.
@@ -1751,7 +1456,7 @@ Built (engine pass, 2026-11-10):
   - **Ruler:** playhead, loop region, markers, follow.
   - **Zoom and drag:** pinch both ways. Drag and drop adds instruments, effects (always to the track's chain), patterns and new tracks.
   - **Glow:** subtle and adjustable.
-  - **Detail:** [UI plan](ui-plan.md#arrangement-home).
+  - **Detail:** UI plan (private).
 - **Piano roll, hearing and drawing (owner, 2026-11-04):**
   - **Hearing (2026-11-05):** a note plays while it is placed, moved, held or bent, through its track's instrument and effects at the track's volume and pan (mute and solo apply), on top of playback too, at the note's velocity. A tapped-in note plays its own length; a held or dragged note sounds until the finger lifts. A pitch change ends the old note before the new one starts; a move in time only doesn't retrigger. A selection plays its opening chord (the notes that start first). While a bend is edited the note follows the pitch at the edited point of the curve. "Hear notes" in ⋮ turns previews off. Claude built the note on/off C API for it (#103).
   - **Drawing:** drawing stays as today, plus the confirmed quality-of-life tweaks.
@@ -1762,12 +1467,12 @@ Built (engine pass, 2026-11-10):
   - **Tabs and running:** tabs with autosave for project files. Code runs automatically after a pause, plus Run.
   - **Editor:** inline errors, hover docs, find and replace, go to definition, multi-cursor, folding, snippets and format.
   - **Side panels:** Controls, Problems, Scope and Library.
-  - **Detail:** [UI plan](ui-plan.md#code-workspace).
+  - **Detail:** UI plan (private).
 - **Startup and engine changes (owner, 2026-11-04):**
   - **Startup:** the app opens straight into the last project's arrangement. New, template and open move to the project menu, replacing the 2026-10-28 startup screen.
   - **Small engine changes:** Claude makes those the UI needs, such as the note on/off call.
   - **Large engine changes:** these wait for GPT: several instruments per track, parent tracks with sound, and Bezier curves.
-- **Why:** the owner wants one place to build a song that feels like a real DAW and good to use. The plan, today's findings and the open questions are in [UI plan](ui-plan.md).
+- **Why:** the owner wants one place to build a song that feels like a real DAW and good to use. The plan, today's findings and the open questions are in UI plan (private).
 - **Consequences:** several instruments per track and silent empty tracks change the engine and project model. The engine part goes to GPT as an issue, and the UI waits for it where it must.
 
 ## 2026-11-04: F7 resource budgets (owner, after the caps audit)
@@ -1844,14 +1549,6 @@ Built (engine pass, 2026-11-10):
 - **No backwards compatibility before Release 1 (owner).** The app hasn't shipped and the owner, its only user, has no projects to keep, so older project files need not keep opening. The project file format stays at version 2; real versioning starts at Release 1, once adding features no longer needs core rework. Roadmap F9 (migrations) moves to before Release 1 (R.7), and Foundation changes to the project model need no migration. Changes to the project file are still listed in each pull request.
 - **F4 precision: float graph edges, golden hashes re-recorded once (owner).** The live mixer sums tracks, folder buses and the master in 64-bit `double`, while graph audio edges are 32-bit float. Measured on 2026-11-03: rounding each track's output to float where it enters a bus or the master changes 10 of the 12 golden hashes (rounding of about 1e-7, inaudible). The owner chose to keep float edges and re-record those hashes once, in F4.2, where the old mixer is changed to round at exactly the points the graph will. F4.3 (the graph runs playback) reproduces the F4.2 hashes bit-for-bit. Later golden-hash changes follow the 2026-11-03 "reliability over old-engine compatibility" entry above.
 
-## 2026-11-03: Roadmap order, first release and per-item tables
-
-- **Goal restated (owner):** C.A.W. is not trying to be a conventional DAW and needn't work like one, but it must be able to do everything a good DAW can do, because there is no good DAW for mobile. This replaces the older "lightweight DAW in a pinch, no full feature parity" wording in `architecture.md`. The goal is stated in [vision](vision.md).
-- **Graph first.** The engine graph and N-channel core (issue #28) is the roadmap's new **Foundation** stage, before the remaining Stage 0 (SFZ, stems) and Stage 1 features, so they are built on the graph once rather than on the old mixer and then migrated. This replaces the same day's decision to pause graph integration until after Stage 1.
-- **First release after Stage 7.** Release 1 (signed builds, onboarding/help, docs, licensing, distribution) comes after recording works, on Android and Windows; Stages 8–10 ship as updates. It was previously the last stage.
-- **Gaps added to the roadmap:** app-wide undo/redo and crash recovery (Stage 1), project format versions and migration (Foundation, before the project model changes), audio output settings (Stage 5), and onboarding, help and a preset/template browser (Release 1).
-- **Layout:** each stage is a table of items with status, where (engine/app), dependencies and what's missing, so progress and gaps are visible per item.
-
 ## 2026-11-03: Engine shape, formats and trust decisions to avoid later rework
 
 - **One graph runs everything (eventual engine core).** Code (.caw) layers, synth voices, effects, folder buses, sends and master all become nodes of the one typed module graph. The current layer → effects → folder bus → master mixer is migrated into it, not kept as a parallel path. Timing: first, as the roadmap's Foundation stage (see the next entry).
@@ -1859,8 +1556,8 @@ Built (engine pass, 2026-11-10):
 - **Exports were to be bit-identical** on every platform; superseded on 2026-11-12: output, exports included, need only be perceptually identical (entry of that day).
 - **Low-end target includes budget phones:** Galaxy A1x-class, 3–4 GB RAM, Android 10+. Voice counts, buffer sizes and benchmark budgets are set for that class.
 - **Precision:** graph audio buffers are 32-bit float; 64-bit is used where accuracy needs it (phase/time accumulators, sensitive filter state). The .caw VM keeps its 64-bit JavaScript number semantics, which bytebeat compatibility requires.
-- **Latency is adjustable:** a low-latency mode for playing live when timing matters, and a lighter, more stable mode (larger buffers, less CPU) when it doesn't. This is the workload-policy model in [engine-next](engine-next.md) §9.
-- **Third-party native code: the user chooses per item.** Each external plugin (CLAP/VST3/AU) or third-party native module runs in one of three modes the user sets: **Isolated** (separate process), **Trusted** (in-process, no isolation, for code the user trusts) or **Blocked**. Shared .caw source stays sandboxed as before. The default mode for code not seen before is an open question in [vision](vision.md#open-owner-decisions).
+- **Latency is adjustable:** a low-latency mode for playing live when timing matters, and a lighter, more stable mode (larger buffers, less CPU) when it doesn't. This is the workload-policy model in engine-next (private) §9.
+- **Third-party native code: the user chooses per item.** Each external plugin (CLAP/VST3/AU) or third-party native module runs in one of three modes the user sets: **Isolated** (separate process), **Trusted** (in-process, no isolation, for code the user trusts) or **Blocked**. Shared .caw source stays sandboxed as before. The default mode for code not seen before is an open question in the private open-questions register.
 - **Projects are folders that work like a repository.** A project folder holds the project file and its local assets; assets can also be linked from the global library. "Package build" collects every dependency into the folder so it works on its own. The format must stay compatible with a future **AutoStacc cloud library** (the owner's synced personal asset library). That sync is optional; core work never needs the network.
 - **Audio clip timing is chosen per clip.** Clip positions are stored in musical time (beats). Each audio clip is either *musical* (follows tempo changes, time-stretched) or *fixed* (plays at original speed in seconds).
 - **Graph is N-channel by design, stereo in practice.** Ports and buses carry a channel-layout field and are not hard-coded to two channels; only mono and stereo are implemented until surround (roadmap Stage 10).
@@ -1903,7 +1600,7 @@ Built (engine pass, 2026-11-10):
 - Avoid arbitrary thread counts and unconditional parallelism. Use bounded worker pools, adaptive task granularity, serial fast paths and controls against oversubscription.
 - Preserve sample accuracy, deterministic semantics where required, audio deadlines and stable fallbacks. The audio callback must not block waiting for workers or accelerators.
 - Optimize measured end-to-end performance, including scheduling, synchronization, memory movement, power and worst-case deadline margin—not just throughput or thread utilization.
-- Full requirements: [Native engine refactor, Section 17](engine-next.md#17-adaptive-concurrency-batching-and-minimum-overhead-execution).
+- Full requirements: Native engine refactor, Section 17 (private).
 
 ## 2026-11-02: Universal creative capability and routing
 
@@ -1913,7 +1610,7 @@ Built (engine pass, 2026-11-10):
 - Avoid arbitrary fixed caps on project objects or graph complexity. Real constraints are available resources, platform/format requirements and explicit safety budgets. Surface unavoidable limits and never silently truncate.
 - Make resource budgets configurable within host safety policy; enforce real-time bounded work, isolation, diagnostics, graceful bypass/recovery and clear failure reporting.
 - Keep common workflows simple and fast while providing advanced extension interfaces for unusual processing, routing and execution models.
-- Full requirements: [Native engine refactor, Section 16](engine-next.md#16-universal-creative-capability-safe-extensibility-and-unrestricted-composition).
+- Full requirements: Native engine refactor, Section 16 (private).
 
 ## 2026-11-02: Safe extensibility for unconventional engine behavior
 
@@ -1922,7 +1619,7 @@ Built (engine pass, 2026-11-10):
 - Extensions declare capabilities, channel/event types, latency, resource needs, state and real-time requirements; validate and prepare them before activation.
 - Protect the audio thread with bounded work, preallocated resources, defined failure/bypass/recovery behavior and clear isolation boundaries. In-process native extensions are trusted, not sandboxed; sandboxed VM modules remain constrained.
 - Version extension APIs and state, preserve project compatibility through migration/capability negotiation, and isolate experimental interfaces from stable core contracts.
-- Full requirements and verification are in [Native engine refactor](engine-next.md#16-safe-extensibility-and-deliberate-departures-from-standard-engine-behavior).
+- Full requirements and verification are in Native engine refactor (private).
 
 ## 2026-11-02: Unified parameter, modulation and mathematical processing model
 
@@ -1932,7 +1629,7 @@ Built (engine pass, 2026-11-10):
 - Define explicit, deterministic source-combination, precedence, scaling, clamping and smoothing rules. Evaluate sample-accurately only where required; use block/control-rate processing where it preserves behavior and saves work.
 - Mathematical expressions are first-class generators, waveform sources, modulation/control sources and audio effects, with bounded sandboxed execution and the existing .caw VM retained.
 - Keep the cheapest correct path: constants stay constant, shared modulation is computed once where possible, and tables/precomputation are used only when worthwhile with a correct fallback.
-- Detailed requirements and tests are in [Native engine refactor](engine-next.md#15-unified-parameters-modulation-automation-and-mathematical-modules).
+- Detailed requirements and tests are in Native engine refactor (private).
 
 ## 2026-11-01: Native engine refactor and efficiency-first architecture
 
@@ -1944,16 +1641,7 @@ Built (engine pass, 2026-11-10):
 - Evaluate existing permissively licensed/commercially usable libraries and proven algorithms before writing replacements. No GPL/AGPL, revenue-capped or commercial-only dependency without an explicit owner exception. Review exact versions and transitive licences and record every adopted dependency.
 - Keep stereo as the efficient default while making the architecture capable of explicit mono and future multichannel processing.
 - Preserve existing projects, modules, sound semantics, deterministic behavior, real-time callback invariants and live/offline render parity.
-- The detailed technical plan is [Native engine refactor](engine-next.md). The canonical sequencing is [Roadmap](roadmap.md).
-
-## 2026-11-02: Permanent roadmap and full production direction
-
-- The C.A.W. roadmap is the permanent, canonical plan. It owns feature scope, sequencing, long-term capabilities, performance gates and explicit exclusions.
-- Do not maintain competing master plans or separate feature-sequencing documents. Supporting notes may record factual implementation gaps or detailed technical designs, but the roadmap controls ordering.
-- The long-term product direction includes the DAW capabilities discussed: non-destructive audio editing, sample authoring, complete mixer/routing, live MIDI and control surfaces, tempo maps, audio/MIDI recording, monitoring, latency compensation, punch/loop recording, takes/comping, plugin hosting, platform support, practical mastering tools, optional collaboration and surround/immersive audio.
-- These capabilities are planned in dependency order, not claimed as implemented or all scheduled for immediate work.
-- Video synchronization is not a current priority and is excluded from the roadmap unless the owner changes this decision.
-- No in-app AI integration remains the current direction.
+- The detailed technical plan is Native engine refactor (private). The canonical sequencing is Roadmap (private).
 
 ## 2026-11-01: No in-app AI integration in current scope
 

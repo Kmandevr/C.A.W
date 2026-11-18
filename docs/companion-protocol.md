@@ -1,19 +1,18 @@
 ---
 title: Companion protocol
 covers: [app/packages/caw_services/lib/companion/, app/lib/platform/companion_link.dart, app/lib/model/companion/, app/android/app/src/main/kotlin/com/kmandevr/caw/CompanionClient.kt, app/android/app/src/main/kotlin/com/kmandevr/caw/CompanionCallerCheck.kt]
-summary: How C.A.W talks to its companion app on Android (1.0.7, #239): a bound Messenger service, the ten message kinds and their bodies, version 1, size limits, timeouts, the caller check both ways and the fallback when the companion is absent; a proposal, the companion itself not built.
+summary: How C.A.W talks to its companion app on Android (#239): a bound Messenger service, the ten message kinds and their bodies, version 1, size limits, timeouts, the caller check both ways and the fallback when the companion is absent; a proposal, the companion itself not built.
 updated: 2026-11-18
 ---
 
 # Companion protocol
 
-**[Proposal]** (architect design, 2026-11-18, for release 1.0.7, #239). Why there is a companion at all is in the [plug-in hosting plan](plugin-hosting-plan.md#least-privilege-and-the-companion-app). The companion app (the AutoStacc Hub, in the private `Kmandevr/AutoStacc-Hub`, [decisions](decisions.md)) is not built. Its native screens, the known-bad list's source and signing key, and the Play listings wait for the owner (that plan's open questions). The main app's side is groundwork: with no companion installed, everything takes today's in-app path.
+**[Proposal]** (architect design, 2026-11-18, #239). The companion holds the powers the main app gives up (least privilege); its plan is kept privately. The companion app (the AutoStacc Hub, in the private `Kmandevr/AutoStacc-Hub`) is not built. The main app's side is groundwork: with no companion installed, everything takes today's in-app path.
 
 ## Transport
 - **A bound `Service` with a `Messenger`,** like the main app's `:compiler` service. The main app binds with an explicit component, sends one `Message` per request with `replyTo` set, and gets one `Message` back.
 - **Names [Assumption]**, until the owner settles them: the package `com.kmandevr.caw.companion` and the service `com.kmandevr.caw.companion.CompanionService`. They are kept in one place on each side.
 - **No custom permission in the main app** (security review, 2026-11-18). The design's signature permission `com.kmandevr.caw.permission.COMPANION` is not declared or asked for by C.A.W. A permission name belongs to whichever package declared it first, so a hostile app installed before C.A.W that declared it would make C.A.W's own install or update fail (see [Platform facts](#platform-facts)). The boundary is the per-message uid and signer check below, which needs no permission.
-- **Open, for when the companion is built:** whether the companion declares the permission and requires it on its service (`android:permission`). For: the system then refuses a bind from any app not signed with C.A.W's key before a message arrives. Against: the same squat, aimed at the companion, would block the companion's install, and a permission adds nothing the signer check doesn't already enforce. Until then the check is the boundary.
 - **`<queries>`:** the main app names the companion package so it can see and bind it. The companion needs none to answer, because an app that binds a service is visible to that service's app.
 - **No `sharedUserId`,** which would merge the two apps' permissions again.
 
@@ -83,6 +82,3 @@ Built 2026-11-18 as groundwork; nothing reaches a companion until one is install
 - **Dart, the adapters** (`app/lib/model/companion/`): `CompanionUpdateSource` (an `UpdateSource`), `CompanionUpdateInstaller` (an `UpdateInstaller`), `CompanionRelay` (at the `RelayClient` level, not `RelayHttp`, which takes any URL), and `TrustSource` with `LocalTrustSource` and `CompanionTrustSource`. Main wires the first three; **the trust source is not yet consulted by the native component loader**, which keeps reading `NativeTrustStore` until the known-bad list has a source.
 - **Kotlin** (`app/android/app/src/main/kotlin/com/kmandevr/caw/`): `CompanionClient.kt` checks the companion's package, permission and signer before it binds, binds with the 3 s timeout, sends each request with its own timeout, re-checks the companion when bound and before each send, checks each reply's sender before reading its Bundle, then its `what` and body size, drops a reply whose Bundle can't be read, and unbinds 30 s after the last answer; a companion process that dies mid-request times that request out. `CompanionCallerCheck.kt` holds the check as pure Kotlin behind a small `PackageFacts` interface, so the companion reuses it. **No JVM unit tests yet:** the Android build has no test source set or test dependency, and CI builds the APK without running Gradle tests; the logic is kept pure so a test can be added with the companion. The manifest only names the companion in `<queries>`. In the `play` flavour, `caw/updates` answers `notImplemented` (`BuildConfig.SELF_UPDATES` false), so no PackageInstaller code is reachable.
 - **The signer check (today):** it accepts only a companion signed with the installed C.A.W's own key.
-- **[Proposal]** (owner, 2026-11-18: the Hub has its own key, [decisions](decisions.md)): the check changes to the Hub certificate's pinned SHA-256 digest once the first signed Hub build gives it, and the Hub pins C.A.W's in return. Until then no companion is accepted.
-- **[Proposal], for when the companion exists:** in companion mode `UpdateService` still downloads the update before `install` hands over to `update.open`; it should skip its own download then. Tests `app/test/companion_test.dart`.
-
