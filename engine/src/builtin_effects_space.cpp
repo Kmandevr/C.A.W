@@ -9,6 +9,7 @@
 #include "caw/library/dynamics.hpp"
 #include "caw/library/filter.hpp"
 #include "caw/library/reverb.hpp"
+#include "fx_merged.h"
 #include "stereo_pair.h"
 
 // Original code (C.A.W. is Apache-2.0). The reverb is the Library's 8-line feedback delay network
@@ -72,7 +73,7 @@ const ModuleDescriptor& reverbDescriptor() {
     return d;
 }
 
-class ReverbPro final : public EffectBase {
+class ReverbPro : public EffectBase {
 public:
     const ModuleDescriptor& descriptor() const noexcept override { return reverbDescriptor(); }
 
@@ -213,7 +214,7 @@ const ModuleDescriptor& delayDescriptor() {
 // feedback knob means what it says up to 1, and loud loops stay bounded), modulated by a slow sine (the right a
 // quarter cycle on), ducked by the input, frozen on request (the loop repeats exactly: no input, feedback 1, no
 // filter or saturation). A new time glides there over ~50 ms (a tape-like bend, no click).
-class DelayPro final : public EffectBase {
+class DelayPro : public EffectBase {
 public:
     const ModuleDescriptor& descriptor() const noexcept override { return delayDescriptor(); }
 
@@ -403,6 +404,17 @@ ModuleProcessor* make() noexcept {
 }
 
 }  // namespace
+
+// The reverb and delay as variants of Reverb and Delay (builtin_fx_merged_space.cpp): their own (legacy)
+// descriptors, and an instance of the same class under a variant's descriptor (fx_merged.h, AsVariant).
+const ModuleDescriptor& reverbProDescriptor() { return reverbDescriptor(); }
+ModuleProcessor* makeReverbProAs(const ModuleDescriptor& variant) noexcept {
+    return new (std::nothrow) AsVariant<ReverbPro>(variant);
+}
+const ModuleDescriptor& delayProDescriptor() { return delayDescriptor(); }
+ModuleProcessor* makeDelayProAs(const ModuleDescriptor& variant) noexcept {
+    return new (std::nothrow) AsVariant<DelayPro>(variant);
+}
 
 void registerSpace(ModuleRegistry& registry) {
     registry.add(reverbDescriptor(), &make<ReverbPro>);

@@ -576,8 +576,8 @@ TEST(stress_profiles_are_per_engine) {
     };
     const auto ma = ids(a), mb = ids(b);
     CHECK(ma.count("host") && mb.count("host"));
-    CHECK(ma.count("org.caw.reverb.pro") == 1);   // the song's
-    CHECK(mb.count("org.caw.reverb.pro") == 0);   // the kit has none: nothing of the song's leaked into its rows
+    CHECK(ma.count("org.caw.reverb") == 1);       // the song's (its reverb.pro, migrated to Reverb)
+    CHECK(mb.count("org.caw.reverb") == 0);       // the kit has none: nothing of the song's leaked into its rows
     CHECK(mb.count("org.caw.drums") == 1);
     CHECK(ma.count("org.caw.mod.lfo") == 1);      // the song's LFOs: modulators get the profile too
 }

@@ -189,6 +189,12 @@ void effectsCost(double seconds) {
         {"reverb (default: modulated)", "org.caw.reverb.pro", {}},
         {"reverb, no modulation", "org.caw.reverb.pro", {{"mod", 0}}},
         {"reverb, ducking", "org.caw.reverb.pro", {{"duck", 0.5}}},
+        // FX consolidation part E: Delay and Reverb's variants against the old ids they replace.
+        {"Reverb: Hall (default)", "org.caw.reverb", {}},
+        {"shimmer (old id)", "org.caw.shimmer", {}},
+        {"Reverb: Shimmer", "org.caw.reverb", {{"variant", 1}}},
+        {"Delay: Digital (default)", "org.caw.delay", {}},
+        {"Delay: Ping-pong (old id: ping-pong delay)", "org.caw.delay", {{"variant", 1}}},
         {"delay (default)", "org.caw.delay.pro", {}},
         {"delay, ping-pong, ducking", "org.caw.delay.pro", {{"mode", 1}, {"duck", 0.5}}},
         {"saturator (default: tape, 2x)", "org.caw.saturator", {}},
