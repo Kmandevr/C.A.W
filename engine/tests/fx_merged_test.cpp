@@ -199,6 +199,40 @@ TEST(merged_pitch_shift_lists_its_variants_with_a_structural_variant_parameter) 
     for (const fx::MergedDevice* d : fx::mergedDevices()) CHECK(!d->variants.empty());
 }
 
+TEST(a_merged_device_reusing_an_old_id_replaces_its_registration_in_place) {
+    // registerMergedDevices runs after the old effects: replaceBuiltin swaps the old registration for the merged
+    // device's first variant, keeping its place in the list; a loaded or internal one is never replaced.
+    ModuleRegistry r;
+    const ModuleDescriptor* oldShift = registry().find("org.caw.pitchshift");
+    const ModuleDescriptor* freq = registry().find("org.caw.freqshift");
+    CHECK(oldShift && freq);
+    if (!oldShift || !freq) return;
+    const ModuleFactory none = []() noexcept -> ModuleProcessor* { return nullptr; };
+    CHECK(r.add(*oldShift, none));
+    CHECK(r.add(*freq, none));
+    const fx::MergedDevice* m = fx::findMergedDevice(kShift);
+    CHECK(m != nullptr);
+    if (!m) return;
+    // A stand-in for a reused id: the merged descriptor under the old id's name is what replaceBuiltin keys on.
+    ModuleDescriptor reused = m->variants[0].descriptor();
+    reused.id = "org.caw.pitchshift";
+    CHECK(r.replaceBuiltin(reused, m->variants[0].create));
+    CHECK(r.find("org.caw.pitchshift") == &reused);
+    CHECK_EQ(r.builtinComponents().size(), 2u);
+    CHECK(r.builtinComponents()[0] == &reused);  // its place kept
+    CHECK(r.replaceBuiltin(m->variants[0].descriptor(), m->variants[0].create));  // a new id: added
+    CHECK_EQ(r.builtinComponents().size(), 3u);
+    // The engine's own registry lists every merged id with its first variant's descriptor, `variant` among them.
+    for (const fx::MergedDevice* d : fx::mergedDevices()) {
+        const ModuleDescriptor* listed = registry().find(d->id);
+        CHECK(listed == &d->variants[0].descriptor());
+        CHECK(listed && listed->parameterCount > 0 && listed->parameters[listed->parameterCount - 1].id == fx::kVariantParam);
+    }
+    // A merged id's presets are its own (a reused id's, variant 0) and its old effects'; any other id's are its own.
+    CHECK(&builtinPresets("org.caw.eq") == &ownBuiltinPresets("org.caw.eq"));
+    CHECK(ownBuiltinPresets(kShift).empty() && builtinPresets(kShift).size() >= 10u);
+}
+
 TEST(merged_pitch_shift_renders_the_old_ids_bits_over_their_presets_and_random_values) {
     const Stereo in = music(24000);
     uint32_t seed = 2026;

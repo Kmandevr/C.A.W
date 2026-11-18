@@ -74,6 +74,9 @@ public:
     // An engine-internal built-in (the test signal, org.caw.test.osc): found and created by id like any other,
     // but left out of builtinComponents(), so hosts never list it in a browser or the Library.
     bool addInternal(const ModuleDescriptor& descriptor, ModuleFactory factory);
+    // A merged device (fx_merged.h) that reuses an old built-in's id: replaces that static registration in place
+    // (its place in builtinComponents() kept), else adds it. Never replaces a loaded library's component.
+    bool replaceBuiltin(const ModuleDescriptor& descriptor, ModuleFactory factory);
 
     // Trust is mandatory. Blocked never opens the library; Isolated is rejected until a real process sandbox exists.
     // The library must export caw_get_component_v3 (caw_component.h); its descriptor is copied into

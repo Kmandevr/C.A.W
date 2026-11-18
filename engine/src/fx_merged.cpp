@@ -29,7 +29,7 @@ const MergedDevice* findMergedDevice(std::string_view id) noexcept {
 
 void registerMergedDevices(ModuleRegistry& registry) {
     for (const MergedDevice* d : mergedDevices())
-        if (!d->variants.empty()) registry.add(d->variants[0].descriptor(), d->variants[0].create);
+        if (!d->variants.empty()) registry.replaceBuiltin(d->variants[0].descriptor(), d->variants[0].create);
 }
 
 uint32_t variantIndex(const MergedDevice& device, const std::vector<std::pair<std::string, double>>& params) noexcept {

@@ -49,7 +49,8 @@ std::span<const MergedDevice> mergedSpaceDevices();     // builtin_fx_merged_spa
 const std::vector<const MergedDevice*>& mergedDevices();
 const MergedDevice* findMergedDevice(std::string_view id) noexcept;
 
-// Registers every merged id (with its first variant's descriptor and class). registerBuiltinEffects calls it.
+// Registers every merged id (with its first variant's descriptor and class), replacing the old effect's
+// registration where a merged device reuses its id (org.caw.utility...). registerBuiltinEffects calls it.
 void registerMergedDevices(ModuleRegistry& registry);
 
 // The variant `params` choose for `device` (its `variant` value rounded and held to the list; 0 when absent).
