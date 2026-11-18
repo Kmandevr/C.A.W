@@ -303,7 +303,8 @@ TEST(a_feedback_loop_renders_finite_and_its_limiter_bounds_it) {
     const auto off = render(loop(false), 48000, 256);
     float peakOff = 0;
     for (float v : off) peakOff = std::max(peakOff, std::isfinite(v) ? std::fabs(v) : 1e30f);
-    CHECK(peakOff > 10.0f);  // without its limiter a +6 dB loop runs away (saturating, never inf or NaN on a route)
+    CHECK(peakOff > 10.0f);  // without its limiter a +6 dB loop runs away...
+    CHECK(peakOff < 16.0f + 0.5f);  // ...but its return stops at +/-16 (plus the input), never near FLT_MAX
 }
 
 TEST(a_feedback_mix_renders_the_same_bits_at_any_buffer_size) {
@@ -503,4 +504,55 @@ TEST(general_routing_on_the_mix_pool_is_bit_identical_to_one_thread) {
         CHECK(sameBits(serial, renderMix(p, 1 + static_cast<int>(seed % 4), 260)));
     }
     CHECK(played >= 8);
+}
+
+TEST(a_stopped_preview_never_brings_back_a_feedback_loop_from_before_the_stop) {
+    // Bus x feeds itself back; a plays into it. After Stop, a preview on b (outside the loop) runs the mix again: x
+    // stays silent, because its loop stopped with the song.
+    LayerSpec x = bus("x");
+    x.sends = {sendTo("x", 0.95, false, true)};
+    // a plays notes (a free-running test signal would go on sounding while stopped, as a monitored input does).
+    LayerSpec a = cawtest::testSignalNotesLayer("a", Shape::Saw, "n", {{"level", 0.5}});
+    a.parentId = "x";
+    LayerSpec b = cawtest::testSignalNotesLayer("b", Shape::Sine, "", {{"level", 0.3}});
+    ProjectSpec p = project({x, a, b});
+    p.modules.push_back({"n", "---\nkind: pattern\n---\n0 A2 4 1\n8 C3 4 1\n"});
+    Engine e(48000);
+    e.setMasterBypass(true);
+    CHECK(ok(e.setProject(p)));
+    e.play();
+    run(e, 48000);
+    LayerMeter m;
+    CHECK(e.layerMeter(0, m));
+    CHECK(m.peak > 0.1f);  // the loop sounds while playing
+    e.stop();
+    run(e, 24000);  // the stop's fade, and quiet
+    CHECK(e.layerMeter(0, m));  // (reading takes the peak)
+    e.noteOn("b", 1, 69, 1.0);
+    const auto out = run(e, 4800);
+    float peak = 0;
+    for (float v : out) peak = std::max(peak, std::fabs(v));
+    CHECK(peak > 0.05f);  // b sounds
+    CHECK(e.layerMeter(0, m));
+    CHECK_EQ(m.peak, 0.0f);  // and x, the loop, doesn't
+}
+
+TEST(a_send_turned_into_a_feedback_send_fades_in_instead_of_jumping) {
+    // a (0.5) sends into bus x at unity; the send becomes a feedback send while it plays. Its old signal stops, and
+    // the new one starts a chunk later from silence, gliding up (no step back to full gain).
+    LayerSpec a = track("a", 0.5);
+    a.sends = {sendTo("x", 1.0, false, false, false)};  // no limiter: its DC block would take the DC away
+    ProjectSpec p = project({a, bus("x")});
+    Engine e(48000);
+    e.setMasterBypass(true);
+    CHECK(ok(e.setProject(p)));
+    e.play();
+    run(e, 9600);
+    p.layers[0].sends[0].feedback = true;
+    CHECK(ok(e.setProject(p)));
+    const auto out = run(e, 4800);
+    float step = 0;
+    for (size_t i = 16; i < out.size(); ++i) step = std::max(step, std::fabs(out[i] - out[i - 1]));
+    CHECK(step < 0.01f);
+    CHECK_NEAR(out[4700], 2 * 0.5 * kCentre, 1e-4);  // back at full gain
 }
