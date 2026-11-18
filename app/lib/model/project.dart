@@ -951,7 +951,7 @@ class ProjectDoc {
 
   AudioAssetDoc? asset(String? id) => id == null ? null : assets.where((a) => a.id == id).firstOrNull;
 
-  /// Controller learn: hardware CCs mapped to knobs (Settings › MIDI lists them).
+  /// Controller learn: hardware CCs mapped to knobs (Settings › Sound › MIDI and controllers lists them).
   List<MidiCcMapping> midiMappings = [];
 
   /// The music video's saved setup, shots, layouts, effects and looks (`music_video_edit.dart` reads it, versioned;

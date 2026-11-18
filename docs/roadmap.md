@@ -244,7 +244,7 @@ Built on the graph from the Foundation stage. Do not keep a second mixer or crea
 | # | Item | Status | Where | Depends on | What's missing |
 |---|---|---|---|---|---|
 | 5.1 | USB and Bluetooth MIDI device discovery, connection, status and reconnect | Built, untested on hardware | both | F5 | Android USB, Bluetooth LE (in-app scan) and UMP devices, Windows WinMM ports; a device list with activity lights and on/off; frame-accurate engine input (API 15). Windows MIDI Services not used ([app](app.md)) |
-| 5.2 | Note/CC routing, controller learn and editable mappings | Built, untested on hardware | both | 5.1, F6 | Learn MIDI CC on any knob's long-press sheet; mappings in the project, listed and removable in Settings › MIDI; MPE and bend range ([app](app.md)) |
+| 5.2 | Note/CC routing, controller learn and editable mappings | Built, untested on hardware | both | 5.1, F6 | Learn MIDI CC on any knob's long-press sheet; mappings in the project, listed and removable in Settings › Sound › MIDI and controllers; MPE and bend range ([app](app.md)) |
 | 5.3 | MIDI clock in/out and sync | Planned | engine | 5.1 | Not built |
 | 5.4 | Control surfaces with assignable controls and feedback | Planned | both | 5.2 | Not built |
 | 5.5 | On-screen performance keys, metronome and count-in | Built | both | — | Slide-up keys and 4×4 pads, the engine's click and a count-in ([app](app.md), Frame: Record; 2026-11-10) |
@@ -273,9 +273,9 @@ Recording is part of the product direction and the last stage before Release 1. 
 | # | Item | Status | Where | Depends on | What's missing |
 |---|---|---|---|---|---|
 | 7.1 | MIDI recording from devices and on-screen controls | Partial | both | 5.1, 5.5 | Record writes a take from a MIDI device (placed at its timestamps) or the on-screen keys and pads, with loop passes as takes and a Keep take? toast ([app](app.md)); no record modes (overdub, replace) |
-| 7.2 | Audio input selection, channel configuration and input monitoring | Built, untested on hardware | both | 5.6 | Settings › Audio's input device and channels, the RECORD_AUDIO request when input is turned on or a track armed, each track's channel, mono or stereo and monitoring ([app](app.md), Audio); untested on the S22+ |
+| 7.2 | Audio input selection, channel configuration and input monitoring | Built, untested on hardware | both | 5.6 | Settings › Sound's input device and channels, the RECORD_AUDIO request when input is turned on or a track armed, each track's channel, mono or stereo and monitoring ([app](app.md), Audio); untested on the S22+ |
 | 7.3 | Multitrack audio recording to arrangement tracks | Built, untested on hardware | both | 3.2, 7.2 | Record records every armed audio track; takes become clips where they were played ([app](app.md), Audio) |
-| 7.4 | Input latency measurement and compensation | Partial | both | 7.2 | Takes are placed by the round-trip latency; Settings › Audio measures it with the ping (after a warning) or takes a typed offset. Not yet measured on a phone |
+| 7.4 | Input latency measurement and compensation | Partial | both | 7.2 | Takes are placed by the round-trip latency; Settings › Sound measures it with the ping (after a warning) or takes a typed offset. Not yet measured on a phone |
 | 7.5 | Punch in/out and loop recording; take lanes and comping | Partial | both | 7.3 | Punch over the loop range or the time selection; a loop recording makes a take per pass (MIDI and audio), comped in take lanes under the track with crossfaded joins and flattened in one step (1.0.5, #209, [app](app.md)) |
 | 7.6 | Count-in, metronome options and monitoring controls | Partial | app | 5.5 | Metronome off, while recording or always, and a 0–2 bar count-in on Record's long-press; no click sound choice or monitoring controls |
 | 7.7 | Recording recovery after interruption, device loss or low storage | Partial | both | 1.7, 7.3 | Takes a crash left are offered back when the project opens; a failed write ends the take keeping what was written, a full ring is filled with silence and reported. Device-loss handling in the app is not built |

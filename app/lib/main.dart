@@ -82,7 +82,7 @@ Future<void> main(List<String> args) async {
     ..follow(midi, () => midi.recording)
     ..load();
 
-  // The update check (Settings › About › Updates): its choices load before the first frame, so the startup screen
+  // The update check (Settings › App › Updates): its choices load before the first frame, so the startup screen
   // can say "Update available"; the check itself runs after the app is shown (UpdatePromptHost).
   final fetcher = UpdateFetcher();
   final updates = UpdateService(

@@ -141,7 +141,7 @@ class AppState extends ChangeNotifier implements StressHost {
   /// The app's clock in microseconds (monotonic; tests pass their own).
   int get nowUs => _clockUs();
 
-  /// The output and input latency in force: the platform's figure plus each device's offset (Settings › Audio ›
+  /// The output and input latency in force: the platform's figure plus each device's offset (Settings › Sound ›
   /// Latency).
   late final LatencyComp latency;
 
@@ -517,7 +517,7 @@ class AppState extends ChangeNotifier implements StressHost {
     return null;
   }
 
-  /// Settings › Audio's test tone: opens the device if it is closed and plays 440 Hz for [seconds]; returns an error
+  /// Settings › Sound's test tone: opens the device if it is closed and plays 440 Hz for [seconds]; returns an error
   /// message when the device can't open.
   String? playTestTone({double seconds = 1.5}) {
     final e = engine;
@@ -669,7 +669,7 @@ class AppState extends ChangeNotifier implements StressHost {
   }
 
   /// An empty project: no modules and no layers.
-  /// Settings › Projects and files sets its tempo and time signature.
+  /// Settings › Projects and export sets its tempo and time signature.
   ProjectDoc blankProject() => ProjectDoc(id: newId('p'), name: 'New project')
     ..bpm = settings.newProjectBpm
     ..beatsPerBar = settings.newProjectBeatsPerBar;
@@ -2481,7 +2481,7 @@ class AppState extends ChangeNotifier implements StressHost {
     if (status.loaded.isNotEmpty) await _syncNow();
   }
 
-  /// New project: the template Settings › Projects and files names, else blank (with its tempo and meter).
+  /// New project: the template Settings › Projects and export names, else blank (with its tempo and meter).
   Future<void> newProject() => _switchTo(newProjectDoc());
 
   /// New project from template [t] (the project menu's New from template).

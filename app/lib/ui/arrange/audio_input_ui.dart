@@ -156,7 +156,7 @@ class AudioInputPanel extends StatelessWidget {
           AudioArmButton(state: state, layer: layer, size: 30),
         ]),
         if (rec != null && !rec.inputOpen)
-          const Padding(padding: EdgeInsets.only(top: 4), child: Text('Input is off: arming turns it on (Settings › Audio '
+          const Padding(padding: EdgeInsets.only(top: 4), child: Text('Input is off: arming turns it on (Settings › Sound '
               'picks the device).', style: TextStyle(color: Neon.dim, fontSize: 11))),
         if (rec != null)
           ValueListenableBuilder<bool>(valueListenable: rec.micBusy, builder: (context, busy, _) => AnimatedSize(

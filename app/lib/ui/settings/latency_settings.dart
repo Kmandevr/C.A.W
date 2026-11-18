@@ -1,4 +1,4 @@
-// Settings › Audio › Latency: how late the output (Bluetooth, USB, HDMI) and the input are, each device's offset
+// Settings › Sound › Latency and Bluetooth: how late the output (Bluetooth, USB, HDMI) and the input are, each device's offset
 // (preset by its kind, typed in, slid while listening, tapped along to the click, or found by the loopback ping
 // series), the switch that compensates them, and the badge the transport row shows while the output adds 50 ms.
 import 'dart:async';
@@ -59,7 +59,7 @@ Widget _action(String id, String title, {String? subtitle, IconData? icon, VoidC
       },
     ));
 
-/// The row in Settings › Audio that opens the Latency page.
+/// The row in Settings › Sound that opens the Latency page.
 class LatencySettingsRow extends StatelessWidget {
   const LatencySettingsRow({super.key, required this.state});
   final AppState? state;
@@ -200,7 +200,7 @@ class _LatencyPageState extends State<LatencyPage> {
       if (!output)
         _action('audio.latencyLoopback', 'Loopback measurement', icon: Icons.av_timer,
             subtitle: hasInput ? 'A noise ping from the output into the input splits the round trip'
-                : 'Turn audio input on (below in Audio) to measure',
+                : 'Turn audio input on (Settings › Sound › Audio devices) to measure',
             trailing: FilledButton.tonal(key: const ValueKey('latency-loopback'),
                 onPressed: hasInput && !_pinging ? _ping : null,
                 child: AnimatedSwitcher(

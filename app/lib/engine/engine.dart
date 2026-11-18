@@ -306,7 +306,7 @@ enum AudioConfigured { ok, fallback, closed }
 class Engine implements TempoEngine {
   Engine._(this._b, this._handle, this.sampleRate);
 
-  /// The rate the engine runs at unless Settings › Audio chose another (it is fixed when the engine is made).
+  /// The rate the engine runs at unless Settings › Sound chose another (it is fixed when the engine is made).
   static const int defaultSampleRate = 48000;
   static const sampleRates = [44100, 48000, 88200, 96000];
   final int sampleRate;

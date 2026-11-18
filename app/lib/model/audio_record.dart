@@ -239,7 +239,7 @@ class AudioRecorder extends ChangeNotifier {
     if (!_disposed) notifyListeners();
   }
 
-  /// Turns audio input off (Settings › Audio): the microphone closes and arming asks again.
+  /// Turns audio input off (Settings › Sound): the microphone closes and arming asks again.
   Future<void> closeInput() async {
     await _release();
     await io.configureInput(enabled: false);
@@ -306,7 +306,7 @@ class AudioRecorder extends ChangeNotifier {
     }
   }
 
-  /// A new input choice (Settings › Audio): saved, and the input reopens on it when it is on.
+  /// A new input choice (Settings › Sound): saved, and the input reopens on it when it is on.
   Future<void> chooseInput({String? deviceId, String? deviceName, int? channels}) async {
     if (deviceId != null) prefs.deviceId = deviceId;
     if (deviceName != null) prefs.deviceName = deviceName;
@@ -558,7 +558,7 @@ class AudioRecorder extends ChangeNotifier {
 
   // ---------- latency ----------
 
-  /// The round trip takes are placed by. "compensated": the output's latency (Bluetooth included, Settings › Audio ›
+  /// The round trip takes are placed by. "compensated": the output's latency (Bluetooth included, Settings › Sound ›
   /// Latency) plus the input's, sent because it says more than the engine's own estimate.
   LatencyInfo get latency {
     final l = io.inputLatency();
@@ -570,7 +570,7 @@ class AudioRecorder extends ChangeNotifier {
   int _compensated = -1;
 
   /// Sends the round trip recordings are placed by: a typed one stands; a ping made through the output in use
-  /// stands (it heard the whole trip); else the output latency plus the input latency (Settings › Audio › Latency),
+  /// stands (it heard the whole trip); else the output latency plus the input latency (Settings › Sound › Latency and Bluetooth),
   /// when that is more than the engine's estimate of its buffers (a Bluetooth output or microphone).
   void _applyLatency() {
     if (prefs.latencyOverride >= 0) return;
@@ -610,7 +610,7 @@ class AudioRecorder extends ChangeNotifier {
   /// Measures the round trip: plays the ping [runs] times (about a second each) and judges them together
   /// ([judgePings]: enough of them heard, all within the tolerance of their median). A reliable series becomes the
   /// latency in use unless one is typed in, and what the output's latency does not explain of it is the input's
-  /// (Settings › Audio › Latency); an unreliable one is reported and not saved. Null when it couldn't start.
+  /// (Settings › Sound › Latency and Bluetooth); an unreliable one is reported and not saved. Null when it couldn't start.
   Future<PingSeries?> ping({Duration poll = const Duration(milliseconds: 150), int tries = 20, int runs = pingRuns,
       void Function(int done, int runs)? progress}) async {
     _pinging = true;

@@ -116,7 +116,7 @@ class _ShellState extends State<Shell> {
 
   AppState get s => widget.state;
 
-  // Settings › Layout, followed while running.
+  // Settings › Appearance and feel › Layout and sizes, followed while running.
   late LayoutMode _layoutMode = s.settings.layoutMode;
 
   void _onSettings() {
@@ -258,7 +258,7 @@ class _ShellState extends State<Shell> {
     if (_dock.form == FormFactor.desktop) _dock.reveal(panelOfSection(now));
   }
 
-  /// A change of frame while running (Settings › Layout, a rotation, a window or display change): the section in
+  /// A change of frame while running (Settings › Appearance and feel › Layout and sizes, a rotation, a window or display change): the section in
   /// front stays in front. Desktop shows its docked panel; a phone shows the section of the panel last used.
   void _switchForm(FormFactor form) {
     final was = _dock.form;
@@ -693,7 +693,7 @@ class _TransportBar extends StatelessWidget {
               border: Border(bottom: BorderSide(color: Neon.ink.withValues(alpha: 0.08))),
             )
           : const BoxDecoration(color: Neon.panel, border: Border(bottom: BorderSide(color: Neon.line))),
-      // Desktop on a phone (Settings › Layout) can make the bar narrow: the project name then keeps a modest width and
+      // Desktop on a phone (Settings › Appearance and feel › Layout and sizes) can make the bar narrow: the project name then keeps a modest width and
       // the readouts and buttons scroll sideways instead of overflowing.
       child: LayoutBuilder(builder: (context, box) {
         final narrow = box.maxWidth < 720;
@@ -969,7 +969,7 @@ Future<void> showProjectMenu(BuildContext context, AppState s) async {
             title: const Text('New project'),
             subtitle: Text(
                 switch (s.templateById(s.settings.newProjectTemplate)) {
-                  final t? => 'From the ${t.name} template (Settings › Projects and files)',
+                  final t? => 'From the ${t.name} template (Settings › Projects and export)',
                   null => 'Blank, ${s.settings.newProjectBpm.toStringAsFixed(0)} BPM, ${s.settings.newProjectBeatsPerBar}/4',
                 },
                 style: const TextStyle(color: Neon.dim)),

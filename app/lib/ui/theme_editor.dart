@@ -1,4 +1,4 @@
-// The theme editor (Settings › Look › Theme; owner 2026-11-11: "a theme editor that builds the theme for you"): pick
+// The theme editor (Settings › Appearance and feel › Theme; owner 2026-11-11: "a theme editor that builds the theme for you"): pick
 // or start a theme and its Mode, build its palette from seeds, set its feel, layout and behaviour with a live preview,
 // edit any colour under Advanced, and save, duplicate, import or export it.
 import 'dart:convert';

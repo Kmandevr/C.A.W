@@ -37,7 +37,7 @@ List<int> scalePads(ProjectDoc p, int octave) {
 }
 
 /// Velocity from where a key is touched: soft at the top, full at the bottom (where a finger presses hardest); a
-/// [fixed] velocity (Settings › MIDI and input, above 0) instead.
+/// [fixed] velocity (Settings › Sound › MIDI and controllers, above 0) instead.
 double velocityAt(double y, double height, {double fixed = 0}) => fixed > 0
     ? fixed.clamp(0.05, 1.0).toDouble()
     : height <= 0 ? 0.8 : (0.3 + 0.7 * (y / height)).clamp(0.3, 1.0);

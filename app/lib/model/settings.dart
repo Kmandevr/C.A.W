@@ -457,7 +457,7 @@ class Settings extends ChangeNotifier {
   bool vimKeys = false;
 
   /// The key hint strip (which keys work where the keyboard focus is): null follows the keyboard (shown once a
-  /// hardware keyboard is used, and on a desktop), true or false as chosen in Settings › Keys.
+  /// hardware keyboard is used, and on a desktop), true or false as chosen in Settings › App › Keys and shortcuts.
   bool? keyHints;
 
   /// The music video editor has shown its photosensitivity warning (the first time Strobe is added).
@@ -483,7 +483,7 @@ class Settings extends ChangeNotifier {
   SoundQuality soundQuality = SoundQuality.normal;
   AudioBuffer audioBuffer = AudioBuffer.auto;
 
-  /// Settings › Audio: the playback device by the backend's id (two identical interfaces share a name) and by name,
+  /// Settings › Sound: the playback device by the backend's id (two identical interfaces share a name) and by name,
   /// which opens it when the id has changed (a driver reinstall) ('' both: the system default), the engine's sample
   /// rate (fixed when the engine is made, so a change applies at the next start), a callback size in frames (0: the
   /// buffer mode chooses) and exclusive mode where the backend takes it (WASAPI, AAudio).
@@ -539,7 +539,7 @@ class Settings extends ChangeNotifier {
   static const bufferSizes = [0, 16, 32, 48, 64, 96, 128, 192, 256, 384, 512, 768, 1024, 2048, 4096, 8192];
   bool exclusiveAudio = false;
 
-  /// Settings › MIDI and input: the keyboard read ('' every connected one), its channel (0 every channel, else 1-16),
+  /// Settings › Sound › MIDI and controllers: the keyboard read ('' every connected one), its channel (0 every channel, else 1-16),
   /// the velocity curve (and the Fixed value), and whether notes play the selected track outside a recording.
   String midiDevice = '';
   int midiChannel = 0;
@@ -547,7 +547,7 @@ class Settings extends ChangeNotifier {
   double midiFixedVelocity = 0.8;
   bool midiThru = true;
 
-  /// The MIDI devices turned off in Settings › MIDI (by name; the others are read), MPE, and the semitones a full
+  /// The MIDI devices turned off in Settings › Sound › MIDI and controllers (by name; the others are read), MPE, and the semitones a full
   /// pitch bend moves (MPE: the master channel's; member channels and MIDI 2.0 per-note bend use 48).
   Set<String> midiClosed = {};
   bool midiMpe = false;
@@ -591,7 +591,7 @@ class Settings extends ChangeNotifier {
   bool wheelZooms = false;
   bool confirmDelete = false;
 
-  /// Settings › Code editor: the code font size (the C++ editor's is scaled from it), tab width, line numbers and
+  /// Settings › App › Code editor: the code font size (the C++ editor's is scaled from it), tab width, line numbers and
   /// soft wrap (the C++ editor; the .caw editor always wraps).
   double codeFontSize = 15;
   static const minCodeFontSize = 10.0, maxCodeFontSize = 24.0;
@@ -599,7 +599,7 @@ class Settings extends ChangeNotifier {
   bool codeLineNumbers = true;
   bool codeWrap = false;
 
-  /// Settings › Projects and files: how long after the last edit the project is saved, how many restore points each
+  /// Settings › Projects and export: how long after the last edit the project is saved, how many restore points each
   /// project keeps, and what New project starts with.
   int autosaveMs = 500;
   static const autosaveDelays = [500, 2000, 5000, 15000, 30000];
@@ -609,7 +609,7 @@ class Settings extends ChangeNotifier {
   /// The template New project opens (`lib/model/templates.dart` ids; '' is a blank project).
   String newProjectTemplate = '';
 
-  /// Settings › Export: what the exporter opens with.
+  /// Settings › Projects and export › Export: what the exporter opens with.
   String exportKind = 'loop';
   int exportSampleRate = 48000;
   bool exportFloat32 = false;
