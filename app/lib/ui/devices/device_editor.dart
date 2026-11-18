@@ -53,10 +53,30 @@ Future<void> openDeviceEditor(BuildContext context, AppState state, LayerDoc lay
     );
   }
   // A page that comes in and goes out as the theme's pages do (panelRoute), whether closed by Back, Esc or ←.
-  return Navigator.of(context).push(panelRoute<void>(context, (context) => GlassPage(child: Scaffold(
+  final page = panelRoute<void>(context, (context) => GlassPage(child: Scaffold(
       backgroundColor: Colors.transparent,
       body: SafeArea(child: DeviceEditor(target: target, onClose: () => Navigator.of(context).maybePop())),
-    ))));
+    )));
+  _devicePages.add(page);
+  return Navigator.of(context).push(page).whenComplete(() => _devicePages.remove(page));
+}
+
+/// The full-screen device pages open now (a phone's; the wide screens' floating window is not one).
+final _devicePages = <Route<void>>{};
+
+/// Closes the full-screen device page (and any sheet or menu open over it) with its exit animation, so what is
+/// behind it shows: Automate from a phone's device page goes to the lane it opened. False, closing nothing, when no
+/// such page is open (a wide screen's window stays, as a panel beside the arrangement).
+bool closeDevicePage() {
+  final open = [for (final r in _devicePages) if (r.isActive && r.navigator != null) r];
+  if (open.isEmpty) return false;
+  var passed = false;
+  open.first.navigator!.popUntil((r) {
+    if (passed) return true;
+    if (open.contains(r)) passed = true;
+    return false;
+  });
+  return true;
 }
 
 /// The floating window on wide screens: drag its header to move it.

@@ -564,7 +564,7 @@ void main() {
       expect(barW(), lessThan(before));
     });
 
-    testWidgets('a pinch scales the lanes as laid out and lays them out once, where a layout per move would be',
+    testWidgets('a pinch lays the lanes out at its zoom on every move, and the fingers lifting change nothing',
         (tester) async {
       await pumpArranger(tester, const Size(412, 900));
       await settle(tester);
@@ -581,21 +581,23 @@ void main() {
       final at = tester.getCenter(find.byKey(const ValueKey('track-header-b'))) + const Offset(200, 0);
       final a = await tester.startGesture(at - const Offset(40, 0), kind: PointerDeviceKind.touch);
       final b = await tester.startGesture(at + const Offset(40, 0), kind: PointerDeviceKind.touch);
-      // 80 → 100 px apart: 1.25×, inside the rebase window: the lanes keep their layout, scaled.
+      // 80 → 100 px apart: 1.25×, laid out at it as the fingers move (owner, 2026-11-18: no stretch, no jump).
       for (var i = 0; i < 2; i++) {
         await a.moveBy(const Offset(-5, 0));
         await b.moveBy(const Offset(5, 0));
         await tester.pump();
       }
-      expect(barW(), w0, reason: 'no layout while the fingers move');
-      expect(find.byWidgetPredicate((w) => w is Transform && w.transform.getMaxScaleOnAxis() > 1.2), findsOneWidget);
-      expect(tester.getCenter(end).dx, closeTo(at.dx + (x0 - at.dx) * 1.25, 0.5), reason: 'drawn where it will lie');
+      expect(barW(), closeTo(w0 * 1.25, 1e-6), reason: 'laid out at the pinch\'s zoom');
+      expect(find.byWidgetPredicate((w) => w is Transform && (w.transform.entry(0, 0) - 1).abs() > 1e-9 &&
+          find.descendant(of: find.byWidget(w), matching: end).evaluate().isNotEmpty), findsNothing,
+          reason: 'nothing scales the lanes');
+      // The song's end mark moved away from the fingers' midpoint by the zoom.
+      expect(tester.getCenter(end).dx, closeTo(at.dx + (x0 - at.dx) * 1.25, 0.5));
       await a.up();
       await b.up();
       await tester.pump();
       await tester.pump();
-      expect(barW(), closeTo(w0 * 1.25, 1e-6), reason: 'laid out once at the pinch\'s zoom');
-      // The song's end mark moved away from the fingers' midpoint by the zoom, as a layout per move moves it.
+      expect(barW(), closeTo(w0 * 1.25, 1e-6), reason: 'lifting the fingers changes nothing');
       expect(tester.getCenter(end).dx, closeTo(at.dx + (x0 - at.dx) * 1.25, 0.5));
       await settle(tester);
     });

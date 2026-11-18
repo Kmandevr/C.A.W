@@ -972,6 +972,10 @@ class AppState extends ChangeNotifier implements StressHost {
 
   void _docChanged() => _docGen++;
 
+  /// Bumped by every edit, value move and engine sync of the project (never by a selection, the transport or
+  /// meters): screens keep parts built from the project (Arrange's track headers and clips) while it stays the same.
+  int get docGen => _docGen;
+
   /// The engine JSON of a live drag step: the project with [text] as module [moduleId]'s source.
   @visibleForTesting
   String liveEngineJson(String moduleId, String text) {
@@ -1866,6 +1870,17 @@ class AppState extends ChangeNotifier implements StressHost {
     if (layer.showTakes == shown) return;
     layer.showTakes = shown;
     _changed(engine: false);
+  }
+
+  /// Sets the row height of each of [layer]'s take lanes (null: the default; clamped to the lanes' range), as a
+  /// drag on a take lane header's bottom edge leaves it: one undo step. Only the screen changes.
+  void setTakeHeight(LayerDoc layer, double? height) {
+    final h = height == null || !height.isFinite ? null : height.clamp(kMinLaneHeight, kMaxLaneHeight).toDouble();
+    if (layer.takeHeight == h) return;
+    endUndoStep();
+    layer.takeHeight = h;
+    _changed(engine: false);
+    endUndoStep();
   }
 
   /// Sets how much of each of [layers]' rows shows (the track menu's Collapse, a header's bottom-edge drag or pinch):

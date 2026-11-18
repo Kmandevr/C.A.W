@@ -228,7 +228,7 @@ The same meaning everywhere, so nothing has to be learned twice:
 | A second finger resting during a drag | Shift | Free the drag from the grid (piano roll) |
 | A second finger touched down during a clip or track drag | Ctrl | Copy instead of move (Arrange; touch it again to move) |
 | Double-tap | Double-click | Reset a value to its default (every knob and slider with a meaningful default: a component's knob to its descriptor's default, a track's volume to 0 dB, pan to centre, zoom to its default; `ResetOnDoubleTap`); open an item |
-| Two-finger pinch / pan | Wheel, Ctrl+wheel | Zoom and scroll a grid or roll |
+| Two-finger pinch / pan | Wheel, Ctrl+wheel | Zoom and scroll a grid or roll: laid out at each zoom as it changes, never stretched, the point under the fingers held still (owner, 2026-11-18) |
 | Swipe up on the sheet | — | Show more of the inspector |
 
 - **Value controls:** a phone uses full-width sliders, never small knobs.

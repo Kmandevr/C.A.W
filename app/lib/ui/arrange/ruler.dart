@@ -205,13 +205,8 @@ class _ArrangeRulerState extends State<ArrangeRuler> {
   }
 }
 
-/// How far past each side of the view the ruler and grid paint, in views (0 at rest): a time pinch shows the lanes
-/// scaled ([ArrangerScreen]), and zooming out brings in what was beside the view before it lays out again.
-final arrangeSpanReveal = ValueNotifier<double>(0);
-
 class _RulerPainter extends CustomPainter {
-  _RulerPainter(this.stepW, this.bars, this.scroll, this.height)
-      : super(repaint: Listenable.merge([scroll, arrangeSpanReveal]));
+  _RulerPainter(this.stepW, this.bars, this.scroll, this.height) : super(repaint: scroll);
   final double stepW, height;
   final BarMath bars;
   final ScrollController scroll;
@@ -221,14 +216,13 @@ class _RulerPainter extends CustomPainter {
     var from = 0.0, to = math.min(size.width, 4096.0);
     if (scroll.hasClients) {
       final pos = scroll.positions.last;
-      final reveal = pos.viewportDimension * arrangeSpanReveal.value;
-      from = (pos.pixels - reveal).clamp(0.0, size.width).toDouble();
-      to = (pos.pixels + pos.viewportDimension + reveal).clamp(from, size.width).toDouble();
+      from = pos.pixels.clamp(0.0, size.width).toDouble();
+      to = (pos.pixels + pos.viewportDimension).clamp(from, size.width).toDouble();
     }
-    final tick = Paint()..color = Neon.dim.withValues(alpha: 0.4)..strokeWidth = 1;
+    final tick = Paint()..strokeWidth = 1;
     canvas.drawLine(Offset(from, size.height - 0.5), Offset(to, size.height - 0.5), Paint()..color = Neon.line);
-    paintBarNumbers(canvas, bars, stepW, from, to, (x, label, room) {
-      canvas.drawLine(Offset(x, 0), Offset(x, height * 0.5), tick);
+    paintBarNumbers(canvas, bars, stepW, from, to, (x, label, room, alpha) {
+      canvas.drawLine(Offset(x, 0), Offset(x, height * 0.5), tick..color = Neon.dim.withValues(alpha: 0.4 * alpha));
       label.layout(maxWidth: math.max(1.0, room - 4));
       label.paint(canvas, Offset(x + 3, (height * 0.5 - label.height) / 2));
     });
@@ -239,11 +233,18 @@ class _RulerPainter extends CustomPainter {
       old.stepW != stepW || old.bars != bars || old.scroll != scroll || old.height != height;
 }
 
+/// How strongly a level of labels or lines [spacing] pixels apart shows, where [room] is the spacing it needs: none
+/// below [from] of it, fading in to full at it. A zoom brings the next level in and out gradually (owner, 2026-11-18:
+/// zooming smooth, nothing popping), and the level it reaches full strength at is the one the spacing rule picks.
+double zoomFade(double spacing, double room, {double from = 0.55}) =>
+    ((spacing / room - from) / (1 - from)).clamp(0.0, 1.0).toDouble();
+
 /// Bar numbers from x [from] to [to] at [stepW] pixels a step, from the time signatures: every bar, or every 4, 16,
-/// 64… bars when bars are narrower than a label (owner, 2026-11-11: far out it still reads). [draw] gets each label's
-/// x, its text (laid out by [draw]) and the room to the next label.
+/// 64… bars when bars are narrower than a label (owner, 2026-11-11: far out it still reads); the next finer level
+/// fades in as it gets room ([zoomFade]). [draw] gets each label's x, its text (laid out by [draw]), the room to the
+/// next label and its strength (0–1; the text already carries it).
 void paintBarNumbers(Canvas canvas, BarMath bars, double stepW, double from, double to,
-    void Function(double x, TextPainter label, double room) draw) {
+    void Function(double x, TextPainter label, double room, double alpha) draw) {
   // The narrowest bar in view sets the spacing, so labels never crowd.
   var barW = double.infinity;
   for (final b in bars.bars(from / stepW / 4, to / stepW / 4, limit: 64)) {
@@ -253,15 +254,23 @@ void paintBarNumbers(Canvas canvas, BarMath bars, double stepW, double from, dou
     if (g.beat * 4 * stepW > from && g.beat * 4 * stepW < to) barW = math.min(barW, g.barBeats * 4 * stepW);
   }
   if (!barW.isFinite || barW <= 0) return;
+  double room(int every) => every >= 1024 ? 40 : 28;
   var every = 1;
-  while (every * barW < (every >= 1024 ? 40 : 28) && every < 1 << 30) {
+  while (every * barW < room(every) && every < 1 << 30) {
     every *= 4;
   }
-  for (final b in bars.bars(from / stepW / 4, to / stepW / 4, every: every, limit: 1024)) {
+  // The level between (a quarter of [every]) fades in as it nears room for its labels.
+  final finer = every ~/ 4;
+  final fade = finer >= 1 ? zoomFade(finer * barW, room(finer)) : 0.0;
+  final step = fade > 0 ? finer : every;
+  for (final b in bars.bars(from / stepW / 4, to / stepW / 4, every: step, limit: 1024)) {
+    final major = b.bar % every == 0;
+    final alpha = major ? 1.0 : fade;
     final x = b.beat * 4 * stepW;
-    final label = TextPainter(text: TextSpan(text: '${b.bar + 1}', style: Neon.code(size: 10, color: Neon.dim)),
+    final label = TextPainter(text: TextSpan(text: '${b.bar + 1}',
+        style: Neon.code(size: 10, color: Neon.dim.withValues(alpha: Neon.dim.a * alpha))),
       textDirection: TextDirection.ltr, maxLines: 1);
-    draw(x, label, every * b.length * 4 * stepW);
+    draw(x, label, step * b.length * 4 * stepW, alpha);
     label.dispose();
   }
 }

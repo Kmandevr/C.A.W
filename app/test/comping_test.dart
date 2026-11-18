@@ -1,7 +1,7 @@
 // Comping and Consolidate (1.0.5, #209): the comp's parts (swipe, whole take, a moved join), a MIDI comp's pattern,
-// an audio comp's parts with crossfades in the engine JSON, Flatten and undo, the take lanes' swipe and hold menu,
-// Consolidate of MIDI and audio clips; with CAW_LIB a comp renders exactly its takes outside the crossfades and a
-// consolidated clip renders as the clips did.
+// an audio comp's parts with crossfades in the engine JSON, Flatten and undo, the take lanes' swipe, hold menu and
+// height drag, Consolidate of MIDI and audio clips; with CAW_LIB a comp renders exactly its takes outside the
+// crossfades and a consolidated clip renders as the clips did.
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -18,6 +18,7 @@ import 'package:caw/model/pattern_doc.dart';
 import 'package:caw/model/project.dart';
 import 'package:caw/model/settings.dart';
 import 'package:caw/model/song_export.dart';
+import 'package:caw/ui/arrange/take_lanes.dart' show kTakeLaneHeight;
 import 'package:caw/ui/arranger_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -433,6 +434,59 @@ void main() {
     await tester.pumpAndSettle();
     expect(layer('k').clips.single.takes, isEmpty);
     expect(find.byKey(const ValueKey('take-header-k-0')), findsNothing);
+    await tester.pump(const Duration(seconds: 1));
+  });
+
+  testWidgets('a take lane header\'s bottom edge drags the take lanes\' height, saved and reloaded', (tester) async {
+    tester.view.physicalSize = const Size(900, 700);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    layer('k').showTakes = true;
+    Future<void> pumpArranger() async {
+      await tester.pumpWidget(MaterialApp(home: Scaffold(body: ListenableBuilder(listenable: s,
+          builder: (_, _) => ArrangerScreen(state: s)))));
+      await tester.pumpAndSettle();
+    }
+    await pumpArranger();
+    double rowH(int i) => tester.getSize(find.byKey(ValueKey('take-row-k-$i'))).height;
+    double headerH(int i) => tester.getSize(find.byKey(ValueKey('take-header-k-$i'))).height;
+    expect(rowH(0), kTakeLaneHeight);
+    // A real drag on lane 1's edge: every take lane of the track takes the height, header and row together, and
+    // the edge stays under the finger while it moves.
+    final edge = tester.getCenter(find.byKey(const ValueKey('take-height-k-0')));
+    final bottom = tester.getBottomLeft(find.byKey(const ValueKey('take-header-k-0'))).dy;
+    final g = await tester.startGesture(edge);
+    for (var i = 0; i < 10; i++) {
+      await g.moveBy(const Offset(0, 4));
+      await tester.pump(const Duration(milliseconds: 16));
+    }
+    expect(rowH(1), kTakeLaneHeight + 40, reason: 'live while it moves');
+    expect(tester.getBottomLeft(find.byKey(const ValueKey('take-header-k-0'))).dy, closeTo(bottom + 40, 0.5));
+    await g.up();
+    await tester.pumpAndSettle();
+    expect(layer('k').takeHeight, kTakeLaneHeight + 40);
+    for (var i = 0; i < 3; i++) {
+      expect((rowH(i), headerH(i)), (kTakeLaneHeight + 40, kTakeLaneHeight + 40));
+    }
+    // Lane 3's edge moves three rows: each grows by a third of the drag. Never past the range.
+    await tester.drag(find.byKey(const ValueKey('take-height-k-2')), const Offset(0, -60));
+    await tester.pumpAndSettle();
+    expect(layer('k').takeHeight, kTakeLaneHeight + 20);
+    await tester.drag(find.byKey(const ValueKey('take-height-k-0')), const Offset(0, -400));
+    await tester.pumpAndSettle();
+    expect(layer('k').takeHeight, kMinLaneHeight);
+    expect(s.undo(), isTrue, reason: 'each drag is one undo step');
+    expect(layer('k').takeHeight, kTakeLaneHeight + 20);
+    // Saved with the project (format v5's `take_height`), never sent to the engine; a reload keeps it.
+    final saved = jsonDecode(jsonEncode(s.project.toJson())) as Map<String, dynamic>;
+    expect((saved['layers'] as List).first['take_height'], kTakeLaneHeight + 20);
+    expect(s.project.toEngineJson(), isNot(contains('take_height')));
+    expect(LayerDoc.fromJson({'id': 'x', 'take_height': 9999}).takeHeight, kMaxLaneHeight);
+    expect(LayerDoc(id: 'x', name: 'X', color: 0).toJson().containsKey('take_height'), isFalse);
+    open(ProjectDoc.fromJson(saved));
+    await pumpArranger();
+    expect(rowH(2), kTakeLaneHeight + 20);
+    expect(headerH(2), kTakeLaneHeight + 20);
     await tester.pump(const Duration(seconds: 1));
   });
 
