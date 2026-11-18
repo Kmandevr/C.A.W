@@ -107,7 +107,7 @@ class MidiPort {
   /// It speaks Universal MIDI Packets (MIDI 2.0).
   final bool ump;
 
-  /// Open and read now; [off] when Settings › MIDI turned it off.
+  /// Open and read now; [off] when Settings › Sound › MIDI and controllers turned it off.
   final bool open, off;
 }
 
@@ -142,7 +142,7 @@ abstract class MidiInput {
   /// Every device seen (open or turned off), each time that changes.
   Stream<List<MidiPort>> get ports;
 
-  /// Closes the devices named here and opens the others (Settings › MIDI's switches).
+  /// Closes the devices named here and opens the others (Settings › Sound › MIDI and controllers's switches).
   void setClosed(Set<String> names);
 
   /// The in-app Bluetooth LE MIDI scan, where the platform has one.

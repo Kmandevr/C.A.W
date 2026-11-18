@@ -1,6 +1,6 @@
 // The latency sheet (#236): an output offset slider with ±1 ms nudges, saved for the routed output, opened from
 // Record's long-press and the latency badge, with a visual beat to line up with the click (#241: the song's metronome,
-// or stopped a click loop of its own); plus the cards it shares with Settings › Audio › Latency: Bluetooth's own
+// or stopped a click loop of its own); plus the cards it shares with Settings › Sound › Latency and Bluetooth: Bluetooth's own
 // delay, how to lower it and its best quality, a correction learned from takes, a re-check.
 import 'dart:async';
 import 'dart:io';
@@ -52,7 +52,7 @@ String latencyBreakdown(AppState s) {
       'offset $sign${_ms(off.extraMs.abs())} ($source)';
 }
 
-/// Opens the sheet over [context]; [settings] opens Settings › Audio › Latency (the type-in, tap-along and
+/// Opens the sheet over [context]; [settings] opens Settings › Sound › Latency and Bluetooth (the type-in, tap-along and
 /// loopback live there).
 Future<void> showLatencySheet(BuildContext context, AppState state, {VoidCallback? settings}) => showGlassSheet<void>(
       context: context,

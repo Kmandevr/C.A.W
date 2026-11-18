@@ -1,4 +1,4 @@
-// Settings › Export: what the exporter opens with (kind, sample rate, bit depth, free length) and how files are named.
+// Settings › Projects and export › Export (#244): what the exporter opens with (kind, sample rate, bit depth, free length) and how files are named.
 import 'package:flutter/material.dart';
 
 import '../../model/settings.dart';
@@ -6,14 +6,14 @@ import 'settings_deps.dart';
 import 'settings_registry.dart';
 import 'settings_widgets.dart';
 
-class ExportSettings extends StatelessWidget {
-  const ExportSettings({super.key, required this.deps});
+class ExportCard extends StatelessWidget {
+  const ExportCard({super.key, required this.deps});
   final SettingsDeps deps;
 
   @override
   Widget build(BuildContext context) {
     final s = deps.settings;
-    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+    return SettingsCardView(card: SettingsCard.export, rows: [
       settingDropdown<String>('export.kind', s.exportKind,
           [for (final k in const ['loop', 'free', 'oneShot', 'wavetable', 'midi']) (k, exportKindLabel(k))],
           (v) => s.update((x) => x.exportKind = v),
@@ -24,6 +24,7 @@ class ExportSettings extends StatelessWidget {
       settingChoice<bool>('export.depth', s.exportFloat32, const [(false, '24-bit PCM'), (true, '32-bit float')],
           (v) => s.update((x) => x.exportFloat32 = v),
           icon: Icons.data_array, subtitle: 'Wavetables are always 32-bit float'),
+    ], more: [
       settingSlider('export.seconds', s,
           value: s.exportSeconds, min: 1, max: 120, divisions: 119, icon: Icons.timer_outlined,
           show: (v) => '${v.round()} s', set: (x, v) => x.exportSeconds = v.roundToDouble(), reset: 8),

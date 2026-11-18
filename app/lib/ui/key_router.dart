@@ -235,7 +235,7 @@ class KeyRouterState extends State<KeyRouter> implements KeyAreaHost {
   /// The hint strip's entries for [area], from the keymap in force.
   List<KeyHint> hintsFor(Area area) => contextHints(registry, vim.keymap, area, vimKeys: s.settings.vimKeys);
 
-  /// Whether the hint strip shows (Settings › Keys; by default once a keyboard is in use).
+  /// Whether the hint strip shows (Settings › App › Keys and shortcuts; by default once a keyboard is in use).
   bool get hintsOn => KeyAreaHost.hintsOn(s.settings.keyHints);
 
   /// The keymap in force.

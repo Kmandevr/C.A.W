@@ -1,4 +1,6 @@
 // App state: settings, the startup choice, the open project, engine sync, autosave, meters and every edit.
+import 'output_watch.dart';
+import 'track_defaults.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -11,6 +13,7 @@ import '../engine/engine.dart';
 import '../engine/execution.dart';
 import '../platform/audio_route.dart';
 import '../platform/resource_signals.dart';
+import 'audio_devices.dart';
 import 'av_sync.dart';
 import 'latency_comp.dart';
 import 'poller.dart';
@@ -93,7 +96,13 @@ class AppState extends ChangeNotifier implements StressHost {
     _density = this.settings.density;
     _lookRevision = this.settings.lookRevision;
     this.settings.addListener(_settingsChanged);
+    outputWatch = OutputWatch(this);
+    addListener(outputWatch.update);
+    foreground.addListener(outputWatch.update);
   }
+
+  /// Pause when unplugged and Keep the screen awake (#244, output_watch.dart).
+  late final OutputWatch outputWatch;
 
   late bool _light;
   late PerformanceMode _performanceMode;
@@ -104,6 +113,7 @@ class AppState extends ChangeNotifier implements StressHost {
   void _settingsChanged() {
     _docChanged(); // the swap timing and the voice budget are in the engine JSON
     applyAudioSettings();
+    outputWatch.update();
     final nextMode = settings.performanceMode;
     final nextDensity = settings.density;
     final nextLook = settings.lookRevision;
@@ -131,7 +141,7 @@ class AppState extends ChangeNotifier implements StressHost {
   /// The app's clock in microseconds (monotonic; tests pass their own).
   int get nowUs => _clockUs();
 
-  /// The output and input latency in force: the platform's figure plus each device's offset (Settings › Audio ›
+  /// The output and input latency in force: the platform's figure plus each device's offset (Settings › Sound ›
   /// Latency).
   late final LatencyComp latency;
 
@@ -249,6 +259,7 @@ class AppState extends ChangeNotifier implements StressHost {
   AudioBuffer? _buffer;
   bool? _bufferRecording;
   String? _deviceChoice, _clickChoice;
+  (bool, bool)? _safetyChoice;
 
   /// Sends the sound quality, the device's choice (device, callback size, exclusive mode), the click's sound and the
   /// buffer mode to the engine when they (or whether a recording runs) changed. A device choice reopens a running
@@ -265,29 +276,18 @@ class AppState extends ChangeNotifier implements StressHost {
         '${settings.audioDeviceId}|${settings.audioDevice}|${settings.bufferFrames}|${settings.exclusiveAudio}';
     if (_deviceChoice != device) {
       _deviceChoice = device;
-      final name = settings.audioDevice;
-      _audioConfigured = e
-          .configureAudio(
-              deviceId: settings.audioDeviceId,
-              device: name,
-              periodFrames: settings.bufferFrames,
-              exclusive: settings.exclusiveAudio)
-          .then((result) {
-        if (_disposed || _deviceChoice != device) return;  // a newer choice will report for itself
-        final before = audioError;
-        audioError = switch (result) {
-          AudioConfigured.ok => audioError == _fallbackNote ? null : audioError,
-          AudioConfigured.fallback => _fallbackNote = 'Couldn\'t open ${name.isEmpty ? 'the chosen size or mode' : name}; '
-              'using the default',
-          AudioConfigured.closed => 'The audio device did not reopen with the new settings',
-        };
-        if (audioError != before) notifyListeners();
-      }, onError: (Object _) {});
+      _configureDevice(e, device);
     }
     final click = '${settings.clickVolume}|${settings.clickSound.index}';
     if (_clickChoice != click) {
       _clickChoice = click;
       e.setMetronomeSound(settings.clickVolume, settings.clickSound.index);
+    }
+    // The live output's safety limiter and mono check (API 35, #244): never in an export.
+    final safety = (settings.safetyLimiter, settings.monoCheck);
+    if (_safetyChoice != safety) {
+      _safetyChoice = safety;
+      e.setOutputSafety(limiter: settings.safetyLimiter, mono: settings.monoCheck);
     }
     final rec = recording ?? _bufferRecording ?? false;
     if (_buffer != settings.audioBuffer || _bufferRecording != rec) {
@@ -295,6 +295,51 @@ class AppState extends ChangeNotifier implements StressHost {
       _bufferRecording = rec;
       e.setBufferMode(settings.audioBuffer.index, recording: rec);
     }
+  }
+
+  /// The engine id the last device choice opened ([engineDeviceId]: a platform choice by its id now).
+  String? _openedDeviceId;
+  StreamSubscription<void>? _routeSub;
+
+  // The device choice to the engine. A choice from the platform's own list (#242: Android's devices by type and
+  // name) opens by the id that device has now, '' (the default) while it is not connected; any other saved id goes
+  // as it is (WASAPI's endpoint id). A name only is still looked up by the engine.
+  void _configureDevice(Engine e, String device) {
+    final key = settings.audioDeviceId;
+    final name = settings.audioDevice;
+    final platform = key.startsWith(platformChoicePrefix);
+    _routeSub ??= latency.route.changes.listen((_) => _deviceListChanged());
+    _audioConfigured = _audioConfigured.then((_) async {
+      if (_disposed || _deviceChoice != device) return;
+      final choices = platform ? platformChoices((await latency.route.devices()).outputs, input: false) : const <AudioChoice>[];
+      final id = engineDeviceId(key, choices);
+      final missing = platform && id.isEmpty;
+      _openedDeviceId = id;
+      final result = await e.configureAudio(
+          deviceId: id, device: platform ? '' : name, periodFrames: settings.bufferFrames, exclusive: settings.exclusiveAudio);
+      if (_disposed || _deviceChoice != device) return;  // a newer choice will report for itself
+      final before = audioError;
+      audioError = switch (result) {
+        AudioConfigured.ok when missing => _fallbackNote = '${name.isEmpty ? 'The chosen output' : name} is not connected; '
+            'using the default',
+        AudioConfigured.ok => audioError == _fallbackNote ? null : audioError,
+        AudioConfigured.fallback => _fallbackNote = 'Couldn\'t open ${name.isEmpty ? 'the chosen size or mode' : name}; '
+            'using the default',
+        AudioConfigured.closed => 'The audio device did not reopen with the new settings',
+      };
+      if (audioError != before) notifyListeners();
+    }).catchError((Object _) {});
+  }
+
+  // A device connected or went away: a platform choice opens again where its id changed (it reconnected with a new
+  // one, or it is back after the default played meanwhile), and nothing reopens otherwise.
+  Future<void> _deviceListChanged() async {
+    final e = engine;
+    final key = settings.audioDeviceId;
+    if (e == null || _disposed || !key.startsWith(platformChoicePrefix) || _deviceChoice == null) return;
+    final id = engineDeviceId(key, platformChoices((await latency.route.devices()).outputs, input: false));
+    if (_disposed || id == _openedDeviceId) return;
+    _configureDevice(e, _deviceChoice!);
   }
 
   Engine? engine;
@@ -472,7 +517,7 @@ class AppState extends ChangeNotifier implements StressHost {
     return null;
   }
 
-  /// Settings › Audio's test tone: opens the device if it is closed and plays 440 Hz for [seconds]; returns an error
+  /// Settings › Sound's test tone: opens the device if it is closed and plays 440 Hz for [seconds]; returns an error
   /// message when the device can't open.
   String? playTestTone({double seconds = 1.5}) {
     final e = engine;
@@ -624,7 +669,7 @@ class AppState extends ChangeNotifier implements StressHost {
   }
 
   /// An empty project: no modules and no layers.
-  /// Settings › Projects and files sets its tempo and time signature.
+  /// Settings › Projects and export sets its tempo and time signature.
   ProjectDoc blankProject() => ProjectDoc(id: newId('p'), name: 'New project')
     ..bpm = settings.newProjectBpm
     ..beatsPerBar = settings.newProjectBeatsPerBar;
@@ -633,11 +678,13 @@ class AppState extends ChangeNotifier implements StressHost {
   void dispose() {
     _disposed = true;
     settings.removeListener(_settingsChanged);
+    outputWatch.dispose();
     final pressureSubscription = _resourcePressureSubscription;
     _resourcePressureSubscription = null;
     if (pressureSubscription != null) unawaited(pressureSubscription.cancel());
     _poller.dispose();
     latency.removeListener(_latencyChanged);
+    unawaited(_routeSub?.cancel());
     latency.dispose();
     _liveTimer?.cancel();
     _saveTimer?.cancel();
@@ -668,6 +715,7 @@ class AppState extends ChangeNotifier implements StressHost {
     layerMeters = e.layerMeters(project.layers.length); // one C API call for every track (beta plan B4.8)
     final now = nowUs;
     meterTimeline.push(MeterReading(now, meters, layerMeters));
+    outputWatch.poll(now, playing: meters.playing);  // a removed output, where the platform sends no event (#244)
     if (settings.bufferTuning && e.audioOn && meters.playing && now - _tuneReadUs > 1000000) _tuneBuffer(e, now);
     if (e.audioOn && now - _latencyReadUs > 3000000) {
       // The platform's figure and the route, now and then (a Bluetooth link can settle after it opens).
@@ -1421,6 +1469,25 @@ class AppState extends ChangeNotifier implements StressHost {
     notifyListeners();
   }
 
+  /// Remember zoom per project (#244): the arranger hands its view out through [readArrangeView] and takes one
+  /// back through [applyArrangeView] (both null while no arranger is built). The view is kept in the settings by
+  /// project id, never in the project file, so it is no edit and no undo step.
+  ArrangeView? Function()? readArrangeView;
+  void Function(ArrangeView view)? applyArrangeView;
+
+  /// Keeps the arrangement's view for the open project (Settings.rememberZoom on): on leaving a project, going to
+  /// the background, and when the arranger closes.
+  void rememberArrangeView() {
+    if (!settings.rememberZoom) return;
+    final view = readArrangeView?.call();
+    if (view == null || settings.projectViews[project.id] == view) return;
+    settings.rememberProjectView(project.id, view);
+    unawaited(settings.save());
+  }
+
+  /// The open project's remembered view, while Remember zoom per project is on.
+  ArrangeView? get savedArrangeView => settings.rememberZoom ? settings.projectViews[project.id] : null;
+
   /// Whether the app is in front (the lifecycle's last word): the microphone is released behind it unless a
   /// recording runs (`AudioRecorder`).
   final foreground = ValueNotifier<bool>(true);
@@ -1437,6 +1504,7 @@ class AppState extends ChangeNotifier implements StressHost {
     // and its load history is forgotten, going away and coming back (the engine sheds again if it must).
     e.clearOverload();
     if (!foreground) {
+      rememberArrangeView();
       flush();
       if (!meters.playing) e.stopAudio();
     } else if (!e.audioOn || !e.audioStatus().running) {
@@ -2086,7 +2154,7 @@ class AppState extends ChangeNotifier implements StressHost {
     project.layers.add(LayerDoc(
       id: newId('l'),
       name: 'Layer ${project.layers.length + 1}',
-      color: project.layers.length % LayerDoc.trackColors,
+      color: newTrackColor(NewTrackKind.midi),
       lengthSteps: project.stepsPerBar,
       volume: 1, // 0 dB (owner, 2026-11-10)
     ));
@@ -2316,7 +2384,7 @@ class AppState extends ChangeNotifier implements StressHost {
   /// (REAPER, UG 5.13.5).
   void addFolder({String? parentId}) {
     final parent = parentId == null ? null : project.layers.where((l) => l.id == parentId && l.isFolder).firstOrNull;
-    final folder = LayerDoc(id: newId('l'), name: 'Group', color: project.layers.length % LayerDoc.trackColors,
+    final folder = LayerDoc(id: newId('l'), name: 'Group', color: newTrackColor(NewTrackKind.folder),
         parentId: parent?.id, isFolder: true, busEnabled: true);
     var at = project.layers.length;
     if (parent != null) {
@@ -2346,6 +2414,7 @@ class AppState extends ChangeNotifier implements StressHost {
   Future<List<ProjectSummary>> listProjects() async => await _storage?.list() ?? const [];
 
   Future<void> _switchTo(ProjectDoc p, {bool saveCurrent = true}) async {
+    rememberArrangeView();  // the project being left keeps its zoom and scroll (#244)
     if (saveCurrent) await flush();
     engine?.stop();
     pausedStep = null;
@@ -2395,6 +2464,7 @@ class AppState extends ChangeNotifier implements StressHost {
     await _storage?.setLastOpened(p.id);
     await flush();
     notifyListeners();
+    if (savedArrangeView case final view?) applyArrangeView?.call(view);
     await _syncNow();
     unawaited(prepareNativeComponents());
     // Linked sample files first (their paths on this device), then what is still missing (sample_use.dart).
@@ -2426,7 +2496,7 @@ class AppState extends ChangeNotifier implements StressHost {
     if (status.loaded.isNotEmpty) await _syncNow();
   }
 
-  /// New project: the template Settings › Projects and files names, else blank (with its tempo and meter).
+  /// New project: the template Settings › Projects and export names, else blank (with its tempo and meter).
   Future<void> newProject() => _switchTo(newProjectDoc());
 
   /// New project from template [t] (the project menu's New from template).

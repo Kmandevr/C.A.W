@@ -5,7 +5,7 @@ import 'keys.dart';
 import 'macro.dart' show ActionRef;
 import 'vim.dart' show KeyHint;
 
-/// Vim keys (Settings › Keys): H J K L act as the arrows in the keyboard-focus contexts ([Area.navigates]).
+/// Vim keys (Settings › App › Keys and shortcuts): H J K L act as the arrows in the keyboard-focus contexts ([Area.navigates]).
 const Map<String, String> vimArrows = {'H': 'Left', 'J': 'Down', 'K': 'Up', 'L': 'Right'};
 
 /// [chord] as the arrow it stands for under Vim keys, or null (any modifiers carry over: Alt+K is Alt+Up).

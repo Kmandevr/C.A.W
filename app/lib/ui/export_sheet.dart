@@ -35,7 +35,7 @@ Future<void> showSongExportSheet(BuildContext context, AppState state, {ExportQu
   );
 }
 
-/// The project's name as the files' {project}, following Settings › Export › File names.
+/// The project's name as the files' {project}, following Settings › Projects and export › Export › File names.
 String exportProjectName(ProjectDoc p, ExportNaming naming, {DateTime? now}) {
   final safe = p.name.replaceAll(RegExp(r'[^A-Za-z0-9_-]+'), '');
   final base = safe.isEmpty ? 'CAW' : safe;
@@ -79,7 +79,7 @@ class _SongExportPanelState extends State<SongExportPanel> {
   AppState get s => widget.state;
   ProjectDoc get p => s.project;
 
-  // The last options used, with Settings › Export's rate and depth the first time.
+  // The last options used, with Settings › Projects and export › Export's rate and depth the first time.
   SongExportOptions _initial() {
     final q = widget.queue;
     if (q.hasLast) return q.last.copy();

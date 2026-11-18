@@ -67,7 +67,7 @@ class ExportPage extends StatefulWidget {
 }
 
 class _ExportPageState extends State<ExportPage> {
-  // Settings › Export: what the exporter opens with.
+  // Settings › Projects and export › Export: what the exporter opens with.
   late ExportKind _kind = ExportKind.values.firstWhere((k) => k.name == s.settings.exportKind, orElse: () => ExportKind.loop);
   late bool _advanced = _kind != ExportKind.loop; // a non-loop default needs the full exporter
   late int _rate = s.settings.exportSampleRate;
@@ -103,7 +103,7 @@ class _ExportPageState extends State<ExportPage> {
   String _fileName() {
     final p = s.project;
     final base = _safe(p.name).isEmpty ? 'CAW' : _safe(p.name);
-    // Settings › Export › File names: the project alone, or with the date and time, instead of the details below.
+    // Settings › Projects and export › Export › File names: the project alone, or with the date and time, instead of the details below.
     final ext = _kind == ExportKind.midi ? 'mid' : 'wav';
     switch (s.settings.exportNaming) {
       case ExportNaming.project:

@@ -176,7 +176,7 @@ extension Templates on AppState {
   TemplateDoc? templateById(String id) =>
       [...projectTemplates, ...trackTemplates].where((t) => t.id == id).firstOrNull;
 
-  /// What New project opens (Settings › Projects and files): the chosen template, or a blank project when it is
+  /// What New project opens (Settings › Projects and export): the chosen template, or a blank project when it is
   /// [blankTemplateId] or no longer there.
   ProjectDoc newProjectDoc() {
     final id = settings.newProjectTemplate;

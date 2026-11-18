@@ -327,7 +327,7 @@ class MusicVideoEditorState extends State<MusicVideoEditor> implements VideoEdit
     Haptics.drop();
   }
 
-  /// Runs one of the editor's actions (the catalogue's `video.*`, from the keymap: Settings › Keys rebinds them).
+  /// Runs one of the editor's actions (the catalogue's `video.*`, from the keymap: Settings › App › Keys and shortcuts rebinds them).
   bool runAction(String id) {
     if (!canEdit && id != 'video.fullScreen' && id != 'video.previous' && id != 'video.following') return false;
     switch (id) {

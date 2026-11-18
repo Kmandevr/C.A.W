@@ -16,6 +16,7 @@ import 'package:caw/model/component_bench.dart';
 import 'package:caw/model/cpp_component.dart';
 import 'package:caw/model/music_video.dart';
 import 'package:caw/model/music_video_edit.dart';
+import 'package:caw/model/latency_comp.dart';
 import 'package:caw/model/music_video_overlay.dart';
 import 'package:caw/model/music_video_director.dart';
 import 'package:caw/model/project.dart';
@@ -444,6 +445,14 @@ void main() {
         await c.tester.tap(find.text(sec.title).first);
         await _settle(c.tester);
       }
+      // Every card's More fold open (#244), so its rarer rows are checked too.
+      for (final card in sec.cards) {
+        final more = find.byKey(ValueKey('more-${card.name}'));
+        if (more.evaluate().isEmpty) continue;
+        await c.tester.ensureVisible(more.first);
+        await c.tester.tap(more.first);
+        await _settle(c.tester);
+      }
       await c.shot('');
       await c.end('');
     });
@@ -544,10 +553,16 @@ void main() {
     var outMs = 20.0;
     final s = AppState(settings: Settings(), audioRoute: FakeRoute(const AudioRouteInfo(output: buds, input: mic)));
     s.latency.readDevice = () => lat.device(outMs: outMs);
-    await tester.runAsync(() => s.latency.refresh());
+    Future<void> settle() async {
+      for (var i = 0; i < LatencyComp.settleRuns; i++) {
+        await tester.runAsync(() => s.latency.refresh()); // the timestamps settle
+      }
+    }
+
+    await settle();
     s.latency.setOutputTotalMs(212);
     outMs = 60;
-    await tester.runAsync(() => s.latency.refresh());
+    await settle();
     for (var i = 0; i < 3; i++) {
       s.latency.learnFromTake(List.filled(10, 18.0));
     }

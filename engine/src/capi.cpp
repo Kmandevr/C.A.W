@@ -11,6 +11,7 @@
 #include "builtin_drums.h"
 #include "presets.h"
 #include "capi_internal.h"
+#include "output_safety.h"
 #include "component_test.h"
 #include "sample_pack.h"
 #include "json.h"
@@ -215,6 +216,14 @@ void caw_engine_play_count_in_bars(CawEngine* e, double step, int32_t bars) {
 void caw_engine_set_metronome(CawEngine* e, int32_t on) {
     if (e) e->engine->setMetronome(on != 0);
 }
+
+static_assert(CAW_OUTPUT_LIMITER == caw::OutputSafety::kLimiter && CAW_OUTPUT_MONO == caw::OutputSafety::kMono);
+
+void caw_engine_set_output_safety(CawEngine* e, int32_t flags) {
+    if (e) e->engine->setOutputSafety(flags & (CAW_OUTPUT_LIMITER | CAW_OUTPUT_MONO));
+}
+
+int32_t caw_engine_output_safety(CawEngine* e) { return e ? e->engine->outputSafety() : 0; }
 
 void caw_engine_set_metronome_sound(CawEngine* e, double volume, int32_t sound) {
     if (e) e->engine->setMetronomeSound(volume, sound);

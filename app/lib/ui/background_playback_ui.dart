@@ -1,4 +1,4 @@
-// Background playback in the UI (owner, 2026-11-12): Settings › Audio's "Background playback" row (whether Android
+// Background playback in the UI (owner, 2026-11-12): Settings › Sound's "Background playback" row (whether Android
 // restricts C.A.W's battery, with Open), and the one-time hint on return to set it to Unrestricted.
 import 'dart:async';
 
@@ -14,7 +14,7 @@ import 'theme.dart';
 /// What the hint says (owner, 2026-11-12).
 const backgroundHintText = 'For uninterrupted background playback, set C.A.W\'s battery to Unrestricted';
 
-/// Settings › Audio: whether C.A.W's battery is restricted, with Open (Android's page for it). Hidden where there is
+/// Settings › Sound: whether C.A.W's battery is restricted, with Open (Android's page for it). Hidden where there is
 /// no such setting (Windows, Linux); re-read when the app comes back from that page.
 class BackgroundPlaybackRow extends StatefulWidget {
   const BackgroundPlaybackRow({super.key, required this.state, this.playback});

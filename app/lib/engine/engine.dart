@@ -255,8 +255,12 @@ class AudioStatus {
     this.requestedDevice = '',
     this.requestedFrames = 0,
     this.exclusiveRequested = false,
+    this.routedDeviceId = 0,
   });
   final bool running, exclusive, lowLatency, modesReadBack;
+
+  /// AAudio: the device the stream runs on (AudioDeviceInfo.getId()); 0 elsewhere or unknown (#242).
+  final int routedDeviceId;
   final String backend, device, deviceId;
   final int sampleRate, periodFrames, periods;
 
@@ -290,6 +294,7 @@ class AudioStatus {
         requestedDevice: j['requested_device'] as String? ?? '',
         requestedFrames: (j['requested_frames'] as num?)?.toInt() ?? 0,
         exclusiveRequested: j['exclusive_requested'] == true,
+        routedDeviceId: (j['routed_device_id'] as num?)?.toInt() ?? 0,
       );
 }
 
@@ -301,7 +306,7 @@ enum AudioConfigured { ok, fallback, closed }
 class Engine implements TempoEngine {
   Engine._(this._b, this._handle, this.sampleRate);
 
-  /// The rate the engine runs at unless Settings › Audio chose another (it is fixed when the engine is made).
+  /// The rate the engine runs at unless Settings › Sound chose another (it is fixed when the engine is made).
   static const int defaultSampleRate = 48000;
   static const sampleRates = [44100, 48000, 88200, 96000];
   final int sampleRate;
@@ -838,6 +843,11 @@ class Engine implements TempoEngine {
 
   /// The engine's built-in metronome click on every beat while playing.
   void setMetronome(bool on) => _b.setMetronome(_handle, on ? 1 : 0);
+
+  /// The live output's last stage (API 35, #244), in the device callback only (renders and exports never run it):
+  /// [limiter], a gentle safety limiter that keeps what plays under -1 dBFS, and [mono], both sides as their mean.
+  void setOutputSafety({required bool limiter, required bool mono}) =>
+      _b.setOutputSafety(_handle, (limiter ? 1 : 0) | (mono ? 2 : 0));
 
   /// Sound quality (CAW_QUALITY_*: 0 Eco, 1 Normal, 2 High): what the built-ins spend on oversampling, unison
   /// copies, reverb density and display updates.

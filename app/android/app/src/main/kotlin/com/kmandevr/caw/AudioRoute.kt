@@ -3,11 +3,14 @@
 // compensation can pick the right per-device offset. Device types go out as AudioDeviceInfo's raw TYPE_* ints.
 // "openBluetoothSettings" opens the system's Bluetooth page (LE Audio, low-latency modes; an app can't pick a codec);
 // "openDeveloperOptions" opens Developer options, where the user picks the Bluetooth codec and rate, or says they are off.
+// AudioNoisy sends AudioManager.ACTION_AUDIO_BECOMING_NOISY over "caw/audio_noisy" (#244: pause when unplugged).
 package com.kmandevr.caw
 
 import android.content.ActivityNotFoundException
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.media.AudioAttributes
 import android.media.AudioDeviceCallback
 import android.media.AudioDeviceInfo
@@ -91,6 +94,29 @@ class AudioRoute(private val context: Context) : EventChannel.StreamHandler, Met
 
     override fun onCancel(arguments: Any?) {
         audio.unregisterAudioDeviceCallback(callback)
+        sink = null
+    }
+}
+
+// Headphones or a Bluetooth output about to fall back to the speaker (#244): one event per broadcast while Dart
+// listens. Registered in code, never in the manifest; not exported to other apps where the API asks.
+class AudioNoisy(private val context: Context) : EventChannel.StreamHandler {
+    private var sink: EventChannel.EventSink? = null
+    private val receiver = object : BroadcastReceiver() {
+        override fun onReceive(c: Context, intent: Intent) {
+            if (intent.action == AudioManager.ACTION_AUDIO_BECOMING_NOISY) sink?.success(true)
+        }
+    }
+
+    override fun onListen(arguments: Any?, events: EventChannel.EventSink) {
+        sink = events
+        val filter = IntentFilter(AudioManager.ACTION_AUDIO_BECOMING_NOISY)
+        if (Build.VERSION.SDK_INT >= 33) context.registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED)
+        else context.registerReceiver(receiver, filter)
+    }
+
+    override fun onCancel(arguments: Any?) {
+        try { context.unregisterReceiver(receiver) } catch (e: IllegalArgumentException) { }
         sink = null
     }
 }

@@ -229,7 +229,7 @@ Generators (buttons; no default keys):
 
 ## Keyboard focus
 
-The whole app works from the keyboard (owner, 2026-11-11, [decisions](decisions.md)). Each part of a screen that takes keys is a **context**, an `Area` after `code` (`Area.navigates`), drawn by a `KeyArea` (`lib/ui/keyboard/key_area.dart`); while it or a control in it has the focus its keys win over the global ones. Tab and Shift+Tab move between contexts in reading order; Enter goes into one (its first control) and Esc comes back out. Inside a context the arrows and WASD both move; with **Vim keys everywhere** on (Settings › Keys and shortcuts, `vim_keys`) H J K L act as the arrows too, modifiers included (`vimArrowFor` in `lib/actions/hints.dart`). Every key below is rebindable per context in the key bindings editor.
+The whole app works from the keyboard (owner, 2026-11-11, [decisions](decisions.md)). Each part of a screen that takes keys is a **context**, an `Area` after `code` (`Area.navigates`), drawn by a `KeyArea` (`lib/ui/keyboard/key_area.dart`); while it or a control in it has the focus its keys win over the global ones. Tab and Shift+Tab move between contexts in reading order; Enter goes into one (its first control) and Esc comes back out. Inside a context the arrows and WASD both move; with **Vim keys everywhere** on (Settings › App › Keys and shortcuts, `vim_keys`) H J K L act as the arrows too, modifiers included (`vimArrowFor` in `lib/actions/hints.dart`). Every key below is rebindable per context in the key bindings editor.
 
 | Context | Keys |
 | --- | --- |
@@ -245,7 +245,7 @@ The whole app works from the keyboard (owner, 2026-11-11, [decisions](decisions.
 | Music video editor (`video`: the shot lane and list, in the sheet or full screen) | A add a shot at the cursor, S split there, Ctrl+D duplicate, Delete or Backspace delete, Ctrl+Z undo and Ctrl+Shift+Z or Ctrl+Y redo (the lane's own steps), ← → move the shot by the snap, [ ] the previous or next shot, Ctrl+Shift+A Auto-cut…, F11 full screen; typing in a text field inside a context (the video's Text & media tab) is the field's, not the context's keys |
 
 - **Focus ring:** the focused control wears a ring in the theme's `Neon.ink` edged with the selection accent, the focused context a softer accent outline (`KeyRing` in `lib/ui/tokens.dart`); it follows light and dark palettes and shows only while the keyboard is in use.
-- **Hint strip** (which-key): a strip at the bottom lists the keys that work in the focused context, read from the keymap (`keyHintsFor` in `lib/actions/hints.dart`), so a rebinding shows at once; then Tab, Esc and `?` (the action list). Settings › Keys and shortcuts › **Key hints** (`key_hints`) turns it off; unset, it shows once a hardware keyboard is used and on a desktop.
+- **Hint strip** (which-key): a strip at the bottom lists the keys that work in the focused context, read from the keymap (`keyHintsFor` in `lib/actions/hints.dart`), so a rebinding shows at once; then Tab, Esc and `?` (the action list). Settings › App › Keys and shortcuts › **Key hints** (`key_hints`) turns it off; unset, it shows once a hardware keyboard is used and on a desktop.
 - **Screen readers:** each context is a labelled semantics container; device controls say their name and value; FX cards their place, name and bypass. Focus order is reading order (`keyItems`: rows top to bottom, each left to right).
 - **Arrange and the piano roll** (tracks, clips, notes) are the next batch: [Proposal] in [decisions](decisions.md).
 

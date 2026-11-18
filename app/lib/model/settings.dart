@@ -180,6 +180,39 @@ enum MidiRecordMode {
   final String label;
 }
 
+/// Keep the screen awake (#244): never, while playing or recording, or whenever C.A.W is in front.
+enum KeepAwake {
+  off('Off'),
+  playing('While playing'),
+  always('Always');
+
+  const KeepAwake(this.label);
+  final String label;
+}
+
+/// A new track's colour (#244): the next of the theme's track colours each time, or one colour per kind (MIDI,
+/// audio, sampler).
+enum TrackColorScheme {
+  cycle('Next colour'),
+  byKind('By kind');
+
+  const TrackColorScheme(this.label);
+  final String label;
+}
+
+/// A new track's name (#244): its kind and number (Track 3, Audio 3) or its instrument's name and number (Flagship 2).
+enum TrackNaming {
+  numbered('Kind and number'),
+  byInstrument('Instrument name');
+
+  const TrackNaming(this.label);
+  final String label;
+}
+
+/// Where a project's arrangement view was (#244, Remember zoom per project): the time zoom (pixels per step, at
+/// comfortable density), the step at the view's left edge and the tracks' scroll in pixels.
+typedef ArrangeView = ({double zoom, double left, double top});
+
 /// Sound quality (owner, 2026-11-10), in the engine's order (CAW_QUALITY_*): Eco spends less on oversampling,
 /// unison copies, reverb density and display updates; High oversamples the saturator further.
 enum SoundQuality { eco, normal, high }
@@ -424,7 +457,7 @@ class Settings extends ChangeNotifier {
   bool vimKeys = false;
 
   /// The key hint strip (which keys work where the keyboard focus is): null follows the keyboard (shown once a
-  /// hardware keyboard is used, and on a desktop), true or false as chosen in Settings › Keys.
+  /// hardware keyboard is used, and on a desktop), true or false as chosen in Settings › App › Keys and shortcuts.
   bool? keyHints;
 
   /// The music video editor has shown its photosensitivity warning (the first time Strobe is added).
@@ -450,7 +483,7 @@ class Settings extends ChangeNotifier {
   SoundQuality soundQuality = SoundQuality.normal;
   AudioBuffer audioBuffer = AudioBuffer.auto;
 
-  /// Settings › Audio: the playback device by the backend's id (two identical interfaces share a name) and by name,
+  /// Settings › Sound: the playback device by the backend's id (two identical interfaces share a name) and by name,
   /// which opens it when the id has changed (a driver reinstall) ('' both: the system default), the engine's sample
   /// rate (fixed when the engine is made, so a change applies at the next start), a callback size in frames (0: the
   /// buffer mode chooses) and exclusive mode where the backend takes it (WASAPI, AAudio).
@@ -461,14 +494,52 @@ class Settings extends ChangeNotifier {
   int bufferFrames = 0;
 
   /// The AAudio output's buffer sized automatically (#236, caw_audio_tune_buffer): off by default until it has run on
-  /// phones (no Settings row yet), and the size it settled on per kind of output (AudioDeviceKind's name → frames),
+  /// phones (Settings › Sound › Quality and buffer, "Find the smallest stable buffer", #244), and the size it settled on per kind of output (AudioDeviceKind's name → frames),
   /// where the next stream on that kind starts.
   bool bufferTuning = false;
   final Map<String, int> tunedBufferFrames = {};
+  /// Settings › Sound (#244, owner 2026-11-18): playback stops when headphones or a Bluetooth device disconnect
+  /// (Android's "becoming noisy" broadcast; a removed output on desktop). On by default.
+  bool pauseOnUnplug = true;
+
+  /// The live output's safety limiter (API 35, #244): on by default; never in exports.
+  bool safetyLimiter = true;
+
+  /// Mono check (#244): the live output in mono, for listening. Never saved: off at every start, never in exports.
+  bool monoCheck = false;
+
+  /// Keep the screen awake (#244); while playing or recording by default.
+  KeepAwake keepAwake = KeepAwake.playing;
+
+  /// New tracks (#244): an audio track's monitoring ('off', 'auto' or 'on'), the instrument a MIDI track Record
+  /// makes gets ('' none), the colour scheme and the naming scheme.
+  String newTrackMonitor = 'auto';
+  String newTrackInstrument = 'org.caw.synth.flagship';
+  TrackColorScheme trackColors = TrackColorScheme.cycle;
+  TrackNaming trackNaming = TrackNaming.numbered;
+
+  /// Remember zoom per project (#244): each project reopens at its arrangement zoom and scroll ([projectViews],
+  /// the most recent [maxProjectViews] projects by id).
+  bool rememberZoom = true;
+  final Map<String, ArrangeView> projectViews = {};
+  static const maxProjectViews = 64;
+
+  /// Keeps [view] as project [id]'s, newest last, dropping the oldest past [maxProjectViews].
+  void rememberProjectView(String id, ArrangeView view) {
+    projectViews.remove(id);
+    projectViews[id] = view;
+    while (projectViews.length > maxProjectViews) {
+      projectViews.remove(projectViews.keys.first);
+    }
+  }
+
+  /// Left-handed layout (#244): the transport's buttons and the side rail are mirrored.
+  bool leftHanded = false;
+
   static const bufferSizes = [0, 16, 32, 48, 64, 96, 128, 192, 256, 384, 512, 768, 1024, 2048, 4096, 8192];
   bool exclusiveAudio = false;
 
-  /// Settings › MIDI and input: the keyboard read ('' every connected one), its channel (0 every channel, else 1-16),
+  /// Settings › Sound › MIDI and controllers: the keyboard read ('' every connected one), its channel (0 every channel, else 1-16),
   /// the velocity curve (and the Fixed value), and whether notes play the selected track outside a recording.
   String midiDevice = '';
   int midiChannel = 0;
@@ -476,7 +547,7 @@ class Settings extends ChangeNotifier {
   double midiFixedVelocity = 0.8;
   bool midiThru = true;
 
-  /// The MIDI devices turned off in Settings › MIDI (by name; the others are read), MPE, and the semitones a full
+  /// The MIDI devices turned off in Settings › Sound › MIDI and controllers (by name; the others are read), MPE, and the semitones a full
   /// pitch bend moves (MPE: the master channel's; member channels and MIDI 2.0 per-note bend use 48).
   Set<String> midiClosed = {};
   bool midiMpe = false;
@@ -520,7 +591,7 @@ class Settings extends ChangeNotifier {
   bool wheelZooms = false;
   bool confirmDelete = false;
 
-  /// Settings › Code editor: the code font size (the C++ editor's is scaled from it), tab width, line numbers and
+  /// Settings › App › Code editor: the code font size (the C++ editor's is scaled from it), tab width, line numbers and
   /// soft wrap (the C++ editor; the .caw editor always wraps).
   double codeFontSize = 15;
   static const minCodeFontSize = 10.0, maxCodeFontSize = 24.0;
@@ -528,7 +599,7 @@ class Settings extends ChangeNotifier {
   bool codeLineNumbers = true;
   bool codeWrap = false;
 
-  /// Settings › Projects and files: how long after the last edit the project is saved, how many restore points each
+  /// Settings › Projects and export: how long after the last edit the project is saved, how many restore points each
   /// project keeps, and what New project starts with.
   int autosaveMs = 500;
   static const autosaveDelays = [500, 2000, 5000, 15000, 30000];
@@ -538,7 +609,7 @@ class Settings extends ChangeNotifier {
   /// The template New project opens (`lib/model/templates.dart` ids; '' is a blank project).
   String newProjectTemplate = '';
 
-  /// Settings › Export: what the exporter opens with.
+  /// Settings › Projects and export › Export: what the exporter opens with.
   String exportKind = 'loop';
   int exportSampleRate = 48000;
   bool exportFloat32 = false;
@@ -693,6 +764,17 @@ class Settings extends ChangeNotifier {
         'export_float32': exportFloat32,
         'export_seconds': exportSeconds,
         'export_naming': exportNaming.name,
+        'pause_on_unplug': pauseOnUnplug,
+        'safety_limiter': safetyLimiter,
+        'keep_awake': keepAwake.name,
+        'new_track_monitor': newTrackMonitor,
+        'new_track_instrument': newTrackInstrument,
+        'track_colors': trackColors.name,
+        'track_naming': trackNaming.name,
+        'remember_zoom': rememberZoom,
+        if (projectViews.isNotEmpty)
+          'project_views': {for (final e in projectViews.entries) e.key: [e.value.zoom, e.value.left, e.value.top]},
+        'left_handed': leftHanded,
       };
 
   /// The settings file's layout: 1 (no `settings_version`) had no Audio, MIDI, Editing, Projects or Export pages; 2
@@ -875,6 +957,27 @@ class Settings extends ChangeNotifier {
     exportFloat32 = flag('export_float32') ?? exportFloat32;
     exportSeconds = num_('export_seconds', 1, 120) ?? exportSeconds;
     exportNaming = pick(ExportNaming.values, j['export_naming'], exportNaming);
+    pauseOnUnplug = flag('pause_on_unplug') ?? pauseOnUnplug;
+    safetyLimiter = flag('safety_limiter') ?? safetyLimiter;
+    keepAwake = pick(KeepAwake.values, j['keep_awake'], keepAwake);
+    if (const ['off', 'auto', 'on'].contains(j['new_track_monitor'])) newTrackMonitor = j['new_track_monitor'] as String;
+    final instrument = j['new_track_instrument'];
+    if (instrument is String && instrument.length <= 128) newTrackInstrument = instrument;
+    trackColors = pick(TrackColorScheme.values, j['track_colors'], trackColors);
+    trackNaming = pick(TrackNaming.values, j['track_naming'], trackNaming);
+    rememberZoom = flag('remember_zoom') ?? rememberZoom;
+    if (j['project_views'] case final Map views) {
+      projectViews.clear();
+      for (final e in views.entries.take(maxProjectViews)) {
+        final v = e.value;
+        if (e.key is! String || (e.key as String).length > 128 || v is! List || v.length != 3) continue;
+        if (!v.every((x) => x is num && x.isFinite)) continue;
+        final z = (v[0] as num).toDouble(), left = (v[1] as num).toDouble(), top = (v[2] as num).toDouble();
+        if (z <= 0 || z > 1000 || left < 0 || top < 0) continue;
+        projectViews[e.key as String] = (zoom: z, left: left, top: top);
+      }
+    }
+    leftHanded = flag('left_handed') ?? leftHanded;
   }
 
   Future<void> _load() async {

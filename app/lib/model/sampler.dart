@@ -1,5 +1,6 @@
 // The sampler (org.caw.sampler, docs/engine.md "Sampler"): its zones as the app edits them (keys and velocities,
 // root, loop points, round robins), kept as the instrument entry's state JSON, and making zones from dropped files.
+import 'track_defaults.dart';
 import 'dart:convert';
 import 'dart:math' as math;
 
@@ -215,7 +216,7 @@ extension SamplerEdit on AppState {
 
   /// A new track playing the sampler, with [zones] (or none).
   LayerDoc addSamplerTrack({String name = 'Sampler', SamplerState? zones}) {
-    final track = addEmptyTrack(name: name);
+    final track = addEmptyTrack(name: name, kind: NewTrackKind.sampler);
     setNativeInstrument(track, samplerComponentId);
     if (zones != null) setSamplerState(track, zones);
     return track;

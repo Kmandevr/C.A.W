@@ -32,7 +32,7 @@ updated: 2026-11-18
 - **Footer:** an output meter with a clip light, Mix where the device has one, and Output.
 - **Auto gain:** an ear icon in the header.
   - It's a listening aid: it matches the loudness, not the peaks, so you compare by ear and not by level. Its trim shows as a number.
-  - It's off by default. **Settings › Audio** has it app-wide, with a per-device switch.
+  - It's off by default. **Settings › Sound** has it app-wide, with a per-device switch.
   - It is never applied silently to a render. It plays in a render only when its device's switch is on, as for any setting you choose.
 - **Families share a visual language:**
 

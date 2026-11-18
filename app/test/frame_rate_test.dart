@@ -271,7 +271,7 @@ void main() {
     addTearDown(tester.view.reset);
     await tester.pumpWidget(MaterialApp(theme: Neon.theme(), home: SettingsPage(settings: s, onEditKeys: (_) async {})));
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('section-performance')));
+    await tester.tap(find.byKey(const ValueKey('section-app')));
     await tester.pumpAndSettle();
     final row = find.byKey(const ValueKey('setting-performance.frameRate'));
     await tester.ensureVisible(row);
@@ -366,7 +366,7 @@ void main() {
     addTearDown(tester.view.reset);
     await tester.pumpWidget(MaterialApp(theme: Neon.theme(), home: SettingsPage(settings: s, onEditKeys: (_) async {})));
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('section-performance')));
+    await tester.tap(find.byKey(const ValueKey('section-app')));
     await tester.pumpAndSettle();
     final row = find.byKey(const ValueKey('setting-performance.frameRate'));
     await tester.ensureVisible(row);

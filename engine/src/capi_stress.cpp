@@ -237,14 +237,17 @@ RunResult runLive(Job& j) {
         startFrame.push_back(at);
         at += meter->frames[static_cast<size_t>(c)];
     }
-    // The parts a live run has: the callback's device I/O (the FIFO, the input bridge) and the rest, Engine::process
-    // (a live run is not profiled, so that stays whole, as "other").
+    // The parts a live run has: the callback's device I/O (the FIFO, the input bridge), the live output's safety
+    // stage (the mono check and safety limiter, API 35: "master", which a live run's process() doesn't split out)
+    // and the rest, Engine::process (a live run is not profiled, so that stays whole, as "other").
     if (!us.empty()) {
         std::vector<uint64_t> partNs(us.size() * kPartCount, 0);
         for (size_t c = 0; c < us.size(); ++c) {
             const double io = std::min<double>(us[c], meter->deviceIo[static_cast<size_t>(from) + c]);
+            const double safe = std::min<double>(us[c] - io, meter->safety[static_cast<size_t>(from) + c]);
             partNs[c * kPartCount + static_cast<int>(Part::DeviceIo)] = static_cast<uint64_t>(io * 1000.0);
-            partNs[c * kPartCount + static_cast<int>(Part::Other)] = static_cast<uint64_t>((us[c] - io) * 1000.0);
+            partNs[c * kPartCount + static_cast<int>(Part::Master)] = static_cast<uint64_t>(safe * 1000.0);
+            partNs[c * kPartCount + static_cast<int>(Part::Other)] = static_cast<uint64_t>((us[c] - io - safe) * 1000.0);
         }
         out.parts = partRows(partNs.data(), static_cast<int64_t>(us.size()));
     }

@@ -1,4 +1,4 @@
-// The code editors' font size, tab width, line numbers and wrap from Settings › Code editor, read where editors build.
+// The code editors' font size, tab width, line numbers and wrap from Settings › App › Code editor, read where editors build.
 
 /// Set by Settings whenever it changes (as Haptics.strength and Motion are), so the editors need no settings object.
 class CodePrefs {

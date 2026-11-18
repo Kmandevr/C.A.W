@@ -1,4 +1,4 @@
-// Goldens of key screens in light (and Flat) palettes: Arrange at phone size, a device editor and Settings › Look,
+// Goldens of key screens in light (and Flat) palettes: Arrange at phone size, a device editor and Settings › Appearance and feel,
 // in Dawn light, Neon light and Flat light or dark, so light mode is checked by eye where it matters most.
 import 'package:caw/model/app_state.dart';
 import 'package:caw/model/device_display.dart';
@@ -104,11 +104,11 @@ void main() {
   }
 
   for (final e in looks.entries) {
-    testWidgets('golden: Settings › Look at phone size, ${e.key}', (tester) async {
+    testWidgets('golden: Settings › Appearance and feel at phone size, ${e.key}', (tester) async {
       final s = Settings();
       _look(s, e.value.$1, e.value.$2);
       await pumpGolden(tester, SettingsPage(settings: s), goldenSizes['phone']!);
-      await tester.tap(find.text('Look'));
+      await tester.tap(find.text('Appearance and feel'));
       await tester.pumpAndSettle();
       expect(find.text('Theme family'), findsOneWidget);
       expect(find.text('Follow system'), findsOneWidget);

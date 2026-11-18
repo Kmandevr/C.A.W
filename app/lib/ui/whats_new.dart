@@ -1,4 +1,4 @@
-// What's new: the bundled changelog as a page (Settings › About and beta › What's new) and the sheet shown once
+// What's new: the bundled changelog as a page (Settings › App › About › What's new) and the sheet shown once
 // after an update with the new version's entry ("See all changes", "Close"); docs/app.md "Updates".
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
