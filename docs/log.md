@@ -6,6 +6,7 @@ updated: 2026-11-18
 
 # Log
 
+- 2026-11-18: audit of old open issues and branches: closed #28, #46, #51, #53, #139, #152, #154, #155, #158 and #187 with evidence; performance leftovers collected in #245; the engine CI's build parallelism capped (the sanitizer job ran its runner out of memory); a stale app.md paragraph on the Android compiler and component screens corrected.
 - 2026-11-18: 1.0.6 becomes the usability release (#242, #244, zoom, tap-along); security and the companion app move to 1.0.7, later batches up by one (owner).
 - 2026-11-18: v1.0.5-alpha.2 published (PR #243, the #241 hotfix).
 - 2026-11-18: hotfix 1.0.5-alpha.2 prepared (#241): version, changelog; companion app decisions recorded (#239).
