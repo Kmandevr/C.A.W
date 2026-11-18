@@ -6,6 +6,15 @@ updated: 2026-11-18
 
 # Decisions
 
+## 2026-11-18: The companion app ships updater and trust first, in the AutoStacc look (owner, #239)
+
+**Decision (owner, 2026-11-18):** in 1.0.6, the companion app takes:
+- updates and the update check;
+- telemetry and feedback;
+- plug-in trust and the known-bad list.
+
+The AutoStacc hub (files, account, cloud library) grows into it later. Its look is AutoStacc's own branding and layout, ready to become the hub. The owner supplies the brand (logo, colours, name) before the screens are built.
+
 ## 2026-11-18: Least privilege first, a companion app, sandboxing optional (owner)
 
 **Decision (owner, 2026-11-18, "probably the route"):** the main defence against bad third-party code is giving the main app as few powers as it can do with, not a sandbox by default. The design is in the [plug-in hosting plan](plugin-hosting-plan.md#least-privilege-and-the-companion-app).
