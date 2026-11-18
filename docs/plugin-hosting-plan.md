@@ -65,6 +65,26 @@ updated: 2026-11-18
   - the app's own builder signs what it builds from source the user saw, with a non-exportable device key;
   - unsigned code needs an explicit Trusted choice with a plain warning.
 
+### The pre-load scan
+
+**[Proposal]** (owner direction, 2026-11-18: a silent antivirus that looks at each plug-in before it is ever launched).
+- **When:** once per exact file hash, when a plug-in is added or built, and again before load if the file changed. **Before `dlopen`/`LoadLibrary`**, because loading already runs the library's static constructors (`.init_array`, and TLS callbacks on Windows). The verdict is cached by hash, so it costs nothing on the audio path, at play or at project open.
+- **Where:** in the engine (one C++ parser for the app and a `caw` CLI command, tested against fixtures in CI), off the audio thread, on a worker. The scanner parses untrusted files, so it runs with size and count limits and is fuzzed in CI.
+- **Two policies:**
+  - **C.A.W components** need only the host API, maths, memory and the C++ runtime, so they are held to an **allowlist of imports**. Anything else is flagged.
+  - **CLAP/VST3 binaries** legitimately use much more (GUIs, files, often a licence check over the network), so for them the same findings warn rather than block.
+- **What it looks for** (cheap, static):
+  - **Imports:** networking (`socket`, `connect`, `getaddrinfo`, WinHTTP, WinINet, Winsock); starting programs (`execve`, `fork`, `system`, `popen`, `CreateProcess`, `ShellExecute`); loading more code at run time (`dlopen`, `dlsym`, `LoadLibrary`, `GetProcAddress`); making memory executable (`mprotect`, `VirtualProtect`, `VirtualAlloc` with execute); debugging other processes (`ptrace`); keyboard hooks, the registry, the clipboard; encryption APIs (a ransomware hint); and on Android `JNI_OnLoad` or other JNI use, which reaches Android's Java APIs.
+  - **Direct system calls** in code sections, which bypass the import table: `svc #0` on Arm64 (fixed-width instructions, so a reliable scan) and `syscall` on x86-64 (a byte scan, so a hint only).
+  - **Code that runs on load:** TLS callbacks, and an unusual amount of constructor code.
+  - **Packing:** sections that are both writable and executable, high-entropy code or large high-entropy data, packer section names.
+  - **Strings:** URLs and IP addresses, shell paths (`/system/bin/sh`, `cmd.exe`, `powershell`), `.onion`, browser-profile or wallet paths.
+  - **Reputation:** the hub's known-bad and known-good hashes, and the signature state.
+  - **Source builds:** the source too, for networking and process headers, inline assembly and platform headers.
+- **Verdicts:** clean (silent), notice, warning (the user sees why before choosing Trusted), blocked. **Open (owner):** which findings block and which only warn.
+- **Limits:** it stops lazy and obvious malware. Code built to evade it (looking functions up by walking memory, encrypted payloads, harmless-looking imports) gets past, as it does with any static scanner. A false positive must never silently break a legitimate plug-in.
+- **Dependencies:** none needed; a small ELF/PE reader of C.A.W's own is enough. **[Assumption]** LIEF (Apache-2.0) for parsing and YARA (BSD-3-Clause) for signature rules are permissive candidates; check the licences before adopting either.
+
 **[Assumption]** the API names and behaviour above (AMSI, `revokeSelfPermissionsOnKill`, signature permissions, `sharedUserId`) come from platform documentation not re-read this session; check each before building on it.
 
 ## Silent steps
@@ -98,5 +118,5 @@ updated: 2026-11-18
 4. What users see on a crash: bypass, mute, or a notice?
 5. Are plug-in GUIs (VST3 editors, CLAP GUI embedding) in scope for 1.1.0?
 6. Which trust a plug-in gets the first time it is seen (already open in [vision](vision.md)).
-7. Which flagging and signing parts to build ([least privilege](#least-privilege-and-the-companion-app)), and whether unsigned code may load at all.
+7. Which flagging and signing parts to build ([least privilege](#least-privilege-and-the-companion-app)), whether unsigned code may load at all, which pre-load scan findings block, and how a warning looks.
 8. Which release the companion app comes in, and whether it starts as the updater alone or as the AutoStacc hub.

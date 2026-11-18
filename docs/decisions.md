@@ -13,6 +13,7 @@ updated: 2026-11-18
 - **A companion app.** Updates, installs and the network move into a second app with its own package, so its own permissions. The main app, where plug-ins load, drops `REQUEST_INSTALL_PACKAGES`, `UPDATE_PACKAGES_WITHOUT_USER_ACTION` and, if every network use moves, `INTERNET`. The owner expects it to grow into the AutoStacc hub (files, the account and more), which keeps account tokens out of the process that loads plug-ins.
 - **Sandboxing is offered, not the default.** Isolated (and any interpreted format) stays available for users who want it. The default trust for never-seen code is still open ([vision](vision.md)).
 - **Flagging and a handshake:** the owner wants bad code flagged (antivirus or similar) and something plug-ins must pass before they load. The proposals (AMSI scans on Windows, signed plug-ins, a revocation list from the hub) are in the plan, for the owner to choose.
+- **A silent built-in scanner (owner):** every plug-in gets a quick look before it is ever loaded, for obvious back doors or malicious intent. It is quiet when nothing is found. It catches the easy cases and is not a substitute for least privilege. The design is in the plan ([the pre-load scan](plugin-hosting-plan.md#the-pre-load-scan)).
 
 ## 2026-11-17: Each platform's low-latency path; ASIO and rtkit stay out (owner's request, #237)
 
