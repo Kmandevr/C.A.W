@@ -1,0 +1,1 @@
+{"format":"caw.capabilities","version":1,"capabilities":[{"id":"background_threads","reason":"Renders the \"tail\" on a worker; see C:\\presets; café"},{"id":"internet","reason":"Downloads the factory presets","sites":["presets.example.com","cdn.example.org"]}]}
