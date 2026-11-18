@@ -8,6 +8,7 @@
 
 #include "caw/library/dynamics.hpp"
 #include "caw/library/filter.hpp"
+#include "fx_merged.h"
 #include "sample_time.h"
 
 // Original code (C.A.W. is Apache-2.0). The compressor's soft knee is the textbook curve (Giannoulis, Massberg and
@@ -64,7 +65,7 @@ const ModuleDescriptor& compDescriptor() {
     return d;
 }
 
-class Compressor final : public EffectBase {
+class Compressor : public EffectBase {
 public:
     const ModuleDescriptor& descriptor() const noexcept override { return compDescriptor(); }
 
@@ -231,7 +232,7 @@ const ModuleDescriptor& limDescriptor() {
     return d;
 }
 
-class Limiter final : public EffectBase {
+class Limiter : public EffectBase {
 public:
     const ModuleDescriptor& descriptor() const noexcept override { return limDescriptor(); }
 
@@ -371,7 +372,7 @@ const ModuleDescriptor& gateDescriptor() {
     return d;
 }
 
-class Gate final : public EffectBase {
+class Gate : public EffectBase {
 public:
     const ModuleDescriptor& descriptor() const noexcept override { return gateDescriptor(); }
 
@@ -469,7 +470,7 @@ const ModuleDescriptor& transientDescriptor() {
 // Two pairs of level followers on the louder side: a fast against a slow attack finds the onsets (the fast one
 // is ahead), a fast against a slow release finds the tails (the slow one stays up). Their ratios in dB, up to
 // 24 dB, scaled by `attack` and `sustain` (+-1), are the gain change.
-class TransientShaper final : public EffectBase {
+class TransientShaper : public EffectBase {
 public:
     const ModuleDescriptor& descriptor() const noexcept override { return transientDescriptor(); }
 
@@ -497,6 +498,12 @@ protected:
         first_ = false;
     }
     void run(const float* inL, const float* inR, float* outL, float* outR, uint32_t n) noexcept override {
+        // The optional transient and sustain outputs (the merged Transient's; null while unconnected): the output
+        // split by how far the fast onset follower is over the slow one, the two parts summing to the output.
+        float* tl = optionalOutLeft(0);
+        float* tr = optionalOutRight(0);
+        float* sl = optionalOutLeft(1);
+        float* sr = optionalOutRight(1);
         for (uint32_t i = 0; i < n; ++i) {
             const double l = inL[i], r = inR[i];
             const double x = std::max(l < 0 ? -l : l, r < 0 ? -r : r);
@@ -513,6 +520,12 @@ protected:
             const double g = (1.0 + (lib::dbToGain(db) - 1.0) * mix0_) * out0_;
             outL[i] = static_cast<float>(l * g);
             outR[i] = static_cast<float>(r * g);
+            if (tl || sl) {
+                const double w = fa > 1e-9 ? std::clamp(1.0 - sa / fa, 0.0, 1.0) : 0.0;
+                const float wl = static_cast<float>(l * g * w), wr = static_cast<float>(r * g * w);
+                if (tl) tl[i] = wl, tr[i] = wr;
+                if (sl) sl[i] = outL[i] - wl, sr[i] = outR[i] - wr;
+            }
         }
     }
     uint32_t fillDisplay(float* out, bool) noexcept override {
@@ -531,12 +544,42 @@ private:
     bool first_ = true;
 };
 
+// The transient shaper as the merged Transient's variant: its own descriptor, and the optional outputs.
+class TransientWithPorts final : public TransientShaper {
+public:
+    explicit TransientWithPorts(const ModuleDescriptor& d) noexcept : d_(d) {}
+    const ModuleDescriptor& descriptor() const noexcept override { return d_; }
+    std::span<const OptionalPort> optionalPorts() const noexcept override {
+        static const OptionalPort ports[] = {{"transient", "Transient", false}, {"sustain", "Sustain", false}};
+        return ports;
+    }
+
+private:
+    const ModuleDescriptor& d_;
+};
+
 template <class T>
 ModuleProcessor* make() noexcept {
     return new (std::nothrow) T();
 }
 
+template <class T>
+ModuleProcessor* makeAs(const ModuleDescriptor& variant) noexcept {
+    return new (std::nothrow) T(variant);
+}
+
 }  // namespace
+
+// The classes as merged variants (builtin_fx_merged_dynamics.cpp): the old descriptors, and an instance under a
+// variant's descriptor.
+const ModuleDescriptor& legacyCompressorDescriptor() { return compDescriptor(); }
+const ModuleDescriptor& legacyLimiterDescriptor() { return limDescriptor(); }
+const ModuleDescriptor& legacyGateDescriptor() { return gateDescriptor(); }
+const ModuleDescriptor& legacyTransientDescriptor() { return transientDescriptor(); }
+ModuleProcessor* makeCompressorAs(const ModuleDescriptor& v) noexcept { return makeAs<AsVariant<Compressor>>(v); }
+ModuleProcessor* makeLimiterAs(const ModuleDescriptor& v) noexcept { return makeAs<AsVariant<Limiter>>(v); }
+ModuleProcessor* makeGateAs(const ModuleDescriptor& v) noexcept { return makeAs<AsVariant<Gate>>(v); }
+ModuleProcessor* makeTransientAs(const ModuleDescriptor& v) noexcept { return makeAs<TransientWithPorts>(v); }
 
 void registerDynamics(ModuleRegistry& registry) {
     registry.add(compDescriptor(), &make<Compressor>);
