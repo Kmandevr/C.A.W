@@ -1,6 +1,6 @@
 // The companion protocol's caller check (docs/companion-protocol.md), as pure Kotlin with no Android types, so the
-// companion app reuses it and a JVM test can run it: one package for the sender's uid, then its signer (and a
-// permission, only when one is asked for).
+// companion app reuses it and a JVM test can run it: one package for the sender's uid, then its signer against a
+// pinned certificate digest (and a permission, only when one is asked for).
 package com.kmandevr.caw
 
 /** What the check reads from the system; `AndroidPackageFacts` (CompanionClient.kt) answers from PackageManager. */
@@ -14,8 +14,11 @@ interface PackageFacts {
     /** API 28+: PackageManager.hasSigningCertificate(uid, sha256, CERT_INPUT_SHA256). */
     fun hasCertificateSha256(uid: Int, sha256: ByteArray): Boolean
 
-    /** API 26 and 27: PackageManager.checkSignatures(uid1, uid2) >= SIGNATURE_MATCH. */
-    fun signaturesMatch(uid1: Int, uid2: Int): Boolean
+    /**
+     * The SHA-256 of each of [pkg]'s current signing certificates, or null when it can't be read: API 28+
+     * `SigningInfo.apkContentsSigners`, API 26 and 27 `PackageInfo.signatures`.
+     */
+    fun currentSignerSha256(pkg: String): List<ByteArray>?
 }
 
 object CompanionCallerCheck {
@@ -26,31 +29,48 @@ object CompanionCallerCheck {
     const val PERMISSION = "com.kmandevr.caw.permission.COMPANION"
     const val MAIN_PACKAGE = "com.kmandevr.caw"
 
-    /** [Assumption] until the owner names the companion (docs/companion-protocol.md). */
-    const val COMPANION_PACKAGE = "com.kmandevr.caw.companion"
-    const val COMPANION_SERVICE = "com.kmandevr.caw.companion.CompanionService"
+    /** The companion is the AutoStacc Hub (owner, 2026-11-18). */
+    const val COMPANION_PACKAGE = "com.autostacc.hub"
+    const val COMPANION_SERVICE = "com.autostacc.hub.CompanionService"
 
     /** Android 9 (API 28): hasSigningCertificate. */
     const val API_SIGNING_CERTIFICATE = 28
 
-    enum class Verdict { ALLOWED, NO_SENDER, NOT_ONE_PACKAGE, WRONG_PACKAGE, NO_PERMISSION, WRONG_SIGNER }
+    enum class Verdict { ALLOWED, NO_PIN, NO_SENDER, NOT_ONE_PACKAGE, WRONG_PACKAGE, NO_PERMISSION, WRONG_SIGNER }
 
     /**
-     * Whether a message whose `Message.sendingUid` is [sendingUid] comes from [expectedPackage], signed with this
-     * app's own key. [ownCertSha256] is the SHA-256 of each of this app's current signing certificates, read at run
-     * time (no digest is written in the source); every one must be the sender's. Below API 28 the signatures of
-     * [myUid] and the sender are compared instead. [requiredPermission], when given, must be held too; the main app
-     * passes none, since the signer is the boundary.
+     * A pinned SHA-256 certificate digest from build configuration: 64 hex digits, or 32 colon-separated pairs, in
+     * either case. Null when empty or malformed, which the check treats as "no companion is accepted".
+     */
+    fun parsePin(text: String?): ByteArray? {
+        val t = text?.trim() ?: return null
+        val hex = when {
+            t.length == 64 -> t
+            t.length == 95 && (0 until 31).all { t[3 * it + 2] == ':' } -> t.replace(":", "")
+            else -> return null
+        }
+        if (hex.length != 64 || !hex.all { it in '0'..'9' || it in 'a'..'f' || it in 'A'..'F' }) return null
+        return ByteArray(32) { hex.substring(2 * it, 2 * it + 2).toInt(16).toByte() }
+    }
+
+    /**
+     * Whether a message whose `Message.sendingUid` is [sendingUid] comes from [expectedPackage], signed with the key
+     * whose certificate's SHA-256 is [pinnedSha256]. No pin (null or not 32 bytes): nothing is accepted. The package
+     * must have exactly one current signer, and that signer must be the pinned one; on API 28+ the system must also
+     * confirm the pin for the uid (hasSigningCertificate). A package signed by several keys is refused, and so is one
+     * whose key rotated away from the pin (the pinned key only in its past lineage): the pin then has to follow the
+     * rotation. [requiredPermission], when given, must be held too; the main app passes none, since the signer is the
+     * boundary.
      */
     fun check(
         sendingUid: Int,
         expectedPackage: String,
+        pinnedSha256: ByteArray?,
         sdkInt: Int,
-        myUid: Int,
-        ownCertSha256: List<ByteArray>,
         facts: PackageFacts,
         requiredPermission: String? = null,
     ): Verdict {
+        if (pinnedSha256 == null || pinnedSha256.size != 32) return Verdict.NO_PIN
         // -1: not posted through a Messenger.
         if (sendingUid < 0) return Verdict.NO_SENDER
         val packages = facts.packagesForUid(sendingUid) ?: return Verdict.NOT_ONE_PACKAGE
@@ -60,12 +80,10 @@ object CompanionCallerCheck {
         if (requiredPermission != null && !facts.holdsPermission(expectedPackage, requiredPermission)) {
             return Verdict.NO_PERMISSION
         }
-        val signed = if (sdkInt >= API_SIGNING_CERTIFICATE) {
-            ownCertSha256.isNotEmpty() && ownCertSha256.all { it.size == 32 && facts.hasCertificateSha256(sendingUid, it) }
-        } else {
-            facts.signaturesMatch(myUid, sendingUid)
-        }
-        return if (signed) Verdict.ALLOWED else Verdict.WRONG_SIGNER
+        val signers = facts.currentSignerSha256(expectedPackage)
+        val current = signers != null && signers.size == 1 && signers[0].contentEquals(pinnedSha256)
+        val system = sdkInt < API_SIGNING_CERTIFICATE || facts.hasCertificateSha256(sendingUid, pinnedSha256)
+        return if (current && system) Verdict.ALLOWED else Verdict.WRONG_SIGNER
     }
 
     /** The bound on a body (UTF-8 bytes), in either direction. */

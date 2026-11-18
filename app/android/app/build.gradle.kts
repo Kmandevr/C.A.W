@@ -5,6 +5,18 @@ plugins {
     id("dev.flutter.flutter-gradle-plugin")
 }
 
+// The AutoStacc Hub's signing-certificate SHA-256 (docs/companion-protocol.md): -PhubCertSha256=<64 hex digits, or 32
+// colon-separated pairs>, which CI takes from the repository variable HUB_CERT_SHA256. Normalised to uppercase hex
+// without colons; empty (the default) means the app accepts no companion. A malformed value fails the build.
+val hubCertSha256: String = run {
+    val raw = (findProperty("hubCertSha256") as String?)?.trim().orEmpty()
+    val format = Regex("[0-9A-Fa-f]{64}|[0-9A-Fa-f]{2}(:[0-9A-Fa-f]{2}){31}")
+    if (raw.isNotEmpty() && !format.matches(raw)) {
+        throw GradleException("hubCertSha256 must be a SHA-256 digest: 64 hex digits or 32 colon-separated pairs")
+    }
+    raw.replace(":", "").uppercase()
+}
+
 android {
     namespace = "com.kmandevr.caw"
     compileSdk = flutter.compileSdkVersion
@@ -27,6 +39,8 @@ android {
         // flag during build.
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+        // The pinned companion signer (above); CompanionClient.kt accepts no companion while it is empty.
+        buildConfigField("String", "HUB_CERT_SHA256", "\"$hubCertSha256\"")
         // 64-bit ARM: the phones C.A.W targets. Every ABI listed builds the engine again.
         ndk {
             abiFilters += listOf("arm64-v8a")
