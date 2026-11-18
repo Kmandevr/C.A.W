@@ -28,13 +28,13 @@ Workflows:
 - `.github/workflows/compiler.yml`: builds the on-device C++ compiler (`engine/compiler/`: Clang and LLD 23.1.5 as one library, LLVM cached per version) for Android ARM64 and Linux, assembles its offline data bundle, and on Linux compiles test components for Android ARM64 with it; publishes the Android library and the bundle.
 - `.github/workflows/cpp-components.yml`: builds the installed `CAW::SDK` package, a manifest-driven example component and the example instrument (`examples/cpp/poly-synth/`) on Linux x64, Windows x64 and Android ARM64 (NDK r30); desktop jobs run their contract tests (through each component's C interface, `caw_get_component_v3`) and every target publishes its component artifact; a CLAP job builds the example as a `.clap` plug-in for Linux x64 and Windows x64 (artifacts `caw-minimal-clap-*`) and runs the CLAP test host on Linux.
 - `.github/workflows/quick-check.yml`: the chat-agent route. Pushes to `gpt/**` branches run the commands named by `run:` lines in the commit message (targeted tests, sanitizer runs, builds, renders, widget-test screenshots, git diff/log/show/blame, search and Graphify; `scripts/agent-run.js`) or, with none, the docs guard, a Linux x64 engine build and tests, the example checks and (when `app/` changed) Dart analysis and tests. No app builds. It writes one short report per branch to `quick-check/<branch with / as -->.md` on the `agent-results` branch (RUNNING as soon as a run starts, with `quick-check/INDEX.md` listing every branch; screenshots under `screens/`) ([AGENTS.md](AGENTS.md)). Full CI runs once the branch opens a pull request.
-- `.github/workflows/agent-context.yml`: on pushes to `Main` that change `AGENTS.md`, `CLAUDE.md`, `docs/vision.md` or a rule, rebuilds `START.md` on `agent-results`: one file bundling everything a chat agent reads first (`scripts/agent-context.js`).
+- `.github/workflows/agent-context.yml`: on pushes to `Main` that change `AGENTS.md`, `CLAUDE.md`, `docs/roadmap.md` or a rule, rebuilds `START.md` on `agent-results`: one file bundling everything a chat agent reads first (`scripts/agent-context.js`).
 - `.github/workflows/publish-agent-results.yml`: reusable step the two workflows above use to commit their file to `agent-results`; it is the only job with write access and never runs branch code.
 - `.github/workflows/clear-status-on-close.yml`: removes `status:` labels when an issue closes.
 
 ## Working on it
 
-Tasks and bugs are GitHub Issues. Security problems: [SECURITY.md](SECURITY.md).
+Bug reports are GitHub Issues; features and plans are tracked privately. Security problems: [SECURITY.md](SECURITY.md).
 
 ## Licence
 

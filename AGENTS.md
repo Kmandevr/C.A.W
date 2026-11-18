@@ -10,7 +10,7 @@ At the start of every task/chat, read:
 
 1. [`AGENTS.md`](AGENTS.md) (this file)
 2. [`CLAUDE.md`](CLAUDE.md) for project-wide rules and workflow
-3. [`docs/vision.md`](docs/vision.md) for the owner's product direction and principles (plans and open questions are tracked privately)
+3. [`docs/roadmap.md`](docs/roadmap.md) for what is promised publicly (the vision, plans and open questions are tracked privately)
 4. The applicable rule file(s) below before changing files in that area
 
 Do not read the whole repository by default. Follow the layered reading guidance in `CLAUDE.md`; open only the files needed for the task. The code is the source of truth for what is built. Keep facts, proposals, assumptions and open questions distinct. Ask the owner before settling an open question.
@@ -42,7 +42,7 @@ The skills contain the detailed procedures. Read the linked `SKILL.md` when the 
 | Navigate project/file relationships or Dart/C++ symbols | [`.claude/skills/code-nav/SKILL.md`](.claude/skills/code-nav/SKILL.md) |
 | Leave a durable resume note at a multi-step task boundary | [`.claude/skills/handoff/SKILL.md`](.claude/skills/handoff/SKILL.md) |
 
-Use GitHub Issues as the task/bug tracker; do not create a separate task list. A PR that finishes an issue must include `Closes #N`. Before each push, test the changed area and run the docs check; follow the release-check skill before calling the work ready. Never merge or approve your own PR.
+Use GitHub Issues as the tracker (this repository's for bugs that are fine to show the public; features and plans are tracked privately); do not create a separate task list. A PR that finishes an issue must include `Closes #N`. Before each push, test the changed area and run the docs check; follow the release-check skill before calling the work ready. Never merge or approve your own PR.
 
 ## Working habits
 
@@ -118,7 +118,7 @@ Commands run without a shell, so arguments are taken literally. Paths must be re
 
 ### The loop
 
-1. **Start or resume.** Fetch `START.md` from the `agent-results` branch (https://raw.githubusercontent.com/Kmandevr/C.A.W/agent-results/START.md). CI regenerates it from `Main` whenever this file, `CLAUDE.md`, `docs/vision.md` or a rule changes, and it bundles all of them, so this one fetch replaces reading them separately. Answer its confirmation list, then read the progress comment and the report if they exist and resume at the next action. Don't re-read files or re-review steps the comment marks done.
+1. **Start or resume.** Fetch `START.md` from the `agent-results` branch (https://raw.githubusercontent.com/Kmandevr/C.A.W/agent-results/START.md). CI regenerates it from `Main` whenever this file, `CLAUDE.md`, `docs/roadmap.md` or a rule changes, and it bundles all of them, so this one fetch replaces reading them separately. Answer its confirmation list, then read the progress comment and the report if they exist and resume at the next action. Don't re-read files or re-review steps the comment marks done.
 2. **Branch.** New tasks work on `gpt/<issue>-<short-name>`, created from `Main`. Pushes there run only the Quick check, never the full CI matrix or the app builds, and need no pull request.
 3. **Plan.** Write at most five small steps into the progress comment. A step is one logical change that can pass the Quick check by itself.
 4. **One step at a time.** Open only the files the step needs; prefer search and line ranges to whole files. Use `grep`, `refs`, `def`, `graph` and `tree` (above) to find what to open. Write the change, then fetch each written file again to check for connector mangling. A newer push cancels the older run, so commit the step's files one after another and put the `run:` lines (the narrowest tests that prove the step, such as `test <name>`) in the last commit.

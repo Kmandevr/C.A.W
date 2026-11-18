@@ -7,7 +7,7 @@ covers: [app/pubspec.yaml, app/packages/caw_services/pubspec.yaml, engine/CMakeL
 
 # Architecture
 
-The technical plan for the owner's brief in [vision](vision.md). The C++ language, SDK and shared component architecture are specified in [C++ creation platform](cpp-creation-platform.md). The build order is planned privately. Why each choice was made: [decisions](decisions.md).
+The technical plan for the owner's brief (the vision is tracked privately). The C++ language, SDK and shared component architecture are specified in [C++ creation platform](cpp-creation-platform.md). The build order is planned privately. Why each choice was made: [decisions](decisions.md).
 
 **[Fact, 2026-11-13]** The app's version is set in `app/pubspec.yaml` and mirrored in `app/lib/version.dart` (a test keeps them equal): 1.0.6-alpha.1 now. Each release adds its entry to the repository's `CHANGELOG.md` first, bundled in the app as What's new and placed at the top of the release's notes ([README](../README.md)). Versions keep the `-alpha.N` suffix until the owner calls the official release ([decisions](decisions.md)).
 
@@ -18,7 +18,7 @@ Labels used below:
 
 ## Product focus and capability
 
-C.A.W. is not a conventional DAW and doesn't have to work like one, but it must be able to do everything a good DAW can do, because there is no good DAW for mobile ([vision](vision.md)). Architecture choices serve that capability through C.A.W.'s own model (code, patterns, one shared project and engine) on a lightweight, phone-first core.
+C.A.W. is not a conventional DAW and doesn't have to work like one, but it must be able to do everything a good DAW can do, because there is no good DAW for mobile. Architecture choices serve that capability through C.A.W.'s own model (code, patterns, one shared project and engine) on a lightweight, phone-first core.
 
 ## C++ creation platform direction
 

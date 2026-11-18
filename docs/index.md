@@ -17,7 +17,7 @@ Project memory for C.A.W. Open this docs/ folder as a vault in Obsidian, or read
 - [Native engine recovery](engine-recovery.md): short resume protocol, current checkpoint and critical architecture facts for interrupted sessions.
 - [Native engine progress](engine-progress.md): milestone ledger with actual implementation status, evidence, commits, CI, blockers and exact next actions.
 - [Task 1 UI implementation handoff](task-1-ui-handoff.md): concise current UI implementation pointer and verified workflow gaps; no stale branch/CI snapshot.
-- [Vision](vision.md): owner-approved product direction, actual platform support and current scope boundaries.
+- [Roadmap](roadmap.md): the work C.A.W has promised and hasn't built yet (VST3 and CLAP hosting, iOS releases); the vision and other plans are private.
 - [Architecture](architecture.md): verified technical architecture and engine/app boundaries
 - [C++ creation platform](cpp-creation-platform.md): owner-approved C++ language direction, the Library/SDK, shared component model, code editor, real-time boundaries and migration
 - [Engine integration contract](engine-integration.md): how projects, add-ons, the app, library and CLI share native capabilities and assets

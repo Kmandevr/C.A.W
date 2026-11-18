@@ -1,16 +1,16 @@
 # C.A.W
 
-**C.A.W** (Code Auditioning Workspace; crow logo) is an experimental code-driven sound-design and music workspace. The Flutter app ships Android and Windows builds; Linux/Windows CI also builds and tests the C++20 engine. The app has three sections: Build, Files and Arrange. [docs/app.md](docs/app.md) is shipped app behaviour, [docs/engine-build-status.md](docs/engine-build-status.md) the native side and its boundaries; planned work lives in the private Kmandevr/AutoStacc-Hub (docs/caw/). The beta sends anonymous telemetry and optional feedback through a relay; audio stays local, and there is no in-app AI or cloud audio. AI coding assistants are development tools, not a feature. The owner's product direction is in [docs/vision.md](docs/vision.md).
+**C.A.W** (Code Auditioning Workspace; crow logo) is an experimental code-driven sound-design and music workspace. The Flutter app ships Android and Windows builds; Linux/Windows CI also builds and tests the C++20 engine. The app has three sections: Build, Files and Arrange. [docs/app.md](docs/app.md) is shipped app behaviour, [docs/engine-build-status.md](docs/engine-build-status.md) the native side and its boundaries; the vision and plans are private (docs/caw/ in Kmandevr/AutoStacc-Hub); [docs/roadmap.md](docs/roadmap.md) is what is promised. The beta sends anonymous telemetry and optional feedback through a relay; audio stays local, and there is no in-app AI or cloud audio. AI coding assistants are development tools, not a feature.
 
-**Data and services:** Kmandevr/C.A.W-Telemetry holds what C.A.W collects (telemetry, feedback Issues, privacy policy, terms) and the beta relay; its PLAN.md is the contract's other copy. The private Kmandevr/AutoStacc-Hub holds the companion and C.A.W's plans and owner questions (docs/caw/). Work cross-repo changes in one session (add_repo).
+**Data and services:** Kmandevr/C.A.W-Telemetry holds what C.A.W collects (telemetry, feedback Issues, privacy policy, terms) and the beta relay; its PLAN.md is the contract's other copy. The private Kmandevr/AutoStacc-Hub holds the companion and C.A.W's vision, plans and owner questions (docs/caw/). Work cross-repo changes in one session (add_repo).
 
 ## Start of every session
 
-Tasks and bugs live in GitHub Issues: use the `tasks` skill to find, claim and finish work, and don't keep a task list anywhere else. The `docs/` folder holds permanent project knowledge (an Obsidian vault); its notes list is [docs/index.md](docs/index.md).
+Public bugs live in this repository's Issues, every other task in the private AutoStacc-Hub's: use the `tasks` skill, and keep no other task list. The `docs/` folder holds permanent project knowledge (an Obsidian vault); its notes list is [docs/index.md](docs/index.md).
 
 ## Rules
 
-- Keep facts, proposals, assumptions and open questions apart, as `docs/vision.md` and `docs/architecture.md` label them. Never present a proposal as built, and never build an open question as settled: ask the owner.
+- Keep facts, proposals, assumptions and open questions apart, as `docs/architecture.md` labels them. Never present a proposal as built, and never build an open question as settled: ask the owner.
 - Never invent facts about libraries, versions, licences, platform behaviour or devices. Check a primary source and date it, or label it an assumption.
 - The audio callback never allocates, locks, logs, does I/O or calls into the UI layer (details: `.claude/rules/engine.md`).
 - Downloaded projects and modules are untrusted: parse them with limits. Native components are in-process code, not sandboxed: third-party binaries load only under the user's per-item choice of Isolated, Trusted or Blocked (`docs/decisions.md`), never silently. Never ship a GitHub token or other secret.

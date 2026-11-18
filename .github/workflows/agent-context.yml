@@ -3,7 +3,7 @@ name: Agent start file
 on:
   push:
     branches: [Main]
-    paths: [AGENTS.md, CLAUDE.md, docs/vision.md, .claude/rules/**, scripts/agent-context.js, .github/workflows/agent-context.yml]
+    paths: [AGENTS.md, CLAUDE.md, docs/roadmap.md, .claude/rules/**, scripts/agent-context.js, .github/workflows/agent-context.yml]
   workflow_dispatch:
 permissions:
   contents: read

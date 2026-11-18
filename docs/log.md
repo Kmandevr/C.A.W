@@ -6,6 +6,8 @@ updated: 2026-11-18
 
 # Log
 
+- 2026-11-18: Issues are bug-only here (owner): feature and plan issues copied to the private tracker and closed with a note, the task template removed, the `tasks` skill covers both trackers ([decisions](decisions.md)).
+- 2026-11-18: the vision moved to the private Kmandevr/AutoStacc-Hub too (owner); a curated public [roadmap](roadmap.md) lists only the promised work (VST3 and CLAP hosting, iOS releases); `scripts/agent-context.js` bundles the roadmap in its place ([decisions](decisions.md)).
 - 2026-11-18: plans move to the private Kmandevr/AutoStacc-Hub (docs/caw/) now, not at 1.1.0 (owner): the roadmap, the feature plans and proposals for unbuilt work, the owner questions and decisions about unbuilt features left this repository; split notes keep their built facts and contracts here, and links to moved notes became plain text ([decisions](decisions.md), [index](index.md)).
 - 2026-11-18: the companion's direction decided (owner): it is the AutoStacc Hub, in the private `Kmandevr/AutoStacc-Hub`; planning notes updated (private) ([protocol](companion-protocol.md)).
 - 2026-11-18: v1.0.6-alpha.1 published (release run 44275912556; it published before its Dart tests failed on a loaded runner's 21 ms launch stall, which passed on the re-run). The GitHub Release job now also needs analysis and the Dart tests; the launch-stall bench counts the quietest of three warmed rounds.

@@ -1,13 +1,16 @@
 ---
 name: tasks
-description: How to find, claim, work, report and finish tasks in C.A.W using GitHub Issues and labels. Use at session start, when picking or being given a task, when you find a bug, and when finishing work. Not needed for pure questions.
+description: How to find, claim, work, report and finish tasks in C.A.W using GitHub Issues and labels (public bugs here, everything else in the private AutoStacc-Hub). Use at session start, when picking or being given a task, when you find a bug, and when finishing work. Not needed for pure questions.
 ---
 
 # GitHub workflow
 
-**GitHub is the task list.** Issue = one piece of work or bug. PR = its implementation (`Closes #N`). `docs/` = permanent knowledge only. Never keep a second task list in `CLAUDE.md`, `docs/`, code comments or local files.
+**GitHub is the task list, in two repositories** (owner, 2026-11-18):
+- **`Kmandevr/C.A.W` (public): bugs only,** the ones fine to show the public. Template `.github/ISSUE_TEMPLATE/bug.yml`.
+- **`Kmandevr/AutoStacc-Hub` (private): everything else:** features, improvements, refactors, plans, and bugs that shouldn't be public (anything that reveals unannounced work). An unfixed security weakness still goes in a draft security advisory (below).
 
-Repo `Kmandevr/C.A.W`. Use the GitHub MCP tools, each for one job, with output trimmed to what you need (`number`, `title`, `labels`; add `body` only for the issue you'll work on):
+Issue = one piece of work or bug. PR = its implementation: `Closes #N` for a C.A.W bug, `Closes Kmandevr/AutoStacc-Hub#N` for a private task (only the number shows publicly; never describe the private task in a public PR, commit or comment). `docs/` = permanent knowledge only. Never keep a second task list in `CLAUDE.md`, `docs/`, code comments or local files.
+ Use the GitHub MCP tools, each for one job, with output trimmed to what you need (`number`, `title`, `labels`; add `body` only for the issue you'll work on):
 
 - `list_issues` with `labels` (all must match) and `state`: the board.
 - `search_issues`: finding duplicates or related work (it doesn't understand `label:` filters).
@@ -34,6 +37,7 @@ Issues, PRs, commit messages and Actions logs are public. Never put in them an u
 
 ## Session start (only when the task isn't already given)
 
+In both repositories (add `Kmandevr/AutoStacc-Hub` to the session with add_repo if it isn't there):
 1. `list_issues` labels `["status: in progress"]`, OPEN: what's being worked on.
 2. `search_pull_requests` `is:open`: what waits for review.
 3. `list_issues` labels `["status: ready"]`, OPEN: candidates. Sort them yourself by `P0`..`P3`.
@@ -56,7 +60,7 @@ If the owner names a task, use it. Otherwise take the first that applies among `
 ## Found a bug or idea outside the current issue
 
 1. `search_issues`. If one exists, comment what you learned and stop.
-2. Otherwise open a narrow issue with the sections of `.github/ISSUE_TEMPLATE/bug.yml` or `task.yml` as `### Heading` blocks, a type, a priority and an area if clear. Add `status: ready` only if it's fully scoped.
+2. Otherwise open a narrow issue with `### Heading` blocks (a bug: the sections of `.github/ISSUE_TEMPLATE/bug.yml`, in C.A.W; anything else: Summary, Scope, Acceptance criteria, in the Hub), a type, a priority and an area if clear. Add `status: ready` only if it's fully scoped.
 3. Continue the original task unless the bug blocks it (mark the current issue `status: blocked` and say why) or it is P0.
 
 ## Finishing
