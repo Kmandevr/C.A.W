@@ -1,12 +1,12 @@
 ---
 title: Plug-in hosting plan
-summary: Least privilege and the companion app (1.6.0) first, the optional isolation design, the silent staged plan for hosting CLAP/VST3 plug-ins (#212, live in 1.1.0), the verified facts and the owner's open questions; planned, not built.
+summary: Least privilege and the companion app (1.0.6) first, the optional isolation design, the silent staged plan for hosting CLAP/VST3 plug-ins (#212, live in 1.1.0), the verified facts and the owner's open questions; planned, not built.
 updated: 2026-11-18
 ---
 
 # Plug-in hosting plan
 
-**[Proposal]** None of this is built. It is an architect review from 2026-11-17, laid down silently in steps (the owner's groundwork rule, [decisions](decisions.md)). Hosting goes live in 1.1.0, and least privilege and the companion app in 1.6.0 (owner, 2026-11-18). The owner reviews the isolation design before step 1.
+**[Proposal]** None of this is built. It is an architect review from 2026-11-17, laid down silently in steps (the owner's groundwork rule, [decisions](decisions.md)). Hosting goes live in 1.1.0, and least privilege and the companion app in 1.0.6 (owner, 2026-11-18). The owner reviews the isolation design before step 1.
 
 **Owner direction (2026-11-18):** least privilege comes first and Isolated is an option the user can choose, not the default ([decisions](decisions.md)). The design for that is [Least privilege and the companion app](#least-privilege-and-the-companion-app).
 
@@ -45,7 +45,7 @@ updated: 2026-11-18
 - location is declared only up to Android 11 (`maxSdkVersion="30"`), and Bluetooth scanning is `neverForLocation`;
 - linked sample folders are granted read-only.
 
-**The companion app** (owner, 2026-11-18: release **1.6.0** is given over to it and to this security work). It has its own package, so its own permissions.
+**The companion app** (owner, 2026-11-18: release **1.0.6**, the next one, is given over to it and to this security work; the later batches moved up by one). It has its own package, so its own permissions.
 - **What it holds:** `REQUEST_INSTALL_PACKAGES`, `UPDATE_PACKAGES_WITHOUT_USER_ACTION` and `INTERNET`, for the self-updater, the update check, telemetry and feedback. Plug-in trust is kept here too (below).
 - **What it grows into:** AutoStacc's secondary hub; the two work as one. It holds every download, the user's whole library and the account, and stores the user's data, sounds and one-shots in the cloud for C.A.W to use. C.A.W reads them through the companion, so the main app still needs no network, and account tokens never live in the process that loads plug-ins.
 - **Private (owner):** its code (a closed-source, private repository, unlike C.A.W's Apache-2.0, [vision](vision.md)) and its data. Nothing in it is shared or exposed.
@@ -132,13 +132,13 @@ updated: 2026-11-18
 **[Assumption]** the API names and behaviour above (AMSI, `revokeSelfPermissionsOnKill`, signature permissions, `sharedUserId`) come from platform documentation not re-read this session; check each before building on it.
 
 ## Silent steps
-1. **1.0.6:** the shared-memory ring (a new isolation folder in the engine sources), with tests across two processes on Linux and Windows CI. Nothing calls it.
-2. **1.0.7:** the host executable and an `IsolatedProcessor` proxy. These load a C.A.W component first (not CLAP), and are compiled only with the `CAW_ISOLATED_HOST` CMake option (OFF).
+1. **1.0.7:** the shared-memory ring (a new isolation folder in the engine sources), with tests across two processes on Linux and Windows CI. Nothing calls it.
+2. **1.0.8:** the host executable and an `IsolatedProcessor` proxy. These load a C.A.W component first (not CLAP), and are compiled only with the `CAW_ISOLATED_HOST` CMake option (OFF).
    - Tests: render parity against in-process at one block of offset; `kill -9` mid-render, which bypasses and restarts; a stalled host never makes the callback wait.
    - CI checks the binary size, so it is shown to cost nothing while off.
-3. **1.0.8:** the Android service, a client and a JNI bridge. It is never bound unless a hidden dev flag is on. An emulator test (API 34+) loads a fixture `.so` from a file descriptor in an isolated process; **this settles the riskiest Android assumption, so run it early**.
-4. **1.0.9:** the scan, run inside the host process only, with timeouts and a cache. It is reachable only from the CLI (`caw scan`), with tests for hanging and crashing plug-ins.
-5. **1.0.10:** the CLAP and VST3 adapters, mapping their audio, sidechain and note ports to the graph's typed ports, ready for the 1.1.0 routing (#233). The UI comes in 1.1.0, after the owner reviews its look.
+3. **1.0.9:** the Android service, a client and a JNI bridge. It is never bound unless a hidden dev flag is on. An emulator test (API 34+) loads a fixture `.so` from a file descriptor in an isolated process; **this settles the riskiest Android assumption, so run it early**.
+4. **1.0.10:** the scan, run inside the host process only, with timeouts and a cache. It is reachable only from the CLI (`caw scan`), with tests for hanging and crashing plug-ins.
+5. **1.0.11:** the CLAP and VST3 adapters, mapping their audio, sidechain and note ports to the graph's typed ports, ready for the 1.1.0 routing (#233). The UI comes in 1.1.0, after the owner reviews its look.
 
 ## Facts and checks
 - **[Fact]** CLAP is MIT, v1.2.9 (verified 2026-11-10). VST3's `pluginterfaces` is MIT from 3.8.0 (verified 2026-11-11). Steinberg's VST logo and trademark guidelines are still to be checked if "VST3" appears in the UI.
@@ -163,5 +163,5 @@ updated: 2026-11-18
 5. Are plug-in GUIs (VST3 editors, CLAP GUI embedding) in scope for 1.1.0?
 6. Which trust a plug-in gets the first time it is seen (already open in [vision](vision.md)).
 7. Which flagging and signing parts to build ([least privilege](#least-privilege-and-the-companion-app)), whether unsigned code may load at all, which findings block for CLAP/VST3, the capability list, and how a warning looks.
-8. **Settled** (owner, 2026-11-18): the companion app is 1.6.0. Open: what protects users between hosting in 1.1.0 and the companion in 1.6.0. **[Proposal]** In 1.1.0 ship the pre-load scan, declared capabilities, plain-language warnings and Blocked for never-seen code, all inside the main app; third-party binaries are in the GitHub build only.
+8. **Settled** (owner, 2026-11-18): the companion app and this security work are release 1.0.6, before hosting goes live in 1.1.0; the later batches moved up by one.
 9. Which trust a never-seen plug-in gets (6): **[Proposal]** Blocked until the user chooses.

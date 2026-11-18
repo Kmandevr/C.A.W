@@ -16,7 +16,7 @@ updated: 2026-11-18
 - **A silent built-in scanner (owner):** every plug-in gets a quick look before it is ever loaded, for obvious back doors or malicious intent. It is quiet when nothing is found. It catches the easy cases and is not a substitute for least privilege. The design is in the plan ([the pre-load scan](plugin-hosting-plan.md#the-pre-load-scan)).
 - **Declared capabilities (owner, later the same day):** plug-ins in C.A.W's own format state what they need beyond the basics, and why. Anything used but not declared is blocked outright. CLAP/VST3 findings only warn. Warnings explain, for people who don't know how software works, what each capability allows, the risk, and why an honest plug-in might need it.
 - **The hub (owner):** the companion app grows into AutoStacc's secondary hub: every download, the user's whole library, and cloud storage of their data, sounds and one-shots for C.A.W to use. Its code and data are 100% private (a closed-source, private repository). The C.A.W-Telemetry data is shown in an admin view inside it for the owner and the people they trust, to see how the app works and find vulnerabilities.
-- **Release 1.6.0 (owner, later the same day):** given over to the companion app and this security work. The owner accepted the remaining design points (trust kept in the companion, the companion not trusting the main app, disabling a malicious plug-in, plug-in internet through the companion, admin accounts without tokens, working without the companion, moving users, signing keys, versioned scanner rules, shared projects, Windows, keeping data) and left the details to Claude's reasoning ([plan](plugin-hosting-plan.md#the-rest-of-the-design)).
+- **Release 1.0.6 (owner, later the same day):** the next release is given over to the companion app and this security work, and every later 1.0.x batch moves up by one (the FX batch is now 1.0.7). The owner accepted the remaining design points (trust kept in the companion, the companion not trusting the main app, disabling a malicious plug-in, plug-in internet through the companion, admin accounts without tokens, working without the companion, moving users, signing keys, versioned scanner rules, shared projects, Windows, keeping data) and left the details to Claude's reasoning ([plan](plugin-hosting-plan.md#the-rest-of-the-design)).
 - **Notice (owner):** anything sold on AutoStacc may be reviewed with no notice. Something stored but not sold gets a notice when it is reviewed, saying this doesn't necessarily mean a problem. Every takedown gives a notice and a way to appeal. Hosting malicious plug-ins bans the account, with an entirely manual appeal. A downloaded plug-in later found malicious is disabled at once, and the user can see why. The automatic malware check on uploads is not a review: it sends no data to the team, only refuses malicious content, and tells the uploader.
 
 ## 2026-11-17: Each platform's low-latency path; ASIO and rtkit stay out (owner's request, #237)
@@ -133,10 +133,10 @@ The owner's decision (2026-11-13, below) built on branch `midi-store`; the detai
 - **Bit distortion:** one built-in device has the classic crush and the bitwise operations (shift, XOR, AND masks). The AutoStacc beta pack drops its bit-shift device and gets a different one instead, to be chosen.
 - **The AutoStacc beta pack:** it stays free for everyone who used the beta, even after the pack becomes paid.
 - **The FX batch splits in two:**
-  - **1.0.6:** consolidation, the device kit and FX chain, Flagship, React to… and live preset preview;
-  - **1.0.7:** the new effects, the recording tools, guitar, presets and templates, low-latency monitoring, the pack and the music video.
+  - **1.0.7:** consolidation, the device kit and FX chain, Flagship, React to… and live preset preview;
+  - **1.0.8:** the new effects, the recording tools, guitar, presets and templates, low-latency monitoring, the pack and the music video.
 
-  The later batches move up one: hosting foundation 1.0.10, notation 1.0.11.
+  The later batches move up one: hosting foundation 1.0.11, notation 1.0.12.
 - **Suggestions adopted:**
   - low-latency monitoring through effects, with a latency readout, checked on the S22+;
   - live preset preview;
@@ -151,7 +151,7 @@ The owner's decision (2026-11-13, below) built on branch `midi-store`; the detai
 - for modulation;
 - inside Flagship.
 
-The goal is "everything works with everything natively", like Kilohearts' Snap Heap but built into everything that can use it. The batch 1.0.6 devices are built to become nodes later.
+The goal is "everything works with everything natively", like Kilohearts' Snap Heap but built into everything that can use it. The batch 1.0.7 devices are built to become nodes later.
 
 The owner added (2026-11-17):
 - Everything can be placed freely: an oscillator wired into a distortion, then a filter, and so on. Sound sources are nodes too.
@@ -176,11 +176,11 @@ The owner added (2026-11-17):
 - secondary inputs appear wherever they make sense: the vocoder, ring mod and frequency shift carriers, a live convolver impulse, a C++ second input;
 - a very easy way for one track's notes or loudness to change another track's effect.
 
-That last one is **React to…** in every knob's hold menu (track, then Loudness or Notes). It uses the existing project modulators, so it ships early, with the 1.0.6 device kit.
+That last one is **React to…** in every knob's hold menu (track, then Loudness or Notes). It uses the existing project modulators, so it ships early, with the 1.0.7 device kit.
 
 ## 2026-11-17: Device UI redesign and a step-by-step music video (owner, #231, #232)
 
-**Decision (owner, 2026-11-17).** The device UI ships in batch 1.0.6, with the FX consolidation; the music video in 1.0.7 (the FX batch's split, above).
+**Decision (owner, 2026-11-17).** The device UI ships in batch 1.0.7, with the FX consolidation; the music video in 1.0.8 (the FX batch's split, above).
 - **FX chain:** collapsed rows, any number open at once, and every control usable in place.
 - **Editing:** visual first, controlled mainly by knobs.
 - **Flagship:** one Vital-like screen; on a phone, three panels (Oscillators, Filters, Modulation) with a mod strip that is always shown.
@@ -261,7 +261,7 @@ The plan: [device UI plan](device-ui-plan.md).
 
   **[Fact]** Fire is AGPL-3.0 (its GitHub listing, checked 2026-11-17), so none of its code is used; C.A.W's version is its own.
 - **More presets:** every built-in effect ships at least 8 presets, named for the job and tagged by purpose, where that makes sense.
-- **When:** after 1.0.5, split over 1.0.6 and 1.0.7 (the FX batch's split, above). The later batches move up.
+- **When:** after 1.0.5, split over 1.0.7 and 1.0.8 (the FX batch's split, above). The later batches move up.
 
 ## 2026-11-14: Freeze and bounce: pre-fader, the frozen track sent as an audio clip, no C API bump (Claude, within the owner's 1.0.5 decisions, #209)
 
