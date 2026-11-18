@@ -6,11 +6,12 @@ updated: 2026-11-18
 
 # Decisions
 
-## 2026-11-18: Plans move to the private AutoStacc-Hub now; the code stays public (owner)
+## 2026-11-18: Plans and the vision move to the private AutoStacc-Hub now; a curated public roadmap; the code stays public (owner)
 
-**Decision (owner, 2026-11-18):** C.A.W's roadmap, feature plans, proposals for unbuilt work, owner questions and decisions about unbuilt features move now, not at 1.1.0, into the private repository `Kmandevr/AutoStacc-Hub` (docs/caw/), "the private repository that holds everything we don't want people to know, like feature plans".
+**Decision (owner, 2026-11-18):** C.A.W's vision, roadmap, feature plans, proposals for unbuilt work, owner questions and decisions about unbuilt features move now, not at 1.1.0, into the private repository `Kmandevr/AutoStacc-Hub` (docs/caw/), "the private repository that holds everything we don't want people to know, like feature plans".
 - **Public (this repository):** what is shipped and how the code works, the contracts the shipped code implements (the companion protocol, the C.A.W-Telemetry contract), security rules, licences and process, with short pointers such as "planned work is tracked privately".
 - **[Fact]** Git history still shows the old plans; only future changes are hidden. Hidden features stay readable in the public code (Apache-2.0, neutral commit messages): the surprise rests on the plans and the announcements, not on secret code.
+- **The public roadmap** ([roadmap](roadmap.md)) lists only what the owner chooses to reveal: for now the promised work, hosting VST3 and CLAP plug-ins and iOS releases.
 - **Replaces** the 2026-11-17 decision that plans would go private at 1.1.0.
 
 ## 2026-11-18: The companion's groundwork in the main app: a services package, one link, two flavours (#239, for 1.0.7)

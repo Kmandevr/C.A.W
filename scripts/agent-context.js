@@ -6,7 +6,7 @@ const fs = require('fs');
 const path = require('path');
 
 const ROOT = path.join(__dirname, '..');
-const ENTRY = ['AGENTS.md', 'CLAUDE.md', 'docs/vision.md'];
+const ENTRY = ['AGENTS.md', 'CLAUDE.md', 'docs/roadmap.md'];
 const RULES_DIR = '.claude/rules';
 const REPO = 'Kmandevr/C.A.W';
 
@@ -32,7 +32,7 @@ const rules = fs.readdirSync(path.join(ROOT, RULES_DIR)).filter((f) => f.endsWit
 const md = [];
 md.push('# C.A.W start file for chat agents', '');
 md.push(`Generated from \`${commit}\` on the default branch at ${new Date().toISOString().replace(/\.\d+Z$/, 'Z')} by \`scripts/agent-context.js\`. Don't edit it; edit the files it bundles.`, '');
-md.push('Read this whole file before doing anything else. It replaces separately reading `AGENTS.md`, `CLAUDE.md`, `docs/vision.md` and `.claude/rules/*.md`.', '');
+md.push('Read this whole file before doing anything else. It replaces separately reading `AGENTS.md`, `CLAUDE.md`, `docs/roadmap.md` and `.claude/rules/*.md`.', '');
 md.push('## Before you start: confirm in your first reply', '');
 md.push(`1. The commit this file was generated from (\`${commit.slice(0, 7)}\`).`);
 md.push('2. The task issue number and your branch (`gpt/<issue>-<short-name>`).');
