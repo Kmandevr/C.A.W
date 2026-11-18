@@ -459,7 +459,8 @@ jobs:
 
   release:
     name: GitHub Release
-    needs: [android, windows]
+    # Publishes only after analysis and the Dart tests pass, not just the builds.
+    needs: [analyze, tests, android, windows]
     if: >-
       startsWith(github.ref, 'refs/tags/v') ||
       (github.event_name == 'workflow_dispatch' && inputs.installables && inputs.release)
