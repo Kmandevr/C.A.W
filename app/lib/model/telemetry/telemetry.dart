@@ -209,11 +209,12 @@ class Telemetry extends ChangeNotifier {
     required this.config,
     required this._store,
     RelayHttp? http,
+    RelayClient? relay,
     this._probe,
     TelemetryApp? app,
     DateTime Function()? now,
     Random? random,
-  })  : _relay = RelayClient(config, http ?? IoRelayHttp()),
+  })  : _relay = relay ?? RelayClient(config, http ?? IoRelayHttp()),
         app = app ?? TelemetryApp(),
         _now = now ?? DateTime.now,
         _random = random ?? Random.secure();

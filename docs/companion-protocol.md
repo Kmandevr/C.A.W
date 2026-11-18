@@ -1,5 +1,6 @@
 ---
 title: Companion protocol
+covers: [app/packages/caw_services/lib/companion/, app/lib/platform/companion_link.dart, app/lib/model/companion/]
 summary: How C.A.W talks to its companion app on Android (1.0.7, #239): a bound Messenger service, the ten message kinds and their bodies, version 1, size limits, timeouts, the caller check both ways and the fallback when the companion is absent; a proposal, the companion itself not built.
 updated: 2026-11-18
 ---
@@ -31,7 +32,7 @@ updated: 2026-11-18
 |---|---|---|---|
 | 1 | `hello` | `{}` | `{"app": version, "kinds": [names]}` |
 | 2 | `update.status` | `{}` | `{"state": "idle"\|"checking"\|"downloading"\|"ready", "offer": label or null}` |
-| 3 | `update.check` | `{"channel": "stable"\|"beta"\|"everyChange"}` | `{"releases": [...]}`, GitHub's release shape, notes trimmed to fit |
+| 3 | `update.check` | `{}` | `{"releases": [...]}`, GitHub's release shape, notes trimmed to fit; the main app picks its channel's update itself |
 | 4 | `update.open` | `{}` | `{}`: the companion shows its update screen; nothing installs without the user's tap there |
 | 5 | `telemetry.report` | `{"report": object}` (the existing report schema) | a relay answer |
 | 6 | `telemetry.get` | `{"receipt": hex}` | a relay answer |
@@ -40,7 +41,7 @@ updated: 2026-11-18
 | 9 | `trust.query` | `{"component": id, "sha256": hex}` | `{"verdict": "bad"\|"unknown", "reason": text}` |
 | 10 | `knownbad.version` | `{}` | `{"version": int}` |
 
-- **A relay answer** is `{"status": int, "body": text, "retryAfter": seconds}`: the relay's own HTTP status and answer, so the main app's telemetry code reads it exactly as it reads the relay today (`RelayResponse`). `status` 0 means the companion couldn't reach the relay.
+- **A relay answer** is `{"status": int, "body": text, "retryAfter": seconds, "sent": bool}`: the relay's own HTTP status and answer, so the main app's telemetry code reads it exactly as it reads the relay today (`RelayResponse`). `status` 0 means the companion couldn't reach the relay, and `sent` whether the request may have arrived. A `busy` reply reads as the relay's 429, so telemetry backs off.
 - **Releases from the companion** are read by the same defensive parser as GitHub's answer (`parseGitHubReleases`): asset URLs must still be this repository's release downloads, so a companion that lied couldn't point a download elsewhere.
 - **Known-bad wins.** A `bad` verdict blocks a component whatever the local trust choice says. `unknown` leaves the local choice in charge.
 
@@ -71,3 +72,11 @@ A message that fails is dropped without an answer. The logic is kept pure, so th
 - **[Fact]** `Message.sendingUid`: added in **API 21**, "the uid that sent the message", valid only for messages posted by a `Messenger`, otherwise -1 (developer.android.com, `android.os.Message`, read 2026-11-18). The main app's minimum is API 26.
 - **[Fact]** `PackageManager.hasSigningCertificate(uid, cert, CERT_INPUT_SHA256)` and `CERT_INPUT_SHA256` were added in API 28; `checkSignatures(int, int)` in API 5, "useful … when doing the check in an IPC, where the UID is the only identity available". `PackageManager.checkPermission(perm, package)` returns the permission's stored state (developer.android.com, `PackageManager`, read 2026-11-18).
 - **[Fact]** Google Play's `REQUEST_INSTALL_PACKAGES` policy permits it only where installing is the app's core purpose (web browsing or search, communication with attachments, file sharing or management, enterprise device management, backup and restore, device migration), and states its concern as "apps that self update using any method other than Google Play's update mechanism" (support.google.com, Play Console answer 12085295, read 2026-11-18). Hence the `play` flavour carries neither install permission.
+
+## Where the code is
+Built 2026-11-18 as groundwork; nothing reaches a companion until one is installed.
+- **Dart, shared:** the kinds, version, limits, timeouts and body checks in `app/packages/caw_services/lib/companion/companion_protocol.dart`, which the companion can reuse.
+- **Dart, the link:** `app/lib/platform/companion_link.dart`, chosen once in `main.dart`. `AndroidCompanionLink` talks to `caw/companion`; `NoCompanionLink` is every other platform and the tests. Each reply is checked again (version, id, status, body size and shape), and a channel that hangs counts as a timeout after the bind and request timeouts plus 2 s.
+- **Dart, the adapters** (`app/lib/model/companion/`): `CompanionUpdateSource` (an `UpdateSource`), `CompanionUpdateInstaller` (an `UpdateInstaller`), `CompanionRelay` (at the `RelayClient` level, not `RelayHttp`, which takes any URL), and `TrustSource` with `LocalTrustSource` and `CompanionTrustSource`. Main wires the first three; **the trust source is not yet consulted by the native component loader**, which keeps reading `NativeTrustStore` until the known-bad list has a source.
+- **[Proposal], for when the companion exists:** in companion mode `UpdateService` still downloads the update before `install` hands over to `update.open`; it should skip its own download then. Tests `app/test/companion_test.dart`.
+
