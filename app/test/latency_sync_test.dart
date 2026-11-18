@@ -274,10 +274,15 @@ void main() {
       await Future<void>.delayed(const Duration(milliseconds: 20));
       expect(route.asked, asked + 2, reason: 'read on the change, and again after the link settles');
       expect(l.previousOutput?.key, speaker.key);
+      for (var i = 0; i < LatencyComp.settleRuns; i++) {
+        await l.refresh(); // the timestamps settle
+      }
       l.setOutputTotalMs(220);
       expect(l.outputNeedsCheck, isFalse);
       outMs = 90; // a new codec, say
-      await l.refresh();
+      for (var i = 0; i < LatencyComp.settleRuns; i++) {
+        await l.refresh();
+      }
       expect(l.outputNeedsCheck, isTrue);
       expect(l.outputMs, 270, reason: 'the offset rides on the new figure until checked');
     });

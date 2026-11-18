@@ -33,6 +33,7 @@ This note records the current implementation gaps in C.A.W.'s music-production w
 - **[Implemented]** Track and folder-bus volume/pan automation is serialized and played by the native engine.
 - **[Implemented]** Project/timeline automation lanes target module parameters by module ID or named project globals; the app edits song-time points with curved segments (#230) and the native VM evaluates them per sample. Track volume/pan lanes remain separate.
 - **[Implemented]** Audio import and clips with non-destructive editing, the sample editor, the stretch notch, Follows tempo and Slice to MIDI (batch 1.0.4, #208); a tempo map (stepped and ramped changes, a tempo lane), time signatures, sections and markers (batch 1.0.3, #207, C API 31): the engine plays every position on the map, sections move, copy and delete with their contents, and the recording count-in counts bars ([app](app.md), Arranger).
+- **[Implemented]** Choosing the real audio output and input device on Android (#242, `AppState._configureDevice`); latency compensation per device keeps a measured or typed total ([app](app.md), Latency).
 - **[Incomplete]** Clip-following automation and consolidation. Bounce to audio of a track or clips, and freeze, are built (1.0.5, [app](app.md)).
 
 ### Mixer and signal flow

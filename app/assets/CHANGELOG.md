@@ -3,6 +3,24 @@
 What changed in each C.A.W release, newest first. C.A.W is in open alpha: expect rough edges and unexpected issues.
 Versions keep the `-alpha.N` suffix until the official release.
 
+## 1.0.6-alpha.1 (unreleased)
+
+Choose the real speaker, headphones and microphone on Android, and latency you set stays where you set it.
+
+### New
+- **Choose your output and input device on Android:**
+  - outputs: the phone speaker, wired headphones, Bluetooth and USB;
+  - inputs: the phone's microphones, a headset's and USB.
+  - Your choice is remembered and used again when the device reconnects.
+  - The line under each drop-down says which device is actually in use.
+
+### Fixed
+- **Latency you measure or type** no longer counts the system's latency twice:
+  - **Tap along** keeps the figure your taps found, also on Bluetooth headphones whose delay settles after they connect;
+  - **the loopback test** splits the round trip correctly, so recordings land where you played;
+  - **a typed latency**, for the output or the input, stays what you typed.
+<!-- zoom -->
+
 ## 1.0.5-alpha.2 (2026-11-18)
 
 A hotfix: smoother scrolling, the playhead in time with the sound, a smoother start, and fixes that made the app hard to use.

@@ -6,6 +6,12 @@ updated: 2026-11-18
 
 # Decisions
 
+## 2026-11-18: A set latency keeps its total until a like figure moves (#241, the owner's tap-along report)
+
+**Decision:** every latency the user sets (typed, slid, tapped, pinged, accepted from takes; output and input) is saved as what it adds on top of the system's figure then, with that figure's kind ("timestamp" once 3 reads agree, "settling" before, "buffers", "none"). Read over a figure of another kind it keeps its total; it rides only on a figure of the same kind, which is a real change (a new buffer size or codec), and the re-check card asks only when a settled figure set over a settled one moved.
+**Why:** a saved offset that rides on a better figure counts the system's part twice (the slider in 1.0.5-alpha.2, tap-along after it); keeping every total fixed instead would ignore a real buffer change, on Windows the only figure there is.
+**[Assumption]:** 3 agreeing reads (6 to 9 s of playing) are enough for a Bluetooth link's timestamps to settle; a phone run can check it with the status's figures.
+
 ## 2026-11-18: Real device choice on Android: by AudioManager's list, kept by type and name, opened by today's id (owner's request, #242)
 
 **Decision:** on Android the Audio page's output and input drop-downs offer the devices `AudioManager.getDevices` lists, named by type plus the product name for display. The settings keep `android:<type>:<product name>[#n]`, because an `AudioDeviceInfo` id is given per connection ([Assumption] from the API's description of ids as identifying a device while it is connected; not checked on a primary page). The app sends the engine `aaudio:<id>` with the id the device has now, and AAudio's `setDeviceId` opens it (miniaudio 0.11.25 passes `ma_device_id.aaudio`). A chosen device that is not connected plays or records on the default, the page says so, and the app opens it again when it reconnects. A stream that runs on another device than the one chosen, because Android routed it elsewhere or miniaudio reopened the default after a disconnect, shows in the status as a fallback.
