@@ -385,10 +385,11 @@ int32_t reportedPeriod(const Audio* a) {
 // period count, which is then the whole capacity in one period.
 int32_t reportedPeriods(const Audio* a) {
     const auto& p = a->device.playback;
-    if (!a->deviceSizes || a->callbackFrames <= 0) return static_cast<int32_t>(p.internalPeriods);
-    const int64_t buffer = a->bufferFrames > 0 ? a->bufferFrames
-                                               : static_cast<int64_t>(p.internalPeriodSizeInFrames) * std::max<ma_uint32>(1, p.internalPeriods);
-    return static_cast<int32_t>(std::max<int64_t>(1, (buffer + a->callbackFrames / 2) / a->callbackFrames));
+    // AAudio's queue (its buffer size, at a fixed size too: miniaudio's periods there are the capacity, #241) in
+    // callbacks; elsewhere the backend's periods.
+    if (!a->deviceSizes && a->bufferFrames <= 0) return static_cast<int32_t>(p.internalPeriods);
+    return caw::queuedPeriods(caw::queuedOutputFrames(a->bufferFrames, p.internalPeriodSizeInFrames, p.internalPeriods),
+                              a->callbackFrames, p.internalPeriods);
 }
 
 // The core this callback runs on, for the Benchmark's live mode (-1 where the platform can't say).
@@ -859,12 +860,10 @@ void attachCapture(CawEngine* e, Audio* a, ma_device* d, std::string deviceId) {
     // side's buffer is in its device's frames, converted; the fill is already the engine's.
     const int64_t in = toEngineFrames(static_cast<int64_t>(c.internalPeriodSizeInFrames) * std::max<ma_uint32>(1, c.internalPeriods),
                                       c.internalSampleRate, rate);
-    // The output's queue: AAudio's buffer size where the output takes its sizes (miniaudio's periods are then the
-    // whole capacity, and nothing is held between), else miniaudio's periods.
-    const int64_t out = a->deviceSizes && a->bufferFrames > 0
-                            ? toEngineFrames(a->bufferFrames, p.internalSampleRate, rate)
-                            : toEngineFrames(static_cast<int64_t>(p.internalPeriodSizeInFrames) * std::max<ma_uint32>(1, p.internalPeriods),
-                                             p.internalSampleRate, rate);
+    // The output's queue: AAudio's buffer size where it is known (miniaudio's periods are the whole capacity, at a
+    // fixed size too, #241), else miniaudio's periods.
+    const int64_t out = toEngineFrames(caw::queuedOutputFrames(a->bufferFrames, p.internalPeriodSizeInFrames, p.internalPeriods),
+                                       p.internalSampleRate, rate);
     // The round trip: the input's buffer and the bridge's fill (the FIFO's most included: queued input, a real
     // delay) to the engine, then the FIFO's mean hold and the output's buffer to the speaker.
     e->engine->liveAudio().setDeviceLatency(in + out + a->duplexBufferFrames + a->fifoMeanHold);
@@ -1203,9 +1202,12 @@ std::string latencyJson(CawEngine* e, Audio* a) {
     const auto& p = a->device.playback;
     const bool input = a->input && a->capture;
     refreshAfterReroute(a);
-    SideLatency out = a->deviceSizes && a->bufferFrames > 0
-                          ? bufferLatency(static_cast<ma_uint32>(a->bufferFrames), 1, p.internalSampleRate, rate)
-                          : bufferLatency(p.internalPeriodSizeInFrames, p.internalPeriods, p.internalSampleRate, rate);
+    // Without a timestamp: what AAudio queues (its buffer size, not miniaudio's periods, which are the stream's
+    // whole capacity, #241), else the backend's periods.
+    SideLatency out;
+    out.frames = toEngineFrames(caw::queuedOutputFrames(a->bufferFrames, p.internalPeriodSizeInFrames, p.internalPeriods),
+                                p.internalSampleRate, rate);
+    out.source = out.frames > 0 ? "buffers" : "none";
     SideLatency in;
     if (input) {
         const auto& c = a->capture->capture;

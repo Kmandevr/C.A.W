@@ -2,7 +2,7 @@
 title: App
 summary: The built Flutter app: three sections (Build, Files, Arrange), shared engine state, the project library, portable files, performance profiles, the Benchmark, storage and CI.
 covers: [app/, engine/include/caw.h, engine/src/worker_api.cpp, engine/src/hardware.*, engine/src/execution.*, engine/src/scheduler.*]
-updated: 2026-11-17
+updated: 2026-11-18
 ---
 
 # App
@@ -216,6 +216,7 @@ The project model stores C++ component entries alongside existing project module
   - live CPU, left/right peak (held, in dB), playback and overload telemetry; each track's path shows its peak in dB
   - each track's signal path: its pattern clips, then its instrument and C++ effects, with live signal pulses driven by the meter tick, to its bus or the master
   - a read-only 512-sample native master scope (mono sum) and a 512-point Hann-window FFT spectrum spanning 0–24 kHz; left/right peak readouts remain independent
+  - **Audio clock** (#241, `lib/ui/settings/audio_diagnostics.dart`): `caw_audio_status`'s counters as text, read once a second while it shows, with a Copy button as Display modes has: the engine's rate, the output stream's rate and backend, its real rate (frames per second since it opened, and over the last read), callbacks, their smallest and largest size, frames rendered, late callbacks, xruns and the layers shed, restored and muted; the input's stream rate, real rate, drift, fill against its start, skipped frames, underruns and xruns; each playback device's native rates from `caw_audio_devices` where known ([engine](engine.md#audio-input-and-recording)). Test: `audio_clock_test.dart`.
   - it is an inspector for existing engine capabilities, not an editable processing graph or sample/buffer debugger
 - **Automation** (the focus view's Automation tab, `lib/ui/arrange/automation_panel.dart`, and the lanes under each track; the Automation workspace folded into Arrange with #139):
   - a track's volume and pan lanes: + adds one, tap the curve to add points, drag points, remove one, or set step and value with sliders; with no lanes a line says Automate in the transport records them by moving controls
