@@ -2,6 +2,7 @@
 #include <cmath>
 
 #include "builtin_fx_creative.h"
+#include "fx_merged.h"
 #include "caw/library/filter.hpp"
 
 // Original code (C.A.W. is Apache-2.0). A model of a cheap converter pair: an anti-alias low-pass (the ADC's),
@@ -70,7 +71,7 @@ struct ConverterFilter {
     }
 };
 
-class Bitcrush final : public EffectBase {
+class Bitcrush : public EffectBase {
 public:
     const ModuleDescriptor& descriptor() const noexcept override { return crushDescriptor(); }
 
@@ -149,5 +150,11 @@ private:
 }  // namespace
 
 void registerBitcrush(ModuleRegistry& registry) { registry.add(crushDescriptor(), &creative::make<Bitcrush>); }
+
+// As Bit distortion's Crush variant (builtin_fx_merged_drive.cpp): its own descriptor, and the same class under the variant's.
+const ModuleDescriptor& bitcrushDescriptor() { return crushDescriptor(); }
+ModuleProcessor* makeBitcrushAs(const ModuleDescriptor& variant) noexcept {
+    return new (std::nothrow) AsVariant<Bitcrush>(variant);
+}
 
 }  // namespace caw::fx
