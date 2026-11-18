@@ -54,13 +54,13 @@ void main() {
     expect(find.byIcon(Icons.check_rounded), findsNothing);
 
     p.finish(StartupStep.engine);
+    p.finish(StartupStep.projects);
     p.begin(StartupStep.components);
     await tester.pump(const Duration(milliseconds: 300));
-    expect(find.byIcon(Icons.check_rounded), findsOneWidget);
+    expect(find.byIcon(Icons.check_rounded), findsNWidgets(2));
     expect(find.text('Loading C++ components'), findsOneWidget);
 
     p.finish(StartupStep.components, ok: false); // no compiler on this device
-    p.finish(StartupStep.projects);
     p.begin(StartupStep.project, project: 'Mid tempo');
     await tester.pump(const Duration(milliseconds: 300));
     expect(find.byIcon(Icons.close_rounded), findsOneWidget);
@@ -100,10 +100,15 @@ void main() {
     await tester.pump(revealDuration - const Duration(milliseconds: 300));
     expect(find.byType(StartupScreen), findsOneWidget);
     expect(gate().ignoring, isFalse);
+    expect(find.text('the app'), findsNothing); // not built under the reveal: it takes no frame from it
 
     await tester.pump(const Duration(milliseconds: 200)); // the reveal ends
-    await tester.pump(); // the post-frame callback starts the fade
+    await tester.pump(); // its post-frame callback builds the app under the screen
     expect(gate().ignoring, isTrue);
+    expect(find.text('the app'), findsOneWidget);
+    expect(tester.widget<FadeTransition>(
+        find.ancestor(of: find.byType(StartupScreen), matching: find.byType(FadeTransition)).first).opacity.value, 1);
+    await tester.pump(); // the app's first frame is drawn: the fade starts on the next
     await tester.pump(Motion.standard + const Duration(milliseconds: 20));
     expect(find.byType(StartupScreen), findsNothing);
     expect(find.text('the app'), findsOneWidget);
@@ -122,6 +127,7 @@ void main() {
     // The app takes input at once; the screen fades out over it in the standard fade.
     expect(tester.widget<IgnorePointer>(
         find.ancestor(of: find.byType(StartupScreen), matching: find.byType(IgnorePointer)).first).ignoring, isTrue);
+    await tester.pump(); // the fade starts after the app's first frame
     await tester.pump(Motion.standard + const Duration(milliseconds: 20));
     expect(find.byType(StartupScreen), findsNothing);
   });
@@ -164,17 +170,87 @@ void main() {
     expect(s.startup.failed(StartupStep.project), isFalse);
   });
 
+  test('each launch step begins when its work does and ends when that is done, with real counts', () async {
+    final root = await Directory.systemTemp.createTemp('caw-startup');
+    addTearDown(() => root.delete(recursive: true));
+    final storage = ProjectStorage(root);
+    final maker = AppState(settings: Settings());
+    addTearDown(maker.dispose);
+    for (final name in ['One', 'Two', 'Three']) {
+      final p = maker.demoProject()..name = name;
+      await storage.save(p);
+      await storage.setLastOpened(p.id);
+    }
+    final s = AppState(settings: Settings()); // no engine: C++ components fail, the rest opens
+    addTearDown(s.dispose);
+    final seen = <String>[];
+    String row(StartupStep step) =>
+        '${s.startup.label(step)}${s.startup.done(step) ? ' done' : s.startup.begun(step) ? ' running' : ''}';
+    s.startup.addListener(() => seen.add([for (final step in s.startup.shown) row(step)].join(' | ')));
+    await s.openStorage(ProjectStorage(root));
+    expect(seen, [
+      'Reading saved projects running',
+      'Reading saved projects 3 running', // the count once the list is read, while the last project still loads
+      'Reading saved projects 3 done',
+      'Reading saved projects 3 done | Loading C++ components running',
+      'Reading saved projects 3 done | Loading C++ components done',
+      'Reading saved projects 3 done | Loading C++ components done | Opening Three running',
+      'Reading saved projects 3 done | Loading C++ components done | Opening Three done',
+    ]);
+    expect(s.startup.failed(StartupStep.components), isTrue);
+    expect(s.project.name, 'Three');
+  });
+
+  test('a row says its count: n of a known total, or how many were found', () {
+    final p = StartupProgress();
+    addTearDown(p.dispose);
+    expect(p.label(StartupStep.components), 'Loading C++ components');
+    p.count(StartupStep.components, 3, 7);
+    expect(p.label(StartupStep.components), 'Loading C++ components 3/7');
+    p.count(StartupStep.projects, 12);
+    expect(p.label(StartupStep.projects), 'Reading saved projects 12');
+    p.begin(StartupStep.project, project: 'Mid tempo');
+    expect(p.label(StartupStep.project), 'Opening Mid tempo');
+    var heard = 0;
+    p.addListener(() => heard++);
+    p.count(StartupStep.components, 3, 7); // unchanged: nothing to redraw
+    expect(heard, 0);
+  });
+
+  testWidgets('the components row counts up as each loads', (tester) async {
+    final p = StartupProgress()
+      ..finish(StartupStep.engine)
+      ..finish(StartupStep.projects)
+      ..begin(StartupStep.components)
+      ..count(StartupStep.components, 0, 3);
+    addTearDown(p.dispose);
+    await _pump(tester, _screen(p), const Size(390, 844));
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.text('Loading C++ components 0/3'), findsOneWidget);
+    p.count(StartupStep.components, 2, 3);
+    await tester.pump();
+    expect(find.text('Loading C++ components 2/3'), findsOneWidget);
+    expect(find.byIcon(Icons.check_rounded), findsNWidgets(2));
+    p
+      ..count(StartupStep.components, 3, 3)
+      ..finish(StartupStep.components);
+    await tester.pumpAndSettle();
+    expect(find.byIcon(Icons.check_rounded), findsNWidgets(3));
+  });
+
   testWidgets('a launch that hangs shows the app after the safety timeout, the stuck step marked and why', (tester) async {
     final s = AppState(settings: Settings());
     // Disposed in the test: its meter poller's timer must stop before the test ends.
     s.startup
       ..finish(StartupStep.engine)
+      ..finish(StartupStep.projects)
       ..begin(StartupStep.components); // and never finishes
     await _pump(tester, StartupGate(state: s, child: const Scaffold(body: Text('the app'))), const Size(390, 844));
     await tester.pump(const Duration(seconds: 9));
     expect(s.ready, isFalse);
     expect(find.byType(StartupScreen), findsOneWidget);
     await tester.pump(const Duration(seconds: 1, milliseconds: 100));
+    await tester.pump();
     await tester.pump(Motion.standard + const Duration(milliseconds: 20));
     expect(s.ready, isTrue);
     expect(find.byType(StartupScreen), findsNothing);
@@ -238,8 +314,10 @@ void main() {
     testWidgets('golden: startup screen mid-reveal on $name', (tester) async {
       final p = StartupProgress()
         ..finish(StartupStep.engine)
-        ..finish(StartupStep.components)
-        ..begin(StartupStep.projects);
+        ..count(StartupStep.projects, 12)
+        ..finish(StartupStep.projects)
+        ..begin(StartupStep.components)
+        ..count(StartupStep.components, 3, 7);
       addTearDown(p.dispose);
       await _pump(tester, _screen(p), size);
       await tester.pump(revealDuration * 0.62); // the outline mostly traced, the wave calming

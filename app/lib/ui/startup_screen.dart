@@ -2,7 +2,6 @@
 // real loading steps tick off under it, the version shows, and it fades away the moment loading is done.
 import 'dart:async';
 import 'dart:math' as math;
-import 'dart:ui' show PathMetric;
 
 import 'package:flutter/material.dart';
 
@@ -30,13 +29,17 @@ const Color _pink = Color(0xFFFF2BD6);
 /// unless Settings › Feel › Full startup animation is off, when loading that ends sooner cuts it short ([StartupGate]).
 const Duration revealDuration = Duration(milliseconds: 1300);
 
+/// The crow logo, precached as the reveal starts.
+const AssetImage _logoImage = AssetImage('assets/logo/caw_mark.png');
+
 /// The open-alpha notice and the copyright under the version (owner, 2026-11-12).
 const String openAlphaNotice = 'Open alpha: expect rough edges and unexpected issues.';
 const String copyrightLine = '© 2026 AutoStacc';
 
 /// Shows [child] (the app) with the startup screen in front until [state] is ready and, with
 /// [Settings.fullStartupAnimation] on (the default), the reveal has played to its end; then fades the screen out over
-/// the app, which takes input from the moment the fade starts.
+/// the app, which takes input from the moment the fade starts. The app is built only then, under the screen, so its
+/// first build and every rebuild while loading never take a frame from the reveal; the fade starts on the frame after.
 /// A launch still loading after [timeout] shows the app anyway ([AppState.startupTimedOut] says which step stuck).
 class StartupGate extends StatefulWidget {
   const StartupGate({super.key, required this.state, required this.child, this.timeout = const Duration(seconds: 10)});
@@ -51,6 +54,7 @@ class StartupGate extends StatefulWidget {
 class _StartupGateState extends State<StartupGate> with SingleTickerProviderStateMixin {
   late bool _ready = widget.state.ready;
   late bool _shown = !_ready;
+  late bool _buildChild = _ready; // the app is built once the screen starts to leave
   bool _revealDone = false;
   bool _leaving = false;
   late final AnimationController _fade = AnimationController(vsync: this, value: 1)
@@ -98,20 +102,28 @@ class _StartupGateState extends State<StartupGate> with SingleTickerProviderStat
   void _maybeLeave() {
     if (!_ready || !_shown || _leaving) return;
     if (widget.state.settings.fullStartupAnimation && !_revealDone) return;
-    setState(() => _leaving = true);
+    setState(() {
+      _leaving = true;
+      _buildChild = true;
+    });
     final d = Motion.fade(Motion.standard, Motion.of(context));
     if (d == Duration.zero) {
       _hide();
     } else {
-      _fade
-        ..duration = d
-        ..reverse();
+      // The app's first frame (its heaviest) is drawn under the still screen; the fade starts on the next one, so
+      // it runs smoothly from its first step.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        _fade
+          ..duration = d
+          ..reverse();
+      });
     }
   }
 
   @override
   Widget build(BuildContext context) => Stack(fit: StackFit.passthrough, children: [
-        widget.child,
+        _buildChild ? widget.child : const ColoredBox(color: startupBackground, child: SizedBox.expand()),
         if (_shown)
           Positioned.fill(
             child: IgnorePointer(
@@ -168,6 +180,8 @@ class _StartupScreenState extends State<StartupScreen> with SingleTickerProvider
     // Full motion reveals; Reduced, Off and the Minimal profile show the still logo (owner's D3).
     final moving = Motion.of(context) == MotionLevel.full;
     if (moving == _moving) return;
+    // The logo decodes while the wave runs (off the UI isolate), so it is ready when it fades in at 70%.
+    if (_moving == null) unawaited(precacheImage(_logoImage, context).catchError((Object _) {}));
     _moving = moving;
     if (moving) {
       _reveal.forward(from: 0);
@@ -190,22 +204,26 @@ class _StartupScreenState extends State<StartupScreen> with SingleTickerProvider
           child: LayoutBuilder(builder: (context, box) {
             final logo = math.min(box.maxWidth * 0.36, box.maxHeight * 0.24).clamp(64.0, 148.0);
             final listWidth = math.min(280.0, box.maxWidth - 32);
-            final image = Image.asset('assets/logo/caw_mark.png',
-                width: logo, height: logo, filterQuality: FilterQuality.medium, semanticLabel: 'C.A.W.');
+            final image = Image(
+                image: _logoImage, width: logo, height: logo, filterQuality: FilterQuality.medium, semanticLabel: 'C.A.W.');
             return Column(children: [
               const Spacer(flex: 5),
-              SizedBox(
-                width: box.maxWidth,
-                height: logo,
-                child: _moving == true
-                    ? CustomPaint(
-                        painter: WaveformRevealPainter(_reveal, logoSize: logo),
-                        child: Center(child: FadeTransition(opacity: _logo, child: image)),
-                      )
-                    : Center(child: image),
+              // Layers of their own: the reveal repaints every frame without the steps and lines, and a step that
+              // changes repaints none of the reveal.
+              RepaintBoundary(
+                child: SizedBox(
+                  width: box.maxWidth,
+                  height: logo,
+                  child: _moving == true
+                      ? CustomPaint(
+                          painter: WaveformRevealPainter(_reveal, logoSize: logo),
+                          child: Center(child: FadeTransition(opacity: _logo, child: image)),
+                        )
+                      : Center(child: image),
+                ),
               ),
               const SizedBox(height: 28),
-              SizedBox(width: listWidth, child: _StepList(progress: widget.progress)),
+              RepaintBoundary(child: SizedBox(width: listWidth, child: _StepList(progress: widget.progress))),
               const Spacer(flex: 6),
               // The version (and an update an earlier check found), the open-alpha notice and the copyright: small
               // and quiet, fading in with the steps.
@@ -271,8 +289,7 @@ class _StepRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final level = Motion.of(context);
     final done = progress.done(step), failed = progress.failed(step);
-    final name = progress.projectName;
-    final label = step == StartupStep.project && name != null ? 'Opening $name' : step.label;
+    final label = progress.label(step); // with its count, as the work goes ("Loading C++ components 3/7")
     final Widget mark = failed
         ? const Icon(Icons.close_rounded, key: ValueKey('failed'), size: 14, color: _pink)
         : done
@@ -292,7 +309,9 @@ class _StepRow extends StatelessWidget {
       Expanded(
         child: AnimatedDefaultTextStyle(
           duration: Motion.fade(Motion.small, level),
-          style: Theme.of(context).textTheme.bodyMedium!.copyWith(fontSize: 13, color: done ? _dim : _text, height: 1.2),
+          // Tabular figures: a count going up doesn't shift the row.
+          style: Theme.of(context).textTheme.bodyMedium!.copyWith(
+              fontSize: 13, color: done ? _dim : _text, height: 1.2, fontFeatures: const [FontFeature.tabularFigures()]),
           child: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis),
         ),
       ),
@@ -394,29 +413,82 @@ class WaveformRevealPainter extends CustomPainter {
     return Offset(256 + 1.18 * (x - 262), 256 + 1.18 * (y - 250));
   }
 
-  // The outline at one size, measured once (the size only changes with the window).
-  static (double, List<PathMetric>, double)? _cache;
+  // The outline at one size, measured once (the size only changes with the window): each edge's points scaled to
+  // the logo and the length along it at every point, so a frame walks the polyline without measuring or extracting.
+  static _Outline? _outlineCache;
 
-  static (List<PathMetric>, double) _outline(double size) {
-    final c = _cache;
-    if (c != null && c.$1 == size) return (c.$2, c.$3);
+  static _Outline _outline(double size) {
+    final c = _outlineCache;
+    if (c != null && c.size == size) return c;
     final k = size / 512;
-    final path = Path();
+    final edges = <List<Offset>>[];
+    final lengths = <List<double>>[];
+    var total = 0.0;
     for (final edge in _edges) {
-      final first = _svg(edge.first) * k;
-      path.moveTo(first.dx, first.dy);
-      for (final p in edge.skip(1)) {
-        final o = _svg(p) * k;
-        path.lineTo(o.dx, o.dy);
+      final points = [for (final p in edge) _svg(p) * k];
+      final at = <double>[0];
+      for (var i = 1; i < points.length; i++) {
+        at.add(at.last + (points[i] - points[i - 1]).distance);
       }
+      total += at.last;
+      edges.add(points);
+      lengths.add(at);
     }
-    final metrics = path.computeMetrics().toList();
-    final total = metrics.fold(0.0, (sum, m) => sum + m.length);
-    _cache = (size, metrics, total);
-    return (metrics, total);
+    return _outlineCache = _Outline(size, edges, lengths, total);
   }
 
   static double _span(double t, double from, double to) => ((t - from) / (to - from)).clamp(0.0, 1.0);
+
+  /// Paths the painter has made since the app started (a test checks a frame makes none once warmed up).
+  @visibleForTesting
+  static int debugPathsMade = 0;
+
+  // What every frame reuses: the two paths (reset and refilled; a canvas copies a path when it records it), the
+  // paints, the outline's sheen (per logo size), its glow's blur and the wave's gradient (per tip and height).
+  static final Path _wave = _newPath(), _drawn = _newPath();
+  static Path _newPath() {
+    debugPathsMade++;
+    return Path();
+  }
+
+  static final Paint _wavePaint = Paint()
+    ..style = PaintingStyle.stroke
+    ..strokeJoin = StrokeJoin.round;
+  static final Paint _glowPaint = Paint()
+    ..style = PaintingStyle.stroke
+    ..strokeJoin = StrokeJoin.round;
+  static final Paint _linePaint = Paint()
+    ..style = PaintingStyle.stroke
+    ..strokeJoin = StrokeJoin.round
+    ..strokeCap = StrokeCap.round;
+  static final Paint _dotPaint = Paint();
+  static (Rect, Shader)? _sheen, _waveShader;
+  static (double, MaskFilter)? _blur;
+
+  static Shader _sheenFor(Rect rect) {
+    final c = _sheen;
+    if (c != null && c.$1 == rect) return c.$2;
+    final shader = const LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: [_green, _cyan, _violet])
+        .createShader(rect);
+    _sheen = (rect, shader);
+    return shader;
+  }
+
+  static Shader _waveShaderFor(Rect rect) {
+    final c = _waveShader;
+    if (c != null && c.$1 == rect) return c.$2;
+    final shader = const LinearGradient(colors: [_violet, _cyan, _green]).createShader(rect);
+    _waveShader = (rect, shader);
+    return shader;
+  }
+
+  static MaskFilter _blurFor(double sigma) {
+    final c = _blur;
+    if (c != null && c.$1 == sigma) return c.$2;
+    final blur = MaskFilter.blur(BlurStyle.normal, sigma);
+    _blur = (sigma, blur);
+    return blur;
+  }
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -434,7 +506,9 @@ class WaveformRevealPainter extends CustomPainter {
       final tip = start.dx * run;
       final amp = logoSize * 0.17 * (0.25 + 0.75 * calm);
       final phase = t * math.pi * 7;
-      final wave = Path()..moveTo(0, start.dy);
+      final wave = _wave
+        ..reset()
+        ..moveTo(0, start.dy);
       final steps = math.max(96, tip ~/ 2); // about one point every 2 px
       for (var i = 1; i <= steps; i++) {
         final u = i / steps;
@@ -444,15 +518,11 @@ class WaveformRevealPainter extends CustomPainter {
         final y = math.sin(x / logoSize * 22 - phase) * 0.65 + math.sin(x / logoSize * 57 + phase * 1.6) * 0.35;
         wave.lineTo(x, start.dy + y * amp * env);
       }
-      final shader = const LinearGradient(colors: [_violet, _cyan, _green])
-          .createShader(Rect.fromLTWH(0, start.dy - logoSize / 2, math.max(tip, 1), logoSize));
       canvas.drawPath(
           wave,
-          Paint()
-            ..style = PaintingStyle.stroke
+          _wavePaint
             ..strokeWidth = stroke
-            ..strokeJoin = StrokeJoin.round
-            ..shader = shader
+            ..shader = _waveShaderFor(Rect.fromLTWH(0, start.dy - logoSize / 2, math.max(tip, 1), logoSize))
             ..color = Color.fromRGBO(255, 255, 255, calm));
     }
 
@@ -460,48 +530,59 @@ class WaveformRevealPainter extends CustomPainter {
     final trace = Curves.easeInOutCubic.transform(_span(t, 0.3, 0.8));
     final fadeOut = 1 - _span(t, 0.8, 1);
     if (trace <= 0 || fadeOut <= 0) return;
-    final (metrics, total) = _outline(logoSize);
-    var left = trace * total;
-    final drawn = Path();
+    final outline = _outline(logoSize);
+    // The pen goes by length along the whole outline (the same speed on every edge), the edges in drawing order.
+    var left = trace * outline.total;
+    final drawn = _drawn..reset();
     Offset? pen;
-    for (final m in metrics) {
-      if (left <= 0) break;
-      final part = math.min(left, m.length);
-      drawn.addPath(m.extractPath(0, part), box);
-      if (part < m.length) pen = box + m.getTangentForOffset(part)!.position;
-      left -= part;
+    for (var e = 0; e < outline.edges.length && left > 0; e++) {
+      final points = outline.edges[e], at = outline.lengths[e];
+      drawn.moveTo(box.dx + points[0].dx, box.dy + points[0].dy);
+      for (var i = 1; i < points.length; i++) {
+        if (left >= at[i] - 1e-6) { // whole (the edges' lengths may sum a hair under the total)
+          drawn.lineTo(box.dx + points[i].dx, box.dy + points[i].dy);
+          continue;
+        }
+        final p = box + Offset.lerp(points[i - 1], points[i], (left - at[i - 1]) / (at[i] - at[i - 1]))!;
+        drawn.lineTo(p.dx, p.dy);
+        pen = p;
+        break;
+      }
+      left -= at.last;
     }
-    final rect = box & Size.square(logoSize);
-    final sheen = const LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: [_green, _cyan, _violet])
-        .createShader(rect);
+    final sheen = _sheenFor(box & Size.square(logoSize));
     canvas.drawPath(
         drawn,
-        Paint()
-          ..style = PaintingStyle.stroke
+        _glowPaint
           ..strokeWidth = stroke * 3
-          ..strokeJoin = StrokeJoin.round
           ..shader = sheen
           ..color = Color.fromRGBO(255, 255, 255, 0.18 * fadeOut)
-          ..maskFilter = MaskFilter.blur(BlurStyle.normal, stroke * 2));
+          ..maskFilter = _blurFor(stroke * 2));
     canvas.drawPath(
         drawn,
-        Paint()
-          ..style = PaintingStyle.stroke
+        _linePaint
           ..strokeWidth = stroke
-          ..strokeJoin = StrokeJoin.round
-          ..strokeCap = StrokeCap.round
           ..shader = sheen
           ..color = Color.fromRGBO(255, 255, 255, fadeOut));
     if (pen != null) {
-      canvas.drawCircle(pen, stroke * 1.6, Paint()..color = Color.fromRGBO(255, 255, 255, 0.9 * fadeOut));
+      canvas.drawCircle(pen, stroke * 1.6, _dotPaint..color = Color.fromRGBO(255, 255, 255, 0.9 * fadeOut));
     }
     // The pink eye lights once the outline is whole.
     final eye = _span(t, 0.78, 0.86) * fadeOut;
     if (eye > 0) {
-      canvas.drawCircle(box + _svg(_eye) * k, _eyeRadius * 1.18 * k, Paint()..color = _pink.withValues(alpha: eye));
+      canvas.drawCircle(box + _svg(_eye) * k, _eyeRadius * 1.18 * k, _dotPaint..color = _pink.withValues(alpha: eye));
     }
   }
 
   @override
   bool shouldRepaint(WaveformRevealPainter old) => old.reveal != reveal || old.logoSize != logoSize;
+}
+
+/// The crow's outline at one logo size: each edge's points, the length along it at each point, and the total.
+class _Outline {
+  _Outline(this.size, this.edges, this.lengths, this.total);
+  final double size;
+  final List<List<Offset>> edges;
+  final List<List<double>> lengths;
+  final double total;
 }

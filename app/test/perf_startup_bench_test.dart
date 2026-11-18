@@ -1,11 +1,14 @@
 // Benchmarks the storage work at startup with 20 saved 16-track projects: listing them (every file decoded for its
 // name) and opening one. Reports the wall time and the UI isolate's longest stall (the largest gap between 1 ms
 // timer ticks while the work runs), which is what a user feels as a frozen first frame, and the listing again while
-// the startup screen's reveal paints at 120 Hz. Prints BENCH lines.
+// the startup screen's reveal paints at 120 Hz; then the launch's own steps (openStorage: reading the projects, the
+// default project, opening the last one) and, with CAW_LIB, making the engine and opening the device, each timed for
+// the UI isolate's longest stall. Prints BENCH lines.
 import 'dart:async';
 import 'dart:io';
 import 'dart:ui' as ui;
 
+import 'package:caw/engine/engine.dart';
 import 'package:caw/model/app_state.dart';
 import 'package:caw/model/settings.dart';
 import 'package:caw/model/storage.dart';
@@ -33,6 +36,7 @@ Future<(int wallUs, int stallUs, int busyUs)> _measure(Future<void> Function() w
 }
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized(); // the launch reads the bundled default project
   test('listing and opening saved projects', () async {
     final root = await Directory.systemTemp.createTemp('caw-perf');
     addTearDown(() => root.delete(recursive: true));
@@ -79,4 +83,60 @@ void main() {
     expect((await storage.list()).length, 20);
     s.dispose();
   });
+
+  test('launch: opening the last of 12 saved projects leaves the UI isolate free between chunks', () async {
+    final root = await Directory.systemTemp.createTemp('caw-perf-launch');
+    addTearDown(() => root.delete(recursive: true));
+    final storage = ProjectStorage(root);
+    final maker = AppState(settings: Settings());
+    for (var i = 0; i < 12; i++) {
+      final p = bigProject(maker, notes: 1000)..name = 'Song $i';
+      await storage.save(p);
+      await storage.setLastOpened(p.id);
+    }
+    maker.dispose();
+    var longest = 0, wall = 0;
+    for (var round = 0; round < 4; round++) { // the first rounds warm up the JIT (a release build is compiled ahead)
+      final s = AppState(settings: Settings());
+      final r = await _measure(() => s.openStorage(ProjectStorage(root)));
+      expect(s.project.name, 'Song 11');
+      s.dispose();
+      (wall, longest) = (r.$1, r.$2);
+    }
+    String ms(int us) => (us / 1000).toStringAsFixed(1);
+    // ignore: avoid_print
+    print('BENCH launch, 12 saved projects of about 0.3 MB: openStorage ${ms(wall)} ms, longest UI stall ${ms(longest)} ms');
+    // About one frame at 60 Hz in this JIT test VM (about 5 ms on a desktop); a step done in one go would be far more.
+    expect(longest, lessThan(16000));
+  });
+
+  final lib = Platform.environment['CAW_LIB'];
+  test('launch: the engine is made and the device opened off the UI isolate', () async {
+    final sync = await _measure(() async => Engine.create().dispose());
+    Engine? made;
+    final off = await _measure(() async => made = await Engine.createOffThread());
+    final audio = await _measure(() async => await made!.startAudioOffThread());
+    made!.dispose();
+    // Opening a big saved project with the engine (its sync to the engine included), warmed up.
+    final root = await Directory.systemTemp.createTemp('caw-perf-launch-engine');
+    addTearDown(() => root.delete(recursive: true));
+    final storage = ProjectStorage(root);
+    final maker = AppState(settings: Settings());
+    final big = bigProject(maker, notes: 1000);
+    await storage.save(big);
+    await storage.setLastOpened(big.id);
+    maker.dispose();
+    var open = (0, 0, 0);
+    for (var round = 0; round < 4; round++) {
+      final s = AppState(settings: Settings())..engine = Engine.create();
+      open = await _measure(() => s.openStorage(ProjectStorage(root)));
+      s.dispose();
+    }
+    String ms(int us) => (us / 1000).toStringAsFixed(1);
+    // ignore: avoid_print
+    print('BENCH launch with the engine, a 0.3 MB project: openStorage ${ms(open.$1)} ms, longest UI stall ${ms(open.$2)} ms');
+    // ignore: avoid_print
+    print('BENCH engine: made on the UI isolate ${ms(sync.$1)} ms (stall ${ms(sync.$2)}); made off it '
+        '${ms(off.$1)} ms (stall ${ms(off.$2)}); device opened off it ${ms(audio.$1)} ms (stall ${ms(audio.$2)})');
+  }, skip: lib == null || lib.isEmpty ? 'set CAW_LIB to the built engine library' : null);
 }
