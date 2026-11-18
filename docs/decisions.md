@@ -1,10 +1,18 @@
 ---
 title: Decisions
 summary: Dated record of what was chosen and why, newest first.
-updated: 2026-11-17
+updated: 2026-11-18
 ---
 
 # Decisions
+
+## 2026-11-18: Least privilege first, a companion app, sandboxing optional (owner)
+
+**Decision (owner, 2026-11-18, "probably the route"):** the main defence against bad third-party code is giving the main app as few powers as it can do with, not a sandbox by default. The design is in the [plug-in hosting plan](plugin-hosting-plan.md#least-privilege-and-the-companion-app).
+- **Why:** a sandbox costs latency (Isolated: one block) or CPU (an interpreted or WASM format), and most DAWs run plug-ins in-process too. Least privilege costs no CPU or memory on the audio path: it lowers the worst case from "everything C.A.W can do" to what the main app must hold.
+- **A companion app.** Updates, installs and the network move into a second app with its own package, so its own permissions. The main app, where plug-ins load, drops `REQUEST_INSTALL_PACKAGES`, `UPDATE_PACKAGES_WITHOUT_USER_ACTION` and, if every network use moves, `INTERNET`. The owner expects it to grow into the AutoStacc hub (files, the account and more), which keeps account tokens out of the process that loads plug-ins.
+- **Sandboxing is offered, not the default.** Isolated (and any interpreted format) stays available for users who want it. The default trust for never-seen code is still open ([vision](vision.md)).
+- **Flagging and a handshake:** the owner wants bad code flagged (antivirus or similar) and something plug-ins must pass before they load. The proposals (AMSI scans on Windows, signed plug-ins, a revocation list from the hub) are in the plan, for the owner to choose.
 
 ## 2026-11-17: Each platform's low-latency path; ASIO and rtkit stay out (owner's request, #237)
 

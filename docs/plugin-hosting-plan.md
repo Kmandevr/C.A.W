@@ -1,12 +1,14 @@
 ---
 title: Plug-in hosting plan
-summary: The isolation design and the silent staged plan for hosting CLAP/VST3 plug-ins (#212, live in 1.1.0), the verified facts and the owner's open questions; planned, not built.
-updated: 2026-11-17
+summary: Least privilege and the companion app first, the optional isolation design, the silent staged plan for hosting CLAP/VST3 plug-ins (#212, live in 1.1.0), the verified facts and the owner's open questions; planned, not built.
+updated: 2026-11-18
 ---
 
 # Plug-in hosting plan
 
 **[Proposal]** None of this is built. It is an architect review from 2026-11-17, laid down silently in steps (the owner's groundwork rule, [decisions](decisions.md)). It goes live in 1.1.0. The owner reviews the isolation design before step 1.
+
+**Owner direction (2026-11-18):** least privilege comes first and Isolated is an option the user can choose, not the default ([decisions](decisions.md)). The design for that is [Least privilege and the companion app](#least-privilege-and-the-companion-app).
 
 ## Where things stand today **[Fact]**, checked 2026-11-17
 - Isolated is refused: `engine/src/module_registry.cpp` and `app/lib/model/native_trust.dart`. The C API already has `CAW_NATIVE_TRUST_ISOLATED`.
@@ -16,7 +18,7 @@ updated: 2026-11-17
 
 ## Isolated mode: the design
 - **A host process.** A small `caw_plugin_host` runs per plug-in instance by default. It links only the hosting code.
-  - **Windows:** a child process in a Job Object (it is killed with the app, and its memory is capped), with a shared memory section.
+  - **Windows:** a child process in a Job Object (it is killed with the app, and its memory is capped), with a shared memory section. A Job Object limits resources, not access: to be a sandbox the host also needs an AppContainer or a low-integrity token, with no network capability.
   - **Android:** a `PluginHostService` in its own declared process, ideally `isolatedProcess`. It gets the plug-in `.so` and the shared memory as file descriptors, and it cannot read app storage itself.
   - **Linux CI:** the same POSIX code.
 - **Audio exchange that never waits.** Each instance has one shared region holding input and output block slots, plus SPSC rings for events and parameter changes.
@@ -33,6 +35,37 @@ updated: 2026-11-17
   - the host thread may not get real-time priority outside the audio callback **[Assumption]**.
   
   The Benchmark measures all of this.
+
+## Least privilege and the companion app
+
+**[Proposal]** (owner direction, 2026-11-18). Android grants permissions per app, not per process or library, so a Trusted plug-in has everything the main app has. Taking powers away from the main app costs nothing on the audio path.
+
+**Already in place [Fact]**, `app/android/app/src/main/AndroidManifest.xml` and `LinkedFolders.kt`, checked 2026-11-18:
+- the microphone and Bluetooth are asked for only when the user turns them on;
+- location is declared only up to Android 11 (`maxSdkVersion="30"`), and Bluetooth scanning is `neverForLocation`;
+- linked sample folders are granted read-only.
+
+**The companion app** has its own package, so its own permissions:
+- It holds `REQUEST_INSTALL_PACKAGES`, `UPDATE_PACKAGES_WITHOUT_USER_ACTION` and `INTERNET`: the self-updater, the update check, telemetry and feedback. Later it becomes the AutoStacc hub (files, the account), so account tokens never live in the process that loads plug-ins.
+- The main app talks to it only in fixed, structured messages (an update check, a telemetry report in the existing schema), never arbitrary payloads, so a plug-in can't use it to send data out.
+- It accepts only callers signed with C.A.W's own key: a custom permission with `protectionLevel="signature"`. Never `sharedUserId`, which would merge the two apps' permissions again. The main app needs a `<queries>` entry to find it.
+- **Play builds:** the Play companion carries no install permissions either, since Play does the updating.
+- **Windows:** the same split, as a helper process. It only helps if the main process is itself restricted (MSIX with an AppContainer). **[Assumption]** that the Flutter app and local CMake builds work in an AppContainer; to test.
+
+**Free limits in the main app:**
+- third-party code loads only while a project that uses it is open, and unloads when it closes;
+- a setting gives the microphone back when C.A.W closes (`revokeSelfPermissionsOnKill`, Android 13+);
+- the microphone foreground service runs only while recording.
+
+**Flagging and a handshake** (the owner wants both; choices open):
+- **Antivirus, Windows:** before loading a library, the app passes its bytes to the installed antivirus through AMSI (`AmsiScanBuffer`) and refuses on a detection. It keeps the Mark-of-the-Web on files that came from a download, so SmartScreen and Defender treat them as downloaded.
+- **Android** has no antivirus API for an app's own files. The equivalent is a hash check against a list the hub keeps: known-bad hashes are refused everywhere, and a user's report through feedback can add one.
+- **Signed plug-ins, the "handshake":** a check the plug-in runs itself proves nothing, because bad code can run it too. What works is a signature from a key the plug-in's author doesn't control, checked once at load:
+  - authors register a key with the hub, and the hub can revoke it;
+  - the app's own builder signs what it builds from source the user saw, with a non-exportable device key;
+  - unsigned code needs an explicit Trusted choice with a plain warning.
+
+**[Assumption]** the API names and behaviour above (AMSI, `revokeSelfPermissionsOnKill`, signature permissions, `sharedUserId`) come from platform documentation not re-read this session; check each before building on it.
 
 ## Silent steps
 1. **1.0.6:** the shared-memory ring (a new isolation folder in the engine sources), with tests across two processes on Linux and Windows CI. Nothing calls it.
@@ -65,3 +98,5 @@ updated: 2026-11-17
 4. What users see on a crash: bypass, mute, or a notice?
 5. Are plug-in GUIs (VST3 editors, CLAP GUI embedding) in scope for 1.1.0?
 6. Which trust a plug-in gets the first time it is seen (already open in [vision](vision.md)).
+7. Which flagging and signing parts to build ([least privilege](#least-privilege-and-the-companion-app)), and whether unsigned code may load at all.
+8. Which release the companion app comes in, and whether it starts as the updater alone or as the AutoStacc hub.
