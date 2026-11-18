@@ -2,6 +2,7 @@
 import 'package:flutter/material.dart';
 
 import '../../../engine/component_info.dart';
+import '../../../model/merged_devices.dart';
 import '../../theme.dart';
 import 'creative/creative_catalog.dart' as fx_creative;  // fx-creative
 import 'dynamics/catalog.dart' as fx_dynamics;  // fx-dynamics
@@ -79,6 +80,17 @@ class EffectCatalog {
         m[id] = EffectEntry(id, c ?? EffectCategory.utility, description, icon, keywords: m[id]?.keywords ?? const []);
       }
     }
+    // A merged device is found by its old effects' words too ("saturator", "ping pong").
+    for (final id in MergedDevices.ids) {
+      final e = m[id];
+      if (e == null) continue;
+      final words = <String>{...e.keywords};
+      for (final v in MergedDevices.variants.where((v) => v.id == id && v.oldId != id)) {
+        words.add(v.oldId.substring('org.caw.'.length).replaceAll('.', ' '));
+        words.addAll(m[v.oldId]?.keywords ?? const []);
+      }
+      m[id] = EffectEntry(id, e.category, e.description, e.icon, keywords: words.toList());
+    }
     return m;
   }();
 
@@ -90,6 +102,26 @@ class EffectCatalog {
     [for (final e in fx_creative.creativeCatalog) (e.id, e.category, e.description, e.icon)],  // fx-creative
     [for (final e in fx_filters.filtersBrowserEntries) (e.id, e.category, e.description, e.icon)],  // fx-filters
     [for (final e in fx_space_model.fxSpaceBrowser.entries) (e.key, e.value.category, e.value.description, fx_space.fxSpaceIcons[e.key]!)],  // fx-space
+    _merged,  // the merged devices (FX consolidation, 1.0.8), last: their entries win over a reused id's older one
+  ];
+
+  /// The merged devices (FX consolidation, 1.0.8): one entry each, listed by the engine in place of the old effects
+  /// they replaced (engine/src/fx_merged.h; the old ids are retired and no longer listed).
+  static const List<(String, String, String, IconData)> _merged = [
+    ('org.caw.compressor', 'Dynamics', 'Compressor, Dynamics, Gate or Shape (the drawn duck), with a sidechain', Icons.compress),
+    ('org.caw.limiter', 'Dynamics', 'A brickwall ceiling with look-ahead and true peak', Icons.vertical_align_top),
+    ('org.caw.transient', 'Dynamics', 'More or less attack and sustain, whatever the level', Icons.show_chart),
+    ('org.caw.drive', 'Drive', 'Distortion, Saturate, Clip or Phase: from warmth to grit', Icons.whatshot_outlined),
+    ('org.caw.bits', 'Drive', 'Crush: fewer bits and a lower rate with jitter and converter filters', Icons.grain),
+    ('org.caw.eq', 'EQ & Filter', 'Bands (eight with a live spectrum), Graphic, DJ or Tilt', Icons.graphic_eq),
+    ('org.caw.filter', 'EQ & Filter', 'Multimode, Ladder or Nonlinear: resonant filters', Icons.filter_alt_outlined),
+    ('org.caw.utility', 'Utility', 'Utility, Width, Balance, Imager, Haas or Mixer: gain and the stereo field', Icons.tune),
+    ('org.caw.chorus', 'Modulation', 'Chorus, Ensemble, Doubler, Flanger, Vibrato or Rotary', Icons.waves),
+    ('org.caw.phaser', 'Modulation', 'Swept all-pass notches with feedback', Icons.waves),
+    ('org.caw.tremolo', 'Modulation', 'Tremolo or Pan: level or place moving in time', Icons.swap_horiz),
+    ('org.caw.delay', 'Space', 'Digital (synced, dual, drive in the loop) or Ping-pong echoes', Icons.blur_linear),
+    ('org.caw.reverb', 'Space', 'Hall (rooms to halls, ducking and freeze) or Shimmer', Icons.blur_on),
+    ('org.caw.shift', 'Pitch & Time', 'Pitch (semitones and cents) or Frequency (every partial by the same hertz)', Icons.height),
   ];
 
   static const List<EffectEntry> _entries = [

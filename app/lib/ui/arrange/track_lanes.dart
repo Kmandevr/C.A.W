@@ -256,7 +256,7 @@ List<(String, String)> addableClipLanes(AppState state, LayerDoc layer, ClipDoc 
     }
   }
   for (var i = 0; i < layer.components.length; i++) {
-    final info = state.componentInfo(layer.components[i].id);
+    final info = state.useInfo(layer.components[i]);
     for (final p in info?.parameters ?? const []) {
       if (p.automatable && !has('component', p.id, i)) out.add(('component|$i|${p.id}', '${info!.label} · ${p.name.isEmpty ? p.id : p.name}'));
     }

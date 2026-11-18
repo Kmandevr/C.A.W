@@ -3,13 +3,14 @@
 // unless a feedback send breaks the loop (RoutingPlan).
 import 'app_state.dart';
 import 'arrange_fx.dart';
+import 'merged_devices.dart';
 import 'project.dart';
 import 'routing.dart';
 
 /// What a one-tap new bus starts with.
 enum FxBusKind {
-  reverb('Reverb', 'org.caw.reverb.pro'),
-  delay('Delay', 'org.caw.delay.pro');
+  reverb('Reverb', 'org.caw.reverb'),  // its first variant, Hall (was org.caw.reverb.pro)
+  delay('Delay', 'org.caw.delay');  // its first variant, Digital (was org.caw.delay.pro)
 
   const FxBusKind(this.label, this.componentId);
   final String label, componentId;
@@ -85,8 +86,9 @@ extension RoutingEdit on AppState {
   }
 
   /// Whether component [componentId] has a sidechain input (its descriptor's "sidechain" audio input).
-  bool hasSidechain(String componentId) {
-    final info = componentInfo(componentId);
+  bool hasSidechain(String componentId, [Map<String, double> params = const {}]) {
+    // A merged device (FX consolidation): its variant's ports (Compressor's Dynamics variant has no sidechain).
+    final info = componentInfo(componentId)?.forValues(params);
     if (info == null) return keyedBuiltins.contains(componentId);
     return info.ports.any((p) => p.input && p.isAudio && p.id == 'sidechain');
   }
@@ -189,12 +191,13 @@ extension RoutingEdit on AppState {
     if (slot < 0 || slot >= layer.components.length) return false;
     if (sourceId != null && !routing.canKey(layer, sourceId)) return false;
     final use = layer.components[slot];
+    final page = MergedDevices.pageIdOf(use.id, use.params);  // a merged device: the old effect its variant is
     // A compressor or gate listens to the key once it has one (Sidechain: External), and back to itself without.
-    if (use.id == 'org.caw.compressor' || use.id == 'org.caw.gate') {
+    if (page == 'org.caw.compressor' || page == 'org.caw.gate') {
       setNativeParamLive(layer, slot, 'sidechain', sourceId == null ? 0 : 1);
     }
     // A ducker on Tempo (it needs no input) starts following the key's audio when given one.
-    if (use.id == 'org.caw.ducker' && sourceId != null && (use.params['mode'] ?? 2) == 2) {
+    if (page == 'org.caw.ducker' && sourceId != null && (use.params['mode'] ?? 2) == 2) {
       setNativeParamLive(layer, slot, 'mode', 0);
     }
     // fx-creative: a ring mod takes the key as its carrier when given one, and goes back to a sine without.

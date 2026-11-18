@@ -1,5 +1,6 @@
 // Device presets (Init, the engine's list when it offers one, starter lists in Dart, the user's own) and the header's A/B compare snapshots.
 import '../../../engine/component_info.dart';
+import '../../../model/merged_devices.dart';
 import '../../../model/device_target.dart';
 import '../../../model/user_presets.dart';
 
@@ -70,7 +71,13 @@ class DevicePresets {
   static List<DevicePreset> user(DeviceTarget target) {
     final id = target.componentId;
     if (id == null) return const [];
-    return [for (final p in target.state.userPresets.forComponent(id)) DevicePreset.user(p)];
+    // A merged device (FX consolidation): the user's presets of the variant it plays (another variant's would set
+    // knobs it doesn't have; the variant picker changes the variant).
+    final variant = target.info?.variantIndex ?? 0;
+    return [
+      for (final p in target.state.userPresets.forComponent(id))
+        if (!MergedDevices.isMerged(id) || ((p.device?.params[variantParam] ?? 0).round() == variant)) DevicePreset.user(p),
+    ];
   }
 
   /// What was loaded last, per device: the preset's [DevicePreset.key] and name.

@@ -308,6 +308,8 @@ class Bindings {
             'caw_engine_release_touches'),
         migrateInstrument = lib.lookupFunction<Pointer<Utf8> Function(Pointer<Utf8>), Pointer<Utf8> Function(Pointer<Utf8>)>(
             'caw_migrate_instrument'),
+        migrateComponent = lib.lookupFunction<Pointer<Utf8> Function(Pointer<Utf8>), Pointer<Utf8> Function(Pointer<Utf8>)>(
+            'caw_migrate_component'),
         drumsInfo = lib.lookupFunction<Pointer<Utf8> Function(), Pointer<Utf8> Function()>('caw_drums_info'),
         drumsRandomize = lib.lookupFunction<Pointer<Utf8> Function(Int32, Uint32, Double, Int32, Pointer<Utf8>),
             Pointer<Utf8> Function(int, int, double, int, Pointer<Utf8>)>('caw_drums_randomize'),
@@ -537,6 +539,8 @@ class Bindings {
   final void Function(Pointer<Void>, double, int) playCountIn;
   final void Function(Pointer<Void>, int) setMetronome;
   final Pointer<Utf8> Function(Pointer<Utf8>) migrateInstrument;
+  /// caw_migrate_component (API 38): an effect entry in its merged form (FX consolidation).
+  final Pointer<Utf8> Function(Pointer<Utf8>) migrateComponent;
   final Pointer<Utf8> Function() drumsInfo;
   final Pointer<Utf8> Function(int, int, double, int, Pointer<Utf8>) drumsRandomize;
   final Pointer<Utf8> Function(Pointer<Utf8>) drumsExplode;

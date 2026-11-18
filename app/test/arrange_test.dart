@@ -700,15 +700,20 @@ void main() {
     final layer = s.project.layers.firstWhere((l) => !l.isFolder);
     await tester.runAsync(() async {
       s.componentCatalog.refreshIfStale();
-      for (var i = 0; i < 250 && s.componentInfo('org.caw.stereo.width') == null; i++) {
+      for (var i = 0; i < 250 && s.componentInfo('org.caw.utility') == null; i++) {
         await Future<void>.delayed(const Duration(milliseconds: 20));
       }
     });
-    final width = s.componentInfo('org.caw.stereo.width');
-    expect(width, isNotNull);
-    expect(width!.builtin, isTrue);
-    expect(width.parameters.map((p) => p.id), contains('width'));
-    s.addNativeEffect(layer, 'org.caw.stereo.width');
+    // The width tool is Utility/Stereo's Width variant now (FX consolidation; it was org.caw.stereo.width, retired).
+    expect(s.componentInfo('org.caw.stereo.width'), isNull);
+    final utility = s.componentInfo('org.caw.utility');
+    expect(utility, isNotNull);
+    expect(utility!.builtin, isTrue);
+    final width = utility.forValues({'variant': 1});
+    expect(width.variantIndex, 1);
+    expect(width.parameters.map((p) => p.id), containsAll(['width', 'variant']));
+    s.addNativeEffect(layer, 'org.caw.utility');
+    layer.components.single.params['variant'] = 1;
     await tester.runAsync(() async => s.info = await s.engine!.setProject(s.project.toEngineJson()));
     expect(s.engineComponentIndex(layer, 0), 0);
     s.setNativeParamLive(layer, 0, 'width', 1.5);

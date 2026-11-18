@@ -421,7 +421,7 @@ class _NativeEffectCard extends StatelessWidget {
 
   Widget _card(BuildContext context) {
     final use = _use;
-    final info = state.componentInfo(use.id);
+    final info = state.useInfo(use);
     final cpp = state.cppComponentFor(use.id);
     final builtin = isBuiltinComponent(use.id) || (info?.builtin ?? false);
     final status = state.nativeEffectState(use.id);
@@ -454,7 +454,7 @@ class _NativeEffectCard extends StatelessWidget {
       if (v == 'up') state.moveNativeEffect(layer, index, index - 1);
       if (v == 'down') state.moveNativeEffect(layer, index, index + 1);
       if (v == 'reset' && info != null) {
-        for (final p in info.parameters) {
+        for (final p in info.knobs) {
           _param(p.id, p.defaultValue);
         }
         state.commitNativeParams(layer);
@@ -560,7 +560,7 @@ class _NativeEffectCard extends StatelessWidget {
         return ValueListenableBuilder<int>(
           valueListenable: state.layerValueTick(layer.id),
           builder: (context, _, _) => Wrap(spacing: 2, runSpacing: 4, children: [
-            for (final p in info.parameters)
+            for (final p in info.knobs)
               if (p.isChoice)
                 _ChoiceParam(label: p.label, value: use.params[p.id] ?? p.defaultValue, choices: p.choices, min: p.min,
                   onChanged: (v) { _param(p.id, v); state.commitNativeParams(layer); })

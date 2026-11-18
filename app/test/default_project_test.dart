@@ -27,17 +27,20 @@ void main() {
     final tracks = {for (final l in p.layers) l.name: l};
     expect(tracks.keys, ['Track 3', 'Bass', 'Drums', 'Layer 4']);
     String? inst(String n) => tracks[n]!.instrument?.id;
-    List<String> fx(String n) => [for (final c in tracks[n]!.components) c.id];
+    // Its effects as merged devices and variants (FX consolidation; the old ids in the comments).
+    List<String> fx(String n) => [
+          for (final c in tracks[n]!.components) c.params.containsKey('variant') ? '${c.id}#${c.params['variant']!.round()}' : c.id,
+        ];
     expect(inst('Track 3'), 'org.caw.synth.flagship');
-    expect(fx('Track 3'), ['org.caw.ducker', 'org.caw.distortion']);
+    expect(fx('Track 3'), ['org.caw.compressor#3', 'org.caw.drive#0']);  // ducker, distortion
     expect(inst('Bass'), 'org.caw.synth.flagship');
     expect(tracks['Bass']!.instrument?.preset, 'Mono bass');
-    expect(fx('Bass'), ['org.caw.distortion', 'org.caw.saturator', 'org.caw.ducker']);
+    expect(fx('Bass'), ['org.caw.drive#0', 'org.caw.drive#1', 'org.caw.compressor#3']);  // distortion, saturator, ducker
     expect(inst('Drums'), 'org.caw.drums');
     expect(tracks['Drums']!.instrument?.preset, 'Kit: 808');
-    expect(fx('Drums'), ['org.caw.distortion', 'org.caw.eq', 'org.caw.compressor']);
+    expect(fx('Drums'), ['org.caw.drive#0', 'org.caw.eq', 'org.caw.compressor']);
     expect(inst('Layer 4'), 'org.caw.synth.flagship');
-    expect(fx('Layer 4'), ['org.caw.delay.pingpong']);
+    expect(fx('Layer 4'), ['org.caw.delay#1']);  // delay.pingpong
     expect(tracks['Bass']!.clips, hasLength(2));
   });
 

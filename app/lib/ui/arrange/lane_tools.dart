@@ -270,7 +270,7 @@ List<AutomationChoice> automationChoices(AppState state, LayerDoc layer) {
     }
   }
   for (var i = 0; i < layer.components.length; i++) {
-    final info = state.componentInfo(layer.components[i].id);
+    final info = state.useInfo(layer.components[i]);
     final group = '${info?.label ?? state.componentLabel(layer.components[i].id)} · ${i + 1}';
     for (final p in info?.parameters ?? const []) {
       if (p.automatable) {

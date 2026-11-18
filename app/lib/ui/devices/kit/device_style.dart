@@ -51,6 +51,10 @@ DeviceFamily? familyOfComponent(String id) => filtersFamily(id) /* fx-filters */
       'org.caw.compressor' || 'org.caw.limiter' || 'org.caw.gate' || 'org.caw.transient' => DeviceFamily.dynamics,
       'org.caw.reverb.pro' || 'org.caw.delay.pro' || 'org.caw.delay.pingpong' => DeviceFamily.space,
       'org.caw.saturator' || 'org.caw.distortion' => DeviceFamily.drive,
+      // The merged devices (FX consolidation) that have new ids; a reused id keeps its family.
+      'org.caw.drive' || 'org.caw.bits' => DeviceFamily.drive,
+      'org.caw.delay' || 'org.caw.reverb' => DeviceFamily.space,
+      'org.caw.shift' => DeviceFamily.creative,
       // fx-dynamics
       'org.caw.dynamics' || 'org.caw.multiband' || 'org.caw.deesser' => DeviceFamily.dynamics,
       'org.caw.clipper' || 'org.caw.phasedist' => DeviceFamily.drive,

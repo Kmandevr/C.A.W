@@ -2,6 +2,7 @@
 // "Key: <track>" to pick what it listens to, and pre or post fader (the ducker's trigger tiles sit right under it).
 import 'package:flutter/material.dart';
 
+import '../../model/merged_devices.dart';
 import '../../model/device_target.dart';
 import '../../model/routing_edit.dart';
 import '../arrange/long_press_menu.dart';
@@ -21,11 +22,11 @@ class SidechainBar extends StatelessWidget {
   Widget build(BuildContext context) {
     final t = target, s = t.state;
     final use = t.use, layer = t.layer, id = t.componentId;
-    if (t.isInstrument || use == null || layer == null || isMasterLayer(layer) || id == null || !s.hasSidechain(id)) return const SizedBox.shrink();
+    if (t.isInstrument || use == null || layer == null || isMasterLayer(layer) || id == null || !s.hasSidechain(id, use.params)) return const SizedBox.shrink();
     final key = use.key;
     final source = s.layerById(key?.layer);
     final plays = key != null && s.routing.keyPlays(layer, use);
-    final ducker = id == 'org.caw.ducker';
+    final ducker = MergedDevices.pageIdOf(id, use.params) == 'org.caw.ducker';  // Compressor's Shape variant
     final mode = ducker ? t.value('mode').round().clamp(0, 2) : 0;
     // Tempo needs no key: the picker stays, dimmed, for switching back.
     final needsKey = !ducker || mode != 2;

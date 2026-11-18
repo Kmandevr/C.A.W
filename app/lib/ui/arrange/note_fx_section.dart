@@ -129,7 +129,7 @@ class _NoteFxCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final use = layer.noteComponents[index];
-    final info = state.componentInfo(use.id);
+    final info = state.useInfo(use);
     final name = state.componentLabel(use.id);
     final heavy = info?.cpuClass == 'heavy';
     Future<void> menu(Offset at) async {
@@ -182,7 +182,7 @@ class _NoteFxCard extends StatelessWidget {
                 ValueListenableBuilder<int>(
                   valueListenable: state.layerValueTick(layer.id),
                   builder: (context, _, _) => Wrap(spacing: 2, runSpacing: 4, children: [
-                    for (final p in info.parameters)
+                    for (final p in info.knobs)
                       if (!p.isChoice)
                         Knob(key: ValueKey('note-knob-${use.id}-${p.id}'), value: use.params[p.id] ?? p.defaultValue,
                           min: p.min, max: p.max, step: p.step, defaultValue: p.defaultValue, label: p.label,

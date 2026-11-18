@@ -3,6 +3,7 @@
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:caw/model/merged_devices.dart';
 import 'package:caw/engine/engine.dart';
 import 'package:caw/model/app_state.dart';
 import 'package:caw/model/device_display.dart';
@@ -144,6 +145,8 @@ void main() {
           ...creativeCatalog.map((e) => (e.id, e.category, e.description, e.icon)),
           ...filtersBrowserEntries.map((e) => (e.id, e.category, e.description, e.icon)),
           ...fxSpaceBrowser.entries.map((e) => (e.key, e.value.category, e.value.description, fxSpaceIcons[e.key]!))]) {
+        // A merged device's own entry (FX consolidation) replaces a reused id's group entry (checked below).
+        if (MergedDevices.isMerged(e.$1)) continue;
         final entry = EffectCatalog.of(e.$1);
         expect(entry, isNotNull, reason: e.$1);
         expect(entry!.category, EffectCategory.byLabel(e.$2), reason: e.$1);
@@ -155,6 +158,14 @@ void main() {
       expect(EffectCatalog.of('org.caw.bitcrush')!.category, EffectCategory.creative);
       expect(EffectCatalog.of('org.caw.ladder')!.category, EffectCategory.eqFilter);
       expect(EffectCatalog.of('org.caw.compressor')!.keywords, contains('glue'));
+      // One entry per merged device, found by its old effects' names too.
+      for (final id in MergedDevices.ids) {
+        expect(EffectCatalog.of(id)?.description, isNotEmpty, reason: id);
+      }
+      expect(EffectCatalog.of('org.caw.drive')!.category, EffectCategory.drive);
+      expect(EffectCatalog.of('org.caw.drive')!.matches('saturator', 'Drive'), isTrue);
+      expect(EffectCatalog.of('org.caw.delay')!.matches('ping pong', 'Delay'), isTrue);
+      expect(EffectCatalog.of('org.caw.compressor')!.matches('ducker', 'Compressor'), isTrue);
       expect(EffectCatalog.of('org.caw.stutter')!.matches('beat repeat', 'Stutter'), isTrue);
       expect(EffectCategory.byLabel('EQ & Filter'), EffectCategory.eqFilter);
       expect(EffectCategory.byLabel('Nope'), isNull);
@@ -207,16 +218,16 @@ void main() {
       expect(find.text('FAVOURITES'), findsOneWidget);
       expect(find.byKey(const ValueKey('fx-browser-Favourites-org.caw.compressor')), findsOneWidget);
       // A pick goes first in Recently used.
-      await tester.scrollUntilVisible(find.byKey(const ValueKey('fx-browser-Dynamics-org.caw.gate')), 120,
+      await tester.scrollUntilVisible(find.byKey(const ValueKey('fx-browser-Dynamics-org.caw.limiter')), 120,
           scrollable: find.byType(Scrollable).last);
       await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const ValueKey('fx-browser-Dynamics-org.caw.gate')));
+      await tester.tap(find.byKey(const ValueKey('fx-browser-Dynamics-org.caw.limiter')));
       await tester.pumpAndSettle();
-      expect(s.effectRecents.ids.first, 'org.caw.gate');
+      expect(s.effectRecents.ids.first, 'org.caw.limiter');
       await tester.tap(find.text('open'));
       await tester.pumpAndSettle();
       expect(find.text('RECENTLY USED'), findsOneWidget);
-      expect(find.byKey(const ValueKey('fx-browser-Recently used-org.caw.gate')), findsOneWidget);
+      expect(find.byKey(const ValueKey('fx-browser-Recently used-org.caw.limiter')), findsOneWidget);
       expect(s.isFavourite(s.builtinAssets.firstWhere((a) => a.native!.id == 'org.caw.compressor')), isTrue);
     });
 

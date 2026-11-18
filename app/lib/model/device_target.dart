@@ -5,6 +5,7 @@ import '../engine/component_info.dart';
 import 'app_state.dart';
 import 'arrange_fx.dart';
 import 'mixer_fx.dart';
+import 'merged_devices.dart';
 import 'project.dart';
 import 'racks.dart';
 
@@ -39,9 +40,10 @@ class DeviceTarget {
   NativeComponentInfo? get info {
     final id = componentId;
     if (id == null) return null;
-    final base = state.componentInfo(id);
-    // A rack (fx-racks): its own parameters, its children's and its routes, for the children it holds now.
     final u = use;
+    // A merged device (FX consolidation): the descriptor of the variant its values choose.
+    final base = u == null ? state.componentInfo(id) : state.useInfo(u);
+    // A rack (fx-racks): its own parameters, its children's and its routes, for the children it holds now.
     if (base == null || u == null || !isRackComponent(id)) return base;
     return rackInfo(base, u.params, state.componentCatalog.value);
   }
@@ -81,6 +83,11 @@ class DeviceTarget {
   void setLive(String id, double v) {
     final l = layer;
     if (l == null || use == null) return;
+    // A merged built-in's `variant` (a rack child's `<slot>.variant`) changes only through the variant picker
+    // (variant_edit.dart: it resets the knobs the new variant doesn't share); a knob, lane or preset can't move it.
+    if ((id == variantParam && MergedDevices.isMerged(use!.id)) || (isRackComponent(use!.id) && id.endsWith('.$variantParam'))) {
+      return;
+    }
     final p = param(id);
     if (p != null) v = clampToParam(p, v);
     final plain = runtimeType == DeviceTarget && !isRackComponent(use!.id);
@@ -132,7 +139,7 @@ class DeviceTarget {
   void resetAll() {
     final i = info;
     if (i == null) return;
-    setAll({for (final p in i.parameters) p.id: p.defaultValue});
+    setAll({for (final p in i.knobs) p.id: p.defaultValue});
   }
 }
 

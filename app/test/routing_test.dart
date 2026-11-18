@@ -74,7 +74,7 @@ void main() {
     final bus = s.newFxBus(FxBusKind.reverb, from: kick);
     expect(bus.isFolder && bus.busEnabled, isTrue);
     expect(bus.name, 'Reverb bus');
-    expect(bus.components.single.id, 'org.caw.reverb.pro');
+    expect(bus.components.single.id, 'org.caw.reverb');  // Hall, its first variant (was org.caw.reverb.pro)
     expect(bus.components.single.params['mix'], 1.0);
     expect(kick.sends.single.to, bus.id);
     expect(s.newFxBus(FxBusKind.reverb).name, 'Reverb bus 2');

@@ -38,7 +38,7 @@ class GenericDevicePage extends StatelessWidget {
       key: const ValueKey('device-fallback'),
       padding: const EdgeInsets.all(12),
       child: Wrap(spacing: 2, runSpacing: 4, children: [
-        for (final p in info.parameters)
+        for (final p in info.knobs)
           if (p.isChoice)
             SizedBox(width: 96, height: 62, child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
               DropdownButton<int>(
@@ -159,7 +159,7 @@ class GeneratedControls extends StatelessWidget {
     }
     final target = UiRangeTarget(scope.target, ranges);
     final covered = {for (final c in info.uiControls) if (c.parameterId.isNotEmpty) c.parameterId};
-    final rest = [for (final p in info.parameters) if (!covered.contains(p.id)) p.id];
+    final rest = [for (final p in info.knobs) if (!covered.contains(p.id)) p.id];
     final inline = scope.inline;
     final body = Column(crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: [
       for (final g in groupUiControls(info))

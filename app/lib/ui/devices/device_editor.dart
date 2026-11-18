@@ -19,6 +19,7 @@ import 'kit/hero.dart' show MotionTouch;
 import 'kit/param_watch.dart';
 import 'kit/key_param.dart';
 import 'sidechain_bar.dart';
+import 'variant_bar.dart';
 import 'kit/device_style.dart';
 import 'kit/feel.dart';
 import 'kit/preset_browser.dart';
@@ -257,6 +258,7 @@ class _DeviceEditorState extends State<DeviceEditor> {
       header,
       Container(height: 2, decoration: BoxDecoration(gradient: LinearGradient(colors: Neon.ramp([
         color.withValues(alpha: 0.0), color.withValues(alpha: 0.8), second.withValues(alpha: 0.8), second.withValues(alpha: 0.0)])))),
+      if (bypass) VariantBar(target: t, color: color),
       if (bypass) SidechainBar(target: t, color: color),
       if (tabs != null) SizedBox(height: 34, child: Row(children: [
         for (var i = 0; i < tabs.length; i++)

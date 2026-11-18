@@ -1,6 +1,7 @@
 // App state: settings, the startup choice, the open project, engine sync, autosave, meters and every edit.
 import 'output_watch.dart';
 import 'track_defaults.dart';
+import 'merged_devices.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -555,6 +556,7 @@ class AppState extends ChangeNotifier implements StressHost {
       }
       try {
         engine = await createEngine(settings.sampleRate);
+        MergedDevices.resolver = Engine.resolveComponent;  // old presets' effects as merged devices (user_presets.dart)
         applyAudioSettings();  // before the device opens, so it opens on the chosen device at the chosen size
         hardwareProfile = EngineExecutionPolicy.hardwareProfile;
         auditionPlan = EngineExecutionPolicy.plan(workload: EngineWorkload.interactiveAudition);
@@ -814,10 +816,10 @@ class AppState extends ChangeNotifier implements StressHost {
     layer('Lead', flagship, lead, 0.45, preset: 'Morph pad', params: {
       'osc1_frame': 0.66, 'mod1_amt': 0.15, 'osc1_unison': 3, 'osc1_detune': 10, 'flt1_cutoff': 2600,
       'env1_attack': 0.005, 'env1_decay': 0.25, 'env1_sustain': 0.5, 'env1_release': 0.3,
-    }, effects: [ComponentUseDoc('org.caw.delay.pingpong', {'sync': 3, 'mix': 0.3})]);
+    }, effects: [ComponentUseDoc('org.caw.delay', {'variant': 1, 'sync': 3, 'mix': 0.3})]);
     // Muted to start with: the acid line plays in the bass's register and the pad under the lead. Unmute one.
     layer('Acid', flagship, acid, 0.6, preset: 'Acid 303',
-        params: {'flt1_resonance': 0.8}, effects: [ComponentUseDoc('org.caw.distortion', {'drive': 3, 'mix': 0.5})], mute: true);
+        params: {'flt1_resonance': 0.8}, effects: [ComponentUseDoc('org.caw.drive', {'drive': 3, 'mix': 0.5})], mute: true);
     layer('Pad', flagship, chords, 0.5, preset: 'Morph pad', effects: [ComponentUseDoc('org.caw.chorus')], mute: true);
     return p;
   }
@@ -2431,6 +2433,9 @@ class AppState extends ChangeNotifier implements StressHost {
     // The retired synths as Flagship presets, and presets' values into the knobs (the engine does the same when it
     // plays, so a project opened without the engine library still sounds right).
     if (engine != null) p.resolveInstruments(Engine.resolveInstrument);
+    // The retired effect ids as their merged devices (FX consolidation, 1.0.8), with their lanes, links and MIDI
+    // mappings: one load step, not an undo step, like the instruments above.
+    if (engine != null) p.resolveComponents(Engine.resolveComponent);
     // A path the project names that isn't a plain local one (a network share, a device or URL) becomes a missing
     // file before the engine or the missing-files check could look at it (project_dependencies.dart).
     try {

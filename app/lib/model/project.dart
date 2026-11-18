@@ -11,6 +11,7 @@ import 'clip_automation.dart';
 import 'clip_midi.dart';
 import 'cpp_component.dart';
 import 'midi_file.dart' show kMaxMidiFileBytes;
+import 'merged_devices.dart';
 import 'midi_mapping.dart';
 import 'modulation.dart';
 import 'pattern_doc.dart';
@@ -329,8 +330,20 @@ class ComponentUseDoc {
   /// values under [params]; [ProjectDoc.resolveInstruments] fills them in so the knobs show them.
   String? preset;
 
-  final String id;
+  /// The component. Changed only when an old project opens ([ProjectDoc.resolveComponents]: a retired effect id
+  /// becomes its merged device).
+  String id;
   Map<String, double> params;
+
+  /// A rack read from a file older than the merged devices (no `rack_layout`): written back as it was until the engine
+  /// migrates it ([ProjectDoc.resolveComponents]), since marking it current would leave its routes unmoved. Every
+  /// other rack is saved with `rack_layout` (the engine's current layout), whatever values it holds.
+  bool legacyRack = false;
+
+  /// Whether this entry names something the FX consolidation replaced: a retired effect id or a [legacyRack].
+  bool get needsResolving => legacyRack || MergedDevices.isRetired(id);
+
+  bool get _isRack => id.startsWith('org.caw.rack.');
 
   /// Passes its input through and is not run.
   bool bypass;
@@ -352,12 +365,13 @@ class ComponentUseDoc {
   /// A bare id when nothing else is set, as older projects stored it. [withKey] false leaves the key out (the
   /// engine's copy, when the key would make a loop or names a layer that is gone: [RoutingPlan]).
   Object toJson({bool withKey = true}) => params.isEmpty && !bypass && state == null && preset == null &&
-          (key == null || !withKey) && samples.isEmpty
+          (key == null || !withKey) && samples.isEmpty && !(_isRack && !legacyRack)
       ? id
       : {
           'id': id,
           if (preset != null) 'preset': preset,
-          if (params.isNotEmpty) 'params': params,
+          if (_isRack && !legacyRack) 'params': {...params, rackLayoutParam: rackLayoutCurrent}
+          else if (params.isNotEmpty) 'params': params,
           if (bypass) 'bypass': true,
           if (state != null) ...{'state': state, 'state_version': stateVersion},
           if (key != null && withKey) 'key': key!.toJson(),
@@ -393,7 +407,8 @@ class ComponentUseDoc {
       switch (_boundedProjectText(j['preset'], 64)) { '' => null, final name => name },
     )
       ..key = ComponentKeyDoc.fromJson(j['key'])
-      ..samples = ComponentSampleDoc.listFromJson(j['samples']);
+      ..samples = ComponentSampleDoc.listFromJson(j['samples'])
+      ..legacyRack = id.startsWith('org.caw.rack.') && (params[rackLayoutParam] ?? 0) < rackLayoutCurrent;
   }
 
   static List<ComponentUseDoc> listFromJson(Object? raw) => [
@@ -858,11 +873,17 @@ class ProjectDoc {
   /// freeze's `frozen`, `frozen_asset` and `frozen_context` (#209) and automation's point `curve` and `tension`, lane
   /// `height`, `recent_automation` and `automation_follows_clips` (#230), and a linked sample asset's `link` (#229).
   /// An older C.A.W refuses a v5 file whole. v6 (mixer routing, 2026-11-18): a track's `output` override and a
-  /// send's `feedback` and `limiter`, and sends into tracks. A project using none of them is still written as v5
-  /// ([baseFileVersion], [savedFileVersion]) so builds before v6 open it; this build reads both and refuses newer.
-  static const int fileVersion = 6;
+  /// send's `feedback` and `limiter`, and sends into tracks. v7 (the merged effect devices, 1.0.8): an effect whose
+  /// id only 1.0.8 knows (Drive, Bit distortion, Delay, Reverb, Pitch/Shift), a `variant` on any effect (a reused id's
+  /// variant 0 included: an older engine refuses the parameter), or a rack (always saved with `rack_layout`, which
+  /// an older engine refuses). A project using none of v7's is written as v6 or v5 as before, byte for byte
+  /// ([baseFileVersion], [savedFileVersion]), so older builds open it; this build reads them all and refuses newer.
+  static const int fileVersion = 7;
 
-  /// The format a project without v6's routing is written as.
+  /// The format a project with v6's routing and nothing of v7's is written as.
+  static const int routingFileVersion = 6;
+
+  /// The format a project without v6's routing or v7's merged devices is written as.
   static const int baseFileVersion = 5;
 
   /// Whether the project uses anything v6 added: an output override (to a bus or [LayerDoc.toMaster]), a send into a track (not a folder), a feedback
@@ -874,8 +895,20 @@ class ProjectDoc {
         s.feedback || !s.limiter || (ids.contains(s.to) && !folders.contains(s.to))));
   }
 
-  /// The `caw_app_project` [toJson] writes: [fileVersion] when [usesRoutingV6], else [baseFileVersion].
-  int get savedFileVersion => usesRoutingV6 ? fileVersion : baseFileVersion;
+  /// Whether the project holds anything v7 added (the merged effect devices): a merged device's new id, a `variant`
+  /// on an effect, or a rack (saved with `rack_layout`; a rack read from an older file and not yet migrated, a
+  /// [ComponentUseDoc.legacyRack], is saved as it was). A retired id not yet migrated (no engine) is an older file's.
+  bool get usesMergedDevicesV7 {
+    bool merged(ComponentUseDoc c) =>
+        MergedDevices.newIds.contains(c.id) || c.params.containsKey(variantParam) ||
+        (c.id.startsWith('org.caw.rack.') && !c.legacyRack);
+    return masterComponents.any(merged) ||
+        layers.any((l) => l.components.any(merged) || l.noteComponents.any(merged));
+  }
+
+  /// The `caw_app_project` [toJson] writes: [fileVersion] when [usesMergedDevicesV7], else [routingFileVersion] when
+  /// [usesRoutingV6], else [baseFileVersion].
+  int get savedFileVersion => usesMergedDevicesV7 ? fileVersion : usesRoutingV6 ? routingFileVersion : baseFileVersion;
 
   final String id;
   String name;
@@ -1329,6 +1362,85 @@ class ProjectDoc {
     }
     return changed;
   }
+
+  /// Brings every effect entry up to the merged devices (FX consolidation, 1.0.8) with [resolve]
+  /// (`Engine.resolveComponent`, the engine's caw_migrate_component): a retired effect id becomes its merged device
+  /// with its `variant`, and a rack older than the merged devices gets its children's ids, `<slot>.variant` and
+  /// `rack_layout`, its routes re-pointed. In every component list (the master's, each track's effects and per-note
+  /// effects), the automation lanes (project and clip lanes), modulation links and MIDI mappings on a migrated entry
+  /// follow its renamed parameters and go with a dropped one. Saved again, the project names only merged ids.
+  /// Returns whether anything changed. An entry the engine refuses (a null result) is left as it is.
+  bool resolveComponents(Map<String, dynamic>? Function(Map<String, dynamic> entry) resolve) {
+    var changed = false;
+    void chain(List<ComponentUseDoc> list, String laneType, LayerDoc? layer) {
+      final layerId = layer?.id;
+      for (var i = 0; i < list.length; i++) {
+        final use = list[i];
+        if (!use.needsResolving) continue;
+        final r = resolve({'id': use.id, 'params': use.params, if (use.preset != null) 'preset': use.preset});
+        if (r == null || r['id'] is! String) continue;
+        final renamed = <String, String>{
+          for (final e in ((r['renamed'] as Map?) ?? const {}).entries)
+            if (e.key is String && e.value is String) e.key as String: e.value as String,
+        };
+        final dropped = {for (final d in ((r['dropped'] as List?) ?? const [])) if (d is String) d};
+        // A lane's, link's or mapping's parameter on this entry after the move; null: it goes.
+        String? moved(String param) => dropped.contains(param) ? null : renamed[param] ?? param;
+        use.id = r['id'] as String;
+        use.params = {
+          for (final e in ((r['params'] as Map?) ?? const {}).entries)
+            if (e.value is num && (e.value as num).isFinite) e.key as String: (e.value as num).toDouble(),
+        };
+        if (r['keeps_state'] == false) use.state = null;
+        use.legacyRack = false;
+        automation.removeWhere((lane) {
+          if (lane.targetType != laneType || lane.layerId != layerId || lane.component != i) return false;
+          final to = moved(lane.target);
+          if (to == null) return true;
+          lane.target = to;
+          return false;
+        });
+        if (laneType == 'component' && layer != null) {
+          for (final clip in layer.clips) {
+            clip.automation.removeWhere((lane) {
+              if (lane.targetType != 'component' || lane.component != i) return false;
+              final to = moved(lane.target);
+              if (to == null) return true;
+              lane.target = to;
+              return false;
+            });
+          }
+        }
+        if (laneType == 'component') {
+          modLinks.removeWhere((link) {
+            final t = link.target;
+            if (t.type != 'component' || t.layerId != layerId || t.index != i) return false;
+            final to = moved(t.param);
+            if (to == null) return true;
+            if (to != t.param) link.target = ModTarget.component(t.layerId, t.index, to);
+            return false;
+          });
+          final mappingLayer = layerId ?? masterMappingLayerId;
+          midiMappings = [
+            for (final m in midiMappings)
+              if (m.layerId != mappingLayer || m.slot != i) m
+              else if (moved(m.paramId) case final to?)
+                MidiCcMapping(channel: m.channel, cc: m.cc, layerId: m.layerId, slot: m.slot, paramId: to),
+          ];
+        }
+        changed = true;
+      }
+    }
+    chain(masterComponents, 'component', null);
+    for (final l in layers) {
+      chain(l.components, 'component', l);
+      chain(l.noteComponents, 'noteComponent', l);
+    }
+    return changed;
+  }
+
+  /// The layer id a MIDI mapping on a master effect names (mixer_fx.dart's masterLayerId).
+  static const masterMappingLayerId = '\u0000master';
 
   static ProjectDoc fromJson(Map<String, dynamic> j) {
     // A file from a newer C.A.W (after a downgrade) is refused whole: read in part, then saved, it would lose

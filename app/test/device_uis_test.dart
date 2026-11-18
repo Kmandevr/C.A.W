@@ -2,6 +2,8 @@
 // parameters, live display data draws, presets and A/B work, and goldens at phone (and some desktop) size.
 import 'dart:io';
 
+import 'package:caw/engine/component_info.dart';
+import 'package:caw/model/merged_devices.dart';
 import 'package:caw/engine/engine.dart';
 import 'package:caw/model/app_state.dart';
 import 'package:caw/model/device_display.dart';
@@ -412,12 +414,26 @@ void main() {
     for (final id in retiredDrums) {
       expect(engine.containsKey(id), isFalse, reason: '$id is retired');
     }
+    // The old effect ids are retired (FX consolidation): the engine lists only their merged devices, each with every
+    // variant's descriptor, which the fixture holds as the engine dumped them.
+    for (final v in MergedDevices.variants.where((v) => v.oldId != v.id)) {
+      expect(engine.containsKey(v.oldId), isFalse, reason: '${v.oldId} is retired');
+    }
+    List<(String, double, double, double, String)> knobs(NativeComponentInfo i) =>
+        [for (final p in i.parameters) (p.id, p.min, p.max, p.defaultValue, p.choices.join('|'))];
     for (final id in [...builtinEffects, ...engineInstruments]) {
-      final want = engine[id], have = builtinInfo(id);
+      final merged = MergedDevices.of(id);
+      final want = merged == null ? engine[id] : engine[merged.id]?.variants[merged.variant], have = builtinInfo(id);
       expect(want, isNotNull, reason: id);
-      expect([for (final p in have.parameters) (p.id, p.min, p.max, p.defaultValue, p.choices.join('|'))],
-          [for (final p in want!.parameters) (p.id, p.min, p.max, p.defaultValue, p.choices.join('|'))],
-          reason: '$id changed: refresh test/fixtures/builtin_components.json');
+      expect(knobs(have), knobs(want!), reason: '$id changed: refresh test/fixtures/builtin_components.json');
+    }
+    for (final id in MergedDevices.ids) {
+      final want = engine[id], have = builtinInfos().firstWhere((c) => c.id == id);
+      expect(want, isNotNull, reason: id);
+      expect(have.variants.length, want!.variants.length, reason: id);
+      for (var v = 0; v < want.variants.length; v++) {
+        expect(knobs(have.variants[v]), knobs(want.variants[v]), reason: '$id variant $v changed: refresh the fixture');
+      }
     }
   }, skip: (Platform.environment['CAW_LIB'] ?? '').isEmpty ? 'set CAW_LIB to the built engine library' : null);
 

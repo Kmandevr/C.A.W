@@ -1,6 +1,7 @@
 // The built-in effects suite (#173) in the app: each opens its plugin UI from the FX stack, and display floats decode into frames.
 import 'dart:io';
 
+import 'package:caw/model/merged_devices.dart';
 import 'package:caw/engine/engine.dart';
 import 'package:caw/model/app_state.dart';
 import 'package:caw/model/arrange_fx.dart';
@@ -23,6 +24,7 @@ class _FakeDisplay extends DeviceDisplaySource {
   ValueListenable<DeviceDisplayFrame?> frames(DeviceTarget target) => _frame;
 }
 
+/// The suite's effects; an old id names its merged device's variant (FX consolidation), which opens that old page.
 const suite = [
   'org.caw.eq', 'org.caw.compressor', 'org.caw.limiter', 'org.caw.reverb.pro', 'org.caw.delay.pro', 'org.caw.saturator',
   'org.caw.gate', 'org.caw.transient', 'org.caw.filter', 'org.caw.phaser', 'org.caw.flanger', 'org.caw.utility',
@@ -65,9 +67,11 @@ void main() {
     final e = Engine.create();
     final list = await e.nativeComponents();
     for (final id in suite) {
-      final info = list.where((c) => c.id == id).firstOrNull;
+      final merged = MergedDevices.of(id)!;
+      expect(list.where((c) => c.id == id && id != merged.id), isEmpty, reason: '$id is retired');
+      final info = list.where((c) => c.id == merged.id).firstOrNull?.variants[merged.variant];
       expect(info, isNotNull, reason: id);
-      expect(DeviceEditors.custom(id, info), isNotNull, reason: '$id has no editor');
+      expect(DeviceEditors.custom(merged.id, info), isNotNull, reason: '$id has no editor');
     }
     e.dispose();
   }, skip: lib == null || lib.isEmpty ? 'set CAW_LIB to the built engine library' : null);
@@ -95,7 +99,9 @@ void main() {
       Motion.setting = MotionLevel.off; // the state applies its settings' motion; animated visuals stand still
       s.project = ProjectDoc(id: 'p', name: 'Fx', bpm: 120, modules: [], layers: [LayerDoc(id: 'a', name: 'T', color: 0)]);
       s.componentCatalog.set([for (final c in infos) c]);
-      s.addNativeEffect(s.project.layers.first, id);
+      final merged = MergedDevices.of(id)!;
+      s.addNativeEffect(s.project.layers.first, merged.id);
+      if (merged.id != id) s.project.layers.first.components.first.params[variantParam] = merged.variant.toDouble();
       await tester.pumpWidget(MaterialApp(home: Scaffold(body: SizedBox(height: 900,
           child: ListenableBuilder(listenable: s, builder: (_, _) => FxStack(state: s, layer: s.project.layers.first))))));
       await tester.pump();

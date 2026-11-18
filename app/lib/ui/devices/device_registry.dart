@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import '../../engine/component_info.dart';
 import '../../model/arrange_fx.dart' show isBuiltinComponent;
 import '../../model/device_target.dart';
+import '../../model/merged_devices.dart';
 import 'drums/drums_editor.dart';
 import 'effects/effect_editors.dart';
 import 'flagship/flagship_editor.dart';
@@ -60,6 +61,9 @@ class DeviceEditors {
   /// [id]'s custom editor, or null (the fallback page). Shape matching applies only to the engine's built-ins,
   /// never to a project's own C++ code.
   static DeviceEditorEntry? custom(String id, NativeComponentInfo? info) {
+    // A merged device (FX consolidation) opens its variant's old effect's page for now (the new device UI is a
+    // later part): the page of the old id that variant was.
+    if (info != null && MergedDevices.isMerged(id)) id = MergedDevices.pageId(id, info.variantIndex);
     final exact = _byId[id];
     if (exact != null || info == null) return exact;
     if (isBuiltinComponent(id) || info.builtin) {

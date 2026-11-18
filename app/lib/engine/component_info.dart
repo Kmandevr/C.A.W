@@ -139,6 +139,8 @@ class NativeComponentInfo {
     this.presets = const [],
     this.domains = const ['whole'],
     this.cpuClass = 'unspecified',
+    this.variants = const [],
+    this.variantIndex = 0,
   });
 
   final String id, name;
@@ -164,6 +166,27 @@ class NativeComponentInfo {
 
   /// Its author's cost hint: "unspecified", "light", "medium" or "heavy" (not a measurement).
   final String cpuClass;
+
+  /// A merged device's variants (FX consolidation, API 38): each one's own descriptor (its parameters, ports,
+  /// latency and tail), in `variant` order; empty for any other component. This descriptor is the first's.
+  final List<NativeComponentInfo> variants;
+
+  /// Which of its device's [variants] this descriptor is (0 for any other component, and for the listed descriptor).
+  final int variantIndex;
+
+  /// The descriptor [params] choose: a merged device's variant (its `variant` value, rounded and held to the list, as
+  /// the engine reads it; [prefix] for a rack child's `<slot>.`), else this one.
+  NativeComponentInfo forValues(Map<String, double> params, {String prefix = ''}) {
+    if (variants.isEmpty) return this;
+    final v = params['${prefix}variant'];
+    if (v == null || !v.isFinite || v <= 0) return variants.first;
+    return variants[v.round().clamp(0, variants.length - 1)];
+  }
+
+  /// The parameters a page shows as knobs: all but a merged built-in's `variant`, which only its variant picker sets
+  /// (it is structural: not automatable, modulatable or MIDI-learnable).
+  List<ComponentParameterInfo> get knobs =>
+      builtin && parameters.any((p) => p.id == 'variant') ? [for (final p in parameters) if (p.id != 'variant') p] : parameters;
 
   bool get runsPerNote => domains.contains('per_note') || domains.contains('per_voice');
 
@@ -210,6 +233,21 @@ class NativeComponentInfo {
         ],
         domains: [for (final d in (j['domains'] as List? ?? const ['whole'])) if (d is String) d],
         cpuClass: j['cpu_class'] as String? ?? 'unspecified',
+        variantIndex: (j['variant_index'] as num?)?.toInt() ?? 0,
+        variants: [
+          // Each variant with the device's presets that choose it.
+          for (final (i, v) in (j['variants'] as List? ?? const []).indexed)
+            if (v is Map<String, dynamic>)
+              NativeComponentInfo.fromJson({
+                ...v,
+                'builtin': j['builtin'] == true,
+                'variant_index': i,
+                'presets': [
+                  for (final p in (j['presets'] as List? ?? const []))
+                    if (p is Map && (((p['params'] as Map?)?['variant'] as num?)?.round() ?? 0) == i) p,
+                ],
+              }),
+        ],
       );
 
   /// Parses the whole caw_engine_components result; an error result gives an empty list.

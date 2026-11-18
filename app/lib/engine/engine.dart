@@ -913,6 +913,21 @@ class Engine implements TempoEngine {
     return j['ok'] == true ? j : null;
   }
 
+  /// An effect entry ({"id", "params", "preset"}) in its merged form (caw_migrate_component, FX consolidation): a
+  /// retired effect id becomes its merged device with its `variant`, a rack older than the merged devices its current
+  /// layout; `"migrated"`, `"renamed"` ({old parameter: new}), `"dropped"` and `"keeps_state"` say what moved. Null
+  /// when the engine refuses it.
+  static Map<String, dynamic>? resolveComponent(Map<String, dynamic> entry) {
+    final b = Bindings.instance;
+    final s = jsonEncode(entry).toNativeUtf8();
+    final r = b.migrateComponent(s);
+    calloc.free(s);
+    if (r == nullptr) return null;
+    final j = jsonDecode(r.toDartString()) as Map<String, dynamic>;
+    b.free(r);
+    return j['ok'] == true ? j : null;
+  }
+
   /// The drums' layout (`caw_drums_info`: layers, sounds, kits, built-in samples, the GM map, the display layout).
   static Map<String, dynamic>? drumsInfo() => _drumsJson((b) => b.drumsInfo());
 

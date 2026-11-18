@@ -10,6 +10,7 @@ import 'package:caw/model/arrange_fx.dart';
 import 'package:caw/model/device_display.dart';
 import 'package:caw/model/device_target.dart';
 import 'package:caw/model/drums.dart';
+import 'package:caw/model/merged_devices.dart';
 import 'package:caw/model/project.dart';
 import 'package:caw/model/settings.dart';
 import 'package:caw/ui/devices/device_editor.dart';
@@ -18,7 +19,9 @@ import 'package:flutter/material.dart';
 
 import 'flagship_fixture.dart';
 
-/// Every built-in effect and instrument with a plugin UI.
+/// Every built-in effect page and instrument with a plugin UI. An old effect id here (retired by the FX consolidation,
+/// 1.0.8) names its merged device's variant, which opens that old page: [builtinInfo] gives the variant's descriptor
+/// and [stateWith] puts the merged device on its variant.
 const builtinEffects = [
   'org.caw.eq', 'org.caw.compressor', 'org.caw.limiter', 'org.caw.gate', 'org.caw.transient', 'org.caw.reverb.pro',
   'org.caw.delay.pro', 'org.caw.delay.pingpong', 'org.caw.saturator', 'org.caw.distortion', 'org.caw.filter',
@@ -48,7 +51,12 @@ List<NativeComponentInfo> builtinInfos() => _infos ??= [
       flagshipFixture(),
     ];
 
-NativeComponentInfo builtinInfo(String id) => builtinInfos().firstWhere((c) => c.id == id);
+NativeComponentInfo builtinInfo(String id) {
+  final merged = MergedDevices.isRetired(id) ? MergedDevices.of(id) : null;
+  if (merged != null) return builtinInfos().firstWhere((c) => c.id == merged.id).variants[merged.variant];
+  // A reused id is its device's first variant (what a device on it shows: that variant's presets only).
+  return builtinInfos().firstWhere((c) => c.id == id).forValues(const {});
+}
 
 /// A frame like a playing device's: a pink-noise-ish spectrum, levels that pulse like a drum loop over [tick]
 /// (−6 dB in, −9 dB out and 4 dB of reduction at tick 0), and the component's own values ([values]).
@@ -101,9 +109,17 @@ AppState stateWith(String id, {AppState Function()? make}) {
   if (info.isInstrument) {
     s.setNativeInstrument(s.project.layers.first, id);
   } else {
-    s.addNativeEffect(s.project.layers.first, id);
+    addBuiltinEffect(s, s.project.layers.first, id);
   }
   return s;
+}
+
+/// Adds built-in effect [id] to [layer]: a retired old id as its merged device on that variant (the app never adds
+/// an old id now, FX consolidation).
+void addBuiltinEffect(AppState s, LayerDoc layer, String id) {
+  final merged = MergedDevices.isRetired(id) ? MergedDevices.of(id) : null;
+  final use = s.addNativeEffect(layer, merged?.id ?? id);
+  if (merged != null) use?.params[variantParam] = merged.variant.toDouble();
 }
 
 /// An app state that records note previews instead of playing them.

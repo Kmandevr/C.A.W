@@ -1,6 +1,7 @@
 // The EQ & Filter group's plugin UIs: each opens its own UI, fits a phone both ways, its hero's gestures edit the right parameters, its display decodes, and goldens at phone size.
 import 'dart:io';
 
+import 'package:caw/model/merged_devices.dart';
 import 'package:caw/engine/engine.dart';
 import 'package:caw/model/app_state.dart';
 import 'package:caw/model/device_display.dart';
@@ -262,7 +263,11 @@ void main() {
     final engine = {for (final c in await e.nativeComponents()) c.id: c};
     e.dispose();
     for (final id in [...filters, 'org.caw.eq']) {
-      final want = engine[id], have = builtinInfo(id);
+      // An old id (FX consolidation) is retired: its merged device's variant in the engine's list.
+      final merged = MergedDevices.isRetired(id) ? MergedDevices.of(id) : null;
+      expect(merged != null && engine.containsKey(id), isFalse, reason: '$id is retired');
+      final want = merged == null ? engine[id]?.forValues(const {}) : engine[merged.id]?.variants[merged.variant];
+      final have = builtinInfo(id);
       expect(want, isNotNull, reason: id);
       expect([for (final p in have.parameters) (p.id, p.min, p.max, p.defaultValue, p.choices.join('|'))],
           [for (final p in want!.parameters) (p.id, p.min, p.max, p.defaultValue, p.choices.join('|'))], reason: id);

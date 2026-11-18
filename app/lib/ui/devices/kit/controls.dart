@@ -407,7 +407,7 @@ class ParamGrid extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = DeviceScope.of(context).target;
-    final all = t.info?.parameters ?? const <ComponentParameterInfo>[];
+    final all = t.info?.knobs ?? const <ComponentParameterInfo>[];
     final params = only == null
         ? [for (final p in all) if (!skip.contains(p.id)) p]
         : [for (final id in only!) ?t.param(id)];

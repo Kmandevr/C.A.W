@@ -8,6 +8,7 @@ import 'mixer_fx.dart';
 import 'device_target.dart';
 import 'fx_space_display.dart'; // fx-space
 import 'drums.dart';
+import 'merged_devices.dart';
 import 'project.dart';
 // fx-filters begin
 import '../ui/devices/effects/filters/filters_display.dart' show decodeFiltersDisplay;
@@ -111,7 +112,9 @@ class _Poll extends ValueNotifier<DeviceDisplayFrame?> {
     }
     // A rack's child (fx-racks): the rack's index + (child + 1) * 65536.
     final n = engine.componentDisplay(engineLayerId(layer), target.displayChild == 0 ? index : index + target.displayChild * 65536, _buffer);
-    if (n > 0) value = decodeDisplay(id, _buffer, n);  // 0: nothing new to show (or the engine is busy): keep the last
+    // A merged device's display is its variant's old effect's layout (FX consolidation).
+    final shown = MergedDevices.isMerged(id) ? MergedDevices.pageId(id, target.info?.variantIndex ?? 0) : id;
+    if (n > 0) value = decodeDisplay(shown, _buffer, n);  // 0: nothing new to show (or the engine is busy): keep the last
     if (n < 0) value = null;
   }
 }

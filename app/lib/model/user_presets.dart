@@ -11,6 +11,7 @@ import 'app_state.dart';
 import 'arrange_fx.dart';
 import 'mixer_fx.dart';
 import 'device_target.dart';
+import 'merged_devices.dart';
 import 'project.dart';
 
 enum UserPresetKind { device, track }
@@ -68,9 +69,18 @@ class PresetDevice {
         }
       }
     }
-    final state = j['state'];
+    var state = j['state'];
+    // A preset saved before the merged devices (FX consolidation, 1.0.8): its device under the merged id and variant.
+    var componentId = id;
+    if (MergedDevices.resolveEntry(id, params) case final merged?) {
+      componentId = merged.id;
+      params
+        ..clear()
+        ..addAll(merged.params);
+      if (!merged.keepsState) state = null;
+    }
     return PresetDevice(
-      id,
+      componentId,
       params,
       descriptorVersion: _int(j['descriptor_version'], 1),
       bypass: j['bypass'] == true,

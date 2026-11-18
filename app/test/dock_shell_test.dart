@@ -204,7 +204,7 @@ void main() {
     await tester.pumpAndSettle();
     final layer = s.project.layers.first;
     final before = layer.components.length;
-    final item = find.descendant(of: find.byKey(const ValueKey('arrange-browser')), matching: find.text('Distortion'));
+    final item = find.descendant(of: find.byKey(const ValueKey('arrange-browser')), matching: find.text('Drive'));
     // The built-in list is long (the effects suite, #173): scroll to it.
     await tester.scrollUntilVisible(item, 60,
         scrollable: find.descendant(of: find.byKey(const ValueKey('arrange-browser')), matching: find.byType(Scrollable)).last);

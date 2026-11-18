@@ -101,6 +101,9 @@ extension ArrangeFx on AppState {
 
   NativeComponentInfo? componentInfo(String id) => componentCatalog.value[id];
 
+  /// The descriptor [use]'s values choose: a merged device's variant's (FX consolidation), else its component's.
+  NativeComponentInfo? useInfo(ComponentUseDoc use) => componentInfo(use.id)?.forValues(use.params);
+
   /// The project's C++ component that defines [componentId], or null (a built-in, or code that isn't in the project).
   CppComponentDoc? cppComponentFor(String componentId) =>
       project.cppComponents.where((c) => c.componentId == componentId).firstOrNull;
