@@ -10,6 +10,7 @@ import '../../engine/engine.dart';
 import '../../model/app_state.dart';
 import '../../model/audio_clips.dart' show AudioAssetDoc;
 import '../../model/audio_edit.dart';
+import '../../model/native_components.dart' show NativeScan;
 import '../../model/project_dependencies.dart';
 import '../../model/sample_use.dart' show SampleUse;
 import '../../platform/linked_folders.dart' show LinkedFolderAccess, PickedFolder;
@@ -17,6 +18,7 @@ import '../../model/project_package.dart';
 import '../../model/storage.dart';
 import '../../platform/save_copy.dart';
 import '../glass.dart';
+import '../native_trust_sheet.dart';
 import '../theme.dart';
 import '../panel_motion.dart';
 
@@ -253,7 +255,8 @@ Future<void> importProjectFromPath(BuildContext context, AppState state, String 
               ) ??
               false;
         },
-        askBinaryTrust: (b) async => context.mounted ? askPackagedBuildTrust(context, b) : null);
+        askBinaryTrust: (b) async =>
+            context.mounted ? askPackagedBuildTrust(context, b, scan: state.nativeComponents?.scan) : null);
     if (result == null || !context.mounted) return;
     final parts = [
       'Imported "${state.project.name}"',
@@ -271,23 +274,19 @@ Future<void> importProjectFromPath(BuildContext context, AppState state, String 
   }
 }
 
-/// Asks Trust or Block for a C++ build that came in a package: it runs in the app with full access, so it is asked
-/// once for exactly this file (its fingerprint) and never assumed. Closing the dialog leaves it unused.
-Future<NativeComponentTrust?> askPackagedBuildTrust(BuildContext context, ImportedBinary b) => showDialog<NativeComponentTrust>(
-      context: context, animationStyle: dialogAnimation(context),
-      builder: (context) => AlertDialog(
-        key: const ValueKey('packaged-build-trust'),
-        title: const Text('Use the packaged C++ build?'),
-        content: Text('The project carries a build of ${b.name} (${b.componentId}) for this device. A build runs '
-            'inside the app with full access, and C.A.W can\'t check what it does: trust it only if you trust whoever '
-            'made the project. Block builds it from its source here instead (if you trust that).\n\n'
-            'Fingerprint ${b.sha256.substring(0, 16)}…'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context, NativeComponentTrust.blocked), child: const Text('Block')),
-          FilledButton(onPressed: () => Navigator.pop(context, NativeComponentTrust.trusted), child: const Text('Trust')),
-        ],
-      ),
-    );
+/// Asks for a C++ build that came in a package: it runs in the app with full access, so it is asked once for exactly
+/// this file (its fingerprint) and never assumed. The trust sheet shows what the pre-load scan found in it ([scan],
+/// when this device has one); a build the scan blocks can only be Blocked. Closing the sheet leaves it unused.
+Future<NativeComponentTrust?> askPackagedBuildTrust(BuildContext context, ImportedBinary b, {NativeScan? scan}) async {
+  ComponentScan? found;
+  try {
+    found = await scan?.call(b.path, expectedComponentId: b.componentId);
+  } catch (_) {
+    found = null;
+  }
+  if (!context.mounted) return null;
+  return showNativeTrustSheet(context, name: b.name.isEmpty ? b.componentId : b.name, scan: found);
+}
 
 // ---------- missing files ----------
 

@@ -42,4 +42,43 @@ void main() {
     again.forget('org.alex.fuzz');
     expect(again.decide('org.alex.fuzz', fingerprint), isNull);
   });
+
+  test('a store from before 1.0.7 (no "scan" marker) is migrated once; a new store never grants grace', () async {
+    final dir = await Directory.systemTemp.createTemp('caw-trust-legacy');
+    addTearDown(() => dir.delete(recursive: true));
+    final file = File('${dir.path}/trust.json');
+    final shaA = 'a' * 64, shaB = 'b' * 64;
+
+    // A fresh install has nothing to migrate.
+    final fresh = NativeTrustStore(file);
+    await fresh.load();
+    expect(fresh.needsLegacyMigration, isFalse);
+    fresh.finishLegacyMigration([('org.me.delay', shaA)]);
+    expect(fresh.legacyTrusted('org.me.delay', shaA), isNull);
+
+    // Written by 1.0.6: no marker. Saving before the migration keeps it unmarked.
+    await file.writeAsString('{"authored":{"org.me.delay":["f"]},"choices":{}}');
+    final old = NativeTrustStore(file);
+    await old.load();
+    expect(old.needsLegacyMigration, isTrue);
+    await old.save();
+    expect(jsonDecode(await file.readAsString()), isNot(contains('scan')));
+    old.finishLegacyMigration([('org.me.delay', shaA.toUpperCase()), ('org.me.delay', 'not-a-hash')]);
+    expect(old.needsLegacyMigration, isFalse);
+    await old.save();
+    expect(jsonDecode(await file.readAsString())['scan'], 1);
+
+    final again = NativeTrustStore(file);
+    await again.load();
+    expect(again.needsLegacyMigration, isFalse);
+    expect(again.hasLegacy('org.me.delay'), isTrue);
+    expect(again.legacyTrusted('org.me.delay', shaA), shaA);
+    expect(again.legacyTrusted('org.me.delay', shaB), isNull); // a rebuild: a new hash, no grace
+    expect(again.legacyTrusted('org.me.other', shaA), isNull);
+    again.finishLegacyMigration([('org.me.delay', shaB)]); // only once
+    expect(again.legacyTrusted('org.me.delay', shaB), isNull);
+    // Forgetting the component's choices drops its grace too.
+    again.forget('org.me.delay');
+    expect(again.hasLegacy('org.me.delay'), isFalse);
+  });
 }

@@ -24,6 +24,7 @@ import '../glass.dart';
 import '../keyboard/key_area.dart';
 import '../../actions/actions.dart';
 import '../motion.dart';
+import '../native_trust_sheet.dart';
 import '../theme.dart';
 import '../volume_fader.dart';
 import 'arrange_drag.dart';
@@ -533,13 +534,13 @@ class _NativeEffectCard extends StatelessWidget {
     switch (status) {
       case NativeEffectState.needsTrust:
         return note('Native code from ‘${state.project.name}’', buttons: [
-          if (cpp != null) TextButton(onPressed: () => state.decideNativeTrust(cpp, trust: true), child: const Text('Trust')),
+          if (cpp != null) TextButton(onPressed: () => askNativeTrust(context, state, cpp), child: const Text('Trust')),
           if (cpp != null) TextButton(onPressed: () => state.decideNativeTrust(cpp, trust: false),
             style: TextButton.styleFrom(foregroundColor: Neon.pink), child: const Text('Block')),
         ]);
       case NativeEffectState.blocked:
         return note('Blocked on this device; the rest of the song plays.', buttons: [
-          if (cpp != null) TextButton(onPressed: () => state.decideNativeTrust(cpp, trust: true), child: const Text('Trust')),
+          if (cpp != null) TextButton(onPressed: () => askNativeTrust(context, state, cpp), child: const Text('Trust')),
         ]);
       case NativeEffectState.buildFailed:
         return note('Build failed', color: Neon.pink, buttons: [

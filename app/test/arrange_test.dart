@@ -325,7 +325,7 @@ void main() {
         trust: trust,
         cacheFile: File('${dir.path}/builds.json'),
         build: (_, _) async => throw StateError('no build in this test'),
-        load: ({required artifactPath, required expectedComponentId, required trust, reload = false}) async =>
+        load: ({required artifactPath, required expectedComponentId, required trust, reload = false, legacyGraceSha256}) async =>
             throw StateError('no load in this test'),
       );
       final fuzz = CppComponentDoc(id: 'cc', name: 'My fuzz', componentId: 'com.example.fuzz',

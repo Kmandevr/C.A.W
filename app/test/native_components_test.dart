@@ -1,4 +1,5 @@
 // A project's C++ components: own code builds and loads, other code waits for a choice, builds are reused.
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:caw/engine/component_bench.dart';
@@ -18,6 +19,7 @@ void main() {
   late NativeTrustStore trust;
   late List<String> builds;
   late List<({String path, String id, bool reload})> loads;
+  late List<String?> graces;
   late NativeComponentManager manager;
 
   setUp(() async {
@@ -25,6 +27,7 @@ void main() {
     trust = NativeTrustStore(File('${dir.path}/trust.json'));
     builds = [];
     loads = [];
+    graces = [];
     var n = 0;
     manager = NativeComponentManager(
       trust: trust,
@@ -34,13 +37,14 @@ void main() {
         if (component.files['src/x.cpp'] == 'broken') {
           return const CppBuildResult(success: false, exitCode: 1, output: 'error', diagnostics: []);
         }
-        final path = '${dir.path}/${component.componentId}-${n++}.so';
-        await File(path).writeAsString('ELF');
+        final path = '${dir.path}/${component.componentId}-$n.so';
+        await File(path).writeAsString('ELF ${n++}'); // each build its own bytes, as a real rebuild
         return CppBuildResult(success: true, exitCode: 0, output: '', diagnostics: const [], artifactPath: path);
       },
-      load: ({required artifactPath, required expectedComponentId, required trust, bool reload = false}) async {
+      load: ({required artifactPath, required expectedComponentId, required trust, bool reload = false, String? legacyGraceSha256}) async {
         loads.add((path: artifactPath, id: expectedComponentId, reload: reload));
-        return NativeComponentLoadResult(ok: true, componentId: expectedComponentId);
+        graces.add(legacyGraceSha256);
+        return NativeComponentLoadResult(ok: true, componentId: expectedComponentId, graceApplied: legacyGraceSha256 != null);
       },
     );
   });
@@ -161,5 +165,43 @@ void main() {
     expect(status.buildFailed.keys, ['org.me.delay']);
     expect(status.ready, isFalse);
     expect(loads, isEmpty);
+  });
+
+  test('a build trusted before 1.0.7 loads with legacy grace while its hash is unchanged; a rebuild never does',
+      () async {
+    final delay = component('delay', 'int a;'), verb = component('verb', 'int v;');
+    trust.markAuthored(delay);
+    trust.markAuthored(verb);
+    final project = ProjectDoc(id: 'p', name: 'P', bpm: 120, cppComponents: [delay]);
+    // 1.0.6 built the delay and saved its store (no "scan" marker).
+    await manager.prepare(project);
+    final old = loads.single.path;
+    final store = jsonDecode(await trust.file.readAsString().catchError((_) => '{}')) as Map;
+    await trust.file.writeAsString(jsonEncode({...store, 'authored': {
+      'org.me.delay': [NativeTrustStore.sourceFingerprint(delay)],
+      'org.me.verb': [NativeTrustStore.sourceFingerprint(verb)],
+    }}..remove('scan')));
+
+    // 1.0.7 starts: the migration records the delay's build, the one trusted then.
+    final trust2 = NativeTrustStore(trust.file);
+    await trust2.load();
+    expect(trust2.needsLegacyMigration, isTrue);
+    final m = NativeComponentManager(trust: trust2, cacheFile: manager.cacheFile, build: manager.build, load: manager.load);
+    await m.migrateLegacyTrust();
+    expect(trust2.needsLegacyMigration, isFalse);
+    final status = await m.prepare(ProjectDoc(id: 'p', name: 'P', bpm: 120, cppComponents: [delay, verb]));
+    expect(loads[1].path, old);
+    expect(graces[1], await NativeTrustStore.libraryFingerprint(old));
+    expect(status.graceApplied, {'org.me.delay'});
+    // The verb was never built before 1.0.7: no grace.
+    expect(loads[2].id, 'org.me.verb');
+    expect(graces[2], isNull);
+
+    // Edited and rebuilt: a new file, a new hash, no grace.
+    delay.files['src/x.cpp'] = 'int b;';
+    trust2.markAuthored(delay);
+    await m.prepare(ProjectDoc(id: 'p', name: 'P', bpm: 120, cppComponents: [delay]));
+    expect(loads.last.path, isNot(old));
+    expect(graces.last, isNull);
   });
 }
