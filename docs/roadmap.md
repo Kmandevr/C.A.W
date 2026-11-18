@@ -72,12 +72,13 @@ An overview by area, checked against the repository on 2026-11-03. The stage tab
    - MIDI playback and piano roll fixes (#226, #228).
 
    Stem export is already built (#33). App-wide undo is checked against the existing project-wide history (`lib/model/history.dart`) first.
-5. **1.0.6** (owner, 2026-11-18; the later batches moved up by one): plug-in security and the companion app (#239). Least privilege for the main app, and the companion app as updater, network and trust holder, later AutoStacc's secondary hub with the cloud library and the telemetry admin view. Also the pre-load scan, declared capabilities and plain-language warnings ([plug-in hosting plan](plugin-hosting-plan.md#least-privilege-and-the-companion-app)).
-6. **1.0.7** (owner, 2026-11-17: the FX batch split in two): fewer, better built-in effects (#227). The overlapping effects merge into one device each, no more costly to run than the ones they replace. This batch also has:
+5. **1.0.6** (owner, 2026-11-18): usability. Real input and output device choice (#242), the tap-along and loopback latency fix, smooth continuous zoom, and the settings reorganised into 5 sections with grouped cards and new settings (#244). The 1.0.5-alpha.2 hotfix (#241) came before it.
+6. **1.0.7** (owner, 2026-11-18; moved from 1.0.6 the same day): plug-in security and the companion app (#239). Least privilege for the main app, and the companion app as updater, network and trust holder, later AutoStacc's secondary hub with the cloud library and the telemetry admin view. Also the pre-load scan, declared capabilities and plain-language warnings ([plug-in hosting plan](plugin-hosting-plan.md#least-privilege-and-the-companion-app)).
+7. **1.0.8** (owner, 2026-11-17: the FX batch split in two): fewer, better built-in effects (#227). The overlapping effects merge into one device each, no more costly to run than the ones they replace. This batch also has:
    - the device UI kit, the collapsible FX chain and the Vital-like Flagship (#231);
    - **React to…** (#233);
    - live preset preview: tap through presets while a loop plays.
-7. **1.0.8:** the rest of the FX work (#227):
+8. **1.0.9:** the rest of the FX work (#227):
    - **New standard effects:** exciter, pitch correction, vocoder, analyzer, tuner, loudness meter, dynamic and M/S EQ, tape echo, plate and spring.
    - **Recording tools:** noise reduction (live and on clips), a pedal-style noise gate, de-hum, de-click and de-plosive, de-reverb and breath.
    - **Guitar:** amp, pedal and cabinet modes in Drive and the convolver, and Drive's Bands mode.
@@ -85,18 +86,18 @@ An overview by area, checked against the repository on 2026-11-03. The stage tab
    - **Low-latency monitoring** through effects while recording, with a latency readout.
    - **The free AutoStacc beta pack:** warp, spectral FX, glitch, and one more to choose.
    - **The step-by-step music video** (#232).
-8. **1.0.9:**
+9. **1.0.10:**
    - clip automation's override-or-add choice and VCA groups (#210; MIDI clip lanes that override the track lane are built);
    - receives, parallel paths and drum multi-out (#217);
    - MIDI out and MIDI clock (#211).
-9. **1.0.10:**
+10. **1.0.11:**
    - format migrations, crash recovery, device loss, and a first-run tour and help (#218);
    - drawn LFO shapes and a Flagship wavetable editor (#219).
-10. **1.0.11:** the foundation for hosting other people's plug-ins (#212): the isolation design (reviewed first), the out-of-process host, the scan and the loader behind Isolated, Trusted or Blocked. Users don't see any of it. The feature itself (CLAP and VST3 on Windows, CLAP on Android) ships in 1.1.0.
-11. **1.0.12:** a notation view (#213), a clip launcher, and S Pen precision (#220).
+11. **1.0.12:** the foundation for hosting other people's plug-ins (#212): the isolation design (reviewed first), the out-of-process host, the scan and the loader behind Isolated, Trusted or Blocked. Users don't see any of it. The feature itself (CLAP and VST3 on Windows, CLAP on Android) ships in 1.1.0.
+12. **1.0.13:** a notation view (#213), a clip launcher, and S Pen precision (#220).
 - **Silent 1.1.0 groundwork** (owner, 2026-11-17): the routing engine (#233), plug-in hosting (#212), play-ahead (#191), the AutoStacc download and update source (#221) and the store builds (#222) are built in hidden steps alongside these batches, behind off-by-default flags or as engine-only code. Users see none of it until 1.1.0, and the changelog doesn't announce it.
-12. **iOS and macOS builds** (#214), once the owner has an Apple Developer membership. On iOS, the app ships every built-in instrument and effect, but no on-device C++ building or loading (owner, 2026-11-13: Apple forbids downloaded native code).
-13. **Play-ahead rendering** (#191, the [play-ahead plan](play-ahead-plan.md)). It moved from 1.2.0 into 1.1.0 (owner, 2026-11-13) and is built in its own batches before 1.1.0.
+13. **iOS and macOS builds** (#214), once the owner has an Apple Developer membership. On iOS, the app ships every built-in instrument and effect, but no on-device C++ building or loading (owner, 2026-11-13: Apple forbids downloaded native code).
+14. **Play-ahead rendering** (#191, the [play-ahead plan](play-ahead-plan.md)). It moved from 1.2.0 into 1.1.0 (owner, 2026-11-13) and is built in its own batches before 1.1.0.
 
 **In 1.1.0 itself (owner, 2026-11-13):**
 - plug-in hosting goes live (#212) and play-ahead ships;

@@ -6,6 +6,16 @@ updated: 2026-11-18
 
 # Decisions
 
+## 2026-11-18: 1.0.6 is the usability release; security moves to 1.0.7 (owner)
+
+**Decision (owner, 2026-11-18):** 1.0.6-alpha.1 contains:
+- real device selection (#242);
+- the tap-along and loopback latency fix;
+- smooth continuous zoom;
+- the settings reorganisation with its new settings (#244).
+
+Plug-in security and the companion app (#239) move to 1.0.7, and every later batch moves up by one: FX consolidation 1.0.8, the rest of the FX 1.0.9, and so on to notation in 1.0.13.
+
 ## 2026-11-18: The companion app ships updater and trust first, in the AutoStacc look (owner, #239)
 
 **Decision (owner, 2026-11-18):** in 1.0.6, the companion app takes:

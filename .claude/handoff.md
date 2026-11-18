@@ -4,7 +4,7 @@ Commit: 27ee13f (Main = v1.0.5-alpha.2, published 2026-11-18 via PR #243)
 Branch: ccr-56285e11-0xrj3h. Main is protected: PRs only; merge yourself when CI is green. Publish with app.yml's workflow_dispatch (installables + release) on Main. Each release needs a CHANGELOG.md entry, copied to app/assets/CHANGELOG.md.
 
 ## Goal
-Next is 1.0.6, plug-in security and the companion app (#239, in docs/plugin-hosting-plan.md). Then 1.0.7: FX consolidation and the device UI (#227, #231). Silent 1.1.0 groundwork rides along.
+Next is 1.0.6-alpha.1, the usability release: #242 devices, the tap-along fix, smooth zoom, #244 settings. Then 1.0.7, security and the companion app (#239). Then 1.0.8, the FX consolidation (#227, #231). Silent 1.1.0 groundwork rides along.
 
 ## Done and verified
 - Merged into the session branch:
@@ -30,5 +30,5 @@ Next is 1.0.6, plug-in security and the companion app (#239, in docs/plugin-host
   - the slider beat.
 
 ## Next
-1. Ship device-select (#242) as 1.0.5-alpha.3 if the owner agrees.
-2. Start 1.0.6 (#239) once the owner sends the AutoStacc brand.
+1. Merge device-select, smooth-zoom, then the #244 settings rework (it starts after device-select), then release 1.0.6-alpha.1.
+2. 1.0.7 (#239) once the owner sends the AutoStacc brand.
