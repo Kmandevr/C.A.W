@@ -6,6 +6,14 @@ updated: 2026-11-18
 
 # Decisions
 
+## 2026-11-18: Merged effects open old projects; files that use them are version 7 (Claude, owner's FX plan)
+
+**Decision:**
+- **Old ids are retired, not removed:** the 30 old effect ids no longer list or create, but every project, preset, rack, lane, link and MIDI mapping that names one opens as its merged device's variant ([engine](engine.md), [app](app.md)).
+- **File version 7** is written only when a project names a merged-only id, any `variant`, or any rack (racks always save `rack_layout`); otherwise v6 or v5 exactly as before. Builds before 1.0.8 refuse v7, so most projects saved by 1.0.8 don't open in 1.0.7. Accepted: a newer file must not play wrong in an older build.
+- **Changing a variant** keeps only knobs the new variant declares identically; the rest reset to defaults, and their automation lanes, modulation links and MIDI mappings are dropped with them, because their meaning changed. One undo step.
+- **Until the device UI kit,** a plain "Variant" pill opens a menu of variants on today's device pages (an assumption the approved device UI plan replaces).
+
 ## 2026-11-18: The Hub goes into use with 1.1.0; APKs are installed by hand until then (owner)
 
 **Decision (owner):** 1.0.7 lays the Hub's groundwork only: C.A.W's side of the link, the Hub's first build and its update channels and notifications, all inert while no Hub certificate is pinned. Using the Hub (signing it, pinning each app's certificate, installing updates through it) comes with 1.1.0. Until then the owner installs APKs by hand.
