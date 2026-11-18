@@ -27,6 +27,7 @@ class MainActivity : FlutterActivity() {
     private var micPermission: MicPermission? = null
     private var updateInstaller: UpdateInstaller? = null
     private var playback: PlaybackChannel? = null
+    private var companion: CompanionClient? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -35,6 +36,12 @@ class MainActivity : FlutterActivity() {
         val updates = UpdateInstaller(this) { updatesChannel }
         updateInstaller = updates
         updatesChannel.setMethodCallHandler { call, result -> updates.handle(call, result) }
+
+        // The companion app's service (CompanionClient.kt, docs/companion-protocol.md): "absent" until one is installed.
+        val companionClient = CompanionClient(this)
+        companion = companionClient
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, COMPANION_METHOD_CHANNEL)
+            .setMethodCallHandler { call, result -> companionClient.handle(call, result) }
 
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, RESOURCE_METHOD_CHANNEL)
             .setMethodCallHandler { call, result ->
@@ -345,6 +352,8 @@ class MainActivity : FlutterActivity() {
         bluetoothMidi = null
         updateInstaller?.dispose()
         updateInstaller = null
+        companion?.dispose()
+        companion = null
         playback?.close(isFinishing)
         playback = null
         super.onDestroy()
@@ -353,6 +362,7 @@ class MainActivity : FlutterActivity() {
     companion object {
         private const val RESOURCE_METHOD_CHANNEL = "caw/resource_signals"
         private const val UPDATES_METHOD_CHANNEL = "caw/updates"
+        private const val COMPANION_METHOD_CHANNEL = "caw/companion"
         private const val RESOURCE_EVENT_CHANNEL = "caw/resource_signals/events"
         private const val COMPILER_METHOD_CHANNEL = "caw/compiler"
         private const val MIDI_EVENT_CHANNEL = "caw/midi"
