@@ -47,8 +47,14 @@ updated: 2026-11-18
 
 **The companion app** has its own package, so its own permissions:
 - It holds `REQUEST_INSTALL_PACKAGES`, `UPDATE_PACKAGES_WITHOUT_USER_ACTION` and `INTERNET`: the self-updater, the update check, telemetry and feedback. Later it becomes the AutoStacc hub (owner, 2026-11-18): every download, the user's whole library, files and the account, so account tokens never live in the process that loads plug-ins.
-- **Private (owner):** the owner calls the hub "100% private". Open: whether that means a private, closed-source repository (C.A.W itself stays Apache-2.0, [vision](vision.md)) or private data, or both.
-- **Admin view (owner):** the C.A.W-Telemetry data (telemetry and feedback) feeds into the hub, with an admin version, as AutoStacc has, that the owner and the people they trust can see. This changes where collected data is shown, so it needs the C.A.W-Telemetry repository's PLAN.md, privacy policy and access rules updated in the same change when it is built.
+- **Private (owner, 2026-11-18):** the companion app and its data are 100% private: a closed-source, private repository, unlike C.A.W itself (Apache-2.0, [vision](vision.md)). Nothing in it is shared or exposed. Long term it is AutoStacc's secondary hub; the two work as one.
+- **Admin view (owner):** the telemetry and feedback that C.A.W-Telemetry collects are shown in an admin view inside the companion app, for the owner and the people they trust, to see how the app is used and to find vulnerabilities. This changes where collected data is shown, so the C.A.W-Telemetry repository's PLAN.md, privacy policy and access rules are updated in the same change when it is built.
+- **Review and takedown (owner, 2026-11-18),** stated in a clear disclaimer that users accept:
+  - anything **sold** on AutoStacc (plug-ins, effects, samples, anything) may be reviewed at any time, without notifying the creator;
+  - anything only **hosted** on AutoStacc or the companion app is private, and is reviewed only after a notice that it is causing a problem;
+  - either way, malicious code or intent can be taken down.
+  
+  **[Assumption]** to check with a lawyer before launch: hosting laws may require more. For example, the EU's Digital Services Act requires a hosting service to give the uploader a statement of reasons when it removes their content. Whether automatic malware checks of hosted files count as "review" is also open.
 - The main app talks to it only in fixed, structured messages (an update check, a telemetry report in the existing schema), never arbitrary payloads, so a plug-in can't use it to send data out.
 - It accepts only callers signed with C.A.W's own key: a custom permission with `protectionLevel="signature"`. Never `sharedUserId`, which would merge the two apps' permissions again. The main app needs a `<queries>` entry to find it.
 - **Play builds:** the Play companion carries no install permissions either, since Play does the updating.
@@ -137,4 +143,4 @@ updated: 2026-11-18
 5. Are plug-in GUIs (VST3 editors, CLAP GUI embedding) in scope for 1.1.0?
 6. Which trust a plug-in gets the first time it is seen (already open in [vision](vision.md)).
 7. Which flagging and signing parts to build ([least privilege](#least-privilege-and-the-companion-app)), whether unsigned code may load at all, which findings block for CLAP/VST3, the capability list, and how a warning looks.
-8. Which release the companion app comes in, whether it starts as the updater alone or as the AutoStacc hub, and what "100% private" covers.
+8. Which release the companion app comes in, and whether it starts as the updater alone or as the AutoStacc hub.
