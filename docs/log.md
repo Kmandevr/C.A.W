@@ -1,11 +1,12 @@
 ---
 title: Log
 summary: Dated history of changes, newest first.
-updated: 2026-11-17
+updated: 2026-11-18
 ---
 
 # Log
 
+- 2026-11-18: settings dropdowns with a long choice (an audio device's name) go under the title at full width, short ones stay on the right with ellipsis; the input device row no longer squeezes its title into one letter per line (#241).
 - 2026-11-17: v1.0.5-alpha.1 published (PR #238; CI green after one re-run of the sanitizer job, whose runner died mid-build; the same sanitizer suite passed locally).
 - 2026-11-17: the audio review's fixes on batch-105 (#236, #237): a WASAPI Low latency open, or reroute, that comes up at another period than asked (miniaudio's quiet `IAudioClient` fallback, a 3-period buffer) opens again at the default and the status says `refused`; the period findings cleared at every open; `caw_audio_tune_buffer` only in Low latency or Auto while recording, new streams told by an open and reroute count, a new playback not counted as quiet time; `CAW_AUDIO_BACKEND` falls back to the default order when its device fails; a ramp is capped only by the engine's component cap or memory budget, any other refusal is an error.
 - 2026-11-17: each platform's low-latency path (#237, branch `platform-audio`): Low latency on WASAPI asks the endpoint's smallest period (`IAudioClient3`, `src/device_period.h`, floor 128 frames; `caw_audio_status` "smallest_period"); `CAW_AUDIO_BACKEND` for the CLI (JACK's real-time callback); the route model's `bluetoothProfile` (LE Audio, A2DP, SCO, ASHA); research recorded: LE Audio and MMAP conditions, BLE MIDI's system-held high connection priority, PulseAudio's 25 ms default and PipeWire's floors, ASIO (proprietary or GPLv3) and libdbus (AFL-2.1 or GPL) not added.
