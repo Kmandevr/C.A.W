@@ -431,7 +431,7 @@ TEST(a_rack_older_than_the_merged_devices_gets_its_routes_re_pointed_and_its_lay
     const ModuleDescriptor* rack = registry().find(kFxRackId);
     CHECK(rack && rack->parameters[rack->parameterCount - 1].id == kRackLayoutParam &&
           !rack->parameters[rack->parameterCount - 1].automatable);
-    // caw_migrate_component marks an older empty rack, and the rack presets carry the version already.
+    // caw_migrate_component marks an older empty rack, and every rack preset settles after one migration.
     const Json j = migrateJson(R"({"id":"org.caw.rack.multiband","params":{"bands":2}})");
     CHECK(j.boolean("migrated", false) && j.get("params") && j.get("params")->number(std::string(kRackLayoutParam), 0) == kRackLayoutCurrent);
     for (const char* id : {kFxRackId.data(), "org.caw.rack.multiband"})
@@ -439,6 +439,8 @@ TEST(a_rack_older_than_the_merged_devices_gets_its_routes_re_pointed_and_its_lay
             ComponentSpec c;
             c.id = id;
             for (const auto& [k, v] : p.values) c.params.emplace_back(std::string(k), v);
+            // A preset still naming an old id migrates (part F rewrites the presets); once is enough.
+            fx::migrateLegacyEffect(c);
             CHECK(!fx::migrateLegacyEffect(c));
         }
 }
