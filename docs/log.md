@@ -6,6 +6,7 @@ updated: 2026-11-18
 
 # Log
 
+- 2026-11-18: v1.0.5-alpha.2 published (PR #243, the #241 hotfix).
 - 2026-11-18: hotfix 1.0.5-alpha.2 prepared (#241): version, changelog; companion app decisions recorded (#239).
 - 2026-11-18: automation points drag on touch again (#241): the 28 px point target was a plain pan, which on touch needs 36 px (`kPanSlop`) while the timeline's scroll takes the finger at 18 px, so the scroll always won; it now takes its drag at the first touch (`EagerPan`, as the segment handles do), with a tap, double tap and hold told apart by movement. The focus view's Automation tab showed only a track's own volume and pan lanes (never its device lanes) in an editor of its own; it now lists the same lanes as under the track, edited with the Arrange lane row and the #230 picker. Widget tests drive real finger drags in the full arranger, zoomed and scrolled.
 - 2026-11-18: settings dropdowns with a long choice (an audio device's name) go under the title at full width, short ones stay on the right with ellipsis; the input device row no longer squeezes its title into one letter per line (#241).
