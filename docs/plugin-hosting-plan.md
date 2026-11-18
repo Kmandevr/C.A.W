@@ -165,3 +165,9 @@ updated: 2026-11-18
 7. Which flagging and signing parts to build ([least privilege](#least-privilege-and-the-companion-app)), whether unsigned code may load at all, which findings block for CLAP/VST3, the capability list, and how a warning looks.
 8. **Settled** (owner, 2026-11-18): the companion app and this security work are release 1.0.7, after the 1.0.6 usability release and before hosting goes live in 1.1.0; the later batches moved up by one.
 9. Which trust a never-seen plug-in gets (6): **[Proposal]** Blocked until the user chooses.
+10. **Waiting for the owner before the companion app is built** (the main app's groundwork is in, [companion protocol](companion-protocol.md)):
+    - where the companion's code lives: the owner called it private and closed-source, against this Apache-2.0 repository; also its package and service names (assumed `com.kmandevr.caw.companion` and `.CompanionService`);
+    - its screens, which need the AutoStacc brand (logo, colours, name);
+    - the known-bad list's source and its signing key;
+    - the two Play listings;
+    - when the main app drops `INTERNET`, `REQUEST_INSTALL_PACKAGES` and `UPDATE_PACKAGES_WITHOUT_USER_ACTION` (design point 7: only once the companion is confirmed present).
