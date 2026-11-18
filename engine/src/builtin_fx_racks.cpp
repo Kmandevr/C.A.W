@@ -146,6 +146,18 @@ void RackLayout::Built::make(const RackLayout& layout, const std::vector<const M
             bip.step = 1, bip.choices = kPolarities, bip.choiceCount = 2;
         }
     }
+    {  // the layout version, last (builtin_fx_racks.h)
+        ParameterDescriptor v;
+        v.id = kRackLayoutParam;
+        v.name = "Layout version";
+        v.defaultValue = kRackLayoutCurrent;
+        v.minimum = 1.0;
+        v.maximum = kRackLayoutCurrent;
+        v.step = 1.0;
+        v.smoothingFrames = 0;
+        v.automatable = v.modulatable = v.midiMappable = false;
+        params.push_back(v);
+    }
     desc = ModuleDescriptor{};
     desc.id = layout.id;
     desc.name = layout.name;

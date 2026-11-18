@@ -115,9 +115,33 @@ const ModuleDescriptor* currentChild(uint32_t hash, double variant) {
     return nullptr;
 }
 
+// Whether a rack entry carries today's layout version (builtin_fx_racks.h); one without it is older than the merged
+// devices.
+bool currentLayout(const Values& values) noexcept { return valueOf(values, kRackLayoutParam, 0.0) >= kRackLayoutCurrent; }
+
+// The slots of a rack older than the merged devices whose child is a merged device's own id (one reusing an old id,
+// as org.caw.utility) with no `<slot>.variant`: that child was the old effect, whose list lacked `variant`.
+std::vector<std::string> preVariantSlots(const ModuleDescriptor& rack, const Values& values) {
+    std::vector<std::string> out;
+    if (currentLayout(values)) return out;
+    for (uint32_t k = 0; k < rack.parameterCount; ++k) {
+        const std::string_view id = rack.parameters[k].id;
+        if (!endsWith(id, "_fx")) continue;
+        const std::string slot(id.substr(0, id.size() - 3));
+        const uint32_t hash = hashValue(valueOf(values, id, 0.0));
+        if (hash == 0 || legacyByHash(hash) || !std::isnan(valueOf(values, slot + "." + std::string(kVariantParam), NAN)))
+            continue;
+        for (const MergedDevice* m : mergedDevices())
+            if (rackChildHash(m->id) == hash) out.push_back(slot);
+    }
+    return out;
+}
+
 // A rack's parameter ids in its flattened order (own parameters, then each slot's child's as "<slot>.<id>"), for
-// `values`; `legacy`: children that are old ids read as the old effects (else as what their hash names now).
-std::vector<std::string> rackLayout(std::string_view rackId, const Values& values, bool legacy) {
+// `values`; `legacy`: children that are old ids read as the old effects (else as what their hash names now), and
+// the `preVariant` slots' merged children without their trailing `variant`.
+std::vector<std::string> rackLayout(std::string_view rackId, const Values& values, bool legacy,
+                                    const std::vector<std::string>& preVariant = {}) {
     std::vector<std::string> ids;
     const ModuleDescriptor* d = builtins().find(rackId);
     if (!d) return ids;
@@ -137,7 +161,9 @@ std::vector<std::string> rackLayout(std::string_view rackId, const Values& value
         else
             child = currentChild(hash, valueOf(values, slot + "." + std::string(kVariantParam), 0.0));
         if (!child) continue;
-        for (uint32_t c = 0; c < child->parameterCount; ++c) ids.push_back(slot + "." + std::string(child->parameters[c].id));
+        uint32_t count = child->parameterCount;
+        if (legacy && count > 0 && std::find(preVariant.begin(), preVariant.end(), slot) != preVariant.end()) --count;
+        for (uint32_t c = 0; c < count; ++c) ids.push_back(slot + "." + std::string(child->parameters[c].id));
     }
     for (uint32_t k = own; k < d->parameterCount; ++k) ids.emplace_back(d->parameters[k].id);
     return ids;
@@ -153,14 +179,17 @@ bool migrateRack(ComponentSpec& spec, ParamRenames& renames) {
         if (const LegacyEffect* e = legacyByHash(hashValue(valueOf(spec.params, id, 0.0))))
             slots.emplace_back(std::string(id.substr(0, id.size() - 3)), e);
     }
-    if (slots.empty()) return false;
-    const std::vector<std::string> before = rackLayout(spec.id, spec.params, true);
+    if (slots.empty() && currentLayout(spec.params)) return false;
+    const std::vector<std::string> preVariant = preVariantSlots(*d, spec.params);
+    const std::vector<std::string> before = rackLayout(spec.id, spec.params, true, preVariant);
     const size_t first = renames.size();
     for (const auto& [slot, e] : slots) {
         set(spec.params, slot + "_fx", static_cast<double>(rackChildHash(e->to)));
         moveParams(*e, spec.params, slot + ".", renames);
         if (!e->keepsState) spec.hasState = false;  // the rack's state holds each child's
     }
+    for (const std::string& slot : preVariant) set(spec.params, slot + "." + std::string(kVariantParam), 0.0);
+    set(spec.params, kRackLayoutParam, kRackLayoutCurrent);  // migrated once
     const std::vector<std::string> after = rackLayout(spec.id, spec.params, false);
     // The routes' destinations: an index + 1 into the flattened list, which the new children moved.
     for (auto& [name, v] : spec.params) {
@@ -179,6 +208,7 @@ bool migrateRack(ComponentSpec& spec, ParamRenames& renames) {
 bool needsMigration(const ComponentSpec& spec) {
     if (findLegacyEffect(spec.id)) return true;
     if (!isRackId(spec.id)) return false;
+    if (!currentLayout(spec.params)) return true;  // older than the merged devices: re-pointed and marked
     for (const auto& [name, v] : spec.params)
         if (endsWith(name, "_fx") && name.find('.') == std::string::npos && legacyByHash(hashValue(v))) return true;
     return false;

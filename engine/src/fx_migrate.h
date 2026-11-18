@@ -65,7 +65,10 @@ using ParamRenames = std::vector<std::pair<std::string, std::string>>;
 // Migrates one entry in place: an old id becomes its merged device (`variant` set, parameters moved, fixed values
 // added, the state kept or dropped), and a rack's children that are old ids become theirs (`<slot>_fx`,
 // `<slot>.variant`, `<slot>.<param>` and the routes' destinations). `renames`, if given, gets the parameter
-// renames for its lanes. False, with nothing changed, when there was nothing to migrate.
+// renames for its lanes. A rack without today's layout version (kRackLayoutParam, builtin_fx_racks.h) is older than
+// the merged devices: a child that is a merged device's own id with no `<slot>.variant` (an old effect whose id was
+// reused, as org.caw.utility) gets `<slot>.variant` 0, the routes are re-pointed past its new `variant`, and the
+// version is added. False, with nothing changed, when there was nothing to migrate (a current rack: never twice).
 bool migrateLegacyEffect(ComponentSpec& spec, ParamRenames* renames = nullptr);
 
 // Whether any component list of the project (master, layers' components and noteComponents, the audition's)
