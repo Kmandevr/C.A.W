@@ -1,6 +1,6 @@
 # Handoff
 
-Commit: bc98be7+ (Main = v1.0.6-alpha.1 published + the companion groundwork, PR #247 merged)
+Commit: f9cd21c (Main = v1.0.6-alpha.1 + the 1.0.7 groundwork; this branch: PR #248, plans moved private)
 Branch: ccr-56285e11-0xrj3h. Main is protected: PRs only; merge yourself when CI is green. Publish with app.yml's workflow_dispatch (installables + release) on Main. Each release needs a CHANGELOG.md entry, copied to app/assets/CHANGELOG.md.
 
 ## Goal
