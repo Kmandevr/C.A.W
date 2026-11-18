@@ -1,12 +1,12 @@
 # C.A.W start file for chat agents
 
-Generated from `fd9131b3f0df2e8dfae2d9b1cf2b10c77ae311a2` on the default branch at 2026-11-18T14:49:26Z by `scripts/agent-context.js`. Don't edit it; edit the files it bundles.
+Generated from `118ac5967543b7b9c2468afcc6c80c7ca34bb5dd` on the default branch at 2026-11-18T14:51:04Z by `scripts/agent-context.js`. Don't edit it; edit the files it bundles.
 
 Read this whole file before doing anything else. It replaces separately reading `AGENTS.md`, `CLAUDE.md`, `docs/roadmap.md` and `.claude/rules/*.md`.
 
 ## Before you start: confirm in your first reply
 
-1. The commit this file was generated from (`fd9131b`).
+1. The commit this file was generated from (`118ac59`).
 2. The task issue number and your branch (`gpt/<issue>-<short-name>`).
 3. The progress comment's next action, or "new task" if there is none yet.
 4. Which area rules below apply to the files you will touch.
@@ -233,7 +233,7 @@ Develop on the branch the session names. Put `Closes #N` in pull requests that f
 
 ---
 title: Roadmap
-summary: The work C.A.W has promised to build and hasn't built yet: hosting VST3 and CLAP plug-ins, and iOS releases. Only promised work is listed, with no dates.
+summary: The work C.A.W has promised to build and hasn't built yet: hosting VST3 and CLAP plug-ins, iOS and macOS releases, Google Play, and the AutoStacc store and cloud library. Only promised work is listed, with no dates.
 updated: 2026-11-18
 ---
 
@@ -246,7 +246,12 @@ This is C.A.W's public roadmap: the work it has promised and hasn't built yet. I
   - Load other people's VST3 and CLAP plug-ins in C.A.W.
   - A plug-in made by someone else loads only under your own choice for it: Isolated, Trusted or Blocked. It never loads silently.
   - C.A.W can already build its own C++ components as CLAP and VST3 plug-ins for other hosts ([Engine](engine.md)); hosting is the other direction.
-- **iOS releases.** C.A.W on iPhone and iPad. Today it ships for Android and Windows.
+- **iOS and macOS releases.** C.A.W on iPhone, iPad and Mac. Today it ships for Android and Windows.
+- **Google Play.** C.A.W in the Play Store, alongside the builds on GitHub Releases.
+- **The AutoStacc store and cloud library.**
+  - Get C.A.W, its updates and extra sounds, instruments and effects from AutoStacc.
+  - Keep your sounds and projects in your AutoStacc cloud library, and drag anything stored there straight into C.A.W.
+  - Core features stay free; what AutoStacc offers is optional.
 
 ---
 
