@@ -7,6 +7,7 @@
 
 #include "caw/library/dynamics.hpp"
 #include "caw/library/filter.hpp"
+#include "fx_merged.h"
 
 // Original code (C.A.W. is Apache-2.0). Techniques, in our own words (docs/engine.md, "Dynamics and drive"):
 // - a level detector in dB (peak or RMS) smoothed with separate attack and release, then a static curve in dB,
@@ -116,7 +117,7 @@ struct TwoThresholds {
     }
 };
 
-class Dynamics final : public EffectBase {
+class Dynamics : public EffectBase {
 public:
     const ModuleDescriptor& descriptor() const noexcept override { return dynDescriptor(); }
 
@@ -518,6 +519,10 @@ ModuleProcessor* make() noexcept {
 }
 
 }  // namespace
+
+// The dynamics processor as the merged Compressor's variant (builtin_fx_merged_dynamics.cpp).
+const ModuleDescriptor& legacyDynamicsDescriptor() { return dynDescriptor(); }
+ModuleProcessor* makeDynamicsAs(const ModuleDescriptor& v) noexcept { return new (std::nothrow) AsVariant<Dynamics>(v); }
 
 void registerFxDynamics(ModuleRegistry& registry) {
     registry.add(dynDescriptor(), &make<Dynamics>);

@@ -10,6 +10,7 @@
 #include "caw/library/dynamics.hpp"
 #include "caw/library/filter.hpp"
 #include "component_chain.h"
+#include "fx_merged.h"
 
 // Original code (C.A.W. is Apache-2.0); the technique is in docs/engine.md ("The ducker"). The key filters are
 // Simper's trapezoidal state-variable filter (caw/library/filter.hpp); the band split is a Linkwitz-Riley
@@ -86,7 +87,7 @@ double bend(double x, double tension) noexcept {
     return (detExp(c * x) - 1.0) / (detExp(c) - 1.0);  // detExp: the same bits on every platform (golden renders)
 }
 
-class Ducker final : public EffectBase, public VariableLatency {
+class Ducker : public EffectBase, public VariableLatency {
 public:
     const ModuleDescriptor& descriptor() const noexcept override { return duckDescriptor(); }
     uint32_t latencyFor(const double* values, uint32_t count) const noexcept override {
@@ -409,6 +410,9 @@ private:
 }  // namespace
 
 ModuleProcessor* makeDucker() noexcept { return new (std::nothrow) Ducker(); }
+// The ducker as the merged Compressor's "Shape" variant (builtin_fx_merged_dynamics.cpp).
+const ModuleDescriptor& legacyDuckerDescriptor() { return duckDescriptor(); }
+ModuleProcessor* makeDuckerAs(const ModuleDescriptor& v) noexcept { return new (std::nothrow) AsVariant<Ducker>(v); }
 
 void registerDucker(ModuleRegistry& registry) { registry.add(duckDescriptor(), &makeDucker); }
 
