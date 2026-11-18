@@ -53,8 +53,9 @@ updated: 2026-11-18
   - anything **sold** on AutoStacc (plug-ins, effects, samples, anything) may be reviewed at any time, without notifying the creator;
   - anything only **hosted** on AutoStacc or the companion app is private, and is reviewed only after a notice that it is causing a problem;
   - either way, malicious code or intent can be taken down.
+  - **The automatic malware check is not a review (owner, 2026-11-18):** it runs on each upload, sends no file or data to the owner or the team, and only refuses malicious content. Where it applies, it can report that an upload was refused and why.
   
-  **[Assumption]** to check with a lawyer before launch: hosting laws may require more. For example, the EU's Digital Services Act requires a hosting service to give the uploader a statement of reasons when it removes their content. Whether automatic malware checks of hosted files count as "review" is also open.
+  **[Assumption]** to check with a lawyer before launch: hosting laws may require more. For example, the EU's Digital Services Act requires a hosting service to give the uploader a statement of reasons when it removes their content.
 - The main app talks to it only in fixed, structured messages (an update check, a telemetry report in the existing schema), never arbitrary payloads, so a plug-in can't use it to send data out.
 - It accepts only callers signed with C.A.W's own key: a custom permission with `protectionLevel="signature"`. Never `sharedUserId`, which would merge the two apps' permissions again. The main app needs a `<queries>` entry to find it.
 - **Play builds:** the Play companion carries no install permissions either, since Play does the updating.
