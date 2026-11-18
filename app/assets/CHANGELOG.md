@@ -3,9 +3,9 @@
 What changed in each C.A.W release, newest first. C.A.W is in open alpha: expect rough edges and unexpected issues.
 Versions keep the `-alpha.N` suffix until the official release.
 
-## 1.0.6-alpha.1 (unreleased)
+## 1.0.6-alpha.1 (2026-11-18)
 
-Choose the real speaker, headphones and microphone on Android, and latency you set stays where you set it.
+The usability release: smooth zooming, a tidier Settings, choosing your real speaker, headphones and microphone, and latency that stays where you set it.
 
 ### New
 - **Choose your output and input device on Android:**
@@ -28,10 +28,14 @@ Choose the real speaker, headphones and microphone on Android, and latency you s
   - **Tap along** keeps the figure your taps found, also on Bluetooth headphones whose delay settles after they connect;
   - **the loopback test** splits the round trip correctly, so recordings land where you played;
   - **a typed latency**, for the output or the input, stays what you typed.
-<!-- zoom -->
+- **Zooming** in Arrange is smooth: text, clip names and the ruler keep their size instead of stretching and then jumping, nothing snaps when you lift your fingers, and the beat under your fingers stays under them. The zoom buttons and the mouse wheel glide too, and grid lines and ruler numbers fade in and out.
+- **Editing feels quicker:** selecting or changing a clip or track redraws only what changed.
+- **Automate from a device page** on a phone now closes the page and shows you the lane.
 
 ### Improved
 - **A tidier Settings:** five sections in the order you use them (Sound, Editing, Appearance and feel, Projects and export, App), each a set of glass cards that keep related settings together. Rarer settings sit under each card's **More**; search still finds every setting and opens its card. Each setting now lives in one place: the two recording offsets sit together as **Audio take offset** and **MIDI note offset**, and the Privacy Policy, Terms and Send feedback appear once.
+- **Take lanes** can be resized by dragging their edge, like automation lanes.
+- **Bounce to audio** is in an audio clip's own menu.
 - **Latency learns from audio takes too:** when you record audio with the click on, C.A.W finds where your notes start and how far they land from the beat. After a few takes that agree, the latency card suggests a correction. It never changes anything until you tap **Apply**.
 
 ## 1.0.5-alpha.2 (2026-11-18)
