@@ -6,6 +6,14 @@ updated: 2026-11-18
 
 # Decisions
 
+## 2026-11-18: Declared capabilities: strict default, embedded in the binary, older components warned until rebuilt (owner, architect)
+
+**Decision:**
+- **Strict default (owner):** with nothing declared, a C.A.W component may use only the host API, maths, memory and the C++ runtime. Anything more, background threads and reading or writing files included, is declared with a plain reason, or the component is blocked; there is no Trusted override for undeclared use. CLAP and VST3 binaries can't declare, so their findings only warn.
+- **Where (architect):** in the component's `caw-component.json` (`capabilities`: id, reason, and for `internet` its sites), embedded by the build in an allocated data section of the binary (`caw_caps` on ELF, `.cawcap` on PE) that the scan reads without loading it. So the declaration is covered by the binary's SHA-256, which the trust store and the Hub's lists key on, and can't be swapped on its own. The component ABI and descriptor are unchanged. Ids are the scan's list (`internet`, not `network`).
+- **Older components (owner):** a component trusted before 1.0.7, with no declaration, keeps loading with its findings shown as warnings until it is rebuilt or updated; then an undeclared use blocks it.
+- **Declaring (owner):** a "Needs" form in the component's settings in the C++ Builder: a capability from a picker, its reason on one line and, for Internet, its sites; it writes the manifest.
+
 ## 2026-11-18: The Hub switches update channels and shows download notifications; scan findings go in the trust sheet (owner)
 
 **Decision (owner):**
