@@ -42,7 +42,7 @@ The skills contain the detailed procedures. Read the linked `SKILL.md` when the 
 | Navigate project/file relationships or Dart/C++ symbols | [`.claude/skills/code-nav/SKILL.md`](.claude/skills/code-nav/SKILL.md) |
 | Leave a durable resume note at a multi-step task boundary | [`.claude/skills/handoff/SKILL.md`](.claude/skills/handoff/SKILL.md) |
 
-Use GitHub Issues as the task/bug tracker; do not create a separate task list. A PR that finishes an issue must include `Closes #N`. Before each push, test the changed area and run the docs check; follow the release-check skill before calling the work ready. Never merge or approve your own PR.
+Use GitHub Issues as the tracker (this repository's for bugs that are fine to show the public; features and plans are tracked privately); do not create a separate task list. A PR that finishes an issue must include `Closes #N`. Before each push, test the changed area and run the docs check; follow the release-check skill before calling the work ready. Never merge or approve your own PR.
 
 ## Working habits
 

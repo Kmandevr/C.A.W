@@ -6,7 +6,7 @@
 
 ## Start of every session
 
-Tasks and bugs live in GitHub Issues: use the `tasks` skill to find, claim and finish work, and don't keep a task list anywhere else. The `docs/` folder holds permanent project knowledge (an Obsidian vault); its notes list is [docs/index.md](docs/index.md).
+Public bugs live in this repository's Issues, every other task in the private AutoStacc-Hub's: use the `tasks` skill, and keep no other task list. The `docs/` folder holds permanent project knowledge (an Obsidian vault); its notes list is [docs/index.md](docs/index.md).
 
 ## Rules
 

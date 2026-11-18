@@ -15,4 +15,4 @@ Docs stay clean and current: a note says what is true now, not how it got there.
 - **Frontmatter** on every note: `title`, `summary` (one line, shown in the repo map), `covers` (when the note describes code: a one-line list of files, `dir/` folders or `*` globs, e.g. `[engine/vm/, scripts/docs-test.js]`), `updated` (YYYY-MM-DD).
 - When code a note covers changes, re-check that note in the same change and bump `updated`. New code areas get a `covers:` entry. `node scripts/docs-test.js` checks all of this; the Stop hook reminds you, and CI fails a stale note on pull requests (`--strict`).
 - `README.md` is the front door: it must name every top-level folder, workflow and npm script (the check fails otherwise), and its `covers:` list is the HTML comment on its first line.
-- Relative markdown links (`[text](other.md)`), not `[[wikilinks]]`. Tasks live in GitHub Issues, not here.
+- Relative markdown links (`[text](other.md)`), not `[[wikilinks]]`. Tasks live in GitHub Issues (the `tasks` skill), not here.

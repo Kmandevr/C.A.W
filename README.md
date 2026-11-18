@@ -34,7 +34,7 @@ Workflows:
 
 ## Working on it
 
-Tasks and bugs are GitHub Issues. Security problems: [SECURITY.md](SECURITY.md).
+Bug reports are GitHub Issues; features and plans are tracked privately. Security problems: [SECURITY.md](SECURITY.md).
 
 ## Licence
 

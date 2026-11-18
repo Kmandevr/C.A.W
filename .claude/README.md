@@ -11,7 +11,7 @@ Adapted from the AutoStacc repository's setup. `tools/`, `hooks/` and `workflows
 | `tools/graph.sh` | on call | Single entry to [Graphify](https://github.com/Graphify-Labs/graphify) (project and file level). Installs it and rebuilds the graph only when files were added, edited or deleted. |
 | `tools/serena.sh`, `.mcp.json` | when Serena's tools are used | Starts the [Serena](https://github.com/oraios/serena) MCP server (symbol level). Config: `.serena/project.yml`, with the Dart and C++ language servers; its file, shell, memory and onboarding tools are off. |
 | `tools/serena-hook.sh` | on Read, Grep and Serena calls; session end | Runs Serena's `remind` and `cleanup` hooks. `remind` counts Read/Grep calls, denies a burst once with a nudge to use Serena, and resets when a Serena tool is used. It no longer watches Bash (owner, 2026-11-09): builds, tests and git commands tripped it far more often than code reads did. Does nothing if Serena isn't installed. |
-| `skills/tasks` | description every session, body when invoked | Find, claim, work and finish tasks through GitHub Issues and labels. The only task system. |
+| `skills/tasks` | description every session, body when invoked | Find, claim, work and finish tasks through GitHub Issues and labels: public bugs here, everything else in the private AutoStacc-Hub. The only task system. |
 | `skills/release-check` | same | Final check before calling a change ready: docs guard, repo hygiene (`check.sh`), diff scope, and reviewers when the diff calls for them. |
 | `skills/code-nav` | same | Using Graphify and Serena together, with `check.sh`, a self-test for both. |
 | `skills/handoff` | same | Writes `.claude/handoff.md`, a short snapshot to resume a multi-step task from. `check.sh` keeps every line of `must-keep.txt` in place and CLAUDE.md within its word budget. |
@@ -32,7 +32,7 @@ There's one home for each kind of instruction; the others point to it.
 | Repeatable procedures | `skills/` |
 | Independent review, in its own context | `agents/` |
 | Product direction, plan, decisions, history | `docs/` |
-| Tasks and bugs | GitHub Issues |
+| Tasks and bugs | GitHub Issues: bugs here, the rest in the private AutoStacc-Hub |
 | Project-wide map and relationships | Graphify through `tools/graph.sh` |
 | Symbols and references | Serena |
 

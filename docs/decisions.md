@@ -12,6 +12,7 @@ updated: 2026-11-18
 - **Public (this repository):** what is shipped and how the code works, the contracts the shipped code implements (the companion protocol, the C.A.W-Telemetry contract), security rules, licences and process, with short pointers such as "planned work is tracked privately".
 - **[Fact]** Git history still shows the old plans; only future changes are hidden. Hidden features stay readable in the public code (Apache-2.0, neutral commit messages): the surprise rests on the plans and the announcements, not on secret code.
 - **The public roadmap** ([roadmap](roadmap.md)) lists only what the owner chooses to reveal: for now the promised work, hosting VST3 and CLAP plug-ins and iOS releases.
+- **Issues** (owner, the same day): this repository's Issues are for bugs that are fine to show the public. Features, plans and other tasks are tracked in the private repository's Issues; the 26 open feature and plan issues were copied there and closed here with a note (closing doesn't hide their text or edit history). The task template is gone; `bug.yml` stays.
 - **Replaces** the 2026-11-17 decision that plans would go private at 1.1.0.
 
 ## 2026-11-18: The companion's groundwork in the main app: a services package, one link, two flavours (#239, for 1.0.7)
