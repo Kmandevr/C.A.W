@@ -666,10 +666,14 @@ class LayerDoc {
   /// The folder the track sits in on screen (and, without an [output], the bus it plays into).
   String? parentId;
 
-  /// The bus folder the track's own sound goes to instead of its parent folder's bus or the master (format v6,
-  /// [ProjectDoc.fileVersion]); null for that default. One that names no enabled bus, or would make a loop, is left
-  /// out of the engine and the default plays ([RoutingPlan.outputOf]).
+  /// The bus folder the track's own sound goes to instead of its parent folder's bus or the master, or [toMaster]
+  /// for straight to the master even inside a bus folder (format v6, [ProjectDoc.fileVersion]); null for that
+  /// default. One that names no enabled bus, or would make a loop, is left out of the engine and the default plays
+  /// ([RoutingPlan.outputOf]).
   String? output;
+
+  /// The [output] that means the master. Layer ids never start with `@`, so it can't name a layer.
+  static const toMaster = '@master';
   bool isFolder, busEnabled, collapsed;
 
   /// A spacer drawn under the track in the arrangement, in logical pixels (0: none). It only separates tracks on
@@ -861,7 +865,7 @@ class ProjectDoc {
   /// The format a project without v6's routing is written as.
   static const int baseFileVersion = 5;
 
-  /// Whether the project uses anything v6 added: an output override, a send into a track (not a folder), a feedback
+  /// Whether the project uses anything v6 added: an output override (to a bus or [LayerDoc.toMaster]), a send into a track (not a folder), a feedback
   /// send or a send's limiter turned off.
   bool get usesRoutingV6 {
     final folders = {for (final l in layers) if (l.isFolder) l.id};

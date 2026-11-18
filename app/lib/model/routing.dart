@@ -67,10 +67,10 @@ const keyedBuiltins = {'org.caw.ducker', 'org.caw.compressor', 'org.caw.gate', '
 /// Which outputs, sends and keys of a project play. The engine refuses a whole project whose routing makes a loop (a
 /// bus sending into a bus that feeds it, a ducker keyed by its own folder), so the app gives it only routes that
 /// keep the graph loop-free, in this order:
-/// 1. every layer's own route: its [LayerDoc.output] bus when it names an enabled bus folder other than itself, else
-///    its parent folder's bus ([routeTarget]), else the master. The parent routes are laid first; then each output
-///    override, in track order, replaces its layer's parent route only if it closes no loop (else the parent route
-///    stays, which never closes one);
+/// 1. every layer's own route: its [LayerDoc.output] bus when it names an enabled bus folder other than itself, or
+///    the master for [LayerDoc.toMaster], else its parent folder's bus ([routeTarget]), else the master. The parent
+///    routes are laid first; then each output override, in track order, replaces its layer's parent route only if
+///    it closes no loop (else the parent route stays, which never closes one; the master never does);
 /// 2. then sends and keys in track order, each kept only if it closes no loop. A feedback send ([SendDoc.feedback])
 ///    is kept whatever it closes and is no edge for the others' checks (the engine breaks the loop with a delay).
 /// A route to a missing or bus-less folder, a send to itself, or a key from a missing or bus-less layer is left out
@@ -92,11 +92,10 @@ class RoutingPlan {
     }
     for (final l in p.layers) {
       final out = l.output;
-      if (out == null || !plan._plays(l) || !plan._isBus(out) || out == l.id) continue;
-      if (plan.reaches(out, l.id)) continue;  // it would loop: the parent route stays
+      if (out == null || !plan.canOutput(l, out)) continue;  // no bus, or it would loop: the parent route stays
       final parent = routeTarget(p, l);
       if (parent != null) plan._edges[l.id]?.remove(parent);
-      plan._edge(l.id, out);
+      if (out != LayerDoc.toMaster) plan._edge(l.id, out);
       plan._outputs[l.id] = out;
     }
     for (final l in p.layers) {
@@ -146,15 +145,21 @@ class RoutingPlan {
   }
 
   /// The bus [layer]'s own sound goes to: its kept [LayerDoc.output], else its parent folder's bus, else null (the
-  /// master).
-  String? outputOf(LayerDoc layer) => _outputs[layer.id] ?? routeTarget(_p, layer);
+  /// master, [LayerDoc.toMaster] included).
+  String? outputOf(LayerDoc layer) => switch (_outputs[layer.id]) {
+        LayerDoc.toMaster => null,
+        final String bus => bus,
+        null => routeTarget(_p, layer),
+      };
 
   /// Whether [layer]'s [LayerDoc.output] override plays (false: none, or it would loop or names no bus).
   bool outputPlays(LayerDoc layer) => _outputs.containsKey(layer.id);
 
-  /// Whether [layer] can output to bus [busId] now: an enabled bus folder, not itself, and no loop.
+  /// Whether [layer] can output to bus [busId] now: an enabled bus folder, not itself, and no loop; or
+  /// [LayerDoc.toMaster], which never loops.
   bool canOutput(LayerDoc layer, String busId) =>
-      _plays(layer) && busId != layer.id && _isBus(busId) && !reaches(busId, layer.id);
+      _plays(layer) &&
+      (busId == LayerDoc.toMaster || (busId != layer.id && _isBus(busId) && !reaches(busId, layer.id)));
 
   /// Whether [to] can take a send from [layer] at all: a bus folder or a track (anything that carries sound), not
   /// [layer] itself. Loops aside: [canSend] checks those.

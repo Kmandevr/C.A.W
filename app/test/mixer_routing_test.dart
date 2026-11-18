@@ -225,14 +225,50 @@ void main() {
     });
   });
 
+  group('straight to the master', () {
+    test('@master takes a track in a bus folder to the master: plan, engine JSON, file and edit', () {
+      final p = _project();
+      final bass = _l(p, 'bass');
+      bass.output = LayerDoc.toMaster;
+      final plan = RoutingPlan.of(p);
+      expect(plan.outputPlays(bass), isTrue);
+      expect(plan.outputOf(bass), isNull);
+      expect(plan.reaches('bass', 'grp'), isFalse);
+      // With the bass out of its Group, the Group may send into the bass.
+      expect(plan.canSend(_l(p, 'grp'), 'bass'), isTrue);
+      expect(_engineLayer(p, 'bass')['output'], '@master');
+      expect(_engineLayer(p, 'bass')['parent'], 'grp');
+      expect(p.usesRoutingV6, isTrue);
+      expect(p.toJson()['caw_app_project'], 6);
+      expect(_l(_reload(p), 'bass').output, '@master');
+      // A bus-less folder carries nothing, so it has no output to set.
+      _l(p, 'org').output = LayerDoc.toMaster;
+      expect(RoutingPlan.of(p).outputPlays(_l(p, 'org')), isFalse);
+      expect(_engineLayer(p, 'org').containsKey('output'), isFalse);
+    });
+
+    test('setOutput(@master) is one undo step and outputTargets offers it only off the master', () {
+      final s = _state();
+      final bass = _l(s.project, 'bass');
+      expect(s.outputTargets(_l(s.project, 'kick')).map((t) => t.id), isNot(contains('@master')));
+      expect(s.setOutput(bass, LayerDoc.toMaster), isTrue);
+      expect(s.outputOf(bass), isNull);
+      s.endUndoStep();
+      expect(s.undo(), isTrue);
+      expect(_l(s.project, 'bass').output, isNull);
+      expect(s.outputOf(_l(s.project, 'bass'))?.id, 'grp');
+    });
+  });
+
   group('the edits', () {
     test('setOutput: buses without a loop, null for the default, one undo step', () {
       final s = _state();
       final bass = _l(s.project, 'bass');
       final grp = _l(s.project, 'grp');
       expect(s.outputOf(bass)?.id, 'grp');
-      expect(s.outputTargets(bass).map((b) => b.id), ['grp', 'verb', 'dly']);
-      expect(s.outputTargets(grp).map((b) => b.id), ['verb', 'dly'], reason: 'not itself');
+      expect(s.outputTargets(bass).map((t) => t.id), ['@master', 'grp', 'verb', 'dly']);
+      expect(s.outputTargets(bass).first.bus, isNull);
+      expect(s.outputTargets(grp).map((t) => t.id), ['verb', 'dly'], reason: 'not itself; already on the master');
       expect(s.setOutput(bass, 'verb'), isTrue);
       expect(s.outputOf(bass)?.id, 'verb');
       s.endUndoStep();
@@ -243,7 +279,7 @@ void main() {
       expect(s.outputOf(_l(s.project, 'bass'))?.id, 'grp');
       // Delay → Verb makes Verb → Delay a loop.
       expect(s.setOutput(_l(s.project, 'dly'), 'verb'), isTrue);
-      expect(s.outputTargets(_l(s.project, 'verb')).map((b) => b.id), isNot(contains('dly')));
+      expect(s.outputTargets(_l(s.project, 'verb')).map((t) => t.id), isNot(contains('dly')));
       expect(s.setOutput(_l(s.project, 'verb'), 'dly'), isFalse);
       expect(s.setOutput(_l(s.project, 'dly'), null), isTrue);
       expect(_l(s.project, 'dly').output, isNull);

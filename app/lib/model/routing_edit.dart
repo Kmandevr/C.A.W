@@ -19,6 +19,10 @@ enum FxBusKind {
 /// can go there (a plain one would close a loop).
 typedef SendTarget = ({LayerDoc layer, bool feedbackOnly});
 
+/// A place [RoutingEdit.outputTargets] offers a layer's output: [id] for [RoutingEdit.setOutput], and the bus, or
+/// null for the master ([LayerDoc.toMaster], which the UI labels "Master").
+typedef OutputTarget = ({String id, LayerDoc? bus});
+
 extension RoutingEdit on AppState {
   RoutingPlan get routing => RoutingPlan.of(project);
 
@@ -52,15 +56,21 @@ extension RoutingEdit on AppState {
   /// master.
   LayerDoc? outputOf(LayerDoc layer) => layerById(routing.outputOf(layer));
 
-  /// The buses [layer] can output to now without a loop (not itself, nor one fed by it), in track order. Null in
-  /// [setOutput] is the default: its parent folder's bus, else the master.
-  List<LayerDoc> outputTargets(LayerDoc layer) {
+  /// Where [layer] can output to now without a loop: the master first ([LayerDoc.toMaster]) when its default route
+  /// isn't already the master (it sits in a bus folder), then the buses (not itself, nor one fed by it) in track
+  /// order. Null in [setOutput] is the default: its parent folder's bus, else the master.
+  List<OutputTarget> outputTargets(LayerDoc layer) {
     final plan = routing;
-    return [for (final b in buses) if (plan.canOutput(layer, b.id)) b];
+    return [
+      if (plan.canOutput(layer, LayerDoc.toMaster) && routeTarget(project, layer) != null)
+        (id: LayerDoc.toMaster, bus: null),
+      for (final b in buses) if (plan.canOutput(layer, b.id)) (id: b.id, bus: b),
+    ];
   }
 
-  /// Sends [layer]'s own sound to bus [busId] instead of its parent folder's bus or the master (null: back to that
-  /// default), one undo step; false (nothing changed) when [busId] is no bus it can output to ([outputTargets]).
+  /// Sends [layer]'s own sound to bus [busId], or the master for [LayerDoc.toMaster], instead of its parent folder's
+  /// bus or the master (null: back to that default), one undo step; false (nothing changed) when it can't output
+  /// there ([RoutingPlan.canOutput]).
   bool setOutput(LayerDoc layer, String? busId) {
     if (busId == layer.output) return true;
     if (busId != null && !routing.canOutput(layer, busId)) return false;

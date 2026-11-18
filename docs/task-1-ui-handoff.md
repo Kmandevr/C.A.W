@@ -34,7 +34,7 @@ The owner's UI redesign (2026-11-04) is specified in the private UI plan, with s
 ## Verified UI/workflow gaps
 
 - Correlation, phase and loudness meters: there are only peak meters (dB) and scopes.
-- Sends, full sidechain routing, parallel mixer paths and master effect chains.
+- Screens for general routing (output overrides, sends into tracks, feedback sends; the model holds them since 2026-11-18, [app](app.md) Routing), parallel mixer paths and master effect chains. Sends to buses and sidechain keys have screens.
 - Input health shows only as the *Microphone in use by another app* note in place of the input meters (`audio_input_ui.dart`); background playback has no in-app control beyond the Android notification.
 - Multisample mapping and authoring beyond the sampler's zones (the sample editor and Slice to MIDI are built, batch 1.0.4: [app](app.md)).
 - USB/Bluetooth MIDI device discovery/connection, controller mapping and live Engine voice routing.
