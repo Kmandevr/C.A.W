@@ -669,6 +669,9 @@ void main() {
       expect(find.text('Update available: v1.0.0-alpha.2'), findsOneWidget);
       expect(find.text(updatePrivacyNote), findsOneWidget);
       expect(find.byKey(const ValueKey('update-notes')), findsNothing, reason: 'no notes in this release');
+      // The channel and automatic updates are under the Updates card's More (#244).
+      await tester.tap(find.byKey(const ValueKey('more-updates')));
+      await tester.pumpAndSettle();
       expect(find.text('Off'), findsOneWidget, reason: 'automatic updates default to Off');
       t.answers[s.offer!.assets.first.url.toString()] = () => UpdateResponse(status: 200, length: 1, body: Stream.value([1]));
       await tester.tap(find.byKey(const ValueKey('update-now-settings')));

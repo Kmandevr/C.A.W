@@ -13,6 +13,15 @@ Choose the real speaker, headphones and microphone on Android, and latency you s
   - inputs: the phone's microphones, a headset's and USB.
   - Your choice is remembered and used again when the device reconnects.
   - The line under each drop-down says which device is actually in use.
+- **Pause when unplugged:** playback stops when your headphones or Bluetooth disconnect, before the speaker plays (Settings › Sound › Audio devices, on by default).
+- **Safety limiter:** a gentle limiter on what you hear protects your ears and speakers. It never touches your exports (Settings › Sound › Quality and buffer, on by default).
+- **Mono check:** hear your mix in mono to check what cancels. It is for listening only; exports stay stereo.
+- **Keep the screen awake:** Off, while playing or recording, or always (Settings › App › Performance).
+- **New-track defaults:** the instrument a new MIDI track plays when you record, track colours (the next one, or one per kind) and names (kind and number, or the instrument's name), plus whether a new audio track hears its input (Off, Auto or On).
+- **Record mode in Settings:** Takes, Overdub or Replace, the same choice as Record's long-press.
+- **Remember zoom per project:** each project reopens at its zoom and scroll position.
+- **Left-handed layout:** the transport and the side rail are mirrored, Play and Record on the left.
+- **Find the smallest stable buffer** (Android): a switch for the automatic buffer size, off by default.
 
 ### Fixed
 - **Latency you measure or type** no longer counts the system's latency twice:
@@ -22,6 +31,7 @@ Choose the real speaker, headphones and microphone on Android, and latency you s
 <!-- zoom -->
 
 ### Improved
+- **A tidier Settings:** five sections in the order you use them (Sound, Editing, Appearance and feel, Projects and export, App), each a set of glass cards that keep related settings together. Rarer settings sit under each card's **More**; search still finds every setting and opens its card. Each setting now lives in one place: the two recording offsets sit together as **Audio take offset** and **MIDI note offset**, and the Privacy Policy, Terms and Send feedback appear once.
 - **Latency learns from audio takes too:** when you record audio with the click on, C.A.W finds where your notes start and how far they land from the beat. After a few takes that agree, the latency card suggests a correction. It never changes anything until you tap **Apply**.
 
 ## 1.0.5-alpha.2 (2026-11-18)

@@ -365,15 +365,20 @@ void main() {
 
     keyTest('Settings: rows by arrows, Space toggles, Right turns a switch on and Left off', (tester) async {
       await pumpApp(tester, SettingsSectionBody(section: SettingsSection.app, deps: SettingsDeps(settings: s.settings)));
-      // Vim keys are under Keys and shortcuts' More fold (#244).
-      await tester.ensureVisible(find.byKey(const ValueKey('more-keys')));
-      await tester.tap(find.byKey(const ValueKey('more-keys')));
+      // Vim keys are under Keys and shortcuts' More fold (#244), on the App page after the Code editor's slider
+      // (which keeps the arrows): open the fold and start from its row.
+      final more = find.byKey(const ValueKey('more-keys'));
+      await tester.ensureVisible(more);
+      await tester.tap(more);
       await tester.pumpAndSettle();
       await key(tester, LogicalKeyboardKey.tab);
       expect(KeyArea.focused?.area, Area.settings);
-      // Down to the Vim keys switch.
-      for (var i = 0; i < 80 && focusedLabel() != 'Vim keys everywhere'; i++) {
-        await key(tester, LogicalKeyboardKey.arrowDown);
+      Focus.of(tester.element(find.descendant(of: more, matching: find.byType(Text)).first)).requestFocus();
+      await tester.pump();
+      expect(focusedLabel(), 'Less');
+      // Up to the Vim keys switch: the fold opens above its Less row.
+      for (var i = 0; i < 10 && focusedLabel() != 'Vim keys everywhere'; i++) {
+        await key(tester, LogicalKeyboardKey.arrowUp);
       }
       expect(focusedLabel(), 'Vim keys everywhere');
       await key(tester, LogicalKeyboardKey.space);
