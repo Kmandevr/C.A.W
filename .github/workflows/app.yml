@@ -76,6 +76,10 @@ env:
   CAW_CHANNEL: ${{ vars.CAW_CHANNEL || 'beta' }}
   CAW_RELAY_URL: ${{ vars.CAW_RELAY_URL || 'https://caw-telemetry.kmandevr.workers.dev' }}
   CAW_APP_KEY: ${{ vars.CAW_APP_KEY || 'caw-beta-1' }}
+  # The AutoStacc Hub's signing-certificate SHA-256 (docs/companion-protocol.md), from the repository variable of the
+  # same name: a digest is public, so a variable, not a secret. Empty (unset) builds accept no companion; a malformed
+  # value fails the Android build (app/android/app/build.gradle.kts).
+  HUB_CERT_SHA256: ${{ vars.HUB_CERT_SHA256 }}
   FLUTTER_VERSION: 3.47.7
   FLUTTER_SHA_LINUX: af7455f540df951184c7953fbe3cf884766e7541dacf8571f9f582db03dd6230
   FLUTTER_SHA_WINDOWS: c2c875da25a1a1448d18ee4e8f398b2f6fce888b4775d8f9130538e16d826cb4
@@ -309,7 +313,8 @@ jobs:
           # names a flavoured APK app-<flavor>-<mode>.apk (flutter_tools 3.47.7, gradle.dart _apkFilesFor).
           flutter build apk --flavor github --release --target-platform android-arm64 --split-debug-info=build/symbols \
             --dart-define=CAW_CHANNEL="$CAW_CHANNEL" --dart-define=CAW_RELAY_URL="$CAW_RELAY_URL" \
-            --dart-define=CAW_APP_KEY="$CAW_APP_KEY" --dart-define=CAW_BUILD="${GITHUB_SHA::12}"
+            --dart-define=CAW_APP_KEY="$CAW_APP_KEY" --dart-define=CAW_BUILD="${GITHUB_SHA::12}" \
+            --android-project-arg=hubCertSha256="$HUB_CERT_SHA256"
           ccache --show-stats || true
           mv build/app/outputs/flutter-apk/app-github-release.apk "$GITHUB_WORKSPACE/caw-android.apk"
           (cd build/symbols && zip -q "$GITHUB_WORKSPACE/caw-android-symbols.zip" ./*.symbols)
@@ -381,7 +386,8 @@ jobs:
         run: |
           flutter --disable-analytics
           # Signed with the debug key (no secrets here): this APK is never published.
-          flutter build apk --flavor play --release --target-platform android-arm64
+          flutter build apk --flavor play --release --target-platform android-arm64 \
+            --android-project-arg=hubCertSha256="$HUB_CERT_SHA256"
       - name: Check the play APK has no install permissions
         run: |
           apk=app/build/app/outputs/flutter-apk/app-play-release.apk
