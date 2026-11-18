@@ -23,6 +23,38 @@ Future<void> _pump(WidgetTester tester, Settings s, {Size size = const Size(390,
 }
 
 void main() {
+  testWidgets('a dropdown with a long choice goes under its title, never squeezing it (owner, 2026-11-18)',
+      (tester) async {
+    tester.view.physicalSize = const Size(360, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    for (final scale in [1.0, 1.3]) {
+      await tester.pumpWidget(MaterialApp(
+          home: MediaQuery(
+              data: MediaQueryData(size: const Size(360, 800), textScaler: TextScaler.linear(scale)),
+              child: Scaffold(
+                  body: ListView(children: [
+                settingDropdown<String>('audio.inputDevice', 'a', const [
+                  ('a', 'Default Capture Device · 2 ch'),
+                  ('b', 'USB Audio Interface With A Very Long Name · 8 ch'),
+                ], (_) {}, icon: Icons.mic),
+                settingDropdown<String>('audio.inputDevice', 'x', const [('x', 'Short'), ('y', 'Other')], (_) {}),
+              ])))));
+      await tester.pump();
+      expect(tester.takeException(), isNull);
+      final title = find.text(settingEntry('audio.inputDevice')!.title);
+      for (final e in title.evaluate()) {
+        expect(tester.getSize(find.byWidget(e.widget)).width, greaterThan(100), reason: 'scale $scale');
+      }
+      // The long choice sits below the title, the short one on the right.
+      final rows = find.byType(ListTile);
+      final longDropdown = find.descendant(of: rows.first, matching: find.byType(DropdownButton<String>));
+      expect(tester.getTopLeft(longDropdown).dy, greaterThan(tester.getTopLeft(title.first).dy + 10));
+      final shortDropdown = find.descendant(of: rows.at(1), matching: find.byType(DropdownButton<String>));
+      expect(tester.getTopLeft(shortDropdown).dx, greaterThan(180));
+    }
+  });
+
   testWidgets('the list shows every section with a summary, and each opens its page', (tester) async {
     final s = Settings();
     await _pump(tester, s);

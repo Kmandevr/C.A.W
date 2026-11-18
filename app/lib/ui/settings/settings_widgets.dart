@@ -137,33 +137,50 @@ Widget settingChoice<T>(String id, T value, List<(T, String)> choices, ValueChan
       ),
     );
 
-/// A setting with a drop-down list of choices on the right.
+/// Choices longer than this go under the title, full width; shorter ones sit on the right.
+const int _dropdownInlineChars = 14;
+
+/// A setting with a drop-down list of choices: on the right when every choice is short, else under the title at
+/// full width, so a long choice (an audio device's name) never squeezes the title into a sliver (owner, 2026-11-18).
 Widget settingDropdown<T>(String id, T? value, List<(T, String)> choices, ValueChanged<T>? onChanged,
-        {String? subtitle, IconData? icon}) =>
-    SettingRow(
-      id: id,
-      child: ListTile(
-        dense: true,
-        contentPadding: const EdgeInsets.symmetric(horizontal: 8),
-        leading: icon == null ? null : Icon(icon, color: Neon.blue, size: 20),
-        title: Text(_title(id)),
-        subtitle: _sub(subtitle ?? _description(id)),
-        trailing: DropdownButton<T>(
-          key: ValueKey('dropdown-$id'),
-          value: choices.any((c) => c.$1 == value) ? value : null,
-          underline: const SizedBox.shrink(),
-          isDense: true,
-          items: [for (final (v, label) in choices) DropdownMenuItem(value: v, child: Text(label))],
-          onChanged: onChanged == null
-              ? null
-              : (v) {
-                  if (v == null) return;
-                  Haptics.tap();
-                  onChanged(v);
-                },
-        ),
-      ),
-    );
+    {String? subtitle, IconData? icon}) {
+  final below = choices.any((c) => c.$2.length > _dropdownInlineChars);
+  Widget dropdown({required bool expanded}) => DropdownButton<T>(
+        key: ValueKey('dropdown-$id'),
+        value: choices.any((c) => c.$1 == value) ? value : null,
+        underline: const SizedBox.shrink(),
+        isDense: true,
+        isExpanded: expanded,
+        items: [
+          for (final (v, label) in choices)
+            DropdownMenuItem(value: v, child: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis)),
+        ],
+        onChanged: onChanged == null
+            ? null
+            : (v) {
+                if (v == null) return;
+                Haptics.tap();
+                onChanged(v);
+              },
+      );
+  return SettingRow(
+    id: id,
+    child: ListTile(
+      dense: true,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 8),
+      leading: icon == null ? null : Icon(icon, color: Neon.blue, size: 20),
+      title: Text(_title(id)),
+      subtitle: below
+          ? Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              _sub(subtitle ?? _description(id)),
+              const SizedBox(height: 6),
+              dropdown(expanded: true),
+            ])
+          : _sub(subtitle ?? _description(id)),
+      trailing: below ? null : ConstrainedBox(constraints: const BoxConstraints(maxWidth: 160), child: dropdown(expanded: true)),
+    ),
+  );
+}
 
 /// A setting with a slider: [settings.adjust] while it moves (shown, not saved), saved when let go; a double-tap
 /// puts back [reset].
