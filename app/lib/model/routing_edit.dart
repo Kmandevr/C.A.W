@@ -1,5 +1,6 @@
-// Routing edits on AppState: sends (add, live level, pre/post, mute, remove), "New reverb bus" in one tap, a track's
-// output, and a device's sidechain key, each one undo step and loop-free (RoutingPlan).
+// Routing edits on AppState: sends to buses and tracks (add, live level, pre/post, mute, feedback, limiter, remove),
+// "New reverb bus" in one tap, a track's output, and a device's sidechain key, each one undo step and loop-free
+// unless a feedback send breaks the loop (RoutingPlan).
 import 'app_state.dart';
 import 'arrange_fx.dart';
 import 'project.dart';
@@ -14,6 +15,10 @@ enum FxBusKind {
   final String label, componentId;
 }
 
+/// A place [RoutingEdit.sendChoices] offers a send to: a bus folder or a track, and whether only a feedback send
+/// can go there (a plain one would close a loop).
+typedef SendTarget = ({LayerDoc layer, bool feedbackOnly});
+
 extension RoutingEdit on AppState {
   RoutingPlan get routing => RoutingPlan.of(project);
 
@@ -22,7 +27,8 @@ extension RoutingEdit on AppState {
   /// Every bus folder in the project (folders with their bus on), in track order.
   List<LayerDoc> get buses => [for (final l in project.layers) if (l.isFolder && l.busEnabled) l];
 
-  /// The buses [layer] can send to now (no loop, not one it already sends to).
+  /// The buses [layer] can send to now (no loop, not one it already sends to). Sends into tracks, and feedback
+  /// sends, are in [sendChoices].
   List<LayerDoc> sendTargets(LayerDoc layer) {
     final plan = routing;
     return [
@@ -31,8 +37,36 @@ extension RoutingEdit on AppState {
     ];
   }
 
-  /// Where [layer]'s sound goes: its nearest bus folder, or null for the master.
-  LayerDoc? outputOf(LayerDoc layer) => layerById(routeTarget(project, layer));
+  /// Every layer [layer] can send to now, in track order: bus folders and tracks it doesn't already send to, each
+  /// marked [SendTarget.feedbackOnly] when a plain send would close a loop (only a feedback send may go there).
+  List<SendTarget> sendChoices(LayerDoc layer) {
+    final plan = routing;
+    return [
+      for (final l in project.layers)
+        if (!layer.sends.any((s) => s.to == l.id) && plan.canSendFeedback(layer, l.id))
+          (layer: l, feedbackOnly: !plan.canSend(layer, l.id)),
+    ];
+  }
+
+  /// Where [layer]'s sound goes: its output override when it plays, else its nearest bus folder, or null for the
+  /// master.
+  LayerDoc? outputOf(LayerDoc layer) => layerById(routing.outputOf(layer));
+
+  /// The buses [layer] can output to now without a loop (not itself, nor one fed by it), in track order. Null in
+  /// [setOutput] is the default: its parent folder's bus, else the master.
+  List<LayerDoc> outputTargets(LayerDoc layer) {
+    final plan = routing;
+    return [for (final b in buses) if (plan.canOutput(layer, b.id)) b];
+  }
+
+  /// Sends [layer]'s own sound to bus [busId] instead of its parent folder's bus or the master (null: back to that
+  /// default), one undo step; false (nothing changed) when [busId] is no bus it can output to ([outputTargets]).
+  bool setOutput(LayerDoc layer, String? busId) {
+    if (busId == layer.output) return true;
+    if (busId != null && !routing.canOutput(layer, busId)) return false;
+    editLayer(layer, (l) => l.output = busId);
+    return true;
+  }
 
   /// The layers [layer] could take a key from: every other layer with sound whose key wouldn't loop.
   List<LayerDoc> keySources(LayerDoc layer) {
@@ -47,13 +81,35 @@ extension RoutingEdit on AppState {
     return info.ports.any((p) => p.input && p.isAudio && p.id == 'sidechain');
   }
 
-  /// Adds a send from [layer] to bus [busId] (at [level]); null when it can't (a loop, the limit, already there).
-  SendDoc? addSend(LayerDoc layer, String busId, {double level = SendDoc.defaultLevel}) {
-    if (layer.sends.length >= SendDoc.maxSends || layer.sends.any((s) => s.to == busId)) return null;
-    if (!routing.canSend(layer, busId)) return null;
-    final send = SendDoc(busId, level: level);
+  /// Adds a send from [layer] to [to], a bus folder or a track (at [level]), one undo step; a [feedback] send may
+  /// close a loop. Null when it can't (a plain send closing a loop, the limit, already there, itself).
+  SendDoc? addSend(LayerDoc layer, String to, {double level = SendDoc.defaultLevel, bool feedback = false}) {
+    if (layer.sends.length >= SendDoc.maxSends || layer.sends.any((s) => s.to == to)) return null;
+    final plan = routing;
+    if (!(feedback ? plan.canSendFeedback(layer, to) : plan.canSend(layer, to))) return null;
+    final send = SendDoc(to, level: level, feedback: feedback);
     editLayer(layer, (l) => l.sends.add(send));
     return send;
+  }
+
+  /// Makes [layer]'s send [index] a feedback send or a plain one, one undo step (a project sync: the engine has no
+  /// live setter for it). False (nothing changed) when a plain send would close a loop.
+  bool setSendFeedback(LayerDoc layer, int index, bool feedback) {
+    if (index < 0 || index >= layer.sends.length) return false;
+    final s = layer.sends[index];
+    if (s.feedback == feedback) return true;
+    if (!feedback) {
+      // Checked with the send as it is now: a feedback send is no edge, so this asks whether a plain one would loop.
+      if (!routing.canSend(layer, s.to)) return false;
+    }
+    editLayer(layer, (_) => s.feedback = feedback);
+    return true;
+  }
+
+  /// Turns [layer]'s send [index]'s loop limiter on or off (it acts only on a feedback send), one undo step.
+  void setSendLimiter(LayerDoc layer, int index, bool limiter) {
+    if (index < 0 || index >= layer.sends.length || layer.sends[index].limiter == limiter) return;
+    editLayer(layer, (_) => layer.sends[index].limiter = limiter);
   }
 
   /// A new bus folder at the end of the track list, named for [kind] ("Reverb", "Reverb 2"...), running that effect
