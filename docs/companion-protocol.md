@@ -7,7 +7,7 @@ updated: 2026-11-18
 
 # Companion protocol
 
-**[Proposal]** (architect design, 2026-11-18, #239). The companion holds the powers the main app gives up (least privilege); its plan is kept privately. The companion app (the AutoStacc Hub, in the private `Kmandevr/AutoStacc-Hub`) is not built. The main app's side is groundwork: with no companion installed, or no pinned Hub signer (the case until the Hub's key exists), everything takes today's in-app path.
+**[Fact]** (architect design, 2026-11-18). The companion holds the powers the main app gives up (least privilege); its plan is kept privately. The companion, the AutoStacc Hub (private `Kmandevr/AutoStacc-Hub`), has a first Android build that answers this protocol, not yet signed or published. The main app's side: with no companion installed, or no pinned Hub signer (the case until the Hub's key exists), everything takes today's in-app path.
 
 ## Transport
 - **A bound `Service` with a `Messenger`,** like the main app's `:compiler` service. The main app binds with an explicit component, sends one `Message` per request with `replyTo` set, and gets one `Message` back.
