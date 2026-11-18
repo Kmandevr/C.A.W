@@ -6,6 +6,13 @@ updated: 2026-11-18
 
 # Decisions
 
+## 2026-11-18: The Hub switches update channels and shows download notifications; scan findings go in the trust sheet (owner)
+
+**Decision (owner):**
+- **Update channels:** the Hub installs C.A.W updates from the channel the user chose in C.A.W (Stable, Beta, Every change), not only Stable. C.A.W tells the Hub the channel in its install request; an older C.A.W that sends none gets Stable. Downgrades stay refused.
+- **Notifications:** the Hub runs long downloads as a foreground service with a progress notification, so Android doesn't stop them.
+- **Scan findings:** what the pre-load scan finds in a plug-in is listed in the existing Isolated / Trusted / Blocked sheet, one row per finding with a plain sentence and a "Why might it need this?" fold; a blocked C.A.W component says why and offers no Trusted.
+
 ## 2026-11-18: General mixer routing in the engine and the model, silent in 1.0.7; renders need only be repeatable (owner)
 
 **Decision (owner):** the mixer's routes become general (a track's output to any bus or straight to the master, sends to any bus or track, feedback sends, sidechain keys from any track), built in the engine and the app's model and shipped silently in 1.0.7: no screens until the 1.1.0 visual router's look is designed ("Engine only for now"). Claude's choices within it, following the architect's review:
