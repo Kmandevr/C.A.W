@@ -16,7 +16,8 @@ enum class Part : uint8_t {
     Metering,    // meters, scopes, correlation and loudness
     DeviceIo,    // the device callback's FIFO and input bridge (live runs only; outside process())
     MixPool,     // the mix pool's overhead: parking, waking and waiting for workers
-    Master,      // the master stage: gain, DC block, the master chain, the metronome and the safety limiter
+    Master,      // the master stage: gain, DC block, the master chain, the metronome and the safety limiter (a live
+                 // run: the live output's mono check and safety limiter after process(), API 35)
     Devices,     // instrument and effect processing (the per-device costs break it down)
     Other,       // the remainder: commands, planning, transport
     Count

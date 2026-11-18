@@ -1,6 +1,7 @@
 // Recording audio (API 18): the input choice and latency kept app-wide, opening the input after the microphone
 // permission, recording the armed tracks with the transport's Record, takes placed as clips (a loop's passes stacked
-// as takes), punch in/out, input meters, the latency ping and crash recovery.
+// as takes), punch in/out, input meters, the latency ping, learning the latency from takes against the click and
+// crash recovery.
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -12,10 +13,13 @@ import '../engine/audio_engine.dart';
 import '../platform/mic_permission.dart';
 import 'app_state.dart';
 import 'audio_clips.dart';
+import 'audio_devices.dart';
 import 'audio_edit.dart';
 import 'latency_comp.dart';
 import 'project.dart';
 import 'atomic_file.dart';
+import 'sample_edit.dart';
+import 'settings.dart';
 
 /// Where punch in/out comes from: none, the loop range, or the time selection.
 enum PunchMode { off, loop, selection }
@@ -98,6 +102,30 @@ class AudioRecorder extends ChangeNotifier {
     state.addListener(_onState);
     state.foreground.addListener(_onState);
     micBusy.addListener(notifyListeners);
+    _routeSub = state.latency.route.changes.listen((_) => unawaited(_deviceListChanged()));
+  }
+
+  StreamSubscription<void>? _routeSub;
+  String? _openedInputId;
+
+  /// The id the engine opens the chosen input by: a choice from the platform's own list (#242) by the id that
+  /// device has now ('' while it is not connected: the default records), any other saved id as it is.
+  Future<String> _inputDeviceId() async {
+    final key = prefs.deviceId;
+    if (!key.startsWith(platformChoicePrefix)) return key;
+    return engineDeviceId(key, platformChoices((await state.latency.route.devices()).inputs, input: true));
+  }
+
+  /// The name the engine looks a device up by, where the backend lists its own (a platform choice opens by its id).
+  String get _inputDeviceName => prefs.deviceId.startsWith(platformChoicePrefix) ? '' : prefs.deviceName;
+
+  // A device connected or went away while the input is open: a platform choice opens again where its id changed.
+  Future<void> _deviceListChanged() async {
+    if (_disposed || !inputOpen || !prefs.deviceId.startsWith(platformChoicePrefix) || _recording) return;
+    final id = await _inputDeviceId();
+    if (_disposed || id == _openedInputId || !inputOpen) return;
+    await _open();
+    notifyListeners();
   }
 
   static AudioRecorder? current;
@@ -180,8 +208,9 @@ class AudioRecorder extends ChangeNotifier {
   // Opens the engine's input (the permission is granted). True when it opened, or when only the microphone is busy
   // (it is tried again quietly); false, with [message], otherwise.
   Future<bool> _open() async {
-    final r = await io.configureInput(enabled: true, deviceId: prefs.deviceId, deviceName: prefs.deviceName,
-        channels: prefs.channels);
+    final id = await _inputDeviceId();
+    _openedInputId = id;
+    final r = await io.configureInput(enabled: true, deviceId: id, deviceName: _inputDeviceName, channels: prefs.channels);
     if (prefs.latencyOverride >= 0) io.setInputLatency(prefs.latencyOverride);
     _compensated = -1; // a reopened input: the round trip is worked out again
     unawaited(state.latency.refresh().then((_) => _applyLatency()));
@@ -210,7 +239,7 @@ class AudioRecorder extends ChangeNotifier {
     if (!_disposed) notifyListeners();
   }
 
-  /// Turns audio input off (Settings › Audio): the microphone closes and arming asks again.
+  /// Turns audio input off (Settings › Sound): the microphone closes and arming asks again.
   Future<void> closeInput() async {
     await _release();
     await io.configureInput(enabled: false);
@@ -263,8 +292,9 @@ class AudioRecorder extends ChangeNotifier {
       final silenced = state.foreground.value && await permission.inputSilenced();
       if (_disposed) return;
       if (engineBusy && retry && state.foreground.value && !_recording && !_starting) {
-        await io.configureInput(enabled: true, deviceId: prefs.deviceId, deviceName: prefs.deviceName,
-            channels: prefs.channels);
+        final id = await _inputDeviceId();
+        _openedInputId = id;
+        await io.configureInput(enabled: true, deviceId: id, deviceName: _inputDeviceName, channels: prefs.channels);
         if (_disposed) return;
         final again = io.inputStatus()['state'];
         micBusy.value = again != 'open' || silenced;
@@ -276,7 +306,7 @@ class AudioRecorder extends ChangeNotifier {
     }
   }
 
-  /// A new input choice (Settings › Audio): saved, and the input reopens on it when it is on.
+  /// A new input choice (Settings › Sound): saved, and the input reopens on it when it is on.
   Future<void> chooseInput({String? deviceId, String? deviceName, int? channels}) async {
     if (deviceId != null) prefs.deviceId = deviceId;
     if (deviceName != null) prefs.deviceName = deviceName;
@@ -377,9 +407,41 @@ class AudioRecorder extends ChangeNotifier {
       return false;
     }
     _recording = true;
+    _clickAtStart = _clickOn;
     _missingAtStart = _missingFrames();
     notifyListeners();
     return true;
+  }
+
+  // The metronome sounds while recording (Settings' Metronome: While recording or Always), at the start and the stop.
+  bool _clickAtStart = false;
+  bool get _clickOn => state.settings.metronome != Metronome.off;
+
+  /// Learning from audio takes (owner, #241 follow-up): the transients in each take ([AudioAnalysis.slicePoints],
+  /// the engine's `caw_asset_slices` on a worker isolate) placed on the song where the take landed, then how far
+  /// each lies from its beat ([beatDeviationsMs], the click's quarter notes), as one take of evidence for the output
+  /// in use ([LatencyComp.learnFromTake]: the same thresholds as MIDI takes, and only ever a suggestion). Called when
+  /// recording stops with the click on; returns how many onsets counted.
+  Future<int> learnFromTakes(List<RecordedAudioTake> takes) async {
+    final tempo = state.project.tempo;
+    final steps = <double>[];
+    for (final t in takes) {
+      if (!t.complete || t.recovered || t.path.isEmpty) continue;
+      final seconds = t.seconds > 0 ? t.seconds : (t.sampleRate > 0 ? t.frames / t.sampleRate : 0.0);
+      if (!(seconds > 0)) continue;
+      final onsets = await state.audioAnalysis
+          .slicePoints(t.path, start: 0, end: math.min(seconds, 600), sensitivity: 0.5, maxSlices: 256);
+      if (_disposed || onsets == null) continue;
+      final zero = tempo.secondsAt(t.startSteps / 4); // where the take's first frame lies on the song, in seconds
+      for (final o in onsets) {
+        final step = tempo.beatAt(zero + o) * 4;
+        if (step >= 0) steps.add(step);
+      }
+    }
+    if (_disposed) return 0;
+    final deviations = beatDeviationsMs(steps, bpmAt: (st) => tempo.bpmAt(st / 4));
+    state.latency.learnFromTake(deviations);
+    return deviations.length;
   }
 
   // Output frames the input was missing since it opened (the engine's bridge), to mark a take's gaps.
@@ -394,6 +456,8 @@ class AudioRecorder extends ChangeNotifier {
     final r = await io.recordStop();
     final placed = placeTakes(r.takes, droppedFrames: r.droppedFrames, error: r.error);
     lastRecording.value = placed;
+    // Learning from recordings: only a take played against the click says where the beat was heard.
+    if (_clickAtStart && _clickOn) unawaited(learnFromTakes(r.takes));
     final missing = _missingFrames() - _missingAtStart;
     if (r.droppedFrames > 0) {
       message.value = '${r.droppedFrames} frames were dropped while recording (filled with silence; the device was busy).';
@@ -494,7 +558,7 @@ class AudioRecorder extends ChangeNotifier {
 
   // ---------- latency ----------
 
-  /// The round trip takes are placed by. "compensated": the output's latency (Bluetooth included, Settings › Audio ›
+  /// The round trip takes are placed by. "compensated": the output's latency (Bluetooth included, Settings › Sound ›
   /// Latency) plus the input's, sent because it says more than the engine's own estimate.
   LatencyInfo get latency {
     final l = io.inputLatency();
@@ -506,7 +570,7 @@ class AudioRecorder extends ChangeNotifier {
   int _compensated = -1;
 
   /// Sends the round trip recordings are placed by: a typed one stands; a ping made through the output in use
-  /// stands (it heard the whole trip); else the output latency plus the input latency (Settings › Audio › Latency),
+  /// stands (it heard the whole trip); else the output latency plus the input latency (Settings › Sound › Latency and Bluetooth),
   /// when that is more than the engine's estimate of its buffers (a Bluetooth output or microphone).
   void _applyLatency() {
     if (prefs.latencyOverride >= 0) return;
@@ -546,7 +610,7 @@ class AudioRecorder extends ChangeNotifier {
   /// Measures the round trip: plays the ping [runs] times (about a second each) and judges them together
   /// ([judgePings]: enough of them heard, all within the tolerance of their median). A reliable series becomes the
   /// latency in use unless one is typed in, and what the output's latency does not explain of it is the input's
-  /// (Settings › Audio › Latency); an unreliable one is reported and not saved. Null when it couldn't start.
+  /// (Settings › Sound › Latency and Bluetooth); an unreliable one is reported and not saved. Null when it couldn't start.
   Future<PingSeries?> ping({Duration poll = const Duration(milliseconds: 150), int tries = 20, int runs = pingRuns,
       void Function(int done, int runs)? progress}) async {
     _pinging = true;
@@ -585,6 +649,7 @@ class AudioRecorder extends ChangeNotifier {
 
   @override
   void dispose() {
+    unawaited(_routeSub?.cancel());
     state.tick.removeListener(_poll);
     state.latency.removeListener(_applyLatency);
     state.removeListener(_onState);

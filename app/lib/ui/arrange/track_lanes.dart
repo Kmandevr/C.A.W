@@ -325,26 +325,41 @@ class TrackLaneHeaders extends StatelessWidget {
               ])),
               // The bottom edge: drag the lane's height (saved per lane); a double tap goes back to the default.
               if (lane.resizable) Positioned(left: 0, right: 0, bottom: 0, height: 8,
-                child: _HeightGrip(key: ValueKey('lane-height-${lane.key}'), lane: lane)),
+                child: LaneHeightGrip.of(lane, key: ValueKey('lane-height-${lane.key}'))),
             ])),
         LaneToolRow(state: state, layer: layer, height: kLaneToolRowHeight),
       ]);
     });
 }
 
-/// A lane's bottom edge: drags its height, header and row together, and saves it when let go.
-class _HeightGrip extends StatefulWidget {
-  const _HeightGrip({super.key, required this.lane});
-  final ArrangeLane lane;
+/// A lane's bottom edge: drags its height, header and row together, and saves it when let go (an automation lane's,
+/// and a track's take lanes'). While it moves, [laneHeightDrag] holds ([dragKey], the height) for the rows to read.
+/// [rowsAbove]: how many rows of the same height end at this edge (take lanes share one height), so the edge stays
+/// under the finger.
+class LaneHeightGrip extends StatefulWidget {
+  const LaneHeightGrip({super.key, required this.state, required this.dragKey, required this.color,
+      required this.height, required this.onSave, this.rowsAbove = 1});
+  final AppState state;
+  final String dragKey;
+  final Color color;
+  final double Function() height;
+
+  /// Saves the height (null: back to the default, a double tap).
+  final void Function(double? height) onSave;
+  final int rowsAbove;
+
+  /// The grip on [lane]'s bottom edge.
+  static LaneHeightGrip of(ArrangeLane lane, {Key? key}) => LaneHeightGrip(key: key, state: lane.state,
+      dragKey: lane.key, color: lane.color, height: () => lane.height, onSave: lane.setHeight);
 
   @override
-  State<_HeightGrip> createState() => _HeightGripState();
+  State<LaneHeightGrip> createState() => _LaneHeightGripState();
 }
 
-class _HeightGripState extends State<_HeightGrip> {
+class _LaneHeightGripState extends State<LaneHeightGrip> {
   double _start = 0, _dy = 0;
 
-  ValueNotifier<(String, double)?> get _drag => laneHeightDrag(widget.lane.state);
+  ValueNotifier<(String, double)?> get _drag => laneHeightDrag(widget.state);
 
   @override
   Widget build(BuildContext context) => MouseRegion(cursor: SystemMouseCursors.resizeRow, child: GestureDetector(
@@ -352,27 +367,28 @@ class _HeightGripState extends State<_HeightGrip> {
     dragStartBehavior: DragStartBehavior.down,
     onDoubleTap: () {
       Haptics.tap();
-      widget.lane.setHeight(null);
+      widget.onSave(null);
     },
     onVerticalDragStart: (_) {
-      _start = widget.lane.height;
+      _start = widget.height();
       _dy = 0;
       Haptics.grab();
     },
     onVerticalDragUpdate: (d) {
       _dy += d.delta.dy;
-      _drag.value = (widget.lane.key, (_start + _dy).clamp(kMinLaneHeight, kMaxLaneHeight).toDouble());
+      _drag.value = (widget.dragKey,
+          (_start + _dy / math.max(1, widget.rowsAbove)).clamp(kMinLaneHeight, kMaxLaneHeight).toDouble());
     },
     onVerticalDragEnd: (_) => _end(),
     onVerticalDragCancel: _end,
     child: Center(child: Container(width: 24, height: 3, decoration: BoxDecoration(
-      color: widget.lane.color.withValues(alpha: 0.35), borderRadius: BorderRadius.circular(2)))),
+      color: widget.color.withValues(alpha: 0.35), borderRadius: BorderRadius.circular(2)))),
   ));
 
   void _end() {
     final d = _drag.value;
     _drag.value = null;
-    if (d != null && d.$1 == widget.lane.key) widget.lane.setHeight(d.$2);
+    if (d != null && d.$1 == widget.dragKey) widget.onSave(d.$2);
     Haptics.drop();
   }
 }

@@ -29,6 +29,7 @@
 #include "caw.h"
 #include "capi_internal.h"
 #include "buffer_tuner.h"
+#include "device_choice.h"
 #include "device_period.h"
 #include "device_render.h"
 #include "input_bridge.h"
@@ -71,6 +72,8 @@ struct Audio {
     ma_uint32 inputChannels = 0;
     ma_uint32 duplexBufferFrames = 0;  // the bridge's starting fill, in the latency estimate
     std::string inputDeviceId, inputError;
+    // The chosen input did not open, so the default records (#242); why, for the status ("" when it did).
+    std::string inputFallbackReason;
     caw::InputBridge bridge;
     // Behind the app (caw_audio_set_background): the output's AAudio buffer raised toward its capacity, and the
     // size to restore on return.
@@ -317,6 +320,29 @@ int32_t aaudioXRuns(const Audio* a, void* stream) {
     auto get = reinterpret_cast<Getter>(dlsym(a->context.aaudio.hAAudio, "AAudioStream_getXRunCount"));
     return get ? get(stream) : -1;
 }
+// The device a stream runs on (AAudioStream_getDeviceId, NDK API 26: AudioDeviceInfo.getId()), 0 unknown. The caller
+// holds that device's reroute lock, or the stream has not started.
+int32_t aaudioStreamDevice(const Audio* a, void* stream) {
+    if (a->context.backend != ma_backend_aaudio || !a->context.aaudio.hAAudio || !stream) return 0;
+    using Getter = int32_t (*)(void*);
+    auto get = reinterpret_cast<Getter>(dlsym(a->context.aaudio.hAAudio, "AAudioStream_getDeviceId"));
+    const int32_t n = get ? get(stream) : 0;
+    return n > 0 ? n : 0;
+}
+int32_t outputDevice(Audio* a) {
+    if (a->context.backend != ma_backend_aaudio) return 0;
+    ma_mutex_lock(&a->device.aaudio.rerouteLock);
+    const int32_t n = aaudioStreamDevice(a, a->device.aaudio.pStreamPlayback);
+    ma_mutex_unlock(&a->device.aaudio.rerouteLock);
+    return n;
+}
+int32_t inputDevice(const Audio* a) {
+    if (!a->capture || a->context.backend != ma_backend_aaudio) return 0;
+    ma_mutex_lock(&a->capture->aaudio.rerouteLock);
+    const int32_t n = aaudioStreamDevice(a, a->capture->aaudio.pStreamCapture);
+    ma_mutex_unlock(&a->capture->aaudio.rerouteLock);
+    return n;
+}
 int32_t outputXRuns(Audio* a) {
     if (a->context.backend != ma_backend_aaudio) return -1;  // the reroute lock is AAudio's
     ma_mutex_lock(&a->device.aaudio.rerouteLock);
@@ -332,6 +358,8 @@ int32_t inputXRuns(const Audio* a) {
     return n;
 }
 #else
+int32_t outputDevice(Audio*) { return 0; }
+int32_t inputDevice(const Audio*) { return 0; }
 int32_t outputXRuns(Audio*) { return -1; }
 int32_t inputXRuns(const Audio*) { return -1; }
 void readAAudioModes(Audio*) {}
@@ -435,7 +463,7 @@ void callback(ma_device* dev, void* output, const void* input, ma_uint32 frames)
     if (a->owner->muteOutput.load(std::memory_order_relaxed)) std::fill(out, out + static_cast<size_t>(frames) * 2, 0.0f);
     if (stress)
         stress->record(used, budget, static_cast<int32_t>(frames), stress->coreDue() ? callbackCore() : -1,
-                       a->render.takeProcessNs());
+                       a->render.takeProcessNs(), a->render.takeSafetyNs());
 }
 
 // The capture device's callback: its frames into the bridge, nothing else.
@@ -788,10 +816,20 @@ CaptureRequest captureRequest(const CawEngine* e) {
 // which on AAudio Android routes), 1..32 channels, shared, at the engine's rate. Touches no shared state, so it
 // runs outside gDeviceLock (gOpLock held). Null and [why] when it did not open (no permission, no microphone,
 // another app holding it); [deviceId] the id of a chosen device that opened.
-ma_device* initCapture(Audio* a, const CaptureRequest& q, std::string& deviceId, std::string& why) {
+//
+// On AAudio, which lists only the default, the chosen device is named by its Android id ("aaudio:<id>",
+// device_choice.h, #242). A chosen device that is found but does not open gives the default instead, with
+// [fallback] saying why ("" when the choice opened or none was made).
+ma_device* initCapture(Audio* a, const CaptureRequest& q, std::string& deviceId, std::string& why, std::string& fallback) {
+    fallback.clear();
     ma_device_id chosen;
     bool found = false;
-    if ((!q.id.empty() || !q.name.empty()) && a->context.backend != ma_backend_aaudio) {
+    if (a->context.backend == ma_backend_aaudio) {
+        if (const int32_t n = caw::aaudioDeviceId(q.id); n > 0) {
+            chosen.aaudio = n;
+            found = true;
+        }
+    } else if (!q.id.empty() || !q.name.empty()) {
         ma_device_info* capture = nullptr;
         ma_uint32 count = 0;
         if (ma_context_get_devices(&a->context, nullptr, nullptr, &capture, &count) == MA_SUCCESS) {
@@ -817,13 +855,21 @@ ma_device* initCapture(Audio* a, const CaptureRequest& q, std::string& deviceId,
     cfg.dataCallback = captureCallback;
     cfg.pUserData = a;
     auto* d = new ma_device();
-    const ma_result r = ma_device_init(&a->context, &cfg, d);
+    ma_result r = ma_device_init(&a->context, &cfg, d);
+    if (r != MA_SUCCESS && found) {
+        // The chosen input is busy or gone: the default records instead, and the status says so.
+        fallback = std::string("the chosen input did not open (") + ma_result_description(r) + "); the default records";
+        found = false;
+        cfg.capture.pDeviceID = nullptr;
+        r = ma_device_init(&a->context, &cfg, d);
+    }
     if (r != MA_SUCCESS) {
         delete d;
+        fallback.clear();
         why = std::string("can't open the audio input: ") + ma_result_description(r);
         return nullptr;
     }
-    deviceId = found ? deviceIdText(a->context.backend, chosen) : std::string();
+    deviceId = !found ? std::string() : a->context.backend == ma_backend_aaudio ? q.id : deviceIdText(a->context.backend, chosen);
     return d;
 }
 
@@ -874,8 +920,9 @@ void attachCapture(CawEngine* e, Audio* a, ma_device* d, std::string deviceId) {
 void openCapture(CawEngine* e, Audio* a) {
     closeCapture(e, a);
     a->inputError.clear();
-    std::string id, why;
-    ma_device* d = initCapture(a, captureRequest(e), id, why);
+    std::string id, why, fallback;
+    ma_device* d = initCapture(a, captureRequest(e), id, why, fallback);
+    a->inputFallbackReason = fallback;
     if (!d) {
         a->inputError = why;
         return;
@@ -888,15 +935,35 @@ void openCapture(CawEngine* e, Audio* a) {
     }
 }
 
+// An AAudio output chosen by its id that runs on another device (Android opened another, or miniaudio reopened the
+// default after a disconnect: device_choice.h) is a fallback, which the status says, with why. Under gDeviceLock
+// or before the device is shared.
+void checkChosenOutput(Audio* a) {
+    const int32_t chosen = caw::aaudioDeviceId(a->deviceId);
+    if (chosen <= 0 || a->fallback) return;
+    const int32_t routed = outputDevice(a);
+    if (caw::onChosenDevice(chosen, routed)) return;
+    a->fallback = true;
+    a->fallbackReason = "the chosen output is not the one playing (it disconnected, or Android routed elsewhere); device " +
+                        std::to_string(routed) + " plays";
+}
+
 // The output on [a]'s context: the chosen device, else the system default (fallback). MA_SUCCESS or why not; the
 // caller owns the context either way.
 ma_result openOnContext(CawEngine* e, Audio* a, std::string& why) {
     // A device chosen by id (two identical interfaces share a name), else by name, found in the backend's list;
     // else the default (it was unplugged, say). No list for the default, nor on AAudio, which lists only the
     // default (miniaudio 0.11.25, ma_context_enumerate_devices__aaudio) and where Android routes the output.
+    // On AAudio a device is chosen by its Android id ("aaudio:<id>", device_choice.h, #242), which the app reads from
+    // AudioManager.
     ma_device_id chosen;
     bool found = false;
-    if ((!e->deviceId.empty() || !e->deviceName.empty()) && a->context.backend != ma_backend_aaudio) {
+    if (a->context.backend == ma_backend_aaudio) {
+        if (const int32_t n = caw::aaudioDeviceId(e->deviceId); n > 0) {
+            chosen.aaudio = n;
+            found = true;
+        }
+    } else if (!e->deviceId.empty() || !e->deviceName.empty()) {
         ma_device_info* playback = nullptr;
         ma_uint32 count = 0;
         if (ma_context_get_devices(&a->context, &playback, &count, nullptr, nullptr) == MA_SUCCESS) {
@@ -927,7 +994,8 @@ ma_result openOnContext(CawEngine* e, Audio* a, std::string& why) {
             r = MA_SUCCESS;
         }
     } else if (r == MA_SUCCESS && found) {
-        a->deviceId = deviceIdText(a->context.backend, chosen);
+        a->deviceId = a->context.backend == ma_backend_aaudio ? e->deviceId : deviceIdText(a->context.backend, chosen);
+        checkChosenOutput(a);  // Android may have opened another device
     }
     return r;
 }
@@ -1045,7 +1113,16 @@ std::string inputStatus(const CawEngine* e, const Audio* a) {
                       ",\"requested_channels\":" + std::to_string(e->inputChannels);
     if (running) {
         const auto& c = a->capture->capture;
+        // #242: the device the stream runs on (AAudio; 0 elsewhere), and whether the chosen one is not it: it did
+        // not open, or it went away and miniaudio reopened the default.
+        const int32_t routed = inputDevice(a);
+        const bool moved = !caw::onChosenDevice(caw::aaudioDeviceId(a->inputDeviceId), routed);
+        const std::string reason = !a->inputFallbackReason.empty() ? a->inputFallbackReason
+                                   : moved ? "the chosen input is not the one recording (it disconnected); device " + std::to_string(routed) + " records"
+                                           : std::string();
         out += ",\"device\":" + quoted(c.name) + ",\"device_id\":" + quoted(a->inputDeviceId.c_str()) +
+               ",\"routed_device_id\":" + std::to_string(routed) + ",\"fallback\":" + (reason.empty() ? "false" : "true") +
+               ",\"fallback_reason\":" + quoted(reason.c_str()) +
                ",\"channels\":" + std::to_string(a->inputChannels) + ",\"sample_rate\":" + std::to_string(c.internalSampleRate) +
                ",\"period_frames\":" + std::to_string(c.internalPeriodSizeInFrames) +
                ",\"duplex_buffer_frames\":" + std::to_string(a->duplexBufferFrames) +
@@ -1476,10 +1553,11 @@ int32_t caw_audio_configure_input(CawEngine* e, int32_t enabled, const char* dev
     // open the new one (gOpLock keeps the context and the output as they are meanwhile).
     destroyCapture(running, old);
     if (!on) return running->fallback ? 2 : 0;
-    std::string deviceId, why;
-    ma_device* d = initCapture(running, q, deviceId, why);
+    std::string deviceId, why, fallback;
+    ma_device* d = initCapture(running, q, deviceId, why, fallback);
     {
         std::lock_guard<std::mutex> lock(gDeviceLock);
+        running->inputFallbackReason = fallback;
         if (!d) {
             running->inputError = why;
             return running->fallback ? 2 : 0;
@@ -1571,12 +1649,15 @@ char* caw_audio_status(CawEngine* e) {
     auto* a = static_cast<Audio*>(e->audio);
     if (!a) return dup("{\"running\":false" + request + ",\"input\":" + inputStatus(e, nullptr) + "}");
     refreshAfterReroute(a);
+    checkChosenOutput(a);  // a chosen AAudio device that went away (#242)
     const auto& p = a->device.playback;
     // Not started: the system stopped it (a disconnect miniaudio could not reopen); caw_audio_start opens it again.
     const bool started = ma_device_get_state(&a->device) == ma_device_state_started;
     return dup(std::string("{\"running\":") + (started ? "true" : "false") + ",\"stopped_by_system\":" +
                (started ? "false" : "true") + ",\"backend\":" + quoted(ma_get_backend_name(a->context.backend)) +
                ",\"device\":" + quoted(p.name) + ",\"device_id\":" + quoted(a->deviceId.c_str()) +
+               // AAudio: the device the stream runs on (AudioDeviceInfo.getId(); 0 elsewhere or unknown), #242.
+               ",\"routed_device_id\":" + std::to_string(outputDevice(a)) +
                ",\"sample_rate\":" + std::to_string(p.internalSampleRate) +
                // #241: the rate the engine renders, counts its song clock and asks every stream for (the one source
                // of truth); the stream's own rate above differs only where miniaudio resamples between them.

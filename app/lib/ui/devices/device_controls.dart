@@ -4,6 +4,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 import '../../engine/component_info.dart';
+import '../../model/device_target.dart';
 import '../../model/mod_matrix.dart';
 import '../../model/modulation.dart';
 import '../arrange/knob.dart' show Taper;
@@ -464,26 +465,55 @@ class _DeviceKnobState extends State<DeviceKnob> {
   Future<void> _typeValue(BuildContext context, ComponentParameterInfo p, double value) async {
     final t = DeviceScope.of(context).target;
     DeviceFeel.tap();
-    final field = TextEditingController(text: value.toStringAsFixed(p.max - p.min > 20 ? 1 : 3));
-    final typed = await showDialog<double>(context: context, animationStyle: dialogAnimation(context), builder: (c) => AlertDialog(
+    final typed = await showDialog<double>(context: context, animationStyle: dialogAnimation(context),
+        builder: (c) => _TypeValueDialog(target: t, param: p, value: value));
+    if (typed != null) t.set(p.id, typed);
+  }
+}
+
+/// A knob's typed value, with Automate and Learn MIDI CC. Its text field lives as long as the dialog does, so it
+/// is still there while the dialog animates out (a pop from Automate, which can close the device page with it).
+class _TypeValueDialog extends StatefulWidget {
+  const _TypeValueDialog({required this.target, required this.param, required this.value});
+  final DeviceTarget target;
+  final ComponentParameterInfo param;
+  final double value;
+
+  @override
+  State<_TypeValueDialog> createState() => _TypeValueDialogState();
+}
+
+class _TypeValueDialogState extends State<_TypeValueDialog> {
+  late final _field = TextEditingController(
+      text: widget.value.toStringAsFixed(widget.param.max - widget.param.min > 20 ? 1 : 3));
+
+  @override
+  void dispose() {
+    _field.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final p = widget.param, t = widget.target;
+    return AlertDialog(
       title: Text(p.label, style: const TextStyle(fontSize: 14)),
       content: TextField(
         key: const ValueKey('dknob-type'),
-        controller: field,
+        controller: _field,
         autofocus: true,
         keyboardType: const TextInputType.numberWithOptions(decimal: true, signed: true),
         decoration: InputDecoration(suffixText: p.unit, helperText: '${p.min} .. ${p.max}'),
-        onSubmitted: (s) => Navigator.of(c).pop(double.tryParse(s.trim())),
+        onSubmitted: (s) => Navigator.of(context).pop(double.tryParse(s.trim())),
       ),
       actions: [
         AutomateButton(target: t, paramId: p.id),
         MidiLearnButton(target: t, paramId: p.id),
-        TextButton(onPressed: () => Navigator.of(c).pop(), child: const Text('Cancel')),
-        TextButton(onPressed: () => Navigator.of(c).pop(double.tryParse(field.text.trim())), child: const Text('Set')),
+        TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Cancel')),
+        TextButton(onPressed: () => Navigator.of(context).pop(double.tryParse(_field.text.trim())),
+            child: const Text('Set')),
       ],
-    ));
-    field.dispose();
-    if (typed != null) t.set(p.id, typed);
+    );
   }
 }
 

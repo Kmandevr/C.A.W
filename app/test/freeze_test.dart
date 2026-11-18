@@ -1,6 +1,6 @@
 // Freeze and bounce to audio (1.0.5, #209): the project fields, the engine JSON a frozen track sends (no instrument
-// or effects), freeze, unfreeze and bounce as one undo step each, the "Unfreeze to edit?" prompt, and with CAW_LIB a
-// frozen track rendering the same as the live one.
+// or effects), freeze, unfreeze and bounce (a track, MIDI clips, an audio clip from its menu) as one undo step each,
+// the "Unfreeze to edit?" prompt, and with CAW_LIB a frozen track rendering the same as the live one.
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -9,6 +9,7 @@ import 'dart:typed_data';
 import 'package:caw/model/app_state.dart';
 import 'package:caw/model/arrange_fx.dart';
 import 'package:caw/model/audio_clips.dart';
+import 'package:caw/model/audio_edit.dart';
 import 'package:caw/model/freeze.dart';
 import 'package:caw/model/modulation.dart';
 import 'package:caw/model/project.dart';
@@ -21,6 +22,7 @@ import 'package:caw/ui/frame/sections.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'audio_fake.dart';
 import 'golden_util.dart';
 
 const _riff = '---\nkind: pattern\nlength: 16\n---\n0 A2 2 1\n4 C3 1 0.8\n8 E3 2 0.6\n';
@@ -368,6 +370,68 @@ void main() {
     await tester.tap(find.text('Unfreeze'));
     await tester.pumpAndSettle();
     expect(layer('a').frozen, isFalse);
+    await tester.pump(const Duration(seconds: 1));
+  });
+
+  testWidgets("an audio clip's own menu bounces it through the track's effects into a new clip, one undo step",
+      (tester) async {
+    tester.view.physicalSize = const Size(1400, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    s.audioIo = FakeAudioIo();
+    s.project.assets.add(AudioAssetDoc(id: 'va', path: '/abs/vox.wav', name: 'vox', seconds: 4, channels: 1));
+    s.project.layers.add(LayerDoc(id: 'v', name: 'Vox', color: 3, input: AudioInputDoc(),
+        components: [ComponentUseDoc('org.caw.delay.pro')], audioClips: [
+          AudioClipDoc(id: 'ac1', assetId: 'va', startSteps: 4, lengthSeconds: 1),
+          AudioClipDoc(id: 'ac2', assetId: 'va', startSteps: 20, lengthSeconds: 1),
+        ]));
+    s.history.reset(jsonEncode(s.project.toJson()));
+    await tester.pumpWidget(MaterialApp(home: Scaffold(body: ListenableBuilder(listenable: s,
+        builder: (_, _) => ArrangerScreen(state: s)))));
+    await tester.pumpAndSettle();
+    Future<void> bounce() async {
+      await tester.longPress(find.byKey(const ValueKey('audio-clip-ac1')));
+      await tester.pumpAndSettle();
+      await tester.scrollUntilVisible(find.text('Bounce to audio'), 120, scrollable: find.descendant(
+          of: find.byKey(const ValueKey('long-press-menu')), matching: find.byType(Scrollable)).first);
+      await tester.tap(find.text('Bounce to audio'));
+      await tester.pumpAndSettle();
+    }
+    await bounce();
+    // Just that clip through the track (its effects too), over its span with the tail.
+    final r = requests.single;
+    expect(r['layers'], ['v']);
+    expect((r['stem_tap'], r['start_steps'], r['end_steps'], r['tail']), ('pre', 4, 12, 'silence'));  // 1 s: 8 steps
+    final sent = (projects.single['layers'] as List).cast<Map<String, dynamic>>().firstWhere((l) => l['id'] == 'v');
+    expect((sent['audio_clips'] as List), hasLength(1));
+    expect(sent['components'], isNotNull);
+    // A new audio track under it with one clip where the clip was; the clip is muted, the other is not.
+    final layers = s.project.layers;
+    final v = layer('v');
+    final made = layers[layers.indexOf(v) + 1];
+    expect(made.name, 'Vox (bounce)');
+    expect(made.audioClips.single.startSteps, 4);
+    expect(s.project.asset(made.audioClips.single.assetId), isNotNull);
+    expect(v.audioClips.map((c) => c.mute), [true, false]);
+    expect(find.byKey(ValueKey('audio-clip-${made.audioClips.single.id}')), findsOneWidget);
+    expect(s.undo(), isTrue, reason: 'one undo step');
+    expect(s.project.layers.map((l) => l.id), ['a', 'b', 'v']);
+    expect(layer('v').audioClips.first.mute, isFalse);
+    await tester.pumpAndSettle();
+    // A frozen track asks "Unfreeze to edit?" first; Cancel renders nothing.
+    s.project.assets.add(AudioAssetDoc(id: 'fzv', path: '/abs/frozen_v.wav', name: 'Frozen · Vox', seconds: 4,
+        channels: 2, sourceRate: 48000));
+    layer('v')
+      ..frozenAsset = 'fzv'
+      ..frozenContext = s.project.freezeContext;
+    s.notifyListeners();
+    await tester.pumpAndSettle();
+    await bounce();
+    expect(find.text('Unfreeze to edit?'), findsOneWidget);
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+    expect(requests, hasLength(1));
+    expect(layer('v').frozen, isTrue);
     await tester.pump(const Duration(seconds: 1));
   });
 

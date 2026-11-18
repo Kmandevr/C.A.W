@@ -15,6 +15,7 @@
 #include "detmath.h"
 #include "device_render.h"
 #include "buffer_tuner.h"
+#include "device_choice.h"
 #include "device_period.h"
 #include "engine.h"
 #include "native_component_test_path.h"
@@ -984,6 +985,21 @@ TEST(a_new_devices_first_callbacks_stay_out_of_the_cpu_meter) {
         e.reportLoad(1.5, 256);
     }
     CHECK(e.sheddingStats().shed > uint64_t{0});
+}
+
+// #242: an Android device chosen by its AudioDeviceInfo id ("aaudio:<id>", from the app's settings: untrusted text)
+// opens by that id; anything else opens the default; and a stream on another device than the chosen one is told.
+TEST(an_aaudio_device_is_chosen_by_its_id_and_junk_opens_the_default) {
+    using caw::aaudioDeviceId;
+    CHECK_EQ(aaudioDeviceId("aaudio:41"), 41);
+    CHECK_EQ(aaudioDeviceId("aaudio:2147483647"), 2147483647);
+    for (const char* junk : {"", "41", "aaudio:", "aaudio:0", "aaudio:-3", "aaudio:4x", "aaudio: 4", "aaudio:2147483648",
+                             "aaudio:99999999999", "AAUDIO:4", "android:8:WH-1000XM4", "{0.0.0.00000000}.{abc}"})
+        CHECK_EQ(aaudioDeviceId(junk), 0);
+    CHECK(caw::onChosenDevice(41, 41));
+    CHECK(!caw::onChosenDevice(41, 3));  // Android opened another, or miniaudio reopened the default after a disconnect
+    CHECK(caw::onChosenDevice(0, 3));    // nothing chosen
+    CHECK(caw::onChosenDevice(41, 0));   // not known
 }
 
 // #241: the output's latency without a timestamp counts what AAudio queues, its buffer size, not miniaudio's periods,

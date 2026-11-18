@@ -114,7 +114,7 @@ class _FeedbackFormState extends State<FeedbackForm> {
       case FeedbackOutcome.invalid:
         setState(() => _problem = 'The relay won\'t take this one: write some text, and keep it under 5,000 characters.');
       case FeedbackOutcome.unavailable:
-        setState(() => _problem = 'This build has no feedback relay set. Report a problem (About and beta) still works.');
+        setState(() => _problem = 'This build has no feedback relay set. Report a problem (Settings › App) still works.');
     }
   }
 

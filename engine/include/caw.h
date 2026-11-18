@@ -131,8 +131,12 @@ extern "C" {
    "stop_reason" "capped"), "parts_basis" and, live, "audio_threads". #237 (also 34, branch platform-audio):
    caw_audio_status gains "smallest_period" (the period Low latency asked on WASAPI and the endpoint's periods), and
    Low latency on WASAPI asks the endpoint's smallest legal period of at least 128 frames instead of 10 ms. Nothing
-   else changes. */
-#define CAW_API_VERSION 34
+   else changes.
+   35 (2026-11-18, 1.0.6, #244): caw_engine_set_output_safety and caw_engine_output_safety: the live output's
+   mono check (CAW_OUTPUT_MONO) and safety limiter (CAW_OUTPUT_LIMITER, on by default), applied in the device
+   callback after the mix and never in a render or export; a live Benchmark run's "parts" put that stage's time
+   in "master". Nothing else changes. */
+#define CAW_API_VERSION 35
 /* The component index that names a layer's native instrument rather than one of its "components". */
 #define CAW_INSTRUMENT_INDEX 0xFFFFFFFFu
 /* A component index with this bit (API version 22) names component (index & ~CAW_NOTE_COMPONENT) of the layer's
@@ -346,6 +350,15 @@ CAW_API void caw_engine_play_count_in(CawEngine* e, double step, int32_t beats);
 /* API 31: the count-in in bars (0..16): `bars` whole bars of the signature where `step` is, each its `num` ticks (1/den
    notes) at the tempo there, so it starts on an accent (a 6/8 bar is six eighth-note clicks); then as play_at. */
 CAW_API void caw_engine_play_count_in_bars(CawEngine* e, double step, int32_t bars);
+/* API 35 (#244). The live output's last stage, in the device callback after the mix (renders, exports, freezes and
+   stems never run it): CAW_OUTPUT_MONO plays both sides as their mean (a listening check), CAW_OUTPUT_LIMITER a
+   gentle zero-latency peak limiter (no effect below -4 dBFS, the output kept under -1 dBFS; non-finite samples
+   silenced). The flags OR together; 0 turns both off. An engine starts with CAW_OUTPUT_LIMITER. Any thread. */
+#define CAW_OUTPUT_LIMITER 1
+#define CAW_OUTPUT_MONO 2
+CAW_API void caw_engine_set_output_safety(CawEngine* e, int32_t flags);
+/* The flags caw_engine_set_output_safety last set (CAW_OUTPUT_LIMITER on a new engine; 0 for a null engine). */
+CAW_API int32_t caw_engine_output_safety(CawEngine* e);
 /* The metronome (on != 0): a short click on every beat (API 31: each tick of the time signatures, a 1/den note, on the
    tempo map) while playing, accented on the bar, mixed before the safety
    limiter. Off by default; offline renders never click. */

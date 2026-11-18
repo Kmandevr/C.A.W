@@ -264,7 +264,7 @@ class ProjectStorage {
   Future<void> setLastOpened(String id) => _settings.writeAsString(jsonEncode({'last': id}));
 }
 
-/// What the app's folders take on the device, in bytes (Settings › Projects and files).
+/// What the app's folders take on the device, in bytes (Settings › Projects and export).
 class StorageUse {
   const StorageUse({this.projects = 0, this.restorePoints = 0, this.themes = 0, this.other = 0, this.caches = 0});
   final int projects, restorePoints, themes, other, caches;

@@ -1,5 +1,6 @@
 // Arrange's track edits on AppState: a track's FX stack (instrument and native effects), drops onto a track
 // or below the last one, clips moved between tracks, trust.
+import 'track_defaults.dart';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
@@ -308,10 +309,10 @@ extension ArrangeFx on AppState {
 
   /// A new track with nothing on it, named [name]: at the end of the list, or with [parentId] as the last track
   /// inside that folder.
-  LayerDoc addEmptyTrack({String? name, String? parentId}) {
+  LayerDoc addEmptyTrack({String? name, String? parentId, NewTrackKind kind = NewTrackKind.midi}) {
     final p = project;
     final track = LayerDoc(id: newId('l'), name: name == null || name.isEmpty ? 'Track ${p.layers.length + 1}' : name,
-        color: p.layers.length % LayerDoc.trackColors, parentId: parentId, lengthSteps: p.stepsPerBar, volume: 1);
+        color: newTrackColor(kind), parentId: parentId, lengthSteps: p.stepsPerBar, volume: 1);
     var at = p.layers.length;
     if (parentId != null) {
       final folder = p.layers.indexWhere((l) => l.id == parentId);

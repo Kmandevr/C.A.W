@@ -1,38 +1,29 @@
 # Handoff
 
-Commit: 8de3295 (session branch = hotfix 1.0.5-alpha.2 plus Main's #239 plan docs; Main has v1.0.5-alpha.1)
+Commit: 619dd5b (the session branch = 1.0.6-alpha.1, in PR #246; Main = v1.0.5-alpha.2)
 Branch: ccr-56285e11-0xrj3h. Main is protected: PRs only; merge yourself when CI is green. Publish with app.yml's workflow_dispatch (installables + release) on Main. Each release needs a CHANGELOG.md entry, copied to app/assets/CHANGELOG.md.
 
 ## Goal
-Ship hotfix 1.0.5-alpha.2 (#241). Next is 1.0.6, plug-in security and the companion app (#239, in docs/plugin-hosting-plan.md). Then 1.0.7: FX consolidation and the device UI (#227, #231). Silent 1.1.0 groundwork rides along.
+Finish and release 1.0.6-alpha.1, the usability release (owner, 2026-11-18). Then build the 1.0.7 groundwork (#239), everything that needs no owner input, so only the last decisions remain. Wake-ups are set for 05:07 and 05:40 MT (12:07 and 12:40 UTC), after the usage reset.
 
 ## Done and verified
-- Merged into the session branch:
-  - settings drop-downs;
-  - automation-fix (point drag, Automation tab);
-  - startup-smooth;
-  - drift-ui (scroll window, playhead, the 300 ms double count, slider beat, Bluetooth quality hint);
-  - drift-audio (drift tests found no engine drift, a clock readout in Engine diagnostics, latency counts AAudio's queue).
-- Before drift-audio was merged: flutter test 2163 passed (no CAW_LIB).
+- v1.0.5-alpha.2 published (PR #243).
+- Roadmap renumbered: 1.0.7 security and companion, 1.0.8 FX consolidation, and so on.
 
 ## Open
-- **Final checks on 8de3295:** the engine ctest plus CAW_LIB flutter test, running in the background. Then:
-  1. bump to 1.0.5-alpha.2 (pubspec +9, version.dart, docs/app.md and architecture.md, 4 goldens);
-  2. CHANGELOG;
-  3. PR, merge, release.
-- **#242 device selection:** an agent is working on branch `device-select`. It ships after the hotfix.
-- **Owner questions:**
-  - #239's open points (updater-only first or hub, its look);
-  - the AutoStacc pack's 4th device;
-  - routing and hosting plan questions;
-  - the TERMS governing law;
-  - store accounts.
-- **Device checks on the S22+ after the hotfix:**
-  - Engine diagnostics with the mic on and off (drift);
-  - the Latency breakdown (300 ms);
-  - scroll;
-  - the slider beat.
+- **1.0.6-alpha.1** (all merged, PR #246):
+  - #244 settings, C API 35;
+  - #242 devices, the tap fix, audio-take learning;
+  - smooth zoom and the #235 pass;
+  - the quick wins.
+  - Checks: ctest 11/11; CAW_LIB flutter test 2328 + 8 goldens re-recorded (the zoom note-preview levels); docs --strict.
+  - Next: CI green, then merge and release.
+- **1.0.7 groundwork:** docs/plugin-hosting-plan.md ("Least privilege and the companion app"), decisions 2026-11-18, and #239.
+  - Owner answers: updater and trust first; the full AutoStacc look (brand assets still needed from the owner).
+- **Audit (2026-11-18):** 10 issues closed; #245 collects the performance leftovers. CI build jobs are capped (f8805d3).
+- **Owner phone checks with 1.0.6:** #20 (keyboard Backspace), #31 (one USB and one BLE MIDI keyboard), #204 (power, heat and frames baseline).
+- **Owner questions:** where the companion's code lives (you called it private and closed-source, but C.A.W is open source, and its APK can't come from a private repo without a token); Windows x86-64-v3 (a second DLL, or the minimum CPU); the AutoStacc brand; the pack's 4th device; routing and hosting plan questions; TERMS governing law; store accounts.
 
 ## Next
-1. Release 1.0.5-alpha.2.
-2. Start 1.0.6 (#239). Ask the owner its open points first.
+1. Merge PR #246 when green and release 1.0.6-alpha.1.
+2. 1.0.7 groundwork: the agent on branch `companion-groundwork` builds the protocol doc, the caw_services package, the Dart link and adapters, the Kotlin client, the github/play flavours and the delta script. The companion app itself waits for the owner (private repo?).

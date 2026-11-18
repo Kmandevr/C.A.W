@@ -34,7 +34,7 @@ class CppFileView {
   CppFileView(String text) {
     controller = CodeLineEditingController(
       codeLines: CodeLines.fromText(text),
-      options: CodeLineOptions(indentSize: CodePrefs.tabWidth), // Settings › Code editor, when the file opens
+      options: CodeLineOptions(indentSize: CodePrefs.tabWidth), // Settings › App › Code editor, when the file opens
       spanBuilder: ({required context, required index, required codeLine, required textSpan, required style}) {
         final m = marks[index];
         return m == null ? textSpan : decorateSpan(textSpan, m);
@@ -447,7 +447,7 @@ class CppEditorState extends State<CppEditor> {
 
   void _mirrorIndicator() => _paragraphs.value = _boundIndicator?.value;
 
-  // Line numbers off (Settings › Code editor): only the problem marks' strip.
+  // Line numbers off (Settings › App › Code editor): only the problem marks' strip.
   double get _gutterWidth =>
       CodePrefs.lineNumbers ? 14 + 7.6 * math.max(3, view.controller.lineCount.toString().length) : 8;
 

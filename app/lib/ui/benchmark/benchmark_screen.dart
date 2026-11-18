@@ -351,7 +351,7 @@ class _BenchmarkScreenState extends State<BenchmarkScreen> {
               label: const Text('Save JSON')),
         ]),
         const SizedBox(height: 8),
-        const Text('With telemetry on (Settings › Privacy), each run\'s numbers are sent anonymously to help make '
+        const Text('With telemetry on (Settings › App › Privacy and feedback › Privacy), each run\'s numbers are sent anonymously to help make '
             'C.A.W faster. The breakdown by part stays in the JSON on this device.', style: TextStyle(color: Neon.dim, fontSize: 12)),
       ],
     ]);

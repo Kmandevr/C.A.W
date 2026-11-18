@@ -3,6 +3,41 @@
 What changed in each C.A.W release, newest first. C.A.W is in open alpha: expect rough edges and unexpected issues.
 Versions keep the `-alpha.N` suffix until the official release.
 
+## 1.0.6-alpha.1 (2026-11-18)
+
+The usability release: smooth zooming, a tidier Settings, choosing your real speaker, headphones and microphone, and latency that stays where you set it.
+
+### New
+- **Choose your output and input device on Android:**
+  - outputs: the phone speaker, wired headphones, Bluetooth and USB;
+  - inputs: the phone's microphones, a headset's and USB.
+  - Your choice is remembered and used again when the device reconnects.
+  - The line under each drop-down says which device is actually in use.
+- **Pause when unplugged:** playback stops when your headphones or Bluetooth disconnect, before the speaker plays (Settings › Sound › Audio devices, on by default).
+- **Safety limiter:** a gentle limiter on what you hear protects your ears and speakers. It never touches your exports (Settings › Sound › Quality and buffer, on by default).
+- **Mono check:** hear your mix in mono to check what cancels. It is for listening only; exports stay stereo.
+- **Keep the screen awake:** Off, while playing or recording, or always (Settings › App › Performance).
+- **New-track defaults:** the instrument a new MIDI track plays when you record, track colours (the next one, or one per kind) and names (kind and number, or the instrument's name), plus whether a new audio track hears its input (Off, Auto or On).
+- **Record mode in Settings:** Takes, Overdub or Replace, the same choice as Record's long-press.
+- **Remember zoom per project:** each project reopens at its zoom and scroll position.
+- **Left-handed layout:** the transport and the side rail are mirrored, Play and Record on the left.
+- **Find the smallest stable buffer** (Android): a switch for the automatic buffer size, off by default.
+
+### Fixed
+- **Latency you measure or type** no longer counts the system's latency twice:
+  - **Tap along** keeps the figure your taps found, also on Bluetooth headphones whose delay settles after they connect;
+  - **the loopback test** splits the round trip correctly, so recordings land where you played;
+  - **a typed latency**, for the output or the input, stays what you typed.
+- **Zooming** in Arrange is smooth: text, clip names and the ruler keep their size instead of stretching and then jumping, nothing snaps when you lift your fingers, and the beat under your fingers stays under them. The zoom buttons and the mouse wheel glide too, and grid lines and ruler numbers fade in and out.
+- **Editing feels quicker:** selecting or changing a clip or track redraws only what changed.
+- **Automate from a device page** on a phone now closes the page and shows you the lane.
+
+### Improved
+- **A tidier Settings:** five sections in the order you use them (Sound, Editing, Appearance and feel, Projects and export, App), each a set of glass cards that keep related settings together. Rarer settings sit under each card's **More**; search still finds every setting and opens its card. Each setting now lives in one place: the two recording offsets sit together as **Audio take offset** and **MIDI note offset**, and the Privacy Policy, Terms and Send feedback appear once.
+- **Take lanes** can be resized by dragging their edge, like automation lanes.
+- **Bounce to audio** is in an audio clip's own menu.
+- **Latency learns from audio takes too:** when you record audio with the click on, C.A.W finds where your notes start and how far they land from the beat. After a few takes that agree, the latency card suggests a correction. It never changes anything until you tap **Apply**.
+
 ## 1.0.5-alpha.2 (2026-11-18)
 
 A hotfix: smoother scrolling, the playhead in time with the sound, a smoother start, and fixes that made the app hard to use.

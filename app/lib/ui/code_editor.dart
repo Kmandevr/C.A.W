@@ -99,7 +99,7 @@ class CodeField extends StatelessWidget {
         smartDashesType: SmartDashesType.disabled,
         smartQuotesType: SmartQuotesType.disabled,
         textCapitalization: TextCapitalization.none,
-        style: Neon.code(size: CodePrefs.fontSize), // Settings › Code editor
+        style: Neon.code(size: CodePrefs.fontSize), // Settings › App › Code editor
         cursorColor: Neon.green,
         decoration: InputDecoration(
           filled: true,

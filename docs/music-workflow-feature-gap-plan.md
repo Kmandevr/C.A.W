@@ -33,6 +33,7 @@ This note records the current implementation gaps in C.A.W.'s music-production w
 - **[Implemented]** Track and folder-bus volume/pan automation is serialized and played by the native engine.
 - **[Implemented]** Project/timeline automation lanes target module parameters by module ID or named project globals; the app edits song-time points with curved segments (#230) and the native VM evaluates them per sample. Track volume/pan lanes remain separate.
 - **[Implemented]** Audio import and clips with non-destructive editing, the sample editor, the stretch notch, Follows tempo and Slice to MIDI (batch 1.0.4, #208); a tempo map (stepped and ramped changes, a tempo lane), time signatures, sections and markers (batch 1.0.3, #207, C API 31): the engine plays every position on the map, sections move, copy and delete with their contents, and the recording count-in counts bars ([app](app.md), Arranger).
+- **[Implemented]** Choosing the real audio output and input device on Android (#242, `AppState._configureDevice`); latency compensation per device keeps a measured or typed total ([app](app.md), Latency).
 - **[Incomplete]** Clip-following automation and consolidation. Bounce to audio of a track or clips, and freeze, are built (1.0.5, [app](app.md)).
 
 ### Mixer and signal flow
@@ -75,6 +76,7 @@ This note records the current implementation gaps in C.A.W.'s music-production w
 - Keep arrangement-first composition; the retired session/clip-launcher grid is not an alternate view.
 - Maintain phone and desktop parity, touch targets, keyboard/action access and accessible editing gestures.
 - Preserve local/offline operation and low CPU/RAM overhead on weak devices.
+- Keep edits cheap to show: a project change that bypasses `AppState`'s edit paths (`_save`, `_sync`, the value ticks) leaves `AppState.docGen` as it was, and Arrange's kept track headers and clips (#235) would not show it; route it through them.
 - Keep launch quick: work added to `AppState.init` or `openStorage` reports a step on `AppState.startup` (`app/lib/model/startup_progress.dart`), so the startup screen shows it instead of a silent wait.
 - Keep audio callback work bounded, allocation-free, lock-free and free of I/O, logging, UI calls and unbounded loops.
 - Perform file access, waveform generation, analysis, stretching and export off the audio callback using bounded background work.

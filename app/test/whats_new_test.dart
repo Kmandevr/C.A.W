@@ -283,7 +283,7 @@ void main() {
       expect(find.text('v1.0.0-alpha.1'), findsOneWidget);
       expect(tester.takeException(), isNull);
       final found = searchSettings('changelog');
-      expect(found[SettingsSection.about]?.map((e) => e.id), contains('about.whatsNew'));
+      expect(found[SettingsSection.app]?.map((e) => e.id), contains('about.whatsNew'));
     });
 
     testWidgets('a missing changelog says so instead of failing', (tester) async {

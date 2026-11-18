@@ -573,7 +573,8 @@ class _NotchPainter extends CustomPainter {
   bool shouldRepaint(_NotchPainter old) => old.color != color || old.active != active;
 }
 
-/// An audio clip's menu: split, duplicate, reverse, loop, mute, lock, mode and stretch, takes, the inspector, delete.
+/// An audio clip's menu: split, duplicate, reverse, loop, mute, lock, mode and stretch, takes, consolidate, bounce to
+/// audio, the inspector, delete.
 Future<void> showAudioClipMenu(BuildContext context, AppState s, LayerDoc layer, AudioClipDoc clip, Offset at,
     {VoidCallback? onOpen}) async {
   final step = s.editStep.toDouble();
@@ -597,6 +598,9 @@ Future<void> showAudioClipMenu(BuildContext context, AppState s, LayerDoc layer,
         // Consolidate (#209): the selection's clips on this track rendered into one clip.
         if (consolidate.length >= 2) MenuAction('consolidate', 'Consolidate ${consolidate.length} clips',
             Icons.join_full),
+        // Bounce to audio (#209, as a MIDI clip's): this clip, or the selection's clips on this track, through the
+        // track's effects into a new clip on a new audio track under it.
+        if (s.canRenderTrack(layer)) const MenuAction('bounce', 'Bounce to audio', Icons.graphic_eq_rounded),
         if (!clip.lock) const MenuAction('delete', 'Delete', Icons.delete_outline, danger: true),
       ]);
   if (v == null) return;
@@ -632,6 +636,14 @@ Future<void> showAudioClipMenu(BuildContext context, AppState s, LayerDoc layer,
       if (!context.mounted) return;
       await runTrackRender(context, 'Consolidate ${consolidate.length} clips',
           () => s.consolidateAudioClips(layer, consolidate));
+      return;
+    case 'bounce':
+      // Bouncing mutes the clips it renders: a frozen track asks "Unfreeze to edit?" first.
+      if (!context.mounted || !await editableOrUnfreeze(context, s, layer) || !context.mounted) return;
+      final chosen = s.selectedClipIds.contains(clip.id)
+          ? [for (final c in layer.audioClips) if (s.selectedClipIds.contains(c.id)) c] : [clip];
+      await runTrackRender(context, 'Bounce ${chosen.length == 1 ? s.audioClipName(clip) : '${chosen.length} clips'}',
+          () => s.bounceClips(layer, const [], audio: chosen));
       return;
     case 'delete':
       s.removeAudioClip(layer, clip);

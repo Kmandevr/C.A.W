@@ -17,7 +17,7 @@ class BackgroundPlayback {
     _sync();
   }
 
-  /// The app's one (main.dart), for Settings › Audio and the hint.
+  /// The app's one (main.dart), for Settings › Sound and the hint.
   static BackgroundPlayback? current;
 
   final AppState state;
@@ -98,7 +98,7 @@ class BackgroundPlayback {
     if (forever) unawaited(state.settings.update((s) => s.backgroundHintOff = true));
   }
 
-  /// Opens Android's battery page for C.A.W (Settings › Audio's row and the hint).
+  /// Opens Android's battery page for C.A.W (Settings › Sound's row and the hint).
   Future<bool> openBatterySettings() => service.openBatterySettings();
 
   /// Whether C.A.W's battery is unrestricted; null where there is no such setting.

@@ -1,5 +1,7 @@
 // Better track automation (#230): curved segments (the model, its JSON and the engine's), the lane tools (pencil,
-// line, shapes, eraser), select and transform, copy and paste, Automate from a knob, the picker and clip-follow.
+// line, shapes, eraser), select and transform, copy and paste, Automate from a knob (and from a phone's device page),
+// the picker and clip-follow.
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:caw/engine/component_info.dart';
@@ -17,6 +19,7 @@ import 'package:caw/ui/arrange/knob.dart';
 import 'package:caw/ui/arrange/lane_tools.dart';
 import 'package:caw/ui/arrange/track_lanes.dart';
 import 'package:caw/ui/arranger_screen.dart';
+import 'package:caw/ui/devices/device_editor.dart';
 import 'package:caw/ui/frame/sections.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
@@ -468,6 +471,50 @@ void main() {
       await tester.pump(const Duration(milliseconds: 500));
       expect(find.byKey(ValueKey('lane-row-${lane.key}')), findsOneWidget);
       expect(s.automationReveal.value, isNull);
+      await tester.pump(const Duration(seconds: 2));
+    });
+
+    testWidgets('Automate from a phone\'s full-screen device page closes the page and shows the lane, armed',
+        (tester) async {
+      // Tracks above it, so its lane opens below the view and has to be scrolled to.
+      s.project.layers.insertAll(0, [for (var i = 0; i < 14; i++) LayerDoc(id: 'x$i', name: 'X$i', color: i)]);
+      final a = s.project.layers.firstWhere((l) => l.id == 'a');
+      await pumpArranger(tester, size: const Size(412, 900));
+      expect(tester.getRect(find.byKey(const ValueKey('track-header-a'))).top, greaterThan(900));
+      final context = tester.element(find.byType(ArrangerScreen));
+      unawaited(openDeviceEditor(context, s, a, 0));
+      await tester.pumpAndSettle();
+      expect(find.byType(DeviceEditor), findsOneWidget);
+      // A hold on the device's Mix knob: its dialog, with Automate.
+      final knob = find.byKey(const ValueKey('dknob-mix'));
+      expect(knob, findsOneWidget);
+      await tester.longPress(knob);
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('automate-param')));
+      await tester.pumpAndSettle();
+      expect(find.byType(DeviceEditor), findsNothing, reason: 'the page closed');
+      final lane = s.project.automation.single;
+      expect((lane.target, lane.component, lane.armed), ('mix', 0, true));
+      expect(a.showLanes, isTrue);
+      final row = tester.getRect(find.byKey(ValueKey('lane-row-${lane.key}')));
+      expect(row.top >= 0 && row.bottom <= 900, isTrue, reason: 'the lane is on screen: $row');
+      expect(s.automationReveal.value, isNull, reason: 'the row scrolled itself into view');
+      await tester.pump(const Duration(seconds: 2));
+    });
+
+    testWidgets('Automate from a wide screen\'s device window keeps the window open', (tester) async {
+      await pumpArranger(tester);
+      final context = tester.element(find.byType(ArrangerScreen));
+      unawaited(openDeviceEditor(context, s, keys(), 0));
+      await tester.pumpAndSettle();
+      final knob = find.byKey(const ValueKey('dknob-mix'));
+      await tester.longPress(knob);
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('automate-param')));
+      await tester.pumpAndSettle();
+      expect(find.byType(DeviceEditor), findsOneWidget, reason: 'the window stays; only its dialog closed');
+      expect(find.byKey(const ValueKey('automate-param')), findsNothing);
+      expect(s.project.automation.single.armed, isTrue);
       await tester.pump(const Duration(seconds: 2));
     });
 

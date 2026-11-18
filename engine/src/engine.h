@@ -189,6 +189,11 @@ public:
     SamplePreview& samplePreview() noexcept { return *samplePreview_; }
     // A layer's slot for the preview's "layer" option (-1: none). Briefly under the control lock.
     int previewSlot(const std::string& layerId) { return deviceSlot(layerId); }
+    // API 35 (#244): the live output's mono check and safety limiter (output_safety.h, OutputSafety::kLimiter and
+    // kMono), which the device callback applies after process(); renders and exports never do. The limiter is on
+    // by default. Any thread; the callback reads the flags once per render.
+    void setOutputSafety(int flags) noexcept { outputSafety_.store(flags & 3, std::memory_order_relaxed); }
+    int outputSafety() const noexcept { return outputSafety_.load(std::memory_order_relaxed); }
     // Sound quality (caw.h CAW_QUALITY_*): the built-ins read it while they play (quality.h). Normal by default.
     void setQuality(int quality) noexcept;
     int quality() const noexcept { return quality_.load(std::memory_order_relaxed); }
@@ -620,6 +625,7 @@ private:
     std::atomic<bool> shedding_{true};             // setShedding
     std::atomic<bool> playingFlag_{false};
     std::atomic<bool> bypass_{false};
+    std::atomic<int> outputSafety_{1};  // setOutputSafety: OutputSafety::kLimiter by default
     std::atomic<int64_t> posFlag_{0}, loopLenFlag_{0};
     std::atomic<int> overloadedFlag_{0};  // layers shed now
     std::atomic<uint64_t> shedTotal_{0}, restoredTotal_{0};

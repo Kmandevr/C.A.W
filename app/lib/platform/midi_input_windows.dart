@@ -36,7 +36,7 @@ class _WinMM {
   final int Function(int) start, reset, close;
 }
 
-/// Every WinMM input port, open unless Settings › MIDI turned it off. WinMM has no plug-in notification: the port
+/// Every WinMM input port, open unless Settings › Sound › MIDI and controllers turned it off. WinMM has no plug-in notification: the port
 /// list is checked every two seconds, and a change reopens the ports (their numbers shift when one goes).
 class WindowsMidiInput implements MidiInput {
   WindowsMidiInput(this._clock);

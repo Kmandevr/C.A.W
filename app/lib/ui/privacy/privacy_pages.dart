@@ -1,6 +1,6 @@
 // Privacy on screen (beta readiness plan E2, E3; owner's look 2026-11-12, "simple sheets"): the first-run page,
 // "Show exactly what's sent", the once-only question after a beta build, and the bundled Privacy Policy and Terms.
-// Settings › About and beta › Privacy itself is settings/privacy_settings.dart.
+// Settings › App › Privacy and feedback › Privacy itself is settings/privacy_settings.dart.
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -135,11 +135,11 @@ class FirstRunPage extends StatelessWidget {
                   ]),
                   const _Point(Icons.public, Neon.blue, 'All of it is public', [
                     'Every report is published in github.com/Kmandevr/C.A.W-Telemetry. Each one has a receipt only your '
-                        'device knows: see, check and delete your reports in Settings › About and beta › Privacy › My data.',
+                        'device knows: see, check and delete your reports in Settings › App › Privacy and feedback › Privacy › My data.',
                     'Feedback you send is posted publicly there too; an email you add is never published.',
                   ]),
                   const _Point(Icons.toggle_off_outlined, Neon.yellow, 'Turning it off', [
-                    'Settings › About and beta › Privacy, at any time. Off stops sending at once and deletes what is '
+                    'Settings › App › Privacy and feedback › Privacy, at any time. Off stops sending at once and deletes what is '
                         'waiting on this device.',
                   ]),
                   Wrap(spacing: 8, runSpacing: 4, children: [
@@ -197,7 +197,7 @@ Future<void> askKeepTelemetry(BuildContext context, Telemetry t) async {
       title: const Text('Keep sending anonymous data?'),
       content: const Text('This is a release build, so telemetry is now off. The beta build sent anonymous performance and '
           'device data, published openly. Turn it back on to keep helping? You can change this in Settings › '
-          'About and beta › Privacy.'),
+          'App › Privacy and feedback › Privacy.'),
       actions: [
         TextButton(key: const ValueKey('keep-off'), onPressed: () => Navigator.pop(c, false), child: const Text('Leave it off')),
         FilledButton(key: const ValueKey('keep-on'), onPressed: () => Navigator.pop(c, true), child: const Text('Turn it on')),

@@ -1,4 +1,5 @@
-// Settings › Projects and files: autosave, restore points kept, what a new project starts with, storage and caches.
+// Settings › Projects and export (#244): Saving (autosave, restore points kept), New projects (template, tempo, meter),
+// Export (export_settings.dart) and Storage (what is used, clearing caches).
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -8,7 +9,9 @@ import '../../model/settings.dart';
 import '../../model/storage.dart';
 import '../../model/templates.dart';
 import '../widgets.dart';
+import 'export_settings.dart';
 import 'settings_deps.dart';
+import 'settings_registry.dart';
 import 'settings_widgets.dart';
 
 class ProjectsSettings extends StatefulWidget {
@@ -60,6 +63,7 @@ class _ProjectsSettingsState extends State<ProjectsSettings> {
     final use = _use;
     String delay(int ms) => ms < 1000 ? '$ms ms' : '${ms ~/ 1000} s';
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      SettingsCardView(card: SettingsCard.saving, rows: [
       settingDropdown<int>('projects.autosave', s.autosaveMs,
           [for (final d in Settings.autosaveDelays) (d, d == 500 ? 'As you edit (0.5 s)' : 'After ${delay(d)}')],
           (v) => s.update((x) => x.autosaveMs = v),
@@ -69,6 +73,8 @@ class _ProjectsSettingsState extends State<ProjectsSettings> {
           value: s.restorePointsKept.toDouble(), min: 1, max: 100, divisions: 99, icon: Icons.history,
           show: (v) => '${v.round()}', set: (x, v) => x.restorePointsKept = v.round(), reset: 20,
           subtitle: 'The newest this many per project; older ones go when a new one is made'),
+      ]),
+      SettingsCardView(card: SettingsCard.newProjects, rows: [
       settingDropdown<String>('projects.newStart', s.newProjectTemplate, [
             (blankTemplateId, 'Blank'),
             ...switch (widget.deps.state) {
@@ -97,6 +103,9 @@ class _ProjectsSettingsState extends State<ProjectsSettings> {
       settingDropdown<int>('projects.newMeter', s.newProjectBeatsPerBar,
           [for (var b = 1; b <= 16; b++) (b, '$b/4')], (v) => s.update((x) => x.newProjectBeatsPerBar = v),
           icon: Icons.straighten),
+      ]),
+      ExportCard(deps: widget.deps),
+      SettingsCardView(card: SettingsCard.storage, rows: [
       settingAction('projects.storage',
           icon: Icons.storage,
           subtitle: use == null
@@ -113,6 +122,7 @@ class _ProjectsSettingsState extends State<ProjectsSettings> {
             onPressed: _temp == null || _clearing ? null : _clear,
             child: Text(_clearing ? 'Clearing…' : 'Clear'),
           )),
+      ]),
     ]);
   }
 }

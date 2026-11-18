@@ -114,7 +114,10 @@ void main() {
       expect(l.outputMs, 200, reason: 'was 121 + 178.7 = 299.7: the delay counted twice');
       expect(l.outputOffset.extraMs, closeTo(79, 1e-9));
       expect(l.outputNeedsCheck, isFalse);
-      // Set over a timestamp it rides on a later figure (a new codec), and asks for a check.
+      // Set over a settled timestamp it rides on a later settled figure (a new codec), and asks for a check.
+      for (var i = 0; i < LatencyComp.settleRuns; i++) {
+        await l.refresh();
+      }
       l.setOutputTotalMs(200, source: OffsetSource.slider);
       dev = _out(160);
       for (var i = 0; i < 5; i++) {

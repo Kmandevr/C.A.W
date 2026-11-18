@@ -86,6 +86,18 @@ bool FlutterWindow::OnCreate() {
             }
           }
           result->Success();
+        } else if (call.method_name() == "keepScreenOn") {
+          // Settings › App › Keep the screen awake (#244): the display stays on while asked (ES_CONTINUOUS holds
+          // it until the next call), and back to the system's idle timer after.
+          bool on = false;
+          if (const auto* args = std::get_if<flutter::EncodableMap>(call.arguments())) {
+            const auto it = args->find(flutter::EncodableValue("on"));
+            if (it != args->end()) {
+              if (const auto* v = std::get_if<bool>(&it->second)) on = *v;
+            }
+          }
+          ::SetThreadExecutionState(on ? (ES_CONTINUOUS | ES_DISPLAY_REQUIRED) : ES_CONTINUOUS);
+          result->Success();
         } else if (call.method_name() == "takeLaunchFiles") {
           flutter::EncodableList files;
           for (const std::string& path : launch_files_) {

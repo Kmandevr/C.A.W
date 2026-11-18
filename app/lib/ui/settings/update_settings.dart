@@ -1,4 +1,4 @@
-// Settings › About › Updates: this version and the last check, Check now, Update now with the release notes, the
+// Settings › App › Updates (#244), a card: this version and the last check, Check now, Update now with the release notes, the
 // channel, automatic checks, prompts and automatic updates, and Install another version (older ones too).
 import 'package:flutter/material.dart';
 
@@ -8,6 +8,7 @@ import '../../model/updates/update_service.dart';
 import '../motion.dart';
 import '../theme.dart';
 import '../updates/update_flow.dart';
+import 'settings_registry.dart';
 import 'settings_widgets.dart';
 
 /// The privacy line under the Updates row (owner, 2026-11-12: say it plainly).
@@ -41,8 +42,7 @@ class UpdateSettings extends StatelessWidget {
                           ? 'Up to date (checked ${_date(s.lastCheck!)})'
                           : 'Not checked yet';
           const dim = TextStyle(color: Neon.dim, fontSize: 12);
-          return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-            settingHeading('Updates'),
+          return SettingsCardView(card: SettingsCard.updates, rows: [
             SettingRow(
               id: 'about.updates',
               child: Padding(
@@ -110,6 +110,10 @@ class UpdateSettings extends StatelessWidget {
                 ]),
               ),
             ),
+            settingSwitch('about.updates.check', s.auto, s.setAuto),
+            settingSwitch('about.updates.prompts', s.prompts, s.setPrompts,
+                subtitle: s.prompts ? null : 'Off: this row still shows an update when one is found'),
+          ], more: [
             _choiceRow(
               id: 'about.updates.channel',
               icon: Icons.alt_route,
@@ -128,9 +132,6 @@ class UpdateSettings extends StatelessWidget {
                 },
               ),
             ),
-            settingSwitch('about.updates.check', s.auto, s.setAuto),
-            settingSwitch('about.updates.prompts', s.prompts, s.setPrompts,
-                subtitle: s.prompts ? null : 'Off: this row still shows an update when one is found'),
             if (s.channel == UpdateChannel.stable)
               _choiceRow(
                 id: 'about.updates.install',

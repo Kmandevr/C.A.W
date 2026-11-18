@@ -86,7 +86,7 @@ The .caw VM, whose costs the 2026-10-28 engine audit measured (integer conversio
 2. **`Poller`** (`app/lib/model/poller.dart`) replaces the `Ticker`:
    - about 30 reads a second only while playing, plus 1 s after stopping; the meters fall on their own clock after that
    - then no timers, no frames and no FFI calls
-   - nothing at all while the app is in the background, except a 2-second device check while playing behind the app (`background_playback.dart`, 2026-11-12), and Android's foreground service keeps the process from being frozen then; a battery-restricted C.A.W may still be interrupted, so Settings › Audio offers Android's battery page ([app](app.md))
+   - nothing at all while the app is in the background, except a 2-second device check while playing behind the app (`background_playback.dart`, 2026-11-12), and Android's foreground service keeps the process from being frozen then; a battery-restricted C.A.W may still be interrupted, so Settings › Sound offers Android's battery page ([app](app.md))
    - Tests in `app/test/poller_test.dart` check the rate, the settle, the idle and the background.
 3. **The audio device closes after 30 s stopped and idle.** Play (or resuming a pause) reopens it, as the app already did after returning from the background. **[Assumption]** Reopening takes well under a second on Android; check it on the phone.
 
@@ -367,8 +367,24 @@ Beta readiness plan B3–B5 (owner, 2026-11-12, [beta readiness plan](beta-readi
   - `AppState._syncNow` notifies only on a real change; scopes read and redraw only on a new tick, as live islands; automation curves are cached in their own layer under a small live painter.
   - Device painters compare their inputs; controls, the preset chip, Flagship's cards and every editor's hero rebuild on their own values (`ParamWatch`): `HeroCanvas` watches its visual and its readout, a watch also counts what its subtree reads in layout and paint (a `LayoutBuilder`, a painter) and what a widget rebuilt on its own reads (found by its `DeviceScope` lookup), and editors read the values their hero draws inside it, not in the page. A knob step rebuilds the knob and the hero.
   - The meter poll reads all tracks in one C API call (API 25) into a kept native buffer.
-  - The pinch transforms the laid-out lanes and lays out at its end (or past 0.6×/1.6×), landing exactly where a layout per move would (`arrange_test`, "a pinch scales the lanes").
+  - The pinch lays the lanes out at its zoom on every move (2026-11-18, replacing a sideways transform laid out again at the pinch's end or past 0.6×/1.6×, which stretched text and then jumped): the step width is a listenable that only the zoom's parts listen to, clips keep their widgets and lay out at the new width, and note previews are cached per zoom level. On the bench's 30 pinch frames: 8,220 builds (274 a frame; a plain layout per move built 33,630, 1,121 a frame), 31,560 painted (each clip repaints at its new width, which the transform skipped), 39–61 ms a frame in the debug test VM, by machine load (a layout per move: 72 ms; the transform: 12 ms between its jumps), the release 0 builds. The bench's zoom ceilings moved to match (`perf_arrange_bench_test.dart`); release-build frame times on the S22+ are still to be measured.
 - **Not measured here:** frame times on the S22+ and Windows in a release build (the plan's B5 asks the owner to check them and record them here).
+
+## Frames at 120 Hz while playing and editing (2026-11-18, #235)
+
+The owner's telemetry (S22+, 1.0.4-alpha.1, [#235](https://github.com/Kmandevr/C.A.W/issues/235)) counted 42–60% of frames at 120 Hz as slow, most of them in Arrange while playing. Profiled in the widget tests (debug VM, the test's software rasterizer; counts are exact, times only compare): the shell with Arrange in front and the demo project playing at a 120 Hz pump (`frame_bench_test.dart`, with `CAW_LIB`), Arrange on the 16-track bench project (`perf_arrange_bench_test.dart`, `arrange_scroll_test.dart`), and the piano roll's curve drag (`roll_curve_bench_test.dart`).
+
+| Measured | Before | After |
+| --- | --- | --- |
+| Shell playing, 120 frames (phone) | 279 builds, 582 painted, 2.0 ms p50 a frame; 0 backdrop blurs, 61 opacity layers all at full opacity (no offscreen layer) | unchanged: playing was already cheap on the UI thread |
+| Shell, 20 track selections (`selectLayer`), phone / landscape | 31,740 / 31,700 builds, 21,084 / 21,040 painted | 18,453 / 18,413 builds, 12,255 / 12,211 painted |
+| Arrange (16 tracks), one clip selection | 3,759 builds, 363–388 ms; every track header (about 125 widgets each) and every clip built again | 1,619 builds, about 208 ms; two headers and two clips (`arrange_scroll_test.dart` pins it) |
+| Arrange pinch zoom, 30 frames | 33,630 builds for a layout per move (the transform before: 2,389 between jumps) | 8,220 builds ([smooth zoom](#frames-at-240-hz-2026-11-12)) |
+| Piano roll curve drag, 60 events | 3 editor builds, 1,298 element rebuilds, 3 roll paints, 60 live paints | unchanged |
+
+- **What changed:** a track header builds again only when what it shows can have changed: the project (`AppState.docGen`, bumped by every edit, value move and engine sync), the settings, its selection or focus, its place and size, or a recording starting or stopping (a `Selected` per header in `_timeline`). A lane keeps each clip's widget while the project, settings, its selection, colour, height and pattern source stay the same, and its slot while its place does too; before, any rebuild of the arranger (every app-state change) built every header and clip anew.
+- **[Finding, open question for the owner]** Telemetry's "slow" compares `FrameTiming.totalSpan` (from vsync to the end of raster, `app/lib/model/telemetry/app_telemetry.dart`) with the frame budget. With the UI and raster threads pipelined, a frame can span more than one 8.3 ms period without a dropped frame, so this measure likely counts frames as slow that weren't; build and raster time each against the budget (Flutter's own jank rule in DevTools) would tell them apart. The definition is part of the telemetry contract (C.A.W-Telemetry's PLAN.md), so it is not changed here.
+- **Not measured here:** raster time on the GPU (the test rasterizer is software) and release-build frame times on the S22+; the default theme draws no backdrop blur in Arrange.
 
 ## Music video render (2026-11-12)
 

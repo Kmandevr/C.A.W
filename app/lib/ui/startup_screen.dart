@@ -26,7 +26,7 @@ const Color _violet = Color(0xFFB46CFF);
 const Color _pink = Color(0xFFFF2BD6);
 
 /// How long the reveal takes: the wave runs in, the crow's outline traces, the logo fades in. It plays to its end
-/// unless Settings › Feel › Full startup animation is off, when loading that ends sooner cuts it short ([StartupGate]).
+/// unless Settings › Appearance and feel › Full startup animation is off, when loading that ends sooner cuts it short ([StartupGate]).
 const Duration revealDuration = Duration(milliseconds: 1300);
 
 /// The crow logo, precached as the reveal starts.

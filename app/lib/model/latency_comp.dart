@@ -40,10 +40,12 @@ enum OffsetSource { preset, typed, slider, tapped, loopback, learned }
 /// [maxOffsetMs] above it.
 const minOffsetMs = -500.0, maxOffsetMs = 2000.0;
 
-/// One device's offset: the ms it adds on top of what the platform reports, and that figure when it was set
-/// ([platformMs]; null for an older file), so a platform figure that moves a lot since asks for a check, and where
-/// that figure came from ([platformSource]: SideLatency.source, "timestamp", "buffers" or "none"; null for an older
-/// file).
+/// One device's offset: the ms it adds on top of what the platform reported when it was set, that figure
+/// ([platformMs]; null for a file older than 1.0.5-alpha.1) and what kind of figure it was ([platformSource]:
+/// "timestamp" once AAudio's timestamps have settled, "settling" before, "buffers" or "none"; null for an older
+/// file). What was typed, slid, tapped, pinged or learned is the total [platformMs] + [extraMs]: it rides on a later
+/// figure only of the same kind (a real change: a new buffer size, a new codec), and stands over any other
+/// (LatencyComp.outputOffset).
 class DeviceOffset {
   const DeviceOffset(this.extraMs, this.source, {this.platformMs, this.platformSource});
   final double extraMs;
@@ -51,8 +53,8 @@ class DeviceOffset {
   final double? platformMs;
   final String? platformSource;
 
-  /// Set over a figure that was only an estimate (the queued buffers before the first timestamp, or no device
-  /// running): what it adds is not known, so the total heard as right is what stands (#241).
+  /// Set over a figure that was only an estimate (the queued buffers before the first timestamp, timestamps not yet
+  /// settled, or no device running): a later figure does not ask for a check (#241).
   bool get overEstimate => platformMs != null && platformSource != null && platformSource != 'timestamp';
 
   Map<String, dynamic> toJson() => {'extra_ms': extraMs, 'source': source.name,
@@ -64,7 +66,7 @@ class DeviceOffset {
     return DeviceOffset((o['extra_ms'] as num).toDouble().clamp(minOffsetMs, maxOffsetMs).toDouble(),
         OffsetSource.values.where((s) => s.name == o['source']).firstOrNull ?? OffsetSource.typed,
         platformMs: p is num && p.isFinite ? p.toDouble().clamp(0, maxOffsetMs).toDouble() : null,
-        platformSource: const {'timestamp', 'buffers', 'none'}.contains(ps) ? ps as String : null);
+        platformSource: const {'timestamp', 'settling', 'buffers', 'none'}.contains(ps) ? ps as String : null);
   }
 }
 
@@ -361,6 +363,11 @@ class LatencyComp extends ChangeNotifier {
   /// How many timestamp figures the system figure is the median of.
   static const stampRuns = 9;
 
+  /// How many timestamp reads in a row, within a callback's jitter, before the figure counts as settled (a
+  /// Bluetooth link's first timestamps can lie well below where it settles). **[Assumption]** 3 reads (6 to 9 s
+  /// of playing at the 3 s refresh).
+  static const settleRuns = 3;
+
   StreamSubscription<void>? _sub;
   AudioRouteInfo routeInfo = const AudioRouteInfo();
   DeviceLatency device = const DeviceLatency();
@@ -430,23 +437,50 @@ class LatencyComp extends ChangeNotifier {
   /// Where the platform's output figure comes from now (SideLatency.source; "none" with no device).
   String get platformOutputSource => device.output.running ? device.output.source : 'none';
 
+  /// Where the platform's input figure comes from now ("none" with no input).
+  String get platformInputSource => device.input.running ? device.input.source : 'none';
+
+  /// What kind of figure the output's is now, for keeping a total (DeviceOffset.platformSource): "settling" until
+  /// [settleRuns] timestamps agree.
+  String get _outputKind {
+    final s = platformOutputSource;
+    return s == 'timestamp' && _stamps.length < settleRuns ? 'settling' : s;
+  }
+
   /// The offset saved for the routed output, else its kind's preset (what the preset expects beyond the platform).
-  /// An offset set over an estimate keeps its total once the system's timestamps give the real figure: adding it to
-  /// that figure would count the delay twice (#241: set to 200 ms while the buffers said 21, it read 300 once the
-  /// timestamps said 121). Set over a timestamp it rides on the figure (a new codec), and the re-check asks.
+  /// A saved offset holds a total (typed, slid, tapped, pinged or learned: what was heard or measured in all). Over a
+  /// figure of another kind than the one it was set over it keeps that total: adding it to the better figure would
+  /// count the system's part twice (#241: slid to 200 ms while the buffers said 21, it read 300 once the timestamps
+  /// said 121; tapped to 200 over a Bluetooth link's first timestamp of 40, it read 340 once they settled at 180).
+  /// Over a figure of the same kind it rides on it (a new buffer size or codec), and the re-check asks.
   DeviceOffset get outputOffset {
     final o = store.outputs[routeInfo.output.key];
     if (o == null) {
       return DeviceOffset(math.max(0, presetOutputMs(routeInfo.output.kind) - platformOutputMs), OffsetSource.preset);
     }
-    if (o.overEstimate && platformOutputSource == 'timestamp') {
-      return DeviceOffset(_extra(o.platformMs! + o.extraMs, platformOutputMs), o.source,
-          platformMs: o.platformMs, platformSource: o.platformSource);
-    }
-    return o;
+    return _standing(o, platformOutputMs, _outputKind);
   }
-  DeviceOffset get inputOffset => store.inputs[routeInfo.input.key] ??
-      DeviceOffset(math.max(0, presetInputMs(routeInfo.input.kind) - platformInputMs), OffsetSource.preset);
+
+  /// The same for the routed input: a typed or pinged total keeps it as the output's does.
+  DeviceOffset get inputOffset {
+    final o = store.inputs[routeInfo.input.key];
+    if (o == null) {
+      return DeviceOffset(math.max(0, presetInputMs(routeInfo.input.kind) - platformInputMs), OffsetSource.preset);
+    }
+    return _standing(o, platformInputMs, platformInputSource);
+  }
+
+  /// [o] over today's system figure [nowMs] of kind [nowKind]: as saved over a real figure of the same kind, else
+  /// moved so that its total stays what it was set to. An offset from a file older than 1.0.5-alpha.2 has no kind
+  /// to go by and rides as it did.
+  static DeviceOffset _standing(DeviceOffset o, double nowMs, String nowKind) {
+    final then = o.platformMs, kind = o.platformSource;
+    if (then == null || kind == null) return o;
+    if (kind == nowKind && (kind == 'timestamp' || kind == 'buffers')) return o;
+    final extra = _extra(then + o.extraMs, nowMs);
+    return extra == o.extraMs ? o
+        : DeviceOffset(extra, o.source, platformMs: then, platformSource: o.platformSource);
+  }
 
   /// What the routed output adds in all, compensation on or off (the slider's value).
   double get outputTotalMs => math.max(0, platformOutputMs + outputOffset.extraMs);
@@ -470,8 +504,9 @@ class LatencyComp extends ChangeNotifier {
     final o = store.outputs[routeInfo.output.key];
     final then = o?.platformMs;
     if (o == null || then == null || !device.output.running) return false;
-    // Set over an estimate, the total stands: only a real figure set over a real figure asks.
-    if (o.overEstimate) return false;
+    // Set over an estimate, or read over one now, the total stands: only a settled figure set over a settled
+    // figure asks.
+    if (o.overEstimate || _outputKind != 'timestamp') return false;
     return (platformOutputMs - then).abs() > recheckMs;
   }
 
@@ -483,12 +518,14 @@ class LatencyComp extends ChangeNotifier {
   static double _extra(double totalMs, double platformMs) =>
       (totalMs.clamp(0, maxOffsetMs) - platformMs).clamp(minOffsetMs, maxOffsetMs).toDouble();
 
-  /// Sets what the routed output adds in all (ms heard after the engine renders), keeping the platform's part;
-  /// [save] false keeps it in memory (a slider drag saves once it ends, [saveNow]).
+  /// Sets what the routed output adds in all (ms heard after the engine renders): every way of setting it (typed,
+  /// slid, tapped, learned) comes here, saved as what it adds on top of the system's figure now, with that figure and
+  /// its source, so the total shown is the one set ([outputOffset]); [save] false keeps it in memory (a slider drag
+  /// saves once it ends, [saveNow]).
   void setOutputTotalMs(double totalMs, {OffsetSource source = OffsetSource.typed, bool save = true}) {
     if (!totalMs.isFinite) return;
     store.outputs[routeInfo.output.key] = DeviceOffset(_extra(totalMs, platformOutputMs), source,
-        platformMs: platformOutputMs, platformSource: platformOutputSource);
+        platformMs: platformOutputMs, platformSource: _outputKind);
     if (save) unawaited(store.save());
     notifyListeners();
   }
@@ -500,10 +537,12 @@ class LatencyComp extends ChangeNotifier {
   /// Saves the offsets now (after a slider drag).
   Future<void> saveNow() => store.save();
 
+  /// Sets what the routed input adds in all (typed, or what a loopback ping leaves after the output), as
+  /// [setOutputTotalMs] does.
   void setInputTotalMs(double totalMs, {OffsetSource source = OffsetSource.typed}) {
     if (!totalMs.isFinite) return;
-    store.inputs[routeInfo.input.key] =
-        DeviceOffset(_extra(totalMs, platformInputMs), source, platformMs: platformInputMs);
+    store.inputs[routeInfo.input.key] = DeviceOffset(_extra(totalMs, platformInputMs), source,
+        platformMs: platformInputMs, platformSource: platformInputSource);
     unawaited(store.save());
     notifyListeners();
   }

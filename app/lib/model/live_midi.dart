@@ -68,7 +68,7 @@ class LiveMidi extends ChangeNotifier {
     i.setClosed(_closed);
   }
 
-  /// Every device the platform sees, open or turned off (Settings › MIDI's list).
+  /// Every device the platform sees, open or turned off (Settings › Sound › MIDI and controllers's list).
   List<MidiPort> ports = const [];
 
   /// When each device (by name) last sent something, for its activity light; [activity] ticks with it.
@@ -85,7 +85,7 @@ class LiveMidi extends ChangeNotifier {
   Set<String> _closed = {};
   (bool, int)? _midiOptions;
 
-  /// Settings › MIDI: the devices turned off, and MPE and the bend range for the engine.
+  /// Settings › Sound › MIDI and controllers: the devices turned off, and MPE and the bend range for the engine.
   void _applyMidiSettings() {
     final s = state.settings;
     if (!_sameSet(s.midiClosed, _closed)) {
@@ -318,7 +318,7 @@ class LiveMidi extends ChangeNotifier {
     var start = from;
     _applyMetronome();
     if (!state.transportOn) {
-      // Pre-roll (Settings › Metronome and recording): play starts that many bars earlier, recording at [from].
+      // Pre-roll (Settings › Sound › Recording and metronome): play starts that many bars earlier, recording at [from].
       final preRoll = state.settings.preRollBars * state.project.stepsPerBar;
       if (preRoll > 0 && from > 0) {
         start = math.max(0.0, from - preRoll);
@@ -332,7 +332,7 @@ class LiveMidi extends ChangeNotifier {
       _countInTickMs = sig.unitBeats * 60000 / state.project.tempo.bpmAt(at);
       state.togglePlay(countInBars: bars);
       countInEnds = countInBeats > 0 && state.transportOn
-          // The clicks are heard an output latency after they render (Settings › Audio › Latency).
+          // The clicks are heard an output latency after they render (Settings › Sound › Latency and Bluetooth).
           ? DateTime.now().add(Duration(
               microseconds: (countInBeats * _countInTickMs * 1000).round() + state.outputLatencyUs))
           : null;
@@ -364,7 +364,7 @@ class LiveMidi extends ChangeNotifier {
   }
 
 
-  /// Whether Settings › MIDI lets [m] through: a keyboard other than the chosen one, or a channel other than the
+  /// Whether Settings › Sound › MIDI and controllers lets [m] through: a keyboard other than the chosen one, or a channel other than the
   /// chosen one, is ignored (the on-screen keys always pass).
   bool accepts(MidiMessage m) {
     final s = state.settings;
@@ -403,7 +403,7 @@ class LiveMidi extends ChangeNotifier {
       _sustained.remove(m.data1); // pressed again: it is held by the key now, not the pedal
       _release(m.data1, now); // a repeated key ends its earlier note
       final id = state.nextPreviewId();
-      // A keyboard's velocity goes through the curve; the on-screen keys have their own (Settings › MIDI).
+      // A keyboard's velocity goes through the curve; the on-screen keys have their own (Settings › Sound › MIDI and controllers).
       final played = m.data2 / 127;
       final vel = m.source.isEmpty ? played : state.settings.velocityCurve.apply(played, state.settings.midiFixedVelocity);
       state.previewOn(layer, id, m.data1 + _bend * 2, vel);
@@ -441,7 +441,7 @@ class LiveMidi extends ChangeNotifier {
     if (!recording || from == null) return;
     // Notes begun in the pre-roll (before the record point, on the first pass) are heard, not recorded.
     if (pass == 0 && start < from - 1e-9) return;
-    // Written earlier by the recording offset, for the delay between a note and hearing it (Settings › Recording).
+    // Written earlier by the MIDI note offset, for the delay between a note and hearing it (Settings › Sound › Latency).
     final early = recordOffsetSteps;
     taken.add(TakenNote(start - early, math.max(0.25, end - start), pitch, vel, pass));
   }
@@ -481,7 +481,7 @@ class LiveMidi extends ChangeNotifier {
     return (s + wraps, pass);
   }
 
-  /// A Note On's velocity through Settings › MIDI's curve (its UMP packet too).
+  /// A Note On's velocity through Settings › Sound › MIDI and controllers's curve (its UMP packet too).
   MidiMessage _curved(MidiMessage m, double vel) {
     final words = m.ump;
     if (words == null) return m.withData2((vel * 127).round().clamp(1, 127));
@@ -590,7 +590,7 @@ class LiveMidi extends ChangeNotifier {
     state.deviceMidiRelease();
   }
 
-  /// Settings › Metronome and recording's offset in sixteenth steps at the project's tempo.
+  /// Settings › Sound › Recording and metronome's offset in sixteenth steps at the project's tempo.
   double get recordOffsetSteps => state.settings.recordOffsetMs / 1000 * state.project.bpm / 15;
 
   void _releaseAll() {

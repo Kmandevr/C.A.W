@@ -1,4 +1,4 @@
-// The display-rate channel: lists the screen's modes and what may limit its rate, and asks for a rate.
+// The display-rate channel: lists the screen's modes and what may limit its rate, asks for a rate, and keeps the screen on (#244).
 package com.kmandevr.caw
 
 import android.app.Activity
@@ -6,6 +6,7 @@ import android.content.Context
 import android.os.Build
 import android.os.PowerManager
 import android.view.Display
+import android.view.WindowManager
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 
@@ -54,6 +55,15 @@ class DisplayRate(private val activity: Activity) : MethodChannel.MethodCallHand
 
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
         when (call.method) {
+            // Settings › App › Keep the screen awake (#244): the window's FLAG_KEEP_SCREEN_ON, set or cleared.
+            "keepScreenOn" -> {
+                val on = call.argument<Boolean>("on") == true
+                activity.runOnUiThread {
+                    if (on) activity.window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                    else activity.window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                }
+                result.success(null)
+            }
             "info" -> {
                 val d = display() ?: return result.success(mapOf("modes" to emptyList<Any>()))
                 fun m(x: Display.Mode) = mapOf(

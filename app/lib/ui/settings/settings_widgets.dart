@@ -1,10 +1,12 @@
-// Settings' row building blocks: a row that a search can scroll to and flash, and its switch, choice and slider forms.
+// Settings' building blocks: a group's glass card with its More fold (#244), a row that a search can scroll to and flash, and its switch, choice and slider forms.
 import 'package:flutter/material.dart';
 
 import '../../model/settings.dart';
+import '../glass.dart';
 import '../haptics.dart';
 import '../motion.dart';
 import '../theme.dart';
+import '../tokens.dart';
 import '../widgets.dart';
 import 'settings_registry.dart';
 
@@ -71,7 +73,8 @@ class _SettingRowState extends State<SettingRow> with SingleTickerProviderStateM
             borderRadius: BorderRadius.circular(10),
             border: a > 0 ? Border.all(color: color.withValues(alpha: a * 2.4)) : null,
           ),
-          child: child,
+          // The row's ink paints over the flash, not under it.
+          child: Material(type: MaterialType.transparency, child: child),
         );
       },
     );
@@ -251,3 +254,113 @@ Widget settingAction(String id, {String? subtitle, IconData? icon, Color? iconCo
 
 /// A heading inside a section page.
 Widget settingHeading(String text) => Heading(text);
+
+
+/// One group of settings (#244, owner 2026-11-18): a rounded glass card in its section's colour with a small header
+/// (the card's icon and title), its everyday [rows], and a More row that opens the rarer [more] rows in place. A
+/// search result in the fold opens it at once, so the row is there to scroll to and flash. [footer] (a note) sits
+/// under the rows, inside the card.
+class SettingsCardView extends StatefulWidget {
+  SettingsCardView({required this.card, required this.rows, this.more = const [], this.footer})
+      : super(key: ValueKey('card-${card.name}'));
+  final SettingsCard card;
+  final List<Widget> rows, more;
+  final Widget? footer;
+
+  @override
+  State<SettingsCardView> createState() => _SettingsCardViewState();
+}
+
+class _SettingsCardViewState extends State<SettingsCardView> {
+  bool _open = false;
+  String? _seen;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // A search result inside the fold opens it (and keeps it open after).
+    final id = SettingsHighlight.of(context);
+    if (id != null && id != _seen) {
+      final e = settingEntry(id);
+      if (e != null && e.card == widget.card && e.more) _open = true;
+    }
+    _seen = id;
+  }
+
+  void _toggle() {
+    Haptics.tap();
+    setState(() => _open = !_open);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final card = widget.card;
+    final c = card.section.color;
+    final level = Motion.of(context);
+    final more = widget.more;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: GlassPanel(
+        radius: Radii.l,
+        tint: c,
+        // The rows' ink paints on the card, over its glass.
+        child: Material(type: MaterialType.transparency, child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 10, 12, 2),
+            child: Row(children: [
+              Icon(card.icon, size: 15, color: c, shadows: [Shadow(color: c.withValues(alpha: 0.6), blurRadius: 8)]),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(card.title.toUpperCase(),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(fontSize: 11.5, letterSpacing: 1.3, fontWeight: FontWeight.w700, color: c)),
+              ),
+            ]),
+          ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: widget.rows),
+          ),
+          ?widget.footer,
+          if (more.isNotEmpty) ...[
+            AnimatedSize(
+              duration: Motion.move(Motion.panel, level),
+              curve: Curves.easeOutCubic,
+              alignment: Alignment.topCenter,
+              child: AnimatedSwitcher(
+                duration: Motion.fade(Motion.standard, level),
+                child: !_open
+                    ? const SizedBox(width: double.infinity, key: ValueKey('fold-shut'))
+                    : Padding(
+                        key: ValueKey('fold-${card.name}'),
+                        padding: const EdgeInsets.symmetric(horizontal: 4),
+                        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: more),
+                      ),
+              ),
+            ),
+            InkWell(
+              key: ValueKey('more-${card.name}'),
+              onTap: _toggle,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(12, 8, 8, 8),
+                child: Row(children: [
+                  Expanded(
+                    child: Text(_open ? 'Less' : 'More (${card.entries.where((e) => e.more && settingAvailable(e)).length})',
+                        style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: c.withValues(alpha: 0.9))),
+                  ),
+                  AnimatedRotation(
+                    turns: _open ? 0.5 : 0,
+                    duration: Motion.move(Motion.standard, level),
+                    child: Icon(Icons.expand_more, size: 18, color: c),
+                  ),
+                ]),
+              ),
+            ),
+          ] else
+            const SizedBox(height: 6),
+        ])),
+      ),
+    );
+  }
+}

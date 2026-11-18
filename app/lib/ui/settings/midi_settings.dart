@@ -1,5 +1,5 @@
-// Settings › MIDI and input: the devices (midi_devices_settings.dart), the keyboard and channel read, the velocity
-// curve, MIDI thru and the on-screen keys.
+// Settings › Sound › MIDI and controllers (#244): the devices (midi_devices_settings.dart), the keyboard and channel
+// read, the velocity curve, MIDI thru, MPE and the bend range, controller mappings and the on-screen keys, in one card.
 import 'package:flutter/material.dart';
 
 import '../../model/live_midi.dart';
@@ -7,10 +7,11 @@ import '../../model/settings.dart';
 import '../frame/live_keys.dart' show noteName;
 import 'midi_devices_settings.dart';
 import 'settings_deps.dart';
+import 'settings_registry.dart';
 import 'settings_widgets.dart';
 
-class MidiSettings extends StatelessWidget {
-  const MidiSettings({super.key, required this.deps});
+class MidiCard extends StatelessWidget {
+  const MidiCard({super.key, required this.deps});
   final SettingsDeps deps;
 
   @override
@@ -18,9 +19,8 @@ class MidiSettings extends StatelessWidget {
     final s = deps.settings;
     final midi = LiveMidi.current;
     final connected = midi?.devices ?? const <String>[];
-    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-      MidiDevicesSettings(deps: deps),
-      settingHeading('Playing'),
+    return SettingsCardView(card: SettingsCard.midi, rows: [
+      MidiDevicesSettings(deps: deps, only: const {'midi.devices'}),
       settingDropdown<String>(
         'midi.device',
         s.midiDevice,
@@ -57,15 +57,18 @@ class MidiSettings extends StatelessWidget {
           VelocityCurve.fixed => 'Every note at ${(s.midiFixedVelocity * 100).round()}%',
         },
       ),
-      settingSlider('midi.fixedVelocity', s,
-          value: s.midiFixedVelocity, min: 0.05, max: 1, divisions: 19, enabled: s.velocityCurve == VelocityCurve.fixed,
-          show: (v) => '${(v * 100).round()}%', set: (x, v) => x.midiFixedVelocity = v, reset: 0.8,
-          subtitle: s.velocityCurve == VelocityCurve.fixed ? null : 'Used with the Fixed curve'),
       settingSwitch('midi.thru', s.midiThru, (v) => s.update((x) => x.midiThru = v),
           icon: Icons.call_split,
           subtitle: s.midiThru
               ? 'A keyboard plays the armed track, else the selected one'
               : 'A keyboard sounds only on a track being recorded'),
+    ], more: [
+      MidiDevicesSettings(deps: deps, only: const {'midi.bluetooth'}),
+      settingSlider('midi.fixedVelocity', s,
+          value: s.midiFixedVelocity, min: 0.05, max: 1, divisions: 19, enabled: s.velocityCurve == VelocityCurve.fixed,
+          show: (v) => '${(v * 100).round()}%', set: (x, v) => x.midiFixedVelocity = v, reset: 0.8,
+          subtitle: s.velocityCurve == VelocityCurve.fixed ? null : 'Used with the Fixed curve'),
+      MidiDevicesSettings(deps: deps, only: const {'midi.mpe', 'midi.bendRange', 'midi.mappings'}),
       settingSwitch('midi.keysVelocity', s.keysVelocity == 0, (v) => s.update((x) => x.keysVelocity = v ? 0 : 0.8),
           icon: Icons.touch_app_outlined,
           subtitle: s.keysVelocity == 0

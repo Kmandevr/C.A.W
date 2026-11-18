@@ -1,6 +1,7 @@
 // Pins how much of Arrange rebuilds per frame while it scrolls and plays (#241): a scroll frame rebuilds nothing; a
 // lanes window that moves on builds only the clips coming into view, not every lane's clips again; the timeline
-// growing ahead near its end doesn't rebuild the whole arrangement each frame; playing rebuilds only the playhead.
+// growing ahead near its end doesn't rebuild the whole arrangement each frame; playing rebuilds only the playhead; a
+// selection rebuilds only the headers and clips it changes (#235).
 import 'package:caw/engine/engine.dart';
 import 'package:caw/model/app_state.dart';
 import 'package:caw/model/project.dart';
@@ -110,6 +111,34 @@ void main() {
     expect(perFrame.skip(1).every((n) => n <= 8), isTrue, reason: 'the playhead alone: $perFrame');
 
     s.meters = const EngineMeters();
+    await tester.pump(const Duration(seconds: 1));
+
+    // Selecting a clip on another track (#235): only the two headers and the two clips whose selection changed build
+    // again, not every track's header and clip (each header was about 125 widgets, 16 of them on every selection).
+    h().jumpTo(0); // the first clips in view
+    await tester.pump(const Duration(seconds: 1));
+    var headers = 0, clips = 0, all = 0;
+    w.debugOnRebuildDirtyWidget = (e, _) {
+      all++;
+      final t = e.widget.runtimeType.toString();
+      if (t == '_TimelineHeader') headers++;
+      if (t == '_TimelineClip') clips++;
+    };
+    final perSelect = <int>[];
+    for (var k = 0; k < 4; k++) {
+      headers = clips = all = 0;
+      final l = p.layers[4 + k];
+      s.selectClip(l, l.clips.first);
+      await tester.pump(const Duration(milliseconds: 8));
+      perSelect.add(all);
+      if (k == 0) continue; // the first also brings in the clip bar
+      expect(headers, 2, reason: 'the headers losing and taking the selection');
+      expect(clips, 2, reason: 'the clips losing and taking the selection');
+    }
+    // About 3,760 a selection before #235.
+    expect(perSelect.skip(1).every((n) => n < 1900), isTrue, reason: '$perSelect');
+    w.debugOnRebuildDirtyWidget = null;
+
     await tester.pumpWidget(const SizedBox());
     await tester.pump(const Duration(seconds: 2));
     s.dispose();

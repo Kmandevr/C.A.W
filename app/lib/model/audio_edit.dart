@@ -1,5 +1,6 @@
 // Audio clips on tracks, as the app edits them: importing files into the project's storage, audio tracks, and every
 // clip edit (move, trim, split, fades, gain, reverse, pitch, mode, takes), each one undo step.
+import 'track_defaults.dart';
 import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
@@ -152,7 +153,7 @@ extension AudioEdit on AppState {
   LayerDoc addAudioTrack({String? name, LayerDoc? after}) {
     final p = project;
     final track = LayerDoc(id: newId('l'), name: name == null || name.isEmpty ? 'Audio ${p.layers.length + 1}' : name,
-        color: p.layers.length % LayerDoc.trackColors, parentId: after?.parentId, volume: 1, input: AudioInputDoc());
+        color: newTrackColor(NewTrackKind.audio), parentId: after?.parentId, volume: 1, input: newTrackInput());
     final at = after == null ? p.layers.length : p.layers.indexOf(after) + 1;
     editProject((p) => p.layers.insert(at.clamp(0, p.layers.length), track));
     return track;
@@ -182,7 +183,7 @@ extension AudioEdit on AppState {
     if (!known) (_unsized[this] ??= {}).add(clip.id);
     editLayer(track, (l) {
       l.audioClips.add(clip);
-      l.input ??= AudioInputDoc();
+      l.input ??= newTrackInput();
     });
     selectAudioClip(track, clip);
     if (!known) unawaited(measureAsset(asset));
@@ -272,7 +273,7 @@ extension AudioEdit on AppState {
         clip.startSteps = at;
         target.audioClips.add(clip);
       }
-      target.input ??= AudioInputDoc();
+      target.input ??= newTrackInput();
     });
     endUndoStep();
     selectAudioClip(target, placed);
@@ -441,7 +442,7 @@ extension AudioEdit on AppState {
 
   void editInput(LayerDoc layer, void Function(AudioInputDoc input) change) {
     endUndoStep();
-    editLayer(layer, (l) => change(l.input ??= AudioInputDoc()));
+    editLayer(layer, (l) => change(l.input ??= newTrackInput()));
     endUndoStep();
   }
 

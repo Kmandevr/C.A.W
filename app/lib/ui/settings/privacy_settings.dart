@@ -1,11 +1,10 @@
-// Settings › About and beta › Privacy (beta readiness plan E3; the published policy's name for it): anonymous
-// telemetry on or off, "Show exactly what's sent", My data, Send feedback, the Privacy Policy and Terms, and the public
-// dashboard.
+// Settings › App › Privacy and feedback › Privacy (beta readiness plan E3; the published policy's name for it):
+// anonymous telemetry on or off, "Show exactly what's sent", My data, the Privacy Policy and Terms (their one place,
+// #244), and the public dashboard. Send feedback lives beside the Privacy row, not here.
 import 'package:flutter/material.dart';
 
 import '../../model/telemetry/telemetry.dart';
 import '../panel_motion.dart';
-import '../privacy/feedback_sheet.dart';
 import '../privacy/my_data_page.dart';
 import '../privacy/privacy_pages.dart';
 import '../theme.dart';
@@ -38,7 +37,7 @@ class PrivacyPage extends StatelessWidget {
       );
 }
 
-/// The About and beta row's line for Privacy.
+/// The Privacy row's line.
 String privacySummary(Telemetry? t) => switch (t) {
       null => 'Anonymous telemetry, what\'s sent and My data',
       final t => [
@@ -87,9 +86,6 @@ class PrivacySettings extends StatelessWidget {
             icon: Icons.receipt_long_outlined, iconColor: Neon.yellow,
             subtitle: reports == 0 ? 'No reports yet' : '$reports report${reports == 1 ? '' : 's'}: see, check, export or delete them',
             onTap: t == null ? null : () => showMyData(context, t)),
-        settingAction('privacy.feedback',
-            icon: Icons.rate_review_outlined, iconColor: Neon.pink,
-            onTap: t == null ? null : () => showFeedbackSheet(context, t)),
         settingHeading('The texts'),
         settingAction('privacy.policy',
             icon: Icons.policy_outlined, iconColor: Neon.dim, onTap: () => showLegalText(context, LegalText.privacy)),

@@ -1,4 +1,4 @@
-// Settings › Keys and shortcuts: the key bindings editor, Vim keys, the key hint strip, and the symbol key row.
+// Settings › App › Keys and shortcuts (#244): the key bindings editor, the key hint strip and the symbol key row; under More, Vim keys.
 import 'package:flutter/material.dart';
 
 import '../../model/settings.dart';
@@ -6,6 +6,7 @@ import '../glass.dart';
 import '../keyboard/key_area.dart';
 import '../theme.dart';
 import 'settings_deps.dart';
+import 'settings_registry.dart';
 import 'settings_widgets.dart';
 
 class KeysSettings extends StatelessWidget {
@@ -15,18 +16,16 @@ class KeysSettings extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final s = deps.settings;
-    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+    return SettingsCardView(card: SettingsCard.keys, rows: [
       if (deps.onEditKeys != null)
         settingAction('keys.bindings', icon: Icons.keyboard_alt_outlined, iconColor: Neon.yellow,
             onTap: () => deps.onEditKeys!(context)),
-      settingSwitch('keys.vim', s.vimCode, (v) => s.update((x) => x.vimCode = v), icon: Icons.keyboard),
       // On by default once a hardware keyboard is used (or on a desktop); a choice here sticks.
       ValueListenableBuilder<bool>(
         valueListenable: KeyAreaHost.keyboardSeen,
         builder: (context, _, _) => settingSwitch('keys.hints', KeyAreaHost.hintsOn(s.keyHints),
             (v) => s.update((x) => x.keyHints = v), icon: Icons.tips_and_updates_outlined),
       ),
-      settingSwitch('keys.vimKeys', s.vimKeys, (v) => s.update((x) => x.vimKeys = v), icon: Icons.keyboard_alt_outlined),
       settingAction('keys.keyRow',
           icon: Icons.space_bar, iconColor: Neon.yellow,
           subtitle: s.editor.keyRow.map((k) => k.trim()).join('  '),
@@ -36,6 +35,9 @@ class KeysSettings extends StatelessWidget {
                 isScrollControlled: true,
                 builder: (_) => _KeyRowEditor(settings: s),
               )),
+    ], more: [
+      settingSwitch('keys.vim', s.vimCode, (v) => s.update((x) => x.vimCode = v), icon: Icons.keyboard),
+      settingSwitch('keys.vimKeys', s.vimKeys, (v) => s.update((x) => x.vimKeys = v), icon: Icons.keyboard_alt_outlined),
     ]);
   }
 }

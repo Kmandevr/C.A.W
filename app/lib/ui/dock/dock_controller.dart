@@ -87,7 +87,7 @@ class DockController extends ChangeNotifier {
   /// The current screen shape. The shell sets it from its size on every layout, without a notification.
   FormFactor form = FormFactor.desktop;
 
-  /// The desktop frame on a small window (Settings › Layout › Desktop on a phone): until a layout is saved, every
+  /// The desktop frame on a small window (Settings › Appearance and feel › Layout and sizes › Desktop on a phone): until a layout is saved, every
   /// panel starts as a tab of one full-size group instead of side by side.
   bool narrow = false;
 

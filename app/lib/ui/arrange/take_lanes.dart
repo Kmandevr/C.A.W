@@ -1,7 +1,7 @@
 // A track's take lanes in the arranger (#209, comping; owner 2026-11-17): a row per take of its clips with takes,
 // under the track like the automation lanes. Swipe across a take to pick that part into the comp; tap selects the
 // clip, double tap plays the take whole, hold opens the menu (Use this take, Flatten, Hide), hold-and-move moves a
-// join of the comp.
+// join of the comp. A header's bottom edge drags the lanes' height, as an automation lane's does.
 import 'dart:math' as math;
 
 import 'package:flutter/gestures.dart';
@@ -23,14 +23,24 @@ import 'audio_waveform.dart';
 import 'clip_preview.dart';
 import 'long_press_menu.dart';
 import 'track_color.dart';
-import 'track_lanes.dart' show kArrangeLaneHeight;
+import 'track_lanes.dart' show LaneHeightGrip, kArrangeLaneHeight, laneHeightDrag;
 
-/// A take lane's row height: the automation lanes' default.
+/// A take lane's row height until it is dragged: the automation lanes' default.
 const double kTakeLaneHeight = kArrangeLaneHeight;
+
+/// What [laneHeightDrag] names [layer]'s take lanes by while their height is dragged.
+String takeHeightKey(LayerDoc layer) => 'takes|${layer.id}';
+
+/// Each of [layer]'s take lanes' row height: as being dragged, as saved ([LayerDoc.takeHeight]), or the default.
+double takeLaneHeight(AppState state, LayerDoc layer) {
+  final d = laneHeightDrag(state).value;
+  if (d != null && d.$1 == takeHeightKey(layer)) return d.$2;
+  return layer.takeHeight ?? kTakeLaneHeight;
+}
 
 /// The height [layer]'s open take lanes add under it (none while hidden or without takes).
 double takeLanesHeight(LayerDoc layer) =>
-    layer.showTakes && !layer.isFolder ? takeLaneCount(layer) * kTakeLaneHeight : 0;
+    layer.showTakes && !layer.isFolder ? takeLaneCount(layer) * (layer.takeHeight ?? kTakeLaneHeight) : 0;
 
 /// The menu of take lane [index] (its header's, and its body's with [clip] and [at] for a clip's own actions).
 Future<void> takeLaneMenu(BuildContext context, AppState state, LayerDoc layer, int index, Offset at,
@@ -68,7 +78,8 @@ Future<void> takeLaneMenu(BuildContext context, AppState state, LayerDoc layer, 
 }
 
 /// The take lanes' names under a track's header, a row each, as the automation lanes' headers look; a hold, a
-/// double tap or a right-click on the name opens the lane's menu.
+/// double tap or a right-click on the name opens the lane's menu, and a row's bottom edge drags the height every
+/// take lane of the track shares (saved as [LayerDoc.takeHeight]; a double tap on it goes back to the default).
 class TakeLaneHeaders extends StatelessWidget {
   const TakeLaneHeaders({super.key, required this.state, required this.layer, required this.indent});
   final AppState state;
@@ -76,31 +87,44 @@ class TakeLaneHeaders extends StatelessWidget {
   final double indent;
 
   @override
-  Widget build(BuildContext context) {
-    final color = trackColor(state, layer);
-    final clips = takeClips(layer);
-    return Column(children: [
-      for (var i = 0; i < takeLaneCount(layer); i++)
-        Container(key: ValueKey('take-header-${layer.id}-$i'), height: kTakeLaneHeight,
-          padding: EdgeInsets.only(left: 10 + indent, right: 6),
-          decoration: BoxDecoration(color: Color.lerp(Neon.panel, color, 0.08),
-            border: Border(left: BorderSide(color: color.withValues(alpha: 0.6), width: 2),
-              bottom: BorderSide(color: Neon.line.withValues(alpha: 0.6)))),
-          child: GestureDetector(key: ValueKey('take-name-${layer.id}-$i'), behavior: HitTestBehavior.opaque,
-            onLongPressStart: (d) => takeLaneMenu(context, state, layer, i, d.globalPosition),
-            onDoubleTapDown: (d) => takeLaneMenu(context, state, layer, i, d.globalPosition),
-            onSecondaryTapDown: (d) => takeLaneMenu(context, state, layer, i, d.globalPosition),
-            child: Row(children: [
-              Expanded(child: Text('Take ${i + 1}', maxLines: 1, overflow: TextOverflow.ellipsis,
-                  style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: color))),
-              // A dot while some clip's comp plays part of this take.
-              AnimatedOpacity(opacity: clips.any((c) => i < c.takes.length && c.comp.any((p) => p.take == c.takes[i]))
-                  ? 1 : 0, duration: EditMotion.of(context, EditMotionKind.lengths) ?? Duration.zero,
-                child: Container(key: ValueKey('take-used-${layer.id}-$i'), width: 6, height: 6,
-                    decoration: BoxDecoration(color: color, shape: BoxShape.circle))),
-            ]))),
-    ]);
-  }
+  Widget build(BuildContext context) => ValueListenableBuilder<(String, double)?>(
+    valueListenable: laneHeightDrag(state),
+    builder: (context, _, _) {
+      final color = trackColor(state, layer);
+      final clips = takeClips(layer);
+      final h = takeLaneHeight(state, layer);
+      return Column(children: [
+        for (var i = 0; i < takeLaneCount(layer); i++)
+          Container(key: ValueKey('take-header-${layer.id}-$i'), height: h,
+            padding: EdgeInsets.only(left: 10 + indent, right: 6),
+            decoration: BoxDecoration(color: Color.lerp(Neon.panel, color, 0.08),
+              border: Border(left: BorderSide(color: color.withValues(alpha: 0.6), width: 2),
+                bottom: BorderSide(color: Neon.line.withValues(alpha: 0.6)))),
+            child: Stack(children: [
+              Positioned.fill(child: GestureDetector(key: ValueKey('take-name-${layer.id}-$i'),
+                behavior: HitTestBehavior.opaque,
+                onLongPressStart: (d) => takeLaneMenu(context, state, layer, i, d.globalPosition),
+                onDoubleTapDown: (d) => takeLaneMenu(context, state, layer, i, d.globalPosition),
+                onSecondaryTapDown: (d) => takeLaneMenu(context, state, layer, i, d.globalPosition),
+                child: Row(children: [
+                  Expanded(child: Text('Take ${i + 1}', maxLines: 1, overflow: TextOverflow.ellipsis,
+                      style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: color))),
+                  // A dot while some clip's comp plays part of this take.
+                  AnimatedOpacity(opacity: clips.any((c) => i < c.takes.length &&
+                      c.comp.any((p) => p.take == c.takes[i])) ? 1 : 0,
+                    duration: EditMotion.of(context, EditMotionKind.lengths) ?? Duration.zero,
+                    child: Container(key: ValueKey('take-used-${layer.id}-$i'), width: 6, height: 6,
+                        decoration: BoxDecoration(color: color, shape: BoxShape.circle))),
+                ]))),
+              // The bottom edge: the take lanes' height, one for the track's take lanes (lane i's edge follows the
+              // finger, so the rows above it grow with it).
+              Positioned(left: 0, right: 0, bottom: 0, height: 8, child: LaneHeightGrip(
+                key: ValueKey('take-height-${layer.id}-$i'), state: state, dragKey: takeHeightKey(layer),
+                color: color, height: () => takeLaneHeight(state, layer), rowsAbove: i + 1,
+                onSave: (v) => state.setTakeHeight(layer, v))),
+            ])),
+      ]);
+    });
 }
 
 /// The take lanes on the timeline, level with [TakeLaneHeaders]: lane i shows take i of each clip with takes,
@@ -112,25 +136,28 @@ class TakeLaneRows extends StatelessWidget {
   final double stepW, width;
 
   @override
-  Widget build(BuildContext context) {
-    final clips = takeClips(layer);
-    final color = trackColor(state, layer);
-    final p = state.project;
-    return Column(children: [
-      for (var i = 0; i < takeLaneCount(layer); i++)
-        Container(key: ValueKey('take-row-${layer.id}-$i'), width: width, height: kTakeLaneHeight,
-          decoration: BoxDecoration(color: color.withValues(alpha: 0.03),
-              border: Border(bottom: BorderSide(color: Neon.line.withValues(alpha: 0.6)))),
-          child: Stack(children: [
-            for (final c in clips)
-              if (i < c.takes.length)
-                Positioned(left: c.start * stepW, top: 3, height: kTakeLaneHeight - 6,
-                  width: math.max(4.0, (c.end(p) - c.start) * stepW),
-                  child: TakeLaneClip(key: ValueKey('take-${c.id}-$i'), state: state, layer: layer, clip: c, index: i,
-                      stepW: stepW, color: color)),
-          ])),
-    ]);
-  }
+  Widget build(BuildContext context) => ValueListenableBuilder<(String, double)?>(
+    valueListenable: laneHeightDrag(state),
+    builder: (context, _, _) {
+      final clips = takeClips(layer);
+      final color = trackColor(state, layer);
+      final p = state.project;
+      final h = takeLaneHeight(state, layer);
+      return Column(children: [
+        for (var i = 0; i < takeLaneCount(layer); i++)
+          Container(key: ValueKey('take-row-${layer.id}-$i'), width: width, height: h,
+            decoration: BoxDecoration(color: color.withValues(alpha: 0.03),
+                border: Border(bottom: BorderSide(color: Neon.line.withValues(alpha: 0.6)))),
+            child: Stack(children: [
+              for (final c in clips)
+                if (i < c.takes.length)
+                  Positioned(left: c.start * stepW, top: 3, height: h - 6,
+                    width: math.max(4.0, (c.end(p) - c.start) * stepW),
+                    child: TakeLaneClip(key: ValueKey('take-${c.id}-$i'), state: state, layer: layer, clip: c,
+                        index: i, stepW: stepW, color: color)),
+            ])),
+      ]);
+    });
 }
 
 /// Take [index] of [clip] in its lane: the take's notes or waveform, the parts the comp plays from it lit and the

@@ -462,7 +462,7 @@ class Telemetry extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Settings › Privacy's toggle. Off stops collecting at once and wipes the queue and the day's counts (after a
+  /// Settings › App › Privacy and feedback › Privacy's toggle. Off stops collecting at once and wipes the queue and the day's counts (after a
   /// POST already on its way has its answer, so a report the relay took keeps its delete key).
   Future<void> setEnabled(bool on) async {
     _askKeep = false;
@@ -693,7 +693,7 @@ class Telemetry extends ChangeNotifier {
         await _save();
       });
 
-  /// What today's report holds so far (Settings › Privacy shows it beside the queue); null when off.
+  /// What today's report holds so far (Settings › App › Privacy and feedback › Privacy shows it beside the queue); null when off.
   Future<Map<String, Object?>?> previewToday() async {
     final s = _collecting;
     if (s == null) return null;
