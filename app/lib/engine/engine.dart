@@ -345,6 +345,15 @@ class Engine implements TempoEngine {
     return Engine._(b, h, rate);
   }
 
+  /// [create] on a background isolate: loading the library and building the engine take tens of milliseconds at
+  /// launch, which would hold up the startup reveal's frames. The engine is plain native memory, usable from the UI
+  /// isolate once made (caw_engine_create has no thread of its own to keep).
+  static Future<Engine> createOffThread({int sampleRate = defaultSampleRate}) async {
+    final rate = sampleRates.contains(sampleRate) ? sampleRate : defaultSampleRate;
+    final address = await _createOffThread(rate, cawApiVersion);
+    return Engine._(Bindings.instance, Pointer<Void>.fromAddress(address), rate);
+  }
+
   /// The playback devices, read on a background isolate (opening the backend can take tens of milliseconds).
   static Future<AudioDeviceList> audioDevices() => Isolate.run(() {
         final b = Bindings.instance;
@@ -999,6 +1008,29 @@ class Engine implements TempoEngine {
     return msg;
   }
 
+  /// [startAudio] on a background isolate (opening a device can take tens of milliseconds), after any device
+  /// choice still on its way ([configureAudio]); the engine's device lock keeps the two apart.
+  Future<String?> startAudioOffThread() {
+    if (_disposed) return Future.value('The sound engine is closed');
+    _pendingNativeOps++;
+    final done = Completer<String?>();
+    final address = _handle.address;
+    _audioQueue = _audioQueue.then((_) async {
+      try {
+        if (_audioOn && _deviceRunning()) return done.complete(null);
+        final msg = await _startAudioOffThread(address);
+        _audioOn = msg == null;
+        done.complete(msg);
+      } catch (error, stack) {
+        done.completeError(error, stack);
+      } finally {
+        _pendingNativeOps--;
+        if (_destroyRequested && _pendingNativeOps == 0) _destroyNative();
+      }
+    });
+    return done.future;
+  }
+
   /// Closes the device. Always asks the native side (a no-op when closed), so a device reopened behind a stale
   /// [audioOn] still closes.
   void stopAudio() {
@@ -1142,6 +1174,27 @@ Future<String> _loadComponentOffThread(int engineAddress, String artifactPath, S
       } finally {
         calloc.free(path);
         calloc.free(id);
+      }
+    });
+
+Future<int> _createOffThread(int rate, int apiVersion) => Isolate.run(() {
+      final b = Bindings.instance;
+      if (b.apiVersion() != apiVersion) {
+        throw StateError('engine library is API ${b.apiVersion()}, the app needs $apiVersion');
+      }
+      final h = b.create(rate);
+      if (h == nullptr) throw StateError('could not create the engine');
+      return h.address;
+    });
+
+Future<String?> _startAudioOffThread(int engineAddress) => Isolate.run(() {
+      final b = Bindings.instance;
+      final err = calloc<Uint8>(256).cast<Utf8>();
+      try {
+        final r = b.audioStart(Pointer<Void>.fromAddress(engineAddress), err, 256);
+        return r == 0 ? null : err.toDartString();
+      } finally {
+        calloc.free(err);
       }
     });
 

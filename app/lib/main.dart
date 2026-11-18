@@ -67,7 +67,9 @@ Future<void> main(List<String> args) async {
     ..setCap(settings.frameRate)
     ..setProfileCap(settings.profileFrameCap);
   FrameRateController.current = frameRate;
-  unawaited(frameRate.start());
+  // Asked for before the first frame (behind the native splash), so the startup reveal doesn't change rate partway;
+  // a slow answer doesn't hold the launch up.
+  await frameRate.start().timeout(const Duration(milliseconds: 300), onTimeout: () {});
   final state = AppState(settings: settings);
   // What follows the audio is drawn for when its frame lights up, at the rate the app draws at while things move.
   state.avSync.refreshHz = () => frameRate.movingRate > 0 ? frameRate.movingRate : AvSync.screenHz();

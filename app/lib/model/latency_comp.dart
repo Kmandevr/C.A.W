@@ -41,22 +41,30 @@ enum OffsetSource { preset, typed, slider, tapped, loopback, learned }
 const minOffsetMs = -500.0, maxOffsetMs = 2000.0;
 
 /// One device's offset: the ms it adds on top of what the platform reports, and that figure when it was set
-/// ([platformMs]; null for an older file), so a platform figure that moves a lot since asks for a check.
+/// ([platformMs]; null for an older file), so a platform figure that moves a lot since asks for a check, and where
+/// that figure came from ([platformSource]: SideLatency.source, "timestamp", "buffers" or "none"; null for an older
+/// file).
 class DeviceOffset {
-  const DeviceOffset(this.extraMs, this.source, {this.platformMs});
+  const DeviceOffset(this.extraMs, this.source, {this.platformMs, this.platformSource});
   final double extraMs;
   final OffsetSource source;
   final double? platformMs;
+  final String? platformSource;
 
-  Map<String, dynamic> toJson() =>
-      {'extra_ms': extraMs, 'source': source.name, if (platformMs != null) 'platform_ms': platformMs};
+  /// Set over a figure that was only an estimate (the queued buffers before the first timestamp, or no device
+  /// running): what it adds is not known, so the total heard as right is what stands (#241).
+  bool get overEstimate => platformMs != null && platformSource != null && platformSource != 'timestamp';
+
+  Map<String, dynamic> toJson() => {'extra_ms': extraMs, 'source': source.name,
+        if (platformMs != null) 'platform_ms': platformMs, if (platformSource != null) 'platform_source': platformSource};
 
   static DeviceOffset? fromJson(Object? o) {
     if (o is! Map || o['extra_ms'] is! num || !(o['extra_ms'] as num).isFinite) return null;
-    final p = o['platform_ms'];
+    final p = o['platform_ms'], ps = o['platform_source'];
     return DeviceOffset((o['extra_ms'] as num).toDouble().clamp(minOffsetMs, maxOffsetMs).toDouble(),
         OffsetSource.values.where((s) => s.name == o['source']).firstOrNull ?? OffsetSource.typed,
-        platformMs: p is num && p.isFinite ? p.toDouble().clamp(0, maxOffsetMs).toDouble() : null);
+        platformMs: p is num && p.isFinite ? p.toDouble().clamp(0, maxOffsetMs).toDouble() : null,
+        platformSource: const {'timestamp', 'buffers', 'none'}.contains(ps) ? ps as String : null);
   }
 }
 
@@ -343,6 +351,16 @@ class LatencyComp extends ChangeNotifier {
   /// The names the engine's device opened with (desktop routes go by them).
   String Function()? outputName, inputName;
 
+  /// The output's callback size in frames (caw_audio_status' period_frames; null or 0: not known).
+  int Function()? callbackFrames;
+
+  // The last few timestamp figures for the routed output (ms), and the callback size then.
+  final List<double> _stamps = [];
+  int _frames = 0;
+
+  /// How many timestamp figures the system figure is the median of.
+  static const stampRuns = 9;
+
   StreamSubscription<void>? _sub;
   AudioRouteInfo routeInfo = const AudioRouteInfo();
   DeviceLatency device = const DeviceLatency();
@@ -366,6 +384,21 @@ class LatencyComp extends ChangeNotifier {
         outputName: outputName?.call() ?? '', inputName: inputName?.call() ?? '', outputKind: d.output.kind,
         inputKind: d.input.kind));
     if (info.output.key != routeInfo.output.key && device.running) previousOutput = routeInfo.output;
+    // A timestamp figure is read at a random point of the callback's cycle (#241), so it moves by up to a callback
+    // from one read to the next: the median of the last few stands, started again on a new device or source.
+    final frames = callbackFrames?.call() ?? 0;
+    if (info.output.key != routeInfo.output.key || d.output.source != 'timestamp' || !d.output.running ||
+        frames != _frames) {
+      _stamps.clear();
+    }
+    _frames = frames;
+    // A jump past a callback's jitter is a real change (a new codec, a reroute): it counts from now.
+    final jitterMs = (d.sampleRate > 0 ? frames * 1000 / d.sampleRate : 0) + 5;
+    if (_stamps.isNotEmpty && (d.output.ms - median(_stamps)!).abs() > jitterMs) _stamps.clear();
+    if (d.output.source == 'timestamp' && d.output.running) {
+      _stamps.add(d.output.ms);
+      if (_stamps.length > stampRuns) _stamps.removeAt(0);
+    }
     final changed = info.output != routeInfo.output || info.input != routeInfo.input ||
         (d.output.frames - device.output.frames).abs() > 48 || (d.input.frames - device.input.frames).abs() > 48 ||
         d.running != device.running;
@@ -382,12 +415,36 @@ class LatencyComp extends ChangeNotifier {
     notifyListeners();
   }
 
-  double get platformOutputMs => device.output.ms;
+  /// The system's output figure in ms. From AAudio's timestamps it is how far the next frame to be written lies
+  /// from the moment of the read, which comes at a random point between two callbacks: the median of the last few
+  /// reads, less half a callback, is the delay from the moment a callback renders (what the playhead and
+  /// recordings count from: caw_engine_position_at), with no callback's jitter in it (#241).
+  double get platformOutputMs {
+    final o = device.output;
+    if (o.source != 'timestamp' || _stamps.isEmpty) return o.ms;
+    final half = _frames > 0 && device.sampleRate > 0 ? _frames / 2 * 1000 / device.sampleRate : 0.0;
+    return math.max(0.0, median(_stamps)! - half);
+  }
   double get platformInputMs => device.input.running ? device.input.ms : 0;
 
+  /// Where the platform's output figure comes from now (SideLatency.source; "none" with no device).
+  String get platformOutputSource => device.output.running ? device.output.source : 'none';
+
   /// The offset saved for the routed output, else its kind's preset (what the preset expects beyond the platform).
-  DeviceOffset get outputOffset => store.outputs[routeInfo.output.key] ??
-      DeviceOffset(math.max(0, presetOutputMs(routeInfo.output.kind) - platformOutputMs), OffsetSource.preset);
+  /// An offset set over an estimate keeps its total once the system's timestamps give the real figure: adding it to
+  /// that figure would count the delay twice (#241: set to 200 ms while the buffers said 21, it read 300 once the
+  /// timestamps said 121). Set over a timestamp it rides on the figure (a new codec), and the re-check asks.
+  DeviceOffset get outputOffset {
+    final o = store.outputs[routeInfo.output.key];
+    if (o == null) {
+      return DeviceOffset(math.max(0, presetOutputMs(routeInfo.output.kind) - platformOutputMs), OffsetSource.preset);
+    }
+    if (o.overEstimate && platformOutputSource == 'timestamp') {
+      return DeviceOffset(_extra(o.platformMs! + o.extraMs, platformOutputMs), o.source,
+          platformMs: o.platformMs, platformSource: o.platformSource);
+    }
+    return o;
+  }
   DeviceOffset get inputOffset => store.inputs[routeInfo.input.key] ??
       DeviceOffset(math.max(0, presetInputMs(routeInfo.input.kind) - platformInputMs), OffsetSource.preset);
 
@@ -412,7 +469,10 @@ class LatencyComp extends ChangeNotifier {
   bool get outputNeedsCheck {
     final o = store.outputs[routeInfo.output.key];
     final then = o?.platformMs;
-    return o != null && then != null && device.output.running && (platformOutputMs - then).abs() > recheckMs;
+    if (o == null || then == null || !device.output.running) return false;
+    // Set over an estimate, the total stands: only a real figure set over a real figure asks.
+    if (o.overEstimate) return false;
+    return (platformOutputMs - then).abs() > recheckMs;
   }
 
   int framesOf(double ms, int sampleRate) => (ms * sampleRate / 1000).round();
@@ -427,8 +487,8 @@ class LatencyComp extends ChangeNotifier {
   /// [save] false keeps it in memory (a slider drag saves once it ends, [saveNow]).
   void setOutputTotalMs(double totalMs, {OffsetSource source = OffsetSource.typed, bool save = true}) {
     if (!totalMs.isFinite) return;
-    store.outputs[routeInfo.output.key] =
-        DeviceOffset(_extra(totalMs, platformOutputMs), source, platformMs: platformOutputMs);
+    store.outputs[routeInfo.output.key] = DeviceOffset(_extra(totalMs, platformOutputMs), source,
+        platformMs: platformOutputMs, platformSource: platformOutputSource);
     if (save) unawaited(store.save());
     notifyListeners();
   }
