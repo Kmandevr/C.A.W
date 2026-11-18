@@ -202,6 +202,7 @@ else()
 endif()
 target_sources(caw_core PRIVATE src/thread_tuning.cpp ${CAW_THREAD_TUNING})
 target_sources(caw_core PRIVATE src/note_fx_host.cpp)  # per-note FX (#127): slot racks, the voice-bus host, the manager
+target_sources(caw_core PRIVATE src/patch.cpp src/patch_nodes.cpp)  # the patch model (routing plan step 3; not yet used)
 target_include_directories(caw_core PRIVATE src)
 target_compile_options(caw_core PRIVATE ${CAW_FLAGS})
 find_package(Threads REQUIRED)
@@ -313,6 +314,7 @@ target_include_directories(caw_cli PRIVATE src)
   target_sources(caw_tests PRIVATE tests/mix_graph_test.cpp)  # speed phase 5a/5b: pulled routes, per-node scratch, graph levels
   target_sources(caw_tests PRIVATE tests/mix_pool_test.cpp)  # speed phase 5c: the mix pool, parallel levels, the serial lane
   target_sources(caw_tests PRIVATE tests/component_bench_test.cpp)  # #197: the plug-in benchmark
+  target_sources(caw_tests PRIVATE tests/patch_test.cpp)  # the patch model: nulls, block sizes, feedback, latency, limits
   add_library(caw_test_component MODULE tests/native_component_fixture.cpp)
   target_link_libraries(caw_test_component PRIVATE CAW::SDK)
   target_compile_options(caw_test_component PRIVATE ${CAW_FLAGS})
@@ -413,6 +415,7 @@ target_include_directories(caw_cli PRIVATE src)
   target_sources(caw_rt_tests PRIVATE tests/component_bench_rt_test.cpp)  # #197: the plug-in benchmark's allocation check
   target_sources(caw_rt_tests PRIVATE tests/output_safety_rt_test.cpp)  # #244: the live output's mono check and safety limiter
   target_sources(caw_rt_tests PRIVATE tests/mixer_routing_rt_test.cpp)  # outputs, sends into tracks, feedback sends
+  target_sources(caw_rt_tests PRIVATE tests/patch_rt_test.cpp)  # the patch model: a swap allocates nothing
   target_compile_options(caw_rt_tests PRIVATE ${CAW_FLAGS})
   target_include_directories(caw_rt_tests PRIVATE src)
   add_dependencies(caw_rt_tests caw_test_component caw_bench_fixture)
@@ -440,6 +443,11 @@ add_executable(caw_bench bench/caw_bench.cpp src/capi.cpp src/capi_modulation.cp
   target_compile_options(caw_bench PRIVATE ${CAW_FLAGS})
   target_include_directories(caw_bench PRIVATE src)
   target_link_libraries(caw_bench PRIVATE caw_core)
+  # The patch model's cost against today's chain (routing plan step 3); run it on a release build.
+  add_executable(caw_patch_bench bench/patch_bench.cpp)
+  target_compile_options(caw_patch_bench PRIVATE ${CAW_FLAGS})
+  target_include_directories(caw_patch_bench PRIVATE src)
+  target_link_libraries(caw_patch_bench PRIVATE caw_core)
 endif()
 
 # The strict reference the timing tests compare with (an option on a source comes after the target's). It includes no
@@ -472,7 +480,7 @@ endif()
 # The engine's own targets take CAW_FP_FLAGS (in CAW_FLAGS) instead of the SDK's strict floating-point flags: every
 # program that links caw_core, the CLAP and VST3 host tests included (set after their subdirectories define them), so
 # no program mixes strict and fast copies of one inline function. Components and plug-ins stay strict (CAW::SDK).
-foreach(_caw_target caw_core caw_engine caw_cli caw_tests caw_rt_tests caw_bench caw_clap_tests caw_vst3_tests)
+foreach(_caw_target caw_core caw_engine caw_cli caw_tests caw_rt_tests caw_bench caw_patch_bench caw_clap_tests caw_vst3_tests)
   if(TARGET ${_caw_target})
     set_property(TARGET ${_caw_target} PROPERTY CAW_ENGINE_FP_FLAGS ON)
   endif()
