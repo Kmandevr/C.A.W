@@ -14,6 +14,8 @@ updated: 2026-11-18
 - **Sandboxing is offered, not the default.** Isolated (and any interpreted format) stays available for users who want it. The default trust for never-seen code is still open ([vision](vision.md)).
 - **Flagging and a handshake:** the owner wants bad code flagged (antivirus or similar) and something plug-ins must pass before they load. The proposals (AMSI scans on Windows, signed plug-ins, a revocation list from the hub) are in the plan, for the owner to choose.
 - **A silent built-in scanner (owner):** every plug-in gets a quick look before it is ever loaded, for obvious back doors or malicious intent. It is quiet when nothing is found. It catches the easy cases and is not a substitute for least privilege. The design is in the plan ([the pre-load scan](plugin-hosting-plan.md#the-pre-load-scan)).
+- **Declared capabilities (owner, later the same day):** plug-ins in C.A.W's own format state what they need beyond the basics, and why. Anything used but not declared is blocked outright. CLAP/VST3 findings only warn. Warnings explain, for people who don't know how software works, what each capability allows, the risk, and why an honest plug-in might need it.
+- **The hub (owner):** the companion app grows into the hub for every download and the user's whole library. The owner calls it "100% private" (scope to confirm). The C.A.W-Telemetry data feeds into it, with an admin version for the owner and the people they trust.
 
 ## 2026-11-17: Each platform's low-latency path; ASIO and rtkit stay out (owner's request, #237)
 

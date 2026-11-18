@@ -46,7 +46,9 @@ updated: 2026-11-18
 - linked sample folders are granted read-only.
 
 **The companion app** has its own package, so its own permissions:
-- It holds `REQUEST_INSTALL_PACKAGES`, `UPDATE_PACKAGES_WITHOUT_USER_ACTION` and `INTERNET`: the self-updater, the update check, telemetry and feedback. Later it becomes the AutoStacc hub (files, the account), so account tokens never live in the process that loads plug-ins.
+- It holds `REQUEST_INSTALL_PACKAGES`, `UPDATE_PACKAGES_WITHOUT_USER_ACTION` and `INTERNET`: the self-updater, the update check, telemetry and feedback. Later it becomes the AutoStacc hub (owner, 2026-11-18): every download, the user's whole library, files and the account, so account tokens never live in the process that loads plug-ins.
+- **Private (owner):** the owner calls the hub "100% private". Open: whether that means a private, closed-source repository (C.A.W itself stays Apache-2.0, [vision](vision.md)) or private data, or both.
+- **Admin view (owner):** the C.A.W-Telemetry data (telemetry and feedback) feeds into the hub, with an admin version, as AutoStacc has, that the owner and the people they trust can see. This changes where collected data is shown, so it needs the C.A.W-Telemetry repository's PLAN.md, privacy policy and access rules updated in the same change when it is built.
 - The main app talks to it only in fixed, structured messages (an update check, a telemetry report in the existing schema), never arbitrary payloads, so a plug-in can't use it to send data out.
 - It accepts only callers signed with C.A.W's own key: a custom permission with `protectionLevel="signature"`. Never `sharedUserId`, which would merge the two apps' permissions again. The main app needs a `<queries>` entry to find it.
 - **Play builds:** the Play companion carries no install permissions either, since Play does the updating.
@@ -71,8 +73,8 @@ updated: 2026-11-18
 - **When:** once per exact file hash, when a plug-in is added or built, and again before load if the file changed. **Before `dlopen`/`LoadLibrary`**, because loading already runs the library's static constructors (`.init_array`, and TLS callbacks on Windows). The verdict is cached by hash, so it costs nothing on the audio path, at play or at project open.
 - **Where:** in the engine (one C++ parser for the app and a `caw` CLI command, tested against fixtures in CI), off the audio thread, on a worker. The scanner parses untrusted files, so it runs with size and count limits and is fuzzed in CI.
 - **Two policies:**
-  - **C.A.W components** need only the host API, maths, memory and the C++ runtime, so they are held to an **allowlist of imports**. Anything else is flagged.
-  - **CLAP/VST3 binaries** legitimately use much more (GUIs, files, often a licence check over the network), so for them the same findings warn rather than block.
+  - **C.A.W components declare what they need (owner, 2026-11-18).** By default a component gets only the host API, maths, memory and the C++ runtime. Anything more is a **capability** it declares in its descriptor, each with the author's reason in plain words (for example `network`: "downloads the factory presets"). The scan checks the binary against the declaration: **anything used but not declared is blocked outright**, with no Trusted override. Declared capabilities are shown to the user with their reasons, and the hub reviews the reasons for what it lists. **[Proposal]** where it can, the host offers a capability as its own service (a file the user picks, a request to a named site through the companion), so even declared use is visible and limited.
+  - **CLAP/VST3 binaries** can't declare anything in C.A.W's format and legitimately use much more (GUIs, files, often a licence check over the network), so for them the same findings warn rather than block.
 - **What it looks for** (cheap, static):
   - **Imports:** networking (`socket`, `connect`, `getaddrinfo`, WinHTTP, WinINet, Winsock); starting programs (`execve`, `fork`, `system`, `popen`, `CreateProcess`, `ShellExecute`); loading more code at run time (`dlopen`, `dlsym`, `LoadLibrary`, `GetProcAddress`); making memory executable (`mprotect`, `VirtualProtect`, `VirtualAlloc` with execute); debugging other processes (`ptrace`); keyboard hooks, the registry, the clipboard; encryption APIs (a ransomware hint); and on Android `JNI_OnLoad` or other JNI use, which reaches Android's Java APIs.
   - **Direct system calls** in code sections, which bypass the import table: `svc #0` on Arm64 (fixed-width instructions, so a reliable scan) and `syscall` on x86-64 (a byte scan, so a hint only).
@@ -81,7 +83,23 @@ updated: 2026-11-18
   - **Strings:** URLs and IP addresses, shell paths (`/system/bin/sh`, `cmd.exe`, `powershell`), `.onion`, browser-profile or wallet paths.
   - **Reputation:** the hub's known-bad and known-good hashes, and the signature state.
   - **Source builds:** the source too, for networking and process headers, inline assembly and platform headers.
-- **Verdicts:** clean (silent), notice, warning (the user sees why before choosing Trusted), blocked. **Open (owner):** which findings block and which only warn.
+- **Verdicts:** clean (silent), notice, warning (the user sees why before choosing Trusted), blocked. For C.A.W components, undeclared use blocks; for CLAP/VST3, the owner chooses which findings block.
+- **Warnings people can follow (owner, 2026-11-18):** each finding is explained for someone who doesn't know how software works: what it lets the plug-in do, what could go wrong, and why an honest plug-in might need it. The draft wording is below; how it looks is the owner's to decide.
+
+| Capability | What it lets the plug-in do | The risk | Why an honest plug-in might need it |
+| --- | --- | --- | --- |
+| Internet | Send and receive data over the internet | It could send your projects, recordings or samples to someone else, or download more code | Checking a licence, downloading presets or samples, updates, cloud sync |
+| Reading files | Open files outside its own folder | It could read your projects and samples | Loading samples, impulse responses, wavetables or presets |
+| Writing files | Change or create files | It could change or delete your work | Saving recordings, renders or presets |
+| Starting programs | Run another program on the device | It could run anything at all, with C.A.W's access | Almost never for audio; sometimes a helper installer on desktop |
+| Loading more code later | Load code the scan never saw | It can hide what it really does | Optional speed-ups for some processors, or hosting other plug-ins |
+| Making new code while running | Turn data into runnable code | Same: hides what it does | A plug-in with its own scripting or fast-compile engine |
+| Phone system features (Android) | Use Android's own features through C.A.W | It could use the microphone or other permissions you gave C.A.W | Rare: device sensors |
+| Background threads | Do work alongside the audio | It could use a lot of battery or processor | Loading large samples, heavy offline processing |
+| Encryption | Scramble or unscramble data | A sign of ransomware, which locks your files | Licence checks, protected sample libraries |
+| Keyboard, clipboard, screen | See what you type, copy or show | Spying | Almost never for audio |
+| Scrambled or packed code | Hide its own contents | The scan can't see what it does | Copy protection in commercial plug-ins |
+
 - **Limits:** it stops lazy and obvious malware. Code built to evade it (looking functions up by walking memory, encrypted payloads, harmless-looking imports) gets past, as it does with any static scanner. A false positive must never silently break a legitimate plug-in.
 - **Dependencies:** none needed; a small ELF/PE reader of C.A.W's own is enough. **[Assumption]** LIEF (Apache-2.0) for parsing and YARA (BSD-3-Clause) for signature rules are permissive candidates; check the licences before adopting either.
 
@@ -118,5 +136,5 @@ updated: 2026-11-18
 4. What users see on a crash: bypass, mute, or a notice?
 5. Are plug-in GUIs (VST3 editors, CLAP GUI embedding) in scope for 1.1.0?
 6. Which trust a plug-in gets the first time it is seen (already open in [vision](vision.md)).
-7. Which flagging and signing parts to build ([least privilege](#least-privilege-and-the-companion-app)), whether unsigned code may load at all, which pre-load scan findings block, and how a warning looks.
-8. Which release the companion app comes in, and whether it starts as the updater alone or as the AutoStacc hub.
+7. Which flagging and signing parts to build ([least privilege](#least-privilege-and-the-companion-app)), whether unsigned code may load at all, which findings block for CLAP/VST3, the capability list, and how a warning looks.
+8. Which release the companion app comes in, whether it starts as the updater alone or as the AutoStacc hub, and what "100% private" covers.
