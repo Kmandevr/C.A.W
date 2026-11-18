@@ -30,13 +30,7 @@ Finish and release 1.0.6-alpha.1, the usability release (owner, 2026-11-18). The
   - Owner answers: updater and trust first; the full AutoStacc look (brand assets still needed from the owner).
 - **Audit (2026-11-18):** 10 issues closed; #245 collects the performance leftovers. CI build jobs are capped (f8805d3).
 - **Owner phone checks with 1.0.6:** #20 (keyboard Backspace), #31 (one USB and one BLE MIDI keyboard), #204 (power, heat and frames baseline).
-- **Owner questions:**
-  - Windows x86-64-v3: a second DLL, or the minimum CPU;
-  - the AutoStacc brand;
-  - the pack's 4th device;
-  - routing and hosting plan questions;
-  - TERMS governing law;
-  - store accounts.
+- **Owner questions:** Windows x86-64-v3 (a second DLL, or the minimum CPU); the AutoStacc brand; the pack's 4th device; routing and hosting plan questions; TERMS governing law; store accounts.
 
 ## Next
 1. Collect the two agents' reports, then start #244 and the quick wins.
