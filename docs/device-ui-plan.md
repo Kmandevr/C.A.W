@@ -1,12 +1,12 @@
 ---
 title: Device UI plan
-summary: The owner's 2026-11-17 direction for every device's UI (collapsible FX chain, Vital-like Flagship, visual-first effects with knobs, the shared QoL kit) and a plan per device; planned for 1.0.6, not built.
-updated: 2026-11-17
+summary: The owner's 2026-11-17 direction for every device's UI (collapsible FX chain, Vital-like Flagship, visual-first effects with knobs, the shared QoL kit) and a plan per device; planned for 1.0.7, not built.
+updated: 2026-11-18
 ---
 
 # Device UI plan
 
-**[Proposal]** None of this is built. The device kit, FX chain and Flagship ship in 1.0.6; the new devices in 1.0.7 (#227, #231). The owner gives a yes on each device's plan before it is built.
+**[Proposal]** None of this is built. The device kit, FX chain and Flagship ship in 1.0.7; the new devices in 1.0.8 (#227, #231). The owner gives a yes on each device's plan before it is built.
 
 ## The owner's direction (2026-11-17)
 - **FX chain:** each effect is a collapsed row with power, name, a tiny live visual and Mix.

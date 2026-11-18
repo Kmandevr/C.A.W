@@ -4,7 +4,7 @@ Commit: a7525d6 (session branch = 1.0.5-alpha.1, in PR #238; Main has v1.0.4-alp
 Branch: ccr-56285e11-0xrj3h. Main is protected: PRs only; merge yourself when CI is green. Publish with app.yml's workflow_dispatch (installables + release) on Main. Each release needs a CHANGELOG.md entry, copied to app/assets/CHANGELOG.md.
 
 ## Goal
-Ship 1.0.5-alpha.1 (#215). Then 1.0.6: FX consolidation and the device UI (#227, #231), with routing step S1 designed into it. Then 1.0.7. Silent 1.1.0 groundwork rides along (docs/routing-plan.md, docs/plugin-hosting-plan.md).
+Ship 1.0.5-alpha.1 (#215). Then 1.0.7: FX consolidation and the device UI (#227, #231), with routing step S1 designed into it. Then 1.0.8. Silent 1.1.0 groundwork rides along (docs/routing-plan.md, docs/plugin-hosting-plan.md).
 
 ## Done and verified
 - 1.0.5 holds everything since 1.0.4:
@@ -34,4 +34,4 @@ Ship 1.0.5-alpha.1 (#215). Then 1.0.6: FX consolidation and the device UI (#227,
 
 ## Next
 1. Merge #238 and release.
-2. Start 1.0.6: #227 consolidation plus #231 kit, Flagship, FX chain, React to… and live preset preview. Ask the owner for each device's look first.
+2. Start 1.0.7: #227 consolidation plus #231 kit, Flagship, FX chain, React to… and live preset preview. Ask the owner for each device's look first.
