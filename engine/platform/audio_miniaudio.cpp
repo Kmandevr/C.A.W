@@ -114,6 +114,12 @@ struct Audio {
     // device at its settings (reopenAfterReroute).
     std::atomic<bool> reopen{false};
     int fifoMeanHold = 0;  // the frames it holds back on average: in the latency figures that align recordings
+    // #241's diagnostic (caw_audio_status "clock" and the input's counters): what the streams have done since they
+    // opened, so a device run shows whether frames go missing between the capture, the engine and the speaker.
+    // Relaxed atomics, each written on one callback's thread only; reset before the stream starts.
+    std::atomic<int64_t> outCallbacks{0}, outFrames{0}, outRendered{0}, outLate{0};
+    std::atomic<int32_t> outMin{0}, outMax{0};
+    std::chrono::steady_clock::time_point openedAt{}, inputOpenedAt{};
     // Low latency on WASAPI (#237): the engine's periods read before the open (wasapiPeriods) and the smallest
     // period asked from them (0: none asked, miniaudio's 10 ms default), with where it came from ("shared_engine":
     // IAudioClient3's shared-mode engine period, "device_period": the exclusive minimum, "none").
@@ -302,7 +308,32 @@ int32_t aaudioBufferFrames(const Audio* a) {
     const int32_t n = get ? get(a->device.aaudio.pStreamPlayback) : 0;
     return n > 0 ? n : 0;
 }
+
+// A stream's underruns (output) or overruns (input) since it opened (AAudioStream_getXRunCount, NDK API 26, looked
+// up as above); -1 unknown. The caller holds that device's reroute lock.
+int32_t aaudioXRuns(const Audio* a, void* stream) {
+    if (a->context.backend != ma_backend_aaudio || !a->context.aaudio.hAAudio || !stream) return -1;
+    using Getter = int32_t (*)(void*);
+    auto get = reinterpret_cast<Getter>(dlsym(a->context.aaudio.hAAudio, "AAudioStream_getXRunCount"));
+    return get ? get(stream) : -1;
+}
+int32_t outputXRuns(Audio* a) {
+    if (a->context.backend != ma_backend_aaudio) return -1;  // the reroute lock is AAudio's
+    ma_mutex_lock(&a->device.aaudio.rerouteLock);
+    const int32_t n = aaudioXRuns(a, a->device.aaudio.pStreamPlayback);
+    ma_mutex_unlock(&a->device.aaudio.rerouteLock);
+    return n;
+}
+int32_t inputXRuns(const Audio* a) {
+    if (!a->capture || a->context.backend != ma_backend_aaudio) return -1;
+    ma_mutex_lock(&a->capture->aaudio.rerouteLock);
+    const int32_t n = aaudioXRuns(a, a->capture->aaudio.pStreamCapture);
+    ma_mutex_unlock(&a->capture->aaudio.rerouteLock);
+    return n;
+}
 #else
+int32_t outputXRuns(Audio*) { return -1; }
+int32_t inputXRuns(const Audio*) { return -1; }
 void readAAudioModes(Audio*) {}
 int32_t aaudioBurst(const Audio*) { return 0; }
 int32_t aaudioBufferFrames(const Audio*) { return 0; }
@@ -389,6 +420,14 @@ void callback(ma_device* dev, void* output, const void* input, ma_uint32 frames)
     const double budget = static_cast<double>(frames) / static_cast<double>(dev->sampleRate);
     // The load per frame rendered: through the FIFO a callback renders more or fewer frames than it plays.
     a->owner->engine->reportLoad(budget > 0 ? used / budget : 0.0, static_cast<int>(frames), rendered);
+    // The clock diagnostic (#241): this thread is the only writer.
+    a->outCallbacks.fetch_add(1, std::memory_order_relaxed);
+    a->outFrames.fetch_add(frames, std::memory_order_relaxed);
+    a->outRendered.fetch_add(rendered, std::memory_order_relaxed);
+    if (used > budget) a->outLate.fetch_add(1, std::memory_order_relaxed);
+    const int32_t n = static_cast<int32_t>(frames);
+    if (const int32_t lo = a->outMin.load(std::memory_order_relaxed); lo == 0 || n < lo) a->outMin.store(n, std::memory_order_relaxed);
+    if (n > a->outMax.load(std::memory_order_relaxed)) a->outMax.store(n, std::memory_order_relaxed);
     // The Benchmark's live mode, after the timed span: silent output whatever was rendered (zeros, never a scaled
     // NaN), and the callback recorded; its core is read on the first callback and every kCoreEvery-th
     // (sched_getcpu can be a system call), -1 meaning "not read this time".
@@ -694,6 +733,10 @@ ma_result openDevice(Audio* a, const CawEngine* e, const ma_device_id* id, ma_ui
         a->render.open(a->callbackFrames);
     }
     e->engine->requestSheddingReset();  // a fresh device: a throttled stretch before doesn't count
+    for (auto* c : {&a->outCallbacks, &a->outFrames, &a->outRendered, &a->outLate}) c->store(0, std::memory_order_relaxed);
+    a->outMin.store(0, std::memory_order_relaxed);
+    a->outMax.store(0, std::memory_order_relaxed);
+    a->openedAt = std::chrono::steady_clock::now();
     e->engine->requestDeviceWarmUp();   // nor its own first callbacks: the stream filling its buffer (#234)
     a->fifoLatency = a->render.latency();
     a->fifoMeanHold = a->render.meanHold();
@@ -807,6 +850,7 @@ void attachCapture(CawEngine* e, Audio* a, ma_device* d, std::string deviceId) {
                    static_cast<int>(8 * std::max(period, outPeriod)), rate / 4, rate);
     a->capture = d;
     a->input = true;
+    a->inputOpenedAt = std::chrono::steady_clock::now();  // the bridge's pushed() counts from its open, above
     a->inputChannels = channels;
     a->duplexBufferFrames = static_cast<ma_uint32>(a->bridge.prime());
     a->inputDeviceId = std::move(deviceId);
@@ -970,6 +1014,29 @@ const char* inputState(const CawEngine* e, const Audio* a) {
     return a->bridge.stalled() ? "stalled" : "open";
 }
 
+std::string secondsSince(std::chrono::steady_clock::time_point t) {
+    char b[32];
+    std::snprintf(b, sizeof b, "%.3f", std::chrono::duration<double>(std::chrono::steady_clock::now() - t).count());
+    return b;
+}
+
+// #241's diagnostic: the output callback's frames against the time since the device opened (frames / seconds is
+// the rate the speaker really takes them at; a shortfall is time the device played without asking), the frames
+// the engine rendered for them (more by at most the FIFO's 63), the callbacks' sizes, the ones over their budget,
+// the stream's own underruns, and the layers shed for load.
+std::string clockStatus(const CawEngine* e, Audio* a) {
+    const caw::Engine::SheddingStats sh = e->engine->sheddingStats();
+    return std::string("{\"seconds\":") + secondsSince(a->openedAt) +
+           ",\"callbacks\":" + std::to_string(a->outCallbacks.load(std::memory_order_relaxed)) +
+           ",\"frames\":" + std::to_string(a->outFrames.load(std::memory_order_relaxed)) +
+           ",\"rendered_frames\":" + std::to_string(a->outRendered.load(std::memory_order_relaxed)) +
+           ",\"min_frames\":" + std::to_string(a->outMin.load(std::memory_order_relaxed)) +
+           ",\"max_frames\":" + std::to_string(a->outMax.load(std::memory_order_relaxed)) +
+           ",\"late_callbacks\":" + std::to_string(a->outLate.load(std::memory_order_relaxed)) +
+           ",\"xruns\":" + std::to_string(outputXRuns(a)) + ",\"shed\":" + std::to_string(sh.shed) +
+           ",\"restored\":" + std::to_string(sh.restored) + ",\"muted_now\":" + std::to_string(sh.mutedNow) + "}";
+}
+
 std::string inputStatus(const CawEngine* e, const Audio* a) {
     const bool running = a && a->input && a->capture;
     std::string out = std::string("{\"enabled\":") + (e->inputEnabled ? "true" : "false") +
@@ -987,7 +1054,14 @@ std::string inputStatus(const CawEngine* e, const Audio* a) {
                ",\"underruns\":" + std::to_string(a->bridge.underruns()) +
                ",\"dropped_frames\":" + std::to_string(a->bridge.dropped()) +
                ",\"missing_frames\":" + std::to_string(a->bridge.missing()) +
-               ",\"drift_ppm\":" + std::to_string(static_cast<int64_t>((a->bridge.ratio() - 1.0) * 1e6));
+               ",\"drift_ppm\":" + std::to_string(static_cast<int64_t>((a->bridge.ratio() - 1.0) * 1e6)) +
+               // #241: the capture's frames against the time since it opened (its real rate), the bridge's fill
+               // now (the input's delay, held near duplex_buffer_frames) and the stream's own overruns.
+               ",\"pushed_frames\":" + std::to_string(a->bridge.pushed()) +
+               ",\"seconds\":" + secondsSince(a->inputOpenedAt) +
+               ",\"fill_frames\":" + std::to_string(static_cast<int64_t>(a->bridge.delay())) +
+               ",\"skipped_frames\":" + std::to_string(a->bridge.skipped()) +
+               ",\"xruns\":" + std::to_string(inputXRuns(a));
     }
     return out + ",\"error\":" + quoted(a ? a->inputError.c_str() : "") + "}";
 }
@@ -1502,6 +1576,9 @@ char* caw_audio_status(CawEngine* e) {
                (started ? "false" : "true") + ",\"backend\":" + quoted(ma_get_backend_name(a->context.backend)) +
                ",\"device\":" + quoted(p.name) + ",\"device_id\":" + quoted(a->deviceId.c_str()) +
                ",\"sample_rate\":" + std::to_string(p.internalSampleRate) +
+               // #241: the rate the engine renders, counts its song clock and asks every stream for (the one source
+               // of truth); the stream's own rate above differs only where miniaudio resamples between them.
+               ",\"engine_sample_rate\":" + std::to_string(static_cast<int64_t>(e->engine->sampleRate())) +
                ",\"period_frames\":" + std::to_string(reportedPeriod(a)) +
                ",\"periods\":" + std::to_string(reportedPeriods(a)) +
                ",\"device_sizes\":" + (a->deviceSizes ? "true" : "false") +
@@ -1515,7 +1592,8 @@ char* caw_audio_status(CawEngine* e) {
                ",\"engine_max\":" + std::to_string(a->enginePeriods[3]) + ",\"mix_rate\":" + std::to_string(a->mixRate) +
                ",\"device_period_hns\":" + std::to_string(a->devicePeriodHns) + "}" +
                ",\"fallback\":" + (a->fallback ? "true" : "false") +
-               ",\"fallback_reason\":" + quoted(a->fallbackReason.c_str()) + request + ",\"input\":" + inputStatus(e, a) + "}");
+               ",\"fallback_reason\":" + quoted(a->fallbackReason.c_str()) + request + ",\"clock\":" + clockStatus(e, a) +
+               ",\"input\":" + inputStatus(e, a) + "}");
 }
 
 char* caw_audio_latency(CawEngine* e) {
