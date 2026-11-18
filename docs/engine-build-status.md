@@ -1,6 +1,6 @@
 ---
 title: Modular engine implementation status
-summary: Evidence-based status of the unified engine build, what is implemented, what is only a contract, and the next engineering stages.
+summary: Evidence-based status of the unified engine build, what is implemented and what is only a contract; the next engineering stages are kept privately.
 covers: [engine/, app/lib/engine/, app/lib/model/app_state.dart, app/lib/model/lane_curve.dart, app/lib/model/pattern_doc.dart, app/lib/model/poller.dart, app/lib/model/project.dart, examples/cpp/minimal/, scripts/caw-component-build.js, scripts/caw-component-build.test.js, .github/workflows/cpp-components.yml]
 updated: 2026-11-18
 ---
@@ -95,23 +95,7 @@ This is the implementation ledger for the unified modular engine. A documented c
 - **Safety bounds to make configurable within host policy:** module source 64 KiB, nesting 128, registers 1,024, state 8 MiB per module, `fn` depth 32 and 4,096 calls; JSON 16 MiB and depth 64, project JSON 8 MiB, 4,096 dependencies; MIDI files 16 MiB and 65,536 events; queues (commands 1,024 with a 2 s retry that can drop a payload, retirement 1,024 plus 256 pending whose overflow leaks, MIDI 2.0 input 1,024 with an unsurfaced drop count, graph events 1,024 per port, parameter commands 256); 16 workers and 256 queued jobs; 64 channels per port.
 - **Real format limits (stay):** MIDI 7-bit fields and 0..15 channels, UMP group/channel/controller, the 2^53-sample transport, sample rates 8 kHz..192 kHz, uint16 register indexes, built-in arity 6.
 
-See [engine progress](engine-progress.md) for the complete source-level audit and exact next actions.
-
-## Current implementation order
-
-Module-graph integration into the Engine/VM/mixer path ([engine blueprint](engine-next.md) §12 step 3) is the active first stage: the roadmap's **Foundation** stage (issue #28), ahead of the remaining Stage 0 and Stage 1 features, with the target of one graph running everything ([decisions](decisions.md), 2026-11-03). Its items, statuses and gaps are the Foundation table in the [roadmap](roadmap.md).
-
-The prior engine work (the M0 repository audit, graph cap removal with explicit working-memory budgets, the owning prepared-graph lifecycle and the N-channel module contract) merged into `Main` with F3 and F4.1 in PR #73, and F4.2 followed in PR #75. F4.3 (the graph runs playback) is on `claude/caw-engine-foundation-skpirb`.
-
-After the Foundation stage, the app-usable v2 order is:
-
-1. **Implemented — PR #68 (merged; Engine, App and Docs CI green on 2026-11-02):** project/timeline automation for module parameters and project globals, including native per-sample playback/render evaluation and app editing.
-2. WAV/SFZ multisample workflow: sample import, hand-mapped zones, in-app playback and WAV + SFZ export ([roadmap](roadmap.md) Stage 0 item 2).
-3. Stems export ([roadmap](roadmap.md) Stage 0 item 3).
-
-Scenes and MIDI 2.0 device input/output remain deferred backlog items; the existing MIDI 2.0 decoder and bounded queue are not live device support.
-
-Each item should be delivered as its own small PR, with app-facing functionality, tests and CI. Hardware validation must be documented separately from cloud CI. The implementation ledger above records what is built and what remains unintegrated.
+See [engine progress](engine-progress.md) for the complete source-level audit and exact next actions. The next engineering stages are kept privately.
 
 ## Verification
 

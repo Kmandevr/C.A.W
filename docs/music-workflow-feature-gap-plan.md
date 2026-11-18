@@ -1,15 +1,13 @@
 ---
 title: Music workflow implementation gaps
-summary: Factual snapshot of implemented and incomplete music-workflow capabilities; sequencing belongs to the permanent roadmap.
+summary: Factual snapshot of the implemented music-workflow capabilities by area, and the constraints new work keeps; open gaps are tracked privately.
 covers: [app/lib/model/app_state.dart, app/lib/model/lane_curve.dart, app/lib/model/pattern_doc.dart, app/lib/model/poller.dart, app/lib/model/project.dart, app/lib/model/storage.dart]
 updated: 2026-11-18
 ---
 
 # Music workflow implementation gaps
 
-The owner's UI redesign (2026-11-04) is in the [UI plan](ui-plan.md). Where this note and the UI plan disagree about the UI, the UI plan holds.
-
-This note records the current implementation gaps in C.A.W.'s music-production workflows. It is a factual companion to the permanent [roadmap](roadmap.md), not a separate plan or implementation sequence. The app and engine references remain authoritative for implementation details.
+This note records what C.A.W.'s music-production workflows can do today, area by area; the open gaps and their order are tracked privately. The app and engine references remain authoritative for implementation details.
 
 ## Existing foundations
 
@@ -23,7 +21,6 @@ This note records the current implementation gaps in C.A.W.'s music-production w
 - **[Implemented]** Clips stored as MIDI in the project (format v5, #216; pattern text is their editing view). MIDI pattern import/export (.mid, .midi2) through the pattern editor. A file imported as clips while no track has a clip brings its tempo map and time signatures (#207); otherwise its tempo is left out.
 - **[Implemented]** Curve tool for velocity and chance lane curves; per-note expression editors support pitch bend, pressure/volume, timbre and vibrato, including editable points and segment bends.
 - **[Implemented]** Pattern actions include Euclidean, random-in-key, arpeggiate, humanize, chord stamp, legato, reverse and pitch inversion.
-- **[Incomplete]** Kit-row routing, code-generated procedural patterns/Freeze, advanced quantization and groove/swing utilities remain future work.
 
 ### Arrangement
 
@@ -34,20 +31,17 @@ This note records the current implementation gaps in C.A.W.'s music-production w
 - **[Implemented]** Project/timeline automation lanes target module parameters by module ID or named project globals; the app edits song-time points with curved segments (#230) and the native VM evaluates them per sample. Track volume/pan lanes remain separate.
 - **[Implemented]** Audio import and clips with non-destructive editing, the sample editor, the stretch notch, Follows tempo and Slice to MIDI (batch 1.0.4, #208); a tempo map (stepped and ramped changes, a tempo lane), time signatures, sections and markers (batch 1.0.3, #207, C API 31): the engine plays every position on the map, sections move, copy and delete with their contents, and the recording count-in counts bars ([app](app.md), Arranger).
 - **[Implemented]** Choosing the real audio output and input device on Android (#242, `AppState._configureDevice`); latency compensation per device keeps a measured or typed total ([app](app.md), Latency).
-- **[Incomplete]** Clip-following automation and consolidation. Bounce to audio of a track or clips, and freeze, are built (1.0.5, [app](app.md)).
 
 ### Mixer and signal flow
 
 - **[Implemented]** Track volume/pan/mute/solo, generator/effect chains, nested folder buses, folder routing and group volume/pan, master output level, and peak meters for the master (stereo), each track and each folder, on a dB scale; volume faders in dB on a REAPER-like taper up to +12 dB (track and master gain up to +12 dB since 2026-11-10), stereo meters on stereo tracks; every track's meter read in one engine call per 30 Hz poll (API 25, 2026-11-12), which also tells device motion whether the engine sounds (`AppState.sounding`). Routing between tracks, buses and master carries 32-bit float since 2026-11-03 (Foundation F4.2).
 - **[Partial]** Exported module signals and sidechain concepts exist in the engine/module system, but full user-facing routing and modulation connections are not integrated as a general mixer workflow.
-- **[Incomplete]** Sends, arbitrary buses, parallel routing/effects, master effect chain and full plugin/global parameter automation.
 
 ### Export and file workflow
 
 - **[Implemented]** Native offline WAV rendering, loop/free-length/one-shot/wavetable export, MIDI pattern export, named export profiles, export history and a sequential in-memory queue (up to 50 jobs).
 - **[Implemented]** The arrangement music video: an offline MP4 render, cut by an auto director or edited as shots on a lane (layouts, looks, effects, transitions, camera moves, text overlays, images, auto-cut), with drafts and a background render, saved with the project ([app](app.md)); the platform encoders are not yet run on a device.
 - **[Partial]** Queue state is not persisted across restarts; batch/stem rendering and multi-destination automation are incomplete.
-- **[Incomplete]** SFZ multisample workflow, stems export, persistent/recoverable export queue and broader batch delivery.
 
 ### Modules and plugins
 
@@ -57,14 +51,12 @@ This note records the current implementation gaps in C.A.W.'s music-production w
 
 ### Audio assets and sampling
 
-- **[Incomplete]** Local asset preview, velocity layers and complete WAV/SFZ multisample authoring.
 - The current engine can generate audio and process it through module/effect chains; that does not constitute an audio-file editing or sampling workflow.
 
 ### MIDI hardware and recording
 
 - **[Implemented foundation]** MIDI 2.0 UMP decoding and bounded input-queue primitives, plus MIDI pattern file import/export.
 - **[Implemented, Android and Windows]** MIDI devices: USB, Bluetooth (scanned and connected in the app) and UMP devices on Android, WinMM ports on Windows ([app](app.md)); every Channel Voice message plays the armed or selected track at the frame it was played through the engine's device input (`app/lib/model/live_midi.dart`). Record captures a take while playing and writes it at Stop as a new pattern clip from the bar where recording began. Controller learn maps CCs to knobs.
-- **[Incomplete]** Bluetooth MIDI pairing inside the app, controller learn/mapping, external clock/sync and control-surface support.
 - **[Implemented, not yet run on a device]** Overload recovery (2026-11-12): layers the engine shed come back on their own once the load is low, and going to or from the background unmutes them ([engine](engine.md), "Overload, and coming back"). An overload also turns the Lightweight profile on once while Lightweight on overload is on (`light_by_self` remembers it; [app](app.md), Frame rate).
 - **[Implemented, not yet run on a device]** Output and input latency compensation (Bluetooth, USB, HDMI): MIDI takes at the step that was heard when the note was played, audio takes by output + input latency, the playhead and meters at the heard time, the playhead drawn between reads from the compensated read ([app](app.md)).
 - **[Built 1.0.5, #209]** Take lanes and comping: a swipe across a take picks that part, crossfaded joins, Flatten ([app](app.md)).
@@ -80,4 +72,4 @@ This note records the current implementation gaps in C.A.W.'s music-production w
 - Keep launch quick: work added to `AppState.init` or `openStorage` reports a step on `AppState.startup` (`app/lib/model/startup_progress.dart`), so the startup screen shows it instead of a silent wait.
 - Keep audio callback work bounded, allocation-free, lock-free and free of I/O, logging, UI calls and unbounded loops.
 - Perform file access, waveform generation, analysis, stretching and export off the audio callback using bounded background work.
-- Verify current code and tests before opening implementation work. A listed gap is not permission to invent a parallel architecture; follow the relevant stage in the [roadmap](roadmap.md).
+- Verify current code and tests before opening implementation work. A listed gap is not permission to invent a parallel architecture; follow the private plan.

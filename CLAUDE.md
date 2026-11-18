@@ -1,8 +1,8 @@
 # C.A.W
 
-**C.A.W** (Code Auditioning Workspace; crow logo) is an experimental, code-driven sound-design and music workspace. The current Flutter app ships Android and Windows builds; the portable C++20 engine is also built and tested by Linux/Windows CI. The app has three sections: Build, Files and Arrange. Not every roadmap feature is built: [docs/app.md](docs/app.md) is shipped app behaviour, [docs/engine-build-status.md](docs/engine-build-status.md) the native side and its boundaries, [docs/core-and-feature-plan.md](docs/core-and-feature-plan.md) planned work. The beta sends anonymous telemetry and optional feedback through a relay; audio processing stays local, and there is no in-app AI or cloud audio. AI coding assistants are development tools, not a product feature. The owner's product direction is in [docs/vision.md](docs/vision.md).
+**C.A.W** (Code Auditioning Workspace; crow logo) is an experimental code-driven sound-design and music workspace. The Flutter app ships Android and Windows builds; Linux/Windows CI also builds and tests the C++20 engine. The app has three sections: Build, Files and Arrange. [docs/app.md](docs/app.md) is shipped app behaviour, [docs/engine-build-status.md](docs/engine-build-status.md) the native side and its boundaries; planned work lives in the private Kmandevr/AutoStacc-Hub (docs/caw/). The beta sends anonymous telemetry and optional feedback through a relay; audio stays local, and there is no in-app AI or cloud audio. AI coding assistants are development tools, not a feature. The owner's product direction is in [docs/vision.md](docs/vision.md).
 
-**Data and services:** Kmandevr/C.A.W-Telemetry holds what C.A.W collects (telemetry, feedback Issues, privacy policy, terms) and the beta relay; its PLAN.md is the contract's other copy. Work cross-repo changes in one session (add_repo).
+**Data and services:** Kmandevr/C.A.W-Telemetry holds what C.A.W collects (telemetry, feedback Issues, privacy policy, terms) and the beta relay; its PLAN.md is the contract's other copy. The private Kmandevr/AutoStacc-Hub holds the companion and C.A.W's plans and owner questions (docs/caw/). Work cross-repo changes in one session (add_repo).
 
 ## Start of every session
 
@@ -43,7 +43,7 @@ One-file changes: just do them. Every file (code, notes, Claude config) has one 
 
 ## Context
 
-Keep context while it helps; clean up only at a task boundary (task done, PR opened or merged, before `/clear`) or when context is crowded. Drop the superseded (stale file reads, re-run check outputs, finished subtasks). Carry into any compaction or summary: the owner's requirements and decisions, security constraints, unresolved issues, verified results (with the command that showed them), branch and next step. Multi-step task at a boundary: the `handoff` skill. A handoff is never the only copy of a requirement or decision (those go in `docs/` or Issues first).
+Keep context while it helps; clean up only at a task boundary (task done, PR opened or merged, before `/clear`) or when crowded. Drop the superseded (stale reads, re-run outputs, finished subtasks). Carry into any compaction or summary: the owner's requirements and decisions, security constraints, unresolved issues, verified results (with the command that showed them), branch and next step. Multi-step task at a boundary: the `handoff` skill. A handoff is never the only copy of a requirement or decision (those go in `docs/` or Issues first).
 
 ## Checking changes
 

@@ -7,7 +7,7 @@ updated: 2026-11-18
 
 # Engine reference
 
-The engine in `engine/` as built. The reasons behind it are in [architecture](architecture.md), and the version plan is in [roadmap](roadmap.md). All of it is **[Fact]**: it is checked by `engine/tests/`.
+The engine in `engine/` as built. The reasons behind it are in [architecture](architecture.md), and the version plan is kept privately. All of it is **[Fact]**: it is checked by `engine/tests/`.
 
 Every file path the engine takes or returns (C API, project JSON, requests) is UTF-8 text. The engine opens, creates, renames and deletes files through `src/utf8_path.h` (a `std::filesystem::path` built from the UTF-8 bytes, and `_wfopen` on Windows), so names outside ASCII work on Windows too, where a narrow `fopen` or `std::filesystem::path(std::string)` would read them in the ANSI code page; file system errors there are returned, never thrown. Returned paths use `/` on every platform. **[Assumption]** The `caw` CLI is the exception on Windows: it passes `argv` on as given, which there is in the ANSI code page, so CLI paths outside ASCII are not expected to work on Windows (untested).
 

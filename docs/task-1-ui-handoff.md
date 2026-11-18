@@ -13,7 +13,7 @@ This file is a concise handoff, not a live Git branch/CI tracker. Previous commi
 
 The Flutter app has three sections, Build, Files and Arrange (the mixer and automation are part of Arrange; Export is a page from the project menu). They share one AppState and the same native engine/project model. The app opens straight into the last project, with the arrangement in front; while it loads, the startup screen (the waveform reveal, `lib/ui/startup_screen.dart`) shows the real loading steps and goes the moment the project is open. The transport's tempo is typed with a tap or tapped on a pad (#19), and its undo and redo walk one project history. Space pauses and resumes where it paused; Shift+Space stops. Settings → Key bindings changes what each key does.
 
-The app reference [App](app.md) is the authoritative inventory of implemented screens and behavior. The [UI design](ui.md) describes the design direction and current editor state. The [core development plan](core-and-feature-plan.md) gives the ordered work sequence.
+The app reference [App](app.md) is the authoritative inventory of implemented screens and behavior. The [UI design](ui.md) describes the design direction and current editor state. The ordered work sequence is planned privately.
 
 Implemented UI/workflow foundations include:
 - Build: C++ effects and instruments in a code editor (checks, completion, the Library), patterns, a plug-in page per component (Write → Build → Test → Export: the test suite, CLAP/VST3 plug-in projects, sample packs) and the plug-in benchmark beside ▶ Build (checks, the code's own sections, curves; it needs the engine's C API 30 or later).
@@ -29,7 +29,7 @@ Implemented UI/workflow foundations include:
 - Motion rules and the Motion, Haptics and Glow settings (`lib/ui/motion.dart`), the Glass setting and the glass look across the app (`lib/ui/glass.dart`: ambient background, see-through panels and tracks, frosted sheets, outlined controls), and golden tests with real fonts (`test/golden_util.dart`). Themes come in five light-and-dark families with a theme editor that builds palettes and sets the feel, including the animation style that pages, sheets, panels and clip edits follow ([app](app.md), Theme).
 - The frame (`lib/ui/shell.dart`, `lib/ui/frame/`): Build, Files and Arrange as sections on phones (bottom transport and section bar in portrait, a rail in landscape), and docking panels that can float on desktop and tablets ([app](app.md), Frame). The frame shows the crow logo, which is also the launcher icon. Moving parts (playhead, meters, scopes, device motion, a pinch, which lays the lanes out at its zoom on every frame since 2026-11-18) are kept cheap enough for 240 Hz frames, and device motion asks for none while the engine is stopped and silent and nothing is touched (beta plan B3–B4, 2026-11-12; [performance](performance.md#frames-at-240-hz-2026-11-12)). Every main screen and sheet is checked for fit at 360 dp, 412 dp with large text and tablet size (`test/layout_fit_test.dart`).
 
-The owner's UI redesign (2026-11-04) is specified in the [UI plan](ui-plan.md), with steps U0–U8.
+The owner's UI redesign (2026-11-04) is specified in the private UI plan, with steps U0–U8.
 
 ## Verified UI/workflow gaps
 
@@ -51,4 +51,4 @@ Do not infer current CI status from old commit hashes or historical handoff note
 
 ## Next steps
 
-Follow [Core development plan and complete feature list](core-and-feature-plan.md) and [Engine implementation status](engine-build-status.md). Graph-to-Engine/VM integration is the roadmap's Foundation stage (issue #28); don't build UI on top of it before it lands. Don't introduce AI product integration without explicit owner authorization.
+Follow the private plans and [Engine implementation status](engine-build-status.md). Don't introduce AI product integration without explicit owner authorization.

@@ -7,7 +7,7 @@ updated: 2026-11-18
 
 # C++ creation platform
 
-**Status (2026-11-11):** The public C++ processor contract is exposed through `engine/include/caw/module.hpp`. CP.1 now includes an installable `CAW::SDK` CMake package, versioned `caw.component` manifest/helper, descriptor/create/destroy exports, and a minimal stereo fixture. The app persists component source and exact dependency pins in the project file (`cpp_components`, unchanged by format v4, by 1.0.5's freeze fields and by 1.0.6's screen-only `take_height`; a frozen track's components stay in the project, saved states untouched, but don't load in the engine until it is unfrozen), materializes them into a private workspace, builds locally with CMake, reuses a persistent build directory and returns a verified artifact path (the engine's link-time optimisation, `CAW_LTO`, applies to the engine's own targets, not to components built against `CAW::SDK`). The Engine's `ModuleRegistry` and C API (version 32 since 2026-11-14, batch 1.0.4's audio stretching and analysis; the loader boundary is unchanged) can load a built shared library only with an explicit trust value: Blocked refuses to open it, Isolated is rejected because no process sandbox exists, and Trusted loads it in-process. Explicitly loaded native stereo effects run with their parameters on tracks (`LayerDoc.components`, after the track's chain and before volume and pan) and on the master (`ProjectDoc.masterComponents`, before the safety limiter), and native instruments play a track's notes (`LayerDoc.instrument`, `caw/instrument.hpp`, the built-in `org.caw.synth.basic`, `examples/cpp/poly-synth/`; #156). An offline testing suite measures a built effect (`caw_component_test`, `caw test-component`; [engine](engine.md#component-testing)); the app's test strip does not use it yet. The Dart FFI load/unload wrapper exists, and the trust store (`app/lib/model/native_trust.dart`: own builds Trusted, others asked once per SHA-256 fingerprint) with `NativeComponentManager` exists; the FX stack's greyed card asks Trust / Block for code from elsewhere, and Build asks "Trust and build" first. Until code from elsewhere is trusted the compiler doesn't read it at all (no live check or completion), and a duplicate of it in Files stays undecided, so it asks too. A `caw.toolchain` manifest validator (`app/lib/platform/cpp_toolchain.dart`) describes the bundled compiler, and the CMake runner refuses to run on Android. On Android the on-device compiler (`libcaw_compiler.so`, Clang and LLD in-process) runs in a dedicated `:compiler` process (§6, `CompilerService.kt`, reached through the `caw/compiler` channel in `MainActivity.kt`) and is packaged into the Main APK by CI; `AndroidCppCompiler` drives it through one queue (`SerialCppCompiler`: builds, checks and completions take turns). The C++ Builder ([app](app.md), Build) uses it for builds, a check-only compile (`-fsyntax-only`) after a pause in typing, and Clang's own completion (`-code-completion-at`); `caw_compiler_run` captures what Clang prints to stdout during a run (completion results) by pointing fd 1 at a temporary file, and appends it after the diagnostics (at most 256 KB, so a reply fits Android's Binder transaction). Each check or completion compiles a copy of the code in its own temporary folder. [Assumption] the per-call cost of a check or completion on a phone is unmeasured. The proactive dependency manager, full Library coverage, visual scripting, generated/custom UI and self-contained project handoff remain incomplete. The Linux x64, Windows x64 and Android ARM64 GitHub Actions matrix is repository CI only; it is not a CAW user build service. **The product requirement remains local/offline C++ compilation.** Faust and Tracktion Engine are evaluated in [visual creation and signal routing](visual-routing-and-library-integration.md); neither is an adopted dependency. This note supports the single [C.A.W. roadmap](roadmap.md), not a second feature roadmap.
+**Status (2026-11-11):** The public C++ processor contract is exposed through `engine/include/caw/module.hpp`. CP.1 now includes an installable `CAW::SDK` CMake package, versioned `caw.component` manifest/helper, descriptor/create/destroy exports, and a minimal stereo fixture. The app persists component source and exact dependency pins in the project file (`cpp_components`, unchanged by format v4, by 1.0.5's freeze fields and by 1.0.6's screen-only `take_height`; a frozen track's components stay in the project, saved states untouched, but don't load in the engine until it is unfrozen), materializes them into a private workspace, builds locally with CMake, reuses a persistent build directory and returns a verified artifact path (the engine's link-time optimisation, `CAW_LTO`, applies to the engine's own targets, not to components built against `CAW::SDK`). The Engine's `ModuleRegistry` and C API (version 32 since 2026-11-14, batch 1.0.4's audio stretching and analysis; the loader boundary is unchanged) can load a built shared library only with an explicit trust value: Blocked refuses to open it, Isolated is rejected because no process sandbox exists, and Trusted loads it in-process. Explicitly loaded native stereo effects run with their parameters on tracks (`LayerDoc.components`, after the track's chain and before volume and pan) and on the master (`ProjectDoc.masterComponents`, before the safety limiter), and native instruments play a track's notes (`LayerDoc.instrument`, `caw/instrument.hpp`, the built-in `org.caw.synth.basic`, `examples/cpp/poly-synth/`; #156). An offline testing suite measures a built effect (`caw_component_test`, `caw test-component`; [engine](engine.md#component-testing)); the app's test strip does not use it yet. The Dart FFI load/unload wrapper exists, and the trust store (`app/lib/model/native_trust.dart`: own builds Trusted, others asked once per SHA-256 fingerprint) with `NativeComponentManager` exists; the FX stack's greyed card asks Trust / Block for code from elsewhere, and Build asks "Trust and build" first. Until code from elsewhere is trusted the compiler doesn't read it at all (no live check or completion), and a duplicate of it in Files stays undecided, so it asks too. A `caw.toolchain` manifest validator (`app/lib/platform/cpp_toolchain.dart`) describes the bundled compiler, and the CMake runner refuses to run on Android. On Android the on-device compiler (`libcaw_compiler.so`, Clang and LLD in-process) runs in a dedicated `:compiler` process (§6, `CompilerService.kt`, reached through the `caw/compiler` channel in `MainActivity.kt`) and is packaged into the Main APK by CI; `AndroidCppCompiler` drives it through one queue (`SerialCppCompiler`: builds, checks and completions take turns). The C++ Builder ([app](app.md), Build) uses it for builds, a check-only compile (`-fsyntax-only`) after a pause in typing, and Clang's own completion (`-code-completion-at`); `caw_compiler_run` captures what Clang prints to stdout during a run (completion results) by pointing fd 1 at a temporary file, and appends it after the diagnostics (at most 256 KB, so a reply fits Android's Binder transaction). Each check or completion compiles a copy of the code in its own temporary folder. [Assumption] the per-call cost of a check or completion on a phone is unmeasured. The proactive dependency manager, full Library coverage, visual scripting, generated/custom UI and self-contained project handoff remain incomplete. The Linux x64, Windows x64 and Android ARM64 GitHub Actions matrix is repository CI only; it is not a CAW user build service. **The product requirement remains local/offline C++ compilation.** Faust and Tracktion Engine are not adopted dependencies. The plans for the unbuilt parts are kept privately.
 
 ## 1. The four distinct layers
 
@@ -117,59 +117,7 @@ Users can add or drop in existing C++ files and projects. C.A.W. should respect 
 
 The editor should catch inexpensive syntax and semantic errors before full compilation, resolve includes/configuration and linker requirements early, and keep diagnostics attached to their source locations. Do not launch a full compile for every keystroke. Use incremental compilation and a local cache so unchanged translation units are reused; perform expensive linking and validation after earlier checks pass. All compilation and linking happen locally, including when the device is offline.
 
-### B. Component visual workspace — build instruments and effects
-
-This is the visual DSP/component editor: a typed composition surface for built-in Library operations, Faust-generated native components and user-created C++ components. It is for building or changing a component's internal behavior, not for routing whole song tracks.
-
-- Drag components onto a graph and connect compatible ports.
-- Show audio, MIDI/event, modulation, control and data connections distinctly.
-- Validate incompatible types, channel layouts and rates before execution; offer explicit conversion components where appropriate.
-- Expose component parameters and allow subgraphs to be grouped and saved as reusable components.
-- A C++ component with a valid descriptor automatically becomes a visual block; no duplicate block implementation is required.
-- Keep code and graph authoring interoperable: components and their parameters remain inspectable, reusable and editable through their C++ source.
-- Compile/prepare graphs into the same native execution infrastructure used by C++ components. Do not create a separate interpreted visual-graph runtime.
-
-### C. Project/track visual workspace — route and shape the song
-
-This is a second visual workspace using the same canvas, node/port, connection, grouping, selection and inspector framework, but it edits the project routing model rather than a component's internal DSP graph.
-
-- Keep the arrangement and piano roll as the normal song-making workflow; the visual track workspace is an additional page/inspector, not a replacement.
-- Show track parameters, input/output, sends and destinations, buses, sidechains, channel maps and effect chains together. Users can adjust send level/destination and reorder or insert effects without navigating away from the track.
-- Provide both a visual route view and conventional mixer controls. Every edit updates the same persisted project state and live engine routing; no UI-only routing copy.
-- Support audio, MIDI/event, control, modulation, analysis and logic connections through typed contracts and explicit conversion nodes.
-- Allow conditional branches and regional routes: e.g. MIDI from the kick track triggers a bass duck; a track's RMS crossing a threshold blends in a preloaded distortion path; entering a clip/region activates a parallel effect route.
-- Project routes can connect component endpoints, but the project graph remains distinct from the component's internal DSP graph. The condition graph is a third model that selects/actions routes through declared endpoints.
-- Track state such as highlight/selection may be an explicit UI event source for auditioning only; it never changes an export (owner, 2026-11-09).
-
-### D. Performance and mixer interface
-
-The performance surface is the live control face of the same components. The user chooses which parameters are exposed and how they are presented.
-
-- Generate useful controls automatically from parameter metadata: knobs, sliders, switches, selectors, buttons, pads, keyboards, XY controls and meters.
-- Support custom labels, grouping, ordering, ranges, units and layout.
-- Apply parameter changes live through the shared parameter system.
-- Provide MIDI keyboards/pads and controller mappings where relevant.
-- Show component status, meters, bypass and declared latency/resource information where useful.
-- Keep the interface lightweight on phones and adaptable to desktop layouts.
-
-The existing Mixer remains a workspace for track and signal-flow control. The visual track workspace complements it and edits the same project graph; neither creates a second processing path. See [visual routing design](visual-routing-and-library-integration.md) for graph domains, conditional rules, scheduling and examples.
-
-## 4. Generated, custom and hybrid interfaces
-
-A valid component gets a usable generated UI by default. The component author does not have to hand-design an interface just to make its parameters accessible.
-
-The generated renderer chooses controls from metadata and parameter type:
-
-- continuous numeric values: knob or slider, with unit/range and optional numeric entry;
-- boolean values: switch or button;
-- enumerations: selector or menu;
-- trigger/action values: button or pad;
-- incoming/outgoing levels and diagnostics: meter or status display;
-- note-oriented components: keyboard, pads or note controls when declared.
-
-Authors may optionally provide a fully custom interface in C++ or through a visual UI designer. A hybrid interface can retain generated controls and replace or augment selected sections with custom controls. UI code runs outside the audio callback and communicates through the same parameter/event contracts. The processor remains independent of its UI.
-
-A plugin host may have different UI requirements from C.A.W. The shared metadata feeds host-specific UI/parameter adapters; do not assume a Flutter view can be embedded unchanged in every host.
+The component and project visual workspaces, the performance interface and generated/custom interfaces (sections 3B-3D and 4), the Faust backend (5A), remote compiling, the self-contained project handoff and the verification gates (11) are planned privately.
 
 ## 5. C.A.W. Library/SDK scope
 
@@ -207,12 +155,6 @@ Provide numerical utilities, vectors, matrices, complex numbers, transforms, int
 Provide well-documented reusable facilities where they add value: parsing/serialization helpers, data transforms, search and sorting utilities, resource handles, diagnostics and common project/component helpers. This does not restrict users to the built-in catalogue; ordinary C++ and supported third-party libraries remain available subject to build and licence rules.
 
 Library functions should have clear input/output contracts, units, defaults, error behavior, allocation behavior, thread-safety and real-time-safety declarations. A function may accept parameters, tables, buffers, events or other data and return generated audio, waveforms, transformed data, analysis results or events. Where algorithms have meaningful tradeoffs, expose the alternatives and their cost rather than claiming one universal best implementation.
-
-## 5A. Optional DSP authoring backend: Faust [Proposal]
-
-Faust is an optional specialist DSP language/compiler, not a replacement for general-purpose C++. The preferred first prototype compiles Faust source to generated C++ and passes that source through the existing local/offline C++ component build pipeline. An adapter maps Faust inputs/outputs, UI metadata, parameters, state, lifecycle and processing buffers to the C.A.W. component descriptor. The native C.A.W. engine remains the only runtime/scheduler.
-
-There is no embedded libfaust/LLVM JIT path (owner, 2026-11-09): the bundled C++ compiler already builds Faust-generated code. Validate Faust's buffer/in-place semantics, vectorization, channel layouts, polyphony, MIDI/per-note expression and real-time behavior. Do not enable a parallel scheduler inside the audio callback. Audit the exact compiler, standard-library and architecture-file licences: the compiler is LGPL-2.1-or-later, while generated-code obligations depend on included inputs/libraries/architecture files. No integration or licence compatibility is assumed complete. Details and reuse evaluations: [visual routing design](visual-routing-and-library-integration.md).
 
 ## 6. Runtime, performance and trust boundaries
 
@@ -258,8 +200,6 @@ Resource use must be visible and user-configurable: show meaningful CPU, memory,
 - **Loading the result:** the built `.so` goes in app-private storage, is marked read-only (**[Fact, Android 14 summary, checked 2026-11-09]** dynamically loaded code must be read-only for apps targeting API 34+; whether this covers native libraries is undocumented, so always do it) and loads under the trust choice.
 - **Cheap builds:** precompiled SDK headers, incremental rebuilds, a fast unoptimised audition build and an optimised build on export or request, at low priority so audio never stutters.
 
-**Remote compiling (owner direction, 2026-11-09; future, [Proposal] for the details):** on-device compiling stays the default and must work offline. Later, a project may optionally be compiled elsewhere: on a free service if a suitable one exists, or on the user's own computer (for example a PC on the same network running a small C.A.W. build helper). The result comes back as a component like any other: it is checked against the descriptor and the C interface, and because it was built outside the app it goes through the user's Isolated/Trusted/Blocked choice. No C.A.W.-run paid build server and no shipped secret is assumed. Free services: the user's own GitHub account (Actions in their repository, through the existing GitHub sign-in) is the first candidate; other free build services are to be researched. The user's computer can be reached on the same network or over the internet. Open: which other free services can return a built Android/Windows library, and how the phone and computer pair and connect securely over the internet (relay or direct connection).
-
 ## 7. Extensibility and versioning without rewrites
 
 Extensibility without broad rewrites is a permanent architecture requirement.
@@ -294,10 +234,6 @@ Migration order:
 
 Do not remove the old implementation before its replacement is usable. Do not keep the old VM indefinitely as a second product language. No source/project compatibility layer is required for the retired language.
 
-### Self-contained project handoff
-
-The current project-delivery goal is a REAPER-like handoff bundle, not cloud collaboration: package a project so it carries its source, required assets, build configuration, pinned dependency versions and required dependency payloads. The recipient should not need to find and install the project's dependencies manually. A bundled project must be usable offline once received. AutoStacc-based distribution or synchronization is a future direction, not a current implementation priority.
-
 ## 9. Plugin and standalone reuse
 
 A component is authored and implemented once. C.A.W. loads it through the shared component model; visual scripting uses it as a block; the performance UI controls it from its descriptor; the component browser discovers it; and presets/state use the shared state contract.
@@ -314,26 +250,3 @@ Plugin export must not block the initial SDK or the three C.A.W. authoring inter
 ## 10. Prototype-first delivery
 
 The immediate goal is a working prototype, not completion of every architecture layer. The first slices prove project source persistence, safe app-private materialization, a local manifest-driven CMake build with incremental directory reuse, artifact discovery, and explicit-trust dynamic loading through the Engine registry/C API. Explicitly loaded stereo effects now play with their parameters on tracks and the master, with the safety limiter still last. Next: the Android-hosted compiler, then the per-component trust UI/store and the in-app editor (issue #137). Start with one minimal real component and add only what makes that slice reliable. Keep the larger shared component model, dependency/library strategy, trust choice, resource controls and handoff requirements documented, but defer full visual editing, comprehensive compatibility migration, AutoStacc integration, plugin export and other later systems until the prototype works.
-
-## 11. Verification gates
-
-The design is not complete merely because interfaces exist. Tests and CI should prove:
-
-- one C++ component registers once and is discoverable in the code, visual, performance and plugin/component browsers;
-- the same processor implementation produces the same processing result through direct use and a compiled visual graph;
-- descriptor ports reject invalid type/channel connections and accept explicitly declared conversions;
-- one parameter definition drives generated controls, automation, modulation, MIDI mapping and host exposure;
-- generated UI works with no custom UI, and custom/hybrid UI does not change processor behavior;
-- MIDI 1.0, MIDI 2.0 UMP, note identity and per-note expression traverse the shared event path;
-- multiple simultaneous notes retain independent pitch, pressure, timbre and other supported expression through note-aware components and the playback path;
-- unison voices retain independent phase, detune, pan/spread and modulation until an explicit voice-mix boundary;
-- a C++ instrument can generate distinct native left/right signals, and stereo effects preserve and process both channels without mono collapse;
-- per-channel processors correctly handle multi-channel layouts within the declared resource budget, with explicit channel maps and conversions;
-- a track defaults to stereo and may carry more channels than the physical output device, with any required output mapping/downmix explicit;
-- state/preset save and restore are versioned and deterministic within the declared contract;
-- real-time processing performs no allocation, blocking lock, I/O or UI call and remains within declared bounds;
-- untrusted native code is never silently loaded in-process;
-- adding a new component, parameter, port, UI control or adapter does not require unrelated subsystem rewrites; and
-- low-end performance is measured against realistic audio workloads, with no duplicate runtime or unnecessary background cost.
-
-Until these tests and the relevant CI jobs pass, mark the capability planned or partial rather than implemented.

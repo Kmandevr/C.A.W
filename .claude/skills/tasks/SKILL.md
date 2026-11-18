@@ -40,7 +40,7 @@ Issues, PRs, commit messages and Actions logs are public. Never put in them an u
 
 ## Choosing work
 
-If the owner names a task, use it. Otherwise take the first that applies among `status: ready` issues: P0 bug, P1 bug, work that unblocks the current roadmap milestone (`docs/roadmap.md`), P1 feature, P2, improvements and refactors, P3. Check that dependencies are met (`Blocked by`) and nothing `in progress` touches the same files.
+If the owner names a task, use it. Otherwise take the first that applies among `status: ready` issues: P0 bug, P1 bug, work that unblocks the current milestone (the private roadmap), P1 feature, P2, improvements and refactors, P3. Check that dependencies are met (`Blocked by`) and nothing `in progress` touches the same files.
 
 ## Before starting
 

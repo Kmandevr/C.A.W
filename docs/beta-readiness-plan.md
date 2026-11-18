@@ -1,12 +1,12 @@
 ---
 title: Beta readiness plan
-summary: The owner's 2026-11-12 direction for engine speed A1-A7, a 240 fps UI, the stress test, the startup screen, telemetry and feedback, and the C.A.W-Telemetry contract (section H, with its 2026-11-12 updates); the stress test (C), telemetry and feedback (E, F) are built, the rest planned.
-updated: 2026-11-13
+summary: The owner's 2026-11-12 beta direction as it concerns built work and contracts: who does what, the rules, the stress test (C), telemetry and feedback (E, F), builds (G) and the C.A.W-Telemetry contract (section H, with its 2026-11-12 updates); sections A, B and D are kept privately.
+updated: 2026-11-18
 ---
 
 # Beta readiness plan
 
-**[Proposal] Owner direction, 2026-11-12, verbatim.** The owner's other session wrote it with the owner and sent it here; the owner confirmed it in this session. Tracked in issue #187. Section H is shared with the caw-telemetry repo: change it only through the owner. What is built is recorded in the notes that own each area, not here.
+**[Proposal] Owner direction, 2026-11-12, verbatim.** The owner's other session wrote it with the owner and sent it here; the owner confirmed it in this session. Tracked in issue #187. Section H is shared with the caw-telemetry repo: change it only through the owner. What is built is recorded in the notes that own each area, not here. Sections A (engine speed), B (frame rate) and D (startup screen) and the prompt's closing line are kept privately; what of them is built is in [engine performance](engine-performance.md), [performance](performance.md) and [app](app.md).
 
 ## The prompt
 
@@ -31,69 +31,6 @@ Two Claude sessions work at once, on disjoint repositories.
 - No secrets in the app or this repo. The app holds only the relay's URL and a non-secret app key.
 
 ---
-
-### A. Engine speed, beyond phases 1–5
-
-Keep doing phases 2–5 as planned. Add these, in this order:
-
-**A1. Audio-thread scheduling.** This is the biggest open gap. The owner's S22+ showed 49% CPU on three tracks; the server shows 3.8%. `docs/performance.md` ("The CPU meter") suspects a little core or a low clock.
-- Diagnostics: report the callback's core (`sched_getcpu` or the platform's equivalent) and that core's clock through the C API, so the app and the stress test can show them.
-- Use each platform's own scheduling tools, set up outside the callback, loaded so older systems still run, with a silent fallback (check each against primary docs, dated):
-  - Android: the ADPF performance hint (`APerformanceHint`, Android 13+): target duration = the callback period; report actual durations. Check which calls are safe on the real-time thread and how Oboe does it.
-  - Windows: MMCSS "Pro Audio" for the audio thread (if miniaudio doesn't already do it; check); opt it out of power throttling/EcoQoS; keep it off E-cores on hybrid Intel CPUs; WASAPI exclusive where the user allows it.
-  - Linux: real-time priority (SCHED_FIFO, via rtkit when unprivileged), and what PipeWire, Pulse and ALSA each allow.
-  - macOS/iOS: audio workgroups are future work only (the app doesn't ship there).
-- Ask the owner to run a release APK before/after and report the CPU meter.
-
-**A2. Flagship inside one track.** The parallel mixer can't help it: 64 voices are still about 91% of budget after phase 1.
-- Run several voices' ladder filters side by side, as each voice's two sides already are (that gave 1.7×, `docs/performance.md` "Flagship synth").
-- Vectorise across unison copies.
-- Fold this into phase 4 if it fits, and say which.
-
-**A3. The first callback after Play** is 2–8× the mean (`docs/engine-performance.md`). Find the first-time work, move it before Play or spread it over a few callbacks, and report the worst-case column before/after.
-
-**A4. Issue #133:** bound the per-callback loops (`applyCommands`, `planChunk`, `updateSolo`) to active slots; callgrind before/after.
-
-**A5. CPU features:** check what each build enables (SSE2 only? AVX2? NEON on arm64). Propose runtime dispatch for the hottest kernels where a wider instruction set measurably helps. Add a Windows target to `bench.yml` if it isn't there. The same tolerance tests run on every target.
-
-**A6. Worker pool and parallel mixer (phase 5):** size from each device's real cores and core types on every platform (big/little and P/E-cores), not just Android.
-
-**A7. Proposal only:** a shared reverb bus instead of a reverb inside each Flagship is a product choice. Write it up in docs and ask the owner.
-
-### B. A super-smooth UI with an adaptive frame rate, up to 240 fps
-
-Goal: everything that moves (playhead, meters, scopes, scrolling, zoom, drags, device motion) runs at the display's full refresh rate, up to 240 Hz, on every platform. When nothing moves, the app still asks for zero frames (the battery rule stays).
-
-**B1. Research first (facts, sources, dates):**
-- How Flutter at our version asks for the highest refresh rate on Android (API 30+ preferred frame rate/display mode; any plugin must be permissively licensed and recorded in decisions).
-- The S22+ panel's real modes (believed adaptive up to 120 Hz; confirm).
-- How Flutter Windows and Linux pace frames to the monitor, including several monitors (follow the one the window is on).
-- Any known Impeller frame-pacing limits.
-
-**B2. Adaptive rate:** the display's maximum while anything animates or the user is touching; the lowest rate when idle. The Lightweight and Minimal profiles may cap it (propose the caps; ask the owner).
-
-**B3. Decouple motion from the 30 Hz poll** (today `Poller` ticks every 33 ms and `MotionClock` steps every 33 ms, so faster frames would repeat the same picture):
-- Playhead: work out its position each frame from the last engine position plus elapsed time × tempo, correcting softly on each poll. Never call FFI per frame.
-- Meters: fall per frame on wall-clock time.
-- Device motion: per frame while visible.
-- Scopes: keep 30 Hz data, with no full redraw on frames that have no new data.
-
-**B4. Make every frame cheap** (a 240 Hz frame is 4.2 ms):
-1. `track_cards_screen.dart:543`: the playhead shares a repaint layer with clips and waveforms. Put the playhead in a `LiveIsland` and the waveform in a `RepaintBoundary`.
-2. `arrange/audio_waveform.dart:143`: one `drawLine` per pixel across the whole clip, including off screen. Batch it (`drawRawPoints` or one `Path`), draw only the visible span, and cache a `ui.Picture` per clip and zoom level.
-3. `AudioClipPainter` repaints on the global `WaveformCache`, so any loaded level redraws every waveform. Notify per file path.
-4. `app_state.dart:757`: `_syncNow` always notifies, rebuilding the shell and every `IndexedStack` workspace. Notify only on a real change.
-5. Device editors:
-   - about 25 painters return `shouldRepaint => true`;
-   - a knob step rebuilds 450–1,100 widgets;
-   - display polls run on their own `Timer.periodic(33 ms)` (`device_display.dart:82`).
-   Drive them from the shared tick, compare in `shouldRepaint`, and narrow listeners per control.
-6. `ScopeView` (`widgets.dart:65`): add a `LiveIsland`, and drop the blur under Lightweight.
-7. `track_lanes.dart:518`: split a cached static automation curve from a small live painter.
-8. `app_state.dart:509`: one FFI call per track every 33 ms. Make it one batched C API call into a reused buffer (bump the C API, update the app).
-9. Pinch zoom paints every clip each frame (about 4,200 render objects). Scale the painted lanes during the gesture and lay out once at the end.
-
-**B5. Measure:** extend the perf benches with frame build and raster cost while playing, scrolling, zooming and with a device editor open, and assert them so they can't grow back. Then ask the owner to check a release build on the S22+ and on Windows, and record the results.
 
 ### C. Built-in stress test, on every platform
 
@@ -134,14 +71,6 @@ It runs on Android, Windows and Linux, with the same scenarios, scores and JSON 
 **C5. Engine and C API:** a "run scenario N for S seconds" call with progress and cancel, through the native worker pool, sharing code with caw_bench (architect review first: the shared builders move). Bump the C API version.
 
 **C6. UI:** ask the owner how the test and results look and where they live, before building.
-
-### D. Startup screen and animation
-
-Goal: a polished startup like REAPER's (a splash showing what's loading), but entirely C.A.W's own: the crow logo, original art and motion, not REAPER's look.
-- **D1.** No blank flash: the native splash (Android 12+ SplashScreen API plus its older fallback; the Windows and Linux window background) matches the first Flutter frame.
-- **D2.** It shows the version (v1.0.0-beta.x) and the real loading steps ("Starting audio engine", "Loading instruments", "Opening project"). It disappears the moment loading is done and never slows startup: measure with `perf_startup_bench_test` and stay within about 50 ms of today.
-- **D3.** Minimal / motion off gets a still logo. The animation runs at the display's real rate.
-- **D4.** Ask the owner first: 2–3 options (logo motion, layout, colours, duration), then build the one picked.
 
 ### E. Telemetry: the app's side
 
@@ -267,10 +196,6 @@ The email is never published; the server keeps it privately for the owner.
 
 **H5. Limits the app must respect:** one report per device per UTC day, at most 5 feedback posts a day, and back off on any 429 or 503.
 
----
-
-**Done when:** A1–A6 are merged with numbers and A7 is written up and asked; B–G are merged after the owner approves each look; all tests are green; docs are updated; and the owner has a before/after table of results. Ask the owner for a release APK check on the S22+ and a Windows check at the end.
-
 ## Updates to section H (2026-11-12, owner)
 
 **[Fact]** Agreed with the owner on 2026-11-12 and passed on by the owner's other session, which runs the relay. The verbatim prompt above is unchanged; where it differs, these win. The other copy of the contract is `PLAN.md` in Kmandevr/C.A.W-Telemetry.
@@ -294,4 +219,3 @@ The email is never published; the server keeps it privately for the owner.
   - PLAN.md's `screens` accept any id of `a-z 0-9 _ . -`; the app sends only its three section ids.
   - PLAN.md now lists the same ten Benchmark scenario ids as the app; any other, such as the bench's `tail`, arrives as "other". The relay counts Benchmark results from daily reports too, so the fallback onto the next daily report stays.
   - PRIVACY.md calls it the **Stress test**; the app's UI says **Benchmark**.
-
