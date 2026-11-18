@@ -34,7 +34,6 @@ Finish and release 1.0.6-alpha.1, the usability release (owner, 2026-11-18). The
   - routing and hosting plan questions;
   - TERMS governing law;
   - store accounts.
-- **Device checks:** Engine diagnostics with the mic off and on; the Latency breakdown; the device picker.
 
 ## Next
 1. Collect the two agents' reports, then start #244 and the quick wins.
