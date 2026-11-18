@@ -1,5 +1,6 @@
 // fx-dynamics (Drive category): the Clipper (hard, soft and analog curves, up to 8x oversampled, clip to 0 dB) and Phase distortion.
 #include "builtin_effects.h"
+#include "fx_merged.h"
 
 #include <algorithm>
 #include <cmath>
@@ -136,7 +137,7 @@ inline double clipCurve(int mode, double u, double knee) noexcept {
     }
 }
 
-class Clipper final : public EffectBase {
+class Clipper : public EffectBase {
 public:
     const ModuleDescriptor& descriptor() const noexcept override { return clipDescriptor(); }
 
@@ -256,7 +257,7 @@ const ModuleDescriptor& pdDescriptor() {
     return d;
 }
 
-class PhaseDistortion final : public EffectBase {
+class PhaseDistortion : public EffectBase {
 public:
     const ModuleDescriptor& descriptor() const noexcept override { return pdDescriptor(); }
 
@@ -365,6 +366,17 @@ ModuleProcessor* make() noexcept {
 void registerFxDrive(ModuleRegistry& registry) {
     registry.add(clipDescriptor(), &make<Clipper>);
     registry.add(pdDescriptor(), &make<PhaseDistortion>);
+}
+
+// As Drive's Clip and Phase variants (builtin_fx_merged_drive.cpp): their own descriptors, and the same classes
+// under the variants'.
+const ModuleDescriptor& clipperDescriptor() { return clipDescriptor(); }
+ModuleProcessor* makeClipperAs(const ModuleDescriptor& variant) noexcept {
+    return new (std::nothrow) AsVariant<Clipper>(variant);
+}
+const ModuleDescriptor& phaseDistDescriptor() { return pdDescriptor(); }
+ModuleProcessor* makePhaseDistAs(const ModuleDescriptor& variant) noexcept {
+    return new (std::nothrow) AsVariant<PhaseDistortion>(variant);
 }
 
 }  // namespace caw::fx

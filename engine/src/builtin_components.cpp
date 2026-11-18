@@ -5,6 +5,7 @@
 #include "builtin_effects.h"
 #include "builtin_instruments.h"
 #include "builtin_test_signal.h"
+#include "fx_merged.h"
 
 #include <algorithm>
 #include <cmath>
@@ -146,7 +147,7 @@ bool steadyKnobs(const AudioProcessBlock& b, uint32_t count) noexcept {
 
 // The shapes' per-sample maths is the Library's fast kind (fastmath.hpp: the same curves within 1e-9), and
 // what depends only on the knobs is worked out once per value, not per sample.
-class Distortion final : public ModuleProcessor {
+class Distortion : public ModuleProcessor {
 public:
     const ModuleDescriptor& descriptor() const noexcept override { return kDistortion; }
     // No state: silence in gives silence out, so the host may skip it while its input is silent.
@@ -390,5 +391,13 @@ void registerBuiltinComponents(ModuleRegistry& registry) {
     registerBuiltinModulators(registry);  // LFO, envelope, follower, steps, random, macros, MIDI to CV (#161)
     registerTestSignal(registry);  // org.caw.test.osc, internal: for tests, never listed (builtin_test_signal.cpp)
 }
+
+// As Drive's Distortion variant (builtin_fx_merged_drive.cpp): its own descriptor, and the same class under the variant's.
+namespace fx {
+const ModuleDescriptor& distortionDescriptor() { return kDistortion; }
+ModuleProcessor* makeDistortionAs(const ModuleDescriptor& variant) noexcept {
+    return new (std::nothrow) AsVariant<Distortion>(variant);
+}
+}  // namespace fx
 
 }  // namespace caw

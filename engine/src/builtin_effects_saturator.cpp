@@ -1,5 +1,6 @@
 // The built-in saturator (#173, "org.caw.saturator"): tape, tube, clips, folds, crush, fuzz, rectify, bit shape and fat, 2x oversampled (4x at High).
 #include "builtin_effects.h"
+#include "fx_merged.h"
 
 #include <algorithm>
 #include <cmath>
@@ -91,7 +92,7 @@ const ModuleDescriptor& satDescriptor() {
     }
 }
 
-class Saturator final : public EffectBase {
+class Saturator : public EffectBase {
 public:
     const ModuleDescriptor& descriptor() const noexcept override { return satDescriptor(); }
 
@@ -397,5 +398,11 @@ ModuleProcessor* makeSaturator() noexcept { return new (std::nothrow) Saturator(
 }  // namespace
 
 void registerSaturator(ModuleRegistry& registry) { registry.add(satDescriptor(), &makeSaturator); }
+
+// As Drive's Saturate variant (builtin_fx_merged_drive.cpp): its own descriptor, and the same class under the variant's.
+const ModuleDescriptor& saturatorDescriptor() { return satDescriptor(); }
+ModuleProcessor* makeSaturatorAs(const ModuleDescriptor& variant) noexcept {
+    return new (std::nothrow) AsVariant<Saturator>(variant);
+}
 
 }  // namespace caw::fx
