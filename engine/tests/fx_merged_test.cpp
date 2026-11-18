@@ -385,6 +385,64 @@ TEST(a_racks_old_children_migrate_with_their_values_and_routes_and_sound_the_sam
     CHECK(componentStructure(other) != componentStructure(merged));
 }
 
+TEST(a_rack_older_than_the_merged_devices_gets_its_routes_re_pointed_and_its_layout_version_once) {
+    // A merged device in a rack that has no layout version, with no `<slot>.variant`: the rack was saved before the
+    // merge, when that id (an old effect's, reused) listed no `variant`. Pitch/Shift stands in for such an id here
+    // (Utility, Chorus... in their families' tests): its variant 0's list without `variant` is the "old" one.
+    auto h = [](const char* id) { return static_cast<double>(rackChildHash(id)); };
+    ComponentSpec expected;  // the rack as it is meant today: routes by name on the current layout
+    expected.id = std::string(kFxRackId);
+    expected.params = {{"s1_fx", h(kShift)}, {"s1.semitones", 5}, {"s1.variant", 0}, {"s2_fx", h("org.caw.convolver")},
+                       {"mod1_src", 1}, {"mod1_amt", 0.5}, {"mod2_src", 2}, {"mod2_amt", -0.4}};
+    expected.params.emplace_back("mod1_dst", destination(kFxRackId, expected.params, "s2.mix"));
+    expected.params.emplace_back("mod2_dst", destination(kFxRackId, expected.params, "s1.mix"));
+    expected.params.emplace_back(std::string(kRackLayoutParam), kRackLayoutCurrent);
+    ComponentSpec old;  // saved before: no version, no s1.variant, and s2's knobs one place earlier
+    old.id = expected.id;
+    for (const auto& [k, v] : expected.params)
+        if (k != "s1.variant" && k != kRackLayoutParam) old.params.emplace_back(k, k == "mod1_dst" ? v - 1 : v);
+    CHECK(fx::hasLegacyEffects([&] {
+        ProjectSpec p;
+        p.masterComponents.push_back(old);
+        return p;
+    }()));
+    ComponentSpec merged = old;
+    fx::ParamRenames renames;
+    CHECK(fx::migrateLegacyEffect(merged, &renames));
+    CHECK(renames.empty());
+    CHECK_EQ(valueOf(merged.params, "s1.variant"), 0.0);
+    CHECK_EQ(valueOf(merged.params, kRackLayoutParam), kRackLayoutCurrent);
+    CHECK_EQ(valueOf(merged.params, "mod1_dst"), valueOf(expected.params, "mod1_dst"));  // the same knob, s2.mix
+    CHECK_EQ(valueOf(merged.params, "mod2_dst"), valueOf(expected.params, "mod2_dst"));  // before the variant: kept
+    const Stereo in = music(32000);  // whole 64-frame blocks (renderChain's)
+    CHECK(sameBits(renderChain({merged}, in), renderChain({expected}, in)));
+    // Migrated once: a second pass changes nothing.
+    const ComponentSpec again = merged;
+    CHECK(!fx::migrateLegacyEffect(merged));
+    CHECK(merged.params == again.params);
+    // A current rack (with the version) whose variant-0 child omits `<slot>.variant` is left alone.
+    ComponentSpec current = expected;
+    std::erase_if(current.params, [](const auto& kv) { return kv.first == "s1.variant"; });
+    const ComponentSpec before = current;
+    CHECK(!fx::migrateLegacyEffect(current));
+    CHECK(current.params == before.params);
+    CHECK(sameBits(renderChain({current}, in), renderChain({expected}, in)));
+    // The version is the rack's last parameter, after the routes: no route destination moved for it.
+    const ModuleDescriptor* rack = registry().find(kFxRackId);
+    CHECK(rack && rack->parameters[rack->parameterCount - 1].id == kRackLayoutParam &&
+          !rack->parameters[rack->parameterCount - 1].automatable);
+    // caw_migrate_component marks an older empty rack, and the rack presets carry the version already.
+    const Json j = migrateJson(R"({"id":"org.caw.rack.multiband","params":{"bands":2}})");
+    CHECK(j.boolean("migrated", false) && j.get("params") && j.get("params")->number(std::string(kRackLayoutParam), 0) == kRackLayoutCurrent);
+    for (const char* id : {kFxRackId.data(), "org.caw.rack.multiband"})
+        for (const BuiltinPreset& p : builtinPresets(id)) {
+            ComponentSpec c;
+            c.id = id;
+            for (const auto& [k, v] : p.values) c.params.emplace_back(std::string(k), v);
+            CHECK(!fx::migrateLegacyEffect(c));
+        }
+}
+
 TEST(a_variant_change_rebuilds_the_chain_and_a_parameter_call_cant_change_it) {
     auto project = [](double variant, bool leftover) {
         ProjectSpec p = cawtest::testSignalProject({cawtest::testSignalLayer("t", cawtest::Shape::Saw, {{"freq", 110}})});

@@ -50,6 +50,7 @@ void route(std::string_view rackId, Owned& v, int n, int source, std::string_vie
 Values frozen(const Owned& v) {
     Values out;
     for (const auto& [k, x] : v) out.emplace_back(keep(k), x);
+    out.emplace_back(kRackLayoutParam, kRackLayoutCurrent);  // routes made on today's layout
     return out;
 }
 
